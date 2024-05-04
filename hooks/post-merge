@@ -1,12 +1,39 @@
-#!/bin/sh
-#
-# An example hook script to verify what is about to be committed.
-# Called by "git commit" with no arguments.  The hook should
-# exit with non-zero status after issuing an appropriate message if
-# it wants to stop the commit.
-#
-# To enable this hook, rename this file to "pre-commit".
+#!/bin/bash
 
-tex2lyx -f theory.tex theory.lyx
+# Get the list of LyX files that have changed
+changed_files=$(git diff --name-only HEAD@{1} HEAD | grep ".tex")
+
+# Loop over each LyX file
+for file in $changed_files; do
+  # Convert the LyX file to a temporary LaTeX file
+  echo "${file%.tex}.lyx"
+  lyx --force-overwrite --export pdflatex "${file%.tex}.lyx"
+
+  # extract only the main body
+  awk '/\\begin{document}/,/\\end{document}/ {if (!/\\begin{document}/ && !/\\end{document}/) print}' "$file" > temp_file.tex
+  mv temp_file.tex "$file"
+
+  # Temporarily commit the LaTeX file to allow for git merging  
+  git add "$file"
+  git commit -m "commit ours $file" --no-verify
+
+  # Stash all other changes to ensure a clean merge
+  git stash -u
+
+  git merge --no-ff -X theirs HEAD@{1} -m "Merge theirs at HEAD@{1} into ours at HEAD@{0}=HEAD" 
+
+  # If there are conflicts, resolve them here or manually later
+  # For automatic resolutions, you might add custom merge driver settings in .git/config
+
+  # Clean up: go back to the original branch and apply stashed changes
+  git stash pop
+
+  # Convert the merged file back to LyX with -f force
+  tex2lyx -f $file
+
+  # Clean up temporary commits and restore to the pull head
+  # at this point, HEAD@{0} is the merge commit, HEAD@{1} is our lyx export, HEAD@{2} is the pull state
+  git reset --soft HEAD@{2}
+done
 
 echo "Ran post-merge hook."
