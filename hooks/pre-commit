@@ -10,15 +10,14 @@
 # Loop through each .lyx file
 for file in *.lyx; do
     # Export .lyx to .tex
-    lyx --export-to latex "${file%.lyx}.tex" "$file" 
+    lyx --export-to latex "${file%.lyx}.tex" -f "$file"
     
     # Modify the .tex file
-    awk '/\\begin{document}/,/\\end{document}/ {if (!/\\begin{document}/ && !/\\end{document}/) print}' "${file%.lyx}.tex" > temp_file.tex
+    gawk '/\\begin{document}/,/\\end{document}/ {if (!/\\begin{document}/ && !/\\end{document}/ && !/^\\include/) print}' "${file%.lyx}.tex" > temp_file.tex
+
     mv temp_file.tex "${file%.lyx}.tex"
 done
 
 touch .commit 
 
 echo "Ran pre-commit hook."
-
-exit

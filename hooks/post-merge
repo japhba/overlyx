@@ -7,13 +7,13 @@ changed_files=$(git diff --name-only HEAD@{1} HEAD | grep ".tex")
 for file in $changed_files; do
   # Convert the LyX file to a temporary LaTeX file
   echo "${file%.tex}.lyx"
-  lyx --force-overwrite --export pdflatex "${file%.tex}.lyx"
+  lyx --export-to -f latex "${file}" "${file%.tex}.lyx"
 
   # extract only the main body
-  awk '/\\begin{document}/,/\\end{document}/ {if (!/\\begin{document}/ && !/\\end{document}/) print}' "$file" > temp_file.tex
+  gawk '/\\begin{document}/,/\\end{document}/ {if (!/\\begin{document}/ && !/\\end{document}/ && !/^\\include/) print}' "${file%.lyx}.tex" > temp_file.tex
   mv temp_file.tex "$file"
 
-  # Temporarily commit the LaTeX file to allow for git merging  
+  # Temporarily commit the LaTeX file to allow for git merging, use --no-verify to skip pre-commit hooks
   git add "$file"
   git commit -m "commit ours $file" --no-verify
 
