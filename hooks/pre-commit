@@ -9,6 +9,10 @@
 
 # Loop through each .lyx file
 for file in *.lyx; do
+    if [[ "$file" == "main.lyx" ]]; then
+        continue
+    fi
+    
     # Export .lyx to .tex
     lyx --export-to latex "${file%.lyx}.tex" -f "$file"
     
