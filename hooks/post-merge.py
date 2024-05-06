@@ -3,18 +3,24 @@ import glob
 import subprocess
 import os
 import time
+from pathlib import Path
 
 # Change the current working directory to 'tex' if necessary
 
-GIT_DIR = subprocess.run('git rev-parse --show-toplevel', capture_output=True, text=True, shell=True).stdout.strip()
+GIT_DIR = Path(subprocess.run('git rev-parse --show-toplevel', capture_output=True, text=True, shell=True).stdout.strip())
 
-if not GIT_DIR.startswith("tex"):
-    GIT_DIR = os.path.join(GIT_DIR, "tex")
+if not str(GIT_DIR).startswith("tex"):
+    GIT_DIR = GIT_DIR / "tex"
+    os.chdir(GIT_DIR)
 
-OVERLYX_DIR = "~/overlyx"
+OVERLYX_DIR = Path.home() / "overlyx"
 
-log_file = 'post-merge.log'
+log_file = OVERLYX_DIR / "hooks/post-merge.log"
 os.remove(log_file) if os.path.exists(log_file) else None
+
+# create log file with pathlib
+Path(log_file).touch()
+
 
 def print_and_log(log_file, message):
     print(message)
@@ -38,8 +44,10 @@ def is_git_merging():
 
 
 all_files = glob.glob(f"{GIT_DIR}/*.tex")
+
+
 for filename_tex in all_files:
-    if (filename_tex == "main.tex") or ("temp" in filename_tex):
+    if ("main.tex" in filename_tex) or ("temp" in filename_tex):
         continue
 
     filename_lyx = filename_tex.replace(".tex", ".lyx")
@@ -48,7 +56,7 @@ for filename_tex in all_files:
         print_and_log(f"Examining {filename_lyx}...")
         run(f'git status', )
         run(f'git add {filename_lyx} -v', )
-        run(f'git commit -v --allow-empty -m "[hook] pre-hook safety {filename_lyx}" --no-verify')  # head2
+        run(f'git commit -v --allow-empty -m "[hook] pre-hook safety {filename_lyx.name}" --no-verify')  # head2
 
         run(f'lyx --export-to latex {filename_tex} -f {filename_lyx}')
         gawk_command = r"gawk '/\\begin\{document\}/,/\\end\{document\}/ {if (!/\\begin\{document\}/ && !/\\end\{document\}/ && !/^\\include/) print}' "
@@ -56,7 +64,7 @@ for filename_tex in all_files:
         os.rename('temp_file.tex', filename_tex)
 
         run(f'git add {filename_tex}', )
-        run(f'git commit -v --allow-empty -m "[hook] commit our {filename_tex}" --no-verify')  # head1
+        run(f'git commit -v --allow-empty -m "[hook] commit our {filename_tex.name}" --no-verify')  # head1
         run('git stash -u', )
         run('git fetch', )
         run(f'touch {OVERLYX_DIR}/.disable_hooks')

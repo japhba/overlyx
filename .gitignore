@@ -7,3 +7,4 @@
 *.synctex.gz
 .commit
 .DS_Store
+.disable_hooks
