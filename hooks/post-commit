@@ -5,5 +5,6 @@ if [ -e .commit ]
     rm .commit
     git add theory.tex
     git commit --amend -C HEAD --no-verify
+    echo "Commit amended with produced .tex"
 fi
 exit

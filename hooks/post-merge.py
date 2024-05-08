@@ -9,7 +9,7 @@ from pathlib import Path
 
 GIT_DIR = Path(subprocess.run('git rev-parse --show-toplevel', capture_output=True, text=True, shell=True).stdout.strip())
 
-if not str(GIT_DIR).startswith("tex"):
+if not str(GIT_DIR.parts[-1]).startswith("tex"):
     GIT_DIR = GIT_DIR / "tex"
     os.chdir(GIT_DIR)
 
@@ -21,7 +21,6 @@ os.remove(log_file) if os.path.exists(log_file) else None
 # create log file with pathlib
 Path(log_file).touch()
 
-
 def print_and_log(log_file, message):
     print(message)
     with open(log_file, 'a') as file:
@@ -29,34 +28,46 @@ def print_and_log(log_file, message):
 
 print_and_log = partial(print_and_log, log_file)
 
+print_and_log(f"{OVERLYX_DIR}")
+print_and_log(f"{GIT_DIR}")
+print_and_log(f"cwd: {os.getcwd()}")
 
-def run(cmd, check=False, shell=True):
+
+
+
+def run(cmd, check=True, shell=True):
     with open(log_file, 'a') as file:
-        process = subprocess.run(cmd, shell=shell, text=True, stdout=file, stderr=subprocess.STDOUT)        
+        process = subprocess.run(cmd, shell=shell, text=True, stdout=file, stderr=file)        
         if check and process.returncode != 0:
             print_and_log(f"Command failed with error. Check {log_file}.")
+            print(process.stdout)
+            print(process.stderr)
             raise subprocess.CalledProcessError(process.returncode, cmd)
     return process
 
 def is_git_merging():
-    result = subprocess.run("git status", capture_output=True, text=True, shell=True)
-    return "Unmerged paths:" in result.stdout
+    # Run the git command to check if MERGE_HEAD exists
+    result = subprocess.run('git rev-parse --verify MERGE_HEAD', shell=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode == 128 and "fatal" in result.stderr.strip():
+        return False
+    else:
+        return True
 
 
-all_files = glob.glob(f"{GIT_DIR}/*.tex")
+all_files = list(GIT_DIR.glob("*.tex"))
 
 
 for filename_tex in all_files:
-    if ("main.tex" in filename_tex) or ("temp" in filename_tex):
+    if ("main.tex" in str(filename_tex)) or ("temp" in str(filename_tex)):
         continue
 
-    filename_lyx = filename_tex.replace(".tex", ".lyx")
+    filename_lyx = Path(filename_tex).with_suffix(".lyx")
 
     try:
-        print_and_log(f"Examining {filename_lyx}...")
+        print_and_log(f"Loop is at {filename_lyx}...")
         run(f'git status', )
         run(f'git add {filename_lyx} -v', )
-        run(f'git commit -v --allow-empty -m "[hook] pre-hook safety {filename_lyx.name}" --no-verify')  # head2
+        run(f'git commit -v --allow-empty -m "[hook] pre-hook our {filename_lyx.name}" --no-verify')  # head2
 
         run(f'lyx --export-to latex {filename_tex} -f {filename_lyx}')
         gawk_command = r"gawk '/\\begin\{document\}/,/\\end\{document\}/ {if (!/\\begin\{document\}/ && !/\\end\{document\}/ && !/^\\include/) print}' "
@@ -69,7 +80,10 @@ for filename_tex in all_files:
         run('git fetch', )
         run(f'touch {OVERLYX_DIR}/.disable_hooks')
         
-        run('git merge -vvvvv --no-ff -X theirs --no-verify origin/master -m "[hook] Merge origin into local"', check=True)  # head0
+        print_and_log(f"Merge {filename_lyx.name}...")
+
+        # -X theirs to resolve conflict by keeping the remote version
+        run('git merge -vvvvv --no-ff --no-verify origin/master -m "[hook] Merge origin into local"', check=False)  # head0
 
         run(f'rm {OVERLYX_DIR}/.disable_hooks')
 
@@ -80,14 +94,17 @@ for filename_tex in all_files:
                 time.sleep(1)  # Check every 1 seconds
             print_and_log("Merge conflict resolved. Continuing...")
 
-        run('git stash pop', )
+        run('git stash pop', check=False)
         run(f'tex2lyx -f {filename_tex}', )
 
         run('git reset --soft HEAD@{2}', )
+        print_and_log(f"merged .tex differs from upstream by:")
+        run(f"git diff origin/master {filename_tex}")
         run(f'git checkout origin/master -- {filename_tex}')  # checkout tex at remote version
+        print_and_log(f"Exit code 0: {filename_lyx}.")
 
-    except subprocess.CalledProcessError:
-        print_and_log("An error occurred. Please check the logs. Exiting.")
-        break
+    except subprocess.CalledProcessError as e:
+        print_and_log(f"Error in subprocess: {e}")
+        raise SystemExit
 
-print_and_log("Post-merge processing completed.")
+print_and_log("All post-merge processing completed.")
