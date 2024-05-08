@@ -3,3 +3,12 @@ To install the hooks into your repository, cd to its root directory (not this re
 git config core.hooksPath ~/overlyx/hooks
 ```
 possibly replacing by the directory you cloned this repository to. 
+
+To view, 
+```
+git config core.hooksPath
+```
+To unset,
+```
+git config --unset core.hooksPath
+```
