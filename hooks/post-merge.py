@@ -24,7 +24,7 @@ Path(log_file).touch()
 def print_and_log(log_file, message):
     print(message)
     with open(log_file, 'a') as file:
-        file.write(message + '\n')
+        file.write(message + '\n\n')
 
 print_and_log = partial(print_and_log, log_file)
 
@@ -42,7 +42,10 @@ def run(cmd, check=True, shell=True):
             print_and_log(f"Command failed with error. Check {log_file}.")
             print(process.stdout)
             print(process.stderr)
-            raise subprocess.CalledProcessError(process.returncode, cmd)
+            if not check == "catch":
+                raise subprocess.CalledProcessError(process.returncode, cmd)
+            else:
+                return process
     return process
 
 def is_git_merging():
@@ -80,10 +83,10 @@ for filename_tex in all_files:
         run('git fetch', )
         run(f'touch {OVERLYX_DIR}/.disable_hooks')
         
-        print_and_log(f"Merge {filename_lyx.name}...")
+        print_and_log(f"Merge {filename_tex.name}...")
 
         # -X theirs to resolve conflict by keeping the remote version
-        run('git merge -vvvvv --no-ff --no-verify origin/master -m "[hook] Merge origin into local"', check=False)  # head0
+        run('git merge -vvvvv --no-ff --no-verify origin/master -m "[hook] Merge origin into local"', check="catch")  # head0
 
         run(f'rm {OVERLYX_DIR}/.disable_hooks')
 
