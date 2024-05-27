@@ -3,8 +3,12 @@ echo
 if [ -e .commit ]
     then
     rm .commit
-    git add theory.tex
+    for file in *.lyx; do
+        git add "${file%.lyx}.tex"
+        
+    git status
     git commit --amend -C HEAD --no-verify
-    echo "Commit amended with produced .tex"
+    echo "Commit amended with produced *.tex"
+    done
 fi
 exit

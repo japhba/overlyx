@@ -15,7 +15,8 @@ if not str(GIT_DIR.parts[-1]).startswith("tex"):
 
 OVERLYX_DIR = Path.home() / "overlyx"
 
-log_file = OVERLYX_DIR / "hooks/post-merge.log"
+# log_file = OVERLYX_DIR / "hooks/post-merge.log"
+log_file = GIT_DIR / "post-merge.log"
 os.remove(log_file) if os.path.exists(log_file) else None
 
 # create log file with pathlib
@@ -31,8 +32,6 @@ print_and_log = partial(print_and_log, log_file)
 print_and_log(f"{OVERLYX_DIR}")
 print_and_log(f"{GIT_DIR}")
 print_and_log(f"cwd: {os.getcwd()}")
-
-
 
 
 def run(cmd, check=True, shell=True):
@@ -65,6 +64,9 @@ for filename_tex in all_files:
         continue
 
     filename_lyx = Path(filename_tex).with_suffix(".lyx")
+    if not filename_lyx.exists():
+        print_and_log(f"Lyx file not found for {filename_tex}. Skipping...")
+        continue
 
     try:
         print_and_log(f"Loop is at {filename_lyx}...")
