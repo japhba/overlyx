@@ -12,10 +12,12 @@ for file in *.lyx; do
     # Export .lyx to .tex
     lyx --export-to latex "${file%.lyx}.tex" -f "$file"
     
-    # Modify the .tex file
-    gawk '/\\begin{document}/,/\\end{document}/ {if (!/\\begin{document}/ && !/\\end{document}/ && !/^\\include/) print}' "${file%.lyx}.tex" > temp_file.tex
-
-    mv temp_file.tex "${file%.lyx}.tex"
+    # Check if the file is main.lyx before invoking gawk
+    if [ "$file" = "main.lyx" ]; then
+        # Modify the .tex file
+        gawk '/\\begin{document}/,/\\end{document}/ {if (!/\\begin{document}/ && !/\\end{document}/ && !/^\\include/) print}' "${file%.lyx}.tex" > temp_file.tex
+        mv temp_file.tex "${file%.lyx}.tex"
+    fi
 done
 
 touch .commit 

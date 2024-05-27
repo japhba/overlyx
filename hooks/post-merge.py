@@ -60,7 +60,7 @@ all_files = list(GIT_DIR.glob("*.tex"))
 
 
 for filename_tex in all_files:
-    if ("main.tex" in str(filename_tex)) or ("temp" in str(filename_tex)):
+    if ("temp" in str(filename_tex)):
         continue
 
     filename_lyx = Path(filename_tex).with_suffix(".lyx")
@@ -75,9 +75,12 @@ for filename_tex in all_files:
         run(f'git commit -v --allow-empty -m "[hook] pre-hook our {filename_lyx.name}" --no-verify')  # head2
 
         run(f'lyx --export-to latex {filename_tex} -f {filename_lyx}')
-        gawk_command = r"gawk '/\\begin\{document\}/,/\\end\{document\}/ {if (!/\\begin\{document\}/ && !/\\end\{document\}/ && !/^\\include/) print}' "
-        run(gawk_command + f'{filename_tex} > temp_file.tex', )
-        os.rename('temp_file.tex', filename_tex)
+
+        # main special treatment
+        if not ("main.tex" in str(filename_tex)):
+            gawk_command = r"gawk '/\\begin\{document\}/,/\\end\{document\}/ {if (!/\\begin\{document\}/ && !/\\end\{document\}/ && !/^\\include/) print}' "
+            run(gawk_command + f'{filename_tex} > temp_file.tex', )
+            os.rename('temp_file.tex', filename_tex)
 
         run(f'git add {filename_tex}', )
         run(f'git commit -v --allow-empty -m "[hook] commit our {filename_tex.name}" --no-verify')  # head1
