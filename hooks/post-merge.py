@@ -1,118 +1,210 @@
+#!/usr/bin/env python3
+"""
+Post-merge hook for handling .tex and .lyx file synchronization.
+This script manages the conversion and merging of LaTeX and LyX files.
+"""
+
+from dataclasses import dataclass
 from functools import partial
 import glob
-import subprocess
+import logging
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
+from typing import Optional, List, Tuple
 
-# Change the current working directory to 'tex' if necessary
+@dataclass
+class GitContext:
+    """Holds git-related paths and context"""
+    root_dir: Path
+    tex_dir: Path
+    overlyx_dir: Path
+    log_file: Path
 
-GIT_DIR = Path(subprocess.run('git rev-parse --show-toplevel', capture_output=True, text=True, shell=True).stdout.strip())
+class CommandError(Exception):
+    """Custom exception for command execution failures"""
+    pass
 
-if not str(GIT_DIR.parts[-1]).startswith("tex"):
-    GIT_DIR = GIT_DIR / "tex"
-    os.chdir(GIT_DIR)
+class GitProcessor:
+    def __init__(self, context: GitContext):
+        self.ctx = context
+        self.logger = self._setup_logger()
+        
+    def _setup_logger(self) -> logging.Logger:
+        """Configure logging to both file and console"""
+        logger = logging.getLogger('post-merge')
+        logger.setLevel(logging.DEBUG)  # TODO: change to INFO
+        
+        # Clear existing log file
+        self.ctx.log_file.unlink(missing_ok=True)
+        
+        # File handler
+        fh = logging.FileHandler(self.ctx.log_file)
+        fh.setLevel(logging.DEBUG)
+        
+        # Console handler
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)  # TODO: change to INFO
+        
+        # Formatter
+        formatter = logging.Formatter('%(asctime)s - %(message)s')
+        fh.setFormatter(formatter)
+        ch.setFormatter(formatter)
+        
+        logger.addHandler(fh)
+        logger.addHandler(ch)
+        
+        return logger
 
-OVERLYX_DIR = Path.home() / "overlyx"
+    def run_command(self, cmd: str, check: bool = True, silent: bool = False) -> subprocess.CompletedProcess:
+        """Execute a shell command with proper logging and error handling"""
+        self.logger.debug(f"Executing: {cmd}")
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                text=True,
+                capture_output=True,
+                check=check
+            )
+            
+            if not silent:
+                if result.stdout:
+                    self.logger.debug(result.stdout)
+                if result.stderr:
+                    self.logger.debug(result.stderr)
+                    
+            return result
+            
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Command failed: {cmd}")
+            self.logger.error(f"Error output: {e.stderr} {e.stdout}")
+            raise CommandError(f"Command failed: {cmd}") from e
 
-# log_file = OVERLYX_DIR / "hooks/post-merge.log"
-log_file = GIT_DIR / "post-merge.log"
-os.remove(log_file) if os.path.exists(log_file) else None
+    def is_git_merging(self) -> bool:
+        """Check if git is currently in a merging state"""
+        result = self.run_command('git rev-parse --verify MERGE_HEAD', check=False, silent=True)
+        return result.returncode == 0
 
-# create log file with pathlib
-Path(log_file).touch()
-
-def print_and_log(log_file, message):
-    print(message)
-    with open(log_file, 'a') as file:
-        file.write(message + '\n\n')
-
-print_and_log = partial(print_and_log, log_file)
-
-print_and_log(f"{OVERLYX_DIR}")
-print_and_log(f"{GIT_DIR}")
-print_and_log(f"cwd: {os.getcwd()}")
-
-
-def run(cmd, check=True, shell=True):
-    with open(log_file, 'a') as file:
-        process = subprocess.run(cmd, shell=shell, text=True, stdout=file, stderr=file)        
-        if check and process.returncode != 0:
-            print_and_log(f"Command failed with error. Check {log_file}.")
-            print(process.stdout)
-            print(process.stderr)
-            if not check == "catch":
-                raise subprocess.CalledProcessError(process.returncode, cmd)
-            else:
-                return process
-    return process
-
-def is_git_merging():
-    # Run the git command to check if MERGE_HEAD exists
-    result = subprocess.run('git rev-parse --verify MERGE_HEAD', shell=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode == 128 and "fatal" in result.stderr.strip():
-        return False
-    else:
+    def handle_merge_conflict(self, filename: Path) -> bool:
+        """Handle merge conflicts automatically by accepting remote version"""
+        self.logger.warning(f"Merge conflict detected in {filename}. Accepting remote version...")
+        self.run_command('git checkout --theirs .')
+        self.run_command('git add .')
+        self.run_command('git commit -m "[hook] Accept remote version"')
         return True
 
-
-all_files = list(GIT_DIR.glob("*.tex"))
-
-
-for filename_tex in all_files:
-    if ("temp" in str(filename_tex)):
-        continue
-
-    filename_lyx = Path(filename_tex).with_suffix(".lyx")
-    if not filename_lyx.exists():
-        print_and_log(f"Lyx file not found for {filename_tex}. Skipping...")
-        continue
-
-    try:
-        print_and_log(f"Loop is at {filename_lyx}...")
-        run(f'git status', )
-        run(f'git add {filename_lyx} -v', )
-        run(f'git commit -v --allow-empty -m "[hook] pre-hook our {filename_lyx.name}" --no-verify')  # head2
-
-        run(f'lyx --export-to latex {filename_tex} -f {filename_lyx}')
-
-        # main special treatment
-        if not ("main.tex" in str(filename_tex)):
-            gawk_command = r"gawk '/\\begin\{document\}/,/\\end\{document\}/ {if (!/\\begin\{document\}/ && !/\\end\{document\}/ && !/^\\include/) print}' "
-            run(gawk_command + f'{filename_tex} > temp_file.tex', )
-            os.rename('temp_file.tex', filename_tex)
-
-        run(f'git add {filename_tex}', )
-        run(f'git commit -v --allow-empty -m "[hook] commit our {filename_tex.name}" --no-verify')  # head1
-        run('git stash -u', )
-        run('git fetch', )
-        run(f'touch {OVERLYX_DIR}/.disable_hooks')
+    def process_file(self, tex_file: Path) -> bool:
+        """Process a single tex file"""
+        lyx_file = tex_file.with_suffix(".lyx")
         
-        print_and_log(f"Merge {filename_tex.name}...")
+        self.logger.info(f"\nProcessing: {tex_file.name}")
+        
+        # Check for lyx file existence
+        if not lyx_file.exists():
+            self.logger.warning(f"LyX file not found: {lyx_file.name}")
+            try:
+                self.run_command(f'tex2lyx -f {tex_file}')
+                self.logger.info(f"Created {lyx_file.name}")
+            except CommandError:
+                self.logger.error(f"Failed to create {lyx_file.name}")
+                return False
 
-        # -X theirs to resolve conflict by keeping the remote version
-        run('git merge -vvvvv --no-ff --no-verify origin/master -m "[hook] Merge origin into local"', check="catch")  # head0
+        try:
+            # Backup current work
+            self.run_command(f'git add {lyx_file}')
+            self.run_command(f'git commit --allow-empty -m "[hook] Backup {lyx_file.name}" --no-verify')
 
-        run(f'rm {OVERLYX_DIR}/.disable_hooks')
+            # Convert LyX to LaTeX
+            self.run_command(f'lyx --export-to latex {tex_file} -f {lyx_file}')
 
-        # Detect if a merge conflict has occurred
-        if is_git_merging():
-            print_and_log("! Merge conflict detected. Please resolve the conflict and commit. Waiting for resolution...")
-            while is_git_merging():
-                time.sleep(1)  # Check every 1 seconds
-            print_and_log("Merge conflict resolved. Continuing...")
+            # Process non-main tex files
+            if tex_file.name != "main.tex":
+                self.run_command(
+                    f"gawk '/\\\\begin{{document}}/,/\\\\end{{document}}/ "
+                    f"{{if (!/\\\\begin{{document}}/ && !/\\\\end{{document}}/ && !/^\\\\include/) print}}' "
+                    f"{tex_file} > temp_file.tex"
+                )
+                os.rename('temp_file.tex', tex_file)
 
-        run('git stash pop', check=False)
-        run(f'tex2lyx -f {filename_tex}', )
+            # Prepare for merge
+            self.run_command(f'git add {tex_file}')
+            self.run_command(f'git commit --allow-empty -m "[hook] Pre-merge {tex_file.name}" --no-verify')
+            self.run_command('git stash -u')  # Stash all changes before the pull
+            self.run_command('git fetch')
 
-        run('git reset --soft HEAD@{2}', )
-        print_and_log(f"merged .tex differs from upstream by:")
-        run(f"git diff origin/master {filename_tex}")
-        run(f'git checkout origin/master -- {filename_tex}')  # checkout tex at remote version
-        print_and_log(f"Exit code 0: {filename_lyx}.")
+            # Disable other hooks during merge
+            disable_hooks = self.ctx.overlyx_dir / ".disable_hooks"
+            disable_hooks.touch()
 
-    except subprocess.CalledProcessError as e:
-        print_and_log(f"Error in subprocess: {e}")
-        raise SystemExit
+            try:
+                self.logger.info(f"Merging {tex_file.name}...")
+                self.run_command('git merge -v --no-ff --no-verify origin/master -m "[hook] Merge origin into local"')
 
-print_and_log("All post-merge processing completed.")
+                # Handle any merge conflicts
+                if self.is_git_merging():
+                    if not self.handle_merge_conflict(tex_file):
+                        return False
+
+                # Re-apply stashed changes from before the pull and convert back to LyX
+                self.run_command('git stash pop', check=False)
+                self.run_command(f'tex2lyx -f {tex_file}')
+
+                # Reset and checkout remote version
+                self.logger.info("Resetting Git HEAD to remote version...")
+                self.run_command('git reset --soft HEAD@{2}')
+
+                self.logger.info("Checking differences from upstream <-> local...")
+                self.run_command(f"git diff origin/master {tex_file}")
+                self.run_command(f'git checkout origin/master -- {tex_file}')
+
+                self.logger.info(f"Successfully processed {tex_file.name}")
+                return True
+
+            finally:
+                # Always remove disable_hooks file
+                disable_hooks.unlink(missing_ok=True)
+
+        except CommandError as e:
+            self.logger.error(f"Error processing {tex_file.name}: {e}")
+            return False
+
+def main():
+    # Setup paths
+    git_root = Path(subprocess.getoutput('git rev-parse --show-toplevel'))
+    tex_dir = git_root if git_root.name.startswith("tex") else git_root / "tex"
+    overlyx_dir = Path.home() / "overlyx"
+    log_file = tex_dir / "post-merge.log"
+
+    # Change to tex directory
+    os.chdir(tex_dir)
+
+    # Initialize context and processor
+    context = GitContext(git_root, tex_dir, overlyx_dir, log_file)
+    processor = GitProcessor(context)
+
+    # Get all tex files
+    tex_files = [f for f in tex_dir.glob("*.tex") if "temp" not in str(f) and "main" not in str(f)]
+
+    if not tex_files:
+        processor.logger.warning("[OverLyX] No .tex files found to process")
+        return
+
+    # Process each file
+    success_count = 0
+    for tex_file in tex_files:
+        if processor.process_file(tex_file):
+            success_count += 1
+
+    # Final summary
+    total = len(tex_files)
+    processor.logger.info(f"\n[OverLyX] Processing complete: {success_count}/{total} files successful")
+    if success_count < total:
+        processor.logger.warning("[OverLyX] Some files were not processed successfully")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

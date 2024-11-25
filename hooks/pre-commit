@@ -7,19 +7,10 @@
 #
 # To enable this hook, rename this file to "pre-commit".
 
-# Loop through each .lyx file
-for file in *.lyx; do
-    # Export .lyx to .tex
-    lyx --export-to latex "${file%.lyx}.tex" -f "$file"
-    
-    # Check if the file is main.lyx before invoking gawk
-    if [ "$file" = "main.lyx" ]; then
-        # Modify the .tex file
-        gawk '/\\begin{document}/,/\\end{document}/ {if (!/\\begin{document}/ && !/\\end{document}/ && !/^\\include/) print}' "${file%.lyx}.tex" > temp_file.tex
-        mv temp_file.tex "${file%.lyx}.tex"
-    fi
-done
+OVERLYX_DIR=~/overlyx
 
-touch .commit 
-
-echo "Ran pre-commit hook."
+# Check if .disable_hooks exists in the Git directory
+if [ ! -f "$OVERLYX_DIR/.disable_hooks" ]; then
+    # .disable_hooks does not exist, so run the Python script
+    python "$OVERLYX_DIR/hooks/pre-commit.py"
+fi
