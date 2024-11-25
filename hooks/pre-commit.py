@@ -4,80 +4,17 @@ Pre-commit hook for handling .tex and .lyx file synchronization.
 This script manages the conversion of LyX files to LaTeX before commit.
 """
 
-from dataclasses import dataclass
-import logging
 import os
-import subprocess
-from pathlib import Path
 import sys
+from pathlib import Path
+from git_processor import BaseProcessor, CommandError, setup_processor, GitContext
 
-@dataclass
-class GitContext:
-    """Holds git-related paths and context"""
-    root_dir: Path
-    tex_dir: Path
-    overlyx_dir: Path
-    log_file: Path
-
-class CommandError(Exception):
-    """Custom exception for command execution failures"""
-    pass
-
-class LyXProcessor:
+class LyX2TeXProcessor(BaseProcessor):
+    """
+    Processor for converting LyX files to LaTeX before commit.
+    """
     def __init__(self, context: GitContext):
-        self.ctx = context
-        self.logger = self._setup_logger()
-        
-    def _setup_logger(self) -> logging.Logger:
-        """Configure logging to both file and console"""
-        logger = logging.getLogger('pre-commit')
-        logger.setLevel(logging.DEBUG)
-        
-        # Clear existing log file
-        self.ctx.log_file.unlink(missing_ok=True)
-        
-        # File handler
-        fh = logging.FileHandler(self.ctx.log_file)
-        fh.setLevel(logging.DEBUG)
-        
-        # Console handler
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
-        
-        # Formatter
-        formatter = logging.Formatter('%(asctime)s - %(message)s')
-        fh.setFormatter(formatter)
-        ch.setFormatter(formatter)
-        
-        logger.addHandler(fh)
-        logger.addHandler(ch)
-        
-        return logger
-
-    def run_command(self, cmd: str, check: bool = True) -> subprocess.CompletedProcess:
-        """Execute a shell command with proper logging and error handling"""
-        self.logger.debug(f"Executing: {cmd}")
-        
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                text=True,
-                capture_output=True,
-                check=check
-            )
-            
-            if result.stdout:
-                self.logger.debug(result.stdout)
-            if result.stderr:
-                self.logger.debug(result.stderr)
-                
-            return result
-            
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"Command failed: {cmd}")
-            self.logger.error(f"Error output: {e.stderr}")
-            raise CommandError(f"Command failed: {cmd}") from e
+        super().__init__(context, 'pre-commit')
 
     def process_file(self, lyx_file: Path) -> bool:
         """Process a single LyX file"""
@@ -105,21 +42,11 @@ class LyXProcessor:
             return False
 
 def main():
-    # Setup paths
-    git_root = Path(subprocess.getoutput('git rev-parse --show-toplevel'))
-    tex_dir = git_root if git_root.name.startswith("tex") else git_root / "tex"
-    overlyx_dir = Path.home() / "overlyx"
-    log_file = tex_dir / "pre-commit.log"
-
     # Change to tex directory
-    os.chdir(tex_dir)
-
-    # Initialize context and processor
-    context = GitContext(git_root, tex_dir, overlyx_dir, log_file)
-    processor = LyXProcessor(context)
+    os.chdir(context.tex_dir)
 
     # Get all LyX files
-    lyx_files = list(tex_dir.glob("*.lyx"))
+    lyx_files = [f for f in context.tex_dir.glob("*.lyx") if "temp" not in str(f) and "main" not in str(f)]
 
     if not lyx_files:
         processor.logger.warning("No .lyx files found to process")
@@ -142,4 +69,5 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
+    context, processor = setup_processor('pre-commit', LyX2TeXProcessor)
     main()

@@ -12,3 +12,5 @@ To unset,
 ```
 git config --unset core.hooksPath
 ```
+## TODO
+- decide whether we should on pull export to tex, then merge, then reimport to lyx.

@@ -4,85 +4,17 @@ Post-merge hook for handling .tex and .lyx file synchronization.
 This script manages the conversion and merging of LaTeX and LyX files.
 """
 
-from dataclasses import dataclass
-from functools import partial
-import glob
-import logging
 import os
-import subprocess
 import sys
-import time
 from pathlib import Path
-from typing import Optional, List, Tuple
+from git_processor import BaseProcessor, CommandError, setup_processor, GitContext
 
-@dataclass
-class GitContext:
-    """Holds git-related paths and context"""
-    root_dir: Path
-    tex_dir: Path
-    overlyx_dir: Path
-    log_file: Path
-
-class CommandError(Exception):
-    """Custom exception for command execution failures"""
-    pass
-
-class GitProcessor:
+class TeX2LyXProcessor(BaseProcessor):
+    """
+    Processor for converting LaTeX to LyX files after a merge from remote Overleaf.
+    """
     def __init__(self, context: GitContext):
-        self.ctx = context
-        self.logger = self._setup_logger()
-        
-    def _setup_logger(self) -> logging.Logger:
-        """Configure logging to both file and console"""
-        logger = logging.getLogger('post-merge')
-        logger.setLevel(logging.DEBUG)  # TODO: change to INFO
-        
-        # Clear existing log file
-        self.ctx.log_file.unlink(missing_ok=True)
-        
-        # File handler
-        fh = logging.FileHandler(self.ctx.log_file)
-        fh.setLevel(logging.DEBUG)
-        
-        # Console handler
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)  # TODO: change to INFO
-        
-        # Formatter
-        formatter = logging.Formatter('%(asctime)s - %(message)s')
-        fh.setFormatter(formatter)
-        ch.setFormatter(formatter)
-        
-        logger.addHandler(fh)
-        logger.addHandler(ch)
-        
-        return logger
-
-    def run_command(self, cmd: str, check: bool = True, silent: bool = False) -> subprocess.CompletedProcess:
-        """Execute a shell command with proper logging and error handling"""
-        self.logger.debug(f"Executing: {cmd}")
-        
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                text=True,
-                capture_output=True,
-                check=check
-            )
-            
-            if not silent:
-                if result.stdout:
-                    self.logger.debug(result.stdout)
-                if result.stderr:
-                    self.logger.debug(result.stderr)
-                    
-            return result
-            
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"Command failed: {cmd}")
-            self.logger.error(f"Error output: {e.stderr} {e.stdout}")
-            raise CommandError(f"Command failed: {cmd}") from e
+        super().__init__(context, 'post-merge')
 
     def is_git_merging(self) -> bool:
         """Check if git is currently in a merging state"""
@@ -96,7 +28,6 @@ class GitProcessor:
         self.run_command('git add .')
         self.run_command('git commit -m "[hook] Accept remote version"')
         return True
-
     def process_file(self, tex_file: Path) -> bool:
         """Process a single tex file"""
         lyx_file = tex_file.with_suffix(".lyx")
@@ -129,7 +60,6 @@ class GitProcessor:
                     f"{tex_file} > temp_file.tex"
                 )
                 os.rename('temp_file.tex', tex_file)
-
             # Prepare for merge
             self.run_command(f'git add {tex_file}')
             self.run_command(f'git commit --allow-empty -m "[hook] Pre-merge {tex_file.name}" --no-verify')
@@ -167,30 +97,20 @@ class GitProcessor:
             finally:
                 # Always remove disable_hooks file
                 disable_hooks.unlink(missing_ok=True)
-
         except CommandError as e:
             self.logger.error(f"Error processing {tex_file.name}: {e}")
             return False
+        
 
 def main():
-    # Setup paths
-    git_root = Path(subprocess.getoutput('git rev-parse --show-toplevel'))
-    tex_dir = git_root if git_root.name.startswith("tex") else git_root / "tex"
-    overlyx_dir = Path.home() / "overlyx"
-    log_file = tex_dir / "post-merge.log"
-
     # Change to tex directory
-    os.chdir(tex_dir)
-
-    # Initialize context and processor
-    context = GitContext(git_root, tex_dir, overlyx_dir, log_file)
-    processor = GitProcessor(context)
+    os.chdir(context.tex_dir)
 
     # Get all tex files
-    tex_files = [f for f in tex_dir.glob("*.tex") if "temp" not in str(f) and "main" not in str(f)]
+    tex_files = [f for f in context.tex_dir.glob("*.tex") if "temp" not in str(f) and "main" not in str(f)]
 
     if not tex_files:
-        processor.logger.warning("[OverLyX] No .tex files found to process")
+        processor.logger.warning("No .tex files found to process")
         return
 
     # Process each file
@@ -201,10 +121,11 @@ def main():
 
     # Final summary
     total = len(tex_files)
-    processor.logger.info(f"\n[OverLyX] Processing complete: {success_count}/{total} files successful")
+    processor.logger.info(f"\nProcessing complete: {success_count}/{total} files successful")
     if success_count < total:
-        processor.logger.warning("[OverLyX] Some files were not processed successfully")
+        processor.logger.warning("Some files were not processed successfully")
         sys.exit(1)
 
 if __name__ == "__main__":
+    context, processor = setup_processor('post-merge', TeX2LyXProcessor)
     main()
