@@ -28,6 +28,7 @@ class TeX2LyXProcessor(BaseProcessor):
         self.run_command('git add .')
         self.run_command('git commit -m "[hook] Accept remote version"')
         return True
+    
     def process_file(self, tex_file: Path) -> bool:
         """Process a single tex file"""
         lyx_file = tex_file.with_suffix(".lyx")
