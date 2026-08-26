@@ -123,6 +123,11 @@ function wire(mf: MathfieldElement, view: EditorView, getPos: () => number | und
         ev.preventDefault(); ev.stopPropagation(); return;
       }
     }
+    // Ctrl/Cmd+L: start a LaTeX command (a backslash) — the browser would focus its address bar
+    if (mod && ev.key.toLowerCase() === 'l' && !ev.shiftKey && !ev.altKey) {
+      mf.executeCommand(['switchMode', 'latex', '', '\\']);
+      ev.preventDefault(); ev.stopPropagation(); return;
+    }
     if (mod && ev.key.toLowerCase() === 'm' && !ev.shiftKey) {
       // Ctrl+M inside math: LyX inserts a text box
       mf.executeCommand(['insert', '\\text{#0}']);

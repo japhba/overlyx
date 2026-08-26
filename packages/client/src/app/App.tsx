@@ -95,6 +95,19 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   }, []);
 
   useEffect(() => { document.documentElement.style.setProperty('--editor-zoom', String(zoom)); localStorage.setItem('ol.zoom', String(zoom)); }, [zoom]);
+  // Ctrl/Cmd +/-/0 zoom the document text, never the browser chrome — wherever the focus is (formula fields, panels)
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      const mod = navigator.platform.includes('Mac') ? ev.metaKey : ev.ctrlKey;
+      if (!mod || ev.altKey || ev.shiftKey && ev.key !== '+') return;
+      const k = ev.key === '+' || ev.code === 'Equal' || ev.code === 'NumpadAdd' ? 1 : ev.key === '-' || ev.code === 'Minus' || ev.code === 'NumpadSubtract' ? -1 : ev.key === '0' || ev.code === 'Digit0' || ev.code === 'Numpad0' ? 0 : null;
+      if (k === null) return;
+      ev.preventDefault(); ev.stopPropagation();
+      editorContext.ui?.zoom(k);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
   useEffect(() => { document.documentElement.style.setProperty('--text-width', textWidth > 0 ? textWidth + 'px' : '100%'); localStorage.setItem('ol.textWidth', String(textWidth)); }, [textWidth]);
   useEffect(() => { localStorage.setItem('ol.tabs', JSON.stringify(tabs)); }, [tabs]);
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.combined', combined ? '1' : '0'); }, [combined]);

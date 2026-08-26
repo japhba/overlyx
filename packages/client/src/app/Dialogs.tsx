@@ -299,7 +299,7 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
     ['Ctrl+E, Ctrl+B, Ctrl+U', 'Emphasis, bold, underline'],
     ['Ctrl+Shift+P, Ctrl+Shift+O, Ctrl+Shift+N', 'Typewriter, strikeout, noun (small caps)'],
     ['Ctrl+Alt+D', 'Reset font'],
-    ['Ctrl+L', 'TeX code (ERT)'],
+    ['Ctrl+L', 'TeX code (ERT); in a formula: start a \\command'],
     ['Ctrl+Alt+F / Ctrl+Alt+M / Ctrl+Alt+N', 'Footnote / margin note / LyX note'],
     ['Ctrl+Alt+C', 'New comment thread'],
     ['Ctrl+Shift+C, Ctrl+Shift+I, Ctrl+Alt+L', 'Citation, cross-reference, label'],
@@ -311,7 +311,8 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
     ['Ctrl+Shift+E', 'Track changes'],
     ['Ctrl+Alt+O', 'Outline pane'],
     ['Ctrl+Z / Ctrl+Y', 'Undo / redo (per user)'],
-    ['Ctrl++ / Ctrl+-', 'Zoom'],
+    ['Ctrl++ / Ctrl+- / Ctrl+0', 'Zoom the text (the interface keeps its size)'],
+    ['Ctrl+Alt++ / Ctrl+Alt+-', 'Wider / narrower text column'],
   ];
   return (
     <Dialog title="Keyboard shortcuts (LyX bindings)" onClose={onClose} wide>
