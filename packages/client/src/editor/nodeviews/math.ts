@@ -6,8 +6,8 @@
 import type { Node as PMNode } from 'prosemirror-model';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
 import type { EditorView, NodeView } from 'prosemirror-view';
-import { macroFromLyxLines, parseFormula, numberedType, type HullType } from '@overlyx/core';
-import { LyxMathField, renderStaticHtml, activeMathField } from '../lyxmath/field';
+import { macroFromLyxLines, parseFormula, renderHullSource, numberedType, type HullType } from '@overlyx/core';
+import { LyxMathField, renderStaticHtml, activeMathField, rowRectsOf } from '../lyxmath/field';
 import { macroTableFor, mathViews, macroVersion } from '../lyxmath/macrotable';
 import { showContextMenu, type MenuItem } from '../contextmenu';
 import { toggleMathDisplay } from '../commands';
@@ -306,8 +306,30 @@ export class MathDisplayView implements NodeView {
 
   private syncNumber() {
     const n = this.dom.getAttribute('data-eqnum') ?? '';
-    if (this.numberEl.textContent !== n) this.numberEl.textContent = n;
+    if (this.numberEl.dataset.nums !== n) { this.numberEl.dataset.nums = n; this.numberEl.textContent = n; }
     this.numberEl.style.display = n ? '' : 'none';
+    this.scheduleRelayout();
+  }
+
+  /** put each equation number at the vertical centre of its row (LyX draws them per row) */
+  private layoutNumbers() {
+    const nums = (this.numberEl.dataset.nums ?? '').split('\n').filter(Boolean);
+    const h = this.hull();
+    const numberedRowsIdx = h.type === 'multline' ? [h.rows.length - 1] : h.numberedRows.map((v, i) => (v === true ? i : -1)).filter(i => i >= 0);
+    if (nums.length < 2 || numberedRowsIdx.length !== nums.length) { this.numberEl.classList.remove('per-row'); if (this.numberEl.textContent !== nums.join('\n')) this.numberEl.textContent = nums.join('\n'); return; }
+    const container = this.field?.dom ?? this.staticEl;
+    if (!container) return;
+    const refs = this.field ? this.field.cellRefs() : renderHullSource(h, macroTableFor(this.view, this.getPos()).table).cells;
+    const rects = rowRectsOf(h, refs, container);
+    const base = this.dom.getBoundingClientRect();
+    this.numberEl.classList.add('per-row');
+    this.numberEl.replaceChildren(...nums.map((t, k) => {
+      const r = rects[numberedRowsIdx[k]];
+      const sp = document.createElement('span');
+      sp.textContent = t;
+      sp.style.top = `${(r.top + r.bottom) / 2 - base.top}px`;
+      return sp;
+    }));
   }
 
   private relayoutRaf = 0;
@@ -325,6 +347,7 @@ export class MathDisplayView implements NodeView {
     const avail = shifted ? dom.parentElement!.clientWidth : dom.clientWidth;
     const metaW = this.metaEl.offsetWidth;
     const need = contentW + metaW + 10;
+    this.layoutNumbers();
     if (need <= avail) {
       if (shifted) { dom.style.marginLeft = ''; dom.style.width = ''; dom.style.gridTemplateColumns = ''; }
       return;

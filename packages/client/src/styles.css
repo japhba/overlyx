@@ -281,6 +281,9 @@ button { cursor: pointer; }
 .lyx-math-display .eq-left { grid-column: 1; }
 .lyx-math-display .eq-meta { grid-column: 3; justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; max-width: 100%; }
 .lyx-math-display .eq-number { font-family: var(--editor-font); white-space: pre; text-align: right; color: #333; }
+.lyx-math-display .eq-number.per-row { position: static; white-space: normal; min-width: 2.2em; height: 1px; }
+.lyx-math-display .eq-number.per-row > span { position: absolute; right: 0; transform: translateY(-50%); white-space: pre; }
+.lyx-math-display .eq-number.per-row ~ .eq-labels { position: absolute; right: 0; bottom: -4px; }
 .lyx-math-display .eq-labels { font-family: var(--ui-font); font-size: 10px; color: #6b4b00; background: #fff3d6; border: 1px solid #d6b46a; border-radius: 3px; padding: 0 4px; cursor: pointer; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lyx-math-display.ProseMirror-selectednode { outline: 2px solid var(--accent); }
 .lyx-macro { display: inline-block; font-size: 0.95em; background: #f3f7ee; border: 1px solid #a6c48a; border-radius: 3px; padding: 0 4px; margin: 1px; }

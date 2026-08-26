@@ -66,6 +66,7 @@ export class LyxMathField {
   private dragging = false;
   private lastLatex: string;
   private _macroKey = '';
+  private hoverAtom: Atom | null = null;
   readonly id = ++seq;
 
   constructor(opts: FieldOptions) {
@@ -112,6 +113,10 @@ export class LyxMathField {
     this.render();
   }
   hasFocus(): boolean { return this.focused; }
+  /** the rendered cells (ids match the `lm-c<id>` classes in the DOM) */
+  cellRefs(): CellRef[] { return this.cells; }
+  /** bounding boxes of the hull's rows (client coordinates) */
+  rowRects(): DOMRect[] { return rowRectsOf(this.hull, this.cells, this.content); }
   focus(where?: 'start' | 'end'): void {
     if (where === 'start') { this.cursor.slices = this.cursor.slices.slice(0, 1); this.cursor.idx = 0; this.cursor.pos = 0; }
     if (where === 'end') { this.cursor.slices = this.cursor.slices.slice(0, 1); this.cursor.idx = this.cursor.lastidx; this.cursor.pos = this.cursor.lastpos; }
@@ -257,9 +262,12 @@ export class LyxMathField {
   layout(): void {
     const ov = this.overlay;
     ov.replaceChildren();
-    if (!this.focused) return;
     const base = this.dom.getBoundingClientRect();
     const c = this.cursor;
+    // LyX highlights the inset under the mouse pointer (Color_mathframe) even when not editing
+    const hover = this.hoverAtom;
+    if (hover && !(this.focused && c.slices.some(s => s.owner === hover))) { const r = this.atomRect(hover); if (r) this.corners(ov, base, r, hover.t === 'frac' || hover.t === 'grid' || hover.t === 'macro' ? 'both' : 'lower'); }
+    if (!this.focused) return;
     // selection
     const sel = c.selRange();
     if (sel) {
@@ -303,6 +311,35 @@ export class LyxMathField {
       const kind = inset.t === 'frac' || inset.t === 'grid' || inset.t === 'macro' ? 'both' : 'lower';
       this.corners(ov, base, r, kind, inset.t === 'macro' ? '\\' + inset.n : undefined);
     }
+  }
+
+  /** the KaTeX box of an inset atom (found through its parent cell) */
+  private atomRect(atom: Atom): DOMRect | null {
+    const p = this.parents.get(atom);
+    if (!p) return null;
+    const el = this.cellEl(p.owner, p.idx);
+    if (!el) return null;
+    const cell = atomCells(p.owner)[p.idx] ?? [];
+    const box = this.atomBoxes(cell, el).find(b => p.pos >= b.from && p.pos < b.to);
+    return box ? box.el.getBoundingClientRect() : null;
+  }
+
+  /** the innermost inset whose box contains the point (LyX: the hovered inset) */
+  private insetFromPoint(x: number, y: number): Atom | null {
+    let el = document.elementFromPoint(x, y) as Element | null;
+    if (!el || !this.content.contains(el)) return null;
+    // the nearest cell around the element, and the atom box of that cell containing it
+    for (let e: Element | null = el; e && e !== this.content; e = e.parentElement) {
+      const m = /(?:^|\s)lm-c(\d+)(?:\s|$)/.exec(e.className ?? '');
+      if (!m) continue;
+      const ref = this.cells[Number(m[1])];
+      if (!ref) return null;
+      const cell = atomCells(ref.owner)[ref.idx] ?? [];
+      const box = this.atomBoxes(cell, e as HTMLElement).find(b => b.el === el || b.el.contains(el!));
+      if (box && !box.text) { const a = cell[box.from]; if (a && nargs(a) > 0) return a; }
+      return isHull(ref.owner) ? null : ref.owner;
+    }
+    return null;
   }
 
   private corners(ov: HTMLElement, base: DOMRect, r: DOMRect, kind: 'lower' | 'both', label?: string): void {
@@ -423,6 +460,8 @@ export class LyxMathField {
       this.scheduleLayout();
     });
     window.addEventListener('mouseup', () => { if (this.dragging) { this.dragging = false; if (this.cursor.selection && this.cursor.anchor && this.pathOf(this.cursor.anchor).join() === this.pathOf(this.cursor.slices).join()) this.cursor.clearSelection(); this.scheduleLayout(); } });
+    this.content.addEventListener('pointermove', ev => { const a = this.insetFromPoint(ev.clientX, ev.clientY); if (a !== this.hoverAtom) { this.hoverAtom = a; this.scheduleLayout(); } });
+    this.content.addEventListener('pointerleave', () => { if (this.hoverAtom) { this.hoverAtom = null; this.scheduleLayout(); } });
     // the field re-lays out when its box moves
     if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => this.scheduleLayout()).observe(this.dom);
   }
@@ -515,6 +554,24 @@ export class LyxMathField {
 }
 
 function escapeHtml(s: string): string { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+/** Bounding boxes of the rows of a hull in a rendered container (union of each row's cell boxes). */
+export function rowRectsOf(hull: Hull, cells: CellRef[], container: HTMLElement): DOMRect[] {
+  const out: DOMRect[] = [];
+  for (let r = 0; r < hull.rows.length; r++) {
+    let box: DOMRect | null = null;
+    for (let c = 0; c < hull.ncols; c++) {
+      const ref = cells.find(x => x.owner === hull && x.idx === r * hull.ncols + c);
+      const el = ref ? container.querySelector(`.lm-c${ref.id}`) : null;
+      if (!el) continue;
+      const rr = el.getBoundingClientRect();
+      if (!rr.height) continue;
+      box = box ? new DOMRect(Math.min(box.left, rr.left), Math.min(box.top, rr.top), Math.max(box.right, rr.right) - Math.min(box.left, rr.left), Math.max(box.bottom, rr.bottom) - Math.min(box.top, rr.top)) : rr;
+    }
+    out.push(box ?? new DOMRect(0, 0, 0, 0));
+  }
+  return out;
+}
 
 /** Static rendering of a formula (no editing) — the same source as the field, so it looks identical. */
 export function renderStaticHtml(latex: string, display: boolean, macros: MacroTable): string {
