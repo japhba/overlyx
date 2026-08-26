@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+*.log
+credentials.txt
+test-results/
+playwright-report/
+.env

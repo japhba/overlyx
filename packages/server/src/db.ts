@@ -1,0 +1,56 @@
+import Database from 'better-sqlite3';
+import path from 'node:path';
+import { config } from './config.ts';
+
+export const db = new Database(path.join(config.dataDir, 'overlyx.sqlite'));
+db.pragma('journal_mode = WAL');
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  display_name TEXT NOT NULL,
+  password_hash TEXT,
+  color TEXT NOT NULL,
+  email TEXT,
+  google_sub TEXT UNIQUE,
+  is_admin INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ydocs (
+  id TEXT PRIMARY KEY,
+  state BLOB NOT NULL,
+  file_hash TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  doc_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  author TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  lyx TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS versions_doc ON versions(doc_id, created_at);
+CREATE TABLE IF NOT EXISTS builds (
+  doc_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  log TEXT NOT NULL,
+  pdf_path TEXT,
+  tex_path TEXT,
+  updated_at INTEGER NOT NULL
+);
+`);
+
+export interface UserRow {
+  id: number; username: string; display_name: string; password_hash: string | null; color: string;
+  email: string | null; google_sub: string | null; is_admin: number; created_at: number;
+}
+
+export const USER_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', '#9A6324', '#800000', '#aaffc3', '#808000', '#000075'];
+
+export function pickColor(): string {
+  const n = (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+  return USER_COLORS[n % USER_COLORS.length];
+}

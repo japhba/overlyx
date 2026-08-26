@@ -1,0 +1,619 @@
+import { useEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
+import type { EditorView } from 'prosemirror-view';
+import { NodeSelection, TextSelection } from 'prosemirror-state';
+import { undo, redo } from 'y-prosemirror';
+import { addColumnAfter, addColumnBefore, addRowAfter, addRowBefore, deleteColumn, deleteRow, deleteTable, mergeCells, splitCell } from 'prosemirror-tables';
+import { api, type DocMeta, type User } from '../api';
+import { Login } from './Login';
+import { FileBrowser } from './FileBrowser';
+import { MenuBar, type MenuDef } from './MenuBar';
+import { Toolbar, type ToolButton } from './Toolbar';
+import { Outline, buildOutline, type OutlineItem } from './Outline';
+import { Versions } from './Versions';
+import { PdfPanel, buildPdf, type PdfState } from './PdfPanel';
+import { StatusBar, type Status } from './StatusBar';
+import { GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, commandParams } from './Dialogs';
+import { createEditor, refreshMacros, type EditorHandle } from '../editor/editor';
+import { editorContext } from '../editor/context';
+import { STANDARD_LAYOUTS } from '../editor/layouts';
+import { chordKey } from '../editor/keymap';
+import * as C from '../editor/commands';
+import { setMarginMode, marginKey } from '../editor/plugins/margin';
+import { acceptAllChanges, rejectAllChanges } from '../editor/plugins/changes';
+import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '../editor/plugins/find';
+import { schema, unquote } from '@overlyx/core';
+
+type Dialog = { name: string; arg?: unknown } | null;
+
+export function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [google, setGoogle] = useState(false);
+  const [ready, setReady] = useState(false);
+  useEffect(() => { api.me().then(r => { setUser(r.user); setGoogle(r.google); }).finally(() => setReady(true)); }, []);
+  if (!ready) return <div style="padding:40px;color:#666">Loading…</div>;
+  if (!user) return <Login google={google} onLogin={setUser} />;
+  return <Workspace user={user} onLogout={() => api.logout().then(() => setUser(null))} />;
+}
+
+function docIdFromHash(): string | null {
+  const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
+  return h || null;
+}
+
+function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const [docId, setDocId] = useState<string | null>(docIdFromHash());
+  const [meta, setMeta] = useState<DocMeta | null>(null);
+  const [headerLines, setHeaderLines] = useState<string[]>([]);
+  const [status, setStatus] = useState<Status>({ connected: false, synced: false, users: [] });
+  const [layout, setLayout] = useState('Standard');
+  const [outline, setOutline] = useState<OutlineItem[]>([]);
+  const [activePos, setActivePos] = useState(0);
+  const [showFiles, setShowFiles] = useState(true);
+  const [rightTab, setRightTab] = useState<'outline' | 'pdf' | 'versions' | null>('outline');
+  const [pdf, setPdf] = useState<PdfState>({ url: null, log: '', busy: false, ok: null, warnings: [] });
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [message, setMessage] = useState<{ text: string; kind: 'info' | 'error' } | null>(null);
+  const [marginMode, setMarginModeState] = useState(localStorage.getItem('ol.margin') === '1');
+  const [tracking, setTracking] = useState(false);
+  const [chord, setChord] = useState<string | null>(null);
+  const [saved, setSaved] = useState(true);
+  const [zoom, setZoom] = useState(Number(localStorage.getItem('ol.zoom') || 1));
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQ, setFindQ] = useState(''), [replQ, setReplQ] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [selVersion, setSelVersion] = useState(0);
+  const editorRef = useRef<EditorHandle | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [, force] = useState(0);
+  const rerender = () => force(x => x + 1);
+
+  const notify = useCallback((text: string, kind: 'info' | 'error' = 'info') => { setMessage({ text, kind }); setTimeout(() => setMessage(m => (m?.text === text ? null : m)), 4000); }, []);
+
+  useEffect(() => {
+    const onHash = () => setDocId(docIdFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  useEffect(() => { document.documentElement.style.setProperty('--editor-zoom', String(zoom)); localStorage.setItem('ol.zoom', String(zoom)); }, [zoom]);
+
+  // create / destroy the editor when the document changes
+  useEffect(() => {
+    editorRef.current?.destroy();
+    editorRef.current = null;
+    setMeta(null); setOutline([]); setPdf({ url: null, log: '', busy: false, ok: null, warnings: [] });
+    if (!docId || !containerRef.current) return;
+    containerRef.current.innerHTML = '';
+    editorContext.user = user; editorContext.docId = docId; editorContext.project = docId.split('/')[0]; editorContext.meta = null;
+    const handle = createEditor({
+      docId, user, container: containerRef.current, marginMode,
+      onStatus: setStatus,
+      onSelectionChange: (view) => {
+        const p = C.currentParagraph(view.state);
+        setLayout(p ? p.node.attrs.layout : '');
+        setActivePos(view.state.selection.from);
+        setChord(chordKey.getState(view.state) ?? null);
+        rerender();
+      },
+      onDocChange: (view) => { setSaved(false); scheduleOutline(view); },
+    });
+    editorRef.current = handle;
+    const scheduleOutline = debounce((view: EditorView) => setOutline(buildOutline(view.state.doc, true, editorContext.meta?.secnumdepth ?? 3)), 300);
+    api.meta(docId).then(m => {
+      setMeta(m); editorContext.meta = m;
+      refreshMacros(handle.view, m.macros);
+      setTracking(m.trackingChanges);
+      editorContext.trackChanges = m.trackingChanges;
+      const a = m.authors.find(x => x.name === user.name);
+      editorContext.changeAuthorId = a?.id;
+      // header lines live in the Y meta map
+      const metaMap = handle.ydoc.getMap<string>('meta');
+      const readHeader = () => { try { setHeaderLines(JSON.parse(metaMap.get('header') ?? '[]')); } catch { /* ignore */ } };
+      readHeader(); metaMap.observe(readHeader);
+      setOutline(buildOutline(handle.view.state.doc, true, editorContext.meta?.secnumdepth ?? 3));
+    }).catch(e => notify('Could not load document metadata: ' + e.message, 'error'));
+    // saved-state polling: the server writes 1.5s after the last change
+    const t = setInterval(() => setSaved(true), 4000);
+    handle.provider.on('sync', () => { setOutline(buildOutline(handle.view.state.doc, true, editorContext.meta?.secnumdepth ?? 3)); refreshMacros(handle.view, editorContext.meta?.macros ?? {}); });
+    return () => { clearInterval(t); handle.destroy(); editorRef.current = null; };
+  }, [docId]);
+
+  // UI hooks for keymap / node views
+  useEffect(() => {
+    editorContext.notify = notify;
+    editorContext.openDialog = (name, arg) => setDialog({ name, arg });
+    editorContext.openInsetDialog = (view, pos) => { if (pos !== undefined) setDialog({ name: 'inset', arg: pos }); };
+    editorContext.ui = {
+      save: () => { if (docId) api.save(docId).then(() => { setSaved(true); notify('Saved to ' + docId); }).catch(e => notify(String(e.message), 'error')); },
+      viewPdf: () => build('overlyx'),
+      updatePdf: () => build('overlyx'),
+      find: () => setFindOpen(true),
+      openDialog: (name, arg) => setDialog({ name, arg }),
+      toggleTrackChanges: () => toggleTracking(),
+      toggleOutline: () => setRightTab(t => (t === 'outline' ? null : 'outline')),
+      zoom: (d) => setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))),
+      openFile: () => setShowFiles(true),
+      newFile: () => { const p = docId?.split('/')[0]; if (p) { const name = prompt('New document name:', 'untitled.lyx'); if (name) api.newDoc(p, name, { title: name.replace(/\.lyx$/, '') }).then(r => { location.hash = '#/' + r.id; setRefreshKey(k => k + 1); }); } },
+    };
+  });
+
+  const view = editorRef.current?.view ?? null;
+  const run = (cmd: (state: any, dispatch: any, view?: any) => boolean) => { if (!view) return; cmd(view.state, view.dispatch, view); view.focus(); };
+  const runView = (fn: (v: EditorView) => boolean) => { if (!view) return; fn(view); };
+
+  const build = async (engine: 'overlyx' | 'lyx') => {
+    if (!docId) return;
+    setRightTab('pdf');
+    setPdf(p => ({ ...p, busy: true }));
+    await api.save(docId).catch(() => {});
+    const r = await buildPdf(docId, engine);
+    setPdf(r);
+    notify(r.ok ? 'PDF built' : 'PDF build failed — see log', r.ok ? 'info' : 'error');
+  };
+
+  const toggleTracking = async () => {
+    if (!docId) return;
+    const next = !editorContext.trackChanges;
+    if (next && editorContext.changeAuthorId === undefined) {
+      // register this user as an author in the document header
+      const id = hashAuthor(user.name);
+      const lines = [...headerLines];
+      const idx = lines.findIndex(l => l.startsWith('\\author '));
+      const line = `\\author ${id} "${user.name}" ""`;
+      if (idx >= 0) lines.splice(idx, 0, line); else lines.push(line);
+      await api.setHeader(docId, { headerLines: lines, set: { tracking_changes: 'true' } });
+      editorContext.changeAuthorId = id;
+      setMeta(m => (m ? { ...m, authors: [...m.authors, { id, name: user.name }] } : m));
+    } else {
+      await api.setHeader(docId, { set: { tracking_changes: String(next) } });
+    }
+    editorContext.trackChanges = next;
+    setTracking(next);
+    notify(next ? 'Change tracking ON' : 'Change tracking OFF');
+  };
+
+  const toggleMargin = () => {
+    const next = !marginMode;
+    setMarginModeState(next);
+    localStorage.setItem('ol.margin', next ? '1' : '0');
+    if (view) setMarginMode(view, next);
+  };
+
+  const labels = useMemo(() => {
+    if (!view) return [] as { name: string; context: string }[];
+    const out: { name: string; context: string }[] = [];
+    view.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'command' && node.attrs.cmd === 'label') {
+        const $p = view.state.doc.resolve(pos);
+        out.push({ name: unquote(commandParams(node).get('name')), context: $p.parent.textContent.slice(0, 60) });
+      } else if (node.type.name === 'math_display') {
+        for (const m of String(node.attrs.latex).matchAll(/\\label\{([^}]*)\}/g)) out.push({ name: m[1], context: '(equation)' });
+      }
+      return true;
+    });
+    return out;
+  }, [dialog, view]);
+
+  const layouts = meta?.layouts?.length ? meta.layouts : STANDARD_LAYOUTS;
+
+  const menus: MenuDef[] = docId ? [
+    { title: 'File', items: [
+      { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
+      { label: 'Open (file browser)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
+      { label: 'Save now', shortcut: 'Ctrl+S', action: () => editorContext.ui?.save() },
+      { sep: true },
+      { label: 'Export ▸', sub: [
+        { label: 'PDF (pdflatex via latexmk)', shortcut: 'Ctrl+R', action: () => build('overlyx') },
+        { label: 'PDF via native LyX', action: () => build('lyx') },
+        { label: 'LaTeX source…', action: async () => { const r = await api.export(docId, 'tex'); setDialog({ name: 'tex', arg: r.tex ?? '' }); } },
+        { label: 'Download .lyx', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/lyx?download=1`) },
+        { label: 'Download PDF', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/pdf?download=1`) },
+      ] },
+      { label: 'Versions…', action: () => setRightTab('versions') },
+      { sep: true },
+      { label: 'Close', shortcut: 'Ctrl+W', action: () => { location.hash = ''; } },
+    ] },
+    { title: 'Edit', items: [
+      { label: 'Undo', shortcut: 'Ctrl+Z', action: () => run(undo) },
+      { label: 'Redo', shortcut: 'Ctrl+Y', action: () => run(redo) },
+      { sep: true },
+      { label: 'Find & Replace…', shortcut: 'Ctrl+F', action: () => setFindOpen(true) },
+      { label: 'Select inset / all', shortcut: 'Ctrl+A', action: () => run(C.selectInset) },
+      { sep: true },
+      { label: 'Text Style ▸', sub: [
+        { label: 'Emphasized', shortcut: 'Ctrl+E', action: () => run(C.fontCommands.emph) },
+        { label: 'Bold', shortcut: 'Ctrl+B', action: () => run(C.fontCommands.bold) },
+        { label: 'Noun (small caps)', shortcut: 'Ctrl+Shift+N', action: () => run(C.fontCommands.noun) },
+        { label: 'Underline', shortcut: 'Ctrl+U', action: () => run(C.fontCommands.underline) },
+        { label: 'Strikeout', shortcut: 'Ctrl+Shift+O', action: () => run(C.fontCommands.strikeout) },
+        { label: 'Typewriter', shortcut: 'Ctrl+Shift+P', action: () => run(C.fontCommands.typewriter) },
+        { label: 'Sans serif', action: () => run(C.fontCommands.sans) },
+        { label: 'Italic shape', action: () => run(C.fontCommands.italic) },
+        { label: 'Small caps shape', action: () => run(C.fontCommands.smallcaps) },
+        { label: 'Double underline', action: () => run(C.fontCommands.uuline) },
+        { label: 'Wavy underline', action: () => run(C.fontCommands.uwave) },
+        { sep: true },
+        ...['tiny', 'scriptsize', 'footnotesize', 'small', 'normal', 'large', 'larger', 'largest', 'huge', 'giant'].map(s => ({ label: 'Size: ' + s, action: () => run(C.setValueMark('size', s === 'normal' ? null : s)) })),
+        { sep: true },
+        ...['red', 'blue', 'green', 'magenta', 'cyan', 'orange', 'purple', 'gray', 'none'].map(c => ({ label: 'Color: ' + c, action: () => run(C.setValueMark('color', c === 'none' ? null : c)) })),
+        { sep: true },
+        { label: 'Reset font', shortcut: 'Ctrl+Alt+D', action: () => run(C.fontDefault) },
+      ] },
+      { label: 'Paragraph ▸', sub: [
+        { label: 'Align left', shortcut: 'Alt+A L', action: () => run(C.setParagraphAttrs({ align: 'left' })) },
+        { label: 'Align center', shortcut: 'Alt+A C', action: () => run(C.setParagraphAttrs({ align: 'center' })) },
+        { label: 'Align right', shortcut: 'Alt+A R', action: () => run(C.setParagraphAttrs({ align: 'right' })) },
+        { label: 'Justified', shortcut: 'Alt+A J', action: () => run(C.setParagraphAttrs({ align: 'block' })) },
+        { label: 'Default alignment', shortcut: 'Alt+A E', action: () => run(C.setParagraphAttrs({ align: null })) },
+        { label: 'Toggle indentation', shortcut: 'Alt+A I', action: () => { const p = view && C.currentParagraph(view.state); if (p) run(C.setParagraphAttrs({ noindent: !p.node.attrs.noindent })); } },
+        { sep: true },
+        { label: 'Increase depth', shortcut: 'Alt+Shift+→', action: () => run(C.changeDepth(1)) },
+        { label: 'Decrease depth', shortcut: 'Alt+Shift+←', action: () => run(C.changeDepth(-1)) },
+        { label: 'Move paragraph up', shortcut: 'Alt+↑', action: () => run(C.moveParagraph(-1)) },
+        { label: 'Move paragraph down', shortcut: 'Alt+↓', action: () => run(C.moveParagraph(1)) },
+      ] },
+      { label: 'Table ▸', sub: [
+        { label: 'Add row above', action: () => run(addRowBefore) }, { label: 'Add row below', action: () => run(addRowAfter) },
+        { label: 'Add column before', action: () => run(addColumnBefore) }, { label: 'Add column after', action: () => run(addColumnAfter) },
+        { label: 'Delete row', action: () => run(deleteRow) }, { label: 'Delete column', action: () => run(deleteColumn) },
+        { label: 'Merge cells (multicolumn)', action: () => run(mergeCells) }, { label: 'Split cell', action: () => run(splitCell) },
+        { sep: true },
+        { label: 'Top line on/off', action: () => toggleCellLine('topline') }, { label: 'Bottom line on/off', action: () => toggleCellLine('bottomline') },
+        { label: 'Left line on/off', action: () => toggleCellLine('leftline') }, { label: 'Right line on/off', action: () => toggleCellLine('rightline') },
+        { label: 'Align cell left', action: () => run(C.setCellAttr('alignment', 'left')) }, { label: 'Align cell center', action: () => run(C.setCellAttr('alignment', 'center')) }, { label: 'Align cell right', action: () => run(C.setCellAttr('alignment', 'right')) },
+        { sep: true },
+        { label: 'Delete table', action: () => run(deleteTable) },
+      ] },
+      { label: 'Track Changes ▸', sub: [
+        { label: 'Track changes', shortcut: 'Ctrl+Shift+E', checked: tracking, action: toggleTracking },
+        { label: 'Accept all changes', action: () => run(acceptAllChanges()) },
+        { label: 'Reject all changes', action: () => run(rejectAllChanges()) },
+      ] },
+      { sep: true },
+      { label: 'Inset settings…', shortcut: 'Ctrl+Alt+I', action: () => setDialog({ name: 'inset' }) },
+      { label: 'Open/close inset', shortcut: 'Ctrl+I', action: () => run(C.toggleInset) },
+      { label: 'Math: toggle inline/display', action: () => run(C.toggleMathDisplay) },
+    ] },
+    { title: 'View', items: [
+      { label: 'File browser', checked: showFiles, action: () => setShowFiles(!showFiles) },
+      { label: 'Outline', shortcut: 'Ctrl+Alt+O', checked: rightTab === 'outline', action: () => setRightTab(rightTab === 'outline' ? null : 'outline') },
+      { label: 'PDF preview', checked: rightTab === 'pdf', action: () => setRightTab(rightTab === 'pdf' ? null : 'pdf') },
+      { label: 'Versions', checked: rightTab === 'versions', action: () => setRightTab(rightTab === 'versions' ? null : 'versions') },
+      { sep: true },
+      { label: 'Notes & comments in the margin', checked: marginMode, action: toggleMargin },
+      { label: 'Open all insets', action: () => run(C.setAllInsets('open')) },
+      { label: 'Close all insets', action: () => run(C.setAllInsets('collapsed')) },
+      { sep: true },
+      { label: 'Zoom in', shortcut: 'Ctrl++', action: () => editorContext.ui?.zoom(1) },
+      { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => editorContext.ui?.zoom(-1) },
+      { label: 'Reset zoom', shortcut: 'Ctrl+0', action: () => editorContext.ui?.zoom(0) },
+    ] },
+    { title: 'Insert', items: [
+      { label: 'Math ▸', sub: [
+        { label: 'Inline formula', shortcut: 'Ctrl+M', action: () => runView(C.insertMath(false)) },
+        { label: 'Display formula', shortcut: 'Ctrl+Shift+M', action: () => runView(C.insertMath(true)) },
+        { label: 'Numbered equation', shortcut: 'Ctrl+Alt+N', action: () => runView(C.insertMath(true, 'equation')) },
+        { label: 'AMS align environment', shortcut: 'Alt+M T A', action: () => runView(C.insertMath(true, 'align')) },
+        { label: 'AMS align* (unnumbered)', action: () => runView(C.insertMath(true, 'align*')) },
+        { label: 'AMS gather', action: () => runView(C.insertMath(true, 'gather')) },
+        { label: 'AMS multline', action: () => runView(C.insertMath(true, 'multline')) },
+        { label: 'eqnarray', action: () => runView(C.insertMath(true, 'eqnarray')) },
+        { sep: true },
+        { label: 'Math macro definition', action: () => { const n = prompt('Macro name (without backslash):'); if (n) run(C.insertMacroDef(n, Number(prompt('Number of arguments:', '0') || 0), '')); } },
+      ] },
+      { label: 'Special Character ▸', sub: [
+        { label: 'Ellipsis …', shortcut: 'Alt+.', action: () => run(C.insertSpecial('ldots')) },
+        { label: 'End of sentence', shortcut: 'Ctrl+.', action: () => run(C.insertSpecial('endofsentence')) },
+        { label: 'Non-breaking dash', shortcut: 'Ctrl+Alt+-', action: () => run(C.insertSpecial('nobreakdash')) },
+        { label: 'Hyphenation point', shortcut: 'Alt+-', action: () => run(C.insertSpecial('softhyphen')) },
+        { label: 'Ligature break', shortcut: 'Ctrl+Shift+L', action: () => run(C.insertSpecial('ligaturebreak')) },
+        { label: 'Breakable slash', shortcut: 'Ctrl+/', action: () => run(C.insertSpecial('breakableslash')) },
+        { label: 'Menu separator', action: () => run(C.insertSpecial('menuseparator')) },
+        { label: 'En dash –', action: () => run(C.insertHyphens('\\twohyphens')) },
+        { label: 'Em dash —', action: () => run(C.insertHyphens('\\threehyphens')) },
+        { label: 'LyX / TeX / LaTeX logos', action: () => run(C.insertSpecial('LaTeX')) },
+        { label: 'Opening quote', action: () => run(C.insertQuote('l')) }, { label: 'Closing quote', action: () => run(C.insertQuote('r')) },
+        { label: 'Single quotes ‘ ’', action: () => run(C.insertQuote('l', 'e', 's')) },
+      ] },
+      { label: 'Formatting ▸', sub: [
+        { label: 'Line break', shortcut: 'Ctrl+Enter', action: () => run(C.insertNewline('newline')) },
+        { label: 'Justified line break', shortcut: 'Ctrl+Shift+Enter', action: () => run(C.insertNewline('linebreak')) },
+        { label: 'New page', action: () => run(C.insertNewpage('newpage')) },
+        { label: 'Page break', action: () => run(C.insertNewpage('pagebreak')) },
+        { label: 'Clear page', action: () => run(C.insertNewpage('clearpage')) },
+        { sep: true },
+        { label: 'Protected space', shortcut: 'Ctrl+Space', action: () => run(C.insertSpace('~')) },
+        { label: 'Thin space', shortcut: 'Ctrl+Shift+Space', action: () => run(C.insertSpace('\\thinspace{}')) },
+        { label: 'Interword space', action: () => run(C.insertSpace('\\space{}')) },
+        { label: 'Quad space', action: () => run(C.insertSpace('\\quad{}')) },
+        { label: 'Horizontal fill', action: () => run(C.insertSpace('\\hfill{}')) },
+        { sep: true },
+        { label: 'Vertical space (defskip)', action: () => run(C.insertVSpace('defskip')) },
+        { label: 'Vertical space (bigskip)', action: () => run(C.insertVSpace('bigskip')) },
+      ] },
+      { label: 'Float ▸', sub: [
+        { label: 'Figure', action: () => run(C.insertFloat('figure')) },
+        { label: 'Table', action: () => run(C.insertFloat('table')) },
+        { label: 'Algorithm', action: () => run(C.insertFloat('algorithm')) },
+      ] },
+      { label: 'Note ▸', sub: [
+        { label: 'LyX note (not printed)', shortcut: 'Ctrl+Alt+N', action: () => run(C.insertNote('Note')) },
+        { label: 'Comment (LaTeX comment)', action: () => run(C.insertNote('Comment')) },
+        { label: 'Greyed out', action: () => run(C.insertNote('Greyedout')) },
+      ] },
+      { label: 'Comment thread', shortcut: 'Ctrl+Alt+C', action: () => run(C.insertComment) },
+      { sep: true },
+      { label: 'Graphics…', shortcut: 'Ctrl+Shift+G', action: () => setDialog({ name: 'graphics' }) },
+      { label: 'Table…', shortcut: 'Ctrl+Alt+T', action: () => setDialog({ name: 'table' }) },
+      { label: 'Caption', action: () => run(C.insertCaption) },
+      { sep: true },
+      { label: 'Label…', shortcut: 'Ctrl+Alt+L', action: () => setDialog({ name: 'label' }) },
+      { label: 'Cross-reference…', shortcut: 'Ctrl+Shift+I', action: () => setDialog({ name: 'ref' }) },
+      { label: 'Citation…', shortcut: 'Ctrl+Shift+C', action: () => setDialog({ name: 'cite' }) },
+      { label: 'Hyperlink…', shortcut: 'Ctrl+Alt+K', action: () => setDialog({ name: 'href' }) },
+      { label: 'Footnote', shortcut: 'Ctrl+Alt+F', action: () => run(C.insertFootnote) },
+      { label: 'Marginal note', shortcut: 'Ctrl+Alt+M', action: () => run(C.insertMarginal) },
+      { label: 'Index entry', action: () => run(C.insertIndex) },
+      { label: 'Short title (argument)', shortcut: 'Alt+A 1', action: () => run(C.insertArgument('1')) },
+      { sep: true },
+      { label: 'TeX code (ERT)', shortcut: 'Ctrl+L', action: () => run(C.insertERT) },
+      { label: 'Program listing', action: () => run(C.insertListing) },
+      { label: 'Box', action: () => run(C.insertBox) },
+      { label: 'Branch…', action: () => { const n = prompt('Branch name:'); if (n) run(C.insertBranch(n)); } },
+      { label: 'Custom inset (Flex)…', action: () => { const n = prompt('Flex inset name:', meta?.flexInsets?.[0] ?? 'Code'); if (n) run(C.insertFlex(n)); } },
+      { sep: true },
+      { label: 'Child document…', action: () => { const fn = prompt('Child document file name (relative):', 'chapter1.lyx'); if (fn) run(C.insertInclude(fn, 'include')); } },
+      { label: 'Table of contents', action: () => run(C.insertToc()) },
+      { label: 'List of figures', action: () => run(C.insertToc('listoffigures')) },
+      { label: 'BibTeX bibliography…', action: () => { const f = prompt('BibTeX file(s), comma separated (without .bib):', (meta?.files.filter(x => x.kind === 'bib').map(x => x.path.replace(/\.bib$/, '')).join(',') || 'references')); if (f) run(C.insertBibtex(f, prompt('Style:', 'plain') || 'plain')); } },
+      { label: 'Index (print)', action: () => run(C.insertIndexPrint) },
+    ] },
+    { title: 'Navigate', items: [
+      { label: 'Outline pane', shortcut: 'Ctrl+Alt+O', action: () => setRightTab('outline') },
+      { label: 'Go to label…', action: () => { const n = prompt('Label:'); if (n && view) gotoLabel(view, n); } },
+      { label: 'Beginning of document', shortcut: 'Ctrl+Home', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)).scrollIntoView()); view.focus(); } } },
+      { label: 'End of document', shortcut: 'Ctrl+End', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView()); view.focus(); } } },
+    ] },
+    { title: 'Document', items: [
+      { label: 'Settings…', action: () => setDialog({ name: 'settings' }) },
+      { label: 'Math macros…', action: () => setDialog({ name: 'macros' }) },
+      { label: 'Change tracking', shortcut: 'Ctrl+Shift+E', checked: tracking, action: toggleTracking },
+      { sep: true },
+      { label: 'Reload metadata (macros, bibliography)', action: () => { if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (view) refreshMacros(view, m.macros); notify('Metadata reloaded'); }); } },
+    ] },
+    { title: 'Help', items: [
+      { label: 'Keyboard shortcuts', action: () => setDialog({ name: 'help' }) },
+      { label: 'About OverLyX', action: () => alert('OverLyX — a LyX-compatible collaborative WYSIWYG editor for LaTeX documents.\nDocuments are stored as native .lyx files; math is edited live with MathLive; collaboration via Yjs CRDTs.') },
+    ] },
+  ] : [];
+
+  const toggleCellLine = (key: string) => {
+    if (!view) return;
+    const $from = view.state.selection.$from;
+    let cur: any = null;
+    for (let d = $from.depth; d > 0; d--) if ($from.node(d).type.name === 'table_cell') { cur = $from.node(d); break; }
+    const attrs: [string, string][] = cur ? JSON.parse(cur.attrs.attrs || '[]') : [];
+    const on = attrs.find(a => a[0] === key)?.[1] === 'true';
+    run(C.setCellAttr(key, on ? null : 'true'));
+  };
+
+  const markActive = (name: string, value: string) => {
+    if (!view) return false;
+    const { $from, empty } = view.state.selection;
+    const marks = empty ? (view.state.storedMarks ?? $from.marks()) : $from.marks();
+    return marks.some(m => m.type.name === name && m.attrs.value === value);
+  };
+
+  const toolbarGroups: ToolButton[][] = [
+    [
+      { id: 'new', title: 'New document (Ctrl+N)', icon: 'new', action: () => editorContext.ui?.newFile() },
+      { id: 'open', title: 'Open (Ctrl+O)', icon: 'open', action: () => setShowFiles(true) },
+      { id: 'save', title: 'Save now (Ctrl+S)', icon: 'save', action: () => editorContext.ui?.save() },
+    ],
+    [
+      { id: 'undo', title: 'Undo (Ctrl+Z)', icon: 'undo', action: () => run(undo) },
+      { id: 'redo', title: 'Redo (Ctrl+Y)', icon: 'redo', action: () => run(redo) },
+      { id: 'find', title: 'Find & replace (Ctrl+F)', icon: 'find', action: () => setFindOpen(true) },
+    ],
+    [
+      { id: 'emph', title: 'Emphasis (Ctrl+E)', icon: 'emph', action: () => run(C.fontCommands.emph), active: markActive('emph', 'on') },
+      { id: 'noun', title: 'Noun / small caps (Ctrl+Shift+N)', icon: 'noun', action: () => run(C.fontCommands.noun), active: markActive('noun', 'on') },
+      { id: 'bold', title: 'Bold (Ctrl+B)', icon: 'bold', action: () => run(C.fontCommands.bold), active: markActive('series', 'bold') },
+      { id: 'underline', title: 'Underline (Ctrl+U)', icon: 'underline', action: () => run(C.fontCommands.underline), active: markActive('bar', 'under') },
+      { id: 'strike', title: 'Strikeout (Ctrl+Shift+O)', icon: 'strike', action: () => run(C.fontCommands.strikeout), active: markActive('strikeout', 'on') },
+      { id: 'tt', title: 'Typewriter (Ctrl+Shift+P)', icon: 'tt', action: () => run(C.fontCommands.typewriter), active: markActive('family', 'typewriter') },
+    ],
+    [
+      { id: 'depthout', title: 'Decrease depth (Alt+Shift+←)', icon: 'depthout', action: () => run(C.changeDepth(-1)) },
+      { id: 'depthin', title: 'Increase depth (Alt+Shift+→)', icon: 'depthin', action: () => run(C.changeDepth(1)) },
+    ],
+    [
+      { id: 'math', title: 'Inline formula (Ctrl+M)', icon: 'math', action: () => runView(C.insertMath(false)) },
+      { id: 'dmath', title: 'Display formula (Ctrl+Shift+M)', icon: 'dmath', action: () => runView(C.insertMath(true)) },
+      { id: 'graphics', title: 'Insert graphics (Ctrl+Shift+G)', icon: 'graphics', action: () => setDialog({ name: 'graphics' }) },
+      { id: 'table', title: 'Insert table (Ctrl+Alt+T)', icon: 'table', action: () => setDialog({ name: 'table' }) },
+      { id: 'float', title: 'Insert figure float', icon: 'float', action: () => run(C.insertFloat('figure')) },
+    ],
+    [
+      { id: 'footnote', title: 'Footnote (Ctrl+Alt+F)', icon: 'footnote', action: () => run(C.insertFootnote) },
+      { id: 'note', title: 'LyX note (Ctrl+Alt+N)', icon: 'note', action: () => run(C.insertNote('Note')) },
+      { id: 'comment', title: 'Comment thread (Ctrl+Alt+C)', icon: 'comment', action: () => run(C.insertComment) },
+      { id: 'label', title: 'Label (Ctrl+Alt+L)', icon: 'label', action: () => setDialog({ name: 'label' }) },
+      { id: 'ref', title: 'Cross-reference (Ctrl+Shift+I)', icon: 'ref', action: () => setDialog({ name: 'ref' }) },
+      { id: 'cite', title: 'Citation (Ctrl+Shift+C)', icon: 'cite', action: () => setDialog({ name: 'cite' }) },
+      { id: 'href', title: 'Hyperlink (Ctrl+Alt+K)', icon: 'href', action: () => setDialog({ name: 'href' }) },
+      { id: 'ert', title: 'TeX code (Ctrl+L)', icon: 'ert', action: () => run(C.insertERT) },
+      { id: 'toggleinset', title: 'Open/close inset (Ctrl+I)', icon: 'toggleinset', action: () => run(C.toggleInset) },
+    ],
+    [
+      { id: 'track', title: 'Track changes (Ctrl+Shift+E)', icon: 'track', action: toggleTracking, active: tracking },
+      { id: 'margin', title: 'Show notes & comments in the margin', icon: 'margin', action: toggleMargin, active: marginMode },
+      { id: 'outline', title: 'Outline (Ctrl+Alt+O)', icon: 'outline', action: () => setRightTab(rightTab === 'outline' ? null : 'outline'), active: rightTab === 'outline' },
+      { id: 'pdf', title: 'View PDF (Ctrl+R)', icon: 'pdf', action: () => build('overlyx') },
+    ],
+  ];
+
+  const insetDialogNode = () => {
+    if (!view) return null;
+    const pos = typeof dialog?.arg === 'number' ? dialog.arg : undefined;
+    if (pos !== undefined) { const n = view.state.doc.nodeAt(pos); return n ? { node: n, pos } : null; }
+    return C.nearestNode(view.state, ['inset', 'command', 'graphics', 'leaf', 'table']);
+  };
+
+  const renderDialog = () => {
+    if (!dialog || !view || !docId) return null;
+    const close = () => { setDialog(null); view.focus(); };
+    switch (dialog.name) {
+      case 'graphics': return <GraphicsDialog meta={meta} project={docId.split('/')[0]} onClose={close} onInsert={o => run(C.insertGraphics(o.filename, o))} />;
+      case 'table': return <TableDialog onClose={close} onInsert={(r, c) => run(C.insertTable(r, c))} />;
+      case 'label': return <LabelDialog initial={suggestLabel(view)} onClose={close} onInsert={n => run(C.insertLabel(n))} />;
+      case 'ref': return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} onClose={close} onInsert={(n, k) => run(C.insertRef(n, k))} />;
+      case 'cite': return <CiteDialog meta={meta} onClose={close} onInsert={(keys, cmd, b, a) => run(C.insertCite(keys, cmd, b, a))} />;
+      case 'href': return <HrefDialog onClose={close} onInsert={(t, n) => run(C.insertHref(t, n))} />;
+      case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; refreshMacros(view, m.macros); })} />;
+      case 'help': return <HelpDialog onClose={close} />;
+      case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
+      case 'tex': return <TexDialog tex={String(dialog.arg ?? '')} onClose={close} />;
+      case 'layout': return <LayoutPicker layouts={layouts} onClose={close} onPick={n => run(C.setLayout(n))} />;
+      case 'argument': { run(C.insertArgument(String(dialog.arg ?? '1'))); setDialog(null); return null; }
+      case 'open-include': {
+        const node = dialog.arg as any;
+        const fn = unquote(commandParams(node).get('filename'));
+        const base = docId.split('/'); base.pop();
+        const parts = [...base, ...fn.split('/')];
+        const norm: string[] = [];
+        for (const p of parts) { if (p === '..') norm.pop(); else if (p !== '.') norm.push(p); }
+        setDialog(null);
+        location.hash = '#/' + norm.join('/');
+        return null;
+      }
+      case 'inset': {
+        const target = insetDialogNode();
+        if (!target) { setDialog(null); notify('No inset at the cursor'); return null; }
+        if (target.node.type.name === 'graphics') {
+          const p = commandParams(target.node);
+          return <GraphicsDialog meta={meta} project={docId.split('/')[0]} initial={{ filename: p.get('filename') ?? '', width: p.get('width'), scale: p.get('scale'), lyxscale: p.get('lyxscale') }} onClose={close}
+            onInsert={o => { const params = [`\tfilename ${o.filename}`]; if (o.lyxscale) params.push(`\tlyxscale ${o.lyxscale}`); if (o.scale) params.push(`\tscale ${o.scale}`); if (o.width) params.push(`\twidth ${o.width}`); params.push(''); view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
+        }
+        if (target.node.type.name === 'command' && target.node.attrs.cmd === 'href') {
+          const p = commandParams(target.node);
+          return <HrefDialog initial={{ target: unquote(p.get('target')), name: unquote(p.get('name')) }} onClose={close} onInsert={(t, n) => view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(['LatexCommand href', `name "${n}"`, `target "${t}"`, 'literal "false"', '']) }))} />;
+        }
+        if (target.node.type.name === 'table') { notify('Use Edit ▸ Table for table operations'); setDialog(null); return null; }
+        return <InsetDialog node={target.node} onClose={close} onApply={attrs => view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, ...attrs }))} />;
+      }
+    }
+    return null;
+  };
+
+  return (
+    <div class="app">
+      <MenuBar menus={menus} user={user} onLogout={onLogout} right={docId ? <span style="color:#666;font-size:12px;margin-right:12px">{docId}</span> : null} />
+      {docId && <Toolbar layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={toolbarGroups} />}
+      {docId && findOpen && (
+        <div class="find-bar">
+          <span>Find:</span><input autofocus value={findQ} onInput={e => { setFindQ((e.target as HTMLInputElement).value); if (view) setQuery(view, (e.target as HTMLInputElement).value, false); }} onKeyDown={e => { if (e.key === 'Enter' && view) findNext(view, e.shiftKey ? -1 : 1); if (e.key === 'Escape') { setFindOpen(false); if (view) { setQuery(view, '', false); view.focus(); } } }} />
+          <button class="small-btn" onClick={() => view && findNext(view, 1)}>Next</button>
+          <button class="small-btn" onClick={() => view && findNext(view, -1)}>Prev</button>
+          <span>Replace:</span><input value={replQ} onInput={e => setReplQ((e.target as HTMLInputElement).value)} />
+          <button class="small-btn" onClick={() => view && replaceCurrent(view, replQ)}>Replace</button>
+          <button class="small-btn" onClick={() => { if (view) notify(`Replaced ${replaceAll(view, replQ)} occurrence(s)`); }}>Replace all</button>
+          <span style="color:#666">{view ? `${findKey.getState(view.state)?.matches.length ?? 0} matches` : ''}</span>
+          <span style="flex:1" /><button class="small-btn" onClick={() => { setFindOpen(false); if (view) { setQuery(view, '', false); view.focus(); } }}>✕</button>
+        </div>
+      )}
+      <div class="main">
+        {showFiles && <div class="sidebar"><div class="panel-tabs"><button class="active">Files</button><button onClick={() => setShowFiles(false)}>✕</button></div><div class="panel-body"><FileBrowser current={docId} refreshKey={refreshKey} onOpen={id => { location.hash = '#/' + id; }} /></div></div>}
+        <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
+          {docId ? <div class="editor-page" ref={containerRef} /> : <Welcome onOpen={() => setShowFiles(true)} />}
+        </div>
+        {docId && rightTab && (
+          <div class={'sidebar right' + (rightTab === 'pdf' ? ' wide' : '')}>
+            <div class="panel-tabs">
+              <button class={rightTab === 'outline' ? 'active' : ''} onClick={() => setRightTab('outline')}>Outline</button>
+              <button class={rightTab === 'pdf' ? 'active' : ''} onClick={() => setRightTab('pdf')}>PDF</button>
+              <button class={rightTab === 'versions' ? 'active' : ''} onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }}>Versions</button>
+              <button onClick={() => setRightTab(null)}>✕</button>
+            </div>
+            {rightTab === 'outline' && <div class="panel-body"><Outline view={view} items={outline} activePos={activePos} /></div>}
+            {rightTab === 'pdf' && <PdfPanel docId={docId} state={pdf} onBuild={build} onShowTex={() => setDialog({ name: 'tex', arg: pdf.tex ?? '' })} />}
+            {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
+          </div>
+        )}
+      </div>
+      <StatusBar layout={layout} status={status} chord={chord} message={message} saved={saved} tracking={tracking} />
+      {renderDialog()}
+    </div>
+  );
+}
+
+function LayoutPicker({ layouts, onPick, onClose }: { layouts: { name: string; category?: string }[]; onPick: (n: string) => void; onClose: () => void }) {
+  const [q, setQ] = useState('');
+  const list = layouts.filter(l => l.name.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div class="dialog-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div class="dialog"><h2>Paragraph layout</h2><div class="body">
+        <input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter' && list[0]) { onPick(list[0].name); onClose(); } if (e.key === 'Escape') onClose(); }} placeholder="type to filter…" />
+        <div class="list">{list.map(l => <div key={l.name} onClick={() => { onPick(l.name); onClose(); }}>{l.name} <span class="sub">{l.category}</span></div>)}</div>
+      </div></div>
+    </div>
+  );
+}
+
+function Welcome({ onOpen }: { onOpen: () => void }) {
+  return (
+    <div style="max-width:640px;margin:60px auto;background:#fff;padding:30px 40px;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,0.2)">
+      <h2 style="margin-top:0;color:#3b6ea5">Welcome to OverLyX</h2>
+      <p>Open a <b>.lyx</b> document from the file browser on the left, or create a new one inside a project. Everything you edit is saved as a native LyX file — you can keep using LyX on the same files.</p>
+      <ul>
+        <li>Formulas are edited in place (Ctrl+M / Ctrl+Shift+M) and rendered while you type; document macros are honoured.</li>
+        <li>Several people can edit the same document simultaneously; changes merge automatically.</li>
+        <li>Use <b>View ▸ Notes &amp; comments in the margin</b> to show LyX notes and comment threads next to the text.</li>
+        <li>Press <b>Ctrl+R</b> to compile the PDF with LaTeX.</li>
+      </ul>
+      <button class="btn primary" onClick={onOpen}>Open the file browser</button>
+    </div>
+  );
+}
+
+function suggestLabel(view: EditorView): string {
+  const p = C.currentParagraph(view.state);
+  if (!p) return '';
+  const layout = p.node.attrs.layout as string;
+  const text = p.node.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
+  const prefix = /^Section/.test(layout) ? 'sec:' : /^Subsection/.test(layout) ? 'subsec:' : /^Chapter/.test(layout) ? 'chap:' : 'sec:';
+  const $from = view.state.selection.$from;
+  for (let d = $from.depth; d > 0; d--) {
+    const n = $from.node(d);
+    if (n.type.name === 'inset' && n.attrs.name === 'Caption') {
+      let ft = 'fig';
+      for (let dd = d - 1; dd > 0; dd--) { const f = $from.node(dd); if (f.type.name === 'inset' && f.attrs.name === 'Float') { ft = f.attrs.arg === 'table' ? 'tab' : f.attrs.arg === 'algorithm' ? 'alg' : 'fig'; break; } }
+      return `${ft}:${text || 'label'}`;
+    }
+  }
+  return prefix + (text || 'label');
+}
+
+function gotoLabel(view: EditorView, name: string): void {
+  let found = -1;
+  view.state.doc.descendants((node, pos) => {
+    if (found >= 0) return false;
+    if (node.type.name === 'command' && node.attrs.cmd === 'label' && unquote(commandParams(node).get('name')) === name) found = pos;
+    if (node.type.name === 'math_display' && String(node.attrs.latex).includes(`\\label{${name}}`)) found = pos;
+    return true;
+  });
+  if (found >= 0) { view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, found)).scrollIntoView()); view.focus(); }
+}
+
+function hashAuthor(name: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) { h ^= name.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h | 0;
+}
+
+function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T {
+  let t: ReturnType<typeof setTimeout> | null = null;
+  return ((...a: any[]) => { if (t) clearTimeout(t); t = setTimeout(() => fn(...a), ms); }) as T;
+}
+
+export { schema };

@@ -1,0 +1,23 @@
+import { readFileSync } from 'node:fs';
+import * as Y from 'yjs';
+import { prosemirrorJSONToYDoc, yDocToProsemirrorJSON } from 'y-prosemirror';
+import { parseLyx, writeLyx, lyxToPm, pmToLyxBody, schema } from '/root/lyx/overlyx/packages/core/src/index.ts';
+const f = process.argv[2];
+const src = readFileSync(f, 'utf8');
+const doc = parseLyx(src);
+const ydoc = prosemirrorJSONToYDoc(schema, lyxToPm(doc), 'prosemirror');
+const json = yDocToProsemirrorJSON(ydoc, 'prosemirror');
+const out = writeLyx({ ...doc, body: pmToLyxBody(json) });
+const a = src.split('\n'), b = out.split('\n');
+let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++;
+console.log('identical', out === src, 'first diff line', i + 1);
+console.log('SRC', JSON.stringify(a.slice(i - 2, i + 3)));
+console.log('OUT', JSON.stringify(b.slice(i - 2, i + 3)));
+// inspect the pm json around: find first inline node with marks
+const pm = lyxToPm(doc);
+let found = 0;
+const walk = (n: any) => { if (found > 2) return; if (n.type !== 'text' && n.marks) { console.log('node with marks:', n.type, JSON.stringify(n.marks)); found++; } (n.content ?? []).forEach(walk); };
+walk(pm);
+found = 0;
+const walk2 = (n: any) => { if (found > 2) return; if (n.type !== 'text' && n.marks) { console.log('after Y:', n.type, JSON.stringify(n.marks)); found++; } (n.content ?? []).forEach(walk2); };
+walk2(json);

@@ -1,0 +1,34 @@
+import { readFileSync } from 'node:fs';
+import type { Page, BrowserContext } from '@playwright/test';
+
+export function adminCredentials(): { username: string; password: string } {
+  const lines = readFileSync('/root/lyx/overlyx/data/credentials.txt', 'utf8').split('\n').filter(l => l.startsWith('admin\t'));
+  const [username, password] = lines[lines.length - 1].split('\t');
+  return { username, password };
+}
+
+export async function login(page: Page, creds = adminCredentials()): Promise<void> {
+  await page.goto('/');
+  await page.getByPlaceholder('Username').fill(creds.username);
+  await page.getByPlaceholder('Password').fill(creds.password);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.waitForSelector('.menubar', { timeout: 20000 });
+}
+
+export async function openDoc(page: Page, id: string): Promise<void> {
+  await page.goto('/#/' + id);
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+}
+
+export function collectErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  return errors;
+}
+
+export async function apiLogin(ctx: BrowserContext, creds = adminCredentials()): Promise<void> {
+  const res = await ctx.request.post('http://localhost:5173/api/auth/login', { data: creds });
+  if (!res.ok()) throw new Error('api login failed');
+}
