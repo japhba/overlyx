@@ -70,6 +70,7 @@ export async function exportTex(docId: string): Promise<{ dir: string; main: str
     } catch { return undefined; }
   };
   const res = exporter.exportLatex(lyx, { resolveInclude, basename: base, layoutDir: config.layoutDir, docDir });
+  linkDocumentAssets(docDir, dir);
   const main = path.join(dir, base + '.tex');
   fs.writeFileSync(main, res.tex, 'utf8');
   for (const [name, content] of Object.entries(res.files)) {
@@ -88,6 +89,35 @@ export async function exportTex(docId: string): Promise<{ dir: string; main: str
     }
   }
   return { dir, main, warnings: res.warnings, tex: res.tex };
+}
+
+/**
+ * Make the document's graphics and asset directories visible in the build directory (symlinks),
+ * like LyX's temp-dir export. Packages such as `svg` need the files in the working directory to
+ * find/keep their conversion cache (svg-inkscape/) and to compare timestamps.
+ */
+export function linkDocumentAssets(docDir: string, buildDirPath: string): void {
+  const LINK_EXT = new Set(['.svg', '.svgz', '.png', '.jpg', '.jpeg', '.eps', '.ps', '.tif', '.tiff', '.gif', '.bmp', '.webp', '.pdf_tex']);
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(docDir, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+    const src = path.join(docDir, e.name);
+    const dest = path.join(buildDirPath, e.name);
+    const wanted = e.isDirectory() || LINK_EXT.has(path.extname(e.name).toLowerCase());
+    if (!wanted) continue;
+    try {
+      const st = fs.lstatSync(dest);
+      if (st.isSymbolicLink()) { if (fs.readlinkSync(dest) === src) continue; fs.unlinkSync(dest); }
+      else continue; // a real file/dir produced by the build: leave it alone
+    } catch { /* does not exist */ }
+    try { fs.symlinkSync(src, dest); } catch { /* ignore */ }
+  }
+  // the svg package writes its cache next to the document when compiling locally; share it
+  const cache = path.join(docDir, 'svg-inkscape');
+  if (!fs.existsSync(cache)) { try { fs.mkdirSync(cache); } catch { /* ignore */ } }
+  const cacheLink = path.join(buildDirPath, 'svg-inkscape');
+  try { if (!fs.existsSync(cacheLink)) fs.symlinkSync(cache, cacheLink); } catch { /* ignore */ }
 }
 
 export function texInputs(docDir: string, buildDirPath: string): NodeJS.ProcessEnv {

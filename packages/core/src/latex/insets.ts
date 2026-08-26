@@ -133,11 +133,29 @@ export function latexInset(ctx: ExportContext, os: TexStream, rp: RunParams, ins
 
 /* ------------------------------------------------------------------- math */
 
+/** Replace non-ASCII characters inside math by their unicodesymbols math commands (InsetMathChar / Encodings::latexMathChar). */
+function mathUnicode(ctx: ExportContext, latex: string): string {
+  let out = '';
+  for (const ch of latex) {
+    const cp = ch.codePointAt(0)!;
+    if (cp < 0x80) { out += ch; continue; }
+    const sym = ctx.unicode.get(cp);
+    if (sym && sym.mathCommand) {
+      if (sym.mathPreamble) ctx.features.require(sym.mathPreamble);
+      out += sym.mathCommand;
+    } else if (sym && sym.textCommand && !sym.mathalpha) {
+      if (sym.textPreamble) ctx.features.require(sym.textPreamble);
+      out += `\\text{${sym.textCommand}}`;
+    } else out += ch;
+  }
+  return out;
+}
+
 function latexFormula(ctx: ExportContext, os: TexStream, rp: RunParams, f: FormulaInset, pos: InsetPosition): void {
   for (const r of mathRequirements(f.latex, ctx.symbols)) ctx.features.require(r);
   if (/\\(iint|iiint|iiiint|idotsint|oiint|oiiint|ointctrclockwise|ointclockwise|sqint|varointclockwise|varointctrclockwise|landupint|landdownint)\b/.test(f.latex)) ctx.features.require('esint|amsmath');
   if (f.inline) {
-    let latex = normalizeMath(f.latex.replace(/\n/g, ' '), ctx.symbols, ctx.macroNames);
+    let latex = mathUnicode(ctx, normalizeMath(f.latex.replace(/\n/g, ' '), ctx.symbols, ctx.macroNames));
     if (rp.movingArg && ctx.macroNames.size) {
       // user macros are fragile: LyX protects them in moving arguments
       latex = latex.replace(/\\([A-Za-z]+)/g, (m0, name: string) => (ctx.macroNames.has(name) ? '\\protect' + m0 : m0));
@@ -151,7 +169,7 @@ function latexFormula(ctx: ExportContext, os: TexStream, rp: RunParams, f: Formu
     else os.write('\\\\\n');
   }
   os.breakln();
-  os.write(normalizeMath(f.latex.replace(/\n$/, ''), ctx.symbols, ctx.macroNames));
+  os.write(mathUnicode(ctx, normalizeMath(f.latex.replace(/\n$/, ''), ctx.symbols, ctx.macroNames)));
   os.write('\n');
   void pos;
 }
@@ -175,7 +193,7 @@ function latexMacro(ctx: ExportContext, os: TexStream, m: FormulaMacroInset): vo
     os.write(`\\global\\long\\def\\${parsed.name}`);
     for (let i = 1; i <= parsed.nargs; i++) os.write('#' + i);
   }
-  os.write(`{${normalizeMath(parsed.body, ctx.symbols, ctx.macroNames)}}%\n`);
+  os.write(`{${mathUnicode(ctx, normalizeMath(parsed.body, ctx.symbols, ctx.macroNames))}}%\n`);
 }
 
 export interface MacroDefinition { name: string; nargs: number; optionals: string[]; body: string; redefinition: boolean }
@@ -1034,6 +1052,19 @@ function escapeLabel(s: string): string {
 }
 
 function latexRef(ctx: ExportContext, os: TexStream, rp: RunParams, cmd: string, g: (k: string) => string): void {
+  const refs = g('reference').split(',').map(r => r.trim()).filter(Boolean);
+  if (refs.length > 1) {
+    const range = g('tuple') === 'range';
+    refs.forEach((r, i) => {
+      if (i > 0) os.write(range ? '--' : i === refs.length - 1 ? ' and ' : ', ');
+      latexRefOne(ctx, os, rp, i === 0 ? cmd : (cmd === 'formatted' || cmd === 'labelonly' ? 'ref' : cmd), (k) => (k === 'reference' ? r : g(k)));
+    });
+    return;
+  }
+  latexRefOne(ctx, os, rp, cmd, g);
+}
+
+function latexRefOne(ctx: ExportContext, os: TexStream, rp: RunParams, cmd: string, g: (k: string) => string): void {
   const ref = g('reference');
   const hyper = ctx.bp.pdf.useHyperref;
   const nolink = hyper && g('nolink') === 'true';
