@@ -649,7 +649,10 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         if (!ctx) { setDialog(null); notify('The cursor is not in a table'); return null; }
         const m = (json: string) => new Map<string, string>((() => { try { return JSON.parse(json || '[]'); } catch { return []; } })());
         const columns: [string, string][][] = (() => { try { return JSON.parse(ctx.table.attrs.columns || '[]'); } catch { return []; } })();
-        return <TableSettingsDialog initial={{ cell: m(ctx.cell.attrs.attrs), column: new Map(columns[ctx.colIndex] ?? []), row: m(ctx.row.attrs.attrs), table: m(ctx.table.attrs.features), rowIndex: ctx.rowIndex, colIndex: ctx.colIndex, nrows: ctx.nrows, ncols: ctx.ncols }} onClose={close} onApply={ch => run(C.setTableAttrs(ch))} />;
+        // LyX keeps lines on cells: the row tab shows a line as set when every cell of the row has it
+        const rowAttrs = m(ctx.row.attrs.attrs);
+        for (const k of ['topline', 'bottomline']) { let all = true; ctx.row.forEach(c => { if (m(c.attrs.attrs).get(k) !== 'true') all = false; }); rowAttrs.set(k, all ? 'true' : ''); }
+        return <TableSettingsDialog initial={{ cell: m(ctx.cell.attrs.attrs), column: new Map(columns[ctx.colIndex] ?? []), row: rowAttrs, table: m(ctx.table.attrs.features), rowIndex: ctx.rowIndex, colIndex: ctx.colIndex, nrows: ctx.nrows, ncols: ctx.ncols }} onClose={close} onApply={ch => run(C.setTableAttrs(ch))} />;
       }
       case 'delimiters': return <DelimiterDialog onClose={close} onInsert={latex => insertInMath(latex)} />;
       case 'matrix': return <MatrixDialog onClose={close} onInsert={latex => insertInMath(latex)} />;
