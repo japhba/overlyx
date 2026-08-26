@@ -131,7 +131,7 @@ test('fonts, footnote, label/ref and citation insets', async ({ page }) => {
   await page.locator('.dialog input[type=text]').fill('sec:e2e');
   await page.locator('.dialog .btn.primary').click();
   await page.keyboard.press('Control+Shift+i');
-  await page.locator('.dialog .list div', { hasText: 'sec:e2e' }).click();
+  await page.locator('.dialog .list b', { hasText: 'sec:e2e' }).click();
   await page.locator('.dialog .btn.primary').click();
   await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\emph on\nemphasized\n\\emph default\n \n\\series bold\nbold\n\\series default\n\n\\begin_inset Foot\nstatus open\n\n\\begin_layout Plain Layout\na footnote\n\\end_layout\n\n\\end_inset\n\n\n\\begin_inset CommandInset label\nLatexCommand label\nname "sec:e2e"\n\n\\end_inset\n\n\n\\begin_inset CommandInset ref\nLatexCommand ref\nreference "sec:e2e"/);
 });

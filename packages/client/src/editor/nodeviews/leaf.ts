@@ -162,7 +162,15 @@ export class CommandView implements NodeView {
         text = cmd;
         this.dom.classList.add('lyx-button');
     }
-    this.dom.textContent = text;
+    if (cmd === 'include' && editorContext.project) {
+      const fn = unquote(p.get('filename'));
+      const a = document.createElement('a');
+      a.href = '#/' + editorContext.project + '/' + resolveDocPath(fn);
+      a.textContent = text;
+      a.className = 'lyx-include-link';
+      a.addEventListener('click', (ev) => { if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) ev.preventDefault(); });
+      this.dom.replaceChildren(a);
+    } else this.dom.textContent = text;
     this.dom.title = title || cmd;
   }
   update(node: PMNode): boolean {

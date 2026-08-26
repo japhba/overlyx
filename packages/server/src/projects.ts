@@ -73,3 +73,42 @@ export function newDocumentText(opts: { textclass?: string; title?: string; auth
   body.push('\n\\begin_layout Standard\n\n\\end_layout\n');
   return tpl.replace('%%BODY%%', body.join(''));
 }
+
+/** LyX backup / temp files that should never be treated as documents. */
+export function isBackupFile(name: string): boolean {
+  return name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency') || name.endsWith('.overlyx-tmp');
+}
+
+/**
+ * Find the master document of a child (LyX children have no back-link unless \master is set):
+ * scan the project's .lyx files for an include inset referencing the child. Returns a
+ * project-relative path or null.
+ */
+export function findMaster(project: string, relPath: string): string | null {
+  const root = projectDir(project);
+  const files = collect(root, root, [], 0).filter(f => f.kind === 'lyx' && !isBackupFile(f.name) && f.path !== relPath);
+  const candidates: string[] = [];
+  for (const f of files) {
+    let text: string;
+    try { text = fs.readFileSync(path.join(root, f.path), 'utf8'); } catch { continue; }
+    const m = /^\\master (.+)$/m.exec(text);
+    void m;
+    const dir = path.dirname(f.path);
+    for (const im of text.matchAll(/^filename "([^"]+)"$/gm)) {
+      const target = path.normalize(path.join(dir === '.' ? '' : dir, im[1]));
+      if (target === relPath) { candidates.push(f.path); break; }
+    }
+  }
+  if (!candidates.length) {
+    // explicit \master in the child itself
+    try {
+      const text = fs.readFileSync(path.join(root, relPath), 'utf8');
+      const m = /^\\master (.+)$/m.exec(text);
+      if (m) return path.normalize(path.join(path.dirname(relPath), m[1].trim()));
+    } catch { /* ignore */ }
+    return null;
+  }
+  // prefer main.lyx-like names, then the shortest path
+  candidates.sort((a, b) => Number(!/(^|\/)main\.lyx$/.test(a)) - Number(!/(^|\/)main\.lyx$/.test(b)) || a.length - b.length || a.localeCompare(b));
+  return candidates[0];
+}

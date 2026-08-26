@@ -57,9 +57,8 @@ export function layout(view: EditorView): void {
     for (const c of cards) { c.classList.remove('in-margin'); const b = c.querySelector<HTMLElement>(':scope > .inset-box'); if (b) { b.style.top = ''; b.style.left = ''; } }
     return;
   }
-  const rootRect = root.getBoundingClientRect();
   const cardWidth = 320;
-  const columnLeft = rootRect.right - cardWidth - 30; // inside the page's right padding
+  const columnLeft = view.dom.getBoundingClientRect().right + 28; // just right of the text column
   const items = top.map(c => {
     const anchor = c.querySelector<HTMLElement>(':scope > .inset-anchor') ?? c;
     return { el: c, anchorTop: anchor.getBoundingClientRect().top };

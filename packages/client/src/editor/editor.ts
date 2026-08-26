@@ -20,7 +20,7 @@ import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
 import { editorContext } from './context';
-import { setDocumentMacros, configureMathlive } from './math';
+import { setDocumentMacros, setInlineMacroDefs, configureMathlive } from './math';
 import type { User } from '../api';
 
 export interface EditorHandle {
@@ -98,9 +98,13 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       leaf: (node, view, getPos) => new LeafView(node, view, getPos as () => number | undefined),
     },
     attributes: { class: 'lyx-editor', spellcheck: 'true' },
-    handleDoubleClickOn(view, pos, node) {
+    handleDoubleClickOn(view, pos, node, nodePos) {
       if (node.type.name === 'command' && node.attrs.cmd === 'include') {
         editorContext.openDialog?.('open-include', node);
+        return true;
+      }
+      if (node.type.name === 'command' && (node.attrs.cmd === 'ref' || node.attrs.cmd === 'citation')) {
+        editorContext.openDialog?.(node.attrs.cmd === 'ref' ? 'ref' : 'cite', { pos: nodePos, node });
         return true;
       }
       return false;
@@ -127,6 +131,18 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       }
       return false;
     },
+  });
+
+  // tooltip with author and date for change-tracked text
+  view.dom.addEventListener('mouseover', (ev) => {
+    const el = (ev.target as HTMLElement).closest?.('.lyx-change, .lyx-inset[data-change]') as HTMLElement | null;
+    if (!el || el.title) return;
+    const type = el.dataset.change;
+    const authorId = Number(el.dataset.author);
+    const time = Number(el.dataset.time);
+    const author = editorContext.meta?.authors.find(a => a.id === authorId)?.name ?? `author ${authorId}`;
+    const when = time ? new Date(time * 1000).toLocaleString() : '';
+    el.title = `${type === 'deleted' ? 'Deleted' : 'Inserted'} by ${author}${when ? ' on ' + when : ''}`;
   });
 
   const status = { connected: false, synced: false, users: [] as { name: string; color: string }[] };
@@ -159,24 +175,32 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   };
 }
 
-/** Scan the document for FormulaMacro insets and merge with server-provided macros. */
+/**
+ * Macros: server-provided ones (preamble, \input files, child documents) apply everywhere;
+ * FormulaMacro insets of this document apply from their position onwards (LyX semantics).
+ */
 export function refreshMacros(view: EditorView, serverMacros: Record<string, { def: string; args: number; expand: boolean }>): void {
-  const macros = { ...serverMacros };
-  view.state.doc.descendants((node) => {
+  const defs: { pos: number; name: string; def: string; args: number }[] = [];
+  view.state.doc.descendants((node, pos) => {
     if (node.type.name === 'macro') {
       try {
         const lines: string[] = JSON.parse(node.attrs.lines);
-        const m = /^\\(?:re)?newcommand\{\\([A-Za-z]+)\}(?:\[(\d+)\])?\{([\s\S]*)\}$/.exec(lines[0]);
+        const m = /^\\(?:re)?newcommand\*?\{\\([A-Za-z]+)\}(?:\[(\d+)\])?\{([\s\S]*)\}$/.exec(lines[0]);
         if (m) {
           let display: string | undefined;
           if (lines[1]?.startsWith('{')) display = lines[1].slice(1, -1);
-          macros[m[1]] = { def: display || m[3], args: Number(m[2] ?? 0), expand: false };
+          defs.push({ pos, name: m[1], def: display || m[3], args: Number(m[2] ?? 0) });
         }
       } catch { /* ignore */ }
     }
     return true;
   });
-  setDocumentMacros(macros);
+  // server macros minus the ones this document defines itself (positional defs take over)
+  const own = new Set(defs.map(d => d.name));
+  const base: Record<string, { def: string; args: number; expand: boolean }> = {};
+  for (const [k, v] of Object.entries(serverMacros)) if (!own.has(k)) base[k] = v;
+  setDocumentMacros(base);
+  setInlineMacroDefs(defs);
 }
 
 export { editorContext };

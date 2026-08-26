@@ -83,30 +83,41 @@ export function LabelDialog({ initial, onInsert, onClose }: { initial: string; o
 }
 
 /* ------------------------------------------------------------------ ref */
-export function RefDialog({ labels, useRefstyle, onInsert, onClose }: { labels: { name: string; context: string }[]; useRefstyle: boolean; onInsert: (name: string, kind: string) => void; onClose: () => void }) {
+export function RefDialog({ labels, useRefstyle, initial, onInsert, onClose }: { labels: { name: string; context: string; file?: string }[]; useRefstyle: boolean; initial?: { name: string; kind: string }; onInsert: (name: string, kind: string) => void; onClose: () => void }) {
   const [q, setQ] = useState('');
-  const [sel, setSel] = useState(labels[0]?.name ?? '');
-  const [kind, setKind] = useState('ref');
-  const list = labels.filter(l => l.name.toLowerCase().includes(q.toLowerCase()) || l.context.toLowerCase().includes(q.toLowerCase()));
+  const [sel, setSel] = useState(initial?.name ?? labels[0]?.name ?? '');
+  const [kind, setKind] = useState(initial?.kind ?? 'ref');
+  const [group, setGroup] = useState(true);
+  const filtered = labels.filter(l => l.name.toLowerCase().includes(q.toLowerCase()) || l.context.toLowerCase().includes(q.toLowerCase()));
+  // LyX-like: group by prefix (sec:, fig:, eq: ...) and sort alphabetically
+  const list = group ? [...filtered].sort((a, b) => a.name.localeCompare(b.name)) : filtered;
+  const prefixOf = (n: string) => (n.includes(':') ? n.slice(0, n.indexOf(':') + 1) : '(no prefix)');
+  let lastPrefix = '';
   const kinds = [['ref', '<reference>'], ['eqref', '(<reference>)'], ['pageref', '<page>'], ['vref', 'on page <page>'], ['vpageref', '<reference> on page <page>'], ['formatted', useRefstyle ? 'Formatted reference (refstyle)' : 'Formatted reference (prettyref)'], ['nameref', 'Textual reference'], ['labelonly', 'Label only']];
   return (
-    <Dialog title="Cross-reference" onClose={onClose} buttons={<button class="btn primary" disabled={!sel} onClick={() => { onInsert(sel, kind); onClose(); }}>Insert</button>}>
-      <Row label="Filter"><input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} /></Row>
-      <div class="list">
-        {list.map(l => <div key={l.name} class={l.name === sel ? 'sel' : ''} onClick={() => setSel(l.name)} onDblClick={() => { onInsert(l.name, kind); onClose(); }}>{l.name} <span class="sub">{l.context}</span></div>)}
+    <Dialog title="Cross-reference" onClose={onClose} wide buttons={<button class="btn primary" disabled={!sel} onClick={() => { onInsert(sel, kind); onClose(); }}>{initial ? 'Apply' : 'Insert'}</button>}>
+      <Row label="Filter"><input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} placeholder="label or heading text" /><label style="min-width:0"><input type="checkbox" checked={group} onChange={e => setGroup((e.target as HTMLInputElement).checked)} /> group by prefix</label></Row>
+      <div class="list" style="max-height:360px">
+        {list.map(l => {
+          const pre = prefixOf(l.name);
+          const header = group && pre !== lastPrefix ? <div class="group-header">{pre}</div> : null;
+          lastPrefix = pre;
+          return <div key={l.name + (l.file ?? '')} style="display:contents">{header}<div class={l.name === sel ? 'sel' : ''} onClick={() => setSel(l.name)} onDblClick={() => { onInsert(l.name, kind); onClose(); }}><b>{l.name}</b> <span class="sub">{l.context}</span>{l.file && <span class="sub"> — {l.file}</span>}</div></div>;
+        })}
         {!list.length && <div class="sub">No labels found.</div>}
       </div>
+      <Row label="Selected"><input type="text" value={sel} onInput={e => setSel((e.target as HTMLInputElement).value)} /></Row>
       <Row label="Format"><select value={kind} onChange={e => setKind((e.target as HTMLSelectElement).value)}>{kinds.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Row>
     </Dialog>
   );
 }
 
 /* ----------------------------------------------------------------- cite */
-export function CiteDialog({ meta, onInsert, onClose }: { meta: DocMeta | null; onInsert: (keys: string[], cmd: string, before: string, after: string) => void; onClose: () => void }) {
+export function CiteDialog({ meta, initial, onInsert, onClose }: { meta: DocMeta | null; initial?: { keys: string[]; cmd: string; before: string; after: string }; onInsert: (keys: string[], cmd: string, before: string, after: string) => void; onClose: () => void }) {
   const [q, setQ] = useState('');
-  const [keys, setKeys] = useState<string[]>([]);
-  const [cmd, setCmd] = useState(meta?.citeEngine === 'natbib' || meta?.citeEngine === 'biblatex' ? 'citep' : 'cite');
-  const [before, setBefore] = useState(''), [after, setAfter] = useState('');
+  const [keys, setKeys] = useState<string[]>(initial?.keys ?? []);
+  const [cmd, setCmd] = useState(initial?.cmd ?? (meta?.citeEngine === 'natbib' || meta?.citeEngine === 'biblatex' ? 'citep' : 'cite'));
+  const [before, setBefore] = useState(initial?.before ?? ''), [after, setAfter] = useState(initial?.after ?? '');
   const bib = meta?.bib ?? [];
   const list = useMemo(() => {
     const ql = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -116,9 +127,10 @@ export function CiteDialog({ meta, onInsert, onClose }: { meta: DocMeta | null; 
   const toggle = (k: string) => setKeys(keys.includes(k) ? keys.filter(x => x !== k) : [...keys, k]);
   const cmds = meta?.citeEngine === 'natbib' ? ['citep', 'citet', 'citealp', 'citealt', 'citeauthor', 'citeyear', 'citeyearpar', 'nocite'] : meta?.citeEngine === 'biblatex' ? ['cite', 'parencite', 'textcite', 'autocite', 'citeauthor', 'citeyear', 'nocite'] : ['cite', 'nocite'];
   return (
-    <Dialog title="Citation" onClose={onClose} wide buttons={<button class="btn primary" disabled={!keys.length} onClick={() => { onInsert(keys, cmd, before, after); onClose(); }}>Insert</button>}>
+    <Dialog title="Citation" onClose={onClose} wide buttons={<button class="btn primary" disabled={!keys.length} onClick={() => { onInsert(keys, cmd, before, after); onClose(); }}>{initial ? 'Apply' : 'Insert'}</button>}>
       <Row label="Search"><input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} placeholder="author, year, title, key" /></Row>
       <div class="list" style="max-height:320px">
+        {keys.filter(k => !list.some(e => e.key === k)).map(k => <div key={'sel-' + k} class="sel" onClick={() => toggle(k)}><b>{bib.find(e => e.key === k)?.author || k}</b> <span class="sub">[{k}] (selected)</span></div>)}
         {list.map(e => <div key={e.key} class={keys.includes(e.key) ? 'sel' : ''} onClick={() => toggle(e.key)}><b>{e.author || e.key}</b> {e.year} <span class="sub">— {e.title}</span> <span class="sub">[{e.key}]</span></div>)}
         {!bib.length && <div class="sub">No bibliography entries found (add a BibTeX inset or .bib files to the project).</div>}
       </div>

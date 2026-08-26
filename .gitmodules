@@ -1,0 +1,3 @@
+[submodule "lyx"]
+	path = lyx
+	url = https://github.com/cburschka/lyx

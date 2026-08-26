@@ -10,8 +10,8 @@ import { spawn } from 'node:child_process';
 import { parseLyx, writeLyx, type LyxDocument } from '@overlyx/core';
 import { config } from './config.ts';
 import { db } from './db.ts';
-import { manager } from './docs.ts';
-import { projectDir, resolveProjectPath } from './projects.ts';
+import { manager, DocManager } from './docs.ts';
+import { projectDir, resolveProjectPath, findMaster } from './projects.ts';
 import { toPdf } from './graphics.ts';
 
 export interface BuildResult { ok: boolean; log: string; pdfPath?: string; texPath?: string; warnings: string[]; tex?: string }
@@ -103,7 +103,12 @@ export async function buildPdf(docId: string, opts: { engine?: 'overlyx' | 'lyx'
   return p;
 }
 
-async function buildViaOverlyx(docId: string): Promise<BuildResult> {
+async function buildViaOverlyx(requestedId: string): Promise<BuildResult> {
+  // a child document is built through its master (LyX: master-buffer-view); the child's live
+  // content is used because open documents are resolved from the CRDT state
+  const { project, relPath } = DocManager.parseId(requestedId);
+  const masterRel = findMaster(project, relPath);
+  const docId = masterRel ? `${project}/${masterRel}` : requestedId;
   const doc = await manager.open(docId);
   const docDir = path.dirname(doc.absPath);
   let exp: Awaited<ReturnType<typeof exportTex>>;
@@ -111,20 +116,29 @@ async function buildViaOverlyx(docId: string): Promise<BuildResult> {
     exp = await exportTex(docId);
   } catch (e) {
     const r: BuildResult = { ok: false, log: 'export failed: ' + String(e), warnings: [] };
-    record(docId, r);
+    record(requestedId, r);
     return r;
   }
   const base = path.basename(exp.main, '.tex');
-  const r = await run('latexmk', ['-pdf', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex'], {
-    cwd: exp.dir, env: texInputs(docDir, exp.dir), timeoutMs: 300000,
+  const args = ['-pdf', '-g', '-interaction=nonstopmode', '-file-line-error', '-synctex=1'];
+  // honour a latexmkrc in the document directory (e.g. for -shell-escape needed by the svg package)
+  for (const rc of ['latexmkrc', '.latexmkrc']) {
+    const f = path.join(docDir, rc);
+    if (fs.existsSync(f)) { args.push('-r', f); break; }
+  }
+  args.push(base + '.tex');
+  const r = await run('latexmk', args, {
+    cwd: exp.dir, env: texInputs(docDir, exp.dir), timeoutMs: 420000,
   });
   const pdf = path.join(exp.dir, base + '.pdf');
   const logFile = path.join(exp.dir, base + '.log');
   let log = r.out;
   if (fs.existsSync(logFile)) log = extractErrors(fs.readFileSync(logFile, 'utf8')) + '\n\n---- latexmk output ----\n' + r.out.slice(-20000);
   const ok = r.code === 0 && fs.existsSync(pdf);
+  if (masterRel) log = `(built master document ${masterRel})\n` + log;
   const res: BuildResult = { ok, log, pdfPath: fs.existsSync(pdf) ? pdf : undefined, texPath: exp.main, warnings: exp.warnings, tex: exp.tex };
-  record(docId, res);
+  record(requestedId, res);
+  if (docId !== requestedId) record(docId, res);
   return res;
 }
 

@@ -6,11 +6,11 @@ import { config } from './config.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, generatePassword } from './auth.ts';
 import { attachWebSocket } from './ws.ts';
 import { manager } from './docs.ts';
-import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind } from './projects.ts';
+import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile } from './projects.ts';
 import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, lastBuild } from './export.ts';
 import { db } from './db.ts';
-import { parseLyx, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets } from '@overlyx/core';
+import { parseLyx, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText } from '@overlyx/core';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -105,13 +105,54 @@ api.get('/docs/*/meta', async (req, res) => {
     const id = docId(req);
     const doc = await manager.open(id);
     const lyx = doc.toLyxDocument();
-    const docDir = path.dirname(doc.absPath);
     const proj = projectDir(doc.project);
+    // child documents inherit macros, bibliography and labels from their master
+    const masterRel = findMaster(doc.project, doc.relPath);
+    const masterId = masterRel ? `${doc.project}/${masterRel}` : null;
+    const readDoc = (rel: string) => {
+      const open = manager.docs.get(`${doc.project}/${rel}`);
+      if (open) return open.toLyxDocument();
+      return parseLyx(fs.readFileSync(path.join(proj, rel), 'utf8'));
+    };
+    const rootRel = masterRel ?? doc.relPath;
+    const rootLyx = masterRel ? readDoc(masterRel) : lyx;
+    const docDir = path.dirname(path.join(proj, rootRel));
     const safe = (fn: string) => { const abs = path.resolve(docDir, fn); return abs.startsWith(proj) ? abs : null; };
-    const macros = collectMacros(lyx, {
-      include: (fn) => { const abs = safe(fn); try { return abs ? parseLyx(fs.readFileSync(abs, 'utf8')) : undefined; } catch { return undefined; } },
+    const includeDoc = (fn: string) => { const abs = safe(fn); if (!abs) return undefined; try { return readDoc(path.relative(proj, abs)); } catch { return undefined; } };
+    const macros = collectMacros(rootLyx, {
+      include: includeDoc,
       readFile: (fn) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } },
     });
+    if (masterRel) {
+      // the child's own macros come last (they override for the child's view)
+      macros.push(...collectMacros(lyx, { include: includeDoc, readFile: (fn) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } } }));
+    }
+    // labels across the master tree (for the cross-reference dialog)
+    const labels: { name: string; context: string; file: string }[] = [];
+    const seenLabelFiles = new Set<string>();
+    const collectLabels = (d: typeof lyx, rel: string, depth: number) => {
+      if (depth > 4 || seenLabelFiles.has(rel)) return;
+      seenLabelFiles.add(rel);
+      const dir = path.dirname(path.join(proj, rel));
+      for (const par of walkParagraphsAll(d.body)) {
+        for (const it of par.items) {
+          if (it.kind !== 'inset') continue;
+          const ins = it.inset;
+          if (ins.type === 'Leaf' && ins.name === 'CommandInset' && ins.arg === 'label') {
+            labels.push({ name: unquote(paramMap(ins.params).get('name')), context: plainText([par]).slice(0, 80), file: rel });
+          } else if (ins.type === 'Formula' && !ins.inline) {
+            for (const m of ins.latex.matchAll(/\\label\{([^}]*)\}/g)) labels.push({ name: m[1], context: '(equation)', file: rel });
+          } else if (ins.type === 'Leaf' && ins.name === 'CommandInset' && ins.arg === 'include') {
+            const fn = unquote(paramMap(ins.params).get('filename'));
+            if (fn.endsWith('.lyx')) {
+              const abs = path.resolve(dir, fn);
+              if (abs.startsWith(proj) && fs.existsSync(abs)) { try { collectLabels(readDoc(path.relative(proj, abs)), path.relative(proj, abs), depth + 1); } catch { /* ignore */ } }
+            }
+          }
+        }
+      }
+    };
+    collectLabels(rootLyx, rootRel, 0);
     // bibliography files referenced by bibtex insets (in this doc and children)
     const bibFiles = new Set<string>();
     const scan = (d: typeof lyx, depth: number) => {
@@ -128,7 +169,8 @@ api.get('/docs/*/meta', async (req, res) => {
         }
       }
     };
-    scan(lyx, 0);
+    scan(rootLyx, 0);
+    if (masterRel) scan(lyx, 0);
     const bib: ReturnType<typeof parseBibtex> = [];
     for (const f of bibFiles) {
       const abs = safe(f.endsWith('.bib') ? f : f + '.bib');
@@ -137,7 +179,7 @@ api.get('/docs/*/meta', async (req, res) => {
     // also offer all .bib files of the project when none is referenced
     if (!bib.length) {
       for (const f of listProjects().find(p => p.name === doc.project)?.files ?? []) {
-        if (f.kind === 'bib') { try { bib.push(...parseBibtex(fs.readFileSync(path.join(proj, f.path), 'utf8'))); } catch { /* ignore */ } }
+        if (f.kind === 'bib' && !isBackupFile(f.name)) { try { bib.push(...parseBibtex(fs.readFileSync(path.join(proj, f.path), 'utf8'))); } catch { /* ignore */ } }
       }
     }
     let layouts: unknown = null;
@@ -150,8 +192,12 @@ api.get('/docs/*/meta', async (req, res) => {
     } catch (e) {
       layouts = null;
     }
+    // de-duplicate bibliography entries by key
+    const seenKeys = new Set<string>();
+    const bibUnique = bib.filter(e => (seenKeys.has(e.key) ? false : (seenKeys.add(e.key), true)));
     res.json({
-      id, project: doc.project, path: doc.relPath,
+      id, project: doc.project, path: doc.relPath, master: masterId,
+      labels,
       textclass: getTextClass(lyx), modules: getModules(lyx),
       language: headerValue(lyx.header, 'language') ?? 'english',
       useRefstyle: headerValue(lyx.header, 'use_refstyle') === '1',
@@ -163,7 +209,7 @@ api.get('/docs/*/meta', async (req, res) => {
       authors: getAuthors(lyx.header),
       macros: toMathliveMacros(macros),
       macroList: macros.map(m => ({ name: m.name, args: m.args, def: m.def, display: m.display, source: m.source })),
-      bib: bib.slice(0, 20000).map(e => ({ key: e.key, author: e.authorShort, year: e.year, title: e.title })),
+      bib: bibUnique.slice(0, 30000).map(e => ({ key: e.key, author: e.authorShort, year: e.year, title: e.title })),
       layouts, flexInsets,
       files: listProjects().find(p => p.name === doc.project)?.files ?? [],
     });

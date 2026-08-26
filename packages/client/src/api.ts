@@ -10,6 +10,7 @@ export interface DocMeta {
   macros: Record<string, { def: string; args: number; expand: boolean }>;
   macroList: { name: string; args: number; def: string; display?: string; source: string }[];
   bib: BibItem[]; layouts: LayoutInfo[] | null; flexInsets: string[] | null; files: ProjectFile[];
+  master: string | null; labels: { name: string; context: string; file: string }[];
 }
 export interface VersionInfo { id: number; name: string; author: string; kind: string; created_at: number; size: number }
 

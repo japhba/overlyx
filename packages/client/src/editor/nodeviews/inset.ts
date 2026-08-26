@@ -84,8 +84,8 @@ export class InsetView implements NodeView {
     try {
       const marks: { type: string; attrs?: Record<string, unknown> }[] = JSON.parse(a.marks || '[]');
       const ch = marks.find(m => m.type === 'change');
-      if (ch) { this.dom.dataset.change = String(ch.attrs?.type); this.dom.dataset.author = String(ch.attrs?.author); }
-      else { delete this.dom.dataset.change; delete this.dom.dataset.author; }
+      if (ch) { this.dom.dataset.change = String(ch.attrs?.type); this.dom.dataset.author = String(ch.attrs?.author); this.dom.dataset.time = String(ch.attrs?.time ?? ''); }
+      else { delete this.dom.dataset.change; delete this.dom.dataset.author; delete this.dom.dataset.time; }
     } catch { /* ignore */ }
   }
 

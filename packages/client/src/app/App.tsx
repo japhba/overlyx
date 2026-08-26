@@ -96,12 +96,20 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         setChord(chordKey.getState(view.state) ?? null);
         rerender();
       },
-      onDocChange: (view) => { setSaved(false); scheduleOutline(view); },
+      onDocChange: (view) => { setSaved(false); scheduleOutline(view); scheduleMacros(view); },
     });
     editorRef.current = handle;
     const scheduleOutline = debounce((view: EditorView) => setOutline(buildOutline(view.state.doc, true, editorContext.meta?.secnumdepth ?? 3)), 300);
+    let macroSig = '';
+    const scheduleMacros = debounce((view: EditorView) => {
+      // only re-apply when a FormulaMacro inset changed (cheap signature)
+      let sig = '';
+      view.state.doc.descendants((n, pos) => { if (n.type.name === 'macro') sig += pos + n.attrs.lines + ';'; return true; });
+      if (sig !== macroSig) { macroSig = sig; refreshMacros(view, editorContext.meta?.macros ?? {}); }
+    }, 600);
     api.meta(docId).then(m => {
       setMeta(m); editorContext.meta = m;
+      applyAuthorColors(m.authors);
       refreshMacros(handle.view, m.macros);
       setTracking(m.trackingChanges);
       editorContext.trackChanges = m.trackingChanges;
@@ -181,8 +189,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   };
 
   const labels = useMemo(() => {
-    if (!view) return [] as { name: string; context: string }[];
-    const out: { name: string; context: string }[] = [];
+    if (!view) return [] as { name: string; context: string; file?: string }[];
+    const out: { name: string; context: string; file?: string }[] = [];
     view.state.doc.descendants((node, pos) => {
       if (node.type.name === 'command' && node.attrs.cmd === 'label') {
         const $p = view.state.doc.resolve(pos);
@@ -192,8 +200,11 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       }
       return true;
     });
+    // labels from the master document and its other children (server-side scan)
+    const own = new Set(out.map(l => l.name));
+    for (const l of meta?.labels ?? []) if (!own.has(l.name) && l.file !== meta?.path) out.push({ name: l.name, context: l.context, file: l.file });
     return out;
-  }, [dialog, view]);
+  }, [dialog, view, meta]);
 
   const layouts = meta?.layouts?.length ? meta.layouts : STANDARD_LAYOUTS;
 
@@ -468,8 +479,24 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       case 'graphics': return <GraphicsDialog meta={meta} project={docId.split('/')[0]} docDir={editorContext.docDir} onClose={close} onInsert={o => run(C.insertGraphics(o.filename, o))} />;
       case 'table': return <TableDialog onClose={close} onInsert={(r, c) => run(C.insertTable(r, c))} />;
       case 'label': return <LabelDialog initial={suggestLabel(view)} onClose={close} onInsert={n => run(C.insertLabel(n))} />;
-      case 'ref': return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} onClose={close} onInsert={(n, k) => run(C.insertRef(n, k))} />;
-      case 'cite': return <CiteDialog meta={meta} onClose={close} onInsert={(keys, cmd, b, a) => run(C.insertCite(keys, cmd, b, a))} />;
+      case 'ref': {
+        const target = dialog.arg as { pos: number; node: any } | undefined;
+        if (target?.node) {
+          const p = commandParams(target.node);
+          return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: p.get('LatexCommand') ?? 'ref' }} onClose={close}
+            onInsert={(n, k) => { const params = [`LatexCommand ${k}`, `reference "${n}"`, 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '']; view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
+        }
+        return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} onClose={close} onInsert={(n, k) => run(C.insertRef(n, k))} />;
+      }
+      case 'cite': {
+        const target = dialog.arg as { pos: number; node: any } | undefined;
+        if (target?.node) {
+          const p = commandParams(target.node);
+          return <CiteDialog meta={meta} initial={{ keys: unquote(p.get('key')).split(',').map(k => k.trim()).filter(Boolean), cmd: p.get('LatexCommand') ?? 'cite', before: unquote(p.get('before')), after: unquote(p.get('after')) }} onClose={close}
+            onInsert={(keys, cmd, b, a) => { const params = [`LatexCommand ${cmd}`]; if (a) params.push(`after "${a}"`); if (b) params.push(`before "${b}"`); params.push(`key "${keys.join(',')}"`, 'literal "false"', ''); view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
+        }
+        return <CiteDialog meta={meta} onClose={close} onInsert={(keys, cmd, b, a) => run(C.insertCite(keys, cmd, b, a))} />;
+      }
       case 'href': return <HrefDialog onClose={close} onInsert={(t, n) => run(C.insertHref(t, n))} />;
       case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; refreshMacros(view, m.macros); })} />;
       case 'help': return <HelpDialog onClose={close} />;
@@ -509,7 +536,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   return (
     <div class="app">
-      <MenuBar menus={menus} user={user} onLogout={onLogout} right={docId ? <span style="color:#666;font-size:12px;margin-right:12px">{docId}</span> : null} />
+      <MenuBar menus={menus} user={user} onLogout={onLogout} right={docId ? <span style="color:#666;font-size:12px;margin-right:12px">{docId}{meta?.master && <> · child of <a href={'#/' + meta.master} style="color:#3b6ea5">{meta.master.split('/').pop()}</a></>}</span> : null} />
       {docId && <Toolbar layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={toolbarGroups} />}
       {docId && findOpen && (
         <div class="find-bar">
@@ -604,6 +631,14 @@ function gotoLabel(view: EditorView, name: string): void {
     return true;
   });
   if (found >= 0) { view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, found)).scrollIntoView()); view.focus(); }
+}
+
+/** One colour per LyX author for change tracking (stable across sessions: by author id order). */
+function applyAuthorColors(authors: { id: number; name: string }[]): void {
+  const palette = ['#2e7d32', '#c62828', '#1565c0', '#6a1b9a', '#ef6c00', '#00838f', '#ad1457', '#4e342e', '#558b2f', '#283593'];
+  let el = document.getElementById('ol-author-colors') as HTMLStyleElement | null;
+  if (!el) { el = document.createElement('style'); el.id = 'ol-author-colors'; document.head.appendChild(el); }
+  el.textContent = authors.map((a, i) => `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: ${palette[i % palette.length]}; }`).join('\n');
 }
 
 function hashAuthor(name: string): number {

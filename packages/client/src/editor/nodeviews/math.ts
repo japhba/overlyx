@@ -6,7 +6,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import type { MathfieldElement } from 'mathlive';
-import { createMathfield, parseDisplayMath, serializeDisplayMath, MATH_ALT_M, type DisplayMath, isNumberedEnv } from '../math';
+import { createMathfield, parseDisplayMath, serializeDisplayMath, MATH_ALT_M, type DisplayMath, isNumberedEnv, applyMacros, macroVersion } from '../math';
 import { macroFromLyxLines } from '@overlyx/core';
 
 function isMac() { return /Mac/.test(navigator.platform); }
@@ -94,11 +94,16 @@ export class MathInlineView implements NodeView {
   dom: HTMLElement;
   mf: MathfieldElement;
   private updating = false;
+  private macroVersion = 0;
 
   constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-math-inline';
-    this.mf = createMathfield({ latex: node.attrs.latex, display: false });
+    this.mf = createMathfield({ latex: '', display: false });
+    (this.mf as any).__lyxPos = getPos;
+    applyMacros(this.mf, false, getPos());
+    this.macroVersion = macroVersion;
+    this.mf.value = node.attrs.latex;
     this.dom.appendChild(this.mf);
     focusWhenMounted(this.mf, getPos);
     wire(this.mf, view, getPos, {
@@ -115,6 +120,7 @@ export class MathInlineView implements NodeView {
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
+    if (this.macroVersion !== macroVersion) { this.macroVersion = macroVersion; applyMacros(this.mf, true, this.getPos()); }
     if (this.mf.value !== node.attrs.latex && document.activeElement !== this.mf) {
       this.updating = true;
       this.mf.value = node.attrs.latex;
@@ -140,12 +146,17 @@ export class MathDisplayView implements NodeView {
   labelEl: HTMLElement;
   dm: DisplayMath;
   private updating = false;
+  private macroVersion = 0;
 
   constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dm = parseDisplayMath(node.attrs.latex);
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-math-display';
-    this.mf = createMathfield({ latex: this.bodyForMathlive(), display: true });
+    this.mf = createMathfield({ latex: '', display: true });
+    (this.mf as any).__lyxPos = getPos;
+    applyMacros(this.mf, false, getPos());
+    this.macroVersion = macroVersion;
+    this.mf.value = this.bodyForMathlive();
     this.numberEl = document.createElement('span');
     this.numberEl.className = 'eq-number';
     this.numberEl.contentEditable = 'false';
@@ -246,6 +257,7 @@ export class MathDisplayView implements NodeView {
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
+    if (this.macroVersion !== macroVersion) { this.macroVersion = macroVersion; applyMacros(this.mf, true, this.getPos()); }
     if (node.attrs.latex !== serializeDisplayMath(this.dm, this.bodyFromMathlive(this.mf.value))) {
       this.dm = parseDisplayMath(node.attrs.latex);
       if (document.activeElement !== this.mf) {
