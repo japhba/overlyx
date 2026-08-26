@@ -61,6 +61,13 @@ function isDeletedPar(par: Paragraph): boolean {
 
 function hasArgsStyle(s: LayoutStyle): boolean { return s.args.size > 0; }
 
+/** Paragraph::hasSameLayout: same layout and same paragraph parameters. */
+function sameLayout(a: Paragraph, b: Paragraph): boolean {
+  const pa = a.params, pb = b.params;
+  return a.layout === b.layout && (pa.align ?? '') === (pb.align ?? '') && (pa.paragraph_spacing ?? '') === (pb.paragraph_spacing ?? '')
+    && !!pa.noindent === !!pb.noindent && (pa.labelwidthstring ?? '') === (pb.labelwidthstring ?? '') && (pa.leftindent ?? '') === (pb.leftindent ?? '');
+}
+
 /* ----------------------------------------------------- language switches */
 
 function langBegin(ctx: ExportContext, lang: string): string {
@@ -144,7 +151,7 @@ export function latexArgInsets(ctx: ExportContext, os: TexStream, rp: RunParams,
 
 /** InsetArgument::latexArgument */
 function latexArgument(ctx: ExportContext, os: TexStream, rp: RunParams, ins: TextInset, spec: ArgumentSpec, ldelim: string, rdelim: string): void {
-  const inner = new (os.constructor as new () => TexStream)();
+  const inner = new TexStream();
   const rp2: RunParams = { ...rp, passThru: spec.passThru, passThruChars: rp.passThruChars + spec.passThruChars, newlineCmd: spec.newlineCmd || rp.newlineCmd, forcePlain: true, isMainText: false, freeSpacing: spec.freeSpacing || rp.freeSpacing };
   for (const r of spec.requires) ctx.features.require(r);
   latexParagraphs(ctx, { pars: ins.paragraphs, isMainText: false }, inner, rp2);
@@ -476,7 +483,7 @@ function texOnePar(ctx: ExportContext, text: TextInfo, pit: number, os: TexStrea
     if (style.inTitle) {
       if (spacing) { if (localRp.movingArg) os.write('\\protect'); os.write(spacing.cmd); }
     } else {
-      if (spacing && (pit === 0 || !priorpar || priorpar.layout !== par.layout)) os.write(spacing.begin + '\n');
+      if (spacing && (pit === 0 || !priorpar || !sameLayout(priorpar, par))) os.write(spacing.begin + '\n');
       if (isCommand(style)) os.write('\n');
     }
   }
@@ -514,7 +521,7 @@ function texOnePar(ctx: ExportContext, text: TextInfo, pit: number, os: TexStrea
       if (nextpar && !intitleCommand) pendingNewline = !rp.parbreakIgnored && !mergedPar;
   }
 
-  if (allowCust && !style.inTitle && spacing && (isLastPar || !nextpar || nextpar.layout !== par.layout)) {
+  if (allowCust && !style.inTitle && spacing && (isLastPar || !nextpar || !sameLayout(nextpar, par))) {
     if (pendingNewline) os.write('\n');
     os.breakln();
     os.write(spacing.end);
@@ -574,7 +581,7 @@ function texOnePar(ctx: ExportContext, text: TextInfo, pit: number, os: TexStrea
     if (!isCommand(nextStyle)) {
       const curAlign = parAlign(par, style);
       const nextAlign = parAlign(nextpar, nextStyle);
-      const isDefaultLayout = nextStyle.name === ctx.dc.defaultStyle || nextStyle.name === 'Plain Layout';
+      const isDefaultLayout = nextStyle.name === ctx.dc.defaultStyle;
       if ((nextStyle === style && !style.parbreakIsNewline && !rp.parbreakIsNewline && !rp.parbreakIgnored
             && style.latexType !== 'Item_Environment' && style.latexType !== 'List_Environment'
             && style.align === curAlign && nextpar.depth === par.depth
@@ -709,7 +716,7 @@ export function paragraphLatex(ctx: ExportContext, os: TexStream, rp: RunParams,
   let running = plain();
   let openCount = 0;
   let openFontFlag = false;
-  let runningChange: Change | undefined = rp.inDeletedInset ? undefined : undefined;
+  let runningChange: Change | undefined;
   const typewriter = style.font.family === 'typewriter';
   const passThru = style.passThru || rp.passThru;
 

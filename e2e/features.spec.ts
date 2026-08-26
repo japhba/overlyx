@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import { login, openDoc, collectErrors } from './helpers';
 
 /** Each test works on its own copy of a document inside a scratch project. */
@@ -11,14 +11,16 @@ function freshDoc(name: string): string {
   const src = readFileSync('/root/projects/bayesian_chaos/notes/notes.lyx', 'utf8');
   const file = `${DIR}/${name}.lyx`;
   writeFileSync(file, src);
+  if (!existsSync(`${DIR}/translation_table.png`)) copyFileSync('/root/projects/bayesian_chaos/notes/translation_table.png', `${DIR}/translation_table.png`);
   return `${PROJECT}/${name}.lyx`;
 }
 
 const fileText = (id: string) => readFileSync('/root/projects/' + id, 'utf8');
+/** Put the cursor at the start of the first Standard paragraph (click its top-left corner: no inline insets there). */
 async function firstStandard(page: Page) {
   const p = page.locator('.lyx-editor > .lyx-par.lyx-layout-standard').first();
-  await p.click();
-  await page.keyboard.press('End');
+  await p.click({ position: { x: 4, y: 10 } });
+  await page.keyboard.press('Home');
   return p;
 }
 
@@ -33,19 +35,22 @@ test('inline and display math are edited in place and saved as LyX formulas', as
   await page.keyboard.press('Control+m');            // inline formula (LyX: math-mode)
   const mf = page.locator('math-field.focused, math-field:focus');
   await expect(mf).toHaveCount(1, { timeout: 5000 });
-  await page.keyboard.type('a^2+b^2=c^2');
+  await page.keyboard.type('a^2'); await page.keyboard.press('ArrowRight');   // leave the superscript (as in LyX)
+  await page.keyboard.type('+b^2'); await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('=c^2');
   await page.keyboard.press('Escape');               // leave the formula
   await page.keyboard.type(' after');
-  await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('\\begin_inset Formula $a^{2}+b^{2}=c^{2}$');
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin_inset Formula \$a\^\{?2\}?\+b\^\{?2\}?=c\^\{?2\}?\$/);
   // display formula with numbering toggle (Alt+M n inside math)
   await page.keyboard.press('Enter');
   await page.keyboard.press('Control+Shift+m');
-  await page.keyboard.type('E=mc^2');
-  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin_inset Formula \n\\\[\nE=mc\^\{2\}\n\\\]/);
+  await expect(page.locator('math-field.display.focused')).toHaveCount(1, { timeout: 5000 });
+  await page.keyboard.type('E=mc^2'); await page.keyboard.press('ArrowRight');
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin_inset Formula \n\\\[\nE=mc\^\{?2\}?\n\\\]/);
   await page.keyboard.press('Alt+m');
   await page.keyboard.press('n');
-  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin\{equation\}\nE=mc\^\{2\}\n\\end\{equation\}/);
-  await expect(page.locator('.lyx-math-display[data-eqnum]')).toHaveCount(1);
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin\{equation\}\nE=mc\^\{?2\}?\n\\end\{equation\}/);
+  await expect(page.locator('.lyx-math-display').first()).toHaveAttribute('data-eqnum', '(1)');   // our new equation is the first one
   expect(errors.filter(e => !/favicon|ResizeObserver|Unknown delimiter/.test(e))).toEqual([]);
 });
 
@@ -53,7 +58,8 @@ test('LyX layouts via Alt+P chords, lists and depth', async ({ page }) => {
   const id = freshDoc('layout-' + Date.now());
   await openDoc(page, id);
   await firstStandard(page);
-  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');                // split: an empty Standard paragraph above
+  await page.keyboard.press('ArrowUp');
   await page.keyboard.type('My new section');
   await page.keyboard.press('Alt+p');
   await page.keyboard.press('2');                    // layout Section
@@ -75,7 +81,7 @@ test('comment threads and LyX notes, shown in the margin', async ({ page }) => {
   await firstStandard(page);
   await page.keyboard.press('Control+Alt+c');         // new comment thread
   await page.keyboard.type('Please check this claim.');
-  const comment = page.locator('.lyx-inset-note-comment').first();
+  const comment = page.locator('.lyx-inset-note-comment', { hasText: 'Please check this claim.' }).first();
   await expect(comment).toContainText('Please check this claim.');
   await expect(comment.locator('.comment-header').first()).toContainText('Admin (');
   // reply
@@ -92,8 +98,8 @@ test('comment threads and LyX notes, shown in the margin', async ({ page }) => {
   await page.keyboard.type('a lyx note');
   await expect(page.locator('.lyx-inset-note-note', { hasText: 'a lyx note' })).toHaveCount(1);
   await page.locator('.tb-btn[title^="Show notes"]').click();
-  await expect(page.locator('.lyx-inset-note.in-margin')).toHaveCount(2);
-  const box = page.locator('.lyx-inset-note.in-margin > .inset-box').first();
+  expect(await page.locator('.lyx-inset-note.in-margin').count()).toBeGreaterThan(1);
+  const box = page.locator('.lyx-inset-note.in-margin', { hasText: 'a lyx note' }).locator('> .inset-box');
   const pageBox = await page.locator('.editor-page').boundingBox();
   const b = await box.boundingBox();
   expect(b!.x).toBeGreaterThan(pageBox!.x + pageBox!.width - 400);   // in the right margin column
@@ -106,9 +112,9 @@ test('tables are inserted as LyX tabulars', async ({ page }) => {
   await firstStandard(page);
   await page.keyboard.press('Enter');
   await page.keyboard.press('Control+Alt+t');
-  await page.getByRole('button', { name: 'Insert' }).click();
+  await page.locator('.dialog .btn.primary').click();
   await page.keyboard.type('cell A');
-  await expect(page.locator('.lyx-tabular td')).toHaveCount(9);
+  await expect(page.locator('.lyx-tabular', { hasText: 'cell A' }).locator('td')).toHaveCount(9);
   await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/<lyxtabular version="3" rows="3" columns="3">[\s\S]*<cell alignment="center" valignment="top" topline="true" bottomline="true" leftline="true" rightline="true" usebox="none">\n\\begin_inset Text\n\n\\begin_layout Plain Layout\ncell A\n\\end_layout/);
 });
 

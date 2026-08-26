@@ -25,18 +25,22 @@ export function Dialog({ title, onClose, children, buttons, wide }: { title: str
 const Row = ({ label, children }: { label: string; children: ComponentChildren }) => <div class="row"><label>{label}</label>{children}</div>;
 
 /* ------------------------------------------------------------- graphics */
-export function GraphicsDialog({ meta, project, initial, onInsert, onClose }: { meta: DocMeta | null; project: string; initial?: { filename: string; width?: string; scale?: string; lyxscale?: string }; onInsert: (o: { filename: string; width?: string; scale?: string; lyxscale?: string }) => void; onClose: () => void }) {
+export function GraphicsDialog({ meta, project, docDir = '', initial, onInsert, onClose }: { meta: DocMeta | null; project: string; docDir?: string; initial?: { filename: string; width?: string; scale?: string; lyxscale?: string }; onInsert: (o: { filename: string; width?: string; scale?: string; lyxscale?: string }) => void; onClose: () => void }) {
   const [filename, setFilename] = useState(initial?.filename ?? '');
   const [width, setWidth] = useState(initial?.width ?? (initial ? '' : '100col%'));
   const [scale, setScale] = useState(initial?.scale ?? '');
+  // file names are stored relative to the document's directory (as LyX does)
+  const toDocRel = (projectRel: string) => { const up = docDir ? docDir.split('/').filter(Boolean).length : 0; if (docDir && projectRel.startsWith(docDir + '/')) return projectRel.slice(docDir.length + 1); return '../'.repeat(up) + projectRel; };
+  const toProjectRel = (docRel: string) => { const parts = [...docDir.split('/').filter(Boolean), ...docRel.split('/')]; const out: string[] = []; for (const p of parts) { if (p === '..') out.pop(); else if (p && p !== '.') out.push(p); } return out.join('/'); };
   const [files, setFiles] = useState<ProjectFile[]>(meta?.files.filter(f => f.kind === 'image') ?? []);
   const upload = () => {
     const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*,.pdf,.eps,.svg';
     input.onchange = async () => {
       const f = input.files?.[0]; if (!f) return;
       const path = 'figures/' + f.name;
-      await api.upload(project, path, f);
-      setFiles([...files, { path, name: f.name, size: f.size, mtime: Date.now(), kind: 'image' }]);
+      const projPath = toProjectRel(path);
+      await api.upload(project, projPath, f);
+      setFiles([...files, { path: projPath, name: f.name, size: f.size, mtime: Date.now(), kind: 'image' }]);
       setFilename(path);
     };
     input.click();
@@ -45,10 +49,10 @@ export function GraphicsDialog({ meta, project, initial, onInsert, onClose }: { 
     <Dialog title="Graphics" onClose={onClose} buttons={<button class="btn primary" disabled={!filename} onClick={() => { onInsert({ filename, width: width || undefined, scale: scale || undefined, lyxscale: initial?.lyxscale }); onClose(); }}>{initial ? 'Apply' : 'Insert'}</button>}>
       <Row label="File"><input type="text" value={filename} onInput={e => setFilename((e.target as HTMLInputElement).value)} placeholder="figures/plot.pdf" /><button class="small-btn" onClick={upload}>Upload…</button></Row>
       <div class="list" style="max-height:180px">
-        {files.map(f => <div key={f.path} class={f.path === filename ? 'sel' : ''} onClick={() => setFilename(f.path)}>{f.path}</div>)}
+        {files.map(f => <div key={f.path} class={toDocRel(f.path) === filename ? 'sel' : ''} onClick={() => setFilename(toDocRel(f.path))}>{f.path}</div>)}
         {!files.length && <div class="sub">No image files in this project yet — upload one.</div>}
       </div>
-      {filename && <img src={graphicsUrl(project, filename, 600)} style="max-height:180px;max-width:100%;object-fit:contain;border:1px solid #ddd" alt="" />}
+      {filename && <img src={graphicsUrl(project, toProjectRel(filename), 600)} style="max-height:180px;max-width:100%;object-fit:contain;border:1px solid #ddd" alt="" />}
       <Row label="Width"><input type="text" value={width} onInput={e => setWidth((e.target as HTMLInputElement).value)} placeholder="e.g. 100col%, 0.5text%, 8cm (empty = natural)" /></Row>
       <Row label="Scale (%)"><input type="text" value={scale} onInput={e => setScale((e.target as HTMLInputElement).value)} placeholder="e.g. 50" /></Row>
       <div class="sub" style="color:#777;font-size:11px">LyX units: <code>col%</code> = column width, <code>text%</code> = text width, <code>page%</code>, <code>line%</code>, or absolute lengths (cm, in, pt).</div>

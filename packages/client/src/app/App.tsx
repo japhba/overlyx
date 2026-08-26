@@ -85,6 +85,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     if (!docId || !containerRef.current) return;
     containerRef.current.innerHTML = '';
     editorContext.user = user; editorContext.docId = docId; editorContext.project = docId.split('/')[0]; editorContext.meta = null;
+    editorContext.docDir = docId.split('/').slice(1, -1).join('/');
     const handle = createEditor({
       docId, user, container: containerRef.current, marginMode,
       onStatus: setStatus,
@@ -464,7 +465,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     if (!dialog || !view || !docId) return null;
     const close = () => { setDialog(null); view.focus(); };
     switch (dialog.name) {
-      case 'graphics': return <GraphicsDialog meta={meta} project={docId.split('/')[0]} onClose={close} onInsert={o => run(C.insertGraphics(o.filename, o))} />;
+      case 'graphics': return <GraphicsDialog meta={meta} project={docId.split('/')[0]} docDir={editorContext.docDir} onClose={close} onInsert={o => run(C.insertGraphics(o.filename, o))} />;
       case 'table': return <TableDialog onClose={close} onInsert={(r, c) => run(C.insertTable(r, c))} />;
       case 'label': return <LabelDialog initial={suggestLabel(view)} onClose={close} onInsert={n => run(C.insertLabel(n))} />;
       case 'ref': return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} onClose={close} onInsert={(n, k) => run(C.insertRef(n, k))} />;
@@ -492,7 +493,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         if (!target) { setDialog(null); notify('No inset at the cursor'); return null; }
         if (target.node.type.name === 'graphics') {
           const p = commandParams(target.node);
-          return <GraphicsDialog meta={meta} project={docId.split('/')[0]} initial={{ filename: p.get('filename') ?? '', width: p.get('width'), scale: p.get('scale'), lyxscale: p.get('lyxscale') }} onClose={close}
+          return <GraphicsDialog meta={meta} project={docId.split('/')[0]} docDir={editorContext.docDir} initial={{ filename: p.get('filename') ?? '', width: p.get('width'), scale: p.get('scale'), lyxscale: p.get('lyxscale') }} onClose={close}
             onInsert={o => { const params = [`\tfilename ${o.filename}`]; if (o.lyxscale) params.push(`\tlyxscale ${o.lyxscale}`); if (o.scale) params.push(`\tscale ${o.scale}`); if (o.width) params.push(`\twidth ${o.width}`); params.push(''); view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
         }
         if (target.node.type.name === 'command' && target.node.attrs.cmd === 'href') {

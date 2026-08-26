@@ -1,0 +1,25 @@
+[Unit]
+Description=OverLyX collaborative LyX/LaTeX editor
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/lyx/overlyx
+Environment=PORT=80
+Environment=HOST=0.0.0.0
+Environment=OVERLYX_DATA_DIR=/root/lyx/overlyx/data
+Environment=OVERLYX_PROJECTS_DIR=/root/projects
+Environment=LYX_LAYOUT_DIR=/root/lyx/lib/layouts
+Environment=NODE_ENV=production
+# Set these to enable "Sign in with Google" (OAuth redirect: <public url>/api/auth/google/callback)
+#Environment=OVERLYX_PUBLIC_URL=https://overlyx.example.org
+#Environment=GOOGLE_CLIENT_ID=...
+#Environment=GOOGLE_CLIENT_SECRET=...
+ExecStart=/usr/bin/npx tsx packages/server/src/index.ts
+Restart=always
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

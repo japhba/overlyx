@@ -222,8 +222,8 @@ export class DocManager {
   }
 
   private watch(): void {
-    const projects = listProjects().map(p => p.path);
-    this.watcher = chokidar.watch(projects, { ignoreInitial: true, depth: 6, awaitWriteFinish: { stabilityThreshold: 400, pollInterval: 100 }, ignored: /(^|[/\\])(\.|node_modules|_build)/ });
+    // watch the whole projects root so that projects created later are covered too
+    this.watcher = chokidar.watch(config.projectsDir, { ignoreInitial: true, depth: 7, awaitWriteFinish: { stabilityThreshold: 400, pollInterval: 100 }, ignored: /(^|[/\\])(\.|node_modules|_build)/ });
     this.watcher.on('change', (file: string) => void this.onExternalChange(file));
     this.watcher.on('add', (file: string) => void this.onExternalChange(file));
   }

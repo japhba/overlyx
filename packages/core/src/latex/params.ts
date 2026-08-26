@@ -189,7 +189,7 @@ export function readBufferParams(doc: LyxDocument): BufferParams {
     fontRoman: fontPick('font_roman'),
     fontSans: fontPick('font_sans'),
     fontTypewriter: fontPick('font_typewriter'),
-    fontMath: fontPick('font_math') || 'auto',
+    fontMath: v('font_math') === undefined ? 'auto' : fontPick('font_math') || 'auto',
     fontRomanOpts: firstQuoted(v('font_roman_opts'), ''),
     fontSansOpts: firstQuoted(v('font_sans_opts'), ''),
     fontTypewriterOpts: firstQuoted(v('font_typewriter_opts'), ''),

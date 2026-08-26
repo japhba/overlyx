@@ -5,6 +5,17 @@ import type { Node as PMNode } from 'prosemirror-model';
 
 export interface OutlineItem { pos: number; level: number; text: string; layout: string; num?: string }
 
+/** Visible heading text: own text and inline math only (no note/footnote/inset content). */
+function headingText(para: PMNode): string {
+  let out = '';
+  para.forEach((child) => {
+    if (child.isText) out += child.text;
+    else if (child.type.name === 'math_inline') out += child.attrs.latex;
+    else if (child.type.name === 'quotes' || child.type.name === 'space' || child.type.name === 'special') out += child.type.spec.toDOM ? (child.type.name === 'space' ? ' ' : child.type.name === 'quotes' ? '"' : '…') : '';
+  });
+  return out.trim();
+}
+
 export function buildOutline(doc: PMNode, includeFloats = true, secnumdepth = 3): OutlineItem[] {
   const items: OutlineItem[] = [];
   const counters = [0, 0, 0, 0, 0, 0, 0];
@@ -21,9 +32,9 @@ export function buildOutline(doc: PMNode, includeFloats = true, secnumdepth = 3)
         while (parts.length > 1 && parts[0] === '0') parts.shift();
         if (lvl <= secnumdepth) num = parts.join('.');
       }
-      items.push({ pos, level: Math.max(0, lvl + 1), text: para.textContent.trim() || '(empty)', layout, num });
+      items.push({ pos, level: Math.max(0, lvl + 1), text: headingText(para) || '(empty)', layout, num });
     } else if (layout === 'Title') {
-      items.push({ pos, level: 0, text: para.textContent.trim() || '(title)', layout });
+      items.push({ pos, level: 0, text: headingText(para) || '(title)', layout });
     }
     if (includeFloats) {
       para.descendants((n, off) => {

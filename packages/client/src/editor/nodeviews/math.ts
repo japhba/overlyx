@@ -11,6 +11,24 @@ import { macroFromLyxLines } from '@overlyx/core';
 
 function isMac() { return /Mac/.test(navigator.platform); }
 
+/** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
+export const pendingFocus: { pos: number | null; keys: string[] } = { pos: null, keys: [] };
+
+function focusWhenMounted(mf: MathfieldElement, getPos: () => number | undefined) {
+  const pos = getPos();
+  if (pos === undefined || pendingFocus.pos !== pos) return;
+  pendingFocus.pos = null;
+  const doFocus = () => {
+    mf.focus();
+    mf.executeCommand('moveToMathfieldEnd');
+    // replay characters typed before the field was ready
+    const keys = pendingFocus.keys.splice(0);
+    for (const k of keys) mf.executeCommand(['insert', k]);
+  };
+  if ((mf as any).isConnected && (mf as any).shadowRoot?.querySelector('.ML__content')) doFocus();
+  else mf.addEventListener('mount', doFocus, { once: true });
+}
+
 /** Shared wiring: focus in/out, move-out events, keyboard bridge. */
 function wire(mf: MathfieldElement, view: EditorView, getPos: () => number | undefined, opts: { onChange: (latex: string) => void; onCommit?: () => void }) {
   let altM = false;
@@ -82,6 +100,7 @@ export class MathInlineView implements NodeView {
     this.dom.className = 'lyx-math-inline';
     this.mf = createMathfield({ latex: node.attrs.latex, display: false });
     this.dom.appendChild(this.mf);
+    focusWhenMounted(this.mf, getPos);
     wire(this.mf, view, getPos, {
       onChange: (latex) => {
         if (this.updating) return;
@@ -135,6 +154,7 @@ export class MathDisplayView implements NodeView {
     this.labelEl.contentEditable = 'false';
     this.dom.append(this.mf, this.numberEl, this.labelEl);
     this.renderMeta();
+    focusWhenMounted(this.mf, getPos);
     wire(this.mf, view, getPos, {
       onChange: (latex) => {
         if (this.updating) return;

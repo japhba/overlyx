@@ -8,7 +8,7 @@ import type { EditorView } from 'prosemirror-view';
 import { schema, commentHeader, formatTimestamp } from '@overlyx/core';
 import { nextLayout, isHeadingLayout } from './layouts';
 import { editorContext } from './context';
-import { MathInlineView, MathDisplayView } from './nodeviews/math';
+import { MathInlineView, MathDisplayView, pendingFocus } from './nodeviews/math';
 
 /* ------------------------------------------------------------ paragraphs */
 
@@ -272,8 +272,8 @@ export const insertComment: Command = (state, dispatch) => {
   const body = schema.nodes.paragraph.create({ layout: 'Plain Layout' });
   const cmd = insertTextInset('Note', 'Comment', [], 'open', [header, body]);
   return cmd(state, (tr) => {
-    // move cursor into the body paragraph
-    const pos = tr.selection.from + header.nodeSize;
+    // the cursor sits at the end of the header paragraph: +1 closes it, +1 opens the body paragraph
+    const pos = tr.selection.from + 2;
     dispatch?.(tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(pos, tr.doc.content.size)))).scrollIntoView());
   });
 };
@@ -358,15 +358,19 @@ export function insertMath(display: boolean, env?: string): (view: EditorView) =
     } else {
       node = schema.nodes.math_inline.create({ ...attrs, latex: selText, delim: '$' });
     }
+    const pos = state.selection.from;   // the node is inserted where the selection starts
+    pendingFocus.pos = pos; pendingFocus.keys = [];
     const tr = state.tr.replaceSelectionWith(node, false);
-    const pos = tr.selection.from - node.nodeSize;
     view.dispatch(tr);
-    // focus the mathfield
-    requestAnimationFrame(() => {
+    // focus the mathfield (the node view DOM exists right after dispatch; retry on the next frame)
+    const focusField = (): boolean => {
       const nv = (view as any).nodeDOM(pos) as HTMLElement | null;
       const mf = nv?.querySelector?.('math-field') as any;
-      if (mf) { mf.focus(); mf.executeCommand('moveToMathfieldEnd'); }
-    });
+      if (!mf) return false;
+      mf.focus(); mf.executeCommand('moveToMathfieldEnd');
+      return true;
+    };
+    if (!focusField()) requestAnimationFrame(() => focusField());
     return true;
   };
 }

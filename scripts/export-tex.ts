@@ -78,7 +78,7 @@ for (const w of result.warnings) console.warn(`warning: ${w}`);
 
 if (flags.has('--pdf')) {
   const env = { ...process.env, TEXINPUTS: `${docdir}//:`, BIBINPUTS: `${docdir}//:`, BSTINPUTS: `${docdir}//:` };
-  const r = spawnSync('latexmk', ['-pdf', '-interaction=nonstopmode', '-f', base + '.tex'], { cwd: outdir, env, stdio: 'pipe', timeout: 600000 });
+  const r = spawnSync('latexmk', ['-pdf', '-bibtex', '-interaction=nonstopmode', '-f', base + '.tex'], { cwd: outdir, env, stdio: 'pipe', timeout: 600000 });
   const pdf = join(outdir, base + '.pdf');
   if (existsSync(pdf)) {
     console.log(pdf);

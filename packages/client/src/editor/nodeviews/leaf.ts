@@ -6,7 +6,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { paramMap, unquote } from '@overlyx/core';
 import { graphicsUrl } from '../../api';
-import { editorContext } from '../context';
+import { editorContext, resolveDocPath } from '../context';
 
 function params(node: PMNode): Map<string, string> {
   try { return paramMap(JSON.parse(node.attrs.params || '[]')); } catch { return new Map(); }
@@ -40,7 +40,7 @@ export class GraphicsView implements NodeView {
     this.img.alt = file;
     this.img.title = `${file}\nwidth: ${width ?? 'auto'}${scale ? `, scale ${scale}%` : ''} — double-click to edit, right-click to export as PNG`;
     if (project && file) {
-      const url = graphicsUrl(project, file, 1600);
+      const url = graphicsUrl(project, resolveDocPath(file), 1600);
       if (this.img.dataset.src !== url) { this.img.dataset.src = url; this.img.src = url; }
       this.img.style.display = '';
       this.caption.textContent = '';

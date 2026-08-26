@@ -128,7 +128,35 @@ async function buildViaOverlyx(docId: string): Promise<BuildResult> {
   return res;
 }
 
-/** Native LyX build: mirror the project into the build dir with lyx2lyx-downgraded copies. */
+/**
+ * Downgrade a LyX 2.5 (format 643) file header so that LyX 2.4 (format 620) can read it.
+ * Only header keys differ between the formats for ordinary documents; the body is kept.
+ */
+export function downgradeTo620(text: string): string {
+  const drop = ['\\table_border_color', '\\table_odd_row_color', '\\table_even_row_color', '\\table_alt_row_colors_start', '\\crossref_package', '\\use_formatted_ref', '\\nomencl_options', '\\docbook_', '\\use_minted', '\\use_lineno', '\\lineno_options'];
+  const cmap: Record<string, string> = { '\\backgroundcolor': '#ffffff', '\\fontcolor': '#000000', '\\notefontcolor': '#cccccc', '\\boxbgcolor': '#ff0000' };
+  const out: string[] = [];
+  let inHeader = false;
+  for (const l of text.split('\n')) {
+    if (l.startsWith('\\lyxformat')) { out.push('\\lyxformat 620'); continue; }
+    if (l === '\\begin_header') inHeader = true;
+    if (l === '\\end_header') inHeader = false;
+    if (inHeader) {
+      if (drop.some(d => l.startsWith(d))) {
+        if (l.startsWith('\\crossref_package')) out.push('\\use_refstyle ' + (l.includes('prettyref') ? '0' : '1'));
+        continue;
+      }
+      const k = l.split(' ')[0];
+      if (k in cmap && !l.split(' ').pop()!.startsWith('#')) { out.push(k + ' ' + cmap[k]); continue; }
+      if (l.startsWith('\\justification default')) { out.push('\\justification true'); continue; }
+    }
+    if (l.startsWith('tuple "')) continue;
+    out.push(l);
+  }
+  return out.join('\n');
+}
+
+/** Native LyX build: mirror the project into the build dir with downgraded copies. */
 async function buildViaLyx(docId: string): Promise<BuildResult> {
   const doc = await manager.open(docId);
   await manager.saveAll();
@@ -147,8 +175,9 @@ async function buildViaLyx(docId: string): Promise<BuildResult> {
         const text = fs.readFileSync(s, 'utf8');
         const parsed = parseLyx(text);
         if (parsed.format > 620) {
+          // try lyx2lyx first (works when a matching LyX version is installed), else a header downgrade
           const r = await run('python3', [config.lyx2lyx, '-t', '620', '-o', d, s], { cwd: dir, timeoutMs: 120000 });
-          if (r.code !== 0) { log += `lyx2lyx failed for ${e.name}:\n${r.out}\n`; fs.writeFileSync(d, writeLyx(parsed)); }
+          if (r.code !== 0 || !fs.existsSync(d)) { log += `lyx2lyx unavailable for ${e.name} (using header downgrade)\n`; fs.writeFileSync(d, downgradeTo620(writeLyx(parsed))); }
         } else fs.copyFileSync(s, d);
       } else {
         try { fs.copyFileSync(s, d); } catch { /* ignore */ }

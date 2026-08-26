@@ -108,7 +108,7 @@ export function insetTextLatex(ctx: ExportContext, os: TexStream, rp: RunParams,
       os.write('}');
       if (args.size) latexArgInsets(ctx, os, rp, args, found, 'post:');
     } else if (il.latexType === 'environment') {
-      if (il.display || rp.inComment) os.breakln(); else os.safebreakln();
+      if (il.display || rp2.inComment) os.breakln(); else os.safebreakln();
       os.write(`\\end{${il.latexName}}`);
       os.breakln();
       if (!il.display) os.protectSpace(true);
