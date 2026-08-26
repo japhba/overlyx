@@ -190,6 +190,7 @@ export function writeAtom(a: Atom, os: MathWriter): void {
     case 'comment': os.s('%' + a.text + '\n'); return;
     case 'env': os.s('\\begin{' + a.n + '}'); writeCell(a.body, os); os.s('\\end{' + a.n + '}'); return;
     case 'raw': os.s(a.latex); return;
+    case 'unknown': os.s(a.n); if (a.n.length > 1) os.space(true); return;
   }
 }
 
