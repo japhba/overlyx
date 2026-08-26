@@ -23,8 +23,10 @@ Overleaf/LyX blend.
   (`\left…\right`, `\text{}`, scripts, `\sqrt`, fractions, macros …) shows LyX's corner markers —
   two lower corners, four for fractions/grids/macros, the macro name while editing one — and insets
   light up under the mouse; Backspace at the inner left edge or Delete at the inner right edge of a
-  cell dissolves the inset (LyX's `pullArg`); Space leaves the current inset and, at the end, the
-  formula; a typed `(` is a plain parenthesis. Right-click menus on formulas, cross-references (go
+  cell dissolves the inset (LyX's `pullArg`), deleting across a big inset selects it first; Space
+  leaves the current inset and, at the end, the formula; a typed `(` is a plain parenthesis; the caret
+  only ever rests in a macro's argument cells, never in its expansion. The text column is centred
+  and its width is a View setting (*View ▸ Text width*, `Ctrl+Alt+±`). Right-click menus on formulas, cross-references (go
   to label, reference format), citations, hyperlinks, child documents, insets and tracked changes;
   `Ctrl/⌘+click` follows a reference or opens a child document; **tabs** for open documents (new
   tabs open right of the current one); *View ▸ Master + child documents in one

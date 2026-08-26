@@ -66,7 +66,7 @@ test('macro arguments are editable in place and written back as macro calls', as
     const before = mf.__lyxLatex as string;
     mf.focus(); await sleep(50);
     mf.executeCommand('moveToMathfieldStart');
-    for (let i = 0; i < 3; i++) mf.executeCommand('moveToNextChar');
+    mf.executeCommand('moveToNextChar');       // the caret skips the macro's template and lands in the argument cell
     await sleep(30);
     await new Promise(r => requestAnimationFrame(() => setTimeout(r, 60)));
     const marks = [...mf.shadowRoot.querySelectorAll('.lyx-mk > div')] as HTMLElement[];
@@ -147,6 +147,22 @@ test('LyX math keys: inset markers, Backspace/Delete dissolve a cell, Space leav
   await page.keyboard.press('Control+z');
   await page.waitForTimeout(100);
   expect((await state()).latex).toContain('\\text{if }');
+  // the caret never rests in a macro's expansion template: it is moved to the nearest argument edge
+  await setCaret("m.offsetOf(m.atoms.find(a => a.type === 'subsup' && a.parent?.args?.[0]?.startsWith('lyxmacro=inv')).superscript.at(-1))");
+  await page.waitForTimeout(100);
+  expect((await state()).pos).toBe(await page.evaluate(() => { const m = (document.querySelector('.lyx-editor .lyx-math-inline math-field') as any)._mathfield.model; return m.offsetOf(m.atoms.find((a: any) => a.command === '\\htmlData' && /lyxarg/.test(a.args[0])).lastChild); }));
+  // deleting across a big inset selects it first (LyX confirmDeletion), the second Backspace removes it
+  await setCaret("m.offsetOf(m.atoms.find(a => a.type === 'surd'))");
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => { const m = (document.querySelector('.lyx-editor .lyx-math-inline math-field') as any)._mathfield.model; const r = m.selection.ranges[0]; return r[1] - r[0]; })).toBeGreaterThan(0);
+  expect((await state()).latex).toContain('\\sqrt{y}');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(100);
+  expect((await state()).latex).not.toContain('\\sqrt');
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(100);
+  expect((await state()).latex).toContain('\\sqrt{y}');
   // Space leaves the superscript, and at the end of the formula leaves the formula with a text space
   await setCaret("m.offsetOf(m.atoms.filter(a => a.type === 'subsup')[1].superscript.at(-1))");
   await page.keyboard.press('Space');

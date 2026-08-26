@@ -67,10 +67,13 @@ button { cursor: pointer; }
 .editor-scroll { flex: 1; overflow: auto; background: var(--page-bg); position: relative; }
 /* "infinite margin": the page fills the viewport; text stays in a left-bound column of readable width,
    while wide objects (display math, tables, floats) may overflow the column and are centred on it */
-.editor-page { position: relative; background: var(--page-bg); min-height: 100%; width: 100%; padding: 36px 48px 120px 56px; }
-.lyx-editor { max-width: var(--text-width, 720px); }
-/* with annotations in the margin, keep room for a 320px card column next to the text */
-.margin-mode .lyx-editor { max-width: min(var(--text-width, 720px), calc(100% - 372px)); }
+.editor-page { position: relative; background: var(--page-bg); min-height: 100%; width: 100%; padding: 36px 48px 120px 48px; }
+/* the text column is centred; its width is a View setting (--text-width, "Text width" menu) */
+.lyx-editor { max-width: var(--text-width, 720px); margin: 0 auto; }
+/* with annotations in the margin, keep room for a 320px card column right of the text and centre both */
+.margin-mode .lyx-editor { max-width: min(var(--text-width, 720px), calc(100% - 372px)); margin-left: max(0px, calc((100% - min(var(--text-width, 720px), 100% - 372px) - 372px) / 2)); }
+/* MathLive shades the inset that contains the caret; the LyX corner markers replace that */
+math-field { --contains-highlight-background-color: transparent; }
 .lyx-editor { outline: none; font-family: var(--editor-font); font-size: calc(15.5px * var(--editor-zoom)); line-height: 1.45; color: #111; min-height: 300px; }
 .lyx-editor:focus-visible { outline: none; }
 

@@ -32,6 +32,8 @@ export interface UiActions {
   rejectAll?(): void;
   closeTab?(): void;
   toggleSource?(): void;
+  /** change the text column width by a step (0 resets) */
+  textWidth?(delta: number): void;
 }
 
 const ui = (fn: (a: UiActions) => void): Command => () => { const a = editorContext.ui; if (a) fn(a); return true; };
@@ -186,6 +188,9 @@ export function lyxKeymap(): Plugin {
     'Mod-=': ui(a => a.zoom(1)),
     'Mod-+': ui(a => a.zoom(1)),
     'Mod--': ui(a => a.zoom(-1)),
+    'Mod-Alt-=': ui(a => a.textWidth?.(1)),
+    'Mod-Alt-+': ui(a => a.textWidth?.(1)),
+    'Mod-Alt--': ui(a => a.textWidth?.(-1)),
     'Mod-0': ui(a => a.zoom(0)),
     'Mod-o': ui(a => a.openFile()),
     'Mod-n': ui(a => a.newFile()),

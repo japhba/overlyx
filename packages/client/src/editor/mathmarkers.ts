@@ -229,15 +229,75 @@ export function installMarkers(mf: MathfieldElement): void {
   (mf as any).__lyxRedraw = redraw;   // for tests
 }
 
-/** LyX math keys: Backspace/Delete at a cell edge dissolve the inset, Space leaves it. */
+/** LyX math keys: Backspace/Delete at a cell edge dissolve the inset (and select a big inset before
+ *  deleting it), Space leaves the inset; the caret never rests in a macro's expansion template. */
 export function installLyxKeys(mf: MathfieldElement): void {
   mf.addEventListener('keydown', (ev: KeyboardEvent) => {
     if (ev.ctrlKey || ev.metaKey || ev.altKey || mf.readOnly) return;
     let handled = false;
-    if ((ev.key === 'Backspace' || ev.key === 'Delete') && !ev.shiftKey) handled = dissolveAtCaret(mf, ev.key === 'Backspace' ? 'backward' : 'forward');
-    else if (ev.key === ' ') handled = spaceAtCaret(mf);
+    if ((ev.key === 'Backspace' || ev.key === 'Delete') && !ev.shiftKey) {
+      const dir = ev.key === 'Backspace' ? 'backward' : 'forward';
+      handled = dissolveAtCaret(mf, dir) || confirmDeletion(mf, dir);
+    } else if (ev.key === ' ') handled = spaceAtCaret(mf);
     if (handled) { ev.preventDefault(); ev.stopImmediatePropagation(); }
   }, { capture: true });
+  let lastPos = -1;
+  let pointer = false;   // the caret was placed with the mouse: go to the nearest cell edge, not "onwards"
+  mf.addEventListener('pointerdown', () => { pointer = true; }, { capture: true });
+  mf.addEventListener('selection-change', () => {
+    const model = internal(mf)?.model;
+    if (!model) return;
+    if (model.selectionIsCollapsed) keepOutOfTemplates(model, pointer ? -1 : lastPos);
+    pointer = false;
+    lastPos = model.position;
+  });
+}
+
+/** The macro whose expansion (not one of its argument cells) contains `atom`, or null: our expanded
+ *  templates (`\htmlData{lyxmacro=…}`) and MathLive's own `macro` atoms (argument-less macros). */
+function templateOf(atom: any): any {
+  for (let a = atom.parent; a && a.type !== 'root'; a = a.parent) {
+    const hd = htmlData(a);
+    if (hd && isArg(hd)) return null;
+    if ((hd && macroName(hd)) || a.type === 'macro') return a;
+  }
+  return null;
+}
+
+/** LyX only ever places the cursor in a macro's argument cells (or around the macro): a caret that
+ *  lands in the expansion template is moved on to the next cell in the direction of travel, or to
+ *  the nearest cell edge after a mouse click. */
+function keepOutOfTemplates(model: any, lastPos: number): void {
+  const atom = model.at(model.position);
+  if (!atom) return;
+  const macro = templateOf(atom);
+  if (!macro) return;
+  const pos = model.position;
+  const stops: number[] = [model.offsetOf(macro.leftSibling)];          // before the macro
+  for (const a of macro.children as any[]) { const hd = htmlData(a); if (hd && isArg(hd)) stops.push(model.offsetOf(a.firstChild), model.offsetOf(a.lastChild)); }
+  stops.push(model.offsetOf(macro));                                      // after the macro
+  let target: number | undefined;
+  if (lastPos >= 0 && lastPos < pos) target = stops.find(s => s > pos);
+  else if (lastPos >= 0 && lastPos > pos) target = [...stops].reverse().find(s => s < pos);
+  if (target === undefined) target = stops.reduce((best, s) => (Math.abs(s - pos) < Math.abs(best - pos) ? s : best), stops[0]);
+  if (target !== pos) model.position = target;
+}
+
+/** LyX (Cursor::backspace/erase + InsetMathNest::confirmDeletion): deleting across a "big" inset first
+ *  selects it; the next Backspace/Delete removes the selection. */
+function confirmDeletion(mf: MathfieldElement, dir: 'backward' | 'forward'): boolean {
+  const model = internal(mf)?.model;
+  if (!model || !model.selectionIsCollapsed || mf.mode !== 'math') return false;
+  const cur = model.at(model.position);
+  const atom = dir === 'backward' ? cur : cur?.rightSibling;
+  if (!atom || atom.type === 'first') return false;
+  let first = atom, last = atom;
+  if (atom.mode === 'text') { const run = textRun(atom); first = run[0]; last = run[run.length - 1]; }
+  else if (atom.type === 'subsup') { const b = atom.leftSibling; if (b && b.type !== 'first') first = b; }
+  else if (dir === 'forward' && atom.rightSibling?.type === 'subsup') last = atom.rightSibling;
+  else if (!(htmlData(atom) && macroName(htmlData(atom)!)) && !ONE_CELL.has(atom.type) && !['genfrac', 'array', 'box', 'enclose'].includes(atom.type)) return false;
+  mf.selection = { ranges: [[model.offsetOf(first.leftSibling), model.offsetOf(last)]] } as any;
+  return true;
 }
 
 /** The inset that owns the caret's cell (a macro for the cells of its arguments), or null at top level. */

@@ -69,6 +69,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [saved, setSaved] = useState(true);
   const [zoom, setZoom] = useState(Number(localStorage.getItem('ol.zoom') || 1));
+  // width of the text column in px (0 = full width), see View ▸ Text width
+  const [textWidth, setTextWidth] = useState<number>(() => { const v = Number(localStorage.getItem('ol.textWidth')); return Number.isFinite(v) && localStorage.getItem('ol.textWidth') !== null ? v : 720; });
+  const stepTextWidth = (d: number) => setTextWidth(w => (d === 0 ? 720 : Math.min(1600, Math.max(400, (w || 1200) + d * 60))));
   const [findOpen, setFindOpen] = useState(false);
   const [findQ, setFindQ] = useState(''), [replQ, setReplQ] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
@@ -92,6 +95,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   }, []);
 
   useEffect(() => { document.documentElement.style.setProperty('--editor-zoom', String(zoom)); localStorage.setItem('ol.zoom', String(zoom)); }, [zoom]);
+  useEffect(() => { document.documentElement.style.setProperty('--text-width', textWidth > 0 ? textWidth + 'px' : '100%'); localStorage.setItem('ol.textWidth', String(textWidth)); }, [textWidth]);
   useEffect(() => { localStorage.setItem('ol.tabs', JSON.stringify(tabs)); }, [tabs]);
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.combined', combined ? '1' : '0'); }, [combined]);
 
@@ -241,6 +245,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       rejectAll: () => run(rejectAllChanges()),
       closeTab: () => { if (docId) closeTab(docId); },
       zoom: (d) => setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))),
+      textWidth: stepTextWidth,
       openFile: () => setShowFiles(true),
       newFile: () => { const p = docId?.split('/')[0]; if (p) { const name = prompt('New document name:', 'untitled.lyx'); if (name) api.newDoc(p, name, { title: name.replace(/\.lyx$/, '') }).then(r => { location.hash = '#/' + r.id; setRefreshKey(k => k + 1); }); } },
     };
@@ -412,6 +417,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Zoom in', shortcut: 'Ctrl++', action: () => editorContext.ui?.zoom(1) },
       { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => editorContext.ui?.zoom(-1) },
       { label: 'Reset zoom', shortcut: 'Ctrl+0', action: () => editorContext.ui?.zoom(0) },
+      { label: 'Text width ▸', sub: [
+        ...[['Narrow', 560], ['Normal', 720], ['Wide', 880], ['Extra wide', 1080], ['Full width', 0]].map(([l, w]) => ({ label: String(l), checked: textWidth === w, action: () => setTextWidth(w as number) })),
+        { sep: true },
+        { label: 'Wider', shortcut: 'Ctrl+Alt++', action: () => stepTextWidth(1) },
+        { label: 'Narrower', shortcut: 'Ctrl+Alt+-', action: () => stepTextWidth(-1) },
+      ] },
     ] },
     { title: 'Insert', items: [
       { label: 'Math ▸', sub: [
