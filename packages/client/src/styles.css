@@ -131,8 +131,8 @@ button { cursor: pointer; }
 .lyx-color-red { color: #d00; } .lyx-color-blue { color: #00d; } .lyx-color-green { color: #080; } .lyx-color-magenta { color: #c0c; } .lyx-color-cyan { color: #0aa; } .lyx-color-yellow { color: #aa0; } .lyx-color-orange { color: #e80; } .lyx-color-purple { color: #808; } .lyx-color-brown { color: #840; } .lyx-color-darkgray { color: #444; } .lyx-color-gray { color: #888; } .lyx-color-lightgray { color: #bbb; } .lyx-color-lime { color: #5c0; } .lyx-color-olive { color: #880; } .lyx-color-pink { color: #e6a; } .lyx-color-teal { color: #088; } .lyx-color-violet { color: #80f; } .lyx-color-black { color: #000; } .lyx-color-white { color: #fff; }
 
 /* change tracking */
-.lyx-change-inserted { color: var(--change-color, #2e7d32); cursor: help; }
-.lyx-change-deleted { color: var(--change-color, #b41c1c); text-decoration: line-through; text-decoration-thickness: 1.5px; opacity: 0.85; cursor: help; }
+.lyx-change-inserted { color: var(--change-color, #2e7d32); }
+.lyx-change-deleted { color: var(--change-color, #b41c1c); text-decoration: line-through; text-decoration-thickness: 1.5px; opacity: 0.85; }
 .lyx-inset[data-change="inserted"] > .inset-box { border-color: var(--change-color, #0a5db8); border-style: dashed; }
 .lyx-inset[data-change="deleted"] > .inset-box { outline: 1px dashed #b41c1c; opacity: 0.6; }
 

@@ -93,7 +93,9 @@ function wire(mf: MathfieldElement, view: EditorView, getPos: () => number | und
     const node = view.state.doc.nodeAt(pos);
     const size = node ? node.nodeSize : 1;
     const target = dir === 'backward' || dir === 'upward' ? pos : pos + size;
-    view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(target), dir === 'backward' || dir === 'upward' ? -1 : 1)));
+    let tr = view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(target), dir === 'backward' || dir === 'upward' ? -1 : 1));
+    if ((ev as CustomEvent).detail?.insertSpace) tr = tr.insertText(' ');   // LyX: Space at the end of a formula leaves it and becomes a text space
+    view.dispatch(tr);
     view.focus();
   });
   mf.addEventListener('focusin', () => { mf.classList.add('focused'); });

@@ -150,7 +150,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       const cmd = node.attrs.cmd as string;
       if (cmd === 'ref') { editorContext.gotoLabel?.(unquote(p.get('reference')).split(',')[0].trim(), view); return true; }
       if (cmd === 'href') { const t = unquote(p.get('target')); window.open(/^[a-z]+:/i.test(t) ? t : 'https://' + t, '_blank', 'noopener'); return true; }
-      if (cmd === 'include') { const id = includeTarget(node, viewProject(view), viewDocDir(view)); if (id) window.open('#/' + id, '_blank'); return true; }
+      if (cmd === 'include') { const id = includeTarget(node, viewProject(view), viewDocDir(view)); if (id) editorContext.openInTab?.(id); return true; }
       return false;
     },
     handleDOMEvents: {

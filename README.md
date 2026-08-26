@@ -19,11 +19,15 @@ Overleaf/LyX blend.
 * **Export**: LaTeX (a port of LyX's `output_latex` driven by LyX's own layout files) and PDF via
   `latexmk`; a native-LyX build as reference; embedded graphics (SVG/PDF/EPS/…) are rendered to
   PNG for the editor and downloadable as PNG.
-* **Editing niceties**: macro arguments are editable in place (`\inv{…}` shows LyX-like corner
-  markers around the argument / `\text{}` / `\left…\right` cell that holds the caret); right-click
-  menus on formulas, cross-references (go to label, reference format), citations, hyperlinks, child
-  documents, insets and tracked changes; `Ctrl/⌘+click` follows a reference; **tabs** for open
-  documents (child documents open in a tab on double-click); *View ▸ Master + child documents in one
+* **LyX-like math editing**: macro arguments are editable in place; every inset on the caret's path
+  (`\left…\right`, `\text{}`, scripts, `\sqrt`, fractions, macros …) shows LyX's corner markers —
+  two lower corners, four for fractions/grids/macros, the macro name while editing one — and insets
+  light up under the mouse; Backspace at the inner left edge or Delete at the inner right edge of a
+  cell dissolves the inset (LyX's `pullArg`); Space leaves the current inset and, at the end, the
+  formula; a typed `(` is a plain parenthesis. Right-click menus on formulas, cross-references (go
+  to label, reference format), citations, hyperlinks, child documents, insets and tracked changes;
+  `Ctrl/⌘+click` follows a reference or opens a child document; **tabs** for open documents (new
+  tabs open right of the current one); *View ▸ Master + child documents in one
   view* shows a paper and its `\include`d children as one scrolling page; an editable **Source pane**
   (live LyX source that follows the cursor — edit and *Apply* — plus the exported LaTeX); wide display
   formulas overflow symmetrically into the margins (Google-Docs style) with equation numbers kept

@@ -4,7 +4,7 @@
  * the combined master+child view, the editable source pane and change-tracking info.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { mkdirSync, copyFileSync, rmSync, existsSync, symlinkSync, readFileSync } from 'node:fs';
+import { mkdirSync, copyFileSync, rmSync, existsSync, symlinkSync, readFileSync, writeFileSync } from 'node:fs';
 import { login, collectErrors } from './helpers';
 
 const SRC = '/root/projects/recurrent_feature';
@@ -12,18 +12,43 @@ const PROJECT = 'e2e-paper';
 const DIR = `/root/projects/${PROJECT}`;
 const FILES = ['main.lyx', 'appendix.lyx', 'lyxmacros.lyx', 'macros.tex', 'preamble.tex', 'latexmkrc', 'bib.bib', 'icml2026.sty', 'icml2026.bst', 'icml.layout', 'fancyhdr.sty', 'algorithm.sty', 'algorithmic.sty'];
 
+// a small document for the math-key tests: the paper's header (macro definitions come with it) + one formula
+const MATH_LATEX = String.raw`\inv{A}+\left(x+\frac{a}{b}\right)+\text{if }x^{2}+\sqrt{y}+\hat{z}`;
+const mathDoc = () => readFileSync(`${SRC}/main.lyx`, 'utf8').split('\\begin_body')[0] + `\\begin_body
+
+\\begin_layout Standard
+\\begin_inset FormulaMacro
+\\newcommand{\\inv}[1]{\\left(#1\\right)^{-1}}
+\\end_inset
+
+
+\\end_layout
+
+\\begin_layout Standard
+Test 
+\\begin_inset Formula $${MATH_LATEX}$
+\\end_inset
+
+ end.
+\\end_layout
+
+\\end_body
+\\end_document
+`;
+
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
   for (const f of FILES) if (existsSync(`${SRC}/${f}`)) copyFileSync(`${SRC}/${f}`, `${DIR}/${f}`);
   symlinkSync(`${SRC}/figures`, `${DIR}/figures`);
+  writeFileSync(`${DIR}/math.lyx`, mathDoc());
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
-async function openPaper(page: Page, file = 'main.lyx') {
+async function openPaper(page: Page, file = 'main.lyx', minParagraphs = 50) {
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.setItem('ol.combined', '0'); });
   await page.goto(`/#/${PROJECT}/${file}`);
-  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 50, null, { timeout: 90000 });
+  await page.waitForFunction((n) => document.querySelectorAll('.lyx-editor .lyx-par').length >= n, minParagraphs, { timeout: 90000 });
   await page.waitForTimeout(1500);
 }
 
@@ -43,8 +68,10 @@ test('macro arguments are editable in place and written back as macro calls', as
     mf.executeCommand('moveToMathfieldStart');
     for (let i = 0; i < 3; i++) mf.executeCommand('moveToNextChar');
     await sleep(30);
-    const marked = !!mf.shadowRoot.querySelector('.lyx-env[data-lyxarg]');
-    const active = mf.shadowRoot.querySelector('.lyx-macro-active')?.getAttribute('data-lyxmacro');
+    await new Promise(r => requestAnimationFrame(() => setTimeout(r, 60)));
+    const marks = [...mf.shadowRoot.querySelectorAll('.lyx-mk > div')] as HTMLElement[];
+    const marked = marks.filter(d => !d.textContent).length >= 4;                  // four corners around the macro
+    const active = marks.find(d => d.textContent)?.textContent?.replace(/^\\/, '');
     mf.executeCommand(['insert', 'Q']);
     await sleep(400);
     const after = (wrap as any).pmViewDesc.node.attrs.latex as string;
@@ -54,12 +81,85 @@ test('macro arguments are editable in place and written back as macro calls', as
     return { before, marked, active, after, restored: (wrap as any).pmViewDesc.node.attrs.latex as string, expanded: mf.value.includes('lyxmacro=inv') };
   });
   expect(r.expanded).toBe(true);                     // MathLive edits the expanded template
-  expect(r.marked).toBe(true);                       // LyX-like corner markers on the argument cell
+  expect(r.marked).toBe(true);                       // LyX-like corner markers around the macro being edited
   expect(r.active).toBe('inv');
   // MathLive normalises sub/superscript order when it serialises; compare modulo that
   const norm = (x: string) => x.replace(/\^\{-\}_\{\\cT\}/g, '_{\\cT}^{-}');
   expect(norm(r.after)).toBe(norm(r.before).replace(/^\\inv\{/, '\\inv{Q'));   // the argument edit is written back as \inv{...}
   expect(norm(r.restored)).toBe(norm(r.before));
+  expect(errors).toEqual([]);
+});
+
+test('LyX math keys: inset markers, Backspace/Delete dissolve a cell, Space leaves the inset', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openPaper(page, 'math.lyx', 2);
+  const wrap = page.locator('.lyx-editor .lyx-math-inline').first();
+  await wrap.hover();
+  await expect(wrap.locator('math-field')).toHaveCount(1, { timeout: 5000 });
+  await wrap.click();
+  const field = () => page.evaluate(() => (document.querySelector('.lyx-editor .lyx-math-inline math-field') as any));
+  const setCaret = (finder: string) => page.evaluate((finder) => {
+    const mf = document.querySelector('.lyx-editor .lyx-math-inline math-field') as any;
+    const m = mf._mathfield.model;
+    mf.focus(); m.position = new Function('m', 'return ' + finder)(m);
+  }, finder);
+  const state = () => page.evaluate(() => {
+    const mf = document.querySelector('.lyx-editor .lyx-math-inline math-field') as any;
+    const m = mf._mathfield.model;
+    const marks = [...mf.shadowRoot.querySelectorAll('.lyx-mk > div')] as HTMLElement[];
+    return { latex: mf.value as string, pos: m.position as number, corners: marks.filter(d => !d.textContent).length, label: marks.find(d => d.textContent)?.textContent ?? null };
+  });
+  await field();
+  // caret in the numerator: two lower corners for \left…\right plus four for the fraction
+  await setCaret("m.offsetOf(m.atoms.find(a => a.type === 'genfrac').above[0])");
+  await page.waitForTimeout(150);
+  expect((await state()).corners).toBe(6);
+  // caret in the macro argument: four corners and the macro name, nothing for the template's \left(
+  await setCaret("m.offsetOf(m.atoms.find(a => a.command === '\\\\htmlData' && /lyxarg/.test(a.args[0])).lastChild)");
+  await page.waitForTimeout(150);
+  expect(await state()).toMatchObject({ corners: 4, label: '\\inv' });
+  // caret at top level: no markers
+  await setCaret('m.lastOffset');
+  await page.waitForTimeout(150);
+  expect((await state()).corners).toBe(0);
+  const strip = (l: string) => l.replace(/\\htmlData\{[^}]*\}/g, '');
+  // Backspace at the inner left edge of \left( … \right) dissolves it
+  await setCaret("m.offsetOf(m.atoms.filter(a => a.type === 'leftright')[1].firstChild)");
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(100);
+  expect(strip((await state()).latex)).toContain('+x+\\frac{a}{b}+');
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(100);
+  expect(strip((await state()).latex)).toContain('\\left(x+\\frac{a}{b}\\right)');
+  // Delete at the inner right edge of the macro argument replaces the macro by the argument
+  await setCaret("m.offsetOf(m.atoms.find(a => a.command === '\\\\htmlData' && /lyxarg/.test(a.args[0])).lastChild)");
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(100);
+  expect((await state()).latex.startsWith('A+')).toBe(true);
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(100);
+  expect((await state()).latex.includes('lyxmacro=inv')).toBe(true);
+  // Delete at the end of a \text{} cell turns it into math characters
+  await setCaret("m.offsetOf(m.atoms.filter(a => a.mode === 'text').at(-1))");
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(100);
+  expect((await state()).latex).toContain('+if\\ x^2');
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(100);
+  expect((await state()).latex).toContain('\\text{if }');
+  // Space leaves the superscript, and at the end of the formula leaves the formula with a text space
+  await setCaret("m.offsetOf(m.atoms.filter(a => a.type === 'subsup')[1].superscript.at(-1))");
+  await page.keyboard.press('Space');
+  await page.keyboard.type('q');
+  await page.waitForTimeout(100);
+  expect((await state()).latex).toContain('x^2q+');
+  await page.keyboard.press('Control+z');
+  await setCaret('m.lastOffset');
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(150);
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('MATH-FIELD');
+  const para = await page.locator('.lyx-editor .lyx-par').nth(1).textContent();
+  expect(para).toMatch(/\)  end\.$|\u200b? {2}end\./);
   expect(errors).toEqual([]);
 });
 
@@ -88,7 +188,7 @@ test('wide display formulas are centred on the column and equation numbers never
   await page.keyboard.press('Control+Shift+m');
   await expect(page.locator('math-field.focused')).toHaveCount(1, { timeout: 5000 });
   await page.waitForTimeout(500);
-  await page.keyboard.type('W=' + 'A_{1}B_{1}C_{1}+'.repeat(20));
+  await page.keyboard.type('W=' + 'A_1 B_1 C_1 +'.repeat(20));   // LyX style: Space leaves the subscript
   await page.waitForTimeout(600);
   const r = await page.evaluate(() => {
     const d = document.querySelector('math-field.focused')!.closest('.lyx-math-display') as HTMLElement;

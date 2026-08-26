@@ -103,9 +103,9 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent): MenuItem[] 
         if (id) {
           items.push(
             { label: `Child document ${id.split('/').pop()}`, info: true },
-            { label: 'Open', shortcut: 'double-click', action: () => editorContext.openInTab?.(id) },
+            { label: 'Open in new tab', shortcut: MOD + '+click', action: () => editorContext.openInTab?.(id) },
             { label: 'Open in new tab (background)', action: () => editorContext.openInTab?.(id, { background: true }) },
-            { label: 'Open in new browser tab', shortcut: MOD + '+click', action: () => window.open('#/' + id, '_blank') },
+            { label: 'Open in new browser tab', action: () => window.open('#/' + id, '_blank') },
             { label: 'Show master and child documents in one view', checked: editorContext.combined, action: () => editorContext.ui?.toggleCombined?.() },
             { sep: true },
           );

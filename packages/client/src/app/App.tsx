@@ -95,11 +95,17 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   useEffect(() => { localStorage.setItem('ol.tabs', JSON.stringify(tabs)); }, [tabs]);
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.combined', combined ? '1' : '0'); }, [combined]);
 
-  // every opened document gets a tab
-  useEffect(() => { if (docId) setTabs(t => (t.includes(docId) ? t : [...t, docId])); }, [docId]);
+  // every opened document gets a tab, inserted right of the tab it was opened from
+  const lastDoc = useRef<string | null>(null);
+  const addTab = (t: string[], id: string, after: string | null): string[] => {
+    if (t.includes(id)) return t;
+    const i = after ? t.indexOf(after) : -1;
+    return i < 0 ? [...t, id] : [...t.slice(0, i + 1), id, ...t.slice(i + 1)];
+  };
+  useEffect(() => { if (docId) { setTabs(t => addTab(t, docId, lastDoc.current)); lastDoc.current = docId; } }, [docId]);
 
   const openInTab = useCallback((id: string, opts: { background?: boolean; goto?: string } = {}) => {
-    setTabs(t => (t.includes(id) ? t : [...t, id]));
+    setTabs(t => addTab(t, id, parseHash().id));
     if (opts.background) { notify(`Opened ${id.split('/').pop()} in a new tab`); return; }
     const target = '#/' + id + (opts.goto ? '?goto=' + encodeURIComponent(opts.goto) : '');
     if (location.hash === target) { pendingGoto.current = opts.goto ?? null; runGoto(); } else location.hash = target;
