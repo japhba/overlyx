@@ -99,15 +99,69 @@ function docId(req: express.Request): string {
   return decodeURIComponent((req.params as any)[0] ?? req.params.id);
 }
 
+/** Parsed BibTeX files, cached by path + mtime + size (bibliographies are often several MB). */
+const bibCache = new Map<string, { key: string; entries: ReturnType<typeof parseBibtex> }>();
+function cachedBib(abs: string): ReturnType<typeof parseBibtex> {
+  try {
+    const st = fs.statSync(abs);
+    const key = `${st.mtimeMs}:${st.size}`;
+    const hit = bibCache.get(abs);
+    if (hit && hit.key === key) return hit.entries;
+    const entries = parseBibtex(fs.readFileSync(abs, 'utf8')).map(e => ({ ...e, key: String(e.key ?? ''), author: String(e.author ?? ''), year: String(e.year ?? ''), title: String(e.title ?? '') }));
+    bibCache.set(abs, { key, entries });
+    return entries;
+  } catch { return []; }
+}
+
+/** bib files used by a document (filled by the meta route) for the /bib search endpoint */
+const bibIndex = new Map<string, { files: string[]; fallbackProject: string | null }>();
+
+/** Search the bibliography of a document: ?q=words (matches key/author/year/title) or ?keys=a,b */
+api.get('/docs/*/bib', async (req, res) => {
+  try {
+    const id = docId(req);
+    if (!bibIndex.has(id)) { await manager.open(id); }
+    let idx = bibIndex.get(id);
+    if (!idx) {
+      // metadata not requested yet in this process: use all .bib files of the project
+      const doc = await manager.open(id);
+      idx = { files: [], fallbackProject: doc.project };
+    }
+    let entries: ReturnType<typeof parseBibtex> = [];
+    for (const f of idx.files) entries.push(...cachedBib(f));
+    if (!entries.length && idx.fallbackProject) {
+      const proj = projectDir(idx.fallbackProject);
+      for (const f of listProjects().find(p => p.name === idx!.fallbackProject)?.files ?? []) if (f.kind === 'bib' && !isBackupFile(f.name)) entries.push(...cachedBib(path.join(proj, f.path)));
+    }
+    const seen = new Set<string>();
+    entries = entries.filter(e => (seen.has(e.key) ? false : (seen.add(e.key), true)));
+    const keys = String(req.query.keys ?? '').split(',').map(k => k.trim()).filter(Boolean);
+    if (keys.length) { res.json({ entries: entries.filter(e => keys.includes(e.key)), total: entries.length }); return; }
+    const terms = String(req.query.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    const limit = Math.min(500, Number(req.query.limit ?? 100) || 100);
+    const hits = terms.length
+      ? entries.filter(e => terms.every(t => e.key.toLowerCase().includes(t) || e.author.toLowerCase().includes(t) || e.year.includes(t) || e.title.toLowerCase().includes(t)))
+      : entries;
+    res.json({ entries: hits.slice(0, limit), total: entries.length, matches: hits.length });
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
 /** Document metadata for the editor: class, layouts, macros, bib entries, labels, authors. */
 api.get('/docs/*/meta', async (req, res) => {
+  const t0 = performance.now();
+  const timings: Record<string, number> = {};
+  let tPrev = t0;
+  const lap = (name: string) => { const t = performance.now(); timings[name] = Math.round(t - tPrev); tPrev = t; };
   try {
     const id = docId(req);
     const doc = await manager.open(id);
+    lap('open');
     const lyx = doc.toLyxDocument();
+    lap('toLyx');
     const proj = projectDir(doc.project);
     // child documents inherit macros, bibliography and labels from their master
     const masterRel = findMaster(doc.project, doc.relPath);
+    lap('findMaster');
     const masterId = masterRel ? `${doc.project}/${masterRel}` : null;
     const readDoc = (rel: string) => {
       const open = manager.docs.get(`${doc.project}/${rel}`);
@@ -127,6 +181,7 @@ api.get('/docs/*/meta', async (req, res) => {
       // the child's own macros come last (they override for the child's view)
       macros.push(...collectMacros(lyx, { include: includeDoc, readFile: (fn) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } } }));
     }
+    lap('macros');
     // labels across the master tree (for the cross-reference dialog)
     const labels: { name: string; context: string; file: string }[] = [];
     const seenLabelFiles = new Set<string>();
@@ -153,35 +208,47 @@ api.get('/docs/*/meta', async (req, res) => {
       }
     };
     collectLabels(rootLyx, rootRel, 0);
-    // bibliography files referenced by bibtex insets (in this doc and children)
+    lap('labels');
+    // bibliography files referenced by bibtex insets (in this doc and children), and the keys cited
     const bibFiles = new Set<string>();
+    const citedKeys = new Set<string>();
+    const scanned = new Set<string>([rootRel, doc.relPath]);
     const scan = (d: typeof lyx, depth: number) => {
-      if (depth > 3) return;
+      if (depth > 4) return;
       for (const { inset } of walkInsets(d.body)) {
         if (inset.type !== 'Leaf' || inset.name !== 'CommandInset') continue;
         const pm = paramMap(inset.params);
         if (inset.arg === 'bibtex') {
           for (const f of unquote(pm.get('bibfiles')).split(',')) if (f.trim()) bibFiles.add(f.trim());
+        } else if (inset.arg === 'citation') {
+          for (const k of unquote(pm.get('key')).split(',')) if (k.trim()) citedKeys.add(k.trim());
         } else if (inset.arg === 'include') {
           const fn = unquote(pm.get('filename'));
           const abs = safe(fn);
-          if (abs && fn.endsWith('.lyx') && fs.existsSync(abs)) { try { scan(parseLyx(fs.readFileSync(abs, 'utf8')), depth + 1); } catch { /* ignore */ } }
+          if (abs && fn.endsWith('.lyx') && fs.existsSync(abs)) {
+            const rel = path.relative(proj, abs);
+            if (scanned.has(rel)) continue;     // child documents may include each other (appendix ↔ macros file)
+            scanned.add(rel);
+            try { scan(readDoc(rel), depth + 1); } catch { /* ignore */ }
+          }
         }
       }
     };
     scan(rootLyx, 0);
     if (masterRel) scan(lyx, 0);
+    lap('bibscan');
     const bib: ReturnType<typeof parseBibtex> = [];
     for (const f of bibFiles) {
       const abs = safe(f.endsWith('.bib') ? f : f + '.bib');
-      if (abs && fs.existsSync(abs)) { try { bib.push(...parseBibtex(fs.readFileSync(abs, 'utf8'))); } catch { /* ignore */ } }
+      if (abs && fs.existsSync(abs)) bib.push(...cachedBib(abs));
     }
     // also offer all .bib files of the project when none is referenced
     if (!bib.length) {
       for (const f of listProjects().find(p => p.name === doc.project)?.files ?? []) {
-        if (f.kind === 'bib' && !isBackupFile(f.name)) { try { bib.push(...parseBibtex(fs.readFileSync(path.join(proj, f.path), 'utf8'))); } catch { /* ignore */ } }
+        if (f.kind === 'bib' && !isBackupFile(f.name)) bib.push(...cachedBib(path.join(proj, f.path)));
       }
     }
+    lap('bib');
     let layouts: unknown = null;
     let flexInsets: unknown = null;
     try {
@@ -192,9 +259,13 @@ api.get('/docs/*/meta', async (req, res) => {
     } catch (e) {
       layouts = null;
     }
-    // de-duplicate bibliography entries by key
+    lap('layouts');
+    if (req.query.debug) console.log('meta', id, timings, 'total', Math.round(performance.now() - t0), 'ms');
+    // de-duplicate bibliography entries by key; large bibliographies are searched through /bib instead of shipped whole
     const seenKeys = new Set<string>();
-    const bibUnique = bib.filter(e => (seenKeys.has(e.key) ? false : (seenKeys.add(e.key), true)));
+    const bibAll = bib.filter(e => (seenKeys.has(e.key) ? false : (seenKeys.add(e.key), true)));
+    const bibUnique = bibAll.length > 400 ? bibAll.filter(e => citedKeys.has(e.key)) : bibAll;
+    bibIndex.set(id, { files: [...bibFiles].map(f => safe(f.endsWith('.bib') ? f : f + '.bib')).filter((x): x is string => !!x), fallbackProject: bibFiles.size ? null : doc.project });
     res.json({
       id, project: doc.project, path: doc.relPath, master: masterId,
       labels,
@@ -204,6 +275,7 @@ api.get('/docs/*/meta', async (req, res) => {
       citeEngine: headerValue(lyx.header, 'cite_engine') ?? 'basic',
       citeEngineType: headerValue(lyx.header, 'cite_engine_type') ?? 'default',
       trackingChanges: headerValue(lyx.header, 'tracking_changes') === 'true',
+      bibTotal: bibAll.length,
       secnumdepth: Number(headerValue(lyx.header, 'secnumdepth') ?? 3),
       tocdepth: Number(headerValue(lyx.header, 'tocdepth') ?? 3),
       authors: getAuthors(lyx.header),

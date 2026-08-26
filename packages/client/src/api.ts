@@ -6,6 +6,8 @@ export interface BibItem { key: string; author: string; year: string; title: str
 export interface DocMeta {
   id: string; project: string; path: string; textclass: string; modules: string[]; language: string;
   useRefstyle: boolean; citeEngine: string; citeEngineType: string; trackingChanges: boolean; secnumdepth: number; tocdepth: number;
+  /** number of entries in the bibliography (meta.bib only holds the cited ones when it is large) */
+  bibTotal?: number;
   authors: { id: number; name: string; email?: string }[];
   macros: Record<string, { def: string; args: number; expand: boolean }>;
   macroList: { name: string; args: number; def: string; display?: string; source: string }[];
@@ -47,6 +49,7 @@ export const api = {
   getVersion: (id: string, vid: number) => req<{ lyx: string; name: string; created_at: number; author: string }>('GET', `/api/docs/${encId(id)}/versions/${vid}`),
   restoreVersion: (id: string, vid: number) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/versions/${vid}/restore`),
   deleteVersion: (id: string, vid: number) => req<{ ok: boolean }>('DELETE', `/api/docs/${encId(id)}/versions/${vid}`),
+  bibSearch: (id: string, q: string, limit = 100) => req<{ entries: BibItem[]; total: number; matches: number }>('GET', `/api/docs/${encId(id)}/bib?q=${encodeURIComponent(q)}&limit=${limit}`),
   export: (id: string, format: 'pdf' | 'tex', engine: 'overlyx' | 'lyx' = 'overlyx') => req<{ ok: boolean; log?: string; warnings?: string[]; pdf?: string | null; tex?: string }>('POST', `/api/docs/${encId(id)}/export`, { format, engine }),
   build: (id: string) => req<{ build: { status: string; log: string; pdf_path: string | null; updated_at: number } | null }>('GET', `/api/docs/${encId(id)}/build`),
   users: () => req<{ users: { id: number; username: string; name: string; color: string; isAdmin: number }[] }>('GET', '/api/users'),

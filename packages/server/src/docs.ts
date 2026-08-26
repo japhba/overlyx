@@ -29,6 +29,8 @@ export class OpenDoc {
   awareness: awarenessProtocol.Awareness;
   conns = new Map<import('ws').WebSocket, Set<number>>();
   fileHash = '';
+  /** identifies this Yjs history; a fresh Y.Doc (after a restart with a changed file) gets a new one */
+  epoch = crypto.randomBytes(8).toString('hex');
   private saveTimer: NodeJS.Timeout | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
   private unloadTimer: NodeJS.Timeout | null = null;
@@ -92,8 +94,8 @@ export class OpenDoc {
 
   persistState(): void {
     const state = Y.encodeStateAsUpdate(this.ydoc);
-    db.prepare('INSERT INTO ydocs (id, state, file_hash, updated_at) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state, file_hash=excluded.file_hash, updated_at=excluded.updated_at')
-      .run(this.id, Buffer.from(state), this.fileHash, Date.now());
+    db.prepare('INSERT INTO ydocs (id, state, file_hash, updated_at, epoch) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state, file_hash=excluded.file_hash, updated_at=excluded.updated_at, epoch=excluded.epoch')
+      .run(this.id, Buffer.from(state), this.fileHash, Date.now(), this.epoch);
   }
 
   async saveToFile(): Promise<boolean> {
@@ -175,9 +177,10 @@ export class DocManager {
     const hash = sha1(text);
     doc.fileHash = hash;
     knownHashes.set(absPath, hash);
-    const row = db.prepare('SELECT state, file_hash FROM ydocs WHERE id = ?').get(id) as { state: Buffer; file_hash: string } | undefined;
+    const row = db.prepare('SELECT state, file_hash, epoch FROM ydocs WHERE id = ?').get(id) as { state: Buffer; file_hash: string; epoch: string | null } | undefined;
     if (row && row.file_hash === hash) {
       Y.applyUpdate(doc.ydoc, new Uint8Array(row.state), 'db');
+      if (row.epoch) doc.epoch = row.epoch;
       // sanity: the stored state must produce the same file; otherwise rebuild
       let ok = false;
       try { ok = doc.fragment.length > 0 && sha1(doc.toLyxText()) === hash; } catch { ok = false; }

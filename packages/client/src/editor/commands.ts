@@ -5,7 +5,7 @@ import { type Command, type EditorState, TextSelection, NodeSelection, Selection
 import { type Node as PMNode, type MarkType, Fragment, type Attrs, type ResolvedPos } from 'prosemirror-model';
 import { splitBlock } from 'prosemirror-commands';
 import type { EditorView } from 'prosemirror-view';
-import { schema, commentHeader, formatTimestamp } from '@overlyx/core';
+import { schema, commentHeader, formatTimestamp, unquote, paramMap } from '@overlyx/core';
 import { nextLayout, isHeadingLayout } from './layouts';
 import { editorContext } from './context';
 import { MathInlineView, MathDisplayView, pendingFocus } from './nodeviews/math';
@@ -365,6 +365,7 @@ export function insertMath(display: boolean, env?: string): (view: EditorView) =
     // focus the mathfield (the node view DOM exists right after dispatch; retry on the next frame)
     const focusField = (): boolean => {
       const nv = (view as any).nodeDOM(pos) as HTMLElement | null;
+      (nv as any)?.pmViewDesc?.spec?.ensureField?.();
       const mf = nv?.querySelector?.('math-field') as any;
       if (!mf) return false;
       mf.focus(); mf.executeCommand('moveToMathfieldEnd');
@@ -410,6 +411,7 @@ export function arrowIntoMath(dir: -1 | 1): (state: EditorState, dispatch: ((tr:
     if (!node || (node.type.name !== 'math_inline' && node.type.name !== 'math_display' && node.type.name !== 'macro')) return false;
     const pos = dir > 0 ? $c.pos : $c.pos - node.nodeSize;
     const dom = view.nodeDOM(pos) as HTMLElement | null;
+    (dom as any)?.pmViewDesc?.spec?.ensureField?.();
     const mf = dom?.querySelector?.('math-field') as any;
     if (!mf) return false;
     mf.focus();
@@ -600,3 +602,32 @@ export function nearestNode(state: EditorState, types: string[]): { node: PMNode
 }
 
 export { splitBlock, Selection, type ResolvedPos };
+
+/** LyX "dissolve inset": replace an inset by its content (paragraph contents joined inline). */
+export function dissolveInset(pos: number): Command {
+  return (state, dispatch) => {
+    const node = state.doc.nodeAt(pos);
+    if (!node || node.type.name !== 'inset') return false;
+    if (!dispatch) return true;
+    const content: PMNode[] = [];
+    node.forEach((para, _o, i) => {
+      if (i > 0 && content.length) content.push(state.schema.text(' '));
+      para.forEach(c => content.push(c));
+    });
+    const tr = state.tr.replaceWith(pos, pos + node.nodeSize, content);
+    dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(pos))));
+    return true;
+  };
+}
+
+/** Project-relative id of the child document referenced by an include command node. */
+export function includeTarget(node: PMNode, project: string, docDir: string): string | null {
+  if (node.type.name !== 'command' || node.attrs.cmd !== 'include') return null;
+  let fn = '';
+  try { fn = unquote(paramMap(JSON.parse(node.attrs.params || '[]')).get('filename')); } catch { return null; }
+  if (!fn) return null;
+  const parts = [...docDir.split('/').filter(Boolean), ...fn.split('/')];
+  const out: string[] = [];
+  for (const p of parts) { if (p === '..') out.pop(); else if (p !== '.' && p !== '') out.push(p); }
+  return project + '/' + out.join('/');
+}

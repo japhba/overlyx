@@ -97,22 +97,37 @@ export async function exportTex(docId: string): Promise<{ dir: string; main: str
  * find/keep their conversion cache (svg-inkscape/) and to compare timestamps.
  */
 export function linkDocumentAssets(docDir: string, buildDirPath: string): void {
-  const LINK_EXT = new Set(['.svg', '.svgz', '.png', '.jpg', '.jpeg', '.eps', '.ps', '.tif', '.tiff', '.gif', '.bmp', '.webp', '.pdf_tex']);
-  let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(docDir, { withFileTypes: true }); } catch { return; }
-  for (const e of entries) {
-    if (e.name.startsWith('.') || e.name === 'node_modules') continue;
-    const src = path.join(docDir, e.name);
-    const dest = path.join(buildDirPath, e.name);
-    const wanted = e.isDirectory() || LINK_EXT.has(path.extname(e.name).toLowerCase());
-    if (!wanted) continue;
-    try {
-      const st = fs.lstatSync(dest);
-      if (st.isSymbolicLink()) { if (fs.readlinkSync(dest) === src) continue; fs.unlinkSync(dest); }
-      else continue; // a real file/dir produced by the build: leave it alone
-    } catch { /* does not exist */ }
-    try { fs.symlinkSync(src, dest); } catch { /* ignore */ }
-  }
+  const LINK_EXT = new Set(['.svg', '.svgz', '.png', '.jpg', '.jpeg', '.eps', '.ps', '.tif', '.tiff', '.gif', '.bmp', '.webp', '.pdf_tex', '.pdf']);
+  // Sub-directories are re-created as real directories with symlinked files (never symlinked as a
+  // whole): LaTeX may write .aux/.bbl files into them, and those must land in the build directory,
+  // not in the user's project.
+  let count = 0;
+  const linkDir = (srcDir: string, destDir: string, depth: number) => {
+    if (depth > 4 || count > 5000) return;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(srcDir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'svg-inkscape') continue;
+      const src = path.join(srcDir, e.name);
+      const dest = path.join(destDir, e.name);
+      if (e.isDirectory()) {
+        try { const st = fs.lstatSync(dest); if (st.isSymbolicLink()) fs.unlinkSync(dest); } catch { /* does not exist */ }
+        try { fs.mkdirSync(dest, { recursive: true }); } catch { /* ignore */ }
+        linkDir(src, dest, depth + 1);
+        continue;
+      }
+      // in sub-directories every file may be needed (\input{sub/file}); at the top level only graphics
+      // (other files are found through TEXINPUTS, and the exporter writes the .tex files itself)
+      if (depth === 0 && !LINK_EXT.has(path.extname(e.name).toLowerCase())) continue;
+      try {
+        const st = fs.lstatSync(dest);
+        if (st.isSymbolicLink()) { if (fs.readlinkSync(dest) === src) continue; fs.unlinkSync(dest); }
+        else continue; // a real file produced by the build (or the exporter): leave it alone
+      } catch { /* does not exist */ }
+      try { fs.symlinkSync(src, dest); count++; } catch { /* ignore */ }
+    }
+  };
+  linkDir(docDir, buildDirPath, 0);
   // the svg package writes its cache next to the document when compiling locally; share it
   const cache = path.join(docDir, 'svg-inkscape');
   if (!fs.existsSync(cache)) { try { fs.mkdirSync(cache); } catch { /* ignore */ } }
@@ -121,7 +136,8 @@ export function linkDocumentAssets(docDir: string, buildDirPath: string): void {
 }
 
 export function texInputs(docDir: string, buildDirPath: string): NodeJS.ProcessEnv {
-  const inputs = `${buildDirPath}//:${docDir}//:`;
+  // not recursive: a stray main.bbl/main.aux in some sub-directory of the project must not be picked up
+  const inputs = `${buildDirPath}:${docDir}:`;
   return { TEXINPUTS: inputs, BIBINPUTS: inputs, BSTINPUTS: inputs, openout_any: 'a', max_print_line: '1000' };
 }
 
@@ -163,10 +179,21 @@ async function buildViaOverlyx(requestedId: string): Promise<BuildResult> {
   const pdf = path.join(exp.dir, base + '.pdf');
   const logFile = path.join(exp.dir, base + '.log');
   let log = r.out;
-  if (fs.existsSync(logFile)) log = extractErrors(fs.readFileSync(logFile, 'utf8')) + '\n\n---- latexmk output ----\n' + r.out.slice(-20000);
-  const ok = r.code === 0 && fs.existsSync(pdf);
+  const warnings = [...exp.warnings];
+  let realErrors = r.code !== 0;
+  if (fs.existsSync(logFile)) {
+    const full = fs.readFileSync(logFile, 'utf8');
+    log = extractErrors(full) + '\n\n---- latexmk output ----\n' + r.out.slice(-20000);
+    // errors raised inside the generated bibliography come from malformed .bib entries, not from the
+    // document: the PDF is still produced, so report them as warnings (as LyX does)
+    const errs = errorLocations(full);
+    const bbl = errs.filter(e => /\.bbl$/.test(e.file));
+    realErrors = errs.length > bbl.length || (r.code !== 0 && errs.length === 0);
+    if (bbl.length) warnings.push(...bbl.map(e => `bibliography: ${path.basename(e.file)}:${e.line}: ${e.message}`));
+  }
+  const ok = !realErrors && fs.existsSync(pdf);
   if (masterRel) log = `(built master document ${masterRel})\n` + log;
-  const res: BuildResult = { ok, log, pdfPath: fs.existsSync(pdf) ? pdf : undefined, texPath: exp.main, warnings: exp.warnings, tex: exp.tex };
+  const res: BuildResult = { ok, log, pdfPath: fs.existsSync(pdf) ? pdf : undefined, texPath: exp.main, warnings, tex: exp.tex };
   record(requestedId, res);
   if (docId !== requestedId) record(docId, res);
   return res;
@@ -249,6 +276,17 @@ export function lastBuild(docId: string): { status: string; log: string; pdf_pat
 }
 
 /** Pull "! error" blocks and file:line:error lines out of a LaTeX log. */
+/** Errors of a -file-line-error log: { file, line, message }. */
+export function errorLocations(log: string): { file: string; line: number; message: string }[] {
+  const out: { file: string; line: number; message: string }[] = [];
+  for (const l of log.split('\n')) {
+    const m = /^(.+?):(\d+): (.*)$/.exec(l);
+    if (m && !/^(l|line)$/.test(m[1])) out.push({ file: m[1], line: Number(m[2]), message: m[3] });
+    else if (l.startsWith('! ')) out.push({ file: '', line: 0, message: l.slice(2) });
+  }
+  return out;
+}
+
 export function extractErrors(log: string): string {
   const lines = log.split('\n');
   const out: string[] = [];

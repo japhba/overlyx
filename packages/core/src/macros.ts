@@ -267,11 +267,7 @@ export function toMathliveMacros(macros: MacroDef[]): Record<string, { def: stri
   const out: Record<string, { def: string; args: number; expand: boolean }> = {};
   for (const m of macros) {
     if (!/^[A-Za-z]+$/.test(m.name)) continue;
-    let def = m.display ?? m.def;
-    // MathLive cannot render text-mode/raw TeX internals; keep the definition but guard obvious text-only constructs
-    if (/\\(hbox|vbox|raisebox|mkern|kern|scalebox|includesvg|includegraphics|sbox|usebox|ooalign|mathchoice|mathpalette|fontcharht|ensuremath|vcenter|accentset|text\b)/.test(def) && m.display === undefined) {
-      def = fallbackDisplay(m, def);
-    }
+    let def = m.display ?? sanitizeForMathlive(m.def, m);
     if (m.optional !== undefined && m.args > 0) {
       // MathLive has no optional args; substitute the default for #1 and shift the rest
       let d = def.replace(/#1/g, m.optional);
@@ -284,10 +280,66 @@ export function toMathliveMacros(macros: MacroDef[]): Record<string, { def: stri
   return out;
 }
 
-function fallbackDisplay(m: MacroDef, def: string): string {
-  // \ensuremath{X} -> X ; \text{...} keep; otherwise show the macro name in upright text
-  const em = /^\\ensuremath\{([\s\S]*)\}$/.exec(def.trim());
-  if (em) return em[1];
-  if (/\\ensuremath\{/.test(def)) return def.replace(/\\ensuremath\{/g, '{');
-  return `\\mathrm{${m.name}}`;
+/** Replace a command with a single braced argument (\cmd{X}, optionally with [..] options) using `fn(content)`. */
+function replaceCommand(def: string, cmd: string, fn: (content: string, opts: string[]) => string, nGroups = 1): string {
+  let out = def;
+  for (let guard = 0; guard < 50; guard++) {
+    const i = out.indexOf('\\' + cmd);
+    if (i < 0) break;
+    // the command name must end here (not a prefix of a longer command)
+    const after = out[i + cmd.length + 1];
+    if (after && /[A-Za-z]/.test(after)) { const rest = replaceCommand(out.slice(i + 1), cmd, fn, nGroups); return out.slice(0, i + 1) + rest; }
+    let j = skipWs(out, i + cmd.length + 1);
+    const opts: string[] = [];
+    let groups: string[] = [];
+    for (let g = 0; g < nGroups; g++) {
+      // [options] and {mandatory} groups in any order before the last mandatory group
+      for (;;) {
+        j = skipWs(out, j);
+        if (out[j] === '[') { const b = readBracket(out, j); if (!b) break; opts.push(b[0]); j = b[1]; continue; }
+        break;
+      }
+      const grp = readGroup(out, j);
+      if (!grp) { groups = []; break; }
+      groups.push(grp[0]); j = grp[1];
+    }
+    if (!groups.length) { out = out.slice(0, i) + '\\mathrm{' + cmd + '}' + out.slice(i + cmd.length + 1); continue; }
+    out = out.slice(0, i) + fn(groups[groups.length - 1], [...opts, ...groups.slice(0, -1)]) + out.slice(j);
+  }
+  return out;
+}
+
+/** Strip a text-mode `$...$` wrapper (math inside \raisebox / \scalebox content). */
+function unmath(s: string): string {
+  const t = s.trim();
+  const m = /^\$([\s\S]*)\$$/.exec(t);
+  return m ? m[1] : t;
+}
+
+/**
+ * MathLive cannot render some TeX internals / text-mode constructs used in macro definitions.
+ * Rewrite the common ones into a visual approximation, and fall back to the macro name
+ * (keeping the arguments visible) for the rest.
+ */
+export function sanitizeForMathlive(def: string, m: { name: string; args: number }): string {
+  let d = def;
+  // text-mode boxes that only change size / position: keep the content
+  d = replaceCommand(d, 'scalebox', c => `{${unmath(c)}}`, 2);
+  d = replaceCommand(d, 'resizebox', c => `{${unmath(c)}}`, 3);
+  d = replaceCommand(d, 'rotatebox', c => `{${unmath(c)}}`, 2);
+  d = replaceCommand(d, 'vcenter', c => `{${c}}`);
+  d = replaceCommand(d, 'vbox', c => `{${c}}`);
+  d = replaceCommand(d, 'hbox', c => `\\text{${c}}`);
+  d = replaceCommand(d, 'ensuremath', c => `{${c}}`);
+  d = replaceCommand(d, 'textnormal', c => `\\text{${c}}`);
+  d = replaceCommand(d, 'accentset', (c, o) => `\\overset{${o[0] ?? ''}}{${c}}`, 2);
+  d = replaceCommand(d, 'mathchoice', (c, o) => `{${o[0] ?? c}}`, 4);
+  d = d.replace(/\\relax\b/g, '');
+  // things we cannot approximate: show the macro name with its arguments
+  if (/\\(includesvg|includegraphics|sbox|usebox|ooalign|mathpalette|fontcharht|fontdimen|csname|expandafter|noexpand|@)/.test(d)) {
+    let f = `\\mathrm{${m.name}}`;
+    for (let k = 1; k <= m.args; k++) f += `\\{#${k}\\}`;
+    return f;
+  }
+  return d;
 }

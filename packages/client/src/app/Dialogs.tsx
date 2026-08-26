@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import type { DocMeta, ProjectFile } from '../api';
+import type { DocMeta, ProjectFile, BibItem } from '../api';
 import { api, graphicsUrl } from '../api';
 import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote } from '@overlyx/core';
@@ -113,26 +113,46 @@ export function RefDialog({ labels, useRefstyle, initial, onInsert, onClose }: {
 }
 
 /* ----------------------------------------------------------------- cite */
-export function CiteDialog({ meta, initial, onInsert, onClose }: { meta: DocMeta | null; initial?: { keys: string[]; cmd: string; before: string; after: string }; onInsert: (keys: string[], cmd: string, before: string, after: string) => void; onClose: () => void }) {
+export function CiteDialog({ meta, docId, initial, onInsert, onClose }: { meta: DocMeta | null; docId?: string; initial?: { keys: string[]; cmd: string; before: string; after: string }; onInsert: (keys: string[], cmd: string, before: string, after: string, entries: BibItem[]) => void; onClose: () => void }) {
   const [q, setQ] = useState('');
   const [keys, setKeys] = useState<string[]>(initial?.keys ?? []);
   const [cmd, setCmd] = useState(initial?.cmd ?? (meta?.citeEngine === 'natbib' || meta?.citeEngine === 'biblatex' ? 'citep' : 'cite'));
   const [before, setBefore] = useState(initial?.before ?? ''), [after, setAfter] = useState(initial?.after ?? '');
-  const bib = meta?.bib ?? [];
+  const local = meta?.bib ?? [];
+  const total = meta?.bibTotal ?? local.length;
+  const remote = total > local.length;    // large bibliography: search on the server
+  const [hits, setHits] = useState<BibItem[]>([]);
+  const [searching, setSearching] = useState(false);
+  useEffect(() => {
+    if (!remote || !docId) return;
+    setSearching(true);
+    const t = setTimeout(() => { api.bibSearch(docId, q, 200).then(r => setHits(r.entries)).catch(() => setHits([])).finally(() => setSearching(false)); }, q ? 200 : 0);
+    return () => clearTimeout(t);
+  }, [q, remote, docId]);
+  const known = useMemo(() => { const m = new Map<string, BibItem>(); for (const e of [...local, ...hits]) m.set(e.key, e); return m; }, [local, hits]);
   const list = useMemo(() => {
     const ql = q.toLowerCase().split(/\s+/).filter(Boolean);
-    if (!ql.length) return bib.slice(0, 200);
-    return bib.filter(e => ql.every(t => e.key.toLowerCase().includes(t) || e.author.toLowerCase().includes(t) || e.year.includes(t) || e.title.toLowerCase().includes(t))).slice(0, 200);
-  }, [q, bib]);
+    const match = (e: BibItem) => ql.every(t => e.key.toLowerCase().includes(t) || e.author.toLowerCase().includes(t) || e.year.includes(t) || e.title.toLowerCase().includes(t));
+    if (remote) {
+      // cited entries first (they are what the author usually wants again), then the search results
+      const citedHits = local.filter(match);
+      const rest = hits.filter(e => !citedHits.some(c => c.key === e.key));
+      return [...citedHits, ...rest].slice(0, 300);
+    }
+    if (!ql.length) return local.slice(0, 200);
+    return local.filter(match).slice(0, 200);
+  }, [q, local, hits, remote]);
   const toggle = (k: string) => setKeys(keys.includes(k) ? keys.filter(x => x !== k) : [...keys, k]);
   const cmds = meta?.citeEngine === 'natbib' ? ['citep', 'citet', 'citealp', 'citealt', 'citeauthor', 'citeyear', 'citeyearpar', 'nocite'] : meta?.citeEngine === 'biblatex' ? ['cite', 'parencite', 'textcite', 'autocite', 'citeauthor', 'citeyear', 'nocite'] : ['cite', 'nocite'];
+  const insert = () => { onInsert(keys, cmd, before, after, keys.map(k => known.get(k)).filter((e): e is BibItem => !!e)); onClose(); };
   return (
-    <Dialog title="Citation" onClose={onClose} wide buttons={<button class="btn primary" disabled={!keys.length} onClick={() => { onInsert(keys, cmd, before, after); onClose(); }}>{initial ? 'Apply' : 'Insert'}</button>}>
-      <Row label="Search"><input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} placeholder="author, year, title, key" /></Row>
+    <Dialog title="Citation" onClose={onClose} wide buttons={<button class="btn primary" disabled={!keys.length} onClick={insert}>{initial ? 'Apply' : 'Insert'}</button>}>
+      <Row label="Search"><input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} placeholder="author, year, title, key" /><span class="sub" style="color:#888;font-size:11px;white-space:nowrap">{searching ? 'searching…' : `${total} entries`}</span></Row>
       <div class="list" style="max-height:320px">
-        {keys.filter(k => !list.some(e => e.key === k)).map(k => <div key={'sel-' + k} class="sel" onClick={() => toggle(k)}><b>{bib.find(e => e.key === k)?.author || k}</b> <span class="sub">[{k}] (selected)</span></div>)}
+        {keys.filter(k => !list.some(e => e.key === k)).map(k => <div key={'sel-' + k} class="sel" onClick={() => toggle(k)}><b>{known.get(k)?.author || k}</b> <span class="sub">[{k}] (selected)</span></div>)}
         {list.map(e => <div key={e.key} class={keys.includes(e.key) ? 'sel' : ''} onClick={() => toggle(e.key)}><b>{e.author || e.key}</b> {e.year} <span class="sub">— {e.title}</span> <span class="sub">[{e.key}]</span></div>)}
-        {!bib.length && <div class="sub">No bibliography entries found (add a BibTeX inset or .bib files to the project).</div>}
+        {!total && <div class="sub">No bibliography entries found (add a BibTeX inset or .bib files to the project).</div>}
+        {remote && !q && total > local.length && <div class="sub" style="padding:4px 6px;color:#888">Type to search all {total} entries; the cited ones are listed first.</div>}
       </div>
       <Row label="Selected">{keys.join(', ') || <span class="sub">none</span>}</Row>
       <Row label="Style"><select value={cmd} onChange={e => setCmd((e.target as HTMLSelectElement).value)}>{cmds.map(c => <option key={c} value={c}>\{c}</option>)}</select></Row>

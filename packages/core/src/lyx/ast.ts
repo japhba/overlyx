@@ -351,9 +351,16 @@ export function* walkParagraphs(pars: Paragraph[]): Generator<Paragraph> {
   }
 }
 
+/** Walk all insets in document order (an inset is yielded before the insets nested inside it). */
 export function* walkInsets(pars: Paragraph[]): Generator<{ inset: Inset; par: Paragraph; item: InsetItem }> {
-  for (const p of walkParagraphs(pars)) {
-    for (const it of p.items) if (it.kind === 'inset') yield { inset: it.inset, par: p, item: it };
+  for (const p of pars) {
+    for (const it of p.items) {
+      if (it.kind !== 'inset') continue;
+      yield { inset: it.inset, par: p, item: it };
+      const ins = it.inset;
+      if (ins.type === 'Text') yield* walkInsets(ins.paragraphs);
+      else if (ins.type === 'Tabular') for (const r of ins.rows) for (const c of r.cells) yield* walkInsets(c.paragraphs);
+    }
   }
 }
 

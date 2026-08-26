@@ -1,8 +1,13 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import { login, openDoc, collectErrors } from './helpers';
 
-const DOC = 'recurrent_feature/main.lyx';
+// a scratch copy of a real paper: tests must never type into the user's own documents
+const DOC = 'e2e-scratch/smoke-main.lyx';
+test.beforeAll(() => {
+  mkdirSync('/root/projects/e2e-scratch', { recursive: true });
+  copyFileSync('/root/projects/recurrent_feature/main.lyx', '/root/projects/' + DOC);
+});
 
 test('login, open a native LyX document and render it', async ({ page }) => {
   const errors = collectErrors(page);
@@ -13,7 +18,7 @@ test('login, open a native LyX document and render it', async ({ page }) => {
   const paragraphs = await page.locator('.lyx-editor > .lyx-par').count();
   expect(paragraphs).toBeGreaterThan(50);
   // math fields rendered with MathLive
-  const mathFields = await page.locator('.lyx-editor math-field').count();
+  const mathFields = await page.locator('.lyx-editor .lyx-math-inline, .lyx-editor .lyx-math-display').count();
   expect(mathFields).toBeGreaterThan(50);
   // LyX notes present with labels
   await expect(page.locator('.lyx-inset-note-note').first()).toBeVisible();
@@ -26,7 +31,7 @@ test('login, open a native LyX document and render it', async ({ page }) => {
   expect(await page.locator('.outline-item').count()).toBeGreaterThan(3);
   // the title paragraph gets the LyX title layout style
   await expect(page.locator('.lyx-layout-section').first()).toBeVisible();
-  expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
+  expect(errors.filter(e => !/favicon|ResizeObserver|404/.test(e))).toEqual([]);   // the scratch copy lacks the figures
 });
 
 test('typing is saved to the .lyx file and seen by a second user', async ({ browser }) => {

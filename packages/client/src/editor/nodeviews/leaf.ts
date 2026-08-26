@@ -6,7 +6,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { paramMap, unquote } from '@overlyx/core';
 import { graphicsUrl } from '../../api';
-import { editorContext, resolveDocPath } from '../context';
+import { editorContext, resolveDocPath, viewDocDir, viewProject } from '../context';
 
 function params(node: PMNode): Map<string, string> {
   try { return paramMap(JSON.parse(node.attrs.params || '[]')); } catch { return new Map(); }
@@ -33,14 +33,14 @@ export class GraphicsView implements NodeView {
   private render() {
     const p = params(this.node);
     const file = p.get('filename') ?? '';
-    const project = editorContext.project;
+    const project = viewProject(this.view) || editorContext.project;
     const width = p.get('width');
     const scale = p.get('scale');
     const lyxscale = p.get('lyxscale');
     this.img.alt = file;
     this.img.title = `${file}\nwidth: ${width ?? 'auto'}${scale ? `, scale ${scale}%` : ''} — double-click to edit, right-click to export as PNG`;
     if (project && file) {
-      const url = graphicsUrl(project, resolveDocPath(file), 1600);
+      const url = graphicsUrl(project, resolveDocPath(file, viewDocDir(this.view)), 1600);
       if (this.img.dataset.src !== url) { this.img.dataset.src = url; this.img.src = url; }
       this.img.style.display = '';
       this.caption.textContent = '';
@@ -162,10 +162,10 @@ export class CommandView implements NodeView {
         text = cmd;
         this.dom.classList.add('lyx-button');
     }
-    if (cmd === 'include' && editorContext.project) {
+    if (cmd === 'include' && (viewProject(this.view) || editorContext.project)) {
       const fn = unquote(p.get('filename'));
       const a = document.createElement('a');
-      a.href = '#/' + editorContext.project + '/' + resolveDocPath(fn);
+      a.href = '#/' + (viewProject(this.view) || editorContext.project) + '/' + resolveDocPath(fn, viewDocDir(this.view));
       a.textContent = text;
       a.className = 'lyx-include-link';
       a.addEventListener('click', (ev) => { if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) ev.preventDefault(); });

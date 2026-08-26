@@ -12,14 +12,15 @@ import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Versions } from './Versions';
 import { PdfPanel, buildPdf, type PdfState } from './PdfPanel';
 import { StatusBar, type Status } from './StatusBar';
+import { SourcePane, type SourceTarget } from './SourcePane';
 import { GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, commandParams } from './Dialogs';
-import { createEditor, refreshMacros, type EditorHandle } from '../editor/editor';
-import { editorContext } from '../editor/context';
+import { createEditor, refreshMacros, describeChange, type EditorHandle } from '../editor/editor';
+import { editorContext, viewDocId } from '../editor/context';
 import { STANDARD_LAYOUTS } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
 import * as C from '../editor/commands';
-import { setMarginMode, marginKey } from '../editor/plugins/margin';
-import { acceptAllChanges, rejectAllChanges } from '../editor/plugins/changes';
+import { setMarginMode } from '../editor/plugins/margin';
+import { acceptAllChanges, rejectAllChanges, changeAt, resolveChange } from '../editor/plugins/changes';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '../editor/plugins/find';
 import { schema, unquote } from '@overlyx/core';
 
@@ -35,13 +36,20 @@ export function App() {
   return <Workspace user={user} onLogout={() => api.logout().then(() => setUser(null))} />;
 }
 
-function docIdFromHash(): string | null {
-  const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
-  return h || null;
+/** `#/project/path.lyx?goto=label` */
+function parseHash(): { id: string | null; goto: string | null } {
+  const raw = location.hash.replace(/^#\/?/, '');
+  const q = raw.indexOf('?');
+  const idPart = decodeURIComponent(q >= 0 ? raw.slice(0, q) : raw);
+  const goto = q >= 0 ? new URLSearchParams(raw.slice(q + 1)).get('goto') : null;
+  return { id: idPart || null, goto };
 }
 
+function loadTabs(): string[] { try { const t = JSON.parse(localStorage.getItem('ol.tabs') || '[]'); return Array.isArray(t) ? t.filter(x => typeof x === 'string') : []; } catch { return []; } }
+
 function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
-  const [docId, setDocId] = useState<string | null>(docIdFromHash());
+  const [docId, setDocId] = useState<string | null>(parseHash().id);
+  const [tabs, setTabs] = useState<string[]>(loadTabs);
   const [meta, setMeta] = useState<DocMeta | null>(null);
   const [headerLines, setHeaderLines] = useState<string[]>([]);
   const [status, setStatus] = useState<Status>({ connected: false, synced: false, users: [] });
@@ -49,57 +57,151 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [activePos, setActivePos] = useState(0);
   const [showFiles, setShowFiles] = useState(true);
-  const [rightTab, setRightTab] = useState<'outline' | 'pdf' | 'versions' | null>('outline');
+  const [rightTab, setRightTab] = useState<'outline' | 'pdf' | 'versions' | 'source' | null>('outline');
   const [pdf, setPdf] = useState<PdfState>({ url: null, log: '', busy: false, ok: null, warnings: [] });
   const [dialog, setDialog] = useState<Dialog>(null);
   const [message, setMessage] = useState<{ text: string; kind: 'info' | 'error' } | null>(null);
   const [marginMode, setMarginModeState] = useState(localStorage.getItem('ol.margin') === '1');
+  const [combined, setCombined] = useState(localStorage.getItem('ol.combined') === '1');
+  const [childIds, setChildIds] = useState<string[]>([]);
   const [tracking, setTracking] = useState(false);
   const [chord, setChord] = useState<string | null>(null);
+  const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [saved, setSaved] = useState(true);
   const [zoom, setZoom] = useState(Number(localStorage.getItem('ol.zoom') || 1));
   const [findOpen, setFindOpen] = useState(false);
   const [findQ, setFindQ] = useState(''), [replQ, setReplQ] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const [selVersion, setSelVersion] = useState(0);
+  const [docTick, setDocTick] = useState(0);
+  const [selTick, setSelTick] = useState(0);
   const editorRef = useRef<EditorHandle | null>(null);
+  const childRefs = useRef(new Map<string, EditorHandle>());
+  const activeViewRef = useRef<EditorView | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pendingGoto = useRef<string | null>(parseHash().goto);
   const [, force] = useState(0);
   const rerender = () => force(x => x + 1);
 
   const notify = useCallback((text: string, kind: 'info' | 'error' = 'info') => { setMessage({ text, kind }); setTimeout(() => setMessage(m => (m?.text === text ? null : m)), 4000); }, []);
 
   useEffect(() => {
-    const onHash = () => setDocId(docIdFromHash());
+    const onHash = () => { const h = parseHash(); pendingGoto.current = h.goto; setDocId(h.id); if (h.goto && h.id === editorContext.docId) runGoto(); };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
   useEffect(() => { document.documentElement.style.setProperty('--editor-zoom', String(zoom)); localStorage.setItem('ol.zoom', String(zoom)); }, [zoom]);
+  useEffect(() => { localStorage.setItem('ol.tabs', JSON.stringify(tabs)); }, [tabs]);
+  useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.combined', combined ? '1' : '0'); }, [combined]);
 
-  // create / destroy the editor when the document changes
+  // every opened document gets a tab
+  useEffect(() => { if (docId) setTabs(t => (t.includes(docId) ? t : [...t, docId])); }, [docId]);
+
+  const openInTab = useCallback((id: string, opts: { background?: boolean; goto?: string } = {}) => {
+    setTabs(t => (t.includes(id) ? t : [...t, id]));
+    if (opts.background) { notify(`Opened ${id.split('/').pop()} in a new tab`); return; }
+    const target = '#/' + id + (opts.goto ? '?goto=' + encodeURIComponent(opts.goto) : '');
+    if (location.hash === target) { pendingGoto.current = opts.goto ?? null; runGoto(); } else location.hash = target;
+  }, []);
+  const closeTab = useCallback((id: string) => {
+    setTabs(t => {
+      const idx = t.indexOf(id);
+      const next = t.filter(x => x !== id);
+      if (id === parseHash().id) { const nb = next[Math.min(idx, next.length - 1)]; location.hash = nb ? '#/' + nb : ''; }
+      return next;
+    });
+  }, []);
+
+  /** Find a label in a view and select it. */
+  const gotoLabelIn = (view: EditorView, name: string): boolean => {
+    let found = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (found >= 0) return false;
+      if (node.type.name === 'command' && node.attrs.cmd === 'label' && unquote(commandParams(node).get('name')) === name) found = pos;
+      if (node.type.name === 'math_display' && String(node.attrs.latex).includes(`\\label{${name}}`)) found = pos;
+      return true;
+    });
+    if (found < 0) return false;
+    view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, found)).scrollIntoView());
+    view.focus();
+    const dom = view.nodeDOM(found) as HTMLElement | null;
+    dom?.scrollIntoView?.({ block: 'center' });
+    return true;
+  };
+  const gotoLabel = useCallback((name: string, from?: EditorView) => {
+    const views = [from, editorRef.current?.view, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v);
+    for (const v of views) if (gotoLabelIn(v, name)) return;
+    const l = editorContext.meta?.labels.find(x => x.name === name);
+    if (l?.file && editorContext.project) { openInTab(`${editorContext.project}/${l.file}`, { goto: name }); return; }
+    notify(`Label “${name}” not found`, 'error');
+  }, []);
+  const runGoto = () => {
+    const name = pendingGoto.current;
+    if (!name) return;
+    const v = editorRef.current?.view;
+    if (v && gotoLabelIn(v, name)) { pendingGoto.current = null; }
+  };
+
+  const onSelection = (view: EditorView) => {
+    activeViewRef.current = view; editorContext.activeView = view;
+    const p = C.currentParagraph(view.state);
+    setLayout(p ? p.node.attrs.layout : '');
+    if (view === editorRef.current?.view) setActivePos(view.state.selection.from);
+    setChord(chordKey.getState(view.state) ?? null);
+    const ch = changeAt(view.state, view.state.selection.from);
+    setChangeInfo(ch ? describeChange(ch.type, ch.author, ch.time) : null);
+    setSelTick(t => t + 1);
+    rerender();
+  };
+
+  // create / destroy the editor when the document changes (metadata first, so formulas render once with the right macros)
   useEffect(() => {
     editorRef.current?.destroy();
-    editorRef.current = null;
-    setMeta(null); setOutline([]); setPdf({ url: null, log: '', busy: false, ok: null, warnings: [] });
+    editorRef.current = null; activeViewRef.current = null;
+    setMeta(null); setOutline([]); setChildIds([]); setPdf({ url: null, log: '', busy: false, ok: null, warnings: [] });
     if (!docId || !containerRef.current) return;
-    containerRef.current.innerHTML = '';
+    containerRef.current.innerHTML = '<div class="editor-loading">Loading document…</div>';
     editorContext.user = user; editorContext.docId = docId; editorContext.project = docId.split('/')[0]; editorContext.meta = null;
     editorContext.docDir = docId.split('/').slice(1, -1).join('/');
-    const handle = createEditor({
-      docId, user, container: containerRef.current, marginMode,
-      onStatus: setStatus,
-      onSelectionChange: (view) => {
-        const p = C.currentParagraph(view.state);
-        setLayout(p ? p.node.attrs.layout : '');
-        setActivePos(view.state.selection.from);
-        setChord(chordKey.getState(view.state) ?? null);
-        rerender();
-      },
-      onDocChange: (view) => { setSaved(false); scheduleOutline(view); scheduleMacros(view); },
-    });
-    editorRef.current = handle;
-    const scheduleOutline = debounce((view: EditorView) => setOutline(buildOutline(view.state.doc, true, editorContext.meta?.secnumdepth ?? 3)), 300);
+    let handle: EditorHandle | null = null;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const start = (m: DocMeta | null) => {
+      if (cancelled || !containerRef.current) return;
+      containerRef.current.innerHTML = '';
+      if (m) {
+        setMeta(m); editorContext.meta = m;
+        applyAuthorColors(m.authors);
+        setTracking(m.trackingChanges);
+        editorContext.trackChanges = m.trackingChanges;
+        editorContext.changeAuthorId = m.authors.find(x => x.name === user.name)?.id;
+      }
+      handle = createEditor({
+        docId, user, container: containerRef.current, marginMode,
+        onStatus: setStatus,
+        onSelectionChange: onSelection,
+        onDocChange: (view) => { setSaved(false); setDocTick(t => t + 1); scheduleOutline(view); scheduleMacros(view); },
+      });
+      editorRef.current = handle; activeViewRef.current = handle.view; editorContext.activeView = handle.view;
+      refreshMacros(handle.view, m?.macros ?? {});
+      // header lines live in the Y meta map
+      const metaMap = handle.ydoc.getMap<string>('meta');
+      const readHeader = () => { try { setHeaderLines(JSON.parse(metaMap.get('header') ?? '[]')); } catch { /* ignore */ } };
+      readHeader(); metaMap.observe(readHeader);
+      // saved-state polling: the server writes 1.5s after the last change
+      timer = setInterval(() => setSaved(true), 4000);
+      const h = handle;
+      h.provider.on('sync', () => {
+        setOutline(buildOutline(h.view.state.doc, true, editorContext.meta?.secnumdepth ?? 3));
+        setChildIds(collectChildren(h.view));
+        refreshMacros(h.view, editorContext.meta?.macros ?? {});
+        setDocTick(x => x + 1);
+        setTimeout(runGoto, 50);
+      });
+      rerender();
+    };
+    const scheduleOutline = debounce((view: EditorView) => { setOutline(buildOutline(view.state.doc, true, editorContext.meta?.secnumdepth ?? 3)); setChildIds(collectChildren(view)); }, 300);
     let macroSig = '';
     const scheduleMacros = debounce((view: EditorView) => {
       // only re-apply when a FormulaMacro inset changed (cheap signature)
@@ -107,31 +209,18 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       view.state.doc.descendants((n, pos) => { if (n.type.name === 'macro') sig += pos + n.attrs.lines + ';'; return true; });
       if (sig !== macroSig) { macroSig = sig; refreshMacros(view, editorContext.meta?.macros ?? {}); }
     }, 600);
-    api.meta(docId).then(m => {
-      setMeta(m); editorContext.meta = m;
-      applyAuthorColors(m.authors);
-      refreshMacros(handle.view, m.macros);
-      setTracking(m.trackingChanges);
-      editorContext.trackChanges = m.trackingChanges;
-      const a = m.authors.find(x => x.name === user.name);
-      editorContext.changeAuthorId = a?.id;
-      // header lines live in the Y meta map
-      const metaMap = handle.ydoc.getMap<string>('meta');
-      const readHeader = () => { try { setHeaderLines(JSON.parse(metaMap.get('header') ?? '[]')); } catch { /* ignore */ } };
-      readHeader(); metaMap.observe(readHeader);
-      setOutline(buildOutline(handle.view.state.doc, true, editorContext.meta?.secnumdepth ?? 3));
-    }).catch(e => notify('Could not load document metadata: ' + e.message, 'error'));
-    // saved-state polling: the server writes 1.5s after the last change
-    const t = setInterval(() => setSaved(true), 4000);
-    handle.provider.on('sync', () => { setOutline(buildOutline(handle.view.state.doc, true, editorContext.meta?.secnumdepth ?? 3)); refreshMacros(handle.view, editorContext.meta?.macros ?? {}); });
-    return () => { clearInterval(t); handle.destroy(); editorRef.current = null; };
+    api.meta(docId).then(start).catch(e => { notify('Could not load document metadata: ' + e.message, 'error'); start(null); });
+    return () => { cancelled = true; if (timer) clearInterval(timer); handle?.destroy(); editorRef.current = null; };
   }, [docId]);
 
   // UI hooks for keymap / node views
   useEffect(() => {
     editorContext.notify = notify;
     editorContext.openDialog = (name, arg) => setDialog({ name, arg });
-    editorContext.openInsetDialog = (view, pos) => { if (pos !== undefined) setDialog({ name: 'inset', arg: pos }); };
+    editorContext.openInsetDialog = (_view, pos) => { if (pos !== undefined) setDialog({ name: 'inset', arg: pos }); };
+    editorContext.openInTab = openInTab;
+    editorContext.gotoLabel = gotoLabel;
+    (window as any).overlyx = editorContext;   // handy for tests / debugging
     editorContext.ui = {
       save: () => { if (docId) api.save(docId).then(() => { setSaved(true); notify('Saved to ' + docId); }).catch(e => notify(String(e.message), 'error')); },
       viewPdf: () => build('overlyx'),
@@ -140,15 +229,21 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       openDialog: (name, arg) => setDialog({ name, arg }),
       toggleTrackChanges: () => toggleTracking(),
       toggleOutline: () => setRightTab(t => (t === 'outline' ? null : 'outline')),
+      toggleSource: () => setRightTab(t => (t === 'source' ? null : 'source')),
+      toggleCombined: () => setCombined(c => !c),
+      acceptAll: () => run(acceptAllChanges()),
+      rejectAll: () => run(rejectAllChanges()),
+      closeTab: () => { if (docId) closeTab(docId); },
       zoom: (d) => setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))),
       openFile: () => setShowFiles(true),
       newFile: () => { const p = docId?.split('/')[0]; if (p) { const name = prompt('New document name:', 'untitled.lyx'); if (name) api.newDoc(p, name, { title: name.replace(/\.lyx$/, '') }).then(r => { location.hash = '#/' + r.id; setRefreshKey(k => k + 1); }); } },
     };
   });
 
-  const view = editorRef.current?.view ?? null;
-  const run = (cmd: (state: any, dispatch: any, view?: any) => boolean) => { if (!view) return; cmd(view.state, view.dispatch, view); view.focus(); };
-  const runView = (fn: (v: EditorView) => boolean) => { if (!view) return; fn(view); };
+  const view = activeViewRef.current ?? editorRef.current?.view ?? null;
+  const masterView = editorRef.current?.view ?? null;
+  const run = (cmd: (state: any, dispatch: any, view?: any) => boolean) => { const v = activeViewRef.current ?? editorRef.current?.view; if (!v) return; cmd(v.state, v.dispatch, v); v.focus(); };
+  const runView = (fn: (v: EditorView) => boolean) => { const v = activeViewRef.current ?? editorRef.current?.view; if (!v) return; fn(v); };
 
   const build = async (engine: 'overlyx' | 'lyx') => {
     if (!docId) return;
@@ -178,28 +273,32 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     }
     editorContext.trackChanges = next;
     setTracking(next);
-    notify(next ? 'Change tracking ON' : 'Change tracking OFF');
+    notify(next ? `Change tracking ON (as ${user.name})` : 'Change tracking OFF');
   };
 
   const toggleMargin = () => {
     const next = !marginMode;
     setMarginModeState(next);
     localStorage.setItem('ol.margin', next ? '1' : '0');
-    if (view) setMarginMode(view, next);
+    if (masterView) setMarginMode(masterView, next);
+    for (const h of childRefs.current.values()) setMarginMode(h.view, next);
   };
 
   const labels = useMemo(() => {
     if (!view) return [] as { name: string; context: string; file?: string }[];
     const out: { name: string; context: string; file?: string }[] = [];
-    view.state.doc.descendants((node, pos) => {
+    const scan = (v: EditorView, file?: string) => v.state.doc.descendants((node, pos) => {
       if (node.type.name === 'command' && node.attrs.cmd === 'label') {
-        const $p = view.state.doc.resolve(pos);
-        out.push({ name: unquote(commandParams(node).get('name')), context: $p.parent.textContent.slice(0, 60) });
+        const $p = v.state.doc.resolve(pos);
+        out.push({ name: unquote(commandParams(node).get('name')), context: $p.parent.textContent.slice(0, 60), file });
       } else if (node.type.name === 'math_display') {
-        for (const m of String(node.attrs.latex).matchAll(/\\label\{([^}]*)\}/g)) out.push({ name: m[1], context: '(equation)' });
+        for (const m of String(node.attrs.latex).matchAll(/\\label\{([^}]*)\}/g)) out.push({ name: m[1], context: '(equation)', file });
       }
       return true;
     });
+    scan(view);
+    if (masterView && masterView !== view) scan(masterView, viewDocId(masterView).split('/').slice(1).join('/'));
+    for (const h of childRefs.current.values()) if (h.view !== view) scan(h.view, viewDocId(h.view).split('/').slice(1).join('/'));
     // labels from the master document and its other children (server-side scan)
     const own = new Set(out.map(l => l.name));
     for (const l of meta?.labels ?? []) if (!own.has(l.name) && l.file !== meta?.path) out.push({ name: l.name, context: l.context, file: l.file });
@@ -207,6 +306,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   }, [dialog, view, meta]);
 
   const layouts = meta?.layouts?.length ? meta.layouts : STANDARD_LAYOUTS;
+  const base = (id: string) => id.split('/').pop() ?? id;
+  const docLabel = docId ? (combined && childIds.length ? [docId, ...childIds].map(base).join(' + ') : docId) : '';
 
   const menus: MenuDef[] = docId ? [
     { title: 'File', items: [
@@ -223,7 +324,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       ] },
       { label: 'Versions…', action: () => setRightTab('versions') },
       { sep: true },
-      { label: 'Close', shortcut: 'Ctrl+W', action: () => { location.hash = ''; } },
+      { label: 'Close tab', shortcut: 'Ctrl+W', action: () => closeTab(docId) },
+      { label: 'Close other tabs', action: () => setTabs([docId]) },
     ] },
     { title: 'Edit', items: [
       { label: 'Undo', shortcut: 'Ctrl+Z', action: () => run(undo) },
@@ -278,6 +380,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       ] },
       { label: 'Track Changes ▸', sub: [
         { label: 'Track changes', shortcut: 'Ctrl+Shift+E', checked: tracking, action: toggleTracking },
+        { label: 'Accept change at cursor', disabled: !changeInfo, action: () => { const v = view; if (!v) return; const ch = changeAt(v.state, v.state.selection.from); if (ch) run(resolveChange(ch, true)); } },
+        { label: 'Reject change at cursor', disabled: !changeInfo, action: () => { const v = view; if (!v) return; const ch = changeAt(v.state, v.state.selection.from); if (ch) run(resolveChange(ch, false)); } },
+        { sep: true },
         { label: 'Accept all changes', action: () => run(acceptAllChanges()) },
         { label: 'Reject all changes', action: () => run(rejectAllChanges()) },
       ] },
@@ -289,9 +394,11 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     { title: 'View', items: [
       { label: 'File browser', checked: showFiles, action: () => setShowFiles(!showFiles) },
       { label: 'Outline', shortcut: 'Ctrl+Alt+O', checked: rightTab === 'outline', action: () => setRightTab(rightTab === 'outline' ? null : 'outline') },
+      { label: 'Source pane (LyX / LaTeX)', shortcut: 'Ctrl+Alt+S', checked: rightTab === 'source', action: () => setRightTab(rightTab === 'source' ? null : 'source') },
       { label: 'PDF preview', checked: rightTab === 'pdf', action: () => setRightTab(rightTab === 'pdf' ? null : 'pdf') },
       { label: 'Versions', checked: rightTab === 'versions', action: () => setRightTab(rightTab === 'versions' ? null : 'versions') },
       { sep: true },
+      { label: 'Master + child documents in one view', checked: combined, action: () => setCombined(!combined) },
       { label: 'Notes & comments in the margin', checked: marginMode, action: toggleMargin },
       { label: 'Open all insets', action: () => run(C.setAllInsets('open')) },
       { label: 'Close all insets', action: () => run(C.setAllInsets('collapsed')) },
@@ -382,7 +489,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     ] },
     { title: 'Navigate', items: [
       { label: 'Outline pane', shortcut: 'Ctrl+Alt+O', action: () => setRightTab('outline') },
-      { label: 'Go to label…', action: () => { const n = prompt('Label:'); if (n && view) gotoLabel(view, n); } },
+      { label: 'Go to label…', action: () => { const n = prompt('Label:'); if (n) gotoLabel(n, view ?? undefined); } },
+      { label: 'Next tab', shortcut: 'Ctrl+Tab', action: () => { const i = tabs.indexOf(docId); const n = tabs[(i + 1) % tabs.length]; if (n) location.hash = '#/' + n; } },
       { label: 'Beginning of document', shortcut: 'Ctrl+Home', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)).scrollIntoView()); view.focus(); } } },
       { label: 'End of document', shortcut: 'Ctrl+End', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView()); view.focus(); } } },
     ] },
@@ -391,13 +499,21 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Math macros…', action: () => setDialog({ name: 'macros' }) },
       { label: 'Change tracking', shortcut: 'Ctrl+Shift+E', checked: tracking, action: toggleTracking },
       { sep: true },
-      { label: 'Reload metadata (macros, bibliography)', action: () => { if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (view) refreshMacros(view, m.macros); notify('Metadata reloaded'); }); } },
+      { label: 'Reload metadata (macros, bibliography)', action: () => { if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); notify('Metadata reloaded'); }); } },
     ] },
     { title: 'Help', items: [
       { label: 'Keyboard shortcuts', action: () => setDialog({ name: 'help' }) },
       { label: 'About OverLyX', action: () => alert('OverLyX — a LyX-compatible collaborative WYSIWYG editor for LaTeX documents.\nDocuments are stored as native .lyx files; math is edited live with MathLive; collaboration via Yjs CRDTs.') },
     ] },
   ] : [];
+
+  /** Entries picked in the citation dialog become known to the editor (for rendering author/year) even if they were not cited before. */
+  const rememberBib = (entries: { key: string; author: string; year: string; title: string }[]) => {
+    const m = editorContext.meta;
+    if (!m || !entries.length) return;
+    for (const e of entries) if (!m.bib.some(b => b.key === e.key)) m.bib.push(e);
+    setMeta({ ...m });
+  };
 
   const toggleCellLine = (key: string) => {
     if (!view) return;
@@ -475,52 +591,44 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const renderDialog = () => {
     if (!dialog || !view || !docId) return null;
     const close = () => { setDialog(null); view.focus(); };
+    const project = viewDocId(view).split('/')[0] || docId.split('/')[0];
+    const docDir = view.dom.dataset.docDir ?? editorContext.docDir;
     switch (dialog.name) {
-      case 'graphics': return <GraphicsDialog meta={meta} project={docId.split('/')[0]} docDir={editorContext.docDir} onClose={close} onInsert={o => run(C.insertGraphics(o.filename, o))} />;
+      case 'graphics': return <GraphicsDialog meta={meta} project={project} docDir={docDir} onClose={close} onInsert={o => run(C.insertGraphics(o.filename, o))} />;
       case 'table': return <TableDialog onClose={close} onInsert={(r, c) => run(C.insertTable(r, c))} />;
       case 'label': return <LabelDialog initial={suggestLabel(view)} onClose={close} onInsert={n => run(C.insertLabel(n))} />;
       case 'ref': {
-        const target = dialog.arg as { pos: number; node: any } | undefined;
-        if (target?.node) {
+        const target = dialog.arg as { pos?: number; node?: any; prefill?: string } | undefined;
+        if (target?.node && target.pos !== undefined) {
           const p = commandParams(target.node);
+          const tpos = target.pos, tnode = target.node;
           return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: p.get('LatexCommand') ?? 'ref' }} onClose={close}
-            onInsert={(n, k) => { const params = [`LatexCommand ${k}`, `reference "${n}"`, 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '']; view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
+            onInsert={(n, k) => { const params = [`LatexCommand ${k}`, `reference "${n}"`, 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '']; view.dispatch(view.state.tr.setNodeMarkup(tpos, undefined, { ...tnode.attrs, params: JSON.stringify(params) })); }} />;
         }
-        return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} onClose={close} onInsert={(n, k) => run(C.insertRef(n, k))} />;
+        return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={target?.prefill ? { name: target.prefill, kind: 'ref' } : undefined} onClose={close} onInsert={(n, k) => run(C.insertRef(n, k))} />;
       }
       case 'cite': {
         const target = dialog.arg as { pos: number; node: any } | undefined;
         if (target?.node) {
           const p = commandParams(target.node);
-          return <CiteDialog meta={meta} initial={{ keys: unquote(p.get('key')).split(',').map(k => k.trim()).filter(Boolean), cmd: p.get('LatexCommand') ?? 'cite', before: unquote(p.get('before')), after: unquote(p.get('after')) }} onClose={close}
-            onInsert={(keys, cmd, b, a) => { const params = [`LatexCommand ${cmd}`]; if (a) params.push(`after "${a}"`); if (b) params.push(`before "${b}"`); params.push(`key "${keys.join(',')}"`, 'literal "false"', ''); view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
+          return <CiteDialog meta={meta} docId={docId} initial={{ keys: unquote(p.get('key')).split(',').map(k => k.trim()).filter(Boolean), cmd: p.get('LatexCommand') ?? 'cite', before: unquote(p.get('before')), after: unquote(p.get('after')) }} onClose={close}
+            onInsert={(keys, cmd, b, a, entries) => { rememberBib(entries); const params = [`LatexCommand ${cmd}`]; if (a) params.push(`after "${a}"`); if (b) params.push(`before "${b}"`); params.push(`key "${keys.join(',')}"`, 'literal "false"', ''); view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
         }
-        return <CiteDialog meta={meta} onClose={close} onInsert={(keys, cmd, b, a) => run(C.insertCite(keys, cmd, b, a))} />;
+        return <CiteDialog meta={meta} docId={docId} onClose={close} onInsert={(keys, cmd, b, a, entries) => { rememberBib(entries); run(C.insertCite(keys, cmd, b, a)); }} />;
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t, n) => run(C.insertHref(t, n))} />;
-      case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; refreshMacros(view, m.macros); })} />;
+      case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); })} />;
       case 'help': return <HelpDialog onClose={close} />;
       case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
       case 'tex': return <TexDialog tex={String(dialog.arg ?? '')} onClose={close} />;
       case 'layout': return <LayoutPicker layouts={layouts} onClose={close} onPick={n => run(C.setLayout(n))} />;
       case 'argument': { run(C.insertArgument(String(dialog.arg ?? '1'))); setDialog(null); return null; }
-      case 'open-include': {
-        const node = dialog.arg as any;
-        const fn = unquote(commandParams(node).get('filename'));
-        const base = docId.split('/'); base.pop();
-        const parts = [...base, ...fn.split('/')];
-        const norm: string[] = [];
-        for (const p of parts) { if (p === '..') norm.pop(); else if (p !== '.') norm.push(p); }
-        setDialog(null);
-        location.hash = '#/' + norm.join('/');
-        return null;
-      }
       case 'inset': {
         const target = insetDialogNode();
         if (!target) { setDialog(null); notify('No inset at the cursor'); return null; }
         if (target.node.type.name === 'graphics') {
           const p = commandParams(target.node);
-          return <GraphicsDialog meta={meta} project={docId.split('/')[0]} docDir={editorContext.docDir} initial={{ filename: p.get('filename') ?? '', width: p.get('width'), scale: p.get('scale'), lyxscale: p.get('lyxscale') }} onClose={close}
+          return <GraphicsDialog meta={meta} project={project} docDir={docDir} initial={{ filename: p.get('filename') ?? '', width: p.get('width'), scale: p.get('scale'), lyxscale: p.get('lyxscale') }} onClose={close}
             onInsert={o => { const params = [`\tfilename ${o.filename}`]; if (o.lyxscale) params.push(`\tlyxscale ${o.lyxscale}`); if (o.scale) params.push(`\tscale ${o.scale}`); if (o.width) params.push(`\twidth ${o.width}`); params.push(''); view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
         }
         if (target.node.type.name === 'command' && target.node.attrs.cmd === 'href') {
@@ -534,10 +642,18 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     return null;
   };
 
+  const sourceTarget: SourceTarget | null = (() => {
+    if (!view) return null;
+    if (masterView && view === masterView && editorRef.current) return { view, ydoc: editorRef.current.ydoc, docId: docId! };
+    for (const [id, h] of childRefs.current) if (h.view === view) return { view, ydoc: h.ydoc, docId: id };
+    return editorRef.current ? { view: editorRef.current.view, ydoc: editorRef.current.ydoc, docId: docId! } : null;
+  })();
+
   return (
     <div class="app">
-      <MenuBar menus={menus} user={user} onLogout={onLogout} right={docId ? <span style="color:#666;font-size:12px;margin-right:12px">{docId}{meta?.master && <> · child of <a href={'#/' + meta.master} style="color:#3b6ea5">{meta.master.split('/').pop()}</a></>}</span> : null} />
+      <MenuBar menus={menus} user={user} onLogout={onLogout} right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />
       {docId && <Toolbar layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={toolbarGroups} />}
+      {tabs.length > 0 && <TabBar tabs={tabs} current={docId} onSelect={id => { location.hash = '#/' + id; }} onClose={closeTab} onReorder={setTabs} />}
       {docId && findOpen && (
         <div class="find-bar">
           <span>Find:</span><input autofocus value={findQ} onInput={e => { setFindQ((e.target as HTMLInputElement).value); if (view) setQuery(view, (e.target as HTMLInputElement).value, false); }} onKeyDown={e => { if (e.key === 'Enter' && view) findNext(view, e.shiftKey ? -1 : 1); if (e.key === 'Escape') { setFindOpen(false); if (view) { setQuery(view, '', false); view.focus(); } } }} />
@@ -551,26 +667,104 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         </div>
       )}
       <div class="main">
-        {showFiles && <div class="sidebar"><div class="panel-tabs"><button class="active">Files</button><button onClick={() => setShowFiles(false)}>✕</button></div><div class="panel-body"><FileBrowser current={docId} refreshKey={refreshKey} onOpen={id => { location.hash = '#/' + id; }} /></div></div>}
+        {showFiles && <div class="sidebar"><div class="panel-tabs"><button class="active">Files</button><button onClick={() => setShowFiles(false)}>✕</button></div><div class="panel-body"><FileBrowser current={docId} refreshKey={refreshKey} onOpen={id => openInTab(id)} /></div></div>}
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
-          {docId ? <div class="editor-page" ref={containerRef} /> : <Welcome onOpen={() => setShowFiles(true)} />}
+          {docId ? (
+            <div class="editor-page">
+              <div class="editor-host" ref={containerRef} />
+              {combined && childIds.map(id => (
+                <ChildEditor key={id} id={id} user={user} marginMode={marginMode} onSelection={onSelection} onDocChange={() => { setSaved(false); setDocTick(t => t + 1); }}
+                  register={(cid, h) => { if (h) childRefs.current.set(cid, h); else childRefs.current.delete(cid); rerender(); }} />
+              ))}
+            </div>
+          ) : <Welcome onOpen={() => setShowFiles(true)} />}
         </div>
         {docId && rightTab && (
-          <div class={'sidebar right' + (rightTab === 'pdf' ? ' wide' : '')}>
+          <div class={'sidebar right' + (rightTab === 'pdf' ? ' wide' : rightTab === 'source' ? ' source' : '')}>
             <div class="panel-tabs">
               <button class={rightTab === 'outline' ? 'active' : ''} onClick={() => setRightTab('outline')}>Outline</button>
+              <button class={rightTab === 'source' ? 'active' : ''} onClick={() => setRightTab('source')} title="LyX / LaTeX source (Ctrl+Alt+S)">Source</button>
               <button class={rightTab === 'pdf' ? 'active' : ''} onClick={() => setRightTab('pdf')}>PDF</button>
               <button class={rightTab === 'versions' ? 'active' : ''} onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }}>Versions</button>
               <button onClick={() => setRightTab(null)}>✕</button>
             </div>
-            {rightTab === 'outline' && <div class="panel-body"><Outline view={view} items={outline} activePos={activePos} /></div>}
+            {rightTab === 'outline' && <div class="panel-body"><Outline view={masterView} items={outline} activePos={activePos} /></div>}
+            {rightTab === 'source' && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} onNotify={notify} />}
             {rightTab === 'pdf' && <PdfPanel docId={docId} state={pdf} onBuild={build} onShowTex={() => setDialog({ name: 'tex', arg: pdf.tex ?? '' })} />}
             {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
           </div>
         )}
       </div>
-      <StatusBar layout={layout} status={status} chord={chord} message={message} saved={saved} tracking={tracking} />
+      <StatusBar layout={layout} status={status} chord={chord} message={message} saved={saved} tracking={tracking} trackingAs={user.name} change={changeInfo}
+        docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null} />
       {renderDialog()}
+    </div>
+  );
+}
+
+/** Child documents (\include / \input of .lyx files) of a master, in document order. */
+function collectChildren(view: EditorView): string[] {
+  const out: string[] = [];
+  const project = view.dom.dataset.project ?? '', docDir = view.dom.dataset.docDir ?? '';
+  view.state.doc.descendants((node) => {
+    const id = C.includeTarget(node, project, docDir);
+    if (id && id.endsWith('.lyx') && !out.includes(id)) out.push(id);
+    return true;
+  });
+  return out;
+}
+
+function ChildEditor({ id, user, marginMode, onSelection, onDocChange, register }: { id: string; user: User; marginMode: boolean; onSelection: (v: EditorView) => void; onDocChange: () => void; register: (id: string, h: EditorHandle | null) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<Status>({ connected: false, synced: false, users: [] });
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let handle: EditorHandle | null = null;
+    let cancelled = false;
+    // the child's metadata (macros inherited from the master) must exist before we connect
+    api.meta(id).then(m => {
+      if (cancelled || !ref.current) return;
+      ref.current.innerHTML = '';
+      handle = createEditor({ docId: id, user, container: ref.current, marginMode, child: true, onStatus: setStatus, onSelectionChange: onSelection, onDocChange, onStale: () => setTimeout(() => location.reload(), 800) });
+      register(id, handle);
+      refreshMacros(handle.view, m.macros, true);
+      handle.provider.on('sync', () => { if (handle) refreshMacros(handle.view, m.macros, true); });
+    }).catch(e => { if (!cancelled) setError(String((e as Error).message)); });
+    return () => { cancelled = true; if (handle) { register(id, null); handle.destroy(); } };
+  }, [id]);
+  return (
+    <div class="child-doc">
+      <div class="child-doc-header">
+        <span class="name">📄 {id.split('/').pop()}</span>
+        <span class="path">{id}</span>
+        <span style="flex:1" />
+        <span class="sync">{error ? 'not available' : status.connected ? (status.synced ? 'connected' : 'syncing…') : 'connecting…'}</span>
+        {!error && <a href={'#/' + id} class="small-btn" title="Open this child document in its own tab">Open in tab</a>}
+      </div>
+      {error ? <div class="child-doc-error">Child document cannot be opened: {error}</div> : <div class="editor-host child" ref={ref} />}
+    </div>
+  );
+}
+
+function TabBar({ tabs, current, onSelect, onClose, onReorder }: { tabs: string[]; current: string | null; onSelect: (id: string) => void; onClose: (id: string) => void; onReorder: (t: string[]) => void }) {
+  const drag = useRef<string | null>(null);
+  const base = (id: string) => id.split('/').pop() ?? id;
+  // disambiguate tabs with the same file name by prefixing the project
+  const counts = new Map<string, number>();
+  for (const t of tabs) counts.set(base(t), (counts.get(base(t)) ?? 0) + 1);
+  return (
+    <div class="tabbar" role="tablist">
+      {tabs.map(id => (
+        <a key={id} href={'#/' + id} role="tab" class={'tab' + (id === current ? ' active' : '')} title={id} draggable
+          onClick={e => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onSelect(id); } }}
+          onAuxClick={e => { if (e.button === 1) { e.preventDefault(); onClose(id); } }}
+          onDragStart={() => { drag.current = id; }}
+          onDragOver={e => e.preventDefault()}
+          onDrop={e => { e.preventDefault(); const from = drag.current; if (!from || from === id) return; const t = tabs.filter(x => x !== from); t.splice(t.indexOf(id), 0, from); onReorder(t); }}>
+          <span class="tab-name">{(counts.get(base(id)) ?? 0) > 1 ? id.split('/')[0] + '/' : ''}{base(id)}</span>
+          <button class="tab-close" title="Close tab (middle-click)" onClick={e => { e.preventDefault(); e.stopPropagation(); onClose(id); }}>×</button>
+        </a>
+      ))}
     </div>
   );
 }
@@ -620,17 +814,6 @@ function suggestLabel(view: EditorView): string {
     }
   }
   return prefix + (text || 'label');
-}
-
-function gotoLabel(view: EditorView, name: string): void {
-  let found = -1;
-  view.state.doc.descendants((node, pos) => {
-    if (found >= 0) return false;
-    if (node.type.name === 'command' && node.attrs.cmd === 'label' && unquote(commandParams(node).get('name')) === name) found = pos;
-    if (node.type.name === 'math_display' && String(node.attrs.latex).includes(`\\label{${name}}`)) found = pos;
-    return true;
-  });
-  if (found >= 0) { view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, found)).scrollIntoView()); view.focus(); }
 }
 
 /** One colour per LyX author for change tracking (stable across sessions: by author id order). */

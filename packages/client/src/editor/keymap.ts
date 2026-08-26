@@ -27,6 +27,11 @@ export interface UiActions {
   zoom(delta: number): void;
   openFile(): void;
   newFile(): void;
+  toggleCombined?(): void;
+  acceptAll?(): void;
+  rejectAll?(): void;
+  closeTab?(): void;
+  toggleSource?(): void;
 }
 
 const ui = (fn: (a: UiActions) => void): Command => () => { const a = editorContext.ui; if (a) fn(a); return true; };

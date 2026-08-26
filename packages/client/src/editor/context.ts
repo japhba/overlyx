@@ -18,14 +18,27 @@ export interface EditorContext {
   /** author id used for change tracking */
   changeAuthorId?: number;
   trackChanges: boolean;
+  /** master + child documents shown in one view */
+  combined: boolean;
+  /** open a document in a tab of the workspace (optionally without switching to it) */
+  openInTab?: (id: string, opts?: { background?: boolean; goto?: string }) => void;
+  /** jump to a label (in any open editor, or open the document that defines it) */
+  gotoLabel?: (name: string, from?: EditorView) => void;
+  /** the editor view that had the selection last (master or a child document) */
+  activeView?: EditorView | null;
 }
 
-export const editorContext: EditorContext = { user: null, meta: null, docId: null, project: null, docDir: '', trackChanges: false };
+export const editorContext: EditorContext = { user: null, meta: null, docId: null, project: null, docDir: '', trackChanges: false, combined: false };
 
 /** Resolve a document-relative file name (graphics, includes) to a project-relative path. */
-export function resolveDocPath(file: string): string {
-  const parts = [...editorContext.docDir.split('/').filter(Boolean), ...file.split('/')];
+export function resolveDocPath(file: string, docDir: string = editorContext.docDir): string {
+  const parts = [...docDir.split('/').filter(Boolean), ...file.split('/')];
   const out: string[] = [];
   for (const p of parts) { if (p === '..') out.pop(); else if (p !== '.' && p !== '') out.push(p); }
   return out.join('/');
 }
+
+/** Document id / directory of the document a view shows (child editors differ from the workspace document). */
+export function viewDocId(view: EditorView): string { return view.dom.dataset.docId ?? editorContext.docId ?? ''; }
+export function viewDocDir(view: EditorView): string { return view.dom.dataset.docDir ?? editorContext.docDir; }
+export function viewProject(view: EditorView): string { return view.dom.dataset.project ?? editorContext.project ?? ''; }

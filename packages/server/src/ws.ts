@@ -14,6 +14,8 @@ import { userFromCookieHeader } from './auth.ts';
 
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
+/** OverLyX extension: the document's epoch, sent before the first sync step (see docs.ts) */
+const MSG_EPOCH = 2;
 
 function send(doc: OpenDoc, conn: WebSocket, msg: Uint8Array): void {
   if (conn.readyState !== conn.OPEN && conn.readyState !== conn.CONNECTING) { closeConn(doc, conn); return; }
@@ -112,6 +114,13 @@ async function handleConnection(conn: WebSocket, docId: string): Promise<void> {
   conn.on('close', () => { closeConn(doc, conn); clearInterval(ping); });
   conn.on('error', () => { closeConn(doc, conn); clearInterval(ping); });
 
+  // epoch first: a client that knows a different epoch must not merge its stale history into this doc
+  {
+    const enc0 = encoding.createEncoder();
+    encoding.writeVarUint(enc0, MSG_EPOCH);
+    encoding.writeVarString(enc0, doc.epoch);
+    send(doc, conn, encoding.toUint8Array(enc0));
+  }
   // initial sync step 1 + awareness
   {
     const enc = encoding.createEncoder();

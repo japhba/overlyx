@@ -19,6 +19,15 @@ Overleaf/LyX blend.
 * **Export**: LaTeX (a port of LyX's `output_latex` driven by LyX's own layout files) and PDF via
   `latexmk`; a native-LyX build as reference; embedded graphics (SVG/PDF/EPS/…) are rendered to
   PNG for the editor and downloadable as PNG.
+* **Editing niceties**: macro arguments are editable in place (`\inv{…}` shows LyX-like corner
+  markers around the argument / `\text{}` / `\left…\right` cell that holds the caret); right-click
+  menus on formulas, cross-references (go to label, reference format), citations, hyperlinks, child
+  documents, insets and tracked changes; `Ctrl/⌘+click` follows a reference; **tabs** for open
+  documents (child documents open in a tab on double-click); *View ▸ Master + child documents in one
+  view* shows a paper and its `\include`d children as one scrolling page; an editable **Source pane**
+  (live LyX source that follows the cursor — edit and *Apply* — plus the exported LaTeX); wide display
+  formulas overflow symmetrically into the margins (Google-Docs style) with equation numbers kept
+  clear of the formula.
 * **LyX keyboard bindings** (`cua.bind`/`menus.bind`/`math.bind`): `Ctrl+M`, `Ctrl+Shift+M`,
   `Alt+P …` layouts, `Alt+M …` math, `Alt+A …` paragraph, `Ctrl+E/B/U`, `Ctrl+L` (TeX code),
   `Ctrl+Alt+F/M/N/C` (footnote / margin / note / comment), `Ctrl+Shift+E` (track changes), …
@@ -71,4 +80,14 @@ npx playwright test                       # e2e (needs the dev servers running)
 * The document header (class, preamble, options) is edited through *Document ▸ Settings*; raw
   header editing is available for anything else.
 * Change tracking: insertions/deletions are marked per author (matched by the LyX author name);
-  *Edit ▸ Track Changes* accepts/rejects all.
+  the status bar shows who you are tracking as and the change under the cursor; *Edit ▸ Track
+  Changes* / the context menu accept or reject single changes or all of them.
+* Macro rendering follows LyX's positional semantics (a `FormulaMacro` applies from its position on;
+  later definitions — including ones nested in notes — override earlier ones). Macros with
+  arguments are expanded into editable templates for MathLive and contracted back to `\name{…}`
+  calls when the formula is written to the file (`packages/core/src/mathedit.ts`).
+* Large documents: formulas render statically first and become editable MathLive fields when they
+  scroll into view or are hovered/entered.
+* Every document's Yjs history carries an *epoch*; a browser tab whose editor belongs to an older
+  epoch (server restarted with a changed file) reloads instead of merging stale content. Cross-tab
+  BroadcastChannel syncing of y-websocket is disabled for the same reason.
