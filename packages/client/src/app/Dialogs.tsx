@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { DocMeta, ProjectFile, BibItem } from '../api';
+import type { GraphicsOpts, TableChanges } from '../editor/commands';
 import { api, graphicsUrl } from '../api';
 import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote } from '@overlyx/core';
@@ -25,10 +26,11 @@ export function Dialog({ title, onClose, children, buttons, wide }: { title: str
 const Row = ({ label, children }: { label: string; children: ComponentChildren }) => <div class="row"><label>{label}</label>{children}</div>;
 
 /* ------------------------------------------------------------- graphics */
-export function GraphicsDialog({ meta, project, docDir = '', initial, onInsert, onClose }: { meta: DocMeta | null; project: string; docDir?: string; initial?: { filename: string; width?: string; scale?: string; lyxscale?: string }; onInsert: (o: { filename: string; width?: string; scale?: string; lyxscale?: string }) => void; onClose: () => void }) {
+export function GraphicsDialog({ meta, project, docDir = '', initial, onInsert, onClose }: { meta: DocMeta | null; project: string; docDir?: string; initial?: GraphicsOpts & { filename: string }; onInsert: (filename: string, o: GraphicsOpts) => void; onClose: () => void }) {
   const [filename, setFilename] = useState(initial?.filename ?? '');
-  const [width, setWidth] = useState(initial?.width ?? (initial ? '' : '100col%'));
-  const [scale, setScale] = useState(initial?.scale ?? '');
+  const [o, setO] = useState<GraphicsOpts>(() => (initial ? { ...initial } : { width: '100col%' }));
+  const set = (k: keyof GraphicsOpts, v: string | boolean) => setO(prev => ({ ...prev, [k]: v }));
+  const [tab, setTab] = useState<'graphics' | 'clip' | 'latex'>('graphics');
   // file names are stored relative to the document's directory (as LyX does)
   const toDocRel = (projectRel: string) => { const up = docDir ? docDir.split('/').filter(Boolean).length : 0; if (docDir && projectRel.startsWith(docDir + '/')) return projectRel.slice(docDir.length + 1); return '../'.repeat(up) + projectRel; };
   const toProjectRel = (docRel: string) => { const parts = [...docDir.split('/').filter(Boolean), ...docRel.split('/')]; const out: string[] = []; for (const p of parts) { if (p === '..') out.pop(); else if (p && p !== '.') out.push(p); } return out.join('/'); };
@@ -45,17 +47,67 @@ export function GraphicsDialog({ meta, project, docDir = '', initial, onInsert, 
     };
     input.click();
   };
+  const text = (k: keyof GraphicsOpts, placeholder = '') => <input type="text" value={String(o[k] ?? '')} onInput={e => set(k, (e.target as HTMLInputElement).value)} placeholder={placeholder} />;
+  const check = (k: keyof GraphicsOpts) => <input type="checkbox" checked={!!o[k]} onChange={e => set(k, (e.target as HTMLInputElement).checked)} />;
   return (
-    <Dialog title="Graphics" onClose={onClose} buttons={<button class="btn primary" disabled={!filename} onClick={() => { onInsert({ filename, width: width || undefined, scale: scale || undefined, lyxscale: initial?.lyxscale }); onClose(); }}>{initial ? 'Apply' : 'Insert'}</button>}>
+    <Dialog title="Graphics" onClose={onClose} wide buttons={<button class="btn primary" disabled={!filename} onClick={() => { onInsert(filename, o); onClose(); }}>{initial ? 'Apply' : 'Insert'}</button>}>
       <Row label="File"><input type="text" value={filename} onInput={e => setFilename((e.target as HTMLInputElement).value)} placeholder="figures/plot.pdf" /><button class="small-btn" onClick={upload}>Upload…</button></Row>
-      <div class="list" style="max-height:180px">
+      <div class="list" style="max-height:140px">
         {files.map(f => <div key={f.path} class={toDocRel(f.path) === filename ? 'sel' : ''} onClick={() => setFilename(toDocRel(f.path))}>{f.path}</div>)}
         {!files.length && <div class="sub">No image files in this project yet — upload one.</div>}
       </div>
-      {filename && <img src={graphicsUrl(project, toProjectRel(filename), 600)} style="max-height:180px;max-width:100%;object-fit:contain;border:1px solid #ddd" alt="" />}
-      <Row label="Width"><input type="text" value={width} onInput={e => setWidth((e.target as HTMLInputElement).value)} placeholder="e.g. 100col%, 0.5text%, 8cm (empty = natural)" /></Row>
-      <Row label="Scale (%)"><input type="text" value={scale} onInput={e => setScale((e.target as HTMLInputElement).value)} placeholder="e.g. 50" /></Row>
-      <div class="sub" style="color:#777;font-size:11px">LyX units: <code>col%</code> = column width, <code>text%</code> = text width, <code>page%</code>, <code>line%</code>, or absolute lengths (cm, in, pt).</div>
+      {filename && <img src={graphicsUrl(project, toProjectRel(filename), 600)} style="max-height:140px;max-width:100%;object-fit:contain;border:1px solid #ddd" alt="" />}
+      <div class="panel-tabs">
+        <button class={tab === 'graphics' ? 'active' : ''} onClick={() => setTab('graphics')}>Graphics</button>
+        <button class={tab === 'clip' ? 'active' : ''} onClick={() => setTab('clip')}>Clipping</button>
+        <button class={tab === 'latex' ? 'active' : ''} onClick={() => setTab('latex')}>LaTeX and LyX options</button>
+      </div>
+      {tab === 'graphics' && <>
+        <Row label="Scale on screen (%)">{text('lyxscale', 'e.g. 50 (display size in the editor)')}</Row>
+        <Row label="Scale (%)">{text('scale', 'e.g. 50 — output scaling')}</Row>
+        <Row label="Width">{text('width', 'e.g. 100col%, 0.5text%, 8cm (empty = natural)')}</Row>
+        <Row label="Height">{text('height', 'e.g. 5cm, 30theight%')}</Row>
+        <Row label="Maintain aspect ratio">{check('keepAspectRatio')}</Row>
+        <Row label="Rotation angle">{text('rotateAngle', 'degrees, e.g. 90')}<select value={o.rotateOrigin ?? 'center'} onChange={e => set('rotateOrigin', (e.target as HTMLSelectElement).value)}>{['center', 'leftTop', 'leftBottom', 'leftBaseline', 'centerTop', 'centerBottom', 'centerBaseline', 'rightTop', 'rightBottom', 'rightBaseline'].map(v => <option key={v} value={v}>{v}</option>)}</select></Row>
+        <Row label="Scale before rotation">{check('scaleBeforeRotation')}</Row>
+        <div class="sub" style="color:#777;font-size:11px">LyX units: <code>col%</code> = column width, <code>text%</code> = text width, <code>page%</code>, <code>line%</code>, <code>theight%</code>, or absolute lengths (cm, in, pt).</div>
+      </>}
+      {tab === 'clip' && <>
+        <Row label="Clip to bounding box">{check('clip')}</Row>
+        <Row label="Bounding box">{text('BoundingBox', 'llx lly urx ury, e.g. 0bp 0bp 200bp 100bp')}</Row>
+        <div class="sub" style="color:#777;font-size:11px">Empty bounding box: the one stored in the file.</div>
+      </>}
+      {tab === 'latex' && <>
+        <Row label="Draft mode">{check('draft')}<span class="sub">only a frame is printed</span></Row>
+        <Row label="LaTeX options">{text('special', 'extra \\includegraphics options, e.g. angle=45')}</Row>
+        <Row label="Group">{text('groupId', 'graphics group name')}</Row>
+      </>}
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------ paragraph */
+export interface ParagraphSettings { align: string | null; spacing: string | null; noindent: boolean; labelwidthstring: string | null }
+export function ParagraphDialog({ initial, indentSeparation, onApply, onClose }: { initial: ParagraphSettings; indentSeparation: boolean; onApply: (s: ParagraphSettings) => void; onClose: () => void }) {
+  const [align, setAlign] = useState(initial.align ?? '');
+  const sp = initial.spacing ?? '';
+  const [spacing, setSpacing] = useState(sp.startsWith('other') ? 'other' : sp);
+  const [spacingValue, setSpacingValue] = useState(sp.startsWith('other') ? sp.slice(6).trim() : '1.5');
+  const [noindent, setNoindent] = useState(initial.noindent);
+  const [labelwidth, setLabelwidth] = useState(initial.labelwidthstring ?? '');
+  const apply = () => {
+    onApply({ align: align || null, spacing: spacing === 'other' ? `other ${spacingValue || '1.5'}` : spacing || null, noindent, labelwidthstring: labelwidth || null });
+    onClose();
+  };
+  return (
+    <Dialog title="Paragraph Settings" onClose={onClose} buttons={<button class="btn primary" onClick={apply}>Apply</button>}>
+      <Row label="Alignment"><select value={align} onChange={e => setAlign((e.target as HTMLSelectElement).value)}>{[['', 'Default (layout)'], ['block', 'Justified'], ['left', 'Left'], ['center', 'Center'], ['right', 'Right']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Row>
+      <Row label="Line spacing"><select value={spacing} onChange={e => setSpacing((e.target as HTMLSelectElement).value)}>{[['', 'Default (document)'], ['single', 'Single'], ['onehalf', 'One and a half'], ['double', 'Double'], ['other', 'Custom']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+        {spacing === 'other' && <input type="text" value={spacingValue} onInput={e => setSpacingValue((e.target as HTMLInputElement).value)} style="width:5em" />}</Row>
+      <Row label={indentSeparation ? 'Indent paragraph' : 'No indentation'}>{indentSeparation
+        ? <input type="checkbox" checked={!noindent} onChange={e => setNoindent(!(e.target as HTMLInputElement).checked)} />
+        : <input type="checkbox" checked={noindent} onChange={e => setNoindent((e.target as HTMLInputElement).checked)} />}</Row>
+      <Row label="Label width"><input type="text" value={labelwidth} onInput={e => setLabelwidth((e.target as HTMLInputElement).value)} placeholder="longest label (for lists / description)" /></Row>
     </Dialog>
   );
 }
@@ -179,60 +231,272 @@ const CLASSES = ['article', 'report', 'book', 'scrartcl', 'scrreprt', 'scrbook',
 export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose }: { docId: string; meta: DocMeta | null; headerLines: string[]; onSaved: () => void; onClose: () => void }) {
   const get = (k: string) => headerLines.find(l => l.startsWith('\\' + k + ' '))?.slice(k.length + 2) ?? '';
   const preStart = headerLines.indexOf('\\begin_preamble'), preEnd = headerLines.indexOf('\\end_preamble');
-  const [textclass, setTextclass] = useState(get('textclass') || 'article');
+  // a single map of header values edited by the tabs; only keys that changed are written back
+  const KEYS = ['textclass', 'language', 'paperfontsize', 'papersize', 'cite_engine', 'cite_engine_type', 'biblio_style', 'use_hyperref', 'tracking_changes', 'output_changes',
+    'paperorientation', 'use_geometry', 'paperwidth', 'paperheight', 'leftmargin', 'topmargin', 'rightmargin', 'bottommargin', 'headheight', 'headsep', 'footskip', 'columnsep', 'papercolumns', 'papersides',
+    'paragraph_separation', 'defskip', 'spacing', 'justification', 'is_math_indent', 'math_numbering_side', 'quotes_style', 'secnumdepth', 'tocdepth', 'float_placement', 'float_alignment',
+    'font_roman', 'font_sans', 'font_typewriter', 'font_math', 'font_default_family', 'use_microtype', 'font_sc', 'font_roman_osf', 'font_sf_scale', 'font_tt_scale', 'use_non_tex_fonts',
+    'pdf_title', 'pdf_author', 'pdf_subject', 'pdf_keywords', 'pdf_bookmarks', 'pdf_bookmarksnumbered', 'pdf_bookmarksopen', 'pdf_breaklinks', 'pdf_pdfborder', 'pdf_colorlinks', 'pdf_backref', 'pdf_pdfusetitle', 'pdf_quoted_options',
+    'suppress_date', 'use_refstyle', 'use_minted', 'use_lineno', 'index_command', 'paperpagestyle', 'html_math_output'] as const;
+  const [v, setV] = useState<Record<string, string>>(() => Object.fromEntries(KEYS.map(k => [k, get(k)])));
+  const set = (k: string, val: string) => setV(prev => ({ ...prev, [k]: val }));
   const [options, setOptions] = useState(get('options'));
-  const [language, setLanguage] = useState(get('language') || 'english');
-  const [fontsize, setFontsize] = useState(get('paperfontsize') || 'default');
-  const [papersize, setPapersize] = useState(get('papersize') || 'default');
-  const [citeEngine, setCiteEngine] = useState(get('cite_engine') || 'basic');
-  const [citeType, setCiteType] = useState(get('cite_engine_type') || 'default');
-  const [bibStyle, setBibStyle] = useState(get('biblio_style') || 'plain');
-  const [hyperref, setHyperref] = useState(get('use_hyperref') === 'true');
-  const [tracking, setTracking] = useState(get('tracking_changes') === 'true');
-  const [outputChanges, setOutputChanges] = useState(get('output_changes') === 'true');
   const [preamble, setPreamble] = useState(preStart >= 0 ? headerLines.slice(preStart + 1, preEnd).join('\n') : '');
   const [modules, setModules] = useState((() => { const s = headerLines.indexOf('\\begin_modules'), e = headerLines.indexOf('\\end_modules'); return s >= 0 ? headerLines.slice(s + 1, e).join(', ') : ''; })());
+  // branches: \branch NAME … \end_branch blocks (kept verbatim apart from \selected)
+  const parseBranches = () => {
+    const out: { name: string; selected: boolean; lines: string[] }[] = [];
+    for (let i = 0; i < headerLines.length; i++) {
+      if (!headerLines[i].startsWith('\\branch ')) continue;
+      const j = headerLines.indexOf('\\end_branch', i);
+      const lines = headerLines.slice(i + 1, j);
+      out.push({ name: headerLines[i].slice(8), selected: lines.some(l => l === '\\selected 1'), lines });
+      i = j;
+    }
+    return out;
+  };
+  const [branches, setBranches] = useState(parseBranches);
+  const [newBranch, setNewBranch] = useState('');
   const [raw, setRaw] = useState(false);
   const [rawText, setRawText] = useState(headerLines.join('\n'));
-  const [tab, setTab] = useState<'general' | 'preamble' | 'raw'>('general');
+  type Tab = 'general' | 'page' | 'text' | 'numbering' | 'fonts' | 'branches' | 'pdf' | 'preamble' | 'raw';
+  const [tab, setTab] = useState<Tab>('general');
   const save = async () => {
     if (tab === 'raw' || raw) { await api.setHeader(docId, { headerLines: rawText.split('\n') }); onSaved(); onClose(); return; }
     const lines = [...headerLines];
-    const setL = (k: string, v: string) => { const i = lines.findIndex(l => l === '\\' + k || l.startsWith('\\' + k + ' ')); if (i >= 0) lines[i] = `\\${k} ${v}`; else { const ti = lines.findIndex(l => l.startsWith('\\textclass')); lines.splice(ti + 1, 0, `\\${k} ${v}`); } };
-    setL('textclass', textclass); setL('language', language); setL('paperfontsize', fontsize); setL('papersize', papersize);
-    setL('cite_engine', citeEngine); setL('cite_engine_type', citeType); setL('biblio_style', bibStyle);
-    setL('use_hyperref', String(hyperref)); setL('tracking_changes', String(tracking)); setL('output_changes', String(outputChanges));
-    if (options.trim()) { setL('options', options.trim()); setL('use_default_options', 'false'); } else { const i = lines.findIndex(l => l.startsWith('\\options ')); if (i >= 0) lines.splice(i, 1); }
+    const findKey = (k: string) => lines.findIndex(l => l === '\\' + k || l.startsWith('\\' + k + ' '));
+    /** insert a missing key before the first of the `before` keys that exists (LyX's header order), else after \textclass */
+    const insertAt = (k: string, before: string[]) => { for (const b of before) { const i = findKey(b); if (i >= 0) return i; } return findKey('textclass') + 1; };
+    const ORDER: Record<string, string[]> = {
+      options: ['use_default_options'], paperorientation: ['suppress_date'], use_geometry: ['use_package'],
+      paperwidth: ['paperheight', 'leftmargin', 'topmargin', 'rightmargin', 'bottommargin', 'headheight', 'headsep', 'footskip', 'columnsep', 'secnumdepth'],
+      paperheight: ['leftmargin', 'topmargin', 'rightmargin', 'bottommargin', 'headheight', 'headsep', 'footskip', 'columnsep', 'secnumdepth'],
+      leftmargin: ['topmargin', 'rightmargin', 'bottommargin', 'headheight', 'headsep', 'footskip', 'columnsep', 'secnumdepth'],
+      topmargin: ['rightmargin', 'bottommargin', 'headheight', 'headsep', 'footskip', 'columnsep', 'secnumdepth'],
+      rightmargin: ['bottommargin', 'headheight', 'headsep', 'footskip', 'columnsep', 'secnumdepth'],
+      bottommargin: ['headheight', 'headsep', 'footskip', 'columnsep', 'secnumdepth'], headheight: ['headsep', 'footskip', 'columnsep', 'secnumdepth'],
+      headsep: ['footskip', 'columnsep', 'secnumdepth'], footskip: ['columnsep', 'secnumdepth'], columnsep: ['secnumdepth'],
+      defskip: ['is_math_indent', 'math_numbering_side', 'quotes_style'], float_placement: ['float_alignment', 'paperfontsize'], float_alignment: ['paperfontsize'],
+      pdf_title: ['pdf_author', 'pdf_subject', 'pdf_keywords', 'pdf_bookmarks'], pdf_author: ['pdf_subject', 'pdf_keywords', 'pdf_bookmarks'], pdf_subject: ['pdf_keywords', 'pdf_bookmarks'], pdf_keywords: ['pdf_bookmarks'],
+      pdf_quoted_options: ['papersize'], use_lineno: ['use_indices'], papersides: ['paperpagestyle'],
+    };
+    const setL = (k: string, val: string) => {
+      const i = findKey(k);
+      if (val === '' && !['options', 'paperwidth', 'paperheight', 'leftmargin', 'topmargin', 'rightmargin', 'bottommargin', 'headheight', 'headsep', 'footskip', 'columnsep', 'pdf_title', 'pdf_author', 'pdf_subject', 'pdf_keywords', 'pdf_quoted_options', 'defskip'].includes(k)) return;
+      if (val === '') { if (i >= 0) lines.splice(i, 1); return; }
+      if (i >= 0) lines[i] = `\\${k} ${val}`; else lines.splice(insertAt(k, ORDER[k] ?? []), 0, `\\${k} ${val}`);
+    };
+    for (const k of KEYS) if (v[k] !== get(k)) setL(k, v[k]);
+    // margins are only meaningful with geometry; LyX drops them otherwise
+    if (v.use_geometry !== 'true') for (const k of ['leftmargin', 'topmargin', 'rightmargin', 'bottommargin', 'headheight', 'headsep', 'footskip', 'columnsep', 'paperwidth', 'paperheight']) if (get(k) && v[k] === get(k)) { /* keep as is */ }
+    if (options.trim()) { setL('options', options.trim()); setL('use_default_options', 'false'); } else setL('options', '');
     const mods = modules.split(',').map(s => s.trim()).filter(Boolean);
     const ms = lines.indexOf('\\begin_modules'), me = lines.indexOf('\\end_modules');
     if (ms >= 0) lines.splice(ms, me - ms + 1);
     if (mods.length) { const ti = lines.findIndex(l => l.startsWith('\\use_default_options')); lines.splice(ti + 1, 0, '\\begin_modules', ...mods, '\\end_modules'); }
+    // branches: rewrite all blocks in place (LyX writes them before the \index blocks)
+    let first = lines.findIndex(l => l.startsWith('\\branch '));
+    while (true) { const i = lines.findIndex(l => l.startsWith('\\branch ')); if (i < 0) break; const j = lines.indexOf('\\end_branch', i); lines.splice(i, j - i + 1); }
+    if (first < 0) { first = lines.findIndex(l => l.startsWith('\\index ')); if (first < 0) first = findKey('secnumdepth'); }
+    const blocks = branches.flatMap(b => ['\\branch ' + b.name, ...b.lines.map(l => (l.startsWith('\\selected') ? `\\selected ${b.selected ? 1 : 0}` : l)), '\\end_branch']);
+    if (blocks.length) lines.splice(first, 0, ...blocks);
     await api.setHeader(docId, { headerLines: lines, preamble });
     onSaved(); onClose();
   };
+  const text = (k: string, placeholder = '', style = '') => <input type="text" value={v[k] ?? ''} onInput={e => set(k, (e.target as HTMLInputElement).value)} placeholder={placeholder} style={style} />;
+  const sel = (k: string, opts: (string | [string, string])[]) => <select value={v[k] ?? ''} onChange={e => set(k, (e.target as HTMLSelectElement).value)}>{opts.map(o => { const [val, label] = Array.isArray(o) ? o : [o, o]; return <option key={val} value={val}>{label}</option>; })}</select>;
+  const bool = (k: string) => <input type="checkbox" checked={v[k] === 'true'} onChange={e => set(k, String((e.target as HTMLInputElement).checked))} />;
+  const TABS: [Tab, string][] = [['general', 'Class & options'], ['page', 'Page & margins'], ['text', 'Text layout'], ['numbering', 'Numbering & floats'], ['fonts', 'Fonts'], ['branches', 'Branches'], ['pdf', 'PDF properties'], ['preamble', 'LaTeX preamble'], ['raw', 'Raw header']];
+  const geometry = v.use_geometry === 'true';
   return (
     <Dialog title="Document Settings" onClose={onClose} wide buttons={<button class="btn primary" onClick={save}>Apply</button>}>
-      <div class="panel-tabs">
-        <button class={tab === 'general' ? 'active' : ''} onClick={() => setTab('general')}>Document class & options</button>
-        <button class={tab === 'preamble' ? 'active' : ''} onClick={() => setTab('preamble')}>LaTeX preamble</button>
-        <button class={tab === 'raw' ? 'active' : ''} onClick={() => { setTab('raw'); setRaw(true); }}>Raw header (advanced)</button>
+      <div class="panel-tabs" style="flex-wrap:wrap">
+        {TABS.map(([t, l]) => <button key={t} class={tab === t ? 'active' : ''} onClick={() => { setTab(t); if (t === 'raw') setRaw(true); }}>{l}</button>)}
       </div>
       {tab === 'general' && <>
-        <Row label="Document class"><input type="text" list="ol-classes" value={textclass} onInput={e => setTextclass((e.target as HTMLInputElement).value)} /><datalist id="ol-classes">{CLASSES.map(c => <option key={c} value={c} />)}</datalist></Row>
+        <Row label="Document class"><input type="text" list="ol-classes" value={v.textclass} onInput={e => set('textclass', (e.target as HTMLInputElement).value)} /><datalist id="ol-classes">{CLASSES.map(c => <option key={c} value={c} />)}</datalist></Row>
         <Row label="Class options"><input type="text" value={options} onInput={e => setOptions((e.target as HTMLInputElement).value)} placeholder="e.g. prx,amsmath,superscriptaddress" /></Row>
         <Row label="Modules"><input type="text" value={modules} onInput={e => setModules((e.target as HTMLInputElement).value)} placeholder="e.g. theorems-ams, customHeadersFooters" /></Row>
-        <Row label="Language"><input type="text" value={language} onInput={e => setLanguage((e.target as HTMLInputElement).value)} /></Row>
-        <Row label="Font size"><select value={fontsize} onChange={e => setFontsize((e.target as HTMLSelectElement).value)}>{['default', '10', '11', '12'].map(v => <option key={v} value={v}>{v}</option>)}</select></Row>
-        <Row label="Paper size"><select value={papersize} onChange={e => setPapersize((e.target as HTMLSelectElement).value)}>{['default', 'a4', 'letter', 'a5', 'b5', 'legal'].map(v => <option key={v} value={v}>{v}</option>)}</select></Row>
-        <Row label="Citation engine"><select value={citeEngine} onChange={e => setCiteEngine((e.target as HTMLSelectElement).value)}>{['basic', 'natbib', 'biblatex', 'jurabib'].map(v => <option key={v} value={v}>{v}</option>)}</select>
-          <select value={citeType} onChange={e => setCiteType((e.target as HTMLSelectElement).value)}>{['default', 'authoryear', 'numerical'].map(v => <option key={v} value={v}>{v}</option>)}</select></Row>
-        <Row label="Bibliography style"><input type="text" value={bibStyle} onInput={e => setBibStyle((e.target as HTMLInputElement).value)} /></Row>
-        <Row label="Hyperref"><input type="checkbox" checked={hyperref} onChange={e => setHyperref((e.target as HTMLInputElement).checked)} /></Row>
-        <Row label="Track changes"><input type="checkbox" checked={tracking} onChange={e => setTracking((e.target as HTMLInputElement).checked)} /> <span class="sub">show changes in output</span> <input type="checkbox" checked={outputChanges} onChange={e => setOutputChanges((e.target as HTMLInputElement).checked)} /></Row>
+        <Row label="Language">{text('language')}</Row>
+        <Row label="Citation engine">{sel('cite_engine', ['basic', 'natbib', 'biblatex', 'jurabib'])}{sel('cite_engine_type', ['default', 'authoryear', 'numerical'])}</Row>
+        <Row label="Bibliography style">{text('biblio_style')}</Row>
+        <Row label="Hyperref">{bool('use_hyperref')}</Row>
+        <Row label="Track changes">{bool('tracking_changes')} <span class="sub">show changes in output</span> {bool('output_changes')}</Row>
+        <Row label="Suppress date">{bool('suppress_date')}</Row>
+      </>}
+      {tab === 'page' && <>
+        <Row label="Paper size">{sel('papersize', ['default', 'custom', 'a3', 'a4', 'a5', 'b4', 'b5', 'letter', 'legal', 'executive'])}</Row>
+        {v.papersize === 'custom' && <Row label="Custom size">{text('paperwidth', 'width, e.g. 21cm', 'width:8em')}{text('paperheight', 'height, e.g. 29.7cm', 'width:8em')}</Row>}
+        <Row label="Orientation">{sel('paperorientation', ['portrait', 'landscape'])}</Row>
+        <Row label="Two-sided">{sel('papersides', [['1', 'Single-sided'], ['2', 'Double-sided']])}</Row>
+        <Row label="Columns">{sel('papercolumns', [['1', 'One'], ['2', 'Two']])}{v.papercolumns === '2' && text('columnsep', 'column separation, e.g. 1cm', 'width:10em')}</Row>
+        <Row label="Page style">{sel('paperpagestyle', ['default', 'empty', 'plain', 'headings', 'fancy'])}</Row>
+        <Row label="Custom margins">{bool('use_geometry')}<span class="sub">(geometry package)</span></Row>
+        {geometry && <>
+          <Row label="Top / bottom">{text('topmargin', 'e.g. 2.5cm', 'width:7em')}{text('bottommargin', 'e.g. 2.5cm', 'width:7em')}</Row>
+          <Row label="Inner / outer">{text('leftmargin', 'e.g. 2.5cm', 'width:7em')}{text('rightmargin', 'e.g. 2.5cm', 'width:7em')}</Row>
+          <Row label="Head height / sep">{text('headheight', '', 'width:7em')}{text('headsep', '', 'width:7em')}</Row>
+          <Row label="Foot skip">{text('footskip', '', 'width:7em')}</Row>
+        </>}
+      </>}
+      {tab === 'text' && <>
+        <Row label="Paragraph separation">{sel('paragraph_separation', [['indent', 'Indentation'], ['skip', 'Vertical space']])}
+          {v.paragraph_separation === 'skip' && sel('defskip', ['smallskip', 'medskip', 'bigskip', 'halfline', 'fullline'])}</Row>
+        <Row label="Line spacing">{sel('spacing', [['single', 'Single'], ['onehalf', 'One and a half'], ['double', 'Double']])}</Row>
+        <Row label="Justification">{sel('justification', [['true', 'Justified'], ['false', 'Ragged right'], ['default', 'Default']])}</Row>
+        <Row label="Quote style">{sel('quotes_style', ['english', 'swedish', 'german', 'polish', 'swiss', 'danish', 'plain', 'british', 'swedishg', 'french', 'frenchin', 'russian', 'cjk', 'cjkangle', 'hungarian', 'hebrew'])}</Row>
+        <Row label="Math indentation">{sel('is_math_indent', [['0', 'Centered formulas'], ['1', 'Indented formulas']])}</Row>
+        <Row label="Equation numbers">{sel('math_numbering_side', ['default', 'left', 'right'])}</Row>
+        <Row label="Line numbers">{bool('use_lineno')}</Row>
+      </>}
+      {tab === 'numbering' && <>
+        <Row label="Numbering depth">{sel('secnumdepth', [['-2', 'none'], ['-1', 'part'], ['0', 'chapter'], ['1', 'section'], ['2', 'subsection'], ['3', 'subsubsection'], ['4', 'paragraph'], ['5', 'subparagraph']])}</Row>
+        <Row label="Table of contents depth">{sel('tocdepth', [['-2', 'none'], ['-1', 'part'], ['0', 'chapter'], ['1', 'section'], ['2', 'subsection'], ['3', 'subsubsection'], ['4', 'paragraph'], ['5', 'subparagraph']])}</Row>
+        <Row label="Float placement">{sel('float_placement', [['class', 'Class default'], ['h', 'Here if possible'], ['H', 'Here definitely'], ['t', 'Top of page'], ['b', 'Bottom of page'], ['p', 'Page of floats'], ['htbp', 'htbp'], ['tbp', 'tbp'], ['!htbp', '!htbp']])}</Row>
+        <Row label="Float alignment">{sel('float_alignment', ['class', 'document', 'left', 'center', 'right'])}</Row>
+        <Row label="Reference style">{bool('use_refstyle')}<span class="sub">refstyle (\\eqref, \\secref …) instead of prettyref</span></Row>
+      </>}
+      {tab === 'fonts' && <>
+        <Row label="Non-TeX fonts">{bool('use_non_tex_fonts')}<span class="sub">(XeTeX/LuaTeX)</span></Row>
+        <Row label="Roman">{text('font_roman', '"default" "default" — LaTeX name, non-TeX name')}</Row>
+        <Row label="Sans serif">{text('font_sans', '"default" "default"')}</Row>
+        <Row label="Typewriter">{text('font_typewriter', '"default" "default"')}</Row>
+        <Row label="Math">{text('font_math', '"auto" "auto"')}</Row>
+        <Row label="Default family">{sel('font_default_family', ['default', 'rmdefault', 'sfdefault', 'ttdefault'])}</Row>
+        <Row label="Base size">{sel('paperfontsize', ['default', '8', '9', '10', '11', '12', '14', '17', '20'])}</Row>
+        <Row label="Sans / typewriter scale">{text('font_sf_scale', '100 100', 'width:7em')}{text('font_tt_scale', '100 100', 'width:7em')}</Row>
+        <Row label="Microtype">{bool('use_microtype')}</Row>
+      </>}
+      {tab === 'branches' && <>
+        <div class="list" style="max-height:220px">
+          {branches.map((b, i) => <div key={b.name} style="display:flex;gap:8px;align-items:center">
+            <input type="checkbox" checked={b.selected} onChange={e => setBranches(bs => bs.map((x, j) => (j === i ? { ...x, selected: (e.target as HTMLInputElement).checked } : x)))} />
+            <b style="flex:1">{b.name}</b><span class="sub">{b.selected ? 'activated' : 'not activated'}</span>
+            <button class="small-btn" onClick={() => setBranches(bs => bs.filter((_, j) => j !== i))}>Remove</button>
+          </div>)}
+          {!branches.length && <div class="sub">No branches defined. Text in a branch inset is only output when the branch is activated.</div>}
+        </div>
+        <Row label="New branch"><input type="text" value={newBranch} onInput={e => setNewBranch((e.target as HTMLInputElement).value)} placeholder="name" />
+          <button class="small-btn" disabled={!newBranch.trim() || branches.some(b => b.name === newBranch.trim())} onClick={() => { setBranches([...branches, { name: newBranch.trim(), selected: true, lines: ['\\selected 1', '\\filename_suffix 0', '\\color #faf0e6 #faf0e6'] }]); setNewBranch(''); }}>Add</button></Row>
+      </>}
+      {tab === 'pdf' && <>
+        <Row label="Use title & author">{bool('pdf_pdfusetitle')}</Row>
+        <Row label="Title">{text('pdf_title', '(quoted as LyX writes it, e.g. "My title")')}</Row>
+        <Row label="Author">{text('pdf_author')}</Row>
+        <Row label="Subject">{text('pdf_subject')}</Row>
+        <Row label="Keywords">{text('pdf_keywords')}</Row>
+        <Row label="Bookmarks">{bool('pdf_bookmarks')} <span class="sub">numbered</span> {bool('pdf_bookmarksnumbered')} <span class="sub">open</span> {bool('pdf_bookmarksopen')}</Row>
+        <Row label="Links">
+          <span class="sub">break across lines</span> {bool('pdf_breaklinks')} <span class="sub">border</span> {bool('pdf_pdfborder')} <span class="sub">colour</span> {bool('pdf_colorlinks')} <span class="sub">back references</span> {bool('pdf_backref')}
+        </Row>
+        <Row label="Extra hyperref options">{text('pdf_quoted_options', 'e.g. linkcolor=blue')}</Row>
       </>}
       {tab === 'preamble' && <textarea style="min-height:360px" value={preamble} onInput={e => setPreamble((e.target as HTMLTextAreaElement).value)} spellcheck={false} />}
       {tab === 'raw' && <textarea style="min-height:420px" value={rawText} onInput={e => setRawText((e.target as HTMLTextAreaElement).value)} spellcheck={false} />}
       {meta && <div style="color:#777;font-size:11px">Macros available: {meta.macroList.length} · Bibliography entries: {meta.bib.length} · Layouts: {meta.layouts?.length ?? 'n/a'}</div>}
+    </Dialog>
+  );
+}
+
+/* ---------------------------------------------------------- table settings */
+export interface TableSettingsInitial { cell: Map<string, string>; column: Map<string, string>; row: Map<string, string>; table: Map<string, string>; rowIndex: number; colIndex: number; nrows: number; ncols: number }
+export function TableSettingsDialog({ initial, onApply, onClose }: { initial: TableSettingsInitial; onApply: (ch: TableChanges) => void; onClose: () => void }) {
+  type Tab = 'cell' | 'column' | 'row' | 'table';
+  const [tab, setTab] = useState<Tab>('cell');
+  const mk = (m: Map<string, string>) => Object.fromEntries([...m.entries()]);
+  const [cell, setCell] = useState<Record<string, string>>(mk(initial.cell));
+  const [column, setColumn] = useState<Record<string, string>>(mk(initial.column));
+  const [row, setRow] = useState<Record<string, string>>(mk(initial.row));
+  const [table, setTable] = useState<Record<string, string>>(mk(initial.table));
+  const diff = (before: Map<string, string>, after: Record<string, string>): [string, string | null][] => {
+    const out: [string, string | null][] = [];
+    for (const [k, val] of Object.entries(after)) if (before.get(k) !== val) out.push([k, val === '' ? null : val]);
+    for (const k of before.keys()) if (!(k in after)) out.push([k, null]);
+    return out;
+  };
+  const apply = () => { onApply({ cell: diff(initial.cell, cell), column: diff(initial.column, column), row: diff(initial.row, row), table: diff(initial.table, table) }); onClose(); };
+  const field = (st: Record<string, string>, setSt: (f: (p: Record<string, string>) => Record<string, string>) => void) => ({
+    sel: (k: string, opts: (string | [string, string])[]) => <select value={st[k] ?? ''} onChange={e => { const val = (e.target as HTMLSelectElement).value; setSt(p => ({ ...p, [k]: val })); }}>{opts.map(o => { const [val, label] = Array.isArray(o) ? o : [o, o]; return <option key={val} value={val}>{label}</option>; })}</select>,
+    bool: (k: string) => <input type="checkbox" checked={st[k] === 'true'} onChange={e => { const c = (e.target as HTMLInputElement).checked; setSt(p => ({ ...p, [k]: c ? 'true' : '' })); }} />,
+    text: (k: string, placeholder = '') => <input type="text" value={st[k] ?? ''} onInput={e => { const val = (e.target as HTMLInputElement).value; setSt(p => ({ ...p, [k]: val })); }} placeholder={placeholder} />,
+  });
+  const c = field(cell, setCell), col = field(column, setColumn), r = field(row, setRow), t = field(table, setTable);
+  const H_ALIGN: [string, string][] = [['', 'Column default'], ['left', 'Left'], ['center', 'Center'], ['right', 'Right'], ['block', 'Justified'], ['decimal', 'At decimal separator']];
+  const V_ALIGN: [string, string][] = [['', 'Column default'], ['top', 'Top'], ['middle', 'Middle'], ['bottom', 'Bottom']];
+  return (
+    <Dialog title={`Table Settings — row ${initial.rowIndex + 1} of ${initial.nrows}, column ${initial.colIndex + 1} of ${initial.ncols}`} onClose={onClose} wide buttons={<button class="btn primary" onClick={apply}>Apply</button>}>
+      <div class="panel-tabs">{(['cell', 'column', 'row', 'table'] as Tab[]).map(x => <button key={x} class={tab === x ? 'active' : ''} onClick={() => setTab(x)}>{x === 'cell' ? 'This cell' : x === 'column' ? 'This column' : x === 'row' ? 'This row' : 'Table'}</button>)}</div>
+      {tab === 'cell' && <>
+        <Row label="Horizontal alignment">{c.sel('alignment', H_ALIGN)}</Row>
+        <Row label="Vertical alignment">{c.sel('valignment', V_ALIGN)}</Row>
+        <Row label="Width">{c.text('width', 'e.g. 3cm, 20col% (fixed-width cell = paragraph)')}</Row>
+        <Row label="Rotate">{c.sel('rotate', [['', 'No'], ['90', '90°'], ['-90', '−90°'], ['180', '180°']])}</Row>
+        <Row label="Borders"><span class="sub">top</span> {c.bool('topline')} <span class="sub">bottom</span> {c.bool('bottomline')} <span class="sub">left</span> {c.bool('leftline')} <span class="sub">right</span> {c.bool('rightline')}</Row>
+        <div class="sub" style="color:#777;font-size:11px">Multi-column / multi-row cells: Edit ▸ Table ▸ Merge cells.</div>
+      </>}
+      {tab === 'column' && <>
+        <Row label="Horizontal alignment">{col.sel('alignment', H_ALIGN.slice(1))}</Row>
+        <Row label="Vertical alignment">{col.sel('valignment', V_ALIGN.slice(1))}</Row>
+        <Row label="Width">{col.text('width', 'e.g. 3cm (empty/0pt = automatic)')}</Row>
+        <Row label="LaTeX column spec">{col.text('special', 'e.g. p{3cm} or >{\\raggedright}X (overrides the above)')}</Row>
+      </>}
+      {tab === 'row' && <>
+        <Row label="Lines"><span class="sub">top</span> {r.bool('topline')} <span class="sub">bottom</span> {r.bool('bottomline')} <span class="sub">(all cells of the row)</span></Row>
+        <Row label="Space above">{r.text('topspace', 'e.g. 3mm or default')}</Row>
+        <Row label="Space below">{r.text('bottomspace', 'e.g. 3mm or default')}</Row>
+        <Row label="Interline space">{r.text('interlinespace', 'e.g. 2mm or default')}</Row>
+        {table.islongtable === 'true' && <>
+          <Row label="Long table header">{r.bool('endfirsthead')} <span class="sub">first page</span> {r.bool('endhead')} <span class="sub">every page</span></Row>
+          <Row label="Long table footer">{r.bool('endfoot')} <span class="sub">every page</span> {r.bool('endlastfoot')} <span class="sub">last page</span></Row>
+          <Row label="Page break after">{r.bool('newpage')}</Row>
+          <Row label="Caption row">{r.bool('caption')}</Row>
+        </>}
+      </>}
+      {tab === 'table' && <>
+        <Row label="Vertical alignment">{t.sel('tabularvalignment', [['', 'Middle (default)'], ['top', 'Top'], ['middle', 'Middle'], ['bottom', 'Bottom']])}</Row>
+        <Row label="Table width">{t.text('tabularwidth', 'e.g. 100col% (empty = automatic)')}</Row>
+        <Row label="Rotate">{t.sel('rotate', [['', 'No'], ['90', '90°'], ['-90', '−90°']])}</Row>
+        <Row label="Booktabs style">{t.bool('booktabs')}</Row>
+        <Row label="Long table">{t.bool('islongtable')} <span class="sub">(multi-page)</span>{table.islongtable === 'true' && t.sel('longtabularalignment', ['center', 'left', 'right'])}</Row>
+      </>}
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------- math insert */
+const DELIMS: [string, string][] = [['(', ')'], ['[', ']'], ['\\{', '\\}'], ['|', '|'], ['\\|', '\\|'], ['\\langle', '\\rangle'], ['\\lfloor', '\\rfloor'], ['\\lceil', '\\rceil'], ['.', '.']];
+const DELIM_LABEL: Record<string, string> = { '(': '(', ')': ')', '[': '[', ']': ']', '\\{': '{', '\\}': '}', '|': '|', '\\|': '‖', '\\langle': '⟨', '\\rangle': '⟩', '\\lfloor': '⌊', '\\rfloor': '⌋', '\\lceil': '⌈', '\\rceil': '⌉', '.': '(none)' };
+export function DelimiterDialog({ onInsert, onClose }: { onInsert: (latex: string) => void; onClose: () => void }) {
+  const [left, setLeft] = useState('(');
+  const [right, setRight] = useState(')');
+  const [matched, setMatched] = useState(true);
+  const [size, setSize] = useState('');
+  const latex = size ? `${size}l${left} #0 ${size}r${right}` : `\\left${left} #0 \\right${right}`;
+  const pickLeft = (l: string) => { setLeft(l); if (matched) setRight(DELIMS.find(d => d[0] === l)?.[1] ?? l); };
+  return (
+    <Dialog title="Math Delimiters" onClose={onClose} buttons={<button class="btn primary" onClick={() => { onInsert(latex); onClose(); }}>Insert</button>}>
+      <Row label="Left"><div style="display:flex;gap:4px;flex-wrap:wrap">{DELIMS.map(d => <button key={d[0]} class={'small-btn' + (left === d[0] ? ' active' : '')} onClick={() => pickLeft(d[0])}>{DELIM_LABEL[d[0]]}</button>)}</div></Row>
+      <Row label="Right"><div style="display:flex;gap:4px;flex-wrap:wrap">{DELIMS.map(d => <button key={d[1]} class={'small-btn' + (right === d[1] ? ' active' : '')} onClick={() => { setRight(d[1]); setMatched(false); }}>{DELIM_LABEL[d[1]]}</button>)}</div></Row>
+      <Row label="Keep matched"><input type="checkbox" checked={matched} onChange={e => { setMatched((e.target as HTMLInputElement).checked); if ((e.target as HTMLInputElement).checked) setRight(DELIMS.find(d => d[0] === left)?.[1] ?? left); }} /></Row>
+      <Row label="Size"><select value={size} onChange={e => setSize((e.target as HTMLSelectElement).value)}>{[['', 'Variable (\\left … \\right)'], ['\\big', 'big'], ['\\Big', 'Big'], ['\\bigg', 'bigg'], ['\\Bigg', 'Bigg']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Row>
+      <div class="sub" style="color:#777;font-size:11px"><code>{latex.replace(' #0 ', ' … ')}</code></div>
+    </Dialog>
+  );
+}
+
+export function MatrixDialog({ onInsert, onClose }: { onInsert: (latex: string) => void; onClose: () => void }) {
+  const [rows, setRows] = useState(2);
+  const [cols, setCols] = useState(2);
+  const [kind, setKind] = useState('pmatrix');
+  const [halign, setHalign] = useState('c');
+  const body = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => (r === 0 && c === 0 ? '#0' : '#?')).join(' & ')).join('\\\\ ');
+  const latex = kind === 'array' ? `\\begin{array}{${halign.repeat(cols)}}${body}\\end{array}` : kind === 'cases' ? `\\begin{cases}${body}\\end{cases}` : `\\begin{${kind}}${body}\\end{${kind}}`;
+  return (
+    <Dialog title="Math Matrix" onClose={onClose} buttons={<button class="btn primary" onClick={() => { onInsert(latex); onClose(); }}>Insert</button>}>
+      <Row label="Rows × columns"><input type="number" min={1} max={20} value={rows} onInput={e => setRows(Math.max(1, Number((e.target as HTMLInputElement).value) || 1))} style="width:4em" /> × <input type="number" min={1} max={20} value={cols} onInput={e => setCols(Math.max(1, Number((e.target as HTMLInputElement).value) || 1))} style="width:4em" /></Row>
+      <Row label="Decoration"><select value={kind} onChange={e => setKind((e.target as HTMLSelectElement).value)}>{[['matrix', 'None'], ['pmatrix', '( ) parentheses'], ['bmatrix', '[ ] brackets'], ['Bmatrix', '{ } braces'], ['vmatrix', '| | bars'], ['Vmatrix', '‖ ‖ double bars'], ['cases', 'cases'], ['array', 'array (alignment below)']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Row>
+      {kind === 'array' && <Row label="Horizontal alignment"><select value={halign} onChange={e => setHalign((e.target as HTMLSelectElement).value)}>{[['l', 'Left'], ['c', 'Center'], ['r', 'Right']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Row>}
+      <div class="sub" style="color:#777;font-size:11px">Move between cells with Tab / arrow keys.</div>
     </Dialog>
   );
 }
@@ -300,6 +564,7 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
     ['Ctrl+Shift+P, Ctrl+Shift+O, Ctrl+Shift+N', 'Typewriter, strikeout, noun (small caps)'],
     ['Ctrl+Alt+D', 'Reset font'],
     ['Ctrl+L', 'TeX code (ERT); in a formula: start a \\command'],
+    ['Ctrl+Alt+P', 'Paragraph settings'],
     ['Ctrl+Alt+F / Ctrl+Alt+M / Ctrl+Alt+N', 'Footnote / margin note / LyX note'],
     ['Ctrl+Alt+C', 'New comment thread'],
     ['Ctrl+Shift+C, Ctrl+Shift+I, Ctrl+Alt+L', 'Citation, cross-reference, label'],

@@ -160,7 +160,10 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent): MenuItem[] 
   const cur = C.currentParagraph(view.state);
   items.push(
     { label: 'Paragraph layout', sub: layouts.map(l => ({ label: l.name, checked: cur?.node.attrs.layout === l.name, action: run(C.setLayout(l.name)) })) },
+    ...(C.tableContext(view.state) ? [{ label: 'Table settings…', action: () => editorContext.openDialog?.('tablesettings') }] : []),
     { label: 'Paragraph', sub: [
+      { label: 'Paragraph settings…', shortcut: MOD + '+Alt+P', action: () => editorContext.openDialog?.('paragraph') },
+      { sep: true },
       { label: 'Align left', action: run(C.setParagraphAttrs({ align: 'left' })) },
       { label: 'Align center', action: run(C.setParagraphAttrs({ align: 'center' })) },
       { label: 'Align right', action: run(C.setParagraphAttrs({ align: 'right' })) },

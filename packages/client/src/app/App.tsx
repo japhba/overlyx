@@ -13,7 +13,7 @@ import { Versions } from './Versions';
 import { PdfPanel, buildPdf, type PdfState } from './PdfPanel';
 import { StatusBar, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget } from './SourcePane';
-import { GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, commandParams } from './Dialogs';
+import { GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams } from './Dialogs';
 import { createEditor, refreshMacros, describeChange, type EditorHandle } from '../editor/editor';
 import { editorContext, viewDocId } from '../editor/context';
 import { STANDARD_LAYOUTS } from '../editor/layouts';
@@ -378,6 +378,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         { label: 'Reset font', shortcut: 'Ctrl+Alt+D', action: () => run(C.fontDefault) },
       ] },
       { label: 'Paragraph ▸', sub: [
+        { label: 'Paragraph settings…', shortcut: 'Ctrl+Alt+P', action: () => setDialog({ name: 'paragraph' }) },
+        { sep: true },
         { label: 'Align left', shortcut: 'Alt+A L', action: () => run(C.setParagraphAttrs({ align: 'left' })) },
         { label: 'Align center', shortcut: 'Alt+A C', action: () => run(C.setParagraphAttrs({ align: 'center' })) },
         { label: 'Align right', shortcut: 'Alt+A R', action: () => run(C.setParagraphAttrs({ align: 'right' })) },
@@ -401,6 +403,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         { label: 'Align cell left', action: () => run(C.setCellAttr('alignment', 'left')) }, { label: 'Align cell center', action: () => run(C.setCellAttr('alignment', 'center')) }, { label: 'Align cell right', action: () => run(C.setCellAttr('alignment', 'right')) },
         { sep: true },
         { label: 'Delete table', action: () => run(deleteTable) },
+        { sep: true },
+        { label: 'Table settings…', action: () => setDialog({ name: 'tablesettings' }) },
       ] },
       { label: 'Track Changes ▸', sub: [
         { label: 'Track changes', shortcut: 'Ctrl+Shift+E', checked: tracking, action: toggleTracking },
@@ -447,6 +451,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         { label: 'AMS gather', action: () => runView(C.insertMath(true, 'gather')) },
         { label: 'AMS multline', action: () => runView(C.insertMath(true, 'multline')) },
         { label: 'eqnarray', action: () => runView(C.insertMath(true, 'eqnarray')) },
+        { sep: true },
+        { label: 'Delimiters…', action: () => setDialog({ name: 'delimiters' }) },
+        { label: 'Matrix…', action: () => setDialog({ name: 'matrix' }) },
         { sep: true },
         { label: 'Math macro definition', action: () => { const n = prompt('Macro name (without backslash):'); if (n) run(C.insertMacroDef(n, Number(prompt('Number of arguments:', '0') || 0), '')); } },
       ] },
@@ -618,13 +625,34 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     return C.nearestNode(view.state, ['inset', 'command', 'graphics', 'leaf', 'table']);
   };
 
+  /** Insert LaTeX into the focused formula, or into a new inline formula at the cursor. */
+  const insertInMath = (latex: string) => {
+    const active = document.activeElement as any;
+    if (active?.tagName === 'MATH-FIELD') { active.executeCommand(['insert', latex]); return; }
+    if (view) { C.insertMath(false)(view); setTimeout(() => (document.activeElement as any)?.executeCommand?.(['insert', latex]), 60); }
+  };
   const renderDialog = () => {
     if (!dialog || !view || !docId) return null;
     const close = () => { setDialog(null); view.focus(); };
     const project = viewDocId(view).split('/')[0] || docId.split('/')[0];
     const docDir = view.dom.dataset.docDir ?? editorContext.docDir;
     switch (dialog.name) {
-      case 'graphics': return <GraphicsDialog meta={meta} project={project} docDir={docDir} onClose={close} onInsert={o => run(C.insertGraphics(o.filename, o))} />;
+      case 'graphics': return <GraphicsDialog meta={meta} project={project} docDir={docDir} onClose={close} onInsert={(f, o) => run(C.insertGraphics(f, o))} />;
+      case 'paragraph': {
+        const cur = C.currentParagraph(view.state);
+        if (!cur) { setDialog(null); return null; }
+        const a = cur.node.attrs;
+        return <ParagraphDialog initial={{ align: a.align ?? null, spacing: a.spacing ?? null, noindent: !!a.noindent, labelwidthstring: a.labelwidthstring ?? null }} indentSeparation={!headerLines.some(l => l === '\\paragraph_separation skip')} onClose={close} onApply={p => run(C.setParagraphAttrs({ ...p }))} />;
+      }
+      case 'tablesettings': {
+        const ctx = C.tableContext(view.state);
+        if (!ctx) { setDialog(null); notify('The cursor is not in a table'); return null; }
+        const m = (json: string) => new Map<string, string>((() => { try { return JSON.parse(json || '[]'); } catch { return []; } })());
+        const columns: [string, string][][] = (() => { try { return JSON.parse(ctx.table.attrs.columns || '[]'); } catch { return []; } })();
+        return <TableSettingsDialog initial={{ cell: m(ctx.cell.attrs.attrs), column: new Map(columns[ctx.colIndex] ?? []), row: m(ctx.row.attrs.attrs), table: m(ctx.table.attrs.features), rowIndex: ctx.rowIndex, colIndex: ctx.colIndex, nrows: ctx.nrows, ncols: ctx.ncols }} onClose={close} onApply={ch => run(C.setTableAttrs(ch))} />;
+      }
+      case 'delimiters': return <DelimiterDialog onClose={close} onInsert={latex => insertInMath(latex)} />;
+      case 'matrix': return <MatrixDialog onClose={close} onInsert={latex => insertInMath(latex)} />;
       case 'table': return <TableDialog onClose={close} onInsert={(r, c) => run(C.insertTable(r, c))} />;
       case 'label': return <LabelDialog initial={suggestLabel(view)} onClose={close} onInsert={n => run(C.insertLabel(n))} />;
       case 'ref': {
@@ -657,15 +685,15 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         const target = insetDialogNode();
         if (!target) { setDialog(null); notify('No inset at the cursor'); return null; }
         if (target.node.type.name === 'graphics') {
-          const p = commandParams(target.node);
-          return <GraphicsDialog meta={meta} project={project} docDir={docDir} initial={{ filename: p.get('filename') ?? '', width: p.get('width'), scale: p.get('scale'), lyxscale: p.get('lyxscale') }} onClose={close}
-            onInsert={o => { const params = [`\tfilename ${o.filename}`]; if (o.lyxscale) params.push(`\tlyxscale ${o.lyxscale}`); if (o.scale) params.push(`\tscale ${o.scale}`); if (o.width) params.push(`\twidth ${o.width}`); params.push(''); view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
+          const params: string[] = (() => { try { return JSON.parse(target.node.attrs.params || '[]'); } catch { return []; } })();
+          return <GraphicsDialog meta={meta} project={project} docDir={docDir} initial={C.graphicsOpts(params)} onClose={close}
+            onInsert={(f, o) => view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(C.graphicsParams(f, o)) }))} />;
         }
         if (target.node.type.name === 'command' && target.node.attrs.cmd === 'href') {
           const p = commandParams(target.node);
           return <HrefDialog initial={{ target: unquote(p.get('target')), name: unquote(p.get('name')) }} onClose={close} onInsert={(t, n) => view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(['LatexCommand href', `name "${n}"`, `target "${t}"`, 'literal "false"', '']) }))} />;
         }
-        if (target.node.type.name === 'table') { notify('Use Edit ▸ Table for table operations'); setDialog(null); return null; }
+        if (target.node.type.name === 'table') { setDialog({ name: 'tablesettings' }); return null; }
         return <InsetDialog node={target.node} onClose={close} onApply={attrs => view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, ...attrs }))} />;
       }
     }

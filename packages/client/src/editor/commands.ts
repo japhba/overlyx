@@ -294,13 +294,45 @@ export function insertFloat(type: 'figure' | 'table' | 'algorithm' = 'figure'): 
   };
 }
 
-export function insertGraphics(filename: string, opts: { width?: string; scale?: string; lyxscale?: string } = {}): Command {
+/** Graphics inset parameters (LyX InsetGraphicsParams). Flags are written as bare words. */
+export interface GraphicsOpts {
+  lyxscale?: string; draft?: boolean; scale?: string; width?: string; height?: string; keepAspectRatio?: boolean;
+  rotateAngle?: string; rotateOrigin?: string; scaleBeforeRotation?: boolean; BoundingBox?: string; clip?: boolean; special?: string; groupId?: string;
+}
+
+/** Parameter lines in the order LyX writes them (InsetGraphicsParams::Write). */
+export function graphicsParams(filename: string, o: GraphicsOpts = {}): string[] {
   const params = [`\tfilename ${filename}`];
-  if (opts.lyxscale) params.push(`\tlyxscale ${opts.lyxscale}`);
-  if (opts.scale) params.push(`\tscale ${opts.scale}`);
-  if (opts.width) params.push(`\twidth ${opts.width}`);
+  if (o.lyxscale) params.push(`\tlyxscale ${o.lyxscale}`);
+  if (o.draft) params.push('\tdraft');
+  if (o.scale) params.push(`\tscale ${o.scale}`);
+  if (o.width) params.push(`\twidth ${o.width}`);
+  if (o.height) params.push(`\theight ${o.height}`);
+  if (o.keepAspectRatio) params.push('\tkeepAspectRatio');
+  if (o.rotateAngle && o.rotateAngle !== '0') params.push(`\trotateAngle ${o.rotateAngle}`);
+  if (o.rotateOrigin && o.rotateOrigin !== 'center') params.push(`\trotateOrigin ${o.rotateOrigin}`);
+  if (o.scaleBeforeRotation) params.push('\tscaleBeforeRotation');
+  if (o.BoundingBox) params.push(`\tBoundingBox ${o.BoundingBox}`);
+  if (o.clip) params.push('\tclip');
+  if (o.special) params.push(`\tspecial ${o.special}`);
+  if (o.groupId) params.push(`\tgroupId ${o.groupId}`);
   params.push('');
-  return insertNode(schema.nodes.graphics.create({ params: JSON.stringify(params) }));
+  return params;
+}
+
+/** The inverse of graphicsParams for an existing inset. */
+export function graphicsOpts(params: string[]): GraphicsOpts & { filename: string } {
+  const p = paramMap(params);
+  const str = (k: string) => p.get(k) || undefined;
+  return {
+    filename: p.get('filename') ?? '', lyxscale: str('lyxscale'), draft: p.has('draft'), scale: str('scale'), width: str('width'), height: str('height'),
+    keepAspectRatio: p.has('keepAspectRatio'), rotateAngle: str('rotateAngle'), rotateOrigin: str('rotateOrigin'), scaleBeforeRotation: p.has('scaleBeforeRotation'),
+    BoundingBox: str('BoundingBox'), clip: p.has('clip'), special: str('special'), groupId: str('groupId'),
+  };
+}
+
+export function insertGraphics(filename: string, opts: GraphicsOpts = {}): Command {
+  return insertNode(schema.nodes.graphics.create({ params: JSON.stringify(graphicsParams(filename, opts)) }));
 }
 
 export function insertCommand(cmd: string, params: string[]): Command {
@@ -538,6 +570,78 @@ export function insertTable(rows: number, cols: number): Command {
 }
 
 /** Set a LyX cell attribute (e.g. topline true, alignment left) on selected cells. */
+/** The table, row and cell around the cursor with their indices. */
+export interface TableContext {
+  table: PMNode; tablePos: number; row: PMNode; rowPos: number; cell: PMNode; cellPos: number;
+  rowIndex: number; colIndex: number; nrows: number; ncols: number;
+}
+export function tableContext(state: EditorState): TableContext | null {
+  const $from = state.selection.$from;
+  let cell: { node: PMNode; pos: number } | null = null, row: { node: PMNode; pos: number } | null = null, table: { node: PMNode; pos: number } | null = null;
+  for (let d = $from.depth; d >= 0; d--) {
+    const n = $from.node(d);
+    if (n.type.name === 'table_cell' && !cell) cell = { node: n, pos: $from.before(d) };
+    else if (n.type.name === 'table_row' && !row) row = { node: n, pos: $from.before(d) };
+    else if (n.type.name === 'table' && !table) { table = { node: n, pos: $from.before(d) }; break; }
+  }
+  if (!cell || !row || !table) return null;
+  let colIndex = 0, rowIndex = 0, ncols = 0;
+  row.node.forEach((c, offset) => { if (row!.pos + 1 + offset < cell!.pos) colIndex += c.attrs.colspan ?? 1; });
+  table.node.forEach((r, offset, i) => { if (table!.pos + 1 + offset === row!.pos) rowIndex = i; let n = 0; r.forEach(c => { n += c.attrs.colspan ?? 1; }); ncols = Math.max(ncols, n); });
+  return { table: table.node, tablePos: table.pos, row: row.node, rowPos: row.pos, cell: cell.node, cellPos: cell.pos, rowIndex, colIndex, nrows: table.node.childCount, ncols };
+}
+
+function withAttr(attrs: [string, string][], key: string, value: string | null): [string, string][] {
+  const out = attrs.map(a => [a[0], a[1]] as [string, string]);
+  const i = out.findIndex(a => a[0] === key);
+  if (value === null) { if (i >= 0) out.splice(i, 1); }
+  else if (i >= 0) out[i] = [key, value];
+  else { const ub = out.findIndex(a => a[0] === 'usebox'); out.splice(ub >= 0 ? ub : out.length, 0, [key, value]); }
+  return out;
+}
+const jsonAttrs = (s: string): [string, string][] => { try { return JSON.parse(s || '[]'); } catch { return []; } };
+
+export interface TableChanges { cell?: [string, string | null][]; column?: [string, string | null][]; row?: [string, string | null][]; table?: [string, string | null][] }
+
+/** Apply the table-settings dialog in one transaction: cell attrs, column attrs (+ alignment of the
+ *  column's cells, as LyX does), row attrs (lines go to the row's cells) and table features. */
+export function setTableAttrs(ch: TableChanges): Command {
+  return (state, dispatch) => {
+    const ctx = tableContext(state);
+    if (!ctx) return false;
+    const tr = state.tr;
+    const setCell = (pos: number, node: PMNode, kv: [string, string | null][]) => {
+      let attrs = jsonAttrs(node.attrs.attrs);
+      for (const [k, v] of kv) attrs = withAttr(attrs, k, v);
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, attrs: JSON.stringify(attrs) });
+    };
+    if (ch.cell?.length) setCell(ctx.cellPos, ctx.cell, ch.cell);
+    if (ch.row?.length) {
+      const lines = ch.row.filter(([k]) => /line$/.test(k));
+      const rest = ch.row.filter(([k]) => !/line$/.test(k));
+      if (lines.length) ctx.row.forEach((c, offset) => { const pos = ctx.rowPos + 1 + offset; setCell(pos, pos === ctx.cellPos && ch.cell?.length ? tr.doc.nodeAt(pos)! : c, lines); });
+      if (rest.length) { let attrs = jsonAttrs(ctx.row.attrs.attrs); for (const [k, v] of rest) attrs = withAttr(attrs, k, v); tr.setNodeMarkup(ctx.rowPos, undefined, { ...ctx.row.attrs, attrs: JSON.stringify(attrs) }); }
+    }
+    if (ch.column?.length || ch.table?.length) {
+      const columns: [string, string][][] = (() => { try { return JSON.parse(ctx.table.attrs.columns || '[]'); } catch { return []; } })();
+      while (columns.length < ctx.ncols) columns.push([['alignment', 'center'], ['valignment', 'top']]);
+      if (ch.column?.length) {
+        columns[ctx.colIndex] = ch.column.reduce((a, [k, v]) => withAttr(a, k, v), columns[ctx.colIndex]);
+        const align = ch.column.filter(([k]) => k === 'alignment' || k === 'valignment');
+        if (align.length) ctx.table.forEach((r, roff) => {
+          let ci = 0;
+          r.forEach((c, coff) => { const pos = ctx.tablePos + 1 + roff + 1 + coff; if (ci === ctx.colIndex) setCell(pos, tr.doc.nodeAt(pos)!, align); ci += c.attrs.colspan ?? 1; });
+        });
+      }
+      let features = jsonAttrs(ctx.table.attrs.features);
+      for (const [k, v] of ch.table ?? []) features = withAttr(features, k, v);
+      tr.setNodeMarkup(ctx.tablePos, undefined, { ...ctx.table.attrs, columns: JSON.stringify(columns), features: JSON.stringify(features) });
+    }
+    if (dispatch) dispatch(tr);
+    return true;
+  };
+}
+
 export function setCellAttr(key: string, value: string | null): Command {
   return (state, dispatch) => {
     const { from, to } = state.selection;

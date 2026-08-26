@@ -197,6 +197,7 @@ export function lyxKeymap(): Plugin {
     'Shift-Mod-c': ui(a => a.openDialog('cite')),
     'Shift-Mod-g': ui(a => a.openDialog('graphics')),
     'Alt-Mod-t': ui(a => a.openDialog('table')),
+    'Alt-Mod-p': ui(a => a.openDialog('paragraph')),
     'Shift-Mod-i': ui(a => a.openDialog('ref')),
     'Alt-Mod-l': ui(a => a.openDialog('label')),
     'Alt-Mod-k': ui(a => a.openDialog('href')),

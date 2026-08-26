@@ -26,7 +26,12 @@ Overleaf/LyX blend.
   cell dissolves the inset (LyX's `pullArg`), deleting across a big inset selects it first; Space
   leaves the current inset and, at the end, the formula; a typed `(` is a plain parenthesis; the caret
   only ever rests in a macro's argument cells, never in its expansion. The text column is centred
-  and its width is a View setting (*View ▸ Text width*, `Ctrl+Alt+±`). Right-click menus on formulas, cross-references (go
+  and its width is a View setting (*View ▸ Text width*, `Ctrl+Alt+±`).
+* **LyX-style dialogs**: Paragraph settings (`Ctrl+Alt+P`: alignment, line spacing, indentation,
+  label width), Table settings (cell / column / row / table tabs incl. longtable), Document settings
+  (class & options, page & margins, text layout, numbering & floats, fonts, branches, PDF properties,
+  preamble, raw header), Graphics (scale, width/height, rotation, clipping, LaTeX options), math
+  Delimiters and Matrix insertion — all writing exactly the LyX parameters. Right-click menus on formulas, cross-references (go
   to label, reference format), citations, hyperlinks, child documents, insets and tracked changes;
   `Ctrl/⌘+click` follows a reference or opens a child document; **tabs** for open documents (new
   tabs open right of the current one); *View ▸ Master + child documents in one
