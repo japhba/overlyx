@@ -10,6 +10,8 @@
   "dependencies": {
     "@overlyx/core": "*",
     "@preact/signals": "^2.11.1",
+    "@types/katex": "^0.16.8",
+    "katex": "^0.18.4",
     "mathlive": "^0.110.0",
     "preact": "^10.29.8",
     "prosemirror-commands": "^1.6.2",
