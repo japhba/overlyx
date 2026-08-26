@@ -8,7 +8,7 @@ import { Decoration, DecorationSet } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { ENUM_STYLES, ITEMIZE_BULLETS, isNumberedSection, sectionLevel } from '../layouts';
 import { parseHeader } from '@overlyx/core';
-import { parseDisplayMath, numberedRows } from '../math';
+import { parseFormula } from '@overlyx/core';
 import { editorContext } from '../context';
 
 export const numberingKey = new PluginKey<DecorationSet>('lyx-numbering');
@@ -65,8 +65,8 @@ function build(doc: PMNode): DecorationSet {
           if (para.type.name === 'paragraph') { decorateParagraph(para, pp, true); walkInsets(para, pp + 1, floatType); }
         })));
       } else if (child.type.name === 'math_display') {
-        const dm = parseDisplayMath(child.attrs.latex);
-        const n = numberedRows(dm);
+        const h = parseFormula(String(child.attrs.latex));
+        const n = h.type === 'simple' || h.type === 'none' || h.type === 'unknown' ? 0 : h.type === 'equation' ? (h.numberedRows[0] === true ? 1 : 0) : h.type === 'multline' ? (h.numberedRows.some(x => x === true) ? 1 : 0) : h.numberedRows.filter(x => x === true).length;
         if (n > 0) {
           const nums: string[] = [];
           for (let i = 0; i < n; i++) nums.push(String(++c.eq));

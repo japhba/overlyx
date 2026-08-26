@@ -62,31 +62,27 @@ test('macro arguments are editable in place and written back as macro calls', as
     const wrap = [...document.querySelectorAll('.lyx-math-inline')].find(w => /^\\inv\{/.test(((w as any).pmViewDesc?.node?.attrs?.latex) ?? ''))!;
     wrap.dispatchEvent(new PointerEvent('pointerenter'));      // hovering upgrades the static rendering to a field
     await sleep(100);
-    const mf = wrap.querySelector('math-field') as any;
-    const before = mf.__lyxLatex as string;
-    mf.focus(); await sleep(50);
-    mf.executeCommand('moveToMathfieldStart');
-    mf.executeCommand('moveToNextChar');       // the caret skips the macro's template and lands in the argument cell
-    await sleep(30);
+    const f = (wrap as any).pmViewDesc.spec.field;
+    const before = f.latex as string;                          // the field's (LyX-normalised) form of the formula
+    f.focus('start'); await sleep(50);
+    f.cursor.mathForward();                                    // enters the macro's argument cell
+    f.layout();
     await new Promise(r => requestAnimationFrame(() => setTimeout(r, 60)));
-    const marks = [...mf.shadowRoot.querySelectorAll('.lyx-mk > div')] as HTMLElement[];
-    const marked = marks.filter(d => !d.textContent).length >= 4;                  // four corners around the macro
-    const active = marks.find(d => d.textContent)?.textContent?.replace(/^\\/, '');
-    mf.executeCommand(['insert', 'Q']);
+    const marked = f.dom.querySelectorAll('.lm-corner').length >= 4;                  // four corners around the macro
+    const active = f.dom.querySelector('.lm-macro-name')?.textContent?.replace(/^\\/, '');
+    f.execute('insert', 'Q');
     await sleep(400);
     const after = (wrap as any).pmViewDesc.node.attrs.latex as string;
-    // undo through the document so the file is left unchanged
-    mf.executeCommand('deleteBackward');
+    f.execute('undo');
     await sleep(400);
-    return { before, marked, active, after, restored: (wrap as any).pmViewDesc.node.attrs.latex as string, expanded: mf.value.includes('lyxmacro=inv') };
+    return { before, marked, active, after, restored: (wrap as any).pmViewDesc.node.attrs.latex as string, inArg: f.cursor.inset?.t };
   });
-  expect(r.expanded).toBe(true);                     // MathLive edits the expanded template
+  expect(r.inArg).toBe('macro');                     // the cursor is inside the macro's argument
   expect(r.marked).toBe(true);                       // LyX-like corner markers around the macro being edited
   expect(r.active).toBe('inv');
-  // MathLive normalises sub/superscript order when it serialises; compare modulo that
-  const norm = (x: string) => x.replace(/\^\{-\}_\{\\cT\}/g, '_{\\cT}^{-}');
-  expect(norm(r.after)).toBe(norm(r.before).replace(/^\\inv\{/, '\\inv{Q'));   // the argument edit is written back as \inv{...}
-  expect(norm(r.restored)).toBe(norm(r.before));
+  const body = (s: string) => s.replace(/^\$|\$$/g, '');
+  expect(r.after).toBe(body(r.before).replace(/^\\inv\{/, '\\inv{Q'));   // the argument edit is written back as \inv{...}
+  expect(r.restored).toBe(body(r.before));
   expect(errors).toEqual([]);
 });
 
@@ -95,67 +91,57 @@ test('LyX math keys: inset markers, Backspace/Delete dissolve a cell, Space leav
   await openPaper(page, 'math.lyx', 2);
   const wrap = page.locator('.lyx-editor .lyx-math-inline').first();
   await wrap.hover();
-  await expect(wrap.locator('math-field')).toHaveCount(1, { timeout: 5000 });
+  await expect(wrap.locator('.lm-field')).toHaveCount(1, { timeout: 5000 });
   await wrap.click();
-  const field = () => page.evaluate(() => (document.querySelector('.lyx-editor .lyx-math-inline math-field') as any));
-  const setCaret = (finder: string) => page.evaluate((finder) => {
-    const mf = document.querySelector('.lyx-editor .lyx-math-inline math-field') as any;
-    const m = mf._mathfield.model;
-    mf.focus(); m.position = new Function('m', 'return ' + finder)(m);
-  }, finder);
+  // cursor paths are [cell index, position] per level, like LyX's DocIterator
+  const setPath = (path: number[][]) => page.evaluate((path) => {
+    const f = (document.querySelector('.lyx-editor .lyx-math-inline') as any).pmViewDesc.spec.field;
+    f.focus(); f.cursor.clearSelection(); f.restorePath(path); f.layout();
+  }, path);
   const state = () => page.evaluate(() => {
-    const mf = document.querySelector('.lyx-editor .lyx-math-inline math-field') as any;
-    const m = mf._mathfield.model;
-    const marks = [...mf.shadowRoot.querySelectorAll('.lyx-mk > div')] as HTMLElement[];
-    return { latex: mf.value as string, pos: m.position as number, corners: marks.filter(d => !d.textContent).length, label: marks.find(d => d.textContent)?.textContent ?? null };
+    const f = (document.querySelector('.lyx-editor .lyx-math-inline') as any).pmViewDesc.spec.field;
+    f.layout();
+    return { latex: f.latex as string, depth: f.cursor.depth as number, pos: f.cursor.pos as number, corners: f.dom.querySelectorAll('.lm-corner').length, label: f.dom.querySelector('.lm-macro-name')?.textContent ?? null, selection: !!f.cursor.selection };
   });
-  await field();
+  // atoms of the formula: \inv A (0) + (1) \left( (2) + (3) \text{if } (4) x^2 (5) + (6) \sqrt (7) + (8) \hat (9)
   // caret in the numerator: two lower corners for \left…\right plus four for the fraction
-  await setCaret("m.offsetOf(m.atoms.find(a => a.type === 'genfrac').above[0])");
-  await page.waitForTimeout(150);
+  await setPath([[0, 2], [0, 2], [0, 0]]);
   expect((await state()).corners).toBe(6);
-  // caret in the macro argument: four corners and the macro name, nothing for the template's \left(
-  await setCaret("m.offsetOf(m.atoms.find(a => a.command === '\\\\htmlData' && /lyxarg/.test(a.args[0])).lastChild)");
-  await page.waitForTimeout(150);
+  // caret in the macro argument: four corners and the macro name
+  await setPath([[0, 0], [0, 1]]);
   expect(await state()).toMatchObject({ corners: 4, label: '\\inv' });
   // caret at top level: no markers
-  await setCaret('m.lastOffset');
-  await page.waitForTimeout(150);
+  await setPath([[0, 10]]);
   expect((await state()).corners).toBe(0);
-  const strip = (l: string) => l.replace(/\\htmlData\{[^}]*\}/g, '');
   // Backspace at the inner left edge of \left( … \right) dissolves it
-  await setCaret("m.offsetOf(m.atoms.filter(a => a.type === 'leftright')[1].firstChild)");
+  await setPath([[0, 2], [0, 0]]);
   await page.keyboard.press('Backspace');
   await page.waitForTimeout(100);
-  expect(strip((await state()).latex)).toContain('+x+\\frac{a}{b}+');
+  expect((await state()).latex).toContain('+x+\\frac{a}{b}+');
   await page.keyboard.press('Control+z');
   await page.waitForTimeout(100);
-  expect(strip((await state()).latex)).toContain('\\left(x+\\frac{a}{b}\\right)');
+  expect((await state()).latex).toContain('\\left(x+\\frac{a}{b}\\right)');
   // Delete at the inner right edge of the macro argument replaces the macro by the argument
-  await setCaret("m.offsetOf(m.atoms.find(a => a.command === '\\\\htmlData' && /lyxarg/.test(a.args[0])).lastChild)");
+  await setPath([[0, 0], [0, 1]]);
   await page.keyboard.press('Delete');
   await page.waitForTimeout(100);
-  expect((await state()).latex.startsWith('A+')).toBe(true);
+  expect((await state()).latex.startsWith('$A+')).toBe(true);
   await page.keyboard.press('Control+z');
   await page.waitForTimeout(100);
-  expect((await state()).latex.includes('lyxmacro=inv')).toBe(true);
+  expect((await state()).latex.startsWith('$\\inv A+')).toBe(true);
   // Delete at the end of a \text{} cell turns it into math characters
-  await setCaret("m.offsetOf(m.atoms.filter(a => a.mode === 'text').at(-1))");
+  await setPath([[0, 4], [0, 3]]);
   await page.keyboard.press('Delete');
   await page.waitForTimeout(100);
-  expect((await state()).latex).toContain('+if\\ x^2');
+  expect((await state()).latex).toContain('+if x^{2}');
   await page.keyboard.press('Control+z');
   await page.waitForTimeout(100);
   expect((await state()).latex).toContain('\\text{if }');
-  // the caret never rests in a macro's expansion template: it is moved to the nearest argument edge
-  await setCaret("m.offsetOf(m.atoms.find(a => a.type === 'subsup' && a.parent?.args?.[0]?.startsWith('lyxmacro=inv')).superscript.at(-1))");
-  await page.waitForTimeout(100);
-  expect((await state()).pos).toBe(await page.evaluate(() => { const m = (document.querySelector('.lyx-editor .lyx-math-inline math-field') as any)._mathfield.model; return m.offsetOf(m.atoms.find((a: any) => a.command === '\\htmlData' && /lyxarg/.test(a.args[0])).lastChild); }));
   // deleting across a big inset selects it first (LyX confirmDeletion), the second Backspace removes it
-  await setCaret("m.offsetOf(m.atoms.find(a => a.type === 'surd'))");
+  await setPath([[0, 8]]);
   await page.keyboard.press('Backspace');
   await page.waitForTimeout(100);
-  expect(await page.evaluate(() => { const m = (document.querySelector('.lyx-editor .lyx-math-inline math-field') as any)._mathfield.model; const r = m.selection.ranges[0]; return r[1] - r[0]; })).toBeGreaterThan(0);
+  expect((await state()).selection).toBe(true);
   expect((await state()).latex).toContain('\\sqrt{y}');
   await page.keyboard.press('Backspace');
   await page.waitForTimeout(100);
@@ -164,18 +150,18 @@ test('LyX math keys: inset markers, Backspace/Delete dissolve a cell, Space leav
   await page.waitForTimeout(100);
   expect((await state()).latex).toContain('\\sqrt{y}');
   // Space leaves the superscript, and at the end of the formula leaves the formula with a text space
-  await setCaret("m.offsetOf(m.atoms.filter(a => a.type === 'subsup')[1].superscript.at(-1))");
+  await setPath([[0, 5], [1, 1]]);
   await page.keyboard.press('Space');
   await page.keyboard.type('q');
   await page.waitForTimeout(100);
-  expect((await state()).latex).toContain('x^2q+');
+  expect((await state()).latex).toContain('x^{2}q+');
   await page.keyboard.press('Control+z');
-  await setCaret('m.lastOffset');
+  await setPath([[0, 10]]);
   await page.keyboard.press('Space');
   await page.waitForTimeout(150);
-  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('MATH-FIELD');
+  expect(await page.evaluate(() => document.activeElement?.className)).not.toContain('lm-input');
   const para = await page.locator('.lyx-editor .lyx-par').nth(1).textContent();
-  expect(para).toMatch(/\)  end\.$|\u200b? {2}end\./);
+  expect(para).toMatch(/  end\.\s*$/);
   expect(errors).toEqual([]);
 });
 
@@ -184,16 +170,19 @@ test('formulas: tight inline spacing, no change background, ln|H| via redefined 
   const r = await page.evaluate(() => {
     const st = [...document.querySelectorAll('.lyx-math-inline .lyx-math-static')].find(s => s.textContent && s.textContent.length < 3)!;
     const wrap = st.parentElement!;
-    const base = st.querySelector('.ML__base')!.getBoundingClientRect();
+    const base = st.querySelector('.katex')!.getBoundingClientRect();
     const w = wrap.getBoundingClientRect();
     const ins = document.querySelector('.lyx-change-inserted');
     const lndet = [...document.querySelectorAll('.lyx-math-inline')].find(x => /\\lndet\{\\HH\}/.test((x as any).pmViewDesc?.node?.attrs?.latex ?? ''));
-    return { left: base.left - w.left, right: w.right - base.right, bg: ins ? getComputedStyle(ins).backgroundColor : null, lndet: lndet?.textContent };
+    const ld = lndet?.querySelector('.lyx-math-static, .lm-field');
+    return { left: base.left - w.left, right: w.right - base.right, bg: ins ? getComputedStyle(ins).backgroundColor : null, lndet: ld ? { text: ld.textContent, open: ld.querySelectorAll('.mopen').length, close: ld.querySelectorAll('.mclose').length } : null };
   });
   expect(r.left).toBeLessThan(6);
   expect(r.right).toBeLessThan(6);
   expect(r.bg === null || r.bg === 'rgba(0, 0, 0, 0)').toBe(true);
-  expect(r.lndet).toMatch(/^ln∣+\u200b?[Hℍ]\u200b?∣+/);   // bars surround the argument (\lndet redefined after a stale \det)
+  // bars surround the argument (\lndet redefined after a stale \det): KaTeX draws sized delimiters as SVG
+  expect(r.lndet?.text).toMatch(/^ln/);
+  expect(r.lndet?.open).toBeGreaterThan(0); expect(r.lndet?.close).toBeGreaterThan(0);
 });
 
 test('wide display formulas are centred on the column and equation numbers never overlap', async ({ page }) => {
@@ -202,16 +191,16 @@ test('wide display formulas are centred on the column and equation numbers never
   await p.click({ position: { x: 4, y: 8 } });
   await page.keyboard.press('End');
   await page.keyboard.press('Control+Shift+m');
-  await expect(page.locator('math-field.focused')).toHaveCount(1, { timeout: 5000 });
+  await expect(page.locator('.lm-field.focused')).toHaveCount(1, { timeout: 5000 });
   await page.waitForTimeout(500);
   await page.keyboard.type('W=' + 'A_1 B_1 C_1 +'.repeat(20));   // LyX style: Space leaves the subscript
   await page.waitForTimeout(600);
   const r = await page.evaluate(() => {
-    const d = document.querySelector('math-field.focused')!.closest('.lyx-math-display') as HTMLElement;
+    const d = document.querySelector('.lm-field.focused')!.closest('.lyx-math-display') as HTMLElement;
     const ed = document.querySelector('.lyx-editor')!.getBoundingClientRect();
-    const m = d.querySelector('math-field')!.getBoundingClientRect();
+    const m = d.querySelector('.lm-field')!.getBoundingClientRect();
     const eq = [...document.querySelectorAll('.lyx-math-display')].filter(x => x.querySelector('.eq-number')?.textContent).slice(0, 8).map(x => {
-      const c = (x.querySelector('math-field') ?? x.querySelector('.lyx-math-static'))!.getBoundingClientRect();
+      const c = (x.querySelector('.lm-field') ?? x.querySelector('.lyx-math-static'))!.getBoundingClientRect();
       const n = x.querySelector('.eq-number')!.getBoundingClientRect();
       return n.left >= c.right - 1;
     });
@@ -248,8 +237,8 @@ test('right-click menus and go-to-label for cross-references', async ({ page }) 
   // a formula context menu
   const disp = page.locator('.lyx-math-display.ProseMirror-selectednode');
   await disp.hover();
-  await disp.locator('math-field').click({ button: 'right' });
-  await expect(page.locator('.ctx-menu .ctx-item', { hasText: 'Numbered equation' })).toHaveCount(1);
+  await disp.locator('.lm-field').click({ button: 'right' });
+  await expect(page.locator('.ctx-menu .ctx-item', { hasText: 'Numbered' })).toHaveCount(1);
   await page.keyboard.press('Escape');
 });
 

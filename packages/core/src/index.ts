@@ -6,4 +6,4 @@ export * from './convert.ts';
 export * from './macros.ts';
 export * from './bib.ts';
 export * from './comments.ts';
-export * from './mathedit.ts';
+export * from './math/index.ts';

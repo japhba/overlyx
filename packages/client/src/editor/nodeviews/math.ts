@@ -1,35 +1,19 @@
 /**
- * Node views for math: inline formulas, display formulas and macro definitions,
- * edited in place with MathLive (WYSIWYG while typing, no compile step).
+ * Node views for math: inline formulas, display formulas and macro definitions, edited in place
+ * with the LyX-style math editor (editor/lyxmath). Formulas render statically first and become
+ * editable fields when they come into view or are hovered/clicked.
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
 import type { EditorView, NodeView } from 'prosemirror-view';
-import type { MathfieldElement } from 'mathlive';
-import { createMathfield, parseDisplayMath, serializeDisplayMath, MATH_ALT_M, type DisplayMath, type HullType, isNumberedEnv, applyMacros, macroVersion, setFieldLatex, getFieldLatex, renderStaticMath, macroDictFor, mathViews } from '../math';
-import { macroFromLyxLines } from '@overlyx/core';
+import { macroFromLyxLines, parseFormula, numberedType, type HullType } from '@overlyx/core';
+import { LyxMathField, renderStaticHtml, activeMathField } from '../lyxmath/field';
+import { macroTableFor, mathViews, macroVersion } from '../lyxmath/macrotable';
 import { showContextMenu, type MenuItem } from '../contextmenu';
 import { toggleMathDisplay } from '../commands';
 
-function isMac() { return /Mac/.test(navigator.platform); }
-
 /** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
 export const pendingFocus: { pos: number | null; keys: string[] } = { pos: null, keys: [] };
-
-function focusWhenMounted(mf: MathfieldElement, getPos: () => number | undefined) {
-  const pos = getPos();
-  if (pos === undefined || pendingFocus.pos !== pos) return;
-  pendingFocus.pos = null;
-  const doFocus = () => {
-    mf.focus();
-    mf.executeCommand('moveToMathfieldEnd');
-    // replay characters typed before the field was ready
-    const keys = pendingFocus.keys.splice(0);
-    for (const k of keys) mf.executeCommand(['insert', k]);
-  };
-  if ((mf as any).isConnected && (mf as any).shadowRoot?.querySelector('.ML__content')) doFocus();
-  else mf.addEventListener('mount', doFocus, { once: true });
-}
 
 /* ------------------------------------------------ lazy upgrade of static formulas */
 
@@ -45,12 +29,11 @@ const io = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserve
   pump();
 }, { rootMargin: '900px 0px' }) : null;
 
-/** Upgrade a few formulas per frame so that scrolling stays smooth. */
 function pump() {
   if (pumping) return;
   pumping = true;
   const step = () => {
-    const batch = lazyQueue.splice(0, 6);
+    const batch = lazyQueue.splice(0, 8);
     for (const v of batch) v.upgrade();
     if (lazyQueue.length) requestAnimationFrame(step); else pumping = false;
   };
@@ -59,97 +42,33 @@ function pump() {
 function watchLazy(v: Upgradable) { (v.dom as any).__lyxMathView = v; io?.observe(v.dom); }
 function unwatchLazy(v: Upgradable) { io?.unobserve(v.dom); const i = lazyQueue.indexOf(v); if (i >= 0) lazyQueue.splice(i, 1); }
 
+/* ------------------------------------------------ shared */
+
+const DELIMS: [string, string, string][] = [['( )', '(', ')'], ['[ ]', '[', ']'], ['{ }', '{', '}'], ['| |', '|', '|'], ['‖ ‖', 'Vert', 'Vert'], ['⟨ ⟩', 'langle', 'rangle'], ['⌊ ⌋', 'lfloor', 'rfloor'], ['⌈ ⌉', 'lceil', 'rceil']];
+
 /** Menu entries shared by all formula kinds. */
-function commonMathMenu(mf: MathfieldElement): MenuItem[] {
-  const ins = (latex: string) => () => { mf.focus(); mf.executeCommand(['insert', latex]); };
+function commonMathMenu(f: LyxMathField): MenuItem[] {
+  const ins = (latex: string) => () => { f.focus(); f.execute('insert', latex); };
+  const c = f.cursor;
   return [
     { label: 'Insert', sub: [
-      { label: 'Fraction', shortcut: 'Alt+M F', action: ins('\\frac{#0}{#?}') },
+      { label: 'Fraction', shortcut: 'Alt+M F', action: ins('\\frac{#0}{}') },
       { label: 'Square root', shortcut: 'Alt+M S', action: ins('\\sqrt{#0}') },
-      { label: 'Parentheses \\left( \\right)', shortcut: 'Alt+M (', action: ins('\\left(#0\\right)') },
-      { label: 'Brackets \\left[ \\right]', shortcut: 'Alt+M [', action: ins('\\left[#0\\right]') },
-      { label: 'Braces \\left\\{ \\right\\}', shortcut: 'Alt+M {', action: ins('\\left\\{#0\\right\\}') },
-      { label: 'Norm \\left| \\right|', shortcut: 'Alt+M |', action: ins('\\left|#0\\right|') },
-      { label: 'Text \\text{}', shortcut: 'Ctrl+M', action: ins('\\text{#0}') },
-      { label: 'Sum', shortcut: 'Alt+M U', action: ins('\\sum_{#?}^{#?}') },
-      { label: 'Integral', shortcut: 'Alt+M I', action: ins('\\int_{#?}^{#?}') },
-      { label: 'Matrix (2×2)', action: ins('\\begin{pmatrix}#0 & #? \\\\ #? & #?\\end{pmatrix}') },
-      { label: 'Cases', action: ins('\\begin{cases}#0 & #? \\\\ #? & #?\\end{cases}') },
+      { label: 'Root', shortcut: 'Alt+M R', action: ins('\\sqrt[]{#0}') },
+      { label: 'Sum', shortcut: 'Alt+M U', action: ins('\\sum') },
+      { label: 'Integral', shortcut: 'Alt+M I', action: ins('\\int') },
+      { label: 'Limit', shortcut: 'Alt+M L', action: ins('\\lim') },
+      { label: 'Text', shortcut: 'Ctrl+M', action: () => { f.focus(); f.execute('text'); } },
+      { label: 'Superscript', shortcut: 'Alt+M E', action: () => { f.focus(); f.execute('moveToSuperscript'); } },
+      { label: 'Subscript', shortcut: 'Alt+M X', action: () => { f.focus(); f.execute('moveToSubscript'); } },
+      { label: 'Delimiters', sub: DELIMS.map(([l, a, b]) => ({ label: l, action: () => { f.focus(); f.execute('delim', a, b); } })) },
+      { label: 'Matrix', sub: [['2×2', 2, 2, 'pmatrix'], ['3×3', 3, 3, 'pmatrix'], ['2×2 brackets', 2, 2, 'bmatrix'], ['cases', 2, 2, 'cases']].map(([l, r, cc, env]) => ({ label: String(l), action: () => { f.focus(); f.execute('matrix', r, cc, env); } })) },
+      { label: 'Thin space', shortcut: 'Ctrl+Space', action: ins('\\,') },
     ] },
-    { label: 'Copy LaTeX', action: () => { void navigator.clipboard?.writeText(getFieldLatex(mf)); } },
-    { label: 'Copy MathML', action: () => { try { void navigator.clipboard?.writeText(mf.getValue('math-ml')); } catch { /* ignore */ } } },
+    { label: 'Font', sub: [['Roman', 'mathrm'], ['Bold', 'mathbf'], ['Bold symbol', 'boldsymbol'], ['Calligraphic', 'mathcal'], ['Blackboard', 'mathbb'], ['Fraktur', 'mathfrak'], ['Sans serif', 'mathsf'], ['Typewriter', 'mathtt'], ['Italic', 'mathit']].map(([l, n]) => ({ label: l, action: () => { f.focus(); f.execute('font', n); } })) },
+    { label: 'Toggle limits (\\limits)', action: () => { f.focus(); f.execute('limits'); } },
+    { label: c.selection ? 'Copy LaTeX of selection' : 'Copy LaTeX', action: () => { void navigator.clipboard?.writeText(c.selection ? c.grabSelection() : f.latex); } },
   ];
-}
-
-/** Shared wiring: focus in/out, move-out events, keyboard bridge, context menu. */
-function wire(mf: MathfieldElement, view: EditorView, getPos: () => number | undefined, opts: { onChange: (latex: string) => void; onCommit?: () => void; menu?: () => MenuItem[] }) {
-  let altM = false;
-  mf.addEventListener('input', () => { opts.onChange(getFieldLatex(mf)); });
-  mf.addEventListener('change', () => { opts.onCommit?.(); });
-  mf.addEventListener('move-out', (ev: Event) => {
-    const dir = (ev as CustomEvent).detail?.direction as string;
-    const pos = getPos();
-    if (pos === undefined) return;
-    const node = view.state.doc.nodeAt(pos);
-    const size = node ? node.nodeSize : 1;
-    const target = dir === 'backward' || dir === 'upward' ? pos : pos + size;
-    let tr = view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(target), dir === 'backward' || dir === 'upward' ? -1 : 1));
-    if ((ev as CustomEvent).detail?.insertSpace) tr = tr.insertText(' ');   // LyX: Space at the end of a formula leaves it and becomes a text space
-    view.dispatch(tr);
-    view.focus();
-  });
-  mf.addEventListener('focusin', () => { mf.classList.add('focused'); });
-  mf.addEventListener('focusout', () => { mf.classList.remove('focused'); altM = false; });
-  // capture phase: MathLive's own contextmenu handler (inside the shadow root) stops propagation
-  mf.addEventListener('contextmenu', (ev: MouseEvent) => {
-    ev.preventDefault(); ev.stopPropagation();
-    const items = [...(opts.menu?.() ?? []), { sep: true }, ...commonMathMenu(mf)];
-    showContextMenu(ev.clientX, ev.clientY, items);
-  }, { capture: true });
-  mf.addEventListener('keydown', (ev: KeyboardEvent) => {
-    const mod = isMac() ? ev.metaKey : ev.ctrlKey;
-    // Alt+M prefix (LyX math bindings)
-    if (ev.altKey && ev.key.toLowerCase() === 'm' && !mod) { altM = true; ev.preventDefault(); ev.stopPropagation(); return; }
-    if (altM) {
-      altM = false;
-      const ins = MATH_ALT_M[ev.key];
-      if (ins) { mf.executeCommand(['insert', ins]); ev.preventDefault(); ev.stopPropagation(); return; }
-      if (ev.key === 'x') { mf.executeCommand('moveToSubscript'); ev.preventDefault(); ev.stopPropagation(); return; }
-      if (ev.key === 'e') { mf.executeCommand('moveToSuperscript'); ev.preventDefault(); ev.stopPropagation(); return; }
-      if (ev.key === 'm') { mf.executeCommand(['insert', '\\text{#0}']); ev.preventDefault(); ev.stopPropagation(); return; }
-      if (ev.key === 'n' || ev.key === 'd' || ev.key === 't') {
-        // handled by the display math view (numbering / type); bubble as custom event
-        mf.dispatchEvent(new CustomEvent('lyx-math-command', { detail: { key: ev.key }, bubbles: true }));
-        ev.preventDefault(); ev.stopPropagation(); return;
-      }
-    }
-    // Ctrl/Cmd+L: start a LaTeX command (a backslash) — the browser would focus its address bar
-    if (mod && ev.key.toLowerCase() === 'l' && !ev.shiftKey && !ev.altKey) {
-      mf.executeCommand(['switchMode', 'latex', '', '\\']);
-      ev.preventDefault(); ev.stopPropagation(); return;
-    }
-    if (mod && ev.key.toLowerCase() === 'm' && !ev.shiftKey) {
-      // Ctrl+M inside math: LyX inserts a text box
-      mf.executeCommand(['insert', '\\text{#0}']);
-      ev.preventDefault(); ev.stopPropagation(); return;
-    }
-    if (ev.key === 'Escape') {
-      const pos = getPos();
-      if (pos !== undefined) {
-        const node = view.state.doc.nodeAt(pos);
-        view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos + (node?.nodeSize ?? 1)))));
-        view.focus();
-      }
-      ev.preventDefault(); ev.stopPropagation(); return;
-    }
-    // Ctrl+Space: protected space in text; in math LyX inserts a thin space
-    if (mod && ev.key === ' ') { mf.executeCommand(['insert', '\\,']); ev.preventDefault(); ev.stopPropagation(); return; }
-    // Do not let ProseMirror see keystrokes meant for the field, except global shortcuts
-    const passthrough = mod && ['s', 'r', 'z', 'y', 'f', 'o', 'p', 'w'].includes(ev.key.toLowerCase()) && !ev.altKey;
-    if (!passthrough) ev.stopPropagation();
-  });
-  // prevent ProseMirror from handling mouse selection inside the field
-  mf.addEventListener('mousedown', (ev) => { ev.stopPropagation(); });
 }
 
 function deleteFormula(view: EditorView, getPos: () => number | undefined) {
@@ -161,9 +80,46 @@ function deleteFormula(view: EditorView, getPos: () => number | undefined) {
   view.focus();
 }
 
+/** Leave the field into the document: cursor before/after the formula node. */
+function moveOut(view: EditorView, getPos: () => number | undefined, dir: string, insertSpace: boolean) {
+  const pos = getPos();
+  if (pos === undefined) return;
+  const node = view.state.doc.nodeAt(pos);
+  const size = node ? node.nodeSize : 1;
+  const back = dir === 'backward' || dir === 'upward';
+  let tr = view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(back ? pos : pos + size), back ? -1 : 1));
+  if (insertSpace) tr = tr.insertText(' ');
+  view.dispatch(tr);
+  view.focus();
+}
+
+/** Common field wiring: context menu, mouse isolation from ProseMirror, keyboard passthrough. */
+function wire(f: LyxMathField, menu: () => MenuItem[]) {
+  f.dom.addEventListener('contextmenu', (ev: MouseEvent) => {
+    ev.preventDefault(); ev.stopPropagation();
+    showContextMenu(ev.clientX, ev.clientY, [...menu(), { sep: true }, ...commonMathMenu(f)]);
+  });
+  f.dom.addEventListener('mousedown', ev => { ev.stopPropagation(); });
+  f.dom.addEventListener('keydown', (ev: KeyboardEvent) => {
+    // global shortcuts (save, find, …) may bubble to the editor; everything else stays in the field
+    const mod = /Mac/.test(navigator.platform) ? ev.metaKey : ev.ctrlKey;
+    const passthrough = mod && ['s', 'r', 'f', 'o', 'p', 'w'].includes(ev.key.toLowerCase()) && !ev.altKey;
+    if (!passthrough) ev.stopPropagation();
+  });
+}
+
+function focusIfPending(f: LyxMathField, getPos: () => number | undefined) {
+  const pos = getPos();
+  if (pos === undefined || pendingFocus.pos !== pos) return;
+  pendingFocus.pos = null;
+  requestAnimationFrame(() => { f.focus('end'); for (const k of pendingFocus.keys.splice(0)) f.execute('insert', k); });
+}
+
+/* ------------------------------------------------ inline formulas */
+
 export class MathInlineView implements NodeView {
   dom: HTMLElement;
-  mf: MathfieldElement | null = null;
+  field: LyxMathField | null = null;
   private staticEl: HTMLElement | null = null;
   private staticKey = '';
   private updating = false;
@@ -182,54 +138,61 @@ export class MathInlineView implements NodeView {
 
   private renderStatic() {
     if (!this.staticEl) { this.staticEl = document.createElement('span'); this.staticEl.className = 'lyx-math-static'; this.dom.replaceChildren(this.staticEl); }
-    const el = this.staticEl, latex = this.lastLatex;
-    renderStaticMath({ latex, display: false, view: this.view, pos: this.getPos(), apply: (html, key) => { if (this.staticEl === el && this.lastLatex === latex) { el.innerHTML = html; this.staticKey = key; } } });
+    const { key, table } = macroTableFor(this.view, this.getPos());
+    this.staticEl.innerHTML = renderStaticHtml('$' + this.lastLatex + '$', false, table);
+    this.staticKey = key;
   }
 
-  /** Replace the static rendering by an editable MathLive field. */
   upgrade() {
-    if (this.mf) return;
+    if (this.field) return;
     unwatchLazy(this);
-    const mf = createMathfield({ latex: this.lastLatex, display: false, view: this.view, pos: this.getPos() });
-    (mf as any).__lyxPos = this.getPos;
-    this.mf = mf;
-    this.dom.replaceChildren(mf);
-    this.staticEl = null;
-    focusWhenMounted(mf, this.getPos);
-    wire(mf, this.view, this.getPos, {
-      onChange: (latex) => {
-        if (this.updating || latex === this.lastLatex) return;
-        const pos = this.getPos();
-        if (pos === undefined) return;
-        const cur = this.view.state.doc.nodeAt(pos);
-        if (!cur || cur.attrs.latex === latex) return;
-        this.lastLatex = latex;
-        this.dom.classList.toggle('empty', !latex.trim());
-        this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex }).setMeta('addToHistory', true));
-      },
-      menu: () => [
-        { label: 'Inline formula', info: true },
-        { label: 'Convert to display formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
-        { label: 'Delete formula', action: () => deleteFormula(this.view, this.getPos) },
-      ],
+    const { key, table } = macroTableFor(this.view, this.getPos());
+    const f = new LyxMathField({
+      latex: '$' + this.lastLatex + '$', display: false, macros: table,
+      onChange: latex => this.commit(latex),
+      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace),
     });
+    (f as any)._macroKey = key;
+    this.field = f;
+    this.dom.replaceChildren(f.dom);
+    this.staticEl = null;
+    wire(f, () => [
+      { label: 'Inline formula', info: true },
+      { label: 'Convert to display formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
+      { label: 'Delete formula', action: () => deleteFormula(this.view, this.getPos) },
+    ]);
+    focusIfPending(f, this.getPos);
   }
-  ensureField(): MathfieldElement { this.upgrade(); return this.mf!; }
+  ensureField(): LyxMathField { this.upgrade(); return this.field!; }
+
+  private commit(latex: string) {
+    if (this.updating) return;
+    const body = latex.replace(/^\$|\$$/g, '').replace(/^ $/, '');
+    if (body === this.lastLatex) return;
+    const pos = this.getPos();
+    if (pos === undefined) return;
+    const cur = this.view.state.doc.nodeAt(pos);
+    if (!cur || cur.attrs.latex === body) return;
+    this.lastLatex = body;
+    this.dom.classList.toggle('empty', !body.trim());
+    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex: body }).setMeta('addToHistory', true));
+  }
   refreshMacros() {
-    if (this.mf) applyMacros(this.mf, true, this.getPos(), this.view);
-    else if (this.staticKey !== macroDictFor(this.view, this.getPos()).key) this.renderStatic();
+    const { key, table } = macroTableFor(this.view, this.getPos());
+    if (this.field) this.field.setMacros(table, key);
+    else if (this.staticKey !== key) this.renderStatic();
   }
   private selectSelf() { const pos = this.getPos(); if (pos !== undefined) this.view.dispatch(this.view.state.tr.setSelection(NodeSelection.create(this.view.state.doc, pos))); }
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
     const latex = String(node.attrs.latex);
-    if (this.mf) {
-      if ((this.mf as any).__lyxMacroVersion !== macroVersion) applyMacros(this.mf, true, this.getPos(), this.view);
-      if (latex !== this.lastLatex && document.activeElement !== this.mf) {
+    if (this.field) {
+      this.refreshMacros();
+      if (latex !== this.lastLatex && !this.field.hasFocus()) {
         this.updating = true;
         this.lastLatex = latex;
-        setFieldLatex(this.mf, latex);
+        this.field.setLatex('$' + latex + '$');
         this.dom.classList.toggle('empty', !latex.trim());
         this.updating = false;
       }
@@ -242,26 +205,19 @@ export class MathInlineView implements NodeView {
   }
   selectNode() { this.dom.classList.add('ProseMirror-selectednode'); }
   deselectNode() { this.dom.classList.remove('ProseMirror-selectednode'); }
-  stopEvent(ev: Event) { return !!this.mf && (ev.target === this.mf || this.mf.contains(ev.target as Node)); }
+  stopEvent(ev: Event) { return !!this.field && this.field.dom.contains(ev.target as Node); }
   ignoreMutation() { return true; }
-  focus(atEnd = false) {
-    const mf = this.ensureField();
-    mf.focus();
-    mf.executeCommand(atEnd ? 'moveToMathfieldEnd' : 'moveToMathfieldStart');
-  }
-  destroy() { mathViews.delete(this); unwatchLazy(this); this.mf?.remove(); }
+  focus(where: 'start' | 'end' = 'end') { this.ensureField().focus(where); }
+  destroy() { mathViews.delete(this); unwatchLazy(this); this.field?.destroy(); }
 }
 
+/* ------------------------------------------------ display formulas */
+
 const ENV_MENU: { env: HullType; label: string }[] = [
-  { env: 'simple', label: 'Plain display  \\[ … \\]' },
-  { env: 'equation', label: 'equation (numbered)' },
-  { env: 'equation*', label: 'equation*' },
+  { env: 'equation', label: 'equation' },
   { env: 'align', label: 'align' },
-  { env: 'align*', label: 'align*' },
   { env: 'gather', label: 'gather' },
-  { env: 'gather*', label: 'gather*' },
   { env: 'multline', label: 'multline' },
-  { env: 'multline*', label: 'multline*' },
   { env: 'eqnarray', label: 'eqnarray' },
   { env: 'flalign', label: 'flalign' },
   { env: 'alignat', label: 'alignat' },
@@ -269,13 +225,12 @@ const ENV_MENU: { env: HullType; label: string }[] = [
 
 export class MathDisplayView implements NodeView {
   dom: HTMLElement;
-  mf: MathfieldElement | null = null;
+  field: LyxMathField | null = null;
   private staticEl: HTMLElement | null = null;
   private staticKey = '';
   numberEl: HTMLElement;
   labelEl: HTMLElement;
   metaEl: HTMLElement;
-  dm: DisplayMath;
   private updating = false;
   private lastLatex: string;
   private ro: ResizeObserver | null = null;
@@ -283,7 +238,6 @@ export class MathDisplayView implements NodeView {
 
   constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.lastLatex = String(node.attrs.latex);
-    this.dm = parseDisplayMath(this.lastLatex);
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-math-display';
     const left = document.createElement('span');
@@ -315,36 +269,39 @@ export class MathDisplayView implements NodeView {
     this.dom.addEventListener('pointerenter', () => this.upgrade());
   }
 
-  private contentEl(): HTMLElement { return this.mf ?? this.staticEl!; }
+  private contentEl(): HTMLElement { return this.field?.dom ?? this.staticEl!; }
 
   private renderStatic() {
     if (!this.staticEl) return;
-    const el = this.staticEl, latex = this.bodyForMathlive();
-    renderStaticMath({ latex, display: true, view: this.view, pos: this.getPos(), apply: (html, key) => { if (this.staticEl === el) { el.innerHTML = html; this.staticKey = key; this.scheduleRelayout(); } } });
+    const { key, table } = macroTableFor(this.view, this.getPos());
+    this.staticEl.innerHTML = renderStaticHtml(this.lastLatex, true, table);
+    this.staticKey = key;
+    this.scheduleRelayout();
   }
 
   upgrade() {
-    if (this.mf) return;
+    if (this.field) return;
     unwatchLazy(this);
-    const mf = createMathfield({ latex: this.bodyForMathlive(), display: true, view: this.view, pos: this.getPos() });
-    (mf as any).__lyxPos = this.getPos;
-    this.mf = mf;
-    if (this.staticEl) { this.staticEl.replaceWith(mf); this.staticEl = null; } else this.dom.insertBefore(mf, this.metaEl);
-    this.ro?.observe(mf);
-    focusWhenMounted(mf, this.getPos);
-    wire(mf, this.view, this.getPos, {
-      onChange: (latex) => { if (!this.updating) this.commit(latex); },
-      menu: () => this.menu(),
+    const { key, table } = macroTableFor(this.view, this.getPos());
+    const f = new LyxMathField({
+      latex: this.lastLatex, display: true, macros: table,
+      onChange: latex => this.commit(latex),
+      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace),
+      onCommand: key => { if (key === 'n') this.toggleNumbering(); },
     });
-    mf.addEventListener('lyx-math-command', (ev: Event) => {
-      const key = (ev as CustomEvent).detail.key as string;
-      if (key === 'n') this.toggleNumbering();
-    });
+    (f as any)._macroKey = key;
+    this.field = f;
+    if (this.staticEl) { this.staticEl.replaceWith(f.dom); this.staticEl = null; } else this.dom.insertBefore(f.dom, this.metaEl);
+    this.ro?.observe(f.dom);
+    wire(f, () => this.menu());
+    focusIfPending(f, this.getPos);
   }
-  ensureField(): MathfieldElement { this.upgrade(); return this.mf!; }
+  ensureField(): LyxMathField { this.upgrade(); return this.field!; }
+
   refreshMacros() {
-    if (this.mf) applyMacros(this.mf, true, this.getPos(), this.view);
-    else if (this.staticKey !== macroDictFor(this.view, this.getPos()).key) this.renderStatic();
+    const { key, table } = macroTableFor(this.view, this.getPos());
+    if (this.field) this.field.setMacros(table, key);
+    else if (this.staticKey !== key) this.renderStatic();
   }
 
   private syncNumber() {
@@ -363,10 +320,8 @@ export class MathDisplayView implements NodeView {
     const scroll = dom.closest('.editor-scroll') as HTMLElement | null;
     if (!scroll || !dom.isConnected) return;
     const content = this.contentEl();
-    const latexEl = (this.mf ? this.mf.shadowRoot?.querySelector('.ML__latex') : content.querySelector('.ML__latex')) as HTMLElement | null;
-    const contentW = Math.ceil(Math.max(content.scrollWidth, latexEl?.scrollWidth ?? 0) + 8);
+    const contentW = Math.ceil(content.scrollWidth + 8);
     const shifted = dom.style.gridTemplateColumns !== '';
-    // reads first; the container width is the text column width unless we already stretched it
     const avail = shifted ? dom.parentElement!.clientWidth : dom.clientWidth;
     const metaW = this.metaEl.offsetWidth;
     const need = contentW + metaW + 10;
@@ -374,7 +329,6 @@ export class MathDisplayView implements NodeView {
       if (shifted) { dom.style.marginLeft = ''; dom.style.width = ''; dom.style.gridTemplateColumns = ''; }
       return;
     }
-    // room between the column and the page's left edge, independent of horizontal scrolling and of a previous shift
     const pageLeft = scroll.getBoundingClientRect().left + 6;
     const left = dom.getBoundingClientRect().left + scroll.scrollLeft - (parseFloat(dom.style.marginLeft) || 0);
     const leftRoom = Math.max(0, left - pageLeft);
@@ -384,143 +338,89 @@ export class MathDisplayView implements NodeView {
     dom.style.width = shift > 0 ? `calc(100% + ${shift}px)` : '';
   }
 
+  private hull() { return this.field ? this.field.hull : parseFormula(this.lastLatex, macroTableFor(this.view, this.getPos()).table); }
+
   private menu(): MenuItem[] {
-    const numbered = isNumberedEnv(this.dm.env);
-    const labels = this.dm.labels.filter(Boolean) as string[];
+    const h = this.hull();
+    const numbered = numberedType(h);
+    const labels = h.labels.filter(Boolean) as string[];
     return [
       { label: 'Display formula', info: true },
-      { label: 'Numbered equation', shortcut: 'Alt+M N', checked: numbered, action: () => this.toggleNumbering() },
+      { label: 'Numbered', shortcut: 'Alt+M N', checked: numbered, action: () => this.toggleNumbering() },
+      { label: 'Number this line', checked: h.rows.length > 1 && !!h.numberedRows[this.currentRow()], disabled: h.rows.length < 2, action: () => this.ensureField().execute('numberLineToggle') },
       { label: labels.length ? `Edit label (${labels.join(', ')})…` : 'Add label…', action: () => this.editLabel() },
       { label: 'Copy label name', disabled: !labels.length, action: () => { void navigator.clipboard?.writeText(labels[0] ?? ''); } },
-      { label: 'Environment', sub: ENV_MENU.map(e => ({ label: e.label, checked: this.dm.env === e.env || (this.dm.env === 'unknown' && e.env === 'equation'), action: () => this.setEnv(e.env) })) },
+      { label: 'Environment', sub: ENV_MENU.map(e => ({ label: e.label, checked: h.type === e.env, action: () => this.setEnv(e.env) })) },
+      { label: 'New line (row)', shortcut: 'Enter', action: () => this.ensureField().execute('newline') },
       { label: 'Convert to inline formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
       { label: 'Delete formula', action: () => deleteFormula(this.view, this.getPos) },
     ];
   }
+  private currentRow(): number { const f = this.field; if (!f) return 0; const s = f.cursor.slices[0]; return Math.floor(s.idx / Math.max(1, f.hull.ncols)); }
   private selectSelf() { const pos = this.getPos(); if (pos !== undefined) this.view.dispatch(this.view.state.tr.setSelection(NodeSelection.create(this.view.state.doc, pos))); }
 
   private editLabel() {
-    const cur = prompt('Equation label (empty to remove):', this.dm.labels.find(Boolean) ?? 'eq:');
+    const h = this.hull();
+    const cur = prompt('Equation label (empty to remove):', h.labels.find(Boolean) ?? 'eq:');
     if (cur === null) return;
-    this.setLabel(cur.trim() || null);
+    this.setLabel(cur.trim());
   }
 
-  private bodyForMathlive(): string {
-    const env = this.dm.env;
-    if (env === 'simple' || env === 'equation' || env === 'equation*' || env === 'unknown') return this.dm.body.trim();
-    // multi-line environments: hand MathLive the equivalent environment (aligned/gathered/multline)
-    const inner = env.startsWith('align') || env.startsWith('flalign') || env.startsWith('eqnarray') || env.startsWith('xalignat') ? 'aligned' :
-      env.startsWith('alignat') ? 'alignedat' : 'gathered';
-    const arg = inner === 'alignedat' ? (this.dm.envArg || '{2}') : '';
-    return `\\begin{${inner}}${arg}${this.dm.body.trim()}\\end{${inner}}`;
-  }
-
-  private bodyFromMathlive(latex: string): string {
-    const env = this.dm.env;
-    if (env === 'simple' || env === 'equation' || env === 'equation*' || env === 'unknown') return latex;
-    const m = /^\s*\\begin\{(aligned|alignedat|gathered)\}(\{[^}]*\})?([\s\S]*)\\end\{\1\}\s*$/.exec(latex);
-    return m ? m[3] : latex;
-  }
-
-  /** Current body text (from the field if it exists, else the parsed one). */
-  private currentBody(): string { return this.mf ? this.bodyFromMathlive(getFieldLatex(this.mf)) : this.dm.body; }
-
-  private commit(latex: string) { this.commitBody(this.bodyFromMathlive(latex)); }
-
-  private commitBody(body: string) {
+  private commit(fieldLatex: string) {
+    if (this.updating) return;
+    // the LyX writer adds the newlines around a display formula itself (core/lyx/writer.ts)
+    const latex = fieldLatex.replace(/^\n/, '').replace(/\n$/, '');
     const pos = this.getPos();
     if (pos === undefined) return;
     const cur = this.view.state.doc.nodeAt(pos);
-    if (!cur) return;
-    const text = serializeDisplayMath(this.dm, body);
-    if (cur.attrs.latex === text) return;
-    this.lastLatex = text;
-    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex: text }));
+    if (!cur || cur.attrs.latex === latex) return;
+    this.lastLatex = latex;
+    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex }));
+    this.renderMeta();
   }
 
   private renderMeta() {
-    const numbered = isNumberedEnv(this.dm.env);
+    const h = this.hull();
+    const numbered = numberedType(h);
     this.dom.classList.toggle('numbered', numbered);
-    this.dom.dataset.env = this.dm.env;
-    const labels = this.dm.labels.filter(Boolean) as string[];
+    this.dom.dataset.env = h.type;
+    const labels = h.labels.filter(Boolean) as string[];
     this.labelEl.textContent = labels.length ? labels.join(', ') : (numbered ? '+label' : '');
     this.labelEl.title = labels.length ? 'Label: ' + labels.join(', ') + ' (click to edit)' : 'Click to add a label';
     this.labelEl.style.display = numbered || labels.length ? '' : 'none';
   }
 
-  toggleNumbering() {
-    const env = this.dm.env;
-    let next: typeof env;
-    if (env === 'simple') next = 'equation';
-    else if (env === 'equation') next = 'simple';
-    else if (env === 'unknown') next = 'equation';
-    else next = (env.endsWith('*') ? env.slice(0, -1) : env + '*') as typeof env;
-    const body = this.currentBody();
-    this.dm = { ...this.dm, env: next };
-    this.commitBody(body);
-    this.renderMeta();
-  }
-
-  setEnv(env: DisplayMath['env']) {
-    const wasMulti = !['simple', 'equation', 'equation*', 'unknown'].includes(this.dm.env);
-    const body = this.currentBody();
-    this.dm = { ...this.dm, env, body, envArg: env.startsWith('alignat') ? (this.dm.envArg || '{2}') : '' };
-    const isMulti = !['simple', 'equation', 'equation*', 'unknown'].includes(env);
-    if (wasMulti !== isMulti) {
-      this.updating = true;
-      if (this.mf) setFieldLatex(this.mf, this.bodyForMathlive()); else this.renderStatic();
-      this.updating = false;
-    }
-    this.commitBody(body);
-    this.renderMeta();
-  }
-
-  setLabel(label: string | null) {
-    const idx = Math.max(0, this.dm.labels.findIndex(Boolean));
-    const labels = [...this.dm.labels];
-    while (labels.length <= idx) labels.push(null);
-    labels[idx] = label;
-    const body = this.currentBody();
-    this.dm = { ...this.dm, labels };
-    this.commitBody(body);
-    this.renderMeta();
-  }
+  toggleNumbering() { this.ensureField().execute('numberToggle'); this.renderMeta(); }
+  setEnv(env: HullType) { this.ensureField().execute('mutate', env); this.renderMeta(); }
+  setLabel(label: string) { this.ensureField().execute('label', label); this.renderMeta(); }
 
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
-    if (this.mf && (this.mf as any).__lyxMacroVersion !== macroVersion) applyMacros(this.mf, true, this.getPos(), this.view);
     const latex = String(node.attrs.latex);
+    if (this.field) this.refreshMacros();
     if (latex !== this.lastLatex) {
       this.lastLatex = latex;
-      this.dm = parseDisplayMath(latex);
-      if (this.mf) {
-        if (document.activeElement !== this.mf) {
-          this.updating = true;
-          setFieldLatex(this.mf, this.bodyForMathlive());
-          this.updating = false;
-        }
-      } else this.renderStatic();
+      if (this.field) { if (!this.field.hasFocus()) { this.updating = true; this.field.setLatex(latex); this.updating = false; } }
+      else this.renderStatic();
       this.renderMeta();
     }
     return true;
   }
   selectNode() { this.dom.classList.add('ProseMirror-selectednode'); }
   deselectNode() { this.dom.classList.remove('ProseMirror-selectednode'); }
-  stopEvent(ev: Event) { return (!!this.mf && this.mf.contains(ev.target as Node)) || this.metaEl.contains(ev.target as Node); }
+  stopEvent(ev: Event) { return (!!this.field && this.field.dom.contains(ev.target as Node)) || this.metaEl.contains(ev.target as Node); }
   ignoreMutation() { return true; }
-  focus(atEnd = false) {
-    const mf = this.ensureField();
-    mf.focus();
-    mf.executeCommand(atEnd ? 'moveToMathfieldEnd' : 'moveToMathfieldStart');
-  }
-  destroy() { mathViews.delete(this); unwatchLazy(this); cancelAnimationFrame(this.relayoutRaf); this.ro?.disconnect(); this.mo?.disconnect(); this.mf?.remove(); }
+  focus(where: 'start' | 'end' = 'end') { this.ensureField().focus(where); }
+  destroy() { mathViews.delete(this); unwatchLazy(this); cancelAnimationFrame(this.relayoutRaf); this.ro?.disconnect(); this.mo?.disconnect(); this.field?.destroy(); }
 }
+
+/* ------------------------------------------------ macro definitions */
 
 /** FormulaMacro inset: shows "\name := definition" with an editable definition. */
 export class MacroView implements NodeView {
   dom: HTMLElement;
-  mf: MathfieldElement;
+  field: LyxMathField;
   nameEl: HTMLElement;
   private updating = false;
   private lastDef: string;
@@ -534,43 +434,49 @@ export class MacroView implements NodeView {
     const def = this.parse();
     this.nameEl.textContent = '\\' + (def?.name ?? '?') + (def && def.args ? `[${def.args}]` : '') + ' ≔ ';
     this.lastDef = def?.def ?? '';
-    this.mf = createMathfield({ latex: this.lastDef, display: false, view });
-    this.dom.append(this.nameEl, this.mf);
+    const { key, table } = macroTableFor(view, getPos());
+    this.field = new LyxMathField({
+      latex: '$' + this.lastDef + '$', display: false, macros: table,
+      onChange: latex => this.commit(latex.replace(/^\$|\$$/g, '')),
+      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace),
+    });
+    (this.field as any)._macroKey = key;
+    this.dom.append(this.nameEl, this.field.dom);
     mathViews.add(this);
     if (def?.display) { const d = document.createElement('span'); d.className = 'macro-display'; d.textContent = ' (shown as: ' + def.display + ')'; d.contentEditable = 'false'; this.dom.append(d); }
-    wire(this.mf, view, getPos, {
-      onChange: (latex) => {
-        if (this.updating || latex === this.lastDef) return;
-        const pos = this.getPos();
-        if (pos === undefined) return;
-        const cur = this.view.state.doc.nodeAt(pos);
-        if (!cur) return;
-        const lines: string[] = JSON.parse(cur.attrs.lines);
-        const d = macroFromLyxLines(lines);
-        if (!d) return;
-        const cmd = /^\\renewcommand/.test(lines[0]) ? '\\renewcommand' : '\\newcommand';
-        lines[0] = `${cmd}{\\${d.name}}${d.args ? `[${d.args}]` : ''}{${latex}}`;
-        this.lastDef = latex;
-        this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, lines: JSON.stringify(lines) }));
-      },
-      menu: () => [{ label: 'Math macro definition', info: true }, { label: 'Delete macro definition', action: () => deleteFormula(this.view, this.getPos) }],
-    });
+    wire(this.field, () => [{ label: 'Math macro definition', info: true }, { label: 'Delete macro definition', action: () => deleteFormula(this.view, this.getPos) }]);
     this.nameEl.addEventListener('mousedown', (ev) => { ev.preventDefault(); const pos = this.getPos(); if (pos !== undefined) { this.view.dispatch(this.view.state.tr.setSelection(NodeSelection.create(this.view.state.doc, pos))); this.view.focus(); } });
   }
   private parse() { try { return macroFromLyxLines(JSON.parse(this.node.attrs.lines)); } catch { return null; } }
-  refreshMacros() { applyMacros(this.mf, true, undefined, this.view); }
-  ensureField(): MathfieldElement { return this.mf; }
+  private commit(latex: string) {
+    if (this.updating || latex === this.lastDef) return;
+    const pos = this.getPos();
+    if (pos === undefined) return;
+    const cur = this.view.state.doc.nodeAt(pos);
+    if (!cur) return;
+    const lines: string[] = JSON.parse(cur.attrs.lines);
+    const d = macroFromLyxLines(lines);
+    if (!d) return;
+    const cmd = /^\\renewcommand/.test(lines[0]) ? '\\renewcommand' : '\\newcommand';
+    lines[0] = `${cmd}{\\${d.name}}${d.args ? `[${d.args}]` : ''}{${latex}}`;
+    this.lastDef = latex;
+    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, lines: JSON.stringify(lines) }));
+  }
+  refreshMacros() { const { key, table } = macroTableFor(this.view, undefined); this.field.setMacros(table, key); }
+  ensureField(): LyxMathField { return this.field; }
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
     const def = this.parse();
-    if (def && def.def !== this.lastDef && document.activeElement !== this.mf) { this.updating = true; this.lastDef = def.def; setFieldLatex(this.mf, def.def); this.updating = false; }
+    if (def && def.def !== this.lastDef && !this.field.hasFocus()) { this.updating = true; this.lastDef = def.def; this.field.setLatex('$' + def.def + '$'); this.updating = false; }
     return true;
   }
   selectNode() { this.dom.classList.add('ProseMirror-selectednode'); }
   deselectNode() { this.dom.classList.remove('ProseMirror-selectednode'); }
-  stopEvent(ev: Event) { return this.mf.contains(ev.target as Node); }
+  stopEvent(ev: Event) { return this.field.dom.contains(ev.target as Node); }
   ignoreMutation() { return true; }
-  focus() { this.mf.focus(); }
-  destroy() { mathViews.delete(this); this.mf.remove(); }
+  focus(where: 'start' | 'end' = 'end') { this.field.focus(where); }
+  destroy() { mathViews.delete(this); this.field.destroy(); }
 }
+
+export { activeMathField };

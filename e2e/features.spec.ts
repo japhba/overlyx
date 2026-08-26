@@ -33,7 +33,7 @@ test('inline and display math are edited in place and saved as LyX formulas', as
   await firstStandard(page);
   await page.keyboard.type(' MATHTEST ');
   await page.keyboard.press('Control+m');            // inline formula (LyX: math-mode)
-  const mf = page.locator('math-field.focused, math-field:focus');
+  const mf = page.locator('.lm-field.focused');
   await expect(mf).toHaveCount(1, { timeout: 5000 });
   await page.keyboard.type('a^2'); await page.keyboard.press('ArrowRight');   // leave the superscript (as in LyX)
   await page.keyboard.type('+b^2'); await page.keyboard.press('ArrowRight');
@@ -44,7 +44,7 @@ test('inline and display math are edited in place and saved as LyX formulas', as
   // display formula with numbering toggle (Alt+M n inside math)
   await page.keyboard.press('Enter');
   await page.keyboard.press('Control+Shift+m');
-  await expect(page.locator('math-field.display.focused')).toHaveCount(1, { timeout: 5000 });
+  await expect(page.locator('.lm-field.display.focused')).toHaveCount(1, { timeout: 5000 });
   await page.keyboard.type('E=mc^2'); await page.keyboard.press('ArrowRight');
   await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin_inset Formula \n\\\[\nE=mc\^\{?2\}?\n\\\]/);
   await page.keyboard.press('Alt+m');

@@ -24,7 +24,7 @@ test('login, open a native LyX document and render it', async ({ page }) => {
   await expect(page.locator('.lyx-inset-note-note').first()).toBeVisible();
   expect(await page.locator('.lyx-inset-note-note .inset-label').first().textContent()).toBe('Note');
   // a macro-using formula (\Pfi) renders without error atoms
-  const err = await page.locator('.lyx-editor math-field .ML__error').count();
+  const err = await page.locator('.lyx-editor .katex-error').count();
   expect(err).toBeLessThan(5);
   // outline lists sections
   await expect(page.locator('.outline-item').first()).toBeVisible();

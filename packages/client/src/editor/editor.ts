@@ -21,7 +21,7 @@ import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
 import { editorContext, viewDocDir, viewProject } from './context';
-import { setDocumentMacros, setInlineMacroDefs, configureMathlive } from './math';
+import { setDocumentMacros, setInlineMacroDefs } from './lyxmath/macrotable';
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
 import { includeTarget } from './commands';
@@ -49,7 +49,6 @@ export interface EditorOptions {
 }
 
 export function createEditor(opts: EditorOptions): EditorHandle {
-  configureMathlive();
   const ydoc = new Y.Doc();
   const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
   // disableBc: y-websocket would otherwise sync all providers of this origin that share the (empty)

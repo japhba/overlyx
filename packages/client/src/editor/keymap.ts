@@ -14,6 +14,7 @@ import {
   moveParagraph, deleteToParagraphEnd, setLayout, setParagraphAttrs, arrowIntoMath, setValueMark, insertHyphens, insertQuote, smartQuote, insertMarginal,
 } from './commands';
 import { editorContext } from './context';
+import { activeMathField } from './lyxmath/field';
 import { trackedDelete } from './plugins/changes';
 
 export interface UiActions {
@@ -105,7 +106,7 @@ export function chordPlugin(): Plugin<string | null> {
             if (k === 'd') { insertMath(true)(view); return true; }
             if (k === 'n') { insertMath(true, 'equation')(view); return true; }
             if (k === 't') { setPrefix('M-m t'); return true; }
-            if (k === 'f') { insertMath(false)(view); setTimeout(() => (document.activeElement as any)?.executeCommand?.(['insert', '\\frac{#0}{#?}']), 30); return true; }
+            if (k === 'f') { insertMath(false)(view); setTimeout(() => activeMathField()?.execute('insert', '\\frac{#0}{}'), 30); return true; }
             return true;
           }
           if (prefix === 'M-m t') {

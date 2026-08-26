@@ -13,6 +13,7 @@ import { Versions } from './Versions';
 import { PdfPanel, buildPdf, type PdfState } from './PdfPanel';
 import { StatusBar, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget } from './SourcePane';
+import { activeMathField } from '../editor/lyxmath/field';
 import { GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams } from './Dialogs';
 import { createEditor, refreshMacros, describeChange, type EditorHandle } from '../editor/editor';
 import { editorContext, viewDocId } from '../editor/context';
@@ -627,9 +628,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   /** Insert LaTeX into the focused formula, or into a new inline formula at the cursor. */
   const insertInMath = (latex: string) => {
-    const active = document.activeElement as any;
-    if (active?.tagName === 'MATH-FIELD') { active.executeCommand(['insert', latex]); return; }
-    if (view) { C.insertMath(false)(view); setTimeout(() => (document.activeElement as any)?.executeCommand?.(['insert', latex]), 60); }
+    const active = activeMathField();
+    if (active) { active.execute('insert', latex); return; }
+    if (view) { C.insertMath(false)(view); setTimeout(() => activeMathField()?.execute('insert', latex), 60); }
   };
   const renderDialog = () => {
     if (!dialog || !view || !docId) return null;

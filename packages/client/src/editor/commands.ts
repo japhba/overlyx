@@ -397,10 +397,9 @@ export function insertMath(display: boolean, env?: string): (view: EditorView) =
     // focus the mathfield (the node view DOM exists right after dispatch; retry on the next frame)
     const focusField = (): boolean => {
       const nv = (view as any).nodeDOM(pos) as HTMLElement | null;
-      (nv as any)?.pmViewDesc?.spec?.ensureField?.();
-      const mf = nv?.querySelector?.('math-field') as any;
-      if (!mf) return false;
-      mf.focus(); mf.executeCommand('moveToMathfieldEnd');
+      const spec = (nv as any)?.pmViewDesc?.spec;
+      if (!spec?.focus) return false;
+      spec.focus('end');
       return true;
     };
     if (!focusField()) requestAnimationFrame(() => focusField());
@@ -443,11 +442,9 @@ export function arrowIntoMath(dir: -1 | 1): (state: EditorState, dispatch: ((tr:
     if (!node || (node.type.name !== 'math_inline' && node.type.name !== 'math_display' && node.type.name !== 'macro')) return false;
     const pos = dir > 0 ? $c.pos : $c.pos - node.nodeSize;
     const dom = view.nodeDOM(pos) as HTMLElement | null;
-    (dom as any)?.pmViewDesc?.spec?.ensureField?.();
-    const mf = dom?.querySelector?.('math-field') as any;
-    if (!mf) return false;
-    mf.focus();
-    mf.executeCommand(dir > 0 ? 'moveToMathfieldStart' : 'moveToMathfieldEnd');
+    const spec = (dom as any)?.pmViewDesc?.spec;
+    if (!spec?.focus) return false;
+    spec.focus(dir > 0 ? 'start' : 'end');
     return true;
   };
 }

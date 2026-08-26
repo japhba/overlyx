@@ -126,5 +126,6 @@ test('math delimiters and matrix dialogs insert into a formula', async ({ page }
   await openDialog(page, 'matrix');
   await row(page, 'Decoration').locator('select').selectOption('bmatrix');
   await apply(page);
-  await expect.poll(() => /\\begin\{bmatrix\}[^$]*&[^$]*\\\\[^$]*\\end\{bmatrix\}/.test(file()), { timeout: 10000 }).toBe(true);
+  // LyX drops trailing empty cells when writing, so an empty 2×2 matrix is written as \begin{bmatrix}\\\end{bmatrix}
+  await expect.poll(() => /\\begin\{bmatrix\}[\s\S]*\\\\[\s\S]*\\end\{bmatrix\}/.test(file()), { timeout: 10000 }).toBe(true);
 });

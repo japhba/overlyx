@@ -8,7 +8,7 @@ Overleaf/LyX blend.
   LyX on the same files; external saves are picked up live.
 * **WYSIWYG without compiling.** Text, insets, floats, tables and math render as you type.
   Formulas (inline and display, `equation`/`align`/`gather`/`multline`/…) are edited in place
-  with MathLive; document macros (`FormulaMacro` insets, preamble `\newcommand`/`\def`,
+  with KaTeX; document macros (`FormulaMacro` insets, preamble `\newcommand`/`\def`,
   `\input{macros}` files, child documents) render immediately.
 * **Multi-user editing** (Yjs CRDT, per-user undo, live cursors) with automatic and named
   **versions** (diff & restore).
@@ -19,14 +19,19 @@ Overleaf/LyX blend.
 * **Export**: LaTeX (a port of LyX's `output_latex` driven by LyX's own layout files) and PDF via
   `latexmk`; a native-LyX build as reference; embedded graphics (SVG/PDF/EPS/…) are rendered to
   PNG for the editor and downloadable as PNG.
-* **LyX-like math editing**: macro arguments are editable in place; every inset on the caret's path
-  (`\left…\right`, `\text{}`, scripts, `\sqrt`, fractions, macros …) shows LyX's corner markers —
-  two lower corners, four for fractions/grids/macros, the macro name while editing one — and insets
-  light up under the mouse; Backspace at the inner left edge or Delete at the inner right edge of a
-  cell dissolves the inset (LyX's `pullArg`), deleting across a big inset selects it first; Space
-  leaves the current inset and, at the end, the formula; a typed `(` is a plain parenthesis; the caret
-  only ever rests in a macro's argument cells, never in its expansion. The text column is centred
-  and its width is a View setting (*View ▸ Text width*, `Ctrl+Alt+±`).
+* **LyX math editor**: formulas are edited with our own port of LyX's mathed (`packages/core/src/math`:
+  the LyX cell/inset model, a port of `MathParser.cpp` and of LyX 2.5's writer so that edited formulas
+  are written exactly as LyX writes them, and a port of `Cursor.cpp`/`InsetMathNest` for the cursor)
+  rendered with KaTeX (`packages/client/src/editor/lyxmath`). Everything behaves as in LyX: cursor
+  movement into and out of insets, `^`/`_`, `\` command mode with name completion by Space, Space
+  leaves the inset, Backspace/Delete at cell edges dissolve the inset (`pullArg`), big insets are
+  selected before deletion, empty scripts vanish, Enter adds rows (an inline formula becomes align),
+  Tab moves between cells, LyX's corner markers around every inset on the cursor path, macros with
+  arguments are expanded from their definitions with editable argument cells. Right-click menus on
+  formulas, cross-references (go to label, reference format), citations, hyperlinks, child documents,
+  insets and tracked changes; `Ctrl/⌘+click` follows a reference or opens a child document; **tabs**
+  for open documents (new tabs open right of the current one); the text column is centred and its
+  width is a View setting (*View ▸ Text width*, `Ctrl+Alt+±`).
 * **LyX-style dialogs**: Paragraph settings (`Ctrl+Alt+P`: alignment, line spacing, indentation,
   label width), Table settings (cell / column / row / table tabs incl. longtable), Document settings
   (class & options, page & margins, text layout, numbering & floats, fonts, branches, PDF properties,
@@ -51,7 +56,7 @@ packages/core     LyX AST + parser/writer (lossless), ProseMirror schema, AST⇄
                   macro/bib/comment helpers, LaTeX exporter (latex/) with a LyX layout-file parser
 packages/server   Express + WebSocket (Yjs sync/awareness), SQLite persistence, auth (scrypt,
                   JWT cookie, optional Google OAuth), .lyx file sync & watcher, versions, export
-packages/client   Vite + Preact UI, ProseMirror editor, MathLive node views, LyX keymap,
+packages/client   Vite + Preact UI, ProseMirror editor, LyX math editor (editor/lyxmath, KaTeX), LyX keymap,
                   numbering/margin/change-tracking/find plugins
 tests/            vitest: byte-exact round trips over 400+ LyX files, PM/Yjs conversions,
                   LaTeX export unit tests, latexmk compile tests
@@ -95,9 +100,9 @@ npx playwright test                       # e2e (needs the dev servers running)
   Changes* / the context menu accept or reject single changes or all of them.
 * Macro rendering follows LyX's positional semantics (a `FormulaMacro` applies from its position on;
   later definitions — including ones nested in notes — override earlier ones). Macros with
-  arguments are expanded into editable templates for MathLive and contracted back to `\name{…}`
+  arguments are expanded from their definitions with the argument cells kept editable (`core/src/math/katex.ts`).
   calls when the formula is written to the file (`packages/core/src/mathedit.ts`).
-* Large documents: formulas render statically first and become editable MathLive fields when they
+* Large documents: formulas render statically first and become editable fields when they
   scroll into view or are hovered/entered.
 * Every document's Yjs history carries an *epoch*; a browser tab whose editor belongs to an older
   epoch (server restarted with a changed file) reloads instead of merging stale content. Cross-tab
