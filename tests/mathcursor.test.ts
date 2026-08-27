@@ -3,7 +3,7 @@
  * same LaTeX and cursor positions as LyX.
  */
 import { describe, it, expect } from 'vitest';
-import { parseFormula, writeFormula, MathCursor, type MacroTable } from '../packages/core/src/math';
+import { parseFormula, writeFormula, MathCursor, completeCommand, isKnownCommand, type MacroTable } from '../packages/core/src/math';
 
 const MACROS: MacroTable = { inv: { nargs: 1 }, Pfi: { nargs: 0 }, cum: { nargs: 2 } };
 
@@ -198,5 +198,20 @@ describe('rows, numbering, labels, mutation', () => {
     expect(out(c)).toBe('\n\\[\na=bc=d\n\\]\n');
     c.mutate('simple');
     expect(out(c)).toBe('$a=bc=d$');
+  });
+});
+
+describe('command completion (Tab in macro mode)', () => {
+  it('offers document macros first, then LyX symbols and commands, shortest first', () => {
+    expect(completeCommand('alp', MACROS)).toEqual(['alpha']);
+    expect(completeCommand('in', MACROS).slice(0, 3)).toEqual(['inv', 'inf', 'int']);   // \inv is a document macro
+    expect(completeCommand('fra', MACROS)[0]).toBe('frac');
+    expect(completeCommand('', MACROS)).toEqual([]);
+  });
+  it('knows which names are commands', () => {
+    expect(isKnownCommand('alpha', MACROS)).toBe(true);
+    expect(isKnownCommand('frac', MACROS)).toBe(true);
+    expect(isKnownCommand('inv', MACROS)).toBe(true);
+    expect(isKnownCommand('alp', MACROS)).toBe(false);
   });
 });

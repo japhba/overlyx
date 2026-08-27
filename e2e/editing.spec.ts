@@ -149,6 +149,20 @@ test('LyX math keys: inset markers, Backspace/Delete dissolve a cell, Space leav
   await page.keyboard.press('Control+z');
   await page.waitForTimeout(100);
   expect((await state()).latex).toContain('\\sqrt{y}');
+  // \ starts a command name: shown red until it is a valid command, with LyX's completion in grey; Tab completes, then inserts
+  await setPath([[0, 10]]);
+  await page.keyboard.type('\\alp');
+  await page.waitForTimeout(150);
+  expect(await page.evaluate(() => { const f = document.querySelector('.lyx-editor .lyx-math-inline .lm-field')!; return { typing: !!f.querySelector('.lm-mm-typing'), hint: f.querySelector('.lm-mm-hint')?.textContent }; })).toEqual({ typing: true, hint: 'ha' });
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(150);
+  expect(await page.evaluate(() => { const f = document.querySelector('.lyx-editor .lyx-math-inline .lm-field')!; return { ok: !!f.querySelector('.lm-mm-ok'), text: f.querySelector('.lm-mm')?.textContent }; })).toEqual({ ok: true, text: '\\alpha' });
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(150);
+  expect((await state()).latex).toContain('\\hat{z}\\alpha');
+  for (let i = 0; i < 3; i++) { await page.keyboard.press('Control+z'); await page.waitForTimeout(60); }   // typing, completion, insertion
+  await page.waitForTimeout(100);
+  expect((await state()).latex.endsWith('\\hat{z}$')).toBe(true);
   // Space leaves the superscript, and at the end of the formula leaves the formula with a text space
   await setPath([[0, 5], [1, 1]]);
   await page.keyboard.press('Space');

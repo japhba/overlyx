@@ -9,7 +9,7 @@
  */
 import katex from 'katex';
 import {
-  parseFormula, writeFormula, writeCellLatex, parseCell, renderHullSource, katexMacros, MathCursor, atomCells, isHull, nargs, numberedType,
+  parseFormula, writeFormula, writeCellLatex, parseCell, renderHullSource, katexMacros, MathCursor, atomCells, isHull, nargs, numberedType, isKnownCommand, completeCommand,
   type Hull, type HullType, type MacroTable, type Slice, type Atom, type Cell, type CellRef, type Owner,
 } from '@overlyx/core';
 
@@ -168,7 +168,18 @@ export class LyxMathField {
   }
 
   /* ------------------------------------------------------------ rendering */
+  /** the command name being typed, annotated with validity and LyX's completion */
+  private updateMacroModeHint(): void {
+    const p = this.cursor.activeMacro();
+    if (!p) return;
+    const name = p.n.slice(1);
+    p.valid = name.length > 0 && isKnownCommand(name, this.macros);
+    const cand = completeCommand(name, this.macros, 1)[0];
+    p.hint = cand ? cand.slice(name.length) : undefined;
+  }
+
   render(): void {
+    this.updateMacroModeHint();
     const { latex, cells } = renderHullSource(this.hull, this.macros);
     this.cells = cells;
     this.rebuildParents();
@@ -528,7 +539,17 @@ export class LyxMathField {
       case 'ArrowDown': move(() => c.upDown(false), 'downward'); return;
       case 'Home': move(() => c.lineBegin(), 'backward'); return;
       case 'End': move(() => c.lineEnd(), 'forward'); return;
-      case 'Tab': if (ev.shiftKey) c.cellBackward(); else c.cellForward(); this.moved(old); handled(); return;
+      case 'Tab': {
+        handled();
+        if (c.inMacroMode() && !this.readOnly) {
+          // LyX: Tab completes the command name being typed; a complete name is inserted
+          const p = c.activeMacro()!;
+          this.snapshot('complete');
+          if (p.hint) { p.n += p.hint; this.commit(); return; }
+          c.macroModeClose(); c.editInsertedInset(); this.commit(); return;
+        }
+        if (ev.shiftKey) c.cellBackward(); else c.cellForward(); this.moved(old); return;
+      }
       case 'Escape': if (c.selection) { c.clearSelection(); this.scheduleLayout(); } else if (c.inMacroMode()) { c.macroModeClose(true); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } handled(); return;
       case 'Enter': if (this.readOnly) return; handled(); if (c.inMacroMode()) { this.snapshot('macro'); c.macroModeClose(); c.editInsertedInset(); this.commit(); return; } if (mod || ev.shiftKey || this.display) { this.snapshot('newline'); c.newline(); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } return;
       case 'Backspace': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.backspace()) { this.commit(); this.opts.onMoveOut?.('backward', {}); return; } this.commit(); return;

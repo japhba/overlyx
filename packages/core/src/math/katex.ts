@@ -172,7 +172,11 @@ export function atomToKatex(a: Atom, ctx: KatexContext, mode: 'math' | 'text'): 
     case 'comment': return `\\htmlClass{lm-comment}{\\text{\\%${escapeText(a.text)}}}`;
     case 'env': return `\\htmlClass{lm-unknown}{\\text{\\textbackslash begin\\{${escapeText(a.n)}\\}}}${cellToKatex(a.body, ctx, a, 0, mode)}\\htmlClass{lm-unknown}{\\text{\\textbackslash end\\{${escapeText(a.n)}\\}}}`;
     case 'raw': return a.latex;
-    case 'unknown': return `\\htmlClass{lm-mm}{\\texttt{${escapeText(a.n)}}}`;
+    case 'unknown': {
+      // a command name being typed: green once it is a valid command, with the completion LyX would offer in grey
+      const cls = 'lm-mm' + (a.final ? '' : a.valid ? ' lm-mm-ok' : ' lm-mm-typing');
+      return `\\htmlClass{${cls}}{\\texttt{${escapeText(a.n)}}}` + (!a.final && a.hint ? `\\htmlClass{lm-mm-hint}{\\texttt{${escapeText(a.hint)}}}` : '');
+    }
   }
 }
 

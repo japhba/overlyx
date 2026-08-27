@@ -730,6 +730,29 @@ export function guessColumns(halign: string): number {
 const LENGTH_RE = /^[+-]?(\d+(\.\d*)?|\.\d+)\s*(pt|mm|cm|in|ex|em|mu|sp|bp|dd|pc|cc|px|text%|col%|page%|line%|theight%|pheight%|baselineskip%)\s*$|^[+-]?(\d+(\.\d*)?|\.\d+)\\(width|height|depth|totalheight|textwidth|columnwidth|paperwidth|linewidth|textheight|paperheight|baselineskip)$/;
 export function isValidLength(s: string): boolean { return LENGTH_RE.test(s.trim()); }
 
+/* ------------------------------------------------------------------ command names */
+
+/** Commands the parser handles itself (not in the symbol table). */
+export const PARSER_COMMANDS: string[] = ['frac', 'dfrac', 'tfrac', 'cfrac', 'nicefrac', 'binom', 'dbinom', 'tbinom', 'sqrt', 'left', 'right', 'begin', 'end', 'text', 'label', 'nonumber', 'notag',
+  'limits', 'nolimits', 'hline', 'cancelto', 'unit', 'unitfrac', 'stackrel', 'kern', 'mkern', 'choose', 'over', 'atop', 'brace', 'brack', 'color', 'textcolor', 'normalcolor', 'substack', 'framebox', 'makebox',
+  'tag', 'hspace', 'smash', 'lyxmathsym', 'ensuremath', 'boxed', 'fbox', 'multicolumn', ...PHANTOMS, ...ONE_CELL_CMDS, ...XARROWS, ...REFS, 'sideset'];
+
+/** Is `\name` a command LyX would understand here (symbol table, parser or a document macro)? */
+export function isKnownCommand(name: string, macros: MacroTable): boolean {
+  return !!macros[name] || !!SYMBOLS[name] || PARSER_COMMANDS.includes(name);
+}
+
+let allNames: string[] | null = null;
+/** Completion candidates for a typed prefix: document macros first, then LyX's symbols and commands, shortest first. */
+export function completeCommand(prefix: string, macros: MacroTable, limit = 12): string[] {
+  if (!prefix) return [];
+  if (!allNames) allNames = [...new Set([...Object.keys(SYMBOLS).filter(n => /^[A-Za-z]+\*?$/.test(n)), ...PARSER_COMMANDS])];
+  const rank = (n: string) => (macros[n] ? 0 : 1);
+  const own = Object.keys(macros).filter(n => n.startsWith(prefix) && n !== prefix);
+  const rest = allNames.filter(n => n.startsWith(prefix) && n !== prefix && !macros[n]);
+  return [...own, ...rest].sort((a, b) => rank(a) - rank(b) || a.length - b.length || a.localeCompare(b)).slice(0, limit);
+}
+
 /* ------------------------------------------------------------------ API */
 
 /** Parse the content of a cell (no `$` / environment around it). */

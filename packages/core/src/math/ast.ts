@@ -73,7 +73,7 @@ export type Atom =
   /** InsetMathString / anything LyX would keep verbatim (e.g. `\lyxmathsym`); written as is */
   | { t: 'raw'; latex: string }
   /** InsetMathUnknown: a command name being typed (macro mode, `final` false) or an unresolved one */
-  | { t: 'unknown'; n: string; final: boolean; sel?: string };
+  | { t: 'unknown'; n: string; final: boolean; sel?: string; /** editor-only: completion suggestion and validity of the typed name */ hint?: string; valid?: boolean };
 
 export type FracKind = 'frac' | 'dfrac' | 'tfrac' | 'cfrac' | 'cfracleft' | 'cfracright' | 'nicefrac' | 'unitfrac' | 'unit'
   | 'binom' | 'dbinom' | 'tbinom' | 'choose' | 'brace' | 'brack' | 'atop' | 'over';

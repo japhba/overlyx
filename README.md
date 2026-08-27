@@ -27,7 +27,9 @@ Overleaf/LyX blend.
   leaves the inset, Backspace/Delete at cell edges dissolve the inset (`pullArg`), big insets are
   selected before deletion, empty scripts vanish, Enter adds rows (an inline formula becomes align),
   Tab moves between cells, LyX's corner markers around every inset on the cursor path, macros with
-  arguments are expanded from their definitions with editable argument cells. Right-click menus on
+  arguments are expanded from their definitions with editable argument cells; typing `\` starts a
+  command shown red until it names a real command (then green), with LyX's completion in grey — Tab
+  completes it. Right-click menus on
   formulas, cross-references (go to label, reference format), citations, hyperlinks, child documents,
   insets and tracked changes; `Ctrl/⌘+click` follows a reference or opens a child document; **tabs**
   for open documents (new tabs open right of the current one); the text column is centred and its
