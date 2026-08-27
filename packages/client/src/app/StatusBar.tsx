@@ -9,8 +9,9 @@ export function SaveIndicator({ save }: { save: SaveState }) {
     case 'saved': return <span class="save-state saved" title={when ? `The .lyx file on the server was last written at ${when}` : 'Everything is saved on the server'}>✓ All changes saved</span>;
     case 'saving': return <span class="save-state saving" title="Your edits are being written to the .lyx file on the server">Saving…</span>;
     case 'connecting': return <span class="save-state connecting">connecting…</span>;
+    case 'stale': return <span class="save-state offline" title="The document on the server has a different history than this copy; it is being reloaded.">⚠ document was re-created on the server — reloading…</span>;
     case 'offline': return (
-      <span class="save-state offline" title={save.unavailable ? 'This document has not been opened on this device yet, so there is no local copy to show.' : 'No connection to the server. You can keep editing: changes are stored in this browser and sync automatically when the connection is back.'}>
+      <span class="save-state offline" title={(save.unavailable ? 'This document has not been opened on this device yet, so there is no local copy to show. ' : 'You can keep editing: changes are stored in this browser and sync automatically when the connection is back. ') + (save.detail ? 'Reason: ' + save.detail + '.' : '')}>
         ⚡ Offline{save.unavailable ? ' — document not available offline' : save.pending ? ' — changes kept on this device, will sync when back online' : ' — working from the local copy'}
       </span>
     );

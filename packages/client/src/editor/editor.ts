@@ -47,13 +47,15 @@ export interface EditorHandle {
  * in this browser and sync later), `connecting` = not synced yet after opening.
  */
 export interface SaveState {
-  state: 'saved' | 'saving' | 'offline' | 'connecting';
+  state: 'saved' | 'saving' | 'offline' | 'connecting' | 'stale';
   /** local edits the server has not confirmed as written */
   pending: boolean;
   /** time of the last write to the .lyx file (server clock, ms) */
   savedAt: number;
   /** offline and nothing cached locally: the document cannot be shown */
   unavailable: boolean;
+  /** why there is no connection (diagnostics for the tooltip) */
+  detail?: string;
 }
 
 export interface EditorOptions {
@@ -107,11 +109,18 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   let localSynced = false;      // IndexedDB copy loaded
   let localEmpty = true;
   let pendingFromStore = false; // the stored copy had unsaved edits when it was last used
+  let lastConnInfo = '';
   const saveState = (): SaveState => {
     const pending = editSeq > savedSeq || (pendingFromStore && !provider.synced);
     const connected = provider.wsconnected;
-    const state: SaveState['state'] = connected && provider.synced ? (pending ? 'saving' : 'saved') : connected || !localSynced ? 'connecting' : 'offline';
-    return { state, pending, savedAt, unavailable: state === 'offline' && localEmpty };
+    const state: SaveState['state'] = stale ? 'stale' : connected && provider.synced ? (pending ? 'saving' : 'saved') : connected || !localSynced ? 'connecting' : 'offline';
+    let detail: string | undefined;
+    if (state === 'offline') {
+      detail = navigator.onLine === false ? 'the browser reports no network connection' : 'no WebSocket connection to the server';
+      if (lastConnInfo) detail += ` (${lastConnInfo})`;
+      detail += ' — reconnecting automatically';
+    }
+    return { state, pending, savedAt, unavailable: state === 'offline' && localEmpty, detail };
   };
   let lastEmitted = '';
   const emitSaveState = () => {
@@ -141,6 +150,8 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   // document), syncing would merge two unrelated histories: bail out instead and let the UI decide.
   let epoch: string | null = null;
   let stale = false;
+  provider.on('connection-close', (ev: CloseEvent | null) => { if (ev) lastConnInfo = `closed with code ${ev.code}${ev.reason ? ': ' + ev.reason : ''}`; emitSaveState(); });
+  provider.on('connection-error', () => { lastConnInfo = 'connection attempt failed'; emitSaveState(); });
   (provider as any).messageHandlers[2] = (_enc: unknown, dec: decoding.Decoder) => {
     const e = decoding.readVarString(dec);
     if (epoch !== null && e !== epoch && !stale) {
@@ -164,7 +175,9 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     if (destroyed) return;
     performance.mark('ol:local-loaded');
     emitSaveState();
-    if (navigator.onLine !== false) provider.connect();
+    // always try — navigator.onLine is unreliable (Chrome reports "offline" behind some VPNs / network
+    // setups); a failing attempt just makes y-websocket retry with backoff
+    provider.connect();
   };
   void connectAfterLocalLoad();
   const fragment = ydoc.getXmlFragment('prosemirror');
@@ -317,9 +330,18 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   });
   provider.awareness.on('change', pushStatus);
   // The browser's online/offline events give immediate feedback (the WebSocket itself only notices a
-  // dead connection through y-websocket's 30 s watchdog); reconnecting is y-websocket's job otherwise.
-  const onOnline = () => { if (!destroyed && !stale && !provider.wsconnected) { provider.disconnect(); provider.connect(); } };
-  const onOffline = () => { if (!destroyed && !stale) { provider.disconnect(); emitSaveState(); } };
+  // dead connection through y-websocket's 30 s watchdog). They are hints only: after an "offline"
+  // event we keep trying to connect every few seconds, since the flag is wrong in some setups.
+  let retry: ReturnType<typeof setInterval> | null = null;
+  const stopRetry = () => { if (retry) { clearInterval(retry); retry = null; } };
+  const reconnect = () => { if (destroyed || stale) return; if (!provider.wsconnected) { provider.disconnect(); provider.connect(); } };
+  const onOnline = () => { stopRetry(); reconnect(); };
+  const onOffline = () => {
+    if (destroyed || stale) return;
+    provider.disconnect(); emitSaveState();
+    stopRetry();
+    retry = setInterval(() => { if (provider.wsconnected) stopRetry(); else reconnect(); }, 5000);
+  };
   window.addEventListener('online', onOnline);
   window.addEventListener('offline', onOffline);
 
@@ -340,6 +362,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     async discardLocal() { try { await persistence.clearData(); } catch { /* ignore */ } },
     destroy() {
       destroyed = true;
+      stopRetry();
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
       // the view first: its Yjs binding must be gone before the provider/awareness fire their last events
