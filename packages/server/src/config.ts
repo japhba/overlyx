@@ -23,6 +23,10 @@ export const config = {
   clientDist: path.resolve(process.env.OVERLYX_CLIENT_DIST ?? path.join(REPO_ROOT, 'packages/client/dist')),
   /** debounce for writing .lyx files back to disk (ms) */
   saveDebounceMs: Number(process.env.OVERLYX_SAVE_DEBOUNCE ?? 1500),
+  /** concurrent PDF builds (each latexmk run is one core; more only queue up) */
+  maxBuilds: Math.max(1, Number(process.env.OVERLYX_MAX_BUILDS ?? 2)),
+  /** `nice` level for latexmk / LyX so that builds never starve the editor */
+  buildNiceness: Number(process.env.OVERLYX_BUILD_NICE ?? 10),
   /** idle time after which an open document is released from memory (ms) */
   unloadAfterMs: Number(process.env.OVERLYX_UNLOAD_MS ?? 6 * 60 * 60 * 1000),
   /** minimum interval between automatic versions (ms) */

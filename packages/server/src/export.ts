@@ -6,17 +6,115 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { Worker } from 'node:worker_threads';
 import { parseLyx, writeLyx, type LyxDocument } from '@overlyx/core';
 import { config } from './config.ts';
 import { db } from './db.ts';
 import { manager, DocManager } from './docs.ts';
 import { projectDir, resolveProjectPath, findMaster } from './projects.ts';
 import { toPdf } from './graphics.ts';
+import type { ExportRequest, ExportResponse } from './exportworker.ts';
 
 export interface BuildResult { ok: boolean; log: string; pdfPath?: string; texPath?: string; warnings: string[]; tex?: string }
 
-const running = new Map<string, Promise<BuildResult>>();
+/* ------------------------------------------------------------------ build jobs
+ * PDF builds are background jobs: a request enqueues one and returns at once; clients poll
+ * `buildStatus`. At most `config.maxBuilds` compile at a time (latexmk runs `nice`d so the editor
+ * stays responsive), one per document — a request while a build runs marks it for a re-run with
+ * the latest content. The LaTeX export itself runs in a worker thread (exportworker.ts). */
+
+export type JobStatus = 'queued' | 'exporting' | 'compiling' | 'ok' | 'error' | 'cancelled';
+export interface BuildJob {
+  id: number;
+  docId: string;
+  engine: 'overlyx' | 'lyx';
+  status: JobStatus;
+  requestedBy: string;
+  startedAt: number;
+  phaseAt: number;
+  finishedAt?: number;
+  /** last line of latexmk output */
+  progress: string;
+  rerun: boolean;
+  result?: BuildResult;
+  cancel?: () => void;
+  waiters: ((r: BuildResult) => void)[];
+}
+export interface PublicJob { id: number; status: JobStatus; engine: string; requestedBy: string; startedAt: number; phaseAt: number; finishedAt?: number; progress: string; rerun: boolean }
+
+const jobs = new Map<string, BuildJob>();
+const queue: BuildJob[] = [];
+let active = 0;
+let nextJobId = 1;
+
+export function publicJob(j: BuildJob): PublicJob {
+  return { id: j.id, status: j.status, engine: j.engine, requestedBy: j.requestedBy, startedAt: j.startedAt, phaseAt: j.phaseAt, finishedAt: j.finishedAt, progress: j.progress, rerun: j.rerun };
+}
+
+/** Enqueue a build (or attach to the running one) and return its job. */
+export function requestBuild(docId: string, engine: 'overlyx' | 'lyx', requestedBy: string): BuildJob {
+  const cur = jobs.get(docId);
+  if (cur && (cur.status === 'queued' || cur.status === 'exporting' || cur.status === 'compiling')) {
+    if (cur.status !== 'queued') cur.rerun = true;   // the content may have changed: build once more afterwards
+    return cur;
+  }
+  const job: BuildJob = { id: nextJobId++, docId, engine, status: 'queued', requestedBy, startedAt: Date.now(), phaseAt: Date.now(), progress: '', rerun: false, waiters: [] };
+  jobs.set(docId, job);
+  queue.push(job);
+  pump();
+  return job;
+}
+
+/** The active job of a document (running or the last finished one). */
+export function currentJob(docId: string): BuildJob | undefined { return jobs.get(docId); }
+
+export function cancelBuild(docId: string): boolean {
+  const j = jobs.get(docId);
+  if (!j) return false;
+  if (j.status === 'queued') { const i = queue.indexOf(j); if (i >= 0) queue.splice(i, 1); finish(j, { ok: false, log: 'cancelled', warnings: [] }, 'cancelled'); return true; }
+  if (j.status === 'exporting' || j.status === 'compiling') { j.rerun = false; j.status = 'cancelled'; j.cancel?.(); return true; }
+  return false;
+}
+
+/** Wait for a document's build to finish (used by the synchronous API variant). */
+export function buildPdf(docId: string, opts: { engine?: 'overlyx' | 'lyx'; requestedBy?: string } = {}): Promise<BuildResult> {
+  const job = requestBuild(docId, opts.engine === 'lyx' ? 'lyx' : 'overlyx', opts.requestedBy ?? 'api');
+  if (job.result && (job.status === 'ok' || job.status === 'error' || job.status === 'cancelled')) return Promise.resolve(job.result);
+  return new Promise(res => job.waiters.push(res));
+}
+
+function pump(): void {
+  while (active < config.maxBuilds && queue.length) {
+    const job = queue.shift()!;
+    active++;
+    void runJob(job).finally(() => {
+      active--;
+      if (job.rerun) { job.rerun = false; requestBuild(job.docId, job.engine, job.requestedBy); }
+      pump();
+    });
+  }
+}
+
+function setPhase(job: BuildJob, status: JobStatus): void { job.status = status; job.phaseAt = Date.now(); }
+/** (a cancel request may have changed the status while a step was awaited) */
+const isCancelled = (job: BuildJob): boolean => (job.status as JobStatus) === 'cancelled';
+
+function finish(job: BuildJob, r: BuildResult, status: JobStatus): void {
+  job.result = r; job.status = status; job.finishedAt = Date.now(); job.cancel = undefined;
+  for (const w of job.waiters.splice(0)) w(r);
+}
+
+async function runJob(job: BuildJob): Promise<void> {
+  const t0 = Date.now();
+  try {
+    const r = job.engine === 'lyx' ? await buildViaLyx(job) : await buildViaOverlyx(job);
+    finish(job, r, isCancelled(job) ? 'cancelled' : r.ok ? 'ok' : 'error');
+  } catch (e) {
+    finish(job, { ok: false, log: 'build failed: ' + String(e), warnings: [] }, 'error');
+  }
+  console.log(`[build] ${job.docId} (${job.engine}) ${job.status} in ${Math.round((Date.now() - t0) / 1000)} s`);
+}
 
 export function buildDir(docId: string): string {
   const d = path.join(config.dataDir, 'build', crypto.createHash('sha1').update(docId).digest('hex').slice(0, 16));
@@ -24,29 +122,66 @@ export function buildDir(docId: string): string {
   return d;
 }
 
-function run(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }): Promise<{ code: number; out: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env } });
+interface RunHandle { done: Promise<{ code: number; out: string }>; kill: () => void }
+/** Spawn a (niced) command, collecting its output; `onLine` receives every output line. */
+function run(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; nice?: boolean; onLine?: (l: string) => void }): RunHandle {
+  let child: ChildProcess;
+  let killed = false;
+  const done = new Promise<{ code: number; out: string }>((resolve) => {
+    // detached: the command leads its own process group, so cancelling kills latexmk *and* the
+    // pdflatex/bibtex it spawned (they would otherwise keep the output pipes open and run on)
+    const spawnOpts = { cwd: opts.cwd, env: { ...process.env, ...opts.env }, detached: true };
+    child = opts.nice ? spawn('nice', ['-n', String(config.buildNiceness), cmd, ...args], spawnOpts) : spawn(cmd, args, spawnOpts);
     let out = '';
-    const cap = (d: Buffer) => { out += d.toString(); if (out.length > 2_000_000) out = out.slice(-1_000_000); };
-    child.stdout.on('data', cap); child.stderr.on('data', cap);
-    const t = setTimeout(() => { child.kill('SIGKILL'); out += '\n[timeout]'; }, opts.timeoutMs ?? 240000);
-    child.on('close', (code) => { clearTimeout(t); resolve({ code: code ?? -1, out }); });
+    let partial = '';
+    const cap = (d: Buffer) => {
+      const text = d.toString();
+      out += text; if (out.length > 2_000_000) out = out.slice(-1_000_000);
+      if (opts.onLine) {
+        partial += text;
+        const lines = partial.split('\n'); partial = lines.pop() ?? '';
+        for (const l of lines) if (l.trim()) opts.onLine(l);
+      }
+    };
+    child.stdout?.on('data', cap); child.stderr?.on('data', cap);
+    const t = setTimeout(() => { killGroup(child, 'SIGKILL'); out += '\n[timeout]'; }, opts.timeoutMs ?? 240000);
+    child.on('close', (code) => { clearTimeout(t); resolve({ code: killed ? -2 : code ?? -1, out: killed ? out + '\n[cancelled]' : out }); });
     child.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: out + '\n' + String(e) }); });
   });
+  return { done, kill: () => { killed = true; killGroup(child, 'SIGTERM'); setTimeout(() => killGroup(child, 'SIGKILL'), 3000); } };
+}
+function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (!child.pid || child.exitCode !== null) return;
+  try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* gone */ } }
 }
 
-type ExporterModule = {
-  exportLatex: (doc: LyxDocument, opts: Record<string, unknown>) => { tex: string; files: Record<string, string>; graphics: { src: string; dest: string }[]; warnings: string[] };
-};
+/* ------------------------------------------------------------------ export worker */
 
-async function loadExporter(): Promise<ExporterModule | null> {
-  try {
-    return await import('@overlyx/core/latex/index.ts') as unknown as ExporterModule;
-  } catch (e) {
-    console.warn('[export] OverLyX LaTeX exporter unavailable:', (e as Error).message);
-    return null;
-  }
+let worker: Worker | null = null;
+let nextExportId = 1;
+const pendingExports = new Map<number, { resolve: (r: ExportResponse) => void; reject: (e: Error) => void }>();
+
+function exportWorker(): Worker {
+  if (worker) return worker;
+  const w = new Worker(new URL('./exportworker.ts', import.meta.url));
+  w.on('message', (r: ExportResponse) => { const p = pendingExports.get(r.id); if (p) { pendingExports.delete(r.id); p.resolve(r); } });
+  const fail = (e: unknown) => {
+    console.error('[export] worker failed:', e);
+    if (worker === w) worker = null;
+    for (const [id, p] of pendingExports) { pendingExports.delete(id); p.reject(new Error('export worker failed: ' + String(e))); }
+  };
+  w.on('error', fail);
+  w.on('exit', (code) => { if (code !== 0) fail('exit ' + code); else if (worker === w) worker = null; });
+  worker = w;
+  return w;
+}
+
+function exportInWorker(req: Omit<ExportRequest, 'id'>): Promise<ExportResponse> {
+  const id = nextExportId++;
+  return new Promise((resolve, reject) => {
+    pendingExports.set(id, { resolve, reject });
+    try { exportWorker().postMessage({ id, ...req } satisfies ExportRequest); } catch (e) { pendingExports.delete(id); reject(e as Error); }
+  });
 }
 
 /** Export the document to LaTeX (+ children, graphics) into the build dir. */
@@ -56,20 +191,14 @@ export async function exportTex(docId: string): Promise<{ dir: string; main: str
   const dir = buildDir(docId);
   const docDir = path.dirname(doc.absPath);
   const base = path.basename(doc.relPath, '.lyx');
-  const exporter = await loadExporter();
-  if (!exporter) throw new Error('LaTeX exporter not available');
-  const resolveInclude = (fn: string): LyxDocument | undefined => {
-    try {
-      const abs = path.resolve(docDir, fn);
-      if (!abs.startsWith(projectDir(doc.project))) return undefined;
-      // use the live CRDT version if the child is open in the editor
-      const rel = path.relative(projectDir(doc.project), abs);
-      const open = manager.docs.get(doc.project + '/' + rel);
-      if (open) return open.toLyxDocument();
-      return parseLyx(fs.readFileSync(abs, 'utf8'));
-    } catch { return undefined; }
-  };
-  const res = exporter.exportLatex(lyx, { resolveInclude, basename: base, layoutDir: config.layoutDir, docDir });
+  // live content of the project's open documents (child documents being edited)
+  const openDocs: Record<string, LyxDocument> = {};
+  for (const d of manager.docs.values()) if (d.project === doc.project && d.id !== docId) openDocs[d.relPath] = d.toLyxDocument();
+  const t0 = Date.now();
+  const r = await exportInWorker({ lyx, docDir, projectDir: projectDir(doc.project), basename: base, layoutDir: config.layoutDir, openDocs });
+  if (!r.ok) throw new Error(r.error ?? 'export failed');
+  console.log(`[export] ${docId}: LaTeX export ${Date.now() - t0} ms (worker)`);
+  const res = { tex: r.tex!, files: r.files ?? {}, graphics: r.graphics ?? [], warnings: r.warnings ?? [] };
   linkDocumentAssets(docDir, dir);
   const main = path.join(dir, base + '.tex');
   fs.writeFileSync(main, res.tex, 'utf8');
@@ -141,22 +270,18 @@ export function texInputs(docDir: string, buildDirPath: string): NodeJS.ProcessE
   return { TEXINPUTS: inputs, BIBINPUTS: inputs, BSTINPUTS: inputs, openout_any: 'a', max_print_line: '1000' };
 }
 
-export async function buildPdf(docId: string, opts: { engine?: 'overlyx' | 'lyx' } = {}): Promise<BuildResult> {
-  const existing = running.get(docId);
-  if (existing) return existing;
-  const p = (opts.engine === 'lyx' ? buildViaLyx(docId) : buildViaOverlyx(docId)).finally(() => running.delete(docId));
-  running.set(docId, p);
-  return p;
-}
-
-async function buildViaOverlyx(requestedId: string): Promise<BuildResult> {
+async function buildViaOverlyx(job: BuildJob): Promise<BuildResult> {
+  const requestedId = job.docId;
   // a child document is built through its master (LyX: master-buffer-view); the child's live
   // content is used because open documents are resolved from the CRDT state
   const { project, relPath } = DocManager.parseId(requestedId);
   const masterRel = findMaster(project, relPath);
   const docId = masterRel ? `${project}/${masterRel}` : requestedId;
   const doc = await manager.open(docId);
+  if (doc.dirty) await doc.saveToFile();   // the file on disk matches what is being built
   const docDir = path.dirname(doc.absPath);
+  setPhase(job, 'exporting');
+  job.cancel = () => { /* the export cannot be interrupted; its result is discarded (see isCancelled below) */ };
   let exp: Awaited<ReturnType<typeof exportTex>>;
   try {
     exp = await exportTex(docId);
@@ -165,6 +290,8 @@ async function buildViaOverlyx(requestedId: string): Promise<BuildResult> {
     record(requestedId, r);
     return r;
   }
+  if (isCancelled(job)) return { ok: false, log: 'cancelled', warnings: [] };
+  setPhase(job, 'compiling');
   const base = path.basename(exp.main, '.tex');
   const args = ['-pdf', '-g', '-interaction=nonstopmode', '-file-line-error', '-synctex=1'];
   // honour a latexmkrc in the document directory (e.g. for -shell-escape needed by the svg package)
@@ -173,9 +300,14 @@ async function buildViaOverlyx(requestedId: string): Promise<BuildResult> {
     if (fs.existsSync(f)) { args.push('-r', f); break; }
   }
   args.push(base + '.tex');
-  const r = await run('latexmk', args, {
-    cwd: exp.dir, env: texInputs(docDir, exp.dir), timeoutMs: 420000,
+  const proc = run('latexmk', args, {
+    cwd: exp.dir, env: texInputs(docDir, exp.dir), timeoutMs: 420000, nice: true,
+    onLine: (l) => { job.progress = l.slice(0, 200); },
   });
+  job.cancel = () => { job.status = 'cancelled'; proc.kill(); };
+  const r = await proc.done;
+  job.cancel = undefined;
+  if (isCancelled(job)) { const c: BuildResult = { ok: false, log: 'cancelled', warnings: [] }; record(requestedId, c); return c; }
   const pdf = path.join(exp.dir, base + '.pdf');
   const logFile = path.join(exp.dir, base + '.log');
   let log = r.out;
@@ -228,9 +360,11 @@ export function downgradeTo620(text: string): string {
 }
 
 /** Native LyX build: mirror the project into the build dir with downgraded copies. */
-async function buildViaLyx(docId: string): Promise<BuildResult> {
+async function buildViaLyx(job: BuildJob): Promise<BuildResult> {
+  const docId = job.docId;
   const doc = await manager.open(docId);
   await manager.saveAll();
+  setPhase(job, 'exporting');
   const projDir = projectDir(doc.project);
   const dir = path.join(buildDir(docId), 'lyx');
   fs.mkdirSync(dir, { recursive: true });
@@ -247,7 +381,7 @@ async function buildViaLyx(docId: string): Promise<BuildResult> {
         const parsed = parseLyx(text);
         if (parsed.format > 620) {
           // try lyx2lyx first (works when a matching LyX version is installed), else a header downgrade
-          const r = await run('python3', [config.lyx2lyx, '-t', '620', '-o', d, s], { cwd: dir, timeoutMs: 120000 });
+          const r = await run('python3', [config.lyx2lyx, '-t', '620', '-o', d, s], { cwd: dir, timeoutMs: 120000 }).done;
           if (r.code !== 0 || !fs.existsSync(d)) { log += `lyx2lyx unavailable for ${e.name} (using header downgrade)\n`; fs.writeFileSync(d, downgradeTo620(writeLyx(parsed))); }
         } else fs.copyFileSync(s, d);
       } else {
@@ -258,21 +392,30 @@ async function buildViaLyx(docId: string): Promise<BuildResult> {
   await walk(projDir, dir);
   const target = path.join(dir, doc.relPath);
   const pdf = target.replace(/\.lyx$/, '.pdf');
-  const r = await run(config.lyxBin, ['-batch', '-E', 'pdf2', pdf, target], { cwd: path.dirname(target), env: { QT_QPA_PLATFORM: 'offscreen' }, timeoutMs: 400000 });
+  setPhase(job, 'compiling');
+  const proc = run(config.lyxBin, ['-batch', '-E', 'pdf2', pdf, target], { cwd: path.dirname(target), env: { QT_QPA_PLATFORM: 'offscreen' }, timeoutMs: 400000, nice: true, onLine: (l) => { job.progress = l.slice(0, 200); } });
+  job.cancel = () => { job.status = 'cancelled'; proc.kill(); };
+  const r = await proc.done;
+  job.cancel = undefined;
   log += r.out;
-  const ok = fs.existsSync(pdf);
+  const ok = !isCancelled(job) && fs.existsSync(pdf);
   const res: BuildResult = { ok, log, pdfPath: ok ? pdf : undefined, warnings: [] };
   record(docId, res);
   return res;
 }
 
 function record(docId: string, r: BuildResult): void {
-  db.prepare('INSERT INTO builds (doc_id, status, log, pdf_path, tex_path, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(doc_id) DO UPDATE SET status=excluded.status, log=excluded.log, pdf_path=excluded.pdf_path, tex_path=excluded.tex_path, updated_at=excluded.updated_at')
-    .run(docId, r.ok ? 'ok' : 'error', r.log.slice(-200000), r.pdfPath ?? null, r.texPath ?? null, Date.now());
+  db.prepare('INSERT INTO builds (doc_id, status, log, pdf_path, tex_path, updated_at, warnings) VALUES (?,?,?,?,?,?,?) ON CONFLICT(doc_id) DO UPDATE SET status=excluded.status, log=excluded.log, pdf_path=excluded.pdf_path, tex_path=excluded.tex_path, updated_at=excluded.updated_at, warnings=excluded.warnings')
+    .run(docId, r.ok ? 'ok' : 'error', r.log.slice(-200000), r.pdfPath ?? null, r.texPath ?? null, Date.now(), JSON.stringify(r.warnings ?? []));
 }
 
-export function lastBuild(docId: string): { status: string; log: string; pdf_path: string | null; tex_path: string | null; updated_at: number } | undefined {
-  return db.prepare('SELECT status, log, pdf_path, tex_path, updated_at FROM builds WHERE doc_id = ?').get(docId) as any;
+export interface BuildRow { status: string; log: string; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[] }
+export function lastBuild(docId: string): BuildRow | undefined {
+  const row = db.prepare('SELECT status, log, pdf_path, tex_path, updated_at, warnings FROM builds WHERE doc_id = ?').get(docId) as (Omit<BuildRow, 'warnings'> & { warnings: string | null }) | undefined;
+  if (!row) return undefined;
+  let warnings: string[] = [];
+  try { warnings = row.warnings ? JSON.parse(row.warnings) : []; } catch { /* ignore */ }
+  return { ...row, warnings };
 }
 
 /** Pull "! error" blocks and file:line:error lines out of a LaTeX log. */

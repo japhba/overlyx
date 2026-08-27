@@ -9,7 +9,7 @@ import { attachWebSocket } from './ws.ts';
 import { manager } from './docs.ts';
 import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile } from './projects.ts';
 import { toPng, isDirectImage } from './graphics.ts';
-import { buildPdf, exportTex, lastBuild } from './export.ts';
+import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob } from './export.ts';
 import { db } from './db.ts';
 import { parseLyx, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText } from '@overlyx/core';
 
@@ -401,9 +401,20 @@ api.post('/docs/*/export', async (req, res) => {
       res.json({ ok: true, tex: r.tex, warnings: r.warnings });
       return;
     }
-    const r = await buildPdf(id, { engine });
-    res.json({ ok: r.ok, log: r.log, warnings: r.warnings, pdf: r.pdfPath ? `/api/docs/${encodeURIComponent(id)}/pdf?t=${Date.now()}` : null, tex: r.tex });
+    if (req.body?.wait) {
+      // synchronous variant (scripts): wait for the build to finish
+      const r = await buildPdf(id, { engine, requestedBy: req.user!.name });
+      res.json({ ok: r.ok, log: r.log, warnings: r.warnings, pdf: r.pdfPath ? `/api/docs/${encodeURIComponent(id)}/pdf?t=${Date.now()}` : null, tex: r.tex });
+      return;
+    }
+    // background job: returns at once, poll GET /build for progress and the result
+    const job = requestBuild(id, engine, req.user!.name);
+    res.json({ ok: true, job: publicJob(job) });
   } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+api.post('/docs/*/export/cancel', (req, res) => {
+  res.json({ ok: cancelBuild(docId(req)) });
 });
 
 api.get('/docs/*/pdf', (req, res) => {
@@ -415,8 +426,16 @@ api.get('/docs/*/pdf', (req, res) => {
   res.sendFile(b.pdf_path);
 });
 
+/** Last build result + the current job (running / queued / just finished), for the PDF panel. */
 api.get('/docs/*/build', (req, res) => {
-  res.json({ build: lastBuild(docId(req)) ?? null });
+  const id = docId(req);
+  const b = lastBuild(id);
+  const job = currentJob(id);
+  const tex = req.query.tex === '1' && b?.tex_path && fs.existsSync(b.tex_path) ? fs.readFileSync(b.tex_path, 'utf8') : undefined;
+  res.json({
+    build: b ? { ...b, pdf: b.pdf_path && fs.existsSync(b.pdf_path) ? `/api/docs/${encodeURIComponent(id)}/pdf?t=${b.updated_at}` : null, tex } : null,
+    job: job ? publicJob(job) : null,
+  });
 });
 
 /* ------------------------------------------------------------------- users */

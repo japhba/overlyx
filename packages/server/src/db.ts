@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS builds (
 // documents get an "epoch" (random id of their Yjs history); clients holding a different epoch are stale
 try { db.exec('ALTER TABLE ydocs ADD COLUMN epoch TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT'); } catch { /* column exists */ }
+try { db.exec('ALTER TABLE builds ADD COLUMN warnings TEXT'); } catch { /* column exists */ }
 
 export interface UserRow {
   id: number; username: string; display_name: string; password_hash: string | null; color: string;

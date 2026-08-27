@@ -26,7 +26,14 @@ Overleaf/LyX blend.
   column (Google-Docs style).
 * **Export**: LaTeX (a port of LyX's `output_latex` driven by LyX's own layout files) and PDF via
   `latexmk`; a native-LyX build as reference; embedded graphics (SVG/PDF/EPS/…) are rendered to
-  PNG for the editor and downloadable as PNG.
+  PNG for the editor and downloadable as PNG. PDF builds only start on request (Ctrl+R, the
+  toolbar or the PDF panel) and run as **background jobs**: the LaTeX export runs in a worker
+  thread, `latexmk` runs `nice`d with at most `OVERLYX_MAX_BUILDS` (2) in parallel, the PDF panel
+  shows the phase / elapsed time / last log line and has a *Cancel* button, and a build keeps
+  running if you switch documents or tabs (the panel picks it up again). A request while a build
+  is running re-builds once more afterwards with the latest content.
+* **Ruler**: a Google-Docs-style ruler above the page (*View ▸ Ruler*) with draggable margin
+  handles sets the text width (also *View ▸ Text width*, `Ctrl+Alt+±`); double-click resets it.
 * **LyX math editor**: formulas are edited with our own port of LyX's mathed (`packages/core/src/math`:
   the LyX cell/inset model, a port of `MathParser.cpp` and of LyX 2.5's writer so that edited formulas
   are written exactly as LyX writes them, and a port of `Cursor.cpp`/`InsetMathNest` for the cursor)
@@ -89,6 +96,8 @@ Environment: `PORT` (default 3000), `OVERLYX_PROJECTS_DIR` (default `/root/proje
 sub-directory is a project holding `.lyx` files, figures and `.bib`s), `OVERLYX_DATA_DIR`
 (SQLite, caches, builds, `credentials.txt`), `OVERLYX_CLIENT_DIST` (built client to serve, default
 `packages/client/dist`), `OVERLYX_UNLOAD_MS` (how long an idle document stays loaded, default 6 h),
+`OVERLYX_MAX_BUILDS` (parallel PDF builds, default 2), `OVERLYX_BUILD_NICE` (niceness of latexmk,
+default 10),
 `LYX_LAYOUT_DIR` (LyX `lib/layouts`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` +
 `OVERLYX_PUBLIC_URL` to enable Google sign-in. The Vite dev server proxies to `OVERLYX_API_PORT`
 (default 3000).

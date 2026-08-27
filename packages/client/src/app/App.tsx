@@ -10,7 +10,8 @@ import { MenuBar, type MenuDef } from './MenuBar';
 import { Toolbar, type ToolButton } from './Toolbar';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Versions } from './Versions';
-import { PdfPanel, buildPdf, type PdfState } from './PdfPanel';
+import { PdfPanel, stateFromBuild, jobActive, type PdfState } from './PdfPanel';
+import { Ruler } from './Ruler';
 import { StatusBar, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget } from './SourcePane';
 import { activeMathField } from '../editor/lyxmath/field';
@@ -93,6 +94,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   // width of the text column in px (0 = full width), see View ▸ Text width
   const [textWidth, setTextWidth] = useState<number>(() => { const v = Number(localStorage.getItem('ol.textWidth')); return Number.isFinite(v) && localStorage.getItem('ol.textWidth') !== null ? v : 720; });
   const stepTextWidth = (d: number) => setTextWidth(w => (d === 0 ? 720 : Math.min(1600, Math.max(400, (w || 1200) + d * 60))));
+  const [showRuler, setShowRuler] = useState(localStorage.getItem('ol.ruler') !== '0');
+  useEffect(() => { localStorage.setItem('ol.ruler', showRuler ? '1' : '0'); }, [showRuler]);
   const [findOpen, setFindOpen] = useState(false);
   const [findQ, setFindQ] = useState(''), [replQ, setReplQ] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
@@ -322,14 +325,50 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const run = (cmd: (state: any, dispatch: any, view?: any) => boolean) => { const v = activeViewRef.current ?? editorRef.current?.view; if (!v) return; cmd(v.state, v.dispatch, v); v.focus(); };
   const runView = (fn: (v: EditorView) => boolean) => { const v = activeViewRef.current ?? editorRef.current?.view; if (!v) return; fn(v); };
 
+  // PDF builds are background jobs on the server: start one, then poll its status (also picks up
+  // a build that is already running for this document, e.g. started from another tab)
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollBuild = useCallback((id: string, announce: boolean) => {
+    if (pollRef.current) clearTimeout(pollRef.current);
+    const step = async () => {
+      if (editorContext.docId !== id) return;
+      let r: Awaited<ReturnType<typeof api.build>>;
+      try { r = await api.build(id); } catch { pollRef.current = setTimeout(step, 3000); return; }
+      if (editorContext.docId !== id) return;
+      setPdf(p => stateFromBuild(p, r));
+      if (jobActive(r.job)) { pollRef.current = setTimeout(step, 1000); return; }
+      if (announce && r.job) notify(r.job.status === 'ok' ? 'PDF built' : r.job.status === 'cancelled' ? 'PDF build cancelled' : 'PDF build failed — see log', r.job.status === 'ok' ? 'info' : 'error');
+    };
+    void step();
+  }, []);
+  useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current); }, []);
+  // when a document opens: show its last PDF, and resume polling if a build is running
+  useEffect(() => { if (docId) pollBuild(docId, false); }, [docId]);
+
   const build = async (engine: 'overlyx' | 'lyx') => {
     if (!docId) return;
     setRightTab('pdf');
     setPdf(p => ({ ...p, busy: true }));
-    await api.save(docId).catch(() => {});
-    const r = await buildPdf(docId, engine);
-    setPdf(r);
-    notify(r.ok ? 'PDF built' : 'PDF build failed — see log', r.ok ? 'info' : 'error');
+    try {
+      const r = await api.export(docId, 'pdf', engine);
+      setPdf(p => ({ ...p, busy: true, job: r.job ?? p.job }));
+      pollBuild(docId, true);
+    } catch (e) {
+      setPdf(p => ({ ...p, busy: false, ok: false, log: String((e as Error).message) }));
+      notify('Could not start the PDF build: ' + String((e as Error).message), 'error');
+    }
+  };
+  const cancelBuild = async () => {
+    if (!docId) return;
+    await api.cancelBuild(docId).catch(() => {});
+    pollBuild(docId, true);
+  };
+  const showTex = async () => {
+    if (!docId) return;
+    if (pdf.tex) { setDialog({ name: 'tex', arg: pdf.tex }); return; }
+    try { const r = await api.build(docId, true); if (r.build?.tex) { setPdf(p => ({ ...p, tex: r.build!.tex })); setDialog({ name: 'tex', arg: r.build.tex }); return; } } catch { /* fall through */ }
+    const r = await api.export(docId, 'tex');
+    setDialog({ name: 'tex', arg: r.tex ?? '' });
   };
 
   const toggleTracking = async () => {
@@ -501,6 +540,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Zoom in', shortcut: 'Ctrl++', action: () => editorContext.ui?.zoom(1) },
       { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => editorContext.ui?.zoom(-1) },
       { label: 'Reset zoom', shortcut: 'Ctrl+0', action: () => editorContext.ui?.zoom(0) },
+      { label: 'Ruler', checked: showRuler, action: () => setShowRuler(r => !r) },
       { label: 'Text width ▸', sub: [
         ...[['Narrow', 560], ['Normal', 720], ['Wide', 880], ['Extra wide', 1080], ['Full width', 0]].map(([l, w]) => ({ label: String(l), checked: textWidth === w, action: () => setTextWidth(w as number) })),
         { sep: true },
@@ -814,6 +854,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       <div class="main">
         {showFiles && <div class="sidebar"><div class="panel-tabs"><button class="active">Files</button><button onClick={() => setShowFiles(false)}>✕</button></div><div class="panel-body"><FileBrowser current={docId} refreshKey={refreshKey} onOpen={id => openInTab(id)} /></div></div>}
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
+          {docId && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={marginMode} />}
           {docId ? (
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
@@ -835,7 +876,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
             </div>
             {rightTab === 'outline' && <div class="panel-body"><Outline view={masterView} items={outline} activePos={activePos} /></div>}
             {rightTab === 'source' && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} onNotify={notify} />}
-            {rightTab === 'pdf' && <PdfPanel docId={docId} state={pdf} onBuild={build} onShowTex={() => setDialog({ name: 'tex', arg: pdf.tex ?? '' })} />}
+            {rightTab === 'pdf' && <PdfPanel docId={docId} state={pdf} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} />}
             {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
           </div>
         )}

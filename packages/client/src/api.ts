@@ -14,6 +14,8 @@ export interface DocMeta {
   bib: BibItem[]; layouts: LayoutInfo[] | null; flexInsets: string[] | null; files: ProjectFile[];
   master: string | null; labels: { name: string; context: string; file: string }[];
 }
+export interface BuildJob { id: number; status: 'queued' | 'exporting' | 'compiling' | 'ok' | 'error' | 'cancelled'; engine: string; requestedBy: string; startedAt: number; phaseAt: number; finishedAt?: number; progress: string; rerun: boolean }
+export interface BuildInfo { status: string; log: string; pdf: string | null; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[]; tex?: string }
 export interface VersionInfo { id: number; name: string; author: string; kind: string; created_at: number; size: number }
 
 async function req<T>(method: string, url: string, body?: unknown, raw?: BodyInit): Promise<T> {
@@ -51,8 +53,10 @@ export const api = {
   restoreVersion: (id: string, vid: number) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/versions/${vid}/restore`),
   deleteVersion: (id: string, vid: number) => req<{ ok: boolean }>('DELETE', `/api/docs/${encId(id)}/versions/${vid}`),
   bibSearch: (id: string, q: string, limit = 100) => req<{ entries: BibItem[]; total: number; matches: number }>('GET', `/api/docs/${encId(id)}/bib?q=${encodeURIComponent(q)}&limit=${limit}`),
-  export: (id: string, format: 'pdf' | 'tex', engine: 'overlyx' | 'lyx' = 'overlyx') => req<{ ok: boolean; log?: string; warnings?: string[]; pdf?: string | null; tex?: string }>('POST', `/api/docs/${encId(id)}/export`, { format, engine }),
-  build: (id: string) => req<{ build: { status: string; log: string; pdf_path: string | null; updated_at: number } | null }>('GET', `/api/docs/${encId(id)}/build`),
+  /** LaTeX export (returns the source) or a PDF build request (a background job; poll `build`) */
+  export: (id: string, format: 'pdf' | 'tex', engine: 'overlyx' | 'lyx' = 'overlyx') => req<{ ok: boolean; log?: string; warnings?: string[]; pdf?: string | null; tex?: string; job?: BuildJob }>('POST', `/api/docs/${encId(id)}/export`, { format, engine }),
+  cancelBuild: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/export/cancel`),
+  build: (id: string, withTex = false) => req<{ build: BuildInfo | null; job: BuildJob | null }>('GET', `/api/docs/${encId(id)}/build${withTex ? '?tex=1' : ''}`),
   users: () => req<{ users: { id: number; username: string; name: string; color: string; isAdmin: number }[] }>('GET', '/api/users'),
   createUser: (username: string, name: string, password?: string) => req<{ user: User; password: string }>('POST', '/api/users', { username, name, password }),
 };
