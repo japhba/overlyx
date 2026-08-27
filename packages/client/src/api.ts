@@ -1,4 +1,4 @@
-export interface User { id: number; username: string; name: string; color: string; isAdmin: boolean }
+export interface User { id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null }
 export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'other' }
 export interface Project { name: string; files: ProjectFile[] }
 export interface LayoutInfo { name: string; category?: string; labelType?: string; tocLevel?: number; latexType?: string; latexName?: string; isNumbered?: boolean }

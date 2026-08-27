@@ -51,7 +51,7 @@ export function MenuBar({ menus, user, right, onLogout }: { menus: MenuDef[]; us
       <span class="spacer" />
       {right}
       <span class="userbox">
-        <span class="avatar" style={{ background: user.color }}>{user.name.slice(0, 1).toUpperCase()}</span>
+        <span class="avatar" style={{ background: user.color }}>{user.avatar ? <img src={user.avatar} alt="" referrerpolicy="no-referrer" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : user.name.slice(0, 1).toUpperCase()}</span>
         <span>{user.name}</span>
         <button class="small-btn" onClick={onLogout}>Sign out</button>
       </span>

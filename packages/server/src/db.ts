@@ -45,10 +45,11 @@ CREATE TABLE IF NOT EXISTS builds (
 
 // documents get an "epoch" (random id of their Yjs history); clients holding a different epoch are stale
 try { db.exec('ALTER TABLE ydocs ADD COLUMN epoch TEXT'); } catch { /* column exists */ }
+try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT'); } catch { /* column exists */ }
 
 export interface UserRow {
   id: number; username: string; display_name: string; password_hash: string | null; color: string;
-  email: string | null; google_sub: string | null; is_admin: number; created_at: number;
+  email: string | null; google_sub: string | null; is_admin: number; created_at: number; avatar_url?: string | null;
 }
 
 export const USER_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', '#9A6324', '#800000', '#aaffc3', '#808000', '#000075'];

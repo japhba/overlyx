@@ -6,7 +6,7 @@ import express from 'express';
 import { db, pickColor, type UserRow } from './db.ts';
 import { config, JWT_SECRET } from './config.ts';
 
-export interface SessionUser { id: number; username: string; name: string; color: string; isAdmin: boolean }
+export interface SessionUser { id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null }
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -32,14 +32,14 @@ export function generatePassword(len = 20): string {
   return out;
 }
 
-export function createUser(username: string, displayName: string, password: string | null, opts: { email?: string; googleSub?: string; isAdmin?: boolean } = {}): UserRow {
-  const stmt = db.prepare('INSERT INTO users (username, display_name, password_hash, color, email, google_sub, is_admin, created_at) VALUES (?,?,?,?,?,?,?,?)');
-  const info = stmt.run(username, displayName, password ? hashPassword(password) : null, pickColor(), opts.email ?? null, opts.googleSub ?? null, opts.isAdmin ? 1 : 0, Date.now());
+export function createUser(username: string, displayName: string, password: string | null, opts: { email?: string; googleSub?: string; isAdmin?: boolean; avatar?: string } = {}): UserRow {
+  const stmt = db.prepare('INSERT INTO users (username, display_name, password_hash, color, email, google_sub, is_admin, created_at, avatar_url) VALUES (?,?,?,?,?,?,?,?,?)');
+  const info = stmt.run(username, displayName, password ? hashPassword(password) : null, pickColor(), opts.email ?? null, opts.googleSub ?? null, opts.isAdmin ? 1 : 0, Date.now(), opts.avatar ?? null);
   return db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid) as UserRow;
 }
 
 export function toSessionUser(u: UserRow): SessionUser {
-  return { id: u.id, username: u.username, name: u.display_name, color: u.color, isAdmin: !!u.is_admin };
+  return { id: u.id, username: u.username, name: u.display_name, color: u.color, isAdmin: !!u.is_admin, avatar: u.avatar_url ?? null };
 }
 
 export function signSession(u: SessionUser): string {
@@ -150,7 +150,7 @@ export function authRouter(): Router {
       const tok = await tokenRes.json() as { id_token?: string; access_token?: string };
       if (!tok.access_token) { res.status(401).send('google auth failed'); return; }
       const infoRes = await fetch('https://openidconnect.googleapis.com/v1/userinfo', { headers: { authorization: 'Bearer ' + tok.access_token } });
-      const info = await infoRes.json() as { sub: string; email?: string; name?: string; email_verified?: boolean };
+      const info = await infoRes.json() as { sub: string; email?: string; name?: string; email_verified?: boolean; picture?: string };
       let row = db.prepare('SELECT * FROM users WHERE google_sub = ?').get(info.sub) as UserRow | undefined;
       if (!row && info.email) row = db.prepare('SELECT * FROM users WHERE email = ?').get(info.email) as UserRow | undefined;
       if (!row) {
@@ -158,9 +158,14 @@ export function authRouter(): Router {
         const base = (info.email ?? 'google_' + info.sub).split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
         let username = base; let k = 1;
         while (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) username = `${base}${k++}`;
-        row = createUser(username, info.name ?? username, null, { email: info.email, googleSub: info.sub });
+        row = createUser(username, info.name ?? username, null, { email: info.email, googleSub: info.sub, avatar: info.picture });
       } else if (!row.google_sub) {
         db.prepare('UPDATE users SET google_sub = ? WHERE id = ?').run(info.sub, row.id);
+      }
+      // keep the profile picture fresh on every sign-in
+      if (info.picture !== undefined && info.picture !== row.avatar_url) {
+        db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(info.picture ?? null, row.id);
+        row = db.prepare('SELECT * FROM users WHERE id = ?').get(row.id) as UserRow;
       }
       setSessionCookie(res, toSessionUser(row));
       res.redirect('/');
