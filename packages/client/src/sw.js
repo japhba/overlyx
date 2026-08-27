@@ -14,7 +14,7 @@ const VERSION = '__VERSION__';
 const PRECACHE = __PRECACHE__;
 const SHELL = 'overlyx-shell-' + VERSION;
 const API = 'overlyx-api';
-const API_CACHED = /^\/api\/(auth\/me$|projects$|docs\/[^/]+\/(meta|versions)$|projects\/[^/]+\/(graphics|file)\/)/;
+const API_CACHED = /^\/api\/(auth\/me$|projects$|users\/\d+\/avatar$|docs\/[^/]+\/(meta|versions)$|projects\/[^/]+\/(graphics|file)\/)/;
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));

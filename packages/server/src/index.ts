@@ -421,6 +421,33 @@ api.get('/docs/*/build', (req, res) => {
 
 /* ------------------------------------------------------------------- users */
 
+/** A user's profile picture (fetched from the identity provider once and cached on disk). */
+api.get('/users/:id/avatar', async (req, res) => {
+  try {
+    const row = db.prepare('SELECT avatar_url FROM users WHERE id = ?').get(Number(req.params.id)) as { avatar_url: string | null } | undefined;
+    if (!row?.avatar_url) { res.status(404).end(); return; }
+    const file = path.join(config.dataDir, 'cache', `avatar-${Number(req.params.id)}`);
+    const metaFile = file + '.json';
+    let type = 'image/png';
+    let fresh = false;
+    try {
+      const m = JSON.parse(fs.readFileSync(metaFile, 'utf8')) as { url: string; type: string; at: number };
+      fresh = m.url === row.avatar_url && Date.now() - m.at < 7 * 24 * 3600 * 1000 && fs.existsSync(file);
+      type = m.type;
+    } catch { /* not cached */ }
+    if (!fresh) {
+      const r = await fetch(row.avatar_url, { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) { if (fs.existsSync(file)) { res.setHeader('Content-Type', type); res.sendFile(file); } else res.status(502).end(); return; }
+      type = r.headers.get('content-type') ?? 'image/png';
+      fs.writeFileSync(file, Buffer.from(await r.arrayBuffer()));
+      fs.writeFileSync(metaFile, JSON.stringify({ url: row.avatar_url, type, at: Date.now() }));
+    }
+    res.setHeader('Content-Type', type);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.sendFile(file);
+  } catch (e) { res.status(502).json({ error: String(e) }); }
+});
+
 api.get('/users', (_req, res) => {
   res.json({ users: db.prepare('SELECT id, username, display_name AS name, color, is_admin AS isAdmin FROM users ORDER BY username').all() });
 });

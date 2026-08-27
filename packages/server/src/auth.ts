@@ -39,7 +39,9 @@ export function createUser(username: string, displayName: string, password: stri
 }
 
 export function toSessionUser(u: UserRow): SessionUser {
-  return { id: u.id, username: u.username, name: u.display_name, color: u.color, isAdmin: !!u.is_admin, avatar: u.avatar_url ?? null };
+  // the profile picture is served through our own origin (see /api/users/:id/avatar): third-party
+  // image hosts get blocked by privacy extensions / referrer rules, and it works offline this way
+  return { id: u.id, username: u.username, name: u.display_name, color: u.color, isAdmin: !!u.is_admin, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null };
 }
 
 export function signSession(u: SessionUser): string {

@@ -181,7 +181,8 @@ export function lyxKeymap(): Plugin {
     'Mod-s': ui(a => a.save()),
     F2: ui(a => a.save()),
     'Mod-r': ui(a => a.viewPdf()),
-    'Shift-Mod-r': ui(a => a.updatePdf()),
+    // LyX binds Ctrl+Shift+R to "update PDF" as well, but in a browser that is the hard-reload key:
+    // hijacking it silently started a full latexmk build. Left to the browser on purpose.
     'Mod-f': ui(a => a.find()),
     F3: ui(a => a.find()),
     'Shift-Mod-e': ui(a => a.toggleTrackChanges()),
