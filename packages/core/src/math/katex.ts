@@ -291,14 +291,29 @@ export function sanitizeForKatex(def: string, name: string, args: number): strin
   return d;
 }
 
-/** KaTeX `macros` option: LyX's own symbol macros plus the document's argument-less macros. */
+/**
+ * KaTeX `macros` option: LyX's own symbol macros plus the document's argument-less macros.
+ * Macro tables are shared by all formulas of a document (see the client's macrotable.ts), so the
+ * converted table is cached per table object — building it is far more expensive than rendering
+ * a typical inline formula.
+ */
+const katexMacroCache = new WeakMap<MacroTable, Record<string, string>>();
+const sanitizedCache = new Map<string, string>();
 export function katexMacros(table: MacroTable): Record<string, string> {
+  const hit = katexMacroCache.get(table);
+  if (hit) return hit;
   const out: Record<string, string> = { ...KATEX_BASE_MACROS };
   for (const [name, info] of Object.entries(table)) {
     if (!/^[A-Za-z]+$/.test(name)) continue;
     if (info.def === undefined) continue;
-    if (info.nargs === 0) out['\\' + name] = sanitizeForKatex(info.def, name, 0);
+    if (info.nargs === 0) {
+      const k = name + '\0' + info.def;
+      let s = sanitizedCache.get(k);
+      if (s === undefined) { s = sanitizeForKatex(info.def, name, 0); if (sanitizedCache.size > 5000) sanitizedCache.clear(); sanitizedCache.set(k, s); }
+      out['\\' + name] = s;
+    }
   }
+  katexMacroCache.set(table, out);
   return out;
 }
 

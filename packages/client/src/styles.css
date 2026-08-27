@@ -253,6 +253,9 @@ button { cursor: pointer; }
 /* statically rendered formula (upgraded to an editable field on demand) */
 .lyx-math-static { display: inline-block; padding: 1px 2px; border: 1px solid transparent; border-radius: 3px; line-height: normal; white-space: nowrap; cursor: text; }
 .lyx-math-static.display { font-size: 1.05em; grid-column: 2; justify-self: center; min-width: 4em; text-align: center; }
+/* formulas that are not rendered yet (off-screen, rendered in idle time): show their source */
+.lyx-math-static.pending { font-family: "DejaVu Sans Mono", monospace; font-size: 0.78em; color: #999; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: baseline; }
+.lyx-math-static.display.pending { white-space: pre-wrap; text-align: left; min-height: 1.6em; }
 .lyx-math-raw { font-family: "DejaVu Sans Mono", monospace; font-size: 0.8em; color: #b00; }
 .lyx-math-inline.empty .lm-field { min-width: 1.2em; }
 /* the LyX-style math editor (editor/lyxmath) */
@@ -318,6 +321,10 @@ button { cursor: pointer; }
 .statusbar .tracking { color: #b00; }
 .statusbar .change-info { color: #2e7d32; background: #eef7ee; padding: 0 6px; border-radius: 3px; }
 .statusbar .doclabel { color: #3b6ea5; font-weight: 600; }
+.statusbar .save-state.saved { color: #2e7d32; }
+.statusbar .save-state.saving { color: #666; }
+.statusbar .save-state.offline { color: #7a4b00; background: #fff3d6; padding: 0 8px; border-radius: 3px; }
+.filetree .offline-mark { color: #3a3; font-size: 10px; margin-left: 4px; }
 .menubar .doc-title { color: #666; font-size: 12px; margin-right: 12px; }
 .menubar .doc-title a { color: #3b6ea5; }
 

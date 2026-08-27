@@ -90,7 +90,12 @@ export class CommandView implements NodeView {
     this.dom = document.createElement('span');
     this.dom.contentEditable = 'false';
     this.render();
-    this.dom.addEventListener('dblclick', (ev) => { ev.preventDefault(); editorContext.openInsetDialog?.(this.view, this.getPos()); });
+    this.dom.addEventListener('dblclick', (ev) => {
+      ev.preventDefault();
+      // child documents open in a tab on double-click (editor.ts handleDoubleClickOn), not a dialog
+      if (this.node.attrs.cmd === 'include') return;
+      editorContext.openInsetDialog?.(this.view, this.getPos());
+    });
   }
 
   private render() {

@@ -20,9 +20,11 @@ export const config = {
     clientId: process.env.GOOGLE_CLIENT_ID ?? '',
     clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
   },
-  clientDist: path.join(REPO_ROOT, 'packages/client/dist'),
+  clientDist: path.resolve(process.env.OVERLYX_CLIENT_DIST ?? path.join(REPO_ROOT, 'packages/client/dist')),
   /** debounce for writing .lyx files back to disk (ms) */
   saveDebounceMs: Number(process.env.OVERLYX_SAVE_DEBOUNCE ?? 1500),
+  /** idle time after which an open document is released from memory (ms) */
+  unloadAfterMs: Number(process.env.OVERLYX_UNLOAD_MS ?? 6 * 60 * 60 * 1000),
   /** minimum interval between automatic versions (ms) */
   autoVersionIntervalMs: Number(process.env.OVERLYX_AUTOVERSION_MS ?? 10 * 60 * 1000),
   sessionDays: 30,

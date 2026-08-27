@@ -4,10 +4,10 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { login, collectErrors } from './helpers';
+import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
 
-const SRC = '/root/projects/recurrent_feature/main.lyx';
-const DIR = '/root/projects/e2e-dialogs';
+const SRC = `${FIXTURES_DIR}/recurrent_feature/main.lyx`;
+const DIR = `${PROJECTS_DIR}/e2e-dialogs`;
 const FILE = `${DIR}/main.lyx`;
 
 const body = `\\begin_body

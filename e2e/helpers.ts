@@ -1,8 +1,14 @@
 import { readFileSync } from 'node:fs';
 import type { Page, BrowserContext } from '@playwright/test';
 
+/** Root of the projects served by the server under test (an isolated copy when OVERLYX_PROJECTS_DIR is set). */
+export const PROJECTS_DIR = process.env.OVERLYX_PROJECTS_DIR ?? '/root/projects';
+/** Real papers used as fixtures (read-only; specs copy them into scratch projects under PROJECTS_DIR). */
+export const FIXTURES_DIR = process.env.OVERLYX_E2E_FIXTURES ?? '/root/projects';
+export const BASE_URL = process.env.OVERLYX_E2E_BASE ?? 'http://localhost:5173';
+
 export function adminCredentials(): { username: string; password: string } {
-  const lines = readFileSync('/root/lyx/overlyx/data/credentials.txt', 'utf8').split('\n').filter(l => l.startsWith('admin\t'));
+  const lines = readFileSync(process.env.OVERLYX_E2E_CREDENTIALS ?? '/root/lyx/overlyx/data/credentials.txt', 'utf8').split('\n').filter(l => l.startsWith('admin\t'));
   const [username, password] = lines[lines.length - 1].split('\t');
   return { username, password };
 }
@@ -29,6 +35,6 @@ export function collectErrors(page: Page): string[] {
 }
 
 export async function apiLogin(ctx: BrowserContext, creds = adminCredentials()): Promise<void> {
-  const res = await ctx.request.post('http://localhost:5173/api/auth/login', { data: creds });
+  const res = await ctx.request.post(BASE_URL + '/api/auth/login', { data: creds });
   if (!res.ok()) throw new Error('api login failed');
 }

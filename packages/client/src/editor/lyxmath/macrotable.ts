@@ -22,9 +22,10 @@ const FALLBACK_MACROS: Record<string, { def: string; args: number }> = {
 
 let docMacros: MacroTable = {};
 let docVersion = 0;
+let docSignature = '';
 const inlineDefsByView = new WeakMap<object, InlineDef[]>();
 const tableCache = new Map<string, MacroTable>();
-let lastSignature = '';
+const signatureByView = new WeakMap<object, string>();
 /** bumped whenever any macro definition changes; fields compare it to re-render */
 export let macroVersion = 0;
 
@@ -32,13 +33,25 @@ export let macroVersion = 0;
 export const mathViews = new Set<{ refreshMacros(): void }>();
 function refreshAllFields(): void { for (const v of mathViews) v.refreshMacros(); }
 
+/**
+ * Views whose document macros (server metadata) have been registered. Formulas of a view that is
+ * not ready yet are only shown as placeholders: the document syncs while its metadata is still
+ * loading, and rendering everything with an incomplete macro table would be wasted work.
+ */
+const readyViews = new WeakSet<object>();
+export function markMacrosReady(view: object): void { readyViews.add(view); }
+export function macrosReady(view: object | undefined): boolean { return !!view && readyViews.has(view); }
+
 /** Set the macros that apply to every formula. `merge` keeps previously set macros (child editors of a combined view). */
 export function setDocumentMacros(macros: Record<string, { def: string; args: number; expand?: boolean }>, merge = false): void {
-  if (!merge) {
-    docMacros = {};
-    for (const [k, v] of Object.entries(FALLBACK_MACROS)) docMacros[k] = { nargs: v.args, def: v.def };
-  }
-  for (const [k, v] of Object.entries(macros)) docMacros[k] = { nargs: v.args, def: v.def };
+  const next: MacroTable = merge ? { ...docMacros } : {};
+  if (!merge) for (const [k, v] of Object.entries(FALLBACK_MACROS)) next[k] = { nargs: v.args, def: v.def };
+  for (const [k, v] of Object.entries(macros)) next[k] = { nargs: v.args, def: v.def };
+  // unchanged tables must not invalidate anything: every formula would re-render for nothing
+  const sig = JSON.stringify(next);
+  if (sig === docSignature) return;
+  docSignature = sig;
+  docMacros = next;
   docVersion++;
   tableCache.clear();
 }
@@ -47,8 +60,8 @@ export function setDocumentMacros(macros: Record<string, { def: string; args: nu
 export function setInlineMacroDefs(view: object, defs: InlineDef[]): void {
   inlineDefsByView.set(view, defs);
   const sig = docVersion + '|' + JSON.stringify(defs);
-  if (sig === lastSignature) return;
-  lastSignature = sig;
+  if (sig === signatureByView.get(view)) return;
+  signatureByView.set(view, sig);
   macroVersion++;
   tableCache.clear();
   refreshAllFields();

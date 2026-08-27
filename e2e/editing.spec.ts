@@ -5,11 +5,11 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, copyFileSync, rmSync, existsSync, symlinkSync, readFileSync, writeFileSync } from 'node:fs';
-import { login, collectErrors } from './helpers';
+import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
 
-const SRC = '/root/projects/recurrent_feature';
+const SRC = `${FIXTURES_DIR}/recurrent_feature`;
 const PROJECT = 'e2e-paper';
-const DIR = `/root/projects/${PROJECT}`;
+const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const FILES = ['main.lyx', 'appendix.lyx', 'lyxmacros.lyx', 'macros.tex', 'preamble.tex', 'latexmkrc', 'bib.bib', 'icml2026.sty', 'icml2026.bst', 'icml.layout', 'fancyhdr.sty', 'algorithm.sty', 'algorithmic.sty'];
 
 // a small document for the math-key tests: the paper's header (macro definitions come with it) + one formula

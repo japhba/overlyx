@@ -33,6 +33,16 @@ export function FileBrowser({ current, onOpen, refreshKey }: { current: string |
   const [showBackups, setShowBackups] = useState(false);
   const load = () => api.projects().then(r => setProjects(r.projects)).catch(() => {});
   useEffect(() => { load(); }, [refreshKey]);
+  // documents with a local copy (IndexedDB) can be opened offline
+  const [offlineDocs, setOfflineDocs] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let alive = true;
+    const scan = () => (indexedDB as any).databases?.().then((dbs: { name?: string }[]) => {
+      if (alive) setOfflineDocs(new Set(dbs.map(d => d.name ?? '').filter(n => n.startsWith('overlyx:')).map(n => n.slice('overlyx:'.length))));
+    }).catch(() => {});
+    const t = setTimeout(scan, 1500);   // after the current document has been stored
+    return () => { alive = false; clearTimeout(t); };
+  }, [current, refreshKey]);
   useEffect(() => { localStorage.setItem('ol.tree', JSON.stringify(collapsed)); }, [collapsed]);
 
   // auto-expand the folders of the current document
@@ -99,6 +109,7 @@ export function FileBrowser({ current, onOpen, refreshKey }: { current: string |
         href={href} target={f.kind === 'lyx' ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB`}
         onClick={e => { if (f.kind === 'lyx' && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(id); } }}>
         <span class="ficon">{ICON[f.kind] ?? '·'}</span><span class="fname">{node.name}</span>
+        {f.kind === 'lyx' && offlineDocs.has(id) && <span class="offline-mark" title="A copy of this document is stored in this browser: it can be opened and edited offline">⬇</span>}
       </a>
     );
   };

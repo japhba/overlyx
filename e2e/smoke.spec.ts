@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync, mkdirSync, copyFileSync } from 'node:fs';
-import { login, openDoc, collectErrors } from './helpers';
+import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
 
 // a scratch copy of a real paper: tests must never type into the user's own documents
 const DOC = 'e2e-scratch/smoke-main.lyx';
 test.beforeAll(() => {
-  mkdirSync('/root/projects/e2e-scratch', { recursive: true });
-  copyFileSync('/root/projects/recurrent_feature/main.lyx', '/root/projects/' + DOC);
+  mkdirSync(`${PROJECTS_DIR}/e2e-scratch`, { recursive: true });
+  copyFileSync(`${FIXTURES_DIR}/recurrent_feature/main.lyx`, PROJECTS_DIR + '/' + DOC);
 });
 
 test('login, open a native LyX document and render it', async ({ page }) => {
@@ -54,9 +54,9 @@ test('typing is saved to the .lyx file and seen by a second user', async ({ brow
   await openDoc(pageB, DOC);
   await expect(pageB.locator('.lyx-editor')).toContainText(marker, { timeout: 20000 });
   // file on disk updated (server debounce 1.5 s)
-  await expect.poll(() => readFileSync('/root/projects/' + DOC, 'utf8').includes(marker), { timeout: 15000 }).toBe(true);
+  await expect.poll(() => readFileSync(PROJECTS_DIR + '/' + DOC, 'utf8').includes(marker), { timeout: 15000 }).toBe(true);
   // undo on A removes it again (per-user undo), and disk follows
   await pageA.keyboard.press('Control+z');
-  await expect.poll(() => readFileSync('/root/projects/' + DOC, 'utf8').includes(marker), { timeout: 15000 }).toBe(false);
+  await expect.poll(() => readFileSync(PROJECTS_DIR + '/' + DOC, 'utf8').includes(marker), { timeout: 15000 }).toBe(false);
   await ctxA.close(); await ctxB.close();
 });

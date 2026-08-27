@@ -2,6 +2,7 @@ import express from 'express';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { config } from './config.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, generatePassword } from './auth.ts';
 import { attachWebSocket } from './ws.ts';
@@ -99,7 +100,11 @@ function docId(req: express.Request): string {
   return decodeURIComponent((req.params as any)[0] ?? req.params.id);
 }
 
-/** Parsed BibTeX files, cached by path + mtime + size (bibliographies are often several MB). */
+/**
+ * Parsed BibTeX files, cached in memory and on disk (data/cache/bib-*.json) by path + mtime + size:
+ * bibliographies are often several MB and parsing one takes over a second, which used to make the
+ * first open of a document after a server restart slow.
+ */
 const bibCache = new Map<string, { key: string; entries: ReturnType<typeof parseBibtex> }>();
 function cachedBib(abs: string): ReturnType<typeof parseBibtex> {
   try {
@@ -107,10 +112,32 @@ function cachedBib(abs: string): ReturnType<typeof parseBibtex> {
     const key = `${st.mtimeMs}:${st.size}`;
     const hit = bibCache.get(abs);
     if (hit && hit.key === key) return hit.entries;
-    const entries = parseBibtex(fs.readFileSync(abs, 'utf8')).map(e => ({ ...e, key: String(e.key ?? ''), author: String(e.author ?? ''), year: String(e.year ?? ''), title: String(e.title ?? '') }));
+    const diskFile = path.join(config.dataDir, 'cache', 'bib-' + crypto.createHash('sha1').update(abs).digest('hex').slice(0, 16) + '.json');
+    let entries: ReturnType<typeof parseBibtex> | null = null;
+    try {
+      const cached = JSON.parse(fs.readFileSync(diskFile, 'utf8')) as { key: string; entries: ReturnType<typeof parseBibtex> };
+      if (cached.key === key && Array.isArray(cached.entries)) entries = cached.entries;
+    } catch { /* no disk cache */ }
+    if (!entries) {
+      entries = parseBibtex(fs.readFileSync(abs, 'utf8')).map(e => ({ ...e, key: String(e.key ?? ''), author: String(e.author ?? ''), year: String(e.year ?? ''), title: String(e.title ?? '') }));
+      try { fs.writeFileSync(diskFile, JSON.stringify({ key, entries })); } catch { /* cache dir not writable: ignore */ }
+    }
     bibCache.set(abs, { key, entries });
     return entries;
   } catch { return []; }
+}
+
+/** Parsed LyX files that are not open (child documents, macro files), cached by mtime + size. */
+const parseCache = new Map<string, { key: string; doc: ReturnType<typeof parseLyx> }>();
+function cachedParse(abs: string): ReturnType<typeof parseLyx> {
+  const st = fs.statSync(abs);
+  const key = `${st.mtimeMs}:${st.size}`;
+  const hit = parseCache.get(abs);
+  if (hit && hit.key === key) return hit.doc;
+  const doc = parseLyx(fs.readFileSync(abs, 'utf8'));
+  if (parseCache.size > 200) parseCache.clear();
+  parseCache.set(abs, { key, doc });
+  return doc;
 }
 
 /** bib files used by a document (filled by the meta route) for the /bib search endpoint */
@@ -166,7 +193,7 @@ api.get('/docs/*/meta', async (req, res) => {
     const readDoc = (rel: string) => {
       const open = manager.docs.get(`${doc.project}/${rel}`);
       if (open) return open.toLyxDocument();
-      return parseLyx(fs.readFileSync(path.join(proj, rel), 'utf8'));
+      return cachedParse(path.join(proj, rel));
     };
     const rootRel = masterRel ?? doc.relPath;
     const rootLyx = masterRel ? readDoc(masterRel) : lyx;
@@ -297,6 +324,12 @@ api.get('/docs/*/lyx', async (req, res) => {
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
+/** Admin: start a fresh collaboration history for a document (see DocManager.reset). */
+api.post('/docs/*/reset', async (req, res) => {
+  if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
+  try { await manager.reset(docId(req)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
 api.post('/docs/*/save', async (req, res) => {
   try {
     const doc = await manager.open(docId(req));
@@ -336,7 +369,9 @@ api.get('/docs/*/versions', (req, res) => {
 });
 api.post('/docs/*/versions', async (req, res) => {
   try {
-    const id = await manager.createVersion(docId(req), String(req.body?.name ?? 'version'), req.user!.name, 'manual');
+    // `lyx` = explicit content (a client's offline edits that could not be merged), else the current state
+    const lyx = typeof req.body?.lyx === 'string' && req.body.lyx.length < 20_000_000 ? req.body.lyx : undefined;
+    const id = await manager.createVersion(docId(req), String(req.body?.name ?? 'version'), req.user!.name, lyx ? 'offline' : 'manual', lyx);
     res.json({ id });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });

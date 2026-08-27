@@ -12,6 +12,14 @@ Overleaf/LyX blend.
   `\input{macros}` files, child documents) render immediately.
 * **Multi-user editing** (Yjs CRDT, per-user undo, live cursors) with automatic and named
   **versions** (diff & restore).
+* **Autosave and offline editing** (Google-Docs style): there is no Save button — every edit goes
+  to the server over the WebSocket and is written to the `.lyx` file 1.5 s after the last change
+  (the status bar shows *Saving…* / *All changes saved*, confirmed by the server). Every opened
+  document is mirrored in the browser (IndexedDB), so it opens instantly the next time and can be
+  read and edited without a connection; a service worker keeps the app itself available offline.
+  Offline edits sync automatically when the connection is back and merge with what others did in
+  the meantime (CRDT), and an external save from desktop LyX only replaces the paragraphs that
+  actually changed. See *Offline mode* below.
 * **Notes and comments**: LyX notes (Note / Comment / Greyed out) render like LyX; OverLyX
   comment threads (author, time, replies, resolve) are stored as ordinary `Note Comment` insets so
   LyX users see them too. *View ▸ Notes & comments in the margin* moves them into a right-hand
@@ -79,8 +87,11 @@ npm start            # production server (serves the built client)
 
 Environment: `PORT` (default 3000), `OVERLYX_PROJECTS_DIR` (default `/root/projects`; every
 sub-directory is a project holding `.lyx` files, figures and `.bib`s), `OVERLYX_DATA_DIR`
-(SQLite, caches, builds, `credentials.txt`), `LYX_LAYOUT_DIR` (LyX `lib/layouts`),
-`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` + `OVERLYX_PUBLIC_URL` to enable Google sign-in.
+(SQLite, caches, builds, `credentials.txt`), `OVERLYX_CLIENT_DIST` (built client to serve, default
+`packages/client/dist`), `OVERLYX_UNLOAD_MS` (how long an idle document stays loaded, default 6 h),
+`LYX_LAYOUT_DIR` (LyX `lib/layouts`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` +
+`OVERLYX_PUBLIC_URL` to enable Google sign-in. The Vite dev server proxies to `OVERLYX_API_PORT`
+(default 3000).
 
 A systemd unit is installed as `overlyx.service` (see `deploy/`).
 
@@ -90,6 +101,53 @@ A systemd unit is installed as `overlyx.service` (see `deploy/`).
 npm test                                  # vitest (round trips, conversions, LaTeX, compile)
 npx playwright test                       # e2e (needs the dev servers running)
 ```
+
+The e2e suites copy real papers into scratch projects; to keep them away from the production
+server and its data, run them against an isolated instance:
+
+```bash
+S=/tmp/overlyx-e2e; mkdir -p $S/projects $S/data; cp -r /root/projects/recurrent_feature $S/projects/
+OVERLYX_DATA_DIR=$S/data npx tsx packages/server/src/seed.ts admin Admin
+OVERLYX_DATA_DIR=$S/data OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_CLIENT_DIST=$S/dist PORT=3001 npx tsx packages/server/src/index.ts &
+(cd packages/client && OVERLYX_API_PORT=3001 npx vite --port 5174 &)
+export OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_E2E_CREDENTIALS=$S/data/credentials.txt
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/smoke.spec.ts e2e/editing.spec.ts e2e/features.spec.ts e2e/dialogs.spec.ts
+# offline mode needs the built client (service worker): build into $S/dist, then
+(cd packages/client && npx vite build --outDir $S/dist)
+OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts
+```
+
+## Offline mode
+
+How it works, in order of what happens when you open a document:
+
+1. **Local copy first.** The editor loads the document's Yjs state from IndexedDB
+   (`overlyx:<project>/<file>`, written by `y-indexeddb`) and renders it right away, then connects
+   to the server. The initial sync only exchanges what the two sides are missing, so re-opening a
+   document is fast even on a slow connection.
+2. **Editing.** Every keystroke is a Yjs update: applied locally, appended to IndexedDB and — while
+   connected — sent to the server immediately. The server writes the `.lyx` file 1.5 s after the
+   last change and then tells all clients *"the file now contains state X"* (message type 3);
+   the status bar switches from *Saving…* to *All changes saved* when that confirmation covers
+   everything this browser has sent.
+3. **Offline.** When the connection drops (the browser's `offline` event, or y-websocket's
+   30 s watchdog), the status bar shows *⚡ Offline — changes kept on this device*. Editing continues
+   against the local copy; the service worker (`packages/client/src/sw.js`, generated into
+   `dist/sw.js` with the list of built files) serves the app shell and the last responses of the
+   few read-only API calls the editor needs (`/api/auth/me`, the project list, a document's
+   metadata, rendered graphics), so a reload while offline still works. Documents with a local
+   copy are marked ⬇ in the file browser; a document that was never opened on this device cannot
+   be shown offline.
+4. **Back online.** y-websocket reconnects; the Yjs sync sends the offline edits and receives
+   everybody else's. Because the document is a CRDT, concurrent edits merge without conflicts
+   (two people editing the same sentence simply both get their words in). External saves from
+   desktop LyX are applied on the server as a *diff* (`packages/server/src/ydiff.ts`), so
+   paragraphs that LyX did not touch keep their identity and offline edits inside them survive.
+5. **Unmergeable case.** If the server's copy of the document has a *different history* (its Yjs
+   state was reset with *POST /api/docs/…/reset*, or its database was wiped) the local copy cannot
+   be merged: the editor stores the unsynced edits as a version named *"offline changes by …"*
+   (Versions panel: compare / restore), discards the local copy and reloads the server's document.
+   Logging out deletes the local copies and cached API responses on that browser.
 
 ## Compatibility notes
 
@@ -104,8 +162,11 @@ npx playwright test                       # e2e (needs the dev servers running)
   later definitions — including ones nested in notes — override earlier ones). Macros with
   arguments are expanded from their definitions with the argument cells kept editable (`core/src/math/katex.ts`).
   calls when the formula is written to the file (`packages/core/src/mathedit.ts`).
-* Large documents: formulas render statically first and become editable fields when they
-  scroll into view or are hovered/entered.
+* Large documents: the editor opens the local copy and starts syncing while the document's
+  metadata loads; formulas near the top are rendered synchronously (a ~40 ms budget), the rest
+  show their source and are rendered in idle time or when scrolled near, and become editable
+  fields when they scroll into view or are hovered/entered. Macro tables are shared and cached
+  per document, so a 300-formula paper paints in well under a second.
 * Every document's Yjs history carries an *epoch*; a browser tab whose editor belongs to an older
   epoch (server restarted with a changed file) reloads instead of merging stale content. Cross-tab
   BroadcastChannel syncing of y-websocket is disabled for the same reason.

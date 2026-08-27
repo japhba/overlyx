@@ -1,21 +1,21 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
-import { login, openDoc, collectErrors } from './helpers';
+import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
 
 /** Each test works on its own copy of a document inside a scratch project. */
 const PROJECT = 'e2e-scratch';
-const DIR = `/root/projects/${PROJECT}`;
+const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 function freshDoc(name: string): string {
   mkdirSync(DIR, { recursive: true });
-  const src = readFileSync('/root/projects/bayesian_chaos/notes/notes.lyx', 'utf8');
+  const src = readFileSync(`${FIXTURES_DIR}/bayesian_chaos/notes/notes.lyx`, 'utf8');
   const file = `${DIR}/${name}.lyx`;
   writeFileSync(file, src);
-  if (!existsSync(`${DIR}/translation_table.png`)) copyFileSync('/root/projects/bayesian_chaos/notes/translation_table.png', `${DIR}/translation_table.png`);
+  if (!existsSync(`${DIR}/translation_table.png`)) copyFileSync(`${FIXTURES_DIR}/bayesian_chaos/notes/translation_table.png`, `${DIR}/translation_table.png`);
   return `${PROJECT}/${name}.lyx`;
 }
 
-const fileText = (id: string) => readFileSync('/root/projects/' + id, 'utf8');
+const fileText = (id: string) => readFileSync(PROJECTS_DIR + '/' + id, 'utf8');
 /** Put the cursor at the start of the first Standard paragraph (click its top-left corner: no inline insets there). */
 async function firstStandard(page: Page) {
   const p = page.locator('.lyx-editor > .lyx-par.lyx-layout-standard').first();
@@ -142,7 +142,7 @@ test('external edits (e.g. saved from LyX) are picked up live', async ({ page })
   await expect(page.locator('.statusbar')).toContainText('connected');
   const text = fileText(id);
   const marker = 'EXTERNAL-EDIT-' + Date.now();
-  writeFileSync('/root/projects/' + id, text.replace('\\begin_layout Standard\n', `\\begin_layout Standard\n${marker} `));
+  writeFileSync(PROJECTS_DIR + '/' + id, text.replace('\\begin_layout Standard\n', `\\begin_layout Standard\n${marker} `));
   await expect(page.locator('.lyx-editor')).toContainText(marker, { timeout: 15000 });
 });
 
@@ -177,7 +177,7 @@ test('PDF export builds a PDF for a revtex document', async ({ page, request }) 
 /** A document with a figure (caption + label), an equation with a label, and a ref/eqref to each. */
 function labelDoc(name: string): string {
   mkdirSync(DIR, { recursive: true });
-  const head = readFileSync('/root/projects/bayesian_chaos/notes/notes.lyx', 'utf8').split('\\begin_body')[0];
+  const head = readFileSync(`${FIXTURES_DIR}/bayesian_chaos/notes/notes.lyx`, 'utf8').split('\\begin_body')[0];
   const body = [
     '\\begin_body', '',
     '\\begin_layout Standard', 'See Fig ',

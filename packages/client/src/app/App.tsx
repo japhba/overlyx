@@ -15,7 +15,8 @@ import { StatusBar, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget } from './SourcePane';
 import { activeMathField } from '../editor/lyxmath/field';
 import { GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams } from './Dialogs';
-import { createEditor, refreshMacros, describeChange, type EditorHandle } from '../editor/editor';
+import { createEditor, refreshMacros, describeChange, type EditorHandle, type SaveState } from '../editor/editor';
+import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
 import { STANDARD_LAYOUTS } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
@@ -31,10 +32,28 @@ export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [google, setGoogle] = useState(false);
   const [ready, setReady] = useState(false);
-  useEffect(() => { api.me().then(r => { setUser(r.user); setGoogle(r.google); }).finally(() => setReady(true)); }, []);
+  useEffect(() => {
+    api.me().then(r => {
+      setUser(r.user); setGoogle(r.google);
+      // remembered for offline starts (the session cookie itself is still valid then)
+      try { if (r.user) localStorage.setItem('ol.user', JSON.stringify(r.user)); else localStorage.removeItem('ol.user'); } catch { /* ignore */ }
+    }).catch(() => {
+      // no server (offline): continue with the last known user; documents come from the local copies
+      try { const u = localStorage.getItem('ol.user'); if (u) setUser(JSON.parse(u)); } catch { /* ignore */ }
+    }).finally(() => setReady(true));
+  }, []);
   if (!ready) return <div style="padding:40px;color:#666">Loading…</div>;
   if (!user) return <Login google={google} onLogin={setUser} />;
-  return <Workspace user={user} onLogout={() => api.logout().then(() => setUser(null))} />;
+  return <Workspace user={user} onLogout={() => api.logout().then(clearLocalData).then(() => { try { localStorage.removeItem('ol.user'); } catch { /* ignore */ } setUser(null); })} />;
+}
+
+/** Forget everything cached in this browser (API responses cached by the service worker, local document copies). */
+async function clearLocalData(): Promise<void> {
+  try { if ('caches' in window) for (const k of await caches.keys()) if (k.startsWith('overlyx-api')) await caches.delete(k); } catch { /* ignore */ }
+  try {
+    const dbs = await (indexedDB as any).databases?.() as { name?: string }[] | undefined;
+    for (const d of dbs ?? []) if (d.name?.startsWith('overlyx:')) indexedDB.deleteDatabase(d.name);
+  } catch { /* ignore */ }
 }
 
 /** `#/project/path.lyx?goto=label` */
@@ -68,7 +87,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [tracking, setTracking] = useState(false);
   const [chord, setChord] = useState<string | null>(null);
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
-  const [saved, setSaved] = useState(true);
+  const [save, setSave] = useState<SaveState>({ state: 'connecting', pending: false, savedAt: 0, unavailable: false });
+  const [reloadKey, setReloadKey] = useState(0);
   const [zoom, setZoom] = useState(Number(localStorage.getItem('ol.zoom') || 1));
   // width of the text column in px (0 = full width), see View ▸ Text width
   const [textWidth, setTextWidth] = useState<number>(() => { const v = Number(localStorage.getItem('ol.textWidth')); return Number.isFinite(v) && localStorage.getItem('ol.textWidth') !== null ? v : 720; });
@@ -184,16 +204,39 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     editorRef.current?.destroy();
     editorRef.current = null; activeViewRef.current = null;
     setMeta(null); setOutline([]); setChildIds([]); setPdf({ url: null, log: '', busy: false, ok: null, warnings: [] });
+    setDialog(null);   // a dialog belongs to the document it was opened in
     if (!docId || !containerRef.current) return;
-    containerRef.current.innerHTML = '<div class="editor-loading">Loading document…</div>';
+    containerRef.current.innerHTML = '';
     editorContext.user = user; editorContext.docId = docId; editorContext.project = docId.split('/')[0]; editorContext.meta = null;
     editorContext.docDir = docId.split('/').slice(1, -1).join('/');
-    let handle: EditorHandle | null = null;
     let cancelled = false;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const start = (m: DocMeta | null) => {
-      if (cancelled || !containerRef.current) return;
-      containerRef.current.innerHTML = '';
+    const scheduleOutline = debounce((view: EditorView) => { setOutline(buildOutline(view.state.doc, true, editorContext.meta?.secnumdepth ?? 3)); setChildIds(collectChildren(view)); }, 300);
+    setSave({ state: 'connecting', pending: false, savedAt: 0, unavailable: false });
+    // The editor loads its local copy and connects right away; the metadata request runs in
+    // parallel. Until it has arrived the editor is read-only and formulas only show their source
+    // (their macros are not known yet), so nothing is rendered twice.
+    const handle: EditorHandle = createEditor({
+      docId, user, container: containerRef.current, marginMode, readOnly: true,
+      onStatus: setStatus,
+      onSaveState: (st) => { if (!cancelled) setSave(st); },
+      onSelectionChange: onSelection,
+      onDocChange: (view) => { setDocTick(t => t + 1); scheduleOutline(view); },
+      onStale: (info) => { void resolveStale(handle, docId, info.pendingLocal); },
+    });
+    editorRef.current = handle; activeViewRef.current = handle.view; editorContext.activeView = handle.view;
+    // header lines live in the Y meta map
+    const metaMap = handle.ydoc.getMap<string>('meta');
+    const readHeader = () => { try { setHeaderLines(JSON.parse(metaMap.get('header') ?? '[]')); } catch { /* ignore */ } };
+    readHeader(); metaMap.observe(readHeader);
+    const h = handle;
+    h.provider.on('sync', () => {
+      setOutline(buildOutline(h.view.state.doc, true, editorContext.meta?.secnumdepth ?? 3));
+      setChildIds(collectChildren(h.view));
+      setDocTick(x => x + 1);
+      setTimeout(runGoto, 50);
+    });
+    const withMeta = (m: DocMeta | null) => {
+      if (cancelled) return;
       if (m) {
         setMeta(m); editorContext.meta = m;
         applyAuthorColors(m.authors);
@@ -201,41 +244,45 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         editorContext.trackChanges = m.trackingChanges;
         editorContext.changeAuthorId = m.authors.find(x => x.name === user.name)?.id;
       }
-      handle = createEditor({
-        docId, user, container: containerRef.current, marginMode,
-        onStatus: setStatus,
-        onSelectionChange: onSelection,
-        onDocChange: (view) => { setSaved(false); setDocTick(t => t + 1); scheduleOutline(view); scheduleMacros(view); },
-      });
-      editorRef.current = handle; activeViewRef.current = handle.view; editorContext.activeView = handle.view;
-      refreshMacros(handle.view, m?.macros ?? {});
-      // header lines live in the Y meta map
-      const metaMap = handle.ydoc.getMap<string>('meta');
-      const readHeader = () => { try { setHeaderLines(JSON.parse(metaMap.get('header') ?? '[]')); } catch { /* ignore */ } };
-      readHeader(); metaMap.observe(readHeader);
-      // saved-state polling: the server writes 1.5s after the last change
-      timer = setInterval(() => setSaved(true), 4000);
-      const h = handle;
-      h.provider.on('sync', () => {
-        setOutline(buildOutline(h.view.state.doc, true, editorContext.meta?.secnumdepth ?? 3));
-        setChildIds(collectChildren(h.view));
-        refreshMacros(h.view, editorContext.meta?.macros ?? {});
-        setDocTick(x => x + 1);
-        setTimeout(runGoto, 50);
-      });
+      refreshMacros(h.view, m?.macros ?? {});
+      h.setEditable(true);
+      setOutline(buildOutline(h.view.state.doc, true, m?.secnumdepth ?? 3));
       rerender();
     };
-    const scheduleOutline = debounce((view: EditorView) => { setOutline(buildOutline(view.state.doc, true, editorContext.meta?.secnumdepth ?? 3)); setChildIds(collectChildren(view)); }, 300);
-    let macroSig = '';
-    const scheduleMacros = debounce((view: EditorView) => {
-      // only re-apply when a FormulaMacro inset changed (cheap signature)
-      let sig = '';
-      view.state.doc.descendants((n, pos) => { if (n.type.name === 'macro') sig += pos + n.attrs.lines + ';'; return true; });
-      if (sig !== macroSig) { macroSig = sig; refreshMacros(view, editorContext.meta?.macros ?? {}); }
-    }, 600);
-    api.meta(docId).then(start).catch(e => { notify('Could not load document metadata: ' + e.message, 'error'); start(null); });
-    return () => { cancelled = true; if (timer) clearInterval(timer); handle?.destroy(); editorRef.current = null; };
-  }, [docId]);
+    api.meta(docId).then(withMeta).catch(e => { notify(navigator.onLine ? 'Could not load document metadata: ' + e.message : 'Offline: document metadata (macros, bibliography) not available', 'error'); withMeta(null); });
+    rerender();
+    return () => { cancelled = true; handle.destroy(); editorRef.current = null; };
+  }, [docId, reloadKey]);
+
+  /**
+   * The server's copy of the document has a different history than our local copy (the server
+   * re-created the document, e.g. after its database was reset). Yjs cannot merge unrelated
+   * histories, so: keep any unsynced local edits as a version on the server (they can be compared
+   * and restored from the Versions panel), drop the local copy and load the server's document.
+   */
+  const resolveStale = async (h: EditorHandle, id: string, pendingLocal: boolean) => {
+    let kept = '';
+    if (pendingLocal) {
+      const name = `offline changes by ${user.name} (not merged)`;
+      try {
+        const lyx = generateLyx({ view: h.view, ydoc: h.ydoc, docId: id });
+        await api.createVersion(id, name, lyx);
+        kept = `Your unsynced edits were kept as the version “${name}” — open Versions to compare or restore them.`;
+      } catch {
+        try {
+          const lyx = generateLyx({ view: h.view, ydoc: h.ydoc, docId: id });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(new Blob([lyx], { type: 'application/x-lyx' }));
+          a.download = (id.split('/').pop() ?? 'document.lyx').replace(/\.lyx$/, '') + '-offline-changes.lyx';
+          a.click();
+          kept = 'Your unsynced edits could not be stored on the server; they were downloaded as a .lyx file instead.';
+        } catch { kept = 'Your unsynced edits could not be kept.'; }
+      }
+    }
+    await h.discardLocal();
+    alert(`The document on the server was re-created while this copy was open, so the local copy cannot be merged and will be reloaded.${kept ? '\n\n' + kept : ''}`);
+    setReloadKey(k => k + 1);
+  };
 
   // UI hooks for keymap / node views
   useEffect(() => {
@@ -246,7 +293,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     editorContext.gotoLabel = gotoLabel;
     (window as any).overlyx = editorContext;   // handy for tests / debugging
     editorContext.ui = {
-      save: () => { if (docId) api.save(docId).then(() => { setSaved(true); notify('Saved to ' + docId); }).catch(e => notify(String(e.message), 'error')); },
+      save: () => {
+        if (!docId) return;
+        const st = editorRef.current?.saveState();
+        if (st?.state === 'offline') { notify('You are offline — your changes are kept on this device and will be saved automatically when the connection is back'); return; }
+        api.save(docId).then(() => notify('All changes are saved automatically — written to ' + docId.split('/').pop())).catch(e => notify(String(e.message), 'error'));
+      },
       viewPdf: () => build('overlyx'),
       updatePdf: () => build('overlyx'),
       find: () => setFindOpen(true),
@@ -352,7 +404,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       { label: 'Open (file browser)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
-      { label: 'Save now', shortcut: 'Ctrl+S', action: () => editorContext.ui?.save() },
+      { label: save.state === 'offline' ? 'Offline — changes are saved on this device' : save.state === 'saving' ? 'Saving…' : 'All changes saved automatically', disabled: true, action: () => {} },
       { sep: true },
       { label: 'Export ▸', sub: [
         { label: 'PDF (pdflatex via latexmk)', shortcut: 'Ctrl+R', action: () => build('overlyx') },
@@ -588,7 +640,6 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     [
       { id: 'new', title: 'New document (Ctrl+N)', icon: 'new', action: () => editorContext.ui?.newFile() },
       { id: 'open', title: 'Open (Ctrl+O)', icon: 'open', action: () => setShowFiles(true) },
-      { id: 'save', title: 'Save now (Ctrl+S)', icon: 'save', action: () => editorContext.ui?.save() },
     ],
     [
       { id: 'undo', title: 'Undo (Ctrl+Z)', icon: 'undo', action: () => run(undo) },
@@ -767,7 +818,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (
-                <ChildEditor key={id} id={id} user={user} marginMode={marginMode} onSelection={onSelection} onDocChange={() => { setSaved(false); setDocTick(t => t + 1); }}
+                <ChildEditor key={id} id={id} user={user} marginMode={marginMode} onSelection={onSelection} onDocChange={() => { setDocTick(t => t + 1); }}
                   register={(cid, h) => { if (h) childRefs.current.set(cid, h); else childRefs.current.delete(cid); rerender(); }} />
               ))}
             </div>
@@ -789,7 +840,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
           </div>
         )}
       </div>
-      <StatusBar layout={layout} status={status} chord={chord} message={message} saved={saved} tracking={tracking} trackingAs={user.name} change={changeInfo}
+      <StatusBar layout={layout} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null} />
       {renderDialog()}
     </div>
@@ -819,7 +870,8 @@ function ChildEditor({ id, user, marginMode, onSelection, onDocChange, register 
     api.meta(id).then(m => {
       if (cancelled || !ref.current) return;
       ref.current.innerHTML = '';
-      handle = createEditor({ docId: id, user, container: ref.current, marginMode, child: true, onStatus: setStatus, onSelectionChange: onSelection, onDocChange, onStale: () => setTimeout(() => location.reload(), 800) });
+      handle = createEditor({ docId: id, user, container: ref.current, marginMode, child: true, onStatus: setStatus, onSelectionChange: onSelection, onDocChange,
+        onStale: () => { void handle?.discardLocal().then(() => setTimeout(() => location.reload(), 800)); } });
       register(id, handle);
       refreshMacros(handle.view, m.macros, true);
       handle.provider.on('sync', () => { if (handle) refreshMacros(handle.view, m.macros, true); });

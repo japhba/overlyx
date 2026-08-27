@@ -9,6 +9,7 @@ import { dropCursor } from 'prosemirror-dropcursor';
 import { tableEditing } from 'prosemirror-tables';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
+import { IndexeddbPersistence } from 'y-indexeddb';
 import * as decoding from 'lib0/decoding';
 import { ySyncPlugin, yCursorPlugin, yUndoPlugin, initProseMirrorDoc } from 'y-prosemirror';
 import { schema, unquote, paramMap } from '@overlyx/core';
@@ -21,7 +22,7 @@ import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
 import { editorContext, viewDocDir, viewProject } from './context';
-import { setDocumentMacros, setInlineMacroDefs } from './lyxmath/macrotable';
+import { setDocumentMacros, setInlineMacroDefs, markMacrosReady } from './lyxmath/macrotable';
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
 import { includeTarget } from './commands';
@@ -31,7 +32,28 @@ export interface EditorHandle {
   view: EditorView;
   ydoc: Y.Doc;
   provider: WebsocketProvider;
+  /** editing is disabled until the document's metadata (authors, change tracking, macros) is known */
+  setEditable(on: boolean): void;
+  /** current save / connection state */
+  saveState(): SaveState;
+  /** forget the local (IndexedDB) copy of this document; used after an epoch conflict */
+  discardLocal(): Promise<void>;
   destroy(): void;
+}
+
+/**
+ * Where the user's edits are: `saved` = the .lyx file on the server contains everything, `saving` =
+ * edits are on their way to the server / not written yet, `offline` = no connection (edits are kept
+ * in this browser and sync later), `connecting` = not synced yet after opening.
+ */
+export interface SaveState {
+  state: 'saved' | 'saving' | 'offline' | 'connecting';
+  /** local edits the server has not confirmed as written */
+  pending: boolean;
+  /** time of the last write to the .lyx file (server clock, ms) */
+  savedAt: number;
+  /** offline and nothing cached locally: the document cannot be shown */
+  unavailable: boolean;
 }
 
 export interface EditorOptions {
@@ -44,9 +66,20 @@ export interface EditorOptions {
   onStatus?: (s: { connected: boolean; synced: boolean; users: { name: string; color: string }[] }) => void;
   onSelectionChange?: (view: EditorView) => void;
   onDocChange?: (view: EditorView) => void;
-  /** the server re-created the document (its history changed): this editor's state is stale and must be discarded */
-  onStale?: () => void;
+  /**
+   * The server's document has a different history (epoch) than the local copy — it was re-created
+   * (e.g. the server's database was reset). The local state cannot be merged and must be discarded;
+   * `pendingLocal` tells whether it holds edits the server never received (the caller can save them
+   * as a version before discarding).
+   */
+  onStale?: (info: { pendingLocal: boolean }) => void;
+  onSaveState?: (s: SaveState) => void;
+  /** start read-only (until `setEditable(true)`) */
+  readOnly?: boolean;
 }
+
+/** IndexedDB database name of a document's local copy */
+export const localDbName = (docId: string) => 'overlyx:' + docId;
 
 export function createEditor(opts: EditorOptions): EditorHandle {
   const ydoc = new Y.Doc();
@@ -54,11 +87,58 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   // disableBc: y-websocket would otherwise sync all providers of this origin that share the (empty)
   // room name through a BroadcastChannel — i.e. merge *different documents* open in other tabs or in
   // the combined master+child view into each other. Documents are only synced through the server.
-  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: { doc: opts.docId }, disableBc: true });
-  // y-websocket appends the room name to the url; we pass the doc as a query param instead
+  // y-websocket appends the room name to the url; we pass the doc as a query param instead.
+  // The connection is opened once the local copy has been loaded (see below).
+  const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: { doc: opts.docId }, disableBc: true, connect: false });
+  let destroyed = false;
+
+  /* ---------------------------------------------------------------- offline copy + save state
+   * Every document is mirrored in IndexedDB (y-indexeddb): it renders instantly on the next open,
+   * and while offline edits keep going into the local copy; on reconnect the Yjs sync exchanges
+   * exactly the missing updates in both directions (CRDT merge, no conflicts).
+   *
+   * Save state: local edits are counted (`editSeq`); everything up to `sentSeq` has been handed to
+   * the server (sent immediately while connected, or exchanged by the sync after a reconnect); the
+   * server's MSG_SAVED (type 3, sent after each write of the .lyx file, ordered after the updates it
+   * processed) confirms everything sent before it. */
+  const persistence = new IndexeddbPersistence(localDbName(opts.docId), ydoc);
+  let editSeq = 0, sentSeq = 0, savedSeq = 0;
+  let savedAt = 0;
+  let localSynced = false;      // IndexedDB copy loaded
+  let localEmpty = true;
+  let pendingFromStore = false; // the stored copy had unsaved edits when it was last used
+  const saveState = (): SaveState => {
+    const pending = editSeq > savedSeq || (pendingFromStore && !provider.synced);
+    const connected = provider.wsconnected;
+    const state: SaveState['state'] = connected && provider.synced ? (pending ? 'saving' : 'saved') : connected || !localSynced ? 'connecting' : 'offline';
+    return { state, pending, savedAt, unavailable: state === 'offline' && localEmpty };
+  };
+  let lastEmitted = '';
+  const emitSaveState = () => {
+    const st = saveState();
+    const key = JSON.stringify(st);
+    if (key === lastEmitted) return;
+    lastEmitted = key;
+    if (st.pending !== pendingFromStore || !st.pending) { pendingFromStore = st.pending; void persistence.set('pending', st.pending ? 1 : 0).catch(() => {}); }
+    opts.onSaveState?.(st);
+  };
+  ydoc.on('update', (_u: Uint8Array, origin: unknown) => {
+    if (origin === provider || origin === persistence) return;
+    editSeq++;
+    if (provider.wsconnected && provider.synced) sentSeq = editSeq;   // y-websocket sends local updates right away
+    emitSaveState();
+  });
+  ydoc.on('update', () => { localEmpty = ydoc.getXmlFragment('prosemirror').length === 0; });
+  (provider as any).messageHandlers[3] = (_enc: unknown, dec: decoding.Decoder) => {
+    savedAt = decoding.readVarUint(dec);
+    decoding.readVarUint8Array(dec);   // state vector of the written file (informational)
+    savedSeq = sentSeq;
+    emitSaveState();
+  };
+
   // Message type 2 = document epoch (OverLyX extension, sent by the server before sync step 1). If the
-  // server's Yjs history was re-created while this editor was alive (restart + changed file), syncing
-  // would merge two unrelated histories: bail out instead and let the UI reload the document.
+  // server's Yjs history differs from the one our local copy belongs to (the server re-created the
+  // document), syncing would merge two unrelated histories: bail out instead and let the UI decide.
   let epoch: string | null = null;
   let stale = false;
   (provider as any).messageHandlers[2] = (_enc: unknown, dec: decoding.Decoder) => {
@@ -67,10 +147,26 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       stale = true;
       provider.shouldConnect = false;
       provider.disconnect();
-      opts.onStale?.();
+      opts.onStale?.({ pendingLocal: editSeq > savedSeq || pendingFromStore });
+      return;
     }
-    epoch = e;
+    if (epoch !== e) { epoch = e; void persistence.set('epoch', e).catch(() => {}); }
   };
+  const connectAfterLocalLoad = async () => {
+    try {
+      await Promise.race([persistence.whenSynced, new Promise(r => setTimeout(r, 2500))]);
+      const [storedEpoch, pending] = await Promise.all([persistence.get('epoch'), persistence.get('pending')]);
+      if (typeof storedEpoch === 'string') epoch = storedEpoch;
+      pendingFromStore = pending === 1;
+    } catch { /* no IndexedDB (private mode, …): work without a local copy */ }
+    localSynced = true;
+    localEmpty = ydoc.getXmlFragment('prosemirror').length === 0;
+    if (destroyed) return;
+    performance.mark('ol:local-loaded');
+    emitSaveState();
+    if (navigator.onLine !== false) provider.connect();
+  };
+  void connectAfterLocalLoad();
   const fragment = ydoc.getXmlFragment('prosemirror');
   const { doc: initialDoc, mapping } = initProseMirrorDoc(fragment, schema);
 
@@ -100,6 +196,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     marginPlugin(opts.marginMode ?? false),
     changeTrackingPlugin(),
     findPlugin(),
+    macroDefsPlugin(() => viewRef),
     new Plugin({
       view: () => ({
         update: (view, prev) => {
@@ -111,8 +208,11 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   ];
 
   const state = EditorState.create({ schema, doc: initialDoc, plugins });
+  let viewRef: EditorView | null = null;
+  let editable = !opts.readOnly;
   const view = new EditorView(opts.container, {
     state,
+    editable: () => editable,
     nodeViews: {
       math_inline: (node, view, getPos) => new MathInlineView(node, view, getPos as () => number | undefined),
       math_display: (node, view, getPos) => new MathDisplayView(node, view, getPos as () => number | undefined),
@@ -179,6 +279,12 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       return false;
     },
   });
+  viewRef = view;
+  performance.mark('ol:editor-created');
+  // A double-click that opened this document (child link, file browser) ends after the new editor
+  // exists: its dblclick event must not open a dialog for whatever node now sits under the pointer.
+  const createdAt = performance.now();
+  view.dom.addEventListener('dblclick', (ev) => { if (performance.now() - createdAt < 600) { ev.stopPropagation(); ev.preventDefault(); } }, true);
   // which document this view shows (child editors in the combined view differ from the workspace document)
   view.dom.dataset.docId = opts.docId;
   view.dom.dataset.project = opts.docId.split('/')[0];
@@ -198,9 +304,24 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     status.users = users;
     opts.onStatus?.({ ...status });
   };
-  provider.on('status', (e: { status: string }) => { status.connected = e.status === 'connected'; pushStatus(); });
-  provider.on('sync', (s: boolean) => { status.synced = s; pushStatus(); });
+  provider.on('status', (e: { status: string }) => { status.connected = e.status === 'connected'; pushStatus(); emitSaveState(); });
+  provider.on('sync', (s: boolean) => {
+    status.synced = s;
+    if (s) {
+      performance.mark('ol:synced');
+      // edits stored from an earlier session stay "pending" until the server confirms it wrote them
+      if (pendingFromStore) editSeq = Math.max(editSeq, savedSeq + 1);
+      sentSeq = editSeq;   // the sync exchanged everything we had
+    }
+    pushStatus(); emitSaveState();
+  });
   provider.awareness.on('change', pushStatus);
+  // The browser's online/offline events give immediate feedback (the WebSocket itself only notices a
+  // dead connection through y-websocket's 30 s watchdog); reconnecting is y-websocket's job otherwise.
+  const onOnline = () => { if (!destroyed && !stale && !provider.wsconnected) { provider.disconnect(); provider.connect(); } };
+  const onOffline = () => { if (!destroyed && !stale) { provider.disconnect(); emitSaveState(); } };
+  window.addEventListener('online', onOnline);
+  window.addEventListener('offline', onOffline);
 
   // put cursor at start once synced
   if (!opts.child) {
@@ -214,11 +335,18 @@ export function createEditor(opts: EditorOptions): EditorHandle {
 
   return {
     view, ydoc, provider,
+    setEditable(on: boolean) { if (on !== editable) { editable = on; view.setProps({ editable: () => editable }); } },
+    saveState,
+    async discardLocal() { try { await persistence.clearData(); } catch { /* ignore */ } },
     destroy() {
+      destroyed = true;
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
       // the view first: its Yjs binding must be gone before the provider/awareness fire their last events
       view.destroy();
       provider.awareness.setLocalState(null);
       provider.destroy();
+      persistence.destroy();
       ydoc.destroy();
     },
   };
@@ -231,33 +359,74 @@ export function describeChange(type: string | undefined, authorId: number, time:
   return `${type === 'deleted' ? 'Deleted' : 'Inserted'} by ${author}${when ? ' on ' + when : ''}`;
 }
 
+type ServerMacros = Record<string, { def: string; args: number; expand: boolean }>;
+interface InlineDef { pos: number; name: string; def: string; args: number }
+const serverMacrosByView = new WeakMap<EditorView, { macros: ServerMacros; merge: boolean }>();
+
+/**
+ * Registers the positional macro definitions of every new document state *before* the view renders
+ * it: node views of formulas ask for their macro table when they are created, so the definitions
+ * must be known by then (otherwise every formula would be rendered twice on load).
+ */
+function macroDefsPlugin(getView: () => EditorView | null): Plugin {
+  return new Plugin({
+    state: {
+      init: () => '',
+      apply(tr, sig: string, _old, newState) {
+        if (!tr.docChanged) return sig;
+        const view = getView();
+        if (!view) return sig;
+        const defs = inlineMacroDefs(newState.doc);
+        const next = JSON.stringify(defs);
+        if (next === sig) return sig;
+        const server = serverMacrosByView.get(view);
+        if (server) applyMacros(view, defs, server.macros, server.merge);
+        else setInlineMacroDefs(view, defs);   // metadata still loading: positional defs only
+        return next;
+      },
+    },
+  });
+}
+
+/** FormulaMacro insets of a document (definition + position). */
+function inlineMacroDefs(doc: import('prosemirror-model').Node): InlineDef[] {
+  const defs: InlineDef[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name !== 'macro') return true;
+    try {
+      const lines: string[] = JSON.parse(node.attrs.lines);
+      const m = /^\\(?:re)?newcommand\*?\{\\([A-Za-z]+)\}(?:\[(\d+)\])?\{([\s\S]*)\}$/.exec(lines[0]);
+      if (m) {
+        let display: string | undefined;
+        if (lines[1]?.startsWith('{')) display = lines[1].slice(1, -1);
+        defs.push({ pos, name: m[1], def: display || m[3], args: Number(m[2] ?? 0) });
+      }
+    } catch { /* ignore */ }
+    return false;   // macro nodes have no formulas inside
+  });
+  return defs;
+}
+
+function applyMacros(view: EditorView, defs: InlineDef[], serverMacros: ServerMacros, merge: boolean): void {
+  // server macros minus the ones this document defines itself (positional defs take over)
+  const own = new Set(defs.map(d => d.name));
+  const base: ServerMacros = {};
+  for (const [k, v] of Object.entries(serverMacros)) if (!own.has(k)) base[k] = v;
+  setDocumentMacros(base, merge);
+  setInlineMacroDefs(view, defs);
+}
+
 /**
  * Macros: server-provided ones (preamble, \input files, child documents) apply everywhere;
  * FormulaMacro insets of this document apply from their position onwards (LyX semantics).
  * `merge` adds to the global dictionary instead of replacing it (child editors of a combined view).
+ * The server macros are remembered per view; later document changes re-apply them through
+ * `macroDefsPlugin`.
  */
-export function refreshMacros(view: EditorView, serverMacros: Record<string, { def: string; args: number; expand: boolean }>, merge = false): void {
-  const defs: { pos: number; name: string; def: string; args: number }[] = [];
-  view.state.doc.descendants((node, pos) => {
-    if (node.type.name === 'macro') {
-      try {
-        const lines: string[] = JSON.parse(node.attrs.lines);
-        const m = /^\\(?:re)?newcommand\*?\{\\([A-Za-z]+)\}(?:\[(\d+)\])?\{([\s\S]*)\}$/.exec(lines[0]);
-        if (m) {
-          let display: string | undefined;
-          if (lines[1]?.startsWith('{')) display = lines[1].slice(1, -1);
-          defs.push({ pos, name: m[1], def: display || m[3], args: Number(m[2] ?? 0) });
-        }
-      } catch { /* ignore */ }
-    }
-    return true;
-  });
-  // server macros minus the ones this document defines itself (positional defs take over)
-  const own = new Set(defs.map(d => d.name));
-  const base: Record<string, { def: string; args: number; expand: boolean }> = {};
-  for (const [k, v] of Object.entries(serverMacros)) if (!own.has(k)) base[k] = v;
-  setDocumentMacros(base, merge);
-  setInlineMacroDefs(view, defs);
+export function refreshMacros(view: EditorView, serverMacros: ServerMacros, merge = false): void {
+  serverMacrosByView.set(view, { macros: serverMacros, merge });
+  markMacrosReady(view);
+  applyMacros(view, inlineMacroDefs(view.state.doc), serverMacros, merge);
 }
 
 export { editorContext };

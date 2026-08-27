@@ -8,7 +8,7 @@ import { NodeSelection, TextSelection } from 'prosemirror-state';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { macroFromLyxLines, parseFormula, renderHullSource, numberedType, type HullType } from '@overlyx/core';
 import { LyxMathField, renderStaticHtml, activeMathField, rowRectsOf } from '../lyxmath/field';
-import { macroTableFor, mathViews, macroVersion } from '../lyxmath/macrotable';
+import { macroTableFor, mathViews, macroVersion, macrosReady } from '../lyxmath/macrotable';
 import { showContextMenu, type MenuItem } from '../contextmenu';
 import { toggleMathDisplay, countLabelRefs, renameLabelRefs } from '../commands';
 import { editorContext } from '../context';
@@ -16,16 +16,56 @@ import { editorContext } from '../context';
 /** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
 export const pendingFocus: { pos: number | null; keys: string[] } = { pos: null, keys: [] };
 
+/* ------------------------------------------------ deferred static rendering */
+
+interface Deferrable { dom: HTMLElement; view: EditorView; pending: boolean; renderPending(): void }
+/** formulas showing their source instead of a rendering; rendered in idle time (document order) or when scrolled near */
+const staticQueue = new Set<Deferrable>();
+let staticPumpScheduled = false;
+let batchStart = 0, lastBudgetCheck = 0;
+/**
+ * Synchronous rendering budget: one burst of node-view constructions (the initial render of a
+ * document) may spend ~40 ms on KaTeX; the formulas after that only show their source and are
+ * rendered in idle time. Keeps the first paint of a long paper fast without the formulas at the
+ * top (where the cursor is) ever appearing unrendered.
+ */
+function canRenderNow(): boolean {
+  const now = performance.now();
+  if (now - lastBudgetCheck > 20) batchStart = now;
+  lastBudgetCheck = now;
+  return now - batchStart < 40;
+}
+const idle: (cb: (d: { timeRemaining(): number }) => void) => void =
+  typeof (window as any).requestIdleCallback === 'function' ? (cb) => (window as any).requestIdleCallback(cb, { timeout: 500 }) : (cb) => setTimeout(() => cb({ timeRemaining: () => 8 }), 16);
+function schedulePump(): void {
+  if (staticPumpScheduled || !staticQueue.size) return;
+  staticPumpScheduled = true;
+  idle(pumpStatic);
+}
+function pumpStatic(deadline: { timeRemaining(): number }): void {
+  staticPumpScheduled = false;
+  let waiting = false;
+  for (const v of staticQueue) {
+    if (deadline.timeRemaining() < 3) { waiting = true; break; }
+    if (!macrosReady(v.view)) continue;     // stays queued until its document's macros are known
+    v.renderPending();
+  }
+  if (waiting) schedulePump();
+}
+
 /* ------------------------------------------------ lazy upgrade of static formulas */
 
-interface Upgradable { dom: HTMLElement; upgrade(): void }
+interface Upgradable extends Deferrable { upgrade(): void }
 const lazyQueue: Upgradable[] = [];
 let pumping = false;
 const io = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver((entries) => {
   for (const e of entries) {
     if (!e.isIntersecting) continue;
     const v = (e.target as any).__lyxMathView as Upgradable | undefined;
-    if (v && !lazyQueue.includes(v)) lazyQueue.push(v);
+    if (!v) continue;
+    // near the viewport: render right away instead of waiting for idle time
+    if (v.pending && macrosReady(v.view)) v.renderPending();
+    if (!lazyQueue.includes(v)) lazyQueue.push(v);
   }
   pump();
 }, { rootMargin: '900px 0px' }) : null;
@@ -41,7 +81,7 @@ function pump() {
   requestAnimationFrame(step);
 }
 function watchLazy(v: Upgradable) { (v.dom as any).__lyxMathView = v; io?.observe(v.dom); }
-function unwatchLazy(v: Upgradable) { io?.unobserve(v.dom); const i = lazyQueue.indexOf(v); if (i >= 0) lazyQueue.splice(i, 1); }
+function unwatchLazy(v: Upgradable) { io?.unobserve(v.dom); staticQueue.delete(v); const i = lazyQueue.indexOf(v); if (i >= 0) lazyQueue.splice(i, 1); }
 
 /* ------------------------------------------------ shared */
 
@@ -125,28 +165,52 @@ export class MathInlineView implements NodeView {
   private staticKey = '';
   private updating = false;
   private lastLatex: string;
+  /** shows its source; rendered later (idle time / scrolled near / macros known) */
+  pending = false;
 
-  constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
+  constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-math-inline';
     this.lastLatex = String(node.attrs.latex);
     this.dom.classList.toggle('empty', !this.lastLatex.trim());
     mathViews.add(this);
     if (pendingFocus.pos !== null && pendingFocus.pos === getPos()) this.upgrade();
-    else { this.renderStatic(); watchLazy(this); }
+    else { this.renderStaticOrDefer(); watchLazy(this); }
     this.dom.addEventListener('pointerenter', () => this.upgrade());
   }
 
-  private renderStatic() {
+  private ensureStaticEl(): HTMLElement {
     if (!this.staticEl) { this.staticEl = document.createElement('span'); this.staticEl.className = 'lyx-math-static'; this.dom.replaceChildren(this.staticEl); }
+    return this.staticEl;
+  }
+  private renderStaticOrDefer() {
+    if (macrosReady(this.view) && canRenderNow()) this.renderStatic();
+    else this.showPlaceholder();
+  }
+  private showPlaceholder() {
+    const el = this.ensureStaticEl();
+    el.classList.add('pending');
+    el.textContent = this.lastLatex;
+    this.pending = true;
+    staticQueue.add(this);
+    schedulePump();
+  }
+  renderPending() {
+    if (!this.pending) return;
+    this.renderStatic();
+  }
+  private renderStatic() {
+    const el = this.ensureStaticEl();
+    this.pending = false; staticQueue.delete(this); el.classList.remove('pending');
     const { key, table } = macroTableFor(this.view, this.getPos());
-    this.staticEl.innerHTML = renderStaticHtml('$' + this.lastLatex + '$', false, table);
+    el.innerHTML = renderStaticHtml('$' + this.lastLatex + '$', false, table);
     this.staticKey = key;
   }
 
   upgrade() {
     if (this.field) return;
     unwatchLazy(this);
+    this.pending = false;
     const { key, table } = macroTableFor(this.view, this.getPos());
     const f = new LyxMathField({
       latex: '$' + this.lastLatex + '$', display: false, macros: table,
@@ -179,6 +243,7 @@ export class MathInlineView implements NodeView {
     this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex: body }).setMeta('addToHistory', true));
   }
   refreshMacros() {
+    if (this.pending) { if (macrosReady(this.view)) schedulePump(); return; }
     const { key, table } = macroTableFor(this.view, this.getPos());
     if (this.field) this.field.setMacros(table, key);
     else if (this.staticKey !== key) this.renderStatic();
@@ -200,7 +265,7 @@ export class MathInlineView implements NodeView {
     } else if (latex !== this.lastLatex) {
       this.lastLatex = latex;
       this.dom.classList.toggle('empty', !latex.trim());
-      this.renderStatic();
+      if (this.pending) this.showPlaceholder(); else this.renderStatic();
     }
     return true;
   }
@@ -236,8 +301,10 @@ export class MathDisplayView implements NodeView {
   private lastLatex: string;
   private ro: ResizeObserver | null = null;
   private mo: MutationObserver | null = null;
+  /** shows its source; rendered later (idle time / scrolled near / macros known) */
+  pending = false;
 
-  constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
+  constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined) {
     this.lastLatex = String(node.attrs.latex);
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-math-display';
@@ -266,14 +333,31 @@ export class MathDisplayView implements NodeView {
     this.ro.observe(this.dom);
     mathViews.add(this);
     if (pendingFocus.pos !== null && pendingFocus.pos === getPos()) this.upgrade();
-    else { this.renderStatic(); watchLazy(this); }
+    else { this.renderStaticOrDefer(); watchLazy(this); }
     this.dom.addEventListener('pointerenter', () => this.upgrade());
   }
 
   private contentEl(): HTMLElement { return this.field?.dom ?? this.staticEl!; }
 
+  private renderStaticOrDefer() {
+    if (macrosReady(this.view) && canRenderNow()) this.renderStatic();
+    else this.showPlaceholder();
+  }
+  private showPlaceholder() {
+    if (!this.staticEl) return;
+    this.staticEl.classList.add('pending');
+    this.staticEl.textContent = this.lastLatex;
+    this.pending = true;
+    staticQueue.add(this);
+    schedulePump();
+  }
+  renderPending() {
+    if (!this.pending) return;
+    this.renderStatic();
+  }
   private renderStatic() {
     if (!this.staticEl) return;
+    this.pending = false; staticQueue.delete(this); this.staticEl.classList.remove('pending');
     const { key, table } = macroTableFor(this.view, this.getPos());
     this.staticEl.innerHTML = renderStaticHtml(this.lastLatex, true, table);
     this.staticKey = key;
@@ -283,6 +367,7 @@ export class MathDisplayView implements NodeView {
   upgrade() {
     if (this.field) return;
     unwatchLazy(this);
+    this.pending = false;
     const { key, table } = macroTableFor(this.view, this.getPos());
     const f = new LyxMathField({
       latex: this.lastLatex, display: true, macros: table,
@@ -300,6 +385,7 @@ export class MathDisplayView implements NodeView {
   ensureField(): LyxMathField { this.upgrade(); return this.field!; }
 
   refreshMacros() {
+    if (this.pending) { if (macrosReady(this.view)) schedulePump(); return; }
     const { key, table } = macroTableFor(this.view, this.getPos());
     if (this.field) this.field.setMacros(table, key);
     else if (this.staticKey !== key) this.renderStatic();
@@ -432,6 +518,7 @@ export class MathDisplayView implements NodeView {
     if (latex !== this.lastLatex) {
       this.lastLatex = latex;
       if (this.field) { if (!this.field.hasFocus()) { this.updating = true; this.field.setLatex(latex); this.updating = false; } }
+      else if (this.pending) this.showPlaceholder();
       else this.renderStatic();
       this.renderMeta();
     }

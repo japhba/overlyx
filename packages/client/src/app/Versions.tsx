@@ -53,7 +53,7 @@ export function Versions({ docId, refreshKey }: { docId: string; refreshKey: num
       </div>
       {versions.map(v => (
         <div class="version" key={v.id}>
-          <div class="name">{v.name} {v.kind === 'auto' && <span style="color:#999;font-weight:400">(auto)</span>}</div>
+          <div class="name">{v.name} {v.kind === 'auto' && <span style="color:#999;font-weight:400">(auto)</span>}{v.kind === 'offline' && <span style="color:#b26a00;font-weight:400" title="Edits made offline that could not be merged into the server's document">(offline edits)</span>}</div>
           <div class="meta">{new Date(v.created_at).toLocaleString()} · {v.author} · {(v.size / 1024).toFixed(0)} KB</div>
           <div class="buttons">
             <button class="small-btn" onClick={() => showDiff(v)}>Diff vs now</button>

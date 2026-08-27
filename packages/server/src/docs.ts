@@ -9,13 +9,14 @@ import crypto from 'node:crypto';
 import * as Y from 'yjs';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import chokidar, { type FSWatcher } from 'chokidar';
-import { prosemirrorJSONToYXmlFragment, yDocToProsemirrorJSON } from 'y-prosemirror';
+import { yDocToProsemirrorJSON } from 'y-prosemirror';
 import {
-  parseLyx, writeLyx, lyxToPm, pmToLyxBody, schema, type LyxDocument, type PMJSON,
+  parseLyx, writeLyx, pmToLyxBody, type LyxDocument, type PMJSON,
 } from '@overlyx/core';
 import { db } from './db.ts';
 import { config } from './config.ts';
 import { listProjects, resolveProjectPath, type ProjectFile } from './projects.ts';
+import { applyLyxDocument } from './ydiff.ts';
 
 export interface DocMeta {
   preamble: string[];
@@ -37,6 +38,11 @@ export class OpenDoc {
   saving = false;
   dirty = false;
   lastAutoVersion = 0;
+  /** what the .lyx file on disk contains: state vector of the Y.Doc when it was last written / read */
+  lastSavedSV: Uint8Array = Y.encodeStateVector(this.ydoc);
+  lastSavedAt = 0;
+  /** notified after every successful save (the WebSocket layer tells the clients) */
+  savedListeners = new Set<() => void>();
 
   constructor(public id: string, public project: string, public relPath: string, public absPath: string) {
     this.awareness = new awarenessProtocol.Awareness(this.ydoc);
@@ -74,14 +80,20 @@ export class OpenDoc {
 
   toLyxText(): string { return writeLyx(this.toLyxDocument()); }
 
-  /** Replace the whole CRDT content from a LyX document (external change / restore). */
+  /**
+   * Load a LyX document into the CRDT (initial load, external change, restore). Applied as a diff:
+   * unchanged paragraphs keep their identity so that concurrent / offline edits in them survive.
+   */
   loadFromLyx(doc: LyxDocument, origin: string): void {
-    this.ydoc.transact(() => {
-      const frag = this.fragment;
-      if (frag.length) frag.delete(0, frag.length);
-      prosemirrorJSONToYXmlFragment(schema, lyxToPm(doc), frag);
-      this.setMetaFrom(doc);
-    }, origin);
+    applyLyxDocument(this.ydoc, doc, origin);
+    if (origin === 'file-load') this.markSaved();
+  }
+
+  /** The file on disk now corresponds to the current state. */
+  markSaved(): void {
+    this.lastSavedSV = Y.encodeStateVector(this.ydoc);
+    this.lastSavedAt = Date.now();
+    for (const l of this.savedListeners) { try { l(); } catch { /* ignore */ } }
   }
 
   scheduleSave(): void {
@@ -102,6 +114,7 @@ export class OpenDoc {
     if (this.saving) { this.scheduleSave(); return false; }
     this.saving = true;
     try {
+      const sv = Y.encodeStateVector(this.ydoc);
       const text = this.toLyxText();
       const hash = sha1(text);
       if (hash !== this.fileHash) {
@@ -114,6 +127,9 @@ export class OpenDoc {
       }
       this.dirty = false;
       this.persistState();
+      this.lastSavedSV = sv;
+      this.lastSavedAt = Date.now();
+      for (const l of this.savedListeners) { try { l(); } catch { /* ignore */ } }
       return true;
     } catch (e) {
       console.error('save failed', this.absPath, e);
@@ -140,7 +156,9 @@ export class OpenDoc {
   touchUnload(): void {
     if (this.unloadTimer) clearTimeout(this.unloadTimer);
     if (this.conns.size === 0) {
-      this.unloadTimer = setTimeout(() => void manager.unload(this.id), 5 * 60 * 1000);
+      // keep idle documents in memory for a long while: the first open after an unload is the slow
+      // (parse / rebuild) path, and a loaded document costs only a few MB
+      this.unloadTimer = setTimeout(() => void manager.unload(this.id), config.unloadAfterMs);
     }
   }
 }
@@ -168,6 +186,13 @@ export class DocManager {
   async open(id: string): Promise<OpenDoc> {
     const existing = this.docs.get(id);
     if (existing) return existing;
+    const t0 = performance.now();
+    const doc = this.openCold(id);
+    console.log(`[docs] opened ${id} in ${Math.round(performance.now() - t0)} ms`);
+    return doc;
+  }
+
+  private openCold(id: string): OpenDoc {
     const { project, relPath } = DocManager.parseId(id);
     if (!relPath.endsWith('.lyx')) throw new Error('not a LyX file');
     const absPath = resolveProjectPath(project, relPath);
@@ -178,16 +203,25 @@ export class DocManager {
     doc.fileHash = hash;
     knownHashes.set(absPath, hash);
     const row = db.prepare('SELECT state, file_hash, epoch FROM ydocs WHERE id = ?').get(id) as { state: Buffer; file_hash: string; epoch: string | null } | undefined;
-    if (row && row.file_hash === hash) {
+    if (!row) return this.openFresh(doc, text);
+    let ok = false;
+    try {
       Y.applyUpdate(doc.ydoc, new Uint8Array(row.state), 'db');
       if (row.epoch) doc.epoch = row.epoch;
-      // sanity: the stored state must produce the same file; otherwise rebuild
-      let ok = false;
-      try { ok = doc.fragment.length > 0 && sha1(doc.toLyxText()) === hash; } catch { ok = false; }
-      if (!ok) { doc.ydoc.destroy(); return this.openFresh(doc, text); }
-    } else {
-      return this.openFresh(doc, text);
-    }
+      if (row.file_hash !== hash) {
+        // the file changed while the document was not open (desktop LyX, git, a restart with a
+        // changed file): merge it into the stored history as a diff, keeping the epoch, so that
+        // clients holding a local copy of this history (offline edits) can still sync
+        console.log(`[docs] ${id}: file changed since last persisted state — merging`);
+        doc.loadFromLyx(parseLyx(text), 'file-load');
+      }
+      // sanity: the state must produce exactly the file; otherwise rebuild from scratch
+      ok = doc.fragment.length > 0 && sha1(doc.toLyxText()) === hash;
+    } catch { ok = false; }
+    if (!ok) { doc.ydoc.destroy(); return this.openFresh(doc, text); }
+    doc.markSaved();
+    doc.lastSavedAt = fs.statSync(absPath).mtimeMs;
+    if (row.file_hash !== hash) doc.persistState();
     this.register(doc);
     return doc;
   }
@@ -197,6 +231,7 @@ export class DocManager {
     fresh.fileHash = doc.fileHash;
     const parsed = parseLyx(text);
     fresh.loadFromLyx(parsed, 'file-load');
+    fresh.lastSavedAt = fs.statSync(doc.absPath).mtimeMs;
     fresh.persistState();
     this.register(fresh);
     return fresh;
@@ -218,6 +253,24 @@ export class DocManager {
     doc.awareness.destroy();
     doc.ydoc.destroy();
     this.docs.delete(id);
+  }
+
+  /**
+   * Drop the collaboration history of a document (admin tool): the .lyx file on disk is kept (a
+   * pending save is written first), the persisted Yjs state is deleted and every client is
+   * disconnected; the next open starts a fresh history with a new epoch. Clients holding a local
+   * copy of the old history keep their unsynced edits as a version when they reconnect.
+   */
+  async reset(id: string): Promise<void> {
+    const doc = this.docs.get(id);
+    if (doc) {
+      if (doc.dirty) await doc.saveToFile();
+      for (const c of [...doc.conns.keys()]) { doc.conns.delete(c); try { c.close(4001, 'document reset'); } catch { /* ignore */ } }
+      doc.awareness.destroy();
+      doc.ydoc.destroy();
+      this.docs.delete(id);
+    }
+    db.prepare('DELETE FROM ydocs WHERE id = ?').run(id);
   }
 
   async saveAll(): Promise<void> {
@@ -257,9 +310,9 @@ export class DocManager {
     return db.prepare('SELECT id, name, author, kind, created_at, length(lyx) AS size FROM versions WHERE doc_id = ? ORDER BY created_at DESC').all(id) as { id: number; name: string; author: string; kind: string; created_at: number; size: number }[];
   }
 
-  async createVersion(id: string, name: string, author: string, kind = 'manual'): Promise<number> {
+  async createVersion(id: string, name: string, author: string, kind = 'manual', lyx?: string): Promise<number> {
     const doc = await this.open(id);
-    const text = doc.toLyxText();
+    const text = lyx ?? doc.toLyxText();
     const info = db.prepare('INSERT INTO versions (doc_id, name, author, kind, created_at, lyx) VALUES (?,?,?,?,?,?)').run(id, name || 'version', author, kind, Date.now(), text);
     return Number(info.lastInsertRowid);
   }

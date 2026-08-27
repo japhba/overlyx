@@ -16,6 +16,16 @@ const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
 /** OverLyX extension: the document's epoch, sent before the first sync step (see docs.ts) */
 const MSG_EPOCH = 2;
+/** OverLyX extension: "the .lyx file on disk contains this state" (timestamp + state vector), sent after every save */
+const MSG_SAVED = 3;
+
+function savedMessage(doc: OpenDoc): Uint8Array {
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, MSG_SAVED);
+  encoding.writeVarUint(enc, Math.round(doc.lastSavedAt));
+  encoding.writeVarUint8Array(enc, doc.lastSavedSV);
+  return encoding.toUint8Array(enc);
+}
 
 function send(doc: OpenDoc, conn: WebSocket, msg: Uint8Array): void {
   if (conn.readyState !== conn.OPEN && conn.readyState !== conn.CONNECTING) { closeConn(doc, conn); return; }
@@ -54,6 +64,10 @@ function ensureDocHandlers(doc: OpenDoc): void {
     encoding.writeVarUint(enc, MSG_AWARENESS);
     encoding.writeVarUint8Array(enc, awarenessProtocol.encodeAwarenessUpdate(doc.awareness, changed));
     const msg = encoding.toUint8Array(enc);
+    for (const c of doc.conns.keys()) send(doc, c, msg);
+  });
+  doc.savedListeners.add(() => {
+    const msg = savedMessage(doc);
     for (const c of doc.conns.keys()) send(doc, c, msg);
   });
 }
@@ -127,6 +141,7 @@ async function handleConnection(conn: WebSocket, docId: string): Promise<void> {
     encoding.writeVarUint(enc, MSG_SYNC);
     syncProtocol.writeSyncStep1(enc, doc.ydoc);
     send(doc, conn, encoding.toUint8Array(enc));
+    send(doc, conn, savedMessage(doc));
     const states = doc.awareness.getStates();
     if (states.size > 0) {
       const enc2 = encoding.createEncoder();
