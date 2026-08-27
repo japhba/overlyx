@@ -5,12 +5,13 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/root/lyx/overlyx
-Environment=PORT=80
-Environment=HOST=0.0.0.0
+Environment=PORT=8080
+Environment=HOST=127.0.0.1
 Environment=OVERLYX_DATA_DIR=/root/lyx/overlyx/data
 Environment=OVERLYX_PROJECTS_DIR=/root/projects
 Environment=LYX_LAYOUT_DIR=/root/lyx/lib/layouts
 Environment=NODE_ENV=production
+# Fronted by Caddy (deploy/Caddyfile): app binds localhost:8080, Caddy serves https://overlyx.app on 443
 # Set these to enable "Sign in with Google" (OAuth redirect: <public url>/api/auth/google/callback)
 #Environment=OVERLYX_PUBLIC_URL=https://overlyx.example.org
 #Environment=GOOGLE_CLIENT_ID=...
