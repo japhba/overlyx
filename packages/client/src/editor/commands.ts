@@ -339,6 +339,61 @@ export function insertCommand(cmd: string, params: string[]): Command {
   return insertNode(schema.nodes.command.create({ cmd, params: JSON.stringify([...params, '']) }));
 }
 export const insertLabel = (name: string) => insertCommand('label', ['LatexCommand label', `name "${name}"`]);
+
+/** Update all cross-references (ref/eqref/pageref/…) that point at `oldName` to `newName`; returns the count. */
+export function renameLabelRefs(view: EditorView, oldName: string, newName: string): number {
+  if (!oldName || oldName === newName) return 0;
+  const tr = view.state.tr;
+  let n = 0;
+  view.state.doc.descendants((node, pos) => {
+    if (node.type.name !== 'command' || node.attrs.cmd !== 'ref') return true;
+    const lines: string[] = (() => { try { return JSON.parse(node.attrs.params || '[]'); } catch { return []; } })();
+    const i = lines.findIndex(l => l.replace(/^\t/, '').startsWith('reference '));
+    if (i < 0) return true;
+    const targets = unquote(lines[i].slice(lines[i].indexOf('reference ') + 10)).split(',').map(t => t.trim());
+    if (!targets.includes(oldName)) return true;
+    const updated = targets.map(t => (t === oldName ? newName : t)).join(',');
+    const next = [...lines];
+    next[i] = `reference "${updated}"`;
+    tr.setNodeMarkup(tr.mapping.map(pos), undefined, { ...node.attrs, params: JSON.stringify(next) });
+    n++;
+    return true;
+  });
+  if (n) view.dispatch(tr);
+  return n;
+}
+
+/** Count the cross-references pointing at a label name in a view's document. */
+export function countLabelRefs(view: EditorView, name: string): number {
+  if (!name) return 0;
+  let n = 0;
+  view.state.doc.descendants(node => {
+    if (node.type.name === 'command' && node.attrs.cmd === 'ref') {
+      const lines: string[] = (() => { try { return JSON.parse(node.attrs.params || '[]'); } catch { return []; } })();
+      const line = lines.find(l => l.replace(/^\t/, '').startsWith('reference '));
+      if (line && unquote(line.slice(line.indexOf('reference ') + 10)).split(',').map(t => t.trim()).includes(name)) n++;
+    }
+    return true;
+  });
+  return n;
+}
+
+/** Set the `name` of a label command inset (used by the Label dialog when editing a figure/table label). */
+export function setLabelName(view: EditorView, pos: number, newName: string): void {
+  const node = view.state.doc.nodeAt(pos);
+  if (!node || node.type.name !== 'command') return;
+  const lines: string[] = (() => { try { return JSON.parse(node.attrs.params || '[]'); } catch { return []; } })();
+  const i = lines.findIndex(l => l.replace(/^\t/, '').startsWith('name '));
+  if (i >= 0) lines[i] = `name "${newName}"`; else lines.push(`name "${newName}"`);
+  view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, params: JSON.stringify(lines) }));
+}
+
+/** Delete a label command inset at `pos`. */
+export function deleteLabelAt(view: EditorView, pos: number): void {
+  const node = view.state.doc.nodeAt(pos);
+  if (node) view.dispatch(view.state.tr.delete(pos, pos + node.nodeSize));
+}
+
 export const insertRef = (name: string, kind = 'ref') => insertCommand('ref', [`LatexCommand ${kind}`, `reference "${name}"`, 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"']);
 export const insertCite = (keys: string[], cmd = 'cite', before = '', after = '') => {
   const p = [`LatexCommand ${cmd}`];

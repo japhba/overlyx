@@ -124,11 +124,20 @@ export function TableDialog({ onInsert, onClose }: { onInsert: (rows: number, co
 }
 
 /* ---------------------------------------------------------------- label */
-export function LabelDialog({ initial, onInsert, onClose }: { initial: string; onInsert: (name: string) => void; onClose: () => void }) {
+export function LabelDialog({ initial, editing, refCount = 0, existing = [], onInsert, onRemove, onClose }: { initial: string; editing?: boolean; refCount?: number; existing?: string[]; onInsert: (name: string) => void; onRemove?: () => void; onClose: () => void }) {
   const [name, setName] = useState(initial);
+  const trimmed = name.trim();
+  const dup = editing ? existing.includes(trimmed) && trimmed !== initial : existing.includes(trimmed);
+  const ok = () => { if (trimmed && !dup) { onInsert(trimmed); onClose(); } };
   return (
-    <Dialog title="Label" onClose={onClose} buttons={<button class="btn primary" disabled={!name} onClick={() => { onInsert(name); onClose(); }}>OK</button>}>
-      <Row label="Label"><input type="text" autofocus value={name} onInput={e => setName((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter' && name) { onInsert(name); onClose(); } }} /></Row>
+    <Dialog title={editing ? 'Label Settings' : 'Label'} onClose={onClose} buttons={<>
+      {editing && onRemove && <button class="btn" onClick={() => { onRemove(); onClose(); }}>Remove label</button>}
+      <button class="btn primary" disabled={!trimmed || dup} onClick={ok}>{editing ? 'Apply' : 'OK'}</button>
+    </>}>
+      <Row label="Label"><input type="text" autofocus value={name} onInput={e => setName((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') ok(); }} /></Row>
+      {dup && <div style="color:#b00020;font-size:11px">A label named “{trimmed}” already exists.</div>}
+      {editing && refCount > 0 && <div style="color:#777;font-size:11px">Used by {refCount} cross-reference{refCount === 1 ? '' : 's'} — renaming updates {refCount === 1 ? 'it' : 'them'} automatically.</div>}
+      {editing && refCount === 0 && <div style="color:#777;font-size:11px">Not referenced yet.</div>}
       <div style="color:#777;font-size:11px">Conventions: sec:, subsec:, fig:, tab:, eq:, alg: … (used by formatted references).</div>
     </Dialog>
   );

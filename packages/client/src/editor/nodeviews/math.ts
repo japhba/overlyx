@@ -10,7 +10,8 @@ import { macroFromLyxLines, parseFormula, renderHullSource, numberedType, type H
 import { LyxMathField, renderStaticHtml, activeMathField, rowRectsOf } from '../lyxmath/field';
 import { macroTableFor, mathViews, macroVersion } from '../lyxmath/macrotable';
 import { showContextMenu, type MenuItem } from '../contextmenu';
-import { toggleMathDisplay } from '../commands';
+import { toggleMathDisplay, countLabelRefs, renameLabelRefs } from '../commands';
+import { editorContext } from '../context';
 
 /** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
 export const pendingFocus: { pos: number | null; keys: string[] } = { pos: null, keys: [] };
@@ -384,9 +385,15 @@ export class MathDisplayView implements NodeView {
 
   private editLabel() {
     const h = this.hull();
-    const cur = prompt('Equation label (empty to remove):', h.labels.find(Boolean) ?? 'eq:');
-    if (cur === null) return;
-    this.setLabel(cur.trim());
+    const cur = (h.labels.find(Boolean) ?? '') as string;
+    editorContext.openDialog?.('label', {
+      equation: true,
+      initial: cur || 'eq:',
+      hasLabel: !!cur,
+      refCount: countLabelRefs(this.view, cur),
+      onApply: (name: string) => { this.setLabel(name); if (cur && cur !== name) renameLabelRefs(this.view, cur, name); },
+      onRemove: () => this.setLabel(''),
+    });
   }
 
   private commit(fieldLatex: string) {

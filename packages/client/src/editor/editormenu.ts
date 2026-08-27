@@ -76,7 +76,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent): MenuItem[] 
         const name = unquote(p.get('name'));
         items.push(
           { label: `Label “${name}”`, info: true },
-          { label: 'Edit label…', action: () => { const n = prompt('Label name:', name); if (n && n !== name) setParam(view, pos, node, 'name', `"${n}"`); } },
+          { label: 'Edit label…', action: () => editorContext.openDialog?.('label', { pos }) },
           { label: 'Insert cross-reference to this label…', action: dialog('ref', { prefill: name }) },
           { label: 'Copy label name', action: () => { void navigator.clipboard?.writeText(name); } },
           { sep: true },

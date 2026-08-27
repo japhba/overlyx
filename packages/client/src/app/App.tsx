@@ -330,6 +330,20 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     return out;
   }, [dialog, view, meta]);
 
+  const labelNames = () => labels.map(l => l.name);
+  const refCountOf = (nm: string): number => {
+    if (!view || !nm) return 0;
+    let n = 0;
+    view.state.doc.descendants(node => {
+      if (node.type.name === 'command' && node.attrs.cmd === 'ref') {
+        const target = unquote(commandParams(node).get('reference'));
+        if (target.split(',').map(t => t.trim()).includes(nm)) n++;
+      }
+      return true;
+    });
+    return n;
+  };
+
   const layouts = meta?.layouts?.length ? meta.layouts : STANDARD_LAYOUTS;
   const base = (id: string) => id.split('/').pop() ?? id;
   const docLabel = docId ? (combined && childIds.length ? [docId, ...childIds].map(base).join(' + ') : docId) : '';
@@ -658,7 +672,24 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       case 'delimiters': return <DelimiterDialog onClose={close} onInsert={latex => insertInMath(latex)} />;
       case 'matrix': return <MatrixDialog onClose={close} onInsert={latex => insertInMath(latex)} />;
       case 'table': return <TableDialog onClose={close} onInsert={(r, c) => run(C.insertTable(r, c))} />;
-      case 'label': return <LabelDialog initial={suggestLabel(view)} onClose={close} onInsert={n => run(C.insertLabel(n))} />;
+      case 'label': {
+        const arg = dialog.arg as { pos?: number; equation?: boolean; initial?: string; hasLabel?: boolean; refCount?: number; onApply?: (n: string) => void; onRemove?: () => void } | undefined;
+        if (arg?.equation && arg.onApply) {
+          return <LabelDialog initial={arg.initial ?? 'eq:'} editing refCount={arg.refCount ?? 0} existing={labelNames()} onClose={close}
+            onInsert={n => arg.onApply!(n)} onRemove={arg.hasLabel ? () => arg.onRemove?.() : undefined} />;
+        }
+        if (arg?.pos !== undefined) {
+          const node = view.state.doc.nodeAt(arg.pos);
+          if (node && node.type.name === 'command' && node.attrs.cmd === 'label') {
+            const cur = unquote(commandParams(node).get('name'));
+            const lpos = arg.pos;
+            return <LabelDialog initial={cur} editing refCount={refCountOf(cur)} existing={labelNames()} onClose={close}
+              onInsert={n => { if (n !== cur) { C.setLabelName(view, lpos, n); C.renameLabelRefs(view, cur, n); } }}
+              onRemove={() => C.deleteLabelAt(view, lpos)} />;
+          }
+        }
+        return <LabelDialog initial={suggestLabel(view)} existing={labelNames()} onClose={close} onInsert={n => run(C.insertLabel(n))} />;
+      }
       case 'ref': {
         const target = dialog.arg as { pos?: number; node?: any; prefill?: string } | undefined;
         if (target?.node && target.pos !== undefined) {
@@ -697,6 +728,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
           const p = commandParams(target.node);
           return <HrefDialog initial={{ target: unquote(p.get('target')), name: unquote(p.get('name')) }} onClose={close} onInsert={(t, n) => view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(['LatexCommand href', `name "${n}"`, `target "${t}"`, 'literal "false"', '']) }))} />;
         }
+        if (target.node.type.name === 'command' && target.node.attrs.cmd === 'label') { setDialog({ name: 'label', arg: { pos: target.pos } }); return null; }
         if (target.node.type.name === 'table') { setDialog({ name: 'tablesettings' }); return null; }
         return <InsetDialog node={target.node} onClose={close} onApply={attrs => view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, ...attrs }))} />;
       }

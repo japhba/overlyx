@@ -173,3 +173,61 @@ test('PDF export builds a PDF for a revtex document', async ({ page, request }) 
   await expect(page.locator('.pdf-panel iframe')).toHaveCount(1, { timeout: 360000 });
   await expect(page.locator('.pdf-panel .bar span')).toContainText('built');
 });
+
+/** A document with a figure (caption + label), an equation with a label, and a ref/eqref to each. */
+function labelDoc(name: string): string {
+  mkdirSync(DIR, { recursive: true });
+  const head = readFileSync('/root/projects/bayesian_chaos/notes/notes.lyx', 'utf8').split('\\begin_body')[0];
+  const body = [
+    '\\begin_body', '',
+    '\\begin_layout Standard', 'See Fig ',
+    '\\begin_inset CommandInset ref', 'LatexCommand ref', 'reference "fig:demo"', 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '', '\\end_inset', '',
+    ' and ',
+    '\\begin_inset CommandInset ref', 'LatexCommand eqref', 'reference "eq:demo"', 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '', '\\end_inset', '', '.', '\\end_layout', '',
+    '\\begin_layout Standard',
+    '\\begin_inset Float figure', 'wide false', 'sideways false', 'status open', '',
+    '\\begin_layout Plain Layout',
+    '\\begin_inset Caption Standard', '',
+    '\\begin_layout Plain Layout', 'A demo figure.',
+    '\\begin_inset CommandInset label', 'LatexCommand label', 'name "fig:demo"', '', '\\end_inset', '', '', '\\end_layout', '',
+    '\\end_inset', '', '', '\\end_layout', '',
+    '\\end_inset', '', '', '\\end_layout', '',
+    '\\begin_layout Standard',
+    '\\begin_inset Formula ', '\\begin{equation}', 'E=mc^{2}\\label{eq:demo}', '\\end{equation}', '', '\\end_inset', '', '', '\\end_layout', '',
+    '\\end_body', '\\end_document', '',
+  ].join('\n');
+  const file = `${DIR}/${name}.lyx`;
+  writeFileSync(file, head + body);
+  return `${PROJECT}/${name}.lyx`;
+}
+
+test('figure and equation labels are edited through the same dialog and rename updates references', async ({ page }) => {
+  const errors = collectErrors(page);
+  const id = labelDoc('labels-' + Date.now());
+  await openDoc(page, id);
+  await page.waitForTimeout(500);
+  // figure label: double-click the chip opens the Label Settings dialog
+  await page.locator('.lyx-command-label').first().dblclick();
+  await expect(page.locator('.dialog')).toContainText('Label Settings');
+  await expect(page.locator('.dialog')).toContainText('Used by 1 cross-reference');
+  await page.locator('.dialog input[type=text]').first().fill('fig:renamed');
+  await page.locator('.dialog button.primary').click();
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('name "fig:renamed"');
+  expect(fileText(id)).toContain('reference "fig:renamed"');      // the \ref was updated
+  expect(fileText(id)).not.toContain('fig:demo');
+  // equation label: clicking the equation label chip opens the same dialog
+  const disp = page.locator('.lyx-math-display').first();
+  await disp.scrollIntoViewIfNeeded();
+  await disp.locator('.eq-labels').click();
+  await expect(page.locator('.dialog')).toContainText('Label Settings');
+  await expect(page.locator('.dialog input[type=text]').first()).toHaveValue('eq:demo');
+  await page.locator('.dialog input[type=text]').first().fill('eq:renamed');
+  await page.locator('.dialog button.primary').click();
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('\\label{eq:renamed}');
+  expect(fileText(id)).toContain('reference "eq:renamed"');       // the \eqref was updated
+  // remove the equation label via the dialog
+  await disp.locator('.eq-labels').click();
+  await page.locator('.dialog button', { hasText: 'Remove label' }).click();
+  await expect.poll(() => fileText(id), { timeout: 15000 }).not.toContain('\\label{eq:renamed}');
+  expect(errors).toEqual([]);
+});

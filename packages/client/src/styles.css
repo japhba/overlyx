@@ -216,7 +216,7 @@ button { cursor: pointer; }
 .lyx-block-button { display: block; width: fit-content; margin: 0.3em 0; }
 .lyx-cite { color: #1f3a5f; background: #eef2f8; border-radius: 2px; padding: 0 2px; }
 .lyx-href { color: #0645ad; text-decoration: underline; }
-.lyx-command-label { background: #fff3d6; border-color: #d6b46a; color: #6b4b00; }
+.lyx-command-label { background: #fff3d6; border-color: #d6b46a; color: #6b4b00; cursor: pointer; }
 .lyx-command-ref { background: #e6f2e6; border-color: #7fb37f; color: #1f4d1f; }
 .lyx-command-include { background: #f0e8f8; }
 .lyx-quotes { }

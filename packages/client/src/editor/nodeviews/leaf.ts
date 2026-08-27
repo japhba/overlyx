@@ -103,7 +103,7 @@ export class CommandView implements NodeView {
     switch (cmd) {
       case 'label':
         text = unquote(p.get('name'));
-        title = 'Label: ' + text;
+        title = 'Label: ' + text + ' (double-click to edit)';
         this.dom.classList.add('lyx-button');
         break;
       case 'ref': {
