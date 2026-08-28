@@ -129,6 +129,16 @@ describe('inline content', () => {
     expect(bodyOf(out).replace(/\n/g, ' ')).toBe('Some \\emph{emphasised} and \\textbf{bold }\\textbf{\\textit{italic}} text, ``quoted\'\' -- dashed --- and 50\\% of \\$5, a~tie\\footnote{Note $x$.} and \\ldots{} \\LaTeX{} done.');
   });
 
+  it('custom text colours: \\textcolor[HTML|rgb|RGB|gray] round-trip as #rrggbb, named colours stay named', () => {
+    const src = doc('A \\textcolor[HTML]{FF8800}{custom} and \\textcolor{red}{named} and \\textcolor[rgb]{1,0.5,0}{rgb} and \\textcolor[RGB]{0,128,255}{big} and \\textcolor[gray]{0.5}{grey} word.');
+    const out = expectStable(src, 'colours');
+    expect(bodyOf(out).replace(/\n/g, ' ')).toBe('A \\textcolor[HTML]{FF8800}{custom} and \\textcolor{red}{named} and \\textcolor[HTML]{FF8000}{rgb} and \\textcolor[HTML]{0080FF}{big} and \\textcolor[HTML]{808080}{grey} word.');
+    expect(out).toContain('xcolor');
+    // an unknown model is not understood: kept verbatim as TeX code, nothing lost
+    const odd = doc('A \\textcolor[cmyk]{0,1,1,0}{x} word.');
+    expect(bodyOf(rewrite(odd))).toContain('\\textcolor[cmyk]{0,1,1,0}');
+  });
+
   it('accented characters and symbols come in as Unicode and go out as LaTeX again', () => {
     const src = doc('Caf\\\'{e}, na\\"ive, stra\\ss{}e, \\textdegree{} and \\textrightarrow{} and a literal ä.');
     const d = parse(src);
@@ -277,6 +287,19 @@ describe('change tracking and notes live in the file', () => {
     const two = doc('A %\n%% @note\n%% first\n%% @comment\n%% second\nB');
     expect(insets(parse(two), 'Note')).toHaveLength(2);
     expectStable(two);
+  });
+
+  it('a folded note keeps its fold state: "%% @note collapsed" (LyX status collapsed), open without the word', () => {
+    const src = doc('A %\n%% @note collapsed\n%% folded\n%% @comment\n%% open thread\n%% %% @note collapsed\n%% %% nested folded\nB');
+    const d = parse(src);
+    const notes = insets(d, 'Note') as { arg: string; status?: string }[];
+    expect(notes.map(n => `${n.arg}:${n.status}`)).toEqual(['Note:collapsed', 'Comment:open', 'Note:collapsed']);
+    expect(bodyOf(expectStable(src))).toBe('A %\n%% @note collapsed\n%% folded\n%% @comment\n%% open thread %\n%% %% @note collapsed\n%% %% nested folded\nB');
+    // toggling the state in the editor changes only the header line
+    const toggled = write({ ...d, body: d.body.map(p => ({ ...p, items: p.items.map(i => (i.kind === 'inset' && i.inset.type === 'Text' && i.inset.name === 'Note' ? { ...i, inset: { ...i.inset, status: i.inset.status === 'collapsed' ? 'open' as const : 'collapsed' as const } } : i)) })) });
+    expect(bodyOf(toggled)).toBe('A %\n%% @note\n%% folded\n%% @comment collapsed\n%% open thread %\n%% %% @note collapsed\n%% %% nested folded\nB');
+    // "open" is accepted too (and normalised away)
+    expect(bodyOf(write(parse(doc('A %\n%% @note open\n%% x\nB'))))).toBe('A %\n%% @note\n%% x\nB');
   });
 
   it('macro definitions in the body are macro insets (positional), also inside notes; the preamble ones are collected too', () => {

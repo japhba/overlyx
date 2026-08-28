@@ -380,7 +380,8 @@ invisible to LaTeX itself:
   print coloured / struck-out text (as LyX does); off, they print the final text.
 * **Notes and comments** are comment blocks: `%% @note`, `%% @comment` or `%% @greyedout`,
   followed by the note's LaTeX on `%% ` lines (a blank `%%` line is a paragraph break, nested
-  notes carry another `%% `). A comment thread's messages are paragraphs headed
+  notes carry another `%% `). A folded note is `%% @note collapsed` (LyX's *status collapsed*);
+  without the word it is shown open. A comment thread's messages are paragraphs headed
   `Name (2026-08-26 14:03):`, the first one marked `[resolved]` when resolved. A note inside a
   paragraph is preceded by `%` at the end of the line, so the surrounding text joins as in TeX.
 * **Child documents** (`\input{appendix.tex}` from the body) are fragments without a preamble;

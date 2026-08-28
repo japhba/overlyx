@@ -182,6 +182,9 @@ export function lyxLength(s: string): string {
 
 /* ------------------------------------------------------------ parser */
 
+/** The header line of a note block (`%% @note`, `%% @comment collapsed`, …) as the scanner sees it (first `%` removed). */
+const NOTE_HEADER = /^% @(note|comment|greyedout)(?:\s+(open|collapsed))?\s*$/;
+
 class BodyParser {
   warnings: string[] = [];
   authors = new Map<number, { name: string; email: string }>();
@@ -435,7 +438,7 @@ class BodyParser {
 
   private handleComment(s: Scanner, ctx: TextCtx, st: State, t: Tok): void {
     const v = t.value;
-    const m = /^% @(note|comment|greyedout)\s*$/.exec(v);
+    const m = NOTE_HEADER.exec(v);
     if (m) {
       // an OverLyX note block: the following "%% " lines are its LaTeX content
       const lines: string[] = [];
@@ -443,13 +446,14 @@ class BodyParser {
         const save = s.pos;
         const n = s.next();
         // a "%% @note" line at this level starts the next note (nested ones carry another "%% ")
-        if (n.kind === 'comment' && n.value.startsWith('%') && !/^% @(note|comment|greyedout)\s*$/.test(n.value)) { lines.push(n.value.slice(1).replace(/^ /, '')); continue; }
+        if (n.kind === 'comment' && n.value.startsWith('%') && !NOTE_HEADER.test(n.value)) { lines.push(n.value.slice(1).replace(/^ /, '')); continue; }
         s.pos = save;
         break;
       }
       const kind = m[1] === 'note' ? 'Note' : m[1] === 'comment' ? 'Comment' : 'Greyedout';
       const pars = this.parseInsetString(lines.join('\n'), 'Plain Layout');
-      this.pushInset(ctx, st, { type: 'Text', name: 'Note', arg: kind, params: [], status: 'open', paragraphs: pars });
+      // "%% @note collapsed": the note is shown folded (LyX's "status collapsed"); open otherwise
+      this.pushInset(ctx, st, { type: 'Text', name: 'Note', arg: kind, params: [], status: m[2] === 'collapsed' ? 'collapsed' : 'open', paragraphs: pars });
       return;
     }
     if (v.trim() === '') return;   // "%\n" = line continuation

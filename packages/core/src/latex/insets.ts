@@ -373,7 +373,8 @@ function texNote(ctx: ExportContext, os: TexStream, rp: RunParams, inset: TextIn
   const next = pos.units[pos.index + 1];
   if (next && next.kind === 'char' && next.ch === ' ') { if (os.column > 0 && os.last !== ' ') os.write(' '); pos.skipNextSpace = true; }
   os.safebreakln();
-  os.write('%% @' + inset.arg.toLowerCase() + '\n');
+  // the fold state travels with the note (LyX's status line): open is the default
+  os.write('%% @' + inset.arg.toLowerCase() + (inset.status === 'collapsed' ? ' collapsed' : '') + '\n');
   for (const l of lines) os.write('%%' + (l ? ' ' + l : '') + '\n');
 }
 

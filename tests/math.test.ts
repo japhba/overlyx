@@ -125,7 +125,9 @@ describe('corpus (all formulas of the local LyX projects, when present)', () => 
   it.skipIf(!existsSync(dir + '/formulas.json'))('≥ 99% of LyX-2.5-written formulas round-trip byte-exactly', () => {
     const formulas: { file: string; latex: string }[] = JSON.parse(readFileSync(dir + '/formulas.json', 'utf8'));
     const fmt = new Map<string, string>();
-    for (const f of new Set(formulas.map(x => x.file))) { const m = /\\lyxformat (\d+)/.exec(readFileSync(f, 'utf8').slice(0, 400)); fmt.set(f, m?.[1] ?? '?'); }
+    // the projects' .lyx originals moved into <project>/lyx_deprecated/ when the documents became .tex
+    const lyxPath = (f: string) => (existsSync(f) ? f : f.replace(/^(\/root\/projects\/[^/]+\/)/, '$1lyx_deprecated/'));
+    for (const f of new Set(formulas.map(x => x.file))) { const m = /\\lyxformat (\d+)/.exec(readFileSync(lyxPath(f), 'utf8').slice(0, 400)); fmt.set(f, m?.[1] ?? '?'); }
     const sel = formulas.filter(f => fmt.get(f.file) === '643');
     let ok = 0;
     for (const f of sel) { try { if (writeFormula(parseFormula(f.latex, { inv: { nargs: 1 }, lndet: { nargs: 1 }, mdiag: { nargs: 1 }, cum: { nargs: 2 }, vev: { nargs: 1 }, ev: { nargs: 1 }, order: { nargs: 1 }, tr: { nargs: 0 } })) === f.latex) ok++; } catch { /* counted as failure */ } }
