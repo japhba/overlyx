@@ -169,7 +169,11 @@ the project directory is mounted read-only, there is no network, a private `/tmp
 and an empty environment. Without bubblewrap the server starts with a warning and runs the tools
 unsandboxed (`packages/server/src/sandbox.ts`).
 
-A systemd unit is installed as `overlyx.service` (see `deploy/`).
+A systemd unit is installed as `overlyx.service` (see `deploy/`). `deploy/overlyx-backup.timer` runs
+`scripts/backup.sh` every night: an online backup of the SQLite database and a tarball of the
+projects directory (without build products) into `<data dir>/backups/<timestamp>/`, keeping the
+newest 14 (`OVERLYX_BACKUP_KEEP`). The server logs unhandled promise rejections instead of dying;
+on an uncaught exception it saves the open documents and exits so that systemd restarts it.
 
 ## Tests
 

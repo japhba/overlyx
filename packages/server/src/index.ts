@@ -676,3 +676,11 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     manager.saveAll().finally(() => process.exit(0));
   });
 }
+// A promise nobody awaited must not take the server (and everybody's session) down: log it.
+process.on('unhandledRejection', (reason) => { console.error('[server] unhandled rejection:', reason); });
+// A real crash: save what can be saved, then let systemd restart us.
+process.on('uncaughtException', (err) => {
+  console.error('[server] uncaught exception — saving open documents and exiting:', err);
+  const bail = setTimeout(() => process.exit(1), 5000);
+  manager.saveAll().finally(() => { clearTimeout(bail); process.exit(1); });
+});

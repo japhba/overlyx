@@ -1,0 +1,9 @@
+[Unit]
+Description=OverLyX nightly backup (database + projects)
+
+[Service]
+Type=oneshot
+Environment=OVERLYX_DATA_DIR=/root/lyx/overlyx/data
+Environment=OVERLYX_PROJECTS_DIR=/root/projects
+ExecStart=/root/lyx/overlyx/scripts/backup.sh
+Nice=10
