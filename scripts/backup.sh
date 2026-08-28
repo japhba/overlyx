@@ -14,6 +14,8 @@ out="$DEST/$stamp"
 mkdir -p "$out"
 sqlite3 "$DATA/overlyx.sqlite" ".backup '$out/overlyx.sqlite'"
 cp -p "$DATA/secret.key" "$out/" 2>/dev/null || true
+# the instance secrets (deploy/secrets.env, git-ignored) exist nowhere else
+cp -p "$(dirname "$0")/../deploy/secrets.env" "$out/" 2>/dev/null || true
 tar --create --gzip --file "$out/projects.tar.gz" -C "$(dirname "$PROJECTS")" \
   --exclude='_build' --exclude='svg-inkscape' --exclude='*.overlyx-tmp' \
   --exclude='*.aux' --exclude='*.log' --exclude='*.fls' --exclude='*.fdb_latexmk' --exclude='*.synctex.gz' \

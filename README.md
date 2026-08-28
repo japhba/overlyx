@@ -220,20 +220,16 @@ on an uncaught exception it saves the open documents and exits so that systemd r
 
 Everything secret (the Google OAuth client secret, the GitHub token) stays out of the repository —
 which is public — in `deploy/secrets.env` (git-ignored, mode 600), read by the systemd unit through
-`EnvironmentFile=`. `deploy/secrets.env.example` lists the variables. So that a fresh clone can be
-wired up without copying files around, the real file is kept in a *private* GitHub repository
-(`OVERLYX_SECRETS_REPO`, default `japhba/overlyx-secrets`) and fetched with your GitHub login:
+`EnvironmentFile=`; `deploy/secrets.env.example` lists the variables. The file exists on the server
+and in the nightly backup, nowhere else — deliberately no secret store: both values can be re-created
+in minutes (the OAuth client in the Google Cloud console under *APIs & Services ▸ Credentials*, a
+fine-grained personal access token with *Issues: read & write* on the repository in GitHub's
+*Developer settings*), and a second machine gets the file by `scp`. Without it the app runs with
+password login only and the feedback dialog falls back to GitHub's issue form. The per-instance JWT
+secret (`<data dir>/secret.key`) is generated on first start and is part of every backup too.
 
-```bash
-gh auth login                 # once
-scripts/secrets.sh pull       # private repo -> deploy/secrets.env
-scripts/secrets.sh edit       # change something, push it back
-scripts/secrets.sh push       # deploy/secrets.env -> private repo
-```
-
-Only accounts that can read the private repository get the secrets; everybody else runs the app
-without Google sign-in and with the feedback dialog falling back to GitHub's issue form. The per-instance
-JWT secret (`<data dir>/secret.key`) is generated on first start and is part of every backup.
+Do not put a broad-scope token (your `gh` login) in there: the server runs user-supplied LaTeX, and a
+token with *Issues* on one repository is all the feedback channel needs.
 
 ## Backups and restoring
 

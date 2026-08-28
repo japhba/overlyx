@@ -16,8 +16,8 @@ Environment=OVERLYX_PUBLIC_URL=https://overlyx.app
 ## The instance owner: administrator, and owner of every pre-existing project directory
 Environment=OVERLYX_OWNER_EMAIL=japhba@gmail.com
 # Secrets (Google OAuth client id/secret, GitHub token for feedback issues) are NOT in this file:
-# they come from deploy/secrets.env — git-ignored; `scripts/secrets.sh pull` fetches it from a
-# private GitHub repository with your GitHub login. deploy/secrets.env.example lists the variables.
+# they come from deploy/secrets.env — git-ignored, kept on the server only (and in the nightly
+# backup). deploy/secrets.env.example lists the variables.
 EnvironmentFile=-/root/lyx/overlyx/deploy/secrets.env
 # OVERLYX_SIGNUP=invited would restrict Google sign-in to invited e-mail addresses (default: open)
 # Every project is a git repository served at <public url>/git/<project>.git (needs git in PATH);

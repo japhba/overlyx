@@ -27,6 +27,9 @@ sqlite3 "$src/overlyx.sqlite" "PRAGMA integrity_check" | grep -qx ok || { echo "
 cp -p "$src/overlyx.sqlite" "$data/overlyx.sqlite"
 rm -f "$data/overlyx.sqlite-wal" "$data/overlyx.sqlite-shm"
 [ -f "$src/secret.key" ] && { aside "$data/secret.key"; install -m 600 "$src/secret.key" "$data/secret.key"; }
+# the instance secrets go back next to this checkout's unit file (only if it has none yet)
+deploy="$(dirname "$0")/../deploy"
+if [ -f "$src/secrets.env" ] && [ ! -f "$deploy/secrets.env" ]; then install -m 600 "$src/secrets.env" "$deploy/secrets.env"; echo "restored $deploy/secrets.env"; fi
 
 # projects: the tarball holds one top-level directory (the basename of the projects dir at backup time)
 if [ -d "$projects" ] && [ -n "$(ls -A "$projects")" ]; then aside "$projects"; fi
