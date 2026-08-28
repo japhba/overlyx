@@ -1,4 +1,5 @@
 import { useState } from 'preact/hooks';
+import { Logo } from './Logo';
 import { api, type User } from '../api';
 
 export function Login({ onLogin, google }: { onLogin: (u: User) => void; google: boolean }) {
@@ -16,8 +17,8 @@ export function Login({ onLogin, google }: { onLogin: (u: User) => void; google:
   return (
     <div class="login">
       <form onSubmit={submit}>
-        <h1>OverLyX</h1>
-        <div style="color:#666;font-size:12px;margin-bottom:6px">Collaborative WYSIWYG LaTeX editing, LyX-compatible.</div>
+        <h1><Logo size={30} /> OverLyX</h1>
+        <div style="color:#666;font-size:12px;margin-bottom:6px">Write LaTeX together — in LyX files, without the compiling.</div>
         <input placeholder="Username" value={username} onInput={e => setUsername((e.target as HTMLInputElement).value)} autocomplete="username" autofocus />
         <input placeholder="Password" type="password" value={password} onInput={e => setPassword((e.target as HTMLInputElement).value)} autocomplete="current-password" />
         {err && <div class="err">{err}</div>}

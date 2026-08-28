@@ -79,3 +79,31 @@ test('Ctrl+Backspace deletes a word; Ctrl+Alt+S toggles the source pane; statist
   await expect(row.locator('td').nth(1)).toHaveText('11');   // 9 + 2 words
   await expect(errors).toEqual([]);
 });
+
+test('a dead-key ^ (German/French layouts: a composition) makes exactly one superscript', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await open(page);
+  await page.locator('.lyx-editor .lyx-par').nth(1).click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Control+m');
+  await page.keyboard.type('x');
+  // what Chrome sends for a dead ^ followed by a non-composable key: a composition of "^" that is
+  // committed (input event while composing, then compositionend), then the next key as plain text
+  await page.evaluate(() => {
+    const ta = document.activeElement as HTMLTextAreaElement;
+    if (!ta || !ta.classList.contains('lm-input')) throw new Error('math field not focused');
+    ta.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
+    ta.value = '^';
+    ta.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: '^', isComposing: true, bubbles: true }));
+    ta.dispatchEvent(new CompositionEvent('compositionend', { data: '^' }));
+  });
+  await page.keyboard.type('2');
+  const latex = await page.evaluate(() => (document.querySelector('.lyx-editor .lyx-math-inline') as any).pmViewDesc.spec.field.latex as string);
+  expect(latex).toBe('$x^{2}$');
+  // the plain (US-layout) ^ keeps working the same way
+  await page.keyboard.press('Escape');
+  await page.keyboard.type('^3');
+  expect(await page.evaluate(() => (document.querySelector('.lyx-editor .lyx-math-inline') as any).pmViewDesc.spec.field.latex as string)).toBe('$x^{2}$');
+  expect(errors).toEqual([]);
+});

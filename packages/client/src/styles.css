@@ -25,8 +25,11 @@ button { cursor: pointer; }
 /* ------------------------------------------------------------ layout */
 .app { display: flex; flex-direction: column; height: 100%; }
 .menubar { display: flex; align-items: center; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); padding: 0 6px; height: 28px; user-select: none; }
-.menubar .brand { font-weight: 700; color: var(--accent); margin-right: 14px; letter-spacing: 0.3px; }
-.menubar .brand span { color: #555; font-weight: 400; }
+.menubar .brand { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--accent); margin-right: 14px; letter-spacing: 0.3px; text-decoration: none; padding: 2px 6px 2px 2px; border-radius: 4px; }
+.menubar .brand:hover { background: #dcdcd8; }
+.ol-logo { display: inline-block; vertical-align: middle; transition: transform 0.25s cubic-bezier(.34,1.56,.64,1); }
+.menubar .brand:hover .ol-logo { transform: rotate(-10deg) scale(1.12); }
+.login h1 { display: flex; align-items: center; gap: 8px; }
 .menu { position: relative; }
 .menu > button { background: none; border: 0; padding: 4px 9px; border-radius: 3px; }
 .menu > button:hover, .menu.open > button { background: #dcdcd8; }

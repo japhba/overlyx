@@ -1,7 +1,7 @@
 {
   "name": "OverLyX",
   "short_name": "OverLyX",
-  "description": "Collaborative WYSIWYG LaTeX editing, LyX-compatible",
+  "description": "Collaborative WYSIWYG LaTeX editor for LyX documents",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f4f4f4",

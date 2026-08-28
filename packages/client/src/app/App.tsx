@@ -1211,7 +1211,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   return (
     <div class="app">
-      <MenuBar menus={menus} user={user} onLogout={onLogout} right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />
+      <MenuBar menus={menus} user={user} onLogout={onLogout} onHome={() => { location.hash = '#/'; }} right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />
       {isLyxDoc && tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={standardGroups} />}
       {isLyxDoc && tbMode('extra') !== 'off' && <Toolbar id="extra" groups={extraGroups} />}
       {isLyxDoc && showMath && <Toolbar id="math" label="Math" groups={mathGroups} />}

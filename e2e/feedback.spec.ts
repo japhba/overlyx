@@ -7,6 +7,8 @@ import { login, collectErrors } from './helpers';
 
 test('the feedback dialog sends a report; without a GitHub token it opens the pre-filled issue form', async ({ page }) => {
   const errors = collectErrors(page);
+  // the popup must keep the URL the app asked for (github.com would redirect an anonymous visitor to its login page)
+  await page.context().route('https://github.com/**', r => r.fulfill({ status: 200, contentType: 'text/html', body: '<title>stub</title>' }));
   await login(page);
   await page.waitForSelector('.home', { timeout: 20000 });
   await page.locator('.menubar .menu button', { hasText: 'Help' }).click();

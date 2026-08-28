@@ -19,7 +19,9 @@ const body = `\\begin_body\n\n` + para('Hello toolbar.') +
 test.beforeAll(async ({ browser }) => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
-  writeFileSync(FILE, readFileSync(SRC, 'utf8').split('\\begin_body')[0] + body);
+  // the fixture's own preamble may already carry OverLyX's \llangle snippet (the paper uses ⟪ ⟫): start clean
+  const header = readFileSync(SRC, 'utf8').split('\\begin_body')[0].replace(/\\begin_preamble[\s\S]*?\\end_preamble/, '\\begin_preamble\n\\usepackage{amsmath}\n\\end_preamble');
+  writeFileSync(FILE, header + body);
   await shareProject(browser, 'e2e-toolbar', ['bob']);
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });

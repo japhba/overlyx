@@ -453,8 +453,11 @@ export class LyxMathField {
       if (ev.inputType === 'insertText' || ev.inputType === 'insertCompositionText') { if (ev.inputType === 'insertText') { ev.preventDefault(); this.typed(ev.data ?? ''); } return; }
       if (ev.inputType.startsWith('delete') || ev.inputType.startsWith('insert')) ev.preventDefault();
     });
-    input.addEventListener('compositionend', ev => { this.typed(ev.data ?? ''); input.value = ''; });
-    input.addEventListener('input', () => { if (input.value && !(input as any).isComposing) { const v = input.value; input.value = ''; this.typed(v); } });
+    // Dead keys (^ ` ´ ~ on German/French/… layouts) arrive as a composition: the text is taken once,
+    // at compositionend; `input` events fired while composing must be ignored (the flag is on the
+    // event — checking it on the element used to insert ^ twice: x^2 became a double superscript).
+    input.addEventListener('compositionend', ev => { input.value = ''; this.typed(ev.data ?? ''); });
+    input.addEventListener('input', ev => { if ((ev as InputEvent).isComposing) return; if (input.value) { const v = input.value; input.value = ''; this.typed(v); } });
     input.addEventListener('copy', ev => { ev.preventDefault(); ev.clipboardData?.setData('text/plain', this.cursor.selection ? this.cursor.grabSelection() : ''); });
     input.addEventListener('cut', ev => { ev.preventDefault(); if (!this.cursor.selection || this.readOnly) return; ev.clipboardData?.setData('text/plain', this.cursor.grabSelection()); this.snapshot('cut'); this.cursor.eraseSelection(); this.commit(); });
     input.addEventListener('paste', ev => { ev.preventDefault(); if (this.readOnly) return; const t = ev.clipboardData?.getData('text/plain') ?? ''; if (!t) return; this.snapshot('paste'); this.cursor.niceInsert(t.replace(/^\$|\$$/g, ''), false); this.commit(); });
