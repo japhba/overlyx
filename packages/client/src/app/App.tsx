@@ -34,6 +34,21 @@ import { schema, unquote, llanglePreamble, hasLlangleSnippet, definesLlangle } f
 
 type Dialog = { name: string; arg?: unknown } | null;
 
+/** LyX language name → BCP 47 tag (for the browser's spell checker). */
+function bcp47(lyxLang: string): string {
+  const t: Record<string, string> = {
+    english: 'en', american: 'en-US', british: 'en-GB', canadian: 'en-CA', australian: 'en-AU', newzealand: 'en-NZ',
+    german: 'de', ngerman: 'de', 'german-ch': 'de-CH', 'ngerman-ch': 'de-CH', austrian: 'de-AT', naustrian: 'de-AT',
+    french: 'fr', spanish: 'es', 'spanish-mexico': 'es-MX', italian: 'it', dutch: 'nl', portuguese: 'pt', brazilian: 'pt-BR',
+    russian: 'ru', ukrainian: 'uk', polish: 'pl', czech: 'cs', slovak: 'sk', slovene: 'sl', croatian: 'hr', serbian: 'sr',
+    swedish: 'sv', danish: 'da', norsk: 'nb', nynorsk: 'nn', finnish: 'fi', icelandic: 'is', estonian: 'et', latvian: 'lv', lithuanian: 'lt',
+    greek: 'el', turkish: 'tr', hungarian: 'hu', romanian: 'ro', bulgarian: 'bg', hebrew: 'he', arabic_arabi: 'ar', arabic_arabtex: 'ar',
+    japanese: 'ja', 'japanese-cjk': 'ja', 'chinese-simplified': 'zh-Hans', 'chinese-traditional': 'zh-Hant', korean: 'ko',
+    catalan: 'ca', basque: 'eu', galician: 'gl', irish: 'ga', welsh: 'cy', latin: 'la', esperanto: 'eo', afrikaans: 'af', indonesian: 'id', malay: 'ms', thai: 'th', vietnamese: 'vi', hindi: 'hi', farsi: 'fa',
+  };
+  return t[lyxLang] ?? lyxLang.slice(0, 2);
+}
+
 export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [google, setGoogle] = useState(false);
@@ -130,6 +145,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [mathField, setMathField] = useState<LyxMathField | null>(null);
   useEffect(() => { const l = (f: LyxMathField | null) => setMathField(f); mathFocusListeners.add(l); return () => { mathFocusListeners.delete(l); }; }, []);
   const [findQ, setFindQ] = useState(''), [replQ, setReplQ] = useState('');
+  const [findCase, setFindCase] = useState(false), [findWord, setFindWord] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [selVersion, setSelVersion] = useState(0);
   const [docTick, setDocTick] = useState(0);
@@ -285,6 +301,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       onStale: (info) => { void resolveStale(handle, docId, info.pendingLocal); },
       // access revoked or role changed: the metadata tells the new role (or 403 → the tab closes)
       onAccessChanged: () => loadMeta(),
+      onGone: (reason) => {
+        if (cancelled) return;
+        if (/reset/.test(reason)) return;   // handled by the epoch / stale-history flow
+        notify(`${docId}: ${reason} — the tab was closed (a copy is in the project's versions)`, 'error');
+        closeTab(docId);
+      },
     });
     editorRef.current = handle; activeViewRef.current = handle.view; editorContext.activeView = handle.view;
     // header lines live in the Y meta map
@@ -302,6 +324,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       if (cancelled) return;
       if (m) {
         setMeta(m); editorContext.meta = m;
+        // the browser's spell checker picks its dictionary from the lang attribute
+        h.view.dom.lang = bcp47(m.language);
         applyAuthorColors(m.authors);
         setTracking(m.trackingChanges);
         editorContext.trackChanges = m.trackingChanges;
@@ -527,7 +551,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Download', action: () => window.open(`/api/projects/${encodeURIComponent(docId.split('/')[0])}/file/${docId.split('/').slice(1).map(encodeURIComponent).join('/')}`) },
       { label: 'Share project…', action: () => setShareFor(docId.split('/')[0]) },
       { sep: true },
-      { label: 'Close tab', shortcut: 'Ctrl+W', action: () => closeTab(docId) },
+      { label: 'Close tab', action: () => closeTab(docId) },
       { label: 'Close other tabs', action: () => setTabs([docId]) },
     ] },
   ] : [];
@@ -547,7 +571,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Versions…', action: () => setRightTab('versions') },
       { label: 'Share project…', action: () => setShareFor(docId.split('/')[0]) },
       { sep: true },
-      { label: 'Close tab', shortcut: 'Ctrl+W', action: () => closeTab(docId) },
+      { label: 'Close tab', action: () => closeTab(docId) },
       { label: 'Close other tabs', action: () => setTabs([docId]) },
     ] },
     { title: 'Edit', items: [
@@ -705,7 +729,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         { label: 'Algorithm', action: () => run(C.insertFloat('algorithm')) },
       ] },
       { label: 'Note ▸', sub: [
-        { label: 'LyX note (not printed)', shortcut: 'Ctrl+Alt+N', action: () => run(C.insertNote('Note')) },
+        { label: 'LyX note (not printed)', shortcut: 'Ctrl+Alt+Shift+N', action: () => run(C.insertNote('Note')) },
         { label: 'Comment (LaTeX comment)', action: () => run(C.insertNote('Comment')) },
         { label: 'Greyed out', action: () => run(C.insertNote('Greyedout')) },
       ] },
@@ -739,7 +763,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     { title: 'Navigate', items: [
       { label: 'Outline pane', shortcut: 'Ctrl+Alt+O', action: () => setRightTab('outline') },
       { label: 'Go to label…', action: () => { const n = prompt('Label:'); if (n) gotoLabel(n, view ?? undefined); } },
-      { label: 'Next tab', shortcut: 'Ctrl+Tab', action: () => { const i = tabs.indexOf(docId); const n = tabs[(i + 1) % tabs.length]; if (n) location.hash = '#/' + n; } },
+      { label: 'Next tab', action: () => { const i = tabs.indexOf(docId); const n = tabs[(i + 1) % tabs.length]; if (n) location.hash = '#/' + n; } },
       { label: 'Beginning of document', shortcut: 'Ctrl+Home', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)).scrollIntoView()); view.focus(); } } },
       { label: 'End of document', shortcut: 'Ctrl+End', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView()); view.focus(); } } },
     ] },
@@ -901,7 +925,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     [
       { id: 'footnote', title: 'Footnote (Ctrl+Alt+F)', icon: 'footnote', action: () => run(C.insertFootnote) },
       { id: 'marginal', title: 'Margin note (Ctrl+Alt+M)', icon: 'marginal', action: () => run(C.insertMarginal) },
-      { id: 'note', title: 'LyX note (Ctrl+Alt+N)', icon: 'note', action: () => run(C.insertNote('Note')) },
+      { id: 'note', title: 'LyX note (Ctrl+Alt+Shift+N)', icon: 'note', action: () => run(C.insertNote('Note')) },
       { id: 'comment', title: 'Comment thread (Ctrl+Alt+C)', icon: 'comment', action: () => run(C.insertComment) },
       { id: 'boxinset', title: 'Insert box', icon: 'box', action: () => run(C.insertBox) },
       { id: 'href', title: 'Hyperlink (Ctrl+Alt+K)', icon: 'href', action: () => setDialog({ name: 'href' }) },
@@ -1013,7 +1037,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { id: 'r-rejectall', title: 'Reject all changes', icon: 'rejectall', action: () => { if (confirm('Reject all tracked changes?')) run(rejectAllChanges()); } },
     ],
     [
-      { id: 'r-note', title: 'Insert note (Ctrl+Alt+N)', icon: 'note', action: () => run(C.insertNote('Note')) },
+      { id: 'r-note', title: 'Insert note (Ctrl+Alt+Shift+N)', icon: 'note', action: () => run(C.insertNote('Note')) },
       { id: 'r-comment', title: 'Comment thread (Ctrl+Alt+C)', icon: 'comment', action: () => run(C.insertComment) },
     ],
   ];
@@ -1140,7 +1164,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       {tabs.length > 0 && <TabBar tabs={tabs} current={docId} onSelect={id => { location.hash = '#/' + id; }} onClose={closeTab} onReorder={setTabs} />}
       {docId && findOpen && (
         <div class="find-bar">
-          <span>Find:</span><input autofocus value={findQ} onInput={e => { setFindQ((e.target as HTMLInputElement).value); if (view) setQuery(view, (e.target as HTMLInputElement).value, false); }} onKeyDown={e => { if (e.key === 'Enter' && view) findNext(view, e.shiftKey ? -1 : 1); if (e.key === 'Escape') { setFindOpen(false); if (view) { setQuery(view, '', false); view.focus(); } } }} />
+          <span>Find:</span><input autofocus value={findQ} onInput={e => { setFindQ((e.target as HTMLInputElement).value); if (view) setQuery(view, (e.target as HTMLInputElement).value, findCase, findWord); }} onKeyDown={e => { if (e.key === 'Enter' && view) findNext(view, e.shiftKey ? -1 : 1); if (e.key === 'Escape') { setFindOpen(false); if (view) { setQuery(view, '', false); view.focus(); } } }} />
+          <label title="Case sensitive"><input type="checkbox" checked={findCase} onChange={e => { const v = (e.target as HTMLInputElement).checked; setFindCase(v); if (view) setQuery(view, findQ, v, findWord); }} /> Aa</label>
+          <label title="Whole words only"><input type="checkbox" checked={findWord} onChange={e => { const v = (e.target as HTMLInputElement).checked; setFindWord(v); if (view) setQuery(view, findQ, findCase, v); }} /> Word</label>
           <button class="small-btn" onClick={() => view && findNext(view, 1)}>Next</button>
           <button class="small-btn" onClick={() => view && findNext(view, -1)}>Prev</button>
           <span>Replace:</span><input value={replQ} onInput={e => setReplQ((e.target as HTMLInputElement).value)} />

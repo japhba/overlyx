@@ -39,6 +39,26 @@ export interface UiActions {
 
 const ui = (fn: (a: UiActions) => void): Command => () => { const a = editorContext.ui; if (a) fn(a); return true; };
 
+/** LyX word-delete-backward/forward: within a paragraph's text; at an inset or paragraph edge the character command takes over. */
+const deleteWord = (dir: -1 | 1, fallback: Command): Command => (state, dispatch, view) => {
+  const { $from, empty } = state.selection;
+  if (!empty || !$from.parent.isTextblock) return fallback(state, dispatch, view);
+  const off = $from.parentOffset;
+  const par = $from.parent;
+  if (dir < 0) {
+    const before = par.textBetween(0, off, '\u0000', '\u0000');
+    const m = /(\s*\S+|\s+)$/.exec(before);
+    if (!m || m[0].includes('\u0000')) return fallback(state, dispatch, view);
+    if (dispatch) dispatch(state.tr.delete($from.pos - m[0].length, $from.pos).scrollIntoView());
+    return true;
+  }
+  const after = par.textBetween(off, par.content.size, '\u0000', '\u0000');
+  const m = /^(\S+\s*|\s+)/.exec(after);
+  if (!m || m[0].includes('\u0000')) return fallback(state, dispatch, view);
+  if (dispatch) dispatch(state.tr.delete($from.pos, $from.pos + m[0].length).scrollIntoView());
+  return true;
+};
+
 declare module './context' { interface EditorContext { ui?: UiActions } }
 
 const LAYOUT_PREFIX: Record<string, string> = {
@@ -138,9 +158,9 @@ export function lyxKeymap(): Plugin {
     'Mod-Enter': insertNewline('newline'),
     'Shift-Mod-Enter': insertNewline('linebreak'),
     Backspace: backspace,
-    'Mod-Backspace': backspace,
+    'Mod-Backspace': deleteWord(-1, backspace),
     Delete: del,
-    'Mod-Delete': del,
+    'Mod-Delete': deleteWord(1, del),
     'Mod-z': undo,
     'Mod-y': redo,
     'Shift-Mod-z': redo,
@@ -187,6 +207,7 @@ export function lyxKeymap(): Plugin {
     F3: ui(a => a.find()),
     'Shift-Mod-e': ui(a => a.toggleTrackChanges()),
     'Alt-Mod-o': ui(a => a.toggleOutline()),
+    'Alt-Mod-s': ui(a => a.toggleSource?.()),
     'Mod-=': ui(a => a.zoom(1)),
     'Mod-+': ui(a => a.zoom(1)),
     'Mod--': ui(a => a.zoom(-1)),

@@ -574,7 +574,7 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
     ['Ctrl+Alt+D', 'Reset font'],
     ['Ctrl+L', 'TeX code (ERT); in a formula: start a \\command'],
     ['Ctrl+Alt+P', 'Paragraph settings'],
-    ['Ctrl+Alt+F / Ctrl+Alt+M / Ctrl+Alt+N', 'Footnote / margin note / LyX note'],
+    ['Ctrl+Alt+F / Ctrl+Alt+M / Ctrl+Alt+Shift+N', 'Footnote / margin note / LyX note'],
     ['Ctrl+Alt+C', 'New comment thread'],
     ['Ctrl+Shift+C, Ctrl+Shift+I, Ctrl+Alt+L', 'Citation, cross-reference, label'],
     ['Ctrl+Shift+G, Ctrl+Alt+T', 'Graphics, table'],

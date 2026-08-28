@@ -9,7 +9,7 @@ import { attachWebSocket } from './ws.ts';
 import { manager } from './docs.ts';
 import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile } from './projects.ts';
 import { toPng, isDirectImage } from './graphics.ts';
-import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob } from './export.ts';
+import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData } from './export.ts';
 import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
 import { sandboxAvailable } from './sandbox.ts';
@@ -90,6 +90,7 @@ api.delete('/projects/:project', needProject('owner'), async (req, res) => {
   try {
     await manager.closeProject(req.params.project);
     const dest = trashProject(req.params.project);
+    cleanupProjectData(req.params.project);
     res.json({ ok: true, trash: dest });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
@@ -438,7 +439,7 @@ api.get('/docs/*/meta', async (req, res) => {
       const mod = await import('@overlyx/core/latex/index.ts') as any;
       const dc = mod.loadDocumentClass(getTextClass(lyx), getModules(lyx), config.layoutDir);
       layouts = mod.describeLayouts(dc);
-      flexInsets = dc.insetLayouts ? [...Object.keys(dc.insetLayouts ?? {})] : null;
+      flexInsets = dc.insetLayouts ? mod.flexInsetNames(dc) : null;
     } catch (e) {
       layouts = null;
     }
@@ -496,9 +497,14 @@ api.post('/docs/*/save', async (req, res) => {
 });
 
 /** Update header (document settings): full header lines list, or preamble text. */
+/** Header updates are read-modify-write on one value: run them one at a time per document. */
+const headerQueue = new Map<string, Promise<unknown>>();
 api.post('/docs/*/header', async (req, res) => {
+  const id = docId(req);
+  const prev = headerQueue.get(id) ?? Promise.resolve();
+  const job = prev.catch(() => {}).then(async () => {
   try {
-    const doc = await manager.open(docId(req));
+    const doc = await manager.open(id);
     const meta = doc.getMeta();
     let lines: string[] = meta.headerLines;
     if (Array.isArray(req.body?.headerLines)) lines = req.body.headerLines.map(String);
@@ -517,6 +523,10 @@ api.post('/docs/*/header', async (req, res) => {
     doc.ydoc.transact(() => { doc.meta.set('header', JSON.stringify(lines)); }, 'header');
     res.json({ ok: true, headerLines: lines });
   } catch (e) { res.status(400).json({ error: String(e) }); }
+  });
+  headerQueue.set(id, job);
+  await job;
+  if (headerQueue.get(id) === job) headerQueue.delete(id);
 });
 
 /* ---------------------------------------------------------------- versions */

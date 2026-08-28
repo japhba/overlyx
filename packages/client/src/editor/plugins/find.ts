@@ -4,10 +4,11 @@ import { Decoration, DecorationSet } from 'prosemirror-view';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 
-export interface FindState { query: string; caseSensitive: boolean; matches: { from: number; to: number }[]; current: number }
+export interface FindState { query: string; caseSensitive: boolean; wholeWord: boolean; matches: { from: number; to: number }[]; current: number }
 export const findKey = new PluginKey<FindState>('lyx-find');
 
-function search(doc: PMNode, query: string, cs: boolean): { from: number; to: number }[] {
+const WORD = /[\p{L}\p{N}_]/u;
+function search(doc: PMNode, query: string, cs: boolean, wholeWord = false): { from: number; to: number }[] {
   if (!query) return [];
   const out: { from: number; to: number }[] = [];
   const q = cs ? query : query.toLowerCase();
@@ -23,8 +24,9 @@ function search(doc: PMNode, query: string, cs: boolean): { from: number; to: nu
     const hay = cs ? text : text.toLowerCase();
     let idx = hay.indexOf(q);
     while (idx >= 0) {
-      out.push({ from: map[idx], to: map[idx + q.length - 1] + 1 });
-      idx = hay.indexOf(q, idx + q.length);
+      const boundary = !wholeWord || ((idx === 0 || !WORD.test(text[idx - 1])) && (idx + q.length >= text.length || !WORD.test(text[idx + q.length])));
+      if (boundary) out.push({ from: map[idx], to: map[idx + q.length - 1] + 1 });
+      idx = hay.indexOf(q, idx + 1);
     }
     return false;
   });
@@ -35,17 +37,17 @@ export function findPlugin(): Plugin<FindState> {
   return new Plugin<FindState>({
     key: findKey,
     state: {
-      init: () => ({ query: '', caseSensitive: false, matches: [], current: -1 }),
+      init: () => ({ query: '', caseSensitive: false, wholeWord: false, matches: [], current: -1 }),
       apply(tr, prev, _o, newState) {
         const meta = tr.getMeta(findKey) as Partial<FindState> | undefined;
         if (meta) {
           const next = { ...prev, ...meta };
-          next.matches = search(newState.doc, next.query, next.caseSensitive);
+          next.matches = search(newState.doc, next.query, next.caseSensitive, next.wholeWord);
           if (meta.current === undefined) next.current = next.matches.length ? Math.min(prev.current < 0 ? 0 : prev.current, next.matches.length - 1) : -1;
           return next;
         }
         if (tr.docChanged && prev.query) {
-          const matches = search(newState.doc, prev.query, prev.caseSensitive);
+          const matches = search(newState.doc, prev.query, prev.caseSensitive, prev.wholeWord);
           return { ...prev, matches, current: matches.length ? Math.min(prev.current, matches.length - 1) : -1 };
         }
         return prev;
@@ -61,8 +63,8 @@ export function findPlugin(): Plugin<FindState> {
   });
 }
 
-export function setQuery(view: EditorView, query: string, caseSensitive: boolean): void {
-  view.dispatch(view.state.tr.setMeta(findKey, { query, caseSensitive }));
+export function setQuery(view: EditorView, query: string, caseSensitive: boolean, wholeWord = false): void {
+  view.dispatch(view.state.tr.setMeta(findKey, { query, caseSensitive, wholeWord }));
 }
 
 export function findNext(view: EditorView, dir: 1 | -1 = 1): void {

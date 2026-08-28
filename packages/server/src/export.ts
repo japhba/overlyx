@@ -8,7 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
-import { parseLyx, writeLyx, type LyxDocument } from '@overlyx/core';
+import { parseLyx, writeLyx, headerValue, type LyxDocument } from '@overlyx/core';
 import { config } from './config.ts';
 import { db } from './db.ts';
 import { manager, DocManager } from './docs.ts';
@@ -115,6 +115,19 @@ async function runJob(job: BuildJob): Promise<void> {
     finish(job, { ok: false, log: 'build failed: ' + String(e), warnings: [] }, 'error');
   }
   console.log(`[build] ${job.docId} (${job.engine}) ${job.status} in ${Math.round((Date.now() - t0) / 1000)} s`);
+}
+
+/** Forget the build products and versions of a project's documents (the project was deleted). */
+export function cleanupProjectData(project: string): void {
+  const ids = new Set<string>();
+  for (const t of ['builds', 'versions']) {
+    for (const r of db.prepare(`SELECT DISTINCT doc_id FROM ${t} WHERE substr(doc_id, 1, ?) = ?`).all(project.length + 1, project + '/') as { doc_id: string }[]) ids.add(r.doc_id);
+    db.prepare(`DELETE FROM ${t} WHERE substr(doc_id, 1, ?) = ?`).run(project.length + 1, project + '/');
+  }
+  for (const id of ids) {
+    const d = path.join(config.dataDir, 'build', crypto.createHash('sha1').update(id).digest('hex').slice(0, 16));
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
 }
 
 export function buildDir(docId: string): string {
@@ -303,18 +316,25 @@ async function buildViaOverlyx(job: BuildJob): Promise<BuildResult> {
   if (isCancelled(job)) return { ok: false, log: 'cancelled', warnings: [] };
   setPhase(job, 'compiling');
   const base = path.basename(exp.main, '.tex');
+  // the TeX engine: non-TeX fonts (fontspec) need XeTeX or LuaTeX — like LyX, XeTeX unless the
+  // document's default output format says LuaTeX (pdf5); an explicit pdf4 / pdf5 is honoured too
+  const header = doc.toLyxDocument().header;
+  const outFmt = headerValue(header, 'default_output_format') ?? 'default';
+  const nonTex = headerValue(header, 'use_non_tex_fonts') === 'true';
+  const engineFlag = outFmt === 'pdf5' ? '-pdflua' : outFmt === 'pdf4' || nonTex ? '-pdfxe' : '-pdf';
   // build products must be real files in the build directory, never links into the project
   for (const ext of ['.pdf', '.synctex.gz', '.aux', '.log', '.out', '.bbl', '.blg', '.toc', '.fls', '.fdb_latexmk']) {
     const f = path.join(exp.dir, base + ext);
     try { if (fs.lstatSync(f).isSymbolicLink()) fs.unlinkSync(f); } catch { /* not there */ }
   }
-  const args = ['-pdf', '-g', '-interaction=nonstopmode', '-file-line-error', '-synctex=1'];
-  // honour a latexmkrc in the document directory (e.g. for -shell-escape needed by the svg package)
+  // honour a latexmkrc in the document directory (e.g. for -shell-escape needed by the svg package);
+  // it is read where it appears on the command line, so it comes first: our engine choice wins
+  const args: string[] = [];
   for (const rc of ['latexmkrc', '.latexmkrc']) {
     const f = path.join(docDir, rc);
     if (fs.existsSync(f)) { args.push('-r', f); break; }
   }
-  args.push(base + '.tex');
+  args.push(engineFlag, '-g', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
   const proc = run('latexmk', args, {
     cwd: exp.dir, env: texInputs(docDir, exp.dir), timeoutMs: 420000, nice: true,
     // the build directory (and the svg package's cache next to the document) are the only writable places

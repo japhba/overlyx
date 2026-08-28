@@ -578,3 +578,6 @@ button { cursor: pointer; }
 .text-editor textarea[readonly] { background: #fbfbfa; color: #444; }
 .filetree .actions { flex-wrap: wrap; row-gap: 3px; }
 .filetree .actions .small-btn { white-space: nowrap; }
+
+/* a node view that failed to render (see guarded() in editor.ts) */
+.lyx-broken { display: inline-block; padding: 0 4px; border: 1px dashed #c33; color: #c33; background: #fff3f3; border-radius: 3px; font-size: 0.85em; cursor: help; }

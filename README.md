@@ -28,10 +28,25 @@ Overleaf/LyX blend.
   `latexmk`; a native-LyX build as reference; embedded graphics (SVG/PDF/EPS/…) are rendered to
   PNG for the editor and downloadable as PNG. PDF builds only start on request (Ctrl+R, the
   toolbar or the PDF panel) and run as **background jobs**: the LaTeX export runs in a worker
-  thread, `latexmk` runs `nice`d with at most `OVERLYX_MAX_BUILDS` (2) in parallel, the PDF panel
+  thread, `latexmk` runs `nice`d with at most `OVERLYX_MAX_BUILDS` (2) in parallel (XeTeX or LuaTeX
+  when the document uses non-TeX fonts or asks for them via its default output format), the PDF panel
   shows the phase / elapsed time / last log line and has a *Cancel* button, and a build keeps
   running if you switch documents or tabs (the panel picks it up again). A request while a build
   is running re-builds once more afterwards with the latest content.
+* **Copy & paste** keeps every inset: a paragraph copied and pasted elsewhere (or into another
+  OverLyX tab) still has its citations, cross-references, labels, formulas, tables and figures; the
+  plain-text form of the clipboard is LaTeX-ish (`$…$`, `\ref{…}`, `\citep{…}`), so pasting into a
+  `.tex` file or a chat gives something useful; HTML from a web page or another editor pastes as
+  LyX content (headings, bold/italic/typewriter, lists, tables).
+* **Safe with the file on disk.** The `.lyx` file is written atomically (temporary file + rename,
+  fsync'ed). If somebody else wrote the file meanwhile (desktop LyX, git, another editor), that
+  change is merged *three-way* at paragraph level before we write: only the paragraphs they changed
+  are taken over, edits made here in other paragraphs are kept (the disk wins where both changed
+  the same paragraph). A document whose file was deleted is closed and its content kept as a
+  version instead of being silently re-created; a large deletion keeps the previous content as a
+  version; the writer refuses to replace a document with something that is not a LyX document.
+  Damaged files (an unterminated inset, unknown tokens, latin-1 bytes) open and are written back
+  structurally complete.
 * **Sharing** (Google-Docs model): a project is private to its owner until it is shared. The owner
   invites people by username or e-mail address as *viewers* or *editors* (an e-mail that has not
   signed in yet is kept as an invitation and bound to the account on its first Google sign-in), or
@@ -97,6 +112,8 @@ Overleaf/LyX blend.
   (live LyX source that follows the cursor — edit and *Apply* — plus the exported LaTeX); wide display
   formulas overflow symmetrically into the margins (Google-Docs style) with equation numbers kept
   clear of the formula.
+* **Find & replace** (`Ctrl+F`): find next/previous, replace, replace all, case-sensitive and
+  whole-word options, live match count and highlighting.
 * **LyX keyboard bindings** (`cua.bind`/`menus.bind`/`math.bind`): `Ctrl+M`, `Ctrl+Shift+M`,
   `Alt+P …` layouts, `Alt+M …` math, `Alt+A …` paragraph, `Ctrl+E/B/U`, `Ctrl+L` (TeX code),
   `Ctrl+Alt+F/M/N/C` (footnote / margin / note / comment), `Ctrl+Shift+E` (track changes), …

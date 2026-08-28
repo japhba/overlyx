@@ -324,7 +324,14 @@ function pmTableToLyx(t: PMJSON): TabularInset {
       } else if (g.cont) {
         cells.push({ attrs: g.cont, paragraphs: g.contContent ? pmBlocksToParagraphs(g.contContent) : [{ layout: 'Plain Layout', depth: 0, params: {}, items: [] }] });
       } else {
-        cells.push({ attrs: parse(g.start.attrs?.attrs, []), paragraphs: pmBlocksToParagraphs(g.start.content ?? []) });
+        // a span's first cell carries multicolumn/multirow="1" in LyX (cells pasted from HTML lack it)
+        let attrs: [string, string][] = parse(g.start.attrs?.attrs, []);
+        const cs = g.start.attrs?.colspan || 1, rs = g.start.attrs?.rowspan || 1;
+        if (rs > 1 && !attrs.some(x => x[0] === 'multirow')) attrs = [['multirow', '1'], ...attrs];
+        if (cs > 1 && !attrs.some(x => x[0] === 'multicolumn')) attrs = [['multicolumn', '1'], ...attrs];
+        // LyX allows only Plain Layout inside table cells
+        const paragraphs = pmBlocksToParagraphs(g.start.content ?? []).map(p => (p.layout === 'Standard' ? { ...p, layout: 'Plain Layout' } : p));
+        cells.push({ attrs, paragraphs });
       }
     }
     return { attrs: parse(row.attrs?.attrs, []), cells };
@@ -334,6 +341,7 @@ function pmTableToLyx(t: PMJSON): TabularInset {
   if (!tattrs.length) setA('version', '3');
   setA('rows', String(nrows)); setA('columns', String(ncols));
   const cols = columns.slice(0, ncols);
+  // a table that did not come from a LyX file (pasted HTML) may lack column definitions
   while (cols.length < ncols) cols.push([['alignment', 'center'], ['valignment', 'top']]);
   return { type: 'Tabular', attrs: tattrs, features: parse(a.features, []), columns: cols.map(attrs => ({ attrs })), rows };
 }

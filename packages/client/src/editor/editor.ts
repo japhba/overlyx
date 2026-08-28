@@ -3,7 +3,9 @@
  * node views (MathLive, insets, graphics, commands), decorations and collaboration cursors.
  */
 import { EditorState, Plugin, TextSelection } from 'prosemirror-state';
-import { EditorView } from 'prosemirror-view';
+import { EditorView, type NodeView } from 'prosemirror-view';
+import type { Node as PMNode } from 'prosemirror-model';
+import { sliceText } from './cliptext';
 import { gapCursor } from 'prosemirror-gapcursor';
 import { dropCursor } from 'prosemirror-dropcursor';
 import { tableEditing } from 'prosemirror-tables';
@@ -27,6 +29,28 @@ import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
 import { includeTarget } from './commands';
 import type { User } from '../api';
+
+/**
+ * A node view that throws (a malformed attribute that arrived over the wire, a rendering bug) must
+ * not take the whole editor down: it is replaced by a marker that shows the error, and an `update`
+ * that throws makes ProseMirror re-create the view instead of propagating.
+ */
+function guarded(node: PMNode, make: () => NodeView): NodeView {
+  let v: NodeView;
+  try { v = make(); }
+  catch (e) {
+    console.error(`node view for ${node.type.name} failed`, e, node.toJSON());
+    const dom = document.createElement(node.isInline ? 'span' : 'div');
+    dom.className = 'lyx-broken';
+    dom.title = `This ${node.type.name} could not be displayed: ${String(e)}`;
+    dom.textContent = `⚠ ${node.type.name}`;
+    dom.contentEditable = 'false';
+    return { dom, update: () => false };
+  }
+  const update = v.update?.bind(v);
+  if (update) v.update = (n, decos, inner) => { try { return update(n, decos, inner); } catch (e) { console.error(`node view update for ${node.type.name} failed`, e); return false; } };
+  return v;
+}
 
 export interface EditorHandle {
   view: EditorView;
@@ -84,6 +108,8 @@ export interface EditorOptions {
   onStale?: (info: { pendingLocal: boolean }) => void;
   /** the server closed the connection because this user's access to the project changed (revoked, or a new role) */
   onAccessChanged?: () => void;
+  /** the document is gone on the server (file deleted / project removed / history reset) */
+  onGone?: (reason: string) => void;
   onSaveState?: (s: SaveState) => void;
   /** start read-only (until `setEditable(true)`) */
   readOnly?: boolean;
@@ -163,6 +189,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     if (ev) lastConnInfo = `closed with code ${ev.code}${ev.reason ? ': ' + ev.reason : ''}`;
     emitSaveState();
     if (ev?.code === 4003) opts.onAccessChanged?.();
+    if (ev?.code === 4001 || ev?.code === 4004) opts.onGone?.(ev.reason || 'document not available');
   });
   provider.on('connection-error', () => { lastConnInfo = 'connection attempt failed'; emitSaveState(); });
   // A remote update dispatched between a mouse click and the browser's (asynchronous)
@@ -273,15 +300,17 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       view.updateState(view.state.apply(tr));
     },
     nodeViews: {
-      math_inline: (node, view, getPos) => new MathInlineView(node, view, getPos as () => number | undefined),
-      math_display: (node, view, getPos) => new MathDisplayView(node, view, getPos as () => number | undefined),
-      macro: (node, view, getPos) => new MacroView(node, view, getPos as () => number | undefined),
-      inset: (node, view, getPos) => new InsetView(node, view, getPos as () => number | undefined),
-      graphics: (node, view, getPos) => new GraphicsView(node, view, getPos as () => number | undefined),
-      command: (node, view, getPos) => new CommandView(node, view, getPos as () => number | undefined),
-      leaf: (node, view, getPos) => new LeafView(node, view, getPos as () => number | undefined),
+      math_inline: (node, view, getPos) => guarded(node, () => new MathInlineView(node, view, getPos as () => number | undefined)),
+      math_display: (node, view, getPos) => guarded(node, () => new MathDisplayView(node, view, getPos as () => number | undefined)),
+      macro: (node, view, getPos) => guarded(node, () => new MacroView(node, view, getPos as () => number | undefined)),
+      inset: (node, view, getPos) => guarded(node, () => new InsetView(node, view, getPos as () => number | undefined)),
+      graphics: (node, view, getPos) => guarded(node, () => new GraphicsView(node, view, getPos as () => number | undefined)),
+      command: (node, view, getPos) => guarded(node, () => new CommandView(node, view, getPos as () => number | undefined)),
+      leaf: (node, view, getPos) => guarded(node, () => new LeafView(node, view, getPos as () => number | undefined)),
     },
     attributes: { class: 'lyx-editor' + (opts.child ? ' lyx-editor-child' : ''), spellcheck: 'true' },
+    // text/plain for the clipboard: formulas as $…$, references as \ref{…}, … (see cliptext.ts)
+    clipboardTextSerializer: sliceText,
     handleDoubleClickOn(view, _pos, node, nodePos) {
       if (node.type.name === 'command' && node.attrs.cmd === 'include') {
         const id = includeTarget(node, viewProject(view), viewDocDir(view));

@@ -78,7 +78,10 @@ for (const w of result.warnings) console.warn(`warning: ${w}`);
 
 if (flags.has('--pdf')) {
   const env = { ...process.env, TEXINPUTS: `${docdir}//:`, BIBINPUTS: `${docdir}//:`, BSTINPUTS: `${docdir}//:` };
-  const r = spawnSync('latexmk', ['-pdf', '-bibtex', '-interaction=nonstopmode', '-f', base + '.tex'], { cwd: outdir, env, stdio: 'pipe', timeout: 600000 });
+  // XeTeX / LuaTeX like the server (non-TeX fonts, or an explicit default output format)
+  const hv = (k: string) => doc.header.lines.find(l => l.startsWith('\\' + k + ' '))?.slice(k.length + 2).trim();
+  const engine = hv('default_output_format') === 'pdf5' ? '-pdflua' : hv('default_output_format') === 'pdf4' || hv('use_non_tex_fonts') === 'true' ? '-pdfxe' : '-pdf';
+  const r = spawnSync('latexmk', [engine, '-bibtex', '-interaction=nonstopmode', '-f', base + '.tex'], { cwd: outdir, env, stdio: 'pipe', timeout: 600000 });
   const pdf = join(outdir, base + '.pdf');
   if (existsSync(pdf)) {
     console.log(pdf);

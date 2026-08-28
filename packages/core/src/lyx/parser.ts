@@ -283,6 +283,11 @@ function parseInset(r: Reader, first: string): Inset {
       // inset directly inside an inset without paragraphs — unknown structure; keep raw
       return parseRaw(r, first, params);
     }
+    if (l === '\\end_layout' || l === '\\end_body' || l === '\\end_document' || l === '\\end_deeper') {
+      // an unterminated inset (a damaged file): end it here instead of swallowing the rest of
+      // the document as "parameters" — the writer adds the missing \end_inset
+      return { type: 'Leaf', name, arg, params };
+    }
     params.push(r.next());
   }
   return { type: 'Leaf', name, arg, params };

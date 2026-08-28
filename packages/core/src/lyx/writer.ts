@@ -131,6 +131,7 @@ export function writeParagraph(p: Paragraph): string {
         pos++;
         break;
       case 'unknown':
+        if (column > 0) { out.push('\n'); column = 0; }
         out.push(it.line + '\n');
         break;
       case 'inset':
