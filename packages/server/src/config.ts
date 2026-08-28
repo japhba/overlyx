@@ -20,13 +20,30 @@ export const config = {
     clientId: process.env.GOOGLE_CLIENT_ID ?? '',
     clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
   },
+  /**
+   * E-mail (or username) of the instance owner: this account is an administrator and owns every
+   * project directory that exists without an owner (the ones that predate sharing / were created
+   * by hand). Unset: the first admin account.
+   */
+  ownerEmail: (process.env.OVERLYX_OWNER_EMAIL ?? '').trim().toLowerCase(),
+  /**
+   * Who may create an account with "Sign in with Google": `open` (anyone — like Google Docs, they
+   * only see their own and shared projects) or `invited` (only e-mails that a project was shared with).
+   */
+  signup: (process.env.OVERLYX_SIGNUP === 'invited' ? 'invited' : 'open') as 'open' | 'invited',
   clientDist: path.resolve(process.env.OVERLYX_CLIENT_DIST ?? path.join(REPO_ROOT, 'packages/client/dist')),
   /** debounce for writing .lyx files back to disk (ms) */
   saveDebounceMs: Number(process.env.OVERLYX_SAVE_DEBOUNCE ?? 1500),
+  /** longest time edits may stay unwritten while people type continuously (ms) */
+  saveMaxWaitMs: Number(process.env.OVERLYX_SAVE_MAX_WAIT ?? 10000),
+  /** same for persisting the Yjs state in SQLite (ms) */
+  persistMaxWaitMs: Number(process.env.OVERLYX_PERSIST_MAX_WAIT ?? 5000),
   /** concurrent PDF builds (each latexmk run is one core; more only queue up) */
   maxBuilds: Math.max(1, Number(process.env.OVERLYX_MAX_BUILDS ?? 2)),
   /** `nice` level for latexmk / LyX so that builds never starve the editor */
   buildNiceness: Number(process.env.OVERLYX_BUILD_NICE ?? 10),
+  /** sandbox for latexmk / LyX / image converters (see sandbox.ts): auto | bwrap | none */
+  sandbox: (['auto', 'bwrap', 'none'].includes(process.env.OVERLYX_SANDBOX ?? '') ? process.env.OVERLYX_SANDBOX : 'auto') as 'auto' | 'bwrap' | 'none',
   /** idle time after which an open document is released from memory (ms) */
   unloadAfterMs: Number(process.env.OVERLYX_UNLOAD_MS ?? 6 * 60 * 60 * 1000),
   /** minimum interval between automatic versions (ms) */

@@ -11,6 +11,8 @@ import { listProjects, resolveProjectPath, projectDir, createProject, newDocumen
 import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob } from './export.ts';
 import { db } from './db.ts';
+import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
+import { sandboxAvailable } from './sandbox.ts';
 import { parseLyx, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText } from '@overlyx/core';
 
 const app = express();
@@ -20,6 +22,7 @@ app.use(authMiddleware);
 app.use((_req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   next();
 });
 
@@ -29,22 +32,122 @@ const api = express.Router();
 api.use(requireAuth);
 api.use(express.json({ limit: '5mb' }));
 
+/* ----------------------------------------------------------------- access */
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express { interface Request { role?: Role } }
+}
+
+function deny(res: express.Response, role: Role | null): void {
+  res.status(403).json({ error: role ? 'You can only view this project' : 'You do not have access to this project (ask its owner to share it with you)' });
+}
+
+/** Project routes: the user needs at least `min` in `:project`. */
+const needProject = (min: Role) => (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const role = roleFor(req.user!, String(req.params.project ?? ''));
+  if (!atLeast(role, min)) { deny(res, role); return; }
+  req.role = role!;
+  next();
+};
+
+/**
+ * Document routes (`/docs/<id>/<action>`): reading needs *view*, changing the document *edit*.
+ * Building a PDF / exporting only reads the document, so viewers may do it.
+ */
+api.all('/docs/*', (req, res, next) => {
+  const full = String((req.params as any)[0] ?? '');
+  const m = /^(.*?)(?:\/(meta|lyx|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build))?$/.exec(full)!;
+  const id = decodeURIComponent(m[1]);
+  const action = m[2] ?? '';
+  const write = req.method !== 'GET' && !/^export/.test(action);
+  const role = roleFor(req.user!, id.split('/')[0]);
+  if (!atLeast(role, write ? 'edit' : 'view')) { deny(res, role); return; }
+  req.role = role!;
+  next();
+});
+
 /* ---------------------------------------------------------------- projects */
 
-api.get('/projects', (_req, res) => {
-  res.json({ projects: listProjects().map(p => ({ name: p.name, files: p.files })) });
+api.get('/projects', (req, res) => {
+  ensureWelcomeProject(req.user!);
+  res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, owner: p.owner, files: p.files })) });
 });
 
 api.post('/projects', (req, res) => {
   try {
     const name = String(req.body?.name ?? '').trim();
     if (!/^[A-Za-z0-9._ -]+$/.test(name)) { res.status(400).json({ error: 'invalid project name' }); return; }
+    if (fs.existsSync(projectDir(name))) { res.status(409).json({ error: 'a project with this name exists already' }); return; }
     const p = createProject(name);
-    res.json({ project: { name: p.name, files: p.files } });
+    registerProject(name, req.user!.id);
+    res.json({ project: { name: p.name, title: null, kind: 'project', role: 'owner', via: 'owner', files: p.files } });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
-api.post('/projects/:project/new', (req, res) => {
+/** Remove a project (owner): the directory is moved to <data>/trash, never deleted. */
+api.delete('/projects/:project', needProject('owner'), async (req, res) => {
+  try {
+    await manager.closeProject(req.params.project);
+    const dest = trashProject(req.params.project);
+    res.json({ ok: true, trash: dest });
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/* ----------------------------------------------------------------- sharing */
+
+api.get('/projects/:project/share', needProject('owner'), (req, res) => {
+  res.json(shareInfo(req.params.project));
+});
+api.post('/projects/:project/share/members', needProject('owner'), (req, res) => {
+  try {
+    const role = req.body?.role;
+    if (!isRole(role)) { res.status(400).json({ error: 'role must be view or edit' }); return; }
+    const m = addMember(req.params.project, String(req.body?.who ?? ''), role, req.user!);
+    res.json({ member: m, share: shareInfo(req.params.project) });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+api.post('/projects/:project/share/members/:id', needProject('owner'), (req, res) => {
+  const role = req.body?.role;
+  if (!isRole(role)) { res.status(400).json({ error: 'role must be view or edit' }); return; }
+  const m = memberRow(req.params.project, Number(req.params.id));
+  setMemberRole(req.params.project, Number(req.params.id), role);
+  // their open editors reconnect with the new role
+  if (m?.user_id != null) manager.kick(req.params.project, [m.user_id]);
+  res.json({ share: shareInfo(req.params.project) });
+});
+api.delete('/projects/:project/share/members/:id', needProject('owner'), (req, res) => {
+  const m = memberRow(req.params.project, Number(req.params.id));
+  removeMember(req.params.project, Number(req.params.id));
+  if (m?.user_id != null) manager.kick(req.params.project, [m.user_id]);
+  res.json({ share: shareInfo(req.params.project) });
+});
+/** Link sharing: body { role: 'view' | 'edit' | null } (null turns it off and revokes link members). */
+api.post('/projects/:project/share/link', needProject('owner'), (req, res) => {
+  try {
+    const role = req.body?.role ?? null;
+    if (role !== null && !isRole(role)) { res.status(400).json({ error: 'role must be view, edit or null' }); return; }
+    const affected = linkMemberIds(req.params.project);
+    const link = setLink(req.params.project, role);
+    if (affected.length) manager.kick(req.params.project, affected);
+    res.json({ link, share: shareInfo(req.params.project) });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+api.post('/projects/:project/share/owner', needProject('owner'), (req, res) => {
+  try { setOwner(req.params.project, String(req.body?.username ?? '')); res.json({ share: shareInfo(req.params.project) }); }
+  catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+/** Open a share link: join the project and learn what to open. */
+api.post('/share/:token/accept', (req, res) => {
+  try {
+    const { project, role } = acceptLink(String(req.params.token), req.user!);
+    const files = listProjects().find(p => p.name === project.name)?.files ?? [];
+    const lyx = files.filter(f => f.kind === 'lyx' && !isBackupFile(f.name)).sort((a, b) => Number(!/(^|\/)main\.lyx$/.test(a.path)) - Number(!/(^|\/)main\.lyx$/.test(b.path)) || a.path.length - b.path.length || a.path.localeCompare(b.path));
+    res.json({ project: project.name, title: project.title, role, doc: lyx[0] ? `${project.name}/${lyx[0].path}` : null });
+  } catch (e) { res.status(404).json({ error: (e as Error).message }); }
+});
+
+api.post('/projects/:project/new', needProject('edit'), (req, res) => {
   try {
     let rel = String(req.body?.path ?? 'untitled.lyx');
     if (!rel.endsWith('.lyx')) rel += '.lyx';
@@ -57,7 +160,7 @@ api.post('/projects/:project/new', (req, res) => {
 });
 
 /** Upload a file (raw body) into a project, e.g. figures/plot.png */
-api.post('/projects/:project/upload', express.raw({ type: '*/*', limit: '100mb' }), (req, res) => {
+api.post('/projects/:project/upload', needProject('edit'), express.raw({ type: '*/*', limit: '100mb' }), (req, res) => {
   try {
     const rel = String(req.query.path ?? '');
     if (!rel || rel.includes('..')) { res.status(400).json({ error: 'bad path' }); return; }
@@ -68,18 +171,70 @@ api.post('/projects/:project/upload', express.raw({ type: '*/*', limit: '100mb' 
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
+/** File types a browser may render in place; everything else (html, svg, …) is offered as a download — a project's files are user content and must not run as a page of our origin. */
+const INLINE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.txt']);
+
 /** Serve a project file (bib, pdf, images, ...). */
-api.get('/projects/:project/file/*', (req, res) => {
+api.get('/projects/:project/file/*', needProject('view'), (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
     const abs = resolveProjectPath(req.params.project, rel);
     if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) { res.status(404).end(); return; }
+    if (!INLINE_EXT.has(path.extname(abs).toLowerCase())) res.attachment(path.basename(abs));
     res.sendFile(abs);
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
+/* ------------------------------------------------------------ text files */
+
+const TEXT_MAX = 4 * 1024 * 1024;
+
+/** A text file of the project (.tex, .bib, .sty, …) for the built-in text editor. */
+api.get('/projects/:project/text/*', needProject('view'), (req, res) => {
+  try {
+    const rel = decodeURIComponent((req.params as any)[0]);
+    if (rel.endsWith('.lyx')) { res.status(400).json({ error: 'LyX documents are opened as documents, not as text' }); return; }
+    const abs = resolveProjectPath(req.params.project, rel);
+    if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) { res.status(404).json({ error: 'not found' }); return; }
+    const st = fs.statSync(abs);
+    if (st.size > TEXT_MAX) { res.status(413).json({ error: 'file too large for the text editor (4 MB)' }); return; }
+    const buf = fs.readFileSync(abs);
+    if (buf.includes(0)) { res.status(415).json({ error: 'not a text file' }); return; }
+    res.json({ text: buf.toString('utf8'), mtime: st.mtimeMs, size: st.size, role: req.role ?? 'edit' });
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/**
+ * Save a text file. `mtime` is the modification time the client loaded; if the file changed since
+ * (someone else, desktop LyX, git), the save is refused with 409 and the current content.
+ */
+api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
+  try {
+    const rel = decodeURIComponent((req.params as any)[0]);
+    if (rel.endsWith('.lyx')) { res.status(400).json({ error: 'LyX documents are opened as documents, not as text' }); return; }
+    const abs = resolveProjectPath(req.params.project, rel);
+    const text = req.body?.text;
+    if (typeof text !== 'string') { res.status(400).json({ error: 'text missing' }); return; }
+    if (Buffer.byteLength(text) > TEXT_MAX) { res.status(413).json({ error: 'file too large (4 MB)' }); return; }
+    const expected = typeof req.body?.mtime === 'number' ? req.body.mtime : undefined;
+    if (expected !== undefined && fs.existsSync(abs)) {
+      const cur = fs.statSync(abs);
+      if (Math.abs(cur.mtimeMs - expected) > 1) {
+        res.status(409).json({ error: 'The file was changed on the server since you loaded it', text: fs.readFileSync(abs, 'utf8'), mtime: cur.mtimeMs });
+        return;
+      }
+    }
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    const tmp = abs + '.overlyx-tmp';
+    fs.writeFileSync(tmp, text, 'utf8');
+    fs.renameSync(tmp, abs);
+    const st = fs.statSync(abs);
+    res.json({ ok: true, mtime: st.mtimeMs, size: st.size });
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
 /** Graphics rendered to PNG for the editor (svg/pdf/eps/... converted; png/jpg passed through). */
-api.get('/projects/:project/graphics/*', async (req, res) => {
+api.get('/projects/:project/graphics/*', needProject('view'), async (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
     const abs = resolveProjectPath(req.params.project, rel);
@@ -109,7 +264,7 @@ const bibCache = new Map<string, { key: string; entries: ReturnType<typeof parse
 function cachedBib(abs: string): ReturnType<typeof parseBibtex> {
   try {
     const st = fs.statSync(abs);
-    const key = `${st.mtimeMs}:${st.size}`;
+    const key = `${st.mtimeMs}:${st.size}:v2`;   // v2: entries carry the (short) author list
     const hit = bibCache.get(abs);
     if (hit && hit.key === key) return hit.entries;
     const diskFile = path.join(config.dataDir, 'cache', 'bib-' + crypto.createHash('sha1').update(abs).digest('hex').slice(0, 16) + '.json');
@@ -119,7 +274,8 @@ function cachedBib(abs: string): ReturnType<typeof parseBibtex> {
       if (cached.key === key && Array.isArray(cached.entries)) entries = cached.entries;
     } catch { /* no disk cache */ }
     if (!entries) {
-      entries = parseBibtex(fs.readFileSync(abs, 'utf8')).map(e => ({ ...e, key: String(e.key ?? ''), author: String(e.author ?? ''), year: String(e.year ?? ''), title: String(e.title ?? '') }));
+      // `author`: the "A and B" / "A et al." form shown in the editor and the citation dialog
+      entries = parseBibtex(fs.readFileSync(abs, 'utf8')).map(e => ({ ...e, key: String(e.key ?? ''), author: String(e.authorShort || e.fields?.author || ''), year: String(e.year ?? ''), title: String(e.title ?? '') }));
       try { fs.writeFileSync(diskFile, JSON.stringify({ key, entries })); } catch { /* cache dir not writable: ignore */ }
     }
     bibCache.set(abs, { key, entries });
@@ -167,7 +323,7 @@ api.get('/docs/*/bib', async (req, res) => {
     const terms = String(req.query.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
     const limit = Math.min(500, Number(req.query.limit ?? 100) || 100);
     const hits = terms.length
-      ? entries.filter(e => terms.every(t => e.key.toLowerCase().includes(t) || e.author.toLowerCase().includes(t) || e.year.includes(t) || e.title.toLowerCase().includes(t)))
+      ? entries.filter(e => terms.every(t => e.key.toLowerCase().includes(t) || (e.fields?.author ?? '').toLowerCase().includes(t) || e.authorShort.toLowerCase().includes(t) || e.year.includes(t) || e.title.toLowerCase().includes(t)))
       : entries;
     res.json({ entries: hits.slice(0, limit), total: entries.length, matches: hits.length });
   } catch (e) { res.status(400).json({ error: String(e) }); }
@@ -295,6 +451,7 @@ api.get('/docs/*/meta', async (req, res) => {
     bibIndex.set(id, { files: [...bibFiles].map(f => safe(f.endsWith('.bib') ? f : f + '.bib')).filter((x): x is string => !!x), fallbackProject: bibFiles.size ? null : doc.project });
     res.json({
       id, project: doc.project, path: doc.relPath, master: masterId,
+      role: req.role ?? 'edit',
       labels,
       textclass: getTextClass(lyx), modules: getModules(lyx),
       language: headerValue(lyx.header, 'language') ?? 'english',
@@ -467,7 +624,8 @@ api.get('/users/:id/avatar', async (req, res) => {
   } catch (e) { res.status(502).json({ error: String(e) }); }
 });
 
-api.get('/users', (_req, res) => {
+api.get('/users', (req, res) => {
+  if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
   res.json({ users: db.prepare('SELECT id, username, display_name AS name, color, is_admin AS isAdmin FROM users ORDER BY username').all() });
 });
 api.post('/users', (req, res) => {
@@ -491,6 +649,9 @@ if (fs.existsSync(config.clientDist)) {
 } else {
   app.get('/', (_req, res) => res.type('text').send('OverLyX server running. Build the client (npm run build) or use the Vite dev server.'));
 }
+
+adoptProjects();
+sandboxAvailable();
 
 const server = http.createServer(app);
 attachWebSocket(server);

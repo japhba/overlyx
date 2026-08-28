@@ -710,7 +710,8 @@ function extraBraces(a: Atom): boolean {
   return a.t === 'color' || a.t === 'oldfont' || a.t === 'style' || (a.t === 'frac' && (a.kind === 'atop' || a.kind === 'choose' || a.kind === 'brace' || a.kind === 'brack'));
 }
 
-const BIG_DELIMS = new Set(['(', ')', '\\{', '\\}', '\\lbrace', '\\rbrace', '[', ']', '|', '/', '\\slash', '\\|', '\\vert', '\\Vert', "'", '<', '>', '\\\\', '\\backslash', '\\langle', '\\lceil', '\\lfloor', '\\rangle', '\\rceil', '\\rfloor', '\\llbracket', '\\rrbracket', '\\downarrow', '\\Downarrow', '\\uparrow', '\\Uparrow', '\\updownarrow', '\\Updownarrow']);
+// LyX's InsetMathBig::isBigInsetDelim list plus \llangle/\rrangle (OverLyX's double angle brackets, see core/math/llangle.ts)
+const BIG_DELIMS = new Set(['(', ')', '\\{', '\\}', '\\lbrace', '\\rbrace', '[', ']', '|', '/', '\\slash', '\\|', '\\vert', '\\Vert', "'", '<', '>', '\\\\', '\\backslash', '\\langle', '\\lceil', '\\lfloor', '\\rangle', '\\rceil', '\\rfloor', '\\llbracket', '\\rrbracket', '\\llangle', '\\rrangle', '\\downarrow', '\\Downarrow', '\\uparrow', '\\Uparrow', '\\updownarrow', '\\Updownarrow']);
 export const isBigInsetDelim = (d: string) => BIG_DELIMS.has(d);
 
 const innerHull = (name: string) => ['aligned', 'gathered', 'split', 'alignedat', 'lgathered', 'rgathered'].includes(name);

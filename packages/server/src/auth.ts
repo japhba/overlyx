@@ -5,8 +5,9 @@ import type { Request, Response, NextFunction, Router } from 'express';
 import express from 'express';
 import { db, pickColor, type UserRow } from './db.ts';
 import { config, JWT_SECRET } from './config.ts';
+import { bindInvitations, isInvited } from './access.ts';
 
-export interface SessionUser { id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null }
+export interface SessionUser { id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null; email?: string | null }
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -41,7 +42,7 @@ export function createUser(username: string, displayName: string, password: stri
 export function toSessionUser(u: UserRow): SessionUser {
   // the profile picture is served through our own origin (see /api/users/:id/avatar): third-party
   // image hosts get blocked by privacy extensions / referrer rules, and it works offline this way
-  return { id: u.id, username: u.username, name: u.display_name, color: u.color, isAdmin: !!u.is_admin, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null };
+  return { id: u.id, username: u.username, name: u.display_name, color: u.color, isAdmin: !!u.is_admin, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null, email: u.email };
 }
 
 export function signSession(u: SessionUser): string {
@@ -51,7 +52,7 @@ export function signSession(u: SessionUser): string {
 export function userFromToken(token: string | undefined): SessionUser | null {
   if (!token) return null;
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { sub: string };
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { sub: string };
     const row = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(payload.sub)) as UserRow | undefined;
     return row ? toSessionUser(row) : null;
   } catch {
@@ -80,9 +81,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
-function setSessionCookie(res: Response, u: SessionUser): void {
+function setSessionCookie(req: Request, res: Response, u: SessionUser): void {
   res.cookie('ol_session', signSession(u), {
-    httpOnly: true, sameSite: 'lax', secure: config.publicUrl.startsWith('https'),
+    httpOnly: true, sameSite: 'lax', secure: config.publicUrl.startsWith('https') || req.secure,
     maxAge: config.sessionDays * 24 * 3600 * 1000, path: '/',
   });
 }
@@ -97,6 +98,7 @@ export function authRouter(): Router {
   r.post('/login', express.json(), (req, res) => {
     const { username, password } = req.body ?? {};
     const ip = req.ip ?? 'x';
+    if (loginAttempts.size > 5000) { const now = Date.now(); for (const [k, v] of loginAttempts) if (v.until < now) loginAttempts.delete(k); }
     const la = loginAttempts.get(ip);
     if (la && la.n >= 8 && Date.now() < la.until) { res.status(429).json({ error: 'too many attempts, try again later' }); return; }
     const row = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username ?? '').trim().toLowerCase()) as UserRow | undefined;
@@ -108,8 +110,9 @@ export function authRouter(): Router {
       return;
     }
     loginAttempts.delete(ip);
+    bindInvitations(row.id, row.email);
     const u = toSessionUser(row);
-    setSessionCookie(res, u);
+    setSessionCookie(req, res, u);
     res.json({ user: u });
   });
 
@@ -119,7 +122,7 @@ export function authRouter(): Router {
   });
 
   r.get('/me', (req, res) => {
-    res.json({ user: req.user ?? null, google: !!config.google.clientId });
+    res.json({ user: req.user ?? null, google: !!config.google.clientId, signup: config.signup });
   });
 
   // --- Google OAuth (active when GOOGLE_CLIENT_ID/SECRET are configured)
@@ -153,23 +156,33 @@ export function authRouter(): Router {
       if (!tok.access_token) { res.status(401).send('google auth failed'); return; }
       const infoRes = await fetch('https://openidconnect.googleapis.com/v1/userinfo', { headers: { authorization: 'Bearer ' + tok.access_token } });
       const info = await infoRes.json() as { sub: string; email?: string; name?: string; email_verified?: boolean; picture?: string };
+      const email = info.email && info.email_verified !== false ? info.email.trim().toLowerCase() : undefined;
       let row = db.prepare('SELECT * FROM users WHERE google_sub = ?').get(info.sub) as UserRow | undefined;
-      if (!row && info.email) row = db.prepare('SELECT * FROM users WHERE email = ?').get(info.email) as UserRow | undefined;
+      if (!row && email) row = db.prepare('SELECT * FROM users WHERE lower(email) = ?').get(email) as UserRow | undefined;
       if (!row) {
-        // only pre-registered (by email) users or an open policy: we register by email domain-free default
-        const base = (info.email ?? 'google_' + info.sub).split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
+        // Anyone with a Google account may sign in (they only ever see their own and shared projects,
+        // like Google Docs) — unless the instance is invitation-only.
+        if (config.signup === 'invited' && !isInvited(email)) {
+          res.status(403).type('html').send(`<p style="font:14px system-ui;margin:40px">This OverLyX instance is invitation-only. Ask a project owner to share a project with <b>${escapeHtml(email ?? 'your Google account')}</b>, then sign in again.</p><p style="font:14px system-ui;margin:40px"><a href="/">Back</a></p>`);
+          return;
+        }
+        const base = (email ?? 'google_' + info.sub).split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '') || 'user';
         let username = base; let k = 1;
         while (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) username = `${base}${k++}`;
-        row = createUser(username, info.name ?? username, null, { email: info.email, googleSub: info.sub, avatar: info.picture });
+        row = createUser(username, info.name ?? username, null, { email, googleSub: info.sub, avatar: info.picture });
       } else if (!row.google_sub) {
         db.prepare('UPDATE users SET google_sub = ? WHERE id = ?').run(info.sub, row.id);
       }
+      if (email && !row.email) { db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email, row.id); row.email = email; }
+      // the instance owner is an administrator; invitations addressed to this e-mail now belong to the account
+      if (config.ownerEmail && row.email?.toLowerCase() === config.ownerEmail && !row.is_admin) { db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(row.id); row.is_admin = 1; }
+      bindInvitations(row.id, row.email);
       // keep the profile picture fresh on every sign-in
       if (info.picture !== undefined && info.picture !== row.avatar_url) {
         db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(info.picture ?? null, row.id);
         row = db.prepare('SELECT * FROM users WHERE id = ?').get(row.id) as UserRow;
       }
-      setSessionCookie(res, toSessionUser(row));
+      setSessionCookie(req, res, toSessionUser(row));
       res.redirect('/');
     } catch (e) {
       res.status(500).send('google auth error: ' + String(e));
@@ -178,6 +191,8 @@ export function authRouter(): Router {
 
   return r;
 }
+
+function escapeHtml(s: string): string { return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!)); }
 
 function redirectUri(req: Request): string {
   const base = config.publicUrl || `${req.protocol}://${req.get('host')}`;

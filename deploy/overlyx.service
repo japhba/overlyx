@@ -13,7 +13,13 @@ Environment=LYX_LAYOUT_DIR=/root/lyx/lib/layouts
 Environment=NODE_ENV=production
 # Fronted by Caddy (deploy/Caddyfile): app binds localhost:8080, Caddy serves https://overlyx.app on 443
 # Set these to enable "Sign in with Google" (OAuth redirect: <public url>/api/auth/google/callback)
+## The instance owner: administrator, and owner of every pre-existing project directory
+Environment=OVERLYX_OWNER_EMAIL=japhba@gmail.com
+# OVERLYX_SIGNUP=invited would restrict Google sign-in to invited e-mail addresses (default: open)
 #Environment=OVERLYX_PUBLIC_URL=https://overlyx.example.org
+# LaTeX builds and image conversions run in a bubblewrap sandbox (apt install bubblewrap);
+# OVERLYX_SANDBOX=bwrap refuses to start without it, =none disables it (not recommended)
+#Environment=OVERLYX_SANDBOX=bwrap
 #Environment=GOOGLE_CLIENT_ID=...
 #Environment=GOOGLE_CLIENT_SECRET=...
 ExecStart=/usr/bin/npx tsx packages/server/src/index.ts

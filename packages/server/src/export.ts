@@ -13,7 +13,8 @@ import { config } from './config.ts';
 import { db } from './db.ts';
 import { manager, DocManager } from './docs.ts';
 import { projectDir, resolveProjectPath, findMaster } from './projects.ts';
-import { toPdf } from './graphics.ts';
+import { toPdf, cacheDir } from './graphics.ts';
+import { sandboxed, type SandboxSpec } from './sandbox.ts';
 import type { ExportRequest, ExportResponse } from './exportworker.ts';
 
 export interface BuildResult { ok: boolean; log: string; pdfPath?: string; texPath?: string; warnings: string[]; tex?: string }
@@ -124,13 +125,18 @@ export function buildDir(docId: string): string {
 
 interface RunHandle { done: Promise<{ code: number; out: string }>; kill: () => void }
 /** Spawn a (niced) command, collecting its output; `onLine` receives every output line. */
-function run(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; nice?: boolean; onLine?: (l: string) => void }): RunHandle {
+function run(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; nice?: boolean; onLine?: (l: string) => void; sandbox?: Omit<SandboxSpec, 'cwd' | 'env'> }): RunHandle {
   let child: ChildProcess;
   let killed = false;
   const done = new Promise<{ code: number; out: string }>((resolve) => {
     // detached: the command leads its own process group, so cancelling kills latexmk *and* the
     // pdflatex/bibtex it spawned (they would otherwise keep the output pipes open and run on)
-    const spawnOpts = { cwd: opts.cwd, env: { ...process.env, ...opts.env }, detached: true };
+    let env: NodeJS.ProcessEnv = { ...process.env, ...opts.env };
+    if (opts.sandbox) {
+      const s = sandboxed(cmd, args, { ...opts.sandbox, cwd: opts.cwd, env: Object.fromEntries(Object.entries(opts.env ?? {}).filter((e): e is [string, string] => typeof e[1] === 'string')) });
+      cmd = s.cmd; args = s.args; env = s.env;
+    }
+    const spawnOpts = { cwd: opts.cwd, env, detached: true };
     child = opts.nice ? spawn('nice', ['-n', String(config.buildNiceness), cmd, ...args], spawnOpts) : spawn(cmd, args, spawnOpts);
     let out = '';
     let partial = '';
@@ -248,6 +254,9 @@ export function linkDocumentAssets(docDir: string, buildDirPath: string): void {
       // in sub-directories every file may be needed (\input{sub/file}); at the top level only graphics
       // (other files are found through TEXINPUTS, and the exporter writes the .tex files itself)
       if (depth === 0 && !LINK_EXT.has(path.extname(e.name).toLowerCase())) continue;
+      // a PDF next to a document of the same name is that document's output (LyX's, or an earlier
+      // build), not a figure: linking it would make the build write into the user's project
+      if (/\.pdf$/i.test(e.name) && ['.lyx', '.tex'].some(x => fs.existsSync(path.join(srcDir, e.name.replace(/\.pdf$/i, x))))) continue;
       try {
         const st = fs.lstatSync(dest);
         if (st.isSymbolicLink()) { if (fs.readlinkSync(dest) === src) continue; fs.unlinkSync(dest); }
@@ -267,7 +276,8 @@ export function linkDocumentAssets(docDir: string, buildDirPath: string): void {
 export function texInputs(docDir: string, buildDirPath: string): NodeJS.ProcessEnv {
   // not recursive: a stray main.bbl/main.aux in some sub-directory of the project must not be picked up
   const inputs = `${buildDirPath}:${docDir}:`;
-  return { TEXINPUTS: inputs, BIBINPUTS: inputs, BSTINPUTS: inputs, openout_any: 'a', max_print_line: '1000' };
+  // openout_any=p: TeX may only write below the build directory (the sandbox enforces the same)
+  return { TEXINPUTS: inputs, BIBINPUTS: inputs, BSTINPUTS: inputs, openout_any: 'p', max_print_line: '1000' };
 }
 
 async function buildViaOverlyx(job: BuildJob): Promise<BuildResult> {
@@ -293,6 +303,11 @@ async function buildViaOverlyx(job: BuildJob): Promise<BuildResult> {
   if (isCancelled(job)) return { ok: false, log: 'cancelled', warnings: [] };
   setPhase(job, 'compiling');
   const base = path.basename(exp.main, '.tex');
+  // build products must be real files in the build directory, never links into the project
+  for (const ext of ['.pdf', '.synctex.gz', '.aux', '.log', '.out', '.bbl', '.blg', '.toc', '.fls', '.fdb_latexmk']) {
+    const f = path.join(exp.dir, base + ext);
+    try { if (fs.lstatSync(f).isSymbolicLink()) fs.unlinkSync(f); } catch { /* not there */ }
+  }
   const args = ['-pdf', '-g', '-interaction=nonstopmode', '-file-line-error', '-synctex=1'];
   // honour a latexmkrc in the document directory (e.g. for -shell-escape needed by the svg package)
   for (const rc of ['latexmkrc', '.latexmkrc']) {
@@ -302,6 +317,8 @@ async function buildViaOverlyx(job: BuildJob): Promise<BuildResult> {
   args.push(base + '.tex');
   const proc = run('latexmk', args, {
     cwd: exp.dir, env: texInputs(docDir, exp.dir), timeoutMs: 420000, nice: true,
+    // the build directory (and the svg package's cache next to the document) are the only writable places
+    sandbox: { rw: [exp.dir, path.join(docDir, 'svg-inkscape')], ro: [projectDir(project), cacheDir] },
     onLine: (l) => { job.progress = l.slice(0, 200); },
   });
   job.cancel = () => { job.status = 'cancelled'; proc.kill(); };
@@ -363,7 +380,7 @@ export function downgradeTo620(text: string): string {
 async function buildViaLyx(job: BuildJob): Promise<BuildResult> {
   const docId = job.docId;
   const doc = await manager.open(docId);
-  await manager.saveAll();
+  await manager.saveProject(doc.project);
   setPhase(job, 'exporting');
   const projDir = projectDir(doc.project);
   const dir = path.join(buildDir(docId), 'lyx');
@@ -393,7 +410,7 @@ async function buildViaLyx(job: BuildJob): Promise<BuildResult> {
   const target = path.join(dir, doc.relPath);
   const pdf = target.replace(/\.lyx$/, '.pdf');
   setPhase(job, 'compiling');
-  const proc = run(config.lyxBin, ['-batch', '-E', 'pdf2', pdf, target], { cwd: path.dirname(target), env: { QT_QPA_PLATFORM: 'offscreen' }, timeoutMs: 400000, nice: true, onLine: (l) => { job.progress = l.slice(0, 200); } });
+  const proc = run(config.lyxBin, ['-batch', '-E', 'pdf2', pdf, target], { cwd: path.dirname(target), env: { QT_QPA_PLATFORM: 'offscreen' }, timeoutMs: 400000, nice: true, sandbox: { rw: [dir], ro: [cacheDir] }, onLine: (l) => { job.progress = l.slice(0, 200); } });
   job.cancel = () => { job.status = 'cancelled'; proc.kill(); };
   const r = await proc.done;
   job.cancel = undefined;

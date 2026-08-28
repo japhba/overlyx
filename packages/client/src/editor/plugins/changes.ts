@@ -228,3 +228,64 @@ export function resolveChange(range: ChangeRange, accept: boolean): Command {
     return true;
   };
 }
+
+/* ------------------------------------------------ navigation (LyX change-next / change-previous) */
+
+/** All tracked change runs of the document in document order (adjacent same author/type merged). */
+export function allChanges(doc: PMNode): ChangeRange[] {
+  const out: ChangeRange[] = [];
+  doc.descendants((node, pos) => {
+    if (!node.isInline) return true;
+    const c = changeOf(node);
+    if (!c) return false;
+    const last = out[out.length - 1];
+    if (last && last.to === pos && last.type === c.type && last.author === c.author) last.to = pos + node.nodeSize;
+    else out.push({ from: pos, to: pos + node.nodeSize, ...c });
+    return false;
+  });
+  return out;
+}
+
+/** Move the cursor to the next / previous tracked change (wraps around); selects it. */
+export function gotoChange(dir: 1 | -1): Command {
+  return (state, dispatch) => {
+    const all = allChanges(state.doc);
+    if (!all.length) return false;
+    const { from, to } = state.selection;
+    let target: ChangeRange | undefined;
+    if (dir > 0) target = all.find(c => c.from >= to || (c.from > from && c.to > to)) ?? all[0];
+    else { for (let i = all.length - 1; i >= 0; i--) if (all[i].to <= from || (all[i].from < from && all[i].to < to)) { target = all[i]; break; } target = target ?? all[all.length - 1]; }
+    if (!target) return false;
+    if (dispatch) {
+      const tr = state.tr.setSelection(TextSelection.create(state.doc, target.from, target.to)).scrollIntoView();
+      dispatch(tr.setMeta('addToHistory', false));
+    }
+    return true;
+  };
+}
+
+/** Accept or reject every change touching the selection (LyX change-accept / change-reject); with an
+ *  empty selection, the change under the cursor. */
+export function resolveSelectionChanges(accept: boolean): Command {
+  return (state, dispatch) => {
+    const { from, to, empty } = state.selection;
+    const ranges = empty ? [changeAt(state, from)].filter((c): c is ChangeRange => !!c) : allChanges(state.doc).filter(c => c.from < to && c.to > from);
+    if (!ranges.length) return false;
+    if (!dispatch) return true;
+    let tr = state.tr;
+    for (const r of ranges.sort((a, b) => b.from - a.from)) {
+      const remove = accept ? r.type === 'deleted' : r.type === 'inserted';
+      if (remove) tr = tr.delete(r.from, r.to);
+      else {
+        tr = tr.removeMark(r.from, r.to, schema.marks.change);
+        tr.doc.nodesBetween(r.from, r.to, (node, pos) => {
+          if (node.isInline && !node.isText && (node.attrs.marks || '').includes('"change"')) tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, marks: JSON.stringify(JSON.parse(node.attrs.marks || '[]').filter((m: any) => m.type !== 'change')) });
+          return true;
+        });
+      }
+    }
+    if (!tr.docChanged) return false;
+    dispatch(tr.setMeta('lyx-changes', true));
+    return true;
+  };
+}

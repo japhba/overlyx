@@ -29,6 +29,8 @@ export class OpenDoc {
   ydoc = new Y.Doc({ gc: true });
   awareness: awarenessProtocol.Awareness;
   conns = new Map<import('ws').WebSocket, Set<number>>();
+  /** which account is behind each connection (to close them when access is revoked) */
+  connUsers = new Map<import('ws').WebSocket, number>();
   fileHash = '';
   /** identifies this Yjs history; a fresh Y.Doc (after a restart with a changed file) gets a new one */
   epoch = crypto.randomBytes(8).toString('hex');
@@ -96,12 +98,23 @@ export class OpenDoc {
     for (const l of this.savedListeners) { try { l(); } catch { /* ignore */ } }
   }
 
+  /** when the current debounce window started (0 = none): continuous typing must not starve the save */
+  private saveWindowStart = 0;
+  private persistWindowStart = 0;
+
   scheduleSave(): void {
     this.dirty = true;
+    const now = Date.now();
+    // Debounce, but with a maximum wait: while several users type continuously the debounce timer
+    // would be reset on every keystroke and the file would never be written (nor the state persisted).
+    if (!this.saveWindowStart) this.saveWindowStart = now;
     if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => void this.saveToFile(), config.saveDebounceMs);
+    const saveDelay = Math.max(0, Math.min(config.saveDebounceMs, this.saveWindowStart + config.saveMaxWaitMs - now));
+    this.saveTimer = setTimeout(() => { this.saveWindowStart = 0; void this.saveToFile(); }, saveDelay);
+    if (!this.persistWindowStart) this.persistWindowStart = now;
     if (this.persistTimer) clearTimeout(this.persistTimer);
-    this.persistTimer = setTimeout(() => this.persistState(), 800);
+    const persistDelay = Math.max(0, Math.min(800, this.persistWindowStart + config.persistMaxWaitMs - now));
+    this.persistTimer = setTimeout(() => { this.persistWindowStart = 0; this.persistState(); }, persistDelay);
   }
 
   persistState(): void {
@@ -273,8 +286,41 @@ export class DocManager {
     db.prepare('DELETE FROM ydocs WHERE id = ?').run(id);
   }
 
+  /** Save and close every open document of a project (before it is moved away / deleted). */
+  async closeProject(project: string): Promise<void> {
+    for (const doc of [...this.docs.values()]) {
+      if (doc.project !== project) continue;
+      if (doc.dirty) await doc.saveToFile();
+      for (const c of [...doc.conns.keys()]) { doc.conns.delete(c); try { c.close(4001, 'project removed'); } catch { /* ignore */ } }
+      doc.awareness.destroy();
+      doc.ydoc.destroy();
+      this.docs.delete(doc.id);
+    }
+    db.prepare("DELETE FROM ydocs WHERE substr(id, 1, ?) = ?").run(project.length + 1, project + '/');
+  }
+
   async saveAll(): Promise<void> {
     for (const d of this.docs.values()) if (d.dirty) await d.saveToFile();
+  }
+  async saveProject(project: string): Promise<void> {
+    for (const d of this.docs.values()) if (d.project === project && d.dirty) await d.saveToFile();
+  }
+
+  /**
+   * Close the connections of some users (or of everybody) to the documents of a project — after
+   * their access changed. The client reconnects and learns its new role (or that it has none).
+   */
+  kick(project: string, userIds: number[] | 'all', reason = 'access changed'): number {
+    let n = 0;
+    for (const doc of this.docs.values()) {
+      if (doc.project !== project) continue;
+      for (const [c, uid] of [...doc.connUsers]) {
+        if (userIds !== 'all' && !userIds.includes(uid)) continue;
+        try { c.close(4003, reason); } catch { /* ignore */ }
+        n++;
+      }
+    }
+    return n;
   }
 
   private watch(): void {

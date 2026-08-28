@@ -1,6 +1,6 @@
-import type { SaveState } from '../editor/editor';
+import type { SaveState, PresenceUser } from '../editor/editor';
 
-export interface Status { connected: boolean; synced: boolean; users: { name: string; color: string }[] }
+export interface Status { connected: boolean; synced: boolean; users: PresenceUser[] }
 
 /** Google-Docs-style save indicator: everything is saved automatically; this tells where the edits are. */
 export function SaveIndicator({ save }: { save: SaveState }) {
@@ -18,24 +18,39 @@ export function SaveIndicator({ save }: { save: SaveState }) {
   }
 }
 
-export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel }: {
+/** Presence avatars: one per connected client; click to jump to where that user is editing. */
+export function UserAvatars({ users, onJump }: { users: PresenceUser[]; onJump?: (u: PresenceUser) => void }) {
+  return (
+    <span class="users" title={users.map(u => u.name).join(', ')}>
+      {users.map(u => (
+        <button key={u.clientId} type="button" class={'avatar' + (u.self ? ' self' : '') + (u.hasCursor ? ' has-cursor' : '')} style={{ background: u.color }}
+          title={u.self ? `${u.name} (you)` : u.hasCursor ? `${u.name} — click to jump to their cursor` : `${u.name} — no cursor in this document yet`}
+          data-client={u.clientId} data-username={u.username ?? ''} onMouseDown={e => e.preventDefault()} onClick={() => onJump?.(u)}>{u.name.slice(0, 1).toUpperCase()}</button>
+      ))}
+    </span>
+  );
+}
+
+export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, onJumpToUser }: {
   layout: string; status: Status; chord: string | null; message: { text: string; kind: 'info' | 'error' } | null; save: SaveState;
-  tracking: boolean; trackingAs?: string; change?: string | null; docLabel?: string | null;
+  tracking: boolean; trackingAs?: string; change?: string | null; docLabel?: string | null; readOnly?: boolean;
+  /** no document editor is open (start screen, text file): only messages */
+  quiet?: boolean; onJumpToUser?: (u: PresenceUser) => void;
 }) {
+  if (quiet) return <div class="statusbar">{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" /></div>;
   return (
     <div class="statusbar">
       <span><span class={'dot' + (status.connected ? ' on' : '')} />{status.connected ? (status.synced ? 'connected' : 'syncing…') : save.state === 'connecting' ? 'connecting…' : 'offline'}</span>
       {docLabel && <span class="doclabel" title="Document under the cursor">{docLabel}</span>}
       <span title="Current paragraph layout">{layout}</span>
+      {readOnly && <span class="readonly-badge" title="This project was shared with you for viewing: you can read and compile it, but not change it">👁 view only</span>}
       {chord && <span class="chord">{chord} …</span>}
       {tracking && <span class="tracking" title="Change tracking is on (Ctrl+Shift+E): your edits are recorded under this name">● tracking changes{trackingAs ? ` as ${trackingAs}` : ''}</span>}
       {change && <span class="change-info" title="Tracked change under the cursor (right-click to accept / reject)">{change}</span>}
       {message && <span class={'msg ' + message.kind}>{message.text}</span>}
       <span class="spacer" />
       <SaveIndicator save={save} />
-      <span class="users" title={status.users.map(u => u.name).join(', ')}>
-        {status.users.map((u, i) => <span key={i} class="avatar" style={{ background: u.color }} title={u.name}>{u.name.slice(0, 1).toUpperCase()}</span>)}
-      </span>
+      <UserAvatars users={status.users} onJump={onJumpToUser} />
     </div>
   );
 }

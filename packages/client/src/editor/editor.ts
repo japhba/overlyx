@@ -11,7 +11,7 @@ import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import * as decoding from 'lib0/decoding';
-import { ySyncPlugin, yCursorPlugin, yUndoPlugin, initProseMirrorDoc } from 'y-prosemirror';
+import { ySyncPlugin, yCursorPlugin, yUndoPlugin, initProseMirrorDoc, ySyncPluginKey, relativePositionToAbsolutePosition } from 'y-prosemirror';
 import { schema, unquote, paramMap } from '@overlyx/core';
 import { lyxKeymap, chordPlugin } from './keymap';
 import { numberingPlugin } from './plugins/numbering';
@@ -34,12 +34,19 @@ export interface EditorHandle {
   provider: WebsocketProvider;
   /** editing is disabled until the document's metadata (authors, change tracking, macros) is known */
   setEditable(on: boolean): void;
+  /** viewer of a shared project: no local transaction may change the document (remote updates still apply) */
+  setViewOnly(on: boolean): void;
   /** current save / connection state */
   saveState(): SaveState;
   /** forget the local (IndexedDB) copy of this document; used after an epoch conflict */
   discardLocal(): Promise<void>;
+  /** move the cursor to where another user (an awareness client) is editing and scroll there; false if unknown */
+  gotoUser(clientId: number): boolean;
   destroy(): void;
 }
+
+/** A user connected to the document (one entry per browser tab / awareness client). */
+export interface PresenceUser { name: string; color: string; username?: string; clientId: number; /** has a known cursor position in this document */ hasCursor: boolean; self: boolean }
 
 /**
  * Where the user's edits are: `saved` = the .lyx file on the server contains everything, `saving` =
@@ -65,7 +72,7 @@ export interface EditorOptions {
   marginMode?: boolean;
   /** a child document rendered below its master (combined view) */
   child?: boolean;
-  onStatus?: (s: { connected: boolean; synced: boolean; users: { name: string; color: string }[] }) => void;
+  onStatus?: (s: { connected: boolean; synced: boolean; users: PresenceUser[] }) => void;
   onSelectionChange?: (view: EditorView) => void;
   onDocChange?: (view: EditorView) => void;
   /**
@@ -75,6 +82,8 @@ export interface EditorOptions {
    * as a version before discarding).
    */
   onStale?: (info: { pendingLocal: boolean }) => void;
+  /** the server closed the connection because this user's access to the project changed (revoked, or a new role) */
+  onAccessChanged?: () => void;
   onSaveState?: (s: SaveState) => void;
   /** start read-only (until `setEditable(true)`) */
   readOnly?: boolean;
@@ -150,8 +159,23 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   // document), syncing would merge two unrelated histories: bail out instead and let the UI decide.
   let epoch: string | null = null;
   let stale = false;
-  provider.on('connection-close', (ev: CloseEvent | null) => { if (ev) lastConnInfo = `closed with code ${ev.code}${ev.reason ? ': ' + ev.reason : ''}`; emitSaveState(); });
+  provider.on('connection-close', (ev: CloseEvent | null) => {
+    if (ev) lastConnInfo = `closed with code ${ev.code}${ev.reason ? ': ' + ev.reason : ''}`;
+    emitSaveState();
+    if (ev?.code === 4003) opts.onAccessChanged?.();
+  });
   provider.on('connection-error', () => { lastConnInfo = 'connection attempt failed'; emitSaveState(); });
+  // A remote update dispatched between a mouse click and the browser's (asynchronous)
+  // `selectionchange` event would make ProseMirror write its stale state selection back into the
+  // DOM and the click would be lost (y-prosemirror restores the *state* selection after applying
+  // remote changes). Reading the DOM selection before applying any sync message closes that gap.
+  // (Both document updates and awareness updates: remote cursors are decorations, and ProseMirror
+  // re-writes the DOM selection whenever decorations change, unless the mouse button is still down.)
+  const flushDomSelection = () => { try { (viewRef as any)?.domObserver?.flush(); } catch { /* ignore */ } };
+  {
+    const orig = (provider as any).messageHandlers[0];
+    (provider as any).messageHandlers[0] = (...args: unknown[]) => { flushDomSelection(); return orig(...args); };
+  }
   (provider as any).messageHandlers[2] = (_enc: unknown, dec: decoding.Decoder) => {
     const e = decoding.readVarString(dec);
     if (epoch !== null && e !== epoch && !stale) {
@@ -188,9 +212,10 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   const plugins: Plugin[] = [
     ySyncPlugin(fragment, { mapping }),
     yCursorPlugin(provider.awareness, {
-      cursorBuilder: (user: { name: string; color: string }) => {
+      cursorBuilder: (user: { name: string; color: string }, clientId?: number) => {
         const cursor = document.createElement('span');
         cursor.className = 'ProseMirror-yjs-cursor';
+        if (clientId !== undefined) cursor.dataset.client = String(clientId);
         cursor.style.borderColor = user.color;
         const label = document.createElement('div');
         label.style.backgroundColor = user.color;
@@ -223,9 +248,30 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   const state = EditorState.create({ schema, doc: initialDoc, plugins });
   let viewRef: EditorView | null = null;
   let editable = !opts.readOnly;
+  let viewOnly = false;
+  let flushing = false;
   const view = new EditorView(opts.container, {
     state,
     editable: () => editable,
+    // Decoration-only transactions (y-prosemirror re-renders the remote cursors from a setTimeout
+    // after every awareness change) make ProseMirror write its *state* selection back into the DOM.
+    // Right after a mouse click the DOM selection is ahead of the state (the browser's
+    // `selectionchange` event has not been processed yet), so the click would be lost: read the
+    // DOM selection first and re-create the transaction on the fresh state.
+    dispatchTransaction(tr) {
+      if (viewOnly && tr.docChanged && !tr.getMeta(ySyncPluginKey)) return;   // viewers cannot edit (the server drops their updates anyway)
+      if (!flushing && !tr.docChanged && tr.selectionSet === false && tr.selection.eq(view.state.selection)) {
+        flushing = true;
+        const before = view.state;
+        try { (view as any).domObserver.flush(); } catch { /* ignore */ } finally { flushing = false; }
+        if (view.state !== before) {
+          const fresh = view.state.tr;
+          for (const [k, v] of Object.entries((tr as any).meta as Record<string, unknown>)) fresh.setMeta(k, v);
+          tr = fresh;
+        }
+      }
+      view.updateState(view.state.apply(tr));
+    },
     nodeViews: {
       math_inline: (node, view, getPos) => new MathInlineView(node, view, getPos as () => number | undefined),
       math_display: (node, view, getPos) => new MathDisplayView(node, view, getPos as () => number | undefined),
@@ -310,12 +356,23 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     el.title = describeChange(el.dataset.change, Number(el.dataset.author), Number(el.dataset.time));
   });
 
-  const status = { connected: false, synced: false, users: [] as { name: string; color: string }[] };
+  const status = { connected: false, synced: false, users: [] as PresenceUser[] };
   const pushStatus = () => {
-    const users: { name: string; color: string }[] = [];
-    provider.awareness.getStates().forEach((s) => { if (s.user) users.push({ name: s.user.name, color: s.user.color }); });
+    const users: PresenceUser[] = [];
+    provider.awareness.getStates().forEach((s, clientId) => { if (s.user) users.push({ name: s.user.name, color: s.user.color, username: s.user.username, clientId, hasCursor: !!s.cursor, self: clientId === ydoc.clientID }); });
     status.users = users;
     opts.onStatus?.({ ...status });
+  };
+  /** Absolute document position of another client's cursor head, if it is in this document. */
+  const userCursorPos = (clientId: number): number | null => {
+    const st = provider.awareness.getStates().get(clientId);
+    if (!st?.cursor) return null;
+    const ystate = ySyncPluginKey.getState(view.state);
+    if (!ystate || ystate.binding.mapping.size === 0) return null;
+    try {
+      const pos = relativePositionToAbsolutePosition(ystate.doc, ystate.type, Y.createRelativePositionFromJSON(st.cursor.head), ystate.binding.mapping);
+      return pos === null ? null : Math.min(pos, view.state.doc.content.size - 1);
+    } catch { return null; }
   };
   provider.on('status', (e: { status: string }) => { status.connected = e.status === 'connected'; pushStatus(); emitSaveState(); });
   provider.on('sync', (s: boolean) => {
@@ -358,8 +415,25 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   return {
     view, ydoc, provider,
     setEditable(on: boolean) { if (on !== editable) { editable = on; view.setProps({ editable: () => editable }); } },
+    setViewOnly(on: boolean) { viewOnly = on; view.dom.classList.toggle('view-only', on); },
     saveState,
     async discardLocal() { try { await persistence.clearData(); } catch { /* ignore */ } },
+    gotoUser(clientId: number) {
+      const pos = userCursorPos(clientId);
+      if (pos === null) return false;
+      try {
+        const sel = TextSelection.near(view.state.doc.resolve(pos));
+        view.dispatch(view.state.tr.setSelection(sel).scrollIntoView().setMeta('addToHistory', false));
+      } catch { return false; }
+      view.focus();
+      // show where they are: flash their cursor label
+      requestAnimationFrame(() => {
+        const el = view.dom.querySelector(`.ProseMirror-yjs-cursor[data-client="${clientId}"]`) as HTMLElement | null;
+        el?.scrollIntoView({ block: 'center', inline: 'nearest' });
+        if (el) { el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1600); }
+      });
+      return true;
+    },
     destroy() {
       destroyed = true;
       stopRetry();

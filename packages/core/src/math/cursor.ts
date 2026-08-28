@@ -675,6 +675,64 @@ export class MathCursor {
     g.rows.splice(row, 1);
     if (isHull(this.owner)) { this.owner.numberedRows.splice(row, 1); this.owner.labels.splice(row, 1); }
   }
+
+  /* ---- LyX tabular-feature append-row / delete-row / append-column / delete-column in grids
+     (matrices, cases, arrays) and multi-row hulls (InsetMathGrid::doDispatch; InsetMathHull
+     restricts rows to rowChangeOK() and columns to colChangeOK() types) */
+  /** Can rows be added / removed at the cursor (LyX InsetMathHull::rowChangeOK for hulls)? */
+  gridRowsOK(): boolean {
+    const g = gridOf(this.owner);
+    return !!g && (!isHull(this.owner) || ROW_HULLS.has(this.owner.type));
+  }
+  /** Can columns be added / removed at the cursor (InsetMathHull::colChangeOK)? */
+  gridColsOK(): boolean {
+    const g = gridOf(this.owner);
+    return !!g && (!isHull(this.owner) || COL_HULLS.has(this.owner.type));
+  }
+  /** append-row: a new row below the current one; the cursor moves into it */
+  gridAppendRow(): boolean {
+    if (!this.gridRowsOK()) return false;
+    const g = gridOf(this.owner)!;
+    const r = this.row, c = this.col;
+    this.addRow(r);
+    this.idx = (r + 1) * g.ncols + c;
+    this.pos = 0;
+    return true;
+  }
+  /** delete-row: remove the current row (the last row of a grid stays) */
+  gridDeleteRow(): boolean {
+    if (!this.gridRowsOK()) return false;
+    const g = gridOf(this.owner)!;
+    if (g.rows.length <= 1) return false;
+    const r = this.row, c = this.col;
+    this.delRow(r);
+    this.idx = Math.min(r, g.rows.length - 1) * g.ncols + c;
+    this.pos = 0;
+    return true;
+  }
+  /** append-column: a new column right of the current one; the cursor moves into it */
+  gridAppendColumn(): boolean {
+    if (!this.gridColsOK()) return false;
+    const g = gridOf(this.owner)!;
+    const r = this.row, c = this.col;
+    addCol(g, c + 1);
+    if (!isHull(this.owner) && g.halign !== undefined) g.halign = g.halign.slice(0, c + 1) + 'c' + g.halign.slice(c + 1);
+    this.idx = r * g.ncols + c + 1;
+    this.pos = 0;
+    return true;
+  }
+  /** delete-column: remove the current column (the last column stays) */
+  gridDeleteColumn(): boolean {
+    if (!this.gridColsOK()) return false;
+    const g = gridOf(this.owner)!;
+    if (g.ncols <= 1) return false;
+    const r = this.row, c = this.col;
+    delCol(g, c);
+    if (!isHull(this.owner) && g.halign !== undefined) g.halign = g.halign.slice(0, c) + g.halign.slice(c + 1);
+    this.idx = r * g.ncols + Math.min(c, g.ncols - 1);
+    this.pos = 0;
+    return true;
+  }
   /** LFUN_NEWLINE_INSERT: split the current row at the cursor (hulls mutate simple/equation into align first) */
   newline() {
     const o = this.owner;
@@ -796,9 +854,10 @@ function ensureScript(s: Extract<Atom, { t: 'script' }>, up: boolean) {
 const SPACE_CYCLE = [',', ':', ';', 'quad', 'qquad', '!'];
 const nextSpace = (n: string) => SPACE_CYCLE[(SPACE_CYCLE.indexOf(n) + 1) % SPACE_CYCLE.length];
 
-const BIG_DELIMS = new Set(['(', ')', '\\{', '\\}', '\\lbrace', '\\rbrace', '[', ']', '|', '/', '\\slash', '\\|', '\\vert', '\\Vert', "'", '<', '>', '\\\\', '\\backslash', '\\langle', '\\lceil', '\\lfloor', '\\rangle', '\\rceil', '\\rfloor', '\\llbracket', '\\rrbracket', '\\downarrow', '\\Downarrow', '\\uparrow', '\\Uparrow', '\\updownarrow', '\\Updownarrow']);
+// LyX's InsetMathBig::isBigInsetDelim list plus \llangle/\rrangle (OverLyX's double angle brackets, see core/math/llangle.ts)
+const BIG_DELIMS = new Set(['(', ')', '\\{', '\\}', '\\lbrace', '\\rbrace', '[', ']', '|', '/', '\\slash', '\\|', '\\vert', '\\Vert', "'", '<', '>', '\\\\', '\\backslash', '\\langle', '\\lceil', '\\lfloor', '\\rangle', '\\rceil', '\\rfloor', '\\llbracket', '\\rrbracket', '\\llangle', '\\rrangle', '\\downarrow', '\\Downarrow', '\\uparrow', '\\Uparrow', '\\updownarrow', '\\Updownarrow']);
 const isBigDelim = (d: string) => BIG_DELIMS.has(d);
-const matchingDelim = (c: string): string => ({ '(': ')', '[': ']', '{': '}', '<': '>', '|': '|', '.': '.' } as Record<string, string>)[c] ?? '.';
+const matchingDelim = (c: string): string => ({ '(': ')', '[': ']', '{': '}', '<': '>', '|': '|', '.': '.', '\\{': '\\}', '\\langle': '\\rangle', '\\llangle': '\\rrangle', '\\lfloor': '\\rfloor', '\\lceil': '\\rceil', '\\llbracket': '\\rrbracket', '\\|': '\\|', '\\Vert': '\\Vert', '\\lVert': '\\rVert', '\\lvert': '\\rvert' } as Record<string, string>)[c] ?? '.';
 /** delimiter names as InsetMathDelim stores them (`\{` → `{`, `\langle` → `langle`) */
 export const delimName = (d: string) => (d.startsWith('\\') ? d.slice(1) : d);
 

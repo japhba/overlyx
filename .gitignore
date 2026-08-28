@@ -6,3 +6,4 @@ credentials.txt
 test-results/
 playwright-report/
 .env
+dist.new/

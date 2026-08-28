@@ -43,6 +43,9 @@ let seq = 0;
 let active: LyxMathField | null = null;
 /** the field that currently has the keyboard focus */
 export function activeMathField(): LyxMathField | null { return active; }
+/** called whenever a math field gains or loses the focus (the toolbar switches to LyX's math toolbar) */
+export const mathFocusListeners = new Set<(field: LyxMathField | null) => void>();
+function notifyFocus(): void { for (const l of mathFocusListeners) { try { l(active); } catch { /* ignore */ } } }
 
 export class LyxMathField {
   dom: HTMLSpanElement;
@@ -152,6 +155,15 @@ export class LyxMathField {
       case 'undo': return this.undo();
       case 'redo': return this.redo();
       case 'text': return change('text', () => { const sel = c.grabAndEraseSelection(); c.niceInsertAtom({ t: 'font', n: 'text', body: parseCell(sel, this.macros, 'text'), mode: 'text' }); });
+      // plain delimiter pair around the selection (no \left / \bigl): `\llangle x \rrangle`
+      case 'pair': return change('pair', () => { const [l, r] = args as string[]; const sel = c.grabAndEraseSelection(); c.niceInsert(l, false); c.niceInsert(r, false); c.posBackward(); if (sel) c.niceInsert(sel, false); });
+      // LyX math-size: \displaystyle etc. wrap the selection (or start an inset at the cursor)
+      case 'style': return change('style', () => c.handleNest({ t: 'style', n: String(args[0] ?? 'displaystyle').replace(/^\\/, ''), body: [] }));
+      // LyX tabular-feature append-row / delete-row / append-column / delete-column
+      case 'appendRow': return c.gridRowsOK() ? change('grid', () => c.gridAppendRow()) : false;
+      case 'deleteRow': return c.gridRowsOK() ? change('grid', () => c.gridDeleteRow()) : false;
+      case 'appendColumn': return c.gridColsOK() ? change('grid', () => c.gridAppendColumn()) : false;
+      case 'deleteColumn': return c.gridColsOK() ? change('grid', () => c.gridDeleteColumn()) : false;
       default: return false;
     }
   }
@@ -434,8 +446,8 @@ export class LyxMathField {
   /* ------------------------------------------------------------ events */
   private wire(): void {
     const input = this.input;
-    input.addEventListener('focus', () => { this.focused = true; active = this; this.dom.classList.add('focused'); this.opts.onFocus?.(); this.scheduleLayout(); });
-    input.addEventListener('blur', () => { this.focused = false; if (active === this) active = null; this.altM = false; this.dom.classList.remove('focused'); this.cursor.macroModeClose(); this.overlay.replaceChildren(); this.opts.onBlur?.(); });
+    input.addEventListener('focus', () => { this.focused = true; active = this; this.dom.classList.add('focused'); this.opts.onFocus?.(); this.scheduleLayout(); notifyFocus(); });
+    input.addEventListener('blur', () => { this.focused = false; if (active === this) active = null; this.altM = false; this.dom.classList.remove('focused'); this.cursor.macroModeClose(); this.overlay.replaceChildren(); this.opts.onBlur?.(); notifyFocus(); });
     input.addEventListener('keydown', ev => this.keydown(ev));
     input.addEventListener('beforeinput', ev => {
       if (ev.inputType === 'insertText' || ev.inputType === 'insertCompositionText') { if (ev.inputType === 'insertText') { ev.preventDefault(); this.typed(ev.data ?? ''); } return; }

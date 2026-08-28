@@ -33,6 +33,27 @@ CREATE TABLE IF NOT EXISTS versions (
   lyx TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS versions_doc ON versions(doc_id, created_at);
+CREATE TABLE IF NOT EXISTS projects (
+  name TEXT PRIMARY KEY,
+  title TEXT,
+  owner_id INTEGER,
+  kind TEXT NOT NULL DEFAULT 'project',
+  link_token TEXT UNIQUE,
+  link_role TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  user_id INTEGER,
+  email TEXT,
+  role TEXT NOT NULL,
+  via TEXT NOT NULL,
+  added_by INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS project_members_user ON project_members(project, user_id) WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS project_members_email ON project_members(project, email) WHERE email IS NOT NULL;
 CREATE TABLE IF NOT EXISTS builds (
   doc_id TEXT PRIMARY KEY,
   status TEXT NOT NULL,
@@ -47,6 +68,19 @@ CREATE TABLE IF NOT EXISTS builds (
 try { db.exec('ALTER TABLE ydocs ADD COLUMN epoch TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE builds ADD COLUMN warnings TEXT'); } catch { /* column exists */ }
+
+/** A project = a directory under the projects root; rows hold ownership and sharing (see access.ts). */
+export interface ProjectRow {
+  name: string; title: string | null; owner_id: number | null;
+  /** 'project' | 'example' (the personal welcome project) | 'example-gone' (deleted by its owner: not re-created) */
+  kind: string;
+  link_token: string | null; link_role: string | null; created_at: number;
+}
+export interface MemberRow {
+  id: number; project: string; user_id: number | null; email: string | null; role: string;
+  /** 'user' (added by name) | 'email' (invited by e-mail) | 'link' (joined through the share link) */
+  via: string; added_by: number | null; created_at: number;
+}
 
 export interface UserRow {
   id: number; username: string; display_name: string; password_hash: string | null; color: string;

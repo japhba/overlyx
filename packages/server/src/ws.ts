@@ -10,7 +10,9 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import { manager, type OpenDoc } from './docs.ts';
-import { userFromCookieHeader } from './auth.ts';
+import { userFromCookieHeader, type SessionUser } from './auth.ts';
+import { roleFor } from './access.ts';
+import { config } from './config.ts';
 
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
@@ -34,6 +36,7 @@ function send(doc: OpenDoc, conn: WebSocket, msg: Uint8Array): void {
 
 function closeConn(doc: OpenDoc, conn: WebSocket): void {
   const ids = doc.conns.get(conn);
+  doc.connUsers.delete(conn);
   if (ids) {
     doc.conns.delete(conn);
     awarenessProtocol.removeAwarenessStates(doc.awareness, [...ids], null);
@@ -73,23 +76,39 @@ function ensureDocHandlers(doc: OpenDoc): void {
 }
 
 export function attachWebSocket(server: Server): void {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
 
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname !== '/ws' && url.pathname !== '/ws/') return;
+    // browsers send the page's origin: a foreign site must not be able to open a socket with our cookie
+    if (!originAllowed(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     const user = userFromCookieHeader(req.headers.cookie);
     if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
-    wss.handleUpgrade(req, socket, head, (ws) => void handleConnection(ws, url.searchParams.get('doc') ?? ''));
+    const docId = decodeURIComponent(url.searchParams.get('doc') ?? '');
+    const role = roleFor(user, docId.split('/')[0]);
+    if (!role) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
+    wss.handleUpgrade(req, socket, head, (ws) => void handleConnection(ws, docId, user, role === 'view'));
   });
 
   wss.on('error', (e) => console.error('wss error', e));
 }
 
-async function handleConnection(conn: WebSocket, docId: string): Promise<void> {
+/** Same-origin check for the upgrade: the Origin's host must be ours (the request's Host, the public URL, or localhost in development). */
+export function originAllowed(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return true;   // not a browser (curl, tests)
+  let host: string;
+  try { host = new URL(origin).host; } catch { return false; }
+  if (host === req.headers.host) return true;
+  if (config.publicUrl) { try { if (host === new URL(config.publicUrl).host) return true; } catch { /* ignore */ } }
+  return /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) && process.env.NODE_ENV !== 'production';
+}
+
+async function handleConnection(conn: WebSocket, docId: string, user: SessionUser, readOnly: boolean): Promise<void> {
   let doc: OpenDoc;
   try {
-    doc = await manager.open(decodeURIComponent(docId));
+    doc = await manager.open(docId);
   } catch (e) {
     conn.close(4004, String(e));
     return;
@@ -97,6 +116,7 @@ async function handleConnection(conn: WebSocket, docId: string): Promise<void> {
   ensureDocHandlers(doc);
   conn.binaryType = 'arraybuffer';
   doc.conns.set(conn, new Set());
+  doc.connUsers.set(conn, user.id);
 
   conn.on('message', (data: ArrayBuffer | Buffer) => {
     try {
@@ -107,7 +127,12 @@ async function handleConnection(conn: WebSocket, docId: string): Promise<void> {
       switch (type) {
         case MSG_SYNC:
           encoding.writeVarUint(enc, MSG_SYNC);
-          syncProtocol.readSyncMessage(dec, enc, doc.ydoc, conn);
+          if (readOnly) {
+            // a viewer only ever gets the document: answer its state request, drop anything it sends
+            if (decoding.readVarUint(dec) === syncProtocol.messageYjsSyncStep1) syncProtocol.writeSyncStep2(enc, doc.ydoc, decoding.readVarUint8Array(dec));
+          } else {
+            syncProtocol.readSyncMessage(dec, enc, doc.ydoc, conn);
+          }
           if (encoding.length(enc) > 1) send(doc, conn, encoding.toUint8Array(enc));
           break;
         case MSG_AWARENESS:

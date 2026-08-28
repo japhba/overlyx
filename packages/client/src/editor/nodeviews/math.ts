@@ -218,6 +218,7 @@ export class MathInlineView implements NodeView {
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace),
     });
     (f as any)._macroKey = key;
+    (f as any)._toggleDisplay = () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); };
     this.field = f;
     this.dom.replaceChildren(f.dom);
     this.staticEl = null;
@@ -376,6 +377,7 @@ export class MathDisplayView implements NodeView {
       onCommand: key => { if (key === 'n') this.toggleNumbering(); },
     });
     (f as any)._macroKey = key;
+    (f as any)._toggleDisplay = () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); };
     this.field = f;
     if (this.staticEl) { this.staticEl.replaceWith(f.dom); this.staticEl = null; } else this.dom.insertBefore(f.dom, this.metaEl);
     this.ro?.observe(f.dom);

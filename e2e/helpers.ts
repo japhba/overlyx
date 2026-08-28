@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { Page, BrowserContext } from '@playwright/test';
+import type { Page, BrowserContext, Browser } from '@playwright/test';
 
 /** Root of the projects served by the server under test (an isolated copy when OVERLYX_PROJECTS_DIR is set). */
 export const PROJECTS_DIR = process.env.OVERLYX_PROJECTS_DIR ?? '/root/projects';
@@ -37,4 +37,29 @@ export function collectErrors(page: Page): string[] {
 export async function apiLogin(ctx: BrowserContext, creds = adminCredentials()): Promise<void> {
   const res = await ctx.request.post(BASE_URL + '/api/auth/login', { data: creds });
   if (!res.ok()) throw new Error('api login failed');
+}
+
+/**
+ * Projects are private to their owner (scratch directories created by the specs belong to the
+ * admin): share one with other test users so that they can open it. Runs as the admin.
+ */
+export async function shareProject(browser: Browser, project: string, usernames: string[], role: 'view' | 'edit' = 'edit'): Promise<void> {
+  const ctx = await browser.newContext();
+  try {
+    await apiLogin(ctx);
+    // listing registers directories that were created on disk by the spec
+    await ctx.request.get(BASE_URL + '/api/projects');
+    for (const who of usernames) {
+      const r = await ctx.request.post(`${BASE_URL}/api/projects/${encodeURIComponent(project)}/share/members`, { data: { who, role } });
+      if (!r.ok()) throw new Error(`sharing ${project} with ${who} failed: ${await r.text()}`);
+    }
+  } finally { await ctx.close(); }
+}
+
+/** Credentials of any seeded user (last entry for that user name in the credentials file). */
+export function userCredentials(username: string): { username: string; password: string } {
+  const lines = readFileSync(process.env.OVERLYX_E2E_CREDENTIALS ?? '/root/lyx/overlyx/data/credentials.txt', 'utf8').split('\n').filter(l => l.startsWith(username + '\t'));
+  if (!lines.length) throw new Error(`no credentials for ${username}`);
+  const [u, password] = lines[lines.length - 1].split('\t');
+  return { username: u, password };
 }

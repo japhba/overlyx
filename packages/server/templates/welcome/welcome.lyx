@@ -1,0 +1,1178 @@
+#LyX 2.5 created this file. For more info see https://www.lyx.org/
+\lyxformat 643
+\begin_document
+\begin_header
+\save_transient_properties true
+\origin unavailable
+\textclass article
+\begin_preamble
+%%LLANGLE%%
+\end_preamble
+\use_default_options true
+\maintain_unincluded_children no
+\language english
+\language_package default
+\inputencoding utf8
+\fontencoding auto
+\font_roman "default" "default"
+\font_sans "default" "default"
+\font_typewriter "default" "default"
+\font_math "auto" "auto"
+\font_default_family default
+\use_non_tex_fonts false
+\font_sc false
+\font_roman_osf false
+\font_sans_osf false
+\font_typewriter_osf false
+\font_sf_scale 100 100
+\font_tt_scale 100 100
+\use_microtype false
+\use_dash_ligatures true
+\graphics default
+\default_output_format default
+\output_sync 0
+\bibtex_command default
+\index_command default
+\float_placement class
+\float_alignment class
+\paperfontsize default
+\spacing single
+\use_hyperref true
+\pdf_bookmarks true
+\pdf_bookmarksnumbered false
+\pdf_bookmarksopen false
+\pdf_bookmarksopenlevel 1
+\pdf_breaklinks false
+\pdf_pdfborder true
+\pdf_colorlinks true
+\pdf_backref false
+\pdf_pdfusetitle true
+\pdf_quoted_options "linkcolor=blue,citecolor=blue,urlcolor=blue"
+\papersize default
+\use_geometry false
+\use_package amsmath 1
+\use_package amssymb 1
+\use_package cancel 0
+\use_package esint 0
+\use_package mathdots 0
+\use_package mathtools 0
+\use_package mhchem 0
+\use_package stackrel 0
+\use_package stmaryrd 0
+\use_package undertilde 0
+\cite_engine natbib
+\cite_engine_type authoryear
+\biblio_style plainnat
+\use_bibtopic false
+\use_indices false
+\paperorientation portrait
+\suppress_date false
+\justification default
+\crossref_package prettyref
+\use_formatted_ref 0
+\use_minted 0
+\use_lineno 0
+\backgroundcolor none
+\fontcolor none
+\notefontcolor lightgray
+\boxbgcolor red
+\table_border_color default
+\table_odd_row_color default
+\table_even_row_color default
+\table_alt_row_colors_start 1
+\index Index
+\shortcut idx
+\color #008000
+\end_index
+\secnumdepth 3
+\tocdepth 3
+\paragraph_separation indent
+\paragraph_indentation default
+\is_math_indent 0
+\math_numbering_side default
+\quotes_style english
+\dynamic_quotes 0
+\papercolumns 1
+\papersides 1
+\paperpagestyle default
+\tablestyle default
+\tracking_changes false
+\output_changes false
+\change_bars false
+\postpone_fragile_content true
+\html_math_output 0
+\html_css_as_file 0
+\html_be_strict false
+\docbook_table_output 0
+\docbook_mathml_prefix 1
+\docbook_mathml_version 0
+
+\end_header
+
+\begin_body
+
+\begin_layout Title
+Welcome to OverLyX
+\end_layout
+
+\begin_layout Author
+%%NAME%%
+\end_layout
+
+\begin_layout Abstract
+This is your personal example document,
+ %%FIRSTNAME%%.
+ It is an ordinary \SpecialChar LyX
+ file in a project of your own:
+ everything you do here is saved exactly as \SpecialChar LyX
+ would save it,
+ so you can open it in desktop \SpecialChar LyX
+ at any time.
+ Edit it,
+ break it,
+ share it —
+ or delete the project once you know your way around.
+\end_layout
+
+\begin_layout Section
+Editing text
+\begin_inset CommandInset label
+LatexCommand label
+name "sec:text"
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Every paragraph has a 
+\emph on
+layout
+\emph default
+ —
+ Standard,
+ Section,
+ Itemize,
+ Quote,
+ \SpecialChar ldots
+ —
+ chosen from the drop-down at the left of the toolbar,
+ with \SpecialChar LyX
+'s shortcuts (
+\family sans
+Alt+P
+\family default
+ followed by a letter,
+ e.g.
+
+\family sans
+ Alt+P 2
+\family default
+ for a section),
+ or from the right-click menu.
+ The outline on the right follows the sections;
+ click an entry to jump there.
+\end_layout
+
+\begin_layout Standard
+Character styles work as in \SpecialChar LyX
+:
+ 
+\emph on
+emphasis
+\emph default
+ with
+\family sans
+ Ctrl+E
+\family default
+,
+ 
+\series bold
+bold
+\series default
+ with
+\family sans
+ Ctrl+B
+\family default
+,
+ 
+\family typewriter
+typewriter
+\family default
+ and small caps from the Edit\SpecialChar menuseparator
+Text Style menu.
+ Footnotes
+\begin_inset Foot
+status collapsed
+
+\begin_layout Plain Layout
+A footnote.
+ Insets like this one open and close with a click on their label;
+ 
+\family sans
+Ctrl+Alt+F
+\family default
+ inserts one.
+\end_layout
+
+\end_inset
+
+ and 
+\begin_inset Quotes eld
+\end_inset
+
+typographic quotes
+\begin_inset Quotes erd
+\end_inset
+
+ are insets,
+ just like in \SpecialChar LyX
+.
+\end_layout
+
+\begin_layout Itemize
+Lists are layouts too:
+ this is an Itemize paragraph (
+\family sans
+Alt+P I
+\family default
+).
+\end_layout
+
+\begin_layout Itemize
+Press
+\family sans
+ Enter
+\family default
+ for the next item,
+ 
+\family sans
+Tab
+\family default
+ to nest it one level deeper,
+ and
+\family sans
+ Shift+Tab
+\family default
+ (or the layout drop-down) to get out again.
+\end_layout
+
+\begin_layout Enumerate
+Enumerate (
+\family sans
+Alt+P E
+\family default
+) numbers its items —
+
+\end_layout
+
+\begin_layout Enumerate
+and Description (
+\family sans
+Alt+P D
+\family default
+) sets the first words in bold,
+ like the shortcut list below.
+\end_layout
+
+\begin_layout Description
+Ctrl+M inline formula
+\end_layout
+
+\begin_layout Description
+Ctrl+Shift+M display formula
+\end_layout
+
+\begin_layout Description
+Ctrl+R compile the PDF
+\end_layout
+
+\begin_layout Description
+Ctrl+F find and replace
+\end_layout
+
+\begin_layout Description
+Ctrl+Shift+E track changes
+\end_layout
+
+\begin_layout Standard
+Cross-references are insets as well:
+ the mathematics are in Section 
+\begin_inset CommandInset ref
+LatexCommand ref
+reference "sec:math"
+plural "false"
+caps "false"
+noprefix "false"
+nolink "false"
+
+\end_inset
+
+,
+ the figure is Figure 
+\begin_inset CommandInset ref
+LatexCommand ref
+reference "fig:waves"
+plural "false"
+caps "false"
+noprefix "false"
+nolink "false"
+
+\end_inset
+
+ and the shortcuts are collected in Table 
+\begin_inset CommandInset ref
+LatexCommand ref
+reference "tab:shortcuts"
+plural "false"
+caps "false"
+noprefix "false"
+nolink "false"
+
+\end_inset
+
+.
+ Insert\SpecialChar menuseparator
+Label puts a label on the current paragraph;
+ Insert\SpecialChar menuseparator
+Cross-reference lists all labels of the project,
+ including those of child documents.
+\end_layout
+
+\begin_layout Section
+Mathematics
+\begin_inset CommandInset label
+LatexCommand label
+name "sec:math"
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Formulas are edited in place with a port of \SpecialChar LyX
+'s math editor,
+ so everything behaves as you are used to:
+ 
+\family sans
+Ctrl+M
+\family default
+ starts an inline formula such as 
+\begin_inset Formula $e^{i\pi}+1=0$
+\end_inset
+
+ and
+\family sans
+ Ctrl+Shift+M
+\family default
+ a displayed one.
+ Type a backslash to enter a command (
+\family typewriter
+
+\backslash
+int
+\family default
+,
+ 
+\family typewriter
+
+\backslash
+alpha
+\family default
+,
+ 
+\family typewriter
+
+\backslash
+frac
+\family default
+),
+ complete it with
+\family sans
+ Tab
+\family default
+,
+ and use
+\family sans
+ Space
+\family default
+ to leave the current inset:
+\end_layout
+
+\begin_layout Standard
+
+\begin_inset Formula 
+\begin{equation}
+\int_{-\infty}^{\infty}e^{-x^{2}}\,\mathrm{d}x=\sqrt{\pi}.\label{eq:gauss}
+\end{equation}
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+The math toolbars (they appear while the cursor is in a formula) hold the Greek letters,
+ operators,
+ relations,
+ arrows,
+ decorations,
+ fonts and delimiters of \SpecialChar LyX
+'s panels.
+ Delimiters come in every size —
+ plain,
+ 
+\family typewriter
+
+\backslash
+left
+\family default
+\SpecialChar ldots
+
+\family typewriter
+
+\backslash
+right
+\family default
+,
+ 
+\family typewriter
+
+\backslash
+big
+\family default
+,
+ 
+\family typewriter
+
+\backslash
+Big
+\family default
+,
+ 
+\family typewriter
+
+\backslash
+bigg
+\family default
+,
+ 
+\family typewriter
+
+\backslash
+Bigg
+\family default
+ —
+ including the double angle brackets,
+ for which OverLyX added a small macro to this document's preamble:
+\end_layout
+
+\begin_layout Standard
+
+\begin_inset Formula 
+\begin{equation}
+\left\llangle f,g\right\rrangle =\int_{0}^{1}f(x)\,g(x)\,\mathrm{d}x,\qquad\bigl\llangle x\bigr\rrangle \neq\left|x\right|.\label{eq:llangle}
+\end{equation}
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Document macros are honoured.
+ The following paragraph defines one —
+ a \SpecialChar LyX
+ math macro (Insert\SpecialChar menuseparator
+Math\SpecialChar menuseparator
+Macro) with one argument:
+\end_layout
+
+\begin_layout Standard
+\begin_inset FormulaMacro
+\newcommand{\E}[1]{\mathbb{E}\left[#1\right]}
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+From here on 
+\begin_inset Formula $\E{X}$
+\end_inset
+
+ expands to the definition (editable in place,
+ argument included);
+ equation (
+\begin_inset CommandInset ref
+LatexCommand ref
+reference "eq:macro"
+plural "false"
+caps "false"
+noprefix "false"
+nolink "false"
+
+\end_inset
+
+) uses it,
+ and the definition travels with the document to \SpecialChar LaTeX
+.
+\end_layout
+
+\begin_layout Standard
+
+\begin_inset Formula 
+\begin{align}
+\mathrm{Var}\left[X\right] & =\E{X^{2}}-\E{X}^{2},\label{eq:macro}\\
+\mathrm{Cov}\left[X,Y\right] & =\E{XY}-\E{X}\E{Y}.\nonumber 
+\end{align}
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Press
+\family sans
+ Enter
+\family default
+ inside a formula to add a row (an inline formula becomes an
+\family typewriter
+ align
+\family default
+ environment),
+ 
+\family sans
+Tab
+\family default
+ to move between cells,
+ and use the matrix button of the math toolbar for something like 
+\begin_inset Formula $\begin{pmatrix}a & b\\
+c & d
+\end{pmatrix}$
+\end_inset
+
+.
+ The right-hand 
+\emph on
+ Source
+\emph default
+ panel shows the \SpecialChar LyX
+ and \SpecialChar LaTeX
+ source of the paragraph under the cursor.
+\end_layout
+
+\begin_layout Section
+Figures,
+ tables and references
+\begin_inset CommandInset label
+LatexCommand label
+name "sec:floats"
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Figure 
+\begin_inset CommandInset ref
+LatexCommand ref
+reference "fig:waves"
+plural "false"
+caps "false"
+noprefix "false"
+nolink "false"
+
+\end_inset
+
+ is a floating figure with a PDF graphic from the project's
+\family typewriter
+ figures
+\family default
+ folder.
+ Upload your own files with the upload button next to a project in the file browser (or drop them onto it);
+ SVG,
+ PNG,
+ JPEG,
+ PDF and EPS are rendered in the editor and converted for \SpecialChar LaTeX
+ as needed.
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement document
+alignment document
+wide false
+sideways false
+status open
+
+\begin_layout Plain Layout
+\align center
+\begin_inset Graphics
+	filename figures/waves.pdf
+	width 70col%
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Plain Layout
+
+\begin_inset Caption Standard
+
+\begin_layout Plain Layout
+
+\begin_inset CommandInset label
+LatexCommand label
+name "fig:waves"
+
+\end_inset
+
+Three damped oscillations,
+ 
+\begin_inset Formula $x(t)=A\,e^{-t/4}\sin(\omega t+\varphi)$
+\end_inset
+
+.
+ The figure is
+\family typewriter
+ figures/waves.pdf
+\family default
+ in this project;
+ double-click it to change its size.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Tables are \SpecialChar LyX
+ tables:
+ the table toolbar (shown while the cursor is in a table) adds and removes rows and columns,
+ sets borders and alignment,
+ and joins cells.
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float table
+placement document
+alignment document
+wide false
+sideways false
+status open
+
+\begin_layout Plain Layout
+
+\begin_inset Caption Standard
+
+\begin_layout Plain Layout
+
+\begin_inset CommandInset label
+LatexCommand label
+name "tab:shortcuts"
+
+\end_inset
+
+Keyboard shortcuts you will use most (Help\SpecialChar menuseparator
+Keyboard shortcuts lists them all).
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Plain Layout
+\align center
+\begin_inset Tabular
+<lyxtabular version="3" rows="8" columns="2">
+<features tabularvalignment="middle">
+<column alignment="left" valignment="top">
+<column alignment="left" valignment="top">
+<row>
+<cell alignment="left" valignment="top" topline="true" bottomline="true" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+Keys
+\end_layout
+
+\end_inset
+</cell>
+<cell alignment="left" valignment="top" topline="true" bottomline="true" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+Action
+\end_layout
+
+\end_inset
+</cell>
+</row>
+<row>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+
+\family sans
+Ctrl+M
+\family default
+ / 
+\family sans
+Ctrl+Shift+M
+\end_layout
+
+\end_inset
+</cell>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+inline / display formula
+\end_layout
+
+\end_inset
+</cell>
+</row>
+<row>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+
+\family sans
+Alt+P
+\family default
+ + letter
+\end_layout
+
+\end_inset
+</cell>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+paragraph layout (1–6 sections,
+ I,
+ E,
+ D lists)
+\end_layout
+
+\end_inset
+</cell>
+</row>
+<row>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+
+\family sans
+Ctrl+E
+\family default
+,
+ 
+\family sans
+Ctrl+B
+\end_layout
+
+\end_inset
+</cell>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+emphasis,
+ bold
+\end_layout
+
+\end_inset
+</cell>
+</row>
+<row>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+
+\family sans
+Ctrl+R
+\end_layout
+
+\end_inset
+</cell>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+compile the PDF
+\end_layout
+
+\end_inset
+</cell>
+</row>
+<row>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+
+\family sans
+Ctrl+Shift+E
+\end_layout
+
+\end_inset
+</cell>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+track changes on/off
+\end_layout
+
+\end_inset
+</cell>
+</row>
+<row>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+
+\family sans
+Ctrl+Alt+F
+\family default
+ / 
+\family sans
+Ctrl+Alt+N
+\family default
+ / 
+\family sans
+Ctrl+Alt+C
+\end_layout
+
+\end_inset
+</cell>
+<cell alignment="left" valignment="top" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+footnote / note / comment
+\end_layout
+
+\end_inset
+</cell>
+</row>
+<row>
+<cell alignment="left" valignment="top" bottomline="true" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+
+\family sans
+Ctrl+F
+\end_layout
+
+\end_inset
+</cell>
+<cell alignment="left" valignment="top" bottomline="true" usebox="none">
+\begin_inset Text
+
+\begin_layout Plain Layout
+find and replace
+\end_layout
+
+\end_inset
+</cell>
+</row>
+</lyxtabular>
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Citations come from the project's BibTeX files (
+\family typewriter
+refs.bib
+\family default
+ here):
+ Insert\SpecialChar menuseparator
+Citation searches them by author,
+ year and title.
+ OverLyX writes \SpecialChar LyX
+ files,
+ \SpecialChar LyX
+ writes \SpecialChar LaTeX
+ 
+\begin_inset CommandInset citation
+LatexCommand citep
+key "lamport1994"
+literal "false"
+
+\end_inset
+
+,
+ and underneath it all is \SpecialChar TeX
+ 
+\begin_inset CommandInset citation
+LatexCommand citep
+key "knuth1984"
+literal "false"
+
+\end_inset
+
+.
+ Concurrent edits from several people are merged with conflict-free replicated data types 
+\begin_inset CommandInset citation
+LatexCommand citep
+key "shapiro2011"
+literal "false"
+
+\end_inset
+
+,
+ which is why nobody ever has to resolve a merge conflict.
+\end_layout
+
+\begin_layout Section
+Working together
+\begin_inset CommandInset label
+LatexCommand label
+name "sec:collab"
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+
+\series bold
+Sharing.
+
+\series default
+ A project is private to you until you share it —
+ like a Google Doc.
+ File\SpecialChar menuseparator
+Share project\SpecialChar ldots
+ (or the share button next to the project in the file browser) invites people by username or e-mail address as
+\emph on
+ viewers
+\emph default
+ or 
+\emph on
+ editors
+\emph default
+,
+ and can turn on a link that anyone signed in can use.
+ Someone invited by e-mail gets access the moment they sign in with Google.
+\end_layout
+
+\begin_layout Standard
+
+\series bold
+Presence.
+
+\series default
+ Everybody who has the document open appears as a small avatar in the status bar,
+ and their cursors and selections show in the text in their colour.
+ Click an avatar to jump to where that person is editing.
+\end_layout
+
+\begin_layout Standard
+
+\series bold
+Saving.
+
+\series default
+ There is no Save button:
+ every change goes to the server as you type and is written to the
+\family typewriter
+ .lyx
+\family default
+ file a moment later (the status bar says 
+\emph on
+ All changes saved
+\emph default
+).
+ If you open the same file in desktop \SpecialChar LyX
+ and save it there,
+ OverLyX picks up the change.
+ Working offline is fine too —
+ edits are kept in the browser and merge when you are back.
+\end_layout
+
+\begin_layout Standard
+
+\series bold
+Changes,
+ notes and comments.
+
+\series default
+ 
+\family sans
+Ctrl+Shift+E
+\family default
+ turns on change tracking;
+ the review toolbar walks through the changes and accepts or rejects them,
+ just as in \SpecialChar LyX
+.
+ Notes are invisible in the output —
+ this one is a \SpecialChar LyX
+ note:
+\begin_inset Note Note
+status open
+
+\begin_layout Plain Layout
+A \SpecialChar LyX
+ note.
+ It is stored in the file and shown in desktop \SpecialChar LyX
+,
+ but never printed.
+\end_layout
+
+\end_inset
+
+ Comments become discussion threads (reply,
+ resolve),
+ and View\SpecialChar menuseparator
+Notes & comments in the margin shows them next to the text:
+\begin_inset Note Comment
+status open
+
+\begin_layout Plain Layout
+OverLyX (2026-08-28 09:00):
+\end_layout
+
+\begin_layout Plain Layout
+A comment thread.
+ Click it to reply or to mark it resolved.
+\end_layout
+
+\end_inset
+
+ File\SpecialChar menuseparator
+Versions keeps named versions and automatic snapshots of the document;
+ any of them can be compared and restored.
+\end_layout
+
+\begin_layout Section
+Compiling and exporting
+\begin_inset CommandInset label
+LatexCommand label
+name "sec:compile"
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+
+\family sans
+Ctrl+R
+\family default
+ compiles the document with
+\family typewriter
+ pdflatex
+\family default
+ (via
+\family typewriter
+ latexmk
+\family default
+) in the background and shows the result in the PDF panel;
+ errors and warnings are listed underneath it.
+ File\SpecialChar menuseparator
+Export also offers the \SpecialChar LaTeX
+ source,
+ a build with native \SpecialChar LyX
+ for comparison,
+ and the
+\family typewriter
+ .lyx
+\family default
+ file itself for download.
+ Document\SpecialChar menuseparator
+Settings changes the class,
+ the preamble,
+ packages and the bibliography style.
+\end_layout
+
+\begin_layout Section
+Where to go next
+\begin_inset CommandInset label
+LatexCommand label
+name "sec:next"
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Create a project of your own with the
+\series bold
+ + Project
+\series default
+ button in the file browser and upload your existing
+\family typewriter
+ .lyx
+\family default
+ files,
+ figures and bibliographies —
+ or ask a colleague to share theirs with you.
+ Help\SpecialChar menuseparator
+Keyboard shortcuts lists everything;
+ the source of this editor is at
+\begin_inset CommandInset href
+LatexCommand href
+name "github.com/japhba/overlyx"
+target "https://github.com/japhba/overlyx"
+literal "false"
+
+\end_inset
+
+.
+\end_layout
+
+\begin_layout Standard
+Enjoy writing,
+ %%FIRSTNAME%%!
+\end_layout
+
+\begin_layout Standard
+
+\begin_inset CommandInset bibtex
+LatexCommand bibtex
+btprint "btPrintCited"
+bibfiles "refs"
+options "plainnat"
+encoding "default"
+
+\end_inset
+
+
+\end_layout
+
+\end_body
+\end_document

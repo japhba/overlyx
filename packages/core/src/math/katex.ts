@@ -130,7 +130,14 @@ export function atomToKatex(a: Atom, ctx: KatexContext, mode: 'math' | 'text'): 
       const lm = /^(\\langle|\[)(\\!.*)$/.exec(l), rm = /^(\\rangle|\])(\\!.*)$/.exec(r);
       return `\\left${lm ? lm[1] + lm[2] : l}${cellToKatex(a.body, ctx, a, 0)}${rm ? rm[2].replace(/^\\!/, '') + '\\!' : ''}\\right${rm ? rm[1] : r}`;
     }
-    case 'big': { const n = a.n.replace(/^(big|Big|bigg|Bigg)gg?/, '$1'); return `\\${n}${a.d.startsWith('\\') ? a.d : a.d === '{' ? '\\{' : a.d === '}' ? '\\}' : a.d}`; }
+    case 'big': {
+      const n = a.n.replace(/^(big|Big|bigg|Bigg)gg?/, '$1');
+      // double delimiters (stmaryrd / OverLyX): two glyphs of the same size, kerned together
+      const dbl: Record<string, [string, string]> = { '\\llangle': ['\\langle', '\\langle'], '\\rrangle': ['\\rangle', '\\rangle'], '\\llbracket': ['[', '['], '\\rrbracket': [']', ']'] };
+      const two = dbl[a.d];
+      if (two) return `\\${n}${two[0]}\\mkern-4.5mu\\${n}${two[1]}`;
+      return `\\${n}${a.d.startsWith('\\') ? a.d : a.d === '{' ? '\\{' : a.d === '}' ? '\\}' : a.d}`;
+    }
     case 'brace': return `{${cellToKatex(a.body, ctx, a, 0, mode)}}`;
     case 'font': {
       const n = FONT_MAP[a.n] ?? a.n;
