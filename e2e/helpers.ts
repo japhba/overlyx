@@ -13,7 +13,9 @@ export function adminCredentials(): { username: string; password: string } {
   return { username, password };
 }
 
-export async function login(page: Page, creds = adminCredentials()): Promise<void> {
+export async function login(page: Page, creds = adminCredentials(), opts: { tour?: boolean } = {}): Promise<void> {
+  // the interactive tour is offered once per browser; keep it out of the way unless a spec wants it
+  if (!opts.tour) await page.addInitScript(TOUR_SEEN_SCRIPT);
   await page.goto('/');
   await page.getByPlaceholder('Username').fill(creds.username);
   await page.getByPlaceholder('Password').fill(creds.password);
@@ -34,7 +36,10 @@ export function collectErrors(page: Page): string[] {
   return errors;
 }
 
+export const TOUR_SEEN_SCRIPT = () => { try { if (!localStorage.getItem('ol.tour')) localStorage.setItem('ol.tour', 'e2e'); } catch { /* ignore */ } };
+
 export async function apiLogin(ctx: BrowserContext, creds = adminCredentials()): Promise<void> {
+  await ctx.addInitScript(TOUR_SEEN_SCRIPT);      // pages of this context must not be offered the tour
   const res = await ctx.request.post(BASE_URL + '/api/auth/login', { data: creds });
   if (!res.ok()) throw new Error('api login failed');
 }

@@ -7,7 +7,7 @@ import { addColumnAfter, addColumnBefore, addRowAfter, addRowBefore, deleteColum
 import { api, type DocMeta, type User } from '../api';
 import { Login } from './Login';
 import { FileBrowser } from './FileBrowser';
-import { Home } from './Home';
+import { Home, projectDocs } from './Home';
 import { TextEditor } from './TextEditor';
 import { ShareDialog } from './Share';
 import { GitDialog } from './Git';
@@ -20,6 +20,8 @@ import { Ruler } from './Ruler';
 import { StatusBar, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget } from './SourcePane';
 import { activeMathField, mathFocusListeners, type LyxMathField } from '../editor/lyxmath/field';
+import { Tour, tourWanted, rememberTour, type TourEnd } from './Tour';
+import { FeedbackDialog } from './Feedback';
 import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams } from './Dialogs';
 import { createEditor, refreshMacros, describeChange, type EditorHandle, type SaveState } from '../editor/editor';
 import { generateLyx } from './SourcePane';
@@ -165,6 +167,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [shareFor, setShareFor] = useState<string | null>(null);
   // the project whose git dialog (clone URL, tokens, history) is open
   const [gitFor, setGitFor] = useState<string | null>(null);
+  /** the interactive walkthrough: offered once per browser, restartable from Help */
+  const [tour, setTour] = useState<'intro' | 'steps' | null>(() => (tourWanted() ? 'intro' : null));
   const [viewOnly, setViewOnly] = useState(false);
   // LyX toolbars: standard / extra always (unless hidden), math / table / review on, off or automatic (LyX's "auto")
   const [toolbars, setToolbars] = useState<ToolbarPrefs>(loadToolbarPrefs);
@@ -573,6 +577,14 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const base = (id: string) => id.split('/').pop() ?? id;
   const docLabel = docId ? (combined && childIds.length ? [docId, ...childIds].map(base).join(' + ') : docId) : '';
 
+  // Help is available everywhere (the start screen has no other menus; feedback must be reachable there)
+  const helpMenu: MenuDef = { title: 'Help', items: [
+    { label: 'Take the tour', action: () => setTour('intro') },
+    { label: 'Keyboard shortcuts', action: () => setDialog({ name: 'help' }) },
+    { sep: true },
+    { label: 'Report a problem / send feedback…', action: () => setDialog({ name: 'feedback' }) },
+    { label: 'About OverLyX', action: () => alert('OverLyX — a LyX-compatible collaborative WYSIWYG editor for LaTeX documents.\nDocuments are stored as native .lyx files; formulas are edited with a port of LyX\'s math editor; collaboration via Yjs CRDTs.') },
+  ] };
   const textFileMenus: MenuDef[] = docId ? [
     { title: 'File', items: [
       { label: 'Open (file browser)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
@@ -586,7 +598,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Close other tabs', action: () => setTabs([docId]) },
     ] },
   ] : [];
-  const menus: MenuDef[] = docId && !isLyxDoc ? textFileMenus : docId ? [
+  const menus: MenuDef[] = [...(docId && !isLyxDoc ? textFileMenus : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       { label: 'Open (file browser)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
@@ -807,11 +819,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { sep: true },
       { label: 'Reload metadata (macros, bibliography)', action: () => { if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); notify('Metadata reloaded'); }); } },
     ] },
-    { title: 'Help', items: [
-      { label: 'Keyboard shortcuts', action: () => setDialog({ name: 'help' }) },
-      { label: 'About OverLyX', action: () => alert('OverLyX — a LyX-compatible collaborative WYSIWYG editor for LaTeX documents.\nDocuments are stored as native .lyx files; math is edited live with MathLive; collaboration via Yjs CRDTs.') },
-    ] },
-  ] : [];
+  ] : []), helpMenu];
 
   /** Entries picked in the citation dialog become known to the editor (for rendering author/year) even if they were not cited before. */
   const rememberBib = (entries: { key: string; author: string; year: string; title: string }[]) => {
@@ -1089,7 +1097,11 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     if (view) { C.insertMath(false)(view); setTimeout(() => activeMathField()?.execute('insert', latex), 60); }
   };
   const renderDialog = () => {
-    if (!dialog || !view || !docId) return null;
+    if (!dialog) return null;
+    // dialogs that do not need an editor (start screen, text files)
+    if (dialog.name === 'feedback') return <FeedbackDialog docId={docId} onClose={() => { setDialog(null); view?.focus(); }} />;
+    if (dialog.name === 'help') return <HelpDialog onClose={() => { setDialog(null); view?.focus(); }} />;
+    if (!view || !docId) return null;
     const close = () => { setDialog(null); view.focus(); };
     const project = viewDocId(view).split('/')[0] || docId.split('/')[0];
     const docDir = view.dom.dataset.docDir ?? editorContext.docDir;
@@ -1153,7 +1165,6 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t, n) => run(C.insertHref(t, n))} />;
       case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); })} />;
-      case 'help': return <HelpDialog onClose={close} />;
       case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
       case 'stats': return view ? <StatsDialog view={view} onClose={close} /> : null;
       case 'tex': return <TexDialog tex={String(dialog.arg ?? '')} onClose={close} />;
@@ -1178,6 +1189,18 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     }
     return null;
   };
+
+  /** The tour practises on the user's example project (a document of their own); failing that, on the open document. */
+  const openExample = useCallback(async (): Promise<boolean> => {
+    try {
+      const { projects } = await api.projects();
+      const ex = projects.find(p => p.kind === 'example' && p.via === 'owner');
+      const doc = ex && projectDocs(ex)[0];
+      if (ex && doc) { openInTab(`${ex.name}/${doc}`); return true; }
+    } catch { /* offline: fall through */ }
+    return isLyxDoc;
+  }, [openInTab, isLyxDoc]);
+  const endTour = useCallback((how: TourEnd) => { rememberTour(how); setTour(null); }, []);
 
   const sourceTarget: SourceTarget | null = (() => {
     if (!view) return null;
@@ -1222,15 +1245,15 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
                   register={(cid, h) => { if (h) childRefs.current.set(cid, h); else childRefs.current.delete(cid); rerender(); }} />
               ))}
             </div>
-          ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} notify={notify} />}
+          ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); setTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} notify={notify} />}
         </div>
         {isLyxDoc && rightTab && (
           <div class={'sidebar right' + (rightTab === 'pdf' ? ' wide' : rightTab === 'source' ? ' source' : '')}>
             <div class="panel-tabs">
-              <button class={rightTab === 'outline' ? 'active' : ''} onClick={() => setRightTab('outline')}>Outline</button>
-              <button class={rightTab === 'source' ? 'active' : ''} onClick={() => setRightTab('source')} title="LyX / LaTeX source (Ctrl+Alt+S)">Source</button>
-              <button class={rightTab === 'pdf' ? 'active' : ''} onClick={() => setRightTab('pdf')}>PDF</button>
-              <button class={rightTab === 'versions' ? 'active' : ''} onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }}>Versions</button>
+              <button class={rightTab === 'outline' ? 'active' : ''} data-tab="outline" onClick={() => setRightTab('outline')}>Outline</button>
+              <button class={rightTab === 'source' ? 'active' : ''} data-tab="source" onClick={() => setRightTab('source')} title="LyX / LaTeX source (Ctrl+Alt+S)">Source</button>
+              <button class={rightTab === 'pdf' ? 'active' : ''} data-tab="pdf" onClick={() => setRightTab('pdf')}>PDF</button>
+              <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }}>Versions</button>
               <button onClick={() => setRightTab(null)}>✕</button>
             </div>
             {rightTab === 'outline' && <div class="panel-body"><Outline view={masterView} items={outline} activePos={activePos} /></div>}
@@ -1248,6 +1271,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       {renderDialog()}
       {shareFor && <ShareDialog project={shareFor} user={user} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
+      {tour && <Tour intro={tour === 'intro'} onEnd={endTour}
+        ctx={{ docId, ready: isLyxDoc && status.synced && !!view, docTick, layout, inMath: !!mathField, saveState: save.state, rightTab, pdfBusy: pdf.busy, pdfBuiltAt: pdf.builtAt ?? 0, shareOpen: !!shareFor, gitOpen: !!gitFor, marginMode }}
+        actions={{ openExample, showRight: () => { if (!rightTab) setRightTab('outline'); }, showFiles: () => setShowFiles(true) }} />}
     </div>
   );
 }

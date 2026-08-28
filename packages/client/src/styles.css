@@ -619,3 +619,35 @@ button { cursor: pointer; }
 .dialog table.stats { border-collapse: collapse; margin: 6px 0; }
 .dialog table.stats th, .dialog table.stats td { padding: 3px 12px 3px 0; text-align: right; }
 .dialog table.stats td:first-child, .dialog table.stats th:first-child { text-align: left; }
+
+/* interactive tour (app/Tour.tsx): the overlay lets clicks through, only the card takes them */
+.tour-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 90; }
+.tour-spot { position: fixed; z-index: 45; pointer-events: none; border-radius: 5px; box-shadow: 0 0 0 9999px rgba(20,30,50,0.28), 0 0 0 2px var(--accent), 0 0 14px 2px rgba(59,110,165,0.6); transition: left 0.15s, top 0.15s, width 0.15s, height 0.15s; }
+.tour-card { position: fixed; z-index: 95; width: 340px; max-width: calc(100vw - 24px); background: #fff; border: 1px solid #b9cde6; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); padding: 12px 14px; font-family: var(--ui-font); font-size: 13px; line-height: 1.45; color: #222; }
+.tour-card h3 { margin: 0; font-size: 14px; color: var(--accent); }
+.tour-card p { margin: 6px 0; }
+.tour-card code { font-family: "DejaVu Sans Mono", Menlo, monospace; font-size: 12px; background: #f3f3f1; padding: 0 3px; border-radius: 2px; }
+.tour-card kbd { font-family: var(--ui-font); font-size: 11px; border: 1px solid #bbb; border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; background: #fafafa; white-space: nowrap; }
+.tour-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.tour-head h3 { flex: 1; }
+.tour-count { color: #888; font-size: 11px; }
+.tour-close { border: 0; background: none; color: #888; font-size: 13px; padding: 0 2px; cursor: pointer; }
+.tour-close:hover { color: #222; }
+.tour-task { margin: 8px 0 2px; padding: 4px 8px; border-radius: 4px; background: #fff8e1; color: #7a5a00; font-size: 12px; }
+.tour-task.done { background: #eef7ee; color: #2e7d32; font-weight: 600; }
+.tour-buttons { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.tour-buttons .btn { font-size: 12px; padding: 4px 12px; }
+.tour-buttons .btn:disabled { opacity: 0.5; }
+.tour-dots { flex: 1; display: flex; justify-content: center; gap: 4px; }
+.tour-dots i { width: 6px; height: 6px; border-radius: 50%; background: #d5d5d0; }
+.tour-dots i.past { background: #9fb8d6; }
+.tour-dots i.on { background: var(--accent); }
+.tour-muted { color: #666; font-size: 12px; }
+.tour-error { color: #b00; font-size: 12px; }
+
+/* feedback dialog (app/Feedback.tsx) */
+.feedback-note { margin: 0; font-size: 12px; color: #555; }
+.feedback-opt { display: flex; gap: 6px; align-items: baseline; font-size: 12px; color: #444; }
+.feedback-opt code { font-size: 11px; background: #f3f3f1; padding: 0 3px; border-radius: 2px; }
+.feedback-error { color: #b00; font-size: 12px; }
+.feedback-done p { margin: 0; }

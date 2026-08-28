@@ -13,6 +13,7 @@ import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, 
 import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
 import { sandboxAvailable } from './sandbox.ts';
+import { feedbackRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
 import { parseLyx, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText } from '@overlyx/core';
 
@@ -37,6 +38,7 @@ app.use('/git', gitRouter());
 const api = express.Router();
 api.use(requireAuth);
 api.use(express.json({ limit: '5mb' }));
+api.use(feedbackRoutes());
 
 /* ----------------------------------------------------------------- access */
 
@@ -718,7 +720,7 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 // A promise nobody awaited must not take the server (and everybody's session) down: log it.
-process.on('unhandledRejection', (reason) => { console.error('[server] unhandled rejection:', reason); });
+process.on('unhandledRejection', (reason) => { console.error('[server] unhandled rejection:', reason); reportServerError(reason); });
 // A real crash: save what can be saved, then let systemd restart us.
 process.on('uncaughtException', (err) => {
   console.error('[server] uncaught exception — saving open documents and exiting:', err);

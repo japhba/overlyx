@@ -54,6 +54,14 @@ export const config = {
   gitCommitMs: Number(process.env.OVERLYX_GIT_COMMIT_MS ?? 2 * 60 * 1000),
   /** longest time changes may stay uncommitted while editing goes on (ms) */
   gitCommitMaxWaitMs: Number(process.env.OVERLYX_GIT_COMMIT_MAX_WAIT ?? 15 * 60 * 1000),
+  /** feedback + error reports become GitHub issues of this repository (feedback.ts); needs a token with Issues: write */
+  github: {
+    repo: (process.env.GITHUB_REPO ?? 'japhba/overlyx').trim(),
+    token: (process.env.GITHUB_TOKEN ?? '').trim(),
+    api: (process.env.GITHUB_API_URL ?? 'https://api.github.com').replace(/\/$/, ''),
+  },
+  /** automatic issues for uncaught browser / server errors (OVERLYX_ERROR_REPORTS=off keeps only Help ▸ Report a problem) */
+  errorReports: process.env.OVERLYX_ERROR_REPORTS !== 'off',
   sessionDays: 30,
 };
 

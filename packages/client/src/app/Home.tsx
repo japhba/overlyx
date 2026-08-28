@@ -13,8 +13,8 @@ export function projectDocs(p: Project): string[] {
 }
 export const projectTitle = (p: Project) => p.title ?? p.name;
 
-export function Home({ user, refreshKey, onOpen, onShare, onGit, onChanged, onBrowse, notify }: {
-  user: User; refreshKey: number; onOpen: (id: string) => void; onShare: (project: string) => void; onGit: (project: string) => void; onChanged: () => void; onBrowse: () => void;
+export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, onChanged, onBrowse, notify }: {
+  user: User; refreshKey: number; onOpen: (id: string) => void; onStartTour: (id: string) => void; onShare: (project: string) => void; onGit: (project: string) => void; onChanged: () => void; onBrowse: () => void;
   notify: (text: string, kind?: 'info' | 'error') => void;
 }) {
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -53,6 +53,7 @@ export function Home({ user, refreshKey, onOpen, onShare, onGit, onChanged, onBr
           <div class="blurb">
             A short tour of OverLyX written for you, {firstName}: text and layouts, formulas and macros, a figure, a table, citations, notes and comments, sharing and compiling.
             It is a normal LyX file in a project of your own — edit it, press <b>Ctrl+R</b> to see the PDF, share it with a colleague, or delete it when you are done.
+            <b>Start the tour</b> opens it with an interactive walkthrough that asks you to try the essentials (every step can be skipped).
           </div>
         )}
         {!isExample && <div class="meta">{p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · {docs.length} document{docs.length === 1 ? '' : 's'}, {p.files.length} file{p.files.length === 1 ? '' : 's'}</div>}
@@ -62,7 +63,9 @@ export function Home({ user, refreshKey, onOpen, onShare, onGit, onChanged, onBr
           {!docs.length && <span class="meta">No documents yet.</span>}
         </div>
         <div class="actions">
-          {docs[0] && <button class="btn primary small" onClick={() => onOpen(p.name + '/' + docs[0])}>{isExample ? 'Start the tour' : 'Open'}</button>}
+          {docs[0] && (isExample
+            ? <button class="btn primary small" data-start-tour onClick={() => onStartTour(p.name + '/' + docs[0])}>Start the tour</button>
+            : <button class="btn primary small" onClick={() => onOpen(p.name + '/' + docs[0])}>Open</button>)}
           {p.role === 'owner' && p.via !== 'admin' && <button class="btn small" onClick={() => onShare(p.name)} data-share={p.name}>Share…</button>}
           <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>
           {p.role === 'owner' && <button class="btn small danger" title="Move this project to the trash" onClick={() => void remove(p)}>Delete</button>}

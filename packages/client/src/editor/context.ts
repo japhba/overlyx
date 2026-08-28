@@ -15,6 +15,8 @@ export interface EditorContext {
   openDialog?: (name: string, arg?: unknown) => void;
   /** notify UI (status bar) */
   notify?: (msg: string, kind?: 'info' | 'error') => void;
+  /** last uncaught error shown to the user (offered in the feedback dialog) */
+  lastError?: string;
   /** author id used for change tracking */
   changeAuthorId?: number;
   trackChanges: boolean;

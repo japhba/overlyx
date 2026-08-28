@@ -76,6 +76,25 @@ Overleaf/LyX blend.
   `scripts/gen-welcome.py`): layouts, formulas incl. a macro and `\llangle`, a figure, a table,
   citations, notes and comments, sharing, compiling. The start screen (no document open) lists it
   first, then the user's projects and what others shared.
+* **Interactive tour** (`packages/client/src/app/Tour.tsx`): on the first visit (once per browser,
+  `localStorage.ol.tour`) OverLyX offers a three-minute hands-on walkthrough that opens the example
+  document and asks the user to try the essentials — type, make a paragraph a Section, insert a
+  formula, watch the autosave indicator, start a comment thread, build the PDF, open the Versions
+  tab, open the sharing dialog — each step highlights the part of the interface it talks about and
+  notices by itself when the task is done (or is skipped with one click); the tour never blocks the
+  interface or takes the focus away from the editor, can be left at any time, and is restarted with
+  *Help ▸ Take the tour* or *Start the tour* on the start screen. Specs suppress it (`login()` in
+  `e2e/helpers.ts` marks it as seen); `e2e/tour.spec.ts` walks through it.
+* **Feedback straight to GitHub** (`packages/server/src/feedback.ts`, `app/Feedback.tsx`): *Help ▸
+  Report a problem / send feedback…* (available on the start screen too) creates an issue in the
+  project's repository (`GITHUB_REPO`, default `japhba/overlyx`) through the GitHub API with
+  `GITHUB_TOKEN` — a fine-grained token with *Issues: read and write* on that repository. The dialog
+  says what is sent (name and user name, app version, browser; the document name and the last error
+  message only when ticked; never document content) and that the tracker is public; 10 reports per
+  person and hour. Uncaught browser errors (`main.tsx`) and server errors (`unhandledRejection`) are
+  reported automatically as one issue per distinct message (numbers / ids normalised), repeats become
+  a count and at most one comment per 10 minutes; `OVERLYX_ERROR_REPORTS=off` keeps only the manual
+  dialog. Without a token the dialog opens GitHub's pre-filled *new issue* form in a new tab instead.
 * **File browser, one project at a time**: a switcher at the top lists your projects, the ones
   shared with you and (administrators) all others; the tree shows the selected project only. LaTeX
   build products (`.aux`, `.log`, `.bbl`, …) and LyX backups are hidden unless *All files* is on.
@@ -173,7 +192,9 @@ administrator at sign-in and given every project directory that has no owner yet
 `OVERLYX_SIGNUP` (`open` — anyone with a Google account may sign in, the default — or `invited`),
 `OVERLYX_GIT` (`off` to not expose projects as git repositories), `OVERLYX_GIT_COMMIT_MS` (idle time
 before OverLyX commits what changed, default 2 min) and `OVERLYX_GIT_COMMIT_MAX_WAIT` (longest time
-changes stay uncommitted while editing goes on, default 15 min). Git itself runs with an empty
+changes stay uncommitted while editing goes on, default 15 min), `GITHUB_REPO` / `GITHUB_TOKEN` /
+`GITHUB_API_URL` (feedback and error reports as issues, see above) and `OVERLYX_ERROR_REPORTS` (`off`
+disables the automatic ones). Git itself runs with an empty
 environment (`HOME=<data dir>/git-home`, `safe.directory=*` because projects may belong to another
 account) — the server's own git configuration never applies.
 The Vite dev server proxies to `OVERLYX_API_PORT` (default 3000).
@@ -195,6 +216,42 @@ projects directory (without build products) into `<data dir>/backups/<timestamp>
 newest 14 (`OVERLYX_BACKUP_KEEP`). The server logs unhandled promise rejections instead of dying;
 on an uncaught exception it saves the open documents and exits so that systemd restarts it.
 
+## Secrets
+
+Everything secret (the Google OAuth client secret, the GitHub token) stays out of the repository —
+which is public — in `deploy/secrets.env` (git-ignored, mode 600), read by the systemd unit through
+`EnvironmentFile=`. `deploy/secrets.env.example` lists the variables. So that a fresh clone can be
+wired up without copying files around, the real file is kept in a *private* GitHub repository
+(`OVERLYX_SECRETS_REPO`, default `japhba/overlyx-secrets`) and fetched with your GitHub login:
+
+```bash
+gh auth login                 # once
+scripts/secrets.sh pull       # private repo -> deploy/secrets.env
+scripts/secrets.sh edit       # change something, push it back
+scripts/secrets.sh push       # deploy/secrets.env -> private repo
+```
+
+Only accounts that can read the private repository get the secrets; everybody else runs the app
+without Google sign-in and with the feedback dialog falling back to GitHub's issue form. The per-instance
+JWT secret (`<data dir>/secret.key`) is generated on first start and is part of every backup.
+
+## Backups and restoring
+
+`deploy/overlyx-backup.timer` runs `scripts/backup.sh` every night (SQLite online backup, `secret.key`,
+a tarball of the projects without build products; the newest 14 are kept). Restoring — do the drill
+once in a while:
+
+```bash
+B=data/backups/$(ls data/backups | tail -1)
+scripts/restore.sh $B /tmp/restore/data /tmp/restore/projects            # integrity check, counts
+OVERLYX_DATA_DIR=/tmp/restore/data OVERLYX_PROJECTS_DIR=/tmp/restore/projects OVERLYX_GIT=off PORT=3002 HOST=127.0.0.1 npx tsx packages/server/src/index.ts
+# log in with a real password (hashes are in the database), list projects, open a document; then
+# for a real restore: systemctl stop overlyx; scripts/restore.sh $B data /root/projects --force; systemctl start overlyx
+```
+
+`--force` moves the existing database and projects directory aside (`*.before-restore-<timestamp>`)
+instead of deleting them. `data/credentials.txt` (seeded passwords in clear) is not part of a backup.
+
 ## Tests
 
 ```bash
@@ -206,13 +263,15 @@ The e2e suites copy real papers into scratch projects; to keep them away from th
 server and its data, run them against an isolated instance:
 
 ```bash
-S=/tmp/overlyx-e2e; mkdir -p $S/projects $S/data; cp -r /root/projects/recurrent_feature $S/projects/
+S=/tmp/overlyx-e2e; mkdir -p $S/projects $S/data
+rsync -a --exclude _build --exclude .git /root/projects/recurrent_feature /root/projects/bayesian_chaos $S/projects/   # features.spec compiles bayesian_chaos
 OVERLYX_DATA_DIR=$S/data npx tsx packages/server/src/seed.ts admin Admin bob Bob carol Carol u1 U1 u2 U2 u3 U3 u4 U4 u5 U5 u6 U6
 OVERLYX_DATA_DIR=$S/data OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_CLIENT_DIST=$S/dist PORT=3001 npx tsx packages/server/src/index.ts &
 (cd packages/client && OVERLYX_API_PORT=3001 npx vite --port 5174 &)
 export OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_E2E_CREDENTIALS=$S/data/credentials.txt
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/smoke.spec.ts e2e/editing.spec.ts e2e/features.spec.ts e2e/dialogs.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sharing.spec.ts e2e/textfiles.spec.ts e2e/toolbar.spec.ts e2e/collab.spec.ts   # bob, carol, u1…u6
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts
 # offline mode needs the built client (service worker): build into $S/dist, then
 (cd packages/client && npx vite build --outDir $S/dist)
 OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e2e/git.spec.ts   # git: a real clone / push / pull with a token
