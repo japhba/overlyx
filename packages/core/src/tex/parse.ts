@@ -600,10 +600,15 @@ class BodyParser {
     const size = SIZE_DECLS[name];
     if (size) { st.font.size = size; return null; }
     if (name === 'textcolor' || name === 'color') {
+      // \textcolor{name} (LyX's named colours) or \textcolor[HTML|rgb|RGB|gray]{spec} (the colour
+      // picker): custom colours are kept as '#rrggbb' in the font
+      const model = s.readOptional();
       const c = s.readGroup();
-      if (c === null) { this.pushERT(ctx, st, '\\' + name); return null; }
-      if (name === 'color') { st.font.color = c.trim(); return null; }
-      const inner: State = { font: { ...st.font, color: c.trim() }, change: st.change };
+      if (c === null) { this.pushERT(ctx, st, '\\' + name + (model !== null ? `[${model}]` : '')); return null; }
+      const color = model === null ? c.trim() : colorFromModel(model.trim(), c.trim());
+      if (color === null) { this.pushERT(ctx, st, `\\${name}[${model}]{${c}}`); return null; }
+      if (name === 'color') { st.font.color = color; return null; }
+      const inner: State = { font: { ...st.font, color }, change: st.change };
       s.skipBlanks();
       if (s.peekChar() === '{') { s.pos++; const r = this.parseText(s, ctx, inner, { ...stop, close: true, item: false }); if (r !== 'close' && r !== 'eof') return r; }
       return null;
@@ -1525,4 +1530,15 @@ export function parseTex(text: string, opts: ParseTexOptions = {}): ParseTexResu
     trailer: split.trailer.replace(/^\n/, '').replace(/\s+$/, '') ? split.trailer.replace(/^\n/, '').replace(/\s+$/, '').split('\n') : [],
   };
   return { doc, warnings, fragment: !split.hasDocument };
+}
+
+/** A colour given with an xcolor model → '#rrggbb', or null when the model is not understood. */
+export function colorFromModel(model: string, spec: string): string | null {
+  const hex = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+  const nums = spec.split(',').map(x => Number(x.trim()));
+  if (model === 'HTML') return /^[0-9a-fA-F]{6}$/.test(spec) ? '#' + spec.toLowerCase() : null;
+  if (model === 'rgb' && nums.length === 3 && nums.every(Number.isFinite)) return '#' + nums.map(n => hex(n * 255)).join('');
+  if (model === 'RGB' && nums.length === 3 && nums.every(Number.isFinite)) return '#' + nums.map(hex).join('');
+  if (model === 'gray' && nums.length === 1 && Number.isFinite(nums[0])) return '#' + hex(nums[0] * 255).repeat(3);
+  return null;
 }

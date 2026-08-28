@@ -312,7 +312,7 @@ const marks: Record<string, MarkSpec> = {
   noun: valueMark('noun', v => ['span', { class: 'lyx-noun-' + v, 'data-noun': v }, 0]),
   numeric: valueMark('numeric', v => ['span', { class: 'lyx-numeric-' + v, 'data-numeric': v }, 0]),
   nospellcheck: valueMark('nospellcheck', v => ['span', { 'data-nospellcheck': v }, 0]),
-  color: valueMark('color', v => ['span', { class: 'lyx-color-' + v, 'data-color': v }, 0]),
+  color: valueMark('color', v => (v.startsWith('#') ? ['span', { class: 'lyx-color-custom', 'data-color': v, style: 'color:' + v }, 0] : ['span', { class: 'lyx-color-' + v, 'data-color': v }, 0])),
   lang: valueMark('lang', v => ['span', { class: 'lyx-lang', 'data-lang': v, lang: v === 'latex' ? undefined : v }, 0]),
   /** change tracking */
   change: {

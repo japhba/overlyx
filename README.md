@@ -110,6 +110,11 @@ blend.
   after the last change (or `Ctrl+S`), and a conflict check — if the file changed on the server
   meanwhile (someone else, git) the save is refused and you choose between the server's
   version and yours. Viewers get it read-only. `+ File` in the file browser creates one.
+* **Dark mode**: follows the system preference by default; the sun/moon button in the menu bar
+  flips it (remembered in this browser), *View ▸ Theme ▸ Follow the system* goes back to the OS
+  setting. Text and formulas are white on a near-black page; everything in
+  `packages/client/src/styles.css` goes through the theme tokens at the top of the file (light values
+  on `:root`, dark ones on `html[data-theme="dark"]`, set by `app/theme.ts`).
 * **Ruler**: a Google-Docs-style ruler above the page (*View ▸ Ruler*) with draggable margin
   handles sets the text width (also *View ▸ Text width*, `Ctrl+Alt+±`); double-click resets it.
 * **LyX math editor**: formulas are edited with our own port of LyX's mathed (`packages/core/src/math`:
@@ -130,7 +135,9 @@ blend.
 * **LyX toolbars** (a port of `lib/ui/stdtoolbars.inc`): the *Standard* and *Extra* rows, and the
   contextual *Math*, *Math panels*, *Table* and *Review* rows that appear automatically when the cursor
   is in a formula / a table / a document with tracked changes (or always / never: *View ▸ Toolbars*,
-  and the three toggle buttons at the end of the Standard row). The math row has LyX's buttons plus a
+  and the three toggle buttons at the end of the Standard row). The Standard row also has a **text colour**
+  palette: LyX's named colours plus a native colour picker (custom colours are written as
+  `\textcolor[HTML]{RRGGBB}{…}` and read back from the `HTML`, `rgb`, `RGB` and `gray` models). The math row has LyX's buttons plus a
   **delimiter palette** (pairs × sizes: `\left…\right`, plain, `\big`, `\Big`, `\bigg`, `\Bigg`, incl.
   `| |`, `‖ ‖`, `⟨ ⟩`, `⟪ ⟫`, `⌊ ⌋`, `⌈ ⌉`, `⟦ ⟧`, arrows) and all of LyX's symbol panels (Greek, arrows,
   relations, operators, dots, decorations, big operators, AMS sets, functions, spacings, styles,
@@ -138,7 +145,7 @@ blend.
   the first use adds a small macro to the document preamble (`packages/core/src/math/llangle.ts`) that
   makes the plain, `\left…\right` and `\bigl…\bigr` forms compile with symmetric scaled brackets. The
   table row implements LyX's `tabular-feature` commands (`packages/client/src/editor/tablecommands.ts`).
-* **Presence**: the avatars in the status bar are the connected users; click one to jump to where
+* **Presence**: the avatars in the status bar (profile pictures for Google accounts, initials otherwise) are the connected users; click one to jump to where
   that user is editing (their cursor is scrolled into view and flashes).
 * **LyX-style dialogs**: Paragraph settings (`Ctrl+Alt+P`: alignment, line spacing, indentation,
   label width), Table settings (cell / column / row / table tabs incl. longtable), Document settings
@@ -173,7 +180,7 @@ blend.
   whole-word options, live match count and highlighting. *Document ▸ Statistics* counts words and
   characters of the selection / the document (notes excluded).
 * **LyX keyboard bindings** (`cua.bind`/`menus.bind`/`math.bind`): `Ctrl+M`, `Ctrl+Shift+M`,
-  `Alt+P …` layouts, `Alt+M …` math, `Alt+A …` paragraph, `Ctrl+E/B/U`, `Ctrl+L` (TeX code),
+  `Alt+P …` layouts, `Alt+M …` math, `Alt+A …` paragraph, `Ctrl+E/I/B/U` (emphasis, italic, bold, underline), `Ctrl+L` (TeX code),
   `Ctrl+Alt+F/M/N/C` (footnote / margin / note / comment), `Ctrl+Shift+E` (track changes), …
   See *Help ▸ Keyboard shortcuts*.
 

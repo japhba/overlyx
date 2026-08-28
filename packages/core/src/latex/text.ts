@@ -230,8 +230,8 @@ export function openFont(ctx: ExportContext, os: TexStream, rp: RunParams, f: Ef
   if (f.series) { const cmd = SERIES_CMDS[f.series]; if (cmd) w('\\' + cmd + '{'); }
   if (f.shape) { const cmd = SHAPE_CMDS[f.shape]; if (cmd) w('\\' + cmd + '{'); }
   if (f.color) {
-    ctx.features.require(EXTENDED_COLORS.has(f.color) ? 'xcolor' : 'color');
-    w(`\\textcolor{${f.color}}{`);
+    if (f.color.startsWith('#')) { ctx.features.require('xcolor'); w(`\\textcolor[HTML]{${f.color.slice(1).toUpperCase()}}{`); }   // custom colour (colour picker)
+    else { ctx.features.require(EXTENDED_COLORS.has(f.color) ? 'xcolor' : 'color'); w(`\\textcolor{${f.color}}{`); }
   }
   if (f.emph) w('\\emph{');
   if (f.noun) { ctx.features.require('noun'); w('\\noun{'); }

@@ -54,6 +54,8 @@ export const ICONS: Record<string, string> = {
   paste: '<svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="12" fill="none" stroke="currentColor"/><rect x="6" y="1.5" width="4" height="3" fill="#fff" stroke="currentColor"/><path d="M5.5 8h5M5.5 11h5" stroke="currentColor"/></svg>',
   find: '<svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.8"/></svg>',
   emph: '<svg viewBox="0 0 16 16"><text x="4" y="13" font-size="13" font-style="italic" font-family="serif">E</text></svg>',
+  italic: '<svg viewBox="0 0 16 16"><text x="5" y="13" font-size="13" font-style="italic" font-family="serif">I</text></svg>',
+  textcolor: '<svg viewBox="0 0 16 16"><text x="3" y="11" font-size="12" font-family="serif">A</text><rect x="2" y="12.5" width="12" height="2.5" fill="none" stroke="currentColor" stroke-width="0.8"/></svg>',
   noun: '<svg viewBox="0 0 16 16"><text x="2" y="13" font-size="11" font-family="serif" font-variant="small-caps">Nn</text></svg>',
   bold: '<svg viewBox="0 0 16 16"><text x="3" y="13" font-size="13" font-weight="bold" font-family="serif">B</text></svg>',
   underline: '<svg viewBox="0 0 16 16"><text x="4" y="12" font-size="12" font-family="serif" text-decoration="underline">U</text></svg>',
@@ -390,6 +392,45 @@ export function Toolbar({ id, layouts, layout, onLayout, groups, label }: Toolba
           ))}
         </span>
       ))}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- text colour palette */
+
+/** LyX's named text colours (what `\color` / `\textcolor{…}` accept) with the swatch shown for each. */
+export const NAMED_COLORS: [string, string][] = [
+  ['black', '#000'], ['darkgray', '#444'], ['gray', '#888'], ['lightgray', '#bbb'], ['white', '#fff'],
+  ['red', '#d00'], ['orange', '#e80'], ['yellow', '#aa0'], ['lime', '#5c0'], ['green', '#080'],
+  ['olive', '#880'], ['teal', '#088'], ['cyan', '#0aa'], ['blue', '#00d'], ['violet', '#80f'],
+  ['purple', '#808'], ['magenta', '#c0c'], ['pink', '#e6a'], ['brown', '#840'],
+];
+const swatchOf = (c: string | null): string | null => (c ? (c.startsWith('#') ? c : NAMED_COLORS.find(([n]) => n === c)?.[1] ?? null) : null);
+
+/** The toolbar icon: an "A" over a bar in the current colour (outlined when no colour is set). */
+export function colorIcon(current: string | null): string {
+  const sw = swatchOf(current);
+  return `<svg viewBox="0 0 16 16"><text x="3" y="11" font-size="12" font-family="serif">A</text>${sw ? `<rect x="2" y="12.5" width="12" height="2.5" fill="${sw}"/>` : '<rect x="2" y="12.5" width="12" height="2.5" fill="none" stroke="currentColor" stroke-width="0.8"/>'}</svg>`;
+}
+
+/** Popup: LyX's named colours as swatches, "default" and a native colour picker (custom colours are written as \textcolor[HTML]{…}). */
+export function ColorPalette({ current, onPick, close }: { current: string | null; onPick: (color: string | null) => void; close: () => void }) {
+  const [custom, setCustom] = useState(current && current.startsWith('#') ? current : '#ff8800');
+  const pick = (c: string | null) => { close(); onPick(c); };
+  return (
+    <div class="tb-colors" data-color-palette>
+      <div class="tb-color-grid">
+        {NAMED_COLORS.map(([name, css]) => (
+          <button key={name} type="button" class={'tb-swatch' + (current === name ? ' active' : '')} style={{ background: css }} title={name} data-color={name} onMouseDown={e => e.preventDefault()} onClick={() => pick(name)} />
+        ))}
+        <label class={'tb-swatch custom' + (current && current.startsWith('#') ? ' active' : '')} title="Custom colour…" style={{ background: custom }} data-color="custom">
+          <input type="color" value={custom} data-color-custom onInput={e => setCustom((e.target as HTMLInputElement).value)} onChange={e => pick((e.target as HTMLInputElement).value)} />
+        </label>
+      </div>
+      <div class="tb-colors-foot">
+        <button type="button" class="small-btn" data-color="none" onMouseDown={e => e.preventDefault()} onClick={() => pick(null)}>Default colour</button>
+        <span>{current ? current : 'no colour'}</span>
+      </div>
     </div>
   );
 }

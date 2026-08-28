@@ -70,7 +70,7 @@ export interface EditorHandle {
 }
 
 /** A user connected to the document (one entry per browser tab / awareness client). */
-export interface PresenceUser { name: string; color: string; username?: string; clientId: number; /** has a known cursor position in this document */ hasCursor: boolean; self: boolean }
+export interface PresenceUser { name: string; color: string; username?: string; /** profile picture URL (Google sign-in), if any */ avatar?: string | null; clientId: number; /** has a known cursor position in this document */ hasCursor: boolean; self: boolean }
 
 /**
  * Where the user's edits are: `saved` = the .lyx file on the server contains everything, `saving` =
@@ -234,7 +234,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   const fragment = ydoc.getXmlFragment('prosemirror');
   const { doc: initialDoc, mapping } = initProseMirrorDoc(fragment, schema);
 
-  provider.awareness.setLocalStateField('user', { name: opts.user.name, color: opts.user.color, username: opts.user.username });
+  provider.awareness.setLocalStateField('user', { name: opts.user.name, color: opts.user.color, username: opts.user.username, avatar: opts.user.avatar ?? null });
 
   const plugins: Plugin[] = [
     ySyncPlugin(fragment, { mapping }),
@@ -388,7 +388,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   const status = { connected: false, synced: false, users: [] as PresenceUser[] };
   const pushStatus = () => {
     const users: PresenceUser[] = [];
-    provider.awareness.getStates().forEach((s, clientId) => { if (s.user) users.push({ name: s.user.name, color: s.user.color, username: s.user.username, clientId, hasCursor: !!s.cursor, self: clientId === ydoc.clientID }); });
+    provider.awareness.getStates().forEach((s, clientId) => { if (s.user) users.push({ name: s.user.name, color: s.user.color, username: s.user.username, avatar: s.user.avatar ?? null, clientId, hasCursor: !!s.cursor, self: clientId === ydoc.clientID }); });
     status.users = users;
     opts.onStatus?.({ ...status });
   };

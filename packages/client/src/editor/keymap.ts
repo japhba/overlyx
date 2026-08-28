@@ -182,8 +182,9 @@ export function lyxKeymap(): Plugin {
     'Alt-Mod-m': insertMarginal,
     'Alt-Mod-c': insertComment,
     'Alt-Shift-Mod-n': insertNote('Note'),
-    'Mod-i': toggleInset,
-    'Alt-Mod-i': ui(a => a.openDialog('inset')),
+    'Mod-i': fontCommands.italic,          // the usual italic key; LyX's Ctrl+I (inset-toggle) moved to Ctrl+Alt+I
+    'Alt-Mod-i': toggleInset,
+    'Shift-Alt-Mod-i': ui(a => a.openDialog('inset')),
     'Mod- ': insertSpace('~'),
     'Alt-Mod- ': insertSpace('\\space{}'),
     'Shift-Mod- ': insertSpace('\\thinspace{}'),

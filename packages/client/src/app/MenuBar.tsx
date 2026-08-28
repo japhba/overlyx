@@ -2,6 +2,22 @@ import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { User } from '../api';
 import { Wordmark } from './Logo';
+import { AvatarContent, initials } from './Avatar';
+import { toggleTheme, useTheme } from './theme';
+
+/** Sun / moon button: flips between light and dark (View ▸ Theme ▸ System follows the OS again). */
+function ThemeToggle() {
+  const { theme, pref } = useTheme();
+  const dark = theme === 'dark';
+  return (
+    <button type="button" class="theme-toggle" data-theme-toggle data-current={theme} onClick={toggleTheme}
+      title={`${dark ? 'Dark' : 'Light'} theme${pref === 'system' ? ' (following the system)' : ''} — click for ${dark ? 'light' : 'dark'}`}>
+      {dark
+        ? <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" /></svg>
+        : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" /></svg>}
+    </button>
+  );
+}
 
 export interface MenuEntry { label?: string; shortcut?: string; action?: () => void; checked?: boolean; disabled?: boolean; sep?: boolean; sub?: MenuEntry[] }
 export interface MenuDef { title: string; items: MenuEntry[] }
@@ -51,8 +67,9 @@ export function MenuBar({ menus, user, right, onLogout, onHome }: { menus: MenuD
       ))}
       <span class="spacer" />
       {right}
+      <ThemeToggle />
       <span class="userbox">
-        <span class="avatar" style={{ background: user.color }}>{user.avatar ? <img src={user.avatar} alt="" referrerpolicy="no-referrer" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : user.name.slice(0, 1).toUpperCase()}</span>
+        <span class="avatar" style={{ background: user.color }} data-initials={user.avatar ? undefined : initials(user.name).length}><AvatarContent name={user.name} src={user.avatar} /></span>
         <span>{user.name}</span>
         <button class="small-btn" onClick={onLogout}>Sign out</button>
       </span>

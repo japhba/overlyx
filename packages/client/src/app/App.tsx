@@ -11,8 +11,10 @@ import { Home, projectDocs } from './Home';
 import { TextEditor } from './TextEditor';
 import { ShareDialog } from './Share';
 import { GitDialog } from './Git';
+import type { Mark } from 'prosemirror-model';
 import { MenuBar, type MenuDef } from './MenuBar';
-import { Toolbar, DelimPalette, TableSizePicker, delimLatex, mathPanelPalettes, mathPreview, type ToolButton, type DelimChoice } from './Toolbar';
+import { setThemePref, useTheme } from './theme';
+import { Toolbar, ColorPalette, colorIcon, NAMED_COLORS, DelimPalette, TableSizePicker, delimLatex, mathPanelPalettes, mathPreview, type ToolButton, type DelimChoice } from './Toolbar';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Versions } from './Versions';
 import { PdfPanel, stateFromBuild, jobActive, type PdfState } from './PdfPanel';
@@ -174,6 +176,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [tour, setTour] = useState<'intro' | 'steps' | null>(() => (tourWanted() ? 'intro' : null));
   const [viewOnly, setViewOnly] = useState(false);
   // LyX toolbars: standard / extra always (unless hidden), math / table / review on, off or automatic (LyX's "auto")
+  const { pref: themePref } = useTheme();
   const [toolbars, setToolbars] = useState<ToolbarPrefs>(loadToolbarPrefs);
   useEffect(() => { localStorage.setItem('ol.toolbars', JSON.stringify(toolbars)); }, [toolbars]);
   const setToolbar = (id: ToolbarId, mode: ToolbarMode) => setToolbars(t => ({ ...t, [id]: mode }));
@@ -608,6 +611,16 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Close other tabs', action: () => setTabs([docId]) },
     ] },
   ] : [];
+  /** the font marks the toolbar reports: stored marks / marks at the caret, or the marks of the first selected text */
+  const marksAtCursor = (): readonly Mark[] => {
+    if (!view) return [];
+    const { $from, empty } = view.state.selection;
+    if (empty) return view.state.storedMarks ?? $from.marks();
+    return $from.nodeAfter?.marks ?? $from.marks();
+  };
+  /** the value of a font mark at the cursor (null when unset) */
+  const markValue = (name: string): string | null => (marksAtCursor().find(m => m.type.name === name)?.attrs.value as string | undefined) ?? null;
+  const textColor = markValue('color');
   const menus: MenuDef[] = [...(docId && !isLyxDoc ? textFileMenus : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
@@ -636,13 +649,13 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { sep: true },
       { label: 'Text Style ▸', sub: [
         { label: 'Emphasized', shortcut: 'Ctrl+E', action: () => run(C.fontCommands.emph) },
+        { label: 'Italic', shortcut: 'Ctrl+I', action: () => run(C.fontCommands.italic) },
         { label: 'Bold', shortcut: 'Ctrl+B', action: () => run(C.fontCommands.bold) },
         { label: 'Noun (small caps)', shortcut: 'Ctrl+Shift+N', action: () => run(C.fontCommands.noun) },
         { label: 'Underline', shortcut: 'Ctrl+U', action: () => run(C.fontCommands.underline) },
         { label: 'Strikeout', shortcut: 'Ctrl+Shift+O', action: () => run(C.fontCommands.strikeout) },
         { label: 'Typewriter', shortcut: 'Ctrl+Shift+P', action: () => run(C.fontCommands.typewriter) },
         { label: 'Sans serif', action: () => run(C.fontCommands.sans) },
-        { label: 'Italic shape', action: () => run(C.fontCommands.italic) },
         { label: 'Small caps shape', action: () => run(C.fontCommands.smallcaps) },
         { label: 'Double underline', action: () => run(C.fontCommands.uuline) },
         { label: 'Wavy underline', action: () => run(C.fontCommands.uwave) },
@@ -652,6 +665,13 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         ...['red', 'blue', 'green', 'magenta', 'cyan', 'orange', 'purple', 'gray', 'none'].map(c => ({ label: 'Color: ' + c, action: () => run(C.setValueMark('color', c === 'none' ? null : c)) })),
         { sep: true },
         { label: 'Reset font', shortcut: 'Ctrl+Alt+D', action: () => run(C.fontDefault) },
+      ] },
+      { label: 'Text colour ▸', sub: [
+        { label: 'Default (no colour)', checked: !textColor, action: () => run(C.setValueMark('color', null)) },
+        { sep: true },
+        ...NAMED_COLORS.map(([name]) => ({ label: name[0].toUpperCase() + name.slice(1), checked: textColor === name, action: () => run(C.setValueMark('color', name)) })),
+        { sep: true },
+        { label: 'Custom colour… (palette on the toolbar)', checked: !!textColor && textColor.startsWith('#'), action: () => (document.querySelector('[data-tb="textcolor"]') as HTMLButtonElement | null)?.click() },
       ] },
       { label: 'Paragraph ▸', sub: [
         { label: 'Paragraph settings…', shortcut: 'Ctrl+Alt+P', action: () => setDialog({ name: 'paragraph' }) },
@@ -691,8 +711,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         { label: 'Reject all changes', action: () => run(rejectAllChanges()) },
       ] },
       { sep: true },
-      { label: 'Inset settings…', shortcut: 'Ctrl+Alt+I', action: () => setDialog({ name: 'inset' }) },
-      { label: 'Open/close inset', shortcut: 'Ctrl+I', action: () => run(C.toggleInset) },
+      { label: 'Inset settings…', shortcut: 'Ctrl+Alt+Shift+I', action: () => setDialog({ name: 'inset' }) },
+      { label: 'Open/close inset', shortcut: 'Ctrl+Alt+I', action: () => run(C.toggleInset) },
       { label: 'Math: toggle inline/display', action: () => run(C.toggleMathDisplay) },
     ] },
     { title: 'View', items: [
@@ -711,6 +731,11 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => editorContext.ui?.zoom(-1) },
       { label: 'Reset zoom', shortcut: 'Ctrl+0', action: () => editorContext.ui?.zoom(0) },
       { label: 'Ruler', checked: showRuler, action: () => setShowRuler(r => !r) },
+      { label: 'Theme ▸', sub: [
+        { label: 'Follow the system', checked: themePref === 'system', action: () => setThemePref('system') },
+        { label: 'Light', checked: themePref === 'light', action: () => setThemePref('light') },
+        { label: 'Dark', checked: themePref === 'dark', action: () => setThemePref('dark') },
+      ] },
       { label: 'Toolbars ▸', sub: [
         { label: 'Standard', checked: tbMode('standard') !== 'off', action: () => setToolbar('standard', tbMode('standard') === 'off' ? 'on' : 'off') },
         { label: 'Extra', checked: tbMode('extra') !== 'off', action: () => setToolbar('extra', tbMode('extra') === 'off' ? 'on' : 'off') },
@@ -858,12 +883,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     run(C.setCellAttr(key, on ? null : 'true'));
   };
 
-  const markActive = (name: string, value: string) => {
-    if (!view) return false;
-    const { $from, empty } = view.state.selection;
-    const marks = empty ? (view.state.storedMarks ?? $from.marks()) : $from.marks();
-    return marks.some(m => m.type.name === name && m.attrs.value === value);
-  };
+  const markActive = (name: string, value: string) => marksAtCursor().some(m => m.type.name === name && m.attrs.value === value);
 
   /* ------------------------------------------------------------------ toolbars (LyX stdtoolbars.inc) */
   const mathExec = (cmd: string, ...args: unknown[]) => {
@@ -933,11 +953,14 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     ],
     [
       { id: 'emph', title: 'Emphasis (Ctrl+E)', icon: 'emph', action: () => run(C.fontCommands.emph), active: markActive('emph', 'on') },
+      { id: 'italic', title: 'Italic (Ctrl+I)', icon: 'italic', action: () => run(C.fontCommands.italic), active: markActive('shape', 'italic') },
       { id: 'noun', title: 'Noun / small caps (Ctrl+Shift+N)', icon: 'noun', action: () => run(C.fontCommands.noun), active: markActive('noun', 'on') },
       { id: 'bold', title: 'Bold (Ctrl+B)', icon: 'bold', action: () => run(C.fontCommands.bold), active: markActive('series', 'bold') },
       { id: 'underline', title: 'Underline (Ctrl+U)', icon: 'underline', action: () => run(C.fontCommands.underline), active: markActive('bar', 'under') },
       { id: 'strike', title: 'Strikeout (Ctrl+Shift+O)', icon: 'strike', action: () => run(C.fontCommands.strikeout), active: markActive('strikeout', 'on') },
       { id: 'tt', title: 'Typewriter (Ctrl+Shift+P)', icon: 'tt', action: () => run(C.fontCommands.typewriter), active: markActive('family', 'typewriter') },
+      { id: 'textcolor', title: textColor ? `Text colour: ${textColor}` : 'Text colour', icon: 'textcolor', html: colorIcon(textColor), active: !!textColor,
+        palette: { title: 'Text colour', render: close => <ColorPalette current={textColor} close={close} onPick={c => run(C.setValueMark('color', c))} /> } },
     ],
     [
       { id: 'math', title: 'Inline formula (Ctrl+M)', icon: 'math', action: () => runView(C.insertMath(false)) },
@@ -949,7 +972,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     [
       { id: 'outline', title: 'Outline (Ctrl+Alt+O)', icon: 'outline', action: () => setRightTab(rightTab === 'outline' ? null : 'outline'), active: rightTab === 'outline' },
       { id: 'margin', title: 'Show notes & comments in the margin', icon: 'margin', action: toggleMargin, active: marginMode },
-      { id: 'toggleinset', title: 'Open/close inset (Ctrl+I)', icon: 'toggleinset', action: () => run(C.toggleInset) },
+      { id: 'toggleinset', title: 'Open/close inset (Ctrl+Alt+I)', icon: 'toggleinset', action: () => run(C.toggleInset) },
       { id: 'tb-math', title: 'Show math toolbar', icon: 'mathtb', action: () => toggleTb('math', showMath), active: showMath },
       { id: 'tb-table', title: 'Show table toolbar', icon: 'tabletb', action: () => toggleTb('table', showTable), active: showTable },
       { id: 'tb-review', title: 'Show review toolbar', icon: 'reviewtb', action: () => toggleTb('review', showReview), active: showReview },
@@ -1398,9 +1421,12 @@ function suggestLabel(view: EditorView): string {
 /** One colour per LyX author for change tracking (stable across sessions: by author id order). */
 function applyAuthorColors(authors: { id: number; name: string }[]): void {
   const palette = ['#2e7d32', '#c62828', '#1565c0', '#6a1b9a', '#ef6c00', '#00838f', '#ad1457', '#4e342e', '#558b2f', '#283593'];
+  // the same hues, lifted so that they read on the dark page (app/theme.ts)
+  const dark = ['#7bd88f', '#ff8a80', '#82b1ff', '#d6a2ff', '#ffb74d', '#4dd0e1', '#f48fb1', '#d7ccc8', '#c5e1a5', '#9fa8da'];
   let el = document.getElementById('ol-author-colors') as HTMLStyleElement | null;
   if (!el) { el = document.createElement('style'); el.id = 'ol-author-colors'; document.head.appendChild(el); }
-  el.textContent = authors.map((a, i) => `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: ${palette[i % palette.length]}; }`).join('\n');
+  el.textContent = authors.map((a, i) => `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: ${palette[i % palette.length]}; }\n`
+    + `html[data-theme="dark"] .lyx-change[data-author="${a.id}"], html[data-theme="dark"] .lyx-inset[data-author="${a.id}"] { --change-color: ${dark[i % dark.length]}; }`).join('\n');
 }
 
 function hashAuthor(name: string): number {

@@ -1,6 +1,6 @@
 /**
  * The OverLyX wordmark: "Over" in a fast italic with motion lines, then "LYX" the way lyx.org draws
- * it — heavy sans-serif capitals, each letter tilted, blue L / yellow Y / red X with a soft shadow.
+ * it — heavy sans-serif capitals, each letter tilted, blue L / violet Y / pink X with a soft shadow.
  * Plain markup + CSS (styles.css `.ol-wordmark`) so it scales with the surrounding font size; the
  * favicon (public/icon.svg, index.html) is the "LYX" part.
  */

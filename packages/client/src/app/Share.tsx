@@ -4,6 +4,7 @@
  * sees it — the server refuses everything else.
  */
 import { useEffect, useState } from 'preact/hooks';
+import { AvatarContent, initials } from './Avatar';
 import { api, type ShareInfo, type User } from '../api';
 import { Dialog } from './Dialogs';
 
@@ -60,14 +61,14 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
           <h4>People with access</h4>
           <div class="share-list" data-share-members>
             <div class="share-row">
-              <span class="avatar" style={{ background: '#3b6ea5' }}>{(info.owner?.name ?? '?').slice(0, 1).toUpperCase()}</span>
+              <span class="avatar" style={{ background: 'var(--accent)' }} data-initials={initials(info.owner?.name ?? '?').length}>{initials(info.owner?.name ?? '?')}</span>
               <span class="who">{info.owner?.name ?? '—'}{info.owner && <small>{info.owner.id === user.id ? 'you' : info.owner.username}</small>}</span>
               <span class="role-static">Owner</span>
             </div>
             {info.members.map(m => (
               <div class="share-row" key={m.id} data-member={m.user?.username ?? m.email ?? ''}>
                 {m.user
-                  ? <span class="avatar" style={{ background: m.user.color }}>{m.user.avatar ? <img src={m.user.avatar} alt="" referrerpolicy="no-referrer" /> : m.user.name.slice(0, 1).toUpperCase()}</span>
+                  ? <span class="avatar" style={{ background: m.user.color }} data-initials={m.user.avatar ? undefined : initials(m.user.name).length}><AvatarContent name={m.user.name} src={m.user.avatar} /></span>
                   : <span class="avatar pending" title="Invited — has not signed in yet">✉</span>}
                 <span class="who" title={m.user ? `${m.user.name} (${m.user.username})` : m.email ?? ''}>
                   {m.user ? m.user.name : m.email}
