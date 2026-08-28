@@ -68,6 +68,8 @@ export class OpenDoc {
   lastSavedAt = 0;
   /** notified after every successful save (the WebSocket layer tells the clients) */
   savedListeners = new Set<() => void>();
+  /** accounts whose edits were written to the file since the last time somebody asked (git commits) */
+  editors = new Set<number>();
 
   constructor(public id: string, public project: string, public relPath: string, public absPath: string) {
     this.awareness = new awarenessProtocol.Awareness(this.ydoc);
@@ -205,6 +207,8 @@ export class OpenDoc {
         this.fileText = text;
         knownHashes.set(this.absPath, hash);
         this.maybeAutoVersion(text);
+        const editors = [...this.editors]; this.editors.clear();
+        for (const l of fileWrittenListeners) { try { l(this.project, editors); } catch { /* ignore */ } }
       }
       this.dirty = false;
       this.saveError = null;
@@ -265,6 +269,9 @@ function sha1(s: string): string { return crypto.createHash('sha1').update(s).di
 
 /** hashes of file contents we last wrote / read, to distinguish our own writes from external ones */
 const knownHashes = new Map<string, string>();
+
+/** Called after a .lyx file was written: (project, ids of the users whose edits it contains). */
+export const fileWrittenListeners = new Set<(project: string, userIds: number[]) => void>();
 
 export class DocManager {
   docs = new Map<string, OpenDoc>();
@@ -342,6 +349,8 @@ export class DocManager {
     this.docs.set(doc.id, doc);
     doc.ydoc.on('update', (_u: Uint8Array, origin: unknown) => {
       if (origin === 'file-load' || origin === 'db') return;
+      // updates from the WebSocket carry the connection as origin: remember who edited
+      if (origin && typeof origin === 'object') { const uid = doc.connUsers.get(origin as import('ws').WebSocket); if (uid != null) doc.editors.add(uid); }
       doc.scheduleSave();
     });
     doc.touchUnload();

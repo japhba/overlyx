@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS project_members (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS project_members_user ON project_members(project, user_id) WHERE user_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS project_members_email ON project_members(project, email) WHERE email IS NOT NULL;
+CREATE TABLE IF NOT EXISTS git_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  token_hash TEXT UNIQUE NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS builds (
   doc_id TEXT PRIMARY KEY,
   status TEXT NOT NULL,

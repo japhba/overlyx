@@ -30,6 +30,9 @@ export interface DocMeta {
 export interface BuildJob { id: number; status: 'queued' | 'exporting' | 'compiling' | 'ok' | 'error' | 'cancelled'; engine: string; requestedBy: string; startedAt: number; phaseAt: number; finishedAt?: number; progress: string; rerun: boolean }
 export interface BuildInfo { status: string; log: string; pdf: string | null; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[]; tex?: string }
 export interface VersionInfo { id: number; name: string; author: string; kind: string; created_at: number; size: number }
+export interface GitCommit { hash: string; author: string; date: number; message: string }
+export interface GitInfo { url: string; username: string; role: Role; hasPassword: boolean; branch: string; commits: GitCommit[]; pending: number; pendingFiles: string[]; head: string | null }
+export interface GitToken { id: number; name: string; created_at: number; last_used_at: number | null }
 
 async function req<T>(method: string, url: string, body?: unknown, raw?: BodyInit): Promise<T> {
   const res = await fetch(url, {
@@ -63,6 +66,12 @@ export const api = {
   setOwner: (project: string, username: string) => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/owner`, { username }),
   /** open a share link (#/share/<token>): join the project; `doc` is the document to open */
   acceptShare: (token: string) => req<{ project: string; title: string | null; role: Role; doc: string | null }>('POST', `/api/share/${encodeURIComponent(token)}/accept`),
+  // git: every project is a repository (clone URL, history); tokens are the password for git over HTTPS
+  gitInfo: (project: string) => req<GitInfo>('GET', `/api/projects/${encodeURIComponent(project)}/git`),
+  gitCommit: (project: string, message?: string) => req<{ committed: boolean } & Omit<GitInfo, 'url' | 'username' | 'role' | 'hasPassword'>>('POST', `/api/projects/${encodeURIComponent(project)}/git/commit`, message ? { message } : {}),
+  gitTokens: () => req<{ tokens: GitToken[] }>('GET', '/api/git/tokens'),
+  createGitToken: (name: string) => req<{ id: number; token: string; tokens: GitToken[] }>('POST', '/api/git/tokens', { name }),
+  deleteGitToken: (id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/git/tokens/${id}`),
   newDoc: (project: string, path: string, opts: { title?: string; textclass?: string } = {}) => req<{ id: string }>('POST', `/api/projects/${encodeURIComponent(project)}/new`, { path, ...opts }),
   /** plain text files (.tex, .bib, …) for the built-in text editor; `mtime` guards against overwriting someone else's save */
   readText: (project: string, path: string) => req<{ text: string; mtime: number; size: number; role: Role }>('GET', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`),

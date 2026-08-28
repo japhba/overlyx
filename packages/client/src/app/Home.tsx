@@ -13,8 +13,8 @@ export function projectDocs(p: Project): string[] {
 }
 export const projectTitle = (p: Project) => p.title ?? p.name;
 
-export function Home({ user, refreshKey, onOpen, onShare, onChanged, onBrowse, notify }: {
-  user: User; refreshKey: number; onOpen: (id: string) => void; onShare: (project: string) => void; onChanged: () => void; onBrowse: () => void;
+export function Home({ user, refreshKey, onOpen, onShare, onGit, onChanged, onBrowse, notify }: {
+  user: User; refreshKey: number; onOpen: (id: string) => void; onShare: (project: string) => void; onGit: (project: string) => void; onChanged: () => void; onBrowse: () => void;
   notify: (text: string, kind?: 'info' | 'error') => void;
 }) {
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -64,6 +64,7 @@ export function Home({ user, refreshKey, onOpen, onShare, onChanged, onBrowse, n
         <div class="actions">
           {docs[0] && <button class="btn primary small" onClick={() => onOpen(p.name + '/' + docs[0])}>{isExample ? 'Start the tour' : 'Open'}</button>}
           {p.role === 'owner' && p.via !== 'admin' && <button class="btn small" onClick={() => onShare(p.name)} data-share={p.name}>Share…</button>}
+          <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>
           {p.role === 'owner' && <button class="btn small danger" title="Move this project to the trash" onClick={() => void remove(p)}>Delete</button>}
         </div>
       </div>

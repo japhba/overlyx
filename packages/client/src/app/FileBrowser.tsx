@@ -34,7 +34,7 @@ const ICON: Record<string, string> = { lyx: '📄', bib: '📚', image: '🖼', 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 export const projectLabel = (p: Project) => p.title ?? p.name;
 
-export function FileBrowser({ current, onOpen, onShare, refreshKey }: { current: string | null; onOpen: (id: string) => void; onShare?: (project: string) => void; refreshKey: number }) {
+export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { current: string | null; onOpen: (id: string) => void; onShare?: (project: string) => void; onGit?: (project: string) => void; refreshKey: number }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('ol.tree') || '{}'); } catch { return {}; } });
   const [showAll, setShowAll] = useState(false);
@@ -183,6 +183,7 @@ export function FileBrowser({ current, onOpen, onShare, refreshKey }: { current:
         {canEdit && project && <button class="small-btn" onClick={() => void newTextFile()} title="New text file (.tex, .bib, …) in this project">+ File</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void upload()} title="Upload files (figures, .bib, .sty …)">⇧</button>}
         {role === 'owner' && via !== 'admin' && project && onShare && <button class="small-btn" data-share={project.name} onClick={() => onShare(project.name)} title="Share this project…">👥</button>}
+        {project && onGit && <button class="small-btn" data-git={project.name} onClick={() => onGit(project.name)} title="Git repository: clone, pull and push this project from your computer…">⎇</button>}
         <button class="small-btn" onClick={() => setShowAll(!showAll)} title="Show LaTeX build files (.aux, .log, .bbl …) and LyX backups (~, #, .emergency)">{showAll ? 'Fewer' : 'All files'}</button>
         <button class="small-btn" onClick={load} title="Refresh">↻</button>
       </div>

@@ -13,6 +13,7 @@ import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, 
 import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
 import { sandboxAvailable } from './sandbox.ts';
+import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
 import { parseLyx, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText } from '@overlyx/core';
 
 const app = express();
@@ -30,6 +31,8 @@ app.use((_req, res, next) => {
 });
 
 app.use('/api/auth', authRouter());
+// git over HTTP (Basic auth, see git.ts) — before the API's cookie auth and JSON parsing
+app.use('/git', gitRouter());
 
 const api = express.Router();
 api.use(requireAuth);
@@ -75,6 +78,7 @@ api.all('/docs/*', (req, res, next) => {
 api.get('/projects', (req, res) => {
   ensureWelcomeProject(req.user!);
   res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, owner: p.owner, files: p.files })) });
+  void ensureAllRepos();   // directories that appeared since (created by hand, the welcome project) get their repository
 });
 
 api.post('/projects', (req, res) => {
@@ -84,6 +88,7 @@ api.post('/projects', (req, res) => {
     if (fs.existsSync(projectDir(name))) { res.status(409).json({ error: 'a project with this name exists already' }); return; }
     const p = createProject(name);
     registerProject(name, req.user!.id);
+    ensureRepo(name).catch(e => console.error('[git] init failed:', e));
     res.json({ project: { name: p.name, title: null, kind: 'project', role: 'owner', via: 'owner', files: p.files } });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
@@ -151,6 +156,35 @@ api.post('/share/:token/accept', (req, res) => {
   } catch (e) { res.status(404).json({ error: (e as Error).message }); }
 });
 
+/* --------------------------------------------------------------------- git */
+
+/** The project's repository: clone URL, recent commits, what is not committed yet. */
+api.get('/projects/:project/git', needProject('view'), async (req, res) => {
+  try {
+    const info = await repoInfo(req.params.project);
+    const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user!.id) as { password_hash: string | null } | undefined;
+    res.json({ ...info, url: cloneUrl(req, req.params.project), username: req.user!.username, role: req.role, hasPassword: !!row?.password_hash });
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+/** Commit what changed, now (editors). */
+api.post('/projects/:project/git/commit', needProject('edit'), async (req, res) => {
+  try {
+    const committed = await commitProject(req.params.project, { message: typeof req.body?.message === 'string' && req.body.message.trim() ? req.body.message.trim().slice(0, 500) : undefined, by: req.user!.id });
+    res.json({ committed, ...(await repoInfo(req.params.project)) });
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+/** Personal access tokens (the password for git over HTTPS; Google accounts have no other). */
+api.get('/git/tokens', (req, res) => { res.json({ tokens: listTokens(req.user!.id) }); });
+api.post('/git/tokens', (req, res) => {
+  const name = String(req.body?.name ?? '').trim() || 'token';
+  const t = createToken(req.user!.id, name);
+  res.json({ id: t.id, token: t.token, tokens: listTokens(req.user!.id) });
+});
+api.delete('/git/tokens/:id', (req, res) => {
+  deleteToken(req.user!.id, Number(req.params.id));
+  res.json({ tokens: listTokens(req.user!.id) });
+});
+
 api.post('/projects/:project/new', needProject('edit'), (req, res) => {
   try {
     let rel = String(req.body?.path ?? 'untitled.lyx');
@@ -159,6 +193,7 @@ api.post('/projects/:project/new', needProject('edit'), (req, res) => {
     if (fs.existsSync(abs)) { res.status(409).json({ error: 'file exists' }); return; }
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, newDocumentText({ textclass: req.body?.textclass, title: req.body?.title, author: req.user?.name }), 'utf8');
+    touchProject(req.params.project, req.user!.id);
     res.json({ id: `${req.params.project}/${rel}` });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
@@ -171,6 +206,7 @@ api.post('/projects/:project/upload', needProject('edit'), express.raw({ type: '
     const abs = resolveProjectPath(req.params.project, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, req.body as Buffer);
+    touchProject(req.params.project, req.user!.id);
     res.json({ ok: true, path: rel, kind: fileKind(rel) });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
@@ -233,6 +269,7 @@ api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
     fs.writeFileSync(tmp, text, 'utf8');
     fs.renameSync(tmp, abs);
     const st = fs.statSync(abs);
+    touchProject(req.params.project, req.user!.id);
     res.json({ ok: true, mtime: st.mtimeMs, size: st.size });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
@@ -665,6 +702,7 @@ if (fs.existsSync(config.clientDist)) {
 
 adoptProjects();
 sandboxAvailable();
+void ensureAllRepos();
 
 const server = http.createServer(app);
 attachWebSocket(server);
@@ -676,7 +714,7 @@ server.listen(config.port, config.host, () => {
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
     console.log('shutting down, saving open documents…');
-    manager.saveAll().finally(() => process.exit(0));
+    manager.saveAll().then(() => flushCommits()).finally(() => process.exit(0));
   });
 }
 // A promise nobody awaited must not take the server (and everybody's session) down: log it.

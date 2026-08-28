@@ -10,6 +10,7 @@ import { FileBrowser } from './FileBrowser';
 import { Home } from './Home';
 import { TextEditor } from './TextEditor';
 import { ShareDialog } from './Share';
+import { GitDialog } from './Git';
 import { MenuBar, type MenuDef } from './MenuBar';
 import { Toolbar, DelimPalette, TableSizePicker, delimLatex, mathPanelPalettes, mathPreview, type ToolButton, type DelimChoice } from './Toolbar';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
@@ -162,6 +163,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [findOpen, setFindOpen] = useState(false);
   // sharing: the project whose share dialog is open; view-only when the current project was shared for viewing
   const [shareFor, setShareFor] = useState<string | null>(null);
+  // the project whose git dialog (clone URL, tokens, history) is open
+  const [gitFor, setGitFor] = useState<string | null>(null);
   const [viewOnly, setViewOnly] = useState(false);
   // LyX toolbars: standard / extra always (unless hidden), math / table / review on, off or automatic (LyX's "auto")
   const [toolbars, setToolbars] = useState<ToolbarPrefs>(loadToolbarPrefs);
@@ -577,6 +580,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { sep: true },
       { label: 'Download', action: () => window.open(`/api/projects/${encodeURIComponent(docId.split('/')[0])}/file/${docId.split('/').slice(1).map(encodeURIComponent).join('/')}`) },
       { label: 'Share project…', action: () => setShareFor(docId.split('/')[0]) },
+      { label: 'Git repository…', action: () => setGitFor(docId.split('/')[0]) },
       { sep: true },
       { label: 'Close tab', action: () => closeTab(docId) },
       { label: 'Close other tabs', action: () => setTabs([docId]) },
@@ -597,6 +601,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       ] },
       { label: 'Versions…', action: () => setRightTab('versions') },
       { label: 'Share project…', action: () => setShareFor(docId.split('/')[0]) },
+      { label: 'Git repository…', action: () => setGitFor(docId.split('/')[0]) },
       { sep: true },
       { label: 'Close tab', action: () => closeTab(docId) },
       { label: 'Close other tabs', action: () => setTabs([docId]) },
@@ -1206,7 +1211,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         </div>
       )}
       <div class="main">
-        {showFiles && <div class="sidebar"><div class="panel-tabs"><button class="active">Files</button><button onClick={() => setShowFiles(false)}>✕</button></div><div class="panel-body"><FileBrowser current={docId} refreshKey={refreshKey} onOpen={id => openInTab(id)} onShare={p => setShareFor(p)} /></div></div>}
+        {showFiles && <div class="sidebar"><div class="panel-tabs"><button class="active">Files</button><button onClick={() => setShowFiles(false)}>✕</button></div><div class="panel-body"><FileBrowser current={docId} refreshKey={refreshKey} onOpen={id => openInTab(id)} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} /></div></div>}
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {isLyxDoc && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={marginMode} />}
           {docId ? (!isLyxDoc ? <TextEditor key={docId} id={docId} notify={notify} /> :
@@ -1217,7 +1222,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
                   register={(cid, h) => { if (h) childRefs.current.set(cid, h); else childRefs.current.delete(cid); rerender(); }} />
               ))}
             </div>
-          ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onShare={p => setShareFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} notify={notify} />}
+          ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} notify={notify} />}
         </div>
         {isLyxDoc && rightTab && (
           <div class={'sidebar right' + (rightTab === 'pdf' ? ' wide' : rightTab === 'source' ? ' source' : '')}>
@@ -1242,6 +1247,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         onJumpToUser={jumpToUser} />
       {renderDialog()}
       {shareFor && <ShareDialog project={shareFor} user={user} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
+      {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
     </div>
   );
 }
