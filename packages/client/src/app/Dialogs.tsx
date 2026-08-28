@@ -231,7 +231,7 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
     const t = oq.trim();
     if (t.length < 3) { setOhits([]); setOerror(null); return; }
     setOsearching(true); setOerror(null);
-    const h = setTimeout(() => { api.literatureSearch(t).then(r => setOhits(r.hits)).catch(e => { setOhits([]); setOerror((e as Error).message); }).finally(() => setOsearching(false)); }, 450);
+    const h = setTimeout(() => { api.literatureSearch(t).then(r => { setOhits(r.hits); setOerror(r.warnings?.length ? r.warnings.join(' · ') : null); }).catch(e => { setOhits([]); setOerror((e as Error).message); }).finally(() => setOsearching(false)); }, 450);
     return () => clearTimeout(h);
   }, [oq, tab]);
   const took = (r: BibAddResult) => {
@@ -286,7 +286,7 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
                 <button class="small-btn" disabled={busyId === h.id || addedIds.has(h.id)} onClick={ev => { ev.stopPropagation(); void cite(h); }}>{addedIds.has(h.id) ? `✓ ${addedIds.get(h.id)}` : busyId === h.id ? 'Adding…' : 'Cite'}</button>
               </div>
             ))}
-            {oerror && <div class="sub" style="color:#b00;padding:4px 6px">{oerror}</div>}
+            {oerror && <div class="sub" style="color:#b00;padding:4px 6px" data-cite-error>⚠ {oerror}</div>}
             {!ohits.length && !osearching && oq.trim().length >= 3 && !oerror && <div class="sub" style="padding:4px 6px">Nothing found — try the Google Scholar link and paste the BibTeX below.</div>}
             {oq.trim().length < 3 && <div class="sub" style="padding:4px 6px;color:#888">Type a title, author names, a DOI or an arXiv id. Picking a result adds its BibTeX to <code>cited.bib</code> in this project and selects it.{sources.length > 0 && !sources.includes('Google Scholar') && !sources.includes('Semantic Scholar') && <> Relevance is best with a Semantic Scholar or SerpApi key on the server (see README ▸ Secrets).</>}</div>}
           </div>

@@ -172,28 +172,58 @@ async function googleScholar(q: string, limit: number): Promise<Hit[]> {
   if (d.error) throw new Error(`Google Scholar (SerpApi): ${d.error}`);
   return (d.organic_results ?? []).map((o: any): Hit => {
     const info = o.publication_info ?? {};
-    // "A Vaswani, N Shazeer, N Parmar… - Advances in neural information…, 2017 - proceedings.neurips.cc"
-    const parts = String(info.summary ?? '').split(' - ');
-    const authors = (info.authors ?? []).map((a: any) => a.name).filter(Boolean);
-    const summaryAuthors = parts.length > 1 ? parts[0].split(',').map((x: string) => x.replace(/…$/, '').trim()).filter(Boolean) : [];
-    const venueYear = parts.length > 1 ? parts[1] : '';
-    const ym = /(\d{4})\s*$/.exec(venueYear);
+    const { authors, venue, year } = parseScholarSummary(String(info.summary ?? ''), (info.authors ?? []).map((a: any) => a.name).filter(Boolean));
     const link = String(o.link ?? '');
     const arxiv = /arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})/.exec(link)?.[1] ?? null;
     const doi = DOI_RE.exec(link)?.[1] ?? null;
     return {
-      id: `scholar:${o.result_id}`, title: String(o.title ?? '').replace(/^\[[A-Z]+\]\s*/, ''), authors: authors.length ? authors : summaryAuthors,
-      year: ym ? Number(ym[1]) : null, venue: venueYear.replace(/,?\s*\d{4}\s*$/, '').replace(/…$/, '').trim(), type: o.type ?? '',
-      doi, arxiv, url: link || null, citations: o.inline_links?.cited_by?.total ?? null, sources: ['scholar'], scholarId: o.result_id,
+      id: `scholar:${o.result_id}`, title: String(o.title ?? '').replace(/^\[[A-Z]+\]\s*/, ''), authors,
+      year, venue, type: o.type ?? '', doi, arxiv, url: link || null, citations: o.inline_links?.cited_by?.total ?? null, sources: ['scholar'], scholarId: o.result_id,
     };
   });
+}
+
+/**
+ * Scholar's one-line publication info as SerpApi hands it over — the separators Scholar shows are
+ * gone: "H Sompolinsky, A Crisanti, HJ SommersPhysical review letters, 1988•APS" (authors run into
+ * the venue; "…" where Scholar shortened; "•" before the site). `linked` are the authors SerpApi
+ * resolved to profiles (a subset).
+ */
+export function parseScholarSummary(summary: string, linked: string[] = []): { authors: string[]; venue: string; year: number | null } {
+  const clean = (a: string[]) => a.map(x => x.replace(/…$/, '').trim()).filter(Boolean);
+  // the other shape SerpApi delivers: "authors - venue, year - site" (or "authors - year - site")
+  if (summary.includes(' - ')) {
+    const parts = summary.split(' - ').map(x => x.trim());
+    const authors = clean(parts[0].split(/,\s*/));
+    const mid = parts.length >= 3 ? parts.slice(1, -1).join(' - ') : (parts[1] ?? '');
+    const ym = /((?:19|20)\d{2})\s*$/.exec(mid);
+    const venue = mid.replace(/,?\s*(?:19|20)\d{2}\s*$/, '').trim();
+    return { authors: authors.length >= linked.length ? authors : linked, venue, year: ym ? Number(ym[1]) : null };
+  }
+  let s = summary.split('•')[0].trim();
+  const ym = /(?:,\s*)?((?:19|20)\d{2})\s*$/.exec(s);
+  const year = ym ? Number(ym[1]) : null;
+  if (ym) s = s.slice(0, ym.index).trim();
+  // the author list is "I Surname, I Surname, I Surname" — the last surname runs straight into the venue
+  const chunks = s.split(/,\s*/);
+  const authors: string[] = [];
+  let venue = '';
+  chunks.forEach((c, i) => {
+    if (i < chunks.length - 1) { authors.push(c.replace(/…$/, '').trim()); return; }
+    const m = /^((?:[A-Z]{1,4}\s)?[A-Z][\p{L}'’\-]+(?:\s[A-Z][\p{L}'’\-]+)?)(…|(?=[A-Z][a-z])|$)(.*)$/u.exec(c);
+    if (m) { if (m[1].trim()) authors.push(m[1].trim()); venue = m[3].trim(); }
+    else if (/…/.test(c)) { const [a, v] = c.split('…'); if (a.trim()) authors.push(a.trim()); venue = (v ?? '').trim(); }
+    else venue = c.trim();
+  });
+  const cleaned = authors.filter(a => a && a !== '…');
+  return { authors: cleaned.length >= linked.length ? cleaned : linked, venue: venue.replace(/^…/, '').trim(), year };
 }
 
 /** Scholar's own BibTeX for a result (SerpApi's google_scholar_cite gives the link; Scholar serves the file). */
 async function bibtexFromScholar(resultId: string): Promise<string | null> {
   try {
     const r = await fetchImpl(`https://serpapi.com/search.json?engine=google_scholar_cite&q=${encodeURIComponent(resultId)}&api_key=${encodeURIComponent(config.serpApiKey)}`);
-    if (!r.ok) return null;
+    if (!r.ok) { console.warn('[bibsearch] scholar cite', r.status); return null; }
     const d: any = await r.json();
     const link = (d.links ?? []).find((l: any) => /bibtex/i.test(l.name))?.link;
     if (!link) return null;
@@ -204,19 +234,26 @@ async function bibtexFromScholar(resultId: string): Promise<string | null> {
   } catch { return null; }
 }
 
-/** Search the open indexes (or look a DOI / arXiv id up); failures of one index are ignored. */
-export async function searchLiterature(q: string, limit = 10): Promise<Hit[]> {
+export interface SearchResult { hits: Hit[]; /** an index that should have answered did not (shown to the user) */ warnings: string[] }
+
+/** Search (or look a DOI / arXiv id up). A failing open index is ignored; a failing Scholar-grade index becomes a warning. */
+export async function searchLiterature(q: string, limit = 10): Promise<SearchResult> {
   const p = parseQuery(q);
-  if (p.kind === 'doi') { const h = await hitFromDoi(p.doi); return h ? [h] : []; }
-  if (p.kind === 'arxiv') { const h = await hitFromDoi(`10.48550/arXiv.${p.id}`); return h ? [h] : []; }
-  if (!p.text) return [];
+  if (p.kind === 'doi') { const h = await hitFromDoi(p.doi); return { hits: h ? [h] : [], warnings: h ? [] : [`doi.org has no BibTeX for ${p.doi}`] }; }
+  if (p.kind === 'arxiv') { const h = await hitFromDoi(`10.48550/arXiv.${p.id}`); return { hits: h ? [h] : [], warnings: h ? [] : [`arXiv:${p.id} could not be looked up`] }; }
+  if (!p.text) return { hits: [], warnings: [] };
   // a Scholar-grade index first when a key is configured; the open ones fill in DOIs, DBLP keys, BibTeX
   const trusted = config.serpApiKey ? googleScholar(p.text, limit) : config.s2ApiKey ? semanticScholar(p.text, limit) : null;
   const settled = await Promise.allSettled([...(trusted ? [trusted] : []), openalex(p.text, limit, 'title'), openalex(p.text, limit), dblp(p.text, limit)]);
   const lists = settled.map(s => (s.status === 'fulfilled' ? s.value : []));
   if (settled.every(s => s.status === 'rejected')) throw new Error('Literature search is unavailable right now: ' + settled.map(s => (s as PromiseRejectedResult).reason?.message).join('; '));
-  if (trusted && settled[0].status === 'rejected') console.warn('[bibsearch]', (settled[0] as PromiseRejectedResult).reason?.message);
-  return mergeHits(lists, p.text, limit, { trusted: !!trusted && settled[0].status === 'fulfilled' });
+  const warnings: string[] = [];
+  if (trusted && settled[0].status === 'rejected') {
+    const why = (settled[0] as PromiseRejectedResult).reason?.message ?? 'no answer';
+    console.warn('[bibsearch]', why);
+    warnings.push(`${config.serpApiKey ? 'Google Scholar' : 'Semantic Scholar'} did not respond (${why}) — showing OpenAlex / DBLP results instead`);
+  }
+  return { hits: mergeHits(lists, p.text, limit, { trusted: !!trusted && settled[0].status === 'fulfilled' }), warnings };
 }
 
 async function hitFromDoi(doi: string): Promise<Hit | null> {

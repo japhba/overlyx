@@ -65,7 +65,7 @@ describe('literature search', () => {
   });
 
   it('merges OpenAlex and DBLP hits (same DOI → one hit with DBLP key and citation count), ranks title matches first, preprint after the paper', async () => {
-    const hits = await bs.searchLiterature('attention is all you need');
+    const hits = (await bs.searchLiterature('attention is all you need')).hits;
     expect(hits[0].title).toBe('Attention Is All You Need');
     expect(hits[0].dblp).toBe('conf/nips/VaswaniSPUJGKP17');
     expect(hits[0].citations).toBe(90000);
@@ -79,14 +79,14 @@ describe('literature search', () => {
   });
 
   it('a DOI query is looked up at doi.org and answered from its BibTeX', async () => {
-    const hits = await bs.searchLiterature('10.1038/nature14539');
+    const hits = (await bs.searchLiterature('10.1038/nature14539')).hits;
     expect(hits).toHaveLength(1);
     expect(hits[0]).toMatchObject({ doi: '10.1038/nature14539', title: 'Deep learning', year: 2015, venue: 'Nature', sources: ['doi'] });
     expect(hits[0].authors).toEqual(['LeCun, Yann', 'Bengio, Yoshua', 'Hinton, Geoffrey']);
   });
 
   it('BibTeX comes from DBLP when it knows the paper, else doi.org, else it is generated', async () => {
-    const hits = await bs.searchLiterature('attention is all you need');
+    const hits = (await bs.searchLiterature('attention is all you need')).hits;
     expect(await bs.bibtexFor(hits[0])).toContain('DBLP:conf/nips/VaswaniSPUJGKP17');
     const gen = await bs.bibtexFor(hits.find(h => h.title === 'Attention in speech separation')!);
     expect(gen).toMatch(/^@article\{tmp,\n  title = \{Attention in speech separation\}/);

@@ -257,7 +257,7 @@ api.get('/bib/search', async (req, res) => {
   if (!config.literature) { res.status(503).json({ error: 'Literature search is switched off on this server (OVERLYX_LITERATURE=off).' }); return; }
   const q = String(req.query.q ?? '').trim().slice(0, 300);
   if (!q) { res.json({ hits: [] }); return; }
-  try { res.json({ hits: await searchLiterature(q, Math.min(25, Number(req.query.limit) || 10)), sources: sourcesAvailable() }); }
+  try { const r = await searchLiterature(q, Math.min(25, Number(req.query.limit) || 10)); res.json({ hits: r.hits, warnings: r.warnings, sources: sourcesAvailable() }); }
   catch (e) { res.status(502).json({ error: (e as Error).message }); }
 });
 /** Add a paper to the project's cited.bib: either a search hit (BibTeX fetched here) or pasted BibTeX. */
