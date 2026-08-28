@@ -147,24 +147,23 @@ button { cursor: pointer; }
    silver → cyan gradient through the letters that streams backwards on hover while the motion lines
    streak out behind it (hover works on the wordmark itself, so also on the login page). */
 .ol-wordmark { display: inline-flex; align-items: baseline; line-height: 1; white-space: nowrap; user-select: none;
-  --ol-blue: #2f5fdb; --ol-cyan: #16b3e6; --ol-chrome: #d7dcf0; --ol-silver: #7480a3; --ol-steel: #4a5170; --ol-pink: #ff2ec4; --ol-magenta: #9b1fd6; --ol-outline: rgba(25, 28, 48, 0.55); --ol-glow: rgba(255, 46, 196, 0.45); --ol-glow2: rgba(52, 216, 255, 0.5); }
-html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; --ol-chrome: #ffffff; --ol-silver: #c3c9dc; --ol-steel: #6f789a; --ol-pink: #ff3ccf; --ol-magenta: #cf4dff; --ol-outline: rgba(10, 8, 24, 0.5); --ol-glow: rgba(255, 60, 207, 0.55); --ol-glow2: rgba(79, 227, 255, 0.6); }
+  --ol-blue: #2f5fdb; --ol-cyan: #16b3e6; --ol-chrome: #5c6796; --ol-silver: #4b5580; --ol-steel: #3d4666; --ol-pink: #ff2ec4; --ol-magenta: #9b1fd6; --ol-glow: rgba(255, 46, 196, 0.45); --ol-glow2: rgba(52, 216, 255, 0.5); }
+html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; --ol-chrome: #ffffff; --ol-silver: #c3c9dc; --ol-steel: #6f789a; --ol-pink: #ff3ccf; --ol-magenta: #cf4dff; --ol-glow: rgba(255, 60, 207, 0.55); --ol-glow2: rgba(79, 227, 255, 0.6); }
 .ol-wordmark .speed { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 0.13em; align-self: center; margin-right: 0.16em; transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .ol-wordmark .speed i { display: block; height: 0.11em; border-radius: 0.06em; background: linear-gradient(90deg, transparent, var(--ol-pink) 35%, var(--ol-cyan)); opacity: 0.9; transform-origin: right center; transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .ol-wordmark .speed i:nth-child(1) { width: 0.5em; }
 .ol-wordmark .speed i:nth-child(2) { width: 0.85em; }
 .ol-wordmark .speed i:nth-child(3) { width: 0.35em; }
-/* chrome lettering: a dark outline (webkit-text-stroke) keeps the letterforms readable against any
-   background, then a soft vertical "horizon" sheen (bright top, gently dimmed middle, bright bottom —
-   no hard seam) over a blue → chrome → pink → violet sweep; the sweep streams backwards on hover */
+/* chrome lettering: a soft vertical "horizon" sheen (bright top, gently dimmed middle, bright bottom —
+   no hard seam) over a blue → chrome → pink → violet sweep, all stops kept dark enough to hold up
+   against a white page; the sweep streams backwards on hover */
 .ol-wordmark .over { display: inline-block; font-family: var(--ui-font); font-weight: 800; font-style: italic; letter-spacing: -0.02em; transform: skewX(-10deg); margin-right: 0.04em; padding-right: 0.06em;
   background-image:
-    linear-gradient(180deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0.15) 40%, rgba(255,255,255,0.15) 60%, rgba(255,255,255,0.7) 100%),
+    linear-gradient(180deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.12) 40%, rgba(255,255,255,0.12) 60%, rgba(255,255,255,0.45) 100%),
     linear-gradient(100deg, var(--ol-blue) 0%, var(--ol-cyan) 12%, var(--ol-chrome) 24%, var(--ol-silver) 32%, var(--ol-pink) 44%, var(--ol-magenta) 54%, var(--ol-steel) 66%, var(--ol-blue) 100%);
   background-size: 100% 100%, 300% 100%; background-position: 0 0, 20% 0; background-repeat: no-repeat, repeat;
   color: transparent; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-  -webkit-text-stroke: 0.55px var(--ol-outline);
-  filter: drop-shadow(0 0.028em 0.012em rgba(0,0,0,0.4)) drop-shadow(0 -0.012em 0.008em rgba(255,255,255,0.55));
+  filter: drop-shadow(0 0.028em 0.012em rgba(0,0,0,0.45)) drop-shadow(0 -0.012em 0.008em rgba(255,255,255,0.4));
   transition: filter 0.3s; }
 .ol-wordmark:hover .over { animation: ol-flow 0.8s linear infinite; filter: drop-shadow(0 0 0.12em var(--ol-glow)) drop-shadow(0 0 0.25em var(--ol-glow2)); }
 @keyframes ol-flow { from { background-position: 0 0, 20% 0; } to { background-position: 0 0, 170% 0; } }
@@ -178,8 +177,8 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .ol-wordmark .lyx { display: inline-flex; align-items: flex-end; font-family: "Arial Black", "Helvetica Neue", Arial, "Liberation Sans", sans-serif; font-weight: 900; font-size: 1.05em; letter-spacing: -0.04em; margin-left: 0.1em; }
 .ol-wordmark .lyx span { display: inline-block; text-shadow: 0.045em 0.045em 0 rgba(0,0,0,0.28); }
 .ol-wordmark .l { color: #2f7fd6; transform: rotate(-12deg) translateY(-0.04em); }
-.ol-wordmark .y { color: #8b5cf6; transform: rotate(7deg) translateY(0.12em); margin: 0 -0.02em; }
-.ol-wordmark .x { color: #ff2ec4; transform: rotate(12deg) translateY(-0.02em); }
+.ol-wordmark .y { color: #f3b400; transform: rotate(7deg) translateY(0.12em); margin: 0 -0.02em; }
+.ol-wordmark .x { color: #e14b2c; transform: rotate(12deg) translateY(-0.02em); }
 /* theme toggle in the menu bar (app/MenuBar.tsx) */
 .menubar .theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; margin-right: 10px; border: 0; border-radius: 4px; background: none; color: var(--ui-muted); padding: 0; }
 .menubar .theme-toggle:hover { background: var(--ui-hover); color: var(--ui-fg); }
