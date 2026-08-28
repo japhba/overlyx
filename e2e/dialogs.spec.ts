@@ -1,39 +1,25 @@
 /**
  * LyX-style settings dialogs: paragraph, table, document (page/margins, branches), graphics,
- * and the math delimiter / matrix insertion. Everything is checked against the .lyx file on disk.
+ * and the math delimiter / matrix insertion. Everything is checked against the .tex file on disk.
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
+import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
-const SRC = `${FIXTURES_DIR}/recurrent_feature/main.lyx`;
+const SRC = `${FIXTURES_DIR}/recurrent_feature/main.tex`;
 const DIR = `${PROJECTS_DIR}/e2e-dialogs`;
-const FILE = `${DIR}/main.lyx`;
+const FILE = `${DIR}/main.tex`;
 
-const body = `\\begin_body
+const body = `Hello dialogs.
 
-\\begin_layout Standard
-Hello dialogs.
-\\end_layout
-
-\\begin_layout Standard
-\\begin_inset Graphics
-	filename figures/x.png
-	width 50col%
-
-\\end_inset
-
-
-\\end_layout
-
-\\end_body
-\\end_document
+\\includegraphics[width=0.5\\columnwidth]{figures/x.png}
 `;
 
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
-  writeFileSync(FILE, readFileSync(SRC, 'utf8').split('\\begin_body')[0] + body);
+  writeFileSync(FILE, withPreambleOf(SRC, body));
+  for (const f of ['macros.tex', 'preamble.tex']) writeFileSync(`${DIR}/${f}`, readFileSync(`${FIXTURES_DIR}/recurrent_feature/${f}`, 'utf8'));
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
@@ -41,7 +27,7 @@ const file = () => readFileSync(FILE, 'utf8');
 async function open(page: Page) {
   await login(page);
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.setItem('ol.combined', '0'); });
-  await page.goto('/#/e2e-dialogs/main.lyx');
+  await page.goto('/#/e2e-dialogs/main.tex');
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length >= 2, null, { timeout: 60000 });
   await page.waitForTimeout(800);
 }
@@ -49,7 +35,7 @@ const openDialog = (page: Page, name: string) => page.evaluate((n) => (window as
 const row = (page: Page, label: string) => page.locator('.dialog .row', { hasText: label });
 const apply = (page: Page) => page.locator('.dialog button.btn.primary').click();
 
-test('paragraph settings: alignment and line spacing are written as paragraph params', async ({ page }) => {
+test('paragraph settings: alignment and line spacing are written as LaTeX environments', async ({ page }) => {
   const errors = collectErrors(page);
   await open(page);
   await page.locator('.lyx-editor .lyx-par').first().click();
@@ -57,7 +43,7 @@ test('paragraph settings: alignment and line spacing are written as paragraph pa
   await row(page, 'Alignment').locator('select').selectOption('center');
   await row(page, 'Line spacing').locator('select').first().selectOption('double');
   await apply(page);
-  await expect.poll(() => file().includes('\\paragraph_spacing double') && file().includes('\\align center'), { timeout: 10000 }).toBe(true);
+  await expect.poll(() => file().includes('\\begin{doublespace}') && file().includes('\\begin{center}'), { timeout: 10000 }).toBe(true);
   expect(errors.filter(e => !/404/.test(e))).toEqual([]);   // the scratch copy lacks figures/x.png
 });
 
@@ -77,31 +63,25 @@ test('table settings: cell alignment, row lines and table features', async ({ pa
   await page.locator('.dialog .panel-tabs button', { hasText: 'Table' }).click();
   await row(page, 'Booktabs').locator('input[type=checkbox]').check();
   await apply(page);
-  await expect.poll(() => /<cell alignment="right"/.test(file()) && file().includes('booktabs="true"'), { timeout: 10000 }).toBe(true);
-  // all three cells of the row lost their bottom line, the other rows kept theirs
-  const cells = [...file().matchAll(/<cell [^>]*>/g)].map(m => m[0]);
-  expect(cells.filter(c => /bottomline="true"/.test(c)).length).toBe(6);
+  // a right-aligned cell in a centred column is a \multicolumn{1}{r}{...}; booktabs rules replace \hline
+  await expect.poll(() => /\\multicolumn\{1\}\{[^}]*r[^}]*\}/.test(file()) && file().includes('\\toprule'), { timeout: 10000 }).toBe(true);
+  // the first row lost its bottom line: only the top rule and the rules of the other rows remain
+  expect((file().match(/\\(top|mid|bottom)rule/g) ?? []).length).toBe(3);
 });
 
-test('document settings: custom margins and a new branch land where LyX writes them', async ({ page }) => {
+test('document settings: a new branch is kept in the settings line', async ({ page }) => {
   await open(page);
   await openDialog(page, 'settings');
-  await page.locator('.dialog .panel-tabs button', { hasText: 'Page & margins' }).click();
-  await row(page, 'Custom margins').locator('input[type=checkbox]').check();
-  await row(page, 'Top / bottom').locator('input').first().fill('3cm');
   await page.locator('.dialog .panel-tabs button', { hasText: 'Branches' }).click();
   await row(page, 'New branch').locator('input').fill('draft');
   await row(page, 'New branch').locator('button').click();
   await apply(page);
-  await expect.poll(() => file().includes('\\use_geometry true') && file().includes('\\topmargin 3cm'), { timeout: 15000 }).toBe(true);
+  await expect.poll(() => file().includes('\\\\branch draft'), { timeout: 15000 }).toBe(true);
   const f = file();
-  expect(f.indexOf('\\topmargin 3cm')).toBeLessThan(f.indexOf('\\secnumdepth'));
-  expect(f).toContain('\\branch draft\n\\selected 1\n\\filename_suffix 0\n\\color #faf0e6 #faf0e6\n\\end_branch\n');
-  expect(f.indexOf('\\branch draft')).toBeLessThan(f.indexOf('\\index Index'));
-  expect(f.indexOf('\\branch draft')).toBeGreaterThan(f.indexOf('\\boxbgcolor'));
+  expect(f).toMatch(/%% overlyx-settings: \{.*"branches":\["\\\\branch draft","\\\\selected 1"/);
 });
 
-test('graphics settings: height, aspect ratio and rotation are written in LyX order', async ({ page }) => {
+test('graphics settings: height, aspect ratio and rotation are written as \\includegraphics options', async ({ page }) => {
   await open(page);
   await page.locator('.lyx-editor .lyx-graphics').first().click();
   await openDialog(page, 'inset');
@@ -110,7 +90,7 @@ test('graphics settings: height, aspect ratio and rotation are written in LyX or
   await row(page, 'Maintain aspect ratio').locator('input[type=checkbox]').check();
   await row(page, 'Rotation angle').locator('input[type=text]').fill('90');
   await apply(page);
-  await expect.poll(() => file().includes('\twidth 50col%\n\theight 5cm\n\tkeepAspectRatio\n\trotateAngle 90\n'), { timeout: 10000 }).toBe(true);
+  await expect.poll(() => file().includes('\\includegraphics[angle=90,width=0.5\\columnwidth,totalheight=5cm,keepaspectratio]{figures/x.png}'), { timeout: 10000 }).toBe(true);
 });
 
 test('math delimiters and matrix dialogs insert into a formula', async ({ page }) => {

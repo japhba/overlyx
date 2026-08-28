@@ -1,7 +1,7 @@
 /**
- * Document manager: keeps one Y.Doc per open LyX file, persists Yjs state in SQLite,
- * writes the .lyx file back to disk (debounced) and reloads it when it changes externally
- * (e.g. saved from native LyX). Also manages named/automatic versions.
+ * Document manager: keeps one Y.Doc per open .tex document, persists Yjs state in SQLite,
+ * writes the .tex file back to disk (debounced) and reloads it when it changes externally
+ * (git, another editor). Also manages named/automatic versions.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,31 +11,17 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { yDocToProsemirrorJSON } from 'y-prosemirror';
 import {
-  parseLyx, writeLyx, mergeLyx, pmToLyxBody, type LyxDocument, type PMJSON,
+  mergeLyx, pmToLyxBody, type LyxDocument, type PMJSON,
 } from '@overlyx/core';
 import { db } from './db.ts';
 import { config } from './config.ts';
-import { listProjects, resolveProjectPath, type ProjectFile } from './projects.ts';
+import { listProjects, resolveProjectPath, projectDir, type ProjectFile } from './projects.ts';
 import { applyLyxDocument } from './ydiff.ts';
+import { parseDocumentText, writeDocumentText, readTextFile, looksLikeDocument, cachedParseFile } from './texdoc.ts';
 
-/**
- * Read a .lyx file as text. LyX writes UTF-8; a file that is not valid UTF-8 (an old latin-1 file,
- * a corrupted one) is decoded as latin-1 rather than silently turned into U+FFFD characters that
- * would then be written back over the original bytes.
- */
-export function readLyxFile(absPath: string): string {
-  const buf = fs.readFileSync(absPath);
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
-  catch {
-    console.warn(`[docs] ${absPath} is not valid UTF-8 — decoding as latin-1`);
-    return buf.toString('latin1');
-  }
-}
-
-/** Does this text look like a LyX document we can safely write back? (a header, a body, an end) */
-export function looksLikeLyx(text: string, parsed: LyxDocument): boolean {
-  return parsed.format > 0 && parsed.header.lines.length > 0 && text.includes('\\begin_body') && text.includes('\\end_document');
-}
+export { readTextFile, looksLikeDocument };
+/** @deprecated name kept for older call sites */
+export const readLyxFile = readTextFile;
 
 export interface DocMeta {
   preamble: string[];
@@ -63,7 +49,9 @@ export class OpenDoc {
   saving = false;
   dirty = false;
   lastAutoVersion = 0;
-  /** what the .lyx file on disk contains: state vector of the Y.Doc when it was last written / read */
+  /** the document has no preamble of its own (a child document / fragment) */
+  isChild = false;
+  /** what the .tex file on disk contains: state vector of the Y.Doc when it was last written / read */
   lastSavedSV: Uint8Array = Y.encodeStateVector(this.ydoc);
   lastSavedAt = 0;
   /** notified after every successful save (the WebSocket layer tells the clients) */
@@ -98,14 +86,26 @@ export class OpenDoc {
     m.set('trailer', JSON.stringify(doc.trailer));
   }
 
-  /** Current document as LyX AST (from the CRDT state). */
+  /** Current document as the document model (from the CRDT state). */
   toLyxDocument(): LyxDocument {
     const meta = this.getMeta();
     const json = yDocToProsemirrorJSON(this.ydoc, 'prosemirror') as PMJSON;
     return { preamble: meta.preamble, format: meta.format, header: { lines: meta.headerLines }, body: pmToLyxBody(json), trailer: meta.trailer };
   }
 
-  toLyxText(): string { return writeLyx(this.toLyxDocument()); }
+  /** Current document as .tex text. */
+  toText(): string {
+    return writeDocumentText(this.toLyxDocument(), this.project, this.relPath, this.isChild, (fn) => resolveIncludeFor(this, fn)).text;
+  }
+  /** @deprecated use toText() */
+  toLyxText(): string { return this.toText(); }
+
+  /** Parse .tex text in this document's context (project layouts, master settings for children). */
+  parse(text: string): LyxDocument {
+    const r = parseDocumentText(text, this.project, this.relPath);
+    this.isChild = r.fragment;
+    return r.doc;
+  }
 
   /**
    * Load a LyX document into the CRDT (initial load, external change, restore). Applied as a diff:
@@ -159,22 +159,23 @@ export class OpenDoc {
    */
   absorbExternalChange(text?: string): boolean {
     if (text === undefined) {
-      try { text = readLyxFile(this.absPath); } catch { return false; }   // missing: see onExternalRemove
+      try { text = readTextFile(this.absPath); } catch { return false; }   // missing: see onExternalRemove
     }
     const hash = sha1(text);
+    if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] absorb ${this.id} hash=${hash.slice(0, 8)} file=${this.fileHash.slice(0, 8)} known=${knownHashes.get(this.absPath)?.slice(0, 8)} len=${text.length}`);
     if (hash === this.fileHash || hash === knownHashes.get(this.absPath)) return false;
-    const parsed = parseLyx(text);
-    if (!looksLikeLyx(text, parsed)) { console.warn(`[docs] ${this.id}: the file on disk is not a LyX document any more — ignoring it`); return false; }
+    if (!looksLikeDocument(text, this.isChild)) { console.warn(`[docs] ${this.id}: the file on disk is not a document any more — ignoring it`); return false; }
+    const parsed = this.parse(text);
     console.log(`[docs] external change detected: ${this.id} — merging`);
     // three-way: only what changed on disk (relative to what we last read / wrote) is taken over;
     // edits made here meanwhile in other paragraphs are kept (they are saved right after)
-    const base = this.fileText !== null ? parseLyx(this.fileText) : null;
+    const base = this.fileText !== null ? this.parse(this.fileText) : null;
     const merged = base ? mergeLyx(base, this.toLyxDocument(), parsed) : parsed;
     this.fileHash = hash;
     this.fileText = text;
     knownHashes.set(this.absPath, hash);
     this.loadFromLyx(merged, 'file-load');
-    if (base && sha1(this.toLyxText()) !== hash) this.dirty = true;   // ours differs from the disk: write it
+    if (base && sha1(this.toText()) !== hash) this.dirty = true;   // ours differs from the disk: write it
     this.persistState();
     return true;
   }
@@ -189,20 +190,21 @@ export class OpenDoc {
       // merge that first — writing over it would silently discard their change.
       this.absorbExternalChange();
       const sv = Y.encodeStateVector(this.ydoc);
-      const text = this.toLyxText();
+      const text = this.toText();
       const hash = sha1(text);
       if (hash !== this.fileHash) {
         // never replace a document with something that is not one (a bug in the conversion must
         // not destroy the file on disk; the state stays dirty and the next save tries again)
-        if (!looksLikeLyx(text, parseLyx(text))) throw new Error('refusing to write: the generated text is not a LyX document');
+        if (!looksLikeDocument(text, this.isChild)) throw new Error('refusing to write: the generated text is not a document');
         // a drastic shrink is probably a mistake: keep what the file had as a version first
         let previous: string | null = null;
-        try { previous = readLyxFile(this.absPath); } catch { /* new file */ }
+        try { previous = readTextFile(this.absPath); } catch { /* new file */ }
         if (previous && previous.length > 5000 && text.length < previous.length * 0.2) this.snapshot('before large deletion', previous);
         const tmp = this.absPath + '.overlyx-tmp';
         const fd = fs.openSync(tmp, 'w');
         try { fs.writeSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
         fs.renameSync(tmp, this.absPath);
+        if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] wrote ${this.id} hash=${hash.slice(0, 8)} len=${text.length}`);
         this.fileHash = hash;
         this.fileText = text;
         knownHashes.set(this.absPath, hash);
@@ -270,7 +272,36 @@ function sha1(s: string): string { return crypto.createHash('sha1').update(s).di
 /** hashes of file contents we last wrote / read, to distinguish our own writes from external ones */
 const knownHashes = new Map<string, string>();
 
-/** Called after a .lyx file was written: (project, ids of the users whose edits it contains). */
+/**
+ * A stored version is .tex text — or, for versions from before the switch to .tex and for offline
+ * edits a browser could only keep in LyX's format, a LyX document: those are read as such.
+ */
+export async function parseVersionText(doc: OpenDoc, text: string): Promise<LyxDocument> {
+  if (/^\s*#LyX|^\\lyxformat/m.test(text.slice(0, 400))) {
+    const { parseLyx } = await import('@overlyx/core');
+    const { prepareForTex } = await import('@overlyx/core/tex/index.ts');
+    const d = parseLyx(text);
+    prepareForTex(d);
+    d.preamble = [];
+    return d;
+  }
+  return doc.parse(text);
+}
+
+/** A child document (\\input / \\include) resolved from the live state of an open document, else parsed from disk. */
+function resolveIncludeFor(doc: OpenDoc, filename: string): LyxDocument | undefined {
+  try {
+    const proj = projectDir(doc.project);
+    const abs = path.resolve(path.dirname(doc.absPath), filename.endsWith('.tex') || filename.includes('.') ? filename : filename + '.tex');
+    if (!abs.startsWith(proj + path.sep) || !fs.existsSync(abs)) return undefined;
+    const rel = path.relative(proj, abs);
+    const open = manager.docs.get(`${doc.project}/${rel}`);
+    if (open) return open.toLyxDocument();
+    return cachedParseFile(doc.project, rel).doc;
+  } catch { return undefined; }
+}
+
+/** Called after a document was written: (project, ids of the users whose edits it contains). */
 export const fileWrittenListeners = new Set<(project: string, userIds: number[]) => void>();
 
 export class DocManager {
@@ -281,7 +312,7 @@ export class DocManager {
     this.watch();
   }
 
-  /** ids look like "project/sub/dir/file.lyx" */
+  /** ids look like "project/sub/dir/file.tex" */
   static parseId(id: string): { project: string; relPath: string } {
     const idx = id.indexOf('/');
     if (idx < 0) throw new Error('bad doc id');
@@ -299,12 +330,12 @@ export class DocManager {
 
   private openCold(id: string): OpenDoc {
     const { project, relPath } = DocManager.parseId(id);
-    if (!relPath.endsWith('.lyx')) throw new Error('not a LyX file');
+    if (!relPath.endsWith('.tex')) throw new Error('not a .tex document');
     const absPath = resolveProjectPath(project, relPath);
     if (!fs.existsSync(absPath)) throw new Error('file not found: ' + id);
     const doc = new OpenDoc(id, project, relPath, absPath);
-    const text = readLyxFile(absPath);
-    if (!looksLikeLyx(text, parseLyx(text))) throw new Error('not a LyX document: ' + id);
+    const text = readTextFile(absPath);
+    if (text.includes('\0')) throw new Error('not a text document: ' + id);
     const hash = sha1(text);
     doc.fileHash = hash;
     doc.fileText = text;
@@ -320,10 +351,10 @@ export class DocManager {
         // changed file): merge it into the stored history as a diff, keeping the epoch, so that
         // clients holding a local copy of this history (offline edits) can still sync
         console.log(`[docs] ${id}: file changed since last persisted state — merging`);
-        doc.loadFromLyx(parseLyx(text), 'file-load');
-      }
+        doc.loadFromLyx(doc.parse(text), 'file-load');
+      } else doc.parse(text);   // learns whether this is a child document
       // sanity: the state must produce exactly the file; otherwise rebuild from scratch
-      ok = doc.fragment.length > 0 && sha1(doc.toLyxText()) === hash;
+      ok = doc.fragment.length > 0 && sha1(doc.toText()) === hash;
     } catch { ok = false; }
     if (!ok) { doc.ydoc.destroy(); return this.openFresh(doc, text); }
     doc.markSaved();
@@ -337,7 +368,7 @@ export class DocManager {
     const fresh = new OpenDoc(doc.id, doc.project, doc.relPath, doc.absPath);
     fresh.fileHash = doc.fileHash;
     fresh.fileText = text;
-    const parsed = parseLyx(text);
+    const parsed = fresh.parse(text);
     fresh.loadFromLyx(parsed, 'file-load');
     fresh.lastSavedAt = fs.statSync(doc.absPath).mtimeMs;
     fresh.persistState();
@@ -420,15 +451,20 @@ export class DocManager {
 
   private watch(): void {
     // watch the whole projects root so that projects created later are covered too
-    this.watcher = chokidar.watch(config.projectsDir, { ignoreInitial: true, depth: 7, awaitWriteFinish: { stabilityThreshold: 400, pollInterval: 100 }, ignored: /(^|[/\\])(\.|node_modules|_build)/ });
+    // hidden directories, node_modules and build directories *inside* the projects root are not
+    // watched (the root itself may live under a dotted path)
+    const root = config.projectsDir;
+    const ignored = (p: string) => path.relative(root, p).split(path.sep).some(seg => (seg.startsWith('.') && seg !== '.' && seg !== '..') || seg === 'node_modules' || seg === '_build');
+    this.watcher = chokidar.watch(root, { ignoreInitial: true, depth: 7, awaitWriteFinish: { stabilityThreshold: 400, pollInterval: 100 }, ignored });
     this.watcher.on('change', (file: string) => void this.onExternalChange(file));
     this.watcher.on('add', (file: string) => void this.onExternalChange(file));
     this.watcher.on('unlink', (file: string) => void this.onExternalRemove(file));
   }
 
   private async onExternalChange(file: string): Promise<void> {
-    if (!file.endsWith('.lyx')) return;
+    if (!file.endsWith('.tex')) return;
     const doc = [...this.docs.values()].find(d => d.absPath === file);
+    if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] fs change ${file} open=${!!doc} hash=${doc?.fileHash.slice(0, 8)} known=${knownHashes.get(file)?.slice(0, 8)}`);
     if (!doc) return;
     const wasMissing = doc.fileMissing;
     doc.fileMissing = false;
@@ -444,15 +480,16 @@ export class DocManager {
    * the clients are told (close code 4001); the next save would otherwise silently re-create it.
    */
   private async onExternalRemove(file: string): Promise<void> {
-    if (!file.endsWith('.lyx')) return;
+    if (!file.endsWith('.tex')) return;
     const doc = [...this.docs.values()].find(d => d.absPath === file);
+    if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] fs change ${file} open=${!!doc} hash=${doc?.fileHash.slice(0, 8)} known=${knownHashes.get(file)?.slice(0, 8)}`);
     if (!doc) return;
     doc.fileMissing = true;
     await new Promise(r => setTimeout(r, 1500));
     if (this.docs.get(doc.id) !== doc) return;
     if (fs.existsSync(file)) { doc.fileMissing = false; if (doc.dirty) doc.scheduleSave(); return; }
     console.log(`[docs] ${doc.id}: file removed on disk — closing the document (content kept as a version)`);
-    doc.snapshot('file removed on disk', doc.toLyxText());
+    doc.snapshot('file removed on disk', doc.toText());
     this.drop(doc, 'document removed');
   }
 
@@ -473,7 +510,7 @@ export class DocManager {
 
   async createVersion(id: string, name: string, author: string, kind = 'manual', lyx?: string): Promise<number> {
     const doc = await this.open(id);
-    const text = lyx ?? doc.toLyxText();
+    const text = lyx ?? doc.toText();
     const info = db.prepare('INSERT INTO versions (doc_id, name, author, kind, created_at, lyx) VALUES (?,?,?,?,?,?)').run(id, name || 'version', author, kind, Date.now(), text);
     return Number(info.lastInsertRowid);
   }
@@ -487,7 +524,7 @@ export class DocManager {
     if (!v) throw new Error('version not found');
     const doc = await this.open(id);
     await this.createVersion(id, 'before restore of "' + v.name + '"', author, 'auto');
-    doc.loadFromLyx(parseLyx(v.lyx), 'restore');
+    doc.loadFromLyx(await parseVersionText(doc, v.lyx), 'restore');
     doc.scheduleSave();
   }
 }

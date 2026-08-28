@@ -30,7 +30,7 @@ function buildTree(files: ProjectFile[]): TreeNode[] {
   return root.children;
 }
 
-const ICON: Record<string, string> = { lyx: '📄', bib: '📚', image: '🖼', tex: '𝓣', pdf: '📕', other: '·' };
+const ICON: Record<string, string> = { doc: '📄', lyx: '📥', bib: '📚', image: '🖼', tex: '𝓣', pdf: '📕', other: '·' };
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 export const projectLabel = (p: Project) => p.title ?? p.name;
 
@@ -87,10 +87,10 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { c
 
   const newDoc = async (dir = '') => {
     if (!project) return;
-    const name = prompt(`New document file name (in ${projectLabel(project)}${dir ? '/' + dir : ''}):`, 'untitled.lyx');
+    const name = prompt(`New document file name (in ${projectLabel(project)}${dir ? '/' + dir : ''}):`, 'untitled.tex');
     if (!name) return;
     try {
-      const r = await api.newDoc(project.name, (dir ? dir + '/' : '') + name, { title: name.replace(/\.lyx$/, '') });
+      const r = await api.newDoc(project.name, (dir ? dir + '/' : '') + name, { title: name.replace(/\.(tex|lyx)$/, '') });
       await load();
       onOpen(r.id);
     } catch (e) { alert(String((e as Error).message)); }
@@ -99,7 +99,6 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { c
     if (!project) return;
     const name = prompt(`New text file (in ${projectLabel(project)}${dir ? '/' + dir : ''}), e.g. macros.tex or refs.bib:`, 'notes.tex');
     if (!name) return;
-    if (name.endsWith('.lyx')) { void newDoc(dir); return; }
     const rel = (dir ? dir + '/' : '') + name;
     try {
       if (project.files.some(f => f.path === rel)) throw new Error('file exists');
@@ -148,15 +147,23 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { c
     }
     const f = node.file;
     const id = `${project!.name}/${f.path}`;
-    const inTab = f.kind === 'lyx' || isTextFile(f.name);
-    const href = inTab ? '#/' + id : fileUrl(project!.name, f.path);
+    const isDoc = f.kind === 'doc';
+    const isLyx = f.kind === 'lyx';
+    const inTab = isDoc || isLyx || isTextFile(f.name);
+    const tabId = isDoc ? id : 'text:' + id;
+    const href = isLyx ? '#' : inTab ? '#/' + tabId : fileUrl(project!.name, f.path);
+    const importLyx = async () => {
+      if (!confirm(`Import ${f.name} into a .tex document (${f.name.replace(/\.lyx$/, '.tex')})? The .lyx file is kept; child documents it includes are imported too.`)) return;
+      try { const r = await api.importLyx(project!.name, f.path); await load(); onOpen(r.id); if (r.warnings.length) alert('Imported with warnings:\n' + r.warnings.slice(0, 10).join('\n')); }
+      catch (e) { alert('Import failed: ' + (e as Error).message); }
+    };
     return (
-      <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (f.kind !== 'lyx' ? ' other' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }}
-        href={href} target={inTab ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB${inTab && f.kind !== 'lyx' ? ' · opens in the text editor' : ''}`}
+      <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (!isDoc ? ' other' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }}
+        href={href} target={inTab ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB${isLyx ? ' · click to import as .tex' : inTab && !isDoc ? ' · opens in the text editor' : ''}`}
         data-file={f.path}
-        onClick={e => { if (inTab && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(id); } }}>
+        onClick={e => { if (isLyx) { e.preventDefault(); void importLyx(); return; } if (inTab && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(tabId); } }}>
         <span class="ficon">{ICON[f.kind] ?? '·'}</span><span class="fname">{node.name}</span>
-        {f.kind === 'lyx' && offlineDocs.has(id) && <span class="offline-mark" title="A copy of this document is stored in this browser: it can be opened and edited offline">⬇</span>}
+        {isDoc && offlineDocs.has(id) && <span class="offline-mark" title="A copy of this document is stored in this browser: it can be opened and edited offline">⬇</span>}
       </a>
     );
   };

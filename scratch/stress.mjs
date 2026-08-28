@@ -2,17 +2,17 @@
  * Headless multi-user stress harness for OverLyX (run with `npx tsx scratch/stress.mjs`).
  *
  *   BASE=http://127.0.0.1:3011 CREDS=<credentials.txt> PROJECTS=<projects dir> \
- *   N=8 DURATION=20 RATE=6 BURST=40 DOC=recurrent_feature/small.lyx SCENARIO=basic npx tsx scratch/stress.mjs
+ *   N=8 DURATION=20 RATE=6 BURST=40 DOC=recurrent_feature/small.tex SCENARIO=basic npx tsx scratch/stress.mjs
  *
  * N clients (each logged in as a different user) connect to the same document over the Yjs
  * WebSocket protocol and perform random concurrent edits directly on the 'prosemirror' XmlFragment
  * (text inserts/deletes in random paragraphs, paragraph inserts/deletes, formula edits, awareness
  * cursors). Measures update propagation latency (client -> server -> other clients), server RSS,
- * and checks convergence of all clients, the .lyx file written by the server (parse + round trip)
+ * and checks convergence of all clients, the .tex file written by the server (parse + round trip)
  * and that a fresh client receives the same state.
  *
  * SCENARIO: basic | reconnect (one client drops mid-burst, edits offline, reconnects) |
- *           external (the .lyx is rewritten on disk while others type) | twodocs (also runs a
+ *           external (the .tex is rewritten on disk while others type) | twodocs (also runs a
  *           second document concurrently and checks no cross-contamination)
  */
 import fs from 'node:fs';
@@ -23,7 +23,7 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { parseLyx, writeLyx } from '../packages/core/src/index.ts';
+import { parseTex, writeTex } from '../packages/core/src/tex/index.ts';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
@@ -34,8 +34,8 @@ const N = Number(process.env.N ?? 8);
 const DURATION = Number(process.env.DURATION ?? 20);      // seconds of editing
 const RATE = Number(process.env.RATE ?? 6);               // ops/s per client (normal typing)
 const BURST = Number(process.env.BURST ?? 40);            // ops/s per client during bursts
-const DOC = process.env.DOC ?? 'recurrent_feature/small.lyx';
-const DOC2 = process.env.DOC2 ?? 'recurrent_feature/main.lyx';
+const DOC = process.env.DOC ?? 'recurrent_feature/small.tex';
+const DOC2 = process.env.DOC2 ?? 'recurrent_feature/main.tex';
 const SCENARIO = process.env.SCENARIO ?? 'basic';
 const SEED = Number(process.env.SEED ?? 1);
 const SERVER_PID = process.env.SERVER_PID ?? findServerPid();
@@ -204,8 +204,8 @@ class Client {
       } else if (r < 0.97) {     // insert / edit an inline formula
         const par = pick(pars);
         const maths = par.toArray().filter(c => c instanceof Y.XmlElement && c.nodeName === 'math_inline');
-        if (maths.length && rnd() < 0.6) { const m = pick(maths); m.setAttribute('latex', `$\\alpha_{${ri(9)}}+${pick(['x', 'y', 'z'])}^{${ri(9)}}$`); }
-        else { const m = new Y.XmlElement('math_inline'); m.setAttribute('latex', `$x_{${this.name}}^{${this.ops}}$`); m.setAttribute('delim', '$'); m.setAttribute('marks', '[]'); par.insert(ri(par.length + 1), [m]); }
+        if (maths.length && rnd() < 0.6) { const m = pick(maths); m.setAttribute('latex', `\\alpha_{${ri(9)}}+${pick(['x', 'y', 'z'])}^{${ri(9)}}`); }
+        else { const m = new Y.XmlElement('math_inline'); m.setAttribute('latex', `x_{${this.name}}^{${this.ops}}`); m.setAttribute('delim', '$'); m.setAttribute('marks', '[]'); par.insert(ri(par.length + 1), [m]); }
       } else {                   // move the cursor (awareness)
         const par = pick(pars); const txt = this.textOf(par);
         if (txt) { const pos = ri(txt.length + 1); const rel = Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(txt, pos)); this.awareness.setLocalStateField('cursor', { anchor: rel, head: rel, t: performance.now() }); }
@@ -266,9 +266,24 @@ function checkFile(docId, markers = []) {
   const text = fs.readFileSync(file, 'utf8');
   let ok = true;
   try {
-    const parsed = parseLyx(text);
-    const again = writeLyx(parsed);
-    if (again !== text) { ok = false; console.log('  !! file does not round-trip (write(parse(x)) != x)'); fs.writeFileSync(file + '.rt-diff-a', text); fs.writeFileSync(file + '.rt-diff-b', again); }
+    const dir = path.dirname(file);
+    const readFile = (n) => { const q = path.join(dir, n); return fs.existsSync(q) ? fs.readFileSync(q, 'utf8') : undefined; };
+    // child documents contribute their requirements (packages) to the master, like the server does
+    const resolveInclude = (fn) => { const q = path.join(dir, fn.endsWith('.tex') || fn.includes('.') ? fn : fn + '.tex'); return fs.existsSync(q) ? parseTex(fs.readFileSync(q, 'utf8'), { localDirs: [dir], readFile, masterHeader: parsed.doc.header.lines }).doc : undefined; };
+    const opts = { localDirs: [dir], readFile };
+    const parsed = parseTex(text, opts);
+    const again = writeTex(parsed.doc, { ...opts, resolveInclude, fragment: parsed.fragment }).text;
+    // the contract: a file the server wrote is reproduced by parse + write — up to whitespace the
+    // synthetic edits put in (double / trailing blanks, which LaTeX ignores), and exactly from then on
+    // (the synthetic edits also leave empty font spans, which LaTeX ignores and the parser drops;
+    // line breaks inside a paragraph are re-wrapped once)
+    const canon = (t) => t.replace(/\\(noun|emph|textbf|textit|texttt|textsf|textsc|uline|sout)\{\}/g, '').split('\n\n').map(p => p.replace(/\s+/g, ' ').trim()).join('\n\n').replace(/ +\}/g, '}').replace(/\{ +/g, '{');
+    if (canon(again) !== canon(text)) { ok = false; console.log('  !! file does not round-trip (write(parse(x)) != x)'); fs.writeFileSync(file + '.rt-diff-a', text); fs.writeFileSync(file + '.rt-diff-b', again); }
+    else {
+      const parsed2 = parseTex(again, opts);
+      const again2 = writeTex(parsed2.doc, { ...opts, resolveInclude, fragment: parsed2.fragment }).text;
+      if (again2 !== again) { ok = false; console.log('  !! file is not stable under a second parse + write'); fs.writeFileSync(file + '.rt-diff-a', again); fs.writeFileSync(file + '.rt-diff-b', again2); }
+    }
   } catch (e) { ok = false; console.log('  !! file does not parse: ' + e.message); }
   const missing = markers.filter(m => !text.includes(m));
   if (missing.length) { ok = false; console.log(`  !! ${missing.length}/${markers.length} markers missing from the file`); }
@@ -336,12 +351,10 @@ async function runScenario() {
       await waitSaved(clients, 6000);
       const file = path.join(PROJECTS, DOC);
       const text = fs.readFileSync(file, 'utf8');
-      const doc = parseLyx(text);
       externalText = `EXTERNAL-EDIT-${SEED}-${Date.now()}`;
-      // rewrite: append a paragraph at the end of the body (a change LyX could have made)
-      const idx = text.lastIndexOf('\\end_body');
-      const newText = text.slice(0, idx) + `\\begin_layout Standard\n${externalText}\n\\end_layout\n\n` + text.slice(idx);
-      void doc;
+      // rewrite: append a paragraph at the end of the body (a change another editor could have made)
+      const idx = text.lastIndexOf('\\end{document}');
+      const newText = text.slice(0, idx) + `${externalText}\n\n` + text.slice(idx);
       fs.writeFileSync(file + '.tmp', newText); fs.renameSync(file + '.tmp', file);
       console.log(`  external change written to ${DOC}`);
     }
@@ -356,7 +369,7 @@ async function runScenario() {
   const conv = await waitConverged(clients, 30000);
   const rssEnd = rss();
   console.log(`  ${totalOps} ops in ${elapsed.toFixed(1)} s = ${(totalOps / elapsed).toFixed(0)} ops/s; latency p50 ${pct(latencies, 0.5).toFixed(1)} ms, p95 ${pct(latencies, 0.95).toFixed(1)} ms, p99 ${pct(latencies, 0.99).toFixed(1)} ms, max ${pct(latencies, 1).toFixed(0)} ms (${latencies.length} samples); awareness p50 ${pct(awarenessLat, 0.5).toFixed(1)} ms p95 ${pct(awarenessLat, 0.95).toFixed(1)} ms`);
-  console.log(`  server RSS ${rss0.toFixed(0)} -> ${rssEnd.toFixed(0)} MB (max during run ${Math.max(...rssSamples).toFixed(0)} MB); .lyx written ${Math.max(0, saveTimes.size - 1)}× during the ${DURATION} s of continuous editing`);
+  console.log(`  server RSS ${rss0.toFixed(0)} -> ${rssEnd.toFixed(0)} MB (max during run ${Math.max(...rssSamples).toFixed(0)} MB); .tex written ${Math.max(0, saveTimes.size - 1)}× during the ${DURATION} s of continuous editing`);
   const converged = conv && checkConverged(clients, 'main doc');
   console.log(`  convergence: ${converged ? 'yes' : 'NO'} (${clients[0].paragraphs().length} paragraphs, ${clients[0].plainText().length} chars)`);
   const errors = clients.flatMap(c => c.errors.map(e => c.name + ': ' + e));
@@ -385,8 +398,8 @@ async function runScenario() {
   console.log(`  fresh client gets identical content: ${freshOk} (sync ${Math.round(fresh.syncMs)} ms)`);
   fresh.disconnect();
 
-  // the server's own view (through the .lyx file) must contain the same paragraph texts as the clients
-  const parsedDisk = parseLyx(fs.readFileSync(path.join(PROJECTS, DOC), 'utf8'));
+  // the server's own view (through the .tex file) must contain the same paragraph texts as the clients
+  const parsedDisk = parseTex(fs.readFileSync(path.join(PROJECTS, DOC), 'utf8')).doc;
   const diskPars = parsedDisk.body.filter(p => p.type === 'paragraph' || p.layout).length;
   console.log(`  paragraphs: clients ${clients[0].paragraphs().length}, file ${diskPars}`);
 

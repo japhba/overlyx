@@ -57,4 +57,18 @@ export class Features {
   }
 
   get all(): string[] { return [...this.required]; }
+
+  /** The same requirements against a class that additionally provides `extra` (tex mode: the user's preamble). */
+  withProvides(extra: Set<string>): Features {
+    const dc = { ...this.dc, provides: new Set([...this.dc.provides, ...extra]) };
+    const f = new Features(dc);
+    for (const r of this.required) f.required.add(r);
+    f.snippets.push(...this.snippets);
+    f.usedLayouts.push(...this.usedLayouts);
+    f.usedInsetLayouts.push(...this.usedInsetLayouts);
+    for (const [k, v] of this.usedFloats) f.usedFloats.set(k, v);
+    for (const [k, v] of this.usedLanguages) f.usedLanguages.set(k, v);
+    f.fontEncodings.push(...this.fontEncodings);
+    return f;
+  }
 }

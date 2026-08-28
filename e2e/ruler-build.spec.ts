@@ -2,14 +2,20 @@
  * The ruler (text width) and background PDF builds (start, progress, cancel).
  */
 import { test, expect } from '@playwright/test';
-import { mkdirSync, copyFileSync } from 'node:fs';
+import { mkdirSync, copyFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { login, openDoc, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
 
-const DOC = 'e2e-scratch/ruler-build.lyx';
+// the whole paper (children, class files, figures): its build takes long enough to be cancelled
+const SRC = `${FIXTURES_DIR}/recurrent_feature`;
+const DIR = `${PROJECTS_DIR}/e2e-build`;
+const DOC = 'e2e-build/main.tex';
 test.beforeAll(() => {
-  mkdirSync(`${PROJECTS_DIR}/e2e-scratch`, { recursive: true });
-  copyFileSync(`${FIXTURES_DIR}/recurrent_feature/main.lyx`, PROJECTS_DIR + '/' + DOC);
+  rmSync(DIR, { recursive: true, force: true });
+  mkdirSync(`${DIR}/figures`, { recursive: true });
+  for (const f of ['main.tex', 'appendix.tex', 'lyxmacros.tex', 'macros.tex', 'preamble.tex', 'latexmkrc', 'bib.bib', 'icml2026.sty', 'icml2026.bst', 'icml.layout', 'fancyhdr.sty', 'algorithm.sty', 'algorithmic.sty']) if (existsSync(`${SRC}/${f}`)) copyFileSync(`${SRC}/${f}`, `${DIR}/${f}`);
+  for (const m of readFileSync(`${SRC}/main.tex`, 'utf8').matchAll(/\\includegraphics(?:\[[^\]]*\])?\{figures\/([^}]+)\}/g)) if (existsSync(`${SRC}/figures/${m[1]}`)) copyFileSync(`${SRC}/figures/${m[1]}`, `${DIR}/figures/${m[1]}`);
 });
+test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
 test('the ruler resizes the text column; double-click resets it', async ({ page }) => {
   await login(page);

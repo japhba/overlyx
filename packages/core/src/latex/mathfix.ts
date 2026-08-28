@@ -51,6 +51,13 @@ function fixTextArg(arg: string, db: MathSymbolDB, macros: Set<string>): string 
       if (!m) { out += arg.slice(i, i + 2); i += 2; continue; }
       const name = m[1];
       let j = i + m[0].length;
+      if (name === 'ensuremath' && arg[j] === '{') {
+        // already math: copy verbatim
+        const end = groupEnd(arg, j);
+        out += arg.slice(i, end);
+        i = end;
+        continue;
+      }
       if (TEXT_MODE_CMDS.has(name) && arg[j] === '{') {
         // nested text-mode argument
         const end = groupEnd(arg, j);

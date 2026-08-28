@@ -65,7 +65,7 @@ export const TOUR_STEPS: Step[] = [
     target: ['.lyx-editor'],
     ready: s => s.ready,
     body: (now) => now.ready ? <>
-      <p>What you see is your personal example project: an ordinary <code>.lyx</code> file, rendered as you type — no compiling needed to read it, and desktop LyX opens the same file.</p>
+      <p>What you see is your personal example project: an ordinary <code>.tex</code> file, rendered as you type — no compiling needed to read it, and any LaTeX editor (or Overleaf) opens the same file.</p>
       <p><b>Click into the text and type a few words.</b></p>
     </> : <p>Opening your example document…</p>,
     done: (now, base) => now.docTick > base.docTick,
@@ -93,7 +93,7 @@ export const TOUR_STEPS: Step[] = [
     id: 'save', title: 'Everything is saved for you',
     target: ['.statusbar .save-state'],
     body: (now) => <>
-      <p>There is no Save button: every edit goes to the server at once and is written to the <code>.lyx</code> file a moment later; this indicator turns green when the file is up to date. If the connection drops you keep editing offline and your changes sync when it is back.</p>
+      <p>There is no Save button: every edit goes to the server at once and is written to the <code>.tex</code> file a moment later; this indicator turns green when the file is up to date. If the connection drops you keep editing offline and your changes sync when it is back.</p>
       <p><b>Wait for “All changes saved”.</b>{now.saveState === 'saved' && <> ✓</>}</p>
     </>,
     done: now => now.saveState === 'saved',

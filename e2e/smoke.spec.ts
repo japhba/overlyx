@@ -3,13 +3,14 @@ import { readFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
 
 // a scratch copy of a real paper: tests must never type into the user's own documents
-const DOC = 'e2e-scratch/smoke-main.lyx';
+const DOC = 'e2e-scratch/smoke-main.tex';
 test.beforeAll(() => {
   mkdirSync(`${PROJECTS_DIR}/e2e-scratch`, { recursive: true });
-  copyFileSync(`${FIXTURES_DIR}/recurrent_feature/main.lyx`, PROJECTS_DIR + '/' + DOC);
+  copyFileSync(`${FIXTURES_DIR}/recurrent_feature/main.tex`, PROJECTS_DIR + '/' + DOC);
+  for (const f of ['lyxmacros.tex', 'macros.tex', 'preamble.tex']) copyFileSync(`${FIXTURES_DIR}/recurrent_feature/${f}`, `${PROJECTS_DIR}/e2e-scratch/${f}`);
 });
 
-test('login, open a native LyX document and render it', async ({ page }) => {
+test('login, open a .tex document and render it', async ({ page }) => {
   const errors = collectErrors(page);
   await login(page);
   await openDoc(page, DOC);
@@ -34,7 +35,7 @@ test('login, open a native LyX document and render it', async ({ page }) => {
   expect(errors.filter(e => !/favicon|ResizeObserver|404/.test(e))).toEqual([]);   // the scratch copy lacks the figures
 });
 
-test('typing is saved to the .lyx file and seen by a second user', async ({ browser }) => {
+test('typing is saved to the .tex file and seen by a second user', async ({ browser }) => {
   const ctxA = await browser.newContext();
   const pageA = await ctxA.newPage();
   await login(pageA);

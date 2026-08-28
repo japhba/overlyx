@@ -7,7 +7,9 @@ import { config } from './config.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, generatePassword } from './auth.ts';
 import { attachWebSocket } from './ws.ts';
 import { manager } from './docs.ts';
-import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile } from './projects.ts';
+import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile, isDocumentFile } from './projects.ts';
+import { cachedParseFile, importLyxFile, parseDocumentText } from './texdoc.ts';
+import { toPdf } from './graphics.ts';
 import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData } from './export.ts';
 import { db } from './db.ts';
@@ -16,7 +18,7 @@ import { sandboxAvailable } from './sandbox.ts';
 import { feedbackRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
-import { parseLyx, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText } from '@overlyx/core';
+import { collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText } from '@overlyx/core';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -66,7 +68,7 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
  */
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|lyx|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build))?$/.exec(full)!;
+  const m = /^(.*?)(?:\/(meta|tex|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build))?$/.exec(full)!;
   const id = decodeURIComponent(m[1]);
   const action = m[2] ?? '';
   const write = req.method !== 'GET' && !/^export/.test(action);
@@ -154,7 +156,7 @@ api.post('/share/:token/accept', (req, res) => {
   try {
     const { project, role } = acceptLink(String(req.params.token), req.user!);
     const files = listProjects().find(p => p.name === project.name)?.files ?? [];
-    const lyx = files.filter(f => f.kind === 'lyx' && !isBackupFile(f.name)).sort((a, b) => Number(!/(^|\/)main\.lyx$/.test(a.path)) - Number(!/(^|\/)main\.lyx$/.test(b.path)) || a.path.length - b.path.length || a.path.localeCompare(b.path));
+    const lyx = files.filter(f => f.kind === 'doc' && !isBackupFile(f.name)).sort((a, b) => Number(!/(^|\/)main\.tex$/.test(a.path)) - Number(!/(^|\/)main\.tex$/.test(b.path)) || a.path.length - b.path.length || a.path.localeCompare(b.path));
     res.json({ project: project.name, title: project.title, role, doc: lyx[0] ? `${project.name}/${lyx[0].path}` : null });
   } catch (e) { res.status(404).json({ error: (e as Error).message }); }
 });
@@ -190,8 +192,9 @@ api.delete('/git/tokens/:id', (req, res) => {
 
 api.post('/projects/:project/new', needProject('edit'), (req, res) => {
   try {
-    let rel = String(req.body?.path ?? 'untitled.lyx');
-    if (!rel.endsWith('.lyx')) rel += '.lyx';
+    let rel = String(req.body?.path ?? 'untitled.tex');
+    if (rel.endsWith('.lyx')) rel = rel.slice(0, -4) + '.tex';
+    if (!rel.endsWith('.tex')) rel += '.tex';
     const abs = resolveProjectPath(req.params.project, rel);
     if (fs.existsSync(abs)) { res.status(409).json({ error: 'file exists' }); return; }
     fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -236,7 +239,7 @@ const TEXT_MAX = 4 * 1024 * 1024;
 api.get('/projects/:project/text/*', needProject('view'), (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
-    if (rel.endsWith('.lyx')) { res.status(400).json({ error: 'LyX documents are opened as documents, not as text' }); return; }
+    if (rel.endsWith('.lyx') || isDocumentFile(req.params.project, rel)) { res.status(400).json({ error: 'Documents are opened as documents, not as text' }); return; }
     const abs = resolveProjectPath(req.params.project, rel);
     if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) { res.status(404).json({ error: 'not found' }); return; }
     const st = fs.statSync(abs);
@@ -280,7 +283,7 @@ api.post('/projects/:project/bib/add', needProject('edit'), async (req, res) => 
 api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
-    if (rel.endsWith('.lyx')) { res.status(400).json({ error: 'LyX documents are opened as documents, not as text' }); return; }
+    if (rel.endsWith('.lyx') || isDocumentFile(req.params.project, rel)) { res.status(400).json({ error: 'Documents are opened as documents, not as text' }); return; }
     const abs = resolveProjectPath(req.params.project, rel);
     const text = req.body?.text;
     if (typeof text !== 'string') { res.status(400).json({ error: 'text missing' }); return; }
@@ -353,18 +356,6 @@ function cachedBib(abs: string): ReturnType<typeof parseBibtex> {
   } catch { return []; }
 }
 
-/** Parsed LyX files that are not open (child documents, macro files), cached by mtime + size. */
-const parseCache = new Map<string, { key: string; doc: ReturnType<typeof parseLyx> }>();
-function cachedParse(abs: string): ReturnType<typeof parseLyx> {
-  const st = fs.statSync(abs);
-  const key = `${st.mtimeMs}:${st.size}`;
-  const hit = parseCache.get(abs);
-  if (hit && hit.key === key) return hit.doc;
-  const doc = parseLyx(fs.readFileSync(abs, 'utf8'));
-  if (parseCache.size > 200) parseCache.clear();
-  parseCache.set(abs, { key, doc });
-  return doc;
-}
 
 /** bib files used by a document (filled by the meta route) for the /bib search endpoint */
 const bibIndex = new Map<string, { files: string[]; fallbackProject: string | null }>();
@@ -419,13 +410,14 @@ api.get('/docs/*/meta', async (req, res) => {
     const readDoc = (rel: string) => {
       const open = manager.docs.get(`${doc.project}/${rel}`);
       if (open) return open.toLyxDocument();
-      return cachedParse(path.join(proj, rel));
+      return cachedParseFile(doc.project, rel).doc;
     };
     const rootRel = masterRel ?? doc.relPath;
     const rootLyx = masterRel ? readDoc(masterRel) : lyx;
     const docDir = path.dirname(path.join(proj, rootRel));
     const safe = (fn: string) => { const abs = path.resolve(docDir, fn); return abs.startsWith(proj) ? abs : null; };
-    const includeDoc = (fn: string) => { const abs = safe(fn); if (!abs) return undefined; try { return readDoc(path.relative(proj, abs)); } catch { return undefined; } };
+    const texName = (fn: string) => (fn.endsWith('.tex') || fn.includes('.') ? fn : fn + '.tex');
+    const includeDoc = (fn: string) => { const abs = safe(texName(fn)); if (!abs || !abs.endsWith('.tex') || !fs.existsSync(abs)) return undefined; try { return readDoc(path.relative(proj, abs)); } catch { return undefined; } };
     const macros = collectMacros(rootLyx, {
       include: includeDoc,
       readFile: (fn) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } },
@@ -451,8 +443,8 @@ api.get('/docs/*/meta', async (req, res) => {
           } else if (ins.type === 'Formula' && !ins.inline) {
             for (const m of ins.latex.matchAll(/\\label\{([^}]*)\}/g)) labels.push({ name: m[1], context: '(equation)', file: rel });
           } else if (ins.type === 'Leaf' && ins.name === 'CommandInset' && ins.arg === 'include') {
-            const fn = unquote(paramMap(ins.params).get('filename'));
-            if (fn.endsWith('.lyx')) {
+            const fn = texName(unquote(paramMap(ins.params).get('filename')));
+            if (fn.endsWith('.tex')) {
               const abs = path.resolve(dir, fn);
               if (abs.startsWith(proj) && fs.existsSync(abs)) { try { collectLabels(readDoc(path.relative(proj, abs)), path.relative(proj, abs), depth + 1); } catch { /* ignore */ } }
             }
@@ -476,9 +468,9 @@ api.get('/docs/*/meta', async (req, res) => {
         } else if (inset.arg === 'citation') {
           for (const k of unquote(pm.get('key')).split(',')) if (k.trim()) citedKeys.add(k.trim());
         } else if (inset.arg === 'include') {
-          const fn = unquote(pm.get('filename'));
+          const fn = texName(unquote(pm.get('filename')));
           const abs = safe(fn);
-          if (abs && fn.endsWith('.lyx') && fs.existsSync(abs)) {
+          if (abs && fn.endsWith('.tex') && fs.existsSync(abs)) {
             const rel = path.relative(proj, abs);
             if (scanned.has(rel)) continue;     // child documents may include each other (appendix ↔ macros file)
             scanned.add(rel);
@@ -506,7 +498,7 @@ api.get('/docs/*/meta', async (req, res) => {
     let flexInsets: unknown = null;
     try {
       const mod = await import('@overlyx/core/latex/index.ts') as any;
-      const dc = mod.loadDocumentClass(getTextClass(lyx), getModules(lyx), config.layoutDir);
+      const dc = mod.loadDocumentClass(getTextClass(lyx), getModules(lyx), config.layoutDir, [proj, docDir]);
       layouts = mod.describeLayouts(dc);
       flexInsets = dc.insetLayouts ? mod.flexInsetNames(dc) : null;
     } catch (e) {
@@ -542,12 +534,40 @@ api.get('/docs/*/meta', async (req, res) => {
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
-api.get('/docs/*/lyx', async (req, res) => {
+/** The document's LaTeX source (what the file on disk contains once saved). */
+api.get('/docs/*/tex', async (req, res) => {
   try {
     const doc = await manager.open(docId(req));
-    res.setHeader('Content-Type', 'application/x-lyx; charset=utf-8');
+    res.setHeader('Content-Type', 'application/x-tex; charset=utf-8');
     if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${path.basename(doc.relPath)}"`);
-    res.send(doc.toLyxText());
+    res.send(doc.toText());
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/** Replace the document by LaTeX source edited by hand (applied as a diff: untouched paragraphs keep their identity). */
+api.post('/docs/*/source', async (req, res) => {
+  try {
+    const text = req.body?.text;
+    if (typeof text !== 'string') { res.status(400).json({ error: 'text missing' }); return; }
+    if (text.length > 20_000_000) { res.status(413).json({ error: 'too large' }); return; }
+    const doc = await manager.open(docId(req));
+    const r = parseDocumentText(text, doc.project, doc.relPath);
+    doc.loadFromLyx(r.doc, 'source');
+    doc.scheduleSave();
+    res.json({ ok: true, warnings: r.warnings });
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/** Import a .lyx file of the project (and the children it includes) into .tex documents next to it. */
+api.post('/projects/:project/import', needProject('edit'), async (req, res) => {
+  try {
+    const rel = String(req.body?.path ?? '');
+    if (!rel.endsWith('.lyx') || rel.includes('..')) { res.status(400).json({ error: 'a .lyx file of the project is expected' }); return; }
+    const abs = resolveProjectPath(req.params.project, rel);
+    if (!fs.existsSync(abs)) { res.status(404).json({ error: 'not found' }); return; }
+    const r = await importLyxFile(req.params.project, rel, toPdf);
+    touchProject(req.params.project, req.user!.id);
+    res.json(r);
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
@@ -563,6 +583,12 @@ api.post('/docs/*/save', async (req, res) => {
     const ok = await doc.saveToFile();
     res.json({ ok });
   } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/** The document settings (header lines) — for clients that need the master's settings. */
+api.get('/docs/*/header', async (req, res) => {
+  try { const doc = await manager.open(docId(req)); res.json({ headerLines: doc.getMeta().headerLines }); }
+  catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
 /** Update header (document settings): full header lines list, or preamble text. */
@@ -631,7 +657,7 @@ api.post('/docs/*/export', async (req, res) => {
   try {
     const id = docId(req);
     const format = String(req.body?.format ?? 'pdf');
-    const engine = req.body?.engine === 'lyx' ? 'lyx' : 'overlyx';
+    const engine = 'overlyx';
     if (format === 'tex') {
       const r = await exportTex(id);
       res.json({ ok: true, tex: r.tex, warnings: r.warnings });

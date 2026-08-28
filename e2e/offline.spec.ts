@@ -9,30 +9,15 @@ import { login, collectErrors, adminCredentials, PROJECTS_DIR } from './helpers'
 
 const PROJECT = 'e2e-offline';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
-const DOC = `${PROJECT}/doc.lyx`;
-const FILE = `${DIR}/doc.lyx`;
+const DOC = `${PROJECT}/doc.tex`;
+const FILE = `${DIR}/doc.tex`;
 
-const LYX = `#LyX 2.5 created this file. For more info see https://www.lyx.org/
-\\lyxformat 643
-\\begin_document
-\\begin_header
-\\save_transient_properties true
-\\origin unavailable
-\\textclass article
-\\end_header
-
-\\begin_body
-
-\\begin_layout Standard
+const LYX = `\\documentclass{article}
+\\begin{document}
 First paragraph of the offline test.
-\\end_layout
 
-\\begin_layout Standard
 Second paragraph of the offline test.
-\\end_layout
-
-\\end_body
-\\end_document
+\\end{document}
 `;
 
 test.describe.configure({ mode: 'serial' });

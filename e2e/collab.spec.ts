@@ -1,7 +1,7 @@
 /**
  * Multi-user editing through real browsers: several users (separate browser contexts, different
  * accounts) edit the same document at the same time — in different paragraphs, in the SAME
- * paragraph, in a formula — and everything must converge, reach the .lyx file on disk, show up in
+ * paragraph, in a formula — and everything must converge, reach the .tex file on disk, show up in
  * the presence avatars, and undo must stay per user.
  *
  * Run against an isolated instance (see README / memory notes), e.g.
@@ -11,112 +11,20 @@
  */
 import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { login, openDoc, collectErrors, PROJECTS_DIR, adminCredentials, shareProject, userCredentials } from './helpers';
+import { login, openDoc, collectErrors, PROJECTS_DIR, adminCredentials, shareProject, userCredentials, texDoc } from './helpers';
 
 const PROJECT = 'e2e-collab';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
-const DOC = `${PROJECT}/collab.lyx`;
-const FILE = `${DIR}/collab.lyx`;
+const DOC = `${PROJECT}/collab.tex`;
+const FILE = `${DIR}/collab.tex`;
 const USERS = 6;
 
-const HEADER = `#LyX 2.5 created this file. For more info see https://www.lyx.org/
-\\lyxformat 643
-\\begin_document
-\\begin_header
-\\save_transient_properties true
-\\origin unavailable
-\\textclass article
-\\use_default_options true
-\\maintain_unincluded_children no
-\\language english
-\\language_package default
-\\inputencoding utf8
-\\fontencoding auto
-\\font_roman "default" "default"
-\\font_sans "default" "default"
-\\font_typewriter "default" "default"
-\\font_math "auto" "auto"
-\\font_default_family default
-\\use_non_tex_fonts false
-\\font_sc false
-\\font_roman_osf false
-\\font_sans_osf false
-\\font_typewriter_osf false
-\\font_sf_scale 100 100
-\\font_tt_scale 100 100
-\\use_microtype false
-\\use_dash_ligatures true
-\\graphics default
-\\default_output_format default
-\\output_sync 0
-\\bibtex_command default
-\\index_command default
-\\float_placement class
-\\float_alignment class
-\\paperfontsize default
-\\spacing single
-\\use_hyperref false
-\\papersize default
-\\use_geometry false
-\\use_package amsmath 1
-\\use_package amssymb 1
-\\use_package cancel 1
-\\use_package esint 1
-\\use_package mathdots 1
-\\use_package mathtools 1
-\\use_package mhchem 1
-\\use_package stackrel 1
-\\use_package stmaryrd 1
-\\use_package undertilde 1
-\\cite_engine basic
-\\cite_engine_type default
-\\biblio_style plain
-\\use_bibtopic false
-\\use_indices false
-\\paperorientation portrait
-\\suppress_date false
-\\justification true
-\\use_refstyle 1
-\\use_formatted_ref 0
-\\use_minted 0
-\\use_lineno 0
-\\index Index
-\\shortcut idx
-\\color #008000
-\\end_index
-\\secnumdepth 3
-\\tocdepth 3
-\\paragraph_separation indent
-\\paragraph_indentation default
-\\is_math_indent 0
-\\math_numbering_side default
-\\quotes_style english
-\\dynamic_quotes 0
-\\papercolumns 1
-\\papersides 1
-\\paperpagestyle default
-\\tablestyle default
-\\tracking_changes false
-\\output_changes false
-\\change_bars false
-\\postpone_fragile_content true
-\\html_math_output 0
-\\html_css_as_file 0
-\\html_be_strict false
-\\docbook_table_output 0
-\\docbook_mathml_prefix 1
-\\docbook_mathml_version 0
-\\end_header
-
-\\begin_body
-`;
-
 const body = () => {
-  let s = '\n\\begin_layout Title\nCollaboration test\n\\end_layout\n';
-  for (let i = 0; i < USERS + 2; i++) s += `\n\\begin_layout Standard\nParagraph ${i} of the collaboration test.\n\\end_layout\n`;
-  s += '\n\\begin_layout Standard\nShared paragraph:\n\\end_layout\n';
-  s += '\n\\begin_layout Standard\nFormula \n\\begin_inset Formula $a+b$\n\\end_inset\n\n here.\n\\end_layout\n';
-  return s + '\n\\end_body\n\\end_document\n';
+  let s = '\\title{Collaboration test}\n\\maketitle\n\n';
+  for (let i = 0; i < USERS + 2; i++) s += `Paragraph ${i} of the collaboration test.\n\n`;
+  s += 'Shared paragraph:\n\n';
+  s += 'Formula $a+b$ here.\n\n';
+  return s;
 };
 
 function credentialsFor(username: string): { username: string; password: string } {
@@ -156,7 +64,7 @@ const relevantErrors = (e: string[]) => e.filter(x => !/favicon|ResizeObserver|4
 
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(async ({ browser }) => {
-  rmSync(DIR, { recursive: true, force: true }); mkdirSync(DIR, { recursive: true }); writeFileSync(FILE, HEADER + body());
+  rmSync(DIR, { recursive: true, force: true }); mkdirSync(DIR, { recursive: true }); writeFileSync(FILE, texDoc(body()));
   await shareProject(browser, PROJECT, ['u1', 'u2', 'u3', 'u4', 'u5', 'u6'].filter(u => { try { userCredentials(u); return true; } catch { return false; } }));
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
@@ -179,7 +87,7 @@ test(`${USERS} users type at the same time in different paragraphs; everything c
   const texts = await Promise.all(sessions.map(s => editorText(s.page)));
   const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
   for (let i = 1; i < texts.length; i++) expect(norm(texts[i])).toBe(norm(texts[0]));
-  // the .lyx file on disk gets all of it
+  // the .tex file on disk gets all of it
   await expect.poll(() => { const t = readFileSync(FILE, 'utf8'); return markers.filter(m => t.includes(m)).length; }, { timeout: 30000 }).toBe(markers.length);
   // presence: every page lists every user
   for (const s of sessions) {

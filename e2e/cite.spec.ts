@@ -5,32 +5,17 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
+import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
 const PROJECT = 'e2e-cite';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
-const doc = () => readFileSync(`${SRC}/main.lyx`, 'utf8').split('\\begin_body')[0] + `\\begin_body
+const doc = () => withPreambleOf(`${SRC}/main.tex`, `Transformers changed everything.
 
-\\begin_layout Standard
-Transformers changed everything.
-\\end_layout
-
-\\begin_layout Standard
-\\begin_inset CommandInset bibtex
-LatexCommand bibtex
-bibfiles "refs"
-options "plain"
-
-\\end_inset
-
-
-\\end_layout
-
-\\end_body
-\\end_document
-`;
+\\bibliographystyle{plain}
+\\bibliography{refs}
+`);
 
 const SCHOLAR_BIBTEX = `@inproceedings{vaswani2017attention,
   title={Attention is all you need},
@@ -44,13 +29,13 @@ test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
   writeFileSync(`${DIR}/refs.bib`, '@book{knuth1984texbook, title={The TeXbook}, author={Knuth, Donald E.}, year={1984}, publisher={Addison-Wesley}}\n');
-  writeFileSync(`${DIR}/paper.lyx`, doc());
+  writeFileSync(`${DIR}/paper.tex`, doc());
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
 async function open(page: Page) {
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); });
-  await page.goto(`/#/${PROJECT}/paper.lyx`);
+  await page.goto(`/#/${PROJECT}/paper.tex`);
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length >= 2, null, { timeout: 60000 });
   await page.waitForTimeout(1200);
 }
@@ -77,8 +62,8 @@ test('paste a BibTeX entry: it lands in cited.bib, the bibliography inset gets c
   await page.locator('[data-cite-insert]').click();
   await expect(page.locator('.lyx-editor .lyx-command-citation')).toHaveCount(1);
   await expect(page.locator('.lyx-editor .lyx-command-citation')).toContainText('Vaswani');
-  await expect.poll(() => readFileSync(`${DIR}/paper.lyx`, 'utf8'), { timeout: 15000 }).toContain('bibfiles "refs,cited"');
-  await expect.poll(() => readFileSync(`${DIR}/paper.lyx`, 'utf8')).toContain('key "vaswani2017attention"');
+  await expect.poll(() => readFileSync(`${DIR}/paper.tex`, 'utf8'), { timeout: 15000 }).toContain('\\bibliography{refs,cited}');
+  await expect.poll(() => readFileSync(`${DIR}/paper.tex`, 'utf8')).toMatch(/\\cite[a-z*]*\{vaswani2017attention\}/);
 
   // the same paper pasted again is recognised, not duplicated
   await page.keyboard.press('Control+Shift+c');

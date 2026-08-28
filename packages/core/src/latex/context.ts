@@ -23,6 +23,15 @@ export interface ExportOptions {
   outputChanges?: boolean;
   /** Master document parameters (internal: set when exporting children). */
   masterParams?: BufferParams;
+  /** Directories searched first for layout files (project-local layouts). */
+  localDirs?: string[];
+  /**
+   * Round-trip mode for .tex documents: notes as %% blocks, change tracking always written,
+   * graphics file names verbatim, .tex children resolved for their requirements.
+   */
+  texMode?: boolean;
+  /** Features the user's preamble already provides (tex mode: no second \usepackage). */
+  provided?: Set<string>;
 }
 
 export interface ExportResult {
@@ -76,6 +85,10 @@ export interface ExportContext {
   mainInsetLayout?: InsetLayout;
   /** Names of math macros defined in the document (protected in moving arguments) */
   macroNames: Set<string>;
+  /** see ExportOptions.texMode */
+  texMode: boolean;
+  /** tex mode: change tracking markup was written (the macros are needed) */
+  usedChanges: boolean;
 }
 
 /** Output parameters passed down while writing a text (LyX OutputParams). */

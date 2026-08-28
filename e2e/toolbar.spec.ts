@@ -4,24 +4,21 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { login, collectErrors, userCredentials, PROJECTS_DIR, FIXTURES_DIR, shareProject } from './helpers';
+import { login, collectErrors, userCredentials, PROJECTS_DIR, shareProject } from './helpers';
 
-const SRC = `${FIXTURES_DIR}/recurrent_feature/main.lyx`;
 const DIR = `${PROJECTS_DIR}/e2e-toolbar`;
-const FILE = `${DIR}/main.lyx`;
+const FILE = `${DIR}/main.tex`;
 
-const para = (t: string) => `\\begin_layout Standard\n${t}\n\\end_layout\n\n`;
-const body = `\\begin_body\n\n` + para('Hello toolbar.') +
-  `\\begin_layout Standard\nA formula \n\\begin_inset Formula $x+y$\n\\end_inset\n\n here.\n\\end_layout\n\n` +
+const para = (t: string) => `${t}\n\n`;
+const body = '\\documentclass{article}\n\\usepackage{amsmath}\n\\begin{document}\n' + para('Hello toolbar.') +
+  para('A formula $x+y$ here.') +
   Array.from({ length: 60 }, (_, i) => para(`Filler paragraph number ${i + 1} with some words so that the page scrolls.`)).join('') +
-  para('The very last paragraph.') + `\\end_body\n\\end_document\n`;
+  para('The very last paragraph.') + '\\end{document}\n';
 
 test.beforeAll(async ({ browser }) => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
-  // the fixture's own preamble may already carry OverLyX's \llangle snippet (the paper uses ⟪ ⟫): start clean
-  const header = readFileSync(SRC, 'utf8').split('\\begin_body')[0].replace(/\\begin_preamble[\s\S]*?\\end_preamble/, '\\begin_preamble\n\\usepackage{amsmath}\n\\end_preamble');
-  writeFileSync(FILE, header + body);
+  writeFileSync(FILE, body);
   await shareProject(browser, 'e2e-toolbar', ['bob']);
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
@@ -30,7 +27,7 @@ const file = () => readFileSync(FILE, 'utf8');
 async function open(page: Page, creds?: { username: string; password: string }) {
   await login(page, creds);
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.setItem('ol.combined', '0'); localStorage.removeItem('ol.toolbars'); });
-  await page.goto('/#/e2e-toolbar/main.lyx');
+  await page.goto('/#/e2e-toolbar/main.tex');
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length >= 3, null, { timeout: 60000 });
   await expect(page.locator('.statusbar')).toContainText('connected', { timeout: 20000 });
   await page.waitForTimeout(500);
@@ -113,21 +110,26 @@ test('table toolbar appears in a table; add row / column and lines work', async 
   await cells.nth(1 * 10 + 2).click();
   await expect(page.locator('.lyx-editor .lyx-tabular')).toHaveCount(1);
   await expect(page.locator('.toolbar-table')).toBeVisible();
-  await expect.poll(() => (file().match(/<row>/g) ?? []).length).toBe(2);
+  const body = () => file().slice(file().indexOf('\\begin{document}'));
+  const rows = () => (body().match(/\\tabularnewline/g) ?? []).length;
+  const cols = () => ((body().match(/\\begin\{tabular\}\{([^}]*)\}/) ?? [, ''])[1].match(/[lcr]/g) ?? []).length;
+  await expect.poll(rows).toBe(2);
   await tb(page, 't-addrow').click();
-  await expect.poll(() => (file().match(/<row>/g) ?? []).length).toBe(3);
+  await expect.poll(rows).toBe(3);
   await tb(page, 't-addcol').click();
-  await expect.poll(() => (file().match(/<column /g) ?? []).length, { timeout: 10000 }).toBe(4);
+  await expect.poll(cols, { timeout: 10000 }).toBe(4);
   await expect(page.locator('.lyx-editor .lyx-tabular td')).toHaveCount(12);
   await tb(page, 't-delrow').click();
-  await expect.poll(() => (file().match(/<row>/g) ?? []).length).toBe(2);
+  await expect.poll(rows).toBe(2);
   // lines (LyX: on the selected cells, here the cursor cell): unset, then set again
   const count = (re: RegExp) => (file().match(re) ?? []).length;
-  const linesBefore = count(/(top|bottom|left|right)line="true"/g);
+  // a full row line is \hline, a partial one \cline (LyX writes \hline only when every cell of the row has the line)
+  const lines = () => (body().match(/\\hline/g) ?? []).length * 2 + (body().match(/\\cline/g) ?? []).length + (body().match(/\|/g) ?? []).length;
+  const linesBefore = lines();
   await tb(page, 't-none').click();
-  await expect.poll(() => count(/(top|bottom|left|right)line="true"/g)).toBeLessThan(linesBefore);
+  await expect.poll(lines).toBeLessThan(linesBefore);
   await tb(page, 't-all').click();
-  await expect.poll(() => count(/(top|bottom|left|right)line="true"/g)).toBeGreaterThanOrEqual(linesBefore - 2);
+  await expect.poll(lines).toBeGreaterThanOrEqual(linesBefore - 2);
 });
 
 test('review toolbar appears with change tracking', async ({ page }) => {
@@ -137,15 +139,20 @@ test('review toolbar appears with change tracking', async ({ page }) => {
   await page.keyboard.press('Control+Shift+e');
   await expect(page.locator('.toolbar-review')).toBeVisible();
   for (const id of ['r-track', 'r-output', 'r-prev', 'r-next', 'r-accept', 'r-reject', 'r-acceptall', 'r-rejectall']) await expect(tb(page, id)).toBeVisible();
-  await page.keyboard.press('End');
+  // the first paragraph starts with the table inserted above: End would stay on the table's line
+  await page.evaluate(() => {
+    const v = (window as any).overlyx.activeView;
+    const end = v.state.selection.$from.end(1);
+    v.dispatch(v.state.tr.setSelection(v.state.selection.constructor.create(v.state.doc, end)));
+  });
   await page.keyboard.type(' tracked');
-  await expect.poll(() => file().includes('\\change_inserted')).toBe(true);
+  await expect.poll(() => file().includes('\\lyxadded{')).toBe(true);
   await tb(page, 'r-next').click();
   const sel = await page.evaluate(() => { const v = (window as any).overlyx.activeView; return v.state.doc.textBetween(v.state.selection.from, v.state.selection.to); });
   expect(sel).toBe(' tracked');
   await tb(page, 'r-accept').click();
-  await expect.poll(() => file().includes('\\change_inserted')).toBe(false);
-  expect(file().replace(/\n/g, '')).toContain('Hello toolbar. tracked');   // (a line break inside a paragraph is nothing in a .lyx file)
+  await expect.poll(() => file().includes('\\lyxadded{')).toBe(false);
+  expect(file().replace(/\n/g, ' ')).toContain('Hello toolbar. tracked');
 });
 
 test('clicking a user avatar jumps to that user\'s cursor', async ({ browser }) => {

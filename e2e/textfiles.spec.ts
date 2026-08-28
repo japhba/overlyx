@@ -9,26 +9,11 @@ import { apiLogin, adminCredentials, userCredentials, shareProject, BASE_URL, PR
 
 const PROJECT = 'e2e-text';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
-const LYX = `#LyX 2.5 created this file. For more info see https://www.lyx.org/
-\\lyxformat 643
-\\begin_document
-\\begin_header
-\\save_transient_properties true
-\\origin unavailable
-\\textclass article
-\\begin_preamble
+const LYX = `\\documentclass{article}
 \\input{macros}
-\\end_preamble
-\\end_header
-
-\\begin_body
-
-\\begin_layout Standard
+\\begin{document}
 Hello text files.
-\\end_layout
-
-\\end_body
-\\end_document
+\\end{document}
 `;
 const MACROS = '% macros for the paper\n\\newcommand{\\E}{\\mathbb{E}}\n\\newcommand{\\R}{\\mathbb{R}}\n';
 
@@ -43,12 +28,12 @@ async function asUser(browser: Browser, username?: string): Promise<BrowserConte
 test.beforeAll(async ({ browser }) => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(`${DIR}/figures`, { recursive: true });
-  writeFileSync(`${DIR}/main.lyx`, LYX);
+  writeFileSync(`${DIR}/main.tex`, LYX);
   writeFileSync(`${DIR}/macros.tex`, MACROS);
   writeFileSync(`${DIR}/refs.bib`, '@book{knuth1984, author={Donald E. Knuth}, title={The TeXbook}, year={1984}}\n');
   writeFileSync(`${DIR}/main.aux`, '\\relax\n');
   writeFileSync(`${DIR}/main.log`, 'This is pdfTeX\n');
-  writeFileSync(`${DIR}/main.lyx~`, LYX);
+  writeFileSync(`${DIR}/main.tex~`, LYX);
   await shareProject(browser, PROJECT, ['bob'], 'view');
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
@@ -56,26 +41,26 @@ test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 test('the file browser shows one project at a time and hides build files', async ({ browser }) => {
   const admin = await asUser(browser);
   const page = await admin.newPage();
-  await page.goto('/#/' + PROJECT + '/main.lyx');
+  await page.goto('/#/' + PROJECT + '/main.tex');
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   const tree = page.locator('.filetree');
   await expect(tree).toHaveAttribute('data-project', PROJECT);
   await expect(tree.locator('select')).toHaveValue(PROJECT);
-  await expect(tree.locator('.tree-row.file')).toHaveCount(3);          // main.lyx, macros.tex, refs.bib
+  await expect(tree.locator('.tree-row.file')).toHaveCount(3);          // main.tex, macros.tex, refs.bib
   await expect(tree.locator('[data-file="main.aux"]')).toHaveCount(0);
-  await expect(tree.locator('[data-file="main.lyx~"]')).toHaveCount(0);
+  await expect(tree.locator('[data-file="main.tex~"]')).toHaveCount(0);
   await expect(tree.locator('.project-info')).toContainText('Your project');
   await tree.locator('button', { hasText: 'All files' }).click();
   await expect(tree.locator('[data-file="main.aux"]')).toHaveCount(1);
-  await expect(tree.locator('[data-file="main.lyx~"]')).toHaveCount(1);
+  await expect(tree.locator('[data-file="main.tex~"]')).toHaveCount(1);
   await tree.locator('button', { hasText: 'Fewer' }).click();
   // other projects are one switch away, not in the same tree
   const options = await tree.locator('select option').allTextContents();
   expect(options.some(o => o.startsWith('Welcome to OverLyX'))).toBe(true);
-  await expect(tree.locator('[data-file="welcome.lyx"]')).toHaveCount(0);
+  await expect(tree.locator('[data-file="welcome.tex"]')).toHaveCount(0);
   await tree.locator('select').selectOption('welcome-admin');
   await expect(tree).toHaveAttribute('data-project', 'welcome-admin');
-  await expect(tree.locator('[data-file="welcome.lyx"]')).toHaveCount(1);
+  await expect(tree.locator('[data-file="welcome.tex"]')).toHaveCount(1);
   await expect(tree.locator('[data-file="macros.tex"]')).toHaveCount(0);
   // opening a document switches back to its project
   await tree.locator('select').selectOption(PROJECT);
@@ -86,10 +71,10 @@ test('the file browser shows one project at a time and hides build files', async
 test('text files open in a tab with the text editor; edits are saved automatically', async ({ browser }) => {
   const admin = await asUser(browser);
   const page = await admin.newPage();
-  await page.goto('/#/' + PROJECT + '/main.lyx');
+  await page.goto('/#/' + PROJECT + '/main.tex');
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   await page.locator('.filetree [data-file="macros.tex"]').click();
-  await expect(page).toHaveURL(/#\/e2e-text\/macros\.tex$/);
+  await expect(page).toHaveURL(/#\/text:e2e-text\/macros\.tex$/);
   const ed = page.locator('.text-editor');
   await expect(ed).toBeVisible();
   await expect(ed.locator('textarea')).toHaveValue(MACROS);
@@ -112,7 +97,7 @@ test('text files open in a tab with the text editor; edits are saved automatical
   await expect(ed.locator('.state')).toHaveText('✓ Saved', { timeout: 10000 });
   expect(readFileSync(`${DIR}/macros.tex`, 'utf8')).toContain('\n  % indented');
   // the document tab still works next to it
-  await page.locator('.tabbar .tab', { hasText: 'main.lyx' }).click();
+  await page.locator('.tabbar .tab', { hasText: 'main.tex' }).click();
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   await expect(page.locator('.text-editor')).toHaveCount(0);
   await page.locator('.tabbar .tab', { hasText: 'macros.tex' }).click();
@@ -166,7 +151,7 @@ test('a viewer can read text files but not change them', async ({ browser }) => 
   expect(readFileSync(`${DIR}/macros.tex`, 'utf8')).not.toContain('hacked');
   // creating a text file needs edit rights; .lyx files are never served as text
   const admin = await asUser(browser);
-  expect((await admin.request.get(`${BASE_URL}/api/projects/${PROJECT}/text/main.lyx`)).status()).toBe(400);
+  expect((await admin.request.get(`${BASE_URL}/api/projects/${PROJECT}/text/main.tex`)).status()).toBe(400);
   expect((await admin.request.put(`${BASE_URL}/api/projects/${PROJECT}/text/notes/todo.md`, { data: { text: '# todo\n' } })).ok()).toBe(true);
   expect(readFileSync(`${DIR}/notes/todo.md`, 'utf8')).toBe('# todo\n');
   await bob.close(); await admin.close();

@@ -25,6 +25,8 @@ export interface InsetPosition {
   parLang: string;
   itemFont: EffectiveFont;
   style: LayoutStyle;
+  /** set by the inset: a blank following it was written before it (tex mode notes) */
+  skipNextSpace?: boolean;
 }
 
 const MULTIPAR_INSETS = new Set(['Note', 'Foot', 'Marginal', 'Float', 'Wrap', 'Box', 'Branch', 'listings', 'Caption', 'Listings']);
@@ -158,7 +160,7 @@ function latexFormula(ctx: ExportContext, os: TexStream, rp: RunParams, f: Formu
     let latex = mathUnicode(ctx, normalizeMath(f.latex.replace(/\n/g, ' '), ctx.symbols, ctx.macroNames));
     if (rp.movingArg && ctx.macroNames.size) {
       // user macros are fragile: LyX protects them in moving arguments
-      latex = latex.replace(/\\([A-Za-z]+)/g, (m0, name: string) => (ctx.macroNames.has(name) ? '\\protect' + m0 : m0));
+      latex = latex.replace(/(\\protect)?\\([A-Za-z]+)/g, (m0, prot: string | undefined, name: string) => (!prot && ctx.macroNames.has(name) ? '\\protect' + m0 : m0));
     }
     os.write(latex);
     return;
@@ -255,6 +257,7 @@ function latexTextInset(ctx: ExportContext, os: TexStream, rp: RunParams, inset:
   const pars = inset.paragraphs;
   switch (inset.name) {
     case 'Note': {
+      if (ctx.texMode && (inset.arg === 'Note' || inset.arg === 'Comment')) { texNote(ctx, os, rp, inset, pos); return; }
       if (inset.arg === 'Note') return;
       const il = findInsetLayout(ctx.dc, 'Note:' + inset.arg);
       if (inset.arg === 'Greyedout') ctx.features.require('lyxgreyedout');
@@ -266,6 +269,8 @@ function latexTextInset(ctx: ExportContext, os: TexStream, rp: RunParams, inset:
     case 'ERT': {
       const il = findInsetLayout(ctx.dc, 'ERT');
       insetTextLatex(ctx, os, rp, pars, il, { passThru: true, forcePlain: true, parbreakIsNewline: true, freeSpacing: true });
+      // a comment at the end of the raw code must not swallow what follows
+      if (ctx.texMode && pars.length && endsInComment(plainText([pars[pars.length - 1]]))) os.breakln();
       return;
     }
     case 'Foot': {
@@ -355,6 +360,27 @@ function latexTextInset(ctx: ExportContext, os: TexStream, rp: RunParams, inset:
     }
   }
   void pos;
+}
+
+/** tex mode: notes and comments are written as "%%" comment blocks (see tex/parse.ts). */
+function texNote(ctx: ExportContext, os: TexStream, rp: RunParams, inset: TextInset, pos: InsetPosition): void {
+  const inner = new TexStream();
+  const rp2: RunParams = { ...rp, isMainText: false, owner: 'other', inComment: true, passThru: false, postMacro: '' };
+  latexParagraphs(ctx, { pars: inset.paragraphs, isMainText: false }, inner, rp2);
+  inner.flushTermination();
+  const lines = inner.toString().replace(/\n+$/, '').split('\n');
+  // a blank after the note is written before it: the comment eats the newline (and any indentation)
+  const next = pos.units[pos.index + 1];
+  if (next && next.kind === 'char' && next.ch === ' ') { if (os.column > 0 && os.last !== ' ') os.write(' '); pos.skipNextSpace = true; }
+  os.safebreakln();
+  os.write('%% @' + inset.arg.toLowerCase() + '\n');
+  for (const l of lines) os.write('%%' + (l ? ' ' + l : '') + '\n');
+}
+
+function endsInComment(s: string): boolean {
+  const line = s.slice(s.lastIndexOf('\n') + 1);
+  for (let i = 0; i < line.length; i++) { if (line[i] === '\\') { i++; continue; } if (line[i] === '%') return true; }
+  return false;
 }
 
 /* -------------------------------------------------------------------- Float */
@@ -877,6 +903,7 @@ function latexGraphics(ctx: ExportContext, os: TexStream, rp: RunParams, inset: 
 /** File name to reference from the .tex (registers conversions in ctx.graphics). */
 function graphicsFileName(ctx: ExportContext, filename: string): string {
   if (!filename) return '';
+  if (ctx.texMode) return filename.replace(/\\/g, '/');
   const norm = filename.replace(/\\/g, '/');
   const slash = norm.lastIndexOf('/');
   const dir = slash >= 0 ? norm.slice(0, slash + 1) : '';
@@ -1117,6 +1144,8 @@ function latexInclude(ctx: ExportContext, os: TexStream, rp: RunParams, cmd: str
   if (!filename) { ctx.warnings.push('include inset without file name ignored'); return; }
   const isLyx = filename.toLowerCase().endsWith('.lyx');
   const texName = isLyx ? filename.slice(0, -4) + '.tex' : filename;
+  // tex mode: a .tex child is read for the packages / macros it needs (its text is its own file)
+  const isTexChild = ctx.texMode && !isLyx && (cmd === 'input' || cmd === 'include');
   switch (cmd) {
     case 'verbatiminput':
     case 'verbatiminput*':
@@ -1136,7 +1165,13 @@ function latexInclude(ctx: ExportContext, os: TexStream, rp: RunParams, cmd: str
     }
     case 'input':
     case 'include': {
-      if (isLyx) {
+      if (isTexChild) {
+        if (ctx.includeDepth <= 10) {
+          const child = ctx.opts.resolveInclude?.(filename);
+          const key = 'child:' + texName.replace(/\\/g, '/');
+          if (child && !(key in ctx.files)) { ctx.files[key] = ''; exportChild(ctx, child, filename); delete ctx.files[key]; }
+        }
+      } else if (isLyx) {
         if (ctx.includeDepth > 10) { ctx.warnings.push(`include recursion too deep at ${filename}`); return; }
         const child = ctx.opts.resolveInclude?.(filename);
         if (!child) ctx.warnings.push(`child document '${filename}' could not be resolved; \\${cmd}{${texName}} written anyway`);

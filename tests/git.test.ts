@@ -27,23 +27,14 @@ const gitmod = await import('../packages/server/src/git.ts');
 const access = await import('../packages/server/src/access.ts');
 const { createUser, toSessionUser } = await import('../packages/server/src/auth.ts');
 const { manager } = await import('../packages/server/src/docs.ts');
-const { parseLyx } = await import('../packages/core/src/lyx/parser.ts');
+const { parseTex, writeTex } = await import('../packages/core/src/tex/index.ts');
 
-const HEAD = `#LyX 2.5 created this file. For more info see https://www.lyx.org/
-\\lyxformat 643
-\\begin_document
-\\begin_header
-\\textclass article
-\\end_header
-
-\\begin_body
-`;
-const TAIL = `
-\\end_body
-\\end_document
-`;
-const par = (t: string) => `\n\\begin_layout Standard\n${t}\n\\end_layout\n`;
+const HEAD = '\\documentclass{article}\n\\begin{document}\n';
+const TAIL = '\\end{document}\n';
+const par = (t: string) => `${t}\n\n`;
 const docText = (...pars: string[]) => HEAD + pars.map(par).join('') + TAIL;
+/** the canonical form the document manager writes */
+const canon = (text: string) => writeTex(parseTex(text).doc).text;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 const jan = toSessionUser(createUser('jan', 'Jan Bauer', null, { email: 'owner@example.com', googleSub: 'g-jan' }));
@@ -65,10 +56,10 @@ let bobToken = '';
 const url = (user: string, secret: string, project = 'paper') => `${base.replace('http://', `http://${user}:${encodeURIComponent(secret)}@`)}/git/${encodeURIComponent(project)}.git`;
 
 beforeAll(async () => {
-  writeFileSync(join(PROJECT, 'main.lyx'), docText('one', 'two', 'three'));
+  writeFileSync(join(PROJECT, 'main.tex'), docText('one', 'two', 'three'));
   writeFileSync(join(PROJECT, 'refs.bib'), '@article{a, title={A}}\n');
   writeFileSync(join(PROJECT, 'main.aux'), 'aux junk\n');
-  writeFileSync(join(PROJECT, 'main.lyx~'), 'backup\n');
+  writeFileSync(join(PROJECT, 'main.tex~'), 'backup\n');
   writeFileSync(join(PROJECT, 'figures', 'plot.txt'), 'not really a plot\n');
   access.adoptProjects();                                   // paper -> jan
   access.addMember('paper', 'bob', 'edit', jan);
@@ -89,7 +80,7 @@ describe('repository', () => {
     expect(existsSync(join(PROJECT, '.git'))).toBe(true);
     expect(readFileSync(join(PROJECT, '.gitignore'), 'utf8')).toContain('*.aux');
     const files = (await g(PROJECT, 'ls-files')).trim().split('\n').sort();
-    expect(files).toEqual(['.gitignore', 'figures/plot.txt', 'main.lyx', 'refs.bib']);
+    expect(files).toEqual(['.gitignore', 'figures/plot.txt', 'main.tex', 'refs.bib']);
     expect(await g(PROJECT, 'log', '--format=%s')).toContain('Import "paper" into OverLyX');
     expect((await g(PROJECT, 'config', 'receive.denyCurrentBranch')).trim()).toBe('updateInstead');
     expect(existsSync(join(PROJECT, '.git', 'hooks', 'push-to-checkout'))).toBe(true);
@@ -99,13 +90,13 @@ describe('repository', () => {
   });
 
   it('commits OverLyX writes, attributed to the people who edited', async () => {
-    const doc = await manager.open('paper/main.lyx');
+    const doc = await manager.open('paper/main.tex');
     doc.editors.add(bob.id);
-    doc.loadFromLyx(parseLyx(docText('one', 'two edited by bob', 'three')), 'test');
+    doc.loadFromLyx(doc.parse(docText('one', 'two edited by bob', 'three')), 'test');
     expect(await doc.saveToFile()).toBe(true);              // -> fileWrittenListeners -> touchProject (300 ms)
     for (let i = 0; i < 60 && (await g(PROJECT, 'rev-list', '--count', 'HEAD')).trim() === '1'; i++) await sleep(100);
     expect((await g(PROJECT, 'rev-list', '--count', 'HEAD')).trim()).toBe('2');
-    expect((await g(PROJECT, 'log', '-1', '--format=%an <%ae>%n%cn%n%s%n%b')).trim()).toBe('Bob Builder <bob@overlyx.local>\nOverLyX\nUpdate main.lyx\nEdited in OverLyX by Bob Builder\n\nFiles:\n  main.lyx');
+    expect((await g(PROJECT, 'log', '-1', '--format=%an <%ae>%n%cn%n%s%n%b')).trim()).toBe('Bob Builder <bob@overlyx.local>\nOverLyX\nUpdate main.tex\nEdited in OverLyX by Bob Builder\n\nFiles:\n  main.tex');
     expect((await g(PROJECT, 'status', '--porcelain')).trim()).toBe('');
     // nothing to commit: no commit
     expect(await gitmod.commitProject('paper')).toBe(false);
@@ -165,9 +156,9 @@ describe('git over HTTP', () => {
 
   it('clones with a token and pushes; the push updates the working tree', async () => {
     await g(ROOT, 'clone', '-q', url('bob', bobToken), clone);
-    expect(readFileSync(join(clone, 'main.lyx'), 'utf8')).toBe(docText('one', 'two edited by bob', 'three'));
+    expect(readFileSync(join(clone, 'main.tex'), 'utf8')).toBe(canon(docText('one', 'two edited by bob', 'three')));
     expect(existsSync(join(clone, 'main.aux'))).toBe(false);
-    expect((await g(clone, 'log', '--format=%s')).trim().split('\n')).toEqual(['Add notes', 'Update main.lyx', 'Import "paper" into OverLyX']);
+    expect((await g(clone, 'log', '--format=%s')).trim().split('\n')).toEqual(['Add notes', 'Update main.tex', 'Import "paper" into OverLyX']);
     writeFileSync(join(clone, 'refs.bib'), '@article{a, title={A}}\n@article{b, title={B}}\n');
     await g(clone, 'add', '-A');
     await g(clone, 'commit', '-q', '-m', 'Add reference b');
@@ -224,17 +215,17 @@ describe('git over HTTP', () => {
   });
 
   it('pull gets what OverLyX wrote since; a pushed document change reaches the open document', async () => {
-    const doc = await manager.open('paper/main.lyx');
-    doc.loadFromLyx(parseLyx(docText('one', 'two edited by bob', 'three', 'four from the browser')), 'test');
+    const doc = await manager.open('paper/main.tex');
+    doc.loadFromLyx(doc.parse(docText('one', 'two edited by bob', 'three', 'four from the browser')), 'test');
     // not even written yet: the fetch saves and commits first
     await g(clone, 'pull', '-q', '--no-rebase', 'origin', 'main');
-    expect(readFileSync(join(clone, 'main.lyx'), 'utf8')).toBe(docText('one', 'two edited by bob', 'three', 'four from the browser'));
-    // now the other way: a paragraph edited locally and pushed shows up in the open document
-    writeFileSync(join(clone, 'main.lyx'), docText('one (local)', 'two edited by bob', 'three', 'four from the browser'));
+    expect(readFileSync(join(clone, 'main.tex'), 'utf8')).toBe(canon(docText('one', 'two edited by bob', 'three', 'four from the browser')));
+    // now the other way: a paragraph edited locally (in a plain editor, not canonical) and pushed shows up in the open document
+    writeFileSync(join(clone, 'main.tex'), docText('one (local)', 'two edited by bob', 'three', 'four from the browser'));
     await g(clone, 'commit', '-q', '-am', 'Local edit of paragraph one');
     await g(clone, 'push', '-q', 'origin', 'main');
-    for (let i = 0; i < 80 && !doc.toLyxText().includes('one (local)'); i++) await sleep(100);
-    expect(doc.toLyxText()).toBe(docText('one (local)', 'two edited by bob', 'three', 'four from the browser'));
+    for (let i = 0; i < 80 && !doc.toText().includes('one (local)'); i++) await sleep(100);
+    expect(doc.toText()).toBe(canon(docText('one (local)', 'two edited by bob', 'three', 'four from the browser')));
   });
 
   it('a project name with spaces works, and an unborn repository can be pushed to', async () => {
@@ -245,9 +236,9 @@ describe('git over HTTP', () => {
     const tj = gitmod.createToken(jan.id, 'x');
     await g(ROOT, 'clone', '-q', url('jan', tj.token, 'my paper'), c);
     expect((await g(c, 'ls-files')).trim()).toBe('.gitignore');
-    writeFileSync(join(c, 'main.lyx'), docText('hello'));
+    writeFileSync(join(c, 'main.tex'), docText('hello'));
     await g(c, 'add', '-A'); await g(c, 'commit', '-q', '-m', 'first');
     await g(c, 'push', '-q', 'origin', 'main');
-    expect(readFileSync(join(ROOT, 'projects', 'my paper', 'main.lyx'), 'utf8')).toBe(docText('hello'));
+    expect(readFileSync(join(ROOT, 'projects', 'my paper', 'main.tex'), 'utf8')).toBe(docText('hello'));
   });
 });

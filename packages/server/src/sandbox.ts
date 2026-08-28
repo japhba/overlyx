@@ -1,7 +1,8 @@
 /**
  * External tools (latexmk, LyX, the image converters) run in a **bubblewrap** sandbox: the system
  * read-only, only the directories named by the caller writable, no network, an own PID namespace,
- * a private /tmp and HOME, an empty environment, and everything killed when the server stops.
+ * a private /tmp and HOME, an empty environment, no capabilities beyond reading files, and
+ * everything killed when the server stops.
  *
  * Why: LaTeX is a programming language and `latexmkrc` is Perl. Anyone who may edit a project can
  * put both there, so a PDF build is arbitrary code — it must not be arbitrary code *on the server*.
@@ -63,7 +64,12 @@ export function sandboxed(cmd: string, args: string[], spec: SandboxSpec): Sandb
   b.push('--bind', home, home);
   for (const d of new Set(spec.ro ?? [])) if (fs.existsSync(d)) b.push('--ro-bind', d, d);
   for (const d of new Set(spec.rw)) { fs.mkdirSync(d, { recursive: true }); b.push('--bind', d, d); }
-  b.push('--unshare-all', '--die-with-parent', '--new-session', '--chdir', spec.cwd);
+  // As root, a user namespace would hide the capabilities that read files owned by other users
+  // (projects synced from elsewhere often are): skip the user namespace and drop every capability
+  // except reading; unprivileged servers get the full unshare (they need the user namespace).
+  if (process.getuid?.() === 0) b.push('--unshare-pid', '--unshare-net', '--unshare-ipc', '--unshare-uts', '--unshare-cgroup-try', '--cap-drop', 'ALL', '--cap-add', 'CAP_DAC_READ_SEARCH');
+  else b.push('--unshare-all');
+  b.push('--die-with-parent', '--new-session', '--chdir', spec.cwd);
   b.push('--clearenv', '--setenv', 'PATH', '/usr/local/bin:/usr/bin:/bin', '--setenv', 'LANG', 'C.UTF-8', '--setenv', 'HOME', home, '--setenv', 'TMPDIR', '/tmp');
   for (const [k, v] of Object.entries(spec.env ?? {})) b.push('--setenv', k, v);
   return { cmd: 'bwrap', args: [...b, '--', cmd, ...args], env: { ...process.env } };

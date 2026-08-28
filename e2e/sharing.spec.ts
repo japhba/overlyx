@@ -14,7 +14,7 @@ import * as decoding from 'lib0/decoding';
 import { apiLogin, adminCredentials, userCredentials, BASE_URL, PROJECTS_DIR } from './helpers';
 
 const PROJECT = 'e2e-share';
-const DOC = `${PROJECT}/main.lyx`;
+const DOC = `${PROJECT}/main.tex`;
 const FILE = `${PROJECTS_DIR}/${DOC}`;
 const enc = (id: string) => encodeURIComponent(id);
 const DATA_DIR = dirname(process.env.OVERLYX_E2E_CREDENTIALS ?? '/root/lyx/overlyx/data/credentials.txt');
@@ -77,8 +77,8 @@ async function pushHeaderOverWebSocket(ctx: BrowserContext, doc: string, textcla
   const e = encoding.createEncoder(); encoding.writeVarUint(e, 0); syncProtocol.writeUpdate(e, update); ws.send(encoding.toUint8Array(e));
   await new Promise(r => setTimeout(r, 800));
   ws.close();
-  const text = await (await ctx.request.get(`${BASE_URL}/api/docs/${enc(doc)}/lyx`)).text();
-  return text.includes('\\textclass ' + textclass);
+  const text = await (await ctx.request.get(`${BASE_URL}/api/docs/${enc(doc)}/tex`)).text();
+  return new RegExp('\\\\documentclass(\\[[^\\]]*\\])?\\{' + textclass + '\\}').test(text);
 }
 
 test.beforeAll(async ({ browser }) => {
@@ -86,7 +86,7 @@ test.beforeAll(async ({ browser }) => {
   const admin = await asUser(browser);
   await admin.request.delete(`${BASE_URL}/api/projects/${PROJECT}`);   // leftovers of an earlier run
   expect((await admin.request.post(BASE_URL + '/api/projects', { data: { name: PROJECT } })).ok()).toBe(true);
-  expect((await admin.request.post(`${BASE_URL}/api/projects/${PROJECT}/new`, { data: { path: 'main.lyx', title: 'A shared paper' } })).ok()).toBe(true);
+  expect((await admin.request.post(`${BASE_URL}/api/projects/${PROJECT}/new`, { data: { path: 'main.tex', title: 'A shared paper' } })).ok()).toBe(true);
   // the admin's own example project must not be shared with bob (earlier runs / manual tests)
   await admin.request.get(BASE_URL + '/api/projects');
   const share = await admin.request.get(`${BASE_URL}/api/projects/welcome-admin/share`);
@@ -98,9 +98,9 @@ test('a project is private to its owner', async ({ browser }) => {
   const bob = await asUser(browser, 'bob');
   expect((await projectsOf(bob)).map(p => p.name)).not.toContain(PROJECT);
   expect(await metaStatus(bob)).toBe(403);
-  expect((await bob.request.get(`${BASE_URL}/api/docs/${enc(DOC)}/lyx`)).status()).toBe(403);
-  expect((await bob.request.get(`${BASE_URL}/api/projects/${PROJECT}/file/main.lyx`)).status()).toBe(403);
-  expect((await bob.request.post(`${BASE_URL}/api/projects/${PROJECT}/new`, { data: { path: 'x.lyx' } })).status()).toBe(403);
+  expect((await bob.request.get(`${BASE_URL}/api/docs/${enc(DOC)}/tex`)).status()).toBe(403);
+  expect((await bob.request.get(`${BASE_URL}/api/projects/${PROJECT}/file/main.tex`)).status()).toBe(403);
+  expect((await bob.request.post(`${BASE_URL}/api/projects/${PROJECT}/new`, { data: { path: 'x.tex' } })).status()).toBe(403);
   expect((await bob.request.get(`${BASE_URL}/api/projects/${PROJECT}/share`)).status()).toBe(403);
   await expect(pushHeaderOverWebSocket(bob, DOC, 'book')).rejects.toThrow();   // the WebSocket upgrade is refused
   // the UI: not in the file browser, and the URL alone does not open it
@@ -117,9 +117,9 @@ test('every account gets its own personalised example project', async ({ browser
   const ex = (await projectsOf(bob)).find(p => p.kind === 'example' && p.via === 'owner');
   expect(ex).toBeTruthy();
   expect([ex!.name, ex!.title, ex!.role, ex!.via]).toEqual(['welcome-bob', 'Welcome to OverLyX', 'owner', 'owner']);
-  const text = readFileSync(`${PROJECTS_DIR}/welcome-bob/welcome.lyx`, 'utf8');
-  expect(text).toContain('\\begin_layout Author\nBob\n\\end_layout');
-  expect(text).not.toContain('%%');
+  const text = readFileSync(`${PROJECTS_DIR}/welcome-bob/welcome.tex`, 'utf8');
+  expect(text).toMatch(/\\author\{Bob/);
+  expect(text).not.toContain('@@');
   // the start screen shows it first; it opens and renders (formulas incl. the double angle brackets)
   const page = await bob.newPage();
   await page.goto('/');
@@ -137,7 +137,7 @@ test('every account gets its own personalised example project', async ({ browser
   const admin = await asUser(browser);
   expect((await projectsOf(admin)).find(p => p.name === 'welcome-admin')?.via).toBe('owner');
   expect((await projectsOf(bob)).map(p => p.name)).not.toContain('welcome-admin');
-  expect((await bob.request.get(`${BASE_URL}/api/docs/${enc('welcome-admin/welcome.lyx')}/meta`)).status()).toBe(403);
+  expect((await bob.request.get(`${BASE_URL}/api/docs/${enc('welcome-admin/welcome.tex')}/meta`)).status()).toBe(403);
   await bob.close(); await admin.close();
 });
 
@@ -201,7 +201,7 @@ test('link sharing: joining through the link, revoked when the link is turned of
   expect((await projectsOf(carol)).map(p => p.name)).not.toContain(PROJECT);
   const pageC = await carol.newPage();
   await pageC.goto(url.replace(/^https?:\/\/[^/]+/, ''));
-  await pageC.waitForURL(/#\/e2e-share\/main\.lyx$/, { timeout: 20000 });
+  await pageC.waitForURL(/#\/e2e-share\/main\.tex$/, { timeout: 20000 });
   await pageC.waitForSelector('.lyx-editor', { timeout: 30000 });
   await expect(pageC.locator('.statusbar .msg')).toContainText('You can now edit', { timeout: 10000 });
   await expect(pageC.locator('.statusbar')).toContainText('connected', { timeout: 20000 });

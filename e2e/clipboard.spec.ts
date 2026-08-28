@@ -5,79 +5,30 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, copyFileSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
+import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
 const PROJECT = 'e2e-clip';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
-const doc = () => readFileSync(`${SRC}/main.lyx`, 'utf8').split('\\begin_body')[0] + `\\begin_body
+const doc = () => withPreambleOf(`${SRC}/main.tex`, `\\section{Intro}\\label{sec:intro}
 
-\\begin_layout Section
-Intro
-\\begin_inset CommandInset label
-LatexCommand label
-name "sec:intro"
+Cite \\citep{Hubel59} ref \\ref{sec:intro} math $E=mc^{2}$ \`\`quoted'' end
 
-\\end_inset
-
-
-\\end_layout
-
-\\begin_layout Standard
-Cite
-\\begin_inset CommandInset citation
-LatexCommand citep
-key "Hubel59"
-literal "false"
-
-\\end_inset
-
- ref
-\\begin_inset CommandInset ref
-LatexCommand ref
-reference "sec:intro"
-plural "false"
-caps "false"
-noprefix "false"
-nolink "false"
-
-\\end_inset
-
- math
-\\begin_inset Formula $E=mc^{2}$
-\\end_inset
-
-
-\\begin_inset Quotes eld
-\\end_inset
-
-quoted
-\\begin_inset Quotes erd
-\\end_inset
-
- end
-\\end_layout
-
-\\begin_layout Standard
 Last paragraph.
-\\end_layout
-
-\\end_body
-\\end_document
-`;
+`);
 
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
-  for (const f of ['bib.bib', 'lyxmacros.lyx']) if (existsSync(`${SRC}/${f}`)) copyFileSync(`${SRC}/${f}`, `${DIR}/${f}`);
-  writeFileSync(`${DIR}/clip.lyx`, doc());
+  for (const f of ['bib.bib', 'lyxmacros.tex', 'macros.tex', 'preamble.tex']) if (existsSync(`${SRC}/${f}`)) copyFileSync(`${SRC}/${f}`, `${DIR}/${f}`);
+  writeFileSync(`${DIR}/clip.tex`, doc());
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
 async function open(page: Page) {
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); });
-  await page.goto(`/#/${PROJECT}/clip.lyx`);
+  await page.goto(`/#/${PROJECT}/clip.tex`);
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length >= 3, null, { timeout: 60000 });
   await page.waitForFunction(() => !document.querySelector('.lyx-editor')?.closest('[aria-busy="true"]'), null, { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(1500);
@@ -93,8 +44,13 @@ test('copying a paragraph and pasting it keeps citations, references, formulas a
   // select the whole second paragraph (the one with the insets) and copy it
   const par = page.locator('.lyx-editor .lyx-par').nth(1);
   await par.click({ position: { x: 5, y: 8 } });
-  await page.keyboard.press('Home');
-  await page.keyboard.press('Shift+End');
+  // select the paragraph's content (a keyboard Shift+End is not reliable in headless Chromium)
+  await page.evaluate(() => {
+    const v = (window as any).overlyx.activeView;
+    const $p = v.state.selection.$from;
+    const start = $p.start(1), end = $p.end(1);
+    v.dispatch(v.state.tr.setSelection(v.state.selection.constructor.create(v.state.doc, start, end)));
+  });
   await page.keyboard.press('Control+c');
   // the text/plain form is LaTeX-ish
   const plain = await page.evaluate(() => navigator.clipboard.readText());
@@ -111,16 +67,15 @@ test('copying a paragraph and pasting it keeps citations, references, formulas a
   await expect(page.locator('.lyx-editor .lyx-command-citation')).toHaveCount(2, { timeout: 5000 });
   await expect(page.locator('.lyx-editor .lyx-command-ref')).toHaveCount(2);
   // …and the file on disk has both copies, as proper insets
-  await expect.poll(() => count(readFileSync(`${DIR}/clip.lyx`, 'utf8'), /\\begin_inset CommandInset citation/g), { timeout: 15000 }).toBe(2);
-  const text = readFileSync(`${DIR}/clip.lyx`, 'utf8');
-  expect(count(text, /\\begin_inset CommandInset ref\n/g)).toBe(2);
-  expect(count(text, /\\begin_inset Formula \$E=mc\^\{2\}\$/g)).toBe(2);
-  expect(count(text, /\\begin_inset Quotes eld/g)).toBe(2);
-  expect(count(text, /key "Hubel59"/g)).toBe(2);
+  await expect.poll(() => count(readFileSync(`${DIR}/clip.tex`, 'utf8'), /\\citep\{Hubel59\}/g), { timeout: 15000 }).toBe(2);
+  const text = readFileSync(`${DIR}/clip.tex`, 'utf8');
+  expect(count(text, /\\ref\{sec:intro\}/g)).toBe(2);
+  expect(count(text, /\$E=mc\^\{2\}\$/g)).toBe(2);
+  expect(count(text, /``quoted''/g)).toBe(2);
   expect(errors).toEqual([]);
 });
 
-test('foreign HTML pastes as LyX content (bold, italics, a heading)', async ({ page }) => {
+test('foreign HTML pastes as document content (bold, italics, a heading)', async ({ page }) => {
   await login(page);
   await open(page);
   const last = page.locator('.lyx-editor .lyx-par').nth(2);
@@ -134,8 +89,8 @@ test('foreign HTML pastes as LyX content (bold, italics, a heading)', async ({ p
     document.querySelector('.lyx-editor')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
   });
   await expect(page.locator('.lyx-editor .lyx-layout-subsection')).toHaveCount(1, { timeout: 5000 });
-  await expect.poll(() => readFileSync(`${DIR}/clip.lyx`, 'utf8').includes('\\begin_layout Subsection\nPasted title'), { timeout: 15000 }).toBe(true);
-  const text = readFileSync(`${DIR}/clip.lyx`, 'utf8');
-  expect(text).toContain('\\series bold\nbold');
-  expect(text).toContain('\\emph on\nitalic');
+  await expect.poll(() => readFileSync(`${DIR}/clip.tex`, 'utf8').includes('\\subsection{Pasted title}'), { timeout: 15000 }).toBe(true);
+  const text = readFileSync(`${DIR}/clip.tex`, 'utf8');
+  expect(text).toContain('\\textbf{bold}');
+  expect(text).toContain('\\emph{italic}');
 });

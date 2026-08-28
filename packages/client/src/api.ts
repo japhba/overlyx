@@ -1,5 +1,6 @@
 export interface User { id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null }
-export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'other' }
+/** `doc`: a .tex document (opens in the editor); `tex`: other LaTeX sources (text editor); `lyx`: importable */
+export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'other' }
 export type Role = 'owner' | 'edit' | 'view';
 export interface Project {
   name: string; files: ProjectFile[];
@@ -87,7 +88,13 @@ export const api = {
   writeText: (project: string, path: string, text: string, mtime?: number) => req<{ ok: boolean; mtime: number; size: number }>('PUT', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`, mtime !== undefined ? { text, mtime } : { text }),
   upload: (project: string, path: string, file: Blob) => req<{ ok: boolean; path: string }>('POST', `/api/projects/${encodeURIComponent(project)}/upload?path=${encodeURIComponent(path)}`, undefined, file),
   meta: (id: string) => req<DocMeta>('GET', `/api/docs/${encId(id)}/meta`),
-  lyxText: (id: string) => fetch(`/api/docs/${encId(id)}/lyx`).then(r => r.text()),
+  /** the document's LaTeX source (what its .tex file contains) */
+  texText: (id: string) => fetch(`/api/docs/${encId(id)}/tex`).then(r => r.text()),
+  /** replace the document by hand-edited LaTeX source */
+  applySource: (id: string, text: string) => req<{ ok: boolean; warnings: string[] }>('POST', `/api/docs/${encId(id)}/source`, { text }),
+  header: (id: string) => req<{ headerLines: string[] }>('GET', `/api/docs/${encId(id)}/header`),
+  /** convert a .lyx file of the project (and its children) to .tex documents */
+  importLyx: (project: string, path: string) => req<{ id: string; created: string[]; warnings: string[]; graphics: { src: string; dest: string; ok: boolean; error?: string }[] }>('POST', `/api/projects/${encodeURIComponent(project)}/import`, { path }),
   save: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/save`),
   setHeader: (id: string, body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }) => req<{ ok: boolean; headerLines: string[] }>('POST', `/api/docs/${encId(id)}/header`, body),
   versions: (id: string) => req<{ versions: VersionInfo[] }>('GET', `/api/docs/${encId(id)}/versions`),
@@ -98,7 +105,7 @@ export const api = {
   deleteVersion: (id: string, vid: number) => req<{ ok: boolean }>('DELETE', `/api/docs/${encId(id)}/versions/${vid}`),
   bibSearch: (id: string, q: string, limit = 100) => req<{ entries: BibItem[]; total: number; matches: number }>('GET', `/api/docs/${encId(id)}/bib?q=${encodeURIComponent(q)}&limit=${limit}`),
   /** LaTeX export (returns the source) or a PDF build request (a background job; poll `build`) */
-  export: (id: string, format: 'pdf' | 'tex', engine: 'overlyx' | 'lyx' = 'overlyx') => req<{ ok: boolean; log?: string; warnings?: string[]; pdf?: string | null; tex?: string; job?: BuildJob }>('POST', `/api/docs/${encId(id)}/export`, { format, engine }),
+  export: (id: string, format: 'pdf' | 'tex') => req<{ ok: boolean; log?: string; warnings?: string[]; pdf?: string | null; tex?: string; job?: BuildJob }>('POST', `/api/docs/${encId(id)}/export`, { format }),
   cancelBuild: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/export/cancel`),
   build: (id: string, withTex = false) => req<{ build: BuildInfo | null; job: BuildJob | null }>('GET', `/api/docs/${encId(id)}/build${withTex ? '?tex=1' : ''}`),
   users: () => req<{ users: { id: number; username: string; name: string; color: string; isAdmin: number }[] }>('GET', '/api/users'),

@@ -6,10 +6,10 @@ import { useEffect, useState } from 'preact/hooks';
 import { api, type Project, type User } from '../api';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
-const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.lyx$/.test(a)) - Number(!/(^|\/)main\.lyx$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
+const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
 
 export function projectDocs(p: Project): string[] {
-  return p.files.filter(f => f.kind === 'lyx' && !isBackup(f.name)).map(f => f.path).sort(mainFirst);
+  return p.files.filter(f => f.kind === 'doc' && !isBackup(f.name)).map(f => f.path).sort(mainFirst);
 }
 export const projectTitle = (p: Project) => p.title ?? p.name;
 

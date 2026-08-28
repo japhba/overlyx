@@ -7,6 +7,17 @@ export const PROJECTS_DIR = process.env.OVERLYX_PROJECTS_DIR ?? '/root/projects'
 export const FIXTURES_DIR = process.env.OVERLYX_E2E_FIXTURES ?? '/root/projects';
 export const BASE_URL = process.env.OVERLYX_E2E_BASE ?? 'http://localhost:5173';
 
+/** A minimal .tex document around `body` (paragraphs separated by blank lines). */
+export function texDoc(body: string, preamble = ''): string {
+  return `\\documentclass{article}\n${preamble ? preamble + '\n' : ''}\\begin{document}\n${body}\n\\end{document}\n`;
+}
+/** The preamble of a real document (everything up to and including \begin{document}) with a new body. */
+export function withPreambleOf(texPath: string, body: string): string {
+  const text = readFileSync(texPath, 'utf8');
+  const i = text.indexOf('\\begin{document}');
+  return text.slice(0, i) + '\\begin{document}\n' + body + '\n\\end{document}\n';
+}
+
 export function adminCredentials(): { username: string; password: string } {
   const lines = readFileSync(process.env.OVERLYX_E2E_CREDENTIALS ?? '/root/lyx/overlyx/data/credentials.txt', 'utf8').split('\n').filter(l => l.startsWith('admin\t'));
   const [username, password] = lines[lines.length - 1].split('\t');

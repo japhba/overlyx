@@ -400,7 +400,9 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose }: {
   const text = (k: string, placeholder = '', style = '') => <input type="text" value={v[k] ?? ''} onInput={e => set(k, (e.target as HTMLInputElement).value)} placeholder={placeholder} style={style} />;
   const sel = (k: string, opts: (string | [string, string])[]) => <select value={v[k] ?? ''} onChange={e => set(k, (e.target as HTMLSelectElement).value)}>{opts.map(o => { const [val, label] = Array.isArray(o) ? o : [o, o]; return <option key={val} value={val}>{label}</option>; })}</select>;
   const bool = (k: string) => <input type="checkbox" checked={v[k] === 'true'} onChange={e => set(k, String((e.target as HTMLInputElement).checked))} />;
-  const TABS: [Tab, string][] = [['general', 'Class & options'], ['page', 'Page & margins'], ['text', 'Text layout'], ['numbering', 'Numbering & floats'], ['fonts', 'Fonts'], ['branches', 'Branches'], ['pdf', 'PDF properties'], ['preamble', 'LaTeX preamble'], ['raw', 'Raw header']];
+  // page layout, fonts and PDF properties are written by hand in the LaTeX preamble of a .tex
+  // document; the settings kept here are the ones LaTeX cannot express (see tex/preamble.ts)
+  const TABS: [Tab, string][] = [['general', 'Class & options'], ['text', 'Text layout'], ['numbering', 'Numbering & floats'], ['branches', 'Branches'], ['preamble', 'LaTeX preamble'], ['raw', 'Raw settings']];
   const geometry = v.use_geometry === 'true';
   return (
     <Dialog title="Document Settings" onClose={onClose} wide buttons={<button class="btn primary" onClick={save}>Apply</button>}>

@@ -4,37 +4,28 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
-import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
+import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
 const PROJECT = 'e2e-misc';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
-const doc = () => readFileSync(`${SRC}/main.lyx`, 'utf8').split('\\begin_body')[0] + `\\begin_body
+const doc = () => withPreambleOf(`${SRC}/main.tex`, `The cat sat on the Cat mat; concatenate cats.
 
-\\begin_layout Standard
-The cat sat on the Cat mat; concatenate cats.
-\\end_layout
-
-\\begin_layout Standard
 Delete these words please.
-\\end_layout
-
-\\end_body
-\\end_document
-`;
+`);
 
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
-  if (existsSync(`${SRC}/lyxmacros.lyx`)) copyFileSync(`${SRC}/lyxmacros.lyx`, `${DIR}/lyxmacros.lyx`);
-  writeFileSync(`${DIR}/misc.lyx`, doc());
+  for (const f of ['lyxmacros.tex', 'macros.tex', 'preamble.tex']) if (existsSync(`${SRC}/${f}`)) copyFileSync(`${SRC}/${f}`, `${DIR}/${f}`);
+  writeFileSync(`${DIR}/misc.tex`, doc());
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
 async function open(page: Page) {
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); });
-  await page.goto(`/#/${PROJECT}/misc.lyx`);
+  await page.goto(`/#/${PROJECT}/misc.tex`);
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length >= 2, null, { timeout: 60000 });
   await page.waitForTimeout(1500);
 }
@@ -66,7 +57,7 @@ test('Ctrl+Backspace deletes a word; Ctrl+Alt+S toggles the source pane; statist
   await page.keyboard.press('Control+Backspace');           // "please."
   await page.keyboard.press('Control+Backspace');           // "words "
   await expect(second).toHaveText(/^Delete these ?$/);
-  await expect.poll(() => /Delete these ?\n\\end_layout/.test(readFileSync(`${DIR}/misc.lyx`, 'utf8')), { timeout: 15000 }).toBe(true);
+  await expect.poll(() => /Delete these ?\n\n\\end\{document\}/.test(readFileSync(`${DIR}/misc.tex`, 'utf8')), { timeout: 15000 }).toBe(true);
   await page.keyboard.press('Control+Alt+s');
   await expect(page.locator('.source-pane')).toBeVisible();
   await page.keyboard.press('Control+Alt+s');

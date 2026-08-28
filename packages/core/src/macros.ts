@@ -71,7 +71,7 @@ function readCsName(s: string, i: number): [string, number] | null {
  * the index after the definition, or null if this is not a definition.
  */
 export function parseMacroAt(s: string, i: number, source: MacroDef['source']): [MacroDef, number] | null {
-  const head = /^\\(?:global\s*)?(?:long\s*)?(?:outer\s*)?(?:protected\s*)?(newcommand\*?|renewcommand\*?|providecommand\*?|DeclareRobustCommand\*?|NewDocumentCommand|RenewDocumentCommand|DeclareDocumentCommand|ProvideDocumentCommand|DeclareMathOperator\*?|DeclarePairedDelimiter(?:X|XPP)?|def|edef|gdef|xdef|let)\b/.exec(s.slice(i));
+  const head = /^(?:\\global\s*)?(?:\\long\s*)?(?:\\outer\s*)?(?:\\protected\s*)?\\(newcommand\*?|renewcommand\*?|providecommand\*?|DeclareRobustCommand\*?|NewDocumentCommand|RenewDocumentCommand|DeclareDocumentCommand|ProvideDocumentCommand|DeclareMathOperator\*?|DeclarePairedDelimiter(?:X|XPP)?|def|edef|gdef|xdef|let)\b/.exec(s.slice(i));
   if (!head) return null;
   const kind = head[1];
   let j = i + head[0].length;
@@ -250,12 +250,11 @@ export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, se
       const fn = unquote(pm.get('filename'));
       if (fn && !seen.has('lyx:' + fn)) {
         seen.add('lyx:' + fn);
-        if (fn.endsWith('.lyx')) {
-          const child = resolver.include?.(fn);
-          if (child) out.push(...collectMacros(child, resolver, seen));
-        } else {
-          visitFile(fn);
-        }
+        // a child document (.lyx or .tex) is read as a document: its macros keep their positions
+        // (also the ones inside notes, which LyX evaluates); other files are scanned as text
+        const child = fn.endsWith('.lyx') || fn.endsWith('.tex') || !fn.includes('.') ? resolver.include?.(fn) : undefined;
+        if (child) out.push(...collectMacros(child, resolver, seen));
+        else if (!fn.endsWith('.lyx')) visitFile(fn);
       }
     }
   }

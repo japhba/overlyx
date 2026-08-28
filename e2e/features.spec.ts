@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
-import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
+import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 /** Each test works on its own copy of a document inside a scratch project. */
 const PROJECT = 'e2e-scratch';
@@ -8,11 +8,11 @@ const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 function freshDoc(name: string): string {
   mkdirSync(DIR, { recursive: true });
-  const src = readFileSync(`${FIXTURES_DIR}/bayesian_chaos/notes/notes.lyx`, 'utf8');
-  const file = `${DIR}/${name}.lyx`;
+  // a self-contained master document (notes/notes.tex is a child fragment without \begin{document})
+  const src = readFileSync(`${FIXTURES_DIR}/bayesian_chaos/notes/spectral_projection.tex`, 'utf8');
+  const file = `${DIR}/${name}.tex`;
   writeFileSync(file, src);
-  if (!existsSync(`${DIR}/translation_table.png`)) copyFileSync(`${FIXTURES_DIR}/bayesian_chaos/notes/translation_table.png`, `${DIR}/translation_table.png`);
-  return `${PROJECT}/${name}.lyx`;
+  return `${PROJECT}/${name}.tex`;
 }
 
 const fileText = (id: string) => readFileSync(PROJECTS_DIR + '/' + id, 'utf8');
@@ -26,7 +26,7 @@ async function firstStandard(page: Page) {
 
 test.beforeEach(async ({ page }) => { await login(page); });
 
-test('inline and display math are edited in place and saved as LyX formulas', async ({ page }) => {
+test('inline and display math are edited in place and saved as LaTeX formulas', async ({ page }) => {
   const errors = collectErrors(page);
   const id = freshDoc('math-' + Date.now());
   await openDoc(page, id);
@@ -40,13 +40,13 @@ test('inline and display math are edited in place and saved as LyX formulas', as
   await page.keyboard.type('=c^2');
   await page.keyboard.press('Escape');               // leave the formula
   await page.keyboard.type(' after');
-  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin_inset Formula \$a\^\{?2\}?\+b\^\{?2\}?=c\^\{?2\}?\$/);
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\$a\^\{?2\}?\+b\^\{?2\}?=c\^\{?2\}?\$/);
   // display formula with numbering toggle (Alt+M n inside math)
   await page.keyboard.press('Enter');
   await page.keyboard.press('Control+Shift+m');
   await expect(page.locator('.lm-field.display.focused')).toHaveCount(1, { timeout: 5000 });
   await page.keyboard.type('E=mc^2'); await page.keyboard.press('ArrowRight');
-  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin_inset Formula \n\\\[\nE=mc\^\{?2\}?\n\\\]/);
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\\[\nE=mc\^\{?2\}?\n\\\]/);
   await page.keyboard.press('Alt+m');
   await page.keyboard.press('n');
   await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin\{equation\}\nE=mc\^\{?2\}?\n\\end\{equation\}/);
@@ -72,7 +72,7 @@ test('LyX layouts via Alt+P chords, lists and depth', async ({ page }) => {
   await page.keyboard.press('Enter');
   await page.keyboard.type('nested item');
   await page.keyboard.press('Alt+Shift+ArrowRight');  // depth-increment
-  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin_layout Section\nMy new section\n\\end_layout[\s\S]*\\begin_layout Itemize\nfirst item\n\\end_layout\n\n\\begin_deeper\n\\begin_layout Itemize\nnested item\n\\end_layout\n\n\\end_deeper/);
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\section\{My new section\}[\s\S]*\\begin\{itemize\}\n\\item first item\n\\begin\{itemize\}\n\\item nested item\n\\end\{itemize\}\n\\end\{itemize\}/);
 });
 
 test('comment threads and LyX notes, shown in the margin', async ({ page }) => {
@@ -91,7 +91,7 @@ test('comment threads and LyX notes, shown in the margin', async ({ page }) => {
   // resolve
   await comment.locator('.inset-action', { hasText: 'Resolve' }).click();
   await expect(comment).toHaveClass(/resolved/);
-  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin_inset Note Comment\nstatus open\n\n\\begin_layout Plain Layout\nAdmin \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}\) \[resolved\]:\n\\end_layout\n\n\\begin_layout Plain Layout\nPlease check this claim\.\n\\end_layout/);
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/%% @comment\n%% Admin \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}\) \{\[\}resolved\{\]\}:\n%%\n%% Please check this claim\./);
   // LyX note + margin mode
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+Alt+Shift+n');
@@ -103,10 +103,10 @@ test('comment threads and LyX notes, shown in the margin', async ({ page }) => {
   const pageBox = await page.locator('.editor-page').boundingBox();
   const b = await box.boundingBox();
   expect(b!.x).toBeGreaterThan(pageBox!.x + pageBox!.width - 400);   // in the right margin column
-  await expect.poll(() => fileText(id)).toContain('\\begin_inset Note Note\nstatus open\n\n\\begin_layout Plain Layout\na lyx note');
+  await expect.poll(() => fileText(id)).toContain('%% @note\n%% a lyx note');
 });
 
-test('tables are inserted as LyX tabulars', async ({ page }) => {
+test('tables are inserted as tabulars', async ({ page }) => {
   const id = freshDoc('table-' + Date.now());
   await openDoc(page, id);
   await firstStandard(page);
@@ -115,7 +115,7 @@ test('tables are inserted as LyX tabulars', async ({ page }) => {
   await page.locator('.dialog .btn.primary').click();
   await page.keyboard.type('cell A');
   await expect(page.locator('.lyx-tabular', { hasText: 'cell A' }).locator('td')).toHaveCount(9);
-  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/<lyxtabular version="3" rows="3" columns="3">[\s\S]*<cell alignment="center" valignment="top" topline="true" bottomline="true" leftline="true" rightline="true" usebox="none">\n\\begin_inset Text\n\n\\begin_layout Plain Layout\ncell A\n\\end_layout/);
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin\{tabular\}\{\|c\|c\|c\|\}\n\\hline[\s\S]*cell A[\s\S]*\\end\{tabular\}/);
 });
 
 test('fonts, footnote, label/ref and citation insets', async ({ page }) => {
@@ -133,16 +133,16 @@ test('fonts, footnote, label/ref and citation insets', async ({ page }) => {
   await page.keyboard.press('Control+Shift+i');
   await page.locator('.dialog .list b', { hasText: 'sec:e2e' }).click();
   await page.locator('.dialog .btn.primary').click();
-  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\emph on\nemphasized\n\\emph default\n \n\\series bold\nbold\n\\series default\n\n\\begin_inset Foot\nstatus open\n\n\\begin_layout Plain Layout\na footnote\n\\end_layout\n\n\\end_inset\n\n\n\\begin_inset CommandInset label\nLatexCommand label\nname "sec:e2e"\n\n\\end_inset\n\n\n\\begin_inset CommandInset ref\nLatexCommand ref\nreference "sec:e2e"/);
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\emph\{emphasized\}\s+\\textbf\{bold\}\\footnote\{a footnote\}\\label\{sec:e2e\}\\ref\{sec:e2e\}/);
 });
 
-test('external edits (e.g. saved from LyX) are picked up live', async ({ page }) => {
+test('external edits (git, another editor) are picked up live', async ({ page }) => {
   const id = freshDoc('external-' + Date.now());
   await openDoc(page, id);
   await expect(page.locator('.statusbar')).toContainText('connected');
   const text = fileText(id);
   const marker = 'EXTERNAL-EDIT-' + Date.now();
-  writeFileSync(PROJECTS_DIR + '/' + id, text.replace('\\begin_layout Standard\n', `\\begin_layout Standard\n${marker} `));
+  writeFileSync(PROJECTS_DIR + '/' + id, text.replace('\\begin{document}\n', `\\begin{document}\n${marker} paragraph.\n\n`));
   await expect(page.locator('.lyx-editor')).toContainText(marker, { timeout: 15000 });
 });
 
@@ -166,9 +166,9 @@ test('versions can be created, listed and restored', async ({ page }) => {
 });
 
 test('PDF export builds a PDF for a revtex document', async ({ page, request }) => {
-  test.skip(!existsSync('/root/lyx/overlyx/packages/core/src/latex/index.ts'), 'exporter not available');
+  test.skip(!existsSync(`${PROJECTS_DIR}/bayesian_chaos/main.tex`), 'the revtex paper is not in the projects directory under test');
   test.setTimeout(400000);
-  await openDoc(page, 'bayesian_chaos/main.lyx');
+  await openDoc(page, 'bayesian_chaos/main.tex');
   await page.locator('.tb-btn[title^="View PDF"]').click();
   // builds run in the background: wait for this one (progress shown, then gone), not a previous PDF
   await expect(page.locator('.pdf-panel .build-progress')).toBeVisible({ timeout: 15000 });
@@ -180,28 +180,14 @@ test('PDF export builds a PDF for a revtex document', async ({ page, request }) 
 /** A document with a figure (caption + label), an equation with a label, and a ref/eqref to each. */
 function labelDoc(name: string): string {
   mkdirSync(DIR, { recursive: true });
-  const head = readFileSync(`${FIXTURES_DIR}/bayesian_chaos/notes/notes.lyx`, 'utf8').split('\\begin_body')[0];
   const body = [
-    '\\begin_body', '',
-    '\\begin_layout Standard', 'See Fig ',
-    '\\begin_inset CommandInset ref', 'LatexCommand ref', 'reference "fig:demo"', 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '', '\\end_inset', '',
-    ' and ',
-    '\\begin_inset CommandInset ref', 'LatexCommand eqref', 'reference "eq:demo"', 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '', '\\end_inset', '', '.', '\\end_layout', '',
-    '\\begin_layout Standard',
-    '\\begin_inset Float figure', 'wide false', 'sideways false', 'status open', '',
-    '\\begin_layout Plain Layout',
-    '\\begin_inset Caption Standard', '',
-    '\\begin_layout Plain Layout', 'A demo figure.',
-    '\\begin_inset CommandInset label', 'LatexCommand label', 'name "fig:demo"', '', '\\end_inset', '', '', '\\end_layout', '',
-    '\\end_inset', '', '', '\\end_layout', '',
-    '\\end_inset', '', '', '\\end_layout', '',
-    '\\begin_layout Standard',
-    '\\begin_inset Formula ', '\\begin{equation}', 'E=mc^{2}\\label{eq:demo}', '\\end{equation}', '', '\\end_inset', '', '', '\\end_layout', '',
-    '\\end_body', '\\end_document', '',
+    'See Fig \\ref{fig:demo} and \\eqref{eq:demo}.', '',
+    '\\begin{figure}', '\\caption{A demo figure.}\\label{fig:demo}', '\\end{figure}', '',
+    '\\begin{equation}', 'E=mc^{2}\\label{eq:demo}', '\\end{equation}', '',
   ].join('\n');
-  const file = `${DIR}/${name}.lyx`;
-  writeFileSync(file, head + body);
-  return `${PROJECT}/${name}.lyx`;
+  const file = `${DIR}/${name}.tex`;
+  writeFileSync(file, withPreambleOf(`${FIXTURES_DIR}/bayesian_chaos/notes/spectral_projection.tex`, body));
+  return `${PROJECT}/${name}.tex`;
 }
 
 test('figure and equation labels are edited through the same dialog and rename updates references', async ({ page }) => {
@@ -215,8 +201,8 @@ test('figure and equation labels are edited through the same dialog and rename u
   await expect(page.locator('.dialog')).toContainText('Used by 1 cross-reference');
   await page.locator('.dialog input[type=text]').first().fill('fig:renamed');
   await page.locator('.dialog button.primary').click();
-  await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('name "fig:renamed"');
-  expect(fileText(id)).toContain('reference "fig:renamed"');      // the \ref was updated
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('\\label{fig:renamed}');
+  expect(fileText(id)).toContain('\\ref{fig:renamed}');      // the \ref was updated
   expect(fileText(id)).not.toContain('fig:demo');
   // equation label: clicking the equation label chip opens the same dialog
   const disp = page.locator('.lyx-math-display').first();
@@ -227,7 +213,7 @@ test('figure and equation labels are edited through the same dialog and rename u
   await page.locator('.dialog input[type=text]').first().fill('eq:renamed');
   await page.locator('.dialog button.primary').click();
   await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('\\label{eq:renamed}');
-  expect(fileText(id)).toContain('reference "eq:renamed"');       // the \eqref was updated
+  expect(fileText(id)).toContain('\\eqref{eq:renamed}');       // the \eqref was updated
   // remove the equation label via the dialog
   await disp.locator('.eq-labels').click();
   await page.locator('.dialog button', { hasText: 'Remove label' }).click();

@@ -112,12 +112,12 @@ describe('example project and deletion', () => {
   it('creates one personalised example project per account, once', () => {
     const name = access.ensureWelcomeProject(bob)!;
     expect(name).toBe('welcome-bob');
-    const text = readFileSync(join(ROOT, 'projects', name, 'welcome.lyx'), 'utf8');
-    expect(text).toContain('\\begin_layout Author\nBob Builder\n\\end_layout');
+    const text = readFileSync(join(ROOT, 'projects', name, 'welcome.tex'), 'utf8');
+    expect(text).toContain('\\author{Bob Builder}');
     expect(text).toContain('Bob.');
-    expect(text).not.toContain('%%');
+    expect(text).not.toContain('@@');
     expect(text).toContain('% OverLyX: double angle brackets');
-    expect(readdirSync(join(ROOT, 'projects', name)).sort()).toEqual(['figures', 'refs.bib', 'welcome.lyx']);
+    expect(readdirSync(join(ROOT, 'projects', name)).sort()).toEqual(['figures', 'refs.bib', 'welcome.tex']);
     expect(access.ensureWelcomeProject(bob)).toBe(name);
     const p = access.accessibleProjects(bob).find(p => p.name === name)!;
     expect([p.kind, p.title, p.role, p.via]).toEqual(['example', 'Welcome to OverLyX', 'owner', 'owner']);
@@ -127,7 +127,7 @@ describe('example project and deletion', () => {
   it('moves a deleted project to the trash and does not re-create a deleted example', () => {
     const dest = access.trashProject('welcome-bob');
     expect(existsSync(join(ROOT, 'projects', 'welcome-bob'))).toBe(false);
-    expect(existsSync(join(dest, 'welcome.lyx'))).toBe(true);
+    expect(existsSync(join(dest, 'welcome.tex'))).toBe(true);
     expect(access.ensureWelcomeProject(bob)).toBeNull();
     expect(access.accessibleProjects(bob).map(p => p.name)).not.toContain('welcome-bob');
     access.addMember('paper', 'bob', 'edit', jan);

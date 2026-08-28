@@ -27,13 +27,16 @@ function libDir(layoutDir: string): string {
   return join(layoutDir, '..');
 }
 
-function makeContext(doc: LyxDocument, opts: ExportOptions, parent?: ExportContext): ExportContext {
+export function makeContext(doc: LyxDocument, opts: ExportOptions, parent?: ExportContext): ExportContext {
   const layoutDir = opts.layoutDir ?? parent?.opts.layoutDir ?? DEFAULT_LAYOUT_DIR;
   const lib = libDir(layoutDir);
   const bp = readBufferParams(doc);
   // children use the master's parameters for everything that affects the preamble
   const effective: BufferParams = parent ? { ...parent.bp, branches: [...parent.bp.branches, ...bp.branches] } : bp;
-  const dc = parent ? parent.dc : loadDocumentClass(effective.textclass, effective.modules, layoutDir);
+  const localDirs = opts.localDirs ?? parent?.opts.localDirs ?? [];
+  const dc0 = parent ? parent.dc : loadDocumentClass(effective.textclass, effective.modules, layoutDir, localDirs);
+  // tex mode: what the user's preamble loads counts as provided by the class
+  const dc = parent || !opts.provided?.size ? dc0 : { ...dc0, provides: new Set([...dc0.provides, ...opts.provided]) };
   const langs = parent?.langs ?? loadLanguages(join(lib, 'languages'));
   const docLanguage = langs.get(effective.language) ?? langs.get('english') ?? {
     name: effective.language, guiName: '', babel: '', polyglossia: '', polyglossiaOpts: '', encoding: 'iso8859-1', fontEncoding: ['ASCII'],
@@ -80,7 +83,9 @@ function makeContext(doc: LyxDocument, opts: ExportOptions, parent?: ExportConte
     else if (babelRequired) useBabel = true;
   } else if (lp === 'babel') { if (babelRequired) useBabel = true; }
   else { /* custom package string */ }
-  const outputChanges = opts.outputChanges ?? (parent ? parent.outputChanges : bp.outputChanges);
+  const texMode = parent ? parent.texMode : !!opts.texMode;
+  // tex mode: change tracking is always written (it is the only place the changes live)
+  const outputChanges = texMode ? true : opts.outputChanges ?? (parent ? parent.outputChanges : bp.outputChanges);
   return {
     doc, bp: effective, dc, features, opts: parent ? { ...opts, layoutDir } : opts,
     warnings: parent?.warnings ?? [], files: parent?.files ?? {}, graphics: parent?.graphics ?? [],
@@ -90,11 +95,12 @@ function makeContext(doc: LyxDocument, opts: ExportOptions, parent?: ExportConte
     isChild: !!parent || !!opts.isChild, needMaketitle: parent?.needMaketitle ?? false, haveMaketitle: parent?.haveMaketitle ?? false,
     bibLabels: [], openLanguage: effective.language, includeDepth: (parent?.includeDepth ?? -1) + 1, bodyPars: doc.body,
     macroNames: parent?.macroNames ?? new Set<string>(),
+    texMode, usedChanges: false,
   };
 }
 
 /** Collect bibliography labels (for the widest label) and math macro names. */
-function collectBibLabels(ctx: ExportContext): void {
+export function collectBibLabels(ctx: ExportContext): void {
   for (const { inset } of walkInsets(ctx.doc.body)) {
     if (inset.type === 'FormulaMacro') {
       const m = /^\\(?:re)?newcommand\*?\s*\{?\\([A-Za-z@]+)|^\\(?:global\\)?(?:long\\)?def\\([A-Za-z@]+)/.exec(inset.lines[0] ?? '');
@@ -108,10 +114,10 @@ function collectBibLabels(ctx: ExportContext): void {
 }
 
 /** Requirements that depend only on the document settings (BufferParams::validate). */
-function validateParams(ctx: ExportContext): void {
+export function validateParams(ctx: ExportContext): void {
   const { bp, features: f, dc } = ctx;
   f.require(dc.requires);
-  if (ctx.outputChanges) {
+  if (ctx.outputChanges && !ctx.texMode) {
     f.require('ct-xcolor-ulem'); f.require('ulem'); f.require('xcolor'); f.require('pdfcolmk');
     if (bp.changeBars) f.require('changebar');
   }
@@ -134,7 +140,7 @@ function validateParams(ctx: ExportContext): void {
 }
 
 /** Body of the document (paragraphs between \begin{document} and \end{document}). */
-function writeBody(ctx: ExportContext): string {
+export function writeBody(ctx: ExportContext): string {
   const os = new TexStream();
   const rp = newRunParams(ctx.bp.language, true);
   rp.owner = 'main';
@@ -145,7 +151,7 @@ function writeBody(ctx: ExportContext): string {
 
 /** Export a child document (body only) sharing the master's context. */
 export function exportChild(parent: ExportContext, child: LyxDocument, filename: string): string {
-  const ctx = makeContext(child, { ...parent.opts, isChild: true, basename: filename.replace(/\.lyx$/, '') }, parent);
+  const ctx = makeContext(child, { ...parent.opts, isChild: true, basename: filename.replace(/\.(lyx|tex)$/, '') }, parent);
   if (ctx.dc.name !== readBufferParams(child).textclass) {
     parent.warnings.push(`child '${filename}' uses textclass '${readBufferParams(child).textclass}' while the master uses '${ctx.dc.name}'`);
   }
@@ -177,6 +183,12 @@ export function exportLatex(doc: LyxDocument, opts: ExportOptions = {}): ExportR
     const preamble = writePreamble(ctx);
     tex = preamble + '\\begin{document}\n' + body + (body.endsWith('\n') ? '' : '\n') + '\n\\end{document}\n';
   }
+  return finishExport(ctx, tex);
+}
+
+/** Feature bookkeeping shared by the LyX export and the .tex writer. */
+export function finishExport(ctx: ExportContext, tex: string): ExportResult {
+  const f = ctx.features;
   const requires = new Set<string>();
   const re = /\\usepackage(?:\[[^\]]*\])?\{([^}]*)\}/g;
   let m: RegExpExecArray | null;

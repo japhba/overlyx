@@ -6,8 +6,8 @@ export interface Status { connected: boolean; synced: boolean; users: PresenceUs
 export function SaveIndicator({ save }: { save: SaveState }) {
   const when = save.savedAt ? new Date(save.savedAt).toLocaleTimeString() : '';
   switch (save.state) {
-    case 'saved': return <span class="save-state saved" title={when ? `The .lyx file on the server was last written at ${when}` : 'Everything is saved on the server'}>✓ All changes saved</span>;
-    case 'saving': return <span class="save-state saving" title="Your edits are being written to the .lyx file on the server">Saving…</span>;
+    case 'saved': return <span class="save-state saved" title={when ? `The .tex file on the server was last written at ${when}` : 'Everything is saved on the server'}>✓ All changes saved</span>;
+    case 'saving': return <span class="save-state saving" title="Your edits are being written to the .tex file on the server">Saving…</span>;
     case 'connecting': return <span class="save-state connecting">connecting…</span>;
     case 'stale': return <span class="save-state offline" title="The document on the server has a different history than this copy; it is being reloaded.">⚠ document was re-created on the server — reloading…</span>;
     case 'offline': return (

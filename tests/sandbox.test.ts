@@ -18,7 +18,12 @@ describe('sandbox', () => {
     expect(a.slice(-3)).toEqual(['--', 'latexmk', '-pdf', 'main.tex'].slice(-3));
     expect(a[a.indexOf('--') + 1]).toBe('latexmk');
     // system read-only, build dir read-write, no network / pids, clean environment
-    expect(a).toContain('--unshare-all');
+    if (process.getuid?.() === 0) {
+      // as root: no user namespace (files owned by other users must stay readable), no capabilities but reading
+      for (const f of ['--unshare-pid', '--unshare-net', '--unshare-ipc', '--unshare-uts']) expect(a).toContain(f);
+      expect(a.slice(a.indexOf('--cap-drop'), a.indexOf('--cap-drop') + 4)).toEqual(['--cap-drop', 'ALL', '--cap-add', 'CAP_DAC_READ_SEARCH']);
+      expect(a).not.toContain('--unshare-user');
+    } else expect(a).toContain('--unshare-all');
     expect(a).toContain('--clearenv');
     expect(a).toContain('--die-with-parent');
     const bind = a.indexOf('--bind', a.indexOf('--tmpfs'));

@@ -134,8 +134,11 @@ function loadTabs(): string[] { try { const t = JSON.parse(localStorage.getItem(
 
 function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [docId, setDocId] = useState<string | null>(parseHash().id);
-  // tabs hold LyX documents (the collaborative editor) and other text files (a plain text editor)
-  const isLyxDoc = !!docId && docId.endsWith('.lyx');
+  // tabs hold .tex documents (the collaborative editor) and other text files (a plain text editor,
+  // ids prefixed with "text:")
+  const isTextTab = !!docId && docId.startsWith('text:');
+  const textId = docId ? docId.replace(/^text:/, '') : null;
+  const isLyxDoc = !!docId && !isTextTab && docId.endsWith('.tex');
   const [tabs, setTabs] = useState<string[]>(loadTabs);
   const [meta, setMeta] = useState<DocMeta | null>(null);
   const [headerLines, setHeaderLines] = useState<string[]>([]);
@@ -377,7 +380,14 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     let metaAttempt = 0;
     loadMeta = () => {
       clearTimeout(metaRetry);
-      api.meta(docId).then(m => { metaAttempt = 0; withMeta(m); }).catch((e: Error & { status?: number }) => {
+      api.meta(docId).then(m => {
+        metaAttempt = 0;
+        // a .tex file that is not a document (a preamble / macro file opened by URL) belongs to the text editor
+        const rel = docId.slice(docId.indexOf('/') + 1);
+        const entry = m.files?.find(f => f.path === rel);
+        if (entry && entry.kind === 'tex') { location.hash = '#/text:' + docId; return; }
+        withMeta(m);
+      }).catch((e: Error & { status?: number }) => {
         if (cancelled) return;
         if (e.status === 403) { notify(e.message || 'You no longer have access to this project', 'error'); closeTab(docId); return; }
         if (!navigator.onLine) { notify('Offline: document metadata (macros, bibliography) not available', 'error'); withMeta(null); return; }
@@ -414,9 +424,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
           const lyx = generateLyx({ view: h.view, ydoc: h.ydoc, docId: id });
           const a = document.createElement('a');
           a.href = URL.createObjectURL(new Blob([lyx], { type: 'application/x-lyx' }));
-          a.download = (id.split('/').pop() ?? 'document.lyx').replace(/\.lyx$/, '') + '-offline-changes.lyx';
+          a.download = (id.split('/').pop() ?? 'document.tex').replace(/\.tex$/, '') + '-offline-changes.lyx';
           a.click();
-          kept = 'Your unsynced edits could not be stored on the server; they were downloaded as a .lyx file instead.';
+          kept = 'Your unsynced edits could not be stored on the server; they were downloaded as a .lyx file instead (import it into the project to recover them).';
         } catch { kept = 'Your unsynced edits could not be kept.'; }
       }
     }
@@ -440,8 +450,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         if (st?.state === 'offline') { notify('You are offline — your changes are kept on this device and will be saved automatically when the connection is back'); return; }
         api.save(docId).then(() => notify('All changes are saved automatically — written to ' + docId.split('/').pop())).catch(e => notify(String(e.message), 'error'));
       },
-      viewPdf: () => build('overlyx'),
-      updatePdf: () => build('overlyx'),
+      viewPdf: () => build(),
+      updatePdf: () => build(),
       find: () => setFindOpen(true),
       openDialog: (name, arg) => setDialog({ name, arg }),
       toggleTrackChanges: () => toggleTracking(),
@@ -454,7 +464,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       zoom: (d) => setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))),
       textWidth: stepTextWidth,
       openFile: () => setShowFiles(true),
-      newFile: () => { const p = docId?.split('/')[0]; if (p) { const name = prompt('New document name:', 'untitled.lyx'); if (name) api.newDoc(p, name, { title: name.replace(/\.lyx$/, '') }).then(r => { location.hash = '#/' + r.id; setRefreshKey(k => k + 1); }); } },
+      newFile: () => { const p = textId?.split('/')[0]; if (p) { const name = prompt('New document name:', 'untitled.tex'); if (name) api.newDoc(p, name, { title: name.replace(/\.(tex|lyx)$/, '') }).then(r => { location.hash = '#/' + r.id; setRefreshKey(k => k + 1); }); } },
     };
   });
 
@@ -483,12 +493,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   // when a document opens: show its last PDF, and resume polling if a build is running
   useEffect(() => { if (docId) pollBuild(docId, false); }, [docId]);
 
-  const build = async (engine: 'overlyx' | 'lyx') => {
+  const build = async () => {
     if (!docId) return;
     setRightTab('pdf');
     setPdf(p => ({ ...p, busy: true }));
     try {
-      const r = await api.export(docId, 'pdf', engine);
+      const r = await api.export(docId, 'pdf');
       setPdf(p => ({ ...p, busy: true, job: r.job ?? p.job }));
       pollBuild(docId, true);
     } catch (e) {
@@ -583,16 +593,16 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     { label: 'Keyboard shortcuts', action: () => setDialog({ name: 'help' }) },
     { sep: true },
     { label: 'Report a problem / send feedback…', action: () => setDialog({ name: 'feedback' }) },
-    { label: 'About OverLyX', action: () => alert('OverLyX — a LyX-compatible collaborative WYSIWYG editor for LaTeX documents.\nDocuments are stored as native .lyx files; formulas are edited with a port of LyX\'s math editor; collaboration via Yjs CRDTs.') },
+    { label: 'About OverLyX', action: () => alert('OverLyX — a LyX-like collaborative WYSIWYG editor for LaTeX documents.\nDocuments are ordinary .tex files (change tracking and comments live in the file as macros and comment blocks); formulas are edited with a port of LyX\'s math editor; collaboration via Yjs CRDTs.') },
   ] };
   const textFileMenus: MenuDef[] = docId ? [
     { title: 'File', items: [
       { label: 'Open (file browser)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
       { label: 'Saved automatically (Ctrl+S saves now)', disabled: true, action: () => {} },
       { sep: true },
-      { label: 'Download', action: () => window.open(`/api/projects/${encodeURIComponent(docId.split('/')[0])}/file/${docId.split('/').slice(1).map(encodeURIComponent).join('/')}`) },
-      { label: 'Share project…', action: () => setShareFor(docId.split('/')[0]) },
-      { label: 'Git repository…', action: () => setGitFor(docId.split('/')[0]) },
+      { label: 'Download', action: () => window.open(`/api/projects/${encodeURIComponent(textId!.split('/')[0])}/file/${textId!.split('/').slice(1).map(encodeURIComponent).join('/')}`) },
+      { label: 'Share project…', action: () => setShareFor(textId!.split('/')[0]) },
+      { label: 'Git repository…', action: () => setGitFor(textId!.split('/')[0]) },
       { sep: true },
       { label: 'Close tab', action: () => closeTab(docId) },
       { label: 'Close other tabs', action: () => setTabs([docId]) },
@@ -605,10 +615,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: save.state === 'offline' ? 'Offline — changes are saved on this device' : save.state === 'saving' ? 'Saving…' : 'All changes saved automatically', disabled: true, action: () => {} },
       { sep: true },
       { label: 'Export ▸', sub: [
-        { label: 'PDF (pdflatex via latexmk)', shortcut: 'Ctrl+R', action: () => build('overlyx') },
-        { label: 'PDF via native LyX', action: () => build('lyx') },
-        { label: 'LaTeX source…', action: async () => { const r = await api.export(docId, 'tex'); setDialog({ name: 'tex', arg: r.tex ?? '' }); } },
-        { label: 'Download .lyx', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/lyx?download=1`) },
+        { label: 'PDF (latexmk)', shortcut: 'Ctrl+R', action: () => build() },
+        { label: 'LaTeX source (as built)…', action: async () => { const r = await api.export(docId, 'tex'); setDialog({ name: 'tex', arg: r.tex ?? '' }); } },
+        { label: 'Download .tex', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/tex?download=1`) },
         { label: 'Download PDF', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/pdf?download=1`) },
       ] },
       { label: 'Versions…', action: () => setRightTab('versions') },
@@ -798,7 +807,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Branch…', action: () => { const n = prompt('Branch name:'); if (n) run(C.insertBranch(n)); } },
       { label: 'Custom inset (Flex)…', action: () => { const n = prompt('Flex inset name:', meta?.flexInsets?.[0] ?? 'Code'); if (n) run(C.insertFlex(n)); } },
       { sep: true },
-      { label: 'Child document…', action: () => { const fn = prompt('Child document file name (relative):', 'chapter1.lyx'); if (fn) run(C.insertInclude(fn, 'include')); } },
+      { label: 'Child document…', action: () => { const fn = prompt('Child document file name (relative):', 'chapter1.tex'); if (fn) run(C.insertInclude(fn, 'include')); } },
       { label: 'Table of contents', action: () => run(C.insertToc()) },
       { label: 'List of figures', action: () => run(C.insertToc('listoffigures')) },
       { label: 'BibTeX bibliography…', action: () => { const f = prompt('BibTeX file(s), comma separated (without .bib):', (meta?.files.filter(x => x.kind === 'bib').map(x => x.path.replace(/\.bib$/, '')).join(',') || 'references')); if (f) run(C.insertBibtex(f, prompt('Style:', 'plain') || 'plain')); } },
@@ -868,10 +877,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     try {
       const target = meta?.master ?? docId;
       let lines = headerLines;
-      if (target !== docId) {
-        const text = await api.lyxText(target);
-        lines = text.split('\n');
-      }
+      if (target !== docId) lines = (await api.header(target)).headerLines;
       const a = lines.indexOf('\\begin_preamble'), b = lines.indexOf('\\end_preamble');
       const preamble = a >= 0 && b > a ? lines.slice(a + 1, b).join('\n') : '';
       if (hasLlangleSnippet(preamble)) return;
@@ -949,7 +955,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { id: 'tb-review', title: 'Show review toolbar', icon: 'reviewtb', action: () => toggleTb('review', showReview), active: showReview },
     ],
     [
-      { id: 'pdf', title: 'View PDF (Ctrl+R)', icon: 'pdf', action: () => build('overlyx') },
+      { id: 'pdf', title: 'View PDF (Ctrl+R)', icon: 'pdf', action: () => build() },
       ...(meta?.master ? [{ id: 'pdfmaster', title: `View master document (${meta.master.split('/').pop()})`, icon: 'pdfmaster', action: () => openInTab(meta.master!) } as ToolButton] : []),
     ],
   ];
@@ -982,7 +988,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { id: 'href', title: 'Hyperlink (Ctrl+Alt+K)', icon: 'href', action: () => setDialog({ name: 'href' }) },
       { id: 'ert', title: 'TeX code (Ctrl+L)', icon: 'ert', action: () => run(C.insertERT) },
       { id: 'macro', title: 'Math macro definition', icon: 'macro', action: () => { const n = prompt('Macro name (without backslash):'); if (n) run(C.insertMacroDef(n, Number(prompt('Number of arguments:', '0') || 0), '')); } },
-      { id: 'include', title: 'Include file (child document)', icon: 'include', action: () => { const fn = prompt('Child document file name (relative):', 'chapter1.lyx'); if (fn) run(C.insertInclude(fn, 'include')); } },
+      { id: 'include', title: 'Include file (child document)', icon: 'include', action: () => { const fn = prompt('Child document file name (relative):', 'chapter1.tex'); if (fn) run(C.insertInclude(fn, 'include')); } },
     ],
     [
       { id: 'textstyle', title: 'Text properties', icon: 'textstyle', palette: { title: 'Text properties', list: true, cols: 2, items: [
@@ -1244,10 +1250,10 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         </div>
       )}
       <div class="main">
-        {showFiles && <div class="sidebar"><div class="panel-tabs"><button class="active">Files</button><button onClick={() => setShowFiles(false)}>✕</button></div><div class="panel-body"><FileBrowser current={docId} refreshKey={refreshKey} onOpen={id => openInTab(id)} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} /></div></div>}
+        {showFiles && <div class="sidebar"><div class="panel-tabs"><button class="active">Files</button><button onClick={() => setShowFiles(false)}>✕</button></div><div class="panel-body"><FileBrowser current={textId} refreshKey={refreshKey} onOpen={id => openInTab(id)} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} /></div></div>}
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {isLyxDoc && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={marginMode} />}
-          {docId ? (!isLyxDoc ? <TextEditor key={docId} id={docId} notify={notify} /> :
+          {docId ? (!isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (
@@ -1288,13 +1294,14 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   );
 }
 
-/** Child documents (\include / \input of .lyx files) of a master, in document order. */
+/** Child documents (\include / \input of .tex files) of a master, in document order. */
 function collectChildren(view: EditorView): string[] {
   const out: string[] = [];
   const project = view.dom.dataset.project ?? '', docDir = view.dom.dataset.docDir ?? '';
   view.state.doc.descendants((node) => {
-    const id = C.includeTarget(node, project, docDir);
-    if (id && id.endsWith('.lyx') && !out.includes(id)) out.push(id);
+    let id = C.includeTarget(node, project, docDir);
+    if (id && !/\.[A-Za-z0-9]+$/.test(id)) id += '.tex';
+    if (id && id.endsWith('.tex') && !out.includes(id)) out.push(id);
     return true;
   });
   return out;

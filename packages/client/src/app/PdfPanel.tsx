@@ -11,7 +11,7 @@ export interface PdfState {
 
 const PHASE: Record<string, string> = { queued: 'waiting for a free build slot', exporting: 'exporting LaTeX', compiling: 'running latexmk' };
 
-export function PdfPanel({ docId, state, onBuild, onCancel, onShowTex }: { docId: string; state: PdfState; onBuild: (engine: 'overlyx' | 'lyx') => void; onCancel: () => void; onShowTex: () => void }) {
+export function PdfPanel({ docId, state, onBuild, onCancel, onShowTex }: { docId: string; state: PdfState; onBuild: () => void; onCancel: () => void; onShowTex: () => void }) {
   const [showLog, setShowLog] = useState(false);
   const [, tick] = useState(0);
   useEffect(() => { if (!state.busy) return; const t = setInterval(() => tick(x => x + 1), 1000); return () => clearInterval(t); }, [state.busy]);
@@ -20,10 +20,9 @@ export function PdfPanel({ docId, state, onBuild, onCancel, onShowTex }: { docId
   return (
     <div class="pdf-panel">
       <div class="bar">
-        <button class="small-btn" disabled={state.busy} onClick={() => onBuild('overlyx')} title="Export with the OverLyX LaTeX exporter and compile with latexmk in the background (Ctrl+R)">{state.busy ? 'Building…' : 'View PDF'}</button>
-        <button class="small-btn" disabled={state.busy} onClick={() => onBuild('lyx')} title="Compile with the native LyX binary (reference)">via LyX</button>
+        <button class="small-btn" disabled={state.busy} onClick={() => onBuild()} title="Compile the document with latexmk in the background (Ctrl+R)">{state.busy ? 'Building…' : 'View PDF'}</button>
         {state.busy && <button class="small-btn" onClick={onCancel} title="Stop this build">Cancel</button>}
-        <button class="small-btn" onClick={onShowTex} title="Show generated LaTeX source">LaTeX</button>
+        <button class="small-btn" onClick={onShowTex} title="Show the LaTeX source as built">LaTeX</button>
         <button class="small-btn" onClick={() => setShowLog(!showLog)}>{showLog ? 'Hide log' : 'Log'}</button>
         {state.url && <a class="small-btn" href={`/api/docs/${encId(docId)}/pdf?download=1`} target="_blank">Download</a>}
         <span style={{ color: state.ok === false ? '#b00' : '#3a3', fontSize: '11px' }} title={state.builtAt ? 'built at ' + new Date(state.builtAt).toLocaleTimeString() : ''}>{state.ok === null ? '' : state.ok ? '✓ built' : '✗ errors'}</span>

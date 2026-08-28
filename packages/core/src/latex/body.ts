@@ -14,7 +14,7 @@ import {
   asctime, babelName, closeFont, effectiveFont, fontsEqualEff, latexChar, latexSpecialItem, openFont, polyglossiaName,
   type EffectiveFont,
 } from './text.ts';
-import { latexInset, isFontSwitchInset } from './insets.ts';
+import { latexInset, isFontSwitchInset, type InsetPosition } from './insets.ts';
 
 /** A text (list of paragraphs) being written, with its owning inset's layout. */
 export interface TextInfo {
@@ -613,6 +613,11 @@ export function markChange(ctx: ExportContext, os: TexStream, rp: RunParams, old
     if (oldChange.type === 'deleted') rp.inulemcmd = Math.max(0, rp.inulemcmd - 1);
   }
   if (!change) return;
+  if (ctx.texMode && !ctx.usedChanges) {
+    ctx.usedChanges = true;
+    if (ctx.bp.outputChanges) { ctx.features.require('ct-xcolor-ulem'); ctx.features.require('ulem'); ctx.features.require('xcolor'); ctx.features.require('pdfcolmk'); }
+    else ctx.features.require('ct-none');
+  }
   const macro = change.type === 'deleted' ? '\\lyxdeleted' : '\\lyxadded';
   if (change.type === 'deleted') rp.inulemcmd++;
   const author = ctx.bp.authors.get(change.author);
@@ -732,8 +737,10 @@ export function paragraphLatex(ctx: ExportContext, os: TexStream, rp: RunParams,
   let startCol = os.column;
   const parColumn = () => (os.column >= startCol ? os.column - startCol : os.column);
 
+  let skipSpace = false;
   for (let i = 0; i < units.length; i++) {
     const u = units[i];
+    if (skipSpace) { skipSpace = false; if (u.kind === 'char' && u.ch === ' ') continue; }
     if (i === bodyPos) {
       if (bodyPos > 0) {
         if (openFontFlag) { closeFont(os, rp, running, openCount); openFontFlag = false; openCount = 0; }
@@ -807,7 +814,9 @@ export function paragraphLatex(ctx: ExportContext, os: TexStream, rp: RunParams,
       case 'inset': {
         const innerRp: RunParams = { ...rp, outerLang: current.lang, passThru: passThru, freeSpacing: rp.freeSpacing || style.freeSpacing };
         const nlBefore = os.newlines;
-        latexInset(ctx, os, innerRp, u.inset, { par, index: i, units, isLast: i + 1 === units.length, parLang, itemFont: current, style });
+        const ipos: InsetPosition = { par, index: i, units, isLast: i + 1 === units.length, parLang, itemFont: current, style };
+        latexInset(ctx, os, innerRp, u.inset, ipos);
+        if (ipos.skipNextSpace) skipSpace = true;
         // LyX restarts its column count after insets that produced line breaks
         if (os.newlines !== nlBefore) startCol = os.column;
         rp.postMacro = innerRp.postMacro;

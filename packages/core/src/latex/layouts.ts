@@ -9,7 +9,7 @@
  * The grammar follows src/TextClass.cpp / src/Layout.cpp / src/insets/InsetLayout.cpp
  * closely enough for the export use case; unknown keys are kept in `props`.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 /* ------------------------------------------------------------------ types */
@@ -202,6 +202,8 @@ export interface DocumentClass {
   /** Names of layout/module files that were read (for diagnostics) */
   sources: string[];
   warnings: string[];
+  /** The global layout directory (Input fallback for project-local layout files) */
+  layoutDir: string;
 }
 
 /* ---------------------------------------------------------------- helpers */
@@ -671,11 +673,13 @@ function readLayoutFile(file: string, dc: DocumentClass, seen: Set<string>): voi
         const name = v.endsWith('.inc') || v.endsWith('.layout') || v.endsWith('.module') ? v : v + '.inc';
         let f = join(dir, name);
         if (!existsSync(f)) f = join(dc.sources[0] ? join(dc.sources[0], '..') : dir, name);
+        if (!existsSync(f)) f = join(dc.layoutDir, name);
         readLayoutFile(f, dc, seen);
         break;
       }
       case 'inputglobal': {
-        readLayoutFile(join(dir, v.endsWith('.layout') ? v : v + '.layout'), dc, seen);
+        const name = v.endsWith('.layout') ? v : v + '.layout';
+        readLayoutFile(existsSync(join(dc.layoutDir, name)) ? join(dc.layoutDir, name) : join(dir, name), dc, seen);
         break;
       }
       case 'style':
@@ -782,13 +786,19 @@ export const DEFAULT_LAYOUT_DIR = process.env.LYX_LAYOUT_DIR ?? '/root/lyx/lib/l
 
 /**
  * Load a document class (textclass + modules) from LyX layout files.
- * Results are cached per (layoutDir, textclass, modules).
+ * Results are cached per (layoutDir, localDirs, textclass, modules). `localDirs` (e.g. the
+ * project directory) are searched first for the class and module files, like LyX's user
+ * layout directory.
  */
-export function loadDocumentClass(textclass: string, modules: string[] = [], layoutDir?: string): DocumentClass {
+export function loadDocumentClass(textclass: string, modules: string[] = [], layoutDir?: string, localDirs: string[] = []): DocumentClass {
   const dir = layoutDir ?? DEFAULT_LAYOUT_DIR;
-  const key = `${dir}|${textclass}|${modules.join(',')}`;
+  const key = `${dir}|${localDirs.join(';')}|${textclass}|${modules.join(',')}`;
   const cached = cache.get(key);
   if (cached) return cached;
+  const find = (name: string): string | undefined => {
+    for (const d of [...localDirs, dir]) { const f = join(d, name); if (existsSync(f)) return f; }
+    return undefined;
+  };
 
   const dc: DocumentClass = {
     name: textclass, latexName: textclass, description: '', category: '', classPackages: [], options: '',
@@ -797,11 +807,11 @@ export function loadDocumentClass(textclass: string, modules: string[] = [], lay
     pageStyles: ['empty', 'plain', 'headings', 'fancy'], columns: 1, sides: 1, secNumDepth: 3, tocDepth: 3,
     defaultStyle: 'Standard', titleLatexName: 'maketitle', titleLatexType: 'CommandAfter', preamble: '',
     provides: new Set(), requires: [], packageOptions: new Map(), styles: new Map(), insetLayouts: new Map(),
-    floats: new Map(), counters: new Map(), defaultFont: {}, bibInToc: false, modules: [...modules], sources: [], warnings: [],
+    floats: new Map(), counters: new Map(), defaultFont: {}, bibInToc: false, modules: [...modules], sources: [], warnings: [], layoutDir: dir,
   };
   const seen = new Set<string>();
-  let classFile = join(dir, textclass + '.layout');
-  if (!existsSync(classFile)) {
+  let classFile = find(textclass + '.layout');
+  if (!classFile) {
     dc.warnings.push(`textclass '${textclass}' not found in ${dir}; falling back to article`);
     classFile = join(dir, 'article.layout');
     dc.latexName = textclass;
@@ -809,8 +819,8 @@ export function loadDocumentClass(textclass: string, modules: string[] = [], lay
   readLayoutFile(classFile, dc, seen);
   if (!dc.latexName) dc.latexName = textclass;
   for (const m of modules) {
-    const f = join(dir, m + '.module');
-    if (!existsSync(f)) { dc.warnings.push(`module '${m}' not found`); continue; }
+    const f = find(m + '.module');
+    if (!f) { dc.warnings.push(`module '${m}' not found`); continue; }
     readLayoutFile(f, dc, seen);
   }
   builtinLayouts(dc);
@@ -820,7 +830,46 @@ export function loadDocumentClass(textclass: string, modules: string[] = [], lay
 }
 
 /** Clear the document class cache (tests / layout dir changes). */
-export function clearLayoutCache(): void { cache.clear(); }
+export function clearLayoutCache(): void { cache.clear(); classIndexCache.clear(); }
+
+export interface LayoutFileInfo { textclass: string; latexClass: string; description: string; file: string; local: boolean }
+
+const classIndexCache = new Map<string, LayoutFileInfo[]>();
+
+/** All layout files of a directory with the LaTeX class they declare (\DeclareLaTeXClass). */
+export function indexLayoutDir(dir: string, local = false): LayoutFileInfo[] {
+  const key = `${dir}|${local}`;
+  const cached = classIndexCache.get(key);
+  if (cached) return cached;
+  const out: LayoutFileInfo[] = [];
+  let entries: string[] = [];
+  try { entries = readdirSync(dir); } catch { /* no such dir */ }
+  for (const name of entries) {
+    if (!name.endsWith('.layout')) continue;
+    const file = join(dir, name);
+    let head = '';
+    try { head = readFileSync(file, 'utf8').slice(0, 4000); } catch { continue; }
+    const m = /\\DeclareLaTeXClass(?:\[([^\]]*)\])?\{([^}]*)\}/.exec(head);
+    const textclass = basename(name, '.layout');
+    const latexClass = m?.[1] ? m[1].split(',')[0].trim() || textclass : textclass;
+    out.push({ textclass, latexClass, description: m?.[2] ?? '', file, local });
+  }
+  classIndexCache.set(key, out);
+  return out;
+}
+
+/**
+ * The LyX textclass (layout file) for a LaTeX document class: a layout of the same name first,
+ * then one declaring that class; project-local layout files win over the global ones.
+ */
+export function textclassForLatexClass(latexClass: string, layoutDir?: string, localDirs: string[] = []): string | undefined {
+  const dir = layoutDir ?? DEFAULT_LAYOUT_DIR;
+  const all = [...localDirs.flatMap(d => indexLayoutDir(d, true)), ...indexLayoutDir(dir)];
+  const same = all.find(l => l.textclass === latexClass);
+  if (same) return same.textclass;
+  const declared = all.find(l => l.latexClass === latexClass);
+  return declared?.textclass;
+}
 
 export interface LayoutDescription {
   name: string;

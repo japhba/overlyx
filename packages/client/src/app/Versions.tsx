@@ -39,7 +39,7 @@ export function Versions({ docId, refreshKey }: { docId: string; refreshKey: num
     load();
   };
   const showDiff = async (v: VersionInfo) => {
-    const [old, cur] = await Promise.all([api.getVersion(docId, v.id), api.lyxText(docId)]);
+    const [old, cur] = await Promise.all([api.getVersion(docId, v.id), api.texText(docId)]);
     const lines = diffLines(old.lyx, cur).filter((l, i, arr) => l.type !== 'same' || arr.slice(Math.max(0, i - 2), i + 3).some(x => x.type !== 'same'));
     setDiff({ name: v.name, lines });
   };

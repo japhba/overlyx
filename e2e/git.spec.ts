@@ -44,7 +44,7 @@ test('a new project is a repository; the dialog shows the clone URL and creates 
   await login(page);
   const r = await page.request.post(BASE_URL + '/api/projects', { data: { name: PROJECT } });
   expect(r.ok()).toBeTruthy();
-  await page.request.post(`${BASE_URL}/api/projects/${PROJECT}/new`, { data: { path: 'main.lyx', title: 'Git test' } });
+  await page.request.post(`${BASE_URL}/api/projects/${PROJECT}/new`, { data: { path: 'main.tex', title: 'Git test' } });
   await page.goto('/');
   await page.waitForSelector(`.home-card[data-project="${PROJECT}"]`, { timeout: 20000 });
   const dlg = await openGitDialog(page);
@@ -67,7 +67,7 @@ test('a new project is a repository; the dialog shows the clone URL and creates 
 test('clone with the token, push a change, pull what OverLyX committed', async ({ page }) => {
   const withAuth = cloneUrl.replace('://', `://admin:${encodeURIComponent(token)}@`);
   git(tmpdir(), 'clone', '-q', withAuth, CLONE);
-  expect(existsSync(join(CLONE, 'main.lyx'))).toBe(true);
+  expect(existsSync(join(CLONE, 'main.tex'))).toBe(true);
   expect(readFileSync(join(CLONE, '.gitignore'), 'utf8')).toContain('*.aux');
   // push a new file: it appears in the project (and the file browser)
   writeFileSync(join(CLONE, 'notes.tex'), '% pushed from the laptop\n');

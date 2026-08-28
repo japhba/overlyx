@@ -1,21 +1,20 @@
 /**
- * Export pipeline: LyX document -> LaTeX (OverLyX exporter) -> PDF via latexmk.
- * Alternative path: native LyX binary (lyx2lyx downgrade + `lyx -E pdf2`), used as a
- * reference/fallback.
+ * PDF builds: the document's .tex text (the file on disk is the LaTeX source) -> latexmk.
+ * The build directory gets a copy of the master and its child documents with graphics that
+ * pdflatex cannot include (svg, eps, ...) converted to PDF, plus links to the project's assets.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { Worker } from 'node:worker_threads';
-import { parseLyx, writeLyx, headerValue, type LyxDocument } from '@overlyx/core';
+import { headerValue } from '@overlyx/core';
 import { config } from './config.ts';
 import { db } from './db.ts';
 import { manager, DocManager } from './docs.ts';
-import { projectDir, resolveProjectPath, findMaster } from './projects.ts';
+import { projectDir, resolveProjectPath, findMaster, childDocuments } from './projects.ts';
 import { toPdf, cacheDir } from './graphics.ts';
 import { sandboxed, type SandboxSpec } from './sandbox.ts';
-import type { ExportRequest, ExportResponse } from './exportworker.ts';
+import { readTextFile } from './texdoc.ts';
 
 export interface BuildResult { ok: boolean; log: string; pdfPath?: string; texPath?: string; warnings: string[]; tex?: string }
 
@@ -23,13 +22,13 @@ export interface BuildResult { ok: boolean; log: string; pdfPath?: string; texPa
  * PDF builds are background jobs: a request enqueues one and returns at once; clients poll
  * `buildStatus`. At most `config.maxBuilds` compile at a time (latexmk runs `nice`d so the editor
  * stays responsive), one per document — a request while a build runs marks it for a re-run with
- * the latest content. The LaTeX export itself runs in a worker thread (exportworker.ts). */
+ * the latest content. */
 
 export type JobStatus = 'queued' | 'exporting' | 'compiling' | 'ok' | 'error' | 'cancelled';
 export interface BuildJob {
   id: number;
   docId: string;
-  engine: 'overlyx' | 'lyx';
+  engine: 'overlyx';
   status: JobStatus;
   requestedBy: string;
   startedAt: number;
@@ -54,13 +53,13 @@ export function publicJob(j: BuildJob): PublicJob {
 }
 
 /** Enqueue a build (or attach to the running one) and return its job. */
-export function requestBuild(docId: string, engine: 'overlyx' | 'lyx', requestedBy: string): BuildJob {
+export function requestBuild(docId: string, _engine: string, requestedBy: string): BuildJob {
   const cur = jobs.get(docId);
   if (cur && (cur.status === 'queued' || cur.status === 'exporting' || cur.status === 'compiling')) {
     if (cur.status !== 'queued') cur.rerun = true;   // the content may have changed: build once more afterwards
     return cur;
   }
-  const job: BuildJob = { id: nextJobId++, docId, engine, status: 'queued', requestedBy, startedAt: Date.now(), phaseAt: Date.now(), progress: '', rerun: false, waiters: [] };
+  const job: BuildJob = { id: nextJobId++, docId, engine: 'overlyx', status: 'queued', requestedBy, startedAt: Date.now(), phaseAt: Date.now(), progress: '', rerun: false, waiters: [] };
   jobs.set(docId, job);
   queue.push(job);
   pump();
@@ -79,8 +78,8 @@ export function cancelBuild(docId: string): boolean {
 }
 
 /** Wait for a document's build to finish (used by the synchronous API variant). */
-export function buildPdf(docId: string, opts: { engine?: 'overlyx' | 'lyx'; requestedBy?: string } = {}): Promise<BuildResult> {
-  const job = requestBuild(docId, opts.engine === 'lyx' ? 'lyx' : 'overlyx', opts.requestedBy ?? 'api');
+export function buildPdf(docId: string, opts: { engine?: string; requestedBy?: string } = {}): Promise<BuildResult> {
+  const job = requestBuild(docId, 'overlyx', opts.requestedBy ?? 'api');
   if (job.result && (job.status === 'ok' || job.status === 'error' || job.status === 'cancelled')) return Promise.resolve(job.result);
   return new Promise(res => job.waiters.push(res));
 }
@@ -109,12 +108,12 @@ function finish(job: BuildJob, r: BuildResult, status: JobStatus): void {
 async function runJob(job: BuildJob): Promise<void> {
   const t0 = Date.now();
   try {
-    const r = job.engine === 'lyx' ? await buildViaLyx(job) : await buildViaOverlyx(job);
+    const r = await buildViaLatexmk(job);
     finish(job, r, isCancelled(job) ? 'cancelled' : r.ok ? 'ok' : 'error');
   } catch (e) {
     finish(job, { ok: false, log: 'build failed: ' + String(e), warnings: [] }, 'error');
   }
-  console.log(`[build] ${job.docId} (${job.engine}) ${job.status} in ${Math.round((Date.now() - t0) / 1000)} s`);
+  console.log(`[build] ${job.docId} ${job.status} in ${Math.round((Date.now() - t0) / 1000)} s`);
 }
 
 /** Forget the build products and versions of a project's documents (the project was deleted). */
@@ -174,69 +173,77 @@ function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* gone */ } }
 }
 
-/* ------------------------------------------------------------------ export worker */
+/* ------------------------------------------------------------------ export */
 
-let worker: Worker | null = null;
-let nextExportId = 1;
-const pendingExports = new Map<number, { resolve: (r: ExportResponse) => void; reject: (e: Error) => void }>();
+const PDFLATEX_FORMATS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'mps']);
 
-function exportWorker(): Worker {
-  if (worker) return worker;
-  const w = new Worker(new URL('./exportworker.ts', import.meta.url));
-  w.on('message', (r: ExportResponse) => { const p = pendingExports.get(r.id); if (p) { pendingExports.delete(r.id); p.resolve(r); } });
-  const fail = (e: unknown) => {
-    console.error('[export] worker failed:', e);
-    if (worker === w) worker = null;
-    for (const [id, p] of pendingExports) { pendingExports.delete(id); p.reject(new Error('export worker failed: ' + String(e))); }
-  };
-  w.on('error', fail);
-  w.on('exit', (code) => { if (code !== 0) fail('exit ' + code); else if (worker === w) worker = null; });
-  worker = w;
-  return w;
-}
-
-function exportInWorker(req: Omit<ExportRequest, 'id'>): Promise<ExportResponse> {
-  const id = nextExportId++;
-  return new Promise((resolve, reject) => {
-    pendingExports.set(id, { resolve, reject });
-    try { exportWorker().postMessage({ id, ...req } satisfies ExportRequest); } catch (e) { pendingExports.delete(id); reject(e as Error); }
-  });
-}
-
-/** Export the document to LaTeX (+ children, graphics) into the build dir. */
-export async function exportTex(docId: string): Promise<{ dir: string; main: string; warnings: string[]; tex: string }> {
-  const doc = await manager.open(docId);
-  const lyx = doc.toLyxDocument();
-  const dir = buildDir(docId);
-  const docDir = path.dirname(doc.absPath);
-  const base = path.basename(doc.relPath, '.lyx');
-  // live content of the project's open documents (child documents being edited)
-  const openDocs: Record<string, LyxDocument> = {};
-  for (const d of manager.docs.values()) if (d.project === doc.project && d.id !== docId) openDocs[d.relPath] = d.toLyxDocument();
-  const t0 = Date.now();
-  const r = await exportInWorker({ lyx, docDir, projectDir: projectDir(doc.project), basename: base, layoutDir: config.layoutDir, openDocs });
-  if (!r.ok) throw new Error(r.error ?? 'export failed');
-  console.log(`[export] ${docId}: LaTeX export ${Date.now() - t0} ms (worker)`);
-  const res = { tex: r.tex!, files: r.files ?? {}, graphics: r.graphics ?? [], warnings: r.warnings ?? [] };
-  linkDocumentAssets(docDir, dir);
-  const main = path.join(dir, base + '.tex');
-  fs.writeFileSync(main, res.tex, 'utf8');
-  for (const [name, content] of Object.entries(res.files)) {
-    const p = path.join(dir, name);
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, content, 'utf8');
-  }
-  for (const g of res.graphics) {
+/**
+ * Rewrite \includegraphics references to formats pdflatex cannot include (svg, eps, tif, ...)
+ * to PDF copies converted into the build directory (same relative path, .pdf extension).
+ */
+async function rewriteGraphics(text: string, texDir: string, buildTexDir: string, warnings: string[]): Promise<string> {
+  const re = /\\includegraphics\s*(\*?)\s*(\[[^\]]*\])?\s*\{([^}]*)\}/g;
+  const jobs: { m: string; name: string }[] = [];
+  for (const m of text.matchAll(re)) jobs.push({ m: m[0], name: m[3].trim() });
+  let out = text;
+  const done = new Map<string, string>();
+  for (const j of jobs) {
+    if (done.has(j.name)) continue;
+    const norm = j.name.replace(/\\/g, '/');
+    const ext = norm.includes('.') ? norm.slice(norm.lastIndexOf('.') + 1).toLowerCase() : '';
+    if (!ext || PDFLATEX_FORMATS.has(ext)) { done.set(j.name, j.name); continue; }
+    const src = path.resolve(texDir, norm);
+    const dest = path.join(buildTexDir, norm.slice(0, norm.lastIndexOf('.')) + '.pdf');
+    const newName = norm.slice(0, norm.lastIndexOf('.')) + '.pdf';
     try {
-      const src = path.resolve(docDir, g.src);
-      const dest = path.join(dir, g.dest);
+      if (!fs.existsSync(src)) { warnings.push(`graphics file not found: ${j.name}`); done.set(j.name, j.name); continue; }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
+      try { if (fs.lstatSync(dest).isSymbolicLink()) fs.unlinkSync(dest); } catch { /* not there */ }
       if (!fs.existsSync(dest) || fs.statSync(dest).mtimeMs < fs.statSync(src).mtimeMs) await toPdf(src, dest);
+      done.set(j.name, newName);
     } catch (e) {
-      res.warnings.push(`graphics conversion failed for ${g.src}: ${String(e)}`);
+      warnings.push(`graphics conversion failed for ${j.name}: ${String(e)}`);
+      done.set(j.name, j.name);
     }
   }
-  return { dir, main, warnings: res.warnings, tex: res.tex };
+  for (const [name, newName] of done) {
+    if (name === newName) continue;
+    out = out.split('{' + name + '}').join('{' + newName + '}');
+  }
+  return out;
+}
+
+/** Live text of a project document: the open document's state, else the file. */
+function documentText(project: string, rel: string): string {
+  const open = manager.docs.get(`${project}/${rel}`);
+  if (open) return open.fileText ?? open.toText();
+  return readTextFile(resolveProjectPath(project, rel));
+}
+
+/** Put the document and its children into the build dir (graphics converted) and return the main file. */
+export async function exportTex(docId: string): Promise<{ dir: string; main: string; warnings: string[]; tex: string }> {
+  const doc = await manager.open(docId);
+  await manager.saveProject(doc.project);   // the files on disk match what is being built
+  const dir = buildDir(docId);
+  const docDir = path.dirname(doc.absPath);
+  const warnings: string[] = [];
+  linkDocumentAssets(docDir, dir);
+  const files = [doc.relPath, ...childDocuments(doc.project, doc.relPath)];
+  const proj = projectDir(doc.project);
+  let mainText = '';
+  for (const rel of files) {
+    let text: string;
+    try { text = documentText(doc.project, rel); } catch { continue; }
+    const relToDoc = path.relative(docDir, path.join(proj, rel));
+    if (relToDoc.startsWith('..')) continue;   // outside the document's directory: found through TEXINPUTS
+    const target = path.join(dir, relToDoc);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    try { if (fs.lstatSync(target).isSymbolicLink()) fs.unlinkSync(target); } catch { /* not there */ }
+    const rewritten = await rewriteGraphics(text, path.dirname(path.join(proj, rel)), path.dirname(target), warnings);
+    fs.writeFileSync(target, rewritten, 'utf8');
+    if (rel === doc.relPath) mainText = rewritten;
+  }
+  return { dir, main: path.join(dir, path.basename(doc.relPath)), warnings, tex: mainText };
 }
 
 /**
@@ -265,10 +272,11 @@ export function linkDocumentAssets(docDir: string, buildDirPath: string): void {
         continue;
       }
       // in sub-directories every file may be needed (\input{sub/file}); at the top level only graphics
-      // (other files are found through TEXINPUTS, and the exporter writes the .tex files itself)
+      // (other files are found through TEXINPUTS, and the documents are written by exportTex)
       if (depth === 0 && !LINK_EXT.has(path.extname(e.name).toLowerCase())) continue;
-      // a PDF next to a document of the same name is that document's output (LyX's, or an earlier
-      // build), not a figure: linking it would make the build write into the user's project
+      if (e.name.endsWith('.tex')) continue;
+      // a PDF next to a document of the same name is that document's output (an earlier build),
+      // not a figure: linking it would make the build write into the user's project
       if (/\.pdf$/i.test(e.name) && ['.lyx', '.tex'].some(x => fs.existsSync(path.join(srcDir, e.name.replace(/\.pdf$/i, x))))) continue;
       try {
         const st = fs.lstatSync(dest);
@@ -293,15 +301,14 @@ export function texInputs(docDir: string, buildDirPath: string): NodeJS.ProcessE
   return { TEXINPUTS: inputs, BIBINPUTS: inputs, BSTINPUTS: inputs, openout_any: 'p', max_print_line: '1000' };
 }
 
-async function buildViaOverlyx(job: BuildJob): Promise<BuildResult> {
+async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   const requestedId = job.docId;
-  // a child document is built through its master (LyX: master-buffer-view); the child's live
-  // content is used because open documents are resolved from the CRDT state
+  // a child document is built through its master; the child's live content is used because open
+  // documents are written to disk first
   const { project, relPath } = DocManager.parseId(requestedId);
   const masterRel = findMaster(project, relPath);
   const docId = masterRel ? `${project}/${masterRel}` : requestedId;
   const doc = await manager.open(docId);
-  if (doc.dirty) await doc.saveToFile();   // the file on disk matches what is being built
   const docDir = path.dirname(doc.absPath);
   setPhase(job, 'exporting');
   job.cancel = () => { /* the export cannot be interrupted; its result is discarded (see isCancelled below) */ };
@@ -368,79 +375,6 @@ async function buildViaOverlyx(job: BuildJob): Promise<BuildResult> {
   return res;
 }
 
-/**
- * Downgrade a LyX 2.5 (format 643) file header so that LyX 2.4 (format 620) can read it.
- * Only header keys differ between the formats for ordinary documents; the body is kept.
- */
-export function downgradeTo620(text: string): string {
-  const drop = ['\\table_border_color', '\\table_odd_row_color', '\\table_even_row_color', '\\table_alt_row_colors_start', '\\crossref_package', '\\use_formatted_ref', '\\nomencl_options', '\\docbook_', '\\use_minted', '\\use_lineno', '\\lineno_options'];
-  const cmap: Record<string, string> = { '\\backgroundcolor': '#ffffff', '\\fontcolor': '#000000', '\\notefontcolor': '#cccccc', '\\boxbgcolor': '#ff0000' };
-  const out: string[] = [];
-  let inHeader = false;
-  for (const l of text.split('\n')) {
-    if (l.startsWith('\\lyxformat')) { out.push('\\lyxformat 620'); continue; }
-    if (l === '\\begin_header') inHeader = true;
-    if (l === '\\end_header') inHeader = false;
-    if (inHeader) {
-      if (drop.some(d => l.startsWith(d))) {
-        if (l.startsWith('\\crossref_package')) out.push('\\use_refstyle ' + (l.includes('prettyref') ? '0' : '1'));
-        continue;
-      }
-      const k = l.split(' ')[0];
-      if (k in cmap && !l.split(' ').pop()!.startsWith('#')) { out.push(k + ' ' + cmap[k]); continue; }
-      if (l.startsWith('\\justification default')) { out.push('\\justification true'); continue; }
-    }
-    if (l.startsWith('tuple "')) continue;
-    out.push(l);
-  }
-  return out.join('\n');
-}
-
-/** Native LyX build: mirror the project into the build dir with downgraded copies. */
-async function buildViaLyx(job: BuildJob): Promise<BuildResult> {
-  const docId = job.docId;
-  const doc = await manager.open(docId);
-  await manager.saveProject(doc.project);
-  setPhase(job, 'exporting');
-  const projDir = projectDir(doc.project);
-  const dir = path.join(buildDir(docId), 'lyx');
-  fs.mkdirSync(dir, { recursive: true });
-  let log = '';
-  // mirror files
-  const walk = async (src: string, dst: string) => {
-    fs.mkdirSync(dst, { recursive: true });
-    for (const e of fs.readdirSync(src, { withFileTypes: true })) {
-      if (e.name.startsWith('.')) continue;
-      const s = path.join(src, e.name), d = path.join(dst, e.name);
-      if (e.isDirectory()) { await walk(s, d); continue; }
-      if (e.name.endsWith('.lyx')) {
-        const text = fs.readFileSync(s, 'utf8');
-        const parsed = parseLyx(text);
-        if (parsed.format > 620) {
-          // try lyx2lyx first (works when a matching LyX version is installed), else a header downgrade
-          const r = await run('python3', [config.lyx2lyx, '-t', '620', '-o', d, s], { cwd: dir, timeoutMs: 120000 }).done;
-          if (r.code !== 0 || !fs.existsSync(d)) { log += `lyx2lyx unavailable for ${e.name} (using header downgrade)\n`; fs.writeFileSync(d, downgradeTo620(writeLyx(parsed))); }
-        } else fs.copyFileSync(s, d);
-      } else {
-        try { fs.copyFileSync(s, d); } catch { /* ignore */ }
-      }
-    }
-  };
-  await walk(projDir, dir);
-  const target = path.join(dir, doc.relPath);
-  const pdf = target.replace(/\.lyx$/, '.pdf');
-  setPhase(job, 'compiling');
-  const proc = run(config.lyxBin, ['-batch', '-E', 'pdf2', pdf, target], { cwd: path.dirname(target), env: { QT_QPA_PLATFORM: 'offscreen' }, timeoutMs: 400000, nice: true, sandbox: { rw: [dir], ro: [cacheDir] }, onLine: (l) => { job.progress = l.slice(0, 200); } });
-  job.cancel = () => { job.status = 'cancelled'; proc.kill(); };
-  const r = await proc.done;
-  job.cancel = undefined;
-  log += r.out;
-  const ok = !isCancelled(job) && fs.existsSync(pdf);
-  const res: BuildResult = { ok, log, pdfPath: ok ? pdf : undefined, warnings: [] };
-  record(docId, res);
-  return res;
-}
-
 function record(docId: string, r: BuildResult): void {
   db.prepare('INSERT INTO builds (doc_id, status, log, pdf_path, tex_path, updated_at, warnings) VALUES (?,?,?,?,?,?,?) ON CONFLICT(doc_id) DO UPDATE SET status=excluded.status, log=excluded.log, pdf_path=excluded.pdf_path, tex_path=excluded.tex_path, updated_at=excluded.updated_at, warnings=excluded.warnings')
     .run(docId, r.ok ? 'ok' : 'error', r.log.slice(-200000), r.pdfPath ?? null, r.texPath ?? null, Date.now(), JSON.stringify(r.warnings ?? []));
@@ -455,7 +389,6 @@ export function lastBuild(docId: string): BuildRow | undefined {
   return { ...row, warnings };
 }
 
-/** Pull "! error" blocks and file:line:error lines out of a LaTeX log. */
 /** Errors of a -file-line-error log: { file, line, message }. */
 export function errorLocations(log: string): { file: string; line: number; message: string }[] {
   const out: { file: string; line: number; message: string }[] = [];
@@ -467,6 +400,7 @@ export function errorLocations(log: string): { file: string; line: number; messa
   return out;
 }
 
+/** Pull "! error" blocks and file:line:error lines out of a LaTeX log. */
 export function extractErrors(log: string): string {
   const lines = log.split('\n');
   const out: string[] = [];

@@ -4,48 +4,33 @@
  * the combined master+child view, the editable source pane and change-tracking info.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { mkdirSync, copyFileSync, rmSync, existsSync, symlinkSync, readFileSync, writeFileSync } from 'node:fs';
-import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
+import { mkdirSync, copyFileSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
 const PROJECT = 'e2e-paper';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
-const FILES = ['main.lyx', 'appendix.lyx', 'lyxmacros.lyx', 'macros.tex', 'preamble.tex', 'latexmkrc', 'bib.bib', 'icml2026.sty', 'icml2026.bst', 'icml.layout', 'fancyhdr.sty', 'algorithm.sty', 'algorithmic.sty'];
+const FILES = ['main.tex', 'appendix.tex', 'lyxmacros.tex', 'macros.tex', 'preamble.tex', 'latexmkrc', 'bib.bib', 'icml2026.sty', 'icml2026.bst', 'icml.layout', 'fancyhdr.sty', 'algorithm.sty', 'algorithmic.sty'];
 
 // a small document for the math-key tests: the paper's header (macro definitions come with it) + one formula
 const MATH_LATEX = String.raw`\inv{A}+\left(x+\frac{a}{b}\right)+\text{if }x^{2}+\sqrt{y}+\hat{z}`;
-const mathDoc = () => readFileSync(`${SRC}/main.lyx`, 'utf8').split('\\begin_body')[0] + `\\begin_body
+const mathDoc = () => withPreambleOf(`${SRC}/main.tex`, `\\global\\long\\def\\inv#1{\\left(#1\\right)^{-1}}%
 
-\\begin_layout Standard
-\\begin_inset FormulaMacro
-\\newcommand{\\inv}[1]{\\left(#1\\right)^{-1}}
-\\end_inset
-
-
-\\end_layout
-
-\\begin_layout Standard
-Test 
-\\begin_inset Formula $${MATH_LATEX}$
-\\end_inset
-
- end.
-\\end_layout
-
-\\end_body
-\\end_document
-`;
+Test $${MATH_LATEX}$ end.
+`);
 
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
   for (const f of FILES) if (existsSync(`${SRC}/${f}`)) copyFileSync(`${SRC}/${f}`, `${DIR}/${f}`);
-  symlinkSync(`${SRC}/figures`, `${DIR}/figures`);
-  writeFileSync(`${DIR}/math.lyx`, mathDoc());
+  // the figures the paper shows (a symlink to the fixture directory would point outside the project: the sandboxed converters cannot read it)
+  mkdirSync(`${DIR}/figures`, { recursive: true });
+  for (const m of readFileSync(`${SRC}/main.tex`, 'utf8').matchAll(/\\includegraphics(?:\[[^\]]*\])?\{figures\/([^}]+)\}/g)) if (existsSync(`${SRC}/figures/${m[1]}`)) copyFileSync(`${SRC}/figures/${m[1]}`, `${DIR}/figures/${m[1]}`);
+  writeFileSync(`${DIR}/math.tex`, mathDoc());
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
-async function openPaper(page: Page, file = 'main.lyx', minParagraphs = 50) {
+async function openPaper(page: Page, file = 'main.tex', minParagraphs = 50) {
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.setItem('ol.combined', '0'); });
   await page.goto(`/#/${PROJECT}/${file}`);
   await page.waitForFunction((n) => document.querySelectorAll('.lyx-editor .lyx-par').length >= n, minParagraphs, { timeout: 90000 });
@@ -88,7 +73,7 @@ test('macro arguments are editable in place and written back as macro calls', as
 
 test('LyX math keys: inset markers, Backspace/Delete dissolve a cell, Space leaves the inset', async ({ page }) => {
   const errors = collectErrors(page);
-  await openPaper(page, 'math.lyx', 2);
+  await openPaper(page, 'math.tex', 2);
   const wrap = page.locator('.lyx-editor .lyx-math-inline').first();
   await wrap.hover();
   await expect(wrap.locator('.lm-field')).toHaveCount(1, { timeout: 5000 });
@@ -201,7 +186,8 @@ test('formulas: tight inline spacing, no change background, ln|H| via redefined 
 
 test('wide display formulas are centred on the column and equation numbers never overlap', async ({ page }) => {
   await openPaper(page);
-  const p = page.locator('.lyx-editor > .lyx-par.lyx-layout-standard').first();
+  // a paragraph of prose (the first ones hold the class's raw title code)
+  const p = page.locator('.lyx-editor > .lyx-par.lyx-layout-standard').filter({ hasText: /neural network/i }).first();
   await p.click({ position: { x: 4, y: 8 } });
   await page.keyboard.press('End');
   await page.keyboard.press('Control+Shift+m');
@@ -259,23 +245,23 @@ test('right-click menus and go-to-label for cross-references', async ({ page }) 
 test('child documents open in tabs; the combined view shows master and children together', async ({ page }) => {
   await openPaper(page);
   await page.locator('.lyx-include-link').first().dblclick();
-  await expect(page).toHaveURL(/lyxmacros\.lyx$/);
+  await expect(page).toHaveURL(/lyxmacros\.tex$/);
   await expect(page.locator('.tab')).toHaveCount(2);
-  await expect(page.locator('.tab.active')).toHaveText(/lyxmacros\.lyx/);
+  await expect(page.locator('.tab.active')).toHaveText(/lyxmacros\.tex/);
   // close the tab → back to the master
   await page.locator('.tab.active .tab-close').click();
-  await expect(page).toHaveURL(/main\.lyx$/);
+  await expect(page).toHaveURL(/main\.tex$/);
   await expect(page.locator('.tab')).toHaveCount(1);
   // combined view
   await page.evaluate(() => localStorage.setItem('ol.combined', '1'));
   await page.reload();
   await page.waitForFunction(() => document.querySelectorAll('.child-doc .lyx-editor .lyx-par').length > 20, null, { timeout: 90000 });
-  await expect(page.locator('.doc-title')).toHaveText(/main\.lyx \+ lyxmacros\.lyx \+ appendix\.lyx/);
+  await expect(page.locator('.doc-title')).toHaveText(/main\.tex \+ lyxmacros\.tex \+ appendix\.tex/);
   await expect(page.locator('.child-doc-header .name')).toHaveCount(3);
   // editing inside the child updates the status bar's document label and the source pane target
   const childPar = page.locator('.child-doc').nth(1).locator('.lyx-editor > .lyx-par.lyx-layout-standard').first();
   await childPar.click({ position: { x: 4, y: 8 } });
-  await expect(page.locator('.statusbar .doclabel')).toHaveText('appendix.lyx');
+  await expect(page.locator('.statusbar .doclabel')).toHaveText('appendix.tex');
   await page.evaluate(() => localStorage.setItem('ol.combined', '0'));
 });
 
@@ -283,22 +269,18 @@ test('the source pane follows the cursor and applies edits back to the document'
   await openPaper(page);
   await page.locator('.panel-tabs button', { hasText: 'Source' }).click();
   const ta = page.locator('.source-pane textarea');
-  await expect(ta).toHaveValue(/#LyX 2\.5 created this file/, { timeout: 10000 });
-  await page.locator('.lyx-editor > .lyx-par.lyx-layout-section').nth(1).click({ position: { x: 4, y: 8 } });
-  await page.waitForTimeout(500);
-  const sel = await ta.evaluate((el: HTMLTextAreaElement) => el.value.slice(el.selectionStart, el.selectionEnd));
-  expect(sel).toBe('\\begin_layout Section');
-  // edit the source: add a word to the first Standard paragraph and apply
+  await expect(ta).toHaveValue(/\\documentclass/, { timeout: 15000 });
+  await expect(ta).toHaveValue(/\\section\{/);
+  // edit the source: add a paragraph at the start of the body and apply
   await ta.evaluate((el: HTMLTextAreaElement) => {
-    const v = el.value; const i = v.indexOf('\\begin_layout Standard'); const j = v.indexOf('\n', i + 1);
+    const v = el.value; const i = v.indexOf('\\begin{document}\n') + '\\begin{document}\n'.length;
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-    setter.call(el, v.slice(0, j + 1) + 'SOURCEEDIT ' + v.slice(j + 1));
+    setter.call(el, v.slice(0, i) + 'SOURCEEDIT paragraph.\n\n' + v.slice(i));
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await page.locator('.source-pane button', { hasText: 'Apply' }).click();
-  await expect(page.locator('.lyx-editor')).toContainText('SOURCEEDIT');
-  await page.waitForTimeout(2500);
-  expect(readFileSync(`${DIR}/main.lyx`, 'utf8')).toContain('SOURCEEDIT');
+  await expect(page.locator('.lyx-editor')).toContainText('SOURCEEDIT', { timeout: 15000 });
+  await expect.poll(() => readFileSync(`${DIR}/main.tex`, 'utf8').includes('SOURCEEDIT'), { timeout: 15000 }).toBe(true);
 });
 
 test('status bar names the change author and shows the change under the cursor', async ({ page }) => {

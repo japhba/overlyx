@@ -1,11 +1,19 @@
 # OverLyX
 
-A web-based, LyX-compatible, collaborative WYSIWYG editor for LaTeX documents — an
-Overleaf/LyX blend.
+A web-based, LyX-like, collaborative WYSIWYG editor for LaTeX documents — an Overleaf/LyX
+blend.
 
-* **Native `.lyx` files are the source of truth.** Documents are parsed and written back
-  byte-for-byte compatible with LyX 2.4/2.5 (`\lyxformat` ≥ 620): you can keep using desktop
-  LyX on the same files; external saves are picked up live.
+* **Plain `.tex` files are the source of truth.** A document is an ordinary LaTeX file that any
+  editor, Overleaf or `latexmk` understands; OverLyX reads it into a LyX-style document model
+  (paragraph layouts, insets, formulas) driven by LyX's own layout files, renders it as you type
+  and writes it back — a file that was written by OverLyX is reproduced byte for byte until
+  somebody edits it. Whatever the model has no place for (unknown commands, environments,
+  `\verb`, TikZ, …) is kept verbatim as raw LaTeX and stays editable. Change tracking lives in the
+  file as LyX's `\lyxadded{author}{time}{…}` / `\lyxdeleted{…}` macros (defined in a managed
+  block of the preamble, shown or hidden in the PDF by a setting), notes and comment threads as
+  `%% @note` / `%% @comment` comment blocks that every other LaTeX tool ignores. See *The .tex
+  format* below. Existing `.lyx` documents are imported once (file browser ▸ click the file, or
+  `scripts/import-lyx.ts`); the `.lyx` file is kept but no longer used.
 * **WYSIWYG without compiling.** Text, insets, floats, tables and math render as you type.
   Formulas (inline and display, `equation`/`align`/`gather`/`multline`/…) are edited in place
   with KaTeX; document macros (`FormulaMacro` insets, preamble `\newcommand`/`\def`,
@@ -13,33 +21,32 @@ Overleaf/LyX blend.
 * **Multi-user editing** (Yjs CRDT, per-user undo, live cursors) with automatic and named
   **versions** (diff & restore).
 * **Autosave and offline editing** (Google-Docs style): there is no Save button — every edit goes
-  to the server over the WebSocket and is written to the `.lyx` file 1.5 s after the last change
+  to the server over the WebSocket and is written to the `.tex` file 1.5 s after the last change
   (the status bar shows *Saving…* / *All changes saved*, confirmed by the server). Every opened
   document is mirrored in the browser (IndexedDB), so it opens instantly the next time and can be
   read and edited without a connection; a service worker keeps the app itself available offline.
   Offline edits sync automatically when the connection is back and merge with what others did in
-  the meantime (CRDT), and an external save from desktop LyX only replaces the paragraphs that
-  actually changed. See *Offline mode* below.
-* **Notes and comments**: LyX notes (Note / Comment / Greyed out) render like LyX; OverLyX
-  comment threads (author, time, replies, resolve) are stored as ordinary `Note Comment` insets so
-  LyX users see them too. *View ▸ Notes & comments in the margin* moves them into a right-hand
-  column (Google-Docs style).
-* **Export**: LaTeX (a port of LyX's `output_latex` driven by LyX's own layout files) and PDF via
-  `latexmk`; a native-LyX build as reference; embedded graphics (SVG/PDF/EPS/…) are rendered to
-  PNG for the editor and downloadable as PNG. PDF builds only start on request (Ctrl+R, the
-  toolbar or the PDF panel) and run as **background jobs**: the LaTeX export runs in a worker
-  thread, `latexmk` runs `nice`d with at most `OVERLYX_MAX_BUILDS` (2) in parallel (XeTeX or LuaTeX
-  when the document uses non-TeX fonts or asks for them via its default output format), the PDF panel
-  shows the phase / elapsed time / last log line and has a *Cancel* button, and a build keeps
-  running if you switch documents or tabs (the panel picks it up again). A request while a build
-  is running re-builds once more afterwards with the latest content.
+  the meantime (CRDT), and an external change of the file (git, another editor) only replaces the
+  paragraphs that actually changed. See *Offline mode* below.
+* **Notes and comments**: LyX-style notes (Note / Comment / Greyed out) and OverLyX comment
+  threads (author, time, replies, resolve) are kept in the `.tex` file as `%%` comment blocks.
+  *View ▸ Notes & comments in the margin* moves them into a right-hand column (Google-Docs style).
+* **PDF** via `latexmk` on the document's own `.tex` file (plus the child documents it inputs);
+  embedded graphics (SVG/PDF/EPS/…) are rendered to PNG for the editor and downloadable as PNG,
+  and formats pdflatex cannot include are converted to PDF for the build. PDF builds only start on
+  request (Ctrl+R, the toolbar or the PDF panel) and run as **background jobs**: `latexmk` runs
+  `nice`d with at most `OVERLYX_MAX_BUILDS` (2) in parallel (XeTeX or LuaTeX when the document uses
+  non-TeX fonts or asks for them via its default output format), the PDF panel shows the phase /
+  elapsed time / last log line and has a *Cancel* button, and a build keeps running if you switch
+  documents or tabs (the panel picks it up again). A request while a build is running re-builds
+  once more afterwards with the latest content.
 * **Copy & paste** keeps every inset: a paragraph copied and pasted elsewhere (or into another
   OverLyX tab) still has its citations, cross-references, labels, formulas, tables and figures; the
   plain-text form of the clipboard is LaTeX-ish (`$…$`, `\ref{…}`, `\citep{…}`), so pasting into a
   `.tex` file or a chat gives something useful; HTML from a web page or another editor pastes as
   LyX content (headings, bold/italic/typewriter, lists, tables).
-* **Safe with the file on disk.** The `.lyx` file is written atomically (temporary file + rename,
-  fsync'ed). If somebody else wrote the file meanwhile (desktop LyX, git, another editor), that
+* **Safe with the file on disk.** The `.tex` file is written atomically (temporary file + rename,
+  fsync'ed). If somebody else wrote the file meanwhile (git, another editor, Overleaf), that
   change is merged *three-way* at paragraph level before we write: only the paragraphs they changed
   are taken over, edits made here in other paragraphs are kept (the disk wins where both changed
   the same paragraph). A document whose file was deleted is closed and its content kept as a
@@ -101,7 +108,7 @@ Overleaf/LyX blend.
 * **Text editor** for the other files of a project (`.tex`, `.bib`, `.sty`, `.cls`, `.bst`, `.md`,
   `.txt`, `latexmkrc`, …): they open in a tab like documents, with line numbers, autosave 1.5 s
   after the last change (or `Ctrl+S`), and a conflict check — if the file changed on the server
-  meanwhile (someone else, desktop LyX, git) the save is refused and you choose between the server's
+  meanwhile (someone else, git) the save is refused and you choose between the server's
   version and yours. Viewers get it read-only. `+ File` in the file browser creates one.
 * **Ruler**: a Google-Docs-style ruler above the page (*View ▸ Ruler*) with draggable margin
   handles sets the text width (also *View ▸ Text width*, `Ctrl+Alt+±`); double-click resets it.
@@ -173,14 +180,17 @@ Overleaf/LyX blend.
 ## Layout
 
 ```
-packages/core     LyX AST + parser/writer (lossless), ProseMirror schema, AST⇄PM conversion,
-                  macro/bib/comment helpers, LaTeX exporter (latex/) with a LyX layout-file parser
+packages/core     document model (lyx/ast.ts, LyX-shaped), .tex parser/writer/importer (tex/),
+                  LaTeX writer (latex/, a port of LyX's output_latex driven by LyX layout files),
+                  ProseMirror schema, AST⇄PM conversion, macro/bib/comment helpers, LyX file
+                  parser/writer (import only)
 packages/server   Express + WebSocket (Yjs sync/awareness), SQLite persistence, auth (scrypt,
-                  JWT cookie, optional Google OAuth), .lyx file sync & watcher, versions, export
+                  JWT cookie, optional Google OAuth), .tex file sync & watcher, versions, builds
 packages/client   Vite + Preact UI, ProseMirror editor, LyX math editor (editor/lyxmath, KaTeX), LyX keymap,
                   numbering/margin/change-tracking/find plugins
-tests/            vitest: byte-exact round trips over 400+ LyX files, PM/Yjs conversions,
-                  LaTeX export unit tests, latexmk compile tests
+tests/            vitest: .tex parse/write stability (tex.test.ts: features + a corpus of real
+                  papers and LyX's example documents), LyX round trips (import path), PM/Yjs
+                  conversions, LaTeX writer unit tests, latexmk compile tests
 e2e/              Playwright: login, rendering, collaboration, math, layouts, comments,
                   margin mode, tables, insets, external edits, versions, PDF export
 ```
@@ -197,7 +207,7 @@ npm start            # production server (serves the built client)
 ```
 
 Environment: `PORT` (default 3000), `OVERLYX_PROJECTS_DIR` (default `/root/projects`; every
-sub-directory is a project holding `.lyx` files, figures and `.bib`s), `OVERLYX_DATA_DIR`
+sub-directory is a project holding `.tex` files, figures and `.bib`s), `OVERLYX_DATA_DIR`
 (SQLite, caches, builds, `credentials.txt`), `OVERLYX_CLIENT_DIST` (built client to serve, default
 `packages/client/dist`), `OVERLYX_UNLOAD_MS` (how long an idle document stays loaded, default 6 h),
 `OVERLYX_MAX_BUILDS` (parallel PDF builds, default 2), `OVERLYX_BUILD_NICE` (niceness of latexmk,
@@ -220,7 +230,7 @@ The Vite dev server proxies to `OVERLYX_API_PORT` (default 3000).
 Deleted projects are moved to `<data dir>/trash/<name>-<timestamp>`, never removed.
 
 **Sandboxing.** LaTeX is a programming language and a project's `latexmkrc` is Perl, so a PDF build
-is arbitrary code. `latexmk`, native LyX and the image converters therefore run under
+is arbitrary code. `latexmk` and the image converters therefore run under
 [bubblewrap](https://github.com/containers/bubblewrap) (`apt install bubblewrap`): the system is
 read-only, only the build directory (and the `svg-inkscape` cache next to the document) is writable,
 the project directory is mounted read-only, there is no network, a private `/tmp` and `HOME`
@@ -300,7 +310,7 @@ How it works, in order of what happens when you open a document:
    to the server. The initial sync only exchanges what the two sides are missing, so re-opening a
    document is fast even on a slow connection.
 2. **Editing.** Every keystroke is a Yjs update: applied locally, appended to IndexedDB and — while
-   connected — sent to the server immediately. The server writes the `.lyx` file 1.5 s after the
+   connected — sent to the server immediately. The server writes the `.tex` file 1.5 s after the
    last change and then tells all clients *"the file now contains state X"* (message type 3);
    the status bar switches from *Saving…* to *All changes saved* when that confirmation covers
    everything this browser has sent.
@@ -314,9 +324,9 @@ How it works, in order of what happens when you open a document:
    be shown offline.
 4. **Back online.** y-websocket reconnects; the Yjs sync sends the offline edits and receives
    everybody else's. Because the document is a CRDT, concurrent edits merge without conflicts
-   (two people editing the same sentence simply both get their words in). External saves from
-   desktop LyX are applied on the server as a *diff* (`packages/server/src/ydiff.ts`), so
-   paragraphs that LyX did not touch keep their identity and offline edits inside them survive.
+   (two people editing the same sentence simply both get their words in). External changes of
+   the file are applied on the server as a *diff* (`packages/server/src/ydiff.ts`), so paragraphs
+   they did not touch keep their identity and offline edits inside them survive.
 5. **Unmergeable case.** If the server's copy of the document has a *different history* (its Yjs
    state was reset with *POST /api/docs/…/reset*, or its database was wiped) the local copy cannot
    be merged: the editor stores the unsynced edits as a version named *"offline changes by …"*
@@ -344,3 +354,37 @@ How it works, in order of what happens when you open a document:
 * Every document's Yjs history carries an *epoch*; a browser tab whose editor belongs to an older
   epoch (server restarted with a changed file) reloads instead of merging stale content. Cross-tab
   BroadcastChannel syncing of y-websocket is disabled for the same reason.
+
+## The .tex format
+
+A document is a normal LaTeX file. OverLyX only relies on a few conventions, all of them
+invisible to LaTeX itself:
+
+* **A managed block** right before `\begin{document}` (between `%% OverLyX ---` and
+  `%% end OverLyX ---`) holds the packages and macro definitions the *content* needs
+  (`ulem`/`xcolor` and the change-tracking macros, `graphicx`, `booktabs`, `textcomp`, the
+  `\lyxgreyedout` environment, …) — everything the user's own preamble does not already load —
+  and one `%% overlyx-settings: {...}` line with what LaTeX cannot express (LyX layout modules,
+  citation engine, whether tracked changes are shown in the PDF, …). It is regenerated on every
+  save; put your own preamble above it.
+* **Change tracking**: inserted / deleted text is wrapped in LyX's `\lyxadded{Author}{Tue Aug 26
+  14:03:00 2026}{…}` and `\lyxdeleted{…}{…}{…}` macros (a deleted paragraph break is
+  `\lyxadded{…}{…}{¶}`). With *show changes in output* on, the managed block defines them to
+  print coloured / struck-out text (as LyX does); off, they print the final text.
+* **Notes and comments** are comment blocks: `%% @note`, `%% @comment` or `%% @greyedout`,
+  followed by the note's LaTeX on `%% ` lines (a blank `%%` line is a paragraph break, nested
+  notes carry another `%% `). A comment thread's messages are paragraphs headed
+  `Name (2026-08-26 14:03):`, the first one marked `[resolved]` when resolved. A note inside a
+  paragraph is preceded by `%` at the end of the line, so the surrounding text joins as in TeX.
+* **Child documents** (`\input{appendix.tex}` from the body) are fragments without a preamble;
+  their first line is their settings line. They are edited on their own and built through their
+  master. `\input`s in the preamble (`macros.tex`, `preamble.tex`) are plain text files.
+* **Everything else is LaTeX**: sections, lists, theorems (from the class's LyX layout), floats,
+  captions, graphics, tables (`tabular`/`longtable`, `\multicolumn`/`\multirow`, booktabs),
+  citations, references, footnotes, macros (`\newcommand` / `\global\long\def` in the body keep
+  their position, as in LyX), fonts, quotes, accents. What is not understood is kept verbatim as
+  raw LaTeX (shown like LyX's ERT) with its arguments still editable as text; LyX-specific
+  spellings (`\SpecialChar`, protected spaces, …) are written as their LaTeX equivalents.
+
+`scripts/import-lyx.ts` converts a project's `.lyx` files (children as fragments, SVG/EPS
+graphics as PDF); the LyX settings become a real preamble, exactly as LyX's own export writes it.
