@@ -39,7 +39,7 @@ case "$cmd" in
     sha=$(gh api "repos/$REPO/contents/$REMOTE_PATH" -q .sha 2>/dev/null || true)
     args=(-f message="update $(date -u +%Y-%m-%dT%H:%M:%SZ) from $(hostname)" -f content="$(base64 -w0 "$FILE")")
     [ -n "$sha" ] && args+=(-f sha="$sha")
-    gh api -X PUT "repos/$REPO/contents/$REMOTE_PATH" "${args[@]}" -q '.commit.sha' | sed "s/^/pushed $FILE to $REPO @ /"
+    gh api -X PUT "repos/$REPO/contents/$REMOTE_PATH" "${args[@]}" -q '.commit.sha' | { read -r sha; echo "pushed $FILE to $REPO @ $sha"; }
     ;;
   edit)
     [ -f "$FILE" ] || install -m 600 deploy/secrets.env.example "$FILE"
