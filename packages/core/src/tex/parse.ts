@@ -657,9 +657,15 @@ class BodyParser {
       const def = readMacroDefinition(s.s, start);
       if (def) {
         s.pos = def.end;
+        const lines = [def.text];
+        // "...}%% @display {…}": the display form of the macro (LyX's second line) — see latexMacro
+        const eol = s.s.indexOf('\n', s.pos);
+        const rest = s.s.slice(s.pos, eol < 0 ? s.s.length : eol);
+        const dm = /^%% @display (\{.*\})\s*$/.exec(rest);
+        if (dm) { lines.push(dm[1]); s.pos += rest.length; }
         // a trailing "%" (LyX writes "...}%\n") is part of the definition line
-        if (s.s[s.pos] === '%' && s.s[s.pos + 1] === '\n') s.pos += 1;   // the newline stays: a blank line after it is a paragraph break
-        this.pushInset(ctx, st, { type: 'FormulaMacro', lines: [def.text] });
+        else if (s.s[s.pos] === '%' && s.s[s.pos + 1] === '\n') s.pos += 1;   // the newline stays: a blank line after it is a paragraph break
+        this.pushInset(ctx, st, { type: 'FormulaMacro', lines });
         return null;
       }
     }

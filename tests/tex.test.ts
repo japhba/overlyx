@@ -314,6 +314,22 @@ describe('change tracking and notes live in the file', () => {
     expect(bodyOf(out)).toContain('\\global\\long\\def\\R{\\mathbb{R}}%');
   });
 
+  it('a macro keeps its LyX display form as "%% @display {…}" on the definition line', () => {
+    const src = doc('\\global\\long\\def\\inv#1{\\myinv{(#1)}}%% @display {(#1)^{-1}}\n\\global\\long\\def\\ZZ{Z}%% @display {\\mathbb{Z}}\n\\global\\long\\def\\plain{p}%\n\n$\\inv{x}$');
+    const d = parse(src);
+    const macros = [...walkInsets(d.body)].map(x => x.inset).filter(i => i.type === 'FormulaMacro') as { lines: string[] }[];
+    expect(macros.map(m => m.lines)).toEqual([['\\global\\long\\def\\inv#1{\\myinv{(#1)}}', '{(#1)^{-1}}'], ['\\global\\long\\def\\ZZ{Z}', '{\\mathbb{Z}}'], ['\\global\\long\\def\\plain{p}']]);
+    const inv = collectMacros(d).find(m => m.name === 'inv')!;
+    expect(inv.def).toBe('\\myinv{(#1)}');
+    expect(inv.display).toBe('(#1)^{-1}');
+    expect(collectMacros(d).find(m => m.name === 'plain')!.display).toBeUndefined();
+    const out = expectStable(src);
+    expect(bodyOf(out)).toBe('\\global\\long\\def\\inv#1{\\myinv{(#1)}}%% @display {(#1)^{-1}}\n\\global\\long\\def\\ZZ{Z}%% @display {\\mathbb{Z}}\n\\global\\long\\def\\plain{p}%\n\n$\\inv{x}$');
+    // the LyX importer carries the display form over
+    const lyx = '#LyX 2.4 created this file. For more info see https://www.lyx.org/\n\\lyxformat 620\n\\begin_document\n\\begin_header\n\\save_transient_properties true\n\\origin unavailable\n\\textclass article\n\\end_header\n\n\\begin_body\n\n\\begin_layout Standard\n\\begin_inset FormulaMacro\n\\newcommand{\\inv}[1]{\\myinv{(#1)}}\n{(#1)^{-1}}\n\\end_inset\n\n\n\\end_layout\n\n\\end_body\n\\end_document\n';
+    expect(importLyx(lyx, {}).tex).toContain('\\global\\long\\def\\inv#1{\\myinv{(#1)}}%% @display {(#1)^{-1}}');
+  });
+
   it('unknown commands and environments are kept verbatim (raw LaTeX insets), arguments stay editable text', () => {
     const src = doc('\\twocolumn[\n\\icmltitle{A title}\n\\vskip 0.3in\n]\n\\begin{tikzpicture}\n\\draw (0,0) -- (1,1);\n\\end{tikzpicture}\n\n\\setlength{\\parskip}{1em} A \\mycmd{with \\emph{text}} and \\verb|a&b| here.\n\n\\begin{myenv}[opt]\nInside.\n\\end{myenv}');
     const d = parse(src);

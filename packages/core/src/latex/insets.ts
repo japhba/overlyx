@@ -195,7 +195,12 @@ function latexMacro(ctx: ExportContext, os: TexStream, m: FormulaMacroInset): vo
     os.write(`\\global\\long\\def\\${parsed.name}`);
     for (let i = 1; i <= parsed.nargs; i++) os.write('#' + i);
   }
-  os.write(`{${mathUnicode(ctx, normalizeMath(parsed.body, ctx.symbols, ctx.macroNames))}}%\n`);
+  os.write(`{${mathUnicode(ctx, normalizeMath(parsed.body, ctx.symbols, ctx.macroNames))}}%`);
+  // LyX's display form (what the editor shows instead of the expansion) rides along in the .tex
+  // file as a comment on the definition line: "...}%% @display {(#1)^{-1}}"
+  const display = ctx.texMode ? (m.lines[1] ?? '').trim() : '';
+  if (display.startsWith('{') && !display.includes('\n')) os.write('% @display ' + display);
+  os.write('\n');
 }
 
 export interface MacroDefinition { name: string; nargs: number; optionals: string[]; body: string; redefinition: boolean }

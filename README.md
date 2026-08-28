@@ -390,7 +390,8 @@ invisible to LaTeX itself:
 * **Everything else is LaTeX**: sections, lists, theorems (from the class's LyX layout), floats,
   captions, graphics, tables (`tabular`/`longtable`, `\multicolumn`/`\multirow`, booktabs),
   citations, references, footnotes, macros (`\newcommand` / `\global\long\def` in the body keep
-  their position, as in LyX), fonts, quotes, accents. What is not understood is kept verbatim as
+  their position, as in LyX; a macro's on-screen *display* form, LyX's second definition line, is
+  the trailer `%% @display {…}` on the definition line), fonts, quotes, accents. What is not understood is kept verbatim as
   raw LaTeX (shown like LyX's ERT) with its arguments still editable as text; LyX-specific
   spellings (`\SpecialChar`, protected spaces, …) are written as their LaTeX equivalents.
 
