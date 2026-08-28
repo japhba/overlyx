@@ -25,11 +25,23 @@ button { cursor: pointer; }
 /* ------------------------------------------------------------ layout */
 .app { display: flex; flex-direction: column; height: 100%; }
 .menubar { display: flex; align-items: center; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); padding: 0 6px; height: 28px; user-select: none; }
-.menubar .brand { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--accent); margin-right: 14px; letter-spacing: 0.3px; text-decoration: none; padding: 2px 6px 2px 2px; border-radius: 4px; }
+.menubar .brand { display: inline-flex; align-items: center; margin-right: 14px; text-decoration: none; padding: 1px 8px 1px 6px; border-radius: 4px; font-size: 16px; }
 .menubar .brand:hover { background: #dcdcd8; }
-.ol-logo { display: inline-block; vertical-align: middle; transition: transform 0.25s cubic-bezier(.34,1.56,.64,1); }
-.menubar .brand:hover .ol-logo { transform: rotate(-10deg) scale(1.12); }
-.login h1 { display: flex; align-items: center; gap: 8px; }
+/* the wordmark (app/Logo.tsx): sized by the font-size of its container */
+.ol-wordmark { display: inline-flex; align-items: baseline; line-height: 1; white-space: nowrap; user-select: none; }
+.ol-wordmark .speed { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 0.13em; align-self: center; margin-right: 0.16em; transition: transform 0.25s ease; }
+.ol-wordmark .speed i { display: block; height: 0.11em; border-radius: 0.06em; background: var(--accent); opacity: 0.85; transition: width 0.25s ease; }
+.ol-wordmark .speed i:nth-child(1) { width: 0.5em; }
+.ol-wordmark .speed i:nth-child(2) { width: 0.85em; }
+.ol-wordmark .speed i:nth-child(3) { width: 0.35em; }
+.ol-wordmark .over { display: inline-block; font-family: var(--ui-font); font-weight: 800; font-style: italic; color: var(--accent); letter-spacing: -0.02em; transform: skewX(-8deg); margin-right: 0.04em; }
+.ol-wordmark .lyx { font-family: "Latin Modern Roman", "Times New Roman", Times, Georgia, serif; font-weight: 700; font-size: 1.08em; letter-spacing: -0.01em; }
+.ol-wordmark .l { color: #1a5fb4; }
+.ol-wordmark .y { color: #f5b400; }
+.ol-wordmark .x { color: #d0342c; }
+.menubar .brand:hover .speed { transform: translateX(-0.12em); }
+.menubar .brand:hover .speed i { width: 1.1em; }
+.login h1 { font-size: 26px; }
 .menu { position: relative; }
 .menu > button { background: none; border: 0; padding: 4px 9px; border-radius: 3px; }
 .menu > button:hover, .menu.open > button { background: #dcdcd8; }

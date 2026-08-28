@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { User } from '../api';
-import { Logo } from './Logo';
+import { Wordmark } from './Logo';
 
 export interface MenuEntry { label?: string; shortcut?: string; action?: () => void; checked?: boolean; disabled?: boolean; sep?: boolean; sub?: MenuEntry[] }
 export interface MenuDef { title: string; items: MenuEntry[] }
@@ -42,7 +42,7 @@ export function MenuBar({ menus, user, right, onLogout, onHome }: { menus: MenuD
   }, [open]);
   return (
     <div class="menubar">
-      <a class="brand" href="#/" title="Start screen" onClick={e => { e.preventDefault(); onHome(); }}><Logo /><span class="wordmark">OverLyX</span></a>
+      <a class="brand" href="#/" title="Start screen" onClick={e => { e.preventDefault(); onHome(); }}><Wordmark /></a>
       {menus.map((m, i) => (
         <div key={m.title} class={'menu' + (open === i ? ' open' : '')} onMouseEnter={() => { if (open !== null) setOpen(i); }}>
           <button onMouseDown={e => { e.preventDefault(); setOpen(open === i ? null : i); }}>{m.title}</button>

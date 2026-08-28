@@ -1,18 +1,14 @@
 /**
- * The OverLyX mark: a cheerful page with a dog-ear, eyes, a smile and rosy cheeks — the same drawing
- * as the favicon (public/icon.svg, index.html). Inline so it inherits nothing and scales crisply.
+ * The OverLyX wordmark: "Over" in a fast italic with motion lines, then "LyX" in the colours of the
+ * lyx.org logo (blue L, yellow y, red X, serif). Plain markup + CSS (styles.css `.ol-wordmark`) so it
+ * scales with the surrounding font size; the favicon (public/icon.svg, index.html) is the "LyX" part.
  */
-export const LOGO_PATHS = `
-<path d="M7 3h13l7 7v17a2.5 2.5 0 0 1-2.5 2.5h-17A2.5 2.5 0 0 1 5 27V5.5A2.5 2.5 0 0 1 7.5 3z" fill="#ffffff" stroke="#3b6ea5" stroke-width="2" stroke-linejoin="round"/>
-<path d="M20 3v7h7z" fill="#cfe0f5" stroke="#3b6ea5" stroke-width="2" stroke-linejoin="round"/>
-<circle cx="12.6" cy="15.6" r="1.7" fill="#3b6ea5"/>
-<circle cx="19.4" cy="15.6" r="1.7" fill="#3b6ea5"/>
-<path d="M11.5 20.5q4.5 4.6 9 0" fill="none" stroke="#3b6ea5" stroke-width="2" stroke-linecap="round"/>
-<circle cx="9.6" cy="19.6" r="1.4" fill="#f5a8b4"/>
-<circle cx="22.4" cy="19.6" r="1.4" fill="#f5a8b4"/>
-<text x="17.6" y="27.6" font-size="6" font-family="serif" font-style="italic" fill="#3b6ea5">x²</text>
-`;
-
-export function Logo({ size = 22 }: { size?: number }) {
-  return <svg class="ol-logo" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" dangerouslySetInnerHTML={{ __html: LOGO_PATHS }} />;
+export function Wordmark() {
+  return (
+    <span class="ol-wordmark" aria-label="OverLyX">
+      <span class="speed" aria-hidden="true"><i /><i /><i /></span>
+      <span class="over">Over</span>
+      <span class="lyx"><span class="l">L</span><span class="y">y</span><span class="x">X</span></span>
+    </span>
+  );
 }
