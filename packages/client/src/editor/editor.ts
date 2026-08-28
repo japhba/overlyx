@@ -145,10 +145,23 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   let localEmpty = true;
   let pendingFromStore = false; // the stored copy had unsaved edits when it was last used
   let lastConnInfo = '';
+  // A lost connection is reported as "connecting…" for a few seconds before it becomes "offline":
+  // the server restarts in ~2 s for a deployment and the WebSocket reconnects right away, which
+  // should not read as an outage. (The browser's own offline signal is shown immediately.)
+  const RECONNECT_GRACE_MS = 8000;
+  let disconnectedAt = 0;
+  let graceTimer: ReturnType<typeof setTimeout> | null = null;
+  const inGrace = () => navigator.onLine !== false && disconnectedAt > 0 && Date.now() - disconnectedAt < RECONNECT_GRACE_MS;
+  const noteDisconnected = () => {
+    if (disconnectedAt) return;
+    disconnectedAt = Date.now();
+    if (graceTimer) clearTimeout(graceTimer);
+    graceTimer = setTimeout(() => { graceTimer = null; emitSaveState(); }, RECONNECT_GRACE_MS + 50);
+  };
   const saveState = (): SaveState => {
     const pending = editSeq > savedSeq || (pendingFromStore && !provider.synced);
     const connected = provider.wsconnected;
-    const state: SaveState['state'] = stale ? 'stale' : connected && provider.synced ? (pending ? 'saving' : 'saved') : connected || !localSynced ? 'connecting' : 'offline';
+    const state: SaveState['state'] = stale ? 'stale' : connected && provider.synced ? (pending ? 'saving' : 'saved') : connected || !localSynced || inGrace() ? 'connecting' : 'offline';
     let detail: string | undefined;
     if (state === 'offline') {
       detail = navigator.onLine === false ? 'the browser reports no network connection' : 'no WebSocket connection to the server';
@@ -179,6 +192,9 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     savedSeq = sentSeq;
     emitSaveState();
   };
+  // Message type 4 = server heartbeat (no payload): it only refreshes y-websocket's "last message
+  // received" watchdog, so a healthy connection in a throttled background tab stays open.
+  (provider as any).messageHandlers[4] = () => {};
 
   // Message type 2 = document epoch (OverLyX extension, sent by the server before sync step 1). If the
   // server's Yjs history differs from the one our local copy belongs to (the server re-created the
@@ -187,11 +203,12 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   let stale = false;
   provider.on('connection-close', (ev: CloseEvent | null) => {
     if (ev) lastConnInfo = `closed with code ${ev.code}${ev.reason ? ': ' + ev.reason : ''}`;
+    noteDisconnected();
     emitSaveState();
     if (ev?.code === 4003) opts.onAccessChanged?.();
     if (ev?.code === 4001 || ev?.code === 4004) opts.onGone?.(ev.reason || 'document not available');
   });
-  provider.on('connection-error', () => { lastConnInfo = 'connection attempt failed'; emitSaveState(); });
+  provider.on('connection-error', () => { lastConnInfo = 'connection attempt failed'; noteDisconnected(); emitSaveState(); });
   // A remote update dispatched between a mouse click and the browser's (asynchronous)
   // `selectionchange` event would make ProseMirror write its stale state selection back into the
   // DOM and the click would be lost (y-prosemirror restores the *state* selection after applying
@@ -403,7 +420,11 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       return pos === null ? null : Math.min(pos, view.state.doc.content.size - 1);
     } catch { return null; }
   };
-  provider.on('status', (e: { status: string }) => { status.connected = e.status === 'connected'; pushStatus(); emitSaveState(); });
+  provider.on('status', (e: { status: string }) => {
+    status.connected = e.status === 'connected';
+    if (status.connected) { disconnectedAt = 0; if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; } } else noteDisconnected();
+    pushStatus(); emitSaveState();
+  });
   provider.on('sync', (s: boolean) => {
     status.synced = s;
     if (s) {
@@ -430,6 +451,33 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   };
   window.addEventListener('online', onOnline);
   window.addEventListener('offline', onOffline);
+  // Hidden tabs: the page's timers are throttled (Chrome wakes a long-hidden tab once a minute), so
+  // the presence renewal (every 15 s, the server drops a user's presence after 30 s) and the
+  // reconnect back-off timer fall behind, and the user appeared to go offline whenever their tab
+  // was covered. A worker's timer is not throttled: it renews the presence state when the page's
+  // own timer missed it and reconnects a dropped connection without waiting for the back-off.
+  const renewPresence = () => {
+    const aw = provider.awareness;
+    const meta = aw.meta.get(ydoc.clientID);
+    if (aw.getLocalState() !== null && (!meta || Date.now() - meta.lastUpdated >= 15000)) aw.setLocalState(aw.getLocalState());
+  };
+  const keepAlive = () => {
+    if (destroyed || stale) return;
+    if (provider.wsconnected) renewPresence();
+    else if (provider.shouldConnect && !provider.wsconnecting && provider.ws === null) provider.connect();
+  };
+  let heartbeat: Worker | null = null;
+  try {
+    heartbeat = new Worker(new URL('./heartbeat.ts', import.meta.url), { type: 'module' });
+    heartbeat.onmessage = keepAlive;
+  } catch { /* no worker support: the page timers still do their best */ }
+  // Back in the foreground: reconnect immediately (no back-off) and tell the others we are here.
+  const onVisible = () => {
+    if (document.visibilityState !== 'visible' || destroyed || stale) return;
+    if (!provider.wsconnected && !provider.wsconnecting) reconnect();
+    else if (provider.wsconnected) renewPresence();
+  };
+  document.addEventListener('visibilitychange', onVisible);
 
   // put cursor at start once synced
   if (!opts.child) {
@@ -468,6 +516,9 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       stopRetry();
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
+      document.removeEventListener('visibilitychange', onVisible);
+      heartbeat?.terminate();
+      if (graceTimer) clearTimeout(graceTimer);
       // the view first: its Yjs binding must be gone before the provider/awareness fire their last events
       view.destroy();
       provider.awareness.setLocalState(null);

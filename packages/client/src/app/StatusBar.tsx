@@ -32,11 +32,14 @@ export function UserAvatars({ users, onJump }: { users: PresenceUser[]; onJump?:
   );
 }
 
-export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, onJumpToUser }: {
+export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, onJumpToUser }: {
   layout: string; status: Status; chord: string | null; message: { text: string; kind: 'info' | 'error' } | null; save: SaveState;
   tracking: boolean; trackingAs?: string; change?: string | null; docLabel?: string | null; readOnly?: boolean;
   /** no document editor is open (start screen, text file): only messages */
-  quiet?: boolean; onJumpToUser?: (u: PresenceUser) => void;
+  quiet?: boolean;
+  /** a newer build of OverLyX is deployed than the one running in this tab */
+  updateReady?: boolean;
+  onJumpToUser?: (u: PresenceUser) => void;
 }) {
   if (quiet) return <div class="statusbar">{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" /></div>;
   return (
@@ -50,6 +53,7 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
       {change && <span class="change-info" title="Tracked change under the cursor (right-click to accept / reject)">{change}</span>}
       {message && <span class={'msg ' + message.kind}>{message.text}</span>}
       <span class="spacer" />
+      {updateReady && <button type="button" class="update-hint" title="A newer version of OverLyX is deployed. Reloading takes a second; your document is kept." onClick={() => location.reload()}>↻ new version — reload</button>}
       <SaveIndicator save={save} />
       <UserAvatars users={status.users} onJump={onJumpToUser} />
     </div>

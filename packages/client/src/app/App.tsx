@@ -26,6 +26,7 @@ import { Tour, tourWanted, rememberTour, type TourEnd } from './Tour';
 import { FeedbackDialog } from './Feedback';
 import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams } from './Dialogs';
 import { createEditor, refreshMacros, describeChange, type EditorHandle, type SaveState } from '../editor/editor';
+import { newerVersionAvailable } from './update';
 import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
 import { STANDARD_LAYOUTS } from '../editor/layouts';
@@ -161,6 +162,30 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [save, setSave] = useState<SaveState>({ state: 'connecting', pending: false, savedAt: 0, unavailable: false });
   const [reloadKey, setReloadKey] = useState(0);
+  // A newer client build is deployed (checked after every (re)connect, when the tab comes back to
+  // the foreground and every 15 minutes): offer a reload; do it unasked only while the tab is hidden
+  // and nothing is half-done (all edits confirmed by the server, no dialog open).
+  const [updateReady, setUpdateReady] = useState(false);
+  useEffect(() => {
+    if (!status.connected || updateReady) return;
+    let alive = true;
+    const check = () => { void newerVersionAvailable().then(v => { if (alive && v) setUpdateReady(true); }); };
+    const t = setTimeout(check, 3000);
+    const iv = setInterval(check, 15 * 60000);
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { alive = false; clearTimeout(t); clearInterval(iv); document.removeEventListener('visibilitychange', onVisible); };
+  }, [status.connected, updateReady]);
+  useEffect(() => {
+    if (!updateReady) return;
+    const quietReload = () => {
+      if (document.visibilityState !== 'hidden' || save.pending || save.state !== 'saved' || document.querySelector('.dialog-backdrop')) return;
+      location.reload();
+    };
+    quietReload();
+    document.addEventListener('visibilitychange', quietReload);
+    return () => document.removeEventListener('visibilitychange', quietReload);
+  }, [updateReady, save.pending, save.state]);
   const [zoom, setZoom] = useState(Number(localStorage.getItem('ol.zoom') || 1));
   // width of the text column in px (0 = full width), see View ▸ Text width
   const [textWidth, setTextWidth] = useState<number>(() => { const v = Number(localStorage.getItem('ol.textWidth')); return Number.isFinite(v) && localStorage.getItem('ol.textWidth') !== null ? v : 720; });
@@ -1304,7 +1329,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       </div>
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null}
-        readOnly={!!docId && viewOnly}
+        readOnly={!!docId && viewOnly} updateReady={updateReady}
         quiet={!!docId && !isLyxDoc}
         onJumpToUser={jumpToUser} />
       {renderDialog()}

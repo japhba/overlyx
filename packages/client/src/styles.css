@@ -497,6 +497,8 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .statusbar .save-state.saved { color: var(--ok); }
 .statusbar .save-state.saving { color: var(--ui-muted); }
 .statusbar .save-state.offline { color: var(--warn-fg); background: var(--warn-bg); padding: 0 8px; border-radius: 3px; }
+.statusbar .update-hint { font: inherit; color: var(--accent, #1a5fb4); background: transparent; border: 1px solid currentColor; border-radius: 3px; padding: 0 8px; margin-right: 10px; cursor: pointer; line-height: 18px; }
+.statusbar .update-hint:hover { background: var(--hover-bg, rgba(26, 95, 180, 0.1)); }
 .filetree .offline-mark { color: var(--ok); font-size: 10px; margin-left: 4px; }
 .menubar .doc-title { color: var(--ui-muted); font-size: 12px; margin-right: 12px; }
 .menubar .doc-title a { color: var(--accent); }

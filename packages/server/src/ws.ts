@@ -20,6 +20,16 @@ const MSG_AWARENESS = 1;
 const MSG_EPOCH = 2;
 /** OverLyX extension: "the .lyx file on disk contains this state" (timestamp + state vector), sent after every save */
 const MSG_SAVED = 3;
+/**
+ * OverLyX extension: server heartbeat (no payload). y-websocket closes a connection on which it has
+ * not received *any* message for 30 s; normally its own awareness renewals (echoed by the server
+ * every 15 s) keep it alive, but browsers throttle the timers of hidden tabs (Chrome: one wake-up
+ * per minute after five minutes in the background), so a lone background tab used to flap between
+ * connected and "offline". A heartbeat that does not depend on client timers keeps a healthy
+ * connection open; a dead one still trips the watchdog.
+ */
+const MSG_PING = 4;
+const HEARTBEAT_MS = 10000;
 
 function savedMessage(doc: OpenDoc): Uint8Array {
   const enc = encoding.createEncoder();
@@ -80,7 +90,9 @@ export function attachWebSocket(server: Server): void {
 
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    if (url.pathname !== '/ws' && url.pathname !== '/ws/') return;
+    // an upgrade for any other path (a browser extension probing the site, …) must not leave the
+    // socket dangling: nobody else answers it and the proxy in front keeps it open for minutes
+    if (url.pathname !== '/ws' && url.pathname !== '/ws/') { socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); socket.destroy(); return; }
     // browsers send the page's origin: a foreign site must not be able to open a socket with our cookie
     if (!originAllowed(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     const user = userFromCookieHeader(req.headers.cookie);
@@ -144,11 +156,21 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
     }
   });
 
+  // liveness: a protocol ping every 30 s (answered by the browser's network stack even when the
+  // page is throttled or frozen) and an application-level heartbeat every 10 s (see MSG_PING)
   let pongReceived = true;
+  let tick = 0;
+  const heartbeat = new Uint8Array([MSG_PING]);
   const ping = setInterval(() => {
-    if (!pongReceived) { closeConn(doc, conn); clearInterval(ping); return; }
-    if (doc.conns.has(conn)) { pongReceived = false; try { conn.ping(); } catch { closeConn(doc, conn); clearInterval(ping); } }
-  }, 30000);
+    if (!doc.conns.has(conn)) { clearInterval(ping); return; }
+    tick++;
+    if (tick % 3 === 0) {
+      if (!pongReceived) { closeConn(doc, conn); clearInterval(ping); return; }
+      pongReceived = false;
+      try { conn.ping(); } catch { closeConn(doc, conn); clearInterval(ping); return; }
+    }
+    send(doc, conn, heartbeat);
+  }, HEARTBEAT_MS);
   conn.on('pong', () => { pongReceived = true; });
   conn.on('close', () => { closeConn(doc, conn); clearInterval(ping); });
   conn.on('error', () => { closeConn(doc, conn); clearInterval(ping); });

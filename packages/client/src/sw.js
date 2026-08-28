@@ -28,15 +28,22 @@ self.addEventListener('activate', (e) => {
 
 async function networkFirst(req, cacheName, fallbackUrl) {
   const cache = await caches.open(cacheName);
+  let res;
   try {
-    const res = await fetch(req);
-    if (res.ok) cache.put(req, res.clone()).catch(() => {});
-    return res;
+    res = await fetch(req);
   } catch (err) {
     const hit = await cache.match(fallbackUrl ?? req, { ignoreSearch: !!fallbackUrl });
     if (hit) return hit;
     throw err;
   }
+  if (res.ok) cache.put(req, res.clone()).catch(() => {});
+  // the server is restarting (the proxy answers 502/503 for a couple of seconds): the app shell
+  // from the cache loads and reconnects by itself instead of showing the proxy's error page
+  else if (fallbackUrl && res.status >= 500) {
+    const hit = await cache.match(fallbackUrl, { ignoreSearch: true });
+    if (hit) return hit;
+  }
+  return res;
 }
 
 async function cacheFirst(req, cacheName) {
