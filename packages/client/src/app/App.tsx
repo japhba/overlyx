@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
+import { nodeText } from '../editor/cliptext';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
 import { undo, redo } from 'y-prosemirror';
 import { addColumnAfter, addColumnBefore, addRowAfter, addRowBefore, deleteColumn, deleteRow, deleteTable, mergeCells, splitCell } from 'prosemirror-tables';
@@ -18,7 +19,7 @@ import { Ruler } from './Ruler';
 import { StatusBar, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget } from './SourcePane';
 import { activeMathField, mathFocusListeners, type LyxMathField } from '../editor/lyxmath/field';
-import { GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams } from './Dialogs';
+import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams } from './Dialogs';
 import { createEditor, refreshMacros, describeChange, type EditorHandle, type SaveState } from '../editor/editor';
 import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
@@ -33,6 +34,32 @@ import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '../edit
 import { schema, unquote, llanglePreamble, hasLlangleSnippet, definesLlangle } from '@overlyx/core';
 
 type Dialog = { name: string; arg?: unknown } | null;
+
+/** Document ▸ Statistics: words and characters of the selection or the whole document (notes and comments excluded, like LyX's default). */
+function StatsDialog({ view, onClose }: { view: EditorView; onClose: () => void }) {
+  const stats = useMemo(() => {
+    const sel = view.state.selection;
+    const count = (text: string) => ({ words: (text.match(/[\p{L}\p{N}]+(?:[’'\-][\p{L}\p{N}]+)*/gu) ?? []).length, chars: text.replace(/\s/g, '').length, charsSpaces: text.length });
+    const textOf = (from: number, to: number) => {
+      let out = '';
+      view.state.doc.nodesBetween(from, to, (node, pos) => {
+        if (node.type.name === 'inset' && /^Note$/.test(node.attrs.name)) return false;   // LyX notes / comments are not counted
+        if (node.isText) out += node.text!.slice(Math.max(0, from - pos), Math.max(0, to - pos));
+        else if (node.isAtom && node.isInline) out += nodeText(node);
+        else if (node.isTextblock) out += '\n';
+        return true;
+      });
+      return out;
+    };
+    return { selection: sel.empty ? null : count(textOf(sel.from, sel.to)), document: count(textOf(0, view.state.doc.content.size)) };
+  }, [view, view.state.doc, view.state.selection]);
+  const row = (label: string, c: { words: number; chars: number; charsSpaces: number }) => <tr><td>{label}</td><td>{c.words.toLocaleString()}</td><td>{c.chars.toLocaleString()}</td><td>{c.charsSpaces.toLocaleString()}</td></tr>;
+  return <Dialog title="Statistics" onClose={onClose} buttons={<button onClick={onClose}>Close</button>}>
+    <table class="stats"><thead><tr><th></th><th>Words</th><th>Characters</th><th>Characters (with spaces)</th></tr></thead>
+      <tbody>{stats.selection && row('Selection', stats.selection)}{row('Document', stats.document)}</tbody></table>
+    <p class="hint">Formulas count as one word each; LyX notes and comments are not counted.</p>
+  </Dialog>;
+}
 
 /** LyX language name → BCP 47 tag (for the browser's spell checker). */
 function bcp47(lyxLang: string): string {
@@ -770,6 +797,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     { title: 'Document', items: [
       { label: 'Settings…', action: () => setDialog({ name: 'settings' }) },
       { label: 'Math macros…', action: () => setDialog({ name: 'macros' }) },
+      { label: 'Statistics (word count)…', action: () => setDialog({ name: 'stats' }) },
       { label: 'Change tracking', shortcut: 'Ctrl+Shift+E', checked: tracking, action: toggleTracking },
       { sep: true },
       { label: 'Reload metadata (macros, bibliography)', action: () => { if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); notify('Metadata reloaded'); }); } },
@@ -1122,6 +1150,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); })} />;
       case 'help': return <HelpDialog onClose={close} />;
       case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
+      case 'stats': return view ? <StatsDialog view={view} onClose={close} /> : null;
       case 'tex': return <TexDialog tex={String(dialog.arg ?? '')} onClose={close} />;
       case 'layout': return <LayoutPicker layouts={layouts} onClose={close} onPick={n => run(C.setLayout(n))} />;
       case 'argument': { run(C.insertArgument(String(dialog.arg ?? '1'))); setDialog(null); return null; }

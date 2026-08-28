@@ -78,7 +78,7 @@ const nodes: Record<string, NodeSpec> = {
       if (a.noindent) attrs['data-noindent'] = '1';
       if (a.labelwidthstring) attrs['data-labelwidthstring'] = a.labelwidthstring;
       if (a.spacing) attrs['data-spacing'] = a.spacing;
-      if (a.leftindent) attrs['data-leftindent'] = a.leftindent;
+      if (a.leftindent) { attrs['data-leftindent'] = a.leftindent; attrs.style = 'margin-left:' + cssLength(a.leftindent); }
       if (a.appendix) attrs['data-appendix'] = '1';
       if (a.endChange) attrs['data-end-change'] = JSON.stringify(a.endChange);
       return ['p', attrs, 0];
@@ -224,7 +224,14 @@ const nodes: Record<string, NodeSpec> = {
   space: {
     inline: true, group: 'inline', atom: true,
     attrs: { kind: { default: '~' }, params: jsonAttr([]) },
-    toDOM: node => ['span', { class: 'lyx-space', 'data-kind': node.attrs.kind, 'data-params': node.attrs.params, title: 'space ' + node.attrs.kind }, spaceChar(node.attrs.kind)],
+    toDOM: node => {
+      const a: Record<string, string> = { class: 'lyx-space', 'data-kind': node.attrs.kind, 'data-params': node.attrs.params, title: 'space ' + node.attrs.kind };
+      // \hspace{} carries its length as a parameter line: show the gap at that width
+      if (/^\\hspace\*?\{\}$/.test(node.attrs.kind)) {
+        try { const l = (JSON.parse(node.attrs.params) as string[]).find(p => p.startsWith('\\length ')); if (l) { a.style = 'width:' + cssLength(l.slice(8).trim()); a.title += ' ' + l.slice(8).trim(); } } catch { /* ignore */ }
+      }
+      return ['span', a, spaceChar(node.attrs.kind)];
+    },
     parseDOM: [{ tag: 'span.lyx-space', getAttrs: (d: HTMLElement) => ({ kind: attr(d, 'data-kind', '~'), params: jsonFrom(d, 'data-params', '[]') }) }],
   },
 
@@ -339,6 +346,25 @@ export const FONT_MARKS = ['family', 'series', 'shape', 'size', 'emph', 'numeric
 
 export const schema = new Schema({ nodes, marks });
 export type LyxSchema = typeof schema;
+
+/** A LyX/LaTeX length as CSS (em-ish approximations for TeX units and relative lengths). */
+export function cssLength(len: string): string {
+  const m = /^(-?[\d.]+)\s*([a-z%]*)$/i.exec(len.trim());
+  if (!m) return '0';
+  const v = parseFloat(m[1]);
+  switch (m[2]) {
+    case 'cm': case 'mm': case 'in': case 'pt': case 'em': case 'ex': case 'px': return `${v}${m[2]}`;
+    case 'bp': return `${v}pt`;
+    case 'pc': return `${v * 12}pt`;
+    case 'dd': return `${v * 1.07}pt`;
+    case 'cc': return `${v * 12.84}pt`;
+    case 'sp': return `${v / 65536}pt`;
+    case 'mu': return `${v / 18}em`;
+    case 'text%': case 'col%': case 'page%': case 'line%': return `${v}%`;
+    case 'theight%': case 'pheight%': return `${v}vh`;
+    default: return `${v}em`;
+  }
+}
 
 export function quoteChar(kind: string): string {
   // LyX quote type: [style][side][level]: e.g. "eld" = english left double, "grs" = german right single

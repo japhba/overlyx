@@ -113,7 +113,8 @@ Overleaf/LyX blend.
   formulas overflow symmetrically into the margins (Google-Docs style) with equation numbers kept
   clear of the formula.
 * **Find & replace** (`Ctrl+F`): find next/previous, replace, replace all, case-sensitive and
-  whole-word options, live match count and highlighting.
+  whole-word options, live match count and highlighting. *Document ▸ Statistics* counts words and
+  characters of the selection / the document (notes excluded).
 * **LyX keyboard bindings** (`cua.bind`/`menus.bind`/`math.bind`): `Ctrl+M`, `Ctrl+Shift+M`,
   `Alt+P …` layouts, `Alt+M …` math, `Alt+A …` paragraph, `Ctrl+E/B/U`, `Ctrl+L` (TeX code),
   `Ctrl+Alt+F/M/N/C` (footnote / margin / note / comment), `Ctrl+Shift+E` (track changes), …
