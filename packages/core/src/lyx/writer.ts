@@ -171,7 +171,9 @@ export function writeInset(ins: Inset): string {
     }
     case 'Text': {
       let s = ins.name + (ins.arg ? ' ' + ins.arg : '') + '\n';
-      for (const l of ins.params) s += l + '\n';
+      // LyX never writes blank parameter lines in text insets (the parser drops them too); an empty
+      // line here would make the file non-canonical and break byte-exact round trips
+      for (const l of ins.params) if (l !== '') s += l + '\n';
       if (ins.status) s += 'status ' + ins.status + '\n';
       s += writeParagraphs(ins.paragraphs);
       return s;

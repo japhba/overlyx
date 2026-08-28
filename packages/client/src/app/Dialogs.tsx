@@ -3,6 +3,7 @@ import type { ComponentChildren } from 'preact';
 import type { DocMeta, ProjectFile, BibItem } from '../api';
 import type { GraphicsOpts, TableChanges } from '../editor/commands';
 import { api, graphicsUrl } from '../api';
+import type { LitHit, BibAddResult } from '../api';
 import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote } from '@overlyx/core';
 
@@ -174,22 +175,29 @@ export function RefDialog({ labels, useRefstyle, initial, onInsert, onClose }: {
 }
 
 /* ----------------------------------------------------------------- cite */
-export function CiteDialog({ meta, docId, initial, onInsert, onClose }: { meta: DocMeta | null; docId?: string; initial?: { keys: string[]; cmd: string; before: string; after: string }; onInsert: (keys: string[], cmd: string, before: string, after: string, entries: BibItem[]) => void; onClose: () => void }) {
+export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, onClose }: {
+  meta: DocMeta | null; docId?: string; project?: string; initial?: { keys: string[]; cmd: string; before: string; after: string };
+  onInsert: (keys: string[], cmd: string, before: string, after: string, entries: BibItem[]) => void;
+  /** a paper was added to the project's cited.bib (the caller updates the bibliography inset and its metadata) */
+  onAdded?: (r: BibAddResult) => void; onClose: () => void;
+}) {
+  const [tab, setTab] = useState<'project' | 'online'>('project');
   const [q, setQ] = useState('');
   const [keys, setKeys] = useState<string[]>(initial?.keys ?? []);
   const [cmd, setCmd] = useState(initial?.cmd ?? (meta?.citeEngine === 'natbib' || meta?.citeEngine === 'biblatex' ? 'citep' : 'cite'));
   const [before, setBefore] = useState(initial?.before ?? ''), [after, setAfter] = useState(initial?.after ?? '');
-  const local = meta?.bib ?? [];
-  const total = meta?.bibTotal ?? local.length;
+  const [added, setAdded] = useState<BibItem[]>([]);
+  const local = useMemo(() => [...added, ...(meta?.bib ?? [])], [meta, added]);
+  const total = (meta?.bibTotal ?? (meta?.bib ?? []).length) + added.length;
   const remote = total > local.length;    // large bibliography: search on the server
   const [hits, setHits] = useState<BibItem[]>([]);
   const [searching, setSearching] = useState(false);
   useEffect(() => {
-    if (!remote || !docId) return;
+    if (!remote || !docId || tab !== 'project') return;
     setSearching(true);
     const t = setTimeout(() => { api.bibSearch(docId, q, 200).then(r => setHits(r.entries)).catch(() => setHits([])).finally(() => setSearching(false)); }, q ? 200 : 0);
     return () => clearTimeout(t);
-  }, [q, remote, docId]);
+  }, [q, remote, docId, tab]);
   const known = useMemo(() => { const m = new Map<string, BibItem>(); for (const e of [...local, ...hits]) m.set(e.key, e); return m; }, [local, hits]);
   const list = useMemo(() => {
     const ql = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -206,16 +214,91 @@ export function CiteDialog({ meta, docId, initial, onInsert, onClose }: { meta: 
   const toggle = (k: string) => setKeys(keys.includes(k) ? keys.filter(x => x !== k) : [...keys, k]);
   const cmds = meta?.citeEngine === 'natbib' ? ['citep', 'citet', 'citealp', 'citealt', 'citeauthor', 'citeyear', 'citeyearpar', 'nocite'] : meta?.citeEngine === 'biblatex' ? ['cite', 'parencite', 'textcite', 'autocite', 'citeauthor', 'citeyear', 'nocite'] : ['cite', 'nocite'];
   const insert = () => { onInsert(keys, cmd, before, after, keys.map(k => known.get(k)).filter((e): e is BibItem => !!e)); onClose(); };
+
+  // --- find online (OpenAlex, DBLP, doi.org) and paste from Google Scholar
+  const [oq, setOq] = useState('');
+  const [ohits, setOhits] = useState<LitHit[]>([]);
+  const [osearching, setOsearching] = useState(false);
+  const [oerror, setOerror] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [addedIds, setAddedIds] = useState<Map<string, string>>(new Map());
+  const [paste, setPaste] = useState('');
+  const [status, setStatus] = useState<string | null>(null);
+  useEffect(() => {
+    if (tab !== 'online') return;
+    const t = oq.trim();
+    if (t.length < 3) { setOhits([]); setOerror(null); return; }
+    setOsearching(true); setOerror(null);
+    const h = setTimeout(() => { api.literatureSearch(t).then(r => setOhits(r.hits)).catch(e => { setOhits([]); setOerror((e as Error).message); }).finally(() => setOsearching(false)); }, 450);
+    return () => clearTimeout(h);
+  }, [oq, tab]);
+  const took = (r: BibAddResult) => {
+    setAdded(a => (a.some(e => e.key === r.key) ? a : [r.entry, ...a]));
+    setKeys(k => (k.includes(r.key) ? k : [...k, r.key]));
+    setStatus(r.existed ? `Already in the project as [${r.key}] (${r.file}) — selected` : `Added [${r.key}] to ${r.file} — selected`);
+    onAdded?.(r);
+  };
+  const cite = async (h: LitHit) => {
+    if (!project) return;
+    setBusyId(h.id); setStatus(null);
+    try { const r = await api.bibAdd(project, { hit: h }); setAddedIds(m => new Map(m).set(h.id, r.key)); took(r); }
+    catch (e) { setStatus('Could not add: ' + (e as Error).message); }
+    finally { setBusyId(null); }
+  };
+  const addPasted = async () => {
+    if (!project || !paste.trim()) return;
+    setBusyId('paste'); setStatus(null);
+    try { const r = await api.bibAdd(project, { bibtex: paste }); took(r); setPaste(''); }
+    catch (e) { setStatus('Could not add: ' + (e as Error).message); }
+    finally { setBusyId(null); }
+  };
+  const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(oq.trim())}`;
+  const authorsOf = (h: LitHit) => (h.authors.length > 3 ? h.authors.slice(0, 3).join(', ') + ' et al.' : h.authors.join(', '));
+
   return (
-    <Dialog title="Citation" onClose={onClose} wide buttons={<button class="btn primary" disabled={!keys.length} onClick={insert}>{initial ? 'Apply' : 'Insert'}</button>}>
-      <Row label="Search"><input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} placeholder="author, year, title, key" /><span class="sub" style="color:#888;font-size:11px;white-space:nowrap">{searching ? 'searching…' : `${total} entries`}</span></Row>
-      <div class="list" style="max-height:320px">
-        {keys.filter(k => !list.some(e => e.key === k)).map(k => <div key={'sel-' + k} class="sel" onClick={() => toggle(k)}><b>{known.get(k)?.author || k}</b> <span class="sub">[{k}] (selected)</span></div>)}
-        {list.map(e => <div key={e.key} class={keys.includes(e.key) ? 'sel' : ''} onClick={() => toggle(e.key)}><b>{e.author || e.key}</b> {e.year} <span class="sub">— {e.title}</span> <span class="sub">[{e.key}]</span></div>)}
-        {!total && <div class="sub">No bibliography entries found (add a BibTeX inset or .bib files to the project).</div>}
-        {remote && !q && total > local.length && <div class="sub" style="padding:4px 6px;color:#888">Type to search all {total} entries; the cited ones are listed first.</div>}
+    <Dialog title="Citation" onClose={onClose} wide buttons={<button class="btn primary" disabled={!keys.length} onClick={insert} data-cite-insert>{initial ? 'Apply' : 'Insert'}</button>}>
+      <div class="dlg-tabs">
+        <button class={tab === 'project' ? 'active' : ''} onClick={() => setTab('project')}>In this project</button>
+        <button class={tab === 'online' ? 'active' : ''} onClick={() => setTab('online')} data-cite-online disabled={!project}>Find online / paste BibTeX</button>
       </div>
-      <Row label="Selected">{keys.join(', ') || <span class="sub">none</span>}</Row>
+      {tab === 'project' ? (
+        <>
+          <Row label="Search"><input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} placeholder="author, year, title, key" /><span class="sub" style="color:#888;font-size:11px;white-space:nowrap">{searching ? 'searching…' : `${total} entries`}</span></Row>
+          <div class="list" style="max-height:320px">
+            {keys.filter(k => !list.some(e => e.key === k)).map(k => <div key={'sel-' + k} class="sel" onClick={() => toggle(k)}><b>{known.get(k)?.author || k}</b> <span class="sub">[{k}] (selected)</span></div>)}
+            {list.map(e => <div key={e.key} class={keys.includes(e.key) ? 'sel' : ''} onClick={() => toggle(e.key)}><b>{e.author || e.key}</b> {e.year} <span class="sub">— {e.title}</span> <span class="sub">[{e.key}]</span></div>)}
+            {!total && <div class="sub">No bibliography entries yet — find the paper online (tab above) or add a .bib file to the project.</div>}
+            {remote && !q && total > local.length && <div class="sub" style="padding:4px 6px;color:#888">Type to search all {total} entries; the cited ones are listed first.</div>}
+          </div>
+        </>
+      ) : (
+        <>
+          <Row label="Find"><input type="text" autofocus value={oq} onInput={e => setOq((e.target as HTMLInputElement).value)} placeholder="title, authors, DOI, arXiv id or URL" data-cite-query /><span class="sub" style="color:#888;font-size:11px;white-space:nowrap">{osearching ? 'searching…' : 'OpenAlex · DBLP · doi.org'}</span></Row>
+          <div class="list lit-list" style="max-height:260px" data-cite-hits>
+            {ohits.map(h => (
+              <div key={h.id} class="lit-hit" onClick={() => { if (!busyId && !addedIds.has(h.id)) void cite(h); }}>
+                <div class="lit-main">
+                  <b>{h.title}</b>
+                  <div class="sub">{authorsOf(h)}{h.year ? ` · ${h.year}` : ''}{h.venue ? ` · ${h.venue}` : ''}{h.citations != null ? ` · cited by ${h.citations}` : ''}{h.arxiv ? ` · arXiv:${h.arxiv}` : ''}</div>
+                </div>
+                <button class="small-btn" disabled={busyId === h.id || addedIds.has(h.id)} onClick={ev => { ev.stopPropagation(); void cite(h); }}>{addedIds.has(h.id) ? `✓ ${addedIds.get(h.id)}` : busyId === h.id ? 'Adding…' : 'Cite'}</button>
+              </div>
+            ))}
+            {oerror && <div class="sub" style="color:#b00;padding:4px 6px">{oerror}</div>}
+            {!ohits.length && !osearching && oq.trim().length >= 3 && !oerror && <div class="sub" style="padding:4px 6px">Nothing found — try the Google Scholar link and paste the BibTeX below.</div>}
+            {oq.trim().length < 3 && <div class="sub" style="padding:4px 6px;color:#888">Type a title, author names, a DOI or an arXiv id. Picking a result adds its BibTeX to <code>cited.bib</code> in this project and selects it.</div>}
+          </div>
+          <div class="row" style="justify-content:space-between">
+            <span class="sub"><a href={scholarUrl} target="_blank" rel="noopener">Search Google Scholar ↗</a> — there: <i>Cite ▸ BibTeX</i>, then paste it here:</span>
+          </div>
+          <textarea rows={4} value={paste} onInput={e => setPaste((e.target as HTMLTextAreaElement).value)} placeholder={'@article{key,\n  title = {…}, author = {…}, year = {…}\n}'} data-cite-paste style="min-height:70px" />
+          <div class="row" style="justify-content:space-between">
+            <span class="sub" data-cite-status>{status}</span>
+            <button class="btn" disabled={!paste.trim() || busyId === 'paste'} onClick={() => void addPasted()} data-cite-add-paste>{busyId === 'paste' ? 'Adding…' : 'Add to cited.bib'}</button>
+          </div>
+        </>
+      )}
+      <Row label="Selected"><span data-cite-selected>{keys.join(', ') || <span class="sub">none</span>}</span></Row>
       <Row label="Style"><select value={cmd} onChange={e => setCmd((e.target as HTMLSelectElement).value)}>{cmds.map(c => <option key={c} value={c}>\{c}</option>)}</select></Row>
       <Row label="Text before"><input type="text" value={before} onInput={e => setBefore((e.target as HTMLInputElement).value)} /></Row>
       <Row label="Text after"><input type="text" value={after} onInput={e => setAfter((e.target as HTMLInputElement).value)} placeholder="e.g. p. 12" /></Row>
@@ -516,7 +599,7 @@ export function InsetDialog({ node, onApply, onClose }: { node: PMNode; onApply:
   const [params, setParams] = useState<string>(() => { try { return (JSON.parse(node.attrs.params ?? '[]') as string[]).join('\n'); } catch { return ''; } });
   const [arg, setArg] = useState(String(node.attrs.arg ?? node.attrs.cmd ?? ''));
   const apply = () => {
-    const lines = params.split('\n');
+    const lines = params.split('\n').filter(l => l.trim() !== '');   // an empty textarea is no parameter line
     const attrs: Record<string, unknown> = { params: JSON.stringify(lines) };
     if (type === 'inset') attrs.arg = arg;
     if (type === 'command') attrs.cmd = arg;

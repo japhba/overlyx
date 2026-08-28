@@ -4,7 +4,7 @@ import { nodeText } from '../editor/cliptext';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
 import { undo, redo } from 'y-prosemirror';
 import { addColumnAfter, addColumnBefore, addRowAfter, addRowBefore, deleteColumn, deleteRow, deleteTable, mergeCells, splitCell } from 'prosemirror-tables';
-import { api, type DocMeta, type User } from '../api';
+import { api, type BibAddResult, type DocMeta, type User } from '../api';
 import { Login } from './Login';
 import { FileBrowser } from './FileBrowser';
 import { Home, projectDocs } from './Home';
@@ -821,6 +821,16 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     ] },
   ] : []), helpMenu];
 
+  /** A paper was added to cited.bib: make the entry known, list cited.bib in the BibTeX inset, refresh the metadata. */
+  const onBibAdded = (r: BibAddResult) => {
+    rememberBib([r.entry]);
+    if (r.existed) return;
+    const where = masterView ?? view;
+    const st = where ? C.ensureBibFile(where, r.file) : 'none';
+    if (st === 'added') notify(`Added ${r.file} to the document's bibliography`);
+    else if (st === 'none') notify(`${r.file} has the entry — add a BibTeX bibliography with "${r.file.replace(/\.bib$/, '')}" (Insert ▸ BibTeX bibliography…) so that it is printed`, 'error');
+    if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; }).catch(() => {});
+  };
   /** Entries picked in the citation dialog become known to the editor (for rendering author/year) even if they were not cited before. */
   const rememberBib = (entries: { key: string; author: string; year: string; title: string }[]) => {
     const m = editorContext.meta;
@@ -1158,10 +1168,10 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         const target = dialog.arg as { pos: number; node: any } | undefined;
         if (target?.node) {
           const p = commandParams(target.node);
-          return <CiteDialog meta={meta} docId={docId} initial={{ keys: unquote(p.get('key')).split(',').map(k => k.trim()).filter(Boolean), cmd: p.get('LatexCommand') ?? 'cite', before: unquote(p.get('before')), after: unquote(p.get('after')) }} onClose={close}
+          return <CiteDialog meta={meta} docId={docId} project={viewOnly ? undefined : project} onAdded={onBibAdded} initial={{ keys: unquote(p.get('key')).split(',').map(k => k.trim()).filter(Boolean), cmd: p.get('LatexCommand') ?? 'cite', before: unquote(p.get('before')), after: unquote(p.get('after')) }} onClose={close}
             onInsert={(keys, cmd, b, a, entries) => { rememberBib(entries); const params = [`LatexCommand ${cmd}`]; if (a) params.push(`after "${a}"`); if (b) params.push(`before "${b}"`); params.push(`key "${keys.join(',')}"`, 'literal "false"', ''); view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
         }
-        return <CiteDialog meta={meta} docId={docId} onClose={close} onInsert={(keys, cmd, b, a, entries) => { rememberBib(entries); run(C.insertCite(keys, cmd, b, a)); }} />;
+        return <CiteDialog meta={meta} docId={docId} project={viewOnly ? undefined : project} onClose={close} onAdded={onBibAdded} onInsert={(keys, cmd, b, a, entries) => { rememberBib(entries); run(C.insertCite(keys, cmd, b, a)); }} />;
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t, n) => run(C.insertHref(t, n))} />;
       case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); })} />;

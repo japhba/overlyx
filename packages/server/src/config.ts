@@ -60,6 +60,10 @@ export const config = {
     token: (process.env.GITHUB_TOKEN ?? '').trim(),
     api: (process.env.GITHUB_API_URL ?? 'https://api.github.com').replace(/\/$/, ''),
   },
+  /** literature search in the citation dialog (OpenAlex, DBLP, doi.org); OVERLYX_LITERATURE=off disables the outbound requests */
+  literature: process.env.OVERLYX_LITERATURE !== 'off',
+  /** optional contact address sent with those requests (joins the OpenAlex / Crossref "polite pools" with better rate limits) */
+  contactEmail: (process.env.OVERLYX_CONTACT_EMAIL ?? '').trim(),
   /** automatic issues for uncaught browser / server errors (OVERLYX_ERROR_REPORTS=off keeps only Help ▸ Report a problem) */
   errorReports: process.env.OVERLYX_ERROR_REPORTS !== 'off',
   sessionDays: 30,

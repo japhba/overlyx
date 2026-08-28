@@ -50,8 +50,12 @@ async function req<T>(method: string, url: string, body?: unknown, raw?: BodyIni
 
 export const encId = (id: string) => encodeURIComponent(id);
 
+export interface LitHit { id: string; title: string; authors: string[]; year: number | null; venue: string; type: string; doi: string | null; arxiv: string | null; url: string | null; citations: number | null; sources: string[]; dblp?: string }
+export interface BibAddResult { key: string; file: string; existed: boolean; bibtex: string; entry: BibItem }
 export interface FeedbackInfo { enabled: boolean; repo: string; newIssueUrl: string; version: string; errorReports: boolean }
 export const api = {
+  literatureSearch: (q: string) => req<{ hits: LitHit[] }>('GET', `/api/bib/search?q=${encodeURIComponent(q)}`),
+  bibAdd: (project: string, data: { hit?: LitHit; bibtex?: string }) => req<BibAddResult>('POST', `/api/projects/${encodeURIComponent(project)}/bib/add`, data),
   feedbackInfo: () => req<FeedbackInfo>('GET', '/api/feedback/info'),
   feedback: (data: { kind: 'bug' | 'idea' | 'question'; title: string; body: string; doc?: string | null; error?: string | null }) => req<{ number: number; url: string }>('POST', '/api/feedback', data),
   clientError: (data: { message: string; stack?: string | null }) => req<{ url: string | null }>('POST', '/api/client-error', data),

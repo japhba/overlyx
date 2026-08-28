@@ -404,6 +404,31 @@ export const insertCite = (keys: string[], cmd = 'cite', before = '', after = ''
 };
 export const insertHref = (target: string, name = '') => insertCommand('href', ['LatexCommand href', `name "${name}"`, `target "${target}"`, 'literal "false"']);
 export const insertInclude = (filename: string, kind = 'include') => insertCommand('include', [`LatexCommand ${kind}`, `filename "${filename}"`, 'literal "true"']);
+/**
+ * Make sure the document's BibTeX inset lists a bibliography file (e.g. `cited` for cited.bib):
+ * 'added' when it was appended to the inset's list, 'present' when it was there already, 'none'
+ * when this document has no BibTeX inset (a child document's bibliography lives in the master).
+ */
+export function ensureBibFile(view: EditorView, name: string): 'added' | 'present' | 'none' {
+  let result: 'added' | 'present' | 'none' = 'none';
+  const want = name.replace(/\.bib$/, '');
+  view.state.doc.descendants((node, pos) => {
+    if (result !== 'none' || node.type.name !== 'command') return true;
+    const params: string[] = JSON.parse(node.attrs.params || '[]');
+    if (!params.includes('LatexCommand bibtex')) return true;
+    const i = params.findIndex(p => p.startsWith('bibfiles '));
+    const files = i >= 0 ? params[i].replace(/^bibfiles\s+/, '').replace(/^"|"$/g, '').split(',').map(s => s.trim()).filter(Boolean) : [];
+    if (files.some(f => f.replace(/\.bib$/, '') === want)) { result = 'present'; return false; }
+    const next = [...params];
+    const line = `bibfiles "${[...files, want].join(',')}"`;
+    if (i >= 0) next[i] = line; else next.splice(1, 0, line);
+    view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, params: JSON.stringify(next) }));
+    result = 'added';
+    return false;
+  });
+  return result;
+}
+
 export const insertBibtex = (files: string, style = 'plain') => insertCommand('bibtex', ['LatexCommand bibtex', 'btprint "btPrintCited"', `bibfiles "${files}"`, `options "${style}"`, 'encoding "default"']);
 export const insertToc = (kind = 'tableofcontents') => insertCommand('toc', [`LatexCommand ${kind}`]);
 export const insertIndexPrint = insertCommand('index_print', ['LatexCommand printindex', 'type "idx"', 'name "Index"', 'literal "false"']);

@@ -35,10 +35,12 @@ button { cursor: pointer; }
 .ol-wordmark .speed i:nth-child(2) { width: 0.85em; }
 .ol-wordmark .speed i:nth-child(3) { width: 0.35em; }
 .ol-wordmark .over { display: inline-block; font-family: var(--ui-font); font-weight: 800; font-style: italic; color: var(--accent); letter-spacing: -0.02em; transform: skewX(-8deg); margin-right: 0.04em; }
-.ol-wordmark .lyx { font-family: "Latin Modern Roman", "Times New Roman", Times, Georgia, serif; font-weight: 700; font-size: 1.08em; letter-spacing: -0.01em; }
-.ol-wordmark .l { color: #1a5fb4; }
-.ol-wordmark .y { color: #f5b400; }
-.ol-wordmark .x { color: #d0342c; }
+/* "LYX" as on lyx.org: heavy sans capitals, each letter tilted, with a soft 3-D shadow */
+.ol-wordmark .lyx { display: inline-flex; align-items: flex-end; font-family: "Arial Black", "Helvetica Neue", Arial, "Liberation Sans", sans-serif; font-weight: 900; font-size: 1.05em; letter-spacing: -0.04em; margin-left: 0.1em; }
+.ol-wordmark .lyx span { display: inline-block; text-shadow: 0.045em 0.045em 0 rgba(0,0,0,0.28); }
+.ol-wordmark .l { color: #2f7fd6; transform: rotate(-12deg) translateY(-0.04em); }
+.ol-wordmark .y { color: #f3b400; transform: rotate(7deg) translateY(0.12em); margin: 0 -0.02em; }
+.ol-wordmark .x { color: #e14b2c; transform: rotate(12deg) translateY(-0.02em); }
 .menubar .brand:hover .speed { transform: translateX(-0.12em); }
 .menubar .brand:hover .speed i { width: 1.1em; }
 .login h1 { font-size: 26px; }
@@ -666,3 +668,14 @@ button { cursor: pointer; }
 .feedback-opt code { font-size: 11px; background: #f3f3f1; padding: 0 3px; border-radius: 2px; }
 .feedback-error { color: #b00; font-size: 12px; }
 .feedback-done p { margin: 0; }
+
+/* citation dialog: project / online tabs and search hits */
+.dlg-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--ui-border); margin-bottom: 4px; }
+.dlg-tabs button { border: 0; background: none; padding: 5px 10px; border-bottom: 2px solid transparent; font-size: 12.5px; color: #444; }
+.dlg-tabs button.active { border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
+.dlg-tabs button:disabled { opacity: 0.5; }
+.lit-hit { display: flex; align-items: center; gap: 8px; }
+.lit-hit .lit-main { flex: 1; min-width: 0; }
+.lit-hit .lit-main b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lit-hit .sub { color: #666; font-size: 11px; }
+.lit-hit .small-btn { flex: none; }

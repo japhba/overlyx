@@ -145,6 +145,18 @@ Overleaf/LyX blend.
   (live LyX source that follows the cursor — edit and *Apply* — plus the exported LaTeX); wide display
   formulas overflow symmetrically into the margins (Google-Docs style) with equation numbers kept
   clear of the formula.
+* **Citations from the literature** (`Ctrl+Shift+C` ▸ *Find online / paste BibTeX*): type a title,
+  author names, a DOI, an arXiv id or a URL — the server searches **OpenAlex** (everything, with
+  citation counts) and **DBLP** (computer science) and looks DOIs / arXiv ids up directly; one click
+  fetches the BibTeX (DBLP's record, else doi.org content negotiation, else generated from the
+  metadata), gives it a Google-Scholar-style key (`vaswani2017attention`, made unique), appends it
+  to the project's **`cited.bib`** (created on demand), adds `cited` to the document's BibTeX inset
+  and selects it for insertion. A paper the project already has (same DOI, or same title and year, in
+  any of its .bib files) is not added twice — its existing key is used. Google Scholar itself has no
+  API and blocks servers, so the dialog links to a Scholar search for the query and accepts a pasted
+  entry from Scholar's *Cite ▸ BibTeX* the same way. `packages/server/src/bibsearch.ts`;
+  `OVERLYX_LITERATURE=off` disables the outbound requests, `OVERLYX_CONTACT_EMAIL` joins the
+  OpenAlex / Crossref polite pools (better rate limits; nothing else about users is sent).
 * **Find & replace** (`Ctrl+F`): find next/previous, replace, replace all, case-sensitive and
   whole-word options, live match count and highlighting. *Document ▸ Statistics* counts words and
   characters of the selection / the document (notes excluded).
@@ -194,7 +206,8 @@ administrator at sign-in and given every project directory that has no owner yet
 before OverLyX commits what changed, default 2 min) and `OVERLYX_GIT_COMMIT_MAX_WAIT` (longest time
 changes stay uncommitted while editing goes on, default 15 min), `GITHUB_REPO` / `GITHUB_TOKEN` /
 `GITHUB_API_URL` (feedback and error reports as issues, see above) and `OVERLYX_ERROR_REPORTS` (`off`
-disables the automatic ones). Git itself runs with an empty
+disables the automatic ones), `OVERLYX_LITERATURE` (`off` disables the literature search of the
+citation dialog) and `OVERLYX_CONTACT_EMAIL` (optional, for the OpenAlex / Crossref polite pools). Git itself runs with an empty
 environment (`HOME=<data dir>/git-home`, `safe.directory=*` because projects may belong to another
 account) — the server's own git configuration never applies.
 The Vite dev server proxies to `OVERLYX_API_PORT` (default 3000).
@@ -267,7 +280,7 @@ OVERLYX_DATA_DIR=$S/data OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_CLIENT_DIST=$S
 export OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_E2E_CREDENTIALS=$S/data/credentials.txt
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/smoke.spec.ts e2e/editing.spec.ts e2e/features.spec.ts e2e/dialogs.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sharing.spec.ts e2e/textfiles.spec.ts e2e/toolbar.spec.ts e2e/collab.spec.ts   # bob, carol, u1…u6
-OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts e2e/cite.spec.ts
 # offline mode needs the built client (service worker): build into $S/dist, then
 (cd packages/client && npx vite build --outDir $S/dist)
 OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e2e/git.spec.ts   # git: a real clone / push / pull with a token
