@@ -32,6 +32,19 @@ export interface Hit {
   sources: string[];
   /** DBLP record key when DBLP knows the paper (its .bib is the best BibTeX around) */
   dblp?: string;
+  /** BibTeX the index handed over with the hit (Semantic Scholar) */
+  bibtex?: string;
+  /** Google Scholar result id (SerpApi) — its "cite" endpoint gives the BibTeX */
+  scholarId?: string;
+}
+
+/** Which indexes this server can use, best first (the dialog shows them). */
+export function sourcesAvailable(): string[] {
+  const out: string[] = [];
+  if (config.serpApiKey) out.push('Google Scholar');
+  if (config.s2ApiKey) out.push('Semantic Scholar');
+  out.push('OpenAlex', 'DBLP', 'doi.org');
+  return out;
 }
 
 const UA = 'OverLyX/0.1 (https://github.com/japhba/overlyx' + (config.contactEmail ? `; mailto:${config.contactEmail}` : '') + ')';
@@ -93,38 +106,102 @@ async function dblp(q: string, limit: number): Promise<Hit[]> {
   });
 }
 
-/** Merge results of several indexes: same DOI or same title → one hit (DBLP's key kept, OpenAlex's citations kept). */
-export function mergeHits(lists: Hit[][], q: string, limit: number): Hit[] {
+/**
+ * Merge results of several indexes: same DOI or same title → one hit (DBLP's key, Scholar's id, the
+ * BibTeX and the citation count are kept from whichever index had them). `lists` are ordered by
+ * trust: the order of the first list that has a paper is its rank; a "Scholar-grade" first list
+ * (Google Scholar, Semantic Scholar) dominates the ranking, the open indexes only fill in.
+ */
+export function mergeHits(lists: Hit[][], q: string, limit: number, opts: { trusted?: boolean } = {}): Hit[] {
   const out: Hit[] = [];
-  const rank = new Map<Hit, number>();      // position in its index's relevance order (best of the merged ones)
+  const rank = new Map<Hit, number>(), origin = new Map<Hit, number>();
   const byDoi = new Map<string, Hit>(), byTitle = new Map<string, Hit>();
-  for (const list of lists) list.forEach((h, i) => {
+  lists.forEach((list, li) => list.forEach((h, i) => {
     const doi = h.doi?.toLowerCase(), t = normTitle(h.title);
     const dup = (doi && byDoi.get(doi)) || (t && byTitle.get(t));
     if (dup) {
       dup.sources = [...new Set([...dup.sources, ...h.sources])];
       dup.dblp = dup.dblp ?? h.dblp; dup.citations = dup.citations ?? h.citations; dup.doi = dup.doi ?? h.doi; dup.arxiv = dup.arxiv ?? h.arxiv;
-      dup.venue = dup.venue || h.venue; dup.year = dup.year ?? h.year; dup.url = dup.url ?? h.url;
+      dup.venue = dup.venue || h.venue; dup.year = dup.year ?? h.year; dup.url = dup.url ?? h.url; dup.bibtex = dup.bibtex ?? h.bibtex; dup.scholarId = dup.scholarId ?? h.scholarId;
       if (!dup.authors.length) dup.authors = h.authors;
-      rank.set(dup, Math.min(rank.get(dup) ?? i, i));
+      if (doi && !byDoi.has(doi)) byDoi.set(doi, dup);
+      if (t && !byTitle.has(t)) byTitle.set(t, dup);
       return;
     }
-    out.push(h); rank.set(h, i);
+    out.push(h); rank.set(h, i); origin.set(h, li);
     if (doi) byDoi.set(doi, h);
     if (t) byTitle.set(t, h);
-  });
-  // rank: a title containing every query word first; then the indexes' own relevance order (a paper both
-  // indexes list goes up); citations only break ties — a famous paper must not outrank the one asked for
+  }));
   const words = normTitle(q).split(' ').filter(w => w.length > 2);
   const score = (h: Hit) => {
     const t = normTitle(h.title);
     const hitWords = words.filter(w => t.includes(w)).length;
     const cites = Math.log10((h.citations ?? 0) + 1), pos = rank.get(h) ?? 0, both = h.sources.length > 1;
-    // every query word in the title: these are "the paper with that title" — the well-known one first
+    // a trusted first index: keep its order, everything it did not list goes below
+    if (opts.trusted) return (origin.get(h) === 0 ? 10000 - pos * 10 : 0) + hitWords * 2 + cites;
+    // open indexes: a title containing every query word first (the well-known one on top), then their own
+    // relevance order (a paper both list goes up); citations only break ties
     if (words.length && hitWords === words.length) return 1000 + cites * 10 - pos * 2 + (both ? 6 : 0);
     return hitWords * 5 - pos * 10 + (both ? 5 : 0) + cites;
   };
   return out.sort((a, b) => score(b) - score(a)).slice(0, limit);
+}
+
+/** Semantic Scholar (needs S2_API_KEY): relevance close to Google Scholar's, BibTeX included. */
+async function semanticScholar(q: string, limit: number): Promise<Hit[]> {
+  const r = await fetchImpl(`https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(q)}&limit=${limit}&fields=title,authors,year,venue,externalIds,citationCount,publicationTypes,citationStyles`, { headers: { 'x-api-key': config.s2ApiKey } });
+  if (!r.ok) throw new Error(`Semantic Scholar ${r.status}`);
+  const d: any = await r.json();
+  return (d.data ?? []).map((p: any): Hit => {
+    const ids = p.externalIds ?? {};
+    const doi = ids.DOI ? String(ids.DOI) : null;
+    return {
+      id: doi ?? `s2:${p.paperId}`, title: p.title ?? '', authors: (p.authors ?? []).map((a: any) => a.name).filter(Boolean), year: p.year ?? null,
+      venue: p.venue ?? '', type: (p.publicationTypes ?? []).join(','), doi, arxiv: ids.ArXiv ?? null,
+      url: doi ? `https://doi.org/${doi}` : (ids.ArXiv ? `https://arxiv.org/abs/${ids.ArXiv}` : `https://www.semanticscholar.org/paper/${p.paperId}`),
+      citations: p.citationCount ?? null, sources: ['semanticscholar'], dblp: ids.DBLP ?? undefined, bibtex: p.citationStyles?.bibtex ?? undefined,
+    };
+  });
+}
+
+/** Google Scholar through SerpApi (needs SERPAPI_KEY): the real thing, incl. "cited by" counts. */
+async function googleScholar(q: string, limit: number): Promise<Hit[]> {
+  const r = await fetchImpl(`https://serpapi.com/search.json?engine=google_scholar&q=${encodeURIComponent(q)}&num=${Math.min(20, limit)}&hl=en&api_key=${encodeURIComponent(config.serpApiKey)}`);
+  if (!r.ok) throw new Error(`Google Scholar (SerpApi) ${r.status}`);
+  const d: any = await r.json();
+  if (d.error) throw new Error(`Google Scholar (SerpApi): ${d.error}`);
+  return (d.organic_results ?? []).map((o: any): Hit => {
+    const info = o.publication_info ?? {};
+    // "A Vaswani, N Shazeer, N Parmar… - Advances in neural information…, 2017 - proceedings.neurips.cc"
+    const parts = String(info.summary ?? '').split(' - ');
+    const authors = (info.authors ?? []).map((a: any) => a.name).filter(Boolean);
+    const summaryAuthors = parts.length > 1 ? parts[0].split(',').map((x: string) => x.replace(/…$/, '').trim()).filter(Boolean) : [];
+    const venueYear = parts.length > 1 ? parts[1] : '';
+    const ym = /(\d{4})\s*$/.exec(venueYear);
+    const link = String(o.link ?? '');
+    const arxiv = /arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})/.exec(link)?.[1] ?? null;
+    const doi = DOI_RE.exec(link)?.[1] ?? null;
+    return {
+      id: `scholar:${o.result_id}`, title: String(o.title ?? '').replace(/^\[[A-Z]+\]\s*/, ''), authors: authors.length ? authors : summaryAuthors,
+      year: ym ? Number(ym[1]) : null, venue: venueYear.replace(/,?\s*\d{4}\s*$/, '').replace(/…$/, '').trim(), type: o.type ?? '',
+      doi, arxiv, url: link || null, citations: o.inline_links?.cited_by?.total ?? null, sources: ['scholar'], scholarId: o.result_id,
+    };
+  });
+}
+
+/** Scholar's own BibTeX for a result (SerpApi's google_scholar_cite gives the link; Scholar serves the file). */
+async function bibtexFromScholar(resultId: string): Promise<string | null> {
+  try {
+    const r = await fetchImpl(`https://serpapi.com/search.json?engine=google_scholar_cite&q=${encodeURIComponent(resultId)}&api_key=${encodeURIComponent(config.serpApiKey)}`);
+    if (!r.ok) return null;
+    const d: any = await r.json();
+    const link = (d.links ?? []).find((l: any) => /bibtex/i.test(l.name))?.link;
+    if (!link) return null;
+    const b = await fetchImpl(link);
+    if (!b.ok) return null;
+    const t = (await b.text()).trim();
+    return t.startsWith('@') ? t : null;
+  } catch { return null; }
 }
 
 /** Search the open indexes (or look a DOI / arXiv id up); failures of one index are ignored. */
@@ -133,10 +210,13 @@ export async function searchLiterature(q: string, limit = 10): Promise<Hit[]> {
   if (p.kind === 'doi') { const h = await hitFromDoi(p.doi); return h ? [h] : []; }
   if (p.kind === 'arxiv') { const h = await hitFromDoi(`10.48550/arXiv.${p.id}`); return h ? [h] : []; }
   if (!p.text) return [];
-  const settled = await Promise.allSettled([openalex(p.text, limit, 'title'), openalex(p.text, limit), dblp(p.text, limit)]);
+  // a Scholar-grade index first when a key is configured; the open ones fill in DOIs, DBLP keys, BibTeX
+  const trusted = config.serpApiKey ? googleScholar(p.text, limit) : config.s2ApiKey ? semanticScholar(p.text, limit) : null;
+  const settled = await Promise.allSettled([...(trusted ? [trusted] : []), openalex(p.text, limit, 'title'), openalex(p.text, limit), dblp(p.text, limit)]);
   const lists = settled.map(s => (s.status === 'fulfilled' ? s.value : []));
   if (settled.every(s => s.status === 'rejected')) throw new Error('Literature search is unavailable right now: ' + settled.map(s => (s as PromiseRejectedResult).reason?.message).join('; '));
-  return mergeHits(lists, p.text, limit);
+  if (trusted && settled[0].status === 'rejected') console.warn('[bibsearch]', (settled[0] as PromiseRejectedResult).reason?.message);
+  return mergeHits(lists, p.text, limit, { trusted: !!trusted && settled[0].status === 'fulfilled' });
 }
 
 async function hitFromDoi(doi: string): Promise<Hit | null> {
@@ -167,10 +247,19 @@ async function bibtexFromDblp(key: string): Promise<string | null> {
   } catch { return null; }
 }
 
-/** BibTeX for a hit: DBLP's record, else doi.org, else generated from what we know. */
+/** BibTeX for a hit: DBLP's record, else what the index handed over, else Scholar's, else doi.org, else generated. */
 export async function bibtexFor(h: Hit): Promise<string> {
-  const raw = (h.dblp && await bibtexFromDblp(h.dblp)) || (h.doi && await bibtexFromDoi(h.doi)) || generateBibtex(h);
-  return raw;
+  return (h.dblp && await bibtexFromDblp(h.dblp)) || h.bibtex || (h.scholarId && config.serpApiKey && await bibtexFromScholar(h.scholarId)) || (h.doi && await bibtexFromDoi(h.doi)) || (await bibtexFromTitle(h)) || generateBibtex(h);
+}
+
+/** Last resort before generating: find the paper's DOI by exact title (OpenAlex) and take doi.org's BibTeX. */
+async function bibtexFromTitle(h: Hit): Promise<string | null> {
+  if (!h.title) return null;
+  try {
+    const hits = await openalex(h.title, 3, 'title');
+    const m = hits.find(x => normTitle(x.title) === normTitle(h.title) && x.doi && (!h.year || !x.year || Math.abs(x.year - h.year) <= 1));
+    return m?.doi ? await bibtexFromDoi(m.doi) : null;
+  } catch { return null; }
 }
 
 function generateBibtex(h: Hit): string {

@@ -224,6 +224,8 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
   const [addedIds, setAddedIds] = useState<Map<string, string>>(new Map());
   const [paste, setPaste] = useState('');
   const [status, setStatus] = useState<string | null>(null);
+  const [sources, setSources] = useState<string[]>([]);
+  useEffect(() => { if (tab === 'online' && !sources.length) api.literatureSources().then(r => setSources(r.sources)).catch(() => {}); }, [tab]);
   useEffect(() => {
     if (tab !== 'online') return;
     const t = oq.trim();
@@ -273,7 +275,7 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
         </>
       ) : (
         <>
-          <Row label="Find"><input type="text" autofocus value={oq} onInput={e => setOq((e.target as HTMLInputElement).value)} placeholder="title, authors, DOI, arXiv id or URL" data-cite-query /><span class="sub" style="color:#888;font-size:11px;white-space:nowrap">{osearching ? 'searching…' : 'OpenAlex · DBLP · doi.org'}</span></Row>
+          <Row label="Find"><input type="text" autofocus value={oq} onInput={e => setOq((e.target as HTMLInputElement).value)} placeholder="title, authors, DOI, arXiv id or URL" data-cite-query /><span class="sub" style="color:#888;font-size:11px;white-space:nowrap">{osearching ? 'searching…' : sources.join(' · ') || '…'}</span></Row>
           <div class="list lit-list" style="max-height:260px" data-cite-hits>
             {ohits.map(h => (
               <div key={h.id} class="lit-hit" onClick={() => { if (!busyId && !addedIds.has(h.id)) void cite(h); }}>
@@ -286,7 +288,7 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
             ))}
             {oerror && <div class="sub" style="color:#b00;padding:4px 6px">{oerror}</div>}
             {!ohits.length && !osearching && oq.trim().length >= 3 && !oerror && <div class="sub" style="padding:4px 6px">Nothing found — try the Google Scholar link and paste the BibTeX below.</div>}
-            {oq.trim().length < 3 && <div class="sub" style="padding:4px 6px;color:#888">Type a title, author names, a DOI or an arXiv id. Picking a result adds its BibTeX to <code>cited.bib</code> in this project and selects it.</div>}
+            {oq.trim().length < 3 && <div class="sub" style="padding:4px 6px;color:#888">Type a title, author names, a DOI or an arXiv id. Picking a result adds its BibTeX to <code>cited.bib</code> in this project and selects it.{sources.length > 0 && !sources.includes('Google Scholar') && !sources.includes('Semantic Scholar') && <> Relevance is best with a Semantic Scholar or SerpApi key on the server (see README ▸ Secrets).</>}</div>}
           </div>
           <div class="row" style="justify-content:space-between">
             <span class="sub"><a href={scholarUrl} target="_blank" rel="noopener">Search Google Scholar ↗</a> — there: <i>Cite ▸ BibTeX</i>, then paste it here:</span>

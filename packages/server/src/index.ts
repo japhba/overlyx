@@ -14,7 +14,7 @@ import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
 import { sandboxAvailable } from './sandbox.ts';
 import { feedbackRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
-import { searchLiterature, bibtexFor, addToCitedBib, type Hit } from './bibsearch.ts';
+import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
 import { parseLyx, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText } from '@overlyx/core';
 
@@ -251,12 +251,13 @@ api.get('/projects/:project/text/*', needProject('view'), (req, res) => {
  * Save a text file. `mtime` is the modification time the client loaded; if the file changed since
  * (someone else, desktop LyX, git), the save is refused with 409 and the current content.
  */
+api.get('/bib/sources', (_req, res) => { res.json({ enabled: config.literature, sources: config.literature ? sourcesAvailable() : [] }); });
 /** Literature search for the citation dialog (open indexes; see bibsearch.ts). */
 api.get('/bib/search', async (req, res) => {
   if (!config.literature) { res.status(503).json({ error: 'Literature search is switched off on this server (OVERLYX_LITERATURE=off).' }); return; }
   const q = String(req.query.q ?? '').trim().slice(0, 300);
   if (!q) { res.json({ hits: [] }); return; }
-  try { res.json({ hits: await searchLiterature(q, Math.min(25, Number(req.query.limit) || 10)) }); }
+  try { res.json({ hits: await searchLiterature(q, Math.min(25, Number(req.query.limit) || 10)), sources: sourcesAvailable() }); }
   catch (e) { res.status(502).json({ error: (e as Error).message }); }
 });
 /** Add a paper to the project's cited.bib: either a search hit (BibTeX fetched here) or pasted BibTeX. */

@@ -64,6 +64,10 @@ export const config = {
   literature: process.env.OVERLYX_LITERATURE !== 'off',
   /** optional contact address sent with those requests (joins the OpenAlex / Crossref "polite pools" with better rate limits) */
   contactEmail: (process.env.OVERLYX_CONTACT_EMAIL ?? '').trim(),
+  /** Semantic Scholar API key (free, https://www.semanticscholar.org/product/api#api-key-form): Scholar-like relevance, BibTeX included */
+  s2ApiKey: (process.env.S2_API_KEY ?? '').trim(),
+  /** SerpApi key (https://serpapi.com): real Google Scholar results through their API */
+  serpApiKey: (process.env.SERPAPI_KEY ?? '').trim(),
   /** automatic issues for uncaught browser / server errors (OVERLYX_ERROR_REPORTS=off keeps only Help ▸ Report a problem) */
   errorReports: process.env.OVERLYX_ERROR_REPORTS !== 'off',
   sessionDays: 30,

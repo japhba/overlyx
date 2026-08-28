@@ -54,7 +54,8 @@ export interface LitHit { id: string; title: string; authors: string[]; year: nu
 export interface BibAddResult { key: string; file: string; existed: boolean; bibtex: string; entry: BibItem }
 export interface FeedbackInfo { enabled: boolean; repo: string; newIssueUrl: string; version: string; errorReports: boolean }
 export const api = {
-  literatureSearch: (q: string) => req<{ hits: LitHit[] }>('GET', `/api/bib/search?q=${encodeURIComponent(q)}`),
+  literatureSearch: (q: string) => req<{ hits: LitHit[]; sources: string[] }>('GET', `/api/bib/search?q=${encodeURIComponent(q)}`),
+  literatureSources: () => req<{ enabled: boolean; sources: string[] }>('GET', '/api/bib/sources'),
   bibAdd: (project: string, data: { hit?: LitHit; bibtex?: string }) => req<BibAddResult>('POST', `/api/projects/${encodeURIComponent(project)}/bib/add`, data),
   feedbackInfo: () => req<FeedbackInfo>('GET', '/api/feedback/info'),
   feedback: (data: { kind: 'bug' | 'idea' | 'question'; title: string; body: string; doc?: string | null; error?: string | null }) => req<{ number: number; url: string }>('POST', '/api/feedback', data),

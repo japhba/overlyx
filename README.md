@@ -146,8 +146,13 @@ Overleaf/LyX blend.
   formulas overflow symmetrically into the margins (Google-Docs style) with equation numbers kept
   clear of the formula.
 * **Citations from the literature** (`Ctrl+Shift+C` ▸ *Find online / paste BibTeX*): type a title,
-  author names, a DOI, an arXiv id or a URL — the server searches **OpenAlex** (everything, with
-  citation counts) and **DBLP** (computer science) and looks DOIs / arXiv ids up directly; one click
+  author names, a DOI, an arXiv id or a URL. With a key the search is Scholar-grade: **Google
+  Scholar** itself through [SerpApi](https://serpapi.com) (`SERPAPI_KEY`; free tier 100 searches a
+  month, its own "cited by" counts and BibTeX) or **Semantic Scholar** (`S2_API_KEY`, free from
+  their [API form](https://www.semanticscholar.org/product/api#api-key-form); relevance close to
+  Scholar's, BibTeX included) — the first available leads the ranking. Without keys the open indexes
+  **OpenAlex** (title/abstract search, citation counts) and **DBLP** (computer science) are used, with
+  noticeably weaker relevance. DOIs / arXiv ids are looked up directly. One click
   fetches the BibTeX (DBLP's record, else doi.org content negotiation, else generated from the
   metadata), gives it a Google-Scholar-style key (`vaswani2017attention`, made unique), appends it
   to the project's **`cited.bib`** (created on demand), adds `cited` to the document's BibTeX inset
