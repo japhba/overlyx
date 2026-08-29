@@ -28,6 +28,10 @@ describe('wordsOf', () => {
     const p = par([t('plain '), t('code_name', [schema.marks.family.create({ value: 'typewriter' })]), t(' '), t('LyXword', [schema.marks.nospellcheck.create({ value: 'true' })])]);
     expect(wordsOf(p, 0).map(w => w.word)).toEqual(['plain']);
   });
+  it('skips e-mail addresses, URLs, file names and Latin abbreviations', () => {
+    const p = par([t('Write to jan.bauer@ucl.ac.uk or see https://overlyx.app/docs and fig1.pdf, et al. use v2.0 loosely.')]);
+    expect(wordsOf(p, 0).map(w => w.word)).toEqual(['Write', 'to', 'or', 'see', 'and', 'use', 'loosely']);
+  });
   it('checks nothing in code layouts', () => {
     expect(wordsOf(par([t('int main')], 'LyX-Code'), 0)).toEqual([]);
   });
