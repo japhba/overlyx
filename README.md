@@ -169,11 +169,18 @@ blend.
   actions that make sense for it), then Cut / Copy / Paste, *Rewrite with AI* (when switched on),
   *Comment on this* and *Turn into a formula* for a selection, the text style, paragraph layout,
   paragraph, insert and track-changes submenus, and the spell-checking switch. Formulas have their
-  own menu (numbering, environment, label, insert, fonts, AI). Shift+right-click gives the browser's
-  own menu — that is where its spelling suggestions live.
-* **Spell checking** is the browser's (red underlines); switch it off and on with the abc✓ button
-  on the standard toolbar, Tools ▸ Spell checking, or the context menu. The choice is kept per
-  browser (`localStorage.ol.prefs`, `src/prefs.ts`, Tools ▸ Preferences…).
+  own menu (numbering, environment, label, insert, fonts, AI); a misspelt word puts its
+  corrections first. Shift+right-click gives the browser's own menu.
+* **Spell checking** (`editor/spell/`): OverLyX's own checker by default — a Hunspell dictionary
+  (nspell) in a Web Worker, chosen by the document's language (English, British, German, French;
+  served from `/dict/`, loaded on demand), checking starts as soon as a document opens and only the
+  paragraphs an edit touched are re-checked; it knows LaTeX — formulas, cross references,
+  citation keys, ERT / listings / typewriter text, acronyms and identifiers are left alone, and so
+  is the word under the caret until you move on. Misspelt words get a wavy underline; the
+  right-click menu offers Hunspell's suggestions, *Add to the dictionary* (kept per browser,
+  `localStorage.ol.spell.words`) and *Ignore*. Preferences ▸ Checker switches to the browser's own
+  checker instead (which checks slowly after a click and keeps its suggestions to itself). The
+  abc✓ toolbar button, Tools ▸ Spell checking and the context menu switch checking off and on.
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or
   Preferences — the switches are menu items, so the command palette finds them): needs
   `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.7 Flash rewrites,

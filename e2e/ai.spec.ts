@@ -50,7 +50,7 @@ const selectParagraph = (page: Page, i: number) => page.evaluate((i) => {
 }, i);
 
 test('the right-click menu: clipboard first, formatting, insert, spell checking; Shift passes to the browser', async ({ page }) => {
-  await open(page, { spellcheck: true, aiRewrite: false });
+  await open(page, { spellcheck: true, spellEngine: 'browser', aiRewrite: false });   // OverLyX's checker has its own spec
   const par = page.locator('.lyx-editor .lyx-par').nth(2);
   await par.click({ button: 'right', position: { x: 12, y: 8 } });
   const items = (await page.locator('.ctx-menu .ctx-item').allTextContents()).map(t => t.replace(/Ctrl\+\w|⌘\w|▸/g, '').trim());
@@ -75,7 +75,7 @@ test('the right-click menu: clipboard first, formatting, insert, spell checking;
 });
 
 test('spell checking: toolbar button and Tools menu, remembered per browser', async ({ page }) => {
-  await open(page, { spellcheck: true });
+  await open(page, { spellcheck: true, spellEngine: 'browser' });   // the browser engine shows the switch on the element itself
   await expect(page.locator('.lyx-editor')).toHaveAttribute('spellcheck', 'true');
   await expect(page.locator('[data-tb="spellcheck"]')).toHaveClass(/active/);
   await page.click('[data-tb="spellcheck"]');
@@ -88,7 +88,7 @@ test('spell checking: toolbar button and Tools menu, remembered per browser', as
 });
 
 test('AI switches live in Tools ▸ AI assistance and the preferences; the palette finds them', async ({ page }) => {
-  await open(page, { aiRewrite: false, aiCompleteText: false });
+  await open(page, { aiRewrite: false, aiCompleteText: false, spellEngine: 'browser' });
   await page.click('.menubar .menu button:has-text("Tools")');
   await page.click('.menu-item:has-text("Preferences")');
   const dlg = page.locator('.dialog');

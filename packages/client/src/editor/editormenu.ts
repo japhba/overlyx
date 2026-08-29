@@ -16,6 +16,7 @@ import { STANDARD_LAYOUTS } from './layouts';
 import { resolveDocPath } from './context';
 import { getPrefs, setPref } from '../prefs';
 import { openRewrite, REWRITE_KEY } from './ai/rewrite';
+import { addToDictionary, ignoreWord } from './spell/plugin';
 
 const REF_TYPES: [string, string][] = [
   ['ref', '<reference>'], ['eqref', '(<reference>)'], ['pageref', '<page>'], ['vref', '<reference> on page <page>'],
@@ -37,7 +38,7 @@ function setParam(view: EditorView, pos: number, node: PMNode, key: string, valu
 const isMac = /Mac/.test(navigator.platform);
 const MOD = isMac ? '⌘' : 'Ctrl';
 
-export function editorContextMenu(view: EditorView, ev: MouseEvent): MenuItem[] {
+export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: { word: string; from: number; to: number; suggestions: string[] }): MenuItem[] {
   const state = view.state;
   const coords = view.posAtCoords({ left: ev.clientX, top: ev.clientY });
   let target: { node: PMNode; pos: number } | null = null;
@@ -55,6 +56,17 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent): MenuItem[] 
   }
   const items: MenuItem[] = [];
   const run = (cmd: Command) => () => { cmd(view.state, view.dispatch, view); view.focus(); };
+  if (spelling) {
+    const { word, from, to, suggestions } = spelling;
+    items.push({ label: `“${word}” is not in the dictionary`, info: true });
+    if (suggestions.length) items.push(...suggestions.map(s => ({ label: s, action: () => { view.dispatch(view.state.tr.insertText(s, from, to)); view.focus(); } })));
+    else items.push({ label: 'No suggestions', disabled: true });
+    items.push(
+      { label: `Add “${word}” to the dictionary`, action: () => addToDictionary(word) },
+      { label: `Ignore “${word}” for now`, action: () => ignoreWord(word) },
+      { sep: true },
+    );
+  }
   const dialog = (name: string, arg?: unknown) => () => editorContext.openDialog?.(name, arg);
   const project = viewProject(view), docDir = viewDocDir(view);
 
@@ -225,7 +237,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent): MenuItem[] 
     ] },
     { sep: true },
     { label: 'Spell checking', checked: prefs.spellcheck, action: () => setPref('spellcheck', !prefs.spellcheck) },
-    { label: (isMac ? '⇧' : 'Shift+') + 'right-click: the browser menu (spelling suggestions)', info: true },
+    { label: (isMac ? '⇧' : 'Shift+') + 'right-click: the browser menu', info: true },
   );
   return items;
 }

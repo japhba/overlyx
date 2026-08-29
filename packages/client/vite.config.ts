@@ -35,8 +35,38 @@ function serviceWorker(): Plugin {
   };
 }
 
+/**
+ * Hunspell dictionaries for the spell checker (editor/spell/worker.ts) from the dictionary-*
+ * packages, at /dict/<lang>.aff|.dic: a middleware in dev, emitted files at build (not part of
+ * the offline precache — the worker fetches the one language it needs).
+ */
+const DICTIONARIES: Record<string, string> = { en: 'dictionary-en', 'en-gb': 'dictionary-en-gb', de: 'dictionary-de', fr: 'dictionary-fr' };
+function dictionaries(): Plugin {
+  const source = (lang: string, ext: string) => path.resolve(__dirname, '../../node_modules', DICTIONARIES[lang] ?? '', 'index.' + ext);
+  return {
+    name: 'overlyx-dictionaries',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const m = /^\/dict\/([a-z-]+)\.(aff|dic)(?:\?.*)?$/.exec(req.url ?? '');
+        if (!m || !DICTIONARIES[m[1]]) { next(); return; }
+        const f = source(m[1], m[2]);
+        if (!fs.existsSync(f)) { res.statusCode = 404; res.end(); return; }
+        res.setHeader('content-type', 'text/plain; charset=utf-8');
+        res.setHeader('cache-control', 'public, max-age=86400');
+        fs.createReadStream(f).pipe(res);
+      });
+    },
+    generateBundle() {
+      for (const lang of Object.keys(DICTIONARIES)) for (const ext of ['aff', 'dic']) {
+        const f = source(lang, ext);
+        if (fs.existsSync(f)) this.emitFile({ type: 'asset', fileName: `dict/${lang}.${ext}`, source: fs.readFileSync(f) });
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [preact(), serviceWorker()],
+  plugins: [preact(), serviceWorker(), dictionaries()],
   resolve: {
     alias: { '@overlyx/core': path.resolve(__dirname, '../core/src/index.ts') },
     dedupe: ['prosemirror-model', 'prosemirror-state', 'prosemirror-view', 'prosemirror-transform', 'yjs'],

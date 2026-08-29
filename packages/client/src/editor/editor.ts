@@ -33,6 +33,7 @@ import { aiRewritePlugin, openRewriteMath } from './ai/rewrite';
 import { aiCompletePlugin } from './ai/complete';
 import { installMathAssist } from './ai/mathassist';
 import { getPrefs, subscribePrefs } from '../prefs';
+import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
 import type { User } from '../api';
 
 installMathAssist();
@@ -281,6 +282,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     // AI preview / ghost text come first: their Tab / Escape must win over the LyX bindings and table navigation
     aiRewritePlugin(),
     aiCompletePlugin(),
+    spellPlugin(),
     chordPlugin(),
     lyxKeymap(),
     gapCursor(),
@@ -348,7 +350,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       command: (node, view, getPos) => guarded(node, () => new CommandView(node, view, getPos as () => number | undefined)),
       leaf: (node, view, getPos) => guarded(node, () => new LeafView(node, view, getPos as () => number | undefined)),
     },
-    attributes: editorAttributes(!!opts.child, getPrefs().spellcheck),
+    attributes: editorAttributes(!!opts.child, getPrefs()),
     // text/plain for the clipboard: formulas as $…$, references as \ref{…}, … (see cliptext.ts)
     clipboardTextSerializer: sliceText,
     handleDoubleClickOn(view, _pos, node, nodePos) {
@@ -384,9 +386,15 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       contextmenu(view, ev) {
         const t = ev.target as HTMLElement;
         if (t.closest?.('math-field')) return false;   // the field shows its own menu
-        if (ev.shiftKey) return false;                  // Shift+right-click: the browser's own menu (spelling suggestions)
+        if (ev.shiftKey) return false;                  // Shift+right-click: the browser's own menu
         ev.preventDefault();
-        showContextMenu(ev.clientX, ev.clientY, editorContextMenu(view, ev));
+        // a misspelt word under the pointer: fetch the suggestions first (a few ms), then the menu
+        const coords = view.posAtCoords({ left: ev.clientX, top: ev.clientY });
+        const bad = coords ? misspelledAt(view.state, coords.pos) : null;
+        if (bad) {
+          const { clientX, clientY } = ev;
+          void spellSuggest(bad.word).then(list => { showContextMenu(clientX, clientY, editorContextMenu(view, ev, { ...bad, suggestions: list })); });
+        } else showContextMenu(ev.clientX, ev.clientY, editorContextMenu(view, ev));
         return true;
       },
     },
@@ -411,7 +419,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   viewRef = view;
   performance.mark('ol:editor-created');
   // the spell-check switch (Tools ▸ Spell checking) applies to open editors right away
-  const unsubscribePrefs = subscribePrefs(p => { view.setProps({ attributes: editorAttributes(!!opts.child, p.spellcheck) }); });
+  const unsubscribePrefs = subscribePrefs(p => { view.setProps({ attributes: editorAttributes(!!opts.child, p) }); });
   // A double-click that opened this document (child link, file browser) ends after the new editor
   // exists: its dblclick event must not open a dialog for whatever node now sits under the pointer.
   const createdAt = performance.now();
@@ -578,8 +586,9 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   };
 }
 
-function editorAttributes(child: boolean, spellcheck: boolean): Record<string, string> {
-  return { class: 'lyx-editor' + (child ? ' lyx-editor-child' : ''), spellcheck: spellcheck ? 'true' : 'false' };
+function editorAttributes(child: boolean, p: { spellcheck: boolean; spellEngine: string }): Record<string, string> {
+  // the browser's checker only when it is the chosen engine (two sets of underlines otherwise)
+  return { class: 'lyx-editor' + (child ? ' lyx-editor-child' : ''), spellcheck: p.spellcheck && p.spellEngine === 'browser' ? 'true' : 'false' };
 }
 
 /** "Inserted by Jane Doe on 3/2/2026, 10:12" for a tracked change. */

@@ -747,7 +747,11 @@ export function PreferencesDialog({ ai, onClose }: { ai: AiStatus | null; onClos
   return (
     <Dialog title="Preferences" onClose={onClose}>
       <h3>Text</h3>
-      {check('spellcheck', 'Spell checking', `The browser's spell checker underlines misspelt words; ${/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click on a word shows its suggestions.`)}
+      {check('spellcheck', 'Spell checking', 'Misspelt words are underlined; the right-click menu offers corrections.')}
+      <Row label="Checker"><select data-pref="spellEngine" value={p.spellEngine} onChange={e => setPref('spellEngine', (e.target as HTMLSelectElement).value as Prefs['spellEngine'])}>
+        <option value="overlyx">OverLyX — instant, knows LaTeX (skips formulas, commands, code), suggestions in the menu; English, British, German, French</option>
+        <option value="browser">Browser — the browser's own checker (checks slowly after a click; suggestions only via {/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click)</option>
+      </select></Row>
       <h3>AI assistance</h3>
       <div class="sub">{ai === null ? 'Checking the server…' : ai.available ? `Available on this server — model ${ai.model}${ai.completionModel !== ai.model ? `, autocomplete ${ai.completionModel}` : ''}.` : 'Not configured on this server: the administrator has to set OPENROUTER_API_KEY (deploy/secrets.env). The switches below have no effect until then.'}</div>
       {check('aiRewrite', `Rewrite with AI (${REWRITE_KEY})`, 'Select text or a formula, press the key and describe the change; the proposal is shown in place and applied only when you accept it. While this is on, LyX’s Ctrl+K (delete to the end of the paragraph) is taken over.')}
