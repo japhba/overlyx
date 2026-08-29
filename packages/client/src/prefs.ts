@@ -19,7 +19,7 @@ export interface Prefs {
   aiCompleteDelay: number;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 600 };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 450 };
 const STORAGE = 'ol.prefs';
 
 function load(): Prefs {

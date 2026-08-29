@@ -78,12 +78,14 @@ export const config = {
   },
   /**
    * AI assistance in the editor (⌘K rewrite, autocomplete; ai.ts) — through the same OpenRouter
-   * key. Gemini Flash by default: fast, huge context (the whole paper goes along), cheap enough
-   * for autocomplete. The completion model may differ (e.g. a "lite" model for lower latency).
+   * key. Rewrites use Gemini Flash (quality, a million tokens of context — the whole paper goes
+   * along). Autocomplete needs an answer in well under a second: Gemini 3.7 Flash spends ~100
+   * hidden reasoning tokens on every reply (2.6 s, and reasoning cannot be switched off), the
+   * "lite" model answers the same prompt in 0.6–0.9 s (measured 2026-08-29, scratch/ai-bench.mjs).
    */
   ai: {
     model: (process.env.OVERLYX_AI_MODEL ?? 'google/gemini-3.7-flash').trim(),
-    completionModel: (process.env.OVERLYX_AI_COMPLETION_MODEL ?? process.env.OVERLYX_AI_MODEL ?? 'google/gemini-3.7-flash').trim(),
+    completionModel: (process.env.OVERLYX_AI_COMPLETION_MODEL ?? 'google/gemini-3.5-flash-lite').trim(),
     /** requests per user per minute: rewrites / completions */
     rewritesPerMinute: Number(process.env.OVERLYX_AI_REWRITES_PER_MIN ?? 30),
     completionsPerMinute: Number(process.env.OVERLYX_AI_COMPLETIONS_PER_MIN ?? 120),

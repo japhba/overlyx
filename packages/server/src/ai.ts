@@ -40,6 +40,19 @@ function messageText(content: unknown): string {
 
 /** One chat completion through OpenRouter; the assistant's text (may be empty). */
 export async function chat(messages: ChatMessage[], opts: ChatOptions = {}): Promise<string> {
+  const t0 = Date.now();
+  const what = `${opts.title ?? 'OverLyX'} ${opts.model ?? config.ai.model}`;
+  try {
+    const text = await chatRaw(messages, opts);
+    console.log(`[ai] ${what}: ${Date.now() - t0} ms, ${messages.reduce((n, m) => n + m.content.length, 0)} chars in, ${text.length} out`);
+    return text;
+  } catch (e) {
+    if (!(e instanceof AiError && e.status === 499)) console.warn(`[ai] ${what} failed after ${Date.now() - t0} ms: ${(e as Error).message}`);
+    throw e;
+  }
+}
+
+async function chatRaw(messages: ChatMessage[], opts: ChatOptions): Promise<string> {
   if (!config.openrouter.apiKey) throw new AiError('AI assistance is not configured on this server (OPENROUTER_API_KEY is unset).', 503);
   let res: Response;
   try {
@@ -225,22 +238,24 @@ function docContext(doc: OpenDoc): { text: string; macros: string[] } {
 }
 
 export async function complete(doc: OpenDoc, req: CompleteRequest, signal?: AbortSignal): Promise<CompleteResult> {
-  const { text: docText, macros } = docContext(doc);
-  const before = req.before.slice(-6000), after = req.after.slice(0, 1500);
-  // the document beyond the immediate neighbourhood: preamble (macros, title) and a window before the passage
+  const { text: docText, macros: allMacros } = docContext(doc);
+  // latency matters more than breadth here: a few thousand characters around the cursor, the
+  // start of the preamble (class, title, the first macros) and the first macro definitions
+  const before = req.before.slice(-2500), after = req.after.slice(0, 600);
+  const macros = allMacros.slice(0, 150);
   const bd = docText.indexOf('\\begin{document}');
-  const preamble = bd > 0 ? docText.slice(0, Math.min(bd, 6000)) : '';
+  const preamble = bd > 0 ? docText.slice(0, Math.min(bd, 2500)) : '';
   const loc = before.trim() ? locate(docText, before.slice(-400)) : null;
-  const earlier = loc ? docText.slice(Math.max(bd > 0 ? bd : 0, loc.start - 12000), loc.start) : docText.slice(bd > 0 ? bd : 0, (bd > 0 ? bd : 0) + 12000);
+  const earlier = loc ? docText.slice(Math.max(bd > 0 ? bd : 0, loc.start - 5000), loc.start) : docText.slice(bd > 0 ? bd : 0, (bd > 0 ? bd : 0) + 5000);
   const model = config.ai.completionModel;
   if (req.kind === 'math') {
     const user = `## Document (for context)\n${preamble}\n…\n${earlier}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Text around the formula\n${(req.paragraph ?? before).slice(-2000)}\n\n## The formula so far\n${req.formula ?? before + CURSOR + after}\n\nReply with the continuation at ${CURSOR} only.`;
-    const reply = cleanReply(await chat([{ role: 'system', content: COMPLETE_MATH_SYSTEM }, { role: 'user', content: user }], { model, temperature: 0.1, maxTokens: 120, signal, title: 'OverLyX autocomplete' }));
+    const reply = cleanReply(await chat([{ role: 'system', content: COMPLETE_MATH_SYSTEM }, { role: 'user', content: user }], { model, temperature: 0.1, maxTokens: 80, signal, title: 'OverLyX autocomplete' }));
     const text = reply.replace(/^\$+|\$+$/g, '').replace(/^\\\[|\\\]$/g, '').replace(/\n/g, ' ').trim();
     return { text, nodes: [] };
   }
   const user = `## Document (for context)\n${preamble}\n…\n${earlier}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Text at the cursor\n${before}${CURSOR}${after}\n\nReply with the continuation at ${CURSOR} only.`;
-  const raw = await chat([{ role: 'system', content: COMPLETE_TEXT_SYSTEM }, { role: 'user', content: user }], { model, temperature: 0.2, maxTokens: 120, signal, title: 'OverLyX autocomplete' });
+  const raw = await chat([{ role: 'system', content: COMPLETE_TEXT_SYSTEM }, { role: 'user', content: user }], { model, temperature: 0.2, maxTokens: 60, signal, title: 'OverLyX autocomplete' });
   // a leading space is meaningful here (the reply starts a new word): keep it, drop the rest of the trimming
   let text = raw.replace(/\r\n/g, '\n');
   const fence = /^\s*```(?:[\w-]*)\n([\s\S]*?)\n?```\s*$/.exec(text);

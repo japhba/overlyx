@@ -30,6 +30,8 @@ export interface EditorContext {
   activeView?: EditorView | null;
   /** the server can answer AI requests (a key is configured); the model names for the UI */
   ai?: { available: boolean; model: string; completionModel: string };
+  /** an AI request is in flight (the status bar shows it) */
+  aiBusy?: (on: boolean) => void;
   /** ⌘K inside a formula (set by editor/ai/rewrite.ts; the math field calls it) */
   aiRewriteMath?: (field: import('./lyxmath/field').LyxMathField) => void;
 }

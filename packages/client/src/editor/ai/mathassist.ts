@@ -43,6 +43,7 @@ export function installMathAssist(): void {
     if (hit !== undefined) { if (hit) f.setGhost(hit); return; }
     ctrl?.abort();
     const ac = ctrl = new AbortController();
+    editorContext.aiBusy?.(true);
     try {
       const r = await api.aiComplete(docId, { kind: 'math', before, after, formula, paragraph }, ac.signal);
       if (ac.signal.aborted) return;
@@ -53,7 +54,7 @@ export function installMathAssist(): void {
       if ((e as Error).name === 'AbortError' || ac.signal.aborted) return;
       const status = (e as { status?: number }).status;
       if (status === 429 || status === 503) editorContext.notify?.((e as Error).message, 'error');
-    } finally { if (ctrl === ac) ctrl = null; }
+    } finally { if (ctrl === ac) ctrl = null; editorContext.aiBusy?.(false); }
   };
 
   mathCursorListeners.add((f) => {

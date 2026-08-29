@@ -955,3 +955,5 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .dialog .pref input { margin-top: 2px; }
 .dialog .pref .sub, .dialog .body > .sub { display: block; color: var(--ui-muted); font-size: 11px; line-height: 1.4; }
 .dialog h3 { margin: 6px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ui-muted); }
+.statusbar .ai-busy { color: var(--accent); animation: ai-pulse 1s ease-in-out infinite; }
+@keyframes ai-pulse { 50% { opacity: 0.35; } }

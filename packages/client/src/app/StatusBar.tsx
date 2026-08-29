@@ -32,13 +32,15 @@ export function UserAvatars({ users, onJump }: { users: PresenceUser[]; onJump?:
   );
 }
 
-export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, onJumpToUser }: {
+export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, onJumpToUser }: {
   layout: string; status: Status; chord: string | null; message: { text: string; kind: 'info' | 'error' } | null; save: SaveState;
   tracking: boolean; trackingAs?: string; change?: string | null; docLabel?: string | null; readOnly?: boolean;
   /** no document editor is open (start screen, text file): only messages */
   quiet?: boolean;
   /** a newer build of OverLyX is deployed than the one running in this tab */
   updateReady?: boolean;
+  /** an autocomplete request is on its way (Tools ▸ AI assistance) */
+  aiBusy?: boolean;
   onJumpToUser?: (u: PresenceUser) => void;
 }) {
   if (quiet) return <div class="statusbar">{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" /></div>;
@@ -48,6 +50,7 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
       {docLabel && <span class="doclabel" title="Document under the cursor">{docLabel}</span>}
       <span title="Current paragraph layout">{layout}</span>
       {readOnly && <span class="readonly-badge" title="This project was shared with you for viewing: you can read and compile it, but not change it">👁 view only</span>}
+      {aiBusy && <span class="ai-busy" title="Asking the model for a continuation…" data-ai-busy>✦ AI…</span>}
       {chord && <span class="chord">{chord} …</span>}
       {tracking && <span class="tracking" title="Change tracking is on (Ctrl+Shift+E): your edits are recorded under this name">● tracking changes{trackingAs ? ` as ${trackingAs}` : ''}</span>}
       {change && <span class="change-info" title="Tracked change under the cursor (right-click to accept / reject)">{change}</span>}

@@ -176,8 +176,8 @@ blend.
   browser (`localStorage.ol.prefs`, `src/prefs.ts`, Tools ▸ Preferences…).
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or
   Preferences — the switches are menu items, so the command palette finds them): needs
-  `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); the model is Gemini Flash
-  (`OVERLYX_AI_MODEL`, `OVERLYX_AI_COMPLETION_MODEL`).
+  `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.7 Flash rewrites,
+  Gemini 3.5 Flash Lite completes (`OVERLYX_AI_MODEL`, `OVERLYX_AI_COMPLETION_MODEL`).
   * *Rewrite with AI* — `⌘K` / `Ctrl+K` (LyX's delete-to-end-of-paragraph on that key steps aside
     while this is on): select a passage — or nothing, to write at the cursor — and describe the
     change in the small prompt under it. The passage, the instruction and the document's LaTeX
@@ -186,7 +186,7 @@ blend.
     proposal rendered after it, formulas and citations included. Enter accepts, Esc rejects,
     nothing touches the shared document before that. Inside a formula the same key rewrites the
     formula (or its selected part) and shows the rendered proposal in the prompt.
-  * *Autocomplete* — after a pause in typing (600 ms, adjustable) the model proposes a short
+  * *Autocomplete* — after a pause in typing (450 ms, adjustable) the model proposes a short
     continuation; it appears as grey ghost content after the caret, with any formula in it already
     rendered (the server returns editor nodes, not just text), and Tab inserts exactly that.
     Anything else dismisses it. Inside formulas the ghost is rendered by KaTeX at the end of the
@@ -321,7 +321,9 @@ token with *Issues* on one repository is all the feedback channel needs.
 document repair (see "Document health" below); `OPENROUTER_REPAIR_MODEL` overrides the model
 (default `anthropic/claude-opus-5`). Without a key the feature is hidden. The same key powers the
 editor's AI assistance (⌘K rewrite, autocomplete; `OVERLYX_AI_MODEL` /
-`OVERLYX_AI_COMPLETION_MODEL`, default `google/gemini-3.7-flash`; `OVERLYX_AI_REWRITES_PER_MIN`,
+`OVERLYX_AI_COMPLETION_MODEL`, defaults `google/gemini-3.7-flash` for rewrites and
+`google/gemini-3.5-flash-lite` for autocomplete — the 3.7 model spends ~100 hidden reasoning tokens on
+every reply, 2.6 s, the lite model answers in 0.6–0.9 s, see `scratch/ai-bench.mjs`; `OVERLYX_AI_REWRITES_PER_MIN`,
 `OVERLYX_AI_COMPLETIONS_PER_MIN` rate limits per user). `GET /api/ai/status` tells the client
 whether it is configured; the features stay off in every browser until a user switches them on.
 
