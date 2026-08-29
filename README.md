@@ -189,8 +189,8 @@ blend.
   Chapter, so Section promotes to Part).
 * **Notes & comments in the margin** (*View* menu / toolbar): the note cards sit in a column right
   of the text, Google-Docs style, stacked without overlap and anchored by small coloured squares
-  in the text (`editor/plugins/margin.ts`); every card shows its whole content (a note's fold
-  state only matters inline); the − / + buttons on the ruler over the note column make the cards
+  in the text (`editor/plugins/margin.ts`); a folded note is a card with its label and a one-line
+  excerpt, its label unfolds it (and the cards below move down); the − / + buttons on the ruler over the note column make the cards
   narrower / wider (`localStorage.ol.noteWidth`, 200–640 px, double-click the label to reset); the
   column narrows on a small window and the text keeps at least 360px. Notes and comments are set
   in the interface's sans-serif, a little smaller than the text, inline as well.

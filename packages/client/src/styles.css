@@ -418,10 +418,12 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .margin-mode .lyx-inset-note.in-margin { position: static; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box { position: absolute; width: 320px; max-width: calc(var(--margin-col, 372px) - 52px); display: block; z-index: 2; box-shadow: 0 1px 4px rgba(0,0,0,0.15); padding: 6px 8px; font-size: 0.85em; line-height: 1.35; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
-/* in the margin every note shows its whole content (its fold state only matters inline) */
-.margin-mode .lyx-inset-note.in-margin.collapsed > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin .lyx-inset-note.collapsed > .inset-box > .inset-content { display: block; }
-.margin-mode .lyx-inset-note.in-margin .lyx-inset-note > .inset-box { display: block; margin: 3px 0; }
-.margin-mode .lyx-inset-note.in-margin .lyx-inset-note > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin .lyx-inset-note > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
+/* a folded note in the margin: its label and a one-line excerpt (click the label to unfold it); nested notes fold as inline */
+.margin-mode .lyx-inset-note.in-margin.collapsed > .inset-box > .inset-content { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: 1.4em; opacity: 0.6; }
+.margin-mode .lyx-inset-note.in-margin.collapsed > .inset-box > .inset-content > .lyx-par { display: inline; }
+.margin-mode .lyx-inset-note.in-margin.collapsed > .inset-box > .inset-content .lyx-inset > .inset-box { display: inline; }
+.margin-mode .lyx-inset-note.in-margin:not(.collapsed) .lyx-inset-note > .inset-box { display: block; margin: 3px 0; }
+.margin-mode .lyx-inset-note.in-margin:not(.collapsed) .lyx-inset-note:not(.collapsed) > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin:not(.collapsed) .lyx-inset-note:not(.collapsed) > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box .lyx-inset-note > .inset-anchor { display: none; }
 
 /* leaf insets */

@@ -353,20 +353,34 @@ test('Ctrl+Alt+← / → go back and forward through jumps, also across tabs', a
   await page.keyboard.press('Escape');
 });
 
-test('margin mode shows every note in full, and the ruler buttons change the note width', async ({ page }) => {
+test('margin mode keeps the notes' fold state, unfolds on the label, and the ruler buttons change the note width', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });   // room for the note column (it is capped at 45% of the page)
   await openPaper(page);
   if (!(await page.locator('.editor-scroll.margin-mode').count())) await page.locator('[data-tb="margin"]').click();
   await expect(page.locator('.editor-scroll.margin-mode')).toHaveCount(1);
   const cards = page.locator('.lyx-inset-note.in-margin');
   await expect.poll(() => cards.count()).toBeGreaterThan(5);
-  // folded notes are shown whole in the margin (no clipped preview), in the interface font
-  const folded = page.locator('.lyx-inset-note.in-margin.collapsed > .inset-box > .inset-content').first();
+  // a folded note keeps its fold in the margin: label + a one-line excerpt; its label unfolds it and the cards below move down
+  const all = page.locator('.lyx-inset-note.in-margin');
+  const foldedIndex = await all.evaluateAll(els => els.findIndex(e => e.classList.contains('collapsed')));
+  expect(foldedIndex).toBeGreaterThanOrEqual(0);
+  const foldedCard = all.nth(foldedIndex);   // (pinned by index: a ".collapsed" locator would re-resolve to another card once this one unfolds)
+  const folded = foldedCard.locator('> .inset-box > .inset-content');
   await expect(folded).toBeVisible();
-  const style = await folded.evaluate(el => { const c = getComputedStyle(el); return { maxHeight: c.maxHeight, opacity: c.opacity, font: getComputedStyle(el.parentElement!).fontFamily }; });
-  expect(style.maxHeight).toBe('none');
-  expect(style.opacity).toBe('1');
+  const style = await folded.evaluate(el => { const c = getComputedStyle(el); return { overflow: c.overflow, nowrap: c.whiteSpace, font: getComputedStyle(el.parentElement!).fontFamily }; });
+  expect(style.overflow).toBe('hidden');
+  expect(style.nowrap).toBe('nowrap');
   expect(style.font).toMatch(/Segoe UI|Roboto|Helvetica|Arial|sans-serif/);
+  const boxes = () => page.locator('.lyx-inset-note.in-margin > .inset-box').evaluateAll(els => els.map(e => e.getBoundingClientRect()).sort((a, b) => a.top - b.top).map(r => [r.top, r.bottom]));
+  const h0 = await foldedCard.locator('> .inset-box').evaluate(el => el.getBoundingClientRect().height);
+  await foldedCard.locator('> .inset-box > .inset-label').dispatchEvent('mousedown');
+  await expect(foldedCard).not.toHaveClass(/collapsed/);
+  await expect.poll(() => foldedCard.locator('> .inset-box').evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThan(h0);
+  await page.waitForTimeout(300);
+  const rects = await boxes();
+  for (let i = 1; i < rects.length; i++) expect(rects[i][0]).toBeGreaterThanOrEqual(rects[i - 1][1] - 1);   // stacked, no overlap
+  await foldedCard.locator('> .inset-box > .inset-label').dispatchEvent('mousedown');            // fold it again
+  await expect(foldedCard).toHaveClass(/collapsed/);
   // − / + on the ruler
   const width = () => page.locator('.lyx-inset-note.in-margin > .inset-box').first().evaluate(el => el.getBoundingClientRect().width);
   const w0 = await width();
