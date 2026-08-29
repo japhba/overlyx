@@ -17,6 +17,7 @@ import { api, type PMJSON } from '../../api';
 import { getPrefs } from '../../prefs';
 import { editorContext, viewDocId } from '../context';
 import { currentParagraph } from '../commands';
+import { nodeText } from '../cliptext';
 import { renderFragment, isInlineFragment } from './render';
 import type { LyxMathField } from '../lyxmath/field';
 import { renderStaticHtml } from '../lyxmath/field';
@@ -55,7 +56,7 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 export const REWRITE_KEY = isMac ? '⌘K' : 'Ctrl+K';
 
 type Target =
-  | { kind: 'text'; view: EditorView; from: number; to: number; content: PMJSON[]; layout: string }
+  | { kind: 'text'; view: EditorView; from: number; to: number; content: PMJSON[]; layout: string; before: string; after: string }
   | { kind: 'math'; field: LyxMathField; view: EditorView | null; latex: string; display: boolean; selection?: string; wrap: (tex: string) => string };
 
 class RewritePanel {
@@ -153,7 +154,7 @@ class RewritePanel {
     const docId = t.kind === 'text' ? viewDocId(t.view) : (t.view ? viewDocId(t.view) : editorContext.docId ?? '');
     try {
       const r = t.kind === 'text'
-        ? await api.aiRewrite(docId, { instruction, content: t.content, layout: t.layout }, ac.signal)
+        ? await api.aiRewrite(docId, { instruction, content: t.content, layout: t.layout, before: t.before, after: t.after }, ac.signal)
         : await api.aiRewrite(docId, { instruction, content: [], math: { latex: t.latex, display: t.display, selection: t.selection } }, ac.signal);
       if (ac.signal.aborted) return;
       this.showResult(r);
@@ -258,10 +259,13 @@ export function openRewrite(view: EditorView): boolean {
   }
   const content = sel.content().toJSON()?.content ?? [];
   const layout = String(currentParagraph(view.state)?.node.attrs.layout ?? 'Standard');
+  // where the cursor is, for an empty selection: the paragraph's text around it
+  const $c = sel.$from, par = $c.parent;
+  const before = par.isTextblock ? nodeText(par.cut(0, $c.parentOffset)) : '', after = par.isTextblock ? nodeText(par.cut(sel.$to.parentOffset)) : '';
   const c = view.coordsAtPos(sel.to);
   const start = view.coordsAtPos(sel.from);
   const anchor = new DOMRect(Math.min(start.left, c.left), c.top, Math.abs(c.left - start.left), c.bottom - c.top);
-  panel = new RewritePanel({ kind: 'text', view, from: sel.from, to: sel.to, content, layout }, anchor);
+  panel = new RewritePanel({ kind: 'text', view, from: sel.from, to: sel.to, content, layout, before, after }, anchor);
   return true;
 }
 

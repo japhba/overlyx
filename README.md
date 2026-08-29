@@ -177,7 +177,7 @@ blend.
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or
   Preferences — the switches are menu items, so the command palette finds them): needs
   `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.7 Flash rewrites,
-  Gemini 3.5 Flash Lite completes (`OVERLYX_AI_MODEL`, `OVERLYX_AI_COMPLETION_MODEL`).
+  Gemini 2.5 Flash Lite completes (`OVERLYX_AI_MODEL`, `OVERLYX_AI_COMPLETION_MODEL`).
   * *Rewrite with AI* — `⌘K` / `Ctrl+K` (LyX's delete-to-end-of-paragraph on that key steps aside
     while this is on): select a passage — or nothing, to write at the cursor — and describe the
     change in the small prompt under it. The passage, the instruction and the document's LaTeX
@@ -187,7 +187,7 @@ blend.
     nothing touches the shared document before that. Inside a formula the same key rewrites the
     formula (or its selected part) and shows the rendered proposal in the prompt.
   * *Autocomplete* — IDE-style inline suggestions: every keystroke schedules a request (200 ms
-    debounce, adjustable; one in flight at a time, Gemini Flash Lite answers in ~0.5–0.9 s); the
+    throttle, adjustable; one in flight at a time, Gemini 2.5 Flash Lite answers in ~0.5–1 s); the model repeats the sentence up to the cursor and continues it, the overlap is stripped by matching (so spacing is never guessed); the
     continuation appears as grey ghost content after the caret, with any formula in it already
     rendered (the server returns editor nodes, not just text). Typing the suggestion's beginning
     keeps it and shortens it — a reply that arrives while you are typing its first words is shown
@@ -325,8 +325,9 @@ document repair (see "Document health" below); `OPENROUTER_REPAIR_MODEL` overrid
 (default `anthropic/claude-opus-5`). Without a key the feature is hidden. The same key powers the
 editor's AI assistance (⌘K rewrite, autocomplete; `OVERLYX_AI_MODEL` /
 `OVERLYX_AI_COMPLETION_MODEL`, defaults `google/gemini-3.7-flash` for rewrites and
-`google/gemini-3.5-flash-lite` for autocomplete — the 3.7 model spends ~100 hidden reasoning tokens on
-every reply, 2.6 s, the lite model answers in 0.6–0.9 s, see `scratch/ai-bench.mjs`; `OVERLYX_AI_REWRITES_PER_MIN`,
+`google/gemini-2.5-flash-lite` for autocomplete — the 3.7 model spends ~100 hidden reasoning tokens on
+every reply (2.6 s) and, like 3.5 Flash Lite, answered sentence ends of a real paper with a word or
+nothing; 2.5 Flash Lite writes sentences in 0.5–1 s, see `scratch/ai-bench.mjs`; `OVERLYX_AI_REWRITES_PER_MIN`,
 `OVERLYX_AI_COMPLETIONS_PER_MIN` rate limits per user). `GET /api/ai/status` tells the client
 whether it is configured; the features stay off in every browser until a user switches them on.
 

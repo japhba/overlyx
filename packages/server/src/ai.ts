@@ -155,12 +155,12 @@ export function locate(hay: string, needle: string): { start: number; end: numbe
 
 const SEL_OPEN = '⟦SELECTION⟧', SEL_CLOSE = '⟦/SELECTION⟧', CURSOR = '⟦CURSOR⟧';
 
-/** The document's LaTeX with the passage marked, cut to a window around it when the document is long. */
-function documentContext(text: string, snippet: string, maxChars: number): string {
+/** The document's LaTeX with the passage marked (or just centred on it), cut to a window around it when the document is long. */
+function documentContext(text: string, snippet: string, maxChars: number, mark = true): string {
   const loc = snippet.trim() ? locate(text, snippet) : null;
   let marked = text;
   let centre = 0;
-  if (loc) { marked = text.slice(0, loc.start) + SEL_OPEN + text.slice(loc.start, loc.end) + SEL_CLOSE + text.slice(loc.end); centre = loc.start; }
+  if (loc) { if (mark) marked = text.slice(0, loc.start) + SEL_OPEN + text.slice(loc.start, loc.end) + SEL_CLOSE + text.slice(loc.end); centre = loc.start; }
   if (marked.length <= maxChars) return marked;
   const bd = marked.indexOf('\\begin{document}');
   const preamble = bd > 0 ? marked.slice(0, Math.min(bd, 12000)) : '';
@@ -177,11 +177,16 @@ Rules:
 - Reply with the replacement LaTeX only. No explanations, no markdown fences, no quotation marks around it, no \\documentclass / \\begin{document}.
 - Keep the document's conventions: its notation, its macros (a list is given), the citation keys and labels that exist in it, its language and tone. Inline math as $…$; keep display environments (equation, align, …) as in the original and preserve every \\label.
 - Change only what the instruction asks for. Do not add remarks, headings, or content the instruction does not call for.
-- If the selection is empty, the instruction asks for new text to insert at the cursor: write exactly that.
+- If nothing is selected, the instruction asks for new text to insert at the cursor, marked ${CURSOR} in the document: write exactly that, fitting between what is before and after the marker.
 - The document text is provided for context only; the passage to replace is delimited by ${SEL_OPEN} … ${SEL_CLOSE} (the markers are not part of the document).
 - Comments in the source that start with "%%" and macros \\lyxadded / \\lyxdeleted are the editor's own bookkeeping (notes, tracked changes): never produce them.`;
 
-export interface RewriteRequest { instruction: string; content: PMJSON[]; layout?: string; math?: { latex: string; display: boolean; selection?: string } }
+export interface RewriteRequest {
+  instruction: string; content: PMJSON[]; layout?: string;
+  /** text of the paragraph before / after the cursor (locates the cursor in the document when nothing is selected) */
+  before?: string; after?: string;
+  math?: { latex: string; display: boolean; selection?: string };
+}
 export interface RewriteResult { tex: string; nodes: PMJSON[]; original: string }
 
 export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortSignal): Promise<RewriteResult> {
@@ -197,7 +202,12 @@ export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortS
     return { tex: reply.replace(/^\$+|\$+$/g, '').trim(), nodes: [], original };
   }
   const original = selectionToTex(doc, req.content, req.layout);
-  const context = documentContext(docText, original, 160000);
+  let context = documentContext(docText, original, 160000);
+  if (!original.trim() && req.before?.trim()) {
+    // nothing selected: mark where the cursor is
+    const loc = locate(docText, req.before.slice(-300));
+    if (loc) context = documentContext(docText.slice(0, loc.end) + CURSOR + docText.slice(loc.end), CURSOR, 160000, false);
+  }
   const user = `## Document (for context; the passage to replace is marked)\n${context}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Passage to replace\n${original || '(empty — insert new text at the cursor)'}\n\n## Instruction\n${instruction}\n\nReply with the replacement for the passage only.`;
   const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { signal, title: 'OverLyX rewrite' }));
   let nodes: PMJSON[] = [];
@@ -207,14 +217,14 @@ export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortS
 
 /* ------------------------------------------------------------------ autocomplete */
 
-const COMPLETE_TEXT_SYSTEM = `You are the autocomplete engine of OverLyX, a WYSIWYG editor for scientific papers written in LaTeX. Continue the document at the cursor, marked ${CURSOR}.
+const COMPLETE_TEXT_SYSTEM = `You are the autocomplete engine of OverLyX, a WYSIWYG editor for scientific papers written in LaTeX. The author is typing; the cursor is marked ${CURSOR}. Propose how the text goes on.
 
 Rules:
-- Reply with the continuation only: finish the current sentence or clause, or add at most one short sentence (no more than 25 words). No explanations, no markdown fences, no quotation marks.
+- Reply with the current sentence: first repeat it exactly as it stands up to the cursor (the "sentence so far" is given — copy it verbatim, LaTeX included, do not correct it), then continue it to its end; you may add one more short sentence. At most about 30 new words. No explanations, no markdown fences, no quotation marks.
 - Write LaTeX as the author would: inline math as $…$, the document's macros and notation, \\cite{key} only with keys that occur in the document, \\ref{label} only for labels that exist.
-- Begin your reply by repeating the last word before the cursor exactly as it is written (the characters right before ${CURSOR}, e.g. "we" or an unfinished "explor"), then continue from there — this anchors where your text starts. Do not write anything that is already after the cursor.
-- Match the language, register and style of the surrounding text. Never invent numerical results, citations or claims that the document does not support — prefer a shorter, safer continuation.
-- If no sensible continuation exists (for instance right after a heading or inside a reference), reply with nothing at all.`;
+- Do not write anything that is already after the cursor.
+- Match the language, register and style of the surrounding text; stay consistent with what the document says. Never invent numerical results.
+- Only when the cursor sits inside a LaTeX command, a reference or a citation key, reply with just the sentence so far (nothing added).`;
 
 const COMPLETE_MATH_SYSTEM = `You are the autocomplete engine of OverLyX, a WYSIWYG editor for scientific papers written in LaTeX. Continue the formula the author is typing at the cursor, marked ${CURSOR}.
 
@@ -254,15 +264,23 @@ export async function complete(doc: OpenDoc, req: CompleteRequest, signal?: Abor
     const text = reply.replace(/^\$+|\$+$/g, '').replace(/^\\\[|\\\]$/g, '').replace(/\n/g, ' ').trim();
     return { text, nodes: [] };
   }
-  const user = `## Document (for context)\n${preamble}\n…\n${earlier}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Text at the cursor\n${before}${CURSOR}${after}\n\nReply with the continuation at ${CURSOR} only.`;
-  const raw = await chat([{ role: 'system', content: COMPLETE_TEXT_SYSTEM }, { role: 'user', content: user }], { model, temperature: 0.2, maxTokens: 60, signal, title: 'OverLyX autocomplete' });
+  const sentence = sentenceSoFar(before);
+  const user = `## Document (for context)\n${preamble}\n…\n${earlier}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Text at the cursor\n${before}${CURSOR}${after}\n\n## Sentence so far (repeat it verbatim, then continue)\n${sentence}\n\nReply with the sentence so far followed by its continuation.`;
+  const raw = await chat([{ role: 'system', content: COMPLETE_TEXT_SYSTEM }, { role: 'user', content: user }], { model, temperature: 0.2, maxTokens: 160, signal, title: 'OverLyX autocomplete' });
+  if (process.env.OVERLYX_AI_DEBUG) console.log('[ai] debug: before=' + JSON.stringify(before.slice(-60)) + ' raw=' + JSON.stringify(raw.slice(0, 200)));
   // a leading space is meaningful here (the reply starts a new word): keep it, drop the rest of the trimming
   let text = raw.replace(/\r\n/g, '\n');
   const fence = /^\s*```(?:[\w-]*)\n([\s\S]*?)\n?```\s*$/.exec(text);
   if (fence) text = fence[1];
   text = text.replace(/\n+/g, ' ').replace(/\s+$/, '');
+  // a long reply may have hit the token limit mid-sentence: end it at a sentence or at least a word boundary
+  if (text.length > 160 && !/[.!?:]$/.test(text)) {
+    const cut = text.slice(0, 220);
+    const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
+    text = end > 40 ? cut.slice(0, end + 1) : cut.slice(0, Math.max(40, cut.lastIndexOf(' ')));
+  }
   if (/^\s*$/.test(text)) return { text: '', nodes: [] };
-  text = stripOverlap(before, text.replace(/⟦\/?[A-Z]+⟧/g, ''));   // a small model sometimes echoes the cursor marker
+  text = stripOverlap(before, text.replace(/⟦\/?[A-Z]+⟧/g, ''));   // the repeated sentence goes; a small model sometimes echoes the cursor marker
   const leading = /^\s/.test(text);
   let nodes: PMJSON[] = [];
   try { nodes = texToPm(doc, text.trim()); } catch { nodes = []; }
@@ -272,28 +290,46 @@ export async function complete(doc: OpenDoc, req: CompleteRequest, signal?: Abor
   return { text, nodes: inline };
 }
 
+/** The current sentence up to the cursor (what the model is asked to repeat): the text after the last sentence end, at most ~240 characters from a word boundary. */
+export function sentenceSoFar(before: string): string {
+  const tail = before.slice(-2000);
+  const m = /[.!?][)"'”’]*\s+(?=[^\s])/g;
+  let start = 0, r: RegExpExecArray | null;
+  while ((r = m.exec(tail))) start = r.index + r[0].length;
+  let sent = tail.slice(start);
+  if (sent.length > 240) { const cut = sent.slice(-240); const ws = cut.indexOf(' '); sent = ws >= 0 ? cut.slice(ws + 1) : cut; }
+  return sent;
+}
+
 /**
- * The reply is asked to start by repeating the last word(s) before the cursor; that overlap is
- * removed here, which settles the "is there a space between the text and the continuation"
- * question that small models otherwise get wrong. A reply that did not repeat anything gets a
- * space when both sides are word characters.
+ * The reply repeats the sentence so far; the longest suffix of `before` that the reply begins
+ * with (compared with whitespace runs collapsed) is dropped. That settles where the new text
+ * starts — and whether a space belongs between the text and the continuation — without
+ * guessing. A reply that repeated nothing: after a sentence end a space is supplied; after
+ * letters it is taken as a continuation of the word (the model was told to repeat otherwise).
  */
 export function stripOverlap(before: string, reply: string): string {
-  const words = before.trimEnd().split(/\s+/).filter(Boolean);
-  const endsWithSpace = /\s$/.test(before);
-  for (let k = Math.min(3, words.length); k >= 1; k--) {
-    const tail = words.slice(-k).join(' ');
-    if (!tail) continue;
-    const candidates = endsWithSpace ? [tail + ' ', tail] : [tail];
-    for (const c of candidates) {
-      if (reply.startsWith(c)) {
-        const rest = reply.slice(c.length);
-        return endsWithSpace ? rest.replace(/^\s+/, '') : rest;
-      }
+  const b = before.slice(-600), r = reply;
+  const collapse = (str: string) => { const map: number[] = []; let out = ''; let ws = false; for (let i = 0; i < str.length; i++) { const c = str[i]; if (/\s/.test(c)) { ws = true; continue; } if (ws && out) { out += ' '; map.push(i); ws = false; } out += c; map.push(i); } return { out, map }; };
+  const cb = collapse(b), cr = collapse(r);
+  // longest suffix of cb.out that is a prefix of cr.out, starting at a word boundary
+  for (let i = 0; i < cb.out.length; i++) {
+    if (i > 0 && cb.out[i - 1] !== ' ') continue;
+    const suffix = cb.out.slice(i);
+    if (suffix.length < 2) break;
+    if (cr.out.startsWith(suffix)) {
+      const endCollapsed = suffix.length;   // index in cr.out where the new text begins
+      const endRaw = endCollapsed < cr.map.length ? cr.map[endCollapsed] : r.length;
+      let rest = r.slice(endRaw);
+      // whitespace between the repeated part and the continuation belongs to the continuation
+      const wsBefore = /\s$/.test(r.slice(0, endRaw)) && !/^\s/.test(rest);
+      if (wsBefore && !/\s$/.test(b)) rest = ' ' + rest.replace(/^\s+/, '');
+      return rest;
     }
   }
-  if (!endsWithSpace && /[A-Za-z0-9]$/.test(before) && /^[A-Za-z0-9\\$]/.test(reply)) return ' ' + reply;
-  return reply;
+  // nothing repeated: only the space after a finished sentence / punctuation can be inferred
+  if (/[.!?:;,)]$/.test(b) && /^[^\s]/.test(r)) return ' ' + r;
+  return r;
 }
 
 /* ------------------------------------------------------------------ rate limiting */

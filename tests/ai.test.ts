@@ -106,6 +106,13 @@ describe('rewrite', () => {
     expect(r.original).toBe('');
     expect(lastRequest.messages[1].content).toContain('(empty — insert new text at the cursor)');
   });
+  it('marks the cursor in the document when nothing is selected', async () => {
+    nextReply = 'inserted sentence.';
+    await ai.rewrite(doc, { instruction: 'add a sentence', content: [], before: 'The variance of the weights is $\\sigma^2$, and the gain $g$ controls the transition to chaos.', after: '' });
+    const user = (lastRequest.messages[1].content as string).replace(/\s+/g, ' ');
+    expect(user).toContain('controls the transition to chaos.⟦CURSOR⟧');
+    expect(lastRequest.messages[0].content).toContain('marked ⟦CURSOR⟧');
+  });
   it('rewrites a formula: math LaTeX without delimiters', async () => {
     nextReply = '$\\frac{1}{2}\\sigma^{2}$';
     const r = await ai.rewrite(doc, { instruction: 'as a fraction', content: [], math: { latex: '\\sigma^2/2', display: false } });
@@ -122,13 +129,14 @@ describe('rewrite', () => {
 
 describe('complete', () => {
   it('text: keeps a leading space, returns inline nodes with rendered math', async () => {
-    nextReply = ' of the network is $\\lambda = \\log g$.';
+    nextReply = 'The Lyapunov exponent of the network is $\\lambda = \\log g$.';
     const r = await ai.complete(doc, { kind: 'text', before: 'The Lyapunov exponent', after: '' });
     expect(r.text).toBe(' of the network is $\\lambda = \\log g$.');
     expect(r.nodes[0]).toEqual({ type: 'text', text: ' ' });
     expect(r.nodes.map(n => n.type)).toEqual(['text', 'text', 'math_inline', 'text']);
     const user = lastRequest.messages[1].content as string;
     expect(user).toContain('The Lyapunov exponent⟦CURSOR⟧');
+    expect(user).toContain('## Sentence so far (repeat it verbatim, then continue)\nThe Lyapunov exponent');
     expect(user).toContain('\\bW = \\mathbf{W}');
     expect(lastRequest.max_tokens).toBeLessThanOrEqual(200);
   });
@@ -151,19 +159,25 @@ describe('complete', () => {
   });
 });
 
-describe('stripOverlap (the reply repeats the last word before the cursor)', () => {
-  it('removes the repeated word(s) and keeps the spacing the reply had', () => {
-    expect(ai.stripOverlap('In this document we', 'we explore the features.')).toBe(' explore the features.');
-    expect(ai.stripOverlap('an unfinished explor', 'explore how it works')).toBe('e how it works');
-    expect(ai.stripOverlap('We study the', 'study the exponent')).toBe(' exponent');
+describe('sentenceSoFar / stripOverlap (the reply repeats the sentence up to the cursor)', () => {
+  it('extracts the current sentence', () => {
+    expect(ai.sentenceSoFar('First sentence. Second one is $x$, and')).toBe('Second one is $x$, and');
+    expect(ai.sentenceSoFar('No end yet')).toBe('No end yet');
+    expect(ai.sentenceSoFar('Done (really?) Next')).toBe('Next');
+  });
+  it('drops the repeated sentence and keeps the spacing the reply had', () => {
+    expect(ai.stripOverlap('First. Second one is', 'Second one is $x$, and more.')).toBe(' $x$, and more.');
+    expect(ai.stripOverlap('in the fea', 'in the feature learning regime')).toBe('ture learning regime');
+    expect(ai.stripOverlap('through a kernel.', 'through a kernel. This approach works.')).toBe(' This approach works.');
+    expect(ai.stripOverlap('of  stochastic dynamics in the fea', 'of stochastic dynamics in the feature regime')).toBe('ture regime');   // whitespace runs
+    expect(ai.stripOverlap('ends with a space ', 'ends with a space and more')).toBe('and more');
     expect(ai.stripOverlap('ends with a space ', 'space and more')).toBe('and more');
   });
-  it('adds a space when nothing was repeated and both sides are word characters', () => {
-    expect(ai.stripOverlap('In this document we', 'explore')).toBe(' explore');
-    expect(ai.stripOverlap('In this document we', ' explore')).toBe(' explore');
-    expect(ai.stripOverlap('a formula', '$x$ follows')).toBe(' $x$ follows');
-    expect(ai.stripOverlap('ends with a space ', 'and more')).toBe('and more');
-    expect(ai.stripOverlap('punctuation.', ' Next sentence')).toBe(' Next sentence');
+  it('infers the space after a sentence end when nothing was repeated, and nothing else', () => {
+    expect(ai.stripOverlap('through a kernel.', 'This approach works.')).toBe(' This approach works.');
+    expect(ai.stripOverlap('in the fea', 'ture learning regime')).toBe('ture learning regime');
+    expect(ai.stripOverlap('in the fea', ' new words')).toBe(' new words');
+    expect(ai.stripOverlap('a formula,', '$x$ follows')).toBe(' $x$ follows');
   });
 });
 

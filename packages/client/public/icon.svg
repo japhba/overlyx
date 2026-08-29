@@ -1,1 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#ffffff"/><g font-family="Arial Black, Arial, Helvetica, sans-serif" font-weight="900" font-size="16"><text x="8" y="22" text-anchor="middle" fill="#2f7fd6" transform="rotate(-12 8 18)">L</text><text x="16.5" y="24" text-anchor="middle" fill="#f3b400" transform="rotate(7 16.5 20)">Y</text><text x="25" y="22" text-anchor="middle" fill="#e14b2c" transform="rotate(12 25 18)">X</text></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- OverLyX favicon: "O·LYX" — the O in the wordmark's blue/cyan/chrome/pink sweep, a centred dot,
+       then LYX the way lyx.org draws it (heavy tilted caps, blue L / yellow Y / red X). All geometry,
+       no fonts, so it renders identically everywhere. -->
+  <defs>
+    <linearGradient id="over" gradientUnits="userSpaceOnUse" x1="2" y1="15" x2="19" y2="49">
+      <stop offset="0" stop-color="#2f5fdb"/>
+      <stop offset="0.3" stop-color="#16b3e6"/>
+      <stop offset="0.5" stop-color="#b3bedc"/>
+      <stop offset="0.7" stop-color="#ff2ec4"/>
+      <stop offset="1" stop-color="#9b1fd6"/>
+    </linearGradient>
+    <linearGradient id="dot" gradientUnits="userSpaceOnUse" x1="20" y1="30" x2="24.5" y2="34.5">
+      <stop offset="0" stop-color="#ff2ec4"/>
+      <stop offset="1" stop-color="#9b1fd6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="#ffffff"/>
+  <!-- O: heavy italic -->
+  <path transform="translate(9.8,32) skewX(-10) translate(-9.8,-32)" fill="url(#over)" fill-rule="evenodd"
+        d="M9.8,17 A8.5,15 0 1,0 9.8,47 A8.5,15 0 1,0 9.8,17 Z M9.8,21.8 A3.4,10.2 0 1,1 9.8,42.2 A3.4,10.2 0 1,1 9.8,21.8 Z"/>
+  <!-- centred dot -->
+  <circle cx="22" cy="32" r="2.3" fill="url(#dot)"/>
+  <!-- L Y X with a soft drop shadow -->
+  <g fill="#000" opacity="0.2" transform="translate(0.9,0.9)">
+    <path transform="rotate(-11 30.5 31) translate(25.2,16)" d="M0,0 H7.2 V22.6 H10.5 V30 H0 Z"/>
+    <path transform="rotate(6 43 35.5) translate(35.5,20.5)" d="M0,0 H5 L10.4,17 H4.6 Z M10,0 H15 L10.4,17 H4.6 Z M4.6,15 H10.4 V30 H4.6 Z"/>
+    <path transform="rotate(10 53.8 31.5) translate(47.3,16.5)" d="M0,0 H5.6 L13 30 H7.4 Z M7.4,0 H13 L5.6,30 H0 Z"/>
+  </g>
+  <path fill="#2f7fd6" transform="rotate(-11 30.5 31) translate(25.2,16)" d="M0,0 H7.2 V22.6 H10.5 V30 H0 Z"/>
+  <path fill="#f3b400" transform="rotate(6 43 35.5) translate(35.5,20.5)" d="M0,0 H5 L10.4,17 H4.6 Z M10,0 H15 L10.4,17 H4.6 Z M4.6,15 H10.4 V30 H4.6 Z"/>
+  <path fill="#e14b2c" transform="rotate(10 53.8 31.5) translate(47.3,16.5)" d="M0,0 H5.6 L13 30 H7.4 Z M7.4,0 H13 L5.6,30 H0 Z"/>
+</svg>
