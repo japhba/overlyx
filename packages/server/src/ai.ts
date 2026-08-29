@@ -262,7 +262,7 @@ export async function complete(doc: OpenDoc, req: CompleteRequest, signal?: Abor
   if (fence) text = fence[1];
   text = text.replace(/\n+/g, ' ').replace(/\s+$/, '');
   if (/^\s*$/.test(text)) return { text: '', nodes: [] };
-  text = stripOverlap(before, text);
+  text = stripOverlap(before, text.replace(/⟦\/?[A-Z]+⟧/g, ''));   // a small model sometimes echoes the cursor marker
   const leading = /^\s/.test(text);
   let nodes: PMJSON[] = [];
   try { nodes = texToPm(doc, text.trim()); } catch { nodes = []; }

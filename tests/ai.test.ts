@@ -132,6 +132,11 @@ describe('complete', () => {
     expect(user).toContain('\\bW = \\mathbf{W}');
     expect(lastRequest.max_tokens).toBeLessThanOrEqual(200);
   });
+  it('text: an echoed cursor marker is dropped', async () => {
+    nextReply = '⟦CURSOR⟧ grows with $g$.';
+    const r = await ai.complete(doc, { kind: 'text', before: 'The exponent', after: '' });
+    expect(r.text).toBe(' grows with $g$.');
+  });
   it('text: an empty / whitespace reply means no suggestion', async () => {
     nextReply = '   \n';
     const r = await ai.complete(doc, { kind: 'text', before: 'Introduction', after: '' });
