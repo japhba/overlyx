@@ -184,6 +184,8 @@ export function lyxLength(s: string): string {
 
 /** The header line of a note block (`%% @note`, `%% @comment collapsed`, …) as the scanner sees it (first `%` removed). */
 const NOTE_HEADER = /^% @(note|comment|greyedout)(?:\s+(open|collapsed))?\s*$/;
+/** the closer of a note block (`%% @end`); older files have none — a note then ends at the first line that is not `%% …` */
+const NOTE_END = /^% @end\s*$/;
 
 class BodyParser {
   warnings: string[] = [];
@@ -445,7 +447,8 @@ class BodyParser {
       for (;;) {
         const save = s.pos;
         const n = s.next();
-        // a "%% @note" line at this level starts the next note (nested ones carry another "%% ")
+        // "%% @end" closes the note; a "%% @note" line at this level starts the next note (nested ones carry another "%% ")
+        if (n.kind === 'comment' && NOTE_END.test(n.value)) break;
         if (n.kind === 'comment' && n.value.startsWith('%') && !NOTE_HEADER.test(n.value)) { lines.push(n.value.slice(1).replace(/^ /, '')); continue; }
         s.pos = save;
         break;

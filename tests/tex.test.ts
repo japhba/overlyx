@@ -282,7 +282,11 @@ describe('change tracking and notes live in the file', () => {
     expect(insets(d, 'Note', 'Note')).toHaveLength(1);
     expect(d.body[0].items.filter(i => i.kind === 'text').map(i => (i as { text: string }).text).join('')).toBe('Text continues here.');
     const out = expectStable(src);
-    expect(bodyOf(out)).toBe('Text %\n%% @comment\n%% Jan Bauer (2026-08-26 14:03):\n%%\n%% A comment with \\emph{emphasis} and $x$. %\n%% %% @note\n%% %% nested note\ncontinues here.');
+    // written back as self-contained blocks: every note is closed by "%% @end" (nested: "%% %% @end")
+    expect(bodyOf(out)).toBe('Text %\n%% @comment\n%% Jan Bauer (2026-08-26 14:03):\n%%\n%% A comment with \\emph{emphasis} and $x$. %\n%% %% @note\n%% %% nested note\n%% %% @end\n%% @end\ncontinues here.');
+    // the closed form reads back the same (and a note without the closer, as above, still ends at the first plain line)
+    expect(bodyOf(write(parse(out)))).toBe(bodyOf(out));
+    expect(insets(parse(out), 'Note')).toHaveLength(2);
     // two notes in a row stay two notes
     const two = doc('A %\n%% @note\n%% first\n%% @comment\n%% second\nB');
     expect(insets(parse(two), 'Note')).toHaveLength(2);
@@ -294,12 +298,12 @@ describe('change tracking and notes live in the file', () => {
     const d = parse(src);
     const notes = insets(d, 'Note') as { arg: string; status?: string }[];
     expect(notes.map(n => `${n.arg}:${n.status}`)).toEqual(['Note:collapsed', 'Comment:open', 'Note:collapsed']);
-    expect(bodyOf(expectStable(src))).toBe('A %\n%% @note collapsed\n%% folded\n%% @comment\n%% open thread %\n%% %% @note collapsed\n%% %% nested folded\nB');
+    expect(bodyOf(expectStable(src))).toBe('A %\n%% @note collapsed\n%% folded\n%% @end\n%% @comment\n%% open thread %\n%% %% @note collapsed\n%% %% nested folded\n%% %% @end\n%% @end\nB');
     // toggling the state in the editor changes only the header line
     const toggled = write({ ...d, body: d.body.map(p => ({ ...p, items: p.items.map(i => (i.kind === 'inset' && i.inset.type === 'Text' && i.inset.name === 'Note' ? { ...i, inset: { ...i.inset, status: i.inset.status === 'collapsed' ? 'open' as const : 'collapsed' as const } } : i)) })) });
-    expect(bodyOf(toggled)).toBe('A %\n%% @note\n%% folded\n%% @comment collapsed\n%% open thread %\n%% %% @note collapsed\n%% %% nested folded\nB');
+    expect(bodyOf(toggled)).toBe('A %\n%% @note\n%% folded\n%% @end\n%% @comment collapsed\n%% open thread %\n%% %% @note collapsed\n%% %% nested folded\n%% %% @end\n%% @end\nB');
     // "open" is accepted too (and normalised away)
-    expect(bodyOf(write(parse(doc('A %\n%% @note open\n%% x\nB'))))).toBe('A %\n%% @note\n%% x\nB');
+    expect(bodyOf(write(parse(doc('A %\n%% @note open\n%% x\nB'))))).toBe('A %\n%% @note\n%% x\n%% @end\nB');
   });
 
   it('macro definitions in the body are macro insets (positional), also inside notes; the preamble ones are collected too', () => {

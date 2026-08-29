@@ -54,10 +54,17 @@ export function layout(view: EditorView): void {
   // only top-level notes (notes nested in notes stay inline in their parent card)
   const top = cards.filter(c => !c.parentElement?.closest('.lyx-inset-note'));
   if (!on) {
+    ((root.closest('.editor-scroll') as HTMLElement | null) ?? root).style.removeProperty('--margin-col');
     for (const c of cards) { c.classList.remove('in-margin'); const b = c.querySelector<HTMLElement>(':scope > .inset-box'); if (b) { b.style.top = ''; b.style.left = ''; } }
     return;
   }
-  const cardWidth = 320;
+  // the note column takes up to 320px, less on a narrow page (the text column keeps at least ~360px)
+  const pageWidth = root.getBoundingClientRect().width;
+  const cardWidth = Math.max(160, Math.min(320, Math.round(pageWidth * 0.3)));
+  const col = `${cardWidth + 52}px`;
+  // on the scroll container, so the ruler above the page sees it too
+  const holder = (root.closest('.editor-scroll') as HTMLElement | null) ?? root;
+  if (holder.style.getPropertyValue('--margin-col') !== col) holder.style.setProperty('--margin-col', col);
   const columnLeft = view.dom.getBoundingClientRect().right + 28; // just right of the text column
   const items = top.map(c => {
     const anchor = c.querySelector<HTMLElement>(':scope > .inset-anchor') ?? c;

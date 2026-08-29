@@ -268,7 +268,8 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 /* the text column is centred; its width is a View setting (--text-width, "Text width" menu) */
 .lyx-editor { max-width: var(--text-width, 720px); margin: 0 auto; }
 /* with annotations in the margin, keep room for a 320px card column right of the text and centre both */
-.margin-mode .lyx-editor { max-width: min(var(--text-width, 720px), calc(100% - 372px)); margin-left: max(0px, calc((100% - min(var(--text-width, 720px), 100% - 372px) - 372px) / 2)); }
+/* margin mode: the note column (--margin-col, set by plugins/margin.ts from the page width) sits right of the text; the text keeps at least 360px */
+.margin-mode .lyx-editor { max-width: max(360px, min(var(--text-width, 720px), calc(100% - var(--margin-col, 372px)))); margin-left: max(0px, calc((100% - max(360px, min(var(--text-width, 720px), 100% - var(--margin-col, 372px))) - var(--margin-col, 372px)) / 2)); }
 /* MathLive shades the inset that contains the caret; the LyX corner markers replace that */
 .lyx-editor { outline: none; font-family: var(--editor-font); font-size: calc(15.5px * var(--editor-zoom)); line-height: 1.45; color: var(--editor-fg); min-height: 300px; }
 .lyx-editor:focus-visible { outline: none; }
@@ -413,7 +414,7 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .margin-mode .lyx-inset-note-comment > .inset-anchor { background: #4c7bb8; }
 .margin-mode .lyx-inset-note-greyedout > .inset-anchor { background: var(--muted2); }
 .margin-mode .lyx-inset-note.in-margin { position: static; }
-.margin-mode .lyx-inset-note.in-margin > .inset-box { position: absolute; width: 320px; display: block; z-index: 2; box-shadow: 0 1px 4px rgba(0,0,0,0.15); padding: 6px 8px; font-size: 0.85em; line-height: 1.35; }
+.margin-mode .lyx-inset-note.in-margin > .inset-box { position: absolute; width: 320px; max-width: calc(var(--margin-col, 372px) - 52px); display: block; z-index: 2; box-shadow: 0 1px 4px rgba(0,0,0,0.15); padding: 6px 8px; font-size: 0.85em; line-height: 1.35; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
 .margin-mode .lyx-inset-note.in-margin.collapsed > .inset-box > .inset-content { display: block; max-height: 2.6em; overflow: hidden; opacity: 0.6; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box .lyx-inset-note > .inset-anchor { display: none; }
@@ -572,10 +573,13 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .source-pane .grip:hover { background: var(--accent); opacity: 0.5; }
 .source-pane .bar .close { margin-left: 4px; }
 .source-pane .code { position: relative; flex: 1; min-height: 0; overflow: hidden; }
-.source-pane .code pre.hl, .source-pane .code textarea.source { position: absolute; inset: 0; margin: 0; box-sizing: border-box; width: 100%; height: 100%; font-family: "DejaVu Sans Mono", Menlo, monospace; font-size: 11.5px; line-height: 15px; padding: 6px 8px; white-space: pre; tab-size: 4; overflow: auto; }
+.source-pane .code pre.hl, .source-pane .code textarea.source { position: absolute; inset: 0; margin: 0; box-sizing: border-box; width: 100%; height: 100%; font-family: "DejaVu Sans Mono", Menlo, monospace; font-size: 11.5px; line-height: 15px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: break-word; tab-size: 4; overflow: auto; overflow-x: hidden; }
 .source-pane .code pre.hl { pointer-events: none; overflow: hidden; color: var(--ui-fg); background: var(--page-bg); }
 .source-pane .code pre.hl code { font: inherit; }
-.source-pane .code pre.hl .cur { position: absolute; left: 0; right: 0; height: 15px; background: var(--active-bg); opacity: 0.45; }
+/* one block per source line (texhighlight.ts highlightLines): soft-wrapped like the textarea; the current line is marked */
+pre.hl .l { position: relative; min-height: 1.45em; min-height: 1lh; }
+.source-pane .code pre.hl .l { min-height: 15px; }
+pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent); }
 .source-pane .code textarea.source { color: transparent; caret-color: var(--ui-fg); background: transparent; border: 0; resize: none; outline: none; }
 .source-pane .code textarea.source::selection { background: var(--row-sel); color: transparent; }
 /* LaTeX colours */
@@ -612,7 +616,7 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .ruler { position: sticky; top: 0; z-index: 6; height: 24px; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); user-select: none; font-family: var(--ui-font); }
 .ruler-inner { position: relative; margin: 0 48px; height: 100%; }
 .ruler-band { position: relative; height: 100%; max-width: var(--text-width, 720px); margin: 0 auto; background: var(--page-bg); border-left: 1px solid var(--ui-border); border-right: 1px solid var(--ui-border); box-sizing: border-box; }
-.margin-mode .ruler-band { max-width: min(var(--text-width, 720px), calc(100% - 372px)); margin-left: max(0px, calc((100% - min(var(--text-width, 720px), 100% - 372px) - 372px) / 2)); }
+.margin-mode .ruler-band { max-width: max(360px, min(var(--text-width, 720px), calc(100% - var(--margin-col, 372px)))); margin-left: max(0px, calc((100% - max(360px, min(var(--text-width, 720px), 100% - var(--margin-col, 372px))) - var(--margin-col, 372px)) / 2)); }
 .ruler .tick { position: absolute; bottom: 0; width: 1px; height: 5px; background: var(--muted2); }
 .ruler .tick.major { height: 9px; background: var(--ui-muted); }
 .ruler .tick-label { position: absolute; bottom: 9px; left: 2px; font-size: 9px; color: var(--ui-muted); line-height: 1; }
@@ -660,7 +664,14 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .small-btn:hover { background: var(--row-hover); }
 
 /* outline */
-.outline-item { padding: 2px 4px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 2px; }
+.outline-item { padding: 2px 4px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 2px; display: flex; align-items: center; gap: 4px; }
+.outline-item .outline-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* section operations (LyX's outline buttons), shown on hover / for the active section */
+.outline-item .outline-tools { display: none; flex: none; gap: 1px; }
+.outline-item:hover .outline-tools, .outline-item.active .outline-tools { display: inline-flex; }
+.outline-item .outline-tools button { font: inherit; font-size: 9px; line-height: 1; padding: 2px 3px; border: 1px solid var(--ui-border); background: var(--ui-bg); color: var(--fg2); border-radius: 2px; cursor: pointer; }
+.outline-item .outline-tools button:hover:not(:disabled) { background: var(--row-hover); color: var(--ui-fg); }
+.outline-item .outline-tools button:disabled { opacity: 0.35; cursor: default; }
 .outline-item:hover { background: var(--row-hover); }
 .outline-item.active { background: var(--row-sel); }
 .outline-item.l0 { font-weight: 700; } .outline-item.l1 { padding-left: 4px; font-weight: 600; } .outline-item.l2 { padding-left: 16px; } .outline-item.l3 { padding-left: 28px; } .outline-item.l4 { padding-left: 40px; color: var(--fg2); } .outline-item.l5 { padding-left: 52px; color: var(--fg2); }
@@ -874,14 +885,16 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .text-editor .te-head .state.saved { color: var(--ok); }
 .text-editor .te-head .state.error, .text-editor .te-head .state.conflict { color: var(--err); }
 .text-editor .te-conflict { background: var(--warn-bg); border-bottom: 1px solid var(--warn-border); padding: 6px 10px; font-size: 12.5px; display: flex; gap: 8px; align-items: center; }
-.text-editor .te-body { flex: 1; display: flex; min-height: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; line-height: 1.45; }
-.text-editor .te-gutter { flex: none; width: 3.5em; overflow: hidden; text-align: right; padding: 8px 6px 8px 0; color: var(--muted2); background: var(--surface2); border-right: 1px solid var(--ui-border); user-select: none; white-space: pre; }
-.text-editor .te-code { position: relative; flex: 1; min-width: 0; overflow: hidden; }
+.text-editor .te-body { flex: 1; display: flex; min-height: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; line-height: 1.45; --gutter: 3.5em; }
+/* the code column has the document view's text width (the ruler); line numbers sit in its left padding */
+.text-editor .te-code { position: relative; flex: 1; min-width: 0; overflow: hidden; max-width: var(--text-width, 720px); margin: 0 auto; }
 .text-editor .te-code.readonly { background: var(--surface2); }
-.text-editor .te-code pre.hl, .text-editor textarea { position: absolute; inset: 0; margin: 0; box-sizing: border-box; width: 100%; height: 100%; resize: none; border: 0; outline: 0; padding: 8px 10px; font: inherit; line-height: inherit; white-space: pre; overflow: auto; tab-size: 4; }
+.text-editor .te-code pre.hl, .text-editor textarea { position: absolute; inset: 0; margin: 0; box-sizing: border-box; width: 100%; height: 100%; resize: none; border: 0; outline: 0; padding: 8px 10px 8px calc(var(--gutter) + 10px); font: inherit; line-height: inherit; white-space: pre-wrap; overflow-wrap: break-word; overflow: auto; overflow-x: hidden; tab-size: 4; }
 .text-editor .te-code pre.hl { pointer-events: none; overflow: hidden; color: var(--ui-fg); }
-.text-editor .te-code pre.hl code { font: inherit; }
-.text-editor .te-code pre.hl .cur { position: absolute; left: 0; right: 0; background: var(--active-bg); opacity: 0.35; }
+.text-editor .te-code pre.hl code { font: inherit; counter-reset: line; }
+.text-editor .te-code pre.hl .l { counter-increment: line; }
+.text-editor .te-code pre.hl .l::before { content: counter(line); position: absolute; left: calc(-1 * var(--gutter) - 4px); width: var(--gutter); text-align: right; color: var(--muted2); user-select: none; }
+.text-editor .te-code pre.hl .l.cur::before { color: var(--fg2); }
 .text-editor textarea { color: transparent; caret-color: var(--ui-fg); background: transparent; }
 .text-editor textarea::selection { background: var(--row-sel); color: transparent; }
 .text-editor .te-code.readonly pre.hl { color: var(--fg2); }

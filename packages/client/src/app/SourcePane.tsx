@@ -13,7 +13,7 @@ import type { EditorView } from 'prosemirror-view';
 import type * as Y from 'yjs';
 import { writeLyx, pmToLyxBody } from '@overlyx/core';
 import { api } from '../api';
-import { highlightTex } from './texhighlight';
+import { highlightTex, highlightLines } from './texhighlight';
 import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask } from './codearea';
 import { findSourceLine } from './sourcelocate';
 import type { LyxMathField } from '../editor/lyxmath/field';
@@ -88,8 +88,8 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
       const cls = match.kind === 'adjacent' ? 'hl-match' : 'hl-enclose';
       for (const at of [match.open, match.close]) for (let k = 0; k < match.len; k++) marks.set(at + k, cls);
     }
-    return highlightTex(text, marks) + '\n';
-  }, [text, match]);
+    return highlightLines(highlightTex(text, marks), dirty ? null : curLine);
+  }, [text, match, curLine, dirty]);
   const updateCursor = () => { const el = ta.current; if (el) setCursor(el.selectionStart === el.selectionEnd ? el.selectionStart : null); };
   useEffect(() => {
     const h = () => { if (document.activeElement === ta.current) updateCursor(); };
@@ -122,13 +122,15 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     if (!target || dirty || !text) return;
     const found = cursorLine(target.view, text, mathField ?? null, lastOffset.current);
     lastOffset.current = found?.offset ?? null;
-    const line = found?.line ?? null;
-    setCurLine(line);
-    const el = ta.current;
-    if (line === null || !el || document.activeElement === el) return;
-    const y = PAD_TOP + line * LINE_H;
-    if (y < el.scrollTop + LINE_H || y > el.scrollTop + el.clientHeight - 2 * LINE_H) { el.scrollTop = Math.max(0, y - el.clientHeight / 3); syncScroll(); }
+    setCurLine(found?.line ?? null);
   }, [selTick, text, dirty, mathField]);
+  // keep the marked line in view (once it is rendered; lines wrap, so it is measured, not computed)
+  useEffect(() => {
+    const el = ta.current, cur = pre.current?.querySelector('.l.cur') as HTMLElement | null;
+    if (!el || !cur || dirty || document.activeElement === el) return;
+    const y = cur.offsetTop, h = cur.offsetHeight || LINE_H;
+    if (y < el.scrollTop + h || y + h > el.scrollTop + el.clientHeight - h) { el.scrollTop = Math.max(0, y - el.clientHeight / 3); syncScroll(); }
+  }, [curLine, html]);
 
   useEffect(() => { try { localStorage.setItem('ol.source.h', String(Math.round(height))); } catch { /* ignore */ } }, [height]);
   const startResize = (e: PointerEvent) => {
@@ -169,10 +171,7 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
         {onClose && <button class="small-btn close" onClick={onClose} title="Hide the source pane (Ctrl+Alt+S)">✕</button>}
       </div>
       <div class="code">
-        <pre class="hl" ref={pre} aria-hidden="true">
-          {curLine !== null && !dirty && <span class="cur" style={{ top: PAD_TOP + curLine * LINE_H + 'px' }} />}
-          <code dangerouslySetInnerHTML={{ __html: html }} />
-        </pre>
+        <pre class="hl" ref={pre} aria-hidden="true"><code dangerouslySetInnerHTML={{ __html: html }} /></pre>
         <textarea ref={ta} class="source" spellcheck={false} value={text} onScroll={syncScroll} onClick={updateCursor} onKeyUp={updateCursor}
           onInput={e => { const el = e.target as HTMLTextAreaElement; undo.current.record({ value: el.value, start: el.selectionStart, end: el.selectionEnd }); setText(el.value); setDirty(true); updateCursor(); }}
           onKeyDown={e => {

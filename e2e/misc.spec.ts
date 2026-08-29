@@ -98,3 +98,36 @@ test('a dead-key ^ (German/French layouts: a composition) makes exactly one supe
   expect(await page.evaluate(() => (document.querySelector('.lyx-editor .lyx-math-inline') as any).pmViewDesc.spec.field.latex as string)).toBe('$x^{2}$');
   expect(errors).toEqual([]);
 });
+
+test('sections can be reordered and re-levelled from the outline', async ({ page }) => {
+  writeFileSync(`${DIR}/sections.tex`, withPreambleOf(`${SRC}/main.tex`, '\\section{Alpha}\n\nfirst\n\n\\subsection{Alpha one}\n\nnested\n\n\\section{Beta}\n\nsecond\n'));
+  await login(page);
+  await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.setItem('ol.right', 'outline'); });
+  await page.goto(`/#/${PROJECT}/sections.tex`);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length >= 6, null, { timeout: 60000 });
+  await page.waitForTimeout(1000);
+  const items = page.locator('.outline-item');
+  const texts = page.locator('.outline-item .outline-text');   // (the row's text without its buttons)
+  await expect(texts).toHaveText([/Alpha$/, /Alpha one/, /Beta/]);
+  // Alpha ▼: Beta comes first, Alpha keeps its subsection
+  await items.nth(0).hover();
+  await items.nth(0).locator('[data-outline="down"]').click();
+  await expect(texts).toHaveText([/Beta/, /Alpha$/, /Alpha one/]);
+  await expect(texts.nth(0)).toContainText('1');
+  await expect(texts.nth(1)).toContainText('2');
+  // Alpha one ◀: promoted to a section, numbered 3
+  await items.nth(2).hover();
+  await items.nth(2).locator('[data-outline="out"]').click();
+  await expect(items.nth(2)).toHaveClass(new RegExp('\\b' + /\bl\d\b/.exec((await items.nth(0).getAttribute('class')) ?? '')![0] + '\\b'));   // same level class as the sections
+  await expect(texts.nth(2)).toContainText('3');
+  await expect(items.nth(2).locator('[data-outline="up"]')).toBeEnabled();
+  await expect(items.nth(0).locator('[data-outline="up"]')).toBeDisabled();
+  // it is written to the file in the new order and level
+  await expect.poll(() => readFileSync(`${DIR}/sections.tex`, 'utf8').replace(/\s+/g, ' '), { timeout: 15000 }).toMatch(/\\section\{Beta\} second \\section\{Alpha\} first \\section\{Alpha one\} nested/);
+  // the Edit menu works on the cursor's section: move Alpha one up again
+  await page.locator('.lyx-editor .lyx-par', { hasText: 'nested' }).click();
+  await page.locator('.menubar .menu > button', { hasText: 'Edit' }).click();
+  await page.locator('.menu-item', { hasText: 'Paragraph' }).first().hover();
+  await page.locator('.menu-item:not(.menu-sub)', { hasText: 'Move section up' }).click();
+  await expect(texts).toHaveText([/Beta/, /Alpha one/, /Alpha$/]);
+});

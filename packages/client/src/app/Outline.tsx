@@ -2,6 +2,8 @@ import type { EditorView } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
 import { sectionLevel } from '../editor/layouts';
 import { navHistory } from './navhistory';
+import { editorContext } from '../editor/context';
+import { moveSection, shiftSection, canMoveSection, canShiftSection } from '../editor/outline';
 import type { Node as PMNode } from 'prosemirror-model';
 
 export interface OutlineItem { pos: number; level: number; text: string; layout: string; num?: string }
@@ -61,11 +63,32 @@ export function Outline({ view, items, activePos }: { view: EditorView | null; i
   };
   let active = -1;
   for (let i = 0; i < items.length; i++) if (items[i].level < 99 && items[i].pos <= activePos) active = i;
+  // LyX's outline operations on a section: move it up / down among its siblings, promote / demote its headings
+  const layouts = editorContext.meta?.layouts;
+  const run = (it: OutlineItem, what: 'up' | 'down' | 'out' | 'in') => {
+    if (!view) return;
+    const pos = it.pos + 1;
+    const cmd = what === 'up' ? moveSection(-1, pos) : what === 'down' ? moveSection(1, pos) : shiftSection(what === 'out' ? -1 : 1, pos, layouts);
+    if (cmd(view.state, view.dispatch)) view.focus();
+  };
+  const tools = (it: OutlineItem) => {
+    if (!view || it.level === 99) return null;
+    const st = view.state, pos = it.pos + 1;
+    return (
+      <span class="outline-tools" onClick={e => e.stopPropagation()}>
+        <button title="Move this section up (before the previous one)" disabled={!canMoveSection(st, pos, -1)} data-outline="up" onClick={() => run(it, 'up')}>▲</button>
+        <button title="Move this section down (after the next one)" disabled={!canMoveSection(st, pos, 1)} data-outline="down" onClick={() => run(it, 'down')}>▼</button>
+        <button title="Promote: one heading level up (subsection → section)" disabled={!canShiftSection(st, pos, -1, layouts)} data-outline="out" onClick={() => run(it, 'out')}>◀</button>
+        <button title="Demote: one heading level down (section → subsection)" disabled={!canShiftSection(st, pos, 1, layouts)} data-outline="in" onClick={() => run(it, 'in')}>▶</button>
+      </span>
+    );
+  };
   return (
     <div>
       {items.map((it, i) => (
         <div key={it.pos} class={'outline-item ' + (it.level === 99 ? 'other' : 'l' + Math.min(5, it.level)) + (i === active ? ' active' : '')} onClick={() => go(it)} title={it.text}>
-          {it.num && <span class="num">{it.num}</span>}{it.text}
+          <span class="outline-text">{it.num && <span class="num">{it.num}</span>}{it.text}</span>
+          {tools(it)}
         </div>
       ))}
       {!items.length && <div style="color:#888;padding:6px">No sections yet.</div>}

@@ -181,6 +181,16 @@ blend.
   tab reopens it. The stack survives a reload (`sessionStorage.ol.nav`). Both keys can be rebound
   from the command palette (e.g. to `Control+-` / `Control+Shift+-`, VS Code's Mac defaults, should
   the browser claim ⌥⌘←/→).
+* **Outline operations** (`editor/outline.ts`, buttons ▲ ▼ ◀ ▶ on the hovered / active outline
+  row, also *Edit ▸ Paragraph ▸ Move section up/down, Promote, Demote*): LyX's outline-up/down/in/out —
+  a section (its heading up to the next heading of the same or a higher level) swaps places with
+  its previous / next sibling, never leaving its parent; promote / demote change the level of its
+  heading and of every sub-heading in it by one step of the class's ladder (an article has no
+  Chapter, so Section promotes to Part).
+* **Notes & comments in the margin** (*View* menu / toolbar): the note cards sit in a column right
+  of the text, Google-Docs style, stacked without overlap and anchored by small coloured squares
+  in the text (`editor/plugins/margin.ts`); the column narrows on a small window and the text keeps
+  at least 360px.
 * **Sidebars**: the file browser (left) and the Outline / PDF / Versions panels (right) hide
   with the « » buttons in their tab strip; a hidden sidebar leaves a thin rail with its panels' names
   that brings it back. The state is remembered per browser (`localStorage.ol.files`, `ol.right`).
@@ -479,12 +489,15 @@ invisible to LaTeX itself:
   14:03:00 2026}{…}` and `\lyxdeleted{…}{…}{…}` macros (a deleted paragraph break is
   `\lyxadded{…}{…}{¶}`). With *show changes in output* on, the managed block defines them to
   print coloured / struck-out text (as LyX does); off, they print the final text.
-* **Notes and comments** are comment blocks: `%% @note`, `%% @comment` or `%% @greyedout`,
-  followed by the note's LaTeX on `%% ` lines (a blank `%%` line is a paragraph break, nested
-  notes carry another `%% `). A folded note is `%% @note collapsed` (LyX's *status collapsed*);
+* **Notes and comments** are comment blocks: `%% @note`, `%% @comment` or `%% @greyedout` on a
+  line of its own, the note's LaTeX on `%% ` lines, and `%% @end` on a line of its own (a blank
+  `%%` line is a paragraph break, nested notes carry another `%% `; a block without the closer —
+  older files — ends at the first line that is not `%% …`). A folded note is `%% @note collapsed` (LyX's *status collapsed*);
   without the word it is shown open. A comment thread's messages are paragraphs headed
   `Name (2026-08-26 14:03):`, the first one marked `[resolved]` when resolved. A note inside a
   paragraph is preceded by `%` at the end of the line, so the surrounding text joins as in TeX.
+* **No hard line breaks**: a paragraph is one line of the file (LyX re-wrapped at 65 columns; a
+  line break in the file would only move around in diffs). The text editors wrap to their width.
 * **Child documents** (`\input{appendix.tex}` from the body) are fragments without a preamble;
   their first line is their settings line. They are edited on their own and built through their
   master. `\input`s in the preamble (`macros.tex`, `preamble.tex`) are plain text files.

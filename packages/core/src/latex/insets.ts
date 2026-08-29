@@ -381,6 +381,8 @@ function texNote(ctx: ExportContext, os: TexStream, rp: RunParams, inset: TextIn
   // the fold state travels with the note (LyX's status line): open is the default
   os.write('%% @' + inset.arg.toLowerCase() + (inset.status === 'collapsed' ? ' collapsed' : '') + '\n');
   for (const l of lines) os.write('%%' + (l ? ' ' + l : '') + '\n');
+  // the block is closed explicitly, so the note is self-contained wherever it sits (nested ones get another "%% ")
+  os.write('%% @end\n');
 }
 
 function endsInComment(s: string): boolean {

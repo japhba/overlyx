@@ -792,7 +792,8 @@ export function paragraphLatex(ctx: ExportContext, os: TexStream, rp: RunParams,
           // simpleTeXBlanks: wrap long lines at spaces
           const prev = i > 0 ? units[i - 1] : undefined;
           const prevCh = prev && prev.kind === 'char' ? prev.ch : '';
-          if (parColumn() > WRAP_COLUMN && i > 0 && prevCh !== ' ' && i + 1 < units.length && !rp.freeSpacing && !style.freeSpacing
+          // (.tex documents are not wrapped: one line per paragraph, the editors wrap to their width)
+          if (!ctx.texMode && parColumn() > WRAP_COLUMN && i > 0 && prevCh !== ' ' && i + 1 < units.length && !rp.freeSpacing && !style.freeSpacing
               && !(typewriter && '.?:!'.includes(prevCh) && prevCh !== '')) {
             os.write('\n');
             startCol = 0;

@@ -81,7 +81,7 @@ test('text files open in a tab with the text editor; edits are saved automatical
   await expect(ed.locator('.state')).toHaveText('✓ Saved');
   await expect(page.locator('.tabbar .tab.active')).toContainText('macros.tex');
   await expect(page.locator('.toolbar')).toHaveCount(0);            // no LyX toolbars for a text file
-  await expect(ed.locator('.te-gutter')).toContainText('3');
+  expect(await ed.locator('pre.hl .l').count()).toBeGreaterThanOrEqual(3);   // one overlay block per line (numbered by CSS)
   // type at the end: autosaved to disk
   await ed.locator('textarea').focus();
   await page.keyboard.press('Control+End');

@@ -134,3 +134,28 @@ export function highlightTex(src: string, marks?: Map<number, string>): string {
   }
   return out;
 }
+
+/**
+ * The highlighted HTML as one `<div class="l">` per source line (spans that run across a line
+ * break are closed and reopened), so that line numbers (CSS counters) and the current line
+ * (`current`, 0-based → class `cur`) work with soft-wrapped lines.
+ */
+export function highlightLines(html: string, current: number | null = null): string {
+  const open: string[] = [];
+  let out = '';
+  let line = 0;
+  const startLine = () => `<div class="l${line === current ? ' cur' : ''}">`;
+  out += startLine();
+  for (const part of html.split(/(<span[^>]*>|<\/span>|\n)/)) {
+    if (!part) continue;
+    if (part === '\n') {
+      for (let k = 0; k < open.length; k++) out += '</span>';
+      line++;
+      out += '</div>' + startLine();
+      for (const o of open) out += o;
+    } else if (part === '</span>') { open.pop(); out += part; }
+    else if (part.startsWith('<span')) { open.push(part); out += part; }
+    else out += part;
+  }
+  return out + '</div>';
+}

@@ -1,6 +1,6 @@
 /**
- * A simple editor for the project's text files (.tex, .bib, .sty, …): plain textarea with line
- * numbers, autosave (1.5 s after the last change, or Ctrl+S), and a conflict check — a save is
+ * A simple editor for the project's text files (.tex, .bib, .sty, …): a textarea with line
+ * numbers, soft-wrapped to the same text width as the document view (the ruler), autosave (1.5 s after the last change, or Ctrl+S), and a conflict check — a save is
  * refused when the file changed on the server in the meantime (someone else, desktop LyX, git).
  * A coloured copy of the text lies under the (transparent) textarea (texhighlight.ts), which also
  * marks the bracket pair at the cursor and the current line; undo / redo and the editing keys
@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, fileUrl, type Role } from '../api';
-import { highlightTex } from './texhighlight';
+import { highlightTex, highlightLines } from './texhighlight';
 import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask, type Snapshot } from './codearea';
 
 type SaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'conflict' | 'error' | 'readonly';
@@ -29,7 +29,6 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
   const latest = useRef('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
-  const gutter = useRef<HTMLDivElement>(null);
   const pre = useRef<HTMLPreElement>(null);
   const undo = useRef(new UndoStack({ value: '', start: 0, end: 0 }));
   /** cursor offset when nothing is selected (for bracket matching), else null */
@@ -43,8 +42,8 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
       const cls = match.kind === 'adjacent' ? 'hl-match' : 'hl-enclose';
       for (const at of [match.open, match.close]) for (let k = 0; k < match.len; k++) marks.set(at + k, cls);
     }
-    return highlightTex(text, marks) + '\n';
-  }, [text, match]);
+    return highlightLines(highlightTex(text, marks), pos.line - 1);
+  }, [text, match, pos.line]);
 
   const load = async () => {
     try {
@@ -127,11 +126,8 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
     const s = editingKey(e, el);
     if (s) { e.preventDefault(); applySnapshot(el, s); onInput({ target: el } as unknown as Event); }
   };
-  // the current line, marked in the overlay (its height is the overlay's line height)
-  const [lineH, setLineH] = useState(0);
-  useEffect(() => { if (pre.current) setLineH(parseFloat(getComputedStyle(pre.current).lineHeight) || 0); }, []);
+
   const syncScroll = (el: HTMLTextAreaElement) => {
-    if (gutter.current) gutter.current.scrollTop = el.scrollTop;
     if (pre.current) { pre.current.scrollTop = el.scrollTop; pre.current.scrollLeft = el.scrollLeft; }
   };
   /** the text was replaced wholesale (the server's version): an undoable step */
@@ -157,13 +153,9 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
         </div>
       )}
       <div class="te-body">
-        <div class="te-gutter" ref={gutter} aria-hidden="true">{Array.from({ length: lines }, (_, i) => i + 1).join('\n')}</div>
         <div class={'te-code' + (readonly ? ' readonly' : '')}>
-          <pre class="hl" ref={pre} aria-hidden="true">
-            {lineH > 0 && cursor !== null && <span class="cur" style={{ top: 8 + (pos.line - 1) * lineH + 'px', height: lineH + 'px' }} />}
-            <code dangerouslySetInnerHTML={{ __html: html }} />
-          </pre>
-          <textarea ref={ta} value={text} spellcheck={false} readOnly={readonly} wrap="off" autocomplete="off" autocorrect="off" autocapitalize="off"
+          <pre class="hl" ref={pre} aria-hidden="true"><code dangerouslySetInnerHTML={{ __html: html }} /></pre>
+          <textarea ref={ta} value={text} spellcheck={false} readOnly={readonly} autocomplete="off" autocorrect="off" autocapitalize="off"
             onInput={onInput} onKeyDown={onKeyDown} onClick={updatePos} onKeyUp={updatePos}
             onScroll={e => syncScroll(e.target as HTMLTextAreaElement)} />
         </div>

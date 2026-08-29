@@ -36,6 +36,7 @@ import { restoredCursorPos } from '../editor/cursormemory';
 import { canonical, effectiveShortcut, keyFromEvent } from './keybindings';
 import { STANDARD_LAYOUTS } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
+import { moveSection, shiftSection } from '../editor/outline';
 import * as C from '../editor/commands';
 import { setMarginMode } from '../editor/plugins/margin';
 import { acceptAllChanges, rejectAllChanges, changeAt, resolveChange, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
@@ -814,6 +815,11 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         { label: 'Decrease depth', shortcut: 'Alt+Shift+←', action: () => run(C.changeDepth(-1)) },
         { label: 'Move paragraph up', shortcut: 'Alt+↑', action: () => run(C.moveParagraph(-1)) },
         { label: 'Move paragraph down', shortcut: 'Alt+↓', action: () => run(C.moveParagraph(1)) },
+        { sep: true },
+        { label: 'Move section up', action: () => run(moveSection(-1)) },
+        { label: 'Move section down', action: () => run(moveSection(1)) },
+        { label: 'Promote section (heading level up)', action: () => run(shiftSection(-1, undefined, meta?.layouts)) },
+        { label: 'Demote section (heading level down)', action: () => run(shiftSection(1, undefined, meta?.layouts)) },
       ] },
       { label: 'Table ▸', sub: [
         { label: 'Add row above', action: () => run(addRowBefore) }, { label: 'Add row below', action: () => run(addRowAfter) },
@@ -1471,7 +1477,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         )}
         <div class="editor-column">
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
-          {isLyxDoc && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={marginMode} />}
+          {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} />}
           {docId ? (!isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />

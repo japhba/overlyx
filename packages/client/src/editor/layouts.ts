@@ -46,6 +46,19 @@ export function sectionLevel(layout: string): number | null {
   const base = layout.replace(/\*$/, '');
   return base in SECTION_LEVEL ? SECTION_LEVEL[base] : null;
 }
+/**
+ * The heading layout one level up (delta -1) or down (+1) from `layout` (a * is kept), or null at
+ * the ends. `layouts`: the class's layouts — an article has no Chapter, so Section promotes to Part.
+ */
+export function shiftLayout(layout: string, delta: -1 | 1, layouts?: LayoutInfo[] | null): string | null {
+  const starred = layout.endsWith('*');
+  const base = layout.replace(/\*$/, '');
+  const ladder = Object.keys(SECTION_LEVEL).filter(k => !layouts || layouts.some(l => l.name === k) || k === base);
+  const i = ladder.indexOf(base);
+  if (i < 0) return null;
+  const next = ladder[i + delta];
+  return next ? next + (starred ? '*' : '') : null;
+}
 export function isNumberedSection(layout: string): boolean {
   return sectionLevel(layout) !== null && !layout.endsWith('*');
 }
