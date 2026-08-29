@@ -352,3 +352,30 @@ test('Ctrl+Alt+← / → go back and forward through jumps, also across tabs', a
   await expect(page.locator('.menu-item', { hasText: 'Back' })).toBeVisible();
   await page.keyboard.press('Escape');
 });
+
+test('margin mode shows every note in full, and the ruler buttons change the note width', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });   // room for the note column (it is capped at 45% of the page)
+  await openPaper(page);
+  if (!(await page.locator('.editor-scroll.margin-mode').count())) await page.locator('[data-tb="margin"]').click();
+  await expect(page.locator('.editor-scroll.margin-mode')).toHaveCount(1);
+  const cards = page.locator('.lyx-inset-note.in-margin');
+  await expect.poll(() => cards.count()).toBeGreaterThan(5);
+  // folded notes are shown whole in the margin (no clipped preview), in the interface font
+  const folded = page.locator('.lyx-inset-note.in-margin.collapsed > .inset-box > .inset-content').first();
+  await expect(folded).toBeVisible();
+  const style = await folded.evaluate(el => { const c = getComputedStyle(el); return { maxHeight: c.maxHeight, opacity: c.opacity, font: getComputedStyle(el.parentElement!).fontFamily }; });
+  expect(style.maxHeight).toBe('none');
+  expect(style.opacity).toBe('1');
+  expect(style.font).toMatch(/Segoe UI|Roboto|Helvetica|Arial|sans-serif/);
+  // − / + on the ruler
+  const width = () => page.locator('.lyx-inset-note.in-margin > .inset-box').first().evaluate(el => el.getBoundingClientRect().width);
+  const w0 = await width();
+  await page.locator('.ruler-notes [data-notes="wider"]').click();
+  await expect.poll(width).toBeGreaterThan(w0);
+  await page.locator('.ruler-notes [data-notes="narrower"]').click();
+  await page.locator('.ruler-notes [data-notes="narrower"]').click();
+  await expect.poll(width).toBeLessThan(w0);
+  expect(await page.evaluate(() => localStorage.getItem('ol.noteWidth'))).toBe(String(w0 - 40));
+  await page.locator('[data-tb="margin"]').click();     // leave it off for the other tests
+  await expect(page.locator('.editor-scroll.margin-mode')).toHaveCount(0);
+});

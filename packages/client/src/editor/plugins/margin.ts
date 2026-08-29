@@ -58,9 +58,11 @@ export function layout(view: EditorView): void {
     for (const c of cards) { c.classList.remove('in-margin'); const b = c.querySelector<HTMLElement>(':scope > .inset-box'); if (b) { b.style.top = ''; b.style.left = ''; } }
     return;
   }
-  // the note column takes up to 320px, less on a narrow page (the text column keeps at least ~360px)
+  // the note column is as wide as the user set (--note-width, the ruler's buttons; 320px by default),
+  // less on a narrow page (the text column keeps at least ~360px)
   const pageWidth = root.getBoundingClientRect().width;
-  const cardWidth = Math.max(160, Math.min(320, Math.round(pageWidth * 0.3)));
+  const wanted = parseFloat(getComputedStyle(root).getPropertyValue('--note-width')) || 320;
+  const cardWidth = Math.max(160, Math.min(wanted, Math.round(pageWidth * 0.45)));
   const col = `${cardWidth + 52}px`;
   // on the scroll container, so the ruler above the page sees it too
   const holder = (root.closest('.editor-scroll') as HTMLElement | null) ?? root;

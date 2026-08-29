@@ -20,7 +20,7 @@ import { Toolbar, ColorPalette, colorIcon, NAMED_COLORS, DelimPalette, TableSize
 import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Versions } from './Versions';
 import { PdfPanel, stateFromBuild, jobActive, type PdfState } from './PdfPanel';
-import { Ruler } from './Ruler';
+import { Ruler, NOTE_DEFAULT, NOTE_MIN, NOTE_MAX } from './Ruler';
 import { StatusBar, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget } from './SourcePane';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
@@ -38,7 +38,7 @@ import { STANDARD_LAYOUTS } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import * as C from '../editor/commands';
-import { setMarginMode } from '../editor/plugins/margin';
+import { setMarginMode, layout as layoutMargin } from '../editor/plugins/margin';
 import { acceptAllChanges, rejectAllChanges, changeAt, resolveChange, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
@@ -211,6 +211,13 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   // width of the text column in px (0 = full width), see View ▸ Text width
   const [textWidth, setTextWidth] = useState<number>(() => { const v = Number(localStorage.getItem('ol.textWidth')); return Number.isFinite(v) && localStorage.getItem('ol.textWidth') !== null ? v : 720; });
   const stepTextWidth = (d: number) => setTextWidth(w => (d === 0 ? 720 : Math.min(1600, Math.max(400, (w || 1200) + d * 60))));
+  // width of the note cards in margin mode (the ruler's − / + buttons)
+  const [noteWidth, setNoteWidth] = useState<number>(() => { const v = Number(localStorage.getItem('ol.noteWidth')); return v >= NOTE_MIN && v <= NOTE_MAX ? v : NOTE_DEFAULT; });
+  useEffect(() => {
+    document.documentElement.style.setProperty('--note-width', noteWidth + 'px');
+    localStorage.setItem('ol.noteWidth', String(noteWidth));
+    for (const h of [editorRef.current, ...childRefs.current.values()]) if (h) layoutMargin(h.view);
+  }, [noteWidth]);
   const [showRuler, setShowRuler] = useState(localStorage.getItem('ol.ruler') !== '0');
   useEffect(() => { localStorage.setItem('ol.ruler', showRuler ? '1' : '0'); }, [showRuler]);
   const [findOpen, setFindOpen] = useState(false);
@@ -1477,7 +1484,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         )}
         <div class="editor-column">
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
-          {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} />}
+          {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteWidth={noteWidth} onNoteWidth={setNoteWidth} />}
           {docId ? (!isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />

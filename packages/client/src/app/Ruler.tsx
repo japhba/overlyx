@@ -8,7 +8,13 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 const PX_PER_CM = 96 / 2.54;
 export const MIN_WIDTH = 400, MAX_WIDTH = 1600, DEFAULT_WIDTH = 720;
 
-export function Ruler({ width, onChange, marginMode }: { width: number; onChange: (w: number) => void; marginMode: boolean }) {
+export const NOTE_MIN = 200, NOTE_MAX = 640, NOTE_DEFAULT = 320, NOTE_STEP = 40;
+
+/**
+ * `noteWidth` / `onNoteWidth`: in margin mode the ruler also carries − / + buttons over the note
+ * column that make the note cards narrower / wider.
+ */
+export function Ruler({ width, onChange, marginMode, noteWidth, onNoteWidth }: { width: number; onChange: (w: number) => void; marginMode: boolean; noteWidth?: number; onNoteWidth?: (w: number) => void }) {
   const bandRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ side: 'left' | 'right'; width: number } | null>(null);
   const [bandPx, setBandPx] = useState(0);
@@ -56,6 +62,13 @@ export function Ruler({ width, onChange, marginMode }: { width: number; onChange
           <span class="handle left" onPointerDown={startDrag('left')} title="Left margin — drag to change the text width" />
           <span class="handle right" onPointerDown={startDrag('right')} title="Right margin — drag to change the text width" />
           {(drag || width === 0) && <span class="readout">{(shown / PX_PER_CM).toFixed(1)} cm · {shown} px{width === 0 ? ' (full width)' : ''}</span>}
+          {marginMode && onNoteWidth && noteWidth !== undefined && (
+            <span class="ruler-notes" title="Width of the notes in the margin">
+              <button type="button" data-notes="narrower" disabled={noteWidth <= NOTE_MIN} onClick={() => onNoteWidth(Math.max(NOTE_MIN, noteWidth - NOTE_STEP))} title="Narrower notes">−</button>
+              <span class="label" onDblClick={() => onNoteWidth(NOTE_DEFAULT)}>notes {noteWidth} px</span>
+              <button type="button" data-notes="wider" disabled={noteWidth >= NOTE_MAX} onClick={() => onNoteWidth(Math.min(NOTE_MAX, noteWidth + NOTE_STEP))} title="Wider notes">+</button>
+            </span>
+          )}
         </div>
       </div>
     </div>

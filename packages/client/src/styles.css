@@ -361,6 +361,8 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .inset-action { font-family: var(--ui-font); font-size: 10px; line-height: 14px; padding: 0 5px; border: 1px solid var(--chip-border); background: var(--chip-bg); border-radius: 2px; color: var(--chip-fg); }
 .inset-action:hover { background: var(--row-hover); }
 .lyx-inset-note-comment > .inset-box > .inset-actions { display: inline-flex; }
+/* notes and comments read as annotations: the interface's sans-serif, a little smaller than the text */
+.lyx-inset-note-note > .inset-box, .lyx-inset-note-comment > .inset-box { font-family: var(--ui-font); font-size: 0.9em; line-height: 1.35; }
 .lyx-inset-note-note > .inset-box { background: var(--note-bg); border-color: var(--note-border); }
 .lyx-inset-note-note > .inset-box > .inset-label { background: #c9a70b; }
 .lyx-inset-note-comment > .inset-box { background: var(--comment-bg); border-color: var(--comment-border); }
@@ -416,7 +418,10 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .margin-mode .lyx-inset-note.in-margin { position: static; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box { position: absolute; width: 320px; max-width: calc(var(--margin-col, 372px) - 52px); display: block; z-index: 2; box-shadow: 0 1px 4px rgba(0,0,0,0.15); padding: 6px 8px; font-size: 0.85em; line-height: 1.35; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
-.margin-mode .lyx-inset-note.in-margin.collapsed > .inset-box > .inset-content { display: block; max-height: 2.6em; overflow: hidden; opacity: 0.6; }
+/* in the margin every note shows its whole content (its fold state only matters inline) */
+.margin-mode .lyx-inset-note.in-margin.collapsed > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin .lyx-inset-note.collapsed > .inset-box > .inset-content { display: block; }
+.margin-mode .lyx-inset-note.in-margin .lyx-inset-note > .inset-box { display: block; margin: 3px 0; }
+.margin-mode .lyx-inset-note.in-margin .lyx-inset-note > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin .lyx-inset-note > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box .lyx-inset-note > .inset-anchor { display: none; }
 
 /* leaf insets */
@@ -623,6 +628,12 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .ruler .handle { position: absolute; top: 3px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid var(--accent); cursor: ew-resize; z-index: 2; }
 .ruler .handle.left { left: -7px; }
 .ruler .handle.right { right: -7px; }
+/* margin mode: the note width buttons sit over the note column */
+.ruler .ruler-notes { position: absolute; left: 100%; top: 3px; margin-left: 28px; display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--ui-muted); white-space: nowrap; }
+.ruler .ruler-notes button { font: inherit; font-size: 11px; line-height: 1; width: 16px; height: 16px; padding: 0; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--page-bg); color: var(--fg2); cursor: pointer; }
+.ruler .ruler-notes button:hover:not(:disabled) { background: var(--row-hover); color: var(--ui-fg); }
+.ruler .ruler-notes button:disabled { opacity: 0.35; cursor: default; }
+.ruler .ruler-notes .label { cursor: default; }
 .ruler .handle:hover, .ruler.dragging .handle { border-top-color: var(--accent-strong); }
 .ruler .readout { position: absolute; top: 3px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--ui-fg); background: var(--hl-bg); padding: 0 6px; border-radius: 3px; white-space: nowrap; }
 .pdf-panel .build-progress { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 11px; color: var(--fg2); background: var(--surface2); border-bottom: 1px solid var(--ui-border); white-space: nowrap; overflow: hidden; }
