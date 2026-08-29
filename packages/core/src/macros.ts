@@ -181,6 +181,13 @@ export function stripComments(s: string): string {
   }).join('\n');
 }
 
+/**
+ * Names the math editor implements itself: a preamble that wraps them (OverLyX's own \llangle
+ * snippet redefines \left and \right, see math/llangle.ts) must not turn them into user macros —
+ * `\left[` would then render as the word "left" followed by a bracket.
+ */
+const STRUCTURAL = new Set(['left', 'right', 'begin', 'end']);
+
 /** Scan LaTeX source for macro definitions. Also returns \input/\include file references. */
 export function macrosFromLatex(text: string, source: MacroDef['source'] = 'preamble'): { macros: MacroDef[]; inputs: string[] } {
   const s = stripComments(text);
@@ -191,7 +198,7 @@ export function macrosFromLatex(text: string, source: MacroDef['source'] = 'prea
     const inp = /^\\(?:input|include)\s*\{([^}]+)\}/.exec(s.slice(i));
     if (inp) { inputs.push(inp[1].trim()); i += inp[0].length - 1; continue; }
     const res = parseMacroAt(s, i, source);
-    if (res) { macros.push(res[0]); i = res[1] - 1; }
+    if (res) { if (!STRUCTURAL.has(res[0].name)) macros.push(res[0]); i = res[1] - 1; }
   }
   return { macros, inputs };
 }

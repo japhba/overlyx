@@ -305,3 +305,50 @@ test('status bar names the change author and shows the change under the cursor',
   await expect(page.locator('.ctx-menu .ctx-item', { hasText: 'Accept change' })).toHaveCount(1);
   await page.keyboard.press('Escape');
 });
+
+test('Ctrl+Alt+← / → go back and forward through jumps, also across tabs', async ({ page }) => {
+  await openPaper(page);
+  const ref = page.locator('.lyx-command-ref', { hasText: 'eq:weight-model-RNN' }).first();
+  await ref.scrollIntoViewIfNeeded();
+  // a cursor next to the reference, then follow it
+  await ref.click();
+  const cursorPos = () => page.evaluate(() => (window as any).overlyx.activeView.state.selection.$head.pos as number);
+  const p0 = await cursorPos();
+  await ref.click({ modifiers: ['Control'] });
+  await expect(page.locator('.lyx-math-display.ProseMirror-selectednode')).toHaveCount(1);
+  const p1 = await cursorPos();
+  expect(Math.abs(p1 - p0)).toBeGreaterThan(50);
+  // back: where the reference was; forward: the formula again
+  await page.keyboard.press('Control+Alt+ArrowLeft');
+  await expect.poll(cursorPos).toBe(p0);
+  await page.keyboard.press('Control+Alt+ArrowRight');
+  await expect.poll(cursorPos).toBe(p1);
+  // the outline is a jump too
+  const rail = page.locator('.rail.right [data-rail="outline"]');
+  if (await rail.count()) await rail.click(); else await page.locator('.panel-tabs [data-tab="outline"]').click();
+  await page.locator('.outline-item').nth(3).click();
+  const p2 = await cursorPos();
+  expect(p2).not.toBe(p1);
+  await page.keyboard.press('Control+Alt+ArrowLeft');
+  await expect.poll(cursorPos).toBe(p1);
+  // another document: back returns to the master at the same place, forward to the child again
+  await page.locator('.lyx-include-link').first().dblclick();
+  await expect(page).toHaveURL(/lyxmacros\.tex$/);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 5, null, { timeout: 60000 });
+  await page.keyboard.press('Control+Alt+ArrowLeft');
+  await expect(page).toHaveURL(/main\.tex$/);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 50, null, { timeout: 60000 });
+  // the click on the include link was a jump of its own: first back to it, then to the formula
+  await expect.poll(cursorPos, { timeout: 15000 }).not.toBe(p1);
+  const pInclude = await cursorPos();
+  await page.keyboard.press('Control+Alt+ArrowLeft');
+  await expect.poll(cursorPos).toBe(p1);
+  await page.keyboard.press('Control+Alt+ArrowRight');
+  await expect.poll(cursorPos).toBe(pInclude);
+  await page.keyboard.press('Control+Alt+ArrowRight');
+  await expect(page).toHaveURL(/lyxmacros\.tex$/);
+  // the Navigate menu shows the commands
+  await page.locator('.menubar .menu > button', { hasText: 'Navigate' }).first().click();
+  await expect(page.locator('.menu-item', { hasText: 'Back' })).toBeVisible();
+  await page.keyboard.press('Escape');
+});

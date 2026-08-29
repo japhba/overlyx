@@ -2,9 +2,15 @@
  * A simple editor for the project's text files (.tex, .bib, .sty, …): plain textarea with line
  * numbers, autosave (1.5 s after the last change, or Ctrl+S), and a conflict check — a save is
  * refused when the file changed on the server in the meantime (someone else, desktop LyX, git).
+ * A coloured copy of the text lies under the (transparent) textarea (texhighlight.ts), which also
+ * marks the bracket pair at the cursor and the current line; undo / redo and the editing keys
+ * (auto-closing brackets, Enter with indentation and \end completion, Ctrl+/, Alt+↑↓, …) are our
+ * own (codearea.ts).
  */
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, fileUrl, type Role } from '../api';
+import { highlightTex } from './texhighlight';
+import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask, type Snapshot } from './codearea';
 
 type SaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'conflict' | 'error' | 'readonly';
 const LABEL: Record<SaveState, string> = { loading: 'Loading…', saved: '✓ Saved', dirty: 'Unsaved changes…', saving: 'Saving…', conflict: 'Not saved — changed on the server', error: 'Could not save', readonly: '👁 view only' };
@@ -24,11 +30,27 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
   const gutter = useRef<HTMLDivElement>(null);
+  const pre = useRef<HTMLPreElement>(null);
+  const undo = useRef(new UndoStack({ value: '', start: 0, end: 0 }));
+  /** cursor offset when nothing is selected (for bracket matching), else null */
+  const [cursor, setCursor] = useState<number | null>(null);
+  const mask = useMemo(() => commentMask(text), [text]);
+  const match = useMemo(() => (cursor === null ? null : matchBrackets(text, cursor, mask)), [text, cursor, mask]);
+  const html = useMemo(() => {
+    let marks: Map<number, string> | undefined;
+    if (match) {
+      marks = new Map();
+      const cls = match.kind === 'adjacent' ? 'hl-match' : 'hl-enclose';
+      for (const at of [match.open, match.close]) for (let k = 0; k < match.len; k++) marks.set(at + k, cls);
+    }
+    return highlightTex(text, marks) + '\n';
+  }, [text, match]);
 
   const load = async () => {
     try {
       const r = await api.readText(project, path);
       latest.current = r.text; setText(r.text); mtime.current = r.mtime; role.current = r.role;
+      undo.current.reset({ value: r.text, start: 0, end: 0 });
       dirty.current = false; setConflict(null); setErr('');
       setState(r.role === 'view' ? 'readonly' : 'saved');
     } catch (e) { setErr((e as Error).message); setState('error'); }
@@ -65,32 +87,55 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
     return () => window.removeEventListener('beforeunload', h);
   }, []);
 
-  const onInput = (e: Event) => {
-    const v = (e.target as HTMLTextAreaElement).value;
+  /** the textarea holds new text (typed, undone, pasted): keep it, schedule the save */
+  const changed = (v: string) => {
     latest.current = v; setText(v); dirty.current = true;
     if (state !== 'conflict') { setState('dirty'); schedule(); }
     updatePos();
+  };
+  const onInput = (e: Event) => {
+    const el = e.target as HTMLTextAreaElement;
+    undo.current.record({ value: el.value, start: el.selectionStart, end: el.selectionEnd });
+    changed(el.value);
   };
   const updatePos = () => {
     const el = ta.current; if (!el) return;
     const before = el.value.slice(0, el.selectionStart);
     const line = before.split('\n').length;
     setPos({ line, col: before.length - before.lastIndexOf('\n') });
+    setCursor(el.selectionStart === el.selectionEnd ? el.selectionStart : null);
   };
+  // the cursor moved (also by the mouse, Shift+arrows, …): the bracket match follows
+  useEffect(() => {
+    const h = () => { if (document.activeElement === ta.current) updatePos(); };
+    document.addEventListener('selectionchange', h);
+    return () => document.removeEventListener('selectionchange', h);
+  }, []);
   const onKeyDown = (e: KeyboardEvent) => {
     const mod = navigator.platform.includes('Mac') ? e.metaKey : e.ctrlKey;
     if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); void save(dirty.current); if (!dirty.current) notify('Nothing to save'); return; }
-    if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey && role.current !== 'view') {
+    const ur = undoRedoKey(e);
+    if (ur) {
       e.preventDefault();
-      const el = ta.current!;
-      if (!document.execCommand('insertText', false, '  ')) {
-        const s = el.selectionStart, end = el.selectionEnd;
-        el.value = el.value.slice(0, s) + '  ' + el.value.slice(end);
-        el.selectionStart = el.selectionEnd = s + 2;
-      }
-      onInput({ target: el } as unknown as Event);
+      if (role.current === 'view') return;
+      const s = applyUndoRedo(ta.current!, undo.current, ur);
+      if (s) changed(s.value);
+      return;
     }
+    if (role.current === 'view' || e.isComposing) return;
+    const el = ta.current!;
+    const s = editingKey(e, el);
+    if (s) { e.preventDefault(); applySnapshot(el, s); onInput({ target: el } as unknown as Event); }
   };
+  // the current line, marked in the overlay (its height is the overlay's line height)
+  const [lineH, setLineH] = useState(0);
+  useEffect(() => { if (pre.current) setLineH(parseFloat(getComputedStyle(pre.current).lineHeight) || 0); }, []);
+  const syncScroll = (el: HTMLTextAreaElement) => {
+    if (gutter.current) gutter.current.scrollTop = el.scrollTop;
+    if (pre.current) { pre.current.scrollTop = el.scrollTop; pre.current.scrollLeft = el.scrollLeft; }
+  };
+  /** the text was replaced wholesale (the server's version): an undoable step */
+  const replaceText = (v: string) => { const el = ta.current; const s: Snapshot = { value: v, start: 0, end: 0 }; undo.current.record(s); if (el) { el.value = v; el.setSelectionRange(0, 0); } latest.current = v; setText(v); };
   const lines = text.split('\n').length;
   const readonly = state === 'readonly' || state === 'loading' || state === 'error';
 
@@ -107,15 +152,21 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
       {conflict && (
         <div class="te-conflict">
           <span>This file was changed on the server while you were editing (by someone else, desktop LyX or git).</span>
-          <button class="small-btn" onClick={() => { latest.current = conflict.text; setText(conflict.text); mtime.current = conflict.mtime; dirty.current = false; setConflict(null); setState('saved'); }}>Take the server's version</button>
+          <button class="small-btn" onClick={() => { replaceText(conflict.text); mtime.current = conflict.mtime; dirty.current = false; setConflict(null); setState('saved'); }}>Take the server's version</button>
           <button class="small-btn" onClick={() => void save(true)}>Overwrite with mine</button>
         </div>
       )}
       <div class="te-body">
         <div class="te-gutter" ref={gutter} aria-hidden="true">{Array.from({ length: lines }, (_, i) => i + 1).join('\n')}</div>
-        <textarea ref={ta} value={text} spellcheck={false} readOnly={readonly} wrap="off" autocomplete="off" autocorrect="off" autocapitalize="off"
-          onInput={onInput} onKeyDown={onKeyDown} onClick={updatePos} onKeyUp={updatePos}
-          onScroll={e => { if (gutter.current) gutter.current.scrollTop = (e.target as HTMLTextAreaElement).scrollTop; }} />
+        <div class={'te-code' + (readonly ? ' readonly' : '')}>
+          <pre class="hl" ref={pre} aria-hidden="true">
+            {lineH > 0 && cursor !== null && <span class="cur" style={{ top: 8 + (pos.line - 1) * lineH + 'px', height: lineH + 'px' }} />}
+            <code dangerouslySetInnerHTML={{ __html: html }} />
+          </pre>
+          <textarea ref={ta} value={text} spellcheck={false} readOnly={readonly} wrap="off" autocomplete="off" autocorrect="off" autocapitalize="off"
+            onInput={onInput} onKeyDown={onKeyDown} onClick={updatePos} onKeyUp={updatePos}
+            onScroll={e => syncScroll(e.target as HTMLTextAreaElement)} />
+        </div>
       </div>
     </div>
   );

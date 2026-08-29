@@ -60,6 +60,7 @@
   --math-focus-bg: #f6f9ff;
   --login-bg: linear-gradient(160deg, #dfe7f1, #f3f3f1);
   --hl-comment: #6e7781; --hl-cmd: #0b5394; --hl-kw: #8250df; --hl-env: #116329; --hl-sec: #953800; --hl-brace: #57606a; --hl-math: #b35c00; --hl-mathcmd: #a0421a;
+  --hl-d0: #b8860b; --hl-d1: #9932cc; --hl-d2: #1a7fd4;
   --example-bg: linear-gradient(135deg, #eef4fb, #fff);
   --backdrop: rgba(0,0,0,0.25);
   --editor-zoom: 1;
@@ -121,6 +122,7 @@ html[data-theme="dark"] {
   --math-focus-bg: #1a2030;
   --login-bg: linear-gradient(160deg, #1a1d2b, #121216);
   --hl-comment: #8b949e; --hl-cmd: #79c0ff; --hl-kw: #d2a8ff; --hl-env: #7ee787; --hl-sec: #ffa657; --hl-brace: #8b949e; --hl-math: #f0b26b; --hl-mathcmd: #ffc680;
+  --hl-d0: #ffd700; --hl-d1: #da70d6; --hl-d2: #179fff;
   --example-bg: linear-gradient(135deg, #1f2738, #26262d);
   --backdrop: rgba(0,0,0,0.55);
 }
@@ -585,12 +587,17 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .hl-arg { color: var(--hl-sec); font-weight: 700; }
 .hl-opt { color: var(--hl-brace); }
 .hl-brace { color: var(--hl-brace); }
+.hl-brace.hl-d0 { color: var(--hl-d0); } .hl-brace.hl-d1 { color: var(--hl-d1); } .hl-brace.hl-d2 { color: var(--hl-d2); }
 .hl-mdelim { color: var(--hl-math); font-weight: 600; }
 .hl-math { color: var(--hl-math); }
 .hl-amp.m { color: var(--hl-kw); }
 .hl-cmd.m { color: var(--hl-mathcmd); }
 .hl-brace.m { color: var(--hl-math); opacity: 0.8; }
+.hl-brace.m.hl-d0 { color: var(--hl-d0); } .hl-brace.m.hl-d1 { color: var(--hl-d1); } .hl-brace.m.hl-d2 { color: var(--hl-d2); }
 .hl-comment.m { color: var(--hl-comment); }
+/* the bracket pair at the cursor (codearea.ts matchBrackets): touching one / enclosing the cursor */
+.hl-brace.hl-match { background: var(--hl-bg); box-shadow: 0 0 0 1px var(--hl-bg2); border-radius: 2px; font-weight: 700; opacity: 1; }
+.hl-brace.hl-enclose { box-shadow: inset 0 -2px var(--hl-bg2); opacity: 1; }
 .source-pane .bar { display: flex; gap: 6px; padding: 4px 6px; align-items: center; border-bottom: 1px solid var(--ui-border); font-size: 11px; }
 .source-pane .bar .name { color: var(--ui-muted); }
 .source-pane .bar .line { color: var(--muted2); }
@@ -869,8 +876,15 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .text-editor .te-conflict { background: var(--warn-bg); border-bottom: 1px solid var(--warn-border); padding: 6px 10px; font-size: 12.5px; display: flex; gap: 8px; align-items: center; }
 .text-editor .te-body { flex: 1; display: flex; min-height: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; line-height: 1.45; }
 .text-editor .te-gutter { flex: none; width: 3.5em; overflow: hidden; text-align: right; padding: 8px 6px 8px 0; color: var(--muted2); background: var(--surface2); border-right: 1px solid var(--ui-border); user-select: none; white-space: pre; }
-.text-editor textarea { flex: 1; resize: none; border: 0; outline: 0; padding: 8px 10px; font: inherit; line-height: inherit; white-space: pre; overflow: auto; tab-size: 4; color: var(--ui-fg); }
-.text-editor textarea[readonly] { background: var(--surface2); color: var(--fg2); }
+.text-editor .te-code { position: relative; flex: 1; min-width: 0; overflow: hidden; }
+.text-editor .te-code.readonly { background: var(--surface2); }
+.text-editor .te-code pre.hl, .text-editor textarea { position: absolute; inset: 0; margin: 0; box-sizing: border-box; width: 100%; height: 100%; resize: none; border: 0; outline: 0; padding: 8px 10px; font: inherit; line-height: inherit; white-space: pre; overflow: auto; tab-size: 4; }
+.text-editor .te-code pre.hl { pointer-events: none; overflow: hidden; color: var(--ui-fg); }
+.text-editor .te-code pre.hl code { font: inherit; }
+.text-editor .te-code pre.hl .cur { position: absolute; left: 0; right: 0; background: var(--active-bg); opacity: 0.35; }
+.text-editor textarea { color: transparent; caret-color: var(--ui-fg); background: transparent; }
+.text-editor textarea::selection { background: var(--row-sel); color: transparent; }
+.text-editor .te-code.readonly pre.hl { color: var(--fg2); }
 .filetree .actions { flex-wrap: wrap; row-gap: 3px; }
 .filetree .actions .small-btn { white-space: nowrap; }
 

@@ -60,3 +60,15 @@ describe('sized delimiters from the toolbar', () => {
     expect(rt('$\\left\\Vert x\\right\\Vert $')).toBe('$\\left\\Vert x\\right\\Vert $');
   });
 });
+
+describe('the \\llangle preamble snippet and the macro scanner', () => {
+  it('does not turn its \\left / \\right wrappers into user macros (\\left[ would render as the word "left")', async () => {
+    const { macrosFromLatex } = await import('../packages/core/src/macros.ts');
+    const names = macrosFromLatex('\\newcommand{\\bW}{\\bm{W}}\n' + LLANGLE_PREAMBLE + '\n\\def\\HH{\\mathbb{H}}').macros.map(m => m.name);
+    expect(names).toContain('bW');
+    expect(names).toContain('HH');
+    expect(names).toContain('llangle');
+    expect(names).not.toContain('left');
+    expect(names).not.toContain('right');
+  });
+});

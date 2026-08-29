@@ -1,6 +1,7 @@
 import type { EditorView } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
 import { sectionLevel } from '../editor/layouts';
+import { navHistory } from './navhistory';
 import type { Node as PMNode } from 'prosemirror-model';
 
 export interface OutlineItem { pos: number; level: number; text: string; layout: string; num?: string }
@@ -55,7 +56,7 @@ export function Outline({ view, items, activePos }: { view: EditorView | null; i
   const go = (it: OutlineItem) => {
     if (!view) return;
     const tr = view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(it.pos + 1))).scrollIntoView();
-    view.dispatch(tr);
+    navHistory.jump(() => view.dispatch(tr));
     view.focus();
   };
   let active = -1;

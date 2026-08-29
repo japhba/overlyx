@@ -5,7 +5,8 @@
  * cursor — the paragraph being edited is scrolled into view and its first line marked — and it is
  * editable: "Apply" sends the edited source back; the server parses it and replaces the document
  * content through the normal collaborative channel (as a diff, so paragraphs that did not change
- * keep their identity).
+ * keep their identity). Undo / redo in the pane is our own (codearea.ts, the browser's breaks
+ * when the text is regenerated), and the bracket pair at the cursor is marked in the colours.
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
@@ -13,6 +14,7 @@ import type * as Y from 'yjs';
 import { writeLyx, pmToLyxBody } from '@overlyx/core';
 import { api } from '../api';
 import { highlightTex } from './texhighlight';
+import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask } from './codearea';
 import { findSourceLine } from './sourcelocate';
 import type { LyxMathField } from '../editor/lyxmath/field';
 
@@ -75,14 +77,32 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   const pre = useRef<HTMLPreElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seq = useRef(0);
-  const html = useMemo(() => highlightTex(text) + '\n', [text]);
+  const undo = useRef(new UndoStack({ value: '', start: 0, end: 0 }));
+  const [cursor, setCursor] = useState<number | null>(null);
+  const mask = useMemo(() => commentMask(text), [text]);
+  const match = useMemo(() => (cursor === null ? null : matchBrackets(text, cursor, mask)), [text, cursor, mask]);
+  const html = useMemo(() => {
+    let marks: Map<number, string> | undefined;
+    if (match) {
+      marks = new Map();
+      const cls = match.kind === 'adjacent' ? 'hl-match' : 'hl-enclose';
+      for (const at of [match.open, match.close]) for (let k = 0; k < match.len; k++) marks.set(at + k, cls);
+    }
+    return highlightTex(text, marks) + '\n';
+  }, [text, match]);
+  const updateCursor = () => { const el = ta.current; if (el) setCursor(el.selectionStart === el.selectionEnd ? el.selectionStart : null); };
+  useEffect(() => {
+    const h = () => { if (document.activeElement === ta.current) updateCursor(); };
+    document.addEventListener('selectionchange', h);
+    return () => document.removeEventListener('selectionchange', h);
+  }, []);
 
   const load = async () => {
     if (!target) return;
     const my = ++seq.current;
     try {
       const t = await api.texText(target.docId);
-      if (my === seq.current) setText(t);
+      if (my === seq.current) { setText(t); undo.current.reset({ value: t, start: 0, end: 0 }); }
     } catch (e) { if (my === seq.current) setText('% could not generate source: ' + (e as Error).message); }
   };
 
@@ -153,9 +173,17 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
           {curLine !== null && !dirty && <span class="cur" style={{ top: PAD_TOP + curLine * LINE_H + 'px' }} />}
           <code dangerouslySetInnerHTML={{ __html: html }} />
         </pre>
-        <textarea ref={ta} class="source" spellcheck={false} value={text} onScroll={syncScroll}
-          onInput={e => { setText((e.target as HTMLTextAreaElement).value); setDirty(true); }}
-          onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && dirty) { e.preventDefault(); void apply(); } }} />
+        <textarea ref={ta} class="source" spellcheck={false} value={text} onScroll={syncScroll} onClick={updateCursor} onKeyUp={updateCursor}
+          onInput={e => { const el = e.target as HTMLTextAreaElement; undo.current.record({ value: el.value, start: el.selectionStart, end: el.selectionEnd }); setText(el.value); setDirty(true); updateCursor(); }}
+          onKeyDown={e => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && dirty) { e.preventDefault(); void apply(); return; }
+            const ur = undoRedoKey(e);
+            if (ur) { e.preventDefault(); const s = applyUndoRedo(ta.current!, undo.current, ur); if (s) { setText(s.value); setDirty(true); updateCursor(); } return; }
+            if (e.isComposing) return;
+            const el = ta.current!;
+            const s = editingKey(e, el);
+            if (s) { e.preventDefault(); applySnapshot(el, s); undo.current.record({ value: el.value, start: el.selectionStart, end: el.selectionEnd }); setText(el.value); setDirty(true); updateCursor(); }
+          }} />
       </div>
       <div class="hint">{dirty ? 'Edited — Apply (Ctrl+Enter) replaces the document with this source.' : 'The LaTeX source of the document as it is saved; it follows the cursor. Edit and apply, or copy.'}</div>
     </div>

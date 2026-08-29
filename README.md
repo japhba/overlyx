@@ -159,6 +159,28 @@ blend.
   commands, so the editor's built-in bindings never fire for them. Shortcuts are written once in LyX
   style (`Ctrl+Alt+O`) and rendered per platform (`⌥⌘O` on a Mac; `app/shortcuts.ts`). LyX's
   `Ctrl+Shift+P` (typewriter) gave way to the palette; give it a key there if you want one.
+* **Text-file tabs and the source pane** (`app/TextEditor.tsx`, `app/SourcePane.tsx`, shared logic
+  in `app/codearea.ts`): a textarea under a coloured copy of the text (`app/texhighlight.ts`) with
+  VS Code habits — own undo / redo (`Ctrl+Z`, `Ctrl+Shift+Z` / `Ctrl+Y`; the browser's breaks as soon
+  as a script sets the textarea's value), the bracket pair at the cursor marked (and, when the
+  cursor is not next to one, the enclosing pair underlined; `\{` only matches `\}`; comments are
+  skipped), bracket pair colours by nesting depth, the current line marked, auto-closing `{ [ ( $`
+  (only before whitespace / a closer / the end; typing the closer steps over it; Backspace inside an
+  empty pair removes both; a selection gets wrapped), Enter keeps the indentation, opens `{}` over
+  three lines and completes a `\begin{env}` line with its `\end{env}` when it is not closed yet,
+  Tab / Shift+Tab and `Ctrl+]` / `Ctrl+[` indent the selected lines, `Ctrl+/` toggles `%` comments,
+  `Alt+↑/↓` move lines (`Shift+Alt+↑/↓` copy them), `Ctrl+Shift+K` deletes them, Home goes to the
+  first non-blank character first.
+* **Back / Forward** (`app/navhistory.ts`): `Ctrl+Alt+←` / `Ctrl+Alt+→` (`⌥⌘←` / `⌥⌘→` on a Mac;
+  *Navigate* menu) walk a VS Code-style history of the places the cursor has been — across the tabs
+  of the workspace. Jumps make entries (following a cross-reference with Ctrl+click or the context
+  menu, the outline, a presence avatar, *Go to label*, a far click or find hit, opening another
+  tab); typing and stepping through the text only update the current entry, so Back lands where
+  one was before the jump and Forward where one was at its target. Places are stored like the cursor
+  memory (offset + the text before the cursor) and found again after edits; an entry in a closed
+  tab reopens it. The stack survives a reload (`sessionStorage.ol.nav`). Both keys can be rebound
+  from the command palette (e.g. to `Control+-` / `Control+Shift+-`, VS Code's Mac defaults, should
+  the browser claim ⌥⌘←/→).
 * **Sidebars**: the file browser (left) and the Outline / PDF / Versions panels (right) hide
   with the « » buttons in their tab strip; a hidden sidebar leaves a thin rail with its panels' names
   that brings it back. The state is remembered per browser (`localStorage.ol.files`, `ol.right`).

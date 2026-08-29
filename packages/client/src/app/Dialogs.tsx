@@ -675,6 +675,7 @@ export const HELP_ROWS: [string, string][] = [
     ['Ctrl+S / Ctrl+R / Ctrl+F', 'Write the file now (everything is saved automatically anyway) / view PDF / find & replace'],
     ['Ctrl+Shift+E', 'Track changes'],
     ['Ctrl+Alt+O', 'Outline pane'],
+    ['Ctrl+Alt+← / Ctrl+Alt+→', 'Back / forward through the places you were (after following a reference, the outline, a tab switch)'],
     ['Ctrl+Z / Ctrl+Y', 'Undo / redo (per user)'],
     ['Ctrl++ / Ctrl+- / Ctrl+0', 'Zoom the text (the interface keeps its size)'],
     ['Ctrl+Alt++ / Ctrl+Alt+-', 'Wider / narrower text column'],

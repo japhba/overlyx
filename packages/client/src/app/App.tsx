@@ -31,6 +31,9 @@ import { createEditor, refreshMacros, describeChange, type EditorHandle, type Sa
 import { newerVersionAvailable } from './update';
 import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
+import { navHistory, type NavLocation } from './navhistory';
+import { restoredCursorPos } from '../editor/cursormemory';
+import { canonical, effectiveShortcut, keyFromEvent } from './keybindings';
 import { STANDARD_LAYOUTS } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
 import * as C from '../editor/commands';
@@ -142,6 +145,10 @@ const MATH_PANEL_PREVIEW: Record<string, string> = {
 };
 const MATH_PANEL_ICONS: Record<string, string> = { style: 'Style' };
 
+/** Navigate ▸ Back / Forward (navhistory.ts); the ids are the menu paths, so the palette can rebind them */
+const NAV_BACK_ID = 'Navigate ▸ Back', NAV_FORWARD_ID = 'Navigate ▸ Forward';
+const NAV_BACK_KEY = 'Ctrl+Alt+←', NAV_FORWARD_KEY = 'Ctrl+Alt+→';
+
 function loadTabs(): string[] { try { const t = JSON.parse(localStorage.getItem('ol.tabs') || '[]'); return Array.isArray(t) ? t.filter(x => typeof x === 'string') : []; } catch { return []; } }
 
 function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
@@ -251,10 +258,18 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const notify = useCallback((text: string, kind: 'info' | 'error' = 'info') => { setMessage({ text, kind }); setTimeout(() => setMessage(m => (m?.text === text ? null : m)), 4000); }, []);
 
   useEffect(() => {
-    const onHash = () => { const h = parseHash(); pendingGoto.current = h.goto; setDocId(h.id); if (h.goto && h.id === editorContext.docId) runGoto(); };
+    const onHash = () => {
+      const h = parseHash(); pendingGoto.current = h.goto; setDocId(h.id);
+      if (h.id?.startsWith('text:')) navHistory.visit(h.id, null);
+      if (h.goto && h.id === editorContext.docId) runGoto();
+    };
+    navHistory.load();
+    const h0 = parseHash().id;
+    if (h0?.startsWith('text:')) navHistory.visit(h0, null);
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
+  useEffect(() => navHistory.subscribe(rerender), []);
   // a share link (#/share/<token>): join the project, then open its main document
   useEffect(() => {
     const check = () => {
@@ -331,7 +346,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   };
   const gotoLabel = useCallback((name: string, from?: EditorView) => {
     const views = [from, editorRef.current?.view, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v);
-    for (const v of views) if (gotoLabelIn(v, name)) return;
+    if (navHistory.jump(() => views.some(v => gotoLabelIn(v, name)))) return;
     const l = editorContext.meta?.labels.find(x => x.name === name);
     if (l?.file && editorContext.project) { openInTab(`${editorContext.project}/${l.file}`, { goto: name }); return; }
     notify(`Label “${name}” not found`, 'error');
@@ -343,8 +358,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     if (v && gotoLabelIn(v, name)) { pendingGoto.current = null; }
   };
 
-  const onSelection = (view: EditorView) => {
+  const onSelection = (view: EditorView, info?: { docChanged: boolean }) => {
     activeViewRef.current = view; editorContext.activeView = view;
+    navHistory.visitState(viewDocId(view), view.state, { docChanged: !!info?.docChanged });
     const p = C.currentParagraph(view.state);
     setLayout(p ? p.node.attrs.layout : '');
     if (view === editorRef.current?.view) setActivePos(view.state.selection.from);
@@ -359,9 +375,50 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const jumpToUser = (u: PresenceUser) => {
     if (u.self) { const v = editorRef.current?.view; if (v) { v.focus(); v.dispatch(v.state.tr.scrollIntoView()); } return; }
     const handles = [editorRef.current, ...childRefs.current.values()].filter((h): h is EditorHandle => !!h);
-    for (const h of handles) if (h.gotoUser(u.clientId)) { notify(`Jumped to ${u.name}'s cursor`); return; }
-    notify(`${u.name} has no cursor in this document (yet)`, 'error');
+    const hit = navHistory.jump(() => handles.find(h => h.gotoUser(u.clientId)));
+    if (hit) notify(`Jumped to ${u.name}'s cursor`);
+    else notify(`${u.name} has no cursor in this document (yet)`, 'error');
   };
+
+  /**
+   * Navigation history (navhistory.ts): Back / Forward show an earlier place — in an open editor
+   * (the master or a child of the combined view) right away, else by switching to that document's
+   * tab, where the editor puts the cursor there once the document is loaded (`initialCursor`).
+   */
+  const pendingNav = useRef<NavLocation | null>(null);
+  const showLocation = (loc: NavLocation) => {
+    if (loc.docId.startsWith('text:')) { navHistory.restored(); if (parseHash().id !== loc.docId) location.hash = '#/' + loc.docId; return; }
+    const handles = [editorRef.current, ...childRefs.current.values()].filter((h): h is EditorHandle => !!h);
+    const h = handles.find(x => viewDocId(x.view) === loc.docId);
+    if (h) {
+      const v = h.view;
+      const doc = v.state.doc;
+      const pos = loc.cursor ? restoredCursorPos(doc, loc.cursor) : 0;
+      try { v.dispatch(v.state.tr.setSelection(TextSelection.near(doc.resolve(Math.min(pos, doc.content.size)))).scrollIntoView().setMeta('addToHistory', false)); } catch { /* not a valid place any more */ }
+      navHistory.restored();
+      v.focus();
+      return;
+    }
+    pendingNav.current = loc;
+    if (parseHash().id !== loc.docId) location.hash = '#/' + loc.docId;
+  };
+  const navBack = useCallback(() => { const loc = navHistory.back(); if (loc) showLocation(loc); else notify('Nothing to go back to'); }, []);
+  const navForward = useCallback(() => { const loc = navHistory.forward(); if (loc) showLocation(loc); else notify('Nothing to go forward to'); }, []);
+  // Ctrl+Alt+← / Ctrl+Alt+→ (⌥⌘← / ⌥⌘→) wherever the focus is (formula fields, panels, text-file tabs);
+  // a rebound command is run by the palette's listener, which marks the event handled (defaultPrevented)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const k = keyFromEvent(e);
+      if (!k) return;
+      const action = k === canonical(effectiveShortcut(NAV_BACK_ID, NAV_BACK_KEY)) ? navBack : k === canonical(effectiveShortcut(NAV_FORWARD_ID, NAV_FORWARD_KEY)) ? navForward : null;
+      if (!action) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      action();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
 
   // create / destroy the editor when the document changes (metadata first, so formulas render once with the right macros)
   useEffect(() => {
@@ -387,6 +444,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       onStatus: setStatus,
       onSaveState: (st) => { if (!cancelled) setSave(st); },
       onSelectionChange: onSelection,
+      initialCursor: () => { const p = pendingNav.current; if (p && p.docId === docId) { pendingNav.current = null; return p.cursor; } return null; },
       onDocChange: (view) => { setDocTick(t => t + 1); scheduleOutline(view); },
       onStale: (info) => { void resolveStale(handle, docId, info.pendingLocal); },
       // access revoked or role changed: the metadata tells the new role (or 403 → the tab closes)
@@ -404,7 +462,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     const readHeader = () => { try { setHeaderLines(JSON.parse(metaMap.get('header') ?? '[]')); } catch { /* ignore */ } };
     readHeader(); metaMap.observe(readHeader);
     const h = handle;
+    let firstSync = true;
     h.provider.on('sync', () => {
+      if (firstSync) { firstSync = false; navHistory.visitState(docId, h.view.state); }
       setOutline(buildOutline(h.view.state.doc, true, editorContext.meta?.secnumdepth ?? 3));
       setChildIds(collectChildren(h.view));
       setDocTick(x => x + 1);
@@ -914,6 +974,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     { title: 'Navigate', items: [
       { label: 'Outline pane', shortcut: 'Ctrl+Alt+O', action: () => setRightTab('outline') },
       { label: 'Go to label…', action: () => { const n = prompt('Label:'); if (n) gotoLabel(n, view ?? undefined); } },
+      { sep: true },
+      { label: 'Back', shortcut: NAV_BACK_KEY, disabled: !navHistory.canBack(), action: navBack },
+      { label: 'Forward', shortcut: NAV_FORWARD_KEY, disabled: !navHistory.canForward(), action: navForward },
       { label: 'Next tab', action: () => { const i = tabs.indexOf(docId); const n = tabs[(i + 1) % tabs.length]; if (n) location.hash = '#/' + n; } },
       { label: 'Beginning of document', shortcut: 'Ctrl+Home', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)).scrollIntoView()); view.focus(); } } },
       { label: 'End of document', shortcut: 'Ctrl+End', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView()); view.focus(); } } },

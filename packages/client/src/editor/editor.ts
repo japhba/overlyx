@@ -28,7 +28,7 @@ import { setDocumentMacros, setInlineMacroDefs, markMacrosReady } from './lyxmat
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
 import { includeTarget } from './commands';
-import { readSavedCursor, writeSavedCursor, restoredCursorPos } from './cursormemory';
+import { readSavedCursor, writeSavedCursor, restoredCursorPos, type SavedCursor } from './cursormemory';
 import { aiRewritePlugin, openRewriteMath } from './ai/rewrite';
 import { aiCompletePlugin } from './ai/complete';
 import { installMathAssist } from './ai/mathassist';
@@ -106,7 +106,8 @@ export interface EditorOptions {
   /** a child document rendered below its master (combined view) */
   child?: boolean;
   onStatus?: (s: { connected: boolean; synced: boolean; users: PresenceUser[] }) => void;
-  onSelectionChange?: (view: EditorView) => void;
+  /** the selection changed; `docChanged`: because the document changed (typing, remote edits, loading), not by a cursor move */
+  onSelectionChange?: (view: EditorView, info: { docChanged: boolean }) => void;
   onDocChange?: (view: EditorView) => void;
   /**
    * The server's document has a different history (epoch) than the local copy — it was re-created
@@ -122,6 +123,8 @@ export interface EditorOptions {
   onSaveState?: (s: SaveState) => void;
   /** start read-only (until `setEditable(true)`) */
   readOnly?: boolean;
+  /** where to put the cursor once the document is loaded (navigation history); null: the remembered place */
+  initialCursor?: () => SavedCursor | null;
 }
 
 /** IndexedDB database name of a document's local copy */
@@ -297,7 +300,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     new Plugin({
       view: () => ({
         update: (view, prev) => {
-          if (!prev.selection.eq(view.state.selection) || prev.doc !== view.state.doc) opts.onSelectionChange?.(view);
+          if (!prev.selection.eq(view.state.selection) || prev.doc !== view.state.doc) opts.onSelectionChange?.(view, { docChanged: prev.doc !== view.state.doc });
           if (prev.doc !== view.state.doc) opts.onDocChange?.(view);
           if (cursorRestored && !prev.selection.eq(view.state.selection)) rememberCursor();
         },
@@ -522,7 +525,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     cursorRestored = true;
     try {
       const doc = view.state.doc;
-      const saved = readSavedCursor(opts.docId);
+      const saved = opts.initialCursor?.() ?? readSavedCursor(opts.docId);
       const sel = saved ? TextSelection.near(doc.resolve(restoredCursorPos(doc, saved))) : TextSelection.atStart(doc);
       view.dispatch(view.state.tr.setSelection(sel).scrollIntoView().setMeta('addToHistory', false));
       if (saved) {

@@ -156,3 +156,48 @@ test('a viewer can read text files but not change them', async ({ browser }) => 
   expect(readFileSync(`${DIR}/notes/todo.md`, 'utf8')).toBe('# todo\n');
   await bob.close(); await admin.close();
 });
+
+test('the text editor has its own undo/redo, bracket matching and VS Code-style editing keys', async ({ browser }) => {
+  const admin = await asUser(browser);
+  const page = await admin.newPage();
+  await page.goto('/#/text:' + PROJECT + '/macros.tex');
+  const ed = page.locator('.text-editor');
+  const ta = ed.locator('textarea');
+  await expect(ta).toHaveValue(/newcommand/);
+  await expect(ed.locator('.state')).toHaveText('✓ Saved');
+  const initial = await ta.inputValue();
+  await ta.focus();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('\\begin{itemize}');
+  await page.keyboard.press('Enter');                       // Enter after \begin{…} adds the \end
+  await expect(ta).toHaveValue(/\\begin\{itemize\}\n +\n *\\end\{itemize\}$/);   // (indented like the line before)
+  await page.keyboard.type('\\item x{');                    // the brace is auto-closed …
+  await expect(ta).toHaveValue(/\\item x\{\}\n *\\end/);
+  await page.keyboard.press('Backspace');                   // … and Backspace removes the pair
+  await expect(ta).toHaveValue(/\\item x\n *\\end/);
+  // the matching pair of the bracket at the cursor is marked in the overlay
+  await page.keyboard.type('{a}');
+  await page.keyboard.press('ArrowLeft');
+  await expect(ed.locator('pre.hl .hl-match')).toHaveCount(2);
+  await expect(ed.locator('pre.hl .hl-match').first()).toHaveText('{');
+  await page.keyboard.press('End');
+  // Ctrl+/ comments the line and back, Alt+↑ moves it up
+  await page.keyboard.press('Control+Slash');
+  await expect(ta).toHaveValue(/\n +% \\item x\{a\}\n/);
+  await page.keyboard.press('Control+Slash');
+  await expect(ta).toHaveValue(/\n +\\item x\{a\}\n/);
+  await page.keyboard.press('Alt+ArrowUp');
+  await expect(ta).toHaveValue(/\n +\\item x\{a\}\n *\\begin\{itemize\}\n/);
+  // undo walks all of it back, redo forward again; everything lands on disk
+  let steps = 0;
+  while ((await ta.inputValue()) !== initial && steps < 30) { await page.keyboard.press('Control+z'); steps++; }
+  expect(steps).toBeGreaterThan(2);
+  expect(steps).toBeLessThan(30);
+  await page.keyboard.press('Control+y');
+  await expect(ta).not.toHaveValue(initial);
+  await page.keyboard.press('Control+Shift+z');
+  await expect(ed.locator('.state')).toHaveText('✓ Saved', { timeout: 10000 });
+  expect(readFileSync(`${DIR}/macros.tex`, 'utf8')).toBe(await ta.inputValue());
+  await admin.close();
+});

@@ -7,6 +7,8 @@
  * A stray delimiter cannot colour the rest of the file: $…$, \(…\) and \[…\] end at a blank line
  * (TeX forbids paragraph breaks in math), and `$$` opens display math only when another `$$` follows
  * in the same paragraph — otherwise it is an empty inline formula, as OverLyX writes one.
+ * Braces and brackets carry their nesting depth (`hl-d0` … `hl-d2`, cycling) for VS Code-style
+ * bracket pair colours.
  */
 
 const MATH_ENVS = new Set(['math', 'displaymath', 'equation', 'equation*', 'align', 'align*', 'alignat', 'alignat*', 'gather', 'gather*', 'multline', 'multline*', 'eqnarray', 'eqnarray*', 'flalign', 'flalign*', 'xalignat', 'xxalignat']);
@@ -36,17 +38,37 @@ function hasInParagraph(src: string, from: number, what: string): boolean {
   return blank < 0 || k < blank;
 }
 
-export function highlightTex(src: string): string {
+/**
+ * `marks`: character offsets to set off (the matched bracket pair, codearea.ts `matchBrackets`)
+ * with the class given (`hl-match` / `hl-enclose`); a two-character token (\{) is marked at both
+ * offsets.
+ */
+export function highlightTex(src: string, marks?: Map<number, string>): string {
   let out = '';
+  const marked = (from: number, to: number): boolean => { if (marks) for (let k = from; k < to; k++) if (marks.has(k)) return true; return false; };
   const n = src.length;
   let i = 0;
   /** inside math: what closes it ('$', '$$', '\\)', '\\]' or 'env:<name>') */
   let mathEnd: string | null = null;
   const span = (cls: string, text: string) => { out += `<span class="${cls}${mathEnd ? ' m' : ''}">${esc(text)}</span>`; };
+  let depth = 0;
+  /** a bracket with its depth class: openers count before, closers after */
+  const bracket = (c: string, extra = '') => {
+    const open = c === '{' || c === '[';
+    if (!open && depth > 0) depth--;
+    span(`hl-brace hl-d${depth % 3}${extra}`, c);
+    if (open) depth++;
+  };
   const plain = (text: string) => { out += mathEnd ? `<span class="hl-math">${esc(text)}</span>` : esc(text); };
 
   while (i < n) {
     const c = src[i];
+    if (marks?.has(i)) {
+      const len = c === '\\' && marks.has(i + 1) ? 2 : 1;
+      if (len === 1 && (c === '{' || c === '}' || c === '[' || c === ']')) bracket(c, ' ' + marks.get(i));
+      else span('hl-brace ' + marks.get(i), src.slice(i, i + len));
+      i += len; continue;
+    }
     if (c === '%') {
       let j = src.indexOf('\n', i); if (j < 0) j = n;
       span('hl-comment', src.slice(i, j)); i = j; continue;
@@ -57,7 +79,8 @@ export function highlightTex(src: string): string {
         const name = m[1];
         const end = i + m[0].length;
         if (name === 'begin' || name === 'end') {
-          const arg = /^\s*\{([^{}\n]*)\}/.exec(src.slice(end, end + 80));
+          let arg = /^\s*\{([^{}\n]*)\}/.exec(src.slice(end, end + 80));
+          if (arg && marked(end, end + arg[0].length)) arg = null;   // a marked brace inside: token by token
           span('hl-kw', m[0]);
           if (arg) {
             const env = arg[1];
@@ -78,7 +101,7 @@ export function highlightTex(src: string): string {
           const ws = /^\s*/.exec(src.slice(k, k + 8))![0];
           if (src[k + ws.length] === '{') {
             const e = bracedEnd(src, k + ws.length);
-            if (e > 0) { plain(ws); span('hl-brace', '{'); span('hl-arg', src.slice(k + ws.length + 1, e - 1)); span('hl-brace', '}'); i = e; continue; }
+            if (e > 0 && !marked(k, e)) { plain(ws); span('hl-brace', '{'); span('hl-arg', src.slice(k + ws.length + 1, e - 1)); span('hl-brace', '}'); i = e; continue; }
           }
           i = end; continue;
         }
@@ -98,14 +121,14 @@ export function highlightTex(src: string): string {
       if (mathEnd === two || (mathEnd === '$' && two === '$$')) { const d = mathEnd; mathEnd = null; span('hl-mdelim', d); i += d.length; continue; }
       plain(c); i++; continue;
     }
-    if (c === '{' || c === '}' || c === '[' || c === ']') { span('hl-brace', c); i++; continue; }
+    if (c === '{' || c === '}' || c === '[' || c === ']') { bracket(c); i++; continue; }
     if (c === '&' && mathEnd) { span('hl-amp', c); i++; continue; }
     // a run of ordinary text; a blank line ends $…$, \(…\) and \[…\] math
     const inlineMath = mathEnd !== null && !mathEnd.startsWith('env:');
     let j = i, blank = false;
     if (inlineMath && c === '\n' && src[i + 1] === '\n') { mathEnd = null; plain('\n'); i++; continue; }
     j++;
-    while (j < n && !'%\\${}[]&'.includes(src[j])) { if (inlineMath && src[j] === '\n' && src[j + 1] === '\n') { blank = true; break; } j++; }
+    while (j < n && !'%\\${}[]&'.includes(src[j]) && !marks?.has(j)) { if (inlineMath && src[j] === '\n' && src[j + 1] === '\n') { blank = true; break; } j++; }
     plain(src.slice(i, j)); i = j;
     if (blank) mathEnd = null;
   }
