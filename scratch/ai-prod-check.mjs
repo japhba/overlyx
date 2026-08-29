@@ -22,11 +22,18 @@ await page.keyboard.type(' In this document we', { delay: 60 });
 for (let i = 0; i < 8; i++) { await page.waitForTimeout(500); const n = await page.locator('.ai-ghost').count(); const busy = await page.locator('[data-ai-busy]').count(); console.log(`t=${(i + 1) * 0.5}s ghost=${n} busy=${busy}`); if (n) break; }
 console.log('ghost text:', await page.locator('.ai-ghost').textContent().catch(() => '(none)'));
 await page.screenshot({ path: '/root/.claude/jobs/9387b0c1/tmp/shots/prod-ghost.png' });
-// continuous typing scenario: keep typing while requests are in flight, then pause
+// continuous typing at a natural pace (~130 ms/char): does a ghost ever show while typing?
 await page.keyboard.press('Escape');
-await page.keyboard.type(' and then we will show', { delay: 120 });
-for (let i = 0; i < 8; i++) { await page.waitForTimeout(500); const n = await page.locator('.ai-ghost').count(); console.log(`t=${(i + 1) * 0.5}s ghost=${n}`); if (n) break; }
-console.log('ghost text 2:', await page.locator('.ai-ghost').textContent().catch(() => '(none)'));
+const seen = [];
+const words = ' and then we will show how the editor renders formulas such as'.split(' ');
+for (const w of words) {
+  await page.keyboard.type((w ? ' ' : '') + w, { delay: 130 });
+  const n = await page.locator('.ai-ghost').count();
+  if (n) seen.push(await page.locator('.ai-ghost').textContent().catch(() => '?'));
+}
+console.log('ghosts seen while typing:', seen.length, seen.slice(0, 5));
+await page.waitForTimeout(1500);
+console.log('ghost after pause:', await page.locator('.ai-ghost').textContent().catch(() => '(none)'));
 // undo the typing so the welcome document stays as it was
 await page.evaluate(() => { const v = window.overlyx.activeView; const doc = v.state.doc; let start = 0; for (let k = 0; k < 2; k++) start += doc.child(k).nodeSize; const par = doc.child(2); const txt = par.textContent; const i = txt.indexOf(' In this document we'); if (i >= 0) v.dispatch(v.state.tr.delete(start + 1 + i, start + 1 + par.content.size)); });
 await page.waitForTimeout(500);

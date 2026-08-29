@@ -2,7 +2,7 @@
  * Autocomplete in the text (Tools ▸ AI ▸ Autocomplete text), with the mechanics of an IDE's
  * inline suggestions (VS Code / Copilot):
  *
- *  - every keystroke schedules a request (short debounce); one request is in flight at a time,
+ *  - typing schedules a request (a short throttle, so continuous typing still asks); one request is in flight at a time,
  *    and typing does *not* cancel it — when the reply arrives, whatever was typed meanwhile is
  *    compared with the reply's beginning, and the rest is shown if it matches;
  *  - a shown suggestion stays while you type its beginning (it shrinks as you go) and is
@@ -283,8 +283,9 @@ export function aiCompletePlugin(): Plugin<CompleteState> {
           if (!st) return;
           if (st.moved) { abort(); return; }
           if (!st.typed || st.ghost || !enabled()) return;
-          clearTimer();
-          timer = setTimeout(() => { void request(); }, Math.max(80, getPrefs().aiCompleteDelay));
+          // a throttle, not a debounce: continuous typing must not starve the request (the reply is
+          // matched against whatever gets typed meanwhile)
+          if (!timer) timer = setTimeout(() => { void request(); }, Math.max(80, getPrefs().aiCompleteDelay));
         },
         destroy: abort,
       };

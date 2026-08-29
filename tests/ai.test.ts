@@ -146,6 +146,22 @@ describe('complete', () => {
   });
 });
 
+describe('stripOverlap (the reply repeats the last word before the cursor)', () => {
+  it('removes the repeated word(s) and keeps the spacing the reply had', () => {
+    expect(ai.stripOverlap('In this document we', 'we explore the features.')).toBe(' explore the features.');
+    expect(ai.stripOverlap('an unfinished explor', 'explore how it works')).toBe('e how it works');
+    expect(ai.stripOverlap('We study the', 'study the exponent')).toBe(' exponent');
+    expect(ai.stripOverlap('ends with a space ', 'space and more')).toBe('and more');
+  });
+  it('adds a space when nothing was repeated and both sides are word characters', () => {
+    expect(ai.stripOverlap('In this document we', 'explore')).toBe(' explore');
+    expect(ai.stripOverlap('In this document we', ' explore')).toBe(' explore');
+    expect(ai.stripOverlap('a formula', '$x$ follows')).toBe(' $x$ follows');
+    expect(ai.stripOverlap('ends with a space ', 'and more')).toBe('and more');
+    expect(ai.stripOverlap('punctuation.', ' Next sentence')).toBe(' Next sentence');
+  });
+});
+
 describe('rate limiter', () => {
   it('allows `limit` requests per minute per key', () => {
     expect(ai.allow('k', 2)).toBe(true);

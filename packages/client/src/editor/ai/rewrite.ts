@@ -111,7 +111,11 @@ class RewritePanel {
     this.host.appendChild(this.dom);
     this.place(anchor);
     this.setStatus(target.kind === 'math' ? 'Describe the change to the formula.' : target.from === target.to ? 'Describe what to write at the cursor.' : 'Describe the change — e.g. “more concise”, “fix grammar”, “as a bulleted list”, “make the argument rigorous”.');
-    requestAnimationFrame(() => this.input.focus());
+    // the keyboard goes to the prompt at once (a key typed right after ⌘K must not land in the editor)
+    this.input.focus();
+    requestAnimationFrame(() => { if (document.activeElement !== this.input && this.dom.isConnected) this.input.focus(); });
+    // the passage is tracked in the plugin state from now on, so that it follows edits made meanwhile
+    if (target.kind === 'text') target.view.dispatch(target.view.state.tr.setMeta(aiRewriteKey, { from: target.from, to: target.to, deco: DecorationSet.empty }));
   }
   private lastInstruction = '';
 
@@ -133,7 +137,8 @@ class RewritePanel {
     this.result = null;
     this.actions.hidden = true;
     this.preview.hidden = true; this.preview.replaceChildren();
-    if (this.target.kind === 'text') this.target.view.dispatch(this.target.view.state.tr.setMeta(aiRewriteKey, 'clear'));
+    // keep tracking the passage, drop the decorations
+    if (this.target.kind === 'text') { const v = this.target.view; const p = aiRewriteKey.getState(v.state)?.preview; if (p) v.dispatch(v.state.tr.setMeta(aiRewriteKey, { from: p.from, to: p.to, deco: DecorationSet.empty })); }
   }
 
   async ask() {
@@ -174,7 +179,9 @@ class RewritePanel {
     try { frag = Fragment.fromJSON(schema, r.nodes); } catch { this.setStatus('The reply could not be shown as document content.', 'error'); return; }
     if (!frag.size) { this.setStatus('The model returned nothing to insert.', 'error'); return; }
     this.result = r;
-    const { view, from, to } = t;
+    const { view } = t;
+    const tracked = aiRewriteKey.getState(view.state)?.preview;
+    const from = tracked?.from ?? t.from, to = tracked?.to ?? t.to;
     const decos: Decoration[] = [];
     if (to > from) decos.push(Decoration.inline(from, to, { class: 'ai-old' }));
     decos.push(Decoration.widget(to, (v) => {

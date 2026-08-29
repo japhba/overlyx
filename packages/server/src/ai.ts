@@ -212,7 +212,7 @@ const COMPLETE_TEXT_SYSTEM = `You are the autocomplete engine of OverLyX, a WYSI
 Rules:
 - Reply with the continuation only: finish the current sentence or clause, or add at most one short sentence (no more than 25 words). No explanations, no markdown fences, no quotation marks.
 - Write LaTeX as the author would: inline math as $…$, the document's macros and notation, \\cite{key} only with keys that occur in the document, \\ref{label} only for labels that exist.
-- Start exactly at the cursor: begin with a space if the cursor follows a word and you start a new word; do not repeat text before the cursor and do not write anything that is already after it.
+- Begin your reply by repeating the last word before the cursor exactly as it is written (the characters right before ${CURSOR}, e.g. "we" or an unfinished "explor"), then continue from there — this anchors where your text starts. Do not write anything that is already after the cursor.
 - Match the language, register and style of the surrounding text. Never invent numerical results, citations or claims that the document does not support — prefer a shorter, safer continuation.
 - If no sensible continuation exists (for instance right after a heading or inside a reference), reply with nothing at all.`;
 
@@ -262,6 +262,7 @@ export async function complete(doc: OpenDoc, req: CompleteRequest, signal?: Abor
   if (fence) text = fence[1];
   text = text.replace(/\n+/g, ' ').replace(/\s+$/, '');
   if (/^\s*$/.test(text)) return { text: '', nodes: [] };
+  text = stripOverlap(before, text);
   const leading = /^\s/.test(text);
   let nodes: PMJSON[] = [];
   try { nodes = texToPm(doc, text.trim()); } catch { nodes = []; }
@@ -269,6 +270,30 @@ export async function complete(doc: OpenDoc, req: CompleteRequest, signal?: Abor
   if (leading && inline.length) inline.unshift({ type: 'text', text: ' ' });
   if (!inline.length) return { text: '', nodes: [] };
   return { text, nodes: inline };
+}
+
+/**
+ * The reply is asked to start by repeating the last word(s) before the cursor; that overlap is
+ * removed here, which settles the "is there a space between the text and the continuation"
+ * question that small models otherwise get wrong. A reply that did not repeat anything gets a
+ * space when both sides are word characters.
+ */
+export function stripOverlap(before: string, reply: string): string {
+  const words = before.trimEnd().split(/\s+/).filter(Boolean);
+  const endsWithSpace = /\s$/.test(before);
+  for (let k = Math.min(3, words.length); k >= 1; k--) {
+    const tail = words.slice(-k).join(' ');
+    if (!tail) continue;
+    const candidates = endsWithSpace ? [tail + ' ', tail] : [tail];
+    for (const c of candidates) {
+      if (reply.startsWith(c)) {
+        const rest = reply.slice(c.length);
+        return endsWithSpace ? rest.replace(/^\s+/, '') : rest;
+      }
+    }
+  }
+  if (!endsWithSpace && /[A-Za-z0-9]$/.test(before) && /^[A-Za-z0-9\\$]/.test(reply)) return ' ' + reply;
+  return reply;
 }
 
 /* ------------------------------------------------------------------ rate limiting */
