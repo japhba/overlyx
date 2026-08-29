@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { nodeText } from '../editor/cliptext';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
@@ -18,9 +18,10 @@ import { MenuBar, openPalette, PALETTE_LABEL, PALETTE_DEFAULT, type MenuDef } fr
 import { setThemePref, useTheme } from './theme';
 import { Toolbar, ColorPalette, colorIcon, NAMED_COLORS, DelimPalette, TableSizePicker, delimLatex, mathPanelPalettes, mathPreview, type ToolButton, type DelimChoice } from './Toolbar';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
+import { Comments } from './Comments';
 import { Versions } from './Versions';
 import { PdfPanel, stateFromBuild, jobActive, type PdfState } from './PdfPanel';
-import { Ruler, NOTE_DEFAULT, NOTE_MIN, NOTE_MAX } from './Ruler';
+import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX } from './Ruler';
 import { StatusBar, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget } from './SourcePane';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
@@ -38,7 +39,7 @@ import { STANDARD_LAYOUTS } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import * as C from '../editor/commands';
-import { setMarginMode, layout as layoutMargin } from '../editor/plugins/margin';
+import { setMarginMode } from '../editor/plugins/margin';
 import { acceptAllChanges, rejectAllChanges, changeAt, resolveChange, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
@@ -116,10 +117,10 @@ async function clearLocalData(): Promise<void> {
   } catch { /* ignore */ }
 }
 
-type RightTab = 'outline' | 'pdf' | 'versions';
-const RIGHT_TABS = ['outline', 'pdf', 'versions'] as const;
-const RIGHT_TAB_LABELS: Record<RightTab, string> = { outline: 'Outline', pdf: 'PDF', versions: 'Versions' };
-const RIGHT_TAB_TITLES: Record<RightTab, string> = { outline: 'Outline (Ctrl+Alt+O)', pdf: 'PDF preview', versions: 'Versions of this document' };
+type RightTab = 'outline' | 'comments' | 'pdf' | 'versions';
+const RIGHT_TABS = ['outline', 'comments', 'pdf', 'versions'] as const;
+const RIGHT_TAB_LABELS: Record<RightTab, string> = { outline: 'Outline', comments: 'Comments', pdf: 'PDF', versions: 'Versions' };
+const RIGHT_TAB_TITLES: Record<RightTab, string> = { outline: 'Outline (Ctrl+Alt+O)', comments: 'Comment threads: open ones and the resolved archive', pdf: 'PDF preview', versions: 'Versions of this document' };
 const SOURCE_TITLE = 'LaTeX source below the text (Ctrl+Alt+S)';
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 
@@ -211,13 +212,23 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   // width of the text column in px (0 = full width), see View ▸ Text width
   const [textWidth, setTextWidth] = useState<number>(() => { const v = Number(localStorage.getItem('ol.textWidth')); return Number.isFinite(v) && localStorage.getItem('ol.textWidth') !== null ? v : 720; });
   const stepTextWidth = (d: number) => setTextWidth(w => (d === 0 ? 720 : Math.min(1600, Math.max(400, (w || 1200) + d * 60))));
-  // width of the note cards in margin mode (the ruler's − / + buttons)
-  const [noteWidth, setNoteWidth] = useState<number>(() => { const v = Number(localStorage.getItem('ol.noteWidth')); return v >= NOTE_MIN && v <= NOTE_MAX ? v : NOTE_DEFAULT; });
+  // text size of notes and comments, in % of the document text (the ruler's − / + buttons in margin mode)
+  const [noteScale, setNoteScale] = useState<number>(() => { const v = Number(localStorage.getItem('ol.noteScale')); return v >= NOTE_SCALE_MIN && v <= NOTE_SCALE_MAX ? v : NOTE_SCALE_DEFAULT; });
   useEffect(() => {
-    document.documentElement.style.setProperty('--note-width', noteWidth + 'px');
-    localStorage.setItem('ol.noteWidth', String(noteWidth));
-    for (const h of [editorRef.current, ...childRefs.current.values()]) if (h) layoutMargin(h.view);
-  }, [noteWidth]);
+    document.documentElement.style.setProperty('--note-size', noteScale / 100 + 'em');
+    localStorage.setItem('ol.noteScale', String(noteScale));
+  }, [noteScale]);
+  // Toolbars that come and go with the cursor (the math rows appear when a formula is entered)
+  // move the page below them: keep what is on screen where it is by scrolling the same amount.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollTop = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) { scrollTop.current = null; return; }
+    const top = el.getBoundingClientRect().top;
+    if (scrollTop.current !== null && top !== scrollTop.current) el.scrollTop += top - scrollTop.current;
+    scrollTop.current = top;
+  });
   const [showRuler, setShowRuler] = useState(localStorage.getItem('ol.ruler') !== '0');
   useEffect(() => { localStorage.setItem('ol.ruler', showRuler ? '1' : '0'); }, [showRuler]);
   const [findOpen, setFindOpen] = useState(false);
@@ -308,7 +319,18 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
-  useEffect(() => { document.documentElement.style.setProperty('--text-width', textWidth > 0 ? textWidth + 'px' : '100%'); localStorage.setItem('ol.textWidth', String(textWidth)); }, [textWidth]);
+  // A new text width reflows the whole document: keep the cursor where it is on screen (the ruler
+  // is dragged with the eyes on the text) by scrolling by the amount the cursor moved.
+  useEffect(() => {
+    const v = activeViewRef.current;
+    const scroller = scrollRef.current;
+    const cursorTop = () => { try { return v && v.dom.isConnected ? v.coordsAtPos(v.state.selection.from).top : null; } catch { return null; } };
+    const before = cursorTop();
+    document.documentElement.style.setProperty('--text-width', textWidth > 0 ? textWidth + 'px' : '100%');
+    localStorage.setItem('ol.textWidth', String(textWidth));
+    const after = cursorTop();
+    if (scroller && before !== null && after !== null && after !== before) scroller.scrollTop += after - before;
+  }, [textWidth]);
   useEffect(() => { localStorage.setItem('ol.tabs', JSON.stringify(tabs)); }, [tabs]);
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.combined', combined ? '1' : '0'); }, [combined]);
 
@@ -1483,8 +1505,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
           <div class="rail left"><button data-rail="files" title="Show the file browser" onClick={() => setShowFiles(true)}>Files</button></div>
         )}
         <div class="editor-column">
-        <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
-          {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteWidth={noteWidth} onNoteWidth={setNoteWidth} />}
+        <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
+          {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
           {docId ? (!isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
@@ -1507,12 +1529,14 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
           <div class={'sidebar right' + (rightTab === 'pdf' ? ' wide' : '')}>
             <div class="panel-tabs">
               <button class={rightTab === 'outline' ? 'active' : ''} data-tab="outline" onClick={() => setRightTab('outline')} title={RIGHT_TAB_TITLES.outline}>Outline</button>
+              <button class={rightTab === 'comments' ? 'active' : ''} data-tab="comments" onClick={() => setRightTab('comments')} title={RIGHT_TAB_TITLES.comments}>Comments</button>
               <button class={rightTab === 'pdf' ? 'active' : ''} data-tab="pdf" onClick={() => setRightTab('pdf')} title={RIGHT_TAB_TITLES.pdf}>PDF</button>
               <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }} title={RIGHT_TAB_TITLES.versions}>Versions</button>
               <button class={'toggle' + (showSource ? ' on' : '')} data-tab="source" onClick={() => setShowSource(s => !s)} title={SOURCE_TITLE}>Source</button>
               <button class="hide" title="Hide the sidebar" onClick={() => setRightTab(null)}>»</button>
             </div>
             {rightTab === 'outline' && <div class="panel-body"><Outline view={masterView} items={outline} activePos={activePos} /></div>}
+            {rightTab === 'comments' && <div class="panel-body"><Comments views={[masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} /></div>}
             {rightTab === 'pdf' && <PdfPanel docId={docId} state={pdf} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} />}
             {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
           </div>

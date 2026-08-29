@@ -362,7 +362,7 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .inset-action:hover { background: var(--row-hover); }
 .lyx-inset-note-comment > .inset-box > .inset-actions { display: inline-flex; }
 /* notes and comments read as annotations: the interface's sans-serif, a little smaller than the text */
-.lyx-inset-note-note > .inset-box, .lyx-inset-note-comment > .inset-box { font-family: var(--ui-font); font-size: 0.9em; line-height: 1.35; }
+.lyx-inset-note-note > .inset-box, .lyx-inset-note-comment > .inset-box { font-family: var(--ui-font); font-size: var(--note-size, 0.9em); line-height: 1.35; }
 .lyx-inset-note-note > .inset-box { background: var(--note-bg); border-color: var(--note-border); }
 .lyx-inset-note-note > .inset-box > .inset-label { background: #c9a70b; }
 .lyx-inset-note-comment > .inset-box { background: var(--comment-bg); border-color: var(--comment-border); }
@@ -405,7 +405,25 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .lyx-inset-script-superscript > .inset-box { vertical-align: super; font-size: 0.75em; }
 .lyx-inset-script-subscript > .inset-box { vertical-align: sub; font-size: 0.75em; }
 .lyx-inset.highlight > .inset-box { box-shadow: 0 0 0 3px var(--hl-bg2); }
-.lyx-inset.resolved > .inset-box { opacity: 0.55; }
+/* a resolved comment thread leaves the text: a small grey marker stays, the Comments panel lists it */
+.lyx-inset-note-comment.resolved > .inset-box { display: none; }
+.lyx-inset-note-comment.resolved > .inset-anchor { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 2px; vertical-align: middle; cursor: pointer; background: var(--muted2); opacity: 0.7; }
+.lyx-inset-note-comment.resolved.highlight > .inset-anchor { box-shadow: 0 0 0 3px var(--hl-bg2); }
+.margin-mode .lyx-inset-note-comment.resolved > .inset-anchor { background: var(--muted2); }
+/* the Comments panel */
+.comments-panel { font-size: 12.5px; }
+.comments-panel .section-title { font-family: var(--ui-font); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--ui-muted); padding: 8px 8px 4px; }
+.comments-panel .section-title.archive { cursor: pointer; border-top: 1px solid var(--ui-border); margin-top: 8px; padding-top: 8px; }
+.comments-panel .section-title .count { font-weight: 400; margin-left: 4px; }
+.comments-panel .empty { color: var(--muted2); padding: 4px 8px 8px; }
+.comments-panel .comment-row { margin: 4px 8px; padding: 6px 8px; border: 1px solid var(--comment-border); background: var(--comment-bg); border-radius: 4px; cursor: pointer; }
+.comments-panel .comment-row:hover { box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
+.comments-panel .comment-row.resolved { background: var(--surface2); border-color: var(--ui-border); opacity: 0.85; }
+.comments-panel .who { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-family: var(--ui-font); font-size: 11px; color: var(--chip-fg); }
+.comments-panel .who .author { font-weight: 600; }
+.comments-panel .who .time, .comments-panel .who .doc, .comments-panel .who .replies { color: var(--ui-muted); }
+.comments-panel .excerpt { margin-top: 3px; white-space: pre-wrap; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.comments-panel .actions { margin-top: 4px; display: flex; gap: 4px; }
 
 /* comment threads */
 .comment-header { font-family: var(--ui-font); font-size: 11px; color: var(--chip-fg); font-weight: 600; margin-top: 4px; }
@@ -416,7 +434,7 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .margin-mode .lyx-inset-note-comment > .inset-anchor { background: #4c7bb8; }
 .margin-mode .lyx-inset-note-greyedout > .inset-anchor { background: var(--muted2); }
 .margin-mode .lyx-inset-note.in-margin { position: static; }
-.margin-mode .lyx-inset-note.in-margin > .inset-box { position: absolute; width: 320px; max-width: calc(var(--margin-col, 372px) - 52px); display: block; z-index: 2; box-shadow: 0 1px 4px rgba(0,0,0,0.15); padding: 6px 8px; font-size: 0.85em; line-height: 1.35; }
+.margin-mode .lyx-inset-note.in-margin > .inset-box { position: absolute; width: 320px; max-width: calc(var(--margin-col, 372px) - 52px); display: block; z-index: 2; box-shadow: 0 1px 4px rgba(0,0,0,0.15); padding: 6px 8px; font-size: var(--note-size, 0.9em); line-height: 1.35; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
 /* a folded note in the margin: its label and a one-line excerpt (click the label to unfold it); nested notes fold as inline */
 .margin-mode .lyx-inset-note.in-margin.collapsed > .inset-box > .inset-content { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: 1.4em; opacity: 0.6; }

@@ -190,10 +190,21 @@ blend.
 * **Notes & comments in the margin** (*View* menu / toolbar): the note cards sit in a column right
   of the text, Google-Docs style, stacked without overlap and anchored by small coloured squares
   in the text (`editor/plugins/margin.ts`); a folded note is a card with its label and a one-line
-  excerpt, its label unfolds it (and the cards below move down); the − / + buttons on the ruler over the note column make the cards
-  narrower / wider (`localStorage.ol.noteWidth`, 200–640 px, double-click the label to reset); the
+  excerpt, its label unfolds it (and the cards below move down); the − / + buttons on the ruler over the note column make the text
+  of notes and comments smaller / larger (`localStorage.ol.noteScale`, 60–130 % of the document
+  text, 90 % by default, double-click the label to reset — inline notes follow the same setting); the
   column narrows on a small window and the text keeps at least 360px. Notes and comments are set
-  in the interface's sans-serif, a little smaller than the text, inline as well.
+  in the interface's sans-serif.
+* **Comments panel** (right sidebar, *Comments* tab; `app/Comments.tsx`, `editor/commentops.ts`):
+  every comment thread of the open editors — open ones first, then the *Resolved* archive, like
+  Google Docs' comment history. A resolved thread leaves the text and the margin: only a small grey
+  marker stays where it was anchored (its title says so); the panel shows author, time, excerpt and
+  reply count, jumps to a thread on click and can resolve / reopen it.
+* **Ruler resizes keep the cursor in place**: changing the text width (handles, *View ▸ Text width*)
+  reflows the document; the scroll position is corrected so the cursor stays where it was on screen.
+* **Toolbars that come and go** (the math rows when the cursor enters a formula, the table and
+  review rows) do not move the page: the scroll position is corrected by the height they add or
+  take (`App.tsx`, a layout effect on the scroll container's top edge).
 * **Sidebars**: the file browser (left) and the Outline / PDF / Versions panels (right) hide
   with the « » buttons in their tab strip; a hidden sidebar leaves a thin rail with its panels' names
   that brings it back. The state is remembered per browser (`localStorage.ol.files`, `ol.right`).

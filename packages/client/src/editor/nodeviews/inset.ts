@@ -8,6 +8,7 @@ import type { EditorView, NodeView } from 'prosemirror-view';
 import { insetLabel } from '../layouts';
 import { parseHeader, commentHeader, formatTimestamp } from '@overlyx/core';
 import { editorContext } from '../context';
+import { toggleCommentResolved } from '../commentops';
 
 export class InsetView implements NodeView {
   dom: HTMLElement;
@@ -72,6 +73,8 @@ export class InsetView implements NodeView {
       const first = this.node.firstChild?.textContent ?? '';
       const h = parseHeader(first.trim());
       this.dom.classList.toggle('resolved', !!h?.resolved);
+      // a resolved thread leaves the text: its marker stays (the Comments panel lists it and can reopen it)
+      this.anchor.title = h?.resolved ? 'Resolved comment — click to put the cursor here; the Comments panel lists it and can reopen it' : '';
       const reply = document.createElement('button');
       reply.type = 'button'; reply.className = 'inset-action'; reply.textContent = 'Reply'; reply.title = 'Reply to this comment';
       reply.addEventListener('mousedown', (ev) => { ev.preventDefault(); this.reply(); });
@@ -123,23 +126,7 @@ export class InsetView implements NodeView {
 
   toggleResolved() {
     const pos = this.getPos();
-    if (pos === undefined) return;
-    const cur = this.view.state.doc.nodeAt(pos);
-    if (!cur || !cur.firstChild) return;
-    const first = cur.firstChild;
-    const h = parseHeader(first.textContent.trim());
-    const schema = this.view.state.schema;
-    const user = editorContext.user?.name ?? 'Anonymous';
-    if (!h) {
-      // a plain LyX comment: turn it into a thread by prepending a header
-      const header = schema.nodes.paragraph.create({ layout: 'Plain Layout' }, schema.text(commentHeader(user, formatTimestamp(), true)));
-      this.view.dispatch(this.view.state.tr.insert(pos + 1, header));
-      return;
-    }
-    const text = commentHeader(h.author, h.time, !h.resolved);
-    const from = pos + 1, to = pos + 1 + first.nodeSize;
-    const para = schema.nodes.paragraph.create(first.attrs, schema.text(text));
-    this.view.dispatch(this.view.state.tr.replaceWith(from, to, para));
+    if (pos !== undefined) toggleCommentResolved(this.view, pos);
   }
 
   update(node: PMNode): boolean {

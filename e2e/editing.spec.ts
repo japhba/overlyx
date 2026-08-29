@@ -353,7 +353,7 @@ test('Ctrl+Alt+← / → go back and forward through jumps, also across tabs', a
   await page.keyboard.press('Escape');
 });
 
-test('margin mode keeps the notes' fold state, unfolds on the label, and the ruler buttons change the note width', async ({ page }) => {
+test("margin mode keeps the notes' fold state, unfolds on the label, and the ruler buttons change the note text size", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });   // room for the note column (it is capped at 45% of the page)
   await openPaper(page);
   if (!(await page.locator('.editor-scroll.margin-mode').count())) await page.locator('[data-tb="margin"]').click();
@@ -381,15 +381,37 @@ test('margin mode keeps the notes' fold state, unfolds on the label, and the rul
   for (let i = 1; i < rects.length; i++) expect(rects[i][0]).toBeGreaterThanOrEqual(rects[i - 1][1] - 1);   // stacked, no overlap
   await foldedCard.locator('> .inset-box > .inset-label').dispatchEvent('mousedown');            // fold it again
   await expect(foldedCard).toHaveClass(/collapsed/);
-  // − / + on the ruler
-  const width = () => page.locator('.lyx-inset-note.in-margin > .inset-box').first().evaluate(el => el.getBoundingClientRect().width);
-  const w0 = await width();
-  await page.locator('.ruler-notes [data-notes="wider"]').click();
-  await expect.poll(width).toBeGreaterThan(w0);
-  await page.locator('.ruler-notes [data-notes="narrower"]').click();
-  await page.locator('.ruler-notes [data-notes="narrower"]').click();
-  await expect.poll(width).toBeLessThan(w0);
-  expect(await page.evaluate(() => localStorage.getItem('ol.noteWidth'))).toBe(String(w0 - 40));
+  // − / + on the ruler: the notes' text size
+  const size = () => page.locator('.lyx-inset-note.in-margin > .inset-box').first().evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+  const s0 = await size();
+  await page.locator('.ruler-notes [data-notes="bigger"]').click();
+  await expect.poll(size).toBeGreaterThan(s0);
+  await page.locator('.ruler-notes [data-notes="smaller"]').click();
+  await page.locator('.ruler-notes [data-notes="smaller"]').click();
+  await expect.poll(size).toBeLessThan(s0);
+  expect(await page.evaluate(() => localStorage.getItem('ol.noteScale'))).toBe('85');
+  await page.locator('.ruler-notes .label').dblclick();
+  await expect.poll(size).toBe(s0);
   await page.locator('[data-tb="margin"]').click();     // leave it off for the other tests
   await expect(page.locator('.editor-scroll.margin-mode')).toHaveCount(0);
+});
+
+test('clicking into a formula does not move the page (the math toolbars appear above it)', async ({ page }) => {
+  await openPaper(page);
+  const f = page.locator('.lyx-math-display').nth(3);
+  await f.scrollIntoViewIfNeeded();
+  await page.mouse.move(5, 400);
+  await page.waitForTimeout(500);
+  const top = () => f.evaluate(el => el.getBoundingClientRect().top);
+  const before = await top();
+  expect(await page.locator('.toolbar-math').count()).toBe(0);
+  await f.click({ position: { x: 10, y: 6 } });
+  await expect(page.locator('.toolbar-math')).toHaveCount(1);       // the auto math row is there now …
+  await page.waitForTimeout(300);
+  expect(Math.abs((await top()) - before)).toBeLessThan(2);          // … and the formula did not move on screen
+  await page.keyboard.press('Escape');
+  await page.mouse.click(5, 400);
+  await expect(page.locator('.toolbar-math')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(Math.abs((await top()) - before)).toBeLessThan(2);
 });

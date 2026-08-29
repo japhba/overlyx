@@ -51,15 +51,16 @@ export function layout(view: EditorView): void {
   const root = view.dom.parentElement!;
   const on = marginKey.getState(view.state) ?? false;
   const cards = Array.from(view.dom.querySelectorAll<HTMLElement>(':scope .lyx-inset-note'));
-  // only top-level notes (notes nested in notes stay inline in their parent card)
-  const top = cards.filter(c => !c.parentElement?.closest('.lyx-inset-note'));
+  // only top-level notes (notes nested in notes stay inline in their parent card); resolved comment
+  // threads are not shown at all (the Comments panel keeps them)
+  const top = cards.filter(c => !c.parentElement?.closest('.lyx-inset-note') && !c.classList.contains('resolved'));
   if (!on) {
     ((root.closest('.editor-scroll') as HTMLElement | null) ?? root).style.removeProperty('--margin-col');
     for (const c of cards) { c.classList.remove('in-margin'); const b = c.querySelector<HTMLElement>(':scope > .inset-box'); if (b) { b.style.top = ''; b.style.left = ''; } }
     return;
   }
-  // the note column is as wide as the user set (--note-width, the ruler's buttons; 320px by default),
-  // less on a narrow page (the text column keeps at least ~360px)
+  // the note column is 320px wide (a `--note-width` on the page overrides that), less on a narrow
+  // page (the text column keeps at least ~360px)
   const pageWidth = root.getBoundingClientRect().width;
   const wanted = parseFloat(getComputedStyle(root).getPropertyValue('--note-width')) || 320;
   const cardWidth = Math.max(160, Math.min(wanted, Math.round(pageWidth * 0.45)));

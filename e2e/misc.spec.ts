@@ -131,3 +131,39 @@ test('sections can be reordered and re-levelled from the outline', async ({ page
   await page.locator('.menu-item:not(.menu-sub)', { hasText: 'Move section up' }).click();
   await expect(texts).toHaveText([/Beta/, /Alpha one/, /Alpha$/]);
 });
+
+test('resolved comments leave the text and live in the Comments panel archive, from where they can be reopened', async ({ page }) => {
+  writeFileSync(`${DIR}/threads.tex`, withPreambleOf(`${SRC}/main.tex`, 'Some text %\n%% @comment\n%% Jan Bauer (2026-08-26 14:03):\n%%\n%% Please check this claim.\n%% @end\nwith an open comment, and %\n%% @comment\n%% Kirsten Fischer (2026-08-27 09:10) [resolved]:\n%%\n%% Done already.\n%% @end\na resolved one.\n'));
+  await login(page);
+  await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.setItem('ol.right', 'comments'); localStorage.setItem('ol.margin', '0'); });
+  await page.goto(`/#/${PROJECT}/threads.tex`);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-inset-note-comment').length === 2, null, { timeout: 60000 });
+  await page.waitForTimeout(800);
+  const rail = page.locator('.rail.right [data-rail="comments"]');
+  if (await rail.count()) await rail.click(); else await page.locator('.panel-tabs [data-tab="comments"]').click();
+  const cards = page.locator('.lyx-editor .lyx-inset-note-comment');
+  // the resolved thread shows no card in the text, only its marker
+  await expect(cards.nth(0).locator('> .inset-box')).toBeVisible();
+  await expect(cards.nth(1)).toHaveClass(/resolved/);
+  await expect(cards.nth(1).locator('> .inset-box')).toBeHidden();
+  await expect(cards.nth(1).locator('> .inset-anchor')).toBeVisible();
+  // the panel lists both, in their sections
+  const panel = page.locator('.comments-panel');
+  await expect(panel.locator('[data-comment="open"]')).toHaveCount(1);
+  await expect(panel.locator('[data-comment="resolved"]')).toHaveCount(1);
+  await expect(panel.locator('[data-comment="open"]')).toContainText('Jan Bauer');
+  await expect(panel.locator('[data-comment="resolved"]')).toContainText('Done already.');
+  // resolve the open one from the panel: it leaves the text and joins the archive
+  await panel.locator('[data-comment="open"] [data-action="resolve"]').click();
+  await expect(panel.locator('[data-comment="open"]')).toHaveCount(0);
+  await expect(panel.locator('[data-comment="resolved"]')).toHaveCount(2);
+  await expect(cards.nth(0).locator('> .inset-box')).toBeHidden();
+  // (the writer escapes the brackets LaTeX-style; the parser reads both forms)
+  await expect.poll(() => readFileSync(`${DIR}/threads.tex`, 'utf8'), { timeout: 15000 }).toMatch(/Jan Bauer \(2026-08-26 14:03\) (\[|\{\[\})resolved(\]|\{\]\}):/);
+  // reopen the other one from the archive: its card is back, the panel jumps to it
+  await panel.locator('[data-comment="resolved"]', { hasText: 'Kirsten' }).locator('[data-action="reopen"]').click();
+  await expect(panel.locator('[data-comment="open"]')).toHaveCount(1);
+  await expect(cards.nth(1).locator('> .inset-box')).toBeVisible();
+  await panel.locator('[data-comment="open"]').click();
+  await expect(cards.nth(1)).toHaveClass(/highlight/);
+});

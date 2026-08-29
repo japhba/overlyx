@@ -59,3 +59,34 @@ test('PDF builds run in the background and can be cancelled', async ({ page, req
   const st = await (await page.request.get(base + `/api/docs/${encodeURIComponent(DOC)}/build`)).json() as { job: { status: string } | null };
   expect(st.job?.status).toBe('cancelled');
 });
+
+test('resizing the text column keeps the cursor where it is on screen', async ({ page }) => {
+  await login(page);
+  await openDoc(page, DOC);
+  await page.evaluate(() => localStorage.setItem('ol.textWidth', '720'));
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 60, null, { timeout: 60000 });
+  await page.waitForTimeout(1000);
+  // the cursor into the 56th paragraph (placed programmatically: the DOM is still settling after the load)
+  await page.evaluate(() => {
+    const v = (window as any).overlyx.activeView;
+    let pos = 0; let i = 0;
+    v.state.doc.forEach((n: any, off: number) => { if (i++ === 55) pos = off + 1; });
+    v.dispatch(v.state.tr.setSelection((window as any).overlyx.activeView.state.selection.constructor.near(v.state.doc.resolve(pos))).scrollIntoView());
+    v.focus();
+  });
+  await page.waitForTimeout(500);
+  const cursorTop = () => page.evaluate(() => { const v = (window as any).overlyx.activeView; return v.coordsAtPos(v.state.selection.from).top; });
+  const before = await cursorTop();
+  const handle = page.locator('.ruler .handle.right');
+  const hb = (await handle.boundingBox())!;
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(hb.x - 120, hb.y + 4, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => Number(localStorage.getItem('ol.textWidth')))).toBeLessThan(600);
+  await page.waitForTimeout(300);
+  expect(Math.abs((await cursorTop()) - before)).toBeLessThan(3);   // the text reflowed (many more lines above), the cursor did not move
+  await page.dblclick('.ruler-band', { position: { x: 120, y: 12 } });
+  await page.waitForTimeout(300);
+  expect(Math.abs((await cursorTop()) - before)).toBeLessThan(3);
+});
