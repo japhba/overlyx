@@ -41,10 +41,15 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
   const [tokenName, setTokenName] = useState('');
   const [newToken, setNewToken] = useState<{ name: string; token: string } | null>(null);
   const [message, setMessage] = useState('');
+  const [mcpTokens, setMcpTokens] = useState<GitToken[] | null>(null);
+  const [mcpName, setMcpName] = useState('');
+  const [newMcpToken, setNewMcpToken] = useState<{ name: string; token: string } | null>(null);
+  const [mcpBusy, setMcpBusy] = useState(false);
 
   const load = () => Promise.all([
     api.gitInfo(project).then(setInfo),
     api.gitTokens().then(r => setTokens(r.tokens)),
+    api.mcpTokens(project).then(r => setMcpTokens(r.tokens)),
   ]).catch(e => setErr((e as Error).message));
   useEffect(() => { setInfo(null); void load(); }, [project]);
   useEffect(() => {
@@ -67,6 +72,22 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
     try { setTokens((await api.deleteGitToken(t.id)).tokens); if (newToken && tokens?.find(x => x.id === t.id)?.name === newToken.name) setNewToken(null); }
     catch (e) { setErr((e as Error).message); }
   };
+  const createMcpToken = async () => {
+    if (mcpBusy) return;
+    setMcpBusy(true); setErr('');
+    try {
+      const name = mcpName.trim() || 'agent';
+      const r = await api.createMcpToken(project, name);
+      setMcpTokens(r.tokens); setNewMcpToken({ name, token: r.token }); setMcpName('');
+    } catch (e) { setErr((e as Error).message); }
+    finally { setMcpBusy(false); }
+  };
+  const revokeMcpToken = async (t: GitToken) => {
+    if (!confirm(`Revoke the agent token “${t.name}”? It will no longer be able to connect.`)) return;
+    try { setMcpTokens((await api.deleteMcpToken(project, t.id)).tokens); if (newMcpToken?.name === t.name) setNewMcpToken(null); }
+    catch (e) { setErr((e as Error).message); }
+  };
+
   const commit = async () => {
     if (busy) return;
     setBusy(true); setErr('');
@@ -115,6 +136,37 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
             <input type="text" placeholder={`Token name, e.g. ${defaultTokenName()}`} value={tokenName} onInput={e => setTokenName((e.target as HTMLInputElement).value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void createToken(); } }} />
             <button class="btn" disabled={busy} onClick={() => void createToken()}>New token</button>
+          </div>
+
+          <h4>MCP connector — let an AI agent read, comment and propose edits</h4>
+          <div class="hint">
+            Any MCP-compatible client (Claude, Claude Code, …) can connect to this project with a token below:
+            read documents and comments, add/resolve comments, and propose paragraph edits — edits are always
+            applied as a <b>tracked change</b> attributed to the agent, never a silent overwrite, so you review
+            them from the Review toolbar or Versions like any collaborator's edit.
+          </div>
+          <CopyField value={`${location.origin}/mcp/${encodeURIComponent(project)}`} label="MCP server URL" />
+          {newMcpToken && (
+            <div class="git-newtoken">
+              <div><b>Agent token “{newMcpToken.name}”</b> — copy it now, it is not shown again. Use it as an
+                <code> Authorization: Bearer {'<token>'}</code> header, or in your MCP client's config as the token/API key for this server.</div>
+              <CopyField value={newMcpToken.token} />
+            </div>
+          )}
+          <div class="git-tokens">
+            {(mcpTokens ?? []).map(t => (
+              <div class="git-token" key={t.id}>
+                <span class="name">🤖 {t.name}</span>
+                <span class="meta">created {fmtDate(t.created_at)}{t.last_used_at ? ` · last used ${ago(t.last_used_at)}` : ' · never used'}</span>
+                <button class="mini" title="Revoke this token" onClick={() => void revokeMcpToken(t)}>Revoke</button>
+              </div>
+            ))}
+            {mcpTokens && !mcpTokens.length && <div class="hint">No agent tokens yet.</div>}
+          </div>
+          <div class="share-add">
+            <input type="text" placeholder="Agent name, e.g. Research assistant" value={mcpName} onInput={e => setMcpName((e.target as HTMLInputElement).value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void createMcpToken(); } }} />
+            <button class="btn" disabled={mcpBusy} onClick={() => void createMcpToken()}>New agent token</button>
           </div>
 
           <h4>History</h4>

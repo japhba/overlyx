@@ -16,6 +16,7 @@ import {
 import { editorContext } from './context';
 import { activeMathField } from './lyxmath/field';
 import { trackedDelete } from './plugins/changes';
+import { openRewrite, rewriteEnabled } from './ai/rewrite';
 
 export interface UiActions {
   save(): void;
@@ -170,7 +171,6 @@ export function lyxKeymap(): Plugin {
     'Mod-b': fontCommands.bold,
     'Alt-Mod-b': fontCommands.bold,
     'Mod-u': fontCommands.underline,
-    'Shift-Mod-p': fontCommands.typewriter,
     'Shift-Mod-o': fontCommands.strikeout,
     'Shift-Mod-n': fontCommands.noun,
     'Alt-Mod-d': fontDefault,
@@ -198,7 +198,8 @@ export function lyxKeymap(): Plugin {
     'Alt-Shift-ArrowLeft': changeDepth(-1),
     'Alt-ArrowUp': moveParagraph(-1),
     'Alt-ArrowDown': moveParagraph(1),
-    'Mod-k': deleteToParagraphEnd,
+    // LyX: delete to the end of the paragraph — unless "Rewrite with AI" is switched on (Tools ▸ AI), then ⌘K/Ctrl+K opens the AI prompt
+    'Mod-k': (state, dispatch, view) => (view && rewriteEnabled() ? openRewrite(view) : deleteToParagraphEnd(state, dispatch, view)),
     'Mod-s': ui(a => a.save()),
     F2: ui(a => a.save()),
     'Mod-r': ui(a => a.viewPdf()),

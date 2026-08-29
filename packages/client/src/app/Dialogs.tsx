@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
+import { formatShortcut } from './shortcuts';
 import type { ComponentChildren } from 'preact';
 import type { DocMeta, ProjectFile, BibItem } from '../api';
 import type { GraphicsOpts, TableChanges } from '../editor/commands';
 import { api, graphicsUrl } from '../api';
-import type { LitHit, BibAddResult } from '../api';
+import type { LitHit, BibAddResult, AiStatus } from '../api';
+import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
+import { REWRITE_KEY } from '../editor/ai/rewrite';
 import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote } from '@overlyx/core';
+import { diffLines } from './diff';
 
 export function Dialog({ title, onClose, children, buttons, wide }: { title: string; onClose: () => void; children: ComponentChildren; buttons?: ComponentChildren; wide?: boolean }) {
   useEffect(() => {
@@ -643,8 +647,8 @@ export function commandParams(node: PMNode): Map<string, string> {
 }
 
 /* ------------------------------------------------------------------ help */
-export function HelpDialog({ onClose }: { onClose: () => void }) {
-  const rows: [string, string][] = [
+/** the shortcut reference (Help ▸ Keyboard shortcuts, and searchable from the Help menu) */
+export const HELP_ROWS: [string, string][] = [
     ['Ctrl+M / Ctrl+Shift+M', 'Inline / display formula (Alt+M n: numbered equation)'],
     ['Alt+M t a / t m / t g', 'Display formula: align / multline / gather'],
     ['Alt+M f, s, x, e, (, [', 'In math: fraction, root, subscript, superscript, delimiters'],
@@ -657,7 +661,7 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
     ['Alt+A l/r/c/j, i', 'Paragraph alignment; toggle indent'],
     ['Alt+S t/s/n/l/h', 'Font size tiny/small/normal/large/huge'],
     ['Ctrl+E, Ctrl+I, Ctrl+B, Ctrl+U', 'Emphasis, italic, bold, underline'],
-    ['Ctrl+Shift+P, Ctrl+Shift+O, Ctrl+Shift+N', 'Typewriter, strikeout, noun (small caps)'],
+    ['Ctrl+Shift+O, Ctrl+Shift+N', 'Strikeout, noun (small caps); typewriter: Edit ▸ Text style (give it a shortcut in the palette)'],
     ['Ctrl+Alt+D', 'Reset font'],
     ['Ctrl+L', 'TeX code (ERT); in a formula: start a \\command'],
     ['Ctrl+Alt+P', 'Paragraph settings'],
@@ -674,10 +678,14 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
     ['Ctrl+Z / Ctrl+Y', 'Undo / redo (per user)'],
     ['Ctrl++ / Ctrl+- / Ctrl+0', 'Zoom the text (the interface keeps its size)'],
     ['Ctrl+Alt++ / Ctrl+Alt+-', 'Wider / narrower text column'],
-  ];
+    ['Ctrl+Alt+S', 'Source pane below the text'],
+    ['Ctrl+Shift+P (or F1)', 'Command palette: search the menus and shortcuts, set your own shortcuts'],
+];
+
+export function HelpDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog title="Keyboard shortcuts (LyX bindings)" onClose={onClose} wide>
-      <table class="help-table"><tbody>{rows.map(([k, v]) => <tr key={k}><td>{k}</td><td>{v}</td></tr>)}</tbody></table>
+      <table class="help-table"><tbody>{HELP_ROWS.map(([k, v]) => <tr key={k}><td>{formatShortcut(k)}</td><td>{v}</td></tr>)}</tbody></table>
     </Dialog>
   );
 }
@@ -697,6 +705,77 @@ export function MacrosDialog({ meta, onClose }: { meta: DocMeta | null; onClose:
         {(meta?.macroList ?? []).map(m => <div key={m.name + m.source}><code>\{m.name}{m.args ? `[${m.args}]` : ''}</code> → <code>{m.display ? `${m.display}  (display of ${m.def})` : m.def}</code> <span class="sub">{m.source}</span></div>)}
         {!meta?.macroList.length && <div class="sub">No macros found.</div>}
       </div>
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------- AI repair (merge editor) */
+type AiRepairState =
+  | { status: 'loading' }
+  | { status: 'ready' | 'applying'; original: string; proposed: string }
+  | { status: 'error'; message: string }
+  | { status: 'applied' };
+
+/** Tools ▸ Preferences…: per-browser settings (spell checking, the AI features and what they send). */
+export function PreferencesDialog({ ai, onClose }: { ai: AiStatus | null; onClose: () => void }) {
+  const [p, setP] = useState<Prefs>(getPrefs);
+  useEffect(() => subscribePrefs(setP), []);
+  const check = (key: 'spellcheck' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath', label: string, hint: string) => (
+    <label class="pref"><input type="checkbox" data-pref={key} checked={p[key]} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
+  );
+  return (
+    <Dialog title="Preferences" onClose={onClose}>
+      <h3>Text</h3>
+      {check('spellcheck', 'Spell checking', `The browser's spell checker underlines misspelt words; ${/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click on a word shows its suggestions.`)}
+      <h3>AI assistance</h3>
+      <div class="sub">{ai === null ? 'Checking the server…' : ai.available ? `Available on this server — model ${ai.model}${ai.completionModel !== ai.model ? `, autocomplete ${ai.completionModel}` : ''}.` : 'Not configured on this server: the administrator has to set OPENROUTER_API_KEY (deploy/secrets.env). The switches below have no effect until then.'}</div>
+      {check('aiRewrite', `Rewrite with AI (${REWRITE_KEY})`, 'Select text or a formula, press the key and describe the change; the proposal is shown in place and applied only when you accept it. While this is on, LyX’s Ctrl+K (delete to the end of the paragraph) is taken over.')}
+      {check('aiCompleteText', 'Autocomplete text', 'After a pause while typing, a continuation appears in grey after the caret — formulas already rendered. Tab inserts it, anything else dismisses it.')}
+      {check('aiCompleteMath', 'Autocomplete formulas', 'The same inside formulas: a suggested continuation at the caret, Tab inserts it.')}
+      <Row label="Pause before suggesting"><input type="number" min={150} max={5000} step={50} value={p.aiCompleteDelay} onInput={e => setPref('aiCompleteDelay', Math.max(150, Number((e.target as HTMLInputElement).value) || 600))} style="max-width:90px" /> ms</Row>
+      <div class="sub">What is sent: your instruction or the text around the cursor together with the document’s LaTeX source (so the model knows the notation, macros, citation keys) goes to the model through the OverLyX server. Nothing is written to the document without your Tab or Accept. The switches are also in the Tools menu, so the command palette finds them.</div>
+    </Dialog>
+  );
+}
+
+export function AiRepairDialog({ docId, onClose, onApplied }: { docId: string; onClose: () => void; onApplied: () => void }) {
+  const [state, setState] = useState<AiRepairState>({ status: 'loading' });
+  useEffect(() => {
+    let cancelled = false;
+    api.aiRepair(docId)
+      .then(r => { if (!cancelled) setState({ status: 'ready', original: r.original, proposed: r.proposed }); })
+      .catch(e => { if (!cancelled) setState({ status: 'error', message: String((e as Error).message ?? e) }); });
+    return () => { cancelled = true; };
+  }, [docId]);
+
+  const apply = async () => {
+    if (state.status !== 'ready') return;
+    const { original, proposed } = state;
+    setState({ status: 'applying', original, proposed });
+    try { await api.applyAiRepair(docId, original, proposed); setState({ status: 'applied' }); onApplied(); }
+    catch (e) { setState({ status: 'error', message: String((e as Error).message ?? e) }); }
+  };
+
+  const diff = state.status === 'ready' || state.status === 'applying' ? diffLines(state.original, state.proposed) : null;
+  const changed = diff ? diff.some(l => l.type !== 'same') : false;
+
+  return (
+    <Dialog title="Escalate to AI — review the proposed repair" onClose={onClose} wide
+      buttons={state.status === 'ready' && <button class="btn primary" disabled={!changed} onClick={apply}>Apply repaired version</button>}>
+      {state.status === 'loading' && <div class="sub">Asking the AI model to propose a fix for this document's structural damage… this can take up to a minute.</div>}
+      {state.status === 'error' && <div class="sub" style="color:var(--err,#b02020)">Could not get a repair: {state.message}</div>}
+      {state.status === 'applying' && <div class="sub">Applying…</div>}
+      {state.status === 'applied' && <div class="sub">Applied — the document has been updated. You can undo this from Versions if it isn't right.</div>}
+      {diff && (changed ? (
+        <div class="merge-diff">
+          {diff.map((l, i) => (
+            <div key={i} class={'merge-line merge-' + l.type}>
+              <span class="merge-gutter">{l.type === 'add' ? '+' : l.type === 'del' ? '−' : ' '}</span>
+              <span class="merge-text">{l.text || ' '}</span>
+            </div>
+          ))}
+        </div>
+      ) : <div class="sub">The AI proposed no changes to the file content.</div>)}
     </Dialog>
   );
 }

@@ -62,6 +62,14 @@ CREATE TABLE IF NOT EXISTS git_tokens (
   created_at INTEGER NOT NULL,
   last_used_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS mcp_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  name TEXT NOT NULL,
+  token_hash TEXT UNIQUE NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS builds (
   doc_id TEXT PRIMARY KEY,
   status TEXT NOT NULL,

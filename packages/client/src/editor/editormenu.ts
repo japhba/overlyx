@@ -14,6 +14,8 @@ import { changeAt, resolveChange } from './plugins/changes';
 import { fileUrl, graphicsUrl } from '../api';
 import { STANDARD_LAYOUTS } from './layouts';
 import { resolveDocPath } from './context';
+import { getPrefs, setPref } from '../prefs';
+import { openRewrite, REWRITE_KEY } from './ai/rewrite';
 
 const REF_TYPES: [string, string][] = [
   ['ref', '<reference>'], ['eqref', '(<reference>)'], ['pageref', '<page>'], ['vref', '<reference> on page <page>'],
@@ -148,17 +150,44 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent): MenuItem[] 
       { sep: true },
     );
   }
-  // generic editing
+  // generic editing: clipboard and AI first, then formatting, structure, insertion
   const hasSel = !view.state.selection.empty;
+  const prefs = getPrefs();
   items.push(
     { label: 'Cut', shortcut: MOD + '+X', disabled: !hasSel, action: () => { view.focus(); document.execCommand('cut'); } },
     { label: 'Copy', shortcut: MOD + '+C', disabled: !hasSel, action: () => { view.focus(); document.execCommand('copy'); } },
     { label: 'Paste', shortcut: MOD + '+V', action: () => { view.focus(); navigator.clipboard?.readText().then(t => { if (t) view.dispatch(view.state.tr.insertText(t)); }).catch(() => editorContext.notify?.('Use ' + MOD + '+V to paste', 'error')); } },
     { sep: true },
   );
+  if (prefs.aiRewrite) {
+    items.push(
+      { label: hasSel ? 'Rewrite selection with AI…' : 'Write here with AI…', shortcut: REWRITE_KEY, action: () => openRewrite(view) },
+      { sep: true },
+    );
+  }
+  if (hasSel) {
+    items.push(
+      { label: 'Comment on this', shortcut: MOD + '+Alt+C', action: run(C.insertComment) },
+      { label: 'Turn into a formula', shortcut: MOD + '+M', action: () => C.insertMath(false)(view) },
+      { sep: true },
+    );
+  }
   const layouts = (editorContext.meta?.layouts?.length ? editorContext.meta.layouts : STANDARD_LAYOUTS).slice(0, 40);
   const cur = C.currentParagraph(view.state);
+  const marks = view.state.selection.empty ? (view.state.storedMarks ?? view.state.selection.$from.marks()) : (view.state.selection.$from.nodeAfter?.marks ?? view.state.selection.$from.marks());
+  const on = (name: string, value: string) => marks.some(m => m.type.name === name && m.attrs.value === value);
   items.push(
+    { label: 'Text style', sub: [
+      { label: 'Emphasized', shortcut: MOD + '+E', checked: on('emph', 'on'), action: run(C.fontCommands.emph) },
+      { label: 'Italic', shortcut: MOD + '+I', checked: on('shape', 'italic'), action: run(C.fontCommands.italic) },
+      { label: 'Bold', shortcut: MOD + '+B', checked: on('series', 'bold'), action: run(C.fontCommands.bold) },
+      { label: 'Underline', shortcut: MOD + '+U', checked: on('bar', 'under'), action: run(C.fontCommands.underline) },
+      { label: 'Noun (small caps)', shortcut: MOD + '+Shift+N', checked: on('noun', 'on'), action: run(C.fontCommands.noun) },
+      { label: 'Strikeout', shortcut: MOD + '+Shift+O', checked: on('strikeout', 'on'), action: run(C.fontCommands.strikeout) },
+      { label: 'Typewriter', checked: on('family', 'typewriter'), action: run(C.fontCommands.typewriter) },
+      { sep: true },
+      { label: 'Reset font', shortcut: MOD + '+Alt+D', action: run(C.fontDefault) },
+    ] },
     { label: 'Paragraph layout', sub: layouts.map(l => ({ label: l.name, checked: cur?.node.attrs.layout === l.name, action: run(C.setLayout(l.name)) })) },
     ...(C.tableContext(view.state) ? [{ label: 'Table settings…', action: () => editorContext.openDialog?.('tablesettings') }] : []),
     { label: 'Paragraph', sub: [
@@ -194,6 +223,9 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent): MenuItem[] 
       { label: 'Accept all changes', action: () => editorContext.ui?.acceptAll?.() },
       { label: 'Reject all changes', action: () => editorContext.ui?.rejectAll?.() },
     ] },
+    { sep: true },
+    { label: 'Spell checking', checked: prefs.spellcheck, action: () => setPref('spellcheck', !prefs.spellcheck) },
+    { label: (isMac ? '⇧' : 'Shift+') + 'right-click: the browser menu (spelling suggestions)', info: true },
   );
   return items;
 }

@@ -13,6 +13,7 @@ import { yDocToProsemirrorJSON } from 'y-prosemirror';
 import {
   mergeLyx, pmToLyxBody, type LyxDocument, type PMJSON,
 } from '@overlyx/core';
+import { checkTexHealth, repairTex, type HealthIssue } from '@overlyx/core/tex/index.ts';
 import { db } from './db.ts';
 import { config } from './config.ts';
 import { listProjects, resolveProjectPath, projectDir, type ProjectFile } from './projects.ts';
@@ -96,6 +97,46 @@ export class OpenDoc {
   /** Current document as .tex text. */
   toText(): string {
     return writeDocumentText(this.toLyxDocument(), this.project, this.relPath, this.isChild, (fn) => resolveIncludeFor(this, fn)).text;
+  }
+
+  /**
+   * Structural health of the file as it stands on disk (or last read/written): whether an
+   * external edit broke the OverLyX conventions the parser silently papers over otherwise.
+   * `fileText === null` (never loaded) means nothing to check yet.
+   */
+  health(): HealthIssue[] {
+    return this.fileText === null ? [] : checkTexHealth(this.fileText, { isFragment: this.isChild });
+  }
+
+  /** Snapshots the current file as a version, then loads `text` like any external change and schedules a save. */
+  private applyRepairedText(text: string, versionName: string): void {
+    this.snapshot(versionName, this.fileText ?? '');
+    this.absorbExternalChange(text);
+    this.dirty = true;
+    void this.saveToFile();
+  }
+
+  /**
+   * Mends the mechanically-fixable issues (managed-block markers) in the file on disk.
+   * Returns the remaining (non-mechanically-fixable) issues.
+   */
+  repair(): { fixed: HealthIssue['code'][]; remaining: HealthIssue[] } {
+    const issues = this.health();
+    const { text, fixed } = repairTex(this.fileText ?? '', issues);
+    if (fixed.length) this.applyRepairedText(text, 'before repair');
+    return { fixed, remaining: this.health() };
+  }
+
+  /**
+   * Applies a fix proposed by "Escalate to AI" once the user has reviewed it in the merge editor.
+   * `expectedOriginal` must match the file text the proposal was generated from — otherwise the
+   * file changed underneath it (another save, another editor) and applying it blindly could
+   * silently discard that change.
+   */
+  applyAiRepair(text: string, expectedOriginal: string): { ok: true; remaining: HealthIssue[] } | { ok: false; error: string } {
+    if ((this.fileText ?? '') !== expectedOriginal) return { ok: false, error: 'The file changed since this repair was proposed — reload and try again.' };
+    this.applyRepairedText(text, 'before AI repair');
+    return { ok: true, remaining: this.health() };
   }
   /** @deprecated use toText() */
   toLyxText(): string { return this.toText(); }

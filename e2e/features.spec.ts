@@ -54,6 +54,81 @@ test('inline and display math are edited in place and saved as LaTeX formulas', 
   expect(errors.filter(e => !/favicon|ResizeObserver|Unknown delimiter/.test(e))).toEqual([]);
 });
 
+test('an empty formula dissolves when the cursor leaves it with an arrow key (a filled one stays)', async ({ page }) => {
+  const id = freshDoc('mathempty-' + Date.now());
+  await openDoc(page, id);
+  const par = await firstStandard(page);
+  const inline = page.locator('.lyx-editor .lyx-math-inline');
+  const display = page.locator('.lyx-editor .lyx-math-display');
+  const nInline = await inline.count();
+  const nDisplay = await display.count();
+  await page.keyboard.type(' EMPTYTEST');
+  // Ctrl+M, → : the empty formula is gone and the cursor is where it was
+  await page.keyboard.press('Control+m');
+  await expect(page.locator('.lm-field.focused')).toHaveCount(1, { timeout: 5000 });
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.lm-field.focused')).toHaveCount(0);
+  await expect(inline).toHaveCount(nInline);
+  await page.keyboard.type('X');
+  await expect(par).toContainText('EMPTYTESTX');
+  // the same with ←
+  await page.keyboard.press('Control+m');
+  await expect(page.locator('.lm-field.focused')).toHaveCount(1, { timeout: 5000 });
+  await page.keyboard.press('ArrowLeft');
+  await expect(inline).toHaveCount(nInline);
+  await page.keyboard.type('Y');
+  await expect(par).toContainText('EMPTYTESTXY');
+  // and for a display formula
+  await page.keyboard.press('Control+Shift+m');
+  await expect(page.locator('.lm-field.display.focused')).toHaveCount(1, { timeout: 5000 });
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.lm-field.focused')).toHaveCount(0);
+  await expect(display).toHaveCount(nDisplay);
+  // a formula with content is left, not removed
+  await page.keyboard.press('Control+m');
+  await expect(page.locator('.lm-field.focused')).toHaveCount(1, { timeout: 5000 });
+  await page.keyboard.type('a');
+  await page.keyboard.press('ArrowRight');
+  await expect(inline).toHaveCount(nInline + 1);
+  await page.keyboard.type('Z');
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/EMPTYTESTXY\$a\$Z/);
+  expect(fileText(id)).not.toMatch(/\$\$|\\\[\s*\\\]/);
+});
+
+test('the cursor comes back to where it was when the document is reopened', async ({ page }) => {
+  const id = freshDoc('cursor-' + Date.now());
+  await openDoc(page, id);
+  // freshly opened: at the start
+  const head = () => page.evaluate(() => (window as any).overlyx.activeView.state.selection.head as number);
+  await expect.poll(head).toBe(1);
+  // go somewhere further down and leave a mark
+  const p = page.locator('.lyx-editor > .lyx-par.lyx-layout-standard').nth(3);
+  await p.click({ position: { x: 4, y: 10 } });
+  await page.keyboard.press('End');
+  await page.keyboard.type(' CURSORMARK');
+  const pos = await head();
+  expect(pos).toBeGreaterThan(50);
+  await expect.poll(() => page.evaluate((k) => localStorage.getItem(k), 'ol.cursor:' + id)).toContain('CURSORMARK');
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('CURSORMARK');
+
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+  await expect.poll(head, { timeout: 10000 }).toBe(pos);
+  expect(await page.evaluate(() => (window as any).overlyx.activeView.state.selection.$head.parent.textContent)).toContain('CURSORMARK');
+  // the paragraph is scrolled into view
+  await expect(p).toBeInViewport();
+
+  // the document changed meanwhile (the saved offset is stale): the text before the cursor finds the place again
+  await page.evaluate((k) => { const v = JSON.parse(localStorage.getItem(k)!); v.pos += 37; localStorage.setItem(k, JSON.stringify(v)); }, 'ol.cursor:' + id);
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+  await expect.poll(head, { timeout: 10000 }).toBe(pos);
+  // ... and the editor has the keyboard again (once the metadata arrived and editing is allowed)
+  await expect.poll(() => page.evaluate(() => { const a = document.activeElement; return !!a && a.classList.contains('lyx-editor') && a.getAttribute('contenteditable') === 'true'; }), { timeout: 10000 }).toBe(true);
+  await page.keyboard.type('!');
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('CURSORMARK!');
+});
+
 test('LyX layouts via Alt+P chords, lists and depth', async ({ page }) => {
   const id = freshDoc('layout-' + Date.now());
   await openDoc(page, id);

@@ -43,7 +43,7 @@ export interface DocumentSplit {
 }
 
 /** `s` with every comment replaced by blanks of the same length (positions are preserved). */
-function maskComments(s: string): string {
+export function maskComments(s: string): string {
   let out = '';
   let i = 0;
   while (i < s.length) {

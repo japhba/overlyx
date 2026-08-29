@@ -18,7 +18,7 @@ import { schema, unquote, paramMap } from '@overlyx/core';
 import { lyxKeymap, chordPlugin } from './keymap';
 import { numberingPlugin } from './plugins/numbering';
 import { marginPlugin } from './plugins/margin';
-import { changeTrackingPlugin } from './plugins/changes';
+import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
 import { findPlugin } from './plugins/find';
 import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
@@ -28,7 +28,15 @@ import { setDocumentMacros, setInlineMacroDefs, markMacrosReady } from './lyxmat
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
 import { includeTarget } from './commands';
+import { readSavedCursor, writeSavedCursor, restoredCursorPos } from './cursormemory';
+import { aiRewritePlugin, openRewriteMath } from './ai/rewrite';
+import { aiCompletePlugin } from './ai/complete';
+import { installMathAssist } from './ai/mathassist';
+import { getPrefs, subscribePrefs } from '../prefs';
 import type { User } from '../api';
+
+installMathAssist();
+editorContext.aiRewriteMath = (field) => openRewriteMath(field);
 
 /**
  * A node view that throws (a malformed attribute that arrived over the wire, a rendering bug) must
@@ -242,6 +250,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     localEmpty = ydoc.getXmlFragment('prosemirror').length === 0;
     if (destroyed) return;
     performance.mark('ol:local-loaded');
+    if (!localEmpty) restoreCursor();
     emitSaveState();
     // always try — navigator.onLine is unreliable (Chrome reports "offline" behind some VPNs / network
     // setups); a failing attempt just makes y-websocket retry with backoff
@@ -269,6 +278,9 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       },
     }),
     yUndoPlugin(),
+    // AI preview / ghost text come first: their Tab / Escape must win over the LyX bindings and table navigation
+    aiRewritePlugin(),
+    aiCompletePlugin(),
     chordPlugin(),
     lyxKeymap(),
     gapCursor(),
@@ -277,6 +289,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     numberingPlugin(),
     marginPlugin(opts.marginMode ?? false),
     changeTrackingPlugin(),
+    changesFilterPlugin(),
     findPlugin(),
     macroDefsPlugin(() => viewRef),
     new Plugin({
@@ -284,6 +297,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
         update: (view, prev) => {
           if (!prev.selection.eq(view.state.selection) || prev.doc !== view.state.doc) opts.onSelectionChange?.(view);
           if (prev.doc !== view.state.doc) opts.onDocChange?.(view);
+          if (cursorRestored && !prev.selection.eq(view.state.selection)) rememberCursor();
         },
       }),
     }),
@@ -291,6 +305,15 @@ export function createEditor(opts: EditorOptions): EditorHandle {
 
   const state = EditorState.create({ schema, doc: initialDoc, plugins });
   let viewRef: EditorView | null = null;
+  // cursor memory (see cursormemory.ts): written a moment after each move, restored once the document is here
+  let cursorRestored = false;
+  // a restored cursor also gets the keyboard (as in LyX), once editing is allowed and unless something else has it
+  let focusWhenEditable = false;
+  const focusRestored = () => { const a = document.activeElement; if (!a || a === document.body) view.focus(); };
+  let cursorTimer: ReturnType<typeof setTimeout> | undefined;
+  const rememberCursor = () => { clearTimeout(cursorTimer); cursorTimer = setTimeout(() => { if (viewRef && !destroyed) writeSavedCursor(opts.docId, viewRef.state); }, 250); };
+  const flushCursor = () => { if (cursorRestored && viewRef && !destroyed) { clearTimeout(cursorTimer); writeSavedCursor(opts.docId, viewRef.state); } };
+  window.addEventListener('pagehide', flushCursor);
   let editable = !opts.readOnly;
   let viewOnly = false;
   let flushing = false;
@@ -325,7 +348,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       command: (node, view, getPos) => guarded(node, () => new CommandView(node, view, getPos as () => number | undefined)),
       leaf: (node, view, getPos) => guarded(node, () => new LeafView(node, view, getPos as () => number | undefined)),
     },
-    attributes: { class: 'lyx-editor' + (opts.child ? ' lyx-editor-child' : ''), spellcheck: 'true' },
+    attributes: editorAttributes(!!opts.child, getPrefs().spellcheck),
     // text/plain for the clipboard: formulas as $…$, references as \ref{…}, … (see cliptext.ts)
     clipboardTextSerializer: sliceText,
     handleDoubleClickOn(view, _pos, node, nodePos) {
@@ -361,6 +384,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       contextmenu(view, ev) {
         const t = ev.target as HTMLElement;
         if (t.closest?.('math-field')) return false;   // the field shows its own menu
+        if (ev.shiftKey) return false;                  // Shift+right-click: the browser's own menu (spelling suggestions)
         ev.preventDefault();
         showContextMenu(ev.clientX, ev.clientY, editorContextMenu(view, ev));
         return true;
@@ -386,6 +410,8 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   });
   viewRef = view;
   performance.mark('ol:editor-created');
+  // the spell-check switch (Tools ▸ Spell checking) applies to open editors right away
+  const unsubscribePrefs = subscribePrefs(p => { view.setProps({ attributes: editorAttributes(!!opts.child, p.spellcheck) }); });
   // A double-click that opened this document (child link, file browser) ends after the new editor
   // exists: its dblclick event must not open a dialog for whatever node now sits under the pointer.
   const createdAt = performance.now();
@@ -479,19 +505,39 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   };
   document.addEventListener('visibilitychange', onVisible);
 
-  // put cursor at start once synced
+  // Cursor where it was the last time this document was open here (else at the start), once the
+  // document is available: from the local copy, or from the server. Children (combined view) keep
+  // their own start. The remote cursors / formulas render later and change the layout, so the
+  // place is scrolled to once more shortly after.
+  function restoreCursor() {
+    if (cursorRestored || opts.child || destroyed) return;
+    cursorRestored = true;
+    try {
+      const doc = view.state.doc;
+      const saved = readSavedCursor(opts.docId);
+      const sel = saved ? TextSelection.near(doc.resolve(restoredCursorPos(doc, saved))) : TextSelection.atStart(doc);
+      view.dispatch(view.state.tr.setSelection(sel).scrollIntoView().setMeta('addToHistory', false));
+      if (saved) {
+        if (editable) focusRestored(); else focusWhenEditable = true;
+        setTimeout(() => { if (!destroyed && view.state.selection.eq(sel)) view.dispatch(view.state.tr.scrollIntoView()); }, 400);
+      }
+    } catch { /* empty document */ }
+  }
   if (!opts.child) {
     const once = (s: boolean) => {
       if (!s) return;
       provider.off('sync', once);
-      try { view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc))); } catch { /* empty */ }
+      restoreCursor();
     };
     provider.on('sync', once);
   }
 
   return {
     view, ydoc, provider,
-    setEditable(on: boolean) { if (on !== editable) { editable = on; view.setProps({ editable: () => editable }); } },
+    setEditable(on: boolean) {
+      if (on !== editable) { editable = on; view.setProps({ editable: () => editable }); }
+      if (on && focusWhenEditable) { focusWhenEditable = false; focusRestored(); }
+    },
     setViewOnly(on: boolean) { viewOnly = on; view.dom.classList.toggle('view-only', on); },
     saveState,
     async discardLocal() { try { await persistence.clearData(); } catch { /* ignore */ } },
@@ -512,6 +558,9 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       return true;
     },
     destroy() {
+      flushCursor();
+      unsubscribePrefs();
+      window.removeEventListener('pagehide', flushCursor);
       destroyed = true;
       stopRetry();
       window.removeEventListener('online', onOnline);
@@ -527,6 +576,10 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       ydoc.destroy();
     },
   };
+}
+
+function editorAttributes(child: boolean, spellcheck: boolean): Record<string, string> {
+  return { class: 'lyx-editor' + (child ? ' lyx-editor-child' : ''), spellcheck: spellcheck ? 'true' : 'false' };
 }
 
 /** "Inserted by Jane Doe on 3/2/2026, 10:12" for a tracked change. */

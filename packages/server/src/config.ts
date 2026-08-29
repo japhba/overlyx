@@ -70,6 +70,24 @@ export const config = {
   serpApiKey: (process.env.SERPAPI_KEY ?? '').trim(),
   /** automatic issues for uncaught browser / server errors (OVERLYX_ERROR_REPORTS=off keeps only Help ▸ Report a problem) */
   errorReports: process.env.OVERLYX_ERROR_REPORTS !== 'off',
+  /** "Escalate to AI" document repair (OpenRouter, https://openrouter.ai/keys); unset disables the feature */
+  openrouter: {
+    apiKey: (process.env.OPENROUTER_API_KEY ?? '').trim(),
+    model: (process.env.OPENROUTER_REPAIR_MODEL ?? 'anthropic/claude-opus-5').trim(),
+    api: (process.env.OPENROUTER_API_URL ?? 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
+  },
+  /**
+   * AI assistance in the editor (⌘K rewrite, autocomplete; ai.ts) — through the same OpenRouter
+   * key. Gemini Flash by default: fast, huge context (the whole paper goes along), cheap enough
+   * for autocomplete. The completion model may differ (e.g. a "lite" model for lower latency).
+   */
+  ai: {
+    model: (process.env.OVERLYX_AI_MODEL ?? 'google/gemini-3.7-flash').trim(),
+    completionModel: (process.env.OVERLYX_AI_COMPLETION_MODEL ?? process.env.OVERLYX_AI_MODEL ?? 'google/gemini-3.7-flash').trim(),
+    /** requests per user per minute: rewrites / completions */
+    rewritesPerMinute: Number(process.env.OVERLYX_AI_REWRITES_PER_MIN ?? 30),
+    completionsPerMinute: Number(process.env.OVERLYX_AI_COMPLETIONS_PER_MIN ?? 120),
+  },
   sessionDays: 30,
 };
 

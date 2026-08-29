@@ -12,6 +12,8 @@ import { macroTableFor, mathViews, macroVersion, macrosReady } from '../lyxmath/
 import { showContextMenu, type MenuItem } from '../contextmenu';
 import { toggleMathDisplay, countLabelRefs, renameLabelRefs } from '../commands';
 import { editorContext } from '../context';
+import { getPrefs } from '../../prefs';
+import { openRewriteMath, REWRITE_KEY } from '../ai/rewrite';
 
 /** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
 export const pendingFocus: { pos: number | null; keys: string[] } = { pos: null, keys: [] };
@@ -92,6 +94,7 @@ function commonMathMenu(f: LyxMathField): MenuItem[] {
   const ins = (latex: string) => () => { f.focus(); f.execute('insert', latex); };
   const c = f.cursor;
   return [
+    ...(getPrefs().aiRewrite ? [{ label: c.selection ? 'Rewrite selected part with AI…' : 'Rewrite formula with AI…', shortcut: REWRITE_KEY, action: () => openRewriteMath(f) } as MenuItem, { sep: true } as MenuItem] : []),
     { label: 'Insert', sub: [
       { label: 'Fraction', shortcut: 'Alt+M F', action: ins('\\frac{#0}{}') },
       { label: 'Square root', shortcut: 'Alt+M S', action: ins('\\sqrt{#0}') },
@@ -121,14 +124,20 @@ function deleteFormula(view: EditorView, getPos: () => number | undefined) {
   view.focus();
 }
 
-/** Leave the field into the document: cursor before/after the formula node. */
-function moveOut(view: EditorView, getPos: () => number | undefined, dir: string, insertSpace: boolean) {
+/**
+ * Leave the field into the document: cursor before/after the formula node. `dissolve` (an empty
+ * formula left with a horizontal cursor move, as LyX does): the formula is removed and the cursor
+ * takes its place.
+ */
+function moveOut(view: EditorView, getPos: () => number | undefined, dir: string, insertSpace: boolean, dissolve = false) {
   const pos = getPos();
   if (pos === undefined) return;
   const node = view.state.doc.nodeAt(pos);
   const size = node ? node.nodeSize : 1;
   const back = dir === 'backward' || dir === 'upward';
-  let tr = view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(back ? pos : pos + size), back ? -1 : 1));
+  let tr = view.state.tr;
+  if (dissolve && node) { tr = tr.delete(pos, pos + size); tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos), back ? -1 : 1)); }
+  else tr = tr.setSelection(TextSelection.near(view.state.doc.resolve(back ? pos : pos + size), back ? -1 : 1));
   if (insertSpace) tr = tr.insertText(' ');
   view.dispatch(tr);
   view.focus();
@@ -215,7 +224,7 @@ export class MathInlineView implements NodeView {
     const f = new LyxMathField({
       latex: '$' + this.lastLatex + '$', display: false, macros: table,
       onChange: latex => this.commit(latex),
-      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace),
+      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
     });
     (f as any)._macroKey = key;
     (f as any)._toggleDisplay = () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); };
@@ -373,7 +382,7 @@ export class MathDisplayView implements NodeView {
     const f = new LyxMathField({
       latex: this.lastLatex, display: true, macros: table,
       onChange: latex => this.commit(latex),
-      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace),
+      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
       onCommand: key => { if (key === 'n') this.toggleNumbering(); },
     });
     (f as any)._macroKey = key;

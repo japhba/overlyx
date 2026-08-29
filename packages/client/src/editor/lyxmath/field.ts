@@ -12,6 +12,8 @@ import {
   parseFormula, writeFormula, writeCellLatex, parseCell, renderHullSource, katexMacros, MathCursor, atomCells, isHull, nargs, numberedType, isKnownCommand, completeCommand,
   type Hull, type HullType, type MacroTable, type Slice, type Atom, type Cell, type CellRef, type Owner,
 } from '@overlyx/core';
+import { editorContext } from '../context';
+import { getPrefs } from '../../prefs';
 
 export type MoveOutDirection = 'backward' | 'forward' | 'upward' | 'downward';
 
@@ -21,7 +23,12 @@ export interface FieldOptions {
   macros: MacroTable;
   readOnly?: boolean;
   onChange?: (latex: string) => void;
-  onMoveOut?: (dir: MoveOutDirection, opts: { insertSpace?: boolean }) => void;
+  /**
+   * The cursor left the formula. `dissolve`: the formula is empty and was left with a horizontal
+   * move (arrow / Backspace / Delete) — the owner may remove it (an empty formula left behind
+   * by Ctrl+M, then a cursor key, is never wanted).
+   */
+  onMoveOut?: (dir: MoveOutDirection, opts: { insertSpace?: boolean; dissolve?: boolean }) => void;
   onFocus?: () => void;
   onBlur?: () => void;
   /** Alt+M n/d/t: numbering / environment commands handled by the node view */
@@ -45,6 +52,9 @@ let active: LyxMathField | null = null;
 export function activeMathField(): LyxMathField | null { return active; }
 /** called whenever a math field gains or loses the focus (the toolbar switches to LyX's math toolbar) */
 export const mathFocusListeners = new Set<(field: LyxMathField | null) => void>();
+/** called after every cursor move or edit inside a field (the source pane follows the cursor) */
+export const mathCursorListeners = new Set<(field: LyxMathField) => void>();
+function notifyCursor(f: LyxMathField): void { for (const l of mathCursorListeners) { try { l(f); } catch { /* ignore */ } } }
 function notifyFocus(): void { for (const l of mathFocusListeners) { try { l(active); } catch { /* ignore */ } } }
 
 export class LyxMathField {
@@ -70,6 +80,8 @@ export class LyxMathField {
   private lastLatex: string;
   private _macroKey = '';
   private hoverAtom: Atom | null = null;
+  /** an autocomplete suggestion shown faintly after the caret (ai/mathassist.ts); Tab inserts it */
+  private ghost: string | null = null;
   readonly id = ++seq;
 
   constructor(opts: FieldOptions) {
@@ -116,10 +128,24 @@ export class LyxMathField {
     this.render();
   }
   hasFocus(): boolean { return this.focused; }
+  /** the row of the top-level cell the cursor is in (0 for inline / single-row formulas) */
+  topRow(): number { return Math.floor(this.cursor.slices[0].idx / Math.max(1, this.hull.ncols)); }
+  /** no content in any cell */
+  isEmpty(): boolean { return !this.hull.rows.some(r => r.cells.some(c => c.length)); }
   /** the rendered cells (ids match the `lm-c<id>` classes in the DOM) */
   cellRefs(): CellRef[] { return this.cells; }
   /** bounding boxes of the hull's rows (client coordinates) */
   rowRects(): DOMRect[] { return rowRectsOf(this.hull, this.cells, this.content); }
+  /** the cursor sits at the end of its cell (where a continuation can be suggested) */
+  atCellEnd(): boolean { const c = this.cursor; return c.pos === (atomCells(c.owner)[c.idx] ?? []).length; }
+  /** LaTeX of the current cell before / after the cursor */
+  cellLatexAround(): { before: string; after: string } { const c = this.cursor; const cell = atomCells(c.owner)[c.idx] ?? []; return { before: writeCellLatex(cell.slice(0, c.pos)), after: writeCellLatex(cell.slice(c.pos)) }; }
+  /** a string identifying the cursor position (to check that nothing moved while a request was in flight) */
+  cursorPath(): string { return this.pathOf(this.cursor.slices).join(';'); }
+  /** show (or clear) an autocomplete suggestion after the caret; it is rendered like the formula, in the ghost colour */
+  setGhost(latex: string | null): void { const g = latex && latex.trim() ? latex.trim() : null; if (g === this.ghost) return; this.ghost = g; this.render(); }
+  get ghostText(): string | null { return this.ghost; }
+  private clearGhost(): boolean { if (!this.ghost) return false; this.ghost = null; return true; }
   focus(where?: 'start' | 'end'): void {
     if (where === 'start') { this.cursor.slices = this.cursor.slices.slice(0, 1); this.cursor.idx = 0; this.cursor.pos = 0; }
     if (where === 'end') { this.cursor.slices = this.cursor.slices.slice(0, 1); this.cursor.idx = this.cursor.lastidx; this.cursor.pos = this.cursor.lastpos; }
@@ -154,6 +180,17 @@ export class LyxMathField {
       case 'selectAll': c.selectAll(); this.scheduleLayout(); return true;
       case 'undo': return this.undo();
       case 'redo': return this.redo();
+      // replace the selection (or insert at the cursor) with LaTeX as it is, no "enter the first cell" magic (AI rewrite)
+      case 'replace': return change('replace', () => { c.grabAndEraseSelection(); c.insertCell(parseCell(String(args[0] ?? ''), this.macros, c.mode)); });
+      // replace the whole formula (its full source, delimiters / environment included); the cursor goes to the end
+      case 'replaceFormula': {
+        this.snapshot('replace');
+        this.hull = parseFormula(String(args[0] ?? ''), this.macros);
+        this.cursor = new MathCursor(this.hull, this.macros, { xToPos: (cell, x) => this.xToPos(cell, x) });
+        this.cursor.idx = this.cursor.lastidx; this.cursor.pos = this.cursor.lastpos;
+        this.commit();
+        return true;
+      }
       case 'text': return change('text', () => { const sel = c.grabAndEraseSelection(); c.niceInsertAtom({ t: 'font', n: 'text', body: parseCell(sel, this.macros, 'text'), mode: 'text' }); });
       // plain delimiter pair around the selection (no \left / \bigl): `\llangle x \rrangle`
       case 'pair': return change('pair', () => { const [l, r] = args as string[]; const sel = c.grabAndEraseSelection(); c.niceInsert(l, false); c.niceInsert(r, false); c.posBackward(); if (sel) c.niceInsert(sel, false); });
@@ -192,9 +229,15 @@ export class LyxMathField {
 
   render(): void {
     this.updateMacroModeHint();
-    const { latex, cells } = renderHullSource(this.hull, this.macros);
+    const rendered = renderHullSource(this.hull, this.macros);
+    let latex = rendered.latex;
+    const cells = rendered.cells;
     this.cells = cells;
     this.rebuildParents();
+    if (this.ghost && this.focused && !this.cursor.selection && !this.cursor.inMacroMode() && this.atCellEnd()) {
+      const ref = cells.find(c => c.owner === this.cursor.owner && c.idx === this.cursor.idx);
+      if (ref) latex = injectGhost(latex, ref.id, this.ghost, this.cursor.mode === 'text');
+    }
     let html: string;
     try {
       html = katex.renderToString((this.display ? '\\displaystyle ' : '') + latex, { throwOnError: false, strict: false, trust: true, displayMode: false, output: 'html', macros: katexMacros(this.macros) });
@@ -202,7 +245,7 @@ export class LyxMathField {
       html = `<span class="lm-error">${escapeHtml(this.lastLatex)}</span>`;
     }
     this.content.innerHTML = html;
-    this.dom.classList.toggle('empty', !this.hull.rows.some(r => r.cells.some(c => c.length)));
+    this.dom.classList.toggle('empty', this.isEmpty());
     this.scheduleLayout();
   }
 
@@ -225,7 +268,7 @@ export class LyxMathField {
 
   /** KaTeX boxes of a cell's atoms, in order (glue spans skipped, merged text runs measured per character) */
   private atomBoxes(cell: Cell, el: HTMLElement): AtomBox[] {
-    const kids = Array.from(el.children).filter(k => !(k.classList.contains('mspace') && !k.classList.contains('enclosing')) && !k.classList.contains('katex-strut') && !k.classList.contains('vlist-s'));
+    const kids = Array.from(el.children).filter(k => !(k.classList.contains('mspace') && !k.classList.contains('enclosing')) && !k.classList.contains('katex-strut') && !k.classList.contains('vlist-s') && !k.classList.contains('lm-ghost'));
     const boxes: AtomBox[] = [];
     let i = 0;
     for (const k of kids) {
@@ -431,23 +474,26 @@ export class LyxMathField {
   }
   /** after a model change: re-render and notify */
   private commit(): void {
+    this.ghost = null;
     this.render();
     const latex = this.latex;
     if (latex !== this.lastLatex) { this.lastLatex = latex; this.opts.onChange?.(latex); }
+    if (this.focused) notifyCursor(this);
   }
   /** cursor moved without a model change (may still remove empty scripts) */
   private moved(old: Slice[]): void {
     const before = this.latex;
     this.cursor.notifyLeave(old);
     if (this.latex !== before) { this.commit(); return; }
-    this.scheduleLayout();
+    if (this.clearGhost()) this.render(); else this.scheduleLayout();
+    if (this.focused) notifyCursor(this);
   }
 
   /* ------------------------------------------------------------ events */
   private wire(): void {
     const input = this.input;
     input.addEventListener('focus', () => { this.focused = true; active = this; this.dom.classList.add('focused'); this.opts.onFocus?.(); this.scheduleLayout(); notifyFocus(); });
-    input.addEventListener('blur', () => { this.focused = false; if (active === this) active = null; this.altM = false; this.dom.classList.remove('focused'); this.cursor.macroModeClose(); this.overlay.replaceChildren(); this.opts.onBlur?.(); notifyFocus(); });
+    input.addEventListener('blur', () => { this.focused = false; if (active === this) active = null; this.altM = false; this.dom.classList.remove('focused'); this.cursor.macroModeClose(); this.overlay.replaceChildren(); if (this.clearGhost()) this.render(); this.opts.onBlur?.(); notifyFocus(); });
     input.addEventListener('keydown', ev => this.keydown(ev));
     input.addEventListener('beforeinput', ev => {
       if (ev.inputType === 'insertText' || ev.inputType === 'insertCompositionText') { if (ev.inputType === 'insertText') { ev.preventDefault(); this.typed(ev.data ?? ''); } return; }
@@ -539,23 +585,31 @@ export class LyxMathField {
     const c = this.cursor;
     const old = c.clone();
     const handled = () => { ev.preventDefault(); ev.stopPropagation(); };
-    const move = (f: () => boolean, dir: MoveOutDirection) => {
+    const move = (f: () => boolean, dir: MoveOutDirection, dissolveEmpty = false) => {
       c.selHandle(ev.shiftKey);
-      if (!c.macroModeClose() && !f()) { if (!ev.shiftKey) { this.commit(); this.opts.onMoveOut?.(dir, {}); } }
+      if (!c.macroModeClose() && !f()) { if (!ev.shiftKey) { const dissolve = dissolveEmpty && this.isEmpty(); this.commit(); this.opts.onMoveOut?.(dir, { dissolve }); } }
       else this.moved(old);
       handled();
     };
     if (ev.altKey && !mod && ev.key.toLowerCase() === 'm') { this.altM = true; handled(); return; }
     if (this.altM && !ev.ctrlKey && !ev.metaKey && ev.key.length === 1) { this.altM = false; if (this.altMKey(ev.key)) { handled(); return; } }
     switch (ev.key) {
-      case 'ArrowRight': move(() => c.mathForward(mod), 'forward'); return;
-      case 'ArrowLeft': move(() => c.mathBackward(mod), 'backward'); return;
+      case 'ArrowRight': move(() => c.mathForward(mod), 'forward', true); return;
+      case 'ArrowLeft': move(() => c.mathBackward(mod), 'backward', true); return;
       case 'ArrowUp': move(() => c.upDown(true), 'upward'); return;
       case 'ArrowDown': move(() => c.upDown(false), 'downward'); return;
       case 'Home': move(() => c.lineBegin(), 'backward'); return;
       case 'End': move(() => c.lineEnd(), 'forward'); return;
       case 'Tab': {
         handled();
+        if (this.ghost && !c.inMacroMode() && !this.readOnly) {
+          // accept the autocomplete suggestion as it stands
+          const g = this.ghost; this.ghost = null;
+          this.snapshot('complete');
+          c.insertCell(parseCell(g, this.macros, c.mode));
+          this.commit();
+          return;
+        }
         if (c.inMacroMode() && !this.readOnly) {
           // LyX: Tab completes the command name being typed; a complete name is inserted
           const p = c.activeMacro()!;
@@ -565,10 +619,10 @@ export class LyxMathField {
         }
         if (ev.shiftKey) c.cellBackward(); else c.cellForward(); this.moved(old); return;
       }
-      case 'Escape': if (c.selection) { c.clearSelection(); this.scheduleLayout(); } else if (c.inMacroMode()) { c.macroModeClose(true); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } handled(); return;
+      case 'Escape': if (this.ghost) { this.clearGhost(); this.render(); handled(); return; } if (c.selection) { c.clearSelection(); this.scheduleLayout(); } else if (c.inMacroMode()) { c.macroModeClose(true); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } handled(); return;
       case 'Enter': if (this.readOnly) return; handled(); if (c.inMacroMode()) { this.snapshot('macro'); c.macroModeClose(); c.editInsertedInset(); this.commit(); return; } if (mod || ev.shiftKey || this.display) { this.snapshot('newline'); c.newline(); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } return;
-      case 'Backspace': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.backspace()) { this.commit(); this.opts.onMoveOut?.('backward', {}); return; } this.commit(); return;
-      case 'Delete': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.erase()) { this.commit(); this.opts.onMoveOut?.('forward', {}); return; } this.commit(); return;
+      case 'Backspace': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.backspace()) { const dissolve = this.isEmpty(); this.commit(); this.opts.onMoveOut?.('backward', { dissolve }); return; } this.commit(); return;
+      case 'Delete': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.erase()) { const dissolve = this.isEmpty(); this.commit(); this.opts.onMoveOut?.('forward', { dissolve }); return; } this.commit(); return;
       default: break;
     }
     if (mod && !ev.altKey) {
@@ -581,6 +635,7 @@ export class LyxMathField {
         case ' ': if (!this.readOnly) { this.snapshot('type'); c.insertAtom({ t: 'space', n: ',' }); this.commit(); } handled(); return;
         case 'b': if (!this.readOnly) this.execute('font', c.mode === 'text' ? 'textbf' : 'mathbf'); handled(); return;
         case 'e': if (!this.readOnly) this.execute('font', c.mode === 'text' ? 'emph' : 'mathcal'); handled(); return;
+        case 'k': if (!this.readOnly && getPrefs().aiRewrite && editorContext.aiRewriteMath) { handled(); editorContext.aiRewriteMath(this); } return;
         default: return;   // Ctrl+S etc. bubble to the editor
       }
     }
@@ -590,6 +645,27 @@ export class LyxMathField {
 }
 
 function escapeHtml(s: string): string { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+/**
+ * Puts the ghost text into the KaTeX source at the end of the cell `lm-c<id>` (as
+ * `\htmlClass{lm-ghost}{…}`, which the caret measurement skips): the suggestion is rendered
+ * with the formula's own metrics and macros, exactly as it will look once inserted.
+ */
+export function injectGhost(latex: string, cellId: number, ghost: string, textMode: boolean): string {
+  const open = `\\htmlClass{lm-c${cellId}}{`;
+  const i = latex.indexOf(open);
+  if (i < 0) return latex;
+  let depth = 1, j = i + open.length;
+  for (; j < latex.length && depth > 0; j++) {
+    const ch = latex[j];
+    if (ch === '\\') { j++; continue; }
+    if (ch === '{') depth++; else if (ch === '}') depth--;
+  }
+  if (depth !== 0) return latex;
+  const close = j - 1;
+  const body = textMode ? ghost.replace(/[{}\\]/g, '') : ghost;
+  return latex.slice(0, close) + `\\htmlClass{lm-ghost}{${body}}` + latex.slice(close);
+}
 
 /** Bounding boxes of the rows of a hull in a rendered container (union of each row's cell boxes). */
 export function rowRectsOf(hull: Hull, cells: CellRef[], container: HTMLElement): DOMRect[] {

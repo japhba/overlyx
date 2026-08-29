@@ -4,7 +4,9 @@ import { nodeText } from '../editor/cliptext';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
 import { undo, redo } from 'y-prosemirror';
 import { addColumnAfter, addColumnBefore, addRowAfter, addRowBefore, deleteColumn, deleteRow, deleteTable, mergeCells, splitCell } from 'prosemirror-tables';
-import { api, type BibAddResult, type DocMeta, type User } from '../api';
+import { api, type AiStatus, type BibAddResult, type DocMeta, type User } from '../api';
+import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
+import { openRewrite, REWRITE_KEY } from '../editor/ai/rewrite';
 import { Login } from './Login';
 import { FileBrowser } from './FileBrowser';
 import { Home, projectDocs } from './Home';
@@ -12,7 +14,7 @@ import { TextEditor } from './TextEditor';
 import { ShareDialog } from './Share';
 import { GitDialog } from './Git';
 import type { Mark } from 'prosemirror-model';
-import { MenuBar, type MenuDef } from './MenuBar';
+import { MenuBar, openPalette, PALETTE_LABEL, PALETTE_DEFAULT, type MenuDef } from './MenuBar';
 import { setThemePref, useTheme } from './theme';
 import { Toolbar, ColorPalette, colorIcon, NAMED_COLORS, DelimPalette, TableSizePicker, delimLatex, mathPanelPalettes, mathPreview, type ToolButton, type DelimChoice } from './Toolbar';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
@@ -21,10 +23,10 @@ import { PdfPanel, stateFromBuild, jobActive, type PdfState } from './PdfPanel';
 import { Ruler } from './Ruler';
 import { StatusBar, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget } from './SourcePane';
-import { activeMathField, mathFocusListeners, type LyxMathField } from '../editor/lyxmath/field';
+import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
 import { Tour, tourWanted, rememberTour, type TourEnd } from './Tour';
 import { FeedbackDialog } from './Feedback';
-import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams } from './Dialogs';
+import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog, PreferencesDialog } from './Dialogs';
 import { createEditor, refreshMacros, describeChange, type EditorHandle, type SaveState } from '../editor/editor';
 import { newerVersionAvailable } from './update';
 import { generateLyx } from './SourcePane';
@@ -33,7 +35,7 @@ import { STANDARD_LAYOUTS } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
 import * as C from '../editor/commands';
 import { setMarginMode } from '../editor/plugins/margin';
-import { acceptAllChanges, rejectAllChanges, changeAt, resolveChange, gotoChange, resolveSelectionChanges, hasChanges } from '../editor/plugins/changes';
+import { acceptAllChanges, rejectAllChanges, changeAt, resolveChange, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '../editor/plugins/find';
@@ -110,6 +112,13 @@ async function clearLocalData(): Promise<void> {
   } catch { /* ignore */ }
 }
 
+type RightTab = 'outline' | 'pdf' | 'versions';
+const RIGHT_TABS = ['outline', 'pdf', 'versions'] as const;
+const RIGHT_TAB_LABELS: Record<RightTab, string> = { outline: 'Outline', pdf: 'PDF', versions: 'Versions' };
+const RIGHT_TAB_TITLES: Record<RightTab, string> = { outline: 'Outline (Ctrl+Alt+O)', pdf: 'PDF preview', versions: 'Versions of this document' };
+const SOURCE_TITLE = 'LaTeX source below the text (Ctrl+Alt+S)';
+const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+
 /** `#/project/path.lyx?goto=label`, or a share link `#/share/<token>` */
 function parseHash(): { id: string | null; goto: string | null; share: string | null } {
   const raw = location.hash.replace(/^#\/?/, '');
@@ -149,8 +158,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [layout, setLayout] = useState('Standard');
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [activePos, setActivePos] = useState(0);
-  const [showFiles, setShowFiles] = useState(true);
-  const [rightTab, setRightTab] = useState<'outline' | 'pdf' | 'versions' | 'source' | null>('outline');
+  // sidebars: shown / hidden state is kept per browser (a hidden sidebar leaves a rail to bring it back)
+  const [showFiles, setShowFiles] = useState(() => stored('ol.files') !== '0');
+  const [rightTab, setRightTab] = useState<RightTab | null>(() => { const v = stored('ol.right'); return v === null ? 'outline' : (RIGHT_TABS as readonly string[]).includes(v) ? v as RightTab : null; });
+  // the LaTeX source is a panel below the writing area with its own switch
+  const [showSource, setShowSource] = useState(() => stored('ol.source') === '1');
+  useEffect(() => { try { localStorage.setItem('ol.files', showFiles ? '1' : '0'); localStorage.setItem('ol.right', rightTab ?? ''); localStorage.setItem('ol.source', showSource ? '1' : '0'); } catch { /* ignore */ } }, [showFiles, rightTab, showSource]);
   const [pdf, setPdf] = useState<PdfState>({ url: null, log: '', busy: false, ok: null, warnings: [] });
   const [dialog, setDialog] = useState<Dialog>(null);
   const [message, setMessage] = useState<{ text: string; kind: 'info' | 'error' } | null>(null);
@@ -202,6 +215,11 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [viewOnly, setViewOnly] = useState(false);
   // LyX toolbars: standard / extra always (unless hidden), math / table / review on, off or automatic (LyX's "auto")
   const { pref: themePref } = useTheme();
+  // per-browser preferences (spell checking, AI assistance) and whether the server can answer AI requests
+  const [prefs, setPrefsState] = useState<Prefs>(getPrefs);
+  useEffect(() => subscribePrefs(setPrefsState), []);
+  const [ai, setAi] = useState<AiStatus | null>(null);
+  useEffect(() => { api.aiStatus().then(s => { editorContext.ai = s; setAi(s); }).catch(() => { const s = { available: false, model: '', completionModel: '' }; editorContext.ai = s; setAi(s); }); }, []);
   const [toolbars, setToolbars] = useState<ToolbarPrefs>(loadToolbarPrefs);
   useEffect(() => { localStorage.setItem('ol.toolbars', JSON.stringify(toolbars)); }, [toolbars]);
   const setToolbar = (id: ToolbarId, mode: ToolbarMode) => setToolbars(t => ({ ...t, [id]: mode }));
@@ -209,8 +227,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   // the formula being edited (LyX shows the math toolbar while the cursor is in math)
   const [mathField, setMathField] = useState<LyxMathField | null>(null);
   useEffect(() => { const l = (f: LyxMathField | null) => setMathField(f); mathFocusListeners.add(l); return () => { mathFocusListeners.delete(l); }; }, []);
+  // cursor moves inside a formula count as selection changes (source pane, status bar)
+  useEffect(() => { const l = () => setSelTick(t => t + 1); mathCursorListeners.add(l); return () => { mathCursorListeners.delete(l); }; }, []);
   const [findQ, setFindQ] = useState(''), [replQ, setReplQ] = useState('');
   const [findCase, setFindCase] = useState(false), [findWord, setFindWord] = useState(false);
+  const [findRegex, setFindRegex] = useState(false), [findMath, setFindMath] = useState(false), [findSel, setFindSel] = useState(false);
+  const [findAdv, setFindAdv] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [selVersion, setSelVersion] = useState(0);
   const [docTick, setDocTick] = useState(0);
@@ -484,7 +506,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       openDialog: (name, arg) => setDialog({ name, arg }),
       toggleTrackChanges: () => toggleTracking(),
       toggleOutline: () => setRightTab(t => (t === 'outline' ? null : 'outline')),
-      toggleSource: () => setRightTab(t => (t === 'source' ? null : 'source')),
+      toggleSource: () => setShowSource(s => !s),
       toggleCombined: () => setCombined(c => !c),
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
@@ -568,6 +590,20 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     notify(next ? `Change tracking ON (as ${user.name})` : 'Change tracking OFF');
   };
 
+  const [repairing, setRepairing] = useState(false);
+  const runRepair = async () => {
+    if (!docId) return;
+    setRepairing(true);
+    try {
+      const r = await api.repair(docId);
+      const m = await api.meta(docId);
+      setMeta(m); editorContext.meta = m;
+      if (r.fixed.length) notify(`Repaired: ${r.fixed.join(', ')}${r.remaining.length ? ` — ${r.remaining.length} issue(s) still need attention` : ''}`);
+      else notify(r.remaining.length ? 'Nothing here can be fixed automatically — try Escalate to AI' : 'No issues found');
+    } catch (e) { notify(String(e), 'error'); }
+    finally { setRepairing(false); }
+  };
+
   const toggleMargin = () => {
     const next = !marginMode;
     setMarginModeState(next);
@@ -616,7 +652,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const docLabel = docId ? (combined && childIds.length ? [docId, ...childIds].map(base).join(' + ') : docId) : '';
 
   // Help is available everywhere (the start screen has no other menus; feedback must be reachable there)
-  const helpMenu: MenuDef = { title: 'Help', items: [
+  const helpMenu: MenuDef = { title: 'Help', search: true, items: [
+    { label: PALETTE_LABEL, shortcut: PALETTE_DEFAULT, action: openPalette },
     { label: 'Take the tour', action: () => setTour('intro') },
     { label: 'Keyboard shortcuts', action: () => setDialog({ name: 'help' }) },
     { sep: true },
@@ -646,6 +683,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   /** the value of a font mark at the cursor (null when unset) */
   const markValue = (name: string): string | null => (marksAtCursor().find(m => m.type.name === name)?.attrs.value as string | undefined) ?? null;
   const textColor = markValue('color');
+  // the shortcut table is searchable too (a match opens the table)
+  const helpSearchEntries = useMemo(() => HELP_ROWS.map(([k, v]) => ({ id: 'Keyboard shortcuts ▸ ' + v, label: v, path: ['Keyboard shortcuts'], shortcut: k, fixed: true, action: () => setDialog({ name: 'help' }) })), []);
   const menus: MenuDef[] = [...(docId && !isLyxDoc ? textFileMenus : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
@@ -679,7 +718,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         { label: 'Noun (small caps)', shortcut: 'Ctrl+Shift+N', action: () => run(C.fontCommands.noun) },
         { label: 'Underline', shortcut: 'Ctrl+U', action: () => run(C.fontCommands.underline) },
         { label: 'Strikeout', shortcut: 'Ctrl+Shift+O', action: () => run(C.fontCommands.strikeout) },
-        { label: 'Typewriter', shortcut: 'Ctrl+Shift+P', action: () => run(C.fontCommands.typewriter) },
+        { label: 'Typewriter', action: () => run(C.fontCommands.typewriter) },   // Ctrl+Shift+P is the command palette
         { label: 'Sans serif', action: () => run(C.fontCommands.sans) },
         { label: 'Small caps shape', action: () => run(C.fontCommands.smallcaps) },
         { label: 'Double underline', action: () => run(C.fontCommands.uuline) },
@@ -736,6 +775,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         { label: 'Reject all changes', action: () => run(rejectAllChanges()) },
       ] },
       { sep: true },
+      { label: 'Document health ▸', sub: [
+        { label: meta?.health.length ? `${meta.health.length} issue(s) found` : 'No issues found', disabled: true },
+        { label: 'Repair', disabled: !meta?.health.some(h => h.fixable), action: runRepair },
+        { label: 'Escalate to AI…', disabled: !meta?.health.length, action: () => setDialog({ name: 'airepair' }) },
+      ] },
+      { sep: true },
       { label: 'Inset settings…', shortcut: 'Ctrl+Alt+Shift+I', action: () => setDialog({ name: 'inset' }) },
       { label: 'Open/close inset', shortcut: 'Ctrl+Alt+I', action: () => run(C.toggleInset) },
       { label: 'Math: toggle inline/display', action: () => run(C.toggleMathDisplay) },
@@ -743,7 +788,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     { title: 'View', items: [
       { label: 'File browser', checked: showFiles, action: () => setShowFiles(!showFiles) },
       { label: 'Outline', shortcut: 'Ctrl+Alt+O', checked: rightTab === 'outline', action: () => setRightTab(rightTab === 'outline' ? null : 'outline') },
-      { label: 'Source pane (LyX / LaTeX)', shortcut: 'Ctrl+Alt+S', checked: rightTab === 'source', action: () => setRightTab(rightTab === 'source' ? null : 'source') },
+      { label: 'Source pane (LaTeX, below the text)', shortcut: 'Ctrl+Alt+S', checked: showSource, action: () => setShowSource(!showSource) },
       { label: 'PDF preview', checked: rightTab === 'pdf', action: () => setRightTab(rightTab === 'pdf' ? null : 'pdf') },
       { label: 'Versions', checked: rightTab === 'versions', action: () => setRightTab(rightTab === 'versions' ? null : 'versions') },
       { sep: true },
@@ -878,6 +923,21 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { sep: true },
       { label: 'Reload metadata (macros, bibliography)', action: () => { if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); notify('Metadata reloaded'); }); } },
     ] },
+    { title: 'Tools', items: [
+      { label: 'Spell checking', checked: prefs.spellcheck, action: () => setPref('spellcheck', !prefs.spellcheck) },
+      { sep: true },
+      { label: 'AI assistance ▸', sub: [
+        { label: ai === null ? 'Checking the server…' : ai.available ? `Model: ${ai.model}` : 'Not configured on this server (OPENROUTER_API_KEY)', disabled: true },
+        { sep: true },
+        { label: `Rewrite with AI (${REWRITE_KEY})`, checked: prefs.aiRewrite, action: () => setPref('aiRewrite', !prefs.aiRewrite) },
+        { label: 'Autocomplete text (ghost text, Tab inserts)', checked: prefs.aiCompleteText, action: () => setPref('aiCompleteText', !prefs.aiCompleteText) },
+        { label: 'Autocomplete formulas', checked: prefs.aiCompleteMath, action: () => setPref('aiCompleteMath', !prefs.aiCompleteMath) },
+        { sep: true },
+        { label: 'Rewrite selection with AI…', shortcut: 'Ctrl+K', disabled: !prefs.aiRewrite, action: () => runView(v => openRewrite(v)) },
+      ] },
+      { sep: true },
+      { label: 'Preferences…', action: () => setDialog({ name: 'preferences' }) },
+    ] },
   ] : []), helpMenu];
 
   /** A paper was added to cited.bib: make the entry known, list cited.bib in the BibTeX inset, refresh the metadata. */
@@ -956,6 +1016,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const layoutBtn = (id: string, name: string, title: string, icon: string): ToolButton => ({ id, title, icon, action: () => run(C.setLayout(layout === name && name !== 'Standard' ? 'Standard' : name)), active: layout === name });
   const inTable = !!view && !!C.tableContext(view.state);
   const tableSt = view ? T.tableToolbarState(view.state) : null;
+  const changesFilterSt = view ? changesFilterKey.getState(view.state) : null;
   const docHasChanges = useMemo(() => !!view && hasChanges(view.state.doc), [docTick, view]);
   const showMath = tbMode('math') === 'on' || (tbMode('math') === 'auto' && !!mathField);
   const showTable = tbMode('table') === 'on' || (tbMode('table') === 'auto' && inTable);
@@ -983,7 +1044,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { id: 'bold', title: 'Bold (Ctrl+B)', icon: 'bold', action: () => run(C.fontCommands.bold), active: markActive('series', 'bold') },
       { id: 'underline', title: 'Underline (Ctrl+U)', icon: 'underline', action: () => run(C.fontCommands.underline), active: markActive('bar', 'under') },
       { id: 'strike', title: 'Strikeout (Ctrl+Shift+O)', icon: 'strike', action: () => run(C.fontCommands.strikeout), active: markActive('strikeout', 'on') },
-      { id: 'tt', title: 'Typewriter (Ctrl+Shift+P)', icon: 'tt', action: () => run(C.fontCommands.typewriter), active: markActive('family', 'typewriter') },
+      { id: 'tt', title: 'Typewriter', icon: 'tt', action: () => run(C.fontCommands.typewriter), active: markActive('family', 'typewriter') },
       { id: 'textcolor', title: textColor ? `Text colour: ${textColor}` : 'Text colour', icon: 'textcolor', html: colorIcon(textColor), active: !!textColor,
         palette: { title: 'Text colour', render: close => <ColorPalette current={textColor} close={close} onPick={c => run(C.setValueMark('color', c))} /> } },
     ],
@@ -997,6 +1058,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     [
       { id: 'outline', title: 'Outline (Ctrl+Alt+O)', icon: 'outline', action: () => setRightTab(rightTab === 'outline' ? null : 'outline'), active: rightTab === 'outline' },
       { id: 'margin', title: 'Show notes & comments in the margin', icon: 'margin', action: toggleMargin, active: marginMode },
+      { id: 'spellcheck', title: prefs.spellcheck ? 'Spell checking is on — click to switch it off' : 'Spell checking is off — click to switch it on', icon: 'spellcheck', action: () => setPref('spellcheck', !prefs.spellcheck), active: prefs.spellcheck },
+      { id: 'ai', title: prefs.aiRewrite ? `Rewrite with AI (${REWRITE_KEY})` : 'AI assistance is off — click to open the preferences', icon: 'ai', action: () => { if (prefs.aiRewrite) runView(v => openRewrite(v)); else setDialog({ name: 'preferences' }); }, active: prefs.aiRewrite },
       { id: 'toggleinset', title: 'Open/close inset (Ctrl+Alt+I)', icon: 'toggleinset', action: () => run(C.toggleInset) },
       { id: 'tb-math', title: 'Show math toolbar', icon: 'mathtb', action: () => toggleTb('math', showMath), active: showMath },
       { id: 'tb-table', title: 'Show table toolbar', icon: 'tabletb', action: () => toggleTb('table', showTable), active: showTable },
@@ -1132,6 +1195,10 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { id: 'r-output', title: 'Show changes in output (\\output_changes)', icon: 'changesoutput', active: outputChanges, action: () => { if (docId) api.setHeader(docId, { set: { output_changes: outputChanges ? 'false' : 'true' } }).then(() => notify(outputChanges ? 'Changes are no longer shown in the output' : 'Changes are shown in the output (needs the ulem/xcolor packages)')).catch(e => notify(String(e), 'error')); } },
     ],
     [
+      { id: 'r-show-ins', title: 'Show insertions', icon: 'showinsertions', active: changesFilterSt?.showInsertions ?? true, action: () => view && setChangesFilter(view, { showInsertions: !(changesFilterSt?.showInsertions ?? true) }) },
+      { id: 'r-show-del', title: 'Show deletions', icon: 'showdeletions', active: changesFilterSt?.showDeletions ?? true, action: () => view && setChangesFilter(view, { showDeletions: !(changesFilterSt?.showDeletions ?? true) }) },
+    ],
+    [
       { id: 'r-prev', title: 'Previous change', icon: 'changeprev', action: () => run(gotoChange(-1)) },
       { id: 'r-next', title: 'Next change', icon: 'changenext', action: () => run(gotoChange(1)) },
       { id: 'r-accept', title: 'Accept change inside selection / at cursor', icon: 'accept', action: () => run(resolveSelectionChanges(true)) },
@@ -1165,6 +1232,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     // dialogs that do not need an editor (start screen, text files)
     if (dialog.name === 'feedback') return <FeedbackDialog docId={docId} onClose={() => { setDialog(null); view?.focus(); }} />;
     if (dialog.name === 'help') return <HelpDialog onClose={() => { setDialog(null); view?.focus(); }} />;
+    if (dialog.name === 'preferences') return <PreferencesDialog ai={ai} onClose={() => { setDialog(null); view?.focus(); }} />;
     if (!view || !docId) return null;
     const close = () => { setDialog(null); view.focus(); };
     const project = viewDocId(view).split('/')[0] || docId.split('/')[0];
@@ -1230,6 +1298,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       case 'href': return <HrefDialog onClose={close} onInsert={(t, n) => run(C.insertHref(t, n))} />;
       case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); })} />;
       case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
+      case 'airepair': return docId ? <AiRepairDialog docId={docId} onClose={close} onApplied={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; })} /> : null;
       case 'stats': return view ? <StatsDialog view={view} onClose={close} /> : null;
       case 'tex': return <TexDialog tex={String(dialog.arg ?? '')} onClose={close} />;
       case 'layout': return <LayoutPicker layouts={layouts} onClose={close} onPick={n => run(C.setLayout(n))} />;
@@ -1275,7 +1344,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   return (
     <div class="app">
-      <MenuBar menus={menus} user={user} onLogout={onLogout} onHome={() => { location.hash = '#/'; }} right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />
+      <MenuBar menus={menus} user={user} onLogout={onLogout} onHome={() => { location.hash = '#/'; }} searchEntries={helpSearchEntries} right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />
       {isLyxDoc && tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={standardGroups} />}
       {isLyxDoc && tbMode('extra') !== 'off' && <Toolbar id="extra" groups={extraGroups} />}
       {isLyxDoc && showMath && <Toolbar id="math" label="Math" groups={mathGroups} />}
@@ -1283,22 +1352,57 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       {isLyxDoc && showTable && <Toolbar id="table" label="Table" groups={tableGroups} />}
       {isLyxDoc && showReview && <Toolbar id="review" label="Review" groups={reviewGroups} />}
       {tabs.length > 0 && <TabBar tabs={tabs} current={docId} onSelect={id => { location.hash = '#/' + id; }} onClose={closeTab} onReorder={setTabs} />}
-      {docId && findOpen && (
+      {docId && meta && meta.health.length > 0 && (
+        <div class="health-bar">
+          <span class="health-icon">⚠</span>
+          <span>{meta.health.length === 1 ? '1 structural issue' : `${meta.health.length} structural issues`} found in this file (probably from an external edit): {meta.health.map(h => h.message).join(' ')}</span>
+          <span style="flex:1" />
+          {meta.health.some(h => h.fixable) && <button class="small-btn" disabled={repairing} onClick={runRepair}>{repairing ? 'Repairing…' : 'Repair'}</button>}
+          <button class="small-btn" onClick={() => setDialog({ name: 'airepair' })}>Escalate to AI…</button>
+        </div>
+      )}
+      {docId && findOpen && (() => {
+        const st = view ? findKey.getState(view.state) : undefined;
+        const requery = (patch: Partial<{ query: string; caseSensitive: boolean; wholeWord: boolean; regex: boolean; searchMath: boolean; selectionOnly: boolean }>, useSelection?: boolean) => {
+          if (!view) return;
+          setQuery(view, { query: findQ, caseSensitive: findCase, wholeWord: findWord, regex: findRegex, searchMath: findMath, selectionOnly: findSel, ...patch, ...(useSelection !== undefined ? { useSelection } : {}) });
+        };
+        return (
+        <div class="find-bar-wrap">
         <div class="find-bar">
-          <span>Find:</span><input autofocus value={findQ} onInput={e => { setFindQ((e.target as HTMLInputElement).value); if (view) setQuery(view, (e.target as HTMLInputElement).value, findCase, findWord); }} onKeyDown={e => { if (e.key === 'Enter' && view) findNext(view, e.shiftKey ? -1 : 1); if (e.key === 'Escape') { setFindOpen(false); if (view) { setQuery(view, '', false); view.focus(); } } }} />
-          <label title="Case sensitive"><input type="checkbox" checked={findCase} onChange={e => { const v = (e.target as HTMLInputElement).checked; setFindCase(v); if (view) setQuery(view, findQ, v, findWord); }} /> Aa</label>
-          <label title="Whole words only"><input type="checkbox" checked={findWord} onChange={e => { const v = (e.target as HTMLInputElement).checked; setFindWord(v); if (view) setQuery(view, findQ, findCase, v); }} /> Word</label>
+          <span>Find:</span><input autofocus value={findQ} onInput={e => { const v = (e.target as HTMLInputElement).value; setFindQ(v); requery({ query: v }); }} onKeyDown={e => { if (e.key === 'Enter' && view) findNext(view, e.shiftKey ? -1 : 1); if (e.key === 'Escape') { setFindOpen(false); if (view) { setQuery(view, { query: '' }); view.focus(); } } }} />
+          <label title="Case sensitive"><input type="checkbox" checked={findCase} onChange={e => { const v = (e.target as HTMLInputElement).checked; setFindCase(v); requery({ caseSensitive: v }); }} /> Aa</label>
+          <label title="Whole words only"><input type="checkbox" checked={findWord} onChange={e => { const v = (e.target as HTMLInputElement).checked; setFindWord(v); requery({ wholeWord: v }); }} /> Word</label>
           <button class="small-btn" onClick={() => view && findNext(view, 1)}>Next</button>
           <button class="small-btn" onClick={() => view && findNext(view, -1)}>Prev</button>
           <span>Replace:</span><input value={replQ} onInput={e => setReplQ((e.target as HTMLInputElement).value)} />
           <button class="small-btn" onClick={() => view && replaceCurrent(view, replQ)}>Replace</button>
           <button class="small-btn" onClick={() => { if (view) notify(`Replaced ${replaceAll(view, replQ)} occurrence(s)`); }}>Replace all</button>
-          <span style="color:#666">{view ? `${findKey.getState(view.state)?.matches.length ?? 0} matches` : ''}</span>
-          <span style="flex:1" /><button class="small-btn" onClick={() => { setFindOpen(false); if (view) { setQuery(view, '', false); view.focus(); } }}>✕</button>
+          <span style="color:#666">{st ? (st.error ? `regex error` : `${st.matches.length} matches`) : ''}</span>
+          <button class={'small-btn' + (findAdv ? ' active' : '')} title="Advanced options" onClick={() => setFindAdv(a => !a)}>Advanced ▾</button>
+          <span style="flex:1" /><button class="small-btn" onClick={() => { setFindOpen(false); if (view) { setQuery(view, { query: '' }); view.focus(); } }}>✕</button>
         </div>
-      )}
+        {findAdv && (
+          <div class="find-bar find-bar-adv">
+            <label title="Treat the search text as a regular expression ($1… back-references work in Replace)"><input type="checkbox" checked={findRegex} onChange={e => { const v = (e.target as HTMLInputElement).checked; setFindRegex(v); requery({ regex: v }); }} /> Regular expression</label>
+            <label title="Also search inside math formulas"><input type="checkbox" checked={findMath} onChange={e => { const v = (e.target as HTMLInputElement).checked; setFindMath(v); requery({ searchMath: v }); }} /> Search math</label>
+            <label title="Only search the current selection"><input type="checkbox" checked={findSel} onChange={e => { const v = (e.target as HTMLInputElement).checked; setFindSel(v); requery({ selectionOnly: v }, v); }} /> In selection</label>
+            {st?.error && <span class="find-error">{st.error}</span>}
+          </div>
+        )}
+        </div>
+        );
+      })()}
       <div class="main">
-        {showFiles && <div class="sidebar"><div class="panel-tabs"><button class="active">Files</button><button onClick={() => setShowFiles(false)}>✕</button></div><div class="panel-body"><FileBrowser current={textId} refreshKey={refreshKey} onOpen={id => openInTab(id)} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} /></div></div>}
+        {showFiles ? (
+          <div class="sidebar">
+            <div class="panel-tabs"><button class="active">Files</button><button class="hide" title="Hide the file browser" onClick={() => setShowFiles(false)}>«</button></div>
+            <div class="panel-body"><FileBrowser current={textId} refreshKey={refreshKey} onOpen={id => openInTab(id)} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} /></div>
+          </div>
+        ) : (
+          <div class="rail left"><button data-rail="files" title="Show the file browser" onClick={() => setShowFiles(true)}>Files</button></div>
+        )}
+        <div class="editor-column">
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {isLyxDoc && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={marginMode} />}
           {docId ? (!isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
@@ -1311,17 +1415,24 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
             </div>
           ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); setTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} notify={notify} />}
         </div>
+        {isLyxDoc && showSource && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => setShowSource(false)} />}
+        </div>
+        {isLyxDoc && !rightTab && (
+          <div class="rail right">
+            {RIGHT_TABS.map(t => <button key={t} data-rail={t} title={RIGHT_TAB_TITLES[t]} onClick={() => { setRightTab(t); if (t === 'versions') setSelVersion(v => v + 1); }}>{RIGHT_TAB_LABELS[t]}</button>)}
+            <button data-rail="source" class={showSource ? 'active' : ''} title={SOURCE_TITLE} onClick={() => setShowSource(s => !s)}>Source</button>
+          </div>
+        )}
         {isLyxDoc && rightTab && (
-          <div class={'sidebar right' + (rightTab === 'pdf' ? ' wide' : rightTab === 'source' ? ' source' : '')}>
+          <div class={'sidebar right' + (rightTab === 'pdf' ? ' wide' : '')}>
             <div class="panel-tabs">
-              <button class={rightTab === 'outline' ? 'active' : ''} data-tab="outline" onClick={() => setRightTab('outline')}>Outline</button>
-              <button class={rightTab === 'source' ? 'active' : ''} data-tab="source" onClick={() => setRightTab('source')} title="LyX / LaTeX source (Ctrl+Alt+S)">Source</button>
-              <button class={rightTab === 'pdf' ? 'active' : ''} data-tab="pdf" onClick={() => setRightTab('pdf')}>PDF</button>
-              <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }}>Versions</button>
-              <button onClick={() => setRightTab(null)}>✕</button>
+              <button class={rightTab === 'outline' ? 'active' : ''} data-tab="outline" onClick={() => setRightTab('outline')} title={RIGHT_TAB_TITLES.outline}>Outline</button>
+              <button class={rightTab === 'pdf' ? 'active' : ''} data-tab="pdf" onClick={() => setRightTab('pdf')} title={RIGHT_TAB_TITLES.pdf}>PDF</button>
+              <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }} title={RIGHT_TAB_TITLES.versions}>Versions</button>
+              <button class={'toggle' + (showSource ? ' on' : '')} data-tab="source" onClick={() => setShowSource(s => !s)} title={SOURCE_TITLE}>Source</button>
+              <button class="hide" title="Hide the sidebar" onClick={() => setRightTab(null)}>»</button>
             </div>
             {rightTab === 'outline' && <div class="panel-body"><Outline view={masterView} items={outline} activePos={activePos} /></div>}
-            {rightTab === 'source' && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} onNotify={notify} />}
             {rightTab === 'pdf' && <PdfPanel docId={docId} state={pdf} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} />}
             {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
           </div>

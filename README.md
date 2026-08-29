@@ -123,7 +123,8 @@ blend.
   rendered with KaTeX (`packages/client/src/editor/lyxmath`). Everything behaves as in LyX: cursor
   movement into and out of insets, `^`/`_`, `\` command mode with name completion by Space, Space
   leaves the inset, Backspace/Delete at cell edges dissolve the inset (`pullArg`), big insets are
-  selected before deletion, empty scripts vanish, Enter adds rows (an inline formula becomes align),
+  selected before deletion, empty scripts vanish, an empty formula left with ←/→ (or Backspace/Delete)
+  is removed again, Enter adds rows (an inline formula becomes align),
   Tab moves between cells, LyX's corner markers around every inset on the cursor path, macros with
   arguments are expanded from their definitions with editable argument cells; typing `\` starts a
   command shown red until it names a real command (then green), with LyX's completion in grey — Tab
@@ -145,8 +146,55 @@ blend.
   the first use adds a small macro to the document preamble (`packages/core/src/math/llangle.ts`) that
   makes the plain, `\left…\right` and `\bigl…\bigr` forms compile with symmetric scaled brackets. The
   table row implements LyX's `tabular-feature` commands (`packages/client/src/editor/tablecommands.ts`).
+* **Landing page / sign-in** (`app/Login.tsx`, wordmark and sign-in card only): *Continue with Google* is the way in; the username +
+  password form (accounts created by an administrator, e2e) is folded away behind a small link while
+  Google sign-in is configured, and is the only form otherwise; links go to the GitHub repository and
+  the issue tracker.
+* **Command palette** (`app/MenuBar.tsx`): `Ctrl+Shift+P` (`⇧⌘P` on a Mac; `F1` as well) or the
+  *Help* menu opens a search over every menu item and the shortcut table — results show the menu
+  path and the shortcut, ↑/↓ + Enter runs one, Escape returns the keyboard to the text. The ✎ next
+  to a result records a new shortcut for that command (Backspace: none, ↺: default); a key another
+  command uses asks first and then moves over. User shortcuts live in `localStorage.ol.keys`
+  (`app/keybindings.ts`): a global listener runs them and swallows the default keys of rebound
+  commands, so the editor's built-in bindings never fire for them. Shortcuts are written once in LyX
+  style (`Ctrl+Alt+O`) and rendered per platform (`⌥⌘O` on a Mac; `app/shortcuts.ts`). LyX's
+  `Ctrl+Shift+P` (typewriter) gave way to the palette; give it a key there if you want one.
+* **Sidebars**: the file browser (left) and the Outline / PDF / Versions panels (right) hide
+  with the « » buttons in their tab strip; a hidden sidebar leaves a thin rail with its panels' names
+  that brings it back. The state is remembered per browser (`localStorage.ol.files`, `ol.right`).
 * **Presence**: the avatars in the status bar (profile pictures for Google accounts, initials otherwise) are the connected users; click one to jump to where
   that user is editing (their cursor is scrolled into view and flashes).
+* **Right-click menu** (`editor/editormenu.ts`): what the click landed on comes first (a
+  cross-reference, citation, link, child document, graphics, inset, tracked change — with the
+  actions that make sense for it), then Cut / Copy / Paste, *Rewrite with AI* (when switched on),
+  *Comment on this* and *Turn into a formula* for a selection, the text style, paragraph layout,
+  paragraph, insert and track-changes submenus, and the spell-checking switch. Formulas have their
+  own menu (numbering, environment, label, insert, fonts, AI). Shift+right-click gives the browser's
+  own menu — that is where its spelling suggestions live.
+* **Spell checking** is the browser's (red underlines); switch it off and on with the abc✓ button
+  on the standard toolbar, Tools ▸ Spell checking, or the context menu. The choice is kept per
+  browser (`localStorage.ol.prefs`, `src/prefs.ts`, Tools ▸ Preferences…).
+* **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or
+  Preferences — the switches are menu items, so the command palette finds them): needs
+  `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); the model is Gemini Flash
+  (`OVERLYX_AI_MODEL`, `OVERLYX_AI_COMPLETION_MODEL`).
+  * *Rewrite with AI* — `⌘K` / `Ctrl+K` (LyX's delete-to-end-of-paragraph on that key steps aside
+    while this is on): select a passage — or nothing, to write at the cursor — and describe the
+    change in the small prompt under it. The passage, the instruction and the document's LaTeX
+    (for context: notation, macros, citation keys) go to the model; the reply comes back as LaTeX
+    parsed into real editor nodes and is previewed *in place* — old text struck through, the
+    proposal rendered after it, formulas and citations included. Enter accepts, Esc rejects,
+    nothing touches the shared document before that. Inside a formula the same key rewrites the
+    formula (or its selected part) and shows the rendered proposal in the prompt.
+  * *Autocomplete* — after a pause in typing (600 ms, adjustable) the model proposes a short
+    continuation; it appears as grey ghost content after the caret, with any formula in it already
+    rendered (the server returns editor nodes, not just text), and Tab inserts exactly that.
+    Anything else dismisses it. Inside formulas the ghost is rendered by KaTeX at the end of the
+    cell (`\htmlClass{lm-ghost}`), Tab inserts it as LaTeX. Requests are debounced, cancelled when
+    overtaken, cached, and rate-limited per user on the server.
+* **Cursor memory**: a document reopens with the cursor where it was the last time it was open in
+  this browser (`localStorage.ol.cursor:<doc>`, `packages/client/src/editor/cursormemory.ts`; the text
+  before the cursor is used to find the place again when the document changed meanwhile).
 * **LyX-style dialogs**: Paragraph settings (`Ctrl+Alt+P`: alignment, line spacing, indentation,
   label width), Table settings (cell / column / row / table tabs incl. longtable), Document settings
   (class & options, page & margins, text layout, numbering & floats, fonts, branches, PDF properties,
@@ -156,7 +204,10 @@ blend.
   `Ctrl/⌘+click` follows a reference or opens a child document; **tabs** for open documents (new
   tabs open right of the current one); *View ▸ Master + child documents in one
   view* shows a paper and its `\include`d children as one scrolling page; an editable **Source pane**
-  (live LyX source that follows the cursor — edit and *Apply* — plus the exported LaTeX); wide display
+  below the text (`Ctrl+Alt+S`, the *Source* switch in the right tab strip): the document's LaTeX with
+  syntax colours (`app/texhighlight.ts`), following the cursor (`app/sourcelocate.ts`: the words before
+  the cursor are searched in the source, or the current row of the formula being edited) — edit and
+  *Apply* —, drag its top edge to resize; wide display
   formulas overflow symmetrically into the margins (Google-Docs style) with equation numbers kept
   clear of the formula.
 * **Citations from the literature** (`Ctrl+Shift+C` ▸ *Find online / paste BibTeX*): type a title,
@@ -266,6 +317,14 @@ secret (`<data dir>/secret.key`) is generated on first start and is part of ever
 Do not put a broad-scope token (your `gh` login) in there: the server runs user-supplied LaTeX, and a
 token with *Issues* on one repository is all the feedback channel needs.
 
+`OPENROUTER_API_KEY` (from [openrouter.ai/keys](https://openrouter.ai/keys)) enables "Escalate to AI…"
+document repair (see "Document health" below); `OPENROUTER_REPAIR_MODEL` overrides the model
+(default `anthropic/claude-opus-5`). Without a key the feature is hidden. The same key powers the
+editor's AI assistance (⌘K rewrite, autocomplete; `OVERLYX_AI_MODEL` /
+`OVERLYX_AI_COMPLETION_MODEL`, default `google/gemini-3.7-flash`; `OVERLYX_AI_REWRITES_PER_MIN`,
+`OVERLYX_AI_COMPLETIONS_PER_MIN` rate limits per user). `GET /api/ai/status` tells the client
+whether it is configured; the features stay off in every browser until a user switches them on.
+
 ## Backups and restoring
 
 `deploy/overlyx-backup.timer` runs `scripts/backup.sh` every night (SQLite online backup, `secret.key`,
@@ -306,6 +365,10 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/
 # offline mode needs the built client (service worker): build into $S/dist, then
 (cd packages/client && npx vite build --outDir $S/dist)
 OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e2e/git.spec.ts   # git: a real clone / push / pull with a token
+# AI assistance (e2e/ai.spec.ts): the menus / preferences part runs anywhere; the ⌘K and autocomplete
+# flows need the server to talk to the stub model: `node scripts/ai-stub.mjs` (port 3999) and the server
+# started with OPENROUTER_API_URL=http://127.0.0.1:3999 OPENROUTER_API_KEY=test-key, then
+OVERLYX_E2E_AI_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/ai.spec.ts
 ```
 
 ## Offline mode
@@ -397,3 +460,51 @@ invisible to LaTeX itself:
 
 `scripts/import-lyx.ts` converts a project's `.lyx` files (children as fragments, SVG/EPS
 graphics as PDF); the LyX settings become a real preamble, exactly as LyX's own export writes it.
+
+### Document health
+
+Because the file is plain LaTeX, anything can edit it outside OverLyX — git, another editor, a
+merge — and can break one of the conventions above (a managed-block marker, the settings JSON, a
+`\begin{document}`/`\end{document}` pair, brace balance). `packages/core/src/tex/health.ts`
+(`checkTexHealth`) checks for this on every load and external change; a banner appears above the
+editor listing what it found. Two ways to fix it:
+
+* **Repair** (`Document ▸ Document health ▸ Repair`, or the banner's button) mends only the
+  mechanical cases — a managed-block marker missing next to its counterpart — by text surgery, and
+  never touches document content. It's a no-op when nothing mechanical is wrong.
+* **Escalate to AI…** sends the broken file and the detected issues to an OpenRouter model (see
+  "Secrets" above) along with the format spec, and shows the proposed fix in a merge/diff editor
+  (`app/diff.ts` + `Dialogs.tsx`'s `AiRepairDialog`) for you to review line by line before applying
+  — nothing is written until you click *Apply*. A version of the file from just before either kind
+  of repair is kept (Versions panel), and applying an AI proposal is refused if the file changed
+  since the proposal was generated.
+
+## MCP connector
+
+Any [MCP](https://modelcontextprotocol.io)-compatible client (Claude, Claude Code, …) can connect to
+one project as a collaborator: File ▸ Git repository… (`Git.tsx`) also has an "MCP connector"
+section with the server URL (`<origin>/mcp/<project>`) and per-project agent tokens
+(`Authorization: Bearer olxmcp_…`, `packages/server/src/mcpTokens.ts`; revocable, one per agent).
+`packages/server/src/mcp.ts` implements the connector on top of `@modelcontextprotocol/sdk`'s
+stateless Streamable HTTP transport (one request/response per JSON-RPC call, no session) and
+exposes six tools:
+
+* `list_documents`, `read_document(path)` — the project's `.tex` documents and one document's text
+  plus its paragraphs (index, layout, depth, plain text) for addressing the tools below.
+* `propose_edit(path, paragraph_index, new_text)` — replaces one paragraph's text. **Always** a
+  tracked change: a word-level diff (`core/src/lyx/tokendiff.ts`) turns the edit into
+  `\lyxadded`/`\lyxdeleted` runs attributed to the agent (author name `"<agent> (MCP)"`), the same
+  representation a human's Track Changes produces — never a silent overwrite, always reviewable
+  from the Review toolbar or rejectable like anyone else's edit. Only plain, uniformly-formatted
+  text paragraphs are supported (no formulas/citations/other insets, no mixed bold/italic runs);
+  anything else is refused with an explanatory error.
+* `list_comments(path)`, `add_comment(path, text, paragraph_index?)`, `resolve_comment(path, index)`
+  — comment threads at the top level of the document body (same `Note Comment` inset shape and
+  header convention — `Name (date time):` — as the client's comment cards).
+
+## Authentication and identity
+
+Two separate token systems exist and are not interchangeable: **git tokens** (`/api/git/tokens`)
+stand for a signed-in *account* across every project it can access; **MCP tokens**
+(`/api/projects/:p/mcp-tokens`) stand for one *agent* scoped to a single project, created by anyone
+with editor access to that project.

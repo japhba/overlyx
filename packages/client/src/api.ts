@@ -17,6 +17,14 @@ export interface ShareMember { id: number; role: 'view' | 'edit'; via: string; e
 export interface ShareInfo { name?: string; title?: string | null; owner: { id: number; name: string; username: string } | null; members: ShareMember[]; link: { token: string; role: 'view' | 'edit' } | null }
 export interface LayoutInfo { name: string; category?: string; labelType?: string; tocLevel?: number; latexType?: string; latexName?: string; isNumbered?: boolean }
 export interface BibItem { key: string; author: string; year: string; title: string }
+export interface HealthIssue { code: string; message: string; severity: 'warning' | 'error'; fixable: boolean }
+/** ProseMirror JSON (nodes of the editor schema) as the server returns them for AI proposals */
+export interface PMJSON { type: string; attrs?: Record<string, any>; content?: PMJSON[]; marks?: { type: string; attrs?: Record<string, any> }[]; text?: string }
+export interface AiStatus { available: boolean; model: string; completionModel: string }
+export interface AiRewriteRequest { instruction: string; content: PMJSON[]; layout?: string; math?: { latex: string; display: boolean; selection?: string } }
+export interface AiRewriteResult { tex: string; nodes: PMJSON[]; original: string }
+export interface AiCompleteRequest { kind: 'text' | 'math'; before: string; after: string; formula?: string; paragraph?: string }
+export interface AiCompleteResult { text: string; nodes: PMJSON[] }
 export interface DocMeta {
   id: string; project: string; path: string; role?: Role; textclass: string; modules: string[]; language: string;
   useRefstyle: boolean; citeEngine: string; citeEngineType: string; trackingChanges: boolean; secnumdepth: number; tocdepth: number;
@@ -27,6 +35,8 @@ export interface DocMeta {
   macroList: { name: string; args: number; def: string; display?: string; source: string }[];
   bib: BibItem[]; layouts: LayoutInfo[] | null; flexInsets: string[] | null; files: ProjectFile[];
   master: string | null; labels: { name: string; context: string; file: string }[];
+  /** structural damage found in the file on disk (an external edit broke an OverLyX convention) */
+  health: HealthIssue[];
 }
 export interface BuildJob { id: number; status: 'queued' | 'exporting' | 'compiling' | 'ok' | 'error' | 'cancelled'; engine: string; requestedBy: string; startedAt: number; phaseAt: number; finishedAt?: number; progress: string; rerun: boolean }
 export interface BuildInfo { status: string; log: string; pdf: string | null; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[]; tex?: string }
@@ -35,12 +45,13 @@ export interface GitCommit { hash: string; author: string; date: number; message
 export interface GitInfo { url: string; username: string; role: Role; hasPassword: boolean; branch: string; commits: GitCommit[]; pending: number; pendingFiles: string[]; head: string | null }
 export interface GitToken { id: number; name: string; created_at: number; last_used_at: number | null }
 
-async function req<T>(method: string, url: string, body?: unknown, raw?: BodyInit): Promise<T> {
+async function req<T>(method: string, url: string, body?: unknown, raw?: BodyInit, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, {
     method,
     headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
     body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined),
     credentials: 'same-origin',
+    signal,
   });
   const text = await res.text();
   let data: any = {};
@@ -82,6 +93,9 @@ export const api = {
   gitTokens: () => req<{ tokens: GitToken[] }>('GET', '/api/git/tokens'),
   createGitToken: (name: string) => req<{ id: number; token: string; tokens: GitToken[] }>('POST', '/api/git/tokens', { name }),
   deleteGitToken: (id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/git/tokens/${id}`),
+  mcpTokens: (project: string) => req<{ tokens: GitToken[] }>('GET', `/api/projects/${encodeURIComponent(project)}/mcp-tokens`),
+  createMcpToken: (project: string, name: string) => req<{ id: number; token: string; tokens: GitToken[] }>('POST', `/api/projects/${encodeURIComponent(project)}/mcp-tokens`, { name }),
+  deleteMcpToken: (project: string, id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/projects/${encodeURIComponent(project)}/mcp-tokens/${id}`),
   newDoc: (project: string, path: string, opts: { title?: string; textclass?: string } = {}) => req<{ id: string }>('POST', `/api/projects/${encodeURIComponent(project)}/new`, { path, ...opts }),
   /** plain text files (.tex, .bib, …) for the built-in text editor; `mtime` guards against overwriting someone else's save */
   readText: (project: string, path: string) => req<{ text: string; mtime: number; size: number; role: Role }>('GET', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`),
@@ -97,6 +111,16 @@ export const api = {
   importLyx: (project: string, path: string) => req<{ id: string; created: string[]; warnings: string[]; graphics: { src: string; dest: string; ok: boolean; error?: string }[] }>('POST', `/api/projects/${encodeURIComponent(project)}/import`, { path }),
   save: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/save`),
   setHeader: (id: string, body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }) => req<{ ok: boolean; headerLines: string[] }>('POST', `/api/docs/${encId(id)}/header`, body),
+  /** Mend mechanically-fixable structural damage (managed-block markers); returns what was fixed and what remains. */
+  repair: (id: string) => req<{ fixed: string[]; remaining: HealthIssue[] }>('POST', `/api/docs/${encId(id)}/repair`),
+  /** "Escalate to AI…": asks OpenRouter to propose a fix; nothing is applied yet. */
+  aiRepair: (id: string) => req<{ original: string; proposed: string; issues: HealthIssue[] }>('POST', `/api/docs/${encId(id)}/ai-repair`),
+  /** Apply an AI-proposed fix once approved in the merge editor. */
+  applyAiRepair: (id: string, original: string, proposed: string) => req<{ ok: true; remaining: HealthIssue[] }>('POST', `/api/docs/${encId(id)}/ai-repair/apply`, { original, proposed }),
+  /** AI assistance (ai.ts on the server): availability, ⌘K rewrite, autocomplete */
+  aiStatus: () => req<AiStatus>('GET', '/api/ai/status'),
+  aiRewrite: (id: string, body: AiRewriteRequest, signal?: AbortSignal) => req<AiRewriteResult>('POST', `/api/docs/${encId(id)}/ai/rewrite`, body, undefined, signal),
+  aiComplete: (id: string, body: AiCompleteRequest, signal?: AbortSignal) => req<AiCompleteResult>('POST', `/api/docs/${encId(id)}/ai/complete`, body, undefined, signal),
   versions: (id: string) => req<{ versions: VersionInfo[] }>('GET', `/api/docs/${encId(id)}/versions`),
   /** `lyx`: explicit content (e.g. offline edits that could not be merged) instead of the current server state */
   createVersion: (id: string, name: string, lyx?: string) => req<{ id: number }>('POST', `/api/docs/${encId(id)}/versions`, lyx !== undefined ? { name, lyx } : { name }),

@@ -10,3 +10,5 @@ export { importLyx, lyxDocumentToTex, prepareForTex } from './import.ts';
 export type { ImportLyxOptions, ImportLyxResult } from './import.ts';
 export { splitDocument, readSettings, settingsFromHeader, settingsLine, preambleFacts, providedFeatures, makeHeaderLines, MANAGED_BEGIN, MANAGED_END, SETTINGS_PREFIX } from './preamble.ts';
 export { Scanner } from './scanner.ts';
+export { checkTexHealth, repairTex } from './health.ts';
+export type { HealthIssue } from './health.ts';

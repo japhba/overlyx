@@ -4,6 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from './config.ts';
+import { requestAiRepair, AiRepairError } from './airepair.ts';
+import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, allow as aiAllow, AiError } from './ai.ts';
+import { mcpRouter } from './mcp.ts';
+import { createMcpToken, listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, generatePassword } from './auth.ts';
 import { attachWebSocket } from './ws.ts';
 import { manager } from './docs.ts';
@@ -37,6 +41,7 @@ app.use((_req, res, next) => {
 app.use('/api/auth', authRouter());
 // git over HTTP (Basic auth, see git.ts) — before the API's cookie auth and JSON parsing
 app.use('/git', gitRouter());
+app.use('/mcp', mcpRouter());
 
 const api = express.Router();
 api.use(requireAuth);
@@ -188,6 +193,18 @@ api.post('/git/tokens', (req, res) => {
 api.delete('/git/tokens/:id', (req, res) => {
   deleteToken(req.user!.id, Number(req.params.id));
   res.json({ tokens: listTokens(req.user!.id) });
+});
+
+/** MCP connector tokens: one per external agent, scoped to this project (see mcp.ts). */
+api.get('/projects/:project/mcp-tokens', needProject('edit'), (req, res) => { res.json({ tokens: listMcpTokens(req.params.project) }); });
+api.post('/projects/:project/mcp-tokens', needProject('edit'), (req, res) => {
+  const name = String(req.body?.name ?? '').trim() || 'agent';
+  const t = createMcpToken(req.params.project, name);
+  res.json({ id: t.id, token: t.token, tokens: listMcpTokens(req.params.project) });
+});
+api.delete('/projects/:project/mcp-tokens/:id', needProject('edit'), (req, res) => {
+  deleteMcpToken(req.params.project, Number(req.params.id));
+  res.json({ tokens: listMcpTokens(req.params.project) });
 });
 
 api.post('/projects/:project/new', needProject('edit'), (req, res) => {
@@ -530,8 +547,88 @@ api.get('/docs/*/meta', async (req, res) => {
       bib: bibUnique.slice(0, 30000).map(e => ({ key: e.key, author: e.authorShort, year: e.year, title: e.title })),
       layouts, flexInsets,
       files: listProjects().find(p => p.name === doc.project)?.files ?? [],
+      health: doc.health(),
     });
   } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/** Mend mechanically-fixable structural damage (managed-block markers) left by an external edit. */
+api.post('/docs/*/repair', async (req, res) => {
+  try {
+    if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
+    const doc = await manager.open(docId(req));
+    res.json(doc.repair());
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/** Ask the configured OpenRouter model to propose a fix for structural damage the mechanical
+ *  repair can't handle. Never applied automatically — see POST .../ai-repair/apply. */
+api.post('/docs/*/ai-repair', async (req, res) => {
+  try {
+    if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
+    if (!config.openrouter.apiKey) { res.status(503).json({ error: 'AI repair is not configured on this server (OPENROUTER_API_KEY is unset).' }); return; }
+    const doc = await manager.open(docId(req));
+    const original = doc.fileText ?? doc.toText();
+    const issues = doc.health();
+    const proposed = await requestAiRepair(original, issues);
+    res.json({ original, proposed, issues });
+  } catch (e) { res.status(e instanceof AiRepairError ? 502 : 400).json({ error: (e as Error).message ?? String(e) }); }
+});
+
+/** Apply an AI-proposed fix once the user has approved it in the merge editor. */
+api.post('/docs/*/ai-repair/apply', async (req, res) => {
+  try {
+    if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
+    const { original, proposed } = req.body ?? {};
+    if (typeof original !== 'string' || typeof proposed !== 'string') { res.status(400).json({ error: 'original/proposed missing' }); return; }
+    const doc = await manager.open(docId(req));
+    const r = doc.applyAiRepair(proposed, original);
+    if (!r.ok) { res.status(409).json({ error: r.error }); return; }
+    res.json({ ok: true, remaining: r.remaining });
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/* ---------------------------------------------------------- AI assistance (ai.ts) */
+
+/** Whether ⌘K rewriting / autocomplete can work on this server (a key is configured) and with which models. */
+api.get('/ai/status', (_req, res) => { res.json(aiStatus()); });
+
+/** ⌘K: rewrite the selected passage (or a formula) according to an instruction; the client previews the proposal. */
+api.post('/docs/*/ai/rewrite', async (req, res) => {
+  try {
+    if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
+    if (!aiAvailable()) { res.status(503).json({ error: 'AI assistance is not configured on this server (OPENROUTER_API_KEY is unset).' }); return; }
+    if (!aiAllow(`rewrite:${req.user!.id}`, config.ai.rewritesPerMinute)) { res.status(429).json({ error: 'Too many AI requests — wait a moment.' }); return; }
+    const body = req.body ?? {};
+    if (typeof body.instruction !== 'string') { res.status(400).json({ error: 'instruction missing' }); return; }
+    const doc = await manager.open(docId(req));
+    const ac = new AbortController();
+    req.on('close', () => { if (!res.writableEnded) ac.abort(); });
+    const r = await aiRewrite(doc, { instruction: body.instruction, content: Array.isArray(body.content) ? body.content : [], layout: typeof body.layout === 'string' ? body.layout : undefined, math: body.math && typeof body.math.latex === 'string' ? body.math : undefined }, ac.signal);
+    res.json(r);
+  } catch (e) {
+    if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
+    res.status(400).json({ error: (e as Error).message ?? String(e) });
+  }
+});
+
+/** Autocomplete: a short continuation at the cursor (text: parsed nodes for the ghost; math: LaTeX). */
+api.post('/docs/*/ai/complete', async (req, res) => {
+  try {
+    if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
+    if (!aiAvailable()) { res.status(503).json({ error: 'AI assistance is not configured on this server.' }); return; }
+    if (!aiAllow(`complete:${req.user!.id}`, config.ai.completionsPerMinute)) { res.status(429).json({ error: 'Too many completion requests — wait a moment.' }); return; }
+    const body = req.body ?? {};
+    const kind = body.kind === 'math' ? 'math' : 'text';
+    const doc = await manager.open(docId(req));
+    const ac = new AbortController();
+    req.on('close', () => { if (!res.writableEnded) ac.abort(); });
+    const r = await aiComplete(doc, { kind, before: String(body.before ?? ''), after: String(body.after ?? ''), formula: typeof body.formula === 'string' ? body.formula : undefined, paragraph: typeof body.paragraph === 'string' ? body.paragraph : undefined }, ac.signal);
+    res.json(r);
+  } catch (e) {
+    if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
+    res.status(400).json({ error: (e as Error).message ?? String(e) });
+  }
 });
 
 /** The document's LaTeX source (what the file on disk contains once saved). */

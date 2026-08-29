@@ -5,6 +5,7 @@
  *  - accept/reject all changes.
  */
 import { Plugin, PluginKey, TextSelection, type Command, type Transaction, type EditorState } from 'prosemirror-state';
+import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { schema } from '@overlyx/core';
 import { editorContext } from '../context';
@@ -172,7 +173,7 @@ export function hasChanges(doc: PMNode): boolean {
 
 export interface ChangeRange { from: number; to: number; type: 'inserted' | 'deleted'; author: number; time: number }
 
-function changeOf(node: PMNode): { type: 'inserted' | 'deleted'; author: number; time: number } | null {
+export function changeOf(node: PMNode): { type: 'inserted' | 'deleted'; author: number; time: number } | null {
   if (node.isText) {
     const m = node.marks.find(x => x.type === schema.marks.change);
     return m ? { type: m.attrs.type, author: Number(m.attrs.author), time: Number(m.attrs.time) } : null;
@@ -288,4 +289,47 @@ export function resolveSelectionChanges(accept: boolean): Command {
     dispatch(tr.setMeta('lyx-changes', true));
     return true;
   };
+}
+
+/* ------------------------------------------------ display filter (insertions / deletions) */
+
+/**
+ * Purely a *view* filter: which tracked-change types are drawn. Independent of the document
+ * itself — insertions and deletions can each be hidden (both, either, or neither), e.g. to read
+ * the text as it will look once deletions are accepted while still seeing what was inserted.
+ */
+export interface ChangesFilterState { showInsertions: boolean; showDeletions: boolean }
+export const changesFilterKey = new PluginKey<ChangesFilterState>('lyx-changes-filter');
+
+export function changesFilterPlugin(): Plugin<ChangesFilterState> {
+  return new Plugin<ChangesFilterState>({
+    key: changesFilterKey,
+    state: {
+      init: () => ({ showInsertions: true, showDeletions: true }),
+      apply(tr, prev) {
+        const meta = tr.getMeta(changesFilterKey) as Partial<ChangesFilterState> | undefined;
+        return meta ? { ...prev, ...meta } : prev;
+      },
+    },
+    props: {
+      decorations(state) {
+        const f = changesFilterKey.getState(state)!;
+        if (f.showInsertions && f.showDeletions) return null;
+        const decos: Decoration[] = [];
+        state.doc.descendants((node, pos) => {
+          if (!node.isInline) return true;
+          const c = changeOf(node);
+          if (!c) return true;
+          const hide = (c.type === 'inserted' && !f.showInsertions) || (c.type === 'deleted' && !f.showDeletions);
+          if (hide) decos.push(node.isText ? Decoration.inline(pos, pos + node.nodeSize, { class: 'lyx-change-hidden' }) : Decoration.node(pos, pos + node.nodeSize, { class: 'lyx-change-hidden' }));
+          return true;
+        });
+        return decos.length ? DecorationSet.create(state.doc, decos) : null;
+      },
+    },
+  });
+}
+
+export function setChangesFilter(view: EditorView, patch: Partial<ChangesFilterState>): void {
+  view.dispatch(view.state.tr.setMeta(changesFilterKey, patch));
 }

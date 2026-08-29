@@ -28,6 +28,10 @@ export async function login(page: Page, creds = adminCredentials(), opts: { tour
   // the interactive tour is offered once per browser; keep it out of the way unless a spec wants it
   if (!opts.tour) await page.addInitScript(TOUR_SEEN_SCRIPT);
   await page.goto('/');
+  // with Google sign-in configured the password form is folded away behind a link
+  await page.locator('[data-password-login], input[placeholder="Username"]').first().waitFor({ timeout: 20000 });
+  const fallback = page.locator('[data-password-login]');
+  if (await fallback.count()) await fallback.click();
   await page.getByPlaceholder('Username').fill(creds.username);
   await page.getByPlaceholder('Password').fill(creds.password);
   await page.getByRole('button', { name: 'Sign in' }).click();
