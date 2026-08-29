@@ -957,3 +957,4 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .dialog h3 { margin: 6px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ui-muted); }
 .statusbar .ai-busy { color: var(--accent); animation: ai-pulse 1s ease-in-out infinite; }
 @keyframes ai-pulse { 50% { opacity: 0.35; } }
+.dialog .model-row { align-items: flex-start; } .dialog .model-row label { padding-top: 5px; }

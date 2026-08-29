@@ -17,9 +17,12 @@ export interface Prefs {
   aiCompleteMath: boolean;
   /** pause before a completion is requested (ms) */
   aiCompleteDelay: number;
+  /** OpenRouter model ids for ⌘K and for autocomplete ('' = the server's default) */
+  aiModel: string;
+  aiCompletionModel: string;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200 };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, aiModel: '', aiCompletionModel: '' };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

@@ -77,7 +77,7 @@ class RewritePanel {
     this.dom.dataset.aiPanel = target.kind;
     this.dom.innerHTML = `
       <div class="ai-row">
-        <span class="ai-badge" title="${escapeAttr(editorContext.ai?.model ?? 'AI')}">AI</span>
+        <span class="ai-badge" title="${escapeAttr(getPrefs().aiModel || editorContext.ai?.model || 'AI')}">AI</span>
         <textarea class="ai-input" rows="1" placeholder="${target.kind === 'math' ? 'What to do with the formula… (Enter to ask)' : target.from === target.to ? 'What to write here… (Enter to ask)' : 'What to do with the selection… (Enter to ask)'}"></textarea>
         <button type="button" class="ai-close" title="Close (Esc)">✕</button>
       </div>
@@ -153,9 +153,10 @@ class RewritePanel {
     const t = this.target;
     const docId = t.kind === 'text' ? viewDocId(t.view) : (t.view ? viewDocId(t.view) : editorContext.docId ?? '');
     try {
+      const model = getPrefs().aiModel || undefined;
       const r = t.kind === 'text'
-        ? await api.aiRewrite(docId, { instruction, content: t.content, layout: t.layout, before: t.before, after: t.after }, ac.signal)
-        : await api.aiRewrite(docId, { instruction, content: [], math: { latex: t.latex, display: t.display, selection: t.selection } }, ac.signal);
+        ? await api.aiRewrite(docId, { instruction, content: t.content, layout: t.layout, before: t.before, after: t.after, model }, ac.signal)
+        : await api.aiRewrite(docId, { instruction, content: [], model, math: { latex: t.latex, display: t.display, selection: t.selection } }, ac.signal);
       if (ac.signal.aborted) return;
       this.showResult(r);
     } catch (e) {

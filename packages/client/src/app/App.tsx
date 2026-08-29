@@ -222,7 +222,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   // completions in flight (a small indicator in the status bar; several may overlap briefly)
   const [aiBusy, setAiBusy] = useState(0);
   useEffect(() => { editorContext.aiBusy = (on) => setAiBusy(n => Math.max(0, n + (on ? 1 : -1))); return () => { editorContext.aiBusy = undefined; }; }, []);
-  useEffect(() => { api.aiStatus().then(s => { editorContext.ai = s; setAi(s); }).catch(() => { const s = { available: false, model: '', completionModel: '' }; editorContext.ai = s; setAi(s); }); }, []);
+  useEffect(() => { api.aiStatus().then(s => { editorContext.ai = s; setAi(s); }).catch(() => { const s = { available: false, model: '', completionModel: '', models: [] }; editorContext.ai = s; setAi(s); }); }, []);
   const [toolbars, setToolbars] = useState<ToolbarPrefs>(loadToolbarPrefs);
   useEffect(() => { localStorage.setItem('ol.toolbars', JSON.stringify(toolbars)); }, [toolbars]);
   const setToolbar = (id: ToolbarId, mode: ToolbarMode) => setToolbars(t => ({ ...t, [id]: mode }));
@@ -930,7 +930,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Spell checking', checked: prefs.spellcheck, action: () => setPref('spellcheck', !prefs.spellcheck) },
       { sep: true },
       { label: 'AI assistance ▸', sub: [
-        { label: ai === null ? 'Checking the server…' : ai.available ? `Model: ${ai.model}` : 'Not configured on this server (OPENROUTER_API_KEY)', disabled: true },
+        { label: ai === null ? 'Checking the server…' : ai.available ? `Models: ${prefs.aiModel || ai.model} (⌘K) · ${prefs.aiCompletionModel || ai.completionModel} (autocomplete)` : 'Not configured on this server (OPENROUTER_API_KEY)', disabled: true },
+        { label: 'Choose the models… (Preferences)', action: () => setDialog({ name: 'preferences' }) },
         { sep: true },
         { label: `Rewrite with AI (${REWRITE_KEY})`, checked: prefs.aiRewrite, action: () => setPref('aiRewrite', !prefs.aiRewrite) },
         { label: 'Autocomplete text (ghost text, Tab inserts)', checked: prefs.aiCompleteText, action: () => setPref('aiCompleteText', !prefs.aiCompleteText) },

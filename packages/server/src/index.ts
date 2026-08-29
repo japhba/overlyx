@@ -604,7 +604,7 @@ api.post('/docs/*/ai/rewrite', async (req, res) => {
     const doc = await manager.open(docId(req));
     const ac = new AbortController();
     req.on('close', () => { if (!res.writableEnded) ac.abort(); });
-    const r = await aiRewrite(doc, { instruction: body.instruction, content: Array.isArray(body.content) ? body.content : [], layout: typeof body.layout === 'string' ? body.layout : undefined, math: body.math && typeof body.math.latex === 'string' ? body.math : undefined }, ac.signal);
+    const r = await aiRewrite(doc, { instruction: body.instruction, content: Array.isArray(body.content) ? body.content : [], layout: typeof body.layout === 'string' ? body.layout : undefined, before: typeof body.before === 'string' ? body.before : undefined, after: typeof body.after === 'string' ? body.after : undefined, model: body.model, math: body.math && typeof body.math.latex === 'string' ? body.math : undefined }, ac.signal);
     res.json(r);
   } catch (e) {
     if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
@@ -623,7 +623,7 @@ api.post('/docs/*/ai/complete', async (req, res) => {
     const doc = await manager.open(docId(req));
     const ac = new AbortController();
     req.on('close', () => { if (!res.writableEnded) ac.abort(); });
-    const r = await aiComplete(doc, { kind, before: String(body.before ?? ''), after: String(body.after ?? ''), formula: typeof body.formula === 'string' ? body.formula : undefined, paragraph: typeof body.paragraph === 'string' ? body.paragraph : undefined }, ac.signal);
+    const r = await aiComplete(doc, { kind, before: String(body.before ?? ''), after: String(body.after ?? ''), formula: typeof body.formula === 'string' ? body.formula : undefined, paragraph: typeof body.paragraph === 'string' ? body.paragraph : undefined, model: body.model }, ac.signal);
     res.json(r);
   } catch (e) {
     if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }

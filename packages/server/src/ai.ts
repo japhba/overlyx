@@ -23,8 +23,26 @@ import { projectDir, findMaster } from './projects.ts';
 export class AiError extends Error { constructor(msg: string, public status = 502) { super(msg); } }
 
 export function aiAvailable(): boolean { return !!config.openrouter.apiKey; }
-export function aiStatus(): { available: boolean; model: string; completionModel: string } {
-  return { available: aiAvailable(), model: config.ai.model, completionModel: config.ai.completionModel };
+
+export interface ModelInfo { id: string; label: string; note: string }
+/** Models offered in the preferences (any OpenRouter id may still be typed in); notes from the 2026-08-29 measurements. */
+export const MODELS: ModelInfo[] = [
+  { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', note: 'fastest (0.4–1 s); proposes full sentences' },
+  { id: 'google/gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite', note: 'fast (0.6–1.2 s), sharper prose; occasionally silent' },
+  { id: 'google/gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', note: 'fast (0.5–0.8 s), terse' },
+  { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'strong, ~1.5 s' },
+  { id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash', note: 'best; thinks before answering (2–3 s) — suits ⌘K' },
+  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5', note: '~1 s, careful prose' },
+  { id: 'openai/gpt-4.1-nano', label: 'GPT-4.1 nano', note: '~0.8 s' },
+];
+export function aiStatus(): { available: boolean; model: string; completionModel: string; models: ModelInfo[] } {
+  return { available: aiAvailable(), model: config.ai.model, completionModel: config.ai.completionModel, models: MODELS };
+}
+/** A model id chosen in the client, if it looks like an OpenRouter id; else the server's default. */
+export function pickModel(requested: unknown, fallback: string): string {
+  if (typeof requested !== 'string') return fallback;
+  const id = requested.trim();
+  return /^[a-z0-9-]+\/[a-z0-9._:-]+$/i.test(id) && id.length <= 80 ? id : fallback;
 }
 
 /* ------------------------------------------------------------------ model access */
@@ -183,6 +201,8 @@ Rules:
 
 export interface RewriteRequest {
   instruction: string; content: PMJSON[]; layout?: string;
+  /** model chosen in the client's preferences (validated; the server default otherwise) */
+  model?: string;
   /** text of the paragraph before / after the cursor (locates the cursor in the document when nothing is selected) */
   before?: string; after?: string;
   math?: { latex: string; display: boolean; selection?: string };
@@ -192,13 +212,14 @@ export interface RewriteResult { tex: string; nodes: PMJSON[]; original: string 
 export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortSignal): Promise<RewriteResult> {
   const instruction = req.instruction.trim();
   if (!instruction) throw new AiError('Say what to do with the passage.', 400);
+  const model = pickModel(req.model, config.ai.model);
   const docText = doc.toText();
   const macros = macroLines(doc);
   if (req.math) {
     const original = req.math.selection ?? req.math.latex;
     const context = documentContext(docText, req.math.latex, 60000);
     const user = `## Document (for context)\n${context}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## The formula being edited (${req.math.display ? 'display' : 'inline'} math)\n${req.math.latex}\n\n## Part of it to replace\n${original}\n\n## Instruction\n${instruction}\n\nReply with LaTeX math only (no $ or \\[ delimiters, no environment unless the part to replace contains one), the replacement for the part.`;
-    const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { signal, title: 'OverLyX rewrite' }));
+    const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { model, signal, title: 'OverLyX rewrite' }));
     return { tex: reply.replace(/^\$+|\$+$/g, '').trim(), nodes: [], original };
   }
   const original = selectionToTex(doc, req.content, req.layout);
@@ -209,7 +230,7 @@ export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortS
     if (loc) context = documentContext(docText.slice(0, loc.end) + CURSOR + docText.slice(loc.end), CURSOR, 160000, false);
   }
   const user = `## Document (for context; the passage to replace is marked)\n${context}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Passage to replace\n${original || '(empty — insert new text at the cursor)'}\n\n## Instruction\n${instruction}\n\nReply with the replacement for the passage only.`;
-  const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { signal, title: 'OverLyX rewrite' }));
+  const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { model, signal, title: 'OverLyX rewrite' }));
   let nodes: PMJSON[] = [];
   try { nodes = texToPm(doc, reply); } catch (e) { throw new AiError(`The reply could not be parsed as LaTeX: ${(e as Error).message}`); }
   return { tex: reply, nodes, original };
@@ -220,7 +241,7 @@ export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortS
 const COMPLETE_TEXT_SYSTEM = `You are the autocomplete engine of OverLyX, a WYSIWYG editor for scientific papers written in LaTeX. The author is typing; the cursor is marked ${CURSOR}. Propose how the text goes on.
 
 Rules:
-- Reply with the current sentence: first repeat it exactly as it stands up to the cursor (the "sentence so far" is given — copy it verbatim, LaTeX included, do not correct it), then continue it to its end; you may add one more short sentence. At most about 30 new words. No explanations, no markdown fences, no quotation marks.
+- Reply with the current sentence: first repeat it exactly as it stands up to the cursor (the "sentence so far" is given — copy it verbatim, LaTeX included, do not correct it), then continue it to its end. If the sentence so far is already complete, write the next sentence after it. Always add new text — between 6 and about 30 new words. No explanations, no markdown fences, no quotation marks.
 - Write LaTeX as the author would: inline math as $…$, the document's macros and notation, \\cite{key} only with keys that occur in the document, \\ref{label} only for labels that exist.
 - Do not write anything that is already after the cursor.
 - Match the language, register and style of the surrounding text; stay consistent with what the document says. Never invent numerical results.
@@ -233,7 +254,7 @@ Rules:
 - Use the document's macros and notation (a macro list and the surrounding text are given). Never repeat what is before the cursor; do not write what is already after it.
 - If the formula is complete or no sensible continuation exists, reply with nothing at all.`;
 
-export interface CompleteRequest { kind: 'text' | 'math'; before: string; after: string; /** math: the formula so far with the cursor, and the paragraph text around it */ formula?: string; paragraph?: string }
+export interface CompleteRequest { kind: 'text' | 'math'; before: string; after: string; /** math: the formula so far with the cursor, and the paragraph text around it */ formula?: string; paragraph?: string; /** model chosen in the client's preferences */ model?: string }
 export interface CompleteResult { text: string; nodes: PMJSON[] }
 
 /** A cached document context per document: the LaTeX source, refreshed at most every few seconds (typing pauses come often). */
@@ -257,7 +278,7 @@ export async function complete(doc: OpenDoc, req: CompleteRequest, signal?: Abor
   const preamble = bd > 0 ? docText.slice(0, Math.min(bd, 1500)) : '';
   const loc = before.trim() ? locate(docText, before.slice(-400)) : null;
   const earlier = loc ? docText.slice(Math.max(bd > 0 ? bd : 0, loc.start - 3000), loc.start) : docText.slice(bd > 0 ? bd : 0, (bd > 0 ? bd : 0) + 3000);
-  const model = config.ai.completionModel;
+  const model = pickModel(req.model, config.ai.completionModel);
   if (req.kind === 'math') {
     const user = `## Document (for context)\n${preamble}\n…\n${earlier}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Text around the formula\n${(req.paragraph ?? before).slice(-2000)}\n\n## The formula so far\n${req.formula ?? before + CURSOR + after}\n\nReply with the continuation at ${CURSOR} only.`;
     const reply = cleanReply(await chat([{ role: 'system', content: COMPLETE_MATH_SYSTEM }, { role: 'user', content: user }], { model, temperature: 0.1, maxTokens: 80, signal, title: 'OverLyX autocomplete' }));
@@ -266,18 +287,19 @@ export async function complete(doc: OpenDoc, req: CompleteRequest, signal?: Abor
   }
   const sentence = sentenceSoFar(before);
   const user = `## Document (for context)\n${preamble}\n…\n${earlier}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Text at the cursor\n${before}${CURSOR}${after}\n\n## Sentence so far (repeat it verbatim, then continue)\n${sentence}\n\nReply with the sentence so far followed by its continuation.`;
-  const raw = await chat([{ role: 'system', content: COMPLETE_TEXT_SYSTEM }, { role: 'user', content: user }], { model, temperature: 0.2, maxTokens: 160, signal, title: 'OverLyX autocomplete' });
+  const raw = await chat([{ role: 'system', content: COMPLETE_TEXT_SYSTEM }, { role: 'user', content: user }], { model, temperature: 0.2, maxTokens: 200, signal, title: 'OverLyX autocomplete' });
   if (process.env.OVERLYX_AI_DEBUG) console.log('[ai] debug: before=' + JSON.stringify(before.slice(-60)) + ' raw=' + JSON.stringify(raw.slice(0, 200)));
   // a leading space is meaningful here (the reply starts a new word): keep it, drop the rest of the trimming
   let text = raw.replace(/\r\n/g, '\n');
   const fence = /^\s*```(?:[\w-]*)\n([\s\S]*?)\n?```\s*$/.exec(text);
   if (fence) text = fence[1];
   text = text.replace(/\n+/g, ' ').replace(/\s+$/, '');
-  // a long reply may have hit the token limit mid-sentence: end it at a sentence or at least a word boundary
-  if (text.length > 160 && !/[.!?:]$/.test(text)) {
-    const cut = text.slice(0, 220);
+  // a reply that hit the token limit ends mid-word: end it at a sentence, or at least at a word boundary
+  if (!/[.!?:;,)]$/.test(text) && text.length > 20) {
+    const cut = text.slice(0, 240);
     const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
-    text = end > 40 ? cut.slice(0, end + 1) : cut.slice(0, Math.max(40, cut.lastIndexOf(' ')));
+    const ws = cut.lastIndexOf(' ');
+    text = end > cut.length * 0.4 ? cut.slice(0, end + 1) : ws > 20 ? cut.slice(0, ws) : cut;
   }
   if (/^\s*$/.test(text)) return { text: '', nodes: [] };
   text = stripOverlap(before, text.replace(/⟦\/?[A-Z]+⟧/g, ''));   // the repeated sentence goes; a small model sometimes echoes the cursor marker
@@ -309,17 +331,28 @@ export function sentenceSoFar(before: string): string {
  * letters it is taken as a continuation of the word (the model was told to repeat otherwise).
  */
 export function stripOverlap(before: string, reply: string): string {
-  const b = before.slice(-600), r = reply;
+  const b = before.slice(-600);
+  let rest = matchedRest(b, reply);
+  if (rest !== null) {
+    // a small model sometimes writes the sentence twice before going on
+    const again = matchedRest(b, rest.replace(/^\s+/, ''));
+    return again !== null ? again : rest;
+  }
+  // nothing repeated: only the space after a finished sentence / punctuation can be inferred
+  if (/[.!?:;,)]$/.test(b) && /^[^\s]/.test(reply)) return ' ' + reply;
+  return reply;
+}
+
+/** What follows the longest suffix of `b` (from a word boundary, whitespace runs collapsed) that `r` begins with; null when `r` repeats nothing. */
+function matchedRest(b: string, r: string): string | null {
   const collapse = (str: string) => { const map: number[] = []; let out = ''; let ws = false; for (let i = 0; i < str.length; i++) { const c = str[i]; if (/\s/.test(c)) { ws = true; continue; } if (ws && out) { out += ' '; map.push(i); ws = false; } out += c; map.push(i); } return { out, map }; };
   const cb = collapse(b), cr = collapse(r);
-  // longest suffix of cb.out that is a prefix of cr.out, starting at a word boundary
   for (let i = 0; i < cb.out.length; i++) {
     if (i > 0 && cb.out[i - 1] !== ' ') continue;
     const suffix = cb.out.slice(i);
     if (suffix.length < 2) break;
     if (cr.out.startsWith(suffix)) {
-      const endCollapsed = suffix.length;   // index in cr.out where the new text begins
-      const endRaw = endCollapsed < cr.map.length ? cr.map[endCollapsed] : r.length;
+      const endRaw = suffix.length < cr.map.length ? cr.map[suffix.length] : r.length;
       let rest = r.slice(endRaw);
       // whitespace between the repeated part and the continuation belongs to the continuation
       const wsBefore = /\s$/.test(r.slice(0, endRaw)) && !/^\s/.test(rest);
@@ -327,9 +360,7 @@ export function stripOverlap(before: string, reply: string): string {
       return rest;
     }
   }
-  // nothing repeated: only the space after a finished sentence / punctuation can be inferred
-  if (/[.!?:;,)]$/.test(b) && /^[^\s]/.test(r)) return ' ' + r;
-  return r;
+  return null;
 }
 
 /* ------------------------------------------------------------------ rate limiting */

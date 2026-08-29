@@ -156,6 +156,28 @@ test.describe('with the AI stub', () => {
     await expect(page.locator('.lyx-editor .lyx-par').last()).toHaveText('Second proposed paragraph.');
   });
 
+  test('the model chosen in the preferences is sent with the requests', async ({ page }) => {
+    await open(page, { aiRewrite: false, aiCompleteText: true, aiCompleteMath: false, aiCompleteDelay: 200 });
+    await page.click('.menubar .menu button:has-text("Tools")');
+    await page.click('.menu-item:has-text("Preferences")');
+    const dlg = page.locator('.dialog');
+    await expect(dlg.locator('[data-pref="aiCompletionModel"] option')).not.toHaveCount(0);
+    await dlg.locator('[data-pref="aiCompletionModel"]').selectOption('google/gemini-3.5-flash-lite');
+    await dlg.locator('[data-pref="aiModel"]').selectOption('__custom');
+    await dlg.locator('[data-pref-custom="aiModel"]').fill('anthropic/claude-haiku-4.5');
+    await page.keyboard.press('Escape');
+    const prefs = JSON.parse(await page.evaluate(() => localStorage.getItem('ol.prefs')!));
+    expect(prefs.aiCompletionModel).toBe('google/gemini-3.5-flash-lite');
+    expect(prefs.aiModel).toBe('anthropic/claude-haiku-4.5');
+    const p = page.locator('.lyx-editor .lyx-par').nth(1);
+    await p.click({ position: { x: 12, y: 8 } });
+    await cursorAtEndOf(page, 1);
+    await page.keyboard.type(' The chaos');
+    await expect(page.locator('.ai-ghost')).toBeVisible({ timeout: 10000 });
+    const log = await (await page.request.get('http://127.0.0.1:3999/log')).json() as { model: string; sys: string }[];
+    expect(log[log.length - 1].model).toBe('google/gemini-3.5-flash-lite');
+  });
+
   test('autocomplete: ghost text with a rendered formula after a pause, Tab inserts it, Esc dismisses it', async ({ page }) => {
     await open(page, { aiRewrite: false, aiCompleteText: true, aiCompleteMath: false, aiCompleteDelay: 200 });
     const p = page.locator('.lyx-editor .lyx-par').nth(1);

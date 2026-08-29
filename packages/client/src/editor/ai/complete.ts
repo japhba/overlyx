@@ -222,7 +222,7 @@ export function aiCompletePlugin(): Plugin<CompleteState> {
       const enabled = () => getPrefs().aiCompleteText && !!editorContext.ai?.available;
       const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
       const abort = () => { clearTimer(); dirty = false; if (inflight) { inflight.ac.abort(); inflight = null; editorContext.aiBusy?.(false); } };
-      const cacheKey = (ctx: CompletionContext) => ctx.before.slice(-600) + ' ' + ctx.after.slice(0, 200);
+      const cacheKey = (ctx: CompletionContext) => getPrefs().aiCompletionModel + '|' + ctx.before.slice(-600) + ' ' + ctx.after.slice(0, 200);
 
       /** shows a reply for `req` if the cursor is still there or only typed the reply's beginning since */
       const applyReply = (req: CompletionContext, nodes: PMJSON[], text: string): boolean => {
@@ -259,7 +259,7 @@ export function aiCompletePlugin(): Plugin<CompleteState> {
         editorContext.aiBusy?.(true);
         let shown = false;
         try {
-          const r = await api.aiComplete(viewDocId(view), { kind: 'text', before: ctx.before, after: ctx.after }, ac.signal);
+          const r = await api.aiComplete(viewDocId(view), { kind: 'text', before: ctx.before, after: ctx.after, model: getPrefs().aiCompletionModel || undefined }, ac.signal);
           if (ac.signal.aborted) return;
           if (cache.size > 80) cache.clear();
           cache.set(cacheKey(ctx), r.nodes);

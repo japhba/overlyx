@@ -20,10 +20,11 @@ export interface BibItem { key: string; author: string; year: string; title: str
 export interface HealthIssue { code: string; message: string; severity: 'warning' | 'error'; fixable: boolean }
 /** ProseMirror JSON (nodes of the editor schema) as the server returns them for AI proposals */
 export interface PMJSON { type: string; attrs?: Record<string, any>; content?: PMJSON[]; marks?: { type: string; attrs?: Record<string, any> }[]; text?: string }
-export interface AiStatus { available: boolean; model: string; completionModel: string }
-export interface AiRewriteRequest { instruction: string; content: PMJSON[]; layout?: string; before?: string; after?: string; math?: { latex: string; display: boolean; selection?: string } }
+export interface AiModelInfo { id: string; label: string; note: string }
+export interface AiStatus { available: boolean; model: string; completionModel: string; models: AiModelInfo[] }
+export interface AiRewriteRequest { instruction: string; content: PMJSON[]; layout?: string; before?: string; after?: string; model?: string; math?: { latex: string; display: boolean; selection?: string } }
 export interface AiRewriteResult { tex: string; nodes: PMJSON[]; original: string }
-export interface AiCompleteRequest { kind: 'text' | 'math'; before: string; after: string; formula?: string; paragraph?: string }
+export interface AiCompleteRequest { kind: 'text' | 'math'; before: string; after: string; formula?: string; paragraph?: string; model?: string }
 export interface AiCompleteResult { text: string; nodes: PMJSON[] }
 export interface DocMeta {
   id: string; project: string; path: string; role?: Role; textclass: string; modules: string[]; language: string;

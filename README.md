@@ -195,6 +195,9 @@ blend.
     word, Esc dismisses. `✦ AI…` in the status bar shows a request in flight. Inside formulas the
     ghost is rendered by KaTeX at the end of the cell (`\htmlClass{lm-ghost}`), typing its first
     characters keeps it, Tab inserts it as LaTeX. Replies are cached and rate-limited per user.
+  * *Models* — Preferences ▸ Models chooses the model for ⌘K and for autocomplete separately (a
+    list with measured notes, or any OpenRouter id typed in); the choice is per browser and sent with
+    each request (`model`, validated on the server); the server defaults apply otherwise.
 * **Cursor memory**: a document reopens with the cursor where it was the last time it was open in
   this browser (`localStorage.ol.cursor:<doc>`, `packages/client/src/editor/cursormemory.ts`; the text
   before the cursor is used to find the place again when the document changed meanwhile).

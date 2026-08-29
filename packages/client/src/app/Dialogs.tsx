@@ -4,7 +4,7 @@ import type { ComponentChildren } from 'preact';
 import type { DocMeta, ProjectFile, BibItem } from '../api';
 import type { GraphicsOpts, TableChanges } from '../editor/commands';
 import { api, graphicsUrl } from '../api';
-import type { LitHit, BibAddResult, AiStatus } from '../api';
+import type { LitHit, BibAddResult, AiStatus, AiModelInfo } from '../api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import type { Node as PMNode } from 'prosemirror-model';
@@ -716,6 +716,27 @@ type AiRepairState =
   | { status: 'error'; message: string }
   | { status: 'applied' };
 
+/** A model choice: the server's default, one of the offered models, or a typed-in id. */
+function ModelPicker({ label, value, fallback, models, onChange, pref }: { label: string; value: string; fallback: string; models: AiModelInfo[]; onChange: (v: string) => void; pref: string }) {
+  const known = !value || models.some(m => m.id === value);
+  const [custom, setCustom] = useState(!known);
+  const cur = models.find(m => m.id === (value || fallback));
+  return (
+    <div class="row model-row">
+      <label>{label}</label>
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <select data-pref={pref} value={custom ? '__custom' : value} onChange={e => { const v = (e.target as HTMLSelectElement).value; if (v === '__custom') { setCustom(true); return; } setCustom(false); onChange(v); }}>
+          <option value="">Server default{fallback ? ` (${models.find(m => m.id === fallback)?.label ?? fallback})` : ''}</option>
+          {models.map(m => <option key={m.id} value={m.id}>{m.label} — {m.note}</option>)}
+          <option value="__custom">Other model id…</option>
+        </select>
+        {custom && <input type="text" data-pref-custom={pref} placeholder="provider/model-id (OpenRouter)" value={value} onInput={e => onChange((e.target as HTMLInputElement).value.trim())} />}
+        {!custom && cur && value && <span class="sub">{cur.id}</span>}
+      </div>
+    </div>
+  );
+}
+
 /** Tools ▸ Preferences…: per-browser settings (spell checking, the AI features and what they send). */
 export function PreferencesDialog({ ai, onClose }: { ai: AiStatus | null; onClose: () => void }) {
   const [p, setP] = useState<Prefs>(getPrefs);
@@ -732,7 +753,11 @@ export function PreferencesDialog({ ai, onClose }: { ai: AiStatus | null; onClos
       {check('aiRewrite', `Rewrite with AI (${REWRITE_KEY})`, 'Select text or a formula, press the key and describe the change; the proposal is shown in place and applied only when you accept it. While this is on, LyX’s Ctrl+K (delete to the end of the paragraph) is taken over.')}
       {check('aiCompleteText', 'Autocomplete text', 'After a pause while typing, a continuation appears in grey after the caret — formulas already rendered — while ✦ AI… shows in the status bar. Tab inserts it, anything else dismisses it. Works at the end of a word or paragraph, in ordinary text.')}
       {check('aiCompleteMath', 'Autocomplete formulas', 'The same inside formulas: a suggested continuation at the caret, Tab inserts it.')}
-      <Row label="Pause before suggesting"><input type="number" min={150} max={5000} step={50} value={p.aiCompleteDelay} onInput={e => setPref('aiCompleteDelay', Math.max(150, Number((e.target as HTMLInputElement).value) || 600))} style="max-width:90px" /> ms</Row>
+      <Row label="Pause before suggesting"><input type="number" min={80} max={5000} step={20} value={p.aiCompleteDelay} onInput={e => setPref('aiCompleteDelay', Math.max(80, Number((e.target as HTMLInputElement).value) || 200))} style="max-width:90px" /> ms</Row>
+      <h3>Models</h3>
+      <div class="sub">Any OpenRouter model id works; the notes are from measurements on a real paper. The choice is kept in this browser.</div>
+      <ModelPicker label="Rewrite (⌘K)" value={p.aiModel} fallback={ai?.model ?? ''} models={ai?.models ?? []} onChange={v => setPref('aiModel', v)} pref="aiModel" />
+      <ModelPicker label="Autocomplete" value={p.aiCompletionModel} fallback={ai?.completionModel ?? ''} models={ai?.models ?? []} onChange={v => setPref('aiCompletionModel', v)} pref="aiCompletionModel" />
       <div class="sub">What is sent: your instruction or the text around the cursor together with the document’s LaTeX source (so the model knows the notation, macros, citation keys) goes to the model through the OverLyX server. Nothing is written to the document without your Tab or Accept. The switches are also in the Tools menu, so the command palette finds them.</div>
     </Dialog>
   );

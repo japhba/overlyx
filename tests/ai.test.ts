@@ -173,11 +173,33 @@ describe('sentenceSoFar / stripOverlap (the reply repeats the sentence up to the
     expect(ai.stripOverlap('ends with a space ', 'ends with a space and more')).toBe('and more');
     expect(ai.stripOverlap('ends with a space ', 'space and more')).toBe('and more');
   });
+  it('a sentence written twice is stripped twice; a reply cut mid-word ends at a word boundary', async () => {
+    expect(ai.stripOverlap('Works converge to processes.', 'Works converge to processes. Works converge to processes. This extends it.')).toBe(' This extends it.');
+    nextReply = 'The exponent grows with the gain and with the variance of the weights of the netw';
+    const r = await ai.complete(doc, { kind: 'text', before: 'The exponent', after: '' });
+    expect(r.text).toBe(' grows with the gain and with the variance of the weights of the');
+  });
   it('infers the space after a sentence end when nothing was repeated, and nothing else', () => {
     expect(ai.stripOverlap('through a kernel.', 'This approach works.')).toBe(' This approach works.');
     expect(ai.stripOverlap('in the fea', 'ture learning regime')).toBe('ture learning regime');
     expect(ai.stripOverlap('in the fea', ' new words')).toBe(' new words');
     expect(ai.stripOverlap('a formula,', '$x$ follows')).toBe(' $x$ follows');
+  });
+});
+
+describe('model choice', () => {
+  it('a client-chosen OpenRouter id is used; anything else falls back to the default', async () => {
+    expect(ai.pickModel('google/gemini-3.5-flash-lite', 'x/y')).toBe('google/gemini-3.5-flash-lite');
+    expect(ai.pickModel('  anthropic/claude-haiku-4.5 ', 'x/y')).toBe('anthropic/claude-haiku-4.5');
+    expect(ai.pickModel('no slash', 'x/y')).toBe('x/y');
+    expect(ai.pickModel('bad/../id', 'x/y')).toBe('x/y');
+    expect(ai.pickModel(undefined, 'x/y')).toBe('x/y');
+    nextReply = 'The exponent grows.';
+    await ai.complete(doc, { kind: 'text', before: 'The exponent', after: '', model: 'openai/gpt-4.1-nano' });
+    expect(lastRequest.model).toBe('openai/gpt-4.1-nano');
+    await ai.rewrite(doc, { instruction: 'x', content: [], model: 'anthropic/claude-haiku-4.5' });
+    expect(lastRequest.model).toBe('anthropic/claude-haiku-4.5');
+    expect(ai.aiStatus().models.some(m => m.id === 'google/gemini-3.5-flash-lite')).toBe(true);
   });
 });
 

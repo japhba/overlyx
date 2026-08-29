@@ -38,14 +38,14 @@ export function installMathAssist(): void {
     const path = f.cursorPath();
     const docId = (f.dom.closest('.lyx-editor') as HTMLElement | null)?.dataset.docId ?? editorContext.docId ?? '';
     const paragraph = (f.dom.closest('.lyx-par')?.textContent ?? '').slice(0, 2000);
-    const key = docId + '|' + formula;
+    const key = getPrefs().aiCompletionModel + '|' + docId + '|' + formula;
     const hit = cache.get(key);
     if (hit !== undefined) { if (hit) f.setGhost(hit); return; }
     ctrl?.abort();
     const ac = ctrl = new AbortController();
     editorContext.aiBusy?.(true);
     try {
-      const r = await api.aiComplete(docId, { kind: 'math', before, after, formula, paragraph }, ac.signal);
+      const r = await api.aiComplete(docId, { kind: 'math', before, after, formula, paragraph, model: getPrefs().aiCompletionModel || undefined }, ac.signal);
       if (ac.signal.aborted) return;
       if (cache.size > 60) cache.clear();
       cache.set(key, r.text);
