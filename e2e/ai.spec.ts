@@ -152,9 +152,8 @@ test.describe('with the AI stub', () => {
     await page.keyboard.press('Enter');
     await expect(page.locator('.ai-new.block')).toBeVisible({ timeout: 10000 });
     await page.keyboard.press('Enter');
-    const texts = await page.locator('.lyx-editor .lyx-par').allTextContents();
-    expect(texts[texts.length - 2]).toBe('The last paragraph of the paper.First proposed paragraph with x2.');
-    expect(texts[texts.length - 1]).toBe('Second proposed paragraph.');
+    await expect(page.locator('.lyx-editor .lyx-par').nth(-2)).toHaveText('The last paragraph of the paper.First proposed paragraph with x2.');
+    await expect(page.locator('.lyx-editor .lyx-par').last()).toHaveText('Second proposed paragraph.');
   });
 
   test('autocomplete: ghost text with a rendered formula after a pause, Tab inserts it, Esc dismisses it', async ({ page }) => {
@@ -176,6 +175,22 @@ test.describe('with the AI stub', () => {
     await page.keyboard.press('Escape');
     await expect(ghost).toHaveCount(0);
     expect(await p.textContent()).not.toContain('More is governed');
+    // IDE mechanics: typing the suggestion's beginning keeps it (shorter); ⌘/Ctrl+→ takes the next word
+    await page.keyboard.type(' x');
+    await expect(ghost).toBeVisible({ timeout: 10000 });
+    await page.keyboard.type(' is gov', { delay: 40 });
+    await expect(ghost).toHaveText(/^erned by the largest/);
+    await page.keyboard.press('Control+ArrowRight');
+    await expect(ghost).toHaveText(/^by the largest/);
+    expect(await p.textContent()).toContain('More x is governed by the largest');
+    // a different character ends it; a reply that arrives while typing its beginning is shown trimmed
+    await page.keyboard.type('Q');
+    await expect(ghost).toHaveCount(0);
+    await page.keyboard.type(' and');
+    await page.waitForTimeout(250);                       // the request is now in flight (stub: 300 ms)
+    await page.keyboard.type(' is gove', { delay: 30 });  // typed meanwhile = the reply's beginning
+    await expect(ghost).toBeVisible({ timeout: 10000 });
+    await expect(ghost).toHaveText(/^rned by the largest/);
   });
 
   test('formulas: ghost continuation at the caret (Tab inserts) and ⌘K rewrite with a rendered proposal', async ({ page }) => {

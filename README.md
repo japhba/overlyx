@@ -186,12 +186,15 @@ blend.
     proposal rendered after it, formulas and citations included. Enter accepts, Esc rejects,
     nothing touches the shared document before that. Inside a formula the same key rewrites the
     formula (or its selected part) and shows the rendered proposal in the prompt.
-  * *Autocomplete* — after a pause in typing (450 ms, adjustable) the model proposes a short
-    continuation; it appears as grey ghost content after the caret, with any formula in it already
-    rendered (the server returns editor nodes, not just text), and Tab inserts exactly that.
-    Anything else dismisses it. Inside formulas the ghost is rendered by KaTeX at the end of the
-    cell (`\htmlClass{lm-ghost}`), Tab inserts it as LaTeX. Requests are debounced, cancelled when
-    overtaken, cached, and rate-limited per user on the server.
+  * *Autocomplete* — IDE-style inline suggestions: every keystroke schedules a request (200 ms
+    debounce, adjustable; one in flight at a time, Gemini Flash Lite answers in ~0.5–0.9 s); the
+    continuation appears as grey ghost content after the caret, with any formula in it already
+    rendered (the server returns editor nodes, not just text). Typing the suggestion's beginning
+    keeps it and shortens it — a reply that arrives while you are typing its first words is shown
+    trimmed — anything else dismisses it; Tab inserts the whole suggestion, `⌘/Ctrl+→` its next
+    word, Esc dismisses. `✦ AI…` in the status bar shows a request in flight. Inside formulas the
+    ghost is rendered by KaTeX at the end of the cell (`\htmlClass{lm-ghost}`), typing its first
+    characters keeps it, Tab inserts it as LaTeX. Replies are cached and rate-limited per user.
 * **Cursor memory**: a document reopens with the cursor where it was the last time it was open in
   this browser (`localStorage.ol.cursor:<doc>`, `packages/client/src/editor/cursormemory.ts`; the text
   before the cursor is used to find the place again when the document changed meanwhile).

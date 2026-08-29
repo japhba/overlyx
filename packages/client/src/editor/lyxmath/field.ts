@@ -472,9 +472,9 @@ export class LyxMathField {
     this.restore(s); this.commit();
     return true;
   }
-  /** after a model change: re-render and notify */
-  private commit(): void {
-    this.ghost = null;
+  /** after a model change: re-render and notify (`keepGhost`: the change was typing the suggestion's beginning) */
+  private commit(keepGhost = false): void {
+    if (!keepGhost) this.ghost = null;
     this.render();
     const latex = this.latex;
     if (latex !== this.lastLatex) { this.lastLatex = latex; this.opts.onChange?.(latex); }
@@ -560,13 +560,18 @@ export class LyxMathField {
 
   private typed(text: string): void {
     if (this.readOnly || !text) return;
+    let keep = false;
     for (const ch of text) {
       if (this.altM) { this.altM = false; if (this.altMKey(ch)) continue; }
+      // typing what the suggestion starts with keeps the rest of it on show
+      const g = this.ghost;
+      keep = !!g && ch !== '\\' && ch !== ' ' && g.startsWith(ch) && g.length > 1;
       this.snapshot('type');
       const ok = this.cursor.interpretChar(ch);
+      if (keep) this.ghost = g!.slice(1).replace(/^\s+/, '');
       if (!ok) { this.commit(); this.opts.onMoveOut?.('forward', { insertSpace: ch === ' ' }); return; }
     }
-    this.commit();
+    this.commit(keep);
   }
 
   private altMKey(k: string): boolean {

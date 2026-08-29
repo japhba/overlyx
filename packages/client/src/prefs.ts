@@ -19,12 +19,15 @@ export interface Prefs {
   aiCompleteDelay: number;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 450 };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200 };
+/** delays that were the default in earlier builds: a stored one of these follows the current default */
+const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';
 
 function load(): Prefs {
   try {
     const v = JSON.parse(localStorage.getItem(STORAGE) ?? '{}');
+    if (v && typeof v === 'object' && OLD_DEFAULT_DELAYS.has(v.aiCompleteDelay)) delete v.aiCompleteDelay;
     return v && typeof v === 'object' ? { ...DEFAULT_PREFS, ...v } : { ...DEFAULT_PREFS };
   } catch { return { ...DEFAULT_PREFS }; }
 }

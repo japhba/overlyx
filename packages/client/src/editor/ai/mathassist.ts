@@ -59,6 +59,7 @@ export function installMathAssist(): void {
 
   mathCursorListeners.add((f) => {
     cancel();
+    if (f.ghostText) return;   // the suggestion is still on show (its beginning is being typed)
     if (!getPrefs().aiCompleteMath || !editorContext.ai?.available) return;
     if (!f.hasFocus() || f.cursor.selection || f.cursor.inMacroMode() || !f.atCellEnd()) return;
     timer = setTimeout(() => { void request(f); }, Math.max(150, getPrefs().aiCompleteDelay));

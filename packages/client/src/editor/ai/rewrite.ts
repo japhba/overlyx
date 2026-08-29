@@ -183,7 +183,7 @@ class RewritePanel {
       span.contentEditable = 'false';
       span.appendChild(renderFragment(v, frag, to));
       return span;
-    }, { side: 1, key: 'ai-new', ignoreSelection: true }));
+    }, { side: 1, key: 'ai-new:' + to + ':' + r.tex, ignoreSelection: true }));   // a fresh key: the widget of an earlier proposal at the same place must not be reused
     view.dispatch(view.state.tr.setMeta(aiRewriteKey, { from, to, deco: DecorationSet.create(view.state.doc, decos) }));
     this.setStatus(to > from ? 'Proposed change shown in the text — Enter accepts, Esc rejects.' : 'Proposed text shown at the cursor — Enter accepts, Esc rejects.');
     this.actions.hidden = false;

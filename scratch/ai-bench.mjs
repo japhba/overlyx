@@ -9,7 +9,7 @@ Rules:
 - Write LaTeX as the author would: inline math as $…$, the document's macros and notation, \\cite{key} only with keys that occur in the document.
 - Start exactly at the cursor: begin with a space if the cursor follows a word and you start a new word; do not repeat text before the cursor.
 - If no sensible continuation exists, reply with nothing at all.`;
-const filler = Array.from({ length: 40 }, (_, i) => `Paragraph ${i}: we consider a recurrent network $\\dot{x}_i = -x_i + \\sum_j W_{ij}\\phi(x_j)$ with weights $\\bW$ drawn i.i.d. with variance $g^2/N$; for $g>1$ the dynamics are chaotic \\cite{sompolinsky1988chaos}.`).join('\n\n');
+const filler = Array.from({ length: Number(process.env.FILL ?? 40) }, (_, i) => `Paragraph ${i}: we consider a recurrent network $\\dot{x}_i = -x_i + \\sum_j W_{ij}\\phi(x_j)$ with weights $\\bW$ drawn i.i.d. with variance $g^2/N$; for $g>1$ the dynamics are chaotic \\cite{sompolinsky1988chaos}.`).join('\n\n');
 const user = `## Document (for context)\n\\documentclass{article}\n\\newcommand{\\bW}{\\mathbf{W}}\n\\begin{document}\n${filler}\n\n## Macros known to the document\n\\bW = \\mathbf{W}\n\n## Text at the cursor\nThe largest Lyapunov exponent $\\lambda_1$ of the network⟦CURSOR⟧\n\nReply with the continuation at ⟦CURSOR⟧ only.`;
 console.log('prompt chars', user.length);
 for (const spec of models) {

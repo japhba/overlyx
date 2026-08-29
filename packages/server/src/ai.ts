@@ -241,12 +241,12 @@ export async function complete(doc: OpenDoc, req: CompleteRequest, signal?: Abor
   const { text: docText, macros: allMacros } = docContext(doc);
   // latency matters more than breadth here: a few thousand characters around the cursor, the
   // start of the preamble (class, title, the first macros) and the first macro definitions
-  const before = req.before.slice(-2500), after = req.after.slice(0, 600);
-  const macros = allMacros.slice(0, 150);
+  const before = req.before.slice(-2000), after = req.after.slice(0, 500);
+  const macros = allMacros.slice(0, 100);
   const bd = docText.indexOf('\\begin{document}');
-  const preamble = bd > 0 ? docText.slice(0, Math.min(bd, 2500)) : '';
+  const preamble = bd > 0 ? docText.slice(0, Math.min(bd, 1500)) : '';
   const loc = before.trim() ? locate(docText, before.slice(-400)) : null;
-  const earlier = loc ? docText.slice(Math.max(bd > 0 ? bd : 0, loc.start - 5000), loc.start) : docText.slice(bd > 0 ? bd : 0, (bd > 0 ? bd : 0) + 5000);
+  const earlier = loc ? docText.slice(Math.max(bd > 0 ? bd : 0, loc.start - 3000), loc.start) : docText.slice(bd > 0 ? bd : 0, (bd > 0 ? bd : 0) + 3000);
   const model = config.ai.completionModel;
   if (req.kind === 'math') {
     const user = `## Document (for context)\n${preamble}\n…\n${earlier}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Text around the formula\n${(req.paragraph ?? before).slice(-2000)}\n\n## The formula so far\n${req.formula ?? before + CURSOR + after}\n\nReply with the continuation at ${CURSOR} only.`;

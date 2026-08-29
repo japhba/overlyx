@@ -64,3 +64,26 @@ describe('injectGhost', () => {
     expect(injectGhost('\\htmlClass{lm-c0}{a}', 7, 'x', false)).toBe('\\htmlClass{lm-c0}{a}');
   });
 });
+
+describe('IDE-style suggestion handling', async () => {
+  const { trimNodes, typedSince, nodesText } = await import('../packages/client/src/editor/ai/complete.ts');
+  const nodes = [{ type: 'text', text: ' is governed by ' }, { type: 'math_inline', attrs: { latex: '\\lambda_1', delim: '$' } }, { type: 'text', text: '.' }];
+  it('the plain text of a suggestion writes formulas as $…$', () => {
+    expect(nodesText(nodes)).toBe(' is governed by $\\lambda_1$.');
+  });
+  it('typing the beginning shortens the suggestion; a formula cannot be cut into', () => {
+    expect(trimNodes(nodes, 4)).toEqual([{ type: 'text', text: 'governed by ' }, nodes[1], nodes[2]]);
+    expect(trimNodes(nodes, ' is governed by '.length)).toEqual([nodes[1], nodes[2]]);
+    expect(trimNodes(nodes, ' is governed by '.length + 1)).toBeNull();
+    expect(trimNodes(nodes, 0)).toEqual(nodes);
+  });
+  it('recognises what was typed since the request, and a cursor that went elsewhere', () => {
+    const req = { pos: 10, before: 'The chaos', after: '' };
+    expect(typedSince(req, { pos: 14, before: 'The chaos is ', after: '' })).toBe(' is ');
+    expect(typedSince(req, { pos: 10, before: 'The chaos', after: '' })).toBe('');
+    expect(typedSince(req, { pos: 9, before: 'The chao', after: '' })).toBeNull();
+    expect(typedSince(req, { pos: 14, before: 'Elsewhere now', after: '' })).toBeNull();
+    expect(typedSince(req, { pos: 12, before: 'The chaos is ', after: '' })).toBeNull();   // positions and text disagree (a formula was inserted)
+    expect(typedSince(req, { pos: 14, before: 'The chaos is ', after: 'changed' })).toBeNull();
+  });
+});

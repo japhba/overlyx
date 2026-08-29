@@ -88,7 +88,7 @@ export const config = {
     completionModel: (process.env.OVERLYX_AI_COMPLETION_MODEL ?? 'google/gemini-3.5-flash-lite').trim(),
     /** requests per user per minute: rewrites / completions */
     rewritesPerMinute: Number(process.env.OVERLYX_AI_REWRITES_PER_MIN ?? 30),
-    completionsPerMinute: Number(process.env.OVERLYX_AI_COMPLETIONS_PER_MIN ?? 120),
+    completionsPerMinute: Number(process.env.OVERLYX_AI_COMPLETIONS_PER_MIN ?? 240),
   },
   sessionDays: 30,
 };
