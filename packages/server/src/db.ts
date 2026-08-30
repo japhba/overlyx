@@ -78,6 +78,30 @@ CREATE TABLE IF NOT EXISTS builds (
   tex_path TEXT,
   updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS mirrors (
+  project TEXT PRIMARY KEY,
+  repo TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_head TEXT,
+  last_push_at INTEGER,
+  last_attempt_at INTEGER,
+  last_error TEXT
+);
+CREATE TABLE IF NOT EXISTS admin_grants (
+  project TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  until INTEGER NOT NULL,
+  PRIMARY KEY (project, user_id)
+);
+CREATE TABLE IF NOT EXISTS access_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  user_id INTEGER,
+  action TEXT NOT NULL,
+  detail TEXT,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS access_log_project ON access_log(project, at);
 `);
 
 // documents get an "epoch" (random id of their Yjs history); clients holding a different epoch are stale

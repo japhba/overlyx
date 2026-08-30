@@ -19,6 +19,8 @@ import { lyxKeymap, chordPlugin } from './keymap';
 import { numberingPlugin } from './plugins/numbering';
 import { marginPlugin } from './plugins/margin';
 import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
+import { fontCarryPlugin } from './plugins/fontcarry';
+import { insetCaretPlugin } from './plugins/insetcaret';
 import { findPlugin } from './plugins/find';
 import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
@@ -288,6 +290,8 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     spellPlugin(),
     chordPlugin(),
     lyxKeymap(),
+    fontCarryPlugin(),
+    insetCaretPlugin(),
     gapCursor(),
     dropCursor({ color: '#3b6ea5' }),
     tableEditing(),

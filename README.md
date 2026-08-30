@@ -60,9 +60,12 @@ blend.
   turns on *Anyone with the link* (`/#/share/<token>`; switching back to *Restricted* revokes
   everyone who came in through the link). Viewers can read and compile but every change is refused
   — in the UI, on the API and on the WebSocket. Administrators (`OVERLYX_OWNER_EMAIL`, or
-  `is_admin` in the database) see everything; directories that exist without an owner are adopted
-  by the instance owner. *File ▸ Share project…*, the 👥 button in the file browser, or the start
-  screen. Anyone with a Google account may sign in (they only see their own and shared projects);
+  `is_admin` in the database) do **not** see other people's projects: the start screen lists them
+  under *Administration*, and *Open as administrator…* grants owner rights for one hour — logged in
+  that project's **activity log**, which its owner sees in the Share dialog together with who
+  opened, built, pulled, pushed or changed the sharing (`GET /api/projects/:p/activity`). Directories
+  that exist without an owner are adopted by the instance owner. *File ▸ Share project…*, the 👥
+  button in the file browser, or the start screen. Anyone with a Google account may sign in (they only see their own and shared projects);
   set `OVERLYX_SIGNUP=invited` to allow only e-mails that were invited to a project.
 * **Every project is a git repository** you can clone, pull and push from your own machine
   (*File ▸ Git repository…*, the ⎇ button in the file browser, or *Git…* on a project card):
@@ -102,8 +105,8 @@ blend.
   reported automatically as one issue per distinct message (numbers / ids normalised), repeats become
   a count and at most one comment per 10 minutes; `OVERLYX_ERROR_REPORTS=off` keeps only the manual
   dialog. Without a token the dialog opens GitHub's pre-filled *new issue* form in a new tab instead.
-* **File browser, one project at a time**: a switcher at the top lists your projects, the ones
-  shared with you and (administrators) all others; the tree shows the selected project only. LaTeX
+* **File browser, one project at a time**: a switcher at the top lists your projects and the ones
+  shared with you; the tree shows the selected project only. LaTeX
   build products (`.aux`, `.log`, `.bbl`, …) and LyX backups are hidden unless *All files* is on.
 * **Text editor** for the other files of a project (`.tex`, `.bib`, `.sty`, `.cls`, `.bst`, `.md`,
   `.txt`, `latexmkrc`, …): they open in a tab like documents, with line numbers, autosave 1.5 s
@@ -363,7 +366,8 @@ on an uncaught exception it saves the open documents and exits so that systemd r
 
 ## Secrets
 
-Everything secret (the Google OAuth client secret, the GitHub token) stays out of the repository —
+Everything secret (the Google OAuth client secret, the GitHub tokens for feedback issues and for
+the off-site mirror) stays out of the repository —
 which is public — in `deploy/secrets.env` (git-ignored, mode 600), read by the systemd unit through
 `EnvironmentFile=`; `deploy/secrets.env.example` lists the variables. The file exists on the server
 and in the nightly backup, nowhere else — deliberately no secret store: both values can be re-created
@@ -389,7 +393,27 @@ whether it is configured; the features stay off in every browser until a user sw
 
 ## Backups and restoring
 
-`deploy/overlyx-backup.timer` runs `scripts/backup.sh` every night (SQLite online backup, `secret.key`,
+**Off-site mirror (GitHub organisation).** With `GITHUB_MIRROR_ORG` and `GITHUB_MIRROR_TOKEN` in
+`deploy/secrets.env` (a fine-grained token whose resource owner is the organisation, *All
+repositories*, permissions *Contents* and *Administration: read & write*), every project's git
+repository is pushed to a private repository `<org>/<project>` of that organisation
+(`packages/server/src/mirror.ts`): the repository is created on the first push, a sweeper runs every
+`OVERLYX_MIRROR_INTERVAL_MS` (5 min) and pushes each project whose HEAD moved (pending edits are
+committed first — OverLyX commits about `OVERLYX_GIT_COMMIT_MS` = 30 s after the last change), the
+server is the only writer (`--force --all`, nothing ever merges), the token reaches git through a
+credential helper reading the environment (never `.git/config` or the command line), a deleted
+project's repository is archived. The Git dialog shows the state per project (last push, behind,
+last error; owners can pause or *Mirror now*). Restore on a fresh machine:
+
+```bash
+GITHUB_MIRROR_ORG=… GITHUB_MIRROR_TOKEN=… scripts/restore-from-mirror.sh /root/projects   # clones every project
+```
+
+The mirror holds the documents and their history — not the database (users, sharing, named versions,
+tokens) nor `secrets.env`; those come from the nightly backup below. `OVERLYX_MIRROR_URL=file:///…/{repo}.git`
+mirrors into bare repositories on disk instead (tests, or a second disk).
+
+**Nightly backup.** `deploy/overlyx-backup.timer` runs `scripts/backup.sh` every night (SQLite online backup, `secret.key`,
 a tarball of the projects without build products; the newest 14 are kept). Restoring — do the drill
 once in a while:
 

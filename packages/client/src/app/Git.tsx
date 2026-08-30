@@ -5,11 +5,11 @@
  * writes automatically and before every clone / pull / push, and a push updates the project.
  */
 import { useEffect, useState } from 'preact/hooks';
-import { api, type GitInfo, type GitToken, type User } from '../api';
+import { api, type GitInfo, type GitToken, type MirrorStatus, type User } from '../api';
 import { Dialog } from './Dialogs';
 
 const fmtDate = (t: number) => new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-const ago = (t: number) => {
+export const ago = (t: number) => {
   const s = Math.max(0, (Date.now() - t) / 1000);
   if (s < 60) return 'just now';
   if (s < 3600) return `${Math.floor(s / 60)} min ago`;
@@ -45,15 +45,18 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
   const [mcpName, setMcpName] = useState('');
   const [newMcpToken, setNewMcpToken] = useState<{ name: string; token: string } | null>(null);
   const [mcpBusy, setMcpBusy] = useState(false);
+  const [mirror, setMirror] = useState<MirrorStatus | null>(null);
+  const [mirrorBusy, setMirrorBusy] = useState(false);
 
   const load = () => Promise.all([
     api.gitInfo(project).then(setInfo),
     api.gitTokens().then(r => setTokens(r.tokens)),
     api.mcpTokens(project).then(r => setMcpTokens(r.tokens)),
+    api.mirrorStatus(project).then(setMirror).catch(() => setMirror(null)),
   ]).catch(e => setErr((e as Error).message));
   useEffect(() => { setInfo(null); void load(); }, [project]);
   useEffect(() => {
-    const t = setInterval(() => { if (!document.hidden) api.gitInfo(project).then(setInfo).catch(() => {}); }, 5000);
+    const t = setInterval(() => { if (!document.hidden) { api.gitInfo(project).then(setInfo).catch(() => {}); api.mirrorStatus(project).then(setMirror).catch(() => {}); } }, 5000);
     return () => clearInterval(t);
   }, [project]);
 
@@ -96,7 +99,16 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
     finally { setBusy(false); }
   };
 
+  const mirrorUpdate = async (body: { enabled?: boolean; now?: boolean }) => {
+    if (mirrorBusy) return;
+    setMirrorBusy(true); setErr('');
+    try { setMirror(await api.mirrorUpdate(project, body)); }
+    catch (e) { setErr((e as Error).message); }
+    finally { setMirrorBusy(false); }
+  };
+
   const canPush = info ? info.role !== 'view' : false;
+  const isOwner = info?.role === 'owner';
   const secretHint = info?.hasPassword ? 'an access token (below) or your OverLyX password' : 'an access token (create one below — Google accounts have no password)';
 
   return (
@@ -169,9 +181,30 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
             <button class="btn" disabled={mcpBusy} onClick={() => void createMcpToken()}>New agent token</button>
           </div>
 
+          <h4>Off-site mirror</h4>
+          {mirror?.configured ? (
+            <div class="git-mirror" data-git-mirror>
+              <div>
+                Mirrored to {mirror.url ? <a href={mirror.url} target="_blank" rel="noopener">{mirror.org}/{mirror.repo}</a> : <code>{mirror.repo}</code>}
+                {' · '}{mirror.lastPushAt ? `last push ${ago(mirror.lastPushAt)}` : 'not pushed yet'}
+                {' · '}
+                {!mirror.enabled ? <b>paused</b>
+                  : mirror.lastError ? <span class="err-inline" title={mirror.lastError}>last push failed: {mirror.lastError.slice(0, 120)}</span>
+                  : mirror.behind ? `changes go out with the next push (every ${Math.round(mirror.intervalMs / 60000)} min)` : 'up to date'}
+              </div>
+              {isOwner && (
+                <div class="git-mirror-actions">
+                  <button class="btn" disabled={mirrorBusy} onClick={() => void mirrorUpdate({ now: true })}>Mirror now</button>
+                  <button class="btn" disabled={mirrorBusy} onClick={() => void mirrorUpdate({ enabled: !mirror.enabled })}>{mirror.enabled ? 'Pause mirroring' : 'Resume mirroring'}</button>
+                </div>
+              )}
+              <div class="hint">A private copy of this repository, with its whole history, in the server's GitHub organisation — the server only ever pushes to it. It is a backup, not a place to work: push your own changes to the clone URL above.</div>
+            </div>
+          ) : <div class="hint">No off-site mirror is configured on this server.</div>}
+
           <h4>History</h4>
           <div class="hint">
-            OverLyX commits what people edit here a couple of minutes after the last change, and always before a clone, pull or push, so the
+            OverLyX commits what people edit here about half a minute after the last change, and always before a clone, pull or push, so the
             repository is never behind the editor. A push into the project updates it at once — open documents merge the change like an
             external save.
           </div>

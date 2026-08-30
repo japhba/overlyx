@@ -5,10 +5,24 @@
  */
 import { useEffect, useState } from 'preact/hooks';
 import { AvatarContent, initials } from './Avatar';
-import { api, type ShareInfo, type User } from '../api';
+import { api, type ActivityEntry, type ShareInfo, type User } from '../api';
+import { ago } from './Git';
 import { Dialog } from './Dialogs';
 
 export function shareUrl(token: string): string { return `${location.origin}/#/share/${token}`; }
+
+/** One activity entry as a sentence fragment after the person's name. */
+export function describe(e: ActivityEntry): string {
+  switch (e.action) {
+    case 'open': return e.detail ? `opened ${e.detail}` : 'opened the project';
+    case 'build': return e.detail ? `built the PDF of ${e.detail}` : 'built a PDF';
+    case 'git-fetch': return 'pulled with git';
+    case 'git-push': return 'pushed with git';
+    case 'share': return e.detail ?? 'changed the sharing';
+    case 'admin-access': return `opened the project as administrator${e.detail ? ` (${e.detail})` : ''}`;
+    default: return e.detail ?? e.action;
+  }
+}
 
 const ROLE_LABEL: Record<string, string> = { view: 'Viewer', edit: 'Editor' };
 
@@ -19,10 +33,14 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
   const [role, setRole] = useState<'view' | 'edit'>('edit');
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [activity, setActivity] = useState<ActivityEntry[] | null>(null);
   // people join through the link while the dialog is open: keep the list fresh (poll + on focus)
   useEffect(() => {
     let alive = true;
-    const load = () => api.share(project).then(i => { if (alive) setInfo(i); }).catch(e => { if (alive) setErr((e as Error).message); });
+    const load = () => Promise.all([
+      api.share(project).then(i => { if (alive) setInfo(i); }),
+      api.activity(project, 40).then(r => { if (alive) setActivity(r.entries); }).catch(() => {}),
+    ]).catch(e => { if (alive) setErr((e as Error).message); });
     void load();
     const t = setInterval(() => { if (!document.hidden) void load(); }, 4000);
     window.addEventListener('focus', load);
@@ -101,6 +119,18 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
               <button class="btn" onClick={() => void copy()}>{copied ? 'Copied ✓' : 'Copy link'}</button>
             </div>
           )}
+          <h4>Activity</h4>
+          <div class="hint">Who opened, built, pulled or pushed this project, changes to its sharing, and every time an administrator opened it (repeated opens by the same person are one entry per 10 minutes).</div>
+          <div class="share-activity git-tokens" data-share-activity>
+            {(activity ?? []).map(e => (
+              <div class={'git-token' + (e.action === 'admin-access' ? ' admin' : '')} key={e.id}>
+                <span class="name">{e.user ? (e.user.id === user.id ? 'You' : e.user.name) : 'Someone'}</span>
+                <span class="what">{describe(e)}</span>
+                <span class="meta">{ago(e.at)}</span>
+              </div>
+            ))}
+            {activity && !activity.length && <div class="hint">Nothing yet.</div>}
+          </div>
           <div class="hint">{info.link ? `Anyone who is signed in and opens the link becomes ${info.link.role === 'edit' ? 'an editor' : 'a viewer'}. Switching back to Restricted removes everyone who came in through the link.` : 'Viewers can read and compile; editors can also change the documents and upload files.'}</div>
         </>
       )}

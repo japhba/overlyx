@@ -19,6 +19,8 @@ import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, 
 import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
 import { sandboxAvailable } from './sandbox.ts';
+import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog } from './access.ts';
+import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
 import { feedbackRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
@@ -109,6 +111,7 @@ api.delete('/projects/:project', needProject('owner'), async (req, res) => {
     await manager.closeProject(req.params.project);
     const dest = trashProject(req.params.project);
     cleanupProjectData(req.params.project);
+    void archiveMirror(req.params.project);
     res.json({ ok: true, trash: dest });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
@@ -123,6 +126,7 @@ api.post('/projects/:project/share/members', needProject('owner'), (req, res) =>
     const role = req.body?.role;
     if (!isRole(role)) { res.status(400).json({ error: 'role must be view or edit' }); return; }
     const m = addMember(req.params.project, String(req.body?.who ?? ''), role, req.user!);
+    logAccess(req.params.project, req.user!.id, 'share', `added ${memberLabel(m)} as ${role === 'edit' ? 'editor' : 'viewer'}`);
     res.json({ member: m, share: shareInfo(req.params.project) });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
@@ -131,6 +135,7 @@ api.post('/projects/:project/share/members/:id', needProject('owner'), (req, res
   if (!isRole(role)) { res.status(400).json({ error: 'role must be view or edit' }); return; }
   const m = memberRow(req.params.project, Number(req.params.id));
   setMemberRole(req.params.project, Number(req.params.id), role);
+  logAccess(req.params.project, req.user!.id, 'share', `made ${memberLabel(m)} ${role === 'edit' ? 'an editor' : 'a viewer'}`);
   // their open editors reconnect with the new role
   if (m?.user_id != null) manager.kick(req.params.project, [m.user_id]);
   res.json({ share: shareInfo(req.params.project) });
@@ -138,6 +143,7 @@ api.post('/projects/:project/share/members/:id', needProject('owner'), (req, res
 api.delete('/projects/:project/share/members/:id', needProject('owner'), (req, res) => {
   const m = memberRow(req.params.project, Number(req.params.id));
   removeMember(req.params.project, Number(req.params.id));
+  logAccess(req.params.project, req.user!.id, 'share', `removed ${memberLabel(m)}`);
   if (m?.user_id != null) manager.kick(req.params.project, [m.user_id]);
   res.json({ share: shareInfo(req.params.project) });
 });
@@ -149,11 +155,12 @@ api.post('/projects/:project/share/link', needProject('owner'), (req, res) => {
     const affected = linkMemberIds(req.params.project);
     const link = setLink(req.params.project, role);
     if (affected.length) manager.kick(req.params.project, affected);
+    logAccess(req.params.project, req.user!.id, 'share', role ? `turned on link sharing (${role === 'edit' ? 'editors' : 'viewers'})` : 'turned off link sharing');
     res.json({ link, share: shareInfo(req.params.project) });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
 api.post('/projects/:project/share/owner', needProject('owner'), (req, res) => {
-  try { setOwner(req.params.project, String(req.body?.username ?? '')); res.json({ share: shareInfo(req.params.project) }); }
+  try { setOwner(req.params.project, String(req.body?.username ?? '')); logAccess(req.params.project, req.user!.id, 'share', `made ${String(req.body?.username ?? '')} the owner`); res.json({ share: shareInfo(req.params.project) }); }
   catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
 /** Open a share link: join the project and learn what to open. */
@@ -164,6 +171,45 @@ api.post('/share/:token/accept', (req, res) => {
     const lyx = files.filter(f => f.kind === 'doc' && !isBackupFile(f.name)).sort((a, b) => Number(!/(^|\/)main\.tex$/.test(a.path)) - Number(!/(^|\/)main\.tex$/.test(b.path)) || a.path.length - b.path.length || a.path.localeCompare(b.path));
     res.json({ project: project.name, title: project.title, role, doc: lyx[0] ? `${project.name}/${lyx[0].path}` : null });
   } catch (e) { res.status(404).json({ error: (e as Error).message }); }
+});
+
+/** The owner's activity log: who opened, built, pulled/pushed, shared — and administrator access. */
+api.get('/projects/:project/activity', needProject('owner'), (req, res) => {
+  res.json({ entries: activityOf(req.params.project, Number(req.query.limit ?? 50) || 50) });
+});
+function memberLabel(m: ReturnType<typeof memberRow>): string {
+  if (!m) return 'a member';
+  if (m.user_id != null) { const u = db.prepare('SELECT username FROM users WHERE id = ?').get(m.user_id) as { username: string } | undefined; if (u) return u.username; }
+  return m.email ?? 'a member';
+}
+
+/* ------------------------------------------------------------ administration */
+
+/** Every project on the instance (administrators): who owns it, whether the administrator can open it now. */
+api.get('/admin/projects', (req, res) => {
+  if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
+  res.json({ projects: projectsForAdmin(req.user) });
+});
+/** Open somebody else's project as administrator for a while (default 60 min) — logged in that project's activity. */
+api.post('/admin/projects/:project/access', (req, res) => {
+  if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
+  try { res.json({ until: grantAdminAccess(req.user, req.params.project, Number(req.body?.minutes ?? 60)) }); }
+  catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+
+/* ------------------------------------------------------------------ mirror */
+
+/** The project's off-site mirror (GitHub organisation): where, when it was pushed last, whether it is behind. */
+api.get('/projects/:project/mirror', needProject('view'), async (req, res) => {
+  try { res.json(await mirrorStatus(req.params.project)); } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+/** Owner: pause/resume the mirror ({ enabled }) or push right now ({ now: true }). */
+api.post('/projects/:project/mirror', needProject('owner'), async (req, res) => {
+  try {
+    if (typeof req.body?.enabled === 'boolean') setMirrorEnabled(req.params.project, req.body.enabled);
+    if (req.body?.now) await mirrorPush(req.params.project, { force: true });
+    res.json(await mirrorStatus(req.params.project));
+  } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
 /* --------------------------------------------------------------------- git */
@@ -760,6 +806,7 @@ api.post('/docs/*/export', async (req, res) => {
       res.json({ ok: true, tex: r.tex, warnings: r.warnings });
       return;
     }
+    logAccess(id.split('/')[0], req.user!.id, 'build', id.slice(id.indexOf('/') + 1));
     if (req.body?.wait) {
       // synchronous variant (scripts): wait for the build to finish
       const r = await buildPdf(id, { engine, requestedBy: req.user!.name });
@@ -854,7 +901,8 @@ if (fs.existsSync(config.clientDist)) {
 
 adoptProjects();
 sandboxAvailable();
-void ensureAllRepos();
+void ensureAllRepos().then(() => startMirrorSweeper());
+pruneAccessLog();
 
 const server = http.createServer(app);
 attachWebSocket(server);

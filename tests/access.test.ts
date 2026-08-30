@@ -32,7 +32,7 @@ describe('ownership', () => {
     expect(access.projectRow('paper')?.owner_id).toBe(jan.id);
     expect(access.roleFor(jan, 'legacy')).toBe('owner');
     expect(access.roleFor(bob, 'legacy')).toBeNull();
-    expect(access.roleFor(admin, 'legacy')).toBe('owner');   // administrators see everything
+    expect(access.roleFor(admin, 'legacy')).toBeNull();      // administrators need an explicit, logged grant (see below)
     expect(access.roleFor(bob, 'does-not-exist')).toBeNull();
     expect(access.roleFor(bob, '../etc')).toBeNull();
   });
@@ -41,9 +41,49 @@ describe('ownership', () => {
     const janSees = access.accessibleProjects(jan).map(p => [p.name, p.role, p.via]);
     expect(janSees).toContainEqual(['legacy', 'owner', 'owner']);
     expect(access.accessibleProjects(bob).map(p => p.name)).not.toContain('legacy');
-    const adminSees = access.accessibleProjects(admin).find(p => p.name === 'legacy');
-    expect(adminSees?.via).toBe('admin');
-    expect(adminSees?.owner?.username).toBe('jan');
+    // an administrator is not a member of anything by default
+    expect(access.accessibleProjects(admin).map(p => p.name)).not.toContain('legacy');
+  });
+});
+
+describe('administrators', () => {
+  it('open other people\'s projects only through an explicit, time-limited grant that the owner sees in the activity log', () => {
+    expect(access.roleFor(admin, 'legacy')).toBeNull();
+    expect(() => access.grantAdminAccess(bob, 'legacy')).toThrow(/administrators only/);
+    expect(() => access.grantAdminAccess(admin, 'does-not-exist')).toThrow(/not found/);
+    const until = access.grantAdminAccess(admin, 'legacy', 30);
+    expect(until).toBeGreaterThan(Date.now() + 29 * 60 * 1000);
+    expect(access.roleFor(admin, 'legacy')).toBe('owner');
+    const seen = access.accessibleProjects(admin).find(p => p.name === 'legacy');
+    expect(seen?.via).toBe('admin');
+    expect(seen?.owner?.username).toBe('jan');
+    const log = access.activityOf('legacy');
+    expect(log[0]).toMatchObject({ action: 'admin-access', detail: '30 min', user: { username: 'admin' } });
+    // the administration list knows what the administrator can open
+    const all = access.projectsForAdmin(admin);
+    expect(all.find(p => p.name === 'legacy')).toMatchObject({ access: 'granted', owner: { username: 'jan' } });
+    expect(all.find(p => p.name === 'paper')).toMatchObject({ access: null });
+    expect(access.projectsForAdmin(bob)).toEqual([]);
+    // the grant expires
+    db.prepare('UPDATE admin_grants SET until = ? WHERE project = ? AND user_id = ?').run(Date.now() - 1, 'legacy', admin.id);
+    expect(access.roleFor(admin, 'legacy')).toBeNull();
+    expect(access.projectsForAdmin(admin).find(p => p.name === 'legacy')?.access).toBeNull();
+  });
+
+  it('the activity log records opens, builds, git and sharing — repeated opens once per 10 minutes', () => {
+    access.logAccess('paper', bob.id, 'open', 'main.tex');
+    access.logAccess('paper', bob.id, 'open', 'main.tex');          // same person, same document: one entry
+    access.logAccess('paper', bob.id, 'open', 'appendix.tex');
+    access.logAccess('paper', jan.id, 'build', 'main.tex');
+    access.logAccess('paper', bob.id, 'git-fetch');
+    access.logAccess('paper', jan.id, 'share', 'added bob as editor');
+    const log = access.activityOf('paper');
+    expect(log.map(e => [e.user?.username, e.action, e.detail])).toEqual([
+      ['jan', 'share', 'added bob as editor'], ['bob', 'git-fetch', null], ['jan', 'build', 'main.tex'], ['bob', 'open', 'appendix.tex'], ['bob', 'open', 'main.tex'],
+    ]);
+    expect(access.activityOf('paper', 2)).toHaveLength(2);
+    access.pruneAccessLog(0);
+    expect(access.activityOf('paper')).toEqual([]);
   });
 });
 

@@ -2,10 +2,10 @@
  * LyX-style editing commands on top of ProseMirror.
  */
 import { type Command, type EditorState, TextSelection, NodeSelection, Selection, type Transaction } from 'prosemirror-state';
-import { type Node as PMNode, type MarkType, Fragment, type Attrs, type ResolvedPos } from 'prosemirror-model';
+import { type Node as PMNode, type MarkType, type Mark, Fragment, type Attrs, type ResolvedPos } from 'prosemirror-model';
 import { splitBlock } from 'prosemirror-commands';
 import type { EditorView } from 'prosemirror-view';
-import { schema, commentHeader, formatTimestamp, unquote, paramMap } from '@overlyx/core';
+import { schema, commentHeader, formatTimestamp, unquote, paramMap, FONT_KEYS } from '@overlyx/core';
 import { nextLayout, isHeadingLayout } from './layouts';
 import { editorContext } from './context';
 import { MathInlineView, MathDisplayView, pendingFocus } from './nodeviews/math';
@@ -34,11 +34,14 @@ export function inInset(state: EditorState): boolean {
 /** Apply a layout to all paragraphs touched by the selection. */
 export function setLayout(layout: string): Command {
   return (state, dispatch) => {
-    const { from, to } = state.selection;
+    const { from, to, $from } = state.selection;
     const tr = state.tr;
     let any = false;
+    // the paragraphs at the cursor's own level (LyX): inside a footnote or note the inset's paragraphs change, not the one around it
+    let level = $from.depth;
+    while (level > 0 && $from.node(level).type.name !== 'paragraph') level--;
     state.doc.nodesBetween(from, to, (node, pos) => {
-      if (node.type.name === 'paragraph') {
+      if (node.type.name === 'paragraph' && state.doc.resolve(pos).depth === level - 1) {
         if (node.attrs.layout !== layout) tr.setNodeMarkup(pos, undefined, { ...node.attrs, layout });
         any = true;
         return false;
@@ -209,8 +212,39 @@ export const fontDefault: Command = (state, dispatch) => {
 
 /* ---------------------------------------------------------------- insets */
 
+const isFontMark = (name: string) => (FONT_KEYS as readonly string[]).includes(name);
+
+/**
+ * The font in effect at the cursor (the stored marks after a font toggle, else the surrounding text's), as
+ * entries of an inline node's `marks` attr. LyX: an inset or formula inserted into emphasized text is
+ * emphasized too (`\emph{For $G$ fixed}`), instead of splitting the run around it.
+ */
+export function inheritedFontMarks(state: EditorState): { type: string; attrs: Attrs }[] {
+  const marks = state.storedMarks ?? state.selection.$from.marks();
+  return marks.filter(m => isFontMark(m.type.name)).map(m => ({ type: m.type.name, attrs: m.attrs }));
+}
+
+/** The font marks an inline node carries in its `marks` attr, as ProseMirror marks (typing after it continues in that font). */
+export function fontMarksOf(node: PMNode): Mark[] {
+  if (node.isText || !node.attrs.marks) return [];
+  try {
+    const list = JSON.parse(node.attrs.marks) as { type: string; attrs?: Attrs }[];
+    return list.filter(m => isFontMark(m.type) && schema.marks[m.type]).map(m => schema.marks[m.type].create(m.attrs));
+  } catch { return []; }
+}
+
+/** `node` with the cursor's font marks added to its `marks` attr (nodes without that attr are returned as they are). */
+function withInheritedFont(state: EditorState, node: PMNode): PMNode {
+  if (node.isText || !node.type.spec.attrs || !('marks' in node.type.spec.attrs)) return node;
+  const inherited = inheritedFontMarks(state);
+  if (!inherited.length) return node;
+  let existing: unknown[] = [];
+  try { existing = node.attrs.marks ? JSON.parse(node.attrs.marks) : []; } catch { existing = []; }
+  return node.type.create({ ...node.attrs, marks: JSON.stringify([...inherited, ...existing]) }, node.content, node.marks);
+}
+
 function insertInline(state: EditorState, node: PMNode): Transaction {
-  const tr = state.tr.replaceSelectionWith(node, false);
+  const tr = state.tr.replaceSelectionWith(withInheritedFont(state, node), false);
   return tr;
 }
 
@@ -459,7 +493,10 @@ export function insertMath(display: boolean, env?: string): (view: EditorView) =
     const { state } = view;
     let node: PMNode;
     const attrs: Record<string, unknown> = {};
-    if (editorContext.trackChanges && editorContext.changeAuthorId !== undefined) attrs.marks = JSON.stringify([{ type: 'change', attrs: { type: 'inserted', author: editorContext.changeAuthorId, time: Math.floor(Date.now() / 1000) } }]);
+    // the formula takes the font at the cursor (LyX), plus the change mark while tracking
+    const markList: { type: string; attrs: Attrs }[] = inheritedFontMarks(state);
+    if (editorContext.trackChanges && editorContext.changeAuthorId !== undefined) markList.push({ type: 'change', attrs: { type: 'inserted', author: editorContext.changeAuthorId, time: Math.floor(Date.now() / 1000) } });
+    if (markList.length) attrs.marks = JSON.stringify(markList);
     // selected text becomes the formula content
     const sel = state.selection;
     const selText = sel.empty ? '' : state.doc.textBetween(sel.from, sel.to, ' ');

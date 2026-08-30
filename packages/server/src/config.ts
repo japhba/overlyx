@@ -51,7 +51,7 @@ export const config = {
   /** every project is a git repository served at /git/<project>.git (OVERLYX_GIT=off disables it) */
   git: process.env.OVERLYX_GIT !== 'off',
   /** idle time after the last change before OverLyX commits it (ms) */
-  gitCommitMs: Number(process.env.OVERLYX_GIT_COMMIT_MS ?? 2 * 60 * 1000),
+  gitCommitMs: Number(process.env.OVERLYX_GIT_COMMIT_MS ?? 30 * 1000),
   /** longest time changes may stay uncommitted while editing goes on (ms) */
   gitCommitMaxWaitMs: Number(process.env.OVERLYX_GIT_COMMIT_MAX_WAIT ?? 15 * 60 * 1000),
   /** feedback + error reports become GitHub issues of this repository (feedback.ts); needs a token with Issues: write */
@@ -59,6 +59,13 @@ export const config = {
     repo: (process.env.GITHUB_REPO ?? 'japhba/overlyx').trim(),
     token: (process.env.GITHUB_TOKEN ?? '').trim(),
     api: (process.env.GITHUB_API_URL ?? 'https://api.github.com').replace(/\/$/, ''),
+  },
+  /** off-site mirror of every project repository in a GitHub organisation (mirror.ts); OVERLYX_MIRROR_URL=file:///…/{repo}.git is the test hook */
+  mirror: {
+    org: (process.env.GITHUB_MIRROR_ORG ?? '').trim(),
+    token: (process.env.GITHUB_MIRROR_TOKEN ?? '').trim(),
+    intervalMs: Number(process.env.OVERLYX_MIRROR_INTERVAL_MS ?? 5 * 60 * 1000),
+    urlTemplate: (process.env.OVERLYX_MIRROR_URL ?? '').trim(),
   },
   /** literature search in the citation dialog (OpenAlex, DBLP, doi.org); OVERLYX_LITERATURE=off disables the outbound requests */
   literature: process.env.OVERLYX_LITERATURE !== 'off',

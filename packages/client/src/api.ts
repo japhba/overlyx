@@ -45,6 +45,11 @@ export interface VersionInfo { id: number; name: string; author: string; kind: s
 export interface GitCommit { hash: string; author: string; date: number; message: string }
 export interface GitInfo { url: string; username: string; role: Role; hasPassword: boolean; branch: string; commits: GitCommit[]; pending: number; pendingFiles: string[]; head: string | null }
 export interface GitToken { id: number; name: string; created_at: number; last_used_at: number | null }
+/** the project's off-site mirror (a private repository in the instance's GitHub organisation) */
+export interface MirrorStatus { configured: boolean; org: string | null; repo: string | null; url: string | null; enabled: boolean; head: string | null; lastHead: string | null; lastPushAt: number | null; lastAttemptAt: number | null; lastError: string | null; behind: boolean; intervalMs: number }
+export type AccessAction = 'open' | 'build' | 'git-fetch' | 'git-push' | 'share' | 'admin-access';
+export interface ActivityEntry { id: number; action: AccessAction; detail: string | null; at: number; user: { id: number; name: string; username: string } | null }
+export interface AdminProjectInfo { name: string; title: string | null; kind: string; owner: { id: number; name: string; username: string } | null; access: 'owner' | 'member' | 'granted' | null; grantUntil: number | null }
 
 async function req<T>(method: string, url: string, body?: unknown, raw?: BodyInit, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, {
@@ -91,6 +96,13 @@ export const api = {
   // git: every project is a repository (clone URL, history); tokens are the password for git over HTTPS
   gitInfo: (project: string) => req<GitInfo>('GET', `/api/projects/${encodeURIComponent(project)}/git`),
   gitCommit: (project: string, message?: string) => req<{ committed: boolean } & Omit<GitInfo, 'url' | 'username' | 'role' | 'hasPassword'>>('POST', `/api/projects/${encodeURIComponent(project)}/git/commit`, message ? { message } : {}),
+  mirrorStatus: (project: string) => req<MirrorStatus>('GET', `/api/projects/${encodeURIComponent(project)}/mirror`),
+  mirrorUpdate: (project: string, body: { enabled?: boolean; now?: boolean }) => req<MirrorStatus>('POST', `/api/projects/${encodeURIComponent(project)}/mirror`, body),
+  /** the owner's activity log of a project */
+  activity: (project: string, limit = 50) => req<{ entries: ActivityEntry[] }>('GET', `/api/projects/${encodeURIComponent(project)}/activity?limit=${limit}`),
+  // administration: every project, and a logged, time-limited grant to open one
+  adminProjects: () => req<{ projects: AdminProjectInfo[] }>('GET', '/api/admin/projects'),
+  adminAccess: (project: string, minutes = 60) => req<{ until: number }>('POST', `/api/admin/projects/${encodeURIComponent(project)}/access`, { minutes }),
   gitTokens: () => req<{ tokens: GitToken[] }>('GET', '/api/git/tokens'),
   createGitToken: (name: string) => req<{ id: number; token: string; tokens: GitToken[] }>('POST', '/api/git/tokens', { name }),
   deleteGitToken: (id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/git/tokens/${id}`),

@@ -7,18 +7,15 @@
  * Generalized Combination Networks"), including their real abstracts, a real sentence + citation
  * from each introduction, and (for the first paper) the real scaled dot-product attention formula.
  * This exercises the WYSIWYG path a real author hits when starting a paper, end to end.
+ * More papers (lists, footnotes, tables, equation labels, align, a PDF build): paperwriting-more.spec.ts.
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { login, collectErrors, PROJECTS_DIR } from './helpers';
+import { blankArticle, openPaper, afterAuthor, setLayout, citeFromPastedBibtex, typeFrac, typeSqrt, typeScript, typeSymbol, typeBareSymbol } from './papertyping';
 
 const PROJECT = 'e2e-paperwriting';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
-
-/** What "New document" (server projects.ts newDocumentText) writes for a titled, empty article. */
-function blankArticle(title: string): string {
-  return `\\documentclass[11pt]{article}\n\\usepackage[T1]{fontenc}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amsmath}\n\\usepackage{amssymb}\n\\usepackage{graphicx}\n\n\\begin{document}\n\\title{${title}}\n\\author{Admin}\n\\maketitle\n\n\n\\end{document}\n`;
-}
 
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
@@ -26,86 +23,10 @@ test.beforeAll(() => {
   writeFileSync(`${DIR}/attention.tex`, blankArticle('Attention Is All You Need'));
   writeFileSync(`${DIR}/netcoding.tex`, blankArticle('On the Gap between Scalar and Vector Solutions of Generalized Combination Networks'));
 });
-test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
+test.afterAll(() => { if (!process.env.OVERLYX_E2E_KEEP) rmSync(DIR, { recursive: true, force: true }); });   // OVERLYX_E2E_KEEP=1 keeps the typed papers
 
 const fileText = (name: string) => readFileSync(`${DIR}/${name}`, 'utf8');
-
-async function open(page: Page, file: string) {
-  await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); });
-  await page.goto(`/#/${PROJECT}/${file}`);
-  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
-  await page.waitForTimeout(1000);
-}
-
-/** Click the end of the (only, so far) Author paragraph and press Enter: a fresh Standard paragraph follows. */
-async function afterAuthor(page: Page) {
-  await page.locator('.lyx-editor > .lyx-par.lyx-layout-author').first().click({ position: { x: 4, y: 8 } });
-  await page.waitForTimeout(200);
-  await page.keyboard.press('End');
-  await page.keyboard.press('Enter');
-  await page.waitForTimeout(200);
-}
-
-async function setLayout(page: Page, key: string) {
-  await page.keyboard.press('Alt+p');
-  await page.waitForTimeout(80);
-  await page.keyboard.press(key);
-  await page.waitForTimeout(150);
-}
-
-/** Paste a BibTeX entry via "Find online / paste BibTeX" and insert the citation at the cursor. */
-async function citeFromPastedBibtex(page: Page, bibtex: string, surname: string) {
-  await page.keyboard.press('Control+Shift+c');
-  const dialog = page.locator('.dialog');
-  await expect(dialog).toContainText('Citation');
-  await page.locator('[data-cite-online]').click();
-  await expect(dialog).toContainText('Google Scholar');
-  await page.locator('[data-cite-paste]').fill(bibtex);
-  await page.locator('[data-cite-add-paste]').click();
-  await expect(page.locator('[data-cite-status]')).toContainText('Added', { timeout: 15000 });
-  await page.locator('[data-cite-insert]').click();
-  await expect(page.locator('.lyx-editor .lyx-command-citation').last()).toContainText(surname);
-}
-
-/** \frac{num}{den}: num/den typed by the caller via the two callbacks; leaves the field back at top level. */
-async function typeFrac(page: Page, num: () => Promise<void>, den: () => Promise<void>) {
-  await page.keyboard.type('\\frac'); await page.waitForTimeout(60);
-  await page.keyboard.press('Tab'); await page.waitForTimeout(60);
-  await num();
-  await page.keyboard.press('Tab'); await page.waitForTimeout(60);
-  await den();
-  await page.keyboard.press('ArrowRight'); await page.waitForTimeout(60);   // out of the denominator, back to top level
-}
-
-async function typeSqrt(page: Page, body: () => Promise<void>) {
-  await page.keyboard.type('\\sqrt'); await page.waitForTimeout(60);
-  await page.keyboard.press('Tab'); await page.waitForTimeout(60);
-  await body();
-  await page.keyboard.press('ArrowRight'); await page.waitForTimeout(60);
-}
-
-/** A superscript/subscript with (possibly multi-char) content, back out to the base afterwards. */
-async function typeScript(page: Page, mark: '^' | '_', content: string) {
-  await page.keyboard.type(mark); await page.waitForTimeout(40);
-  await page.keyboard.type(content); await page.waitForTimeout(40);
-  await page.keyboard.press('ArrowRight'); await page.waitForTimeout(40);
-}
-
-/** A one-argument command (\mathrm{...}, same shape as \sqrt): Tab both confirms the name and enters the argument cell. */
-async function typeSymbol(page: Page, name: string) {
-  await page.keyboard.type(name); await page.waitForTimeout(60);
-  await page.keyboard.press('Tab'); await page.waitForTimeout(60);
-}
-
-/**
- * A named symbol with no arguments (\alpha, \Theta, \gamma, \leq, ...). ArrowRight (not Tab) confirms it
- * as typed: Tab instead accepts the greyed completion suggestion, which for a command that is itself a
- * prefix of another real command (e.g. \leq / \leqq) silently over-completes to the longer one.
- */
-async function typeBareSymbol(page: Page, name: string) {
-  await page.keyboard.type(name); await page.waitForTimeout(60);
-  await page.keyboard.press('ArrowRight'); await page.waitForTimeout(60);
-}
+const open = (page: Page, file: string) => openPaper(page, PROJECT, file);
 
 test.beforeEach(async ({ page }) => { await login(page); });
 

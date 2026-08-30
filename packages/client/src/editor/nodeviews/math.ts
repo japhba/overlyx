@@ -162,7 +162,8 @@ function focusIfPending(f: LyxMathField, getPos: () => number | undefined) {
   const pos = getPos();
   if (pos === undefined || pendingFocus.pos !== pos) return;
   pendingFocus.pos = null;
-  requestAnimationFrame(() => { f.focus('end'); for (const k of pendingFocus.keys.splice(0)) f.execute('insert', k); });
+  // a formula made from selected text continues at its end; an empty one starts in its first cell (LyX: align, cases, ... begin left of the first &)
+  requestAnimationFrame(() => { f.focus(f.isEmpty() ? 'start' : 'end'); for (const k of pendingFocus.keys.splice(0)) f.execute('insert', k); });
 }
 
 /* ------------------------------------------------ inline formulas */

@@ -1018,3 +1018,11 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .dialog .model-row { align-items: flex-start; } .dialog .model-row label { padding-top: 5px; }
 /* OverLyX's spell checker */
 .lyx-editor .spell-error { text-decoration: underline wavy var(--err); text-decoration-thickness: 1px; text-underline-offset: 2px; text-decoration-skip-ink: none; }
+
+/* off-site mirror status (Git dialog), activity log (Share dialog), administration list (start screen) */
+.git-mirror { display: flex; flex-direction: column; gap: 6px; }
+.git-mirror-actions { display: flex; gap: 8px; }
+.git-mirror .err-inline { color: var(--danger, #c0392b); }
+.share-activity .what { flex: 1; color: var(--fg-muted, inherit); }
+.share-activity .git-token.admin .name { color: var(--danger, #c0392b); }
+.admin-projects .name { flex: 1; }

@@ -3,7 +3,7 @@
  * first, then their own projects, then what others shared with them.
  */
 import { useEffect, useState } from 'preact/hooks';
-import { api, type Project, type User } from '../api';
+import { api, type AdminProjectInfo, type Project, type User } from '../api';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -18,8 +18,19 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   notify: (text: string, kind?: 'info' | 'error') => void;
 }) {
   const [projects, setProjects] = useState<Project[] | null>(null);
-  const load = () => api.projects().then(r => setProjects(r.projects)).catch(e => { setProjects([]); notify('Could not load projects: ' + (e as Error).message, 'error'); });
+  const [adminList, setAdminList] = useState<AdminProjectInfo[] | null>(null);
+  const load = () => Promise.all([
+    api.projects().then(r => setProjects(r.projects)).catch(e => { setProjects([]); notify('Could not load projects: ' + (e as Error).message, 'error'); }),
+    user.isAdmin ? api.adminProjects().then(r => setAdminList(r.projects)).catch(() => setAdminList(null)) : Promise.resolve(),
+  ]);
   useEffect(() => { void load(); }, [refreshKey]);
+  // administrators do not see other people's projects; they can open one for an hour, and the owner sees that in the activity log
+  const openAsAdmin = async (p: AdminProjectInfo) => {
+    if (!confirm(`Open “${p.title ?? p.name}” (owned by ${p.owner?.name ?? 'nobody'}) as administrator for one hour?\n\nThe owner will see this in the project's activity log.`)) return;
+    try { await api.adminAccess(p.name, 60); await load(); onChanged(); }
+    catch (e) { notify((e as Error).message, 'error'); }
+  };
+  const others = (adminList ?? []).filter(p => p.access === null && p.kind !== 'example-gone');
 
   const example = projects?.find(p => p.kind === 'example' && p.via === 'owner') ?? null;
   const mine = projects?.filter(p => p.via === 'owner' && p !== example) ?? [];
@@ -87,7 +98,22 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       {mine.length > 0 && <><h3>Your projects</h3><div class="cards">{mine.map(card)}</div></>}
       {projects && !mine.length && !example && <div class="meta">You have no projects yet — create one, or ask a colleague to share theirs with you.</div>}
       {shared.length > 0 && <><h3>Shared with you</h3><div class="cards">{shared.map(card)}</div></>}
-      {admin.length > 0 && <><h3>All other projects (administrator)</h3><div class="cards">{admin.map(card)}</div></>}
+      {admin.length > 0 && <><h3>Opened as administrator</h3><div class="cards">{admin.map(card)}</div></>}
+      {user.isAdmin && adminList && others.length > 0 && (
+        <>
+          <h3>Administration</h3>
+          <div class="meta">Other people's projects on this server. Administrators do not have access to them; opening one grants you owner rights for an hour and is written to the project's activity log, where its owner sees it.</div>
+          <div class="git-tokens admin-projects" data-admin-projects>
+            {others.map(p => (
+              <div class="git-token" key={p.name} data-admin-project={p.name}>
+                <span class="name">📁 {p.title ?? p.name}</span>
+                <span class="meta">{p.owner ? `${p.owner.name} (${p.owner.username})` : 'no owner'}{p.kind === 'example' ? ' · example project' : ''}</span>
+                <button class="mini" onClick={() => void openAsAdmin(p)}>Open as administrator…</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

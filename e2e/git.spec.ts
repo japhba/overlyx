@@ -55,8 +55,8 @@ test('a new project is a repository; the dialog shows the clone URL and creates 
   await expect.poll(() => existsSync(join(DIR, '.git'))).toBe(true);
   await expect(dlg.locator('[data-git-log]')).toContainText('Import "e2e-git" into OverLyX', { timeout: 15000 });
   // a token
-  await dlg.locator('.share-add input').fill('e2e laptop');
-  await dlg.locator('.share-add button', { hasText: 'New token' }).click();
+  await dlg.locator('.share-add input').first().fill('e2e laptop');        // the first .share-add row is the access tokens (the MCP tokens have their own)
+  await dlg.locator('.share-add button', { hasText: 'New token' }).first().click();
   await expect(dlg.locator('.git-newtoken')).toContainText('e2e laptop', { timeout: 10000 });
   token = await dlg.locator('.git-newtoken input').inputValue();
   expect(token).toMatch(/^olx_/);

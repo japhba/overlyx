@@ -26,7 +26,7 @@ import { db, type UserRow } from './db.ts';
 import { projectDir, listProjects } from './projects.ts';
 import { manager, fileWrittenListeners } from './docs.ts';
 import { verifyPassword, toSessionUser, type SessionUser } from './auth.ts';
-import { roleFor, atLeast } from './access.ts';
+import { roleFor, atLeast, logAccess } from './access.ts';
 
 const execFileP = promisify(execFile);
 
@@ -97,7 +97,7 @@ function gitHome(): string {
  * laptop) — `safe.directory=*` — and nothing from the server account's own git configuration
  * (credential helpers, identities, hooks) must leak in.
  */
-function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+export function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
     PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
     HOME: gitHome(),
@@ -151,10 +151,12 @@ export function serverIdentity(): { name: string; email: string } {
  * apart from the two settings a push into a checked-out branch needs.
  */
 export async function ensureRepo(project: string): Promise<void> {
-  if (!config.git || prepared.has(project)) return;
+  if (!config.git) return;
   if (!PROJECT_NAME.test(project)) throw new Error('bad project name');
   const dir = projectDir(project);
   if (!fs.existsSync(dir)) throw new Error('project not found');
+  // prepared in this process — unless the project was deleted and created again under the same name meanwhile
+  if (prepared.has(project)) { if (fs.existsSync(path.join(dir, '.git'))) return; prepared.delete(project); }
   await withRepoLock(project, async () => {
     if (prepared.has(project)) return;
     const fresh = !fs.existsSync(path.join(dir, '.git'));
@@ -408,6 +410,8 @@ async function handle(req: Request, res: Response): Promise<void> {
     res.status(403).type('text').send(role ? `You can only view "${project}" — pushing needs editor access\n` : `You do not have access to "${project}"\n`);
     return;
   }
+  // the owner's activity log: one entry per person and direction (info/refs precedes every fetch and push)
+  if (endpoint !== 'info/refs') logAccess(project, user.id, write ? 'git-push' : 'git-fetch');
 
   // --- the repository, up to date with the editors
   try {
