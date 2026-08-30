@@ -605,6 +605,14 @@ export class MathCursor {
     if (this.inMacroMode()) return true;
     if (this.selection) { this.eraseSelection(); return true; }
     const o = this.owner;
+    // InsetMathHull::doDispatch LFUN_CHAR_DELETE_FORWARD: Delete at the end of a row's last cell
+    // (where the number/label is drawn) first removes the row's label, then its number, before
+    // the grid behaviour applies
+    if (isHull(o) && this.pos === this.lastpos && this.col + 1 === o.ncols) {
+      const r = this.row;
+      if (o.labels[r]) { o.labels[r] = undefined; return true; }
+      if (o.numberedRows[r]) { o.numberedRows[r] = false; return true; }
+    }
     if (this.pos === this.lastpos && this.idxDelete()) return true;
     if (this.pos === this.lastpos) {
       if (isHull(o)) return false;

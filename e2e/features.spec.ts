@@ -298,6 +298,27 @@ test('figure and equation labels are edited through the same dialog and rename u
   expect(errors).toEqual([]);
 });
 
+test('Del at the end of an equation removes the label, then the numbering (as in LyX)', async ({ page }) => {
+  const errors = collectErrors(page);
+  const id = labelDoc('labeldel-' + Date.now());
+  await openDoc(page, id);
+  await page.waitForTimeout(500);
+  const disp = page.locator('.lyx-math-display').first();
+  await disp.scrollIntoViewIfNeeded();
+  await disp.locator('.lm-field, .lyx-math-static').first().click();
+  await expect(page.locator('.lm-field.focused')).toHaveCount(1, { timeout: 5000 });
+  await page.keyboard.press('End');
+  await page.keyboard.press('Delete');            // 1st Del: the label goes, the equation stays numbered
+  await expect.poll(() => fileText(id), { timeout: 15000 }).not.toContain('\\label{eq:demo}');
+  expect(fileText(id)).toContain('\\begin{equation}');
+  await expect(disp.locator('.eq-labels')).toHaveText('+label');
+  await page.keyboard.press('Delete');            // 2nd Del: the numbering goes too
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('\\[');
+  expect(fileText(id)).not.toContain('\\begin{equation}');
+  await expect(disp.locator('.eq-labels')).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
 test('the label dialog opens focused: Backspace clears the name and Enter removes the label', async ({ page }) => {
   const errors = collectErrors(page);
   const id = labelDoc('labelkbd-' + Date.now());

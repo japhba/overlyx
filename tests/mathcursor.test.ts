@@ -190,6 +190,22 @@ describe('rows, numbering, labels, mutation', () => {
     c.numberToggle();
     expect(out(c)).toBe('\n\\begin{align*}\na & =b\\\\\nc & =d\n\\end{align*}\n');
   });
+  it('Delete at the end of a row removes the label first, then the number (InsetMathHull)', () => {
+    const c = at('\n\\begin{equation}\nE=mc^{2}\\label{eq:demo}\n\\end{equation}\n');
+    c.erase();                            // 1st Del: the label goes
+    expect(out(c)).toBe('\n\\begin{equation}\nE=mc^{2}\n\\end{equation}\n');
+    c.erase();                            // 2nd Del: the number goes
+    expect(out(c)).toBe('\n\\[\nE=mc^{2}\n\\]\n');
+    expect(c.erase()).toBe(false);        // 3rd Del: nothing left — the cursor leaves the formula
+    expect(out(c)).toBe('\n\\[\nE=mc^{2}\n\\]\n');
+    // per-row in an align: only the current row's label is touched (the row stays numbered), and only in the last column
+    const a = at('\n\\begin{align}\na & =b\\label{eq:ab}\\\\\nc & =d\\label{eq:cd}\n\\end{align}\n');
+    a.erase();
+    expect(out(a)).toBe('\n\\begin{align}\na & =b\\label{eq:ab}\\\\\nc & =d\n\\end{align}\n');
+    a.idx = 0; a.pos = a.lastpos;         // end of the first row's LEFT column: not the last column — no label change
+    expect(a.erase()).toBe(false);
+    expect(out(a)).toBe('\n\\begin{align}\na & =b\\label{eq:ab}\\\\\nc & =d\n\\end{align}\n');
+  });
   it('mutating between environments keeps the content', () => {
     const c = at('\n\\begin{align}\na & =b\\\\\nc & =d\n\\end{align}\n');
     c.mutate('gather');
