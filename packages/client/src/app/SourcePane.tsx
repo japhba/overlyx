@@ -11,11 +11,11 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import type * as Y from 'yjs';
-import { writeLyx, pmToLyxBody } from '@overlyx/core';
+import { writeLyx, pmToLyxBody, checkTexHealth } from '@overlyx/core';
 import { api } from '../api';
-import { highlightTex, highlightLines } from './texhighlight';
+import { highlightTexBlocks, highlightLineList } from './texhighlight';
 import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask } from './codearea';
-import { findSourceLine } from './sourcelocate';
+import { findSourceLine, locateSourceLine, type LocateBlock } from './sourcelocate';
 import type { LyxMathField } from '../editor/lyxmath/field';
 
 export interface SourceTarget { view: EditorView; ydoc: Y.Doc; docId: string }
@@ -62,17 +62,29 @@ export function cursorLine(view: EditorView, text: string, field: LyxMathField |
   return findSourceLine(text, { before, after, parStart, formula, prev });
 }
 
+function storedWidth(): number {
+  try { const v = Number(localStorage.getItem('ol.source.w')); return v >= 280 ? v : 520; } catch { return 520; }
+}
 function storedHeight(): number {
   try { const v = Number(localStorage.getItem('ol.source.h')); return v >= MIN_H ? v : DEFAULT_H; } catch { return DEFAULT_H; }
 }
 
-export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose }: { target: SourceTarget | null; tick: number; selTick?: number; /** the formula being edited, if any */ mathField?: LyxMathField | null; onNotify: (msg: string, kind?: 'info' | 'error') => void; onClose?: () => void }) {
+export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose, layout = 'bottom' }: { /** below the document (Ctrl+Alt+S) or beside it (the "[raw]" tab, with synchronized scrolling) */ layout?: 'bottom' | 'right'; target: SourceTarget | null; tick: number; selTick?: number; /** the formula being edited, if any */ mathField?: LyxMathField | null; onNotify: (msg: string, kind?: 'info' | 'error') => void; onClose?: () => void }) {
   const [text, setText] = useState('');
+  /** the text as typed, ahead of the render (a live apply scheduled by a keystroke must send it, not the previous render's) */
+  const textRef = useRef('');
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [curLine, setCurLine] = useState<number | null>(null);
   const lastOffset = useRef<number | null>(null);
   const [height, setHeight] = useState(storedHeight);
+  const [width, setWidth] = useState(storedWidth);
+  const focused = useRef(false);
+  const pendingReload = useRef(false);
+  /** live apply: what happened to the last edited source */
+  const [applied, setApplied] = useState<'idle' | 'waiting' | 'applying' | 'ok' | 'held' | 'error'>('idle');
+  const [applyNote, setApplyNote] = useState('');
+  const applyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
   const pre = useRef<HTMLPreElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -81,15 +93,41 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   const [cursor, setCursor] = useState<number | null>(null);
   const mask = useMemo(() => commentMask(text), [text]);
   const match = useMemo(() => (cursor === null ? null : matchBrackets(text, cursor, mask)), [text, cursor, mask]);
-  const html = useMemo(() => {
+  // the coloured copy, one HTML string per line; the <pre> is patched line by line (see below) —
+  // replacing its whole innerHTML on every keystroke costs the browser tens of ms for a long source
+  const lineHtml = useMemo(() => {
     let marks: Map<number, string> | undefined;
     if (match) {
       marks = new Map();
       const cls = match.kind === 'adjacent' ? 'hl-match' : 'hl-enclose';
       for (const at of [match.open, match.close]) for (let k = 0; k < match.len; k++) marks.set(at + k, cls);
     }
-    return highlightLines(highlightTex(text, marks), dirty ? null : curLine);
-  }, [text, match, curLine, dirty]);
+    return highlightLineList(highlightTexBlocks(text, marks));
+  }, [text, match]);
+  const shownLines = useRef<string[]>([]);
+  useEffect(() => {
+    const code = pre.current?.firstElementChild as HTMLElement | null;
+    if (!code) return;
+    const prev = shownLines.current;
+    const divs = code.children;
+    const n = Math.min(prev.length, lineHtml.length, divs.length);
+    for (let i = 0; i < n; i++) if (prev[i] !== lineHtml[i]) divs[i].innerHTML = lineHtml[i];
+    for (let i = divs.length - 1; i >= lineHtml.length; i--) divs[i].remove();
+    if (lineHtml.length > divs.length) {
+      const frag = document.createDocumentFragment();
+      for (let i = divs.length; i < lineHtml.length; i++) { const d = document.createElement('div'); d.className = 'l'; d.innerHTML = lineHtml[i]; frag.append(d); }
+      code.append(frag);
+    }
+    shownLines.current = lineHtml;
+  }, [lineHtml]);
+  // the current line's mark
+  useEffect(() => {
+    const code = pre.current?.firstElementChild as HTMLElement | null;
+    if (!code) return;
+    code.querySelector('.l.cur')?.classList.remove('cur');
+    const want = dirty ? null : curLine;
+    if (want !== null && code.children[want]) code.children[want].classList.add('cur');
+  }, [curLine, dirty, lineHtml]);
   const updateCursor = () => { const el = ta.current; if (el) setCursor(el.selectionStart === el.selectionEnd ? el.selectionStart : null); };
   useEffect(() => {
     const h = () => { if (document.activeElement === ta.current) updateCursor(); };
@@ -102,13 +140,16 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     const my = ++seq.current;
     try {
       const t = await api.texText(target.docId);
-      if (my === seq.current) { setText(t); undo.current.reset({ value: t, start: 0, end: 0 }); }
+      if (my === seq.current) { setText(t); textRef.current = t; if (ta.current) ta.current.value = t; undo.current.reset({ value: t, start: 0, end: 0 }); }
     } catch (e) { if (my === seq.current) setText('% could not generate source: ' + (e as Error).message); }
   };
 
-  // regenerate the source when the document changes (unless the user is editing the source)
+  // regenerate the source when the document changes — not while the user is editing it or has the
+  // keyboard in it (a live apply changes the document; replacing the text under the cursor would be
+  // disruptive): then it is regenerated when the pane loses the focus
   useEffect(() => {
-    if (!target || dirty) return;
+    if (!target) return;
+    if (dirty || focused.current) { pendingReload.current = true; return; }
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => { void load(); }, 700);
     return () => { if (timer.current) clearTimeout(timer.current); };
@@ -130,9 +171,18 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     if (!el || !cur || dirty || document.activeElement === el) return;
     const y = cur.offsetTop, h = cur.offsetHeight || LINE_H;
     if (y < el.scrollTop + h || y + h > el.scrollTop + el.clientHeight - h) { el.scrollTop = Math.max(0, y - el.clientHeight / 3); syncScroll(); }
-  }, [curLine, html]);
+  }, [curLine, lineHtml]);
 
   useEffect(() => { try { localStorage.setItem('ol.source.h', String(Math.round(height))); } catch { /* ignore */ } }, [height]);
+  useEffect(() => { try { localStorage.setItem('ol.source.w', String(Math.round(width))); } catch { /* ignore */ } }, [width]);
+  const startResizeW = (e: PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX, startW = width;
+    const move = (ev: PointerEvent) => setWidth(Math.max(280, Math.min(window.innerWidth * 0.8, startW + startX - ev.clientX)));
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
   const startResize = (e: PointerEvent) => {
     e.preventDefault();
     const startY = e.clientY, startH = height;
@@ -142,49 +192,132 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     window.addEventListener('pointerup', up);
   };
 
-  const apply = async () => {
-    if (!target) return;
-    setBusy(true);
+  /**
+   * Apply the edited source to the document: parsed on the server and merged as a diff. Runs by
+   * itself a moment after the last keystroke (live), but only when the source is structurally sound
+   * (balanced braces, a document body — a half-typed \begin{…} must not turn the document into ERT)
+   * — else it is held until it is; Ctrl+Enter applies at once.
+   */
+  const apply = async (force = false) => {
+    if (!target || busy) return;
+    const current = textRef.current;
+    const issues = checkTexHealth(current).filter(i => i.severity === 'error' || i.code === 'brace-imbalance');   // a half-typed {…} would turn into ERT
+    if (issues.length && !force) { setApplied('held'); setApplyNote(issues[0].message); return; }
+    setBusy(true); setApplied('applying');
     try {
-      const r = await api.applySource(target.docId, text);
+      const r = await api.applySource(target.docId, current);
+      if (textRef.current !== current) { setApplied('waiting'); scheduleApply(); setBusy(false); return; }   // typed on meanwhile: apply again
       setDirty(false);
-      onNotify(r.warnings.length ? `Source applied (${r.warnings.length} warning${r.warnings.length > 1 ? 's' : ''}: ${r.warnings[0]})` : 'Source applied to the document');
+      setApplied('ok'); setApplyNote(r.warnings.length ? `${r.warnings.length} warning${r.warnings.length > 1 ? 's' : ''}: ${r.warnings[0]}` : '');
     } catch (e) {
-      onNotify('Cannot apply source: ' + (e as Error).message, 'error');
+      setApplied('error'); setApplyNote((e as Error).message);
     }
     setBusy(false);
   };
-  const revert = () => { setDirty(false); void load(); };
+  const scheduleApply = () => {
+    if (applyTimer.current) clearTimeout(applyTimer.current);
+    setApplied('waiting');
+    applyTimer.current = setTimeout(() => { applyTimer.current = null; void apply(); }, 1200);
+  };
+  useEffect(() => () => { if (applyTimer.current) clearTimeout(applyTimer.current); }, []);
+  const revert = () => { if (applyTimer.current) clearTimeout(applyTimer.current); setDirty(false); setApplied('idle'); void load(); };
+  const onBlur = () => { focused.current = false; if (pendingReload.current && !dirty) { pendingReload.current = false; void load(); } };
+
+  /* ---- the split view: the two panes scroll together (top paragraph ↔ its source line, top source line ↔ its paragraph) */
+  const syncLock = useRef<{ side: 'doc' | 'src'; until: number } | null>(null);
+  const locked = (side: 'doc' | 'src') => !!syncLock.current && syncLock.current.side === side && syncLock.current.until > Date.now();
+  const lock = (side: 'doc' | 'src') => { syncLock.current = { side, until: Date.now() + 350 }; };
+  const lineEls = () => Array.from(pre.current?.querySelectorAll<HTMLElement>('.l') ?? []);
+  useEffect(() => {
+    if (layout !== 'right' || !target) return;
+    const view = target.view;
+    const scrollEl = view.dom.closest('.editor-scroll') as HTMLElement | null;
+    const el = ta.current;
+    if (!scrollEl || !el) return;
+    let rafDoc = 0, rafSrc = 0;
+    // document → source
+    const onDocScroll = () => {
+      cancelAnimationFrame(rafDoc);
+      rafDoc = requestAnimationFrame(() => {
+        if (locked('doc') || !text) return;
+        const top = scrollEl.getBoundingClientRect().top + 4;
+        const pars = Array.from(view.dom.querySelectorAll<HTMLElement>(':scope > .lyx-par'));
+        const par = pars.find(p => p.getBoundingClientRect().bottom > top) ?? pars[pars.length - 1];
+        if (!par) return;
+        let ptext = '';
+        try { const $p = view.state.doc.resolve(view.posAtDOM(par, 0)); const node = $p.node($p.depth >= 1 ? 1 : 0); ptext = node.textBetween(0, node.content.size, undefined, '\u0000'); } catch { return; }
+        if (!ptext.trim()) return;
+        const found = findSourceLine(text, { before: '', after: ptext.slice(0, 200), parStart: ptext.slice(0, 48) });
+        if (!found) return;
+        const lines = lineEls();
+        const y = lines[found.line]?.offsetTop ?? found.line * LINE_H;
+        lock('src');
+        el.scrollTop = Math.max(0, y - PAD_TOP);
+        syncScroll();
+      });
+    };
+    // source → document
+    const onSrcScroll = () => {
+      cancelAnimationFrame(rafSrc);
+      rafSrc = requestAnimationFrame(() => {
+        if (locked('src') || !text) return;
+        const lines = lineEls();
+        let lo = 0, hi = lines.length - 1, line = 0;
+        while (lo <= hi) { const mid = (lo + hi) >> 1; if (lines[mid].offsetTop + lines[mid].offsetHeight > el.scrollTop + 1) { line = mid; hi = mid - 1; } else lo = mid + 1; }
+        const blocks: (LocateBlock & { pos: number })[] = [];
+        view.state.doc.descendants((node, pos) => {
+          if (node.type.name === 'math_display') { blocks.push({ kind: 'math', text: String(node.attrs.latex ?? ''), pos }); return false; }
+          if (node.isTextblock) blocks.push({ kind: 'text', text: node.textBetween(0, node.content.size, undefined, '\u0000'), pos: pos + 1 });
+          return true;
+        });
+        const hit = locateSourceLine(text, line, blocks);
+        if (!hit) return;
+        const b = blocks[hit.index];
+        let dom: Node | null = null;
+        try { dom = b.kind === 'math' ? view.nodeDOM(b.pos) : view.domAtPos(b.pos).node; } catch { return; }
+        const par = (dom instanceof Element ? dom : dom?.parentElement)?.closest('.lyx-par, .lyx-math-display') as HTMLElement | null;
+        if (!par) return;
+        lock('doc');
+        scrollEl.scrollTop += par.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top - 8;
+      });
+    };
+    scrollEl.addEventListener('scroll', onDocScroll);
+    el.addEventListener('scroll', onSrcScroll);
+    return () => { scrollEl.removeEventListener('scroll', onDocScroll); el.removeEventListener('scroll', onSrcScroll); cancelAnimationFrame(rafDoc); cancelAnimationFrame(rafSrc); };
+  }, [layout, target?.docId, text]);
 
   const name = target?.docId.split('/').pop() ?? '';
   return (
-    <div class="source-pane bottom" style={{ height: height + 'px' }}>
-      <div class="grip" title="Drag to resize" onPointerDown={startResize} />
+    <div class={'source-pane ' + layout} style={layout === 'right' ? { width: width + 'px' } : { height: height + 'px' }}>
+      {layout === 'right' ? <div class="grip v" title="Drag to resize" onPointerDown={startResizeW} /> : <div class="grip" title="Drag to resize" onPointerDown={startResize} />}
       <div class="bar">
         <span class="small-btn active" title="The LaTeX source of the document (its .tex file)">LaTeX</span>
         <span class="name" title={target?.docId}>{name}</span>
         <span style="flex:1" />
-        {dirty && <button class="small-btn primary" disabled={busy} onClick={() => void apply()} title="Parse the edited source and replace the document">{busy ? '…' : 'Apply'}</button>}
-        {dirty && <button class="small-btn" onClick={revert}>Revert</button>}
+        {dirty && <span class={'apply-state ' + applied} title={applyNote} data-apply-state={applied}>{applied === 'waiting' ? 'editing…' : applied === 'applying' ? 'applying…' : applied === 'held' ? 'not applied: ' + applyNote : applied === 'error' ? 'not applied: ' + applyNote : ''}</span>}
+        {dirty && <button class="small-btn" onClick={revert} title="Drop the edits and regenerate the source from the document">Revert</button>}
+        {!dirty && applied === 'ok' && <span class="apply-state ok" data-apply-state="ok" title={applyNote}>applied ✓{applyNote ? ' · ' + applyNote : ''}</span>}
         {!dirty && <button class="small-btn" onClick={() => void load()} title="Regenerate from the editor">Refresh</button>}
         <button class="small-btn" onClick={() => { void navigator.clipboard?.writeText(text); }} title="Copy to clipboard">Copy</button>
         {onClose && <button class="small-btn close" onClick={onClose} title="Hide the source pane (Ctrl+Alt+S)">✕</button>}
       </div>
       <div class="code">
-        <pre class="hl" ref={pre} aria-hidden="true"><code dangerouslySetInnerHTML={{ __html: html }} /></pre>
-        <textarea ref={ta} class="source" spellcheck={false} value={text} onScroll={syncScroll} onClick={updateCursor} onKeyUp={updateCursor}
-          onInput={e => { const el = e.target as HTMLTextAreaElement; undo.current.record({ value: el.value, start: el.selectionStart, end: el.selectionEnd }); setText(el.value); setDirty(true); updateCursor(); }}
+        <pre class="hl" ref={pre} aria-hidden="true"><code /></pre>
+        {/* uncontrolled: the browser inserts what is typed and the DOM is the source of truth (a controlled value re-applied by a slow re-render can drop a fast keystroke); load() sets it */}
+        <textarea ref={ta} class="source" spellcheck={false} onScroll={syncScroll} onClick={updateCursor} onKeyUp={updateCursor}
+          onFocus={() => { focused.current = true; }} onBlur={onBlur}
+          onInput={e => { const el = e.target as HTMLTextAreaElement; undo.current.record({ value: el.value, start: el.selectionStart, end: el.selectionEnd }); textRef.current = el.value; setText(el.value); setDirty(true); updateCursor(); scheduleApply(); }}
           onKeyDown={e => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && dirty) { e.preventDefault(); void apply(); return; }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && dirty) { e.preventDefault(); if (applyTimer.current) clearTimeout(applyTimer.current); void apply(true); return; }
             const ur = undoRedoKey(e);
-            if (ur) { e.preventDefault(); const s = applyUndoRedo(ta.current!, undo.current, ur); if (s) { setText(s.value); setDirty(true); updateCursor(); } return; }
+            if (ur) { e.preventDefault(); const s = applyUndoRedo(ta.current!, undo.current, ur); if (s) { textRef.current = s.value; ta.current!.value = s.value; setText(s.value); setDirty(true); updateCursor(); scheduleApply(); } return; }
             if (e.isComposing) return;
             const el = ta.current!;
             const s = editingKey(e, el);
-            if (s) { e.preventDefault(); applySnapshot(el, s); undo.current.record({ value: el.value, start: el.selectionStart, end: el.selectionEnd }); setText(el.value); setDirty(true); updateCursor(); }
+            if (s) { e.preventDefault(); applySnapshot(el, s); undo.current.record({ value: el.value, start: el.selectionStart, end: el.selectionEnd }); textRef.current = el.value; setText(el.value); setDirty(true); updateCursor(); scheduleApply(); }
           }} />
       </div>
-      <div class="hint">{dirty ? 'Edited — Apply (Ctrl+Enter) replaces the document with this source.' : 'The LaTeX source of the document as it is saved; it follows the cursor. Edit and apply, or copy.'}</div>
+      <div class="hint">{dirty ? 'Edits are applied to the document as you type (once the LaTeX is well-formed; Ctrl+Enter applies at once).' : layout === 'right' ? 'The LaTeX source beside the document: both scroll together; edit here and the document follows.' : 'The LaTeX source of the document as it is saved; it follows the cursor. Edit here and the document follows.'}</div>
     </div>
   );
 }

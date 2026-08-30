@@ -1,6 +1,6 @@
 /** Cursor → source line matching of the source pane (packages/client/src/app/sourcelocate.ts). */
 import { describe, it, expect } from 'vitest';
-import { findSourceLine } from '../packages/client/src/app/sourcelocate.ts';
+import { findSourceLine, locateSourceLine, plainWords } from '../packages/client/src/app/sourcelocate.ts';
 
 const NUL = String.fromCharCode(0);
 const SRC = [
@@ -46,5 +46,37 @@ describe('findSourceLine', () => {
   });
   it('returns null when nothing can be found', () => {
     expect(findSourceLine(SRC, { before: 'zzz qqq', after: 'yyy' })).toBeNull();
+  });
+});
+
+describe('locateSourceLine (SyncTeX inverse search)', () => {
+  const text = ['\\section{Intro}', '', 'The promise of deep learning is to discover rich, hierarchical models \\cite{bengio} that represent', 'probability distributions.', '', '\\begin{equation}', '\\min_{G}\\max_{D}V(D,G)=1\\label{eq:m}', '\\end{equation}', '', 'Second paragraph here.'].join('\n');
+  const blocks = [
+    { kind: 'text' as const, text: 'Intro' },
+    { kind: 'text' as const, text: 'The promise of deep learning is to discover rich, hierarchical models \u0000 that represent probability distributions.' },
+    { kind: 'math' as const, text: '\\begin{equation}\n\\min_{G}\\max_{D}V(D,G)=1\\label{eq:m}\n\\end{equation}' },
+    { kind: 'text' as const, text: 'Second paragraph here.' },
+  ];
+  it('finds the paragraph of a text line and the offset of its words', () => {
+    expect(locateSourceLine(text, 2, blocks)).toEqual({ index: 1, offset: 0 });
+    const r = locateSourceLine(text, 3, blocks)!;
+    expect(r.index).toBe(1);
+    expect(blocks[1].text.slice(r.offset)).toMatch(/^probability distributions/);
+  });
+  it('finds a formula row in the display formulas', () => {
+    expect(locateSourceLine(text, 6, blocks)).toEqual({ index: 2, offset: 0 });
+  });
+  it('skips an empty or command-only line to the paragraph after it', () => {
+    expect(locateSourceLine(text, 0, blocks)).toEqual({ index: 0, offset: 0 });   // \section{Intro} → the heading's words
+    expect(locateSourceLine(text, 8, blocks)).toEqual({ index: 3, offset: 0 });
+  });
+  it('prefers the block that starts with the line (a heading whose word also occurs in a paragraph)', () => {
+    const t = ['Experiments demonstrate the potential of the framework.', '', '\\section{Experiments}\\label{sec:exp}', '', 'We trained nets.'].join('\n');
+    const b = [{ kind: 'text' as const, text: 'Experiments demonstrate the potential of the framework.' }, { kind: 'text' as const, text: 'Experiments' }, { kind: 'text' as const, text: 'We trained nets.' }];
+    expect(locateSourceLine(t, 2, b)).toEqual({ index: 1, offset: 0 });
+    expect(locateSourceLine(t, 0, b)).toEqual({ index: 0, offset: 0 });
+  });
+  it('strips LaTeX to the words the editor shows', () => {
+    expect(plainWords('\\emph{Deep} models~\\cite{a,b} of $x^2$ here \\label{s:x}')).toBe('Deep models of here');
   });
 });

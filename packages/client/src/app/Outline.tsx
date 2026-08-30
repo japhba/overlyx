@@ -22,8 +22,11 @@ function headingText(para: PMNode): string {
 export function buildOutline(doc: PMNode, includeFloats = true, secnumdepth = 3): OutlineItem[] {
   const items: OutlineItem[] = [];
   const counters = [0, 0, 0, 0, 0, 0, 0];
+  let appendix = false;
   doc.forEach((para, pos) => {
     if (para.type.name !== 'paragraph') return;
+    // \appendix: the top-level counter restarts and is lettered from here on
+    if (para.attrs.appendix && !appendix) { appendix = true; counters.fill(0); }
     const layout = para.attrs.layout as string;
     const lvl = sectionLevel(layout);
     if (lvl !== null) {
@@ -33,6 +36,7 @@ export function buildOutline(doc: PMNode, includeFloats = true, secnumdepth = 3)
         for (let i = lvl + 2; i < counters.length; i++) counters[i] = 0;
         const parts = counters.slice(0, lvl + 2).map(String);
         while (parts.length > 1 && parts[0] === '0') parts.shift();
+        if (appendix && parts.length) parts[0] = String.fromCharCode(64 + Number(parts[0]));
         if (lvl <= secnumdepth) num = parts.join('.');
       }
       items.push({ pos, level: Math.max(0, lvl + 1), text: headingText(para) || '(empty)', layout, num });

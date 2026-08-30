@@ -15,7 +15,7 @@ import { listProjects, resolveProjectPath, projectDir, createProject, newDocumen
 import { cachedParseFile, importLyxFile, parseDocumentText } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
 import { toPng, isDirectImage } from './graphics.ts';
-import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData } from './export.ts';
+import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit } from './export.ts';
 import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
 import { sandboxAvailable } from './sandbox.ts';
@@ -75,7 +75,7 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
  */
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|tex|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build))?$/.exec(full)!;
+  const m = /^(.*?)(?:\/(meta|tex|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|synctex\/(?:view|edit)))?$/.exec(full)!;
   const id = decodeURIComponent(m[1]);
   const action = m[2] ?? '';
   const write = req.method !== 'GET' && !/^export/.test(action);
@@ -289,7 +289,7 @@ api.get('/projects/:project/file/*', needProject('view'), (req, res) => {
     const rel = decodeURIComponent((req.params as any)[0]);
     const abs = resolveProjectPath(req.params.project, rel);
     if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) { res.status(404).end(); return; }
-    if (!INLINE_EXT.has(path.extname(abs).toLowerCase())) res.attachment(path.basename(abs));
+    if (!INLINE_EXT.has(path.extname(abs).toLowerCase()) || req.query.download === '1') res.attachment(path.basename(abs));
     res.sendFile(abs);
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
@@ -830,6 +830,21 @@ api.get('/docs/*/pdf', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${path.basename(b.pdf_path)}"`);
   res.sendFile(b.pdf_path);
+});
+
+/** SyncTeX forward search: the PDF boxes of a line (1-based) of the .tex as built (`?line=`). */
+api.get('/docs/*/synctex/view', async (req, res) => {
+  const line = Number(req.query.line), column = Number(req.query.column ?? 0);
+  if (!Number.isFinite(line) || line < 1) { res.status(400).json({ error: 'line required' }); return; }
+  try { res.json({ boxes: await synctexView(docId(req), Math.floor(line), Number.isFinite(column) ? column : 0) }); }
+  catch (e) { res.status(500).json({ error: String(e) }); }
+});
+/** SyncTeX inverse search: the source line under a point of the PDF (`?page=&x=&y=`, points from the page's top-left). */
+api.get('/docs/*/synctex/edit', async (req, res) => {
+  const page = Number(req.query.page), x = Number(req.query.x), y = Number(req.query.y);
+  if (!(page >= 1) || !Number.isFinite(x) || !Number.isFinite(y)) { res.status(400).json({ error: 'page, x, y required' }); return; }
+  try { res.json(await synctexEdit(docId(req), Math.floor(page), x, y) ?? { line: null }); }
+  catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
 /** Last build result + the current job (running / queued / just finished), for the PDF panel. */

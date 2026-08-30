@@ -13,13 +13,13 @@ import { editorContext } from '../context';
 
 export const numberingKey = new PluginKey<DecorationSet>('lyx-numbering');
 
-interface Counters { sec: number[]; enumr: number[]; figure: number; table: number; foot: number; eq: number; theorem: number }
+interface Counters { sec: number[]; enumr: number[]; enumOpen: boolean[]; figure: number; table: number; foot: number; eq: number; theorem: number }
 
 function build(doc: PMNode): DecorationSet {
   const decos: Decoration[] = [];
-  const c: Counters = { sec: [0, 0, 0, 0, 0, 0, 0], enumr: [0, 0, 0, 0, 0, 0], figure: 0, table: 0, foot: 0, eq: 0, theorem: 0 };
-  let prevLayout = '', prevDepth = 0;
+  const c: Counters = { sec: [0, 0, 0, 0, 0, 0, 0], enumr: [0, 0, 0, 0, 0, 0, 0, 0, 0], enumOpen: [false, false, false, false, false, false, false, false, false], figure: 0, table: 0, foot: 0, eq: 0, theorem: 0 };
   let appendix = false;
+  let prevLayout = '', prevDepth = 0;
   const secLabel = (level: number) => {
     const parts: string[] = [];
     for (let i = 0; i <= level + 1; i++) parts.push(String(c.sec[i]));
@@ -82,7 +82,7 @@ function build(doc: PMNode): DecorationSet {
     const attrs: Record<string, string> = {};
     let cls = '';
     if (!inInset) {
-      if (para.attrs.appendix) appendix = true;
+      if (para.attrs.appendix && !appendix) { appendix = true; c.sec.fill(0); }   // \appendix restarts the top-level counter, lettered from here on
       const lvl = sectionLevel(layout);
       if (lvl !== null && isNumberedSection(layout)) {
         const idx = lvl + 1;
@@ -91,9 +91,13 @@ function build(doc: PMNode): DecorationSet {
         if (lvl <= (editorContext.meta?.secnumdepth ?? 3)) attrs['data-label'] = secLabel(lvl);
       }
     }
+    // An enumerate environment at depth d stays open across deeper paragraphs (a nested list or a
+    // continuation paragraph of the item) and is closed by any other paragraph at depth <= d (LaTeX):
+    // its counter restarts only when a new environment opens at that depth.
+    for (let d = depth + 1; d < c.enumOpen.length; d++) c.enumOpen[d] = false;
+    if (layout !== 'Enumerate') c.enumOpen[depth] = false;
     if (layout === 'Enumerate') {
-      if (prevLayout !== 'Enumerate' || prevDepth < depth) { for (let d = depth; d < c.enumr.length; d++) c.enumr[d] = 0; }
-      if (prevLayout === 'Enumerate' && prevDepth > depth) { /* continue outer numbering */ }
+      if (!c.enumOpen[depth]) { c.enumr[depth] = 0; c.enumOpen[depth] = true; }
       c.enumr[depth] = (c.enumr[depth] ?? 0) + 1;
       attrs['data-label'] = ENUM_STYLES[depth % 4](c.enumr[depth]);
     } else if (layout === 'Itemize') {
@@ -101,12 +105,12 @@ function build(doc: PMNode): DecorationSet {
     } else if (layout === 'Description' || layout === 'Labeling') {
       cls += ' lyx-description';
     } else if (/^(Theorem|Lemma|Corollary|Proposition|Conjecture|Definition|Example|Problem|Exercise|Remark|Claim|Fact|Case|Proof|Axiom|Notation|Solution|Question)\*?$/.test(layout)) {
-      if (!layout.endsWith('*') && layout !== 'Proof') { c.theorem++; attrs['data-label'] = `${layout} ${c.theorem}.`; }
-      else attrs['data-label'] = layout.replace(/\*$/, '') + '.';
-      cls += ' lyx-theorem';
+      // consecutive paragraphs of the same layout form one environment (LyX): one label, one number
+      const continues = prevLayout === layout && prevDepth === depth;
+      if (!layout.endsWith('*') && layout !== 'Proof') { if (!continues) c.theorem++; if (!continues) attrs['data-label'] = `${layout} ${c.theorem}.`; }
+      else if (!continues) attrs['data-label'] = layout.replace(/\*$/, '') + '.';
+      cls += ' lyx-theorem' + (continues ? ' lyx-theorem-cont' : '');
     }
-    if (layout !== 'Enumerate' && !(layout === 'Itemize')) { /* keep enum counters when nested lists interleave */ }
-    if (layout !== 'Enumerate' && depth === 0) { for (let d = 0; d < c.enumr.length; d++) if (!isListLayoutName(layout)) c.enumr[d] = 0; }
     if (para.attrs.align) attrs['data-align'] = para.attrs.align;
     if (Object.keys(attrs).length || cls) decos.push(Decoration.node(pos, pos + para.nodeSize, { ...attrs, ...(cls ? { class: cls.trim() } : {}) }));
     prevLayout = layout; prevDepth = depth;
@@ -120,7 +124,6 @@ function build(doc: PMNode): DecorationSet {
   return DecorationSet.create(doc, decos);
 }
 
-function isListLayoutName(l: string): boolean { return l === 'Itemize' || l === 'Enumerate' || l === 'Description' || l === 'Labeling'; }
 
 export function numberingPlugin(): Plugin<DecorationSet> {
   return new Plugin<DecorationSet>({

@@ -271,15 +271,16 @@ test('the source pane follows the cursor and applies edits back to the document'
   const ta = page.locator('.source-pane textarea');
   await expect(ta).toHaveValue(/\\documentclass/, { timeout: 15000 });
   await expect(ta).toHaveValue(/\\section\{/);
-  // edit the source: add a paragraph at the start of the body and apply
+  // edit the source: add a paragraph at the start of the body — it is applied by itself a moment later (no Apply button)
   await ta.evaluate((el: HTMLTextAreaElement) => {
     const v = el.value; const i = v.indexOf('\\begin{document}\n') + '\\begin{document}\n'.length;
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
     setter.call(el, v.slice(0, i) + 'SOURCEEDIT paragraph.\n\n' + v.slice(i));
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await page.locator('.source-pane button', { hasText: 'Apply' }).click();
+  await expect(page.locator('.source-pane button', { hasText: 'Apply' })).toHaveCount(0);
   await expect(page.locator('.lyx-editor')).toContainText('SOURCEEDIT', { timeout: 15000 });
+  await expect(page.locator('.source-pane [data-apply-state="ok"]')).toBeVisible({ timeout: 10000 });
   await expect.poll(() => readFileSync(`${DIR}/main.tex`, 'utf8').includes('SOURCEEDIT'), { timeout: 15000 }).toBe(true);
 });
 

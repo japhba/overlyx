@@ -7,7 +7,8 @@
  * Generalized Combination Networks"), including their real abstracts, a real sentence + citation
  * from each introduction, and (for the first paper) the real scaled dot-product attention formula.
  * This exercises the WYSIWYG path a real author hits when starting a paper, end to end.
- * More papers (lists, footnotes, tables, equation labels, align, a PDF build): paperwriting-more.spec.ts.
+ * More: paperwriting-more.spec.ts (BERT's first pages: lists, footnote, table) and the whole GAN and Adam
+ * papers from abstract to bibliography with a PDF build: paperwriting-gan.spec.ts, paperwriting-adam.spec.ts.
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';

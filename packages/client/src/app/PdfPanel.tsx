@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, encId, type BuildJob, type BuildInfo } from '../api';
+import { PdfViewer, type PdfTarget } from './PdfViewer';
 
 export interface PdfState {
   url: string | null; log: string; busy: boolean; ok: boolean | null; warnings: string[]; tex?: string;
@@ -11,7 +12,7 @@ export interface PdfState {
 
 const PHASE: Record<string, string> = { queued: 'waiting for a free build slot', exporting: 'exporting LaTeX', compiling: 'running latexmk' };
 
-export function PdfPanel({ docId, state, onBuild, onCancel, onShowTex }: { docId: string; state: PdfState; onBuild: () => void; onCancel: () => void; onShowTex: () => void }) {
+export function PdfPanel({ docId, state, onBuild, onCancel, onShowTex, syncTarget, onForward, onInverse }: { docId: string; state: PdfState; onBuild: () => void; onCancel: () => void; onShowTex: () => void; /** SyncTeX: the place to show (forward search), and the double-clicked place (inverse search) */ syncTarget?: PdfTarget | null; onForward?: () => void; onInverse?: (page: number, x: number, y: number) => void }) {
   const [showLog, setShowLog] = useState(false);
   const [, tick] = useState(0);
   useEffect(() => { if (!state.busy) return; const t = setInterval(() => tick(x => x + 1), 1000); return () => clearInterval(t); }, [state.busy]);
@@ -33,7 +34,8 @@ export function PdfPanel({ docId, state, onBuild, onCancel, onShowTex }: { docId
           {job.progress && <span class="progress-line">{job.progress}</span>}
         </div>
       )}
-      {state.url ? <iframe src={state.url} title="PDF preview" /> : <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#888">{state.busy ? 'Building the PDF in the background — you can keep editing.' : 'No PDF yet — click “View PDF” (Ctrl+R).'}</div>}
+      {state.url ? <PdfViewer url={state.url} target={syncTarget} onSync={onInverse} hint="Double-click the PDF to jump to that place in the document"
+        toolbar={onForward && <button class="small-btn" onClick={onForward} title="Show the cursor's place in the PDF (SyncTeX forward search, Ctrl+Alt+J)" data-pdf-sync>⇄ Sync</button>} /> : <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#888">{state.busy ? 'Building the PDF in the background — you can keep editing.' : 'No PDF yet — click “View PDF” (Ctrl+R).'}</div>}
       {(showLog || state.ok === false) && (
         <div class="log">{state.warnings.length ? 'Exporter warnings:\n' + state.warnings.join('\n') + '\n\n' : ''}{state.log || '(no log)'}</div>
       )}

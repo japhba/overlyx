@@ -140,6 +140,23 @@ export function highlightTex(src: string, marks?: Map<number, string>): string {
  * break are closed and reopened), so that line numbers (CSS counters) and the current line
  * (`current`, 0-based → class `cur`) work with soft-wrapped lines.
  */
+/** highlightLines, as one HTML string per line (without the wrapping div): a pane can patch only the lines that changed. */
+export function highlightLineList(html: string): string[] {
+  const open: string[] = [];
+  const lines: string[] = [];
+  let cur = '';
+  for (const part of html.split(/(<span[^>]*>|<\/span>|\n)/)) {
+    if (part === '') continue;
+    if (part === '\n') { cur += '</span>'.repeat(open.length); lines.push(cur); cur = open.join(''); continue; }
+    if (part.startsWith('<span')) { open.push(part); cur += part; continue; }
+    if (part === '</span>') { open.pop(); cur += part; continue; }
+    cur += part;
+  }
+  cur += '</span>'.repeat(open.length);
+  lines.push(cur);
+  return lines;
+}
+
 export function highlightLines(html: string, current: number | null = null): string {
   const open: string[] = [];
   let out = '';
@@ -158,4 +175,27 @@ export function highlightLines(html: string, current: number | null = null): str
     else out += part;
   }
   return out + '</div>';
+}
+
+/**
+ * highlightTex over a large source, cheaply on every keystroke: the text is highlighted per
+ * paragraph block (blank-line separated — math and environments never span a blank line, so a
+ * block highlights the same on its own) and each block's HTML is cached by its text; only the
+ * blocks that changed are highlighted again. `marks` (absolute offsets) apply to their block.
+ */
+const blockCache = new Map<string, string>();
+export function highlightTexBlocks(src: string, marks?: Map<number, string>): string {
+  if (blockCache.size > 4000) blockCache.clear();
+  const out: string[] = [];
+  let pos = 0;
+  for (const block of src.split('\n\n')) {
+    let html: string | undefined;
+    let local: Map<number, string> | undefined;
+    if (marks) for (const [k, v] of marks) if (k >= pos && k < pos + block.length) (local ??= new Map()).set(k - pos, v);
+    if (local) html = highlightTex(block, local);
+    else { html = blockCache.get(block); if (html === undefined) { html = highlightTex(block); blockCache.set(block, html); } }
+    out.push(html);
+    pos += block.length + 2;
+  }
+  return out.join('\n\n');
 }

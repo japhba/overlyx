@@ -149,8 +149,9 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { c
     const id = `${project!.name}/${f.path}`;
     const isDoc = f.kind === 'doc';
     const isLyx = f.kind === 'lyx';
-    const inTab = isDoc || isLyx || isTextFile(f.name);
-    const tabId = isDoc ? id : 'text:' + id;
+    const isPdf = f.kind === 'pdf';
+    const inTab = isDoc || isLyx || isPdf || isTextFile(f.name);
+    const tabId = isDoc ? id : isPdf ? 'pdf:' + id : 'text:' + id;
     const href = isLyx ? '#' : inTab ? '#/' + tabId : fileUrl(project!.name, f.path);
     const importLyx = async () => {
       if (!confirm(`Import ${f.name} into a .tex document (${f.name.replace(/\.lyx$/, '.tex')})? The .lyx file is kept; child documents it includes are imported too.`)) return;
@@ -159,7 +160,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { c
     };
     return (
       <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (!isDoc ? ' other' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }}
-        href={href} target={inTab ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB${isLyx ? ' · click to import as .tex' : inTab && !isDoc ? ' · opens in the text editor' : ''}`}
+        href={href} target={inTab ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB${isLyx ? ' · click to import as .tex' : inTab && isPdf ? ' · opens in the PDF viewer' : inTab && !isDoc ? ' · opens in the text editor' : ''}`}
         data-file={f.path}
         onClick={e => { if (isLyx) { e.preventDefault(); void importLyx(); return; } if (inTab && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(tabId); } }}>
         <span class="ficon">{ICON[f.kind] ?? '·'}</span><span class="fname">{node.name}</span>

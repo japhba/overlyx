@@ -329,7 +329,8 @@ export class MathDisplayView implements NodeView {
     this.numberEl.className = 'eq-number';
     this.labelEl = document.createElement('span');
     this.labelEl.className = 'eq-labels';
-    this.metaEl.append(this.numberEl, this.labelEl);
+    this.metaEl.append(this.numberEl);
+    left.append(this.labelEl);   // the label chip on the left of the formula, the number on the right (as in the output)
     this.staticEl = document.createElement('span');
     this.staticEl.className = 'lyx-math-static display';
     this.dom.append(left, this.staticEl, this.metaEl);
@@ -447,17 +448,32 @@ export class MathDisplayView implements NodeView {
     const metaW = this.metaEl.offsetWidth;
     const need = contentW + metaW + 10;
     this.layoutNumbers();
-    if (need <= avail) {
-      if (shifted) { dom.style.marginLeft = ''; dom.style.width = ''; dom.style.gridTemplateColumns = ''; }
-      return;
-    }
     const pageLeft = scroll.getBoundingClientRect().left + 6;
     const left = dom.getBoundingClientRect().left + scroll.scrollLeft - (parseFloat(dom.style.marginLeft) || 0);
     const leftRoom = Math.max(0, left - pageLeft);
+    if (need <= avail) {
+      if (shifted) { dom.style.marginLeft = ''; dom.style.width = ''; dom.style.gridTemplateColumns = ''; }
+      this.placeLabel(leftRoom, content);
+      return;
+    }
     const shift = Math.round(Math.min(leftRoom, (need - avail) / 2));
     dom.style.gridTemplateColumns = `0 ${contentW}px auto`;
     dom.style.marginLeft = shift > 0 ? `-${shift}px` : '';
     dom.style.width = shift > 0 ? `calc(100% + ${shift}px)` : '';
+    this.placeLabel(leftRoom - shift, content);
+  }
+
+  /**
+   * Where the label chip goes (data-label-pos, see the CSS): in the page margin left of the block
+   * when there is room for it, else in the empty left cell beside a narrow formula, else above
+   * the formula's left corner — never over the formula itself.
+   */
+  private placeLabel(marginRoom: number, content: HTMLElement) {
+    const chipW = this.labelEl.offsetWidth;
+    if (!chipW) { delete this.dom.dataset.labelPos; return; }
+    const inside = content.getBoundingClientRect().left - this.dom.getBoundingClientRect().left;
+    const pos = marginRoom >= chipW + 12 ? 'margin' : inside >= chipW + 8 ? 'inside' : 'above';
+    if (this.dom.dataset.labelPos !== pos) this.dom.dataset.labelPos = pos;
   }
 
   private hull() { return this.field ? this.field.hull : parseFormula(this.lastLatex, macroTableFor(this.view, this.getPos()).table); }
@@ -516,6 +532,7 @@ export class MathDisplayView implements NodeView {
     this.labelEl.textContent = labels.length ? labels.join(', ') : (numbered ? '+label' : '');
     this.labelEl.title = labels.length ? 'Label: ' + labels.join(', ') + ' (click to edit)' : 'Click to add a label';
     this.labelEl.style.display = numbered || labels.length ? '' : 'none';
+    this.scheduleRelayout();   // the chip's width decides where it goes (placeLabel)
   }
 
   toggleNumbering() { this.ensureField().execute('numberToggle'); this.renderMeta(); }

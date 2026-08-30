@@ -84,12 +84,12 @@ function useBindings() {
   return getBindings();
 }
 
-function MenuList({ items, path, close }: { items: MenuEntry[]; path: string[]; close: () => void }) {
+function MenuList({ items, path, close, style }: { items: MenuEntry[]; path: string[]; close: () => void; style?: string }) {
   return (
-    <div class="menu-list" onMouseDown={e => e.preventDefault()}>
+    <div class="menu-list" style={style} onMouseDown={e => e.preventDefault()}>
       {items.map((it, i) => {
         if (it.sep) return <div key={i} class="menu-sep" />;
-        if (it.sub) return <div key={i} class="menu-item menu-sub"><span>{it.label}</span><SubMenu items={it.sub} path={[...path, cleanLabel(it.label ?? '')]} close={close} /></div>;
+        if (it.sub) return <div key={i} class="menu-item menu-sub"><span>{cleanLabel(it.label ?? '')}</span><SubMenu items={it.sub} path={[...path, cleanLabel(it.label ?? '')]} close={close} /></div>;
         const sc = it.label ? effectiveShortcut(entryId(path, it.label), it.shortcut) : it.shortcut;
         return (
           <div key={i} class={'menu-item' + (it.checked ? ' checked' : '') + (it.disabled ? ' disabled' : '')} onClick={() => { if (!it.disabled) { close(); it.action?.(); } }}>
@@ -101,11 +101,24 @@ function MenuList({ items, path, close }: { items: MenuEntry[]; path: string[]; 
   );
 }
 
+/**
+ * A submenu opens beside its item. The list is positioned `fixed` at the item's screen position:
+ * the parent menu scrolls (overflow: auto) when it is taller than the window, which would clip an
+ * absolutely positioned child sticking out of it. Near the right edge of the window it opens to
+ * the left instead.
+ */
 function SubMenu({ items, path, close }: { items: MenuEntry[]; path: string[]; close: () => void }) {
-  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const open = (e: MouseEvent) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const width = 240;
+    const left = r.right + width > window.innerWidth - 8 ? Math.max(0, r.left - width) : r.right;
+    const top = Math.min(r.top - 5, Math.max(0, window.innerHeight - 8 - Math.min(items.length * 24 + 10, window.innerHeight * 0.8)));
+    setPos({ top, left });
+  };
   return (
-    <span style="position:absolute;inset:0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-      {open && <MenuList items={items} path={path} close={close} />}
+    <span style="position:absolute;inset:0" onMouseEnter={open} onMouseLeave={() => setPos(null)}>
+      {pos && <MenuList items={items} path={path} close={close} style={`position:fixed;top:${pos.top}px;left:${pos.left}px`} />}
     </span>
   );
 }

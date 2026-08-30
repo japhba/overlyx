@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { headerValue } from '@overlyx/core';
 import { config } from './config.ts';
 import { db } from './db.ts';
@@ -415,3 +415,52 @@ export function extractErrors(log: string): string {
 }
 
 export { resolveProjectPath };
+
+/* ---------------------------------------------------------------- SyncTeX */
+
+/** A box in the PDF (points, origin at the page's top-left): `x`/`y` its reference point, `h`/`v` the left/bottom of the box, `W`/`H` its width and height. */
+export interface SyncBox { page: number; x: number; y: number; h: number; v: number; W: number; H: number }
+
+/** The last build's PDF, .synctex.gz and .tex names — or null when there is nothing to synchronize with. */
+function synctexFiles(docId: string): { dir: string; pdf: string; tex: string } | null {
+  const b = lastBuild(docId);
+  if (!b?.pdf_path || !fs.existsSync(b.pdf_path)) return null;
+  const dir = path.dirname(b.pdf_path), pdf = path.basename(b.pdf_path);
+  if (!fs.existsSync(path.join(dir, pdf.replace(/\.pdf$/, '.synctex.gz')))) return null;
+  return { dir, pdf, tex: pdf.replace(/\.pdf$/, '.tex') };
+}
+
+function synctex(args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('synctex', args, { cwd, timeout: 8000, maxBuffer: 4 * 1024 * 1024 }, (err, out) => (err && !out ? reject(err) : resolve(String(out))));
+  });
+}
+
+/** Forward search: where line `line` (1-based) of the built .tex ended up in the PDF (`synctex view`); several boxes when the line spans more than one. */
+export async function synctexView(docId: string, line: number, column = 0): Promise<SyncBox[]> {
+  const f = synctexFiles(docId);
+  if (!f) return [];
+  const out = await synctex(['view', '-i', `${line}:${column}:${f.tex}`, '-o', f.pdf], f.dir);
+  const boxes: SyncBox[] = [];
+  let cur: Partial<SyncBox> | null = null;
+  for (const l of out.split('\n')) {
+    const m = /^(Page|x|y|h|v|W|H):(.*)$/.exec(l.trim());
+    if (!m) continue;
+    if (m[1] === 'Page') { if (cur?.page) boxes.push(cur as SyncBox); cur = { page: Number(m[2]) }; continue; }
+    if (cur) (cur as Record<string, number>)[m[1]] = Number(m[2]);
+  }
+  if (cur?.page) boxes.push(cur as SyncBox);
+  return boxes.filter(b => b.page > 0 && Number.isFinite(b.h) && Number.isFinite(b.v));
+}
+
+/** Inverse search: the source line under a point of the PDF (`synctex edit`; x/y in points from the page's top-left). */
+export async function synctexEdit(docId: string, page: number, x: number, y: number): Promise<{ file: string; line: number; column: number } | null> {
+  const f = synctexFiles(docId);
+  if (!f) return null;
+  const out = await synctex(['edit', '-o', `${page}:${x.toFixed(2)}:${y.toFixed(2)}:${f.pdf}`], f.dir);
+  const file = /^Input:(.*)$/m.exec(out)?.[1]?.trim() ?? '';
+  const line = Number(/^Line:(\d+)/m.exec(out)?.[1] ?? NaN);
+  const column = Number(/^Column:(-?\d+)/m.exec(out)?.[1] ?? -1);
+  if (!Number.isFinite(line) || line < 1) return null;
+  return { file: path.basename(file), line, column };
+}

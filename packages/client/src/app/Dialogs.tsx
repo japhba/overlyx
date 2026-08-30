@@ -47,7 +47,8 @@ export function GraphicsDialog({ meta, project, docDir = '', initial, onInsert, 
       const path = 'figures/' + f.name;
       const projPath = toProjectRel(path);
       await api.upload(project, projPath, f);
-      setFiles([...files, { path: projPath, name: f.name, size: f.size, mtime: Date.now(), kind: 'image' }]);
+      // an upload replacing an image of the same name is one entry in the list, not two
+      setFiles([...files.filter(x => x.path !== projPath), { path: projPath, name: f.name, size: f.size, mtime: Date.now(), kind: 'image' }]);
       setFilename(path);
     };
     input.click();

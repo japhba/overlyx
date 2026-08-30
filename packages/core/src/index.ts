@@ -10,3 +10,4 @@ export * from './macros.ts';
 export * from './bib.ts';
 export * from './comments.ts';
 export * from './math/index.ts';
+export { checkTexHealth, repairTex, type HealthIssue } from './tex/health.ts';

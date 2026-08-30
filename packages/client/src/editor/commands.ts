@@ -32,22 +32,27 @@ export function inInset(state: EditorState): boolean {
 }
 
 /** Apply a layout to all paragraphs touched by the selection. */
+/**
+ * The paragraphs of the selection at the cursor's own level (LyX): inside a footnote, note, float
+ * or table cell the inset's paragraphs are the ones a layout / depth / alignment change applies
+ * to, not the paragraph around the inset (which nodesBetween reaches first).
+ */
+function forParagraphsAtCursorLevel(state: EditorState, fn: (node: PMNode, pos: number) => void): boolean {
+  const { from, to, $from } = state.selection;
+  let level = $from.depth;
+  while (level > 0 && $from.node(level).type.name !== 'paragraph') level--;
+  let any = false;
+  state.doc.nodesBetween(from, to, (node, pos) => {
+    if (node.type.name === 'paragraph' && state.doc.resolve(pos).depth === level - 1) { fn(node, pos); any = true; return false; }
+    return true;
+  });
+  return any;
+}
+
 export function setLayout(layout: string): Command {
   return (state, dispatch) => {
-    const { from, to, $from } = state.selection;
     const tr = state.tr;
-    let any = false;
-    // the paragraphs at the cursor's own level (LyX): inside a footnote or note the inset's paragraphs change, not the one around it
-    let level = $from.depth;
-    while (level > 0 && $from.node(level).type.name !== 'paragraph') level--;
-    state.doc.nodesBetween(from, to, (node, pos) => {
-      if (node.type.name === 'paragraph' && state.doc.resolve(pos).depth === level - 1) {
-        if (node.attrs.layout !== layout) tr.setNodeMarkup(pos, undefined, { ...node.attrs, layout });
-        any = true;
-        return false;
-      }
-      return true;
-    });
+    const any = forParagraphsAtCursorLevel(state, (node, pos) => { if (node.attrs.layout !== layout) tr.setNodeMarkup(pos, undefined, { ...node.attrs, layout }); });
     if (!any) return false;
     if (dispatch) dispatch(tr.scrollIntoView());
     return true;
@@ -56,13 +61,8 @@ export function setLayout(layout: string): Command {
 
 export function setParagraphAttrs(attrs: Partial<Record<string, unknown>>): Command {
   return (state, dispatch) => {
-    const { from, to } = state.selection;
     const tr = state.tr;
-    let any = false;
-    state.doc.nodesBetween(from, to, (node, pos) => {
-      if (node.type.name === 'paragraph') { tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...attrs }); any = true; return false; }
-      return true;
-    });
+    const any = forParagraphsAtCursorLevel(state, (node, pos) => { tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...attrs }); });
     if (!any) return false;
     if (dispatch) dispatch(tr);
     return true;
@@ -71,22 +71,25 @@ export function setParagraphAttrs(attrs: Partial<Record<string, unknown>>): Comm
 
 export function changeDepth(delta: number): Command {
   return (state, dispatch) => {
-    const { from, to } = state.selection;
     const tr = state.tr;
     let any = false;
-    state.doc.nodesBetween(from, to, (node, pos) => {
-      if (node.type.name === 'paragraph') {
-        const depth = Math.max(0, Math.min(8, (node.attrs.depth as number) + delta));
-        if (depth !== node.attrs.depth) { tr.setNodeMarkup(pos, undefined, { ...node.attrs, depth }); any = true; }
-        return false;
-      }
-      return true;
+    forParagraphsAtCursorLevel(state, (node, pos) => {
+      const depth = Math.max(0, Math.min(8, (node.attrs.depth as number) + delta));
+      if (depth !== node.attrs.depth) { tr.setNodeMarkup(pos, undefined, { ...node.attrs, depth }); any = true; }
     });
     if (!any) return false;
     if (dispatch) dispatch(tr);
     return true;
   };
 }
+
+/** Document ▸ Start Appendix Here (LyX: \start_of_appendix): the cursor's paragraph begins the appendix — \appendix is written before it, headings from here on are lettered. */
+export const toggleAppendix: Command = (state, dispatch) => {
+  const cur = currentParagraph(state);
+  if (!cur) return false;
+  dispatch?.(state.tr.setNodeMarkup(cur.pos, undefined, { ...cur.node.attrs, appendix: !cur.node.attrs.appendix }));
+  return true;
+};
 
 /** Enter: split paragraph; the new paragraph gets LyX's "next layout". */
 export const paragraphBreak: Command = (state, dispatch) => {
@@ -102,7 +105,8 @@ export const paragraphBreak: Command = (state, dispatch) => {
   const pos = tr.selection.from;
   const $pos = tr.doc.resolve(pos);
   // paragraphs are always splittable in our schema (block+ / paragraph+)
-  const attrs = { ...cur.node.attrs, layout: atEnd ? next : cur.node.attrs.layout, endChange: null };
+  // the new paragraph: the layout LyX gives it; never the start-of-appendix marker (it belongs to one paragraph)
+  const attrs = { ...cur.node.attrs, layout: atEnd ? next : cur.node.attrs.layout, endChange: null, appendix: false };
   tr = tr.split(pos, 1, [{ type: schema.nodes.paragraph, attrs }]);
   if (!atEnd && isHeadingLayout(cur.node.attrs.layout, layouts)) {
     // splitting in the middle of a heading keeps the layout (LyX behaviour)
@@ -129,7 +133,7 @@ export const paragraphBreakInverse: Command = (state, dispatch) => {
   const layout = cur.node.attrs.layout === def ? def : def;
   if (!dispatch) return true;
   let tr = state.tr.deleteSelection();
-  tr = tr.split(tr.selection.from, 1, [{ type: schema.nodes.paragraph, attrs: { ...cur.node.attrs, layout, endChange: null } }]);
+  tr = tr.split(tr.selection.from, 1, [{ type: schema.nodes.paragraph, attrs: { ...cur.node.attrs, layout, endChange: null, appendix: false } }]);
   dispatch(tr.scrollIntoView());
   return true;
 };
@@ -315,7 +319,8 @@ export const insertComment: Command = (state, dispatch) => {
 export function insertFloat(type: 'figure' | 'table' | 'algorithm' = 'figure'): Command {
   return (state, dispatch) => {
     const caption = schema.nodes.inset.create({ name: 'Caption', arg: 'Standard', params: '[]', status: null }, schema.nodes.paragraph.create({ layout: 'Plain Layout' }));
-    const p1 = schema.nodes.paragraph.create({ layout: 'Plain Layout', align: 'center' });
+    // figures and tables are centered (the usual layout); an algorithm's steps are ordinary left-aligned paragraphs
+    const p1 = schema.nodes.paragraph.create(type === 'algorithm' ? { layout: 'Plain Layout' } : { layout: 'Plain Layout', align: 'center' });
     const p2 = schema.nodes.paragraph.create({ layout: 'Plain Layout' }, caption);
     const content = type === 'table' ? [p2, p1] : [p1, p2];
     const float = schema.nodes.inset.create({ name: 'Float', arg: type, params: JSON.stringify(['placement document', 'alignment document', 'wide false', 'sideways false']), status: 'open' }, Fragment.from(content));

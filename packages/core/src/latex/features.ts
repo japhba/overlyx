@@ -34,7 +34,14 @@ export class Features {
 
   get preambleSnippets(): string[] { return this.snippets; }
 
-  useLayout(name: string): void { if (!this.usedLayouts.includes(name)) this.usedLayouts.push(name); }
+  /** LaTeXFeatures::useLayout: a layout whose preamble builds on another one (theorems-ams: \newtheorem{prop}[thm] needs Theorem's thm) pulls that one in first. */
+  useLayout(name: string): void {
+    if (this.usedLayouts.includes(name)) return;
+    const st = this.dc.styles.get(name);
+    if (st?.dependsOn && st.dependsOn !== name) { this.useLayout(st.dependsOn); if (this.usedLayouts.includes(name)) return; }
+    this.usedLayouts.push(name);
+    if (st?.dependsOn) { const dep = this.dc.styles.get(st.dependsOn); if (dep) for (const r of dep.requires) this.require(r); }
+  }
 
   useInsetLayout(name: string): void { if (!this.usedInsetLayouts.includes(name)) this.usedInsetLayouts.push(name); }
 

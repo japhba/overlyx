@@ -225,7 +225,10 @@ export class OpenDoc {
     if (this.saving) { this.scheduleSave(); return false; }
     this.saving = true;
     if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
-    if (this.fileMissing) { this.saving = false; return false; }   // never re-create a deleted file
+    // never re-create a deleted file — but a file that is back on disk (removed and re-created by a
+    // tool, the watcher's events arriving out of order) is written again
+    if (this.fileMissing && fs.existsSync(this.absPath)) this.fileMissing = false;
+    if (this.fileMissing) { this.saving = false; return false; }
     try {
       // Somebody may have written the file since we last read it (during the debounce window):
       // merge that first — writing over it would silently discard their change.

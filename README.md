@@ -153,6 +153,25 @@ blend.
   password form (accounts created by an administrator, e2e) is folded away behind a small link while
   Google sign-in is configured, and is the only form otherwise; links go to the GitHub repository and
   the issue tracker.
+* **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in the side
+  panel by our own viewer (fit-to-width / zoom, page navigation, a rebuilt PDF keeps the scroll
+  position), and a project's `.pdf` files open in a tab of their own from the file browser (ids
+  `pdf:<project>/<file>`), like an editor tab in VS Code. latexmk runs with `-synctex=1`; *Navigate ▸
+  Sync to PDF* (`Ctrl+Alt+J`, the panel's ⇄ Sync button) finds the cursor's line in the LaTeX as
+  built (`app/sourcelocate.ts`) and asks `synctex view` (server, `export.ts`) where it is — the
+  viewer scrolls there and flashes the box; a double-click on the PDF asks `synctex edit` for the
+  source line and puts the cursor into the paragraph or formula with those words (inverse search).
+  *Document ▸ Start Appendix Here* marks the cursor's paragraph as the start of the appendix
+  (LyX's `\start_of_appendix`, written as `\appendix`).
+* **The "[raw]" tab** — a right-click on a `.tex` tab (or *View ▸ LaTeX source beside the document*)
+  opens `raw:<document>`: the same editor instance with its LaTeX source in a resizable pane on the
+  right (`app/SourcePane.tsx` layout="right"). The two scroll together (the top paragraph ↔ its
+  source line, via `app/sourcelocate.ts`), and edits in the source are applied to the document as
+  one types — parsed on the server and merged as a diff — a moment after the last keystroke, held
+  back while the LaTeX is unbalanced (`checkTexHealth`), `Ctrl+Enter` applies at once; the source
+  is regenerated from the document when the pane loses the focus. The bottom source pane
+  (`Ctrl+Alt+S`) applies live the same way. The menubar's right side names the project (the tab
+  names the file).
 * **Command palette** (`app/MenuBar.tsx`): `Ctrl+Shift+P` (`⇧⌘P` on a Mac; `F1` as well) or the
   *Help* menu opens a search over every menu item and the shortcut table — results show the menu
   path and the shortcut, ↑/↓ + Enter runs one, Escape returns the keyboard to the text. The ✎ next
@@ -455,6 +474,12 @@ OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e
 # flows need the server to talk to the stub model: `node scripts/ai-stub.mjs` (port 3999) and the server
 # started with OPENROUTER_API_URL=http://127.0.0.1:3999 OPENROUTER_API_KEY=test-key, then
 OVERLYX_E2E_AI_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/ai.spec.ts
+# "a user writes a paper": real arXiv papers typed from blank documents through the editor UI —
+# paperwriting.spec.ts / paperwriting-more.spec.ts (first pages of Attention, a coding-theory paper, BERT) and
+# the whole GAN and Adam papers from abstract to bibliography with a latexmk build (~15 min each; needs pdftotext):
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/paperwriting-gan.spec.ts e2e/paperwriting-adam.spec.ts
+# OVERLYX_E2E_KEEP=1 leaves the typed projects on disk (e2e-paper-gan, e2e-paper-adam) for inspection
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/pdfview.spec.ts e2e/rawsplit.spec.ts   # pdf.js viewer, SyncTeX, PDF tabs; the [raw] split tab, scroll sync, live apply
 ```
 
 ## Offline mode

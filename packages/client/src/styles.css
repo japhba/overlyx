@@ -25,6 +25,7 @@
   --ui-hover: #dcdcd8;
   --row-hover: #e8eef7;
   --row-sel: #cfe0f5;
+  --sel-overlay: rgba(59, 110, 165, 0.28);   /* selection over text that must stay readable (a transparent textarea above its highlighted copy) */
   --active-bg: #cfd9e6;
   --active-border: #9fb3cc;
   --err: #b00020;
@@ -89,6 +90,7 @@ html[data-theme="dark"] {
   --ui-hover: #33333d;
   --row-hover: #2a3345;
   --row-sel: #2f4566;
+  --sel-overlay: rgba(122, 167, 234, 0.32);
   --active-bg: #34475f;
   --active-border: #5b78a4;
   --err: #ff7b72;
@@ -222,8 +224,10 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .menu-hint { padding: 5px 14px 3px; border-top: 1px solid var(--ui-border2); margin-top: 3px; color: var(--muted2); font-size: 10.5px; }
 .menu-empty { padding: 6px 14px 8px; color: var(--muted2); font-size: 12px; white-space: nowrap; }
 .menu-sub { position: relative; }
-.menu-sub > .menu-list { top: -5px; left: 100%; }
-.menu-sub::after { content: "▸"; float: right; }
+/* the submenu list sits inside a positioning wrapper span: to the right of its item, with the menu's own colours (the hovered item's white would be invisible on the surface) */
+.menu-sub .menu-list { color: var(--ui-fg); }   /* placed by SubMenu (position: fixed) */
+.menu-sub::after { content: "▸"; margin-left: auto; color: var(--muted2); }
+.menu-sub:hover::after { color: var(--on-accent-muted); }
 .menubar .spacer { flex: 1; }
 .menubar .userbox { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ui-muted); }
 .avatar { display: inline-block; width: 18px; height: 18px; border-radius: 50%; color: #fff; text-align: center; line-height: 18px; font-size: 10px; font-weight: 700; overflow: hidden; vertical-align: middle; letter-spacing: -0.02em; }
@@ -527,8 +531,11 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .lyx-math-display .eq-number { font-family: var(--editor-font); white-space: pre; text-align: right; color: var(--fg2); }
 .lyx-math-display .eq-number.per-row { position: static; white-space: normal; min-width: 2.2em; height: 1px; }
 .lyx-math-display .eq-number.per-row > span { position: absolute; right: 0; transform: translateY(-50%); white-space: pre; }
-.lyx-math-display .eq-number.per-row ~ .eq-labels { position: absolute; right: 0; bottom: -4px; }
-.lyx-math-display .eq-labels { font-family: var(--ui-font); font-size: 10px; color: var(--warn-fg); background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 3px; padding: 0 4px; cursor: pointer; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the label chip: left of the formula, the number on the right (as in the output). Placed by the node view (data-label-pos):
+   in the page margin when there is room, inside the empty left cell beside a narrow formula, else just above the formula's left corner */
+.lyx-math-display .eq-labels { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 1; font-family: var(--ui-font); font-size: 10px; color: var(--warn-fg); background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 3px; padding: 0 4px; cursor: pointer; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lyx-math-display[data-label-pos="margin"] .eq-labels { left: auto; right: 100%; margin-right: 8px; }
+.lyx-math-display[data-label-pos="above"] .eq-labels { top: 0; transform: translateY(-100%); }
 .lyx-math-display.ProseMirror-selectednode { outline: 2px solid var(--accent); }
 .lyx-macro { display: inline-block; font-size: 0.95em; background: var(--ok-bg); border: 1px solid var(--ok-border); border-radius: 3px; padding: 0 4px; margin: 1px; }
 .lyx-macro .macro-name { font-family: "DejaVu Sans Mono", monospace; font-size: 0.8em; color: var(--ok-fg2); }
@@ -606,7 +613,7 @@ pre.hl .l { position: relative; min-height: 1.45em; min-height: 1lh; }
 .source-pane .code pre.hl .l { min-height: 15px; }
 pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent); }
 .source-pane .code textarea.source { color: transparent; caret-color: var(--ui-fg); background: transparent; border: 0; resize: none; outline: none; }
-.source-pane .code textarea.source::selection { background: var(--row-sel); color: transparent; }
+.source-pane .code textarea.source::selection { background: var(--sel-overlay); color: transparent; }
 /* LaTeX colours */
 .hl-comment { color: var(--hl-comment); font-style: italic; }
 .hl-cmd { color: var(--hl-cmd); }
@@ -927,7 +934,8 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .text-editor .te-code pre.hl .l::before { content: counter(line); position: absolute; left: calc(-1 * var(--gutter) - 4px); width: var(--gutter); text-align: right; color: var(--muted2); user-select: none; }
 .text-editor .te-code pre.hl .l.cur::before { color: var(--fg2); }
 .text-editor textarea { color: transparent; caret-color: var(--ui-fg); background: transparent; }
-.text-editor textarea::selection { background: var(--row-sel); color: transparent; }
+.text-editor textarea::selection { background: var(--sel-overlay); color: transparent; }
+textarea::selection, .dialog pre::selection, .dialog input::selection { background: var(--row-sel); }
 .text-editor .te-code.readonly pre.hl { color: var(--fg2); }
 .filetree .actions { flex-wrap: wrap; row-gap: 3px; }
 .filetree .actions .small-btn { white-space: nowrap; }
@@ -1026,3 +1034,29 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .share-activity .what { flex: 1; color: var(--fg-muted, inherit); }
 .share-activity .git-token.admin .name { color: var(--danger, #c0392b); }
 .admin-projects .name { flex: 1; }
+
+/* PDF viewer (app/PdfViewer.tsx): the built PDF in the side panel and project PDFs in tabs */
+.pdf-viewer { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--muted2); }
+.pdf-toolbar { display: flex; align-items: center; gap: 4px; padding: 3px 6px; background: var(--surface2); border-bottom: 1px solid var(--ui-border); font-size: 11px; color: var(--fg2); flex: none; flex-wrap: wrap; }
+.pdf-toolbar .small-btn.active { background: var(--row-sel); }
+.pdf-toolbar .pdf-page { width: 3.2em; font-size: 11px; padding: 1px 3px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--page-bg); color: var(--ui-fg); text-align: right; }
+.pdf-toolbar .pdf-count { color: var(--muted2); }
+.pdf-toolbar .pdf-sep { width: 1px; height: 14px; background: var(--ui-border); margin: 0 4px; }
+.pdf-toolbar .pdf-hint { margin-left: auto; color: var(--muted2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pdf-pages { flex: 1; overflow: auto; padding: 12px 0; position: relative; }
+.pdf-page-box { position: relative; margin: 0 auto 12px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.35); overflow: hidden; }
+.pdf-page-box canvas { display: block; }
+.pdf-flash { position: absolute; border: 2px solid var(--accent); background: rgba(59,110,165,0.18); border-radius: 3px; pointer-events: none; animation: pdf-flash 2.5s ease-out forwards; }
+@keyframes pdf-flash { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
+.pdf-error { color: var(--err); padding: 12px; background: var(--surface); margin: 12px; border-radius: 4px; }
+.pdf-tab { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; }
+
+/* the "[raw]" tab: the document and its LaTeX source side by side (app/SourcePane.tsx layout="right") */
+.editor-column.split { flex-direction: row; }
+.source-pane.right { flex: none; position: relative; border-left: 1px solid var(--ui-border); background: var(--page-bg); height: auto; min-height: 0; }
+.source-pane .grip.v { position: absolute; top: 0; bottom: 0; left: -3px; right: auto; width: 6px; height: auto; cursor: col-resize; z-index: 2; }
+.source-pane .bar .apply-state { font-size: 11px; color: var(--muted2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.source-pane .bar .apply-state.ok { color: var(--ok-fg2, #3a3); }
+.source-pane .bar .apply-state.held, .source-pane .bar .apply-state.error { color: var(--err); }
+.tab-menu-backdrop { position: fixed; inset: 0; z-index: 60; }
+.menu-list.tab-menu { z-index: 61; }

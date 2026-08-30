@@ -16,6 +16,7 @@ export interface Project {
 export interface ShareMember { id: number; role: 'view' | 'edit'; via: string; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }
 export interface ShareInfo { name?: string; title?: string | null; owner: { id: number; name: string; username: string } | null; members: ShareMember[]; link: { token: string; role: 'view' | 'edit' } | null }
 export interface LayoutInfo { name: string; category?: string; labelType?: string; tocLevel?: number; latexType?: string; latexName?: string; isNumbered?: boolean }
+export interface SyncBox { page: number; x: number; y: number; h: number; v: number; W: number; H: number }
 export interface BibItem { key: string; author: string; year: string; title: string }
 export interface HealthIssue { code: string; message: string; severity: 'warning' | 'error'; fixable: boolean }
 /** ProseMirror JSON (nodes of the editor schema) as the server returns them for AI proposals */
@@ -144,6 +145,9 @@ export const api = {
   /** LaTeX export (returns the source) or a PDF build request (a background job; poll `build`) */
   export: (id: string, format: 'pdf' | 'tex') => req<{ ok: boolean; log?: string; warnings?: string[]; pdf?: string | null; tex?: string; job?: BuildJob }>('POST', `/api/docs/${encId(id)}/export`, { format }),
   cancelBuild: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/export/cancel`),
+  /** SyncTeX: the PDF boxes (points, origin top-left) of a 1-based line of the built .tex; inverse: the source line under a PDF point. */
+  synctexView: (id: string, line: number) => req<{ boxes: SyncBox[] }>('GET', `/api/docs/${encId(id)}/synctex/view?line=${line}`),
+  synctexEdit: (id: string, page: number, x: number, y: number) => req<{ file?: string; line: number | null; column?: number }>('GET', `/api/docs/${encId(id)}/synctex/edit?page=${page}&x=${x.toFixed(2)}&y=${y.toFixed(2)}`),
   build: (id: string, withTex = false) => req<{ build: BuildInfo | null; job: BuildJob | null }>('GET', `/api/docs/${encId(id)}/build${withTex ? '?tex=1' : ''}`),
   users: () => req<{ users: { id: number; username: string; name: string; color: string; isAdmin: number }[] }>('GET', '/api/users'),
   createUser: (username: string, name: string, password?: string) => req<{ user: User; password: string }>('POST', '/api/users', { username, name, password }),

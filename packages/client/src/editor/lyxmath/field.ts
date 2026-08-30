@@ -616,10 +616,12 @@ export class LyxMathField {
           return;
         }
         if (c.inMacroMode() && !this.readOnly) {
-          // LyX: Tab completes the command name being typed; a complete name is inserted
+          // LyX: Tab completes the command name being typed; a complete name is inserted. A name that is
+          // already a valid command sorts first among its own completions in LyX, so Tab finalizes it as
+          // typed (\bar, not \baro; \leq, not \leqq) — only an incomplete name takes the suggestion.
           const p = c.activeMacro()!;
           this.snapshot('complete');
-          if (p.hint) { p.n += p.hint; this.commit(); return; }
+          if (p.hint && !isKnownCommand(p.n.slice(1), this.macros)) { p.n += p.hint; this.commit(); return; }
           c.macroModeClose(); c.editInsertedInset(); this.commit(); return;
         }
         if (ev.shiftKey) c.cellBackward(); else c.cellForward(); this.moved(old); return;

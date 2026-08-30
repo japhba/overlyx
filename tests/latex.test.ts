@@ -229,6 +229,18 @@ describe('sections, lists, environments', () => {
     expect(res.tex).toContain('\\providecommand{\\theoremname}{Theorem}');
     expect(body(res)).toContain('\\begin{thm}\nthm text\n\\end{thm}\n\n\\begin{proof}\nproof text\n\\end{proof}');
   });
+
+  it('a theorem-like layout pulls in the layout its preamble depends on (DependsOn)', () => {
+    // only a Proposition is used: its \newtheorem{prop}[thm] shares Theorem's counter, so thm must be defined first
+    const src = lyx(par('Proposition', 'prop text'), ['\\begin_modules', 'theorems-ams', '\\end_modules']);
+    const res = tex(src);
+    expect(res.tex).toContain('\\usepackage{amsthm}');
+    const thm = res.tex.indexOf('\\newtheorem{thm}{\\protect\\theoremname}');
+    const prop = res.tex.indexOf('\\newtheorem{prop}[thm]{\\protect\\propositionname}');
+    expect(thm).toBeGreaterThan(-1);
+    expect(prop).toBeGreaterThan(thm);
+    expect(body(res)).toContain('\\begin{prop}\nprop text\n\\end{prop}');
+  });
 });
 
 /* ---------------------------------------------------------------- text */

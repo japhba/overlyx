@@ -248,7 +248,7 @@ test('PDF export builds a PDF for a revtex document', async ({ page, request }) 
   // builds run in the background: wait for this one (progress shown, then gone), not a previous PDF
   await expect(page.locator('.pdf-panel .build-progress')).toBeVisible({ timeout: 15000 });
   await expect(page.locator('.pdf-panel .build-progress')).toHaveCount(0, { timeout: 360000 });
-  await expect(page.locator('.pdf-panel iframe')).toHaveCount(1);
+  await expect(page.locator('.pdf-panel .pdf-viewer .pdf-page-box').first()).toBeVisible({ timeout: 30000 });   // the pdf.js viewer shows the pages
   await expect(page.locator('.pdf-panel .bar span')).toContainText('built');
 });
 

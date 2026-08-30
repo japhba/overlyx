@@ -95,3 +95,57 @@ export function findSourceLine(text: string, ctx: CursorContext): { line: number
   const off = findSourceOffset(text, ctx);
   return off === null ? null : { line: lineOf(text, off), offset: off };
 }
+
+/* ------------------------------------------------------------ the other direction: a source line → the document */
+
+/** A block of the document as the locator sees it: a paragraph's text (non-text children as NUL) or a display formula's LaTeX. */
+export interface LocateBlock { kind: 'text' | 'math'; text: string }
+
+/** LaTeX of a source line reduced to the words the editor shows: commands, braces, labels, citations and formulas removed. */
+export function plainWords(latex: string): string {
+  return latex
+    .replace(/%.*$/, '')
+    .replace(/\$[^$]*\$/g, ' ')
+    .replace(/\\(label|ref|eqref|cite[a-z]*|includegraphics|caption|footnote)\*?(\[[^\]]*\])?\{[^}]*\}/g, ' ')
+    .replace(/\\[A-Za-z]+\*?(\[[^\]]*\])?/g, ' ')
+    .replace(/[{}~]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Where source line `line` (0-based) of `text` is in the document: the block with the longest
+ * phrase of the line's words (a formula line is looked for in the display formulas' LaTeX). The
+ * lines right after an empty or command-only line are tried too (a paragraph that starts on the
+ * next line). Returns the block index and the offset of the phrase in it, or null.
+ */
+export function locateSourceLine(text: string, line: number, blocks: LocateBlock[]): { index: number; offset: number } | null {
+  const lines = text.split('\n');
+  const tryLine = (n: number): { index: number; offset: number } | null => {
+    const raw = lines[n] ?? '';
+    // a formula row: match the display formulas' LaTeX
+    const row = raw.trim().replace(/\\\\$/, '').replace(/\\label\{[^}]*\}/g, '').trim();
+    if (row.length >= 3 && /[\\^_=]/.test(row) && !/^\\(begin|end|section|subsection|item|caption|label)/.test(row)) {
+      for (let i = 0; i < blocks.length; i++) if (blocks[i].kind === 'math' && blocks[i].text.includes(row)) return { index: i, offset: 0 };
+    }
+    const words = plainWords(raw);
+    if (words.length < MIN_PHRASE) return null;
+    const flatBlocks = blocks.map(b => (b.kind === 'text' ? b.text.replace(/\s+/g, ' ') : ''));
+    const phrases = [...headPhrases(words.slice(0, MAX_PHRASE)), ...tailPhrases(words.slice(-MAX_PHRASE))].filter(p => p.length >= 4);
+    // the block that *is* the line (a heading), then one that begins with its words (a paragraph's
+    // first line), then one containing them — a short phrase such as a section title also occurs
+    // inside other paragraphs
+    const bare = flatBlocks.map(b => b.replace(/\u0000/g, '').trim());
+    const boundary = (b: string, p: string) => !/[\p{L}\p{N}]/u.test(b.charAt(p.length));
+    for (const p of phrases) {
+      for (let i = 0; i < bare.length; i++) if (bare[i] === p) return { index: i, offset: 0 };
+      for (let i = 0; i < bare.length; i++) if (bare[i].startsWith(p) && boundary(bare[i], p)) return { index: i, offset: 0 };
+      if (p.length < 16) continue;   // a short phrase found *inside* a paragraph is no evidence — unless nothing longer matches
+      for (let i = 0; i < flatBlocks.length; i++) { const at = flatBlocks[i].indexOf(p); if (at >= 0) return { index: i, offset: at }; }
+    }
+    for (const p of phrases) for (let i = 0; i < flatBlocks.length; i++) { const at = flatBlocks[i].indexOf(p); if (at >= 0) return { index: i, offset: at }; }
+    return null;
+  };
+  for (let n = line; n < Math.min(lines.length, line + 4); n++) { const r = tryLine(n); if (r) return r; }
+  return null;
+}
