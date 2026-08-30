@@ -156,7 +156,7 @@ test('sharing with a person: a viewer only reads, an editor can type', async ({ 
   expect(await metaStatus(bob)).toBe(200);
   const pageB = await openDocPage(bob);
   await expect(pageB.locator('.statusbar .readonly-badge')).toBeVisible({ timeout: 15000 });
-  await expect(pageB.locator('.filetree[data-project="e2e-share"] .badge')).toHaveText('view');
+  await expect(pageB.locator('.docpanel[data-project="e2e-share"] .badge')).toHaveText('view');
   const before = readFileSync(FILE, 'utf8');
   await pageB.locator('.lyx-editor .lyx-par').last().click();
   await pageB.keyboard.type('VIEWER-TYPED');
@@ -182,7 +182,7 @@ test('sharing with a person: a viewer only reads, an editor can type', async ({ 
   expect(await pushHeaderOverWebSocket(bob, DOC, 'report')).toBe(true);
   expect(await pushHeaderOverWebSocket(bob, DOC, 'article')).toBe(true);
   // the owner sees bob's cursor label; bob cannot share the project on
-  await expect(pageA.locator('.statusbar .avatar[data-username="bob"]')).toBeVisible({ timeout: 15000 });
+  await expect(pageA.locator('.menubar .users .avatar[data-username="bob"]')).toBeVisible({ timeout: 15000 });
   expect((await bob.request.get(`${BASE_URL}/api/projects/${PROJECT}/share`)).status()).toBe(403);
   await bob.close(); await admin.close();
 });

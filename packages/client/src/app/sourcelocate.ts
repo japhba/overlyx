@@ -104,7 +104,9 @@ export interface LocateBlock { kind: 'text' | 'math'; text: string }
 /** LaTeX of a source line reduced to the words the editor shows: commands, braces, labels, citations and formulas removed. */
 export function plainWords(latex: string): string {
   return latex
-    .replace(/%.*$/, '')
+    .replace(/(^|[^\\])%.*$/, '$1')
+    .replace(/\\([%&$#_{}])/g, '$1')
+    .replace(/\\ /g, ' ')
     .replace(/\$[^$]*\$/g, ' ')
     .replace(/\\(label|ref|eqref|cite[a-z]*|includegraphics|caption|footnote)\*?(\[[^\]]*\])?\{[^}]*\}/g, ' ')
     .replace(/\\[A-Za-z]+\*?(\[[^\]]*\])?/g, ' ')
@@ -148,4 +150,33 @@ export function locateSourceLine(text: string, line: number, blocks: LocateBlock
   };
   for (let n = line; n < Math.min(lines.length, line + 4); n++) { const r = tryLine(n); if (r) return r; }
   return null;
+}
+
+/**
+ * The caret of the source text (line + column, 0-based) → the block and the character offset in
+ * it: the block by `locateSourceLine`, the offset by the words of the line before the column
+ * (the longest tail of them that occurs in the block, nearest to where the line starts in it).
+ * Formula blocks give offset 0 (the formula as a whole). Null when the line is not in the document.
+ */
+export function locateSourceCaret(text: string, line: number, col: number, blocks: LocateBlock[]): { index: number; offset: number } | null {
+  const hit = locateSourceLine(text, line, blocks);
+  if (!hit) return null;
+  const b = blocks[hit.index];
+  if (b.kind === 'math') return { index: hit.index, offset: 0 };
+  const raw = (text.split('\n')[line] ?? '');
+  const before = plainWords(raw.slice(0, col));
+  const trailing = /\s$/.test(raw.slice(0, col));   // the caret stands after a space: the phrase ends at a word
+  if (!before) return hit;
+  let tail = before.length > MAX_PHRASE ? before.slice(-MAX_PHRASE) : before;
+  if (tail.length === MAX_PHRASE) { const sp = tail.indexOf(' '); if (sp > 0) tail = tail.slice(sp + 1); }
+  const inBlock = (p: string): number[] => occurrences(b.text, p);
+  for (const p of tailPhrases(tail)) {
+    const occ = inBlock(p);
+    if (!occ.length) continue;
+    const at = nearest(occ, hit.offset);
+    let off = at + p.length;
+    if (trailing && b.text.charAt(off) === ' ') off++;
+    return { index: hit.index, offset: Math.min(off, b.text.length) };
+  }
+  return hit;
 }

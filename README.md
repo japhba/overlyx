@@ -105,9 +105,17 @@ blend.
   reported automatically as one issue per distinct message (numbers / ids normalised), repeats become
   a count and at most one comment per 10 minutes; `OVERLYX_ERROR_REPORTS=off` keeps only the manual
   dialog. Without a token the dialog opens GitHub's pre-filled *new issue* form in a new tab instead.
-* **File browser, one project at a time**: a switcher at the top lists your projects and the ones
-  shared with you; the tree shows the selected project only. LaTeX
-  build products (`.aux`, `.log`, `.bbl`, …) and LyX backups are hidden unless *All files* is on.
+* **Documents panel, one project at a time** (`app/DocPanel.tsx`, Google-Docs style, left; `Ctrl+Alt+O`):
+  the project switcher at the top lists your projects and the ones shared with you — choosing another
+  one opens *its* main document (there is no tab bar across projects any more; the hash names the one
+  file shown). Below it the project's `.tex` documents are **document tabs** (main, appendix, macros …):
+  a tab opens its document in place, and its ▸ reveals the outline — the live one (headings numbered,
+  with the ▲ ▼ ◀ ▶ section tools) for the open document, the file's headings (`GET /api/docs/<id>/outline`,
+  `core/tex/headings.ts`, no parse) for the others, where a heading opens that document at the heading
+  (`#/<doc>?heading=<n>`). *Files* underneath is the file browser for everything else (figures, `.bib`,
+  `.sty`, uploads, `+ Doc` / `+ File`); LaTeX build products (`.aux`, `.log`, `.bbl`, …) and LyX
+  backups are hidden unless *All files* is on. The *Navigate* menu lists the sections as well
+  (so the command palette finds them).
 * **Text editor** for the other files of a project (`.tex`, `.bib`, `.sty`, `.cls`, `.bst`, `.md`,
   `.txt`, `latexmkrc`, …): they open in a tab like documents, with line numbers, autosave 1.5 s
   after the last change (or `Ctrl+S`), and a conflict check — if the file changed on the server
@@ -163,15 +171,19 @@ blend.
   source line and puts the cursor into the paragraph or formula with those words (inverse search).
   *Document ▸ Start Appendix Here* marks the cursor's paragraph as the start of the appendix
   (LyX's `\start_of_appendix`, written as `\appendix`).
-* **The "[raw]" tab** — a right-click on a `.tex` tab (or *View ▸ LaTeX source beside the document*)
-  opens `raw:<document>`: the same editor instance with its LaTeX source in a resizable pane on the
-  right (`app/SourcePane.tsx` layout="right"). The two scroll together (the top paragraph ↔ its
-  source line, via `app/sourcelocate.ts`), and edits in the source are applied to the document as
-  one types — parsed on the server and merged as a diff — a moment after the last keystroke, held
-  back while the LaTeX is unbalanced (`checkTexHealth`), `Ctrl+Enter` applies at once; the source
-  is regenerated from the document when the pane loses the focus. The bottom source pane
-  (`Ctrl+Alt+S`) applies live the same way. The menubar's right side names the project (the tab
-  names the file).
+* **The raw view** — *View ▸ LaTeX source beside the document* opens `raw:<document>`: the same
+  editor instance with its LaTeX source in a resizable pane on the right (`app/SourcePane.tsx`
+  layout="right"). The two scroll together (the top paragraph ↔ its source line, via
+  `app/sourcelocate.ts`) and the **cursor is mirrored both ways**, character by character: the
+  document cursor is a thin bar in the coloured source (the textarea's own caret is put there too
+  while nobody types in it), and a click or arrow key in the source puts the document cursor at that
+  word (`locateSourceCaret`: the line's block, then the words before the column) and scrolls it into
+  view — drawn as a blinking *mirror caret* (`editor/plugins/mirrorcaret.ts`) while the editor has no
+  focus. Edits in the source are applied to the document as one types — parsed on the server and
+  merged as a diff — a moment after the last keystroke, held back while the LaTeX is unbalanced
+  (`checkTexHealth`), `Ctrl+Enter` applies at once; the source is regenerated from the document when
+  the pane loses the focus. The bottom source pane (`Ctrl+Alt+S`) syncs and applies the same way.
+  The menubar's right side names the project.
 * **Command palette** (`app/MenuBar.tsx`): `Ctrl+Shift+P` (`⇧⌘P` on a Mac; `F1` as well) or the
   *Help* menu opens a search over every menu item and the shortcut table — results show the menu
   path and the shortcut, ↑/↓ + Enter runs one, Escape returns the keyboard to the text. The ✎ next
@@ -227,11 +239,15 @@ blend.
 * **Toolbars that come and go** (the math rows when the cursor enters a formula, the table and
   review rows) do not move the page: the scroll position is corrected by the height they add or
   take (`App.tsx`, a layout effect on the scroll container's top edge).
-* **Sidebars**: the file browser (left) and the Outline / PDF / Versions panels (right) hide
+* **Sidebars**: the documents panel (left) and the Comments / PDF / Versions panels (right) hide
   with the « » buttons in their tab strip; a hidden sidebar leaves a thin rail with its panels' names
-  that brings it back. The state is remembered per browser (`localStorage.ol.files`, `ol.right`).
-* **Presence**: the avatars in the status bar (profile pictures for Google accounts, initials otherwise) are the connected users; click one to jump to where
-  that user is editing (their cursor is scrolled into view and flashes).
+  that brings it back. The state is remembered per browser (`localStorage.ol.files`, `ol.right`; the
+  right side starts hidden, a PDF build opens it).
+* **Top right, Google-Docs style** (`app/MenuBar.tsx`): the **presence avatars** (profile pictures
+  for Google accounts, initials otherwise) are the people in the document — click one to jump to
+  where they are editing (their cursor is scrolled into view and flashes) —, then the **Share**
+  button (the project's owner only; also *File ▸ Share project…*), the theme toggle and your own
+  avatar, whose menu signs out.
 * **Right-click menu** (`editor/editormenu.ts`): what the click landed on comes first (a
   cross-reference, citation, link, child document, graphics, inset, tracked change — with the
   actions that make sense for it), then Cut / Copy / Paste, *Rewrite with AI* (when switched on),
@@ -270,6 +286,9 @@ blend.
     word, Esc dismisses. `✦ AI…` in the status bar shows a request in flight. Inside formulas the
     ghost is rendered by KaTeX at the end of the cell (`\htmlClass{lm-ghost}`), typing its first
     characters keeps it, Tab inserts it as LaTeX. Replies are cached and rate-limited per user.
+  * *The ✦ toolbar button* — off the toolbar until *Preferences ▸ Show the ✦ AI button* (or Tools ▸
+    AI assistance) enables it; it is a plain on/off switch for autocomplete (text and formulas
+    together), nothing else — rewriting stays on ⌘K / the Tools menu.
   * *Models* — Preferences ▸ Models chooses the model for ⌘K and for autocomplete separately (a
     list with measured notes, or any OpenRouter id typed in); the choice is per browser and sent with
     each request (`model`, validated on the server); the server defaults apply otherwise.
@@ -282,8 +301,8 @@ blend.
   preamble, raw header), Graphics (scale, width/height, rotation, clipping, LaTeX options), math
   Delimiters and Matrix insertion — all writing exactly the LyX parameters. Right-click menus on formulas, cross-references (go
   to label, reference format), citations, hyperlinks, child documents, insets and tracked changes;
-  `Ctrl/⌘+click` follows a reference or opens a child document; **tabs** for open documents (new
-  tabs open right of the current one); *View ▸ Master + child documents in one
+  `Ctrl/⌘+click` follows a reference or opens a child document (in place — the documents panel on
+  the left is where one switches between the files of the project); *View ▸ Master + child documents in one
   view* shows a paper and its `\include`d children as one scrolling page; an editable **Source pane**
   below the text (`Ctrl+Alt+S`, the *Source* switch in the right tab strip): the document's LaTeX with
   syntax colours (`app/texhighlight.ts`), following the cursor (`app/sourcelocate.ts`: the words before

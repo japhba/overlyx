@@ -23,7 +23,8 @@ export interface EditorContext {
   /** master + child documents shown in one view */
   combined: boolean;
   /** open a document in a tab of the workspace (optionally without switching to it) */
-  openInTab?: (id: string, opts?: { background?: boolean; goto?: string }) => void;
+  /** show another document (or file) of the project — in place, one project at a time */
+  openInTab?: (id: string, opts?: { goto?: string; heading?: number }) => void;
   /** jump to a label (in any open editor, or open the document that defines it) */
   gotoLabel?: (name: string, from?: EditorView) => void;
   /** the editor view that had the selection last (master or a child document) */

@@ -24,7 +24,7 @@ import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, 
 import { feedbackRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
-import { collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText } from '@overlyx/core';
+import { texHeadings, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText } from '@overlyx/core';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -75,7 +75,7 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
  */
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|tex|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|synctex\/(?:view|edit)))?$/.exec(full)!;
+  const m = /^(.*?)(?:\/(meta|tex|outline|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|synctex\/(?:view|edit)))?$/.exec(full)!;
   const id = decodeURIComponent(m[1]);
   const action = m[2] ?? '';
   const write = req.method !== 'GET' && !/^export/.test(action);
@@ -684,6 +684,20 @@ api.get('/docs/*/tex', async (req, res) => {
     res.setHeader('Content-Type', 'application/x-tex; charset=utf-8');
     if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${path.basename(doc.relPath)}"`);
     res.send(doc.toText());
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/** The headings of a document from its file on disk (no parse, no loading): the document panel's outline of documents that are not open. */
+api.get('/docs/*/outline', (req, res) => {
+  try {
+    const id = docId(req);
+    const project = id.split('/')[0], rel = id.slice(project.length + 1);
+    const abs = resolveProjectPath(project, rel);
+    if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) { res.status(404).json({ error: 'not found' }); return; }
+    const st = fs.statSync(abs);
+    const text = fs.readFileSync(abs, 'utf8');
+    const depth = /\\setcounter\{secnumdepth\}\{(-?\d+)\}/.exec(text);
+    res.json({ headings: texHeadings(text, depth ? Number(depth[1]) : 3), mtime: st.mtimeMs });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 

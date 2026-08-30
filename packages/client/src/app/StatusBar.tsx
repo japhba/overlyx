@@ -19,7 +19,7 @@ export function SaveIndicator({ save }: { save: SaveState }) {
   }
 }
 
-/** Presence avatars: one per connected client; click to jump to where that user is editing. */
+/** Presence avatars (top right of the menubar): one per connected client; click to jump to where that user is editing. */
 export function UserAvatars({ users, onJump }: { users: PresenceUser[]; onJump?: (u: PresenceUser) => void }) {
   return (
     <span class="users" title={users.map(u => u.name).join(', ')}>
@@ -32,7 +32,7 @@ export function UserAvatars({ users, onJump }: { users: PresenceUser[]; onJump?:
   );
 }
 
-export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, onJumpToUser }: {
+export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy }: {
   layout: string; status: Status; chord: string | null; message: { text: string; kind: 'info' | 'error' } | null; save: SaveState;
   tracking: boolean; trackingAs?: string; change?: string | null; docLabel?: string | null; readOnly?: boolean;
   /** no document editor is open (start screen, text file): only messages */
@@ -41,7 +41,6 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
   updateReady?: boolean;
   /** an autocomplete request is on its way (Tools ▸ AI assistance) */
   aiBusy?: boolean;
-  onJumpToUser?: (u: PresenceUser) => void;
 }) {
   if (quiet) return <div class="statusbar">{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" /></div>;
   return (
@@ -58,7 +57,6 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
       <span class="spacer" />
       {updateReady && <button type="button" class="update-hint" title="A newer version of OverLyX is deployed. Reloading takes a second; your document is kept." onClick={() => location.reload()}>↻ new version — reload</button>}
       <SaveIndicator save={save} />
-      <UserAvatars users={status.users} onJump={onJumpToUser} />
     </div>
   );
 }

@@ -4,11 +4,11 @@ import { nodeText } from '../editor/cliptext';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
 import { undo, redo } from 'y-prosemirror';
 import { addColumnAfter, addColumnBefore, addRowAfter, addRowBefore, deleteColumn, deleteRow, deleteTable, mergeCells, splitCell } from 'prosemirror-tables';
-import { api, type AiStatus, type BibAddResult, type DocMeta, type User, fileUrl } from '../api';
+import { api, type AiStatus, type BibAddResult, type DocMeta, type Project, type User, fileUrl } from '../api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { openRewrite, REWRITE_KEY } from '../editor/ai/rewrite';
 import { Login } from './Login';
-import { FileBrowser } from './FileBrowser';
+import { DocPanel } from './DocPanel';
 import { Home, projectDocs } from './Home';
 import { TextEditor } from './TextEditor';
 import { ShareDialog } from './Share';
@@ -23,7 +23,7 @@ import { Versions } from './Versions';
 import { PdfPanel, stateFromBuild, jobActive, type PdfState } from './PdfPanel';
 import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX } from './Ruler';
 import { StatusBar, type Status } from './StatusBar';
-import { SourcePane, type SourceTarget, cursorLine } from './SourcePane';
+import { SourcePane, type SourceTarget, cursorLine, docBlocks, blockPos } from './SourcePane';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
 import { Tour, tourWanted, rememberTour, type TourEnd } from './Tour';
 import { FeedbackDialog } from './Feedback';
@@ -35,9 +35,9 @@ import { editorContext, viewDocId } from '../editor/context';
 import { navHistory, type NavLocation } from './navhistory';
 import { restoredCursorPos } from '../editor/cursormemory';
 import { PdfViewer, type PdfTarget } from './PdfViewer';
-import { locateSourceLine, type LocateBlock } from './sourcelocate';
+import { locateSourceLine } from './sourcelocate';
 import { canonical, effectiveShortcut, keyFromEvent } from './keybindings';
-import { STANDARD_LAYOUTS } from '../editor/layouts';
+import { STANDARD_LAYOUTS, sectionLevel } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import * as C from '../editor/commands';
@@ -119,21 +119,23 @@ async function clearLocalData(): Promise<void> {
   } catch { /* ignore */ }
 }
 
-type RightTab = 'outline' | 'comments' | 'pdf' | 'versions';
-const RIGHT_TABS = ['outline', 'comments', 'pdf', 'versions'] as const;
-const RIGHT_TAB_LABELS: Record<RightTab, string> = { outline: 'Outline', comments: 'Comments', pdf: 'PDF', versions: 'Versions' };
-const RIGHT_TAB_TITLES: Record<RightTab, string> = { outline: 'Outline (Ctrl+Alt+O)', comments: 'Comment threads: open ones and the resolved archive', pdf: 'PDF preview', versions: 'Versions of this document' };
+type RightTab = 'comments' | 'pdf' | 'versions';
+const RIGHT_TABS = ['comments', 'pdf', 'versions'] as const;
+const RIGHT_TAB_LABELS: Record<RightTab, string> = { comments: 'Comments', pdf: 'PDF', versions: 'Versions' };
+const RIGHT_TAB_TITLES: Record<RightTab, string> = { comments: 'Comment threads: open ones and the resolved archive', pdf: 'PDF preview', versions: 'Versions of this document' };
+const LEFT_TITLE = 'Documents of the project and their outlines (Ctrl+Alt+O)';
 const SOURCE_TITLE = 'LaTeX source below the text (Ctrl+Alt+S)';
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 
-/** `#/project/path.lyx?goto=label`, or a share link `#/share/<token>` */
-function parseHash(): { id: string | null; goto: string | null; share: string | null } {
+/** `#/project/path.tex?goto=label` or `?heading=<n>` (the n-th heading), or a share link `#/share/<token>` */
+function parseHash(): { id: string | null; goto: string | null; heading: number | null; share: string | null } {
   const raw = location.hash.replace(/^#\/?/, '');
   const q = raw.indexOf('?');
   const idPart = decodeURIComponent(q >= 0 ? raw.slice(0, q) : raw);
-  if (idPart.startsWith('share/')) return { id: null, goto: null, share: idPart.slice('share/'.length) };
-  const goto = q >= 0 ? new URLSearchParams(raw.slice(q + 1)).get('goto') : null;
-  return { id: idPart || null, goto, share: null };
+  if (idPart.startsWith('share/')) return { id: null, goto: null, heading: null, share: idPart.slice('share/'.length) };
+  const params = q >= 0 ? new URLSearchParams(raw.slice(q + 1)) : null;
+  const h = params?.get('heading');
+  return { id: idPart || null, goto: params?.get('goto') ?? null, heading: h !== null && h !== undefined && /^\d+$/.test(h) ? Number(h) : null, share: null };
 }
 
 type ToolbarId = 'standard' | 'extra' | 'math' | 'mathpanels' | 'table' | 'review';
@@ -153,31 +155,30 @@ const MATH_PANEL_ICONS: Record<string, string> = { style: 'Style' };
 const NAV_BACK_ID = 'Navigate ▸ Back', NAV_FORWARD_ID = 'Navigate ▸ Forward';
 const NAV_BACK_KEY = 'Ctrl+Alt+←', NAV_FORWARD_KEY = 'Ctrl+Alt+→';
 
-function loadTabs(): string[] { try { const t = JSON.parse(localStorage.getItem('ol.tabs') || '[]'); return Array.isArray(t) ? t.filter(x => typeof x === 'string') : []; } catch { return []; } }
-
 function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
-  // the tab in the hash: a document, "text:"/"pdf:" files, or "raw:<document>" — the document beside its LaTeX source
+  // what the hash shows (one project, one file at a time): a document, "text:"/"pdf:" files, or
+  // "raw:<document>" — the document beside its LaTeX source
   const [hashId, setHashId] = useState<string | null>(parseHash().id);
   const docId = hashId ? hashId.replace(/^raw:/, '') : null;
   const rawSplit = !!hashId && hashId.startsWith('raw:');
-  // tabs hold .tex documents (the collaborative editor) and other text files (a plain text editor,
-  // ids prefixed with "text:")
+  // .tex documents open in the collaborative editor, other text files in a plain text editor (ids
+  // prefixed with "text:"), a project's PDF files in the PDF viewer ("pdf:")
   const isTextTab = !!docId && docId.startsWith('text:');
-  // PDF files of a project open in the PDF viewer (ids prefixed with "pdf:")
   const isPdfTab = !!docId && docId.startsWith('pdf:');
   const textId = docId ? docId.replace(/^(text|pdf):/, '') : null;
   const isLyxDoc = !!docId && !isTextTab && docId.endsWith('.tex');
-  const [tabs, setTabs] = useState<string[]>(loadTabs);
-  const [tabMenu, setTabMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  // the project shown in the documents panel (its owner gets the Share button)
+  const [curProject, setCurProject] = useState<Project | null>(null);
   const [meta, setMeta] = useState<DocMeta | null>(null);
   const [headerLines, setHeaderLines] = useState<string[]>([]);
   const [status, setStatus] = useState<Status>({ connected: false, synced: false, users: [] });
   const [layout, setLayout] = useState('Standard');
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [activePos, setActivePos] = useState(0);
-  // sidebars: shown / hidden state is kept per browser (a hidden sidebar leaves a rail to bring it back)
+  // sidebars: the documents panel (left: project, document tabs, outlines, files) and the right
+  // panels; shown / hidden state is kept per browser (a hidden sidebar leaves a rail to bring it back)
   const [showFiles, setShowFiles] = useState(() => stored('ol.files') !== '0');
-  const [rightTab, setRightTab] = useState<RightTab | null>(() => { const v = stored('ol.right'); return v === null ? 'outline' : (RIGHT_TABS as readonly string[]).includes(v) ? v as RightTab : null; });
+  const [rightTab, setRightTab] = useState<RightTab | null>(() => { const v = stored('ol.right'); return v !== null && (RIGHT_TABS as readonly string[]).includes(v) ? v as RightTab : null; });
   // the LaTeX source is a panel below the writing area with its own switch
   const [showSource, setShowSource] = useState(() => stored('ol.source') === '1');
   useEffect(() => { try { localStorage.setItem('ol.files', showFiles ? '1' : '0'); localStorage.setItem('ol.right', rightTab ?? ''); localStorage.setItem('ol.source', showSource ? '1' : '0'); } catch { /* ignore */ } }, [showFiles, rightTab, showSource]);
@@ -279,6 +280,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const activeViewRef = useRef<EditorView | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const pendingGoto = useRef<string | null>(parseHash().goto);
+  const pendingHeading = useRef<number | null>(parseHash().heading);
   const [, force] = useState(0);
   const rerender = () => force(x => x + 1);
 
@@ -286,9 +288,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   useEffect(() => {
     const onHash = () => {
-      const h = parseHash(); pendingGoto.current = h.goto; setHashId(h.id);
+      const h = parseHash(); pendingGoto.current = h.goto; pendingHeading.current = h.heading; setHashId(h.id);
       if (h.id?.startsWith('text:')) navHistory.visit(h.id, null);
-      if (h.goto && h.id === editorContext.docId) runGoto();
+      if ((h.goto || h.heading !== null) && h.id === editorContext.docId) runGoto();
     };
     navHistory.load();
     const h0 = parseHash().id;
@@ -339,32 +341,16 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     const after = cursorTop();
     if (scroller && before !== null && after !== null && after !== before) scroller.scrollTop += after - before;
   }, [textWidth]);
-  useEffect(() => { localStorage.setItem('ol.tabs', JSON.stringify(tabs)); }, [tabs]);
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.combined', combined ? '1' : '0'); }, [combined]);
 
-  // every opened document gets a tab, inserted right of the tab it was opened from
-  const lastDoc = useRef<string | null>(null);
-  const addTab = (t: string[], id: string, after: string | null): string[] => {
-    if (t.includes(id)) return t;
-    const i = after ? t.indexOf(after) : -1;
-    return i < 0 ? [...t, id] : [...t.slice(0, i + 1), id, ...t.slice(i + 1)];
-  };
-  useEffect(() => { if (hashId) { setTabs(t => addTab(t, hashId, lastDoc.current)); lastDoc.current = hashId; } }, [hashId]);
-
-  const openInTab = useCallback((id: string, opts: { background?: boolean; goto?: string } = {}) => {
-    setTabs(t => addTab(t, id, parseHash().id));
-    if (opts.background) { notify(`Opened ${id.split('/').pop()} in a new tab`); return; }
-    const target = '#/' + id + (opts.goto ? '?goto=' + encodeURIComponent(opts.goto) : '');
-    if (location.hash === target) { pendingGoto.current = opts.goto ?? null; runGoto(); } else location.hash = target;
+  /** show a document or file (in place — one project, one file at a time), optionally at a label or the n-th heading */
+  const openInTab = useCallback((id: string, opts: { goto?: string; heading?: number } = {}) => {
+    const target = '#/' + id + (opts.goto ? '?goto=' + encodeURIComponent(opts.goto) : opts.heading !== undefined ? '?heading=' + opts.heading : '');
+    if (location.hash === target || (location.hash === '#/' + id && !opts.goto && opts.heading === undefined)) { pendingGoto.current = opts.goto ?? null; pendingHeading.current = opts.heading ?? null; runGoto(); }
+    else location.hash = target;
   }, []);
-  const closeTab = useCallback((id: string) => {
-    setTabs(t => {
-      const idx = t.indexOf(id);
-      const next = t.filter(x => x !== id);
-      if (id === parseHash().id) { const nb = next[Math.min(idx, next.length - 1)]; location.hash = nb ? '#/' + nb : ''; }
-      return next;
-    });
-  }, []);
+  /** leave the document: back to the start screen */
+  const closeDoc = useCallback(() => { location.hash = '#/'; }, []);
 
   /** Find a label in a view and select it. */
   const gotoLabelIn = (view: EditorView, name: string): boolean => {
@@ -390,10 +376,23 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     notify(`Label “${name}” not found`, 'error');
   }, []);
   const runGoto = () => {
-    const name = pendingGoto.current;
-    if (!name) return;
     const v = editorRef.current?.view;
-    if (v && gotoLabelIn(v, name)) { pendingGoto.current = null; }
+    const name = pendingGoto.current;
+    if (name && v && gotoLabelIn(v, name)) pendingGoto.current = null;
+    // ?heading=<n>: the n-th heading (the documents panel's static outline counts them the same way)
+    const n = pendingHeading.current;
+    if (n !== null && v) {
+      const items = buildOutline(v.state.doc, false).filter(i => sectionLevel(i.layout) !== null);
+      const it = items[n];
+      if (it) { jumpToOutline(v, it); pendingHeading.current = null; }
+    }
+  };
+  /** the cursor to a heading of the outline (the Navigate menu, the documents panel) */
+  const jumpToOutline = (v: EditorView, it: OutlineItem) => {
+    const tr = v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(Math.min(it.pos + 1, v.state.doc.content.size)))).scrollIntoView();
+    navHistory.jump(() => v.dispatch(tr));
+    v.focus();
+    (v.nodeDOM(it.pos) as HTMLElement | null)?.scrollIntoView?.({ block: 'start' });
   };
 
   const onSelection = (view: EditorView, info?: { docChanged: boolean }) => {
@@ -490,8 +489,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       onGone: (reason) => {
         if (cancelled) return;
         if (/reset/.test(reason)) return;   // handled by the epoch / stale-history flow
-        notify(`${docId}: ${reason} — the tab was closed (a copy is in the project's versions)`, 'error');
-        closeTab(hashId!);
+        notify(`${docId}: ${reason} — the document was closed (a copy is in the project's versions)`, 'error');
+        closeDoc();
       },
     });
     editorRef.current = handle; activeViewRef.current = handle.view; editorContext.activeView = handle.view;
@@ -540,7 +539,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         withMeta(m);
       }).catch((e: Error & { status?: number }) => {
         if (cancelled) return;
-        if (e.status === 403) { notify(e.message || 'You no longer have access to this project', 'error'); closeTab(hashId!); return; }
+        if (e.status === 403) { notify(e.message || 'You no longer have access to this project', 'error'); closeDoc(); return; }
         if (!navigator.onLine) { notify('Offline: document metadata (macros, bibliography) not available', 'error'); withMeta(null); return; }
         // online, but the server could not deliver the metadata: without it tracked changes could not be
         // attributed and macros would not render — keep the document read-only and retry
@@ -607,12 +606,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       find: () => setFindOpen(true),
       openDialog: (name, arg) => setDialog({ name, arg }),
       toggleTrackChanges: () => toggleTracking(),
-      toggleOutline: () => setRightTab(t => (t === 'outline' ? null : 'outline')),
+      toggleOutline: () => setShowFiles(s => !s),
       toggleSource: () => setShowSource(s => !s),
       toggleCombined: () => setCombined(c => !c),
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
-      closeTab: () => { if (hashId) closeTab(hashId); },
+      closeTab: () => closeDoc(),
       zoom: (d) => setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))),
       textWidth: stepTextWidth,
       openFile: () => setShowFiles(true),
@@ -694,16 +693,11 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       if (!r.line) { notify('SyncTeX: nothing is known about this place in the PDF', 'error'); return; }
       const tex = await builtTex();
       if (!tex) return;
-      const blocks: (LocateBlock & { pos: number })[] = [];
-      view.state.doc.descendants((node, pos) => {
-        if (node.type.name === 'math_display') { blocks.push({ kind: 'math', text: String(node.attrs.latex ?? ''), pos }); return false; }
-        if (node.isTextblock) blocks.push({ kind: 'text', text: node.textBetween(0, node.content.size, undefined, '\u0000'), pos: pos + 1 });
-        return true;
-      });
+      const blocks = docBlocks(view);
       const hit = locateSourceLine(tex, r.line - 1, blocks);
       if (!hit) { notify(`SyncTeX: line ${r.line} of the LaTeX source was not found in the document`, 'error'); return; }
       const b = blocks[hit.index];
-      const pos = Math.min(b.kind === 'math' ? b.pos : b.pos + hit.offset, view.state.doc.content.size);
+      const pos = Math.min(b.kind === 'math' ? b.pos : blockPos(b, hit.offset), view.state.doc.content.size);
       view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos))).scrollIntoView());
       view.focus();
     } catch (e) { notify('SyncTeX: ' + (e as Error).message, 'error'); }
@@ -795,6 +789,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   };
 
   const layouts = meta?.layouts?.length ? meta.layouts : STANDARD_LAYOUTS;
+  // the Share button (top right) belongs to the project's owner; the panel reports the project it shows
+  const shareProject = curProject && curProject.role === 'owner' && curProject.via !== 'admin' && (!docId || docId.replace(/^(text|pdf):/, '').split('/')[0] === curProject.name) ? curProject.name : null;
   const base = (id: string) => id.split('/').pop() ?? id;
   // the project's name: the tab already names the file (a combined master shows the children it includes)
   const docLabel = docId ? (combined && childIds.length ? [docId, ...childIds].map(base).join(' + ') : docId.replace(/^(text|pdf):/, '').split('/')[0]) : '';
@@ -810,15 +806,14 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   ] };
   const textFileMenus: MenuDef[] = docId ? [
     { title: 'File', items: [
-      { label: 'Open (file browser)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
+      { label: 'Open… (documents panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
       ...(isPdfTab ? [] : [{ label: 'Saved automatically (Ctrl+S saves now)', disabled: true, action: () => {} }]),
       { sep: true },
       { label: 'Download', action: () => window.open(`/api/projects/${encodeURIComponent(textId!.split('/')[0])}/file/${textId!.split('/').slice(1).map(encodeURIComponent).join('/')}`) },
       { label: 'Share project…', action: () => setShareFor(textId!.split('/')[0]) },
       { label: 'Git repository…', action: () => setGitFor(textId!.split('/')[0]) },
       { sep: true },
-      { label: 'Close tab', action: () => closeTab(hashId!) },
-      { label: 'Close other tabs', action: () => setTabs([docId]) },
+      { label: 'Close (back to the projects)', action: closeDoc },
     ] },
   ] : [];
   /** the font marks the toolbar reports: stored marks / marks at the caret, or the marks of the first selected text */
@@ -833,10 +828,18 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const textColor = markValue('color');
   // the shortcut table is searchable too (a match opens the table)
   const helpSearchEntries = useMemo(() => HELP_ROWS.map(([k, v]) => ({ id: 'Keyboard shortcuts ▸ ' + v, label: v, path: ['Keyboard shortcuts'], shortcut: k, fixed: true, action: () => setDialog({ name: 'help' }) })), []);
+  const sectionItems = useMemo<MenuDef['items']>(() => {
+    const v = masterView;
+    if (!v) return [];
+    return outline.filter(it => it.level < 99 && it.layout !== 'Title').slice(0, 120).map(it => ({
+      label: `${'\u2003'.repeat(Math.max(0, it.level - 1))}${it.num ? it.num + '\u2002' : ''}${it.text}`,
+      action: () => jumpToOutline(v, it),
+    }));
+  }, [outline, masterView]);
   const menus: MenuDef[] = [...(docId && !isLyxDoc ? textFileMenus : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
-      { label: 'Open (file browser)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
+      { label: 'Open… (documents panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
       { label: save.state === 'offline' ? 'Offline — changes are saved on this device' : save.state === 'saving' ? 'Saving…' : 'All changes saved automatically', disabled: true, action: () => {} },
       { sep: true },
       { label: 'Export ▸', sub: [
@@ -849,8 +852,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Share project…', action: () => setShareFor(docId.split('/')[0]) },
       { label: 'Git repository…', action: () => setGitFor(docId.split('/')[0]) },
       { sep: true },
-      { label: 'Close tab', action: () => closeTab(hashId!) },
-      { label: 'Close other tabs', action: () => setTabs([docId]) },
+      { label: 'Close (back to the projects)', action: closeDoc },
     ] },
     { title: 'Edit', items: [
       { label: 'Undo', shortcut: 'Ctrl+Z', action: () => run(undo) },
@@ -939,9 +941,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Math: toggle inline/display', action: () => run(C.toggleMathDisplay) },
     ] },
     { title: 'View', items: [
-      { label: 'LaTeX source beside the document (… [raw] tab)', checked: rawSplit, action: () => { if (docId) location.hash = '#/' + (rawSplit ? docId : 'raw:' + docId); } },
-      { label: 'File browser', checked: showFiles, action: () => setShowFiles(!showFiles) },
-      { label: 'Outline', shortcut: 'Ctrl+Alt+O', checked: rightTab === 'outline', action: () => setRightTab(rightTab === 'outline' ? null : 'outline') },
+      { label: 'LaTeX source beside the document (raw view)', checked: rawSplit, action: () => { if (docId) location.hash = '#/' + (rawSplit ? docId : 'raw:' + docId); } },
+      { label: 'Outline', shortcut: 'Ctrl+Alt+O', checked: showFiles, action: () => setShowFiles(!showFiles) },
       { label: 'Source pane (LaTeX, below the text)', shortcut: 'Ctrl+Alt+S', checked: showSource, action: () => setShowSource(!showSource) },
       { label: 'PDF preview', checked: rightTab === 'pdf', action: () => setRightTab(rightTab === 'pdf' ? null : 'pdf') },
       { label: 'Versions', checked: rightTab === 'versions', action: () => setRightTab(rightTab === 'versions' ? null : 'versions') },
@@ -1063,15 +1064,17 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Index (print)', action: () => run(C.insertIndexPrint) },
     ] },
     { title: 'Navigate', items: [
-      { label: 'Outline pane', shortcut: 'Ctrl+Alt+O', action: () => setRightTab('outline') },
+      { label: 'Outline pane (documents panel)', shortcut: 'Ctrl+Alt+O', action: () => setShowFiles(true) },
       { label: 'Go to label…', action: () => { const n = prompt('Label:'); if (n) gotoLabel(n, view ?? undefined); } },
       { label: 'Sync to PDF (forward search)', shortcut: 'Ctrl+Alt+J', action: () => { void syncToPdf(); } },
       { sep: true },
       { label: 'Back', shortcut: NAV_BACK_KEY, disabled: !navHistory.canBack(), action: navBack },
       { label: 'Forward', shortcut: NAV_FORWARD_KEY, disabled: !navHistory.canForward(), action: navForward },
-      { label: 'Next tab', action: () => { const i = tabs.indexOf(hashId!); const n = tabs[(i + 1) % tabs.length]; if (n) location.hash = '#/' + n; } },
+      { label: 'Next document of the project', action: () => { const d = curProject ? projectDocs(curProject).map(x => `${curProject.name}/${x}`) : []; const i = d.indexOf(docId); const n = d[(i + 1) % d.length]; if (n && n !== docId) openInTab(n); } },
       { label: 'Beginning of document', shortcut: 'Ctrl+Home', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)).scrollIntoView()); view.focus(); } } },
       { label: 'End of document', shortcut: 'Ctrl+End', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView()); view.focus(); } } },
+      // the document's sections (LyX's Navigate menu lists them too): a click jumps, the palette finds them
+      ...(sectionItems.length ? [{ sep: true } as const, ...sectionItems] : []),
     ] },
     { title: 'Document', items: [
       { label: 'Settings…', action: () => setDialog({ name: 'settings' }) },
@@ -1088,6 +1091,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'AI assistance ▸', sub: [
         { label: ai === null ? 'Checking the server…' : ai.available ? `Models: ${prefs.aiModel || ai.model} (⌘K) · ${prefs.aiCompletionModel || ai.completionModel} (autocomplete)` : 'Not configured on this server (OPENROUTER_API_KEY)', disabled: true },
         { label: 'Choose the models… (Preferences)', action: () => setDialog({ name: 'preferences' }) },
+        { label: 'Show the ✦ button on the toolbar (autocomplete on/off)', checked: prefs.aiButton, action: () => setPref('aiButton', !prefs.aiButton) },
         { sep: true },
         { label: `Rewrite with AI (${REWRITE_KEY})`, checked: prefs.aiRewrite, action: () => setPref('aiRewrite', !prefs.aiRewrite) },
         { label: 'Autocomplete text (ghost text, Tab inserts)', checked: prefs.aiCompleteText, action: () => setPref('aiCompleteText', !prefs.aiCompleteText) },
@@ -1174,6 +1178,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     document.execCommand(op);
   };
   const layoutBtn = (id: string, name: string, title: string, icon: string): ToolButton => ({ id, title, icon, action: () => run(C.setLayout(layout === name && name !== 'Standard' ? 'Standard' : name)), active: layout === name });
+  const aiComplete = prefs.aiCompleteText || prefs.aiCompleteMath;
   const inTable = !!view && !!C.tableContext(view.state);
   const tableSt = view ? T.tableToolbarState(view.state) : null;
   const changesFilterSt = view ? changesFilterKey.getState(view.state) : null;
@@ -1216,10 +1221,11 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { id: 'flex', title: 'Custom insets (Flex)', icon: 'box', palette: { title: 'Custom insets of this document class', list: true, cols: 1, items: (meta?.flexInsets ?? []).map(n => ({ label: n, action: () => run(C.insertFlex(n)) })).concat([{ label: 'Other…', action: () => { const n = prompt('Flex inset name:', meta?.flexInsets?.[0] ?? 'Code'); if (n) run(C.insertFlex(n)); } }]) } },
     ],
     [
-      { id: 'outline', title: 'Outline (Ctrl+Alt+O)', icon: 'outline', action: () => setRightTab(rightTab === 'outline' ? null : 'outline'), active: rightTab === 'outline' },
+      { id: 'outline', title: LEFT_TITLE, icon: 'outline', action: () => setShowFiles(s => !s), active: showFiles },
       { id: 'margin', title: 'Show notes & comments in the margin', icon: 'margin', action: toggleMargin, active: marginMode },
       { id: 'spellcheck', title: prefs.spellcheck ? 'Spell checking is on — click to switch it off' : 'Spell checking is off — click to switch it on', icon: 'spellcheck', action: () => setPref('spellcheck', !prefs.spellcheck), active: prefs.spellcheck },
-      { id: 'ai', title: prefs.aiRewrite ? `Rewrite with AI (${REWRITE_KEY})` : 'AI assistance is off — click to open the preferences', icon: 'ai', action: () => { if (prefs.aiRewrite) runView(v => openRewrite(v)); else setDialog({ name: 'preferences' }); }, active: prefs.aiRewrite },
+      // the ✦ button exists only once it is enabled in the preferences; it switches autocomplete (text + formulas) on and off
+      ...(prefs.aiButton ? [{ id: 'ai', title: aiComplete ? 'AI autocomplete is on — click to switch it off' : 'AI autocomplete is off — click to switch it on (ghost text after a pause while typing; Tab inserts it)', icon: 'ai', action: () => { setPref('aiCompleteText', !aiComplete); setPref('aiCompleteMath', !aiComplete); notify(!aiComplete ? 'AI autocomplete on' : 'AI autocomplete off'); }, active: aiComplete } as ToolButton] : []),
       { id: 'toggleinset', title: 'Open/close inset (Ctrl+Alt+I)', icon: 'toggleinset', action: () => run(C.toggleInset) },
       { id: 'tb-math', title: 'Show math toolbar', icon: 'mathtb', action: () => toggleTb('math', showMath), active: showMath },
       { id: 'tb-table', title: 'Show table toolbar', icon: 'tabletb', action: () => toggleTb('table', showTable), active: showTable },
@@ -1504,24 +1510,16 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   return (
     <div class="app">
-      <MenuBar menus={menus} user={user} onLogout={onLogout} onHome={() => { location.hash = '#/'; }} searchEntries={helpSearchEntries} right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />
+      <MenuBar menus={menus} user={user} onLogout={onLogout} onHome={() => { location.hash = '#/'; }} searchEntries={helpSearchEntries}
+        users={isLyxDoc ? status.users : undefined} onJumpToUser={jumpToUser}
+        onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? shareProject}”: invite people or turn on a link` : undefined}
+        right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />
       {isLyxDoc && tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={standardGroups} />}
       {isLyxDoc && tbMode('extra') !== 'off' && <Toolbar id="extra" groups={extraGroups} />}
       {isLyxDoc && showMath && <Toolbar id="math" label="Math" groups={mathGroups} />}
       {isLyxDoc && showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={mathPanelGroups} />}
       {isLyxDoc && showTable && <Toolbar id="table" label="Table" groups={tableGroups} />}
       {isLyxDoc && showReview && <Toolbar id="review" label="Review" groups={reviewGroups} />}
-      {tabs.length > 0 && <TabBar tabs={tabs} current={hashId} onSelect={id => { location.hash = '#/' + id; }} onClose={closeTab} onReorder={setTabs} onContext={(id, x, y) => setTabMenu({ id, x, y })} />}
-      {tabMenu && (
-        <div class="tab-menu-backdrop" onMouseDown={() => setTabMenu(null)} onContextMenu={e => { e.preventDefault(); setTabMenu(null); }}>
-          <div class="menu-list tab-menu" style={`position:fixed;top:${tabMenu.y}px;left:${tabMenu.x}px`} onMouseDown={e => e.stopPropagation()}>
-            {/^[^:]+\.tex$/.test(tabMenu.id) && <div class="menu-item" onClick={() => { const id = tabMenu.id; setTabMenu(null); openInTab('raw:' + id); }}><span>Open LaTeX source beside — {tabMenu.id.split('/').pop()} [raw]</span></div>}
-            {tabMenu.id.startsWith('raw:') && <div class="menu-item" onClick={() => { const id = tabMenu.id; setTabMenu(null); location.hash = '#/' + id.slice(4); }}><span>Show the document only</span></div>}
-            <div class="menu-item" onClick={() => { const id = tabMenu.id; setTabMenu(null); closeTab(id); }}><span>Close tab</span></div>
-            <div class="menu-item" onClick={() => { const id = tabMenu.id; setTabMenu(null); for (const t of tabs) if (t !== id) closeTab(t); }}><span>Close other tabs</span></div>
-          </div>
-        </div>
-      )}
       {docId && meta && meta.health.length > 0 && (
         <div class="health-bar">
           <span class="health-icon">⚠</span>
@@ -1565,12 +1563,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       })()}
       <div class="main">
         {showFiles ? (
-          <div class="sidebar">
-            <div class="panel-tabs"><button class="active">Files</button><button class="hide" title="Hide the file browser" onClick={() => setShowFiles(false)}>«</button></div>
-            <div class="panel-body"><FileBrowser current={textId} refreshKey={refreshKey} onOpen={id => openInTab(id)} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} /></div>
+          <div class="sidebar left">
+            <DocPanel current={textId} currentDoc={isLyxDoc ? docId : null} refreshKey={refreshKey} outline={outline} activePos={activePos} view={masterView}
+              onOpen={(id, o) => openInTab(id, o)} onGit={p => setGitFor(p)} onHide={() => setShowFiles(false)} onProject={setCurProject} notify={notify} />
           </div>
         ) : (
-          <div class="rail left"><button data-rail="files" title="Show the file browser" onClick={() => setShowFiles(true)}>Files</button></div>
+          <div class="rail left"><button data-rail="outline" title={LEFT_TITLE} onClick={() => setShowFiles(true)}>Documents</button></div>
         )}
         <div class={'editor-column' + (rawSplit && isLyxDoc ? ' split' : '')}>
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
@@ -1597,14 +1595,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         {isLyxDoc && rightTab && (
           <div class={'sidebar right' + (rightTab === 'pdf' ? ' wide' : '')}>
             <div class="panel-tabs">
-              <button class={rightTab === 'outline' ? 'active' : ''} data-tab="outline" onClick={() => setRightTab('outline')} title={RIGHT_TAB_TITLES.outline}>Outline</button>
               <button class={rightTab === 'comments' ? 'active' : ''} data-tab="comments" onClick={() => setRightTab('comments')} title={RIGHT_TAB_TITLES.comments}>Comments</button>
               <button class={rightTab === 'pdf' ? 'active' : ''} data-tab="pdf" onClick={() => setRightTab('pdf')} title={RIGHT_TAB_TITLES.pdf}>PDF</button>
               <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }} title={RIGHT_TAB_TITLES.versions}>Versions</button>
               <button class={'toggle' + (showSource ? ' on' : '')} data-tab="source" onClick={() => setShowSource(s => !s)} title={SOURCE_TITLE}>Source</button>
               <button class="hide" title="Hide the sidebar" onClick={() => setRightTab(null)}>»</button>
             </div>
-            {rightTab === 'outline' && <div class="panel-body"><Outline view={masterView} items={outline} activePos={activePos} /></div>}
             {rightTab === 'comments' && <div class="panel-body"><Comments views={[masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} /></div>}
             {rightTab === 'pdf' && <PdfPanel docId={docId} state={pdf} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }} />}
             {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
@@ -1614,14 +1610,13 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null}
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}
-        quiet={!!docId && !isLyxDoc}
-        onJumpToUser={jumpToUser} />
+        quiet={!!docId && !isLyxDoc} />
       {renderDialog()}
       {shareFor && <ShareDialog project={shareFor} user={user} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
       {tour && <Tour intro={tour === 'intro'} onEnd={endTour}
         ctx={{ docId, ready: isLyxDoc && status.synced && !!view, docTick, layout, inMath: !!mathField, saveState: save.state, rightTab, pdfBusy: pdf.busy, pdfBuiltAt: pdf.builtAt ?? 0, shareOpen: !!shareFor, gitOpen: !!gitFor, marginMode }}
-        actions={{ openExample, showRight: () => { if (!rightTab) setRightTab('outline'); }, showFiles: () => setShowFiles(true) }} />}
+        actions={{ openExample, showRight: () => { if (!rightTab) setRightTab('pdf'); }, showFiles: () => setShowFiles(true) }} />}
     </div>
   );
 }
@@ -1669,30 +1664,6 @@ function ChildEditor({ id, user, marginMode, readOnly, onSelection, onDocChange,
         {!error && <a href={'#/' + id} class="small-btn" title="Open this child document in its own tab">Open in tab</a>}
       </div>
       {error ? <div class="child-doc-error">Child document cannot be opened: {error}</div> : <div class="editor-host child" ref={ref} />}
-    </div>
-  );
-}
-
-function TabBar({ tabs, current, onSelect, onClose, onReorder, onContext }: { onContext?: (id: string, x: number, y: number) => void; tabs: string[]; current: string | null; onSelect: (id: string) => void; onClose: (id: string) => void; onReorder: (t: string[]) => void }) {
-  const drag = useRef<string | null>(null);
-  const base = (id: string) => (id.split('/').pop() ?? id) + (id.startsWith('raw:') ? ' [raw]' : '');
-  // disambiguate tabs with the same file name by prefixing the project
-  const counts = new Map<string, number>();
-  for (const t of tabs) counts.set(base(t), (counts.get(base(t)) ?? 0) + 1);
-  return (
-    <div class="tabbar" role="tablist">
-      {tabs.map(id => (
-        <a key={id} href={'#/' + id} role="tab" class={'tab' + (id === current ? ' active' : '')} title={id} draggable
-          onClick={e => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onSelect(id); } }}
-          onContextMenu={e => { if (onContext) { e.preventDefault(); onContext(id, e.clientX, e.clientY); } }}
-          onAuxClick={e => { if (e.button === 1) { e.preventDefault(); onClose(id); } }}
-          onDragStart={() => { drag.current = id; }}
-          onDragOver={e => e.preventDefault()}
-          onDrop={e => { e.preventDefault(); const from = drag.current; if (!from || from === id) return; const t = tabs.filter(x => x !== from); t.splice(t.indexOf(id), 0, from); onReorder(t); }}>
-          <span class="tab-name">{(counts.get(base(id)) ?? 0) > 1 ? id.replace(/^(raw|text|pdf):/, '').split('/')[0] + '/' : ''}{base(id)}</span>
-          <button class="tab-close" title="Close tab (middle-click)" onClick={e => { e.preventDefault(); e.stopPropagation(); onClose(id); }}>×</button>
-        </a>
-      ))}
     </div>
   );
 }

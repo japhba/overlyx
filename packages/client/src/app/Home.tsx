@@ -41,7 +41,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const newProject = async () => {
     const name = prompt('Name of the new project (letters, digits, space, . _ -):');
     if (!name) return;
-    try { await api.createProject(name.trim()); await load(); onChanged(); notify(`Project “${name.trim()}” created — add a document with + in the file browser`); }
+    try { await api.createProject(name.trim()); await load(); onChanged(); notify(`Project “${name.trim()}” created — add a document with + Doc in the documents panel`); }
     catch (e) { notify((e as Error).message, 'error'); }
   };
   const remove = async (p: Project) => {
@@ -70,7 +70,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {!isExample && <div class="meta">{p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · {docs.length} document{docs.length === 1 ? '' : 's'}, {p.files.length} file{p.files.length === 1 ? '' : 's'}</div>}
         <div class="docs">
           {docs.slice(0, isExample ? 1 : 6).map(d => <a key={d} href={'#/' + p.name + '/' + d} onClick={e => { e.preventDefault(); onOpen(p.name + '/' + d); }}>📄 {d}</a>)}
-          {!isExample && docs.length > 6 && <span class="meta">+{docs.length - 6} more in the file browser</span>}
+          {!isExample && docs.length > 6 && <span class="meta">+{docs.length - 6} more in the documents panel</span>}
           {!docs.length && <span class="meta">No documents yet.</span>}
         </div>
         <div class="actions">
@@ -91,7 +91,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       <div class="sub">OverLyX edits LyX documents in the browser, together with others. Projects are private until you share them.</div>
       <div class="home-actions">
         <button class="btn primary" onClick={() => void newProject()}>+ New project</button>
-        <button class="btn" onClick={onBrowse}>Open the file browser</button>
+        <button class="btn" onClick={onBrowse}>Show the documents panel</button>
       </div>
       {projects === null && <div class="meta">Loading your projects…</div>}
       {example && <div class="cards">{card(example)}</div>}

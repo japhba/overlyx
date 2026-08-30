@@ -38,15 +38,17 @@ test.beforeAll(async ({ browser }) => {
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
-test('the file browser shows one project at a time and hides build files', async ({ browser }) => {
+test('the documents panel shows one project at a time (documents as tabs, other files below) and hides build files', async ({ browser }) => {
   const admin = await asUser(browser);
   const page = await admin.newPage();
   await page.goto('/#/' + PROJECT + '/main.tex');
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  const panel = page.locator('.docpanel');
   const tree = page.locator('.filetree');
-  await expect(tree).toHaveAttribute('data-project', PROJECT);
-  await expect(tree.locator('select')).toHaveValue(PROJECT);
-  await expect(tree.locator('.tree-row.file')).toHaveCount(3);          // main.tex, macros.tex, refs.bib
+  await expect(panel).toHaveAttribute('data-project', PROJECT);
+  await expect(panel.locator('.project-switch')).toHaveValue(PROJECT);
+  await expect(panel.locator('.doc-tab')).toHaveCount(1);                 // main.tex is a document tab …
+  await expect(tree.locator('.tree-row.file')).toHaveCount(2);          // … macros.tex and refs.bib are files
   await expect(tree.locator('[data-file="main.aux"]')).toHaveCount(0);
   await expect(tree.locator('[data-file="main.tex~"]')).toHaveCount(0);
   await expect(tree.locator('.project-info')).toContainText('Your project');
@@ -54,16 +56,18 @@ test('the file browser shows one project at a time and hides build files', async
   await expect(tree.locator('[data-file="main.aux"]')).toHaveCount(1);
   await expect(tree.locator('[data-file="main.tex~"]')).toHaveCount(1);
   await tree.locator('button', { hasText: 'Fewer' }).click();
-  // other projects are one switch away, not in the same tree
-  const options = await tree.locator('select option').allTextContents();
+  // other projects are one switch away, not in the same panel; switching opens the other project's document
+  const options = await panel.locator('.project-switch option').allTextContents();
   expect(options.some(o => o.startsWith('Welcome to OverLyX'))).toBe(true);
-  await expect(tree.locator('[data-file="welcome.tex"]')).toHaveCount(0);
-  await tree.locator('select').selectOption('welcome-admin');
-  await expect(tree).toHaveAttribute('data-project', 'welcome-admin');
-  await expect(tree.locator('[data-file="welcome.tex"]')).toHaveCount(1);
+  await expect(panel.locator('.doc-tab[data-doc="welcome.tex"]')).toHaveCount(0);
+  await panel.locator('.project-switch').selectOption('welcome-admin');
+  await expect(page).toHaveURL(/#\/welcome-admin\/welcome\.tex$/);
+  await expect(panel).toHaveAttribute('data-project', 'welcome-admin');
+  await expect(panel.locator('.doc-tab[data-doc="welcome.tex"]')).toHaveClass(/active/);
   await expect(tree.locator('[data-file="macros.tex"]')).toHaveCount(0);
-  // opening a document switches back to its project
-  await tree.locator('select').selectOption(PROJECT);
+  // and back
+  await panel.locator('.project-switch').selectOption(PROJECT);
+  await expect(page).toHaveURL(new RegExp(`#/${PROJECT}/main\\.tex$`));
   await expect(tree.locator('[data-file="macros.tex"]')).toHaveCount(1);
   await admin.close();
 });
@@ -79,7 +83,7 @@ test('text files open in a tab with the text editor; edits are saved automatical
   await expect(ed).toBeVisible();
   await expect(ed.locator('textarea')).toHaveValue(MACROS);
   await expect(ed.locator('.state')).toHaveText('✓ Saved');
-  await expect(page.locator('.tabbar .tab.active')).toContainText('macros.tex');
+  await expect(page.locator('.filetree .tree-row.current')).toContainText('macros.tex');
   await expect(page.locator('.toolbar')).toHaveCount(0);            // no LyX toolbars for a text file
   expect(await ed.locator('pre.hl .l').count()).toBeGreaterThanOrEqual(3);   // one overlay block per line (numbered by CSS)
   // type at the end: autosaved to disk
@@ -97,10 +101,10 @@ test('text files open in a tab with the text editor; edits are saved automatical
   await expect(ed.locator('.state')).toHaveText('✓ Saved', { timeout: 10000 });
   expect(readFileSync(`${DIR}/macros.tex`, 'utf8')).toContain('\n  % indented');
   // the document tab still works next to it
-  await page.locator('.tabbar .tab', { hasText: 'main.tex' }).click();
+  await page.locator('.docpanel .doc-tab[data-doc="main.tex"] .doc-name').click();
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   await expect(page.locator('.text-editor')).toHaveCount(0);
-  await page.locator('.tabbar .tab', { hasText: 'macros.tex' }).click();
+  await page.locator('.filetree [data-file="macros.tex"]').click();
   await expect(page.locator('.text-editor textarea')).toHaveValue(/% indented/);
   await admin.close();
 });

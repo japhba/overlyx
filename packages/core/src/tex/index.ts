@@ -12,3 +12,5 @@ export { splitDocument, readSettings, settingsFromHeader, settingsLine, preamble
 export { Scanner } from './scanner.ts';
 export { checkTexHealth, repairTex } from './health.ts';
 export type { HealthIssue } from './health.ts';
+export { texHeadings, headingPlainText } from './headings.ts';
+export type { TexHeading } from './headings.ts';

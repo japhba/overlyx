@@ -557,8 +557,17 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 /* ------------------------------------------------------------ status bar */
 .statusbar { display: flex; align-items: center; gap: 14px; height: 24px; padding: 0 10px; background: var(--ui-bg); border-top: 1px solid var(--ui-border); font-size: 12px; color: var(--ui-muted); }
 .statusbar .spacer { flex: 1; }
-.statusbar .users { display: flex; gap: 5px; align-items: center; }
-.statusbar .users .avatar { width: 20px; height: 20px; line-height: 20px; }
+/* presence (top right of the menubar, Google-Docs style): overlapping avatars, the Share pill, the account avatar with its menu */
+.menubar .users { display: flex; align-items: center; margin-right: 12px; }
+.menubar .users .avatar { width: 24px; height: 24px; line-height: 20px; font-size: 10.5px; border: 2px solid var(--ui-bg); margin-left: -7px; }
+.menubar .users .avatar:first-child { margin-left: 0; }
+.menubar .share-btn { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 13px 0 10px; margin-right: 10px; border: 0; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 600; font-size: 12.5px; cursor: pointer; }
+.menubar .share-btn:hover { filter: brightness(1.1); }
+.menubar .share-btn svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+.menubar .user-menu .avatar-btn { border: 0; background: none; padding: 0; display: inline-flex; border-radius: 50%; }
+.menubar .user-menu .avatar-btn .avatar { width: 24px; height: 24px; line-height: 24px; font-size: 10.5px; }
+.menubar .user-menu.open .avatar-btn, .menubar .user-menu .avatar-btn:hover { box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 3.5px var(--muted2); }
+.menubar .user-menu .menu-list { min-width: 200px; }
 .statusbar .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--err); margin-right: 4px; }
 .statusbar .dot.on { background: var(--ok); }
 .statusbar .chord { background: var(--hl-bg); padding: 0 6px; border-radius: 3px; color: var(--ui-fg); }
@@ -611,6 +620,12 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 /* one block per source line (texhighlight.ts highlightLines): soft-wrapped like the textarea; the current line is marked */
 pre.hl .l { position: relative; min-height: 1.45em; min-height: 1lh; }
 .source-pane .code pre.hl .l { min-height: 15px; }
+/* the document cursor mirrored into the source (a bar before the character at its offset) and the source caret mirrored into the document */
+.source-pane .code pre.hl .hl-caret { box-shadow: -1.5px 0 0 0 var(--accent); }
+.source-pane .code pre.hl .hl-caret-after { box-shadow: 1.5px 0 0 0 var(--accent); }
+.mirror-caret { display: inline-block; width: 0; height: 1.1em; vertical-align: text-bottom; border-left: 2px solid var(--accent); margin-left: -1px; animation: mirror-blink 1.1s steps(2, start) infinite; pointer-events: none; }
+.ProseMirror:focus .mirror-caret { display: none; }
+@keyframes mirror-blink { to { visibility: hidden; } }
 pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent); }
 .source-pane .code textarea.source { color: transparent; caret-color: var(--ui-fg); background: transparent; border: 0; resize: none; outline: none; }
 .source-pane .code textarea.source::selection { background: var(--sel-overlay); color: transparent; }
@@ -839,10 +854,10 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .tb-swatch.custom input[type=color] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; padding: 0; border: 0; cursor: pointer; }
 .tb-colors-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--ui-muted); }
 /* presence avatars: click to jump to a user's cursor */
-.statusbar .users .avatar { border: 0; padding: 0; cursor: pointer; font-family: inherit; transition: transform 0.1s; }
-.statusbar .users .avatar:hover { transform: scale(1.2); box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 3px var(--muted2); }
-.statusbar .users .avatar.self { box-shadow: 0 0 0 1.5px var(--ui-bg), 0 0 0 2.5px var(--muted2); cursor: default; }
-.statusbar .users .avatar:not(.has-cursor) { opacity: 0.6; }
+.menubar .users .avatar { padding: 0; cursor: pointer; font-family: inherit; transition: transform 0.1s; position: relative; }
+.menubar .users .avatar:hover { transform: scale(1.15); z-index: 1; box-shadow: 0 0 0 1.5px var(--muted2); }
+.menubar .users .avatar.self { cursor: default; }
+.menubar .users .avatar:not(.has-cursor) { opacity: 0.6; }
 .ProseMirror-yjs-cursor.flash > div { animation: ol-cursor-flash 0.4s ease-in-out 4; }
 @keyframes ol-cursor-flash { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }
 
@@ -1060,3 +1075,31 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .source-pane .bar .apply-state.held, .source-pane .bar .apply-state.error { color: var(--err); }
 .tab-menu-backdrop { position: fixed; inset: 0; z-index: 60; }
 .menu-list.tab-menu { z-index: 61; }
+
+/* ------------------------------------------------------------ documents panel (app/DocPanel.tsx): project switcher, document tabs with their outlines, files */
+.sidebar.left { width: 272px; }
+.docpanel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.docpanel .project-bar { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 8px; }
+.docpanel .project-switch { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 700; padding: 3px 4px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--ui-fg); cursor: pointer; }
+.docpanel .project-switch:hover { border-color: var(--ui-border); background: var(--surface); }
+.docpanel .panel-body { padding: 4px 0 12px; }
+.docpanel .doc-tabs { padding: 2px 4px 6px; }
+.docpanel .doc-tab-row { display: flex; align-items: center; border-radius: 5px; }
+.docpanel .doc-tab-row:hover { background: var(--row-hover); }
+.docpanel .doc-tab.active > .doc-tab-row { background: var(--row-sel); }
+.docpanel .doc-tab.active > .doc-tab-row .fname { font-weight: 700; }
+.docpanel .twisty { border: 0; background: none; color: var(--muted2); font-size: 10px; width: 18px; height: 22px; padding: 0; cursor: pointer; border-radius: 3px; flex: none; }
+.docpanel .twisty:hover { color: var(--ui-fg); background: var(--ui-hover); }
+.docpanel .doc-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; padding: 2px 6px 2px 0; color: inherit; text-decoration: none; font-size: 12.5px; line-height: 18px; }
+.docpanel .doc-name .ficon { font-size: 11px; }
+.docpanel .doc-name .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docpanel .doc-outline { padding: 1px 0 4px 14px; }
+.docpanel .doc-outline .outline-item { font-size: 12px; }
+.docpanel .doc-outline .outline-item.static { cursor: pointer; }
+.docpanel .outline-loading, .docpanel .outline-empty { color: var(--muted2); font-size: 11.5px; padding: 2px 8px 4px; }
+.docpanel .empty { padding: 4px 10px; color: var(--muted2); font-size: 12px; }
+.docpanel .section-head { display: flex; align-items: center; gap: 2px; margin: 6px 4px 0; padding: 3px 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--ui-muted); cursor: pointer; border-radius: 4px; user-select: none; }
+.docpanel .section-head:hover { background: var(--row-hover); color: var(--ui-fg); }
+.docpanel .section-head .twisty { width: 14px; height: 16px; font-size: 9px; }
+.docpanel .filetree { padding-bottom: 6px; }
+.docpanel .filetree .actions { padding: 2px 8px 4px; }

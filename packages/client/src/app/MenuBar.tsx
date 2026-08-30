@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { User } from '../api';
+import type { PresenceUser } from '../editor/editor';
+import { UserAvatars } from './StatusBar';
 import { Wordmark } from './Logo';
 import { AvatarContent, initials } from './Avatar';
 import { toggleTheme, useTheme } from './theme';
@@ -204,7 +206,18 @@ function SearchMenu({ menu, entries, close, recording, setRecording }: { menu: M
   );
 }
 
-export function MenuBar({ menus, user, right, onLogout, onHome, searchEntries: extra = [] }: { menus: MenuDef[]; user: User; right?: ComponentChildren; onLogout: () => void; onHome: () => void; /** reference entries (shortcuts without a menu item) for the palette */ searchEntries?: SearchEntry[] }) {
+export function MenuBar({ menus, user, right, onLogout, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle }: {
+  menus: MenuDef[]; user: User; right?: ComponentChildren; onLogout: () => void; onHome: () => void;
+  /** reference entries (shortcuts without a menu item) for the palette */
+  searchEntries?: SearchEntry[];
+  /** who is in the document right now (Google-Docs style, top right; click one to jump to their cursor) */
+  users?: PresenceUser[];
+  onJumpToUser?: (u: PresenceUser) => void;
+  /** the Share button (top right) — only for the project's owner */
+  onShare?: (() => void) | null;
+  shareTitle?: string;
+}) {
+  const [userOpen, setUserOpen] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
   const [recording, setRecording] = useState<string | null>(null);
   const bindings = useBindings();
@@ -229,15 +242,15 @@ export function MenuBar({ menus, user, right, onLogout, onHome, searchEntries: e
   const live = useRef({ keyIndex, recording, open, searchIndex });
   live.current = { keyIndex, recording, open, searchIndex };
 
-  const close = () => { setOpen(null); setRecording(null); const p = prevFocus.current; prevFocus.current = null; if (p && document.contains(p)) p.focus(); };
+  const close = () => { setOpen(null); setUserOpen(false); setRecording(null); const p = prevFocus.current; prevFocus.current = null; if (p && document.contains(p)) p.focus(); };
   const openSearch = () => { if (live.current.searchIndex < 0) return; if (live.current.open === null) prevFocus.current = document.activeElement as HTMLElement | null; setOpen(live.current.searchIndex); };
   useEffect(() => {
-    if (open === null) return;
+    if (open === null && !userOpen) return;
     const h = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('.menubar')) close(); };
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !live.current.recording) close(); };
     document.addEventListener('mousedown', h); document.addEventListener('keydown', k);
     return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
-  }, [open]);
+  }, [open, userOpen]);
   // global keys: the palette (Ctrl+Shift+P / F1), the user's shortcuts, and the swallowed default keys of rebound commands
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -273,12 +286,20 @@ export function MenuBar({ menus, user, right, onLogout, onHome, searchEntries: e
       ))}
       <span class="spacer" />
       {right}
+      {users && users.length > 0 && <UserAvatars users={users} onJump={onJumpToUser} />}
+      {onShare && (
+        <button type="button" class="share-btn" data-share onClick={onShare} title={shareTitle ?? 'Share this project: invite people or turn on a link'}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="1.6" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /></svg>
+          Share
+        </button>
+      )}
       <ThemeToggle />
-      <span class="userbox">
-        <span class="avatar" style={{ background: user.color }} data-initials={user.avatar ? undefined : initials(user.name).length}><AvatarContent name={user.name} src={user.avatar} /></span>
-        <span>{user.name}</span>
-        <button class="small-btn" onClick={onLogout}>Sign out</button>
-      </span>
+      <div class={'menu user-menu' + (userOpen ? ' open' : '')}>
+        <button type="button" class="avatar-btn" data-user-menu title={`${user.name} (${user.username})`} onMouseDown={e => { e.preventDefault(); if (open !== null) setOpen(null); setUserOpen(o => !o); }}>
+          <span class="avatar" style={{ background: user.color }} data-initials={user.avatar ? undefined : initials(user.name).length}><AvatarContent name={user.name} src={user.avatar} /></span>
+        </button>
+        {userOpen && <MenuList items={[{ label: user.name, disabled: true }, { label: user.username, disabled: true }, { sep: true }, { label: 'Sign out', action: onLogout }]} path={['Account']} close={close} style="left:auto;right:0" />}
+      </div>
     </div>
   );
 }

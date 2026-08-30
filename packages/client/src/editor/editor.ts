@@ -22,6 +22,7 @@ import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
 import { fontCarryPlugin } from './plugins/fontcarry';
 import { insetCaretPlugin } from './plugins/insetcaret';
 import { findPlugin } from './plugins/find';
+import { mirrorCaretPlugin } from './plugins/mirrorcaret';
 import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
@@ -300,6 +301,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     changeTrackingPlugin(),
     changesFilterPlugin(),
     findPlugin(),
+    mirrorCaretPlugin(),
     macroDefsPlugin(() => viewRef),
     new Plugin({
       view: () => ({

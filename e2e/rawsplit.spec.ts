@@ -1,9 +1,10 @@
 /**
- * The "[raw]" tab: a right-click on a .tex tab opens the document beside its LaTeX source
- * (app/SourcePane.tsx layout="right") in a tab of its own — the same editor instance, the source
- * pane on the right. The two scroll together (top paragraph ↔ its source line); edits in the
- * source are applied to the document as one types (held while the LaTeX is unbalanced); the
- * menubar names the project, not the file.
+ * The raw view (View ▸ LaTeX source beside the document, hash "raw:<doc>"): the document beside
+ * its LaTeX source (app/SourcePane.tsx layout="right") — the same editor instance, the source
+ * pane on the right. The two scroll together (top paragraph ↔ its source line) and the cursor is
+ * mirrored both ways (caret in the source ↔ cursor in the document); edits in the source are
+ * applied to the document as one types (held while the LaTeX is unbalanced); the menubar names
+ * the project, not the file.
  */
 import { test, expect } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
@@ -32,27 +33,61 @@ const openDoc = async (page: import('@playwright/test').Page) => {
   await page.waitForTimeout(500);
 };
 
-test('right-click on the tab opens the [raw] split tab with the same editor; the menubar names the project', async ({ page }) => {
+test('View ▸ LaTeX source beside the document opens the raw view with the same editor; the menubar names the project', async ({ page }) => {
   const errors = collectErrors(page);
   await openDoc(page);
   await expect(page.locator('.doc-title')).toHaveText(PROJECT);
   await page.evaluate(() => { (window as any).__ed = document.querySelector('.lyx-editor'); });
-  await page.locator('.tabbar .tab', { hasText: 'long.tex' }).click({ button: 'right' });
-  await expect(page.locator('.tab-menu')).toBeVisible();
-  await page.locator('.tab-menu .menu-item', { hasText: 'Open LaTeX source beside' }).click();
+  const viewItem = async () => { await page.locator('.menubar .menu button', { hasText: 'View' }).click(); await page.locator('.menu-item', { hasText: 'LaTeX source beside' }).click(); };
+  await viewItem();
   await expect(page).toHaveURL(new RegExp(`#/raw:${PROJECT}/long\\.tex$`));
-  await expect(page.locator('.tabbar .tab.active')).toContainText('long.tex [raw]');
-  await expect(page.locator('.tabbar .tab')).toHaveCount(2);
+  await expect(page.locator('.docpanel .doc-tab.active .fname')).toHaveText('long.tex');   // the document tab stays the active one
   await expect(page.locator('.editor-column.split .source-pane.right textarea.source')).toHaveValue(/\\section\{Methods\}/, { timeout: 15000 });
   expect(await page.evaluate(() => (window as any).__ed === document.querySelector('.lyx-editor'))).toBe(true);   // the document was not reloaded
   await expect(page.locator('.source-pane .small-btn', { hasText: 'Apply' })).toHaveCount(0);   // edits apply by themselves
-  // back to the plain tab: no split; the raw tab's context menu can close it
-  await page.locator('.tabbar .tab', { hasText: /^long\.tex\s*×$/ }).click();
+  // the same item switches back to the plain view; so does the pane's ✕
+  await viewItem();
+  await expect(page).toHaveURL(new RegExp(`#/${PROJECT}/long\\.tex$`));
   await expect(page.locator('.editor-column.split')).toHaveCount(0);
-  await page.locator('.tabbar .tab', { hasText: 'long.tex [raw]' }).click({ button: 'right' });
-  await page.locator('.tab-menu .menu-item', { hasText: 'Close tab' }).click();
-  await expect(page.locator('.tabbar .tab')).toHaveCount(1);
+  await viewItem();
+  await page.locator('.source-pane .bar .close').click();
+  await expect(page.locator('.editor-column.split')).toHaveCount(0);
   expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
+});
+
+test('the caret in the source and the cursor in the document follow each other', async ({ page }) => {
+  await openDoc(page);
+  await page.goto('/#/raw:' + ID);
+  const ta = page.locator('.source-pane.right textarea.source');
+  await expect(ta).toHaveValue(/\\section\{Methods\}/, { timeout: 15000 });
+  await page.waitForTimeout(500);
+  // document → source: the cursor before the "7" of paragraph 7 of the methods marks that character in the source
+  const par = page.locator('.lyx-editor > .lyx-par', { hasText: 'Paragraph 7 of the methods' });
+  await par.scrollIntoViewIfNeeded();
+  await par.click({ position: { x: 4, y: 8 } });
+  await page.keyboard.press('Home');
+  for (let i = 0; i < 'Paragraph '.length; i++) await page.keyboard.press('ArrowRight');
+  const caret = () => page.evaluate(() => {
+    const c = document.querySelector('.source-pane pre.hl .hl-caret, .source-pane pre.hl .hl-caret-after') as HTMLElement | null;
+    if (!c) return null;
+    const line = c.closest('.l') as HTMLElement;
+    const r = document.createRange(); r.setStart(line, 0); r.setEnd(c, 0);
+    const col = r.toString().length + (c.classList.contains('hl-caret-after') ? (c.textContent ?? '').length : 0);
+    return { line: line.textContent ?? '', col, sel: (document.querySelector('.source-pane textarea.source') as HTMLTextAreaElement).selectionStart };
+  });
+  await expect.poll(async () => (await caret())?.line ?? '', { timeout: 10000 }).toContain('Paragraph 7 of the methods');
+  const c1 = (await caret())!;
+  expect(c1.line.slice(c1.col)).toMatch(/^7 of the methods/);
+  expect(await ta.evaluate((el: HTMLTextAreaElement, s: number) => el.value.slice(s, s + 16), c1.sel)).toBe('7 of the methods');   // the textarea's caret went there too
+  // source → document: a click in the source puts the document cursor at that word; the blurred editor shows it as a mirror caret
+  await page.evaluate(() => { const ta = document.querySelector('.source-pane textarea.source') as HTMLTextAreaElement; const i = ta.value.indexOf('procedure number 3'); ta.focus(); ta.setSelectionRange(i, i); ta.dispatchEvent(new Event('click', { bubbles: true })); });
+  await expect.poll(() => page.evaluate(() => { const v = (window as any).overlyx.activeView; const $f = v.state.selection.$from; return $f.parent.textContent.slice($f.parentOffset, $f.parentOffset + 18); }), { timeout: 5000 }).toBe('procedure number 3');
+  await expect(page.locator('.lyx-editor .mirror-caret')).toHaveCount(1);
+  expect(await ta.evaluate(el => document.activeElement === el)).toBe(true);   // the keyboard stayed in the source
+  // the marked line follows the source caret at once (no echo from the document)
+  const c2 = (await caret())!;
+  expect(c2.line).toContain('Paragraph 3 of the methods');
+  expect(c2.line.slice(c2.col)).toMatch(/^procedure number 3/);
 });
 
 test('the document and its source scroll together, both ways', async ({ page }) => {

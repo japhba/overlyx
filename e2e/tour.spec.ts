@@ -80,7 +80,7 @@ test('offered on the first visit; each step notices what the user did; remembere
   await expect(step(page, 'git')).toBeVisible();
   await page.locator('.tour-card button', { hasText: 'Back' }).click();
   await expect(step(page, 'share')).toBeVisible();
-  await page.locator('.filetree [data-share]').first().click();
+  await page.locator('.menubar [data-share]').click();
   await expect(page.locator('.dialog')).toBeVisible();
   await expect(done(page)).toHaveCount(1);
   await page.keyboard.press('Escape');

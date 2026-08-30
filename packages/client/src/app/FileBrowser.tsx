@@ -34,7 +34,14 @@ const ICON: Record<string, string> = { doc: '📄', lyx: '📥', bib: '📚', im
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 export const projectLabel = (p: Project) => p.title ?? p.name;
 
-export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { current: string | null; onOpen: (id: string) => void; onShare?: (project: string) => void; onGit?: (project: string) => void; refreshKey: number }) {
+export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, project: controlled, hideDocs, onProjectCreated }: {
+  current: string | null; onOpen: (id: string) => void; onShare?: (project: string) => void; onGit?: (project: string) => void; refreshKey: number;
+  /** the project to show, chosen outside (the documents panel): no picker of its own */
+  project?: string | null;
+  /** leave out the .tex documents (they are the document tabs above the browser) */
+  hideDocs?: boolean;
+  onProjectCreated?: (name: string) => void;
+}) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('ol.tree') || '{}'); } catch { return {}; } });
   const [showAll, setShowAll] = useState(false);
@@ -66,10 +73,11 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { c
     ].filter(g => g.items.length);
   }, [projects]);
   const selected = useMemo(() => {
+    if (controlled !== undefined) return controlled;
     if (picked && projects.some(p => p.name === picked)) return picked;
     if (currentProject && projects.some(p => p.name === currentProject)) return currentProject;
     return groups[0]?.items[0]?.name ?? null;
-  }, [currentProject, picked, projects, groups]);
+  }, [currentProject, picked, projects, groups, controlled]);
   const project = projects.find(p => p.name === selected) ?? null;
   const role = project?.role ?? 'owner';
   const via = project?.via ?? 'owner';
@@ -110,7 +118,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { c
   const newProject = async () => {
     const name = prompt('New project name:');
     if (!name) return;
-    try { const r = await api.createProject(name.trim()); await load(); setPicked(r.project.name); } catch (e) { alert(String((e as Error).message)); }
+    try { const r = await api.createProject(name.trim()); await load(); setPicked(r.project.name); onProjectCreated?.(r.project.name); } catch (e) { alert(String((e as Error).message)); }
   };
   const upload = async (dir = '') => {
     if (!project) return;
@@ -125,8 +133,8 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { c
     input.click();
   };
 
-  const visible = (f: ProjectFile) => showAll || (!isBackup(f.name) && !isAuxFile(f.name) && !f.name.endsWith('.overlyx-tmp'));
-  const tree = useMemo(() => (project ? buildTree(project.files.filter(visible)) : []), [project, showAll]);
+  const visible = (f: ProjectFile) => (showAll || (!isBackup(f.name) && !isAuxFile(f.name) && !f.name.endsWith('.overlyx-tmp'))) && !(hideDocs && f.kind === 'doc' && !isBackup(f.name));
+  const tree = useMemo(() => (project ? buildTree(project.files.filter(visible)) : []), [project, showAll, hideDocs]);
 
   const renderNode = (node: TreeNode, depth: number) => {
     const key = project!.name + ':' + node.path;
@@ -171,7 +179,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { c
 
   return (
     <div class="filetree" data-project={project?.name ?? ''}>
-      <div class="project-picker">
+      {controlled === undefined && <div class="project-picker">
         <select value={selected ?? ''} onChange={e => setPicked((e.target as HTMLSelectElement).value)} title="Switch project" aria-label="Project">
           {!projects.length && <option value="">(no projects)</option>}
           {groups.map(g => (
@@ -181,7 +189,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { c
           ))}
         </select>
         {project && via !== 'owner' && <span class={'badge' + (role === 'view' ? ' view' : '')} title={role === 'view' ? 'Shared with you for viewing' : 'Shared with you for editing'}>{via === 'admin' ? 'admin' : role === 'view' ? 'view' : 'edit'}</span>}
-      </div>
+      </div>}
       {project && <div class="project-info" title={project.name}>
         {via === 'owner' ? 'Your project' : via === 'admin' ? `Owned by ${project.owner?.name ?? '—'}` : `Shared by ${project.owner?.name ?? '—'} · ${role === 'view' ? 'view only' : 'you can edit'}`} · {project.name}
       </div>}
@@ -196,7 +204,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey }: { c
         <button class="small-btn" onClick={load} title="Refresh">↻</button>
       </div>
       {project && tree.map(n => renderNode(n, 0))}
-      {project && !tree.length && <div class="empty">No files yet — add a document with + Doc, or upload files.</div>}
+      {project && !tree.length && <div class="empty">{hideDocs ? 'No other files — upload figures or a .bib with ⇧.' : 'No files yet — add a document with + Doc, or upload files.'}</div>}
       {!projects.length && <div class="empty">No projects yet.</div>}
     </div>
   );

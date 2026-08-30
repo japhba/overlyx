@@ -1,6 +1,6 @@
 /** Cursor → source line matching of the source pane (packages/client/src/app/sourcelocate.ts). */
 import { describe, it, expect } from 'vitest';
-import { findSourceLine, locateSourceLine, plainWords } from '../packages/client/src/app/sourcelocate.ts';
+import { findSourceLine, locateSourceLine, locateSourceCaret, plainWords } from '../packages/client/src/app/sourcelocate.ts';
 
 const NUL = String.fromCharCode(0);
 const SRC = [
@@ -78,5 +78,35 @@ describe('locateSourceLine (SyncTeX inverse search)', () => {
   });
   it('strips LaTeX to the words the editor shows', () => {
     expect(plainWords('\\emph{Deep} models~\\cite{a,b} of $x^2$ here \\label{s:x}')).toBe('Deep models of here');
+  });
+});
+
+describe('locateSourceCaret', () => {
+  const blocks = [
+    { kind: 'text' as const, text: 'First paragraph with some words that continue on a second line.' },
+    { kind: 'text' as const, text: `Consider data ${NUL} where ${NUL} is the dimension, i.e. 100% of it.` },
+    { kind: 'math' as const, text: '\\begin{align}\na &= b \\\\\nc &= d\n\\end{align}' },
+    { kind: 'text' as const, text: 'Some words. Some words.' },
+  ];
+  it('maps a column on a wrapped line to the character in the paragraph', () => {
+    // line 3 = "that continue on a second line."; caret after "on a " (col 19)
+    const r = locateSourceCaret(SRC, 3, 19, blocks);
+    expect(r).toEqual({ index: 0, offset: 'First paragraph with some words that continue on a '.length });
+  });
+  it('a caret inside a word lands inside that word', () => {
+    const r = locateSourceCaret(SRC, 2, 8, blocks);   // "First pa|ragraph"
+    expect(r).toEqual({ index: 0, offset: 8 });
+  });
+  it('at the start of a line: the line\'s first character', () => {
+    expect(locateSourceCaret(SRC, 3, 0, blocks)).toEqual({ index: 0, offset: 'First paragraph with some words '.length });
+  });
+  it('after a formula and an escaped character the words still match; a formula line gives the formula', () => {
+    const r = locateSourceCaret(SRC, 6, 'the dimension, i.e.\\ 100\\% of'.length, blocks);
+    expect(r?.index).toBe(1);
+    expect(blocks[1].text.slice(0, r!.offset)).toMatch(/100% of$/);
+    expect(locateSourceCaret(SRC, 9, 3, blocks)).toEqual({ index: 2, offset: 0 });
+  });
+  it('a repeated phrase: the occurrence nearest to where the line starts in the block', () => {
+    expect(locateSourceCaret(SRC, 11, 'Some words. Some'.length, blocks)).toEqual({ index: 3, offset: 'Some words. Some'.length });
   });
 });

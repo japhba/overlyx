@@ -68,8 +68,7 @@ test('a PDF file of the project opens in a tab with the viewer', async ({ page }
   await page.locator('.tree-row.file', { hasText: 'paper.pdf' }).click();
   await expect(page).toHaveURL(/#\/pdf:e2e-pdfview\/paper\.pdf$/);
   await expect(page.locator('.pdf-tab .pdf-page-box')).toHaveCount(9, { timeout: 30000 });
-  await expect(page.locator('.tabbar .tab')).toHaveCount(2);
-  await expect(page.locator('.tabbar .tab.active')).toContainText('paper.pdf');
+  await expect(page.locator('.filetree .tree-row.current')).toContainText('paper.pdf');   // the file is marked in the documents panel
   await expect(page.locator('.pdf-tab .pdf-toolbar a', { hasText: 'Download' })).toHaveAttribute('href', /paper\.pdf\?download=1$/);
   // zoom and page navigation
   await page.locator('.pdf-toolbar .small-btn[title="Zoom in"]').click();
@@ -77,6 +76,6 @@ test('a PDF file of the project opens in a tab with the viewer', async ({ page }
   await page.locator('.pdf-toolbar .small-btn[title="Next page"]').click();
   await expect(page.locator('.pdf-toolbar .pdf-page')).toHaveValue('2');
   // back to the document tab: the editor is still there
-  await page.locator('.tabbar .tab', { hasText: 'two.tex' }).click();
+  await page.locator('.docpanel .doc-tab[data-doc="two.tex"] .doc-name').click();
   await expect(page.locator('.lyx-editor .lyx-par').first()).toBeVisible({ timeout: 15000 });
 });

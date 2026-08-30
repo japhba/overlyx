@@ -168,7 +168,7 @@ test('clicking a user avatar jumps to that user\'s cursor', async ({ browser }) 
   await pageB.keyboard.type(' (Bob was here)');
   // A is at the top and sees Bob in the status bar
   await pageA.locator('.lyx-editor > .lyx-par').first().click();
-  const bob = pageA.locator('.statusbar .users .avatar[data-username="bob"]');
+  const bob = pageA.locator('.menubar .users .avatar[data-username="bob"]');
   await expect(bob).toBeVisible({ timeout: 15000 });
   await expect(bob).toHaveClass(/has-cursor/, { timeout: 15000 });
   const beforeTop = await pageA.evaluate(() => document.querySelector('.editor-scroll')!.scrollTop);

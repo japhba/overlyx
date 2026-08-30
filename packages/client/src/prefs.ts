@@ -11,6 +11,8 @@ export interface Prefs {
   spellcheck: boolean;
   /** OverLyX's own checker (Hunspell in a worker, LaTeX-aware, suggestions in the menu) or the browser's */
   spellEngine: 'overlyx' | 'browser';
+  /** the ✦ button on the toolbar (switches autocomplete on and off); hidden until it is enabled here */
+  aiButton: boolean;
   /** ⌘K / Ctrl+K: rewrite the selection with an instruction */
   aiRewrite: boolean;
   /** ghost-text continuation after a pause while typing text */
@@ -24,7 +26,7 @@ export interface Prefs {
   aiCompletionModel: string;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, aiModel: '', aiCompletionModel: '' };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, aiModel: '', aiCompletionModel: '' };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

@@ -129,17 +129,16 @@ export const TOUR_STEPS: Step[] = [
   },
   {
     id: 'share', title: 'Work together',
-    target: ['.filetree [data-share]', '.sidebar [data-share]'],
-    enter: a => a.showFiles(),
+    target: ['.menubar [data-share]'],
     body: <>
-      <p>Projects are private until you share them. Invite colleagues by e-mail or user name as <i>editors</i> or <i>viewers</i>, or turn on a link. Everybody edits the same document live — the avatars in the status bar show who is here; click one to jump to their cursor.</p>
-      <p><b>Click 👥 in the file browser</b> (or <i>File ▸ Share project…</i>) to see the sharing dialog. You can close it again without inviting anyone.</p>
+      <p>Projects are private until you share them. Invite colleagues by e-mail or user name as <i>editors</i> or <i>viewers</i>, or turn on a link. Everybody edits the same document live — the avatars next to the Share button show who is here; click one to jump to their cursor.</p>
+      <p><b>Click <i>Share</i> at the top right</b> (or <i>File ▸ Share project…</i>) to see the sharing dialog. You can close it again without inviting anyone.</p>
     </>,
     done: now => now.shareOpen,
   },
   {
     id: 'git', title: 'Your files stay yours',
-    target: ['.filetree [data-git]', '.sidebar [data-git]'],
+    target: ['.docpanel [data-git]', '.filetree [data-git]'],
     enter: a => a.showFiles(),
     body: <>
       <p>The project folder on the server is a git repository: ⎇ shows the clone URL and creates access tokens, so you can <code>git clone</code>, edit with desktop LyX or your favourite editor, and <code>push</code> — OverLyX commits what people edit here and merges what you push. Every document is also mirrored in this browser, so it opens instantly and works offline.</p>

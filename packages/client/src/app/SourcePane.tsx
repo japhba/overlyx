@@ -15,7 +15,9 @@ import { writeLyx, pmToLyxBody, checkTexHealth } from '@overlyx/core';
 import { api } from '../api';
 import { highlightTexBlocks, highlightLineList } from './texhighlight';
 import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask } from './codearea';
-import { findSourceLine, locateSourceLine, type LocateBlock } from './sourcelocate';
+import { findSourceLine, locateSourceLine, locateSourceCaret, type LocateBlock } from './sourcelocate';
+import { setMirrorCaret } from '../editor/plugins/mirrorcaret';
+import { TextSelection } from 'prosemirror-state';
 import type { LyxMathField } from '../editor/lyxmath/field';
 
 export interface SourceTarget { view: EditorView; ydoc: Y.Doc; docId: string }
@@ -25,6 +27,7 @@ const LINE_H = 15;
 const PAD_TOP = 6;
 const MIN_H = 100;
 const DEFAULT_H = 240;
+const lineOfOffset = (text: string, off: number): number => { let n = 0; for (let i = 0; i < off && i < text.length; i++) if (text.charCodeAt(i) === 10) n++; return n; };
 
 function metaOf(ydoc: Y.Doc) {
   const m = ydoc.getMap<string>('meta');
@@ -62,6 +65,35 @@ export function cursorLine(view: EditorView, text: string, field: LyxMathField |
   return findSourceLine(text, { before, after, parStart, formula, prev });
 }
 
+/** A paragraph or display formula of the document as the locator sees it, with the document position of every character of its text. */
+export interface DocBlock extends LocateBlock { pos: number; map?: number[] }
+/**
+ * The document's blocks for `locateSourceLine` / `locateSourceCaret`: every text block's direct
+ * children (text as is, any other inline node as one NUL character) with a map from character
+ * offsets to document positions — nested insets are blocks of their own.
+ */
+export function docBlocks(view: EditorView): DocBlock[] {
+  const blocks: DocBlock[] = [];
+  view.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'math_display') { blocks.push({ kind: 'math', text: String(node.attrs.latex ?? ''), pos }); return false; }
+    if (node.isTextblock) {
+      let text = '';
+      const map: number[] = [];
+      node.forEach((child, off) => {
+        const start = pos + 1 + off;
+        if (child.isText) { const t = child.text!; for (let i = 0; i < t.length; i++) { text += t[i]; map.push(start + i); } }
+        else { text += '\u0000'; map.push(start); }
+      });
+      map.push(pos + 1 + node.content.size);
+      blocks.push({ kind: 'text', text, pos: pos + 1, map });
+    }
+    return true;
+  });
+  return blocks;
+}
+/** the document position of character `offset` of a block */
+export const blockPos = (b: DocBlock, offset: number): number => (b.map ? b.map[Math.max(0, Math.min(offset, b.map.length - 1))] : b.pos + offset);
+
 function storedWidth(): number {
   try { const v = Number(localStorage.getItem('ol.source.w')); return v >= 280 ? v : 520; } catch { return 520; }
 }
@@ -76,6 +108,10 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [curLine, setCurLine] = useState<number | null>(null);
+  /** the document cursor's character offset in the source (a caret mark in the coloured copy) */
+  const [curOff, setCurOff] = useState<number | null>(null);
+  /** after the source caret moved the document cursor, the echo (document → source) is skipped for a moment */
+  const caretLock = useRef(0);
   const lastOffset = useRef<number | null>(null);
   const [height, setHeight] = useState(storedHeight);
   const [width, setWidth] = useState(storedWidth);
@@ -102,8 +138,15 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
       const cls = match.kind === 'adjacent' ? 'hl-match' : 'hl-enclose';
       for (const at of [match.open, match.close]) for (let k = 0; k < match.len; k++) marks.set(at + k, cls);
     }
+    // the document cursor as a thin bar before the character at its offset (after the last one of a line)
+    if (curOff !== null && !dirty && text) {
+      marks ??= new Map();
+      const at = Math.min(curOff, text.length);
+      if (at < text.length && text[at] !== '\n') { if (!marks.has(at)) marks.set(at, 'hl-caret'); }
+      else if (at > 0 && text[at - 1] !== '\n' && !marks.has(at - 1)) marks.set(at - 1, 'hl-caret-after');
+    }
     return highlightLineList(highlightTexBlocks(text, marks));
-  }, [text, match]);
+  }, [text, match, curOff, dirty]);
   const shownLines = useRef<string[]>([]);
   useEffect(() => {
     const code = pre.current?.firstElementChild as HTMLElement | null;
@@ -161,10 +204,42 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   // follow the cursor: mark the paragraph's first line and keep it in view (not while editing the source)
   useEffect(() => {
     if (!target || dirty || !text) return;
+    if (caretLock.current > Date.now()) return;   // the document cursor was just set from the source caret
     const found = cursorLine(target.view, text, mathField ?? null, lastOffset.current);
     lastOffset.current = found?.offset ?? null;
     setCurLine(found?.line ?? null);
+    setCurOff(found?.offset ?? null);
+    // the textarea's own caret follows too — while nobody types there (a focused textarea keeps its caret)
+    const el = ta.current;
+    if (found && el && document.activeElement !== el && el.value === text) { try { el.setSelectionRange(found.offset, found.offset); } catch { /* ignore */ } }
   }, [selTick, text, dirty, mathField]);
+  // the other way: the caret in the source (a click, arrow keys) puts the document cursor at that
+  // word and scrolls it into view; the editor keeps drawing it as a mirror caret while it has no focus
+  useEffect(() => {
+    if (!target || cursor === null || !text) return;
+    const el = ta.current;
+    if (!el || document.activeElement !== el) return;
+    const t = setTimeout(() => {
+      const view = target.view;
+      const line = lineOfOffset(text, cursor);
+      const col = cursor - (text.lastIndexOf('\n', cursor - 1) + 1);
+      const blocks = docBlocks(view);
+      const hit = locateSourceCaret(text, line, col, blocks);
+      if (!hit) return;
+      const b = blocks[hit.index];
+      const pos = Math.min(b.kind === 'math' ? b.pos : blockPos(b, hit.offset), view.state.doc.content.size);
+      caretLock.current = Date.now() + 500;
+      setCurLine(line); setCurOff(cursor); lastOffset.current = cursor;
+      try {
+        const $pos = view.state.doc.resolve(pos);
+        view.dispatch(view.state.tr.setSelection(TextSelection.near($pos)).scrollIntoView().setMeta('addToHistory', false));
+        setMirrorCaret(view, pos);
+      } catch { /* not a valid position any more */ }
+    }, 120);
+    return () => clearTimeout(t);
+  }, [cursor, text]);
+  // the mirror caret goes when the pane is left
+  useEffect(() => () => { const v = target?.view; if (v && v.dom.isConnected) { try { setMirrorCaret(v, null); } catch { /* ignore */ } } }, [target?.docId]);
   // keep the marked line in view (once it is rendered; lines wrap, so it is measured, not computed)
   useEffect(() => {
     const el = ta.current, cur = pre.current?.querySelector('.l.cur') as HTMLElement | null;
@@ -264,12 +339,7 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
         const lines = lineEls();
         let lo = 0, hi = lines.length - 1, line = 0;
         while (lo <= hi) { const mid = (lo + hi) >> 1; if (lines[mid].offsetTop + lines[mid].offsetHeight > el.scrollTop + 1) { line = mid; hi = mid - 1; } else lo = mid + 1; }
-        const blocks: (LocateBlock & { pos: number })[] = [];
-        view.state.doc.descendants((node, pos) => {
-          if (node.type.name === 'math_display') { blocks.push({ kind: 'math', text: String(node.attrs.latex ?? ''), pos }); return false; }
-          if (node.isTextblock) blocks.push({ kind: 'text', text: node.textBetween(0, node.content.size, undefined, '\u0000'), pos: pos + 1 });
-          return true;
-        });
+        const blocks = docBlocks(view);
         const hit = locateSourceLine(text, line, blocks);
         if (!hit) return;
         const b = blocks[hit.index];

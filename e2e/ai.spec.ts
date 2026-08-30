@@ -109,6 +109,18 @@ test('AI switches live in Tools ▸ AI assistance and the preferences; the palet
   await page.locator('.lyx-editor .lyx-par').nth(2).click({ button: 'right', position: { x: 12, y: 8 } });
   await expect(page.locator('.ctx-menu .ctx-item', { hasText: 'with AI' })).toHaveCount(1);
   await page.keyboard.press('Escape');
+  // the ✦ toolbar button exists only once it is enabled in the preferences; it switches autocomplete on and off (rewriting stays as it is)
+  await expect(page.locator('[data-tb="ai"]')).toHaveCount(0);
+  await page.click('.menubar .menu button:has-text("Tools")');
+  await page.click('.menu-item:has-text("Preferences")');
+  await dlg.locator('[data-pref="aiButton"]').check();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-tb="ai"]')).toHaveClass(/active/);   // autocomplete text is on
+  await page.click('[data-tb="ai"]');
+  await expect(page.locator('[data-tb="ai"]')).not.toHaveClass(/active/);
+  const after = JSON.parse(await page.evaluate(() => localStorage.getItem('ol.prefs')!));
+  expect([after.aiCompleteText, after.aiCompleteMath, after.aiRewrite, after.aiButton]).toEqual([false, false, true, true]);
+  await page.click('[data-tb="ai"]');
   await expect(page.locator('[data-tb="ai"]')).toHaveClass(/active/);
 });
 

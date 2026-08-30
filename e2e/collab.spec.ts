@@ -91,8 +91,8 @@ test(`${USERS} users type at the same time in different paragraphs; everything c
   await expect.poll(() => { const t = readFileSync(FILE, 'utf8'); return markers.filter(m => t.includes(m)).length; }, { timeout: 30000 }).toBe(markers.length);
   // presence: every page lists every user
   for (const s of sessions) {
-    await expect(s.page.locator('.statusbar .users .avatar')).toHaveCount(USERS, { timeout: 20000 });
-    const names = (await s.page.locator('.statusbar .users').getAttribute('title') ?? '').split(', ').filter(Boolean);
+    await expect(s.page.locator('.menubar .users .avatar')).toHaveCount(USERS, { timeout: 20000 });
+    const names = (await s.page.locator('.menubar .users').getAttribute('title') ?? '').split(', ').filter(Boolean);
     expect(new Set(names).size).toBe(USERS);
   }
   for (const s of sessions) expect(relevantErrors(s.errors)).toEqual([]);

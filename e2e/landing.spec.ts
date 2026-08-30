@@ -45,41 +45,73 @@ test.describe('landing page', () => {
 });
 
 test.describe('sidebars', () => {
-  test('a hidden sidebar leaves a rail that brings it back; the state survives a reload', async ({ page }) => {
+  test('the documents panel (project, document tabs, outline) and the right panels hide into rails; the state survives a reload', async ({ page }) => {
     await login(page);
     await openDoc(page, 'recurrent_feature/main.tex');
-    // both are shown at first
-    await expect(page.locator('.sidebar:not(.right) .panel-tabs')).toContainText('Files');
-    await expect(page.locator('.sidebar.right [data-tab="outline"]')).toHaveClass(/active/);
-    await expect(page.locator('.rail')).toHaveCount(0);
-    // hide the file browser: a rail with "Files" takes its place
-    await page.locator('.sidebar:not(.right) .panel-tabs .hide').click();
-    await expect(page.locator('.sidebar:not(.right)')).toHaveCount(0);
-    await expect(page.locator('.rail.left [data-rail="files"]')).toBeVisible();
-    // hide the right sidebar: a rail with all its panels
-    await page.locator('.sidebar.right .panel-tabs .hide').click();
-    await expect(page.locator('.sidebar.right')).toHaveCount(0);
-    for (const t of ['outline', 'source', 'pdf', 'versions']) await expect(page.locator(`.rail.right [data-rail="${t}"]`)).toBeVisible();
-    // reload: still hidden
-    await page.reload();
-    await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
-    await expect(page.locator('.rail.left')).toBeVisible();
+    // the documents panel is shown at first: the project, its documents, the open one expanded with its live outline; no top tab bar; the right side is a rail
+    await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
+    await expect(page.locator('.docpanel .project-switch')).toHaveValue('recurrent_feature');
+    await expect(page.locator('.docpanel .doc-tab.active .fname')).toHaveText('main.tex');
+    await expect(page.locator('.docpanel .doc-tab.active .outline-item').first()).toBeVisible();
+    await expect(page.locator('.tabbar')).toHaveCount(0);
+    await expect(page.locator('.rail.left')).toHaveCount(0);
     await expect(page.locator('.rail.right')).toBeVisible();
-    await expect(page.locator('.sidebar')).toHaveCount(0);
-    // the rails bring the panels back, directly on the panel that was clicked
+    for (const t of ['comments', 'source', 'pdf', 'versions']) await expect(page.locator(`.rail.right [data-rail="${t}"]`)).toBeVisible();
+    // hide the documents panel: a rail takes its place
+    await page.locator('.docpanel .hide').click();
+    await expect(page.locator('.sidebar.left')).toHaveCount(0);
+    await expect(page.locator('.rail.left [data-rail="outline"]')).toBeVisible();
+    // the right rail opens the panel that was clicked
     await page.locator('.rail.right [data-rail="versions"]').click();
     await expect(page.locator('.sidebar.right [data-tab="versions"]')).toHaveClass(/active/);
     await expect(page.locator('.rail.right')).toHaveCount(0);
-    await page.locator('.rail.left [data-rail="files"]').click();
-    await expect(page.locator('.sidebar:not(.right) .filetree')).toBeVisible();
-    await expect(page.locator('.rail')).toHaveCount(0);
-    // the toolbar / shortcut toggles still work: Ctrl+Alt+O hides the outline… and shows it again
-    await page.locator('[data-tab="outline"]').click();
+    // reload: the same
+    await page.reload();
+    await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+    await expect(page.locator('.rail.left')).toBeVisible();
+    await expect(page.locator('.sidebar.right [data-tab="versions"]')).toHaveClass(/active/);
+    await page.locator('.sidebar.right .panel-tabs .hide').click();
+    await expect(page.locator('.sidebar.right')).toHaveCount(0);
+    await expect(page.locator('.rail.right')).toBeVisible();
+    // the rail brings the documents panel back; Ctrl+Alt+O toggles it
+    await page.locator('.rail.left [data-rail="outline"]').click();
+    await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
+    await expect(page.locator('.rail.left')).toHaveCount(0);
     await page.locator('.lyx-editor > .lyx-par').first().click();
     await page.keyboard.press('Control+Alt+o');
-    await expect(page.locator('.rail.right')).toBeVisible();
+    await expect(page.locator('.rail.left')).toBeVisible();
     await page.keyboard.press('Control+Alt+o');
-    await expect(page.locator('.sidebar.right [data-tab="outline"]')).toHaveClass(/active/);
+    await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
+  });
+
+  test('document tabs open the documents of the project in place and reveal their outlines; a heading of a closed document opens it there', async ({ page }) => {
+    await login(page);
+    await openDoc(page, 'recurrent_feature/main.tex');
+    const tabs = page.locator('.docpanel .doc-tab');
+    const main = page.locator('.docpanel .doc-tab[data-doc="main.tex"]');   // (the project also has main.tex files in sub-directories)
+    await expect(main).toHaveClass(/active/);
+    // the appendix is not open: its tab expands to the headings of the file
+    const app = page.locator('.docpanel .doc-tab[data-doc="appendix.tex"]');
+    await app.locator('.twisty').click();
+    await expect(app.locator('.outline-item.static').first()).toBeVisible({ timeout: 10000 });
+    const second = (await app.locator('.outline-item.static').nth(1).textContent() ?? '').replace(/^[A-Z0-9.]+\s*/, '').trim();
+    // a heading opens that document with the cursor on the heading; the tab becomes the active one with the live outline
+    await app.locator('.outline-item.static').nth(1).click();
+    await expect(page).toHaveURL(/appendix\.tex\?heading=1$/);
+    await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+    await expect(app).toHaveClass(/active/);
+    await expect.poll(() => page.evaluate(() => { const v = (window as any).overlyx.activeView; return v.state.selection.$from.parent.textContent as string; }), { timeout: 10000 }).toContain(second.slice(0, 12));
+    await expect(app.locator('.outline-item:not(.static)').first()).toBeVisible();
+    await expect(app.locator('.outline-item.active')).toHaveCount(1);
+    // the Navigate menu lists the sections too
+    await page.locator('.menubar .menu button', { hasText: 'Navigate' }).click();
+    await expect(page.locator('.menu-item', { hasText: second.slice(0, 12) })).not.toHaveCount(0);
+    await page.keyboard.press('Escape');
+    // back to the main document by its tab; the project switcher shows the project
+    await main.locator('.doc-name').click();
+    await expect(page).toHaveURL(/recurrent_feature\/main\.tex$/);
+    await expect(main).toHaveClass(/active/);
+    await expect(page.locator('.docpanel .project-switch')).toHaveValue('recurrent_feature');
   });
 });
 
@@ -98,7 +130,7 @@ test.describe('command palette', () => {
     await expect(first.locator('.shortcut')).toHaveText('Ctrl+Alt+O');   // Linux: no ⌘
     await expect(first).toHaveClass(/checked/);   // the outline is shown at the moment
     await page.keyboard.press('Enter');
-    await expect(page.locator('.rail.right')).toBeVisible();   // Enter ran "View ▸ Outline": hidden now
+    await expect(page.locator('.rail.left')).toBeVisible();   // Enter ran "View ▸ Outline": the documents panel is hidden now
     await expect(page.locator('[data-help-search]')).toHaveCount(0);
     // the keyboard goes back to the text
     await page.keyboard.type('HELPSEARCH');
@@ -136,11 +168,11 @@ test.describe('command palette', () => {
     await expect(page.locator('[data-help-search]')).toHaveCount(0);
     // the new key toggles the outline; the default Ctrl+Alt+O does nothing any more
     await page.keyboard.press('Control+Shift+9');
-    await expect(page.locator('.rail.right')).toBeVisible();
+    await expect(page.locator('.rail.left')).toBeVisible();
     await page.keyboard.press('Control+Alt+o');
-    await expect(page.locator('.rail.right')).toBeVisible();
+    await expect(page.locator('.rail.left')).toBeVisible();
     await page.keyboard.press('Control+Shift+9');
-    await expect(page.locator('.sidebar.right [data-tab="outline"]')).toHaveClass(/active/);
+    await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
     // the same key for another command: a prompt; accepting moves the key over
     let prompt = '';
     page.once('dialog', d => { prompt = d.message(); void d.accept(); });
@@ -170,7 +202,7 @@ test.describe('command palette', () => {
     await page.keyboard.press('Control+Shift+9');   // now the source pane
     await expect(page.locator('.source-pane')).toBeVisible();
     await page.keyboard.press('Control+Alt+o');    // the outline's default again
-    await expect(page.locator('.rail.right')).toBeVisible();
+    await expect(page.locator('.rail.left')).toBeVisible();
   });
 });
 
@@ -193,7 +225,7 @@ test.describe('source pane', () => {
     const markedLine = async () => page.evaluate(() => {
       const pre = document.querySelector('.source-pane pre.hl') as HTMLElement | null; const cur = pre?.querySelector('.cur') as HTMLElement | null;
       if (!pre || !cur) return null;
-      const line = Math.round((parseFloat(cur.style.top) - 6) / 15);
+      const line = Array.from(pre.querySelectorAll('.l')).indexOf(cur);
       const ta = document.querySelector('.source-pane textarea') as HTMLTextAreaElement;
       return { line, text: ta.value.split('\n')[line] ?? '', scrolled: ta.scrollTop };
     });

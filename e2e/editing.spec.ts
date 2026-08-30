@@ -166,6 +166,10 @@ test('LyX math keys: inset markers, Backspace/Delete dissolve a cell, Space leav
 
 test('formulas: tight inline spacing, no change background, ln|H| via redefined macros', async ({ page }) => {
   await openPaper(page);
+  // formulas far down the page are rendered lazily (when they come into view): bring the \lndet one in and wait for it
+  const findLndet = () => [...document.querySelectorAll('.lyx-math-inline')].find(x => /\\lndet\{\\HH\}/.test((x as any).pmViewDesc?.node?.attrs?.latex ?? ''));
+  await page.evaluate((fn) => { const el = new Function('return ' + fn)()(); el?.scrollIntoView({ block: 'center' }); }, findLndet.toString());
+  await expect.poll(() => page.evaluate((fn) => new Function('return ' + fn)()()?.querySelector('.lyx-math-static, .lm-field')?.textContent ?? '', findLndet.toString()), { timeout: 15000 }).toMatch(/^ln/);
   const r = await page.evaluate(() => {
     const st = [...document.querySelectorAll('.lyx-math-inline .lyx-math-static')].find(s => s.textContent && s.textContent.length < 3)!;
     const wrap = st.parentElement!;
@@ -204,12 +208,13 @@ test('wide display formulas are centred on the column and equation numbers never
       const n = x.querySelector('.eq-number')!.getBoundingClientRect();
       return n.left >= c.right - 1;
     });
-    return { shifted: d.style.marginLeft !== '', leftOverflow: ed.left - m.left, width: m.width, numbersClear: eq.every(Boolean), numbered: eq.length };
+    const pg = document.querySelector('.editor-page')!.getBoundingClientRect();
+    return { shifted: d.style.marginLeft !== '', leftOverflow: ed.left - m.left, pastEdge: pg.left - m.left, width: m.width, numbersClear: eq.every(Boolean), numbered: eq.length };
   });
   expect(r.width).toBeGreaterThan(900);
   expect(r.shifted).toBe(true);                     // overflows symmetrically into the margin ...
   expect(r.leftOverflow).toBeGreaterThan(20);
-  expect(r.leftOverflow).toBeLessThan(60);          // ... but never past the page edge
+  expect(r.pastEdge).toBeLessThanOrEqual(0);        // ... but never past the page edge
   expect(r.numbered).toBeGreaterThan(0);
   expect(r.numbersClear).toBe(true);
   await page.keyboard.press('Escape');
@@ -242,16 +247,15 @@ test('right-click menus and go-to-label for cross-references', async ({ page }) 
   await page.keyboard.press('Escape');
 });
 
-test('child documents open in tabs; the combined view shows master and children together', async ({ page }) => {
+test('child documents open in place (their tab in the documents panel becomes active); the combined view shows master and children together', async ({ page }) => {
   await openPaper(page);
   await page.locator('.lyx-include-link').first().dblclick();
   await expect(page).toHaveURL(/lyxmacros\.tex$/);
-  await expect(page.locator('.tab')).toHaveCount(2);
-  await expect(page.locator('.tab.active')).toHaveText(/lyxmacros\.tex/);
-  // close the tab → back to the master
-  await page.locator('.tab.active .tab-close').click();
+  await expect(page.locator('.docpanel .doc-tab.active .fname')).toHaveText('lyxmacros.tex');
+  // the master's tab → back to the master
+  await page.locator('.docpanel .doc-tab[data-doc="main.tex"] .doc-name').click();
   await expect(page).toHaveURL(/main\.tex$/);
-  await expect(page.locator('.tab')).toHaveCount(1);
+  await expect(page.locator('.docpanel .doc-tab.active .fname')).toHaveText('main.tex');
   // combined view
   await page.evaluate(() => localStorage.setItem('ol.combined', '1'));
   await page.reload();
@@ -267,7 +271,8 @@ test('child documents open in tabs; the combined view shows master and children 
 
 test('the source pane follows the cursor and applies edits back to the document', async ({ page }) => {
   await openPaper(page);
-  await page.locator('.panel-tabs button', { hasText: 'Source' }).click();
+  const srcRail = page.locator('.rail.right [data-rail="source"]');   // the right sidebar starts hidden: its rail carries the Source switch
+  if (await srcRail.count()) await srcRail.click(); else await page.locator('.panel-tabs button', { hasText: 'Source' }).click();
   const ta = page.locator('.source-pane textarea');
   await expect(ta).toHaveValue(/\\documentclass/, { timeout: 15000 });
   await expect(ta).toHaveValue(/\\section\{/);
@@ -325,9 +330,9 @@ test('Ctrl+Alt+← / → go back and forward through jumps, also across tabs', a
   await page.keyboard.press('Control+Alt+ArrowRight');
   await expect.poll(cursorPos).toBe(p1);
   // the outline is a jump too
-  const rail = page.locator('.rail.right [data-rail="outline"]');
-  if (await rail.count()) await rail.click(); else await page.locator('.panel-tabs [data-tab="outline"]').click();
-  await page.locator('.outline-item').nth(3).click();
+  const rail = page.locator('.rail.left [data-rail="outline"]');
+  if (await rail.count()) await rail.click();
+  await page.locator('.docpanel .doc-tab.active .outline-item').nth(3).click();
   const p2 = await cursorPos();
   expect(p2).not.toBe(p1);
   await page.keyboard.press('Control+Alt+ArrowLeft');

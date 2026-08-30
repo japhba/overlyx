@@ -173,7 +173,8 @@ test('comment threads and LyX notes, shown in the margin', async ({ page }) => {
   await page.keyboard.type('a lyx note');
   await expect(page.locator('.lyx-inset-note-note', { hasText: 'a lyx note' })).toHaveCount(1);
   await page.locator('.tb-btn[title^="Show notes"]').click();
-  expect(await page.locator('.lyx-inset-note.in-margin').count()).toBeGreaterThan(1);
+  // the note goes to the margin; the resolved thread is not shown at all (it lives in the Comments panel's archive)
+  await expect.poll(() => page.locator('.lyx-inset-note.in-margin').count(), { timeout: 5000 }).toBe(1);
   const box = page.locator('.lyx-inset-note.in-margin', { hasText: 'a lyx note' }).locator('> .inset-box');
   const pageBox = await page.locator('.editor-page').boundingBox();
   const b = await box.boundingBox();
@@ -228,7 +229,8 @@ test('versions can be created, listed and restored', async ({ page }) => {
   await page.keyboard.type(' before-version');
   await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('before-version');
   page.once('dialog', d => d.accept('v1'));
-  await page.locator('.panel-tabs button', { hasText: 'Versions' }).click();
+  const vRail = page.locator('.rail.right [data-rail="versions"]');
+  if (await vRail.count()) await vRail.click(); else await page.locator('.panel-tabs button', { hasText: 'Versions' }).click();
   await page.locator('.small-btn', { hasText: '+ Save version' }).click();
   await expect(page.locator('.version .name', { hasText: 'v1' })).toHaveCount(1);
   await firstStandard(page);
