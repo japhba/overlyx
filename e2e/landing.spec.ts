@@ -103,6 +103,12 @@ test.describe('sidebars', () => {
     await expect.poll(() => page.evaluate(() => { const v = (window as any).overlyx.activeView; return v.state.selection.$from.parent.textContent as string; }), { timeout: 10000 }).toContain(second.slice(0, 12));
     await expect(app.locator('.outline-item:not(.static)').first()).toBeVisible();
     await expect(app.locator('.outline-item.active')).toHaveCount(1);
+    // a click on a heading of the live outline moves the cursor there *and* scrolls the page to it
+    await page.locator('.editor-scroll').evaluate(el => { el.scrollTop = 0; });
+    const live = app.locator('.outline-item:not(.static)');
+    await live.nth(await live.count() - 1).click();
+    await expect.poll(() => page.evaluate(() => document.querySelector('.editor-scroll')!.scrollTop), { timeout: 5000 }).toBeGreaterThan(100);
+    await expect(page.locator('.lyx-editor')).toBeFocused();
     // the Navigate menu lists the sections too
     await page.locator('.menubar .menu button', { hasText: 'Navigate' }).click();
     await expect(page.locator('.menu-item', { hasText: second.slice(0, 12) })).not.toHaveCount(0);

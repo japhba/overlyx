@@ -61,9 +61,12 @@ export function buildOutline(doc: PMNode, includeFloats = true, secnumdepth = 3)
 export function Outline({ view, items, activePos }: { view: EditorView | null; items: OutlineItem[]; activePos: number }) {
   const go = (it: OutlineItem) => {
     if (!view) return;
-    const tr = view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(it.pos + 1))).scrollIntoView();
-    navHistory.jump(() => view.dispatch(tr));
+    // focus first: ProseMirror scrolls the ancestors of the *DOM* selection into view, and after a
+    // click in the panel that selection would be in the panel, not in the editor's scroll container
     view.focus();
+    const tr = view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(Math.min(it.pos + 1, view.state.doc.content.size)))).scrollIntoView();
+    navHistory.jump(() => view.dispatch(tr));
+    (view.nodeDOM(it.pos) as HTMLElement | null)?.scrollIntoView?.({ block: 'start' });
   };
   let active = -1;
   for (let i = 0; i < items.length; i++) if (items[i].level < 99 && items[i].pos <= activePos) active = i;
@@ -90,7 +93,7 @@ export function Outline({ view, items, activePos }: { view: EditorView | null; i
   return (
     <div>
       {items.map((it, i) => (
-        <div key={it.pos} class={'outline-item ' + (it.level === 99 ? 'other' : 'l' + Math.min(5, it.level)) + (i === active ? ' active' : '')} onClick={() => go(it)} title={it.text}>
+        <div key={it.pos} class={'outline-item ' + (it.level === 99 ? 'other' : 'l' + Math.min(5, it.level)) + (i === active ? ' active' : '')} onMouseDown={e => e.preventDefault()} onClick={() => go(it)} title={it.text}>
           <span class="outline-text">{it.num && <span class="num">{it.num}</span>}{it.text}</span>
           {tools(it)}
         </div>

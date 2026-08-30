@@ -389,9 +389,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   };
   /** the cursor to a heading of the outline (the Navigate menu, the documents panel) */
   const jumpToOutline = (v: EditorView, it: OutlineItem) => {
+    v.focus();   // before the dispatch: scrollIntoView follows the DOM selection, which must be in the editor
     const tr = v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(Math.min(it.pos + 1, v.state.doc.content.size)))).scrollIntoView();
     navHistory.jump(() => v.dispatch(tr));
-    v.focus();
     (v.nodeDOM(it.pos) as HTMLElement | null)?.scrollIntoView?.({ block: 'start' });
   };
 
