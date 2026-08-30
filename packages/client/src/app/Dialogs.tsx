@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { formatShortcut } from './shortcuts';
 import type { ComponentChildren } from 'preact';
 import type { DocMeta, ProjectFile, BibItem } from '../api';
@@ -12,14 +12,20 @@ import { paramMap, unquote } from '@overlyx/core';
 import { diffLines } from './diff';
 
 export function Dialog({ title, onClose, children, buttons, wide }: { title: string; onClose: () => void; children: ComponentChildren; buttons?: ComponentChildren; wide?: boolean }) {
+  const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
     document.addEventListener('keydown', k, true);
     return () => document.removeEventListener('keydown', k, true);
   }, []);
+  // the autofocus attribute only works during page load — focus (and select) the marked field ourselves
+  useEffect(() => {
+    const el = boxRef.current?.querySelector<HTMLElement>('[autofocus]');
+    if (el && document.activeElement !== el) { el.focus(); if (el instanceof HTMLInputElement) el.select(); }
+  }, []);
   return (
     <div class="dialog-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div class="dialog" style={wide ? { minWidth: '720px' } : undefined}>
+      <div class="dialog" ref={boxRef} style={wide ? { minWidth: '720px' } : undefined}>
         <h2>{title}</h2>
         <div class="body">{children}</div>
         <div class="buttons">{buttons}<button class="btn" onClick={onClose}>Close</button></div>
@@ -134,11 +140,16 @@ export function LabelDialog({ initial, editing, refCount = 0, existing = [], onI
   const [name, setName] = useState(initial);
   const trimmed = name.trim();
   const dup = editing ? existing.includes(trimmed) && trimmed !== initial : existing.includes(trimmed);
-  const ok = () => { if (trimmed && !dup) { onInsert(trimmed); onClose(); } };
+  const canRemove = !!(editing && onRemove);
+  // an emptied name removes the label (so select-all + Backspace + Enter deletes it, as users expect)
+  const ok = () => {
+    if (!trimmed) { if (canRemove) { onRemove!(); onClose(); } return; }
+    if (!dup) { onInsert(trimmed); onClose(); }
+  };
   return (
     <Dialog title={editing ? 'Label Settings' : 'Label'} onClose={onClose} buttons={<>
-      {editing && onRemove && <button class="btn" onClick={() => { onRemove(); onClose(); }}>Remove label</button>}
-      <button class="btn primary" disabled={!trimmed || dup} onClick={ok}>{editing ? 'Apply' : 'OK'}</button>
+      {canRemove && <button class="btn" onClick={() => { onRemove!(); onClose(); }}>Remove label</button>}
+      <button class="btn primary" disabled={(!trimmed && !canRemove) || dup} onClick={ok}>{!trimmed && canRemove ? 'Remove' : editing ? 'Apply' : 'OK'}</button>
     </>}>
       <Row label="Label"><input type="text" autofocus value={name} onInput={e => setName((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') ok(); }} /></Row>
       {dup && <div style="color:#b00020;font-size:11px">A label named “{trimmed}” already exists.</div>}

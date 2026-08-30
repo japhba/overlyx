@@ -297,3 +297,23 @@ test('figure and equation labels are edited through the same dialog and rename u
   await expect.poll(() => fileText(id), { timeout: 15000 }).not.toContain('\\label{eq:renamed}');
   expect(errors).toEqual([]);
 });
+
+test('the label dialog opens focused: Backspace clears the name and Enter removes the label', async ({ page }) => {
+  const errors = collectErrors(page);
+  const id = labelDoc('labelkbd-' + Date.now());
+  await openDoc(page, id);
+  await page.waitForTimeout(500);
+  const disp = page.locator('.lyx-math-display').first();
+  await disp.scrollIntoViewIfNeeded();
+  await disp.locator('.eq-labels').click();
+  const input = page.locator('.dialog input[type=text]').first();
+  await expect(input).toBeFocused();              // no extra click needed — keys go to the dialog
+  await expect(input).toHaveValue('eq:demo');
+  await page.keyboard.press('Backspace');         // the name is selected: one Backspace clears it
+  await expect(input).toHaveValue('');
+  await expect(page.locator('.dialog button.primary')).toHaveText('Remove');
+  await page.keyboard.press('Enter');             // an emptied name removes the label
+  await expect(page.locator('.dialog')).toHaveCount(0);
+  await expect.poll(() => fileText(id), { timeout: 15000 }).not.toContain('\\label{eq:demo}');
+  expect(errors).toEqual([]);
+});
