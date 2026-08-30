@@ -367,8 +367,6 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
         {dirty && <span class={'apply-state ' + applied} title={applyNote} data-apply-state={applied}>{applied === 'waiting' ? 'editing…' : applied === 'applying' ? 'applying…' : applied === 'held' ? 'not applied: ' + applyNote : applied === 'error' ? 'not applied: ' + applyNote : ''}</span>}
         {dirty && <button class="small-btn" onClick={revert} title="Drop the edits and regenerate the source from the document">Revert</button>}
         {!dirty && applied === 'ok' && <span class="apply-state ok" data-apply-state="ok" title={applyNote}>applied ✓{applyNote ? ' · ' + applyNote : ''}</span>}
-        {!dirty && <button class="small-btn" onClick={() => void load()} title="Regenerate from the editor">Refresh</button>}
-        <button class="small-btn" onClick={() => { void navigator.clipboard?.writeText(text); }} title="Copy to clipboard">Copy</button>
         {onClose && <button class="small-btn close" onClick={onClose} title="Hide the source pane (Ctrl+Alt+S)">✕</button>}
       </div>
       <div class="code">
