@@ -21,6 +21,7 @@ import { marginPlugin } from './plugins/margin';
 import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
 import { fontCarryPlugin } from './plugins/fontcarry';
 import { insetCaretPlugin } from './plugins/insetcaret';
+import { dragSelectPlugin } from './plugins/dragselect';
 import { findPlugin } from './plugins/find';
 import { mirrorCaretPlugin } from './plugins/mirrorcaret';
 import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
@@ -293,6 +294,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     lyxKeymap(),
     fontCarryPlugin(),
     insetCaretPlugin(),
+    dragSelectPlugin(),
     gapCursor(),
     dropCursor({ color: '#3b6ea5' }),
     tableEditing(),

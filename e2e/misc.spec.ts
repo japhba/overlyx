@@ -204,3 +204,28 @@ test('a window resize after leaving the document does not crash (margin plugin c
   await page.waitForTimeout(500);
   expect(errors.filter(e => !/favicon|ERR_INTERNET|net::/.test(e))).toEqual([]);
 });
+
+test('drag selection crosses a display equation and takes it whole; a plain click still sets the caret', async ({ page }) => {
+  writeFileSync(`${DIR}/dragsel.tex`, withPreambleOf(`${SRC}/main.tex`, 'Alpha bravo charlie delta.\n\n\\begin{equation}\nE=mc^{2}\n\\end{equation}\n\nGolf hotel india juliet.\n'));
+  await login(page);
+  await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); });
+  await page.goto(`/#/${PROJECT}/dragsel.tex`);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length >= 3, null, { timeout: 60000 });
+  await page.waitForTimeout(800);
+  const a = (await page.locator('.lyx-editor > .lyx-par', { hasText: 'Alpha bravo' }).first().boundingBox())!;
+  const g = (await page.locator('.lyx-editor > .lyx-par', { hasText: 'Golf hotel' }).first().boundingBox())!;
+  await page.mouse.move(a.x + 20, a.y + 8);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) await page.mouse.move(a.x + 20 + ((g.x + 160 - a.x - 20) * i) / 8, a.y + 8 + ((g.y + 8 - a.y - 8) * i) / 8);
+  await page.mouse.up();
+  const sel = await page.evaluate(() => {
+    const v = (window as any).overlyx.activeView, s = v.state.selection;
+    return v.state.doc.textBetween(s.from, s.to, ' | ', '[math]');
+  });
+  expect(sel).toContain('bravo charlie delta.');
+  expect(sel).toContain('[math]');          // the whole equation is inside the selection
+  expect(sel).toContain('Golf hotel india');
+  // a plain click still sets a caret
+  await page.mouse.click(g.x + 40, g.y + 8);
+  await expect.poll(() => page.evaluate(() => { const s = (window as any).overlyx.activeView.state.selection; return s.to - s.from; })).toBe(0);
+});
