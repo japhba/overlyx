@@ -206,7 +206,7 @@ test('link sharing: joining through the link, revoked when the link is turned of
   await expect(pageC.locator('.statusbar .msg')).toContainText('You can now edit', { timeout: 10000 });
   await expect(pageC.locator('.statusbar')).toContainText('connected', { timeout: 20000 });
   expect((await projectsOf(carol)).find(p => p.name === PROJECT)?.via).toBe('link');
-  await expect(pageC.locator('.filetree[data-project="e2e-share"] .badge')).toHaveText('edit');
+  await expect(pageC.locator('.docpanel[data-project="e2e-share"] .badge')).toHaveText('edit');   // the role badge sits in the documents panel since the one-project workspace
   await pageC.locator('.lyx-editor .lyx-par').last().click();
   await pageC.keyboard.type('LINK-TYPED');
   await expect.poll(() => readFileSync(FILE, 'utf8'), { timeout: 15000 }).toContain('LINK-TYPED');

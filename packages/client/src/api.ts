@@ -1,6 +1,6 @@
 export interface User { id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null }
 /** `doc`: a .tex document (opens in the editor); `tex`: other LaTeX sources (text editor); `lyx`: importable */
-export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'other' }
+export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'dir' | 'other' }
 export type Role = 'owner' | 'edit' | 'view';
 export interface Project {
   name: string; files: ProjectFile[];
@@ -116,6 +116,7 @@ export const api = {
   readText: (project: string, path: string) => req<{ text: string; mtime: number; size: number; role: Role }>('GET', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`),
   writeText: (project: string, path: string, text: string, mtime?: number) => req<{ ok: boolean; mtime: number; size: number }>('PUT', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`, mtime !== undefined ? { text, mtime } : { text }),
   upload: (project: string, path: string, file: Blob) => req<{ ok: boolean; path: string }>('POST', `/api/projects/${encodeURIComponent(project)}/upload?path=${encodeURIComponent(path)}`, undefined, file),
+  fileOp: (project: string, body: { op: 'rename' | 'delete' | 'mkdir' | 'copy'; from?: string; to?: string }) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/fileops`, body),
   meta: (id: string) => req<DocMeta>('GET', `/api/docs/${encId(id)}/meta`),
   /** the document's LaTeX source (what its .tex file contains) */
   texText: (id: string) => fetch(`/api/docs/${encId(id)}/tex`).then(r => r.text()),

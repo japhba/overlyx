@@ -48,7 +48,8 @@ test('the documents panel shows one project at a time (documents as tabs, other 
   await expect(panel).toHaveAttribute('data-project', PROJECT);
   await expect(panel.locator('.project-switch')).toHaveValue(PROJECT);
   await expect(panel.locator('.doc-tab')).toHaveCount(1);                 // main.tex is a document tab …
-  await expect(tree.locator('.tree-row.file')).toHaveCount(2);          // … macros.tex and refs.bib are files
+  await expect(tree.locator('.tree-row.file')).toHaveCount(3);          // … and the tree lists every file: main.tex, macros.tex, refs.bib
+  await expect(tree.locator('.tree-row.folder', { hasText: 'figures' })).toHaveCount(1);   // empty folders show too
   await expect(tree.locator('[data-file="main.aux"]')).toHaveCount(0);
   await expect(tree.locator('[data-file="main.tex~"]')).toHaveCount(0);
   await expect(tree.locator('.project-info')).toContainText('Your project');
@@ -203,5 +204,56 @@ test('the text editor has its own undo/redo, bracket matching and VS Code-style 
   await page.keyboard.press('Control+Shift+z');
   await expect(ed.locator('.state')).toHaveText('✓ Saved', { timeout: 10000 });
   expect(readFileSync(`${DIR}/macros.tex`, 'utf8')).toBe(await ta.inputValue());
+  await admin.close();
+});
+
+test('the explorer context menu works like VS Code: new folder, duplicate, rename, cut/paste, delete to the trash', async ({ browser }) => {
+  const admin = await asUser(browser);
+  await admin.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const page = await admin.newPage();
+  await page.goto('/#/' + PROJECT + '/main.tex');
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  const tree = page.locator('.filetree');
+  await expect(tree.locator('[data-file="refs.bib"]')).toHaveCount(1);
+  const refContent = readFileSync(`${DIR}/refs.bib`, 'utf8');   // earlier tests of this file edit refs.bib — compare against what is there now
+  const menuItem = (label: string) => page.locator('.ctx-menu .ctx-item', { hasText: label }).first();
+  // the background menu: a new folder (empty folders are listed)
+  page.once('dialog', d => void d.accept('assets'));
+  await page.evaluate(() => { document.querySelector('.filetree')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 400 })); });
+  await menuItem('New Folder…').click();
+  await expect(tree.locator('.tree-row.folder', { hasText: 'assets' })).toHaveCount(1, { timeout: 10000 });
+  // duplicate a file
+  await tree.locator('[data-file="refs.bib"]').click({ button: 'right' });
+  await menuItem('Duplicate').click();
+  await expect(tree.locator('[data-file="refs copy.bib"]')).toHaveCount(1, { timeout: 10000 });
+  // copy the relative path
+  await tree.locator('[data-file="refs copy.bib"]').click({ button: 'right' });
+  await menuItem('Copy Relative Path').click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('refs copy.bib');
+  // rename — a path moves the file
+  page.once('dialog', d => void d.accept('assets/refs2.bib'));
+  await tree.locator('[data-file="refs copy.bib"]').click({ button: 'right' });
+  await menuItem('Rename…').click();
+  await expect(tree.locator('[data-file="assets/refs2.bib"]')).toHaveCount(1, { timeout: 10000 });
+  expect(readFileSync(`${DIR}/assets/refs2.bib`, 'utf8')).toBe(refContent);
+  // cut … paste into figures/
+  await tree.locator('[data-file="assets/refs2.bib"]').click({ button: 'right' });
+  await menuItem('Cut').click();
+  await tree.locator('.tree-row.folder', { hasText: 'figures' }).click({ button: 'right' });
+  await menuItem('Paste').click();
+  await expect(tree.locator('[data-file="figures/refs2.bib"]')).toHaveCount(1, { timeout: 10000 });
+  expect(readFileSync(`${DIR}/figures/refs2.bib`, 'utf8')).toBe(refContent);
+  await expect(tree.locator('[data-file="assets/refs2.bib"]')).toHaveCount(0);
+  // delete: out of the project, but kept in the server's trash (never erased outright)
+  page.once('dialog', d => void d.accept());
+  await tree.locator('[data-file="figures/refs2.bib"]').click({ button: 'right' });
+  await menuItem('Delete').click();
+  await expect(tree.locator('[data-file="figures/refs2.bib"]')).toHaveCount(0, { timeout: 10000 });
+  const dataDir = process.env.OVERLYX_DATA_DIR;
+  if (dataDir) {
+    const { readdirSync } = await import('node:fs');
+    const bins = readdirSync(`${dataDir}/trash/files`).filter(n => n.startsWith(PROJECT + '-'));
+    expect(bins.some(b => { try { return readFileSync(`${dataDir}/trash/files/${b}/figures/refs2.bib`, 'utf8') === refContent; } catch { return false; } })).toBe(true);
+  }
   await admin.close();
 });

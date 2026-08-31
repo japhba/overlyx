@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.ts';
 
-/** `doc`: a .tex document (has \\begin{document}, or is \\input by one); `tex`: other LaTeX sources (preamble, macros, .sty) */
-export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'other' }
+/** `doc`: a .tex document (has \\begin{document}, or is \\input by one); `tex`: other LaTeX sources (preamble, macros, .sty); `dir`: a directory (so empty folders show in the explorer) */
+export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'dir' | 'other' }
 export interface Project { name: string; path: string; files: ProjectFile[] }
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf', '.eps', '.ps', '.tif', '.tiff', '.webp', '.bmp']);
@@ -112,7 +112,11 @@ function collect(root: string, dir: string, out: ProjectFile[], depth: number): 
   for (const e of entries) {
     if (e.name.startsWith('.') || e.name === 'node_modules' || e.name.endsWith('.overlyx-tmp')) continue;
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) { collect(root, full, out, depth + 1); continue; }
+    if (e.isDirectory()) {
+      try { out.push({ path: path.relative(root, full), name: e.name, size: 0, mtime: fs.statSync(full).mtimeMs, kind: 'dir' }); } catch { /* ignore */ }
+      collect(root, full, out, depth + 1);
+      continue;
+    }
     const st = fs.statSync(full);
     out.push({ path: path.relative(root, full), name: e.name, size: st.size, mtime: st.mtimeMs, kind: fileKind(e.name) });
   }

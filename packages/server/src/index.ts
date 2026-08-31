@@ -280,6 +280,44 @@ api.post('/projects/:project/upload', needProject('edit'), express.raw({ type: '
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
+/** File operations behind the explorer's context menu (VS Code-like). Deleted files go to the data
+ * directory's trash, never into the void — project files are the user's documents. */
+api.post('/projects/:project/fileops', needProject('edit'), (req, res) => {
+  try {
+    const project = req.params.project;
+    const op = String(req.body?.op ?? '');
+    const guard = (rel: string) => {
+      if (!rel || rel.split('/').some(part => part === '.git' || part === '..' || part === '' || part === '.')) throw new Error('bad path');
+      return resolveProjectPath(project, rel);
+    };
+    const moveOut = (abs: string, rel: string) => {   // to the trash; a rename across file systems falls back to copy + delete
+      const trash = path.join(config.dataDir, 'trash', 'files', `${project}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+      const dest = path.join(trash, rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      try { fs.renameSync(abs, dest); }
+      catch { fs.cpSync(abs, dest, { recursive: true }); fs.rmSync(abs, { recursive: true, force: true }); }
+    };
+    if (op === 'mkdir') {
+      fs.mkdirSync(guard(String(req.body?.to ?? '')), { recursive: true });
+    } else if (op === 'delete') {
+      const rel = String(req.body?.from ?? '');
+      const abs = guard(rel);
+      if (!fs.existsSync(abs)) throw new Error('not found');
+      moveOut(abs, rel);
+    } else if (op === 'rename' || op === 'copy') {
+      const from = guard(String(req.body?.from ?? ''));
+      const to = guard(String(req.body?.to ?? ''));
+      if (!fs.existsSync(from)) throw new Error('not found');
+      if (fs.existsSync(to)) { res.status(409).json({ error: 'a file with that name exists' }); return; }
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      if (op === 'rename') fs.renameSync(from, to);
+      else fs.cpSync(from, to, { recursive: true });
+    } else throw new Error('unknown operation');
+    touchProject(req.params.project, req.user!.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: (e as Error).message ?? String(e) }); }
+});
+
 /** File types a browser may render in place; everything else (html, svg, …) is offered as a download — a project's files are user content and must not run as a page of our origin. */
 const INLINE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.txt']);
 

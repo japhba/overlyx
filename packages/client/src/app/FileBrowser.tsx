@@ -6,6 +6,7 @@
  */
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { api, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } from '../api';
+import { showContextMenu, type MenuItem } from '../editor/contextmenu';
 
 interface TreeNode { name: string; path: string; children: TreeNode[]; file?: ProjectFile }
 
@@ -13,14 +14,15 @@ function buildTree(files: ProjectFile[]): TreeNode[] {
   const root: TreeNode = { name: '', path: '', children: [] };
   for (const f of files) {
     const parts = f.path.split('/');
+    const dirs = f.kind === 'dir' ? parts.length : parts.length - 1;   // a directory entry is a folder node itself, so empty folders show too
     let cur = root;
-    for (let i = 0; i < parts.length - 1; i++) {
+    for (let i = 0; i < dirs; i++) {
       const dirPath = parts.slice(0, i + 1).join('/');
       let next = cur.children.find(c => !c.file && c.path === dirPath);
       if (!next) { next = { name: parts[i], path: dirPath, children: [] }; cur.children.push(next); }
       cur = next;
     }
-    cur.children.push({ name: parts[parts.length - 1], path: f.path, children: [], file: f });
+    if (f.kind !== 'dir') cur.children.push({ name: parts[parts.length - 1], path: f.path, children: [], file: f });
   }
   const sort = (n: TreeNode) => {
     n.children.sort((a, b) => Number(!!a.file) - Number(!!b.file) || a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -31,15 +33,15 @@ function buildTree(files: ProjectFile[]): TreeNode[] {
 }
 
 const ICON: Record<string, string> = { doc: '📄', lyx: '📥', bib: '📚', image: '🖼', tex: '𝓣', pdf: '📕', other: '·' };
+/** the explorer's cut/copy clipboard (paths within one project; survives re-renders) */
+let fileClip: { project: string; path: string; cut: boolean } | null = null;
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 export const projectLabel = (p: Project) => p.title ?? p.name;
 
-export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, project: controlled, hideDocs, onProjectCreated }: {
+export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, project: controlled, onProjectCreated }: {
   current: string | null; onOpen: (id: string) => void; onShare?: (project: string) => void; onGit?: (project: string) => void; refreshKey: number;
   /** the project to show, chosen outside (the documents panel): no picker of its own */
   project?: string | null;
-  /** leave out the .tex documents (they are the document tabs above the browser) */
-  hideDocs?: boolean;
   onProjectCreated?: (name: string) => void;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -133,8 +135,89 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     input.click();
   };
 
-  const visible = (f: ProjectFile) => (showAll || (!isBackup(f.name) && !isAuxFile(f.name) && !f.name.endsWith('.overlyx-tmp'))) && !(hideDocs && f.kind === 'doc' && !isBackup(f.name));
-  const tree = useMemo(() => (project ? buildTree(project.files.filter(visible)) : []), [project, showAll, hideDocs]);
+  const visible = (f: ProjectFile) => f.kind === 'dir' || showAll || (!isBackup(f.name) && !isAuxFile(f.name) && !f.name.endsWith('.overlyx-tmp'));
+  const tree = useMemo(() => (project ? buildTree(project.files.filter(visible)) : []), [project, showAll]);
+
+  /* ---- the VS Code-like context menu (right click on a file, a folder, or the background) */
+  const doOp = async (body: { op: 'rename' | 'delete' | 'mkdir' | 'copy'; from?: string; to?: string }) => {
+    if (!project) return;
+    try { await api.fileOp(project.name, body); await load(); } catch (e) { alert(String((e as Error).message)); }
+  };
+  /** a free name in `dir` for paste / duplicate: name.ext, name copy.ext, name copy 2.ext … */
+  const freeName = (dir: string, base: string) => {
+    const exists = (rel: string) => project!.files.some(f => f.path === rel);
+    let rel = (dir ? dir + '/' : '') + base;
+    if (!exists(rel)) return rel;
+    const dot = base.startsWith('.') ? -1 : base.lastIndexOf('.');
+    const stem = dot > 0 ? base.slice(0, dot) : base, ext = dot > 0 ? base.slice(dot) : '';
+    for (let k = 1; ; k++) { rel = (dir ? dir + '/' : '') + `${stem} copy${k > 1 ? ' ' + k : ''}${ext}`; if (!exists(rel)) return rel; }
+  };
+  const renamePath = async (p: string) => {
+    const nn = prompt('New name (a path moves the file):', p);
+    if (nn && nn !== p) await doOp({ op: 'rename', from: p, to: nn });
+  };
+  const deletePath = async (p: string, isDir: boolean) => {
+    if (!confirm(`Delete ${p}${isDir ? ' and everything in it' : ''}? (It is moved to the server's trash, not erased.)`)) return;
+    await doOp({ op: 'delete', from: p });
+  };
+  const newFolder = async (dir = '') => {
+    const n = prompt(`New folder${dir ? ' in ' + dir : ''}:`, 'figures');
+    if (n) await doOp({ op: 'mkdir', to: (dir ? dir + '/' : '') + n.trim() });
+  };
+  const pasteInto = async (dir: string) => {
+    if (!fileClip || !project) return;
+    if (fileClip.project !== project.name) { alert('Cut / copy and paste work within one project.'); return; }
+    await doOp({ op: fileClip.cut ? 'rename' : 'copy', from: fileClip.path, to: freeName(dir, fileClip.path.split('/').pop()!) });
+    if (fileClip.cut) fileClip = null;
+  };
+  const copyText = (text: string) => { void navigator.clipboard?.writeText(text).catch(() => {}); };
+  const download = (p: string) => { const a = document.createElement('a'); a.href = fileUrl(project!.name, p) + '?download=1'; a.click(); };
+  const ctxCommon = (p: string, isDir: boolean): MenuItem[] => [
+    { sep: true },
+    ...(canEdit ? [
+      { label: 'Cut', action: () => { fileClip = { project: project!.name, path: p, cut: true }; } },
+      { label: 'Copy', action: () => { fileClip = { project: project!.name, path: p, cut: false }; } },
+      ...(isDir ? [{ label: 'Paste', disabled: !fileClip, action: () => void pasteInto(p) }] : []),
+      { sep: true },
+    ] : [{ sep: true }]),
+    { label: 'Copy Path', action: () => copyText(`${project!.name}/${p}`) },
+    { label: 'Copy Relative Path', action: () => copyText(p) },
+    ...(canEdit ? [
+      { sep: true },
+      { label: 'Rename…', action: () => void renamePath(p) },
+      ...(!isDir ? [{ label: 'Duplicate', action: () => void doOp({ op: 'copy', from: p, to: freeName(p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '', p.split('/').pop()!) }) }] : []),
+      { label: 'Delete', action: () => void deletePath(p, isDir) },
+    ] : []),
+  ];
+  const newItems = (dir = ''): MenuItem[] => canEdit ? [
+    { label: 'New Document…', action: () => void newDoc(dir) },
+    { label: 'New File…', action: () => void newTextFile(dir) },
+    { label: 'New Folder…', action: () => void newFolder(dir) },
+    { label: 'Upload…', action: () => void upload(dir) },
+  ] : [];
+  const fileCtx = (f: ProjectFile, openIt: () => void) => (e: MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    showContextMenu(e.clientX, e.clientY, [
+      { label: 'Open', action: openIt },
+      { label: 'Download', action: () => download(f.path) },
+      ...ctxCommon(f.path, false),
+    ]);
+  };
+  const folderCtx = (p: string) => (e: MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    showContextMenu(e.clientX, e.clientY, [...newItems(p), ...ctxCommon(p, true)]);
+  };
+  const bgCtx = (e: MouseEvent) => {
+    if (!project) return;
+    e.preventDefault();
+    showContextMenu(e.clientX, e.clientY, [
+      ...newItems(''),
+      ...(canEdit ? [{ label: 'Paste', disabled: !fileClip, action: () => void pasteInto('') }] : []),
+      { sep: true },
+      { label: showAll ? 'Hide Build Files' : 'Show All Files', action: () => setShowAll(!showAll) },
+      { label: 'Refresh', action: () => void load() },
+    ]);
+  };
 
   const renderNode = (node: TreeNode, depth: number) => {
     const key = project!.name + ':' + node.path;
@@ -142,7 +225,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
       const isCollapsed = collapsed[key] ?? (depth > 0);
       return (
         <div key={key}>
-          <div class="tree-row folder" style={{ paddingLeft: 6 + depth * 14 + 'px' }} onClick={() => toggle(key)}>
+          <div class="tree-row folder" style={{ paddingLeft: 6 + depth * 14 + 'px' }} onClick={() => toggle(key)} onContextMenu={folderCtx(node.path)}>
             <span class="twisty">{isCollapsed ? '▸' : '▾'}</span><span class="fname">{node.name}</span>
             {canEdit && <span class="row-actions">
               <button class="mini" title="New document here" onClick={e => { e.stopPropagation(); void newDoc(node.path); }}>+</button>
@@ -170,6 +253,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
       <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (!isDoc ? ' other' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }}
         href={href} target={inTab ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB${isLyx ? ' · click to import as .tex' : inTab && isPdf ? ' · opens in the PDF viewer' : inTab && !isDoc ? ' · opens in the text editor' : ''}`}
         data-file={f.path}
+        onContextMenu={fileCtx(f, () => { if (isLyx) void importLyx(); else if (inTab) onOpen(tabId); else window.open(href, '_blank'); })}
         onClick={e => { if (isLyx) { e.preventDefault(); void importLyx(); return; } if (inTab && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(tabId); } }}>
         <span class="ficon">{ICON[f.kind] ?? '·'}</span><span class="fname">{node.name}</span>
         {isDoc && offlineDocs.has(id) && <span class="offline-mark" title="A copy of this document is stored in this browser: it can be opened and edited offline">⬇</span>}
@@ -178,7 +262,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   };
 
   return (
-    <div class="filetree" data-project={project?.name ?? ''}>
+    <div class="filetree" data-project={project?.name ?? ''} onContextMenu={bgCtx}>
       {controlled === undefined && <div class="project-picker">
         <select value={selected ?? ''} onChange={e => setPicked((e.target as HTMLSelectElement).value)} title="Switch project" aria-label="Project">
           {!projects.length && <option value="">(no projects)</option>}
@@ -204,7 +288,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
         <button class="small-btn" onClick={load} title="Refresh">↻</button>
       </div>
       {project && tree.map(n => renderNode(n, 0))}
-      {project && !tree.length && <div class="empty">{hideDocs ? 'No other files — upload figures or a .bib with ⇧.' : 'No files yet — add a document with + Doc, or upload files.'}</div>}
+      {project && !tree.length && <div class="empty">No files yet — add a document with + Doc, or upload files.</div>}
       {!projects.length && <div class="empty">No projects yet.</div>}
     </div>
   );

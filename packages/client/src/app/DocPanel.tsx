@@ -138,7 +138,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
         <div class={'section-head' + (filesOpen ? ' open' : '')} onClick={() => setFilesOpen(o => !o)} data-files-section>
           <span class="twisty">{filesOpen ? '▾' : '▸'}</span> Files
         </div>
-        {filesOpen && <FileBrowser current={current} project={selected} hideDocs refreshKey={refreshKey} onOpen={id => onOpen(id)} onGit={onGit} onProjectCreated={name => { void load().then(() => setPicked(name)); }} />}
+        {filesOpen && <FileBrowser current={current} project={selected} refreshKey={refreshKey} onOpen={id => onOpen(id)} onGit={onGit} onProjectCreated={name => { void load().then(() => setPicked(name)); }} />}
       </div>
     </div>
   );

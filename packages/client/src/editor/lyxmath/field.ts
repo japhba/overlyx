@@ -502,7 +502,14 @@ export class LyxMathField {
     // Dead keys (^ ` ´ ~ on German/French/… layouts) arrive as a composition: the text is taken once,
     // at compositionend; `input` events fired while composing must be ignored (the flag is on the
     // event — checking it on the element used to insert ^ twice: x^2 became a double superscript).
-    input.addEventListener('compositionend', ev => { input.value = ''; this.typed(ev.data ?? ''); });
+    // A dead ^ composed with a letter (ê, â, û … on German/French layouts) means superscript-of-that-
+    // letter in math, as in LyX — the composed character is split back into ^ + letter (other accents
+    // are kept: é stays é).
+    input.addEventListener('compositionend', ev => {
+      input.value = '';
+      const data = ev.data ?? '';
+      this.typed(this.cursor.mode === 'math' ? data.normalize('NFD').replace(/(.)̂/g, '^$1').normalize('NFC') : data);
+    });
     input.addEventListener('input', ev => { if ((ev as InputEvent).isComposing) return; if (input.value) { const v = input.value; input.value = ''; this.typed(v); } });
     input.addEventListener('copy', ev => { ev.preventDefault(); ev.clipboardData?.setData('text/plain', this.cursor.selection ? this.cursor.grabSelection() : ''); });
     input.addEventListener('cut', ev => { ev.preventDefault(); if (!this.cursor.selection || this.readOnly) return; ev.clipboardData?.setData('text/plain', this.cursor.grabSelection()); this.snapshot('cut'); this.cursor.eraseSelection(); this.commit(); });

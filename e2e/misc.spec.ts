@@ -96,6 +96,18 @@ test('a dead-key ^ (German/French layouts: a composition) makes exactly one supe
   await page.keyboard.press('Escape');
   await page.keyboard.type('^3');
   expect(await page.evaluate(() => (document.querySelector('.lyx-editor .lyx-math-inline') as any).pmViewDesc.spec.field.latex as string)).toBe('$x^{2}$');
+  // a dead ^ composed with a vowel (German layout: pressing ^ then e commits a single "ê") means superscript e, as in LyX
+  await page.keyboard.press('Control+m');
+  await page.keyboard.type('u');
+  await page.evaluate(() => {
+    const ta = document.activeElement as HTMLTextAreaElement;
+    if (!ta || !ta.classList.contains('lm-input')) throw new Error('math field not focused');
+    ta.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
+    ta.value = 'ê';
+    ta.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'ê', isComposing: true, bubbles: true }));
+    ta.dispatchEvent(new CompositionEvent('compositionend', { data: 'ê' }));
+  });
+  expect(await page.evaluate(() => (Array.from(document.querySelectorAll('.lyx-editor .lyx-math-inline')).pop() as any).pmViewDesc.spec.field.latex as string)).toBe('$u^{e}$');
   expect(errors).toEqual([]);
 });
 
