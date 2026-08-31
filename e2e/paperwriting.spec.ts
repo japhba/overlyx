@@ -6,17 +6,22 @@
  * "Attention Is All You Need" and 2006.04870 "On the Gap between Scalar and Vector Solutions of
  * Generalized Combination Networks"), including their real abstracts, a real sentence + citation
  * from each introduction, and (for the first paper) the real scaled dot-product attention formula.
- * This exercises the WYSIWYG path a real author hits when starting a paper, end to end.
+ * This exercises the WYSIWYG path a real author hits when starting a paper, end to end. A later
+ * session adds the Attention paper's real appendix ("Attention Visualizations", three figure
+ * floats with the paper's captions) through Document ▸ Start Appendix Here — the
+ * combination-networks paper (like GAN) has no appendix in the original.
  * More: paperwriting-more.spec.ts (BERT's first pages: lists, footnote, table) and the whole GAN and Adam
  * papers from abstract to bibliography with a PDF build: paperwriting-gan.spec.ts, paperwriting-adam.spec.ts.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { login, collectErrors, PROJECTS_DIR } from './helpers';
-import { blankArticle, openPaper, afterAuthor, setLayout, citeFromPastedBibtex, typeFrac, typeSqrt, typeScript, typeSymbol, typeBareSymbol } from './papertyping';
+import { blankArticle, openPaper, afterAuthor, setLayout, newParagraph, citeFromPastedBibtex, typeFrac, typeSqrt, typeScript, typeSymbol, typeBareSymbol, insertFloat, uploadGraphics, typeCaption, leaveFloat, placeholderPng, resumeAtEnd } from './papertyping';
 
 const PROJECT = 'e2e-paperwriting';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
+const TMP = process.env.CLAUDE_JOB_DIR ? `${process.env.CLAUDE_JOB_DIR}/tmp` : '/tmp';
+const FIGS = `${TMP}/e2e-attention-figs`;
 
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
@@ -194,6 +199,62 @@ test('writing "On the Gap between Scalar and Vector Solutions of Generalized Com
   expect(text).toMatch(/\\begin\{equation\}\nq\^\{?a\}?\s*\\leq\s*\\frac\{n\}\{k\}\s*<\s*\\gamma\s*q\^\{?a\}?\n\\end\{equation\}/);
 
   await expect(page.locator('.lyx-math-display .katex-error')).toHaveCount(0);
+  expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
+});
+
+/**
+ * A second session: the author comes back and adds the paper's real appendix — "Attention
+ * Visualizations", three full-page figures — after the last formula. Document ▸ Start Appendix
+ * Here makes the heading lettered ("A Attention Visualizations"). The other paper of this spec
+ * (2006.04870) has no appendix in the original, and neither has GAN (1406.2661); of the example
+ * papers only Adam (paperwriting-adam.spec.ts) and BERT (paperwriting-more.spec.ts) get one too.
+ */
+test('writing "Attention Is All You Need", the appendix: attention visualizations', async ({ page }) => {
+  test.skip(!fileText('attention.tex').includes('\\section{Model Architecture}'), 'the paper was not typed');
+  test.setTimeout(600000);
+  const errors = collectErrors(page);
+  mkdirSync(FIGS, { recursive: true });
+  placeholderPng(`${FIGS}/attention-making.png`, 620, 620, [70, 130, 180]);
+  placeholderPng(`${FIGS}/attention-anaphora.png`, 620, 620, [60, 160, 90]);
+  placeholderPng(`${FIGS}/attention-structure.png`, 620, 620, [170, 90, 60]);
+  await open(page, 'attention.tex');
+  await resumeAtEnd(page, 1);   // Control+End can land inside the display formula's field: one Escape out
+  await newParagraph(page);
+  await page.locator('.menubar .menu button', { hasText: 'Document' }).first().click();
+  await page.locator('.menu-list .menu-item', { hasText: 'Start Appendix Here' }).click();
+  await setLayout(page, '2');
+  await page.keyboard.type('Attention Visualizations');
+
+  const figure = async (png: string, caption: string, label: string) => {
+    await newParagraph(page);
+    await insertFloat(page, 'Figure');
+    await uploadGraphics(page, png);
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(100);
+    await typeCaption(page, caption, label);
+    await leaveFloat(page);
+  };
+  await figure(`${FIGS}/attention-making.png`,
+    "An example of the attention mechanism following long-distance dependencies in the encoder self-attention in layer 5 of 6. Many of the attention heads attend to a distant dependency of the verb 'making', completing the phrase 'making...more difficult'. Attentions here shown only for the word 'making'. Different colors represent different heads. Best viewed in color.",
+    'fig:making');
+  await figure(`${FIGS}/attention-anaphora.png`,
+    "Two attention heads, also in layer 5 of 6, apparently involved in anaphora resolution. Top: Full attentions for head 5. Bottom: Isolated attentions from just the word 'its' for attention heads 5 and 6. Note that the attentions are very sharp for this word.",
+    'fig:anaphora');
+  await figure(`${FIGS}/attention-structure.png`,
+    'Many of the attention heads exhibit behaviour that seems related to the structure of the sentence. We give two such examples above, from two different heads from the encoder self-attention at layer 5 of 6. The heads clearly learned to perform different tasks.',
+    'fig:structure');
+
+  await expect.poll(() => fileText('attention.tex').includes('\\label{fig:structure}'), { timeout: 20000 }).toBe(true);
+  await page.waitForTimeout(2000);
+  const text = fileText('attention.tex');
+  expect(text).toMatch(/\\end\{equation\}\n+\\appendix\n+\\section\{Attention[\s\S]*Visualizations\}/);
+  expect((text.match(/\\appendix/g) ?? []).length).toBe(1);   // one marker, not one per paragraph
+  expect((text.match(/\\begin\{figure\}/g) ?? []).length).toBe(3);
+  expect(text).toMatch(/\\includegraphics\[width=1\\columnwidth\]\{figures\/attention-making\.png\}[\s\S]*\\caption\{An example of the attention mechanism[\s\S]*Best[\s\S]*viewed[\s\S]*in[\s\S]*color\.\}\\label\{fig:making\}/);
+  expect(text).toMatch(/\\includegraphics\[width=1\\columnwidth\]\{figures\/attention-anaphora\.png\}[\s\S]*\\caption\{Two attention heads, also in layer 5 of 6,[\s\S]*sharp[\s\S]*for[\s\S]*this[\s\S]*word\.\}\\label\{fig:anaphora\}/);
+  expect(text).toMatch(/\\includegraphics\[width=1\\columnwidth\]\{figures\/attention-structure\.png\}[\s\S]*\\caption\{Many of the attention heads exhibit behaviour[\s\S]*different[\s\S]*tasks\.\}\\label\{fig:structure\}/);
+  for (const f of ['attention-making', 'attention-anaphora', 'attention-structure']) expect(existsSync(`${DIR}/figures/${f}.png`)).toBe(true);
+  await expect(page.locator('.katex-error')).toHaveCount(0);
   expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
 });
 

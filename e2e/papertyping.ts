@@ -50,6 +50,32 @@ export async function newParagraph(page: Page) {
   await page.waitForTimeout(100);
 }
 
+/**
+ * Put the caret at the very end of an existing document (a later writing session continues there).
+ * The click's selectionchange can arrive after the Control+End keypress and pull the caret back to
+ * the click point — typing then splits the clicked paragraph mid-line — so Control+End is pressed
+ * again until the selection verifiably sits in the last top-level paragraph. When the document
+ * ends in an inset (a table cell, a float's caption), `escapes` Escapes then step out to the
+ * paragraph holding it; the caller opens its own paragraph afterwards.
+ */
+export async function resumeAtEnd(page: Page, escapes = 0) {
+  await page.locator('.lyx-editor > .lyx-par').last().click();
+  await page.waitForTimeout(300);
+  let atEnd = false;
+  for (let i = 0; i < 5 && !atEnd; i++) {
+    await page.keyboard.press('Control+End');
+    await page.waitForTimeout(200);
+    atEnd = await page.evaluate(() => {
+      const pars = document.querySelectorAll('.lyx-editor > .lyx-par');
+      const sel = document.getSelection();
+      if (!pars.length || !sel || !sel.rangeCount) return false;
+      return pars[pars.length - 1].contains(sel.getRangeAt(0).startContainer);
+    });
+  }
+  if (!atEnd) throw new Error('Control+End never reached the last paragraph');
+  for (let i = 0; i < escapes; i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(120); }
+}
+
 /** Paste a BibTeX entry via "Find online / paste BibTeX" and insert the citation at the cursor. */
 export async function citeFromPastedBibtex(page: Page, bibtex: string, surname: string) {
   await page.keyboard.press('Control+Shift+c');

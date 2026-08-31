@@ -497,7 +497,12 @@ OVERLYX_E2E_AI_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test
 # paperwriting.spec.ts / paperwriting-more.spec.ts (first pages of Attention, a coding-theory paper, BERT) and
 # the whole GAN and Adam papers from abstract to bibliography with a latexmk build (~15 min each; needs pdftotext):
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/paperwriting-gan.spec.ts e2e/paperwriting-adam.spec.ts
-# OVERLYX_E2E_KEEP=1 leaves the typed projects on disk (e2e-paper-gan, e2e-paper-adam) for inspection
+# the papers' real appendices are typed by follow-up sessions in the same specs (Adam's convergence
+# proof, BERT's appendices A-C, Attention's visualizations; GAN and the combination-networks paper
+# have no appendix in the originals). OVERLYX_E2E_KEEP=1 leaves the typed projects on disk
+# (e2e-paperwriting, e2e-paperwriting-more, e2e-paper-gan, e2e-paper-adam); publish them into the
+# production admin account so the latest typed-via-GUI papers can always be inspected there:
+scripts/publish-typed-papers.sh $S/projects
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/pdfview.spec.ts e2e/rawsplit.spec.ts   # pdf.js viewer, SyncTeX, PDF tabs; the [raw] split tab, scroll sync, live apply
 ```
 
