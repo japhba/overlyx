@@ -75,9 +75,9 @@ test('the caret in the source and the cursor in the document follow each other',
     const col = r.toString().length + (c.classList.contains('hl-caret-after') ? (c.textContent ?? '').length : 0);
     return { line: line.textContent ?? '', col, sel: (document.querySelector('.source-pane textarea.source') as HTMLTextAreaElement).selectionStart };
   });
-  await expect.poll(async () => (await caret())?.line ?? '', { timeout: 10000 }).toContain('Paragraph 7 of the methods');
+  // the caret mark settles a moment after the arrow keys (the doc → source sync is debounced): poll on the column, not just the line
+  await expect.poll(async () => { const c = await caret(); return c ? c.line.slice(c.col) : ''; }, { timeout: 10000 }).toMatch(/^7 of the methods/);
   const c1 = (await caret())!;
-  expect(c1.line.slice(c1.col)).toMatch(/^7 of the methods/);
   expect(await ta.evaluate((el: HTMLTextAreaElement, s: number) => el.value.slice(s, s + 16), c1.sel)).toBe('7 of the methods');   // the textarea's caret went there too
   // source → document: a click in the source puts the document cursor at that word; the blurred editor shows it as a mirror caret
   await page.evaluate(() => { const ta = document.querySelector('.source-pane textarea.source') as HTMLTextAreaElement; const i = ta.value.indexOf('procedure number 3'); ta.focus(); ta.setSelectionRange(i, i); ta.dispatchEvent(new Event('click', { bubbles: true })); });
