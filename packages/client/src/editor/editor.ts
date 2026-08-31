@@ -4,7 +4,7 @@
  */
 import { EditorState, Plugin, TextSelection } from 'prosemirror-state';
 import { EditorView, type NodeView } from 'prosemirror-view';
-import type { Node as PMNode } from 'prosemirror-model';
+import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
 import { sliceText } from './cliptext';
 import { gapCursor } from 'prosemirror-gapcursor';
 import { dropCursor } from 'prosemirror-dropcursor';
@@ -37,7 +37,7 @@ import { aiCompletePlugin } from './ai/complete';
 import { installMathAssist } from './ai/mathassist';
 import { getPrefs, subscribePrefs } from '../prefs';
 import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
-import type { User } from '../api';
+import { api, type User } from '../api';
 
 installMathAssist();
 editorContext.aiRewriteMath = (field) => openRewriteMath(field);
@@ -408,18 +408,35 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       },
     },
     handlePaste(view, event) {
-      // plain-text paste: keep LyX semantics (no HTML structure)
       const text = event.clipboardData?.getData('text/plain');
       const html = event.clipboardData?.getData('text/html');
-      if (text && !html) {
-        const paras = text.replace(/\r\n/g, '\n').split(/\n{2,}/);
-        if (paras.length === 1) { view.dispatch(view.state.tr.insertText(text.replace(/\n/g, ' '))); return true; }
+      /** plain text without LaTeX: LyX semantics (blank line = new paragraph, no HTML structure) */
+      const plainPaste = () => {
+        const paras = text!.replace(/\r\n/g, '\n').split(/\n{2,}/);
+        if (paras.length === 1) { view.dispatch(view.state.tr.insertText(text!.replace(/\n/g, ' '))); return; }
         let tr = view.state.tr.deleteSelection();
         paras.forEach((p, i) => {
           if (i > 0) tr = tr.split(tr.selection.from);
           tr = tr.insertText(p.replace(/\n/g, ' '));
         });
         view.dispatch(tr);
+      };
+      if (text && !html) {
+        // pasted LaTeX (a \command, $…$, \[ …) is parsed on the server against this document's own
+        // preamble and inserted as real structure — sections, formulas, citations, lists
+        if (!viewOnly && /\\[a-zA-Z]+|\\\[|\\\(|\$[^$\n][^$]*\$/.test(text)) {
+          void api.parseClip(view.dom.dataset.docId ?? opts.docId, text).then(r => {
+            const blocks = (r.blocks as unknown[]).map(b => schema.nodeFromJSON(b)).filter(n => n.type.name !== 'doc');
+            if (!blocks.length) { plainPaste(); return; }
+            // a single plain paragraph flows into the current one; anything structured is inserted as whole paragraphs (closed slice — an open one would dissolve the first block's layout)
+            const single = blocks.length === 1 && blocks[0].type.name === 'paragraph' && blocks[0].attrs.layout === 'Standard' && !blocks[0].attrs.depth;
+            const slice = single ? new Slice(Fragment.from(blocks[0].content), 0, 0) : new Slice(Fragment.from(blocks), 0, 0);
+            view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
+            view.focus();
+          }).catch(e => { console.warn('LaTeX paste fell back to plain text:', e); plainPaste(); });
+          return true;
+        }
+        plainPaste();
         return true;
       }
       return false;

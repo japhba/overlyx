@@ -56,6 +56,12 @@ export function parseDocumentText(text: string, project: string, relPath: string
   return masterHeader ? parseTex(text, { ...opts, masterHeader }) : first;
 }
 
+/** Parse a LaTeX fragment (pasted text) in a document's context: its own header drives the layouts. */
+export function parseFragmentText(latex: string, project: string, relPath: string, masterHeader: string[]): ParseTexResult {
+  const abs = resolveProjectPath(project, relPath);
+  return parseTex(latex, { layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs), masterHeader });
+}
+
 export function writeDocumentText(doc: LyxDocument, project: string, relPath: string, fragment: boolean, resolveInclude?: (filename: string) => LyxDocument | undefined): { text: string; warnings: string[] } {
   const abs = resolveProjectPath(project, relPath);
   const r = writeTex(doc, {

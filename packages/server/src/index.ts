@@ -12,7 +12,7 @@ import { authMiddleware, authRouter, requireAuth, createUser, generatePassword }
 import { attachWebSocket } from './ws.ts';
 import { manager } from './docs.ts';
 import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile, isDocumentFile } from './projects.ts';
-import { cachedParseFile, importLyxFile, parseDocumentText } from './texdoc.ts';
+import { cachedParseFile, importLyxFile, parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
 import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit } from './export.ts';
@@ -24,7 +24,7 @@ import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, 
 import { feedbackRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
-import { texHeadings, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText } from '@overlyx/core';
+import { texHeadings, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText, lyxToPm } from '@overlyx/core';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -642,6 +642,19 @@ api.post('/docs/*/repair', async (req, res) => {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
     const doc = await manager.open(docId(req));
     res.json(doc.repair());
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/** Parse a LaTeX fragment against this document's own preamble (pasting LaTeX text into the
+ *  editor): the ProseMirror blocks to insert. Nothing is written — the client inserts them. */
+api.post('/docs/*/clip', async (req, res) => {
+  try {
+    if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
+    const latex = String(req.body?.latex ?? '');
+    if (!latex.trim() || latex.length > 256 * 1024) { res.status(400).json({ error: 'no LaTeX' }); return; }
+    const doc = await manager.open(docId(req));
+    const r = parseFragmentText(latex, doc.project, doc.relPath, doc.getMeta().headerLines);
+    res.json({ blocks: (lyxToPm(r.doc) as { content?: unknown[] }).content ?? [], warnings: r.warnings });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 

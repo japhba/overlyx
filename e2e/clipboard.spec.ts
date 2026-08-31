@@ -94,3 +94,33 @@ test('foreign HTML pastes as document content (bold, italics, a heading)', async
   expect(text).toContain('\\textbf{bold}');
   expect(text).toContain('\\emph{italic}');
 });
+
+test('plain-text LaTeX pastes as real structure: a section, a formula, bold text and a reference', async ({ page }) => {
+  await login(page);
+  await open(page);
+  const last = page.locator('.lyx-editor .lyx-par').nth(2);
+  await last.click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  const refsBefore = await page.locator('.lyx-editor .lyx-command-ref').count();   // the earlier tests of this file paste ref copies of their own
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', '\\subsection{LaTeX paste}\n\nWith $a^{2}+b$ inline, \\textbf{bold words} and \\ref{sec:intro}.');
+    document.querySelector('.lyx-editor')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await expect(page.locator('.lyx-editor .lyx-layout-subsection', { hasText: 'LaTeX paste' })).toHaveCount(1, { timeout: 10000 });
+  await expect(page.locator('.lyx-editor .lyx-command-ref')).toHaveCount(refsBefore + 1);
+  await expect.poll(() => readFileSync(`${DIR}/clip.tex`, 'utf8').includes('\\subsection{LaTeX paste}'), { timeout: 15000 }).toBe(true);
+  const text = readFileSync(`${DIR}/clip.tex`, 'utf8');
+  expect(text).toContain('$a^{2}+b$');
+  expect(text).toContain('\\textbf{bold words}');
+  expect(text).toContain('\\ref{sec:intro}');
+  // plain prose without LaTeX still pastes as plain paragraphs
+  await page.keyboard.press('Enter');
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', 'Just ordinary words.');
+    document.querySelector('.lyx-editor')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await expect.poll(() => readFileSync(`${DIR}/clip.tex`, 'utf8').includes('Just ordinary words.'), { timeout: 15000 }).toBe(true);
+});

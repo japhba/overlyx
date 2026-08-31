@@ -122,6 +122,8 @@ export const api = {
   texText: (id: string) => fetch(`/api/docs/${encId(id)}/tex`).then(r => r.text()),
   /** replace the document by hand-edited LaTeX source */
   applySource: (id: string, text: string) => req<{ ok: boolean; warnings: string[] }>('POST', `/api/docs/${encId(id)}/source`, { text }),
+  /** parse pasted LaTeX in the document's context: ProseMirror block JSON to insert */
+  parseClip: (id: string, latex: string) => req<{ blocks: unknown[]; warnings: string[] }>('POST', `/api/docs/${encId(id)}/clip`, { latex }),
   header: (id: string) => req<{ headerLines: string[] }>('GET', `/api/docs/${encId(id)}/header`),
   /** convert a .lyx file of the project (and its children) to .tex documents */
   importLyx: (project: string, path: string) => req<{ id: string; created: string[]; warnings: string[]; graphics: { src: string; dest: string; ok: boolean; error?: string }[] }>('POST', `/api/projects/${encodeURIComponent(project)}/import`, { path }),
