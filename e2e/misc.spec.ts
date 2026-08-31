@@ -120,6 +120,20 @@ test('a dead-key ^ (German/French layouts: a composition) makes exactly one supe
   });
   await page.keyboard.type('3');
   expect(await page.evaluate(() => (Array.from(document.querySelectorAll('.lyx-editor .lyx-math-inline')).pop() as any).pmViewDesc.spec.field.latex as string)).toBe('$u^{e^{3}}$');
+  // macOS Chrome commits a composition with a final input event whose isComposing is already false
+  // (inputType insertCompositionText) before compositionend: it must not be typed a second time
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+m');
+  await page.keyboard.type('m');
+  await page.evaluate(() => {
+    const ta = document.activeElement as HTMLTextAreaElement;
+    if (!ta || !ta.classList.contains('lm-input')) throw new Error('math field not focused');
+    ta.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
+    ta.value = 'â';
+    ta.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'â', isComposing: false, bubbles: true }));
+    ta.dispatchEvent(new CompositionEvent('compositionend', { data: 'â' }));
+  });
+  expect(await page.evaluate(() => (Array.from(document.querySelectorAll('.lyx-editor .lyx-math-inline')).pop() as any).pmViewDesc.spec.field.latex as string)).toBe('$m^{a}$');
   expect(errors).toEqual([]);
 });
 

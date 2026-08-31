@@ -409,7 +409,8 @@ export class LyxMathField {
   }
 
   private corners(ov: HTMLElement, base: DOMRect, r: DOMRect, kind: 'lower' | 'both', label?: string): void {
-    const l = r.left - base.left - 2, rt = r.right - base.left - 1, t = r.top - base.top - 1, b = r.bottom - base.top - 2;
+    // LyX reserves a small margin around marked insets; the hooks sit symmetrically 2px outside the box
+    const l = r.left - base.left - 2, rt = r.right - base.left - 2, t = r.top - base.top - 2, b = r.bottom - base.top - 2;
     const corner = (x: number, y: number, h: 'left' | 'right', v: 'top' | 'bottom') => {
       const d = document.createElement('span');
       d.className = 'lm-corner';
@@ -510,7 +511,9 @@ export class LyxMathField {
       const data = ev.data ?? '';
       this.typed(this.cursor.mode === 'math' ? data.normalize('NFD').replace(/(.)̂/g, '^$1').normalize('NFC') : data);
     });
-    input.addEventListener('input', ev => { if ((ev as InputEvent).isComposing) return; if (input.value) { const v = input.value; input.value = ''; this.typed(v); } });
+    // macOS Chrome fires the composition's final input event with isComposing already false
+    // (inputType insertCompositionText) before compositionend — it must not be typed a second time.
+    input.addEventListener('input', ev => { const ie = ev as InputEvent; if (ie.isComposing || ie.inputType === 'insertCompositionText') return; if (input.value) { const v = input.value; input.value = ''; this.typed(v); } });
     input.addEventListener('copy', ev => { ev.preventDefault(); ev.clipboardData?.setData('text/plain', this.cursor.selection ? this.cursor.grabSelection() : ''); });
     input.addEventListener('cut', ev => { ev.preventDefault(); if (!this.cursor.selection || this.readOnly) return; ev.clipboardData?.setData('text/plain', this.cursor.grabSelection()); this.snapshot('cut'); this.cursor.eraseSelection(); this.commit(); });
     input.addEventListener('paste', ev => { ev.preventDefault(); if (this.readOnly) return; const t = ev.clipboardData?.getData('text/plain') ?? ''; if (!t) return; this.snapshot('paste'); this.cursor.niceInsert(t.replace(/^\$|\$$/g, ''), false); this.commit(); });
