@@ -33,6 +33,8 @@ export interface FieldOptions {
   onBlur?: () => void;
   /** Alt+M n/d/t: numbering / environment commands handled by the node view */
   onCommand?: (key: string) => void;
+  /** a drag left the formula (LyX: the motion bubbles to the surrounding text, formula taken whole) */
+  onDragOut?: (ev: MouseEvent) => void;
 }
 
 interface AtomBox { el: Element; from: number; to: number; text: boolean }
@@ -77,6 +79,7 @@ export class LyxMathField {
   private opts: FieldOptions;
   private altM = false;
   private dragging = false;
+  private deadHat = false;
   private lastLatex: string;
   private _macroKey = '';
   private hoverAtom: Atom | null = null;
@@ -494,7 +497,7 @@ export class LyxMathField {
   private wire(): void {
     const input = this.input;
     input.addEventListener('focus', () => { this.focused = true; active = this; this.dom.classList.add('focused'); this.opts.onFocus?.(); this.scheduleLayout(); notifyFocus(); });
-    input.addEventListener('blur', () => { this.focused = false; if (active === this) active = null; this.altM = false; this.dom.classList.remove('focused'); this.cursor.macroModeClose(); this.overlay.replaceChildren(); if (this.clearGhost()) this.render(); this.opts.onBlur?.(); notifyFocus(); });
+    input.addEventListener('blur', () => { this.focused = false; if (active === this) active = null; this.altM = false; this.deadHat = false; this.dom.classList.remove('focused'); this.cursor.macroModeClose(); this.overlay.replaceChildren(); if (this.clearGhost()) this.render(); this.opts.onBlur?.(); notifyFocus(); });
     input.addEventListener('keydown', ev => this.keydown(ev));
     input.addEventListener('beforeinput', ev => {
       if (ev.inputType === 'insertText' || ev.inputType === 'insertCompositionText') { if (ev.inputType === 'insertText') { ev.preventDefault(); this.typed(ev.data ?? ''); } return; }
@@ -503,13 +506,26 @@ export class LyxMathField {
     // Dead keys (^ ` ´ ~ on German/French/… layouts) arrive as a composition: the text is taken once,
     // at compositionend; `input` events fired while composing must be ignored (the flag is on the
     // event — checking it on the element used to insert ^ twice: x^2 became a double superscript).
-    // A dead ^ composed with a letter (ê, â, û … on German/French layouts) means superscript-of-that-
-    // letter in math, as in LyX — the composed character is split back into ^ + letter (other accents
-    // are kept: é stays é).
+    // A dead ^ in math means superscript, as in LyX — and immediately, at the keypress itself: the
+    // composition the browser opens for it is taken over at compositionupdate (waiting for
+    // compositionend used to show nothing until the next key was typed). compositionend then types
+    // only what was composed onto the ^ (â → a, into the superscript); other accents are kept
+    // whole (é stays é), as is everything in text mode.
+    input.addEventListener('compositionupdate', ev => {
+      if (this.deadHat || ev.data !== '^' || this.cursor.mode !== 'math' || this.readOnly) return;
+      this.deadHat = true;
+      this.typed('^');
+    });
     input.addEventListener('compositionend', ev => {
       input.value = '';
       const data = ev.data ?? '';
-      this.typed(this.cursor.mode === 'math' ? data.normalize('NFD').replace(/(.)̂/g, '^$1').normalize('NFC') : data);
+      if (this.deadHat) {
+        this.deadHat = false;
+        const rest = data.normalize('NFD').replace(/\u0302/g, '').replace(/^\^/, '').normalize('NFC');
+        if (rest) this.typed(rest);
+        return;
+      }
+      this.typed(this.cursor.mode === 'math' ? data.normalize('NFD').replace(/(.)\u0302/g, '^$1').normalize('NFC') : data);
     });
     // macOS Chrome fires the composition's final input event with isComposing already false
     // (inputType insertCompositionText) before compositionend — it must not be typed a second time.
@@ -535,9 +551,22 @@ export class LyxMathField {
     });
     window.addEventListener('mousemove', ev => {
       if (!this.dragging) return;
-      const s = this.slicesFromPoint(ev.clientX, ev.clientY);
+      // out of the formula: the drag continues in the surrounding text with the formula taken
+      // whole (LyX lfunMouseMotion leaves motions outside the inset to the outer text)
+      if (this.opts.onDragOut) {
+        const r = this.dom.getBoundingClientRect();
+        if (ev.clientX < r.left - 4 || ev.clientX > r.right + 4 || ev.clientY < r.top - 6 || ev.clientY > r.bottom + 6) {
+          this.dragging = false;
+          this.cursor.clearSelection();
+          this.scheduleLayout();
+          this.opts.onDragOut(ev);
+          return;
+        }
+      }
+      const s = this.slicesForDrag(ev.clientX, ev.clientY);
       if (!s) return;
       if (!this.cursor.selection) this.cursor.selHandle(true);
+      if (this.pathOf(s).join() === this.pathOf(this.cursor.slices).join()) return;   // no move: no relayout
       this.cursor.slices = s;
       this.scheduleLayout();
     });
@@ -555,17 +584,55 @@ export class LyxMathField {
       const m = /(?:^|\s)lm-c(\d+)(?:\s|$)/.exec(el.className ?? '');
       if (m) { ref = this.cells[Number(m[1])]; break; }
     }
-    if (!ref) {
-      // outside any cell: nearest end of the top-level cell
-      const top = this.cells.find(c => isHull(c.owner));
-      if (!top) return null;
-      const r = this.content.getBoundingClientRect();
-      const cell = atomCells(top.owner)[top.idx] ?? [];
-      return this.slicesFor(top, x < (r.left + r.right) / 2 ? 0 : cell.length);
+    let cellEl = ref ? el as HTMLElement : null;
+    if (!ref || !cellEl) {
+      // the point hit no cell box (between rows, above / below the glyphs, over another element):
+      // the nearest cell wins, as in LyX (InsetMathNest::editXY takes the cell with the smallest
+      // distance) — snapping to the start / end of the whole formula made dragging jumpy
+      const near = this.nearestCell(x, y);
+      if (!near) return null;
+      ref = near.ref; cellEl = near.el;
     }
-    const cellEl = el as HTMLElement;
     const cell = atomCells(ref.owner)[ref.idx] ?? [];
     return this.slicesFor(ref, cell.length ? this.posFromX(cell, cellEl, x) : 0);
+  }
+
+  /** the cell whose box is closest to the point (LyX InsetMathNest::editXY; ties go to the innermost box) */
+  private nearestCell(x: number, y: number): { ref: CellRef; el: HTMLElement } | null {
+    let best: { ref: CellRef; el: HTMLElement } | null = null;
+    let bestD = Infinity, bestA = Infinity;
+    for (const ref of this.cells) {
+      const el = this.content.querySelector(`.lm-c${ref.id}`) as HTMLElement | null;
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width && !r.height) continue;
+      const dx = x < r.left ? r.left - x : x > r.right ? x - r.right : 0;
+      const dy = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+      const d = dx + dy, a = r.width * r.height;
+      if (d < bestD - 0.5 || (d < bestD + 0.5 && a < bestA)) { best = { ref, el }; bestD = d; bestA = a; }
+    }
+    return best;
+  }
+
+  /**
+   * Cursor position for a drag: never deeper than the anchor's own nest chain (LyX
+   * lfunMouseMotion ignores motions nested deeper than the anchor — they bubble to the common
+   * parent). An inset off that chain is taken whole, the cursor lands on its closest edge
+   * (Cursor::moveToClosestEdge).
+   */
+  private slicesForDrag(x: number, y: number): Slice[] | null {
+    const s = this.slicesFromPoint(x, y);
+    const a = this.cursor.anchor;
+    if (!s || !a) return s;
+    let d = 0;
+    while (d < s.length && d < a.length && s[d].owner === a[d].owner) d++;
+    if (d >= s.length) return s;                    // on (or above) the anchor's chain
+    const t = s.slice(0, Math.max(1, d));
+    const last = t[t.length - 1];
+    const inset = s[t.length].owner as Atom;        // the off-chain inset the point dived into
+    const r = this.atomRect(inset);
+    if (r && x > (r.left + r.right) / 2) last.pos = Math.min(last.pos + 1, atomCells(last.owner)[last.idx]?.length ?? last.pos + 1);
+    return t;
   }
 
   private typed(text: string): void {

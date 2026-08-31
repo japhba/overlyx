@@ -15,13 +15,52 @@ import type { EditorView } from 'prosemirror-view';
 const ATOMS = new Set(['math_display', 'math_inline', 'macro', 'graphics', 'command', 'leaf']);
 
 function headOver(view: EditorView, x: number, y: number, anchor: number): number | null {
+  // clamp into the editor: posAtCoords has nothing for coordinates outside it, and a drag that
+  // strayed into the margins or over a panel used to stall the selection
+  const box = view.dom.getBoundingClientRect();
+  x = Math.min(Math.max(x, box.left + 1), box.right - 1);
+  y = Math.min(Math.max(y, box.top + 1), box.bottom - 1);
   const p = view.posAtCoords({ left: x, top: y });
-  if (!p) return null;
-  if (p.inside >= 0) {
-    const n = view.state.doc.nodeAt(p.inside);
-    if (n && ATOMS.has(n.type.name)) return p.pos >= anchor ? p.inside + n.nodeSize : p.inside;
+  let inside = p ? p.inside : -1, pos: number | null = p ? p.pos : null;
+  if (pos === null || inside < 0) {
+    // over a formula widget the caret probe can fail or land beside it: resolve the widget itself
+    const el = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest('.lyx-math-display, .lyx-math-inline, .lyx-macro');
+    if (el && view.dom.contains(el) && el.parentElement) {
+      try { inside = view.posAtDOM(el.parentElement, Array.prototype.indexOf.call(el.parentElement.childNodes, el)); } catch { inside = -1; }
+      if (inside >= 0 && pos === null) pos = inside;
+    }
   }
-  return p.pos;
+  if (pos === null) return null;
+  if (inside >= 0) {
+    const n = view.state.doc.nodeAt(inside);
+    if (n && ATOMS.has(n.type.name)) return pos >= anchor ? inside + n.nodeSize : inside;
+  }
+  return pos;
+}
+
+/**
+ * Continue a drag that started inside an atom and left it (a formula being dragged out of —
+ * LyX's lfunMouseMotion leaves such motions to the surrounding text): the atom [from, to) stays
+ * selected whole and the selection follows the pointer on either side of it.
+ */
+export function dragFromAtom(view: EditorView, from: number, to: number, ev: MouseEvent): void {
+  view.focus();
+  const move = (mv: MouseEvent) => {
+    mv.preventDefault();
+    const head = headOver(view, mv.clientX, mv.clientY, from);
+    if (head === null) return;
+    if (head >= to) setSel(view, from, head);
+    else if (head <= from) setSel(view, to, head);
+    else setSel(view, from, to);
+  };
+  const up = () => {
+    window.removeEventListener('mousemove', move, true);
+    window.removeEventListener('mouseup', up, true);
+    view.focus();
+  };
+  window.addEventListener('mousemove', move, true);
+  window.addEventListener('mouseup', up, true);
+  move(ev);
 }
 
 const setSel = (view: EditorView, from: number, to: number) => {

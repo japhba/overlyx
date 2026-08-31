@@ -5,6 +5,7 @@
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
+import { dragFromAtom } from '../plugins/dragselect';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { macroFromLyxLines, parseFormula, renderHullSource, numberedType, type HullType } from '@overlyx/core';
 import { LyxMathField, renderStaticHtml, activeMathField, rowRectsOf } from '../lyxmath/field';
@@ -143,6 +144,14 @@ function moveOut(view: EditorView, getPos: () => number | undefined, dir: string
   view.focus();
 }
 
+/** A drag left the formula: continue as a document drag with the formula selected whole (LyX's undispatched mouse motion). */
+function dragOutOf(view: EditorView, getPos: () => number | undefined, ev: MouseEvent) {
+  const pos = getPos();
+  if (pos === undefined) return;
+  const node = view.state.doc.nodeAt(pos);
+  dragFromAtom(view, pos, pos + (node ? node.nodeSize : 1), ev);
+}
+
 /** Common field wiring: context menu, mouse isolation from ProseMirror, keyboard passthrough. */
 function wire(f: LyxMathField, menu: () => MenuItem[]) {
   f.dom.addEventListener('contextmenu', (ev: MouseEvent) => {
@@ -226,6 +235,7 @@ export class MathInlineView implements NodeView {
       latex: '$' + this.lastLatex + '$', display: false, macros: table,
       onChange: latex => this.commit(latex),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
+      onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
     });
     (f as any)._macroKey = key;
     (f as any)._toggleDisplay = () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); };
@@ -385,6 +395,7 @@ export class MathDisplayView implements NodeView {
       latex: this.lastLatex, display: true, macros: table,
       onChange: latex => this.commit(latex),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
+      onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
       onCommand: key => { if (key === 'n') this.toggleNumbering(); },
     });
     (f as any)._macroKey = key;
@@ -585,6 +596,7 @@ export class MacroView implements NodeView {
       latex: '$' + this.lastDef + '$', display: false, macros: table,
       onChange: latex => this.commit(latex.replace(/^\$|\$$/g, '')),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace),
+      onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
     });
     (this.field as any)._macroKey = key;
     this.dom.append(this.nameEl, this.field.dom);
