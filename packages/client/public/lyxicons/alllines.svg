@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   version="1.1"
+   width="48"
+   height="48"
+   id="svg249">
+  <defs
+     id="defs3">
+    <linearGradient
+       x1="9.5714283"
+       y1="142.42857"
+       x2="112"
+       y2="27.999998"
+       id="linearGradient4424-2"
+       xlink:href="#linearGradient3369-77"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.49810069,0,0,0.66413431,-7.8998318,-18.431632)" />
+    <linearGradient
+       id="linearGradient3369-77">
+      <stop
+         id="stop3372-9"
+         style="stop-color:#f4f7f9;stop-opacity:1"
+         offset="0" />
+      <stop
+         id="stop3374-3"
+         style="stop-color:#eff3f6;stop-opacity:1"
+         offset="0.42597079" />
+      <stop
+         id="stop3376-19"
+         style="stop-color:#e7edf1;stop-opacity:1"
+         offset="0.5892781" />
+      <stop
+         id="stop3378-8"
+         style="stop-color:#dde5ec;stop-opacity:1"
+         offset="0.80219781" />
+      <stop
+         id="stop3384-65"
+         style="stop-color:#dae3ea;stop-opacity:1"
+         offset="1" />
+    </linearGradient>
+    <linearGradient
+       id="linearGradient7422-28">
+      <stop
+         id="stop7424-6"
+         style="stop-color:#aaaaac;stop-opacity:1"
+         offset="0" />
+      <stop
+         id="stop5348-0"
+         style="stop-color:#929297;stop-opacity:1"
+         offset="0.5" />
+      <stop
+         id="stop7426-24"
+         style="stop-color:#c3c3c7;stop-opacity:1"
+         offset="1" />
+    </linearGradient>
+    <linearGradient
+       x1="399.77466"
+       y1="1164.6696"
+       x2="399.77466"
+       y2="549.06134"
+       id="linearGradient5251"
+       xlink:href="#linearGradient7422-28"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.05552836,0,0,0.08923295,-7.1631024,-52.286972)" />
+  </defs>
+  <metadata
+     id="metadata4">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <dc:title></dc:title>
+        <dc:creator>
+          <cc:Agent>
+            <dc:title>Jakub Steiner</dc:title>
+          </cc:Agent>
+        </dc:creator>
+        <dc:source>http://jimmac.musichall.cz</dc:source>
+        <cc:license
+           rdf:resource="http://creativecommons.org/licenses/publicdomain/" />
+      </cc:Work>
+      <cc:License
+         rdf:about="http://creativecommons.org/licenses/publicdomain/">
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#Reproduction" />
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#Distribution" />
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#DerivativeWorks" />
+      </cc:License>
+    </rdf:RDF>
+  </metadata>
+  <rect
+     width="38.402451"
+     height="38.402451"
+     rx="2.4001532"
+     ry="2.4001532"
+     x="4.7974849"
+     y="4.8031278"
+     id="rect2324"
+     style="fill:url(#linearGradient5251);fill-opacity:1;fill-rule:nonzero;stroke:none" />
+  <rect
+     width="33.602146"
+     height="33.602146"
+     rx="0.65540904"
+     ry="0.74581027"
+     x="7.197638"
+     y="7.2032809"
+     id="rect4902"
+     style="fill:#ffffff;fill-opacity:1;fill-rule:nonzero;stroke:none" />
+  <rect
+     width="28.801838"
+     height="28.801838"
+     rx="0"
+     ry="0"
+     x="9.5977917"
+     y="9.6034336"
+     id="rect2326"
+     style="fill:url(#linearGradient4424-2);fill-opacity:1;fill-rule:evenodd;stroke:none" />
+  <path
+     d="m 9.5977913,19.204047 9.6006127,0 0,-9.6006129 9.600614,0 0,9.6006129 9.600612,0 0,9.600612 -9.600612,0 0,9.600612 -9.600614,0 0,-9.600612 -9.6006127,0 z"
+     id="path5219"
+     style="fill:#ffffff;fill-opacity:1;stroke:none" />
+  <path
+     d="m 4.7974849,4.8031278 0,38.4024502 38.4024521,0 0,-38.4024502 -38.4024521,0 z m 4.8003064,4.8003063 12.0007657,0 0,12.0007659 -12.0007657,0 0,-12.0007659 z m 16.8010727,0 12.000766,0 0,12.0007659 -12.000766,0 0,-12.0007659 z M 9.5977913,26.404505 l 12.0007657,0 0,12.000766 -12.0007657,0 0,-12.000766 z m 16.8010727,0 12.000766,0 0,12.000766 -12.000766,0 0,-12.000766 z"
+     id="rect4279"
+     style="fill:#101418;fill-opacity:1;fill-rule:nonzero;stroke:none" />
+</svg>

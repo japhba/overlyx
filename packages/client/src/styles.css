@@ -240,6 +240,8 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .tb-btn:hover { background: var(--ui-hover); border-color: var(--ui-border); }
 .tb-btn.active { background: var(--active-bg); border-color: var(--active-border); }
 .tb-btn svg { width: 16px; height: 16px; fill: currentColor; }
+.tb-btn .tb-img { width: 17px; height: 17px; display: block; }
+html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg); }   /* LyX's icons are drawn dark-on-transparent */
 .tb-btn.math { font-family: var(--editor-font); font-style: italic; }
 .tb-sep { width: 1px; height: 20px; background: var(--ui-border); margin: 0 4px; }
 
@@ -575,6 +577,11 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .statusbar .tracking { color: var(--err); }
 .statusbar .change-info { color: var(--ok); background: var(--ok-bg); padding: 0 6px; border-radius: 3px; }
 .statusbar .doclabel { color: var(--accent); font-weight: 600; }
+.statusbar .stats { color: var(--ui-muted); white-space: nowrap; }
+.statusbar .zoom { display: inline-flex; align-items: center; gap: 1px; margin-left: 4px; }
+.statusbar .zoom-btn { border: 1px solid transparent; background: none; color: var(--ui-fg); width: 18px; height: 18px; line-height: 1; border-radius: 3px; font-size: 13px; padding: 0; cursor: pointer; }
+.statusbar .zoom-btn:hover { background: var(--ui-hover); border-color: var(--ui-border); }
+.statusbar .zoom-select { height: 18px; font-size: 11px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); color: var(--ui-fg); }
 .statusbar .save-state.saved { color: var(--ok); }
 .statusbar .save-state.saving { color: var(--ui-muted); }
 .statusbar .save-state.offline { color: var(--warn-fg); background: var(--warn-bg); padding: 0 8px; border-radius: 3px; }
@@ -812,6 +819,10 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 /* ------------------------------------------------------------ toolbars (LyX standard / extra / math / table / review) */
 .toolbar .tb-label { font-size: 11px; color: var(--ui-muted); padding: 0 6px 0 2px; text-transform: uppercase; letter-spacing: 0.4px; }
 .toolbar-math, .toolbar-mathpanels, .toolbar-table, .toolbar-review { background: var(--ui-bg2); }
+/* LyX's default.ui puts the View/Update and Extra toolbars on one row */
+.tb-samerow { display: flex; flex-wrap: wrap; align-items: stretch; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); }
+.tb-samerow .toolbar { border-bottom: none; flex: 0 1 auto; }
+.tb-samerow .toolbar + .toolbar { border-left: 1px solid var(--ui-border); }
 /* The contextual rows (math / panels / table / review) are docked at the bottom like in LyX, laid
    over the content flush above the status bar — appearing and disappearing with the cursor must
    never shift the document. Their palettes open upward. */

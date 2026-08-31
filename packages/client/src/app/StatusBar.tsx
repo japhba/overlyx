@@ -32,7 +32,24 @@ export function UserAvatars({ users, onJump }: { users: PresenceUser[]; onJump?:
   );
 }
 
-export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy }: {
+/** LyX-style zoom control (bottom right): −, a percentage menu, + (Ctrl+Plus / Ctrl+Minus / Ctrl+0 do the same). */
+export function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => void }) {
+  const pct = Math.round(zoom * 100);
+  const presets = [50, 75, 90, 100, 110, 125, 150, 175, 200, 250];
+  return (
+    <span class="zoom" title="Zoom the document text (Ctrl+Plus / Ctrl+Minus; Ctrl+0 resets)">
+      <button type="button" class="zoom-btn" data-zoom-out onClick={() => onZoom(Math.max(0.5, +(zoom - 0.1).toFixed(2)))}>−</button>
+      <select class="zoom-select" data-zoom value={String(pct)} onChange={e => onZoom(Number((e.target as HTMLSelectElement).value) / 100)}>
+        {(presets.includes(pct) ? presets : [...presets, pct].sort((a, b) => a - b)).map(p => <option key={p} value={String(p)}>{p}%</option>)}
+      </select>
+      <button type="button" class="zoom-btn" data-zoom-in onClick={() => onZoom(Math.min(2.5, +(zoom + 0.1).toFixed(2)))}>+</button>
+    </span>
+  );
+}
+
+export interface DocStats { words: number; chars: number; sel: boolean }
+
+export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, stats, zoom, onZoom }: {
   layout: string; status: Status; chord: string | null; message: { text: string; kind: 'info' | 'error' } | null; save: SaveState;
   tracking: boolean; trackingAs?: string; change?: string | null; docLabel?: string | null; readOnly?: boolean;
   /** no document editor is open (start screen, text file): only messages */
@@ -41,6 +58,10 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
   updateReady?: boolean;
   /** an autocomplete request is on its way (Tools ▸ AI assistance) */
   aiBusy?: boolean;
+  /** word / character count of the selection (sel) or of the whole document */
+  stats?: DocStats | null;
+  zoom?: number;
+  onZoom?: (z: number) => void;
 }) {
   if (quiet) return <div class="statusbar">{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" /></div>;
   return (
@@ -56,7 +77,13 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
       {message && <span class={'msg ' + message.kind}>{message.text}</span>}
       <span class="spacer" />
       {updateReady && <button type="button" class="update-hint" title="A newer version of OverLyX is deployed. Reloading takes a second; your document is kept." onClick={() => location.reload()}>↻ new version — reload</button>}
+      {stats && (
+        <span class="stats" data-stats title={stats.sel ? 'Words and characters in the selection' : 'Words and characters in the document'}>
+          {stats.sel ? 'selection: ' : ''}{stats.words.toLocaleString('en-US')} words, {stats.chars.toLocaleString('en-US')} characters
+        </span>
+      )}
       <SaveIndicator save={save} />
+      {zoom !== undefined && onZoom && <ZoomControl zoom={zoom} onZoom={onZoom} />}
     </div>
   );
 }

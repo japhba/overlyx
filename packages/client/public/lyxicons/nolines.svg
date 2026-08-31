@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   version="1.1"
+   width="48"
+   height="48"
+   id="svg249">
+  <defs
+     id="defs3">
+    <linearGradient
+       x1="9.5714283"
+       y1="142.42857"
+       x2="112"
+       y2="27.999998"
+       id="linearGradient4424-0"
+       xlink:href="#linearGradient3369-66"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.4980689,0,0,0.66409193,-7.8965064,-18.427463)" />
+    <linearGradient
+       id="linearGradient3369-66">
+      <stop
+         id="stop3372-1"
+         style="stop-color:#f4f7f9;stop-opacity:1"
+         offset="0" />
+      <stop
+         id="stop3374-8"
+         style="stop-color:#eff3f6;stop-opacity:1"
+         offset="0.42597079" />
+      <stop
+         id="stop3376-4"
+         style="stop-color:#e7edf1;stop-opacity:1"
+         offset="0.5892781" />
+      <stop
+         id="stop3378-9"
+         style="stop-color:#dde5ec;stop-opacity:1"
+         offset="0.80219781" />
+      <stop
+         id="stop3384-63"
+         style="stop-color:#dae3ea;stop-opacity:1"
+         offset="1" />
+    </linearGradient>
+    <linearGradient
+       id="linearGradient7422-82">
+      <stop
+         id="stop7424-91"
+         style="stop-color:#aaaaac;stop-opacity:1"
+         offset="0" />
+      <stop
+         id="stop5348-3"
+         style="stop-color:#929297;stop-opacity:1"
+         offset="0.5" />
+      <stop
+         id="stop7426-59"
+         style="stop-color:#c3c3c7;stop-opacity:1"
+         offset="1" />
+    </linearGradient>
+    <linearGradient
+       x1="399.77466"
+       y1="1164.6696"
+       x2="399.77466"
+       y2="549.06134"
+       id="linearGradient5397"
+       xlink:href="#linearGradient7422-82"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.05552482,0,0,0.08922725,-7.159824,-52.28064)" />
+  </defs>
+  <metadata
+     id="metadata4">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <dc:title></dc:title>
+        <dc:creator>
+          <cc:Agent>
+            <dc:title>Jakub Steiner</dc:title>
+          </cc:Agent>
+        </dc:creator>
+        <dc:source>http://jimmac.musichall.cz</dc:source>
+        <cc:license
+           rdf:resource="http://creativecommons.org/licenses/publicdomain/" />
+      </cc:Work>
+      <cc:License
+         rdf:about="http://creativecommons.org/licenses/publicdomain/">
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#Reproduction" />
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#Distribution" />
+        <cc:permits
+           rdf:resource="http://creativecommons.org/ns#DerivativeWorks" />
+      </cc:License>
+    </rdf:RDF>
+  </metadata>
+  <rect
+     width="38.399998"
+     height="38.399998"
+     rx="2.3999999"
+     ry="2.3999999"
+     x="4.7999997"
+     y="4.8058138"
+     id="rect2324"
+     style="fill:url(#linearGradient5397);fill-opacity:1;fill-rule:nonzero;stroke:none" />
+  <rect
+     width="33.600002"
+     height="33.600002"
+     rx="0.65536726"
+     ry="0.74576271"
+     x="7.2000003"
+     y="7.2058144"
+     id="rect4902"
+     style="fill:#ffffff;fill-opacity:1;fill-rule:nonzero;stroke:none" />
+  <rect
+     width="28.800001"
+     height="28.800001"
+     rx="0"
+     ry="0"
+     x="9.5999994"
+     y="9.605813"
+     id="rect2326"
+     style="fill:url(#linearGradient4424-0);fill-opacity:1;fill-rule:evenodd;stroke:none" />
+</svg>

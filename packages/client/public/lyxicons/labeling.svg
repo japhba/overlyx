@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   version="1.0"
+   width="128"
+   height="128"
+   id="svg2">
+  <defs
+     id="defs4">
+    <linearGradient
+       id="linearGradient4126">
+      <stop
+         id="stop4128"
+         style="stop-color:#555555;stop-opacity:1"
+         offset="0" />
+      <stop
+         id="stop4130"
+         style="stop-color:#000000;stop-opacity:1"
+         offset="1" />
+    </linearGradient>
+    <linearGradient
+       x1="58.929012"
+       y1="58.6684"
+       x2="58.929012"
+       y2="5.3364"
+       id="linearGradient3905"
+       xlink:href="#linearGradient4126"
+       gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       id="LINESTYLE-1">
+      <stop
+         id="stop6429-5-7"
+         style="stop-color:#d3d7cf;stop-opacity:1"
+         offset="0" />
+      <stop
+         id="stop6431-3-4"
+         style="stop-color:#555753;stop-opacity:1"
+         offset="1" />
+    </linearGradient>
+    <linearGradient
+       x1="192.80969"
+       y1="360.5"
+       x2="203.80968"
+       y2="360.5"
+       id="linearGradient13166"
+       xlink:href="#LINESTYLE-1"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(6.8882661,0,0,4.6395033,-1278.7874,-1567.3351)" />
+    <linearGradient
+       x1="192.80969"
+       y1="355.5"
+       x2="208.80956"
+       y2="355.5"
+       id="linearGradient13169"
+       xlink:href="#LINESTYLE-1"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(4.6272469,0,0,5.0492553,-841.82508,-1714.6913)" />
+    <linearGradient
+       x1="192.80969"
+       y1="348.49997"
+       x2="203.80968"
+       y2="348.49997"
+       id="linearGradient13172"
+       xlink:href="#LINESTYLE-1"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(6.8301462,0,0,4.6486718,-1267.463,-1574.5849)" />
+    <linearGradient
+       x1="192.80969"
+       y1="343.5"
+       x2="208.80956"
+       y2="343.5"
+       id="linearGradient13175"
+       xlink:href="#LINESTYLE-1"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(4.6272468,0,0,5.0492558,-841.82507,-1713.8291)" />
+  </defs>
+  <metadata
+     id="metadata7">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <dc:title></dc:title>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+  <g
+     transform="matrix(1.3236014,0,0,1.295062,-16.444472,-9.5733432)"
+     id="g3913"
+     style="font-size:43.94123459px;font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;line-height:125%;letter-spacing:0px;word-spacing:0px;opacity:0.19232046;fill:url(#linearGradient3905);fill-opacity:1;stroke:none;font-family:Nokia Pure Headline;-inkscape-font-specification:Nokia Pure Headline" />
+  <rect
+     width="119.45728"
+     height="119.45728"
+     x="5.0338073"
+     y="3.1696129"
+     id="lc_defaultbullet"
+     style="fill:#eeeeec;fill-opacity:1;stroke:none;display:inline" />
+  <rect
+     width="119.45715"
+     height="119.45715"
+     rx="0"
+     x="5.034225"
+     y="3.1694987"
+     id="rect6785"
+     style="fill:none;stroke:none;display:inline" />
+  <rect
+     width="69.408104"
+     height="10.098463"
+     rx="2.3136234"
+     ry="2.5246279"
+     x="52.666588"
+     y="15.541039"
+     id="rect15167"
+     style="color:#000000;fill:url(#linearGradient13175);fill-opacity:1;fill-rule:nonzero;stroke:#2e3436;stroke-width:4.83364773;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-opacity:1;stroke-dasharray:none;stroke-dashoffset:0;marker:none;visibility:visible;display:inline;overflow:visible;enable-background:accumulate" />
+  <rect
+     width="68.301414"
+     height="9.2972975"
+     rx="2.1732283"
+     ry="2.3243358"
+     x="52.870453"
+     y="40.8284"
+     id="rect15169"
+     style="color:#000000;fill:url(#linearGradient13172);fill-opacity:1;fill-rule:nonzero;stroke:#2e3436;stroke-width:5.6348114;stroke-opacity:1;marker:none;visibility:visible;display:inline;overflow:visible;enable-background:accumulate" />
+  <rect
+     width="69.408104"
+     height="10.098512"
+     rx="2.3136234"
+     ry="2.5246279"
+     x="52.666588"
+     y="75.269676"
+     id="rect15171"
+     style="color:#000000;fill:url(#linearGradient13169);fill-opacity:1;fill-rule:nonzero;stroke:#2e3436;stroke-width:4.8336482;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-opacity:1;stroke-dasharray:none;stroke-dashoffset:0;marker:none;visibility:visible;display:inline;overflow:visible;enable-background:accumulate" />
+  <rect
+     width="68.882584"
+     height="9.279007"
+     rx="2.191721"
+     ry="2.3197517"
+     x="52.781258"
+     y="100.56636"
+     id="rect15173"
+     style="color:#000000;fill:url(#linearGradient13166);fill-opacity:1;fill-rule:nonzero;stroke:#2e3436;stroke-width:5.65315199;stroke-opacity:1;marker:none;visibility:visible;display:inline;overflow:visible;enable-background:accumulate" />
+  <rect
+     width="35.501274"
+     height="12.094173"
+     rx="1.1295867"
+     ry="2.6488495"
+     x="7.3143163"
+     y="14.554557"
+     id="rect15169-5"
+     style="color:#000000;fill:#b2d1f2;fill-opacity:1;fill-rule:nonzero;stroke:#175581;stroke-width:5;stroke-miterlimit:4;stroke-opacity:1;stroke-dasharray:none;marker:none;visibility:visible;display:inline;overflow:visible;enable-background:accumulate" />
+  <rect
+     width="35.501274"
+     height="12.094173"
+     rx="1.1295867"
+     ry="2.6488495"
+     x="7.3028212"
+     y="74.549957"
+     id="rect15169-5-1"
+     style="color:#000000;fill:#b2d1f2;fill-opacity:1;fill-rule:nonzero;stroke:#175581;stroke-width:5;stroke-miterlimit:4;stroke-opacity:1;stroke-dasharray:none;marker:none;visibility:visible;display:inline;overflow:visible;enable-background:accumulate" />
+</svg>

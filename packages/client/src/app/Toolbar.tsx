@@ -9,6 +9,15 @@ import katex from 'katex';
 import { createInsetMath, nargs, KATEX_BASE_MACROS } from '@overlyx/core';
 import type { LayoutInfo } from '../api';
 import { MATH_PANELS, type PanelItem } from './mathpanels';
+import { LYX_ICONS } from './lyxicons';
+
+/** The face of a toolbar button: LyX's own icon file when there is one, else a KaTeX preview, a hand-drawn SVG, or plain text. */
+function btnIcon(b: ToolButton) {
+  if (LYX_ICONS[b.icon]) return <img class="tb-img" src={LYX_ICONS[b.icon]} alt="" draggable={false} />;
+  if (b.html) return <span dangerouslySetInnerHTML={{ __html: b.html }} />;
+  if (ICONS[b.icon]) return <span dangerouslySetInnerHTML={{ __html: ICONS[b.icon] }} />;
+  return <span>{b.icon}</span>;
+}
 
 export interface PaletteItem { label: string; html?: string; title?: string; action: () => void; active?: boolean }
 export interface Palette {
@@ -354,7 +363,7 @@ function PaletteButton({ b }: { b: ToolButton }) {
     <span ref={ref} class={'tb-pal' + (open ? ' open' : '')}>
       <button type="button" class={'tb-btn has-pal' + (b.active ? ' active' : '') + (b.kind === 'math' ? ' math' : '')} title={b.title} disabled={b.disabled} data-tb={b.id}
         onMouseDown={e => e.preventDefault()} onClick={() => setOpen(o => !o)}>
-        {b.html ? <span dangerouslySetInnerHTML={{ __html: b.html }} /> : ICONS[b.icon] ? <span dangerouslySetInnerHTML={{ __html: ICONS[b.icon] }} /> : <span>{b.icon}</span>}
+        {btnIcon(b)}
         <span class="tb-caret">▾</span>
       </button>
       {open && (
@@ -391,8 +400,7 @@ export function Toolbar({ id, layouts, layout, onLayout, groups, label }: Toolba
         <span key={gi} style="display:contents">
           {(gi > 0 || layouts || label) && <span class="tb-sep" />}
           {g.map(b => b.palette ? <PaletteButton key={b.id} b={b} /> : (
-            <button key={b.id} type="button" class={'tb-btn' + (b.active ? ' active' : '') + (b.kind === 'math' ? ' math' : '')} title={b.title} disabled={b.disabled} data-tb={b.id} onClick={b.action}
-              dangerouslySetInnerHTML={b.html ? { __html: b.html } : ICONS[b.icon] ? { __html: ICONS[b.icon] } : undefined}>{b.html || ICONS[b.icon] ? undefined : b.icon}</button>
+            <button key={b.id} type="button" class={'tb-btn' + (b.active ? ' active' : '') + (b.kind === 'math' ? ' math' : '')} title={b.title} disabled={b.disabled} data-tb={b.id} onClick={b.action}>{btnIcon(b)}</button>
           ))}
         </span>
       ))}
