@@ -93,6 +93,7 @@ test('a drag leaving the formula continues in the text with the formula selected
   expect(r.math).toBe(1);                                // the formula is inside the selection, whole
   expect(r.text).toContain('aft');                       // ... and the drag went on into " after"
   expect(r.fieldSel).toBe(false);                        // the field's own selection was handed over
+  expect(await page.locator('.lyx-editor .lyx-math-inline.ol-selatom').count()).toBe(1);   // visibly selected whole
   expect(errors).toEqual([]);
 });
 
@@ -118,6 +119,7 @@ test('a drag across a display formula takes it whole and does not stall on it', 
   expect(r.math).toBe(1);
   expect(r.text).toContain('Second');
   expect(r.text).toContain('Third');
+  expect(await page.locator('.lyx-editor .lyx-math-display.ol-selatom').count()).toBe(1);  // visibly selected whole
   expect(errors).toEqual([]);
 });
 
@@ -149,5 +151,62 @@ test('a dead ^ (composed on Mac / German layouts) enters the superscript immedia
   await compose('compositionend', '^');
   s = await fieldState(page);
   expect(s.latex).toBe(mid);
+  expect(errors).toEqual([]);
+});
+
+test('Shift+ArrowRight selects LyX chunks and continues out of the formula', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openDoc(page, `${PROJECT}/doc.tex`);
+  const box = await inlineField(page);
+  await page.mouse.click(box.x + 1, box.y + box.height / 2);      // caret at the very start
+  for (let i = 0; i < 5; i++) await page.keyboard.press('Shift+ArrowRight');   // a, b, c, +, \frac
+  const s = await fieldState(page);
+  expect(s.selection).toBe(true);
+  expect(s.depth).toBe(1);
+  expect(s.sel).toContain('abc+');
+  expect(s.sel).toContain('\\frac{u}{v}');                        // the fraction came as ONE chunk
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowRight');   // +, x, y, z → at the edge
+  await page.keyboard.press('Shift+ArrowRight');                   // pops out: formula selected whole in the document
+  const r = await page.evaluate(() => {
+    const v = (window as any).overlyx.activeView, s2 = v.state.selection;
+    let math = 0;
+    v.state.doc.nodesBetween(s2.from, s2.to, (n: any) => { if (n.type.name === 'math_inline') math++; });
+    const f = (document.querySelector('.lyx-editor .lyx-math-inline') as any).pmViewDesc.spec.field;
+    return { math, span: (s2.to - s2.from) as number, fieldSel: !!f.cursor.selection, lit: document.querySelectorAll('.lyx-editor .lyx-math-inline.ol-selatom').length };
+  });
+  expect(r.math).toBe(1);
+  expect(r.span).toBe(1);                                          // exactly the formula node
+  expect(r.fieldSel).toBe(false);
+  expect(r.lit).toBe(1);                                           // ... and it is visibly highlighted
+  await page.keyboard.press('Shift+ArrowRight');                   // keeps going into the text after it
+  expect(await page.evaluate(() => { const s2 = (window as any).overlyx.activeView.state.selection; return s2.to - s2.from; })).toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+});
+
+test('Shift+Arrow from the text beside a formula takes it whole and lights it up', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openDoc(page, `${PROJECT}/doc.tex`);
+  await page.locator('.lyx-editor .lyx-par').first().click({ position: { x: 5, y: 8 } });   // focus the editor away from the formula
+  await page.evaluate(() => {
+    const v = (window as any).overlyx.activeView;
+    let pos = -1;
+    v.state.doc.descendants((n: any, p: number) => { if (pos < 0 && n.type.name === 'math_inline') pos = p; });
+    v.dispatch(v.state.tr.setSelection(v.state.selection.constructor.create(v.state.doc, pos)));
+    v.focus();
+  });
+  await page.keyboard.press('Shift+ArrowRight');
+  const r = await page.evaluate(() => {
+    const s = (window as any).overlyx.activeView.state.selection;
+    return { span: (s.to - s.from) as number, lit: document.querySelectorAll('.lyx-editor .ol-selatom').length };
+  });
+  expect(r.span).toBe(1);                                          // one keypress, one whole formula
+  expect(r.lit).toBe(1);
+  await page.keyboard.press('Shift+ArrowLeft');
+  const r2 = await page.evaluate(() => {
+    const s = (window as any).overlyx.activeView.state.selection;
+    return { span: (s.to - s.from) as number, lit: document.querySelectorAll('.lyx-editor .ol-selatom').length };
+  });
+  expect(r2.span).toBe(0);
+  expect(r2.lit).toBe(0);
   expect(errors).toEqual([]);
 });

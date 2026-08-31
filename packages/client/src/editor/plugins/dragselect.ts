@@ -9,10 +9,10 @@
  * tables, and dragging an existing selection stay with ProseMirror and the browser.
  */
 import { Plugin, TextSelection } from 'prosemirror-state';
-import type { EditorView } from 'prosemirror-view';
+import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 
 /** node types selected as one unit when a drag or shift-click touches them */
-const ATOMS = new Set(['math_display', 'math_inline', 'macro', 'graphics', 'command', 'leaf']);
+export const ATOMS = new Set(['math_display', 'math_inline', 'macro', 'graphics', 'command', 'leaf']);
 
 function headOver(view: EditorView, x: number, y: number, anchor: number): number | null {
   // clamp into the editor: posAtCoords has nothing for coordinates outside it, and a drag that
@@ -70,6 +70,19 @@ const setSel = (view: EditorView, from: number, to: number) => {
 export function dragSelectPlugin(): Plugin {
   return new Plugin({
     props: {
+      // LyX paints an inset that lies inside the selection wholly in the selection colour; the
+      // browser cannot (the widgets are contenteditable=false islands its native selection skips),
+      // so a selected formula showed nothing. Atoms covered by the selection are decorated instead.
+      decorations(state) {
+        const { from, to, empty } = state.selection;
+        if (empty) return null;
+        const decos: Decoration[] = [];
+        state.doc.nodesBetween(from, to, (node, pos) => {
+          if (ATOMS.has(node.type.name) && pos >= from && pos + node.nodeSize <= to) decos.push(Decoration.node(pos, pos + node.nodeSize, { class: 'ol-selatom' }));
+          return true;
+        });
+        return decos.length ? DecorationSet.create(state.doc, decos) : null;
+      },
       handleDOMEvents: {
         mousedown(view, ev) {
           if (ev.button !== 0 || view.editable === false) return false;

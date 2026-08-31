@@ -16,6 +16,7 @@ import {
 } from './commands';
 import { editorContext } from './context';
 import { activeMathField } from './lyxmath/field';
+import { ATOMS } from './plugins/dragselect';
 import { trackedDelete } from './plugins/changes';
 import { openRewrite, rewriteEnabled } from './ai/rewrite';
 
@@ -236,6 +237,10 @@ export function lyxKeymap(): Plugin {
     'Mod-ArrowRight': (state, dispatch, view) => arrowIntoMath(1)(state, dispatch, view) || false,
     ArrowRight: (state, dispatch, view) => arrowIntoMath(1)(state, dispatch, view),
     ArrowLeft: (state, dispatch, view) => arrowIntoMath(-1)(state, dispatch, view),
+    // LyX: extending the selection over a formula/inset takes it whole, one chunk per keypress
+    // (the browser's own shift-arrow can strand the head beside the widget)
+    'Shift-ArrowRight': shiftOverAtom(1),
+    'Shift-ArrowLeft': shiftOverAtom(-1),
     '"': smartQuote,
     'Alt-"': insertQuote('l', 'e', 's'),
     'Shift-Mod-"': (state, dispatch) => dispatch ? (dispatch(state.tr.insertText('"')), true) : true,
@@ -251,6 +256,17 @@ export function lyxKeymap(): Plugin {
   }
   return keymap(bindings);
 }
+
+/** LyX: Shift+arrow beside an atom (formula, graphic …) selects it whole as one chunk. */
+const shiftOverAtom = (dir: -1 | 1): Command => (state, dispatch) => {
+  const sel = state.selection;
+  if (!(sel instanceof TextSelection)) return false;
+  const $h = sel.$head;
+  const node = dir > 0 ? $h.nodeAfter : $h.nodeBefore;
+  if (!node || !ATOMS.has(node.type.name)) return false;
+  dispatch?.(state.tr.setSelection(TextSelection.between(state.doc.resolve(sel.anchor), state.doc.resolve($h.pos + dir * node.nodeSize))).scrollIntoView());
+  return true;
+};
 
 /** Escape: move the cursor out of the innermost inset (to its right). */
 const escapeInset: Command = (state, dispatch) => {

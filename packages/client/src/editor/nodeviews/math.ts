@@ -144,6 +144,17 @@ function moveOut(view: EditorView, getPos: () => number | undefined, dir: string
   view.focus();
 }
 
+/** Shift+arrow hit the formula's edge: the selection continues in the document with the formula taken whole. */
+function selectOutOf(view: EditorView, getPos: () => number | undefined, dir: string) {
+  const pos = getPos();
+  if (pos === undefined) return;
+  const node = view.state.doc.nodeAt(pos);
+  const size = node ? node.nodeSize : 1;
+  const back = dir === 'backward' || dir === 'upward';
+  view.focus();   // focus first: on focus ProseMirror re-reads the DOM selection and would clobber one dispatched before it
+  try { view.dispatch(view.state.tr.setSelection(TextSelection.between(view.state.doc.resolve(back ? pos + size : pos), view.state.doc.resolve(back ? pos : pos + size))).scrollIntoView()); } catch { /* gone */ }
+}
+
 /** A drag left the formula: continue as a document drag with the formula selected whole (LyX's undispatched mouse motion). */
 function dragOutOf(view: EditorView, getPos: () => number | undefined, ev: MouseEvent) {
   const pos = getPos();
@@ -236,6 +247,7 @@ export class MathInlineView implements NodeView {
       onChange: latex => this.commit(latex),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
       onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
+      onSelectOut: dir => selectOutOf(this.view, this.getPos, dir),
     });
     (f as any)._macroKey = key;
     (f as any)._toggleDisplay = () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); };
@@ -396,6 +408,7 @@ export class MathDisplayView implements NodeView {
       onChange: latex => this.commit(latex),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
       onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
+      onSelectOut: dir => selectOutOf(this.view, this.getPos, dir),
       onCommand: key => { if (key === 'n') this.toggleNumbering(); },
     });
     (f as any)._macroKey = key;
@@ -597,6 +610,7 @@ export class MacroView implements NodeView {
       onChange: latex => this.commit(latex.replace(/^\$|\$$/g, '')),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace),
       onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
+      onSelectOut: dir => selectOutOf(this.view, this.getPos, dir),
     });
     (this.field as any)._macroKey = key;
     this.dom.append(this.nameEl, this.field.dom);

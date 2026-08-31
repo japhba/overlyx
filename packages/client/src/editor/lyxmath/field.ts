@@ -35,6 +35,8 @@ export interface FieldOptions {
   onCommand?: (key: string) => void;
   /** a drag left the formula (LyX: the motion bubbles to the surrounding text, formula taken whole) */
   onDragOut?: (ev: MouseEvent) => void;
+  /** a Shift+arrow hit the formula's edge: the selection continues outside, formula taken whole */
+  onSelectOut?: (dir: MoveOutDirection) => void;
 }
 
 interface AtomBox { el: Element; from: number; to: number; text: boolean }
@@ -673,7 +675,12 @@ export class LyxMathField {
     const handled = () => { ev.preventDefault(); ev.stopPropagation(); };
     const move = (f: () => boolean, dir: MoveOutDirection, dissolveEmpty = false) => {
       c.selHandle(ev.shiftKey);
-      if (!c.macroModeClose() && !f()) { if (!ev.shiftKey) { const dissolve = dissolveEmpty && this.isEmpty(); this.commit(); this.opts.onMoveOut?.(dir, { dissolve }); } }
+      if (!c.macroModeClose() && !f()) {
+        if (!ev.shiftKey) { const dissolve = dissolveEmpty && this.isEmpty(); this.commit(); this.opts.onMoveOut?.(dir, { dissolve }); }
+        // LyX: selecting past the edge pops the cursor out — the selection continues in the
+        // document with the formula taken whole (selBegin/selEnd normalize to the inset)
+        else if (this.opts.onSelectOut) { c.clearSelection(); this.commit(); this.opts.onSelectOut(dir); }
+      }
       else this.moved(old);
       handled();
     };
