@@ -124,7 +124,7 @@ const RIGHT_TABS = ['comments', 'pdf', 'versions'] as const;
 const RIGHT_TAB_LABELS: Record<RightTab, string> = { comments: 'Comments', pdf: 'PDF', versions: 'Versions' };
 const RIGHT_TAB_TITLES: Record<RightTab, string> = { comments: 'Comment threads: open ones and the resolved archive', pdf: 'PDF preview', versions: 'Versions of this document' };
 const LEFT_TITLE = 'Documents of the project and their outlines (Ctrl+Alt+O)';
-const SOURCE_TITLE = 'LaTeX source below the text (Ctrl+Alt+S)';
+const SOURCE_TITLE = 'LaTeX source beside the text (Ctrl+Alt+S)';
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 
 /** `#/project/path.tex?goto=label` or `?heading=<n>` (the n-th heading), or a share link `#/share/<token>` */
@@ -162,6 +162,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [hashId, setHashId] = useState<string | null>(parseHash().id);
   const docId = hashId ? hashId.replace(/^raw:/, '') : null;
   const rawSplit = !!hashId && hashId.startsWith('raw:');
+  /** The Source switches (Ctrl+Alt+S, the right rail, the panel tabs, the View menu): the LaTeX source beside the document. */
+  const toggleRawSplit = () => { if (docId) location.hash = '#/' + (rawSplit ? docId : 'raw:' + docId); };
   // .tex documents open in the collaborative editor, other text files in a plain text editor (ids
   // prefixed with "text:"), a project's PDF files in the PDF viewer ("pdf:")
   const isTextTab = !!docId && docId.startsWith('text:');
@@ -181,8 +183,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [showFiles, setShowFiles] = useState(() => stored('ol.files') !== '0');
   const [rightTab, setRightTab] = useState<RightTab | null>(() => { const v = stored('ol.right'); return v !== null && (RIGHT_TABS as readonly string[]).includes(v) ? v as RightTab : null; });
   // the LaTeX source is a panel below the writing area with its own switch
-  const [showSource, setShowSource] = useState(() => stored('ol.source') === '1');
-  useEffect(() => { try { localStorage.setItem('ol.files', showFiles ? '1' : '0'); localStorage.setItem('ol.right', rightTab ?? ''); localStorage.setItem('ol.source', showSource ? '1' : '0'); } catch { /* ignore */ } }, [showFiles, rightTab, showSource]);
+  useEffect(() => { try { localStorage.setItem('ol.files', showFiles ? '1' : '0'); localStorage.setItem('ol.right', rightTab ?? ''); } catch { /* ignore */ } }, [showFiles, rightTab]);
   const [pdf, setPdf] = useState<PdfState>({ url: null, log: '', busy: false, ok: null, warnings: [] });
   const [dialog, setDialog] = useState<Dialog>(null);
   const [message, setMessage] = useState<{ text: string; kind: 'info' | 'error' } | null>(null);
@@ -621,7 +622,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       openDialog: (name, arg) => setDialog({ name, arg }),
       toggleTrackChanges: () => toggleTracking(),
       toggleOutline: () => setShowFiles(s => !s),
-      toggleSource: () => setShowSource(s => !s),
+      toggleSource: () => toggleRawSplit(),
       toggleCombined: () => setCombined(c => !c),
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
@@ -955,9 +956,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { label: 'Math: toggle inline/display', action: () => run(C.toggleMathDisplay) },
     ] },
     { title: 'View', items: [
-      { label: 'LaTeX source beside the document (raw view)', checked: rawSplit, action: () => { if (docId) location.hash = '#/' + (rawSplit ? docId : 'raw:' + docId); } },
+      { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', checked: rawSplit, action: toggleRawSplit },
       { label: 'Outline', shortcut: 'Ctrl+Alt+O', checked: showFiles, action: () => setShowFiles(!showFiles) },
-      { label: 'Source pane (LaTeX, below the text)', shortcut: 'Ctrl+Alt+S', checked: showSource, action: () => setShowSource(!showSource) },
       { label: 'PDF preview', checked: rightTab === 'pdf', action: () => setRightTab(rightTab === 'pdf' ? null : 'pdf') },
       { label: 'Versions', checked: rightTab === 'versions', action: () => setRightTab(rightTab === 'versions' ? null : 'versions') },
       { sep: true },
@@ -1235,7 +1235,6 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     [
       { id: 'new', title: 'New document (Ctrl+N)', icon: 'new', action: () => editorContext.ui?.newFile() },
       { id: 'open', title: 'Open (Ctrl+O)', icon: 'open', action: () => setShowFiles(true) },
-      { id: 'save', title: 'Save — every change is saved automatically; the ✓ in the status bar shows the state', icon: 'save', action: () => notify('Everything is saved automatically — the ✓ in the status bar shows the state') },
     ],
     [
       { id: 'spellcheck', title: prefs.spellcheck ? 'Spell checking is on — click to switch it off' : 'Spell checking is off — click to switch it on', icon: 'spellcheck', action: () => setPref('spellcheck', !prefs.spellcheck), active: prefs.spellcheck },
@@ -1639,13 +1638,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
             </div>
           ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); setTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} notify={notify} />}
         </div>
-        {isLyxDoc && rawSplit && <SourcePane layout="right" target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => { location.hash = '#/' + docId; }} />}
-        {isLyxDoc && showSource && !rawSplit && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => setShowSource(false)} />}
+        {isLyxDoc && rawSplit && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => { location.hash = '#/' + docId; }} />}
         </div>
         {isLyxDoc && !rightTab && (
           <div class="rail right">
             {RIGHT_TABS.map(t => <button key={t} data-rail={t} title={RIGHT_TAB_TITLES[t]} onClick={() => { setRightTab(t); if (t === 'versions') setSelVersion(v => v + 1); }}>{RIGHT_TAB_LABELS[t]}</button>)}
-            <button data-rail="source" class={showSource ? 'active' : ''} title={SOURCE_TITLE} onClick={() => setShowSource(s => !s)}>Source</button>
+            <button data-rail="source" class={rawSplit ? 'active' : ''} title={SOURCE_TITLE} onClick={toggleRawSplit}>Source</button>
           </div>
         )}
         {isLyxDoc && rightTab && (
@@ -1654,7 +1652,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
               <button class={rightTab === 'comments' ? 'active' : ''} data-tab="comments" onClick={() => setRightTab('comments')} title={RIGHT_TAB_TITLES.comments}>Comments</button>
               <button class={rightTab === 'pdf' ? 'active' : ''} data-tab="pdf" onClick={() => setRightTab('pdf')} title={RIGHT_TAB_TITLES.pdf}>PDF</button>
               <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }} title={RIGHT_TAB_TITLES.versions}>Versions</button>
-              <button class={'toggle' + (showSource ? ' on' : '')} data-tab="source" onClick={() => setShowSource(s => !s)} title={SOURCE_TITLE}>Source</button>
+              <button class={'toggle' + (rawSplit ? ' on' : '')} data-tab="source" onClick={toggleRawSplit} title={SOURCE_TITLE}>Source</button>
               <button class="hide" title="Hide the sidebar" onClick={() => setRightTab(null)}>»</button>
             </div>
             {rightTab === 'comments' && <div class="panel-body"><Comments views={[masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} /></div>}

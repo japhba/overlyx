@@ -183,14 +183,14 @@ test.describe('command palette', () => {
     let prompt = '';
     page.once('dialog', d => { prompt = d.message(); void d.accept(); });
     await page.keyboard.press('F1');
-    await page.locator('[data-help-search]').fill('source pane');
-    const src = page.locator('[data-help-result]', { hasText: 'View ▸ Source pane' }).first();
+    await page.locator('[data-help-search]').fill('source beside');
+    const src = page.locator('[data-help-result]', { hasText: 'View ▸ LaTeX source beside' }).first();
     await src.hover();
     await src.locator('[data-set-shortcut]').click();
     await page.keyboard.press('Control+Shift+9');
     await expect(src.locator('.shortcut')).toHaveText('Ctrl+Shift+9');
     expect(prompt).toContain('View ▸ Outline');
-    expect(JSON.parse(await page.evaluate(() => localStorage.getItem('ol.keys')!))).toEqual({ 'View ▸ Outline': null, 'View ▸ Source pane (LaTeX, below the text)': 'Ctrl+Shift+9' });
+    expect(JSON.parse(await page.evaluate(() => localStorage.getItem('ol.keys')!))).toEqual({ 'View ▸ Outline': null, 'View ▸ LaTeX source beside the document (raw view)': 'Ctrl+Shift+9' });
     await page.locator('[data-help-search]').fill('outline');
     await expect(first.locator('.shortcut')).toHaveCount(0);   // no key at all now
     // declining keeps things as they are

@@ -15,7 +15,7 @@ ts = os.path.join(root, 'packages', 'client', 'src', 'app', 'lyxicons.ts')
 # key -> icon file (relative to lib/images, without .svgz); a leading ? marks an optional icon
 ICONS = {
     # standard
-    'new': 'buffer-new', 'open': 'file-open', 'save': 'buffer-write', 'spellcheck': 'spelling-continuously',
+    'new': 'buffer-new', 'open': 'file-open', 'spellcheck': 'spelling-continuously',
     'undo': 'undo', 'redo': 'redo', 'cut': 'cut', 'copy': 'copy', 'paste': 'paste',
     'find': 'dialog-show_findreplace', 'navback': 'bookmark-goto_0',
     'emph': 'font-emph', 'noun': 'font-noun', 'charstyles': 'textstyle-apply',

@@ -81,7 +81,6 @@ export const LYX_ICONS: Record<string, string> = {
   'rotatetable': '/lyxicons/rotatetable.svg',
   'rowdown': '/lyxicons/rowdown.svg',
   'rowup': '/lyxicons/rowup.svg',
-  'save': '/lyxicons/save.svg',
   'section': '/lyxicons/section.svg',
   'spellcheck': '/lyxicons/spellcheck.svg',
   'sub': '/lyxicons/sub.svg',

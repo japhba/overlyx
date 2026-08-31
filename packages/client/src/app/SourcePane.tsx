@@ -25,8 +25,6 @@ export interface SourceTarget { view: EditorView; ydoc: Y.Doc; docId: string }
 /** line height of the source text (px; styles.css `.source-pane .code`) */
 const LINE_H = 15;
 const PAD_TOP = 6;
-const MIN_H = 100;
-const DEFAULT_H = 240;
 const lineOfOffset = (text: string, off: number): number => { let n = 0; for (let i = 0; i < off && i < text.length; i++) if (text.charCodeAt(i) === 10) n++; return n; };
 
 function metaOf(ydoc: Y.Doc) {
@@ -97,11 +95,9 @@ export const blockPos = (b: DocBlock, offset: number): number => (b.map ? b.map[
 function storedWidth(): number {
   try { const v = Number(localStorage.getItem('ol.source.w')); return v >= 280 ? v : 520; } catch { return 520; }
 }
-function storedHeight(): number {
-  try { const v = Number(localStorage.getItem('ol.source.h')); return v >= MIN_H ? v : DEFAULT_H; } catch { return DEFAULT_H; }
-}
 
-export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose, layout = 'bottom' }: { /** below the document (Ctrl+Alt+S) or beside it (the "[raw]" tab, with synchronized scrolling) */ layout?: 'bottom' | 'right'; target: SourceTarget | null; tick: number; selTick?: number; /** the formula being edited, if any */ mathField?: LyxMathField | null; onNotify: (msg: string, kind?: 'info' | 'error') => void; onClose?: () => void }) {
+/** The LaTeX source beside the document (Ctrl+Alt+S / the "[raw]" tab), with synchronized scrolling and live apply. */
+export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose }: { target: SourceTarget | null; tick: number; selTick?: number; /** the formula being edited, if any */ mathField?: LyxMathField | null; onNotify: (msg: string, kind?: 'info' | 'error') => void; onClose?: () => void }) {
   const [text, setText] = useState('');
   /** the text as typed, ahead of the render (a live apply scheduled by a keystroke must send it, not the previous render's) */
   const textRef = useRef('');
@@ -113,7 +109,6 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   /** after the source caret moved the document cursor, the echo (document → source) is skipped for a moment */
   const caretLock = useRef(0);
   const lastOffset = useRef<number | null>(null);
-  const [height, setHeight] = useState(storedHeight);
   const [width, setWidth] = useState(storedWidth);
   const focused = useRef(false);
   const pendingReload = useRef(false);
@@ -248,20 +243,11 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     if (y < el.scrollTop + h || y + h > el.scrollTop + el.clientHeight - h) { el.scrollTop = Math.max(0, y - el.clientHeight / 3); syncScroll(); }
   }, [curLine, lineHtml]);
 
-  useEffect(() => { try { localStorage.setItem('ol.source.h', String(Math.round(height))); } catch { /* ignore */ } }, [height]);
   useEffect(() => { try { localStorage.setItem('ol.source.w', String(Math.round(width))); } catch { /* ignore */ } }, [width]);
   const startResizeW = (e: PointerEvent) => {
     e.preventDefault();
     const startX = e.clientX, startW = width;
     const move = (ev: PointerEvent) => setWidth(Math.max(280, Math.min(window.innerWidth * 0.8, startW + startX - ev.clientX)));
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  };
-  const startResize = (e: PointerEvent) => {
-    e.preventDefault();
-    const startY = e.clientY, startH = height;
-    const move = (ev: PointerEvent) => setHeight(Math.max(MIN_H, Math.min(window.innerHeight * 0.8, startH + startY - ev.clientY)));
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -304,7 +290,7 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   const lock = (side: 'doc' | 'src') => { syncLock.current = { side, until: Date.now() + 350 }; };
   const lineEls = () => Array.from(pre.current?.querySelectorAll<HTMLElement>('.l') ?? []);
   useEffect(() => {
-    if (layout !== 'right' || !target) return;
+    if (!target) return;
     const view = target.view;
     const scrollEl = view.dom.closest('.editor-scroll') as HTMLElement | null;
     const el = ta.current;
@@ -354,12 +340,12 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     scrollEl.addEventListener('scroll', onDocScroll);
     el.addEventListener('scroll', onSrcScroll);
     return () => { scrollEl.removeEventListener('scroll', onDocScroll); el.removeEventListener('scroll', onSrcScroll); cancelAnimationFrame(rafDoc); cancelAnimationFrame(rafSrc); };
-  }, [layout, target?.docId, text]);
+  }, [target?.docId, text]);
 
   const name = target?.docId.split('/').pop() ?? '';
   return (
-    <div class={'source-pane ' + layout} style={layout === 'right' ? { width: width + 'px' } : { height: height + 'px' }}>
-      {layout === 'right' ? <div class="grip v" title="Drag to resize" onPointerDown={startResizeW} /> : <div class="grip" title="Drag to resize" onPointerDown={startResize} />}
+    <div class="source-pane right" style={{ width: width + 'px' }}>
+      <div class="grip v" title="Drag to resize" onPointerDown={startResizeW} />
       <div class="bar">
         <span class="small-btn active" title="The LaTeX source of the document (its .tex file)">LaTeX</span>
         <span class="name" title={target?.docId}>{name}</span>
@@ -385,7 +371,7 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
             if (s) { e.preventDefault(); applySnapshot(el, s); undo.current.record({ value: el.value, start: el.selectionStart, end: el.selectionEnd }); textRef.current = el.value; setText(el.value); setDirty(true); updateCursor(); scheduleApply(); }
           }} />
       </div>
-      <div class="hint">{dirty ? 'Edits are applied to the document as you type (once the LaTeX is well-formed; Ctrl+Enter applies at once).' : layout === 'right' ? 'The LaTeX source beside the document: both scroll together; edit here and the document follows.' : 'The LaTeX source of the document as it is saved; it follows the cursor. Edit here and the document follows.'}</div>
+      <div class="hint">{dirty ? 'Edits are applied to the document as you type (once the LaTeX is well-formed; Ctrl+Enter applies at once).' : 'The LaTeX source beside the document: both scroll together; edit here and the document follows.'}</div>
     </div>
   );
 }

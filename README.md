@@ -182,7 +182,7 @@ blend.
   focus. Edits in the source are applied to the document as one types — parsed on the server and
   merged as a diff — a moment after the last keystroke, held back while the LaTeX is unbalanced
   (`checkTexHealth`), `Ctrl+Enter` applies at once; the source is regenerated from the document when
-  the pane loses the focus. The bottom source pane (`Ctrl+Alt+S`) syncs and applies the same way.
+  the pane loses the focus (`Ctrl+Alt+S` toggles the pane).
   The menubar's right side names the project.
 * **Command palette** (`app/MenuBar.tsx`): `Ctrl+Shift+P` (`⇧⌘P` on a Mac; `F1` as well) or the
   *Help* menu opens a search over every menu item and the shortcut table — results show the menu
@@ -304,7 +304,7 @@ blend.
   `Ctrl/⌘+click` follows a reference or opens a child document (in place — the documents panel on
   the left is where one switches between the files of the project); *View ▸ Master + child documents in one
   view* shows a paper and its `\include`d children as one scrolling page; an editable **Source pane**
-  below the text (`Ctrl+Alt+S`, the *Source* switch in the right tab strip): the document's LaTeX with
+  beside the text (`Ctrl+Alt+S`, the *Source* switch in the right tab strip): the document's LaTeX with
   syntax colours (`app/texhighlight.ts`), following the cursor (`app/sourcelocate.ts`: the words before
   the cursor are searched in the source, or the current row of the formula being edited) — edit and
   *Apply* —, drag its top edge to resize; wide display
