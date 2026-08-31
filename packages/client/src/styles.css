@@ -145,7 +145,7 @@ button { cursor: pointer; }
 #app { height: 100%; }
 
 /* ------------------------------------------------------------ layout */
-.app { display: flex; flex-direction: column; height: 100%; }
+.app { display: flex; flex-direction: column; height: 100%; position: relative; }
 .menubar { display: flex; align-items: center; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); padding: 0 6px; height: 28px; user-select: none; }
 .menubar .brand { display: inline-flex; align-items: center; margin-right: 14px; text-decoration: none; padding: 1px 8px 1px 6px; border-radius: 4px; font-size: 16px; }
 .menubar .brand:hover { background: var(--ui-hover); }
@@ -265,7 +265,7 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .panel-body h3 { margin: 6px 0; font-size: 12px; text-transform: uppercase; color: var(--ui-muted); letter-spacing: 0.5px; }
 
 .editor-column { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.editor-scroll { flex: 1; min-height: 0; overflow: auto; background: var(--page-bg); position: relative; }
+.editor-scroll { flex: 1; min-height: 0; overflow: auto; background: var(--page-bg); position: relative; scroll-padding-bottom: 90px; /* keep the caret above the bottom-docked toolbars */ }
 /* "infinite margin": the page fills the viewport; text stays in a left-bound column of readable width,
    while wide objects (display math, tables, floats) may overflow the column and are centred on it */
 .editor-page { position: relative; background: var(--page-bg); min-height: 100%; width: 100%; padding: 36px 48px 120px 48px; }
@@ -812,6 +812,12 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 /* ------------------------------------------------------------ toolbars (LyX standard / extra / math / table / review) */
 .toolbar .tb-label { font-size: 11px; color: var(--ui-muted); padding: 0 6px 0 2px; text-transform: uppercase; letter-spacing: 0.4px; }
 .toolbar-math, .toolbar-mathpanels, .toolbar-table, .toolbar-review { background: var(--ui-bg2); }
+/* The contextual rows (math / panels / table / review) are docked at the bottom like in LyX, laid
+   over the content flush above the status bar — appearing and disappearing with the cursor must
+   never shift the document. Their palettes open upward. */
+.bottom-toolbars { position: absolute; left: 0; right: 0; bottom: 25px; /* status bar: 24px + 1px border */ z-index: 40; box-shadow: 0 -3px 10px rgba(0, 0, 0, 0.12); }
+.bottom-toolbars .toolbar { border-bottom: none; border-top: 1px solid var(--ui-border); }
+.bottom-toolbars .tb-popup { top: auto; bottom: 100%; margin-top: 0; margin-bottom: 2px; }
 .tb-btn:disabled { opacity: 0.4; pointer-events: none; }
 .tb-btn .katex { font-size: 13px; line-height: 1; }
 .tb-btn.has-pal { padding-right: 3px; }

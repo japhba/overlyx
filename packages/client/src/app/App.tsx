@@ -1529,10 +1529,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />
       {isLyxDoc && tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={standardGroups} />}
       {isLyxDoc && tbMode('extra') !== 'off' && <Toolbar id="extra" groups={extraGroups} />}
-      {isLyxDoc && showMath && <Toolbar id="math" label="Math" groups={mathGroups} />}
-      {isLyxDoc && showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={mathPanelGroups} />}
-      {isLyxDoc && showTable && <Toolbar id="table" label="Table" groups={tableGroups} />}
-      {isLyxDoc && showReview && <Toolbar id="review" label="Review" groups={reviewGroups} />}
+      {/* the contextual math / table / review rows are docked at the bottom (before the StatusBar below) */}
       {docId && meta && meta.health.length > 0 && (
         <div class="health-bar">
           <span class="health-icon">⚠</span>
@@ -1620,6 +1617,17 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
           </div>
         )}
       </div>
+      {/* Contextual toolbars, docked above the status bar like LyX. They are an overlay
+          (.bottom-toolbars is absolutely positioned), so their coming and going with the cursor
+          never shifts the document. */}
+      {isLyxDoc && (showMath || showTable || showReview) && (
+        <div class="bottom-toolbars">
+          {showMath && <Toolbar id="math" label="Math" groups={mathGroups} />}
+          {showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={mathPanelGroups} />}
+          {showTable && <Toolbar id="table" label="Table" groups={tableGroups} />}
+          {showReview && <Toolbar id="review" label="Review" groups={reviewGroups} />}
+        </div>
+      )}
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null}
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}
