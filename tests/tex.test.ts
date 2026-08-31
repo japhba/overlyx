@@ -107,6 +107,27 @@ Centered.
   });
 });
 
+describe('raw LaTeX fidelity (ERT)', () => {
+  it('keeps the braces of script groups after raw ^ and _', () => {
+    const src = doc('\\widemath{x_{J}^{r1}x_{J}^{r2}+\\int_{WV}f}');
+    const out = expectStable(src);
+    expect(bodyOf(out)).toContain('\\widemath{x_{J}^{r1}x_{J}^{r2}+\\int_{WV}f}');
+  });
+
+  it('a command the preamble defines stays a command, not the unicode symbol of that name', () => {
+    const src = doc('\\eq{i\\th_{i}^{r}\\ty}', '\\global\\long\\def\\th{\\tilde{h}}\n\\global\\long\\def\\ty{\\tilde{y}}');
+    const out = expectStable(src);
+    expect(bodyOf(out)).toContain('\\th_{i}^{r}\\ty');
+    expect(out).not.toContain('\u00fe');
+  });
+
+  it('\\maketitle with the title in the user preamble is kept verbatim', () => {
+    const src = doc('\\maketitle\n\nHello.', '\\title{In the preamble}');
+    const out = expectStable(src);
+    expect(bodyOf(out)).toContain('\\maketitle');
+  });
+});
+
 /* ------------------------------------------------------------ inline content */
 
 describe('inline content', () => {
