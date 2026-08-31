@@ -108,6 +108,18 @@ test('a dead-key ^ (German/French layouts: a composition) makes exactly one supe
     ta.dispatchEvent(new CompositionEvent('compositionend', { data: 'ê' }));
   });
   expect(await page.evaluate(() => (Array.from(document.querySelectorAll('.lyx-editor .lyx-math-inline')).pop() as any).pmViewDesc.spec.field.latex as string)).toBe('$u^{e}$');
+  // a control key pressed while the dead-key composition is still open must not move the caret out of the formula
+  await page.evaluate(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })); });
+  expect(await page.evaluate(() => document.activeElement!.classList.contains('lm-input'))).toBe(true);
+  await page.evaluate(() => {
+    const ta = document.activeElement as HTMLTextAreaElement;
+    ta.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
+    ta.value = '^';
+    ta.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: '^', isComposing: true, bubbles: true }));
+    ta.dispatchEvent(new CompositionEvent('compositionend', { data: '^' }));
+  });
+  await page.keyboard.type('3');
+  expect(await page.evaluate(() => (Array.from(document.querySelectorAll('.lyx-editor .lyx-math-inline')).pop() as any).pmViewDesc.spec.field.latex as string)).toBe('$u^{e^{3}}$');
   expect(errors).toEqual([]);
 });
 

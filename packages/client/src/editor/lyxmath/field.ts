@@ -593,6 +593,10 @@ export class LyxMathField {
   }
 
   private keydown(ev: KeyboardEvent): void {
+    // Keys pressed while a dead-key / IME composition is open (keyCode 229) belong to the
+    // composition: acting on Enter / Escape / the arrows here used to move the caret out of the
+    // formula before the composition committed — the ^ then landed in the surrounding text.
+    if (ev.isComposing || ev.keyCode === 229) { ev.stopPropagation(); return; }
     const mod = /Mac/.test(navigator.platform) ? ev.metaKey : ev.ctrlKey;
     const c = this.cursor;
     const old = c.clone();
