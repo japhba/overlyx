@@ -13,6 +13,10 @@ import type { ComponentChildren } from 'preact';
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 const MOD = isMac ? '⌘' : 'Ctrl';
+// ⌘M (minimise) and ⌘⌥C (DevTools) belong to macOS/the browser before the page sees them:
+// the editor also binds the Ctrl variants there, and the tour asks for those
+const MATH_KEY = isMac ? '⌃M' : 'Ctrl+M';
+const COMMENT_KEY = isMac ? '⌃⌥C' : 'Ctrl+Alt+C';
 
 /** Live state of the workspace the steps look at. */
 export interface TourCtx {
@@ -85,7 +89,7 @@ export const TOUR_STEPS: Step[] = [
     target: ['[data-tb="math"]'],
     body: <>
       <p>Formulas are edited in place with LyX's keys: {kbd('^')} and {kbd('_')} for scripts, {kbd('\\')} starts a command ({kbd('Space')} or {kbd('Tab')} completes it), {kbd('Esc')} leaves the formula. The math toolbar appears while the cursor is in one.</p>
-      <p><b>Press {kbd(MOD + '+M')} (or this button) and type</b> <code>\alpha^2 + \beta</code>.</p>
+      <p><b>Press {kbd(MATH_KEY)} (or this button) and type</b> <code>\alpha^2 + \beta</code>.</p>
     </>,
     done: now => now.inMath,
   },
@@ -103,7 +107,7 @@ export const TOUR_STEPS: Step[] = [
     target: ['[data-tb="comment"]'],
     body: <>
       <p>Comment threads (author, time, replies, resolve) are stored as LyX <i>Comment</i> notes, so colleagues on desktop LyX see them too. <i>View ▸ Notes &amp; comments in the margin</i> moves them next to the text, Google-Docs style.</p>
-      <p><b>Select a word and press {kbd(MOD + '+Alt+C')}</b> (or this button) to start a thread, then type your remark.</p>
+      <p><b>Select a word and press {kbd(COMMENT_KEY)}</b> (or this button) to start a thread, then type your remark.</p>
     </>,
     done: (now, base) => now.comments > base.comments,
   },

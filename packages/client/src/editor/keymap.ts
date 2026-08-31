@@ -242,6 +242,13 @@ export function lyxKeymap(): Plugin {
     'Alt-m': (_s, _d, view) => (view ? insertMath(false)(view) : false),
     Escape: escapeInset,
   };
+  if (isMac()) {
+    // ⌘M minimises the window, ⌘⌥C opens DevTools and ⌃R reloads — macOS/Chrome act on those
+    // before or besides the page, so the Ctrl variants work as well (and the tour shows them)
+    bindings['Ctrl-m'] = bindings['Mod-m'];
+    bindings['Ctrl-Alt-c'] = bindings['Alt-Mod-c'];
+    bindings['Ctrl-r'] = bindings['Mod-r'];
+  }
   return keymap(bindings);
 }
 

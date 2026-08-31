@@ -167,3 +167,16 @@ test('resolved comments leave the text and live in the Comments panel archive, f
   await panel.locator('[data-comment="open"]').click();
   await expect(cards.nth(1)).toHaveClass(/highlight/);
 });
+
+test('a window resize after leaving the document does not crash (margin plugin cleanup)', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await open(page);
+  await page.locator('.menubar .brand').click();
+  await page.waitForSelector('.home', { timeout: 20000 });
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await page.waitForTimeout(300);
+  await page.setViewportSize({ width: 1380, height: 880 });
+  await page.waitForTimeout(500);
+  expect(errors.filter(e => !/favicon|ERR_INTERNET|net::/.test(e))).toEqual([]);
+});

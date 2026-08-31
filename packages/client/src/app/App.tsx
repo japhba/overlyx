@@ -329,6 +329,19 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
+  // Ctrl/Cmd+R starts the PDF build wherever the focus is (a panel, a dialog, a comment box):
+  // the editor's keymap only sees the key with the cursor in the text, and the browser's reload
+  // silently threw away the tour and the interface state. Ctrl+Shift+R stays the browser's.
+  useEffect(() => {
+    if (!docId) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if ((!ev.ctrlKey && !ev.metaKey) || ev.altKey || ev.shiftKey || (ev.key !== 'r' && ev.key !== 'R')) return;
+      ev.preventDefault(); ev.stopPropagation();
+      editorContext.ui?.viewPdf?.();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [docId]);
   // A new text width reflows the whole document: keep the cursor where it is on screen (the ruler
   // is dragged with the eyes on the text) by scrolling by the amount the cursor moved.
   useEffect(() => {

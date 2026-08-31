@@ -27,8 +27,8 @@ export function marginPlugin(initial = false): Plugin<boolean> {
       root.classList.toggle('margin-mode', marginKey.getState(view.state) ?? false);
       observer = new ResizeObserver(() => schedule(view));
       observer.observe(view.dom);
-      const onScroll = () => { /* absolute positions are relative to the editor: nothing to do */ };
-      window.addEventListener('resize', () => schedule(view));
+      const onResize = () => schedule(view);
+      window.addEventListener('resize', onResize);
       schedule(view);
       return {
         update: (v, prevState) => {
@@ -36,7 +36,7 @@ export function marginPlugin(initial = false): Plugin<boolean> {
           root.classList.toggle('margin-mode', on);
           if (on || marginKey.getState(prevState)) schedule(v);
         },
-        destroy: () => { observer?.disconnect(); cancelAnimationFrame(raf); window.removeEventListener('resize', onScroll); },
+        destroy: () => { observer?.disconnect(); cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); },
       };
     },
   });
@@ -48,7 +48,8 @@ export function isMarginNote(el: Element): boolean {
 
 /** Position all note cards in the margin column, stacked without overlap. */
 export function layout(view: EditorView): void {
-  const root = view.dom.parentElement!;
+  const root = view.dom.parentElement;
+  if (!root) return;   // the editor was torn down before a scheduled layout ran
   const on = marginKey.getState(view.state) ?? false;
   const cards = Array.from(view.dom.querySelectorAll<HTMLElement>(':scope .lyx-inset-note'));
   // only top-level notes (notes nested in notes stay inline in their parent card); resolved comment
