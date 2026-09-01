@@ -297,18 +297,43 @@ export function resolveSelectionChanges(accept: boolean): Command {
  * Purely a *view* filter: which tracked-change types are drawn. Independent of the document
  * itself — insertions and deletions can each be hidden (both, either, or neither), e.g. to read
  * the text as it will look once deletions are accepted while still seeing what was inserted.
+ * A hidden run does not vanish without a trace: a small caret with a triangle stands where it is
+ * (like a folded region), and clicking it unfolds just that run — the toolbar switches then act
+ * as fold / unfold *all* (flipping one clears the per-run exceptions).
  */
-export interface ChangesFilterState { showInsertions: boolean; showDeletions: boolean }
+export interface ChangesFilterState { showInsertions: boolean; showDeletions: boolean; unfolded: ReadonlySet<string> }
 export const changesFilterKey = new PluginKey<ChangesFilterState>('lyx-changes-filter');
+export type ChangesFilterPatch = Partial<Pick<ChangesFilterState, 'showInsertions' | 'showDeletions'>> & { toggleRun?: string };
+
+/** one edit's identity: stable across position shifts (an agent or user edit shares author+time) */
+const runKeyOf = (c: { type: string; author: number; time: number }) => `${c.type}:${c.author}:${c.time}`;
+
+const foldMarker = (key: string, type: string, folded: boolean) => () => {
+  const el = document.createElement('span');
+  el.className = `ol-change-fold ${type}${folded ? '' : ' open'}`;
+  el.setAttribute('data-fold', key);
+  el.title = folded ? 'A hidden tracked change — click to show it' : 'Click to hide this tracked change again';
+  el.contentEditable = 'false';
+  return el;
+};
 
 export function changesFilterPlugin(): Plugin<ChangesFilterState> {
   return new Plugin<ChangesFilterState>({
     key: changesFilterKey,
     state: {
-      init: () => ({ showInsertions: true, showDeletions: true }),
+      init: () => ({ showInsertions: true, showDeletions: true, unfolded: new Set<string>() }),
       apply(tr, prev) {
-        const meta = tr.getMeta(changesFilterKey) as Partial<ChangesFilterState> | undefined;
-        return meta ? { ...prev, ...meta } : prev;
+        const meta = tr.getMeta(changesFilterKey) as ChangesFilterPatch | undefined;
+        if (!meta) return prev;
+        let unfolded: ReadonlySet<string> = prev.unfolded;
+        if (meta.toggleRun) {
+          const next = new Set(unfolded);
+          next.has(meta.toggleRun) ? next.delete(meta.toggleRun) : next.add(meta.toggleRun);
+          unfolded = next;
+        }
+        // the toolbar switches mean fold / unfold ALL: flipping one resets the per-run exceptions
+        if (meta.showInsertions !== undefined || meta.showDeletions !== undefined) unfolded = new Set();
+        return { showInsertions: meta.showInsertions ?? prev.showInsertions, showDeletions: meta.showDeletions ?? prev.showDeletions, unfolded };
       },
     },
     props: {
@@ -316,20 +341,39 @@ export function changesFilterPlugin(): Plugin<ChangesFilterState> {
         const f = changesFilterKey.getState(state)!;
         if (f.showInsertions && f.showDeletions) return null;
         const decos: Decoration[] = [];
+        let runKey: string | null = null;   // the filtered run the walker is currently inside
+        let runEnd = -1;
         state.doc.descendants((node, pos) => {
-          if (!node.isInline) return true;
+          if (!node.isInline) { runKey = null; return true; }
           const c = changeOf(node);
-          if (!c) return true;
-          const hide = (c.type === 'inserted' && !f.showInsertions) || (c.type === 'deleted' && !f.showDeletions);
-          if (hide) decos.push(node.isText ? Decoration.inline(pos, pos + node.nodeSize, { class: 'lyx-change-hidden' }) : Decoration.node(pos, pos + node.nodeSize, { class: 'lyx-change-hidden' }));
+          const hit = c && ((c.type === 'inserted' && !f.showInsertions) || (c.type === 'deleted' && !f.showDeletions));
+          if (!hit) { runKey = null; return true; }
+          const key = runKeyOf(c);
+          const folded = !f.unfolded.has(key);
+          if (key !== runKey || pos > runEnd) {
+            runKey = key;
+            decos.push(Decoration.widget(pos, foldMarker(key, c.type, folded), { side: -1, key: `fold:${key}:${folded}` }));
+          }
+          runEnd = pos + node.nodeSize;
+          const cls = folded ? 'lyx-change-hidden' : 'lyx-change-unfolded';
+          decos.push(node.isText ? Decoration.inline(pos, pos + node.nodeSize, { class: cls }) : Decoration.node(pos, pos + node.nodeSize, { class: cls }));
           return true;
         });
         return decos.length ? DecorationSet.create(state.doc, decos) : null;
+      },
+      handleDOMEvents: {
+        mousedown(view, ev) {
+          const fold = (ev.target as HTMLElement).closest?.('.ol-change-fold');
+          if (!fold) return false;
+          ev.preventDefault();
+          setChangesFilter(view, { toggleRun: fold.getAttribute('data-fold') ?? '' });
+          return true;
+        },
       },
     },
   });
 }
 
-export function setChangesFilter(view: EditorView, patch: Partial<ChangesFilterState>): void {
+export function setChangesFilter(view: EditorView, patch: ChangesFilterPatch): void {
   view.dispatch(view.state.tr.setMeta(changesFilterKey, patch));
 }

@@ -1198,3 +1198,14 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .agent-item.tool .chev { display: inline-block; width: 11px; }
 .agent-item.tool .err { color: indianred; }
 .agent-item.tool .out { max-height: 180px; overflow: auto; margin: 3px 0 0 14px; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid var(--ui-border); padding-left: 7px; }
+
+/* A hidden tracked change (changes filter): a small caret with a triangle below marks the spot —
+   click folds/unfolds that one run; the Review toolbar switches fold/unfold all. */
+.ol-change-fold { display: inline-block; position: relative; width: 9px; height: 1em; vertical-align: text-bottom; cursor: pointer; }
+.ol-change-fold::before { content: ''; position: absolute; left: 3px; top: 0.05em; bottom: 0.1em; width: 2px; border-radius: 1px; background: var(--change-color, var(--accent)); opacity: 0.85; }
+.ol-change-fold::after { content: ''; position: absolute; left: 0; bottom: -0.32em; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-top: 5px solid var(--change-color, var(--accent)); opacity: 0.85; }
+.ol-change-fold.open::after { border-top: 0; border-bottom: 5px solid var(--change-color, var(--accent)); }
+.ol-change-fold:hover::before, .ol-change-fold:hover::after { opacity: 1; }
+.ol-change-fold.inserted { --change-color: var(--ok); }
+.ol-change-fold.deleted { --change-color: var(--err); }
+.lyx-change-unfolded { outline: 1px dotted var(--change-color, var(--ui-muted)); outline-offset: 1px; }

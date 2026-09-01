@@ -43,7 +43,8 @@ describe('changes display filter', () => {
   it('defaults to showing both, with no hide decorations', () => {
     const view = fakeView(pmDoc(DOC));
     const s = changesFilterKey.getState(view.state)!;
-    expect(s).toEqual({ showInsertions: true, showDeletions: true });
+    expect(s).toMatchObject({ showInsertions: true, showDeletions: true });
+    expect(s.unfolded.size).toBe(0);
   });
 
   it('hiding insertions decorates only the inserted run', () => {
@@ -69,16 +70,37 @@ describe('changes display filter', () => {
   it('hiding both leaves no decorations (fast path, everything renders normally)', () => {
     const view = fakeView(pmDoc(DOC));
     setChangesFilter(view as any, { showInsertions: true, showDeletions: true });
-    expect(changesFilterKey.getState(view.state)).toEqual({ showInsertions: true, showDeletions: true });
+    expect(changesFilterKey.getState(view.state)).toMatchObject({ showInsertions: true, showDeletions: true });
   });
 
   it('toggles are independent of each other', () => {
     const view = fakeView(pmDoc(DOC));
     setChangesFilter(view as any, { showInsertions: false });
-    expect(changesFilterKey.getState(view.state)).toEqual({ showInsertions: false, showDeletions: true });
+    expect(changesFilterKey.getState(view.state)).toMatchObject({ showInsertions: false, showDeletions: true });
     setChangesFilter(view as any, { showDeletions: false });
-    expect(changesFilterKey.getState(view.state)).toEqual({ showInsertions: false, showDeletions: false });
+    expect(changesFilterKey.getState(view.state)).toMatchObject({ showInsertions: false, showDeletions: false });
     setChangesFilter(view as any, { showInsertions: true });
-    expect(changesFilterKey.getState(view.state)).toEqual({ showInsertions: true, showDeletions: false });
+    expect(changesFilterKey.getState(view.state)).toMatchObject({ showInsertions: true, showDeletions: false });
+  });
+
+  it('a hidden run gets a fold marker; toggling its key unfolds just that run', () => {
+    const view = fakeView(pmDoc(DOC));
+    setChangesFilter(view as any, { showInsertions: false });
+    const plugin = view.state.plugins[0];
+    let deco = (plugin.props.decorations as any).call(plugin, view.state);
+    let found = (deco as any).find();
+    // one widget (from === to) stands where the hidden "new " run is
+    expect(found.some((d: any) => d.from === d.to)).toBe(true);
+    // unfold the run by its stable key (type:author:time — from the DOC fixture)
+    setChangesFilter(view as any, { toggleRun: 'inserted:0:1700000000' });
+    expect(changesFilterKey.getState(view.state)!.unfolded.has('inserted:0:1700000000')).toBe(true);
+    deco = (plugin.props.decorations as any).call(plugin, view.state);
+    found = (deco as any).find();
+    // the run is decorated as unfolded now, not hidden — the marker stays to refold it
+    expect(found.some((d: any) => d.from === d.to)).toBe(true);
+    expect(found.some((d: any) => d.type?.attrs?.class === 'lyx-change-unfolded' || d.type?.attrs?.class?.includes?.('unfolded'))).toBe(true);
+    // flipping a toolbar switch clears the per-run exceptions (fold/unfold all semantics)
+    setChangesFilter(view as any, { showDeletions: false });
+    expect(changesFilterKey.getState(view.state)!.unfolded.size).toBe(0);
   });
 });

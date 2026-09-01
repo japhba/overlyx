@@ -195,8 +195,11 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     if (st.pending !== pendingFromStore || !st.pending) { pendingFromStore = st.pending; void persistence.set('pending', st.pending ? 1 : 0).catch(() => {}); }
     opts.onSaveState?.(st);
   };
+  /** origin of updates applied via messageHandlers[5] (the embedded agent's edits): tracked by
+   *  the undo manager so Ctrl+Z reverts them, skipped by the local-edit bookkeeping below */
+  const AGENT_EDIT_ORIGIN = 'agent-edit';
   ydoc.on('update', (_u: Uint8Array, origin: unknown) => {
-    if (origin === provider || origin === persistence) return;
+    if (origin === provider || origin === persistence || origin === AGENT_EDIT_ORIGIN) return;
     editSeq++;
     if (provider.wsconnected && provider.synced) sentSeq = editSeq;   // y-websocket sends local updates right away
     emitSaveState();
@@ -236,6 +239,14 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     const orig = (provider as any).messageHandlers[0];
     (provider as any).messageHandlers[0] = (...args: unknown[]) => { flushDomSelection(); return orig(...args); };
   }
+  // Message type 5 = an edit by the embedded agent (OverLyX extension): the same update bytes the
+  // sync copy carries, applied here first with a *tracked* origin so Ctrl+Z can revert the agent
+  // like one's own typing (yUndoPlugin below tracks this origin; the MSG_SYNC copy that follows
+  // is an idempotent no-op). Other collaborators' edits remain un-undoable, as they should be.
+  (provider as any).messageHandlers[5] = (_enc: unknown, dec: decoding.Decoder) => {
+    flushDomSelection();
+    Y.applyUpdate(ydoc, decoding.readVarUint8Array(dec), AGENT_EDIT_ORIGIN);
+  };
   (provider as any).messageHandlers[2] = (_enc: unknown, dec: decoding.Decoder) => {
     const e = decoding.readVarString(dec);
     if (epoch !== null && e !== epoch && !stale) {
@@ -285,7 +296,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
         return cursor;
       },
     }),
-    yUndoPlugin(),
+    yUndoPlugin({ trackedOrigins: [AGENT_EDIT_ORIGIN] }),
     // AI preview / ghost text come first: their Tab / Escape must win over the LyX bindings and table navigation
     aiRewritePlugin(),
     aiCompletePlugin(),

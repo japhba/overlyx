@@ -88,8 +88,9 @@ export function dragSelectPlugin(): Plugin {
           if (ev.button !== 0 || view.editable === false) return false;
           const t = ev.target as HTMLElement;
           if (!t.closest?.('.lyx-editor')) return false;
-          // the formula editor, collapsible insets, tables and label chips handle their own mouse
-          if (t.closest('.lm-field, .lm-input, .eq-labels, .eq-meta, .lyx-tabular, .lyx-inset')) return false;
+          // the formula editor, collapsible insets, tables, label chips and the tracked-change
+          // fold markers (changes.ts) handle their own mouse
+          if (t.closest('.lm-field, .lm-input, .eq-labels, .eq-meta, .lyx-tabular, .lyx-inset, .ol-change-fold')) return false;
           const start = view.posAtCoords({ left: ev.clientX, top: ev.clientY });
           if (!start) return false;
           // shift-click: extend the selection from its anchor — a formula is taken whole
@@ -102,10 +103,41 @@ export function dragSelectPlugin(): Plugin {
             if (head !== null) setSel(view, anchor, head);
             return true;
           }
-          // clicks and drags on a formula / graphic itself: ProseMirror's node handling (field upgrade, dialogs …)
+          // A press on a formula / graphic itself: the *click* stays with ProseMirror (field
+          // upgrade, node selection, dialogs) — but the browser's default drag from an atom is
+          // exactly the broken path, so once the pointer travels the gesture becomes ours: the
+          // atom is taken whole and the selection follows the pointer, and the pending click is
+          // swallowed so the formula does not pop open mid-drag.
           if (start.inside >= 0) {
             const n = view.state.doc.nodeAt(start.inside);
-            if (n && ATOMS.has(n.type.name)) return false;
+            if (n && ATOMS.has(n.type.name)) {
+              if (ev.detail !== 1) return false;
+              const from = start.inside, to = start.inside + n.nodeSize;
+              let took = false;
+              const move = (mv: MouseEvent) => {
+                if (!took) {
+                  if (Math.hypot(mv.clientX - ev.clientX, mv.clientY - ev.clientY) < 6) return;
+                  took = true;
+                  view.focus();
+                }
+                mv.preventDefault();
+                mv.stopPropagation();   // ProseMirror's own mouse handling must not fight the drag
+                const head = headOver(view, mv.clientX, mv.clientY, from);
+                if (head === null) return;
+                if (head >= to) setSel(view, from, head);
+                else if (head <= from) setSel(view, to, head);
+                else setSel(view, from, to);
+              };
+              const up = (uv: MouseEvent) => {
+                window.removeEventListener('mousemove', move, true);
+                window.removeEventListener('mouseup', up, true);
+                if (took) { uv.preventDefault(); uv.stopPropagation(); view.focus(); }
+                // without a drag, the untouched mouseup completes ProseMirror's click as usual
+              };
+              window.addEventListener('mousemove', move, true);
+              window.addEventListener('mouseup', up, true);
+              return false;   // the mousedown itself stays ProseMirror's (click semantics)
+            }
           }
           // double click = word, triple click = paragraph (dispatched synchronously — the native
           // word selection arrives through selectionchange too late for an immediate Ctrl+B)

@@ -29,6 +29,9 @@ const MSG_SAVED = 3;
  * connection open; a dead one still trips the watchdog.
  */
 const MSG_PING = 4;
+/** an update that came from the embedded agent (origin 'mcp'), sent additionally under this type
+ *  so clients can apply it with an undo-tracked origin (see editor.ts messageHandlers[5]) */
+const MSG_AGENT_EDIT = 5;
 const HEARTBEAT_MS = 10000;
 
 function savedMessage(doc: OpenDoc): Uint8Array {
@@ -60,7 +63,18 @@ const docHandlers = new WeakSet<OpenDoc>();
 function ensureDocHandlers(doc: OpenDoc): void {
   if (docHandlers.has(doc)) return;
   docHandlers.add(doc);
-  doc.ydoc.on('update', (update: Uint8Array) => {
+  doc.ydoc.on('update', (update: Uint8Array, origin: unknown) => {
+    // An agent (MCP) edit goes out twice: first tagged as MSG_AGENT_EDIT so new clients apply it
+    // with an undo-tracked origin (Ctrl+Z reverts the agent like one's own typing), then as the
+    // ordinary sync update — Yjs updates are idempotent, so the second apply is a no-op for
+    // clients that handled the first, and old clients that drop the unknown type still sync.
+    if (origin === 'mcp') {
+      const ea = encoding.createEncoder();
+      encoding.writeVarUint(ea, MSG_AGENT_EDIT);
+      encoding.writeVarUint8Array(ea, update);
+      const am = encoding.toUint8Array(ea);
+      for (const c of doc.conns.keys()) send(doc, c, am);
+    }
     const enc = encoding.createEncoder();
     encoding.writeVarUint(enc, MSG_SYNC);
     syncProtocol.writeUpdate(enc, update);
