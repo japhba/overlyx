@@ -214,7 +214,17 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
   const refreshThreads = () => api.agentThreads(project).then(r => setThreads(r.threads)).catch(() => { /* no access yet */ });
 
   useEffect(() => { void refreshStatus(); }, []);
-  useEffect(() => { setSel(null); setItems([]); setApprovals([]); if (status?.authenticated) void refreshThreads(); }, [project, status?.authenticated]);
+  useEffect(() => {
+    setSel(null); setItems([]); setApprovals([]);
+    if (!status?.authenticated) return;
+    // reopen the thread that was open here last time (kept per project, survives reloads)
+    void api.agentThreads(project).then(r => {
+      setThreads(r.threads);
+      const want = stored('ol.agent.sel:' + project);
+      const row = want ? r.threads.find(t => t.id === want) : null;
+      if (row) openThread(row);
+    }).catch(() => { /* no access yet */ });
+  }, [project, status?.authenticated]);
 
   /** codex's model catalogue, once signed in; keep stored choices when they still exist */
   useEffect(() => {
@@ -294,6 +304,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
 
   const openThread = (t: AgentThreadInfo) => {
     setSel(t.id); setMine(t.mine); setItems([]); setApprovals([]); stick.current = true;
+    store('ol.agent.sel:' + project, t.id);
     api.agentThread(project, t.id)
       .then(r => { setItems(r.thread.turns.flatMap(turn => turn.items)); setMine(r.mine); })
       .catch(e => notify(errText(e), 'error'));
@@ -317,7 +328,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
     void (async () => {
       try {
         let tid = selRef.current;
-        if (!tid) { const r = await api.agentStartThread(project); tid = r.id; setSel(tid); setMine(true); setItems([]); void refreshThreads(); }
+        if (!tid) { const r = await api.agentStartThread(project); tid = r.id; setSel(tid); setMine(true); setItems([]); store('ol.agent.sel:' + project, tid); void refreshThreads(); }
         setItems(list => [...list, localItem]);
         setBusyTurn('pending');
         await api.agentTurn(project, tid, { text: t, context, clientMessageId: localItem.id, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
@@ -365,7 +376,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
   return (
     <div class="agent-panel" data-agent="panel">
       <div class="agent-head">
-        {sel && <button class="small-btn" data-agent-back title="All threads of this project" onClick={() => { setSel(null); setItems([]); setApprovals([]); void refreshThreads(); }}>‹</button>}
+        {sel && <button class="small-btn" data-agent-back title="All threads of this project" onClick={() => { setSel(null); setItems([]); setApprovals([]); store('ol.agent.sel:' + project, ''); void refreshThreads(); }}>‹</button>}
         <span class="who" title={`Signed in as ${status.account?.email ?? 'ChatGPT'}${status.account?.plan ? ` (${status.account.plan})` : ''}`}>
           {sel ? (threads.find(t => t.id === sel)?.title ?? 'Thread') : (status.account?.email ?? 'ChatGPT')}
         </span>
