@@ -1190,3 +1190,11 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .agent-diff-summary .del { color: indianred; }
 .agent-diff-summary .declined { color: indianred; font-style: italic; }
 .agent-approval .fb { width: 100%; box-sizing: border-box; margin-top: 7px; font: inherit; font-size: 12px; background: var(--page-bg); color: inherit; border: 1px solid var(--ui-border); border-radius: 5px; padding: 4px 7px; }
+
+/* Agent panel: tool calls folded to one muted line (click to unfold) */
+.agent-item.tool { font-family: ui-monospace, monospace; font-size: 12px; color: var(--ui-muted); }
+.agent-item.tool .line { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-item.tool .line:hover { color: var(--ui-fg); }
+.agent-item.tool .chev { display: inline-block; width: 11px; }
+.agent-item.tool .err { color: indianred; }
+.agent-item.tool .out { max-height: 180px; overflow: auto; margin: 3px 0 0 14px; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid var(--ui-border); padding-left: 7px; }

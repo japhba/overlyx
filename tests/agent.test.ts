@@ -86,6 +86,14 @@ describe('agent sign-in', () => {
     expect(st.body.authenticated).toBe(true);
     expect(st.body.account?.email).toBe('stub@example.com');
   });
+
+  it('wires codex to the OverLyX MCP: managed config + internal token in the env', async () => {
+    const cfg = readFileSync(join(ROOT, 'data', 'agent-home', String(owner.id), 'config.toml'), 'utf8');
+    expect(cfg).toContain('[mcp_servers.overlyx]');
+    expect(cfg).toContain('bearer_token_env_var = "OVERLYX_MCP_TOKEN"');
+    const row = db.prepare("SELECT token_plain FROM mcp_tokens WHERE user_id = ? AND name = 'Agent panel'").get(owner.id) as { token_plain: string } | undefined;
+    expect(row?.token_plain).toMatch(/^olxmcp_/);
+  });
 });
 
 describe('threads and turns', () => {

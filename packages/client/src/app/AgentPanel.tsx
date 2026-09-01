@@ -141,8 +141,26 @@ function ItemView({ it }: { it: AgentItem }) {
       return <div class="agent-item reasoning" onClick={() => setOpen(o => !o)} title="The agent's reasoning summary">{open ? t : t.split('\n')[0].slice(0, 90) + (t.length > 90 ? ' …' : '')}</div>;
     }
     case 'commandExecution':
+      // folded to one line by default — click for the output
+      return (
+        <div class="agent-item tool" data-agent="cmd">
+          <div class="line" onClick={() => setOpen(o => !o)}>
+            <span class="chev">{open ? '▾' : '▸'}</span> $ {it.command}
+            {it.status === 'inProgress' ? ' …' : it.exitCode != null && it.exitCode !== 0 ? <span class="err"> ✗ {it.exitCode}</span> : null}
+          </div>
+          {open && it.aggregatedOutput ? <div class="out">{it.aggregatedOutput.slice(-4000)}</div> : null}
+        </div>
+      );
     case 'mcpToolCall':
-      return null;   // tool calls stay out of the transcript — the busy line names the current one
+      return (
+        <div class="agent-item tool" data-agent="mcptool">
+          <div class="line" onClick={() => setOpen(o => !o)}>
+            <span class="chev">{open ? '▾' : '▸'}</span> {it.server}: {it.tool}
+            {it.status === 'inProgress' ? ' …' : it.status === 'failed' ? <span class="err"> ✗</span> : null}
+          </div>
+          {open && (it as any).arguments !== undefined ? <div class="out">{JSON.stringify((it as any).arguments, null, 1).slice(0, 2000)}</div> : null}
+        </div>
+      );
     case 'fileChange':
       return <FileChangeView key={it.id} it={it} />;
     case 'plan':
@@ -359,11 +377,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
         <div class="agent-scroll" ref={scrollRef} onScroll={onScroll}>
           {items.map(it => <ItemView key={it.id} it={it} />)}
           {approvals.map(a => <ApprovalCard key={a.requestId} a={a} onDecide={(d, fb) => decide(a, d, fb)} />)}
-          {busyTurn && !approvals.length && (() => {
-            const run = [...items].reverse().find(i => (i.type === 'commandExecution' || i.type === 'mcpToolCall') && i.status === 'inProgress');
-            const label = run ? (run.type === 'commandExecution' ? '$ ' + (run.command ?? '').slice(0, 70) : `${run.server}: ${run.tool}`) : null;
-            return <div class="agent-item reasoning" data-agent="busy">Working…{label ? ` — ${label}` : ''}</div>;
-          })()}
+          {busyTurn && !approvals.length && <div class="agent-item reasoning" data-agent="busy">Working…</div>}
         </div>
       )}
       {(!sel || mine) && (

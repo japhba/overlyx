@@ -270,12 +270,15 @@ blend.
   Code extension speaks) — one `codex` child process per signed-in user, `CODEX_HOME` under
   `data/agent-home/<user>/` so ChatGPT credentials and codex's memories are per account and shared
   across that user's projects. Users sign in with their *own* ChatGPT account (device code); a
-  thread runs with the project directory as cwd in codex's workspace-write sandbox, streams
-  message/reasoning deltas, command output and file-change diffs over SSE, and asks in the panel
-  before running commands or writing files. "selection" in the composer sends the current editor
-  selection along as LaTeX (the ⌘K conversion). Threads belong to the project: every editor sees
-  them and can read transcripts, only the creator drives one; the file edits land in the working
-  tree like external edits (merged live, auto-committed — revertible from Versions/git).
+  thread runs with the project directory as cwd in codex's **read-only** sandbox — the agent reads
+  every project file freely, and all *edits* go through OverLyX's own MCP connector (a managed
+  `[mcp_servers.overlyx]` entry pointing at `/mcp` with an internal per-account token): document
+  edits arrive as tracked changes (`\lyxadded`), reviewable like a collaborator's, `write_file`
+  covers `.bib` and friends, `build_pdf` compiles through the app's queue. A direct filesystem
+  write is a sandbox exception the panel asks the user to grant. The panel streams
+  message/reasoning deltas, tool calls (folded) and diffs over SSE; "selection" in the composer
+  sends the current editor selection along as LaTeX (the ⌘K conversion). Threads belong to the
+  project: every editor sees them and can read transcripts, only the creator drives one.
   `OVERLYX_AGENT=off` disables it, `OVERLYX_CODEX_BIN` points at a stub for tests,
   `OVERLYX_AGENT_MODEL` overrides the model.
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or

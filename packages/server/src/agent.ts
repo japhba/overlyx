@@ -21,6 +21,7 @@ import { db } from './db.ts';
 import { manager } from './docs.ts';
 import { projectDir } from './projects.ts';
 import { roleFor, atLeast, logAccess } from './access.ts';
+import { createMcpToken } from './mcpTokens.ts';
 import { selectionToTex } from './ai.ts';
 import type { PMJSON } from '@overlyx/core';
 
@@ -37,7 +38,8 @@ export interface AgentEvent {
 }
 
 const DEV_INSTRUCTIONS = (project: string) => `You are embedded in OverLyX, a collaborative WYSIWYG LaTeX editor. The working directory is the user's LaTeX project "${project}"; its .tex files are the live documents — edits you make to them appear in the user's editor within seconds, and are versioned automatically.
-Conventions: comment lines starting with %% are OverLyX bookkeeping (notes, settings) — leave them unless asked; \\lyxadded/\\lyxdeleted macros are tracked changes — preserve them; never run git commit or push (OverLyX commits automatically). Do NOT recompile the PDF after every edit: the user builds from the editor whenever they want to look — run latexmk only when explicitly asked, or once at the end of a larger change when you genuinely need to check it compiles.`;
+Read project files directly as much as you like — but ALL edits go through the "overlyx" MCP server's tools with project "${project}": replace_paragraph / insert_paragraphs / delete_paragraph / propose_edit for .tex documents (applied as tracked changes the user reviews and accepts in the editor), write_file for .bib and other text files, write_document / create_document for whole documents, build_pdf to compile through OverLyX's queue. The filesystem is sandboxed read-only: do not write files or run mutating commands directly unless MCP genuinely cannot do it — such an attempt asks the user for an exception.
+Conventions: comment lines starting with %% are OverLyX bookkeeping (notes, settings) — leave them unless asked; \\lyxadded/\\lyxdeleted macros are tracked changes — preserve them; never run git commit or push (OverLyX commits automatically). Do NOT recompile the PDF after every edit: the user builds from the editor whenever they want to look — compile only when explicitly asked, or once at the end of a larger change when you genuinely need to check it compiles.`;
 
 /* ------------------------------------------------------------------ per-user codex host */
 
@@ -45,6 +47,15 @@ type Subscriber = { project: string; res: Response };
 interface PendingReq { resolve: (v: any) => void; reject: (e: Error) => void; timer?: NodeJS.Timeout }
 
 const agentHomeDir = (userId: number) => path.join(config.dataDir, 'agent-home', String(userId));
+
+const AGENT_TOKEN_NAME = 'Agent panel';
+/** The internal MCP token the embedded agent authenticates with (plaintext kept so every codex
+ *  start can pass it via the environment; visible and revocable like any agent token — a deleted
+ *  one is re-minted on the next start). */
+function agentMcpToken(userId: number): string {
+  const row = db.prepare('SELECT token_plain FROM mcp_tokens WHERE user_id = ? AND name = ? AND token_plain IS NOT NULL').get(userId, AGENT_TOKEN_NAME) as { token_plain: string } | undefined;
+  return row ? row.token_plain : createMcpToken(userId, AGENT_TOKEN_NAME, true).token;
+}
 
 class AgentHost {
   proc: ChildProcess | null = null;
@@ -71,8 +82,18 @@ class AgentHost {
   private ensureHome(): void {
     const h = this.home();
     fs.mkdirSync(h, { recursive: true });
-    const cfg = path.join(h, 'config.toml');
-    if (!fs.existsSync(cfg)) fs.writeFileSync(cfg, '# OverLyX-managed codex configuration for this account\n[features]\nmemories = true\n');
+    // OverLyX owns this file — rewritten on every start so the port and settings stay current
+    fs.writeFileSync(path.join(h, 'config.toml'), `# OverLyX-managed codex configuration for this account
+[features]
+memories = true
+
+# OverLyX's own MCP connector: tracked-change document edits, comments, builds — all of the
+# account's projects on one connection (tools take a \`project\` argument). The bearer token
+# arrives via the environment at codex start.
+[mcp_servers.overlyx]
+url = "http://127.0.0.1:${config.port}/mcp"
+bearer_token_env_var = "OVERLYX_MCP_TOKEN"
+`);
   }
 
   /** Start (or reuse) the codex process and finish the initialize handshake. */
@@ -81,7 +102,7 @@ class AgentHost {
     this.ensureHome();
     const proc = spawn(config.agent.bin, ['app-server'], {
       cwd: this.home(),
-      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: this.home(), CODEX_HOME: this.home(), LANG: process.env.LANG ?? 'C.UTF-8', TERM: 'dumb' },
+      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: this.home(), CODEX_HOME: this.home(), LANG: process.env.LANG ?? 'C.UTF-8', TERM: 'dumb', OVERLYX_MCP_TOKEN: agentMcpToken(this.userId) },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.proc = proc;
@@ -317,7 +338,9 @@ export function agentRoutes(): express.Router {
       const out = await h.request('thread/start', {
         cwd: projectDir(project),
         approvalPolicy: 'on-request',
-        sandbox: 'workspace-write',
+        // reads are free (the project is the cwd); every write goes through the MCP tools as a
+        // tracked change — a direct filesystem write is a sandbox exception the user must grant
+        sandbox: 'read-only',
         developerInstructions: DEV_INSTRUCTIONS(project),
         ...(config.agent.model ? { model: config.agent.model } : {}),
       });
