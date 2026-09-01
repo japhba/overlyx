@@ -8,11 +8,13 @@
  * suffixed "(MCP)" — so a misbehaving or over-eager agent is always reviewable and revertible from
  * the Review toolbar / Versions, exactly like a human collaborator's tracked edit.
  *
- * v1 scope, deliberately: `propose_edit` only rewrites a paragraph that is plain, uniformly
- * formatted text (no inline formulas/insets, no mixed bold/italic runs) — anything else is
- * rejected with an explanit error rather than guessing at how to preserve formatting/insets
- * inside a word-level diff. Comments are only read/added/resolved at the top level of the document
- * body (not inside tables/floats/other insets).
+ * Raw LaTeX is a first-class input: insert_paragraphs / replace_paragraph accept any LaTeX
+ * (formulas, citations, sections, environments — the same .tex parser as the editor) and are
+ * applied as tracked changes; write_document replaces or creates a whole document's source,
+ * untracked like the raw-source view (Versions/git keep the prior state); read_file/write_file
+ * reach the project's other text files (refs.bib, macros.tex, …). propose_edit remains the
+ * word-diff tool for plain-text paragraphs. Comments are read/added/resolved at the top level of
+ * the document body (not inside tables/floats/other insets).
  */
 import express, { type Request, type Response } from 'express';
 import { z } from 'zod';
@@ -24,8 +26,11 @@ import {
   setHeaderValue, diffText, commentHeader, formatTimestamp, parseHeader, parseThread,
   type LyxDocument, type Item,
 } from '@overlyx/core';
+import nodePath from 'node:path';
 import { manager } from './docs.ts';
-import { listProjects, projectDir } from './projects.ts';
+import { listProjects, projectDir, resolveProjectPath, isDocumentFile, newDocumentText } from './projects.ts';
+import { parseDocumentText, parseFragmentText } from './texdoc.ts';
+import { touchProject } from './git.ts';
 import { verifyMcpToken } from './mcpTokens.ts';
 import { roleFor, atLeast } from './access.ts';
 import { toSessionUser } from './auth.ts';
@@ -146,8 +151,140 @@ async function resolveComment(project: string, path: string, index: number) {
   throw new Error(`No comment thread at index ${index}.`);
 }
 
+
+/* ------------------------------------------------------ raw LaTeX + files */
+
+const FRAGMENT_MAX = 256 * 1024;
+const DOC_MAX = 20_000_000;
+const FILE_MAX = 4 * 1024 * 1024;
+
+function trackItems(items: Item[], authorId: number, type: 'inserted' | 'deleted', time: number): void {
+  for (const it of items) it.change = { type, author: authorId, time };
+}
+
+/** Register the agent as a change-tracking author and switch tracking on. */
+function beginTracking(lyx: LyxDocument, agentName: string): { authorId: number; time: number } {
+  const author = authorName(agentName);
+  const authorId = lyxAuthorId(author, '');
+  addAuthor(lyx.header, authorId, author, '');
+  setHeaderValue(lyx.header, 'tracking_changes', 'true');
+  return { authorId, time: Math.floor(Date.now() / 1000) };
+}
+
+/** Parse a raw LaTeX fragment in the document's context (its header: class, macros, packages). */
+async function parseFragment(project: string, path: string, latex: string) {
+  if (!latex.trim()) throw new Error('Empty LaTeX.');
+  if (latex.length > FRAGMENT_MAX) throw new Error('LaTeX fragment too large (256 KB).');
+  const doc = await manager.open(`${project}/${path}`);
+  const r = parseFragmentText(latex, project, doc.relPath, doc.getMeta().headerLines);
+  return { doc, lyx: doc.toLyxDocument(), pars: r.doc.body, warnings: r.warnings };
+}
+
+async function insertParagraphs(project: string, agentName: string, path: string, index: number, latex: string) {
+  const { doc, lyx, pars, warnings } = await parseFragment(project, path, latex);
+  if (!pars.length) throw new Error('The LaTeX parsed to no paragraphs.');
+  if (index < 0 || index > lyx.body.length) throw new Error(`Insert position ${index} out of range — the document has ${lyx.body.length} paragraph(s); 0 inserts at the top, ${lyx.body.length} appends.`);
+  const { authorId, time } = beginTracking(lyx, agentName);
+  for (const p of pars) trackItems(p.items, authorId, 'inserted', time);
+  lyx.body.splice(index, 0, ...pars);
+  commitEdit(doc, lyx);
+  return { ok: true, inserted: pars.length, at: index, warnings, note: 'Inserted as a tracked change (reviewable from the Review toolbar); paragraph indices shifted — re-run read_document.' };
+}
+
+async function replaceParagraph(project: string, agentName: string, path: string, index: number, latex: string) {
+  const { doc, lyx, pars, warnings } = await parseFragment(project, path, latex);
+  const par = lyx.body[index];
+  if (!par) throw new Error(`No paragraph ${index} — this document has ${lyx.body.length} paragraph(s) (see read_document).`);
+  if (!pars.length) throw new Error('The LaTeX parsed to no paragraphs — use delete_paragraph to remove one.');
+  const { authorId, time } = beginTracking(lyx, agentName);
+  const plain = (p: typeof par) => p.items.every((it: Item) => it.kind === 'text' && fontsEqual(it.font, p.items[0]?.font ?? {}));
+  if (pars.length === 1 && plain(par) && plain(pars[0]) && pars[0].layout === par.layout) {
+    // plain text to plain text: a word-level diff, like propose_edit — the minimal reviewable change
+    const font = par.items[0]?.font ?? {};
+    const runs = diffText(par.items.map(itemText).join(''), pars[0].items.map(itemText).join(''));
+    par.items = runs.map(r => textItem(r.text, font, r.type === 'same' ? undefined : { type: r.type === 'add' ? 'inserted' : 'deleted', author: authorId, time }));
+  } else {
+    trackItems(par.items, authorId, 'deleted', time);
+    for (const p of pars) trackItems(p.items, authorId, 'inserted', time);
+    lyx.body.splice(index + 1, 0, ...pars);
+  }
+  commitEdit(doc, lyx);
+  return { ok: true, warnings, note: 'Applied as a tracked change (old text marked deleted, new content inserted); a reviewer accepts or rejects it.' };
+}
+
+async function deleteParagraph(project: string, agentName: string, path: string, index: number) {
+  const { doc, lyx } = await openLyx(project, path);
+  const par = lyx.body[index];
+  if (!par) throw new Error(`No paragraph ${index} — this document has ${lyx.body.length} paragraph(s).`);
+  const { authorId, time } = beginTracking(lyx, agentName);
+  trackItems(par.items, authorId, 'deleted', time);
+  commitEdit(doc, lyx);
+  return { ok: true, note: 'Marked deleted as a tracked change; the text disappears when a reviewer accepts it.' };
+}
+
+async function writeDocument(project: string, userId: number, path: string, tex: string) {
+  if (!tex.trim()) throw new Error('tex missing');
+  if (tex.length > DOC_MAX) throw new Error('too large');
+  if (!path.endsWith('.tex')) throw new Error('a .tex path is expected');
+  const abs = resolveProjectPath(project, path);
+  if (!fs.existsSync(abs)) {
+    const r = parseDocumentText(tex, project, path);   // validate and collect warnings before creating
+    fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, tex, 'utf8');
+    touchProject(project, userId);
+    return { ok: true, created: true, warnings: r.warnings };
+  }
+  const doc = await manager.open(`${project}/${path}`);
+  const r = parseDocumentText(tex, doc.project, doc.relPath);
+  doc.loadFromLyx(r.doc, 'source');
+  doc.scheduleSave();
+  return { ok: true, created: false, warnings: r.warnings, note: 'Replaced the whole source (not a tracked change — like the raw-source view; the prior state is kept in Versions and git).' };
+}
+
+function createDocument(project: string, userId: number, agentName: string, relPath: string, title?: string) {
+  let rel = relPath;
+  if (rel.endsWith('.lyx')) rel = rel.slice(0, -4) + '.tex';
+  if (!rel.endsWith('.tex')) rel += '.tex';
+  const abs = resolveProjectPath(project, rel);
+  if (fs.existsSync(abs)) throw new Error('file exists — write_document replaces an existing document');
+  fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, newDocumentText({ title, author: authorName(agentName) }), 'utf8');
+  touchProject(project, userId);
+  return { ok: true, path: rel };
+}
+
+function assertTextFilePath(project: string, rel: string): string {
+  if (rel.endsWith('.lyx') || isDocumentFile(project, rel)) throw new Error('This is a document — use read_document / write_document (or the paragraph tools).');
+  return resolveProjectPath(project, rel);
+}
+
+function readFile(project: string, rel: string) {
+  const abs = assertTextFilePath(project, rel);
+  if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) throw new Error(`not found: ${rel}`);
+  if (fs.statSync(abs).size > FILE_MAX) throw new Error('file too large (4 MB)');
+  const buf = fs.readFileSync(abs);
+  if (buf.includes(0)) throw new Error('not a text file');
+  return { text: buf.toString('utf8'), size: buf.length };
+}
+
+function writeFile(project: string, userId: number, rel: string, text: string) {
+  const abs = assertTextFilePath(project, rel);
+  if (Buffer.byteLength(text) > FILE_MAX) throw new Error('file too large (4 MB)');
+  fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
+  const tmp = abs + '.overlyx-tmp';
+  fs.writeFileSync(tmp, text, 'utf8');
+  fs.renameSync(tmp, abs);
+  touchProject(project, userId);
+  return { ok: true, size: Buffer.byteLength(text) };
+}
+
+function listFiles(project: string) {
+  const p = listProjects().find(x => x.name === project);
+  return (p?.files ?? []).map(f => ({ path: f.path, kind: f.kind, size: f.size }));
+}
+
 /** Builds one MCP server instance scoped to `project`, tools attributed to `agentName`; without `canEdit` the mutating tools refuse. */
-function buildMcpServer(project: string, agentName: string, canEdit: boolean): McpServer {
+function buildMcpServer(project: string, agentName: string, canEdit: boolean, userId: number): McpServer {
   const server = new McpServer({ name: 'overlyx', version: '1.0.0' });
   const needEdit = () => { if (!canEdit) throw new Error("This token's account has view-only access to this project — reading is allowed, editing and commenting are not."); };
 
@@ -189,6 +326,46 @@ function buildMcpServer(project: string, agentName: string, canEdit: boolean): M
     inputSchema: { path: z.string(), index: z.number().int().nonnegative() },
   }, async ({ path, index }) => { try { needEdit(); return ok(await resolveComment(project, path, index)); } catch (e) { return fail(e); } });
 
+  server.registerTool('list_files', {
+    description: 'All files of the project (kind: doc/tex/bib/image/pdf/…) — documents open with read_document, other text files with read_file.',
+    inputSchema: {},
+  }, async () => { try { return ok(listFiles(project)); } catch (e) { return fail(e); } });
+
+  server.registerTool('read_file', {
+    description: 'Read a text file of the project (refs.bib, macros.tex, .sty, …). For documents use read_document.',
+    inputSchema: { path: z.string() },
+  }, async ({ path }) => { try { return ok(readFile(project, path)); } catch (e) { return fail(e); } });
+
+  server.registerTool('write_file', {
+    description: 'Write a text file of the project (e.g. add BibTeX entries to refs.bib). Overwrites the file — git history keeps every prior state. For documents use write_document or the paragraph tools.',
+    inputSchema: { path: z.string(), text: z.string() },
+  }, async ({ path, text }) => { try { needEdit(); return ok(writeFile(project, userId, path, text)); } catch (e) { return fail(e); } });
+
+  server.registerTool('insert_paragraphs', {
+    description: 'Insert raw LaTeX (anything: formulas, citations, sections, environments — parsed like the editor parses .tex) as new paragraphs at a position: 0 = top, paragraph count = append. Applied as a tracked insertion, reviewable like any collaborator edit. Indices shift — re-run read_document afterwards.',
+    inputSchema: { path: z.string(), index: z.number().int().nonnegative().describe('Position from read_document; the paragraph count appends'), latex: z.string() },
+  }, async ({ path, index, latex }) => { try { needEdit(); return ok(await insertParagraphs(project, agentName, path, index, latex)); } catch (e) { return fail(e); } });
+
+  server.registerTool('replace_paragraph', {
+    description: 'Replace one paragraph by raw LaTeX (may parse to several paragraphs; formulas, citations, anything allowed). Tracked: plain-text→plain-text becomes a word-level diff; anything else marks the old paragraph deleted and inserts the new content after it.',
+    inputSchema: { path: z.string(), index: z.number().int().nonnegative().describe("From read_document's paragraphs list"), latex: z.string() },
+  }, async ({ path, index, latex }) => { try { needEdit(); return ok(await replaceParagraph(project, agentName, path, index, latex)); } catch (e) { return fail(e); } });
+
+  server.registerTool('delete_paragraph', {
+    description: 'Mark one paragraph deleted as a tracked change (the text disappears when a reviewer accepts it).',
+    inputSchema: { path: z.string(), index: z.number().int().nonnegative() },
+  }, async ({ path, index }) => { try { needEdit(); return ok(await deleteParagraph(project, agentName, path, index)); } catch (e) { return fail(e); } });
+
+  server.registerTool('write_document', {
+    description: "Replace a document's whole raw LaTeX source, or create the document when the path does not exist. NOT a tracked change — like the raw-source view; the prior state stays in Versions and git. Prefer replace_paragraph / insert_paragraphs for reviewable edits.",
+    inputSchema: { path: z.string(), tex: z.string() },
+  }, async ({ path, tex }) => { try { needEdit(); return ok(await writeDocument(project, userId, path, tex)); } catch (e) { return fail(e); } });
+
+  server.registerTool('create_document', {
+    description: 'Create a new .tex document from the standard template (write_document with full source also creates).',
+    inputSchema: { path: z.string(), title: z.string().optional() },
+  }, async ({ path, title }) => { try { needEdit(); return ok(createDocument(project, userId, agentName, path, title)); } catch (e) { return fail(e); } });
+
   return server;
 }
 
@@ -213,7 +390,7 @@ async function handle(req: Request, res: Response): Promise<void> {
   if (!atLeast(role, 'view')) { res.status(403).json({ error: `this token's account has no access to project "${project}"` }); return; }
   if (!fs.existsSync(projectDir(project))) { res.status(404).json({ error: `no project "${project}"` }); return; }
 
-  const server = buildMcpServer(project, identity.name, atLeast(role, 'edit'));
+  const server = buildMcpServer(project, identity.name, atLeast(role, 'edit'), identity.userId);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => { void transport.close(); void server.close(); });
   try {

@@ -104,12 +104,13 @@ describe('auth', () => {
 });
 
 describe('tools/list', () => {
-  it('lists all six tools', async () => {
+  it('lists all the tools', async () => {
     const t = createMcpToken(owner.id, 'test-agent');
     const { status, body } = await rpc(t.token, 'tools/list');
     expect(status).toBe(200);
     const names = body.result.tools.map((x: any) => x.name).sort();
-    expect(names).toEqual(['add_comment', 'list_comments', 'list_documents', 'propose_edit', 'read_document', 'resolve_comment']);
+    expect(names).toEqual(['add_comment', 'create_document', 'delete_paragraph', 'insert_paragraphs', 'list_comments', 'list_documents',
+      'list_files', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'resolve_comment', 'write_document', 'write_file']);
   });
 });
 
@@ -189,5 +190,85 @@ describe('comments', () => {
   it('resolve_comment on an out-of-range index fails clearly', async () => {
     const t = createMcpToken(owner.id, 'agent').token;
     await expect(callTool(t, 'resolve_comment', { path: 'c.tex', index: 99 })).rejects.toThrow(/No comment thread/);
+  });
+});
+
+describe('raw LaTeX', () => {
+  it('replace_paragraph accepts formulas and applies a tracked replacement', async () => {
+    writeFileSync(file('d.tex'), doc('Plain sentence one.\n\nSecond one.'));
+    const t = createMcpToken(owner.id, 'TeX Bot').token;
+    const r = await callTool(t, 'replace_paragraph', { path: 'd.tex', index: 0, latex: 'The loss $L=\\sum_i x_i^2$ converges.' });
+    expect(r.ok).toBe(true);
+    const text = (await manager.open('p/d.tex')).toText();
+    expect(text).toContain('\\lyxadded{TeX Bot (MCP)}');
+    expect(text).toContain('\\lyxdeleted{TeX Bot (MCP)}');
+    expect(text).toContain('x_i^2');
+    const read = await callTool(t, 'read_document', { path: 'd.tex' });
+    expect(read.text).toContain('converges');
+  });
+
+  it('insert_paragraphs inserts a section heading as tracked content', async () => {
+    const t = createMcpToken(owner.id, 'TeX Bot').token;
+    const before = await callTool(t, 'read_document', { path: 'd.tex' });
+    const r = await callTool(t, 'insert_paragraphs', { path: 'd.tex', index: before.paragraphs.length, latex: '\\section{Results}\n\nAll good.' });
+    expect(r.inserted).toBe(2);
+    const after = await callTool(t, 'read_document', { path: 'd.tex' });
+    expect(after.paragraphs.length).toBe(before.paragraphs.length + 2);
+    expect(after.paragraphs.at(-2).layout).toBe('Section');
+    expect((await manager.open('p/d.tex')).toText()).toContain('Results');
+  });
+
+  it('delete_paragraph marks a paragraph deleted (tracked)', async () => {
+    const t = createMcpToken(owner.id, 'TeX Bot').token;
+    const read = await callTool(t, 'read_document', { path: 'd.tex' });
+    const r = await callTool(t, 'delete_paragraph', { path: 'd.tex', index: read.paragraphs.length - 1 });
+    expect(r.ok).toBe(true);
+    expect((await manager.open('p/d.tex')).toText()).toContain('\\lyxdeleted');
+  });
+
+  it('write_document replaces the whole source, and creates a new document', async () => {
+    const t = createMcpToken(owner.id, 'TeX Bot').token;
+    const r = await callTool(t, 'write_document', { path: 'e.tex', tex: doc('Fresh document with $a=b$.') });
+    expect(r.created).toBe(true);
+    expect((await callTool(t, 'read_document', { path: 'e.tex' })).text).toContain('a=b');
+    const r2 = await callTool(t, 'write_document', { path: 'e.tex', tex: doc('Rewritten entirely.') });
+    expect(r2.created).toBe(false);
+    expect((await callTool(t, 'read_document', { path: 'e.tex' })).text).toContain('Rewritten');
+  });
+
+  it('create_document makes a template document; list_files sees project files', async () => {
+    const t = createMcpToken(owner.id, 'TeX Bot').token;
+    const r = await callTool(t, 'create_document', { path: 'notes', title: 'Notes' });
+    expect(r.path).toBe('notes.tex');
+    const docs = await callTool(t, 'list_documents', {});
+    expect(docs.map((d: { path: string }) => d.path)).toContain('notes.tex');
+    const files = await callTool(t, 'list_files', {});
+    expect(files.map((f: { path: string }) => f.path)).toContain('notes.tex');
+  });
+});
+
+describe('project text files', () => {
+  it('write_file / read_file round-trip refs.bib', async () => {
+    const t = createMcpToken(owner.id, 'Bib Bot').token;
+    const bib = '@article{doe2026, author={Doe, Jane}, title={A Result}, year={2026}}\n';
+    const w = await callTool(t, 'write_file', { path: 'refs.bib', text: bib });
+    expect(w.ok).toBe(true);
+    expect((await callTool(t, 'read_file', { path: 'refs.bib' })).text).toBe(bib);
+  });
+
+  it('documents are refused (use the document tools)', async () => {
+    const t = createMcpToken(owner.id, 'Bib Bot').token;
+    await expect(callTool(t, 'read_file', { path: 'a.tex' })).rejects.toThrow(/read_document/);
+    await expect(callTool(t, 'write_file', { path: 'a.tex', text: 'x' })).rejects.toThrow(/write_document/);
+  });
+
+  it('a view-only account cannot use any writing tool', async () => {
+    const viewer2 = createUser('viewer2', 'Viewer Two', 'pw');
+    db.prepare('INSERT INTO project_members (project, user_id, role, via, created_at) VALUES (?,?,?,?,?)').run('p', viewer2.id, 'view', 'member', Date.now());
+    const t = createMcpToken(viewer2.id, 'ro-agent').token;
+    await expect(callTool(t, 'write_file', { path: 'refs.bib', text: 'x' })).rejects.toThrow(/view-only/);
+    await expect(callTool(t, 'replace_paragraph', { path: 'a.tex', index: 0, latex: 'x' })).rejects.toThrow(/view-only/);
+    await expect(callTool(t, 'write_document', { path: 'a.tex', tex: 'x' })).rejects.toThrow(/view-only/);
+    await expect(callTool(t, 'create_document', { path: 'nope' })).rejects.toThrow(/view-only/);
   });
 });

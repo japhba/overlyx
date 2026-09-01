@@ -628,7 +628,7 @@ access — the URL picks the project, where the agent gets the account's role (v
 edit access is needed for `propose_edit` and the comment tools).
 `packages/server/src/mcp.ts` implements the connector on top of `@modelcontextprotocol/sdk`'s
 stateless Streamable HTTP transport (one request/response per JSON-RPC call, no session) and
-exposes six tools:
+exposes these tools:
 
 * `list_documents`, `read_document(path)` — the project's `.tex` documents and one document's text
   plus its paragraphs (index, layout, depth, plain text) for addressing the tools below.
@@ -642,6 +642,14 @@ exposes six tools:
 * `list_comments(path)`, `add_comment(path, text, paragraph_index?)`, `resolve_comment(path, index)`
   — comment threads at the top level of the document body (same `Note Comment` inset shape and
   header convention — `Name (date time):` — as the client's comment cards).
+* `insert_paragraphs(path, index, latex)`, `replace_paragraph(path, index, latex)`,
+  `delete_paragraph(path, index)` — **raw LaTeX** (formulas, citations, sections, environments;
+  parsed by the same `.tex` parser as the editor), applied as tracked changes (plain-text→plain-text
+  replaces via a word-level diff; anything else marks the old paragraph deleted and inserts the new
+  content). `write_document(path, tex)` replaces — or creates — a whole document's source,
+  untracked like the raw-source view (Versions and git keep the prior state).
+* `list_files`, `read_file(path)`, `write_file(path, text)` — the project's other text files
+  (`refs.bib`, `macros.tex`, `.sty`, …); binary files and documents are refused.
 
 ## Authentication and identity
 
