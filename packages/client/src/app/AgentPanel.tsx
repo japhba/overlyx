@@ -141,16 +141,10 @@ function ItemView({ it }: { it: AgentItem }) {
       return <div class="agent-item reasoning" onClick={() => setOpen(o => !o)} title="The agent's reasoning summary">{open ? t : t.split('\n')[0].slice(0, 90) + (t.length > 90 ? ' …' : '')}</div>;
     }
     case 'commandExecution':
-      return (
-        <div class="agent-item cmd" data-agent="cmd">
-          <div class="line" onClick={() => setOpen(o => !o)}>$ {it.command}{it.exitCode != null && it.exitCode !== 0 ? <span class="err"> ✗ {it.exitCode}</span> : it.status === 'inProgress' ? <span class="run"> …</span> : null}</div>
-          {(open || it.status === 'inProgress') && it.aggregatedOutput ? <div class="out">{it.aggregatedOutput.slice(-4000)}</div> : null}
-        </div>
-      );
+    case 'mcpToolCall':
+      return null;   // tool calls stay out of the transcript — the busy line names the current one
     case 'fileChange':
       return <FileChangeView key={it.id} it={it} />;
-    case 'mcpToolCall':
-      return <div class="agent-item reasoning">{it.server}: {it.tool}{it.status === 'inProgress' ? ' …' : ''}</div>;
     case 'plan':
       return <div class="agent-msg assistant plan"><RichText text={it.text ?? ''} /></div>;
     default:
@@ -365,7 +359,11 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
         <div class="agent-scroll" ref={scrollRef} onScroll={onScroll}>
           {items.map(it => <ItemView key={it.id} it={it} />)}
           {approvals.map(a => <ApprovalCard key={a.requestId} a={a} onDecide={(d, fb) => decide(a, d, fb)} />)}
-          {busyTurn && !approvals.length && <div class="agent-item reasoning" data-agent="busy">Working…</div>}
+          {busyTurn && !approvals.length && (() => {
+            const run = [...items].reverse().find(i => (i.type === 'commandExecution' || i.type === 'mcpToolCall') && i.status === 'inProgress');
+            const label = run ? (run.type === 'commandExecution' ? '$ ' + (run.command ?? '').slice(0, 70) : `${run.server}: ${run.tool}`) : null;
+            return <div class="agent-item reasoning" data-agent="busy">Working…{label ? ` — ${label}` : ''}</div>;
+          })()}
         </div>
       )}
       {(!sel || mine) && (
