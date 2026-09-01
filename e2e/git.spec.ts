@@ -115,7 +115,7 @@ test('with token re-copy enabled for the account, agent tokens can be copied aga
   const row = dlg2.locator('.git-token', { hasText: 'recopy bot' });
   await expect(row.locator('[data-token-copy]')).toBeVisible({ timeout: 10000 });
   // what that button copies: the API hands the plaintext back to this account
-  const listed = await (await page.request.get(`${BASE_URL}/api/projects/${PROJECT}/mcp-tokens`)).json();
+  const listed = await (await page.request.get(`${BASE_URL}/api/mcp-tokens`)).json();
   expect(listed.tokens.find((t: { name: string }) => t.name === 'recopy bot').token).toMatch(/^olxmcp_/);
   // clean up: revoke, and the setting back off
   await row.locator('button', { hasText: 'Revoke' }).click();

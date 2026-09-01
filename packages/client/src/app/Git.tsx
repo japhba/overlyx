@@ -62,7 +62,7 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
   const load = () => Promise.all([
     api.gitInfo(project).then(setInfo),
     api.gitTokens().then(r => setTokens(r.tokens)),
-    api.mcpTokens(project).then(r => setMcpTokens(r.tokens)),
+    api.mcpTokens().then(r => setMcpTokens(r.tokens)),
     api.mirrorStatus(project).then(setMirror).catch(() => setMirror(null)),
   ]).catch(e => setErr((e as Error).message));
   useEffect(() => { setInfo(null); void load(); }, [project]);
@@ -91,14 +91,14 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
     setMcpBusy(true); setErr('');
     try {
       const name = mcpName.trim() || 'agent';
-      const r = await api.createMcpToken(project, name);
+      const r = await api.createMcpToken(name);
       setMcpTokens(r.tokens); setNewMcpToken({ name, token: r.token }); setMcpName('');
     } catch (e) { setErr((e as Error).message); }
     finally { setMcpBusy(false); }
   };
   const revokeMcpToken = async (t: GitToken) => {
     if (!confirm(`Revoke the agent token “${t.name}”? It will no longer be able to connect.`)) return;
-    try { setMcpTokens((await api.deleteMcpToken(project, t.id)).tokens); if (newMcpToken?.name === t.name) setNewMcpToken(null); }
+    try { setMcpTokens((await api.deleteMcpToken(t.id)).tokens); if (newMcpToken?.name === t.name) setNewMcpToken(null); }
     catch (e) { setErr((e as Error).message); }
   };
 
@@ -138,7 +138,7 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
           </div>
 
           <h4>Access tokens</h4>
-          <div class="hint">A token stands for your account in git only. Create one per computer and revoke it when the computer is gone.</div>
+          <div class="hint">A token stands for your account in git only — one list for your whole account, the same in every project's dialog. Create one per computer and revoke it when the computer is gone.</div>
           {newToken && (
             <div class="git-newtoken">
               <div><b>Your new token “{newToken.name}”</b> — copy it now, it is not shown again:</div>
@@ -164,10 +164,12 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
 
           <h4>MCP connector — let an AI agent read, comment and propose edits</h4>
           <div class="hint">
-            Any MCP-compatible client (Claude, Claude Code, …) can connect to this project with a token below:
-            read documents and comments, add/resolve comments, and propose paragraph edits — edits are always
-            applied as a <b>tracked change</b> attributed to the agent, never a silent overwrite, so you review
-            them from the Review toolbar or Versions like any collaborator's edit.
+            Any MCP-compatible client (Claude, Claude Code, …) can connect with one of your agent tokens below.
+            A token stands for <b>your account</b> and works for every project you can access — this URL points the
+            agent at this project, where it gets your role: read documents and comments, and (with edit access)
+            add/resolve comments and propose paragraph edits. Edits are always applied as a <b>tracked change</b>
+            attributed to the agent, never a silent overwrite, so you review them from the Review toolbar or
+            Versions like any collaborator's edit.
           </div>
           <CopyField value={`${location.origin}/mcp/${encodeURIComponent(project)}`} label="MCP server URL" />
           {newMcpToken && (

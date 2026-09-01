@@ -44,15 +44,15 @@ describe('per-account settings', () => {
 
 describe('re-copyable MCP tokens', () => {
   it('with storePlain the list hands the token back — but only to a caller allowed secrets', () => {
-    const t = createMcpToken('p', 'agent', true);
-    expect(verifyMcpToken(t.token)?.project).toBe('p');
-    expect(listMcpTokens('p', true).find(r => r.id === t.id)?.token).toBe(t.token);
-    expect(listMcpTokens('p', false).find(r => r.id === t.id)?.token).toBeUndefined();
-    expect(listMcpTokens('p').find(r => r.id === t.id)?.token).toBeUndefined();
+    const t = createMcpToken(owner.id, 'agent', true);
+    expect(verifyMcpToken(t.token)?.userId).toBe(owner.id);
+    expect(listMcpTokens(owner.id, true).find(r => r.id === t.id)?.token).toBe(t.token);
+    expect(listMcpTokens(owner.id, false).find(r => r.id === t.id)?.token).toBeUndefined();
+    expect(listMcpTokens(owner.id).find(r => r.id === t.id)?.token).toBeUndefined();
   });
   it('without storePlain nothing recoverable is stored', () => {
-    const t = createMcpToken('p', 'oneshot');
-    expect(listMcpTokens('p', true).find(r => r.id === t.id)?.token).toBeUndefined();
+    const t = createMcpToken(owner.id, 'oneshot');
+    expect(listMcpTokens(owner.id, true).find(r => r.id === t.id)?.token).toBeUndefined();
     expect(verifyMcpToken(t.token)?.name).toBe('oneshot');
   });
 });

@@ -64,9 +64,10 @@ CREATE TABLE IF NOT EXISTS git_tokens (
 );
 CREATE TABLE IF NOT EXISTS mcp_tokens (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  project TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
   name TEXT NOT NULL,
   token_hash TEXT UNIQUE NOT NULL,
+  token_plain TEXT,
   created_at INTEGER NOT NULL,
   last_used_at INTEGER
 );
@@ -113,6 +114,30 @@ try { db.exec('ALTER TABLE builds ADD COLUMN warnings TEXT'); } catch { /* colum
 try { db.exec('ALTER TABLE users ADD COLUMN settings TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE git_tokens ADD COLUMN token_plain TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE mcp_tokens ADD COLUMN token_plain TEXT'); } catch { /* column exists */ }
+
+// 2026-09-01: MCP tokens became user-scoped (one token, every project its account can access —
+// mcpTokens.ts). Databases from before have project-scoped rows: rebuild the table, attributing
+// each token to the project's owner (in practice the person who created it).
+const mcpCols = (db.prepare('PRAGMA table_info(mcp_tokens)').all() as { name: string }[]).map(c => c.name);
+if (mcpCols.includes('project')) {
+  db.exec(`
+    CREATE TABLE mcp_tokens_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      token_plain TEXT,
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER
+    );
+    INSERT INTO mcp_tokens_new (id, user_id, name, token_hash, token_plain, created_at, last_used_at)
+      SELECT t.id, COALESCE(p.owner_id, (SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1), 0),
+             t.name, t.token_hash, t.token_plain, t.created_at, t.last_used_at
+      FROM mcp_tokens t LEFT JOIN projects p ON p.name = t.project;
+    DROP TABLE mcp_tokens;
+    ALTER TABLE mcp_tokens_new RENAME TO mcp_tokens;
+  `);
+}
 
 /** A project = a directory under the projects root; rows hold ownership and sharing (see access.ts). */
 export interface ProjectRow {

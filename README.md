@@ -620,9 +620,12 @@ editor listing what it found. Two ways to fix it:
 ## MCP connector
 
 Any [MCP](https://modelcontextprotocol.io)-compatible client (Claude, Claude Code, …) can connect to
-one project as a collaborator: File ▸ Git repository… (`Git.tsx`) also has an "MCP connector"
-section with the server URL (`<origin>/mcp/<project>`) and per-project agent tokens
+a project as a collaborator: File ▸ Git repository… (`Git.tsx`) also has an "MCP connector"
+section with the project's server URL (`<origin>/mcp/<project>`) and the account's agent tokens
 (`Authorization: Bearer olxmcp_…`, `packages/server/src/mcpTokens.ts`; revocable, one per agent).
+A token stands for the *account* that created it and works for every project that account can
+access — the URL picks the project, where the agent gets the account's role (viewers read;
+edit access is needed for `propose_edit` and the comment tools).
 `packages/server/src/mcp.ts` implements the connector on top of `@modelcontextprotocol/sdk`'s
 stateless Streamable HTTP transport (one request/response per JSON-RPC call, no session) and
 exposes six tools:
@@ -642,7 +645,7 @@ exposes six tools:
 
 ## Authentication and identity
 
-Two separate token systems exist and are not interchangeable: **git tokens** (`/api/git/tokens`)
-stand for a signed-in *account* across every project it can access; **MCP tokens**
-(`/api/projects/:p/mcp-tokens`) stand for one *agent* scoped to a single project, created by anyone
-with editor access to that project.
+Two separate token systems exist and are not interchangeable, but both are account-scoped:
+**git tokens** (`/api/git/tokens`) stand for a signed-in *account* in git; **MCP tokens**
+(`/api/mcp-tokens`) stand for one *agent* acting with an account's access (its role checked
+per project on every request).

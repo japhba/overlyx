@@ -1,7 +1,8 @@
 /**
  * MCP connector: lets an external agent (any MCP-compatible client) read a project's documents,
- * read/add/resolve comment threads, and propose text edits — all scoped to one project by a
- * per-project bearer token (see mcpTokens.ts). Edits are NEVER applied as a plain overwrite: every
+ * read/add/resolve comment threads, and propose text edits. The bearer token identifies an
+ * *account* (see mcpTokens.ts) — the agent may connect to any project that account can access,
+ * with the account's role there: viewers read, editors also comment and propose edits. Edits are NEVER applied as a plain overwrite: every
  * `propose_edit` call is turned into change-tracked insertions/deletions (the same `\lyxadded` /
  * `\lyxdeleted` machinery a human editor's Track Changes produces), attributed to the token's name
  * suffixed "(MCP)" — so a misbehaving or over-eager agent is always reviewable and revertible from
@@ -26,6 +27,9 @@ import {
 import { manager } from './docs.ts';
 import { listProjects, projectDir } from './projects.ts';
 import { verifyMcpToken } from './mcpTokens.ts';
+import { roleFor, atLeast } from './access.ts';
+import { toSessionUser } from './auth.ts';
+import { db, type UserRow } from './db.ts';
 
 function ok(value: unknown) {
   return { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
@@ -142,9 +146,10 @@ async function resolveComment(project: string, path: string, index: number) {
   throw new Error(`No comment thread at index ${index}.`);
 }
 
-/** Builds one MCP server instance scoped to `project`, tools attributed to `agentName`. */
-function buildMcpServer(project: string, agentName: string): McpServer {
+/** Builds one MCP server instance scoped to `project`, tools attributed to `agentName`; without `canEdit` the mutating tools refuse. */
+function buildMcpServer(project: string, agentName: string, canEdit: boolean): McpServer {
   const server = new McpServer({ name: 'overlyx', version: '1.0.0' });
+  const needEdit = () => { if (!canEdit) throw new Error("This token's account has view-only access to this project — reading is allowed, editing and commenting are not."); };
 
   server.registerTool('list_documents', {
     description: 'List the .tex documents in this project.',
@@ -163,7 +168,7 @@ function buildMcpServer(project: string, agentName: string): McpServer {
       paragraph_index: z.number().int().nonnegative().describe('From read_document\'s paragraphs list'),
       new_text: z.string().describe('The complete new text of the paragraph'),
     },
-  }, async ({ path, paragraph_index, new_text }) => { try { return ok(await proposeEdit(project, agentName, path, paragraph_index, new_text)); } catch (e) { return fail(e); } });
+  }, async ({ path, paragraph_index, new_text }) => { try { needEdit(); return ok(await proposeEdit(project, agentName, path, paragraph_index, new_text)); } catch (e) { return fail(e); } });
 
   server.registerTool('list_comments', {
     description: 'List comment threads in a document (index, which paragraph they are attached to, messages, resolved state).',
@@ -177,12 +182,12 @@ function buildMcpServer(project: string, agentName: string): McpServer {
       text: z.string(),
       paragraph_index: z.number().int().nonnegative().optional().describe('Defaults to the last paragraph'),
     },
-  }, async ({ path, text, paragraph_index }) => { try { return ok(await addComment(project, agentName, path, text, paragraph_index)); } catch (e) { return fail(e); } });
+  }, async ({ path, text, paragraph_index }) => { try { needEdit(); return ok(await addComment(project, agentName, path, text, paragraph_index)); } catch (e) { return fail(e); } });
 
   server.registerTool('resolve_comment', {
     description: 'Mark a comment thread resolved (index from list_comments, in the same call — the document may have changed since an earlier listing).',
     inputSchema: { path: z.string(), index: z.number().int().nonnegative() },
-  }, async ({ path, index }) => { try { return ok(await resolveComment(project, path, index)); } catch (e) { return fail(e); } });
+  }, async ({ path, index }) => { try { needEdit(); return ok(await resolveComment(project, path, index)); } catch (e) { return fail(e); } });
 
   return server;
 }
@@ -200,12 +205,15 @@ async function handle(req: Request, res: Response): Promise<void> {
   try { project = decodeURIComponent(req.params.project); } catch { res.status(400).json({ error: 'bad project name' }); return; }
   const auth = req.header('authorization') ?? '';
   const m = /^Bearer\s+(\S+)/i.exec(auth);
-  if (!m) { res.status(401).json({ error: 'Authorization: Bearer <token> required (see Share → MCP tokens)' }); return; }
+  if (!m) { res.status(401).json({ error: 'Authorization: Bearer <token> required (create one in File \u25b8 Git repository\u2026)' }); return; }
   const identity = verifyMcpToken(m[1]);
-  if (!identity || identity.project !== project) { res.status(403).json({ error: 'invalid token for this project' }); return; }
+  if (!identity) { res.status(403).json({ error: 'invalid token' }); return; }
+  const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(identity.userId) as UserRow | undefined;
+  const role = userRow ? roleFor(toSessionUser(userRow), project) : null;
+  if (!atLeast(role, 'view')) { res.status(403).json({ error: `this token's account has no access to project "${project}"` }); return; }
   if (!fs.existsSync(projectDir(project))) { res.status(404).json({ error: `no project "${project}"` }); return; }
 
-  const server = buildMcpServer(project, identity.name);
+  const server = buildMcpServer(project, identity.name, atLeast(role, 'edit'));
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => { void transport.close(); void server.close(); });
   try {

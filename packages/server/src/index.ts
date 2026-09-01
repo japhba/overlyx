@@ -255,17 +255,17 @@ api.delete('/git/tokens/:id', (req, res) => {
 /** The signed-in account's server-side settings (userSettings.ts) — the Settings panel. */
 api.get('/settings', (req, res) => { res.json({ settings: userSettings(req.user!.id) }); });
 
-/** MCP connector tokens: one per external agent, scoped to this project (see mcp.ts). */
-api.get('/projects/:project/mcp-tokens', needProject('edit'), (req, res) => { res.json({ tokens: listMcpTokens(req.params.project, userSettings(req.user!.id).allowRecopyTokens) }); });
-api.post('/projects/:project/mcp-tokens', needProject('edit'), (req, res) => {
+/** MCP agent tokens: one per external agent, scoped to the signed-in account — usable on any project the account can access (see mcp.ts). */
+api.get('/mcp-tokens', (req, res) => { res.json({ tokens: listMcpTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) }); });
+api.post('/mcp-tokens', (req, res) => {
   const name = String(req.body?.name ?? '').trim() || 'agent';
   const allow = userSettings(req.user!.id).allowRecopyTokens;
-  const t = createMcpToken(req.params.project, name, allow);
-  res.json({ id: t.id, token: t.token, tokens: listMcpTokens(req.params.project, allow) });
+  const t = createMcpToken(req.user!.id, name, allow);
+  res.json({ id: t.id, token: t.token, tokens: listMcpTokens(req.user!.id, allow) });
 });
-api.delete('/projects/:project/mcp-tokens/:id', needProject('edit'), (req, res) => {
-  deleteMcpToken(req.params.project, Number(req.params.id));
-  res.json({ tokens: listMcpTokens(req.params.project, userSettings(req.user!.id).allowRecopyTokens) });
+api.delete('/mcp-tokens/:id', (req, res) => {
+  deleteMcpToken(req.user!.id, Number(req.params.id));
+  res.json({ tokens: listMcpTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) });
 });
 
 api.post('/projects/:project/new', needProject('edit'), (req, res) => {

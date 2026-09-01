@@ -114,9 +114,9 @@ export const api = {
   /** the signed-in account's server-side settings; administrators switch them per user */
   settings: () => req<{ settings: UserSettings }>('GET', '/api/settings'),
   adminUserSettings: (id: number, patch: Partial<UserSettings>) => req<{ settings: UserSettings }>('POST', `/api/admin/users/${id}/settings`, patch),
-  mcpTokens: (project: string) => req<{ tokens: GitToken[] }>('GET', `/api/projects/${encodeURIComponent(project)}/mcp-tokens`),
-  createMcpToken: (project: string, name: string) => req<{ id: number; token: string; tokens: GitToken[] }>('POST', `/api/projects/${encodeURIComponent(project)}/mcp-tokens`, { name }),
-  deleteMcpToken: (project: string, id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/projects/${encodeURIComponent(project)}/mcp-tokens/${id}`),
+  mcpTokens: () => req<{ tokens: GitToken[] }>('GET', '/api/mcp-tokens'),
+  createMcpToken: (name: string) => req<{ id: number; token: string; tokens: GitToken[] }>('POST', '/api/mcp-tokens', { name }),
+  deleteMcpToken: (id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/mcp-tokens/${id}`),
   newDoc: (project: string, path: string, opts: { title?: string; textclass?: string } = {}) => req<{ id: string }>('POST', `/api/projects/${encodeURIComponent(project)}/new`, { path, ...opts }),
   /** plain text files (.tex, .bib, …) for the built-in text editor; `mtime` guards against overwriting someone else's save */
   readText: (project: string, path: string) => req<{ text: string; mtime: number; size: number; role: Role }>('GET', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`),
