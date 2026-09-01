@@ -175,6 +175,9 @@ function ApprovalCard({ a, onDecide }: { a: Approval; onDecide: (d: string, feed
       <div class="what">
         <b>{isCmd ? 'Run this command?' : 'Apply these changes?'}</b>
         {p.reason && <div class="reason">{p.reason}</div>}
+        {!isCmd && (p.changes ?? []).some((c: { path?: string }) => c.path?.endsWith('.tex')) && (
+          <div class="reason">⚠ A direct file write — it bypasses Track Changes. Deny (with a note) to make the agent propose it as a reviewable tracked edit instead.</div>
+        )}
         {isCmd ? <div class="agent-item cmd"><div class="line">$ {p.command}</div></div> : <Diff changes={p.changes ?? []} />}
       </div>
       <input class="fb" placeholder="Optional: tell the agent what to do differently…" value={fb} onInput={e => setFb((e.target as HTMLInputElement).value)} />
