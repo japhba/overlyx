@@ -38,6 +38,11 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await expect(page.locator('[data-agent-code]')).toHaveText('STUB-CODE');
   await expect(page.locator('.agent-compose textarea')).toBeVisible({ timeout: 15000 });
 
+  // the model and effort selectors come from codex's model list
+  await expect(page.locator('select[data-agent-model]')).toBeVisible();
+  await expect(page.locator('select[data-agent-model] option', { hasText: 'Stub Model' })).toHaveCount(1);
+  await expect(page.locator('select[data-agent-effort]')).toHaveValue('medium');
+
   // a first message starts a thread; the stubbed reply streams in
   await page.locator('.agent-compose textarea').fill('hello agent');
   await page.keyboard.press('Enter');

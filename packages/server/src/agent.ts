@@ -284,6 +284,22 @@ export function agentRoutes(): express.Router {
     catch (e) { fail(res, e); }
   })(); });
 
+  r.get('/agent/models', (req, res) => { void (async () => {
+    try {
+      const h = host(req.user!.id); await h.ensure();
+      const out = await h.request('model/list', {});
+      const models = ((out?.data ?? []) as any[]).filter(m => !m.hidden).map(m => ({
+        id: String(m.model ?? m.id),
+        label: String(m.displayName ?? m.model ?? m.id),
+        description: String(m.description ?? ''),
+        efforts: ((m.supportedReasoningEfforts ?? []) as any[]).map(e => (typeof e === 'string' ? e : String(e?.effort ?? e?.reasoningEffort ?? ''))).filter(Boolean),
+        defaultEffort: m.defaultReasoningEffort ?? null,
+        isDefault: !!m.isDefault,
+      }));
+      res.json({ models });
+    } catch (e) { fail(res, e); }
+  })(); });
+
   /* ---- threads of a project ---- */
 
   r.get('/projects/:project/agent/threads', (req, res) => {
@@ -337,7 +353,10 @@ export function agentRoutes(): express.Router {
       await h.ensureThreadLoaded(row.thread_id);
       const input = await composeInput(text, req.body?.context as TurnContext | undefined);
       if (!row.title) db.prepare('UPDATE agent_threads SET title = ? WHERE thread_id = ?').run(text.slice(0, 100), row.thread_id);
-      const turn = h.request('turn/start', { threadId: row.thread_id, input }, 0);
+      // per-turn model / reasoning-effort overrides from the panel's selectors (stick for later turns too)
+      const model = typeof req.body?.model === 'string' && req.body.model ? String(req.body.model).slice(0, 80) : undefined;
+      const effort = typeof req.body?.effort === 'string' && req.body.effort ? String(req.body.effort).slice(0, 20) : undefined;
+      const turn = h.request('turn/start', { threadId: row.thread_id, input, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }, 0);
       turn.catch(e => console.error(`[agent ${req.user!.id}] turn failed:`, (e as Error).message));
       // the turn runs long; its progress arrives over the events stream — answer as soon as it is accepted
       const quick = await Promise.race([turn.then(t => t), new Promise(r2 => setTimeout(r2, 5000, null))]);
@@ -355,6 +374,21 @@ export function agentRoutes(): express.Router {
     const ok = host(row.user_id).respond(String(req.body?.requestId ?? ''), { decision });
     ok ? res.json({ ok: true }) : res.status(404).json({ error: 'this approval request is gone (answered or expired)' });
   });
+
+  /** A message into the *running* turn (guidance with an approval, a course correction) — codex's turn/steer. */
+  r.post('/projects/:project/agent/threads/:tid/steer', (req, res) => { void (async () => {
+    if (!needRole(req, res, 'edit')) return;
+    const row = threadRow(String(req.params.tid));
+    if (!row || row.project !== String(req.params.project)) { res.status(404).json({ error: 'no such thread in this project' }); return; }
+    if (row.user_id !== req.user!.id) { res.status(403).json({ error: "Only the thread's creator can steer it" }); return; }
+    const text = String(req.body?.text ?? '').trim();
+    if (!text) { res.status(400).json({ error: 'empty message' }); return; }
+    try {
+      const h = host(row.user_id); await h.ensure();
+      await h.request('turn/steer', { threadId: row.thread_id, expectedTurnId: String(req.body?.turnId ?? ''), input: [{ type: 'text', text, text_elements: [] }] });
+      res.json({ ok: true });
+    } catch (e) { fail(res, e); }
+  })(); });
 
   r.post('/projects/:project/agent/threads/:tid/interrupt', (req, res) => { void (async () => {
     if (!needRole(req, res, 'edit')) return;

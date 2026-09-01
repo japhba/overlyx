@@ -72,6 +72,7 @@ export interface AgentTurn { id: string; items: AgentItem[]; status: string }
 /** one message of the agent events stream (SSE) */
 export interface AgentEventMsg { kind: 'notification' | 'request' | 'status'; method?: string; params?: any; requestId?: string; running?: boolean }
 export interface AgentTurnContext { docId?: string; content?: PMJSON[]; layout?: string }
+export interface AgentModel { id: string; label: string; description: string; efforts: string[]; defaultEffort: string | null; isDefault: boolean }
 
 async function req<T>(method: string, url: string, body?: unknown, raw?: BodyInit, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, {
@@ -170,7 +171,9 @@ export const api = {
   agentThreads: (project: string) => req<{ threads: AgentThreadInfo[] }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads`),
   agentStartThread: (project: string) => req<{ id: string; model: string | null }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads`),
   agentThread: (project: string, tid: string) => req<{ thread: { id: string; turns: AgentTurn[] }; mine: boolean }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}`),
-  agentTurn: (project: string, tid: string, body: { text: string; context?: AgentTurnContext }) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/turn`, body),
+  agentModels: () => req<{ models: AgentModel[] }>('GET', '/api/agent/models'),
+  agentTurn: (project: string, tid: string, body: { text: string; context?: AgentTurnContext; model?: string; effort?: string }) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/turn`, body),
+  agentSteer: (project: string, tid: string, turnId: string, text: string) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/steer`, { turnId, text }),
   agentApprove: (project: string, tid: string, requestId: string, decision: string) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/approval`, { requestId, decision }),
   agentInterrupt: (project: string, tid: string, turnId: string) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/interrupt`, { turnId }),
   versions: (id: string) => req<{ versions: VersionInfo[] }>('GET', `/api/docs/${encId(id)}/versions`),

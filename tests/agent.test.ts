@@ -114,6 +114,28 @@ describe('threads and turns', () => {
     expect(list.body.threads[0].title).toBe('hello agent');
   });
 
+  it('lists the models codex offers (hidden ones filtered)', async () => {
+    const r = await get('/agent/models');
+    expect(r.status).toBe(200);
+    expect(r.body.models.map((m: any) => m.id)).toEqual(['stub-model', 'stub-mini']);
+    expect(r.body.models[0].efforts).toContain('high');
+    expect(r.body.models[0].isDefault).toBe(true);
+  });
+
+  it('passes the chosen model and effort through to the turn', async () => {
+    const events = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
+    await sleep(150);
+    await post(`/projects/p/agent/threads/${tid}/turn`, { text: 'model check', model: 'stub-mini', effort: 'high' });
+    const evs = await events;
+    const deltas = evs.filter(e => e.method === 'item/agentMessage/delta').map(e => e.params.delta).join('');
+    expect(deltas).toContain('[model=stub-mini effort=high]');
+  });
+
+  it('steer reaches the running turn (and only for the creator)', async () => {
+    expect((await post(`/projects/p/agent/threads/${tid}/steer`, { turnId: 'turn-1', text: 'go left' })).status).toBe(200);
+    expect((await post(`/projects/p/agent/threads/${tid}/steer`, { turnId: 'turn-1', text: 'go right' }, 'bob')).status).toBe(403);
+  });
+
   it('the transcript can be read back — by the creator and by another editor of the project', async () => {
     const own = await get(`/projects/p/agent/threads/${tid}`);
     expect(own.status).toBe(200);

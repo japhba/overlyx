@@ -158,6 +158,25 @@ const MATH_PANEL_ICONS: Record<string, string> = { style: 'Style' };
 const NAV_BACK_ID = 'Navigate ▸ Back', NAV_FORWARD_ID = 'Navigate ▸ Forward';
 const NAV_BACK_KEY = 'Ctrl+Alt+←', NAV_FORWARD_KEY = 'Ctrl+Alt+→';
 
+/** Drag handle beside a sidebar: sets --left-width / --right-width on the root (kept per browser). */
+function SidebarGrip({ side }: { side: 'left' | 'right' }) {
+  return (
+    <div class={'sidebar-grip ' + side} title="Drag to resize" onPointerDown={(e) => {
+      e.preventDefault();
+      const move = (ev: PointerEvent) => {
+        const w = Math.round(Math.max(180, Math.min(window.innerWidth * 0.6, side === 'left' ? ev.clientX : window.innerWidth - ev.clientX)));
+        document.documentElement.style.setProperty(`--${side}-width`, w + 'px');
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+        try { localStorage.setItem('ol.' + side + 'w', document.documentElement.style.getPropertyValue(`--${side}-width`)); } catch { /* ignore */ }
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    }} />
+  );
+}
+
 function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   // what the hash shows (one project, one file at a time): a document, "text:"/"pdf:" files, or
   // "raw:<document>" — the document beside its LaTeX source
@@ -186,6 +205,13 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [rightTab, setRightTab] = useState<RightTab | null>(() => { const v = stored('ol.right'); return v !== null && (RIGHT_TABS as readonly string[]).includes(v) ? v as RightTab : null; });
   // the LaTeX source is a panel below the writing area with its own switch
   useEffect(() => { try { localStorage.setItem('ol.files', showFiles ? '1' : '0'); localStorage.setItem('ol.right', rightTab ?? ''); } catch { /* ignore */ } }, [showFiles, rightTab]);
+  // dragged sidebar widths from the last visit (SidebarGrip)
+  useEffect(() => {
+    for (const side of ['left', 'right'] as const) {
+      const v = stored('ol.' + side + 'w');
+      if (v) document.documentElement.style.setProperty(`--${side}-width`, v);
+    }
+  }, []);
   const [pdf, setPdf] = useState<PdfState>({ url: null, log: '', busy: false, ok: null, warnings: [] });
   const [dialog, setDialog] = useState<Dialog>(null);
   const [message, setMessage] = useState<{ text: string; kind: 'info' | 'error' } | null>(null);
@@ -1627,6 +1653,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         ) : (
           <div class="rail left"><button data-rail="outline" title={LEFT_TITLE} onClick={() => setShowFiles(true)}>Documents</button></div>
         )}
+        {showFiles && <SidebarGrip side="left" />}
         <div class={'editor-column' + (rawSplit && isLyxDoc ? ' split' : '')}>
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
@@ -1648,6 +1675,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
             <button data-rail="source" class={rawSplit ? 'active' : ''} title={SOURCE_TITLE} onClick={toggleRawSplit}>Source</button>
           </div>
         )}
+        {isLyxDoc && rightTab && <SidebarGrip side="right" />}
         {isLyxDoc && rightTab && (
           <div class={'sidebar right' + (rightTab === 'pdf' ? ' wide' : '')}>
             <div class="panel-tabs">

@@ -32,7 +32,7 @@ function runTurn(id, p) {
   notify('turn/started', { threadId: t.id, turn: turn('inProgress') });
   const finish = () => {
     const itemId = 'item-' + ++nItem;
-    const reply = `Stub reply to: ${text.split('\n').pop().slice(0, 120)}`;
+    const reply = `Stub reply to: ${text.split('\n').pop().slice(0, 120)}` + (p.model ? ` [model=${p.model}${p.effort ? ' effort=' + p.effort : ''}]` : '');
     notify('item/started', { threadId: t.id, turnId, item: { type: 'agentMessage', id: itemId, text: '', phase: null }, startedAtMs: Date.now() });
     for (const piece of [reply.slice(0, 12), reply.slice(12)]) notify('item/agentMessage/delta', { threadId: t.id, turnId, itemId, delta: piece });
     notify('item/completed', { threadId: t.id, turnId, item: { type: 'agentMessage', id: itemId, text: reply, phase: null }, completedAtMs: Date.now() });
@@ -95,6 +95,12 @@ process.stdin.on('data', (d) => {
       case 'thread/read': { const t = threads.get(p.threadId); t ? result(id, { thread: thread(t) }) : out({ id, error: { code: -32600, message: 'no such thread' } }); break; }
       case 'thread/list': result(id, { data: [...threads.values()].map(thread), nextCursor: null }); break;
       case 'turn/start': runTurn(id, p); break;
+      case 'model/list': result(id, { data: [
+        { id: 'stub-model', model: 'stub-model', displayName: 'Stub Model', description: 'the test model', hidden: false, supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium', isDefault: true },
+        { id: 'stub-mini', model: 'stub-mini', displayName: 'Stub Mini', description: '', hidden: false, supportedReasoningEfforts: ['medium'], defaultReasoningEffort: 'medium', isDefault: false },
+        { id: 'stub-hidden', model: 'stub-hidden', displayName: 'Hidden', description: '', hidden: true, supportedReasoningEfforts: [], defaultReasoningEffort: 'medium', isDefault: false },
+      ], nextCursor: null }); break;
+      case 'turn/steer': result(id, {}); break;
       case 'turn/interrupt': result(id, {}); notify('turn/completed', { threadId: p.threadId, turn: { id: p.turnId, items: [], itemsView: 'full', status: 'interrupted', error: null, startedAt: 1, completedAt: 2, durationMs: 1 } }); break;
       default: out({ id, error: { code: -32601, message: 'stub: unknown method ' + method } });
     }
