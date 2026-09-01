@@ -30,13 +30,18 @@ function runTurn(id, p) {
   const text = all[all.length - 1] ?? '';
   const turn = (status) => ({ id: turnId, items: [], itemsView: 'full', status, error: null, startedAt: 1, completedAt: null, durationMs: null });
   notify('turn/started', { threadId: t.id, turn: turn('inProgress') });
+  // real codex echoes the user's message as a userMessage item (clientId = clientUserMessageId)
+  const uid = 'u-' + ++nItem;
+  const userItem = { type: 'userMessage', id: uid, clientId: p.clientUserMessageId ?? null, content: p.input };
+  notify('item/started', { threadId: t.id, turnId, item: userItem, startedAtMs: Date.now() });
+  notify('item/completed', { threadId: t.id, turnId, item: userItem, completedAtMs: Date.now() });
   const finish = () => {
     const itemId = 'item-' + ++nItem;
     const reply = `Stub reply to: ${text.split('\n').pop().slice(0, 120)}` + (p.model ? ` [model=${p.model}${p.effort ? ' effort=' + p.effort : ''}]` : '');
     notify('item/started', { threadId: t.id, turnId, item: { type: 'agentMessage', id: itemId, text: '', phase: null }, startedAtMs: Date.now() });
     for (const piece of [reply.slice(0, 12), reply.slice(12)]) notify('item/agentMessage/delta', { threadId: t.id, turnId, itemId, delta: piece });
     notify('item/completed', { threadId: t.id, turnId, item: { type: 'agentMessage', id: itemId, text: reply, phase: null }, completedAtMs: Date.now() });
-    t.turns.push({ ...turn('completed'), items: [{ type: 'userMessage', id: 'u' + nItem, content: p.input }, { type: 'agentMessage', id: itemId, text: reply, phase: null }] });
+    t.turns.push({ ...turn('completed'), items: [userItem, { type: 'agentMessage', id: itemId, text: reply, phase: null }] });
     notify('turn/completed', { threadId: t.id, turn: turn('completed') });
     result(id, { turn: turn('completed') });
   };

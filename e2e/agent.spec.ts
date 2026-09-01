@@ -48,6 +48,7 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await page.keyboard.press('Enter');
   await expect(page.locator('.agent-msg.assistant')).toContainText('Stub reply to: hello agent', { timeout: 15000 });
   await expect(page.locator('.agent-msg.user')).toContainText('hello agent');   // context items stay hidden
+  await expect(page.locator('.agent-msg.user')).toHaveCount(1);                 // the echoed item replaces the local bubble — no doubling
 
   // a file change asks for approval; allowing it writes into the project
   await page.locator('.agent-compose textarea').fill('write hello for me');

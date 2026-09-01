@@ -379,7 +379,9 @@ export function agentRoutes(): express.Router {
       // per-turn model / reasoning-effort overrides from the panel's selectors (stick for later turns too)
       const model = typeof req.body?.model === 'string' && req.body.model ? String(req.body.model).slice(0, 80) : undefined;
       const effort = typeof req.body?.effort === 'string' && req.body.effort ? String(req.body.effort).slice(0, 20) : undefined;
-      const turn = h.request('turn/start', { threadId: row.thread_id, input, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }, 0);
+      // the panel's optimistic message id: codex echoes it on the userMessage item, so the client can dedupe
+      const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
+      const turn = h.request('turn/start', { threadId: row.thread_id, input, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(cmid ? { clientUserMessageId: cmid } : {}) }, 0);
       turn.catch(e => console.error(`[agent ${req.user!.id}] turn failed:`, (e as Error).message));
       // the turn runs long; its progress arrives over the events stream — answer as soon as it is accepted
       const quick = await Promise.race([turn.then(t => t), new Promise(r2 => setTimeout(r2, 5000, null))]);
@@ -408,7 +410,8 @@ export function agentRoutes(): express.Router {
     if (!text) { res.status(400).json({ error: 'empty message' }); return; }
     try {
       const h = host(row.user_id); await h.ensure();
-      await h.request('turn/steer', { threadId: row.thread_id, expectedTurnId: String(req.body?.turnId ?? ''), input: [{ type: 'text', text, text_elements: [] }] });
+      const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
+      await h.request('turn/steer', { threadId: row.thread_id, expectedTurnId: String(req.body?.turnId ?? ''), input: [{ type: 'text', text, text_elements: [] }], ...(cmid ? { clientUserMessageId: cmid } : {}) });
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
   })(); });

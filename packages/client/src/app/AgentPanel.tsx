@@ -259,12 +259,20 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
         const i = list.findIndex(x => x.id === itemId);
         return i >= 0 ? [...list.slice(0, i), patch(list[i]), ...list.slice(i + 1)] : [...list, patch(fallback)];
       });
+      // the stream echoes the user's message as a real item — it replaces the optimistic local one
+      const mergeUser = (item: AgentItem) => setItems(list => {
+        const cid = (item as { clientId?: string | null }).clientId;
+        const txt = userText(item);
+        const rest = list.filter(x => !(x.id.startsWith('local-') && (x.id === cid || userText(x) === txt)));
+        const i = rest.findIndex(x => x.id === item.id);
+        return i >= 0 ? [...rest.slice(0, i), item, ...rest.slice(i + 1)] : [...rest, item];
+      });
       switch (msg.method) {
         case 'turn/started': setBusyTurn(p.turn?.id ?? null); break;
         case 'turn/completed': setBusyTurn(null); setApprovals([]); void refreshThreads(); break;
         case 'error': setBusyTurn(null); notify(p.error?.message ?? 'The agent reported an error', 'error'); break;
-        case 'item/started': upsert(p.item); break;
-        case 'item/completed': upsert(p.item); setApprovals(a => a.filter(x => x.params?.itemId !== p.item?.id)); break;
+        case 'item/started': p.item?.type === 'userMessage' ? mergeUser(p.item) : upsert(p.item); break;
+        case 'item/completed': p.item?.type === 'userMessage' ? mergeUser(p.item) : upsert(p.item); setApprovals(a => a.filter(x => x.params?.itemId !== p.item?.id)); break;
         case 'item/agentMessage/delta':
           append(p.itemId, it => ({ ...it, text: (it.text ?? '') + (p.delta ?? '') }), { type: 'agentMessage', id: p.itemId, text: '' });
           break;
@@ -295,12 +303,12 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
     const t = text.trim();
     if (!t) return;
     stick.current = true;
-    const localItem: AgentItem = { type: 'userMessage', id: 'local-' + Date.now(), content: [{ type: 'text', text: t }] };
+    const localItem: AgentItem = { type: 'userMessage', id: 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), content: [{ type: 'text', text: t }] };
     // while a turn runs, the composer steers it instead of queueing a new turn
     if (busyTurn && busyTurn !== 'pending' && selRef.current) {
       setText('');
       setItems(list => [...list, localItem]);
-      void api.agentSteer(project, selRef.current, busyTurn, t).catch(e => notify(errText(e), 'error'));
+      void api.agentSteer(project, selRef.current, busyTurn, t, localItem.id).catch(e => notify(errText(e), 'error'));
       return;
     }
     if (busyTurn) return;
@@ -312,7 +320,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
         if (!tid) { const r = await api.agentStartThread(project); tid = r.id; setSel(tid); setMine(true); setItems([]); void refreshThreads(); }
         setItems(list => [...list, localItem]);
         setBusyTurn('pending');
-        await api.agentTurn(project, tid, { text: t, context, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
+        await api.agentTurn(project, tid, { text: t, context, clientMessageId: localItem.id, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
       } catch (e) { setBusyTurn(null); notify(errText(e), 'error'); }
     })();
   };

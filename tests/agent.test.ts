@@ -111,9 +111,12 @@ describe('threads and turns', () => {
   it('a turn streams deltas and completes over the events route', async () => {
     const events = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
     await sleep(150);   // subscribe before the turn starts
-    const r = await post(`/projects/p/agent/threads/${tid}/turn`, { text: 'hello agent', context: { docId: 'p/paper.tex' } });
+    const r = await post(`/projects/p/agent/threads/${tid}/turn`, { text: 'hello agent', context: { docId: 'p/paper.tex' }, clientMessageId: 'local-xyz' });
     expect(r.status).toBe(200);
     const evs = await events;
+    // the user's message comes back as a real item carrying the client id (the panel dedupes on it)
+    const um = evs.find(e => e.method === 'item/completed' && e.params.item?.type === 'userMessage');
+    expect(um?.params.item.clientId).toBe('local-xyz');
     const deltas = evs.filter(e => e.method === 'item/agentMessage/delta').map(e => e.params.delta).join('');
     expect(deltas).toContain('Stub reply to: hello agent');
     expect(evs.some(e => e.method === 'turn/completed')).toBe(true);
