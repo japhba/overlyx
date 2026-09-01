@@ -46,6 +46,20 @@ export const config = {
   sandbox: (['auto', 'bwrap', 'none'].includes(process.env.OVERLYX_SANDBOX ?? '') ? process.env.OVERLYX_SANDBOX : 'auto') as 'auto' | 'bwrap' | 'none',
   /** idle time after which an open document is released from memory (ms) */
   unloadAfterMs: Number(process.env.OVERLYX_UNLOAD_MS ?? 6 * 60 * 60 * 1000),
+  /**
+   * The embedded coding agent (agent.ts): OpenAI Codex driven over its app-server protocol, one
+   * child process per signed-in user. Users authenticate with their own ChatGPT account (device
+   * code); credentials and memories live per user under data/agent-home/<id>. OVERLYX_AGENT=off
+   * disables the feature; OVERLYX_CODEX_BIN points the server at a stub for tests.
+   */
+  agent: {
+    enabled: process.env.OVERLYX_AGENT !== 'off',
+    bin: (process.env.OVERLYX_CODEX_BIN ?? 'codex').trim(),
+    /** idle time after which a user's codex process is stopped (threads resume on demand) */
+    idleMs: Number(process.env.OVERLYX_AGENT_IDLE_MS ?? 30 * 60 * 1000),
+    /** model passed to new threads ('' = codex's default) */
+    model: (process.env.OVERLYX_AGENT_MODEL ?? '').trim(),
+  },
   /** minimum interval between automatic versions (ms) */
   autoVersionIntervalMs: Number(process.env.OVERLYX_AUTOVERSION_MS ?? 10 * 60 * 1000),
   /** every project is a git repository served at /git/<project>.git (OVERLYX_GIT=off disables it) */

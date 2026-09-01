@@ -7,6 +7,7 @@ import { config } from './config.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
 import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, allow as aiAllow, AiError } from './ai.ts';
 import { mcpRouter } from './mcp.ts';
+import { agentRoutes, shutdownAgents } from './agent.ts';
 import { createMcpToken, listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { userSettings, setUserSettings } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, generatePassword } from './auth.ts';
@@ -50,6 +51,7 @@ const api = express.Router();
 api.use(requireAuth);
 api.use(express.json({ limit: '5mb' }));
 api.use(feedbackRoutes());
+api.use(agentRoutes());
 
 /* ----------------------------------------------------------------- access */
 
@@ -1010,6 +1012,7 @@ server.listen(config.port, config.host, () => {
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
     console.log('shutting down, saving open documents…');
+    shutdownAgents();
     manager.saveAll().then(() => flushCommits()).finally(() => process.exit(0));
   });
 }

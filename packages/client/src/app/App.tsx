@@ -20,6 +20,7 @@ import { Toolbar, ColorPalette, colorIcon, NAMED_COLORS, DelimPalette, TableSize
 import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
 import { Versions } from './Versions';
+import { AgentPanel } from './AgentPanel';
 import { PdfPanel, stateFromBuild, jobActive, type PdfState } from './PdfPanel';
 import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX } from './Ruler';
 import { StatusBar, type Status } from './StatusBar';
@@ -120,10 +121,10 @@ async function clearLocalData(): Promise<void> {
   } catch { /* ignore */ }
 }
 
-type RightTab = 'comments' | 'pdf' | 'versions';
-const RIGHT_TABS = ['comments', 'pdf', 'versions'] as const;
-const RIGHT_TAB_LABELS: Record<RightTab, string> = { comments: 'Comments', pdf: 'PDF', versions: 'Versions' };
-const RIGHT_TAB_TITLES: Record<RightTab, string> = { comments: 'Comment threads: open ones and the resolved archive', pdf: 'PDF preview', versions: 'Versions of this document' };
+type RightTab = 'comments' | 'pdf' | 'versions' | 'agent';
+const RIGHT_TABS = ['comments', 'pdf', 'versions', 'agent'] as const;
+const RIGHT_TAB_LABELS: Record<RightTab, string> = { comments: 'Comments', pdf: 'PDF', versions: 'Versions', agent: 'Agent' };
+const RIGHT_TAB_TITLES: Record<RightTab, string> = { comments: 'Comment threads: open ones and the resolved archive', pdf: 'PDF preview', versions: 'Versions of this document', agent: 'The coding agent (OpenAI Codex) working in this project' };
 const LEFT_TITLE = 'Documents of the project and their outlines (Ctrl+Alt+O)';
 const SOURCE_TITLE = 'LaTeX source beside the text (Ctrl+Alt+S)';
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -1653,12 +1654,14 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
               <button class={rightTab === 'comments' ? 'active' : ''} data-tab="comments" onClick={() => setRightTab('comments')} title={RIGHT_TAB_TITLES.comments}>Comments</button>
               <button class={rightTab === 'pdf' ? 'active' : ''} data-tab="pdf" onClick={() => setRightTab('pdf')} title={RIGHT_TAB_TITLES.pdf}>PDF</button>
               <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }} title={RIGHT_TAB_TITLES.versions}>Versions</button>
+              <button class={rightTab === 'agent' ? 'active' : ''} data-tab="agent" onClick={() => setRightTab('agent')} title={RIGHT_TAB_TITLES.agent}>Agent</button>
               <button class={'toggle' + (rawSplit ? ' on' : '')} data-tab="source" onClick={toggleRawSplit} title={SOURCE_TITLE}>Source</button>
               <button class="hide" title="Hide the sidebar" onClick={() => setRightTab(null)}>»</button>
             </div>
             {rightTab === 'comments' && <div class="panel-body"><Comments views={[masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} /></div>}
             {rightTab === 'pdf' && <PdfPanel docId={docId} state={pdf} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }} />}
             {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
+            {rightTab === 'agent' && <AgentPanel project={docId.split('/')[0]} notify={notify} />}
           </div>
         )}
       </div>

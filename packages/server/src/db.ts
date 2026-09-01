@@ -163,3 +163,17 @@ export function pickColor(): string {
   const n = (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
   return USER_COLORS[n % USER_COLORS.length];
 }
+
+// Threads of the embedded coding agent (agent.ts): which project a codex thread belongs to and
+// who started it — the transcript itself lives in the owner's CODEX_HOME (data/agent-home/<user>).
+db.exec(`
+CREATE TABLE IF NOT EXISTS agent_threads (
+  thread_id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  title TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_threads_project ON agent_threads(project, updated_at);
+`);

@@ -265,6 +265,19 @@ blend.
   `localStorage.ol.spell.words`) and *Ignore*. Preferences ▸ Checker switches to the browser's own
   checker instead (which checks slowly after a click and keeps its suggestions to itself). The
   abc✓ toolbar button, Tools ▸ Spell checking and the context menu switch checking off and on.
+* **The Agent panel** (`app/AgentPanel.tsx`, server `agent.ts`): OpenAI Codex embedded in the
+  right sidebar, driven over its app-server protocol (the same JSON-RPC interface the Codex VS
+  Code extension speaks) — one `codex` child process per signed-in user, `CODEX_HOME` under
+  `data/agent-home/<user>/` so ChatGPT credentials and codex's memories are per account and shared
+  across that user's projects. Users sign in with their *own* ChatGPT account (device code); a
+  thread runs with the project directory as cwd in codex's workspace-write sandbox, streams
+  message/reasoning deltas, command output and file-change diffs over SSE, and asks in the panel
+  before running commands or writing files. "selection" in the composer sends the current editor
+  selection along as LaTeX (the ⌘K conversion). Threads belong to the project: every editor sees
+  them and can read transcripts, only the creator drives one; the file edits land in the working
+  tree like external edits (merged live, auto-committed — revertible from Versions/git).
+  `OVERLYX_AGENT=off` disables it, `OVERLYX_CODEX_BIN` points at a stub for tests,
+  `OVERLYX_AGENT_MODEL` overrides the model.
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or
   Preferences — the switches are menu items, so the command palette finds them): needs
   `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.7 Flash rewrites,
@@ -493,6 +506,9 @@ OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e
 # flows need the server to talk to the stub model: `node scripts/ai-stub.mjs` (port 3999) and the server
 # started with OPENROUTER_API_URL=http://127.0.0.1:3999 OPENROUTER_API_KEY=test-key, then
 OVERLYX_E2E_AI_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/ai.spec.ts
+# the Agent panel (e2e/agent.spec.ts): start the server with OVERLYX_CODEX_BIN=scripts/codex-stub.mjs
+# (a stand-in for `codex app-server`: sign-in, streamed replies, one approval round-trip), then
+OVERLYX_E2E_AGENT_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/agent.spec.ts
 # "a user writes a paper": real arXiv papers typed from blank documents through the editor UI —
 # paperwriting.spec.ts / paperwriting-more.spec.ts (first pages of Attention, a coding-theory paper, BERT) and
 # the whole GAN and Adam papers from abstract to bibliography with a latexmk build (~15 min each; needs pdftotext):

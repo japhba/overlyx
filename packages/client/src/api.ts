@@ -56,6 +56,23 @@ export type AccessAction = 'open' | 'build' | 'git-fetch' | 'git-push' | 'share'
 export interface ActivityEntry { id: number; action: AccessAction; detail: string | null; at: number; user: { id: number; name: string; username: string } | null }
 export interface AdminProjectInfo { name: string; title: string | null; kind: string; owner: { id: number; name: string; username: string } | null; access: 'owner' | 'member' | 'granted' | null; grantUntil: number | null }
 
+/** The embedded coding agent (agent.ts on the server: OpenAI Codex, the user's own ChatGPT account) */
+export interface AgentStatus { enabled: boolean; authenticated: boolean; method?: string | null; account?: { email: string | null; plan: string | null } | null }
+export interface AgentLogin { loginId: string; verificationUrl: string; userCode: string }
+export interface AgentThreadInfo { id: string; title: string | null; user: { id: number; name: string | null }; mine: boolean; createdAt: number; updatedAt: number }
+export interface AgentChange { path: string; kind: string; diff: string }
+/** one entry of a thread's transcript (codex's ThreadItem, loosely typed — we render known kinds) */
+export interface AgentItem {
+  type: string; id: string; text?: string; status?: string;
+  content?: { type: string; text?: string }[];
+  summary?: string[]; command?: string; cwd?: string; aggregatedOutput?: string | null; exitCode?: number | null;
+  changes?: AgentChange[]; server?: string; tool?: string;
+}
+export interface AgentTurn { id: string; items: AgentItem[]; status: string }
+/** one message of the agent events stream (SSE) */
+export interface AgentEventMsg { kind: 'notification' | 'request' | 'status'; method?: string; params?: any; requestId?: string; running?: boolean }
+export interface AgentTurnContext { docId?: string; content?: PMJSON[]; layout?: string }
+
 async function req<T>(method: string, url: string, body?: unknown, raw?: BodyInit, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, {
     method,
@@ -145,6 +162,17 @@ export const api = {
   aiStatus: () => req<AiStatus>('GET', '/api/ai/status'),
   aiRewrite: (id: string, body: AiRewriteRequest, signal?: AbortSignal) => req<AiRewriteResult>('POST', `/api/docs/${encId(id)}/ai/rewrite`, body, undefined, signal),
   aiComplete: (id: string, body: AiCompleteRequest, signal?: AbortSignal) => req<AiCompleteResult>('POST', `/api/docs/${encId(id)}/ai/complete`, body, undefined, signal),
+  /** the embedded coding agent (Agent panel; agent.ts on the server) */
+  agentStatus: () => req<AgentStatus>('GET', '/api/agent/status'),
+  agentLogin: () => req<AgentLogin>('POST', '/api/agent/login'),
+  agentLoginCancel: (loginId: string) => req<{ ok: boolean }>('POST', '/api/agent/login/cancel', { loginId }),
+  agentLogout: () => req<{ ok: boolean }>('POST', '/api/agent/logout'),
+  agentThreads: (project: string) => req<{ threads: AgentThreadInfo[] }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads`),
+  agentStartThread: (project: string) => req<{ id: string; model: string | null }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads`),
+  agentThread: (project: string, tid: string) => req<{ thread: { id: string; turns: AgentTurn[] }; mine: boolean }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}`),
+  agentTurn: (project: string, tid: string, body: { text: string; context?: AgentTurnContext }) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/turn`, body),
+  agentApprove: (project: string, tid: string, requestId: string, decision: string) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/approval`, { requestId, decision }),
+  agentInterrupt: (project: string, tid: string, turnId: string) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/interrupt`, { turnId }),
   versions: (id: string) => req<{ versions: VersionInfo[] }>('GET', `/api/docs/${encId(id)}/versions`),
   /** `lyx`: explicit content (e.g. offline edits that could not be merged) instead of the current server state */
   createVersion: (id: string, name: string, lyx?: string) => req<{ id: number }>('POST', `/api/docs/${encId(id)}/versions`, lyx !== undefined ? { name, lyx } : { name }),
