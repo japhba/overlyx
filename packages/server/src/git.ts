@@ -307,19 +307,21 @@ export function cloneUrl(req: Request, project: string): string {
 
 /* --------------------------------------------------------------------- tokens */
 
-export interface TokenRow { id: number; user_id: number; name: string; token_hash: string; created_at: number; last_used_at: number | null }
+export interface TokenRow { id: number; user_id: number; name: string; token_hash: string; token_plain: string | null; created_at: number; last_used_at: number | null }
 
 function hashToken(token: string): string { return crypto.createHash('sha256').update(token).digest('hex'); }
 
-/** A new personal access token for git (shown once; only its hash is stored). */
-export function createToken(userId: number, name: string): { id: number; token: string } {
+/** A new personal access token for git (shown once — unless `storePlain` keeps the plaintext for later re-copy, see userSettings.ts). */
+export function createToken(userId: number, name: string, storePlain = false): { id: number; token: string } {
   const token = 'olx_' + crypto.randomBytes(24).toString('base64url');
-  const info = db.prepare('INSERT INTO git_tokens (user_id, name, token_hash, created_at) VALUES (?,?,?,?)').run(userId, name.trim().slice(0, 60) || 'token', hashToken(token), Date.now());
+  const info = db.prepare('INSERT INTO git_tokens (user_id, name, token_hash, token_plain, created_at) VALUES (?,?,?,?,?)').run(userId, name.trim().slice(0, 60) || 'token', hashToken(token), storePlain ? token : null, Date.now());
   return { id: Number(info.lastInsertRowid), token };
 }
 
-export function listTokens(userId: number): { id: number; name: string; created_at: number; last_used_at: number | null }[] {
-  return db.prepare('SELECT id, name, created_at, last_used_at FROM git_tokens WHERE user_id = ? ORDER BY created_at DESC').all(userId) as any;
+/** The user's tokens; with `includeSecrets`, rows whose plaintext was kept carry `token`. */
+export function listTokens(userId: number, includeSecrets = false): { id: number; name: string; created_at: number; last_used_at: number | null; token?: string }[] {
+  const rows = db.prepare('SELECT id, name, created_at, last_used_at, token_plain FROM git_tokens WHERE user_id = ? ORDER BY created_at DESC').all(userId) as { id: number; name: string; created_at: number; last_used_at: number | null; token_plain: string | null }[];
+  return rows.map(({ token_plain, ...r }) => (includeSecrets && token_plain ? { ...r, token: token_plain } : r));
 }
 
 export function deleteToken(userId: number, id: number): boolean {

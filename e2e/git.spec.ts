@@ -97,3 +97,28 @@ test('clone with the token, push a change, pull what OverLyX committed', async (
   await expect(dlg.locator('.git-token')).toHaveCount(0, { timeout: 10000 });
   expect(() => git(CLONE, 'fetch', '-q', 'origin')).toThrow(/401|Authentication|failed/);
 });
+
+test('with token re-copy enabled for the account, agent tokens can be copied again later', async ({ page }) => {
+  await login(page);
+  page.on('dialog', d => d.accept());
+  // switch the account setting on (what Settings ▸ Account does)
+  const me = await (await page.request.get(BASE_URL + '/api/auth/me')).json();
+  const en = await page.request.post(`${BASE_URL}/api/admin/users/${me.user.id}/settings`, { data: { allowRecopyTokens: true } });
+  expect(en.ok()).toBeTruthy();
+  const dlg = await openGitDialog(page);
+  await dlg.locator('.share-add input').nth(1).fill('recopy bot');            // the second .share-add row is the MCP agent tokens
+  await dlg.locator('.share-add button', { hasText: 'New agent token' }).click();
+  await expect(dlg.locator('.git-newtoken')).toContainText('recopy bot', { timeout: 10000 });
+  // reopen from scratch — normally the token would be gone for good; with the setting on, the row offers Copy
+  await page.reload();
+  const dlg2 = await openGitDialog(page);
+  const row = dlg2.locator('.git-token', { hasText: 'recopy bot' });
+  await expect(row.locator('[data-token-copy]')).toBeVisible({ timeout: 10000 });
+  // what that button copies: the API hands the plaintext back to this account
+  const listed = await (await page.request.get(`${BASE_URL}/api/projects/${PROJECT}/mcp-tokens`)).json();
+  expect(listed.tokens.find((t: { name: string }) => t.name === 'recopy bot').token).toMatch(/^olxmcp_/);
+  // clean up: revoke, and the setting back off
+  await row.locator('button', { hasText: 'Revoke' }).click();
+  await expect(dlg2.locator('.git-token', { hasText: 'recopy bot' })).toHaveCount(0, { timeout: 10000 });
+  await page.request.post(`${BASE_URL}/api/admin/users/${me.user.id}/settings`, { data: { allowRecopyTokens: false } });
+});

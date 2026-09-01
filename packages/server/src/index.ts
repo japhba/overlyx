@@ -8,6 +8,7 @@ import { requestAiRepair, AiRepairError } from './airepair.ts';
 import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, allow as aiAllow, AiError } from './ai.ts';
 import { mcpRouter } from './mcp.ts';
 import { createMcpToken, listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
+import { userSettings, setUserSettings } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, generatePassword } from './auth.ts';
 import { attachWebSocket } from './ws.ts';
 import { manager } from './docs.ts';
@@ -197,6 +198,15 @@ api.post('/admin/projects/:project/access', (req, res) => {
   catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
 
+/** Switch a per-account setting for a user (Settings ▸ Account; currently: allowRecopyTokens). */
+api.post('/admin/users/:id/settings', (req, res) => {
+  if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)) { res.status(404).json({ error: 'no such user' }); return; }
+  if (typeof req.body?.allowRecopyTokens !== 'boolean') { res.status(400).json({ error: 'allowRecopyTokens must be a boolean' }); return; }
+  res.json({ settings: setUserSettings(id, { allowRecopyTokens: req.body.allowRecopyTokens }) });
+});
+
 /* ------------------------------------------------------------------ mirror */
 
 /** The project's off-site mirror (GitHub organisation): where, when it was pushed last, whether it is behind. */
@@ -230,27 +240,32 @@ api.post('/projects/:project/git/commit', needProject('edit'), async (req, res) 
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 /** Personal access tokens (the password for git over HTTPS; Google accounts have no other). */
-api.get('/git/tokens', (req, res) => { res.json({ tokens: listTokens(req.user!.id) }); });
+api.get('/git/tokens', (req, res) => { res.json({ tokens: listTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) }); });
 api.post('/git/tokens', (req, res) => {
   const name = String(req.body?.name ?? '').trim() || 'token';
-  const t = createToken(req.user!.id, name);
-  res.json({ id: t.id, token: t.token, tokens: listTokens(req.user!.id) });
+  const allow = userSettings(req.user!.id).allowRecopyTokens;
+  const t = createToken(req.user!.id, name, allow);
+  res.json({ id: t.id, token: t.token, tokens: listTokens(req.user!.id, allow) });
 });
 api.delete('/git/tokens/:id', (req, res) => {
   deleteToken(req.user!.id, Number(req.params.id));
-  res.json({ tokens: listTokens(req.user!.id) });
+  res.json({ tokens: listTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) });
 });
 
+/** The signed-in account's server-side settings (userSettings.ts) — the Settings panel. */
+api.get('/settings', (req, res) => { res.json({ settings: userSettings(req.user!.id) }); });
+
 /** MCP connector tokens: one per external agent, scoped to this project (see mcp.ts). */
-api.get('/projects/:project/mcp-tokens', needProject('edit'), (req, res) => { res.json({ tokens: listMcpTokens(req.params.project) }); });
+api.get('/projects/:project/mcp-tokens', needProject('edit'), (req, res) => { res.json({ tokens: listMcpTokens(req.params.project, userSettings(req.user!.id).allowRecopyTokens) }); });
 api.post('/projects/:project/mcp-tokens', needProject('edit'), (req, res) => {
   const name = String(req.body?.name ?? '').trim() || 'agent';
-  const t = createMcpToken(req.params.project, name);
-  res.json({ id: t.id, token: t.token, tokens: listMcpTokens(req.params.project) });
+  const allow = userSettings(req.user!.id).allowRecopyTokens;
+  const t = createMcpToken(req.params.project, name, allow);
+  res.json({ id: t.id, token: t.token, tokens: listMcpTokens(req.params.project, allow) });
 });
 api.delete('/projects/:project/mcp-tokens/:id', needProject('edit'), (req, res) => {
   deleteMcpToken(req.params.project, Number(req.params.id));
-  res.json({ tokens: listMcpTokens(req.params.project) });
+  res.json({ tokens: listMcpTokens(req.params.project, userSettings(req.user!.id).allowRecopyTokens) });
 });
 
 api.post('/projects/:project/new', needProject('edit'), (req, res) => {
@@ -955,7 +970,8 @@ api.get('/users/:id/avatar', async (req, res) => {
 
 api.get('/users', (req, res) => {
   if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }
-  res.json({ users: db.prepare('SELECT id, username, display_name AS name, color, is_admin AS isAdmin FROM users ORDER BY username').all() });
+  const rows = db.prepare('SELECT id, username, display_name AS name, color, is_admin AS isAdmin, email FROM users ORDER BY username').all() as { id: number }[];
+  res.json({ users: rows.map(u => ({ ...u, allowRecopyTokens: userSettings(u.id).allowRecopyTokens })) });
 });
 api.post('/users', (req, res) => {
   if (!req.user?.isAdmin) { res.status(403).json({ error: 'admin only' }); return; }

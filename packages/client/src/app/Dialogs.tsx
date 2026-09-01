@@ -4,9 +4,7 @@ import type { ComponentChildren } from 'preact';
 import type { DocMeta, ProjectFile, BibItem } from '../api';
 import type { GraphicsOpts, TableChanges } from '../editor/commands';
 import { api, graphicsUrl } from '../api';
-import type { LitHit, BibAddResult, AiStatus, AiModelInfo } from '../api';
-import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
-import { REWRITE_KEY } from '../editor/ai/rewrite';
+import type { LitHit, BibAddResult } from '../api';
 import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote } from '@overlyx/core';
 import { diffLines } from './diff';
@@ -728,58 +726,6 @@ type AiRepairState =
   | { status: 'ready' | 'applying'; original: string; proposed: string }
   | { status: 'error'; message: string }
   | { status: 'applied' };
-
-/** A model choice: the server's default, one of the offered models, or a typed-in id. */
-function ModelPicker({ label, value, fallback, models, onChange, pref }: { label: string; value: string; fallback: string; models: AiModelInfo[]; onChange: (v: string) => void; pref: string }) {
-  const known = !value || models.some(m => m.id === value);
-  const [custom, setCustom] = useState(!known);
-  const cur = models.find(m => m.id === (value || fallback));
-  return (
-    <div class="row model-row">
-      <label>{label}</label>
-      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
-        <select data-pref={pref} value={custom ? '__custom' : value} onChange={e => { const v = (e.target as HTMLSelectElement).value; if (v === '__custom') { setCustom(true); return; } setCustom(false); onChange(v); }}>
-          <option value="">Server default{fallback ? ` (${models.find(m => m.id === fallback)?.label ?? fallback})` : ''}</option>
-          {models.map(m => <option key={m.id} value={m.id}>{m.label} — {m.note}</option>)}
-          <option value="__custom">Other model id…</option>
-        </select>
-        {custom && <input type="text" data-pref-custom={pref} placeholder="provider/model-id (OpenRouter)" value={value} onInput={e => onChange((e.target as HTMLInputElement).value.trim())} />}
-        {!custom && cur && value && <span class="sub">{cur.id}</span>}
-      </div>
-    </div>
-  );
-}
-
-/** Tools ▸ Preferences…: per-browser settings (spell checking, the AI features and what they send). */
-export function PreferencesDialog({ ai, onClose }: { ai: AiStatus | null; onClose: () => void }) {
-  const [p, setP] = useState<Prefs>(getPrefs);
-  useEffect(() => subscribePrefs(setP), []);
-  const check = (key: 'spellcheck' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath', label: string, hint: string) => (
-    <label class="pref"><input type="checkbox" data-pref={key} checked={p[key]} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
-  );
-  return (
-    <Dialog title="Preferences" onClose={onClose}>
-      <h3>Text</h3>
-      {check('spellcheck', 'Spell checking', 'Misspelt words are underlined; the right-click menu offers corrections.')}
-      <Row label="Checker"><select data-pref="spellEngine" value={p.spellEngine} onChange={e => setPref('spellEngine', (e.target as HTMLSelectElement).value as Prefs['spellEngine'])}>
-        <option value="overlyx">OverLyX — instant, knows LaTeX (skips formulas, commands, code), suggestions in the menu; English, British, German, French</option>
-        <option value="browser">Browser — the browser's own checker (checks slowly after a click; suggestions only via {/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click)</option>
-      </select></Row>
-      <h3>AI assistance</h3>
-      <div class="sub">{ai === null ? 'Checking the server…' : ai.available ? `Available on this server — model ${ai.model}${ai.completionModel !== ai.model ? `, autocomplete ${ai.completionModel}` : ''}.` : 'Not configured on this server: the administrator has to set OPENROUTER_API_KEY (deploy/secrets.env). The switches below have no effect until then.'}</div>
-      {check('aiButton', 'Show the ✦ AI button on the toolbar', 'One button that switches autocomplete (text and formulas) on and off. Hidden until you enable it here.')}
-      {check('aiRewrite', `Rewrite with AI (${REWRITE_KEY})`, 'Select text or a formula, press the key and describe the change; the proposal is shown in place and applied only when you accept it. While this is on, LyX’s Ctrl+K (delete to the end of the paragraph) is taken over.')}
-      {check('aiCompleteText', 'Autocomplete text', 'After a pause while typing, a continuation appears in grey after the caret — formulas already rendered — while ✦ AI… shows in the status bar. Tab inserts it, anything else dismisses it. Works at the end of a word or paragraph, in ordinary text.')}
-      {check('aiCompleteMath', 'Autocomplete formulas', 'The same inside formulas: a suggested continuation at the caret, Tab inserts it.')}
-      <Row label="Pause before suggesting"><input type="number" min={80} max={5000} step={20} value={p.aiCompleteDelay} onInput={e => setPref('aiCompleteDelay', Math.max(80, Number((e.target as HTMLInputElement).value) || 200))} style="max-width:90px" /> ms</Row>
-      <h3>Models</h3>
-      <div class="sub">Any OpenRouter model id works; the notes are from measurements on a real paper. The choice is kept in this browser.</div>
-      <ModelPicker label="Rewrite (⌘K)" value={p.aiModel} fallback={ai?.model ?? ''} models={ai?.models ?? []} onChange={v => setPref('aiModel', v)} pref="aiModel" />
-      <ModelPicker label="Autocomplete" value={p.aiCompletionModel} fallback={ai?.completionModel ?? ''} models={ai?.models ?? []} onChange={v => setPref('aiCompletionModel', v)} pref="aiCompletionModel" />
-      <div class="sub">What is sent: your instruction or the text around the cursor together with the document’s LaTeX source (so the model knows the notation, macros, citation keys) goes to the model through the OverLyX server. Nothing is written to the document without your Tab or Accept. The switches are also in the Tools menu, so the command palette finds them.</div>
-    </Dialog>
-  );
-}
 
 export function AiRepairDialog({ docId, onClose, onApplied }: { docId: string; onClose: () => void; onApplied: () => void }) {
   const [state, setState] = useState<AiRepairState>({ status: 'loading' });

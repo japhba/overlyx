@@ -1125,3 +1125,14 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .docpanel .section-head .twisty { width: 14px; height: 16px; font-size: 9px; }
 .docpanel .filetree { padding-bottom: 6px; }
 .docpanel .filetree .actions { padding: 2px 8px 4px; }
+
+/* the centralized Settings panel (Settings.tsx) */
+.settings-dialog { display: flex; gap: 16px; min-height: 360px; }
+.settings-nav { display: flex; flex-direction: column; gap: 2px; flex: none; width: 130px; border-right: 1px solid var(--ui-border); padding-right: 12px; }
+.settings-nav button { text-align: left; padding: 5px 8px; border: none; background: none; border-radius: 4px; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
+.settings-nav button:hover { background: var(--row-hover); }
+.settings-nav button.active { background: var(--row-sel); font-weight: 600; }
+.settings-content { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 460px; }
+.settings-content h3 { margin: 4px 0 0; }
+.settings-users { border: 1px solid var(--ui-border); border-radius: 4px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
+.settings-users label { display: flex; gap: 8px; align-items: center; cursor: pointer; }

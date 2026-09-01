@@ -27,7 +27,8 @@ import { SourcePane, type SourceTarget, cursorLine, docBlocks, blockPos } from '
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
 import { Tour, tourWanted, rememberTour, type TourEnd } from './Tour';
 import { FeedbackDialog } from './Feedback';
-import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog, PreferencesDialog } from './Dialogs';
+import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog } from './Dialogs';
+import { SettingsPanel } from './Settings';
 import { createEditor, refreshMacros, describeChange, type EditorHandle, type SaveState } from '../editor/editor';
 import { newerVersionAvailable } from './update';
 import { generateLyx } from './SourcePane';
@@ -1107,7 +1108,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { sep: true },
       { label: 'AI assistance ▸', sub: [
         { label: ai === null ? 'Checking the server…' : ai.available ? `Models: ${prefs.aiModel || ai.model} (⌘K) · ${prefs.aiCompletionModel || ai.completionModel} (autocomplete)` : 'Not configured on this server (OPENROUTER_API_KEY)', disabled: true },
-        { label: 'Choose the models… (Preferences)', action: () => setDialog({ name: 'preferences' }) },
+        { label: 'Choose the models… (Settings)', action: () => setDialog({ name: 'preferences', arg: 'ai' }) },
         { label: 'Show the ✦ button on the toolbar (autocomplete on/off)', checked: prefs.aiButton, action: () => setPref('aiButton', !prefs.aiButton) },
         { sep: true },
         { label: `Rewrite with AI (${REWRITE_KEY})`, checked: prefs.aiRewrite, action: () => setPref('aiRewrite', !prefs.aiRewrite) },
@@ -1117,7 +1118,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         { label: 'Rewrite selection with AI…', shortcut: 'Ctrl+K', disabled: !prefs.aiRewrite, action: () => runView(v => openRewrite(v)) },
       ] },
       { sep: true },
-      { label: 'Preferences…', action: () => setDialog({ name: 'preferences' }) },
+      { label: 'Settings…', action: () => setDialog({ name: 'preferences' }) },
     ] },
   ] : []), helpMenu];
 
@@ -1449,7 +1450,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     // dialogs that do not need an editor (start screen, text files)
     if (dialog.name === 'feedback') return <FeedbackDialog docId={docId} onClose={() => { setDialog(null); view?.focus(); }} />;
     if (dialog.name === 'help') return <HelpDialog onClose={() => { setDialog(null); view?.focus(); }} />;
-    if (dialog.name === 'preferences') return <PreferencesDialog ai={ai} onClose={() => { setDialog(null); view?.focus(); }} />;
+    if (dialog.name === 'preferences') return <SettingsPanel ai={ai} user={user!} initial={dialog.arg as 'ai' | undefined} onClose={() => { setDialog(null); view?.focus(); }} />;
     if (!view || !docId) return null;
     const close = () => { setDialog(null); view.focus(); };
     const project = viewDocId(view).split('/')[0] || docId.split('/')[0];
@@ -1561,7 +1562,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   return (
     <div class="app">
-      <MenuBar menus={menus} user={user} onLogout={onLogout} onHome={() => { location.hash = '#/'; }} searchEntries={helpSearchEntries}
+      <MenuBar menus={menus} user={user} onLogout={onLogout} onSettings={() => setDialog({ name: 'preferences' })} onHome={() => { location.hash = '#/'; }} searchEntries={helpSearchEntries}
         users={isLyxDoc ? status.users : undefined} onJumpToUser={jumpToUser}
         onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? shareProject}”: invite people or turn on a link` : undefined}
         right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />

@@ -108,6 +108,11 @@ CREATE INDEX IF NOT EXISTS access_log_project ON access_log(project, at);
 try { db.exec('ALTER TABLE ydocs ADD COLUMN epoch TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE builds ADD COLUMN warnings TEXT'); } catch { /* column exists */ }
+// per-account server-side settings (userSettings.ts) and re-copyable tokens (plaintext kept only
+// for accounts with the allowRecopyTokens setting)
+try { db.exec('ALTER TABLE users ADD COLUMN settings TEXT'); } catch { /* column exists */ }
+try { db.exec('ALTER TABLE git_tokens ADD COLUMN token_plain TEXT'); } catch { /* column exists */ }
+try { db.exec('ALTER TABLE mcp_tokens ADD COLUMN token_plain TEXT'); } catch { /* column exists */ }
 
 /** A project = a directory under the projects root; rows hold ownership and sharing (see access.ts). */
 export interface ProjectRow {

@@ -46,7 +46,10 @@ export interface BuildInfo { status: string; log: string; pdf: string | null; pd
 export interface VersionInfo { id: number; name: string; author: string; kind: string; created_at: number; size: number }
 export interface GitCommit { hash: string; author: string; date: number; message: string }
 export interface GitInfo { url: string; username: string; role: Role; hasPassword: boolean; branch: string; commits: GitCommit[]; pending: number; pendingFiles: string[]; head: string | null }
-export interface GitToken { id: number; name: string; created_at: number; last_used_at: number | null }
+export interface GitToken { id: number; name: string; created_at: number; last_used_at: number | null; /** the plaintext, present only for accounts with token re-copy enabled (Settings ▸ Account) */ token?: string }
+/** Per-account server-side settings (Settings ▸ Account; userSettings.ts on the server). */
+export interface UserSettings { allowRecopyTokens: boolean }
+export interface AdminUser { id: number; username: string; name: string; color: string; isAdmin: number; email: string | null; allowRecopyTokens: boolean }
 /** the project's off-site mirror (a private repository in the instance's GitHub organisation) */
 export interface MirrorStatus { configured: boolean; org: string | null; repo: string | null; url: string | null; enabled: boolean; head: string | null; lastHead: string | null; lastPushAt: number | null; lastAttemptAt: number | null; lastError: string | null; behind: boolean; intervalMs: number }
 export type AccessAction = 'open' | 'build' | 'git-fetch' | 'git-push' | 'share' | 'admin-access';
@@ -108,6 +111,9 @@ export const api = {
   gitTokens: () => req<{ tokens: GitToken[] }>('GET', '/api/git/tokens'),
   createGitToken: (name: string) => req<{ id: number; token: string; tokens: GitToken[] }>('POST', '/api/git/tokens', { name }),
   deleteGitToken: (id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/git/tokens/${id}`),
+  /** the signed-in account's server-side settings; administrators switch them per user */
+  settings: () => req<{ settings: UserSettings }>('GET', '/api/settings'),
+  adminUserSettings: (id: number, patch: Partial<UserSettings>) => req<{ settings: UserSettings }>('POST', `/api/admin/users/${id}/settings`, patch),
   mcpTokens: (project: string) => req<{ tokens: GitToken[] }>('GET', `/api/projects/${encodeURIComponent(project)}/mcp-tokens`),
   createMcpToken: (project: string, name: string) => req<{ id: number; token: string; tokens: GitToken[] }>('POST', `/api/projects/${encodeURIComponent(project)}/mcp-tokens`, { name }),
   deleteMcpToken: (project: string, id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/projects/${encodeURIComponent(project)}/mcp-tokens/${id}`),
@@ -155,7 +161,7 @@ export const api = {
   synctexView: (id: string, line: number) => req<{ boxes: SyncBox[] }>('GET', `/api/docs/${encId(id)}/synctex/view?line=${line}`),
   synctexEdit: (id: string, page: number, x: number, y: number) => req<{ file?: string; line: number | null; column?: number }>('GET', `/api/docs/${encId(id)}/synctex/edit?page=${page}&x=${x.toFixed(2)}&y=${y.toFixed(2)}`),
   build: (id: string, withTex = false) => req<{ build: BuildInfo | null; job: BuildJob | null }>('GET', `/api/docs/${encId(id)}/build${withTex ? '?tex=1' : ''}`),
-  users: () => req<{ users: { id: number; username: string; name: string; color: string; isAdmin: number }[] }>('GET', '/api/users'),
+  users: () => req<{ users: AdminUser[] }>('GET', '/api/users'),
   createUser: (username: string, name: string, password?: string) => req<{ user: User; password: string }>('POST', '/api/users', { username, name, password }),
 };
 

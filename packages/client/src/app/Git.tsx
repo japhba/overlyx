@@ -33,6 +33,17 @@ function CopyField({ value, label }: { value: string; label?: string }) {
   );
 }
 
+/** The row-level Copy of a re-copyable token (accounts with token re-copy on, Settings ▸ Account). */
+function CopyMini({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(value); }
+    catch { const ta = document.createElement('textarea'); ta.value = value; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+  };
+  return <button class="mini" data-token-copy title="Copy this token (re-copy is enabled for your account)" onClick={() => void copy()}>{copied ? 'Copied ✓' : 'Copy'}</button>;
+}
+
 export function GitDialog({ project, user, onClose }: { project: string; user: User; onClose: () => void }) {
   const [info, setInfo] = useState<GitInfo | null>(null);
   const [tokens, setTokens] = useState<GitToken[] | null>(null);
@@ -139,6 +150,7 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
               <div class="git-token" key={t.id}>
                 <span class="name">🔑 {t.name}</span>
                 <span class="meta">created {fmtDate(t.created_at)}{t.last_used_at ? ` · last used ${ago(t.last_used_at)}` : ' · never used'}</span>
+                {t.token && <CopyMini value={t.token} />}
                 <button class="mini" title="Revoke this token" onClick={() => void revoke(t)}>Revoke</button>
               </div>
             ))}
@@ -170,6 +182,7 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
               <div class="git-token" key={t.id}>
                 <span class="name">🤖 {t.name}</span>
                 <span class="meta">created {fmtDate(t.created_at)}{t.last_used_at ? ` · last used ${ago(t.last_used_at)}` : ' · never used'}</span>
+                {t.token && <CopyMini value={t.token} />}
                 <button class="mini" title="Revoke this token" onClick={() => void revokeMcpToken(t)}>Revoke</button>
               </div>
             ))}

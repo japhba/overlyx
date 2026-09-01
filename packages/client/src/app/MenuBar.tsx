@@ -206,8 +206,8 @@ function SearchMenu({ menu, entries, close, recording, setRecording }: { menu: M
   );
 }
 
-export function MenuBar({ menus, user, right, onLogout, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle }: {
-  menus: MenuDef[]; user: User; right?: ComponentChildren; onLogout: () => void; onHome: () => void;
+export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle }: {
+  menus: MenuDef[]; user: User; right?: ComponentChildren; onLogout: () => void; onSettings?: () => void; onHome: () => void;
   /** reference entries (shortcuts without a menu item) for the palette */
   searchEntries?: SearchEntry[];
   /** who is in the document right now (Google-Docs style, top right; click one to jump to their cursor) */
@@ -298,7 +298,7 @@ export function MenuBar({ menus, user, right, onLogout, onHome, searchEntries: e
         <button type="button" class="avatar-btn" data-user-menu title={`${user.name} (${user.username})`} onMouseDown={e => { e.preventDefault(); if (open !== null) setOpen(null); setUserOpen(o => !o); }}>
           <span class="avatar" style={{ background: user.color }} data-initials={user.avatar ? undefined : initials(user.name).length}><AvatarContent name={user.name} src={user.avatar} /></span>
         </button>
-        {userOpen && <MenuList items={[{ label: user.name, disabled: true }, { label: user.username, disabled: true }, { sep: true }, { label: 'Sign out', action: onLogout }]} path={['Account']} close={close} style="left:auto;right:0" />}
+        {userOpen && <MenuList items={[{ label: user.name, disabled: true }, { label: user.username, disabled: true }, { sep: true }, ...(onSettings ? [{ label: 'Settings…', action: onSettings }] : []), { label: 'Sign out', action: onLogout }]} path={['Account']} close={close} style="left:auto;right:0" />}
       </div>
     </div>
   );

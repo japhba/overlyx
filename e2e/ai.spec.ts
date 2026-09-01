@@ -90,7 +90,8 @@ test('spell checking: toolbar button and Tools menu, remembered per browser', as
 test('AI switches live in Tools ▸ AI assistance and the preferences; the palette finds them', async ({ page }) => {
   await open(page, { aiRewrite: false, aiCompleteText: false, spellEngine: 'browser' });
   await page.click('.menubar .menu button:has-text("Tools")');
-  await page.click('.menu-item:has-text("Preferences")');
+  await page.click('.menu-item:has-text("Settings")');
+  await page.click('.settings-nav button:has-text("AI assistance")');
   const dlg = page.locator('.dialog');
   await expect(dlg).toContainText('AI assistance');
   await dlg.locator('[data-pref="aiRewrite"]').check();
@@ -112,7 +113,8 @@ test('AI switches live in Tools ▸ AI assistance and the preferences; the palet
   // the ✦ toolbar button exists only once it is enabled in the preferences; it switches autocomplete on and off (rewriting stays as it is)
   await expect(page.locator('[data-tb="ai"]')).toHaveCount(0);
   await page.click('.menubar .menu button:has-text("Tools")');
-  await page.click('.menu-item:has-text("Preferences")');
+  await page.click('.menu-item:has-text("Settings")');
+  await page.click('.settings-nav button:has-text("AI assistance")');
   await dlg.locator('[data-pref="aiButton"]').check();
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-tb="ai"]')).toHaveClass(/active/);   // autocomplete text is on
@@ -171,7 +173,8 @@ test.describe('with the AI stub', () => {
   test('the model chosen in the preferences is sent with the requests', async ({ page }) => {
     await open(page, { aiRewrite: false, aiCompleteText: true, aiCompleteMath: false, aiCompleteDelay: 200 });
     await page.click('.menubar .menu button:has-text("Tools")');
-    await page.click('.menu-item:has-text("Preferences")');
+    await page.click('.menu-item:has-text("Settings")');
+    await page.click('.settings-nav button:has-text("AI assistance")');
     const dlg = page.locator('.dialog');
     await expect(dlg.locator('[data-pref="aiCompletionModel"] option')).not.toHaveCount(0);
     await dlg.locator('[data-pref="aiCompletionModel"]').selectOption('google/gemini-3.5-flash-lite');

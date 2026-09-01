@@ -67,7 +67,7 @@ test('the browser engine can be chosen instead (no OverLyX underlines, spellchec
   await expect(page.locator('.lyx-editor .spell-error')).toHaveCount(0);
   await expect(page.locator('.lyx-editor')).toHaveAttribute('spellcheck', 'true');
   await page.click('.menubar .menu button:has-text("Tools")');
-  await page.click('.menu-item:has-text("Preferences")');
+  await page.click('.menu-item:has-text("Settings")');
   await page.locator('[data-pref="spellEngine"]').selectOption('overlyx');
   await page.keyboard.press('Escape');
   await expect(page.locator('.lyx-editor .spell-error')).toHaveCount(2, { timeout: 15000 });
