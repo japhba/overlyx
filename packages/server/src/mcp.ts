@@ -13,8 +13,10 @@
  * applied as tracked changes; write_document replaces or creates a whole document's source,
  * untracked like the raw-source view (Versions/git keep the prior state); read_file/write_file
  * reach the project's other text files (refs.bib, macros.tex, …). propose_edit remains the
- * word-diff tool for plain-text paragraphs. Comments are read/added/resolved at the top level of
- * the document body (not inside tables/floats/other insets).
+ * word-diff tool for plain-text paragraphs. Comment threads are found anywhere in the body —
+ * inside tables, floats and other insets too; new threads attach at a top-level paragraph.
+ * build_pdf compiles with latexmk (viewers may, like in the app) and hands back the warnings
+ * and the compile-log tail.
  */
 import express, { type Request, type Response } from 'express';
 import { z } from 'zod';
@@ -24,15 +26,16 @@ import fs from 'node:fs';
 import {
   plainText, itemText, paragraph, textItem, insetItem, textInset, addAuthor, lyxAuthorId, fontsEqual,
   setHeaderValue, diffText, commentHeader, formatTimestamp, parseHeader, parseThread,
-  type LyxDocument, type Item,
+  type LyxDocument, type Item, type TextInset,
 } from '@overlyx/core';
 import nodePath from 'node:path';
 import { manager } from './docs.ts';
 import { listProjects, projectDir, resolveProjectPath, isDocumentFile, newDocumentText } from './projects.ts';
 import { parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { touchProject } from './git.ts';
+import { buildPdf as runBuild, lastBuild, currentJob } from './export.ts';
 import { verifyMcpToken } from './mcpTokens.ts';
-import { roleFor, atLeast } from './access.ts';
+import { roleFor, atLeast, logAccess } from './access.ts';
 import { toSessionUser } from './auth.ts';
 import { db, type UserRow } from './db.ts';
 
@@ -93,19 +96,38 @@ async function proposeEdit(project: string, agentName: string, path: string, par
   return { changed: true, paragraph_index: paragraphIndex, runs, note: 'Applied as a tracked change; a human reviewer can accept/reject it from the Review toolbar.' };
 }
 
-interface CommentEntry { index: number; paragraph_index: number; resolved: boolean; messages: { author: string; time: string; text: string }[] }
+interface CommentEntry { index: number; paragraph_index: number; /** 'body', or where the thread sits: 'Float figure', 'table', … */ location: string; resolved: boolean; messages: { author: string; time: string; text: string }[] }
 
-function findComments(lyx: LyxDocument): CommentEntry[] {
-  const out: CommentEntry[] = [];
-  lyx.body.forEach((par, parIdx) => {
-    for (const it of par.items) {
-      if (it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'Note' && it.inset.arg === 'Comment') {
-        const thread = parseThread(it.inset.paragraphs);
-        out.push({ index: out.length, paragraph_index: parIdx, resolved: thread.resolved, messages: thread.messages });
+interface CommentHit { inset: TextInset; paragraph_index: number; location: string }
+
+function insetLabel(ins: TextInset): string { return (ins.arg && ins.arg !== ins.name ? `${ins.name} ${ins.arg}` : ins.name).trim(); }
+
+/** Every comment inset of the document in one stable order — inside tables, floats and other insets too. */
+function collectComments(lyx: LyxDocument): CommentHit[] {
+  const out: CommentHit[] = [];
+  const visitItems = (items: Item[], topIdx: number, loc: string): void => {
+    for (const it of items) {
+      if (it.kind !== 'inset') continue;
+      const ins = it.inset;
+      if (ins.type === 'Text' && ins.name === 'Note' && ins.arg === 'Comment') { out.push({ inset: ins, paragraph_index: topIdx, location: loc }); continue; }
+      if (ins.type === 'Text') {
+        const l = loc === 'body' ? insetLabel(ins) : `${loc} › ${insetLabel(ins)}`;
+        for (const p of ins.paragraphs) visitItems(p.items, topIdx, l);
+      } else if (ins.type === 'Tabular') {
+        const l = loc === 'body' ? 'table' : `${loc} › table`;
+        for (const row of ins.rows) for (const cell of row.cells) for (const p of cell.paragraphs) visitItems(p.items, topIdx, l);
       }
     }
-  });
+  };
+  lyx.body.forEach((par, i) => visitItems(par.items, i, 'body'));
   return out;
+}
+
+function findComments(lyx: LyxDocument): CommentEntry[] {
+  return collectComments(lyx).map((h, i) => {
+    const thread = parseThread(h.inset.paragraphs);
+    return { index: i, paragraph_index: h.paragraph_index, location: h.location, resolved: thread.resolved, messages: thread.messages };
+  });
 }
 
 async function listComments(project: string, path: string) {
@@ -128,27 +150,48 @@ async function addComment(project: string, agentName: string, path: string, text
 
 async function resolveComment(project: string, path: string, index: number) {
   const { doc, lyx } = await openLyx(project, path);
-  const entries = findComments(lyx);
-  const target = entries[index];
-  if (!target) throw new Error(`No comment thread at index ${index} — this document has ${entries.length}.`);
-  if (target.resolved) return { ok: true, message: 'Already resolved.' };
-  let n = -1;
-  for (const par of lyx.body) {
-    for (const it of par.items) {
-      if (it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'Note' && it.inset.arg === 'Comment') {
-        n++;
-        if (n !== index) continue;
-        const headerPar = it.inset.paragraphs[0];
-        const headerText = headerPar.items.map(itemText).join('');
-        const h = parseHeader(headerText.trim());
-        if (!h) throw new Error('This comment has no structured author/time header (a plain LyX note) — cannot mark it resolved.');
-        headerPar.items = [textItem(commentHeader(h.author, h.time, true))];
-        commitEdit(doc, lyx);
-        return { ok: true };
-      }
-    }
-  }
-  throw new Error(`No comment thread at index ${index}.`);
+  const hits = collectComments(lyx);
+  const target = hits[index];
+  if (!target) throw new Error(`No comment thread at index ${index} — this document has ${hits.length}.`);
+  if (parseThread(target.inset.paragraphs).resolved) return { ok: true, message: 'Already resolved.' };
+  const headerPar = target.inset.paragraphs[0];
+  const h = parseHeader(headerPar.items.map(itemText).join('').trim());
+  if (!h) throw new Error('This comment has no structured author/time header (a plain LyX note) — cannot mark it resolved.');
+  headerPar.items = [textItem(commentHeader(h.author, h.time, true))];
+  commitEdit(doc, lyx);
+  return { ok: true };
+}
+
+/* ---------------------------------------------------------------- building */
+
+const LOG_TAIL = 15_000;
+const logTail = (log: string) => (log.length > LOG_TAIL ? '…' + log.slice(-LOG_TAIL) : log);
+
+function buildStatus(project: string, path: string) {
+  const id = `${project}/${path}`;
+  const b = lastBuild(id);
+  const job = currentJob(id);
+  const running = !!job && (job.status === 'queued' || job.status === 'exporting' || job.status === 'compiling');
+  return {
+    running,
+    job: job ? { status: job.status, requestedBy: job.requestedBy, startedAt: job.startedAt, progress: job.progress } : null,
+    last: b ? { status: b.status, warnings: b.warnings, pdf: !!(b.pdf_path && fs.existsSync(b.pdf_path)), updated_at: b.updated_at, log_tail: logTail(b.log) } : null,
+  };
+}
+
+async function buildDocument(project: string, agentName: string, userId: number, path: string, waitSeconds: number) {
+  const id = `${project}/${path}`;
+  await manager.open(id);                                   // validates the path, flushes pending state
+  logAccess(project, userId, 'build', path);
+  const wait = Math.max(5, Math.min(600, waitSeconds));
+  let timer: NodeJS.Timeout | undefined;
+  const result = await Promise.race([
+    runBuild(id, { requestedBy: authorName(agentName) }),
+    new Promise<null>(res => { timer = setTimeout(() => res(null), wait * 1000); }),
+  ]);
+  clearTimeout(timer);
+  if (result === null) return { ...buildStatus(project, path), note: `Still building after ${wait}s — the build continues; poll build_status.` };
+  return { ok: result.ok, warnings: result.warnings, pdf: !!result.pdfPath, log_tail: logTail(result.log) };
 }
 
 
@@ -308,7 +351,7 @@ function buildMcpServer(project: string, agentName: string, canEdit: boolean, us
   }, async ({ path, paragraph_index, new_text }) => { try { needEdit(); return ok(await proposeEdit(project, agentName, path, paragraph_index, new_text)); } catch (e) { return fail(e); } });
 
   server.registerTool('list_comments', {
-    description: 'List comment threads in a document (index, which paragraph they are attached to, messages, resolved state).',
+    description: 'List comment threads in a document: index, the top-level paragraph they belong to, where they sit (body, a float, a table cell, …), messages, resolved state. Finds threads anywhere — inside tables, floats and other insets too.',
     inputSchema: { path: z.string() },
   }, async ({ path }) => { try { return ok(await listComments(project, path)); } catch (e) { return fail(e); } });
 
@@ -325,6 +368,16 @@ function buildMcpServer(project: string, agentName: string, canEdit: boolean, us
     description: 'Mark a comment thread resolved (index from list_comments, in the same call — the document may have changed since an earlier listing).',
     inputSchema: { path: z.string(), index: z.number().int().nonnegative() },
   }, async ({ path, index }) => { try { needEdit(); return ok(await resolveComment(project, path, index)); } catch (e) { return fail(e); } });
+
+  server.registerTool('build_pdf', {
+    description: 'Compile the document to PDF with latexmk and wait for the result (viewers may build, like in the app). Returns ok, the LaTeX warnings, and the tail of the compile log; on timeout the build keeps running — poll build_status. Humans open the PDF in the app.',
+    inputSchema: { path: z.string(), wait_seconds: z.number().int().positive().max(600).optional().describe('How long to wait before returning (default 180; the build continues on timeout)') },
+  }, async ({ path, wait_seconds }) => { try { return ok(await buildDocument(project, agentName, userId, path, wait_seconds ?? 180)); } catch (e) { return fail(e); } });
+
+  server.registerTool('build_status', {
+    description: "The document's build state: whether a build is running, and the last result (status, LaTeX warnings, compile-log tail, whether a PDF exists).",
+    inputSchema: { path: z.string() },
+  }, async ({ path }) => { try { return ok(buildStatus(project, path)); } catch (e) { return fail(e); } });
 
   server.registerTool('list_files', {
     description: 'All files of the project (kind: doc/tex/bib/image/pdf/…) — documents open with read_document, other text files with read_file.',

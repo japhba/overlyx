@@ -640,8 +640,11 @@ exposes these tools:
   text paragraphs are supported (no formulas/citations/other insets, no mixed bold/italic runs);
   anything else is refused with an explanatory error.
 * `list_comments(path)`, `add_comment(path, text, paragraph_index?)`, `resolve_comment(path, index)`
-  — comment threads at the top level of the document body (same `Note Comment` inset shape and
-  header convention — `Name (date time):` — as the client's comment cards).
+  — comment threads anywhere in the body, inside tables, floats and other insets included (same
+  `Note Comment` inset shape and header convention — `Name (date time):` — as the client's comment
+  cards); new threads attach at the end of a top-level paragraph.
+* `build_pdf(path, wait_seconds?)`, `build_status(path)` — compile with latexmk (viewers may,
+  like in the app) and read the result: status, LaTeX warnings, and the compile-log tail.
 * `insert_paragraphs(path, index, latex)`, `replace_paragraph(path, index, latex)`,
   `delete_paragraph(path, index)` — **raw LaTeX** (formulas, citations, sections, environments;
   parsed by the same `.tex` parser as the editor), applied as tracked changes (plain-text→plain-text

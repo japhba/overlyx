@@ -109,8 +109,8 @@ describe('tools/list', () => {
     const { status, body } = await rpc(t.token, 'tools/list');
     expect(status).toBe(200);
     const names = body.result.tools.map((x: any) => x.name).sort();
-    expect(names).toEqual(['add_comment', 'create_document', 'delete_paragraph', 'insert_paragraphs', 'list_comments', 'list_documents',
-      'list_files', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'resolve_comment', 'write_document', 'write_file']);
+    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'insert_paragraphs', 'list_comments',
+      'list_documents', 'list_files', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'resolve_comment', 'write_document', 'write_file']);
   });
 });
 
@@ -271,4 +271,46 @@ describe('project text files', () => {
     await expect(callTool(t, 'write_document', { path: 'a.tex', tex: 'x' })).rejects.toThrow(/view-only/);
     await expect(callTool(t, 'create_document', { path: 'nope' })).rejects.toThrow(/view-only/);
   });
+});
+
+describe('comments inside insets', () => {
+  it('list_comments finds threads in floats and tables; resolve works by the same index', async () => {
+    writeFileSync(file('f.tex'), doc('Host paragraph.'));
+    const core = await import('../packages/core/src/index.ts');
+    const t = createMcpToken(owner.id, 'Deep Bot').token;
+    const d = await manager.open('p/f.tex');
+    const lyx = d.toLyxDocument();
+    const mkComment = (text: string) => core.textInset('Note', 'Comment', [
+      core.paragraph('Plain Layout', [core.textItem(core.commentHeader('Reviewer (MCP)', core.formatTimestamp()))]),
+      core.paragraph('Plain Layout', [core.textItem(text)]),
+    ], 'open');
+    const float = core.textInset('Float', 'figure', [core.paragraph('Plain Layout', [core.textItem('caption '), core.insetItem(mkComment('inside the float'))])], 'open');
+    const table: any = { type: 'Tabular', attrs: [], features: [], columns: [{ attrs: [] }], rows: [{ attrs: [], cells: [{ attrs: [], paragraphs: [core.paragraph('Plain Layout', [core.textItem('cell '), core.insetItem(mkComment('inside the table'))])] }] }] };
+    lyx.body[0].items.push(core.insetItem(float), core.insetItem(table));
+    d.loadFromLyx(lyx, 'test');
+    const list = await callTool(t, 'list_comments', { path: 'f.tex' });
+    expect(list).toHaveLength(2);
+    expect(list[0].location).toContain('Float');
+    expect(list[0].messages[0].text).toBe('inside the float');
+    expect(list[1].location).toContain('table');
+    const r = await callTool(t, 'resolve_comment', { path: 'f.tex', index: 1 });
+    expect(r.ok).toBe(true);
+    const list2 = await callTool(t, 'list_comments', { path: 'f.tex' });
+    expect(list2[1].resolved).toBe(true);
+    expect(list2[0].resolved).toBe(false);
+  });
+});
+
+describe('build', () => {
+  it('build_pdf compiles with latexmk and returns the log; build_status agrees', async () => {
+    const t = createMcpToken(owner.id, 'Build Bot').token;
+    const r = await callTool(t, 'build_pdf', { path: 'e.tex', wait_seconds: 150 });
+    expect(r.ok).toBe(true);
+    expect(r.pdf).toBe(true);
+    expect(r.log_tail.toLowerCase()).toContain('latexmk');
+    const s = await callTool(t, 'build_status', { path: 'e.tex' });
+    expect(s.running).toBe(false);
+    expect(s.last.status).toBe('ok');
+    expect(s.last.pdf).toBe(true);
+  }, 180_000);
 });

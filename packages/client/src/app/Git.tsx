@@ -166,7 +166,7 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
           <div class="hint">
             Any MCP-compatible client (Claude, Claude Code, …) can connect with one of your agent tokens below.
             A token stands for <b>your account</b> and works for every project you can access — this URL points the
-            agent at this project, where it gets your role: read documents, comments and project files, and (with
+            agent at this project, where it gets your role: read documents, comments and project files, build the PDF, and (with
             edit access) comment and write raw LaTeX — paragraph edits land as a <b>tracked change</b> attributed
             to the agent, never a silent overwrite, so you review them from the Review toolbar or Versions like any
             collaborator's edit (whole-document rewrites and text files like refs.bib stay in Versions/git history).
