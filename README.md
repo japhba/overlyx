@@ -635,13 +635,26 @@ editor listing what it found. Two ways to fix it:
 
 ## MCP connector
 
-Any [MCP](https://modelcontextprotocol.io)-compatible client (Claude, Claude Code, …) can connect to
-a project as a collaborator: File ▸ Git repository… (`Git.tsx`) also has an "MCP connector"
-section with the project's server URL (`<origin>/mcp/<project>`) and the account's agent tokens
-(`Authorization: Bearer olxmcp_…`, `packages/server/src/mcpTokens.ts`; revocable, one per agent).
-A token stands for the *account* that created it and works for every project that account can
-access — the URL picks the project, where the agent gets the account's role (viewers read;
-edit access is needed for `propose_edit` and the comment tools).
+Any [MCP](https://modelcontextprotocol.io)-compatible client (ChatGPT, Claude, Claude Code, …) can
+connect as a collaborator — to **all of an account's projects at `<origin>/mcp`** (each tool takes a
+`project` argument; `list_projects` names the reachable ones and the account's role is checked on
+every call), or fixed to one project at `<origin>/mcp/<project>` (the classic form in File ▸ Git
+repository…, `Git.tsx`). Two ways to authenticate:
+
+* **Agent tokens** (`Authorization: Bearer olxmcp_…`, `packages/server/src/mcpTokens.ts`; created
+  in File ▸ Git repository…, revocable, one per agent) — for clients that take a header.
+* **OAuth 2.1** (`packages/server/src/mcpOauth.ts`) — for ChatGPT and other clients that speak the
+  MCP authorization flow: RFC 8414/9728 discovery under `/.well-known/…`, dynamic client
+  registration (RFC 7591) plus ChatGPT's URL-client-id form, authorization code + PKCE (S256),
+  RFC 9207 `iss`, refresh-token rotation. The consent page rides the normal session cookie; an
+  approved grant mints an expiring agent token named after the client, so it is listed with the
+  account's other tokens and revoking it there cuts the connection. In ChatGPT: Settings ▸ Apps ▸
+  Developer mode ▸ Create, server URL `https://overlyx.app/mcp`, OAuth — the `search`/`fetch` tool
+  pair serves deep research (citations link into the app), the full tool set works in developer
+  mode (read-only tools are annotated, so only writes ask for confirmation).
+
+A token or grant stands for the *account* behind it — in every project it gets that account's role
+(viewers read; edit access is needed for `propose_edit`, the comment tools and the write tools).
 `packages/server/src/mcp.ts` implements the connector on top of `@modelcontextprotocol/sdk`'s
 stateless Streamable HTTP transport (one request/response per JSON-RPC call, no session) and
 exposes these tools:

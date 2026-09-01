@@ -81,9 +81,9 @@ describe('auth', () => {
     expect(r.status).toBe(401);
   });
 
-  it('refuses an unknown token', async () => {
+  it('refuses an unknown token with 401 (so OAuth clients re-authorize)', async () => {
     const r = await rpc('olxmcp_bogus', 'tools/list');
-    expect(r.status).toBe(403);
+    expect(r.status).toBe(401);
   });
 
   it('refuses a token whose account has no access to the project', async () => {
@@ -109,8 +109,8 @@ describe('tools/list', () => {
     const { status, body } = await rpc(t.token, 'tools/list');
     expect(status).toBe(200);
     const names = body.result.tools.map((x: any) => x.name).sort();
-    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'insert_paragraphs', 'list_comments',
-      'list_documents', 'list_files', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'resolve_comment', 'write_document', 'write_file']);
+    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'fetch', 'insert_paragraphs', 'list_comments',
+      'list_documents', 'list_files', 'list_projects', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'resolve_comment', 'search', 'write_document', 'write_file']);
   });
 });
 

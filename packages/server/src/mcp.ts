@@ -35,8 +35,10 @@ import { parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { touchProject } from './git.ts';
 import { buildPdf as runBuild, lastBuild, currentJob } from './export.ts';
 import { verifyMcpToken } from './mcpTokens.ts';
-import { roleFor, atLeast, logAccess } from './access.ts';
-import { toSessionUser } from './auth.ts';
+import { wwwAuthenticate } from './mcpOauth.ts';
+import { config } from './config.ts';
+import { roleFor, atLeast, logAccess, accessibleProjects } from './access.ts';
+import { toSessionUser, type SessionUser } from './auth.ts';
 import { db, type UserRow } from './db.ts';
 
 function ok(value: unknown) {
@@ -44,6 +46,10 @@ function ok(value: unknown) {
 }
 function fail(e: unknown) {
   return { content: [{ type: 'text' as const, text: (e as Error)?.message ?? String(e) }], isError: true };
+}
+/** search/fetch answers for ChatGPT: the JSON both as text and as structuredContent (its citation format). */
+function okStruct(value: Record<string, unknown>) {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }], structuredContent: value };
 }
 
 async function openLyx(project: string, path: string): Promise<{ doc: Awaited<ReturnType<typeof manager.open>>; lyx: LyxDocument }> {
@@ -326,98 +332,193 @@ function listFiles(project: string) {
   return (p?.files ?? []).map(f => ({ path: f.path, kind: f.kind, size: f.size }));
 }
 
-/** Builds one MCP server instance scoped to `project`, tools attributed to `agentName`; without `canEdit` the mutating tools refuse. */
-function buildMcpServer(project: string, agentName: string, canEdit: boolean, userId: number): McpServer {
+/* ---------------------------------------------------- search across all projects (ChatGPT's search/fetch pair) */
+
+const docUrl = (project: string, path: string) => `${(config.publicUrl || 'https://overlyx.app').replace(/\/$/, '')}/#/${encodeURIComponent(project)}/${path}`;
+
+/** Naive full-text search over the account's projects (documents, .tex, .bib) — enough for a
+ *  connector's "find the passage, then fetch the file"; projects are small LaTeX trees. */
+function searchDocs(user: SessionUser, query: string) {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
+  if (!terms.length) return [];
+  const hits: { id: string; title: string; text: string; url: string; score: number }[] = [];
+  for (const p of accessibleProjects(user)) {
+    for (const f of p.files) {
+      if (f.kind !== 'doc' && f.kind !== 'tex' && f.kind !== 'bib') continue;
+      let text: string;
+      try {
+        const abs = resolveProjectPath(p.name, f.path);
+        if (fs.statSync(abs).size > FILE_MAX) continue;
+        text = fs.readFileSync(abs, 'utf8');
+      } catch { continue; }
+      const lower = text.toLowerCase();
+      let score = 0, first = -1;
+      for (const t of terms) { const i = lower.indexOf(t); if (i >= 0) { score++; if (first < 0 || i < first) first = i; } }
+      if (!score) continue;
+      const snippet = text.slice(Math.max(0, first - 80), first + 200).replace(/\s+/g, ' ').trim();
+      hits.push({ id: `${p.name}/${f.path}`, title: `${p.title ?? p.name} — ${f.path}`, text: snippet, url: docUrl(p.name, f.path), score });
+    }
+  }
+  return hits.sort((a, b) => b.score - a.score).slice(0, 20).map(({ score: _s, ...r }) => r);
+}
+
+async function fetchDoc(user: SessionUser, id: string) {
+  const slash = id.indexOf('/');
+  const project = slash > 0 ? id.slice(0, slash) : '';
+  const rel = slash > 0 ? id.slice(slash + 1) : '';
+  if (!project || !rel) throw new Error('id must be "project/path" (from search or list_files).');
+  if (!atLeast(roleFor(user, project), 'view')) throw new Error(`This account has no access to project "${project}".`);
+  let text: string;
+  if (isDocumentFile(project, rel)) {
+    const doc = await manager.open(id);
+    text = doc.toText();
+  } else {
+    const abs = resolveProjectPath(project, rel);
+    if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) throw new Error(`not found: ${id}`);
+    if (fs.statSync(abs).size > FILE_MAX) throw new Error('file too large (4 MB)');
+    const buf = fs.readFileSync(abs);
+    if (buf.includes(0)) throw new Error('not a text file');
+    text = buf.toString('utf8');
+  }
+  return { id, title: id, text, url: docUrl(project, rel), metadata: { project, path: rel } };
+}
+
+/** One MCP server instance for `user`'s account: scoped to `fixedProject` when connected at
+ *  /mcp/<project> (the classic form), or across every project the account can reach when
+ *  connected at /mcp — each tool then takes `project`, and the account's role in that project
+ *  is checked per call. Tools are attributed to `agentName`. */
+function buildMcpServer(user: SessionUser, agentName: string, userId: number, fixedProject: string | null): McpServer {
   const server = new McpServer({ name: 'overlyx', version: '1.0.0' });
-  const needEdit = () => { if (!canEdit) throw new Error("This token's account has view-only access to this project — reading is allowed, editing and commenting are not."); };
+  const projArg = {
+    project: z.string().optional().describe(fixedProject
+      ? 'Ignored — this connection is fixed to one project'
+      : 'The project to work in — a name from list_projects (required on this all-projects connection)'),
+  };
+  /** Resolve and authorize the project of one call. */
+  const need = (arg: unknown, min: 'view' | 'edit'): string => {
+    const project = fixedProject ?? String(arg ?? '').trim();
+    if (!project) throw new Error('No project given — pass `project` (list_projects names the reachable ones).');
+    const role = roleFor(user, project);
+    if (!atLeast(role, 'view')) throw new Error(`This account has no access to a project "${project}" (see list_projects).`);
+    if (min === 'edit' && !atLeast(role, 'edit')) throw new Error(`This token's account has view-only access to project "${project}" — reading is allowed, editing and commenting are not.`);
+    if (!fs.existsSync(projectDir(project))) throw new Error(`No project "${project}".`);
+    return project;
+  };
 
   server.registerTool('list_documents', {
-    description: 'List the .tex documents in this project.',
-    inputSchema: {},
-  }, async () => { try { return ok(listDocuments(project)); } catch (e) { return fail(e); } });
+    description: 'List the .tex documents in a project.',
+    annotations: { readOnlyHint: true },
+    inputSchema: { ...projArg },
+  }, async ({ project: p }) => { try { return ok(listDocuments(need(p, 'view'))); } catch (e) { return fail(e); } });
 
   server.registerTool('read_document', {
     description: 'Read a document: its full LaTeX text, and its paragraphs (index, layout, depth, plain text) for addressing propose_edit / add_comment.',
-    inputSchema: { path: z.string().describe('Project-relative path, e.g. "main.tex"') },
-  }, async ({ path }) => { try { return ok(await readDocument(project, path)); } catch (e) { return fail(e); } });
+    annotations: { readOnlyHint: true },
+    inputSchema: { ...projArg, path: z.string().describe('Project-relative path, e.g. "main.tex"') },
+  }, async ({ project: p, path }) => { try { return ok(await readDocument(need(p, 'view'), path)); } catch (e) { return fail(e); } });
 
   server.registerTool('propose_edit', {
     description: 'Replace the text of one plain-text paragraph. Always applied as a tracked change (insertions/deletions attributed to this agent) — never a silent overwrite. Only works on paragraphs with no formulas/insets and uniform formatting; read_document first to get paragraph indices and check the content is plain.',
     inputSchema: {
+      ...projArg,
       path: z.string(),
       paragraph_index: z.number().int().nonnegative().describe('From read_document\'s paragraphs list'),
       new_text: z.string().describe('The complete new text of the paragraph'),
     },
-  }, async ({ path, paragraph_index, new_text }) => { try { needEdit(); return ok(await proposeEdit(project, agentName, path, paragraph_index, new_text)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, paragraph_index, new_text }) => { try { return ok(await proposeEdit(need(p, 'edit'), agentName, path, paragraph_index, new_text)); } catch (e) { return fail(e); } });
 
   server.registerTool('list_comments', {
     description: 'List comment threads in a document: index, the top-level paragraph they belong to, where they sit (body, a float, a table cell, …), messages, resolved state. Finds threads anywhere — inside tables, floats and other insets too.',
-    inputSchema: { path: z.string() },
-  }, async ({ path }) => { try { return ok(await listComments(project, path)); } catch (e) { return fail(e); } });
+    annotations: { readOnlyHint: true },
+    inputSchema: { ...projArg, path: z.string() },
+  }, async ({ project: p, path }) => { try { return ok(await listComments(need(p, 'view'), path)); } catch (e) { return fail(e); } });
 
   server.registerTool('add_comment', {
     description: 'Add a new comment thread, attached to the end of a paragraph (default: the last paragraph of the document).',
     inputSchema: {
+      ...projArg,
       path: z.string(),
       text: z.string(),
       paragraph_index: z.number().int().nonnegative().optional().describe('Defaults to the last paragraph'),
     },
-  }, async ({ path, text, paragraph_index }) => { try { needEdit(); return ok(await addComment(project, agentName, path, text, paragraph_index)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, text, paragraph_index }) => { try { return ok(await addComment(need(p, 'edit'), agentName, path, text, paragraph_index)); } catch (e) { return fail(e); } });
 
   server.registerTool('resolve_comment', {
     description: 'Mark a comment thread resolved (index from list_comments, in the same call — the document may have changed since an earlier listing).',
-    inputSchema: { path: z.string(), index: z.number().int().nonnegative() },
-  }, async ({ path, index }) => { try { needEdit(); return ok(await resolveComment(project, path, index)); } catch (e) { return fail(e); } });
+    inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative() },
+  }, async ({ project: p, path, index }) => { try { return ok(await resolveComment(need(p, 'edit'), path, index)); } catch (e) { return fail(e); } });
 
   server.registerTool('build_pdf', {
     description: 'Compile the document to PDF with latexmk and wait for the result (viewers may build, like in the app). Returns ok, the LaTeX warnings, and the tail of the compile log; on timeout the build keeps running — poll build_status. Humans open the PDF in the app.',
-    inputSchema: { path: z.string(), wait_seconds: z.number().int().positive().max(600).optional().describe('How long to wait before returning (default 180; the build continues on timeout)') },
-  }, async ({ path, wait_seconds }) => { try { return ok(await buildDocument(project, agentName, userId, path, wait_seconds ?? 180)); } catch (e) { return fail(e); } });
+    inputSchema: { ...projArg, path: z.string(), wait_seconds: z.number().int().positive().max(600).optional().describe('How long to wait before returning (default 180; the build continues on timeout)') },
+  }, async ({ project: p, path, wait_seconds }) => { try { return ok(await buildDocument(need(p, 'view'), agentName, userId, path, wait_seconds ?? 180)); } catch (e) { return fail(e); } });
 
   server.registerTool('build_status', {
     description: "The document's build state: whether a build is running, and the last result (status, LaTeX warnings, compile-log tail, whether a PDF exists).",
-    inputSchema: { path: z.string() },
-  }, async ({ path }) => { try { return ok(buildStatus(project, path)); } catch (e) { return fail(e); } });
+    annotations: { readOnlyHint: true },
+    inputSchema: { ...projArg, path: z.string() },
+  }, async ({ project: p, path }) => { try { return ok(buildStatus(need(p, 'view'), path)); } catch (e) { return fail(e); } });
 
   server.registerTool('list_files', {
     description: 'All files of the project (kind: doc/tex/bib/image/pdf/…) — documents open with read_document, other text files with read_file.',
-    inputSchema: {},
-  }, async () => { try { return ok(listFiles(project)); } catch (e) { return fail(e); } });
+    annotations: { readOnlyHint: true },
+    inputSchema: { ...projArg },
+  }, async ({ project: p }) => { try { return ok(listFiles(need(p, 'view'))); } catch (e) { return fail(e); } });
 
   server.registerTool('read_file', {
     description: 'Read a text file of the project (refs.bib, macros.tex, .sty, …). For documents use read_document.',
-    inputSchema: { path: z.string() },
-  }, async ({ path }) => { try { return ok(readFile(project, path)); } catch (e) { return fail(e); } });
+    annotations: { readOnlyHint: true },
+    inputSchema: { ...projArg, path: z.string() },
+  }, async ({ project: p, path }) => { try { return ok(readFile(need(p, 'view'), path)); } catch (e) { return fail(e); } });
 
   server.registerTool('write_file', {
     description: 'Write a text file of the project (e.g. add BibTeX entries to refs.bib). Overwrites the file — git history keeps every prior state. For documents use write_document or the paragraph tools.',
-    inputSchema: { path: z.string(), text: z.string() },
-  }, async ({ path, text }) => { try { needEdit(); return ok(writeFile(project, userId, path, text)); } catch (e) { return fail(e); } });
+    inputSchema: { ...projArg, path: z.string(), text: z.string() },
+  }, async ({ project: p, path, text }) => { try { return ok(writeFile(need(p, 'edit'), userId, path, text)); } catch (e) { return fail(e); } });
 
   server.registerTool('insert_paragraphs', {
     description: 'Insert raw LaTeX (anything: formulas, citations, sections, environments — parsed like the editor parses .tex) as new paragraphs at a position: 0 = top, paragraph count = append. Applied as a tracked insertion, reviewable like any collaborator edit. Indices shift — re-run read_document afterwards.',
-    inputSchema: { path: z.string(), index: z.number().int().nonnegative().describe('Position from read_document; the paragraph count appends'), latex: z.string() },
-  }, async ({ path, index, latex }) => { try { needEdit(); return ok(await insertParagraphs(project, agentName, path, index, latex)); } catch (e) { return fail(e); } });
+    inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative().describe('Position from read_document; the paragraph count appends'), latex: z.string() },
+  }, async ({ project: p, path, index, latex }) => { try { return ok(await insertParagraphs(need(p, 'edit'), agentName, path, index, latex)); } catch (e) { return fail(e); } });
 
   server.registerTool('replace_paragraph', {
     description: 'Replace one paragraph by raw LaTeX (may parse to several paragraphs; formulas, citations, anything allowed). Tracked: plain-text→plain-text becomes a word-level diff; anything else marks the old paragraph deleted and inserts the new content after it.',
-    inputSchema: { path: z.string(), index: z.number().int().nonnegative().describe("From read_document's paragraphs list"), latex: z.string() },
-  }, async ({ path, index, latex }) => { try { needEdit(); return ok(await replaceParagraph(project, agentName, path, index, latex)); } catch (e) { return fail(e); } });
+    inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative().describe("From read_document's paragraphs list"), latex: z.string() },
+  }, async ({ project: p, path, index, latex }) => { try { return ok(await replaceParagraph(need(p, 'edit'), agentName, path, index, latex)); } catch (e) { return fail(e); } });
 
   server.registerTool('delete_paragraph', {
     description: 'Mark one paragraph deleted as a tracked change (the text disappears when a reviewer accepts it).',
-    inputSchema: { path: z.string(), index: z.number().int().nonnegative() },
-  }, async ({ path, index }) => { try { needEdit(); return ok(await deleteParagraph(project, agentName, path, index)); } catch (e) { return fail(e); } });
+    inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative() },
+  }, async ({ project: p, path, index }) => { try { return ok(await deleteParagraph(need(p, 'edit'), agentName, path, index)); } catch (e) { return fail(e); } });
 
   server.registerTool('write_document', {
     description: "Replace a document's whole raw LaTeX source, or create the document when the path does not exist. NOT a tracked change — like the raw-source view; the prior state stays in Versions and git. Prefer replace_paragraph / insert_paragraphs for reviewable edits.",
-    inputSchema: { path: z.string(), tex: z.string() },
-  }, async ({ path, tex }) => { try { needEdit(); return ok(await writeDocument(project, userId, path, tex)); } catch (e) { return fail(e); } });
+    inputSchema: { ...projArg, path: z.string(), tex: z.string() },
+  }, async ({ project: p, path, tex }) => { try { return ok(await writeDocument(need(p, 'edit'), userId, path, tex)); } catch (e) { return fail(e); } });
 
   server.registerTool('create_document', {
     description: 'Create a new .tex document from the standard template (write_document with full source also creates).',
-    inputSchema: { path: z.string(), title: z.string().optional() },
-  }, async ({ path, title }) => { try { needEdit(); return ok(createDocument(project, userId, agentName, path, title)); } catch (e) { return fail(e); } });
+    inputSchema: { ...projArg, path: z.string(), title: z.string().optional() },
+  }, async ({ project: p, path, title }) => { try { return ok(createDocument(need(p, 'edit'), userId, agentName, path, title)); } catch (e) { return fail(e); } });
+
+  server.registerTool('list_projects', {
+    description: 'The projects this account can reach (name, title, its role in each). On the all-projects connection (/mcp), the other tools take one of these names as `project`.',
+    annotations: { readOnlyHint: true },
+    inputSchema: {},
+  }, async () => { try { return ok(accessibleProjects(user).map(pr => ({ project: pr.name, title: pr.title ?? null, role: pr.role }))); } catch (e) { return fail(e); } });
+
+  // ChatGPT's connector pair (deep research requires exactly these two; citations need a url)
+  server.registerTool('search', {
+    description: 'Full-text search across the LaTeX documents, .tex and .bib files of every project this account can access. Returns ids for fetch.',
+    annotations: { readOnlyHint: true },
+    inputSchema: { query: z.string() },
+  }, async ({ query }) => { try { return okStruct({ results: searchDocs(user, query) }); } catch (e) { return fail(e); } });
+
+  server.registerTool('fetch', {
+    description: 'The full text of one search result or file, by id ("project/path").',
+    annotations: { readOnlyHint: true },
+    inputSchema: { id: z.string() },
+  }, async ({ id }) => { try { return okStruct(await fetchDoc(user, id)); } catch (e) { return fail(e); } });
 
   return server;
 }
@@ -426,24 +527,32 @@ function buildMcpServer(project: string, agentName: string, canEdit: boolean, us
 export function mcpRouter(): express.Router {
   const r = express.Router();
   r.use(express.json({ limit: '2mb' }));
-  r.post('/:project', (req, res) => { void handle(req, res); });
+  r.post('/', (req, res) => { void handle(req, res); });          // all projects (tools take `project`)
+  r.post('/:project', (req, res) => { void handle(req, res); }); // fixed to one project
   return r;
 }
 
 async function handle(req: Request, res: Response): Promise<void> {
-  let project: string;
-  try { project = decodeURIComponent(req.params.project); } catch { res.status(400).json({ error: 'bad project name' }); return; }
+  let project: string | null = null;
+  if (req.params.project !== undefined) {
+    try { project = decodeURIComponent(req.params.project); } catch { res.status(400).json({ error: 'bad project name' }); return; }
+  }
   const auth = req.header('authorization') ?? '';
   const m = /^Bearer\s+(\S+)/i.exec(auth);
-  if (!m) { res.status(401).json({ error: 'Authorization: Bearer <token> required (create one in File \u25b8 Git repository\u2026)' }); return; }
+  // 401 + WWW-Authenticate points OAuth clients (ChatGPT) at the protected-resource metadata
+  if (!m) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'Authorization: Bearer <token> required (create one in File \u25b8 Git repository\u2026, or connect via OAuth)' }); return; }
   const identity = verifyMcpToken(m[1]);
-  if (!identity) { res.status(403).json({ error: 'invalid token' }); return; }
+  if (!identity) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'invalid or expired token' }); return; }
   const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(identity.userId) as UserRow | undefined;
-  const role = userRow ? roleFor(toSessionUser(userRow), project) : null;
-  if (!atLeast(role, 'view')) { res.status(403).json({ error: `this token's account has no access to project "${project}"` }); return; }
-  if (!fs.existsSync(projectDir(project))) { res.status(404).json({ error: `no project "${project}"` }); return; }
+  if (!userRow) { res.status(403).json({ error: 'the account behind this token no longer exists' }); return; }
+  const user = toSessionUser(userRow);
+  if (project !== null) {
+    const role = roleFor(user, project);
+    if (!atLeast(role, 'view')) { res.status(403).json({ error: `this token's account has no access to project "${project}"` }); return; }
+    if (!fs.existsSync(projectDir(project))) { res.status(404).json({ error: `no project "${project}"` }); return; }
+  }
 
-  const server = buildMcpServer(project, identity.name, atLeast(role, 'edit'), identity.userId);
+  const server = buildMcpServer(user, identity.name, identity.userId, project);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => { void transport.close(); void server.close(); });
   try {

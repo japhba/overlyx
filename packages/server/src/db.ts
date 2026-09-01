@@ -177,3 +177,36 @@ CREATE TABLE IF NOT EXISTS agent_threads (
 );
 CREATE INDEX IF NOT EXISTS agent_threads_project ON agent_threads(project, updated_at);
 `);
+
+// OAuth for the MCP connector (mcpOauth.ts): dynamically registered clients (ChatGPT), short-lived
+// authorization codes, and refresh grants. Access tokens are rows in mcp_tokens (with expires_at).
+db.exec(`
+CREATE TABLE IF NOT EXISTS oauth_clients (
+  client_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  redirect_uris TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_codes (
+  code TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  challenge TEXT NOT NULL,
+  redirect_uri TEXT NOT NULL,
+  scope TEXT,
+  expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_grants (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  refresh_hash TEXT UNIQUE NOT NULL,
+  client_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  token_id INTEGER,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER
+);
+`);
+// older databases: mcp_tokens grows an expiry (NULL = does not expire, the hand-created tokens)
+if (!(db.prepare("PRAGMA table_info(mcp_tokens)").all() as { name: string }[]).some(c => c.name === 'expires_at')) {
+  db.exec('ALTER TABLE mcp_tokens ADD COLUMN expires_at INTEGER');
+}

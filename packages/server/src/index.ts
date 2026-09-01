@@ -8,6 +8,7 @@ import { requestAiRepair, AiRepairError } from './airepair.ts';
 import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, allow as aiAllow, AiError } from './ai.ts';
 import { mcpRouter } from './mcp.ts';
 import { agentRoutes, shutdownAgents } from './agent.ts';
+import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
 import { createMcpToken, listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { userSettings, setUserSettings } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, generatePassword } from './auth.ts';
@@ -46,6 +47,9 @@ app.use('/api/auth', authRouter());
 // git over HTTP (Basic auth, see git.ts) — before the API's cookie auth and JSON parsing
 app.use('/git', gitRouter());
 app.use('/mcp', mcpRouter());
+// OAuth for the MCP connector (ChatGPT and other spec-compliant MCP clients; mcpOauth.ts)
+app.use(wellKnownRoutes());
+app.use('/oauth', oauthRoutes());
 
 const api = express.Router();
 api.use(requireAuth);

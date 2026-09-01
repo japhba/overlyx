@@ -12,15 +12,16 @@
 import crypto from 'node:crypto';
 import { db } from './db.ts';
 
-export interface McpTokenRow { id: number; user_id: number; name: string; token_hash: string; token_plain: string | null; created_at: number; last_used_at: number | null }
+export interface McpTokenRow { id: number; user_id: number; name: string; token_hash: string; token_plain: string | null; created_at: number; last_used_at: number | null; expires_at: number | null }
 
 function hashToken(token: string): string { return crypto.createHash('sha256').update(token).digest('hex'); }
 
-/** A new MCP token for the user; `storePlain` keeps the plaintext for later re-copy (see above). */
-export function createMcpToken(userId: number, name: string, storePlain = false): { id: number; token: string } {
+/** A new MCP token for the user; `storePlain` keeps the plaintext for later re-copy (see above);
+ *  `expiresAt` for OAuth-issued tokens (mcpOauth.ts) — hand-created tokens do not expire. */
+export function createMcpToken(userId: number, name: string, storePlain = false, expiresAt: number | null = null): { id: number; token: string } {
   const token = 'olxmcp_' + crypto.randomBytes(24).toString('base64url');
-  const info = db.prepare('INSERT INTO mcp_tokens (user_id, name, token_hash, token_plain, created_at) VALUES (?,?,?,?,?)')
-    .run(userId, name.trim().slice(0, 60) || 'agent', hashToken(token), storePlain ? token : null, Date.now());
+  const info = db.prepare('INSERT INTO mcp_tokens (user_id, name, token_hash, token_plain, created_at, expires_at) VALUES (?,?,?,?,?,?)')
+    .run(userId, name.trim().slice(0, 60) || 'agent', hashToken(token), storePlain ? token : null, Date.now(), expiresAt);
   return { id: Number(info.lastInsertRowid), token };
 }
 
@@ -40,6 +41,7 @@ export function verifyMcpToken(secret: string): { id: number; userId: number; na
   if (!secret || !secret.startsWith('olxmcp_')) return null;
   const row = db.prepare('SELECT * FROM mcp_tokens WHERE token_hash = ?').get(hashToken(secret)) as McpTokenRow | undefined;
   if (!row) return null;
+  if (row.expires_at && Date.now() > row.expires_at) return null;
   if (!row.last_used_at || Date.now() - row.last_used_at > 60_000) db.prepare('UPDATE mcp_tokens SET last_used_at = ? WHERE id = ?').run(Date.now(), row.id);
   return { id: row.id, userId: row.user_id, name: row.name };
 }
