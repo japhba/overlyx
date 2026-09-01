@@ -104,15 +104,10 @@ function Diff({ changes }: { changes: AgentChange[] }) {
   );
 }
 
-/** A completed file change: a one-line summary, unfolded only when it looks important
- *  (still running, small, or touching the open document) — click for the rest. */
+/** A file change: always folded to its one-line +/− summary — click for the diff. */
 function FileChangeView({ it }: { it: AgentItem }) {
   const changes = it.changes ?? [];
-  const total = changes.reduce((n, c) => n + (c.diff || '').split('\n').length, 0);
-  const docId = editorContext.docId;
-  const rel = docId ? docId.slice(docId.indexOf('/') + 1) : null;
-  const important = it.status === 'inProgress' || total < 14 || (!!rel && changes.some(c => c.path.endsWith('/' + rel)));
-  const [open, setOpen] = useState(important);
+  const [open, setOpen] = useState(false);
   return (
     <div class="agent-item" data-agent="filechange">
       <div class="agent-diff-summary" onClick={() => setOpen(o => !o)} title="Show / hide this diff">
@@ -269,19 +264,24 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
         const i = list.findIndex(x => x.id === itemId);
         return i >= 0 ? [...list.slice(0, i), patch(list[i]), ...list.slice(i + 1)] : [...list, patch(fallback)];
       });
-      // the stream echoes the user's message as a real item — it replaces the optimistic local one
-      const mergeUser = (item: AgentItem) => setItems(list => {
-        const cid = (item as { clientId?: string | null }).clientId;
+      // the stream echoes the user's message as a real item — it replaces the optimistic local one,
+      // but ONLY when it carries visible text (codex may echo the hidden [context] input as its own
+      // item holding the client id; that one must neither show nor swallow the local bubble)
+      const mergeUser = (item: AgentItem) => {
         const txt = userText(item);
-        const rest = list.filter(x => !(x.id.startsWith('local-') && (x.id === cid || userText(x) === txt)));
-        const i = rest.findIndex(x => x.id === item.id);
-        return i >= 0 ? [...rest.slice(0, i), item, ...rest.slice(i + 1)] : [...rest, item];
-      });
+        if (!txt) return;
+        setItems(list => {
+          const cid = (item as { clientId?: string | null }).clientId;
+          const rest = list.filter(x => !(x.id.startsWith('local-') && (x.id === cid || userText(x) === txt)));
+          const i = rest.findIndex(x => x.id === item.id);
+          return i >= 0 ? [...rest.slice(0, i), item, ...rest.slice(i + 1)] : [...rest, item];
+        });
+      };
       switch (msg.method) {
         case 'turn/started': setBusyTurn(p.turn?.id ?? null); break;
         case 'turn/completed': setBusyTurn(null); setApprovals([]); void refreshThreads(); break;
         case 'error': setBusyTurn(null); notify(p.error?.message ?? 'The agent reported an error', 'error'); break;
-        case 'item/started': p.item?.type === 'userMessage' ? mergeUser(p.item) : upsert(p.item); break;
+        case 'item/started': if (p.item?.type !== 'userMessage') upsert(p.item); break;   // user echoes only count once complete
         case 'item/completed': p.item?.type === 'userMessage' ? mergeUser(p.item) : upsert(p.item); setApprovals(a => a.filter(x => x.params?.itemId !== p.item?.id)); break;
         case 'item/agentMessage/delta':
           append(p.itemId, it => ({ ...it, text: (it.text ?? '') + (p.delta ?? '') }), { type: 'agentMessage', id: p.itemId, text: '' });
