@@ -164,14 +164,17 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
 
           <h4>MCP connector — let an AI agent read, comment and propose edits</h4>
           <div class="hint">
-            Any MCP-compatible client (Claude, Claude Code, …) can connect with one of your agent tokens below.
-            A token stands for <b>your account</b> and works for every project you can access — this URL points the
-            agent at this project, where it gets your role: read documents, comments and project files, build the PDF, and (with
-            edit access) comment and write raw LaTeX — paragraph edits land as a <b>tracked change</b> attributed
-            to the agent, never a silent overwrite, so you review them from the Review toolbar or Versions like any
-            collaborator's edit (whole-document rewrites and text files like refs.bib stay in Versions/git history).
+            Any MCP-compatible client can connect — it acts as <b>your account</b>: one connection reaches{' '}
+            <b>every project you can access</b> (a <code>list_projects</code> tool names them; the other tools take a{' '}
+            <code>project</code> argument), with your role in each: read documents, comments and project files, build
+            the PDF, and (with edit access) comment and write raw LaTeX — paragraph edits land as a <b>tracked
+            change</b> attributed to the agent, never a silent overwrite, so you review them from the Review toolbar
+            like any collaborator's edit. <b>ChatGPT</b> connects with no token at all (Settings ▸ Apps ▸ Developer
+            mode ▸ Create, this URL, OAuth — you approve it on a consent page); Claude, Claude Code and others use an
+            agent token from below as a Bearer header.
           </div>
-          <CopyField value={`${location.origin}/mcp/${encodeURIComponent(project)}`} label="MCP server URL" />
+          <CopyField value={`${location.origin}/mcp`} label="MCP server URL (all your projects)" />
+          <div class="hint">To pin a client to just this project, give it <code>{location.origin}/mcp/{encodeURIComponent(project)}</code> instead.</div>
           {newMcpToken && (
             <div class="git-newtoken">
               <div><b>Agent token “{newMcpToken.name}”</b> — copy it now, it is not shown again. Use it as an
