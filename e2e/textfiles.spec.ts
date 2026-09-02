@@ -30,6 +30,7 @@ test.beforeAll(async ({ browser }) => {
   mkdirSync(`${DIR}/figures`, { recursive: true });
   writeFileSync(`${DIR}/main.tex`, LYX);
   writeFileSync(`${DIR}/macros.tex`, MACROS);
+  writeFileSync(`${DIR}/notes.md`, '# Project notes\n\nSome **bold** text here.\n');
   writeFileSync(`${DIR}/refs.bib`, '@book{knuth1984, author={Donald E. Knuth}, title={The TeXbook}, year={1984}}\n');
   writeFileSync(`${DIR}/main.aux`, '\\relax\n');
   writeFileSync(`${DIR}/main.log`, 'This is pdfTeX\n');
@@ -313,5 +314,32 @@ test('folders via the + Folder button, and files dragged in from the computer la
   });
   await expect(tree.locator('[data-file="figures/nested.txt"]')).toHaveCount(1, { timeout: 10000 });
   expect(readFileSync(`${DIR}/figures/nested.txt`, 'utf8')).toBe('nested drop');
+  await admin.close();
+});
+
+test('markdown files open in the WYSIWYG editor: sized headings, ## input rule, source toggle, saved as markdown', async ({ browser }) => {
+  const admin = await asUser(browser);
+  const page = await admin.newPage();
+  await page.goto(BASE_URL + '/#/text:' + PROJECT + '/notes.md');
+  const host = page.locator('[data-md-editor]');
+  await expect(host).toBeVisible({ timeout: 20000 });
+  // the file parses into real, sized structure
+  await expect(host.locator('h1')).toHaveText('Project notes');
+  await expect(host.locator('strong')).toHaveText('bold');
+  // typing "## " turns into a live second-level heading (the input rule)
+  await host.locator('p').last().click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('## Plan');
+  await expect(host.locator('h2')).toHaveText('Plan');
+  // autosave writes ordinary markdown to disk
+  await expect(page.locator('[data-md-state="saved"]')).toBeVisible({ timeout: 10000 });
+  expect(readFileSync(`${DIR}/notes.md`, 'utf8')).toContain('## Plan');
+  // the Source button shows the raw text; Rich text comes back
+  await page.locator('[data-md-mode]').click();
+  await expect(page.locator('.texted textarea, .md-editor textarea').first()).toBeVisible({ timeout: 10000 });
+  expect(await page.locator('.md-editor textarea').inputValue()).toContain('# Project notes');
+  await page.locator('[data-md-mode]').click();
+  await expect(host.locator('h2')).toHaveText('Plan');
   await admin.close();
 });

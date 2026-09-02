@@ -11,6 +11,7 @@ import { Login } from './Login';
 import { DocPanel } from './DocPanel';
 import { Home, projectDocs } from './Home';
 import { TextEditor } from './TextEditor';
+import { MarkdownEditor } from './MarkdownEditor';
 import { ShareDialog } from './Share';
 import { GitDialog } from './Git';
 import type { Mark } from 'prosemirror-model';
@@ -1674,7 +1675,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         <div class={'editor-column' + (rawSplit && isLyxDoc ? ' split' : '')}>
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
-          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/'))} toolbar={<a class="small-btn" href={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/')) + '?download=1'}>Download</a>} /></div> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
+          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/'))} toolbar={<a class="small-btn" href={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/')) + '?download=1'}>Download</a>} /></div> : !isLyxDoc ? (/\.(md|markdown)$/i.test(textId!) ? <MarkdownEditor key={docId} id={textId!} notify={notify} /> : <TextEditor key={docId} id={textId!} notify={notify} />) :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (

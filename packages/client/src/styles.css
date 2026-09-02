@@ -1193,6 +1193,30 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .ai-panel .ai-model { max-width: 130px; font-size: 11px; background: var(--page-bg); color: var(--ui-muted); border: 1px solid var(--ui-border); border-radius: 5px; padding: 1px 2px; flex: none; }
 .ai-panel .ai-src { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; margin: 0; }
 
+/* Markdown WYSIWYG editor (.md files): headings at their real sizes as you type */
+.md-editor { max-width: 860px; margin: 0 auto; padding: 10px 18px 40px; }
+.md-editor.as-source { position: relative; max-width: none; padding: 0; }
+.md-editor.as-source .md-mode { position: absolute; top: 6px; right: 14px; z-index: 5; }
+.md-bar { display: flex; align-items: center; gap: 10px; padding: 4px 2px 8px; border-bottom: 1px solid var(--ui-border); margin-bottom: 10px; }
+.md-bar .name { font-weight: 600; }
+.md-bar .save-state { color: var(--ui-muted); font-size: 12px; }
+.md-bar .save-state.s-conflict, .md-bar .save-state.s-error { color: indianred; }
+.md-host .ProseMirror { outline: none; line-height: 1.55; font-size: 15px; min-height: 60vh; white-space: pre-wrap; }
+.md-host .ProseMirror h1 { font-size: 2em; font-weight: 700; margin: 0.8em 0 0.4em; line-height: 1.25; }
+.md-host .ProseMirror h2 { font-size: 1.55em; font-weight: 700; margin: 0.8em 0 0.35em; line-height: 1.3; }
+.md-host .ProseMirror h3 { font-size: 1.25em; font-weight: 600; margin: 0.7em 0 0.3em; }
+.md-host .ProseMirror h4 { font-size: 1.1em; font-weight: 600; margin: 0.6em 0 0.25em; }
+.md-host .ProseMirror h5, .md-host .ProseMirror h6 { font-size: 1em; font-weight: 600; margin: 0.5em 0 0.2em; color: var(--ui-muted); }
+.md-host .ProseMirror p { margin: 0.45em 0; }
+.md-host .ProseMirror code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--ui-bg2); border-radius: 4px; padding: 0 3px; }
+.md-host .ProseMirror pre { font-family: ui-monospace, monospace; font-size: 13px; background: var(--ui-bg2); border: 1px solid var(--ui-border); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
+.md-host .ProseMirror pre code { background: none; padding: 0; }
+.md-host .ProseMirror blockquote { border-left: 3px solid var(--ui-border); margin: 0.5em 0; padding: 0.1em 0 0.1em 12px; color: var(--ui-muted); }
+.md-host .ProseMirror ul, .md-host .ProseMirror ol { padding-left: 1.5em; margin: 0.4em 0; }
+.md-host .ProseMirror a { color: var(--accent); }
+.md-host .ProseMirror hr { border: none; border-top: 1px solid var(--ui-border); margin: 1.2em 0; }
+.md-host .ProseMirror img { max-width: 100%; }
+
 /* a word the autocorrecter just fixed flashes briefly */
 .ol-autocorrected { border-radius: 2px; animation: ol-autocorrect-fade 2.2s ease-out forwards; }
 @keyframes ol-autocorrect-fade { from { background: color-mix(in srgb, var(--accent) 30%, transparent); } to { background: transparent; } }

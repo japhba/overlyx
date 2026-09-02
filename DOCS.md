@@ -282,7 +282,8 @@ blend.
   covers `.bib` and friends, `build_pdf` compiles through the app's queue. A direct filesystem
   write is a sandbox exception the panel asks the user to grant. The developer instructions steer the agent to explore
   and explain by default — document edits only on an explicit ask — and codex's web_search tool is
-  enabled (internet access; sandboxed shell commands still ask). The panel streams
+  enabled (internet access; sandboxed shell commands still ask). They also tell it the documents
+  are live-edited: re-read before editing, never restore earlier content from memory. The panel streams
   message/reasoning deltas, tool calls (folded) and diffs over SSE. Every message carries editor
   context automatically: the open documents and the current selection — as LaTeX (the ⌘K
   conversion) and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in an excerpt of the file. Formulas in the
@@ -391,6 +392,17 @@ packages/server   Express + WebSocket (Yjs sync/awareness), SQLite persistence, 
                   JWT cookie, optional Google OAuth), .tex file sync & watcher, versions, builds
 packages/client   Vite + Preact UI, ProseMirror editor, LyX math editor (editor/lyxmath, KaTeX), LyX keymap,
                   numbering/margin/change-tracking/find plugins
+* **Theorem environments**: a document's own `\newtheorem{definition}{Definition}` declarations
+  become real layouts (`latex/layouts.ts applyDocumentTheorems`, aliased onto the AMS theorem
+  styles by label, `Theorem` as fallback) — parsing, writing (the environment keeps its declared
+  name; the declaration is never duplicated), and the layout list in meta all honour them.
+  Declarations typed into the body are moved to the user preamble on the next save. The math
+  parser knows `\operatorname{…}` and `\operatorname*{…}` (symbols.json; the generator keeps
+  shipped entries on regen). Markdown files (`.md`) open in a WYSIWYG editor
+  (`app/MarkdownEditor.tsx`, prosemirror-markdown): `## ` resizes into a live heading as you
+  type, bold/lists/quotes/links likewise; Source switches to the plain text editor; files stay
+  ordinary markdown on disk.
+
 tests/            vitest: .tex parse/write stability (tex.test.ts: features + a corpus of real
                   papers and LyX's example documents), LyX round trips (import path), PM/Yjs
                   conversions, LaTeX writer unit tests, latexmk compile tests
