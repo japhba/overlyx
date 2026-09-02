@@ -32,6 +32,7 @@ import { FeedbackDialog } from './Feedback';
 import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog } from './Dialogs';
 import { SettingsPanel } from './Settings';
 import { createEditor, refreshMacros, describeChange, type EditorHandle, type SaveState } from '../editor/editor';
+import { useProjectEvents } from './FileBrowser';
 import { newerVersionAvailable } from './update';
 import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
@@ -201,6 +202,19 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [layout, setLayout] = useState('Standard');
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [activePos, setActivePos] = useState(0);
+  // Metadata (macros, bibliography, labels) follows the project's file changes: when an agent, a
+  // git push or a collaborator edits macros.tex / *.bib, open editors learn it without a manual
+  // "Reload metadata" (throttled — the events also fire for this document's own saves).
+  const metaTimer = useRef<number | undefined>(undefined);
+  const metaAt = useRef(0);
+  useProjectEvents(isLyxDoc ? docId!.split('/')[0] : null, () => {
+    if (!docId) return;
+    window.clearTimeout(metaTimer.current);
+    metaTimer.current = window.setTimeout(() => {
+      metaAt.current = Date.now();
+      api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; const v = editorRef.current?.view; if (v) refreshMacros(v, m.macros); }).catch(() => { /* transient */ });
+    }, Math.max(2500, 20000 - (Date.now() - metaAt.current)));
+  });
   // sidebars: the documents panel (left: project, document tabs, outlines, files) and the right
   // panels; shown / hidden state is kept per browser (a hidden sidebar leaves a rail to bring it back)
   const [showFiles, setShowFiles] = useState(() => stored('ol.files') !== '0');

@@ -38,6 +38,7 @@ export class InsetView implements NodeView {
 
     this.label.addEventListener('mousedown', (ev) => {
       ev.preventDefault();
+      ev.stopPropagation();   // PM's own mouse handling would re-place the cursor on mouseup, undoing toggle()'s selection
       if (ev.detail === 2) return;
       this.toggle();
     });
@@ -97,14 +98,27 @@ export class InsetView implements NodeView {
     if (pos === undefined) return;
     const cur = this.view.state.doc.nodeAt(pos);
     if (!cur) return;
+    // an open inset with nothing in it shows only its label — there is no content to collapse
+    // and no visible box to click into: the click means "let me in" (LyX opens with the cursor
+    // inside too), otherwise an emptied note could never be filled again
+    const empty = cur.content.size <= 2 && !cur.textContent;
+    if (cur.attrs.status !== 'collapsed' && empty) {
+      this.view.dispatch(this.view.state.tr.setSelection(TextSelection.near(this.view.state.doc.resolve(pos + 2))));
+      this.view.focus();
+      return;
+    }
     const status = cur.attrs.status === 'collapsed' ? 'open' : 'collapsed';
     let tr = this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, status });
-    // keep the cursor out of a collapsed inset
     const sel = this.view.state.selection;
     if (status === 'collapsed' && sel.from > pos && sel.from < pos + cur.nodeSize) {
+      // keep the cursor out of a collapsed inset
       tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos + cur.nodeSize)));
+    } else if (status === 'open') {
+      // opening by click puts the cursor inside (the box opens for real)
+      tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 2)));
     }
     this.view.dispatch(tr);
+    if (status === 'open') this.view.focus();
   }
 
   reply() {
