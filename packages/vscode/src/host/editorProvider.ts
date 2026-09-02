@@ -10,6 +10,7 @@ import { Registry, type OpenEditor } from './registry.ts';
 import { webviewHtml } from './webviewHtml.ts';
 import type { EditorToHost, HostToEditor } from '../shared/protocol.ts';
 import type { TexContext } from './texdoc.ts';
+import { projectDirFor } from './project.ts';
 
 export interface ProviderDeps {
   bridgeBase(): string;
@@ -29,8 +30,10 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
   constructor(private context: vscode.ExtensionContext, private registry: Registry, private deps: ProviderDeps) {}
 
   resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
+    // the project is the directory that holds the file, not the whole workspace (a child
+    // document adopts its master's directory so it keeps the master's class and preamble)
     const folder = vscode.workspace.getWorkspaceFolder(document.uri);
-    const root = folder ? folder.uri.fsPath : path.dirname(document.uri.fsPath);
+    const root = projectDirFor(document.uri.fsPath, folder?.uri.fsPath);
     const project = this.deps.registerRoot(root);
     const relPath = path.relative(root, document.uri.fsPath);
     let ctx: TexContext;

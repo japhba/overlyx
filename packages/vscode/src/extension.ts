@@ -27,7 +27,7 @@ export interface OverlyxTestApi { registry: Registry; bridgeBase(): string; chec
 
 export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
   const registry = new Registry();
-  /** project name → root directory (workspace folders, plus folders of loose files) */
+  /** project name → root directory (each open file's own directory — projectDirFor —, plus the workspace folders) */
   const projectRoots = new Map<string, string>();
   const registerRoot = (root: string): string => {
     for (const [name, r] of projectRoots) if (r === root) return name;

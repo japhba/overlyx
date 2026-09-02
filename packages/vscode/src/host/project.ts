@@ -126,6 +126,24 @@ export function findMaster(root: string, relPath: string): string | null {
   return candidates.sort()[0] ?? null;
 }
 
+/**
+ * The project directory of a file: the directory that holds it — each paper's folder is its own
+ * self-contained project (not the whole workspace). One exception keeps child documents working:
+ * a fragment (no \begin{document}) whose master lives in a parent directory adopts the master's
+ * directory, searched upward but never above `upperBound` (the workspace folder) — without it
+ * the child would lose its master's class and preamble.
+ */
+export function projectDirFor(absFile: string, upperBound?: string): string {
+  const dir = path.dirname(absFile);
+  try { if (texInfo(absFile, fs.statSync(absFile)).hasDocument) return dir; } catch { return dir; }
+  const bound = upperBound && (absFile.startsWith(upperBound + path.sep) || upperBound === dir) ? upperBound : dir;
+  for (let up = dir; ; up = path.dirname(up)) {
+    try { if (findMaster(up, path.relative(up, absFile))) return up; } catch { /* keep climbing */ }
+    if (up === bound || path.dirname(up) === up) break;
+  }
+  return dir;
+}
+
 /** Child documents (\input / \include) of a document, project-relative, in order. */
 export function childDocuments(root: string, relPath: string, depth = 0, out: string[] = []): string[] {
   if (depth > 5) return out;

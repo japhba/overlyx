@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { lyxToPm, pmToLyxBody, texHeadings, type LyxDocument, type PMJSON } from '@overlyx/core';
 import { parseDocumentText, writeDocumentText, includeResolver } from '../packages/vscode/src/host/texdoc.ts';
 import { buildMeta } from '../packages/vscode/src/host/meta.ts';
-import { collectFiles, findMaster } from '../packages/vscode/src/host/project.ts';
+import { collectFiles, findMaster, projectDirFor } from '../packages/vscode/src/host/project.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const bundledLayouts = path.resolve(here, '../packages/vscode/dist/lyxlib/layouts');
@@ -48,9 +48,32 @@ beforeAll(() => {
   fs.writeFileSync(path.join(root, 'main.tex'), MAIN);
   fs.writeFileSync(path.join(root, 'chapter.tex'), CHILD);
   fs.writeFileSync(path.join(root, 'refs.bib'), '@article{knuth84, author={Donald E. Knuth}, title={Literate Programming}, year={1984}, journal={The Computer Journal}}\n');
+  // a second paper in its own subdirectory, with a child one level deeper — for projectDirFor
+  fs.mkdirSync(path.join(root, 'paper2', 'sections'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'paper2', 'main.tex'), MAIN.replace('chapter.tex', 'sections/intro.tex'));
+  fs.writeFileSync(path.join(root, 'paper2', 'sections', 'intro.tex'), CHILD);
+  fs.writeFileSync(path.join(root, 'loose.tex'), CHILD);
   ctx = { root, layoutDir };
 });
 afterAll(() => { fs.rmSync(root, { recursive: true, force: true }); });
+
+describe("projectDirFor: the open file's directory is the project", () => {
+  it('a document owns its own directory — the workspace root does not matter', () => {
+    expect(projectDirFor(path.join(root, 'paper2', 'main.tex'), root)).toBe(path.join(root, 'paper2'));
+    expect(projectDirFor(path.join(root, 'main.tex'), root)).toBe(root);
+  });
+  it("a child fragment adopts its master's directory (searched upward, workspace-bounded)", () => {
+    expect(projectDirFor(path.join(root, 'paper2', 'sections', 'intro.tex'), root)).toBe(path.join(root, 'paper2'));
+    expect(projectDirFor(path.join(root, 'chapter.tex'), root)).toBe(root);
+  });
+  it('a fragment with no master anywhere stays in its own directory', () => {
+    fs.mkdirSync(path.join(root, 'notes'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'notes', 'scratch.tex'), 'Just a fragment.\n');
+    expect(projectDirFor(path.join(root, 'notes', 'scratch.tex'), root)).toBe(path.join(root, 'notes'));
+    // …and without a workspace bound there is no climbing at all
+    expect(projectDirFor(path.join(root, 'paper2', 'sections', 'intro.tex'))).toBe(path.join(root, 'paper2', 'sections'));
+  });
+});
 
 describe('vscode host document pipeline', () => {
   it('parses, round-trips through ProseMirror and writes stably', () => {
