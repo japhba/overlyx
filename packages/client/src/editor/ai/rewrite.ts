@@ -97,8 +97,11 @@ class RewritePanel {
     const sel = this.dom.querySelector('.ai-model') as HTMLSelectElement;
     const models = editorContext.ai?.models ?? [];
     const fallback = editorContext.ai?.model ?? '';
-    sel.append(new Option(`${models.find(m => m.id === fallback)?.label ?? fallback ?? 'default'}`, ''));
-    for (const m of models) sel.append(new Option(m.label, m.id));
+    // each entry: name — AA intelligence index (artificialanalysis.ai) · measured response time
+    const optText = (m: { label: string; aa?: number; speed: string }) => `${m.label} — AA ${m.aa ?? '?'} · ${m.speed}`;
+    const fb = models.find(m => m.id === fallback);
+    sel.append(Object.assign(new Option(fb ? optText(fb) : (fallback || 'default'), ''), { title: fb?.note ?? '' }));
+    for (const m of models) sel.append(Object.assign(new Option(optText(m), m.id), { title: m.note }));
     const pref = getPrefs().aiModel;
     if (pref && !models.some(m => m.id === pref)) sel.append(new Option(pref, pref));
     sel.value = pref && [...sel.options].some(o => o.value === pref) ? pref : '';
@@ -165,7 +168,12 @@ class RewritePanel {
     this.clearPreview();
     this.ctrl?.abort();
     const ac = this.ctrl = new AbortController();
-    this.setStatus('Thinking…', 'busy');
+    // the busy status names the model and counts the seconds (a thinking model can take 10 s+)
+    const modelId = getPrefs().aiModel || editorContext.ai?.model || '';
+    const label = editorContext.ai?.models.find(m => m.id === modelId)?.label ?? (modelId || 'the model');
+    const t0 = Date.now();
+    this.setStatus(`Asking ${label}…`, 'busy');
+    const tick = window.setInterval(() => { if (this.ctrl === ac) this.setStatus(`Asking ${label}… ${Math.round((Date.now() - t0) / 1000)} s`, 'busy'); }, 1000);
     const t = this.target;
     const docId = t.kind === 'text' ? viewDocId(t.view) : t.kind === 'source' ? t.docId : (t.view ? viewDocId(t.view) : editorContext.docId ?? '');
     try {
@@ -181,7 +189,7 @@ class RewritePanel {
     } catch (e) {
       if (ac.signal.aborted) return;
       this.setStatus((e as Error).message || 'The request failed.', 'error');
-    } finally { if (this.ctrl === ac) this.ctrl = null; }
+    } finally { clearInterval(tick); if (this.ctrl === ac) this.ctrl = null; }
   }
 
   /** After a proposal: the box empties and invites a follow-up; Enter alone accepts. */

@@ -24,16 +24,23 @@ export class AiError extends Error { constructor(msg: string, public status = 50
 
 export function aiAvailable(): boolean { return !!config.openrouter.apiKey; }
 
-export interface ModelInfo { id: string; label: string; note: string }
-/** Models offered in the preferences (any OpenRouter id may still be typed in); notes from the 2026-08-29 measurements. */
+export interface ModelInfo {
+  id: string; label: string; note: string;
+  /** Artificial Analysis Intelligence Index (artificialanalysis.ai, looked up 2026-09-02; top models score in the 60s) */
+  aa?: number;
+  /** response time on a ⌘K-sized rewrite (measured 2026-09-02, scratch/ai-rewrite-bench.mjs) */
+  speed: string;
+}
+/** Models offered in the pickers (any OpenRouter id may still be typed in). */
 export const MODELS: ModelInfo[] = [
-  { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', note: 'fastest (0.4–1 s); proposes full sentences' },
-  { id: 'google/gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite', note: 'fast (0.6–1.2 s), sharper prose; occasionally silent' },
-  { id: 'google/gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', note: 'fast (0.5–0.8 s), terse' },
-  { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'strong, ~1.5 s' },
-  { id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash', note: 'best; thinks before answering (2–3 s) — suits ⌘K' },
-  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5', note: '~1 s, careful prose' },
-  { id: 'openai/gpt-4.1-nano', label: 'GPT-4.1 nano', note: '~0.8 s' },
+  { id: 'google/gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', aa: 26, speed: '~1 s', note: 'no thinking, follows the document’s notation (default)' },
+  { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', aa: 7, speed: '0.6–0.7 s', note: 'fastest and cheapest; fine for simple edits' },
+  { id: 'google/gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite', aa: 37, speed: '0.8–1 s', note: 'sharper prose' },
+  { id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', aa: 59, speed: '1.5–4 s', note: 'strongest of the fast ones (thinking kept low)' },
+  { id: 'inception/mercury-2', label: 'Mercury 2', aa: 22, speed: '~1 s', note: 'diffusion model — instant drafts' },
+  { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5', aa: 24, speed: '~1.5 s', note: 'careful prose' },
+  { id: 'openai/gpt-5.4-nano', label: 'GPT-5.4 nano', aa: 38, speed: '~1.5 s', note: 'OpenAI’s fast one' },
+  { id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash', aa: 56, speed: '7–15 s', note: 'thinks hard — only for difficult rewrites' },
 ];
 export function aiStatus(): { available: boolean; model: string; completionModel: string; models: ModelInfo[] } {
   return { available: aiAvailable(), model: config.ai.model, completionModel: config.ai.completionModel, models: MODELS };
@@ -43,6 +50,20 @@ export function pickModel(requested: unknown, fallback: string): string {
   if (typeof requested !== 'string') return fallback;
   const id = requested.trim();
   return /^[a-z0-9-]+\/[a-z0-9._:-]+$/i.test(id) && id.length <= 80 ? id : fallback;
+}
+
+/**
+ * Request adjustments some models need (applied by `chat` to whatever model is chosen, from the
+ * dropdown or typed in): OpenAI's gpt-5* reject `temperature` and reason unless told not to;
+ * Gemini 3.8 Flash skips its reasoning once the effort is low (measured: 0 reasoning tokens,
+ * 1.5–4 s instead of 7–15 s — it cannot be disabled outright, the endpoint rejects `enabled: false`).
+ */
+const TUNING: { match: RegExp; reasoning?: { effort: 'minimal' | 'low' }; noTemperature?: boolean }[] = [
+  { match: /^openai\/gpt-5/, reasoning: { effort: 'minimal' }, noTemperature: true },
+  { match: /^google\/gemini-3\.8-flash/, reasoning: { effort: 'low' } },
+];
+export function tuningFor(model: string): { reasoning?: { effort: 'minimal' | 'low' }; noTemperature?: boolean } | undefined {
+  return TUNING.find(t => t.match.test(model));
 }
 
 /* ------------------------------------------------------------------ model access */
@@ -72,6 +93,8 @@ export async function chat(messages: ChatMessage[], opts: ChatOptions = {}): Pro
 
 async function chatRaw(messages: ChatMessage[], opts: ChatOptions): Promise<string> {
   if (!config.openrouter.apiKey) throw new AiError('AI assistance is not configured on this server (OPENROUTER_API_KEY is unset).', 503);
+  const model = opts.model ?? config.ai.model;
+  const tuning = tuningFor(model);
   let res: Response;
   try {
     res = await fetch(`${config.openrouter.api}/chat/completions`, {
@@ -84,8 +107,9 @@ async function chatRaw(messages: ChatMessage[], opts: ChatOptions): Promise<stri
         'X-Title': opts.title ?? 'OverLyX',
       },
       body: JSON.stringify({
-        model: opts.model ?? config.ai.model,
-        temperature: opts.temperature ?? 0.2,
+        model,
+        ...(tuning?.noTemperature ? {} : { temperature: opts.temperature ?? 0.2 }),
+        ...(tuning?.reasoning ? { reasoning: tuning.reasoning } : {}),
         max_tokens: opts.maxTokens ?? 2048,
         messages,
       }),
@@ -192,7 +216,7 @@ export function documentContext(text: string, snippet: string, maxChars: number,
 const REWRITE_SYSTEM = `You are a writing and LaTeX assistant built into OverLyX, a WYSIWYG editor for scientific papers written in LaTeX. The user has selected a passage of their document and gives an instruction. Produce the replacement for the passage.
 
 Rules:
-- Reply with the replacement LaTeX only. No explanations, no markdown fences, no quotation marks around it, no \\documentclass / \\begin{document}.
+- Reply with the replacement LaTeX only. No explanations, no markdown fences, no quotation marks around it, no \\documentclass / \\begin{document}. Never write commentary about the passage or the task — the reply is pasted verbatim into the document.
 - Keep the document's conventions: its notation, its macros (a list is given), the citation keys and labels that exist in it, its language and tone. Inline math as $…$; keep display environments (equation, align, …) as in the original and preserve every \\label.
 - Change only what the instruction asks for. Do not add remarks, headings, or content the instruction does not call for.
 - If nothing is selected, the instruction asks for new text to insert at the cursor, marked ${CURSOR} in the document: write exactly that, fitting between what is before and after the marker.

@@ -223,6 +223,23 @@ describe('model choice', () => {
   });
 });
 
+describe('model tuning (reasoning effort, temperature support)', () => {
+  it('gpt-5*: no temperature, minimal reasoning; Gemini 3.8 Flash: low effort; others untouched', async () => {
+    nextReply = 'Tuned.';
+    await ai.rewrite(doc, { instruction: 'x', content: [], model: 'openai/gpt-5.4-nano' });
+    expect(lastRequest.temperature).toBeUndefined();
+    expect(lastRequest.reasoning).toEqual({ effort: 'minimal' });
+    await ai.rewrite(doc, { instruction: 'x', content: [], model: 'google/gemini-3.8-flash' });
+    expect(lastRequest.reasoning).toEqual({ effort: 'low' });
+    expect(lastRequest.temperature).toBe(0.2);
+    await ai.rewrite(doc, { instruction: 'x', content: [] });
+    expect(lastRequest.reasoning).toBeUndefined();
+    expect(lastRequest.temperature).toBe(0.2);
+    expect(ai.tuningFor('openai/gpt-5.6-luna')).toEqual({ match: expect.anything(), reasoning: { effort: 'minimal' }, noTemperature: true });
+    expect(ai.tuningFor('google/gemini-3.1-flash-lite')).toBeUndefined();
+  });
+});
+
 describe('rate limiter', () => {
   it('allows `limit` requests per minute per key', () => {
     expect(ai.allow('k', 2)).toBe(true);

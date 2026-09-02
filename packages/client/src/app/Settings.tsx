@@ -32,7 +32,7 @@ function ModelPicker({ label, value, fallback, models, onChange, pref }: { label
       <div style="flex:1;display:flex;flex-direction:column;gap:4px">
         <select data-pref={pref} value={custom ? '__custom' : value} onChange={e => { const v = (e.target as HTMLSelectElement).value; if (v === '__custom') { setCustom(true); return; } setCustom(false); onChange(v); }}>
           <option value="">Server default{fallback ? ` (${models.find(m => m.id === fallback)?.label ?? fallback})` : ''}</option>
-          {models.map(m => <option key={m.id} value={m.id}>{m.label} — {m.note}</option>)}
+          {models.map(m => <option key={m.id} value={m.id}>{m.label} — AA {m.aa ?? '?'} · {m.speed} — {m.note}</option>)}
           <option value="__custom">Other model id…</option>
         </select>
         {custom && <input type="text" data-pref-custom={pref} placeholder="provider/model-id (OpenRouter)" value={value} onInput={e => onChange((e.target as HTMLInputElement).value.trim())} />}

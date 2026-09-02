@@ -22,7 +22,7 @@ export interface BibItem { key: string; author: string; year: string; title: str
 export interface HealthIssue { code: string; message: string; severity: 'warning' | 'error'; fixable: boolean }
 /** ProseMirror JSON (nodes of the editor schema) as the server returns them for AI proposals */
 export interface PMJSON { type: string; attrs?: Record<string, any>; content?: PMJSON[]; marks?: { type: string; attrs?: Record<string, any> }[]; text?: string }
-export interface AiModelInfo { id: string; label: string; note: string }
+export interface AiModelInfo { id: string; label: string; note: string; /** Artificial Analysis Intelligence Index */ aa?: number; /** measured ⌘K response time */ speed: string }
 export interface AiStatus { available: boolean; model: string; completionModel: string; models: AiModelInfo[] }
 export interface AiRewriteRequest { instruction: string; content: PMJSON[]; layout?: string; before?: string; after?: string; model?: string; math?: { latex: string; display: boolean; selection?: string }; source?: { text: string; before?: string; after?: string }; history?: { instruction: string; tex: string }[] }
 export interface AiRewriteResult { tex: string; nodes: PMJSON[]; original: string }

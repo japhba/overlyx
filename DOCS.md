@@ -312,7 +312,7 @@ blend.
   `OVERLYX_AGENT_MODEL` overrides the model.
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or
   Preferences — the switches are menu items, so the command palette finds them): needs
-  `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.7 Flash rewrites,
+  `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.1 Flash Lite rewrites,
   Gemini 2.5 Flash Lite completes (`OVERLYX_AI_MODEL`, `OVERLYX_AI_COMPLETION_MODEL`). The ⌘K
   panel has its own model picker (kept as the ⌘K preference), accepts follow-up instructions that
   refine the shown proposal (Enter with an empty box accepts), and also works in the source view
