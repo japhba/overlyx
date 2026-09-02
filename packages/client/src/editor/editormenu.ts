@@ -241,6 +241,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
     ] },
     { sep: true },
     { label: 'Spell checking', checked: prefs.spellcheck, action: () => setPref('spellcheck', !prefs.spellcheck) },
+    { label: 'Autocorrect typos', checked: prefs.autoCorrect, action: () => setPref('autoCorrect', !prefs.autoCorrect) },
     { label: (isMac ? '⇧' : 'Shift+') + 'right-click: the browser menu', info: true },
   );
   return items;

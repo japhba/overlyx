@@ -73,3 +73,35 @@ test('the browser engine can be chosen instead (no OverLyX underlines, spellchec
   await expect(page.locator('.lyx-editor .spell-error')).toHaveCount(2, { timeout: 15000 });
   await expect(page.locator('.lyx-editor')).toHaveAttribute('spellcheck', 'false');
 });
+
+// runs last: it types typos into the shared fixture, which the counts above rely on
+test('autocorrect: a minor typo snaps into place after the word, Backspace puts it back', async ({ page }) => {
+  await page.addInitScript(() => { try { localStorage.setItem('ol.prefs', JSON.stringify({ spellcheck: true, spellEngine: 'overlyx', autoCorrect: true })); localStorage.removeItem('ol.spell.words'); } catch { /* ignore */ } });
+  await login(page);
+  await page.goto('/#/' + DOC);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 2, null, { timeout: 30000 });
+  const par = page.locator('.lyx-editor .lyx-par').last();
+  await par.click({ position: { x: 12, y: 8 } });
+  await page.keyboard.press('End');
+  // give the dictionary a moment (the worker loads on demand), then type a classic typo
+  await page.waitForSelector('.lyx-editor .spell-error', { timeout: 15000 });
+  await page.keyboard.type(' I recieve teh');
+  await page.keyboard.type(' ');
+  // every finished word is looked at: the space after 'recieve' fixed it, the one after 'teh' fixed that
+  await expect(par).toContainText('I receive the ', { timeout: 10000 });
+  // Backspace right after: the last correction comes back and that word stays (this session)
+  await page.keyboard.press('Backspace');
+  await expect(par).toContainText('I receive teh', { timeout: 5000 });
+  await page.keyboard.press('End');
+  await page.keyboard.type(' and teh');
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(800);
+  await expect(par).toContainText('and teh ');                                 // reverted words are left alone
+  // …and inside a formula nothing is ever corrected (typing goes through the math field)
+  await page.keyboard.press('Control+m');
+  await page.keyboard.type('teh ');
+  await page.waitForTimeout(600);
+  const formula = par.locator('.lyx-math-inline').last();
+  await expect(formula).toBeVisible();
+  expect((await formula.textContent()) ?? '').not.toContain('the');
+});

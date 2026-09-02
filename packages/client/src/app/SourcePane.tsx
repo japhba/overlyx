@@ -17,6 +17,8 @@ import { highlightTexBlocks, highlightLineList } from './texhighlight';
 import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask } from './codearea';
 import { findSourceLine, locateSourceLine, locateSourceCaret, type LocateBlock } from './sourcelocate';
 import { setMirrorCaret } from '../editor/plugins/mirrorcaret';
+import { openSourceRewrite } from '../editor/ai/rewrite';
+import { getPrefs } from '../prefs';
 import { TextSelection } from 'prosemirror-state';
 import type { LyxMathField } from '../editor/lyxmath/field';
 
@@ -363,6 +365,26 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
           onInput={e => { const el = e.target as HTMLTextAreaElement; undo.current.record({ value: el.value, start: el.selectionStart, end: el.selectionEnd }); textRef.current = el.value; setText(el.value); setDirty(true); updateCursor(); scheduleApply(); }}
           onKeyDown={e => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && dirty) { e.preventDefault(); if (applyTimer.current) clearTimeout(applyTimer.current); void apply(true); return; }
+            // ⌘K in the source view: rewrite the selected LaTeX (or write at the cursor) with AI
+            if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k' && getPrefs().aiRewrite && target) {
+              e.preventDefault();
+              const el = ta.current!;
+              const line = lineOfOffset(el.value, el.selectionStart);
+              const anchor = (pre.current?.querySelectorAll<HTMLElement>('.l')[line] ?? el).getBoundingClientRect();
+              openSourceRewrite({
+                docId: target.docId, host: document.body, textarea: el, anchor,
+                onAccept: (tex, from, to) => {
+                  const v = el.value.slice(0, from) + tex + el.value.slice(to);
+                  el.value = v;
+                  const at = from + tex.length;
+                  el.setSelectionRange(at, at);
+                  undo.current.record({ value: v, start: at, end: at });
+                  textRef.current = v; setText(v); setDirty(true); updateCursor(); scheduleApply();
+                  el.focus();
+                },
+              });
+              return;
+            }
             const ur = undoRedoKey(e);
             if (ur) { e.preventDefault(); const s = applyUndoRedo(ta.current!, undo.current, ur); if (s) { textRef.current = s.value; ta.current!.value = s.value; setText(s.value); setDirty(true); updateCursor(); scheduleApply(); } return; }
             if (e.isComposing) return;

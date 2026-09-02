@@ -61,7 +61,7 @@ export function SettingsPanel({ ai, user, initial, onClose }: { ai: AiStatus | n
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
 
-  const check = (key: 'spellcheck' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath', label: string, hint: string) => (
+  const check = (key: 'spellcheck' | 'autoCorrect' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath', label: string, hint: string) => (
     <label class="pref"><input type="checkbox" data-pref={key} checked={p[key]} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
   );
   const toggleRecopy = async (u: AdminUser) => {
@@ -83,6 +83,7 @@ export function SettingsPanel({ ai, user, initial, onClose }: { ai: AiStatus | n
           {section === 'editor' && <>
             <h3>Text</h3>
             {check('spellcheck', 'Spell checking', 'Misspelt words are underlined; the right-click menu offers corrections.')}
+            {check('autoCorrect', 'Autocorrect typos', 'A minor typo is fixed when the word is finished (never in formulas); Backspace right after puts it back.')}
             <Row label="Checker"><select data-pref="spellEngine" value={p.spellEngine} onChange={e => setPref('spellEngine', (e.target as HTMLSelectElement).value as Prefs['spellEngine'])}>
               <option value="overlyx">OverLyX — instant, knows LaTeX (skips formulas, commands, code), suggestions in the menu; English, British, German, French</option>
               <option value="browser">Browser — the browser's own checker (checks slowly after a click; suggestions only via {/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click)</option>

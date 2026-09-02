@@ -280,7 +280,9 @@ blend.
   `[mcp_servers.overlyx]` entry pointing at `/mcp` with an internal per-account token): document
   edits arrive as tracked changes (`\lyxadded`), reviewable like a collaborator's, `write_file`
   covers `.bib` and friends, `build_pdf` compiles through the app's queue. A direct filesystem
-  write is a sandbox exception the panel asks the user to grant. The panel streams
+  write is a sandbox exception the panel asks the user to grant. The developer instructions steer the agent to explore
+  and explain by default — document edits only on an explicit ask — and codex's web_search tool is
+  enabled (internet access; sandboxed shell commands still ask). The panel streams
   message/reasoning deltas, tool calls (folded) and diffs over SSE. Every message carries editor
   context automatically: the open documents and the current selection — as LaTeX (the ⌘K
   conversion) and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in an excerpt of the file. Formulas in the
@@ -300,7 +302,14 @@ blend.
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or
   Preferences — the switches are menu items, so the command palette finds them): needs
   `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.7 Flash rewrites,
-  Gemini 2.5 Flash Lite completes (`OVERLYX_AI_MODEL`, `OVERLYX_AI_COMPLETION_MODEL`).
+  Gemini 2.5 Flash Lite completes (`OVERLYX_AI_MODEL`, `OVERLYX_AI_COMPLETION_MODEL`). The ⌘K
+  panel has its own model picker (kept as the ⌘K preference), accepts follow-up instructions that
+  refine the shown proposal (Enter with an empty box accepts), and also works in the source view
+  (⌘K over selected raw LaTeX proposes raw source; accepting splices it and the live apply carries
+  it into the document). Autocorrect (Tools ▸ Autocorrect typos, on by default): a minor typo is
+  fixed when the word is finished — dictionary-based (adjacent-swap candidates checked directly:
+  Hunspell never suggests 'the' for 'teh'), never in formulas or code, Backspace right after
+  reverts and pins the word for the session.
   * *Rewrite with AI* — `⌘K` / `Ctrl+K` (LyX's delete-to-end-of-paragraph on that key steps aside
     while this is on): select a passage — or nothing, to write at the cursor — and describe the
     change in the small prompt under it. The passage, the instruction and the document's LaTeX

@@ -78,6 +78,18 @@ export function spellSuggest(word: string, language?: string): Promise<string[]>
   });
 }
 
+/** Is the word spelled correctly? (true also when no dictionary is available — never correct blindly) */
+export function spellCheckWord(word: string, language?: string): Promise<boolean> {
+  const w = ensureWorker(dictionaryFor(language ?? editorContext.meta?.language));
+  if (!w) return Promise.resolve(true);
+  const id = ++seq;
+  return new Promise(resolve => {
+    const t = setTimeout(() => { waiting.delete(id); resolve(true); }, 1500);
+    waiting.set(id, r => { clearTimeout(t); resolve(!(r.type === 'result' && r.wrong.length)); });
+    w.postMessage({ type: 'check', id, words: [word] } satisfies SpellRequest);
+  });
+}
+
 function notify(): void { for (const l of listeners) l(); }
 /** the word (and its case variants) is fine from now on, in every document opened in this browser */
 export function addToDictionary(word: string): void {

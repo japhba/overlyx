@@ -27,6 +27,7 @@ export function adminCredentials(): { username: string; password: string } {
 export async function login(page: Page, creds = adminCredentials(), opts: { tour?: boolean } = {}): Promise<void> {
   // the interactive tour is offered once per browser; keep it out of the way unless a spec wants it
   if (!opts.tour) await page.addInitScript(TOUR_SEEN_SCRIPT);
+  await page.addInitScript(AUTOCORRECT_OFF_SCRIPT);
   await page.goto('/');
   // with Google sign-in configured the password form is folded away behind a link
   await page.locator('[data-password-login], input[placeholder="Username"]').first().waitFor({ timeout: 20000 });
@@ -52,6 +53,8 @@ export function collectErrors(page: Page): string[] {
 }
 
 export const TOUR_SEEN_SCRIPT = () => { try { if (!localStorage.getItem('ol.tour')) localStorage.setItem('ol.tour', 'e2e'); } catch { /* ignore */ } };
+/** e2e types prose verbatim (papers!): autocorrect stays off unless a spec sets the key itself */
+const AUTOCORRECT_OFF_SCRIPT = () => { try { const p = JSON.parse(localStorage.getItem('ol.prefs') ?? '{}'); if (!('autoCorrect' in p)) { p.autoCorrect = false; localStorage.setItem('ol.prefs', JSON.stringify(p)); } } catch { /* ignore */ } };
 
 export async function apiLogin(ctx: BrowserContext, creds = adminCredentials()): Promise<void> {
   await ctx.addInitScript(TOUR_SEEN_SCRIPT);      // pages of this context must not be offered the tour

@@ -1,6 +1,6 @@
 /** Shared editor context (current user, document meta, UI hooks) for node views and commands. */
 import type { EditorView } from 'prosemirror-view';
-import type { DocMeta, User } from '../api';
+import type { AiStatus, DocMeta, User } from '../api';
 
 export interface EditorContext {
   user: User | null;
@@ -29,8 +29,8 @@ export interface EditorContext {
   gotoLabel?: (name: string, from?: EditorView) => void;
   /** the editor view that had the selection last (master or a child document) */
   activeView?: EditorView | null;
-  /** the server can answer AI requests (a key is configured); the model names for the UI */
-  ai?: { available: boolean; model: string; completionModel: string };
+  /** the server can answer AI requests (a key is configured); the models offered, for the UI */
+  ai?: AiStatus;
   /** an AI request is in flight (the status bar shows it) */
   aiBusy?: (on: boolean) => void;
   /** ⌘K inside a formula (set by editor/ai/rewrite.ts; the math field calls it) */

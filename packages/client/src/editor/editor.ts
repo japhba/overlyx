@@ -39,6 +39,7 @@ import { aiCompletePlugin } from './ai/complete';
 import { installMathAssist } from './ai/mathassist';
 import { getPrefs, subscribePrefs } from '../prefs';
 import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
+import { autocorrectPlugin } from './spell/autocorrect';
 import { api, type User } from '../api';
 
 installMathAssist();
@@ -302,6 +303,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     aiRewritePlugin(),
     aiCompletePlugin(),
     spellPlugin(),
+    autocorrectPlugin(),
     chordPlugin(),
     lyxKeymap(),
     fontCarryPlugin(),

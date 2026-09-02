@@ -206,8 +206,20 @@ export interface RewriteRequest {
   /** text of the paragraph before / after the cursor (locates the cursor in the document when nothing is selected) */
   before?: string; after?: string;
   math?: { latex: string; display: boolean; selection?: string };
+  /** raw .tex source selected in the source view — the reply is raw LaTeX for the file, not parsed */
+  source?: { text: string; before?: string; after?: string };
+  /** follow-up: earlier proposals for the same passage, oldest first — the new instruction refines the last one */
+  history?: { instruction: string; tex: string }[];
 }
 export interface RewriteResult { tex: string; nodes: PMJSON[]; original: string }
+
+/** The follow-up section of the prompt: the proposals so far; the instruction refines the last one. */
+function historySection(history: RewriteRequest['history']): string {
+  const h = (history ?? []).filter(x => x && typeof x.tex === 'string').slice(-5);
+  if (!h.length) return '';
+  return h.map((x, i) => `\n\n## Your proposal ${i + 1} for this passage (instruction: ${String(x.instruction ?? '').slice(0, 400)})\n${x.tex.slice(0, 4000)}`).join('')
+    + '\n\nThe user follows up: apply the new instruction to your LAST proposal above (the original passage still says where the replacement goes).';
+}
 
 export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortSignal): Promise<RewriteResult> {
   const instruction = req.instruction.trim();
@@ -215,10 +227,23 @@ export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortS
   const model = pickModel(req.model, config.ai.model);
   const docText = doc.toText();
   const macros = macroLines(doc);
+  if (req.source) {
+    // the source view: the selection is raw .tex text; the reply goes verbatim into the file
+    const sel = req.source.text ?? '';
+    let context = documentContext(docText, sel.trim() ? sel : '', 120000);
+    if (!sel.trim() && req.source.before?.trim()) {
+      const loc = locate(docText, req.source.before.slice(-300));
+      if (loc) context = documentContext(docText.slice(0, loc.end) + CURSOR + docText.slice(loc.end), CURSOR, 120000, false);
+    }
+    const what = sel.trim() ? `## The selected source to replace\n\`\`\`latex\n${sel.slice(0, 12000)}\n\`\`\`` : `## Nothing is selected — write new source for the cursor, marked ${CURSOR}`;
+    const user = `## Document (.tex source, for context; the selection is marked ${SEL_OPEN} … ${SEL_CLOSE} when present)\n${context}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n${what}${historySection(req.history)}\n\n## Instruction\n${instruction}\n\nReply with the raw LaTeX replacement only — it goes verbatim into the .tex file (no fences, no commentary, no \\documentclass unless the selection contained one).`;
+    const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { model, signal, title: 'OverLyX rewrite' }));
+    return { tex: reply, nodes: [], original: sel };
+  }
   if (req.math) {
     const original = req.math.selection ?? req.math.latex;
     const context = documentContext(docText, req.math.latex, 60000);
-    const user = `## Document (for context)\n${context}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## The formula being edited (${req.math.display ? 'display' : 'inline'} math)\n${req.math.latex}\n\n## Part of it to replace\n${original}\n\n## Instruction\n${instruction}\n\nReply with LaTeX math only (no $ or \\[ delimiters, no environment unless the part to replace contains one), the replacement for the part.`;
+    const user = `## Document (for context)\n${context}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## The formula being edited (${req.math.display ? 'display' : 'inline'} math)\n${req.math.latex}\n\n## Part of it to replace\n${original}${historySection(req.history)}\n\n## Instruction\n${instruction}\n\nReply with LaTeX math only (no $ or \\[ delimiters, no environment unless the part to replace contains one), the replacement for the part.`;
     const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { model, signal, title: 'OverLyX rewrite' }));
     return { tex: reply.replace(/^\$+|\$+$/g, '').trim(), nodes: [], original };
   }
@@ -229,7 +254,7 @@ export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortS
     const loc = locate(docText, req.before.slice(-300));
     if (loc) context = documentContext(docText.slice(0, loc.end) + CURSOR + docText.slice(loc.end), CURSOR, 160000, false);
   }
-  const user = `## Document (for context; the passage to replace is marked)\n${context}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Passage to replace\n${original || '(empty — insert new text at the cursor)'}\n\n## Instruction\n${instruction}\n\nReply with the replacement for the passage only.`;
+  const user = `## Document (for context; the passage to replace is marked)\n${context}\n\n## Macros known to the document\n${macros.join('\n') || '(none)'}\n\n## Passage to replace\n${original || '(empty — insert new text at the cursor)'}${historySection(req.history)}\n\n## Instruction\n${instruction}\n\nReply with the replacement for the passage only.`;
   const reply = cleanReply(await chat([{ role: 'system', content: REWRITE_SYSTEM }, { role: 'user', content: user }], { model, signal, title: 'OverLyX rewrite' }));
   let nodes: PMJSON[] = [];
   try { nodes = texToPm(doc, reply); } catch (e) { throw new AiError(`The reply could not be parsed as LaTeX: ${(e as Error).message}`); }

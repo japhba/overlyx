@@ -1188,6 +1188,14 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .agent-math { user-select: all; -webkit-user-select: all; border-radius: 4px; }
 .agent-math:hover { background: var(--ui-hover); }
 .agent-msg a { color: var(--accent); }
+
+/* ⌘K panel: model choice and raw-source proposals */
+.ai-panel .ai-model { max-width: 130px; font-size: 11px; background: var(--page-bg); color: var(--ui-muted); border: 1px solid var(--ui-border); border-radius: 5px; padding: 1px 2px; flex: none; }
+.ai-panel .ai-src { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; margin: 0; }
+
+/* a word the autocorrecter just fixed flashes briefly */
+.ol-autocorrected { border-radius: 2px; animation: ol-autocorrect-fade 2.2s ease-out forwards; }
+@keyframes ol-autocorrect-fade { from { background: color-mix(in srgb, var(--accent) 30%, transparent); } to { background: transparent; } }
 .agent-diff-summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer; font-size: 12px; color: var(--ui-muted); }
 .agent-diff-summary .chev { flex: none; }
 .agent-diff-summary .file { font-family: ui-monospace, monospace; }

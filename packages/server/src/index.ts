@@ -751,7 +751,7 @@ api.post('/docs/*/ai/rewrite', async (req, res) => {
     const doc = await manager.open(docId(req));
     const ac = new AbortController();
     req.on('close', () => { if (!res.writableEnded) ac.abort(); });
-    const r = await aiRewrite(doc, { instruction: body.instruction, content: Array.isArray(body.content) ? body.content : [], layout: typeof body.layout === 'string' ? body.layout : undefined, before: typeof body.before === 'string' ? body.before : undefined, after: typeof body.after === 'string' ? body.after : undefined, model: body.model, math: body.math && typeof body.math.latex === 'string' ? body.math : undefined }, ac.signal);
+    const r = await aiRewrite(doc, { instruction: body.instruction, content: Array.isArray(body.content) ? body.content : [], layout: typeof body.layout === 'string' ? body.layout : undefined, before: typeof body.before === 'string' ? body.before : undefined, after: typeof body.after === 'string' ? body.after : undefined, model: body.model, math: body.math && typeof body.math.latex === 'string' ? body.math : undefined, source: body.source && typeof body.source.text === 'string' ? { text: String(body.source.text).slice(0, 30000), before: typeof body.source.before === 'string' ? body.source.before : undefined, after: typeof body.source.after === 'string' ? body.source.after : undefined } : undefined, history: Array.isArray(body.history) ? body.history.slice(-5).map((h: any) => ({ instruction: String(h?.instruction ?? '').slice(0, 1000), tex: String(h?.tex ?? '').slice(0, 8000) })) : undefined }, ac.signal);
     res.json(r);
   } catch (e) {
     if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }

@@ -120,6 +120,26 @@ describe('rewrite', () => {
     expect(r.nodes).toEqual([]);
     expect(lastRequest.messages[1].content).toContain('\\sigma^2/2');
   });
+  it('source view: raw LaTeX in, raw LaTeX out, with the selection marked in the file', async () => {
+    nextReply = '\\textbf{the gain}';
+    const r = await ai.rewrite(doc, { instruction: 'bold it', content: [], source: { text: 'the gain $g$ controls the transition to chaos', before: 'weights is $\\sigma^2$, and ', after: '.' } });
+    expect(r.tex).toBe('\\textbf{the gain}');
+    expect(r.nodes).toEqual([]);
+    expect(r.original).toBe('the gain $g$ controls the transition to chaos');
+    const user = (lastRequest.messages[1].content as string).replace(/\s+/g, ' ');
+    expect(user).toContain('⟦SELECTION⟧the gain $g$ controls the transition to chaos⟦/SELECTION⟧');
+    expect(user).toContain('## The selected source to replace');
+    expect(user).toContain('goes verbatim into the .tex file');
+  });
+  it('a follow-up carries the earlier proposal and asks to refine it', async () => {
+    nextReply = 'The gain $g$ governs chaos onset.';
+    await ai.rewrite(doc, { instruction: 'shorter', content: [par('The gain controls the transition.')], history: [{ instruction: 'crisper', tex: 'The gain $g$ governs the onset of chaos.' }] });
+    const user = lastRequest.messages[1].content as string;
+    expect(user).toContain('## Your proposal 1 for this passage (instruction: crisper)');
+    expect(user).toContain('The gain $g$ governs the onset of chaos.');
+    expect(user).toContain('apply the new instruction to your LAST proposal');
+  });
+
   it('rejects an empty instruction and reports upstream failures as AiError', async () => {
     await expect(ai.rewrite(doc, { instruction: '  ', content: [] })).rejects.toBeInstanceOf(ai.AiError);
     failNext = true;

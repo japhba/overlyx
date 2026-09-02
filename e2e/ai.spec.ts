@@ -170,6 +170,54 @@ test.describe('with the AI stub', () => {
     await expect(page.locator('.lyx-editor .lyx-par').last()).toHaveText('Second proposed paragraph.');
   });
 
+  test('⌘K: model picker in the panel, follow-ups refine the proposal, and the source view rewrites raw LaTeX', async ({ page }) => {
+    await open(page, { aiRewrite: true, aiCompleteText: false, aiCompleteMath: false });
+    await page.locator('.lyx-editor .lyx-par').nth(2).click({ position: { x: 12, y: 8 } });   // focus the editor first
+    await selectParagraph(page, 2);
+    await page.keyboard.press('Control+k');
+    const panel = page.locator('.ai-panel');
+    await expect(panel).toBeVisible();
+    // the model is chosen right in the panel and kept as the ⌘K preference
+    await panel.locator('.ai-model option[value="anthropic/claude-haiku-4.5"]').waitFor({ state: 'attached' });   // options are never 'visible'
+    await panel.locator('.ai-model').selectOption('anthropic/claude-haiku-4.5');
+    await panel.locator('.ai-input').click();
+    await page.keyboard.type('make it crisper');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.ai-new')).toBeVisible({ timeout: 10000 });
+    const log = await (await page.request.get('http://127.0.0.1:3999/log')).json() as { model: string }[];
+    expect(log[log.length - 1].model).toBe('anthropic/claude-haiku-4.5');
+    expect(JSON.parse(await page.evaluate(() => localStorage.getItem('ol.prefs')!)).aiModel).toBe('anthropic/claude-haiku-4.5');
+    // the box empties for a follow-up: the next instruction refines the shown proposal
+    await page.keyboard.type('shorter please');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.ai-new')).toContainText('Refined (shorter please)', { timeout: 10000 });
+    // Enter with an empty box accepts the refined proposal
+    await page.keyboard.press('Enter');
+    await expect(panel).toHaveCount(0);
+    await expect(page.locator('.lyx-editor .lyx-par').nth(2)).toContainText('Refined (shorter please)');
+
+    // the source view: ⌘K over selected raw LaTeX proposes raw source and applies it to the document
+    await page.keyboard.press('Control+Alt+s');
+    const ta = page.locator('.source-pane textarea');
+    await expect(ta).toBeVisible();
+    await expect(ta).toHaveValue(/The last paragraph of the paper/, { timeout: 10000 });
+    await ta.evaluate((el: HTMLTextAreaElement) => {
+      const at = el.value.indexOf('The last paragraph of the paper.');
+      el.focus(); el.setSelectionRange(at, at + 'The last paragraph of the paper.'.length);
+    });
+    await page.keyboard.press('Control+k');
+    const srcPanel = page.locator('.ai-panel[data-ai-panel="source"]');
+    await expect(srcPanel).toBeVisible();
+    await page.keyboard.type('bold it');
+    await page.keyboard.press('Enter');
+    await expect(srcPanel.locator('.ai-src')).toContainText('rewritten source (bold it)', { timeout: 10000 });
+    await page.keyboard.press('Enter');   // empty box: accept
+    await expect(srcPanel).toHaveCount(0);
+    await expect(ta).toHaveValue(/\\textbf\{rewritten source \(bold it\)\}/);
+    // the live apply carries it into the document as real structure
+    await expect(page.locator('.lyx-editor')).toContainText('rewritten source (bold it)', { timeout: 15000 });
+  });
+
   test('the model chosen in the preferences is sent with the requests', async ({ page }) => {
     await open(page, { aiRewrite: false, aiCompleteText: true, aiCompleteMath: false, aiCompleteDelay: 200 });
     await page.click('.menubar .menu button:has-text("Tools")');
