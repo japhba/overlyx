@@ -125,6 +125,22 @@ describe('threads and turns', () => {
     expect(list.body.threads[0].title).toBe('hello agent');
   });
 
+  it('the context item names the open documents and marks the selection in the file', async () => {
+    const events = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
+    await sleep(150);
+    await post(`/projects/p/agent/threads/${tid}/turn`, { text: 'about this', context: {
+      docId: 'p/paper.tex', layout: 'Standard', openDocs: ['p/paper.tex', 'p/notes.tex'],
+      content: [{ type: 'paragraph', attrs: { layout: 'Standard', depth: 0 }, content: [{ type: 'text', text: 'Hello.' }] }],
+    } });
+    const evs = await events;
+    const um = evs.find(e => e.method === 'item/completed' && e.params.item?.type === 'userMessage');
+    const ctxText = um?.params.item.content?.[0]?.text ?? '';
+    expect(ctxText).toContain('Also open in their workspace: p/notes.tex');
+    expect(ctxText).toContain('Their current selection in that document:');
+    expect(ctxText).toContain('⟦SELECTION⟧Hello.⟦/SELECTION⟧');
+    expect(ctxText.trimEnd().endsWith('[/context]')).toBe(true);
+  });
+
   it('lists the models codex offers (hidden ones filtered)', async () => {
     const r = await get('/agent/models');
     expect(r.status).toBe(200);

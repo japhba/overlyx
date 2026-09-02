@@ -281,8 +281,9 @@ blend.
   edits arrive as tracked changes (`\lyxadded`), reviewable like a collaborator's, `write_file`
   covers `.bib` and friends, `build_pdf` compiles through the app's queue. A direct filesystem
   write is a sandbox exception the panel asks the user to grant. The panel streams
-  message/reasoning deltas, tool calls (folded) and diffs over SSE; "selection" in the composer
-  sends the current editor selection along as LaTeX (the ⌘K conversion). Formulas in the
+  message/reasoning deltas, tool calls (folded) and diffs over SSE. Every message carries editor
+  context automatically: the open documents and the current selection — as LaTeX (the ⌘K
+  conversion) and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in an excerpt of the file. Formulas in the
   transcript (assistant, user and reasoning text) render through the math editor's KaTeX path
   with the document's macros; they select as one unit, and copying puts their LaTeX source on
   the clipboard (`app/richcopy.ts`) — so equations round-trip between the transcript, the

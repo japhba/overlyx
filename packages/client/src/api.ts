@@ -71,7 +71,7 @@ export interface AgentItem {
 export interface AgentTurn { id: string; items: AgentItem[]; status: string }
 /** one message of the agent events stream (SSE) */
 export interface AgentEventMsg { kind: 'notification' | 'request' | 'status'; method?: string; params?: any; requestId?: string; running?: boolean }
-export interface AgentTurnContext { docId?: string; content?: PMJSON[]; layout?: string; mathLatex?: string }
+export interface AgentTurnContext { docId?: string; content?: PMJSON[]; layout?: string; mathLatex?: string; openDocs?: string[] }
 export interface AgentModel { id: string; label: string; description: string; efforts: string[]; defaultEffort: string | null; isDefault: boolean }
 
 /**

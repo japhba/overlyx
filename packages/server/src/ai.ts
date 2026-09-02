@@ -174,7 +174,7 @@ export function locate(hay: string, needle: string): { start: number; end: numbe
 const SEL_OPEN = '⟦SELECTION⟧', SEL_CLOSE = '⟦/SELECTION⟧', CURSOR = '⟦CURSOR⟧';
 
 /** The document's LaTeX with the passage marked (or just centred on it), cut to a window around it when the document is long. */
-function documentContext(text: string, snippet: string, maxChars: number, mark = true): string {
+export function documentContext(text: string, snippet: string, maxChars: number, mark = true): string {
   const loc = snippet.trim() ? locate(text, snippet) : null;
   let marked = text;
   let centre = 0;

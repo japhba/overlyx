@@ -12,6 +12,7 @@ import { api, type Project, type TexHeading } from '../api';
 import { FileBrowser, projectLabel, useProjectEvents } from './FileBrowser';
 import { projectDocs } from './Home';
 import { Outline, type OutlineItem } from './Outline';
+import { editorContext } from '../editor/context';
 
 export interface DocPanelProps {
   /** the file shown (project/path, no prefix) */
@@ -76,6 +77,17 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
 
   // the open document's tab is expanded (its outline is the live one)
   useEffect(() => { if (currentDoc) setExpanded(e => (e[currentDoc] ? e : { ...e, [currentDoc]: true })); }, [currentDoc]);
+
+  // the agent's context: which documents are open here (the active one first)
+  useEffect(() => {
+    const fn = () => {
+      const open = project ? docs.map(d => `${project.name}/${d}`).filter(id => expanded[id]) : [];
+      const active = currentDoc ?? current;
+      return active ? [active, ...open.filter(id => id !== active)] : open;
+    };
+    editorContext.openDocs = fn;
+    return () => { if (editorContext.openDocs === fn) editorContext.openDocs = undefined; };
+  });
 
   /** switching projects opens the other project's main document (one project at a time) */
   const switchProject = (name: string) => {

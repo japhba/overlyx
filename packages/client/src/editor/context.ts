@@ -38,6 +38,8 @@ export interface EditorContext {
   /** the formula field currently being edited (App.tsx tracks focus) — the Agent panel reads its
    *  selection when the ProseMirror selection is empty */
   mathField?: import('./lyxmath/field').LyxMathField | null;
+  /** documents open in the workspace panel (the active one first) — sent to the agent as context */
+  openDocs?: () => string[];
 }
 
 export const editorContext: EditorContext = { user: null, meta: null, docId: null, project: null, docDir: '', trackChanges: false, combined: false };

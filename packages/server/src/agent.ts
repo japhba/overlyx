@@ -22,7 +22,7 @@ import { manager } from './docs.ts';
 import { projectDir } from './projects.ts';
 import { roleFor, atLeast, logAccess } from './access.ts';
 import { createMcpToken } from './mcpTokens.ts';
-import { selectionToTex } from './ai.ts';
+import { selectionToTex, documentContext } from './ai.ts';
 import type { PMJSON } from '@overlyx/core';
 
 /* ------------------------------------------------------------------ protocol types (the subset we touch) */
@@ -39,7 +39,8 @@ export interface AgentEvent {
 
 const DEV_INSTRUCTIONS = (project: string) => `You are embedded in OverLyX, a collaborative WYSIWYG LaTeX editor. The working directory is the user's LaTeX project "${project}"; its .tex files are the live documents — edits you make to them appear in the user's editor within seconds, and are versioned automatically.
 Read project files directly as much as you like — but ALL edits go through the "overlyx" MCP server's tools with project "${project}". For .tex documents the workflow is: read_document (gives numbered paragraphs), then replace_paragraph / insert_paragraphs / delete_paragraph with raw LaTeX — these apply as tracked changes the user reviews and accepts in the editor, which is the whole point. NEVER use apply_patch or shell edits on .tex files, and never write_document on an existing document (it replaces the whole source untracked; it is only for creating new files). write_file is for .bib and other non-document text files; build_pdf compiles through OverLyX's queue. The filesystem is sandboxed read-only, and note the .tex files on disk are live documents that change as people type — a byte-level patch will often fail; the paragraph tools do not.
-Conventions: comment lines starting with %% are OverLyX bookkeeping (notes, settings) — leave them unless asked; \\lyxadded/\\lyxdeleted macros are tracked changes — preserve them; never run git commit or push (OverLyX commits automatically). Do NOT recompile the PDF after every edit: the user builds from the editor whenever they want to look — compile only when explicitly asked, or once at the end of a larger change when you genuinely need to check it compiles.`;
+Conventions: comment lines starting with %% are OverLyX bookkeeping (notes, settings) — leave them unless asked; \\lyxadded/\\lyxdeleted macros are tracked changes — preserve them; never run git commit or push (OverLyX commits automatically). Do NOT recompile the PDF after every edit: the user builds from the editor whenever they want to look — compile only when explicitly asked, or once at the end of a larger change when you genuinely need to check it compiles.
+Each user message may be preceded by a [context]…[/context] item the editor adds (the user did not write it): the document being edited, the other open documents, and the current selection — quoted, and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in a file excerpt. Use it to resolve "this", "here" or an unqualified request.`;
 
 /* ------------------------------------------------------------------ per-user codex host */
 
@@ -238,22 +239,38 @@ export function agentAvailable(): boolean { return config.agent.enabled; }
 
 /* ------------------------------------------------------------------ selection context */
 
-export interface TurnContext { docId?: string; content?: PMJSON[]; layout?: string; mathLatex?: string }
+export interface TurnContext { docId?: string; content?: PMJSON[]; layout?: string; mathLatex?: string; openDocs?: string[] }
 
-/** The input sent to the agent: a context item (where the user is, what they selected — the client
- *  hides items starting with "[context]") followed by the user's message. */
+/** The input sent to the agent: a context item (where the user is, which documents are open,
+ *  what they selected — quoted, and marked in an excerpt of the live file; the client hides
+ *  items starting with "[context]") followed by the user's message. */
 async function composeInput(text: string, ctx: TurnContext | undefined): Promise<{ type: 'text'; text: string; text_elements: never[] }[]> {
   const item = (t: string) => ({ type: 'text' as const, text: t, text_elements: [] as never[] });
   if (!ctx?.docId) return [item(text)];
   const lines = [`[context] The user is editing ${ctx.docId} in OverLyX.`];
+  const others = [...new Set(ctx.openDocs ?? [])].filter(d => d !== ctx.docId).slice(0, 8);
+  if (others.length) lines.push(`Also open in their workspace: ${others.join(', ')}.`);
+  let sel = '';
   try {
     if (ctx.content?.length) {
       const doc = await manager.open(ctx.docId);
-      const tex = selectionToTex(doc, ctx.content, ctx.layout ?? 'Standard');
-      if (tex.trim()) lines.push('Their current selection in that document:', '```latex', tex.trim().slice(0, 6000), '```');
+      sel = selectionToTex(doc, ctx.content, ctx.layout ?? 'Standard').trim();
+      if (sel) lines.push('Their current selection in that document:', '```latex', sel.slice(0, 6000), '```');
     }
   } catch { /* selection context is best-effort */ }
-  if (ctx.mathLatex?.trim()) lines.push('Their current selection, inside a formula:', '```latex', ctx.mathLatex.trim().slice(0, 2000), '```');
+  if (!sel && ctx.mathLatex?.trim()) {
+    sel = ctx.mathLatex.trim();
+    lines.push('Their current selection, inside a formula:', '```latex', sel.slice(0, 2000), '```');
+  }
+  if (sel) {
+    // where it sits: an excerpt of the live file with the passage marked (best-effort — the
+    // selection may not appear verbatim in the file, e.g. a partial formula)
+    try {
+      const doc = await manager.open(ctx.docId);
+      const excerpt = documentContext(doc.toText(), sel, 5000);
+      if (excerpt.includes('⟦SELECTION⟧')) lines.push(`Where the selection sits in ${ctx.docId} (the ⟦SELECTION⟧…⟦/SELECTION⟧ markers are not part of the file):`, '```latex', excerpt, '```');
+    } catch { /* best-effort */ }
+  }
   // codex concatenates input items into one string when it echoes/stores the user message, so the
   // context block carries an explicit terminator the client can strip it by (AgentPanel userText)
   return [item(lines.join('\n') + '\n[/context]'), item(text)];

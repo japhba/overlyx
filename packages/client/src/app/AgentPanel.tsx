@@ -32,14 +32,17 @@ const transcriptCopy = (e: ClipboardEvent) => {
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const store = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
 
-/** The current editor selection as the context the server turns into LaTeX. */
+/** The editor context sent with every message: the open documents and the current selection
+ *  (the server turns it into LaTeX and marks it in an excerpt of the file). */
 function selectionContext(): AgentTurnContext | undefined {
   const view = editorContext.activeView;
-  const docId = editorContext.docId;
-  if (!view || !docId) return docId ? { docId } : undefined;
-  const sel = view.state.selection;
-  const ctx: AgentTurnContext = { docId: view.dom.dataset.docId ?? docId };
-  if (!sel.empty) {
+  const docId = (view?.dom.dataset.docId ?? editorContext.docId)?.replace(/^(text|pdf):/, '');
+  if (!docId) return undefined;
+  const ctx: AgentTurnContext = { docId };
+  const open = editorContext.openDocs?.() ?? [];
+  if (open.length) ctx.openDocs = open.slice(0, 8);
+  const sel = view?.state.selection;
+  if (sel && !sel.empty) {
     ctx.content = (sel.content().toJSON() as { content?: any[] } | null)?.content ?? [];
     ctx.layout = String(sel.$from.parent.attrs?.layout ?? 'Standard');
   } else {
@@ -222,7 +225,6 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [busyTurn, setBusyTurn] = useState<string | null>(null);
   const [text, setText] = useState('');
-  const [includeSel, setIncludeSel] = useState(true);
   const [models, setModels] = useState<AgentModel[]>([]);
   const [model, setModel] = useState(stored('ol.agent.model') ?? '');
   const [effort, setEffort] = useState(stored('ol.agent.effort') ?? '');
@@ -344,11 +346,11 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
     if (busyTurn && busyTurn !== 'pending' && selRef.current) {
       setText('');
       setItems(list => [...list, localItem]);
-      void api.agentSteer(project, selRef.current, busyTurn, t, localItem.id, includeSel ? selectionContext() : undefined).catch(e => notify(errText(e), 'error'));
+      void api.agentSteer(project, selRef.current, busyTurn, t, localItem.id, selectionContext()).catch(e => notify(errText(e), 'error'));
       return;
     }
     if (busyTurn) return;
-    const context = includeSel ? selectionContext() : undefined;
+    const context = selectionContext();
     setText('');
     void (async () => {
       try {
@@ -445,7 +447,6 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
                 {efforts.map(ef => <option key={ef} value={ef}>{ef}</option>)}
               </select>
             )}
-            <label title="Send the current editor selection along as context"><input type="checkbox" checked={includeSel} onChange={e => setIncludeSel((e.target as HTMLInputElement).checked)} /> selection</label>
             <span class="spacer" />
             {busyTurn && busyTurn !== 'pending' && sel && <button class="small-btn" data-agent-stop onClick={() => void api.agentInterrupt(project, sel, busyTurn).catch(e => notify(errText(e), 'error'))}>Stop</button>}
             <button class="small-btn" data-agent-send disabled={!text.trim() || busyTurn === 'pending'} onClick={send}>{busyTurn && busyTurn !== 'pending' ? 'Steer' : 'Send'}</button>
