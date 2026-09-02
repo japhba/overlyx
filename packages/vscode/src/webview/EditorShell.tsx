@@ -201,7 +201,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       refreshMacros(handle.view, m?.macros ?? {});
       postOutline(handle.view);
       rerender();
-      api.aiStatus().then(s => { editorContext.ai = s; }).catch(() => { editorContext.ai = { available: false, model: '', completionModel: '' }; });
+      api.aiStatus().then(s => { editorContext.ai = s; }).catch(() => { editorContext.ai = { available: false, model: '', completionModel: '', models: [] }; });
       handle.view.focus();
     })();
     return () => { cancelled = true; handle?.destroy(); handleRef.current = null; };

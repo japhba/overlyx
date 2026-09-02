@@ -9,7 +9,7 @@ import {
   paramMap, unquote, walkInsets, plainText, checkTexHealth,
   type LyxDocument,
 } from '@overlyx/core';
-import { loadDocumentClass, describeLayouts, flexInsetNames } from '@overlyx/core/latex/layouts.ts';
+import { loadDocumentClass, applyDocumentTheorems, describeLayouts, flexInsetNames } from '@overlyx/core/latex/layouts.ts';
 import { collectFiles, findMaster, isBackupFile, readTextFile } from './project.ts';
 import { cachedParseFile, type TexContext } from './texdoc.ts';
 
@@ -139,7 +139,9 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
   let layouts: unknown = null;
   let flexInsets: unknown = null;
   try {
-    const dc = loadDocumentClass(getTextClass(rootLyx), getModules(rootLyx), ctx.layoutDir, [proj, docDir]);
+    const L = rootLyx.header.lines, ps = L.indexOf('\\begin_preamble'), pe = L.indexOf('\\end_preamble');
+    const userPre = ps >= 0 && pe > ps ? L.slice(ps + 1, pe).join('\n') : '';
+    const dc = applyDocumentTheorems(loadDocumentClass(getTextClass(rootLyx), getModules(rootLyx), ctx.layoutDir, [proj, docDir]), userPre, ctx.layoutDir, [proj, docDir]);
     layouts = describeLayouts(dc);
     flexInsets = dc.insetLayouts ? flexInsetNames(dc) : null;
   } catch { layouts = null; }

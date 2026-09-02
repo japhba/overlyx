@@ -7,7 +7,7 @@
  */
 import { join } from 'node:path';
 import type { LyxDocument } from '../lyx/ast.ts';
-import { DEFAULT_LAYOUT_DIR, loadDocumentClass } from './layouts.ts';
+import { applyDocumentTheorems, DEFAULT_LAYOUT_DIR, loadDocumentClass } from './layouts.ts';
 import { readBufferParams, type BufferParams } from './params.ts';
 import { Features } from './features.ts';
 import { loadLanguages, ENCODING_LATEX_NAMES } from './languages.ts';
@@ -36,7 +36,9 @@ export function makeContext(doc: LyxDocument, opts: ExportOptions, parent?: Expo
   const localDirs = opts.localDirs ?? parent?.opts.localDirs ?? [];
   const dc0 = parent ? parent.dc : loadDocumentClass(effective.textclass, effective.modules, layoutDir, localDirs);
   // tex mode: what the user's preamble loads counts as provided by the class
-  const dc = parent || !opts.provided?.size ? dc0 : { ...dc0, provides: new Set([...dc0.provides, ...opts.provided]) };
+  const dcProvided = parent || !opts.provided?.size ? dc0 : { ...dc0, provides: new Set([...dc0.provides, ...opts.provided]) };
+  // the document's own \newtheorem environments (kept in the user preamble) as layouts
+  const dc = parent ? dcProvided : applyDocumentTheorems(dcProvided, effective.preamble, layoutDir, localDirs);
   const langs = parent?.langs ?? loadLanguages(join(lib, 'languages'));
   const docLanguage = langs.get(effective.language) ?? langs.get('english') ?? {
     name: effective.language, guiName: '', babel: '', polyglossia: '', polyglossiaOpts: '', encoding: 'iso8859-1', fontEncoding: ['ASCII'],

@@ -609,8 +609,11 @@ class Parser {
       else if (t.cs === ' ') push({ t: 'space', n: ' ' });
 
       else if (t.cs) {
-        const name = t.cs;
+        let name = t.cs;
         const isUserMacro = !!macros[name];
+        // a starred command that the table knows as its own entry (\operatorname*, \tag*):
+        // the star belongs to the name
+        if (!isUserMacro && SYMBOLS[name + '*'] && this.nextToken().ch === '*') { this.getToken(); name += '*'; }
         const l = isUserMacro ? undefined : SYMBOLS[name];
         if (l && l.i !== 'macro') {
           if (l.i === 'big') {

@@ -649,7 +649,9 @@ api.get('/docs/*/meta', async (req, res) => {
     let flexInsets: unknown = null;
     try {
       const mod = await import('@overlyx/core/latex/index.ts') as any;
-      const dc = mod.loadDocumentClass(getTextClass(lyx), getModules(lyx), config.layoutDir, [proj, docDir]);
+      const L = lyx.header.lines, ps = L.indexOf('\\begin_preamble'), pe = L.indexOf('\\end_preamble');
+      const userPre = ps >= 0 && pe > ps ? L.slice(ps + 1, pe).join('\n') : '';
+      const dc = mod.applyDocumentTheorems(mod.loadDocumentClass(getTextClass(lyx), getModules(lyx), config.layoutDir, [proj, docDir]), userPre, config.layoutDir, [proj, docDir]);
       layouts = mod.describeLayouts(dc);
       flexInsets = dc.insetLayouts ? mod.flexInsetNames(dc) : null;
     } catch (e) {

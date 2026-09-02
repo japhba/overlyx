@@ -57,6 +57,8 @@ describe('math round trip (LyX 2.5 conventions)', () => {
     '$\\mathrm{I}$',
     '$\\text{no update in \\ensuremath{[s,t]}}$',
     '$ $',
+    '$\\operatorname{Cov}(x)$',
+    '$\\operatorname*{argmax}_{x}f(x)$',
     '\n\\[\nE=mc^{2}\n\\]\n',
     '\n\\begin{equation}\nE=mc^{2}\\label{eq:e}\n\\end{equation}\n',
     '\n\\begin{align}\na & =b\\\\\nc & =d\\label{eq:cd}\n\\end{align}\n',

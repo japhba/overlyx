@@ -48,6 +48,16 @@ for line in open(src, encoding='utf-8'):
         e = {'i': kind}
         if len(f) > 2 and f[2] != 'none': e['x'] = f[2]
         out.setdefault(name, e)
+# Not in lib/symbols, but supported end-to-end (parse -> KaTeX -> writer): amsmath operators
+for extra in ('operatorname', 'operatorname*'):
+    out.setdefault(extra, {'i': 'font', 'x': 'mathmode'})
+# The shipped table wins for entries it already has: it carries manual fixes and entries from
+# other lib/symbols versions (\uline, the text sizes, \bmod ...) — a regen must never drop them.
+try:
+    shipped = json.load(open(dst))
+    for k, v in shipped.items(): out[k] = v
+except FileNotFoundError:
+    pass
 json.dump(out, open(dst, 'w'), ensure_ascii=False, separators=(',', ':'))
 from collections import Counter
 print(len(out), 'entries', Counter(e['i'] for e in out.values()))

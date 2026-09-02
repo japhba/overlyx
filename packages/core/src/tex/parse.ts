@@ -12,7 +12,7 @@ import type {
   Change, FontState, Inset, Item, LeafInset, LyxDocument, Paragraph, ParagraphParams, TextInset,
 } from '../lyx/ast.ts';
 import { lyxAuthorId, quote } from '../lyx/ast.ts';
-import { DEFAULT_LAYOUT_DIR, loadDocumentClass, textclassForLatexClass, type DocumentClass, type InsetLayout, type LayoutStyle } from '../latex/layouts.ts';
+import { DEFAULT_LAYOUT_DIR, loadDocumentClass, applyDocumentTheorems, textclassForLatexClass, type DocumentClass, type InsetLayout, type LayoutStyle } from '../latex/layouts.ts';
 import { loadUnicodeSymbols, type UnicodeDB } from '../latex/unicode.ts';
 import { loadLanguages, type LanguageDB } from '../latex/languages.ts';
 import { Scanner, groupEnd, type Tok } from './scanner.ts';
@@ -189,6 +189,9 @@ const NOTE_END = /^% @end\s*$/;
 
 class BodyParser {
   warnings: string[] = [];
+  /** preamble material found in the body (agents type it there): collected, re-homed by parseTex */
+  absorbPreamble = false;
+  absorbedPreamble: string[] = [];
   authors = new Map<number, { name: string; email: string }>();
   private cmdStyles = new Map<string, LayoutStyle[]>();
   private envStyles = new Map<string, LayoutStyle>();
@@ -979,6 +982,12 @@ class BodyParser {
         s.pos = save;
         break;
       }
+      if (this.absorbPreamble && (name.startsWith('newtheorem') || name === 'theoremstyle')) {
+        // a declaration typed into the body: kept, but in the preamble where it belongs — the
+        // dynamic theorem layouts were already derived from it
+        this.absorbedPreamble.push(raw);
+        return null;
+      }
       this.pushERT(ctx, st, raw + (s.s[s.pos - 1] !== '}' && s.s[s.pos - 1] !== ']' && t.spaceAfter ? ' ' : ''));
       return null;
     }
@@ -1564,7 +1573,8 @@ export function parseTex(text: string, opts: ParseTexOptions = {}): ParseTexResu
     textclass = setStr('textclass') ?? (split.className ? textclassForLatexClass(split.className, layoutDir, opts.localDirs) ?? split.className : 'article');
     headerLines = [];
   }
-  const dc = loadDocumentClass(textclass, modules, layoutDir, opts.localDirs);
+  // the document's own \newtheorem environments (preamble or body) become theorem layouts
+  const dc = applyDocumentTheorems(loadDocumentClass(textclass, modules, layoutDir, opts.localDirs), split.userPreamble + '\n' + split.body, layoutDir, opts.localDirs);
   if (dc.warnings.length) warnings.push(...dc.warnings);
 
   // derived settings (only used when the settings line does not say)
@@ -1590,15 +1600,18 @@ export function parseTex(text: string, opts: ParseTexOptions = {}): ParseTexResu
   const language = setStr('language') ?? derived.language ?? masterValue('language') ?? 'english';
   const quotes = setStr('quotes_style') ?? masterValue('quotes_style') ?? 'english';
   const parser = new BodyParser(dc, unicode, langs, facts, { language, quotes });
+  parser.absorbPreamble = split.hasDocument && /\\newtheorem/.test(body);
   const pars = parser.parseBody(body);
   warnings.push(...parser.warnings);
+  let userPreamble = split.userPreamble;
+  if (parser.absorbedPreamble.length) userPreamble = (userPreamble.replace(/\s+$/, '') + '\n' + parser.absorbedPreamble.join('\n')).replace(/^\n+/, '');
   mergeCommentErts(pars);
 
   const authors = [...parser.authors.entries()].map(([id, a]) => ({ id, name: a.name, email: a.email }));
   if (!split.hasDocument && opts.masterHeader) {
     for (const a of authors) headerLines.push(`\\author ${a.id} "${a.name}" ""`);
   } else {
-    headerLines = makeHeaderLines({ textclass, options: split.classOptions, preamble: split.userPreamble, modules, settings, derived, authors });
+    headerLines = makeHeaderLines({ textclass, options: split.classOptions, preamble: userPreamble, modules, settings, derived, authors });
   }
   const doc: LyxDocument = {
     preamble: split.head.replace(/\s+$/, '').split('\n').filter((l, i, a) => !(i === a.length - 1 && l === '')),

@@ -529,3 +529,35 @@ describe('corpus: every imported document is stable under parse/write', () => {
     });
   }
 });
+
+describe("theorem environments from the document's own \\newtheorem", () => {
+  const PRE = '\\usepackage{amsthm}\n\\newtheorem{definition}{Definition}\n\\newtheorem{example}{Example}';
+  it('parse as theorem layouts and write back under their own names, declared once', () => {
+    const d = parse(doc('\\begin{definition}[Montague]\nA def with $x$.\n\\end{definition}\n\n\\begin{example}\nAn ex.\n\\end{example}', PRE));
+    const layouts = d.body.map(par => par.layout);
+    expect(layouts).toContain('Definition');
+    expect(layouts).toContain('Example');
+    const w = write(d);
+    expect(w).toContain('\\begin{definition}');
+    expect(w).toContain('\\end{definition}');
+    expect(w).toContain('\\begin{example}');
+    expect((w.match(/\\newtheorem\{definition\}/g) ?? []).length).toBe(1);   // the user's declaration only
+    expect(rewrite(w)).toBe(w);
+  });
+  it('declarations typed into the body move to the preamble; the environments still work', () => {
+    const d = parse(doc('\\newtheorem{definition}{Definition}\n\n\\begin{definition}\nBody-declared.\n\\end{definition}'));
+    expect(d.body.map(par => par.layout)).toContain('Definition');
+    const w = write(d);
+    expect(w.indexOf('\\newtheorem{definition}')).toBeGreaterThan(-1);
+    expect(w.indexOf('\\newtheorem{definition}')).toBeLessThan(w.indexOf('\\begin{document}'));
+    expect((w.match(/\\newtheorem\{definition\}/g) ?? []).length).toBe(1);
+    expect(w).toContain('\\usepackage{amsthm}');   // the managed block provides it
+    expect(rewrite(w)).toBe(w);
+  });
+  it('an unknown label falls back to the Theorem shape and stays stable', () => {
+    const d = parse(doc('\\begin{krazytheorem}\nX.\n\\end{krazytheorem}', '\\usepackage{amsthm}\n\\newtheorem{krazytheorem}{Krazy Theorem}'));
+    const w = write(d);
+    expect(w).toContain('\\begin{krazytheorem}');
+    expect(rewrite(w)).toBe(w);
+  });
+});

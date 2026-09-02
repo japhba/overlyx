@@ -887,6 +887,57 @@ export interface LayoutDescription {
 }
 
 /** Plain-JSON description of the paragraph styles (for the layout dropdown). */
+/** A \\newtheorem declaration found in a document (preamble or body). */
+export interface NewtheoremDecl { env: string; star: boolean; shared: string; label: string; within: string }
+
+/** The document's own \\newtheorem declarations, first one per environment name. */
+export function scanNewtheorems(text: string): NewtheoremDecl[] {
+  const out: NewtheoremDecl[] = [];
+  const seen = new Set<string>();
+  const re = /\\newtheorem(\*?)\s*\{([A-Za-z@]+)\}\s*(?:\[([^\]]+)\])?\s*\{([^{}]+)\}\s*(?:\[([^\]]+)\])?/g;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const env = m[2];
+    if (seen.has(env)) continue;
+    seen.add(env);
+    out.push({ env, star: m[1] === '*', shared: m[3] ?? '', label: m[4].trim(), within: m[5] ?? '' });
+  }
+  return out;
+}
+
+/**
+ * Styles for the document's own \\newtheorem environments: plain-LaTeX papers declare
+ * `\\newtheorem{definition}{Definition}` and write `\\begin{definition}` — names no layout file
+ * carries (even the AMS module calls the environment `defn`). Each declaration is aliased onto
+ * the matching AMS theorem layout (by its label; `Theorem` as the fallback), cloned with the
+ * declared environment as its LaTeX name and with no layout preamble — the user's declaration
+ * stays the one source of the environment, so nothing is declared twice. Returns a copy of the
+ * class (they are cached and shared); the class itself when there is nothing to do.
+ */
+export function applyDocumentTheorems(dc: DocumentClass, declText: string, layoutDir?: string, localDirs: string[] = []): DocumentClass {
+  if (!declText || !declText.includes('\\newtheorem')) return dc;
+  const existing = new Set([...dc.styles.values()].map(st => st.latexName));
+  const wanted = scanNewtheorems(declText).filter(d => !existing.has(d.env));
+  if (!wanted.length) return dc;
+  let pool: DocumentClass;
+  try { pool = loadDocumentClass(dc.name, ['theorems-ams', 'theorems-ams-extended'], layoutDir, localDirs); } catch { return dc; }
+  const styles = new Map(dc.styles);
+  for (const d of wanted) {
+    const label = d.label.replace(/\\protect|\\/g, '').trim() || d.env;
+    const key = label.toLowerCase();
+    const base = [...pool.styles.values()].find(st => st.name.toLowerCase() === key + (d.star ? '*' : ''))
+      ?? [...pool.styles.values()].find(st => st.name.toLowerCase() === key)
+      ?? pool.styles.get(d.star ? 'Theorem*' : 'Theorem');
+    if (!base || base.latexType === 'Paragraph' || base.latexType === 'Command') continue;
+    const name = base.name.toLowerCase() === key || base.name.toLowerCase() === key + '*' ? base.name : label;
+    styles.set(name, {
+      ...base, name, latexName: d.env,
+      preamble: '', langPreamble: '', babelPreamble: '',
+      labelString: base.name.toLowerCase().startsWith(key) ? base.labelString : `${label} \\the${d.shared || d.env}.`,
+    });
+  }
+  return { ...dc, styles };
+}
+
 export function describeLayouts(dc: DocumentClass): LayoutDescription[] {
   const out: LayoutDescription[] = [];
   for (const [, s] of dc.styles) {
