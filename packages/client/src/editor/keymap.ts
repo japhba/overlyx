@@ -10,7 +10,7 @@ import { undo, redo } from 'y-prosemirror';
 import { goToNextCell } from 'prosemirror-tables';
 import type { EditorView } from 'prosemirror-view';
 import {
-  paragraphBreak, paragraphBreakInverse, fontCommands, fontDefault, changeDepth, insertMath, toggleMathDisplay,
+  paragraphBreak, paragraphBreakInverse, fontCommands, fontDefault, changeDepth, listIndent, insertMath, toggleMathDisplay,
   insertNewline, insertSpace, insertSpecial, insertERT, insertFootnote, insertNote, insertComment, selectInset, toggleInset,
   moveParagraph, deleteToParagraphEnd, setLayout, setParagraphAttrs, arrowIntoMath, setValueMark, insertHyphens, insertQuote, smartQuote, insertMarginal,
 } from './commands';
@@ -202,9 +202,10 @@ export function lyxKeymap(): Plugin {
     'Alt-Shift-ArrowLeft': changeDepth(-1),
     'Alt-ArrowUp': moveParagraph(-1),
     'Alt-ArrowDown': moveParagraph(1),
-    // LyX: Tab / Shift+Tab move between the cells of a table (nothing else — outside a table the browser keeps the key)
-    Tab: goToNextCell(1),
-    'Shift-Tab': goToNextCell(-1),
+    // LyX site.bind Tab: completion-accept (the ghost suggestion, handled in ai/complete.ts);
+    // cell-forward; depth-increment. Outside tables and lists the browser keeps the key.
+    Tab: chainCommands(goToNextCell(1), listIndent(1)),
+    'Shift-Tab': chainCommands(goToNextCell(-1), listIndent(-1)),
     // LyX: delete to the end of the paragraph — unless "Rewrite with AI" is switched on (Tools ▸ AI), then ⌘K/Ctrl+K opens the AI prompt
     'Mod-k': (state, dispatch, view) => (view && rewriteEnabled() ? openRewrite(view) : deleteToParagraphEnd(state, dispatch, view)),
     'Mod-s': ui(a => a.save()),

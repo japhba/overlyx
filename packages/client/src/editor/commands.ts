@@ -6,7 +6,7 @@ import { type Node as PMNode, type MarkType, type Mark, Fragment, type Attrs, ty
 import { splitBlock } from 'prosemirror-commands';
 import type { EditorView } from 'prosemirror-view';
 import { schema, commentHeader, formatTimestamp, unquote, paramMap, FONT_KEYS } from '@overlyx/core';
-import { nextLayout, isHeadingLayout } from './layouts';
+import { nextLayout, isHeadingLayout, isListLayout, isEnvironmentLayout } from './layouts';
 import { editorContext } from './context';
 import { MathInlineView, MathDisplayView, pendingFocus } from './nodeviews/math';
 
@@ -69,16 +69,57 @@ export function setParagraphAttrs(attrs: Partial<Record<string, unknown>>): Comm
   };
 }
 
-export function changeDepth(delta: number): Command {
+/**
+ * LyX Text::changeDepth: a paragraph may nest one step deeper only under its predecessor
+ * (getMaxDepthAfter: prev.depth + 1 when prev's layout is an environment, else prev.depth);
+ * unnesting just needs depth > 0. The max depth runs forward through the selection, so a
+ * paragraph indented here lets the next selected one follow.
+ */
+export function changeDepth(delta: 1 | -1): Command {
   return (state, dispatch) => {
+    const { from, to, $from } = state.selection;
+    let level = $from.depth;
+    while (level > 0 && $from.node(level).type.name !== 'paragraph') level--;
     const tr = state.tr;
     let any = false;
-    forParagraphsAtCursorLevel(state, (node, pos) => {
-      const depth = Math.max(0, Math.min(8, (node.attrs.depth as number) + delta));
-      if (depth !== node.attrs.depth) { tr.setNodeMarkup(pos, undefined, { ...node.attrs, depth }); any = true; }
+    const newDepths = new Map<PMNode, number>();
+    const layouts = editorContext.meta?.layouts;
+    state.doc.nodesBetween(from, to, (node, pos) => {
+      if (node.type.name !== 'paragraph') return true;
+      const $pos = state.doc.resolve(pos);
+      if ($pos.depth !== level - 1) return true;
+      const prev = $pos.index() > 0 ? $pos.parent.child($pos.index() - 1) : null;
+      let maxDepth = 0;
+      if (prev?.type.name === 'paragraph') {
+        const prevDepth = newDepths.get(prev) ?? ((prev.attrs.depth as number) || 0);
+        maxDepth = isEnvironmentLayout(prev.attrs.layout as string, layouts) ? prevDepth + 1 : prevDepth;
+      }
+      const depth = (node.attrs.depth as number) || 0;
+      let next = depth;
+      if (delta > 0 && depth < maxDepth) next = depth + 1;
+      else if (delta < 0 && depth > 0) next = depth - 1;
+      newDepths.set(node, next);
+      if (next !== depth) { tr.setNodeMarkup(pos, undefined, { ...node.attrs, depth: next }); any = true; }
+      return false;
     });
     if (!any) return false;
     if (dispatch) dispatch(tr);
+    return true;
+  };
+}
+
+/**
+ * Tab / Shift+Tab as list indent (LyX site.bind: Tab falls through cell-forward to
+ * depth-increment). Claimed only in list paragraphs and nested continuation paragraphs, so the
+ * key keeps its browser meaning in ordinary text — but once claimed the key is consumed even if
+ * no depth change is possible, so focus never tabs out of the editor mid-list.
+ */
+export function listIndent(delta: 1 | -1): Command {
+  return (state, dispatch) => {
+    const cur = currentParagraph(state);
+    if (!cur) return false;
+    if (!isListLayout(cur.node.attrs.layout as string) && !((cur.node.attrs.depth as number) > 0)) return false;
+    changeDepth(delta)(state, dispatch);
     return true;
   };
 }

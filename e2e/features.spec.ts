@@ -150,6 +150,23 @@ test('LyX layouts via Alt+P chords, lists and depth', async ({ page }) => {
   await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\section\{My new section\}[\s\S]*\\begin\{itemize\}\n\\item first item\n\\begin\{itemize\}\n\\item nested item\n\\end\{itemize\}\n\\end\{itemize\}/);
 });
 
+test('Tab and Shift+Tab change list depth (LyX depth-increment)', async ({ page }) => {
+  const id = freshDoc('listtab-' + Date.now());
+  await openDoc(page, id);
+  await firstStandard(page);
+  await page.keyboard.press('Enter');                // split: an empty Standard paragraph above
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.type('top item');
+  await page.keyboard.press('Alt+p'); await page.keyboard.press('i');   // Itemize
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('sub item');
+  await page.keyboard.press('Tab');                   // LyX site.bind: Tab falls through to depth-increment
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin\{itemize\}\n\\item top item\n\\begin\{itemize\}\n\\item sub item\n\\end\{itemize\}\n\\end\{itemize\}/);
+  await page.keyboard.press('Tab');                   // deeper than the item above allows: consumed, no change
+  await page.keyboard.press('Shift+Tab');             // depth-decrement (proves Tab did not move the focus away)
+  await expect.poll(() => fileText(id), { timeout: 15000 }).toMatch(/\\begin\{itemize\}\n\\item top item\n\\item sub item\n\\end\{itemize\}/);
+});
+
 test('comment threads and LyX notes, shown in the margin', async ({ page }) => {
   const id = freshDoc('comment-' + Date.now());
   await openDoc(page, id);

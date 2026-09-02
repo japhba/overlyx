@@ -71,6 +71,11 @@ export function isHeadingLayout(layout: string, layouts?: LayoutInfo[] | null): 
 export function isListLayout(layout: string): boolean {
   return ['Itemize', 'Enumerate', 'Description', 'Labeling', 'List'].includes(layout);
 }
+/** LyX Paragraph::getMaxDepthAfter: only an environment paragraph lets the next one nest deeper. */
+export function isEnvironmentLayout(layout: string, layouts?: LayoutInfo[] | null): boolean {
+  const lt = layouts?.find(l => l.name === layout)?.latexType ?? STANDARD_LAYOUTS.find(l => l.name === layout)?.latexType;
+  return !!lt && lt.includes('Environment');
+}
 
 /** Layout to use for the paragraph created by Enter (LyX: headings -> Standard; lists keep). */
 export function nextLayout(layout: string, inInset: boolean, layouts?: LayoutInfo[] | null): string {
