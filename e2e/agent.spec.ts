@@ -83,6 +83,21 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   expect(readFileSync(helloFile, 'utf8')).toContain('hello from the stub agent');
   await expect(page.locator('.agent-msg.assistant').last()).toContainText('Stub reply', { timeout: 15000 });
 
+  // markdown links in the reply render as real links
+  await page.locator('.agent-compose textarea').fill('see [the docs](https://example.org/d) here');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.agent-msg.assistant a[href="https://example.org/d"]').last()).toHaveText('the docs', { timeout: 15000 });
+
+  // a pending approval survives a reload: the thread read returns it and the card comes back
+  await page.locator('.agent-compose textarea').fill('write hello once more');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-agent="approval"]')).toBeVisible({ timeout: 15000 });
+  await page.reload();
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  await expect(page.locator('[data-agent="approval"]')).toBeVisible({ timeout: 15000 });
+  await page.locator('[data-agent="approval"] [data-approve="decline"]').click();
+  await expect(page.locator('.agent-msg.assistant').last()).toContainText('Stub reply', { timeout: 15000 });
+
   // the thread is in the project's list under its first message
   await page.locator('[data-agent-back]').click();
   await expect(page.locator('[data-agent-thread] .title').first()).toContainText('hello agent');

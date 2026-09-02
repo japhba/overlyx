@@ -1187,6 +1187,7 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .agent-math-block { text-align: center; margin: 4px 0; overflow-x: auto; }
 .agent-math { user-select: all; -webkit-user-select: all; border-radius: 4px; }
 .agent-math:hover { background: var(--ui-hover); }
+.agent-msg a { color: var(--accent); }
 .agent-diff-summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer; font-size: 12px; color: var(--ui-muted); }
 .agent-diff-summary .chev { flex: none; }
 .agent-diff-summary .file { font-family: ui-monospace, monospace; }

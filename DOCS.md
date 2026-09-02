@@ -289,6 +289,12 @@ blend.
   the clipboard (`app/richcopy.ts`) — so equations round-trip between the transcript, the
   editor (LaTeX paste) and the composer, and a paste into a formula sheds `$…$`/`\[…\]`. Threads belong to the
   project: every editor sees them and can read transcripts, only the creator drives one.
+  Each user's codex child is owned by a detached keeper process (`scripts/agent-keeper.mjs`,
+  JSON-lines over a unix socket at `data/agent-home/<id>/keeper.sock`): a server restart — a
+  deploy — reconnects instead of killing a running turn; buffered events are replayed, pending
+  approvals are re-delivered and also returned by the thread read, so the card reappears after a
+  reload. Needs `KillMode=process` in the systemd unit. The keeper exits with codex, on idle
+  (`KEEPER_IDLE_MS`, default 2 h without a server), or when its socket file is deleted.
   `OVERLYX_AGENT=off` disables it, `OVERLYX_CODEX_BIN` points at a stub for tests,
   `OVERLYX_AGENT_MODEL` overrides the model.
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or

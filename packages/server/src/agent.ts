@@ -11,9 +11,16 @@
  * The client talks to routes under /api (agentRoutes): a per-project SSE stream forwards codex's
  * notifications (message/reasoning deltas, command output, diffs, turn lifecycle) and its
  * approval *requests* (command execution / file changes), which the client answers via POST.
+ *
+ * The codex child is NOT our child: a detached keeper (scripts/agent-keeper.mjs) owns it and
+ * bridges its stdio to a unix socket under the user's agent home. A server restart — a deploy —
+ * disconnects and reconnects; the turn keeps running, buffered events are replayed, and
+ * unanswered approval requests are re-delivered (the systemd unit needs KillMode=process).
  */
 import express, { type Request, type Response } from 'express';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import net from 'node:net';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.ts';
@@ -59,12 +66,18 @@ function agentMcpToken(userId: number): string {
 }
 
 class AgentHost {
-  proc: ChildProcess | null = null;
+  /** connection to this user's keeper, which owns the codex child (scripts/agent-keeper.mjs) */
+  conn: net.Socket | null = null;
+  /** a keeper connection is up (the events stream reports it) */
+  running = false;
   private buf = '';
-  private nextId = 1;
+  /** request ids go to the same codex process across server restarts — seed from the clock so a
+   *  new server never reuses an id the previous one left in flight */
+  private nextId = (Date.now() % 1000000) * 1000;
   private pending = new Map<number, PendingReq>();
   /** server→client requests (approvals) waiting for the user's decision, by our string key */
-  private serverReqs = new Map<string, { id: number | string; method: string }>();
+  private serverReqs = new Map<string, { id: number | string; method: string; params: any }>();
+  private helloResolve: ((h: { initialized?: boolean }) => void) | null = null;
   subscribers = new Set<Subscriber>();
   /** project of each thread this user owns (from agent_threads; new threads added as they start) */
   threadProjects = new Map<string, string>();
@@ -79,6 +92,7 @@ class AgentHost {
   }
 
   home(): string { return agentHomeDir(this.userId); }
+  private sockPath(): string { return path.join(this.home(), 'keeper.sock'); }
 
   private ensureHome(): void {
     const h = this.home();
@@ -97,36 +111,84 @@ bearer_token_env_var = "OVERLYX_MCP_TOKEN"
 `);
   }
 
-  /** Start (or reuse) the codex process and finish the initialize handshake. */
+  /** Connect to this user's keeper (spawning one when none runs). The codex initialize
+   *  handshake happens once per codex process: after an OverLyX restart the keeper still holds
+   *  the initialized child and hello says so. */
   ensure(): Promise<void> {
-    if (this.proc && this.ready) return this.ready;
-    this.ensureHome();
-    const proc = spawn(config.agent.bin, ['app-server'], {
-      cwd: this.home(),
-      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: this.home(), CODEX_HOME: this.home(), LANG: process.env.LANG ?? 'C.UTF-8', TERM: 'dumb', OVERLYX_MCP_TOKEN: agentMcpToken(this.userId) },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    this.proc = proc;
-    this.buf = '';
-    this.loaded.clear();
-    proc.stdout!.on('data', (d: Buffer) => this.onData(String(d)));
-    proc.stderr!.on('data', (d: Buffer) => { const s = String(d).trim(); if (s) console.error(`[agent ${this.userId}]`, s.slice(0, 500)); });
-    proc.on('exit', (code) => {
-      if (this.proc !== proc) return;
-      this.proc = null; this.ready = null;
-      for (const p of this.pending.values()) { if (p.timer) clearTimeout(p.timer); p.reject(new Error('the agent process exited' + (code ? ` (${code})` : ''))); }
-      this.pending.clear(); this.serverReqs.clear(); this.activeTurns.clear();
-      this.emit({ kind: 'status', running: false });
-    });
-    this.ready = (async () => {
-      await this.request('initialize', { clientInfo: { name: 'overlyx', title: 'OverLyX', version: '0.1.0' } });
-      this.send({ jsonrpc: '2.0', method: 'initialized' });
-    })();
-    this.touch();
+    if (this.ready) return this.ready;
+    this.ready = this.connect().catch(e => { this.ready = null; throw e; });
     return this.ready;
   }
 
-  private send(msg: JsonRpcMsg): void { this.proc?.stdin?.write(JSON.stringify(msg) + '\n'); }
+  private dial(): Promise<net.Socket | null> {
+    return new Promise(resolve => {
+      const c = net.connect(this.sockPath());
+      c.once('connect', () => resolve(c));
+      c.once('error', () => resolve(null));
+    });
+  }
+
+  private async connect(): Promise<void> {
+    this.ensureHome();
+    let sock = await this.dial();
+    if (!sock) {
+      this.spawnKeeper();
+      for (let i = 0; i < 50 && !sock; i++) { await new Promise(r => setTimeout(r, 100)); sock = await this.dial(); }
+      if (!sock) throw new Error('the agent keeper did not start');
+    }
+    await this.attach(sock);
+  }
+
+  private spawnKeeper(): void {
+    try { fs.unlinkSync(this.sockPath()); } catch { /* none */ }
+    const child = spawn(process.execPath, [KEEPER_SCRIPT], {
+      detached: true, stdio: 'ignore', cwd: this.home(),
+      env: {
+        PATH: process.env.PATH ?? '/usr/bin:/bin', LANG: process.env.LANG ?? 'C.UTF-8',
+        KEEPER_SOCKET: this.sockPath(), KEEPER_BIN: config.agent.bin, KEEPER_HOME: this.home(),
+        OVERLYX_MCP_TOKEN: agentMcpToken(this.userId),
+        ...(process.env.OVERLYX_KEEPER_IDLE_MS ? { KEEPER_IDLE_MS: process.env.OVERLYX_KEEPER_IDLE_MS } : {}),
+      },
+    });
+    child.unref();
+  }
+
+  private attach(sock: net.Socket): Promise<void> {
+    this.conn = sock;
+    this.buf = '';
+    sock.setEncoding('utf8');
+    sock.on('data', (d: string) => this.onData(d));
+    sock.on('close', () => this.onClose(sock));
+    sock.on('error', () => { /* close follows */ });
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => { this.helloResolve = null; reject(new Error('the agent keeper did not answer')); }, 10000);
+      this.helloResolve = (h) => {
+        clearTimeout(t);
+        (async () => {
+          if (!h.initialized) {
+            await this.request('initialize', { clientInfo: { name: 'overlyx', title: 'OverLyX', version: '0.1.0' } });
+            this.send({ jsonrpc: '2.0', method: 'initialized' });
+            this.control({ keeper: 'mark-initialized' });
+          }
+          this.running = true;
+          this.touch();
+        })().then(resolve, reject);
+      };
+    });
+  }
+
+  /** The socket to the keeper went away (server-side stop, keeper exit): in-flight requests fail,
+   *  but codex itself may well still run — the next ensure() reconnects and picks the thread up. */
+  private onClose(sock: net.Socket): void {
+    if (this.conn !== sock) return;
+    this.conn = null; this.ready = null; this.running = false;
+    for (const p of this.pending.values()) { if (p.timer) clearTimeout(p.timer); p.reject(new Error('the agent connection closed')); }
+    this.pending.clear(); this.serverReqs.clear(); this.activeTurns.clear();
+    this.emit({ kind: 'status', running: false });
+  }
+
+  private send(msg: JsonRpcMsg): void { this.conn?.write(JSON.stringify(msg) + '\n'); }
+  private control(msg: object): void { this.conn?.write(JSON.stringify(msg) + '\n'); }
 
   request(method: string, params?: any, timeoutMs = 30000): Promise<any> {
     const id = this.nextId++;
@@ -146,10 +208,11 @@ bearer_token_env_var = "OVERLYX_MCP_TOKEN"
       const line = this.buf.slice(0, i).trim();
       this.buf = this.buf.slice(i + 1);
       if (!line) continue;
-      let msg: JsonRpcMsg;
+      let msg: JsonRpcMsg & { keeper?: string };
       try { msg = JSON.parse(line); } catch { continue; }
       this.touch();
-      if (msg.id !== undefined && msg.method) this.onServerRequest(msg);
+      if (msg.keeper) this.onKeeper(msg as { keeper: string; [k: string]: unknown });
+      else if (msg.id !== undefined && msg.method) this.onServerRequest(msg);
       else if (msg.id !== undefined) {
         const p = this.pending.get(Number(msg.id));
         if (p) { this.pending.delete(Number(msg.id)); if (p.timer) clearTimeout(p.timer); msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result); }
@@ -157,15 +220,31 @@ bearer_token_env_var = "OVERLYX_MCP_TOKEN"
     }
   }
 
+  /** The keeper's own control lines: the hello on connect, codex stderr, codex exit. */
+  private onKeeper(msg: { keeper: string; [k: string]: unknown }): void {
+    if (msg.keeper === 'hello' && this.helloResolve) { const r = this.helloResolve; this.helloResolve = null; r(msg as { initialized?: boolean }); }
+    else if (msg.keeper === 'stderr' && msg.line) console.error(`[agent ${this.userId}]`, String(msg.line).slice(0, 500));
+    else if (msg.keeper === 'exit') {
+      console.error(`[agent ${this.userId}] codex exited${msg.code ? ` (${msg.code})` : ''}`);
+      this.conn?.destroy();   // onClose does the bookkeeping
+    }
+  }
+
   /** codex asks the client something (command / file-change approval): forward to the panel. */
   private onServerRequest(msg: JsonRpcMsg): void {
     const method = msg.method!;
+    if (method === 'mcpServer/elicitation/request') {
+      // an MCP server asked the user a question mid-tool-call; there is no UI for it — decline
+      // it properly (MCP ElicitResult) instead of failing the call with a protocol error
+      this.send({ jsonrpc: '2.0', id: msg.id, result: { action: 'decline' } });
+      return;
+    }
     if (!/requestApproval|applyPatchApproval|execCommandApproval|requestUserInput/.test(method)) {
       this.send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: `${method} is not supported by this client` } });
       return;
     }
     const key = `r${msg.id}`;
-    this.serverReqs.set(key, { id: msg.id!, method });
+    this.serverReqs.set(key, { id: msg.id!, method, params: msg.params });
     this.emit({ kind: 'request', method, params: msg.params, requestId: key }, msg.params?.threadId);
     // nobody may ever answer (tab closed): decline after 10 minutes so the turn can finish
     setTimeout(() => { if (this.serverReqs.has(key)) this.respond(key, { decision: 'decline' }); }, 10 * 60 * 1000).unref();
@@ -177,6 +256,14 @@ bearer_token_env_var = "OVERLYX_MCP_TOKEN"
     this.serverReqs.delete(requestId);
     this.send({ jsonrpc: '2.0', id: r.id, result });
     return true;
+  }
+
+  /** approvals still waiting for an answer in this thread — the thread read returns them so a
+   *  reload (or a reconnect after a deploy) shows the pending card again */
+  pendingApprovals(threadId: string): { requestId: string; method: string; params: any }[] {
+    const out: { requestId: string; method: string; params: any }[] = [];
+    for (const [key, r] of this.serverReqs) if (r.params?.threadId === threadId) out.push({ requestId: key, method: r.method, params: r.params });
+    return out;
   }
 
   private onNotification(msg: JsonRpcMsg): void {
@@ -217,13 +304,27 @@ bearer_token_env_var = "OVERLYX_MCP_TOKEN"
     this.idleTimer.unref();
   }
 
+  /** Stop the keeper and its codex child (idle, tests) — threads resume on demand. */
   stop(): void {
-    const proc = this.proc;
-    this.proc = null; this.ready = null;
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    if (proc) { proc.kill('SIGTERM'); setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* gone */ } }, 3000).unref(); }
+    const c = this.conn;
+    this.conn = null; this.ready = null; this.running = false;
+    for (const p of this.pending.values()) { if (p.timer) clearTimeout(p.timer); p.reject(new Error('the agent was stopped')); }
+    this.pending.clear(); this.serverReqs.clear(); this.activeTurns.clear();
+    if (c) {
+      try { c.write(JSON.stringify({ keeper: 'shutdown' }) + '\n'); } catch { /* gone */ }
+      setTimeout(() => c.destroy(), 300).unref();
+    }
+  }
+
+  /** Detach only (server shutdown): the keeper keeps codex — and a running turn — alive. */
+  disconnect(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.conn?.destroy();
   }
 }
+
+const KEEPER_SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../scripts/agent-keeper.mjs');
 
 const hosts = new Map<number, AgentHost>();
 function host(userId: number): AgentHost {
@@ -232,7 +333,11 @@ function host(userId: number): AgentHost {
   return h;
 }
 
-/** Stop every codex child (shutdown; systemd would leave them orphaned otherwise). */
+/** Server shutdown: detach from the keepers — the codex children keep running and the next
+ *  server process (a deploy's restart) reconnects instead of killing a turn in progress. */
+export function disconnectAgents(): void { for (const h of hosts.values()) h.disconnect(); }
+
+/** Stop every keeper and codex child (tests, explicit teardown). */
 export function shutdownAgents(): void { for (const h of hosts.values()) h.stop(); }
 
 export function agentAvailable(): boolean { return config.agent.enabled; }
@@ -298,7 +403,7 @@ export function agentRoutes(): express.Router {
   r.get('/agent/status', (req, res) => { void (async () => {
     const userId = req.user!.id;
     const authFile = path.join(agentHomeDir(userId), 'auth.json');
-    if (!fs.existsSync(authFile) && !hosts.get(userId)?.proc) { res.json({ enabled: true, authenticated: false }); return; }
+    if (!fs.existsSync(authFile) && !hosts.get(userId)?.conn) { res.json({ enabled: true, authenticated: false }); return; }
     try {
       const h = host(userId); await h.ensure();
       const [auth, acct] = await Promise.all([h.request('getAuthStatus', {}), h.request('account/read', {}).catch(() => null)]);
@@ -380,7 +485,8 @@ export function agentRoutes(): express.Router {
     try {
       const h = host(row.user_id); await h.ensure();       // transcripts are read through their owner's codex
       const out = await h.request('thread/read', { threadId: row.thread_id, includeTurns: true });
-      res.json({ thread: out.thread, mine: row.user_id === req.user!.id, user: row.user_id });
+      const approvals = row.user_id === req.user!.id ? h.pendingApprovals(row.thread_id) : [];
+      res.json({ thread: out.thread, mine: row.user_id === req.user!.id, user: row.user_id, approvals });
     } catch (e) { fail(res, e); }
   })(); });
 
@@ -452,7 +558,7 @@ export function agentRoutes(): express.Router {
     if (!needRole(req, res, 'edit')) return;
     const h = host(req.user!.id);
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-    res.write(`data: ${JSON.stringify({ kind: 'status', running: !!h.proc })}\n\n`);
+    res.write(`data: ${JSON.stringify({ kind: 'status', running: h.running })}\n\n`);
     const sub: Subscriber = { project: String(req.params.project), res };
     h.subscribers.add(sub);
     const hb = setInterval(() => res.write(': hb\n\n'), 20000);

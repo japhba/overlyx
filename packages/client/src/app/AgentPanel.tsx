@@ -76,20 +76,21 @@ function MathBit({ latex, display }: { latex: string; display: boolean }) {
 
 function inlineBits(text: string): ComponentChildren[] {
   const out: ComponentChildren[] = [];
-  const re = /\$([^$\n]+?)\$|\\\((.+?)\\\)|`([^`\n]+)`|\*\*([^*\n]+?)\*\*/g;
+  const re = /\$([^$\n]+?)\$|\\\((.+?)\\\)|`([^`\n]+)`|\*\*([^*\n]+?)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
   let last = 0, k = 0;
   for (let m = re.exec(text); m; m = re.exec(text)) {
     if (m.index > last) out.push(text.slice(last, m.index));
     if (m[1] !== undefined || m[2] !== undefined) out.push(<MathBit key={k++} latex={m[1] ?? m[2]} display={false} />);
     else if (m[3] !== undefined) out.push(<code key={k++}>{m[3]}</code>);
-    else out.push(<b key={k++}>{m[4]}</b>);
+    else if (m[4] !== undefined) out.push(<b key={k++}>{m[4]}</b>);
+    else out.push(<a key={k++} href={m[6]} target="_blank" rel="noreferrer">{m[5]}</a>);
     last = m.index + m[0].length;
   }
   if (last < text.length) out.push(text.slice(last));
   return out;
 }
 
-/** Assistant text: fenced code, $$…$$/\[…\] display math, $…$/\(…\) inline math, `code`, **bold**. */
+/** Assistant text: fenced code, $$…$$/\[…\] display math, $…$/\(…\) inline math, `code`, **bold**, [links](https://…). */
 function RichText({ text }: { text: string }) {
   const parts: ComponentChildren[] = [];
   const re = /```[\w-]*\n?([\s\S]*?)```|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g;
@@ -265,12 +266,23 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
   /** codex's live events for this user + project */
   useEffect(() => {
     const es = new EventSource(`/api/projects/${encodeURIComponent(project)}/agent/events`);
+    // after a dropped stream (laptop sleep, a server restart mid-deploy) events were missed:
+    // when the browser reconnects, reload the open thread instead of showing a frozen transcript
+    let lost = false;
+    es.onerror = () => { lost = true; };
+    es.onopen = () => {
+      if (!lost) return;
+      lost = false;
+      void refreshStatus(); void refreshThreads();
+      if (selRef.current) syncThread(selRef.current).catch(() => { /* the next events tell more */ });
+    };
     es.onmessage = (e) => {
       let msg: AgentEventMsg;
       try { msg = JSON.parse(e.data); } catch { return; }
       const p = msg.params ?? {};
       if (msg.kind === 'request') {
-        if (p.threadId === selRef.current && msg.requestId) setApprovals(a => [...a, { requestId: msg.requestId!, method: msg.method ?? '', params: p }]);
+        // re-delivered after a reconnect (the keeper replays unanswered approvals): count once
+        if (p.threadId === selRef.current && msg.requestId) setApprovals(a => a.some(x => x.requestId === msg.requestId) ? a : [...a, { requestId: msg.requestId!, method: msg.method ?? '', params: p }]);
         return;
       }
       if (msg.kind !== 'notification') return;
@@ -329,12 +341,20 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
   useEffect(() => { const el = scrollRef.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [items, approvals, busyTurn]);
   const onScroll = () => { const el = scrollRef.current; if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120; };
 
+  /** (Re)load a thread from the server: items, whether a turn is running, pending approvals —
+   *  used on open and to resync after the events stream reconnected (laptop sleep, a deploy). */
+  const syncThread = (tid: string) => api.agentThread(project, tid).then(r => {
+    setItems(r.thread.turns.flatMap(turn => turn.items));
+    setMine(r.mine);
+    setApprovals((r.approvals ?? []).map(a => ({ requestId: a.requestId, method: a.method, params: a.params })));
+    const last = r.thread.turns[r.thread.turns.length - 1] as { id?: string; status?: string } | undefined;
+    setBusyTurn(last?.status === 'inProgress' ? last.id ?? null : null);
+  });
+
   const openThread = (t: AgentThreadInfo) => {
     setSel(t.id); setMine(t.mine); setItems([]); setApprovals([]); stick.current = true;
     store('ol.agent.sel:' + project, t.id);
-    api.agentThread(project, t.id)
-      .then(r => { setItems(r.thread.turns.flatMap(turn => turn.items)); setMine(r.mine); })
-      .catch(e => notify(errText(e), 'error'));
+    syncThread(t.id).catch(e => notify(errText(e), 'error'));
   };
 
   const send = () => {

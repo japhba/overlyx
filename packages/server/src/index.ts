@@ -7,7 +7,7 @@ import { config } from './config.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
 import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, allow as aiAllow, AiError } from './ai.ts';
 import { mcpRouter } from './mcp.ts';
-import { agentRoutes, shutdownAgents } from './agent.ts';
+import { agentRoutes, disconnectAgents } from './agent.ts';
 import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
 import { createMcpToken, listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { userSettings, setUserSettings } from './userSettings.ts';
@@ -1058,7 +1058,7 @@ server.listen(config.port, config.host, () => {
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
     console.log('shutting down, saving open documents…');
-    shutdownAgents();
+    disconnectAgents();   // the keepers keep codex (and running turns) alive across the restart
     manager.saveAll().then(() => flushCommits()).finally(() => process.exit(0));
   });
 }

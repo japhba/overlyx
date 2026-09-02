@@ -32,6 +32,9 @@ ExecStart=/usr/bin/npx tsx packages/server/src/index.ts
 Restart=always
 RestartSec=3
 KillSignal=SIGINT
+# Only the server process is killed on stop/restart: the detached agent keepers
+# (scripts/agent-keeper.mjs) survive a deploy and the new server reconnects to them
+KillMode=process
 TimeoutStopSec=20
 
 [Install]

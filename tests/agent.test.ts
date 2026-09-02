@@ -22,7 +22,7 @@ process.env.OVERLYX_CODEX_BIN = resolve(process.cwd(), 'scripts/codex-stub.mjs')
 process.env.STUB_LOGIN_DELAY = '120';
 process.env.STUB_DELAY = '60';
 
-const { agentRoutes, shutdownAgents } = await import('../packages/server/src/agent.ts');
+const { agentRoutes, shutdownAgents, disconnectAgents } = await import('../packages/server/src/agent.ts');
 const { createUser } = await import('../packages/server/src/auth.ts');
 const { registerProject } = await import('../packages/server/src/access.ts');
 const { db } = await import('../packages/server/src/db.ts');
@@ -123,6 +123,23 @@ describe('threads and turns', () => {
     // the first message names the thread
     const list = await get('/projects/p/agent/threads');
     expect(list.body.threads[0].title).toBe('hello agent');
+  });
+
+  it('codex survives a server handover: the keeper keeps the same process and threads', async () => {
+    const before = await get(`/projects/p/agent/threads/${tid}`);
+    const nTurns = before.body.thread.turns.length;
+    expect(nTurns).toBeGreaterThan(0);
+    disconnectAgents();   // what a deploy's restart does now — the keeper keeps codex alive
+    await sleep(150);
+    const after = await get(`/projects/p/agent/threads/${tid}`);
+    expect(after.status).toBe(200);
+    expect(after.body.thread.turns.length).toBe(nTurns);   // the same in-memory stub answered
+    // …and the reconnected host still drives turns in that thread
+    const events = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
+    await sleep(150);
+    await post(`/projects/p/agent/threads/${tid}/turn`, { text: 'after handover' });
+    const evs = await events;
+    expect(evs.filter(e => e.method === 'item/agentMessage/delta').map(e => e.params.delta).join('')).toContain('after handover');
   });
 
   it('the context item names the open documents and marks the selection in the file', async () => {
