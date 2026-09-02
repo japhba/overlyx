@@ -284,6 +284,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   // per-browser preferences (spell checking, AI assistance) and whether the server can answer AI requests
   const [prefs, setPrefsState] = useState<Prefs>(getPrefs);
   useEffect(() => subscribePrefs(setPrefsState), []);
+  /** The Agent panel appears once AI assistance is activated in the settings (any AI toggle, or the ✦ button). */
+  const aiActivated = prefs.aiButton || prefs.aiRewrite || prefs.aiCompleteText || prefs.aiCompleteMath;
+  useEffect(() => { if (!aiActivated && rightTab === 'agent') setRightTab(null); }, [aiActivated, rightTab]);
   const [ai, setAi] = useState<AiStatus | null>(null);
   // completions in flight (a small indicator in the status bar; several may overlap briefly)
   const [aiBusy, setAiBusy] = useState(0);
@@ -1685,7 +1688,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         </div>
         {isLyxDoc && !rightTab && (
           <div class="rail right">
-            {RIGHT_TABS.map(t => <button key={t} data-rail={t} title={RIGHT_TAB_TITLES[t]} onClick={() => { setRightTab(t); if (t === 'versions') setSelVersion(v => v + 1); }}>{RIGHT_TAB_LABELS[t]}</button>)}
+            {RIGHT_TABS.filter(t => t !== 'agent' || aiActivated).map(t => <button key={t} data-rail={t} title={RIGHT_TAB_TITLES[t]} onClick={() => { setRightTab(t); if (t === 'versions') setSelVersion(v => v + 1); }}>{RIGHT_TAB_LABELS[t]}</button>)}
             <button data-rail="source" class={rawSplit ? 'active' : ''} title={SOURCE_TITLE} onClick={toggleRawSplit}>Source</button>
           </div>
         )}
@@ -1696,7 +1699,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
               <button class={rightTab === 'comments' ? 'active' : ''} data-tab="comments" onClick={() => setRightTab('comments')} title={RIGHT_TAB_TITLES.comments}>Comments</button>
               <button class={rightTab === 'pdf' ? 'active' : ''} data-tab="pdf" onClick={() => setRightTab('pdf')} title={RIGHT_TAB_TITLES.pdf}>PDF</button>
               <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }} title={RIGHT_TAB_TITLES.versions}>Versions</button>
-              <button class={rightTab === 'agent' ? 'active' : ''} data-tab="agent" onClick={() => setRightTab('agent')} title={RIGHT_TAB_TITLES.agent}>Agent</button>
+              {aiActivated && <button class={rightTab === 'agent' ? 'active' : ''} data-tab="agent" onClick={() => setRightTab('agent')} title={RIGHT_TAB_TITLES.agent}>Agent</button>}
               <button class={'toggle' + (rawSplit ? ' on' : '')} data-tab="source" onClick={toggleRawSplit} title={SOURCE_TITLE}>Source</button>
               <button class="hide" title="Hide the sidebar" onClick={() => setRightTab(null)}>»</button>
             </div>

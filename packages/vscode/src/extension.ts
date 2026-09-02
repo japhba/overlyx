@@ -14,6 +14,7 @@ import { OverlyxEditorProvider } from './host/editorProvider.ts';
 import { OutlineTree } from './host/outlineTree.ts';
 import { PdfPanels } from './host/pdfPanel.ts';
 import { resolveLayoutDir } from './host/lyxlib.ts';
+import { Updater, type CheckResult } from './host/updater.ts';
 import { collectFiles, readTextFile } from './host/project.ts';
 import { cachedParseFile, parseFragmentText, masterHeaderFor, type TexContext } from './host/texdoc.ts';
 import { buildMeta, bibEntriesFor } from './host/meta.ts';
@@ -21,7 +22,7 @@ import * as build from './host/build.ts';
 import type { HostToEditor } from './shared/protocol.ts';
 
 /** What activate() returns — consumed by the integration test (test/suite/index.cjs). */
-export interface OverlyxTestApi { registry: Registry; bridgeBase(): string }
+export interface OverlyxTestApi { registry: Registry; bridgeBase(): string; checkForUpdates(opts?: { interactive: boolean; apiOverride?: string; dryRun?: boolean }): Promise<CheckResult> }
 
 export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
   const registry = new Registry();
@@ -184,6 +185,7 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
   });
 
   const outlineTree = new OutlineTree(registry);
+  const updater = new Updater(context);
 
   context.subscriptions.push(
     { dispose: () => bridge.dispose() },
@@ -215,6 +217,7 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
       if (e) void e.panel.webview.postMessage({ type: 'command', name: 'toggleMargin' } satisfies HostToEditor);
     }),
     vscode.commands.registerCommand('overlyx.refreshOutline', () => outlineTree.refresh()),
+    vscode.commands.registerCommand('overlyx.checkForUpdates', () => void updater.check({ interactive: true }).catch(e => vscode.window.showErrorMessage('OverLyX update check failed: ' + String(e)))),
     vscode.commands.registerCommand('overlyx.gotoOutline', (pos: number) => {
       const e = registry.active;
       if (e) void e.panel.webview.postMessage({ type: 'goto', pos } satisfies HostToEditor);
@@ -223,7 +226,9 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
 
   void bridge.start().catch(e => vscode.window.showErrorMessage('OverLyX: local bridge failed to start: ' + String(e)));
 
-  return { registry, bridgeBase: () => bridge.base };
+  updater.schedule();
+
+  return { registry, bridgeBase: () => bridge.base, checkForUpdates: (opts) => updater.check(opts ?? { interactive: true }) };
 }
 
 export function deactivate(): void { /* subscriptions dispose everything */ }

@@ -698,3 +698,12 @@ Two separate token systems exist and are not interchangeable, but both are accou
 **git tokens** (`/api/git/tokens`) stand for a signed-in *account* in git; **MCP tokens**
 (`/api/mcp-tokens`) stand for one *agent* acting with an account's access (its role checked
 per project on every request).
+
+## License
+
+GPL-3.0-or-later. OverLyX's engine contains TypeScript ports of LyX source code and ships LyX's
+layout files, data tables and icons (LyX is GPL-2.0-or-later), and the PDF viewer uses pdf.js
+(Apache-2.0) — the combination is distributed under the GPL v3. See LICENSE and
+packages/vscode/THIRD-PARTY-NOTICES.md. LyX is a trademark of the LyX team; this project is not
+affiliated with or endorsed by the LyX team, Overleaf, or Microsoft.
+

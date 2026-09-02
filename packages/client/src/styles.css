@@ -1211,3 +1211,8 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .ol-change-fold.inserted { --change-color: var(--ok); }
 .ol-change-fold.deleted { --change-color: var(--err); }
 .lyx-change-unfolded { outline: 1px dotted var(--change-color, var(--ui-muted)); outline-offset: 1px; }
+
+/* GitHub link in the menubar (next to the theme toggle) */
+.menubar .gh-link { display: flex; align-items: center; padding: 0 7px; color: inherit; opacity: 0.7; }
+.menubar .gh-link:hover { opacity: 1; }
+.menubar .gh-link svg { width: 17px; height: 17px; display: block; }

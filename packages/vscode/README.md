@@ -36,6 +36,20 @@ reproduced byte for byte until you change them.
 - `overlyx.layoutDir` — LyX layout files to use (default: the copy bundled with the extension).
 - `overlyx.latexmk` — the latexmk executable.
 
+## Updates
+
+Installed from a `.vsix`, the extension is not updated by VS Code. It checks the release
+repository (`overlyx.updateRepo`, default `japhba/overlyx`) about once a day and offers
+newer versions (`overlyx.updates`: `prompt` / `auto` / `off`); *OverLyX: Check for Updates* runs
+a check on demand. Updates install with the built-in VSIX installer and take effect after a
+reload.
+
+## License
+
+GPL-3.0-or-later — the extension bundles data, icons and ported code from
+[LyX](https://www.lyx.org) (GPL-2.0-or-later) and the pdf.js viewer (Apache-2.0); see LICENSE
+and THIRD-PARTY-NOTICES.md, which also carries the corresponding-source offer.
+
 ## Building from source
 
 ```

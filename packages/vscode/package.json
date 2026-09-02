@@ -2,10 +2,10 @@
   "name": "overlyx-vscode",
   "displayName": "OverLyX",
   "description": "LyX-style WYSIWYG editing for LaTeX .tex files \u2014 the OverLyX editor inside VS Code: rendered text and formulas, LyX keybindings, change tracking, comments, outline, PDF preview with SyncTeX. File browsing, git and agents stay VS Code's.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "overlyx",
   "private": true,
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
     "url": "https://github.com/japhba/overlyx"
@@ -65,6 +65,11 @@
         "title": "Refresh Structure",
         "category": "OverLyX",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "overlyx.checkForUpdates",
+        "title": "Check for Updates",
+        "category": "OverLyX"
       }
     ],
     "viewsContainers": {
@@ -142,6 +147,26 @@
           "type": "boolean",
           "default": false,
           "description": "Open .tex files in the OverLyX editor by default (otherwise use \u201cReopen Editor With\u2026\u201d or the editor-title button)."
+        },
+        "overlyx.updates": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "auto",
+            "off"
+          ],
+          "default": "prompt",
+          "description": "Self-update from GitHub releases (the extension is installed from a .vsix, so VS Code does not update it): ask before installing, install silently, or only check via the \u201cOverLyX: Check for Updates\u201d command."
+        },
+        "overlyx.updateRepo": {
+          "type": "string",
+          "default": "japhba/overlyx",
+          "description": "GitHub repository (owner/name) whose releases provide updates."
+        },
+        "overlyx.updateApi": {
+          "type": "string",
+          "default": "",
+          "description": "Override the release-check endpoint (testing / self-hosted mirrors). Leave empty."
         }
       }
     }

@@ -84,5 +84,25 @@ exports.run = async function run() {
   assert.ok(Array.isArray(sync.boxes) && sync.boxes.length > 0, 'synctex forward search returns boxes');
   log('synctex ok:', sync.boxes.length, 'boxes');
 
+  // 6. self-update pipeline against a stubbed release endpoint (dry run: stops after download)
+  const http = require('http');
+  const stubVsix = Buffer.alloc(20000, 7);
+  const stub = http.createServer((req, res) => {
+    if (req.url === '/latest') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ tag_name: 'v99.0.0', html_url: 'http://stub/rel', body: 'test release',
+        assets: [{ name: 'overlyx-vscode-99.0.0.vsix', browser_download_url: `http://127.0.0.1:${stub.address().port}/asset.vsix` }] }));
+    } else if (req.url === '/asset.vsix') { res.end(stubVsix); }
+    else { res.statusCode = 404; res.end(); }
+  });
+  await new Promise(r => stub.listen(0, '127.0.0.1', r));
+  try {
+    const r = await api.checkForUpdates({ interactive: false, dryRun: true, apiOverride: `http://127.0.0.1:${stub.address().port}/latest` });
+    assert.strictEqual(r.status, 'dry-run-downloaded', 'updater found and downloaded the stub release: ' + JSON.stringify(r));
+    assert.strictEqual(r.latest, '99.0.0');
+    assert.ok(r.vsixPath && fs.statSync(r.vsixPath).size === stubVsix.length, 'vsix downloaded to disk');
+    log('self-update pipeline ok (dry run):', r.vsixPath);
+  } finally { stub.close(); }
+
   log('ALL INTEGRATION CHECKS PASSED');
 };

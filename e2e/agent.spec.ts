@@ -26,7 +26,10 @@ test.afterAll(() => { rmSync(join(PROJECTS_DIR, PROJECT), { recursive: true, for
 test('sign in, ask, approve a file change, find the thread again', async ({ page }) => {
   test.setTimeout(120000);
   await login(page);
+  // the Agent panel is hidden until AI assistance is activated in the settings
+  await page.evaluate(() => localStorage.setItem('ol.prefs', JSON.stringify({ aiButton: true })));
   await page.goto('/#/' + DOC);
+  await page.reload();
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
 
   // open the Agent panel (rail button when the sidebar is collapsed, panel tab otherwise)
