@@ -1185,6 +1185,8 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .agent-msg .agent-code, .agent-code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--ui-bg2); border: 1px solid var(--ui-border); border-radius: 6px; padding: 6px 8px; overflow-x: auto; white-space: pre; margin: 4px 0; }
 .agent-msg code { font-family: ui-monospace, monospace; font-size: 0.92em; background: var(--ui-bg2); border-radius: 4px; padding: 0 3px; }
 .agent-math-block { text-align: center; margin: 4px 0; overflow-x: auto; }
+.agent-math { user-select: all; -webkit-user-select: all; border-radius: 4px; }
+.agent-math:hover { background: var(--ui-hover); }
 .agent-diff-summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer; font-size: 12px; color: var(--ui-muted); }
 .agent-diff-summary .chev { flex: none; }
 .agent-diff-summary .file { font-family: ui-monospace, monospace; }

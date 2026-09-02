@@ -53,6 +53,15 @@ export const MATH_ALT_M: Record<string, string> = {
 let seq = 0;
 let active: LyxMathField | null = null;
 /** the field that currently has the keyboard focus */
+/** A formula pasted into a field may carry its delimiters ($…$, $$…$$, \[…\], \(…\)) — only the content belongs inside. */
+export function stripMathDelims(s: string): string {
+  const t = s.trim();
+  const m = /^(\$\$|\$|\\\[|\\\()([\s\S]*?)(\$\$|\$|\\\]|\\\))$/.exec(t);
+  if (!m) return t;
+  const close: Record<string, string> = { '$$': '$$', $: '$', '\\[': '\\]', '\\(': '\\)' };
+  return close[m[1]] === m[3] ? m[2].trim() : t;
+}
+
 export function activeMathField(): LyxMathField | null { return active; }
 /** called whenever a math field gains or loses the focus (the toolbar switches to LyX's math toolbar) */
 export const mathFocusListeners = new Set<(field: LyxMathField | null) => void>();
@@ -534,7 +543,7 @@ export class LyxMathField {
     input.addEventListener('input', ev => { const ie = ev as InputEvent; if (ie.isComposing || ie.inputType === 'insertCompositionText') return; if (input.value) { const v = input.value; input.value = ''; this.typed(v); } });
     input.addEventListener('copy', ev => { ev.preventDefault(); ev.clipboardData?.setData('text/plain', this.cursor.selection ? this.cursor.grabSelection() : ''); });
     input.addEventListener('cut', ev => { ev.preventDefault(); if (!this.cursor.selection || this.readOnly) return; ev.clipboardData?.setData('text/plain', this.cursor.grabSelection()); this.snapshot('cut'); this.cursor.eraseSelection(); this.commit(); });
-    input.addEventListener('paste', ev => { ev.preventDefault(); if (this.readOnly) return; const t = ev.clipboardData?.getData('text/plain') ?? ''; if (!t) return; this.snapshot('paste'); this.cursor.niceInsert(t.replace(/^\$|\$$/g, ''), false); this.commit(); });
+    input.addEventListener('paste', ev => { ev.preventDefault(); if (this.readOnly) return; const t = ev.clipboardData?.getData('text/plain') ?? ''; if (!t) return; this.snapshot('paste'); this.cursor.niceInsert(stripMathDelims(t), false); this.commit(); });
     // mouse: place the cursor / drag a selection
     this.content.addEventListener('mousedown', ev => {
       if (ev.button !== 0) return;

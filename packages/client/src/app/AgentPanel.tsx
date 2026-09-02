@@ -16,10 +16,19 @@ import type { ComponentChildren } from 'preact';
 import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel } from '../api';
 import { editorContext } from '../editor/context';
 import { renderStaticHtml } from '../editor/lyxmath/field';
+import { latexSelectionText } from './richcopy';
 
 interface Approval { requestId: string; method: string; params: any }
 
 const errText = (e: unknown) => (e as Error)?.message ?? String(e);
+
+/** Copying from the transcript: rendered formulas leave as their LaTeX source (see richcopy.ts). */
+const transcriptCopy = (e: ClipboardEvent) => {
+  const t = latexSelectionText(document.getSelection());
+  if (t === null || !e.clipboardData) return;
+  e.preventDefault();
+  e.clipboardData.setData('text/plain', t);
+};
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const store = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
 
@@ -57,8 +66,9 @@ function MathBit({ latex, display }: { latex: string; display: boolean }) {
   const html = useMemo(() => {
     try { return renderStaticHtml(latex, display, (editorContext.meta?.macros ?? {}) as never); } catch { return null; }
   }, [latex, display]);
-  if (!html) return <span>{display ? `\\[${latex}\\]` : `$${latex}$`}</span>;
-  return <span class={'agent-math' + (display ? ' display' : '')} dangerouslySetInnerHTML={{ __html: html }} />;
+  const attrs = { 'data-latex': latex, 'data-display': display ? '1' : undefined };
+  if (!html) return <span class="agent-math" {...attrs}>{display ? `\\[${latex}\\]` : `$${latex}$`}</span>;
+  return <span class={'agent-math' + (display ? ' display' : '')} {...attrs} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 function inlineBits(text: string): ComponentChildren[] {
@@ -137,14 +147,15 @@ function ItemView({ it }: { it: AgentItem }) {
   switch (it.type) {
     case 'userMessage': {
       const t = userText(it);
-      return t ? <div class="agent-msg user" data-agent="user">{t}</div> : null;
+      return t ? <div class="agent-msg user" data-agent="user"><RichText text={t} /></div> : null;
     }
     case 'agentMessage':
       return <div class="agent-msg assistant" data-agent="assistant"><RichText text={it.text ?? ''} /></div>;
     case 'reasoning': {
       const t = (it.summary ?? it.content ?? []).join('\n').trim();
       if (!t) return <div class="agent-item reasoning">Thinking…</div>;
-      return <div class="agent-item reasoning" onClick={() => setOpen(o => !o)} title="The agent's reasoning summary">{open ? t : t.split('\n')[0].slice(0, 90) + (t.length > 90 ? ' …' : '')}</div>;
+      const toggle = () => { if (window.getSelection()?.isCollapsed !== false) setOpen(o => !o); };
+      return <div class="agent-item reasoning" onClick={toggle} title="The agent's reasoning summary">{open ? <RichText text={t} /> : t.split('\n')[0].slice(0, 90) + (t.length > 90 ? ' …' : '')}</div>;
     }
     case 'commandExecution':
       // folded to one line by default — click for the output
@@ -407,7 +418,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
           {!threads.length && <div class="empty">No agent threads in this project yet — ask below to start one.</div>}
         </div>
       ) : (
-        <div class="agent-scroll" ref={scrollRef} onScroll={onScroll}>
+        <div class="agent-scroll" ref={scrollRef} onScroll={onScroll} onCopy={transcriptCopy}>
           {items.map(it => <ItemView key={it.id} it={it} />)}
           {approvals.map(a => <ApprovalCard key={a.requestId} a={a} onDecide={(d, fb) => decide(a, d, fb)} />)}
           {busyTurn && !approvals.length && <div class="agent-item reasoning" data-agent="busy">Working…</div>}

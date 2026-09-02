@@ -23,7 +23,7 @@ test.beforeAll(() => {
 });
 test.afterAll(() => { rmSync(join(PROJECTS_DIR, PROJECT), { recursive: true, force: true }); });
 
-test('sign in, ask, approve a file change, find the thread again', async ({ page }) => {
+test('sign in, ask, approve a file change, find the thread again', async ({ page, context }) => {
   test.setTimeout(120000);
   await login(page);
   // the Agent panel is hidden until AI assistance is activated in the settings
@@ -52,6 +52,27 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await expect(page.locator('.agent-msg.assistant')).toContainText('Stub reply to: hello agent', { timeout: 15000 });
   await expect(page.locator('.agent-msg.user')).toContainText('hello agent');   // context items stay hidden
   await expect(page.locator('.agent-msg.user')).toHaveCount(1);                 // the echoed item replaces the local bubble — no doubling
+
+  // equations render through the LyX math renderer — in the reply and in the user's own bubble
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.locator('.agent-compose textarea').fill('prove $E=mc^2$ please');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.agent-msg.assistant .agent-math[data-latex="E=mc^2"]').last()).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('.agent-msg.user .agent-math[data-latex="E=mc^2"]')).toHaveCount(1);
+  // drag-select + copy an equation: the clipboard carries its LaTeX source
+  await page.locator('.agent-msg.assistant').last().click();
+  await page.evaluate(() => {
+    const el = [...document.querySelectorAll('.agent-msg.assistant .agent-math')].pop()!;
+    const r = document.createRange(); r.selectNodeContents(el);
+    const sel = window.getSelection()!; sel.removeAllRanges(); sel.addRange(r);
+  });
+  await page.keyboard.press('Control+c');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('$E=mc^2$');
+  // pasted into the document it becomes a real, editable formula again
+  await page.locator('.lyx-editor .lyx-par').first().click({ position: { x: 12, y: 8 } });
+  await page.keyboard.press('End');
+  await page.keyboard.press('Control+v');
+  await expect(page.locator('.lyx-editor .lyx-math-inline')).toHaveCount(1, { timeout: 10000 });
 
   // a file change asks for approval; allowing it writes into the project
   await page.locator('.agent-compose textarea').fill('write hello for me');
