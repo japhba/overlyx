@@ -37,8 +37,14 @@ function selectionContext(): AgentTurnContext | undefined {
   return ctx;
 }
 
+/** codex concatenates the turn's input items into ONE string when echoing/storing the user
+ *  message, so the hidden editor-context block cannot be filtered as a separate part: strip the
+ *  [context]…[/context] span from the joined text instead (and, for threads from before the
+ *  terminator existed, the exact legacy header + optional selection fence). */
+const CONTEXT_RE = /\[context\][\s\S]*?\[\/context\]\s*/g;
+const LEGACY_CONTEXT_RE = /\[context\] The user is editing [^\n]*? in OverLyX\.(?:\nTheir current selection in that document:\n```latex\n[\s\S]*?\n?```)?\s*/g;
 const userText = (it: AgentItem): string =>
-  (it.content ?? []).map(c => c.text ?? '').filter(t => t && !t.startsWith('[context]')).join('\n').trim();
+  (it.content ?? []).map(c => c.text ?? '').join('\n').replace(CONTEXT_RE, '').replace(LEGACY_CONTEXT_RE, '').trim();
 
 /* ------------------------------------------------------------------ LaTeX + markdown-lite rendering */
 

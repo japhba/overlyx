@@ -65,8 +65,11 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await page.locator('[data-agent-thread]').first().click();
   await expect(page.locator('.agent-msg.assistant').first()).toContainText('Stub reply to: hello agent');
 
-  // a reload comes back to the same view: panel open on the same thread
+  // a reload comes back to the same view: panel open on the same thread, user bubbles included
+  // (the transcript path joins codex's concatenated input — the context block must strip cleanly)
   await page.reload();
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   await expect(page.locator('.agent-msg.assistant').first()).toContainText('Stub reply to: hello agent', { timeout: 15000 });
+  await expect(page.locator('.agent-msg.user').first()).toContainText('hello agent');
+  await expect(page.locator('.agent-msg.user').first()).not.toContainText('[context]');
 });

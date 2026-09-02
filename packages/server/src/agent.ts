@@ -253,7 +253,9 @@ async function composeInput(text: string, ctx: TurnContext | undefined): Promise
       if (tex.trim()) lines.push('Their current selection in that document:', '```latex', tex.trim().slice(0, 6000), '```');
     }
   } catch { /* selection context is best-effort */ }
-  return [item(lines.join('\n')), item(text)];
+  // codex concatenates input items into one string when it echoes/stores the user message, so the
+  // context block carries an explicit terminator the client can strip it by (AgentPanel userText)
+  return [item(lines.join('\n') + '\n[/context]'), item(text)];
 }
 
 /* ------------------------------------------------------------------ routes */
