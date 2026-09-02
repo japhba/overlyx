@@ -26,23 +26,35 @@ div.login .hero { display: grid; grid-template-columns: 1fr 350px; gap: 56px; al
 .login .signin .demos-hint { margin-top: 8px; align-self: center; font-size: 12px; color: var(--ui-muted); text-decoration: none; }
 .login .signin .demos-hint:hover { color: var(--accent); text-decoration: underline; }
 
-/* demo clips */
-.login .demos { display: flex; flex-direction: column; gap: 26px; padding: 30px 0 10px; }
-.login .demos h2 { margin: 0 0 2px; font-size: 24px; text-align: center; }
-.login .demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
-.login .demo { margin: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.login .demo .frame { position: relative; border: 1px solid var(--ui-border); border-radius: 10px; overflow: hidden; box-shadow: 0 10px 36px rgba(0, 0, 0, 0.14); background: var(--surface); }
-.login .demo video { display: block; width: 100%; height: auto; }
-.login .demo .frame.ended video { filter: brightness(0.75) saturate(0.85); transition: filter 0.25s; }
-.login .demo figcaption { display: flex; flex-direction: column; gap: 2px; padding: 0 2px; }
-.login .demo figcaption strong { font-size: 14.5px; }
-.login .demo figcaption span { font-size: 12.5px; opacity: 0.7; line-height: 1.45; }
-.login .demo figcaption a { color: var(--accent); }
+/* the VS Code extension, as reachable as the Google button */
+.login a.vscode-get { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 13px 16px; border-radius: 8px; border: 1px solid rgba(0, 122, 204, 0.55); background: var(--surface); color: var(--ui-fg); text-decoration: none; font-weight: 600; font-size: 15.5px; box-shadow: 0 2px 10px rgba(0, 122, 204, 0.2); transition: box-shadow 0.15s, transform 0.15s; }
+.login a.vscode-get:hover { box-shadow: 0 4px 16px rgba(0, 122, 204, 0.35); transform: translateY(-1px); }
+.login a.vscode-get .g { width: 20px; height: 20px; flex: none; }
 
-/* the replay button, once a clip has halted on its last frame */
-.login .replay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border: 0; border-radius: 999px; background: rgba(20, 22, 28, 0.72); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; backdrop-filter: blur(3px); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
+/* the demo gallery wheel: one clip at a time, sliding, with the ". o .." dots underneath */
+.login .demos { display: flex; flex-direction: column; gap: 18px; padding: 30px 0 10px; }
+.login .demos h2 { margin: 0 0 2px; font-size: 24px; text-align: center; }
+.login .wheel { overflow: hidden; }
+.login .wheel .track { display: flex; align-items: flex-start; transition: transform 0.55s cubic-bezier(0.25, 0.8, 0.35, 1); }
+.login .wheel .slide { flex: 0 0 100%; min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+.login .wheel .frame { position: relative; aspect-ratio: 16 / 10; border: 1px solid var(--ui-border); border-radius: 10px; overflow: hidden; box-shadow: 0 10px 36px rgba(0, 0, 0, 0.14); background: var(--surface); }
+.login .wheel video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.login .wheel figcaption { display: flex; flex-direction: column; gap: 2px; padding: 0 2px; text-align: center; }
+.login .wheel figcaption strong { font-size: 15px; }
+.login .wheel figcaption span { font-size: 13px; opacity: 0.7; line-height: 1.45; }
+.login .wheel figcaption a { color: var(--accent); }
+
+/* ↻ on the frame replays the clip that is showing (visible while hovering) */
+.login .replay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border: 0; border-radius: 999px; background: rgba(20, 22, 28, 0.72); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; backdrop-filter: blur(3px); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); opacity: 0; transition: opacity 0.2s; }
+.login .frame:hover .replay, .login .replay:focus-visible { opacity: 1; }
 .login .replay:hover { background: rgba(20, 22, 28, 0.88); transform: translate(-50%, -50%) scale(1.05); }
 .login .replay svg { width: 17px; height: 17px; }
+
+/* ". o .." — the position, and a way to jump */
+.login .dots { display: flex; justify-content: center; align-items: center; gap: 11px; }
+.login .dots .dot { width: 9px; height: 9px; padding: 0; border: 0; border-radius: 50%; background: var(--ui-muted); opacity: 0.45; cursor: pointer; transition: all 0.25s; }
+.login .dots .dot:hover { opacity: 0.8; }
+.login .dots .dot.active { width: 13px; height: 13px; background: var(--accent); opacity: 1; }
 
 /* one more way in at the end of the page */
 .login .cta-end { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 34px 0 26px; }
@@ -53,6 +65,5 @@ div.login .hero { display: grid; grid-template-columns: 1fr 350px; gap: 56px; al
   div.login .hero { grid-template-columns: 1fr; gap: 28px; min-height: 0; padding-top: 12px; justify-items: center; }
   .login .hero-copy { align-items: center; text-align: center; }
   .login .hero-copy .pitch { text-align: left; }
-  .login .demo-grid { grid-template-columns: 1fr; }
   .login form.signin { width: min(350px, 100%); }
 }

@@ -166,12 +166,16 @@ blend.
   list, GitHub links) with the sign-in card beside it — *Continue with Google* is the way in (repeated
   at the bottom of the page); the username + password form (accounts created by an administrator,
   e2e) is folded away behind a small link while Google sign-in is configured, and is the only form
-  otherwise. Below the hero, four demo clips (`public/landing/*.{webm,mp4,jpg}`): real recordings of
-  the editor (WYSIWYG math typing, the raw .tex split, two authors live, the VS Code extension), each
-  in a light and a dark variant picked by the visitor's theme; a clip plays once when scrolled into
-  view, halts on its last frame and offers a replay button. Regenerate the recordings with
-  `scripts/recording/` (see the comments in `record-demos.spec.ts` — an isolated instance — and
-  `record-vscode.mjs` — xvfb); `e2e/landing.spec.ts` covers autoplay, halt, replay and the theme swap.
+  otherwise; *Get the VS Code extension* sits right under the Google button with the same weight,
+  linking to the newest GitHub release. Below the hero, a demo gallery wheel with four clips
+  (`public/landing/*.{webm,mp4,jpg}`): real recordings of the editor (WYSIWYG math typing, the raw
+  .tex split, two authors live with a margin comment thread, the VS Code extension), each in a light
+  and a dark variant picked by the visitor's theme. One clip shows at a time: it plays once when the
+  wheel is scrolled into view, halts on its last frame for a beat, then the wheel slides to the next
+  and wraps around; ". o .." dots under the wheel show the position and jump to a clip, and ↻ on the
+  frame replays the one showing. Regenerate the recordings with `scripts/recording/` (see the
+  comments in `record-demos.spec.ts` — an isolated instance — and `record-vscode.mjs` — xvfb);
+  `e2e/landing.spec.ts` covers autoplay, rotation, the dots, replay and the theme swap.
 * **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in the side
   panel by our own viewer (fit-to-width / zoom, page navigation, a rebuilt PDF keeps the scroll
   position), and a project's `.pdf` files open in a tab of their own from the file browser (ids
@@ -437,6 +441,10 @@ default 10), `OVERLYX_SANDBOX` (`auto` — use bubblewrap when installed, the de
 `LYX_LAYOUT_DIR` (LyX `lib/layouts`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` +
 `OVERLYX_PUBLIC_URL` to enable Google sign-in, `OVERLYX_OWNER_EMAIL` (the instance owner: made an
 administrator at sign-in and given every project directory that has no owner yet),
+`OVERLYX_SMTP_URL` (an SMTP URL with credentials, e.g.
+`smtps://you%40gmail.com:app-password@smtp.gmail.com/` — the owner is e-mailed on every sign-up;
+without it the notification is only logged, since outbound port 25 is blocked on typical hosts)
+and `OVERLYX_MAIL_FROM` (optional From header override),
 `OVERLYX_SIGNUP` (`open` — anyone with a Google account may sign in, the default — or `invited`),
 `OVERLYX_GIT` (`off` to not expose projects as git repositories), `OVERLYX_GIT_COMMIT_MS` (idle time
 before OverLyX commits what changed, default 2 min) and `OVERLYX_GIT_COMMIT_MAX_WAIT` (longest time

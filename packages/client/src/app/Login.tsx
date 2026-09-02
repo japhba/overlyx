@@ -30,53 +30,101 @@ const GoogleButton = () => (
   <a class="google" href="/api/auth/google" data-google-login><GoogleG /><span>Continue with Google</span></a>
 );
 
+const VSCODE_URL = GITHUB_URL + '/releases/latest';
+
+const VscodeIcon = () => (
+  <svg class="g" viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="#007ACC" d="M23.15 2.587 18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261A1 1 0 0 0 .326 8.74L3.899 12 .326 15.26a1 1 0 0 0 .001 1.479L1.65 17.94a.999.999 0 0 0 1.276.057l4.12-3.128 9.46 8.63a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 14.861L10.826 12l7.178-5.448v10.896z" />
+  </svg>
+);
+
+interface Clip { name: string; title: string; note: string; extra?: ComponentChildren }
+const CLIPS: Clip[] = [
+  { name: 'wysiwyg', title: 'True WYSIWYG, for text and math', note: 'Sections, prose and formulas render as you type them — no compile loop, no raw markup.' },
+  { name: 'tex', title: "It's a real .tex file", note: 'The document is plain LaTeX, kept byte for byte. Open the source beside the page and edit either side — they stay in sync.' },
+  { name: 'collab', title: 'Write together', note: 'Live cursors and presence across authors, comment threads in the margin — with change tracking and sharing built in.' },
+  {
+    name: 'vscode', title: 'WYSIWYG for your VS Code LaTeX writing',
+    note: "The same editor as a VS Code extension: rendered .tex documents, PDF preview with SyncTeX — while files, git and agents stay VS Code's. ",
+    extra: <a href={VSCODE_URL} target="_blank" rel="noopener">Get the extension.</a>,
+  },
+];
+
 /**
- * One demo clip: plays once when it scrolls into view, halts on the last frame, and offers a
- * replay button. The light or dark recording is picked to match the visitor's theme.
+ * The demo gallery wheel: one clip at a time, auto-rotating — the active clip plays once, halts
+ * on its last frame for a beat, then the wheel slides to the next (and wraps around). The
+ * ". o .." dots show the position and jump to a clip; ↻ on the frame replays the current one.
+ * Light or dark recordings are picked to match the visitor's theme.
  */
-function Demo({ name, title, note, big, children }: { name: string; title: string; note: string; big?: boolean; children?: ComponentChildren }) {
+function DemoWheel() {
   const { theme } = useTheme();
-  const ref = useRef<HTMLVideoElement>(null);
-  const [ended, setEnded] = useState(false);
-  const src = `/landing/${name}-${theme}`;
+  const [active, setActive] = useState(0);
+  const [inView, setInView] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const videos = useRef<(HTMLVideoElement | null)[]>([]);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+
   useEffect(() => {
-    const v = ref.current;
-    if (!v) return;
-    setEnded(false);
-    const io = new IntersectionObserver(entries => {
-      for (const e of entries) {
-        if (e.isIntersecting && !v.ended) void v.play().catch(() => {});
-        else if (!e.isIntersecting && !v.paused) v.pause();
-      }
-    }, { threshold: 0.35 });
-    io.observe(v);
+    const el = wrap.current;
+    if (!el) return;
+    const io = new IntersectionObserver(es => setInView(es.some(e => e.isIntersecting)), { threshold: 0.35 });
+    io.observe(el);
     return () => io.disconnect();
-  }, [src]);
-  const replay = () => {
-    const v = ref.current;
+  }, []);
+
+  // whenever the active clip, the visibility or the theme changes: everything else pauses, the
+  // active clip starts over (scrolled away, the wheel stands still)
+  useEffect(() => {
+    clearTimeout(timer.current);
+    videos.current.forEach((v, i) => { if (v && i !== active && !v.paused) v.pause(); });
+    const v = videos.current[active];
     if (!v) return;
-    setEnded(false);
-    v.currentTime = 0;
-    void v.play().catch(() => {});
+    if (inView) { v.currentTime = 0; void v.play().catch(() => {}); }
+    else v.pause();
+  }, [active, inView, theme]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const onEnded = (i: number) => {
+    if (i !== active) return;
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setActive(a => (a + 1) % CLIPS.length), 1600);
+  };
+  const replay = (i: number) => {
+    const v = videos.current[i];
+    if (v) { clearTimeout(timer.current); v.currentTime = 0; void v.play().catch(() => {}); }
   };
   return (
-    <figure class={'demo' + (big ? ' big' : '')} data-demo={name}>
-      <div class={'frame' + (ended ? ' ended' : '')}>
-        {/* key: a theme flip swaps the sources, which <video> only picks up on a fresh element */}
-        <video key={src} ref={ref} muted playsInline preload="metadata" poster={src + '.jpg'}
-          onEnded={() => setEnded(true)} onPlay={() => setEnded(false)}>
-          <source src={src + '.webm'} type="video/webm" />
-          <source src={src + '.mp4'} type="video/mp4" />
-        </video>
-        {ended && (
-          <button type="button" class="replay" data-replay onClick={replay} aria-label={'Replay: ' + title}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 5V2L7 6.5 12 11V7.5a5.5 5.5 0 1 1-5.5 5.5H4a8 8 0 1 0 8-8z" /></svg>
-            Replay
-          </button>
-        )}
+    <div class="wheel" ref={wrap}>
+      <div class="track" style={{ transform: `translateX(-${active * 100}%)` }}>
+        {CLIPS.map((c, i) => {
+          const src = `/landing/${c.name}-${theme}`;
+          return (
+            <figure class={'slide' + (i === active ? ' active' : '')} data-demo={c.name} aria-hidden={i !== active}>
+              <div class="frame">
+                {/* key: a theme flip swaps the sources, which <video> only picks up on a fresh element */}
+                <video key={src} ref={el => { videos.current[i] = el; }} muted playsInline preload="metadata" poster={src + '.jpg'}
+                  onEnded={() => onEnded(i)}>
+                  <source src={src + '.webm'} type="video/webm" />
+                  <source src={src + '.mp4'} type="video/mp4" />
+                </video>
+                <button type="button" class="replay" data-replay onClick={() => replay(i)} aria-label={'Replay: ' + c.title} tabIndex={i === active ? 0 : -1}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 5V2L7 6.5 12 11V7.5a5.5 5.5 0 1 1-5.5 5.5H4a8 8 0 1 0 8-8z" /></svg>
+                  Replay
+                </button>
+              </div>
+              <figcaption><strong>{c.title}</strong><span>{c.note}{c.extra}</span></figcaption>
+            </figure>
+          );
+        })}
       </div>
-      <figcaption><strong>{title}</strong><span>{note}{children}</span></figcaption>
-    </figure>
+      <div class="dots" role="tablist" aria-label="Demo clips">
+        {CLIPS.map((c, i) => (
+          <button type="button" role="tab" aria-selected={i === active} aria-label={c.title} data-dot={i}
+            class={'dot' + (i === active ? ' active' : '')}
+            onClick={() => { if (i === active) replay(i); else { clearTimeout(timer.current); setActive(i); } }} />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -120,6 +168,9 @@ export function Login({ onLogin, google }: { onLogin: (u: User) => void; google:
             <h2>Get started</h2>
             <p class="signin-note">Sign in and your first project is one click away.</p>
             {google && <GoogleButton />}
+            <a class="vscode-get" data-vscode-get href={VSCODE_URL} target="_blank" rel="noopener">
+              <VscodeIcon /><span>Get the VS Code extension</span>
+            </a>
             {google && !showPassword && (
               <button type="button" class="fallback-link" data-password-login onClick={() => setWantPassword(true)}>
                 I have a username and password
@@ -139,18 +190,7 @@ export function Login({ onLogin, google }: { onLogin: (u: User) => void; google:
         </header>
         <section class="demos" id="demos" aria-label="What OverLyX can do">
           <h2>See it in action</h2>
-          <Demo big name="wysiwyg" title="True WYSIWYG, for text and math"
-            note="Sections, prose and formulas render as you type them — no compile loop, no raw markup." />
-          <div class="demo-grid">
-            <Demo name="tex" title="It's a real .tex file"
-              note="The document is plain LaTeX, kept byte for byte. Open the source beside the page and edit either side — they stay in sync." />
-            <Demo name="collab" title="Write together"
-              note="Live cursors and presence across authors — with change tracking, comments and sharing built in." />
-          </div>
-          <Demo big name="vscode" title="WYSIWYG for your VS Code LaTeX writing"
-            note="The same editor as a VS Code extension: rendered .tex documents, PDF preview with SyncTeX — while files, git and agents stay VS Code's. ">
-            <a href={GITHUB_URL + '/releases/latest'} target="_blank" rel="noopener">Get the extension.</a>
-          </Demo>
+          <DemoWheel />
         </section>
         <div class="cta-end">
           <p>Your next paper deserves a nicer editor.</p>

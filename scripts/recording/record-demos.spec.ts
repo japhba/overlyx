@@ -88,8 +88,8 @@ function encode(raw: string, name: string, theme: Theme, fromMs: number): void {
 }
 
 /** Close the context and turn its (single recorded) page's video into the published clip. */
-async function finish(ctx: BrowserContext, page: Page, name: string, theme: Theme, t0: number, opened: number): Promise<void> {
-  await page.waitForTimeout(1800);   // rest on the final state before the clip halts
+async function finish(ctx: BrowserContext, page: Page, name: string, theme: Theme, t0: number, opened: number, tailMs = 1800): Promise<void> {
+  await page.waitForTimeout(tailMs);   // rest on the final state before the clip halts
   const video = page.video()!;
   await ctx.close();
   encode(await video.path(), name, theme, t0 - opened);
@@ -163,6 +163,8 @@ for (const theme of ['light', 'dark'] as const) {
   test(`collab (${theme})`, async ({ browser }) => {
     const project = theme === 'light' ? 'deep-ensembles' : 'loss-landscapes';
     const ctx = await recordingContext(browser, theme);
+    // the recorded (admin) view shows comment threads in the margin, Google-Docs style
+    await ctx.addInitScript(() => { try { localStorage.setItem('ol.margin', '1'); } catch { /* ignore */ } });
     await freshProject(ctx, project, doc('Why Ensembles Work', 'Admin',
       '\\section{Ensembles}\n\nAveraging the predictions of independently trained networks reduces variance without touching the bias.\n\n\\section{Loss landscapes}\n\nSolutions found by stochastic gradient descent are connected by paths of low loss.\n'));
     await shareProject(browser, project, ['bob']);
@@ -187,8 +189,20 @@ for (const theme of ['light', 'dark'] as const) {
     await page.waitForTimeout(600);
     await caretToParEnd(page, page.locator('.lyx-editor > .lyx-par.lyx-layout-standard').first());
     await page.keyboard.type(' The gain grows with the disagreement between the members.', { delay: 34 });
-    await bob;
-    await finish(ctx, page, 'collab', theme, t0, opened);   // bob stays connected: his avatar is part of the final frame
+    const p2 = await bob;
+    // bob opens a comment thread on the sentence the admin just wrote; the admin's margin shows it
+    await page.waitForTimeout(400);
+    await caretToParEnd(p2, p2.locator('.lyx-editor > .lyx-par.lyx-layout-standard').first());
+    await p2.keyboard.press('Control+Alt+c');
+    await expect(p2.locator('.lyx-inset-note-comment')).toHaveCount(1, { timeout: 5000 });
+    await p2.keyboard.type('Do we have a citation for this?', { delay: 45 });
+    await expect(page.locator('.lyx-inset-note-comment')).toContainText('Do we have a citation', { timeout: 10000 });
+    // ride out the save debounce, then make sure the known save/merge race did not eat the typed
+    // sentences ([[overlyx-e2e-flakes]] — a scrambled run must fail and be re-recorded, not shipped)
+    await page.waitForTimeout(2400);
+    await expect(page.locator('.lyx-editor')).toContainText('disagreement between the members.');
+    await expect(page.locator('.lyx-editor')).toContainText('ensemble stay diverse.');
+    await finish(ctx, page, 'collab', theme, t0, opened, 800);   // bob stays connected: his avatar is part of the final frame
     await bobCtx.close();
   });
 }

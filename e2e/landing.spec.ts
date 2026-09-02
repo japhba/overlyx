@@ -43,25 +43,51 @@ test.describe('landing page', () => {
     await expect(fallback).toHaveCount(0);
   });
 
-  test('demo clips: autoplay when scrolled into view, halt at the end, replay button restarts; dark mode swaps in the dark recordings', async ({ page }) => {
+  test('the VS Code extension is offered beside the sign-in, with and without Google', async ({ page }) => {
+    await page.route('**/api/auth/me', route => route.fulfill({ json: { user: null, google: true, signup: 'open' } }));
     await page.goto('/');
-    await expect(page.locator('.demos .demo video')).toHaveCount(4);
-    const video = () => page.locator('[data-demo="wysiwyg"] video');
-    await video().scrollIntoViewIfNeeded();
-    // muted autoplay starts once the clip is in view, with the light variant
+    const get = page.locator('.signin [data-vscode-get]');
+    await expect(get).toBeVisible();
+    await expect(get).toHaveAttribute('href', /github\.com\/japhba\/overlyx\/releases\/latest/);
+    // as prominent as the Google button
+    const g = (await page.locator('[data-google-login]').boundingBox())!;
+    const v = (await get.boundingBox())!;
+    expect(Math.abs(v.height - g.height)).toBeLessThan(6);
+    expect(Math.abs(v.width - g.width)).toBeLessThan(6);
+    await page.unroute('**/api/auth/me');
+    await page.goto('/');
+    await expect(page.locator('.signin [data-vscode-get]')).toBeVisible();
+  });
+
+  test('demo wheel: auto-plays in view, rotates to the next clip, dots jump, replay restarts, dark variants', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.wheel .slide video')).toHaveCount(4);
+    await expect(page.locator('.wheel .dots .dot')).toHaveCount(4);
+    const active = () => page.locator('.wheel .slide.active');
+    const video = () => active().locator('video');
+    await page.locator('.wheel').scrollIntoViewIfNeeded();
+    // the wheel starts on the first clip, playing the light recording
+    await expect(active()).toHaveAttribute('data-demo', 'wysiwyg');
     await expect.poll(() => video().evaluate(v => !(v as HTMLVideoElement).paused), { timeout: 15000 }).toBe(true);
     expect(await video().evaluate(v => (v as HTMLVideoElement).currentSrc)).toContain('wysiwyg-light');
-    // jump near the end: the clip halts on the last frame and offers a replay
+    // a clip that ends halts for a beat, then the wheel rotates on and the ". o .." moves with it
     await video().evaluate(v => { const x = v as HTMLVideoElement; x.currentTime = x.duration - 0.1; });
-    const replay = page.locator('[data-demo="wysiwyg"] [data-replay]');
-    await expect(replay).toBeVisible({ timeout: 15000 });
-    expect(await video().evaluate(v => (v as HTMLVideoElement).ended)).toBe(true);
-    await replay.click();
-    await expect(replay).toHaveCount(0);
-    await expect.poll(() => video().evaluate(v => { const x = v as HTMLVideoElement; return !x.paused && !x.ended && x.currentTime < 3; }), { timeout: 10000 }).toBe(true);
-    // a dark system theme re-creates the elements with the dark recordings
+    await expect(active()).toHaveAttribute('data-demo', 'tex', { timeout: 15000 });
+    await expect(page.locator('.wheel .dots .dot.active')).toHaveAttribute('data-dot', '1');
+    await expect.poll(() => video().evaluate(v => !(v as HTMLVideoElement).paused && (v as HTMLVideoElement).currentTime < 3), { timeout: 15000 }).toBe(true);
+    // a dot jumps straight to its clip and plays it from the start
+    await page.locator('.wheel .dots .dot[data-dot="3"]').click();
+    await expect(active()).toHaveAttribute('data-demo', 'vscode');
+    await expect(page.locator('.wheel .dots .dot.active')).toHaveAttribute('data-dot', '3');
+    await expect.poll(() => video().evaluate(v => !(v as HTMLVideoElement).paused && (v as HTMLVideoElement).currentTime < 3), { timeout: 15000 }).toBe(true);
+    // ↻ restarts the clip that is showing
+    await video().evaluate(v => { (v as HTMLVideoElement).currentTime = 5; });
+    await active().locator('.frame').hover();
+    await active().locator('[data-replay]').click();
+    await expect.poll(() => video().evaluate(v => (v as HTMLVideoElement).currentTime), { timeout: 10000 }).toBeLessThan(3);
+    // a dark system theme re-creates the videos with the dark recordings
     await page.emulateMedia({ colorScheme: 'dark' });
-    await expect.poll(() => video().evaluate(v => (v as HTMLVideoElement).currentSrc), { timeout: 10000 }).toContain('wysiwyg-dark');
+    await expect.poll(() => video().evaluate(v => (v as HTMLVideoElement).currentSrc), { timeout: 10000 }).toContain('vscode-dark');
   });
 });
 

@@ -6,6 +6,7 @@ import express from 'express';
 import { db, pickColor, type UserRow } from './db.ts';
 import { config, JWT_SECRET } from './config.ts';
 import { bindInvitations, isInvited } from './access.ts';
+import { notifySignup } from './mailer.ts';
 
 export interface SessionUser { id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null; email?: string | null }
 
@@ -170,6 +171,7 @@ export function authRouter(): Router {
         let username = base; let k = 1;
         while (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) username = `${base}${k++}`;
         row = createUser(username, info.name ?? username, null, { email, googleSub: info.sub, avatar: info.picture });
+        notifySignup({ name: row.display_name, username: row.username, email: row.email }, (db.prepare('SELECT COUNT(*) AS c FROM users').get() as { c: number }).c);
       } else if (!row.google_sub) {
         db.prepare('UPDATE users SET google_sub = ? WHERE id = ?').run(info.sub, row.id);
       }
