@@ -162,10 +162,16 @@ blend.
   the first use adds a small macro to the document preamble (`packages/core/src/math/llangle.ts`) that
   makes the plain, `\left…\right` and `\bigl…\bigr` forms compile with symmetric scaled brackets. The
   table row implements LyX's `tabular-feature` commands (`packages/client/src/editor/tablecommands.ts`).
-* **Landing page / sign-in** (`app/Login.tsx`, wordmark and sign-in card only): *Continue with Google* is the way in; the username +
-  password form (accounts created by an administrator, e2e) is folded away behind a small link while
-  Google sign-in is configured, and is the only form otherwise; links go to the GitHub repository and
-  the issue tracker.
+* **Landing page / sign-in** (`app/Login.tsx` + `app/landing.css`): a hero (wordmark, tagline, pitch
+  list, GitHub links) with the sign-in card beside it — *Continue with Google* is the way in (repeated
+  at the bottom of the page); the username + password form (accounts created by an administrator,
+  e2e) is folded away behind a small link while Google sign-in is configured, and is the only form
+  otherwise. Below the hero, four demo clips (`public/landing/*.{webm,mp4,jpg}`): real recordings of
+  the editor (WYSIWYG math typing, the raw .tex split, two authors live, the VS Code extension), each
+  in a light and a dark variant picked by the visitor's theme; a clip plays once when scrolled into
+  view, halts on its last frame and offers a replay button. Regenerate the recordings with
+  `scripts/recording/` (see the comments in `record-demos.spec.ts` — an isolated instance — and
+  `record-vscode.mjs` — xvfb); `e2e/landing.spec.ts` covers autoplay, halt, replay and the theme swap.
 * **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in the side
   panel by our own viewer (fit-to-width / zoom, page navigation, a rebuilt PDF keeps the scroll
   position), and a project's `.pdf` files open in a tab of their own from the file browser (ids

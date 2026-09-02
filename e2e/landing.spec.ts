@@ -42,6 +42,27 @@ test.describe('landing page', () => {
     await expect(page.locator('.login .password.fallback button.btn')).not.toHaveClass(/primary/);
     await expect(fallback).toHaveCount(0);
   });
+
+  test('demo clips: autoplay when scrolled into view, halt at the end, replay button restarts; dark mode swaps in the dark recordings', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.demos .demo video')).toHaveCount(4);
+    const video = () => page.locator('[data-demo="wysiwyg"] video');
+    await video().scrollIntoViewIfNeeded();
+    // muted autoplay starts once the clip is in view, with the light variant
+    await expect.poll(() => video().evaluate(v => !(v as HTMLVideoElement).paused), { timeout: 15000 }).toBe(true);
+    expect(await video().evaluate(v => (v as HTMLVideoElement).currentSrc)).toContain('wysiwyg-light');
+    // jump near the end: the clip halts on the last frame and offers a replay
+    await video().evaluate(v => { const x = v as HTMLVideoElement; x.currentTime = x.duration - 0.1; });
+    const replay = page.locator('[data-demo="wysiwyg"] [data-replay]');
+    await expect(replay).toBeVisible({ timeout: 15000 });
+    expect(await video().evaluate(v => (v as HTMLVideoElement).ended)).toBe(true);
+    await replay.click();
+    await expect(replay).toHaveCount(0);
+    await expect.poll(() => video().evaluate(v => { const x = v as HTMLVideoElement; return !x.paused && !x.ended && x.currentTime < 3; }), { timeout: 10000 }).toBe(true);
+    // a dark system theme re-creates the elements with the dark recordings
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect.poll(() => video().evaluate(v => (v as HTMLVideoElement).currentSrc), { timeout: 10000 }).toContain('wysiwyg-dark');
+  });
 });
 
 test.describe('sidebars', () => {

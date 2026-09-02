@@ -8,3 +8,4 @@ playwright-report/
 .env
 dist.new/
 deploy/secrets.env
+scripts/recording/out/
