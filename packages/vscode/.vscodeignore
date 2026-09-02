@@ -4,4 +4,6 @@ esbuild.mjs
 webview.vite.config.ts
 tsconfig.json
 scripts/**
+test/**
+.vscode-test/**
 *.map

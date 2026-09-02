@@ -845,6 +845,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     { label: 'Keyboard shortcuts', action: () => setDialog({ name: 'help' }) },
     { sep: true },
     { label: 'Report a problem / send feedback…', action: () => setDialog({ name: 'feedback' }) },
+    { label: 'OverLyX for VS Code (.vsix download)', action: () => { const a = document.createElement('a'); a.href = '/api/vscode-extension'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); notify('Downloading the extension — install it in VS Code with “Extensions: Install from VSIX…”'); } },
     { label: 'About OverLyX', action: () => alert('OverLyX — a LyX-like collaborative WYSIWYG editor for LaTeX documents.\nDocuments are ordinary .tex files (change tracking and comments live in the file as macros and comment blocks); formulas are edited with a port of LyX\'s math editor; collaboration via Yjs CRDTs.') },
   ] };
   const textFileMenus: MenuDef[] = docId ? [

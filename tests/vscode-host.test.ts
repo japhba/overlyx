@@ -25,7 +25,7 @@ const MAIN = `\\documentclass{article}
 
 \\section{Introduction}
 
-Functions on \\RR{} are studied, see \\eqref{eq:main}.
+Functions on $\\RR$ are studied, see \\eqref{eq:main}.
 
 \\begin{equation}
 f(x)=x^{2}\\label{eq:main}

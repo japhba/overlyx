@@ -24,11 +24,18 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, p
     `img-src ${webview.cspSource} data: blob: http://127.0.0.1:*`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
     `font-src ${webview.cspSource} data:`,
-    `script-src 'nonce-${nonce}'`,
+    `script-src 'nonce-${nonce}' ${webview.cspSource}`,   // the entry carries the nonce; its imported chunks come from the asset host
     `connect-src http://127.0.0.1:* ${webview.cspSource}`,
     "worker-src blob: data:",
   ].join('; ');
   const inject = `<meta http-equiv="Content-Security-Policy" content="${csp}">\n` +
-    `<script nonce="${nonce}">window.__OVERLYX_VSCODE__ = ${JSON.stringify({ ...globals, assetBase: base + '/' })};</script>`;
+    // boot instrumentation: grab the one-shot VS Code API here (globals.ts reuses it) and forward
+    // uncaught webview errors to the extension host — a webview that fails to boot is silent otherwise
+    `<script nonce="${nonce}">
+      window.__OVERLYX_VSCAPI = acquireVsCodeApi();
+      window.__OVERLYX_VSCODE__ = ${JSON.stringify({ ...globals, assetBase: base + '/' })};
+      window.addEventListener('error', e => { if (!e.message) return; try { window.__OVERLYX_VSCAPI.postMessage({ type: 'notify', kind: 'error', text: 'webview: ' + e.message + ' @ ' + (e.filename || '?') + ':' + (e.lineno || 0) }); } catch {} }, true);
+      window.addEventListener('unhandledrejection', e => { try { window.__OVERLYX_VSCAPI.postMessage({ type: 'notify', kind: 'error', text: 'webview promise: ' + String(e.reason).slice(0, 300) }); } catch {} });
+    </script>`;
   return html.replace('<head>', '<head>\n' + inject);
 }

@@ -15,7 +15,8 @@ export const G: VsCodeGlobals = (window as unknown as { __OVERLYX_VSCODE__: VsCo
 
 export interface VsCodeApi { postMessage(msg: unknown): void; getState(): unknown; setState(s: unknown): void }
 declare function acquireVsCodeApi(): VsCodeApi;
-export const vscode: VsCodeApi = acquireVsCodeApi();
+// the host's boot script acquires the (one-shot) API first — reuse it
+export const vscode: VsCodeApi = (window as unknown as { __OVERLYX_VSCAPI?: VsCodeApi }).__OVERLYX_VSCAPI ?? acquireVsCodeApi();
 
 /** Apply the VS Code theme to the OverLyX theme attribute. */
 export function applyTheme(dark: boolean): void {

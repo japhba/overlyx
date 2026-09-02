@@ -150,10 +150,12 @@
     "build": "node esbuild.mjs && vite build --config webview.vite.config.ts && node scripts/copy-assets.mjs",
     "build:host": "node esbuild.mjs",
     "build:webview": "vite build --config webview.vite.config.ts",
-    "package": "vsce package --no-dependencies"
+    "package": "vsce package --no-dependencies",
+    "test:integration": "xvfb-run -a node test/runTest.mjs"
   },
   "devDependencies": {
     "@types/vscode": "1.90.0",
-    "@vscode/vsce": "^3.9.0"
+    "@vscode/vsce": "^3.9.0",
+    "@vscode/test-electron": "^2.4.1"
   }
 }

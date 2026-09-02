@@ -1017,6 +1017,19 @@ api.post('/users', (req, res) => {
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
+/** The VS Code extension (.vsix) built on this server: downloadable for signed-in users
+ *  (Help ▸ OverLyX for VS Code). Not on the marketplace yet — this is the distribution channel. */
+api.get('/vscode-extension', (_req, res) => {
+  const dir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../vscode');
+  let files: string[] = [];
+  try { files = fs.readdirSync(dir).filter(f => f.endsWith('.vsix')); } catch { /* not built here */ }
+  if (!files.length) { res.status(404).json({ error: 'The VS Code extension is not built on this server.' }); return; }
+  const file = files.map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs })).sort((a, b) => b.m - a.m)[0].f;
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${file}"`);
+  res.sendFile(path.join(dir, file));
+});
+
 app.use('/api', api);
 
 /* ------------------------------------------------------------------ static */

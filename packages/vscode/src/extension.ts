@@ -20,7 +20,10 @@ import { buildMeta, bibEntriesFor } from './host/meta.ts';
 import * as build from './host/build.ts';
 import type { HostToEditor } from './shared/protocol.ts';
 
-export function activate(context: vscode.ExtensionContext): void {
+/** What activate() returns — consumed by the integration test (test/suite/index.cjs). */
+export interface OverlyxTestApi { registry: Registry; bridgeBase(): string }
+
+export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
   const registry = new Registry();
   /** project name → root directory (workspace folders, plus folders of loose files) */
   const projectRoots = new Map<string, string>();
@@ -219,6 +222,8 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   void bridge.start().catch(e => vscode.window.showErrorMessage('OverLyX: local bridge failed to start: ' + String(e)));
+
+  return { registry, bridgeBase: () => bridge.base };
 }
 
 export function deactivate(): void { /* subscriptions dispose everything */ }
