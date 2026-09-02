@@ -348,9 +348,17 @@ function resolveIncludeFor(doc: OpenDoc, filename: string): LyxDocument | undefi
 /** Called after a document was written: (project, ids of the users whose edits it contains). */
 export const fileWrittenListeners = new Set<(project: string, userIds: number[]) => void>();
 
+/**
+ * Called (debounced) when files appear or disappear in a project — whoever the writer was:
+ * another user's upload, the agent, a git push, a LaTeX build. Feeds the clients' file browsers
+ * (SSE, `GET /api/projects/:project/events`) so they refresh themselves.
+ */
+export const projectChangedListeners = new Set<(project: string) => void>();
+
 export class DocManager {
   docs = new Map<string, OpenDoc>();
   private watcher: FSWatcher | null = null;
+  private changeTimers = new Map<string, NodeJS.Timeout>();
 
   constructor() {
     this.watch();
@@ -512,6 +520,19 @@ export class DocManager {
     this.watcher.on('change', (file: string) => void this.onExternalChange(file));
     this.watcher.on('add', (file: string) => void this.onExternalChange(file));
     this.watcher.on('unlink', (file: string) => void this.onExternalRemove(file));
+    // structural changes only ('change' would fire on every document save while someone types)
+    this.watcher.on('all', (event: string, file: string) => { if (event !== 'change') this.notifyProjectChanged(file); });
+  }
+
+  /** Tell the subscribed clients (debounced per project) that the project's file list changed. */
+  private notifyProjectChanged(file: string): void {
+    const project = path.relative(config.projectsDir, file).split(path.sep)[0];
+    if (!project || project === '..' || project.startsWith('.')) return;
+    clearTimeout(this.changeTimers.get(project));
+    this.changeTimers.set(project, setTimeout(() => {
+      this.changeTimers.delete(project);
+      for (const l of projectChangedListeners) l(project);
+    }, 500));
   }
 
   private async onExternalChange(file: string): Promise<void> {

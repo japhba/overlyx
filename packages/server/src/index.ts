@@ -13,7 +13,7 @@ import { createMcpToken, listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { userSettings, setUserSettings } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, generatePassword } from './auth.ts';
 import { attachWebSocket } from './ws.ts';
-import { manager } from './docs.ts';
+import { manager, projectChangedListeners } from './docs.ts';
 import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile, isDocumentFile } from './projects.ts';
 import { cachedParseFile, importLyxFile, parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
@@ -111,6 +111,26 @@ api.post('/projects', (req, res) => {
     ensureRepo(name).catch(e => console.error('[git] init failed:', e));
     res.json({ project: { name: p.name, title: null, kind: 'project', role: 'owner', via: 'owner', files: p.files } });
   } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/**
+ * Server-sent events: "the project's file list changed on disk" (another user, the agent, a git
+ * push, a LaTeX build — see projectChangedListeners). The file browser subscribes and reloads
+ * itself, so it needs no refresh button.
+ */
+api.get('/projects/:project/events', needProject('view'), (req, res) => {
+  const project = String(req.params.project);
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.write(': connected\n\n');
+  const hb = setInterval(() => res.write(': hb\n\n'), 20000);
+  const cleanup = () => { clearInterval(hb); projectChangedListeners.delete(listener); };
+  const listener = (p: string) => {
+    if (p !== project) return;
+    if (!roleFor(req.user!, project)) { cleanup(); res.end(); return; }   // access revoked since the connect
+    res.write('data: {"kind":"files"}\n\n');
+  };
+  projectChangedListeners.add(listener);
+  req.on('close', cleanup);
 });
 
 /** Remove a project (owner): the directory is moved to <data>/trash, never deleted. */

@@ -4,9 +4,25 @@
  * tabs; images and PDFs open in a browser tab. LaTeX build products and LyX backups are hidden
  * unless "all files" is on.
  */
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } from '../api';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
+
+/**
+ * Subscribe to the server's change stream for one project (SSE): `onChange` fires whenever files
+ * appear or disappear in the project's directory on disk, whoever the writer was — another user,
+ * the agent, a git push, a LaTeX build. The file list refreshes itself; there is no refresh button.
+ */
+export function useProjectEvents(project: string | null | undefined, onChange: () => void): void {
+  const cb = useRef(onChange);
+  cb.current = onChange;
+  useEffect(() => {
+    if (!project) return;
+    const es = new EventSource(`/api/projects/${encodeURIComponent(project)}/events`);
+    es.onmessage = () => cb.current();
+    return () => es.close();
+  }, [project]);
+}
 
 interface TreeNode { name: string; path: string; children: TreeNode[]; file?: ProjectFile }
 
@@ -38,11 +54,10 @@ let fileClip: { project: string; path: string; cut: boolean } | null = null;
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 export const projectLabel = (p: Project) => p.title ?? p.name;
 
-export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, project: controlled, onProjectCreated }: {
+export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, project: controlled }: {
   current: string | null; onOpen: (id: string) => void; onShare?: (project: string) => void; onGit?: (project: string) => void; refreshKey: number;
   /** the project to show, chosen outside (the documents panel): no picker of its own */
   project?: string | null;
-  onProjectCreated?: (name: string) => void;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('ol.tree') || '{}'); } catch { return {}; } });
@@ -84,6 +99,9 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   const role = project?.role ?? 'owner';
   const via = project?.via ?? 'owner';
   const canEdit = role !== 'view';
+  // standalone the browser refreshes itself; under the documents panel the panel subscribes (it
+  // shows the document tabs from the same listing) and bumps refreshKey for both
+  useProjectEvents(controlled === undefined ? selected : null, load);
 
   // auto-expand the folders of the current document
   useEffect(() => {
@@ -116,11 +134,6 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
       await load();
       onOpen(project.name + '/' + rel);
     } catch (e) { alert(String((e as Error).message)); }
-  };
-  const newProject = async () => {
-    const name = prompt('New project name:');
-    if (!name) return;
-    try { const r = await api.createProject(name.trim()); await load(); setPicked(r.project.name); onProjectCreated?.(r.project.name); } catch (e) { alert(String((e as Error).message)); }
   };
   const upload = async (dir = '') => {
     if (!project) return;
@@ -266,7 +279,6 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
       ...(canEdit ? [{ label: 'Paste', disabled: !fileClip, action: () => void pasteInto('') }] : []),
       { sep: true },
       { label: showAll ? 'Hide Build Files' : 'Show All Files', action: () => setShowAll(!showAll) },
-      { label: 'Refresh', action: () => void load() },
     ]);
   };
 
@@ -334,7 +346,6 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
         {via === 'owner' ? 'Your project' : via === 'admin' ? `Owned by ${project.owner?.name ?? '—'}` : `Shared by ${project.owner?.name ?? '—'} · ${role === 'view' ? 'view only' : 'you can edit'}`} · {project.name}
       </div>}
       <div class="actions">
-        <button class="small-btn" onClick={() => void newProject()} title="Create a new project">+ Project</button>
         {canEdit && project && <button class="small-btn" onClick={() => void newDoc()} title="New LyX document in this project">+ Doc</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void newTextFile()} title="New text file (.tex, .bib, …) in this project">+ File</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void newFolder()} title="New folder in this project (also in the right-click menu of any folder)">+ Folder</button>}
@@ -342,7 +353,6 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
         {role === 'owner' && via !== 'admin' && project && onShare && <button class="small-btn" data-share={project.name} onClick={() => onShare(project.name)} title="Share this project…">👥</button>}
         {project && onGit && <button class="small-btn" data-git={project.name} onClick={() => onGit(project.name)} title="Git repository: clone, pull and push this project from your computer…">⎇</button>}
         <button class="small-btn" onClick={() => setShowAll(!showAll)} title="Show LaTeX build files (.aux, .log, .bbl …) and LyX backups (~, #, .emergency)">{showAll ? 'Fewer' : 'All files'}</button>
-        <button class="small-btn" onClick={load} title="Refresh">↻</button>
       </div>
       {project && tree.map(n => renderNode(n, 0))}
       {project && !tree.length && <div class="empty">No files yet — add a document with + Doc, or upload files.</div>}

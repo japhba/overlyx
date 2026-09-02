@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { api, type Project, type TexHeading } from '../api';
-import { FileBrowser, projectLabel } from './FileBrowser';
+import { FileBrowser, projectLabel, useProjectEvents } from './FileBrowser';
 import { projectDocs } from './Home';
 import { Outline, type OutlineItem } from './Outline';
 
@@ -38,8 +38,17 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [filesOpen, setFilesOpen] = useState(() => stored('ol.files.section') !== '0');
   const [statics, setStatics] = useState<Record<string, TexHeading[]>>({});
+  // fsTick: the server told us the project's files changed on disk (SSE), or the window came back
+  // into focus — reload the panel and the file browser without any refresh button
+  const [fsTick, setFsTick] = useState(0);
+  const listKey = refreshKey + fsTick;
   const load = () => api.projects().then(r => setProjects(r.projects)).catch(() => {});
-  useEffect(() => { void load(); }, [refreshKey]);
+  useEffect(() => { void load(); }, [listKey]);
+  useEffect(() => {
+    const f = () => setFsTick(t => t + 1);
+    window.addEventListener('focus', f);
+    return () => window.removeEventListener('focus', f);
+  }, []);
   useEffect(() => { try { localStorage.setItem('ol.files.section', filesOpen ? '1' : '0'); } catch { /* ignore */ } }, [filesOpen]);
 
   // the project shown: the current file's, else the last picked one, else the first
@@ -60,6 +69,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
     return groups[0]?.items[0]?.name ?? null;
   }, [currentProject, picked, projects, groups]);
   const project = projects.find(p => p.name === selected) ?? null;
+  useProjectEvents(selected, () => setFsTick(t => t + 1));
   const reported = useRef<string | null>(null);
   useEffect(() => { const key = project ? `${project.name}:${project.role}:${project.via}` : ''; if (reported.current !== key) { reported.current = key; onProject?.(project); } }, [project]);
   const docs = useMemo(() => (project ? projectDocs(project) : []), [project]);
@@ -86,7 +96,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
     if (open && id !== currentDoc) fetchStatic(id);
   };
   // expanded tabs of documents that are not open show the file's headings; refreshed when the panel reloads
-  useEffect(() => { for (const d of docs) { const id = `${project!.name}/${d}`; if (expanded[id] && id !== currentDoc) fetchStatic(id); } }, [refreshKey, currentDoc, project?.name]);
+  useEffect(() => { for (const d of docs) { const id = `${project!.name}/${d}`; if (expanded[id] && id !== currentDoc) fetchStatic(id); } }, [listKey, currentDoc, project?.name]);
 
   const staticOutline = (id: string) => {
     const hs = statics[id];
@@ -138,7 +148,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
         <div class={'section-head' + (filesOpen ? ' open' : '')} onClick={() => setFilesOpen(o => !o)} data-files-section>
           <span class="twisty">{filesOpen ? '▾' : '▸'}</span> Files
         </div>
-        {filesOpen && <FileBrowser current={current} project={selected} refreshKey={refreshKey} onOpen={id => onOpen(id)} onGit={onGit} onProjectCreated={name => { void load().then(() => setPicked(name)); }} />}
+        {filesOpen && <FileBrowser current={current} project={selected} refreshKey={listKey} onOpen={id => onOpen(id)} onGit={onGit} />}
       </div>
     </div>
   );

@@ -73,6 +73,24 @@ test('the documents panel shows one project at a time (documents as tabs, other 
   await admin.close();
 });
 
+test('the file browser refreshes itself when files appear or disappear on disk (no refresh button)', async ({ browser }) => {
+  const admin = await asUser(browser);
+  const page = await admin.newPage();
+  await page.goto('/#/' + PROJECT + '/main.tex');
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  const tree = page.locator('.filetree');
+  await expect(tree.locator('[data-file="macros.tex"]')).toHaveCount(1);
+  await expect(tree.locator('button[title="Refresh"]')).toHaveCount(0);            // obsolete: the list refreshes itself
+  await expect(tree.locator('button', { hasText: '+ Project' })).toHaveCount(0);   // projects are managed on the landing page
+  // a file written by anything else (another user, the agent, git, a build) appears by itself …
+  writeFileSync(`${DIR}/appeared.bib`, '@misc{x, title={X}}\n');
+  await expect(tree.locator('[data-file="appeared.bib"]')).toHaveCount(1, { timeout: 15000 });
+  // … and disappears again when it is removed
+  rmSync(`${DIR}/appeared.bib`);
+  await expect(tree.locator('[data-file="appeared.bib"]')).toHaveCount(0, { timeout: 15000 });
+  await admin.close();
+});
+
 test('text files open in a tab with the text editor; edits are saved automatically', async ({ browser }) => {
   const admin = await asUser(browser);
   const page = await admin.newPage();
