@@ -4,7 +4,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
-import { parseCell, parseFormula, writeFormula, writeCellLatex, type MacroTable, type Atom } from '../packages/core/src/math';
+import { parseCell, parseFormula, writeFormula, writeCellLatex, renderHullSource, type MacroTable, type Atom } from '../packages/core/src/math';
+import katex from 'katex';
 
 const MACROS: MacroTable = { inv: { nargs: 1 }, lndet: { nargs: 1 }, Pfi: { nargs: 0 }, kap: { nargs: 0 }, cum: { nargs: 2 }, mdiag: { nargs: 1 } };
 
@@ -134,5 +135,31 @@ describe('corpus (all formulas of the local LyX projects, when present)', () => 
     let ok = 0;
     for (const f of sel) { try { if (writeFormula(parseFormula(f.latex, { inv: { nargs: 1 }, lndet: { nargs: 1 }, mdiag: { nargs: 1 }, cum: { nargs: 2 }, vev: { nargs: 1 }, ev: { nargs: 1 }, order: { nargs: 1 }, tr: { nargs: 0 } })) === f.latex) ok++; } catch { /* counted as failure */ } }
     expect(ok / sel.length).toBeGreaterThan(0.99);
+  });
+});
+
+describe('katex limits placement (the \\htmlClass cell markup must not detach scripts)', () => {
+  const kx = (latex: string) => renderHullSource(parseFormula(latex, {}), {}).latex;
+  const renders = (latex: string, display = false) => katex.renderToString(latex, { displayMode: display, trust: true, strict: false, throwOnError: true });
+  it('underbrace: the subscript goes below the brace (\\mathop…\\limits)', () => {
+    const l = kx('$\\underbrace{x+y}_{i}$');
+    expect(l).toMatch(/\\mathop\{.*\\underbrace\{.*\}.*\}\\limits_\{/);
+    expect(renders(l)).toContain('op-limits');
+  });
+  it('overbrace: the superscript goes above', () => {
+    expect(kx('$\\overbrace{x+y}^{n}$')).toMatch(/\\mathop\{.*\\overbrace\{.*\}\\limits\^\{/);
+  });
+  it('big operators carry limits in display style, not inline', () => {
+    const disp = kx('\\[\\sum_{i}x\\]');
+    expect(disp).toMatch(/\\mathop\{.*\\sum.*\}\\limits_\{/);
+    expect(renders(disp, true)).toContain('op-limits');
+    expect(kx('$\\sum_{i}x$')).not.toContain('\\mathop');
+  });
+  it('explicit \\limits and \\nolimits are respected', () => {
+    expect(kx('$\\sum\\limits_{i}x$')).toMatch(/\\mathop\{.*\\sum.*\}\\limits_\{/);
+    expect(kx('\\[\\sum\\nolimits_{i}x\\]')).not.toContain('\\mathop');
+  });
+  it('ordinary scripts are untouched', () => {
+    expect(kx('$x_{i}^{2}$')).not.toContain('\\mathop');
   });
 });

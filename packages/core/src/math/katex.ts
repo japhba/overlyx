@@ -25,7 +25,12 @@ export interface KatexContext {
   cells: CellRef[];
   /** `true` while rendering a macro's expansion template (its cells are not editable) */
   inTemplate?: boolean;
+  /** `true` in a display hull: big operators carry their scripts above/below by default */
+  display?: boolean;
 }
+
+/** Operators whose scripts sit above/below in display style (LaTeX \displaylimits default). */
+const LIMIT_OPS = new Set(['sum', 'prod', 'coprod', 'bigcap', 'bigcup', 'bigodot', 'bigoplus', 'bigotimes', 'bigsqcup', 'biguplus', 'bigvee', 'bigwedge', 'lim', 'liminf', 'limsup', 'max', 'min', 'sup', 'inf', 'det', 'gcd', 'Pr', 'injlim', 'projlim', 'varinjlim', 'varprojlim', 'varliminf', 'varlimsup'])
 
 const CELL_CLASS = 'lm-c';
 
@@ -100,8 +105,16 @@ export function atomToKatex(a: Atom, ctx: KatexContext, mode: 'math' | 'text'): 
     case 'kern': return `\\htmlClass{lm-sp}{\\${a.n}${a.len}}`;
     case 'script': {
       const nuc = cellToKatex(a.nuc, ctx, a, 0);
+      // The cell markup (\htmlClass{lm-cN}{…}) turns the nucleus into an ordinary group, and
+      // KaTeX then hangs the scripts to the right — even for \underbrace or a display \sum.
+      // \mathop{…}\limits restores the above/below placement wherever LaTeX would use it.
+      const one = a.nuc.length === 1 ? a.nuc[0] : null;
+      const wantLimits = a.limits !== 'nolimits' && (a.limits === 'limits' || (one && (
+        (one.t === 'deco' && (one.n === 'underbrace' || one.n === 'overbrace'))
+        || (one.t === 'sym' && one.limits !== 'nolimits' && (one.limits === 'limits' || (!!ctx.display && LIMIT_OPS.has(one.n)))))));
       let s = a.nuc.length ? nuc : '{' + nuc + '}';
-      if (a.limits) s += '\\' + a.limits;
+      if (wantLimits) s = `\\mathop{${s}}\\limits`;
+      else if (a.limits) s += '\\' + a.limits;
       if (a.up) s += '^' + braced(a.up, ctx, a, a.up && a.down ? 1 : 1);
       if (a.down) s += '_' + braced(a.down, ctx, a, a.up ? 2 : 1);
       return s;
@@ -326,6 +339,7 @@ export function katexMacros(table: MacroTable): Record<string, string> {
 
 /** The hull as KaTeX LaTeX (display environments become their inner AMS equivalents). */
 export function hullToKatex(h: Hull, ctx: KatexContext): string {
+  ctx.display = !(h.type === 'simple' || h.type === 'none' || h.type === 'unknown');
   const cell = (ri: number, ci: number) => cellToKatex(h.rows[ri].cells[ci], ctx, h, ri * h.ncols + ci);
   switch (h.type) {
     case 'simple': case 'equation': case 'none': case 'unknown':
