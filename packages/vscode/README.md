@@ -36,6 +36,14 @@ reproduced byte for byte until you change them.
 - `overlyx.layoutDir` — LyX layout files to use (default: the copy bundled with the extension).
 - `overlyx.latexmk` — the latexmk executable.
 
+## Where is the outline?
+
+VS Code's built-in Outline panel cannot be fed by webview editors, so with the OverLyX editor
+active it says "no outline information" — that is a VS Code limitation, not a missing feature.
+The live outline is the **OverLyX Structure** view: in the OverLyX activity-bar icon, and as a
+section in the Explorer sidebar while an OverLyX editor is open. A `.tex` file opened as plain
+text gets native Outline and breadcrumbs from the extension's symbol provider.
+
 ## Updates
 
 Installed from a `.vsix`, the extension is not updated by VS Code. It checks the release

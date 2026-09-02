@@ -84,6 +84,12 @@ exports.run = async function run() {
   assert.ok(Array.isArray(sync.boxes) && sync.boxes.length > 0, 'synctex forward search returns boxes');
   log('synctex ok:', sync.boxes.length, 'boxes');
 
+  // 5b. document symbols: the built-in Outline/breadcrumbs path for .tex text editors
+  const symbols = await vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', mainUri);
+  assert.ok(Array.isArray(symbols) && symbols.some(sy => /Renamed Heading|Introduction/.test(sy.name)), 'document symbols for .tex: ' + JSON.stringify((symbols || []).map(sy => sy.name)));
+  assert.strictEqual(symbols.length, 1, 'exactly one top-level symbol (no doubled providers): ' + JSON.stringify(symbols.map(sy => sy.name)));
+  log('document symbols ok:', symbols.map(sy => sy.name).join(', '));
+
   // 6. self-update pipeline against a stubbed release endpoint (dry run: stops after download)
   const http = require('http');
   const stubVsix = Buffer.alloc(20000, 7);

@@ -15,6 +15,7 @@ import { OutlineTree } from './host/outlineTree.ts';
 import { PdfPanels } from './host/pdfPanel.ts';
 import { resolveLayoutDir } from './host/lyxlib.ts';
 import { Updater, type CheckResult } from './host/updater.ts';
+import { registerTexSymbols } from './host/symbols.ts';
 import { collectFiles, readTextFile } from './host/project.ts';
 import { cachedParseFile, parseFragmentText, masterHeaderFor, type TexContext } from './host/texdoc.ts';
 import { buildMeta, bibEntriesFor } from './host/meta.ts';
@@ -186,6 +187,10 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
 
   const outlineTree = new OutlineTree(registry);
   const updater = new Updater(context);
+  // the built-in Outline pane cannot show a webview editor's outline: surface the Structure view
+  // in the Explorer whenever an OverLyX editor is open (the context key drives its "when")
+  registry.onDidChange(() => void vscode.commands.executeCommand('setContext', 'overlyx.active', registry.all().length > 0));
+  void vscode.commands.executeCommand('setContext', 'overlyx.active', false);
 
   context.subscriptions.push(
     { dispose: () => bridge.dispose() },
@@ -194,6 +199,8 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
       supportsMultipleEditorsPerDocument: false,
     }),
     vscode.window.createTreeView('overlyx.structure', { treeDataProvider: outlineTree, showCollapseAll: true }),
+    vscode.window.createTreeView('overlyx.structureExplorer', { treeDataProvider: outlineTree, showCollapseAll: true }),
+    registerTexSymbols(),
     vscode.window.onDidChangeActiveColorTheme(t => pdfPanels.postTheme([vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighContrast].includes(t.kind))),
     vscode.commands.registerCommand('overlyx.openInOverlyx', (uri?: vscode.Uri) => {
       const target = uri ?? vscode.window.activeTextEditor?.document.uri;
