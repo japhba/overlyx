@@ -1216,3 +1216,11 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .menubar .gh-link { display: flex; align-items: center; padding: 0 7px; color: inherit; opacity: 0.7; }
 .menubar .gh-link:hover { opacity: 1; }
 .menubar .gh-link svg { width: 17px; height: 17px; display: block; }
+
+/* Landing pitch (Login.tsx): tagline + the four features under the wordmark */
+.login .tagline { margin: 6px 0 18px; font-size: 15px; opacity: 0.85; }
+.login .pitch { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; padding: 0; margin: 0 0 26px; max-width: 560px; text-align: left; }
+.login .pitch li { display: flex; flex-direction: column; gap: 1px; }
+.login .pitch li strong { font-size: 13.5px; }
+.login .pitch li span { font-size: 12.5px; opacity: 0.65; line-height: 1.35; }
+@media (max-width: 560px) { .login .pitch { grid-template-columns: 1fr; } }

@@ -46,6 +46,13 @@ export function Login({ onLogin, google }: { onLogin: (u: User) => void; google:
             <a href={GITHUB_URL + '/issues/new'} target="_blank" rel="noopener">Report an issue</a>
           </nav>
         </div>
+        <p class="tagline"><strong>Overleaf&nbsp;+&nbsp;LyX</strong> — collaborative WYSIWYG editing for LaTeX documents.</p>
+        <ul class="pitch" aria-label="Why OverLyX">
+          <li><strong>WYSIWYG editing</strong><span>text and formulas render as you type — no compile loop</span></li>
+          <li><strong>Native .tex</strong><span>plain LaTeX files, kept byte for byte — git and your other tools just work</span></li>
+          <li><strong>Multi-author collaboration</strong><span>live editing, change tracking, comments, sharing</span></li>
+          <li><strong>Offline support</strong><span>edits keep going without a connection and merge when you're back</span></li>
+        </ul>
         <form class="signin" onSubmit={submit}>
           {google && <a class="google" href="/api/auth/google" data-google-login><GoogleG /><span>Continue with Google</span></a>}
           {google && !showPassword && (
