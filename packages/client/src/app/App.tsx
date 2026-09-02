@@ -1821,8 +1821,15 @@ function applyAuthorColors(authors: { id: number; name: string }[]): void {
   const dark = ['#7bd88f', '#ff8a80', '#82b1ff', '#d6a2ff', '#ffb74d', '#4dd0e1', '#f48fb1', '#d7ccc8', '#c5e1a5', '#9fa8da'];
   let el = document.getElementById('ol-author-colors') as HTMLStyleElement | null;
   if (!el) { el = document.createElement('style'); el.id = 'ol-author-colors'; document.head.appendChild(el); }
-  el.textContent = authors.map((a, i) => `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: ${palette[i % palette.length]}; }\n`
-    + `html[data-theme="dark"] .lyx-change[data-author="${a.id}"], html[data-theme="dark"] .lyx-inset[data-author="${a.id}"] { --change-color: ${dark[i % dark.length]}; }`).join('\n');
+  // an agent's tracked changes (the MCP connector's authors, "… (MCP)") are grey by default,
+  // so the colours stay for human co-authors and the eye can skim the machine's insertions
+  const isAgent = (n: string) => /\(MCP\)\s*$/.test(n);
+  el.textContent = authors.map((a, i) => {
+    const light = isAgent(a.name) ? '#757575' : palette[i % palette.length];
+    const dk = isAgent(a.name) ? '#9e9e9e' : dark[i % dark.length];
+    return `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: ${light}; }\n`
+      + `html[data-theme="dark"] .lyx-change[data-author="${a.id}"], html[data-theme="dark"] .lyx-inset[data-author="${a.id}"] { --change-color: ${dk}; }`;
+  }).join('\n');
 }
 
 function hashAuthor(name: string): number {
