@@ -26,6 +26,7 @@ import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessL
 import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
 import { feedbackRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
+import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
 import { texHeadings, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText, lyxToPm } from '@overlyx/core';
 
@@ -398,6 +399,12 @@ api.post('/projects/:project/bib/add', needProject('edit'), async (req, res) => 
     if (!bibtex.trim()) { res.status(400).json({ error: 'No BibTeX entry given' }); return; }
     if (bibtex.length > 20000) { res.status(413).json({ error: 'BibTeX entry too long' }); return; }
     const r = addToCitedBib(dir, bibtex, { commit: () => touchProject(project, req.user!.id) });
+    // fetch the paper's PDF into <project>/pdf/ in the background (additive; open copies only)
+    if (config.literature) {
+      void fetchPdfForEntry(dir, bibtex, req.body?.hit as Hit | undefined)
+        .then(saved => { if (saved && !saved.existed) touchProject(project, req.user!.id); })
+        .catch(e => console.warn('[pdffetch]', (e as Error).message));
+    }
     res.json(r);
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });

@@ -135,6 +135,57 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     input.click();
   };
 
+  /* ---- drag files (or whole folders) in from the computer; a folder row is a drop target */
+  const [dropDir, setDropDir] = useState<string | null>(null);
+  const wantsFiles = (e: DragEvent) => canEdit && !!project && Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  const dragOver = (dir: string) => (e: DragEvent) => {
+    if (!wantsFiles(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    setDropDir(dir);
+  };
+  const uploadDropped = async (dt: DataTransfer, dir: string) => {
+    if (!project) return;
+    const prefix = dir ? dir + '/' : '';
+    // webkitGetAsEntry (all browsers) also walks dropped directories; plain files are the fallback
+    const entries = Array.from(dt.items ?? []).map(i => (i as any).webkitGetAsEntry?.()).filter(Boolean);
+    const files: { rel: string; file: File }[] = [];
+    const emptyDirs: string[] = [];
+    const walk = (entry: any, at: string): Promise<void> => new Promise(resolve => {
+      if (entry.isFile) entry.file((f: File) => { files.push({ rel: at + entry.name, file: f }); resolve(); }, () => resolve());
+      else if (entry.isDirectory) {
+        const sub = at + entry.name + '/';
+        const reader = entry.createReader();
+        const acc: any[] = [];
+        const read = () => reader.readEntries((es: any[]) => {   // readEntries hands out ≤100 at a time
+          if (es.length) { acc.push(...es); read(); }
+          else {
+            if (!acc.length) emptyDirs.push(sub.slice(0, -1));
+            void Promise.all(acc.map(c => walk(c, sub))).then(() => resolve());
+          }
+        }, () => resolve());
+        read();
+      } else resolve();
+    });
+    if (entries.length) await Promise.all(entries.map(en => walk(en, prefix)));
+    else for (const f of Array.from(dt.files ?? [])) files.push({ rel: prefix + f.name, file: f });
+    if (!files.length && !emptyDirs.length) return;
+    const clashes = files.filter(x => project.files.some(f => f.path === x.rel));
+    const keep = clashes.length && !confirm(`${clashes.length === 1 ? clashes[0].rel + ' already exists' : clashes.length + ' of these files already exist'} — replace?`)
+      ? files.filter(x => !clashes.includes(x)) : files;
+    const errors: string[] = [];
+    for (const d of emptyDirs) { try { await api.fileOp(project.name, { op: 'mkdir', to: d }); } catch (e) { errors.push(`${d}: ${(e as Error).message}`); } }
+    for (const { rel, file } of keep) { try { await api.upload(project.name, rel, file); } catch (e) { errors.push(`${rel}: ${(e as Error).message}`); } }
+    await load();
+    if (errors.length) alert('Not everything could be uploaded:\n' + errors.slice(0, 10).join('\n'));
+  };
+  const drop = (dir: string) => (e: DragEvent) => {
+    if (!wantsFiles(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    setDropDir(null);
+    void uploadDropped(e.dataTransfer!, dir);
+  };
+
   const visible = (f: ProjectFile) => f.kind === 'dir' || showAll || (!isBackup(f.name) && !isAuxFile(f.name) && !f.name.endsWith('.overlyx-tmp'));
   const tree = useMemo(() => (project ? buildTree(project.files.filter(visible)) : []), [project, showAll]);
 
@@ -225,7 +276,8 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
       const isCollapsed = collapsed[key] ?? (depth > 0);
       return (
         <div key={key}>
-          <div class="tree-row folder" style={{ paddingLeft: 6 + depth * 14 + 'px' }} onClick={() => toggle(key)} onContextMenu={folderCtx(node.path)}>
+          <div class={'tree-row folder' + (dropDir === node.path ? ' drop-target' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }} onClick={() => toggle(key)} onContextMenu={folderCtx(node.path)}
+            onDragOver={dragOver(node.path)} onDrop={drop(node.path)}>
             <span class="twisty">{isCollapsed ? '▸' : '▾'}</span><span class="fname">{node.name}</span>
             {canEdit && <span class="row-actions">
               <button class="mini" title="New document here" onClick={e => { e.stopPropagation(); void newDoc(node.path); }}>+</button>
@@ -253,6 +305,8 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
       <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (!isDoc ? ' other' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }}
         href={href} target={inTab ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB${isLyx ? ' · click to import as .tex' : inTab && isPdf ? ' · opens in the PDF viewer' : inTab && !isDoc ? ' · opens in the text editor' : ''}`}
         data-file={f.path}
+        onDragOver={dragOver(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
+        onDrop={drop(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
         onContextMenu={fileCtx(f, () => { if (isLyx) void importLyx(); else if (inTab) onOpen(tabId); else window.open(href, '_blank'); })}
         onClick={e => { if (isLyx) { e.preventDefault(); void importLyx(); return; } if (inTab && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(tabId); } }}>
         <span class="ficon">{ICON[f.kind] ?? '·'}</span><span class="fname">{node.name}</span>
@@ -262,7 +316,9 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   };
 
   return (
-    <div class="filetree" data-project={project?.name ?? ''} onContextMenu={bgCtx}>
+    <div class={'filetree' + (dropDir !== null ? ' dropping' : '')} data-project={project?.name ?? ''} onContextMenu={bgCtx}
+      onDragOver={dragOver('')} onDrop={drop('')}
+      onDragLeave={e => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) setDropDir(null); }}>
       {controlled === undefined && <div class="project-picker">
         <select value={selected ?? ''} onChange={e => setPicked((e.target as HTMLSelectElement).value)} title="Switch project" aria-label="Project">
           {!projects.length && <option value="">(no projects)</option>}
@@ -281,7 +337,8 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
         <button class="small-btn" onClick={() => void newProject()} title="Create a new project">+ Project</button>
         {canEdit && project && <button class="small-btn" onClick={() => void newDoc()} title="New LyX document in this project">+ Doc</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void newTextFile()} title="New text file (.tex, .bib, …) in this project">+ File</button>}
-        {canEdit && project && <button class="small-btn" onClick={() => void upload()} title="Upload files (figures, .bib, .sty …)">⇧</button>}
+        {canEdit && project && <button class="small-btn" onClick={() => void newFolder()} title="New folder in this project (also in the right-click menu of any folder)">+ Folder</button>}
+        {canEdit && project && <button class="small-btn" onClick={() => void upload()} title="Upload files (figures, .bib, .sty …) — or drag them from your computer onto the file list">⇧</button>}
         {role === 'owner' && via !== 'admin' && project && onShare && <button class="small-btn" data-share={project.name} onClick={() => onShare(project.name)} title="Share this project…">👥</button>}
         {project && onGit && <button class="small-btn" data-git={project.name} onClick={() => onGit(project.name)} title="Git repository: clone, pull and push this project from your computer…">⎇</button>}
         <button class="small-btn" onClick={() => setShowAll(!showAll)} title="Show LaTeX build files (.aux, .log, .bbl …) and LyX backups (~, #, .emergency)">{showAll ? 'Fewer' : 'All files'}</button>

@@ -257,3 +257,43 @@ test('the explorer context menu works like VS Code: new folder, duplicate, renam
   }
   await admin.close();
 });
+
+test('folders via the + Folder button, and files dragged in from the computer land in the project (a folder row is a drop target)', async ({ browser }) => {
+  const admin = await asUser(browser);
+  const page = await admin.newPage();
+  await page.goto('/#/' + PROJECT + '/main.tex');
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  const tree = page.locator('.filetree');
+  await expect(tree.locator('[data-file="macros.tex"]')).toHaveCount(1);
+  // the + Folder button next to + Doc / + File
+  page.once('dialog', d => void d.accept('drafts'));
+  await tree.locator('button', { hasText: '+ Folder' }).click();
+  await expect(tree.locator('.tree-row.folder', { hasText: 'drafts' })).toHaveCount(1, { timeout: 10000 });
+  // drop a file from the computer onto the tree background → project root
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['dropped from the desktop'], 'dropped.txt', { type: 'text/plain' }));
+    const el = document.querySelector('.filetree')!;
+    el.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    el.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+  });
+  await expect(tree.locator('[data-file="dropped.txt"]')).toHaveCount(1, { timeout: 10000 });
+  expect(readFileSync(`${DIR}/dropped.txt`, 'utf8')).toBe('dropped from the desktop');
+  // … and onto a folder row → into that folder (the row highlights while hovering)
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['x'], 'probe.txt', { type: 'text/plain' }));
+    const row = Array.from(document.querySelectorAll('.tree-row.folder')).find(r => r.textContent!.includes('figures'))!;
+    row.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+  });
+  await expect(tree.locator('.tree-row.folder.drop-target', { hasText: 'figures' })).toHaveCount(1);
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['nested drop'], 'nested.txt', { type: 'text/plain' }));
+    const row = Array.from(document.querySelectorAll('.tree-row.folder')).find(r => r.textContent!.includes('figures'))!;
+    row.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+  });
+  await expect(tree.locator('[data-file="figures/nested.txt"]')).toHaveCount(1, { timeout: 10000 });
+  expect(readFileSync(`${DIR}/figures/nested.txt`, 'utf8')).toBe('nested drop');
+  await admin.close();
+});

@@ -709,6 +709,8 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 /* ------------------------------------------------------------ file browser */
 .tree-row { display: flex; align-items: center; gap: 5px; padding: 2px 6px; cursor: pointer; white-space: nowrap; color: inherit; text-decoration: none; font-size: 12.5px; line-height: 18px; }
 .tree-row:hover { background: var(--row-hover); }
+.filetree.dropping { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.tree-row.folder.drop-target { background: var(--row-sel); box-shadow: inset 0 0 0 1px var(--accent); }
 .tree-row.current { background: var(--row-sel); }
 .tree-row.project { font-weight: 700; }
 .tree-row.folder { color: var(--fg2); }

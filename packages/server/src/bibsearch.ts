@@ -51,7 +51,7 @@ const UA = 'OverLyX/0.1 (https://github.com/japhba/overlyx' + (config.contactEma
 const TIMEOUT = 9000;
 
 /** injectable for tests */
-export let fetchImpl: typeof fetch = (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(TIMEOUT), headers: { 'user-agent': UA, ...(init?.headers as Record<string, string> | undefined) } });
+export let fetchImpl: typeof fetch = (input, init) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(TIMEOUT), headers: { 'user-agent': UA, ...(init?.headers as Record<string, string> | undefined) } });
 export function setFetch(f: typeof fetch): void { fetchImpl = f; }
 
 const DOI_RE = /\b(10\.\d{4,9}\/[^\s"'<>]+)/i;

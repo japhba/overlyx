@@ -113,7 +113,9 @@ blend.
   with the ▲ ▼ ◀ ▶ section tools) for the open document, the file's headings (`GET /api/docs/<id>/outline`,
   `core/tex/headings.ts`, no parse) for the others, where a heading opens that document at the heading
   (`#/<doc>?heading=<n>`). *Files* underneath is the file browser for everything else (figures, `.bib`,
-  `.sty`, uploads, `+ Doc` / `+ File`); LaTeX build products (`.aux`, `.log`, `.bbl`, …) and LyX
+  `.sty`, uploads, `+ Doc` / `+ File` / `+ Folder`); files — or whole folders — dragged in from the
+  computer are uploaded to where they are dropped (the project, or the folder row under the pointer);
+  LaTeX build products (`.aux`, `.log`, `.bbl`, …) and LyX
   backups are hidden unless *All files* is on. The *Navigate* menu lists the sections as well
   (so the command palette finds them).
 * **Text editor** for the other files of a project (`.tex`, `.bib`, `.sty`, `.cls`, `.bst`, `.md`,
@@ -343,6 +345,10 @@ blend.
   entry from Scholar's *Cite ▸ BibTeX* the same way. `packages/server/src/bibsearch.ts`;
   `OVERLYX_LITERATURE=off` disables the outbound requests, `OVERLYX_CONTACT_EMAIL` joins the
   OpenAlex / Crossref polite pools (better rate limits; nothing else about users is sent).
+  Every added citation also fetches the paper's PDF into the project's **`pdf/`** directory in the
+  background, named `authorYY_title.pdf` (`packages/server/src/pdffetch.ts`) — arXiv when the entry
+  has an arXiv id, else an open-access PDF OpenAlex knows for the DOI; strictly additive (an
+  existing file is never replaced), and paywalled papers are simply skipped.
 * **Find & replace** (`Ctrl+F`): find next/previous, replace, replace all, case-sensitive and
   whole-word options, live match count and highlighting. *Document ▸ Statistics* counts words and
   characters of the selection / the document (notes excluded).
