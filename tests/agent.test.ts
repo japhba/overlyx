@@ -221,3 +221,18 @@ describe('threads and turns', () => {
     expect((await get('/agent/status')).body.authenticated).toBe(false);
   });
 });
+
+describe('legacyThreadNote (threads from before the overlyx MCP tools)', () => {
+  it('old threads get the direct-markup fallback, new ones nothing', async () => {
+    const { legacyThreadNote, MCP_TOOLS_SINCE } = await import('../packages/server/src/agent.ts');
+    expect(legacyThreadNote(Date.now())).toBeNull();
+    expect(legacyThreadNote(MCP_TOOLS_SINCE)).toBeNull();
+    const note = legacyThreadNote(MCP_TOOLS_SINCE - 1000, new Date('2026-09-03T09:15:00'));
+    expect(note).not.toBeNull();
+    expect(note!.startsWith('[context]')).toBe(true);
+    expect(note!.trimEnd().endsWith('[/context]')).toBe(true);   // the panel strips [context]…[/context] spans
+    expect(note).toContain('\\lyxadded{Agent panel (MCP)}{Thu Sep  3 09:15:00 2026}');
+    expect(note).toContain('\\lyxdeleted{Agent panel (MCP)}');
+    expect(note).toContain('%%');
+  });
+});

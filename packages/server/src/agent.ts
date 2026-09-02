@@ -50,7 +50,24 @@ The user edits these documents live, between and during your turns: what you rea
 You have internet access through the web_search tool — use it for literature, references and facts (a shell command that needs the network still asks for approval).
 By default the user is here to understand and explore their document and the literature around it — answering, explaining, finding and summarizing is the normal mode, and most turns should not touch any file. Editing happens every so often, only when the user explicitly asks for a change; when a request is ambiguous about whether to edit, explain first and offer the edit instead of making it.
 Conventions: comment lines starting with %% are OverLyX bookkeeping (notes, settings) — leave them unless asked; \\lyxadded/\\lyxdeleted macros are tracked changes — preserve them; never run git commit or push (OverLyX commits automatically). Do NOT recompile the PDF after every edit: the user builds from the editor whenever they want to look — compile only when explicitly asked, or once at the end of a larger change when you genuinely need to check it compiles.
-Each user message may be preceded by a [context]…[/context] item the editor adds (the user did not write it): the document being edited, the other open documents, and the current selection — quoted, and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in a file excerpt. Use it to resolve "this", "here" or an unqualified request.`;
+Each user message may be preceded by a [context]…[/context] item the editor adds (the user did not write it): the document being edited, the other open documents, and the current selection — quoted, and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in a file excerpt. Use it to resolve "this", "here" or an unqualified request.
+The ONE exception to the MCP-only rule: if the "overlyx" MCP tools are not available in this conversation, edit the .tex file directly (the write triggers an approval card — expected) and mark the edit up as a tracked change YOURSELF, exactly as the tools would: wrap every insertion in \\lyxadded{Agent panel (MCP)}{<asctime, e.g. Wed Sep  2 21:30:00 2026>}{…} and keep every deletion inside \\lyxdeleted{Agent panel (MCP)}{<asctime>}{old text} instead of removing it; re-read the file immediately before patching (it changes live) and patch whole lines.`;
+
+/**
+ * Threads started before the managed codex config gained the overlyx MCP server were created
+ * without the document tools (codex binds a thread's tool set at thread/start; the config change
+ * cannot reach an existing thread). Such threads get a per-turn fallback note: edit the .tex
+ * directly and write the tracked-change markup by hand. Wrapped as [context]…[/context] so the
+ * panel strips it from the echoed user message (AgentPanel CONTEXT_RE is global).
+ */
+export const MCP_TOOLS_SINCE = Date.parse('2026-09-01T22:02:00Z');
+export function legacyThreadNote(createdAt: number, now = new Date()): string | null {
+  if (createdAt >= MCP_TOOLS_SINCE) return null;
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], mons = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const p = (n: number) => String(n).padStart(2, '0');
+  const asctime = `${days[now.getDay()]} ${mons[now.getMonth()]} ${String(now.getDate()).padStart(2, ' ')} ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())} ${now.getFullYear()}`;
+  return `[context] Note from the OverLyX editor (the user did not write this): this conversation was started before the "overlyx" document tools existed, so those MCP tools may be missing here — a NEW thread would have them. If they are missing and the user asks for a document change, edit the .tex file directly instead (the write triggers an approval card — expected; re-read the file immediately before patching, it changes live, and patch whole lines) and mark the edit up as a tracked change yourself: wrap every insertion in \\lyxadded{Agent panel (MCP)}{${asctime}}{…} and keep every deletion inside \\lyxdeleted{Agent panel (MCP)}{${asctime}}{old text} instead of removing the text. Leave lines starting with %% untouched. [/context]`;
+}
 
 /* ------------------------------------------------------------------ per-user codex host */
 
@@ -529,6 +546,8 @@ export function agentRoutes(): express.Router {
       const h = host(req.user!.id); await h.ensure();
       await h.ensureThreadLoaded(row.thread_id);
       const input = await composeInput(text, req.body?.context as TurnContext | undefined);
+      const legacy = legacyThreadNote(row.created_at);
+      if (legacy) input.unshift({ type: 'text', text: legacy, text_elements: [] });
       if (!row.title) db.prepare('UPDATE agent_threads SET title = ? WHERE thread_id = ?').run(text.slice(0, 100), row.thread_id);
       // per-turn model / reasoning-effort overrides from the panel's selectors (stick for later turns too)
       const model = typeof req.body?.model === 'string' && req.body.model ? String(req.body.model).slice(0, 80) : undefined;
@@ -566,6 +585,8 @@ export function agentRoutes(): express.Router {
       const h = host(row.user_id); await h.ensure();
       const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
       const input = await composeInput(text, req.body?.context as TurnContext | undefined);
+      const legacy = legacyThreadNote(row.created_at);
+      if (legacy) input.unshift({ type: 'text', text: legacy, text_elements: [] });
       await h.request('turn/steer', { threadId: row.thread_id, expectedTurnId: String(req.body?.turnId ?? ''), input, ...(cmid ? { clientUserMessageId: cmid } : {}) });
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
