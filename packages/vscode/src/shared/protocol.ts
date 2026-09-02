@@ -30,6 +30,8 @@ export type EditorToHost =
   | { type: 'outline'; items: OutlineEntry[] }
   | { type: 'selection'; pos: number }
   | { type: 'notify'; text: string; kind?: 'info' | 'error' }
+  /** flush pending edits and save the TextDocument (Ctrl+S inside the editor) */
+  | { type: 'save' }
   /** start a PDF build (and open the PDF panel) / cancel it / just open the panel */
   | { type: 'build' }
   | { type: 'cancelBuild' }

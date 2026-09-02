@@ -62,7 +62,10 @@ export class Bridge {
   dispose(): void { this.server?.close(); this.server = null; }
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // reflect the Origin: pdf.js and the client fetch with credentials, which forbids ACAO '*'
+    res.setHeader('Access-Control-Allow-Origin', String(req.headers.origin ?? '*'));
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'content-type');
     res.setHeader('Access-Control-Allow-Private-Network', 'true');

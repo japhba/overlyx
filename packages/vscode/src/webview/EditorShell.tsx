@@ -168,38 +168,43 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   };
 
   useEffect(() => {
-    if (!containerRef.current) return;
-    editorContext.user = { id: 1, username: 'you', name: 'You', color: '#3b6ea5', isAdmin: false };
-    editorContext.docId = docId;
-    editorContext.project = docId.split('/')[0];
-    editorContext.docDir = docId.split('/').slice(1, -1).join('/');
-    editorContext.trackChanges = false;
-    editorContext.combined = false;
-    const handle = createLocalEditor({
-      docId, container: containerRef.current, pmDoc: init.pmDoc, marginMode,
-      onSelectionChange: onSelection,
-      onDocChange: (v) => { setDocTick(t => t + 1); postUpdate(v); postOutline(v); },
-    });
-    handleRef.current = handle;
-    editorContext.activeView = handle.view;
-    (window as any).overlyx = editorContext;
-    postOutline(handle.view);
-    // metadata: macros, bibliography, labels, layouts — the editor is usable before it arrives
-    const loadMeta = () => api.meta(docId).then(m => {
-      setMeta(m); editorContext.meta = m;
-      handle.view.dom.lang = bcp47(m.language);
-      applyAuthorColors(m.authors);
-      setTracking(m.trackingChanges);
-      editorContext.trackChanges = m.trackingChanges;
-      editorContext.changeAuthorId = m.authors.find(x => x.name === 'You')?.id;
-      refreshMacros(handle.view, m.macros ?? {});
+    let cancelled = false;
+    let handle: LocalEditorHandle | null = null;
+    void (async () => {
+      editorContext.user = { id: 1, username: 'you', name: 'You', color: '#3b6ea5', isAdmin: false };
+      editorContext.docId = docId;
+      editorContext.project = docId.split('/')[0];
+      editorContext.docDir = docId.split('/').slice(1, -1).join('/');
+      editorContext.trackChanges = false;
+      editorContext.combined = false;
+      // metadata FIRST (macros, authors, layouts): formulas must render once, with the macros —
+      // a \RR rendered before its definition arrives would stay raw (the web app defers the same way)
+      let m: DocMeta | null = null;
+      try { m = await api.meta(docId); } catch (e) { notify('Could not load document metadata: ' + (e as Error).message, 'error'); }
+      if (cancelled || !containerRef.current) return;
+      if (m) { setMeta(m); editorContext.meta = m; }
+      handle = createLocalEditor({
+        docId, container: containerRef.current, pmDoc: init.pmDoc, marginMode,
+        onSelectionChange: onSelection,
+        onDocChange: (v) => { setDocTick(t => t + 1); postUpdate(v); postOutline(v); },
+      });
+      handleRef.current = handle;
+      editorContext.activeView = handle.view;
+      (window as any).overlyx = editorContext;
+      if (m) {
+        handle.view.dom.lang = bcp47(m.language);
+        applyAuthorColors(m.authors);
+        setTracking(m.trackingChanges);
+        editorContext.trackChanges = m.trackingChanges;
+        editorContext.changeAuthorId = m.authors.find(x => x.name === 'You')?.id;
+      }
+      refreshMacros(handle.view, m?.macros ?? {});
       postOutline(handle.view);
       rerender();
-    }).catch(e => notify('Could not load document metadata: ' + (e as Error).message, 'error'));
-    void loadMeta();
-    api.aiStatus().then(s => { editorContext.ai = s; }).catch(() => { editorContext.ai = { available: false, model: '', completionModel: '' }; });
-    handle.view.focus();
-    return () => { handle.destroy(); handleRef.current = null; };
+      api.aiStatus().then(s => { editorContext.ai = s; }).catch(() => { editorContext.ai = { available: false, model: '', completionModel: '' }; });
+      handle.view.focus();
+    })();
+    return () => { cancelled = true; handle?.destroy(); handleRef.current = null; };
   }, []);
 
   /* ---------------------------------------------------------------- host messages */
@@ -343,7 +348,12 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       notify(`Label “${name}” not found`, 'error');
     };
     editorContext.ui = {
-      save: () => notify('Saved through VS Code (Ctrl+S saves the .tex file)'),
+      save: () => {
+        // flush the debounced update first, then let VS Code write the file (ordered messages)
+        const v = handleRef.current?.view;
+        if (v) vscode.postMessage({ type: 'update', pmDoc: v.state.doc.toJSON(), headerLines: headerRef.current });
+        vscode.postMessage({ type: 'save' });
+      },
       viewPdf: () => build(),
       updatePdf: () => build(),
       syncToPdf: () => { void syncToPdf(); },

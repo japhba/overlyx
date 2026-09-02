@@ -151,7 +151,8 @@
     "build:host": "node esbuild.mjs",
     "build:webview": "vite build --config webview.vite.config.ts",
     "package": "vsce package --no-dependencies",
-    "test:integration": "xvfb-run -a node test/runTest.mjs"
+    "test:integration": "xvfb-run -a node test/runTest.mjs",
+    "test:gui": "xvfb-run -a -s \"-screen 0 1600x1000x24\" node test/guiTest.mjs"
   },
   "devDependencies": {
     "@types/vscode": "1.90.0",

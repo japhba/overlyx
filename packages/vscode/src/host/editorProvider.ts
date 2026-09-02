@@ -80,6 +80,9 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           if (msg.kind === 'error') void vscode.window.showErrorMessage('OverLyX: ' + msg.text);
           else vscode.window.setStatusBarMessage('OverLyX: ' + msg.text, 5000);
           break;
+        case 'save':
+          applyChain = applyChain.then(async () => { if (document.isDirty) await document.save(); }).catch(e => console.error('overlyx save failed', e));
+          break;
         case 'build': this.deps.startBuild(entry); break;
         case 'cancelBuild': this.deps.cancelBuild(session.docId); break;
         case 'openPdfPanel': this.deps.openPdfPanel(session.docId); break;
