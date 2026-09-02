@@ -33,6 +33,11 @@ function selectionContext(): AgentTurnContext | undefined {
   if (!sel.empty) {
     ctx.content = (sel.content().toJSON() as { content?: any[] } | null)?.content ?? [];
     ctx.layout = String(sel.$from.parent.attrs?.layout ?? 'Standard');
+  } else {
+    // a selection inside a formula is the math field's own, not ProseMirror's
+    const f = editorContext.mathField;
+    const msel = f?.cursor?.selection ? f.cursor.grabSelection() : '';
+    if (msel) ctx.mathLatex = msel;
   }
   return ctx;
 }
@@ -328,7 +333,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
     if (busyTurn && busyTurn !== 'pending' && selRef.current) {
       setText('');
       setItems(list => [...list, localItem]);
-      void api.agentSteer(project, selRef.current, busyTurn, t, localItem.id).catch(e => notify(errText(e), 'error'));
+      void api.agentSteer(project, selRef.current, busyTurn, t, localItem.id, includeSel ? selectionContext() : undefined).catch(e => notify(errText(e), 'error'));
       return;
     }
     if (busyTurn) return;

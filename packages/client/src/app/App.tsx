@@ -294,7 +294,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const tbMode = (id: ToolbarId): ToolbarMode => toolbars[id] ?? 'auto';
   // the formula being edited (LyX shows the math toolbar while the cursor is in math)
   const [mathField, setMathField] = useState<LyxMathField | null>(null);
-  useEffect(() => { const l = (f: LyxMathField | null) => setMathField(f); mathFocusListeners.add(l); return () => { mathFocusListeners.delete(l); }; }, []);
+  useEffect(() => { const l = (f: LyxMathField | null) => { setMathField(f); editorContext.mathField = f; }; mathFocusListeners.add(l); return () => { mathFocusListeners.delete(l); }; }, []);
   // cursor moves inside a formula count as selection changes (source pane, status bar)
   useEffect(() => { const l = () => setSelTick(t => t + 1); mathCursorListeners.add(l); return () => { mathCursorListeners.delete(l); }; }, []);
   const [findQ, setFindQ] = useState(''), [replQ, setReplQ] = useState('');
@@ -1697,7 +1697,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
           (.bottom-toolbars is absolutely positioned), so their coming and going with the cursor
           never shifts the document. */}
       {isLyxDoc && (showMath || showTable || showReview) && (
-        <div class="bottom-toolbars">
+        <div class="bottom-toolbars" style={{ left: showFiles ? 'var(--left-width, 272px)' : '24px', right: rightTab ? (rightTab === 'pdf' ? 'var(--right-width, 46%)' : 'var(--right-width, 360px)') : '24px' }}>
           {showMath && <Toolbar id="math" label="Math" groups={mathGroups} />}
           {showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={mathPanelGroups} />}
           {showTable && <Toolbar id="table" label="Table" groups={tableGroups} />}

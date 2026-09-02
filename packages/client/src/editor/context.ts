@@ -35,6 +35,9 @@ export interface EditorContext {
   aiBusy?: (on: boolean) => void;
   /** ⌘K inside a formula (set by editor/ai/rewrite.ts; the math field calls it) */
   aiRewriteMath?: (field: import('./lyxmath/field').LyxMathField) => void;
+  /** the formula field currently being edited (App.tsx tracks focus) — the Agent panel reads its
+   *  selection when the ProseMirror selection is empty */
+  mathField?: import('./lyxmath/field').LyxMathField | null;
 }
 
 export const editorContext: EditorContext = { user: null, meta: null, docId: null, project: null, docDir: '', trackChanges: false, combined: false };

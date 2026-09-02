@@ -238,7 +238,7 @@ export function agentAvailable(): boolean { return config.agent.enabled; }
 
 /* ------------------------------------------------------------------ selection context */
 
-export interface TurnContext { docId?: string; content?: PMJSON[]; layout?: string }
+export interface TurnContext { docId?: string; content?: PMJSON[]; layout?: string; mathLatex?: string }
 
 /** The input sent to the agent: a context item (where the user is, what they selected — the client
  *  hides items starting with "[context]") followed by the user's message. */
@@ -253,6 +253,7 @@ async function composeInput(text: string, ctx: TurnContext | undefined): Promise
       if (tex.trim()) lines.push('Their current selection in that document:', '```latex', tex.trim().slice(0, 6000), '```');
     }
   } catch { /* selection context is best-effort */ }
+  if (ctx.mathLatex?.trim()) lines.push('Their current selection, inside a formula:', '```latex', ctx.mathLatex.trim().slice(0, 2000), '```');
   // codex concatenates input items into one string when it echoes/stores the user message, so the
   // context block carries an explicit terminator the client can strip it by (AgentPanel userText)
   return [item(lines.join('\n') + '\n[/context]'), item(text)];
@@ -413,7 +414,8 @@ export function agentRoutes(): express.Router {
     try {
       const h = host(row.user_id); await h.ensure();
       const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
-      await h.request('turn/steer', { threadId: row.thread_id, expectedTurnId: String(req.body?.turnId ?? ''), input: [{ type: 'text', text, text_elements: [] }], ...(cmid ? { clientUserMessageId: cmid } : {}) });
+      const input = await composeInput(text, req.body?.context as TurnContext | undefined);
+      await h.request('turn/steer', { threadId: row.thread_id, expectedTurnId: String(req.body?.turnId ?? ''), input, ...(cmid ? { clientUserMessageId: cmid } : {}) });
       res.json({ ok: true });
     } catch (e) { fail(res, e); }
   })(); });
