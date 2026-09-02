@@ -97,11 +97,14 @@ class AgentHost {
   home(): string { return agentHomeDir(this.userId); }
   private sockPath(): string { return path.join(this.home(), 'keeper.sock'); }
 
-  private ensureHome(): void {
+  /** Write the managed codex config; `true` when an existing, different config was replaced
+   *  (codex only reads it at process start, so the keeper must then be restarted). */
+  private ensureHome(): boolean {
     const h = this.home();
     fs.mkdirSync(h, { recursive: true });
     // OverLyX owns this file — rewritten on every start so the port and settings stay current
-    fs.writeFileSync(path.join(h, 'config.toml'), `# OverLyX-managed codex configuration for this account
+    const file = path.join(h, 'config.toml');
+    const text = `# OverLyX-managed codex configuration for this account
 [features]
 memories = true
 web_search_request = true
@@ -117,7 +120,12 @@ web_search = true
 [mcp_servers.overlyx]
 url = "http://127.0.0.1:${config.port}/mcp"
 bearer_token_env_var = "OVERLYX_MCP_TOKEN"
-`);
+`;
+    let old: string | null = null;
+    try { old = fs.readFileSync(file, 'utf8'); } catch { /* fresh home */ }
+    if (old === text) return false;
+    fs.writeFileSync(file, text);
+    return old !== null;
   }
 
   /** Connect to this user's keeper (spawning one when none runs). The codex initialize
@@ -138,8 +146,19 @@ bearer_token_env_var = "OVERLYX_MCP_TOKEN"
   }
 
   private async connect(): Promise<void> {
-    this.ensureHome();
+    const configChanged = this.ensureHome();
     let sock = await this.dial();
+    if (sock && configChanged) {
+      // codex reads config.toml only at process start: a changed managed config (a new MCP
+      // server, another model…) never reaches a keeper's running codex — old keepers kept
+      // serving threads WITHOUT the overlyx MCP tools after the connector was introduced.
+      // Ask the keeper to shut down (it kills its codex child; threads resume on demand).
+      console.log(`[agent ${this.userId}] managed codex config changed — restarting the keeper`);
+      try { sock.write(JSON.stringify({ keeper: 'shutdown' }) + '\n'); } catch { /* gone */ }
+      sock.destroy();
+      for (let i = 0; i < 40 && fs.existsSync(this.sockPath()); i++) await new Promise(r => setTimeout(r, 100));
+      sock = await this.dial();   // a race with a just-spawning keeper: take it if one answers
+    }
     if (!sock) {
       this.spawnKeeper();
       for (let i = 0; i < 50 && !sock; i++) { await new Promise(r => setTimeout(r, 100)); sock = await this.dial(); }
