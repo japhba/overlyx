@@ -9,6 +9,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote } from '@overlyx/core';
 import type { MenuItem } from './contextmenu';
 import { editorContext, viewDocDir, viewProject } from './context';
+import { insertImageFiles, readClipboardImages } from './imagepaste';
 import * as C from './commands';
 import { changeAt, resolveChange } from './plugins/changes';
 import { fileUrl, graphicsUrl } from '../api';
@@ -167,7 +168,11 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
   items.push(
     { label: 'Cut', shortcut: MOD + '+X', disabled: !hasSel, action: () => { view.focus(); document.execCommand('cut'); } },
     { label: 'Copy', shortcut: MOD + '+C', disabled: !hasSel, action: () => { view.focus(); document.execCommand('copy'); } },
-    { label: 'Paste', shortcut: MOD + '+V', action: () => { view.focus(); navigator.clipboard?.readText().then(t => { if (t) view.dispatch(view.state.tr.insertText(t)); }).catch(() => editorContext.notify?.('Use ' + MOD + '+V to paste', 'error')); } },
+    { label: 'Paste', shortcut: MOD + '+V', action: () => {
+      view.focus();
+      const pasteText = () => navigator.clipboard?.readText().then(t => { if (t) view.dispatch(view.state.tr.insertText(t)); }).catch(() => editorContext.notify?.('Use ' + MOD + '+V to paste', 'error'));
+      readClipboardImages().then(imgs => { if (imgs.length) void insertImageFiles(view, imgs); else void pasteText(); }).catch(() => void pasteText());
+    } },
     { sep: true },
   );
   if (prefs.aiRewrite) {

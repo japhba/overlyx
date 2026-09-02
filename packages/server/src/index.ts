@@ -315,6 +315,8 @@ api.post('/projects/:project/upload', needProject('edit'), express.raw({ type: '
     const rel = String(req.query.path ?? '');
     if (!rel || rel.includes('..')) { res.status(400).json({ error: 'bad path' }); return; }
     const abs = resolveProjectPath(req.params.project, rel);
+    // overwrite=0 (editor image paste/drop): never replace — the client counts up to a free name
+    if (req.query.overwrite === '0' && fs.existsSync(abs)) { res.status(409).json({ error: 'file exists' }); return; }
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, req.body as Buffer);
     touchProject(req.params.project, req.user!.id);

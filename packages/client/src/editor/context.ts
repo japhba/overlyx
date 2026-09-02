@@ -50,6 +50,14 @@ export function resolveDocPath(file: string, docDir: string = editorContext.docD
   return out.join('/');
 }
 
+/** The inverse of resolveDocPath: a project-relative path as the document references it (LyX stores graphics relative to the document). */
+export function toDocRel(projectRel: string, docDir: string = editorContext.docDir): string {
+  const parts = docDir.split('/').filter(Boolean);
+  if (!parts.length) return projectRel;
+  const prefix = parts.join('/') + '/';
+  return projectRel.startsWith(prefix) ? projectRel.slice(prefix.length) : '../'.repeat(parts.length) + projectRel;
+}
+
 /** Document id / directory of the document a view shows (child editors differ from the workspace document). */
 export function viewDocId(view: EditorView): string { return view.dom.dataset.docId ?? editorContext.docId ?? ''; }
 export function viewDocDir(view: EditorView): string { return view.dom.dataset.docDir ?? editorContext.docDir; }

@@ -34,6 +34,7 @@ import { createEditor, refreshMacros, describeChange, type EditorHandle, type Sa
 import { newerVersionAvailable } from './update';
 import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
+import { insertImageFiles, readClipboardImages } from '../editor/imagepaste';
 import { navHistory, type NavLocation } from './navhistory';
 import { restoredCursorPos } from '../editor/cursormemory';
 import { PdfViewer, type PdfTarget } from './PdfViewer';
@@ -358,6 +359,15 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
+  // A file dropped outside a drop target (editor text, file browser) must not make the browser
+  // navigate to it — that would throw the whole workspace away. Element handlers run first.
+  useEffect(() => {
+    const over = (ev: DragEvent) => { if (ev.dataTransfer?.types.includes('Files')) ev.preventDefault(); };
+    const drop = (ev: DragEvent) => { if (ev.dataTransfer?.types.includes('Files')) ev.preventDefault(); };
+    window.addEventListener('dragover', over);
+    window.addEventListener('drop', drop);
+    return () => { window.removeEventListener('dragover', over); window.removeEventListener('drop', drop); };
   }, []);
   // Ctrl/Cmd+R starts the PDF build wherever the focus is (a panel, a dialog, a comment box):
   // the editor's keymap only sees the key with the cursor in the text, and the browser's reload
@@ -1216,7 +1226,10 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       const fallback = () => notify('Paste with Ctrl+V (the browser does not allow the toolbar to read the clipboard)', 'error');
       const nav = navigator.clipboard;
       if (!nav?.readText) { fallback(); return; }
-      nav.readText().then(t => { if (!t) return; if (f) f.execute('insert', t); else { v.focus(); v.pasteText(t); } }).catch(fallback);
+      const pasteText = () => nav.readText().then(t => { if (!t) return; if (f) f.execute('insert', t); else { v.focus(); v.pasteText(t); } }).catch(fallback);
+      if (f) { void pasteText(); return; }
+      // an image on the clipboard becomes a graphics inset (same as Ctrl+V in the editor)
+      readClipboardImages().then(imgs => { if (imgs.length) void insertImageFiles(v, imgs); else void pasteText(); }).catch(() => void pasteText());
       return;
     }
     if (f) { const c = f.cursor; const sel = c.selection ? c.grabSelection() : f.latex; void navigator.clipboard?.writeText(sel); if (op === 'cut' && c.selection) f.execute('insert', ''); return; }

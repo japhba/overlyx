@@ -147,6 +147,23 @@ export class Bridge {
       return;
     }
 
+    /* ---- uploads (images pasted or dropped into the editor) ---- */
+    m = /^\/projects\/([^/]+)\/upload$/.exec(api);
+    if (m && req.method === 'POST') {
+      const root = d.projectRoot(decodeURIComponent(m[1]));
+      if (!root) { send(res, 404, { error: 'unknown project' }); return; }
+      const rel = String(url.searchParams.get('path') ?? '');
+      if (!rel || rel.includes('..')) { send(res, 400, { error: 'bad path' }); return; }
+      const abs = path.resolve(root, rel);
+      if (abs !== root && !abs.startsWith(root + path.sep)) { send(res, 403, { error: 'path escapes project' }); return; }
+      if (url.searchParams.get('overwrite') === '0' && fs.existsSync(abs)) { send(res, 409, { error: 'file exists' }); return; }
+      const data = await rawBody(req);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, data);
+      send(res, 200, { ok: true, path: rel });
+      return;
+    }
+
     /* ---- project files: graphics (converted) and raw files ---- */
     m = /^\/projects\/([^/]+)\/(graphics|file)\/(.+)$/.exec(api);
     if (m) {
@@ -187,6 +204,17 @@ function body(req: http.IncomingMessage): Promise<any> {
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => { size += c.length; if (size > JSON_LIMIT) { reject(new Error('body too large')); req.destroy(); } else chunks.push(c); });
     req.on('end', () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}); } catch (e) { reject(e); } });
+    req.on('error', reject);
+  });
+}
+
+/** Raw request body (uploads); the same size limit as the JSON bodies. */
+function rawBody(req: http.IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => { size += c.length; if (size > JSON_LIMIT) { reject(new Error('body too large')); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }

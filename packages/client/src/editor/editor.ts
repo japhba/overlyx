@@ -28,6 +28,7 @@ import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
 import { editorContext, viewDocDir, viewProject } from './context';
+import { imageFiles, insertImageFiles, isSvgMarkup, svgFile } from './imagepaste';
 import { setDocumentMacros, setInlineMacroDefs, markMacrosReady } from './lyxmath/macrotable';
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
@@ -421,8 +422,16 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       },
     },
     handlePaste(view, event) {
+      // an image on the clipboard (a screenshot, a copied image file): upload it, insert a graphics inset
+      const images = imageFiles(event.clipboardData);
+      if (images.length) {
+        if (!viewOnly) void insertImageFiles(view, images);
+        return true;
+      }
       const text = event.clipboardData?.getData('text/plain');
       const html = event.clipboardData?.getData('text/html');
+      // SVG markup on the text clipboard ("Copy as SVG" in drawing tools): an image, not text
+      if (text && !viewOnly && isSvgMarkup(text)) { void insertImageFiles(view, [svgFile(text)]); return true; }
       /** plain text without LaTeX: LyX semantics (blank line = new paragraph, no HTML structure) */
       const plainPaste = () => {
         const paras = text!.replace(/\r\n/g, '\n').split(/\n{2,}/);
@@ -453,6 +462,16 @@ export function createEditor(opts: EditorOptions): EditorHandle {
         return true;
       }
       return false;
+    },
+    // files dragged in from the computer: images are uploaded and inserted where they were dropped
+    handleDrop(view, event, _slice, moved) {
+      if (moved || !event.dataTransfer?.files.length) return false;   // internal drags and text drops: ProseMirror's own handling
+      if (viewOnly) return true;
+      const images = imageFiles(event.dataTransfer);
+      if (!images.length) { editorContext.notify?.('Only images can be dropped into the text — other files go into the file browser', 'error'); return true; }
+      const pos = view.posAtCoords({ left: event.clientX, top: event.clientY });
+      void insertImageFiles(view, images, pos ? pos.pos : null);
+      return true;
     },
   });
   viewRef = view;

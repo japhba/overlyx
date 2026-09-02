@@ -145,7 +145,7 @@ export const api = {
   /** plain text files (.tex, .bib, …) for the built-in text editor; `mtime` guards against overwriting someone else's save */
   readText: (project: string, path: string) => req<{ text: string; mtime: number; size: number; role: Role }>('GET', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`),
   writeText: (project: string, path: string, text: string, mtime?: number) => req<{ ok: boolean; mtime: number; size: number }>('PUT', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`, mtime !== undefined ? { text, mtime } : { text }),
-  upload: (project: string, path: string, file: Blob) => req<{ ok: boolean; path: string }>('POST', `/api/projects/${encodeURIComponent(project)}/upload?path=${encodeURIComponent(path)}`, undefined, file),
+  upload: (project: string, path: string, file: Blob, opts?: { overwrite?: boolean }) => req<{ ok: boolean; path: string }>('POST', `/api/projects/${encodeURIComponent(project)}/upload?path=${encodeURIComponent(path)}${opts?.overwrite === false ? '&overwrite=0' : ''}`, undefined, file),
   fileOp: (project: string, body: { op: 'rename' | 'delete' | 'mkdir' | 'copy'; from?: string; to?: string }) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/fileops`, body),
   meta: (id: string) => req<DocMeta>('GET', `/api/docs/${encId(id)}/meta`),
   /** the document's LaTeX source (what its .tex file contains) */

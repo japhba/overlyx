@@ -7,6 +7,7 @@ import { api, graphicsUrl } from '../api';
 import type { LitHit, BibAddResult } from '../api';
 import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote } from '@overlyx/core';
+import { resolveDocPath, toDocRel as docRelPath } from '../editor/context';
 import { diffLines } from './diff';
 
 export function Dialog({ title, onClose, children, buttons, wide }: { title: string; onClose: () => void; children: ComponentChildren; buttons?: ComponentChildren; wide?: boolean }) {
@@ -41,8 +42,8 @@ export function GraphicsDialog({ meta, project, docDir = '', initial, onInsert, 
   const set = (k: keyof GraphicsOpts, v: string | boolean) => setO(prev => ({ ...prev, [k]: v }));
   const [tab, setTab] = useState<'graphics' | 'clip' | 'latex'>('graphics');
   // file names are stored relative to the document's directory (as LyX does)
-  const toDocRel = (projectRel: string) => { const up = docDir ? docDir.split('/').filter(Boolean).length : 0; if (docDir && projectRel.startsWith(docDir + '/')) return projectRel.slice(docDir.length + 1); return '../'.repeat(up) + projectRel; };
-  const toProjectRel = (docRel: string) => { const parts = [...docDir.split('/').filter(Boolean), ...docRel.split('/')]; const out: string[] = []; for (const p of parts) { if (p === '..') out.pop(); else if (p && p !== '.') out.push(p); } return out.join('/'); };
+  const toDocRel = (projectRel: string) => docRelPath(projectRel, docDir);
+  const toProjectRel = (docRel: string) => resolveDocPath(docRel, docDir);
   const [files, setFiles] = useState<ProjectFile[]>(meta?.files.filter(f => f.kind === 'image') ?? []);
   const upload = () => {
     const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*,.pdf,.eps,.svg';
