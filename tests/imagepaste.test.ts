@@ -1,7 +1,7 @@
 /** Pasted/dropped images: file-type detection, LaTeX-safe names, SVG-markup detection, doc-relative paths. */
 import { describe, it, expect, vi } from 'vitest';
 vi.hoisted(() => { const g = globalThis as any; if (typeof g.window === 'undefined') g.window = g; });
-import { imageExt, safeGraphicsName, uploadBaseName, pastedName, isSvgMarkup } from '../packages/client/src/editor/imagepaste.ts';
+import { imageExt, imageFiles, safeGraphicsName, uploadBaseName, pastedName, isSvgMarkup, looksLikeImageFileName } from '../packages/client/src/editor/imagepaste.ts';
 import { toDocRel, resolveDocPath } from '../packages/client/src/editor/context.ts';
 
 describe('imageExt', () => {
@@ -19,6 +19,39 @@ describe('imageExt', () => {
     expect(imageExt({ type: 'text/plain', name: 'notes.txt' })).toBe(null);
     expect(imageExt({ type: '', name: 'refs.bib' })).toBe(null);
     expect(imageExt({ type: '', name: 'noextension' })).toBe(null);
+  });
+});
+
+describe('imageFiles', () => {
+  const item = (f: File | null, kind = 'file') => ({ kind, getAsFile: () => f }) as unknown as DataTransferItem;
+  const svg = new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' });
+  const txt = new File(['hi'], 'notes.txt', { type: 'text/plain' });
+  it('reads DataTransfer items when files is empty (Finder-copied files in Chrome on macOS)', () => {
+    expect(imageFiles({ files: [], items: [item(svg)] })).toEqual([svg]);
+    expect(imageFiles({ files: [], items: [item(null, 'string'), item(svg)] })).toEqual([svg]);
+  });
+  it('counts a file present in both lists once, and skips non-images', () => {
+    expect(imageFiles({ files: [svg, txt], items: [item(svg), item(txt)] })).toEqual([svg]);
+  });
+  it('is empty for a text-only paste', () => {
+    expect(imageFiles({ files: [], items: [item(null, 'string')] })).toEqual([]);
+    expect(imageFiles(null)).toEqual([]);
+  });
+});
+
+describe('looksLikeImageFileName', () => {
+  it('matches what Safari/Firefox deliver for a Finder-copied image file', () => {
+    expect(looksLikeImageFileName('diagram.svg')).toBe(true);
+    expect(looksLikeImageFileName('Screen Shot 2026-09-02.png')).toBe(true);
+    expect(looksLikeImageFileName('file:///Users/me/fig.svg')).toBe(true);
+    expect(looksLikeImageFileName('paper.pdf')).toBe(true);
+  });
+  it('leaves ordinary text and markup alone', () => {
+    expect(looksLikeImageFileName('The results are in results.txt')).toBe(false);
+    expect(looksLikeImageFileName('two\nlines.png')).toBe(false);
+    expect(looksLikeImageFileName('\\includegraphics{x.png}')).toBe(false);
+    expect(looksLikeImageFileName('<img src="a.png"> a.png')).toBe(false);
+    expect(looksLikeImageFileName('just words')).toBe(false);
   });
 });
 

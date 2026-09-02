@@ -28,7 +28,7 @@ import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
 import { editorContext, viewDocDir, viewProject } from './context';
-import { imageFiles, insertImageFiles, isSvgMarkup, svgFile } from './imagepaste';
+import { imageFiles, insertImageFiles, isSvgMarkup, looksLikeImageFileName, svgFile } from './imagepaste';
 import { setDocumentMacros, setInlineMacroDefs, markMacrosReady } from './lyxmath/macrotable';
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
@@ -444,6 +444,13 @@ export function createEditor(opts: EditorOptions): EditorHandle {
         view.dispatch(tr);
       };
       if (text && !html) {
+        // just an image file's name: Safari (and Firefox on macOS) deliver only that for a file
+        // copied in the Finder — paste it as text, but say how to get the image itself in
+        if (looksLikeImageFileName(text)) {
+          plainPaste();
+          editorContext.notify?.('Only the file’s name was on the clipboard — to insert the image, drag the file into the text (or copy it in Chrome)');
+          return true;
+        }
         // pasted LaTeX (a \command, $…$, \[ …) is parsed on the server against this document's own
         // preamble and inserted as real structure — sections, formulas, citations, lists
         if (!viewOnly && /\\[a-zA-Z]+|\\\[|\\\(|\$[^$\n][^$]*\$/.test(text)) {

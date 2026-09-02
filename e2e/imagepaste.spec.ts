@@ -4,9 +4,11 @@
  * dragged in from the computer (dropped where the pointer is; a name clash counts up,
  * nothing is replaced).
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, chromium, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
-import { login, collectErrors, PROJECTS_DIR, texDoc } from './helpers';
+import { execSync, spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { login, collectErrors, BASE_URL, PROJECTS_DIR, texDoc } from './helpers';
 
 const PROJECT = 'e2e-imgpaste';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -91,4 +93,37 @@ test('an image file dropped on a paragraph is inserted there; dropping the same 
   await expect(page.locator('.lyx-editor .lyx-graphics')).toHaveCount(before + 2, { timeout: 10000 });
   expect(existsSync(`${DIR}/figures/diagram-2.png`)).toBe(true);
   await expect.poll(() => readFileSync(`${DIR}/img.tex`, 'utf8'), { timeout: 15000 }).toContain('figures/diagram-2');
+});
+
+// The real thing, not a synthesized event: an SVG file is put on the OS clipboard the way file
+// managers do it (text/uri-list — what Ctrl/Cmd+C in Explorer/Finder produces), and a *headed*
+// Chromium on its own X display turns Ctrl+V into the paste itself. Needs Xvfb and xclip.
+test('a file copied in the OS file manager pastes as an image (real clipboard)', async () => {
+  test.skip(!existsSync('/usr/bin/Xvfb') || !existsSync('/usr/bin/xclip'), 'needs Xvfb and xclip');
+  const DISPLAY = ':78';
+  rmSync('/tmp/.X78-lock', { force: true });
+  const svgPath = `${tmpdir()}/osclip-logo.svg`;
+  writeFileSync(svgPath, '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle cx="10" cy="10" r="9" fill="teal"/></svg>');
+  const xvfb = spawn('Xvfb', [DISPLAY, '-screen', '0', '1400x900x24'], { stdio: 'ignore' });
+  try {
+    await new Promise(r => setTimeout(r, 800));
+    // xclip forks a child that serves the selection until the display goes away; silence it or execSync never returns
+    execSync(`printf 'file://${svgPath}\\r\\n' | DISPLAY=${DISPLAY} xclip -selection clipboard -t text/uri-list -i >/dev/null 2>&1`, { shell: '/bin/bash' });
+    const browser = await chromium.launch({ headless: false, env: { ...process.env, DISPLAY } });
+    try {
+      const page = await (await browser.newContext({ baseURL: BASE_URL, viewport: { width: 1400, height: 900 } })).newPage();
+      await login(page);
+      await open(page);
+      const before = await page.locator('.lyx-editor .lyx-graphics').count();
+      await page.locator('.lyx-editor .lyx-par').nth(1).click();
+      await page.keyboard.press('End');
+      await page.keyboard.press('Control+v');
+      await expect(page.locator('.lyx-editor .lyx-graphics')).toHaveCount(before + 1, { timeout: 10000 });
+      expect(readFileSync(`${DIR}/figures/osclip-logo.svg`, 'utf8')).toContain('<circle');
+      await expect.poll(() => readFileSync(`${DIR}/img.tex`, 'utf8'), { timeout: 15000 }).toContain('figures/osclip-logo');
+    } finally { await browser.close(); }
+  } finally {
+    xvfb.kill();
+    rmSync(svgPath, { force: true });
+  }
 });
