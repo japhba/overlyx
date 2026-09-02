@@ -1,1 +1,11 @@
-{ "extends": "./tsconfig.base.json", "include": ["packages/*/src", "tests", "e2e"] }
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/*/src",
+    "tests",
+    "e2e"
+  ],
+  "exclude": [
+    "packages/vscode"
+  ]
+}

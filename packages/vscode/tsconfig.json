@@ -1,0 +1,40 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "..",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": [
+      "es2023",
+      "dom",
+      "dom.iterable",
+      "webworker"
+    ],
+    "types": [
+      "vscode",
+      "node"
+    ],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@client/*": [
+        "../client/src/*"
+      ],
+      "@overlyx/core": [
+        "../core/src/index.ts"
+      ],
+      "@overlyx/core/*": [
+        "../core/src/*"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "webview.vite.config.ts",
+    "esbuild.mjs"
+  ]
+}

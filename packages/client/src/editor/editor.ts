@@ -646,7 +646,7 @@ const serverMacrosByView = new WeakMap<EditorView, { macros: ServerMacros; merge
  * it: node views of formulas ask for their macro table when they are created, so the definitions
  * must be known by then (otherwise every formula would be rendered twice on load).
  */
-function macroDefsPlugin(getView: () => EditorView | null): Plugin {
+export function macroDefsPlugin(getView: () => EditorView | null): Plugin {
   return new Plugin({
     state: {
       init: () => '',

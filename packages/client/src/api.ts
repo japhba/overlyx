@@ -74,8 +74,14 @@ export interface AgentEventMsg { kind: 'notification' | 'request' | 'status'; me
 export interface AgentTurnContext { docId?: string; content?: PMJSON[]; layout?: string; mathLatex?: string }
 export interface AgentModel { id: string; label: string; description: string; efforts: string[]; defaultEffort: string | null; isDefault: boolean }
 
+/**
+ * Base URL for the API. Empty in the web app (same origin); the VS Code extension's webview sets
+ * `globalThis.OVERLYX_API_BASE` to its local bridge before importing this module.
+ */
+export const API_BASE: string = (globalThis as unknown as { OVERLYX_API_BASE?: string }).OVERLYX_API_BASE ?? '';
+
 async function req<T>(method: string, url: string, body?: unknown, raw?: BodyInit, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(API_BASE + url, {
     method,
     headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
     body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined),
@@ -143,7 +149,7 @@ export const api = {
   fileOp: (project: string, body: { op: 'rename' | 'delete' | 'mkdir' | 'copy'; from?: string; to?: string }) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/fileops`, body),
   meta: (id: string) => req<DocMeta>('GET', `/api/docs/${encId(id)}/meta`),
   /** the document's LaTeX source (what its .tex file contains) */
-  texText: (id: string) => fetch(`/api/docs/${encId(id)}/tex`).then(r => r.text()),
+  texText: (id: string) => fetch(`${API_BASE}/api/docs/${encId(id)}/tex`).then(r => r.text()),
   /** replace the document by hand-edited LaTeX source */
   applySource: (id: string, text: string) => req<{ ok: boolean; warnings: string[] }>('POST', `/api/docs/${encId(id)}/source`, { text }),
   /** parse pasted LaTeX in the document's context: ProseMirror block JSON to insert */
@@ -215,8 +221,8 @@ export function isAuxFile(name: string): boolean {
 }
 
 export function graphicsUrl(project: string, path: string, w = 1200): string {
-  return `/api/projects/${encodeURIComponent(project)}/graphics/${path.split('/').map(encodeURIComponent).join('/')}?w=${w}`;
+  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/graphics/${path.split('/').map(encodeURIComponent).join('/')}?w=${w}`;
 }
 export function fileUrl(project: string, path: string): string {
-  return `/api/projects/${encodeURIComponent(project)}/file/${path.split('/').map(encodeURIComponent).join('/')}`;
+  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/file/${path.split('/').map(encodeURIComponent).join('/')}`;
 }
