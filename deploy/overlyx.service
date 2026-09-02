@@ -28,7 +28,9 @@ EnvironmentFile=-/root/lyx/overlyx/deploy/secrets.env
 # Feedback / error reports go to GitHub issues of GITHUB_REPO (default japhba/overlyx) when a
 # GITHUB_TOKEN is in secrets.env; OVERLYX_ERROR_REPORTS=off keeps only the manual Help ▸ Report a problem
 #Environment=OVERLYX_ERROR_REPORTS=off
-ExecStart=/usr/bin/npx tsx packages/server/src/index.ts
+# node runs the server directly (not via npx): with KillMode=process the stop signal only
+# reaches the MAIN process — behind npx the real server lingered on :8080 through a restart
+ExecStart=/usr/bin/node --import tsx packages/server/src/index.ts
 Restart=always
 RestartSec=3
 KillSignal=SIGINT
