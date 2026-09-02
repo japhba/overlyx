@@ -17,6 +17,7 @@ import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type Agen
 import { editorContext } from '../editor/context';
 import { renderStaticHtml } from '../editor/lyxmath/field';
 import { latexSelectionText } from './richcopy';
+import { bibRefs, type BibRef } from './bibrefs';
 
 interface Approval { requestId: string; method: string; params: any }
 
@@ -146,15 +147,44 @@ function FileChangeView({ it }: { it: AgentItem }) {
   );
 }
 
-function ItemView({ it }: { it: AgentItem }) {
+type Notify = (msg: string, kind?: 'info' | 'error') => void;
+
+/** One reference spotted in an agent reply: a click adds it to the project's cited.bib. */
+function AddBibButton({ r, project, notify }: { r: BibRef; project: string; notify: Notify }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
+  const add = () => {
+    if (state !== 'idle') return;
+    setState('busy');
+    const data = r.bibtex ? { bibtex: r.bibtex } : { hit: { id: r.doi!, title: '', authors: [], year: null, venue: '', type: '', doi: r.doi!, arxiv: null, url: null, citations: null, sources: [] } };
+    api.bibAdd(project, data)
+      .then(res => { setState('done'); notify(res.existed ? `${res.key} was already in ${res.file}` : `Added ${res.key} to ${res.file}`); })
+      .catch(e => { setState('idle'); notify(errText(e), 'error'); });
+  };
+  return (
+    <button class="small-btn agent-bib-add" data-agent-bib={r.label} disabled={state !== 'idle'} onClick={add}
+      title={r.bibtex ? 'Add this BibTeX entry to the project’s cited.bib' : 'Fetch the BibTeX for this reference and add it to cited.bib'}>
+      {state === 'done' ? '✓ ' : '+ '}{r.label}
+    </button>
+  );
+}
+
+function ItemView({ it, project, notify }: { it: AgentItem; project?: string; notify?: Notify }) {
   const [open, setOpen] = useState(false);
   switch (it.type) {
     case 'userMessage': {
       const t = userText(it);
       return t ? <div class="agent-msg user" data-agent="user"><RichText text={t} /></div> : null;
     }
-    case 'agentMessage':
-      return <div class="agent-msg assistant" data-agent="assistant"><RichText text={it.text ?? ''} /></div>;
+    case 'agentMessage': {
+      // references in the reply (BibTeX, DOIs, arXiv ids) get one-click buttons into cited.bib
+      const refs = project && notify ? bibRefs(it.text ?? '') : [];
+      return (
+        <div class="agent-msg assistant" data-agent="assistant">
+          <RichText text={it.text ?? ''} />
+          {refs.length > 0 && <div class="agent-bib-row">{refs.map(r => <AddBibButton key={r.label} r={r} project={project!} notify={notify!} />)}</div>}
+        </div>
+      );
+    }
     case 'reasoning': {
       const t = (it.summary ?? it.content ?? []).join('\n').trim();
       if (!t) return <div class="agent-item reasoning">Thinking…</div>;
@@ -441,7 +471,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
         </div>
       ) : (
         <div class="agent-scroll" ref={scrollRef} onScroll={onScroll} onCopy={transcriptCopy}>
-          {items.map(it => <ItemView key={it.id} it={it} />)}
+          {items.map(it => <ItemView key={it.id} it={it} project={project} notify={notify} />)}
           {approvals.map(a => <ApprovalCard key={a.requestId} a={a} onDecide={(d, fb) => decide(a, d, fb)} />)}
           {busyTurn && !approvals.length && <div class="agent-item reasoning" data-agent="busy">Working…</div>}
         </div>
