@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fetchLatestRelease, isNewer, type ReleaseInfo } from './updateCheck.ts';
 
 const DEFAULT_REPO = 'japhba/overlyx';
-const CHECK_EVERY_MS = 20 * 60 * 60 * 1000;   // ~daily, tolerant of laptops sleeping
+const CHECK_EVERY_MS = 5 * 60 * 1000;   // updates land fast; one small API call per check
 
 export interface CheckResult {
   status: 'up-to-date' | 'update-available' | 'installed' | 'skipped' | 'no-release' | 'dry-run-downloaded';
@@ -22,6 +22,11 @@ export interface CheckResult {
 }
 
 export class Updater {
+  private timer: NodeJS.Timeout | undefined;
+  /** versions already handled this session — a 5-minute cadence must not nag or install in a loop */
+  private promptedVersion: string | null = null;
+  private installedVersion: string | null = null;
+
   constructor(private context: vscode.ExtensionContext) {}
 
   private get currentVersion(): string { return String(this.context.extension.packageJSON.version ?? '0.0.0'); }
@@ -32,9 +37,12 @@ export class Updater {
     if (this.context.extensionMode !== vscode.ExtensionMode.Production) return;
     if (this.config.get<string>('updates') === 'off') return;
     const last = this.context.globalState.get<number>('updateLastCheck') ?? 0;
-    const delay = Math.max(10_000, last + CHECK_EVERY_MS - Date.now());
-    const timer = setTimeout(() => { void this.check({ interactive: false }).catch(() => { /* offline etc. */ }); }, delay);
-    this.context.subscriptions.push({ dispose: () => clearTimeout(timer) });
+    const run = async () => {
+      try { await this.check({ interactive: false }); } catch { /* offline etc. */ }
+      this.timer = setTimeout(() => { void run(); }, CHECK_EVERY_MS);
+    };
+    this.timer = setTimeout(() => { void run(); }, Math.max(10_000, last + CHECK_EVERY_MS - Date.now()));
+    this.context.subscriptions.push({ dispose: () => clearTimeout(this.timer) });
   }
 
   /**
@@ -60,11 +68,17 @@ export class Updater {
     }
 
     const mode = this.config.get<string>('updates') ?? 'prompt';
+    if (!opts.interactive && !opts.dryRun) {
+      // handled this session already: installed and waiting for a reload, or the prompt was shown
+      if (this.installedVersion === rel.version) return { status: 'installed', current, latest: rel.version };
+      if (mode === 'prompt' && this.promptedVersion === rel.version) return { status: 'update-available', current, latest: rel.version };
+    }
     // a dry run (tests) never prompts — showInformationMessage would wait for a human forever
     if (!opts.interactive && !opts.dryRun && mode === 'prompt') {
+      this.promptedVersion = rel.version;   // a dismissed prompt is not shown again this session
       const pick = await vscode.window.showInformationMessage(
         `OverLyX ${rel.version} is available (you have ${current}).`, 'Update', 'What changed', 'Skip this version');
-      if (pick === 'What changed') { if (rel.url) void vscode.env.openExternal(vscode.Uri.parse(rel.url)); return this.check(opts); }
+      if (pick === 'What changed') { if (rel.url) void vscode.env.openExternal(vscode.Uri.parse(rel.url)); this.promptedVersion = null; return this.check(opts); }
       if (pick === 'Skip this version') { void this.context.globalState.update('updateSkip', rel.version); return { status: 'skipped', current, latest: rel.version }; }
       if (pick !== 'Update') return { status: 'update-available', current, latest: rel.version };
     }
@@ -72,6 +86,7 @@ export class Updater {
     const vsixPath = await this.download(rel);
     if (opts.dryRun) return { status: 'dry-run-downloaded', current, latest: rel.version, vsixPath };
     await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(vsixPath));
+    this.installedVersion = rel.version;
     void this.context.globalState.update('updateSkip', undefined);
     const pick = await vscode.window.showInformationMessage(`OverLyX ${rel.version} installed — reload to use it.`, 'Reload Window');
     if (pick === 'Reload Window') void vscode.commands.executeCommand('workbench.action.reloadWindow');

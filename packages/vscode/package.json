@@ -2,7 +2,7 @@
   "name": "overlyx-vscode",
   "displayName": "OverLyX",
   "description": "LyX-style WYSIWYG editing for LaTeX .tex files \u2014 the OverLyX editor inside VS Code: rendered text and formulas, LyX keybindings, change tracking, comments, outline, PDF preview with SyncTeX. File browsing, git and agents stay VS Code's.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "overlyx",
   "private": true,
   "license": "GPL-3.0-or-later",

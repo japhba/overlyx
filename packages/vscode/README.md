@@ -47,7 +47,7 @@ text gets native Outline and breadcrumbs from the extension's symbol provider.
 ## Updates
 
 Installed from a `.vsix`, the extension is not updated by VS Code. It checks the release
-repository (`overlyx.updateRepo`, default `japhba/overlyx`) about once a day and offers
+repository (`overlyx.updateRepo`, default `japhba/overlyx`) every five minutes and offers
 newer versions (`overlyx.updates`: `prompt` / `auto` / `off`); *OverLyX: Check for Updates* runs
 a check on demand. Updates install with the built-in VSIX installer and take effect after a
 reload.
