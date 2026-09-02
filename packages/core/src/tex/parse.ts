@@ -1376,6 +1376,39 @@ function hasComment(s: string): boolean {
   return false;
 }
 
+/** The inner paragraphs of a body paragraph that is nothing but one collapsed ERT of pure
+ *  comment lines (every line '%…' or empty), or null. */
+function commentOnlyErt(p: Paragraph): Paragraph[] | null {
+  if (p.items.length !== 1 || Object.keys(p.params).length) return null;
+  const it = p.items[0];
+  if (it.kind !== 'inset' || it.change || Object.keys(it.font ?? {}).length) return null;
+  const ins = it.inset;
+  if (ins.type !== 'Text' || ins.name !== 'ERT' || ins.status !== 'collapsed') return null;
+  for (const par of ins.paragraphs) {
+    if (par.items.some(x => x.kind !== 'text')) return null;
+    const line = par.items.map(x => (x.kind === 'text' ? x.text : '')).join('');
+    if (line && !line.startsWith('%')) return null;
+  }
+  return ins.paragraphs;
+}
+
+/** Consecutive comment-only paragraphs collapse into ONE TeX-Code inset: a commented-out block
+ *  (a "% \widemath{…}" over many lines, remarks separated by blank lines) otherwise renders as a
+ *  tall pile of one-line "TeX Code" buttons in the editor. The blank line between the source
+ *  paragraphs becomes an empty line inside the ERT (the writer's parbreakIsNewline turns it back
+ *  into exactly one blank line), so the written file stays byte-identical. */
+function mergeCommentErts(pars: Paragraph[]): void {
+  for (let i = 1; i < pars.length; i++) {
+    const prev = pars[i - 1], cur = pars[i];
+    if (prev.layout !== cur.layout || prev.depth !== cur.depth) continue;
+    const a = commentOnlyErt(prev), b = commentOnlyErt(cur);
+    if (!a || !b) continue;
+    a.push({ layout: 'Plain Layout', depth: 0, params: {}, items: [] }, ...b);
+    pars.splice(i, 1);
+    i--;
+  }
+}
+
 function ertParagraphs(text: string): Paragraph[] {
   return text.split('\n').map(line => ({ layout: 'Plain Layout', depth: 0, params: {}, items: line ? [{ kind: 'text', text: line, font: {} } as Item] : [] }));
 }
@@ -1559,6 +1592,7 @@ export function parseTex(text: string, opts: ParseTexOptions = {}): ParseTexResu
   const parser = new BodyParser(dc, unicode, langs, facts, { language, quotes });
   const pars = parser.parseBody(body);
   warnings.push(...parser.warnings);
+  mergeCommentErts(pars);
 
   const authors = [...parser.authors.entries()].map(([id, a]) => ({ id, name: a.name, email: a.email }));
   if (!split.hasDocument && opts.masterHeader) {

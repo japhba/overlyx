@@ -396,7 +396,16 @@ export class DocManager {
         // clients holding a local copy of this history (offline edits) can still sync
         console.log(`[docs] ${id}: file changed since last persisted state — merging`);
         doc.loadFromLyx(doc.parse(text), 'file-load');
-      } else doc.parse(text);   // learns whether this is a child document
+      } else {
+        const parsed = doc.parse(text);   // also learns whether this is a child document
+        // Same bytes, but a parser normalisation may structure them differently than the stored
+        // state does (e.g. comment blocks merging into one TeX-Code inset): fold the new structure
+        // into the stored history as a diff — the epoch survives, offline copies still sync.
+        if (parsed.body.length !== doc.toLyxDocument().body.length) {
+          console.log(`[docs] ${id}: parser normalisation changed the structure — merging`);
+          doc.loadFromLyx(parsed, 'file-load');
+        }
+      }
       // sanity: the state must produce exactly the file; otherwise rebuild from scratch
       ok = doc.fragment.length > 0 && sha1(doc.toText()) === hash;
     } catch { ok = false; }

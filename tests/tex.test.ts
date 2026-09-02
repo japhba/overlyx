@@ -108,6 +108,21 @@ Centered.
 });
 
 describe('raw LaTeX fidelity (ERT)', () => {
+  it('consecutive comment paragraphs merge into one TeX-Code inset, byte-exactly', () => {
+    const t = doc('Before.\n\n% \\widemath{\\begin{array}{cc}\n% a & b\n% \\end{array}}\n\n% A remark:\n\n% - one point\n\nAfter.');
+    const d = parse(t);
+    expect(insets(d, 'ERT')).toHaveLength(1);                 // one button, not four
+    expect(rewrite(t)).toBe(rewrite(rewrite(t)));
+    expect(bodyOf(rewrite(t))).toBe(bodyOf(t));               // blank lines between the comments survive
+  });
+
+  it('a comment block does not swallow a neighbouring non-comment ERT', () => {
+    const t = doc('% a comment\n\n\\clearpage{}\n\n% another comment');
+    const d = parse(t);
+    expect(insets(d, 'ERT').length).toBeGreaterThanOrEqual(2); // the \clearpage ERT stays separate
+    expect(bodyOf(rewrite(t))).toBe(bodyOf(t));
+  });
+
   it('keeps the braces of script groups after raw ^ and _', () => {
     const src = doc('\\widemath{x_{J}^{r1}x_{J}^{r2}+\\int_{WV}f}');
     const out = expectStable(src);
