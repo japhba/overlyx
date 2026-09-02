@@ -3,6 +3,20 @@
 A web-based, LyX-like, collaborative WYSIWYG editor for LaTeX documents — an Overleaf/LyX
 blend.
 
+
+**In VS Code:** OverLyX is also a VS Code extension — the same WYSIWYG editor as a custom editor
+for `.tex` files, serverless, with your files, git and agents staying VS Code's own
+([details](packages/vscode/README.md)). Install from the [latest release](https://github.com/japhba/overlyx/releases/latest):
+
+```
+curl -sL https://github.com/japhba/overlyx/releases/latest/download/overlyx-vscode.vsix -o /tmp/overlyx.vsix \
+  && code --install-extension /tmp/overlyx.vsix
+```
+
+(or download the `.vsix` and use “Extensions: Install from VSIX…” in VS Code). It self-updates
+from this repository's releases. PDF preview needs `latexmk` on the PATH. Linux and macOS;
+Windows is untested.
+
 * **Plain `.tex` files are the source of truth.** A document is an ordinary LaTeX file that any
   editor, Overleaf or `latexmk` understands; OverLyX reads it into a LyX-style document model
   (paragraph layouts, insets, formulas) driven by LyX's own layout files, renders it as you type
