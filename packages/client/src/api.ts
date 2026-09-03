@@ -137,6 +137,9 @@ export const api = {
   deleteGitToken: (id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/git/tokens/${id}`),
   /** the signed-in account's server-side settings; administrators switch them per user */
   settings: () => req<{ settings: UserSettings }>('GET', '/api/settings'),
+  /** the account's custom keyboard shortcuts (keybindings.ts syncs them) */
+  keys: () => req<{ keys: Record<string, string | null> }>('GET', '/api/keys'),
+  setKeys: (keys: Record<string, string | null>) => req<{ keys: Record<string, string | null> }>('POST', '/api/keys', { keys }),
   adminUserSettings: (id: number, patch: Partial<UserSettings>) => req<{ settings: UserSettings }>('POST', `/api/admin/users/${id}/settings`, patch),
   mcpTokens: () => req<{ tokens: GitToken[] }>('GET', '/api/mcp-tokens'),
   createMcpToken: (name: string) => req<{ id: number; token: string; tokens: GitToken[] }>('POST', '/api/mcp-tokens', { name }),

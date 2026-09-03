@@ -9,6 +9,7 @@
  * key ('Ctrl+Alt+O', 'Alt+Shift+→', 'Ctrl+Space'). 'Ctrl' is the platform's command key (⌘ on a
  * Mac, where 'Control' is the real control key) — the same convention as the menus use.
  */
+import { api } from '../api';
 import { isMacPlatform } from './shortcuts';
 
 export type Bindings = Record<string, string | null>;
@@ -29,9 +30,32 @@ export function setBinding(id: string, key: string | null | undefined): void {
   if (key === undefined) delete next[id]; else next[id] = key;
   bindings = next;
   save();
+  push();
   for (const l of listeners) l();
 }
-export function resetAllBindings(): void { bindings = {}; save(); for (const l of listeners) l(); }
+export function resetAllBindings(): void { bindings = {}; save(); push(); for (const l of listeners) l(); }
+
+/* ---- account sync: the same shortcuts on every browser (users.keybindings, /api/keys) ---- */
+
+let synced = false;
+let pushTimer: ReturnType<typeof setTimeout> | null = null;
+/** write the current map to the account, debounced; before the first sync only localStorage is touched */
+function push(): void {
+  if (!synced) return;
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => { api.setKeys(bindings).catch(() => { /* offline: the local copy stands */ }); }, 400);
+}
+
+/** After sign-in: adopt the account's shortcuts (they win over this browser's copy); a browser
+ *  with custom shortcuts but an empty account pushes its copy up once (the one-time migration). */
+export async function syncBindings(): Promise<void> {
+  try {
+    const r = await api.keys();
+    if (Object.keys(r.keys).length) { bindings = r.keys; save(); for (const l of listeners) l(); }
+    else if (Object.keys(bindings).length) await api.setKeys(bindings);
+    synced = true;
+  } catch { /* offline: the local copy stands */ }
+}
 export function subscribeBindings(l: () => void): () => void { listeners.add(l); return () => { listeners.delete(l); }; }
 export const isCustom = (id: string): boolean => Object.prototype.hasOwnProperty.call(bindings, id);
 /** the shortcut in force for a command: the user's, or the default */

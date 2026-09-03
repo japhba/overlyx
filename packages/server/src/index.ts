@@ -10,7 +10,7 @@ import { mcpRouter } from './mcp.ts';
 import { agentRoutes, disconnectAgents } from './agent.ts';
 import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
 import { createMcpToken, listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
-import { userSettings, setUserSettings } from './userSettings.ts';
+import { userSettings, setUserSettings, userKeys, setUserKeys } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, generatePassword } from './auth.ts';
 import { attachWebSocket } from './ws.ts';
 import { manager, projectChangedListeners } from './docs.ts';
@@ -281,6 +281,10 @@ api.delete('/git/tokens/:id', (req, res) => {
 
 /** The signed-in account's server-side settings (userSettings.ts) — the Settings panel. */
 api.get('/settings', (req, res) => { res.json({ settings: userSettings(req.user!.id) }); });
+
+/** The account's custom keyboard shortcuts — keybindings.ts on the client syncs them across browsers. */
+api.get('/keys', (req, res) => { res.json({ keys: userKeys(req.user!.id) }); });
+api.post('/keys', (req, res) => { res.json({ keys: setUserKeys(req.user!.id, req.body?.keys) }); });
 
 /** MCP agent tokens: one per external agent, scoped to the signed-in account — usable on any project the account can access (see mcp.ts). */
 api.get('/mcp-tokens', (req, res) => { res.json({ tokens: listMcpTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) }); });

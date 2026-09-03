@@ -112,6 +112,8 @@ try { db.exec('ALTER TABLE builds ADD COLUMN warnings TEXT'); } catch { /* colum
 // per-account server-side settings (userSettings.ts) and re-copyable tokens (plaintext kept only
 // for accounts with the allowRecopyTokens setting)
 try { db.exec('ALTER TABLE users ADD COLUMN settings TEXT'); } catch { /* column exists */ }
+// per-account keyboard shortcuts (userSettings.ts userKeys/setUserKeys; client keybindings.ts syncs)
+try { db.exec('ALTER TABLE users ADD COLUMN keybindings TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE git_tokens ADD COLUMN token_plain TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE mcp_tokens ADD COLUMN token_plain TEXT'); } catch { /* column exists */ }
 

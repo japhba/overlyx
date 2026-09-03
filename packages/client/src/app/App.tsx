@@ -41,12 +41,14 @@ import { navHistory, type NavLocation } from './navhistory';
 import { restoredCursorPos } from '../editor/cursormemory';
 import { PdfViewer, type PdfTarget } from './PdfViewer';
 import { locateSourceLine } from './sourcelocate';
-import { canonical, effectiveShortcut, keyFromEvent } from './keybindings';
+import { canonical, effectiveShortcut, keyFromEvent, syncBindings } from './keybindings';
 import { STANDARD_LAYOUTS, sectionLevel } from '../editor/layouts';
 import { chordKey } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import * as C from '../editor/commands';
 import { setMarginMode } from '../editor/plugins/margin';
+import { getInk, setInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
+import { BoardEditor } from './BoardEditor';
 import { acceptAllChanges, rejectAllChanges, changeAt, resolveChange, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
@@ -103,6 +105,7 @@ export function App() {
   useEffect(() => {
     api.me().then(r => {
       setUser(r.user); setGoogle(r.google);
+      if (r.user) void syncBindings();   // account shortcuts follow the user across browsers
       // remembered for offline starts (the session cookie itself is still valid then)
       try { if (r.user) localStorage.setItem('ol.user', JSON.stringify(r.user)); else localStorage.removeItem('ol.user'); } catch { /* ignore */ }
     }).catch(() => {
@@ -286,6 +289,18 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   });
   const [showRuler, setShowRuler] = useState(localStorage.getItem('ol.ruler') !== '0');
   useEffect(() => { localStorage.setItem('ol.ruler', showRuler ? '1' : '0'); }, [showRuler]);
+  // Margin ink (drawing in the space beside the text): on tablets the toolbar activates itself.
+  const [inkMode, setInkModeState] = useState(() => { const v = localStorage.getItem('ol.ink'); return v !== null ? v === '1' : isTabletClient(); });
+  const setInkMode = (fn: (m: boolean) => boolean) => setInkModeState(m => { const next = fn(m); localStorage.setItem('ol.ink', next ? '1' : '0'); return next; });
+  const [, inkTick] = useState(0);
+  useEffect(() => subscribeInk(() => inkTick(t => t + 1)), []);
+  useEffect(() => { setInk({ active: inkMode }); }, [inkMode]);
+  // entering ink mode adds wide gutters: keep the column centred (the snap point)
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !inkMode) return;
+    el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+  }, [inkMode, docId]);
   const [findOpen, setFindOpen] = useState(false);
   // sharing: the project whose share dialog is open; view-only when the current project was shared for viewing
   const [shareFor, setShareFor] = useState<string | null>(null);

@@ -17,7 +17,7 @@ process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 process.env.OVERLYX_OWNER_EMAIL = 'owner@example.com';
 
 const { createUser } = await import('../packages/server/src/auth.ts');
-const { userSettings, setUserSettings } = await import('../packages/server/src/userSettings.ts');
+const { userSettings, setUserSettings, userKeys, setUserKeys } = await import('../packages/server/src/userSettings.ts');
 const { createMcpToken, listMcpTokens, verifyMcpToken } = await import('../packages/server/src/mcpTokens.ts');
 const { createToken, listTokens } = await import('../packages/server/src/git.ts');
 
@@ -65,5 +65,22 @@ describe('re-copyable git tokens', () => {
     expect(rows.find(r => r.id === kept.id)?.token).toBe(kept.token);
     expect(rows.find(r => r.id === oneshot.id)?.token).toBeUndefined();
     expect(listTokens(owner.id, false).find(r => r.id === kept.id)?.token).toBeUndefined();
+  });
+});
+
+describe('per-account keyboard shortcuts', () => {
+  it('stores a validated map and hands it back', () => {
+    expect(userKeys(bob.id)).toEqual({});
+    const keys = setUserKeys(bob.id, {
+      'Insert ▸ Cross-reference': 'Ctrl+Shift+R',
+      'Edit ▸ Text Style ▸ Noun (small caps)': null,
+      'too-long-value': 'x'.repeat(100),
+      '': 'Ctrl+X',
+      'not-a-key': 42,
+    });
+    expect(keys).toEqual({ 'Insert ▸ Cross-reference': 'Ctrl+Shift+R', 'Edit ▸ Text Style ▸ Noun (small caps)': null });
+    expect(userKeys(bob.id)).toEqual(keys);
+    expect(setUserKeys(bob.id, 'nonsense')).toEqual({});   // a bad payload clears rather than crashes
+    expect(userKeys(bob.id)).toEqual({});
   });
 });

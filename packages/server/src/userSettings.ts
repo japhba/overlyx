@@ -34,3 +34,28 @@ export function setUserSettings(userId: number, patch: Partial<UserSettings>): U
   db.prepare('UPDATE users SET settings = ? WHERE id = ?').run(JSON.stringify(stored), userId);
   return userSettings(userId);
 }
+
+/* ------------- per-account keyboard shortcuts (client keybindings.ts syncs them; /api/keys) */
+
+export type UserKeys = Record<string, string | null>;
+
+/** The account's custom shortcut map { "<menu ▸ path>": "Ctrl+Shift+A" | null } (null = default off). */
+export function userKeys(userId: number): UserKeys {
+  const row = db.prepare('SELECT keybindings FROM users WHERE id = ?').get(userId) as { keybindings: string | null } | undefined;
+  if (!row?.keybindings) return {};
+  try { const v = JSON.parse(row.keybindings); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch { return {}; }
+}
+
+/** Replace the account's shortcut map; entries are lightly validated, the rest dropped. */
+export function setUserKeys(userId: number, keys: unknown): UserKeys {
+  const out: UserKeys = {};
+  if (keys && typeof keys === 'object' && !Array.isArray(keys)) {
+    for (const [id, v] of Object.entries(keys as Record<string, unknown>).slice(0, 500)) {
+      if (!id || id.length > 300) continue;
+      if (v === null) out[id] = null;
+      else if (typeof v === 'string' && v.length > 0 && v.length <= 60) out[id] = v;
+    }
+  }
+  db.prepare('UPDATE users SET keybindings = ? WHERE id = ?').run(JSON.stringify(out), userId);
+  return out;
+}
