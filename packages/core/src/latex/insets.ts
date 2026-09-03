@@ -943,7 +943,7 @@ function latexSketch(ctx: ExportContext, os: TexStream, inset: LeafInset): void 
   ctx.features.require('olsketch');
   os.write(`\\olsketch{${inset.arg}}`);
   const data = inset.params[0];
-  if (data && ctx.texMode) ctx.files[inset.arg] = inkSvg(data);
+  if (data && ctx.texMode) ctx.files[inset.arg] = inkSvg(data, inset.arg);
 }
 
 function latexExternal(ctx: ExportContext, os: TexStream, rp: RunParams, inset: LeafInset): void {

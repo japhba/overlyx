@@ -22,7 +22,16 @@ export interface InkStroke {
   pts: InkPts;
 }
 
-export interface InkData { v: 1; strokes: InkStroke[] }
+/** An image placed on the ink layer (pasted into the margin): document-relative file, offsets like a stroke's. */
+export interface InkImage {
+  /** margin ink: which column edge dx is relative to */
+  side?: 'left' | 'right';
+  /** file path relative to the document (figures/…) */
+  src: string;
+  dx: number; dy: number; w: number; h: number;
+}
+
+export interface InkData { v: 1; strokes: InkStroke[]; imgs?: InkImage[] }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -93,8 +102,8 @@ export function strokePathD(stroke: InkStroke): string {
   return d;
 }
 
-/** Bounding box of the strokes, padded by their widths. */
-export function inkBounds(strokes: InkStroke[]): { x: number; y: number; w: number; h: number } {
+/** Bounding box of the strokes and images, padded by the stroke widths. */
+export function inkBounds(strokes: InkStroke[], imgs: InkImage[] = []): { x: number; y: number; w: number; h: number } {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const s of strokes) for (const [x, y] of s.pts) {
     if (x - s.w < minX) minX = x - s.w;
@@ -102,8 +111,22 @@ export function inkBounds(strokes: InkStroke[]): { x: number; y: number; w: numb
     if (x + s.w > maxX) maxX = x + s.w;
     if (y + s.w > maxY) maxY = y + s.w;
   }
+  for (const im of imgs) {
+    if (im.dx < minX) minX = im.dx;
+    if (im.dy < minY) minY = im.dy;
+    if (im.dx + im.w > maxX) maxX = im.dx + im.w;
+    if (im.dy + im.h > maxY) maxY = im.dy + im.h;
+  }
   if (minX > maxX) return { x: 0, y: 0, w: 1, h: 1 };
   return { x: r2(minX), y: r2(minY), w: r2(maxX - minX), h: r2(maxY - minY) };
+}
+
+/** `target` relative to the directory `fromPath` sits in (both document-relative POSIX paths). */
+function relHref(fromPath: string, target: string): string {
+  const dir = fromPath.split('/').slice(0, -1);
+  const to = target.split('/');
+  while (dir.length && to.length > 1 && dir[0] === to[0]) { dir.shift(); to.shift(); }
+  return '../'.repeat(dir.length) + to.join('/');
 }
 
 const xmlEscape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -112,17 +135,22 @@ const xmlUnescape = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>')
 const META_OPEN = '<metadata id="overlyx-ink">', META_CLOSE = '</metadata>';
 
 /**
- * The saved sidecar SVG of a sketch: the strokes as filled paths plus the stroke data (`dataJson`
- * verbatim) in a metadata element. Deterministic — the same data always produces the same bytes,
- * so re-saving an unchanged document does not touch the file.
+ * The saved sidecar SVG of a sketch: images (under the ink) and the strokes as filled paths, plus
+ * the data (`dataJson` verbatim) in a metadata element. Deterministic — the same data always
+ * produces the same bytes, so re-saving an unchanged document does not touch the file. `svgPath`
+ * (the sketch file's own document-relative path) makes the image hrefs resolve from the SVG.
  */
-export function inkSvg(dataJson: string): string {
+export function inkSvg(dataJson: string, svgPath = ''): string {
   let data: InkData;
   try { data = JSON.parse(dataJson) as InkData; } catch { data = { v: 1, strokes: [] }; }
   const strokes = Array.isArray(data.strokes) ? data.strokes.filter(s => Array.isArray(s.pts) && s.pts.length) : [];
-  const b = inkBounds(strokes);
-  let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${b.x} ${b.y} ${b.w} ${b.h}" width="${b.w}" height="${b.h}">\n`;
+  const imgs = Array.isArray(data.imgs) ? data.imgs.filter(i => i && typeof i.src === 'string') : [];
+  const b = inkBounds(strokes, imgs);
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="${b.x} ${b.y} ${b.w} ${b.h}" width="${b.w}" height="${b.h}">\n`;
   s += `${META_OPEN}${xmlEscape(dataJson)}${META_CLOSE}\n`;
+  for (const im of imgs) {
+    s += `<image href="${xmlEscape(relHref(svgPath, im.src))}" x="${r2(im.dx)}" y="${r2(im.dy)}" width="${r2(im.w)}" height="${r2(im.h)}" preserveAspectRatio="none"/>\n`;
+  }
   for (const st of strokes) {
     const d = strokePathD(st);
     if (!d) continue;

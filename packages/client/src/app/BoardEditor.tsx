@@ -29,7 +29,7 @@ export interface BoardObj {
   text?: string;
 }
 
-type Tool = 'select' | 'pen' | 'highlighter' | 'eraser' | 'note';
+type Tool = 'select' | 'lasso' | 'pen' | 'highlighter' | 'eraser' | 'note';
 interface Camera { tx: number; ty: number; s: number }
 interface LiveStroke { color: string; w: number; o?: number; pts: [number, number, number][] }
 
@@ -69,13 +69,15 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const camRef = useRef(cam); camRef.current = cam;
   const [tool, setToolState] = useState<Tool>('select');
   const toolRef = useRef(tool); toolRef.current = tool;
-  const setTool = (t: Tool) => { setToolState(t); if (t !== 'select') setSelected(null); };
+  const setTool = (t: Tool) => { setToolState(t); if (t !== 'select' && t !== 'lasso') setSelected(new Set()); };
   const [color, setColor] = useState('#1a73e8');
   const colorRef = useRef(color); colorRef.current = color;
   const [width, setWidth] = useState(2.5);
   const widthRef = useRef(width); widthRef.current = width;
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const selectedRef = useRef(selected); selectedRef.current = selected;
+  const [lassoPts, setLassoPts] = useState<[number, number][] | null>(null);
+  const lassoRef = useRef(lassoPts); lassoRef.current = lassoPts;
   const [editing, setEditing] = useState<string | null>(null);
   const [conn, setConn] = useState<'connecting' | 'online' | 'offline'>('connecting');
   const [readOnly, setReadOnly] = useState(false);
@@ -153,8 +155,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   /* ------------------------------------------------------------- input */
 
   interface Drag {
-    kind: 'pan' | 'move' | 'resize' | 'draw' | 'erase';
-    id?: string; start: [number, number]; orig?: BoardObj; corner?: string;
+    kind: 'pan' | 'move' | 'resize' | 'draw' | 'erase' | 'lasso';
+    start: [number, number]; origs?: Map<string, BoardObj>; corner?: string; base?: { x: number; y: number; w: number; h: number };
   }
   const dragRef = useRef<Drag | null>(null);
   const pointers = useRef(new Map<number, [number, number]>());
@@ -180,6 +182,17 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     if (hit.length) mutate(() => { for (const k of hit) objects.delete(k); });
   };
 
+  const groupBBox = (ids: ReadonlySet<string>): { x: number; y: number; w: number; h: number } | null => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const id of ids) {
+      const o = objects.get(id);
+      if (!o) continue;
+      minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
+      maxX = Math.max(maxX, o.x + o.w); maxY = Math.max(maxY, o.y + o.h);
+    }
+    return minX > maxX ? null : { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+  };
+
   const onPointerDown = (e: PointerEvent) => {
     const vp = vpRef.current!;
     vp.focus({ preventScroll: true });
@@ -197,14 +210,30 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     const corner = target.getAttribute?.('data-corner') ?? undefined;
     const t = toolRef.current;
     const drawTool = (t === 'pen' || t === 'highlighter') && e.pointerType !== 'touch' && !readOnlyRef.current;
+    const origsOf = (ids: ReadonlySet<string>) => { const m = new Map<string, BoardObj>(); for (const id of ids) { const o = objects.get(id); if (o) m.set(id, { ...o, pts: o.pts?.map(p => [...p] as [number, number, number]) }); } return m; };
+    const onSelBox = !!target.closest?.('.board-selbox');
     vp.setPointerCapture(e.pointerId);
-    if (e.button === 1 || (t === 'select' && !objId && !corner) || e.pointerType === 'touch' && !objId && t !== 'select' && !corner) {
+    if (onSelBox && !corner && selectedRef.current.size && !readOnlyRef.current) {
+      // dragging inside the selection box moves the whole selection
+      dragRef.current = { kind: 'move', start: [bx, by], origs: origsOf(selectedRef.current) };
+    } else if (e.button === 1 || ((t === 'select' || t === 'lasso') && !objId && !corner && (t === 'select' || e.pointerType === 'touch'))) {
+      if (selectedRef.current.size) setSelected(new Set());
       dragRef.current = { kind: 'pan', start: [e.clientX - camRef.current.tx, e.clientY - camRef.current.ty] };
-    } else if (corner && selectedRef.current && !readOnlyRef.current) {
-      dragRef.current = { kind: 'resize', id: selectedRef.current, corner, start: [bx, by], orig: { ...objects.get(selectedRef.current)! } };
-    } else if (t === 'select' && objId) {
-      setSelected(objId);
-      if (!readOnlyRef.current) dragRef.current = { kind: 'move', id: objId, start: [bx, by], orig: { ...objects.get(objId)! } };
+    } else if (e.pointerType === 'touch' && !objId && t !== 'select' && !corner) {
+      dragRef.current = { kind: 'pan', start: [e.clientX - camRef.current.tx, e.clientY - camRef.current.ty] };
+    } else if (corner && selectedRef.current.size && !readOnlyRef.current) {
+      const base = groupBBox(selectedRef.current);
+      if (base) dragRef.current = { kind: 'resize', corner, start: [bx, by], origs: origsOf(selectedRef.current), base };
+    } else if (t === 'lasso' && !readOnlyRef.current) {
+      dragRef.current = { kind: 'lasso', start: [bx, by] };
+      setLassoPts([[bx, by]]);
+    } else if ((t === 'select' || t === 'lasso') && objId) {
+      const cur = selectedRef.current;
+      const next = e.shiftKey
+        ? new Set(cur.has(objId) ? [...cur].filter(id => id !== objId) : [...cur, objId])
+        : cur.has(objId) ? cur : new Set([objId]);
+      setSelected(next);
+      if (!readOnlyRef.current && next.has(objId)) dragRef.current = { kind: 'move', start: [bx, by], origs: origsOf(next) };
     } else if (t === 'eraser' && !readOnlyRef.current) {
       dragRef.current = { kind: 'erase', start: [bx, by] };
       eraseAt(bx, by);
@@ -212,7 +241,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       const nid = newId();
       mutate(() => objects.set(nid, { t: 'note', x: round1(bx), y: round1(by), w: 180, h: 100, color: NOTE_COLORS[objects.size % NOTE_COLORS.length], text: '' }));
       setTool('select');
-      setSelected(nid);
+      setSelected(new Set([nid]));
       setEditing(nid);
     } else if (drawTool) {
       const hl = t === 'highlighter';
@@ -242,30 +271,42 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     const [bx, by] = toBoard(e.clientX, e.clientY);
     if (d?.kind === 'pan') {
       setCam(c => ({ ...c, tx: e.clientX - d.start[0], ty: e.clientY - d.start[1] }));
-    } else if (d?.kind === 'move' && d.id && d.orig) {
-      const o = objects.get(d.id);
-      if (o) mutate(() => objects.set(d.id!, { ...o, x: round1(d.orig!.x + bx - d.start[0]), y: round1(d.orig!.y + by - d.start[1]) }));
-    } else if (d?.kind === 'resize' && d.id && d.orig) {
-      const o0 = d.orig;
-      let { x, y, w, h } = o0;
+    } else if (d?.kind === 'lasso') {
+      setLassoPts(pts => {
+        if (!pts) return pts;
+        const last = pts[pts.length - 1];
+        return (last[0] - bx) ** 2 + (last[1] - by) ** 2 > 4 / camRef.current.s ? [...pts, [bx, by]] : pts;
+      });
+    } else if (d?.kind === 'move' && d.origs) {
       const dx = bx - d.start[0], dy = by - d.start[1];
-      if (d.corner!.includes('e')) w = o0.w + dx;
-      if (d.corner!.includes('s')) h = o0.h + dy;
-      if (d.corner!.includes('w')) { x = o0.x + dx; w = o0.w - dx; }
-      if (d.corner!.includes('n')) { y = o0.y + dy; h = o0.h - dy; }
-      if (o0.t === 'img' && !e.shiftKey) {   // images keep their aspect unless Shift is held
-        const f = Math.max(w / o0.w, h / o0.h);
-        w = o0.w * f; h = o0.h * f;
-        if (d.corner!.includes('w')) x = o0.x + o0.w - w;
-        if (d.corner!.includes('n')) y = o0.y + o0.h - h;
-      }
-      if (w < 8 || h < 8) return;
-      const next: BoardObj = { ...o0, x: round1(x), y: round1(y), w: round1(w), h: round1(h) };
-      if (o0.t === 'stroke' && o0.pts) {
-        const fx = w / o0.w, fy = h / o0.h;
-        next.pts = o0.pts.map(([px, py, p]) => [round1(px * fx), round1(py * fy), p] as [number, number, number]);
-      }
-      mutate(() => objects.set(d.id!, next));
+      mutate(() => {
+        for (const [id, o0] of d.origs!) {
+          const cur = objects.get(id);
+          if (cur) objects.set(id, { ...cur, x: round1(o0.x + dx), y: round1(o0.y + dy) });
+        }
+      });
+    } else if (d?.kind === 'resize' && d.origs && d.base) {
+      // scale the whole selection about the corner opposite the dragged one
+      const b = d.base;
+      const ox = d.corner!.includes('w') ? b.x + b.w : b.x;
+      const oy = d.corner!.includes('n') ? b.y + b.h : b.y;
+      const clamp = (v: number) => Math.max(0.05, Math.min(20, v));
+      let sx = clamp((bx - ox) / ((d.start[0] - ox) || 1));
+      let sy = clamp((by - oy) / ((d.start[1] - oy) || 1));
+      const onlyImgs = [...d.origs.values()].every(o => o.t === 'img');
+      if (e.shiftKey || onlyImgs) sx = sy = Math.max(sx, sy);   // images keep their aspect unless mixed with ink
+      mutate(() => {
+        for (const [id, o0] of d.origs!) {
+          const w = o0.w * sx, h = o0.h * sy;
+          if (w < 4 || h < 4) continue;
+          const next: BoardObj = { ...o0, x: round1(ox + (o0.x - ox) * sx), y: round1(oy + (o0.y - oy) * sy), w: round1(w), h: round1(h) };
+          if (o0.t === 'stroke' && o0.pts) {
+            next.pts = o0.pts.map(([px, py, p]) => [round1(px * sx), round1(py * sy), p] as [number, number, number]);
+            next.sw = round1(Math.max(0.5, (o0.sw ?? 2) * Math.sqrt(sx * sy)));
+          }
+          objects.set(id, next);
+        }
+      });
     } else if (d?.kind === 'erase') {
       eraseAt(bx, by);
     } else if (liveRef.current) {
@@ -279,6 +320,16 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     }
   };
 
+  /** even-odd ray cast */
+  const inPoly = (x: number, y: number, poly: [number, number][]): boolean => {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i], [xj, yj] = poly[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+
   const onPointerUp = (e: PointerEvent) => {
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
@@ -287,6 +338,22 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       liveRef.current = null;
       try { provider.awareness.setLocalStateField('boardInk', null); } catch { /* closing */ }
       if (live.pts.length) mutate(() => objects.set(newId(), strokeToObj(live.pts, live.color, live.w, live.o)));
+    }
+    if (dragRef.current?.kind === 'lasso') {
+      const poly = lassoRef.current;
+      setLassoPts(null);
+      if (poly && poly.length > 4) {
+        // strokes by most of their points, images and notes by their centre
+        const hit = new Set<string>();
+        objects.forEach((o, key) => {
+          if (o.t === 'stroke' && o.pts?.length) {
+            let inside = 0;
+            for (const [px, py] of o.pts) if (inPoly(o.x + px, o.y + py, poly)) inside++;
+            if (inside / o.pts.length >= 0.5) hit.add(key);
+          } else if (inPoly(o.x + o.w / 2, o.y + o.h / 2, poly)) hit.add(key);
+        });
+        setSelected(e.shiftKey ? new Set([...selectedRef.current, ...hit]) : hit);
+      } else if (!e.shiftKey) setSelected(new Set());
     }
     dragRef.current = null;
     rerender();
@@ -300,13 +367,14 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (editing) return;
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedRef.current && !readOnlyRef.current) {
-      mutate(() => objects.delete(selectedRef.current!));
-      setSelected(null);
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedRef.current.size && !readOnlyRef.current) {
+      mutate(() => { for (const id of selectedRef.current) objects.delete(id); });
+      setSelected(new Set());
       e.preventDefault();
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.shiftKey ? undo.redo() : undo.undo(); e.preventDefault(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { undo.redo(); e.preventDefault(); }
-    else if (e.key === 'Escape') { setSelected(null); setTool('select'); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { setSelected(new Set([...objects.keys()])); setTool('select'); e.preventDefault(); }
+    else if (e.key === 'Escape') { setSelected(new Set()); setTool('select'); }
   };
 
   /* ------------------------------------------------------------- images */
@@ -361,7 +429,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   /* ------------------------------------------------------------- render */
 
   const entries = [...objects.entries()].sort((a, b) => (a[1].z ?? 0) - (b[1].z ?? 0) || (a[0] < b[0] ? -1 : 1));
-  const sel = selected ? objects.get(selected) : null;
+  const selBB = selected.size ? groupBBox(selected) : null;
   const peers: { clientId: number; name: string; color: string; x: number; y: number }[] = [];
   const remoteInks: LiveStroke[] = [];
   provider.awareness.getStates().forEach((state, clientId) => {
@@ -396,20 +464,20 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       <div class="board-content" style={{ transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.s})` }}>
         {entries.map(([key, o]) => {
           if (o.t === 'img') {
-            return <img key={key} data-obj={key} class={'board-img' + (selected === key ? ' selected' : '')} src={fileUrl(project, o.src ?? '')} draggable={false}
+            return <img key={key} data-obj={key} class={'board-img' + (selected.has(key) ? ' selected' : '')} src={fileUrl(project, o.src ?? '')} draggable={false}
               style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px' }} />;
           }
           if (o.t === 'note') {
             return (
-              <div key={key} data-obj={key} class={'board-note' + (selected === key ? ' selected' : '')}
+              <div key={key} data-obj={key} class={'board-note' + (selected.has(key) ? ' selected' : '')}
                 style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', minHeight: o.h + 'px', background: o.color ?? NOTE_COLORS[0] }}
-                onDblClick={() => { if (!readOnly) { setSelected(key); setEditing(key); } }}>
+                onDblClick={() => { if (!readOnly) { setSelected(new Set([key])); setEditing(key); } }}>
                 {editing === key ? noteEdit(key, o) : (o.text || <span class="board-note-hint">double-click to write</span>)}
               </div>
             );
           }
           return (
-            <svg key={key} data-obj={key} class={'board-stroke' + (selected === key ? ' selected' : '')}
+            <svg key={key} data-obj={key} class={'board-stroke' + (selected.has(key) ? ' selected' : '')}
               style={{ left: o.x + 'px', top: o.y + 'px', width: o.w + 'px', height: o.h + 'px', overflow: 'visible' }}
               viewBox={`0 0 ${o.w} ${o.h}`} width={o.w} height={o.h}>
               <path d={strokeD(o)} fill={o.color ?? '#000'} fill-opacity={o.o ?? 1} />
@@ -422,10 +490,15 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
             <path d={strokePathD({ color: s.color, w: s.w, pts: s.pts } as InkStroke)} fill={s.color} fill-opacity={s.o ?? 1} />
           </svg>
         ))}
-        {sel && selected && (
-          <div class="board-selbox" style={{ left: sel.x + 'px', top: sel.y + 'px', width: sel.w + 'px', height: sel.h + 'px' }}>
+        {selBB && (
+          <div class="board-selbox" style={{ left: selBB.x + 'px', top: selBB.y + 'px', width: selBB.w + 'px', height: selBB.h + 'px' }}>
             {['nw', 'ne', 'sw', 'se'].map(c => <span key={c} class={'board-handle ' + c} data-corner={c} style={{ transform: `scale(${1 / cam.s})` }} />)}
           </div>
+        )}
+        {lassoPts && lassoPts.length > 1 && (
+          <svg class="board-lasso" style={{ left: 0, top: 0, overflow: 'visible' }} width={1} height={1}>
+            <polyline points={lassoPts.map(([x, y]) => `${x},${y}`).join(' ')} fill="rgba(59,110,165,0.08)" stroke="rgba(59,110,165,0.9)" stroke-width={1.5 / cam.s} stroke-dasharray={`${5 / cam.s} ${4 / cam.s}`} />
+          </svg>
         )}
         {peers.map(p => (
           <div key={p.clientId} class="board-peer" style={{ left: p.x + 'px', top: p.y + 'px' }}>
@@ -436,6 +509,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       </div>
       <div class="board-tools" onPointerDown={e => e.stopPropagation()}>
         {toolBtn('select', '⤢', 'Select / move (drag empty space to pan)')}
+        {toolBtn('lasso', '◌', 'Lasso — encircle things to select them together (Shift adds); drag to move, corner handles resize, Delete removes')}
         {!readOnly && toolBtn('pen', '✏️', 'Pen')}
         {!readOnly && toolBtn('highlighter', '🖍', 'Highlighter')}
         {!readOnly && toolBtn('eraser', '⌫', 'Eraser (removes strokes)')}

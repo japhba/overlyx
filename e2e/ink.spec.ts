@@ -17,6 +17,7 @@ test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
   writeFileSync(`${DIR}/main.tex`, texDoc('First paragraph with enough words to have a body.\n\nSecond paragraph, also with several words in it.\n\nThird paragraph closes the document.'));
+  writeFileSync(`${DIR}/lasso.tex`, texDoc('Alpha paragraph for the lasso.\n\nBeta paragraph below it.\n\nGamma paragraph at the end.'));
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
@@ -96,6 +97,90 @@ test('clicks in the text column still edit text while draw mode is on (the colum
   await par.click();
   await page.keyboard.type('Typed with the pen on. ');
   await expect(par).toContainText('Typed with the pen on.');
+});
+
+test('the lasso selects strokes for moving, resizing and deleting', async ({ page }) => {
+  await login(page);
+  await openDoc(page, `${PROJECT}/lasso.tex`);
+  await page.click('[data-tb="ink"]');
+  await expect(page.locator('.ink-canvas.draw')).toBeVisible();
+
+  const par = page.locator('.lyx-editor .lyx-par').first();
+  const box = (await par.boundingBox())!;
+  const sx = box.x + box.width + 60, sy = box.y + 10;
+  await squiggle(page, sx, sy);
+  await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(1);
+
+  // encircle the squiggle with the lasso: a selection box with handles appears
+  await page.click('[data-tb="i-lasso"]');
+  await page.mouse.move(sx - 18, sy - 18);
+  await page.mouse.down();
+  for (const [x, y] of [[sx + 60, sy - 18], [sx + 60, sy + 28], [sx - 18, sy + 28], [sx - 18, sy - 18]] as const) await page.mouse.move(x, y, { steps: 4 });
+  await page.mouse.up();
+  const sel = page.locator('.ink-sel');
+  await expect(sel).toBeVisible();
+  const before = (await sel.boundingBox())!;
+
+  // drag inside the box: the selection moves
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(before.x + before.width / 2 + 45, before.y + before.height / 2 + 20, { steps: 5 });
+  await page.mouse.up();
+  await expect(sel).toBeVisible();
+  const moved = (await sel.boundingBox())!;
+  expect(moved.x).toBeGreaterThan(before.x + 25);
+
+  // the south-east handle resizes it
+  const handle = page.locator('.ink-handle.se');
+  const hb = (await handle.boundingBox())!;
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(hb.x + hb.width / 2 + 40, hb.y + hb.height / 2 + 25, { steps: 5 });
+  await page.mouse.up();
+  const grown = (await sel.boundingBox())!;
+  expect(grown.width).toBeGreaterThan(moved.width + 20);
+
+  // Delete removes the selected stroke — and with it the emptied anchor
+  await page.keyboard.press('Delete');
+  await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(0);
+  await expect(sel).toBeHidden();
+});
+
+test('with the canvas focused (caret deactivated), a pasted image lands in the margin, not as a LaTeX figure', async ({ page }) => {
+  await login(page);
+  await openDoc(page, `${PROJECT}/lasso.tex`);
+  await page.click('[data-tb="ink"]');
+  await expect(page.locator('.ink-canvas.draw')).toBeVisible();
+
+  // click into the margin with the lasso: the text caret goes away, the canvas is the paste target
+  await page.click('[data-tb="i-lasso"]');
+  const par = page.locator('.lyx-editor .lyx-par').nth(1);
+  const box = (await par.boundingBox())!;
+  await page.mouse.click(box.x + box.width + 80, box.y + 6);
+  await expect.poll(() => page.evaluate(() => document.activeElement === document.body || !document.activeElement)).toBe(true);
+
+  // paste a small PNG from the clipboard
+  await page.evaluate(() => {
+    const b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], 'shot.png', { type: 'image/png' }));
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+
+  // the image becomes a margin object: an anchor appears, it is selected, no graphics inset is inserted
+  await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(1, { timeout: 15000 });
+  await expect(page.locator('.ink-sel')).toBeVisible();
+  await expect(page.locator('.lyx-editor .lyx-graphics')).toHaveCount(0);
+
+  // the document carries it in the sketch data and the sidecar SVG references the file
+  await expect.poll(() => readFileSync(`${DIR}/lasso.tex`, 'utf8'), { timeout: 15000 }).toContain('\\olsketch{figures/ink-');
+  await expect.poll(() => {
+    const files = existsSync(`${DIR}/figures`) ? readdirSync(`${DIR}/figures`) : [];
+    // several ink-*.svg files can exist (earlier tests leave orphans): any of them may carry the image
+    return files.filter(f => f.startsWith('ink-') && f.endsWith('.svg')).map(f => readFileSync(`${DIR}/figures/${f}`, 'utf8')).join('\n');
+  }, { timeout: 15000 }).toContain('<image href="shot');
+  expect(readdirSync(`${DIR}/figures`).some(f => f.startsWith('shot'))).toBe(true);
 });
 
 test('the drawing toolbar activates itself on tablet clients', async ({ browser }) => {

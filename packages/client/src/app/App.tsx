@@ -1519,6 +1519,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { id: 'i-pen', title: 'Pen (pressure-sensitive)', icon: 'inkpen', active: ink.tool === 'pen', action: () => setInk({ tool: 'pen' }) },
       { id: 'i-hl', title: 'Highlighter', icon: 'inkhl', active: ink.tool === 'highlighter', action: () => setInk({ tool: 'highlighter' }) },
       { id: 'i-eraser', title: 'Eraser — removes whole strokes (also the pen’s eraser end)', icon: 'inkeraser', active: ink.tool === 'eraser', action: () => setInk({ tool: 'eraser' }) },
+      { id: 'i-lasso', title: 'Lasso — encircle strokes and images to move, resize (corner handles, Shift keeps proportions) or delete them; with the canvas focused, Ctrl+V pastes an image into the margin instead of the text', icon: 'inklasso', active: ink.tool === 'lasso', action: () => setInk({ tool: 'lasso' }) },
     ],
     INK_COLORS.map(([c, name]) => ({
       id: 'i-c-' + c.slice(1), title: name, icon: name, html: `<span class="tb-ink-swatch" style="background:${c}"></span>`,

@@ -10,6 +10,7 @@ import { login, texDoc, collectErrors, PROJECTS_DIR } from './helpers';
 const PROJECT = 'e2e-board';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const BOARD = `${DIR}/plan.board`;
+const LASSO_BOARD = `${DIR}/lasso.board`;
 
 test.describe.configure({ mode: 'serial' });
 
@@ -18,11 +19,12 @@ test.beforeAll(() => {
   mkdirSync(DIR, { recursive: true });
   writeFileSync(`${DIR}/main.tex`, texDoc('A project with a whiteboard.'));
   writeFileSync(BOARD, '{"overlyx":"board","v":1,"objects":{\n}}\n');
+  writeFileSync(LASSO_BOARD, '{"overlyx":"board","v":1,"objects":{\n}}\n');
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
-async function openBoard(page: Page): Promise<void> {
-  await page.goto(`/#/${PROJECT}/plan.board`);
+async function openBoard(page: Page, file = 'plan.board'): Promise<void> {
+  await page.goto(`/#/${PROJECT}/${file}`);
   await page.waitForSelector('.board-tools', { timeout: 30000 });
   await expect(page.locator('.board-conn')).toContainText(/live|view/, { timeout: 20000 });
 }
@@ -80,6 +82,46 @@ test('drawing and sticky notes land in the board file and survive a reload', asy
   await expect(page.locator('.board-stroke:not(.live)')).toHaveCount(1);
   await expect(page.locator('.board-note')).toContainText('Sketch the intro figure');
   expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
+});
+
+test('the lasso selects several things at once: group move and group delete', async ({ page }) => {
+  await login(page);
+  await openBoard(page, 'lasso.board');   // a fresh board: no zoom-to-fit surprises from earlier tests
+  const vp = (await page.locator('.board').boundingBox())!;
+  const cx = vp.x + vp.width / 2, cy = vp.y + vp.height / 2;
+
+  // two quick strokes near each other
+  await page.click('[data-tool="pen"]');
+  for (const dy of [-140, -110]) {
+    await page.mouse.move(cx - 40, cy + dy);
+    await page.mouse.down();
+    await page.mouse.move(cx + 40, cy + dy + 10, { steps: 5 });
+    await page.mouse.up();
+  }
+  const count0 = await page.locator('.board-stroke:not(.live)').count();
+
+  // lasso around both: one selection box
+  await page.click('[data-tool="lasso"]');
+  await page.mouse.move(cx - 70, cy - 170);
+  await page.mouse.down();
+  for (const [x, y] of [[cx + 70, cy - 170], [cx + 70, cy - 80], [cx - 70, cy - 80], [cx - 70, cy - 170]] as const) await page.mouse.move(x, y, { steps: 4 });
+  await page.mouse.up();
+  const selbox = page.locator('.board-selbox');
+  await expect(selbox).toBeVisible();
+  const before = (await selbox.boundingBox())!;
+
+  // drag the box: both strokes move together
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(before.x + before.width / 2 + 60, before.y + before.height / 2 + 30, { steps: 5 });
+  await page.mouse.up();
+  const after = (await selbox.boundingBox())!;
+  expect(after.x).toBeGreaterThan(before.x + 40);
+
+  // Delete removes them both
+  await page.keyboard.press('Delete');
+  await expect(page.locator('.board-stroke:not(.live)')).toHaveCount(count0 - 2);
+  await expect(selbox).toBeHidden();
 });
 
 test('two clients see each other: an edit appears live on the other side', async ({ browser }) => {

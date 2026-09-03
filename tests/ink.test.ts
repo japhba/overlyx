@@ -35,6 +35,24 @@ describe('ink geometry and SVG sidecars', () => {
     expect(b.w).toBeGreaterThanOrEqual(14);
   });
 
+  it('renders margin images under the ink, hrefs relative to the SVG', () => {
+    const data = JSON.stringify({
+      v: 1,
+      strokes: [{ side: 'right', color: '#000', w: 2, pts: [[0, 0, 0.5], [10, 5, 0.5]] }],
+      imgs: [
+        { side: 'right', src: 'figures/shot.png', dx: 4, dy: 30, w: 120, h: 80 },
+        { side: 'right', src: 'plots/curve.svg', dx: 4, dy: 130, w: 100, h: 60 },
+      ],
+    });
+    const svg = inkSvg(data, 'figures/ink-a.svg');
+    expect(svg).toContain('<image href="shot.png" x="4" y="30" width="120" height="80"');
+    expect(svg).toContain('<image href="../plots/curve.svg"');
+    expect(svg.indexOf('<image')).toBeLessThan(svg.indexOf('<path'));   // ink draws over images
+    expect(extractInkData(svg)).toBe(data);
+    const b = inkBounds(JSON.parse(data).strokes, JSON.parse(data).imgs);
+    expect(b.h).toBeGreaterThanOrEqual(190);   // image extents count
+  });
+
   it('embeds the stroke data verbatim in the SVG and reads it back', () => {
     const svg = inkSvg(DATA);
     expect(svg).toContain('<svg xmlns');
