@@ -94,9 +94,35 @@ export class OpenDoc {
     return { preamble: meta.preamble, format: meta.format, header: { lines: meta.headerLines }, body: pmToLyxBody(json), trailer: meta.trailer };
   }
 
+  /** Current document as .tex text (plus the sidecar files it owns, e.g. sketch SVGs). */
+  protected render(): { text: string; files: Record<string, string> } {
+    const r = writeDocumentText(this.toLyxDocument(), this.project, this.relPath, this.isChild, (fn) => resolveIncludeFor(this, fn));
+    return { text: r.text, files: r.files };
+  }
+
   /** Current document as .tex text. */
   toText(): string {
-    return writeDocumentText(this.toLyxDocument(), this.project, this.relPath, this.isChild, (fn) => resolveIncludeFor(this, fn)).text;
+    return this.render().text;
+  }
+
+  /**
+   * Write the document's sidecar files (sketch SVGs regenerated from the CRDT state). Only .svg
+   * files inside the project are written, and only when their content actually changed — the
+   * generator is deterministic, so an untouched drawing never dirties the git history.
+   */
+  private writeSidecars(files: Record<string, string>): void {
+    const proj = projectDir(this.project);
+    const dir = path.dirname(this.absPath);
+    for (const [rel, content] of Object.entries(files)) {
+      if (!rel.endsWith('.svg')) continue;
+      try {
+        const abs = path.resolve(dir, rel);
+        if (!abs.startsWith(proj + path.sep)) continue;
+        try { if (fs.readFileSync(abs, 'utf8') === content) continue; } catch { /* new file */ }
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, content);
+      } catch (e) { console.error('sidecar write failed', this.id, rel, e); }
+    }
   }
 
   /**
@@ -234,7 +260,8 @@ export class OpenDoc {
       // merge that first — writing over it would silently discard their change.
       this.absorbExternalChange();
       const sv = Y.encodeStateVector(this.ydoc);
-      const text = this.toText();
+      const { text, files } = this.render();
+      this.writeSidecars(files);   // even when the .tex itself is unchanged (a stroke changes only the SVG)
       const hash = sha1(text);
       if (hash !== this.fileHash) {
         // never replace a document with something that is not one (a bug in the conversion must
@@ -313,6 +340,63 @@ export class OpenDoc {
 
 function sha1(s: string): string { return crypto.createHash('sha1').update(s).digest('hex'); }
 
+/**
+ * A whiteboard document (.board): the same Yjs sync, presence and persistence machinery as a
+ * .tex document, but the state is a flat Y.Map('objects') of board items (strokes, images,
+ * notes) and the file on disk is JSON — no LaTeX anywhere. External changes replace the state
+ * (boards have no three-way merge; concurrent live editing is already conflict-free via Yjs).
+ */
+export class BoardDoc extends OpenDoc {
+  constructor(id: string, project: string, relPath: string, absPath: string) {
+    super(id, project, relPath, absPath);
+    this.isChild = true;   // saveToFile's looksLikeDocument check: boards have no \begin{document}
+  }
+
+  get objects(): Y.Map<unknown> { return this.ydoc.getMap('objects'); }
+
+  override health(): HealthIssue[] { return []; }
+
+  protected override render(): { text: string; files: Record<string, string> } {
+    const m = this.objects;
+    const keys = [...m.keys()].sort();
+    let s = '{"overlyx":"board","v":1,"objects":{';
+    s += keys.map(k => `\n${JSON.stringify(k)}: ${JSON.stringify(m.get(k))}`).join(',');
+    return { text: s + '\n}}\n', files: {} };
+  }
+
+  /** Load board JSON into the CRDT; only objects that differ are touched, so cursors and undo of others survive. */
+  loadFromJson(text: string, origin: string): void {
+    let objs: Record<string, unknown> = {};
+    try {
+      const j = JSON.parse(text) as { objects?: Record<string, unknown> };
+      if (j && typeof j === 'object' && j.objects && typeof j.objects === 'object') objs = j.objects;
+    } catch { console.warn(`[docs] ${this.id}: board file is not valid JSON — starting empty`); }
+    this.ydoc.transact(() => {
+      const m = this.objects;
+      for (const k of [...m.keys()]) if (!(k in objs)) m.delete(k);
+      for (const [k, v] of Object.entries(objs)) {
+        if (JSON.stringify(m.get(k)) !== JSON.stringify(v)) m.set(k, v);
+      }
+    }, origin);
+    if (origin === 'file-load') this.markSaved();
+  }
+
+  override absorbExternalChange(text?: string): boolean {
+    if (text === undefined) {
+      try { text = readTextFile(this.absPath); } catch { return false; }
+    }
+    const hash = sha1(text);
+    if (hash === this.fileHash || hash === knownHashes.get(this.absPath)) return false;
+    this.fileHash = hash;
+    this.fileText = text;
+    knownHashes.set(this.absPath, hash);
+    this.loadFromJson(text, 'file-load');
+    if (sha1(this.toText()) !== hash) this.dirty = true;   // ours differs (normalisation): write it back
+    this.persistState();
+    return true;
+  }
+}
+
 /** hashes of file contents we last wrote / read, to distinguish our own writes from external ones */
 const knownHashes = new Map<string, string>();
 
@@ -382,9 +466,10 @@ export class DocManager {
 
   private openCold(id: string): OpenDoc {
     const { project, relPath } = DocManager.parseId(id);
-    if (!relPath.endsWith('.tex')) throw new Error('not a .tex document');
+    if (!relPath.endsWith('.tex') && !relPath.endsWith('.board')) throw new Error('not a .tex document');
     const absPath = resolveProjectPath(project, relPath);
     if (!fs.existsSync(absPath)) throw new Error('file not found: ' + id);
+    if (relPath.endsWith('.board')) return this.openBoardCold(id, project, relPath, absPath);
     const doc = new OpenDoc(id, project, relPath, absPath);
     const text = readTextFile(absPath);
     if (text.includes('\0')) throw new Error('not a text document: ' + id);
@@ -425,6 +510,37 @@ export class DocManager {
     if (row.file_hash !== hash) doc.persistState();
     this.register(doc);
     return doc;
+  }
+
+  private openBoardCold(id: string, project: string, relPath: string, absPath: string): BoardDoc {
+    const text = readTextFile(absPath);
+    const hash = sha1(text);
+    const setup = (doc: BoardDoc) => { doc.fileHash = hash; doc.fileText = text; knownHashes.set(absPath, hash); };
+    const row = db.prepare('SELECT state, file_hash, epoch FROM ydocs WHERE id = ?').get(id) as { state: Buffer; file_hash: string; epoch: string | null } | undefined;
+    if (row) {
+      const doc = new BoardDoc(id, project, relPath, absPath);
+      setup(doc);
+      try {
+        Y.applyUpdate(doc.ydoc, new Uint8Array(row.state), 'db');
+        if (row.epoch) doc.epoch = row.epoch;
+        if (row.file_hash !== hash) {
+          console.log(`[docs] ${id}: board file changed since last persisted state — reloading`);
+          doc.loadFromJson(text, 'file-load');
+        }
+        doc.markSaved();
+        doc.lastSavedAt = fs.statSync(absPath).mtimeMs;
+        if (row.file_hash !== hash) doc.persistState();
+        this.register(doc);
+        return doc;
+      } catch { doc.ydoc.destroy(); }
+    }
+    const fresh = new BoardDoc(id, project, relPath, absPath);
+    setup(fresh);
+    fresh.loadFromJson(text, 'file-load');
+    fresh.lastSavedAt = fs.statSync(absPath).mtimeMs;
+    fresh.persistState();
+    this.register(fresh);
+    return fresh;
   }
 
   private openFresh(doc: OpenDoc, text: string): OpenDoc {
@@ -538,7 +654,7 @@ export class DocManager {
   }
 
   private async onExternalChange(file: string): Promise<void> {
-    if (!file.endsWith('.tex')) return;
+    if (!file.endsWith('.tex') && !file.endsWith('.board')) return;
     const doc = [...this.docs.values()].find(d => d.absPath === file);
     if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] fs change ${file} open=${!!doc} hash=${doc?.fileHash.slice(0, 8)} known=${knownHashes.get(file)?.slice(0, 8)}`);
     if (!doc) return;
@@ -556,7 +672,7 @@ export class DocManager {
    * the clients are told (close code 4001); the next save would otherwise silently re-create it.
    */
   private async onExternalRemove(file: string): Promise<void> {
-    if (!file.endsWith('.tex')) return;
+    if (!file.endsWith('.tex') && !file.endsWith('.board')) return;
     const doc = [...this.docs.values()].find(d => d.absPath === file);
     if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] fs change ${file} open=${!!doc} hash=${doc?.fileHash.slice(0, 8)} known=${knownHashes.get(file)?.slice(0, 8)}`);
     if (!doc) return;
@@ -600,7 +716,8 @@ export class DocManager {
     if (!v) throw new Error('version not found');
     const doc = await this.open(id);
     await this.createVersion(id, 'before restore of "' + v.name + '"', author, 'auto');
-    doc.loadFromLyx(await parseVersionText(doc, v.lyx), 'restore');
+    if (doc instanceof BoardDoc) doc.loadFromJson(v.lyx, 'restore');
+    else doc.loadFromLyx(await parseVersionText(doc, v.lyx), 'restore');
     doc.scheduleSave();
   }
 }

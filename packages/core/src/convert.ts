@@ -94,6 +94,7 @@ export function insetToPm(ins: Inset): PMJSON {
         case 'CommandInset': return { type: 'command', attrs: { cmd: ins.arg, params: JSON.stringify(ins.params) } };
         case 'Graphics': return { type: 'graphics', attrs: { params: JSON.stringify(ins.params) } };
         case 'Quotes': return { type: 'quotes', attrs: { kind: ins.arg } };
+        case 'Sketch': return { type: 'sketch', attrs: { src: ins.arg, data: ins.params[0] ?? null } };
         case 'space': return { type: 'space', attrs: { kind: ins.arg, params: JSON.stringify(ins.params) } };
         case 'Newline': return { type: 'newline', attrs: { kind: ins.arg } };
         case 'Newpage': return { type: 'newpage', attrs: { kind: ins.arg } };
@@ -247,6 +248,8 @@ function pmInlineToItem(c: PMJSON): Item | null {
       return { kind: 'inset', inset: { type: 'Leaf', name: 'Graphics', arg: '', params: parse(a.params, []) }, ...fc };
     case 'quotes':
       return { kind: 'inset', inset: { type: 'Leaf', name: 'Quotes', arg: a.kind, params: [] }, ...fc };
+    case 'sketch':
+      return { kind: 'inset', inset: { type: 'Leaf', name: 'Sketch', arg: a.src ?? '', params: a.data != null ? [a.data] : [] }, ...fc };
     case 'space':
       return { kind: 'inset', inset: { type: 'Leaf', name: 'space', arg: a.kind, params: parse(a.params, []) }, ...fc };
     case 'newline':

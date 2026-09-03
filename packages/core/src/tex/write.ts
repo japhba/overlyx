@@ -39,6 +39,8 @@ export interface WriteTexResult {
   requires: Set<string>;
   /** graphics that need conversion for pdflatex (svg, eps, ...): `src` as referenced in the file */
   graphics: { src: string; dest: string }[];
+  /** sidecar files the document owns (sketch SVGs): path relative to the document → content */
+  files: Record<string, string>;
 }
 
 /** The managed block: packages / macros for the features the body uses that the preamble lacks. */
@@ -146,5 +148,5 @@ export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTex
     if (doc.trailer.length) text += doc.trailer.join('\n') + '\n';
   }
   const res = finishExport(ctx, text);
-  return { text: res.tex, warnings: res.warnings, requires: res.requires, graphics: res.graphics };
+  return { text: res.tex, warnings: res.warnings, requires: res.requires, graphics: res.graphics, files: res.files };
 }

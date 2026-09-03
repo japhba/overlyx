@@ -5,6 +5,7 @@ export { mergeLyx } from './lyx/merge.ts';
 export { diffText, diffTokens, tokenize, coalesce } from './lyx/tokendiff.ts';
 export type { DiffToken } from './lyx/tokendiff.ts';
 export * from './schema.ts';
+export * from './ink.ts';
 export * from './convert.ts';
 export * from './macros.ts';
 export * from './bib.ts';

@@ -16,6 +16,7 @@ import { latexParagraphs, latexArgInsets, type Unit } from './body.ts';
 import { latexTabular } from './tabular.ts';
 import { exportChild } from './export.ts';
 import { normalizeMath } from './mathfix.ts';
+import { inkSvg } from '../ink.ts';
 
 export interface InsetPosition {
   par: Paragraph;
@@ -762,6 +763,7 @@ function latexLeaf(ctx: ExportContext, os: TexStream, rp: RunParams, inset: Leaf
   switch (inset.name) {
     case 'CommandInset': latexCommand(ctx, os, rp, inset, pos); return;
     case 'Graphics': latexGraphics(ctx, os, rp, inset); return;
+    case 'Sketch': latexSketch(ctx, os, inset); return;
     case 'Quotes': latexQuotes(ctx, os, rp, inset.arg); return;
     case 'space': latexSpace(ctx, os, rp, inset); return;
     case 'Newline':
@@ -930,6 +932,18 @@ function graphicsFileName(ctx: ExportContext, filename: string): string {
   if (!stem.includes('.')) return dir + stem;
   ctx.features.require('lyxdot');
   return dir + stem.replace(/\./g, '\\lyxdot ') + (ext ? '.' + ext : '');
+}
+
+/**
+ * Margin-ink anchor: `\olsketch{file}` (the macro expands to nothing — see OLSKETCH_DEF). The
+ * stroke data carried in params[0] regenerates the sidecar SVG through ctx.files; without data
+ * (the file was unreadable at parse time) only the command is written and the file is left alone.
+ */
+function latexSketch(ctx: ExportContext, os: TexStream, inset: LeafInset): void {
+  ctx.features.require('olsketch');
+  os.write(`\\olsketch{${inset.arg}}`);
+  const data = inset.params[0];
+  if (data && ctx.texMode) ctx.files[inset.arg] = inkSvg(data);
 }
 
 function latexExternal(ctx: ExportContext, os: TexStream, rp: RunParams, inset: LeafInset): void {

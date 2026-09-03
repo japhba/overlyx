@@ -3,7 +3,7 @@ import path from 'node:path';
 import { config } from './config.ts';
 
 /** `doc`: a .tex document (has \\begin{document}, or is \\input by one); `tex`: other LaTeX sources (preamble, macros, .sty); `dir`: a directory (so empty folders show in the explorer) */
-export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'dir' | 'other' }
+export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'dir' | 'other' }
 export interface Project { name: string; path: string; files: ProjectFile[] }
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf', '.eps', '.ps', '.tif', '.tiff', '.webp', '.bmp']);
@@ -14,6 +14,7 @@ export function fileKind(name: string): ProjectFile['kind'] {
   if (ext === '.bib') return 'bib';
   if (ext === '.tex' || ext === '.sty' || ext === '.cls') return 'tex';
   if (ext === '.pdf') return 'pdf';
+  if (ext === '.board') return 'board';
   if (IMAGE_EXT.has(ext)) return 'image';
   return 'other';
 }

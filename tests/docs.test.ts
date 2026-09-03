@@ -66,14 +66,15 @@ describe('saving', () => {
   it('never replaces the file with something that is not a document', async () => {
     const doc = await manager.open('p/a.tex');
     const before = readFileSync(file('a.tex'), 'utf8');
-    const orig = doc.toText.bind(doc);
-    doc.toText = () => '';
+    const asAny = doc as unknown as { render: () => { text: string; files: Record<string, string> } };
+    const orig = asAny.render.bind(doc);
+    asAny.render = () => ({ text: '', files: {} });   // saveToFile writes what render() produces
     try {
       doc.dirty = true;
       expect(await doc.saveToFile()).toBe(false);
       expect(doc.saveError).toMatch(/not a document/);
       expect(readFileSync(file('a.tex'), 'utf8')).toBe(before);
-    } finally { doc.toText = orig; }
+    } finally { asAny.render = orig; }
     // a later save works again
     edit(doc, docText('one from Overleaf', 'two edited', 'three from the web', 'four'));
     expect(await doc.saveToFile()).toBe(true);

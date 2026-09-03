@@ -62,13 +62,13 @@ export function parseFragmentText(latex: string, project: string, relPath: strin
   return parseTex(latex, { layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs), masterHeader });
 }
 
-export function writeDocumentText(doc: LyxDocument, project: string, relPath: string, fragment: boolean, resolveInclude?: (filename: string) => LyxDocument | undefined): { text: string; warnings: string[] } {
+export function writeDocumentText(doc: LyxDocument, project: string, relPath: string, fragment: boolean, resolveInclude?: (filename: string) => LyxDocument | undefined): { text: string; warnings: string[]; files: Record<string, string> } {
   const abs = resolveProjectPath(project, relPath);
   const r = writeTex(doc, {
     layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs),
     fragment, basename: path.basename(relPath, '.tex'), resolveInclude,
   });
-  return { text: r.text, warnings: r.warnings };
+  return { text: r.text, warnings: r.warnings, files: r.files };
 }
 
 /**

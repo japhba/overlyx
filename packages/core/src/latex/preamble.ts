@@ -39,6 +39,7 @@ const CELLVARWIDTH_DEF = '%% Variable width box for table cells\n\\newenvironmen
 const PAPERSIZEPDF_DEF = '\\pdfpageheight\\paperheight\n\\pdfpagewidth\\paperwidth\n';
 const TABULARNEWLINE_DEF = '%% Because html converters don\'t know tabularnewline\n\\providecommand{\\tabularnewline}{\\\\}\n';
 const LYXDOT_DEF = '%% A simple dot to overcome graphicx limitations\n\\newcommand{\\lyxdot}{.}\n';
+const OLSKETCH_DEF = '%% OverLyX margin ink: anchors freehand drawings, invisible in the output\n\\newcommand{\\olsketch}[1]{}\n';
 const LYXREF_DEF = '\\RS@ifundefined{subsecref}\n  {\\newref{subsec}{name = \\RSsectxt}}\n  {}\n\\RS@ifundefined{thmref}\n  {\\def\\RSthmtxt{theorem~}\\newref{thm}{name = \\RSthmtxt}}\n  {}\n\\RS@ifundefined{lemref}\n  {\\def\\RSlemtxt{lemma~}\\newref{lem}{name = \\RSlemtxt}}\n  {}\n';
 const LYXMATHSYM_DEF = '\\newcommand{\\lyxmathsym}[1]{\\ifmmode\\begingroup\\def\\b@ld{bold}\n  \\text{\\ifx\\math@version\\b@ld\\bfseries\\fi#1}\\endgroup\\else#1\\fi}\n';
 const TEXTGREEK_LGR_DEF = '\\DeclareFontEncoding{LGR}{}{}\n';
@@ -363,6 +364,7 @@ export function lyxMacros(ctx: ExportContext): string {
   if (f.mustProvide('cellvarwidth')) m += CELLVARWIDTH_DEF;
   if (f.mustProvide('lyxgreyedout')) m += lyxgreyedoutDef(f.mustProvide('ct-xcolor-ulem'));
   if (f.mustProvide('lyxdot')) m += LYXDOT_DEF + '\n';
+  if (f.mustProvide('olsketch')) m += OLSKETCH_DEF + '\n';
   m += floatDefinitions(ctx);
   if (f.mustProvide('refstyle')) m += LYXREF_DEF + '\n';
   if (f.mustProvide('ct-xcolor-ulem')) {

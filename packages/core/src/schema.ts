@@ -260,6 +260,18 @@ const nodes: Record<string, NodeSpec> = {
     parseDOM: [{ tag: 'span.lyx-special', getAttrs: (d: HTMLElement) => ({ token: attr(d, 'data-token', '\\SpecialChar'), arg: attr(d, 'data-arg', 'ldots') }) }],
   },
 
+  /**
+   * Margin-ink anchor (`\olsketch{figures/….svg}`): marks the paragraph freehand strokes are
+   * anchored to. `data` is the stroke JSON (see ink.ts) that the sidecar SVG stores; null when
+   * the file could not be read (the strokes then stay whatever the file holds).
+   */
+  sketch: {
+    inline: true, group: 'inline', atom: true,
+    attrs: { src: { default: '' }, data: { default: null } },
+    toDOM: node => ['span', { class: 'lyx-sketch', 'data-src': node.attrs.src, ...(node.attrs.data !== null ? { 'data-data': node.attrs.data } : {}), title: 'Margin drawing anchor (' + node.attrs.src + ')' }],
+    parseDOM: [{ tag: 'span.lyx-sketch', getAttrs: (d: HTMLElement) => ({ src: attr(d, 'data-src', ''), data: d.hasAttribute('data-data') ? d.getAttribute('data-data') : null }) }],
+  },
+
   /** Any other leaf inset (VSpace, Info, External, Separator, line, Nomenclature ...) kept verbatim. */
   leaf: {
     inline: true, group: 'inline', atom: true,

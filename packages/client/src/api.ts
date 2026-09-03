@@ -1,6 +1,6 @@
 export interface User { id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null }
 /** `doc`: a .tex document (opens in the editor); `tex`: other LaTeX sources (text editor); `lyx`: importable */
-export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'dir' | 'other' }
+export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'dir' | 'other' }
 export type Role = 'owner' | 'edit' | 'view';
 export interface Project {
   name: string; files: ProjectFile[];
