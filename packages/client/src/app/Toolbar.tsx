@@ -53,6 +53,10 @@ export interface ToolbarProps {
 }
 
 export const ICONS: Record<string, string> = {
+  ink: '<svg viewBox="0 0 16 16"><path d="M2.5 13.5c2-.5 2.5-.5 3-1.5L13 4.5 11.5 3 4 10.5c-1 .5-1 1-1.5 3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M10.5 4l1.5 1.5" stroke="currentColor"/><path d="M2 15h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  inkpen: '<svg viewBox="0 0 16 16"><path d="M3 13c2-.5 2.5-.5 3-1.5L13.5 4 12 2.5 4.5 10c-1 .5-1 1-1.5 3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
+  inkhl: '<svg viewBox="0 0 16 16"><path d="M4 10l6-6 2.5 2.5-6 6H4z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2.5 14.5h11" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity="0.45"/></svg>',
+  inkeraser: '<svg viewBox="0 0 16 16"><path d="M5.5 13L2 9.5 8.5 3 13 7.5 7.5 13z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.5 13H14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M5.5 6L10 10.5" stroke="currentColor" stroke-width="1"/></svg>',
   new: '<svg viewBox="0 0 16 16"><path d="M3 1h7l3 3v11H3z" fill="none" stroke="currentColor"/><path d="M10 1v3h3" fill="none" stroke="currentColor"/></svg>',
   open: '<svg viewBox="0 0 16 16"><path d="M1 3h5l1 2h8v9H1z" fill="none" stroke="currentColor"/></svg>',
   save: '<svg viewBox="0 0 16 16"><path d="M2 2h10l2 2v10H2z" fill="none" stroke="currentColor"/><rect x="5" y="9" width="6" height="4" fill="currentColor"/></svg>',

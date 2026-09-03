@@ -135,6 +135,18 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
       onOpen(project.name + '/' + rel);
     } catch (e) { alert(String((e as Error).message)); }
   };
+  const newBoard = async (dir = '') => {
+    if (!project) return;
+    let name = prompt(`New whiteboard (in ${projectLabel(project)}${dir ? '/' + dir : ''}):`, 'whiteboard.board');
+    if (!name) return;
+    if (!name.endsWith('.board')) name += '.board';
+    const rel = (dir ? dir + '/' : '') + name;
+    try {
+      await api.upload(project.name, rel, new Blob(['{"overlyx":"board","v":1,"objects":{\n}}\n'], { type: 'application/octet-stream' }), { overwrite: false });
+      await load();
+      onOpen(project.name + '/' + rel);
+    } catch (e) { alert(String((e as Error).message)); }
+  };
   const upload = async (dir = '') => {
     if (!project) return;
     const input = document.createElement('input');
@@ -349,6 +361,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
       <div class="actions">
         {canEdit && project && <button class="small-btn" onClick={() => void newDoc()} title="New LyX document in this project">+ Doc</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void newTextFile()} title="New text file (.tex, .bib, …) in this project">+ File</button>}
+        {canEdit && project && <button class="small-btn" onClick={() => void newBoard()} title="New whiteboard (freehand drawing, images, sticky notes — live-collaborative)">+ Board</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void newFolder()} title="New folder in this project (also in the right-click menu of any folder)">+ Folder</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void upload()} title="Upload files (figures, .bib, .sty …) — or drag them from your computer onto the file list">⇧</button>}
         {role === 'owner' && via !== 'admin' && project && onShare && <button class="small-btn" data-share={project.name} onClick={() => onShare(project.name)} title="Share this project…">👥</button>}

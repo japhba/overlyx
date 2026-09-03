@@ -49,7 +49,7 @@ test('the documents panel shows one project at a time (documents as tabs, other 
   await expect(panel).toHaveAttribute('data-project', PROJECT);
   await expect(panel.locator('.project-switch')).toHaveValue(PROJECT);
   await expect(panel.locator('.doc-tab')).toHaveCount(1);                 // main.tex is a document tab …
-  await expect(tree.locator('.tree-row.file')).toHaveCount(3);          // … and the tree lists every file: main.tex, macros.tex, refs.bib
+  await expect(tree.locator('.tree-row.file')).toHaveCount(4);          // … and the tree lists every file: main.tex, macros.tex, notes.md, refs.bib
   await expect(tree.locator('.tree-row.folder', { hasText: 'figures' })).toHaveCount(1);   // empty folders show too
   await expect(tree.locator('[data-file="main.aux"]')).toHaveCount(0);
   await expect(tree.locator('[data-file="main.tex~"]')).toHaveCount(0);

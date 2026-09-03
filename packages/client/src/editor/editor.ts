@@ -18,6 +18,7 @@ import { schema, unquote, paramMap } from '@overlyx/core';
 import { lyxKeymap, chordPlugin } from './keymap';
 import { numberingPlugin } from './plugins/numbering';
 import { marginPlugin } from './plugins/margin';
+import { inkPlugin } from './plugins/ink';
 import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
 import { fontCarryPlugin } from './plugins/fontcarry';
 import { insetCaretPlugin } from './plugins/insetcaret';
@@ -314,6 +315,8 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     tableEditing(),
     numberingPlugin(),
     marginPlugin(opts.marginMode ?? false),
+    // margin ink: one layer per document view (child editors of a combined view share the master's margins)
+    ...(opts.child ? [] : [inkPlugin(provider.awareness)]),
     changeTrackingPlugin(),
     changesFilterPlugin(),
     findPlugin(),

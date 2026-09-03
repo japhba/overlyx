@@ -694,6 +694,60 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .ruler .ruler-notes .label { cursor: default; }
 .ruler .handle:hover, .ruler.dragging .handle { border-top-color: var(--accent-strong); }
 .ruler .readout { position: absolute; top: 3px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--ui-fg); background: var(--hl-bg); padding: 0 6px; border-radius: 3px; white-space: nowrap; }
+
+/* Margin ink (editor/plugins/ink.ts): the drawing canvas overlays the scroll viewport, clipped to
+   the margins by a keyhole clip-path set from JS (the text column is a hole, so clicks there reach
+   the text even while drawing). In ink mode the page gets wide gutters on both sides — pan freely,
+   the column snaps back to centre when released nearby (scroll-snap proximity). */
+.editor-scroll.ink-pan { overflow-x: auto; scroll-snap-type: x proximity; }
+.editor-scroll.ink-pan > .editor-page, .editor-scroll.ink-pan > .ruler { width: calc(100% + 2 * var(--ink-gutter, 85vw)); }
+.editor-scroll.ink-pan .editor-host > .lyx-editor { scroll-snap-align: center; }
+.ink-canvas { position: absolute; left: 0; top: 0; z-index: 5; pointer-events: none; }
+.ink-canvas.draw { pointer-events: auto; cursor: crosshair; touch-action: pan-x pan-y; }
+.lyx-sketch { display: inline-block; width: 5px; height: 5px; margin: 0 1px; border-radius: 50%; background: var(--accent); opacity: 0.3; }
+.lyx-sketch:hover { opacity: 0.8; }
+/* ink toolbar colour swatches / width dots */
+.tb-ink-swatch { display: inline-block; width: 13px; height: 13px; border-radius: 50%; border: 1px solid var(--ui-border); vertical-align: middle; }
+.tb-ink-width { display: inline-block; border-radius: 50%; background: currentColor; vertical-align: middle; }
+
+/* Whiteboard (.board documents, app/BoardEditor.tsx): an infinite pan/zoom canvas. */
+.board { position: relative; flex: 1; min-height: 0; height: 100%; overflow: hidden; outline: none; background: var(--page-bg);
+  background-image: radial-gradient(var(--ui-border) 1px, transparent 1px); background-size: 24px 24px; touch-action: none; }
+.board[data-tool="pen"], .board[data-tool="highlighter"] { cursor: crosshair; }
+.board[data-tool="eraser"] { cursor: cell; }
+.board[data-tool="note"] { cursor: copy; }
+.board-content { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.board-content > * { position: absolute; }
+.board-img { user-select: none; }
+.board-img.selected, .board-note.selected { outline: 1.5px solid var(--accent); }
+.board-stroke { pointer-events: none; }
+.board-stroke path { pointer-events: auto; }
+.board-stroke.live, .board-stroke.live path { pointer-events: none; }
+.board-note { box-sizing: border-box; padding: 10px 12px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.18); color: #202124;
+  font-family: var(--ui-font); font-size: 14px; line-height: 1.35; white-space: pre-wrap; overflow-wrap: break-word; user-select: none; }
+.board-note-hint { opacity: 0.45; font-style: italic; }
+.board-note-edit { position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; padding: 10px 12px; border: none; resize: none;
+  background: transparent; color: inherit; font: inherit; outline: 1.5px solid var(--accent); border-radius: 4px; }
+.board-selbox { pointer-events: none; outline: 1.5px solid var(--accent); }
+.board-handle { position: absolute; width: 9px; height: 9px; background: var(--page-bg); border: 1.5px solid var(--accent); border-radius: 2px; pointer-events: auto; }
+.board-handle.nw { left: -5px; top: -5px; cursor: nwse-resize; }
+.board-handle.ne { right: -5px; top: -5px; cursor: nesw-resize; }
+.board-handle.sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+.board-handle.se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.board-peer { pointer-events: none; z-index: 3; }
+.board-peer .dot { display: block; width: 8px; height: 8px; border-radius: 50%; transform-origin: center; }
+.board-peer .name { position: absolute; left: 10px; top: 8px; padding: 1px 6px; border-radius: 3px; color: #fff; font-family: var(--ui-font); font-size: 11px; white-space: nowrap; transform-origin: 0 0; }
+.board-tools { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 5px 8px;
+  background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.15); z-index: 10; }
+.board-tools .small-btn.active { background: var(--accent); color: #fff; }
+.board-sep { width: 1px; height: 18px; background: var(--ui-border); margin: 0 3px; }
+.board-color { width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--ui-border); cursor: pointer; padding: 0; }
+.board-color.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.board-width span { display: inline-block; border-radius: 50%; background: currentColor; vertical-align: middle; }
+.board-zoom { position: absolute; right: 14px; bottom: 12px; display: flex; align-items: center; gap: 4px; padding: 4px 6px;
+  background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px; z-index: 10; }
+.board-conn { font-family: var(--ui-font); font-size: 11px; color: var(--ui-muted); margin-left: 4px; white-space: nowrap; }
+.board-conn.offline { color: var(--err); }
 .pdf-panel .build-progress { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 11px; color: var(--fg2); background: var(--surface2); border-bottom: 1px solid var(--ui-border); white-space: nowrap; overflow: hidden; }
 .pdf-panel .build-progress .progress-line { color: var(--muted2); font-family: monospace; overflow: hidden; text-overflow: ellipsis; }
 .pdf-panel .spinner { width: 10px; height: 10px; border: 2px solid var(--ui-border); border-top-color: var(--accent); border-radius: 50%; animation: ol-spin 0.8s linear infinite; flex: none; }

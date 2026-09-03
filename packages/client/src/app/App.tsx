@@ -197,6 +197,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const isPdfTab = !!docId && docId.startsWith('pdf:');
   const textId = docId ? docId.replace(/^(text|pdf):/, '') : null;
   const isLyxDoc = !!docId && !isTextTab && docId.endsWith('.tex');
+  const isBoardTab = !!docId && !isTextTab && !isPdfTab && docId.endsWith('.board');
   // the project shown in the documents panel (its owner gets the Share button)
   const [curProject, setCurProject] = useState<Project | null>(null);
   const [meta, setMeta] = useState<DocMeta | null>(null);
@@ -928,6 +929,16 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const menus: MenuDef[] = [...(docId && !isLyxDoc ? textFileMenus : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
+      { label: 'New whiteboard…', action: () => {
+        const p = textId?.split('/')[0];
+        if (!p) return;
+        let name = prompt('New whiteboard name:', 'whiteboard.board');
+        if (!name) return;
+        if (!name.endsWith('.board')) name += '.board';
+        api.upload(p, name, new Blob(['{"overlyx":"board","v":1,"objects":{\n}}\n'], { type: 'application/octet-stream' }), { overwrite: false })
+          .then(() => { location.hash = '#/' + p + '/' + name; setRefreshKey(k => k + 1); })
+          .catch(e => notify('Could not create the whiteboard: ' + (e as Error).message, 'error'));
+      } },
       { label: 'Open… (documents panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
       { label: save.state === 'offline' ? 'Offline — changes are saved on this device' : save.state === 'saving' ? 'Saving…' : 'All changes saved automatically', disabled: true, action: () => {} },
       { sep: true },
@@ -1343,6 +1354,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     [
       { id: 'outline', title: LEFT_TITLE, icon: 'outline', action: () => setShowFiles(s => !s), active: showFiles },
       { id: 'margin', title: 'Show notes & comments in the margin', icon: 'margin', action: toggleMargin, active: marginMode },
+      { id: 'ink', title: inkMode ? 'Margin drawing is on — click to put the pen away' : 'Draw in the margins (pen, highlighter; pans sideways for more space)', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode },
       // the ✦ button exists only once it is enabled in the preferences; it switches autocomplete (text + formulas) on and off
       ...(prefs.aiButton ? [{ id: 'ai', title: aiComplete ? 'AI autocomplete is on — click to switch it off' : 'AI autocomplete is off — click to switch it on (ghost text after a pause while typing; Tab inserts it)', icon: 'ai', action: () => { setPref('aiCompleteText', !aiComplete); setPref('aiCompleteMath', !aiComplete); notify(!aiComplete ? 'AI autocomplete on' : 'AI autocomplete off'); }, active: aiComplete } as ToolButton] : []),
       { id: 'tb-math', title: 'Show math toolbar', icon: 'mathtb', active: showMath, palette: tbTogglePalette('math', 'Show math toolbar') },
@@ -1498,6 +1510,26 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { id: 'r-note', title: 'Insert note (Ctrl+Alt+Shift+N)', icon: 'note', action: () => run(C.insertNote('Note')) },
       { id: 'r-comment', title: 'Comment thread (Ctrl+Alt+C)', icon: 'comment', action: () => run(C.insertComment) },
     ],
+  ];
+  // The margin-ink toolbar (bottom-docked while drawing is on): tool, colour, width.
+  const ink = getInk();
+  const INK_COLORS: [string, string][] = [['#202124', 'Black'], ['#1a73e8', 'Blue'], ['#d93025', 'Red'], ['#188038', 'Green'], ['#f29900', 'Orange'], ['#a142f4', 'Purple']];
+  const inkGroups: ToolButton[][] = [
+    [
+      { id: 'i-pen', title: 'Pen (pressure-sensitive)', icon: 'inkpen', active: ink.tool === 'pen', action: () => setInk({ tool: 'pen' }) },
+      { id: 'i-hl', title: 'Highlighter', icon: 'inkhl', active: ink.tool === 'highlighter', action: () => setInk({ tool: 'highlighter' }) },
+      { id: 'i-eraser', title: 'Eraser — removes whole strokes (also the pen’s eraser end)', icon: 'inkeraser', active: ink.tool === 'eraser', action: () => setInk({ tool: 'eraser' }) },
+    ],
+    INK_COLORS.map(([c, name]) => ({
+      id: 'i-c-' + c.slice(1), title: name, icon: name, html: `<span class="tb-ink-swatch" style="background:${c}"></span>`,
+      active: ink.color === c && ink.tool !== 'eraser',
+      action: () => setInk({ color: c, ...(ink.tool === 'eraser' ? { tool: 'pen' as const } : {}) }),
+    })),
+    [1.5, 2.5, 4].map((w, i) => ({
+      id: 'i-w-' + String(w).replace('.', '_'), title: `Stroke width ${w} px`, icon: String(w), html: `<span class="tb-ink-width" style="width:${5 + i * 3}px;height:${5 + i * 3}px"></span>`,
+      active: ink.width === w,
+      action: () => setInk({ width: w }),
+    })),
   ];
   // The LyX Version Control toolbar, mapped onto the project's git repository (off by default, as in LyX).
   const vcsGroups: ToolButton[][] = [
@@ -1704,9 +1736,9 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         )}
         {showFiles && <SidebarGrip side="left" />}
         <div class={'editor-column' + (rawSplit && isLyxDoc ? ' split' : '')}>
-        <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
+        <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
-          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/'))} toolbar={<a class="small-btn" href={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/')) + '?download=1'}>Download</a>} /></div> : !isLyxDoc ? (/\.(md|markdown)$/i.test(textId!) ? <MarkdownEditor key={docId} id={textId!} notify={notify} /> : <TextEditor key={docId} id={textId!} notify={notify} />) :
+          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/'))} toolbar={<a class="small-btn" href={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/')) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : !isLyxDoc ? (/\.(md|markdown)$/i.test(textId!) ? <MarkdownEditor key={docId} id={textId!} notify={notify} /> : <TextEditor key={docId} id={textId!} notify={notify} />) :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (
@@ -1745,12 +1777,13 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       {/* Contextual toolbars, docked above the status bar like LyX. They are an overlay
           (.bottom-toolbars is absolutely positioned), so their coming and going with the cursor
           never shifts the document. */}
-      {isLyxDoc && (showMath || showTable || showReview) && (
+      {isLyxDoc && (showMath || showTable || showReview || inkMode) && (
         <div class="bottom-toolbars" style={{ left: showFiles ? 'var(--left-width, 272px)' : '24px', right: rightTab ? (rightTab === 'pdf' ? 'var(--right-width, 46%)' : 'var(--right-width, 360px)') : '24px' }}>
           {showMath && <Toolbar id="math" label="Math" groups={mathGroups} />}
           {showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={mathPanelGroups} />}
           {showTable && <Toolbar id="table" label="Table" groups={tableGroups} />}
           {showReview && <Toolbar id="review" label="Review" groups={reviewGroups} />}
+          {inkMode && <Toolbar id="ink" label="Draw" groups={inkGroups} />}
         </div>
       )}
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
