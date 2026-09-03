@@ -54,7 +54,8 @@ export const config = {
    */
   agent: {
     enabled: process.env.OVERLYX_AGENT !== 'off',
-    bin: (process.env.OVERLYX_CODEX_BIN ?? 'codex').trim(),
+    // a path-like bin (the test stub) is resolved now: the keeper spawns it from another cwd
+    bin: (b => (b.includes('/') ? path.resolve(b) : b))((process.env.OVERLYX_CODEX_BIN ?? 'codex').trim()),
     /** idle time after which a user's codex process is stopped (threads resume on demand) */
     idleMs: Number(process.env.OVERLYX_AGENT_IDLE_MS ?? 30 * 60 * 1000),
     /** model passed to new threads ('' = codex's default) */
