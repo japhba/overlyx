@@ -142,6 +142,10 @@ test.describe('with the AI stub', () => {
     await expect(page.locator('.ai-new')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.ai-old').first()).toBeVisible();
     await expect(page.locator('.ai-new .katex')).toHaveCount(1);              // the proposal's $g$ is rendered in the preview
+    // the proposal's LaTeX can be copied from the panel
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.click('[data-ai-copy]');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('Rewritten (make it crisper)');
     // the document is untouched while the proposal is on show
     expect(await par.evaluate(el => el.textContent)).toContain('The variance of the weights');
     await page.keyboard.press('Escape');
@@ -177,6 +181,9 @@ test.describe('with the AI stub', () => {
     await page.keyboard.press('Control+k');
     const panel = page.locator('.ai-panel');
     await expect(panel).toBeVisible();
+    // a real mouse press must reach the select (the panel's focus-keeping mousedown handler used
+    // to preventDefault on it, so the native dropdown never opened): not default-prevented
+    expect(await panel.locator('.ai-model').evaluate(el => el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })))).toBe(true);
     // the model is chosen right in the panel and kept as the ⌘K preference
     await panel.locator('.ai-model option[value="anthropic/claude-haiku-4.5"]').waitFor({ state: 'attached' });   // options are never 'visible'
     await panel.locator('.ai-model').selectOption('anthropic/claude-haiku-4.5');

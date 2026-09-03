@@ -91,6 +91,7 @@ class RewritePanel {
         <button type="button" class="btn primary ai-accept" data-ai-accept>Accept <kbd>⏎</kbd></button>
         <button type="button" class="btn ai-reject" data-ai-reject>Reject <kbd>Esc</kbd></button>
         <button type="button" class="btn ai-retry" data-ai-retry title="Ask again, e.g. with a refined instruction">Try again</button>
+        <button type="button" class="btn ai-copy" data-ai-copy title="Copy the proposal's LaTeX to the clipboard">Copy</button>
       </div>`;
     this.input = this.dom.querySelector('.ai-input')!;
     // the model for this rewrite: the server's default or one of its offered models (kept in the prefs)
@@ -113,18 +114,34 @@ class RewritePanel {
     this.dom.querySelector('[data-ai-accept]')!.addEventListener('click', () => this.accept());
     this.dom.querySelector('[data-ai-reject]')!.addEventListener('click', () => this.close());
     this.dom.querySelector('[data-ai-retry]')!.addEventListener('click', () => { this.history = []; this.clearPreview(); this.input.value = this.lastInstruction; this.input.focus(); this.input.select(); });
+    this.dom.querySelector('[data-ai-copy]')!.addEventListener('click', () => {
+      const r = this.result;
+      if (!r) return;
+      navigator.clipboard.writeText(r.tex)
+        .then(() => this.setStatus('LaTeX copied to the clipboard.'))
+        .catch(() => this.setStatus('Could not write to the clipboard.', 'error'));
+    });
     // keys stay in the panel (the editor's own bindings must not fire); Enter asks / accepts, Esc rejects
     this.dom.addEventListener('keydown', ev => {
       ev.stopPropagation();
       if (ev.key === 'Escape') { ev.preventDefault(); this.close(); return; }
       if (ev.key === 'Enter' && !ev.shiftKey) {
+        if ((ev.target as HTMLElement).tagName === 'SELECT') return;   // Enter in the model picker confirms the choice, not the prompt
         ev.preventDefault();
         // a proposal is on show: Enter with an empty box accepts it, typed text is a follow-up
         if (this.result && !this.input.value.trim()) this.accept();
         else void this.ask();
       }
     });
-    this.dom.addEventListener('mousedown', ev => { if ((ev.target as HTMLElement).tagName !== 'TEXTAREA') ev.preventDefault(); });
+    // keep the keyboard in the prompt when panel chrome is clicked — but the model <select>
+    // needs its native mousedown (or its dropdown never opens), and a press in the preview
+    // starts a text selection (so the proposal can be copied)
+    this.dom.addEventListener('mousedown', ev => {
+      const el = ev.target as HTMLElement;
+      const t = el.tagName;
+      if (t === 'TEXTAREA' || t === 'SELECT' || t === 'OPTION' || el.closest('.ai-preview')) return;
+      ev.preventDefault();
+    });
     this.input.addEventListener('input', () => { this.input.style.height = 'auto'; this.input.style.height = Math.min(120, this.input.scrollHeight) + 'px'; });
     this.host.appendChild(this.dom);
     this.place(anchor);
