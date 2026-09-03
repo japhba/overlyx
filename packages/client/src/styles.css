@@ -4,6 +4,7 @@
    out of the rules below: everything that is not a LyX text colour or a user colour goes through a token. */
 :root {
   color-scheme: light;
+  --vspace-color: #9a6a35;   /* LyX's "added space markers" brown */
   --ui-bg: #f3f3f1;
   --ui-bg2: #e9e9e6;
   --ui-border: #c9c9c4;
@@ -68,6 +69,7 @@
 }
 /* dark: text and formulas are white on a near-black page, the chrome a shade lighter */
 html[data-theme="dark"] {
+  --vspace-color: #b98d5a;
   color-scheme: dark;
   --ui-bg: #1c1c21;
   --ui-bg2: #24242b;
@@ -1246,6 +1248,20 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .ol-change-fold.inserted { --change-color: var(--ok); }
 .ol-change-fold.deleted { --change-color: var(--err); }
 .lyx-change-unfolded { outline: 1px dotted var(--change-color, var(--ui-muted)); outline-offset: 1px; }
+
+/* Vertical space (\vspace, \bigskip, ...) drawn like LyX: the actual gap, a vertical line with
+   outward arrows (flat bars for vfill, inward for negative space) and a small brown label. */
+.lyx-vspace { display: flex; align-items: stretch; gap: 7px; min-height: 12px; margin: 1px 0; user-select: none; cursor: default; }
+.lyx-vspace .vs-glyph { position: relative; width: 11px; flex: none; }
+.lyx-vspace .vs-line { position: absolute; left: 5px; top: 1px; bottom: 1px; width: 1px; background: var(--vspace-color); }
+.lyx-vspace .vs-a { position: absolute; left: 2px; width: 6px; height: 6px; border: 0 solid var(--vspace-color); }
+.lyx-vspace .vs-a.top { top: 0; border-width: 1px 1px 0 0; transform: rotate(-45deg); }
+.lyx-vspace .vs-a.bot { bottom: 0; border-width: 0 1px 1px 0; transform: rotate(45deg); }
+.lyx-vspace.neg .vs-a.top { border-width: 0 1px 1px 0; transform: rotate(45deg); }
+.lyx-vspace.neg .vs-a.bot { border-width: 1px 1px 0 0; transform: rotate(-45deg); }
+.lyx-vspace.fill .vs-a { transform: none; width: 11px; height: 0; left: 0; border-width: 1px 0 0 0; }
+.lyx-vspace.fill .vs-a.bot { border-width: 0 0 1px 0; }
+.lyx-vspace .vs-label { align-self: center; font-family: var(--ui-font); font-size: 10.5px; line-height: 1; color: var(--vspace-color); white-space: nowrap; }
 
 /* GitHub link in the menubar (next to the theme toggle) */
 .menubar .gh-link { display: flex; align-items: center; padding: 0 7px; color: inherit; opacity: 0.7; }

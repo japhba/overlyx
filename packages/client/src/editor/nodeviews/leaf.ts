@@ -203,13 +203,38 @@ export class LeafView implements NodeView {
     this.dom.className = `lyx-leaf lyx-leaf-${name.toLowerCase()} lyx-button`;
     const p = params(this.node);
     let text = name + (arg ? ' ' + arg : '');
-    if (name === 'VSpace') { text = 'Vertical space: ' + arg; this.dom.classList.add('lyx-block-button'); }
+    if (name === 'VSpace') { this.renderVSpace(arg); return; }
     else if (name === 'Separator') { text = arg === 'plain' ? '' : '— separator —'; if (arg === 'plain') { this.dom.classList.remove('lyx-button'); this.dom.classList.add('lyx-separator-plain'); } }
     else if (name === 'Info') text = `Info: ${p.get('type') ?? ''} ${p.get('arg') ?? ''}`;
     else if (name === 'External') text = `External: ${unquote(p.get('filename'))}`;
     else if (name === 'line') text = 'Horizontal line';
     this.dom.textContent = text;
     this.dom.title = name + (arg ? ' ' + arg : '');
+  }
+  /** Vertical space the way LyX draws it: the actual gap, outward arrows joined by a line
+   *  (flat bars for a fill, inward for negative space) and a small brown label. */
+  private renderVSpace(arg: string) {
+    const protect = arg.endsWith('*');
+    const amount = protect ? arg.slice(0, -1) : arg;
+    const gui: Record<string, string> = {
+      defskip: 'Default skip', smallskip: 'Small skip', medskip: 'Medium skip', bigskip: 'Big skip',
+      halfline: 'Half line height', fullline: 'Line height', vfill: 'Vertical fill',
+    };
+    const heights: Record<string, string> = {
+      defskip: '6pt', smallskip: '3pt', medskip: '6pt', bigskip: '12pt',
+      halfline: '0.6em', fullline: '1.2em', vfill: '12px',
+    };
+    const neg = amount.startsWith('-');
+    const cssLen = /^-?[\d.]+(pt|mm|cm|in|px|em|ex)$/.test(amount) ? amount.replace(/^-/, '') : null;
+    this.dom.className = `lyx-leaf lyx-leaf-vspace lyx-vspace${amount === 'vfill' ? ' fill' : ''}${neg ? ' neg' : ''}`;
+    this.dom.style.height = heights[amount] ?? cssLen ?? '12px';
+    const label = (gui[amount] ?? amount) + (protect ? ', protected' : '');
+    this.dom.replaceChildren();
+    const glyph = document.createElement('span'); glyph.className = 'vs-glyph';
+    for (const cls of ['vs-a top', 'vs-line', 'vs-a bot']) { const i = document.createElement('i'); i.className = cls; glyph.appendChild(i); }
+    const lab = document.createElement('span'); lab.className = 'vs-label'; lab.textContent = `Vertical space (${label})`;
+    this.dom.append(glyph, lab);
+    this.dom.title = `\\vspace${protect ? '*' : ''}{${amount}}`;
   }
   update(node: PMNode): boolean { if (node.type !== this.node.type) return false; this.node = node; this.render(); return true; }
   ignoreMutation() { return true; }

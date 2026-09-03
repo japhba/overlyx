@@ -283,6 +283,22 @@ describe('floats, graphics, tables, boxes', () => {
 /* ------------------------------------------------------------ tracking, notes, macros, raw */
 
 describe('change tracking and notes live in the file', () => {
+  it('\\bibitem inside a tracked insertion stays a bibliography entry, not ERT', () => {
+    const src = doc('\\begin{thebibliography}{99}\n\\lyxadded{Agent panel (MCP)}{Thu Sep  3 17:43:39 2026}{\\bibitem{lake2023} Lake and Baroni. Nature, 2023.}\n\n\\lyxadded{Agent panel (MCP)}{Thu Sep  3 17:43:39 2026}{\\bibitem[LB23]{bemis2011} Bemis and Pylkk\\"anen.}\n\\end{thebibliography}');
+    const d = parse(src);
+    expect(insets(d, 'ERT')).toHaveLength(0);
+    const bib = insets(d, 'CommandInset', 'bibitem');
+    expect(bib).toHaveLength(2);
+    expect(unquote(paramMap(bib[0].params).get('key'))).toBe('lake2023');
+    expect(unquote(paramMap(bib[1].params).get('label'))).toBe('LB23');
+    const withBib = pars(d).filter(p => p.items.some(i => i.kind === 'inset' && i.inset.arg === 'bibitem'));
+    expect(withBib).toHaveLength(2);
+    for (const p of withBib) expect(p.items.every(i => i.change?.type === 'inserted')).toBe(true);
+    const out = expectStable(src);
+    expect(bodyOf(out)).toContain('\\lyxadded{Agent panel (MCP)}{Thu Sep  3 17:43:39 2026}{\\bibitem{lake2023} Lake and Baroni. Nature, 2023.}');
+    expect(bodyOf(out)).toContain('{\\bibitem[LB23]{bemis2011} ');
+  });
+
   it('\\lyxadded / \\lyxdeleted become tracked changes with authors and times, and are written back', () => {
     const src = doc('Old \\lyxdeleted{Jan Bauer}{Tue Aug 26 14:03:00 2026}{deleted }text \\lyxadded{Kirsten Fischer}{Wed Aug 27 09:10:11 2026}{and new} words.\n\nGone.\\lyxadded{Jan Bauer}{Tue Aug 26 14:03:00 2026}{¶}\n\nNext.');
     const d = parse(src);

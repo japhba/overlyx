@@ -16,6 +16,7 @@ import { DEFAULT_LAYOUT_DIR, loadDocumentClass, applyDocumentTheorems, textclass
 import { loadUnicodeSymbols, type UnicodeDB } from '../latex/unicode.ts';
 import { loadLanguages, type LanguageDB } from '../latex/languages.ts';
 import { Scanner, groupEnd, type Tok } from './scanner.ts';
+import { extractInkData } from '../ink.ts';
 import { makeHeaderLines, preambleFacts, splitDocument, type PreambleFacts } from './preamble.ts';
 import { parseTabular } from './table.ts';
 
@@ -201,6 +202,8 @@ class BodyParser {
   private babelToLang = new Map<string, string>();
   private pendingBibStyle = '';
   private pendingNociteAll = false;
+  /** read a file relative to the document (sketch SVGs; set from ParseTexOptions.readFile) */
+  readFile?: (name: string) => string | undefined;
   private envStack: string[] = [];
   private quoteStyle: string;
 
@@ -912,6 +915,17 @@ class BodyParser {
       this.pushInset(ctx, st, graphicsInset(g.trim(), opt ?? ''));
       return null;
     }
+    if (name === 'olsketch') {
+      // OverLyX margin ink: the command anchors freehand strokes to this paragraph; the strokes
+      // live in the referenced SVG (and expand to nothing in the output)
+      const g = s.readGroup();
+      if (g === null) { this.pushERT(ctx, st, '\\olsketch'); return null; }
+      const src = g.trim();
+      const svg = this.readFile?.(src);
+      const data = svg ? extractInkData(svg) : null;
+      this.pushInset(ctx, st, { type: 'Leaf', name: 'Sketch', arg: src, params: data !== null ? [data] : [] });
+      return null;
+    }
     if (name === 'mbox') {
       // \mbox{\ref{..}} is what the writer puts around references inside struck-out / tracked text:
       // the reference alone is the content
@@ -990,6 +1004,21 @@ class BodyParser {
       }
       this.pushERT(ctx, st, raw + (s.s[s.pos - 1] !== '}' && s.s[s.pos - 1] !== ']' && t.spaceAfter ? ' ' : ''));
       return null;
+    }
+
+    // \bibitem in running text — inside a \lyxadded{...} change group the Bib_Environment item
+    // loop never sees it: the same CommandInset as at an item start, carrying the change mark
+    if (name === 'bibitem') {
+      const opt = s.readOptional();
+      const key = s.readGroup();
+      if (key !== null) {
+        const params = ['LatexCommand bibitem'];
+        if (opt !== null) params.push('label ' + quote(opt));
+        params.push('key ' + quote(key.trim()), 'literal "true"');
+        this.pushInset(ctx, st, { type: 'Leaf', name: 'CommandInset', arg: 'bibitem', params });
+        return null;
+      }
+      if (opt !== null) { this.pushERT(ctx, st, `\\bibitem[${opt}]`); return null; }
     }
 
     // unknown command: ERT, its brace arguments parsed as text between ERT braces
@@ -1601,6 +1630,7 @@ export function parseTex(text: string, opts: ParseTexOptions = {}): ParseTexResu
   const quotes = setStr('quotes_style') ?? masterValue('quotes_style') ?? 'english';
   const parser = new BodyParser(dc, unicode, langs, facts, { language, quotes });
   parser.absorbPreamble = split.hasDocument && /\\newtheorem/.test(body);
+  parser.readFile = opts.readFile;
   const pars = parser.parseBody(body);
   warnings.push(...parser.warnings);
   let userPreamble = split.userPreamble;
