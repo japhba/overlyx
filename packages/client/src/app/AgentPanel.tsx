@@ -13,7 +13,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel } from '../api';
+import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel, type LitHit } from '../api';
 import { editorContext } from '../editor/context';
 import { renderStaticHtml } from '../editor/lyxmath/field';
 import { latexSelectionText } from './richcopy';
@@ -149,21 +149,48 @@ function FileChangeView({ it }: { it: AgentItem }) {
 
 type Notify = (msg: string, kind?: 'info' | 'error') => void;
 
-/** One reference spotted in an agent reply: a click adds it to the project's cited.bib. */
+/** Author–year labels for bare DOI / arXiv references, resolved once per id. */
+const hitCache = new Map<string, Promise<LitHit | null>>();
+function resolveRef(doi: string): Promise<LitHit | null> {
+  let p = hitCache.get(doi);
+  if (!p) { p = api.literatureSearch(doi).then(r => r.hits[0] ?? null).catch(() => null); hitCache.set(doi, p); }
+  return p;
+}
+/** "Vaswani et al. 2017" from a hit (surname of the first author). */
+function hitLabel(h: LitHit): string | null {
+  const first = h.authors[0];
+  if (!first) return null;
+  const surname = (first.includes(',') ? first.split(',')[0] : first.split(/\s+/).pop() ?? first).trim();
+  if (!surname) return null;
+  return surname + (h.authors.length > 1 ? ' et al.' : '') + (h.year ? ` ${h.year}` : '');
+}
+
+/** One reference spotted in an agent reply: a click adds it to the project's cited.bib.
+ *  Shown as "Author et al. year" where known — bare ids are resolved through the literature
+ *  search (which answers DOI / arXiv queries from doi.org) — with the raw id as a small chip. */
 function AddBibButton({ r, project, notify }: { r: BibRef; project: string; notify: Notify }) {
   const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
+  const [hit, setHit] = useState<LitHit | null>(null);
+  useEffect(() => {
+    let on = true;
+    if (!r.bibtex && !r.nice && r.doi) void resolveRef(r.doi).then(h => { if (on) setHit(h); });
+    return () => { on = false; };
+  }, [r.doi, r.bibtex, r.nice]);
   const add = () => {
     if (state !== 'idle') return;
     setState('busy');
-    const data = r.bibtex ? { bibtex: r.bibtex } : { hit: { id: r.doi!, title: '', authors: [], year: null, venue: '', type: '', doi: r.doi!, arxiv: null, url: null, citations: null, sources: [] } };
+    const data = r.bibtex ? { bibtex: r.bibtex }
+      : { hit: hit ?? { id: r.doi!, title: '', authors: [], year: null, venue: '', type: '', doi: r.doi!, arxiv: null, url: null, citations: null, sources: [] } };
     api.bibAdd(project, data)
       .then(res => { setState('done'); notify(res.existed ? `${res.key} was already in ${res.file}` : `Added ${res.key} to ${res.file}`); })
       .catch(e => { setState('idle'); notify(errText(e), 'error'); });
   };
+  const nice = r.nice ?? (hit && hitLabel(hit)) ?? null;
+  const chip = nice ? (r.kind === 'doi' ? 'doi' : r.label) : null;   // the raw identifier, small, after the name
   return (
     <button class="small-btn agent-bib-add" data-agent-bib={r.label} disabled={state !== 'idle'} onClick={add}
-      title={r.bibtex ? 'Add this BibTeX entry to the project’s cited.bib' : 'Fetch the BibTeX for this reference and add it to cited.bib'}>
-      {state === 'done' ? '✓ ' : '+ '}{r.label}
+      title={(r.bibtex ? 'Add this BibTeX entry to the project’s cited.bib' : 'Fetch the BibTeX for this reference and add it to cited.bib') + (r.doi ? `\n${r.doi}` : '')}>
+      {state === 'done' ? '✓ ' : '+ '}{nice ?? r.label}{chip && <span class="bib-kind">{chip}</span>}
     </button>
   );
 }
