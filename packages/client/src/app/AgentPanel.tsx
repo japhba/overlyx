@@ -248,20 +248,31 @@ function ItemView({ it, project, notify }: { it: AgentItem; project?: string; no
   }
 }
 
+/** The tool arguments of an MCP elicitation (codex gating an MCP tool call), compactly. */
+function ElicitParams({ meta }: { meta: any }) {
+  const rows: { name?: string; display_name?: string; value?: unknown }[] | null = Array.isArray(meta?.tool_params_display) ? meta.tool_params_display : null;
+  const obj = !rows && meta?.tool_params && typeof meta.tool_params === 'object' ? meta.tool_params as Record<string, unknown> : null;
+  const entries: [string, unknown][] = rows ? rows.map(r => [String(r.display_name ?? r.name ?? ''), r.value] as [string, unknown]) : obj ? Object.entries(obj) : [];
+  if (!entries.length) return null;
+  const show = (v: unknown) => { const t = typeof v === 'string' ? v : JSON.stringify(v); return t.length > 400 ? t.slice(0, 400) + '…' : t; };
+  return <div class="agent-item cmd">{entries.map(([k, v]) => <div class="line" key={k}>{k}: {show(v)}</div>)}</div>;
+}
+
 /** The diff + accept view of a pending approval, with an optional comment back to the agent. */
 function ApprovalCard({ a, onDecide }: { a: Approval; onDecide: (d: string, feedback: string) => void }) {
   const [fb, setFb] = useState('');
   const p = a.params ?? {};
   const isCmd = /commandExecution|execCommand/.test(a.method);
+  const isElicit = /elicitation/.test(a.method);
   return (
     <div class="agent-approval" data-agent="approval">
       <div class="what">
-        <b>{isCmd ? 'Run this command?' : 'Apply these changes?'}</b>
+        <b>{isCmd ? 'Run this command?' : isElicit ? (p.message || 'Allow this tool call?') : 'Apply these changes?'}</b>
         {p.reason && <div class="reason">{p.reason}</div>}
-        {!isCmd && (p.changes ?? []).some((c: { path?: string }) => c.path?.endsWith('.tex')) && (
+        {!isCmd && !isElicit && (p.changes ?? []).some((c: { path?: string }) => c.path?.endsWith('.tex')) && (
           <div class="reason">⚠ A direct file write — it bypasses Track Changes. Deny (with a note) to make the agent propose it as a reviewable tracked edit instead.</div>
         )}
-        {isCmd ? <div class="agent-item cmd"><div class="line">$ {p.command}</div></div> : <Diff changes={p.changes ?? []} />}
+        {isCmd ? <div class="agent-item cmd"><div class="line">$ {p.command}</div></div> : isElicit ? <ElicitParams meta={p._meta} /> : <Diff changes={p.changes ?? []} />}
       </div>
       <input class="fb" placeholder="Optional: tell the agent what to do differently…" value={fb} onInput={e => setFb((e.target as HTMLInputElement).value)} />
       <div class="btns">

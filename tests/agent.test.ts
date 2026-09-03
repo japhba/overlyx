@@ -91,6 +91,10 @@ describe('agent sign-in', () => {
     const cfg = readFileSync(join(ROOT, 'data', 'agent-home', String(owner.id), 'config.toml'), 'utf8');
     expect(cfg).toContain('[mcp_servers.overlyx]');
     expect(cfg).toContain('bearer_token_env_var = "OVERLYX_MCP_TOKEN"');
+    // the overlyx tools edit as tracked changes the user reviews in the editor — codex must not
+    // gate them behind its own approval elicitation (it used to be auto-declined: every write
+    // tool returned "user rejected MCP tool call")
+    expect(cfg).toContain('default_tools_approval_mode = "approve"');
     const row = db.prepare("SELECT token_plain FROM mcp_tokens WHERE user_id = ? AND name = 'Agent panel'").get(owner.id) as { token_plain: string } | undefined;
     expect(row?.token_plain).toMatch(/^olxmcp_/);
   });
@@ -204,6 +208,23 @@ describe('threads and turns', () => {
     const file = join(ROOT, 'projects', 'p', 'hello.txt');
     for (let i = 0; i < 30 && !existsSync(file); i++) await sleep(100);
     expect(readFileSync(file, 'utf8')).toContain('hello from the stub agent');
+    expect((await turn).status).toBe(200);
+  });
+
+  it('an MCP elicitation becomes an approval card; accepting answers with an ElicitResult', async () => {
+    // codex 0.149+ gates MCP tool calls with an elicitation — blanket-declining it made every
+    // overlyx write tool return "user rejected MCP tool call"
+    const untilRequest = collectEvents('owner', evs => evs.some(e => e.kind === 'request' && e.method === 'mcpServer/elicitation/request'), 6000);
+    await sleep(150);
+    const turn = post(`/projects/p/agent/threads/${tid}/turn`, { text: 'please use the mcp tool' });
+    const request = (await untilRequest).find(e => e.kind === 'request' && e.method === 'mcpServer/elicitation/request');
+    expect(request?.params.message).toContain('insert_paragraphs');
+    expect(request?.params._meta?.tool_params_display?.[0]?.name).toBe('latex');
+    const untilDone = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
+    await sleep(150);
+    expect((await post(`/projects/p/agent/threads/${tid}/approval`, { requestId: request.requestId, decision: 'acceptForSession' })).status).toBe(200);
+    const deltas = (await untilDone).filter(e => e.method === 'item/agentMessage/delta').map(e => e.params.delta).join('');
+    expect(deltas).toContain('elicitation accepted persist=session');   // the ElicitResult reached the stub
     expect((await turn).status).toBe(200);
   });
 

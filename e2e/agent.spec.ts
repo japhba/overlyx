@@ -83,6 +83,15 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   expect(readFileSync(helloFile, 'utf8')).toContain('hello from the stub agent');
   await expect(page.locator('.agent-msg.assistant').last()).toContainText('Stub reply', { timeout: 15000 });
 
+  // codex gating an overlyx MCP tool call arrives as an elicitation: the card shows the
+  // question and the tool arguments; allowing it answers with an ElicitResult (accept)
+  await page.locator('.agent-compose textarea').fill('use the mcp tool please');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-agent="approval"]')).toContainText('Allow overlyx.insert_paragraphs?', { timeout: 15000 });
+  await expect(page.locator('[data-agent="approval"]')).toContainText('latex: \\section{Probe}');
+  await page.locator('[data-agent="approval"] [data-approve="accept"]').click();
+  await expect(page.locator('.agent-msg.assistant').last()).toContainText('elicitation accepted', { timeout: 15000 });
+
   // markdown links in the reply render as real links
   await page.locator('.agent-compose textarea').fill('see [the docs](https://example.org/d) here');
   await page.keyboard.press('Enter');

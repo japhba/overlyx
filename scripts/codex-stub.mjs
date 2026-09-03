@@ -35,9 +35,9 @@ function runTurn(id, p) {
   const userItem = { type: 'userMessage', id: uid, clientId: p.clientUserMessageId ?? null, content: p.input };
   notify('item/started', { threadId: t.id, turnId, item: userItem, startedAtMs: Date.now() });
   notify('item/completed', { threadId: t.id, turnId, item: userItem, completedAtMs: Date.now() });
-  const finish = () => {
+  const finish = (replyOverride) => {
     const itemId = 'item-' + ++nItem;
-    const reply = `Stub reply to: ${text.split('\n').pop().slice(0, 120)}` + (p.model ? ` [model=${p.model}${p.effort ? ' effort=' + p.effort : ''}]` : '');
+    const reply = replyOverride ?? `Stub reply to: ${text.split('\n').pop().slice(0, 120)}` + (p.model ? ` [model=${p.model}${p.effort ? ' effort=' + p.effort : ''}]` : '');
     notify('item/started', { threadId: t.id, turnId, item: { type: 'agentMessage', id: itemId, text: '', phase: null }, startedAtMs: Date.now() });
     for (const piece of [reply.slice(0, 12), reply.slice(12)]) notify('item/agentMessage/delta', { threadId: t.id, turnId, itemId, delta: piece });
     notify('item/completed', { threadId: t.id, turnId, item: { type: 'agentMessage', id: itemId, text: reply, phase: null }, completedAtMs: Date.now() });
@@ -45,11 +45,27 @@ function runTurn(id, p) {
     notify('turn/completed', { threadId: t.id, turn: turn('completed') });
     result(id, { turn: turn('completed') });
   };
+  if (/use the mcp tool/i.test(text)) {
+    // codex gating an MCP tool call: an elicitation request the client answers with an ElicitResult
+    const reqId = ++nReq;
+    pendingApprovals.set(reqId, (result) => {
+      const ok = result.action === 'accept';
+      const persist = result._meta?.persist ? ` persist=${result._meta.persist}` : '';
+      finish(ok ? `elicitation accepted${persist}` : `elicitation ${result.action ?? 'declined'}`);
+    });
+    out({ id: reqId, method: 'mcpServer/elicitation/request', params: {
+      threadId: t.id, turnId, serverName: 'overlyx', mode: 'form',
+      message: 'Allow overlyx.insert_paragraphs?',
+      requestedSchema: { type: 'object', properties: {} },
+      _meta: { persist: ['session', 'always'], tool_params_display: [{ name: 'latex', value: '\\section{Probe}', display_name: 'latex' }] },
+    } });
+    return;
+  }
   if (/write hello/i.test(text)) {
     const itemId = 'item-' + ++nItem, reqId = ++nReq;
     const change = { path: path.join(t.cwd, 'hello.txt'), kind: 'add', diff: '+hello from the stub agent\n' };
     notify('item/started', { threadId: t.id, turnId, item: { type: 'fileChange', id: itemId, changes: [change], status: 'inProgress' }, startedAtMs: Date.now() });
-    pendingApprovals.set(reqId, (decision) => {
+    pendingApprovals.set(reqId, ({ decision }) => {
       const ok = decision === 'accept' || decision === 'acceptForSession';
       if (ok) fs.writeFileSync(change.path, 'hello from the stub agent\n');
       notify('item/completed', { threadId: t.id, turnId, item: { type: 'fileChange', id: itemId, changes: [change], status: ok ? 'completed' : 'declined' }, completedAtMs: Date.now() });
@@ -70,7 +86,7 @@ process.stdin.on('data', (d) => {
     const { id, method, params: p = {} } = m;
     if (id !== undefined && !method) {   // a response to one of our approval requests
       const cb = pendingApprovals.get(id);
-      if (cb) { pendingApprovals.delete(id); cb(m.result?.decision ?? 'decline'); }
+      if (cb) { pendingApprovals.delete(id); cb(m.result ?? {}); }
       continue;
     }
     switch (method) {

@@ -137,6 +137,11 @@ web_search = true
 [mcp_servers.overlyx]
 url = "http://127.0.0.1:${config.port}/mcp"
 bearer_token_env_var = "OVERLYX_MCP_TOKEN"
+# The tools already apply document edits as tracked changes the user reviews in the editor, so
+# codex must not gate them behind its own approval prompt. That prompt arrives as an MCP
+# elicitation; the panel used to have no card for it and every write tool came back
+# "user rejected MCP tool call".
+default_tools_approval_mode = "approve"
 `;
     let old: string | null = null;
     try { old = fs.readFileSync(file, 'utf8'); } catch { /* fresh home */ }
@@ -278,13 +283,10 @@ bearer_token_env_var = "OVERLYX_MCP_TOKEN"
   /** codex asks the client something (command / file-change approval): forward to the panel. */
   private onServerRequest(msg: JsonRpcMsg): void {
     const method = msg.method!;
-    if (method === 'mcpServer/elicitation/request') {
-      // an MCP server asked the user a question mid-tool-call; there is no UI for it — decline
-      // it properly (MCP ElicitResult) instead of failing the call with a protocol error
-      this.send({ jsonrpc: '2.0', id: msg.id, result: { action: 'decline' } });
-      return;
-    }
-    if (!/requestApproval|applyPatchApproval|execCommandApproval|requestUserInput/.test(method)) {
+    // Forwarded to the panel as approval cards: codex's command / file-change approvals, and MCP
+    // elicitations — codex asks the user to allow an MCP tool call this way (the question in
+    // params.message, tool arguments under params._meta). Anything else is unsupported.
+    if (!/requestApproval|applyPatchApproval|execCommandApproval|requestUserInput|mcpServer\/elicitation/.test(method)) {
       this.send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: `${method} is not supported by this client` } });
       return;
     }
@@ -299,6 +301,16 @@ bearer_token_env_var = "OVERLYX_MCP_TOKEN"
     const r = this.serverReqs.get(requestId);
     if (!r) return false;
     this.serverReqs.delete(requestId);
+    // an elicitation answers with an MCP ElicitResult, not the approval {decision} shape; codex
+    // maps decline → "user rejected MCP tool call", accept → approved (persist: 'session' makes
+    // it stick for the rest of the session, like acceptForSession on a command approval)
+    if (r.method === 'mcpServer/elicitation/request' && typeof result?.decision === 'string') {
+      const d = result.decision;
+      result = d === 'accept' ? { action: 'accept', content: null }
+        : d === 'acceptForSession' ? { action: 'accept', content: null, _meta: { persist: 'session' } }
+        : d === 'cancel' ? { action: 'cancel', content: null }
+        : { action: 'decline', content: null };
+    }
     this.send({ jsonrpc: '2.0', id: r.id, result });
     return true;
   }
