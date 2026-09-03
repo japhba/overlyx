@@ -11,7 +11,7 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { yDocToProsemirrorJSON } from 'y-prosemirror';
 import {
-  mergeLyx, pmToLyxBody, type LyxDocument, type PMJSON,
+  mergeLyx, pmToLyxBody, writeParagraphs, type LyxDocument, type PMJSON,
 } from '@overlyx/core';
 import { checkTexHealth, repairTex, type HealthIssue } from '@overlyx/core/tex/index.ts';
 import { db } from './db.ts';
@@ -407,9 +407,11 @@ export class DocManager {
       } else {
         const parsed = doc.parse(text);   // also learns whether this is a child document
         // Same bytes, but a parser normalisation may structure them differently than the stored
-        // state does (e.g. comment blocks merging into one TeX-Code inset): fold the new structure
-        // into the stored history as a diff — the epoch survives, offline copies still sync.
-        if (parsed.body.length !== doc.toLyxDocument().body.length) {
+        // state does (comment blocks merging into one TeX-Code inset; \begin{definition} becoming
+        // a theorem layout once the parser learnt the document's \newtheorem): fold the new
+        // structure into the stored history as a diff — the epoch survives, offline copies still
+        // sync. Compared structurally — paragraph counts stay equal in most of these cases.
+        if (writeParagraphs(parsed.body) !== writeParagraphs(doc.toLyxDocument().body)) {
           console.log(`[docs] ${id}: parser normalisation changed the structure — merging`);
           doc.loadFromLyx(parsed, 'file-load');
         }
