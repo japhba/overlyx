@@ -20,9 +20,20 @@ const FALLBACK_MACROS: Record<string, { def: string; args: number }> = {
   intercal: { def: '\\top', args: 0 },
 };
 
-let docMacros: MacroTable = {};
+/**
+ * Per-view document-macro tables: several documents are open at once (the tabs of a project, a
+ * master with its children), each with its own server macros — a single shared table used to be
+ * clobbered by whichever document applied its metadata last (switching notes ↔ scratchpad made
+ * formulas forget \bh & co). `lastTable` seeds merges (child editors stack onto the master
+ * applied just before them) and serves view-less callers.
+ */
+const docMacrosByView = new WeakMap<object, MacroTable>();
+const docSigByView = new WeakMap<object, string>();
+let lastTable: MacroTable = {};
 let docVersion = 0;
-let docSignature = '';
+const viewIds = new WeakMap<object, number>();
+let nextViewId = 1;
+const idOf = (v: object): number => { let id = viewIds.get(v); if (id === undefined) { id = nextViewId++; viewIds.set(v, id); } return id; };
 const inlineDefsByView = new WeakMap<object, InlineDef[]>();
 const tableCache = new Map<string, MacroTable>();
 const signatureByView = new WeakMap<object, string>();
@@ -42,16 +53,17 @@ const readyViews = new WeakSet<object>();
 export function markMacrosReady(view: object): void { readyViews.add(view); }
 export function macrosReady(view: object | undefined): boolean { return !!view && readyViews.has(view); }
 
-/** Set the macros that apply to every formula. `merge` keeps previously set macros (child editors of a combined view). */
-export function setDocumentMacros(macros: Record<string, { def: string; args: number; expand?: boolean }>, merge = false): void {
-  const next: MacroTable = merge ? { ...docMacros } : {};
+/** Set the macros that apply to every formula of `view`. `merge` stacks onto the table applied just before (child editors of a combined view). */
+export function setDocumentMacros(view: object, macros: Record<string, { def: string; args: number; expand?: boolean }>, merge = false): void {
+  const next: MacroTable = merge ? { ...(docMacrosByView.get(view) ?? lastTable) } : {};
   if (!merge) for (const [k, v] of Object.entries(FALLBACK_MACROS)) next[k] = { nargs: v.args, def: v.def };
   for (const [k, v] of Object.entries(macros)) next[k] = { nargs: v.args, def: v.def };
-  // unchanged tables must not invalidate anything: every formula would re-render for nothing
+  lastTable = next;
+  // an unchanged table must not invalidate anything: every formula would re-render for nothing
   const sig = JSON.stringify(next);
-  if (sig === docSignature) return;
-  docSignature = sig;
-  docMacros = next;
+  if (sig === docSigByView.get(view)) { for (const k of [...tableCache.keys()]) if (k.startsWith('0|')) tableCache.delete(k); return; }
+  docSigByView.set(view, sig);
+  docMacrosByView.set(view, next);
   docVersion++;
   tableCache.clear();
 }
@@ -69,12 +81,13 @@ export function setInlineMacroDefs(view: object, defs: InlineDef[]): void {
 
 /** The macro table (document macros + positional definitions before `pos`) for a formula, with a cache key. */
 export function macroTableFor(view: object | undefined, pos: number | undefined): { key: string; table: MacroTable } {
+  const docTable = (view ? docMacrosByView.get(view) : undefined) ?? lastTable;
   const defs = view ? inlineDefsByView.get(view) ?? [] : [];
   const applicable = pos === undefined ? defs : defs.filter(d => d.pos < pos);
-  const key = docVersion + '|' + applicable.map(d => `${d.name}=${d.args}:${d.def}`).join(';');
+  const key = (view ? idOf(view) : 0) + '|' + docVersion + '|' + applicable.map(d => `${d.name}=${d.args}:${d.def}`).join(';');
   let table = tableCache.get(key);
   if (!table) {
-    table = { ...docMacros };
+    table = { ...docTable };
     for (const d of applicable) table[d.name] = { nargs: d.args, def: d.def };
     tableCache.set(key, table);
   }

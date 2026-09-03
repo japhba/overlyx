@@ -138,7 +138,15 @@ export class LyxMathField {
     if (key === this._macroKey) return;
     this._macroKey = key;
     this.macros = macros;
-    this.cursor.macros = macros;
+    // a macro's arity changes how the source parses (\bh with an unknown arity became a bare
+    // command atom rendered as "unknown" — a field created before the document's macros arrived
+    // stayed broken): re-parse the current content with the new table, keeping the cursor
+    const latex = writeFormula(this.hull);
+    const path = this.pathOf(this.cursor.slices);
+    this.hull = parseFormula(latex, this.macros);
+    this.lastLatex = latex;
+    this.cursor = new MathCursor(this.hull, this.macros, { xToPos: (cell, x) => this.xToPos(cell, x) });
+    if (!this.restorePath(path)) { this.cursor.idx = this.cursor.lastidx; this.cursor.pos = this.cursor.lastpos; }
     this.render();
   }
   hasFocus(): boolean { return this.focused; }

@@ -78,8 +78,13 @@ function pump() {
   pumping = true;
   const step = () => {
     const batch = lazyQueue.splice(0, 8);
-    for (const v of batch) v.upgrade();
-    if (lazyQueue.length) requestAnimationFrame(step); else pumping = false;
+    // upgrading parses the formula — a field built before the document's macros are known parses
+    // them wrong (and used to stay wrong): keep those queued until the metadata has arrived
+    const deferred = batch.filter(v => !macrosReady(v.view));
+    for (const v of batch) if (!deferred.includes(v)) v.upgrade();
+    lazyQueue.push(...deferred);
+    const progressed = deferred.length < batch.length;
+    if (lazyQueue.length && progressed) requestAnimationFrame(step); else pumping = false;
   };
   requestAnimationFrame(step);
 }
@@ -276,6 +281,7 @@ export class MathInlineView implements NodeView {
     this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex: body }).setMeta('addToHistory', true));
   }
   refreshMacros() {
+    pump();   // macros may have just arrived: deferred lazy upgrades can proceed
     if (this.pending) { if (macrosReady(this.view)) schedulePump(); return; }
     const { key, table } = macroTableFor(this.view, this.getPos());
     if (this.field) this.field.setMacros(table, key);
@@ -422,6 +428,7 @@ export class MathDisplayView implements NodeView {
   ensureField(): LyxMathField { this.upgrade(); return this.field!; }
 
   refreshMacros() {
+    pump();   // macros may have just arrived: deferred lazy upgrades can proceed
     if (this.pending) { if (macrosReady(this.view)) schedulePump(); return; }
     const { key, table } = macroTableFor(this.view, this.getPos());
     if (this.field) this.field.setMacros(table, key);

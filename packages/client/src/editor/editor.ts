@@ -29,7 +29,7 @@ import { InsetView } from './nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
 import { editorContext, viewDocDir, viewProject } from './context';
 import { imageFiles, insertImageFiles, isSvgMarkup, looksLikeImageFileName, svgFile } from './imagepaste';
-import { setDocumentMacros, setInlineMacroDefs, markMacrosReady } from './lyxmath/macrotable';
+import { setDocumentMacros, setInlineMacroDefs, markMacrosReady, macroTableFor, macrosReady, macroVersion, mathViews } from './lyxmath/macrotable';
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
 import { includeTarget } from './commands';
@@ -718,7 +718,7 @@ function applyMacros(view: EditorView, defs: InlineDef[], serverMacros: ServerMa
   const own = new Set(defs.map(d => d.name));
   const base: ServerMacros = {};
   for (const [k, v] of Object.entries(serverMacros)) if (!own.has(k)) base[k] = v;
-  setDocumentMacros(base, merge);
+  setDocumentMacros(view, base, merge);
   setInlineMacroDefs(view, defs);
 }
 
@@ -729,10 +729,24 @@ function applyMacros(view: EditorView, defs: InlineDef[], serverMacros: ServerMa
  * The server macros are remembered per view; later document changes re-apply them through
  * `macroDefsPlugin`.
  */
-export function refreshMacros(view: EditorView, serverMacros: ServerMacros, merge = false): void {
-  serverMacrosByView.set(view, { macros: serverMacros, merge });
+export function refreshMacros(view: EditorView, serverMacros: ServerMacros | null, merge = false): void {
+  // null: the metadata is unavailable right now (an offline blip, a failed fetch during a deploy) —
+  // keep the macros this view already had instead of wiping every formula to "unknown"
+  const remembered = serverMacrosByView.get(view);
+  const macros = serverMacros ?? remembered?.macros ?? {};
+  const mrg = serverMacros ? merge : remembered?.merge ?? merge;
+  serverMacrosByView.set(view, { macros, merge: mrg });
   markMacrosReady(view);
-  applyMacros(view, inlineMacroDefs(view.state.doc), serverMacros, merge);
+  applyMacros(view, inlineMacroDefs(view.state.doc), macros, mrg);
 }
 
 export { editorContext };
+
+// dev-only debugging hooks (the probes in scratch/ read these; absent from production builds)
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { olMacroDebug?: unknown }).olMacroDebug = {
+    macroTableFor, macrosReady, version: () => macroVersion, refreshMacros,
+    remembered: (v: object) => serverMacrosByView.get(v as EditorView),
+    views: () => [...mathViews].map(v => { const x = v as unknown as { field?: unknown; pending?: boolean; staticKey?: string; view?: object; dom?: HTMLElement }; return { field: !!x.field, pending: !!x.pending, key: x.staticKey?.split('|').slice(0, 2).join('|') ?? null, active: x.view === editorContext.activeView, attached: !!x.dom?.isConnected }; }),
+  };
+}

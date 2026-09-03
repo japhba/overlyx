@@ -589,7 +589,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         editorContext.trackChanges = m.trackingChanges;
         editorContext.changeAuthorId = m.authors.find(x => x.name === user.name)?.id;
       }
-      refreshMacros(h.view, m?.macros ?? {});
+      refreshMacros(h.view, m?.macros ?? null);
       const ro = m?.role === 'view';
       setViewOnly(ro);
       h.setViewOnly(ro);
@@ -622,8 +622,10 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       });
     };
     loadMeta();
+    // an offline blip (laptop sleep) leaves the metadata unloaded: fetch it as soon as we are back
+    window.addEventListener('online', loadMeta);
     rerender();
-    return () => { cancelled = true; clearTimeout(metaRetry); handle.destroy(); editorRef.current = null; };
+    return () => { cancelled = true; clearTimeout(metaRetry); window.removeEventListener('online', loadMeta); handle.destroy(); editorRef.current = null; };
   }, [docId, reloadKey]);
 
   /**
