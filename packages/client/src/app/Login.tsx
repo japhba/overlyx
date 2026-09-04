@@ -11,13 +11,13 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Wordmark } from './Logo';
-import { api, type User } from '../api';
+import { api, googleSignInUrl, type User } from '../api';
 import { useTheme } from './theme';
 import './landing.css';
 
 export const GITHUB_URL = 'https://github.com/japhba/overlyx';
 
-const GoogleG = () => (
+export const GoogleG = () => (
   <svg class="g" viewBox="0 0 48 48" aria-hidden="true">
     <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
     <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
@@ -26,8 +26,20 @@ const GoogleG = () => (
   </svg>
 );
 
+/** The location hash, live (the Google links carry it as the place to return to). */
+function useHash(): string {
+  const [hash, setHash] = useState(location.hash);
+  useEffect(() => {
+    const on = () => setHash(location.hash);
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
+  return hash;
+}
+
+/** Continue with Google — back to the document in the URL afterwards (a deep link, a guest keeping a project) */
 const GoogleButton = () => (
-  <a class="google" href="/api/auth/google" data-google-login><GoogleG /><span>Continue with Google</span></a>
+  <a class="google" href={googleSignInUrl(useHash())} data-google-login><GoogleG /><span>Continue with Google</span></a>
 );
 
 const VSCODE_URL = GITHUB_URL + '/releases/latest';
@@ -128,7 +140,13 @@ function DemoWheel() {
   );
 }
 
-export function Login({ onLogin, google }: { onLogin: (u: User) => void; google: boolean }) {
+export function Login({ onLogin, google, note, onBack }: {
+  onLogin: (u: User) => void; google: boolean;
+  /** why the visitor is here (a share link that did not open, a guest keeping a project) */
+  note?: string | null;
+  /** a guest changed their mind: back to the document */
+  onBack?: () => void;
+}) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
@@ -136,6 +154,7 @@ export function Login({ onLogin, google }: { onLogin: (u: User) => void; google:
   // the password form is the fallback: folded away while Google sign-in is offered
   const [wantPassword, setWantPassword] = useState(false);
   const showPassword = wantPassword || !google;
+  const hash = useHash();
   const submit = async (e: Event) => {
     e.preventDefault();
     setBusy(true); setErr('');
@@ -166,7 +185,7 @@ export function Login({ onLogin, google }: { onLogin: (u: User) => void; google:
           </div>
           <form class="signin" onSubmit={submit}>
             <h2>Get started</h2>
-            <p class="signin-note">Sign in and your first project is one click away.</p>
+            {note ? <p class="signin-note link-note" data-login-note>{note}</p> : <p class="signin-note">Sign in and your first project is one click away.</p>}
             {google && <GoogleButton />}
             <a class="vscode-get" data-vscode-get href={VSCODE_URL} target="_blank" rel="noopener">
               <VscodeIcon /><span>Get the VS Code extension</span>
@@ -185,6 +204,7 @@ export function Login({ onLogin, google }: { onLogin: (u: User) => void; google:
                 <button class={'btn' + (google ? '' : ' primary')} disabled={busy}>Sign in</button>
               </div>
             )}
+            {onBack && <button type="button" class="fallback-link" data-login-back onClick={onBack}>← Continue as a guest for now</button>}
             <a class="demos-hint" href="#demos">▾ See it in action</a>
           </form>
         </header>
@@ -194,7 +214,7 @@ export function Login({ onLogin, google }: { onLogin: (u: User) => void; google:
         </section>
         <div class="cta-end">
           <p>Your next paper deserves a nicer editor.</p>
-          {google ? <a class="google" href="/api/auth/google"><GoogleG /><span>Continue with Google</span></a>
+          {google ? <a class="google" href={googleSignInUrl(hash)}><GoogleG /><span>Continue with Google</span></a>
             : <a class="google" href="#top" onClick={e => { e.preventDefault(); document.querySelector('.login')?.scrollTo({ top: 0, behavior: 'smooth' }); }}>Sign in above</a>}
         </div>
       </div>

@@ -5,10 +5,14 @@ import type { Request, Response, NextFunction, Router } from 'express';
 import express from 'express';
 import { db, pickColor, type UserRow } from './db.ts';
 import { config, JWT_SECRET } from './config.ts';
-import { bindInvitations, isInvited } from './access.ts';
+import { adoptGuest, bindInvitations, isInvited } from './access.ts';
 import { notifySignup } from './mailer.ts';
 
-export interface SessionUser { id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null; email?: string | null }
+export interface SessionUser {
+  id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null; email?: string | null;
+  /** a temporary account: came in through a share link without signing in (createGuest) */
+  guest?: boolean;
+}
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -40,10 +44,29 @@ export function createUser(username: string, displayName: string, password: stri
   return db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid) as UserRow;
 }
 
+/** Anonymous visitors get a face and a name (Google Docs' "Anonymous Capybara"). */
+const GUEST_ANIMALS = ['Aardvark', 'Badger', 'Capybara', 'Dolphin', 'Elk', 'Fox', 'Gecko', 'Heron', 'Ibis', 'Jackal', 'Koala', 'Lemur', 'Marmot', 'Narwhal', 'Otter', 'Panda', 'Quokka', 'Raccoon', 'Seal', 'Tapir', 'Urchin', 'Vole', 'Wombat', 'Yak', 'Zebra'];
+
+/**
+ * A guest: the temporary account of somebody who opened a share link without signing in. No
+ * password, no e-mail; it lives as long as its session cookie and vanishes when the visitor signs
+ * in (access.ts adoptGuest moves what the link granted to the real account) or is pruned.
+ */
+export function createGuest(): UserRow {
+  const animal = GUEST_ANIMALS[crypto.randomInt(GUEST_ANIMALS.length)];
+  for (;;) {
+    const username = 'guest-' + crypto.randomBytes(5).toString('hex');
+    if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) continue;
+    const info = db.prepare('INSERT INTO users (username, display_name, password_hash, color, email, google_sub, is_admin, is_guest, created_at) VALUES (?,?,?,?,?,?,0,1,?)')
+      .run(username, 'Anonymous ' + animal, null, pickColor(), null, null, Date.now());
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid) as UserRow;
+  }
+}
+
 export function toSessionUser(u: UserRow): SessionUser {
   // the profile picture is served through our own origin (see /api/users/:id/avatar): third-party
   // image hosts get blocked by privacy extensions / referrer rules, and it works offline this way
-  return { id: u.id, username: u.username, name: u.display_name, color: u.color, isAdmin: !!u.is_admin, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null, email: u.email };
+  return { id: u.id, username: u.username, name: u.display_name, color: u.color, isAdmin: !!u.is_admin, avatar: u.avatar_url ? `/api/users/${u.id}/avatar` : null, email: u.email, ...(u.is_guest ? { guest: true } : {}) };
 }
 
 export function signSession(u: SessionUser): string {
@@ -82,19 +105,39 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
-function setSessionCookie(req: Request, res: Response, u: SessionUser): void {
+export function setSessionCookie(req: Request, res: Response, u: SessionUser): void {
   res.cookie('ol_session', signSession(u), {
     httpOnly: true, sameSite: 'lax', secure: config.publicUrl.startsWith('https') || req.secure,
     maxAge: config.sessionDays * 24 * 3600 * 1000, path: '/',
   });
 }
 
+/**
+ * Where to go after a sign-in: a location hash (`#/project/doc.tex`) the client asked to return
+ * to. Anything else is dropped — a hash never leaves our origin, so this is not an open redirect.
+ */
+function safeNext(x: unknown): string {
+  const s = typeof x === 'string' ? x : '';
+  return /^#\/[^\s<>"'`\\]{0,1500}$/.test(s) ? s : '';
+}
+
 /* ------------------------------------------------------------------ routes */
 
 const loginAttempts = new Map<string, { n: number; until: number }>();
 
-export function authRouter(): Router {
+export interface AuthHooks {
+  /** a guest signed in: these projects were re-attributed to the account, the guest's connections must reconnect */
+  onGuestAdopted?: (projects: string[], guestId: number) => void;
+}
+
+export function authRouter(hooks: AuthHooks = {}): Router {
   const r = express.Router();
+  /** the signed-in visitor was a guest until now: the account takes over what the guest had */
+  const adopt = (req: Request, row: UserRow) => {
+    if (!req.user?.guest) return;
+    const moved = adoptGuest(req.user, row.id);
+    if (moved.length) hooks.onGuestAdopted?.(moved, req.user.id);
+  };
 
   r.post('/login', express.json(), (req, res) => {
     const { username, password } = req.body ?? {};
@@ -112,6 +155,7 @@ export function authRouter(): Router {
     }
     loginAttempts.delete(ip);
     bindInvitations(row.id, row.email);
+    adopt(req, row);
     const u = toSessionUser(row);
     setSessionCookie(req, res, u);
     res.json({ user: u });
@@ -131,6 +175,10 @@ export function authRouter(): Router {
     if (!config.google.clientId) { res.status(404).send('Google login not configured'); return; }
     const state = crypto.randomBytes(16).toString('hex');
     res.cookie('ol_oauth_state', state, { httpOnly: true, sameSite: 'lax', maxAge: 600000, path: '/' });
+    // ?next=#/project/doc.tex: back to the document afterwards (a guest saving a shared project, a deep link)
+    const next = safeNext(req.query.next);
+    if (next) res.cookie('ol_oauth_next', next, { httpOnly: true, sameSite: 'lax', maxAge: 600000, path: '/' });
+    else res.clearCookie('ol_oauth_next', { path: '/' });
     const redirect = redirectUri(req);
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', config.google.clientId);
@@ -179,13 +227,15 @@ export function authRouter(): Router {
       // the instance owner is an administrator; invitations addressed to this e-mail now belong to the account
       if (config.ownerEmail && row.email?.toLowerCase() === config.ownerEmail && !row.is_admin) { db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(row.id); row.is_admin = 1; }
       bindInvitations(row.id, row.email);
+      adopt(req, row);
       // keep the profile picture fresh on every sign-in
       if (info.picture !== undefined && info.picture !== row.avatar_url) {
         db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(info.picture ?? null, row.id);
         row = db.prepare('SELECT * FROM users WHERE id = ?').get(row.id) as UserRow;
       }
       setSessionCookie(req, res, toSessionUser(row));
-      res.redirect('/');
+      res.clearCookie('ol_oauth_next', { path: '/' });
+      res.redirect('/' + safeNext(cookies.ol_oauth_next));
     } catch (e) {
       res.status(500).send('google auth error: ' + String(e));
     }

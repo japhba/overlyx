@@ -17,7 +17,7 @@ process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 process.env.OVERLYX_OWNER_EMAIL = 'owner@example.com';
 
 const access = await import('../packages/server/src/access.ts');
-const { createUser, toSessionUser } = await import('../packages/server/src/auth.ts');
+const { createUser, createGuest, toSessionUser } = await import('../packages/server/src/auth.ts');
 const { db } = await import('../packages/server/src/db.ts');
 
 const admin = toSessionUser(createUser('admin', 'Admin', 'pw', { isAdmin: true }));
@@ -145,6 +145,56 @@ describe('link sharing', () => {
     expect(access.roleFor(carol, 'paper')).toBe('edit');
     expect(() => access.acceptLink(link.token, bob)).toThrow(/not valid/);
     expect(access.setLink('paper', 'view')?.token).not.toBe(link.token);
+  });
+
+  it('lets a guest (no account) in, and hands what the guest gathered to the account they sign in with', () => {
+    const link = access.setLink('paper', 'edit')!;
+    expect(access.linkProject(link.token)?.name).toBe('paper');
+    expect(access.linkProject('nope')).toBeUndefined();
+    const guest = toSessionUser(createGuest());
+    expect(guest.guest).toBe(true);
+    expect(guest.username).toMatch(/^guest-[0-9a-f]{10}$/);
+    expect(guest.name).toMatch(/^Anonymous [A-Z][a-z]+$/);
+    expect(bob.guest).toBeUndefined();
+    expect(access.acceptLink(link.token, guest).role).toBe('edit');
+    expect(access.roleFor(guest, 'paper')).toBe('edit');
+    expect(access.accessibleProjects(guest).map(p => [p.name, p.via])).toEqual([['paper', 'link']]);
+    expect(access.ensureWelcomeProject(guest)).toBeNull();                       // no example project for guests
+    expect(() => access.addMember('legacy', guest.username, 'view', jan)).toThrow(/guest/);
+    expect(() => access.setOwner('paper', guest.username)).toThrow(/guest/);
+    access.logAccess('paper', guest.id, 'open', 'main.tex');
+    // the guest signs in as a new account: the link membership and the activity move over, the guest is gone
+    const erin = toSessionUser(createUser('erin', 'Erin', null, { email: 'erin@example.com', googleSub: 'g-erin' }));
+    expect(access.roleFor(erin, 'paper')).toBeNull();
+    expect(access.adoptGuest(erin, erin.id)).toEqual([]);                         // not a guest: nothing to do
+    expect(access.adoptGuest(guest, erin.id)).toEqual(['paper']);
+    expect(access.roleFor(erin, 'paper')).toBe('edit');
+    expect(access.accessibleProjects(erin).find(p => p.name === 'paper')?.via).toBe('link');
+    expect(access.activityOf('paper')[0]).toMatchObject({ action: 'open', user: { username: 'erin' } });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM users WHERE id = ?').get(guest.id)).toEqual({ n: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM project_members WHERE user_id = ?').get(guest.id)).toEqual({ n: 0 });
+    // an account that is a viewer already is raised by an edit link, an owner is left alone
+    const g2 = toSessionUser(createGuest());
+    access.acceptLink(link.token, g2);
+    access.removeMember('paper', access.shareInfo('paper').members.find(m => m.user?.username === 'carol')!.id);
+    access.addMember('paper', 'carol', 'view', jan);
+    expect(access.adoptGuest(g2, carol.id)).toEqual(['paper']);
+    expect(access.roleFor(carol, 'paper')).toBe('edit');                        // g2 came in while the link said edit
+    access.setLink('paper', 'view');
+    const g3 = toSessionUser(createGuest());
+    access.acceptLink(link.token, g3);
+    expect(access.adoptGuest(g3, jan.id)).toEqual(['paper']);
+    expect(access.roleFor(jan, 'paper')).toBe('owner');
+    expect(access.shareInfo('paper').members.map(m => m.user?.username)).not.toContain(g3.username);
+    // guests whose session expired are pruned
+    const old = toSessionUser(createGuest());
+    access.acceptLink(link.token, old);
+    db.prepare('UPDATE users SET created_at = ? WHERE id = ?').run(Date.now() - 40 * 24 * 3600 * 1000, old.id);
+    const fresh = toSessionUser(createGuest());
+    expect(access.pruneGuests()).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM users WHERE id IN (?, ?)').get(old.id, fresh.id)).toEqual({ n: 1 });
+    expect(access.roleFor(old, 'paper')).toBeNull();
+    access.setLink('paper', null);
   });
 });
 

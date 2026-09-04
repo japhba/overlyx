@@ -206,7 +206,7 @@ function SearchMenu({ menu, entries, close, recording, setRecording }: { menu: M
   );
 }
 
-export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle }: {
+export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle, onSignIn }: {
   menus: MenuDef[]; user: User; right?: ComponentChildren; onLogout: () => void; onSettings?: () => void; onHome: () => void;
   /** reference entries (shortcuts without a menu item) for the palette */
   searchEntries?: SearchEntry[];
@@ -216,6 +216,8 @@ export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, sear
   /** the Share button (top right) — only for the project's owner */
   onShare?: (() => void) | null;
   shareTitle?: string;
+  /** a guest (came in through a share link): the Sign in button takes the Share button's place */
+  onSignIn?: () => void;
 }) {
   const [userOpen, setUserOpen] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
@@ -293,6 +295,11 @@ export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, sear
           Share
         </button>
       )}
+      {user.guest && onSignIn && (
+        <button type="button" class="share-btn signin-btn" data-signin onClick={onSignIn} title="You are here as a guest — sign in to keep this project in your account">
+          Sign in
+        </button>
+      )}
       <a class="gh-link" href="https://github.com/japhba/overlyx" target="_blank" rel="noopener" title="OverLyX on GitHub — source code, issues, releases (GPL-3.0)">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
       </a>
@@ -301,7 +308,9 @@ export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, sear
         <button type="button" class="avatar-btn" data-user-menu title={`${user.name} (${user.username})`} onMouseDown={e => { e.preventDefault(); if (open !== null) setOpen(null); setUserOpen(o => !o); }}>
           <span class="avatar" style={{ background: user.color }} data-initials={user.avatar ? undefined : initials(user.name).length}><AvatarContent name={user.name} src={user.avatar} /></span>
         </button>
-        {userOpen && <MenuList items={[{ label: user.name, disabled: true }, { label: user.username, disabled: true }, { sep: true }, ...(onSettings ? [{ label: 'Settings…', action: onSettings }] : []), { label: 'Sign out', action: onLogout }]} path={['Account']} close={close} style="left:auto;right:0" />}
+        {userOpen && <MenuList items={[{ label: user.name, disabled: true }, { label: user.guest ? 'guest (not signed in)' : user.username, disabled: true }, { sep: true },
+          ...(user.guest && onSignIn ? [{ label: 'Sign in to keep this project…', action: onSignIn }] : onSettings ? [{ label: 'Settings…', action: onSettings }] : []),
+          { label: user.guest ? 'Leave' : 'Sign out', action: onLogout }]} path={['Account']} close={close} style="left:auto;right:0" />}
       </div>
     </div>
   );

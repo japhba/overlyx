@@ -61,7 +61,19 @@ blend.
   invites people by username or e-mail address as *viewers* or *editors* (an e-mail that has not
   signed in yet is kept as an invitation and bound to the account on its first Google sign-in), or
   turns on *Anyone with the link* (`/#/share/<token>`; switching back to *Restricted* revokes
-  everyone who came in through the link). Viewers can read and compile but every change is refused
+  everyone who came in through the link). The link means *anyone*: a visitor without an account
+  lands in the document straight away as a **guest** — `POST /api/share/:token/accept` (outside
+  the authenticated router) creates a temporary account ("Anonymous Otter", `users.is_guest`,
+  same-origin only, ≤ 30 per address and hour) and sets the session cookie; the client shows a
+  *Sign in* button top right with a dismissable callout (`app/Guest.tsx`) suggesting Google sign-in
+  to keep the project. Guests act only inside the projects their links opened (no projects, tokens,
+  agent, administration or example project of their own; `GUEST_DENIED` in index.ts) and get no
+  tour. Signing in — Google or password — while holding a guest cookie moves the guest's link
+  memberships and activity to the account and deletes the guest (`access.ts adoptGuest`; the
+  guest's open editors are kicked to reconnect); `/api/auth/google?next=#/…` returns to the
+  document afterwards (the landing page's Google buttons carry the current hash). Guests older than
+  the session are pruned at startup (`pruneGuests`). `OVERLYX_SIGNUP=invited` instances admit no
+  guests (the link asks to sign in). Viewers can read and compile but every change is refused
   — in the UI, on the API and on the WebSocket. Administrators (`OVERLYX_OWNER_EMAIL`, or
   `is_admin` in the database) do **not** see other people's projects: the start screen lists them
   under *Administration*, and *Open as administrator…* grants owner rights for one hour — logged in
@@ -167,7 +179,10 @@ blend.
   at the bottom of the page); the username + password form (accounts created by an administrator,
   e2e) is folded away behind a small link while Google sign-in is configured, and is the only form
   otherwise; *Get the VS Code extension* sits right under the Google button with the same weight,
-  linking to the newest GitHub release. Below the hero, a demo gallery wheel with four clips
+  linking to the newest GitHub release. The Google buttons carry the location hash as `?next=`,
+  so a deep link (`#/project/doc.tex`, a share link) is where the sign-in returns to; a share link
+  that did not open, or a guest asked to sign in, shows a note above the button (and *Continue as
+  a guest for now* to go back). Below the hero, a demo gallery wheel with four clips
   (`public/landing/*.{webm,mp4,jpg}`): real recordings of the editor (WYSIWYG math typing, the raw
   .tex split, two authors live with a margin comment thread, the VS Code extension), each in a light
   and a dark variant picked by the visitor's theme. One clip shows at a time: it plays once when the

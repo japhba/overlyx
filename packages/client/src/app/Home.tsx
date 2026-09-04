@@ -13,8 +13,10 @@ export function projectDocs(p: Project): string[] {
 }
 export const projectTitle = (p: Project) => p.title ?? p.name;
 
-export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, onChanged, onBrowse, notify }: {
+export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, onChanged, onBrowse, onSignIn, notify }: {
   user: User; refreshKey: number; onOpen: (id: string) => void; onStartTour: (id: string) => void; onShare: (project: string) => void; onGit: (project: string) => void; onChanged: () => void; onBrowse: () => void;
+  /** guests cannot create projects; they are asked to sign in instead */
+  onSignIn: () => void;
   notify: (text: string, kind?: 'info' | 'error') => void;
 }) {
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -36,7 +38,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const mine = projects?.filter(p => p.via === 'owner' && p !== example) ?? [];
   const shared = projects?.filter(p => p.via === 'member' || p.via === 'link') ?? [];
   const admin = projects?.filter(p => p.via === 'admin') ?? [];
-  const firstName = user.name.split(/\s+/)[0];
+  const firstName = user.guest ? 'guest' : user.name.split(/\s+/)[0];
 
   const newProject = async () => {
     const name = prompt('Name of the new project (letters, digits, space, . _ -):');
@@ -88,15 +90,17 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   return (
     <div class="home">
       <h1>Welcome{projects ? `, ${firstName}` : ''}</h1>
-      <div class="sub">OverLyX edits LyX documents in the browser, together with others. Projects are private until you share them.</div>
+      <div class="sub">{user.guest ? 'You are here as a guest, through a link somebody shared. Sign in to keep those projects in an account of your own — and to create projects.' : 'OverLyX edits LyX documents in the browser, together with others. Projects are private until you share them.'}</div>
       <div class="home-actions">
-        <button class="btn primary" onClick={() => void newProject()}>+ New project</button>
+        {user.guest
+          ? <button class="btn primary" data-guest-signin onClick={onSignIn}>Sign in</button>
+          : <button class="btn primary" onClick={() => void newProject()}>+ New project</button>}
         <button class="btn" onClick={onBrowse}>Show the documents panel</button>
       </div>
       {projects === null && <div class="meta">Loading your projects…</div>}
       {example && <div class="cards">{card(example)}</div>}
       {mine.length > 0 && <><h3>Your projects</h3><div class="cards">{mine.map(card)}</div></>}
-      {projects && !mine.length && !example && <div class="meta">You have no projects yet — create one, or ask a colleague to share theirs with you.</div>}
+      {projects && !mine.length && !example && !user.guest && <div class="meta">You have no projects yet — create one, or ask a colleague to share theirs with you.</div>}
       {shared.length > 0 && <><h3>Shared with you</h3><div class="cards">{shared.map(card)}</div></>}
       {admin.length > 0 && <><h3>Opened as administrator</h3><div class="cards">{admin.map(card)}</div></>}
       {user.isAdmin && adminList && others.length > 0 && (

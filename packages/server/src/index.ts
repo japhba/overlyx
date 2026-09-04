@@ -11,8 +11,8 @@ import { agentRoutes, disconnectAgents } from './agent.ts';
 import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
 import { createMcpToken, listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { userSettings, setUserSettings, userKeys, setUserKeys } from './userSettings.ts';
-import { authMiddleware, authRouter, requireAuth, createUser, generatePassword } from './auth.ts';
-import { attachWebSocket } from './ws.ts';
+import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
+import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, projectChangedListeners } from './docs.ts';
 import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile, isDocumentFile } from './projects.ts';
 import { cachedParseFile, importLyxFile, parseDocumentText, parseFragmentText } from './texdoc.ts';
@@ -20,9 +20,9 @@ import { toPdf } from './graphics.ts';
 import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit } from './export.ts';
 import { db } from './db.ts';
-import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
+import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
 import { sandboxAvailable } from './sandbox.ts';
-import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog } from './access.ts';
+import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests } from './access.ts';
 import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
 import { feedbackRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
@@ -44,7 +44,8 @@ app.use((_req, res, next) => {
   next();
 });
 
-app.use('/api/auth', authRouter());
+// a guest who signs in: their open editors hold the guest's identity — reconnect them as the account
+app.use('/api/auth', authRouter({ onGuestAdopted: (projects, guestId) => { for (const p of projects) manager.kick(p, [guestId], 'signed in'); } }));
 // git over HTTP (Basic auth, see git.ts) — before the API's cookie auth and JSON parsing
 app.use('/git', gitRouter());
 app.use('/mcp', mcpRouter());
@@ -52,8 +53,51 @@ app.use('/mcp', mcpRouter());
 app.use(wellKnownRoutes());
 app.use('/oauth', oauthRoutes());
 
+/**
+ * Open a share link: join the project and learn what to open. Without a session the visitor comes
+ * in as a **guest** — a temporary account that holds what the link granted until they sign in
+ * (auth.ts createGuest, access.ts adoptGuest) — which is why this route lives outside the
+ * authenticated router. Guests exist only on instances open to everyone (`OVERLYX_SIGNUP`).
+ */
+const guestBudget = new Map<string, { n: number; until: number }>();
+app.post('/api/share/:token/accept', (req, res) => {
+  try {
+    const token = String(req.params.token);
+    let user = req.user;
+    let joined = false;
+    if (!user) {
+      if (config.signup === 'invited') { res.status(401).json({ error: 'Sign in to open this shared project' }); return; }
+      // a cross-site page must not be able to plant a guest session in somebody's browser
+      if (!originAllowed(req) || req.headers['sec-fetch-site'] === 'cross-site') { res.status(403).json({ error: 'forbidden' }); return; }
+      if (!linkProject(token)) { res.status(404).json({ error: 'This link is not valid (any more). Ask the owner to share the project again.' }); return; }
+      // no account mills: a handful of guests per address and hour
+      const ip = req.ip ?? 'x';
+      if (guestBudget.size > 5000) { const now = Date.now(); for (const [k, v] of guestBudget) if (v.until < now) guestBudget.delete(k); }
+      const b = guestBudget.get(ip);
+      if (b && b.until > Date.now() && b.n >= 30) { res.status(429).json({ error: 'too many guests from this address, try again later' }); return; }
+      guestBudget.set(ip, b && b.until > Date.now() ? { n: b.n + 1, until: b.until } : { n: 1, until: Date.now() + 60 * 60 * 1000 });
+      user = toSessionUser(createGuest());
+      setSessionCookie(req, res, user);
+      joined = true;
+    }
+    const { project, role } = acceptLink(token, user);
+    const files = listProjects().find(p => p.name === project.name)?.files ?? [];
+    const lyx = files.filter(f => f.kind === 'doc' && !isBackupFile(f.name)).sort((a, b) => Number(!/(^|\/)main\.tex$/.test(a.path)) - Number(!/(^|\/)main\.tex$/.test(b.path)) || a.path.length - b.path.length || a.path.localeCompare(b.path));
+    res.json({ project: project.name, title: project.title, role, doc: lyx[0] ? `${project.name}/${lyx[0].path}` : null, ...(joined ? { user } : {}) });
+  } catch (e) { res.status(404).json({ error: (e as Error).message }); }
+});
+
 const api = express.Router();
 api.use(requireAuth);
+/**
+ * Guests act only inside the projects their links opened: no projects, tokens, agents or
+ * administration of their own (their role in a project is checked like everybody's, below).
+ */
+const GUEST_DENIED = /^\/(git\/tokens|mcp-tokens|admin(\/|$)|users$|agent(\/|$)|projects\/[^/]+\/agent(\/|$))/;
+api.use((req, res, next) => {
+  if (req.user!.guest && (GUEST_DENIED.test(req.path) || (req.method === 'POST' && req.path === '/projects'))) { res.status(403).json({ error: 'Sign in to do this' }); return; }
+  next();
+});
 api.use(express.json({ limit: '5mb' }));
 api.use(feedbackRoutes());
 api.use(agentRoutes());
@@ -191,16 +235,6 @@ api.post('/projects/:project/share/owner', needProject('owner'), (req, res) => {
   try { setOwner(req.params.project, String(req.body?.username ?? '')); logAccess(req.params.project, req.user!.id, 'share', `made ${String(req.body?.username ?? '')} the owner`); res.json({ share: shareInfo(req.params.project) }); }
   catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
-/** Open a share link: join the project and learn what to open. */
-api.post('/share/:token/accept', (req, res) => {
-  try {
-    const { project, role } = acceptLink(String(req.params.token), req.user!);
-    const files = listProjects().find(p => p.name === project.name)?.files ?? [];
-    const lyx = files.filter(f => f.kind === 'doc' && !isBackupFile(f.name)).sort((a, b) => Number(!/(^|\/)main\.tex$/.test(a.path)) - Number(!/(^|\/)main\.tex$/.test(b.path)) || a.path.length - b.path.length || a.path.localeCompare(b.path));
-    res.json({ project: project.name, title: project.title, role, doc: lyx[0] ? `${project.name}/${lyx[0].path}` : null });
-  } catch (e) { res.status(404).json({ error: (e as Error).message }); }
-});
-
 /** The owner's activity log: who opened, built, pulled/pushed, shared — and administrator access. */
 api.get('/projects/:project/activity', needProject('owner'), (req, res) => {
   res.json({ entries: activityOf(req.params.project, Number(req.query.limit ?? 50) || 50) });
@@ -1053,6 +1087,7 @@ adoptProjects();
 sandboxAvailable();
 void ensureAllRepos().then(() => startMirrorSweeper());
 pruneAccessLog();
+pruneGuests();
 
 const server = http.createServer(app);
 attachWebSocket(server);

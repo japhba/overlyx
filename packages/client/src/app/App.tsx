@@ -4,7 +4,7 @@ import { nodeText } from '../editor/cliptext';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
 import { undo, redo } from 'y-prosemirror';
 import { addColumnAfter, addColumnBefore, addRowAfter, addRowBefore, deleteColumn, deleteRow, deleteTable, mergeCells, splitCell } from 'prosemirror-tables';
-import { api, type AiStatus, type BibAddResult, type DocMeta, type Project, type User, fileUrl } from '../api';
+import { api, googleSignInUrl, type AiStatus, type BibAddResult, type DocMeta, type Project, type User, fileUrl } from '../api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { openRewrite, REWRITE_KEY } from '../editor/ai/rewrite';
 import { Login } from './Login';
@@ -13,6 +13,7 @@ import { Home, projectDocs } from './Home';
 import { TextEditor } from './TextEditor';
 import { MarkdownEditor } from './MarkdownEditor';
 import { ShareDialog } from './Share';
+import { GuestCallout } from './Guest';
 import { GitDialog } from './Git';
 import type { Mark } from 'prosemirror-model';
 import { MenuBar, openPalette, PALETTE_LABEL, PALETTE_DEFAULT, type MenuDef } from './MenuBar';
@@ -106,20 +107,34 @@ export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [google, setGoogle] = useState(false);
   const [ready, setReady] = useState(false);
+  // why the share link in the URL did not open (shown on the sign-in page)
+  const [linkNote, setLinkNote] = useState<string | null>(null);
   useEffect(() => {
-    api.me().then(r => {
-      setUser(r.user); setGoogle(r.google);
-      if (r.user) void syncBindings();   // account shortcuts follow the user across browsers
+    api.me().then(async r => {
+      let u = r.user;
+      // a share link opened without an account: the server lets the visitor in as a guest, straight
+      // to the document — signing in later keeps the project (Workspace's guest callout)
+      const token = u ? null : parseHash().share;
+      if (token) {
+        try { const a = await api.acceptShare(token); if (a.user) { u = a.user; location.hash = a.doc ? '#/' + a.doc : ''; } }
+        catch (e) { setLinkNote((e as Error).message); }
+      }
+      setUser(u); setGoogle(r.google);
+      if (u) void syncBindings();   // account shortcuts follow the user across browsers
       // remembered for offline starts (the session cookie itself is still valid then)
-      try { if (r.user) localStorage.setItem('ol.user', JSON.stringify(r.user)); else localStorage.removeItem('ol.user'); } catch { /* ignore */ }
+      try { if (u) localStorage.setItem('ol.user', JSON.stringify(u)); else localStorage.removeItem('ol.user'); } catch { /* ignore */ }
     }).catch(() => {
       // no server (offline): continue with the last known user; documents come from the local copies
       try { const u = localStorage.getItem('ol.user'); if (u) setUser(JSON.parse(u)); } catch { /* ignore */ }
     }).finally(() => setReady(true));
   }, []);
+  // a guest asked to sign in (no Google here, or the callout's plain button): the sign-in page over
+  // the workspace — the guest cookie stays, so the login moves the guest's projects to the account
+  const [wantLogin, setWantLogin] = useState(false);
   if (!ready) return <div style="padding:40px;color:#666">Loading…</div>;
-  if (!user) return <Login google={google} onLogin={setUser} />;
-  return <Workspace user={user} onLogout={() => api.logout().then(clearLocalData).then(() => { try { localStorage.removeItem('ol.user'); } catch { /* ignore */ } setUser(null); })} />;
+  if (!user) return <Login google={google} onLogin={setUser} note={linkNote} />;
+  if (user.guest && wantLogin) return <Login google={google} onLogin={u => { setUser(u); setWantLogin(false); }} onBack={() => setWantLogin(false)} note="Sign in to keep the shared project in your account." />;
+  return <Workspace user={user} google={google} onSignIn={() => setWantLogin(true)} onLogout={() => api.logout().then(clearLocalData).then(() => { try { localStorage.removeItem('ol.user'); } catch { /* ignore */ } setUser(null); })} />;
 }
 
 /** Forget everything cached in this browser (API responses cached by the service worker, local document copies). */
@@ -187,7 +202,7 @@ function SidebarGrip({ side }: { side: 'left' | 'right' }) {
   );
 }
 
-function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
+function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: boolean; onSignIn: () => void; onLogout: () => void }) {
   // what the hash shows (one project, one file at a time): a document, "text:"/"pdf:" files, or
   // "raw:<document>" — the document beside its LaTeX source
   const [hashId, setHashId] = useState<string | null>(parseHash().id);
@@ -312,7 +327,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   // the project whose git dialog (clone URL, tokens, history) is open
   const [gitFor, setGitFor] = useState<string | null>(null);
   /** the interactive walkthrough: offered once per browser, restartable from Help */
-  const [tour, setTour] = useState<'intro' | 'steps' | null>(() => (tourWanted() ? 'intro' : null));
+  // guests came for somebody's document, not for a tour (it is offered once they have an account)
+  const [tour, setTour] = useState<'intro' | 'steps' | null>(() => (!user.guest && tourWanted() ? 'intro' : null));
   const [viewOnly, setViewOnly] = useState(false);
   // LyX toolbars: standard / extra always (unless hidden), math / table / review on, off or automatic (LyX's "auto")
   const { pref: themePref } = useTheme();
@@ -1702,12 +1718,17 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     return editorRef.current ? { view: editorRef.current.view, ydoc: editorRef.current.ydoc, docId: docId! } : null;
   })();
 
+  // a guest signs in: with Google directly (back to this document afterwards), else on the sign-in page
+  const signIn = () => { if (google) location.assign(googleSignInUrl()); else onSignIn(); };
+
   return (
     <div class="app">
       <MenuBar menus={menus} user={user} onLogout={onLogout} onSettings={() => setDialog({ name: 'preferences' })} onHome={() => { location.hash = '#/'; }} searchEntries={helpSearchEntries}
         users={isLyxDoc ? status.users : undefined} onJumpToUser={jumpToUser}
         onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? shareProject}”: invite people or turn on a link` : undefined}
+        onSignIn={user.guest ? signIn : undefined}
         right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />
+      {user.guest && <GuestCallout user={user} project={curProject} google={google} onSignIn={signIn} />}
       {isLyxDoc && tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={standardGroups} />}
       {/* LyX's default.ui puts View/Update and Extra on one row ("samerow") */}
       {isLyxDoc && (tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
@@ -1780,7 +1801,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
                   register={(cid, h) => { if (h) childRefs.current.set(cid, h); else childRefs.current.delete(cid); rerender(); }} />
               ))}
             </div>
-          ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); setTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} notify={notify} />}
+          ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); setTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} onSignIn={signIn} notify={notify} />}
         </div>
         {isLyxDoc && rawSplit && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => { location.hash = '#/' + docId; }} />}
         </div>

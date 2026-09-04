@@ -1,7 +1,8 @@
 /**
  * Share dialog (Google-Docs style): people with access and their roles, invite by username or
- * e-mail, and "anyone with the link" with a copyable link. Only the owner (or an administrator)
- * sees it — the server refuses everything else.
+ * e-mail, and "anyone with the link" with a copyable link (which also lets people in without an
+ * account, as guests — app/Guest.tsx). Only the owner (or an administrator) sees it — the server
+ * refuses everything else.
  */
 import { useEffect, useState } from 'preact/hooks';
 import { AvatarContent, initials } from './Avatar';
@@ -131,7 +132,7 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
             ))}
             {activity && !activity.length && <div class="hint">Nothing yet.</div>}
           </div>
-          <div class="hint">{info.link ? `Anyone who is signed in and opens the link becomes ${info.link.role === 'edit' ? 'an editor' : 'a viewer'}. Switching back to Restricted removes everyone who came in through the link.` : 'Viewers can read and compile; editors can also change the documents and upload files.'}</div>
+          <div class="hint">{info.link ? `Anyone who opens the link becomes ${info.link.role === 'edit' ? 'an editor' : 'a viewer'} — without an account as a guest (“Anonymous Otter”), who keeps the project by signing in. Switching back to Restricted removes everyone who came in through the link.` : 'Viewers can read and compile; editors can also change the documents and upload files.'}</div>
         </>
       )}
     </Dialog>

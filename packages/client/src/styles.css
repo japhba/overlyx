@@ -585,6 +585,19 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .menubar .share-btn { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 13px 0 10px; margin-right: 10px; border: 0; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 600; font-size: 12.5px; cursor: pointer; }
 .menubar .share-btn:hover { filter: brightness(1.1); }
 .menubar .share-btn svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+.menubar .signin-btn { padding: 0 13px; }
+/* the guest callout: hangs under the Sign in button (top right), an arrow pointing at it */
+.guest-callout { position: fixed; top: 36px; right: 10px; z-index: 80; width: 320px; max-width: calc(100vw - 20px); background: var(--surface); border: 1px solid var(--accent-border); border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); padding: 12px 14px; font-family: var(--ui-font); font-size: 13px; line-height: 1.45; color: var(--ui-fg); }
+.guest-callout::before { content: ""; position: absolute; top: -7px; right: 118px; width: 12px; height: 12px; background: var(--surface); border-left: 1px solid var(--accent-border); border-top: 1px solid var(--accent-border); transform: rotate(45deg); }
+.guest-callout .guest-head { display: flex; align-items: center; gap: 8px; }
+.guest-callout h3 { flex: 1; margin: 0; font-size: 14px; color: var(--accent); }
+.guest-callout p { margin: 6px 0 10px; }
+.guest-callout .google { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); color: var(--ui-fg); text-decoration: none; font-weight: 600; font-size: 13.5px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.guest-callout .google:hover { box-shadow: 0 3px 10px rgba(59, 110, 165, 0.35); }
+.guest-callout .google .g { width: 18px; height: 18px; flex: none; }
+.guest-callout .btn.primary { width: 100%; padding: 8px 12px; font-size: 13.5px; }
+.guest-callout .later { display: block; margin: 8px auto 0; border: 0; background: none; color: var(--ui-muted); font-size: 12px; cursor: pointer; }
+.guest-callout .later:hover { color: var(--ui-fg); text-decoration: underline; }
 .menubar .user-menu .avatar-btn { border: 0; background: none; padding: 0; display: inline-flex; border-radius: 50%; }
 .menubar .user-menu .avatar-btn .avatar { width: 24px; height: 24px; line-height: 24px; font-size: 10.5px; }
 .menubar .user-menu.open .avatar-btn, .menubar .user-menu .avatar-btn:hover { box-shadow: 0 0 0 2px var(--ui-bg), 0 0 0 3.5px var(--muted2); }

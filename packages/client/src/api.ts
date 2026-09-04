@@ -1,4 +1,13 @@
-export interface User { id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null }
+export interface User {
+  id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null;
+  /** a temporary account: came in through a share link without signing in; signing in keeps what the link opened */
+  guest?: boolean;
+}
+
+/** Google sign-in, returning to `next` (a location hash like `#/project/doc.tex`) afterwards. */
+export function googleSignInUrl(next: string = location.hash): string {
+  return '/api/auth/google' + (next.startsWith('#/') && next.length > 2 ? '?next=' + encodeURIComponent(next) : '');
+}
 /** `doc`: a .tex document (opens in the editor); `tex`: other LaTeX sources (text editor); `lyx`: importable */
 export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'dir' | 'other' }
 export type Role = 'owner' | 'edit' | 'view';
@@ -121,7 +130,8 @@ export const api = {
   setLink: (project: string, role: 'view' | 'edit' | null) => req<{ link: ShareInfo['link']; share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/link`, { role }),
   setOwner: (project: string, username: string) => req<{ share: ShareInfo }>('POST', `/api/projects/${encodeURIComponent(project)}/share/owner`, { username }),
   /** open a share link (#/share/<token>): join the project; `doc` is the document to open */
-  acceptShare: (token: string) => req<{ project: string; title: string | null; role: Role; doc: string | null }>('POST', `/api/share/${encodeURIComponent(token)}/accept`),
+  /** join through a share link; without a session the server opens a guest session and returns its `user` */
+  acceptShare: (token: string) => req<{ project: string; title: string | null; role: Role; doc: string | null; user?: User }>('POST', `/api/share/${encodeURIComponent(token)}/accept`),
   // git: every project is a repository (clone URL, history); tokens are the password for git over HTTPS
   gitInfo: (project: string) => req<GitInfo>('GET', `/api/projects/${encodeURIComponent(project)}/git`),
   gitCommit: (project: string, message?: string) => req<{ committed: boolean } & Omit<GitInfo, 'url' | 'username' | 'role' | 'hasPassword'>>('POST', `/api/projects/${encodeURIComponent(project)}/git/commit`, message ? { message } : {}),

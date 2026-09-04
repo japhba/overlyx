@@ -29,6 +29,10 @@ test.describe('landing page', () => {
     await expect(g).toBeVisible();
     await expect(g).toHaveAttribute('href', '/api/auth/google');
     await expect(g).toContainText('Continue with Google');
+    // a deep link (a document, a share link) is where the sign-in returns to
+    await page.goto('/#/paper/main.tex');
+    await expect(page.locator('[data-google-login]')).toHaveAttribute('href', '/api/auth/google?next=%23%2Fpaper%2Fmain.tex');
+    await page.goto('/');
     await expect(page.getByPlaceholder('Username')).toHaveCount(0);
     const box = await g.boundingBox();
     expect(box!.height).toBeGreaterThan(36);

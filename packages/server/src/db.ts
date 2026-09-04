@@ -116,6 +116,9 @@ try { db.exec('ALTER TABLE users ADD COLUMN settings TEXT'); } catch { /* column
 try { db.exec('ALTER TABLE users ADD COLUMN keybindings TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE git_tokens ADD COLUMN token_plain TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE mcp_tokens ADD COLUMN token_plain TEXT'); } catch { /* column exists */ }
+// guests: temporary accounts for visitors who open a share link without signing in (auth.ts
+// createGuest); their memberships move to the real account at sign-in (access.ts adoptGuest)
+try { db.exec('ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }
 
 // 2026-09-01: MCP tokens became user-scoped (one token, every project its account can access —
 // mcpTokens.ts). Databases from before have project-scoped rows: rebuild the table, attributing
@@ -157,6 +160,8 @@ export interface MemberRow {
 export interface UserRow {
   id: number; username: string; display_name: string; password_hash: string | null; color: string;
   email: string | null; google_sub: string | null; is_admin: number; created_at: number; avatar_url?: string | null;
+  /** 1 for a guest (came in through a share link without an account) */
+  is_guest?: number;
 }
 
 export const USER_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', '#9A6324', '#800000', '#aaffc3', '#808000', '#000075'];

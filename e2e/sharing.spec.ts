@@ -11,7 +11,7 @@ import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { apiLogin, adminCredentials, userCredentials, BASE_URL, PROJECTS_DIR } from './helpers';
+import { apiLogin, adminCredentials, userCredentials, BASE_URL, PROJECTS_DIR, TOUR_SEEN_SCRIPT } from './helpers';
 
 const PROJECT = 'e2e-share';
 const DOC = `${PROJECT}/main.tex`;
@@ -223,6 +223,84 @@ test('link sharing: joining through the link, revoked when the link is turned of
   await expect(pageU).toHaveURL(/\/#?$/);
   await expect(pageU.locator('.home')).toBeVisible();
   await carol.close(); await u1.close(); await admin.close();
+});
+
+test('anyone with the link: a visitor without an account comes in as a guest and keeps the project by signing in', async ({ browser }) => {
+  const admin = await asUser(browser);
+  const on = await admin.request.post(`${BASE_URL}/api/projects/${PROJECT}/share/link`, { data: { role: 'edit' } });
+  expect(on.ok()).toBe(true);
+  const token = (await on.json()).link.token as string;
+
+  // a dead link: the sign-in page says why
+  const stranger = await browser.newContext();
+  await stranger.addInitScript(TOUR_SEEN_SCRIPT);
+  const pageS = await stranger.newPage();
+  await pageS.goto('/#/share/not-a-token');
+  await expect(pageS.locator('.login [data-login-note]')).toContainText('not valid', { timeout: 15000 });
+  await stranger.close();
+
+  // the live link: straight into the document as "Anonymous …", the callout top right, no tour
+  const guest = await browser.newContext();
+  const page = await guest.newPage();
+  await page.goto(`/#/share/${token}`);
+  await page.waitForURL(/#\/e2e-share\/main\.tex$/, { timeout: 20000 });
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  await expect(page.locator('.statusbar')).toContainText('connected', { timeout: 20000 });
+  await expect(page.locator('.login')).toHaveCount(0);
+  await expect(page.locator('.tour-card')).toHaveCount(0);
+  const me = (await (await guest.request.get(BASE_URL + '/api/auth/me')).json()).user as { guest?: boolean; username: string; name: string };
+  expect(me.guest).toBe(true);
+  expect(me.username).toMatch(/^guest-/);
+  expect(me.name).toMatch(/^Anonymous /);
+  const callout = page.locator('[data-guest-callout]');
+  await expect(callout).toBeVisible();
+  await expect(callout).toContainText('as a guest');
+  await expect(callout).toContainText(me.name);
+  await expect(callout).toContainText('edit “e2e-share”');
+  await expect(page.locator('.menubar [data-signin]')).toBeVisible();
+  await expect(page.locator('.docpanel[data-project="e2e-share"] .badge')).toHaveText('edit');
+  // guests edit like any editor and show up in the owner's dialog — but get nothing of their own
+  await page.locator('.lyx-editor .lyx-par').last().click();
+  await page.keyboard.type('GUEST-TYPED');
+  await expect.poll(() => readFileSync(FILE, 'utf8'), { timeout: 15000 }).toContain('GUEST-TYPED');
+  const share = await (await admin.request.get(`${BASE_URL}/api/projects/${PROJECT}/share`)).json();
+  expect(share.members.find((m: { user: { username: string } | null }) => m.user?.username === me.username)).toMatchObject({ role: 'edit', via: 'link' });
+  expect((await guest.request.post(BASE_URL + '/api/projects', { data: { name: 'guest-project' } })).status()).toBe(403);
+  expect((await guest.request.get(BASE_URL + '/api/git/tokens')).status()).toBe(403);
+  expect((await projectsOf(guest)).map(p => p.name)).toEqual([PROJECT]);     // no example project either
+  // "Not now" folds the callout away for the session; the Sign in button stays
+  await callout.locator('[data-guest-later]').click();
+  await expect(callout).toHaveCount(0);
+  await expect(page.locator('.menubar [data-signin]')).toBeVisible();
+  await page.reload();
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  await expect(page.locator('[data-guest-callout]')).toHaveCount(0);
+
+  // signing in (with a password here — Google does the same) moves the guest's project to the account
+  await page.evaluate(TOUR_SEEN_SCRIPT);
+  await page.locator('.menubar [data-signin]').click();
+  await expect(page.locator('.login [data-login-note]')).toContainText('keep');
+  await page.locator('.login [data-login-back]').click();
+  await expect(page.locator('.lyx-editor')).toBeVisible();
+  await page.locator('.menubar [data-signin]').click();
+  const creds = userCredentials('u1');
+  await page.locator('.login input[placeholder="Username"]').fill(creds.username);
+  await page.locator('.login input[placeholder="Password"]').fill(creds.password);
+  await page.locator('.login button', { hasText: 'Sign in' }).click();
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  await expect(page).toHaveURL(/#\/e2e-share\/main\.tex$/);
+  await expect(page.locator('.statusbar')).toContainText('connected', { timeout: 20000 });
+  await expect(page.locator('[data-guest-callout]')).toHaveCount(0);
+  await expect(page.locator('.menubar [data-signin]')).toHaveCount(0);
+  expect(((await (await guest.request.get(BASE_URL + '/api/auth/me')).json()).user as { username: string }).username).toBe('u1');
+  expect((await projectsOf(guest)).find(p => p.name === PROJECT)).toMatchObject({ role: 'edit', via: 'link' });
+  const after = await (await admin.request.get(`${BASE_URL}/api/projects/${PROJECT}/share`)).json();
+  const names = after.members.map((m: { user: { username: string } | null }) => m.user?.username);
+  expect(names).toContain('u1');
+  expect(names).not.toContain(me.username);
+  // tidy up: the link off takes u1 out again
+  expect((await admin.request.post(`${BASE_URL}/api/projects/${PROJECT}/share/link`, { data: { role: null } })).ok()).toBe(true);
+  await guest.close(); await admin.close();
 });
 
 test('an invitation by e-mail is bound to the account that signs in with that address', async ({ browser }) => {
