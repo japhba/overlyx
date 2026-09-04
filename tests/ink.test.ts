@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { parseTex, writeTex } from '../packages/core/src/tex/index.ts';
-import { inkSvg, extractInkData, strokePathD, inkBounds, insetToPm, pmToLyxBody, lyxToPmNode, pointInPolygon, segmentsIntersect, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type LyxDocument } from '../packages/core/src/index.ts';
+import { inkSvg, extractInkData, strokePathD, laserPathD, inkBounds, insetToPm, pmToLyxBody, lyxToPmNode, pointInPolygon, segmentsIntersect, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type LyxDocument } from '../packages/core/src/index.ts';
 
 const DATA = JSON.stringify({
   v: 1,
@@ -157,5 +157,18 @@ describe('lasso geometry (Goodnotes semantics: touching the lasso is enough)', (
     // a narrow lasso crossing the rectangle without a vertex inside it
     const tall: [number, number][] = [[40, -50], [60, -50], [60, 150], [40, 150]];
     expect(rectHitsPolygon(0, 0, 100, 100, tall)).toBe(true);
+  });
+});
+
+describe('laser pointer trace', () => {
+  it('laserPathD is a smoothed open centre line; a single point is a zero-length segment (a dot with round caps)', () => {
+    expect(laserPathD([])).toBe('');
+    expect(laserPathD([[3, 4]])).toBe('M3 4L3 4');
+    expect(laserPathD([[0, 0], [10, 0]])).toBe('M0 0L10 0');
+    const d = laserPathD([[0, 0], [10, 0], [10, 10], [20, 10]]);
+    expect(d).toBe('M0 0Q10 0 10 5Q10 10 15 10L20 10');
+    expect(d).not.toContain('Z');   // never closed: it is stroked, not filled
+    // extra tuple members (pressure) are ignored
+    expect(laserPathD([[0, 0, 0.5], [4, 4, 1]])).toBe('M0 0L4 4');
   });
 });

@@ -716,6 +716,8 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .ink-canvas.draw { pointer-events: auto; cursor: crosshair; touch-action: pan-x pan-y; }
 .ink-canvas.draw[data-tool="eraser"] { cursor: cell; }
 .ink-canvas.draw[data-tool="lasso"] { cursor: default; }
+/* the laser pointer: a glowing red dot for a cursor (over the text column too — no keyhole in this mode) */
+.ink-canvas.draw[data-tool="laser"], .board[data-tool="laser"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='8' fill='%23ff2d55' fill-opacity='0.35'/%3E%3Ccircle cx='10' cy='10' r='3.5' fill='%23ff2d55'/%3E%3Ccircle cx='10' cy='10' r='1.3' fill='%23fff'/%3E%3C/svg%3E") 10 10, crosshair; }
 /* lasso selection box: a DOM overlay in content coordinates (it scrolls with the page) */
 .ink-sel { position: absolute; z-index: 6; outline: 1.5px dashed var(--accent); outline-offset: 2px; cursor: move; pointer-events: auto; touch-action: none; }
 .ink-handle { position: absolute; width: 10px; height: 10px; background: var(--page-bg); border: 1.5px solid var(--accent); border-radius: 2px; }
@@ -729,6 +731,18 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .tb-ink-swatch { display: inline-block; width: 13px; height: 13px; border-radius: 50%; border: 1px solid var(--ui-border); vertical-align: middle; }
 .tb-ink-swatch.hl { border-radius: 3px; opacity: 0.8; }   /* the highlighter's presets: translucent bars, not pen dots */
 .tb-ink-width { display: inline-block; border-radius: 50%; background: currentColor; vertical-align: middle; }
+/* preset editors (app/InkPickers.tsx): opened by clicking the selected swatch / dot again */
+.ink-pick { padding: 6px 8px 4px; min-width: 212px; font-family: var(--ui-font); font-size: 11px; color: var(--ui-fg); }
+.ink-pick-grid { display: grid; grid-template-columns: repeat(8, 22px); gap: 4px; }
+.ink-pick-sw { display: block; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--ui-border); padding: 0; cursor: pointer; box-sizing: border-box; position: relative; }
+.ink-pick-sw.hl { border-radius: 4px; opacity: 0.8; }
+.ink-pick-sw:hover, .ink-pick-sw.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ink-pick-sw.custom::after { content: "+"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; color: #fff; text-shadow: 0 0 2px #000; pointer-events: none; }
+.ink-pick-sw.custom input[type=color] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; padding: 0; border: 0; cursor: pointer; }
+.ink-pick-preview { display: block; width: 200px; height: 48px; margin: 0 auto 4px; background: var(--page-bg); border: 1px solid var(--ui-border); border-radius: 4px; }
+.ink-pick-range { display: block; width: 100%; margin: 4px 0; accent-color: var(--accent); }
+.ink-pick-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 5px; color: var(--ui-muted); }
+.ink-pick-hint { font-style: italic; }
 
 /* Whiteboard (.board documents, app/BoardEditor.tsx): an infinite pan/zoom canvas. */
 .board { position: relative; flex: 1; min-height: 0; height: 100%; overflow: hidden; outline: none; background: var(--page-bg);
@@ -764,8 +778,14 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .board-tools .small-btn.active { background: var(--accent); color: #fff; }
 .board-sep { width: 1px; height: 18px; background: var(--ui-border); margin: 0 3px; }
 .board-color { width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--ui-border); cursor: pointer; padding: 0; }
+.board-color.hl { border-radius: 4px; opacity: 0.8; }
 .board-color.active { outline: 2px solid var(--accent); outline-offset: 1px; }
 .board-width span { display: inline-block; border-radius: 50%; background: currentColor; vertical-align: middle; }
+.board-pop { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 6px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.18); z-index: 11; }
+/* laser traces: SVG in board coordinates; a lifted one fades out */
+.board-laser, .board-laser * { pointer-events: none; }
+.board-laser.fade { animation: ol-laser-fade 0.7s ease-out forwards; }
+@keyframes ol-laser-fade { from { opacity: 1; } to { opacity: 0; } }
 .board-zoom { position: absolute; right: 14px; bottom: 12px; display: flex; align-items: center; gap: 4px; padding: 4px 6px;
   background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px; z-index: 10; }
 .board-conn { font-family: var(--ui-font); font-size: 11px; color: var(--ui-muted); margin-left: 4px; white-space: nowrap; }

@@ -18,21 +18,30 @@
  * move, handles to resize, Delete removes; moved items re-anchor to the paragraph they end up
  * beside). Clicking the canvas takes the
  * caret out of the text ("the canvas is focused"): a pasted image then lands on the margin
- * canvas instead of becoming a LaTeX figure in the document.
+ * canvas instead of becoming a LaTeX figure in the document. The laser pointer is the one tool
+ * that reaches over the text column too: its glowing trace stays while the pen is down, fades when
+ * it lifts, is never saved, and streams to the other clients (in the pointer's presence colour).
  */
 import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { Awareness } from 'y-protocols/awareness';
-import { schema, strokePathD, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type InkImage } from '@overlyx/core';
+import { schema, strokePathD, laserPathD, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type InkImage } from '@overlyx/core';
 import { graphicsUrl } from '../../api';
 import { viewProject, viewDocDir, resolveDocPath } from '../context';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../imagepaste';
 
-export type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso';
+export type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'laser';
 /** the tools that draw — each remembers its own colour and width (Goodnotes: switching pens switches both) */
 export type InkPen = 'pen' | 'highlighter';
-export interface PenSettings { color: string; width: number }
+export interface PenSettings {
+  color: string;
+  width: number;
+  /** the pen's colour presets — the toolbar swatches; clicking the selected one again edits it (Goodnotes) */
+  colors: string[];
+  /** the pen's width presets, likewise editable */
+  widths: number[];
+}
 export interface InkUiState {
   active: boolean;
   tool: InkTool;
@@ -41,25 +50,45 @@ export interface InkUiState {
   pens: Record<InkPen, PenSettings>;
 }
 
-/** Colour presets per pen (the highlighter's are drawn at HIGHLIGHT_OPACITY). */
+/** Default colour presets per pen (the highlighter's are drawn at HIGHLIGHT_OPACITY). */
 export const INK_PALETTES: Record<InkPen, [string, string][]> = {
   pen: [['#202124', 'Black'], ['#1a73e8', 'Blue'], ['#d93025', 'Red'], ['#188038', 'Green'], ['#f29900', 'Orange'], ['#a142f4', 'Purple']],
   highlighter: [['#fbbc04', 'Yellow'], ['#f29900', 'Orange'], ['#e8467c', 'Pink'], ['#34a853', 'Green'], ['#4285f4', 'Blue'], ['#a142f4', 'Purple']],
 };
-/** Nominal widths (the highlighter draws HIGHLIGHT_WIDTH_FACTOR× wider). */
+/** Default nominal widths (the highlighter draws HIGHLIGHT_WIDTH_FACTOR× wider). */
 export const INK_WIDTHS = [1.5, 2.5, 4];
 export const HIGHLIGHT_WIDTH_FACTOR = 4;
+/** The range a width preset can be set to (nominal px; the highlighter multiplies). */
+export const INK_WIDTH_MIN = 0.5, INK_WIDTH_MAX = 12;
+/** A name for the well-known preset colours (the title of a swatch), else the hex code. */
+export function inkColorName(hex: string): string {
+  for (const pal of Object.values(INK_PALETTES)) for (const [c, name] of pal) if (c.toLowerCase() === hex.toLowerCase()) return name;
+  return hex;
+}
 
 const stored = <T,>(k: string, def: T): T => { try { const v = localStorage.getItem(k); return v === null ? def : JSON.parse(v) as T; } catch { return def; } };
-const DEFAULT_PENS: Record<InkPen, PenSettings> = { pen: { color: '#1a73e8', width: 2.5 }, highlighter: { color: '#fbbc04', width: 2.5 } };
+const DEFAULT_PENS: Record<InkPen, PenSettings> = {
+  pen: { color: '#1a73e8', width: 2.5, colors: INK_PALETTES.pen.map(c => c[0]), widths: INK_WIDTHS },
+  highlighter: { color: '#fbbc04', width: 2.5, colors: INK_PALETTES.highlighter.map(c => c[0]), widths: INK_WIDTHS },
+};
+const isHex = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
+const isWidth = (v: unknown): v is number => typeof v === 'number' && v >= INK_WIDTH_MIN && v <= INK_WIDTH_MAX;
 function loadPens(): Record<InkPen, PenSettings> {
   const saved = stored<Partial<Record<InkPen, Partial<PenSettings>>>>('ol.inkPens', {});
   // before pens had their own settings there was one shared colour / width: it becomes the pen's
-  const legacy: Partial<PenSettings> = { color: stored<string | undefined>('ol.inkColor', undefined), width: stored<number | undefined>('ol.inkWidth', undefined) };
-  const pick = (p: InkPen): PenSettings => ({
-    color: saved[p]?.color ?? (p === 'pen' ? legacy.color : undefined) ?? DEFAULT_PENS[p].color,
-    width: saved[p]?.width ?? (p === 'pen' ? legacy.width : undefined) ?? DEFAULT_PENS[p].width,
-  });
+  const legacy = { color: stored<string | undefined>('ol.inkColor', undefined), width: stored<number | undefined>('ol.inkWidth', undefined) };
+  const pick = (p: InkPen): PenSettings => {
+    const s = saved[p] ?? {};
+    const def = DEFAULT_PENS[p];
+    // the presets: what was saved where it is valid, the defaults elsewhere (older saves have none)
+    const colors = def.colors.map((c, i) => (Array.isArray(s.colors) && isHex(s.colors[i]) ? s.colors[i] : c));
+    const widths = def.widths.map((w, i) => (Array.isArray(s.widths) && isWidth(s.widths[i]) ? s.widths[i] : w));
+    return {
+      color: (isHex(s.color) ? s.color : undefined) ?? (p === 'pen' && isHex(legacy.color) ? legacy.color : undefined) ?? def.color,
+      width: (isWidth(s.width) ? s.width : undefined) ?? (p === 'pen' && isWidth(legacy.width) ? legacy.width : undefined) ?? def.width,
+      colors, widths,
+    };
+  };
   return { pen: pick('pen'), highlighter: pick('highlighter') };
 }
 const storedTool = stored('ol.inkTool', 'pen' as InkTool);
@@ -73,18 +102,43 @@ const subs = new Set<() => void>();
 export function getInk(): InkUiState { return ui; }
 /** The settings of the pen the toolbar shows (see InkUiState.pen). */
 export function currentPen(state: InkUiState = ui): PenSettings { return state.pens[state.pen]; }
+export interface InkPatch {
+  active?: boolean;
+  tool?: InkTool;
+  /** which pen the colour / width / preset changes apply to (default: the pen in use, see below) */
+  pen?: InkPen;
+  color?: string;
+  width?: number;
+  /** re-colour one of the pen's presets (and draw with it) — clicking a selected swatch again */
+  slotColor?: { idx: number; color: string };
+  /** re-size one of the pen's width presets (and draw with it) */
+  slotWidth?: { idx: number; width: number };
+}
 /**
- * Change the tool, or the current pen's colour / width. Colour and width always go to the pen in
- * use (or the last one used when the eraser / lasso is active) — picking a colour while erasing
- * or lassoing takes that pen up again, as a Goodnotes user expects.
+ * Change the tool, or a pen's colour / width / presets. Without an explicit `pen`, colour and
+ * width go to the pen in use (or the last one used when the eraser / lasso / laser is active) —
+ * picking a colour while erasing or lassoing takes that pen up again, as a Goodnotes user
+ * expects. The whiteboard passes `pen` explicitly: it has its own tool state.
  */
-export function setInk(patch: { active?: boolean; tool?: InkTool; color?: string; width?: number }): void {
+export function setInk(patch: InkPatch): void {
   const next = { ...ui, pens: { ...ui.pens } };
   if (patch.active !== undefined) next.active = patch.active;
   if (patch.tool !== undefined) { next.tool = patch.tool; if (patch.tool === 'pen' || patch.tool === 'highlighter') next.pen = patch.tool; }
-  if (patch.color !== undefined || patch.width !== undefined) {
-    if (patch.tool === undefined && (next.tool === 'eraser' || next.tool === 'lasso')) next.tool = next.pen;
-    next.pens[next.pen] = { ...next.pens[next.pen], ...(patch.color !== undefined ? { color: patch.color } : {}), ...(patch.width !== undefined ? { width: patch.width } : {}) };
+  const settings = patch.color !== undefined || patch.width !== undefined || patch.slotColor || patch.slotWidth;
+  if (settings) {
+    if (patch.tool === undefined && patch.pen === undefined && next.tool !== 'pen' && next.tool !== 'highlighter') next.tool = next.pen;
+    const p = patch.pen ?? next.pen;
+    const cur = next.pens[p];
+    const colors = cur.colors.slice(), widths = cur.widths.slice();
+    let { color, width } = cur;
+    if (patch.color !== undefined) color = patch.color;
+    if (patch.width !== undefined) width = patch.width;
+    if (patch.slotColor && isHex(patch.slotColor.color) && patch.slotColor.idx >= 0 && patch.slotColor.idx < colors.length) { colors[patch.slotColor.idx] = patch.slotColor.color; color = patch.slotColor.color; }
+    if (patch.slotWidth && patch.slotWidth.idx >= 0 && patch.slotWidth.idx < widths.length) {
+      const w = Math.round(Math.max(INK_WIDTH_MIN, Math.min(INK_WIDTH_MAX, patch.slotWidth.width)) * 4) / 4;
+      widths[patch.slotWidth.idx] = w; width = w;
+    }
+    next.pens[p] = { color, width, colors, widths };
   }
   ui = next;
   try {
@@ -101,11 +155,41 @@ export function isTabletClient(): boolean {
 }
 
 export const HIGHLIGHT_OPACITY = 0.35;
+/** The laser pointer: the colour of one's own trace (the others' trails take their presence colour) and how long a lifted trace lingers. */
+export const LASER_COLOR = '#ff2d55';
+export const LASER_FADE_MS = 700;
+/** Draw a laser trail (points in canvas pixels): a soft wide glow under a bright core, and a dot at the head. */
+export function paintLaser(ctx: CanvasRenderingContext2D, pts: readonly (readonly [number, number, ...unknown[]])[], color: string, alpha: number, scale = 1): void {
+  if (!pts.length || alpha <= 0) return;
+  const path = new Path2D(laserPathD(pts));
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.3 * alpha;
+  ctx.lineWidth = 11 * scale;
+  ctx.stroke(path);
+  ctx.globalAlpha = 0.95 * alpha;
+  ctx.lineWidth = 3.2 * scale;
+  ctx.stroke(path);
+  const [hx, hy] = pts[pts.length - 1];
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.5 * alpha;
+  ctx.beginPath(); ctx.arc(hx, hy, 8 * scale, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.globalAlpha = 0.9 * alpha;
+  ctx.beginPath(); ctx.arc(hx, hy, 2.2 * scale, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
 
 interface InkData { v: 1; strokes: InkStroke[]; imgs: InkImage[] }
 interface SketchEntry { pos: number; blockPos: number; src: string; data: InkData }
 /** what streams over awareness while a stroke is drawn */
 interface LiveInk { src: string; side: 'left' | 'right'; color: string; w: number; o?: number; pts: [number, number, number][] }
+/** what streams over awareness while the laser is held: offsets from (left column edge, top of the `b`-th top-level block) / zoom */
+interface LiveLaser { b: number; pts: [number, number][] }
+/** another client's laser trail, kept after its field vanished so it can fade out here too */
+interface RemoteLaser { b: number; pts: [number, number][]; color: string; name: string; fadeStart: number | null }
 /** one selected thing, addressed inside its sketch node */
 interface SelItem { src: string; kind: 'stroke' | 'img'; idx: number }
 /** live transform while the selection is dragged: scale about (ox, oy), then translate */
@@ -158,6 +242,10 @@ class InkLayer {
   private unsub: (() => void)[] = [];
   /** the stroke being drawn here right now (content coordinates of the scroller) */
   private live: { src: string; side: 'left' | 'right'; edgeX: number; anchorTop: number; color: string; w: number; o?: number; pts: [number, number, number][] } | null = null;
+  /** the laser trace being held (content coordinates) and the one fading after a lift */
+  private laser: { b: number; edgeX: number; top: number; pts: [number, number][] } | null = null;
+  private laserFade: { pts: [number, number][]; start: number } | null = null;
+  private remoteLasers = new Map<number, RemoteLaser>();
   private lasso: [number, number][] | null = null;
   private selection: SelItem[] | null = null;
   private xform: Xform | null = null;
@@ -234,12 +322,19 @@ class InkLayer {
     this.canvas.remove();
     this.selBox.remove();
     if (this.live) try { this.awareness.setLocalStateField('ink', null); } catch { /* closing */ }
+    if (this.laser) try { this.awareness.setLocalStateField('laser', null); } catch { /* closing */ }
   }
 
   private applyMode() {
-    const on = ui.active && this.editable();
+    // the laser changes nothing, so a viewer may point with it too
+    const on = ui.active && (this.editable() || ui.tool === 'laser');
     this.canvas.classList.toggle('draw', on);
     this.canvas.dataset.tool = ui.tool;
+  }
+
+  /** The laser tool is up: the canvas covers the text column as well (no keyhole). */
+  private laserMode(): boolean {
+    return ui.active && ui.tool === 'laser';
   }
 
   private editable(): boolean {
@@ -367,9 +462,10 @@ class InkLayer {
     const W = Math.max(1, Math.round(g.width * dpr)), H = Math.max(1, Math.round(g.height * dpr));
     if (this.canvas.width !== W || this.canvas.height !== H) { this.canvas.width = W; this.canvas.height = H; this.canvas.style.width = g.width + 'px'; this.canvas.style.height = g.height + 'px'; }
     this.canvas.style.transform = `translate(${g.scrollLeft}px, ${g.scrollTop}px)`;
-    // keyhole clip: the whole viewport minus the text column, so column clicks reach the text
+    // keyhole clip: the whole viewport minus the text column, so column clicks reach the text —
+    // except for the laser, which points at the text as much as at the margins
     const L = Math.max(0, g.edgeL - g.scrollLeft - 2), R = Math.min(g.width, g.edgeR - g.scrollLeft + 2);
-    this.canvas.style.clipPath = R > L
+    this.canvas.style.clipPath = R > L && !this.laserMode()
       ? `polygon(0 0, ${g.width}px 0, ${g.width}px ${g.height}px, 0 ${g.height}px, 0 0, ${L}px 0, ${L}px ${g.height}px, ${R}px ${g.height}px, ${R}px 0, ${L}px 0, 0 0)`
       : 'none';
     const ctx = this.canvas.getContext('2d');
@@ -460,6 +556,64 @@ class InkLayer {
       this.selBox.style.width = Math.abs(x2 - x1) + 'px';
       this.selBox.style.height = Math.abs(y2 - y1) + 'px';
     } else this.selBox.hidden = true;
+    // laser traces on top of everything: the others' (fading once their field vanished), then mine
+    if (this.paintLasers(ctx, g, z)) this.schedule();
+  }
+
+  /** Position of the `i`-th top-level block, or null when the document is shorter. */
+  private blockPosOfIndex(i: number): number | null {
+    const doc = this.view.state.doc;
+    if (i < 0 || i >= doc.childCount) return null;
+    let pos = 0;
+    for (let k = 0; k < i; k++) pos += doc.child(k).nodeSize;
+    return pos;
+  }
+
+  /** Draw every laser trace; returns true while something is still fading (keep repainting). */
+  private paintLasers(ctx: CanvasRenderingContext2D, g: ReturnType<InkLayer['geom']>, z: number): boolean {
+    const now = performance.now();
+    let animating = false;
+    // reconcile the remote trails with the awareness states: a vanished field starts its fade here
+    const seen = new Set<number>();
+    this.awareness.getStates().forEach((state, clientId) => {
+      if (clientId === this.awareness.clientID) return;
+      const s = state as { user?: { name?: string; color?: string }; laser?: LiveLaser | null };
+      if (!s.laser || !s.laser.pts?.length) return;
+      seen.add(clientId);
+      this.remoteLasers.set(clientId, { b: s.laser.b, pts: s.laser.pts, color: s.user?.color ?? LASER_COLOR, name: s.user?.name ?? '', fadeStart: null });
+    });
+    for (const [clientId, rl] of this.remoteLasers) {
+      if (!seen.has(clientId) && rl.fadeStart === null) rl.fadeStart = now;
+      if (rl.fadeStart !== null && now - rl.fadeStart > LASER_FADE_MS) { this.remoteLasers.delete(clientId); continue; }
+      const blockPos = this.blockPosOfIndex(rl.b);
+      const top = blockPos === null ? null : this.blockTop(blockPos, g);
+      if (top === null) continue;
+      const alpha = rl.fadeStart === null ? 1 : 1 - (now - rl.fadeStart) / LASER_FADE_MS;
+      if (rl.fadeStart !== null) animating = true;
+      const pts = rl.pts.map(([x, y]) => [g.edgeL + x * z - g.scrollLeft, top + y * z - g.scrollTop] as [number, number]);
+      paintLaser(ctx, pts, rl.color, alpha);
+      if (rl.name && rl.fadeStart === null) {
+        // whose pointer this is, beside its head (like the cursor labels in the text)
+        const [hx, hy] = pts[pts.length - 1];
+        ctx.save();
+        ctx.font = '11px system-ui, sans-serif';
+        const w = ctx.measureText(rl.name).width + 10;
+        ctx.fillStyle = rl.color;
+        ctx.globalAlpha = 0.9;
+        ctx.fillRect(hx + 10, hy - 18, w, 16);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(rl.name, hx + 15, hy - 6);
+        ctx.restore();
+      }
+    }
+    const mine = (pts: [number, number][], alpha: number) => paintLaser(ctx, pts.map(([x, y]) => [x - g.scrollLeft, y - g.scrollTop] as [number, number]), LASER_COLOR, alpha);
+    if (this.laser) mine(this.laser.pts, 1);
+    if (this.laserFade) {
+      const t = (now - this.laserFade.start) / LASER_FADE_MS;
+      if (t >= 1) this.laserFade = null;
+      else { mine(this.laserFade.pts, 1 - t); animating = true; }
+    }
+    return animating;
   }
 
   /* -------------------------------------------------------------- drawing */
@@ -512,11 +666,27 @@ class InkLayer {
   }
 
   private onDown = (e: PointerEvent) => {
-    if (!ui.active || !this.editable() || !this.scroller) return;
+    if (!ui.active || !this.scroller) return;
     if (e.pointerType === 'touch') return;   // fingers pan (touch-action), the pen and mouse draw
     if (e.button !== 0 && !(e.pointerType === 'pen' && e.buttons & 32)) return;
     const g = this.geom();
     const [cx, cy] = this.toContent(e, g);
+    if (ui.tool === 'laser') {
+      // the trace is anchored to the paragraph beside the first point so the others see it in place
+      const anchor = this.anchorAt(e.clientY, g);
+      const blockPos = anchor?.blockPos ?? this.blockPosOfIndex(this.view.state.doc.childCount - 1);
+      const top = blockPos === null ? null : this.blockTop(blockPos, g);
+      if (top === null) return;
+      this.laserFade = null;
+      this.laser = { b: this.view.state.doc.resolve(blockPos!).index(0), edgeX: g.edgeL, top, pts: [[cx, cy]] };
+      this.pointerId = e.pointerId;
+      this.canvas.setPointerCapture(e.pointerId);
+      this.sendLaser(true);
+      this.schedule();
+      e.preventDefault();
+      return;
+    }
+    if (!this.editable()) return;
     this.focusCanvas(cx, cy);
     const side: 'left' | 'right' = cx < (g.edgeL + g.edgeR) / 2 ? 'left' : 'right';
     if (ui.tool === 'lasso') {
@@ -581,9 +751,34 @@ class InkLayer {
     }
   }
 
+  /** Stream the held laser trace to the other clients (throttled unless `force`). */
+  private sendLaser(force = false) {
+    const l = this.laser;
+    if (!l) return;
+    const now = performance.now();
+    if (!force && now - this.lastAwarenessSend < 40) return;
+    this.lastAwarenessSend = now;
+    const z = zoom();
+    const msg: LiveLaser = { b: l.b, pts: l.pts.map(([x, y]) => [round4((x - l.edgeX) / z), round4((y - l.top) / z)] as [number, number]) };
+    try { this.awareness.setLocalStateField('laser', msg); } catch { /* not connected */ }
+  }
+
   private onMove = (e: PointerEvent) => {
     if (this.pointerId !== e.pointerId) return;
     const g = this.geom();
+    if (this.laser) {
+      for (const ev of e.getCoalescedEvents?.() ?? [e]) {
+        const [x, y] = this.toContent(ev, g);
+        const last = this.laser.pts[this.laser.pts.length - 1];
+        if ((last[0] - x) ** 2 + (last[1] - y) ** 2 < 1) continue;
+        this.laser.pts.push([x, y]);
+        if (this.laser.pts.length > 1500) this.laser.pts.shift();   // a very long scribble keeps its recent tail
+      }
+      this.sendLaser();
+      this.schedule();
+      e.preventDefault();
+      return;
+    }
     if (this.lasso) {
       const [cx, cy] = this.toContent(e, g);
       const last = this.lasso[this.lasso.length - 1];
@@ -600,6 +795,14 @@ class InkLayer {
     if (this.pointerId !== e.pointerId) return;
     this.pointerId = null;
     try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* gone */ }
+    if (this.laser) {
+      // lifted: the trace lingers and fades; the others fade their copy when the field vanishes
+      this.laserFade = { pts: this.laser.pts, start: performance.now() };
+      this.laser = null;
+      try { this.awareness.setLocalStateField('laser', null); } catch { /* closing */ }
+      this.schedule();
+      return;
+    }
     if (this.lasso) {
       const poly = this.lasso;
       this.lasso = null;
@@ -630,7 +833,8 @@ class InkLayer {
     this.pointerId = null;
     this.live = null;
     this.lasso = null;
-    try { this.awareness.setLocalStateField('ink', null); } catch { /* closing */ }
+    if (this.laser) { this.laserFade = { pts: this.laser.pts, start: performance.now() }; this.laser = null; }
+    try { this.awareness.setLocalStateField('ink', null); this.awareness.setLocalStateField('laser', null); } catch { /* closing */ }
     this.schedule();
   };
 

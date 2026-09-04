@@ -41,6 +41,8 @@ export interface ToolButton {
   kind?: 'text' | 'math';
   /** a popup palette instead of an action */
   palette?: Palette;
+  /** Goodnotes presets: the first click runs `action` (selects); only a click on the already `active` button opens `palette` */
+  paletteWhenActive?: boolean;
 }
 export interface ToolbarProps {
   id: string;
@@ -57,6 +59,7 @@ export const ICONS: Record<string, string> = {
   inkpen: '<svg viewBox="0 0 16 16"><path d="M3 13c2-.5 2.5-.5 3-1.5L13.5 4 12 2.5 4.5 10c-1 .5-1 1-1.5 3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
   inkhl: '<svg viewBox="0 0 16 16"><path d="M4 10l6-6 2.5 2.5-6 6H4z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2.5 14.5h11" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity="0.45"/></svg>',
   inkeraser: '<svg viewBox="0 0 16 16"><path d="M5.5 13L2 9.5 8.5 3 13 7.5 7.5 13z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.5 13H14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M5.5 6L10 10.5" stroke="currentColor" stroke-width="1"/></svg>',
+  inklaser: '<svg viewBox="0 0 16 16"><path d="M2 13c2.5-1 3-4.5 5.5-5.5S11 9 13 5" fill="none" stroke="#ff2d55" stroke-width="3" stroke-linecap="round" opacity="0.3"/><path d="M2 13c2.5-1 3-4.5 5.5-5.5S11 9 13 5" fill="none" stroke="#ff2d55" stroke-width="1.3" stroke-linecap="round"/><circle cx="13" cy="5" r="2.6" fill="#ff2d55" opacity="0.45"/><circle cx="13" cy="5" r="1.3" fill="#ff2d55"/></svg>',
   inklasso: '<svg viewBox="0 0 16 16"><path d="M8 2.5c3.3 0 6 1.6 6 3.7 0 1.9-2.2 3.4-5 3.7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.4 1.8" stroke-linecap="round"/><path d="M2 6.2c0-2 2.6-3.7 6-3.7M2 6.2c0 1.6 1.5 2.9 3.6 3.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.4 1.8" stroke-linecap="round"/><circle cx="7" cy="10.2" r="1.3" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M7 11.5c-.6 1.2-1.8 2-3.4 2.2" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
   new: '<svg viewBox="0 0 16 16"><path d="M3 1h7l3 3v11H3z" fill="none" stroke="currentColor"/><path d="M10 1v3h3" fill="none" stroke="currentColor"/></svg>',
   open: '<svg viewBox="0 0 16 16"><path d="M1 3h5l1 2h8v9H1z" fill="none" stroke="currentColor"/></svg>',
@@ -364,12 +367,17 @@ function PaletteButton({ b }: { b: ToolButton }) {
   }, [open]);
   const p = b.palette!;
   const close = () => setOpen(false);
+  const preset = !!b.paletteWhenActive;
+  const onClick = () => {
+    if (preset && !b.active) { b.action?.(); return; }   // select first; a second click edits
+    setOpen(o => !o);
+  };
   return (
     <span ref={ref} class={'tb-pal' + (open ? ' open' : '')}>
-      <button type="button" class={'tb-btn has-pal' + (b.active ? ' active' : '') + (b.kind === 'math' ? ' math' : '')} title={b.title} disabled={b.disabled} data-tb={b.id}
-        onMouseDown={e => e.preventDefault()} onClick={() => setOpen(o => !o)}>
+      <button type="button" class={'tb-btn' + (preset ? '' : ' has-pal') + (b.active ? ' active' : '') + (b.kind === 'math' ? ' math' : '')} title={b.title} disabled={b.disabled} data-tb={b.id}
+        onMouseDown={e => e.preventDefault()} onClick={onClick}>
         {btnIcon(b)}
-        <span class="tb-caret">▾</span>
+        {!preset && <span class="tb-caret">▾</span>}
       </button>
       {open && (
         <div ref={popRef} class={'tb-popup' + (p.list ? ' list' : '')} role="menu" data-palette={b.id}>
@@ -394,7 +402,7 @@ export function Toolbar({ id, layouts, layout, onLayout, groups, label }: Toolba
   const names = layouts ? layouts.map(l => l.name) : [];
   if (layouts && layout && !names.includes(layout)) names.unshift(layout);
   return (
-    <div class={'toolbar toolbar-' + id} data-toolbar={id} onMouseDown={e => { if ((e.target as HTMLElement).tagName !== 'SELECT') e.preventDefault(); }}>
+    <div class={'toolbar toolbar-' + id} data-toolbar={id} onMouseDown={e => { const t = e.target as HTMLInputElement; if (t.tagName !== 'SELECT' && !(t.tagName === 'INPUT' && t.type === 'range')) e.preventDefault(); }}>
       {label && <span class="tb-label">{label}</span>}
       {layouts && (
         <select value={layout} onChange={e => onLayout?.((e.target as HTMLSelectElement).value)} title="Paragraph layout (Alt+P …)">

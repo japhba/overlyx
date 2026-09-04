@@ -244,6 +244,25 @@ blend.
   text, 90 % by default, double-click the label to reset — inline notes follow the same setting); the
   column narrows on a small window and the text keeps at least 360px. Notes and comments are set
   in the interface's sans-serif.
+* **Margin ink** (the pen button in the toolbar; `editor/plugins/ink.ts`, `core/ink.ts`): Goodnotes-style
+  drawing in the space left and right of the text — the page grows wide gutters to pan into and snaps
+  back to centre; on tablets the pen comes out by itself (`localStorage.ol.ink` overrides). Strokes
+  and pasted images are anchored to the paragraph beside them (an invisible `\olsketch{figures/ink-….svg}`
+  in the .tex, the drawing in a sidecar SVG the server writes; nothing shows in the PDF) and move with
+  the text. The bottom *Draw* row has a pen and a highlighter (each with its own colour and width),
+  an eraser (whole strokes, also the pen's eraser end), a lasso (closes itself, selects whatever it
+  touches; drag to move, corner handles to resize, Delete) and a **laser pointer**: a glowing trace
+  over the text or the margins that stays while the pen is down and fades when it lifts — never
+  saved, streamed to everyone in the document (in the pointer's presence colour, with their name).
+  The colour swatches and width dots are **presets** as in Goodnotes: one click selects, a click on
+  the selected one opens a picker (a colour grid / a slider with a preview) that replaces it; the pen
+  case is per browser (`localStorage.ol.inkPens`) and shared with the whiteboards. Clicking the
+  margin canvas takes the caret out of the text, so `Ctrl+V` then puts an image into the margin
+  instead of a LaTeX figure.
+* **Whiteboards** (`.board` files, *File ▸ New whiteboard…* or *+ Board*; `app/BoardEditor.tsx`,
+  server `BoardDoc` in `docs.ts`): a Miro-style infinite canvas with the same pens, lasso and laser,
+  images (paste / drop / upload, move and resize) and sticky notes, live-collaborative through the
+  same websocket layer; saved as one JSON object per line, so git diffs stay readable.
 * **Comments panel** (right sidebar, *Comments* tab; `app/Comments.tsx`, `editor/commentops.ts`):
   every comment thread of the open editors — open ones first, then the *Resolved* archive, like
   Google Docs' comment history. A resolved thread leaves the text and the margin: only a small grey

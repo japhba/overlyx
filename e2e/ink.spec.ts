@@ -2,7 +2,9 @@
  * Margin ink: the Draw toolbar, drawing a stroke in the margin beside a paragraph (which anchors
  * an invisible \olsketch command there), the sidecar SVG written by the server, persistence
  * across a reload, and the eraser. Draw mode adds side gutters (pan + snap-back) and the ruler
- * stays. Needs the seeded admin.
+ * stays. Then the lasso, the per-pen colour / width presets (a click on the selected one opens
+ * its picker, Goodnotes-style), the laser pointer (a trace over the text that fades after the
+ * lift, seen live by a second client) and canvas paste. Needs the seeded admin.
  */
 import { test, expect, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -178,32 +180,34 @@ test('the lasso closes itself and selects what it touches; pen and highlighter k
 
   // the highlighter has its own palette and colour: yellow by default; give it pink
   await page.click('[data-tb="i-hl"]');
-  await expect(page.locator('[data-tb="i-c-fbbc04"]')).toHaveClass(/active/);
-  await expect(page.locator('[data-tb="i-c-1a73e8"]')).toHaveCount(0);   // the pen's blue is not offered here
-  await page.click('[data-tb="i-c-e8467c"]');
-  await page.click('[data-tb="i-w-4"]');
-  await expect(page.locator('[data-tb="i-c-e8467c"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-c-0"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-c-0"] .tb-ink-swatch')).toHaveAttribute('data-color', '#fbbc04');
+  await expect(page.locator('.toolbar-ink .tb-ink-swatch[data-color="#1a73e8"]')).toHaveCount(0);   // the pen's blue is not offered here
+  await page.click('[data-tb="i-c-2"]');   // pink
+  await page.click('[data-tb="i-w-2"]');   // thick
+  await expect(page.locator('[data-tb="i-c-2"]')).toHaveClass(/active/);
   // back to the pen: its blue and medium width are untouched
   await page.click('[data-tb="i-pen"]');
-  await expect(page.locator('[data-tb="i-c-1a73e8"]')).toHaveClass(/active/);
-  await expect(page.locator('[data-tb="i-w-2_5"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-c-1"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-c-1"] .tb-ink-swatch')).toHaveAttribute('data-color', '#1a73e8');
+  await expect(page.locator('[data-tb="i-w-1"]')).toHaveClass(/active/);
   // and the highlighter remembers pink + thick
   await page.click('[data-tb="i-hl"]');
-  await expect(page.locator('[data-tb="i-c-e8467c"]')).toHaveClass(/active/);
-  await expect(page.locator('[data-tb="i-w-4"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-c-2"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-w-2"]')).toHaveClass(/active/);
   // picking a colour while erasing takes the last pen (the highlighter) up again
   await page.click('[data-tb="i-eraser"]');
   await expect(page.locator('.ink-canvas[data-tool="eraser"]')).toBeVisible();
-  await page.click('[data-tb="i-c-fbbc04"]');
+  await page.click('[data-tb="i-c-0"]');
   await expect(page.locator('.ink-canvas[data-tool="highlighter"]')).toBeVisible();
-  await expect(page.locator('[data-tb="i-c-fbbc04"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-c-0"]')).toHaveClass(/active/);
   // the settings survive a reload (per browser)
   await page.reload();
   await page.waitForSelector('.lyx-editor .lyx-par');
   await expect(page.locator('[data-tb="i-hl"]')).toHaveClass(/active/);
-  await expect(page.locator('[data-tb="i-w-4"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-w-2"]')).toHaveClass(/active/);
   await page.click('[data-tb="i-pen"]');
-  await expect(page.locator('[data-tb="i-c-1a73e8"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-c-1"]')).toHaveClass(/active/);
   // clean up the strokes for the tests that follow on this document (the page scrolled on reload: re-measure)
   await page.click('[data-tb="i-lasso"]');
   const box2 = (await page.locator('.lyx-editor .lyx-par').first().boundingBox())!;
@@ -215,6 +219,116 @@ test('the lasso closes itself and selects what it touches; pen and highlighter k
   await expect(sel).toBeVisible();
   await page.keyboard.press('Delete');
   await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(0);
+});
+
+test('clicking the selected colour or width again opens a picker that replaces that preset (Goodnotes)', async ({ page }) => {
+  await login(page);
+  await openDoc(page, `${PROJECT}/lasso.tex`);
+  await page.click('[data-tb="ink"]');
+  await expect(page.locator('.ink-canvas.draw')).toBeVisible();
+  await page.click('[data-tb="i-pen"]');
+
+  // the first click on a swatch only selects it — no popup; the second one opens the colour picker
+  await page.click('[data-tb="i-c-2"]');
+  await expect(page.locator('[data-tb="i-c-2"]')).toHaveClass(/active/);
+  await expect(page.locator('.tb-popup')).toHaveCount(0);
+  await page.click('[data-tb="i-c-2"]');
+  const pop = page.locator('.tb-popup[data-palette="i-c-2"]');
+  await expect(pop.locator('[data-ink-picker="color"]')).toBeVisible();
+  await pop.locator('[data-ink-color="#12b5cb"]').click();
+  await expect(page.locator('[data-tb="i-c-2"] .tb-ink-swatch')).toHaveAttribute('data-color', '#12b5cb');   // the preset itself changed…
+  await expect(page.locator('[data-tb="i-c-2"]')).toHaveClass(/active/);                                     // …and is what the pen draws with
+  await expect(page.locator('[data-tb="i-w-1"] .tb-ink-width')).toHaveAttribute('style', /#12b5cb/);         // the width dots show the new colour
+  await page.keyboard.press('Escape');
+  await expect(pop).toBeHidden();
+
+  // widths likewise: select, then click again for the slider
+  await page.click('[data-tb="i-w-2"]');
+  await expect(page.locator('[data-tb="i-w-2"]')).toHaveClass(/active/);
+  await expect(page.locator('.tb-popup')).toHaveCount(0);
+  await page.click('[data-tb="i-w-2"]');
+  const wpop = page.locator('.tb-popup[data-palette="i-w-2"]');
+  await expect(wpop.locator('input[data-ink-width]')).toBeVisible();
+  await wpop.locator('input[data-ink-width]').fill('7');
+  await expect(page.locator('[data-tb="i-w-2"] .tb-ink-width')).toHaveAttribute('data-width', '7');
+  await expect(wpop).toContainText('7 px');
+  await page.keyboard.press('Escape');
+  await expect(wpop).toBeHidden();
+
+  // a stroke drawn now carries the custom colour and width into the saved SVG
+  const par = page.locator('.lyx-editor .lyx-par').first();
+  const box = (await par.boundingBox())!;
+  await squiggle(page, box.x + box.width + 60, box.y + 10);
+  await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(1);
+  await expect.poll(() => {
+    const files = existsSync(`${DIR}/figures`) ? readdirSync(`${DIR}/figures`) : [];
+    return files.filter(f => f.startsWith('ink-') && f.endsWith('.svg')).map(f => readFileSync(`${DIR}/figures/${f}`, 'utf8')).join('\n');
+  }, { timeout: 15000 }).toMatch(/"color":"#12b5cb","w":7/);
+
+  // the presets survive a reload; the other pen's are untouched
+  await page.reload();
+  await page.waitForSelector('.lyx-editor .lyx-par');
+  await expect(page.locator('[data-tb="i-c-2"] .tb-ink-swatch')).toHaveAttribute('data-color', '#12b5cb');
+  await expect(page.locator('[data-tb="i-w-2"] .tb-ink-width')).toHaveAttribute('data-width', '7');
+  await page.click('[data-tb="i-hl"]');
+  await expect(page.locator('[data-tb="i-c-2"] .tb-ink-swatch')).toHaveAttribute('data-color', '#e8467c');
+  await expect(page.locator('[data-tb="i-w-2"] .tb-ink-width')).toHaveAttribute('data-width', '4');
+
+  // clean up the stroke for the tests that follow on this document
+  await page.click('[data-tb="i-lasso"]');
+  const box2 = (await page.locator('.lyx-editor .lyx-par').first().boundingBox())!;
+  const tx = box2.x + box2.width + 60, ty = box2.y + 10;
+  await page.mouse.move(tx - 30, ty - 40);
+  await page.mouse.down();
+  for (const [x, y] of [[tx + 90, ty - 40], [tx + 90, ty + 40], [tx - 30, ty + 40]] as const) await page.mouse.move(x, y, { steps: 3 });
+  await page.mouse.up();
+  await expect(page.locator('.ink-sel')).toBeVisible();
+  await page.keyboard.press('Delete');
+  await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(0);
+});
+
+/** The RGBA of the ink canvas at a viewport point. */
+const canvasPixel = (page: Page, x: number, y: number) => page.evaluate(([px, py]) => {
+  const c = document.querySelector('.ink-canvas') as HTMLCanvasElement;
+  const r = c.getBoundingClientRect();
+  const dpr = c.width / r.width;
+  const d = c.getContext('2d')!.getImageData(Math.round((px - r.left) * dpr), Math.round((py - r.top) * dpr), 1, 1).data;
+  return [d[0], d[1], d[2], d[3]];
+}, [x, y]);
+
+test('the laser pointer traces over the text while the button is held, fades after the lift, and shows on the other client', async ({ browser }) => {
+  const a = await browser.newContext(), b = await browser.newContext();
+  try {
+    const pa = await a.newPage(), pb = await b.newPage();
+    await login(pa); await login(pb);
+    await openDoc(pa, `${PROJECT}/lasso.tex`); await openDoc(pb, `${PROJECT}/lasso.tex`);
+    const sketches = await pa.locator('.lyx-editor .lyx-sketch').count();
+    await pa.click('[data-tb="ink"]');
+    await pa.click('[data-tb="i-laser"]');
+    await expect(pa.locator('.ink-canvas.draw[data-tool="laser"]')).toBeVisible();
+    // no keyhole for the laser: the canvas covers the text column too
+    await expect.poll(() => pa.evaluate(() => (document.querySelector('.ink-canvas') as HTMLElement).style.clipPath)).toBe('none');
+
+    // a stroke straight across the second paragraph's text
+    const boxA = (await pa.locator('.lyx-editor .lyx-par').nth(1).boundingBox())!;
+    const yA = boxA.y + boxA.height / 2;
+    await pa.mouse.move(boxA.x + 20, yA);
+    await pa.mouse.down();
+    for (let i = 1; i <= 10; i++) await pa.mouse.move(boxA.x + 20 + i * 10, yA, { steps: 2 });
+    // held: the trace is there, red
+    await expect.poll(() => canvasPixel(pa, boxA.x + 70, yA).then(([r, g, , al]) => al > 150 && r > 180 && g < 150)).toBe(true);
+    // the other client sees it in place (anchored to the same paragraph, in the pointer's presence colour)
+    const boxB = (await pb.locator('.lyx-editor .lyx-par').nth(1).boundingBox())!;
+    await expect.poll(() => canvasPixel(pb, boxB.x + 70, boxB.y + boxB.height / 2).then(([, , , al]) => al > 100), { timeout: 5000 }).toBe(true);
+    // lifted: gone within the second, on both sides — and nothing was written to the document
+    await pa.mouse.up();
+    await expect.poll(() => canvasPixel(pa, boxA.x + 70, yA).then(([, , , al]) => al), { timeout: 3000 }).toBe(0);
+    await expect.poll(() => canvasPixel(pb, boxB.x + 70, boxB.y + boxB.height / 2).then(([, , , al]) => al), { timeout: 3000 }).toBe(0);
+    expect(await pa.locator('.lyx-editor .lyx-sketch').count()).toBe(sketches);
+    // back to the pen: the text column is a hole again
+    await pa.click('[data-tb="i-pen"]');
+    await expect.poll(() => pa.evaluate(() => (document.querySelector('.ink-canvas') as HTMLElement).style.clipPath)).toContain('polygon');
+  } finally { await a.close(); await b.close(); }
 });
 
 test('with the canvas focused (caret deactivated), a pasted image lands in the margin, not as a LaTeX figure', async ({ page }) => {

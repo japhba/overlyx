@@ -11,6 +11,7 @@ const PROJECT = 'e2e-board';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const BOARD = `${DIR}/plan.board`;
 const LASSO_BOARD = `${DIR}/lasso.board`;
+const LASER_BOARD = `${DIR}/laser.board`;
 
 test.describe.configure({ mode: 'serial' });
 
@@ -20,6 +21,7 @@ test.beforeAll(() => {
   writeFileSync(`${DIR}/main.tex`, texDoc('A project with a whiteboard.'));
   writeFileSync(BOARD, '{"overlyx":"board","v":1,"objects":{\n}}\n');
   writeFileSync(LASSO_BOARD, '{"overlyx":"board","v":1,"objects":{\n}}\n');
+  writeFileSync(LASER_BOARD, '{"overlyx":"board","v":1,"objects":{\n}}\n');
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
@@ -122,6 +124,48 @@ test('the lasso selects several things at once: group move and group delete', as
   await page.keyboard.press('Delete');
   await expect(page.locator('.board-stroke:not(.live)')).toHaveCount(count0 - 2);
   await expect(selbox).toBeHidden();
+});
+
+test('the laser pointer leaves a fading trace and writes nothing; the selected preset opens its editor on a second click', async ({ page }) => {
+  await login(page);
+  await openBoard(page, 'laser.board');
+  const vp = (await page.locator('.board').boundingBox())!;
+  const cx = vp.x + vp.width / 2, cy = vp.y + vp.height / 2;
+
+  await page.click('[data-tool="laser"]');
+  await page.mouse.move(cx - 60, cy);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) await page.mouse.move(cx - 60 + i * 15, cy + (i % 2 ? 6 : -6), { steps: 2 });
+  await expect(page.locator('.board-laser[data-laser="mine"]:not(.fade)')).toBeVisible();
+  await page.mouse.up();
+  // lifted: the trace fades out and is gone; no stroke object was created
+  await expect(page.locator('.board-laser.fade')).toBeVisible();
+  await expect(page.locator('.board-laser')).toHaveCount(0, { timeout: 3000 });
+  await expect(page.locator('.board-stroke:not(.live)')).toHaveCount(0);
+  await expect.poll(() => readFileSync(LASER_BOARD, 'utf8')).toBe('{"overlyx":"board","v":1,"objects":{\n}}\n');
+
+  // presets (the same pen case as the margin ink): select a colour, click it again → picker
+  await page.click('[data-tool="pen"]');
+  await page.click('[data-slot="c3"]');
+  await expect(page.locator('[data-slot="c3"]')).toHaveClass(/active/);
+  await expect(page.locator('.board-pop')).toHaveCount(0);
+  await page.click('[data-slot="c3"]');
+  await expect(page.locator('.board-pop [data-ink-picker="color"]')).toBeVisible();
+  await page.click('.board-pop [data-ink-color="#795548"]');
+  await expect(page.locator('[data-slot="c3"]')).toHaveAttribute('data-color', '#795548');
+  await page.click('[data-slot="w0"]');
+  await expect(page.locator('.board-pop')).toHaveCount(0);   // picking another preset closes the editor
+  await page.click('[data-slot="w0"]');
+  await page.locator('.board-pop input[data-ink-width]').fill('1');
+  await expect(page.locator('[data-slot="w0"]')).toHaveAttribute('data-width', '1');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.board-pop')).toHaveCount(0);
+  // a stroke drawn now uses them
+  await page.mouse.move(cx, cy + 80);
+  await page.mouse.down();
+  await page.mouse.move(cx + 60, cy + 90, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => readFileSync(LASER_BOARD, 'utf8'), { timeout: 15000 }).toMatch(/"color":"#795548"[^\n]*"sw":1[,}]/);
 });
 
 test('two clients see each other: an edit appears live on the other side', async ({ browser }) => {

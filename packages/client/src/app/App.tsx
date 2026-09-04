@@ -47,7 +47,8 @@ import { chordKey } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import * as C from '../editor/commands';
 import { setMarginMode } from '../editor/plugins/margin';
-import { getInk, setInk, subscribeInk, isTabletClient, currentPen, INK_PALETTES, INK_WIDTHS, HIGHLIGHT_WIDTH_FACTOR } from '../editor/plugins/ink';
+import { getInk, setInk, subscribeInk, isTabletClient, currentPen, inkColorName, HIGHLIGHT_WIDTH_FACTOR } from '../editor/plugins/ink';
+import { InkColorPicker, InkWidthPicker } from './InkPickers';
 import { BoardEditor } from './BoardEditor';
 import { acceptAllChanges, rejectAllChanges, changeAt, resolveChange, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import * as T from '../editor/tablecommands';
@@ -1532,9 +1533,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   // The margin-ink toolbar (bottom-docked while drawing is on): tool, then the colour and width
   // of the pen in use — pen and highlighter each keep their own (Goodnotes), so the swatches and
   // dots change with the tool; picking one while erasing or lassoing takes the pen up again.
+  // The swatches and dots are presets: one click selects, a click on the selected one opens a
+  // picker that replaces it (Goodnotes). The laser is the one tool that works over the text too.
   const ink = getInk();
   const pen = currentPen(ink);
   const penName = ink.pen === 'highlighter' ? 'highlighter' : 'pen';
+  const hlPen = ink.pen === 'highlighter';
   const drawing = ink.tool === 'pen' || ink.tool === 'highlighter';
   const inkGroups: ToolButton[][] = [
     [
@@ -1542,17 +1546,23 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { id: 'i-hl', title: 'Highlighter — with its own colour and width', icon: 'inkhl', active: ink.tool === 'highlighter', action: () => setInk({ tool: 'highlighter' }) },
       { id: 'i-eraser', title: 'Eraser — removes whole strokes (also the pen’s eraser end)', icon: 'inkeraser', active: ink.tool === 'eraser', action: () => setInk({ tool: 'eraser' }) },
       { id: 'i-lasso', title: 'Lasso — closes itself and selects every stroke and image it touches, to move, resize (corner handles, Shift keeps proportions) or delete them; with the canvas focused, Ctrl+V pastes an image into the margin instead of the text', icon: 'inklasso', active: ink.tool === 'lasso', action: () => setInk({ tool: 'lasso' }) },
+      { id: 'i-laser', title: 'Laser pointer — a glowing trace over the text or the margins that stays while you hold the pen down and fades when you lift it; nothing is saved, but everyone in the document sees it live', icon: 'inklaser', active: ink.tool === 'laser', action: () => setInk({ tool: 'laser' }) },
     ],
-    INK_PALETTES[ink.pen].map(([c, name]) => ({
-      id: 'i-c-' + c.slice(1), title: `${name} (${penName})`, icon: name, html: `<span class="tb-ink-swatch${ink.pen === 'highlighter' ? ' hl' : ''}" style="background:${c}"></span>`,
+    pen.colors.map((c, i) => ({
+      id: 'i-c-' + i, title: `${inkColorName(c)} (${penName}) — click the selected colour again to change it`, icon: c,
+      html: `<span class="tb-ink-swatch${hlPen ? ' hl' : ''}" data-color="${c}" style="background:${c}"></span>`,
       active: pen.color === c && drawing,
       action: () => setInk({ color: c }),
+      paletteWhenActive: true,
+      palette: { title: `${penName === 'pen' ? 'Pen' : 'Highlighter'} colour ${i + 1}`, render: () => <InkColorPicker value={c} pen={ink.pen} onChange={v => setInk({ slotColor: { idx: i, color: v } })} /> },
     })),
-    INK_WIDTHS.map((w, i) => ({
-      id: 'i-w-' + String(w).replace('.', '_'), title: `${penName === 'pen' ? 'Pen' : 'Highlighter'} width ${ink.pen === 'highlighter' ? w * HIGHLIGHT_WIDTH_FACTOR : w} px`, icon: String(w),
-      html: `<span class="tb-ink-width" style="width:${5 + i * 3}px;height:${5 + i * 3}px;background:${pen.color}${ink.pen === 'highlighter' ? '99' : ''}"></span>`,
+    pen.widths.map((w, i) => ({
+      id: 'i-w-' + i, title: `${penName === 'pen' ? 'Pen' : 'Highlighter'} width ${hlPen ? w * HIGHLIGHT_WIDTH_FACTOR : w} px — click the selected width again to change it`, icon: String(w),
+      html: `<span class="tb-ink-width" data-width="${w}" style="width:${Math.max(4, Math.min(16, 3 + w * 1.6))}px;height:${Math.max(4, Math.min(16, 3 + w * 1.6))}px;background:${pen.color}${hlPen ? '99' : ''}"></span>`,
       active: pen.width === w && drawing,
       action: () => setInk({ width: w }),
+      paletteWhenActive: true,
+      palette: { title: `${penName === 'pen' ? 'Pen' : 'Highlighter'} width ${i + 1}`, render: () => <InkWidthPicker value={w} color={pen.color} pen={ink.pen} onChange={v => setInk({ slotWidth: { idx: i, width: v } })} /> },
     })),
   ];
   // The LyX Version Control toolbar, mapped onto the project's git repository (off by default, as in LyX).

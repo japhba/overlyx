@@ -102,6 +102,23 @@ export function strokePathD(stroke: InkStroke): string {
   return d;
 }
 
+/**
+ * The smoothed centre line through a trail of points as an SVG path — the laser pointer's trace
+ * (stroked, never filled: a uniform glowing line, not a pressure outline). One point becomes a
+ * zero-length segment, which round caps draw as a dot.
+ */
+export function laserPathD(pts: readonly (readonly [number, number, ...unknown[]])[]): string {
+  if (pts.length === 0) return '';
+  let d = `M${r2(pts[0][0])} ${r2(pts[0][1])}`;
+  if (pts.length === 1) return d + `L${r2(pts[0][0])} ${r2(pts[0][1])}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = (pts[i][0] + pts[i + 1][0]) / 2, my = (pts[i][1] + pts[i + 1][1]) / 2;
+    d += `Q${r2(pts[i][0])} ${r2(pts[i][1])} ${r2(mx)} ${r2(my)}`;
+  }
+  const last = pts[pts.length - 1];
+  return d + `L${r2(last[0])} ${r2(last[1])}`;
+}
+
 /** Bounding box of the strokes and images, padded by the stroke widths. */
 export function inkBounds(strokes: InkStroke[], imgs: InkImage[] = []): { x: number; y: number; w: number; h: number } {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
