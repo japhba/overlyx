@@ -16,8 +16,8 @@ import * as decoding from 'lib0/decoding';
 import { strokePathD, laserPathD, polylineHitsPolygon, rectHitsPolygon, type InkStroke } from '@overlyx/core';
 import { api, fileUrl, type User } from '../api';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../editor/imagepaste';
-import { HIGHLIGHT_OPACITY, HIGHLIGHT_WIDTH_FACTOR, LASER_COLOR, LASER_FADE_MS, getInk, setInk, subscribeInk, inkColorName, type InkPen } from '../editor/plugins/ink';
-import { InkColorPicker, InkWidthPicker } from './InkPickers';
+import { HIGHLIGHT_OPACITY, LASER_COLOR, LASER_FADE_MS, getInk, setInk, subscribeInk, inkColorName, formatMm, mmToPx, type InkPen } from '../editor/plugins/ink';
+import { InkColorPicker, InkWidthPicker, widthDotPx } from './InkPickers';
 
 export interface BoardObj {
   t: 'stroke' | 'img' | 'note';
@@ -284,7 +284,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     } else if (drawTool) {
       const hl = t === 'highlighter';
       const pen = getInk().pens[hl ? 'highlighter' : 'pen'];
-      liveRef.current = { color: pen.color, w: hl ? pen.width * HIGHLIGHT_WIDTH_FACTOR : pen.width, ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, e.pointerType === 'pen' ? e.pressure : 0]] };
+      liveRef.current = { color: pen.color, w: mmToPx(pen.width), ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, e.pointerType === 'pen' ? e.pressure : 0]] };
       dragRef.current = { kind: 'draw', start: [bx, by] };
     }
     if (dragRef.current || liveRef.current) e.preventDefault();
@@ -600,10 +600,10 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         })}
         {!readOnly && penSet.widths.map((w, i) => {
           const active = penSet.width === w && drawingTool;
-          const px = Math.max(4, Math.min(16, 3 + w * 1.6));
+          const px = widthDotPx(curPen, w);
           return (
             <button key={curPen + 'w' + i} class={'small-btn board-width' + (active ? ' active' : '')} data-width={w} data-slot={'w' + i}
-              title={`${curPen === 'pen' ? 'Pen' : 'Highlighter'} width ${curPen === 'highlighter' ? w * HIGHLIGHT_WIDTH_FACTOR : w} px — click the selected width again to change it`}
+              title={`${curPen === 'pen' ? 'Pen' : 'Highlighter'} ${formatMm(w)} — click the selected width again to change it`}
               onClick={() => { if (active) setPick(p => (p?.kind === 'width' && p.idx === i ? null : { kind: 'width', idx: i })); else setPenSetting({ width: w }); }}>
               <span style={{ width: px + 'px', height: px + 'px', background: penSet.color }} />
             </button>

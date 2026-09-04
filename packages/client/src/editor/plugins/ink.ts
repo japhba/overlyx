@@ -36,10 +36,11 @@ export type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'laser';
 export type InkPen = 'pen' | 'highlighter';
 export interface PenSettings {
   color: string;
+  /** the nib width in mm on the page (the ruler's scale: 96 px per inch at 100 % zoom) */
   width: number;
   /** the pen's colour presets — the toolbar swatches; clicking the selected one again edits it (Goodnotes) */
   colors: string[];
-  /** the pen's width presets, likewise editable */
+  /** the pen's width presets in mm, likewise editable */
   widths: number[];
 }
 export interface InkUiState {
@@ -55,11 +56,22 @@ export const INK_PALETTES: Record<InkPen, [string, string][]> = {
   pen: [['#202124', 'Black'], ['#1a73e8', 'Blue'], ['#d93025', 'Red'], ['#188038', 'Green'], ['#f29900', 'Orange'], ['#a142f4', 'Purple']],
   highlighter: [['#fbbc04', 'Yellow'], ['#f29900', 'Orange'], ['#e8467c', 'Pink'], ['#34a853', 'Green'], ['#4285f4', 'Blue'], ['#a142f4', 'Purple']],
 };
-/** Default nominal widths (the highlighter draws HIGHLIGHT_WIDTH_FACTOR× wider). */
-export const INK_WIDTHS = [1.5, 2.5, 4];
-export const HIGHLIGHT_WIDTH_FACTOR = 4;
-/** The range a width preset can be set to (nominal px; the highlighter multiplies). */
-export const INK_WIDTH_MIN = 0.5, INK_WIDTH_MAX = 12;
+/**
+ * Widths are millimetres on the page, as Goodnotes shows them; the strokes themselves are stored
+ * in px at 100 % zoom (the SVG sidecars' units), converted with the ruler's 96 dpi scale.
+ */
+export const PX_PER_MM = 96 / 25.4;
+export const mmToPx = (mm: number): number => Math.round(mm * PX_PER_MM * 100) / 100;
+export const pxToMm = (px: number): number => Math.round((px / PX_PER_MM) * 20) / 20;
+/** Default nib widths per pen (mm): a fine, a medium and a broad one. */
+export const INK_WIDTHS: Record<InkPen, number[]> = { pen: [0.35, 0.6, 1], highlighter: [2, 3.5, 5] };
+/** The range a width preset can be set to, in mm (the slider's bounds). */
+export const INK_WIDTH_RANGE: Record<InkPen, { min: number; max: number; step: number }> = {
+  pen: { min: 0.1, max: 3, step: 0.05 },
+  highlighter: { min: 1, max: 10, step: 0.25 },
+};
+/** "0.6 mm", "2 mm" — the width as the toolbar shows it. */
+export function formatMm(mm: number): string { return mm.toFixed(2).replace(/\.?0+$/, '') + ' mm'; }
 /** A name for the well-known preset colours (the title of a swatch), else the hex code. */
 export function inkColorName(hex: string): string {
   for (const pal of Object.values(INK_PALETTES)) for (const [c, name] of pal) if (c.toLowerCase() === hex.toLowerCase()) return name;
@@ -68,24 +80,44 @@ export function inkColorName(hex: string): string {
 
 const stored = <T,>(k: string, def: T): T => { try { const v = localStorage.getItem(k); return v === null ? def : JSON.parse(v) as T; } catch { return def; } };
 const DEFAULT_PENS: Record<InkPen, PenSettings> = {
-  pen: { color: '#1a73e8', width: 2.5, colors: INK_PALETTES.pen.map(c => c[0]), widths: INK_WIDTHS },
-  highlighter: { color: '#fbbc04', width: 2.5, colors: INK_PALETTES.highlighter.map(c => c[0]), widths: INK_WIDTHS },
+  pen: { color: '#1a73e8', width: 0.6, colors: INK_PALETTES.pen.map(c => c[0]), widths: INK_WIDTHS.pen },
+  highlighter: { color: '#fbbc04', width: 3.5, colors: INK_PALETTES.highlighter.map(c => c[0]), widths: INK_WIDTHS.highlighter },
 };
 const isHex = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
-const isWidth = (v: unknown): v is number => typeof v === 'number' && v >= INK_WIDTH_MIN && v <= INK_WIDTH_MAX;
+const isWidth = (p: InkPen, v: unknown): v is number => typeof v === 'number' && v >= INK_WIDTH_RANGE[p].min && v <= INK_WIDTH_RANGE[p].max;
+const clampWidth = (p: InkPen, mm: number): number => {
+  const r = INK_WIDTH_RANGE[p];
+  return Math.round(Math.max(r.min, Math.min(r.max, mm)) / r.step) * r.step;
+};
+const round2 = (n: number) => Math.round(n * 100) / 100;
 function loadPens(): Record<InkPen, PenSettings> {
-  const saved = stored<Partial<Record<InkPen, Partial<PenSettings>>>>('ol.inkPens', {});
-  // before pens had their own settings there was one shared colour / width: it becomes the pen's
-  const legacy = { color: stored<string | undefined>('ol.inkColor', undefined), width: stored<number | undefined>('ol.inkWidth', undefined) };
+  let saved = stored<Partial<Record<InkPen, Partial<PenSettings>>>>('ol.inkPensMm', {});
+  if (!Object.keys(saved).length) {
+    // the case used to be kept in px (`ol.inkPens`, the highlighter's ×4 implied); before that one
+    // shared colour / width — bring them over as mm
+    const px = stored<Partial<Record<InkPen, Partial<PenSettings>>>>('ol.inkPens', {});
+    const legacy = { color: stored<string | undefined>('ol.inkColor', undefined), width: stored<number | undefined>('ol.inkWidth', undefined) };
+    const conv = (p: InkPen, v: unknown): number | undefined => (typeof v === 'number' && v > 0 ? pxToMm(v * (p === 'highlighter' ? 4 : 1)) : undefined);
+    saved = {};
+    for (const p of ['pen', 'highlighter'] as InkPen[]) {
+      const s = px[p] ?? {};
+      saved[p] = {
+        color: isHex(s.color) ? s.color : p === 'pen' && isHex(legacy.color) ? legacy.color : undefined,
+        width: conv(p, s.width) ?? (p === 'pen' ? conv(p, legacy.width) : undefined),
+        colors: Array.isArray(s.colors) ? s.colors : undefined,
+        widths: Array.isArray(s.widths) ? s.widths.map(w => conv(p, w)) as number[] : undefined,
+      };
+    }
+  }
   const pick = (p: InkPen): PenSettings => {
     const s = saved[p] ?? {};
     const def = DEFAULT_PENS[p];
-    // the presets: what was saved where it is valid, the defaults elsewhere (older saves have none)
+    // the presets: what was saved where it is valid, the defaults elsewhere
     const colors = def.colors.map((c, i) => (Array.isArray(s.colors) && isHex(s.colors[i]) ? s.colors[i] : c));
-    const widths = def.widths.map((w, i) => (Array.isArray(s.widths) && isWidth(s.widths[i]) ? s.widths[i] : w));
+    const widths = def.widths.map((w, i) => (Array.isArray(s.widths) && isWidth(p, s.widths[i]) ? round2(s.widths[i]) : w));
     return {
-      color: (isHex(s.color) ? s.color : undefined) ?? (p === 'pen' && isHex(legacy.color) ? legacy.color : undefined) ?? def.color,
-      width: (isWidth(s.width) ? s.width : undefined) ?? (p === 'pen' && isWidth(legacy.width) ? legacy.width : undefined) ?? def.width,
+      color: (isHex(s.color) ? s.color : undefined) ?? def.color,
+      width: (isWidth(p, s.width) ? round2(s.width) : undefined) ?? def.width,
       colors, widths,
     };
   };
@@ -108,10 +140,11 @@ export interface InkPatch {
   /** which pen the colour / width / preset changes apply to (default: the pen in use, see below) */
   pen?: InkPen;
   color?: string;
+  /** mm */
   width?: number;
   /** re-colour one of the pen's presets (and draw with it) — clicking a selected swatch again */
   slotColor?: { idx: number; color: string };
-  /** re-size one of the pen's width presets (and draw with it) */
+  /** re-size one of the pen's width presets (mm; clamped to INK_WIDTH_RANGE) and draw with it */
   slotWidth?: { idx: number; width: number };
 }
 /**
@@ -135,7 +168,7 @@ export function setInk(patch: InkPatch): void {
     if (patch.width !== undefined) width = patch.width;
     if (patch.slotColor && isHex(patch.slotColor.color) && patch.slotColor.idx >= 0 && patch.slotColor.idx < colors.length) { colors[patch.slotColor.idx] = patch.slotColor.color; color = patch.slotColor.color; }
     if (patch.slotWidth && patch.slotWidth.idx >= 0 && patch.slotWidth.idx < widths.length) {
-      const w = Math.round(Math.max(INK_WIDTH_MIN, Math.min(INK_WIDTH_MAX, patch.slotWidth.width)) * 4) / 4;
+      const w = round2(clampWidth(p, patch.slotWidth.width));
       widths[patch.slotWidth.idx] = w; width = w;
     }
     next.pens[p] = { color, width, colors, widths };
@@ -143,7 +176,7 @@ export function setInk(patch: InkPatch): void {
   ui = next;
   try {
     localStorage.setItem('ol.inkTool', JSON.stringify(ui.tool));
-    localStorage.setItem('ol.inkPens', JSON.stringify(ui.pens));
+    localStorage.setItem('ol.inkPensMm', JSON.stringify(ui.pens));
   } catch { /* private mode */ }
   for (const s of subs) s();
 }
@@ -722,7 +755,7 @@ class InkLayer {
       edgeX: this.edgeX(side, g),
       anchorTop: top,
       color: pen.color,
-      w: hl ? pen.width * HIGHLIGHT_WIDTH_FACTOR : pen.width,
+      w: mmToPx(pen.width),
       o: hl ? HIGHLIGHT_OPACITY : undefined,
       pts: [],
     };

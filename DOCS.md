@@ -255,8 +255,10 @@ blend.
   over the text or the margins that stays while the pen is down and fades when it lifts — never
   saved, streamed to everyone in the document (in the pointer's presence colour, with their name).
   The colour swatches and width dots are **presets** as in Goodnotes: one click selects, a click on
-  the selected one opens a picker (a colour grid / a slider with a preview) that replaces it; the pen
-  case is per browser (`localStorage.ol.inkPens`) and shared with the whiteboards. Clicking the
+  the selected one opens a picker (a colour grid / a slider with a preview) that replaces it. Nib
+  widths are **millimetres on the page** (the ruler's 96 dpi: 1 mm = 3.78 px at 100 %; pen 0.1–3 mm,
+  highlighter 1–10 mm; the strokes themselves stay in px in the SVGs); the pen case is per browser
+  (`localStorage.ol.inkPensMm`, an older px case migrates) and shared with the whiteboards. Clicking the
   margin canvas takes the caret out of the text, so `Ctrl+V` then puts an image into the margin
   instead of a LaTeX figure.
 * **Whiteboards** (`.board` files, *File ▸ New whiteboard…* or *+ Board*; `app/BoardEditor.tsx`,

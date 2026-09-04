@@ -249,13 +249,13 @@ test('clicking the selected colour or width again opens a picker that replaces t
   await page.click('[data-tb="i-w-2"]');
   const wpop = page.locator('.tb-popup[data-palette="i-w-2"]');
   await expect(wpop.locator('input[data-ink-width]')).toBeVisible();
-  await wpop.locator('input[data-ink-width]').fill('7');
-  await expect(page.locator('[data-tb="i-w-2"] .tb-ink-width')).toHaveAttribute('data-width', '7');
-  await expect(wpop).toContainText('7 px');
+  await wpop.locator('input[data-ink-width]').fill('2');   // mm on the page, as Goodnotes counts
+  await expect(page.locator('[data-tb="i-w-2"] .tb-ink-width')).toHaveAttribute('data-width', '2');
+  await expect(wpop).toContainText('2 mm');
   await page.keyboard.press('Escape');
   await expect(wpop).toBeHidden();
 
-  // a stroke drawn now carries the custom colour and width into the saved SVG
+  // a stroke drawn now carries the custom colour and width (2 mm = 7.56 px at 96 dpi) into the saved SVG
   const par = page.locator('.lyx-editor .lyx-par').first();
   const box = (await par.boundingBox())!;
   await squiggle(page, box.x + box.width + 60, box.y + 10);
@@ -263,16 +263,16 @@ test('clicking the selected colour or width again opens a picker that replaces t
   await expect.poll(() => {
     const files = existsSync(`${DIR}/figures`) ? readdirSync(`${DIR}/figures`) : [];
     return files.filter(f => f.startsWith('ink-') && f.endsWith('.svg')).map(f => readFileSync(`${DIR}/figures/${f}`, 'utf8')).join('\n');
-  }, { timeout: 15000 }).toMatch(/"color":"#12b5cb","w":7/);
+  }, { timeout: 15000 }).toMatch(/"color":"#12b5cb","w":7\.56/);
 
   // the presets survive a reload; the other pen's are untouched
   await page.reload();
   await page.waitForSelector('.lyx-editor .lyx-par');
   await expect(page.locator('[data-tb="i-c-2"] .tb-ink-swatch')).toHaveAttribute('data-color', '#12b5cb');
-  await expect(page.locator('[data-tb="i-w-2"] .tb-ink-width')).toHaveAttribute('data-width', '7');
+  await expect(page.locator('[data-tb="i-w-2"] .tb-ink-width')).toHaveAttribute('data-width', '2');
   await page.click('[data-tb="i-hl"]');
   await expect(page.locator('[data-tb="i-c-2"] .tb-ink-swatch')).toHaveAttribute('data-color', '#e8467c');
-  await expect(page.locator('[data-tb="i-w-2"] .tb-ink-width')).toHaveAttribute('data-width', '4');
+  await expect(page.locator('[data-tb="i-w-2"] .tb-ink-width')).toHaveAttribute('data-width', '5');
 
   // clean up the stroke for the tests that follow on this document
   await page.click('[data-tb="i-lasso"]');

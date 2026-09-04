@@ -47,8 +47,8 @@ import { chordKey } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import * as C from '../editor/commands';
 import { setMarginMode } from '../editor/plugins/margin';
-import { getInk, setInk, subscribeInk, isTabletClient, currentPen, inkColorName, HIGHLIGHT_WIDTH_FACTOR } from '../editor/plugins/ink';
-import { InkColorPicker, InkWidthPicker } from './InkPickers';
+import { getInk, setInk, subscribeInk, isTabletClient, currentPen, inkColorName, formatMm } from '../editor/plugins/ink';
+import { InkColorPicker, InkWidthPicker, widthDotPx } from './InkPickers';
 import { BoardEditor } from './BoardEditor';
 import { acceptAllChanges, rejectAllChanges, changeAt, resolveChange, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import * as T from '../editor/tablecommands';
@@ -1557,8 +1557,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       palette: { title: `${penName === 'pen' ? 'Pen' : 'Highlighter'} colour ${i + 1}`, render: () => <InkColorPicker value={c} pen={ink.pen} onChange={v => setInk({ slotColor: { idx: i, color: v } })} /> },
     })),
     pen.widths.map((w, i) => ({
-      id: 'i-w-' + i, title: `${penName === 'pen' ? 'Pen' : 'Highlighter'} width ${hlPen ? w * HIGHLIGHT_WIDTH_FACTOR : w} px — click the selected width again to change it`, icon: String(w),
-      html: `<span class="tb-ink-width" data-width="${w}" style="width:${Math.max(4, Math.min(16, 3 + w * 1.6))}px;height:${Math.max(4, Math.min(16, 3 + w * 1.6))}px;background:${pen.color}${hlPen ? '99' : ''}"></span>`,
+      id: 'i-w-' + i, title: `${penName === 'pen' ? 'Pen' : 'Highlighter'} ${formatMm(w)} — click the selected width again to change it`, icon: String(w),
+      html: `<span class="tb-ink-width" data-width="${w}" style="width:${widthDotPx(ink.pen, w)}px;height:${widthDotPx(ink.pen, w)}px;background:${pen.color}${hlPen ? '99' : ''}"></span>`,
       active: pen.width === w && drawing,
       action: () => setInk({ width: w }),
       paletteWhenActive: true,

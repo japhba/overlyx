@@ -156,7 +156,7 @@ test('the laser pointer leaves a fading trace and writes nothing; the selected p
   await page.click('[data-slot="w0"]');
   await expect(page.locator('.board-pop')).toHaveCount(0);   // picking another preset closes the editor
   await page.click('[data-slot="w0"]');
-  await page.locator('.board-pop input[data-ink-width]').fill('1');
+  await page.locator('.board-pop input[data-ink-width]').fill('1');   // 1 mm = 3.78 board px
   await expect(page.locator('[data-slot="w0"]')).toHaveAttribute('data-width', '1');
   await page.keyboard.press('Escape');
   await expect(page.locator('.board-pop')).toHaveCount(0);
@@ -165,7 +165,7 @@ test('the laser pointer leaves a fading trace and writes nothing; the selected p
   await page.mouse.down();
   await page.mouse.move(cx + 60, cy + 90, { steps: 5 });
   await page.mouse.up();
-  await expect.poll(() => readFileSync(LASER_BOARD, 'utf8'), { timeout: 15000 }).toMatch(/"color":"#795548"[^\n]*"sw":1[,}]/);
+  await expect.poll(() => readFileSync(LASER_BOARD, 'utf8'), { timeout: 15000 }).toMatch(/"color":"#795548"[^\n]*"sw":3\.78[,}]/);
 });
 
 test('two clients see each other: an edit appears live on the other side', async ({ browser }) => {
