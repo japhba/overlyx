@@ -13,10 +13,10 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import * as decoding from 'lib0/decoding';
-import { strokePathD, type InkStroke } from '@overlyx/core';
+import { strokePathD, polylineHitsPolygon, rectHitsPolygon, type InkStroke } from '@overlyx/core';
 import { api, fileUrl, type User } from '../api';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../editor/imagepaste';
-import { HIGHLIGHT_OPACITY } from '../editor/plugins/ink';
+import { HIGHLIGHT_OPACITY, HIGHLIGHT_WIDTH_FACTOR, INK_PALETTES, INK_WIDTHS, type InkPen, type PenSettings } from '../editor/plugins/ink';
 
 export interface BoardObj {
   t: 'stroke' | 'img' | 'note';
@@ -33,7 +33,6 @@ type Tool = 'select' | 'lasso' | 'pen' | 'highlighter' | 'eraser' | 'note';
 interface Camera { tx: number; ty: number; s: number }
 interface LiveStroke { color: string; w: number; o?: number; pts: [number, number, number][] }
 
-const COLORS: [string, string][] = [['#202124', 'Black'], ['#1a73e8', 'Blue'], ['#d93025', 'Red'], ['#188038', 'Green'], ['#f29900', 'Orange'], ['#a142f4', 'Purple']];
 const NOTE_COLORS = ['#fff3bf', '#d3f9d8', '#d0ebff', '#ffe3e3', '#f3f0ff'];
 const newId = () => Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -69,11 +68,17 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
   const camRef = useRef(cam); camRef.current = cam;
   const [tool, setToolState] = useState<Tool>('select');
   const toolRef = useRef(tool); toolRef.current = tool;
-  const setTool = (t: Tool) => { setToolState(t); if (t !== 'select' && t !== 'lasso') setSelected(new Set()); };
-  const [color, setColor] = useState('#1a73e8');
-  const colorRef = useRef(color); colorRef.current = color;
-  const [width, setWidth] = useState(2.5);
-  const widthRef = useRef(width); widthRef.current = width;
+  const setTool = (t: Tool) => { setToolState(t); if (t === 'pen' || t === 'highlighter') setLastPen(t); if (t !== 'select' && t !== 'lasso') setSelected(new Set()); };
+  // pen and highlighter each keep their own colour and width (Goodnotes); the swatches show the
+  // pen in use, or the last one used while another tool is active
+  const [pens, setPens] = useState<Record<InkPen, PenSettings>>({ pen: { color: '#1a73e8', width: 2.5 }, highlighter: { color: '#fbbc04', width: 2.5 } });
+  const pensRef = useRef(pens); pensRef.current = pens;
+  const [lastPen, setLastPen] = useState<InkPen>('pen');
+  const curPen: InkPen = tool === 'highlighter' ? 'highlighter' : tool === 'pen' ? 'pen' : lastPen;
+  const setPenSetting = (patch: Partial<PenSettings>) => {
+    setPens(p => ({ ...p, [curPen]: { ...p[curPen], ...patch } }));
+    if (tool !== 'pen' && tool !== 'highlighter') setTool(curPen);   // picking a colour takes the pen up again
+  };
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const selectedRef = useRef(selected); selectedRef.current = selected;
   const [lassoPts, setLassoPts] = useState<[number, number][] | null>(null);
@@ -245,7 +250,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       setEditing(nid);
     } else if (drawTool) {
       const hl = t === 'highlighter';
-      liveRef.current = { color: colorRef.current, w: hl ? widthRef.current * 4 : widthRef.current, ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, e.pointerType === 'pen' ? e.pressure : 0]] };
+      const pen = pensRef.current[hl ? 'highlighter' : 'pen'];
+      liveRef.current = { color: pen.color, w: hl ? pen.width * HIGHLIGHT_WIDTH_FACTOR : pen.width, ...(hl ? { o: HIGHLIGHT_OPACITY } : {}), pts: [[bx, by, e.pointerType === 'pen' ? e.pressure : 0]] };
       dragRef.current = { kind: 'draw', start: [bx, by] };
     }
     if (dragRef.current || liveRef.current) e.preventDefault();
@@ -320,16 +326,6 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     }
   };
 
-  /** even-odd ray cast */
-  const inPoly = (x: number, y: number, poly: [number, number][]): boolean => {
-    let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const [xi, yi] = poly[i], [xj, yj] = poly[j];
-      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-    }
-    return inside;
-  };
-
   const onPointerUp = (e: PointerEvent) => {
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
@@ -343,14 +339,13 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       const poly = lassoRef.current;
       setLassoPts(null);
       if (poly && poly.length > 4) {
-        // strokes by most of their points, images and notes by their centre
+        // Goodnotes semantics: the (auto-closed) lasso selects whatever it touches — a stroke with
+        // any part inside or crossing the line, an image or note it overlaps
         const hit = new Set<string>();
         objects.forEach((o, key) => {
           if (o.t === 'stroke' && o.pts?.length) {
-            let inside = 0;
-            for (const [px, py] of o.pts) if (inPoly(o.x + px, o.y + py, poly)) inside++;
-            if (inside / o.pts.length >= 0.5) hit.add(key);
-          } else if (inPoly(o.x + o.w / 2, o.y + o.h / 2, poly)) hit.add(key);
+            if (polylineHitsPolygon(o.pts.map(([px, py]) => [o.x + px, o.y + py] as [number, number]), poly)) hit.add(key);
+          } else if (rectHitsPolygon(o.x, o.y, o.w, o.h, poly)) hit.add(key);
         });
         setSelected(e.shiftKey ? new Set([...selectedRef.current, ...hit]) : hit);
       } else if (!e.shiftKey) setSelected(new Set());
@@ -497,7 +492,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         )}
         {lassoPts && lassoPts.length > 1 && (
           <svg class="board-lasso" style={{ left: 0, top: 0, overflow: 'visible' }} width={1} height={1}>
-            <polyline points={lassoPts.map(([x, y]) => `${x},${y}`).join(' ')} fill="rgba(59,110,165,0.08)" stroke="rgba(59,110,165,0.9)" stroke-width={1.5 / cam.s} stroke-dasharray={`${5 / cam.s} ${4 / cam.s}`} />
+            <polygon points={lassoPts.map(([x, y]) => `${x},${y}`).join(' ')} fill="rgba(59,110,165,0.08)" stroke="rgba(59,110,165,0.9)" stroke-width={1.5 / cam.s} stroke-dasharray={`${5 / cam.s} ${4 / cam.s}`} />
           </svg>
         )}
         {peers.map(p => (
@@ -516,13 +511,13 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         {!readOnly && toolBtn('note', '🗒', 'Sticky note')}
         {!readOnly && <button class="small-btn" title="Add images (or paste / drag them in)" onClick={pickImages}>🖼</button>}
         {!readOnly && <span class="board-sep" />}
-        {!readOnly && COLORS.map(([c, name]) => (
-          <button key={c} class={'board-color' + (color === c && tool !== 'eraser' ? ' active' : '')} title={name} style={{ background: c }}
-            onClick={() => { setColor(c); if (tool === 'eraser' || tool === 'select' || tool === 'note') setTool('pen'); }} />
+        {!readOnly && INK_PALETTES[curPen].map(([c, name]) => (
+          <button key={curPen + c} class={'board-color' + (pens[curPen].color === c && (tool === 'pen' || tool === 'highlighter') ? ' active' : '')} title={`${name} (${curPen})`} style={{ background: c }}
+            onClick={() => setPenSetting({ color: c })} />
         ))}
-        {!readOnly && [1.5, 2.5, 4].map((w, i) => (
-          <button key={w} class={'small-btn board-width' + (width === w ? ' active' : '')} title={`Stroke width ${w} px`} onClick={() => setWidth(w)}>
-            <span style={{ width: 4 + i * 3 + 'px', height: 4 + i * 3 + 'px' }} />
+        {!readOnly && INK_WIDTHS.map((w, i) => (
+          <button key={w} class={'small-btn board-width' + (pens[curPen].width === w && (tool === 'pen' || tool === 'highlighter') ? ' active' : '')} title={`${curPen === 'pen' ? 'Pen' : 'Highlighter'} width ${curPen === 'highlighter' ? w * HIGHLIGHT_WIDTH_FACTOR : w} px`} onClick={() => setPenSetting({ width: w })}>
+            <span style={{ width: 4 + i * 3 + 'px', height: 4 + i * 3 + 'px', background: pens[curPen].color }} />
           </button>
         ))}
       </div>

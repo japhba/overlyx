@@ -12,7 +12,7 @@ import type { EditorView } from 'prosemirror-view';
 import {
   paragraphBreak, paragraphBreakInverse, fontCommands, fontDefault, changeDepth, listIndent, insertMath, toggleMathDisplay,
   insertNewline, insertSpace, insertSpecial, insertERT, insertFootnote, insertNote, insertComment, selectInset, toggleInset,
-  moveParagraph, deleteToParagraphEnd, setLayout, setParagraphAttrs, arrowIntoMath, setValueMark, insertHyphens, insertQuote, smartQuote, insertMarginal,
+  moveParagraph, deleteToParagraphEnd, setLayout, setKnownLayout, setParagraphAttrs, arrowIntoMath, setValueMark, insertHyphens, insertQuote, smartQuote, insertMarginal,
 } from './commands';
 import { editorContext } from './context';
 import { activeMathField } from './lyxmath/field';
@@ -225,7 +225,6 @@ export function lyxKeymap(): Plugin {
     'Mod-Alt-=': ui(a => a.textWidth?.(1)),
     'Mod-Alt-+': ui(a => a.textWidth?.(1)),
     'Mod-Alt--': ui(a => a.textWidth?.(-1)),
-    'Mod-0': ui(a => a.zoom(0)),
     'Mod-o': ui(a => a.openFile()),
     'Mod-n': ui(a => a.newFile()),
     'Shift-Mod-c': ui(a => a.openDialog('cite')),
@@ -248,6 +247,14 @@ export function lyxKeymap(): Plugin {
     'Alt-m': (_s, _d, view) => (view ? insertMath(false)(view) : false),
     Escape: escapeInset,
   };
+  // Google-Docs-style heading keys, with LyX's digits (the Alt+P chord): Ctrl/⌘+0…6 = Part, Chapter,
+  // Section, Subsection, Subsubsection, Paragraph, Subparagraph; Ctrl/⌘+Alt+digit = the unnumbered
+  // (*) variant. (Ctrl+0 used to reset the zoom — View ▸ Reset zoom, rebindable in the palette.)
+  for (const [digit, layout] of Object.entries(LAYOUT_PREFIX)) {
+    if (!/^[0-6]$/.test(digit)) continue;
+    bindings[`Mod-${digit}`] = setKnownLayout(layout);
+    bindings[`Alt-Mod-${digit}`] = setKnownLayout(layout + '*');
+  }
   if (isMac()) {
     // ⌘M minimises the window, ⌘⌥C opens DevTools and ⌃R reloads — macOS/Chrome act on those
     // before or besides the page, so the Ctrl variants work as well (and the tour shows them)

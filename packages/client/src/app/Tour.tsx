@@ -79,7 +79,7 @@ export const TOUR_STEPS: Step[] = [
     target: ['.toolbar-standard select'],
     body: <>
       <p>Headings, lists, theorems and the like are <i>layouts</i> of the document class, not formatting. The list here shows the layout of the paragraph under the cursor.</p>
-      <p><b>Press {kbd('Enter')} for a new paragraph and make it a <i>Section</i></b> — pick it from this list, or press {kbd('Alt+P')} then {kbd('2')} (LyX's shortcut).</p>
+      <p><b>Press {kbd('Enter')} for a new paragraph and make it a <i>Section</i></b> — pick it from this list, press {kbd(MOD + '+2')}, or {kbd('Alt+P')} then {kbd('2')} (LyX's shortcut).</p>
     </>,
     // a new heading (or list item, …) appeared, or the paragraph under the cursor got another layout
     done: (now, base) => now.styled > base.styled || (now.docTick > base.docTick && now.layout !== base.layout && now.layout !== 'Standard'),

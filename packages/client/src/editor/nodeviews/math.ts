@@ -15,6 +15,7 @@ import { toggleMathDisplay, countLabelRefs, renameLabelRefs } from '../commands'
 import { editorContext } from '../context';
 import { getPrefs } from '../../prefs';
 import { openRewriteMath, REWRITE_KEY } from '../ai/rewrite';
+import { applyChangeAttrs } from '../plugins/changes';
 
 /** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
 export const pendingFocus: { pos: number | null; keys: string[] } = { pos: null, keys: [] };
@@ -208,6 +209,7 @@ export class MathInlineView implements NodeView {
     this.dom.className = 'lyx-math-inline';
     this.lastLatex = String(node.attrs.latex);
     this.dom.classList.toggle('empty', !this.lastLatex.trim());
+    applyChangeAttrs(this.dom, node);
     mathViews.add(this);
     if (pendingFocus.pos !== null && pendingFocus.pos === getPos()) this.upgrade();
     else { this.renderStaticOrDefer(); watchLazy(this); }
@@ -291,6 +293,7 @@ export class MathInlineView implements NodeView {
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
+    applyChangeAttrs(this.dom, node);
     const latex = String(node.attrs.latex);
     if (this.field) {
       this.refreshMacros();
@@ -347,6 +350,7 @@ export class MathDisplayView implements NodeView {
     this.lastLatex = String(node.attrs.latex);
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-math-display';
+    applyChangeAttrs(this.dom, node);
     const left = document.createElement('span');
     left.className = 'eq-left';
     left.contentEditable = 'false';
@@ -585,6 +589,7 @@ export class MathDisplayView implements NodeView {
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
+    applyChangeAttrs(this.dom, node);
     const latex = String(node.attrs.latex);
     if (this.field) this.refreshMacros();
     if (latex !== this.lastLatex) {
@@ -617,6 +622,7 @@ export class MacroView implements NodeView {
   constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-macro';
+    applyChangeAttrs(this.dom, node);
     this.nameEl = document.createElement('span');
     this.nameEl.className = 'macro-name';
     this.nameEl.contentEditable = 'false';
@@ -658,6 +664,7 @@ export class MacroView implements NodeView {
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
+    applyChangeAttrs(this.dom, node);
     const def = this.parse();
     if (def && def.def !== this.lastDef && !this.field.hasFocus()) { this.updating = true; this.lastDef = def.def; this.field.setLatex('$' + def.def + '$'); this.updating = false; }
     return true;

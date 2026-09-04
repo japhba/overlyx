@@ -34,12 +34,42 @@ function insetDOM(node: { attrs: Record<string, any> }): DOMOutputSpec {
   return ['span', { class: cls, 'data-name': node.attrs.name, 'data-arg': node.attrs.arg, 'data-params': node.attrs.params, 'data-status': node.attrs.status ?? '' }, 0];
 }
 
-/** Add `data-marks` (the LyX font / change state of an inline node) to a DOM output spec. */
+/** The tracked change recorded in an inline node's `marks` attribute (JSON list of {type, attrs}), if any. */
+export function changeInMarks(marks: string | null | undefined): { type: 'inserted' | 'deleted'; author: number; time: number } | null {
+  if (!marks || !marks.includes('"change"')) return null;
+  try {
+    const ch = (JSON.parse(marks) as { type: string; attrs?: Record<string, unknown> }[]).find(m => m.type === 'change');
+    return ch ? { type: ch.attrs?.type as 'inserted' | 'deleted', author: Number(ch.attrs?.author), time: Number(ch.attrs?.time) } : null;
+  } catch { return null; }
+}
+
+/**
+ * The DOM attributes that show a tracked change on an inline NODE: the classes the change mark's
+ * span carries, but `data-changed` instead of `data-change` — the change mark's parse rule is
+ * `span[data-change]`, and a mark rule matching the node's own element would swallow the node
+ * on paste.
+ */
+export function changeDomAttrs(ch: { type: string; author: number; time: number }): Record<string, string> {
+  return { class: 'lyx-change lyx-change-' + ch.type, 'data-changed': ch.type, 'data-author': String(ch.author), 'data-time': String(ch.time) };
+}
+
+/**
+ * Add `data-marks` (the LyX font / change state of an inline node) to a DOM output spec — and,
+ * when the marks hold a tracked change, the change classes/attributes the text spans get, so a
+ * deleted quote or inserted special character is coloured like the text around it.
+ */
 function withMarks(spec: DOMOutputSpec, marks: string): DOMOutputSpec {
   if (!marks || marks === '[]' || !Array.isArray(spec)) return spec;
   const [tag, second, ...rest] = spec as [string, unknown, ...unknown[]];
-  if (second && typeof second === 'object' && !Array.isArray(second) && !(typeof Node !== 'undefined' && second instanceof Node)) return [tag, { ...(second as Record<string, unknown>), 'data-marks': marks }, ...rest] as DOMOutputSpec;
-  return [tag, { 'data-marks': marks }, ...(second === undefined ? [] : [second]), ...rest] as DOMOutputSpec;
+  const extra: Record<string, unknown> = { 'data-marks': marks };
+  const ch = changeInMarks(marks);
+  if (ch) Object.assign(extra, changeDomAttrs(ch));
+  if (second && typeof second === 'object' && !Array.isArray(second) && !(typeof Node !== 'undefined' && second instanceof Node)) {
+    const attrs = second as Record<string, unknown>;
+    if (ch && attrs.class) extra.class = `${attrs.class} ${extra.class}`;
+    return [tag, { ...attrs, ...extra }, ...rest] as DOMOutputSpec;
+  }
+  return [tag, extra, ...(second === undefined ? [] : [second]), ...rest] as DOMOutputSpec;
 }
 
 const nodes: Record<string, NodeSpec> = {

@@ -32,12 +32,12 @@ export function UserAvatars({ users, onJump }: { users: PresenceUser[]; onJump?:
   );
 }
 
-/** LyX-style zoom control (bottom right): −, a percentage menu, + (Ctrl+Plus / Ctrl+Minus / Ctrl+0 do the same). */
+/** LyX-style zoom control (bottom right): −, a percentage menu, + (Ctrl+Plus / Ctrl+Minus do the same; 100% resets). */
 export function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => void }) {
   const pct = Math.round(zoom * 100);
   const presets = [50, 75, 90, 100, 110, 125, 150, 175, 200, 250];
   return (
-    <span class="zoom" title="Zoom the document text (Ctrl+Plus / Ctrl+Minus; Ctrl+0 resets)">
+    <span class="zoom" title="Zoom the document text (Ctrl+Plus / Ctrl+Minus; pick 100% to reset)">
       <button type="button" class="zoom-btn" data-zoom-out onClick={() => onZoom(Math.max(0.5, +(zoom - 0.1).toFixed(2)))}>−</button>
       <select class="zoom-select" data-zoom value={String(pct)} onChange={e => onZoom(Number((e.target as HTMLSelectElement).value) / 100)}>
         {(presets.includes(pct) ? presets : [...presets, pct].sort((a, b) => a - b)).map(p => <option key={p} value={String(p)}>{p}%</option>)}

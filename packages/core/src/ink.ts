@@ -169,3 +169,72 @@ export function extractInkData(svg: string): string | null {
   try { JSON.parse(json); } catch { return null; }
   return json;
 }
+
+/* ------------------------------------------------------------------ lasso geometry */
+
+/** A closed polygon as its vertices (the last one connects back to the first). */
+export type Polygon = [number, number][];
+
+/** Is the point inside the (implicitly closed) polygon? Even-odd ray cast. */
+export function pointInPolygon(x: number, y: number, poly: Polygon): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Do the segments a–b and c–d intersect (touching counts)? */
+export function segmentsIntersect(ax: number, ay: number, bx: number, by: number, cx: number, cy: number, dx: number, dy: number): boolean {
+  const o = (px: number, py: number, qx: number, qy: number, rx: number, ry: number) => Math.sign((qx - px) * (ry - py) - (qy - py) * (rx - px));
+  const o1 = o(ax, ay, bx, by, cx, cy), o2 = o(ax, ay, bx, by, dx, dy);
+  const o3 = o(cx, cy, dx, dy, ax, ay), o4 = o(cx, cy, dx, dy, bx, by);
+  if (o1 !== o2 && o3 !== o4) return true;
+  // collinear cases: an endpoint lies on the other segment
+  const on = (px: number, py: number, qx: number, qy: number, rx: number, ry: number) =>
+    Math.min(px, qx) <= rx && rx <= Math.max(px, qx) && Math.min(py, qy) <= ry && ry <= Math.max(py, qy);
+  return (o1 === 0 && on(ax, ay, bx, by, cx, cy)) || (o2 === 0 && on(ax, ay, bx, by, dx, dy))
+    || (o3 === 0 && on(cx, cy, dx, dy, ax, ay)) || (o4 === 0 && on(cx, cy, dx, dy, bx, by));
+}
+
+function polygonBounds(poly: Polygon): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of poly) { if (x < minX) minX = x; if (y < minY) minY = y; if (x > maxX) maxX = x; if (y > maxY) maxY = y; }
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Does a lasso catch this polyline? Goodnotes semantics: the lasso does not have to swallow the
+ * whole stroke — any part of it inside the (auto-closed) polygon, or any crossing of the lasso
+ * line, selects it. A single point counts as inside/outside.
+ */
+export function polylineHitsPolygon(pts: readonly (readonly [number, number, ...unknown[]])[] | readonly [number, number][], poly: Polygon): boolean {
+  if (pts.length === 0 || poly.length < 3) return false;
+  const pb = polygonBounds(poly);
+  // quick reject: the stroke's box misses the lasso's box entirely
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of pts) { if (p[0] < minX) minX = p[0]; if (p[1] < minY) minY = p[1]; if (p[0] > maxX) maxX = p[0]; if (p[1] > maxY) maxY = p[1]; }
+  if (maxX < pb.minX || minX > pb.maxX || maxY < pb.minY || minY > pb.maxY) return false;
+  for (const p of pts) if (pointInPolygon(p[0], p[1], poly)) return true;
+  if (pts.length === 1) return false;
+  // no vertex inside: the stroke may still cut through the lasso (a long straight line)
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
+    for (let j = 0, k = poly.length - 1; j < poly.length; k = j++) {
+      const [cx, cy] = poly[j], [dx, dy] = poly[k];
+      if (segmentsIntersect(ax, ay, bx, by, cx, cy, dx, dy)) return true;
+    }
+  }
+  return false;
+}
+
+/** Does a lasso touch this axis-aligned rectangle (an image, a sticky note)? Overlap of any kind counts. */
+export function rectHitsPolygon(x: number, y: number, w: number, h: number, poly: Polygon): boolean {
+  if (poly.length < 3) return false;
+  const corners: [number, number][] = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  // a lasso vertex inside the rectangle (the lasso is drawn within it, or crosses it)
+  for (const [px, py] of poly) if (px >= x && px <= x + w && py >= y && py <= y + h) return true;
+  // the rectangle inside the lasso, or its edges crossing the lasso line
+  return polylineHitsPolygon([...corners, corners[0]], poly);
+}

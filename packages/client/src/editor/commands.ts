@@ -59,6 +59,22 @@ export function setLayout(layout: string): Command {
   };
 }
 
+/**
+ * setLayout for a layout the document class may not have (LyX: "Layout `Chapter' not known" does
+ * nothing): an article has no Chapter, revtex no Subparagraph. The key is still consumed — it was
+ * meant for the editor, the browser must not get it — and the status bar says why nothing happened.
+ */
+export function setKnownLayout(layout: string): Command {
+  return (state, dispatch, view) => {
+    const layouts = editorContext.meta?.layouts;
+    if (layouts && layouts.length && !layouts.some(l => l.name === layout)) {
+      if (dispatch) editorContext.notify?.(`This document class has no “${layout}” paragraph style`);
+      return true;
+    }
+    return setLayout(layout)(state, dispatch, view);
+  };
+}
+
 export function setParagraphAttrs(attrs: Partial<Record<string, unknown>>): Command {
   return (state, dispatch) => {
     const tr = state.tr;

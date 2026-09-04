@@ -146,6 +146,77 @@ test('the lasso selects strokes for moving, resizing and deleting', async ({ pag
   await expect(sel).toBeHidden();
 });
 
+test('the lasso closes itself and selects what it touches; pen and highlighter keep their own colour and width', async ({ page }) => {
+  await login(page);
+  await openDoc(page, `${PROJECT}/lasso.tex`);
+  await page.click('[data-tb="ink"]');
+  await expect(page.locator('.ink-canvas.draw')).toBeVisible();
+  await page.click('[data-tb="i-pen"]');
+
+  // two squiggles beside the first paragraph, one well to the right of the other
+  const par = page.locator('.lyx-editor .lyx-par').first();
+  const box = (await par.boundingBox())!;
+  const sx = box.x + box.width + 40, sy = box.y + 12;
+  await squiggle(page, sx, sy);
+  await squiggle(page, sx + 120, sy);
+  await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(1);
+
+  // an OPEN lasso path (three sides of a box) over the left third of the first squiggle: it closes
+  // itself, and touching the stroke is enough — Goodnotes semantics, not "most points inside"
+  await page.click('[data-tb="i-lasso"]');
+  await page.mouse.move(sx - 12, sy - 22);
+  await page.mouse.down();
+  for (const [x, y] of [[sx + 12, sy - 22], [sx + 12, sy + 26], [sx - 12, sy + 26]] as const) await page.mouse.move(x, y, { steps: 4 });
+  await page.mouse.up();
+  const sel = page.locator('.ink-sel');
+  await expect(sel).toBeVisible();
+  const r = (await sel.boundingBox())!;
+  expect(r.x).toBeLessThan(sx + 4);           // the first stroke is selected…
+  expect(r.x + r.width).toBeLessThan(sx + 100);   // …and the far one is not
+  await page.keyboard.press('Escape');
+  await expect(sel).toBeHidden();
+
+  // the highlighter has its own palette and colour: yellow by default; give it pink
+  await page.click('[data-tb="i-hl"]');
+  await expect(page.locator('[data-tb="i-c-fbbc04"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-c-1a73e8"]')).toHaveCount(0);   // the pen's blue is not offered here
+  await page.click('[data-tb="i-c-e8467c"]');
+  await page.click('[data-tb="i-w-4"]');
+  await expect(page.locator('[data-tb="i-c-e8467c"]')).toHaveClass(/active/);
+  // back to the pen: its blue and medium width are untouched
+  await page.click('[data-tb="i-pen"]');
+  await expect(page.locator('[data-tb="i-c-1a73e8"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-w-2_5"]')).toHaveClass(/active/);
+  // and the highlighter remembers pink + thick
+  await page.click('[data-tb="i-hl"]');
+  await expect(page.locator('[data-tb="i-c-e8467c"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-w-4"]')).toHaveClass(/active/);
+  // picking a colour while erasing takes the last pen (the highlighter) up again
+  await page.click('[data-tb="i-eraser"]');
+  await expect(page.locator('.ink-canvas[data-tool="eraser"]')).toBeVisible();
+  await page.click('[data-tb="i-c-fbbc04"]');
+  await expect(page.locator('.ink-canvas[data-tool="highlighter"]')).toBeVisible();
+  await expect(page.locator('[data-tb="i-c-fbbc04"]')).toHaveClass(/active/);
+  // the settings survive a reload (per browser)
+  await page.reload();
+  await page.waitForSelector('.lyx-editor .lyx-par');
+  await expect(page.locator('[data-tb="i-hl"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tb="i-w-4"]')).toHaveClass(/active/);
+  await page.click('[data-tb="i-pen"]');
+  await expect(page.locator('[data-tb="i-c-1a73e8"]')).toHaveClass(/active/);
+  // clean up the strokes for the tests that follow on this document (the page scrolled on reload: re-measure)
+  await page.click('[data-tb="i-lasso"]');
+  const box2 = (await page.locator('.lyx-editor .lyx-par').first().boundingBox())!;
+  const tx = box2.x + box2.width + 40, ty = box2.y + 12;
+  await page.mouse.move(tx - 30, ty - 40);
+  await page.mouse.down();
+  for (const [x, y] of [[tx + 200, ty - 40], [tx + 200, ty + 40], [tx - 30, ty + 40]] as const) await page.mouse.move(x, y, { steps: 3 });
+  await page.mouse.up();
+  await expect(sel).toBeVisible();
+  await page.keyboard.press('Delete');
+  await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(0);
+});
+
 test('with the canvas focused (caret deactivated), a pasted image lands in the margin, not as a LaTeX figure', async ({ page }) => {
   await login(page);
   await openDoc(page, `${PROJECT}/lasso.tex`);

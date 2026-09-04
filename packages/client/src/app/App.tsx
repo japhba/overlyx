@@ -47,13 +47,16 @@ import { chordKey } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import * as C from '../editor/commands';
 import { setMarginMode } from '../editor/plugins/margin';
-import { getInk, setInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
+import { getInk, setInk, subscribeInk, isTabletClient, currentPen, INK_PALETTES, INK_WIDTHS, HIGHLIGHT_WIDTH_FACTOR } from '../editor/plugins/ink';
 import { BoardEditor } from './BoardEditor';
 import { acceptAllChanges, rejectAllChanges, changeAt, resolveChange, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '../editor/plugins/find';
 import { schema, unquote, llanglePreamble, hasLlangleSnippet, definesLlangle } from '@overlyx/core';
+
+/** LyX's Alt+P digits: the sectioning layouts by number (also Ctrl+digit, and Ctrl+Alt+digit for the * variants) */
+const SECTION_LAYOUTS: [string, string][] = [['0', 'Part'], ['1', 'Chapter'], ['2', 'Section'], ['3', 'Subsection'], ['4', 'Subsubsection'], ['5', 'Paragraph'], ['6', 'Subparagraph']];
 
 type Dialog = { name: string; arg?: unknown } | null;
 
@@ -381,12 +384,13 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   }, []);
 
   useEffect(() => { document.documentElement.style.setProperty('--editor-zoom', String(zoom)); localStorage.setItem('ol.zoom', String(zoom)); }, [zoom]);
-  // Ctrl/Cmd +/-/0 zoom the document text, never the browser chrome — wherever the focus is (formula fields, panels)
+  // Ctrl/Cmd +/- zoom the document text, never the browser chrome — wherever the focus is (formula
+  // fields, panels). Ctrl+0 is a paragraph style now (Part, like LyX's Alt+P 0); reset via the status bar.
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
       const mod = navigator.platform.includes('Mac') ? ev.metaKey : ev.ctrlKey;
       if (!mod || ev.altKey || ev.shiftKey && ev.key !== '+') return;
-      const k = ev.key === '+' || ev.code === 'Equal' || ev.code === 'NumpadAdd' ? 1 : ev.key === '-' || ev.code === 'Minus' || ev.code === 'NumpadSubtract' ? -1 : ev.key === '0' || ev.code === 'Digit0' || ev.code === 'Numpad0' ? 0 : null;
+      const k = ev.key === '+' || ev.code === 'Equal' || ev.code === 'NumpadAdd' ? 1 : ev.key === '-' || ev.code === 'Minus' || ev.code === 'NumpadSubtract' ? -1 : null;
       if (k === null) return;
       ev.preventDefault(); ev.stopPropagation();
       editorContext.ui?.zoom(k);
@@ -1007,6 +1011,20 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
         { label: 'Promote section (heading level up)', action: () => run(shiftSection(-1, undefined, meta?.layouts)) },
         { label: 'Demote section (heading level down)', action: () => run(shiftSection(1, undefined, meta?.layouts)) },
       ] },
+      // Google-Docs-style: Ctrl+digit sets a heading level (LyX's Alt+P digits), Ctrl+Alt+digit the unnumbered one
+      { label: 'Paragraph style ▸', sub: [
+        { label: 'Standard', shortcut: 'Alt+P S', action: () => run(C.setKnownLayout('Standard')) },
+        { sep: true },
+        ...SECTION_LAYOUTS.map(([digit, name]) => ({ label: name, shortcut: 'Ctrl+' + digit, action: () => run(C.setKnownLayout(name)) })),
+        { sep: true },
+        ...SECTION_LAYOUTS.map(([digit, name]) => ({ label: name + '* (unnumbered)', shortcut: 'Ctrl+Alt+' + digit, action: () => run(C.setKnownLayout(name + '*')) })),
+        { sep: true },
+        { label: 'Itemize (bullet list — or type “- ”)', shortcut: 'Alt+P I', action: () => run(C.setKnownLayout('Itemize')) },
+        { label: 'Enumerate (numbered list — or type “1. ”)', shortcut: 'Alt+P E', action: () => run(C.setKnownLayout('Enumerate')) },
+        { label: 'Description', shortcut: 'Alt+P D', action: () => run(C.setKnownLayout('Description')) },
+        { label: 'Quote', shortcut: 'Alt+P Q', action: () => run(C.setKnownLayout('Quote')) },
+        { label: 'LyX-Code', shortcut: 'Alt+P C', action: () => run(C.setKnownLayout('LyX-Code')) },
+      ] },
       { label: 'Table ▸', sub: [
         { label: 'Add row above', action: () => run(addRowBefore) }, { label: 'Add row below', action: () => run(addRowAfter) },
         { label: 'Add column before', action: () => run(addColumnBefore) }, { label: 'Add column after', action: () => run(addColumnAfter) },
@@ -1053,7 +1071,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { sep: true },
       { label: 'Zoom in', shortcut: 'Ctrl++', action: () => editorContext.ui?.zoom(1) },
       { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => editorContext.ui?.zoom(-1) },
-      { label: 'Reset zoom', shortcut: 'Ctrl+0', action: () => editorContext.ui?.zoom(0) },
+      { label: 'Reset zoom', action: () => editorContext.ui?.zoom(0) },   // Ctrl+0 is Part now (Edit ▸ Paragraph style); rebindable in the palette
       { label: 'Ruler', checked: showRuler, action: () => setShowRuler(r => !r) },
       { label: 'Theme ▸', sub: [
         { label: 'Follow the system', checked: themePref === 'system', action: () => setThemePref('system') },
@@ -1380,7 +1398,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       layoutBtn('l-itemize', 'Itemize', 'Itemized list (Alt+P I)', 'itemize'),
       layoutBtn('l-labeling', 'Labeling', 'Labeled list (Alt+P L)', 'labeling'),
       layoutBtn('l-description', 'Description', 'Description (Alt+P D)', 'description'),
-      layoutBtn('l-section', 'Section', 'Section (Alt+P 2)', 'section'),
+      layoutBtn('l-section', 'Section', 'Section (Ctrl+2 · Alt+P 2)', 'section'),
       { id: 'depthin', title: 'Increase depth (Alt+Shift+→)', icon: 'depthin', action: () => run(C.changeDepth(1)) },
       { id: 'depthout', title: 'Decrease depth (Alt+Shift+←)', icon: 'depthout', action: () => run(C.changeDepth(-1)) },
     ],
@@ -1511,24 +1529,29 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       { id: 'r-comment', title: 'Comment thread (Ctrl+Alt+C)', icon: 'comment', action: () => run(C.insertComment) },
     ],
   ];
-  // The margin-ink toolbar (bottom-docked while drawing is on): tool, colour, width.
+  // The margin-ink toolbar (bottom-docked while drawing is on): tool, then the colour and width
+  // of the pen in use — pen and highlighter each keep their own (Goodnotes), so the swatches and
+  // dots change with the tool; picking one while erasing or lassoing takes the pen up again.
   const ink = getInk();
-  const INK_COLORS: [string, string][] = [['#202124', 'Black'], ['#1a73e8', 'Blue'], ['#d93025', 'Red'], ['#188038', 'Green'], ['#f29900', 'Orange'], ['#a142f4', 'Purple']];
+  const pen = currentPen(ink);
+  const penName = ink.pen === 'highlighter' ? 'highlighter' : 'pen';
+  const drawing = ink.tool === 'pen' || ink.tool === 'highlighter';
   const inkGroups: ToolButton[][] = [
     [
-      { id: 'i-pen', title: 'Pen (pressure-sensitive)', icon: 'inkpen', active: ink.tool === 'pen', action: () => setInk({ tool: 'pen' }) },
-      { id: 'i-hl', title: 'Highlighter', icon: 'inkhl', active: ink.tool === 'highlighter', action: () => setInk({ tool: 'highlighter' }) },
+      { id: 'i-pen', title: 'Pen (pressure-sensitive) — with its own colour and width', icon: 'inkpen', active: ink.tool === 'pen', action: () => setInk({ tool: 'pen' }) },
+      { id: 'i-hl', title: 'Highlighter — with its own colour and width', icon: 'inkhl', active: ink.tool === 'highlighter', action: () => setInk({ tool: 'highlighter' }) },
       { id: 'i-eraser', title: 'Eraser — removes whole strokes (also the pen’s eraser end)', icon: 'inkeraser', active: ink.tool === 'eraser', action: () => setInk({ tool: 'eraser' }) },
-      { id: 'i-lasso', title: 'Lasso — encircle strokes and images to move, resize (corner handles, Shift keeps proportions) or delete them; with the canvas focused, Ctrl+V pastes an image into the margin instead of the text', icon: 'inklasso', active: ink.tool === 'lasso', action: () => setInk({ tool: 'lasso' }) },
+      { id: 'i-lasso', title: 'Lasso — closes itself and selects every stroke and image it touches, to move, resize (corner handles, Shift keeps proportions) or delete them; with the canvas focused, Ctrl+V pastes an image into the margin instead of the text', icon: 'inklasso', active: ink.tool === 'lasso', action: () => setInk({ tool: 'lasso' }) },
     ],
-    INK_COLORS.map(([c, name]) => ({
-      id: 'i-c-' + c.slice(1), title: name, icon: name, html: `<span class="tb-ink-swatch" style="background:${c}"></span>`,
-      active: ink.color === c && ink.tool !== 'eraser',
-      action: () => setInk({ color: c, ...(ink.tool === 'eraser' ? { tool: 'pen' as const } : {}) }),
+    INK_PALETTES[ink.pen].map(([c, name]) => ({
+      id: 'i-c-' + c.slice(1), title: `${name} (${penName})`, icon: name, html: `<span class="tb-ink-swatch${ink.pen === 'highlighter' ? ' hl' : ''}" style="background:${c}"></span>`,
+      active: pen.color === c && drawing,
+      action: () => setInk({ color: c }),
     })),
-    [1.5, 2.5, 4].map((w, i) => ({
-      id: 'i-w-' + String(w).replace('.', '_'), title: `Stroke width ${w} px`, icon: String(w), html: `<span class="tb-ink-width" style="width:${5 + i * 3}px;height:${5 + i * 3}px"></span>`,
-      active: ink.width === w,
+    INK_WIDTHS.map((w, i) => ({
+      id: 'i-w-' + String(w).replace('.', '_'), title: `${penName === 'pen' ? 'Pen' : 'Highlighter'} width ${ink.pen === 'highlighter' ? w * HIGHLIGHT_WIDTH_FACTOR : w} px`, icon: String(w),
+      html: `<span class="tb-ink-width" style="width:${5 + i * 3}px;height:${5 + i * 3}px;background:${pen.color}${ink.pen === 'highlighter' ? '99' : ''}"></span>`,
+      active: pen.width === w && drawing,
       action: () => setInk({ width: w }),
     })),
   ];

@@ -7,6 +7,7 @@ import type { EditorView, NodeView } from 'prosemirror-view';
 import { paramMap, unquote } from '@overlyx/core';
 import { graphicsUrl } from '../../api';
 import { editorContext, resolveDocPath, viewDocDir, viewProject } from '../context';
+import { applyChangeAttrs } from '../plugins/changes';
 
 function params(node: PMNode): Map<string, string> {
   try { return paramMap(JSON.parse(node.attrs.params || '[]')); } catch { return new Map(); }
@@ -69,6 +70,7 @@ export class GraphicsView implements NodeView {
     this.dom.style.setProperty('--lyxscale', String(shrink / 100));
     const rot = p.get('rotateAngle');
     this.img.style.rotate = rot ? `${-Number(rot)}deg` : '';
+    applyChangeAttrs(this.dom, this.node);
   }
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
@@ -177,6 +179,7 @@ export class CommandView implements NodeView {
       this.dom.replaceChildren(a);
     } else this.dom.textContent = text;
     this.dom.title = title || cmd;
+    applyChangeAttrs(this.dom, this.node);   // after the className reset above
   }
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
@@ -199,6 +202,10 @@ export class LeafView implements NodeView {
     this.dom.addEventListener('dblclick', (ev) => { ev.preventDefault(); editorContext.openInsetDialog?.(this.view, this.getPos()); });
   }
   private render() {
+    this.renderContent();
+    applyChangeAttrs(this.dom, this.node);   // after the className reset in renderContent
+  }
+  private renderContent() {
     const name = String(this.node.attrs.name), arg = String(this.node.attrs.arg ?? '');
     this.dom.className = `lyx-leaf lyx-leaf-${name.toLowerCase()} lyx-button`;
     const p = params(this.node);

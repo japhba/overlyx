@@ -18,6 +18,7 @@ import { editorContext } from '../editor/context';
 import { renderStaticHtml } from '../editor/lyxmath/field';
 import { latexSelectionText } from './richcopy';
 import { bibRefs, type BibRef } from './bibrefs';
+import { parseBlocks, type MdBlock } from './mdblocks';
 
 interface Approval { requestId: string; method: string; params: any }
 
@@ -91,8 +92,8 @@ function inlineBits(text: string): ComponentChildren[] {
   return out;
 }
 
-/** Assistant text: fenced code, $$…$$/\[…\] display math, $…$/\(…\) inline math, `code`, **bold**, [links](https://…). */
-function RichText({ text }: { text: string }) {
+/** Running text: $$…$$/\[…\] display math (also a stray fence), $…$/\(…\) inline math, `code`, **bold**, [links](https://…). */
+function FlowText({ text }: { text: string }) {
   const parts: ComponentChildren[] = [];
   const re = /```[\w-]*\n?([\s\S]*?)```|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g;
   let last = 0, k = 0;
@@ -104,6 +105,32 @@ function RichText({ text }: { text: string }) {
   }
   if (last < text.length) parts.push(...inlineBits(text.slice(last)));
   return <>{parts}</>;
+}
+
+/** Assistant text: block structure (fenced code, tables, quotes, headings, rules — app/mdblocks.ts) over FlowText. */
+function RichText({ text }: { text: string }) {
+  return <>{parseBlocks(text).map((b, i) => <Block key={i} b={b} />)}</>;
+}
+
+function Block({ b }: { b: MdBlock }) {
+  switch (b.kind) {
+    case 'text': return <FlowText text={b.text} />;
+    case 'code': return <pre class="agent-code" data-lang={b.lang || undefined}>{b.code}</pre>;
+    case 'heading': return <div class={`agent-h agent-h${b.level}`}>{inlineBits(b.text)}</div>;
+    case 'rule': return <hr class="agent-hr" />;
+    case 'quote': return <blockquote class="agent-quote">{b.blocks.map((x, i) => <Block key={i} b={x} />)}</blockquote>;
+    case 'table': {
+      const style = (i: number) => (b.align[i] ? { textAlign: b.align[i]! } : undefined);
+      return (
+        <div class="agent-table-wrap">
+          <table class="agent-table">
+            <thead><tr>{b.head.map((c, i) => <th key={i} style={style(i)}>{inlineBits(c)}</th>)}</tr></thead>
+            <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, i) => <td key={i} style={style(i)}>{inlineBits(c)}</td>)}</tr>)}</tbody>
+          </table>
+        </div>
+      );
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ diffs */

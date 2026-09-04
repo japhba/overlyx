@@ -37,7 +37,9 @@ function runTurn(id, p) {
   notify('item/completed', { threadId: t.id, turnId, item: userItem, completedAtMs: Date.now() });
   const finish = (replyOverride) => {
     const itemId = 'item-' + ++nItem;
-    const reply = replyOverride ?? `Stub reply to: ${text.split('\n').pop().slice(0, 120)}` + (p.model ? ` [model=${p.model}${p.effort ? ' effort=' + p.effort : ''}]` : '');
+    // "show me a table": block markdown (a GFM table, a quote) for the transcript renderer test
+    const canned = text.includes('show me a table') ? 'Here you are:\n\n| Model | Acc |\n|---|--:|\n| BERT | 92.1 |\n\n> quoted **note**\n\nend' : null;
+    const reply = replyOverride ?? canned ?? `Stub reply to: ${text.split('\n').pop().slice(0, 120)}` + (p.model ? ` [model=${p.model}${p.effort ? ' effort=' + p.effort : ''}]` : '');
     notify('item/started', { threadId: t.id, turnId, item: { type: 'agentMessage', id: itemId, text: '', phase: null }, startedAtMs: Date.now() });
     for (const piece of [reply.slice(0, 12), reply.slice(12)]) notify('item/agentMessage/delta', { threadId: t.id, turnId, itemId, delta: piece });
     notify('item/completed', { threadId: t.id, turnId, item: { type: 'agentMessage', id: itemId, text: reply, phase: null }, completedAtMs: Date.now() });

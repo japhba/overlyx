@@ -41,6 +41,7 @@ import { installMathAssist } from './ai/mathassist';
 import { getPrefs, subscribePrefs } from '../prefs';
 import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
 import { autocorrectPlugin } from './spell/autocorrect';
+import { markdownRulesPlugin } from './plugins/mdrules';
 import { api, type User } from '../api';
 
 installMathAssist();
@@ -304,6 +305,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     aiRewritePlugin(),
     aiCompletePlugin(),
     spellPlugin(),
+    markdownRulesPlugin(),   // `- ` / `1. ` / `# ` at a paragraph start, before autocorrect looks at the space
     autocorrectPlugin(),
     chordPlugin(),
     lyxKeymap(),
@@ -499,11 +501,12 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   view.dom.dataset.project = opts.docId.split('/')[0];
   view.dom.dataset.docDir = opts.docId.split('/').slice(1, -1).join('/');
 
-  // tooltip with author and date for change-tracked text
+  // tooltip with author and date for change-tracked text and nodes (formulas, references…:
+  // `data-changed`, see changeDomAttrs in the schema)
   view.dom.addEventListener('mouseover', (ev) => {
     const el = (ev.target as HTMLElement).closest?.('.lyx-change, .lyx-inset[data-change]') as HTMLElement | null;
     if (!el || el.title) return;
-    el.title = describeChange(el.dataset.change, Number(el.dataset.author), Number(el.dataset.time));
+    el.title = describeChange(el.dataset.change ?? el.dataset.changed, Number(el.dataset.author), Number(el.dataset.time));
   });
 
   const status = { connected: false, synced: false, users: [] as PresenceUser[] };

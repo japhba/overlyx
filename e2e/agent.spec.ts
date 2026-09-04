@@ -97,6 +97,16 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await page.keyboard.press('Enter');
   await expect(page.locator('.agent-msg.assistant a[href="https://example.org/d"]').last()).toHaveText('the docs', { timeout: 15000 });
 
+  // block markdown in a reply: a GFM table and a block quote render as such (the stub answers with one)
+  await page.locator('.agent-compose textarea').fill('show me a table');
+  await page.keyboard.press('Enter');
+  const tabled = page.locator('.agent-msg.assistant', { has: page.locator('table.agent-table') }).last();
+  await expect(tabled).toBeVisible({ timeout: 15000 });
+  await expect(tabled.locator('table.agent-table th')).toHaveText(['Model', 'Acc']);
+  await expect(tabled.locator('table.agent-table td').last()).toHaveText('92.1');
+  await expect(tabled.locator('table.agent-table td').last()).toHaveCSS('text-align', 'right');
+  await expect(tabled.locator('blockquote.agent-quote b')).toHaveText('note');
+
   // a pending approval survives a reload: the thread read returns it and the card comes back
   await page.locator('.agent-compose textarea').fill('write hello once more');
   await page.keyboard.press('Enter');

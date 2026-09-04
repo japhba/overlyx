@@ -12,9 +12,11 @@
  * Yjs awareness channel and are drawn live; every finished change is a normal ProseMirror
  * transaction, so undo (Ctrl+Z) and collaboration come from the existing machinery.
  *
- * Tools: pen, highlighter, eraser (whole strokes), and a lasso — encircle strokes/images to get
- * a selection box with corner handles (drag inside to move, handles to resize, Delete removes;
- * moved items re-anchor to the paragraph they end up beside). Clicking the canvas takes the
+ * Tools: pen and highlighter (each with its own colour and width, like Goodnotes' pens), eraser
+ * (whole strokes), and a lasso — it closes itself and selects every stroke/image it touches, not
+ * only what it encircles completely — giving a selection box with corner handles (drag inside to
+ * move, handles to resize, Delete removes; moved items re-anchor to the paragraph they end up
+ * beside). Clicking the canvas takes the
  * caret out of the text ("the canvas is focused"): a pasted image then lands on the margin
  * canvas instead of becoming a LaTeX figure in the document.
  */
@@ -22,29 +24,72 @@ import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { Awareness } from 'y-protocols/awareness';
-import { schema, strokePathD, type InkStroke, type InkImage } from '@overlyx/core';
+import { schema, strokePathD, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type InkImage } from '@overlyx/core';
 import { graphicsUrl } from '../../api';
 import { viewProject, viewDocDir, resolveDocPath } from '../context';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../imagepaste';
 
 export type InkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso';
-export interface InkUiState { active: boolean; tool: InkTool; color: string; width: number }
+/** the tools that draw — each remembers its own colour and width (Goodnotes: switching pens switches both) */
+export type InkPen = 'pen' | 'highlighter';
+export interface PenSettings { color: string; width: number }
+export interface InkUiState {
+  active: boolean;
+  tool: InkTool;
+  /** the pen the colour / width buttons belong to: the drawing tool in use, or the last one used */
+  pen: InkPen;
+  pens: Record<InkPen, PenSettings>;
+}
+
+/** Colour presets per pen (the highlighter's are drawn at HIGHLIGHT_OPACITY). */
+export const INK_PALETTES: Record<InkPen, [string, string][]> = {
+  pen: [['#202124', 'Black'], ['#1a73e8', 'Blue'], ['#d93025', 'Red'], ['#188038', 'Green'], ['#f29900', 'Orange'], ['#a142f4', 'Purple']],
+  highlighter: [['#fbbc04', 'Yellow'], ['#f29900', 'Orange'], ['#e8467c', 'Pink'], ['#34a853', 'Green'], ['#4285f4', 'Blue'], ['#a142f4', 'Purple']],
+};
+/** Nominal widths (the highlighter draws HIGHLIGHT_WIDTH_FACTOR× wider). */
+export const INK_WIDTHS = [1.5, 2.5, 4];
+export const HIGHLIGHT_WIDTH_FACTOR = 4;
 
 const stored = <T,>(k: string, def: T): T => { try { const v = localStorage.getItem(k); return v === null ? def : JSON.parse(v) as T; } catch { return def; } };
+const DEFAULT_PENS: Record<InkPen, PenSettings> = { pen: { color: '#1a73e8', width: 2.5 }, highlighter: { color: '#fbbc04', width: 2.5 } };
+function loadPens(): Record<InkPen, PenSettings> {
+  const saved = stored<Partial<Record<InkPen, Partial<PenSettings>>>>('ol.inkPens', {});
+  // before pens had their own settings there was one shared colour / width: it becomes the pen's
+  const legacy: Partial<PenSettings> = { color: stored<string | undefined>('ol.inkColor', undefined), width: stored<number | undefined>('ol.inkWidth', undefined) };
+  const pick = (p: InkPen): PenSettings => ({
+    color: saved[p]?.color ?? (p === 'pen' ? legacy.color : undefined) ?? DEFAULT_PENS[p].color,
+    width: saved[p]?.width ?? (p === 'pen' ? legacy.width : undefined) ?? DEFAULT_PENS[p].width,
+  });
+  return { pen: pick('pen'), highlighter: pick('highlighter') };
+}
+const storedTool = stored('ol.inkTool', 'pen' as InkTool);
 let ui: InkUiState = {
   active: false,
-  tool: stored('ol.inkTool', 'pen' as InkTool),
-  color: stored('ol.inkColor', '#1a73e8'),
-  width: stored('ol.inkWidth', 2.5),
+  tool: storedTool,
+  pen: storedTool === 'highlighter' ? 'highlighter' : 'pen',
+  pens: loadPens(),
 };
 const subs = new Set<() => void>();
 export function getInk(): InkUiState { return ui; }
-export function setInk(patch: Partial<InkUiState>): void {
-  ui = { ...ui, ...patch };
+/** The settings of the pen the toolbar shows (see InkUiState.pen). */
+export function currentPen(state: InkUiState = ui): PenSettings { return state.pens[state.pen]; }
+/**
+ * Change the tool, or the current pen's colour / width. Colour and width always go to the pen in
+ * use (or the last one used when the eraser / lasso is active) — picking a colour while erasing
+ * or lassoing takes that pen up again, as a Goodnotes user expects.
+ */
+export function setInk(patch: { active?: boolean; tool?: InkTool; color?: string; width?: number }): void {
+  const next = { ...ui, pens: { ...ui.pens } };
+  if (patch.active !== undefined) next.active = patch.active;
+  if (patch.tool !== undefined) { next.tool = patch.tool; if (patch.tool === 'pen' || patch.tool === 'highlighter') next.pen = patch.tool; }
+  if (patch.color !== undefined || patch.width !== undefined) {
+    if (patch.tool === undefined && (next.tool === 'eraser' || next.tool === 'lasso')) next.tool = next.pen;
+    next.pens[next.pen] = { ...next.pens[next.pen], ...(patch.color !== undefined ? { color: patch.color } : {}), ...(patch.width !== undefined ? { width: patch.width } : {}) };
+  }
+  ui = next;
   try {
     localStorage.setItem('ol.inkTool', JSON.stringify(ui.tool));
-    localStorage.setItem('ol.inkColor', JSON.stringify(ui.color));
-    localStorage.setItem('ol.inkWidth', JSON.stringify(ui.width));
+    localStorage.setItem('ol.inkPens', JSON.stringify(ui.pens));
   } catch { /* private mode */ }
   for (const s of subs) s();
 }
@@ -93,16 +138,6 @@ function pathFor(stroke: InkStroke): Path2D {
 const zoom = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--editor-zoom')) || 1;
 const round4 = (n: number) => Math.round(n * 4) / 4;
 const newSrc = () => `figures/ink-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.svg`;
-
-/** even-odd ray cast */
-function pointInPolygon(x: number, y: number, poly: [number, number][]): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i], [xj, yj] = poly[j];
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
 
 export const inkKey = new PluginKey('lyx-ink');
 
@@ -397,16 +432,20 @@ class InkLayer {
       const rel: InkStroke = { color: l.color, w: l.w, o: l.o, pts: l.pts.map(([x, y, p]) => [(x - l.edgeX) / z, (y - l.anchorTop) / z, p] as [number, number, number]) };
       drawStroke(rel, l.edgeX, l.anchorTop);
     }
-    // the lasso being drawn
+    // the lasso being drawn: always shown closed (a segment back to the start), lightly filled —
+    // the selection is what the closed shape touches
     if (this.lasso && this.lasso.length > 1) {
       ctx.save();
       ctx.translate(-g.scrollLeft, -g.scrollTop);
-      ctx.strokeStyle = 'rgba(59,110,165,0.9)';
-      ctx.lineWidth = 1.25;
-      ctx.setLineDash([5, 4]);
       ctx.beginPath();
       ctx.moveTo(this.lasso[0][0], this.lasso[0][1]);
       for (const [x, y] of this.lasso) ctx.lineTo(x, y);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(59,110,165,0.08)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(59,110,165,0.9)';
+      ctx.lineWidth = 1.25;
+      ctx.setLineDash([5, 4]);
       ctx.stroke();
       ctx.restore();
     }
@@ -507,12 +546,13 @@ class InkLayer {
       this.collect();
     }
     const hl = ui.tool === 'highlighter';
+    const pen = ui.pens[hl ? 'highlighter' : 'pen'];
     this.live = {
       src, side,
       edgeX: this.edgeX(side, g),
       anchorTop: top,
-      color: ui.color,
-      w: hl ? ui.width * 4 : ui.width,
+      color: pen.color,
+      w: hl ? pen.width * HIGHLIGHT_WIDTH_FACTOR : pen.width,
       o: hl ? HIGHLIGHT_OPACITY : undefined,
       pts: [],
     };
@@ -594,7 +634,11 @@ class InkLayer {
     this.schedule();
   };
 
-  /** Everything the lasso polygon caught: strokes by most of their points, images by their centre. */
+  /**
+   * Everything the (auto-closed) lasso touches — Goodnotes semantics: a stroke is selected when
+   * any part of it lies inside the lasso or crosses its line, an image when the lasso overlaps it;
+   * nothing has to be encircled completely.
+   */
   private lassoSelect(poly: [number, number][]): SelItem[] | null {
     const g = this.geom();
     const z = zoom();
@@ -604,13 +648,12 @@ class InkLayer {
       if (top === null) continue;
       e.data.strokes.forEach((s, i) => {
         const edge = this.edgeX(s.side, g);
-        let inside = 0;
-        for (const [px, py] of s.pts) if (pointInPolygon(edge + px * z, top + py * z, poly)) inside++;
-        if (s.pts.length && inside / s.pts.length >= 0.5) out.push({ src: e.src, kind: 'stroke', idx: i });
+        const abs = s.pts.map(([px, py]) => [edge + px * z, top + py * z] as [number, number]);
+        if (polylineHitsPolygon(abs, poly)) out.push({ src: e.src, kind: 'stroke', idx: i });
       });
       e.data.imgs.forEach((im, i) => {
         const edge = this.edgeX(im.side, g);
-        if (pointInPolygon(edge + (im.dx + im.w / 2) * z, top + (im.dy + im.h / 2) * z, poly)) out.push({ src: e.src, kind: 'img', idx: i });
+        if (rectHitsPolygon(edge + im.dx * z, top + im.dy * z, im.w * z, im.h * z, poly)) out.push({ src: e.src, kind: 'img', idx: i });
       });
     }
     return out.length ? out : null;

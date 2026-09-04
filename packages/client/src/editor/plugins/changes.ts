@@ -7,7 +7,7 @@
 import { Plugin, PluginKey, TextSelection, type Command, type Transaction, type EditorState } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { schema } from '@overlyx/core';
+import { schema, changeDomAttrs } from '@overlyx/core';
 import { editorContext } from '../context';
 
 export const changesKey = new PluginKey('lyx-changes');
@@ -18,7 +18,16 @@ function changeMark(type: 'inserted' | 'deleted') {
   return schema.marks.change.create({ type, author: editorContext.changeAuthorId ?? 0, time: now() });
 }
 
-/** Adds the inserted-mark to text inserted by the user while tracking is active. */
+/** Inline nodes that never carry a tracked change of their own: a margin drawing's anchor is not text. */
+const UNTRACKED_NODES = new Set(['sketch']);
+
+/**
+ * Adds the inserted-mark to what the user inserts while tracking is active: text gets the change
+ * mark, an inline node (a pasted formula, a reference, a footnote…) records it in its `marks`
+ * attribute — like LyX, which marks the inset's position. Only pure insertions mark nodes: a
+ * node replaced by a new version of itself (a formula being edited, an inset opened or closed)
+ * stays as it was — LyX does not track edits inside math either.
+ */
 export function changeTrackingPlugin(): Plugin {
   return new Plugin({
     key: changesKey,
@@ -29,17 +38,22 @@ export function changeTrackingPlugin(): Plugin {
         if (!t.docChanged || t.getMeta('lyx-changes') || t.getMeta('y-sync$') || t.getMeta('addToHistory') === false) continue;
         // mark inserted ranges
         t.mapping.maps.forEach((map, i) => {
-          map.forEach((_os, _oe, ns, ne) => {
+          map.forEach((os, oe, ns, ne) => {
             let from = ns, to = ne;
             for (let j = i + 1; j < t.mapping.maps.length; j++) { from = t.mapping.maps[j].map(from, 1); to = t.mapping.maps[j].map(to, -1); }
             if (to <= from) return;
             holder.tr = holder.tr ?? newState.tr;
             const tr = holder.tr;
             const ins = changeMark('inserted');
+            const pureInsert = os === oe;
             newState.doc.nodesBetween(from, to, (node, pos) => {
               if (node.isText) {
                 const existing = node.marks.find(m => m.type === schema.marks.change);
                 if (!existing) tr.addMark(Math.max(from, pos), Math.min(to, pos + node.nodeSize), ins);
+              } else if (node.isInline && pureInsert && pos >= from && pos + node.nodeSize <= to && !UNTRACKED_NODES.has(node.type.name) && !changeOf(node)) {
+                const marks = JSON.parse(node.attrs.marks || '[]').filter((m: any) => m.type !== 'change');
+                marks.push({ type: 'change', attrs: ins.attrs });
+                tr.setNodeMarkup(pos, undefined, { ...node.attrs, marks: JSON.stringify(marks) });
               }
               return true;
             });
@@ -50,6 +64,27 @@ export function changeTrackingPlugin(): Plugin {
       return null;
     },
   });
+}
+
+/**
+ * Show a node's tracked change (kept in its `marks` attribute, see the schema) on the node
+ * view's DOM the way the change mark shows on text: the `lyx-change-*` classes colour the
+ * formula / reference / graphic in the author's colour, `data-author` picks that colour and the
+ * hover tooltip reads the attributes. Node views call this whenever they (re)render their DOM.
+ */
+export function applyChangeAttrs(dom: HTMLElement, node: PMNode): void {
+  const c = changeOf(node);
+  if (!c) {
+    if (dom.dataset.changed === undefined) return;
+    dom.classList.remove('lyx-change', 'lyx-change-inserted', 'lyx-change-deleted');
+    delete dom.dataset.changed; delete dom.dataset.author; delete dom.dataset.time;
+    return;
+  }
+  const attrs = changeDomAttrs(c);
+  dom.classList.toggle('lyx-change', true);
+  dom.classList.toggle('lyx-change-inserted', c.type === 'inserted');
+  dom.classList.toggle('lyx-change-deleted', c.type === 'deleted');
+  for (const [k, v] of Object.entries(attrs)) if (k !== 'class' && dom.getAttribute(k) !== v) dom.setAttribute(k, v);
 }
 
 /** Backspace/Delete while tracking: mark as deleted (unless the text was inserted by tracking, then remove). */

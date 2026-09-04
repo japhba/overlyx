@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { parseTex, writeTex } from '../packages/core/src/tex/index.ts';
-import { inkSvg, extractInkData, strokePathD, inkBounds, insetToPm, pmToLyxBody, lyxToPmNode, type InkStroke, type LyxDocument } from '../packages/core/src/index.ts';
+import { inkSvg, extractInkData, strokePathD, inkBounds, insetToPm, pmToLyxBody, lyxToPmNode, pointInPolygon, segmentsIntersect, polylineHitsPolygon, rectHitsPolygon, type InkStroke, type LyxDocument } from '../packages/core/src/index.ts';
 
 const DATA = JSON.stringify({
   v: 1,
@@ -105,5 +105,57 @@ describe('\\olsketch round trip', () => {
     const out = writeTex({ ...d, body });
     expect(out.text).toBe(writeTex(d).text);
     expect(insetToPm({ type: 'Leaf', name: 'Sketch', arg: 'x.svg', params: [] })).toEqual({ type: 'sketch', attrs: { src: 'x.svg', data: null } });
+  });
+});
+
+describe('lasso geometry (Goodnotes semantics: touching the lasso is enough)', () => {
+  // a square lasso from (0,0) to (100,100), listed as the pointer drew it (not closed explicitly)
+  const square: [number, number][] = [[0, 0], [100, 0], [100, 100], [0, 100]];
+
+  it('pointInPolygon treats the polygon as closed', () => {
+    expect(pointInPolygon(50, 50, square)).toBe(true);
+    expect(pointInPolygon(150, 50, square)).toBe(false);
+    expect(pointInPolygon(50, -1, square)).toBe(false);
+  });
+
+  it('segmentsIntersect: crossing, touching, parallel', () => {
+    expect(segmentsIntersect(0, 0, 10, 10, 0, 10, 10, 0)).toBe(true);
+    expect(segmentsIntersect(0, 0, 10, 0, 5, 0, 5, 10)).toBe(true);     // T-touch
+    expect(segmentsIntersect(0, 0, 10, 0, 0, 1, 10, 1)).toBe(false);    // parallel
+    expect(segmentsIntersect(0, 0, 10, 0, 11, 0, 20, 0)).toBe(false);   // collinear, apart
+    expect(segmentsIntersect(0, 0, 10, 0, 5, 0, 20, 0)).toBe(true);     // collinear, overlapping
+  });
+
+  it('a stroke partly inside the lasso is caught, one entirely outside is not', () => {
+    const halfIn: [number, number, number][] = [[50, 50, 0.5], [150, 50, 0.5], [250, 50, 0.5], [350, 50, 0.5]];   // 1 of 4 points inside
+    expect(polylineHitsPolygon(halfIn, square)).toBe(true);
+    const outside: [number, number, number][] = [[150, 50, 0.5], [250, 50, 0.5]];
+    expect(polylineHitsPolygon(outside, square)).toBe(false);
+    expect(polylineHitsPolygon([], square)).toBe(false);
+  });
+
+  it('a straight line cutting through the lasso with no vertex inside is still caught', () => {
+    const through: [number, number, number][] = [[-50, 50, 0], [150, 50, 0]];
+    expect(polylineHitsPolygon(through, square)).toBe(true);
+    // …but one passing beside it is not, even when its bounding box overlaps the lasso's
+    const beside: [number, number, number][] = [[-50, 120, 0], [150, 120, 0]];
+    expect(polylineHitsPolygon(beside, square)).toBe(false);
+  });
+
+  it('the lasso closes itself: a U-shaped path selects what lies between its open ends', () => {
+    // drawn down the left, along the bottom and up the right — never back along the top
+    const u: [number, number][] = [[0, 0], [0, 100], [100, 100], [100, 0]];
+    expect(polylineHitsPolygon([[50, 10, 0]], u)).toBe(true);
+    expect(pointInPolygon(50, 10, u)).toBe(true);
+  });
+
+  it('images and notes: any overlap with the lasso selects the rectangle', () => {
+    expect(rectHitsPolygon(80, 80, 100, 100, square)).toBe(true);    // corner overlap
+    expect(rectHitsPolygon(20, 20, 10, 10, square)).toBe(true);      // fully inside
+    expect(rectHitsPolygon(-50, -50, 300, 300, square)).toBe(true);  // lasso inside the rectangle
+    expect(rectHitsPolygon(120, 120, 10, 10, square)).toBe(false);
+    // a narrow lasso crossing the rectangle without a vertex inside it
+    const tall: [number, number][] = [[40, -50], [60, -50], [60, 150], [40, 150]];
+    expect(rectHitsPolygon(0, 0, 100, 100, tall)).toBe(true);
   });
 });
