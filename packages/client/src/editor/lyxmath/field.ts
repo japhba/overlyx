@@ -196,7 +196,7 @@ export class LyxMathField {
       case 'limits': return change('limits', () => c.toggleLimits());
       case 'numberToggle': return change('number', () => c.numberToggle());
       case 'numberLineToggle': return change('number', () => c.numberLineToggle());
-      case 'label': return change('label', () => c.setLabel(String(args[0] ?? '')));
+      case 'label': return change('label', () => c.setLabel(String(args[0] ?? ''), typeof args[1] === 'number' ? args[1] : undefined));
       case 'mutate': return change('mutate', () => c.mutate(args[0] as HullType));
       case 'newline': return change('newline', () => c.newline());
       case 'selectAll': c.selectAll(); this.scheduleLayout(); return true;
@@ -677,6 +677,7 @@ export class LyxMathField {
     if (k === 'x') { this.snapshot('script'); c.script(false); this.commit(); return true; }
     if (k === 'e') { this.snapshot('script'); c.script(true); this.commit(); return true; }
     if (k === 'm') { this.execute('text'); return true; }
+    if (k === 'N') { this.execute('numberLineToggle'); return true; }   // LyX M-m N: math-number-line-toggle
     if (k === 'n' || k === 'd' || k === 't') { this.opts.onCommand?.(k); return true; }
     return false;
   }

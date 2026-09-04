@@ -568,7 +568,19 @@ export class MathDisplayView implements NodeView {
 
   toggleNumbering() { this.ensureField().execute('numberToggle'); this.renderMeta(); }
   setEnv(env: HullType) { this.ensureField().execute('mutate', env); this.renderMeta(); }
-  setLabel(label: string) { this.ensureField().execute('label', label); this.renderMeta(); }
+  /**
+   * The label chip names the formula as a whole: the label goes to the row that already carries
+   * one, else to the cursor's row — unless that row has no number (\nonumber), in which case the
+   * first numbered row takes it (a label on an unnumbered row would number it, undoing the choice).
+   */
+  setLabel(label: string) {
+    const f = this.ensureField();
+    const h = f.hull;
+    let row = h.labels.findIndex(Boolean);
+    if (row < 0) { row = this.currentRow(); if (h.numberedRows[row] === false) { const n = h.numberedRows.findIndex(x => x === true); if (n >= 0) row = n; } }
+    f.execute('label', label, row);
+    this.renderMeta();
+  }
 
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;

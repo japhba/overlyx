@@ -179,6 +179,7 @@ test('Shift+ArrowRight selects LyX chunks and continues out of the formula', asy
   expect(r.fieldSel).toBe(false);
   expect(r.lit).toBe(1);                                           // ... and it is visibly highlighted
   await page.keyboard.press('Shift+ArrowRight');                   // keeps going into the text after it
+  await page.waitForTimeout(150);                                  // the browser's own extension arrives through selectionchange
   expect(await page.evaluate(() => { const s2 = (window as any).overlyx.activeView.state.selection; return s2.to - s2.from; })).toBeGreaterThan(1);
   expect(errors).toEqual([]);
 });

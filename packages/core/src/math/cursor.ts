@@ -503,7 +503,13 @@ export class MathCursor {
         // LyX has no special case; we insert the delimiter pair as the math-delim command does
         p.final = true; this.top.pos--; this.plainErase();
         if (bigName === 'left') { const pair = matchingDelim(c); this.handleNest({ t: 'delim', l: delimName(c), r: delimName(pair), body: [] }); }
-        else this.popForwardIfIn('delim');
+        else {
+          // \right<d> closes the pair with the delimiter the author typed — an asymmetric pair
+          // (the evaluation bar \left. ... \right|) is typed exactly like the symmetric ones
+          const d = this.depth >= 2 && (this.owner as Atom).t === 'delim' ? (this.owner as Atom & { t: 'delim' }) : null;
+          if (d) d.r = delimName(c);
+          this.popForwardIfIn('delim');
+        }
         return true;
       }
       if (this.macroModeClose()) {
@@ -799,9 +805,10 @@ export class MathCursor {
     h.numberedRows[r] = !old;
     if (old) h.labels[r] = undefined;
   }
-  setLabel(label: string) {
+  /** LyX math-label: the label of the cursor's row (`row` overrides it), which becomes numbered */
+  setLabel(label: string, row?: number) {
     const h = this.hull;
-    const r = h.type === 'multline' ? h.rows.length - 1 : this.slices[0].idx / h.ncols | 0;
+    const r = h.type === 'multline' ? h.rows.length - 1 : row !== undefined && row >= 0 && row < h.rows.length ? row : this.slices[0].idx / h.ncols | 0;
     if (label.trim()) h.numberedRows[r] = true;
     h.labels[r] = label.trim() || undefined;
   }

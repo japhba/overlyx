@@ -573,10 +573,17 @@ OVERLYX_E2E_AGENT_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright t
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/paperwriting-gan.spec.ts e2e/paperwriting-adam.spec.ts
 # the papers' real appendices are typed by follow-up sessions in the same specs (Adam's convergence
 # proof, BERT's appendices A-C, Attention's visualizations; GAN and the combination-networks paper
-# have no appendix in the originals). OVERLYX_E2E_KEEP=1 leaves the typed projects on disk
-# (e2e-paperwriting, e2e-paperwriting-more, e2e-paper-gan, e2e-paper-adam); publish them into the
-# production admin account so the latest typed-via-GUI papers can always be inspected there:
+# have no appendix in the originals). paperwriting-vae.spec.ts types "Auto-Encoding Variational
+# Bayes" in two sessions plus its six appendices (unnumbered align rows, \eqref, a formula in a
+# section title and in a footnote, \paragraph headings, \left. … \right|, lettered subsections):
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/paperwriting-vae.spec.ts
+# OVERLYX_E2E_KEEP=1 leaves the typed projects on disk (e2e-paperwriting, e2e-paperwriting-more,
+# e2e-paper-gan, e2e-paper-adam, e2e-paper-vae); publish them into the owner's production account
+# (OVERLYX_OWNER_EMAIL, japhba@gmail.com) so the latest typed-via-GUI papers can be inspected there:
 scripts/publish-typed-papers.sh $S/projects
+# mouse selection (LyX rules: insets taken whole at their closest edge, no drag-and-drop of a
+# selection, word/paragraph drags, autoscroll) in the text and in formulas:
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/textselect.spec.ts e2e/mathselect.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/pdfview.spec.ts e2e/rawsplit.spec.ts   # pdf.js viewer, SyncTeX, PDF tabs; the [raw] split tab, scroll sync, live apply
 ```
 

@@ -190,6 +190,24 @@ describe('rows, numbering, labels, mutation', () => {
     c.numberToggle();
     expect(out(c)).toBe('\n\\begin{align*}\na & =b\\\\\nc & =d\n\\end{align*}\n');
   });
+  it('\\right| after \\left. closes the pair with the typed delimiter (evaluation bars)', () => {
+    const c = at('x=');
+    type(c, '\\left.\n');
+    type(c, 'f');
+    type(c, '\\right|\n');
+    type(c, '_');
+    type(c, 'a');
+    c.posForward();
+    expect(out(c)).toBe('x=\\left.f\\right|_{a}');
+  });
+  it('a label can be put on another row than the cursor\'s (the formula\'s label chip picks the numbered one)', () => {
+    const c = at('\n\\begin{align}\na & =b\\nonumber \\\\\nc & =d\n\\end{align}\n');
+    c.idx = 0; c.pos = 0;                 // cursor in the unnumbered first row
+    c.setLabel('eq:cd', 1);
+    expect(out(c)).toBe('\n\\begin{align}\na & =b\\nonumber \\\\\nc & =d\\label{eq:cd}\n\\end{align}\n');
+    c.setLabel('eq:ab');                  // LyX math-label proper: the cursor\'s row, numbered by the label
+    expect(out(c)).toBe('\n\\begin{align}\na & =b\\label{eq:ab}\\\\\nc & =d\\label{eq:cd}\n\\end{align}\n');
+  });
   it('Delete at the end of a row removes the label first, then the number (InsetMathHull)', () => {
     const c = at('\n\\begin{equation}\nE=mc^{2}\\label{eq:demo}\n\\end{equation}\n');
     c.erase();                            // 1st Del: the label goes

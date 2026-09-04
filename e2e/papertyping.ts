@@ -26,11 +26,33 @@ export async function openPaper(page: Page, project: string, file: string) {
   await page.waitForTimeout(1000);
 }
 
-/** Click the end of the (only, so far) Author paragraph and press Enter: a fresh Standard paragraph follows. */
+/**
+ * Click the (only, so far) Author paragraph, put the caret at its very end and press Enter: a
+ * fresh Standard paragraph follows. The click's late selectionchange can pull the caret back to
+ * the click point after the End keypress (the resumeAtEnd trap): End is pressed again until the
+ * selection verifiably sits at the end of the author's text — otherwise Enter splits before the
+ * author name and it gets glued into the next paragraph (an abstract ending in "...results.Admin").
+ */
 export async function afterAuthor(page: Page) {
   await page.locator('.lyx-editor > .lyx-par.lyx-layout-author').first().click({ position: { x: 4, y: 8 } });
   await page.waitForTimeout(200);
-  await page.keyboard.press('End');
+  let atEnd = false;
+  for (let i = 0; i < 5 && !atEnd; i++) {
+    await page.keyboard.press('End');
+    await page.waitForTimeout(150);
+    atEnd = await page.evaluate(() => {
+      const par = document.querySelector('.lyx-editor > .lyx-par.lyx-layout-author');
+      const sel = document.getSelection();
+      if (!par || !sel || !sel.rangeCount) return false;
+      const r = sel.getRangeAt(0);
+      if (!r.collapsed || !par.contains(r.startContainer)) return false;
+      const rest = document.createRange();
+      rest.setStart(r.startContainer, r.startOffset);
+      rest.setEnd(par, par.childNodes.length);
+      return rest.toString().trim() === '';
+    });
+  }
+  if (!atEnd) throw new Error('End never reached the end of the author paragraph');
   await page.keyboard.press('Enter');
   await page.waitForTimeout(200);
 }
@@ -76,13 +98,21 @@ export async function resumeAtEnd(page: Page, escapes = 0) {
   for (let i = 0; i < escapes; i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(120); }
 }
 
+/** The citation dialog's "Find online / paste BibTeX" tab; the tab is enabled once the dialog knows its project (a click before that is lost — try again). */
+async function openOnlineTab(page: Page) {
+  for (let attempt = 0; ; attempt++) {
+    await page.locator('[data-cite-online]').click();
+    try { await expect(page.locator('[data-cite-paste]')).toBeVisible({ timeout: 4000 }); return; }
+    catch (e) { if (attempt >= 2) throw e; console.warn(`citation dialog: the online tab did not open (attempt ${attempt + 1}), clicking again`); }
+  }
+}
+
 /** Paste a BibTeX entry via "Find online / paste BibTeX" and insert the citation at the cursor. */
 export async function citeFromPastedBibtex(page: Page, bibtex: string, surname: string) {
   await page.keyboard.press('Control+Shift+c');
   const dialog = page.locator('.dialog');
   await expect(dialog).toContainText('Citation');
-  await page.locator('[data-cite-online]').click();
-  await expect(dialog).toContainText('Google Scholar');
+  await openOnlineTab(page);
   await page.locator('[data-cite-paste]').fill(bibtex);
   await page.locator('[data-cite-add-paste]').click();
   await expect(page.locator('[data-cite-status]')).toContainText('Added', { timeout: 15000 });
@@ -355,7 +385,8 @@ export async function insertLabel(page: Page, name: string) {
   await expect(page.locator('.dialog')).toContainText('Label');
   await page.locator('.dialog input[type=text]').first().fill(name);
   await page.locator('.dialog .btn.primary').click();
-  await expect(page.locator('.lyx-editor .lyx-command-label', { hasText: name })).toHaveCount(1);
+  // exact text: hasText with a string is substring matching (a fresh app:ml would also count app:mlp)
+  await expect(page.locator('.lyx-editor .lyx-command-label', { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) })).toHaveCount(1);
 }
 
 /** With the cursor in a float's caption: type the caption (text or a callback for text with formulas) and label it. */
@@ -384,7 +415,7 @@ export async function citeFromPastedBibtexMany(page: Page, entries: { bibtex: st
   await page.keyboard.press('Control+Shift+c');
   const dialog = page.locator('.dialog');
   await expect(dialog).toContainText('Citation');
-  await page.locator('[data-cite-online]').click();
+  await openOnlineTab(page);
   const keys: string[] = [];
   for (const e of entries) {
     await page.locator('[data-cite-paste]').fill(e.bibtex);

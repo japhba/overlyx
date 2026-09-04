@@ -17,6 +17,8 @@
  *  - the typed file survives a reload byte-identically and latexmk builds it: the PDF text is
  *    checked for the numbered theorem environments, equation numbers, float captions, resolved
  *    cross-references and the reference list.
+ * Written in two sessions (sections 1-4, then 5-7 with the bibliography): a single headless page
+ * typing for more than ~12 minutes dies with a Chromium renderer CHECK ("Target crashed").
  * Runs against an isolated instance (README "Testing"); OVERLYX_E2E_KEEP=1 keeps the project.
  */
 import { test, expect, type Page } from '@playwright/test';
@@ -26,11 +28,12 @@ import { login, collectErrors, PROJECTS_DIR } from './helpers';
 import {
   openPaper, afterAuthor, setLayout, newParagraph, typeLatex, inlineLatex, displayLatex, canonMath, setModules, selectLayout,
   insertFloat, uploadGraphics, insertLabel, typeCaption, leaveFloat, citeExisting, citeFromPastedBibtexMany, insertRef, insertBibliography,
-  freshPaper, placeholderPng,
+  freshPaper, placeholderPng, resumeAtEnd,
 } from './papertyping';
 
 const PROJECT = 'e2e-paper-gan';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
+const KEYS_FILE = `${DIR}/.keys.json`;
 const TMP = process.env.CLAUDE_JOB_DIR ? `${process.env.CLAUDE_JOB_DIR}/tmp` : '/tmp';
 const FIGS = `${TMP}/e2e-gan-figs`;
 const r = String.raw;
@@ -73,21 +76,8 @@ const BIB: Record<string, { bibtex: string; surname: string }> = {
   bastien2012theano: { surname: 'Bastien', bibtex: `@inproceedings{bastien2012theano,\n  title={Theano: new features and speed improvements},\n  author={Bastien, Fr{\\'e}d{\\'e}ric and Lamblin, Pascal and Pascanu, Razvan and Bergstra, James and Goodfellow, Ian J. and Bergeron, Arnaud and Bouchard, Nicolas and Bengio, Yoshua},\n  booktitle={Deep Learning and Unsupervised Feature Learning NIPS 2012 Workshop},\n  year={2012}\n}` },
 };
 
-test.beforeEach(async ({ page }) => { await login(page); });
-
-test('writing the whole of "Generative Adversarial Nets" from a blank document', async ({ page }) => {
-  test.setTimeout(1500000);
-  const errors = collectErrors(page);
-  await freshPaper(page, PROJECT, 'gan.tex', 'Generative Adversarial Nets', { resetBib: true });
-  rmSync(`${DIR}/.complete`, { force: true });   // marker of an earlier run
-  rmSync(`${DIR}/figures`, { recursive: true, force: true });   // a new paper has no figures yet
-  mkdirSync(FIGS, { recursive: true });
-  placeholderPng(`${FIGS}/gan-overview.png`, 640, 180, [70, 130, 180]);
-  placeholderPng(`${FIGS}/gan-samples.png`, 480, 320, [60, 160, 90]);
-  placeholderPng(`${FIGS}/gan-interpolation.png`, 480, 80, [170, 90, 60]);
-  await openPaper(page, PROJECT, 'gan.tex');
-
-  /* --- local shorthands ------------------------------------------------------------- */
+/** The shorthands the two writing sessions share; `keys` maps a BIB name to the key the server gave it (persisted between the sessions). */
+function tools(page: Page, keys: Record<string, string>) {
   const T = (text: string) => page.keyboard.type(text);
   const M = (latex: string) => inlineLatex(page, latex);
   const P = () => newParagraph(page);
@@ -102,7 +92,6 @@ test('writing the whole of "Generative Adversarial Nets" from a blank document',
     await page.waitForTimeout(60);
   };
   // citations: the first mention of a paper pastes its BibTeX, later ones pick it from the project's bibliography
-  const keys: Record<string, string> = {};
   const cite = async (...names: string[]) => {
     const fresh = names.filter(n => !keys[n]);
     if (fresh.length === names.length) {
@@ -113,6 +102,25 @@ test('writing the whole of "Generative Adversarial Nets" from a blank document',
       await citeExisting(page, names.map(n => `[${keys[n]}]`));
     }
   };
+  return { T, M, P, section, subsection, displayHere, cite };
+}
+
+test.beforeEach(async ({ page }) => { await login(page); });
+
+test('writing "Generative Adversarial Nets" from a blank document, sections 1-4', async ({ page }) => {
+  test.setTimeout(1200000);
+  const errors = collectErrors(page);
+  await freshPaper(page, PROJECT, 'gan.tex', 'Generative Adversarial Nets', { resetBib: true });
+  for (const f of [KEYS_FILE, `${DIR}/.part1`, `${DIR}/.complete`]) rmSync(f, { force: true });   // markers of an earlier run
+  rmSync(`${DIR}/figures`, { recursive: true, force: true });   // a new paper has no figures yet
+  mkdirSync(FIGS, { recursive: true });
+  placeholderPng(`${FIGS}/gan-overview.png`, 640, 180, [70, 130, 180]);
+  placeholderPng(`${FIGS}/gan-samples.png`, 480, 320, [60, 160, 90]);
+  placeholderPng(`${FIGS}/gan-interpolation.png`, 480, 80, [170, 90, 60]);
+  await openPaper(page, PROJECT, 'gan.tex');
+
+  const keys: Record<string, string> = {};
+  const { T, M, P, section, subsection, displayHere, cite } = tools(page, keys);
 
   /* --- front matter --------------------------------------------------------------- */
   await setModules(page, 'theorems-ams', 'Theorem');   // the paper has propositions, a theorem and proofs
@@ -590,6 +598,23 @@ test('writing the whole of "Generative Adversarial Nets" from a blank document',
   await T(' itself. Using a multilayer perceptron to define ');
   await M('G');
   await T(' introduces multiple critical points in parameter space. However, the excellent performance of multilayer perceptrons in practice suggests that they are a reasonable model to use despite their lack of theoretical guarantees.');
+
+  await expect(page.locator('.lyx-editor .lyx-inset-float')).toHaveCount(2);   // the figure and the algorithm so far
+  expect(Object.keys(keys).length).toBe(20);
+  expect(noErrors(errors)).toEqual([]);
+  writeFileSync(KEYS_FILE, JSON.stringify(keys));
+  writeFileSync(`${DIR}/.part1`, 'gan');
+});
+
+test('writing "Generative Adversarial Nets", the experiments, conclusions, acknowledgments and the bibliography', async ({ page }) => {
+  test.skip(!existsSync(`${DIR}/.part1`), 'the first sections were not typed');
+  test.setTimeout(1200000);
+  const errors = collectErrors(page);
+  const keys: Record<string, string> = JSON.parse(readFileSync(KEYS_FILE, 'utf8'));
+  const { T, M, P, section, cite } = tools(page, keys);
+  await openPaper(page, PROJECT, 'gan.tex');
+  await expect(page.locator('.lyx-editor .lyx-command-citation').first()).toBeVisible({ timeout: 15000 });
+  await resumeAtEnd(page);
 
   /* --- 5 Experiments -------------------------------------------------------------- */
   await section('Experiments', 'sec:experiments');
