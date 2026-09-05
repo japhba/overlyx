@@ -48,7 +48,10 @@ export const editorContext: EditorContext = { user: null, meta: null, docId: nul
 export function resolveDocPath(file: string, docDir: string = editorContext.docDir): string {
   const parts = [...docDir.split('/').filter(Boolean), ...file.split('/')];
   const out: string[] = [];
-  for (const p of parts) { if (p === '..') out.pop(); else if (p !== '.' && p !== '') out.push(p); }
+  for (const p of parts) {
+    if (p === '..' && out.length && out[out.length - 1] !== '..') out.pop();
+    else if (p !== '.' && p !== '') out.push(p);
+  }
   return out.join('/');
 }
 

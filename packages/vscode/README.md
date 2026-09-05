@@ -18,6 +18,8 @@ reproduced byte for byte until you change them.
   width; drag its handles or focus a handle and use the arrow keys.
 - **Imported math macros** from project files update when those files change, including
   unsaved definitions in another open VS Code editor.
+- **Shared figures** using `../` and `../../` paths render from parent directories. Common
+  image and PDF extensions can be omitted in `\includegraphics` references.
 - **Structure view** (OverLyX icon in the activity bar): the live outline — sections, floats —
   click to jump.
 - **PDF panel** (Ctrl+R): builds with your local `latexmk` next to the file, shows the PDF with

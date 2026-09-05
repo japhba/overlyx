@@ -14,6 +14,17 @@ const run = promisify(execFile);
 const DIRECT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
 export function isDirectImage(file: string): boolean { return DIRECT.has(path.extname(file).toLowerCase()); }
 
+const GRAPHICS_EXTENSIONS = ['.pdf', ...DIRECT, '.svg', '.svgz', '.eps', '.ps', '.tif', '.tiff', '.bmp'];
+export function isGraphicsFile(file: string): boolean { return GRAPHICS_EXTENSIONS.includes(path.extname(file).toLowerCase()); }
+
+/** LaTeX figure references often omit the extension; look for a supported image beside the requested path. */
+export function resolveGraphicsPath(file: string): string {
+  if (!path.extname(file)) {
+    for (const ext of GRAPHICS_EXTENSIONS) if (fs.existsSync(file + ext)) return file + ext;
+  }
+  return file;
+}
+
 const inflight = new Map<string, Promise<string>>();
 
 /** Returns a path to a PNG for the given graphics file (width in px, best effort). */

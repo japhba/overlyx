@@ -235,8 +235,9 @@ export function isAuxFile(name: string): boolean {
 }
 
 export function graphicsUrl(project: string, path: string, w = 1200): string {
-  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/graphics/${path.split('/').map(encodeURIComponent).join('/')}?w=${w}`;
+  // Encode the whole path so the browser cannot consume ../ segments before the host resolves it.
+  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/graphics/${encodeURIComponent(path)}?w=${w}`;
 }
 export function fileUrl(project: string, path: string): string {
-  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/file/${path.split('/').map(encodeURIComponent).join('/')}`;
+  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/file/${encodeURIComponent(path)}`;
 }

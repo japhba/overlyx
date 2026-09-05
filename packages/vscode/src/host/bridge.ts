@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { isDirectImage, toPng } from './graphics.ts';
+import { isDirectImage, isGraphicsFile, resolveGraphicsPath, toPng } from './graphics.ts';
 
 export interface BridgeDelegate {
   /** project name → absolute root directory (undefined: unknown project) */
@@ -176,8 +176,13 @@ export class Bridge {
       const root = d.projectRoot(decodeURIComponent(m[1]));
       if (!root) { send(res, 404, { error: 'unknown project' }); return; }
       const rel = m[3].split('/').map(decodeURIComponent).join('/');
-      const abs = path.resolve(root, rel);
-      if (abs !== root && !abs.startsWith(root + path.sep)) { send(res, 403, { error: 'path escapes project' }); return; }
+      const requested = path.resolve(root, rel);
+      const abs = m[2] === 'graphics' ? resolveGraphicsPath(requested) : requested;
+      // Local papers may reference shared figures above their own directory. Permit supported
+      // graphics through the image endpoint; raw file reads and uploads remain project-bounded.
+      if (abs !== root && !abs.startsWith(root + path.sep) && (m[2] !== 'graphics' || !isGraphicsFile(abs))) {
+        send(res, 403, { error: 'path escapes project' }); return;
+      }
       if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) { send(res, 404, { error: 'not found' }); return; }
       if (m[2] === 'graphics' && !isDirectImage(abs)) {
         try {

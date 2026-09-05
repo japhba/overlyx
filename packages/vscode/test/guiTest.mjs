@@ -35,7 +35,7 @@ async function until(fn, ms, what) {
 /* ---------------------------------------------------------------- fixture workspace */
 const MAIN = [
   '\\documentclass{article}',
-  '\\usepackage{amsmath,amssymb}',
+  '\\usepackage{amsmath,amssymb,graphicx}',
   '\\newcommand{\\RR}{\\mathbb{R}}',
   '\\input{macros.tex}',
   '\\begin{document}',
@@ -43,6 +43,10 @@ const MAIN = [
   '\\section{Introduction}',
   '',
   'Functions on $\\RR$ are studied, see \\eqref{eq:main}. Vector $\\bx$.',
+  '',
+  '\\includegraphics[width=16pt]{../figures/parent.png}',
+  '\\includegraphics[width=16pt]{../../figures/grandparent.png}',
+  '\\includegraphics[width=16pt]{../figures/parent-pdf}',
   '',
   '\\begin{equation}',
   'f(x)=x^{2}\\label{eq:main}',
@@ -55,7 +59,14 @@ const MAIN = [
   '\\end{document}',
   '',
 ].join('\n');
-const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-gui-ws-'));
+const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-gui-ws-'));
+const ws = path.join(fixtureRoot, 'paper', 'submission');
+fs.mkdirSync(ws, { recursive: true });
+fs.mkdirSync(path.join(fixtureRoot, 'paper', 'figures'));
+fs.mkdirSync(path.join(fixtureRoot, 'figures'));
+fs.copyFileSync(path.join(pkg, 'test/fixtures/graphics.png'), path.join(fixtureRoot, 'paper/figures/parent.png'));
+fs.copyFileSync(path.join(pkg, 'test/fixtures/graphics.png'), path.join(fixtureRoot, 'figures/grandparent.png'));
+fs.copyFileSync(path.join(pkg, 'test/fixtures/graphics.pdf'), path.join(fixtureRoot, 'paper/figures/parent-pdf.pdf'));
 fs.writeFileSync(path.join(ws, 'main.tex'), MAIN);
 fs.writeFileSync(path.join(ws, 'macros.tex'), String.raw`\newcommand{\bx}{\boldsymbol{x}}`);
 
@@ -136,6 +147,11 @@ try {
   }
   await until(async () => (await editorFrame.evaluate(() => document.body.innerText)).includes('Functions on'), 60000, 'the rendered document text');
   log('custom editor opened and rendered the document');
+  await until(() => editorFrame.evaluate(() => {
+    const images = [...document.querySelectorAll('.lyx-graphics img')];
+    return images.length === 3 && images.every(img => img.complete && img.naturalWidth > 0);
+  }), 10000, 'PNG and PDF figures from parent directories');
+  log('parent and grandparent graphics paths rendered, including extensionless PDF');
 
   /* ---- 2. WYSIWYG rendering checks ---- */
   const checks = await editorFrame.evaluate(() => {
@@ -251,6 +267,9 @@ try {
   await shot('05-pdf');
 
   const finalTex = fs.readFileSync(path.join(ws, 'main.tex'), 'utf8');
+  for (const figure of ['../figures/parent.png', '../../figures/grandparent.png', '../figures/parent-pdf']) {
+    if (!finalTex.includes('{' + figure + '}')) fail('relative figure path changed on save: ' + figure);
+  }
   if (finalTex.indexOf('\\section{Methods}') < 0) fail('document structure corrupted during the GUI run');
   if (/Ove[A-Z]/.test(finalTex)) fail('stray palette keystrokes leaked into the document');
   const pdfText = await pdfFrame.evaluate(() => document.body.innerText);
@@ -263,7 +282,7 @@ try {
   throw e;
 } finally {
   kill();
-  fs.rmSync(ws, { recursive: true, force: true });
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
   if (!failed) { fs.rmSync(udd, { recursive: true, force: true }); fs.rmSync(extDir, { recursive: true, force: true }); }
   else log('kept user-data-dir for inspection:', udd);
 }
