@@ -83,10 +83,18 @@ test('drawing in the margin anchors a sketch, saves an SVG next to the document,
   await page.mouse.up();
   await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(1);
 
-  // switching the pen off removes the gutters, the drawings stay visible
+  // switching the pen off removes the gutters, the drawings stay visible — and the page scrolls
+  // back to the column: the canvas must not hold the old (centred) offset open, or the text
+  // vanishes off the left edge until a reload
+  const scroller = page.locator('.editor-scroll');
+  expect(await scroller.evaluate(el => el.scrollLeft)).toBeGreaterThan(0);   // centred in the gutters
   await page.click('[data-tb="ink"]');
   await expect(page.locator('.editor-scroll.ink-pan')).toHaveCount(0);
   await expect(page.locator('.ink-canvas')).toBeVisible();
+  await expect.poll(() => scroller.evaluate(el => [el.scrollLeft, el.scrollWidth - el.clientWidth])).toEqual([0, 0]);
+  const sc = (await scroller.boundingBox())!, col = (await page.locator('.lyx-editor').boundingBox())!;
+  expect(col.x).toBeGreaterThan(sc.x);
+  expect(col.x + col.width).toBeLessThan(sc.x + sc.width);
   expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
 });
 
@@ -238,7 +246,7 @@ test('clicking the selected colour or width again opens a picker that replaces t
   await pop.locator('[data-ink-color="#12b5cb"]').click();
   await expect(page.locator('[data-tb="i-c-2"] .tb-ink-swatch')).toHaveAttribute('data-color', '#12b5cb');   // the preset itself changed…
   await expect(page.locator('[data-tb="i-c-2"]')).toHaveClass(/active/);                                     // …and is what the pen draws with
-  await expect(page.locator('[data-tb="i-w-1"] .tb-ink-width')).toHaveAttribute('style', /#12b5cb/);         // the width dots show the new colour
+  await expect(page.locator('[data-tb="i-w-1"] .tb-ink-width')).toHaveCSS('background-color', 'rgb(34, 34, 34)');   // the width dots stay ink-black (--ui-fg), whatever the colour
   await page.keyboard.press('Escape');
   await expect(pop).toBeHidden();
 

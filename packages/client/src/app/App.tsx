@@ -1574,7 +1574,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     })),
     pen.widths.map((w, i) => ({
       id: 'i-w-' + i, title: `${penName === 'pen' ? 'Pen' : 'Highlighter'} ${formatMm(w)} — click the selected width again to change it`, icon: String(w),
-      html: `<span class="tb-ink-width" data-width="${w}" style="width:${widthDotPx(ink.pen, w)}px;height:${widthDotPx(ink.pen, w)}px;background:${pen.color}${hlPen ? '99' : ''}"></span>`,
+      html: `<span class="tb-ink-width" data-width="${w}" style="width:${widthDotPx(ink.pen, w)}px;height:${widthDotPx(ink.pen, w)}px"></span>`,
       active: pen.width === w && drawing,
       action: () => setInk({ width: w }),
       paletteWhenActive: true,

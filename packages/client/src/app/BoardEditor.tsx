@@ -605,7 +605,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
             <button key={curPen + 'w' + i} class={'small-btn board-width' + (active ? ' active' : '')} data-width={w} data-slot={'w' + i}
               title={`${curPen === 'pen' ? 'Pen' : 'Highlighter'} ${formatMm(w)} — click the selected width again to change it`}
               onClick={() => { if (active) setPick(p => (p?.kind === 'width' && p.idx === i ? null : { kind: 'width', idx: i })); else setPenSetting({ width: w }); }}>
-              <span style={{ width: px + 'px', height: px + 'px', background: penSet.color }} />
+              <span style={{ width: px + 'px', height: px + 'px' }} />
             </button>
           );
         })}

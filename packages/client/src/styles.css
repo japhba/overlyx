@@ -725,7 +725,9 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .editor-scroll.ink-pan { overflow-x: auto; scroll-snap-type: x proximity; }
 .editor-scroll.ink-pan > .editor-page, .editor-scroll.ink-pan > .ruler { width: calc(100% + 2 * var(--ink-gutter, 85vw)); }
 .editor-scroll.ink-pan .editor-host > .lyx-editor { scroll-snap-align: center; }
-.ink-canvas { position: absolute; left: 0; top: 0; z-index: 5; pointer-events: none; }
+/* sticky, not absolute + translate: a stuck box never widens the scrollable area, so the scroll
+   offset clamps back when the gutters go (ink.ts gives it a negative bottom margin: no flow height) */
+.ink-canvas { position: sticky; left: 0; top: 0; display: block; z-index: 5; pointer-events: none; }
 .ink-canvas.draw { pointer-events: auto; cursor: crosshair; touch-action: pan-x pan-y; }
 .ink-canvas.draw[data-tool="eraser"] { cursor: cell; }
 .ink-canvas.draw[data-tool="lasso"] { cursor: default; }
@@ -743,7 +745,7 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 /* ink toolbar colour swatches / width dots */
 .tb-ink-swatch { display: inline-block; width: 13px; height: 13px; border-radius: 50%; border: 1px solid var(--ui-border); vertical-align: middle; }
 .tb-ink-swatch.hl { border-radius: 3px; opacity: 0.8; }   /* the highlighter's presets: translucent bars, not pen dots */
-.tb-ink-width { display: inline-block; border-radius: 50%; background: currentColor; vertical-align: middle; }
+.tb-ink-width { display: inline-block; border-radius: 50%; background: var(--ui-fg); vertical-align: middle; }   /* the width dots are ink-black (light on dark), whatever the pen's colour */
 /* preset editors (app/InkPickers.tsx): opened by clicking the selected swatch / dot again */
 .ink-pick { padding: 6px 8px 4px; min-width: 212px; font-family: var(--ui-font); font-size: 11px; color: var(--ui-fg); }
 .ink-pick-grid { display: grid; grid-template-columns: repeat(8, 22px); gap: 4px; }
@@ -793,7 +795,7 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .board-color { width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--ui-border); cursor: pointer; padding: 0; }
 .board-color.hl { border-radius: 4px; opacity: 0.8; }
 .board-color.active { outline: 2px solid var(--accent); outline-offset: 1px; }
-.board-width span { display: inline-block; border-radius: 50%; background: currentColor; vertical-align: middle; }
+.board-width span { display: inline-block; border-radius: 50%; background: var(--ui-fg); vertical-align: middle; }
 .board-pop { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 6px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.18); z-index: 11; }
 /* laser traces: SVG in board coordinates; a lifted one fades out */
 .board-laser, .board-laser * { pointer-events: none; }

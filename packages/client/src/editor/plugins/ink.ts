@@ -294,7 +294,10 @@ class InkLayer {
     this.scroller = view.dom.closest('.editor-scroll');
     if (!this.scroller) return;
     this.canvas.className = 'ink-canvas';
-    this.scroller.appendChild(this.canvas);
+    // first child, sticky: it follows the scrollport without extending the scrollable area — an
+    // absolutely positioned canvas translated to the scroll offset would hold the offset open (the
+    // page could never scroll back after the ink gutters are removed, or after the text shrinks)
+    this.scroller.insertBefore(this.canvas, this.scroller.firstChild);
     this.selBox.className = 'ink-sel';
     this.selBox.hidden = true;
     for (const c of ['nw', 'ne', 'sw', 'se']) {
@@ -490,11 +493,17 @@ class InkLayer {
 
   private paint() {
     if (!this.scroller || !this.canvas.isConnected) return;
+    // the sticky canvas must stay first: its unshifted place is the top of the content (Preact may
+    // prepend the ruler in front of it)
+    if (this.scroller.firstChild !== this.canvas) this.scroller.insertBefore(this.canvas, this.scroller.firstChild);
     const g = this.geom();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const W = Math.max(1, Math.round(g.width * dpr)), H = Math.max(1, Math.round(g.height * dpr));
-    if (this.canvas.width !== W || this.canvas.height !== H) { this.canvas.width = W; this.canvas.height = H; this.canvas.style.width = g.width + 'px'; this.canvas.style.height = g.height + 'px'; }
-    this.canvas.style.transform = `translate(${g.scrollLeft}px, ${g.scrollTop}px)`;
+    if (this.canvas.width !== W || this.canvas.height !== H) {
+      this.canvas.width = W; this.canvas.height = H;
+      this.canvas.style.width = g.width + 'px'; this.canvas.style.height = g.height + 'px';
+      this.canvas.style.marginBottom = -g.height + 'px';   // takes no room in the flow: the page starts at the top
+    }
     // keyhole clip: the whole viewport minus the text column, so column clicks reach the text —
     // except for the laser, which points at the text as much as at the margins
     const L = Math.max(0, g.edgeL - g.scrollLeft - 2), R = Math.min(g.width, g.edgeR - g.scrollLeft + 2);
