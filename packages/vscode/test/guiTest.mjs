@@ -37,11 +37,12 @@ const MAIN = [
   '\\documentclass{article}',
   '\\usepackage{amsmath,amssymb}',
   '\\newcommand{\\RR}{\\mathbb{R}}',
+  '\\input{macros.tex}',
   '\\begin{document}',
   '',
   '\\section{Introduction}',
   '',
-  'Functions on $\\RR$ are studied, see \\eqref{eq:main}.',
+  'Functions on $\\RR$ are studied, see \\eqref{eq:main}. Vector $\\bx$.',
   '',
   '\\begin{equation}',
   'f(x)=x^{2}\\label{eq:main}',
@@ -56,6 +57,7 @@ const MAIN = [
 ].join('\n');
 const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-gui-ws-'));
 fs.writeFileSync(path.join(ws, 'main.tex'), MAIN);
+fs.writeFileSync(path.join(ws, 'macros.tex'), String.raw`\newcommand{\bx}{\boldsymbol{x}}`);
 
 /* ---------------------------------------------------------------- VS Code launch */
 const udd = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-gui-udd-'));
@@ -162,6 +164,33 @@ try {
   const rawMacro = await editorFrame.evaluate(() => document.body.innerText.indexOf('\\RR') >= 0);
   if (rawMacro) fail('the \\RR macro is shown as raw LaTeX — document macros not applied to formulas');
   await shot('01-editor');
+
+  const macroState = await editorFrame.evaluate(() => ({ macros: window.overlyx?.meta?.macros, errors: [...document.querySelectorAll('.katex-error')].map(n => n.textContent), math: [...document.querySelectorAll('.lyx-math-inline')].map(n => n.innerText) }));
+  log('macro state', JSON.stringify(macroState));
+  if (!macroState.macros?.bx || macroState.math.some(t => t.includes('\\bx'))) fail('imported bx macro did not render');
+  await editorFrame.getByRole('button', { name: 'Split', exact: true }).click();
+  await editorFrame.locator('textarea.source').waitFor({ state: 'visible' });
+  await until(() => editorFrame.locator('textarea.source').inputValue().then(s => s.includes('Introduction')), 15000, 'source text');
+  await editorFrame.getByRole('button', { name: 'TeX', exact: true }).click();
+  if (await editorFrame.locator('.editor-scroll').isVisible()) fail('TeX mode did not hide the writing area');
+  await editorFrame.getByRole('button', { name: 'WYSIWYG', exact: true }).click();
+  if (!await editorFrame.locator('.ruler').isVisible()) fail('ruler missing');
+  fs.writeFileSync(path.join(ws, 'macros.tex'), String.raw`\newcommand{\bx}{\boldsymbol{y}}`);
+  await until(() => editorFrame.evaluate(() => window.overlyx?.meta?.macros?.bx?.def === String.raw`\boldsymbol{y}`), 15000, 'macro dependency refresh');
+  const rulerHandle = editorFrame.getByRole('slider', { name: 'Text width, right handle' });
+  const widthBefore = Number(await rulerHandle.getAttribute('aria-valuenow'));
+  await rulerHandle.focus(); await page.keyboard.press('ArrowLeft');
+  await until(async () => Number(await rulerHandle.getAttribute('aria-valuenow')) === widthBefore - 20, 5000, 'ruler resizing');
+  await editorFrame.getByRole('button', { name: 'TeX', exact: true }).click();
+  const sourceBox = editorFrame.locator('textarea.source');
+  await sourceBox.fill((await sourceBox.inputValue()).replace('Inline math', 'Source edit: inline math'));
+  await sourceBox.press('Control+s');
+  await until(() => fs.readFileSync(path.join(ws, 'main.tex'), 'utf8').includes('Source edit: inline math'), 15000, 'saving directly from TeX mode');
+  await sleep(750); // let a delayed visual-editor echo, if any, arrive after the save
+  if (await page.locator('.tabs-container .tab.dirty').count()) fail('TeX save was followed by another unsaved visual-editor rewrite');
+  await editorFrame.getByRole('button', { name: 'WYSIWYG', exact: true }).click();
+  await until(() => editorFrame.locator('.lyx-editor').innerText().then(t => t.includes('Source edit: inline math')), 10000, 'source edit in WYSIWYG mode');
+  log('view modes, ruler and imported macro refresh OK');
 
   /* ---- 3. type into the document, save with Ctrl+S, verify the .tex on disk ---- */
   await editorFrame.click('text=are studied');

@@ -11,6 +11,7 @@ import { lyxToPm, pmToLyxBody, headerValue, type LyxDocument, type PMJSON } from
 import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, type TexContext } from './texdoc.ts';
 import { buildMeta } from './meta.ts';
 import { findMaster } from './project.ts';
+import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 
 export class DocSession {
   /** header/preamble/format/trailer of the last parse — the parts the PM doc does not carry */
@@ -24,6 +25,14 @@ export class DocSession {
   /** the latest PM doc received from the webview (null until it edits) */
   private pmDoc: PMJSON | null = null;
   private disposed = false;
+  private writes: Promise<unknown> = Promise.resolve();
+
+  /** Source, visual edits, settings and saves share one ordered write queue. */
+  private enqueue<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.writes.catch(() => {}).then(work);
+    this.writes = next;
+    return next;
+  }
 
   constructor(
     public readonly document: vscode.TextDocument,
@@ -65,7 +74,11 @@ export class DocSession {
   }
 
   /** The webview sent an updated PM doc: write it into the TextDocument. */
-  async applyPmUpdate(pmDoc: PMJSON, headerLines?: string[]): Promise<void> {
+  applyPmUpdate(pmDoc: PMJSON, headerLines?: string[]): Promise<void> {
+    return this.enqueue(() => this.writePmUpdate(pmDoc, headerLines));
+  }
+
+  private async writePmUpdate(pmDoc: PMJSON, headerLines?: string[]): Promise<void> {
     if (this.disposed) return;
     this.pmDoc = pmDoc;
     if (headerLines) this.headerLines = headerLines;
@@ -74,7 +87,7 @@ export class DocSession {
     this.lastWritten = text;
     const edit = new vscode.WorkspaceEdit();
     edit.replace(this.document.uri, new vscode.Range(0, 0, this.document.lineCount, 0), text);
-    await vscode.workspace.applyEdit(edit);
+    if (!await vscode.workspace.applyEdit(edit)) { this.lastWritten = null; throw new Error('VS Code could not apply the document edit'); }
   }
 
   /**
@@ -88,8 +101,28 @@ export class DocSession {
     return { pmDoc: r.pmDoc, headerLines: r.headerLines };
   }
 
+  /** Source view edits use the same TextDocument and parsing path as external edits. */
+  applySource(text: string): Promise<ReturnType<DocSession['parseCurrent']>> {
+    return this.enqueue(() => this.writeSource(text));
+  }
+
+  private async writeSource(text: string): Promise<ReturnType<DocSession['parseCurrent']>> {
+    if (this.disposed) throw new Error('The document has closed');
+    // Validate before replacing the TextDocument, retaining the original on a parser failure.
+    parseDocumentText(text, this.ctx, this.relPath);
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(this.document.uri, new vscode.Range(0, 0, this.document.lineCount, 0), text);
+    if (!await vscode.workspace.applyEdit(edit)) throw new Error('VS Code could not apply the source edit');
+    this.lastWritten = text;
+    return this.parseCurrent();
+  }
+
   /** Update header lines (document settings / tracking switches) and re-serialize. */
-  async setHeader(body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<string[]> {
+  setHeader(body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<string[]> {
+    return this.enqueue(() => this.writeHeader(body));
+  }
+
+  private async writeHeader(body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<string[]> {
     let lines = [...this.headerLines];
     if (Array.isArray(body.headerLines)) lines = body.headerLines.map(String);
     if (typeof body.preamble === 'string') {
@@ -104,8 +137,9 @@ export class DocSession {
         if (i >= 0) lines[i] = `\\${k} ${v}`; else lines.push(`\\${k} ${v}`);
       }
     }
+    lines = markEditedSettings(this.headerLines, lines, Object.keys(body.set ?? {}));
     this.headerLines = lines;
-    if (this.pmDoc) await this.applyPmUpdate(this.pmDoc);
+    if (this.pmDoc) await this.writePmUpdate(this.pmDoc);
     else {
       // no webview edit yet: rewrite from the parsed file with the new header
       const r = parseDocumentText(this.document.getText(), this.ctx, this.relPath);
@@ -115,10 +149,16 @@ export class DocSession {
         this.lastWritten = text;
         const edit = new vscode.WorkspaceEdit();
         edit.replace(this.document.uri, new vscode.Range(0, 0, this.document.lineCount, 0), text);
-        await vscode.workspace.applyEdit(edit);
+        if (!await vscode.workspace.applyEdit(edit)) { this.lastWritten = null; throw new Error('VS Code could not apply document settings'); }
       }
     }
     return lines;
+  }
+
+  save(): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.document.isDirty && !await this.document.save()) throw new Error('VS Code could not save the document');
+    });
   }
 
   meta(): Record<string, unknown> {

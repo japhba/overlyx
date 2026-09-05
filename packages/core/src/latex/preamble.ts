@@ -135,7 +135,7 @@ function geometry(ctx: ExportContext): string {
   return out;
 }
 
-function fontsCode(ctx: ExportContext): string {
+export function fontsCode(ctx: ExportContext): string {
   const { bp } = ctx;
   if (bp.fontRoman === 'default' && bp.fontSans === 'default' && bp.fontTypewriter === 'default' && (bp.fontMath === 'default' || bp.fontMath === 'auto')) return '';
   if (bp.useNonTexFonts) {

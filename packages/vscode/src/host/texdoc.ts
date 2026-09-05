@@ -9,7 +9,7 @@ import { parseTex, writeTex, type ParseTexResult } from '@overlyx/core/tex/index
 import type { LyxDocument } from '@overlyx/core';
 import { findMaster, readTextFile, resolveInside } from './project.ts';
 
-export interface TexContext { root: string; layoutDir: string }
+export interface TexContext { root: string; layoutDir: string; /** Unsaved text in an open VS Code document. */ readText?: (absolutePath: string) => string | undefined }
 
 /** A file read relative to a document, refusing to leave the project. */
 export function readerFor(ctx: TexContext, absDocPath: string): (name: string) => string | undefined {
@@ -18,6 +18,8 @@ export function readerFor(ctx: TexContext, absDocPath: string): (name: string) =
     try {
       const abs = path.resolve(dir, name);
       if (!abs.startsWith(ctx.root + path.sep)) return undefined;
+      const open = ctx.readText?.(abs);
+      if (open !== undefined) return open;
       const st = fs.statSync(abs);
       if (!st.isFile() || st.size > 8 * 1024 * 1024) return undefined;
       return fs.readFileSync(abs, 'utf8');
@@ -30,6 +32,8 @@ const parseCache = new Map<string, { key: string; result: ParseTexResult }>();
 /** Parse a .tex file that is not open (child documents, masters), cached by mtime + size. */
 export function cachedParseFile(ctx: TexContext, relPath: string, depth = 0): ParseTexResult {
   const abs = resolveInside(ctx.root, relPath);
+  const open = ctx.readText?.(abs);
+  if (open !== undefined) return parseDocumentText(open, ctx, relPath, depth);
   const st = fs.statSync(abs);
   const key = `${st.mtimeMs}:${st.size}:${depth}`;
   const hit = parseCache.get(abs);

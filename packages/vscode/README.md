@@ -13,6 +13,11 @@ reproduced byte for byte until you change them.
 - **OverLyX editor** for `.tex` files (right-click a file ▸ *Reopen Editor With…* ▸ *OverLyX
   Editor*, or the editor-title button). The document stays an ordinary VS Code `TextDocument`:
   dirty state, Ctrl+S, autosave, git and extensions all see the same file.
+- **WYSIWYG / TeX / Split** buttons in the top bar switch views within the editor. Ctrl+S in
+  TeX view applies the source and saves the file. The ruler above the page resizes the writing
+  width; drag its handles or focus a handle and use the arrow keys.
+- **Imported math macros** from project files update when those files change, including
+  unsaved definitions in another open VS Code editor.
 - **Structure view** (OverLyX icon in the activity bar): the live outline — sections, floats —
   click to jump.
 - **PDF panel** (Ctrl+R): builds with your local `latexmk` next to the file, shows the PDF with

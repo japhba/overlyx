@@ -99,12 +99,13 @@ function storedWidth(): number {
 }
 
 /** The LaTeX source beside the document (Ctrl+Alt+S / the "[raw]" tab), with synchronized scrolling and live apply. */
-export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose }: { target: SourceTarget | null; tick: number; selTick?: number; /** the formula being edited, if any */ mathField?: LyxMathField | null; onNotify: (msg: string, kind?: 'info' | 'error') => void; onClose?: () => void }) {
+export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose, onSave }: { target: SourceTarget | null; tick: number; selTick?: number; /** the formula being edited, if any */ mathField?: LyxMathField | null; onNotify: (msg: string, kind?: 'info' | 'error') => void; onClose?: () => void; onSave?: () => void }) {
   const [text, setText] = useState('');
   /** the text as typed, ahead of the render (a live apply scheduled by a keystroke must send it, not the previous render's) */
   const textRef = useRef('');
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
+  const inFlight = useRef<Promise<unknown> | null>(null);
   const [curLine, setCurLine] = useState<number | null>(null);
   /** the document cursor's character offset in the source (a caret mark in the coloured copy) */
   const [curOff, setCurOff] = useState<number | null>(null);
@@ -261,21 +262,25 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
    * (balanced braces, a document body — a half-typed \begin{…} must not turn the document into ERT)
    * — else it is held until it is; Ctrl+Enter applies at once.
    */
-  const apply = async (force = false) => {
-    if (!target || busy) return;
+  const apply = async (force = false): Promise<boolean> => {
+    if (!target) return false;
+    if (inFlight.current) { try { await inFlight.current; } catch { /* reflected below */ } return apply(force); }
     const current = textRef.current;
     const issues = checkTexHealth(current).filter(i => i.severity === 'error' || i.code === 'brace-imbalance');   // a half-typed {…} would turn into ERT
-    if (issues.length && !force) { setApplied('held'); setApplyNote(issues[0].message); return; }
+    if (issues.length && !force) { setApplied('held'); setApplyNote(issues[0].message); return false; }
     setBusy(true); setApplied('applying');
     try {
-      const r = await api.applySource(target.docId, current);
-      if (textRef.current !== current) { setApplied('waiting'); scheduleApply(); setBusy(false); return; }   // typed on meanwhile: apply again
+      const request = api.applySource(target.docId, current);
+      inFlight.current = request;
+      const r = await request;
+      if (textRef.current !== current) { setApplied('waiting'); scheduleApply(); return false; }   // typed on meanwhile: apply again
       setDirty(false);
       setApplied('ok'); setApplyNote(r.warnings.length ? `${r.warnings.length} warning${r.warnings.length > 1 ? 's' : ''}: ${r.warnings[0]}` : '');
+      return true;
     } catch (e) {
       setApplied('error'); setApplyNote((e as Error).message);
-    }
-    setBusy(false);
+      return false;
+    } finally { inFlight.current = null; setBusy(false); }
   };
   const scheduleApply = () => {
     if (applyTimer.current) clearTimeout(applyTimer.current);
@@ -364,6 +369,12 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
           onFocus={() => { focused.current = true; }} onBlur={onBlur}
           onInput={e => { const el = e.target as HTMLTextAreaElement; undo.current.record({ value: el.value, start: el.selectionStart, end: el.selectionEnd }); textRef.current = el.value; setText(el.value); setDirty(true); updateCursor(); scheduleApply(); }}
           onKeyDown={e => {
+            if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
+              e.preventDefault(); e.stopPropagation();
+              if (applyTimer.current) clearTimeout(applyTimer.current);
+              void apply(true).then(ok => { if (ok) onSave?.(); });
+              return;
+            }
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && dirty) { e.preventDefault(); if (applyTimer.current) clearTimeout(applyTimer.current); void apply(true); return; }
             // ⌘K in the source view: rewrite the selected LaTeX (or write at the cursor) with AI
             if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k' && getPrefs().aiRewrite && target) {

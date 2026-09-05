@@ -14,6 +14,7 @@ export type HostToEditor =
   | { type: 'init'; docId: string; base: string; pmDoc: PmDoc; headerLines: string[]; fragment: boolean; dark: boolean }
   /** the file changed outside the editor (git, another editor, VS Code undo): new content, applied as a diff */
   | { type: 'externalUpdate'; pmDoc: PmDoc; headerLines: string[] }
+  | { type: 'metadataChanged' }
   /** move the cursor to a document position (outline click) */
   | { type: 'goto'; pos: number }
   /** run a UI command (keybindings / menus contributed on the VS Code side) */

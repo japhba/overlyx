@@ -11,6 +11,7 @@ import { makeContext, collectBibLabels, validateParams, writeBody, finishExport 
 import { colorOptions, packages, lyxMacros, tclassPreamble, tclassI18nPreamble, writePreamble } from '../latex/preamble.ts';
 import { babelName } from '../latex/text.ts';
 import type { ExportContext, ExportOptions } from '../latex/context.ts';
+import { nativeClassOptions, nativeEarlySettings, nativeSettings } from './settings.ts';
 import { MANAGED_BEGIN, MANAGED_END, preambleFacts, providedFeatures, settingsFromHeader, settingsLine } from './preamble.ts';
 
 export interface WriteTexOptions {
@@ -103,6 +104,7 @@ function managedBlock(ctx: ExportContext, provided: Set<string>, settings: Recor
   if (f.isRequired('menukeys') && !f.isProvided('menukeys')) s += '\\usepackage{menukeys}\n';
   const i18np = tclassI18nPreamble(c);
   if (i18np) s += i18np + (i18np.endsWith('\n') ? '' : '\n');
+  s += nativeSettings(c, settings, new Set([...provided, ...preambleFacts(s).packages]));
   return MANAGED_BEGIN + '\n' + settingsLine(settings) + '\n'
     + '%% Packages and macros needed by the content (generated on every save; put your own preamble above this block).\n'
     + s + MANAGED_END + '\n';
@@ -110,7 +112,7 @@ function managedBlock(ctx: ExportContext, provided: Set<string>, settings: Recor
 
 export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTexResult {
   const bp = readBufferParams(doc);
-  const facts = preambleFacts(bp.preamble, opts.readFile);
+  const facts = preambleFacts(doc.preamble.join('\n') + '\n' + bp.preamble, opts.readFile);
   let provided = providedFeatures(facts);
   const eopts: ExportOptions = {
     layoutDir: opts.layoutDir, localDirs: opts.localDirs, resolveInclude: opts.resolveInclude, basename: opts.basename,
@@ -140,10 +142,12 @@ export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTex
       preamble = writePreamble(ctx, { noMacros: true }).split('\n').filter(l => !l.startsWith('%% LyX-compatible') && !l.startsWith('%% Do not edit')).join('\n').replace(/\n+$/, '') + '\n';
       provided = providedFeatures(preambleFacts(preamble, opts.readFile));
     } else {
-      preamble = `\\documentclass${bp.options ? `[${bp.options}]` : ''}{${ctx.dc.latexName}}\n`;
+      const options = nativeClassOptions(ctx, settings);
+      preamble = `\\documentclass${options ? `[${options}]` : ''}{${ctx.dc.latexName}}\n`;
+      preamble += nativeEarlySettings(ctx, settings);
       if (bp.preamble.trim()) preamble += bp.preamble.replace(/\s+$/, '') + '\n';
     }
-    const head = [...(opts.head ?? []), ...doc.preamble.filter(l => l.startsWith('%'))];
+    const head = [...(opts.head ?? []), ...doc.preamble];
     text = (head.length ? head.join('\n') + '\n' : '') + preamble + '\n' + managedBlock(ctx, provided, settings) + '\n\\begin{document}\n' + bodyText + '\n\\end{document}\n';
     if (doc.trailer.length) text += doc.trailer.join('\n') + '\n';
   }

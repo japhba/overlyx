@@ -10,6 +10,8 @@ import { stripComments } from '../macros.ts';
 export const MANAGED_BEGIN = '%% OverLyX ------------------------------------------------------------------';
 export const MANAGED_END = '%% end OverLyX --------------------------------------------------------------';
 export const SETTINGS_PREFIX = '%% overlyx-settings: ';
+export const EARLY_BEGIN = '%% OverLyX package options';
+export const EARLY_END = '%% end OverLyX package options';
 
 /** Header keys that live in the settings line (everything the writer needs that LaTeX cannot express). */
 export const SETTINGS_KEYS = [
@@ -20,6 +22,10 @@ export const SETTINGS_KEYS = [
   'use_minted', 'listings_params', 'secnumdepth', 'tocdepth', 'notefontcolor', 'boxbgcolor', 'use_hyperref', 'graphics', 'papercolumns',
   'spacing', 'justification', 'is_math_indent', 'math_numbering_side', 'paperfontsize', 'papersize', 'use_geometry', 'suppress_date',
   'pdf_colorlinks', 'index_command', 'bibtex_command', 'tablestyle', 'use_lineno', 'lineno_options',
+  'paperorientation', 'paperwidth', 'paperheight', 'leftmargin', 'rightmargin', 'topmargin', 'bottommargin', 'headheight', 'headsep', 'footskip', 'columnsep', 'papersides', 'paperpagestyle', 'paragraph_indentation',
+  'font_roman', 'font_sans', 'font_typewriter', 'font_math', 'font_default_family', 'font_sf_scale', 'font_tt_scale', 'font_sc', 'font_roman_osf', 'use_microtype',
+  'pdf_title', 'pdf_author', 'pdf_subject', 'pdf_keywords', 'pdf_bookmarks', 'pdf_bookmarksnumbered', 'pdf_bookmarksopen', 'pdf_breaklinks', 'pdf_pdfborder', 'pdf_backref', 'pdf_pdfusetitle', 'pdf_quoted_options',
+  'overlyx_managed_settings',
 ];
 
 export interface DocumentSplit {
@@ -95,6 +101,7 @@ export function splitDocument(text: string): DocumentSplit {
       out.managed = preamble.slice(mb, blockEnd);
       preamble = preamble.slice(0, mb) + preamble.slice(blockEnd).replace(/^\n/, '');
     }
+    preamble = preamble.replace(/^%% OverLyX package options\r?\n[\s\S]*?^%% end OverLyX package options\r?\n/gm, '');
     out.userPreamble = preamble.replace(/^\n/, '').replace(/\s+$/, '');
     out.settings = readSettings(out.managed) ?? {};
   } else {
@@ -320,6 +327,23 @@ export function makeHeaderLines(h: HeaderInput): string[] {
     if (key === '\\paperpagestyle' && branches.length) lines.push(...branches);
   }
   for (const a of h.authors) lines.push(`\\author ${a.id} "${a.name.replace(/"/g, '\\"')}" "${a.email.replace(/"/g, '\\"')}"`);
+  // Optional page/font/PDF keys are absent from DEFAULT_HEADER but still belong to the model.
+  for (const [key, val] of values) if (!lines.some(l => l === key || l.startsWith(key + ' '))) lines.push(key + (val ? ' ' + val : ''));
+  return lines;
+}
+
+/** Explicit UI choices override matching preamble settings, including a reset to a default. */
+export function markEditedSettings(before: string[], after: string[], explicitKeys: string[] = []): string[] {
+  const value = (lines: string[], k: string) => lines.find(l => l === '\\' + k || l.startsWith('\\' + k + ' '))?.slice(k.length + 2);
+  let edited: string[] = [];
+  for (const lines of [before, after]) {
+    try { const saved = JSON.parse(value(lines, 'overlyx_managed_settings') || '[]'); if (Array.isArray(saved)) edited.push(...saved); } catch { /* old file */ }
+  }
+  edited.push(...explicitKeys);
+  edited = edited.filter(k => SETTINGS_KEYS.includes(k) && k !== 'overlyx_managed_settings');
+  for (const k of SETTINGS_KEYS) if (k !== 'overlyx_managed_settings' && value(before, k) !== value(after, k)) edited.push(k);
+  const lines = after.filter(l => !l.startsWith('\\overlyx_managed_settings '));
+  if (edited.length) lines.push('\\overlyx_managed_settings ' + JSON.stringify([...new Set(edited)].sort()));
   return lines;
 }
 
@@ -330,13 +354,15 @@ export function settingsFromHeader(headerLines: string[]): Record<string, unknow
     for (const l of headerLines) { if (l === '\\' + key) return ''; if (l.startsWith('\\' + key + ' ')) return l.slice(key.length + 2); }
     return undefined;
   };
+  let edited: string[] = [];
+  try { edited = JSON.parse(value('overlyx_managed_settings') || '[]'); } catch { /* old file */ }
   for (const k of SETTINGS_KEYS) {
     const v = value(k);
     if (v === undefined) continue;
     // keep only what differs from the defaults (the file stays readable)
     const def = DEFAULT_HEADER.find(l => l === '\\' + k || l.startsWith('\\' + k + ' '));
     const defVal = def === undefined ? undefined : def === '\\' + k ? '' : def.slice(k.length + 2);
-    if (v === defVal) continue;
+    if (v === defVal && !edited.includes(k)) continue;
     out[k] = v;
   }
   const mods = block(headerLines, 'modules');

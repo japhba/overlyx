@@ -120,7 +120,7 @@ const nodes: Record<string, NodeSpec> = {
   /** Inline formula ($...$). `latex` is the content without delimiters. */
   math_inline: {
     inline: true, group: 'inline', atom: true,
-    attrs: { latex: { default: '' }, delim: { default: '$' } },
+    attrs: { latex: { default: '' }, delim: { default: '$' }, editClock: jsonAttr({}) },
     toDOM: node => ['span', { class: 'lyx-math-inline', 'data-latex': node.attrs.latex, 'data-delim': node.attrs.delim }, node.attrs.latex],
     parseDOM: [{ tag: 'span.lyx-math-inline', getAttrs: (d: HTMLElement) => ({ latex: d.getAttribute('data-latex') ?? '', delim: d.getAttribute('data-delim') ?? '$' }) }],
   },
@@ -131,7 +131,7 @@ const nodes: Record<string, NodeSpec> = {
    */
   math_display: {
     inline: true, group: 'inline', atom: true,
-    attrs: { latex: { default: '\\[\n\n\\]' } },
+    attrs: { latex: { default: '\\[\n\n\\]' }, editClock: jsonAttr({}) },
     toDOM: node => ['span', { class: 'lyx-math-display', 'data-latex': node.attrs.latex }, node.attrs.latex],
     parseDOM: [{ tag: 'span.lyx-math-display', getAttrs: (d: HTMLElement) => ({ latex: d.getAttribute('data-latex') ?? '' }) }],
   },

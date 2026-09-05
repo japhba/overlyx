@@ -60,16 +60,12 @@ function search(doc: PMNode, o: FindOptions, selRange: { from: number; to: numbe
         else {
           // an inline atom (formula, inset, …) counts as one placeholder char in the flattened text …
           map.push(pos + 1 + off); text += '￼';
-          // … but a formula's own latex is searched separately when "search math" is on
-          if (o.searchMath && MATH_TYPES.has(child.type.name)) {
-            const latex = String(child.attrs.latex ?? '');
-            const childPos = pos + 1 + off;
-            for (const hit of matchesInText(latex, re, o.wholeWord)) out.push({ from: childPos, to: childPos + child.nodeSize, kind: 'math', latexOffset: hit.index, latexLen: hit.length });
-          }
         }
       });
       for (const hit of matchesInText(text, re, o.wholeWord)) out.push({ from: map[hit.index], to: map[hit.index + hit.length - 1] + 1, kind: 'text' });
-      return false;
+      // Insets may contain their own paragraphs (footnotes, captions, table cells).
+      // The walk below also searches formulas once, at their actual node position.
+      return true;
     }
     if (o.searchMath && MATH_TYPES.has(node.type.name)) {
       const latex = String(node.attrs.latex ?? '');

@@ -100,6 +100,13 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
         const l = locate(docId);
         return l.session ? l.session.toText() : readTextFile(path.join(l.root, l.relPath));
       },
+      applySource: async (docId, text) => {
+        const entry = registry.byDocId(docId);
+        if (!entry) throw new Error('Open the document before editing its source');
+        const parsed = await entry.session.applySource(text);
+        await entry.panel.webview.postMessage({ type: 'externalUpdate', pmDoc: parsed.pmDoc, headerLines: parsed.headerLines });
+        return { ok: true, warnings: parsed.warnings };
+      },
       clip: async (docId, latex) => {
         const l = locate(docId);
         const header = l.session ? l.session.getHeaderLines() : cachedParseFile(l.ctx, l.relPath).doc.header.lines;

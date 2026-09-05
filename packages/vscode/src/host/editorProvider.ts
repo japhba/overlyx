@@ -38,7 +38,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     const relPath = path.relative(root, document.uri.fsPath);
     let ctx: TexContext;
     try {
-      ctx = { root, layoutDir: this.deps.layoutDir() };
+      ctx = { root, layoutDir: this.deps.layoutDir(), readText: abs => vscode.workspace.textDocuments.find(d => d.uri.fsPath === abs)?.getText() };
     } catch (e) {
       panel.webview.html = `<!doctype html><body style="font-family:sans-serif;padding:2em">${String(e)}</body>`;
       return;
@@ -53,8 +53,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     });
 
     const post = (msg: HostToEditor) => void panel.webview.postMessage(msg);
-    /** webview updates are applied one at a time (applyEdit is async) */
-    let applyChain: Promise<void> = Promise.resolve();
+    const reportWriteError = (error: unknown) => { void vscode.window.showErrorMessage(`OverLyX: ${String(error)}`); };
 
     const subs: vscode.Disposable[] = [];
     subs.push(panel.webview.onDidReceiveMessage((msg: EditorToHost) => {
@@ -70,7 +69,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         }
         case 'update':
-          applyChain = applyChain.then(() => session.applyPmUpdate(msg.pmDoc as never, msg.headerLines)).catch(e => console.error('overlyx apply failed', e));
+          void session.applyPmUpdate(msg.pmDoc as never, msg.headerLines).catch(reportWriteError);
           break;
         case 'outline':
           entry.outline = msg.items;
@@ -84,7 +83,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           else vscode.window.setStatusBarMessage('OverLyX: ' + msg.text, 5000);
           break;
         case 'save':
-          applyChain = applyChain.then(async () => { if (document.isDirty) await document.save(); }).catch(e => console.error('overlyx save failed', e));
+          void session.save().catch(reportWriteError);
           break;
         case 'build': this.deps.startBuild(entry); break;
         case 'cancelBuild': this.deps.cancelBuild(session.docId); break;
@@ -101,7 +100,15 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     // external changes of the TextDocument (git checkout, another editor, VS Code-level undo):
     // re-parse and push as a diff; debounced — typing in a split source view fires per keystroke
     let externalTimer: NodeJS.Timeout | undefined;
+    let metadataTimer: NodeJS.Timeout | undefined;
+    const refreshMetadata = () => {
+      clearTimeout(metadataTimer);
+      metadataTimer = setTimeout(() => post({ type: 'metadataChanged' }), 250);
+    };
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/*.{tex,sty,cls,bib,lyx}'));
+    subs.push(watcher, watcher.onDidChange(refreshMetadata), watcher.onDidCreate(refreshMetadata), watcher.onDidDelete(refreshMetadata));
     subs.push(vscode.workspace.onDidChangeTextDocument(ev => {
+      if (ev.contentChanges.length && ev.document.uri.fsPath.startsWith(root + path.sep)) refreshMetadata();
       if (ev.document !== document || ev.contentChanges.length === 0) return;
       clearTimeout(externalTimer);
       externalTimer = setTimeout(() => {
@@ -118,6 +125,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
 
     panel.onDidDispose(() => {
       clearTimeout(externalTimer);
+      clearTimeout(metadataTimer);
       for (const s of subs) s.dispose();
       session.dispose();
       this.registry.remove(entry);

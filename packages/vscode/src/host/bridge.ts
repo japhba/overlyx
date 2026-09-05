@@ -19,6 +19,7 @@ export interface BridgeDelegate {
   meta(docId: string): Promise<Record<string, unknown>>;
   /** current LaTeX text of a document (the open editor's state, else the file) */
   texText(docId: string): Promise<string>;
+  applySource(docId: string, text: string): Promise<{ ok: boolean; warnings: string[] }>;
   clip(docId: string, latex: string): Promise<{ blocks: unknown[]; warnings: string[] }>;
   headerGet(docId: string): Promise<{ headerLines: string[] }>;
   headerSet(docId: string, body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<{ ok: boolean; headerLines: string[] }>;
@@ -107,6 +108,11 @@ export class Bridge {
       const kind = m[3] ? `${m[2]}/${m[3]}` : m[2];
       if (kind === 'meta') { send(res, 200, await d.meta(docId)); return; }
       if (kind === 'tex') { res.setHeader('Content-Type', 'application/x-tex; charset=utf-8'); res.end(await d.texText(docId)); return; }
+      if (kind === 'source' && req.method === 'POST') {
+        const b = await body(req);
+        if (typeof b?.text !== 'string') { send(res, 400, { error: 'source text required' }); return; }
+        send(res, 200, await d.applySource(docId, b.text)); return;
+      }
       if (kind === 'outline') { send(res, 200, d.outline(docId)); return; }
       if (kind === 'header' && req.method === 'GET') { send(res, 200, await d.headerGet(docId)); return; }
       if (kind === 'header' && req.method === 'POST') { send(res, 200, await d.headerSet(docId, await body(req))); return; }

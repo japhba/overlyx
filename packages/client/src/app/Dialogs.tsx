@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from 'preact/hooks';
 import { formatShortcut } from './shortcuts';
 import type { ComponentChildren } from 'preact';
 import type { DocMeta, ProjectFile, BibItem } from '../api';
@@ -6,26 +6,46 @@ import type { GraphicsOpts, TableChanges } from '../editor/commands';
 import { api, graphicsUrl } from '../api';
 import type { LitHit, BibAddResult } from '../api';
 import type { Node as PMNode } from 'prosemirror-model';
-import { paramMap, unquote } from '@overlyx/core';
+import { paramMap, unquote, moduleWarnings, markEditedSettings } from '@overlyx/core';
 import { resolveDocPath, toDocRel as docRelPath } from '../editor/context';
+import type { EditorView } from 'prosemirror-view';
+import { referenceTargets, type ReferenceOptions } from '../editor/references';
+import { editorContext } from '../editor/context';
 import { diffLines } from './diff';
 
 export function Dialog({ title, onClose, children, buttons, wide }: { title: string; onClose: () => void; children: ComponentChildren; buttons?: ComponentChildren; wide?: boolean }) {
   const boxRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+  const titleId = useId();
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useLayoutEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const box = boxRef.current!;
+    const controls = () => [...box.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]')].filter(el => !el.closest('[hidden]') && el.getClientRects().length > 0);
+    const focusFirst = () => (box.querySelector<HTMLElement>('[autofocus]') ?? controls()[0] ?? box).focus();
+    const k = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); closeRef.current(); }
+      else if (e.key === 'Tab') {
+        const list = controls(), first = list[0], last = list.at(-1);
+        if (!first) { e.preventDefault(); box.focus(); }
+        else if (e.shiftKey && (document.activeElement === first || document.activeElement === box)) { e.preventDefault(); last!.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    const contain = (e: FocusEvent) => { if (!box.contains(e.target as Node)) focusFirst(); };
     document.addEventListener('keydown', k, true);
-    return () => document.removeEventListener('keydown', k, true);
-  }, []);
-  // the autofocus attribute only works during page load — focus (and select) the marked field ourselves
-  useEffect(() => {
-    const el = boxRef.current?.querySelector<HTMLElement>('[autofocus]');
-    if (el && document.activeElement !== el) { el.focus(); if (el instanceof HTMLInputElement) el.select(); }
+    document.addEventListener('focusin', contain);
+    focusFirst();
+    return () => {
+      document.removeEventListener('keydown', k, true);
+      document.removeEventListener('focusin', contain);
+      if (previous?.isConnected) previous.focus();
+    };
   }, []);
   return (
     <div class="dialog-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div class="dialog" ref={boxRef} style={wide ? { minWidth: '720px' } : undefined}>
-        <h2>{title}</h2>
+      <div class={'dialog' + (wide ? ' wide' : '')} ref={boxRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
+        <h2 id={titleId}>{title}</h2>
         <div class="body">{children}</div>
         <div class="buttons">{buttons}<button class="btn" onClick={onClose}>Close</button></div>
       </div>
@@ -33,7 +53,14 @@ export function Dialog({ title, onClose, children, buttons, wide }: { title: str
   );
 }
 
-const Row = ({ label, children }: { label: string; children: ComponentChildren }) => <div class="row"><label>{label}</label>{children}</div>;
+const Row = ({ label, children }: { label: string; children: ComponentChildren }) => {
+  const id = useId(), ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const control = ref.current?.querySelector<HTMLElement>('input, select, textarea');
+    if (control) { if (!control.id) control.id = id; ref.current!.querySelector('label')!.htmlFor = control.id; }
+  });
+  return <div class="row" ref={ref}><label>{label}</label>{children}</div>;
+};
 
 /* ------------------------------------------------------------- graphics */
 export function GraphicsDialog({ meta, project, docDir = '', initial, onInsert, onClose }: { meta: DocMeta | null; project: string; docDir?: string; initial?: GraphicsOpts & { filename: string }; onInsert: (filename: string, o: GraphicsOpts) => void; onClose: () => void }) {
@@ -160,33 +187,38 @@ export function LabelDialog({ initial, editing, refCount = 0, existing = [], onI
 }
 
 /* ------------------------------------------------------------------ ref */
-export function RefDialog({ labels, useRefstyle, initial, onInsert, onClose }: { labels: { name: string; context: string; file?: string }[]; useRefstyle: boolean; initial?: { name: string; kind: string }; onInsert: (name: string, kind: string) => void; onClose: () => void }) {
+export function RefDialog({ labels, useRefstyle, view, initial, onInsert, onClose }: { labels: { name: string; context: string; file?: string }[]; useRefstyle: boolean; view?: EditorView; initial?: { name: string; kind: string; tuple?: 'list' | 'range'; caps?: boolean }; onInsert: (name: string, kind: string, options: ReferenceOptions) => void; onClose: () => void }) {
+  const [targets] = useState(() => view ? referenceTargets(view.state.doc, editorContext.meta?.layouts ?? []) : []);
   const [q, setQ] = useState('');
-  const [sel, setSel] = useState(initial?.name ?? labels[0]?.name ?? '');
+  const [selected, setSelected] = useState(initial?.name ?? '');
   const [kind, setKind] = useState(initial?.kind ?? 'ref');
-  const [group, setGroup] = useState(true);
-  const filtered = labels.filter(l => l.name.toLowerCase().includes(q.toLowerCase()) || l.context.toLowerCase().includes(q.toLowerCase()));
-  // LyX-like: group by prefix (sec:, fig:, eq: ...) and sort alphabetically
-  const list = group ? [...filtered].sort((a, b) => a.name.localeCompare(b.name)) : filtered;
-  const prefixOf = (n: string) => (n.includes(':') ? n.slice(0, n.indexOf(':') + 1) : '(no prefix)');
-  let lastPrefix = '';
-  const kinds = [['ref', '<reference>'], ['eqref', '(<reference>)'], ['pageref', '<page>'], ['vref', 'on page <page>'], ['vpageref', '<reference> on page <page>'], ['formatted', useRefstyle ? 'Formatted reference (refstyle)' : 'Formatted reference (prettyref)'], ['nameref', 'Textual reference'], ['labelonly', 'Label only']];
-  return (
-    <Dialog title="Cross-reference" onClose={onClose} wide buttons={<button class="btn primary" disabled={!sel} onClick={() => { onInsert(sel, kind); onClose(); }}>{initial ? 'Apply' : 'Insert'}</button>}>
-      <Row label="Filter"><input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} placeholder="label or heading text" /><label style="min-width:0"><input type="checkbox" checked={group} onChange={e => setGroup((e.target as HTMLInputElement).checked)} /> group by prefix</label></Row>
-      <div class="list" style="max-height:360px">
-        {list.map(l => {
-          const pre = prefixOf(l.name);
-          const header = group && pre !== lastPrefix ? <div class="group-header">{pre}</div> : null;
-          lastPrefix = pre;
-          return <div key={l.name + (l.file ?? '')} style="display:contents">{header}<div class={l.name === sel ? 'sel' : ''} onClick={() => setSel(l.name)} onDblClick={() => { onInsert(l.name, kind); onClose(); }}><b>{l.name}</b> <span class="sub">{l.context}</span>{l.file && <span class="sub"> — {l.file}</span>}</div></div>;
-        })}
-        {!list.length && <div class="sub">No labels found.</div>}
-      </div>
-      <Row label="Selected"><input type="text" value={sel} onInput={e => setSel((e.target as HTMLInputElement).value)} /></Row>
-      <Row label="Format"><select value={kind} onChange={e => setKind((e.target as HTMLSelectElement).value)}>{kinds.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Row>
-    </Dialog>
-  );
+  const [multiple, setMultiple] = useState(!!initial?.name.includes(','));
+  const [tuple, setTuple] = useState<'list' | 'range'>(initial?.tuple ?? 'list');
+  const [caps, setCaps] = useState(!!initial?.caps);
+  const [error, setError] = useState('');
+  const names = selected.split(',').map(n => n.trim()).filter(Boolean);
+  const entries = [...labels.map(l => ({ key: l.name, title: l.context, detail: l.name + (l.file ? ' — ' + l.file : '') })), ...targets.filter(t => !t.label).map(t => ({ key: t.key, title: t.title, detail: t.kind + ' · create label automatically' }))];
+  const list = entries.filter(e => (e.title + ' ' + e.detail).toLowerCase().includes(q.toLowerCase()));
+  const choose = (key: string) => setSelected(multiple ? (names.includes(key) ? names.filter(n => n !== key) : [...names, key]).join(',') : key);
+  const apply = () => {
+    try { onInsert(selected, kind, { tuple, caps, targets, reserved: labels.map(l => l.name) }); onClose(); }
+    catch (e) { setError((e as Error).message); }
+  };
+  const kinds = [['ref', 'Number'], ['eqref', 'Equation number in parentheses'], ['pageref', 'Page number'], ['vref', 'Number and page'], ['vpageref', 'Page with relative location'], ['cref', 'Formatted reference (cleveref)'], ['formatted', useRefstyle ? 'Formatted reference (refstyle)' : 'Formatted reference (document style)'], ['nameref', 'Target text'], ['labelonly', 'Label only']];
+  return <Dialog title="Cross-reference" onClose={onClose} wide buttons={<button class="btn primary" disabled={!names.length || (tuple === 'range' && names.length !== 2)} onClick={apply}>{initial ? 'Apply' : 'Insert'}</button>}>
+    <Row label="Filter"><input type="text" autofocus value={q} onInput={e => setQ(e.currentTarget.value)} placeholder="Section, figure, table, theorem, equation or label" /></Row>
+    <label><input type="checkbox" checked={multiple} onChange={e => { setMultiple(e.currentTarget.checked); if (!e.currentTarget.checked) { setSelected(names[0] ?? ''); setTuple('list'); } }} /> Select multiple targets</label>
+    <div class="list reference-list" role="group" aria-label="Reference targets">
+      {list.map(e => <button type="button" key={e.key} class={names.includes(e.key) ? 'sel' : ''} aria-pressed={names.includes(e.key)} onClick={() => choose(e.key)}><strong>{e.title || e.detail}</strong><span class="sub">{e.detail}</span></button>)}
+      {!list.length && <div class="sub">No matching targets. Add a heading, captioned float, equation or label.</div>}
+    </div>
+    <Row label="Selected"><span>{names.map(n => entries.find(e => e.key === n)?.title || n).join('; ') || 'Choose a target above'}</span></Row>
+    <Row label="Label names"><input type="text" value={selected} onInput={e => setSelected(e.currentTarget.value)} placeholder="Or enter existing labels, separated by commas" /></Row>
+    <Row label="Format"><select value={kind} onChange={e => setKind(e.currentTarget.value)}>{kinds.map(([k, title]) => <option key={k} value={k}>{title}</option>)}</select></Row>
+    {multiple && <Row label="Combination"><select value={tuple} onChange={e => { setTuple(e.currentTarget.value as 'list' | 'range'); if (e.currentTarget.value === 'range') setKind('cref'); }}><option value="list">List of targets</option><option value="range">Range (choose two endpoints)</option></select></Row>}
+    {(kind === 'cref' || kind === 'formatted') && <label><input type="checkbox" checked={caps} onChange={e => setCaps(e.currentTarget.checked)} /> Capitalize the reference</label>}
+    {error && <div class="err" role="alert">{error}</div>}
+  </Dialog>;
 }
 
 /* ----------------------------------------------------------------- cite */
@@ -348,7 +380,8 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose }: {
     'pdf_title', 'pdf_author', 'pdf_subject', 'pdf_keywords', 'pdf_bookmarks', 'pdf_bookmarksnumbered', 'pdf_bookmarksopen', 'pdf_breaklinks', 'pdf_pdfborder', 'pdf_colorlinks', 'pdf_backref', 'pdf_pdfusetitle', 'pdf_quoted_options',
     'suppress_date', 'use_refstyle', 'use_minted', 'use_lineno', 'index_command', 'paperpagestyle', 'html_math_output'] as const;
   const [v, setV] = useState<Record<string, string>>(() => Object.fromEntries(KEYS.map(k => [k, get(k)])));
-  const set = (k: string, val: string) => setV(prev => ({ ...prev, [k]: val }));
+  const touched = useRef(new Set<string>());
+  const set = (k: string, val: string) => { touched.current.add(k); setV(prev => ({ ...prev, [k]: val })); };
   const [options, setOptions] = useState(get('options'));
   const [preamble, setPreamble] = useState(preStart >= 0 ? headerLines.slice(preStart + 1, preEnd).join('\n') : '');
   const [modules, setModules] = useState((() => { const s = headerLines.indexOf('\\begin_modules'), e = headerLines.indexOf('\\end_modules'); return s >= 0 ? headerLines.slice(s + 1, e).join(', ') : ''; })());
@@ -366,6 +399,9 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose }: {
   };
   const [branches, setBranches] = useState(parseBranches);
   const [newBranch, setNewBranch] = useState('');
+  const [moduleQuery, setModuleQuery] = useState('');
+  const moduleIds = modules.split(',').map(m => m.trim()).filter(Boolean);
+  const moduleIssues = meta?.availableModules ? moduleWarnings(moduleIds, meta.availableModules) : [];
   const [raw, setRaw] = useState(false);
   const [rawText, setRawText] = useState(headerLines.join('\n'));
   type Tab = 'general' | 'page' | 'text' | 'numbering' | 'fonts' | 'branches' | 'pdf' | 'preamble' | 'raw';
@@ -409,18 +445,17 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose }: {
     if (first < 0) { first = lines.findIndex(l => l.startsWith('\\index ')); if (first < 0) first = findKey('secnumdepth'); }
     const blocks = branches.flatMap(b => ['\\branch ' + b.name, ...b.lines.map(l => (l.startsWith('\\selected') ? `\\selected ${b.selected ? 1 : 0}` : l)), '\\end_branch']);
     if (blocks.length) lines.splice(first, 0, ...blocks);
-    await api.setHeader(docId, { headerLines: lines, preamble });
+    await api.setHeader(docId, { headerLines: markEditedSettings(headerLines, lines, [...touched.current]), preamble });
     onSaved(); onClose();
   };
   const text = (k: string, placeholder = '', style = '') => <input type="text" value={v[k] ?? ''} onInput={e => set(k, (e.target as HTMLInputElement).value)} placeholder={placeholder} style={style} />;
   const sel = (k: string, opts: (string | [string, string])[]) => <select value={v[k] ?? ''} onChange={e => set(k, (e.target as HTMLSelectElement).value)}>{opts.map(o => { const [val, label] = Array.isArray(o) ? o : [o, o]; return <option key={val} value={val}>{label}</option>; })}</select>;
   const bool = (k: string) => <input type="checkbox" checked={v[k] === 'true'} onChange={e => set(k, String((e.target as HTMLInputElement).checked))} />;
-  // page layout, fonts and PDF properties are written by hand in the LaTeX preamble of a .tex
-  // document; the settings kept here are the ones LaTeX cannot express (see tex/preamble.ts)
-  const TABS: [Tab, string][] = [['general', 'Class & options'], ['text', 'Text layout'], ['numbering', 'Numbering & floats'], ['branches', 'Branches'], ['preamble', 'LaTeX preamble'], ['raw', 'Raw settings']];
+  const TABS: [Tab, string][] = [['general', 'Class & options'], ['page', 'Page'], ['text', 'Text layout'], ['numbering', 'Numbering & floats'], ['fonts', 'Fonts'], ['pdf', 'PDF'], ['branches', 'Branches'], ['preamble', 'LaTeX preamble'], ['raw', 'Raw settings']];
   const geometry = v.use_geometry === 'true';
   return (
     <Dialog title="Document Settings" onClose={onClose} wide buttons={<button class="btn primary" onClick={save}>Apply</button>}>
+      <div class="hint">Changes here apply to the PDF and take precedence over matching settings in your preamble. Your preamble remains editable.</div>
       <div class="panel-tabs" style="flex-wrap:wrap">
         {TABS.map(([t, l]) => <button key={t} class={tab === t ? 'active' : ''} onClick={() => { setTab(t); if (t === 'raw') setRaw(true); }}>{l}</button>)}
       </div>
@@ -428,6 +463,11 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose }: {
         <Row label="Document class"><input type="text" list="ol-classes" value={v.textclass} onInput={e => set('textclass', (e.target as HTMLInputElement).value)} /><datalist id="ol-classes">{CLASSES.map(c => <option key={c} value={c} />)}</datalist></Row>
         <Row label="Class options"><input type="text" value={options} onInput={e => setOptions((e.target as HTMLInputElement).value)} placeholder="e.g. prx,amsmath,superscriptaddress" /></Row>
         <Row label="Modules"><input type="text" value={modules} onInput={e => setModules((e.target as HTMLInputElement).value)} placeholder="e.g. theorems-ams, customHeadersFooters" /></Row>
+        <details><summary>Choose modules</summary>
+          <input type="search" aria-label="Search modules" value={moduleQuery} onInput={e => setModuleQuery(e.currentTarget.value)} placeholder="Search by name or description" />
+          <div class="list reference-list" style="max-height:200px">{(meta?.availableModules ?? []).filter(m => (m.title + ' ' + m.id + ' ' + m.description).toLowerCase().includes(moduleQuery.toLowerCase())).map(m => <button type="button" key={m.id} class={moduleIds.includes(m.id) ? 'sel' : ''} aria-pressed={moduleIds.includes(m.id)} onClick={() => setModules(moduleIds.includes(m.id) ? moduleIds.filter(id => id !== m.id).join(', ') : [...moduleIds, m.id].join(', '))}><strong>{m.title}</strong><span class="sub">{m.description}</span></button>)}</div>
+        </details>
+        {moduleIssues.map(issue => <div class="err" role="status" key={issue}>{issue}</div>)}
         <Row label="Language">{text('language')}</Row>
         <Row label="Citation engine">{sel('cite_engine', ['basic', 'natbib', 'biblatex', 'jurabib'])}{sel('cite_engine_type', ['default', 'authoryear', 'numerical'])}</Row>
         <Row label="Bibliography style">{text('biblio_style')}</Row>

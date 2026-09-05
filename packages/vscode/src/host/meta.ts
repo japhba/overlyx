@@ -9,7 +9,7 @@ import {
   paramMap, unquote, walkInsets, plainText, checkTexHealth,
   type LyxDocument,
 } from '@overlyx/core';
-import { loadDocumentClass, applyDocumentTheorems, describeLayouts, flexInsetNames } from '@overlyx/core/latex/layouts.ts';
+import { loadDocumentClass, applyDocumentTheorems, describeLayouts, describeModules, flexInsetNames } from '@overlyx/core/latex/layouts.ts';
 import { collectFiles, findMaster, isBackupFile, readTextFile } from './project.ts';
 import { cachedParseFile, type TexContext } from './texdoc.ts';
 
@@ -45,7 +45,7 @@ export function bibEntriesFor(input: Pick<MetaInput, 'ctx' | 'relPath' | 'lyx'>)
 function scanBib(ctx: TexContext, relPath: string, rootLyx: LyxDocument, alsoDoc?: LyxDocument) {
   const proj = ctx.root;
   const docDir = path.dirname(path.join(proj, relPath));
-  const safe = (fn: string) => { const abs = path.resolve(docDir, fn); return abs.startsWith(proj) ? abs : null; };
+  const safe = (fn: string) => { const abs = path.resolve(docDir, fn); return abs.startsWith(proj + path.sep) ? abs : null; };
   const texName = (fn: string) => (fn.endsWith('.tex') || fn.includes('.') ? fn : fn + '.tex');
   const bibFiles = new Set<string>();
   const citedKeys = new Set<string>();
@@ -96,14 +96,14 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
   const rootRel = masterRel ?? relPath;
   const rootLyx = masterRel ? readDoc(masterRel) : lyx;
   const docDir = path.dirname(path.join(proj, rootRel));
-  const safe = (fn: string) => { const abs = path.resolve(docDir, fn); return abs.startsWith(proj) ? abs : null; };
+  const safe = (fn: string) => { const abs = path.resolve(docDir, fn); return abs.startsWith(proj + path.sep) ? abs : null; };
   const texName = (fn: string) => (fn.endsWith('.tex') || fn.includes('.') ? fn : fn + '.tex');
   const includeDoc = (fn: string) => {
     const abs = safe(texName(fn));
     if (!abs || !abs.endsWith('.tex') || !fs.existsSync(abs)) return undefined;
     try { return readDoc(path.relative(proj, abs)); } catch { return undefined; }
   };
-  const readFile = (fn: string) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } };
+  const readFile = (fn: string) => { const abs = safe(fn); try { return abs ? ctx.readText?.(abs) ?? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } };
 
   const macros = collectMacros(rootLyx, { include: includeDoc, readFile });
   if (masterRel) macros.push(...collectMacros(lyx, { include: includeDoc, readFile }));
@@ -153,6 +153,7 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
     role: 'edit',
     labels,
     textclass: getTextClass(rootLyx), modules: getModules(rootLyx),
+    availableModules: describeModules(ctx.layoutDir, [proj, docDir]),
     language: headerValue(lyx.header, 'language') ?? 'english',
     useRefstyle: headerValue(lyx.header, 'use_refstyle') === '1',
     citeEngine: headerValue(lyx.header, 'cite_engine') ?? 'basic',

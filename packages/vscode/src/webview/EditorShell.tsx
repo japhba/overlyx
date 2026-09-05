@@ -5,6 +5,7 @@
  * the PDF lives in its own panel (pdfMain.tsx). Document sync with the extension host runs over
  * postMessage (full ProseMirror doc, debounced), everything else over the local HTTP bridge.
  */
+import { referenceTransaction } from '@client/editor/references';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
@@ -17,7 +18,9 @@ import { Toolbar, ColorPalette, colorIcon, DelimPalette, TableSizePicker, mathPa
 import { buildOutline } from '@client/app/Outline';
 import { Comments } from '@client/app/Comments';
 import { StatusBar, type Status } from '@client/app/StatusBar';
-import { cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
+import { SourcePane, cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
+import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH } from '@client/app/Ruler';
+import { ViewModeSwitch, type ViewMode } from '@client/app/ViewModeSwitch';
 import { locateSourceLine } from '@client/app/sourcelocate';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '@client/editor/lyxmath/field';
 import {
@@ -109,6 +112,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [chord, setChord] = useState<string | null>(null);
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [zoom, setZoom] = useState(Number(stored('ol.zoom') || 1) || 1);
+  const [viewMode, setViewMode] = useState<ViewMode>('wysiwyg');
+  const [textWidth, setTextWidth] = useState(() => Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Number(stored('ol.textWidth')) || DEFAULT_WIDTH)));
   const [findOpen, setFindOpen] = useState(false);
   const [findQ, setFindQ] = useState(''), [replQ, setReplQ] = useState('');
   const [findCase, setFindCase] = useState(false), [findWord, setFindWord] = useState(false);
@@ -136,6 +141,10 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   useEffect(() => { localStorage.setItem('ol.toolbars', JSON.stringify(toolbars)); }, [toolbars]);
   useEffect(() => subscribePrefs(setPrefsState), []);
   useEffect(() => { localStorage.setItem('ol.zoom', String(zoom)); }, [zoom]);
+  useEffect(() => {
+    document.documentElement.style.setProperty('--text-width', textWidth + 'px');
+    localStorage.setItem('ol.textWidth', String(textWidth));
+  }, [textWidth]);
   useEffect(() => { try { localStorage.setItem('ol.vscode.comments', showComments ? '1' : '0'); } catch { /* ignore */ } }, [showComments]);
   useEffect(() => { const l = (f: LyxMathField | null) => { setMathField(f); editorContext.mathField = f; }; mathFocusListeners.add(l); return () => { mathFocusListeners.delete(l); }; }, []);
   useEffect(() => { const l = () => setSelTick(t => t + 1); mathCursorListeners.add(l); return () => { mathCursorListeners.delete(l); }; }, []);
@@ -144,7 +153,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const tbMode = (id: ToolbarId): ToolbarMode => toolbars[id] ?? 'auto';
 
   /* ---------------------------------------------------------------- editor lifecycle */
-  const postUpdate = useMemo(() => debounce((v: EditorView) => {
+  const postUpdate = useMemo(() => debounce((v: EditorView, doc: EditorView['state']['doc']) => {
+    if (v.isDestroyed || v.state.doc !== doc) return;
     vscode.postMessage({ type: 'update', pmDoc: v.state.doc.toJSON(), headerLines: headerRef.current });
   }, 300), []);
   const postOutline = useMemo(() => debounce((v: EditorView) => {
@@ -186,7 +196,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       handle = createLocalEditor({
         docId, container: containerRef.current, pmDoc: init.pmDoc, marginMode,
         onSelectionChange: onSelection,
-        onDocChange: (v) => { setDocTick(t => t + 1); postUpdate(v); postOutline(v); },
+        onDocChange: (v, info) => { setDocTick(t => t + 1); if (!info.external) postUpdate(v, v.state.doc); postOutline(v); },
       });
       handleRef.current = handle;
       editorContext.activeView = handle.view;
@@ -218,6 +228,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       const v = handleRef.current?.view;
       if (!m || !v) return;
       switch (m.type) {
+        case 'metadataChanged': metaReload(); break;
         case 'externalUpdate':
           handleRef.current!.applyExternal(m.pmDoc);
           setHeader(m.headerLines);
@@ -361,12 +372,12 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       openDialog: (name, arg) => setDialog({ name, arg }),
       toggleTrackChanges: () => { void toggleTracking(); },
       toggleOutline: () => notify('The outline is in the OverLyX sidebar (activity bar)'),
-      toggleSource: () => notify('Use “Open as LaTeX Source” in the editor title bar'),
+      toggleSource: () => setViewMode(mode => mode === 'wysiwyg' ? 'split' : 'wysiwyg'),
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
       closeTab: () => { /* VS Code closes tabs */ },
       zoom: (d) => setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))),
-      textWidth: () => { /* fixed in VS Code */ },
+      textWidth: (width) => setTextWidth(width > 0 ? width : DEFAULT_WIDTH),
       openFile: () => notify('Use the VS Code explorer to open files'),
       newFile: () => notify('Create .tex files in the VS Code explorer'),
     };
@@ -719,10 +730,10 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         if (target?.node && target.pos !== undefined) {
           const p = commandParams(target.node);
           const tpos = target.pos, tnode = target.node;
-          return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: p.get('LatexCommand') ?? 'ref' }} onClose={close}
-            onInsert={(n: string, k: string) => { const params = [`LatexCommand ${k}`, `reference "${n}"`, 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '']; view.dispatch(view.state.tr.setNodeMarkup(tpos, undefined, { ...tnode.attrs, params: JSON.stringify(params) })); }} />;
+          return <RefDialog view={view} labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: unquote(p.get('package')) === 'cleveref' ? 'cref' : p.get('LatexCommand') ?? 'ref', tuple: unquote(p.get('tuple')) === 'range' ? 'range' : 'list', caps: unquote(p.get('caps')) === 'true' }} onClose={close}
+            onInsert={(n, k, o) => view.dispatch(referenceTransaction(view.state, n, k, o, tpos))} />;
         }
-        return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={target?.prefill ? { name: target.prefill, kind: 'ref' } : undefined} onClose={close} onInsert={(n: string, k: string) => run(C.insertRef(n, k))} />;
+        return <RefDialog view={view} labels={labels} useRefstyle={!!meta?.useRefstyle} initial={target?.prefill ? { name: target.prefill, kind: 'ref' } : undefined} onClose={close} onInsert={(n, k, o) => view.dispatch(referenceTransaction(view.state, n, k, o))} />;
       }
       case 'cite': {
         const target = dialog.arg as { pos: number; node: any } | undefined;
@@ -769,6 +780,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
 
   return (
     <div class="app" data-vscode="1">
+      <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong><ViewModeSwitch mode={viewMode} onChange={setViewMode} /></div>
       {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={standardGroups} />}
       {(tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
         <div class="tb-samerow">
@@ -808,12 +820,14 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         </div>
       )}
       <div class="main">
-        <div class="editor-column">
+        <div class={'editor-column view-' + viewMode + (viewMode === 'wysiwyg' ? '' : ' split')}>
           <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} ref={scrollRef} style={{ zoom }} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
+            <Ruler width={textWidth} onChange={setTextWidth} marginMode={marginMode} />
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
             </div>
           </div>
+          <SourcePane target={view && handleRef.current ? { view, ydoc: handleRef.current.ydoc, docId } : null} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => setViewMode('wysiwyg')} onSave={() => vscode.postMessage({ type: 'save' })} />
         </div>
         {showComments && (
           <div class="sidebar right">

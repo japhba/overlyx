@@ -124,4 +124,15 @@ describe('vscode host document pipeline', () => {
     const h = texHeadings(MAIN, 3);
     expect(h.some(x => x.text === 'Introduction' && x.level === 2)).toBe(true);
   });
+
+  it('imports macros from project files and uses unsaved definitions from open editors', () => {
+    const macrosPath = path.join(root, 'macros.tex');
+    fs.writeFileSync(macrosPath, String.raw`\newcommand{\bx}{\boldsymbol{x}}`);
+    const source = String.raw`\documentclass{article}\input{macros.tex}\begin{document}$\bx$\end{document}`;
+    const r = parseDocumentText(source, ctx, 'main.tex');
+    const metadata = (context = ctx) => buildMeta({ ctx: context, project: 'proj', relPath: 'main.tex', lyx: r.doc, isChild: false, fileText: source }) as any;
+    expect(metadata().macros.bx).toBeDefined();
+    const unsaved = metadata({ ...ctx, readText: (file: string) => file === macrosPath ? String.raw`\newcommand{\bx}{\boldsymbol{z}}` : undefined } as typeof ctx);
+    expect(JSON.stringify(unsaved.macros.bx)).toContain('boldsymbol{z}');
+  });
 });

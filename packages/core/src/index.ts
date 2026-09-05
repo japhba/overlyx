@@ -13,3 +13,5 @@ export * from './comments.ts';
 export * from './math/index.ts';
 export { checkTexHealth, repairTex, type HealthIssue } from './tex/health.ts';
 export { texHeadings, headingPlainText, type TexHeading } from './tex/headings.ts';
+export { moduleWarnings, type ModuleInfo } from './modules.ts';
+export { markEditedSettings } from './tex/preamble.ts';

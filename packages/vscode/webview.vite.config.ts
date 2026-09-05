@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import preact from '@preact/preset-vite';
 import path from 'node:path';
+import { buildVersion } from '../build-version';
 
 /**
  * Builds the two webview pages (the OverLyX editor and the PDF panel) into dist/webview/ with
@@ -8,6 +9,7 @@ import path from 'node:path';
  */
 export default defineConfig({
   plugins: [preact()],
+  define: { 'import.meta.env.VITE_BUILD_VERSION': JSON.stringify(buildVersion) },
   root: path.resolve(__dirname, 'src/webview'),
   base: './',
   resolve: {
