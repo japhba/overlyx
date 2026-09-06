@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { texHeadings, lyxToPm } from '@overlyx/core';
 import { Bridge, type BridgeDelegate } from './host/bridge.ts';
+import { connectWebviewBridge } from './host/webviewBridge.ts';
 import { Registry, type OpenEditor } from './host/registry.ts';
 import { OverlyxEditorProvider } from './host/editorProvider.ts';
 import { OutlineTree } from './host/outlineTree.ts';
@@ -25,7 +26,7 @@ import type { HostToEditor } from './shared/protocol.ts';
 /** What activate() returns — consumed by the integration test (test/suite/index.cjs). */
 export interface OverlyxTestApi { registry: Registry; bridgeBase(): string; checkForUpdates(opts?: { interactive: boolean; apiOverride?: string; dryRun?: boolean }): Promise<CheckResult> }
 
-export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
+export async function activate(context: vscode.ExtensionContext): Promise<OverlyxTestApi> {
   const registry = new Registry();
   /** project name → root directory (each open file's own directory — projectDirFor —, plus the workspace folders) */
   const projectRoots = new Map<string, string>();
@@ -83,7 +84,19 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
   };
 
   const bridge = new Bridge(makeDelegate());
-  const pdfPanels = new PdfPanels(context.extensionUri, () => bridge.base, onInverse);
+  context.subscriptions.push({ dispose: () => bridge.dispose() });
+  let webviewBase: string;
+  // Resolve again when opening a webview, since the user can close a forwarding tunnel.
+  const bridgeBase = async (): Promise<string> => webviewBase = await connectWebviewBridge(bridge.base);
+  try {
+    await bridge.start();
+    await bridgeBase();
+  } catch (e) {
+    bridge.dispose();
+    void vscode.window.showErrorMessage('OverLyX: could not connect to the preview server: ' + String(e));
+    throw e;
+  }
+  const pdfPanels = new PdfPanels(context.extensionUri, bridgeBase, onInverse);
 
   function makeDelegate(): BridgeDelegate {
     const DICT_PKG: Record<string, string> = { en: 'dictionary-en', 'en-gb': 'dictionary-en-gb', de: 'dictionary-de', fr: 'dictionary-fr' };
@@ -155,7 +168,7 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
         const job = build.currentJob(docId);
         const tex = withTex && b?.tex_path && fs.existsSync(b.tex_path) ? fs.readFileSync(b.tex_path, 'utf8') : undefined;
         return {
-          build: b ? { ...b, pdf: b.pdf_path && fs.existsSync(b.pdf_path) ? `${bridge.base}/api/docs/${encodeURIComponent(docId)}/pdf?t=${b.updated_at}` : null, tex } : null,
+          build: b ? { ...b, pdf: b.pdf_path && fs.existsSync(b.pdf_path) ? `${webviewBase}/api/docs/${encodeURIComponent(docId)}/pdf?t=${b.updated_at}` : null, tex } : null,
           job: job ? build.publicJob(job) : null,
         };
       },
@@ -182,7 +195,7 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
   };
 
   const provider = new OverlyxEditorProvider(context, registry, {
-    bridgeBase: () => bridge.base,
+    bridgeBase,
     layoutDir,
     registerRoot,
     startBuild,
@@ -200,7 +213,6 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
   void vscode.commands.executeCommand('setContext', 'overlyx.active', false);
 
   context.subscriptions.push(
-    { dispose: () => bridge.dispose() },
     vscode.window.registerCustomEditorProvider('overlyx.texEditor', provider, {
       webviewOptions: { retainContextWhenHidden: true },
       supportsMultipleEditorsPerDocument: false,
@@ -237,8 +249,6 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
       if (e) void e.panel.webview.postMessage({ type: 'goto', pos } satisfies HostToEditor);
     }),
   );
-
-  void bridge.start().catch(e => vscode.window.showErrorMessage('OverLyX: local bridge failed to start: ' + String(e)));
 
   updater.schedule();
 

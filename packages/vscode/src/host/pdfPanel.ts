@@ -11,7 +11,7 @@ export class PdfPanels {
 
   constructor(
     private extensionUri: vscode.Uri,
-    private bridgeBase: () => string,
+    private bridgeBase: () => Promise<string>,
     private onInverse: (docId: string, page: number, x: number, y: number) => void,
   ) {}
 
@@ -25,7 +25,11 @@ export class PdfPanels {
     this.panels.set(docId, panel);
     panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'assets/overlyx.svg');
     const dark = [vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighContrast].includes(vscode.window.activeColorTheme.kind);
-    panel.webview.html = webviewHtml(panel.webview, this.extensionUri, 'pdf', { page: 'pdf', docId, base: this.bridgeBase(), dark });
+    const openedPanel = panel;
+    void this.bridgeBase().then(base => {
+      if (this.panels.get(docId) !== openedPanel) return;
+      openedPanel.webview.html = webviewHtml(openedPanel.webview, this.extensionUri, 'pdf', { page: 'pdf', docId, base, dark });
+    }).catch(e => { void vscode.window.showErrorMessage('OverLyX: could not connect to the PDF preview server: ' + String(e)); });
     panel.webview.onDidReceiveMessage((msg: PdfToHost) => {
       if (msg.type === 'inverse') this.onInverse(docId, msg.page, msg.x, msg.y);
       else if (msg.type === 'notify') void (msg.kind === 'error' ? vscode.window.showErrorMessage(msg.text) : vscode.window.showInformationMessage(msg.text));

@@ -25,7 +25,9 @@ exports.run = async function run() {
 
   const ext = vscode.extensions.getExtension('overlyx.overlyx-vscode');
   assert.ok(ext, 'extension is present');
-  const api = await ext.activate();
+  const forwarding = await require('../forwarding.cjs').startForwarding(vscode, ext);
+  try {
+  const api = await forwarding.activate();
   assert.ok(api && api.registry, 'activate() returns the test API');
 
   const mainUri = vscode.Uri.file(path.join(ws, 'main.tex'));
@@ -41,6 +43,9 @@ exports.run = async function run() {
 
   // 2. the bridge serves metadata
   const base = api.bridgeBase();
+  assert.ok(forwarding.resolved >= 2, 'resolve the forwarding URI after startup and when opening the editor');
+  assert.notStrictEqual(new URL(forwarding.base).port, new URL(base).port, 'the test must exercise different client and server ports');
+  assert.ok(entry.panel.webview.html.includes(forwarding.base), 'the webview uses the complete forwarded URI');
   const enc = encodeURIComponent(entry.session.docId);
   const meta = await (await fetch(`${base}/api/docs/${enc}/meta`)).json();
   assert.strictEqual(meta.textclass, 'article');
@@ -76,6 +81,7 @@ exports.run = async function run() {
   }
   assert.strictEqual(finished.job.status, 'ok', 'build failed — log above');
   assert.ok(finished.build.pdf, 'build result carries a PDF URL');
+  assert.ok(finished.build.pdf.startsWith(forwarding.base + '/'), 'PDF links use the same forwarded URI as images');
   const pdfResp = await fetch(finished.build.pdf);
   assert.strictEqual(pdfResp.status, 200, 'PDF is served');
   assert.strictEqual(pdfResp.headers.get('content-type'), 'application/pdf');
@@ -89,6 +95,43 @@ exports.run = async function run() {
   assert.ok(Array.isArray(symbols) && symbols.some(sy => /Renamed Heading|Introduction/.test(sy.name)), 'document symbols for .tex: ' + JSON.stringify((symbols || []).map(sy => sy.name)));
   assert.strictEqual(symbols.length, 1, 'exactly one top-level symbol (no doubled providers): ' + JSON.stringify(symbols.map(sy => sy.name)));
   log('document symbols ok:', symbols.map(sy => sy.name).join(', '));
+
+  // 5c. A real webview must decode a parent-directory PNG through the remote forwarding URI.
+  // Verify that losing the forwarded connection fails, then that restoring it renders PNG.
+  const webview = entry.panel.webview;
+  const originalHtml = webview.html;
+  const csp = /<meta http-equiv="Content-Security-Policy" content="[^"]*">/.exec(originalHtml)[0];
+  const nonce = /'nonce-([^']+)'/.exec(csp)[1];
+  const imageUrl = `${forwarding.base}/api/projects/${encodeURIComponent(entry.session.docId.split('/')[0])}/graphics/${encodeURIComponent('../figures/plot #1.png')}`;
+  const probeImage = id => new Promise((resolve, reject) => {
+    const sub = webview.onDidReceiveMessage(m => {
+      if (m?.type !== 'graphicsProbe' || m.id !== id) return;
+      clearTimeout(timer); sub.dispose(); resolve(m);
+    });
+    const timer = setTimeout(() => { sub.dispose(); reject(new Error('image routing probe timed out')); }, 20000);
+    webview.html = `<!doctype html><html><head>${csp}</head><body>
+      <script nonce="${nonce}">
+        const api = acquireVsCodeApi();
+        const img = new Image();
+        const done = () => api.postMessage({ type: 'graphicsProbe', id: ${JSON.stringify(id)}, width: img.naturalWidth });
+        img.onload = done; img.onerror = done;
+        img.src = ${JSON.stringify(imageUrl)} + '?probe=' + ${JSON.stringify(id)};
+        document.body.appendChild(img);
+      </script></body></html>`;
+  });
+  try {
+    forwarding.setEnabled(false);
+    const disconnected = await probeImage('disconnected');
+    assert.strictEqual(disconnected.width, 0, 'PNG must fail without a route to the extension host');
+    forwarding.setEnabled(true);
+    const connected = await probeImage('connected');
+    assert.strictEqual(connected.width, 16, 'PNG from ../figures must decode through the forwarded connection');
+    assert.ok(forwarding.requests.some(url => url.includes('/graphics/')), 'the PNG request reached the forwarding proxy');
+    log('remote routing regression: parent PNG renders through a different hostname, port and path prefix');
+  } finally {
+    forwarding.setEnabled(true);
+    webview.html = originalHtml;
+  }
 
   // 6. self-update pipeline against a stubbed release endpoint (dry run: stops after download)
   const http = require('http');
@@ -111,4 +154,5 @@ exports.run = async function run() {
   } finally { stub.close(); }
 
   log('ALL INTEGRATION CHECKS PASSED');
+  } finally { forwarding.dispose(); }
 };

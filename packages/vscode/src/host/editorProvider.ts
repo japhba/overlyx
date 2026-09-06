@@ -13,7 +13,7 @@ import type { TexContext } from './texdoc.ts';
 import { projectDirFor } from './project.ts';
 
 export interface ProviderDeps {
-  bridgeBase(): string;
+  bridgeBase(): Promise<string>;
   layoutDir(): string;
   /** register a project root; returns its project name */
   registerRoot(root: string): string;
@@ -29,7 +29,9 @@ const isDark = () => [vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighCont
 export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
   constructor(private context: vscode.ExtensionContext, private registry: Registry, private deps: ProviderDeps) {}
 
-  resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
+  async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel, token: vscode.CancellationToken): Promise<void> {
+    const base = await this.deps.bridgeBase();
+    if (token.isCancellationRequested) return;
     // the project is the directory that holds the file, not the whole workspace (a child
     // document adopts its master's directory so it keeps the master's class and preamble)
     const folder = vscode.workspace.getWorkspaceFolder(document.uri);
@@ -49,7 +51,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
 
     panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] };
     panel.webview.html = webviewHtml(panel.webview, this.context.extensionUri, 'editor', {
-      page: 'editor', docId: session.docId, base: this.deps.bridgeBase(), dark: isDark(),
+      page: 'editor', docId: session.docId, base, dark: isDark(),
     });
 
     const post = (msg: HostToEditor) => void panel.webview.postMessage(msg);
@@ -61,7 +63,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
         case 'ready': {
           try {
             const r = session.parseCurrent();
-            post({ type: 'init', docId: session.docId, base: this.deps.bridgeBase(), pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark() });
+            post({ type: 'init', docId: session.docId, base, pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark() });
             if (r.warnings.length) vscode.window.setStatusBarMessage(`OverLyX: ${r.warnings.length} parse warning(s) — details in the raw file`, 8000);
           } catch (e) {
             void vscode.window.showErrorMessage(`OverLyX could not open ${relPath}: ${String(e)}`);

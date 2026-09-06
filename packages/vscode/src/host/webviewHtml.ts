@@ -15,17 +15,18 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, p
   }
   const base = webview.asWebviewUri(dist).toString();
   const nonce = crypto.randomBytes(16).toString('base64');
+  const bridgeOrigin = new URL(String(globals.base)).origin;
   let html = fs.readFileSync(file, 'utf8');
   // ./assets/... → webview URI
   html = html.replace(/(src|href)="\.\//g, (_m, attr) => `${attr}="${base}/`);
   html = html.replace(/<script /g, `<script nonce="${nonce}" `);
   const csp = [
     "default-src 'none'",
-    `img-src ${webview.cspSource} data: blob: http://127.0.0.1:*`,
+    `img-src ${webview.cspSource} data: blob: http://127.0.0.1:* ${bridgeOrigin}`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
     `font-src ${webview.cspSource} data:`,
     `script-src 'nonce-${nonce}' ${webview.cspSource}`,   // the entry carries the nonce; its imported chunks come from the asset host
-    `connect-src http://127.0.0.1:* ${webview.cspSource}`,
+    `connect-src http://127.0.0.1:* ${bridgeOrigin} ${webview.cspSource}`,
     "worker-src blob: data:",
   ].join('; ');
   const inject = `<meta http-equiv="Content-Security-Policy" content="${csp}">\n` +

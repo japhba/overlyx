@@ -20,6 +20,8 @@ reproduced byte for byte until you change them.
   unsaved definitions in another open VS Code editor.
 - **Shared figures** using `../` and `../../` paths render from parent directories. Common
   image and PDF extensions can be omitted in `\includegraphics` references.
+- **Remote workspaces** route image and PDF previews through VS Code's connection to the
+  extension host. Install or update OverLyX in the remote window, then reload that window.
 - **Structure view** (OverLyX icon in the activity bar): the live outline — sections, floats —
   click to jump.
 - **PDF panel** (Ctrl+R): builds with your local `latexmk` next to the file, shows the PDF with
