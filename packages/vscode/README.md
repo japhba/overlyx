@@ -52,6 +52,10 @@ newer versions (`overlyx.updates`: `prompt` / `auto` / `off`); *OverLyX: Check f
 a check on demand. Updates install with the built-in VSIX installer and take effect after a
 reload.
 
+Extension-affecting pushes to `master` automatically build, test, and publish a
+GitHub release. Website deployment is independent. See [RELEASING.md](RELEASING.md)
+for versioning, source provenance, and manual workflow runs.
+
 ## License
 
 GPL-3.0-or-later — the extension bundles data, icons and ported code from
