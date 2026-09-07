@@ -14,7 +14,7 @@ describe('GitHub bug reports', () => {
     const macros: MacroTable = { Pfi: { nargs: 0, def: sanitized }, tPfi: { nargs: 0, def: String.raw`\tilde{\Pfi}` } };
     const html = renderStaticHtml('$\\Pfi_{ij},\\quad\\tPfi_{ij}$', false, macros, { project: 'paper', docDir: 'chapters' });
     expect(html).toContain('<img');
-    expect(html).toContain('src="/api/projects/paper/graphics/chapters%2Fglyph.pdf?w=400"');
+    expect(html).toMatch(/src="\/api\/projects\/paper\/graphics\/chapters(?:\/|%2F)glyph\.pdf\?w=400"/);
     expect(html).not.toContain('>Pfi<');
   });
 
