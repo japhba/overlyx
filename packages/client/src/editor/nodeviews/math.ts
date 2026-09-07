@@ -12,7 +12,7 @@ import { LyxMathField, renderStaticHtml, activeMathField, rowRectsOf } from '../
 import { macroTableFor, mathViews, macroVersion, macrosReady } from '../lyxmath/macrotable';
 import { showContextMenu, type MenuItem } from '../contextmenu';
 import { toggleMathDisplay, countLabelRefs, renameLabelRefs } from '../commands';
-import { editorContext } from '../context';
+import { editorContext, viewDocDir, viewProject } from '../context';
 import { getPrefs } from '../../prefs';
 import { openRewriteMath, REWRITE_KEY } from '../ai/rewrite';
 import { applyChangeAttrs } from '../plugins/changes';
@@ -240,7 +240,7 @@ export class MathInlineView implements NodeView {
     const el = this.ensureStaticEl();
     this.pending = false; staticQueue.delete(this); el.classList.remove('pending');
     const { key, table } = macroTableFor(this.view, this.getPos());
-    el.innerHTML = renderStaticHtml('$' + this.lastLatex + '$', false, table);
+    el.innerHTML = renderStaticHtml('$' + this.lastLatex + '$', false, table, { project: viewProject(this.view), docDir: viewDocDir(this.view) });
     this.staticKey = key;
   }
 
@@ -251,6 +251,7 @@ export class MathInlineView implements NodeView {
     const { key, table } = macroTableFor(this.view, this.getPos());
     const f = new LyxMathField({
       latex: '$' + this.lastLatex + '$', display: false, macros: table,
+      imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
       onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
@@ -403,7 +404,7 @@ export class MathDisplayView implements NodeView {
     if (!this.staticEl) return;
     this.pending = false; staticQueue.delete(this); this.staticEl.classList.remove('pending');
     const { key, table } = macroTableFor(this.view, this.getPos());
-    this.staticEl.innerHTML = renderStaticHtml(this.lastLatex, true, table);
+    this.staticEl.innerHTML = renderStaticHtml(this.lastLatex, true, table, { project: viewProject(this.view), docDir: viewDocDir(this.view) });
     this.staticKey = key;
     this.scheduleRelayout();
   }
@@ -415,6 +416,7 @@ export class MathDisplayView implements NodeView {
     const { key, table } = macroTableFor(this.view, this.getPos());
     const f = new LyxMathField({
       latex: this.lastLatex, display: true, macros: table,
+      imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
       onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
@@ -632,6 +634,7 @@ export class MacroView implements NodeView {
     const { key, table } = macroTableFor(view, getPos());
     this.field = new LyxMathField({
       latex: '$' + this.lastDef + '$', display: false, macros: table,
+      imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex.replace(/^\$|\$$/g, '')),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace),
       onDragOut: ev => dragOutOf(this.view, this.getPos, ev),

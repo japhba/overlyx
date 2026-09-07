@@ -298,12 +298,24 @@ export function sanitizeForKatex(def: string, name: string, args: number): strin
   d = replaceCommand(d, 'mathds', c => `\\mathbb{${c}}`);
   d = replaceCommand(d, 'intertext', c => `\\text{${c}}`);
   d = replaceCommand(d, 'DeclareMathOperator', () => '', 2);
+  // KaTeX renders \includegraphics itself. The client rewrites its local filename to the
+  // authenticated project graphics endpoint, which also converts PDF/SVG for the browser.
+  d = d.replace(/\\includesvg\b/g, '\\includegraphics');
+  if (/\\includegraphics\b/.test(d)) {
+    // Approximate custom TeX lengths derived from a font glyph by 1em. This covers the common
+    // \fontcharht + \raisebox idiom used to align an image-based mathematical symbol.
+    d = d.replace(/\\[A-Za-z@]+\s*=\s*\\fontcharht\s*\\font\s*`?\S+/g, '');
+    d = d.replace(/\\includegraphics(\s*)\[([^\]]*)\]/g, (_all, ws: string, opts: string) =>
+      `\\includegraphics${ws}[${opts.replace(/((?:height|width|totalheight)\s*=\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+))\\[A-Za-z@]+/g, '$1em')}]`);
+    d = d.replace(/\\normalfont\b/g, '');
+    d = replaceCommand(d, 'text', c => /\\includegraphics\b/.test(c) ? `{${c}}` : `\\text{${c}}`);
+  }
   // stmaryrd double delimiters are no KaTeX delimiters
   d = d.replace(/\\left\\llangle/g, '\\left\\langle\\!\\langle').replace(/\\right\\rrangle/g, '\\rangle\\!\\right\\rangle')
     .replace(/\\left\\llbracket/g, '\\left[\\![').replace(/\\right\\rrbracket/g, ']\\!\\right]')
     .replace(/\\llangle/g, '\\langle\\!\\langle').replace(/\\rrangle/g, '\\rangle\\!\\rangle').replace(/\\llbracket/g, '[\\![').replace(/\\rrbracket/g, ']\\!]');
   d = d.replace(/\\relax\b/g, '').replace(/\\(m|)ath?strut\b/g, '').replace(/\\displaylimits\b/g, '');
-  if (/\\(includesvg|includegraphics|sbox|usebox|ooalign|mathpalette|fontcharht|fontdimen|csname|expandafter|noexpand|@|def\b|let\b|newcommand|renewcommand)/.test(d)) {
+  if (/\\(includesvg|sbox|usebox|ooalign|mathpalette|fontcharht|fontdimen|csname|expandafter|noexpand|@|def\b|let\b|newcommand|renewcommand)/.test(d)) {
     let f = `\\mathrm{${name}}`;
     for (let k = 1; k <= args; k++) f += `\\{#${k}\\}`;
     return f;

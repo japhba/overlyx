@@ -9,6 +9,7 @@ import { schema } from '@overlyx/core';
 import { renderStaticHtml } from '../lyxmath/field';
 import { macroTableFor } from '../lyxmath/macrotable';
 import { nodeText } from '../cliptext';
+import { viewDocDir, viewProject } from '../context';
 
 let serializer: DOMSerializer | null = null;
 
@@ -17,8 +18,9 @@ export function renderFragment(view: EditorView, frag: Fragment, pos: number | u
   serializer ??= DOMSerializer.fromSchema(schema);
   const dom = serializer.serializeFragment(frag);
   const { table } = macroTableFor(view, pos);
-  dom.querySelectorAll('.lyx-math-inline').forEach(el => { el.innerHTML = renderStaticHtml('$' + (el.getAttribute('data-latex') ?? '') + '$', false, table); });
-  dom.querySelectorAll('.lyx-math-display').forEach(el => { el.innerHTML = renderStaticHtml(el.getAttribute('data-latex') ?? '', true, table); });
+  const imageContext = { project: viewProject(view), docDir: viewDocDir(view) };
+  dom.querySelectorAll('.lyx-math-inline').forEach(el => { el.innerHTML = renderStaticHtml('$' + (el.getAttribute('data-latex') ?? '') + '$', false, table, imageContext); });
+  dom.querySelectorAll('.lyx-math-display').forEach(el => { el.innerHTML = renderStaticHtml(el.getAttribute('data-latex') ?? '', true, table, imageContext); });
   // leaf nodes render through node views in the editor; here they show their plain-text form
   const leaves: PMNode[] = [];
   frag.descendants(n => { if (n.type.name === 'command' || n.type.name === 'graphics') leaves.push(n); return true; });

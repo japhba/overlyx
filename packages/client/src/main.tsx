@@ -3,6 +3,7 @@ import { render } from 'preact';
 import { App } from './app/App';
 import { editorContext } from './editor/context';
 import { api } from './api';
+import { isBenignBrowserError } from './error-reporting';
 import './styles.css';
 import 'katex/dist/katex.min.css';
 import 'prosemirror-view/style/prosemirror.css';
@@ -17,6 +18,10 @@ render(<App />, document.getElementById('app')!);
   let last = '', lastAt = 0;
   const sent = new Set<string>();
   const report = (msg: string, stack?: string) => {
+    // Browsers deliver this ResizeObserver scheduling notice as a global ErrorEvent even though
+    // no application exception occurred. It is safe to leave in the console, but not to alarm
+    // the user or create an automatic GitHub issue for it.
+    if (isBenignBrowserError(msg)) return;
     const now = Date.now();
     if (msg === last && now - lastAt < 5000) return;
     last = msg; lastAt = now;

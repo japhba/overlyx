@@ -333,6 +333,7 @@ export function sanitizeForMathlive(def: string, m: { name: string; args: number
   d = replaceCommand(d, 'scalebox', c => `{${unmath(c)}}`, 2);
   d = replaceCommand(d, 'resizebox', c => `{${unmath(c)}}`, 3);
   d = replaceCommand(d, 'rotatebox', c => `{${unmath(c)}}`, 2);
+  d = replaceCommand(d, 'raisebox', c => `{${unmath(c)}}`, 2);
   d = replaceCommand(d, 'vcenter', c => `{${c}}`);
   d = replaceCommand(d, 'vbox', c => `{${c}}`);
   d = replaceCommand(d, 'hbox', c => `\\text{${c}}`);
@@ -340,9 +341,23 @@ export function sanitizeForMathlive(def: string, m: { name: string; args: number
   d = replaceCommand(d, 'textnormal', c => `\\text{${c}}`);
   d = replaceCommand(d, 'accentset', (c, o) => `\\overset{${o[0] ?? ''}}{${c}}`, 2);
   d = replaceCommand(d, 'mathchoice', (c, o) => `{${o[0] ?? c}}`, 4);
+  // KaTeX supports \includegraphics. Treat \includesvg the same way; the client sends both
+  // through the project's graphics endpoint, which converts PDF/SVG to a browser image.
+  d = d.replace(/\\includesvg\b/g, '\\includegraphics');
+  if (/\\includegraphics\b/.test(d)) {
+    // Definitions commonly measure a text glyph into a custom length before sizing the image.
+    // KaTeX has no TeX registers, so use 1em as that length's faithful visual approximation.
+    d = d.replace(/\\[A-Za-z@]+\s*=\s*\\fontcharht\s*\\font\s*`?\S+/g, '');
+    d = d.replace(/\\includegraphics(\s*)\[([^\]]*)\]/g, (_all, ws: string, opts: string) =>
+      `\\includegraphics${ws}[${opts.replace(/((?:height|width|totalheight)\s*=\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+))\\[A-Za-z@]+/g, '$1em')}]`);
+    d = d.replace(/\\normalfont\b/g, '');
+    // \includegraphics is a math-mode KaTeX command, even when the LaTeX definition used a
+    // text/raise box only to establish its baseline.
+    d = replaceCommand(d, 'text', c => /\\includegraphics\b/.test(c) ? `{${c}}` : `\\text{${c}}`);
+  }
   d = d.replace(/\\relax\b/g, '');
   // things we cannot approximate: show the macro name with its arguments
-  if (/\\(includesvg|includegraphics|sbox|usebox|ooalign|mathpalette|fontcharht|fontdimen|csname|expandafter|noexpand|@)/.test(d)) {
+  if (/\\(includesvg|sbox|usebox|ooalign|mathpalette|fontcharht|fontdimen|csname|expandafter|noexpand|@)/.test(d)) {
     let f = `\\mathrm{${m.name}}`;
     for (let k = 1; k <= m.args; k++) f += `\\{#${k}\\}`;
     return f;

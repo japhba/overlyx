@@ -12,7 +12,8 @@ import {
   parseFormula, writeFormula, writeCellLatex, parseCell, renderHullSource, katexMacros, MathCursor, atomCells, isHull, nargs, numberedType, isKnownCommand, completeCommand,
   type Hull, type HullType, type MacroTable, type Slice, type Atom, type Cell, type CellRef, type Owner,
 } from '@overlyx/core';
-import { editorContext } from '../context';
+import { graphicsUrl } from '../../api';
+import { editorContext, resolveDocPath } from '../context';
 import { getPrefs } from '../../prefs';
 
 export type MoveOutDirection = 'backward' | 'forward' | 'upward' | 'downward';
@@ -21,6 +22,8 @@ export interface FieldOptions {
   latex: string;
   display: boolean;
   macros: MacroTable;
+  /** Project location used to resolve image-based math macros. */
+  imageContext?: MathImageContext;
   readOnly?: boolean;
   onChange?: (latex: string) => void;
   /**
@@ -37,6 +40,31 @@ export interface FieldOptions {
   onDragOut?: (ev: MouseEvent) => void;
   /** a Shift+arrow hit the formula's edge: the selection continues outside, formula taken whole */
   onSelectOut?: (dir: MoveOutDirection) => void;
+}
+
+export interface MathImageContext { project?: string | null; docDir?: string }
+
+function decodeHtmlAttribute(s: string): string {
+  return s.replace(/&quot;/g, '"').replace(/&#(?:39|x27);/gi, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+function escapeHtmlAttribute(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+/** Point local images emitted by KaTeX at OverLyX's PDF/SVG-capable graphics endpoint. */
+export function resolveMathImageHtml(html: string, context?: MathImageContext): string {
+  if (!html.includes('<img')) return html;
+  const project = context?.project ?? editorContext.project;
+  if (!project) return html;
+  const docDir = context?.docDir ?? editorContext.docDir;
+  return html.replace(/(<img\b[^>]*\bsrc=")([^"]*)(")/gi, (all, before: string, encoded: string, after: string) => {
+    const src = decodeHtmlAttribute(encoded);
+    // Explicit web/data URLs are already usable. TeX project filenames are relative paths.
+    if (!src || /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(src)) return all;
+    const url = graphicsUrl(project, resolveDocPath(src, docDir), 400);
+    return before + escapeHtmlAttribute(url) + after;
+  });
 }
 
 interface AtomBox { el: Element; from: number; to: number; text: boolean }
@@ -266,7 +294,7 @@ export class LyxMathField {
     } catch (e) {
       html = `<span class="lm-error">${escapeHtml(this.lastLatex)}</span>`;
     }
-    this.content.innerHTML = html;
+    this.content.innerHTML = resolveMathImageHtml(html, this.opts.imageContext);
     this.dom.classList.toggle('empty', this.isEmpty());
     this.scheduleLayout();
   }
@@ -799,11 +827,12 @@ export function rowRectsOf(hull: Hull, cells: CellRef[], container: HTMLElement)
 }
 
 /** Static rendering of a formula (no editing) — the same source as the field, so it looks identical. */
-export function renderStaticHtml(latex: string, display: boolean, macros: MacroTable): string {
+export function renderStaticHtml(latex: string, display: boolean, macros: MacroTable, imageContext?: MathImageContext): string {
   try {
     const hull = parseFormula(latex, macros);
     const { latex: src } = renderHullSource(hull, macros);
-    return katex.renderToString((display ? '\\displaystyle ' : '') + src, { throwOnError: false, strict: false, trust: true, displayMode: false, output: 'html', macros: katexMacros(macros) });
+    const html = katex.renderToString((display ? '\\displaystyle ' : '') + src, { throwOnError: false, strict: false, trust: true, displayMode: false, output: 'html', macros: katexMacros(macros) });
+    return resolveMathImageHtml(html, imageContext);
   } catch {
     return `<span class="lm-error">${escapeHtml(latex)}</span>`;
   }
