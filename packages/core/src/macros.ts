@@ -330,6 +330,16 @@ function unmath(s: string): string {
   return m ? m[1] : t;
 }
 
+/** Browser-math equivalent of the common \ooalign + fractional glyph-width overlay idiom. */
+export function approximateOverlapSymbols(offset: string, args: string[]): string {
+  const left = args[0] ?? '', right = args[1] ?? '';
+  const widths: Record<string, number> = { '\\Phi': 0.764, '\\mathrm{H}': 0.75, '\\mathrm{G}': 0.786, '\\mathrm{X}': 0.75, '\\mathrm{Y}': 0.75, '\\Delta': 0.833 };
+  const fraction = Number.parseFloat(offset.trim());
+  const shift = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0.5;
+  const overlap = Number(((1 - shift) * (widths[left.replace(/\s/g, '')] ?? 0.75)).toFixed(4));
+  return `\\mathord{${left}\\kern-${overlap}em${right}}`;
+}
+
 /**
  * MathLive cannot render some TeX internals / text-mode constructs used in macro definitions.
  * Rewrite the common ones into a visual approximation, and fall back to the macro name
@@ -349,13 +359,8 @@ export function sanitizeForMathlive(def: string, m: { name: string; args: number
   d = replaceCommand(d, 'textnormal', c => `\\text{${c}}`);
   d = replaceCommand(d, 'accentset', (c, o) => `\\overset{${o[0] ?? ''}}{${c}}`, 2);
   d = replaceCommand(d, 'mathchoice', (c, o) => `{${o[0] ?? c}}`, 4);
-  // Approximate the paper's \\sbox/\\ooalign double-glyph helper with a supported inline pair.
-  d = replaceCommand(d, 'OverlapSymbols', (offset, o) => {
-    const shift = Number.parseFloat(offset.trim());
-    const overlap = Number.isFinite(shift) ? Math.max(0, Math.min(1, 1 - shift)) : 0.5;
-    const mu = Math.max(1, Math.round(overlap * 8));
-    return `\\mathord{${o[0] ?? ''}\\mkern-${mu}mu${o[1] ?? ''}}`;
-  }, 3);
+  // Approximate the paper's \\sbox/\\ooalign double-glyph helper with a supported inline overlay.
+  d = replaceCommand(d, 'OverlapSymbols', approximateOverlapSymbols, 3);
   // KaTeX supports \includegraphics. Treat \includesvg the same way; the client sends both
   // through the project's graphics endpoint, which converts PDF/SVG to a browser image.
   d = d.replace(/\\includesvg\b/g, '\\includegraphics');

@@ -8,7 +8,7 @@
  */
 import type { Atom, Cell, Grid, Hull, MacroTable } from './ast';
 import { SYMBOLS } from './parse';
-import { readGroup } from '../macros';
+import { approximateOverlapSymbols, readGroup } from '../macros';
 import katexMacrosTable from './katex-macros.json';
 
 /** LyX predefined macros KaTeX lacks, as KaTeX `macros` entries */
@@ -298,14 +298,9 @@ export function sanitizeForKatex(def: string, name: string, args: number): strin
   d = replaceCommand(d, 'mathds', c => `\\mathbb{${c}}`);
   d = replaceCommand(d, 'intertext', c => `\\text{${c}}`);
   d = replaceCommand(d, 'DeclareMathOperator', () => '', 2);
-  // The paper's double-glyph helper overlays two symbols with TeX boxes. KaTeX cannot
-  // reproduce that box construction, but an overlapped inline pair is a close visual match.
-  d = replaceCommand(d, 'OverlapSymbols', (offset, o) => {
-    const shift = Number.parseFloat(offset.trim());
-    const overlap = Number.isFinite(shift) ? Math.max(0, Math.min(1, 1 - shift)) : 0.5;
-    const mu = Math.max(1, Math.round(overlap * 8));
-    return `\\mathord{${o[0] ?? ''}\\mkern-${mu}mu${o[1] ?? ''}}`;
-  }, 3);
+  // The paper's double-glyph helper overlays two symbols with TeX boxes. Reproduce its
+  // fractional horizontal shift using a calibrated negative kern that KaTeX supports.
+  d = replaceCommand(d, 'OverlapSymbols', approximateOverlapSymbols, 3);
   // KaTeX renders \includegraphics itself. The client rewrites its local filename to the
   // authenticated project graphics endpoint, which also converts PDF/SVG for the browser.
   d = d.replace(/\\includesvg\b/g, '\\includegraphics');
