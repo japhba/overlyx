@@ -70,5 +70,24 @@ npm run build -w packages/vscode
 npm run package -w packages/vscode   # → overlyx-vscode-<version>.vsix
 ```
 
-Development: `node esbuild.mjs --watch` for the host, `npx vite build --watch --config
-webview.vite.config.ts` for the webview, then F5 (Extension Development Host) in VS Code.
+## Live development
+
+Clone this repository on the computer where VS Code runs, open the repository root, run
+`npm ci`, and press **F5**. The checked-in launch configuration builds the extension and opens
+a second VS Code window (the Extension Development Host) with the development copy loaded.
+Set breakpoints in the first window and exercise the extension in the second.
+
+For rapid UI work, run **Tasks: Run Task → OverLyX: watch extension**. It continuously rebuilds
+the extension host and webview bundles. After a rebuild, run **Developer: Reload Window** in the
+Extension Development Host to load it. Changes to command/menu declarations in `package.json`
+also require this reload. Stop the watch task when finished.
+
+The website and extension live in the same repository and share `packages/core` and much of
+`packages/client`. Use a branch for each piece of work, push it to GitHub, and merge through
+`master`; the server and any other workstation then fetch the same commits. Before starting new
+work on either machine, fetch and update from `origin/master`. Avoid editing the same branch on
+two machines at once; use separate branches and merge or rebase them through Git.
+
+Pushing extension-affecting changes to `master` automatically runs the extension checks and
+publishes a new VSIX release. A local F5 session always uses your current working tree, so you do
+not need to publish while iterating.

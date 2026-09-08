@@ -185,6 +185,7 @@
     }
   },
   "scripts": {
+    "dev": "concurrently -n host,webview -c blue,green \"node esbuild.mjs --watch\" \"vite build --watch --config webview.vite.config.ts\"",
     "build": "node esbuild.mjs && vite build --config webview.vite.config.ts && node scripts/copy-assets.mjs",
     "build:host": "node esbuild.mjs",
     "build:webview": "vite build --config webview.vite.config.ts",

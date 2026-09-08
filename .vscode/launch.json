@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "OverLyX Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode",
+        "${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/packages/vscode/dist/**/*.js"
+      ],
+      "preLaunchTask": "OverLyX: build extension"
+    }
+  ]
+}
