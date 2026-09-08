@@ -44,7 +44,7 @@ describe('GitHub bug reports', () => {
     const km = katexMacros(macros);
     expect(km['\\doublephi']).toBe(String.raw`\mathord{\Phi\mkern-6mu\Phi}`);
     for (const name of ['Pfi', 'HH', 'XX', 'YY']) {
-      expect(() => katex.renderToString(String.raw`\${name}`, { throwOnError: true, strict: false, trust: true, macros: km })).not.toThrow();
+      expect(() => katex.renderToString('\\' + name, { throwOnError: true, strict: false, trust: true, macros: km })).not.toThrow();
     }
   });
 

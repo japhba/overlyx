@@ -106,7 +106,7 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
   const readFile = (fn: string) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } };
 
   const macros = collectMacros(rootLyx, { include: includeDoc, readFile });
-  if (masterRel) macros.push(...collectMacros(lyx, { include: includeDoc, readFile }));
+  if (masterRel) macros.push(...collectMacros(lyx, { include: includeDoc, readFile }, { includePreamble: false }));
 
   // labels across the master tree (for the cross-reference dialog)
   const labels: { name: string; context: string; file: string }[] = [];

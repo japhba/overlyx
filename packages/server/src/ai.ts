@@ -170,7 +170,7 @@ function macroLines(doc: OpenDoc): string[] {
     const readFile = (fn: string) => { const a = safe(fn); try { return a ? fs.readFileSync(a, 'utf8') : undefined; } catch { return undefined; } };
     const include = (fn: string) => { const a = safe(fn.endsWith('.tex') || fn.includes('.') ? fn : fn + '.tex'); if (!a || !a.endsWith('.tex') || !fs.existsSync(a)) return undefined; try { return readDoc(path.relative(proj, a)); } catch { return undefined; } };
     const macros = collectMacros(rootLyx, { include, readFile });
-    if (masterRel) macros.push(...collectMacros(lyx, { include, readFile }));
+    if (masterRel) macros.push(...collectMacros(lyx, { include, readFile }, { includePreamble: false }));
     const seen = new Set<string>();
     const out: string[] = [];
     for (const m of macros) { if (seen.has(m.name)) continue; seen.add(m.name); out.push(`\\${m.name}${m.args ? `[${m.args}]` : ''} = ${m.def}`); }

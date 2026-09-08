@@ -223,16 +223,18 @@ export interface MacroResolver {
   readFile?: (filename: string) => string | undefined;
 }
 
+export interface CollectMacrosOptions {
+  /** Child documents inherit the master's parsed header; do not collect that inherited preamble twice. */
+  includePreamble?: boolean;
+}
+
 /**
  * Collect all macros visible in a document: preamble (+ \input files, recursively),
  * FormulaMacro insets in the body, and included child documents (in document order).
  * Later definitions override earlier ones (like LaTeX).
  */
-export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, seen = new Set<string>()): MacroDef[] {
+export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, options: CollectMacrosOptions = {}, seen = new Set<string>()): MacroDef[] {
   const out: MacroDef[] = [];
-  // preamble
-  const pre = macrosFromLatex(getPreamble(doc), 'preamble');
-  out.push(...pre.macros);
   const visitFile = (name: string) => {
     const candidates = name.endsWith('.tex') ? [name] : [name + '.tex', name];
     for (const c of candidates) {
@@ -246,7 +248,11 @@ export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, se
       return;
     }
   };
-  for (const inp of pre.inputs) visitFile(inp);
+  if (options.includePreamble !== false) {
+    const pre = macrosFromLatex(getPreamble(doc), 'preamble');
+    out.push(...pre.macros);
+    for (const inp of pre.inputs) visitFile(inp);
+  }
   // body
   for (const { inset } of walkInsets(doc.body)) {
     if (inset.type === 'FormulaMacro') {
@@ -260,7 +266,9 @@ export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, se
         // a child document (.lyx or .tex) is read as a document: its macros keep their positions
         // (also the ones inside notes, which LyX evaluates); other files are scanned as text
         const child = fn.endsWith('.lyx') || fn.endsWith('.tex') || !fn.includes('.') ? resolver.include?.(fn) : undefined;
-        if (child) out.push(...collectMacros(child, resolver, seen));
+        // Fragment parsers attach the master's header to children for layout resolution. Its
+        // preamble has already been collected above and must not override later macro-file defs.
+        if (child) out.push(...collectMacros(child, resolver, { includePreamble: false }, seen));
         else if (!fn.endsWith('.lyx')) visitFile(fn);
       }
     }

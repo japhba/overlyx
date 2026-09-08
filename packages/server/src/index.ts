@@ -613,7 +613,7 @@ api.get('/docs/*/meta', async (req, res) => {
     });
     if (masterRel) {
       // the child's own macros come last (they override for the child's view)
-      macros.push(...collectMacros(lyx, { include: includeDoc, readFile: (fn) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } } }));
+      macros.push(...collectMacros(lyx, { include: includeDoc, readFile: (fn) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } } }, { includePreamble: false }));
     }
     lap('macros');
     // labels across the master tree (for the cross-reference dialog)
