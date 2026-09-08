@@ -341,6 +341,13 @@ export function sanitizeForMathlive(def: string, m: { name: string; args: number
   d = replaceCommand(d, 'textnormal', c => `\\text{${c}}`);
   d = replaceCommand(d, 'accentset', (c, o) => `\\overset{${o[0] ?? ''}}{${c}}`, 2);
   d = replaceCommand(d, 'mathchoice', (c, o) => `{${o[0] ?? c}}`, 4);
+  // Approximate the paper's \\sbox/\\ooalign double-glyph helper with a supported inline pair.
+  d = replaceCommand(d, 'OverlapSymbols', (offset, o) => {
+    const shift = Number.parseFloat(offset.trim());
+    const overlap = Number.isFinite(shift) ? Math.max(0, Math.min(1, 1 - shift)) : 0.5;
+    const mu = Math.max(1, Math.round(overlap * 8));
+    return `\\mathord{${o[0] ?? ''}\\mkern-${mu}mu${o[1] ?? ''}}`;
+  }, 3);
   // KaTeX supports \includegraphics. Treat \includesvg the same way; the client sends both
   // through the project's graphics endpoint, which converts PDF/SVG to a browser image.
   d = d.replace(/\\includesvg\b/g, '\\includegraphics');
