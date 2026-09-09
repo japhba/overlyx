@@ -34,6 +34,7 @@ export class Updater {
 
   /** Kick off the periodic check (production installs only — a dev host updating itself would be chaos). */
   schedule(): void {
+    if (this.config.get<string>('developmentPath')) return;
     if (this.context.extensionMode !== vscode.ExtensionMode.Production) return;
     if (this.config.get<string>('updates') === 'off') return;
     const last = this.context.globalState.get<number>('updateLastCheck') ?? 0;

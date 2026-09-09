@@ -25,7 +25,7 @@ import type { HostToEditor } from './shared/protocol.ts';
 /** What activate() returns — consumed by the integration test (test/suite/index.cjs). */
 export interface OverlyxTestApi { registry: Registry; bridgeBase(): string; checkForUpdates(opts?: { interactive: boolean; apiOverride?: string; dryRun?: boolean }): Promise<CheckResult> }
 
-export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
+export async function activate(context: vscode.ExtensionContext): Promise<OverlyxTestApi> {
   const registry = new Registry();
   /** project name → root directory (each open file's own directory — projectDirFor —, plus the workspace folders) */
   const projectRoots = new Map<string, string>();
@@ -231,7 +231,7 @@ export function activate(context: vscode.ExtensionContext): OverlyxTestApi {
     }),
   );
 
-  void bridge.start().catch(e => vscode.window.showErrorMessage('OverLyX: local bridge failed to start: ' + String(e)));
+  await bridge.start();
 
   updater.schedule();
 

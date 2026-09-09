@@ -469,6 +469,12 @@ class Parser {
         push({ t: 'delim', l, r, body });
       }
 
+      else if (t.cs === 'middle') {
+        this.skipSpaces();
+        const delimiter = this.getToken();
+        push({ t: 'big', n: 'middle', d: delimiter.cs ? '\\' + delimiter.cs : delimiter.ch });
+      }
+
       else if (t.cs === 'right') { return this.success; }   // FLAG_RIGHT or stray
 
       else if (t.cs === 'begin') {
@@ -737,7 +743,7 @@ export function isValidLength(s: string): boolean { return LENGTH_RE.test(s.trim
 /* ------------------------------------------------------------------ command names */
 
 /** Commands the parser handles itself (not in the symbol table). */
-export const PARSER_COMMANDS: string[] = ['frac', 'dfrac', 'tfrac', 'cfrac', 'nicefrac', 'binom', 'dbinom', 'tbinom', 'sqrt', 'left', 'right', 'begin', 'end', 'text', 'label', 'nonumber', 'notag',
+export const PARSER_COMMANDS: string[] = ['frac', 'dfrac', 'tfrac', 'cfrac', 'nicefrac', 'binom', 'dbinom', 'tbinom', 'sqrt', 'left', 'middle', 'right', 'begin', 'end', 'text', 'label', 'nonumber', 'notag',
   'limits', 'nolimits', 'hline', 'cancelto', 'unit', 'unitfrac', 'stackrel', 'kern', 'mkern', 'choose', 'over', 'atop', 'brace', 'brack', 'color', 'textcolor', 'normalcolor', 'substack', 'framebox', 'makebox',
   'tag', 'hspace', 'smash', 'lyxmathsym', 'ensuremath', 'boxed', 'fbox', 'multicolumn', ...PHANTOMS, ...ONE_CELL_CMDS, ...XARROWS, ...REFS, 'sideset'];
 

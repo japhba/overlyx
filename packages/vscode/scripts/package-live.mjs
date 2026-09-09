@@ -1,0 +1,23 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+
+const pkg = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repo = path.resolve(pkg, '../..');
+const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-live-vsix-'));
+for (const item of ['dist', 'assets', 'README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md']) fs.cpSync(path.join(pkg, item), path.join(stage, item), { recursive: true });
+const manifest = JSON.parse(fs.readFileSync(path.join(pkg, 'package.json'), 'utf8'));
+manifest.displayName = 'OverLyX (Live)';
+manifest.version = process.env.OVERLYX_LIVE_VERSION || '0.3.6';
+manifest.main = './live.cjs';
+manifest.extensionKind = ['workspace'];
+manifest.contributes.configuration.properties['overlyx.developmentPath'].default = repo;
+manifest.contributes.configuration.properties['overlyx.updates'].default = 'off';
+delete manifest.scripts;
+fs.writeFileSync(path.join(stage, 'package.json'), JSON.stringify(manifest, null, 2));
+fs.writeFileSync(path.join(stage, 'live.cjs'), `const vscode = require('vscode');\nconst path = require('node:path');\nconst source = vscode.workspace.getConfiguration('overlyx').get('developmentPath');\nif (!source) throw new Error('OverLyX Live requires overlyx.developmentPath');\nmodule.exports = require(path.join(source, 'packages/vscode/dist/extension.cjs'));\n`);
+const output = path.resolve(process.argv[2] || path.join(os.tmpdir(), 'overlyx-live.vsix'));
+execFileSync(path.join(repo, 'node_modules/.bin/vsce'), ['package', '--no-dependencies', '--allow-missing-repository', '-o', output], { cwd: stage, stdio: 'inherit' });
+console.log(output);

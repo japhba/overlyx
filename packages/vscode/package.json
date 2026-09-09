@@ -146,6 +146,14 @@
     "configuration": {
       "title": "OverLyX",
       "properties": {
+        "overlyx.developmentPath": {
+          "type": "string", "default": "", "scope": "machine",
+          "description": "OverLyX source checkout for live development. Restart the window after changing this path."
+        },
+        "overlyx.developmentServer": {
+          "type": "string", "default": "http://127.0.0.1:18765", "scope": "machine",
+          "description": "Development server on the extension host. Used when developmentPath is set."
+        },
         "overlyx.layoutDir": {
           "type": "string",
           "default": "",
@@ -185,6 +193,10 @@
     }
   },
   "scripts": {
+    "dev:live": "node scripts/live.mjs",
+    "dev:service": "node scripts/install-live-service.mjs",
+    "test:live": "node --import tsx test/liveTest.mts",
+    "package:live": "node scripts/package-live.mjs",
     "dev": "concurrently -n host,webview -c blue,green \"node esbuild.mjs --watch\" \"vite build --watch --config webview.vite.config.ts\"",
     "build": "node esbuild.mjs && vite build --config webview.vite.config.ts && node scripts/copy-assets.mjs",
     "build:host": "node esbuild.mjs",

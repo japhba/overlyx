@@ -29,7 +29,7 @@ const isDark = () => [vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighCont
 export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
   constructor(private context: vscode.ExtensionContext, private registry: Registry, private deps: ProviderDeps) {}
 
-  resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
+  async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     // the project is the directory that holds the file, not the whole workspace (a child
     // document adopts its master's directory so it keeps the master's class and preamble)
     const folder = vscode.workspace.getWorkspaceFolder(document.uri);
@@ -48,9 +48,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     this.registry.add(entry);
 
     panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] };
-    panel.webview.html = webviewHtml(panel.webview, this.context.extensionUri, 'editor', {
-      page: 'editor', docId: session.docId, base: this.deps.bridgeBase(), dark: isDark(),
-    });
+    const base = (await vscode.env.asExternalUri(vscode.Uri.parse(this.deps.bridgeBase()))).toString().replace(/\/$/, '');
 
     const post = (msg: HostToEditor) => void panel.webview.postMessage(msg);
     /** webview updates are applied one at a time (applyEdit is async) */
@@ -62,7 +60,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
         case 'ready': {
           try {
             const r = session.parseCurrent();
-            post({ type: 'init', docId: session.docId, base: this.deps.bridgeBase(), pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark() });
+            post({ type: 'init', docId: session.docId, base, pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark() });
             if (r.warnings.length) vscode.window.setStatusBarMessage(`OverLyX: ${r.warnings.length} parse warning(s) — details in the raw file`, 8000);
           } catch (e) {
             void vscode.window.showErrorMessage(`OverLyX could not open ${relPath}: ${String(e)}`);
@@ -121,6 +119,9 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       for (const s of subs) s.dispose();
       session.dispose();
       this.registry.remove(entry);
+    });
+    panel.webview.html = await webviewHtml(panel.webview, this.context.extensionUri, 'editor', {
+      page: 'editor', docId: session.docId, base, dark: isDark(),
     });
   }
 }

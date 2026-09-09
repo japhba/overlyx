@@ -72,6 +72,57 @@ npm run package -w packages/vscode   # → overlyx-vscode-<version>.vsix
 
 ## Live development
 
+For ordinary windows on a shared SSH host, install the live VSIX and run one persistent
+development service. No changes to VS Code or its installed program files are required.
+
+From the repository root:
+
+```
+npm run build -w packages/vscode
+npm run package:live -w packages/vscode -- /tmp/overlyx-live.vsix
+npm run dev:service -w packages/vscode
+```
+
+The service installer uses `FAST_CACHE_DIR` for Vite's cache. It creates a user systemd service
+restricted to the current hostname, enables it at boot, and restarts it after failures. User
+lingering must be enabled for it to run while logged out. Inspect it with
+`systemctl --user status overlyx-live`; logs go to `$FAST_CACHE_DIR/overlyx-live/service.log`.
+
+In a Remote-SSH window, use **Extensions: Install from VSIX** to install the resulting file,
+then reload that window once. The live package replaces the ordinary OverLyX extension (same
+extension ID); its display name is **OverLyX (Live)**. It embeds the source checkout as the
+default `overlyx.developmentPath`. Set that machine-scoped setting if you move the checkout.
+Every window where this extension is enabled can use the same service. Reconnecting or opening
+a new window loads the latest host bundle from the checkout. Self-update checks are disabled
+in development mode.
+
+Styles and Preact components update through Vite HMR. Editor views can be recreated while their
+Yjs document, undo/redo manager, selection, header and scroll position survive. Pending document
+updates are flushed before view disposal. This preserves document history during UI refreshes;
+it does not promise to preserve transient dialogs or an active math-field cursor when its
+component is replaced. Source changes without a safe HMR boundary request a manual window
+reload instead of silently discarding the editor session. Host code and extension-manifest
+changes require a window reload; manifest changes also require repackaging the VSIX.
+
+The server listens only on `127.0.0.1:18765`. The extension uses `vscode.env.asExternalUri` for
+the dev server and document bridge, resolving their addresses for each new webview. Remote-SSH
+handles the connections; no fixed laptop SSH forwards or auto-forwarding setting changes are
+needed. `overlyx.developmentServer` changes the address, and `OVERLYX_DEV_PORT` changes the
+service's listening port. A server restart may cause Vite to reload a connected page; save
+documents before deliberately restarting the service. The service stays running through SSH
+disconnects.
+
+To stop live development, stop/disable `overlyx-live.service` and install a normal release VSIX.
+Clear any explicit `overlyx.developmentPath` override, then reload the affected windows.
+
+Verification: `npm run test:live -w packages/vscode` exercises two editor clients against the
+running service, checks HMR with unsaved edits, cursor position, undo/redo and reconnection.
+It briefly changes and restores the editor component source. Pass a TeX file path to test that
+document's formulas in the same run. `test/installedLiveTest.mjs` separately tests a normally
+installed VSIX in an isolated VS Code profile under Xvfb.
+
+### Debugger development host
+
 Clone this repository on the computer where VS Code runs, open the repository root, run
 `npm ci`, and press **F5**. The checked-in launch configuration builds the extension and opens
 a second VS Code window (the Extension Development Host) with the development copy loaded.

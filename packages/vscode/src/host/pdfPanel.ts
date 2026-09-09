@@ -25,7 +25,11 @@ export class PdfPanels {
     this.panels.set(docId, panel);
     panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'assets/overlyx.svg');
     const dark = [vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighContrast].includes(vscode.window.activeColorTheme.kind);
-    panel.webview.html = webviewHtml(panel.webview, this.extensionUri, 'pdf', { page: 'pdf', docId, base: this.bridgeBase(), dark });
+    const target = panel;
+    void vscode.env.asExternalUri(vscode.Uri.parse(this.bridgeBase())).then(async uri => {
+      const html = await webviewHtml(target.webview, this.extensionUri, 'pdf', { page: 'pdf', docId, base: uri.toString().replace(/\/$/, ''), dark });
+      if (this.panels.get(docId) === target) target.webview.html = html;
+    }).then(undefined, e => vscode.window.showErrorMessage(`OverLyX PDF view: ${String(e)}`));
     panel.webview.onDidReceiveMessage((msg: PdfToHost) => {
       if (msg.type === 'inverse') this.onInverse(docId, msg.page, msg.x, msg.y);
       else if (msg.type === 'notify') void (msg.kind === 'error' ? vscode.window.showErrorMessage(msg.text) : vscode.window.showInformationMessage(msg.text));

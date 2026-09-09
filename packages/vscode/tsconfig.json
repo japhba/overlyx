@@ -12,6 +12,7 @@
       "webworker"
     ],
     "types": [
+      "vite/client",
       "vscode",
       "node"
     ],

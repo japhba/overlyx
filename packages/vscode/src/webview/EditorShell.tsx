@@ -25,6 +25,7 @@ import {
   TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams,
 } from '@client/app/Dialogs';
 import { createLocalEditor, type LocalEditorHandle } from './localEditor';
+import { editorSessions } from './editorSession';
 import { refreshMacros } from '@client/editor/editor';
 import { editorContext, viewDocId } from '@client/editor/context';
 import { STANDARD_LAYOUTS, sectionLevel } from '@client/editor/layouts';
@@ -46,9 +47,9 @@ type ToolbarPrefs = Partial<Record<ToolbarId, ToolbarMode>>;
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const loadToolbarPrefs = (): ToolbarPrefs => { try { return JSON.parse(stored('ol.toolbars') ?? '{}'); } catch { return {}; } };
 
-function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T {
+function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T & { cancel(): void } {
   let t: ReturnType<typeof setTimeout> | null = null;
-  return ((...a: any[]) => { if (t) clearTimeout(t); t = setTimeout(() => fn(...a), ms); }) as T;
+  return Object.assign(((...a: any[]) => { if (t) clearTimeout(t); t = setTimeout(() => fn(...a), ms); }) as T, { cancel() { if (t) clearTimeout(t); } });
 }
 
 function hashAuthor(name: string): number {
@@ -97,8 +98,8 @@ function suggestLabel(view: EditorView): string {
 export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'init' }> }) {
   const docId = init.docId;
   const [meta, setMeta] = useState<DocMeta | null>(null);
-  const [headerLines, setHeaderLines] = useState<string[]>(init.headerLines);
-  const headerRef = useRef(init.headerLines);
+  const [headerLines, setHeaderLines] = useState<string[]>(editorSessions.get(docId)?.headerLines ?? init.headerLines);
+  const headerRef = useRef(headerLines);
   const setHeader = (lines: string[]) => { headerRef.current = lines; setHeaderLines(lines); };
   const [layout, setLayout] = useState('Standard');
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -203,8 +204,21 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       rerender();
       api.aiStatus().then(s => { editorContext.ai = s; }).catch(() => { editorContext.ai = { available: false, model: '', completionModel: '', models: [] }; });
       handle.view.focus();
+      if (scrollRef.current) scrollRef.current.scrollTop = editorSessions.get(docId)!.scrollTop;
     })();
-    return () => { cancelled = true; handle?.destroy(); handleRef.current = null; };
+    return () => {
+      cancelled = true;
+      postUpdate.cancel();
+      postOutline.cancel();
+      postSelection.cancel();
+      if (handle) {
+        vscode.postMessage({ type: 'update', pmDoc: handle.view.state.doc.toJSON(), headerLines: headerRef.current });
+        editorSessions.get(docId)!.scrollTop = scrollRef.current?.scrollTop ?? 0;
+        editorSessions.get(docId)!.headerLines = headerRef.current;
+        handle.destroy(!!import.meta.hot);
+      }
+      handleRef.current = null;
+    };
   }, []);
 
   /* ---------------------------------------------------------------- host messages */

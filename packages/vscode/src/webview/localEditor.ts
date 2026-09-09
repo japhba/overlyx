@@ -5,7 +5,7 @@
  * the .tex file) and leaves as ProseMirror JSON after each change; external file changes are
  * applied as a Yjs diff so the cursor and unsynced edits survive.
  */
-import { EditorState, Plugin, TextSelection } from 'prosemirror-state';
+import { EditorState, Plugin, Selection, TextSelection } from 'prosemirror-state';
 import { EditorView, type NodeView } from 'prosemirror-view';
 import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
 import { keymap } from 'prosemirror-keymap';
@@ -14,7 +14,8 @@ import { dropCursor } from 'prosemirror-dropcursor';
 import { tableEditing } from 'prosemirror-tables';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
-import { ySyncPlugin, yCursorPlugin, yUndoPlugin, undo, redo, initProseMirrorDoc, prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
+import { ySyncPlugin, yCursorPlugin, yUndoPlugin, ySyncPluginKey, yUndoPluginKey, defaultDeleteFilter, undo, redo, initProseMirrorDoc, prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
+import { editorSessions } from './editorSession';
 import { schema, unquote, paramMap } from '@overlyx/core';
 import { lyxKeymap, chordPlugin } from '@client/editor/keymap';
 import { numberingPlugin } from '@client/editor/plugins/numbering';
@@ -66,7 +67,7 @@ export interface LocalEditorHandle {
   ydoc: Y.Doc;
   /** apply new content that arrived from the file (as a diff: unchanged paragraphs keep identity) */
   applyExternal(pmDoc: unknown): void;
-  destroy(): void;
+  destroy(preserveSession?: boolean): void;
 }
 
 export interface LocalEditorOptions {
@@ -81,11 +82,23 @@ export interface LocalEditorOptions {
 const EXTERNAL_ORIGIN = 'vscode-file';
 
 export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
-  const ydoc = new Y.Doc();
+  let session = editorSessions.get(opts.docId);
+  if (!session) {
+    const ydoc = new Y.Doc();
+    const fragment = ydoc.getXmlFragment('prosemirror');
+    ydoc.transact(() => { prosemirrorJSONToYXmlFragment(schema, opts.pmDoc, fragment); }, EXTERNAL_ORIGIN);
+    const awareness = new Awareness(ydoc);
+    awareness.setLocalStateField('user', { name: 'You', color: '#3b6ea5' });
+    const undoManager = new Y.UndoManager(fragment, {
+      trackedOrigins: new Set([ySyncPluginKey]),
+      deleteFilter: item => defaultDeleteFilter(item, new Set(['paragraph'])),
+      captureTransaction: tr => tr.meta.get('addToHistory') !== false,
+    });
+    session = { ydoc, awareness, undoManager, scrollTop: 0 };
+    editorSessions.set(opts.docId, session);
+  }
+  const { ydoc, awareness, undoManager } = session;
   const fragment = ydoc.getXmlFragment('prosemirror');
-  ydoc.transact(() => { prosemirrorJSONToYXmlFragment(schema, opts.pmDoc, fragment); }, EXTERNAL_ORIGIN);
-  const awareness = new Awareness(ydoc);
-  awareness.setLocalStateField('user', { name: 'You', color: '#3b6ea5' });
 
   const { doc: initialDoc, mapping } = initProseMirrorDoc(fragment, schema);
   let viewRef: EditorView | null = null;
@@ -93,7 +106,25 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
   const plugins: Plugin[] = [
     ySyncPlugin(fragment, { mapping }),
     yCursorPlugin(awareness),
-    yUndoPlugin(),
+    new Plugin({
+      ...yUndoPlugin({ undoManager }).spec,
+      view: view => {
+        const binding = ySyncPluginKey.getState(view.state).binding;
+        for (const item of [...undoManager.undoStack, ...undoManager.redoStack]) {
+          if (session!.binding && item.meta.has(session!.binding)) {
+            item.meta.set(binding, item.meta.get(session!.binding));
+            item.meta.delete(session!.binding);
+          }
+        }
+        session!.binding = binding;
+        type StackItem = Y.UndoManager['undoStack'][number];
+        const added = ({ stackItem }: { stackItem: StackItem }) => { stackItem.meta.set(binding, yUndoPluginKey.getState(view.state)!.prevSel); };
+        const popped = ({ stackItem }: { stackItem: StackItem }) => { binding.beforeTransactionSelection = stackItem.meta.get(binding) || binding.beforeTransactionSelection; };
+        undoManager.on('stack-item-added', added);
+        undoManager.on('stack-item-popped', popped);
+        return { destroy() { undoManager.off('stack-item-added', added); undoManager.off('stack-item-popped', popped); } };
+      },
+    }),
     aiRewritePlugin(),
     aiCompletePlugin(),
     spellPlugin(),
@@ -222,19 +253,24 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
     el.title = describeChange(el.dataset.change, Number(el.dataset.author), Number(el.dataset.time));
   });
 
-  // start with the cursor at the beginning
-  try { view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)).setMeta('addToHistory', false)); } catch { /* empty */ }
+  const selection = session.selection ? Selection.fromJSON(view.state.doc, session.selection) : TextSelection.atStart(view.state.doc);
+  view.dispatch(view.state.tr.setSelection(selection).setMeta('addToHistory', false));
 
   return {
     view, ydoc,
     applyExternal(pmDoc: unknown) {
       ydoc.transact(() => { prosemirrorJSONToYXmlFragment(schema, pmDoc, fragment); }, EXTERNAL_ORIGIN);
     },
-    destroy() {
+    destroy(preserveSession = false) {
+      session!.selection = view.state.selection.toJSON();
       unsubscribePrefs();
       view.destroy();
-      awareness.destroy();
-      ydoc.destroy();
+      if (!preserveSession) {
+        undoManager.destroy();
+        awareness.destroy();
+        ydoc.destroy();
+        editorSessions.delete(opts.docId);
+      }
     },
   };
 }

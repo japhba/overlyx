@@ -18,6 +18,10 @@ declare function acquireVsCodeApi(): VsCodeApi;
 // the host's boot script acquires the (one-shot) API first — reuse it
 export const vscode: VsCodeApi = (window as unknown as { __OVERLYX_VSCAPI?: VsCodeApi }).__OVERLYX_VSCAPI ?? acquireVsCodeApi();
 
+if (import.meta.hot) {
+  import.meta.hot.on('overlyx:reload-required', () => vscode.postMessage({ type: 'notify', text: 'This source change requires Developer: Reload Window. Save your document first.', kind: 'info' }));
+}
+
 /** Apply the VS Code theme to the OverLyX theme attribute. */
 export function applyTheme(dark: boolean): void {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';

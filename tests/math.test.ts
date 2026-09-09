@@ -75,6 +75,15 @@ describe('math round trip (LyX 2.5 conventions)', () => {
 });
 
 describe('math parse structure (LyX semantics)', () => {
+  it('round-trips and renders a middle delimiter in a KL divergence', () => {
+    const latex = '$\\left(\\operatorname{Ber}(p)\\middle\\Vert\\operatorname{Ber}(q)\\right)$';
+    const hull = parseFormula(latex);
+    expect(writeFormula(hull)).toBe(latex);
+    const source = renderHullSource(hull, {}).latex;
+    expect(source).toContain('\\middle\\Vert');
+    const html = katex.renderToString(source, { throwOnError: true, trust: true, strict: false });
+    expect(html).not.toContain('lm-unknown');
+  });
   it('scripts attach to the previous atom and merge', () => {
     const c = parseCell('x_{i}^{2}');
     expect(c.length).toBe(1);
