@@ -156,7 +156,21 @@ blend.
   Tab moves between cells, LyX's corner markers around every inset on the cursor path, macros with
   arguments are expanded from their definitions with editable argument cells; typing `\` starts a
   command shown red until it names a real command (then green), with LyX's completion in grey — Tab
-  completes it. Right-click menus on
+  completes it. **The mouse works on LyX's coordinate model** (`editor/lyxmath/geometry.ts`): the
+  renderer wraps every cell *and every atom* in `\htmlClass` spans (transparent for KaTeX's spacing)
+  and copies KaTeX's own height/depth of each box into the markup, so every atom has a box and every
+  cell a baseline and a content-tight height — an inline span's client rect is only ever its font's
+  line box, which is why fractions and big operators used to get markers and highlights at text
+  height. On top of that sit ports of `MathData::x2pos` (the nearest boundary, insets kept in
+  front), `InsetMathNest::editXY` (nearest cell, down into the inset under the pointer),
+  `Cursor::moveToClosestEdge`, `lfunMouseMotion`'s anchor rule (a drag never dives deeper than its
+  anchor; an inset off the anchor's chain is taken whole at its closest edge), `normalAnchor` /
+  `setCursorSelectionTo` (an anchor inside an inset selects it whole from outside; Shift+click takes
+  the clicked inset whole), double click = the cell, triple click = all cells; a drag that leaves the
+  formula continues in the text with the formula whole and comes back into it when the pointer
+  returns. The corner markers are drawn as `MathRow::drawMarkers` does (3px hooks one pixel outside
+  the inset's box; four corners for fractions, grids and macros) and follow the anchor while the
+  mouse selects. Right-click menus on
   formulas, cross-references (go to label, reference format), citations, hyperlinks, child documents,
   insets and tracked changes; `Ctrl/⌘+click` follows a reference or opens a child document; **tabs**
   for open documents (new tabs open right of the current one); the text column is centred and its
@@ -619,7 +633,8 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/paperwriting-vae.
 # (OVERLYX_OWNER_EMAIL, japhba@gmail.com) so the latest typed-via-GUI papers can be inspected there:
 scripts/publish-typed-papers.sh $S/projects
 # mouse selection (LyX rules: insets taken whole at their closest edge, no drag-and-drop of a
-# selection, word/paragraph drags, autoscroll) in the text and in formulas:
+# selection, word/paragraph drags, autoscroll) in the text and in formulas (LyX's coordinate model:
+# click precision, corner markers around the fraction, double/triple click, drag out and back in):
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/textselect.spec.ts e2e/mathselect.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/pdfview.spec.ts e2e/rawsplit.spec.ts   # pdf.js viewer, SyncTeX, PDF tabs; the [raw] split tab, scroll sync, live apply
 ```

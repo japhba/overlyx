@@ -3,7 +3,11 @@
  * glyph boxes (nearest cell, as in LyX's editXY) and never dives deeper than the anchor (insets
  * taken whole); a drag that leaves the field continues as a document selection with the formula
  * whole; a drag across a display formula takes it whole; and a dead ^ key (Mac / German layouts,
- * arriving as a composition) enters the superscript at the keypress itself.
+ * arriving as a composition) enters the superscript at the keypress itself. The second formula
+ * checks LyX's coordinate model (geometry.ts): clicks land on the nearest boundary or inside the
+ * inset under the pointer, the corner markers hug the fraction, double / triple click select the
+ * cell / the formula, a drag from inside a fraction takes it whole and comes back into the formula,
+ * Shift+click from the text takes the formula whole.
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -16,6 +20,8 @@ test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
   writeFileSync(`${DIR}/doc.tex`, texDoc(`Before $abc+\\frac{u}{v}+xyz$ after more text here.
+
+Precision $2\\pi\\frac{1}{2}+x^{2}$ end.
 
 Second paragraph before the display.
 \\begin{equation}
@@ -209,5 +215,133 @@ test('Shift+Arrow from the text beside a formula takes it whole and lights it up
   });
   expect(r2.span).toBe(0);
   expect(r2.lit).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+/* ---------------------------------------------------------------- LyX's coordinate model */
+
+type Rect = { x: number; y: number; width: number; height: number };
+const second = (page: Page) => page.locator('.lyx-editor .lyx-math-inline').nth(1);
+
+/** the second formula, upgraded, with the boxes of its top-level atoms (2, π, the fraction, +, x²) */
+async function precisionField(page: Page): Promise<{ atoms: Rect[]; num: Rect; frac: Rect; sup: Rect }> {
+  const wrap = second(page);
+  await wrap.hover();
+  await expect(wrap.locator('.lm-field')).toHaveCount(1, { timeout: 5000 });
+  await page.waitForTimeout(100);
+  const atoms = await wrap.locator('.lm-c0 > .lm-a').evaluateAll(els => els.map(e => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; }));
+  expect(atoms.length).toBe(5);
+  const num = (await wrap.locator('.lm-c1').boundingBox())!;
+  const frac = (await wrap.locator('.lm-c0 .mfrac .vlist-t').first().boundingBox())!;   // the visible fraction
+  const sup = (await wrap.locator('.lm-c4').boundingBox())!;
+  return { atoms, num, frac, sup };
+}
+
+const secondState = (page: Page) => page.evaluate(async () => {
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));   // the overlay is redrawn on the next frame
+  const f = (document.querySelectorAll('.lyx-editor .lyx-math-inline')[1] as any).pmViewDesc.spec.field;
+  const corners = [...document.querySelectorAll('.lyx-editor .lyx-math-inline .lm-corner')].map(e => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, right: r.right, bottom: r.bottom }; });
+  return { depth: f.cursor.depth as number, idx: f.cursor.idx as number, pos: f.cursor.pos as number, inset: (f.cursor.inset?.t as string) ?? null, sel: f.cursor.selection ? (f.cursor.grabSelection() as string) : '', corners };
+});
+
+const docSelection = (page: Page) => page.evaluate(() => {
+  const v = (window as any).overlyx.activeView, s = v.state.selection;
+  let math = 0;
+  v.state.doc.nodesBetween(s.from, s.to, (n: any) => { if (n.type.name === 'math_inline') math++; });
+  return { span: (s.to - s.from) as number, math, text: v.state.doc.textBetween(s.from, s.to, ' ', ' ') as string };
+});
+
+test('clicks land on the nearest boundary, inside the inset under the pointer, and the markers hug the fraction', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openDoc(page, `${PROJECT}/doc.tex`);
+  const { atoms, num, frac, sup } = await precisionField(page);
+  const [two, pi] = atoms;
+  const midY = two.y + two.height / 2;
+  // "2π" is one text run for KaTeX — every character still has its own box: the left quarter of π
+  // puts the caret before it, the right quarter behind it
+  await page.mouse.click(pi.x + pi.width * 0.25, midY);
+  let s = await secondState(page);
+  expect([s.depth, s.pos]).toEqual([1, 1]);
+  await page.mouse.click(pi.x + pi.width * 0.75, midY);
+  s = await secondState(page);
+  expect([s.depth, s.pos]).toEqual([1, 2]);
+  await page.mouse.click(two.x + 1, midY);
+  s = await secondState(page);
+  expect([s.depth, s.pos]).toEqual([1, 0]);
+  // into the numerator: the slice above points at the fraction, the fraction gets all four corners,
+  // one pixel outside its visible box (MathRow::drawMarkers) — not around KaTeX's null delimiters,
+  // not at the height of the text line
+  await page.mouse.click(num.x + num.width / 2, num.y + num.height / 2);
+  s = await secondState(page);
+  expect([s.depth, s.inset, s.idx]).toEqual([2, 'frac', 0]);
+  expect(s.corners.length).toBe(4);
+  const xs = s.corners.map(c => c.x).sort((a, b) => a - b), ys = s.corners.map(c => c.y).sort((a, b) => a - b);
+  expect(Math.abs(xs[0] - (frac.x - 1))).toBeLessThan(1.5);
+  expect(Math.abs(s.corners.map(c => c.right).sort((a, b) => b - a)[0] - (frac.x + frac.width + 1))).toBeLessThan(1.5);
+  expect(Math.abs(ys[0] - (frac.y - 1))).toBeLessThan(2);
+  expect(Math.abs(s.corners.map(c => c.bottom).sort((a, b) => b - a)[0] - (frac.y + frac.height + 2))).toBeLessThan(2.5);
+  // the superscript: a script inset, marked below only
+  await page.mouse.click(sup.x + sup.width / 2, sup.y + sup.height / 2);
+  s = await secondState(page);
+  expect([s.depth, s.inset, s.idx]).toEqual([2, 'script', 1]);
+  expect(s.corners.length).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('double click selects the cell, triple click the whole formula (LFUN_MOUSE_DOUBLE / TRIPLE)', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openDoc(page, `${PROJECT}/doc.tex`);
+  const { num, atoms } = await precisionField(page);
+  await page.mouse.dblclick(num.x + num.width / 2, num.y + num.height / 2);
+  let s = await secondState(page);
+  expect([s.depth, s.sel]).toEqual([2, '1']);
+  await page.mouse.click(atoms[1].x + 1, atoms[1].y + atoms[1].height / 2, { clickCount: 3 });
+  s = await secondState(page);
+  expect([s.depth, s.sel]).toEqual([1, '2\\pi\\frac{1}{2}+x^{2}']);
+  expect(errors).toEqual([]);
+});
+
+test('a drag from inside a fraction takes it whole, goes out into the text and comes back into the formula', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openDoc(page, `${PROJECT}/doc.tex`);
+  const { atoms, num } = await precisionField(page);
+  const midY = atoms[0].y + atoms[0].height / 2;
+  // from the numerator to the end: the anchor stays inside, the selection is the fraction whole and what follows
+  await page.mouse.move(num.x + 2, num.y + num.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(atoms[4].x + atoms[4].width - 1, midY, { steps: 5 });
+  await page.mouse.up();
+  let s = await secondState(page);
+  expect([s.depth, s.sel]).toEqual([1, '\\frac{1}{2}+x^{2}']);
+  // out into the text: the document selects, formula whole; back onto the "+": the formula's own
+  // selection again, from the same anchor, the document selection collapsed
+  await page.mouse.move(num.x + 2, num.y + num.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(atoms[4].x + atoms[4].width + 120, midY, { steps: 5 });
+  const out = await docSelection(page);
+  expect(out.math).toBe(1);
+  expect(out.text).toContain('end');
+  await page.mouse.move(atoms[3].x + 1, midY, { steps: 5 });
+  await page.mouse.up();
+  s = await secondState(page);
+  expect([s.depth, s.sel]).toEqual([1, '\\frac{1}{2}']);
+  expect((await docSelection(page)).span).toBe(0);
+  expect(await page.locator('.lyx-editor .ol-selatom').count()).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('Shift+click from the text into a formula takes it whole', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openDoc(page, `${PROJECT}/doc.tex`);
+  const { num } = await precisionField(page);
+  const par = page.locator('.lyx-editor .lyx-par', { hasText: 'Precision' }).first();
+  await par.click({ position: { x: 3, y: 8 } });
+  await page.keyboard.down('Shift');
+  await page.mouse.click(num.x + num.width / 2, num.y + num.height / 2);
+  await page.keyboard.up('Shift');
+  const r = await docSelection(page);
+  expect(r.math).toBe(1);
+  expect(r.text).toContain('Precision');
+  expect(await page.locator('.lyx-editor .lyx-math-inline.ol-selatom').count()).toBe(1);
   expect(errors).toEqual([]);
 });

@@ -5,7 +5,7 @@
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
-import { dragFromAtom } from '../plugins/dragselect';
+import { dragFromAtom, shiftClickAt } from '../plugins/dragselect';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { macroFromLyxLines, parseFormula, renderHullSource, numberedType, type HullType } from '@overlyx/core';
 import { LyxMathField, renderStaticHtml, activeMathField, rowRectsOf } from '../lyxmath/field';
@@ -161,12 +161,21 @@ function selectOutOf(view: EditorView, getPos: () => number | undefined, dir: st
   try { view.dispatch(view.state.tr.setSelection(TextSelection.between(view.state.doc.resolve(back ? pos + size : pos), view.state.doc.resolve(back ? pos : pos + size))).scrollIntoView()); } catch { /* gone */ }
 }
 
-/** A drag left the formula: continue as a document drag with the formula selected whole (LyX's undispatched mouse motion). */
-function dragOutOf(view: EditorView, getPos: () => number | undefined, ev: MouseEvent) {
+/**
+ * A drag left the formula: continue as a document drag with the formula selected whole (LyX's
+ * undispatched mouse motion). When the pointer comes back into the formula the field resumes its
+ * own drag (`reenter`) and the document selection collapses onto the formula.
+ */
+function dragOutOf(view: EditorView, getPos: () => number | undefined, ev: MouseEvent, reenter: (ev: MouseEvent) => boolean) {
   const pos = getPos();
   if (pos === undefined) return;
   const node = view.state.doc.nodeAt(pos);
-  dragFromAtom(view, pos, pos + (node ? node.nodeSize : 1), ev);
+  dragFromAtom(view, pos, pos + (node ? node.nodeSize : 1), ev, mv => {
+    if (!reenter(mv)) return false;
+    const p = getPos();
+    if (p !== undefined) { try { view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(p)))); } catch { /* gone */ } }
+    return true;
+  });
 }
 
 /** Common field wiring: context menu, mouse isolation from ProseMirror, keyboard passthrough. */
@@ -254,7 +263,8 @@ export class MathInlineView implements NodeView {
       imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
-      onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
+      onDragOut: (ev, reenter) => dragOutOf(this.view, this.getPos, ev, reenter),
+      onShiftClick: ev => shiftClickAt(this.view, ev.clientX, ev.clientY),
       onSelectOut: dir => selectOutOf(this.view, this.getPos, dir),
     });
     (f as any)._macroKey = key;
@@ -419,7 +429,8 @@ export class MathDisplayView implements NodeView {
       imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
-      onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
+      onDragOut: (ev, reenter) => dragOutOf(this.view, this.getPos, ev, reenter),
+      onShiftClick: ev => shiftClickAt(this.view, ev.clientX, ev.clientY),
       onSelectOut: dir => selectOutOf(this.view, this.getPos, dir),
       onCommand: key => { if (key === 'n') this.toggleNumbering(); },
     });
@@ -637,7 +648,8 @@ export class MacroView implements NodeView {
       imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex.replace(/^\$|\$$/g, '')),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace),
-      onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
+      onDragOut: (ev, reenter) => dragOutOf(this.view, this.getPos, ev, reenter),
+      onShiftClick: ev => shiftClickAt(this.view, ev.clientX, ev.clientY),
       onSelectOut: dir => selectOutOf(this.view, this.getPos, dir),
     });
     (this.field as any)._macroKey = key;

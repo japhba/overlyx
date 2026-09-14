@@ -45,6 +45,9 @@ export const isActive = (a: Atom) => a.t !== 'ref' && nargs(a) > 0;
 export const confirmDeletion = (a: Atom) => nargs(a) > 0;
 
 const gridOf = (o: Owner): Grid | undefined => (isHull(o) ? o : o.t === 'grid' ? o : undefined);
+/** CursorSlice ordering within one inset: by cell index, then position */
+const sliceLE = (a: Slice, b: Slice) => a.idx < b.idx || (a.idx === b.idx && a.pos <= b.pos);
+const sliceGT = (a: Slice, b: Slice) => !sliceLE(a, b);
 const ncolsOf = (o: Owner) => gridOf(o)?.ncols ?? 1;
 
 /** Script inset helpers (InsetMathScript::idxOfScript etc.) */
@@ -111,41 +114,86 @@ export class MathCursor {
     this.selecting = selecting;
     return true;
   }
-  /** the selection's common cell and its range [from, to) with idx range for grids (LyX selBegin/selEnd) */
+  /**
+   * CursorData::normalAnchor: the anchor cut to the cursor's depth. When the anchor is deeper and
+   * the cursor stands at or before the inset it descends into, the anchor moves behind that inset,
+   * so a selection between them takes the inset whole.
+   */
+  normalAnchor(): Slice {
+    const a = this.anchor;
+    const d = this.depth;
+    if (!a || a.length < d) return { ...this.top };
+    const normal = { ...a[d - 1] };
+    if (d < a.length && sliceLE(this.top, normal)) normal.pos++;
+    return normal;
+  }
+  /** CursorData::setSelection: selecting, unless the normalized anchor is where the cursor is */
+  setSelection(): void {
+    this.selecting = true;
+    if (!this.anchor) { this.selecting = false; return; }
+    const n = this.normalAnchor();
+    if (n.idx === this.idx && n.pos === this.pos) this.selecting = false;
+  }
+  /**
+   * Cursor::setCursorSelectionTo: move the cursor to `dit` keeping the anchor, with `dit` cut to
+   * where it diverges from the anchor (an inset the anchor is not in is taken whole; a position
+   * deeper on the anchor's own chain is cut back to the anchor's depth). Shift+click.
+   */
+  setCursorSelectionTo(dit: Slice[]): void {
+    const a = this.anchor ?? this.clone();
+    let i = 0;
+    while (i < dit.length && i < a.length && MathCursor.sameCell(dit[i], a[i]) && dit[i].pos === a[i].pos) i++;
+    let d = dit.map(x => ({ ...x }));
+    if (i !== d.length) {
+      if (i === a.length) d = d.slice(0, Math.max(1, i));            // a proper extension of the anchor
+      else if (i + 1 < d.length) {
+        d = d.slice(0, i + 1);                                       // remove the excess below the divergence
+        if (sliceGT(d[i], a[i])) d[i].pos++;                          // place it after the inset it was in
+      }
+    }
+    this.slices = d;
+    this.setSelection();
+  }
+  /**
+   * The selection: its common cell and range [from, to), or a range of whole cells of the common
+   * inset (LyX selBegin/selEnd with the normalized anchor: the side that is deeper than the common
+   * cell contributes the position of the inset it is in, moved behind it when the other side is at
+   * or before it — the inset is taken whole).
+   */
   selRange(): { owner: Owner; idx1: number; idx2: number; from: number; to: number; depth: number } | null {
     if (!this.selection || !this.anchor) return null;
     const a = this.anchor, c = this.slices;
-    let d = 0;
-    while (d < a.length && d < c.length && a[d].owner === c[d].owner && (a[d].idx === c[d].idx || gridOf(a[d].owner))) d++;
-    if (d === 0) return null;
-    const i = d - 1;
-    const sa = a[i], sc = c[i];
-    if (sa.idx !== sc.idx) return { owner: sa.owner, idx1: Math.min(sa.idx, sc.idx), idx2: Math.max(sa.idx, sc.idx), from: 0, to: 0, depth: i };
-    // positions: if one side is deeper, its position in this cell is the index of the inset it descends into (+1 for the end)
-    const pa = a.length > d ? a[d].pos + 0 : sa.pos;
-    const pc = c.length > d ? c[d].pos + 0 : sc.pos;
-    let from = Math.min(pa, pc), to = Math.max(pa, pc);
-    if (a.length > d || c.length > d) { const deeperPos = (a.length > d ? a[i + 1] : c[i + 1]); void deeperPos; }
-    // LyX: selBegin/selEnd are the slices at the common depth; a deeper side contributes the position of its inset
-    const posAt = (s: Slice[]) => (s.length > d ? s[d].pos : s[i].pos);
-    // when one side is inside an inset at position p of this cell, the range must include that inset
-    const endAt = (s: Slice[]) => (s.length > d ? s[d].pos + 1 : s[i].pos);
-    const aIsBegin = posAt(a) < posAt(c) || (posAt(a) === posAt(c) && a.length <= c.length);
-    from = aIsBegin ? posAt(a) : posAt(c);
-    to = aIsBegin ? endAt(c) : endAt(a);
-    return { owner: sa.owner, idx1: sa.idx, idx2: sa.idx, from, to, depth: i };
+    let k = 0;
+    for (;;) {
+      const sa = a[k], sc = c[k];
+      if (!sa || !sc || sa.owner !== sc.owner) { k--; break; }
+      if (sa.idx !== sc.idx) return { owner: sa.owner, idx1: Math.min(sa.idx, sc.idx), idx2: Math.max(sa.idx, sc.idx), from: 0, to: 0, depth: k };
+      if (sa.pos !== sc.pos || k === a.length - 1 || k === c.length - 1) break;
+      k++;
+    }
+    if (k < 0) return null;
+    const pa = a[k].pos, pc = c[k].pos;
+    const na = a.length > k + 1 && pc <= pa ? pa + 1 : pa;
+    const nc = c.length > k + 1 && pa <= pc ? pc + 1 : pc;
+    return { owner: a[k].owner, idx1: a[k].idx, idx2: a[k].idx, from: Math.min(na, nc), to: Math.max(na, nc), depth: k };
+  }
+  /** the cells of a whole-cell selection: a rectangle in a grid (InsetMathGrid::idxBetween), idx1..idx2 in other insets */
+  selCells(r: { owner: Owner; idx1: number; idx2: number }): number[][] {
+    const g = gridOf(r.owner);
+    if (!g) { const out: number[] = []; for (let i = r.idx1; i <= r.idx2; i++) out.push(i); return [out]; }
+    const nc = g.ncols;
+    const r1 = Math.floor(r.idx1 / nc), r2 = Math.floor(r.idx2 / nc), c1 = Math.min(r.idx1 % nc, r.idx2 % nc), c2 = Math.max(r.idx1 % nc, r.idx2 % nc);
+    const rows: number[][] = [];
+    for (let row = r1; row <= r2; row++) { const cols: number[] = []; for (let col = c1; col <= c2; col++) cols.push(row * nc + col); rows.push(cols); }
+    return rows;
   }
   /** cap::grabSelection: LaTeX of the selection */
   grabSelection(): string {
     const r = this.selRange();
     if (!r) return '';
     if (r.idx1 === r.idx2) return writeCellLatex(this.cellAt({ owner: r.owner, idx: r.idx1, pos: 0 }).slice(r.from, r.to));
-    const g = gridOf(r.owner)!;
-    const nc = g.ncols;
-    const r1 = Math.floor(r.idx1 / nc), r2 = Math.floor(r.idx2 / nc), c1 = Math.min(r.idx1 % nc, r.idx2 % nc), c2 = Math.max(r.idx1 % nc, r.idx2 % nc);
-    const parts: string[] = [];
-    for (let row = r1; row <= r2; row++) { const cells: string[] = []; for (let col = c1; col <= c2; col++) cells.push(writeCellLatex(g.rows[row].cells[col])); parts.push(cells.join('&')); }
-    return parts.join('\\\\');
+    const cells = atomCells(r.owner);
+    return this.selCells(r).map(row => row.map(i => writeCellLatex(cells[i] ?? [])).join('&')).join('\\\\');
   }
   /** cap::eraseSelection */
   eraseSelection(): boolean {
@@ -157,10 +205,8 @@ export class MathCursor {
       this.cell.splice(r.from, r.to - r.from);
       this.top.pos = r.from;
     } else {
-      const g = gridOf(r.owner)!;
-      const nc = g.ncols;
-      const r1 = Math.floor(r.idx1 / nc), r2 = Math.floor(r.idx2 / nc), c1 = Math.min(r.idx1 % nc, r.idx2 % nc), c2 = Math.max(r.idx1 % nc, r.idx2 % nc);
-      for (let row = r1; row <= r2; row++) for (let col = c1; col <= c2; col++) g.rows[row].cells[col].splice(0);
+      const cells = atomCells(r.owner);
+      for (const row of this.selCells(r)) for (const i of row) cells[i]?.splice(0);
       this.top.pos = 0;
     }
     this.clearSelection();

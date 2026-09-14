@@ -107,7 +107,7 @@ function closestEdge(view: EditorView, r: Range, x: number, y: number): number {
  * anchor's text level (an inset off it taken whole at its closest edge), and the anchor's own
  * container taken whole when the pointer has left it.
  */
-export function dragSelection(view: EditorView, anchor: Range, x: number, y: number): { anchor: number; head: number } | null {
+export function dragSelection(view: EditorView, anchor: Range, x: number, y: number, opts: { bySide?: boolean } = {}): { anchor: number; head: number } | null {
   const hit = hitAt(view, x, y);
   if (!hit) return null;
   const doc = view.state.doc;
@@ -130,7 +130,12 @@ export function dragSelection(view: EditorView, anchor: Range, x: number, y: num
     const n = doc.nodeAt(hit.inside);
     if (n && n.isInline && (ATOMS.has(n.type.name) || !n.isTextblock) && hit.pos >= hit.inside && hit.pos <= hit.inside + n.nodeSize) taken = { from: hit.inside, to: hit.inside + n.nodeSize };
   }
-  const head = taken ? closestEdge(view, taken, x, y) : hit.pos;
+  // an inset taken whole: the head lands on its closest edge (a drag: Cursor::moveToClosestEdge),
+  // or — Shift+click, Cursor::setCursorSelectionTo — on its far side, so that it is included
+  const head = !taken ? hit.pos
+    : opts.bySide && taken.from >= anchor.to ? taken.to
+    : opts.bySide && taken.to <= anchor.from ? taken.from
+    : closestEdge(view, taken, x, y);
   // the anchor: its container the pointer has left (or the node it hangs on) is taken whole
   let a = anchor;
   if (level < chain.length - 1) { const d = chain[level + 1]; a = { from: $a.before(d), to: $a.after(d) }; }
@@ -176,6 +181,12 @@ type DragOpts = {
   deferred?: boolean;
   /** pixels of motion before a deferred press becomes a drag */
   threshold?: number;
+  /**
+   * The drag came out of a formula: called for every motion; when it takes the pointer back (the
+   * pointer returned into the formula, which resumes its own drag — LyX: the motion is over the
+   * inset again and dispatched to it) this drag ends without touching the selection or the focus.
+   */
+  reenter?: (ev: MouseEvent) => boolean;
 };
 
 /**
@@ -211,6 +222,11 @@ export function startDrag(view: EditorView, anchor: Range, ev: MouseEvent, opts:
     if (sc.scrollTop !== before) apply(last.x, last.y);
     raf = requestAnimationFrame(autoscroll);
   };
+  const stop = () => {
+    window.removeEventListener('mousemove', move, true);
+    window.removeEventListener('mouseup', up, true);
+    if (raf) cancelAnimationFrame(raf);
+  };
   const move = (mv: MouseEvent) => {
     if (!dragging) {
       if (Math.hypot(mv.clientX - ev.clientX, mv.clientY - ev.clientY) < (opts.threshold ?? 4)) return;
@@ -219,14 +235,13 @@ export function startDrag(view: EditorView, anchor: Range, ev: MouseEvent, opts:
     }
     mv.preventDefault();
     mv.stopPropagation();   // ProseMirror's own mouse handling must not fight the drag
+    if (opts.reenter?.(mv)) { stop(); return; }
     last = { x: mv.clientX, y: mv.clientY };
     apply(mv.clientX, mv.clientY);
     if (!raf) raf = requestAnimationFrame(autoscroll);
   };
   const up = (uv: MouseEvent) => {
-    window.removeEventListener('mousemove', move, true);
-    window.removeEventListener('mouseup', up, true);
-    if (raf) cancelAnimationFrame(raf);
+    stop();
     // a drag swallows the pending click; without one, an untouched deferred mouseup completes
     // ProseMirror's click as usual
     if (dragging && opts.deferred) { uv.preventDefault(); uv.stopPropagation(); }
@@ -241,11 +256,20 @@ export function startDrag(view: EditorView, anchor: Range, ev: MouseEvent, opts:
  * LyX's lfunMouseMotion leaves such motions to the surrounding text): the atom [from, to) stays
  * selected whole and the selection follows the pointer on either side of it.
  */
-export function dragFromAtom(view: EditorView, from: number, to: number, ev: MouseEvent): void {
+export function dragFromAtom(view: EditorView, from: number, to: number, ev: MouseEvent, reenter?: (ev: MouseEvent) => boolean): void {
   view.focus();
-  startDrag(view, { from, to }, ev);
+  startDrag(view, { from, to }, ev, { reenter });
   const s = dragSelection(view, { from, to }, ev.clientX, ev.clientY);
   if (s) setSel(view, s.anchor, s.head);
+}
+
+/** Shift+click at a point: extend the document selection from its anchor to there — a formula / inset taken whole */
+export function shiftClickAt(view: EditorView, x: number, y: number): boolean {
+  view.focus();
+  const a = view.state.selection.anchor;
+  const s = dragSelection(view, { from: a, to: a }, x, y, { bySide: true });
+  if (s) setSel(view, s.anchor, s.head);
+  return !!s;
 }
 
 export function dragSelectPlugin(): Plugin {
@@ -278,10 +302,7 @@ export function dragSelectPlugin(): Plugin {
           if (ev.shiftKey) {
             if (ev.detail !== 1) return false;
             ev.preventDefault();
-            view.focus();
-            const a = view.state.selection.anchor;
-            const s = dragSelection(view, { from: a, to: a }, ev.clientX, ev.clientY);
-            if (s) setSel(view, s.anchor, s.head);
+            shiftClickAt(view, ev.clientX, ev.clientY);
             return true;
           }
           // A press on a formula / graphic / reference itself: the *click* stays with ProseMirror

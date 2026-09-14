@@ -1,10 +1,14 @@
 /**
  * Math model → KaTeX LaTeX for rendering in the editor.
  *
- * Every cell is wrapped in `\htmlClass{lm-c<id>}{…}` so the view can find the box of each cell
- * (and of each atom inside it) in KaTeX's output; user macros with arguments are expanded from
- * their definitions with the argument cells wrapped too, so they stay editable in place.
- * Constructs KaTeX does not know are approximated (see `sanitizeForKatex`).
+ * Every cell is wrapped in `\htmlClass{lm-c<id>}{…}` so the view can find the box of each cell in
+ * KaTeX's output, and (for the editor, `atoms: true`) every atom of a cell in `\htmlClass{lm-a}{…}`,
+ * so that each atom has a box of its own — the cell wrapper's children, in order, are its atoms,
+ * just like the MathRow LyX lays out from a MathData. KaTeX treats `\htmlClass` spans as
+ * transparent for the inter-atom spacing and bin cancellation, so the rendering is unchanged;
+ * the glue KaTeX puts between two atoms is placed inside the wrapper of the first one. User macros
+ * with arguments are expanded from their definitions with the argument cells wrapped too, so they
+ * stay editable in place. Constructs KaTeX does not know are approximated (see `sanitizeForKatex`).
  */
 import type { Atom, Cell, Grid, Hull, MacroTable } from './ast';
 import { SYMBOLS } from './parse';
@@ -27,12 +31,16 @@ export interface KatexContext {
   inTemplate?: boolean;
   /** `true` in a display hull: big operators carry their scripts above/below by default */
   display?: boolean;
+  /** wrap every atom of an editable cell in `\htmlClass{lm-a}{…}` (the editor measures them) */
+  atoms?: boolean;
 }
 
 /** Operators whose scripts sit above/below in display style (LaTeX \displaylimits default). */
 const LIMIT_OPS = new Set(['sum', 'prod', 'coprod', 'bigcap', 'bigcup', 'bigodot', 'bigoplus', 'bigotimes', 'bigsqcup', 'biguplus', 'bigvee', 'bigwedge', 'lim', 'liminf', 'limsup', 'max', 'min', 'sup', 'inf', 'det', 'gcd', 'Pr', 'injlim', 'projlim', 'varinjlim', 'varprojlim', 'varliminf', 'varlimsup'])
 
 const CELL_CLASS = 'lm-c';
+/** class of the wrapper around every atom of an editable cell (see `KatexContext.atoms`) */
+export const ATOM_CLASS = 'lm-a';
 
 function cellId(ctx: KatexContext, owner: Atom | Hull, idx: number): number {
   ctx.cells.push({ id: ctx.cells.length, owner, idx });
@@ -76,10 +84,12 @@ const TEXT_OK = new Set<Atom['t']>(['char', 'space', 'kern', 'font', 'box', 'col
 export function atomsToKatex(cell: Cell, ctx: KatexContext, mode: 'math' | 'text' = 'math'): string {
   let out = '';
   let prevCmd = false;   // a control word was emitted: separate from following letters
+  const wrap = !!ctx.atoms && !ctx.inTemplate;
   for (const a of cell) {
     // inside \text{}: math constructs (scripts, symbols, \ensuremath …) are rendered as inline math
-    const s = mode === 'text' && !TEXT_OK.has(a.t) ? '$' + atomToKatex(a, ctx, 'math') + '$' : atomToKatex(a, ctx, mode);
-    if (prevCmd && /^[A-Za-z]/.test(s)) out += ' ';
+    let s = mode === 'text' && !TEXT_OK.has(a.t) ? '$' + atomToKatex(a, ctx, 'math') + '$' : atomToKatex(a, ctx, mode);
+    if (wrap) s = `\\htmlClass{${ATOM_CLASS}}{${s}}`;
+    else if (prevCmd && /^[A-Za-z]/.test(s)) out += ' ';
     out += s;
     prevCmd = /\\[A-Za-z]+$/.test(s);
   }
@@ -375,9 +385,9 @@ export function hullToKatex(h: Hull, ctx: KatexContext): string {
   }
 }
 
-/** Render a whole hull: the KaTeX source and the cell registry. */
-export function renderHullSource(h: Hull, macros: MacroTable): { latex: string; cells: CellRef[] } {
-  const ctx: KatexContext = { macros, cells: [] };
+/** Render a whole hull: the KaTeX source and the cell registry (`atoms`: wrap every atom, for the editor). */
+export function renderHullSource(h: Hull, macros: MacroTable, opts: { atoms?: boolean } = {}): { latex: string; cells: CellRef[] } {
+  const ctx: KatexContext = { macros, cells: [], atoms: !!opts.atoms };
   const latex = hullToKatex(h, ctx);
   return { latex, cells: ctx.cells };
 }
