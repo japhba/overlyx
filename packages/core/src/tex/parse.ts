@@ -456,6 +456,28 @@ class BodyParser {
 
   private handleComment(s: Scanner, ctx: TextCtx, st: State, t: Tok): void {
     const v = t.value;
+    if (v.startsWith('% @branch ')) {
+      try {
+        const meta = JSON.parse(v.slice('% @branch '.length));
+        if (typeof meta.name !== 'string' || typeof meta.selected !== 'boolean' || !Array.isArray(meta.params) || !meta.params.every((p: unknown) => typeof p === 'string')) throw new Error('invalid branch');
+        const start = s.s.indexOf('\n', t.start) + 1;
+        const markers = /^%% @(branch .*|endbranch)\r?$/gm;
+        markers.lastIndex = start;
+        let depth = 1, end: RegExpExecArray | null;
+        while ((end = markers.exec(s.s))) {
+          if (end[1].startsWith('branch ')) depth++;
+          else if (--depth === 0) break;
+        }
+        if (start > 0 && end) {
+          let body = s.s.slice(start, end.index);
+          if (!meta.selected) body = body.split('\n').map(l => l.replace(/^%% /, '')).join('\n');
+          s.pos = end.index + end[0].length;
+          if (s.s[s.pos] === '\n' && s.s[s.pos + 1] !== '\n') s.pos++;
+          this.pushInset(ctx, st, { type: 'Text', name: 'Branch', arg: meta.name, params: meta.params, status: meta.status === 'collapsed' ? 'collapsed' : 'open', paragraphs: this.parseInsetString(body, 'Plain Layout') });
+          return;
+        }
+      } catch { /* malformed/unclosed markers stay verbatim in ERT */ }
+    }
     const m = NOTE_HEADER.exec(v);
     if (m) {
       // an OverLyX note block: the following "%% " lines are its LaTeX content
@@ -779,6 +801,12 @@ class BodyParser {
       this.pushInset(ctx, st, { type: 'Leaf', name: 'CommandInset', arg: 'label', params: ['LatexCommand label', 'name ' + quote(g.trim())] });
       return null;
     }
+    if (name === 'crefrange' || name === 'Crefrange') {
+      const star = s.readStar(), a = s.readGroup(), b = s.readGroup();
+      if (a !== null && b !== null) this.pushInset(ctx, st, refInset('formatted', a.trim() + ',' + b.trim(), { caps: name === 'Crefrange', nolink: star, tuple: 'range', package: 'cleveref' }));
+      else this.pushERT(ctx, st, '\\' + name + (star ? '*' : '') + (a === null ? '' : '{' + a + '}') + (b === null ? '' : '{' + b + '}'));
+      return null;
+    }
     if (REF_CMDS.has(name) || (name.endsWith('ref') && REFSTYLE_PREFIXES.has(name.slice(0, -3)) && !this.facts.defined.has(name))) {
       const star = s.readStar();
       const opt = s.readOptional();
@@ -786,7 +814,7 @@ class BodyParser {
       if (g === null) { this.pushERT(ctx, st, '\\' + name + (star ? '*' : '') + (opt !== null ? `[${opt}]` : '')); return null; }
       const ref = g.trim();
       if (name === 'cref' || name === 'Cref' || name === 'prettyref' || name === 'autoref') {
-        this.pushInset(ctx, st, refInset('formatted', ref, { caps: name === 'Cref', nolink: star }));
+        this.pushInset(ctx, st, refInset('formatted', ref, { caps: name === 'Cref', nolink: star, package: name === 'cref' || name === 'Cref' ? 'cleveref' : undefined }));
       } else if (!REF_CMDS.has(name)) {
         // \figref{x} (refstyle): formatted reference to "fig:x"
         const prefix = name.slice(0, -3);
@@ -1471,8 +1499,8 @@ function argumentInset(id: string, pars: Paragraph[]): TextInset {
   return { type: 'Text', name: 'Argument', arg: id, params: [], status: 'open', paragraphs: pars };
 }
 
-function refInset(cmd: string, ref: string, o: { caps?: boolean; plural?: boolean; nolink?: boolean }): LeafInset {
-  return { type: 'Leaf', name: 'CommandInset', arg: 'ref', params: ['LatexCommand ' + cmd, 'reference ' + quote(ref), `plural "${o.plural ? 'true' : 'false'}"`, `caps "${o.caps ? 'true' : 'false'}"`, 'noprefix "false"', `nolink "${o.nolink ? 'true' : 'false'}"`] };
+function refInset(cmd: string, ref: string, o: { caps?: boolean; plural?: boolean; nolink?: boolean; tuple?: string; package?: string }): LeafInset {
+  return { type: 'Leaf', name: 'CommandInset', arg: 'ref', params: ['LatexCommand ' + cmd, 'reference ' + quote(ref), `plural "${o.plural ? 'true' : 'false'}"`, `caps "${o.caps ? 'true' : 'false'}"`, 'noprefix "false"', `nolink "${o.nolink ? 'true' : 'false'}"`, ...(o.tuple ? ['tuple ' + quote(o.tuple)] : []), ...(o.package ? ['package ' + quote(o.package)] : [])] };
 }
 
 /** InsetLayout name → LyX inset name / argument ("Note:Comment" → Note Comment, "Flex:URL" → Flex URL). */

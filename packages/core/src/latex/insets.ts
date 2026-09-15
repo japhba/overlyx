@@ -310,6 +310,20 @@ function latexTextInset(ctx: ExportContext, os: TexStream, rp: RunParams, inset:
     }
     case 'Box': latexBox(ctx, os, rp, inset); return;
     case 'Branch': {
+      if (ctx.texMode) {
+        const selected = branchSelected(ctx, inset);
+        const inner = new TexStream();
+        latexParagraphs(ctx, { pars, isMainText: false }, inner, { ...rp, isMainText: false, owner: 'other', postMacro: '' });
+        inner.flushTermination();
+        // The inactive body is commented line by line; the active body remains ordinary,
+        // editable LaTeX. Nesting adds another comment layer, just as notes do.
+        os.safebreakln();
+        os.write('%% @branch ' + JSON.stringify({ name: inset.arg, params: inset.params, status: inset.status, selected }) + '\n');
+        const body = inner.toString().replace(/\n+$/, '');
+        os.write(selected ? body + (endsInComment(body) ? '\n' : '%\n') : body.split('\n').map(l => '%% ' + l).join('\n') + '\n');
+        os.write('%% @endbranch\n');
+        return;
+      }
       if (!branchSelected(ctx, inset)) return;
       const il = findInsetLayout(ctx.dc, 'Branch:' + inset.arg) ?? findInsetLayout(ctx.dc, 'Branch');
       insetTextLatex(ctx, os, rp, pars, il);
@@ -1102,6 +1116,15 @@ function escapeLabel(s: string): string {
 
 function latexRef(ctx: ExportContext, os: TexStream, rp: RunParams, cmd: string, g: (k: string) => string): void {
   const refs = g('reference').split(',').map(r => r.trim()).filter(Boolean);
+  if (cmd === 'formatted' && (g('package') === 'cleveref' || ctx.bp.crossrefPackage === 'cleveref')) {
+    ctx.features.require('cleveref');
+    const prefix = g('caps') === 'true' ? 'Cref' : 'cref';
+    const star = g('nolink') === 'true' ? '*' : '';
+    if (rp.movingArg) os.write('\\protect');
+    if (g('tuple') === 'range' && refs.length === 2) os.write(`\\${prefix}range${star}{${refs[0]}}{${refs[1]}}`);
+    else os.write(`\\${prefix}${star}{${refs.join(',')}}`);
+    return;
+  }
   if (refs.length > 1) {
     const range = g('tuple') === 'range';
     refs.forEach((r, i) => {
