@@ -54,10 +54,11 @@ test('a new project is a repository; the dialog shows the clone URL and creates 
   // the repository exists on disk with an initial commit
   await expect.poll(() => existsSync(join(DIR, '.git'))).toBe(true);
   await expect(dlg.locator('[data-git-log]')).toContainText('Import "e2e-git" into OverLyX', { timeout: 15000 });
-  // a token
-  await dlg.locator('.share-add input').first().fill('e2e laptop');        // the first .share-add row is the access tokens (the MCP tokens have their own)
-  await dlg.locator('.share-add button', { hasText: 'New token' }).first().click();
-  await expect(dlg.locator('.git-newtoken')).toContainText('e2e laptop', { timeout: 10000 });
+  // the account's one access token (shared by Git, the CLI and MCP): created here, or rotated
+  // when an earlier run left one — rotation asks for confirmation
+  page.once('dialog', d => void d.accept());
+  await dlg.locator('button.btn', { hasText: /Create token|Rotate token/ }).click();
+  await expect(dlg.locator('.git-newtoken')).toContainText('Your new account token', { timeout: 10000 });
   token = await dlg.locator('.git-newtoken input').inputValue();
   expect(token).toMatch(/^olx_/);
   await expect(dlg.locator('.git-token')).toHaveCount(1);
@@ -98,27 +99,27 @@ test('clone with the token, push a change, pull what OverLyX committed', async (
   expect(() => git(CLONE, 'fetch', '-q', 'origin')).toThrow(/401|Authentication|failed/);
 });
 
-test('with token re-copy enabled for the account, agent tokens can be copied again later', async ({ page }) => {
+test('with token re-copy enabled for the account, the account token can be copied again later', async ({ page }) => {
   await login(page);
-  page.on('dialog', d => d.accept());
+  page.on('dialog', d => void d.accept());
   // switch the account setting on (what Settings ▸ Account does)
   const me = await (await page.request.get(BASE_URL + '/api/auth/me')).json();
   const en = await page.request.post(`${BASE_URL}/api/admin/users/${me.user.id}/settings`, { data: { allowRecopyTokens: true } });
   expect(en.ok()).toBeTruthy();
   const dlg = await openGitDialog(page);
-  await dlg.locator('.share-add input').nth(1).fill('recopy bot');            // the second .share-add row is the MCP agent tokens
-  await dlg.locator('.share-add button', { hasText: 'New agent token' }).click();
-  await expect(dlg.locator('.git-newtoken')).toContainText('recopy bot', { timeout: 10000 });
+  await dlg.locator('button.btn', { hasText: /Create token|Rotate token/ }).click();
+  await expect(dlg.locator('.git-newtoken')).toContainText('Your new account token', { timeout: 10000 });
+  const fresh = await dlg.locator('.git-newtoken input').inputValue();
   // reopen from scratch — normally the token would be gone for good; with the setting on, the row offers Copy
   await page.reload();
   const dlg2 = await openGitDialog(page);
-  const row = dlg2.locator('.git-token', { hasText: 'recopy bot' });
+  const row = dlg2.locator('.git-token');
+  await expect(row).toHaveCount(1);
   await expect(row.locator('[data-token-copy]')).toBeVisible({ timeout: 10000 });
   // what that button copies: the API hands the plaintext back to this account
-  const listed = await (await page.request.get(`${BASE_URL}/api/mcp-tokens`)).json();
-  expect(listed.tokens.find((t: { name: string }) => t.name === 'recopy bot').token).toMatch(/^olxmcp_/);
-  // clean up: revoke, and the setting back off
-  await row.locator('button', { hasText: 'Revoke' }).click();
-  await expect(dlg2.locator('.git-token', { hasText: 'recopy bot' })).toHaveCount(0, { timeout: 10000 });
+  const listed = await (await page.request.get(`${BASE_URL}/api/git/tokens`)).json();
+  expect(listed.tokens).toHaveLength(1);
+  expect(listed.tokens[0].token).toBe(fresh);
+  // the setting back off
   await page.request.post(`${BASE_URL}/api/admin/users/${me.user.id}/settings`, { data: { allowRecopyTokens: false } });
 });

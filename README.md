@@ -15,6 +15,19 @@
 
 **Web:** [overlyx.app](https://overlyx.app)
 
+**CLI:** install the dependency-free client, create your account token in *File ▸ Git repository…*,
+then import an existing folder or repository in one command:
+
+```sh
+curl -fsSL https://overlyx.app/install-cli.sh | sh
+overlyx auth login --username YOUR_NAME --with-token
+overlyx repo push . --name my-paper
+```
+
+The `olx` alias and the more GitHub-like `overlyx repo create my-paper --source . --push` form are
+equivalent. The installer verifies a SHA-256 checksum and writes to `~/.local/bin` by default;
+Node.js 20 or newer is required. Use `--host https://your-overlyx.example` for a self-hosted instance.
+
 **VS Code:** the same editor as an extension — file browsing, git and agents stay VS Code's
 ([more](packages/vscode/README.md)):
 

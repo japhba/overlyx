@@ -5,7 +5,7 @@
  * propose_edit (always tracked-change, rejects insets/mixed formatting), list/add/resolve_comment.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import http from 'node:http';
@@ -23,6 +23,7 @@ const { manager } = await import('../packages/server/src/docs.ts');
 const { createUser } = await import('../packages/server/src/auth.ts');
 const { registerProject } = await import('../packages/server/src/access.ts');
 const { db } = await import('../packages/server/src/db.ts');
+const { createToken: createPersonalToken } = await import('../packages/server/src/git.ts');
 
 // tokens are account-scoped: the agent gets the account's role in the requested project
 const owner = createUser('owner', 'Owner', 'pw');
@@ -50,8 +51,8 @@ function parseBody(raw: string, contentType: string | null): any {
   }
   try { return JSON.parse(raw); } catch { return raw; }
 }
-async function rpc(token: string | null, method: string, params?: unknown): Promise<any> {
-  const res = await fetch(base, {
+async function rpcAt(endpoint: string, token: string | null, method: string, params?: unknown): Promise<any> {
+  const res = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -63,9 +64,18 @@ async function rpc(token: string | null, method: string, params?: unknown): Prom
   const raw = await res.text();
   return { status: res.status, body: res.status === 200 ? parseBody(raw, res.headers.get('content-type')) : raw };
 }
+async function rpc(token: string | null, method: string, params?: unknown): Promise<any> {
+  return rpcAt(base, token, method, params);
+}
 
 async function callTool(token: string, name: string, args: unknown): Promise<any> {
   const { body } = await rpc(token, 'tools/call', { name, arguments: args });
+  const text = body.result.content[0].text;
+  if (body.result.isError) throw new Error(text);
+  try { return JSON.parse(text); } catch { return text; }
+}
+async function callToolAt(endpoint: string, token: string, name: string, args: unknown): Promise<any> {
+  const { body } = await rpcAt(endpoint, token, 'tools/call', { name, arguments: args });
   const text = body.result.content[0].text;
   if (body.result.isError) throw new Error(text);
   try { return JSON.parse(text); } catch { return text; }
@@ -84,6 +94,13 @@ describe('auth', () => {
   it('refuses an unknown token with 401 (so OAuth clients re-authorize)', async () => {
     const r = await rpc('olxmcp_bogus', 'tools/list');
     expect(r.status).toBe(401);
+  });
+
+  it('accepts a personal Git/CLI token as an MCP bearer token', async () => {
+    const token = createPersonalToken(owner.id, 'shared integration').token;
+    const r = await rpc(token, 'tools/list');
+    expect(r.status).toBe(200);
+    expect(r.body.result.tools.map((x: any) => x.name)).toContain('read_document');
   });
 
   it('refuses a token whose account has no access to the project', async () => {
@@ -111,6 +128,19 @@ describe('tools/list', () => {
     const names = body.result.tools.map((x: any) => x.name).sort();
     expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'fetch', 'insert_paragraphs', 'list_comments',
       'list_documents', 'list_files', 'list_projects', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'resolve_comment', 'search', 'write_document', 'write_file']);
+  });
+
+  it('creates a project from the account-wide MCP endpoint', async () => {
+    const token = createMcpToken(owner.id, 'project-agent').token;
+    const allProjects = `http://127.0.0.1:${port}/mcp`;
+    const listed = await rpcAt(allProjects, token, 'tools/list');
+    expect(listed.body.result.tools.map((x: any) => x.name)).toContain('create_project');
+    const created = await callToolAt(allProjects, token, 'create_project', { name: 'MCP import', title: 'Made by an agent' });
+    expect(created).toEqual({ project: 'MCP import', title: 'Made by an agent', role: 'owner' });
+    expect(existsSync(join(ROOT, 'projects', 'MCP import', '.git'))).toBe(true);
+    expect(readFileSync(join(ROOT, 'projects', 'MCP import', '.git', 'HEAD'), 'utf8')).toContain('refs/heads/main');
+    const written = await callToolAt(allProjects, token, 'write_document', { project: 'MCP import', path: 'main.tex', tex: doc('Created through MCP.') });
+    expect(written.created).toBe(true);
   });
 });
 

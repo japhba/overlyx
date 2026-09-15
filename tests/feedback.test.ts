@@ -50,7 +50,7 @@ describe('feedback → GitHub issues', () => {
     expect(i.body).toContain('**Browser:** TestBrowser/1');
     expect(i.body).toContain('I typed `\\alpha` and it disappeared.');
     expect(i.body).toContain('TypeError: x is undefined');
-    expect(labels).toEqual(['feedback', 'client-error', 'server-error']);
+    expect(labels).toEqual(['feedback', 'client-error', 'server-error', 'vscode-error']);
   });
 
   it('leaves the document name out unless it was given', async () => {
@@ -116,6 +116,40 @@ describe('feedback → GitHub issues', () => {
       expect(tooMany.status).toBe(429);
       const ce = await fetch(`${base}/client-error`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: 'boom in the browser', stack: 'at x' }) });
       expect((await ce.json()).url).toMatch(/issues\/\d+$/);
+    } finally { srv.close(); }
+  });
+
+  it('accepts sanitized VS Code errors without an app session', async () => {
+    const app = express();
+    app.use(fb.vscodeTelemetryRoutes());
+    const srv = http.createServer(app);
+    await new Promise<void>(r => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
+    try {
+      const before = issues.length;
+      const r = await fetch(`${base}/vscode-telemetry`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'user-agent': 'overlyx-vscode/0.2.9' },
+        body: JSON.stringify({
+          schema: 1, event: 'error', area: 'editor.open', errorName: 'TypeError',
+          message: 'Cannot read properties of undefined', stack: 'at open (extension.cjs:42:1)',
+          extensionVersion: '0.2.9', vscodeVersion: '1.136.1', platform: 'linux', arch: 'x64',
+          remote: 'remote', uiKind: 'desktop', ignored: 'must not reach the issue',
+        }),
+      });
+      expect(r.status).toBe(200);
+      expect((await r.json()).url).toMatch(/issues\/\d+$/);
+      expect(issues.length).toBe(before + 1);
+      expect(issues[before].labels).toEqual(['vscode-error']);
+      expect(issues[before].body).toContain('Area: editor.open');
+      expect(issues[before].body).toContain('Extension: 0.2.9');
+      expect(issues[before].body).toContain('Extension host: remote');
+      expect(issues[before].body).not.toContain('must not reach');
+
+      const bad = await fetch(`${base}/vscode-telemetry`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 99, message: 'nope' }),
+      });
+      expect(bad.status).toBe(400);
     } finally { srv.close(); }
   });
 

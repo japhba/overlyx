@@ -113,9 +113,8 @@ describe('repository', () => {
 });
 
 describe('access tokens', () => {
-  it('are checked before the password; a revoked token stops working', () => {
+  it('keeps one account token, checked before the password; rotation and revocation stop the old value', () => {
     const t = gitmod.createToken(bob.id, 'laptop');
-    bobToken = t.token;
     expect(t.token).toMatch(/^olx_[A-Za-z0-9_-]{30,}$/);
     expect(gitmod.listTokens(bob.id).map(x => x.name)).toEqual(['laptop']);
     expect(gitmod.userForCredentials('bob', t.token)?.username).toBe('bob');
@@ -125,9 +124,13 @@ describe('access tokens', () => {
     expect(gitmod.userForCredentials('bob', '')).toBeNull();
     expect(gitmod.userForCredentials('nobody', t.token)).toBeNull();
     const t2 = gitmod.createToken(bob.id, 'old phone');
+    expect(gitmod.listTokens(bob.id).map(x => x.name)).toEqual(['old phone']);
+    expect(gitmod.userForCredentials('bob', t.token)).toBeNull();
+    expect(gitmod.userForCredentials('bob', t2.token)?.username).toBe('bob');
     expect(gitmod.deleteToken(bob.id, t2.id)).toBe(true);
     expect(gitmod.userForCredentials('bob', t2.token)).toBeNull();
     expect(gitmod.deleteToken(jan.id, t.id)).toBe(false);               // not yours
+    bobToken = gitmod.createToken(bob.id, 'Account access token').token;
     // Google accounts have no password: only a token works
     const tj = gitmod.createToken(jan.id, 'jan laptop');
     expect(gitmod.userForCredentials('jan', tj.token)?.username).toBe('jan');
@@ -181,7 +184,8 @@ describe('git over HTTP', () => {
     expect(readFileSync(join(clone, 'notes.tex'), 'utf8')).toContain('not committed yet');
     const subjects = (await g(PROJECT, 'log', '--format=%s')).trim().split('\n');
     expect(subjects[0]).toMatch(/^Merge branch 'main' of /);
-    expect(subjects.slice(1, 3)).toEqual(['Better plot', 'Update notes.tex']);
+    // The two merge parents can have equal commit timestamps; git log may show either first.
+    expect(new Set(subjects.slice(1, 3))).toEqual(new Set(['Better plot', 'Update notes.tex']));
   });
 
   it('the push-to-checkout hook keeps uncommitted changes in files a push does not touch, and refuses a clash', async () => {

@@ -8,7 +8,7 @@
  *    (`OVERLYX_GIT_COMMIT_MS`), and always right before a clone / fetch / push is served, so the
  *    remote is never behind what the editor shows. Commits are attributed to the people who edited;
  *  - the repository is served over **smart HTTP** at `/git/<project>.git` by `git http-backend`,
- *    with HTTP Basic authentication (username + OverLyX password, or a personal *access token* —
+ *    with HTTP Basic authentication (username + OverLyX password, or either kind of *access token* —
  *    Google accounts have no password) and the project's roles: viewers may fetch, editors and the
  *    owner may push;
  *  - a **push updates the working tree** (`receive.denyCurrentBranch = updateInstead` with a
@@ -26,7 +26,9 @@ import { db, type UserRow } from './db.ts';
 import { projectDir, listProjects } from './projects.ts';
 import { manager, fileWrittenListeners } from './docs.ts';
 import { verifyPassword, toSessionUser, type SessionUser } from './auth.ts';
-import { roleFor, atLeast, logAccess } from './access.ts';
+import { roleFor, atLeast, logAccess, accessibleProjects } from './access.ts';
+import { createOwnedProject } from './projectCreate.ts';
+import { verifyAccessToken } from './tokenAuth.ts';
 
 const execFileP = promisify(execFile);
 
@@ -83,6 +85,9 @@ const PUSH_TO_CHECKOUT_HOOK = `#!/bin/sh
 # (receive.denyCurrentBranch = updateInstead); unlike git's default, uncommitted changes in files
 # the push does not touch are kept (OverLyX commits them a moment later). See githooks(5).
 git update-index -q --refresh
+if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+  exec git read-tree -u -m "$1"
+fi
 exec git read-tree -u -m HEAD "$1"
 `;
 
@@ -146,11 +151,12 @@ export function serverIdentity(): { name: string; email: string } {
 }
 
 /**
- * Make sure the project directory is a git repository configured for us: created (with a
+ * Make sure the project directory is a git repository configured for us: created (normally with a
  * `.gitignore` and an initial commit) if it is none yet; an existing repository is left alone
- * apart from the two settings a push into a checked-out branch needs.
+ * apart from the two settings a push into a checked-out branch needs. `initialCommit: false` is
+ * for a CLI-created remote that must accept an unrelated existing history's first push.
  */
-export async function ensureRepo(project: string): Promise<void> {
+export async function ensureRepo(project: string, opts: { initialCommit?: boolean } = {}): Promise<void> {
   if (!config.git) return;
   if (!PROJECT_NAME.test(project)) throw new Error('bad project name');
   const dir = projectDir(project);
@@ -163,7 +169,7 @@ export async function ensureRepo(project: string): Promise<void> {
     if (fresh) {
       await git(project, ['init', '-q', '-b', 'main']);
       const ignore = path.join(dir, '.gitignore');
-      if (!fs.existsSync(ignore)) fs.writeFileSync(ignore, DEFAULT_GITIGNORE, 'utf8');
+      if (opts.initialCommit !== false && !fs.existsSync(ignore)) fs.writeFileSync(ignore, DEFAULT_GITIGNORE, 'utf8');
     }
     // a push into the checked-out branch updates the working tree; symlinks are checked out as
     // plain files (a pushed link must not point our file routes outside the project)
@@ -175,9 +181,11 @@ export async function ensureRepo(project: string): Promise<void> {
     const hook = path.join(hooks, 'push-to-checkout');
     if (!fs.existsSync(hook)) fs.writeFileSync(hook, PUSH_TO_CHECKOUT_HOOK, { mode: 0o755 });
     prepared.add(project);
-    if (fresh) {
+    if (fresh && opts.initialCommit !== false) {
       const n = await commitLocked(project, { message: `Import "${project}" into OverLyX` });
       console.log(`[git] initialised repository for "${project}"${n ? ' (initial commit)' : ''}`);
+    } else if (fresh) {
+      console.log(`[git] initialised empty repository for "${project}"`);
     }
   });
 }
@@ -311,14 +319,21 @@ export interface TokenRow { id: number; user_id: number; name: string; token_has
 
 function hashToken(token: string): string { return crypto.createHash('sha256').update(token).digest('hex'); }
 
-/** A new personal access token for git (shown once — unless `storePlain` keeps the plaintext for later re-copy, see userSettings.ts). */
+/**
+ * Create or rotate the account's one manually-managed access token. Rotation is atomic and
+ * invalidates the previous token everywhere (Git, CLI and MCP).
+ */
 export function createToken(userId: number, name: string, storePlain = false): { id: number; token: string } {
   const token = 'olx_' + crypto.randomBytes(24).toString('base64url');
-  const info = db.prepare('INSERT INTO git_tokens (user_id, name, token_hash, token_plain, created_at) VALUES (?,?,?,?,?)').run(userId, name.trim().slice(0, 60) || 'token', hashToken(token), storePlain ? token : null, Date.now());
+  const info = db.transaction(() => {
+    db.prepare('DELETE FROM git_tokens WHERE user_id = ?').run(userId);
+    return db.prepare('INSERT INTO git_tokens (user_id, name, token_hash, token_plain, created_at) VALUES (?,?,?,?,?)')
+      .run(userId, name.trim().slice(0, 60) || 'Account access token', hashToken(token), storePlain ? token : null, Date.now());
+  })();
   return { id: Number(info.lastInsertRowid), token };
 }
 
-/** The user's tokens; with `includeSecrets`, rows whose plaintext was kept carry `token`. */
+/** The user's single account token; with `includeSecrets`, its kept plaintext is returned. */
 export function listTokens(userId: number, includeSecrets = false): { id: number; name: string; created_at: number; last_used_at: number | null; token?: string }[] {
   const rows = db.prepare('SELECT id, name, created_at, last_used_at, token_plain FROM git_tokens WHERE user_id = ? ORDER BY created_at DESC').all(userId) as { id: number; name: string; created_at: number; last_used_at: number | null; token_plain: string | null }[];
   return rows.map(({ token_plain, ...r }) => (includeSecrets && token_plain ? { ...r, token: token_plain } : r));
@@ -329,18 +344,15 @@ export function deleteToken(userId: number, id: number): boolean {
 }
 
 /**
- * The account behind HTTP Basic credentials: `secret` is an access token of that user or their
- * OverLyX password. Tokens first (a cheap hash), the password (scrypt) only when no token matched.
+ * The account behind HTTP Basic credentials: `secret` is either kind of access token belonging to
+ * that user, or their OverLyX password. Tokens first (a cheap hash), then password scrypt.
  */
 export function userForCredentials(username: string, secret: string): SessionUser | null {
   const row = db.prepare('SELECT * FROM users WHERE username = ?').get(username.trim().toLowerCase()) as UserRow | undefined;
   if (!row || !secret) return null;
-  const t = db.prepare('SELECT * FROM git_tokens WHERE token_hash = ? AND user_id = ?').get(hashToken(secret), row.id) as TokenRow | undefined;
-  if (t) {
-    if (!t.last_used_at || Date.now() - t.last_used_at > 60_000) db.prepare('UPDATE git_tokens SET last_used_at = ? WHERE id = ?').run(Date.now(), t.id);
-    return toSessionUser(row);
-  }
-  if (secret.startsWith('olx_')) return null;   // a token that does not exist (any more): never try it as a password
+  const token = verifyAccessToken(secret);
+  if (token) return token.userId === row.id ? toSessionUser(row) : null;
+  if (secret.startsWith('olx_') || secret.startsWith('olxmcp_')) return null; // invalid/revoked token: never try it as a password
   return verifyPassword(secret, row.password_hash) ? toSessionUser(row) : null;
 }
 
@@ -358,7 +370,7 @@ function basicCredentials(req: Request): { username: string; secret: string } | 
   return { username: dec.slice(0, i), secret: dec.slice(i + 1) };
 }
 
-function unauthorized(res: Response, msg = 'Authentication required: your OverLyX username and an access token (File ▸ Git repository…) or your password'): void {
+function unauthorized(res: Response, msg = 'Authentication required: your OverLyX username and any access token (File ▸ Git repository…) or your password'): void {
   res.setHeader('WWW-Authenticate', 'Basic realm="OverLyX", charset="UTF-8"');
   res.status(401).type('text').send(msg + '\n');
 }
@@ -372,8 +384,57 @@ const SERVICES = new Set(['git-upload-pack', 'git-receive-pack']);
  */
 export function gitRouter(): express.Router {
   const r = express.Router();
+  // A tiny, Basic-authenticated API used by the CLI. Keeping it beside smart HTTP means the same
+  // access token, rate limiting and account/project permissions cover both repository creation and
+  // the push that follows it.
+  r.get('/api/user', (req, res) => {
+    const user = authenticateBasic(req, res);
+    if (user) res.json({ user: { username: user.username, name: user.name, email: user.email } });
+  });
+  r.get('/api/projects', (req, res) => {
+    const user = authenticateBasic(req, res);
+    if (!user) return;
+    res.json({ projects: accessibleProjects(user).map(p => ({ name: p.name, title: p.title, role: p.role })) });
+  });
+  r.post('/api/projects', express.json({ limit: '32kb' }), (req, res) => { void createCliProject(req, res); });
   r.all(/.*/, (req, res) => { void handle(req, res); });
   return r;
+}
+
+function authenticateBasic(req: Request, res: Response): SessionUser | null {
+  if (!config.git) { res.status(404).type('text').send('git access is disabled on this server\n'); return null; }
+  const ip = req.ip ?? 'x';
+  const f = failures.get(ip);
+  if (f && f.n >= 10 && Date.now() < f.until) { res.status(429).type('text').send('too many failed attempts, try again later\n'); return null; }
+  const creds = basicCredentials(req);
+  if (!creds) { unauthorized(res); return null; }
+  const user = userForCredentials(creds.username, creds.secret);
+  if (!user) {
+    const cur = failures.get(ip) ?? { n: 0, until: 0 };
+    cur.n++; cur.until = Date.now() + 10 * 60 * 1000; failures.set(ip, cur);
+    if (failures.size > 5000) { const now = Date.now(); for (const [k, v] of failures) if (v.until < now) failures.delete(k); }
+    unauthorized(res, 'Invalid username or token/password');
+    return null;
+  }
+  failures.delete(ip);
+  return user;
+}
+
+async function createCliProject(req: Request, res: Response): Promise<void> {
+  const user = authenticateBasic(req, res);
+  if (!user) return;
+  try {
+    const name = String(req.body?.name ?? '').trim();
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 200) || null : null;
+    createOwnedProject(name, user.id, { title });
+    // No synthetic .gitignore/commit: an existing local repository can push HEAD:main without
+    // merging unrelated histories. Its own .gitignore, if any, arrives in that first push.
+    await ensureRepo(name, { initialCommit: false });
+    res.status(201).json({ project: { name, title, role: 'owner' }, url: cloneUrl(req, name), username: user.username });
+  } catch (e) {
+    const message = (e as Error).message ?? String(e);
+    res.status(/already exists/.test(message) ? 409 : 400).json({ error: message });
+  }
 }
 
 async function handle(req: Request, res: Response): Promise<void> {
@@ -390,19 +451,8 @@ async function handle(req: Request, res: Response): Promise<void> {
 
   // --- who
   const ip = req.ip ?? 'x';
-  const f = failures.get(ip);
-  if (f && f.n >= 10 && Date.now() < f.until) { res.status(429).type('text').send('too many failed attempts, try again later\n'); return; }
-  const creds = basicCredentials(req);
-  if (!creds) { unauthorized(res); return; }
-  const user = userForCredentials(creds.username, creds.secret);
-  if (!user) {
-    const cur = failures.get(ip) ?? { n: 0, until: 0 };
-    cur.n++; cur.until = Date.now() + 10 * 60 * 1000; failures.set(ip, cur);
-    if (failures.size > 5000) { const now = Date.now(); for (const [k, v] of failures) if (v.until < now) failures.delete(k); }
-    unauthorized(res, 'Invalid username or token/password');
-    return;
-  }
-  failures.delete(ip);
+  const user = authenticateBasic(req, res);
+  if (!user) return;
 
   // --- what they may do
   if (!PROJECT_NAME.test(project) || !fs.existsSync(projectDir(project))) { res.status(404).type('text').send(`no project "${project}"\n`); return; }

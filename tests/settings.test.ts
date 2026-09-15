@@ -1,7 +1,7 @@
 /**
  * Per-account settings (userSettings.ts) and token re-copy: the instance owner has
  * `allowRecopyTokens` on by default and everyone else off; administrator overrides are stored;
- * with the setting on, git and MCP tokens keep their plaintext and the lists hand it back —
+ * with the setting on, the account token and internal connector credentials can keep plaintext —
  * with it off, nothing recoverable is stored.
  */
 import { describe, it, expect, afterAll } from 'vitest';
@@ -57,13 +57,17 @@ describe('re-copyable MCP tokens', () => {
   });
 });
 
-describe('re-copyable git tokens', () => {
-  it('the same for personal access tokens', () => {
+describe('the account access token', () => {
+  it('is re-copyable when allowed and creating another atomically rotates it', () => {
     const kept = createToken(owner.id, 'laptop', true);
+    expect(listTokens(owner.id, true)).toHaveLength(1);
+    expect(listTokens(owner.id, true)[0].token).toBe(kept.token);
     const oneshot = createToken(owner.id, 'desktop');
     const rows = listTokens(owner.id, true);
-    expect(rows.find(r => r.id === kept.id)?.token).toBe(kept.token);
-    expect(rows.find(r => r.id === oneshot.id)?.token).toBeUndefined();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(oneshot.id);
+    expect(rows[0].token).toBeUndefined();
+    expect(rows.find(r => r.id === kept.id)).toBeUndefined();
     expect(listTokens(owner.id, false).find(r => r.id === kept.id)?.token).toBeUndefined();
   });
 });

@@ -8,12 +8,16 @@
  *   POST /api/client-error   an error that escaped in the browser → issue per distinct message
  *                            (label `client-error`); repeats become a comment, at most one per
  *                            10 minutes per message, so a broken deploy cannot flood the tracker.
+ *   POST /api/vscode-telemetry  a sanitized extension error, accepted without a web-app session
+ *                            (the extension obeys VS Code's telemetry setting; this route is
+ *                            separately rate-limited and accepts only a fixed diagnostic schema)
  *   server errors            reportServerError() from the process-level handlers, same dedupe
  *                            (label `server-error`)
  *
- * What leaves the server: the reporter's display name and user name, the app version, the browser's
- * user agent, the message / stack trace, and — only when the person ticked it — the document name.
- * Never document content. The repository may be public: the client says so before sending.
+ * What leaves the server: web-app reports carry the reporter's display name and user name, the app
+ * version, browser, message / stack trace, and — only when the person ticked it — the document
+ * name. VS Code reports carry a telemetry-sanitized exception and coarse runtime versions/platform.
+ * Never document content. The repository may be public: the clients document the destination.
  */
 import express from 'express';
 import { execFile } from 'node:child_process';
@@ -59,6 +63,7 @@ const LABELS: Record<string, { color: string; description: string }> = {
   feedback: { color: '0e8a16', description: 'Sent from the app (Help ▸ Report a problem)' },
   'client-error': { color: 'd73a4a', description: 'Uncaught error in the browser, reported automatically' },
   'server-error': { color: 'b60205', description: 'Uncaught error on the server, reported automatically' },
+  'vscode-error': { color: 'b60205', description: 'Sanitized error from the OverLyX VS Code extension' },
 };
 let labelsReady: Promise<void> | null = null;
 /** create the labels we use (once per process; a label that exists answers 422, which is fine) */
@@ -119,7 +124,15 @@ const errBump = db.prepare('UPDATE error_reports SET count = count + 1, last_at 
 const errCommented = db.prepare('UPDATE error_reports SET last_comment_at = ? WHERE hash = ?');
 interface ErrRow { hash: string; issue: number; issue_url: string; count: number; first_at: number; last_at: number; last_comment_at: number }
 
-export interface ErrorInput { kind: 'client-error' | 'server-error'; message: string; stack?: string | null; userAgent?: string; who?: Reporter | null }
+export interface ErrorInput {
+  kind: 'client-error' | 'server-error' | 'vscode-error';
+  message: string;
+  stack?: string | null;
+  userAgent?: string;
+  who?: Reporter | null;
+  /** Server-selected, non-identifying environment fields. */
+  details?: Record<string, string>;
+}
 
 /**
  * An error report: a new issue for a message never seen, otherwise a count bump and — not more
@@ -134,7 +147,8 @@ export async function reportError(e: ErrorInput): Promise<string | null> {
   const now = Date.now();
   const details = [
     `OverLyX \`${appVersion}\` · ${stamp()}${e.who ? ` · ${clean(e.who.name, 80)} (\`${clean(e.who.username, 40)}\`)` : ''}`,
-    e.userAgent ? `Browser: ${clean(e.userAgent, 300)}` : '',
+    e.userAgent ? `${e.kind === 'vscode-error' ? 'Client' : 'Browser'}: ${clean(e.userAgent, 300)}` : '',
+    ...Object.entries(e.details ?? {}).map(([key, value]) => `${clean(key, 40)}: ${clean(value, 300)}`),
     '```', message, e.stack ? clean(e.stack, 4000) : '', '```',
   ].filter(Boolean).join('\n');
   const row = errRow.get(hash) as ErrRow | undefined;
@@ -203,6 +217,51 @@ export function feedbackRoutes(): express.Router {
     if (!feedbackEnabled() || !config.errorReports) { res.status(204).end(); return; }
     if (!allow('client-error', 60) || !allow(`client-error:${u.id}`, 20)) { res.status(429).json({ error: 'rate limited' }); return; }
     const url = await reportError({ kind: 'client-error', message: clean(b.message, 1000), stack: b.stack ? clean(b.stack, 4000) : null, userAgent: req.get('user-agent') ?? '', who: { name: u.name, username: u.username } });
+    res.json({ url });
+  });
+  return r;
+}
+
+const VSCODE_FIELDS: Record<string, string> = {
+  area: 'Area',
+  errorName: 'Error type',
+  extensionVersion: 'Extension',
+  vscodeVersion: 'VS Code',
+  platform: 'Platform',
+  arch: 'Architecture',
+  remote: 'Extension host',
+  uiKind: 'UI',
+};
+
+/**
+ * Public receiver for the no-account VS Code extension. The extension has no useful secret to
+ * authenticate with (anything bundled in a VSIX is public), so use a narrow schema and IP/global
+ * rate limits instead. IP addresses are used only in this in-memory limiter and are never stored.
+ */
+export function vscodeTelemetryRoutes(): express.Router {
+  const r = express.Router();
+  r.post('/vscode-telemetry', express.json({ limit: '64kb', type: 'application/json' }), async (req, res) => {
+    if (!feedbackEnabled() || !config.errorReports) { res.status(204).end(); return; }
+    const b = req.body ?? {};
+    if (b.schema !== 1 || (b.event !== 'error' && b.event !== 'unhandled-error')) {
+      res.status(400).json({ error: 'unsupported diagnostic schema' }); return;
+    }
+    const ip = req.ip ?? 'x';
+    if (!allow('vscode-error', 300) || !allow(`vscode-error:${ip}`, 30)) {
+      res.status(429).json({ error: 'rate limited' }); return;
+    }
+    const message = clean(b.message, 1000);
+    if (!message) { res.status(400).json({ error: 'message is required' }); return; }
+    const details: Record<string, string> = {};
+    for (const [field, label] of Object.entries(VSCODE_FIELDS)) {
+      if (typeof b[field] === 'string' || typeof b[field] === 'number' || typeof b[field] === 'boolean') {
+        details[label] = clean(b[field], 300);
+      }
+    }
+    const url = await reportError({
+      kind: 'vscode-error', message, stack: typeof b.stack === 'string' ? clean(b.stack, 4000) : null,
+      userAgent: req.get('user-agent') ?? '', details,
+    });
     res.json({ url });
   });
   return r;

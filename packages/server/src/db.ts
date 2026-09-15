@@ -116,6 +116,11 @@ try { db.exec('ALTER TABLE users ADD COLUMN settings TEXT'); } catch { /* column
 try { db.exec('ALTER TABLE users ADD COLUMN keybindings TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE git_tokens ADD COLUMN token_plain TEXT'); } catch { /* column exists */ }
 try { db.exec('ALTER TABLE mcp_tokens ADD COLUMN token_plain TEXT'); } catch { /* column exists */ }
+// One manually-managed account token per user. On older installations that created several,
+// preserve the newest and revoke the rest before enforcing the invariant.
+db.exec(`DELETE FROM git_tokens
+  WHERE id NOT IN (SELECT MAX(id) FROM git_tokens GROUP BY user_id)`);
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS git_tokens_user ON git_tokens(user_id)');
 // guests: temporary accounts for visitors who open a share link without signing in (auth.ts
 // createGuest); their memberships move to the real account at sign-in (access.ts adoptGuest)
 try { db.exec('ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }

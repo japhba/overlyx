@@ -38,6 +38,7 @@ export interface AiRewriteResult { tex: string; nodes: PMJSON[]; original: strin
 export interface AiCompleteRequest { kind: 'text' | 'math'; before: string; after: string; formula?: string; paragraph?: string; model?: string }
 export interface AiCompleteResult { text: string; nodes: PMJSON[] }
 export interface DocMeta {
+  availableModules?: import('@overlyx/core').ModuleInfo[];
   id: string; project: string; path: string; role?: Role; textclass: string; modules: string[]; language: string;
   useRefstyle: boolean; citeEngine: string; citeEngineType: string; trackingChanges: boolean; secnumdepth: number; tocdepth: number;
   /** number of entries in the bibliography (meta.bib only holds the cited ones when it is large) */
@@ -55,7 +56,7 @@ export interface BuildInfo { status: string; log: string; pdf: string | null; pd
 export interface VersionInfo { id: number; name: string; author: string; kind: string; created_at: number; size: number }
 export interface GitCommit { hash: string; author: string; date: number; message: string }
 export interface GitInfo { url: string; username: string; role: Role; hasPassword: boolean; branch: string; commits: GitCommit[]; pending: number; pendingFiles: string[]; head: string | null }
-export interface GitToken { id: number; name: string; created_at: number; last_used_at: number | null; /** the plaintext, present only for accounts with token re-copy enabled (Settings ▸ Account) */ token?: string }
+export interface GitToken { id: number; name: string; created_at: number; last_used_at: number | null; expires_at?: number | null; /** the plaintext, present only for accounts with token re-copy enabled (Settings ▸ Account) */ token?: string }
 /** Per-account server-side settings (Settings ▸ Account; userSettings.ts on the server). */
 export interface UserSettings { allowRecopyTokens: boolean }
 export interface AdminUser { id: number; username: string; name: string; color: string; isAdmin: number; email: string | null; allowRecopyTokens: boolean }
@@ -132,7 +133,7 @@ export const api = {
   /** open a share link (#/share/<token>): join the project; `doc` is the document to open */
   /** join through a share link; without a session the server opens a guest session and returns its `user` */
   acceptShare: (token: string) => req<{ project: string; title: string | null; role: Role; doc: string | null; user?: User }>('POST', `/api/share/${encodeURIComponent(token)}/accept`),
-  // git: every project is a repository (clone URL, history); tokens are the password for git over HTTPS
+  // git: every project is a repository (clone URL, history); the account token is the HTTPS password
   gitInfo: (project: string) => req<GitInfo>('GET', `/api/projects/${encodeURIComponent(project)}/git`),
   gitCommit: (project: string, message?: string) => req<{ committed: boolean } & Omit<GitInfo, 'url' | 'username' | 'role' | 'hasPassword'>>('POST', `/api/projects/${encodeURIComponent(project)}/git/commit`, message ? { message } : {}),
   mirrorStatus: (project: string) => req<MirrorStatus>('GET', `/api/projects/${encodeURIComponent(project)}/mirror`),
@@ -143,7 +144,7 @@ export const api = {
   adminProjects: () => req<{ projects: AdminProjectInfo[] }>('GET', '/api/admin/projects'),
   adminAccess: (project: string, minutes = 60) => req<{ until: number }>('POST', `/api/admin/projects/${encodeURIComponent(project)}/access`, { minutes }),
   gitTokens: () => req<{ tokens: GitToken[] }>('GET', '/api/git/tokens'),
-  createGitToken: (name: string) => req<{ id: number; token: string; tokens: GitToken[] }>('POST', '/api/git/tokens', { name }),
+  rotateGitToken: () => req<{ id: number; token: string; tokens: GitToken[] }>('POST', '/api/git/tokens'),
   deleteGitToken: (id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/git/tokens/${id}`),
   /** the signed-in account's server-side settings; administrators switch them per user */
   settings: () => req<{ settings: UserSettings }>('GET', '/api/settings'),
@@ -152,7 +153,6 @@ export const api = {
   setKeys: (keys: Record<string, string | null>) => req<{ keys: Record<string, string | null> }>('POST', '/api/keys', { keys }),
   adminUserSettings: (id: number, patch: Partial<UserSettings>) => req<{ settings: UserSettings }>('POST', `/api/admin/users/${id}/settings`, patch),
   mcpTokens: () => req<{ tokens: GitToken[] }>('GET', '/api/mcp-tokens'),
-  createMcpToken: (name: string) => req<{ id: number; token: string; tokens: GitToken[] }>('POST', '/api/mcp-tokens', { name }),
   deleteMcpToken: (id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/mcp-tokens/${id}`),
   newDoc: (project: string, path: string, opts: { title?: string; textclass?: string } = {}) => req<{ id: string }>('POST', `/api/projects/${encodeURIComponent(project)}/new`, { path, ...opts }),
   /** plain text files (.tex, .bib, …) for the built-in text editor; `mtime` guards against overwriting someone else's save */
@@ -234,8 +234,9 @@ export function isAuxFile(name: string): boolean {
 }
 
 export function graphicsUrl(project: string, path: string, w = 1200): string {
-  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/graphics/${path.split('/').map(encodeURIComponent).join('/')}?w=${w}`;
+  // Encode the whole path so the browser cannot consume ../ segments before the host resolves it.
+  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/graphics/${encodeURIComponent(path)}?w=${w}`;
 }
 export function fileUrl(project: string, path: string): string {
-  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/file/${path.split('/').map(encodeURIComponent).join('/')}`;
+  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/file/${encodeURIComponent(path)}`;
 }

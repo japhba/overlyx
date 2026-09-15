@@ -1,15 +1,19 @@
 import express from 'express';
+import { describeModules } from '@overlyx/core/latex/layouts.ts';
+import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from './config.ts';
+import { setSecurityHeaders } from './security.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
 import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, allow as aiAllow, AiError } from './ai.ts';
 import { mcpRouter } from './mcp.ts';
 import { agentRoutes, disconnectAgents } from './agent.ts';
 import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
-import { createMcpToken, listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
+import { listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
+import { cliDownloadRoutes } from './cliDownload.ts';
 import { userSettings, setUserSettings, userKeys, setUserKeys } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
@@ -24,7 +28,7 @@ import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerPr
 import { sandboxAvailable } from './sandbox.ts';
 import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests } from './access.ts';
 import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
-import { feedbackRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
+import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
@@ -35,14 +39,13 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(authMiddleware);
 app.use((_req, res, next) => {
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('Referrer-Policy', 'same-origin');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  // Only our own scripts run in the app; project files are user content and are served as
-  // downloads (see /file/*), so a stray script in a project can never run as us.
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-src 'self' blob:; worker-src 'self' blob:; object-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'");
+  setSecurityHeaders(res);
   next();
 });
+app.use(cliDownloadRoutes());
+// The desktop extension has no OverLyX account/session. Its narrow, rate-limited error endpoint
+// therefore lives outside the authenticated API; all ordinary feedback remains authenticated.
+app.use('/api', vscodeTelemetryRoutes());
 
 // a guest who signs in: their open editors hold the guest's identity — reconnect them as the account
 app.use('/api/auth', authRouter({ onGuestAdopted: (projects, guestId) => { for (const p of projects) manager.kick(p, [guestId], 'signed in'); } }));
@@ -300,12 +303,11 @@ api.post('/projects/:project/git/commit', needProject('edit'), async (req, res) 
     res.json({ committed, ...(await repoInfo(req.params.project)) });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
-/** Personal access tokens (the password for git over HTTPS; Google accounts have no other). */
+/** The account's one manually-managed token (valid for Git, CLI and MCP). POST rotates it. */
 api.get('/git/tokens', (req, res) => { res.json({ tokens: listTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) }); });
 api.post('/git/tokens', (req, res) => {
-  const name = String(req.body?.name ?? '').trim() || 'token';
   const allow = userSettings(req.user!.id).allowRecopyTokens;
-  const t = createToken(req.user!.id, name, allow);
+  const t = createToken(req.user!.id, 'Account access token', allow);
   res.json({ id: t.id, token: t.token, tokens: listTokens(req.user!.id, allow) });
 });
 api.delete('/git/tokens/:id', (req, res) => {
@@ -320,17 +322,20 @@ api.get('/settings', (req, res) => { res.json({ settings: userSettings(req.user!
 api.get('/keys', (req, res) => { res.json({ keys: userKeys(req.user!.id) }); });
 api.post('/keys', (req, res) => { res.json({ keys: setUserKeys(req.user!.id, req.body?.keys) }); });
 
-/** MCP agent tokens: one per external agent, scoped to the signed-in account — usable on any project the account can access (see mcp.ts). */
-api.get('/mcp-tokens', (req, res) => { res.json({ tokens: listMcpTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) }); });
+/** OAuth connections and legacy agent tokens. New manual clients use the single account token. */
+api.get('/mcp-tokens', (req, res) => {
+  const tokens = listMcpTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens)
+    .filter(token => token.name !== 'Agent panel');
+  res.json({ tokens });
+});
 api.post('/mcp-tokens', (req, res) => {
-  const name = String(req.body?.name ?? '').trim() || 'agent';
-  const allow = userSettings(req.user!.id).allowRecopyTokens;
-  const t = createMcpToken(req.user!.id, name, allow);
-  res.json({ id: t.id, token: t.token, tokens: listMcpTokens(req.user!.id, allow) });
+  res.status(410).json({ error: 'Use the account access token for Git, CLI and MCP. Creating it again rotates the previous one.' });
 });
 api.delete('/mcp-tokens/:id', (req, res) => {
   deleteMcpToken(req.user!.id, Number(req.params.id));
-  res.json({ tokens: listMcpTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) });
+  const tokens = listMcpTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens)
+    .filter(token => token.name !== 'Agent panel');
+  res.json({ tokens });
 });
 
 api.post('/projects/:project/new', needProject('edit'), (req, res) => {
@@ -707,6 +712,7 @@ api.get('/docs/*/meta', async (req, res) => {
       role: req.role ?? 'edit',
       labels,
       textclass: getTextClass(lyx), modules: getModules(lyx),
+      availableModules: describeModules(config.layoutDir, [proj, docDir]),
       language: headerValue(lyx.header, 'language') ?? 'english',
       useRefstyle: headerValue(lyx.header, 'use_refstyle') === '1',
       citeEngine: headerValue(lyx.header, 'cite_engine') ?? 'basic',
@@ -899,7 +905,7 @@ api.post('/docs/*/header', async (req, res) => {
   try {
     const doc = await manager.open(id);
     const meta = doc.getMeta();
-    let lines: string[] = meta.headerLines;
+    let lines: string[] = [...meta.headerLines];
     if (Array.isArray(req.body?.headerLines)) lines = req.body.headerLines.map(String);
     if (typeof req.body?.preamble === 'string') {
       const start = lines.indexOf('\\begin_preamble');
@@ -913,6 +919,7 @@ api.post('/docs/*/header', async (req, res) => {
         if (i >= 0) lines[i] = `\\${k} ${v}`; else lines.push(`\\${k} ${v}`);
       }
     }
+    lines = markEditedSettings(meta.headerLines, lines, Object.keys(req.body?.set ?? {}));
     doc.ydoc.transact(() => { doc.meta.set('header', JSON.stringify(lines)); }, 'header');
     res.json({ ok: true, headerLines: lines });
   } catch (e) { res.status(400).json({ error: String(e) }); }
