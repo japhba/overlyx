@@ -54,6 +54,7 @@ export class OpenDoc {
   isChild = false;
   /** what the .tex file on disk contains: state vector of the Y.Doc when it was last written / read */
   lastSavedSV: Uint8Array = Y.encodeStateVector(this.ydoc);
+  lastSavedSnapshot: Uint8Array = Y.encodeSnapshot(Y.snapshot(this.ydoc));
   lastSavedAt = 0;
   /** notified after every successful save (the WebSocket layer tells the clients) */
   savedListeners = new Set<() => void>();
@@ -186,6 +187,7 @@ export class OpenDoc {
   /** The file on disk now corresponds to the current state. */
   markSaved(): void {
     this.lastSavedSV = Y.encodeStateVector(this.ydoc);
+    this.lastSavedSnapshot = Y.encodeSnapshot(Y.snapshot(this.ydoc));
     this.lastSavedAt = Date.now();
     for (const l of this.savedListeners) { try { l(); } catch { /* ignore */ } }
   }
@@ -260,6 +262,7 @@ export class OpenDoc {
       // merge that first — writing over it would silently discard their change.
       this.absorbExternalChange();
       const sv = Y.encodeStateVector(this.ydoc);
+      const snapshot = Y.encodeSnapshot(Y.snapshot(this.ydoc));
       const { text, files } = this.render();
       this.writeSidecars(files);   // even when the .tex itself is unchanged (a stroke changes only the SVG)
       const hash = sha1(text);
@@ -287,6 +290,7 @@ export class OpenDoc {
       this.saveError = null;
       this.persistState();
       this.lastSavedSV = sv;
+      this.lastSavedSnapshot = snapshot;
       this.lastSavedAt = Date.now();
       for (const l of this.savedListeners) { try { l(); } catch { /* ignore */ } }
       return true;

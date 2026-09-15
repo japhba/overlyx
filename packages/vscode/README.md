@@ -13,6 +13,15 @@ reproduced byte for byte until you change them.
 - **OverLyX editor** for `.tex` files (right-click a file ▸ *Reopen Editor With…* ▸ *OverLyX
   Editor*, or the editor-title button). The document stays an ordinary VS Code `TextDocument`:
   dirty state, Ctrl+S, autosave, git and extensions all see the same file.
+- **WYSIWYG / TeX / Split** buttons in the top bar switch views within the editor. Ctrl+S in
+  TeX view applies the source and saves the file. The ruler above the page resizes the writing
+  width; drag its handles or focus a handle and use the arrow keys.
+- **Imported math macros** from project files update when those files change, including
+  unsaved definitions in another open VS Code editor.
+- **Shared figures** using `../` and `../../` paths render from parent directories. Common
+  image and PDF extensions can be omitted in `\includegraphics` references.
+- **Remote workspaces** route image and PDF previews through VS Code's connection to the
+  extension host. Install or update OverLyX in the remote window, then reload that window.
 - **Structure view** (OverLyX icon in the activity bar): the live outline — sections, floats —
   click to jump.
 - **PDF panel** (Ctrl+R): builds with your local `latexmk` next to the file, shows the PDF with
@@ -21,6 +30,10 @@ reproduced byte for byte until you change them.
 - **Comments & notes** live in the file as `%%` comment blocks (any other LaTeX tool ignores
   them); show them in the margin or the comments panel. Change tracking uses LyX's
   `\lyxadded`/`\lyxdeleted` macros.
+- **Master and child documents in one view** (right-click an `\include` ▸ *Show master and
+  child documents in one view*, or the *OverLyX: Show Master and Child Documents in One View*
+  command): the `\include`d / `\input` files are edited below the master as one scrolling page,
+  each still saved through its own file; Ctrl+S saves them all.
 - **Editing a file that changes underneath** (git checkout, a coding agent, you in a split text
   editor) merges into the WYSIWYG view without losing your place.
 
@@ -51,6 +64,17 @@ repository (`overlyx.updateRepo`, default `japhba/overlyx`) every five minutes a
 newer versions (`overlyx.updates`: `prompt` / `auto` / `off`); *OverLyX: Check for Updates* runs
 a check on demand. Updates install with the built-in VSIX installer and take effect after a
 reload.
+
+## Error diagnostics and privacy
+
+When VS Code telemetry is enabled, OverLyX sends errors from the extension host and its webviews
+to `https://overlyx.app/api/vscode-telemetry`. Reports contain the sanitized error and stack trace,
+the OverLyX and VS Code versions, operating-system/CPU family, and whether the extension host is
+local or remote. They never contain document content, filenames, workspace paths, account details,
+email addresses, or stable machine/session identifiers. Distinct errors are deduplicated in the
+project's issue tracker. Set `overlyx.errorReports` to false, or turn off VS Code telemetry globally,
+to disable sending. The exact event schema is in `telemetry.json`; local details remain available in
+the **OverLyX** output channel.
 
 ## License
 

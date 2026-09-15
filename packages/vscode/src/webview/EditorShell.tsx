@@ -5,6 +5,7 @@
  * the PDF lives in its own panel (pdfMain.tsx). Document sync with the extension host runs over
  * postMessage (full ProseMirror doc, debounced), everything else over the local HTTP bridge.
  */
+import { referenceTransaction } from '@client/editor/references';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
@@ -17,7 +18,9 @@ import { Toolbar, ColorPalette, colorIcon, DelimPalette, TableSizePicker, mathPa
 import { buildOutline } from '@client/app/Outline';
 import { Comments } from '@client/app/Comments';
 import { StatusBar, type Status } from '@client/app/StatusBar';
-import { cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
+import { SourcePane, cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
+import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH } from '@client/app/Ruler';
+import { ViewModeSwitch, type ViewMode } from '@client/app/ViewModeSwitch';
 import { locateSourceLine } from '@client/app/sourcelocate';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '@client/editor/lyxmath/field';
 import {
@@ -94,6 +97,40 @@ function suggestLabel(view: EditorView): string {
   return prefix + (text || 'label');
 }
 
+type ChildItem = { id: string; pmDoc?: unknown; headerLines?: string[] };
+
+/**
+ * A child document of the combined view: its own local editor below the master, its edits written
+ * into its own TextDocument by the host (childUpdate), changes from elsewhere applied as a diff.
+ */
+function ChildDoc({ item, marginMode, onSelection, register }: { item: ChildItem; marginMode: boolean; onSelection: (v: EditorView) => void; register: (id: string, h: LocalEditorHandle | null) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<string[]>(item.headerLines ?? []);
+  if (item.headerLines) headerRef.current = item.headerLines;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !item.pmDoc) return;
+    el.innerHTML = '';
+    const post = debounce((v: EditorView) => { if (!v.isDestroyed) vscode.postMessage({ type: 'childUpdate', id: item.id, pmDoc: v.state.doc.toJSON(), headerLines: headerRef.current }); }, 300);
+    const handle = createLocalEditor({ docId: item.id, container: el, pmDoc: item.pmDoc, marginMode, onSelectionChange: onSelection, onDocChange: (v, info) => { if (!info.external) post(v); } });
+    refreshMacros(handle.view, editorContext.meta?.macros ?? {}, true);
+    register(item.id, handle);
+    return () => { register(item.id, null); handle.destroy(); };
+  }, [item.id, !!item.pmDoc]);
+  return (
+    <div class="child-doc">
+      <div class="child-doc-header">
+        <span class="name">📄 {item.id.split('/').pop()}</span>
+        <span class="path">{item.id}</span>
+        <span style="flex:1" />
+        <span class="sync">{item.pmDoc ? 'in this view' : 'loading…'}</span>
+        <button class="small-btn" title="Open this child document in its own editor tab" onClick={() => vscode.postMessage({ type: 'openDoc', id: item.id })}>Open in tab</button>
+      </div>
+      <div class="editor-host child" ref={ref} />
+    </div>
+  );
+}
+
 export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'init' }> }) {
   const docId = init.docId;
   const [meta, setMeta] = useState<DocMeta | null>(null);
@@ -109,6 +146,12 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [chord, setChord] = useState<string | null>(null);
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [zoom, setZoom] = useState(Number(stored('ol.zoom') || 1) || 1);
+  const [viewMode, setViewMode] = useState<ViewMode>('wysiwyg');
+  /** the combined view: the master's child documents editable below it (View ▸ / the include's context menu) */
+  const [combined, setCombined] = useState(stored('ol.combined') === '1');
+  const [children, setChildren] = useState<ChildItem[]>([]);
+  const childHandles = useRef(new Map<string, LocalEditorHandle>());
+  const [textWidth, setTextWidth] = useState(() => Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Number(stored('ol.textWidth')) || DEFAULT_WIDTH)));
   const [findOpen, setFindOpen] = useState(false);
   const [findQ, setFindQ] = useState(''), [replQ, setReplQ] = useState('');
   const [findCase, setFindCase] = useState(false), [findWord, setFindWord] = useState(false);
@@ -125,7 +168,13 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const handleRef = useRef<LocalEditorHandle | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const view = handleRef.current?.view ?? null;
+  /** the editor the cursor is in — the master, or a child of the combined view: toolbars, menus and dialogs act on it */
+  const activeView = (): EditorView | null => {
+    const a = editorContext.activeView;
+    if (a && !a.isDestroyed && (a === handleRef.current?.view || [...childHandles.current.values()].some(h => h.view === a))) return a;
+    return handleRef.current?.view ?? null;
+  };
+  const view = activeView();
 
   const notify = useCallback((text: string, kind: 'info' | 'error' = 'info') => {
     setMessage({ text, kind });
@@ -136,7 +185,18 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   useEffect(() => { localStorage.setItem('ol.toolbars', JSON.stringify(toolbars)); }, [toolbars]);
   useEffect(() => subscribePrefs(setPrefsState), []);
   useEffect(() => { localStorage.setItem('ol.zoom', String(zoom)); }, [zoom]);
+  useEffect(() => {
+    document.documentElement.style.setProperty('--text-width', textWidth + 'px');
+    localStorage.setItem('ol.textWidth', String(textWidth));
+  }, [textWidth]);
   useEffect(() => { try { localStorage.setItem('ol.vscode.comments', showComments ? '1' : '0'); } catch { /* ignore */ } }, [showComments]);
+  useEffect(() => {
+    editorContext.combined = combined;
+    try { localStorage.setItem('ol.combined', combined ? '1' : '0'); } catch { /* ignore */ }
+    // before the master exists the init effect asks for the children itself
+    if (handleRef.current) vscode.postMessage({ type: 'combined', on: combined });
+    if (!combined) setChildren([]);
+  }, [combined]);
   useEffect(() => { const l = (f: LyxMathField | null) => { setMathField(f); editorContext.mathField = f; }; mathFocusListeners.add(l); return () => { mathFocusListeners.delete(l); }; }, []);
   useEffect(() => { const l = () => setSelTick(t => t + 1); mathCursorListeners.add(l); return () => { mathCursorListeners.delete(l); }; }, []);
 
@@ -144,7 +204,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const tbMode = (id: ToolbarId): ToolbarMode => toolbars[id] ?? 'auto';
 
   /* ---------------------------------------------------------------- editor lifecycle */
-  const postUpdate = useMemo(() => debounce((v: EditorView) => {
+  const postUpdate = useMemo(() => debounce((v: EditorView, doc: EditorView['state']['doc']) => {
+    if (v.isDestroyed || v.state.doc !== doc) return;
     vscode.postMessage({ type: 'update', pmDoc: v.state.doc.toJSON(), headerLines: headerRef.current });
   }, 300), []);
   const postOutline = useMemo(() => debounce((v: EditorView) => {
@@ -163,7 +224,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     const ch = changeAt(v.state, v.state.selection.from);
     setChangeInfo(ch ? describeChange(ch.type, ch.author, ch.time) : null);
     setSelTick(t => t + 1);
-    postSelection(v);
+    if (v === handleRef.current?.view) postSelection(v);   // the host's outline follows the master's cursor
     rerender();
   };
 
@@ -176,7 +237,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       editorContext.project = docId.split('/')[0];
       editorContext.docDir = docId.split('/').slice(1, -1).join('/');
       editorContext.trackChanges = false;
-      editorContext.combined = false;
+      editorContext.combined = combined;
       // metadata FIRST (macros, authors, layouts): formulas must render once, with the macros —
       // a \RR rendered before its definition arrives would stay raw (the web app defers the same way)
       let m: DocMeta | null = null;
@@ -186,11 +247,12 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       handle = createLocalEditor({
         docId, container: containerRef.current, pmDoc: init.pmDoc, marginMode,
         onSelectionChange: onSelection,
-        onDocChange: (v) => { setDocTick(t => t + 1); postUpdate(v); postOutline(v); },
+        onDocChange: (v, info) => { setDocTick(t => t + 1); if (!info.external) postUpdate(v, v.state.doc); postOutline(v); },
       });
       handleRef.current = handle;
       editorContext.activeView = handle.view;
       (window as any).overlyx = editorContext;
+      if (combined) vscode.postMessage({ type: 'combined', on: true });
       if (m) {
         handle.view.dom.lang = bcp47(m.language);
         applyAuthorColors(m.authors);
@@ -209,15 +271,30 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
 
   /* ---------------------------------------------------------------- host messages */
   const metaReload = useMemo(() => debounce(() => {
-    api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; const v = handleRef.current?.view; if (v) refreshMacros(v, m.macros ?? {}); }).catch(() => {});
+    api.meta(docId).then(m => {
+      setMeta(m); editorContext.meta = m;
+      const v = handleRef.current?.view;
+      if (v) refreshMacros(v, m.macros ?? {});
+      for (const h of childHandles.current.values()) refreshMacros(h.view, m.macros ?? {}, true);   // children inherit the master's macros
+    }).catch(() => {});
   }, 1500), []);
 
   useEffect(() => {
     const onMsg = (ev: MessageEvent<HostToEditor>) => {
       const m = ev.data;
+      if (!m) return;
+      // the combined view's children do not depend on the master's editor
+      if (m.type === 'children') { setChildren(prev => m.items.map(it => (it.pmDoc ? it : prev.find(p => p.id === it.id) ?? it))); return; }
+      if (m.type === 'childExternalUpdate') {
+        childHandles.current.get(m.id)?.applyExternal(m.pmDoc);
+        setChildren(prev => prev.map(c => (c.id === m.id ? { ...c, headerLines: m.headerLines } : c)));
+        metaReload();
+        return;
+      }
       const v = handleRef.current?.view;
-      if (!m || !v) return;
+      if (!v) return;
       switch (m.type) {
+        case 'metadataChanged': metaReload(); break;
         case 'externalUpdate':
           handleRef.current!.applyExternal(m.pmDoc);
           setHeader(m.headerLines);
@@ -237,6 +314,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           else if (m.name === 'syncToPdf') void syncToPdf();
           else if (m.name === 'buildPdf') build();
           else if (m.name === 'toggleTracking') void toggleTracking();
+          else if (m.name === 'toggleCombined') setCombined(c => !c);
           break;
         case 'inverseSync': void gotoTexLine(m.line); break;
         case 'theme': applyTheme(m.dark); break;
@@ -247,8 +325,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   });
 
   /* ---------------------------------------------------------------- commands and helpers */
-  const run = (cmd: (state: any, dispatch: any, view?: any) => boolean) => { const v = handleRef.current?.view; if (!v) return; cmd(v.state, v.dispatch, v); v.focus(); };
-  const runView = (fn: (v: EditorView) => boolean) => { const v = handleRef.current?.view; if (!v) return; fn(v); };
+  const run = (cmd: (state: any, dispatch: any, view?: any) => boolean) => { const v = activeView(); if (!v) return; cmd(v.state, v.dispatch, v); v.focus(); };
+  const runView = (fn: (v: EditorView) => boolean) => { const v = activeView(); if (!v) return; fn(v); };
 
   const build = () => { vscode.postMessage({ type: 'build' }); notify('Building the PDF…'); };
 
@@ -290,6 +368,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       const next = !on;
       localStorage.setItem('ol.margin', next ? '1' : '0');
       if (v) setMarginMode(v, next);
+      for (const h of childHandles.current.values()) setMarginMode(h.view, next);
       return next;
     });
   };
@@ -342,7 +421,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     editorContext.openInTab = (id, opts) => vscode.postMessage({ type: 'openDoc', id, goto: opts?.goto, heading: opts?.heading });
     editorContext.gotoLabel = (name, from) => {
       const v = from ?? handleRef.current?.view;
-      if (v && gotoLabelIn(v, name)) return;
+      for (const cv of [v, ...[...childHandles.current.values()].map(h => h.view)]) if (cv && gotoLabelIn(cv, name)) return;
       const l = editorContext.meta?.labels.find(x => x.name === name);
       if (l?.file && editorContext.project) { vscode.postMessage({ type: 'openDoc', id: `${editorContext.project}/${l.file}`, goto: name }); return; }
       notify(`Label “${name}” not found`, 'error');
@@ -352,6 +431,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         // flush the debounced update first, then let VS Code write the file (ordered messages)
         const v = handleRef.current?.view;
         if (v) vscode.postMessage({ type: 'update', pmDoc: v.state.doc.toJSON(), headerLines: headerRef.current });
+        for (const c of children) { const h = childHandles.current.get(c.id); if (h) vscode.postMessage({ type: 'childUpdate', id: c.id, pmDoc: h.view.state.doc.toJSON(), headerLines: c.headerLines ?? [] }); }
         vscode.postMessage({ type: 'save' });
       },
       viewPdf: () => build(),
@@ -361,16 +441,24 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       openDialog: (name, arg) => setDialog({ name, arg }),
       toggleTrackChanges: () => { void toggleTracking(); },
       toggleOutline: () => notify('The outline is in the OverLyX sidebar (activity bar)'),
-      toggleSource: () => notify('Use “Open as LaTeX Source” in the editor title bar'),
+      toggleSource: () => setViewMode(mode => mode === 'wysiwyg' ? 'split' : 'wysiwyg'),
+      toggleCombined: () => setCombined(c => !c),
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
       closeTab: () => { /* VS Code closes tabs */ },
       zoom: (d) => setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))),
-      textWidth: () => { /* fixed in VS Code */ },
+      textWidth: (width) => setTextWidth(width > 0 ? width : DEFAULT_WIDTH),
       openFile: () => notify('Use the VS Code explorer to open files'),
       newFile: () => notify('Create .tex files in the VS Code explorer'),
     };
   });
+
+  /** what the source pane shows: the child the cursor is in, else the master */
+  const sourceTarget = (() => {
+    if (!view || !handleRef.current) return null;
+    for (const [id, h] of childHandles.current) if (h.view === view) return { view, ydoc: h.ydoc, docId: id };
+    return { view: handleRef.current.view, ydoc: handleRef.current.ydoc, docId };
+  })();
 
   /* ---------------------------------------------------------------- labels, marks, table state */
   const labels = useMemo(() => {
@@ -719,10 +807,10 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         if (target?.node && target.pos !== undefined) {
           const p = commandParams(target.node);
           const tpos = target.pos, tnode = target.node;
-          return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: p.get('LatexCommand') ?? 'ref' }} onClose={close}
-            onInsert={(n: string, k: string) => { const params = [`LatexCommand ${k}`, `reference "${n}"`, 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '']; view.dispatch(view.state.tr.setNodeMarkup(tpos, undefined, { ...tnode.attrs, params: JSON.stringify(params) })); }} />;
+          return <RefDialog view={view} labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: unquote(p.get('package')) === 'cleveref' ? 'cref' : p.get('LatexCommand') ?? 'ref', tuple: unquote(p.get('tuple')) === 'range' ? 'range' : 'list', caps: unquote(p.get('caps')) === 'true' }} onClose={close}
+            onInsert={(n, k, o) => view.dispatch(referenceTransaction(view.state, n, k, o, tpos))} />;
         }
-        return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={target?.prefill ? { name: target.prefill, kind: 'ref' } : undefined} onClose={close} onInsert={(n: string, k: string) => run(C.insertRef(n, k))} />;
+        return <RefDialog view={view} labels={labels} useRefstyle={!!meta?.useRefstyle} initial={target?.prefill ? { name: target.prefill, kind: 'ref' } : undefined} onClose={close} onInsert={(n, k, o) => view.dispatch(referenceTransaction(view.state, n, k, o))} />;
       }
       case 'cite': {
         const target = dialog.arg as { pos: number; node: any } | undefined;
@@ -769,6 +857,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
 
   return (
     <div class="app" data-vscode="1">
+      <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong><ViewModeSwitch mode={viewMode} onChange={setViewMode} /></div>
       {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={standardGroups} />}
       {(tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
         <div class="tb-samerow">
@@ -808,12 +897,18 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         </div>
       )}
       <div class="main">
-        <div class="editor-column">
+        <div class={'editor-column view-' + viewMode + (viewMode === 'wysiwyg' ? '' : ' split')}>
           <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} ref={scrollRef} style={{ zoom }} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
+            <Ruler width={textWidth} onChange={setTextWidth} marginMode={marginMode} />
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
+              {combined && children.map(c => (
+                <ChildDoc key={c.id} item={c} marginMode={marginMode} onSelection={onSelection}
+                  register={(id, h) => { if (h) childHandles.current.set(id, h); else childHandles.current.delete(id); rerender(); }} />
+              ))}
             </div>
           </div>
+          <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => setViewMode('wysiwyg')} onSave={() => vscode.postMessage({ type: 'save' })} />
         </div>
         {showComments && (
           <div class="sidebar right">
@@ -821,7 +916,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
               <button class="active" data-tab="comments">Comments</button>
               <button class="hide" title="Hide the sidebar" onClick={() => setShowComments(false)}>»</button>
             </div>
-            <div class="panel-body"><Comments views={view ? [view] : []} tick={docTick} /></div>
+            <div class="panel-body"><Comments views={[handleRef.current?.view, ...[...childHandles.current.values()].map(h => h.view)].filter((x): x is EditorView => !!x)} tick={docTick} /></div>
           </div>
         )}
       </div>

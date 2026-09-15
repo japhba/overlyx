@@ -5,11 +5,13 @@
 import { EditorState, Plugin, TextSelection } from 'prosemirror-state';
 import { EditorView, type NodeView } from 'prosemirror-view';
 import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
+import { pasteTargetsPlugin, pasteLatex } from './plugins/paste';
 import { sliceText } from './cliptext';
 import { gapCursor } from 'prosemirror-gapcursor';
 import { dropCursor } from 'prosemirror-dropcursor';
 import { tableEditing } from 'prosemirror-tables';
 import * as Y from 'yjs';
+import { snapshotCovers, localWritesCommitted } from './savedstate';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import * as decoding from 'lib0/decoding';
@@ -98,6 +100,9 @@ export interface SaveState {
   state: 'saved' | 'saving' | 'offline' | 'connecting' | 'stale';
   /** local edits the server has not confirmed as written */
   pending: boolean;
+  /** The newest edits have not yet been committed to browser storage. */
+  localPending?: boolean;
+  localError?: string;
   /** time of the last write to the .lyx file (server clock, ms) */
   savedAt: number;
   /** offline and nothing cached locally: the document cannot be shown */
@@ -154,12 +159,12 @@ export function createEditor(opts: EditorOptions): EditorHandle {
    * and while offline edits keep going into the local copy; on reconnect the Yjs sync exchanges
    * exactly the missing updates in both directions (CRDT merge, no conflicts).
    *
-   * Save state: local edits are counted (`editSeq`); everything up to `sentSeq` has been handed to
-   * the server (sent immediately while connected, or exchanged by the sync after a reconnect); the
-   * server's MSG_SAVED (type 3, sent after each write of the .lyx file, ordered after the updates it
-   * processed) confirms everything sent before it. */
+   * Save acknowledgments carry the snapshot actually written, including its delete set.
+   * Receipt time says nothing about which local edits reached that completed write. */
   const persistence = new IndexeddbPersistence(localDbName(opts.docId), ydoc);
-  let editSeq = 0, sentSeq = 0, savedSeq = 0;
+  let editSeq = 0, savedSeq = 0;
+  let localWriteSeq = 0, localSavedSeq = 0;
+  let localError: string | undefined;
   let savedAt = 0;
   let localSynced = false;      // IndexedDB copy loaded
   let localEmpty = true;
@@ -179,7 +184,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     graceTimer = setTimeout(() => { graceTimer = null; emitSaveState(); }, RECONNECT_GRACE_MS + 50);
   };
   const saveState = (): SaveState => {
-    const pending = editSeq > savedSeq || (pendingFromStore && !provider.synced);
+    const pending = editSeq > savedSeq || pendingFromStore;
     const connected = provider.wsconnected;
     const state: SaveState['state'] = stale ? 'stale' : connected && provider.synced ? (pending ? 'saving' : 'saved') : connected || !localSynced || inGrace() ? 'connecting' : 'offline';
     let detail: string | undefined;
@@ -188,7 +193,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       if (lastConnInfo) detail += ` (${lastConnInfo})`;
       detail += ' — reconnecting automatically';
     }
-    return { state, pending, savedAt, unavailable: state === 'offline' && localEmpty, detail };
+    return { state, pending, localPending: localWriteSeq > localSavedSeq, localError, savedAt, unavailable: state === 'offline' && localEmpty, detail };
   };
   let lastEmitted = '';
   const emitSaveState = () => {
@@ -205,14 +210,28 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   ydoc.on('update', (_u: Uint8Array, origin: unknown) => {
     if (origin === provider || origin === persistence || origin === AGENT_EDIT_ORIGIN) return;
     editSeq++;
-    if (provider.wsconnected && provider.synced) sentSeq = editSeq;   // y-websocket sends local updates right away
+    const written = ++localWriteSeq;
     emitSaveState();
+    // y-indexeddb queues its write before this listener. Its request's success alone
+    // is insufficient: wait for transaction completion before saying the edit is kept.
+    void persistence.whenSynced.then(async () => {
+      if (destroyed) return;
+      if (!persistence.db) throw new Error('Browser storage is unavailable');
+      await localWritesCommitted(persistence.db);
+      if (destroyed) return;
+      localSavedSeq = Math.max(localSavedSeq, written);
+      localError = undefined;
+      emitSaveState();
+    }).catch(error => { if (!destroyed) { localError = String(error); emitSaveState(); } });
   });
   ydoc.on('update', () => { localEmpty = ydoc.getXmlFragment('prosemirror').length === 0; });
   (provider as any).messageHandlers[3] = (_enc: unknown, dec: decoding.Decoder) => {
     savedAt = decoding.readVarUint(dec);
-    decoding.readVarUint8Array(dec);   // state vector of the written file (informational)
-    savedSeq = sentSeq;
+    decoding.readVarUint8Array(dec);   // legacy state vector
+    if (decoding.hasContent(dec) && snapshotCovers(Y.decodeSnapshot(decoding.readVarUint8Array(dec)), Y.snapshot(ydoc))) {
+      savedSeq = editSeq;
+      pendingFromStore = false;
+    }
     emitSaveState();
   };
   // Message type 4 = server heartbeat (no payload): it only refreshes y-websocket's "last message
@@ -322,6 +341,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
     changeTrackingPlugin(),
     changesFilterPlugin(),
     findPlugin(),
+    pasteTargetsPlugin(),
     mirrorCaretPlugin(),
     macroDefsPlugin(() => viewRef),
     new Plugin({
@@ -413,6 +433,12 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       return false;
     },
     handleDOMEvents: {
+      keyup(_view, event) {
+        // Native arrow movement precedes selectionchange; publish its final position
+        // before source mirroring or a decoration update can use the previous caret.
+        if (/^(Arrow|Home$|End$|Page)/.test(event.key)) flushDomSelection();
+        return false;
+      },
       contextmenu(view, ev) {
         const t = ev.target as HTMLElement;
         if (t.closest?.('math-field')) return false;   // the field shows its own menu
@@ -461,15 +487,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
         // pasted LaTeX (a \command, $…$, \[ …) is parsed on the server against this document's own
         // preamble and inserted as real structure — sections, formulas, citations, lists
         if (!viewOnly && /\\[a-zA-Z]+|\\\[|\\\(|\$[^$\n][^$]*\$/.test(text)) {
-          void api.parseClip(view.dom.dataset.docId ?? opts.docId, text).then(r => {
-            const blocks = (r.blocks as unknown[]).map(b => schema.nodeFromJSON(b)).filter(n => n.type.name !== 'doc');
-            if (!blocks.length) { plainPaste(); return; }
-            // a single plain paragraph flows into the current one; anything structured is inserted as whole paragraphs (closed slice — an open one would dissolve the first block's layout)
-            const single = blocks.length === 1 && blocks[0].type.name === 'paragraph' && blocks[0].attrs.layout === 'Standard' && !blocks[0].attrs.depth;
-            const slice = single ? new Slice(Fragment.from(blocks[0].content), 0, 0) : new Slice(Fragment.from(blocks), 0, 0);
-            view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
-            view.focus();
-          }).catch(e => { console.warn('LaTeX paste fell back to plain text:', e); plainPaste(); });
+          void pasteLatex(view, view.dom.dataset.docId ?? opts.docId, text);
           return true;
         }
         plainPaste();
@@ -538,7 +556,6 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       performance.mark('ol:synced');
       // edits stored from an earlier session stay "pending" until the server confirms it wrote them
       if (pendingFromStore) editSeq = Math.max(editSeq, savedSeq + 1);
-      sentSeq = editSeq;   // the sync exchanged everything we had
     }
     pushStatus(); emitSaveState();
   });
@@ -558,6 +575,10 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   };
   window.addEventListener('online', onOnline);
   window.addEventListener('offline', onOffline);
+  const protectUnstoredEdits = (event: BeforeUnloadEvent) => {
+    if (saveState().pending && localWriteSeq > localSavedSeq) { event.preventDefault(); event.returnValue = ''; }
+  };
+  window.addEventListener('beforeunload', protectUnstoredEdits);
   // Hidden tabs: the page's timers are throttled (Chrome wakes a long-hidden tab once a minute), so
   // the presence renewal (every 15 s, the server drops a user's presence after 30 s) and the
   // reconnect back-off timer fall behind, and the user appeared to go offline whenever their tab
@@ -646,6 +667,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       stopRetry();
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
+      window.removeEventListener('beforeunload', protectUnstoredEdits);
       document.removeEventListener('visibilitychange', onVisible);
       heartbeat?.terminate();
       if (graceTimer) clearTimeout(graceTimer);

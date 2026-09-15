@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { User } from '../api';
 import type { PresenceUser } from '../editor/editor';
@@ -86,43 +86,49 @@ function useBindings() {
   return getBindings();
 }
 
-function MenuList({ items, path, close, style }: { items: MenuEntry[]; path: string[]; close: () => void; style?: string }) {
-  return (
-    <div class="menu-list" style={style} onMouseDown={e => e.preventDefault()}>
-      {items.map((it, i) => {
-        if (it.sep) return <div key={i} class="menu-sep" />;
-        if (it.sub) return <div key={i} class="menu-item menu-sub"><span>{cleanLabel(it.label ?? '')}</span><SubMenu items={it.sub} path={[...path, cleanLabel(it.label ?? '')]} close={close} /></div>;
-        const sc = it.label ? effectiveShortcut(entryId(path, it.label), it.shortcut) : it.shortcut;
-        return (
-          <div key={i} class={'menu-item' + (it.checked ? ' checked' : '') + (it.disabled ? ' disabled' : '')} onClick={() => { if (!it.disabled) { close(); it.action?.(); } }}>
-            <span>{it.label}</span>{sc && <span class="shortcut">{formatShortcut(sc)}</span>}
-          </div>
-        );
-      })}
-    </div>
-  );
+function MenuList({ items, path, close, style, back }: { items: MenuEntry[]; path: string[]; close: () => void; style?: string; back?: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { ref.current?.querySelector<HTMLElement>(':scope > [role="menuitem"]:not([aria-disabled="true"])')?.focus(); }, []);
+  const onKey = (e: KeyboardEvent) => {
+    if ((e.target as HTMLElement).closest('[role="menu"]') !== ref.current) return;
+    const entries = [...ref.current!.querySelectorAll<HTMLElement>(':scope > [role="menuitem"]:not([aria-disabled="true"])')];
+    const at = entries.indexOf(document.activeElement as HTMLElement);
+    let next: HTMLElement | undefined;
+    if (e.key === 'ArrowDown') next = entries[(at + 1) % entries.length];
+    else if (e.key === 'ArrowUp') next = entries[(at - 1 + entries.length) % entries.length];
+    else if (e.key === 'Home') next = entries[0];
+    else if (e.key === 'End') next = entries.at(-1);
+    else if (e.key === 'Escape' || (e.key === 'ArrowLeft' && back)) { e.preventDefault(); e.stopPropagation(); (back ?? close)(); return; }
+    else if (e.key === 'Tab') { close(); return; }
+    else if (e.key.length === 1 && /[a-z0-9]/i.test(e.key)) next = [...entries.slice(at + 1), ...entries.slice(0, at + 1)].find(el => el.textContent?.trim().toLowerCase().startsWith(e.key.toLowerCase()));
+    if (next) { e.preventDefault(); e.stopPropagation(); next.focus(); }
+  };
+  return <div class="menu-list" ref={ref} role="menu" aria-label={path.at(-1)} style={style} onKeyDown={onKey} onMouseDown={e => e.preventDefault()}>
+    {items.map((it, i) => {
+      if (it.sep) return <div key={i} class="menu-sep" role="separator" />;
+      if (it.sub) return <SubMenuItem key={i} entry={it} path={path} close={close} />;
+      const sc = it.label ? effectiveShortcut(entryId(path, it.label), it.shortcut) : it.shortcut;
+      const run = () => { if (!it.disabled) { close(); it.action?.(); } };
+      return <div key={i} role="menuitem" tabIndex={-1} aria-disabled={!!it.disabled} class={'menu-item' + (it.checked ? ' checked' : '') + (it.disabled ? ' disabled' : '')} onClick={run} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); run(); } }}><span>{it.label}</span>{sc && <span class="shortcut">{formatShortcut(sc)}</span>}</div>;
+    })}
+  </div>;
 }
 
-/**
- * A submenu opens beside its item. The list is positioned `fixed` at the item's screen position:
- * the parent menu scrolls (overflow: auto) when it is taller than the window, which would clip an
- * absolutely positioned child sticking out of it. Near the right edge of the window it opens to
- * the left instead.
- */
-function SubMenu({ items, path, close }: { items: MenuEntry[]; path: string[]; close: () => void }) {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const open = (e: MouseEvent) => {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const width = 240;
-    const left = r.right + width > window.innerWidth - 8 ? Math.max(0, r.left - width) : r.right;
-    const top = Math.min(r.top - 5, Math.max(0, window.innerHeight - 8 - Math.min(items.length * 24 + 10, window.innerHeight * 0.8)));
-    setPos({ top, left });
+function SubMenuItem({ entry, path, close }: { entry: MenuEntry; path: string[]; close: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const open = () => {
+    const anchor = ref.current;
+    if (!anchor) return;
+    const r = anchor.getBoundingClientRect();
+    setPosition({ left: r.right + 240 > window.innerWidth - 8 ? Math.max(8, r.left - 240) : r.right, top: Math.max(8, Math.min(r.top, window.innerHeight - Math.min((entry.sub!.length + 1) * 24, window.innerHeight * .8))) });
   };
-  return (
-    <span style="position:absolute;inset:0" onMouseEnter={open} onMouseLeave={() => setPos(null)}>
-      {pos && <MenuList items={items} path={path} close={close} style={`position:fixed;top:${pos.top}px;left:${pos.left}px`} />}
-    </span>
-  );
+  return <div ref={ref} role="menuitem" tabIndex={-1} aria-haspopup="menu" aria-expanded={!!position} class="menu-item menu-sub" onMouseEnter={open} onMouseLeave={() => setPosition(null)} onClick={e => { if ((e.target as HTMLElement).closest('[role="menuitem"]') !== ref.current) return; e.stopPropagation(); open(); }} onKeyDown={e => {
+    if (e.target !== ref.current) return;
+    if (['ArrowRight', 'Enter', ' '].includes(e.key)) { e.preventDefault(); e.stopPropagation(); open(); }
+  }}><span>{cleanLabel(entry.label ?? '')}</span>
+    {position && <MenuList items={entry.sub!} path={[...path, cleanLabel(entry.label ?? '')]} close={close} back={() => { setPosition(null); ref.current?.focus(); }} style={`position:fixed;top:${position.top}px;left:${position.left}px`} />}
+  </div>;
 }
 
 /**
@@ -135,7 +141,7 @@ function SearchMenu({ menu, entries, close, recording, setRecording }: { menu: M
   const [sel, setSel] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const results = useMemo(() => searchEntries(entries, q), [entries, q]);
-  useEffect(() => { input.current?.focus(); }, []);
+  useLayoutEffect(() => { input.current?.focus(); }, []);
   useEffect(() => { setSel(0); }, [q]);
   useEffect(() => () => setRecording(null), []);
   const run = (e: SearchEntry) => { close(); e.action?.(); };
@@ -206,8 +212,8 @@ function SearchMenu({ menu, entries, close, recording, setRecording }: { menu: M
   );
 }
 
-export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle, onSignIn }: {
-  menus: MenuDef[]; user: User; right?: ComponentChildren; onLogout: () => void; onSettings?: () => void; onHome: () => void;
+export function MenuBar({ menus, user, primary, right, onLogout, onSettings, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle, onSignIn }: {
+  menus: MenuDef[]; user: User; primary?: ComponentChildren; right?: ComponentChildren; onLogout: () => void; onSettings?: () => void; onHome: () => void;
   /** reference entries (shortcuts without a menu item) for the palette */
   searchEntries?: SearchEntry[];
   /** who is in the document right now (Google-Docs style, top right; click one to jump to their cursor) */
@@ -221,6 +227,9 @@ export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, sear
 }) {
   const [userOpen, setUserOpen] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const [compact, setCompact] = useState(() => window.innerWidth < 1100);
+  const barRef = useRef<HTMLDivElement>(null);
   const [recording, setRecording] = useState<string | null>(null);
   const bindings = useBindings();
   /** whatever had the keyboard before the palette took it (the editor, usually) gets it back */
@@ -241,29 +250,36 @@ export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, sear
     }
     return { custom, shadowed };
   }, [entries, bindings]);
-  const live = useRef({ keyIndex, recording, open, searchIndex });
-  live.current = { keyIndex, recording, open, searchIndex };
+  const live = useRef({ keyIndex, recording, open, searchIndex, overflowOpen });
+  live.current = { keyIndex, recording, open, searchIndex, overflowOpen };
 
-  const close = () => { setOpen(null); setUserOpen(false); setRecording(null); const p = prevFocus.current; prevFocus.current = null; if (p && document.contains(p)) p.focus(); };
-  const openSearch = () => { if (live.current.searchIndex < 0) return; if (live.current.open === null) prevFocus.current = document.activeElement as HTMLElement | null; setOpen(live.current.searchIndex); };
+  const close = () => { setOpen(null); setOverflowOpen(false); setUserOpen(false); setRecording(null); const p = prevFocus.current; prevFocus.current = null; if (p && document.contains(p)) p.focus(); };
+  const openSearch = () => { if (live.current.searchIndex < 0) return; if (live.current.open === null && !live.current.overflowOpen) prevFocus.current = document.activeElement as HTMLElement | null; setOverflowOpen(false); setUserOpen(false); setOpen(live.current.searchIndex); };
   useEffect(() => {
-    if (open === null && !userOpen) return;
+    const bar = barRef.current!;
+    const observer = new ResizeObserver(() => setCompact(bar.clientWidth < 1100));
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, []);
+  useLayoutEffect(() => { close(); }, [compact]);
+  useEffect(() => {
+    if (open === null && !userOpen && !overflowOpen) return;
     const h = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('.menubar')) close(); };
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !live.current.recording) close(); };
     document.addEventListener('mousedown', h); document.addEventListener('keydown', k);
     return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
-  }, [open, userOpen]);
+  }, [open, userOpen, overflowOpen]);
   // global keys: the palette (Ctrl+Shift+P / F1), the user's shortcuts, and the swallowed default keys of rebound commands
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (live.current.recording) return;   // the recorder reads this key
+      if (live.current.recording || (e.target as HTMLElement).closest?.('[role=dialog]')) return;
       const k = keyFromEvent(e);
       if (!k) return;
       const paletteKey = canonical(effectiveShortcut(PALETTE_ID, PALETTE_DEFAULT));
       if (k === paletteKey || k === 'F1') { e.preventDefault(); e.stopPropagation(); openSearch(); return; }
       const { custom, shadowed } = live.current.keyIndex;
       const hit = custom.get(k);
-      if (hit?.action) { e.preventDefault(); e.stopPropagation(); if (live.current.open !== null) close(); hit.action(); return; }
+      if (hit?.action) { e.preventDefault(); e.stopPropagation(); if (live.current.open !== null || live.current.overflowOpen) close(); hit.action(); return; }
       if (shadowed.has(k)) { e.preventDefault(); e.stopPropagation(); }
     };
     const onOpen = () => openSearch();
@@ -273,26 +289,51 @@ export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, sear
   }, []);
   const toggle = (i: number) => {
     if (open === i) { close(); return; }
-    if (menus[i].search && open === null) prevFocus.current = document.activeElement as HTMLElement | null;
+    if (open === null && !overflowOpen) prevFocus.current = document.activeElement as HTMLElement | null;
+    setOverflowOpen(false);
+    setUserOpen(false);
     setOpen(i);
   };
+  const toggleOverflow = () => {
+    if (overflowOpen || open !== null) { close(); return; }
+    prevFocus.current = document.activeElement as HTMLElement | null;
+    setUserOpen(false);
+    setOverflowOpen(true);
+  };
+  const menuContent = (i: number) => menus[i].search
+    ? <SearchMenu key={menus[i].title} menu={menus[i]} entries={entries} close={close} recording={recording} setRecording={setRecording} />
+    : <MenuList key={menus[i].title} items={menus[i].items} path={[menus[i].title]} close={close} back={compact ? () => { setOpen(null); setOverflowOpen(true); } : undefined} />;
   const paletteKey = formatShortcut(effectiveShortcut(PALETTE_ID, PALETTE_DEFAULT) ?? 'F1');
   return (
-    <div class="menubar">
+    <div class="menubar" ref={barRef}>
       <a class="brand" href="#/" title="Start screen" onClick={e => { e.preventDefault(); onHome(); }}><Wordmark /></a>
-      {menus.map((m, i) => (
+      {compact ? (
+        <div class={'menu menu-overflow' + (overflowOpen || open !== null ? ' open' : '')}>
+          <button type="button" aria-haspopup="menu" aria-expanded={overflowOpen || open !== null} onMouseDown={e => e.preventDefault()} onClick={toggleOverflow}
+            onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); if (!overflowOpen && open === null) toggleOverflow(); } }}>Menu <span aria-hidden="true">▾</span></button>
+          {(overflowOpen || open !== null) && <div class="menu-overflow-panel">
+            {open === null
+              ? <MenuList items={[{ label: 'Start screen', action: onHome }, { sep: true }, ...menus.map((m, i) => ({ label: m.title, action: () => toggle(i) }))]} path={['Menu']} close={close} />
+              : <><button type="button" class="menu-back" onClick={() => { setOpen(null); setOverflowOpen(true); }}>‹ All menus <span>{menus[open].title}</span></button>{menuContent(open)}</>}
+          </div>}
+        </div>
+      ) : menus.map((m, i) => (
         <div key={m.title} class={'menu' + (open === i ? ' open' : '')} onMouseEnter={() => { if (open !== null && open !== i) toggle(i); }}>
-          <button onMouseDown={e => { e.preventDefault(); toggle(i); }} title={m.search ? `Search menus and shortcuts (${paletteKey})` : undefined}>{m.title}</button>
-          {open === i && (m.search ? <SearchMenu menu={m} entries={entries} close={close} recording={recording} setRecording={setRecording} /> : <MenuList items={m.items} path={[m.title]} close={close} />)}
+          <button aria-haspopup="menu" aria-expanded={open === i} onKeyDown={e => {
+            if (['ArrowDown', 'Enter', ' '].includes(e.key)) { e.preventDefault(); toggle(i); }
+            else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); const next = (i + (e.key === 'ArrowRight' ? 1 : menus.length - 1)) % menus.length; (e.currentTarget.closest('.menubar')?.querySelectorAll<HTMLElement>(':scope > .menu > button')[next])?.focus(); }
+          }} onMouseDown={e => { e.preventDefault(); toggle(i); }} title={m.search ? `Search menus and shortcuts (${paletteKey})` : undefined}>{m.title}</button>
+          {open === i && menuContent(i)}
         </div>
       ))}
-      <span class="spacer" />
+      <div class="menubar-primary">{primary}</div>
+      <div class="menubar-actions">
       {right}
       {users && users.length > 0 && <UserAvatars users={users} onJump={onJumpToUser} />}
       {onShare && (
-        <button type="button" class="share-btn" data-share onClick={onShare} title={shareTitle ?? 'Share this project: invite people or turn on a link'}>
+        <button type="button" class="share-btn" data-share aria-label="Share" onClick={onShare} title={shareTitle ?? 'Share this project: invite people or turn on a link'}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="1.6" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /></svg>
-          Share
+          <span class="share-label">Share</span>
         </button>
       )}
       {user.guest && onSignIn && (
@@ -305,12 +346,13 @@ export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, sear
       </a>
       <ThemeToggle />
       <div class={'menu user-menu' + (userOpen ? ' open' : '')}>
-        <button type="button" class="avatar-btn" data-user-menu title={`${user.name} (${user.username})`} onMouseDown={e => { e.preventDefault(); if (open !== null) setOpen(null); setUserOpen(o => !o); }}>
+        <button type="button" class="avatar-btn" data-user-menu title={`${user.name} (${user.username})`} onMouseDown={e => { e.preventDefault(); setOpen(null); setOverflowOpen(false); setUserOpen(o => !o); }}>
           <span class="avatar" style={{ background: user.color }} data-initials={user.avatar ? undefined : initials(user.name).length}><AvatarContent name={user.name} src={user.avatar} /></span>
         </button>
         {userOpen && <MenuList items={[{ label: user.name, disabled: true }, { label: user.guest ? 'guest (not signed in)' : user.username, disabled: true }, { sep: true },
           ...(user.guest && onSignIn ? [{ label: 'Sign in to keep this project…', action: onSignIn }] : onSettings ? [{ label: 'Settings…', action: onSettings }] : []),
           { label: user.guest ? 'Leave' : 'Sign out', action: onLogout }]} path={['Account']} close={close} style="left:auto;right:0" />}
+      </div>
       </div>
     </div>
   );

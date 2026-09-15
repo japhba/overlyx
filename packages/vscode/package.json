@@ -2,7 +2,7 @@
   "name": "overlyx-vscode",
   "displayName": "OverLyX",
   "description": "LyX-style WYSIWYG editing for LaTeX .tex files — the OverLyX editor inside VS Code: rendered text and formulas, LyX keybindings, change tracking, comments, outline, PDF preview with SyncTeX. File browsing, git and agents stay VS Code's.",
-  "version": "0.2.3",
+  "version": "0.2.9",
   "publisher": "overlyx",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -58,6 +58,11 @@
       {
         "command": "overlyx.toggleMargin",
         "title": "Toggle Notes & Comments in the Margin",
+        "category": "OverLyX"
+      },
+      {
+        "command": "overlyx.toggleCombined",
+        "title": "Show Master and Child Documents in One View",
         "category": "OverLyX"
       },
       {
@@ -180,6 +185,15 @@
           "type": "string",
           "default": "",
           "description": "Override the release-check endpoint (testing / self-hosted mirrors). Leave empty."
+        },
+        "overlyx.errorReports": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send sanitized extension errors to overlyx.app so maintainers can diagnose installer problems. Also follows VS Code's global telemetry level. Never sends documents, filenames, workspace paths, account details, email, or stable machine IDs.",
+          "tags": [
+            "telemetry",
+            "usesOnlineServices"
+          ]
         }
       }
     }

@@ -35,17 +35,24 @@ async function until(fn, ms, what) {
 /* ---------------------------------------------------------------- fixture workspace */
 const MAIN = [
   '\\documentclass{article}',
-  '\\usepackage{amsmath,amssymb}',
+  '\\usepackage{amsmath,amssymb,graphicx}',
   '\\newcommand{\\RR}{\\mathbb{R}}',
+  '\\input{macros.tex}',
   '\\begin{document}',
   '',
   '\\section{Introduction}',
   '',
-  'Functions on $\\RR$ are studied, see \\eqref{eq:main}.',
+  'Functions on $\\RR$ are studied, see \\eqref{eq:main}. Vector $\\bx$.',
+  '',
+  '\\includegraphics[width=16pt]{../figures/parent.png}',
+  '\\includegraphics[width=16pt]{../../figures/grandparent.png}',
+  '\\includegraphics[width=16pt]{../figures/parent-pdf}',
   '',
   '\\begin{equation}',
   'f(x)=x^{2}\\label{eq:main}',
   '\\end{equation}',
+  '',
+  '\\include{chapter}',
   '',
   '\\section{Methods}',
   '',
@@ -54,8 +61,17 @@ const MAIN = [
   '\\end{document}',
   '',
 ].join('\n');
-const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-gui-ws-'));
+const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-gui-ws-'));
+const ws = path.join(fixtureRoot, 'paper', 'submission');
+fs.mkdirSync(ws, { recursive: true });
+fs.mkdirSync(path.join(fixtureRoot, 'paper', 'figures'));
+fs.mkdirSync(path.join(fixtureRoot, 'figures'));
+fs.copyFileSync(path.join(pkg, 'test/fixtures/graphics.png'), path.join(fixtureRoot, 'paper/figures/parent.png'));
+fs.copyFileSync(path.join(pkg, 'test/fixtures/graphics.png'), path.join(fixtureRoot, 'figures/grandparent.png'));
+fs.copyFileSync(path.join(pkg, 'test/fixtures/graphics.pdf'), path.join(fixtureRoot, 'paper/figures/parent-pdf.pdf'));
 fs.writeFileSync(path.join(ws, 'main.tex'), MAIN);
+fs.writeFileSync(path.join(ws, 'chapter.tex'), '\\section{Details}\n\nChild paragraph with $a+b$.\n');
+fs.writeFileSync(path.join(ws, 'macros.tex'), String.raw`\newcommand{\bx}{\boldsymbol{x}}`);
 
 /* ---------------------------------------------------------------- VS Code launch */
 const udd = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-gui-udd-'));
@@ -134,6 +150,11 @@ try {
   }
   await until(async () => (await editorFrame.evaluate(() => document.body.innerText)).includes('Functions on'), 60000, 'the rendered document text');
   log('custom editor opened and rendered the document');
+  await until(() => editorFrame.evaluate(() => {
+    const images = [...document.querySelectorAll('.lyx-graphics img')];
+    return images.length === 3 && images.every(img => img.complete && img.naturalWidth > 0);
+  }), 10000, 'PNG and PDF figures from parent directories');
+  log('parent and grandparent graphics paths rendered, including extensionless PDF');
 
   /* ---- 2. WYSIWYG rendering checks ---- */
   const checks = await editorFrame.evaluate(() => {
@@ -163,6 +184,33 @@ try {
   if (rawMacro) fail('the \\RR macro is shown as raw LaTeX — document macros not applied to formulas');
   await shot('01-editor');
 
+  const macroState = await editorFrame.evaluate(() => ({ macros: window.overlyx?.meta?.macros, errors: [...document.querySelectorAll('.katex-error')].map(n => n.textContent), math: [...document.querySelectorAll('.lyx-math-inline')].map(n => n.innerText) }));
+  log('macro state', JSON.stringify(macroState));
+  if (!macroState.macros?.bx || macroState.math.some(t => t.includes('\\bx'))) fail('imported bx macro did not render');
+  await editorFrame.getByRole('button', { name: 'Split', exact: true }).click();
+  await editorFrame.locator('textarea.source').waitFor({ state: 'visible' });
+  await until(() => editorFrame.locator('textarea.source').inputValue().then(s => s.includes('Introduction')), 15000, 'source text');
+  await editorFrame.getByRole('button', { name: 'TeX', exact: true }).click();
+  if (await editorFrame.locator('.editor-scroll').isVisible()) fail('TeX mode did not hide the writing area');
+  await editorFrame.getByRole('button', { name: 'WYSIWYG', exact: true }).click();
+  if (!await editorFrame.locator('.ruler').isVisible()) fail('ruler missing');
+  fs.writeFileSync(path.join(ws, 'macros.tex'), String.raw`\newcommand{\bx}{\boldsymbol{y}}`);
+  await until(() => editorFrame.evaluate(() => window.overlyx?.meta?.macros?.bx?.def === String.raw`\boldsymbol{y}`), 15000, 'macro dependency refresh');
+  const rulerHandle = editorFrame.getByRole('slider', { name: 'Text width, right handle' });
+  const widthBefore = Number(await rulerHandle.getAttribute('aria-valuenow'));
+  await rulerHandle.focus(); await page.keyboard.press('ArrowLeft');
+  await until(async () => Number(await rulerHandle.getAttribute('aria-valuenow')) === widthBefore - 20, 5000, 'ruler resizing');
+  await editorFrame.getByRole('button', { name: 'TeX', exact: true }).click();
+  const sourceBox = editorFrame.locator('textarea.source');
+  await sourceBox.fill((await sourceBox.inputValue()).replace('Inline math', 'Source edit: inline math'));
+  await sourceBox.press('Control+s');
+  await until(() => fs.readFileSync(path.join(ws, 'main.tex'), 'utf8').includes('Source edit: inline math'), 15000, 'saving directly from TeX mode');
+  await sleep(750); // let a delayed visual-editor echo, if any, arrive after the save
+  if (await page.locator('.tabs-container .tab.dirty').count()) fail('TeX save was followed by another unsaved visual-editor rewrite');
+  await editorFrame.getByRole('button', { name: 'WYSIWYG', exact: true }).click();
+  await until(() => editorFrame.locator('.lyx-editor').innerText().then(t => t.includes('Source edit: inline math')), 10000, 'source edit in WYSIWYG mode');
+  log('view modes, ruler and imported macro refresh OK');
+
   /* ---- 3. type into the document, save with Ctrl+S, verify the .tex on disk ---- */
   await editorFrame.click('text=are studied');
   await page.keyboard.press('End');
@@ -175,6 +223,27 @@ try {
   log('typing reached the .tex file on disk through Ctrl+S');
   await shot('02-typed-and-saved');
 
+  /* ---- 3b. the combined view: the \include'd child is edited below the master and saved to its own file ---- */
+  await page.keyboard.press('Control+Shift+p');
+  await page.waitForSelector('.quick-input-widget input', { timeout: 15000 });
+  await page.keyboard.type('OverLyX: Show Master and Child');
+  await sleep(500);
+  await page.keyboard.press('Enter');
+  await until(() => editorFrame.evaluate(() => [...document.querySelectorAll('.child-doc .lyx-editor')].some(e => (e.textContent || '').includes('Child paragraph'))), 20000, 'the child document below the master');
+  await editorFrame.click('.child-doc .lyx-editor >> text=Child paragraph');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Typed into the child.');
+  await page.keyboard.press('Control+s');
+  await until(() => fs.readFileSync(path.join(ws, 'chapter.tex'), 'utf8').includes('Typed into the child.'), 20000, 'the child edit in chapter.tex on disk');
+  if (fs.readFileSync(path.join(ws, 'main.tex'), 'utf8').includes('Typed into the child.')) fail('the child edit leaked into the master file');
+  log('combined view: child document edited below the master and saved to chapter.tex');
+  await shot('02b-combined');
+  await page.keyboard.press('Control+Shift+p');
+  await page.waitForSelector('.quick-input-widget input', { timeout: 15000 });
+  await page.keyboard.type('OverLyX: Show Master and Child');
+  await sleep(500);
+  await page.keyboard.press('Enter');
+  await until(() => editorFrame.evaluate(() => document.querySelectorAll('.child-doc').length === 0), 10000, 'the combined view to switch off again');
   /* ---- 4. click into a formula: the static KaTeX upgrades to an editable math field ---- */
   await editorFrame.click('.lyx-math-display .katex');
   await until(() => editorFrame.evaluate(() => {
@@ -222,7 +291,11 @@ try {
   await shot('05-pdf');
 
   const finalTex = fs.readFileSync(path.join(ws, 'main.tex'), 'utf8');
+  for (const figure of ['../figures/parent.png', '../../figures/grandparent.png', '../figures/parent-pdf']) {
+    if (!finalTex.includes('{' + figure + '}')) fail('relative figure path changed on save: ' + figure);
+  }
   if (finalTex.indexOf('\\section{Methods}') < 0) fail('document structure corrupted during the GUI run');
+  if (finalTex.indexOf('\\include{chapter}') < 0) fail('the \\include of the child document was lost');
   if (/Ove[A-Z]/.test(finalTex)) fail('stray palette keystrokes leaked into the document');
   const pdfText = await pdfFrame.evaluate(() => document.body.innerText);
   if (pdfText.indexOf('✗') >= 0) fail('PDF panel reports build errors');
@@ -234,7 +307,7 @@ try {
   throw e;
 } finally {
   kill();
-  fs.rmSync(ws, { recursive: true, force: true });
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
   if (!failed) { fs.rmSync(udd, { recursive: true, force: true }); fs.rmSync(extDir, { recursive: true, force: true }); }
   else log('kept user-data-dir for inspection:', udd);
 }

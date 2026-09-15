@@ -39,6 +39,8 @@ function savedMessage(doc: OpenDoc): Uint8Array {
   encoding.writeVarUint(enc, MSG_SAVED);
   encoding.writeVarUint(enc, Math.round(doc.lastSavedAt));
   encoding.writeVarUint8Array(enc, doc.lastSavedSV);
+  // A vector alone cannot acknowledge deletions: those do not advance the client's clock.
+  encoding.writeVarUint8Array(enc, doc.lastSavedSnapshot);
   return encoding.toUint8Array(enc);
 }
 

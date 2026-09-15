@@ -37,7 +37,7 @@ function credentialsFor(username: string): { username: string; password: string 
 
 interface Session { ctx: BrowserContext; page: Page; errors: string[]; user: string }
 
-async function openSessions(browser: Browser, n: number): Promise<Session[]> {
+async function openSessions(browser: Browser, n: number, doc = DOC): Promise<Session[]> {
   const sessions: Session[] = [];
   // sequential logins keep the load on the (4 core) test box sane; the pages then run concurrently
   for (let i = 0; i < n; i++) {
@@ -46,7 +46,7 @@ async function openSessions(browser: Browser, n: number): Promise<Session[]> {
     const errors = collectErrors(page);
     const creds = credentialsFor(`u${i + 1}`);
     await login(page, creds);
-    await openDoc(page, DOC);
+    await openDoc(page, doc);
     sessions.push({ ctx, page, errors, user: creds.username });
   }
   for (const s of sessions) await expect(s.page.locator('.statusbar')).toContainText('connected', { timeout: 30000 });
@@ -65,6 +65,7 @@ const relevantErrors = (e: string[]) => e.filter(x => !/favicon|ResizeObserver|4
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(async ({ browser }) => {
   rmSync(DIR, { recursive: true, force: true }); mkdirSync(DIR, { recursive: true }); writeFileSync(FILE, texDoc(body()));
+  writeFileSync(`${DIR}/sequential.tex`, texDoc('Formula $a+b$ here.'));
   await shareProject(browser, PROJECT, ['u1', 'u2', 'u3', 'u4', 'u5', 'u6'].filter(u => { try { userCredentials(u); return true; } catch { return false; } }));
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
@@ -131,7 +132,26 @@ test(`${USERS} users type at the same time in the SAME paragraph`, async ({ brow
   for (const s of sessions) await s.ctx.close();
 });
 
-test('two users edit the same formula at the same time; all pages converge to one formula', async ({ browser }) => {
+test('later formula edits do not create spurious conflict comments', async ({ browser }) => {
+  const sessions = await openSessions(browser, 2, `${PROJECT}/sequential.tex`);
+  const field = (page: Page) => page.locator('.lyx-editor .lyx-math-inline').first();
+  const latexOf = (page: Page) => field(page).evaluate((el: any) => el.pmViewDesc.node.attrs.latex);
+  for (let i = 0; i < sessions.length; i++) {
+    const page = sessions[i].page;
+    await field(page).hover(); await field(page).click();
+    await expect(page.locator('.lm-field.focused')).toHaveCount(1);
+    await page.keyboard.press('End'); await page.keyboard.type(i ? '+t' : '+s');
+    await page.keyboard.press('Escape');
+    for (const session of sessions) await expect.poll(() => latexOf(session.page)).toBe(i ? 'a+b+s+t' : 'a+b+s');
+  }
+  for (const session of sessions) {
+    await expect(session.page.locator('.lyx-editor')).not.toContainText('Concurrent formula edit');
+    expect(relevantErrors(session.errors)).toEqual([]);
+    await session.ctx.close();
+  }
+});
+
+test('concurrent formula edits converge and retain both versions for review', async ({ browser }) => {
   test.setTimeout(180000);
   const sessions = await openSessions(browser, 3);
   const [a, b, c] = sessions;
@@ -152,10 +172,12 @@ test('two users edit the same formula at the same time; all pages converge to on
   let latex = '';
   await expect.poll(async () => { const l = await Promise.all(sessions.map(s => latexOf(s.page))); latex = l[0]; return l.every(x => x === l[0]); }, { timeout: 30000 }).toBe(true);
   console.log(`  concurrent formula edit result: ${latex}`);
-  // the formula is one node attribute: concurrent edits of the same formula are last-writer-wins
-  // (one user's keystrokes may be lost), but nothing may diverge or get corrupted
+  // Competing versions survive in persistent review comments beside the shared formula.
   expect(latex).toMatch(/^a\+b/);
-  expect(latex.includes('+x') || latex.includes('+y')).toBe(true);
+  for (const session of sessions) {
+    await expect.poll(() => session.page.evaluate(() => { const formulas: string[] = []; (window as any).overlyx.activeView.state.doc.descendants((n: any) => { if (n.type.name === 'math_inline') formulas.push(n.attrs.latex); }); return formulas.some(s => s.includes('+x')) && formulas.some(s => s.includes('+y')); })).toBe(true);
+  }
+  await expect.poll(() => { const text = readFileSync(FILE, 'utf8'); return text.includes('+x') && text.includes('+y'); }).toBe(true);
   await expect.poll(() => readFileSync(FILE, 'utf8').includes('$' + latex + '$'), { timeout: 30000 }).toBe(true);
   void c;
   for (const s of sessions) expect(relevantErrors(s.errors)).toEqual([]);

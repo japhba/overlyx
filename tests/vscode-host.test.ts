@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { lyxToPm, pmToLyxBody, texHeadings, type LyxDocument, type PMJSON } from '@overlyx/core';
 import { parseDocumentText, writeDocumentText, includeResolver } from '../packages/vscode/src/host/texdoc.ts';
 import { buildMeta } from '../packages/vscode/src/host/meta.ts';
-import { collectFiles, findMaster, projectDirFor } from '../packages/vscode/src/host/project.ts';
+import { childDocuments, collectFiles, findMaster, projectDirFor } from '../packages/vscode/src/host/project.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const bundledLayouts = path.resolve(here, '../packages/vscode/dist/lyxlib/layouts');
@@ -123,5 +123,24 @@ describe('vscode host document pipeline', () => {
   it('outline headings for the tree', () => {
     const h = texHeadings(MAIN, 3);
     expect(h.some(x => x.text === 'Introduction' && x.level === 2)).toBe(true);
+  });
+
+  it('imports macros from project files and uses unsaved definitions from open editors', () => {
+    const macrosPath = path.join(root, 'macros.tex');
+    fs.writeFileSync(macrosPath, String.raw`\newcommand{\bx}{\boldsymbol{x}}`);
+    const source = String.raw`\documentclass{article}\input{macros.tex}\begin{document}$\bx$\end{document}`;
+    const r = parseDocumentText(source, ctx, 'main.tex');
+    const metadata = (context = ctx) => buildMeta({ ctx: context, project: 'proj', relPath: 'main.tex', lyx: r.doc, isChild: false, fileText: source }) as any;
+    expect(metadata().macros.bx).toBeDefined();
+    const unsaved = metadata({ ...ctx, readText: (file: string) => file === macrosPath ? String.raw`\newcommand{\bx}{\boldsymbol{z}}` : undefined } as typeof ctx);
+    expect(JSON.stringify(unsaved.macros.bx)).toContain('boldsymbol{z}');
+  });
+});
+
+describe('childDocuments: the children of a master for the combined view', () => {
+  it('lists the included files in document order, resolved against the master, existing ones only', () => {
+    expect(childDocuments(root, 'main.tex')).toEqual(['chapter.tex']);
+    expect(childDocuments(path.join(root, 'paper2'), 'main.tex')).toEqual(['sections/intro.tex']);
+    expect(childDocuments(root, 'chapter.tex')).toEqual([]);
   });
 });

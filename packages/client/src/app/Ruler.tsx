@@ -50,6 +50,11 @@ export function Ruler({ width, onChange, marginMode, noteScale, onNoteScale }: {
   };
 
   const shown = drag?.width ?? (width > 0 ? Math.round(bandPx) : Math.round(bandPx));
+  const keyboardWidth = (e: KeyboardEvent) => {
+    const value = width || shown;
+    const next = e.key === 'ArrowRight' ? value + 20 : e.key === 'ArrowLeft' ? value - 20 : e.key === 'Home' ? MIN_WIDTH : e.key === 'End' ? MAX_WIDTH : null;
+    if (next !== null) { e.preventDefault(); onChange(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, next))); }
+  };
   const ticks: { x: number; major: boolean; label?: string }[] = [];
   for (let cm = 0; cm * PX_PER_CM <= bandPx + 1; cm += 0.5) {
     const major = Number.isInteger(cm);
@@ -60,8 +65,8 @@ export function Ruler({ width, onChange, marginMode, noteScale, onNoteScale }: {
       <div class="ruler-inner">
         <div class="ruler-band" ref={bandRef} onDblClick={() => onChange(DEFAULT_WIDTH)}>
           {ticks.map(t => <span key={t.x} class={'tick' + (t.major ? ' major' : '')} style={{ left: t.x + 'px' }}>{t.label && <span class="tick-label">{t.label}</span>}</span>)}
-          <span class="handle left" onPointerDown={startDrag('left')} title="Left margin — drag to change the text width" />
-          <span class="handle right" onPointerDown={startDrag('right')} title="Right margin — drag to change the text width" />
+          <span class="handle left" role="slider" tabIndex={0} aria-label="Text width, left handle" aria-valuemin={MIN_WIDTH} aria-valuemax={MAX_WIDTH} aria-valuenow={width || shown} onKeyDown={keyboardWidth} onPointerDown={startDrag('left')} title="Left margin — drag or use arrow keys to change the text width" />
+          <span class="handle right" role="slider" tabIndex={0} aria-label="Text width, right handle" aria-valuemin={MIN_WIDTH} aria-valuemax={MAX_WIDTH} aria-valuenow={width || shown} onKeyDown={keyboardWidth} onPointerDown={startDrag('right')} title="Right margin — drag or use arrow keys to change the text width" />
           {(drag || width === 0) && <span class="readout">{(shown / PX_PER_CM).toFixed(1)} cm · {shown} px{width === 0 ? ' (full width)' : ''}</span>}
           {marginMode && onNoteScale && noteScale !== undefined && (
             <span class="ruler-notes" title="Text size of notes and comments (double-click to reset)">

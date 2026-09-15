@@ -14,10 +14,18 @@ export type HostToEditor =
   | { type: 'init'; docId: string; base: string; pmDoc: PmDoc; headerLines: string[]; fragment: boolean; dark: boolean }
   /** the file changed outside the editor (git, another editor, VS Code undo): new content, applied as a diff */
   | { type: 'externalUpdate'; pmDoc: PmDoc; headerLines: string[] }
+  | { type: 'metadataChanged' }
   /** move the cursor to a document position (outline click) */
   | { type: 'goto'; pos: number }
   /** run a UI command (keybindings / menus contributed on the VS Code side) */
-  | { type: 'command'; name: 'toggleMargin' | 'find' | 'syncToPdf' | 'buildPdf' | 'toggleTracking' }
+  | { type: 'command'; name: 'toggleMargin' | 'find' | 'syncToPdf' | 'buildPdf' | 'toggleTracking' | 'toggleCombined' }
+  /**
+   * The master's child documents (\include / \input, in order) for the combined view: an item
+   * carries its content only when the host has just opened it; known children keep their editor.
+   */
+  | { type: 'children'; items: { id: string; pmDoc?: PmDoc; headerLines?: string[] }[] }
+  /** a child document changed outside the editor */
+  | { type: 'childExternalUpdate'; id: string; pmDoc: PmDoc; headerLines: string[] }
   /** SyncTeX inverse search: a line (1-based) of the LaTeX as built — locate it and move the cursor */
   | { type: 'inverseSync'; line: number }
   | { type: 'theme'; dark: boolean };
@@ -29,7 +37,7 @@ export type EditorToHost =
   | { type: 'update'; pmDoc: PmDoc; headerLines: string[] }
   | { type: 'outline'; items: OutlineEntry[] }
   | { type: 'selection'; pos: number }
-  | { type: 'notify'; text: string; kind?: 'info' | 'error' }
+  | { type: 'notify'; text: string; kind?: 'info' | 'error'; /** only for local/telemetry diagnostics, never shown */ stack?: string }
   /** flush pending edits and save the TextDocument (Ctrl+S inside the editor) */
   | { type: 'save' }
   /** start a PDF build (and open the PDF panel) / cancel it / just open the panel */
@@ -38,6 +46,10 @@ export type EditorToHost =
   | { type: 'openPdfPanel' }
   /** open another document of the project (child document, label in another file) */
   | { type: 'openDoc'; id: string; goto?: string; heading?: number }
+  /** show the master's child documents below it (the host opens their sessions) or hide them again */
+  | { type: 'combined'; on: boolean }
+  /** a child document changed in the combined view: its full ProseMirror doc (debounced) */
+  | { type: 'childUpdate'; id: string; pmDoc: PmDoc; headerLines: string[] }
   /** SyncTeX forward search result: show this box in the PDF panel */
   | { type: 'syncTarget'; target: { page: number; x: number; y: number; w?: number; h?: number; seq: number } };
 
@@ -52,4 +64,4 @@ export type PdfToHost =
   | { type: 'ready' }
   /** double-click in the PDF: inverse search at this point (PDF points from the page's top-left) */
   | { type: 'inverse'; page: number; x: number; y: number }
-  | { type: 'notify'; text: string; kind?: 'info' | 'error' };
+  | { type: 'notify'; text: string; kind?: 'info' | 'error'; /** only for local/telemetry diagnostics, never shown */ stack?: string };

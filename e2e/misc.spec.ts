@@ -61,7 +61,7 @@ test('Ctrl+Backspace deletes a word; Ctrl+Alt+S toggles the source pane; statist
   await page.keyboard.press('Control+Alt+s');
   await expect(page.locator('.source-pane')).toBeVisible();
   await page.keyboard.press('Control+Alt+s');
-  await expect(page.locator('.source-pane')).toHaveCount(0);
+  await expect(page.locator('.source-pane')).toBeHidden();   // the pane stays mounted (its state survives), hidden in the WYSIWYG view mode
   await page.getByRole('button', { name: 'Document', exact: true }).first().click();
   await page.getByText('Statistics (word count)…').click();
   const dialog = page.locator('.dialog');

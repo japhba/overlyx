@@ -16,6 +16,7 @@ import { editorContext, viewDocDir, viewProject } from '../context';
 import { getPrefs } from '../../prefs';
 import { openRewriteMath, REWRITE_KEY } from '../ai/rewrite';
 import { applyChangeAttrs } from '../plugins/changes';
+import { FormulaReview } from '../mathconflict';
 
 /** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
 export const pendingFocus: { pos: number | null; keys: string[] } = { pos: null, keys: [] };
@@ -210,12 +211,14 @@ export class MathInlineView implements NodeView {
   private staticKey = '';
   private updating = false;
   private lastLatex: string;
+  private review: FormulaReview;
   /** shows its source; rendered later (idle time / scrolled near / macros known) */
   pending = false;
 
   constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-math-inline';
+    this.review = new FormulaReview(view, getPos, false, node.attrs.editClock);
     this.lastLatex = String(node.attrs.latex);
     this.dom.classList.toggle('empty', !this.lastLatex.trim());
     applyChangeAttrs(this.dom, node);
@@ -262,6 +265,11 @@ export class MathInlineView implements NodeView {
       latex: '$' + this.lastLatex + '$', display: false, macros: table,
       imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex),
+      onBlur: () => {
+        this.review.adopt(this.node.attrs.editClock);
+        this.lastLatex = String(this.node.attrs.latex);
+        if (this.field) { this.updating = true; this.field.setLatex('$' + this.lastLatex + '$'); this.updating = false; }
+      },
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
       onDragOut: (ev, reenter) => dragOutOf(this.view, this.getPos, ev, reenter),
       onShiftClick: ev => shiftClickAt(this.view, ev.clientX, ev.clientY),
@@ -289,9 +297,10 @@ export class MathInlineView implements NodeView {
     if (pos === undefined) return;
     const cur = this.view.state.doc.nodeAt(pos);
     if (!cur || cur.attrs.latex === body) return;
+    const editClock = this.review.edited(body);
     this.lastLatex = body;
     this.dom.classList.toggle('empty', !body.trim());
-    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex: body }).setMeta('addToHistory', true));
+    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex: body, editClock }).setMeta('addToHistory', true));
   }
   refreshMacros() {
     pump();   // macros may have just arrived: deferred lazy upgrades can proceed
@@ -306,6 +315,7 @@ export class MathInlineView implements NodeView {
     this.node = node;
     applyChangeAttrs(this.dom, node);
     const latex = String(node.attrs.latex);
+    this.review.received(latex, node.attrs.editClock, !!this.field?.hasFocus());
     if (this.field) {
       this.refreshMacros();
       if (latex !== this.lastLatex && !this.field.hasFocus()) {
@@ -327,7 +337,7 @@ export class MathInlineView implements NodeView {
   stopEvent(ev: Event) { return !!this.field && this.field.dom.contains(ev.target as Node); }
   ignoreMutation() { return true; }
   focus(where: 'start' | 'end' = 'end') { this.ensureField().focus(where); }
-  destroy() { mathViews.delete(this); unwatchLazy(this); this.field?.destroy(); }
+  destroy() { this.review.destroy(); mathViews.delete(this); unwatchLazy(this); this.field?.destroy(); }
 }
 
 /* ------------------------------------------------ display formulas */
@@ -352,12 +362,14 @@ export class MathDisplayView implements NodeView {
   metaEl: HTMLElement;
   private updating = false;
   private lastLatex: string;
+  private review: FormulaReview;
   private ro: ResizeObserver | null = null;
   private mo: MutationObserver | null = null;
   /** shows its source; rendered later (idle time / scrolled near / macros known) */
   pending = false;
 
   constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined) {
+    this.review = new FormulaReview(view, getPos, true, node.attrs.editClock);
     this.lastLatex = String(node.attrs.latex);
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-math-display';
@@ -428,6 +440,11 @@ export class MathDisplayView implements NodeView {
       latex: this.lastLatex, display: true, macros: table,
       imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex),
+      onBlur: () => {
+        this.review.adopt(this.node.attrs.editClock);
+        this.lastLatex = String(this.node.attrs.latex);
+        if (this.field) { this.updating = true; this.field.setLatex(this.lastLatex); this.updating = false; }
+      },
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
       onDragOut: (ev, reenter) => dragOutOf(this.view, this.getPos, ev, reenter),
       onShiftClick: ev => shiftClickAt(this.view, ev.clientX, ev.clientY),
@@ -566,8 +583,9 @@ export class MathDisplayView implements NodeView {
     if (pos === undefined) return;
     const cur = this.view.state.doc.nodeAt(pos);
     if (!cur || cur.attrs.latex === latex) return;
+    const editClock = this.review.edited(latex);
     this.lastLatex = latex;
-    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex }));
+    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex, editClock }));
     this.renderMeta();
   }
 
@@ -604,6 +622,7 @@ export class MathDisplayView implements NodeView {
     this.node = node;
     applyChangeAttrs(this.dom, node);
     const latex = String(node.attrs.latex);
+    this.review.received(latex, node.attrs.editClock, !!this.field?.hasFocus());
     if (this.field) this.refreshMacros();
     if (latex !== this.lastLatex) {
       this.lastLatex = latex;
@@ -619,7 +638,7 @@ export class MathDisplayView implements NodeView {
   stopEvent(ev: Event) { return (!!this.field && this.field.dom.contains(ev.target as Node)) || this.metaEl.contains(ev.target as Node); }
   ignoreMutation() { return true; }
   focus(where: 'start' | 'end' = 'end') { this.ensureField().focus(where); }
-  destroy() { mathViews.delete(this); unwatchLazy(this); cancelAnimationFrame(this.relayoutRaf); this.ro?.disconnect(); this.mo?.disconnect(); this.field?.destroy(); }
+  destroy() { this.review.destroy(); mathViews.delete(this); unwatchLazy(this); cancelAnimationFrame(this.relayoutRaf); this.ro?.disconnect(); this.mo?.disconnect(); this.field?.destroy(); }
 }
 
 /* ------------------------------------------------ macro definitions */

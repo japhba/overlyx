@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { isDirectImage, toPng } from './graphics.ts';
+import { isDirectImage, isGraphicsFile, resolveGraphicsPath, toPng } from './graphics.ts';
 
 export interface BridgeDelegate {
   /** project name → absolute root directory (undefined: unknown project) */
@@ -19,6 +19,7 @@ export interface BridgeDelegate {
   meta(docId: string): Promise<Record<string, unknown>>;
   /** current LaTeX text of a document (the open editor's state, else the file) */
   texText(docId: string): Promise<string>;
+  applySource(docId: string, text: string): Promise<{ ok: boolean; warnings: string[] }>;
   clip(docId: string, latex: string): Promise<{ blocks: unknown[]; warnings: string[] }>;
   headerGet(docId: string): Promise<{ headerLines: string[] }>;
   headerSet(docId: string, body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<{ ok: boolean; headerLines: string[] }>;
@@ -107,6 +108,11 @@ export class Bridge {
       const kind = m[3] ? `${m[2]}/${m[3]}` : m[2];
       if (kind === 'meta') { send(res, 200, await d.meta(docId)); return; }
       if (kind === 'tex') { res.setHeader('Content-Type', 'application/x-tex; charset=utf-8'); res.end(await d.texText(docId)); return; }
+      if (kind === 'source' && req.method === 'POST') {
+        const b = await body(req);
+        if (typeof b?.text !== 'string') { send(res, 400, { error: 'source text required' }); return; }
+        send(res, 200, await d.applySource(docId, b.text)); return;
+      }
       if (kind === 'outline') { send(res, 200, d.outline(docId)); return; }
       if (kind === 'header' && req.method === 'GET') { send(res, 200, await d.headerGet(docId)); return; }
       if (kind === 'header' && req.method === 'POST') { send(res, 200, await d.headerSet(docId, await body(req))); return; }
@@ -170,8 +176,13 @@ export class Bridge {
       const root = d.projectRoot(decodeURIComponent(m[1]));
       if (!root) { send(res, 404, { error: 'unknown project' }); return; }
       const rel = m[3].split('/').map(decodeURIComponent).join('/');
-      const abs = path.resolve(root, rel);
-      if (abs !== root && !abs.startsWith(root + path.sep)) { send(res, 403, { error: 'path escapes project' }); return; }
+      const requested = path.resolve(root, rel);
+      const abs = m[2] === 'graphics' ? resolveGraphicsPath(requested) : requested;
+      // Local papers may reference shared figures above their own directory. Permit supported
+      // graphics through the image endpoint; raw file reads and uploads remain project-bounded.
+      if (abs !== root && !abs.startsWith(root + path.sep) && (m[2] !== 'graphics' || !isGraphicsFile(abs))) {
+        send(res, 403, { error: 'path escapes project' }); return;
+      }
       if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) { send(res, 404, { error: 'not found' }); return; }
       if (m[2] === 'graphics' && !isDirectImage(abs)) {
         try {

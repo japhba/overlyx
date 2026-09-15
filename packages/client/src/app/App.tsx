@@ -1,3 +1,4 @@
+import { referenceTransaction } from '../editor/references';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { nodeText } from '../editor/cliptext';
@@ -11,6 +12,7 @@ import { Login } from './Login';
 import { DocPanel } from './DocPanel';
 import { Home, projectDocs } from './Home';
 import { TextEditor } from './TextEditor';
+import { ViewModeSwitch, type ViewMode } from './ViewModeSwitch';
 import { MarkdownEditor } from './MarkdownEditor';
 import { ShareDialog } from './Share';
 import { GuestCallout } from './Guest';
@@ -208,6 +210,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [hashId, setHashId] = useState<string | null>(parseHash().id);
   const docId = hashId ? hashId.replace(/^raw:/, '') : null;
   const rawSplit = !!hashId && hashId.startsWith('raw:');
+  const [sourceOnly, setSourceOnly] = useState(false);
+  const viewMode = rawSplit ? (sourceOnly ? 'tex' : 'split') : 'wysiwyg';
+  const changeViewMode = (mode: ViewMode) => { setSourceOnly(mode === 'tex'); if (docId) location.hash = '#/' + (mode === 'wysiwyg' ? '' : 'raw:') + docId; };
   /** The Source switches (Ctrl+Alt+S, the right rail, the panel tabs, the View menu): the LaTeX source beside the document. */
   const toggleRawSplit = () => { if (docId) location.hash = '#/' + (rawSplit ? docId : 'raw:' + docId); };
   // .tex documents open in the collaborative editor, other text files in a plain text editor (ids
@@ -687,7 +692,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           a.download = (id.split('/').pop() ?? 'document.tex').replace(/\.tex$/, '') + '-offline-changes.lyx';
           a.click();
           kept = 'Your unsynced edits could not be stored on the server; they were downloaded as a .lyx file instead (import it into the project to recover them).';
-        } catch { kept = 'Your unsynced edits could not be kept.'; }
+        } catch { notify('Your unsynced edits could not be exported. This local copy has been kept; copy your edits before reloading.', 'error'); return; }
       }
     }
     await h.discardLocal();
@@ -1657,10 +1662,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         if (target?.node && target.pos !== undefined) {
           const p = commandParams(target.node);
           const tpos = target.pos, tnode = target.node;
-          return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: p.get('LatexCommand') ?? 'ref' }} onClose={close}
-            onInsert={(n, k) => { const params = [`LatexCommand ${k}`, `reference "${n}"`, 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '']; view.dispatch(view.state.tr.setNodeMarkup(tpos, undefined, { ...tnode.attrs, params: JSON.stringify(params) })); }} />;
+          return <RefDialog view={view} labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: unquote(p.get('package')) === 'cleveref' ? 'cref' : p.get('LatexCommand') ?? 'ref', tuple: unquote(p.get('tuple')) === 'range' ? 'range' : 'list', caps: unquote(p.get('caps')) === 'true' }} onClose={close}
+            onInsert={(n, k, o) => view.dispatch(referenceTransaction(view.state, n, k, o, tpos))} />;
         }
-        return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={target?.prefill ? { name: target.prefill, kind: 'ref' } : undefined} onClose={close} onInsert={(n, k) => run(C.insertRef(n, k))} />;
+        return <RefDialog view={view} labels={labels} useRefstyle={!!meta?.useRefstyle} initial={target?.prefill ? { name: target.prefill, kind: 'ref' } : undefined} onClose={close} onInsert={(n, k, o) => view.dispatch(referenceTransaction(view.state, n, k, o))} />;
       }
       case 'cite': {
         const target = dialog.arg as { pos: number; node: any } | undefined;
@@ -1727,7 +1732,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         users={isLyxDoc ? status.users : undefined} onJumpToUser={jumpToUser}
         onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? shareProject}”: invite people or turn on a link` : undefined}
         onSignIn={user.guest ? signIn : undefined}
-        right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />
+        primary={isLyxDoc && <ViewModeSwitch mode={viewMode} onChange={changeViewMode} />}
+        right={docId && <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span>} />
       {user.guest && <GuestCallout user={user} project={curProject} google={google} onSignIn={signIn} />}
       {isLyxDoc && tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={standardGroups} />}
       {/* LyX's default.ui puts View/Update and Extra on one row ("samerow") */}
@@ -1790,20 +1796,20 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           <div class="rail left"><button data-rail="outline" title={LEFT_TITLE} onClick={() => setShowFiles(true)}>Documents</button></div>
         )}
         {showFiles && <SidebarGrip side="left" />}
-        <div class={'editor-column' + (rawSplit && isLyxDoc ? ' split' : '')}>
+        <div class={'editor-column' + (isLyxDoc ? ' view-' + viewMode + (viewMode === 'wysiwyg' ? '' : ' split') : '')}>
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
           {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/'))} toolbar={<a class="small-btn" href={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/')) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : !isLyxDoc ? (/\.(md|markdown)$/i.test(textId!) ? <MarkdownEditor key={docId} id={textId!} notify={notify} /> : <TextEditor key={docId} id={textId!} notify={notify} />) :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (
-                <ChildEditor key={id} id={id} user={user} marginMode={marginMode} readOnly={viewOnly} onSelection={onSelection} onDocChange={() => { setDocTick(t => t + 1); }}
+                <ChildEditor key={id + ':' + reloadKey} id={id} user={user} marginMode={marginMode} readOnly={viewOnly} onSelection={onSelection} onDocChange={() => { setDocTick(t => t + 1); }} onStale={resolveStale}
                   register={(cid, h) => { if (h) childRefs.current.set(cid, h); else childRefs.current.delete(cid); rerender(); }} />
               ))}
             </div>
           ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); setTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} onSignIn={signIn} notify={notify} />}
         </div>
-        {isLyxDoc && rawSplit && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => { location.hash = '#/' + docId; }} />}
+        {isLyxDoc && <SourcePane key={docId!} target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => changeViewMode('wysiwyg')} />}
         </div>
         {isLyxDoc && !rightTab && (
           <div class="rail right">
@@ -1868,7 +1874,7 @@ function collectChildren(view: EditorView): string[] {
   return out;
 }
 
-function ChildEditor({ id, user, marginMode, readOnly, onSelection, onDocChange, register }: { id: string; user: User; marginMode: boolean; readOnly?: boolean; onSelection: (v: EditorView) => void; onDocChange: () => void; register: (id: string, h: EditorHandle | null) => void }) {
+function ChildEditor({ id, user, marginMode, readOnly, onSelection, onDocChange, onStale, register }: { id: string; user: User; marginMode: boolean; readOnly?: boolean; onSelection: (v: EditorView) => void; onDocChange: () => void; onStale: (handle: EditorHandle, id: string, pending: boolean) => Promise<void>; register: (id: string, h: EditorHandle | null) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<Status>({ connected: false, synced: false, users: [] });
   const [error, setError] = useState<string | null>(null);
@@ -1880,7 +1886,7 @@ function ChildEditor({ id, user, marginMode, readOnly, onSelection, onDocChange,
       if (cancelled || !ref.current) return;
       ref.current.innerHTML = '';
       handle = createEditor({ docId: id, user, container: ref.current, marginMode, child: true, onStatus: setStatus, onSelectionChange: onSelection, onDocChange,
-        onStale: () => { void handle?.discardLocal().then(() => setTimeout(() => location.reload(), 800)); } });
+        onStale: info => { if (handle) void onStale(handle, id, info.pendingLocal); } });
       register(id, handle);
       if (readOnly || m.role === 'view') { handle.setViewOnly(true); handle.setEditable(false); }
       refreshMacros(handle.view, m.macros, true);

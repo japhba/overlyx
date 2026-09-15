@@ -29,6 +29,7 @@ import { MathInlineView, MathDisplayView, MacroView } from '@client/editor/nodev
 import { InsetView } from '@client/editor/nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from '@client/editor/nodeviews/leaf';
 import { editorContext, viewDocDir, viewProject } from '@client/editor/context';
+import { pasteTargetsPlugin, pasteLatex } from '@client/editor/plugins/paste';
 import { sliceText } from '@client/editor/cliptext';
 import { showContextMenu } from '@client/editor/contextmenu';
 import { editorContextMenu } from '@client/editor/editormenu';
@@ -75,7 +76,7 @@ export interface LocalEditorOptions {
   pmDoc: unknown;
   marginMode?: boolean;
   onSelectionChange?: (view: EditorView, info: { docChanged: boolean }) => void;
-  onDocChange?: (view: EditorView) => void;
+  onDocChange?: (view: EditorView, info: { external: boolean }) => void;
 }
 
 const EXTERNAL_ORIGIN = 'vscode-file';
@@ -89,6 +90,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
 
   const { doc: initialDoc, mapping } = initProseMirrorDoc(fragment, schema);
   let viewRef: EditorView | null = null;
+  let applyingExternal = false;
 
   const plugins: Plugin[] = [
     ySyncPlugin(fragment, { mapping }),
@@ -111,13 +113,14 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
     changeTrackingPlugin(),
     changesFilterPlugin(),
     findPlugin(),
+    pasteTargetsPlugin(),
     mirrorCaretPlugin(),
     macroDefsPlugin(() => viewRef),
     new Plugin({
       view: () => ({
         update: (view, prev) => {
           if (!prev.selection.eq(view.state.selection) || prev.doc !== view.state.doc) opts.onSelectionChange?.(view, { docChanged: prev.doc !== view.state.doc });
-          if (prev.doc !== view.state.doc) opts.onDocChange?.(view);
+          if (prev.doc !== view.state.doc) opts.onDocChange?.(view, { external: applyingExternal });
         },
       }),
     }),
@@ -165,6 +168,12 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
       return false;
     },
     handleDOMEvents: {
+      keyup(view, event) {
+        if (/^(Arrow|Home$|End$|Page)/.test(event.key)) {
+          try { (view as any).domObserver.flush(); } catch { /* view is closing */ }
+        }
+        return false;
+      },
       contextmenu(view, ev) {
         const t = ev.target as HTMLElement;
         if (t.closest?.('math-field')) return false;
@@ -194,14 +203,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
       };
       if (text && !html) {
         if (/\\[a-zA-Z]+|\\\[|\\\(|\$[^$\n][^$]*\$/.test(text)) {
-          void api.parseClip(view.dom.dataset.docId ?? opts.docId, text).then(r => {
-            const blocks = (r.blocks as unknown[]).map(b => schema.nodeFromJSON(b)).filter(n => n.type.name !== 'doc');
-            if (!blocks.length) { plainPaste(); return; }
-            const single = blocks.length === 1 && blocks[0].type.name === 'paragraph' && blocks[0].attrs.layout === 'Standard' && !blocks[0].attrs.depth;
-            const slice = single ? new Slice(Fragment.from(blocks[0].content), 0, 0) : new Slice(Fragment.from(blocks), 0, 0);
-            view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
-            view.focus();
-          }).catch(e => { console.warn('LaTeX paste fell back to plain text:', e); plainPaste(); });
+          void pasteLatex(view, view.dom.dataset.docId ?? opts.docId, text);
           return true;
         }
         plainPaste();
@@ -228,7 +230,9 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
   return {
     view, ydoc,
     applyExternal(pmDoc: unknown) {
-      ydoc.transact(() => { prosemirrorJSONToYXmlFragment(schema, pmDoc, fragment); }, EXTERNAL_ORIGIN);
+      applyingExternal = true;
+      try { ydoc.transact(() => { prosemirrorJSONToYXmlFragment(schema, pmDoc, fragment); }, EXTERNAL_ORIGIN); }
+      finally { applyingExternal = false; }
     },
     destroy() {
       unsubscribePrefs();

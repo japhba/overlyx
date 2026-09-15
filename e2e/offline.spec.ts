@@ -68,8 +68,10 @@ test('edits made offline are kept locally and saved once the connection is back'
   expect(readFileSync(FILE, 'utf8')).not.toContain('OFFLINE-MARK');
 
   // reloading while offline: app shell from the service worker, document from IndexedDB
+  await page.evaluate(() => { (window as any).__beforeOfflineReload = true; });
   await page.reload();
   await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  expect(await page.evaluate(() => (window as any).__beforeOfflineReload)).toBeUndefined();
   await expect(page.locator('.lyx-editor')).toContainText('OFFLINE-MARK');
   await expect(saveState(page)).toHaveText(/Offline/, { timeout: 15000 });
   await typeInParagraph(page, 1, ' OFFLINE-MARK-2');
