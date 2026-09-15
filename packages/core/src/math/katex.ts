@@ -183,7 +183,7 @@ export function atomToKatex(a: Atom, ctx: KatexContext, mode: 'math' | 'text'): 
       const n = a.n === 'bm' || a.n === 'heavysymbol' ? 'boldsymbol' : a.n === 'lefteqn' ? 'mathrlap' : a.n;
       return `\\${n}{${cellToKatex(a.body, ctx, a, 0)}}` + (a.limits ? '\\' + a.limits : '');
     }
-    case 'color': return a.old ? `{\\color{${a.color === 'normalcolor' ? 'black' : a.color}}${cellToKatex(a.body, ctx, a, 0, mode)}}` : `\\textcolor{${a.color}}{${cellToKatex(a.body, ctx, a, 0, 'text')}}`;
+    case 'color': return a.old ? (a.color === 'normalcolor' ? `{\\htmlClass{lm-normalcolor}{${cellToKatex(a.body, ctx, a, 0, mode)}}}` : `{\\color{${a.color}}${cellToKatex(a.body, ctx, a, 0, mode)}}`) : `\\textcolor{${a.color}}{${cellToKatex(a.body, ctx, a, 0, 'text')}}`;
     case 'phantom': { const n = a.n === 'smasht' ? 'smash[t]' : a.n === 'smashb' ? 'smash[b]' : a.n; return `\\${n}{${cellToKatex(a.body, ctx, a, 0)}}`; }
     case 'ensuremath': return `{${cellToKatex(a.body, ctx, a, 0, 'math')}}`;
     case 'overset': case 'underset': return `\\${a.t}{${cellToKatex(a.top, ctx, a, 1)}}{${cellToKatex(a.body, ctx, a, 0)}}`;

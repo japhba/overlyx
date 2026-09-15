@@ -13,6 +13,7 @@
   --fg2: #444;
   --ui-muted: #666;
   --muted2: #888;
+  --ghost-fg: #888;      /* previews of what Tab would insert: command completions, AI ghost text */
   --accent: #3b6ea5;
   --accent-strong: #1f4f87;
   --accent-border: #b9cde6;
@@ -79,6 +80,7 @@ html[data-theme="dark"] {
   --fg2: #c6c6d0;
   --ui-muted: #9a9aa8;
   --muted2: #7c7c8a;
+  --ghost-fg: #a0a0ae;   /* brighter than --muted2: a preview must stay readable on the near-black page */
   --accent: #7aa7ea;
   --accent-strong: #a9c6f5;
   --accent-border: #3c5580;
@@ -543,8 +545,9 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .lm-mm { color: var(--math-cmd); }
 .lm-mm.lm-mm-typing { color: var(--err); }          /* not (yet) a command */
 .lm-mm.lm-mm-ok { color: var(--ok); }              /* a valid command: Space/Tab inserts it */
-.lm-mm-hint { color: var(--muted2); }                  /* LyX's completion, Tab accepts it */
+.lm-mm-hint { color: var(--ghost-fg); }                  /* LyX's completion, Tab accepts it */
 .lm-arg { color: var(--math-arg); }
+.lm-normalcolor { color: var(--editor-fg); }   /* \normalcolor: the document's text colour, not literal black */
 .lm-ref { color: var(--warn-fg); background: var(--warn-bg); border-radius: 2px; }
 .lm-comment { color: var(--muted2); font-size: 0.8em; }
 .lm-error { font-family: "DejaVu Sans Mono", monospace; font-size: 0.8em; color: var(--err); }
@@ -1166,10 +1169,10 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 
 /* ------------------------------------------------------------ AI assistance (editor/ai) */
 /* ghost text: the suggested continuation, rendered like real content but faint */
-.ai-ghost { color: var(--muted2); opacity: 0.85; pointer-events: none; user-select: none; }
+.ai-ghost { color: var(--ghost-fg); opacity: 0.85; pointer-events: none; user-select: none; }
 .ai-ghost .katex, .ai-ghost .lyx-math-inline, .ai-ghost .lyx-math-display { color: inherit; }
 .ai-ghost .lyx-math-display { display: block; text-align: center; }
-.lm-ghost { color: var(--muted2); opacity: 0.85; }
+.lm-ghost { color: var(--ghost-fg); opacity: 0.85; }
 /* rewrite preview: the old passage struck through, the proposal after it */
 .ai-old { text-decoration: line-through; text-decoration-color: var(--err); background: var(--err-bg); color: var(--err); }
 .ai-new { background: var(--ok-bg); color: var(--ok-fg2); box-shadow: inset 0 -2px 0 var(--ok-border); border-radius: 2px; padding: 0 1px; }
