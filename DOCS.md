@@ -584,7 +584,16 @@ systemd unit's `WorkingDirectory`), and the VS Code extension is released by
 both must come from the same commit: `scripts/deploy.sh` refuses a diverged `master`/`origin/master`,
 pushes (which starts the extension release), fast-forwards the production checkout, runs `npm ci`
 when the lockfile changed, builds the client, restarts the unit and checks that https://overlyx.app
-serves the new bundle. Run the checks below first — the script deploys, it does not test.
+serves the new bundle (`/api/version` reports the running commit). Run the checks below first — the
+script deploys, it does not test. Pushes from any other machine deploy themselves:
+`deploy/overlyx-autodeploy.timer` runs `scripts/autodeploy.sh` every two minutes on the server, which
+fetches origin and, when origin/master is ahead of production, typechecks the client and the
+extension and runs `npm test` in a throwaway worktree, then fast-forwards, builds, restarts and
+verifies — reporting a `deploy/overlyx.app` commit status on GitHub (pending → success / failure;
+`gh api repos/japhba/overlyx/commits/<sha>/status`). A failed commit is not retried; the next push is.
+Both scripts share one lock. Install the units with `cp deploy/overlyx-autodeploy.* /etc/systemd/system/
+&& systemctl daemon-reload && systemctl enable --now overlyx-autodeploy.timer`; logs in
+`journalctl -u overlyx-autodeploy`.
 *Help ▸ OverLyX for VS Code* (`/api/vscode-extension`) redirects to the latest GitHub release's
 `overlyx-vscode.vsix` (the build the extension's self-updater installs); a `.vsix` packaged into
 `packages/vscode` of the running checkout is the fallback (`OVERLYX_VSIX_SOURCE=local` forces it).
