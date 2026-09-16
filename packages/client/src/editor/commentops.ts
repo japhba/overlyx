@@ -22,6 +22,22 @@ export interface CommentInfo {
   replies: number;
 }
 
+/** "Jan Bauer" → "JB", "kirsten" → "K": the avatar letters of a comment's author */
+export function authorInitials(name: string): string {
+  const words = name.trim().split(/[\s._-]+/).filter(Boolean);
+  if (!words.length) return '?';
+  const first = [...words[0]][0] ?? '?';
+  const last = words.length > 1 ? [...words[words.length - 1]][0] ?? '' : '';
+  return (first + last).toUpperCase();
+}
+
+/** a stable hue (0–359) for an author's avatar, the same on every machine */
+export function authorHue(name: string): number {
+  let h = 0;
+  for (const ch of name.trim().toLowerCase()) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
+  return h % 360;
+}
+
 export const isCommentNode = (n: PMNode): boolean => n.type.name === 'inset' && n.attrs.name === 'Note' && n.attrs.arg === 'Comment';
 
 /** every comment thread of a view, in document order */

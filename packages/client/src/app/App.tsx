@@ -1470,6 +1470,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { id: 'm-angle', title: 'Insert ⟨ ⟩ (Alt+M <)', icon: '⟨ ⟩', html: mathPreview('\\left\\langle\\square\\right\\rangle') ?? undefined, action: () => mathExec('delim', '\\langle', '\\rangle') },
       { id: 'm-dangle', title: 'Insert ⟪ ⟫ (adds the \\llangle macro to the preamble)', icon: '⟪ ⟫', html: mathPreview('\\left\\langle\\mkern-4.5mu\\left\\langle\\square\\right\\rangle\\mkern-4.5mu\\right\\rangle') ?? undefined, action: () => insertDelim({ pair: { label: '⟪ ⟫', left: '\\llangle', right: '\\rrangle', title: '' }, size: '' }) },
       { id: 'm-delims', title: 'Delimiters of all sizes (\\left…\\right, \\big … \\Bigg)', icon: 'delimsize', palette: { title: 'Delimiters — rows: pair, columns: size', render: close => <DelimPalette close={close} onPick={insertDelim} onDialog={() => setDialog({ name: 'delimiters' })} /> } },
+      { id: 'm-delim-grow', title: 'Larger delimiters around the cursor: ( ) → \\big → \\Big → \\bigg → \\Bigg → \\left…\\right', icon: '( )↑', action: () => mathExec('delimSize', 1) },
+      { id: 'm-delim-shrink', title: 'Smaller delimiters around the cursor: \\left…\\right → \\Bigg → \\bigg → \\Big → \\big → ( )', icon: '( )↓', action: () => mathExec('delimSize', -1) },
     ],
     [
       { id: 'm-matrix', title: 'Insert matrix…', icon: 'matrix', html: mathPreview('\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}') ?? undefined, action: () => setDialog({ name: 'matrix' }) },

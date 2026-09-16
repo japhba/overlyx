@@ -873,6 +873,59 @@ export class MathCursor {
     cand.limits = cand.limits === 'limits' ? 'nolimits' : cand.limits === 'nolimits' ? undefined : 'limits';
   }
 
+  /**
+   * Grow (dir 1) or shrink (dir -1) the innermost pair of delimiters around the cursor by one
+   * step of the ladder plain → \big → \Big → \bigg → \Bigg → \left…\right (variable). The pair
+   * is a \left…\right inset the cursor is in, or matching delimiters (plain or \bigl…\bigr) in
+   * a cell on the cursor's path. The cursor keeps its place in the content. False: no pair.
+   */
+  delimResize(dir: 1 | -1): boolean {
+    const ladder = ['', 'big', 'Big', 'bigg', 'Bigg', 'left'];
+    for (let k = this.depth - 1; k >= 0; k--) {
+      const sl = this.slices[k];
+      // the cell at depth k is inside a \left…\right inset: that pair
+      if (k >= 1 && !isHull(sl.owner) && sl.owner.t === 'delim') {
+        const d = sl.owner;
+        const next = ladder[ladder.indexOf('left') + dir];
+        if (!next || next === 'left') return false;
+        if (d.l === '.' || d.r === '.') return false;   // an invisible side has no fixed-size form
+        const parent = this.slices[k - 1];
+        const pcell = this.cellAt(parent);
+        const at = parent.pos;
+        if (pcell[at] !== d) return false;
+        const l = delimLatex(d.l), r = delimLatex(d.r);
+        const repl: Cell = [...sizedPair(next, l, r, d.body)];
+        pcell.splice(at, 1, ...repl);
+        // the cursor: from inside the body to the same place in the parent cell
+        const deeper = this.slices.slice(k + 1);
+        this.slices = [...this.slices.slice(0, k - 1), { owner: parent.owner, idx: parent.idx, pos: at + 1 + sl.pos }, ...deeper];
+        return true;
+      }
+      // matching delimiters in this cell around the position
+      const cell = this.cellAt(sl);
+      const pair = enclosingDelims(cell, sl.pos);
+      if (!pair) continue;
+      const { open, close, size, l, r } = pair;
+      const i = ladder.indexOf(size);
+      const next = ladder[i + dir];
+      if (next === undefined) return false;
+      const body = cell.slice(open + 1, close);
+      const repl = sizedPair(next, l, r, body);
+      cell.splice(open, close - open + 1, ...repl);
+      if (next === 'left') {
+        const delim = repl[0];
+        const inside = sl.pos > open && sl.pos <= close;
+        const deeper = this.slices.slice(k + 1);
+        if (inside) this.slices = [...this.slices.slice(0, k), { owner: sl.owner, idx: sl.idx, pos: open }, { owner: delim, idx: 0, pos: sl.pos - open - 1 }, ...deeper];
+        else this.slices = [...this.slices.slice(0, k), { owner: sl.owner, idx: sl.idx, pos: open + 1 }];
+      } else if (sl.pos > close) {
+        this.slices = [...this.slices.slice(0, k), { owner: sl.owner, idx: sl.idx, pos: sl.pos + (repl.length - (close - open + 1)) }];
+      }
+      return true;
+    }
+    return false;
+  }
+
   /** InsetMathScript::notifyCursorLeaves: empty scripts vanish when the cursor leaves them. Call with the previous slices. */
   notifyLeave(old: Slice[]) {
     for (let d = old.length - 1; d >= 1; d--) {
@@ -901,6 +954,76 @@ export class MathCursor {
 
 const ROW_HULLS = new Set<HullType>(['eqnarray', 'align', 'flalign', 'alignat', 'xalignat', 'xxalignat', 'gather', 'multline']);
 const COL_HULLS = new Set<HullType>(['align', 'flalign', 'alignat', 'xalignat', 'xxalignat']);
+
+/** LyX's delimiter name (`(`, `{`, `langle`) as LaTeX (`(`, `\{`, `\langle`) */
+export function delimLatex(name: string): string {
+  if (name === '{' || name === '}') return '\\' + name;
+  return /^[A-Za-z]+$/.test(name) ? '\\' + name : name;
+}
+
+const OPENERS = new Set(['(', '[', '\\{', '\\langle', '\\lfloor', '\\lceil', '\\llbracket', '\\llangle', '\\lvert', '\\lVert', '\\lbrace']);
+const CLOSERS = new Set([')', ']', '\\}', '\\rangle', '\\rfloor', '\\rceil', '\\rrbracket', '\\rrangle', '\\rvert', '\\rVert', '\\rbrace']);
+const AMBIGUOUS = new Set(['|', '\\|', '\\vert', '\\Vert']);
+
+/** A delimiter atom's LaTeX and side ('l', 'r', or '?' for | and friends), with the size of a \big… atom ('' for a plain one). */
+function delimAtom(a: Atom | undefined): { d: string; side: 'l' | 'r' | '?'; size: string } | null {
+  if (!a) return null;
+  let d: string, size = '';
+  if (a.t === 'big') {
+    d = a.d;
+    const m = /^(big|Big|bigg|Bigg)([lmr]?)$/.exec(a.n);
+    if (!m) return null;
+    size = m[1];
+    if (m[2] === 'l') return { d, side: 'l', size };
+    if (m[2] === 'r') return { d, side: 'r', size };
+  } else if (a.t === 'char') d = a.c;
+  else if (a.t === 'sym' || a.t === 'cmd') d = delimLatex(a.n);
+  else return null;
+  if (OPENERS.has(d)) return { d, side: 'l', size };
+  if (CLOSERS.has(d)) return { d, side: 'r', size };
+  if (AMBIGUOUS.has(d)) return { d, side: '?', size };
+  return null;
+}
+
+/** The innermost matching delimiter pair around position `pos` of a cell (or just before it). */
+export function enclosingDelims(cell: Cell, pos: number): { open: number; close: number; size: string; l: string; r: string } | null {
+  // an opener before the position, skipping closed pairs
+  let depth = 0, open = -1, od: ReturnType<typeof delimAtom> = null;
+  for (let i = Math.min(pos, cell.length) - 1; i >= 0; i--) {
+    const d = delimAtom(cell[i]);
+    if (!d) continue;
+    if (d.side === 'r') { depth++; continue; }
+    if (d.side === 'l' || d.side === '?') { if (depth === 0) { open = i; od = d; break; } if (d.side === 'l') depth--; }
+  }
+  if (open < 0 || !od) {
+    // the cursor may sit right after the closing delimiter: look at the atom before it
+    const last = delimAtom(cell[pos - 1]);
+    if (last && (last.side === 'r' || last.side === '?') && pos - 1 > 0) return enclosingDelims(cell, pos - 1);
+    return null;
+  }
+  // the matching closer after the opener
+  depth = 0;
+  for (let j = open + 1; j < cell.length; j++) {
+    const d = delimAtom(cell[j]);
+    if (!d) continue;
+    if (d.side === 'l') { depth++; continue; }
+    if (d.side === 'r' || d.side === '?') {
+      if (depth === 0) {
+        if (j < pos) return null;   // the pair closed before the cursor
+        return d.size === od.size ? { open, close: j, size: od.size, l: od.d, r: d.d } : null;
+      }
+      if (d.side === 'r') depth--;
+    }
+  }
+  return null;
+}
+
+/** The atoms for a delimiter pair of the given size around `body`: plain characters, \bigl…\bigr atoms, or one \left…\right inset. */
+function sizedPair(size: string, l: string, r: string, body: Cell): Cell {
+  if (size === 'left') return [{ t: 'delim', l: delimName(l), r: delimName(r), body }];
+  if (size === '') return [...parseCell(l), ...body, ...parseCell(r)];
+  return [{ t: 'big', n: size + 'l', d: l }, ...body, { t: 'big', n: size + 'r', d: r }];
+}
 
 export function numberedType(h: Hull): boolean {
   if (h.type === 'simple' || h.type === 'none' || h.type === 'unknown') return false;

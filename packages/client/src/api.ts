@@ -122,6 +122,9 @@ export const api = {
   logout: () => req<{ ok: boolean }>('POST', '/api/auth/logout'),
   projects: () => req<{ projects: Project[] }>('GET', '/api/projects'),
   createProject: (name: string) => req<{ project: Project }>('POST', '/api/projects', { name }),
+  /** Overleaf import: clone the selected projects with the user's Overleaf Git token (per-project results), or unpack a downloaded zip */
+  importOverleaf: (body: { token: string; projects: { id: string; name: string }[] }) => req<{ results: { id: string; name: string; ok: boolean; error?: string }[] }>('POST', '/api/import/overleaf', body),
+  importZip: (name: string, file: Blob) => req<{ ok: boolean; name: string; files: number; skipped: string[] }>('POST', `/api/import/zip?name=${encodeURIComponent(name)}`, undefined, file),
   deleteProject: (name: string) => req<{ ok: boolean }>('DELETE', `/api/projects/${encodeURIComponent(name)}`),
   // sharing (owner only)
   share: (project: string) => req<ShareInfo>('GET', `/api/projects/${encodeURIComponent(project)}/share`),

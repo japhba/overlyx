@@ -144,3 +144,20 @@ describe('childDocuments: the children of a master for the combined view', () =>
     expect(childDocuments(root, 'chapter.tex')).toEqual([]);
   });
 });
+
+describe('sameDocumentText (cosmetic saves are not external changes)', async () => {
+  const { sameDocumentText, parseDocumentText: parse } = await import('../packages/vscode/src/host/texdoc.ts');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ovx-same-'));
+  const ctx = { root: dir } as any;
+  const text = '\\documentclass{article}\n\\begin{document}\n\nHello world.  \n\nSecond paragraph.\n\n\\end{document}\n';
+  it('whitespace trimmed at line ends, a final newline or CRLF do not count', () => {
+    expect(parse(text, ctx, 'a.tex').doc.body.length).toBeGreaterThan(0);
+    expect(sameDocumentText(text, text.replace('.  \n', '.\n'), ctx, 'a.tex')).toBe(true);
+    expect(sameDocumentText(text, text.trimEnd(), ctx, 'a.tex')).toBe(true);
+    expect(sameDocumentText(text, text.replace(/\n/g, '\r\n'), ctx, 'a.tex')).toBe(true);
+  });
+  it('a real edit does', () => {
+    expect(sameDocumentText(text, text.replace('Hello world', 'Hello'), ctx, 'a.tex')).toBe(false);
+    expect(sameDocumentText(text, text.replace('Second paragraph.\n', ''), ctx, 'a.tex')).toBe(false);
+  });
+});

@@ -8,7 +8,7 @@
 import * as vscode from 'vscode';
 import path from 'node:path';
 import { lyxToPm, pmToLyxBody, headerValue, type LyxDocument, type PMJSON } from '@overlyx/core';
-import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, type TexContext } from './texdoc.ts';
+import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, sameDocumentText, type TexContext } from './texdoc.ts';
 import { buildMeta } from './meta.ts';
 import { findMaster } from './project.ts';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
@@ -97,6 +97,9 @@ export class DocSession {
   externalChange(): { pmDoc: PMJSON; headerLines: string[] } | null {
     const text = this.document.getText();
     if (text === this.lastWritten) return null;
+    // VS Code changed our own write cosmetically (whitespace trimmed / final newline on save): the
+    // document is the same — re-parsing and pushing it would undo what was typed since
+    if (this.lastWritten !== null && sameDocumentText(text, this.lastWritten, this.ctx, this.relPath)) { this.lastWritten = text; return null; }
     const r = this.parseCurrent();
     return { pmDoc: r.pmDoc, headerLines: r.headerLines };
   }

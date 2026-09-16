@@ -147,6 +147,18 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [zoom, setZoom] = useState(Number(stored('ol.zoom') || 1) || 1);
   const [viewMode, setViewMode] = useState<ViewMode>('wysiwyg');
+  // light / dark: VS Code's theme unless the user picked one here (the sun / moon button; stored like the web client's ol.theme)
+  const [themePref, setThemePref] = useState<'system' | 'light' | 'dark'>(() => { const v = stored('ol.theme'); return v === 'light' || v === 'dark' ? v : 'system'; });
+  const hostDark = useRef(G.dark);
+  const shownDark = themePref === 'system' ? hostDark.current : themePref === 'dark';
+  useEffect(() => { applyTheme(shownDark); }, [shownDark]);
+  const cycleTheme = () => {
+    const next = themePref === 'system' ? (hostDark.current ? 'light' : 'dark') : themePref === 'light' ? 'dark' : 'system';
+    setThemePref(next);
+    try { if (next === 'system') localStorage.removeItem('ol.theme'); else localStorage.setItem('ol.theme', next); } catch { /* ignore */ }
+  };
+  /** the document as last sent to the host (or received from it): an external update equal to it is a stale echo and must not undo edits typed since */
+  const lastSyncedDoc = useRef<string>(JSON.stringify(init.pmDoc));
   /** the combined view: the master's child documents editable below it (View ▸ / the include's context menu) */
   const [combined, setCombined] = useState(stored('ol.combined') === '1');
   const [children, setChildren] = useState<ChildItem[]>([]);
@@ -206,7 +218,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   /* ---------------------------------------------------------------- editor lifecycle */
   const postUpdate = useMemo(() => debounce((v: EditorView, doc: EditorView['state']['doc']) => {
     if (v.isDestroyed || v.state.doc !== doc) return;
-    vscode.postMessage({ type: 'update', pmDoc: v.state.doc.toJSON(), headerLines: headerRef.current });
+    const pmDoc = v.state.doc.toJSON();
+    lastSyncedDoc.current = JSON.stringify(pmDoc);
+    vscode.postMessage({ type: 'update', pmDoc, headerLines: headerRef.current });
   }, 300), []);
   const postOutline = useMemo(() => debounce((v: EditorView) => {
     const items: OutlineEntry[] = buildOutline(v.state.doc, true, editorContext.meta?.secnumdepth ?? 3);
@@ -295,11 +309,18 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       if (!v) return;
       switch (m.type) {
         case 'metadataChanged': metaReload(); break;
-        case 'externalUpdate':
+        case 'externalUpdate': {
+          // the host re-parsed the file: skip when it merely echoes what this editor already has
+          // (VS Code touched our own write on save, or the parse arrived while newer edits were still
+          // debounced here) — applying it would make deleted text pop back
+          const incoming = JSON.stringify(m.pmDoc);
+          if (incoming === lastSyncedDoc.current) break;
+          lastSyncedDoc.current = incoming;
           handleRef.current!.applyExternal(m.pmDoc);
           setHeader(m.headerLines);
           metaReload();
           break;
+        }
         case 'goto': {
           try {
             const pos = Math.max(0, Math.min(m.pos, v.state.doc.content.size));
@@ -317,7 +338,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           else if (m.name === 'toggleCombined') setCombined(c => !c);
           break;
         case 'inverseSync': void gotoTexLine(m.line); break;
-        case 'theme': applyTheme(m.dark); break;
+        case 'theme': hostDark.current = m.dark; if (themePref === 'system') applyTheme(m.dark); break;
       }
     };
     window.addEventListener('message', onMsg);
@@ -430,7 +451,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       save: () => {
         // flush the debounced update first, then let VS Code write the file (ordered messages)
         const v = handleRef.current?.view;
-        if (v) vscode.postMessage({ type: 'update', pmDoc: v.state.doc.toJSON(), headerLines: headerRef.current });
+        if (v) { const pmDoc = v.state.doc.toJSON(); lastSyncedDoc.current = JSON.stringify(pmDoc); vscode.postMessage({ type: 'update', pmDoc, headerLines: headerRef.current }); }
         for (const c of children) { const h = childHandles.current.get(c.id); if (h) vscode.postMessage({ type: 'childUpdate', id: c.id, pmDoc: h.view.state.doc.toJSON(), headerLines: c.headerLines ?? [] }); }
         vscode.postMessage({ type: 'save' });
       },
@@ -666,6 +687,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       { id: 'm-abs', title: 'Insert | | (Alt+M |)', icon: '| |', html: mathPreview('\\left|\\square\\right|') ?? undefined, action: () => mathExec('delim', '|', '|') },
       { id: 'm-angle', title: 'Insert ⟨ ⟩ (Alt+M <)', icon: '⟨ ⟩', html: mathPreview('\\left\\langle\\square\\right\\rangle') ?? undefined, action: () => mathExec('delim', '\\langle', '\\rangle') },
       { id: 'm-delims', title: 'Delimiters of all sizes (\\left…\\right, \\big … \\Bigg)', icon: 'delimsize', palette: { title: 'Delimiters — rows: pair, columns: size', render: (close: () => void) => <DelimPalette close={close} onPick={insertDelim} onDialog={() => setDialog({ name: 'delimiters' })} /> } },
+      { id: 'm-delim-grow', title: 'Larger delimiters around the cursor: ( ) → \\big → \\Big → \\bigg → \\Bigg → \\left…\\right', icon: '( )↑', action: () => mathExec('delimSize', 1) },
+      { id: 'm-delim-shrink', title: 'Smaller delimiters around the cursor: \\left…\\right → \\Bigg → \\bigg → \\Big → \\big → ( )', icon: '( )↓', action: () => mathExec('delimSize', -1) },
     ],
     [
       { id: 'm-matrix', title: 'Insert matrix…', icon: 'matrix', html: mathPreview('\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}') ?? undefined, action: () => setDialog({ name: 'matrix' }) },
@@ -857,7 +880,17 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
 
   return (
     <div class="app" data-vscode="1">
-      <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong><ViewModeSwitch mode={viewMode} onChange={setViewMode} /></div>
+      <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong>
+        <span class="topbar-right">
+          <button type="button" class="theme-toggle" data-theme-toggle data-current={shownDark ? 'dark' : 'light'} onClick={cycleTheme}
+            title={`${shownDark ? 'Dark' : 'Light'} theme${themePref === 'system' ? " (following VS Code's)" : ''} — click for ${themePref === 'system' ? (shownDark ? 'light' : 'dark') : themePref === 'light' ? 'dark' : "VS Code's theme"}`}>
+            {shownDark
+              ? <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" /></svg>
+              : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" /></svg>}
+          </button>
+          <ViewModeSwitch mode={viewMode} onChange={setViewMode} />
+        </span>
+      </div>
       {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={standardGroups} />}
       {(tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
         <div class="tb-samerow">

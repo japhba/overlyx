@@ -122,6 +122,13 @@ export function atomToKatex(a: Atom, ctx: KatexContext, mode: 'math' | 'text'): 
       const wantLimits = a.limits !== 'nolimits' && (a.limits === 'limits' || (one && (
         (one.t === 'deco' && (one.n === 'underbrace' || one.n === 'overbrace'))
         || (one.t === 'sym' && one.limits !== 'nolimits' && (one.limits === 'limits' || (!!ctx.display && LIMIT_OPS.has(one.n)))))));
+      // Scripts on a macro whose expansion ends in scripts of its own (\q := q_{a}, typed \q^x_y):
+      // TeX — and the PDF — hang the new x and y to the right of the whole q_a. On screen the new
+      // scripts join the macro's: x above q, y appended to a, so nothing dangles off to the side.
+      if (one && one.t === 'macro' && (a.up || a.down) && !wantLimits && !a.limits) {
+        const merged = mergeScriptsIntoMacro(nuc, a, ctx);
+        if (merged !== null) return merged;
+      }
       let s = a.nuc.length ? nuc : '{' + nuc + '}';
       if (wantLimits) s = `\\mathop{${s}}\\limits`;
       else if (a.limits) s += '\\' + a.limits;
@@ -236,6 +243,57 @@ function gridToKatex(g: Grid & { t: 'grid' }, ctx: KatexContext, mode: 'math' | 
     case 'CD': return `\\begin{CD}${rows}\\end{CD}`;
     default: return `\\begin{${g.env}}${rows}\\end{${g.env}}`;
   }
+}
+
+/**
+ * The trailing `^{…}` / `_{…}` (or `^x`, `_\alpha`) of a KaTeX string, split off: `q_{a}` →
+ * { base: 'q', down: 'a' }. Null when the string does not end in a script. Braces escaped with a
+ * backslash are literal.
+ */
+export function splitTrailingScripts(s: string): { base: string; up?: string; down?: string } | null {
+  let rest = s.trimEnd();
+  let up: string | undefined, down: string | undefined;
+  const escaped = (i: number) => { let n = 0; for (let j = i - 1; j >= 0 && rest[j] === '\\'; j--) n++; return n % 2 === 1; };
+  for (let round = 0; round < 2; round++) {
+    let arg: string, cut: number;
+    if (rest.endsWith('}') && !escaped(rest.length - 1)) {
+      let depth = 0, i = rest.length - 1;
+      for (; i >= 0; i--) {
+        const c = rest[i];
+        if (c === '}' && !escaped(i)) depth++;
+        else if (c === '{' && !escaped(i)) { depth--; if (depth === 0) break; }
+      }
+      if (i <= 0) break;
+      arg = rest.slice(i + 1, -1); cut = i;
+    } else {
+      const m = /(\\[A-Za-z]+|[^\\{}^_\s])\s*$/.exec(rest);
+      if (!m || m.index === 0) break;
+      arg = m[1]; cut = m.index;
+    }
+    const before = rest.slice(0, cut).trimEnd();
+    const op = before[before.length - 1];
+    if ((op !== '^' && op !== '_') || escaped(before.length - 1)) break;
+    if (op === '^') { if (up !== undefined) break; up = arg; } else { if (down !== undefined) break; down = arg; }
+    rest = before.slice(0, -1).trimEnd();
+    if (!rest) return null;
+  }
+  if (up === undefined && down === undefined) return null;
+  return { base: rest, up, down };
+}
+
+/** The nucleus markup of a script atom around a macro, with the macro's own trailing scripts merged with the atom's (see the 'script' case). */
+function mergeScriptsIntoMacro(nuc: string, a: Atom & { t: 'script' }, ctx: KatexContext): string | null {
+  const m = /^(\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-macro\}\{)([\s\S]*)\}\}$/.exec(nuc);
+  if (!m) return null;
+  const split = splitTrailingScripts(m[2]);
+  if (!split || !split.base) return null;
+  const own = (s: string | undefined) => (s === undefined ? '' : `\\htmlClass{lm-macro}{${s}}`);
+  const up = own(split.up) + (a.up ? cellToKatex(a.up, ctx, a, 1) : '');
+  const down = own(split.down) + (a.down ? cellToKatex(a.down, ctx, a, a.up ? 2 : 1) : '');
+  let s = `${m[1]}${split.base}}}`;
+  if (up) s += `^{${up}}`;
+  if (down) s += `_{${down}}`;
+  return s;
 }
 
 /** Expand a user macro: the definition with `#k` replaced by the (editable) argument cells. */

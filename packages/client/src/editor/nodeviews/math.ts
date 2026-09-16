@@ -19,7 +19,7 @@ import { applyChangeAttrs } from '../plugins/changes';
 import { FormulaReview } from '../mathconflict';
 
 /** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
-export const pendingFocus: { pos: number | null; keys: string[] } = { pos: null, keys: [] };
+export const pendingFocus: { pos: number | null; keys: string[]; /** the formula was opened by typing $ / $$ (see LyxMathField.dollar) */ dollar: '' | '$' | '$$' } = { pos: null, keys: [], dollar: '' };
 
 /* ------------------------------------------------ deferred static rendering */
 
@@ -137,14 +137,19 @@ function deleteFormula(view: EditorView, getPos: () => number | undefined) {
  * formula left with a horizontal cursor move, as LyX does): the formula is removed and the cursor
  * takes its place.
  */
-function moveOut(view: EditorView, getPos: () => number | undefined, dir: string, insertSpace: boolean, dissolve = false) {
+function moveOut(view: EditorView, getPos: () => number | undefined, dir: string, insertSpace: boolean, dissolve = false, putBack = '') {
   const pos = getPos();
   if (pos === undefined) return;
   const node = view.state.doc.nodeAt(pos);
   const size = node ? node.nodeSize : 1;
   const back = dir === 'backward' || dir === 'upward';
   let tr = view.state.tr;
-  if (dissolve && node) { tr = tr.delete(pos, pos + size); tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos), back ? -1 : 1)); }
+  if (dissolve && node && putBack) {
+    // Backspace in the empty formula that `$` / `$$` opened: the typed dollars come back as text
+    tr = tr.replaceWith(pos, pos + size, view.state.schema.text(putBack));
+    tr = tr.setSelection(TextSelection.create(tr.doc, pos + putBack.length));
+  }
+  else if (dissolve && node) { tr = tr.delete(pos, pos + size); tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos), back ? -1 : 1)); }
   else tr = tr.setSelection(TextSelection.near(view.state.doc.resolve(back ? pos : pos + size), back ? -1 : 1));
   if (insertSpace) tr = tr.insertText(' ');
   view.dispatch(tr);
@@ -198,6 +203,7 @@ function focusIfPending(f: LyxMathField, getPos: () => number | undefined) {
   const pos = getPos();
   if (pos === undefined || pendingFocus.pos !== pos) return;
   pendingFocus.pos = null;
+  if (pendingFocus.dollar) { f.dollar = pendingFocus.dollar; pendingFocus.dollar = ''; }
   // a formula made from selected text continues at its end; an empty one starts in its first cell (LyX: align, cases, ... begin left of the first &)
   requestAnimationFrame(() => { f.focus(f.isEmpty() ? 'start' : 'end'); for (const k of pendingFocus.keys.splice(0)) f.execute('insert', k); });
 }
@@ -270,10 +276,21 @@ export class MathInlineView implements NodeView {
         this.lastLatex = String(this.node.attrs.latex);
         if (this.field) { this.updating = true; this.field.setLatex('$' + this.lastLatex + '$'); this.updating = false; }
       },
-      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
+      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve, o.putBack),
       onDragOut: (ev, reenter) => dragOutOf(this.view, this.getPos, ev, reenter),
       onShiftClick: ev => shiftClickAt(this.view, ev.clientX, ev.clientY),
       onSelectOut: dir => selectOutOf(this.view, this.getPos, dir),
+      onCommand: k => {
+        // `$$` typed: the (empty) inline formula becomes a display formula, the cursor stays inside
+        if (k !== '$$') return;
+        const pos = this.getPos();
+        if (pos === undefined) return;
+        pendingFocus.pos = pos; pendingFocus.keys = []; pendingFocus.dollar = '$$';
+        this.selectSelf();
+        toggleMathDisplay(this.view.state, this.view.dispatch);
+        const focusNew = (): boolean => { const spec = ((this.view as any).nodeDOM(pos) as any)?.pmViewDesc?.spec; if (!spec?.focus) return false; spec.focus('start'); return true; };
+        if (!focusNew()) requestAnimationFrame(() => focusNew());
+      },
     });
     (f as any)._macroKey = key;
     (f as any)._toggleDisplay = () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); };
@@ -445,7 +462,7 @@ export class MathDisplayView implements NodeView {
         this.lastLatex = String(this.node.attrs.latex);
         if (this.field) { this.updating = true; this.field.setLatex(this.lastLatex); this.updating = false; }
       },
-      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
+      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve, o.putBack),
       onDragOut: (ev, reenter) => dragOutOf(this.view, this.getPos, ev, reenter),
       onShiftClick: ev => shiftClickAt(this.view, ev.clientX, ev.clientY),
       onSelectOut: dir => selectOutOf(this.view, this.getPos, dir),

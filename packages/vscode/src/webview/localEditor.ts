@@ -25,6 +25,7 @@ import { insetCaretPlugin } from '@client/editor/plugins/insetcaret';
 import { dragSelectPlugin } from '@client/editor/plugins/dragselect';
 import { findPlugin } from '@client/editor/plugins/find';
 import { mirrorCaretPlugin } from '@client/editor/plugins/mirrorcaret';
+import { markdownRulesPlugin } from '@client/editor/plugins/mdrules';
 import { MathInlineView, MathDisplayView, MacroView } from '@client/editor/nodeviews/math';
 import { InsetView } from '@client/editor/nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from '@client/editor/nodeviews/leaf';
@@ -99,6 +100,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
     aiRewritePlugin(),
     aiCompletePlugin(),
     spellPlugin(),
+    markdownRulesPlugin(),   // `- ` / `1. ` / `# `…`###### ` at a paragraph start, as in the web client
     chordPlugin(),
     lyxKeymap(),
     keymap({ 'Mod-z': undo, 'Mod-y': redo, 'Mod-Z': redo, 'Shift-Mod-z': redo }),

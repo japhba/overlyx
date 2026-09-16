@@ -35,10 +35,10 @@ export interface FieldOptions {
    * move (arrow / Backspace / Delete) — the owner may remove it (an empty formula left behind
    * by Ctrl+M, then a cursor key, is never wanted).
    */
-  onMoveOut?: (dir: MoveOutDirection, opts: { insertSpace?: boolean; dissolve?: boolean }) => void;
+  onMoveOut?: (dir: MoveOutDirection, opts: { insertSpace?: boolean; dissolve?: boolean; putBack?: string }) => void;
   onFocus?: () => void;
   onBlur?: () => void;
-  /** Alt+M n/d/t: numbering / environment commands handled by the node view */
+  /** Alt+M n/d/t: numbering / environment commands handled by the node view; '$$' = a second $ typed into an empty inline formula opened with $ (make it a display formula) */
   onCommand?: (key: string) => void;
   /**
    * A drag left the formula (LyX: the motion bubbles to the surrounding text, formula taken whole).
@@ -126,6 +126,13 @@ export class LyxMathField {
   private raf = 0;
   private opts: FieldOptions;
   private altM = false;
+  /**
+   * Set when the formula was opened by typing `$` (or `$$`) in the text: `$` then closes it again
+   * (the cursor leaves forwards, as after the closing dollar of `$x$`), a second `$` in the still
+   * empty inline formula makes it a display formula, and Backspace in the empty formula puts the
+   * typed marker back as text (the convention of the `- ` / `# ` triggers: Backspace undoes them).
+   */
+  dollar: '' | '$' | '$$' = '';
   private dragging = false;
   private deadHat = false;
   private lastLatex: string;
@@ -236,6 +243,7 @@ export class LyxMathField {
       case 'bigdelim': return change('bigdelim', () => { const [ln, ld, rn, rd] = args as string[]; const sel = c.grabAndEraseSelection(); c.insertAtom({ t: 'big', n: ln, d: ld }); if (rn) { c.insertAtom({ t: 'big', n: rn, d: rd }); c.posBackward(); } if (sel) c.niceInsert(sel, false); });
       case 'matrix': return change('matrix', () => { const rows = Number(args[0] ?? 2), cols = Number(args[1] ?? 2), env = String(args[2] ?? 'matrix'); const halign = String(args[3] ?? ''); c.niceInsertAtom({ t: 'grid', env, ncols: cols, rows: Array.from({ length: rows }, () => ({ cells: Array.from({ length: cols }, () => [] as Cell) })), halign: env === 'array' ? (halign || 'c'.repeat(cols)) : undefined }); });
       case 'font': return change('font', () => c.handleFont(String(args[0] ?? 'mathrm')));
+      case 'delimSize': { this.snapshot('delim'); const ok = c.delimResize(Number(args[0]) < 0 ? -1 : 1); if (ok) this.commit(); else this.undoStack.pop(); return ok; }
       case 'limits': return change('limits', () => c.toggleLimits());
       case 'numberToggle': return change('number', () => c.numberToggle());
       case 'numberLineToggle': return change('number', () => c.numberLineToggle());
@@ -630,6 +638,7 @@ export class LyxMathField {
     let keep = false;
     for (const ch of text) {
       if (this.altM) { this.altM = false; if (this.altMKey(ch)) continue; }
+      if (ch === '$' && this.dollarKey()) return;
       // typing what the suggestion starts with keeps the rest of it on show
       const g = this.ghost;
       keep = !!g && ch !== '\\' && ch !== ' ' && g.startsWith(ch) && g.length > 1;
@@ -639,6 +648,18 @@ export class LyxMathField {
       if (!ok) { this.commit(); this.opts.onMoveOut?.('forward', { insertSpace: ch === ' ' }); return; }
     }
     this.commit(keep);
+  }
+
+  /** `$` typed into a formula that was opened with `$`: close it, or (still empty, inline) make it a display formula. */
+  private dollarKey(): boolean {
+    if (!this.dollar) return false;
+    if (this.isEmpty()) {
+      if (!this.display && this.dollar === '$') { this.dollar = '$$'; this.opts.onCommand?.('$$'); return true; }
+      return true;   // a third $ in an empty display formula: nothing to do
+    }
+    this.commit();
+    this.opts.onMoveOut?.('forward', {});
+    return true;
   }
 
   private altMKey(k: string): boolean {
@@ -712,7 +733,7 @@ export class LyxMathField {
       }
       case 'Escape': if (this.ghost) { this.clearGhost(); this.render(); handled(); return; } if (c.selection) { c.clearSelection(); this.scheduleLayout(); } else if (c.inMacroMode()) { c.macroModeClose(true); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } handled(); return;
       case 'Enter': if (this.readOnly) return; handled(); if (c.inMacroMode()) { this.snapshot('macro'); c.macroModeClose(); c.editInsertedInset(); this.commit(); return; } if (mod || ev.shiftKey || this.display) { this.snapshot('newline'); c.newline(); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } return;
-      case 'Backspace': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.backspace()) { const dissolve = this.isEmpty(); this.commit(); this.opts.onMoveOut?.('backward', { dissolve }); return; } this.commit(); return;
+      case 'Backspace': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.backspace()) { const dissolve = this.isEmpty(); this.commit(); this.opts.onMoveOut?.('backward', { dissolve, putBack: dissolve && this.dollar ? this.dollar : undefined }); return; } this.commit(); return;
       case 'Delete': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.erase()) { const dissolve = this.isEmpty(); this.commit(); this.opts.onMoveOut?.('forward', { dissolve }); return; } this.commit(); return;
       default: break;
     }

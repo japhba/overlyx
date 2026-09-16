@@ -442,6 +442,9 @@ export const fileWrittenListeners = new Set<(project: string, userIds: number[])
  * (SSE, `GET /api/projects/:project/events`) so they refresh themselves.
  */
 export const projectChangedListeners = new Set<(project: string) => void>();
+/** a graphics file of a project was written or created: (project, project-relative path, mtime) — the editors reload the image */
+export const graphicsChangedListeners = new Set<(project: string, file: string, version: number) => void>();
+const GRAPHICS_FILE = /\.(png|jpe?g|gif|webp|svgz?|pdf|eps|ps|tiff?|bmp)$/i;
 
 export class DocManager {
   docs = new Map<string, OpenDoc>();
@@ -643,7 +646,20 @@ export class DocManager {
     this.watcher.on('add', (file: string) => void this.onExternalChange(file));
     this.watcher.on('unlink', (file: string) => void this.onExternalRemove(file));
     // structural changes only ('change' would fire on every document save while someone types)
-    this.watcher.on('all', (event: string, file: string) => { if (event !== 'change') this.notifyProjectChanged(file); });
+    this.watcher.on('all', (event: string, file: string) => {
+      if (event !== 'change') this.notifyProjectChanged(file);
+      if ((event === 'change' || event === 'add') && GRAPHICS_FILE.test(file)) this.notifyGraphicsChanged(file);
+    });
+  }
+
+  /** A figure was (re)written — a plot script ran, a file was uploaded: tell the editors showing it. */
+  private notifyGraphicsChanged(file: string): void {
+    const parts = path.relative(config.projectsDir, file).split(path.sep);
+    const project = parts.shift();
+    if (!project || project === '..' || project.startsWith('.') || !parts.length) return;
+    let version = Date.now();
+    try { version = Math.round(fs.statSync(file).mtimeMs); } catch { /* gone again */ }
+    for (const l of graphicsChangedListeners) l(project, parts.join('/'), version);
   }
 
   /** Tell the subscribed clients (debounced per project) that the project's file list changed. */

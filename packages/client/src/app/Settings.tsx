@@ -61,7 +61,7 @@ export function SettingsPanel({ ai, user, initial, onClose }: { ai: AiStatus | n
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
 
-  const check = (key: 'spellcheck' | 'autoCorrect' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath', label: string, hint: string) => (
+  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath', label: string, hint: string) => (
     <label class="pref"><input type="checkbox" data-pref={key} checked={p[key]} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
   );
   const toggleRecopy = async (u: AdminUser) => {
@@ -88,6 +88,8 @@ export function SettingsPanel({ ai, user, initial, onClose }: { ai: AiStatus | n
               <option value="overlyx">OverLyX — instant, knows LaTeX (skips formulas, commands, code), suggestions in the menu; English, British, German, French</option>
               <option value="browser">Browser — the browser's own checker (checks slowly after a click; suggestions only via {/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click)</option>
             </select></Row>
+            <h3>Figures</h3>
+            {check('invertFigures', 'Invert figures in the dark theme', 'Plots and diagrams — dark strokes on a light ground — are shown light-on-dark, like iOS Smart Invert; photographs keep their colours. Figures reload by themselves when their file changes on disk.')}
           </>}
           {section === 'ai' && <>
             <h3>AI assistance</h3>

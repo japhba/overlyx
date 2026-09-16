@@ -17,10 +17,12 @@ import { cliDownloadRoutes } from './cliDownload.ts';
 import { userSettings, setUserSettings, userKeys, setUserKeys } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
-import { manager, projectChangedListeners } from './docs.ts';
+import { manager, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
 import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile, isDocumentFile } from './projects.ts';
 import { cachedParseFile, importLyxFile, parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
+import { extractZip } from './zip.ts';
+import { overleafProjectId, cloneOverleafProject } from './overleaf.ts';
 import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit } from './export.ts';
 import { db } from './db.ts';
@@ -161,22 +163,76 @@ api.post('/projects', (req, res) => {
 });
 
 /**
- * Server-sent events: "the project's file list changed on disk" (another user, the agent, a git
- * push, a LaTeX build — see projectChangedListeners). The file browser subscribes and reloads
- * itself, so it needs no refresh button.
+ * Import projects from Overleaf (start page ▸ Import from Overleaf). Git: each selected project
+ * is cloned from git.overleaf.com with the user's Overleaf Git token (never stored) into a new
+ * project; results come back per project. Zip: an archive downloaded from Overleaf (or anywhere)
+ * becomes a project.
+ */
+api.post('/import/overleaf', async (req, res) => {
+  const token = String(req.body?.token ?? '').trim();
+  const items: { id?: unknown; name?: unknown }[] = Array.isArray(req.body?.projects) ? req.body.projects : [];
+  if (!token) { res.status(400).json({ error: 'the Overleaf Git token is missing' }); return; }
+  if (!items.length || items.length > 25) { res.status(400).json({ error: 'select between 1 and 25 projects' }); return; }
+  const results: { id: string; name: string; ok: boolean; error?: string }[] = [];
+  for (const it of items) {
+    const ref = String(it.id ?? ''), name = String(it.name ?? '').trim();
+    const id = overleafProjectId(ref);
+    if (!id) { results.push({ id: ref, name, ok: false, error: 'not an Overleaf project link or id' }); continue; }
+    if (!/^[A-Za-z0-9._ -]+$/.test(name)) { results.push({ id, name, ok: false, error: 'invalid project name (letters, digits, space, . _ -)' }); continue; }
+    if (fs.existsSync(projectDir(name))) { results.push({ id, name, ok: false, error: 'a project with this name exists already' }); continue; }
+    try {
+      await cloneOverleafProject(id, token, projectDir(name));
+      registerProject(name, req.user!.id);
+      await ensureRepo(name).catch(e => console.error('[git] repo setup after Overleaf clone failed:', e));
+      touchProject(name, req.user!.id);
+      results.push({ id, name, ok: true });
+      console.log(`[import] ${req.user!.username} imported Overleaf project ${id} as “${name}”`);
+    } catch (e) { results.push({ id, name, ok: false, error: (e as Error).message }); }
+  }
+  res.json({ results });
+});
+api.post('/import/zip', express.raw({ type: '*/*', limit: '300mb' }), (req, res) => {
+  const name = String(req.query.name ?? '').trim();
+  if (!/^[A-Za-z0-9._ -]+$/.test(name)) { res.status(400).json({ error: 'invalid project name (letters, digits, space, . _ -)' }); return; }
+  if (fs.existsSync(projectDir(name))) { res.status(409).json({ error: 'a project with this name exists already' }); return; }
+  if (!Buffer.isBuffer(req.body) || !req.body.length) { res.status(400).json({ error: 'no archive received' }); return; }
+  const dir = projectDir(name);
+  try {
+    const { files, skipped } = extractZip(req.body, dir);
+    if (!files.length) { fs.rmSync(dir, { recursive: true, force: true }); res.status(400).json({ error: 'the archive contains no files' }); return; }
+    registerProject(name, req.user!.id);
+    ensureRepo(name).catch(e => console.error('[git] init failed:', e));
+    touchProject(name, req.user!.id);
+    res.json({ ok: true, name, files: files.length, skipped });
+  } catch (e) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* nothing */ }
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+/**
+ * Server-sent events: `{"kind":"files"}` — the project's file list changed on disk (another user,
+ * the agent, a git push, a LaTeX build — see projectChangedListeners; the file browser reloads
+ * itself, so it needs no refresh button) — and `{"kind":"graphics","path":…,"v":mtime}` — a
+ * graphics file was written (a plot script ran, an upload landed; the editors reload the image).
  */
 api.get('/projects/:project/events', needProject('view'), (req, res) => {
   const project = String(req.params.project);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write(': connected\n\n');
   const hb = setInterval(() => res.write(': hb\n\n'), 20000);
-  const cleanup = () => { clearInterval(hb); projectChangedListeners.delete(listener); };
+  const cleanup = () => { clearInterval(hb); projectChangedListeners.delete(listener); graphicsChangedListeners.delete(graphics); };
+  const allowed = () => { if (roleFor(req.user!, project)) return true; cleanup(); res.end(); return false; };   // access revoked since the connect
   const listener = (p: string) => {
-    if (p !== project) return;
-    if (!roleFor(req.user!, project)) { cleanup(); res.end(); return; }   // access revoked since the connect
+    if (p !== project || !allowed()) return;
     res.write('data: {"kind":"files"}\n\n');
   };
+  const graphics = (p: string, file: string, v: number) => {
+    if (p !== project || !allowed()) return;
+    res.write(`data: ${JSON.stringify({ kind: 'graphics', path: file, v })}\n\n`);
+  };
   projectChangedListeners.add(listener);
+  graphicsChangedListeners.add(graphics);
   req.on('close', cleanup);
 });
 

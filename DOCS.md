@@ -20,7 +20,14 @@ blend.
 * **WYSIWYG without compiling.** Text, insets, floats, tables and math render as you type.
   Formulas (inline and display, `equation`/`align`/`gather`/`multline`/…) are edited in place
   with KaTeX; document macros (`FormulaMacro` insets, preamble `\newcommand`/`\def`,
-  `\input{macros}` files, child documents) render immediately.
+  `\input{macros}` files, child documents) render immediately. Formulas are typed the LaTeX way
+  too: `$` opens an inline formula, `$` inside it closes it, `$$` opens a display formula, and
+  Backspace in the empty formula gives the typed dollar back as text (the way to type a literal
+  `$`; in TeX code and listings the dollar is always a character). The math toolbar's ( )↑ / ( )↓
+  grow and shrink the delimiter pair around the cursor (`( )` → `\big` → `\Big` → `\bigg` →
+  `\Bigg` → `\left…\right` and back). A script on a macro whose definition ends in a script
+  (`\q := q_{a}`, typed `\q^x_y`) is drawn greedily on screen — `x` above the `q`, `y` appended to
+  the `a` — where TeX hangs both off the right of the whole `q_a`; the LaTeX is unchanged.
 * **Multi-user editing** (Yjs CRDT, per-user undo, live cursors) with automatic and named
   **versions** (diff & restore).
 * **Autosave and offline editing** (Google-Docs style): there is no Save button — every edit goes
@@ -33,7 +40,25 @@ blend.
   paragraphs that actually changed. See *Offline mode* below.
 * **Notes and comments**: LyX-style notes (Note / Comment / Greyed out) and OverLyX comment
   threads (author, time, replies, resolve) are kept in the `.tex` file as `%%` comment blocks.
-  *View ▸ Notes & comments in the margin* moves them into a right-hand column (Google-Docs style).
+  On screen a note is a yellow sticky, a greyed-out part a quiet grey box, and a comment thread a
+  card with an avatar, name and time per message (the header paragraph `Name (time):` stays as
+  text in the file — `numbering.ts` decorates it, `styles.css` draws it) and Reply / Resolve at
+  the top right. *View ▸ Notes & comments in the margin* moves them into a right-hand column
+  (Google-Docs style).
+* **Figures keep up with their files**: the server watches the projects (chokidar) and tells the
+  open editors over the project's event stream (`/api/projects/:p/events`, `{"kind":"graphics"}`)
+  when a graphics file is rewritten — a plot script ran, an upload landed — and the image reloads
+  in place (the URL carries the file's mtime). In the dark theme figures get an iOS-style *smart
+  invert*: a plot or diagram (dark strokes on a light or transparent ground, judged from a small
+  canvas copy of the pixels, `figureinvert.ts`) is shown light-on-dark with a CSS filter, a
+  photograph keeps its colours; *Settings ▸ Editor ▸ Figures* switches it off.
+* **Import from Overleaf** (start page): paste the links of the projects to bring over and an
+  Overleaf Git token — each ticked project is cloned by the server from `git.overleaf.com` into a
+  new project (Overleaf's Git access, paid and institutional plans; history and `origin` are kept,
+  the token is passed to git through `GIT_ASKPASS` and never stored) — or upload the zip Overleaf's
+  *Menu ▸ Download ▸ Source* produces (every account; several at once). Overleaf has no API that
+  lists projects, so the selection is made from pasted links. `server/zip.ts` is a small ZIP reader
+  (central directory, deflate) with a traversal-safe extraction.
 * **PDF** via `latexmk` on the document's own `.tex` file (plus the child documents it inputs);
   embedded graphics (SVG/PDF/EPS/…) are rendered to PNG for the editor and downloadable as PNG,
   and formats pdflatex cannot include are converted to PDF for the build. PDF builds only start on
@@ -161,7 +186,8 @@ blend.
   version and yours. Viewers get it read-only. `+ File` in the file browser creates one.
 * **Dark mode**: follows the system preference by default; the sun/moon button in the menu bar
   flips it (remembered in this browser), *View ▸ Theme ▸ Follow the system* goes back to the OS
-  setting. Text and formulas are white on a near-black page; everything in
+  setting. In VS Code the same button sits in the editor's top bar next to the WYSIWYG / TeX /
+  Split switch and cycles VS Code's theme → light → dark. Text and formulas are white on a near-black page; everything in
   `packages/client/src/styles.css` goes through the theme tokens at the top of the file (light values
   on `:root`, dark ones on `html[data-theme="dark"]`, set by `app/theme.ts`).
 * **Ruler**: a Google-Docs-style ruler above the page (*View ▸ Ruler*) with draggable margin
@@ -629,6 +655,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/smoke.spec.ts e2e
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sharing.spec.ts e2e/textfiles.spec.ts e2e/toolbar.spec.ts e2e/collab.spec.ts   # bob, carol, u1…u6
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts e2e/cite.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
 # offline mode needs the built client (service worker): build into $S/dist, then
 (cd packages/client && npx vite build --outDir $S/dist)
 OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e2e/git.spec.ts   # git: a real clone / push / pull with a token

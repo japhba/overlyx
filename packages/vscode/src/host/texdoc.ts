@@ -52,6 +52,20 @@ export function masterHeaderFor(ctx: TexContext, relPath: string, depth = 0): st
   try { return cachedParseFile(ctx, masterRel, depth + 1).doc.header.lines; } catch { return undefined; }
 }
 
+/**
+ * Do two texts describe the same document? VS Code touches the text we wrote when the file is
+ * saved (trailing whitespace trimmed, a final newline added, line endings): the parsed model is
+ * unchanged, and pushing it back into the editor would only undo whatever was typed meanwhile.
+ */
+export function sameDocumentText(a: string, b: string, ctx: TexContext, relPath: string): boolean {
+  if (a === b) return true;
+  if (a.replace(/\s+/g, '') !== b.replace(/\s+/g, '')) return false;   // cheap: only whitespace may differ
+  try {
+    const pa = parseDocumentText(a, ctx, relPath), pb = parseDocumentText(b, ctx, relPath);
+    return JSON.stringify(pa.doc.body) === JSON.stringify(pb.doc.body) && JSON.stringify(pa.doc.header.lines) === JSON.stringify(pb.doc.header.lines) && pa.doc.preamble.join('\n') === pb.doc.preamble.join('\n');
+  } catch { return false; }
+}
+
 export function parseDocumentText(text: string, ctx: TexContext, relPath: string, depth = 0): ParseTexResult {
   const abs = resolveInside(ctx.root, relPath);
   const opts = { layoutDir: ctx.layoutDir, localDirs: [ctx.root, path.dirname(abs)], readFile: readerFor(ctx, abs) };
