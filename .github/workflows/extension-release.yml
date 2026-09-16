@@ -51,10 +51,11 @@ jobs:
         env:
           LYX_LIB_DIR: ${{ github.workspace }}/lyx/lib
         run: npm run build --workspace packages/vscode
-      - name: Check editor, document pipeline, and updater
+      - name: Check editor, document pipeline, updater, and web/extension parity
         env:
           LYX_LAYOUT_DIR: ${{ github.workspace }}/lyx/lib/layouts
-        run: npx vitest run tests/vscode-host.test.ts tests/vscode-update.test.ts tests/math.test.ts tests/mathcursor.test.ts
+        # parity.test.ts: the webview must build on the client's editor assembly and toolbars, not on copies of its own
+        run: npx vitest run tests/vscode-host.test.ts tests/vscode-update.test.ts tests/math.test.ts tests/mathcursor.test.ts tests/parity.test.ts
       - name: Check in VS Code
         run: npm run test:integration --workspace packages/vscode
       - name: Package
