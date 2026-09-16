@@ -2,74 +2,26 @@
  * Editor assembly: ProseMirror view bound to a Yjs document (y-prosemirror), LyX keymap,
  * node views (MathLive, insets, graphics, commands), decorations and collaboration cursors.
  */
-import { EditorState, Plugin, TextSelection } from 'prosemirror-state';
-import { EditorView, type NodeView } from 'prosemirror-view';
-import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
-import { pasteTargetsPlugin, pasteLatex } from './plugins/paste';
-import { sliceText } from './cliptext';
-import { gapCursor } from 'prosemirror-gapcursor';
-import { dropCursor } from 'prosemirror-dropcursor';
-import { tableEditing } from 'prosemirror-tables';
+import { EditorState, TextSelection } from 'prosemirror-state';
+import { EditorView } from 'prosemirror-view';
 import * as Y from 'yjs';
 import { snapshotCovers, localWritesCommitted } from './savedstate';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import * as decoding from 'lib0/decoding';
 import { ySyncPlugin, yCursorPlugin, yUndoPlugin, initProseMirrorDoc, ySyncPluginKey, relativePositionToAbsolutePosition } from 'y-prosemirror';
-import { schema, unquote, paramMap } from '@overlyx/core';
-import { lyxKeymap, chordPlugin } from './keymap';
-import { numberingPlugin } from './plugins/numbering';
-import { marginPlugin } from './plugins/margin';
+import { schema } from '@overlyx/core';
 import { inkPlugin } from './plugins/ink';
-import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
-import { fontCarryPlugin } from './plugins/fontcarry';
-import { insetCaretPlugin } from './plugins/insetcaret';
-import { dragSelectPlugin } from './plugins/dragselect';
-import { findPlugin } from './plugins/find';
-import { mirrorCaretPlugin } from './plugins/mirrorcaret';
-import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
-import { InsetView } from './nodeviews/inset';
-import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
-import { editorContext, viewDocDir, viewProject } from './context';
-import { imageFiles, insertImageFiles, isSvgMarkup, looksLikeImageFileName, svgFile } from './imagepaste';
-import { setDocumentMacros, setInlineMacroDefs, markMacrosReady, macroTableFor, macrosReady, macroVersion, mathViews } from './lyxmath/macrotable';
-import { showContextMenu } from './contextmenu';
-import { editorContextMenu } from './editormenu';
-import { includeTarget } from './commands';
+import { editorContext } from './context';
 import { readSavedCursor, writeSavedCursor, restoredCursorPos, type SavedCursor } from './cursormemory';
-import { aiRewritePlugin, openRewriteMath } from './ai/rewrite';
-import { aiCompletePlugin } from './ai/complete';
+import { openRewriteMath } from './ai/rewrite';
 import { installMathAssist } from './ai/mathassist';
 import { getPrefs, subscribePrefs } from '../prefs';
-import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
-import { autocorrectPlugin } from './spell/autocorrect';
-import { markdownRulesPlugin } from './plugins/mdrules';
-import { api, type User } from '../api';
+import { assemblePlugins, editorViewProps, editorAttributes, dispatchTransactionProp, installEditorDom, flushDomSelection as flushSelection } from './assembly';
+import type { User } from '../api';
 
 installMathAssist();
 editorContext.aiRewriteMath = (field) => openRewriteMath(field);
-
-/**
- * A node view that throws (a malformed attribute that arrived over the wire, a rendering bug) must
- * not take the whole editor down: it is replaced by a marker that shows the error, and an `update`
- * that throws makes ProseMirror re-create the view instead of propagating.
- */
-function guarded(node: PMNode, make: () => NodeView): NodeView {
-  let v: NodeView;
-  try { v = make(); }
-  catch (e) {
-    console.error(`node view for ${node.type.name} failed`, e, node.toJSON());
-    const dom = document.createElement(node.isInline ? 'span' : 'div');
-    dom.className = 'lyx-broken';
-    dom.title = `This ${node.type.name} could not be displayed: ${String(e)}`;
-    dom.textContent = `⚠ ${node.type.name}`;
-    dom.contentEditable = 'false';
-    return { dom, update: () => false };
-  }
-  const update = v.update?.bind(v);
-  if (update) v.update = (n, decos, inner) => { try { return update(n, decos, inner); } catch (e) { console.error(`node view update for ${node.type.name} failed`, e); return false; } };
-  return v;
-}
 
 export interface EditorHandle {
   view: EditorView;
@@ -257,7 +209,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   // remote changes). Reading the DOM selection before applying any sync message closes that gap.
   // (Both document updates and awareness updates: remote cursors are decorations, and ProseMirror
   // re-writes the DOM selection whenever decorations change, unless the mouse button is still down.)
-  const flushDomSelection = () => { try { (viewRef as any)?.domObserver?.flush(); } catch { /* ignore */ } };
+  const flushDomSelection = () => flushSelection(viewRef);
   {
     const orig = (provider as any).messageHandlers[0];
     (provider as any).messageHandlers[0] = (...args: unknown[]) => { flushDomSelection(); return orig(...args); };
@@ -304,56 +256,34 @@ export function createEditor(opts: EditorOptions): EditorHandle {
 
   provider.awareness.setLocalStateField('user', { name: opts.user.name, color: opts.user.color, username: opts.user.username, avatar: opts.user.avatar ?? null });
 
-  const plugins: Plugin[] = [
-    ySyncPlugin(fragment, { mapping }),
-    yCursorPlugin(provider.awareness, {
-      cursorBuilder: (user: { name: string; color: string }, clientId?: number) => {
-        const cursor = document.createElement('span');
-        cursor.className = 'ProseMirror-yjs-cursor';
-        if (clientId !== undefined) cursor.dataset.client = String(clientId);
-        cursor.style.borderColor = user.color;
-        const label = document.createElement('div');
-        label.style.backgroundColor = user.color;
-        label.textContent = user.name;
-        cursor.appendChild(label);
-        return cursor;
-      },
-    }),
-    yUndoPlugin({ trackedOrigins: [AGENT_EDIT_ORIGIN] }),
-    // AI preview / ghost text come first: their Tab / Escape must win over the LyX bindings and table navigation
-    aiRewritePlugin(),
-    aiCompletePlugin(),
-    spellPlugin(),
-    markdownRulesPlugin(),   // `- ` / `1. ` / `# ` at a paragraph start, before autocorrect looks at the space
-    autocorrectPlugin(),
-    chordPlugin(),
-    lyxKeymap(),
-    fontCarryPlugin(),
-    insetCaretPlugin(),
-    dragSelectPlugin(),
-    gapCursor(),
-    dropCursor({ color: '#3b6ea5' }),
-    tableEditing(),
-    numberingPlugin(),
-    marginPlugin(opts.marginMode ?? false),
-    // margin ink: one layer per document view (child editors of a combined view share the master's margins)
-    ...(opts.child ? [] : [inkPlugin(provider.awareness)]),
-    changeTrackingPlugin(),
-    changesFilterPlugin(),
-    findPlugin(),
-    pasteTargetsPlugin(),
-    mirrorCaretPlugin(),
-    macroDefsPlugin(() => viewRef),
-    new Plugin({
-      view: () => ({
-        update: (view, prev) => {
-          if (!prev.selection.eq(view.state.selection) || prev.doc !== view.state.doc) opts.onSelectionChange?.(view, { docChanged: prev.doc !== view.state.doc });
-          if (prev.doc !== view.state.doc) opts.onDocChange?.(view);
-          if (cursorRestored && !prev.selection.eq(view.state.selection)) rememberCursor();
+  const plugins = assemblePlugins({
+    sync: [
+      ySyncPlugin(fragment, { mapping }),
+      yCursorPlugin(provider.awareness, {
+        cursorBuilder: (user: { name: string; color: string }, clientId?: number) => {
+          const cursor = document.createElement('span');
+          cursor.className = 'ProseMirror-yjs-cursor';
+          if (clientId !== undefined) cursor.dataset.client = String(clientId);
+          cursor.style.borderColor = user.color;
+          const label = document.createElement('div');
+          label.style.backgroundColor = user.color;
+          label.textContent = user.name;
+          cursor.appendChild(label);
+          return cursor;
         },
       }),
-    }),
-  ];
+      yUndoPlugin({ trackedOrigins: [AGENT_EDIT_ORIGIN] }),
+    ],
+    marginMode: opts.marginMode ?? false,
+    // margin ink: one layer per document view (child editors of a combined view share the master's margins)
+    ink: opts.child ? null : inkPlugin(provider.awareness),
+    getView: () => viewRef,
+    onUpdate: (view, info) => {
+      opts.onSelectionChange?.(view, { docChanged: info.docChanged });
+      if (info.docChanged) opts.onDocChange?.(view);
+      if (cursorRestored && info.selectionChanged) rememberCursor();
+    },
+  });
 
   const state = EditorState.create({ schema, doc: initialDoc, plugins });
   let viewRef: EditorView | null = null;
@@ -368,164 +298,18 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   window.addEventListener('pagehide', flushCursor);
   let editable = !opts.readOnly;
   let viewOnly = false;
-  let flushing = false;
-  const view = new EditorView(opts.container, {
+  const view: EditorView = new EditorView(opts.container, {
     state,
     editable: () => editable,
-    // Decoration-only transactions (y-prosemirror re-renders the remote cursors from a setTimeout
-    // after every awareness change) make ProseMirror write its *state* selection back into the DOM.
-    // Right after a mouse click the DOM selection is ahead of the state (the browser's
-    // `selectionchange` event has not been processed yet), so the click would be lost: read the
-    // DOM selection first and re-create the transaction on the fresh state.
-    dispatchTransaction(tr) {
-      if (viewOnly && tr.docChanged && !tr.getMeta(ySyncPluginKey)) return;   // viewers cannot edit (the server drops their updates anyway)
-      if (!flushing && !tr.docChanged && tr.selectionSet === false && tr.selection.eq(view.state.selection)) {
-        flushing = true;
-        const before = view.state;
-        try { (view as any).domObserver.flush(); } catch { /* ignore */ } finally { flushing = false; }
-        if (view.state !== before) {
-          const fresh = view.state.tr;
-          for (const [k, v] of Object.entries((tr as any).meta as Record<string, unknown>)) fresh.setMeta(k, v);
-          tr = fresh;
-        }
-      }
-      view.updateState(view.state.apply(tr));
-    },
-    nodeViews: {
-      math_inline: (node, view, getPos) => guarded(node, () => new MathInlineView(node, view, getPos as () => number | undefined)),
-      math_display: (node, view, getPos) => guarded(node, () => new MathDisplayView(node, view, getPos as () => number | undefined)),
-      macro: (node, view, getPos) => guarded(node, () => new MacroView(node, view, getPos as () => number | undefined)),
-      inset: (node, view, getPos) => guarded(node, () => new InsetView(node, view, getPos as () => number | undefined)),
-      graphics: (node, view, getPos) => guarded(node, () => new GraphicsView(node, view, getPos as () => number | undefined)),
-      command: (node, view, getPos) => guarded(node, () => new CommandView(node, view, getPos as () => number | undefined)),
-      leaf: (node, view, getPos) => guarded(node, () => new LeafView(node, view, getPos as () => number | undefined)),
-    },
+    dispatchTransaction: dispatchTransactionProp(() => view, () => viewOnly),
     attributes: editorAttributes(!!opts.child, getPrefs()),
-    // text/plain for the clipboard: formulas as $…$, references as \ref{…}, … (see cliptext.ts)
-    clipboardTextSerializer: sliceText,
-    handleDoubleClickOn(view, _pos, node, nodePos) {
-      if (node.type.name === 'command' && node.attrs.cmd === 'include') {
-        const id = includeTarget(node, viewProject(view), viewDocDir(view));
-        if (id) editorContext.openInTab?.(id);
-        return true;
-      }
-      if (node.type.name === 'command' && (node.attrs.cmd === 'ref' || node.attrs.cmd === 'citation')) {
-        editorContext.openDialog?.(node.attrs.cmd === 'ref' ? 'ref' : 'cite', { pos: nodePos, node });
-        return true;
-      }
-      return false;
-    },
-    handleClickOn(view, _pos, node, nodePos, event) {
-      // a statically rendered formula (touch devices: no hover to upgrade it): make it editable and focus it
-      if (node.type.name === 'math_inline' || node.type.name === 'math_display') {
-        const nv = (view.nodeDOM(nodePos) as any)?.pmViewDesc?.spec;
-        if (nv && !nv.mf && nv.ensureField) { const mf = nv.ensureField(); requestAnimationFrame(() => mf.focus()); return true; }
-        return false;
-      }
-      // Ctrl/Cmd+click: follow cross-references, hyperlinks and child documents
-      if (!(event.metaKey || event.ctrlKey) || node.type.name !== 'command') return false;
-      let p: Map<string, string>;
-      try { p = paramMap(JSON.parse(node.attrs.params || '[]')); } catch { return false; }
-      const cmd = node.attrs.cmd as string;
-      if (cmd === 'ref') { editorContext.gotoLabel?.(unquote(p.get('reference')).split(',')[0].trim(), view); return true; }
-      if (cmd === 'href') { const t = unquote(p.get('target')); window.open(/^[a-z]+:/i.test(t) ? t : 'https://' + t, '_blank', 'noopener'); return true; }
-      if (cmd === 'include') { const id = includeTarget(node, viewProject(view), viewDocDir(view)); if (id) editorContext.openInTab?.(id); return true; }
-      return false;
-    },
-    handleDOMEvents: {
-      keyup(_view, event) {
-        // Native arrow movement precedes selectionchange; publish its final position
-        // before source mirroring or a decoration update can use the previous caret.
-        if (/^(Arrow|Home$|End$|Page)/.test(event.key)) flushDomSelection();
-        return false;
-      },
-      contextmenu(view, ev) {
-        const t = ev.target as HTMLElement;
-        if (t.closest?.('math-field')) return false;   // the field shows its own menu
-        if (ev.shiftKey) return false;                  // Shift+right-click: the browser's own menu
-        ev.preventDefault();
-        // a misspelt word under the pointer: fetch the suggestions first (a few ms), then the menu
-        const coords = view.posAtCoords({ left: ev.clientX, top: ev.clientY });
-        const bad = coords ? misspelledAt(view.state, coords.pos) : null;
-        if (bad) {
-          const { clientX, clientY } = ev;
-          void spellSuggest(bad.word).then(list => { showContextMenu(clientX, clientY, editorContextMenu(view, ev, { ...bad, suggestions: list })); });
-        } else showContextMenu(ev.clientX, ev.clientY, editorContextMenu(view, ev));
-        return true;
-      },
-    },
-    handlePaste(view, event) {
-      // an image on the clipboard (a screenshot, a copied image file): upload it, insert a graphics inset
-      const images = imageFiles(event.clipboardData);
-      if (images.length) {
-        if (!viewOnly) void insertImageFiles(view, images);
-        return true;
-      }
-      const text = event.clipboardData?.getData('text/plain');
-      const html = event.clipboardData?.getData('text/html');
-      // SVG markup on the text clipboard ("Copy as SVG" in drawing tools): an image, not text
-      if (text && !viewOnly && isSvgMarkup(text)) { void insertImageFiles(view, [svgFile(text)]); return true; }
-      /** plain text without LaTeX: LyX semantics (blank line = new paragraph, no HTML structure) */
-      const plainPaste = () => {
-        const paras = text!.replace(/\r\n/g, '\n').split(/\n{2,}/);
-        if (paras.length === 1) { view.dispatch(view.state.tr.insertText(text!.replace(/\n/g, ' '))); return; }
-        let tr = view.state.tr.deleteSelection();
-        paras.forEach((p, i) => {
-          if (i > 0) tr = tr.split(tr.selection.from);
-          tr = tr.insertText(p.replace(/\n/g, ' '));
-        });
-        view.dispatch(tr);
-      };
-      if (text && !html) {
-        // just an image file's name: Safari (and Firefox on macOS) deliver only that for a file
-        // copied in the Finder — paste it as text, but say how to get the image itself in
-        if (looksLikeImageFileName(text)) {
-          plainPaste();
-          editorContext.notify?.('Only the file’s name was on the clipboard — to insert the image, drag the file into the text (or copy it in Chrome)');
-          return true;
-        }
-        // pasted LaTeX (a \command, $…$, \[ …) is parsed on the server against this document's own
-        // preamble and inserted as real structure — sections, formulas, citations, lists
-        if (!viewOnly && /\\[a-zA-Z]+|\\\[|\\\(|\$[^$\n][^$]*\$/.test(text)) {
-          void pasteLatex(view, view.dom.dataset.docId ?? opts.docId, text);
-          return true;
-        }
-        plainPaste();
-        return true;
-      }
-      return false;
-    },
-    // files dragged in from the computer: images are uploaded and inserted where they were dropped
-    handleDrop(view, event, _slice, moved) {
-      if (moved || !event.dataTransfer?.files.length) return false;   // internal drags and text drops: ProseMirror's own handling
-      if (viewOnly) return true;
-      const images = imageFiles(event.dataTransfer);
-      if (!images.length) { editorContext.notify?.('Only images can be dropped into the text — other files go into the file browser', 'error'); return true; }
-      const pos = view.posAtCoords({ left: event.clientX, top: event.clientY });
-      void insertImageFiles(view, images, pos ? pos.pos : null);
-      return true;
-    },
+    ...editorViewProps({ docId: opts.docId, viewOnly: () => viewOnly }),
   });
   viewRef = view;
   performance.mark('ol:editor-created');
   // the spell-check switch (Tools ▸ Spell checking) applies to open editors right away
   const unsubscribePrefs = subscribePrefs(p => { view.setProps({ attributes: editorAttributes(!!opts.child, p) }); });
-  // A double-click that opened this document (child link, file browser) ends after the new editor
-  // exists: its dblclick event must not open a dialog for whatever node now sits under the pointer.
-  const createdAt = performance.now();
-  view.dom.addEventListener('dblclick', (ev) => { if (performance.now() - createdAt < 600) { ev.stopPropagation(); ev.preventDefault(); } }, true);
-  // which document this view shows (child editors in the combined view differ from the workspace document)
-  view.dom.dataset.docId = opts.docId;
-  view.dom.dataset.project = opts.docId.split('/')[0];
-  view.dom.dataset.docDir = opts.docId.split('/').slice(1, -1).join('/');
-
-  // tooltip with author and date for change-tracked text and nodes (formulas, references…:
-  // `data-changed`, see changeDomAttrs in the schema)
-  view.dom.addEventListener('mouseover', (ev) => {
-    const el = (ev.target as HTMLElement).closest?.('.lyx-change, .lyx-inset[data-change]') as HTMLElement | null;
-    if (!el || el.title) return;
-    el.title = describeChange(el.dataset.change ?? el.dataset.changed, Number(el.dataset.author), Number(el.dataset.time));
-  });
+  installEditorDom(view, opts.docId);
 
   const status = { connected: false, synced: false, users: [] as PresenceUser[] };
   const pushStatus = () => {
@@ -678,103 +462,5 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       persistence.destroy();
       ydoc.destroy();
     },
-  };
-}
-
-function editorAttributes(child: boolean, p: { spellcheck: boolean; spellEngine: string }): Record<string, string> {
-  // the browser's checker only when it is the chosen engine (two sets of underlines otherwise)
-  return { class: 'lyx-editor' + (child ? ' lyx-editor-child' : ''), spellcheck: p.spellcheck && p.spellEngine === 'browser' ? 'true' : 'false' };
-}
-
-/** "Inserted by Jane Doe on 3/2/2026, 10:12" for a tracked change. */
-export function describeChange(type: string | undefined, authorId: number, time: number): string {
-  const author = editorContext.meta?.authors.find(a => a.id === authorId)?.name ?? `author ${authorId}`;
-  const when = time ? new Date(time * 1000).toLocaleString() : '';
-  return `${type === 'deleted' ? 'Deleted' : 'Inserted'} by ${author}${when ? ' on ' + when : ''}`;
-}
-
-type ServerMacros = Record<string, { def: string; args: number; expand: boolean }>;
-interface InlineDef { pos: number; name: string; def: string; args: number }
-const serverMacrosByView = new WeakMap<EditorView, { macros: ServerMacros; merge: boolean }>();
-
-/**
- * Registers the positional macro definitions of every new document state *before* the view renders
- * it: node views of formulas ask for their macro table when they are created, so the definitions
- * must be known by then (otherwise every formula would be rendered twice on load).
- */
-export function macroDefsPlugin(getView: () => EditorView | null): Plugin {
-  return new Plugin({
-    state: {
-      init: () => '',
-      apply(tr, sig: string, _old, newState) {
-        if (!tr.docChanged) return sig;
-        const view = getView();
-        if (!view) return sig;
-        const defs = inlineMacroDefs(newState.doc);
-        const next = JSON.stringify(defs);
-        if (next === sig) return sig;
-        const server = serverMacrosByView.get(view);
-        if (server) applyMacros(view, defs, server.macros, server.merge);
-        else setInlineMacroDefs(view, defs);   // metadata still loading: positional defs only
-        return next;
-      },
-    },
-  });
-}
-
-/** FormulaMacro insets of a document (definition + position). */
-function inlineMacroDefs(doc: import('prosemirror-model').Node): InlineDef[] {
-  const defs: InlineDef[] = [];
-  doc.descendants((node, pos) => {
-    if (node.type.name !== 'macro') return true;
-    try {
-      const lines: string[] = JSON.parse(node.attrs.lines);
-      const m = /^\\(?:re)?newcommand\*?\{\\([A-Za-z]+)\}(?:\[(\d+)\])?\{([\s\S]*)\}$/.exec(lines[0]);
-      if (m) {
-        let display: string | undefined;
-        if (lines[1]?.startsWith('{')) display = lines[1].slice(1, -1);
-        defs.push({ pos, name: m[1], def: display || m[3], args: Number(m[2] ?? 0) });
-      }
-    } catch { /* ignore */ }
-    return false;   // macro nodes have no formulas inside
-  });
-  return defs;
-}
-
-function applyMacros(view: EditorView, defs: InlineDef[], serverMacros: ServerMacros, merge: boolean): void {
-  // server macros minus the ones this document defines itself (positional defs take over)
-  const own = new Set(defs.map(d => d.name));
-  const base: ServerMacros = {};
-  for (const [k, v] of Object.entries(serverMacros)) if (!own.has(k)) base[k] = v;
-  setDocumentMacros(view, base, merge);
-  setInlineMacroDefs(view, defs);
-}
-
-/**
- * Macros: server-provided ones (preamble, \input files, child documents) apply everywhere;
- * FormulaMacro insets of this document apply from their position onwards (LyX semantics).
- * `merge` adds to the global dictionary instead of replacing it (child editors of a combined view).
- * The server macros are remembered per view; later document changes re-apply them through
- * `macroDefsPlugin`.
- */
-export function refreshMacros(view: EditorView, serverMacros: ServerMacros | null, merge = false): void {
-  // null: the metadata is unavailable right now (an offline blip, a failed fetch during a deploy) —
-  // keep the macros this view already had instead of wiping every formula to "unknown"
-  const remembered = serverMacrosByView.get(view);
-  const macros = serverMacros ?? remembered?.macros ?? {};
-  const mrg = serverMacros ? merge : remembered?.merge ?? merge;
-  serverMacrosByView.set(view, { macros, merge: mrg });
-  markMacrosReady(view);
-  applyMacros(view, inlineMacroDefs(view.state.doc), macros, mrg);
-}
-
-export { editorContext };
-
-// dev-only debugging hooks (the probes in scratch/ read these; absent from production builds)
-if (import.meta.env.DEV && typeof window !== 'undefined') {
-  (window as unknown as { olMacroDebug?: unknown }).olMacroDebug = {
-    macroTableFor, macrosReady, version: () => macroVersion, refreshMacros,
-    remembered: (v: object) => serverMacrosByView.get(v as EditorView),
-    views: () => [...mathViews].map(v => { const x = v as unknown as { field?: unknown; pending?: boolean; staticKey?: string; view?: object; dom?: HTMLElement }; return { field: !!x.field, pending: !!x.pending, key: x.staticKey?.split('|').slice(0, 2).join('|') ?? null, active: x.view === editorContext.activeView, attached: !!x.dom?.isConnected }; }),
   };
 }

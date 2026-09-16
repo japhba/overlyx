@@ -499,6 +499,8 @@ packages/server   Express + WebSocket (Yjs sync/awareness), SQLite persistence, 
                   JWT cookie, optional Google OAuth), .tex file sync & watcher, versions, builds
 packages/client   Vite + Preact UI, ProseMirror editor, LyX math editor (editor/lyxmath, KaTeX), LyX keymap,
                   numbering/margin/change-tracking/find plugins
+packages/vscode   the same editor inside VS Code (a custom editor for .tex files): an extension host
+                  that parses/writes the file and a webview that imports the client's code (@client/*)
 * **Theorem environments**: a document's own `\newtheorem{definition}{Definition}` declarations
   become real layouts (`latex/layouts.ts applyDocumentTheorems`, aliased onto the AMS theorem
   styles by label, `Theorem` as fallback) — parsing, writing (the environment keeps its declared
@@ -509,6 +511,18 @@ packages/client   Vite + Preact UI, ProseMirror editor, LyX math editor (editor/
   (`app/MarkdownEditor.tsx`, prosemirror-markdown): `## ` resizes into a live heading as you
   type, bold/lists/quotes/links likewise; Source switches to the plain text editor; files stay
   ordinary markdown on disk.
+
+**One editor, two shells.** The web client (`app/App.tsx`) and the VS Code webview
+(`packages/vscode/src/webview/EditorShell.tsx`) do not each assemble an editor: the plugins in their
+order, the node views and every view handler (clicks, paste, drop, context menu) come from
+`client/src/editor/assembly.ts` (`assemblePlugins`, `editorViewProps`, `installEditorDom`); a shell
+adds only how the document is synced — `editor/editor.ts` a Yjs document over the WebSocket with the
+IndexedDB copy, `vscode/.../localEditor.ts` a local Y.Doc fed from the file. The seven LyX toolbars
+are one definition too (`app/toolbars.tsx buildToolbars`, from a `ToolbarContext`; what only one
+shell has — files, navigation history, ink, the comments panel — goes into its *slots*), as are the
+document helpers of the shells (`app/shellutil.tsx`). `tests/parity.test.ts` fails as soon as a shell
+grows a plugin list, a toolbar button or one of those helpers of its own again — that is how the
+extension once lacked autocorrect, markdown headings, image paste and the delimiter buttons.
 
 tests/            vitest: .tex parse/write stability (tex.test.ts: features + a corpus of real
                   papers and LyX's example documents), LyX round trips (import path), PM/Yjs
@@ -563,6 +577,17 @@ the project directory is mounted read-only, there is no network, a private `/tmp
 (`<data dir>/sandbox-home`, where TeX/fontconfig/inkscape caches and LyX's user directory persist),
 and an empty environment. Without bubblewrap the server starts with a warning and runs the tools
 unsandboxed (`packages/server/src/sandbox.ts`).
+
+**Deploying.** Production runs from a separate clean checkout (`/root/lyx/overlyx-production`, the
+systemd unit's `WorkingDirectory`), and the VS Code extension is released by
+`.github/workflows/extension-release.yml` from `origin/master` (`packages/vscode/RELEASING.md`), so
+both must come from the same commit: `scripts/deploy.sh` refuses a diverged `master`/`origin/master`,
+pushes (which starts the extension release), fast-forwards the production checkout, runs `npm ci`
+when the lockfile changed, builds the client, restarts the unit and checks that https://overlyx.app
+serves the new bundle. Run the checks below first — the script deploys, it does not test.
+*Help ▸ OverLyX for VS Code* (`/api/vscode-extension`) redirects to the latest GitHub release's
+`overlyx-vscode.vsix` (the build the extension's self-updater installs); a `.vsix` packaged into
+`packages/vscode` of the running checkout is the fallback (`OVERLYX_VSIX_SOURCE=local` forces it).
 
 A systemd unit is installed as `overlyx.service` (see `deploy/`). `deploy/overlyx-backup.timer` runs
 `scripts/backup.sh` every night: an online backup of the SQLite database and a tarball of the
@@ -656,6 +681,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sharing.spec.ts e
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts e2e/cite.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
+npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
 # offline mode needs the built client (service worker): build into $S/dist, then
 (cd packages/client && npx vite build --outDir $S/dist)
 OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e2e/git.spec.ts   # git: a real clone / push / pull with a token

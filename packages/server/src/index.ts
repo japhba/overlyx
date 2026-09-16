@@ -1124,15 +1124,41 @@ api.post('/users', (req, res) => {
 
 /** The VS Code extension (.vsix) built on this server: downloadable for signed-in users
  *  (Help ▸ OverLyX for VS Code). Not on the marketplace yet — this is the distribution channel. */
-api.get('/vscode-extension', (_req, res) => {
+/*
+ * Help ▸ OverLyX for VS Code: the extension is released by the GitHub Action on every push to
+ * master (packages/vscode/RELEASING.md), so the download is the stable asset of the latest release
+ * of the configured repository — the same build the extension's self-updater installs. A .vsix
+ * packaged into packages/vscode of this checkout is the fallback (offline / self-hosted instances,
+ * or OVERLYX_VSIX_SOURCE=local), checked for a few minutes at a time.
+ */
+const VSIX_RELEASE_URL = config.github.repo && process.env.OVERLYX_VSIX_SOURCE !== 'local' ? `https://github.com/${config.github.repo}/releases/latest/download/overlyx-vscode.vsix` : null;
+let vsixReleaseOk: { at: number; ok: boolean } | null = null;
+async function vsixReleaseAvailable(): Promise<boolean> {
+  if (!VSIX_RELEASE_URL) return false;
+  if (vsixReleaseOk && Date.now() - vsixReleaseOk.at < 10 * 60 * 1000) return vsixReleaseOk.ok;
+  let ok = false;
+  try {
+    const r = await fetch(VSIX_RELEASE_URL, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(4000) });
+    ok = r.ok;
+  } catch { ok = false; }
+  vsixReleaseOk = { at: Date.now(), ok };
+  return ok;
+}
+function localVsix(): string | null {
   const dir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../vscode');
   let files: string[] = [];
-  try { files = fs.readdirSync(dir).filter(f => f.endsWith('.vsix')); } catch { /* not built here */ }
-  if (!files.length) { res.status(404).json({ error: 'The VS Code extension is not built on this server.' }); return; }
+  try { files = fs.readdirSync(dir).filter(f => f.endsWith('.vsix')); } catch { return null; }
+  if (!files.length) return null;
   const file = files.map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs })).sort((a, b) => b.m - a.m)[0].f;
+  return path.join(dir, file);
+}
+api.get('/vscode-extension', async (_req, res) => {
+  if (await vsixReleaseAvailable()) { res.redirect(302, VSIX_RELEASE_URL!); return; }
+  const file = localVsix();
+  if (!file) { res.status(404).json({ error: 'The VS Code extension is not available from this server — install it from the GitHub releases.' }); return; }
   res.setHeader('Content-Type', 'application/octet-stream');
-  res.setHeader('Content-Disposition', `attachment; filename="${file}"`);
-  res.sendFile(path.join(dir, file));
+  res.setHeader('Content-Disposition', `attachment; filename="${path.basename(file)}"`);
+  res.sendFile(file);
 });
 
 app.use('/api', api);

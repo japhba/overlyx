@@ -13,6 +13,10 @@ reproduced byte for byte until you change them.
 - **OverLyX editor** for `.tex` files (right-click a file ▸ *Reopen Editor With…* ▸ *OverLyX
   Editor*, or the editor-title button). The document stays an ordinary VS Code `TextDocument`:
   dirty state, Ctrl+S, autosave, git and extensions all see the same file.
+- **The web client's editor, not a copy of it.** The plugins, toolbars and dialogs are the same
+  code the website runs (`packages/client`), so what lands there lands here with the next release:
+  autocorrect, `- ` / `# ` lists and headings, images pasted or dropped into the text, the
+  delimiter size buttons, ⟪ ⟫, nomenclature entries.
 - **Light / dark** button in the top bar: VS Code's theme, or a light or dark editor of your own choosing.
 - **Figures reload** when their file changes on disk (a plot script ran); in the dark theme line art is shown
   light-on-dark, photos are left alone. `$…$` and `$$` type formulas the LaTeX way; `- ` / `# ` at a
@@ -111,7 +115,10 @@ Extension Development Host to load it. Changes to command/menu declarations in `
 also require this reload. Stop the watch task when finished.
 
 The website and extension live in the same repository and share `packages/core` and much of
-`packages/client`. Use a branch for each piece of work, push it to GitHub, and merge through
+`packages/client`: the webview imports the client's editor assembly (`editor/assembly.ts`), its
+toolbars (`app/toolbars.tsx`) and dialogs directly, and `tests/parity.test.ts` fails if the webview
+starts assembling an editor or toolbars of its own — put shared behaviour into the client, and only
+what is specific to VS Code into `packages/vscode`. Use a branch for each piece of work, push it to GitHub, and merge through
 `master`; the server and any other workstation then fetch the same commits. Before starting new
 work on either machine, fetch and update from `origin/master`. Avoid editing the same branch on
 two machines at once; use separate branches and merge or rebase them through Git.
