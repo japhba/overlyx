@@ -42,7 +42,10 @@ export const newIssueUrl = (title = '', body = ''): string =>
 
 /** short git commit of the running code (read once, asynchronously) */
 export let appVersion = 'unknown';
+/** the full commit hash this server runs (GET /api/version; scripts/autodeploy.sh checks it after a deploy) */
+export let appCommit = 'unknown';
 execFile('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO_ROOT, timeout: 5000 }, (err, out) => { if (!err && out.trim()) appVersion = out.trim(); });
+execFile('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, timeout: 5000 }, (err, out) => { if (!err && out.trim()) appCommit = out.trim(); });
 
 async function gh(method: string, path: string, body?: unknown): Promise<any> {
   const res = await fetch(`${github.api}${path}`, {

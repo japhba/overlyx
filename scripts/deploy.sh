@@ -29,6 +29,10 @@ for a in "$@"; do case "$a" in --no-push) PUSH=0 ;; *) echo "unknown option $a" 
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
+# one deploy at a time: scripts/autodeploy.sh (the timer) takes the same lock
+exec 9>"${OVERLYX_DEPLOY_LOCK:-/run/lock/overlyx-deploy.lock}"
+flock -n 9 || { echo "another deploy is running (the autodeploy timer?) — waiting for it"; flock 9; }
+
 step "development checkout: $DEV"
 [ "$(git rev-parse --abbrev-ref HEAD)" = master ] || { echo "deploy from master (on $(git rev-parse --abbrev-ref HEAD))" >&2; exit 1; }
 git diff --quiet && git diff --cached --quiet || { echo "commit your changes first" >&2; git status --short | head -20; exit 1; }
@@ -72,7 +76,13 @@ code=$(curl -s -o /tmp/overlyx-deploy-index.html -w '%{http_code}' "$SITE/")
 served=$(grep -o 'assets/index-[^"]*' /tmp/overlyx-deploy-index.html | head -1)
 built=$(grep -o 'assets/index-[^"]*' "$PROD/packages/client/dist/index.html" | head -1)
 [ -n "$served" ] && [ "$served" = "$built" ] || { echo "served bundle ($served) differs from the built one ($built)" >&2; exit 1; }
-echo "site OK: $served"
+for i in 1 2 3 4 5; do
+  live=$(curl -s --max-time 5 "$SITE/api/version" | sed -n 's/.*"commit":"\([0-9a-f]*\)".*/\1/p')
+  [ "$live" = "$HEAD" ] && break
+  sleep 2
+done
+[ "$live" = "$HEAD" ] || { echo "$SITE/api/version reports '${live:-nothing}', not $HEAD" >&2; exit 1; }
+echo "site OK: $served, commit $live"
 
 if [ "$PUSH" = 1 ] && command -v gh >/dev/null 2>&1; then
   step "extension release workflow"

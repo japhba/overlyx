@@ -30,7 +30,7 @@ import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerPr
 import { sandboxAvailable } from './sandbox.ts';
 import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests } from './access.ts';
 import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
-import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
+import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, feedbackEnabled, appVersion, appCommit } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
@@ -1161,6 +1161,9 @@ api.get('/vscode-extension', async (_req, res) => {
   res.sendFile(file);
 });
 
+// which commit runs here — public, so a deploy (scripts/deploy.sh, scripts/autodeploy.sh) and a
+// developer on another machine can confirm that their push is live
+app.get('/api/version', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ commit: appCommit, version: appVersion }); });
 app.use('/api', api);
 
 /* ------------------------------------------------------------------ static */
