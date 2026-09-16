@@ -77,7 +77,31 @@ svg-inkscape/
 # OverLyX
 *.overlyx-tmp
 .DS_Store
+# Scripts next to the paper (plots, checks) and editor / OS leftovers
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+Thumbs.db
+*.swp
 `;
+
+/**
+ * Bring a `.gitignore` that OverLyX wrote (recognisable by its first line) up to the current
+ * DEFAULT_GITIGNORE: patterns added since are appended, the user's own additions stay. A
+ * `.gitignore` the user wrote or pushed is left alone. Returns true when the file changed.
+ */
+export function upgradeGitignore(dir: string): boolean {
+  const file = path.join(dir, '.gitignore');
+  let current: string;
+  try { current = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  const header = DEFAULT_GITIGNORE.split('\n')[0];
+  if (!current.startsWith(header)) return false;
+  const have = new Set(current.split('\n').map(l => l.trim()));
+  const missing = DEFAULT_GITIGNORE.split('\n').filter(l => l.trim() && !l.startsWith('#') && !have.has(l.trim()));
+  if (!missing.length) return false;
+  fs.writeFileSync(file, current.replace(/\s*$/, '\n') + '# OverLyX: added later\n' + missing.join('\n') + '\n', 'utf8');
+  return true;
+}
 
 /** Installed as .git/hooks/push-to-checkout: a push to the checked-out branch updates the working tree. */
 const PUSH_TO_CHECKOUT_HOOK = `#!/bin/sh
@@ -170,6 +194,8 @@ export async function ensureRepo(project: string, opts: { initialCommit?: boolea
       await git(project, ['init', '-q', '-b', 'main']);
       const ignore = path.join(dir, '.gitignore');
       if (opts.initialCommit !== false && !fs.existsSync(ignore)) fs.writeFileSync(ignore, DEFAULT_GITIGNORE, 'utf8');
+    } else if (upgradeGitignore(dir)) {
+      console.log(`[git] "${project}": .gitignore brought up to date`);
     }
     // a push into the checked-out branch updates the working tree; symlinks are checked out as
     // plain files (a pushed link must not point our file routes outside the project)

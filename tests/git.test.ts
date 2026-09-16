@@ -89,6 +89,31 @@ describe('repository', () => {
     expect((await g(PROJECT, 'rev-list', '--count', 'HEAD')).trim()).toBe('1');
   });
 
+  it('brings a .gitignore it wrote earlier up to date, and leaves a user-written one alone', async () => {
+    const projects = join(ROOT, 'projects');
+    // an older OverLyX repository: our header, but without the patterns added since (Python caches …)
+    const old = join(projects, 'older');
+    mkdirSync(old, { recursive: true });
+    writeFileSync(join(old, 'main.tex'), docText('one'));
+    writeFileSync(join(old, '.gitignore'), gitmod.DEFAULT_GITIGNORE.split('\n').filter(l => !/pycache|\.pyc|ipynb|Thumbs|\.swp/.test(l)).join('\n') + 'mine/\n');
+    await g(old, 'init', '-q', '-b', 'main');
+    await gitmod.ensureRepo('older');
+    const upgraded = readFileSync(join(old, '.gitignore'), 'utf8');
+    expect(upgraded).toContain('__pycache__/');
+    expect(upgraded).toContain('*.pyc');
+    expect(upgraded).toContain('mine/');                     // the user's own line survives
+    expect(upgraded.startsWith(gitmod.DEFAULT_GITIGNORE.split('\n')[0])).toBe(true);
+    expect(gitmod.upgradeGitignore(old)).toBe(false);        // idempotent
+    // a repository whose .gitignore the user wrote (or pushed): not ours to touch
+    const theirs = join(projects, 'theirs');
+    mkdirSync(theirs, { recursive: true });
+    writeFileSync(join(theirs, 'main.tex'), docText('one'));
+    writeFileSync(join(theirs, '.gitignore'), '*.aux\n');
+    await g(theirs, 'init', '-q', '-b', 'main');
+    await gitmod.ensureRepo('theirs');
+    expect(readFileSync(join(theirs, '.gitignore'), 'utf8')).toBe('*.aux\n');
+  });
+
   it('commits OverLyX writes, attributed to the people who edited', async () => {
     const doc = await manager.open('paper/main.tex');
     doc.editors.add(bob.id);

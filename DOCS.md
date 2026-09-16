@@ -693,6 +693,10 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.t
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
 journalctl -u overlyx-autodeploy -n 50   # on the production server: what the last push to origin/master went through (checks, deploy, verification)
+# a real project in the extension (VS Code under xvfb, driven over CDP): notifications, broken node views, KaTeX
+# errors, raw LaTeX left in the text, formula image glyphs and their placement, screenshots — for "this document
+# does not work in the extension" reports; copy the project somewhere first, never point it at /root/projects
+(cd packages/vscode && xvfb-run -a -s "-screen 0 1600x1000x24" node test/probeProject.mjs /tmp/copy-of-project main.tex /tmp/probe-out)
 # offline mode needs the built client (service worker): build into $S/dist, then
 (cd packages/client && npx vite build --outDir $S/dist)
 OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e2e/git.spec.ts   # git: a real clone / push / pull with a token
