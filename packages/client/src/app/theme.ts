@@ -9,6 +9,9 @@ export type Theme = 'light' | 'dark';
 export type ThemePref = Theme | 'system';
 
 const KEY = 'ol.theme';
+let externalTheme = false;
+/** An embedded host can own the theme instead of the browser preference. */
+export function useHostTheme(): void { externalTheme = true; }
 const media = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
 const listeners = new Set<() => void>();
 let pref: ThemePref = load();
@@ -30,6 +33,7 @@ export function setThemePref(p: ThemePref): void {
 export function toggleTheme(): void { setThemePref(currentTheme() === 'dark' ? 'light' : 'dark'); }
 
 function apply(): void {
+  if (externalTheme) return;
   const t = currentTheme();
   document.documentElement.dataset.theme = t;
   const meta = document.querySelector('meta[name="theme-color"]');

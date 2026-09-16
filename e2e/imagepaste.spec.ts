@@ -33,8 +33,8 @@ async function open(page: Page) {
 }
 
 test('a pasted screenshot is uploaded into figures/ and inserted as a graphics inset', async ({ page }) => {
-  const errors = collectErrors(page);
   await login(page);
+  const errors = collectErrors(page);   // measure the authenticated clipboard workflow
   await open(page);
   await page.locator('.lyx-editor .lyx-par').nth(0).click();
   await page.keyboard.press('End');

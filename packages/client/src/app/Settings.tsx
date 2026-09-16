@@ -48,7 +48,7 @@ const THEMES: [ThemePref, string, string][] = [
   ['dark', 'Dark', ''],
 ];
 
-export function SettingsPanel({ ai, user, initial, onClose }: { ai: AiStatus | null; user: User; initial?: SettingsSection; onClose: () => void }) {
+export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.map(([id]) => id) }: { sections?: SettingsSection[]; ai: AiStatus | null; user: User; initial?: SettingsSection; onClose: () => void }) {
   const [section, setSection] = useState<SettingsSection>(initial ?? 'editor');
   const [p, setP] = useState<Prefs>(getPrefs);
   useEffect(() => subscribePrefs(setP), []);
@@ -56,7 +56,7 @@ export function SettingsPanel({ ai, user, initial, onClose }: { ai: AiStatus | n
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [err, setErr] = useState('');
-  useEffect(() => { api.settings().then(r => setSettings(r.settings)).catch(() => {}); }, []);
+  useEffect(() => { if (sections.includes('account')) api.settings().then(r => setSettings(r.settings)).catch(() => {}); }, []);
   useEffect(() => {
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
@@ -77,7 +77,7 @@ export function SettingsPanel({ ai, user, initial, onClose }: { ai: AiStatus | n
     <Dialog title="Settings" onClose={onClose} wide>
       <div class="settings-dialog">
         <div class="settings-nav">
-          {SECTIONS.map(([id, label]) => <button key={id} class={section === id ? 'active' : ''} onClick={() => setSection(id)}>{label}</button>)}
+          {SECTIONS.filter(([id]) => sections.includes(id)).map(([id, label]) => <button key={id} class={section === id ? 'active' : ''} onClick={() => setSection(id)}>{label}</button>)}
         </div>
         <div class="settings-content">
           {section === 'editor' && <>

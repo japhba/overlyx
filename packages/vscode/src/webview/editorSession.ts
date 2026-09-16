@@ -1,5 +1,6 @@
 import type * as Y from 'yjs';
 import type { Awareness } from 'y-protocols/awareness';
+import type { DocumentModel } from '../shared/documentModel';
 
 /** The document and undo history outlive refreshable views. Never seed a refresh from init.pmDoc. */
 export interface EditorSession {
@@ -10,6 +11,7 @@ export interface EditorSession {
   binding?: object;
   scrollTop: number;
   headerLines?: string[];
+  base: DocumentModel;
 }
 
 export const editorSessions: Map<string, EditorSession> = import.meta.hot?.data.sessions ?? new Map();

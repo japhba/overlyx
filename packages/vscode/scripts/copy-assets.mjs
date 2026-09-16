@@ -24,6 +24,8 @@ const icons = path.join(pkg, '../client/public/lyxicons');
 const iconsOut = path.join(pkg, 'dist/webview/lyxicons');
 fs.mkdirSync(iconsOut, { recursive: true });
 for (const f of fs.readdirSync(icons)) fs.copyFileSync(path.join(icons, f), path.join(iconsOut, f));
+// Licenses for the text fonts imported into the webview by Vite.
+fs.cpSync(path.join(pkg, '../client/public/licenses'), path.join(pkg, 'dist/webview/licenses'), { recursive: true });
 // spell checker dictionaries (served by the bridge at /dict/<lang>.aff|.dic)
 const DICTS = { en: 'dictionary-en', 'en-gb': 'dictionary-en-gb', de: 'dictionary-de', fr: 'dictionary-fr' };
 const dictOut = path.join(pkg, 'dist/dict');

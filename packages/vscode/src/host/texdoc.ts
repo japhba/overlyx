@@ -63,13 +63,13 @@ export function parseFragmentText(latex: string, ctx: TexContext, relPath: strin
   return parseTex(latex, { layoutDir: ctx.layoutDir, localDirs: [ctx.root, path.dirname(abs)], readFile: readerFor(ctx, abs), masterHeader });
 }
 
-export function writeDocumentText(doc: LyxDocument, ctx: TexContext, relPath: string, fragment: boolean, resolveInclude?: (filename: string) => LyxDocument | undefined): { text: string; warnings: string[] } {
+export function writeDocumentText(doc: LyxDocument, ctx: TexContext, relPath: string, fragment: boolean, resolveInclude?: (filename: string) => LyxDocument | undefined): { text: string; warnings: string[]; files: Record<string, string> } {
   const abs = resolveInside(ctx.root, relPath);
   const r = writeTex(doc, {
     layoutDir: ctx.layoutDir, localDirs: [ctx.root, path.dirname(abs)], readFile: readerFor(ctx, abs),
     fragment, basename: path.basename(relPath, '.tex'), resolveInclude,
   });
-  return { text: r.text, warnings: r.warnings };
+  return { text: r.text, warnings: r.warnings, files: r.files };
 }
 
 /** Resolve a child document referenced by an include inset, for the writer's requirement scan. */

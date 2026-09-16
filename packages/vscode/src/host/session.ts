@@ -7,30 +7,29 @@
  */
 import * as vscode from 'vscode';
 import path from 'node:path';
-import { lyxToPm, pmToLyxBody, headerValue, type LyxDocument, type PMJSON } from '@overlyx/core';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+import { lyxToPm, headerValue, mergeLyx, type LyxDocument, type PMJSON } from '@overlyx/core';
+import { documentModel, sameModel, modelDocument, type DocumentModel } from '../shared/documentModel.ts';
 import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, type TexContext } from './texdoc.ts';
 import { buildMeta } from './meta.ts';
 import { findMaster } from './project.ts';
 
 export class DocSession {
-  /** header/preamble/format/trailer of the last parse — the parts the PM doc does not carry */
-  private preamble: string[] = ['#LyX 2.5 created this file. For more info see https://www.lyx.org/'];
-  private format = 643;
   private headerLines: string[] = [];
-  private trailer: string[] = [];
   isChild = false;
   /** the exact text we last wrote into the TextDocument (to tell our own echoes from external edits) */
   private lastWritten: string | null = null;
-  /** the latest PM doc received from the webview (null until it edits) */
-  private pmDoc: PMJSON | null = null;
   private disposed = false;
+  private diskText: string;
 
   constructor(
-    public readonly document: vscode.TextDocument,
+    public document: vscode.TextDocument,
     public readonly ctx: TexContext,
     public readonly project: string,
     public readonly relPath: string,
-  ) {}
+    private readonly recoveryDir: string,
+  ) { this.diskText = fs.readFileSync(document.uri.fsPath, 'utf8'); }
 
   get docId(): string { return `${this.project}/${this.relPath}`; }
 
@@ -40,22 +39,13 @@ export class DocSession {
   parseCurrent(): { pmDoc: PMJSON; headerLines: string[]; fragment: boolean; warnings: string[] } {
     const r = parseDocumentText(this.document.getText(), this.ctx, this.relPath);
     this.isChild = r.fragment;
-    this.preamble = r.doc.preamble;
-    this.format = r.doc.format;
     this.headerLines = r.doc.header.lines;
-    this.trailer = r.doc.trailer;
-    this.pmDoc = null;
-    return { pmDoc: lyxToPm(r.doc), headerLines: this.headerLines, fragment: r.fragment, warnings: r.warnings };
+    const pmDoc = lyxToPm(r.doc);
+    return { pmDoc, headerLines: this.headerLines, fragment: r.fragment, warnings: r.warnings };
   }
 
-  /** The current document model: from the webview's PM doc if it edited, else from the file text. */
-  toLyxDocument(): LyxDocument {
-    if (this.pmDoc) {
-      return { preamble: this.preamble, format: this.format, header: { lines: this.headerLines }, body: pmToLyxBody(this.pmDoc), trailer: this.trailer };
-    }
-    const r = parseDocumentText(this.document.getText(), this.ctx, this.relPath);
-    return r.doc;
-  }
+  /** The TextDocument is authoritative; webview snapshots are changes against a supplied base. */
+  toLyxDocument(): LyxDocument { return parseDocumentText(this.document.getText(), this.ctx, this.relPath).doc; }
 
   header(): LyxDocument['header'] { return { lines: this.headerLines } as LyxDocument['header']; }
 
@@ -65,16 +55,85 @@ export class DocSession {
   }
 
   /** The webview sent an updated PM doc: write it into the TextDocument. */
-  async applyPmUpdate(pmDoc: PMJSON, headerLines?: string[]): Promise<void> {
-    if (this.disposed) return;
-    this.pmDoc = pmDoc;
-    if (headerLines) this.headerLines = headerLines;
-    const text = this.toText();
+  async applyPmUpdate(pmDoc: PMJSON, headerLines: string[], base: DocumentModel): Promise<boolean> {
+    if (this.disposed) return false;
+    const diskChanged = await this.syncFromDisk();
+    const incoming = documentModel(pmDoc, headerLines);
+    if (sameModel(incoming, base)) return diskChanged;
+    const current = parseDocumentText(this.document.getText(), this.ctx, this.relPath);
+    const currentModel = documentModel(lyxToPm(current.doc), current.doc.header.lines);
+    if (sameModel(incoming, currentModel)) return diskChanged;
+    const ours = modelDocument(incoming, current.doc);
+    const merged = mergeLyx(modelDocument(base, current.doc), ours, current.doc);
+    const mergedModel = documentModel(lyxToPm(merged), merged.header.lines);
+    const rebased = !sameModel(incoming, mergedModel);
+    if (rebased) this.preserveDraft(writeDocumentText(ours, this.ctx, this.relPath, current.fragment, includeResolver(this.ctx, this.relPath)).text);
+    const { text, files } = writeDocumentText(merged, this.ctx, this.relPath, current.fragment, includeResolver(this.ctx, this.relPath));
+    this.writeSidecars(files);
+    await this.replaceText(text);
+    this.parseCurrent();
+    return diskChanged || rebased;
+  }
+
+  /** VS Code does not reload a dirty TextDocument when another process changes its file. */
+  async syncFromDisk(): Promise<boolean> {
+    // Child editors in a joint view do not own VS Code tabs, so their buffers may be released.
+    const reopened = this.document.isClosed;
+    if (reopened) this.document = await vscode.workspace.openTextDocument(this.document.uri);
+    const disk = fs.readFileSync(this.document.uri.fsPath, 'utf8');
+    if (disk === this.diskText) return reopened;
+    // Let VS Code reload a clean file itself: a WorkspaceEdit would mark it dirty while
+    // leaving VS Code's saved-file timestamp behind, causing a false save conflict.
+    if (!this.document.isDirty && this.document.getText() !== disk) {
+      await new Promise<void>((resolve, reject) => {
+        const listener = vscode.workspace.onDidChangeTextDocument(event => {
+          if (event.document !== this.document || event.contentChanges.length === 0) return;
+          clearTimeout(timeout); listener.dispose(); resolve();
+        });
+        const timeout = setTimeout(() => { listener.dispose(); reject(new Error(`VS Code did not reload ${this.docId} from disk`)); }, 5000);
+      });
+      return this.syncFromDisk();
+    }
+    const local = this.document.getText();
+    let text = disk;
+    if (local !== this.diskText && local !== disk) {
+      const base = parseDocumentText(this.diskText, this.ctx, this.relPath);
+      const ours = parseDocumentText(local, this.ctx, this.relPath);
+      const theirs = parseDocumentText(disk, this.ctx, this.relPath);
+      this.preserveDraft(local);
+      const merged = mergeLyx(base.doc, ours.doc, theirs.doc);
+      text = writeDocumentText(merged, this.ctx, this.relPath, theirs.fragment, includeResolver(this.ctx, this.relPath)).text;
+    }
+    await this.replaceText(text);
+    this.diskText = disk;
+    this.parseCurrent();
+    return true;
+  }
+
+  /** Drawing data lives in SVGs: persist it before reparsing the TeX anchor. */
+  private writeSidecars(files: Record<string, string>): void {
+    for (const [rel, content] of Object.entries(files)) {
+      const abs = path.resolve(path.dirname(this.document.uri.fsPath), rel);
+      if (!abs.startsWith(this.ctx.root + path.sep) || !abs.endsWith('.svg')) throw new Error(`Invalid drawing sidecar: ${rel}`);
+      if (fs.existsSync(abs) && fs.readFileSync(abs, 'utf8') === content) continue;
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content);
+    }
+  }
+
+  private preserveDraft(text: string): void {
+    fs.mkdirSync(this.recoveryDir, { recursive: true });
+    const destination = path.join(this.recoveryDir, `${path.basename(this.relPath, '.tex')}-${crypto.randomUUID()}.tex`);
+    fs.writeFileSync(destination, text, { flag: 'wx' });
+    console.info(`OverLyX preserved an unsaved draft before merging external changes: ${destination}`);
+  }
+
+  private async replaceText(text: string): Promise<void> {
     if (text === this.document.getText()) return;
     this.lastWritten = text;
     const edit = new vscode.WorkspaceEdit();
     edit.replace(this.document.uri, new vscode.Range(0, 0, this.document.lineCount, 0), text);
-    await vscode.workspace.applyEdit(edit);
+    if (!await vscode.workspace.applyEdit(edit)) throw new Error(`Could not apply the edit to ${this.docId}`);
   }
 
   /**
@@ -90,6 +149,8 @@ export class DocSession {
 
   /** Update header lines (document settings / tracking switches) and re-serialize. */
   async setHeader(body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<string[]> {
+    const before = this.toLyxDocument();
+    const base = documentModel(lyxToPm(before), before.header.lines);
     let lines = [...this.headerLines];
     if (Array.isArray(body.headerLines)) lines = body.headerLines.map(String);
     if (typeof body.preamble === 'string') {
@@ -104,21 +165,8 @@ export class DocSession {
         if (i >= 0) lines[i] = `\\${k} ${v}`; else lines.push(`\\${k} ${v}`);
       }
     }
-    this.headerLines = lines;
-    if (this.pmDoc) await this.applyPmUpdate(this.pmDoc);
-    else {
-      // no webview edit yet: rewrite from the parsed file with the new header
-      const r = parseDocumentText(this.document.getText(), this.ctx, this.relPath);
-      const doc: LyxDocument = { ...r.doc, header: { ...r.doc.header, lines } };
-      const text = writeDocumentText(doc, this.ctx, this.relPath, this.isChild, includeResolver(this.ctx, this.relPath)).text;
-      if (text !== this.document.getText()) {
-        this.lastWritten = text;
-        const edit = new vscode.WorkspaceEdit();
-        edit.replace(this.document.uri, new vscode.Range(0, 0, this.document.lineCount, 0), text);
-        await vscode.workspace.applyEdit(edit);
-      }
-    }
-    return lines;
+    await this.applyPmUpdate(base.pmDoc, lines, base);
+    return this.getHeaderLines();
   }
 
   meta(): Record<string, unknown> {

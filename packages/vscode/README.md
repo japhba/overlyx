@@ -22,13 +22,39 @@ reproduced byte for byte until you change them.
   them); show them in the margin or the comments panel. Change tracking uses LyX's
   `\lyxadded`/`\lyxdeleted` macros.
 - **Editing a file that changes underneath** (git checkout, a coding agent, you in a split text
-  editor) merges into the WYSIWYG view without losing your place.
+  editor) refreshes every open view, including cached child documents and inherited macros.
+  Pending edits in separate paragraphs are merged; stale snapshots cannot restore removed text.
+
+### Shared browser editing features
+
+The browser and extension use the same Edit, Insert, Document and View menus, toolbar groups,
+editor plugins and clipboard handlers. Changes to these shared components enter both builds;
+there is no second copy to port. This includes Markdown list/heading shortcuts, autocorrection,
+image/SVG paste and drop, margin drawing, the ruler, text width, settings, help and statistics.
+Drawing SVGs are updated alongside editor changes, including when the TeX anchor is unchanged.
+
+The Help menu searches commands and allows shortcut customization. In VS Code its default
+shortcut is **Ctrl+Alt+Shift+P**; **Ctrl+Shift+P** and **F1** retain VS Code's command palette.
+File operations, source control, history, outline and theme commands use VS Code. Online accounts,
+collaboration and server AI remain browser services; the extension uses local files and VS Code agents.
+
+### External changes and unsaved edits
+
+Clean files reload through VS Code without becoming dirty. If a file changes while it has unsaved
+edits, OverLyX merges the new source into the buffer and preserves the unsaved draft in the
+extension's global-storage `recovery` directory (the extension-host log records the exact path).
+Overlapping or adjacent changed paragraphs use the new source; the saved draft retains the local
+version. VS Code's normal **Compare / Overwrite** save confirmation still applies when both the
+file and the unsaved buffer changed. Overwrite saves the merged buffer visible in OverLyX.
+
+Reloading a webview requests fresh content from its TextDocument. Updating extension-host code
+requires **Developer: Reload Window** so VS Code loads the rebuilt extension.
 
 ## Requirements
 
 - A TeX distribution with `latexmk` (and `synctex`) on the PATH for PDF preview — the editor
   itself works without one.
-- Optional converters for graphics previews: `rsvg-convert`/`inkscape` (SVG), `pdftoppm` (PDF),
+- Optional converters for graphics previews: `rsvg-convert`/`inkscape` (SVG), `pdftocairo` (PDF),
   `gs` (EPS), ImageMagick `convert` (everything else).
 
 ## Settings
@@ -45,6 +71,11 @@ section in the Explorer sidebar while an OverLyX editor is open. A `.tex` file o
 text gets native Outline and breadcrumbs from the extension's symbol provider.
 
 ## Updates
+
+Right-click a child-document include to **Open in new editor tab** (beside the current editor),
+or **Show master and child documents in one view**. The combined view includes nested children
+and can also be enabled from a child document. Each file keeps its own edits and undo history;
+Save writes the files independently. **Show this document only** returns to the single-file view.
 
 Installed from a `.vsix`, the extension is not updated by VS Code. It checks the release
 repository (`overlyx.updateRepo`, default `japhba/overlyx`) every five minutes and offers

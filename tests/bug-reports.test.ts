@@ -10,7 +10,8 @@ describe('GitHub bug reports', () => {
   it('#4 renders a minimal image-based macro instead of its literal name', () => {
     const def = String.raw`\mathord{\includegraphics[height=0.7em]{glyph.pdf}}`;
     const sanitized = sanitizeForKatex(def, 'Pfi', 0);
-    expect(sanitized).toBe(def);
+    expect(sanitized).toContain('lm-image-glyph');
+    expect(sanitizeForKatex(sanitized, 'Pfi', 0)).toBe(sanitized);
     const macros: MacroTable = { Pfi: { nargs: 0, def: sanitized }, tPfi: { nargs: 0, def: String.raw`\tilde{\Pfi}` } };
     const html = renderStaticHtml('$\\Pfi_{ij},\\quad\\tPfi_{ij}$', false, macros, { project: 'paper', docDir: 'chapters' });
     expect(html).toContain('<img');
@@ -19,13 +20,51 @@ describe('GitHub bug reports', () => {
   });
 
   it('#4 approximates the font-height/raisebox/includesvg form used by the reported macro', () => {
-    const source = String.raw`\NewDocumentCommand{\myPfi}{}{\text{\normalfont \bbheight=\fontcharht\font\`0 \raisebox{-0.04\bbheight}[\bbheight][0pt]{\includesvg[height=1.08\bbheight]{doublephi.svg}}}}`;
+    const source = String.raw`\NewDocumentCommand{\myPfi}{}{\text{\normalfont \bbheight=\fontcharht\font@0 \raisebox{-0.04\bbheight}[\bbheight][0pt]{\includesvg[height=1.08\bbheight]{doublephi.svg}}}}`.replace('@', '`');
     const defs = macrosFromLatex(source).macros;
     const transported = toMathliveMacros(defs);
-    expect(transported.myPfi.def).toContain(String.raw`\includegraphics[height=1.08em]{doublephi.svg}`);
+    expect(transported.myPfi.def).toContain(String.raw`\includegraphics[height=0.696em]{doublephi.svg}`);
     expect(transported.myPfi.def).not.toMatch(/fontcharht|raisebox|includesvg/);
     const macros: MacroTable = { myPfi: { nargs: 0, def: transported.myPfi.def } };
     expect(() => katex.renderToString(String.raw`\myPfi`, { throwOnError: true, strict: false, trust: true, macros: katexMacros(macros) })).not.toThrow();
+    expect(sanitizeForKatex(transported.myPfi.def, 'myPfi', 0)).toBe(transported.myPfi.def);
+    expect(sanitizeForKatex(defs[0].def, 'myPfi', 0)).toBe(transported.myPfi.def);
+    for (const formula of [String.raw`\myPfi`, String.raw`x_{\myPfi}`, String.raw`x^{\myPfi}`, String.raw`x_{x_{\myPfi}}`]) {
+      const html = renderStaticHtml(formula, false, macros, { project: 'paper', docDir: 'chapters' });
+      // The image height is relative to its current font in all three math sizes.
+      expect(html).toMatch(/<img[^>]*style="height:0\.696em;/);
+      expect(html).toContain('mask-image:url(&quot;/api/projects/paper/graphics/chapters/doublephi.svg?w=400&quot;)');
+      expect(html).not.toMatch(/katex-error|lm-error/);
+    }
+  });
+
+  it('renders the alignment glyph through both macro passes, including accents and scripts', () => {
+    const source = String.raw`\DeclareRobustCommand{\doublephi}{\mathord{\mathchoice
+      {\includegraphics[height=0.68333em]{symbols/doublephi.pdf}}
+      {\includegraphics[height=0.68333em]{symbols/doublephi.pdf}}
+      {\includegraphics[height=0.47833em]{symbols/doublephi.pdf}}
+      {\includegraphics[height=0.34167em]{symbols/doublephi.pdf}}}}
+      \def\Pfi{\doublephi}\def\tPfi{\tilde{\Pfi}}`;
+    const transported = toMathliveMacros(macrosFromLatex(source).macros);
+    const macros: MacroTable = Object.fromEntries(Object.entries(transported).map(([name, value]) => [name, { nargs: value.args, def: value.def }]));
+    for (const formula of [String.raw`\Pfi`, String.raw`\tPfi`, String.raw`x_{\Pfi}`, String.raw`x_{x_{\Pfi}}`]) {
+      const html = renderStaticHtml(formula, false, macros, { project: 'paper', docDir: '' });
+      expect(html).toMatch(/<img[^>]*style="height:0\.6833\d*em;/);
+      expect(html).toContain('mask-image:');
+      expect(html).not.toMatch(/katex-error|lm-error|lm-unknown|>doublephi</);
+    }
+  });
+
+  it('colours SVG glyph macros without masking ordinary PDF or raster images', () => {
+    const macros: MacroTable = {
+      Pfi: { nargs: 0, def: String.raw`\includegraphics[height=.7em]{symbols/doublephi.svg}` },
+      logo: { nargs: 0, def: String.raw`\includegraphics[height=.7em]{logo.png}` },
+    };
+    const html = renderStaticHtml(String.raw`{\color{red}\Pfi}\logo`, false, macros, { project: 'paper', docDir: '' });
+    expect(html.match(/mask-image:/g)).toHaveLength(1);
+    expect(html).toMatch(/class="enclosing lm-image-glyph" style="color:red;[^\"]*mask-image:/);
+    expect(html).toContain('doublephi.svg?w=400');
+    expect(html).toContain('src="/api/projects/paper/graphics/logo.png?w=400"');
   });
 
   it('renders overlay-based double-symbol macros such as \\Pfi, \\HH, \\XX and \\YY', () => {

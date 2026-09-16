@@ -4,6 +4,7 @@
  */
 import { G, vscode, applyTheme } from './globals';   // must come first: sets OVERLYX_API_BASE
 import { render } from 'preact';
+import { useHostTheme } from '@client/app/theme';
 import { LYX_ICONS } from '@client/app/lyxicons';
 import { editorContext } from '@client/editor/context';
 import { EditorShell } from './EditorShell';
@@ -14,6 +15,7 @@ import 'prosemirror-view/style/prosemirror.css';
 import 'prosemirror-gapcursor/style/gapcursor.css';
 import 'prosemirror-tables/style/tables.css';
 
+useHostTheme();
 applyTheme(G.dark);
 // toolbar icons are absolute paths (/lyxicons/x.svg) in the web app: point them at our assets
 for (const k of Object.keys(LYX_ICONS)) if (LYX_ICONS[k].startsWith('/')) LYX_ICONS[k] = G.assetBase + LYX_ICONS[k].slice(1);

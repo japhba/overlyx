@@ -90,6 +90,17 @@ exports.run = async function run() {
   assert.strictEqual(symbols.length, 1, 'exactly one top-level symbol (no doubled providers): ' + JSON.stringify(symbols.map(sy => sy.name)));
   log('document symbols ok:', symbols.map(sy => sy.name).join(', '));
 
+  // A toolbar invoked in a child can update the preamble of a file without its own tab.
+  const supportPath = path.join(ws, 'support.tex');
+  fs.writeFileSync(supportPath, "\\documentclass{article}\n\\begin{document}\nSupport.\n\\end{document}\n");
+  const supportId = entry.session.project + '/support.tex';
+  const headerResponse = await fetch(`${base}/api/docs/${encodeURIComponent(supportId)}/header`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ preamble: '\\newcommand{\\testglyph}{x}' }),
+  });
+  assert.strictEqual(headerResponse.status, 200);
+  assert.ok(api.registry.sessionByDocId(supportId).document.getText().includes('\\newcommand{\\testglyph}{x}'));
+  log('preamble updates work without a separate editor tab');
+
   // 6. self-update pipeline against a stubbed release endpoint (dry run: stops after download)
   const http = require('http');
   const stubVsix = Buffer.alloc(20000, 7);

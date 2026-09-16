@@ -130,7 +130,7 @@ function SubMenu({ items, path, close }: { items: MenuEntry[]; path: string[]; c
  * menu's own items. Every result has a ✎ button that records a new shortcut for it — press the
  * keys; Backspace removes the shortcut, Esc cancels; a key that another command uses asks first.
  */
-function SearchMenu({ menu, entries, close, recording, setRecording }: { menu: MenuDef; entries: SearchEntry[]; close: () => void; recording: string | null; setRecording: (id: string | null) => void }) {
+function SearchMenu({ menu, entries, close, recording, setRecording, paletteShortcut }: { menu: MenuDef; paletteShortcut: string; entries: SearchEntry[]; close: () => void; recording: string | null; setRecording: (id: string | null) => void }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -170,7 +170,7 @@ function SearchMenu({ menu, entries, close, recording, setRecording }: { menu: M
   return (
     <div class="menu-list help-menu" onMouseDown={e => e.preventDefault()}>
       <div class="menu-search" onMouseDown={e => e.stopPropagation()}>
-        <input ref={input} value={q} placeholder={`Search menus and shortcuts (${formatShortcut(effectiveShortcut(PALETTE_ID, PALETTE_DEFAULT) ?? 'F1')})`} data-help-search
+        <input ref={input} value={q} placeholder={`Search menus and shortcuts (${formatShortcut(effectiveShortcut(PALETTE_ID, paletteShortcut) ?? 'F1')})`} data-help-search
           onInput={e => setQ((e.target as HTMLInputElement).value)} onKeyDown={onKey} autocomplete="off" spellcheck={false} />
       </div>
       {q.trim() ? (
@@ -206,8 +206,8 @@ function SearchMenu({ menu, entries, close, recording, setRecording }: { menu: M
   );
 }
 
-export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle, onSignIn }: {
-  menus: MenuDef[]; user: User; right?: ComponentChildren; onLogout: () => void; onSettings?: () => void; onHome: () => void;
+export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle, onSignIn, showThemeToggle = true, paletteShortcut = PALETTE_DEFAULT, captureF1 = true }: {
+  menus: MenuDef[]; user?: User; right?: ComponentChildren; onLogout?: () => void; onSettings?: () => void; onHome?: () => void; showThemeToggle?: boolean; paletteShortcut?: string; captureF1?: boolean;
   /** reference entries (shortcuts without a menu item) for the palette */
   searchEntries?: SearchEntry[];
   /** who is in the document right now (Google-Docs style, top right; click one to jump to their cursor) */
@@ -259,8 +259,8 @@ export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, sear
       if (live.current.recording) return;   // the recorder reads this key
       const k = keyFromEvent(e);
       if (!k) return;
-      const paletteKey = canonical(effectiveShortcut(PALETTE_ID, PALETTE_DEFAULT));
-      if (k === paletteKey || k === 'F1') { e.preventDefault(); e.stopPropagation(); openSearch(); return; }
+      const paletteKey = canonical(effectiveShortcut(PALETTE_ID, paletteShortcut));
+      if (k === paletteKey || (captureF1 && k === 'F1')) { e.preventDefault(); e.stopPropagation(); openSearch(); return; }
       const { custom, shadowed } = live.current.keyIndex;
       const hit = custom.get(k);
       if (hit?.action) { e.preventDefault(); e.stopPropagation(); if (live.current.open !== null) close(); hit.action(); return; }
@@ -270,20 +270,20 @@ export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, sear
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('ol:palette', onOpen);
     return () => { window.removeEventListener('keydown', onKey, true); window.removeEventListener('ol:palette', onOpen); };
-  }, []);
+  }, [paletteShortcut, captureF1]);
   const toggle = (i: number) => {
     if (open === i) { close(); return; }
     if (menus[i].search && open === null) prevFocus.current = document.activeElement as HTMLElement | null;
     setOpen(i);
   };
-  const paletteKey = formatShortcut(effectiveShortcut(PALETTE_ID, PALETTE_DEFAULT) ?? 'F1');
+  const paletteKey = formatShortcut(effectiveShortcut(PALETTE_ID, paletteShortcut) ?? 'F1');
   return (
     <div class="menubar">
-      <a class="brand" href="#/" title="Start screen" onClick={e => { e.preventDefault(); onHome(); }}><Wordmark /></a>
+      {onHome && <a class="brand" href="#/" title="Start screen" onClick={e => { e.preventDefault(); onHome(); }}><Wordmark /></a>}
       {menus.map((m, i) => (
         <div key={m.title} class={'menu' + (open === i ? ' open' : '')} onMouseEnter={() => { if (open !== null && open !== i) toggle(i); }}>
           <button onMouseDown={e => { e.preventDefault(); toggle(i); }} title={m.search ? `Search menus and shortcuts (${paletteKey})` : undefined}>{m.title}</button>
-          {open === i && (m.search ? <SearchMenu menu={m} entries={entries} close={close} recording={recording} setRecording={setRecording} /> : <MenuList items={m.items} path={[m.title]} close={close} />)}
+          {open === i && (m.search ? <SearchMenu menu={m} entries={entries} close={close} recording={recording} setRecording={setRecording} paletteShortcut={paletteShortcut} /> : <MenuList items={m.items} path={[m.title]} close={close} />)}
         </div>
       ))}
       <span class="spacer" />
@@ -295,7 +295,7 @@ export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, sear
           Share
         </button>
       )}
-      {user.guest && onSignIn && (
+      {user?.guest && onSignIn && (
         <button type="button" class="share-btn signin-btn" data-signin onClick={onSignIn} title="You are here as a guest — sign in to keep this project in your account">
           Sign in
         </button>
@@ -303,15 +303,15 @@ export function MenuBar({ menus, user, right, onLogout, onSettings, onHome, sear
       <a class="gh-link" href="https://github.com/japhba/overlyx" target="_blank" rel="noopener" title="OverLyX on GitHub — source code, issues, releases (GPL-3.0)">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
       </a>
-      <ThemeToggle />
-      <div class={'menu user-menu' + (userOpen ? ' open' : '')}>
+      {showThemeToggle && <ThemeToggle />}
+      {user && <div class={'menu user-menu' + (userOpen ? ' open' : '')}>
         <button type="button" class="avatar-btn" data-user-menu title={`${user.name} (${user.username})`} onMouseDown={e => { e.preventDefault(); if (open !== null) setOpen(null); setUserOpen(o => !o); }}>
           <span class="avatar" style={{ background: user.color }} data-initials={user.avatar ? undefined : initials(user.name).length}><AvatarContent name={user.name} src={user.avatar} /></span>
         </button>
         {userOpen && <MenuList items={[{ label: user.name, disabled: true }, { label: user.guest ? 'guest (not signed in)' : user.username, disabled: true }, { sep: true },
           ...(user.guest && onSignIn ? [{ label: 'Sign in to keep this project…', action: onSignIn }] : onSettings ? [{ label: 'Settings…', action: onSettings }] : []),
           { label: user.guest ? 'Leave' : 'Sign out', action: onLogout }]} path={['Account']} close={close} style="left:auto;right:0" />}
-      </div>
+      </div>}
     </div>
   );
 }

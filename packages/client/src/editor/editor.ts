@@ -1,48 +1,34 @@
+import { editorClipboard } from './clipboard';
+import { editorPlugins } from './plugins';
+import { editorTransactions } from './transactions';
 /**
  * Editor assembly: ProseMirror view bound to a Yjs document (y-prosemirror), LyX keymap,
  * node views (MathLive, insets, graphics, commands), decorations and collaboration cursors.
  */
 import { EditorState, Plugin, TextSelection } from 'prosemirror-state';
 import { EditorView, type NodeView } from 'prosemirror-view';
-import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
+import { type Node as PMNode } from 'prosemirror-model';
 import { sliceText } from './cliptext';
-import { gapCursor } from 'prosemirror-gapcursor';
-import { dropCursor } from 'prosemirror-dropcursor';
-import { tableEditing } from 'prosemirror-tables';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import * as decoding from 'lib0/decoding';
 import { ySyncPlugin, yCursorPlugin, yUndoPlugin, initProseMirrorDoc, ySyncPluginKey, relativePositionToAbsolutePosition } from 'y-prosemirror';
 import { schema, unquote, paramMap } from '@overlyx/core';
-import { lyxKeymap, chordPlugin } from './keymap';
-import { numberingPlugin } from './plugins/numbering';
-import { marginPlugin } from './plugins/margin';
-import { inkPlugin } from './plugins/ink';
-import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
-import { fontCarryPlugin } from './plugins/fontcarry';
-import { insetCaretPlugin } from './plugins/insetcaret';
-import { dragSelectPlugin } from './plugins/dragselect';
-import { findPlugin } from './plugins/find';
-import { mirrorCaretPlugin } from './plugins/mirrorcaret';
 import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
 import { editorContext, viewDocDir, viewProject } from './context';
-import { imageFiles, insertImageFiles, isSvgMarkup, looksLikeImageFileName, svgFile } from './imagepaste';
 import { setDocumentMacros, setInlineMacroDefs, markMacrosReady, macroTableFor, macrosReady, macroVersion, mathViews } from './lyxmath/macrotable';
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
 import { includeTarget } from './commands';
 import { readSavedCursor, writeSavedCursor, restoredCursorPos, type SavedCursor } from './cursormemory';
-import { aiRewritePlugin, openRewriteMath } from './ai/rewrite';
-import { aiCompletePlugin } from './ai/complete';
+import { openRewriteMath } from './ai/rewrite';
 import { installMathAssist } from './ai/mathassist';
 import { getPrefs, subscribePrefs } from '../prefs';
-import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
-import { autocorrectPlugin } from './spell/autocorrect';
-import { markdownRulesPlugin } from './plugins/mdrules';
-import { api, type User } from '../api';
+import { misspelledAt, spellSuggest } from './spell/plugin';
+import { type User } from '../api';
 
 installMathAssist();
 editorContext.aiRewriteMath = (field) => openRewriteMath(field);
@@ -301,28 +287,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
       },
     }),
     yUndoPlugin({ trackedOrigins: [AGENT_EDIT_ORIGIN] }),
-    // AI preview / ghost text come first: their Tab / Escape must win over the LyX bindings and table navigation
-    aiRewritePlugin(),
-    aiCompletePlugin(),
-    spellPlugin(),
-    markdownRulesPlugin(),   // `- ` / `1. ` / `# ` at a paragraph start, before autocorrect looks at the space
-    autocorrectPlugin(),
-    chordPlugin(),
-    lyxKeymap(),
-    fontCarryPlugin(),
-    insetCaretPlugin(),
-    dragSelectPlugin(),
-    gapCursor(),
-    dropCursor({ color: '#3b6ea5' }),
-    tableEditing(),
-    numberingPlugin(),
-    marginPlugin(opts.marginMode ?? false),
-    // margin ink: one layer per document view (child editors of a combined view share the master's margins)
-    ...(opts.child ? [] : [inkPlugin(provider.awareness)]),
-    changeTrackingPlugin(),
-    changesFilterPlugin(),
-    findPlugin(),
-    mirrorCaretPlugin(),
+    ...editorPlugins({ awareness: provider.awareness, marginMode: opts.marginMode ?? false, child: opts.child ?? false, history: [] }),
     macroDefsPlugin(() => viewRef),
     new Plugin({
       view: () => ({
@@ -348,29 +313,10 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   window.addEventListener('pagehide', flushCursor);
   let editable = !opts.readOnly;
   let viewOnly = false;
-  let flushing = false;
   const view = new EditorView(opts.container, {
     state,
     editable: () => editable,
-    // Decoration-only transactions (y-prosemirror re-renders the remote cursors from a setTimeout
-    // after every awareness change) make ProseMirror write its *state* selection back into the DOM.
-    // Right after a mouse click the DOM selection is ahead of the state (the browser's
-    // `selectionchange` event has not been processed yet), so the click would be lost: read the
-    // DOM selection first and re-create the transaction on the fresh state.
-    dispatchTransaction(tr) {
-      if (viewOnly && tr.docChanged && !tr.getMeta(ySyncPluginKey)) return;   // viewers cannot edit (the server drops their updates anyway)
-      if (!flushing && !tr.docChanged && tr.selectionSet === false && tr.selection.eq(view.state.selection)) {
-        flushing = true;
-        const before = view.state;
-        try { (view as any).domObserver.flush(); } catch { /* ignore */ } finally { flushing = false; }
-        if (view.state !== before) {
-          const fresh = view.state.tr;
-          for (const [k, v] of Object.entries((tr as any).meta as Record<string, unknown>)) fresh.setMeta(k, v);
-          tr = fresh;
-        }
-      }
-      view.updateState(view.state.apply(tr));
-    },
+    dispatchTransaction: editorTransactions(() => viewOnly),
     nodeViews: {
       math_inline: (node, view, getPos) => guarded(node, () => new MathInlineView(node, view, getPos as () => number | undefined)),
       math_display: (node, view, getPos) => guarded(node, () => new MathDisplayView(node, view, getPos as () => number | undefined)),
@@ -428,65 +374,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
         return true;
       },
     },
-    handlePaste(view, event) {
-      // an image on the clipboard (a screenshot, a copied image file): upload it, insert a graphics inset
-      const images = imageFiles(event.clipboardData);
-      if (images.length) {
-        if (!viewOnly) void insertImageFiles(view, images);
-        return true;
-      }
-      const text = event.clipboardData?.getData('text/plain');
-      const html = event.clipboardData?.getData('text/html');
-      // SVG markup on the text clipboard ("Copy as SVG" in drawing tools): an image, not text
-      if (text && !viewOnly && isSvgMarkup(text)) { void insertImageFiles(view, [svgFile(text)]); return true; }
-      /** plain text without LaTeX: LyX semantics (blank line = new paragraph, no HTML structure) */
-      const plainPaste = () => {
-        const paras = text!.replace(/\r\n/g, '\n').split(/\n{2,}/);
-        if (paras.length === 1) { view.dispatch(view.state.tr.insertText(text!.replace(/\n/g, ' '))); return; }
-        let tr = view.state.tr.deleteSelection();
-        paras.forEach((p, i) => {
-          if (i > 0) tr = tr.split(tr.selection.from);
-          tr = tr.insertText(p.replace(/\n/g, ' '));
-        });
-        view.dispatch(tr);
-      };
-      if (text && !html) {
-        // just an image file's name: Safari (and Firefox on macOS) deliver only that for a file
-        // copied in the Finder — paste it as text, but say how to get the image itself in
-        if (looksLikeImageFileName(text)) {
-          plainPaste();
-          editorContext.notify?.('Only the file’s name was on the clipboard — to insert the image, drag the file into the text (or copy it in Chrome)');
-          return true;
-        }
-        // pasted LaTeX (a \command, $…$, \[ …) is parsed on the server against this document's own
-        // preamble and inserted as real structure — sections, formulas, citations, lists
-        if (!viewOnly && /\\[a-zA-Z]+|\\\[|\\\(|\$[^$\n][^$]*\$/.test(text)) {
-          void api.parseClip(view.dom.dataset.docId ?? opts.docId, text).then(r => {
-            const blocks = (r.blocks as unknown[]).map(b => schema.nodeFromJSON(b)).filter(n => n.type.name !== 'doc');
-            if (!blocks.length) { plainPaste(); return; }
-            // a single plain paragraph flows into the current one; anything structured is inserted as whole paragraphs (closed slice — an open one would dissolve the first block's layout)
-            const single = blocks.length === 1 && blocks[0].type.name === 'paragraph' && blocks[0].attrs.layout === 'Standard' && !blocks[0].attrs.depth;
-            const slice = single ? new Slice(Fragment.from(blocks[0].content), 0, 0) : new Slice(Fragment.from(blocks), 0, 0);
-            view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
-            view.focus();
-          }).catch(e => { console.warn('LaTeX paste fell back to plain text:', e); plainPaste(); });
-          return true;
-        }
-        plainPaste();
-        return true;
-      }
-      return false;
-    },
-    // files dragged in from the computer: images are uploaded and inserted where they were dropped
-    handleDrop(view, event, _slice, moved) {
-      if (moved || !event.dataTransfer?.files.length) return false;   // internal drags and text drops: ProseMirror's own handling
-      if (viewOnly) return true;
-      const images = imageFiles(event.dataTransfer);
-      if (!images.length) { editorContext.notify?.('Only images can be dropped into the text — other files go into the file browser', 'error'); return true; }
-      const pos = view.posAtCoords({ left: event.clientX, top: event.clientY });
-      void insertImageFiles(view, images, pos ? pos.pos : null);
-      return true;
-    },
+    ...editorClipboard(opts.docId, () => viewOnly),
   });
   viewRef = view;
   performance.mark('ol:editor-created');

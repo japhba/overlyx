@@ -1,3 +1,6 @@
+import { editorClipboard } from '@client/editor/clipboard';
+import { editorPlugins } from '@client/editor/plugins';
+import { editorTransactions } from '@client/editor/transactions';
 /**
  * The OverLyX editor without a server: the same ProseMirror assembly as the web client's
  * createEditor (editor.ts), but on a purely local Y.Doc — no WebSocket provider, no IndexedDB,
@@ -7,25 +10,14 @@
  */
 import { EditorState, Plugin, Selection, TextSelection } from 'prosemirror-state';
 import { EditorView, type NodeView } from 'prosemirror-view';
-import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
+import { type Node as PMNode } from 'prosemirror-model';
 import { keymap } from 'prosemirror-keymap';
-import { gapCursor } from 'prosemirror-gapcursor';
-import { dropCursor } from 'prosemirror-dropcursor';
-import { tableEditing } from 'prosemirror-tables';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { ySyncPlugin, yCursorPlugin, yUndoPlugin, ySyncPluginKey, yUndoPluginKey, defaultDeleteFilter, undo, redo, initProseMirrorDoc, prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
 import { editorSessions } from './editorSession';
+import { documentModel, mergeModels, sameModel, type DocumentModel } from '../shared/documentModel';
 import { schema, unquote, paramMap } from '@overlyx/core';
-import { lyxKeymap, chordPlugin } from '@client/editor/keymap';
-import { numberingPlugin } from '@client/editor/plugins/numbering';
-import { marginPlugin } from '@client/editor/plugins/margin';
-import { changeTrackingPlugin, changesFilterPlugin } from '@client/editor/plugins/changes';
-import { fontCarryPlugin } from '@client/editor/plugins/fontcarry';
-import { insetCaretPlugin } from '@client/editor/plugins/insetcaret';
-import { dragSelectPlugin } from '@client/editor/plugins/dragselect';
-import { findPlugin } from '@client/editor/plugins/find';
-import { mirrorCaretPlugin } from '@client/editor/plugins/mirrorcaret';
 import { MathInlineView, MathDisplayView, MacroView } from '@client/editor/nodeviews/math';
 import { InsetView } from '@client/editor/nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from '@client/editor/nodeviews/leaf';
@@ -34,12 +26,9 @@ import { sliceText } from '@client/editor/cliptext';
 import { showContextMenu } from '@client/editor/contextmenu';
 import { editorContextMenu } from '@client/editor/editormenu';
 import { includeTarget } from '@client/editor/commands';
-import { aiRewritePlugin } from '@client/editor/ai/rewrite';
-import { aiCompletePlugin } from '@client/editor/ai/complete';
-import { spellPlugin, misspelledAt, spellSuggest } from '@client/editor/spell/plugin';
+import { misspelledAt, spellSuggest } from '@client/editor/spell/plugin';
 import { macroDefsPlugin, describeChange } from '@client/editor/editor';
 import { getPrefs, subscribePrefs } from '@client/prefs';
-import { api } from '@client/api';
 
 function guarded(node: PMNode, make: () => NodeView): NodeView {
   let v: NodeView;
@@ -66,7 +55,9 @@ export interface LocalEditorHandle {
   view: EditorView;
   ydoc: Y.Doc;
   /** apply new content that arrived from the file (as a diff: unchanged paragraphs keep identity) */
-  applyExternal(pmDoc: unknown): void;
+  applyExternal(pmDoc: unknown, headerLines: string[]): string[];
+  /** Only user changes since the last received/sent model need to be written back. */
+  takeUpdate(headerLines: string[]): (DocumentModel & { base: DocumentModel }) | null;
   destroy(preserveSession?: boolean): void;
 }
 
@@ -74,7 +65,9 @@ export interface LocalEditorOptions {
   docId: string;
   container: HTMLElement;
   pmDoc: unknown;
+  headerLines: string[];
   marginMode?: boolean;
+  child?: boolean;
   onSelectionChange?: (view: EditorView, info: { docChanged: boolean }) => void;
   onDocChange?: (view: EditorView) => void;
 }
@@ -94,7 +87,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
       deleteFilter: item => defaultDeleteFilter(item, new Set(['paragraph'])),
       captureTransaction: tr => tr.meta.get('addToHistory') !== false,
     });
-    session = { ydoc, awareness, undoManager, scrollTop: 0 };
+    session = { ydoc, awareness, undoManager, scrollTop: 0, headerLines: opts.headerLines, base: documentModel(opts.pmDoc, opts.headerLines) };
     editorSessions.set(opts.docId, session);
   }
   const { ydoc, awareness, undoManager } = session;
@@ -125,24 +118,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
         return { destroy() { undoManager.off('stack-item-added', added); undoManager.off('stack-item-popped', popped); } };
       },
     }),
-    aiRewritePlugin(),
-    aiCompletePlugin(),
-    spellPlugin(),
-    chordPlugin(),
-    lyxKeymap(),
-    keymap({ 'Mod-z': undo, 'Mod-y': redo, 'Mod-Z': redo, 'Shift-Mod-z': redo }),
-    fontCarryPlugin(),
-    insetCaretPlugin(),
-    dragSelectPlugin(),
-    gapCursor(),
-    dropCursor({ color: '#3b6ea5' }),
-    tableEditing(),
-    numberingPlugin(),
-    marginPlugin(opts.marginMode ?? false),
-    changeTrackingPlugin(),
-    changesFilterPlugin(),
-    findPlugin(),
-    mirrorCaretPlugin(),
+    ...editorPlugins({ awareness, marginMode: opts.marginMode ?? false, child: opts.child ?? false, history: [keymap({ 'Mod-z': undo, 'Mod-y': redo, 'Mod-Z': redo, 'Shift-Mod-z': redo })] }),
     macroDefsPlugin(() => viewRef),
     new Plugin({
       view: () => ({
@@ -155,8 +131,10 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
   ];
 
   const state = EditorState.create({ schema, doc: initialDoc, plugins });
+  const attributes = (prefs: { spellcheck: boolean; spellEngine: string }) => ({ ...editorAttributes(prefs), 'data-doc-id': opts.docId, 'data-project': opts.docId.split('/')[0], 'data-doc-dir': opts.docId.split('/').slice(1, -1).join('/') });
   const view = new EditorView(opts.container, {
     state,
+    dispatchTransaction: editorTransactions(() => false),
     nodeViews: {
       math_inline: (node, view, getPos) => guarded(node, () => new MathInlineView(node, view, getPos as () => number | undefined)),
       math_display: (node, view, getPos) => guarded(node, () => new MathDisplayView(node, view, getPos as () => number | undefined)),
@@ -166,7 +144,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
       command: (node, view, getPos) => guarded(node, () => new CommandView(node, view, getPos as () => number | undefined)),
       leaf: (node, view, getPos) => guarded(node, () => new LeafView(node, view, getPos as () => number | undefined)),
     },
-    attributes: editorAttributes(getPrefs()),
+    attributes: attributes(getPrefs()),
     clipboardTextSerializer: sliceText,
     handleDoubleClickOn(view, _pos, node, nodePos) {
       if (node.type.name === 'command' && node.attrs.cmd === 'include') {
@@ -196,6 +174,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
       return false;
     },
     handleDOMEvents: {
+      focus(view) { editorContext.activeView = view; opts.onSelectionChange?.(view, { docChanged: false }); return false; },
       contextmenu(view, ev) {
         const t = ev.target as HTMLElement;
         if (t.closest?.('math-field')) return false;
@@ -210,39 +189,10 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
         return true;
       },
     },
-    handlePaste(view, event) {
-      const text = event.clipboardData?.getData('text/plain');
-      const html = event.clipboardData?.getData('text/html');
-      const plainPaste = () => {
-        const paras = text!.replace(/\r\n/g, '\n').split(/\n{2,}/);
-        if (paras.length === 1) { view.dispatch(view.state.tr.insertText(text!.replace(/\n/g, ' '))); return; }
-        let tr = view.state.tr.deleteSelection();
-        paras.forEach((p, i) => {
-          if (i > 0) tr = tr.split(tr.selection.from);
-          tr = tr.insertText(p.replace(/\n/g, ' '));
-        });
-        view.dispatch(tr);
-      };
-      if (text && !html) {
-        if (/\\[a-zA-Z]+|\\\[|\\\(|\$[^$\n][^$]*\$/.test(text)) {
-          void api.parseClip(view.dom.dataset.docId ?? opts.docId, text).then(r => {
-            const blocks = (r.blocks as unknown[]).map(b => schema.nodeFromJSON(b)).filter(n => n.type.name !== 'doc');
-            if (!blocks.length) { plainPaste(); return; }
-            const single = blocks.length === 1 && blocks[0].type.name === 'paragraph' && blocks[0].attrs.layout === 'Standard' && !blocks[0].attrs.depth;
-            const slice = single ? new Slice(Fragment.from(blocks[0].content), 0, 0) : new Slice(Fragment.from(blocks), 0, 0);
-            view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
-            view.focus();
-          }).catch(e => { console.warn('LaTeX paste fell back to plain text:', e); plainPaste(); });
-          return true;
-        }
-        plainPaste();
-        return true;
-      }
-      return false;
-    },
+    ...editorClipboard(opts.docId, () => false),
   });
   viewRef = view;
-  const unsubscribePrefs = subscribePrefs(p => { view.setProps({ attributes: editorAttributes(p) }); });
+  const unsubscribePrefs = subscribePrefs(p => { view.setProps({ attributes: attributes(p) }); });
   view.dom.dataset.docId = opts.docId;
   view.dom.dataset.project = opts.docId.split('/')[0];
   view.dom.dataset.docDir = opts.docId.split('/').slice(1, -1).join('/');
@@ -258,8 +208,22 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
 
   return {
     view, ydoc,
-    applyExternal(pmDoc: unknown) {
-      ydoc.transact(() => { prosemirrorJSONToYXmlFragment(schema, pmDoc, fragment); }, EXTERNAL_ORIGIN);
+    applyExternal(pmDoc: unknown, headerLines: string[]) {
+      const incoming = documentModel(pmDoc, headerLines);
+      const local = documentModel(view.state.doc.toJSON(), session!.headerLines!);
+      const merged = mergeModels(session!.base, local, incoming);
+      session!.base = incoming;
+      session!.headerLines = merged.headerLines;
+      ydoc.transact(() => { prosemirrorJSONToYXmlFragment(schema, merged.pmDoc, fragment); }, EXTERNAL_ORIGIN);
+      return merged.headerLines;
+    },
+    takeUpdate(headerLines: string[]) {
+      const next = documentModel(view.state.doc.toJSON(), headerLines);
+      const base = session!.base;
+      if (sameModel(next, base)) return null;
+      session!.base = next;
+      session!.headerLines = next.headerLines;
+      return { ...next, base };
     },
     destroy(preserveSession = false) {
       session!.selection = view.state.selection.toJSON();

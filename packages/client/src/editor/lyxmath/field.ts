@@ -52,18 +52,28 @@ function escapeHtmlAttribute(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
-/** Point local images emitted by KaTeX at OverLyX's PDF/SVG-capable graphics endpoint. */
+/** Resolve math images and use image glyphs as alpha masks so their ink follows currentColor. */
 export function resolveMathImageHtml(html: string, context?: MathImageContext): string {
   if (!html.includes('<img')) return html;
   const project = context?.project ?? editorContext.project;
-  if (!project) return html;
   const docDir = context?.docDir ?? editorContext.docDir;
-  return html.replace(/(<img\b[^>]*\bsrc=")([^"]*)(")/gi, (all, before: string, encoded: string, after: string) => {
+  const resolved = html.replace(/(<img\b[^>]*\bsrc=")([^"]*)(")/gi, (all, before: string, encoded: string, after: string) => {
     const src = decodeHtmlAttribute(encoded);
     // Explicit web/data URLs are already usable. TeX project filenames are relative paths.
-    if (!src || /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(src)) return all;
+    if (!project || !src || /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(src)) return all;
     const url = graphicsUrl(project, resolveDocPath(src, docDir), 400);
     return before + escapeHtmlAttribute(url) + after;
+  });
+  return resolved.replace(/(<span\b[^>]*\bclass="[^"]*\blm-image-glyph\b[^"]*"[^>]*>)(<img\b[^>]*\bsrc="([^"]*)"[^>]*>)/gi, (_all, span: string, img: string, encoded: string) => {
+    // Keep the image's intrinsic aspect ratio and KaTeX height. Its transparent pixels
+    // mask the wrapper's text-coloured background; the original black ink is hidden.
+    const url = decodeHtmlAttribute(encoded).replace(/["\\\n\r\f]/g, c => '\\' + c.charCodeAt(0).toString(16) + ' ');
+    const align = /vertical-align:([^;"']+)/.exec(img);
+    const style = `mask-image:url("${url}");${align ? `vertical-align:${align[1]};` : ''}`;
+    const masked = /\bstyle="/.test(span)
+      ? span.replace(/\bstyle="([^"]*)"/, (_attr, existing: string) => `style="${existing};${escapeHtmlAttribute(style)}"`)
+      : span.replace(/>$/, ` style="${escapeHtmlAttribute(style)}">`);
+    return masked + img;
   });
 }
 

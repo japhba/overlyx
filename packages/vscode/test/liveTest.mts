@@ -37,6 +37,7 @@ try {
       w.__messages = [];
       w.__OVERLYX_VSCAPI = { postMessage(m: any) {
         w.__messages.push(m);
+        if (m.type === 'update') { fixture.pmDoc = m.pmDoc; fixture.headerLines = m.headerLines; }
         if (m.type === 'ready') setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'init', ...w.__OVERLYX_VSCODE__, pmDoc: fixture.pmDoc, headerLines: fixture.headerLines, fragment: false } })), 0);
       }, getState() { return null; }, setState() {} };
     }, { fixture, server, i });

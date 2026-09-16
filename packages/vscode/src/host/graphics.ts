@@ -20,7 +20,7 @@ const inflight = new Map<string, Promise<string>>();
 export async function toPng(absFile: string, cacheDir: string, width = 1200): Promise<string> {
   fs.mkdirSync(cacheDir, { recursive: true });
   const st = fs.statSync(absFile);
-  const key = crypto.createHash('sha1').update(`${absFile}|${st.mtimeMs}|${st.size}|${width}`).digest('hex');
+  const key = crypto.createHash('sha1').update(`transparent-pdf|${absFile}|${st.mtimeMs}|${st.size}|${width}`).digest('hex');
   const out = path.join(cacheDir, key + '.png');
   if (fs.existsSync(out)) return out;
   const running = inflight.get(key);
@@ -50,7 +50,7 @@ async function convert(src: string, out: string, width: number): Promise<void> {
       }
     }
     if (ext === '.pdf') {
-      await tool('pdftoppm', ['-png', '-r', '150', '-f', '1', '-l', '1', '-singlefile', src, tmp], 60000);
+      await tool('pdftocairo', ['-png', '-transp', '-r', '150', '-f', '1', '-l', '1', '-singlefile', src, tmp], 60000);
       fs.renameSync(tmp + '.png', out);
       return;
     }

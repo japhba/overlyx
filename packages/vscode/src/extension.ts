@@ -10,6 +10,7 @@ import path from 'node:path';
 import { texHeadings, lyxToPm } from '@overlyx/core';
 import { Bridge, type BridgeDelegate } from './host/bridge.ts';
 import { Registry, type OpenEditor } from './host/registry.ts';
+import { DocSession } from './host/session.ts';
 import { OverlyxEditorProvider } from './host/editorProvider.ts';
 import { OutlineTree } from './host/outlineTree.ts';
 import { PdfPanels } from './host/pdfPanel.ts';
@@ -48,8 +49,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   };
 
   const locate = (docId: string): { ctx: TexContext; root: string; relPath: string; session?: import('./host/session.ts').DocSession } => {
-    const open = registry.byDocId(docId);
-    if (open) return { ctx: open.session.ctx, root: open.session.ctx.root, relPath: open.session.relPath, session: open.session };
+    const session = registry.sessionByDocId(docId);
+    if (session) return { ctx: session.ctx, root: session.ctx.root, relPath: session.relPath, session };
     const slash = docId.indexOf('/');
     const project = docId.slice(0, slash), relPath = docId.slice(slash + 1);
     const root = projectRoots.get(project);
@@ -57,7 +58,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     return { ctx: { root, layoutDir: layoutDir() }, root, relPath };
   };
 
-  const startBuild = (e: OpenEditor): void => {
+  const startBuild = (e: OpenEditor, opts?: { open?: boolean }): void => {
     const { session } = e;
     const target = session.buildTarget();
     const latexmk = vscode.workspace.getConfiguration('overlyx').get<string>('latexmk') || 'latexmk';
@@ -65,11 +66,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       docId: session.docId, absPath: target.absPath, header: target.header, latexmk,
       prepare: async () => {
         // the .tex file on disk is what latexmk compiles: write the editor's state first
-        if (session.document.isDirty) await session.document.save();
-        await vscode.workspace.saveAll(false);
+        if (session.document.isDirty && !await session.document.save()) throw new Error('Save the document before building the PDF.');
+        if (!await vscode.workspace.saveAll(false)) throw new Error('Resolve the unsaved file changes before building the PDF.');
       },
     });
-    pdfPanels.show(session.docId);
+    if (opts?.open !== false) pdfPanels.show(session.docId);
   };
 
   const onInverse = (docId: string, page: number, x: number, y: number): void => {
@@ -113,8 +114,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       },
       headerSet: async (docId, body) => {
         const l = locate(docId);
-        if (!l.session) throw new Error('document is not open in an OverLyX editor');
-        return { ok: true, headerLines: await l.session.setHeader(body) };
+        let session = l.session;
+        if (!session) {
+          const project = registerRoot(l.root);
+          const owner = registry.all().find(editor => editor.session.project === project);
+          if (!owner) throw new Error('No open editor for this project');
+          const document = await vscode.workspace.openTextDocument(vscode.Uri.file(path.join(l.root, l.relPath)));
+          session = new DocSession(document, l.ctx, project, l.relPath, path.join(context.globalStorageUri.fsPath, 'recovery'));
+          session.parseCurrent();
+          registry.relatedSessions(owner).set(docId, session);
+        }
+        return { ok: true, headerLines: await session.setHeader(body) };
       },
       outline: (docId) => {
         const l = locate(docId);
@@ -168,10 +178,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     };
   }
 
-  const openDoc = (root: string, rel: string, _opts?: { goto?: string; heading?: number }): void => {
-    const abs = path.resolve(root, rel);
+  const openDoc = (root: string, rel: string, opts?: { goto?: string; heading?: number; beside?: boolean }): void => {
+    const resolved = path.resolve(root, rel);
+    const abs = path.extname(resolved) ? resolved : resolved + '.tex';
     if (!fs.existsSync(abs)) { void vscode.window.showErrorMessage(`OverLyX: ${rel} does not exist`); return; }
-    void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(abs), abs.endsWith('.tex') ? 'overlyx.texEditor' : 'default');
+    if (opts?.goto !== undefined || opts?.heading !== undefined) provider.navigateTo(`${registerRoot(root)}/${path.relative(root, abs)}`, { type: 'navigate', label: opts.goto, heading: opts.heading });
+    void vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(abs), abs.endsWith('.tex') ? 'overlyx.texEditor' : 'default', { preview: false, viewColumn: opts?.beside ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active });
   };
 
   const provider = new OverlyxEditorProvider(context, registry, {
@@ -212,7 +224,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     }),
     vscode.commands.registerCommand('overlyx.buildPdf', () => {
       const e = registry.active;
-      if (e) startBuild(e);
+      if (e) void e.panel.webview.postMessage({ type: 'command', name: 'buildPdf' } satisfies HostToEditor);
       else void vscode.window.showInformationMessage('OverLyX: open a .tex document in the OverLyX editor first');
     }),
     vscode.commands.registerCommand('overlyx.syncToPdf', () => {

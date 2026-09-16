@@ -51,10 +51,14 @@ jobs:
         env:
           LYX_LIB_DIR: ${{ github.workspace }}/lyx/lib
         run: npm run build --workspace packages/vscode
+      - name: Typecheck both editor hosts
+        run: |
+          npx tsc --noEmit -p packages/client/tsconfig.json
+          npx tsc --noEmit -p packages/vscode/tsconfig.json
       - name: Check editor, document pipeline, and updater
         env:
           LYX_LAYOUT_DIR: ${{ github.workspace }}/lyx/lib/layouts
-        run: npx vitest run tests/vscode-host.test.ts tests/vscode-update.test.ts tests/math.test.ts tests/mathcursor.test.ts
+        run: npx vitest run tests/vscode-host.test.ts tests/vscode-update.test.ts tests/math.test.ts tests/mathcursor.test.ts tests/vscode-sync.test.ts tests/bug-reports.test.ts tests/keybindings.test.ts tests/shortcuts.test.ts tests/mdrules.test.ts tests/autocorrect.test.ts tests/clipboard.test.ts tests/imagepaste.test.ts tests/ink.test.ts tests/inkpens.test.ts tests/editor-transactions.test.ts
       - name: Check in VS Code
         run: npm run test:integration --workspace packages/vscode
       - name: Package

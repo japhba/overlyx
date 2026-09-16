@@ -1,3 +1,15 @@
+import { MenuBar, openPalette, PALETTE_LABEL, type MenuDef } from '@client/app/MenuBar';
+import { documentMenus } from '@client/app/documentMenus';
+import { editorViewMenu } from '@client/app/editorViewMenu';
+import { editorToolbars, type ToolbarId, type ToolbarMode } from '@client/app/editorToolbars';
+import { inkToolbar } from '@client/app/inkToolbar';
+import { StatsDialog } from '@client/app/StatsDialog';
+import { SettingsPanel } from '@client/app/Settings';
+import { HelpDialog, HELP_ROWS } from '@client/app/Dialogs';
+import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
+import { setInk, subscribeInk } from '@client/editor/plugins/ink';
+import { insertImageFiles, readClipboardImages } from '@client/editor/imagepaste';
+import { llanglePreamble, hasLlangleSnippet, definesLlangle } from '@overlyx/core';
 /**
  * The OverLyX editor inside VS Code: the web client's Workspace (App.tsx) trimmed to the editor
  * itself — LyX toolbars, find & replace, contextual math/table/review rows, comments margin and
@@ -5,15 +17,14 @@
  * the PDF lives in its own panel (pdfMain.tsx). Document sync with the extension host runs over
  * postMessage (full ProseMirror doc, debounced), everything else over the local HTTP bridge.
  */
-import { useEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { TextSelection } from 'prosemirror-state';
-import { undo, redo } from 'y-prosemirror';
-import { G, vscode, applyTheme } from './globals';
+import { vscode, applyTheme } from './globals';
 import type { HostToEditor, OutlineEntry } from '../shared/protocol';
-import { api, type AiStatus, type DocMeta } from '@client/api';
+import { api, type DocMeta } from '@client/api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '@client/prefs';
-import { Toolbar, ColorPalette, colorIcon, DelimPalette, TableSizePicker, mathPanelPalettes, mathPreview, type ToolButton, type DelimChoice } from '@client/app/Toolbar';
+import { Toolbar, mathPanelPalettes, type ToolButton, type DelimChoice } from '@client/app/Toolbar';
 import { buildOutline } from '@client/app/Outline';
 import { Comments } from '@client/app/Comments';
 import { StatusBar, type Status } from '@client/app/StatusBar';
@@ -21,27 +32,26 @@ import { cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
 import { locateSourceLine } from '@client/app/sourcelocate';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '@client/editor/lyxmath/field';
 import {
-  Dialog as OlDialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog,
-  TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams,
+GraphicsDialog,TableDialog,LabelDialog,RefDialog,CiteDialog,HrefDialog,SettingsDialog,InsetDialog,
+TexDialog,MacrosDialog,ParagraphDialog,TableSettingsDialog,DelimiterDialog,MatrixDialog,commandParams
 } from '@client/app/Dialogs';
 import { createLocalEditor, type LocalEditorHandle } from './localEditor';
 import { editorSessions } from './editorSession';
+import { RelatedEditor, type RelatedHandle } from './RelatedEditor';
+import { documentOrder } from './documentOrder';
 import { refreshMacros } from '@client/editor/editor';
 import { editorContext, viewDocId } from '@client/editor/context';
 import { STANDARD_LAYOUTS, sectionLevel } from '@client/editor/layouts';
 import { chordKey } from '@client/editor/keymap';
-import { moveSection, shiftSection } from '@client/editor/outline';
 import * as C from '@client/editor/commands';
 import { setMarginMode } from '@client/editor/plugins/margin';
-import { acceptAllChanges, rejectAllChanges, changeAt, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '@client/editor/plugins/changes';
+import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilterKey } from '@client/editor/plugins/changes';
 import * as T from '@client/editor/tablecommands';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '@client/editor/plugins/find';
-import { schema, unquote } from '@overlyx/core';
+import { unquote } from '@overlyx/core';
 import { describeChange } from '@client/editor/editor';
 
 type DialogState = { name: string; arg?: unknown } | null;
-type ToolbarId = 'standard' | 'viewupdate' | 'extra' | 'math' | 'mathpanels' | 'table' | 'review';
-type ToolbarMode = 'on' | 'off' | 'auto';
 type ToolbarPrefs = Partial<Record<ToolbarId, ToolbarMode>>;
 
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -98,6 +108,8 @@ function suggestLabel(view: EditorView): string {
 export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'init' }> }) {
   const docId = init.docId;
   const [meta, setMeta] = useState<DocMeta | null>(null);
+  const metaRef = useRef(meta);
+  metaRef.current = meta;
   const [headerLines, setHeaderLines] = useState<string[]>(editorSessions.get(docId)?.headerLines ?? init.headerLines);
   const headerRef = useRef(headerLines);
   const setHeader = (lines: string[]) => { headerRef.current = lines; setHeaderLines(lines); };
@@ -110,6 +122,20 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [chord, setChord] = useState<string | null>(null);
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [zoom, setZoom] = useState(Number(stored('ol.zoom') || 1) || 1);
+  const [textWidth, setTextWidth] = useState(Number(stored('ol.textWidth') ?? DEFAULT_WIDTH));
+  const [noteScale, setNoteScale] = useState(Number(stored('ol.noteScale') ?? NOTE_SCALE_DEFAULT));
+  const [showRuler, setShowRuler] = useState(stored('ol.ruler') !== '0');
+  const [inkMode, setInkMode] = useState(stored('ol.ink') === '1');
+  useEffect(() => { document.documentElement.style.setProperty('--text-width', textWidth > 0 ? textWidth + 'px' : '100%'); localStorage.setItem('ol.textWidth', String(textWidth)); }, [textWidth]);
+  useEffect(() => { document.documentElement.style.setProperty('--note-size', noteScale / 100 + 'em'); localStorage.setItem('ol.noteScale', String(noteScale)); }, [noteScale]);
+  useEffect(() => { localStorage.setItem('ol.ruler', showRuler ? '1' : '0'); }, [showRuler]);
+  useEffect(() => { setInk({ active: inkMode }); localStorage.setItem('ol.ink', inkMode ? '1' : '0'); }, [inkMode]);
+  useEffect(() => subscribeInk(() => force(t => t + 1)), []);
+  const stepTextWidth = (direction: number) => setTextWidth(w => direction === 0 ? DEFAULT_WIDTH : Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, (w || DEFAULT_WIDTH) + direction * 80)));
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && inkMode) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+  }, [inkMode, docId]);
   const [findOpen, setFindOpen] = useState(false);
   const [findQ, setFindQ] = useState(''), [replQ, setReplQ] = useState('');
   const [findCase, setFindCase] = useState(false), [findWord, setFindWord] = useState(false);
@@ -119,14 +145,40 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [mathField, setMathField] = useState<LyxMathField | null>(null);
   const [prefs, setPrefsState] = useState<Prefs>(getPrefs);
   const [docTick, setDocTick] = useState(0);
+  const [combined, setCombined] = useState(stored('ol.vscode.combined') === '1');
   const [selTick, setSelTick] = useState(0);
   const [, force] = useState(0);
   const rerender = () => force(x => x + 1);
 
   const handleRef = useRef<LocalEditorHandle | null>(null);
+  const relatedRefs = useRef(new Map<string, RelatedHandle>());
+  const activeViewRef = useRef<EditorView | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const view = handleRef.current?.view ?? null;
+  const currentView = () => activeViewRef.current ?? handleRef.current?.view ?? null;
+  const view = currentView();
+  const allViews = () => [handleRef.current?.view, ...[...relatedRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v);
+  const docHeaders = (id: string) => id === docId ? headerRef.current : editorSessions.get(id)!.headerLines!;
+  const updateHeader = (id: string, lines: string[]) => { if (id === docId) setHeader(lines); else editorSessions.get(id)!.headerLines = lines; };
+  const updateMeta = (id: string, value: DocMeta) => {
+    if (id === docId) setMeta(value); else relatedRefs.current.get(id)!.meta = value;
+    if (currentView() && viewDocId(currentView()!) === id) editorContext.meta = value;
+    setDocTick(t => t + 1);
+  };
+  const documents = new Map(allViews().map(v => [viewDocId(v), v.state.doc]));
+  const visibleIds = combined ? documentOrder(meta?.master ?? docId, documents) : [docId];
+  if (!visibleIds.includes(docId)) visibleIds.push(docId);
+  const registerRelated = useCallback((id: string, handle: RelatedHandle | null) => {
+    if (handle) relatedRefs.current.set(id, handle);
+    else {
+      if (activeViewRef.current === relatedRefs.current.get(id)?.view) {
+        activeViewRef.current = handleRef.current?.view ?? null;
+        editorContext.activeView = activeViewRef.current;
+      }
+      relatedRefs.current.delete(id);
+    }
+    setDocTick(t => t + 1);
+  }, []);
 
   const notify = useCallback((text: string, kind: 'info' | 'error' = 'info') => {
     setMessage({ text, kind });
@@ -137,6 +189,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   useEffect(() => { localStorage.setItem('ol.toolbars', JSON.stringify(toolbars)); }, [toolbars]);
   useEffect(() => subscribePrefs(setPrefsState), []);
   useEffect(() => { localStorage.setItem('ol.zoom', String(zoom)); }, [zoom]);
+  useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.vscode.combined', combined ? '1' : '0'); }, [combined]);
   useEffect(() => { try { localStorage.setItem('ol.vscode.comments', showComments ? '1' : '0'); } catch { /* ignore */ } }, [showComments]);
   useEffect(() => { const l = (f: LyxMathField | null) => { setMathField(f); editorContext.mathField = f; }; mathFocusListeners.add(l); return () => { mathFocusListeners.delete(l); }; }, []);
   useEffect(() => { const l = () => setSelTick(t => t + 1); mathCursorListeners.add(l); return () => { mathCursorListeners.delete(l); }; }, []);
@@ -146,7 +199,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
 
   /* ---------------------------------------------------------------- editor lifecycle */
   const postUpdate = useMemo(() => debounce((v: EditorView) => {
-    vscode.postMessage({ type: 'update', pmDoc: v.state.doc.toJSON(), headerLines: headerRef.current });
+    const update = handleRef.current!.takeUpdate(headerRef.current);
+    if (update) vscode.postMessage({ type: 'update', ...update });
   }, 300), []);
   const postOutline = useMemo(() => debounce((v: EditorView) => {
     const items: OutlineEntry[] = buildOutline(v.state.doc, true, editorContext.meta?.secnumdepth ?? 3);
@@ -157,14 +211,27 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   }, 250), []);
 
   const onSelection = (v: EditorView) => {
+    if (!v.hasFocus() && currentView() && currentView() !== v) return;
+    activeViewRef.current = v;
     editorContext.activeView = v;
+    const id = viewDocId(v);
+    editorContext.docId = id;
+    editorContext.project = id.split('/')[0];
+    editorContext.docDir = id.split('/').slice(1, -1).join('/');
+    const activeMeta = id === docId ? metaRef.current : relatedRefs.current.get(id)?.meta;
+    if (activeMeta) {
+      editorContext.meta = activeMeta;
+      editorContext.trackChanges = activeMeta.trackingChanges;
+      editorContext.changeAuthorId = activeMeta.authors.find(a => a.name === 'You')?.id;
+      setTracking(activeMeta.trackingChanges);
+    }
     const p = C.currentParagraph(v.state);
     setLayout(p ? p.node.attrs.layout : '');
     setChord(chordKey.getState(v.state) ?? null);
     const ch = changeAt(v.state, v.state.selection.from);
     setChangeInfo(ch ? describeChange(ch.type, ch.author, ch.time) : null);
     setSelTick(t => t + 1);
-    postSelection(v);
+    if (viewDocId(v) === docId) postSelection(v);
     rerender();
   };
 
@@ -177,19 +244,23 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       editorContext.project = docId.split('/')[0];
       editorContext.docDir = docId.split('/').slice(1, -1).join('/');
       editorContext.trackChanges = false;
-      editorContext.combined = false;
+      editorContext.combined = combined;
       // metadata FIRST (macros, authors, layouts): formulas must render once, with the macros —
       // a \RR rendered before its definition arrives would stay raw (the web app defers the same way)
       let m: DocMeta | null = null;
       try { m = await api.meta(docId); } catch (e) { notify('Could not load document metadata: ' + (e as Error).message, 'error'); }
       if (cancelled || !containerRef.current) return;
       if (m) { setMeta(m); editorContext.meta = m; }
+      const cached = editorSessions.has(docId);
       handle = createLocalEditor({
-        docId, container: containerRef.current, pmDoc: init.pmDoc, marginMode,
+        docId, container: containerRef.current, pmDoc: init.pmDoc, headerLines: headerRef.current, marginMode,
         onSelectionChange: onSelection,
         onDocChange: (v) => { setDocTick(t => t + 1); postUpdate(v); postOutline(v); },
       });
       handleRef.current = handle;
+      // HMR keeps the local document/undo manager, but init belongs to the old mount.
+      // Request a fresh host snapshot rather than writing the cached model back on refresh.
+      if (cached) vscode.postMessage({ type: 'ready' });
       editorContext.activeView = handle.view;
       (window as any).overlyx = editorContext;
       if (m) {
@@ -212,12 +283,14 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       postOutline.cancel();
       postSelection.cancel();
       if (handle) {
-        vscode.postMessage({ type: 'update', pmDoc: handle.view.state.doc.toJSON(), headerLines: headerRef.current });
+        const update = handle.takeUpdate(headerRef.current);
+        if (update) vscode.postMessage({ type: 'update', ...update });
         editorSessions.get(docId)!.scrollTop = scrollRef.current?.scrollTop ?? 0;
         editorSessions.get(docId)!.headerLines = headerRef.current;
         handle.destroy(!!import.meta.hot);
       }
       handleRef.current = null;
+      activeViewRef.current = null;
     };
   }, []);
 
@@ -232,11 +305,23 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       const v = handleRef.current?.view;
       if (!m || !v) return;
       switch (m.type) {
+        case 'init':
         case 'externalUpdate':
-          handleRef.current!.applyExternal(m.pmDoc);
-          setHeader(m.headerLines);
+          postUpdate.cancel();
+          setHeader(handleRef.current!.applyExternal(m.pmDoc, m.headerLines));
+          postUpdate(v);
+          postOutline(v);
           metaReload();
           break;
+        case 'metadataChanged': metaReload(); break;
+        case 'navigate': {
+          if (m.label !== undefined) gotoLabelIn(v, m.label);
+          else if (m.heading !== undefined) {
+            const heading = buildOutline(v.state.doc, false).filter(item => sectionLevel(item.layout) !== null)[m.heading];
+            if (heading) { v.dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(heading.pos))).scrollIntoView()); v.focus(); }
+          }
+          break;
+        }
         case 'goto': {
           try {
             const pos = Math.max(0, Math.min(m.pos, v.state.doc.content.size));
@@ -261,16 +346,17 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   });
 
   /* ---------------------------------------------------------------- commands and helpers */
-  const run = (cmd: (state: any, dispatch: any, view?: any) => boolean) => { const v = handleRef.current?.view; if (!v) return; cmd(v.state, v.dispatch, v); v.focus(); };
-  const runView = (fn: (v: EditorView) => boolean) => { const v = handleRef.current?.view; if (!v) return; fn(v); };
+  const run = (cmd: (state: any, dispatch: any, view?: any) => boolean) => { const v = currentView(); if (!v) return; cmd(v.state, v.dispatch, v); v.focus(); };
+  const runView = (fn: (v: EditorView) => boolean) => { const v = currentView(); if (!v) return; fn(v); };
 
-  const build = () => { vscode.postMessage({ type: 'build' }); notify('Building the PDF…'); };
+  const build = (opts?: { open?: boolean }) => { editorContext.ui?.save(); vscode.postMessage({ type: 'build', open: opts?.open ?? true }); notify('Building the PDF…'); };
+  const hostCommand = (name: Extract<import('../shared/protocol').EditorToHost, { type: 'hostCommand' }>['name']) => vscode.postMessage({ type: 'hostCommand', name, id: view ? viewDocId(view) : docId });
 
   const builtTex = async (): Promise<string | null> => {
     try { const r = await api.build(docId, true); return r.build?.tex ?? null; } catch { return null; }
   };
   const syncToPdf = async () => {
-    const v = handleRef.current?.view;
+    const v = currentView();
     if (!v) return;
     const tex = await builtTex();
     if (!tex) { notify('SyncTeX needs a built PDF — build it first (Ctrl+R)', 'error'); return; }
@@ -285,7 +371,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     } catch (e) { notify('SyncTeX: ' + (e as Error).message, 'error'); }
   };
   const gotoTexLine = async (line: number) => {
-    const v = handleRef.current?.view;
+    const v = currentView();
     if (!v || !line) return;
     const tex = await builtTex();
     if (!tex) return;
@@ -299,31 +385,32 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   };
 
   const toggleMargin = () => {
-    const v = handleRef.current?.view;
     setMarginModeState(on => {
       const next = !on;
       localStorage.setItem('ol.margin', next ? '1' : '0');
-      if (v) setMarginMode(v, next);
+      for (const v of allViews()) setMarginMode(v, next);
       return next;
     });
   };
 
   const toggleTracking = async () => {
+    const target = viewDocId(currentView()!);
     const next = !editorContext.trackChanges;
     try {
       if (next && editorContext.changeAuthorId === undefined) {
         const id = hashAuthor('You');
-        const lines = [...headerRef.current];
+        const lines = [...docHeaders(target)];
         const idx = lines.findIndex(l => l.startsWith('\\author '));
         const line = `\\author ${id} "You" ""`;
         if (idx >= 0) lines.splice(idx, 0, line); else lines.push(line);
-        const r = await api.setHeader(docId, { headerLines: lines, set: { tracking_changes: 'true' } });
-        setHeader(r.headerLines);
+        const r = await api.setHeader(target, { headerLines: lines, set: { tracking_changes: 'true' } });
+        updateHeader(target, r.headerLines);
         editorContext.changeAuthorId = id;
-        setMeta(m => (m ? { ...m, authors: [...m.authors, { id, name: 'You' }] } : m));
+        updateMeta(target, { ...editorContext.meta!, trackingChanges: next, authors: [...editorContext.meta!.authors, { id, name: 'You' }] });
       } else {
-        const r = await api.setHeader(docId, { set: { tracking_changes: String(next) } });
-        setHeader(r.headerLines);
+        const r = await api.setHeader(target, { set: { tracking_changes: String(next) } });
+        updateHeader(target, r.headerLines);
+        updateMeta(target, { ...editorContext.meta!, trackingChanges: next });
       }
       editorContext.trackChanges = next;
       setTracking(next);
@@ -352,11 +439,13 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   useEffect(() => {
     editorContext.notify = notify;
     editorContext.openDialog = (name, arg) => setDialog({ name, arg });
-    editorContext.openInsetDialog = (_v, pos) => { if (pos !== undefined) setDialog({ name: 'inset', arg: pos }); };
+    editorContext.openInsetDialog = (v, pos) => { v.focus(); onSelection(v); if (pos !== undefined) setDialog({ name: 'inset', arg: pos }); };
     editorContext.openInTab = (id, opts) => vscode.postMessage({ type: 'openDoc', id, goto: opts?.goto, heading: opts?.heading });
+    editorContext.separateDocument = { label: 'Open in new editor tab', open: id => vscode.postMessage({ type: 'openDoc', id, beside: true }) };
     editorContext.gotoLabel = (name, from) => {
       const v = from ?? handleRef.current?.view;
       if (v && gotoLabelIn(v, name)) return;
+      for (const candidate of allViews()) if (candidate !== v && gotoLabelIn(candidate, name)) return;
       const l = editorContext.meta?.labels.find(x => x.name === name);
       if (l?.file && editorContext.project) { vscode.postMessage({ type: 'openDoc', id: `${editorContext.project}/${l.file}`, goto: name }); return; }
       notify(`Label “${name}” not found`, 'error');
@@ -364,31 +453,34 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     editorContext.ui = {
       save: () => {
         // flush the debounced update first, then let VS Code write the file (ordered messages)
-        const v = handleRef.current?.view;
-        if (v) vscode.postMessage({ type: 'update', pmDoc: v.state.doc.toJSON(), headerLines: headerRef.current });
+        postUpdate.cancel();
+        const update = handleRef.current?.takeUpdate(headerRef.current);
+        if (update) vscode.postMessage({ type: 'update', ...update });
+        for (const handle of relatedRefs.current.values()) handle.flush();
         vscode.postMessage({ type: 'save' });
       },
       viewPdf: () => build(),
-      updatePdf: () => build(),
+      updatePdf: () => build({ open: false }),
       syncToPdf: () => { void syncToPdf(); },
       find: () => setFindOpen(true),
       openDialog: (name, arg) => setDialog({ name, arg }),
       toggleTrackChanges: () => { void toggleTracking(); },
-      toggleOutline: () => notify('The outline is in the OverLyX sidebar (activity bar)'),
-      toggleSource: () => notify('Use “Open as LaTeX Source” in the editor title bar'),
+      toggleOutline: () => hostCommand('outline'),
+      toggleSource: () => hostCommand('openSource'),
+      toggleCombined: () => setCombined(value => !value),
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
-      closeTab: () => { /* VS Code closes tabs */ },
+      closeTab: () => hostCommand('closeTab'),
       zoom: (d) => setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))),
-      textWidth: () => { /* fixed in VS Code */ },
-      openFile: () => notify('Use the VS Code explorer to open files'),
-      newFile: () => notify('Create .tex files in the VS Code explorer'),
+      textWidth: stepTextWidth,
+      openFile: () => hostCommand('openFile'),
+      newFile: () => hostCommand('newFile'),
     };
   });
 
   /* ---------------------------------------------------------------- labels, marks, table state */
   const labels = useMemo(() => {
-    const v = handleRef.current?.view;
+    const v = currentView();
     const out: { name: string; context: string; file?: string }[] = [];
     if (v) {
       v.state.doc.descendants((node, pos) => {
@@ -406,7 +498,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   }, [docTick, meta]);
   const labelNames = () => labels.map(l => l.name);
   const refCountOf = (nm: string): number => {
-    const v = handleRef.current?.view;
+    const v = currentView();
     if (!v || !nm) return 0;
     let n = 0;
     v.state.doc.descendants(node => {
@@ -420,21 +512,33 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   };
 
   const marksAtCursor = () => {
-    const v = handleRef.current?.view;
+    const v = currentView();
     if (!v) return [] as any[];
     const { $from, empty } = v.state.selection;
     return (empty ? v.state.storedMarks ?? $from.marks() : $from.marks()) as any[];
   };
   const markActive = (name: string, value: string) => marksAtCursor().some(m => m.type.name === name && m.attrs.value === value);
-  const textColor = marksAtCursor().find(m => m.type.name === 'color')?.attrs.value as string | undefined;
+  const textColor = (marksAtCursor().find(m => m.type.name === 'color')?.attrs.value as string | undefined) ?? null;
 
   const mathExec = (cmd: string, ...args: unknown[]) => {
     const f = activeMathField();
     if (f) { f.execute(cmd, ...args); f.focus(); return; }
-    const v = handleRef.current?.view;
+    const v = currentView();
     if (v) { C.insertMath(false)(v); setTimeout(() => activeMathField()?.execute(cmd, ...args), 60); }
   };
+  const ensureLlangle = async () => {
+    const activeMeta = editorContext.meta!;
+    const target = activeMeta.master ?? viewDocId(currentView()!);
+    const lines = (await api.header(target)).headerLines;
+    const a = lines.indexOf('\\begin_preamble'), b = lines.indexOf('\\end_preamble');
+    const preamble = a >= 0 && b > a ? lines.slice(a + 1, b).join('\n') : '';
+    if (hasLlangleSnippet(preamble)) return;
+    const defined = definesLlangle(preamble, Object.keys(activeMeta.macros));
+    await api.setHeader(target, { preamble: preamble + '\n' + llanglePreamble(defined) });
+  };
   const insertDelim = (c: DelimChoice) => {
+    if (c.pair.left === '\\llangle') void ensureLlangle().catch(e => notify(String(e), 'error'));
+
     if (c.size === '') mathExec('delim', c.pair.left, c.pair.right);
     else if (c.size === 'none') mathExec('pair', c.pair.left, c.pair.right);
     else mathExec('bigdelim', `${c.size}l`, c.pair.left, `${c.size}r`, c.pair.right);
@@ -442,19 +546,21 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const insertInMath = (latex: string) => {
     const active = activeMathField();
     if (active) { active.execute('insert', latex); return; }
-    const v = handleRef.current?.view;
+    const v = currentView();
     if (v) { C.insertMath(false)(v); setTimeout(() => activeMathField()?.execute('insert', latex), 60); }
   };
   const mathPanels = useMemo(() => mathPanelPalettes(it => { if (it.kind === 'size') mathExec('style', it.latex); else mathExec('insert', it.latex); }), []);
   const clipboard = (op: 'cut' | 'copy' | 'paste') => {
-    const v = handleRef.current?.view;
+    const v = currentView();
     if (!v) return;
     const f = activeMathField();
     if (op === 'paste') {
       const fallback = () => notify('Paste with Ctrl+V (the toolbar cannot read the clipboard here)', 'error');
       const nav = navigator.clipboard;
       if (!nav?.readText) { fallback(); return; }
-      nav.readText().then(t => { if (!t) return; if (f) f.execute('insert', t); else { v.focus(); v.pasteText(t); } }).catch(fallback);
+      const pasteText = () => nav.readText().then(t => { if (!t) return; if (f) f.execute('insert', t); else { v.focus(); v.pasteText(t); } }).catch(fallback);
+      if (f) void pasteText();
+      else readClipboardImages().then(async images => { if (images.length) await insertImageFiles(v, images); else await pasteText(); }).catch(() => void pasteText());
       return;
     }
     if (f) { const c = f.cursor; const sel = c.selection ? c.grabSelection() : f.latex; void navigator.clipboard?.writeText(sel); if (op === 'cut' && c.selection) f.execute('insert', ''); return; }
@@ -470,7 +576,9 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const showMath = tbMode('math') === 'on' || (tbMode('math') === 'auto' && !!mathField);
   const showTable = tbMode('table') === 'on' || (tbMode('table') === 'auto' && inTable);
   const showReview = tbMode('review') === 'on' || (tbMode('review') === 'auto' && (tracking || docHasChanges));
-  const outputChanges = headerLines.some(l => l === '\\output_changes true');
+  const activeId = view ? viewDocId(view) : docId;
+  const activeMeta = activeId === docId ? meta : relatedRefs.current.get(activeId)!.meta;
+  const outputChanges = docHeaders(activeId).some(l => l === '\\output_changes true');
   const docStats = useMemo(() => {
     if (!view) return null;
     const { from, to, empty } = view.state.selection;
@@ -494,187 +602,69 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     [{ label: 'Reset to default (Alt+C Space)', action: () => run(C.fontDefault) }]) };
 
   /* ---------------------------------------------------------------- toolbar groups (LyX stdtoolbars.inc) */
-  const standardGroups: ToolButton[][] = [
-    [
-      { id: 'spellcheck', title: prefs.spellcheck ? 'Spell checking is on — click to switch it off' : 'Spell checking is off — click to switch it on', icon: 'spellcheck', action: () => setPref('spellcheck', !prefs.spellcheck), active: prefs.spellcheck },
-    ],
-    [
-      { id: 'undo', title: 'Undo (Ctrl+Z)', icon: 'undo', action: () => run(undo) },
-      { id: 'redo', title: 'Redo (Ctrl+Y)', icon: 'redo', action: () => run(redo) },
-      { id: 'cut', title: 'Cut (Ctrl+X)', icon: 'cut', action: () => clipboard('cut') },
-      { id: 'copy', title: 'Copy (Ctrl+C)', icon: 'copy', action: () => clipboard('copy') },
-      { id: 'paste', title: 'Paste (Ctrl+V)', icon: 'paste', action: () => clipboard('paste') },
-      { id: 'find', title: 'Find & replace (Ctrl+F)', icon: 'find', action: () => setFindOpen(true) },
-    ],
-    [
-      { id: 'emph', title: 'Emphasis (Ctrl+E)', icon: 'emph', action: () => run(C.fontCommands.emph), active: markActive('emph', 'on') },
-      { id: 'noun', title: 'Noun / small caps (Ctrl+Shift+N)', icon: 'noun', action: () => run(C.fontCommands.noun), active: markActive('noun', 'on') },
-      { id: 'charstyles', title: 'Custom text styles', icon: 'charstyles', palette: textStylesPalette },
-      { id: 'italic', title: 'Italic (Ctrl+I)', icon: 'italic', action: () => run(C.fontCommands.italic), active: markActive('shape', 'italic') },
-      { id: 'textcolor', title: textColor ? `Text colour: ${textColor}` : 'Text colour', icon: 'textcolor', html: colorIcon(textColor ?? null), active: !!textColor,
-        palette: { title: 'Text colour', render: (close: () => void) => <ColorPalette current={textColor ?? null} close={close} onPick={(c: string | null) => run(C.setValueMark('color', c))} /> } },
-    ],
-    [
-      { id: 'math', title: 'Inline formula (Ctrl+M)', icon: 'math', action: () => runView(C.insertMath(false)) },
-      { id: 'dmath', title: 'Display formula (Ctrl+Shift+M)', icon: 'dmath', action: () => runView(C.insertMath(true)) },
-      { id: 'graphics', title: 'Insert graphics (Ctrl+Shift+G)', icon: 'graphics', action: () => setDialog({ name: 'graphics' }) },
-      { id: 'table', title: 'Insert table (Ctrl+Alt+T)', icon: 'table', palette: { title: 'Insert table', render: (close: () => void) => <TableSizePicker close={close} onPick={(r: number, c: number) => run(C.insertTable(r, c))} /> } },
-      { id: 'flex', title: 'Custom insets (Flex)', icon: 'box', palette: { title: 'Custom insets of this document class', list: true, cols: 1, items: (meta?.flexInsets ?? []).map(n => ({ label: n, action: () => run(C.insertFlex(n)) })).concat([{ label: 'Other…', action: () => { const n = prompt('Flex inset name:', meta?.flexInsets?.[0] ?? 'Code'); if (n) run(C.insertFlex(n)); } }]) } },
-    ],
-    [
-      { id: 'margin', title: 'Show notes & comments in the margin', icon: 'margin', action: toggleMargin, active: marginMode },
-      { id: 'comments-panel', title: 'Comments panel', icon: 'comment', action: () => setShowComments(s => !s), active: showComments },
-      { id: 'tb-math', title: 'Show math toolbar', icon: 'mathtb', active: showMath, palette: tbTogglePalette('math', 'Show math toolbar') },
-      { id: 'tb-table', title: 'Show table toolbar', icon: 'tabletb', active: showTable, palette: tbTogglePalette('table', 'Show table toolbar') },
-      { id: 'tb-review', title: 'Show review toolbar', icon: 'reviewtb', active: showReview, palette: tbTogglePalette('review', 'Show review toolbar') },
-    ],
-  ];
-  const viewUpdateGroups: ToolButton[][] = [
-    [
-      { id: 'pdf', title: 'Build & view PDF (Ctrl+R)', icon: 'view', action: () => build() },
-    ],
-    [
-      { id: 'outputsync', title: "Sync to PDF — show the cursor's place in the built PDF (Ctrl+Alt+J)", icon: 'outputsync', action: () => { void syncToPdf(); } },
-    ],
-  ];
-  const extraGroups: ToolButton[][] = [
-    [
-      layoutBtn('l-standard', 'Standard', 'Default paragraph (Standard)', 'layout'),
-      layoutBtn('l-enumerate', 'Enumerate', 'Numbered list (Alt+P E)', 'enumerate'),
-      layoutBtn('l-itemize', 'Itemize', 'Itemized list (Alt+P I)', 'itemize'),
-      layoutBtn('l-labeling', 'Labeling', 'Labeled list (Alt+P L)', 'labeling'),
-      layoutBtn('l-description', 'Description', 'Description (Alt+P D)', 'description'),
-      layoutBtn('l-section', 'Section', 'Section (Alt+P 2)', 'section'),
-      { id: 'depthin', title: 'Increase depth (Alt+Shift+→)', icon: 'depthin', action: () => run(C.changeDepth(1)) },
-      { id: 'depthout', title: 'Decrease depth (Alt+Shift+←)', icon: 'depthout', action: () => run(C.changeDepth(-1)) },
-    ],
-    [
-      { id: 'float', title: 'Insert figure float', icon: 'float', action: () => run(C.insertFloat('figure')) },
-      { id: 'tablefloat', title: 'Insert table float', icon: 'tablefloat', action: () => run(C.insertFloat('table')) },
-      { id: 'label', title: 'Label (Ctrl+Alt+L)', icon: 'label', action: () => setDialog({ name: 'label' }) },
-      { id: 'ref', title: 'Cross-reference (Ctrl+Shift+I)', icon: 'ref', action: () => setDialog({ name: 'ref' }) },
-      { id: 'cite', title: 'Citation (Ctrl+Shift+C)', icon: 'cite', action: () => setDialog({ name: 'cite' }) },
-      { id: 'index', title: 'Index entry', icon: 'index', action: () => run(C.insertIndex) },
-    ],
-    [
-      { id: 'footnote', title: 'Footnote (Ctrl+Alt+F)', icon: 'footnote', action: () => run(C.insertFootnote) },
-      { id: 'marginal', title: 'Margin note (Ctrl+Alt+M)', icon: 'marginal', action: () => run(C.insertMarginal) },
-      { id: 'note', title: 'LyX note (Ctrl+Alt+Shift+N)', icon: 'note', action: () => run(C.insertNote('Note')) },
-      { id: 'comment', title: 'Comment thread (Ctrl+Alt+C)', icon: 'comment', action: () => run(C.insertComment) },
-      { id: 'boxinset', title: 'Insert box', icon: 'boxinset', action: () => run(C.insertBox) },
-      { id: 'href', title: 'Hyperlink (Ctrl+Alt+K)', icon: 'href', action: () => setDialog({ name: 'href' }) },
-      { id: 'ert', title: 'TeX code (Ctrl+L)', icon: 'ert', action: () => run(C.insertERT) },
-      { id: 'macro', title: 'Math macro definition', icon: 'macro', action: () => { const n = prompt('Macro name (without backslash):'); if (n) run(C.insertMacroDef(n, Number(prompt('Number of arguments:', '0') || 0), '')); } },
-      { id: 'include', title: 'Include file (child document)', icon: 'include', action: () => { const fn = prompt('Child document file name (relative):', 'chapter1.tex'); if (fn) run(C.insertInclude(fn, 'include')); } },
-    ],
-    [
-      { id: 'textstyle', title: 'Text properties', icon: 'textstyle', palette: textStylesPalette },
-      { id: 'paragraph', title: 'Paragraph settings (Ctrl+Alt+P)', icon: 'paragraph', action: () => setDialog({ name: 'paragraph' }) },
-    ],
-  ];
-  const mf = () => activeMathField();
-  const mathGroups: ToolButton[][] = [
-    [{ id: 'm-display', title: 'Toggle display / inline formula (Ctrl+Shift+M)', icon: 'display', active: !!mathField?.display, action: () => { const f = mf() as any; if (f?._toggleDisplay) f._toggleDisplay(); else run(C.toggleMathDisplay); } }],
-    [
-      { id: 'm-sub', title: 'Subscript (Alt+M X, _)', icon: 'sub', action: () => mathExec('moveToSubscript') },
-      { id: 'm-sup', title: 'Superscript (Alt+M E, ^)', icon: 'sup', action: () => mathExec('moveToSuperscript') },
-      { id: 'm-sqrt', title: 'Square root (Alt+M S)', icon: 'msqrt', action: () => mathExec('insert', '\\sqrt{#0}') },
-      { id: 'm-root', title: 'Root (Alt+M R)', icon: 'mroot', action: () => mathExec('insert', '\\sqrt[]{#0}') },
-      { id: 'm-frac', title: 'Fraction (Alt+M F)', icon: 'mfrac', action: () => mathExec('insert', '\\frac{#0}{}') },
-      { id: 'm-sum', title: 'Sum (Alt+M U)', icon: 'msum', action: () => mathExec('insert', '\\sum') },
-      { id: 'm-int', title: 'Integral (Alt+M I)', icon: 'mint', action: () => mathExec('insert', '\\int') },
-      { id: 'm-prod', title: 'Product', icon: 'mprod', action: () => mathExec('insert', '\\prod') },
-    ],
-    [
-      { id: 'm-paren', title: 'Insert ( ) (Alt+M ()', icon: '( )', html: mathPreview('\\left(\\square\\right)') ?? undefined, action: () => mathExec('delim', '(', ')') },
-      { id: 'm-bracket', title: 'Insert [ ] (Alt+M [)', icon: '[ ]', html: mathPreview('\\left[\\square\\right]') ?? undefined, action: () => mathExec('delim', '[', ']') },
-      { id: 'm-brace', title: 'Insert { } (Alt+M {)', icon: '{ }', html: mathPreview('\\left\\{\\square\\right\\}') ?? undefined, action: () => mathExec('delim', '\\{', '\\}') },
-      { id: 'm-abs', title: 'Insert | | (Alt+M |)', icon: '| |', html: mathPreview('\\left|\\square\\right|') ?? undefined, action: () => mathExec('delim', '|', '|') },
-      { id: 'm-angle', title: 'Insert ⟨ ⟩ (Alt+M <)', icon: '⟨ ⟩', html: mathPreview('\\left\\langle\\square\\right\\rangle') ?? undefined, action: () => mathExec('delim', '\\langle', '\\rangle') },
-      { id: 'm-delims', title: 'Delimiters of all sizes (\\left…\\right, \\big … \\Bigg)', icon: 'delimsize', palette: { title: 'Delimiters — rows: pair, columns: size', render: (close: () => void) => <DelimPalette close={close} onPick={insertDelim} onDialog={() => setDialog({ name: 'delimiters' })} /> } },
-    ],
-    [
-      { id: 'm-matrix', title: 'Insert matrix…', icon: 'matrix', html: mathPreview('\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}') ?? undefined, action: () => setDialog({ name: 'matrix' }) },
-      { id: 'm-cases', title: 'Insert cases environment (Alt+M C)', icon: 'cases', html: mathPreview('\\cases') ?? undefined, action: () => mathExec('insert', '\\cases') },
-      { id: 'm-addrow', title: 'Add row (matrix / align)', icon: 'addrow', disabled: !!mathField && !mathField.cursor.gridRowsOK(), action: () => mathExec('appendRow') },
-      { id: 'm-addcol', title: 'Add column (matrix / align)', icon: 'addcol', disabled: !!mathField && !mathField.cursor.gridColsOK(), action: () => mathExec('appendColumn') },
-      { id: 'm-delrow', title: 'Delete row', icon: 'delrow', disabled: !!mathField && !mathField.cursor.gridRowsOK(), action: () => mathExec('deleteRow') },
-      { id: 'm-delcol', title: 'Delete column', icon: 'delcol', disabled: !!mathField && !mathField.cursor.gridColsOK(), action: () => mathExec('deleteColumn') },
-    ],
-    [
-      { id: 'm-limits', title: 'Toggle limits placement (\\limits)', icon: 'lim', html: mathPreview('\\sum\\limits_{i}') ?? undefined, action: () => mathExec('limits') },
-      { id: 'm-text', title: 'Text in formula (Ctrl+M)', icon: 'Tx', action: () => mathExec('text') },
-      { id: 'tb-mathpanels', title: 'Show math panels', icon: 'mathpanelstb', active: tbMode('mathpanels') !== 'off', palette: tbTogglePalette('mathpanels', 'Show math panels') },
-    ],
-  ];
-  const MATH_PANEL_PREVIEW: Record<string, string> = {
-    functions: '\\sin', space: '\\square\\,\\square', 'sqrt-square': '\\sqrt{x}', style: '\\displaystyle\\textstyle', 'frac-square': '\\frac{a}{b}', font: '\\mathbb{R}', latex_dots: '\\cdots', latex_deco: '\\hat{a}',
-    latex_arrow: '\\rightarrow', latex_bop: '\\otimes', latex_brel: '\\leq', latex_greek: '\\alpha', latex_misc: '\\infty', latex_varsz: '\\sum', latex_ams_misc: '\\square', latex_ams_arrows: '\\rightrightarrows',
-    latex_ams_rel: '\\leqslant', latex_ams_nrel: '\\nleq', latex_ams_ops: '\\boxtimes', latex_delim: '\\lfloor\\rfloor',
+  const { standardGroups, viewUpdateGroups, extraGroups, mathGroups, mathPanelGroups, tableGroups, reviewGroups } = editorToolbars({
+    view, meta: activeMeta, prefs: { ...prefs, aiButton: false }, mathField, aiComplete: false, inkMode, marginMode, outputChanges, tracking,
+    showFiles: false, showMath, showReview, showTable, textColor, outlineTitle: 'OverLyX Structure', run, runView, build, syncToPdf,
+    toggleOutputChanges: () => { void api.setHeader(activeId, { set: { output_changes: outputChanges ? 'false' : 'true' } }).then(r => { updateHeader(activeId, r.headerLines); setDocTick(t => t + 1); }); },
+    toggleMargin, toggleTracking, navBack: () => hostCommand('back'), openInTab: id => vscode.postMessage({ type: 'openDoc', id }),
+    setDialog, setFindOpen, setInkMode, setShowFiles: () => hostCommand('outline'), notify, clipboard, insertDelim, mathExec, layoutBtn, markActive,
+    tbMode, tbTogglePalette, textStylesPalette, mathPanels, tableSt, changesFilterSt,
+  });
+  const inkGroups = inkToolbar();
+  const toggleCellLine = (key: string) => {
+    const cell = view && C.tableContext(view.state)?.cell;
+    const attrs = new Map<string, string>(JSON.parse(cell?.attrs.attrs || '[]'));
+    run(C.setCellAttr(key, attrs.get(key) === 'true' ? null : 'true'));
   };
-  const MATH_PANEL_ICONS: Record<string, string> = { style: 'Style' };
-  const mathPanelGroups: ToolButton[][] = [mathPanels.map(p => ({ id: 'mp-' + p.id, title: p.title, icon: MATH_PANEL_ICONS[p.id] ?? p.title, html: MATH_PANEL_PREVIEW[p.id] ? mathPreview(MATH_PANEL_PREVIEW[p.id]) ?? undefined : undefined, palette: p.palette }))];
-  const tableGroups: ToolButton[][] = [
-    [
-      { id: 't-addrow', title: 'Add row', icon: 'addrow', action: () => run(T.appendRow) },
-      { id: 't-addcol', title: 'Add column', icon: 'addcol', action: () => run(T.appendColumn) },
-      { id: 't-delrow', title: 'Delete row', icon: 'delrow', action: () => run(T.deleteRow) },
-      { id: 't-delcol', title: 'Delete column', icon: 'delcol', action: () => run(T.deleteColumn) },
-      { id: 't-rowup', title: 'Move row up', icon: 'rowup', action: () => run(T.moveRowUp) },
-      { id: 't-colleft', title: 'Move column left', icon: 'colleft', action: () => run(T.moveColumnLeft) },
-      { id: 't-rowdown', title: 'Move row down', icon: 'rowdown', action: () => run(T.moveRowDown) },
-      { id: 't-colright', title: 'Move column right', icon: 'colright', action: () => run(T.moveColumnRight) },
-    ],
-    [
-      { id: 't-top', title: 'Toggle top line', icon: 'linetop', active: !!tableSt?.lines.top, action: () => run(T.toggleLine('top')) },
-      { id: 't-bottom', title: 'Toggle bottom line', icon: 'linebottom', active: !!tableSt?.lines.bottom, action: () => run(T.toggleLine('bottom')) },
-      { id: 't-left', title: 'Toggle left line', icon: 'lineleft', active: !!tableSt?.lines.left, action: () => run(T.toggleLine('left')) },
-      { id: 't-right', title: 'Toggle right line', icon: 'lineright', active: !!tableSt?.lines.right, action: () => run(T.toggleLine('right')) },
-      { id: 't-border', title: 'Toggle border lines', icon: 'lineborder', action: () => run(T.toggleBorderLines) },
-      { id: 't-inner', title: 'Toggle inner lines', icon: 'lineinner', action: () => run(T.toggleInnerLines) },
-      { id: 't-all', title: 'Toggle all lines', icon: 'lineall', action: () => run(T.toggleAllLines) },
-      { id: 't-none', title: 'Unset all lines', icon: 'linenone', action: () => run(T.unsetAllLines) },
-      { id: 't-formal', title: 'Reset formal default lines (booktabs style)', icon: 'lineformal', action: () => run(T.resetFormalDefault) },
-    ],
-    [
-      { id: 't-al', title: 'Align left', icon: 'alignleft', active: tableSt?.align === 'left', action: () => run(T.setAlignment('left')) },
-      { id: 't-ac', title: 'Align center', icon: 'aligncenter', active: tableSt?.align === 'center', action: () => run(T.setAlignment('center')) },
-      { id: 't-ar', title: 'Align right', icon: 'alignright', active: tableSt?.align === 'right', action: () => run(T.setAlignment('right')) },
-      { id: 't-ad', title: 'Align on decimal', icon: 'aligndecimal', active: tableSt?.align === 'decimal', action: () => run(T.setAlignment('decimal')) },
-    ],
-    [
-      { id: 't-vt', title: 'Align top', icon: 'valigntop', active: tableSt?.valign === 'top', action: () => run(T.setVAlignment('top')) },
-      { id: 't-vm', title: 'Align middle', icon: 'valignmiddle', active: tableSt?.valign === 'middle', action: () => run(T.setVAlignment('middle')) },
-      { id: 't-vb', title: 'Align bottom', icon: 'valignbottom', active: tableSt?.valign === 'bottom', action: () => run(T.setVAlignment('bottom')) },
-    ],
-    [
-      { id: 't-rotcell', title: 'Rotate cell by 90° or unset rotation', icon: 'rotatecell', active: !!tableSt?.rotateCell, action: () => run(T.toggleRotateCell) },
-      { id: 't-rottable', title: 'Rotate table by 90° or unset rotation', icon: 'rotatetable', active: !!tableSt?.rotateTable, action: () => run(T.toggleRotateTable) },
-      { id: 't-mc', title: 'Set multi-column', icon: 'multicolumn', active: !!tableSt?.multicolumn, action: () => run(T.toggleMultiColumn) },
-      { id: 't-mr', title: 'Set multi-row', icon: 'multirow', active: !!tableSt?.multirow, action: () => run(T.toggleMultiRow) },
-      { id: 't-settings', title: 'Table settings…', icon: 'tablesettings', action: () => setDialog({ name: 'tablesettings' }) },
-    ],
+  const editingMenus = documentMenus({ view, meta: activeMeta, run, runView, setDialog, textColor, tracking, changeInfo, toggleTracking, toggleCellLine, setFindOpen,
+    healthItems: [], reloadMetadata: () => { void api.meta(activeId).then(m => { updateMeta(activeId, m); if (view) refreshMacros(view, m.macros, true); notify('Metadata reloaded'); }); },
+  });
+  const menus: MenuDef[] = [
+    { title: 'File', items: [
+      { label: 'New…', action: () => hostCommand('newFile') },
+      { label: 'Open…', action: () => hostCommand('openFile') },
+      { label: 'Save', shortcut: 'Ctrl+S', action: () => editorContext.ui!.save() },
+      { sep: true },
+      { label: 'Build & View PDF', shortcut: 'Ctrl+R', action: () => build() },
+      { label: 'LaTeX source…', action: () => hostCommand('openSource') },
+      { label: 'Source control', action: () => hostCommand('scm') },
+      { label: 'File history (Timeline)', action: () => hostCommand('timeline') },
+      { label: 'Close', action: () => hostCommand('closeTab') },
+    ] },
+    editingMenus.edit,
+    editorViewMenu({ combined, setCombined, marginMode, toggleMargin, run, showRuler, setShowRuler, tbMode, setToolbar, textWidth, setTextWidth, stepTextWidth,
+      hostItems: [
+        { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', action: () => hostCommand('openSource') },
+        { label: 'Outline', shortcut: 'Ctrl+Alt+O', action: () => hostCommand('outline') },
+        { label: 'PDF preview', action: () => vscode.postMessage({ type: 'openPdfPanel' }) },
+        { label: 'Comments', checked: showComments, action: () => setShowComments(v => !v) },
+        { label: 'Draw in the margins', checked: inkMode, action: () => setInkMode(v => !v) },
+        { sep: true },
+      ],
+      themeItems: [{ label: 'Color theme…', action: () => hostCommand('theme') }], hostToolbars: [],
+    }),
+    editingMenus.insert,
+    { title: 'Navigate', items: [
+      { label: 'Back', action: () => hostCommand('back') }, { label: 'Forward', action: () => hostCommand('forward') },
+      { label: 'Go to label…', action: () => { const name = prompt('Label:'); if (name) editorContext.gotoLabel!(name, view!); } },
+      { label: 'Sync to PDF (forward search)', shortcut: 'Ctrl+Alt+J', action: () => { void syncToPdf(); } },
+      { label: 'Beginning of document', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)).scrollIntoView()); view.focus(); } } },
+      { label: 'End of document', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView()); view.focus(); } } },
+      { sep: true },
+      ...allViews().flatMap(v => buildOutline(v.state.doc, true, activeMeta?.secnumdepth ?? 3).map(item => ({ label: `${viewDocId(v).split('/').pop()}: ${item.num ?? ''} ${item.text}`, action: () => { v.dispatch(v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(item.pos))).scrollIntoView()); v.focus(); } }))),
+    ] },
+    editingMenus.document,
+    { title: 'Tools', items: [
+      { label: 'Spell checking', checked: prefs.spellcheck, action: () => setPref('spellcheck', !prefs.spellcheck) },
+      { label: 'Autocorrect typos', checked: prefs.autoCorrect, action: () => setPref('autoCorrect', !prefs.autoCorrect) },
+      { label: 'Settings…', action: () => setDialog({ name: 'preferences' }) },
+    ] },
+    { title: 'Help', search: true, items: [
+      { label: PALETTE_LABEL, shortcut: 'Ctrl+Alt+Shift+P', action: openPalette },
+      { label: 'Keyboard shortcuts', action: () => setDialog({ name: 'help' }) },
+    ] },
   ];
-  const reviewGroups: ToolButton[][] = [
-    [
-      { id: 'r-track', title: 'Track changes (Ctrl+Shift+E)', icon: 'track', action: () => { void toggleTracking(); }, active: tracking },
-      { id: 'r-output', title: 'Show changes in output (\\output_changes)', icon: 'changesoutput', active: outputChanges, action: () => { api.setHeader(docId, { set: { output_changes: outputChanges ? 'false' : 'true' } }).then(r => { setHeader(r.headerLines); notify(outputChanges ? 'Changes are no longer shown in the output' : 'Changes are shown in the output'); }).catch(e => notify(String(e), 'error')); } },
-    ],
-    [
-      { id: 'r-show-ins', title: 'Show insertions', icon: 'showinsertions', active: changesFilterSt?.showInsertions ?? true, action: () => view && setChangesFilter(view, { showInsertions: !(changesFilterSt?.showInsertions ?? true) }) },
-      { id: 'r-show-del', title: 'Show deletions', icon: 'showdeletions', active: changesFilterSt?.showDeletions ?? true, action: () => view && setChangesFilter(view, { showDeletions: !(changesFilterSt?.showDeletions ?? true) }) },
-    ],
-    [
-      { id: 'r-prev', title: 'Previous change', icon: 'changeprev', action: () => run(gotoChange(-1)) },
-      { id: 'r-next', title: 'Next change', icon: 'changenext', action: () => run(gotoChange(1)) },
-      { id: 'r-accept', title: 'Accept change inside selection / at cursor', icon: 'accept', action: () => run(resolveSelectionChanges(true)) },
-      { id: 'r-reject', title: 'Reject change inside selection / at cursor', icon: 'reject', action: () => run(resolveSelectionChanges(false)) },
-    ],
-    [
-      { id: 'r-acceptall', title: 'Accept all changes', icon: 'acceptall', action: () => { if (confirm('Accept all tracked changes?')) run(acceptAllChanges()); } },
-      { id: 'r-rejectall', title: 'Reject all changes', icon: 'rejectall', action: () => { if (confirm('Reject all tracked changes?')) run(rejectAllChanges()); } },
-    ],
-  ];
+  const helpSearchEntries = HELP_ROWS.map(([shortcut, label]) => ({ id: 'Keyboard shortcuts ▸ ' + label, label, path: ['Keyboard shortcuts'], shortcut, fixed: true, action: () => setDialog({ name: 'help' }) }));
 
   /* ---------------------------------------------------------------- dialogs */
   const insetDialogNode = () => {
@@ -688,10 +678,15 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const renderDialog = () => {
     if (!dialog || !view) return null;
     const close = () => { setDialog(null); view.focus(); };
-    const project = docId.split('/')[0];
+    const targetId = viewDocId(view);
+    const targetMeta = targetId === docId ? meta : relatedRefs.current.get(targetId)!.meta;
+    const project = targetId.split('/')[0];
     const docDir = view.dom.dataset.docDir ?? editorContext.docDir;
     switch (dialog.name) {
-      case 'graphics': return <GraphicsDialog meta={meta} project={project} docDir={docDir} onClose={close} onInsert={(f: string, o: any) => run(C.insertGraphics(f, o))} />;
+      case 'preferences': return <SettingsPanel ai={null} user={editorContext.user!} sections={['editor']} onClose={close} />;
+      case 'help': return <HelpDialog onClose={close} />;
+      case 'stats': return <StatsDialog view={view} onClose={close} />;
+      case 'graphics': return <GraphicsDialog meta={targetMeta} project={project} docDir={docDir} onClose={close} onInsert={(f: string, o: any) => run(C.insertGraphics(f, o))} />;
       case 'paragraph': {
         const cur = C.currentParagraph(view.state);
         if (!cur) { setDialog(null); return null; }
@@ -742,14 +737,14 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         const target = dialog.arg as { pos: number; node: any } | undefined;
         if (target?.node) {
           const p = commandParams(target.node);
-          return <CiteDialog meta={meta} docId={docId} project={undefined} onAdded={() => {}} initial={{ keys: unquote(p.get('key')).split(',').map(k => k.trim()).filter(Boolean), cmd: p.get('LatexCommand') ?? 'cite', before: unquote(p.get('before')), after: unquote(p.get('after')) }} onClose={close}
+          return <CiteDialog meta={targetMeta} docId={targetId} project={undefined} onAdded={() => {}} initial={{ keys: unquote(p.get('key')).split(',').map(k => k.trim()).filter(Boolean), cmd: p.get('LatexCommand') ?? 'cite', before: unquote(p.get('before')), after: unquote(p.get('after')) }} onClose={close}
             onInsert={(keys: string[], cmd: string, b: string, a: string) => { const params = [`LatexCommand ${cmd}`]; if (a) params.push(`after "${a}"`); if (b) params.push(`before "${b}"`); params.push(`key "${keys.join(',')}"`, 'literal "false"', ''); view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(params) })); }} />;
         }
-        return <CiteDialog meta={meta} docId={docId} project={undefined} onClose={close} onAdded={() => {}} onInsert={(keys: string[], cmd: string, b: string, a: string) => { run(C.insertCite(keys, cmd, b, a)); }} />;
+        return <CiteDialog meta={targetMeta} docId={targetId} project={undefined} onClose={close} onAdded={() => {}} onInsert={(keys: string[], cmd: string, b: string, a: string) => { run(C.insertCite(keys, cmd, b, a)); }} />;
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t: string, n: string) => run(C.insertHref(t, n))} />;
-      case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; const v = handleRef.current?.view; if (v) refreshMacros(v, m.macros); void api.header(docId).then(h => setHeader(h.headerLines)); })} />;
-      case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
+      case 'settings': return <SettingsDialog docId={targetId} meta={targetMeta} headerLines={docHeaders(targetId)} onClose={close} onSaved={() => api.meta(targetId).then(m => { updateMeta(targetId, m); refreshMacros(view, m.macros); void api.header(targetId).then(h => updateHeader(targetId, h.headerLines)); })} />;
+      case 'macros': return <MacrosDialog meta={targetMeta} onClose={close} />;
       case 'tex': return <TexDialog tex={String(dialog.arg ?? '')} onClose={close} />;
       case 'layout': return <LayoutPicker layouts={layouts} onClose={close} onPick={(n: string) => run(C.setLayout(n))} />;
       case 'argument': { run(C.insertArgument(String(dialog.arg ?? '1'))); setDialog(null); return null; }
@@ -758,7 +753,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         if (!target) { setDialog(null); notify('No inset at the cursor'); return null; }
         if (target.node.type.name === 'graphics') {
           const params: string[] = (() => { try { return JSON.parse(target.node.attrs.params || '[]'); } catch { return []; } })();
-          return <GraphicsDialog meta={meta} project={project} docDir={docDir} initial={C.graphicsOpts(params)} onClose={close}
+          return <GraphicsDialog meta={targetMeta} project={project} docDir={docDir} initial={C.graphicsOpts(params)} onClose={close}
             onInsert={(f: string, o: any) => view.dispatch(view.state.tr.setNodeMarkup(target.pos, undefined, { ...target.node.attrs, params: JSON.stringify(C.graphicsParams(f, o)) }))} />;
         }
         if (target.node.type.name === 'command' && target.node.attrs.cmd === 'href') {
@@ -783,6 +778,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
 
   return (
     <div class="app" data-vscode="1">
+      <MenuBar menus={menus} showThemeToggle={false} paletteShortcut="Ctrl+Alt+Shift+P" captureF1={false} searchEntries={helpSearchEntries} />
       {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={standardGroups} />}
       {(tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
         <div class="tb-samerow">
@@ -823,9 +819,14 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       )}
       <div class="main">
         <div class="editor-column">
-          <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '')} ref={scrollRef} style={{ zoom }} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
+          {showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
+          <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode ? ' ink-mode' : '')} ref={scrollRef} style={{ zoom }} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
             <div class="editor-page">
-              <div class="editor-host" ref={containerRef} />
+              {visibleIds.map(id => id === docId ? <div key={id}>
+                {combined && <div class="child-doc-header"><span class="name">{id.split('/').pop()}</span><button class="small-btn" onClick={() => setCombined(false)}>Show this document only</button></div>}
+                <div class="editor-host" ref={containerRef} />
+              </div> : <RelatedEditor key={id} id={id} marginMode={marginMode} register={registerRelated}
+                onSelection={onSelection} onDocChange={() => setDocTick(t => t + 1)} />)}
             </div>
           </div>
         </div>
@@ -835,16 +836,17 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
               <button class="active" data-tab="comments">Comments</button>
               <button class="hide" title="Hide the sidebar" onClick={() => setShowComments(false)}>»</button>
             </div>
-            <div class="panel-body"><Comments views={view ? [view] : []} tick={docTick} /></div>
+            <div class="panel-body"><Comments views={allViews()} tick={docTick} /></div>
           </div>
         )}
       </div>
-      {(showMath || showTable || showReview) && (
+      {(showMath || showTable || showReview || inkMode) && (
         <div class="bottom-toolbars" style={{ left: '24px', right: showComments ? 'var(--right-width, 360px)' : '24px' }}>
           {showMath && <Toolbar id="math" label="Math" groups={mathGroups} />}
           {showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={mathPanelGroups} />}
           {showTable && <Toolbar id="table" label="Table" groups={tableGroups} />}
           {showReview && <Toolbar id="review" label="Review" groups={reviewGroups} />}
+          {inkMode && <Toolbar id="ink" label="Draw" groups={inkGroups} />}
         </div>
       )}
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={{ state: 'saved', pending: false, savedAt: 0, unavailable: false }}

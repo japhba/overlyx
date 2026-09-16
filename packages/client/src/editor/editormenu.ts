@@ -119,7 +119,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
           items.push(
             { label: `Child document ${id.split('/').pop()}`, info: true },
             { label: 'Open', shortcut: MOD + '+click', action: () => editorContext.openInTab?.(id) },
-            { label: 'Open in new browser tab', action: () => window.open('#/' + id, '_blank') },
+            { label: editorContext.separateDocument?.label ?? 'Open in new browser tab', action: () => editorContext.separateDocument ? editorContext.separateDocument.open(id) : window.open('#/' + id, '_blank') },
             { label: 'Show master and child documents in one view', checked: editorContext.combined, action: () => editorContext.ui?.toggleCombined?.() },
             { sep: true },
           );
@@ -260,4 +260,3 @@ function pushInsetItems(view: EditorView, node: PMNode, pos: number, items: Menu
     { sep: true },
   );
 }
-

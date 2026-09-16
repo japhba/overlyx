@@ -30,6 +30,7 @@ export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.
   html = html.replace(/<script /g, `<script nonce="${nonce}" `);
   const csp = [
     "default-src 'none'",
+    `base-uri ${live ? dev : "'none'"}`,
     `img-src ${webview.cspSource} data: blob: http://127.0.0.1:* ${dev}`,
     `style-src ${webview.cspSource} 'unsafe-inline' ${dev}`,
     `font-src ${webview.cspSource} data: ${dev}`,
@@ -38,6 +39,9 @@ export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.
     "worker-src blob: data:",
   ].join('; ');
   const inject = `<meta http-equiv="Content-Security-Policy" content="${csp}">\n` +
+    // Vite injects CSS into <style> tags with root-relative font/image URLs. Their base must
+    // be the per-window forwarded dev server, rather than the vscode-webview origin.
+    (live ? `<base href="${dev.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}/">\n` : '') +
     // boot instrumentation: grab the one-shot VS Code API here (globals.ts reuses it) and forward
     // uncaught webview errors to the extension host — a webview that fails to boot is silent otherwise
     `<script nonce="${nonce}">

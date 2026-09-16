@@ -340,13 +340,43 @@ export function approximateOverlapSymbols(offset: string, args: string[]): strin
   return `\\mathord{${left}\\kern-${overlap}em${right}}`;
 }
 
+/** Image symbols inherit text colour; font-measured images follow the math style. */
+export function approximateImageSymbols(def: string): string {
+  if (!/\\include(?:graphics|svg)\b/.test(def)) return def;
+  const heights = new Map<string, number>();
+  // Computer Modern / KaTeX Main: a digit is 0.64444em tall, a capital 0.68333em.
+  // A font-character height is not an em (which was making these symbols ~55% too tall).
+  let d = def.replace(/\\([A-Za-z@]+)\s*=\s*\\fontcharht\s*\\font\s*`([0-9A-Z])/g, (_all, register: string, glyph: string) => {
+    heights.set(register, /[0-9]/.test(glyph) ? 0.64444 : 0.68333);
+    return '';
+  });
+  d = d.replace(/\\includesvg\b/g, '\\includegraphics');
+  const alreadyMarked = d.includes('\\htmlClass{lm-image-glyph}');
+  d = d.replace(/\\includegraphics\s*(?:\[([^\]]*)\])?\s*\{([^{}]*)\}/g, (_all, options: string = '', file: string) => {
+    const measured = /(?:height|width|totalheight)\s*=\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+)?\\([A-Za-z@]+)/g;
+    const fontSized = [...options.matchAll(measured)].some(m => heights.has(m[1]));
+    const image = (scale: number) => {
+      const sizes = options.replace(/((?:height|width|totalheight)\s*=\s*)([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)\\([A-Za-z@]+)/g, (all, key: string, factor: string, register: string) => {
+        const height = heights.get(register);
+        return height === undefined ? all : key + Number(((factor ? Number(factor) : 1) * height * scale).toFixed(5)) + 'em';
+      });
+      const body = `\\includegraphics${sizes ? `[${sizes}]` : ''}{${file}}`;
+      return (/\.svgz?\s*$/i.test(file) || /^\s*\\mathord\b/.test(def)) && !alreadyMarked ? `\\htmlClass{lm-image-glyph}{${body}}` : body;
+    };
+    // KaTeX's em lengths refer to textstyle even in scripts. Account for its 0.7/0.5
+    // script scales so the image and its layout box shrink together with nearby letters.
+    return fontSized ? `\\mathchoice{${image(1)}}{${image(1)}}{${image(0.7)}}{${image(0.5)}}` : image(1);
+  });
+  return d;
+}
+
 /**
  * MathLive cannot render some TeX internals / text-mode constructs used in macro definitions.
  * Rewrite the common ones into a visual approximation, and fall back to the macro name
  * (keeping the arguments visible) for the rest.
  */
 export function sanitizeForMathlive(def: string, m: { name: string; args: number }): string {
-  let d = def;
+  let d = def.replace(/\r?\n\s*/g, ' ');
   // text-mode boxes that only change size / position: keep the content
   d = replaceCommand(d, 'scalebox', c => `{${unmath(c)}}`, 2);
   d = replaceCommand(d, 'resizebox', c => `{${unmath(c)}}`, 3);
@@ -358,18 +388,14 @@ export function sanitizeForMathlive(def: string, m: { name: string; args: number
   d = replaceCommand(d, 'ensuremath', c => `{${c}}`);
   d = replaceCommand(d, 'textnormal', c => `\\text{${c}}`);
   d = replaceCommand(d, 'accentset', (c, o) => `\\overset{${o[0] ?? ''}}{${c}}`, 2);
-  d = replaceCommand(d, 'mathchoice', (c, o) => `{${o[0] ?? c}}`, 4);
   // Approximate the paper's \\sbox/\\ooalign double-glyph helper with a supported inline overlay.
   d = replaceCommand(d, 'OverlapSymbols', approximateOverlapSymbols, 3);
   // KaTeX supports \includegraphics. Treat \includesvg the same way; the client sends both
   // through the project's graphics endpoint, which converts PDF/SVG to a browser image.
-  d = d.replace(/\\includesvg\b/g, '\\includegraphics');
+  d = approximateImageSymbols(d);
+  // KaTeX requires adjacent groups for mathchoice, unlike TeX.
+  d = replaceCommand(d, 'mathchoice', (last, args) => '\\mathchoice' + [...args, last].map(value => `{${value}}`).join(''), 4);
   if (/\\includegraphics\b/.test(d)) {
-    // Definitions commonly measure a text glyph into a custom length before sizing the image.
-    // KaTeX has no TeX registers, so use 1em as that length's faithful visual approximation.
-    d = d.replace(/\\[A-Za-z@]+\s*=\s*\\fontcharht\s*\\font\s*`?\S+/g, '');
-    d = d.replace(/\\includegraphics(\s*)\[([^\]]*)\]/g, (_all, ws: string, opts: string) =>
-      `\\includegraphics${ws}[${opts.replace(/((?:height|width|totalheight)\s*=\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+))\\[A-Za-z@]+/g, '$1em')}]`);
     d = d.replace(/\\normalfont\b/g, '');
     // \includegraphics is a math-mode KaTeX command, even when the LaTeX definition used a
     // text/raise box only to establish its baseline.

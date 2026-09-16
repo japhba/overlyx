@@ -8,7 +8,7 @@
  */
 import type { Atom, Cell, Grid, Hull, MacroTable } from './ast';
 import { SYMBOLS } from './parse';
-import { approximateOverlapSymbols, readGroup } from '../macros';
+import { approximateImageSymbols, approximateOverlapSymbols, readGroup } from '../macros';
 import katexMacrosTable from './katex-macros.json';
 
 /** LyX predefined macros KaTeX lacks, as KaTeX `macros` entries */
@@ -281,7 +281,7 @@ const unmath = (s: string) => { const t = s.trim(); const m = /^\$([\s\S]*)\$$/.
  * rewrite the common ones into a visual approximation, else show the macro name.
  */
 export function sanitizeForKatex(def: string, name: string, args: number): string {
-  let d = def;
+  let d = def.replace(/\r?\n\s*/g, ' ');
   d = replaceCommand(d, 'scalebox', c => `{${unmath(c)}}`, 2);
   d = replaceCommand(d, 'resizebox', c => `{${unmath(c)}}`, 3);
   d = replaceCommand(d, 'rotatebox', c => `{${unmath(c)}}`, 2);
@@ -293,7 +293,6 @@ export function sanitizeForKatex(def: string, name: string, args: number): strin
   d = replaceCommand(d, 'ensuremath', c => `{${c}}`);
   d = replaceCommand(d, 'textnormal', c => `\\text{${c}}`);
   d = replaceCommand(d, 'accentset', (c, o) => `\\overset{${o[0] ?? ''}}{${c}}`, 2);
-  d = replaceCommand(d, 'mathchoice', (c, o) => `{${o[0] ?? c}}`, 4);
   d = replaceCommand(d, 'bm', c => `\\boldsymbol{${c}}`);
   d = replaceCommand(d, 'mathds', c => `\\mathbb{${c}}`);
   d = replaceCommand(d, 'intertext', c => `\\text{${c}}`);
@@ -303,13 +302,10 @@ export function sanitizeForKatex(def: string, name: string, args: number): strin
   d = replaceCommand(d, 'OverlapSymbols', approximateOverlapSymbols, 3);
   // KaTeX renders \includegraphics itself. The client rewrites its local filename to the
   // authenticated project graphics endpoint, which also converts PDF/SVG for the browser.
-  d = d.replace(/\\includesvg\b/g, '\\includegraphics');
+  d = approximateImageSymbols(d);
+  // KaTeX requires adjacent groups for mathchoice, unlike TeX.
+  d = replaceCommand(d, 'mathchoice', (last, args) => '\\mathchoice' + [...args, last].map(value => `{${value}}`).join(''), 4);
   if (/\\includegraphics\b/.test(d)) {
-    // Approximate custom TeX lengths derived from a font glyph by 1em. This covers the common
-    // \fontcharht + \raisebox idiom used to align an image-based mathematical symbol.
-    d = d.replace(/\\[A-Za-z@]+\s*=\s*\\fontcharht\s*\\font\s*`?\S+/g, '');
-    d = d.replace(/\\includegraphics(\s*)\[([^\]]*)\]/g, (_all, ws: string, opts: string) =>
-      `\\includegraphics${ws}[${opts.replace(/((?:height|width|totalheight)\s*=\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+))\\[A-Za-z@]+/g, '$1em')}]`);
     d = d.replace(/\\normalfont\b/g, '');
     d = replaceCommand(d, 'text', c => /\\includegraphics\b/.test(c) ? `{${c}}` : `\\text{${c}}`);
   }

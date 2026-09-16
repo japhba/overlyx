@@ -1,3 +1,5 @@
+@import './fonts/computer-modern/fonts.css';
+
 /* ------------------------------------------------------------ theme tokens
    Light values first; the dark theme (html[data-theme="dark"], set by app/theme.ts from the View menu,
    the toggle in the menu bar or the system preference) only redefines tokens. Keep literal colours
@@ -45,7 +47,7 @@
   --chip-border: #8ea2bd;
   --purple-bg: #f6f0fb;
   --purple-border: #b39ddb;
-  --editor-font: "Latin Modern Roman", "CMU Serif", "Times New Roman", Georgia, serif;
+  --editor-font: "CMU Serif", serif;
   --ui-font: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --note-bg: #fff8c4;
   --note-border: #d9c76a;
@@ -520,6 +522,9 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .lm-field:hover { border-color: var(--ui-border); }
 .lm-field.focused { border-color: var(--accent); background: var(--math-focus-bg); }
 .lm-field .lm-content { display: inline-block; }
+/* SVG math macros are font glyphs: preserve their aspect ratio and use the surrounding ink. */
+.lm-image-glyph { display: inline-block; line-height: 0; background-color: currentColor; mask-mode: alpha; mask-size: 100% 100%; mask-repeat: no-repeat; }
+.lm-image-glyph > img { display: block; opacity: 0; }
 .lm-field .lm-overlay { position: absolute; left: 0; top: 0; width: 0; height: 0; overflow: visible; pointer-events: none; z-index: 3; }
 .lm-caret { position: absolute; width: 1px; background: var(--caret); animation: lm-blink 1.1s steps(2, start) infinite; }
 @keyframes lm-blink { to { visibility: hidden; } }

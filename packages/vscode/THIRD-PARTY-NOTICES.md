@@ -19,6 +19,9 @@ It contains, or is a derivative of, the following third-party material:
 - **Spell-checker dictionaries** (`dict/`): `dictionary-en`, `dictionary-en-gb` (BSD-style /
   SCOWL licenses), `dictionary-de` (igerman98, GPL-2.0 or GPL-3.0), `dictionary-fr` (MPL-2.0).
 - **IBM Plex / KaTeX fonts** — SIL OFL 1.1.
+- **Computer Modern Unicode / CMU Serif** (https://ctan.org/pkg/cm-unicode) — SIL OFL 1.1.
+  Unmodified Roman, bold, italic and bold italic text fonts; copyright the original Metafont
+  authors and Andrey V. Panov. Full license and copyright notices: `dist/webview/licenses/cm-unicode-OFL.txt`.
 
 Corresponding source: the extension is built from the OverLyX source tree. A copy of the
 complete corresponding source for any released .vsix is available to anyone on request —

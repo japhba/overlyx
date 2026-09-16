@@ -4,6 +4,8 @@
  * pointed at it via OVERLYX_API_BASE); postMessage carries only document sync and UI signals.
  */
 
+import type { DocumentModel } from './documentModel';
+
 /** ProseMirror JSON document (nodes of the editor schema). */
 export type PmDoc = { type: string; [k: string]: unknown };
 
@@ -11,11 +13,16 @@ export interface OutlineEntry { pos: number; level: number; text: string; layout
 
 /** host → editor webview */
 export type HostToEditor =
+  | { type: 'relatedInit'; id: string; pmDoc: PmDoc; headerLines: string[]; meta: import('@client/api').DocMeta }
+  | { type: 'relatedExternalUpdate'; id: string; pmDoc: PmDoc; headerLines: string[] }
+  | { type: 'metadataChanged' }
+  | { type: 'relatedError'; id: string; error: string }
   | { type: 'init'; docId: string; base: string; pmDoc: PmDoc; headerLines: string[]; fragment: boolean; dark: boolean }
   /** the file changed outside the editor (git, another editor, VS Code undo): new content, applied as a diff */
   | { type: 'externalUpdate'; pmDoc: PmDoc; headerLines: string[] }
   /** move the cursor to a document position (outline click) */
   | { type: 'goto'; pos: number }
+  | { type: 'navigate'; label?: string; heading?: number }
   /** run a UI command (keybindings / menus contributed on the VS Code side) */
   | { type: 'command'; name: 'toggleMargin' | 'find' | 'syncToPdf' | 'buildPdf' | 'toggleTracking' }
   /** SyncTeX inverse search: a line (1-based) of the LaTeX as built — locate it and move the cursor */
@@ -24,20 +31,23 @@ export type HostToEditor =
 
 /** editor webview → host */
 export type EditorToHost =
+  | { type: 'hostCommand'; name: 'openSource' | 'openFile' | 'newFile' | 'closeTab' | 'outline' | 'back' | 'forward' | 'theme' | 'timeline' | 'scm'; id: string }
+  | { type: 'loadRelated'; id: string }
+  | { type: 'updateRelated'; id: string; pmDoc: PmDoc; headerLines: string[]; base: DocumentModel }
   | { type: 'ready' }
   /** the document changed in the editor: full ProseMirror doc + header lines (debounced) */
-  | { type: 'update'; pmDoc: PmDoc; headerLines: string[] }
+  | { type: 'update'; pmDoc: PmDoc; headerLines: string[]; base: DocumentModel }
   | { type: 'outline'; items: OutlineEntry[] }
   | { type: 'selection'; pos: number }
   | { type: 'notify'; text: string; kind?: 'info' | 'error' }
   /** flush pending edits and save the TextDocument (Ctrl+S inside the editor) */
   | { type: 'save' }
   /** start a PDF build (and open the PDF panel) / cancel it / just open the panel */
-  | { type: 'build' }
+  | { type: 'build'; open: boolean }
   | { type: 'cancelBuild' }
   | { type: 'openPdfPanel' }
   /** open another document of the project (child document, label in another file) */
-  | { type: 'openDoc'; id: string; goto?: string; heading?: number }
+  | { type: 'openDoc'; id: string; goto?: string; heading?: number; beside?: boolean }
   /** SyncTeX forward search result: show this box in the PDF panel */
   | { type: 'syncTarget'; target: { page: number; x: number; y: number; w?: number; h?: number; seq: number } };
 
