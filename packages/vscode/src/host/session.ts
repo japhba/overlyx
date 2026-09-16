@@ -10,8 +10,9 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { lyxToPm, headerValue, mergeLyx, type LyxDocument, type PMJSON } from '@overlyx/core';
-import { documentModel, sameModel, modelDocument, type DocumentModel } from '../shared/documentModel.ts';
+import { documentModel, sameModel, modelDocument, type DocumentModel, type SyncTag } from '../shared/documentModel.ts';
 import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, sameDocumentText, type TexContext } from './texdoc.ts';
+import type { ParseTexResult } from '@overlyx/core/tex/index.ts';
 import { buildMeta } from './meta.ts';
 import { findMaster } from './project.ts';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
@@ -21,8 +22,14 @@ export class DocSession {
   isChild = false;
   /** the exact text we last wrote into the TextDocument (to tell our own echoes from external edits) */
   private lastWritten: string | null = null;
+  /** the last webview update applied; every snapshot pushed to the webview names it (SyncLedger) */
+  applied: SyncTag | null = null;
   private disposed = false;
   private diskText: string;
+  /** the TextDocument text the webview's model was last derived from (parseCurrent) */
+  private synced = '';
+  /** file-side forms of the models the webview may name as its base (see baseDocument) */
+  private known: { key: string; doc: LyxDocument }[] = [];
   private writes: Promise<unknown> = Promise.resolve();
 
   /** Source, visual edits, settings and saves share one ordered write queue. */
@@ -45,12 +52,38 @@ export class DocSession {
   getHeaderLines(): string[] { return [...this.headerLines]; }
 
   /** Parse the current TextDocument text into the model + PM JSON for the webview. */
-  parseCurrent(): { pmDoc: PMJSON; headerLines: string[]; fragment: boolean; warnings: string[] } {
-    const r = parseDocumentText(this.document.getText(), this.ctx, this.relPath);
+  parseCurrent(): { pmDoc: PMJSON; headerLines: string[]; fragment: boolean; warnings: string[]; doc: LyxDocument } {
+    this.synced = this.document.getText();
+    const r = parseDocumentText(this.synced, this.ctx, this.relPath);
     this.isChild = r.fragment;
     this.headerLines = r.doc.header.lines;
     const pmDoc = lyxToPm(r.doc);
-    return { pmDoc, headerLines: this.headerLines, fragment: r.fragment, warnings: r.warnings };
+    this.remember(documentModel(pmDoc, this.headerLines), r.doc);
+    return { pmDoc, headerLines: this.headerLines, fragment: r.fragment, warnings: r.warnings, doc: r.doc };
+  }
+
+  private remember(model: DocumentModel, doc: LyxDocument): void {
+    const key = JSON.stringify(model);
+    this.known = this.known.filter(k => k.key !== key);
+    this.known.push({ key, doc });
+    if (this.known.length > 6) this.known.shift();
+  }
+
+  /**
+   * The webview's base as the file holds it. The webview's model and the file's parse of the same
+   * state differ wherever the LaTeX cannot carry the model exactly — a space at the end of a
+   * paragraph, a macro definition in the writer's spelling, an empty change-tracked paragraph.
+   * Merged against the raw model, every such spot counted as a change on disk, and the disk wins:
+   * deleting the last word of a paragraph (leaving its space), then deleting on, brought the word
+   * back. So the merge base is the parse of the text that model was read from or written to; a
+   * base this session never saw (a webview restored from an earlier run) is round-tripped instead.
+   */
+  private baseDocument(base: DocumentModel, current: ParseTexResult): LyxDocument {
+    const key = JSON.stringify(documentModel(base.pmDoc, base.headerLines));
+    const hit = this.known.find(k => k.key === key);
+    if (hit) return hit.doc;
+    const text = writeDocumentText(modelDocument(base, current.doc), this.ctx, this.relPath, current.fragment, includeResolver(this.ctx, this.relPath)).text;
+    return parseDocumentText(text, this.ctx, this.relPath).doc;
   }
 
   /** The TextDocument is authoritative; webview snapshots are changes against a supplied base. */
@@ -63,9 +96,16 @@ export class DocSession {
     return writeDocumentText(this.toLyxDocument(), this.ctx, this.relPath, this.isChild, includeResolver(this.ctx, this.relPath)).text;
   }
 
-  /** The webview sent an updated PM doc: write it into the TextDocument. */
-  applyPmUpdate(pmDoc: PMJSON, headerLines: string[], base: DocumentModel): Promise<boolean> {
-    return this.enqueue(() => this.writePmUpdate(pmDoc, headerLines, base));
+  /**
+   * The webview sent an updated PM doc: write it into the TextDocument. Resolves to whether the
+   * webview must be sent the result — the file had changed meanwhile, or the merge altered the update.
+   */
+  applyPmUpdate(pmDoc: PMJSON, headerLines: string[], base: DocumentModel, sync?: SyncTag): Promise<boolean> {
+    return this.enqueue(async () => {
+      const push = await this.writePmUpdate(pmDoc, headerLines, base);
+      if (sync) this.applied = sync;
+      return push;
+    });
   }
 
   private async writePmUpdate(pmDoc: PMJSON, headerLines: string[], base: DocumentModel): Promise<boolean> {
@@ -75,27 +115,30 @@ export class DocSession {
     if (sameModel(incoming, base)) return diskChanged;
     const current = parseDocumentText(this.document.getText(), this.ctx, this.relPath);
     const currentModel = documentModel(lyxToPm(current.doc), current.doc.header.lines);
-    if (sameModel(incoming, currentModel)) return diskChanged;
+    if (sameModel(incoming, currentModel)) { this.remember(incoming, current.doc); return diskChanged; }
     const ours = modelDocument(incoming, current.doc);
-    const merged = mergeLyx(modelDocument(base, current.doc), ours, current.doc);
+    const merged = mergeLyx(this.baseDocument(base, current), ours, current.doc);
     const mergedModel = documentModel(lyxToPm(merged), merged.header.lines);
     const rebased = !sameModel(incoming, mergedModel);
     if (rebased) this.preserveDraft(writeDocumentText(ours, this.ctx, this.relPath, current.fragment, includeResolver(this.ctx, this.relPath)).text);
     const { text, files } = writeDocumentText(merged, this.ctx, this.relPath, current.fragment, includeResolver(this.ctx, this.relPath));
     this.writeSidecars(files);
     await this.replaceText(text);
-    this.parseCurrent();
+    const after = this.parseCurrent();
+    // the webview keeps `incoming` as its base unless it is sent the snapshot: its file-side form is this parse
+    if (!rebased) this.remember(incoming, after.doc);
     return diskChanged || rebased;
   }
 
   /** VS Code does not reload a dirty TextDocument when another process changes its file. */
   syncFromDisk(): Promise<boolean> { return this.enqueue(() => this.readDisk()); }
 
+  /** Resolves to whether the TextDocument's content changed (then the webview needs a snapshot). */
   private async readDisk(): Promise<boolean> {
     // Child editors in a joint view do not own VS Code tabs, so their buffers may be released.
     const reopened = this.document.isClosed;
     if (reopened) this.document = await vscode.workspace.openTextDocument(this.document.uri);
-    const disk = fs.readFileSync(this.document.uri.fsPath, 'utf8');
+    let disk = fs.readFileSync(this.document.uri.fsPath, 'utf8');
     if (disk === this.diskText) return reopened;
     // Let VS Code reload a clean file itself: a WorkspaceEdit would mark it dirty while
     // leaving VS Code's saved-file timestamp behind, causing a false save conflict.
@@ -107,7 +150,7 @@ export class DocSession {
         });
         const timeout = setTimeout(() => { listener.dispose(); reject(new Error(`VS Code did not reload ${this.docId} from disk`)); }, 5000);
       });
-      return this.readDisk();
+      disk = fs.readFileSync(this.document.uri.fsPath, 'utf8');
     }
     const local = this.document.getText();
     let text = disk;
@@ -121,8 +164,10 @@ export class DocSession {
     }
     await this.replaceText(text);
     this.diskText = disk;
-    this.parseCurrent();
-    return true;
+    // a save of our own text (auto save, Ctrl+S) changes the disk but not the document: nothing to push
+    const changed = reopened || this.document.getText() !== this.synced;
+    if (changed) this.parseCurrent();
+    return changed;
   }
 
   /** Drawing data lives in SVGs: persist it before reparsing the TeX anchor. */

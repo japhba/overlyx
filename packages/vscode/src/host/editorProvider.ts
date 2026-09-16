@@ -72,8 +72,8 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     };
     const pushSnapshot = (target: DocSession) => {
       const parsed = target.parseCurrent();
-      if (target === session) post({ type: 'externalUpdate', pmDoc: parsed.pmDoc as never, headerLines: parsed.headerLines });
-      else post({ type: 'relatedExternalUpdate', id: target.docId, pmDoc: parsed.pmDoc as never, headerLines: parsed.headerLines });
+      if (target === session) post({ type: 'externalUpdate', pmDoc: parsed.pmDoc as never, headerLines: parsed.headerLines, ack: target.applied });
+      else post({ type: 'relatedExternalUpdate', id: target.docId, pmDoc: parsed.pmDoc as never, headerLines: parsed.headerLines, ack: target.applied });
       post({ type: 'metadataChanged' });
       this.registry.touch();
     };
@@ -112,13 +112,13 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
             const child = related.get(msg.id)!;
             await child.syncFromDisk();
             const parsed = child.parseCurrent();
-            post({ type: 'relatedInit', id: msg.id, pmDoc: parsed.pmDoc as never, headerLines: parsed.headerLines, meta: child.meta() as never });
+            post({ type: 'relatedInit', id: msg.id, pmDoc: parsed.pmDoc as never, headerLines: parsed.headerLines, meta: child.meta() as never, ack: child.applied });
           }).catch(e => post({ type: 'relatedError', id: msg.id, error: String(e) }));
           break;
         case 'updateRelated':
           this.applyChain = this.applyChain.then(async () => {
             const child = related.get(msg.id)!;
-            if (await child.applyPmUpdate(msg.pmDoc as never, msg.headerLines, msg.base)) pushSnapshot(child);
+            if (await child.applyPmUpdate(msg.pmDoc as never, msg.headerLines, msg.base, msg.sync)) pushSnapshot(child);
           }).catch(e => {
             post({ type: 'relatedError', id: msg.id, error: String(e) });
             void vscode.window.showErrorMessage(`OverLyX could not update ${msg.id}: ${String(e)}`);
@@ -128,7 +128,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           this.applyChain = this.applyChain.then(async () => {
             await session.syncFromDisk();
             const r = session.parseCurrent();
-            post({ type: 'init', docId: session.docId, base, pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark() });
+            post({ type: 'init', docId: session.docId, base, pmDoc: r.pmDoc as never, headerLines: r.headerLines, fragment: r.fragment, dark: isDark(), ack: session.applied });
             if (r.warnings.length) vscode.window.setStatusBarMessage(`OverLyX: ${r.warnings.length} parse warning(s) — details in the raw file`, 8000);
           }).catch(e => {
             void vscode.window.showErrorMessage(`OverLyX could not open ${relPath}: ${String(e)}`);
@@ -137,7 +137,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
         }
         case 'update':
           this.applyChain = this.applyChain.then(async () => {
-            if (await session.applyPmUpdate(msg.pmDoc as never, msg.headerLines, msg.base)) pushSnapshot(session);
+            if (await session.applyPmUpdate(msg.pmDoc as never, msg.headerLines, msg.base, msg.sync)) pushSnapshot(session);
           }).catch(e => console.error('overlyx apply failed', e));
           break;
         case 'outline':
@@ -190,7 +190,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
         relatedTimers.set(id, setTimeout(() => {
           this.applyChain = this.applyChain.then(() => {
             const ext = child.externalChange();
-            if (ext) post({ type: 'relatedExternalUpdate', id, pmDoc: ext.pmDoc as never, headerLines: ext.headerLines });
+            if (ext) post({ type: 'relatedExternalUpdate', id, pmDoc: ext.pmDoc as never, headerLines: ext.headerLines, ack: child.applied });
           }).catch(e => console.error('overlyx child refresh failed', e));
         }, 400));
       }
@@ -199,7 +199,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       externalTimer = setTimeout(() => {
         this.applyChain = this.applyChain.then(() => {
           const ext = session.externalChange();
-          if (ext) post({ type: 'externalUpdate', pmDoc: ext.pmDoc as never, headerLines: ext.headerLines });
+          if (ext) post({ type: 'externalUpdate', pmDoc: ext.pmDoc as never, headerLines: ext.headerLines, ack: session.applied });
           this.registry.touch();
         }).catch(e => console.error('overlyx external change failed', e));
       }, 400);

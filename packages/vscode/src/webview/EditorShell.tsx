@@ -2,7 +2,7 @@ import { MenuBar, openPalette, PALETTE_LABEL, type MenuDef } from '@client/app/M
 import { documentMenus } from '@client/app/documentMenus';
 import { editorViewMenu } from '@client/app/editorViewMenu';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
-import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats } from '@client/app/shellutil';
+import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom } from '@client/app/shellutil';
 import { referenceTransaction } from '@client/editor/references';
 import { inkToolbar } from '@client/app/inkToolbar';
 import { StatsDialog } from '@client/app/StatsDialog';
@@ -149,7 +149,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
 
   useEffect(() => { localStorage.setItem('ol.toolbars', JSON.stringify(toolbars)); }, [toolbars]);
   useEffect(() => subscribePrefs(setPrefsState), []);
-  useEffect(() => { localStorage.setItem('ol.zoom', String(zoom)); }, [zoom]);
+  useEffect(() => applyEditorZoom(zoom), [zoom]);
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.vscode.combined', combined ? '1' : '0'); }, [combined]);
   useEffect(() => { try { localStorage.setItem('ol.vscode.comments', showComments ? '1' : '0'); } catch { /* ignore */ } }, [showComments]);
   useEffect(() => { const l = (f: LyxMathField | null) => { setMathField(f); editorContext.mathField = f; }; mathFocusListeners.add(l); return () => { mathFocusListeners.delete(l); }; }, []);
@@ -274,7 +274,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         case 'init':
         case 'externalUpdate':
           postUpdate.cancel();
-          setHeader(handleRef.current!.applyExternal(m.pmDoc, m.headerLines));
+          setHeader(handleRef.current!.applyExternal(m.pmDoc, m.headerLines, m.ack));
           postUpdate(v);
           postOutline(v);
           metaReload();
@@ -722,7 +722,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       <div class="main">
         <div class={'editor-column view-' + viewMode + (viewMode === 'wysiwyg' ? '' : ' split')}>
           {showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
-          <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode ? ' ink-mode' : '')} ref={scrollRef} style={{ zoom }} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
+          <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode ? ' ink-mode' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
             <div class="editor-page">
               {visibleIds.map(id => id === docId ? <div key={id}>
                 {combined && <div class="child-doc-header"><span class="name">{id.split('/').pop()}</span><button class="small-btn" onClick={() => setCombined(false)}>Show this document only</button></div>}

@@ -75,6 +75,10 @@ describe('one toolbar definition for both front ends', () => {
       for (const id of SHARED_IDS) expect(src, `${file} declares the toolbar button '${id}' itself — it belongs in app/toolbars.tsx`).not.toContain(`id: '${id}'`);
       for (const fn of ['function bcp47', 'function suggestLabel', 'function applyAuthorColors', 'function hashAuthor', 'function LayoutPicker', 'function debounce', 'MATH_PANEL_PREVIEW: Record', 'const textStylesPalette', 'const tbTogglePalette', 'const marksAtCursor'])
         expect(src, `${file} keeps its own ${fn} — use app/shellutil.tsx / app/toolbars.tsx`).not.toContain(fn);
+      // zoom scales the font through --editor-zoom in both shells; CSS `zoom` on a container breaks
+      // mouse hit testing (the extension's drags stopped following the pointer when zoomed)
+      expect(src, `${file} must zoom through applyEditorZoom (app/shellutil.tsx)`).toMatch(/applyEditorZoom\(zoom\)/);
+      expect(src, `${file} must not use CSS zoom`).not.toMatch(/style=\{\{\s*zoom|--editor-zoom/);
     });
   }
 

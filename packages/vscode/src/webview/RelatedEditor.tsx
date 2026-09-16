@@ -47,7 +47,7 @@ export function RelatedEditor(props: {
         const handle = handleRef.current;
         if (handle) {
           clearTimeout(timer);
-          handle.applyExternal(msg.pmDoc, msg.headerLines);
+          handle.applyExternal(msg.pmDoc, msg.headerLines, msg.ack);
           flush();
         }
       }
@@ -58,7 +58,7 @@ export function RelatedEditor(props: {
           onDocChange: () => { clearTimeout(timer); timer = setTimeout(flush, 300); callbacks.current.onDocChange(); },
         });
         // A hidden view may have retained its undo history while its TextDocument changed.
-        handle.applyExternal(msg.pmDoc, msg.headerLines);
+        handle.applyExternal(msg.pmDoc, msg.headerLines, msg.ack);
         handleRef.current = { ...handle, meta: msg.meta, flush };
         refreshMacros(handle.view, msg.meta.macros, true);
         callbacks.current.register(id, handleRef.current);

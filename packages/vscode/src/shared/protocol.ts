@@ -4,7 +4,7 @@
  * pointed at it via OVERLYX_API_BASE); postMessage carries only document sync and UI signals.
  */
 
-import type { DocumentModel } from './documentModel';
+import type { DocumentModel, SyncTag } from './documentModel';
 
 /** ProseMirror JSON document (nodes of the editor schema). */
 export type PmDoc = { type: string; [k: string]: unknown };
@@ -13,13 +13,17 @@ export interface OutlineEntry { pos: number; level: number; text: string; layout
 
 /** host → editor webview */
 export type HostToEditor =
-  | { type: 'relatedInit'; id: string; pmDoc: PmDoc; headerLines: string[]; meta: import('@client/api').DocMeta }
-  | { type: 'relatedExternalUpdate'; id: string; pmDoc: PmDoc; headerLines: string[] }
+  | { type: 'relatedInit'; id: string; pmDoc: PmDoc; headerLines: string[]; meta: import('@client/api').DocMeta; ack: SyncTag | null }
+  | { type: 'relatedExternalUpdate'; id: string; pmDoc: PmDoc; headerLines: string[]; ack: SyncTag | null }
   | { type: 'metadataChanged' }
   | { type: 'relatedError'; id: string; error: string }
-  | { type: 'init'; docId: string; base: string; pmDoc: PmDoc; headerLines: string[]; fragment: boolean; dark: boolean }
-  /** the file changed outside the editor (git, another editor, VS Code undo): new content, applied as a diff */
-  | { type: 'externalUpdate'; pmDoc: PmDoc; headerLines: string[] }
+  | { type: 'init'; docId: string; base: string; pmDoc: PmDoc; headerLines: string[]; fragment: boolean; dark: boolean; ack: SyncTag | null }
+  /**
+   * The file's content as the host now has it — changed outside the editor (git, another editor,
+   * VS Code undo), or re-read after one of the editor's own updates was written. `ack` names the
+   * last editor update it reflects, so the editor merges it against the right base (documentModel.ts).
+   */
+  | { type: 'externalUpdate'; pmDoc: PmDoc; headerLines: string[]; ack: SyncTag | null }
   /** move the cursor to a document position (outline click) */
   | { type: 'goto'; pos: number }
   | { type: 'navigate'; label?: string; heading?: number }
@@ -33,10 +37,10 @@ export type HostToEditor =
 export type EditorToHost =
   | { type: 'hostCommand'; name: 'openSource' | 'openFile' | 'newFile' | 'closeTab' | 'outline' | 'back' | 'forward' | 'theme' | 'timeline' | 'scm'; id: string }
   | { type: 'loadRelated'; id: string }
-  | { type: 'updateRelated'; id: string; pmDoc: PmDoc; headerLines: string[]; base: DocumentModel }
+  | { type: 'updateRelated'; id: string; pmDoc: PmDoc; headerLines: string[]; base: DocumentModel; sync: SyncTag }
   | { type: 'ready' }
-  /** the document changed in the editor: full ProseMirror doc + header lines (debounced) */
-  | { type: 'update'; pmDoc: PmDoc; headerLines: string[]; base: DocumentModel }
+  /** the document changed in the editor: full ProseMirror doc + header lines (debounced), numbered by `sync` */
+  | { type: 'update'; pmDoc: PmDoc; headerLines: string[]; base: DocumentModel; sync: SyncTag }
   | { type: 'outline'; items: OutlineEntry[] }
   | { type: 'selection'; pos: number }
   | { type: 'notify'; text: string; kind?: 'info' | 'error'; stack?: string }

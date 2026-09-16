@@ -10,15 +10,18 @@ import { assemblePlugins, editorViewProps, editorAttributes, dispatchTransaction
 import { inkPlugin } from '@client/editor/plugins/ink';
 import { getPrefs, subscribePrefs } from '@client/prefs';
 import { editorSessions } from './editorSession';
-import { documentModel, mergeModels, sameModel, type DocumentModel } from '../shared/documentModel';
+import { documentModel, mergeModels, sameModel, SyncLedger, type DocumentModel, type SyncTag } from '../shared/documentModel';
 
 export interface LocalEditorHandle {
   view: EditorView;
   ydoc: Y.Doc;
-  /** apply new content that arrived from the file (as a diff: unchanged paragraphs keep identity) */
-  applyExternal(pmDoc: unknown, headerLines: string[]): string[];
-  /** Only user changes since the last received/sent model need to be written back. */
-  takeUpdate(headerLines: string[]): (DocumentModel & { base: DocumentModel }) | null;
+  /**
+   * Apply content that arrived from the host (as a diff: unchanged paragraphs keep identity), merged
+   * against the model of the update it acknowledges so that later local changes survive.
+   */
+  applyExternal(pmDoc: unknown, headerLines: string[], ack?: SyncTag | null): string[];
+  /** Only user changes since the last received/sent model need to be written back; numbered for the host's acknowledgement. */
+  takeUpdate(headerLines: string[]): (DocumentModel & { base: DocumentModel; sync: SyncTag }) | null;
   destroy(preserveSession?: boolean): void;
 }
 
@@ -48,7 +51,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
       deleteFilter: item => defaultDeleteFilter(item, new Set(['paragraph'])),
       captureTransaction: tr => tr.meta.get('addToHistory') !== false,
     });
-    session = { ydoc, awareness, undoManager, scrollTop: 0, headerLines: opts.headerLines, base: documentModel(opts.pmDoc, opts.headerLines) };
+    session = { ydoc, awareness, undoManager, scrollTop: 0, headerLines: opts.headerLines, ledger: new SyncLedger(documentModel(opts.pmDoc, opts.headerLines)) };
     editorSessions.set(opts.docId, session);
   }
   const { ydoc, awareness, undoManager } = session;
@@ -107,22 +110,22 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
 
   return {
     view, ydoc,
-    applyExternal(pmDoc: unknown, headerLines: string[]) {
+    applyExternal(pmDoc: unknown, headerLines: string[], ack?: SyncTag | null) {
       const incoming = documentModel(pmDoc, headerLines);
       const local = documentModel(view.state.doc.toJSON(), session!.headerLines!);
-      const merged = mergeModels(session!.base, local, incoming);
-      session!.base = incoming;
+      const merged = mergeModels(session!.ledger.baseFor(ack), local, incoming);
+      session!.ledger.applied(incoming);
       session!.headerLines = merged.headerLines;
       ydoc.transact(() => { prosemirrorJSONToYXmlFragment(schema, merged.pmDoc, fragment); }, EXTERNAL_ORIGIN);
       return merged.headerLines;
     },
     takeUpdate(headerLines: string[]) {
       const next = documentModel(view.state.doc.toJSON(), headerLines);
-      const base = session!.base;
+      const base = session!.ledger.base;
       if (sameModel(next, base)) return null;
-      session!.base = next;
+      const sync = session!.ledger.send(next);
       session!.headerLines = next.headerLines;
-      return { ...next, base };
+      return { ...next, base, sync };
     },
     destroy(preserveSession = false) {
       session!.selection = view.state.selection.toJSON();

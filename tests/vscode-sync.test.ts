@@ -166,3 +166,68 @@ describe('VS Code external source synchronization', () => {
     expect(text.match(/An unchanged anchor/g)).toHaveLength(1);
   });
 });
+
+describe('VS Code host: its own write-and-reparse is not a change on disk', () => {
+  const edit = (m: ReturnType<typeof model>, from: string, to: string) => JSON.parse(JSON.stringify(m).replace(from, to)) as ReturnType<typeof model>;
+
+  it('deleting the last word of a paragraph, then deleting on, keeps both deletions', async () => {
+    // "Local notes." -> delete "notes." (the space before it stays; the LaTeX cannot carry a
+    // trailing space, so the file's parse of that paragraph differs from the webview's model)
+    const base = model(initial);
+    const first = edit(base, 'Local notes.', 'Local ');
+    expect(await session.applyPmUpdate(first.pmDoc, first.headerLines, base, { epoch: 'e', seq: 1 })).toBe(false);
+    expect(doc.text).toContain('\nLocal \n');
+    const snapshot = documentModel(session.parseCurrent().pmDoc, session.parseCurrent().headerLines);
+    expect(JSON.stringify(snapshot)).not.toBe(JSON.stringify(first));   // the file dropped the space
+    // the webview deletes on from its own model: this used to count as a conflict with the disk
+    // (which wins) — the second update was dropped and "notes." came back in the editor
+    const second = edit(first, 'Local ', 'Loc');
+    expect(await session.applyPmUpdate(second.pmDoc, second.headerLines, first, { epoch: 'e', seq: 2 })).toBe(false);
+    expect(doc.text).toContain('\nLoc\n');
+    expect(fs.existsSync(path.join(root, 'recovery'))).toBe(false);   // nothing was "rebased"
+    expect(session.applied).toEqual({ epoch: 'e', seq: 2 });
+  });
+
+  it('an edit next to a macro definition (written in the writer\'s spelling) goes through', async () => {
+    const text = '\\newcommand{\\foo}{x}\n\nSome text here.\n';
+    doc.text = text;
+    fs.writeFileSync(doc.uri.fsPath, text);
+    session = new DocSession(doc as never, ctx, 'paper', 'appendix.tex', path.join(root, 'recovery'));
+    session.parseCurrent();
+    const base = model(text);
+    const first = edit(base, 'Some text here.', 'Some new text here.');
+    expect(await session.applyPmUpdate(first.pmDoc, first.headerLines, base, { epoch: 'e', seq: 1 })).toBe(false);
+    expect(doc.text).toContain('Some new text here.');
+    expect(JSON.stringify(documentModel(session.parseCurrent().pmDoc, session.parseCurrent().headerLines))).not.toBe(JSON.stringify(first));
+    const second = edit(first, 'Some new text here.', 'Some newer text here.');
+    expect(await session.applyPmUpdate(second.pmDoc, second.headerLines, first, { epoch: 'e', seq: 2 })).toBe(false);
+    expect(doc.text).toContain('Some newer text here.');
+    expect(fs.existsSync(path.join(root, 'recovery'))).toBe(false);
+  });
+
+  it('a real change on disk still wins where both sides changed the same paragraph', async () => {
+    const base = model(initial);
+    const first = edit(base, 'Local notes.', 'Local ');
+    await session.applyPmUpdate(first.pmDoc, first.headerLines, base, { epoch: 'e', seq: 1 });
+    fs.writeFileSync(doc.uri.fsPath, doc.text.replace('\nLocal \n', '\nRemote notes.\n'));
+    const second = edit(first, 'Local ', 'Loc');
+    expect(await session.applyPmUpdate(second.pmDoc, second.headerLines, first, { epoch: 'e', seq: 2 })).toBe(true);
+    expect(doc.text).toContain('Remote notes.');
+    expect(doc.text).not.toContain('\nLoc\n');
+    expect(fs.readdirSync(path.join(root, 'recovery')).length).toBeGreaterThan(0);   // the dropped edit is kept as a draft
+  });
+
+  it('a save of the document text itself (auto save) is not a change to push', async () => {
+    const base = model(initial);
+    const edited = edit(base, 'Local notes.', 'Local notes, edited.');
+    await session.applyPmUpdate(edited.pmDoc, edited.headerLines, base, { epoch: 'e', seq: 1 });
+    fs.writeFileSync(doc.uri.fsPath, doc.text);   // VS Code saved what we wrote
+    doc.isDirty = false;
+    expect(await session.syncFromDisk()).toBe(false);
+    fs.writeFileSync(doc.uri.fsPath, doc.text.replace('An unchanged anchor.', 'A changed anchor.'));   // somebody else
+    doc.isDirty = true;
+    expect(await session.syncFromDisk()).toBe(true);
+    expect(doc.text).toContain('A changed anchor.');
+    expect(doc.text).toContain('Local notes, edited.');
+  });
+});

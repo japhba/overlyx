@@ -522,7 +522,29 @@ are one definition too (`app/toolbars.tsx buildToolbars`, from a `ToolbarContext
 shell has — files, navigation history, ink, the comments panel — goes into its *slots*), as are the
 document helpers of the shells (`app/shellutil.tsx`). `tests/parity.test.ts` fails as soon as a shell
 grows a plugin list, a toolbar button or one of those helpers of its own again — that is how the
-extension once lacked autocorrect, markdown headings, image paste and the delimiter buttons.
+extension once lacked autocorrect, markdown headings, image paste and the delimiter buttons. Zoom is
+one of those helpers (`applyEditorZoom`: the `--editor-zoom` variable the editor's font size is
+computed from); the extension used to zoom with CSS `zoom` on its scroll container instead, which puts
+mouse coordinates and layout into different scales in Chromium — drags stopped following the pointer
+and selection highlights disagreed with the selection as soon as the document was zoomed.
+
+**How the extension syncs the file.** The TextDocument is authoritative. The webview sends its whole
+ProseMirror document (debounced, `update` with the `base` it changed from and a sequence number
+`sync`); the host (`host/session.ts writePmUpdate`) three-way merges it onto the file's current parse
+(`core/lyx/merge.ts`, paragraph granularity, the disk wins a conflict), writes the LaTeX, and re-parses
+it. The merge base is the *file-side form* of the webview's base — the parse of the text that model
+was read from or written to (`baseDocument`), never the webview's model itself: the LaTeX cannot
+carry a trailing space in a paragraph, a macro keeps the writer's spelling, an empty change-tracked
+paragraph vanishes, so the raw model differs from the file's parse of the same state, and each such
+spot counted as a change on disk that wins the merge — deleting the last word of a paragraph (its
+space stays), then deleting on, brought the word back. A snapshot goes back to the webview
+(`externalUpdate`) only when the file changed underneath or the merge altered the update. Every
+snapshot names the last update it reflects (`ack`), and the webview merges it against the model of
+*that* update (`shared/documentModel.ts SyncLedger`), not against a newer one still in flight: a
+snapshot the host computed before a later update arrived (its re-read after an auto save, a refresh
+on focus) used to be taken for the newer state and undid that update in the editor — text deleted a
+moment ago came back. `tests/vscode-ledger.test.ts` and `tests/vscode-sync.test.ts` cover both;
+`packages/vscode/test/probeEditing.mjs` reproduces them in the real extension.
 
 tests/            vitest: .tex parse/write stability (tex.test.ts: features + a corpus of real
                   papers and LyX's example documents), LyX round trips (import path), PM/Yjs
@@ -697,6 +719,10 @@ journalctl -u overlyx-autodeploy -n 50   # on the production server: what the la
 # errors, raw LaTeX left in the text, formula image glyphs and their placement, screenshots — for "this document
 # does not work in the extension" reports; copy the project somewhere first, never point it at /root/projects
 (cd packages/vscode && xvfb-run -a -s "-screen 0 1600x1000x24" node test/probeProject.mjs /tmp/copy-of-project main.tex /tmp/probe-out)
+# editing in the real extension: mouse drags across a formula at zoom 1 and 1.3 (the selection head must
+# follow the pointer) and bursts of deletions under auto save with ~1 s pauses (the document must never
+# grow back — report.json edits.regrew); the workspace copy is edited
+(cd packages/vscode && xvfb-run -a -s "-screen 0 1600x1000x24" node test/probeEditing.mjs /tmp/copy-of-project main.tex /tmp/probe-editing)
 # offline mode needs the built client (service worker): build into $S/dist, then
 (cd packages/client && npx vite build --outDir $S/dist)
 OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e2e/git.spec.ts   # git: a real clone / push / pull with a token

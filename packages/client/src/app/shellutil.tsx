@@ -9,6 +9,17 @@ import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { currentParagraph } from '../editor/commands';
 
+/**
+ * Zoom the document text: a CSS variable the editor's font size is computed from (styles.css
+ * `.lyx-editor`), remembered per browser. Both shells use this — never CSS `zoom` on a container,
+ * which puts mouse coordinates and the layout into different scales in Chromium (hit tests miss,
+ * drags jump, selections and their highlights disagree).
+ */
+export function applyEditorZoom(zoom: number): void {
+  document.documentElement.style.setProperty('--editor-zoom', String(zoom));
+  try { localStorage.setItem('ol.zoom', String(zoom)); } catch { /* storage unavailable */ }
+}
+
 export function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T & { cancel(): void } {
   let t: ReturnType<typeof setTimeout> | null = null;
   return Object.assign(((...a: any[]) => { if (t) clearTimeout(t); t = setTimeout(() => fn(...a), ms); }) as T, { cancel() { if (t) clearTimeout(t); } });

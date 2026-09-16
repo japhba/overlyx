@@ -22,7 +22,7 @@ import { MenuBar, openPalette, PALETTE_LABEL, PALETTE_DEFAULT, type MenuDef } fr
 import { setThemePref, useTheme } from './theme';
 import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
-import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats } from './shellutil';
+import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom } from './shellutil';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
 import { Versions } from './Versions';
@@ -349,7 +349,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     return () => window.removeEventListener('hashchange', check);
   }, []);
 
-  useEffect(() => { document.documentElement.style.setProperty('--editor-zoom', String(zoom)); localStorage.setItem('ol.zoom', String(zoom)); }, [zoom]);
+  useEffect(() => applyEditorZoom(zoom), [zoom]);
   // Ctrl/Cmd +/- zoom the document text, never the browser chrome — wherever the focus is (formula
   // fields, panels). Ctrl+0 is a paragraph style now (Part, like LyX's Alt+P 0); reset via the status bar.
   useEffect(() => {
