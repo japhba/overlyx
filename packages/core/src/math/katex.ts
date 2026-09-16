@@ -12,7 +12,7 @@
  */
 import type { Atom, Cell, Grid, Hull, MacroTable } from './ast';
 import { SYMBOLS } from './parse';
-import { approximateImageSymbols, approximateOverlapSymbols, readGroup } from '../macros';
+import { approximateImageSymbols, approximateOverlapSymbols, approximateRaisebox, replaceCommand } from '../macros';
 import katexMacrosTable from './katex-macros.json';
 
 /** LyX predefined macros KaTeX lacks, as KaTeX `macros` entries */
@@ -314,34 +314,6 @@ function macroToKatex(a: Atom & { t: 'macro' }, ctx: KatexContext, mode: 'math' 
   return `\\htmlClass{lm-macro}{${body}}`;
 }
 
-/** Replace a command with a single braced argument (\cmd{X}, optionally with [..] options) using `fn(content)`. */
-function replaceCommand(def: string, cmd: string, fn: (content: string, opts: string[]) => string, nGroups = 1): string {
-  let out = def;
-  for (let guard = 0; guard < 50; guard++) {
-    const i = out.indexOf('\\' + cmd);
-    if (i < 0) break;
-    const after = out[i + cmd.length + 1];
-    if (after && /[A-Za-z]/.test(after)) { const rest = replaceCommand(out.slice(i + 1), cmd, fn, nGroups); return out.slice(0, i + 1) + rest; }
-    let j = i + cmd.length + 1;
-    while (out[j] === ' ') j++;
-    const opts: string[] = [];
-    let groups: string[] = [];
-    for (let g = 0; g < nGroups; g++) {
-      for (;;) {
-        while (out[j] === ' ') j++;
-        if (out[j] === '[') { const e = out.indexOf(']', j); if (e < 0) break; opts.push(out.slice(j + 1, e)); j = e + 1; continue; }
-        break;
-      }
-      const grp = readGroup(out, j);
-      if (!grp) { groups = []; break; }
-      groups.push(grp[0]); j = grp[1];
-    }
-    if (!groups.length) { out = out.slice(0, i) + '\\mathrm{' + cmd + '}' + out.slice(i + cmd.length + 1); continue; }
-    out = out.slice(0, i) + fn(groups[groups.length - 1], [...opts, ...groups.slice(0, -1)]) + out.slice(j);
-  }
-  return out;
-}
-
 const unmath = (s: string) => { const t = s.trim(); const m = /^\$([\s\S]*)\$$/.exec(t); return m ? m[1] : t; };
 
 /**
@@ -353,7 +325,7 @@ export function sanitizeForKatex(def: string, name: string, args: number): strin
   d = replaceCommand(d, 'scalebox', c => `{${unmath(c)}}`, 2);
   d = replaceCommand(d, 'resizebox', c => `{${unmath(c)}}`, 3);
   d = replaceCommand(d, 'rotatebox', c => `{${unmath(c)}}`, 2);
-  d = replaceCommand(d, 'raisebox', c => `{${unmath(c)}}`, 2);
+  d = replaceCommand(d, 'raisebox', approximateRaisebox, 2);
   d = replaceCommand(d, 'vcenter', c => `{${c}}`);
   d = replaceCommand(d, 'vbox', c => `{${c}}`);
   d = replaceCommand(d, 'hbox', c => `\\text{${c}}`);

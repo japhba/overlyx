@@ -294,15 +294,15 @@ export function toMathliveMacros(macros: MacroDef[]): Record<string, { def: stri
   return out;
 }
 
-/** Replace a command with a single braced argument (\cmd{X}, optionally with [..] options) using `fn(content)`. */
-function replaceCommand(def: string, cmd: string, fn: (content: string, opts: string[]) => string, nGroups = 1): string {
-  let out = def;
-  for (let guard = 0; guard < 50; guard++) {
-    const i = out.indexOf('\\' + cmd);
+/** Rewrite each occurrence and its nested arguments once, even when `fn` retains the command. */
+export function replaceCommand(def: string, cmd: string, fn: (content: string, opts: string[]) => string, nGroups = 1): string {
+  let out = def, cursor = 0;
+  for (;;) {
+    const i = out.indexOf('\\' + cmd, cursor);
     if (i < 0) break;
     // the command name must end here (not a prefix of a longer command)
     const after = out[i + cmd.length + 1];
-    if (after && /[A-Za-z]/.test(after)) { const rest = replaceCommand(out.slice(i + 1), cmd, fn, nGroups); return out.slice(0, i + 1) + rest; }
+    if (after && /[A-Za-z]/.test(after)) { cursor = i + cmd.length + 1; continue; }
     let j = skipWs(out, i + cmd.length + 1);
     const opts: string[] = [];
     let groups: string[] = [];
@@ -318,7 +318,10 @@ function replaceCommand(def: string, cmd: string, fn: (content: string, opts: st
       groups.push(grp[0]); j = grp[1];
     }
     if (!groups.length) { out = out.slice(0, i) + '\\mathrm{' + cmd + '}' + out.slice(i + cmd.length + 1); continue; }
-    out = out.slice(0, i) + fn(groups[groups.length - 1], [...opts, ...groups.slice(0, -1)]) + out.slice(j);
+    groups = groups.map(group => replaceCommand(group, cmd, fn, nGroups));
+    const replacement = fn(groups[groups.length - 1], [...opts, ...groups.slice(0, -1)]);
+    out = out.slice(0, i) + replacement + out.slice(j);
+    cursor = i + replacement.length;
   }
   return out;
 }
@@ -328,6 +331,13 @@ function unmath(s: string): string {
   const t = s.trim();
   const m = /^\$([\s\S]*)\$$/.exec(t);
   return m ? m[1] : t;
+}
+
+/** Keep explicit baseline shifts; KaTeX's raisebox needs math inside its text box. */
+export function approximateRaisebox(content: string, args: string[]): string {
+  const lift = args[args.length - 1].trim(), body = unmath(content);
+  return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*[a-z]{2}$/.test(lift)
+    ? `\\raisebox{${lift}}{$${body}$}` : `{${body}}`;
 }
 
 /** Browser-math equivalent of the common \ooalign + fractional glyph-width overlay idiom. */
@@ -381,7 +391,7 @@ export function sanitizeForMathlive(def: string, m: { name: string; args: number
   d = replaceCommand(d, 'scalebox', c => `{${unmath(c)}}`, 2);
   d = replaceCommand(d, 'resizebox', c => `{${unmath(c)}}`, 3);
   d = replaceCommand(d, 'rotatebox', c => `{${unmath(c)}}`, 2);
-  d = replaceCommand(d, 'raisebox', c => `{${unmath(c)}}`, 2);
+  d = replaceCommand(d, 'raisebox', approximateRaisebox, 2);
   d = replaceCommand(d, 'vcenter', c => `{${c}}`);
   d = replaceCommand(d, 'vbox', c => `{${c}}`);
   d = replaceCommand(d, 'hbox', c => `\\text{${c}}`);

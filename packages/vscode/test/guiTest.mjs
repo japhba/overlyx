@@ -202,6 +202,7 @@ try {
   await until(async () => Number(await rulerHandle.getAttribute('aria-valuenow')) === widthBefore - 20, 5000, 'ruler resizing');
   await editorFrame.getByRole('button', { name: 'TeX', exact: true }).click();
   const sourceBox = editorFrame.locator('textarea.source');
+  await until(() => sourceBox.inputValue().then(s => s.includes('Inline math')), 15000, 'source text after reopening TeX mode');
   await sourceBox.fill((await sourceBox.inputValue()).replace('Inline math', 'Source edit: inline math'));
   await sourceBox.press('Control+s');
   await until(() => fs.readFileSync(path.join(ws, 'main.tex'), 'utf8').includes('Source edit: inline math'), 15000, 'saving directly from TeX mode');

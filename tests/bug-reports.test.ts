@@ -55,6 +55,28 @@ describe('GitHub bug reports', () => {
     }
   });
 
+  it('preserves image-glyph baseline shifts through both macro passes', () => {
+    const source = String.raw`\DeclareRobustCommand{\doublephi}{\mathord{\mathchoice
+      {\raisebox{-0.02756em}{\includegraphics[height=0.744em]{symbols/doublephi.pdf}}}
+      {\raisebox{-0.02756em}{\includegraphics[height=0.744em]{symbols/doublephi.pdf}}}
+      {\raisebox{-0.01929em}{\includegraphics[height=0.5208em]{symbols/doublephi.pdf}}}
+      {\raisebox{-0.01378em}{\includegraphics[height=0.372em]{symbols/doublephi.pdf}}}}}
+      \def\Pfi{\doublephi}\def\tPfi{\tilde{\Pfi}}`;
+    const transported = toMathliveMacros(macrosFromLatex(source).macros);
+    const macros: MacroTable = Object.fromEntries(Object.entries(transported).map(([name, value]) => [name, { nargs: value.args, def: value.def }]));
+    expect(sanitizeForKatex(transported.doublephi.def, 'doublephi', 0)).toBe(transported.doublephi.def);
+    const bare = katex.renderToString(String.raw`\Pfi`, { output: 'html', throwOnError: true, strict: false, trust: true, macros: katexMacros(macros) });
+    expect(bare).toContain('height:0.744em;vertical-align:-0.0276em;');
+    for (const formula of [String.raw`\Pfi`, String.raw`\tPfi`, String.raw`x_{\Pfi}`, String.raw`x^{\Pfi}`, String.raw`x_{x_{\Pfi}}`]) {
+      const html = renderStaticHtml(formula, false, macros, { project: 'paper', docDir: '' });
+      expect(html).toContain('mask-image:');
+      expect(html).not.toMatch(/katex-error|lm-error|lm-unknown|>doublephi</);
+    }
+    const raised = sanitizeForKatex(String.raw`\raisebox{0.1em}[1em][0pt]{$x$}`, 'raised', 0);
+    expect(raised).toBe(String.raw`\raisebox{0.1em}{$x$}`);
+    expect(() => katex.renderToString(raised, { throwOnError: true })).not.toThrow();
+  });
+
   it('colours SVG glyph macros without masking ordinary PDF or raster images', () => {
     const macros: MacroTable = {
       Pfi: { nargs: 0, def: String.raw`\includegraphics[height=.7em]{symbols/doublephi.svg}` },
