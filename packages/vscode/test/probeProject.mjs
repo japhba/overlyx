@@ -109,6 +109,58 @@ try {
     await page.screenshot({ path: path.join(out, '02-glyph.png'), clip });
     log('screenshot', path.join(out, '02-glyph.png'), JSON.stringify(box));
   }
+
+  // formulas whose source puts a script on one of the paper's macros: how were they rendered?
+  const SCRIPTED = /\\(quh|qvphi|qhphi|quv|bh|bphi)\s*[\^_]/;
+  const scripted = await editorFrame.evaluate((re) => {
+    const view = window.overlyx?.activeView;
+    if (!view) return { error: 'no active view' };
+    const rx = new RegExp(re);
+    const out = [];
+    view.state.doc.descendants((node, pos) => {
+      if (out.length >= 4) return false;
+      if ((node.type.name === 'math_inline' || node.type.name === 'math_display') && rx.test(node.attrs.latex)) {
+        const dom = view.nodeDOM(pos);
+        const html = dom?.innerHTML ?? '';
+        const i = html.indexOf('lm-macro');
+        out.push({ pos, latex: node.attrs.latex.slice(0, 160), hasMacroClass: i >= 0, hasUnknown: html.includes('lm-unknown'), html: i >= 0 ? html.slice(Math.max(0, i - 400), i + 700) : html.slice(0, 500) });
+      }
+      return true;
+    });
+    const m = window.overlyx?.meta;
+    const table = {};
+    for (const n of ['quh', 'qvphi', 'bu', 'bh', 'bphi']) table[n] = m?.macros?.[n] ?? null;
+    const list = (m?.macroList ?? []).filter(x => ['quh', 'qvphi', 'bu', 'bh', 'bphi'].includes(x.name));
+    return { formulas: out, macros: table, macroList: list, macroCount: Object.keys(m?.macros ?? {}).length };
+  }, SCRIPTED.source);
+  fs.writeFileSync(path.join(out, 'scripted.json'), JSON.stringify(scripted, null, 2));
+  console.log('---- scripted macros ----\n' + JSON.stringify({ ...scripted, formulas: scripted.formulas?.map(f => ({ pos: f.pos, latex: f.latex, hasMacroClass: f.hasMacroClass, hasUnknown: f.hasUnknown })) }, null, 1));
+  if (scripted.formulas?.[0]) {
+    const box = await editorFrame.evaluate((pos) => { const view = window.overlyx.activeView; const dom = view.nodeDOM(pos); dom.scrollIntoView({ block: 'center' }); const r = dom.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }, scripted.formulas[0].pos);
+    await new Promise(r => setTimeout(r, 500));
+    const box2 = await editorFrame.evaluate((pos) => { const view = window.overlyx.activeView; const r = view.nodeDOM(pos).getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }, scripted.formulas[0].pos);
+    const fr = (await editorFrame.frameElement().then(e => e.boundingBox()).catch(() => null)) ?? { x: 0, y: 0 };
+    await page.screenshot({ path: path.join(out, 'scripted-formula.png'), clip: { x: Math.max(0, fr.x + box2.x - 30), y: Math.max(0, fr.y + box2.y - 30), width: box2.w + 60, height: box2.h + 60 } });
+    console.log('scripted formula screenshot', path.join(out, 'scripted-formula.png'), JSON.stringify(box));
+  }
+  // click into the first scripted formula: the static KaTeX becomes an editable field (atom markers) — same rendering?
+  if (scripted.formulas?.[0]) {
+    const target = scripted.formulas.find(f => f.latex.length < 40) ?? scripted.formulas[0];
+    const clicked = await editorFrame.evaluate(async (pos) => {
+      const view = window.overlyx.activeView;
+      const dom = view.nodeDOM(pos);
+      dom.scrollIntoView({ block: 'center' });
+      const k = dom.querySelector('.katex') ?? dom;
+      const r = k.getBoundingClientRect();
+      const ev = (type) => new MouseEvent(type, { bubbles: true, cancelable: true, clientX: r.x + 4, clientY: r.y + r.height / 2, button: 0 });
+      k.dispatchEvent(ev('mousedown')); k.dispatchEvent(ev('mouseup')); k.dispatchEvent(ev('click'));
+      await new Promise(r2 => setTimeout(r2, 1500));
+      const html = view.nodeDOM(pos)?.innerHTML ?? '';
+      return { latex: '', field: html.includes('lm-a'), html: html.slice(html.indexOf('lm-c0') - 20, html.indexOf('lm-c0') + 900) };
+    }, target.pos);
+    fs.writeFileSync(path.join(out, 'scripted-field.json'), JSON.stringify(clicked, null, 2));
+    console.log('---- after clicking into the formula (field mode: ' + clicked.field + ') ----');
+  }
   log('report written to', path.join(out, 'report.json'));
   console.log(JSON.stringify({ ...result, head: undefined }, null, 1));
   console.log('---- rendered text (start) ----\n' + report.head);

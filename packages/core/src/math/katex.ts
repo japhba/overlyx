@@ -283,14 +283,17 @@ export function splitTrailingScripts(s: string): { base: string; up?: string; do
 
 /** The nucleus markup of a script atom around a macro, with the macro's own trailing scripts merged with the atom's (see the 'script' case). */
 function mergeScriptsIntoMacro(nuc: string, a: Atom & { t: 'script' }, ctx: KatexContext): string | null {
-  const m = /^(\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-macro\}\{)([\s\S]*)\}\}$/.exec(nuc);
+  // the nucleus cell holds the macro alone — in the editable field (ctx.atoms) inside its atom marker
+  const plain = /^(\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-macro\}\{)([\s\S]*)\}\}$/.exec(nuc);
+  const marked = plain ? null : /^(\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a\}\{\\htmlClass\{lm-macro\}\{)([\s\S]*)\}\}\}$/.exec(nuc);
+  const m = plain ?? marked;
   if (!m) return null;
   const split = splitTrailingScripts(m[2]);
   if (!split || !split.base) return null;
   const own = (s: string | undefined) => (s === undefined ? '' : `\\htmlClass{lm-macro}{${s}}`);
   const up = own(split.up) + (a.up ? cellToKatex(a.up, ctx, a, 1) : '');
   const down = own(split.down) + (a.down ? cellToKatex(a.down, ctx, a, a.up ? 2 : 1) : '');
-  let s = `${m[1]}${split.base}}}`;
+  let s = `${m[1]}${split.base}}}${marked ? '}' : ''}`;
   if (up) s += `^{${up}}`;
   if (down) s += `_{${down}}`;
   return s;

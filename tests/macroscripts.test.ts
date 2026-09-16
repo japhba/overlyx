@@ -41,6 +41,15 @@ describe('macro scripts render greedily', () => {
     const s = render('$\\M^{2}$');
     expect(s).toMatch(/\\htmlClass\{lm-macro\}\{\\mathbf\{M\}\}\}\^\{\\htmlClass\{lm-c\d+\}\{2\}\}/);
   });
+  it('merges in the editable field too, where every atom carries its lm-a marker', () => {
+    // the field renders with atom markers (renderHullSource atoms: true); the merge used to
+    // recognise only the static form, so a formula stopped being greedy the moment it was clicked
+    const field = (latex: string) => renderHullSource(parseFormula(latex, MACROS), MACROS, { atoms: true }).latex;
+    expect(field('$\\q^{x}_{y}$')).toMatch(/\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a\}\{\\htmlClass\{lm-macro\}\{q\}\}\}\^\{\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a\}\{x\}\}\}_\{\\htmlClass\{lm-macro\}\{a\}\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a\}\{y\}\}\}/);
+    expect(field('$\\qq^{2}$')).toMatch(/\{\\htmlClass\{lm-macro\}\{q\}\}\}\^\{\\htmlClass\{lm-c\d+\}\{\\htmlClass\{lm-a\}\{2\}\}\}_\{\\htmlClass\{lm-macro\}\{a\}\}/);
+    // a definition without trailing scripts: unchanged, markers and all
+    expect(field('$\\M^{2}$')).toMatch(/\\htmlClass\{lm-a\}\{\\htmlClass\{lm-macro\}\{\\mathbf\{M\}\}\}\}\^\{/);
+  });
   it('the LaTeX written back is untouched', async () => {
     const { writeFormula } = await import('../packages/core/src/math');
     expect(writeFormula(parseFormula('$\\q^{x}_{y}$', MACROS))).toBe('$\\q^{x}_{y}$');
