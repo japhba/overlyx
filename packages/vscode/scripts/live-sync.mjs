@@ -66,6 +66,9 @@ async function main() {
   }
   const cache = path.resolve(process.env.OVERLYX_LIVE_CACHE || path.join(process.env.FAST_CACHE_DIR, 'overlyx-live'));
   fs.mkdirSync(cache, { recursive: true });
+  const lockfile = path.join(repo, 'package-lock.json'), previousLockfile = fs.readFileSync(lockfile, 'utf8');
+  const statusFile = liveStatusPath(repo);
+  const retryActivation = fs.existsSync(statusFile) && JSON.parse(fs.readFileSync(statusFile, 'utf8')).activationPending;
   let candidate;
   const run = (cwd, command, args, log) => execFileSync(command, args, { cwd, timeout: 600000, stdio: ['ignore', log, log] });
   const result = await syncLiveCheckout(repo, {
@@ -93,7 +96,7 @@ async function main() {
     afterApply() {
       const log = fs.openSync(path.join(candidate, 'activation.log'), 'a');
       try {
-        run(repo, 'npm', ['ci', '--no-audit', '--no-fund'], log);
+        if (retryActivation || fs.readFileSync(lockfile, 'utf8') !== previousLockfile) run(repo, 'npm', ['ci', '--no-audit', '--no-fund'], log);
         run(repo, 'npm', ['run', 'build', '-w', 'packages/vscode'], log);
         const vsixPath = path.join(candidate, 'overlyx-live.vsix');
         run(repo, process.execPath, ['packages/vscode/scripts/package-live.mjs', vsixPath], log);
