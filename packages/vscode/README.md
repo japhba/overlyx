@@ -13,6 +13,10 @@ reproduced byte for byte until you change them.
 - **OverLyX editor** for `.tex` files (right-click a file ▸ *Reopen Editor With…* ▸ *OverLyX
   Editor*, or the editor-title button). The document stays an ordinary VS Code `TextDocument`:
   dirty state, Ctrl+S, autosave, git and extensions all see the same file.
+- **Light / dark** button in the top bar: VS Code's theme, or a light or dark editor of your own choosing.
+- **Figures reload** when their file changes on disk (a plot script ran); in the dark theme line art is shown
+  light-on-dark, photos are left alone. `$…$` and `$$` type formulas the LaTeX way; `- ` / `# ` at a
+  paragraph start make lists and headings.
 - **WYSIWYG / TeX / Split** buttons in the top bar switch views within the editor. Ctrl+S in
   TeX view applies the source and saves the file. The ruler above the page resizes the writing
   width; drag its handles or focus a handle and use the arrow keys.
@@ -65,6 +69,10 @@ newer versions (`overlyx.updates`: `prompt` / `auto` / `off`); *OverLyX: Check f
 a check on demand. Updates install with the built-in VSIX installer and take effect after a
 reload.
 
+Extension-affecting pushes to `master` automatically build, test, and publish a
+GitHub release. Website deployment is independent. See [RELEASING.md](RELEASING.md)
+for versioning, source provenance, and manual workflow runs.
+
 ## Error diagnostics and privacy
 
 When VS Code telemetry is enabled, OverLyX sends errors from the extension host and its webviews
@@ -90,5 +98,24 @@ npm run build -w packages/vscode
 npm run package -w packages/vscode   # → overlyx-vscode-<version>.vsix
 ```
 
-Development: `node esbuild.mjs --watch` for the host, `npx vite build --watch --config
-webview.vite.config.ts` for the webview, then F5 (Extension Development Host) in VS Code.
+## Live development
+
+Clone this repository on the computer where VS Code runs, open the repository root, run
+`npm ci`, and press **F5**. The checked-in launch configuration builds the extension and opens
+a second VS Code window (the Extension Development Host) with the development copy loaded.
+Set breakpoints in the first window and exercise the extension in the second.
+
+For rapid UI work, run **Tasks: Run Task → OverLyX: watch extension**. It continuously rebuilds
+the extension host and webview bundles. After a rebuild, run **Developer: Reload Window** in the
+Extension Development Host to load it. Changes to command/menu declarations in `package.json`
+also require this reload. Stop the watch task when finished.
+
+The website and extension live in the same repository and share `packages/core` and much of
+`packages/client`. Use a branch for each piece of work, push it to GitHub, and merge through
+`master`; the server and any other workstation then fetch the same commits. Before starting new
+work on either machine, fetch and update from `origin/master`. Avoid editing the same branch on
+two machines at once; use separate branches and merge or rebase them through Git.
+
+Pushing extension-affecting changes to `master` automatically runs the extension checks and
+publishes a new VSIX release. A local F5 session always uses your current working tree, so you do
+not need to publish while iterating.

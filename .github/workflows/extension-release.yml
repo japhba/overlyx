@@ -1,0 +1,106 @@
+name: Release extension
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'packages/vscode/**'
+      - 'packages/core/**'
+      - 'packages/client/**'
+      - 'packages/build-version.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'lyx'
+      - '.gitmodules'
+      - 'tests/**'
+      - 'vitest.config.ts'
+      - 'tsconfig*.json'
+      - '.github/workflows/extension-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: extension-build-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install VS Code and PDF test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libasound2t64 latexmk texlive-latex-recommended texlive-fonts-recommended texlive-latex-extra
+      - name: Assign release version and source
+        env:
+          RELEASE_VERSION: 0.3.${{ github.run_number }}
+        run: |
+          npm version "$RELEASE_VERSION" --workspace packages/vscode --no-git-tag-version
+          node --input-type=module -e 'import fs from "node:fs"; fs.writeFileSync("packages/vscode/release.json", JSON.stringify({version: process.env.RELEASE_VERSION, commit: process.env.GITHUB_SHA}, null, 2) + "\n")'
+      - name: Build extension and bundled assets
+        env:
+          LYX_LIB_DIR: ${{ github.workspace }}/lyx/lib
+        run: npm run build --workspace packages/vscode
+      - name: Check editor, document pipeline, and updater
+        env:
+          LYX_LAYOUT_DIR: ${{ github.workspace }}/lyx/lib/layouts
+        run: npx vitest run tests/vscode-host.test.ts tests/vscode-update.test.ts tests/math.test.ts tests/mathcursor.test.ts
+      - name: Check in VS Code
+        run: npm run test:integration --workspace packages/vscode
+      - name: Package
+        run: npm run package --workspace packages/vscode
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension
+          path: packages/vscode/*.vsix
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    # Let an upload finish; only superseded builds are cancelled.
+    concurrency:
+      group: extension-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: extension
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: 0.3.${{ github.run_number }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # A slower older run must never replace a newer latest release.
+          latest=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)
+          if [ "$(printf '%s\n' "$latest" "v$RELEASE_VERSION" | sort -V | tail -1)" != "v$RELEASE_VERSION" ]; then
+            echo "A newer release already exists; skipping."
+            exit 0
+          fi
+          cp "overlyx-vscode-$RELEASE_VERSION.vsix" overlyx-vscode.vsix
+          if ! gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
+            gh release create "v$RELEASE_VERSION" --draft --target "$RELEASE_SHA" --title "OverLyX for VS Code $RELEASE_VERSION" --notes "Automatic extension release from commit $RELEASE_SHA."
+          fi
+          if [ "$(gh release view "v$RELEASE_VERSION" --json isDraft --jq .isDraft)" = false ]; then
+            echo "Release already published."
+            exit 0
+          fi
+          gh release upload "v$RELEASE_VERSION" "overlyx-vscode-$RELEASE_VERSION.vsix" overlyx-vscode.vsix --clobber
+          gh release edit "v$RELEASE_VERSION" --draft=false --latest

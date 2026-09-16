@@ -1,0 +1,38 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "OverLyX: install dependencies",
+      "type": "shell",
+      "command": "npm ci",
+      "problemMatcher": []
+    },
+    {
+      "label": "OverLyX: build extension",
+      "type": "shell",
+      "command": "npm run build --workspace packages/vscode",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "OverLyX: watch extension",
+      "type": "shell",
+      "command": "npm run dev --workspace packages/vscode",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "OverLyX: focused tests",
+      "type": "shell",
+      "command": "npx vitest run tests/vscode-host.test.ts tests/vscode-update.test.ts tests/math.test.ts tests/mathcursor.test.ts",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -20,6 +20,8 @@ const layoutDir = fs.existsSync(bundledLayouts) ? bundledLayouts : '/root/lyx/li
 
 const MAIN = `\\documentclass{article}
 \\newcommand{\\RR}{\\mathbb{R}}
+\\newcommand{\\XX}{\\mathbb X}
+\\input{macros}
 \\usepackage{graphicx}
 \\begin{document}
 
@@ -47,6 +49,7 @@ beforeAll(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-vscode-test-'));
   fs.writeFileSync(path.join(root, 'main.tex'), MAIN);
   fs.writeFileSync(path.join(root, 'chapter.tex'), CHILD);
+  fs.writeFileSync(path.join(root, 'macros.tex'), '\\newcommand{\\doubleX}{\\mathrm{X}}\n\\global\\long\\def\\XX{\\doubleX}\n');
   fs.writeFileSync(path.join(root, 'refs.bib'), '@article{knuth84, author={Donald E. Knuth}, title={Literate Programming}, year={1984}, journal={The Computer Journal}}\n');
   // a second paper in its own subdirectory, with a child one level deeper — for projectDirFor
   fs.mkdirSync(path.join(root, 'paper2', 'sections'), { recursive: true });
@@ -115,6 +118,7 @@ describe('vscode host document pipeline', () => {
     expect(meta.layouts, 'layouts must load from the bundled LyX lib').toBeTruthy();
     expect((meta.layouts as any[]).some(l => l.name === 'Section')).toBe(true);
     expect(Object.keys(meta.macros)).toContain('RR');
+    expect(meta.macros.XX.def).toBe('\\doubleX');
     expect((meta.labels as any[]).some(l => l.name === 'eq:main')).toBe(true);
     expect((meta.bib as any[]).some(b => b.key === 'knuth84')).toBe(true);   // .bib of the project (none referenced)
     expect(meta.health).toEqual([]);

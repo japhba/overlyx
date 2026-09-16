@@ -24,13 +24,15 @@ function fileKind(name: string): FileKind {
 export function isBackupFile(name: string): boolean { return name.endsWith('~') || name.endsWith('.bak'); }
 
 /** What a .tex file contains, cached by mtime + size. */
-const texInfoCache = new Map<string, { key: string; hasDocument: boolean; includes: string[] }>();
-export function texInfo(abs: string, st: fs.Stats): { hasDocument: boolean; includes: string[] } {
+const texInfoCache = new Map<string, { key: string; hasDocument: boolean; includes: string[]; bodyIncludes: string[] }>();
+/** `includes`: every \input / \include; `bodyIncludes`: those after \begin{document} — the child documents (a preamble \input{macros} is a macro file, not a child) */
+export function texInfo(abs: string, st: fs.Stats): { hasDocument: boolean; includes: string[]; bodyIncludes: string[] } {
   const key = `${st.mtimeMs}:${st.size}`;
   const hit = texInfoCache.get(abs);
   if (hit && hit.key === key) return hit;
   let hasDocument = false;
   const includes: string[] = [];
+  const bodyIncludes: string[] = [];
   if (st.size < 16 * 1024 * 1024) {
     let text = '';
     try { text = fs.readFileSync(abs, 'utf8'); } catch { /* ignore */ }
@@ -45,10 +47,14 @@ export function texInfo(abs: string, st: fs.Stats): { hasDocument: boolean; incl
       }
       return out;
     }).join('\n');
-    hasDocument = code.includes('\\begin{document}');
-    for (const m of code.matchAll(/\\(?:input|include)\s*\{([^}]+)\}/g)) includes.push(m[1].trim());
+    const docStart = code.indexOf('\\begin{document}');
+    hasDocument = docStart >= 0;
+    for (const m of code.matchAll(/\\(?:input|include)\s*\{([^}]+)\}/g)) {
+      includes.push(m[1].trim());
+      if (docStart < 0 || (m.index ?? 0) > docStart) bodyIncludes.push(m[1].trim());
+    }
   }
-  const info = { key, hasDocument, includes };
+  const info = { key, hasDocument, includes, bodyIncludes };
   if (texInfoCache.size > 500) texInfoCache.clear();
   texInfoCache.set(abs, info);
   return info;
@@ -150,7 +156,7 @@ export function childDocuments(root: string, relPath: string, depth = 0, out: st
   const abs = path.join(root, relPath);
   let st: fs.Stats;
   try { st = fs.statSync(abs); } catch { return out; }
-  for (const inc of texInfo(abs, st).includes) {
+  for (const inc of texInfo(abs, st).bodyIncludes) {
     const rel = path.normalize(path.join(path.dirname(relPath), inc.endsWith('.tex') ? inc : inc + '.tex'));
     if (out.includes(rel) || rel === relPath || !fs.existsSync(path.join(root, rel))) continue;
     out.push(rel);

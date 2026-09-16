@@ -223,16 +223,18 @@ export interface MacroResolver {
   readFile?: (filename: string) => string | undefined;
 }
 
+export interface CollectMacrosOptions {
+  /** Child documents inherit the master's parsed header; do not collect that inherited preamble twice. */
+  includePreamble?: boolean;
+}
+
 /**
  * Collect all macros visible in a document: preamble (+ \input files, recursively),
  * FormulaMacro insets in the body, and included child documents (in document order).
  * Later definitions override earlier ones (like LaTeX).
  */
-export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, seen = new Set<string>()): MacroDef[] {
+export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, options: CollectMacrosOptions = {}, seen = new Set<string>()): MacroDef[] {
   const out: MacroDef[] = [];
-  // preamble
-  const pre = macrosFromLatex(getPreamble(doc), 'preamble');
-  out.push(...pre.macros);
   const visitFile = (name: string) => {
     const candidates = name.endsWith('.tex') ? [name] : [name + '.tex', name];
     for (const c of candidates) {
@@ -246,7 +248,11 @@ export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, se
       return;
     }
   };
-  for (const inp of pre.inputs) visitFile(inp);
+  if (options.includePreamble !== false) {
+    const pre = macrosFromLatex(getPreamble(doc), 'preamble');
+    out.push(...pre.macros);
+    for (const inp of pre.inputs) visitFile(inp);
+  }
   // body
   for (const { inset } of walkInsets(doc.body)) {
     if (inset.type === 'FormulaMacro') {
@@ -260,7 +266,9 @@ export function collectMacros(doc: LyxDocument, resolver: MacroResolver = {}, se
         // a child document (.lyx or .tex) is read as a document: its macros keep their positions
         // (also the ones inside notes, which LyX evaluates); other files are scanned as text
         const child = fn.endsWith('.lyx') || fn.endsWith('.tex') || !fn.includes('.') ? resolver.include?.(fn) : undefined;
-        if (child) out.push(...collectMacros(child, resolver, seen));
+        // Fragment parsers attach the master's header to children for layout resolution. Its
+        // preamble has already been collected above and must not override later macro-file defs.
+        if (child) out.push(...collectMacros(child, resolver, { includePreamble: false }, seen));
         else if (!fn.endsWith('.lyx')) visitFile(fn);
       }
     }
@@ -322,6 +330,16 @@ function unmath(s: string): string {
   return m ? m[1] : t;
 }
 
+/** Browser-math equivalent of the common \ooalign + fractional glyph-width overlay idiom. */
+export function approximateOverlapSymbols(offset: string, args: string[]): string {
+  const left = args[0] ?? '', right = args[1] ?? '';
+  const widths: Record<string, number> = { '\\Phi': 0.764, '\\mathrm{H}': 0.75, '\\mathrm{G}': 0.786, '\\mathrm{X}': 0.75, '\\mathrm{Y}': 0.75, '\\Delta': 0.833 };
+  const fraction = Number.parseFloat(offset.trim());
+  const shift = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0.5;
+  const overlap = Number(((1 - shift) * (widths[left.replace(/\s/g, '')] ?? 0.75)).toFixed(4));
+  return `\\mathord{${left}\\kern-${overlap}em${right}}`;
+}
+
 /**
  * MathLive cannot render some TeX internals / text-mode constructs used in macro definitions.
  * Rewrite the common ones into a visual approximation, and fall back to the macro name
@@ -341,6 +359,8 @@ export function sanitizeForMathlive(def: string, m: { name: string; args: number
   d = replaceCommand(d, 'textnormal', c => `\\text{${c}}`);
   d = replaceCommand(d, 'accentset', (c, o) => `\\overset{${o[0] ?? ''}}{${c}}`, 2);
   d = replaceCommand(d, 'mathchoice', (c, o) => `{${o[0] ?? c}}`, 4);
+  // Approximate the paper's \\sbox/\\ooalign double-glyph helper with a supported inline overlay.
+  d = replaceCommand(d, 'OverlapSymbols', approximateOverlapSymbols, 3);
   // KaTeX supports \includegraphics. Treat \includesvg the same way; the client sends both
   // through the project's graphics endpoint, which converts PDF/SVG to a browser image.
   d = d.replace(/\\includesvg\b/g, '\\includegraphics');
