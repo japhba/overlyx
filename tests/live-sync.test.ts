@@ -66,3 +66,14 @@ it('rechecks for edits made during validation before publishing the candidate', 
   expect(result.status).toBe('blocked'); expect(git(local, 'rev-parse', 'HEAD')).toBe(head);
   expect(fs.readFileSync(path.join(local, 'document.txt'), 'utf8')).toBe('Written during build\n');
 });
+
+it('retries activation failures instead of later claiming an unbuilt update is current', async () => {
+  commit(remote, 'upstream.txt', 'New feature\n');
+  await expect(syncLiveCheckout(local, { validate() {}, afterApply() { throw new Error('Dependency install interrupted'); } })).rejects.toThrow('Dependency install interrupted');
+  const integrated = git(local, 'rev-parse', 'HEAD');
+  expect(JSON.parse(fs.readFileSync(liveStatusPath(local), 'utf8')).activationPending).toBe(true);
+  let activated = false;
+  const result = await syncLiveCheckout(local, { validate(candidate: string) { expect(candidate).toBe(integrated); }, afterApply() { activated = true; } });
+  expect(activated).toBe(true); expect(result.status).toBe('updated'); expect(result.activationPending).toBe(false);
+  expect(git(local, 'rev-parse', 'HEAD')).toBe(integrated);
+});

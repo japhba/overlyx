@@ -12,27 +12,32 @@ export async function syncLiveCheckout(repo, { validate, beforeApply = () => {},
   const statusPath = liveStatusPath(repo);
   const previous = fs.existsSync(statusPath) ? JSON.parse(fs.readFileSync(statusPath, 'utf8')) : {};
   let artifact = { vsixPath: previous.vsixPath, artifactHead: previous.artifactHead };
-  let head, upstream;
+  let head, upstream, activationPending = false;
   const report = (status, reason) => {
-    const result = { status, reason, head, upstream, ...artifact, checkedAt: new Date().toISOString() };
+    const result = { status, reason, head, upstream, ...artifact, activationPending, checkedAt: new Date().toISOString() };
     fs.writeFileSync(statusPath + '.tmp', JSON.stringify(result, null, 2) + '\n');
     fs.renameSync(statusPath + '.tmp', statusPath);
     return result;
   };
   try {
     head = git(repo, 'rev-parse', 'HEAD');
+    activationPending = previous.head === head && previous.activationPending === true;
     git(repo, 'fetch', 'origin', 'master');
     upstream = git(repo, 'rev-parse', 'origin/master');
-    if (git(repo, 'rev-list', '--count', 'HEAD..origin/master') === '0') return report('up-to-date', 'This checkout contains all upstream commits.');
+    const current = git(repo, 'rev-list', '--count', 'HEAD..origin/master') === '0';
+    if (current && !activationPending) return report('up-to-date', 'This checkout contains all upstream commits.');
     if (!clean(repo)) return report('blocked', 'Uncommitted source edits prevent an automatic update. Commit or resolve them, then check again.');
     report('checking', 'Validating the upstream update in a separate checkout.');
-    let tree;
-    try { tree = git(repo, 'merge-tree', '--write-tree', head, upstream).split('\n')[0]; }
-    catch (error) {
-      if (error.status === 1) return report('blocked', 'Upstream conflicts with local commits. The live checkout has been left unchanged.');
-      throw error;
+    let commit = head;
+    if (!current) {
+      let tree;
+      try { tree = git(repo, 'merge-tree', '--write-tree', head, upstream).split('\n')[0]; }
+      catch (error) {
+        if (error.status === 1) return report('blocked', 'Upstream conflicts with local commits. The live checkout has been left unchanged.');
+        throw error;
+      }
+      commit = git(repo, 'commit-tree', tree, '-p', head, '-p', upstream, '-m', `Update OverLyX Live from origin/master (${upstream.slice(0, 12)})`);
     }
-    const commit = git(repo, 'commit-tree', tree, '-p', head, '-p', upstream, '-m', `Update OverLyX Live from origin/master (${upstream.slice(0, 12)})`);
     await validate(commit);
     // The author can keep working while the candidate builds.
     if (git(repo, 'rev-parse', 'HEAD') !== head || !clean(repo)) return report('blocked', 'Source files changed during validation. The update was not applied; the next check will retry.');
@@ -40,7 +45,10 @@ export async function syncLiveCheckout(repo, { validate, beforeApply = () => {},
     try {
       git(repo, 'merge', '--ff-only', commit);
       head = commit;
+      activationPending = true;
+      report('checking', 'Source integrated; preparing the live build and extension manifest.');
     } finally { artifact = await afterApply() ?? artifact; }
+    activationPending = false;
     return report('updated', 'Upstream is integrated and rebuilt. Reload the VS Code window to load the extension host changes.');
   } catch (error) {
     report('error', String(error));
