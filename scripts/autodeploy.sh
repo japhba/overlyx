@@ -52,16 +52,23 @@ if ! git -C "$PROD" merge-base --is-ancestor "$current" "$target"; then
 fi
 status "$target" pending "checks are running on the production server"
 
-WT=/tmp/overlyx-autodeploy/$target
-cleanup() { git -C "$PROD" worktree remove --force "$WT" >/dev/null 2>&1 || rm -rf "$WT"; }
+# The worktree lives next to the production checkout (same filesystem): its node_modules are
+# hardlink copies of production's (`cp -al`, seconds, no extra disk) — symlinks would make Node
+# resolve the same package under two paths and load prosemirror twice, which breaks the tests.
+WT=${OVERLYX_AUTODEPLOY_WORK:-$(dirname "$PROD")/.overlyx-autodeploy}/$target
+cleanup() { git -C "$PROD" worktree remove --force "$WT" >/dev/null 2>&1 || rm -rf "$WT"; git -C "$PROD" worktree prune; }
 cleanup; mkdir -p "$(dirname "$WT")"
 git -C "$PROD" worktree add --detach --quiet "$WT" "$target"
 trap cleanup EXIT
 lockfile_changed=0
 git -C "$PROD" diff --quiet "$current" "$target" -- package-lock.json || lockfile_changed=1
 if [ "$lockfile_changed" = 0 ]; then
-  ln -s "$PROD/node_modules" "$WT/node_modules"
-  for d in "$PROD"/packages/*/node_modules; do [ -d "$d" ] && ln -s "$d" "$WT/packages/$(basename "$(dirname "$d")")/node_modules"; done
+  cp -al "$PROD/node_modules" "$WT/node_modules" 2>/dev/null || cp -a "$PROD/node_modules" "$WT/node_modules"
+  for d in "$PROD"/packages/*/node_modules; do
+    [ -d "$d" ] || continue
+    dest="$WT/packages/$(basename "$(dirname "$d")")/node_modules"
+    cp -al "$d" "$dest" 2>/dev/null || cp -a "$d" "$dest"
+  done
 else
   log "lockfile changed: npm ci in the worktree"
   (cd "$WT" && npm ci --no-audit --no-fund > "$STATE/$target-npm-ci.log" 2>&1) || { status "$target" failure "npm ci failed"; touch "$STATE/failed-$target"; tail -20 "$STATE/$target-npm-ci.log"; exit 1; }

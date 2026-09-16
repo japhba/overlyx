@@ -590,7 +590,8 @@ script deploys, it does not test. Pushes from any other machine deploy themselve
 fetches origin and, when origin/master is ahead of production, typechecks the client and the
 extension and runs `npm test` in a throwaway worktree, then fast-forwards, builds, restarts and
 verifies — reporting a `deploy/overlyx.app` commit status on GitHub (pending → success / failure;
-`gh api repos/japhba/overlyx/commits/<sha>/status`). A failed commit is not retried; the next push is.
+`gh api repos/japhba/overlyx/commits/<sha>/status --jq '.statuses[] | "\(.state) \(.description)"'`, or
+`curl -s https://overlyx.app/api/version` once it is live). A failed commit is not retried; the next push is.
 Both scripts share one lock. Install the units with `cp deploy/overlyx-autodeploy.* /etc/systemd/system/
 && systemctl daemon-reload && systemctl enable --now overlyx-autodeploy.timer`; logs in
 `journalctl -u overlyx-autodeploy`.
