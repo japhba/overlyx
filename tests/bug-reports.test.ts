@@ -33,7 +33,7 @@ describe('GitHub bug reports', () => {
       const html = renderStaticHtml(formula, false, macros, { project: 'paper', docDir: 'chapters' });
       // The image height is relative to its current font in all three math sizes.
       expect(html).toMatch(/<img[^>]*style="height:0\.696em;/);
-      expect(html).toContain('mask-image:url(&quot;/api/projects/paper/graphics/chapters/doublephi.svg?w=400&quot;)');
+      expect(decodeURIComponent(html)).toContain('mask-image:url(&quot;/api/projects/paper/graphics/chapters/doublephi.svg?w=400&quot;)');
       expect(html).not.toMatch(/katex-error|lm-error/);
     }
   });

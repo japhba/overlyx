@@ -6,8 +6,11 @@ import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { paramMap, unquote } from '@overlyx/core';
 import { graphicsUrl } from '../../api';
+import { getPrefs, subscribePrefs } from '../../prefs';
+import { subscribeProjectEvents, sameGraphicsFile } from '../../projectevents';
 import { editorContext, resolveDocPath, viewDocDir, viewProject } from '../context';
 import { applyChangeAttrs } from '../plugins/changes';
+import { classifyImage, type FigureKind } from '../figureinvert';
 
 function params(node: PMNode): Map<string, string> {
   try { return paramMap(JSON.parse(node.attrs.params || '[]')); } catch { return new Map(); }
@@ -17,6 +20,12 @@ export class GraphicsView implements NodeView {
   dom: HTMLElement;
   img: HTMLImageElement;
   caption: HTMLElement;
+  /** mtime of the file as last reported by the server (the image URL carries it, so a rewritten file reloads) */
+  private version = 0;
+  private unsubscribeEvents: (() => void) | null = null;
+  private unsubscribePrefs: (() => void) | null = null;
+  /** what the loaded pixels look like (see figureinvert.ts); null until loaded / unreadable */
+  private kind: FigureKind | null = null;
 
   constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('span');
@@ -24,11 +33,36 @@ export class GraphicsView implements NodeView {
     this.dom.contentEditable = 'false';
     this.img = document.createElement('img');
     this.img.draggable = false;
+    // the pixels are read back for the dark-theme classification: ask for CORS so a canvas copy is
+    // allowed when the images come from another origin (the VS Code extension's local bridge)
+    this.img.crossOrigin = 'anonymous';
+    this.img.addEventListener('load', () => { this.kind = classifyImage(this.img); this.applyInvert(); });
     this.caption = document.createElement('span');
     this.caption.className = 'graphics-caption';
     this.dom.append(this.img, this.caption);
     this.render();
     this.dom.addEventListener('dblclick', (ev) => { ev.preventDefault(); editorContext.openInsetDialog?.(this.view, this.getPos()); });
+    this.watchFile();
+    this.unsubscribePrefs = subscribePrefs(() => this.applyInvert());
+  }
+
+  /** the file was rewritten on disk (the server watches the project): reload it */
+  private watchFile() {
+    const project = viewProject(this.view) || editorContext.project;
+    if (!project) return;
+    this.unsubscribeEvents = subscribeProjectEvents(project, ev => {
+      if (ev.kind !== 'graphics') return;
+      const file = params(this.node).get('filename') ?? '';
+      if (!file || !sameGraphicsFile(ev.path, resolveDocPath(file, viewDocDir(this.view)))) return;
+      if (ev.v === this.version) return;
+      this.version = ev.v;
+      this.render();
+    });
+  }
+
+  /** dark theme: line art is shown light-on-dark (a CSS filter; photos keep their colours) */
+  private applyInvert() {
+    this.dom.classList.toggle('smart-invert', this.kind === 'lineart' && getPrefs().invertFigures);
   }
 
   private render() {
@@ -41,7 +75,7 @@ export class GraphicsView implements NodeView {
     this.img.alt = file;
     this.img.title = `${file}\nwidth: ${width ?? 'auto'}${scale ? `, scale ${scale}%` : ''} — double-click to edit, right-click to export as PNG`;
     if (project && file) {
-      const url = graphicsUrl(project, resolveDocPath(file, viewDocDir(this.view)), 1600);
+      const url = graphicsUrl(project, resolveDocPath(file, viewDocDir(this.view)), 1600) + (this.version ? `&v=${this.version}` : '');
       if (this.img.dataset.src !== url) { this.img.dataset.src = url; this.img.src = url; }
       this.img.style.display = '';
       this.caption.textContent = '';
@@ -81,6 +115,10 @@ export class GraphicsView implements NodeView {
   selectNode() { this.dom.classList.add('ProseMirror-selectednode'); }
   deselectNode() { this.dom.classList.remove('ProseMirror-selectednode'); }
   ignoreMutation() { return true; }
+  destroy() {
+    this.unsubscribeEvents?.(); this.unsubscribeEvents = null;
+    this.unsubscribePrefs?.(); this.unsubscribePrefs = null;
+  }
 }
 
 const REF_LABEL: Record<string, string> = { ref: 'Ref', eqref: 'EqRef', pageref: 'Page', vref: 'vRef', vpageref: 'vPage', prettyref: 'Formatted', formatted: 'Formatted', nameref: 'Name', labelonly: 'Label' };

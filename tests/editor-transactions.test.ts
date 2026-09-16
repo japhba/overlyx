@@ -6,14 +6,15 @@ import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { ySyncPlugin, yCursorPlugin, prosemirrorJSONToYXmlFragment, initProseMirrorDoc } from 'y-prosemirror';
 import { schema } from '@overlyx/core';
-import { editorTransactions } from '../packages/client/src/editor/transactions';
+import { dispatchTransactionProp } from '../packages/client/src/editor/assembly';
 
 it('keeps the document when a queued awareness update outlives a replaced editor view', async () => {
   const ydoc = new Y.Doc(), awareness = new Awareness(ydoc), fragment = ydoc.getXmlFragment('prosemirror');
   prosemirrorJSONToYXmlFragment(schema, { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Unsaved draft' }] }] }, fragment);
   const mount = () => {
     const { doc, mapping } = initProseMirrorDoc(fragment, schema);
-    return new EditorView(document.createElement('div'), { state: EditorState.create({ doc, plugins: [ySyncPlugin(fragment, { mapping }), yCursorPlugin(awareness)] }), dispatchTransaction: editorTransactions(() => false) });
+    const view: EditorView = new EditorView(document.createElement('div'), { state: EditorState.create({ doc, plugins: [ySyncPlugin(fragment, { mapping }), yCursorPlugin(awareness)] }), dispatchTransaction: dispatchTransactionProp(() => view, () => false) });
+    return view;
   };
   const first = mount();
   awareness.setLocalStateField('user', { name: 'Author', color: '#123456' });

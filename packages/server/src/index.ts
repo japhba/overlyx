@@ -1,22 +1,28 @@
 import express from 'express';
+import { describeModules } from '@overlyx/core/latex/layouts.ts';
+import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from './config.ts';
+import { setSecurityHeaders } from './security.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
 import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, allow as aiAllow, AiError } from './ai.ts';
 import { mcpRouter } from './mcp.ts';
 import { agentRoutes, disconnectAgents } from './agent.ts';
 import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
-import { createMcpToken, listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
+import { listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
+import { cliDownloadRoutes } from './cliDownload.ts';
 import { userSettings, setUserSettings, userKeys, setUserKeys } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
-import { manager, projectChangedListeners } from './docs.ts';
+import { manager, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
 import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile, isDocumentFile } from './projects.ts';
 import { cachedParseFile, importLyxFile, parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
+import { extractZip } from './zip.ts';
+import { overleafProjectId, cloneOverleafProject } from './overleaf.ts';
 import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit } from './export.ts';
 import { db } from './db.ts';
@@ -24,7 +30,7 @@ import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerPr
 import { sandboxAvailable } from './sandbox.ts';
 import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests } from './access.ts';
 import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
-import { feedbackRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
+import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, feedbackEnabled } from './feedback.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
@@ -35,14 +41,13 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(authMiddleware);
 app.use((_req, res, next) => {
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('Referrer-Policy', 'same-origin');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  // Only our own scripts run in the app; project files are user content and are served as
-  // downloads (see /file/*), so a stray script in a project can never run as us.
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-src 'self' blob:; worker-src 'self' blob:; object-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'");
+  setSecurityHeaders(res);
   next();
 });
+app.use(cliDownloadRoutes());
+// The desktop extension has no OverLyX account/session. Its narrow, rate-limited error endpoint
+// therefore lives outside the authenticated API; all ordinary feedback remains authenticated.
+app.use('/api', vscodeTelemetryRoutes());
 
 // a guest who signs in: their open editors hold the guest's identity — reconnect them as the account
 app.use('/api/auth', authRouter({ onGuestAdopted: (projects, guestId) => { for (const p of projects) manager.kick(p, [guestId], 'signed in'); } }));
@@ -158,22 +163,76 @@ api.post('/projects', (req, res) => {
 });
 
 /**
- * Server-sent events: "the project's file list changed on disk" (another user, the agent, a git
- * push, a LaTeX build — see projectChangedListeners). The file browser subscribes and reloads
- * itself, so it needs no refresh button.
+ * Import projects from Overleaf (start page ▸ Import from Overleaf). Git: each selected project
+ * is cloned from git.overleaf.com with the user's Overleaf Git token (never stored) into a new
+ * project; results come back per project. Zip: an archive downloaded from Overleaf (or anywhere)
+ * becomes a project.
+ */
+api.post('/import/overleaf', async (req, res) => {
+  const token = String(req.body?.token ?? '').trim();
+  const items: { id?: unknown; name?: unknown }[] = Array.isArray(req.body?.projects) ? req.body.projects : [];
+  if (!token) { res.status(400).json({ error: 'the Overleaf Git token is missing' }); return; }
+  if (!items.length || items.length > 25) { res.status(400).json({ error: 'select between 1 and 25 projects' }); return; }
+  const results: { id: string; name: string; ok: boolean; error?: string }[] = [];
+  for (const it of items) {
+    const ref = String(it.id ?? ''), name = String(it.name ?? '').trim();
+    const id = overleafProjectId(ref);
+    if (!id) { results.push({ id: ref, name, ok: false, error: 'not an Overleaf project link or id' }); continue; }
+    if (!/^[A-Za-z0-9._ -]+$/.test(name)) { results.push({ id, name, ok: false, error: 'invalid project name (letters, digits, space, . _ -)' }); continue; }
+    if (fs.existsSync(projectDir(name))) { results.push({ id, name, ok: false, error: 'a project with this name exists already' }); continue; }
+    try {
+      await cloneOverleafProject(id, token, projectDir(name));
+      registerProject(name, req.user!.id);
+      await ensureRepo(name).catch(e => console.error('[git] repo setup after Overleaf clone failed:', e));
+      touchProject(name, req.user!.id);
+      results.push({ id, name, ok: true });
+      console.log(`[import] ${req.user!.username} imported Overleaf project ${id} as “${name}”`);
+    } catch (e) { results.push({ id, name, ok: false, error: (e as Error).message }); }
+  }
+  res.json({ results });
+});
+api.post('/import/zip', express.raw({ type: '*/*', limit: '300mb' }), (req, res) => {
+  const name = String(req.query.name ?? '').trim();
+  if (!/^[A-Za-z0-9._ -]+$/.test(name)) { res.status(400).json({ error: 'invalid project name (letters, digits, space, . _ -)' }); return; }
+  if (fs.existsSync(projectDir(name))) { res.status(409).json({ error: 'a project with this name exists already' }); return; }
+  if (!Buffer.isBuffer(req.body) || !req.body.length) { res.status(400).json({ error: 'no archive received' }); return; }
+  const dir = projectDir(name);
+  try {
+    const { files, skipped } = extractZip(req.body, dir);
+    if (!files.length) { fs.rmSync(dir, { recursive: true, force: true }); res.status(400).json({ error: 'the archive contains no files' }); return; }
+    registerProject(name, req.user!.id);
+    ensureRepo(name).catch(e => console.error('[git] init failed:', e));
+    touchProject(name, req.user!.id);
+    res.json({ ok: true, name, files: files.length, skipped });
+  } catch (e) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* nothing */ }
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+/**
+ * Server-sent events: `{"kind":"files"}` — the project's file list changed on disk (another user,
+ * the agent, a git push, a LaTeX build — see projectChangedListeners; the file browser reloads
+ * itself, so it needs no refresh button) — and `{"kind":"graphics","path":…,"v":mtime}` — a
+ * graphics file was written (a plot script ran, an upload landed; the editors reload the image).
  */
 api.get('/projects/:project/events', needProject('view'), (req, res) => {
   const project = String(req.params.project);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write(': connected\n\n');
   const hb = setInterval(() => res.write(': hb\n\n'), 20000);
-  const cleanup = () => { clearInterval(hb); projectChangedListeners.delete(listener); };
+  const cleanup = () => { clearInterval(hb); projectChangedListeners.delete(listener); graphicsChangedListeners.delete(graphics); };
+  const allowed = () => { if (roleFor(req.user!, project)) return true; cleanup(); res.end(); return false; };   // access revoked since the connect
   const listener = (p: string) => {
-    if (p !== project) return;
-    if (!roleFor(req.user!, project)) { cleanup(); res.end(); return; }   // access revoked since the connect
+    if (p !== project || !allowed()) return;
     res.write('data: {"kind":"files"}\n\n');
   };
+  const graphics = (p: string, file: string, v: number) => {
+    if (p !== project || !allowed()) return;
+    res.write(`data: ${JSON.stringify({ kind: 'graphics', path: file, v })}\n\n`);
+  };
   projectChangedListeners.add(listener);
+  graphicsChangedListeners.add(graphics);
   req.on('close', cleanup);
 });
 
@@ -300,12 +359,11 @@ api.post('/projects/:project/git/commit', needProject('edit'), async (req, res) 
     res.json({ committed, ...(await repoInfo(req.params.project)) });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
-/** Personal access tokens (the password for git over HTTPS; Google accounts have no other). */
+/** The account's one manually-managed token (valid for Git, CLI and MCP). POST rotates it. */
 api.get('/git/tokens', (req, res) => { res.json({ tokens: listTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) }); });
 api.post('/git/tokens', (req, res) => {
-  const name = String(req.body?.name ?? '').trim() || 'token';
   const allow = userSettings(req.user!.id).allowRecopyTokens;
-  const t = createToken(req.user!.id, name, allow);
+  const t = createToken(req.user!.id, 'Account access token', allow);
   res.json({ id: t.id, token: t.token, tokens: listTokens(req.user!.id, allow) });
 });
 api.delete('/git/tokens/:id', (req, res) => {
@@ -320,17 +378,20 @@ api.get('/settings', (req, res) => { res.json({ settings: userSettings(req.user!
 api.get('/keys', (req, res) => { res.json({ keys: userKeys(req.user!.id) }); });
 api.post('/keys', (req, res) => { res.json({ keys: setUserKeys(req.user!.id, req.body?.keys) }); });
 
-/** MCP agent tokens: one per external agent, scoped to the signed-in account — usable on any project the account can access (see mcp.ts). */
-api.get('/mcp-tokens', (req, res) => { res.json({ tokens: listMcpTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) }); });
+/** OAuth connections and legacy agent tokens. New manual clients use the single account token. */
+api.get('/mcp-tokens', (req, res) => {
+  const tokens = listMcpTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens)
+    .filter(token => token.name !== 'Agent panel');
+  res.json({ tokens });
+});
 api.post('/mcp-tokens', (req, res) => {
-  const name = String(req.body?.name ?? '').trim() || 'agent';
-  const allow = userSettings(req.user!.id).allowRecopyTokens;
-  const t = createMcpToken(req.user!.id, name, allow);
-  res.json({ id: t.id, token: t.token, tokens: listMcpTokens(req.user!.id, allow) });
+  res.status(410).json({ error: 'Use the account access token for Git, CLI and MCP. Creating it again rotates the previous one.' });
 });
 api.delete('/mcp-tokens/:id', (req, res) => {
   deleteMcpToken(req.user!.id, Number(req.params.id));
-  res.json({ tokens: listMcpTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) });
+  const tokens = listMcpTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens)
+    .filter(token => token.name !== 'Agent panel');
+  res.json({ tokens });
 });
 
 api.post('/projects/:project/new', needProject('edit'), (req, res) => {
@@ -707,6 +768,7 @@ api.get('/docs/*/meta', async (req, res) => {
       role: req.role ?? 'edit',
       labels,
       textclass: getTextClass(lyx), modules: getModules(lyx),
+      availableModules: describeModules(config.layoutDir, [proj, docDir]),
       language: headerValue(lyx.header, 'language') ?? 'english',
       useRefstyle: headerValue(lyx.header, 'use_refstyle') === '1',
       citeEngine: headerValue(lyx.header, 'cite_engine') ?? 'basic',
@@ -899,7 +961,7 @@ api.post('/docs/*/header', async (req, res) => {
   try {
     const doc = await manager.open(id);
     const meta = doc.getMeta();
-    let lines: string[] = meta.headerLines;
+    let lines: string[] = [...meta.headerLines];
     if (Array.isArray(req.body?.headerLines)) lines = req.body.headerLines.map(String);
     if (typeof req.body?.preamble === 'string') {
       const start = lines.indexOf('\\begin_preamble');
@@ -913,6 +975,7 @@ api.post('/docs/*/header', async (req, res) => {
         if (i >= 0) lines[i] = `\\${k} ${v}`; else lines.push(`\\${k} ${v}`);
       }
     }
+    lines = markEditedSettings(meta.headerLines, lines, Object.keys(req.body?.set ?? {}));
     doc.ydoc.transact(() => { doc.meta.set('header', JSON.stringify(lines)); }, 'header');
     res.json({ ok: true, headerLines: lines });
   } catch (e) { res.status(400).json({ error: String(e) }); }
@@ -1061,15 +1124,41 @@ api.post('/users', (req, res) => {
 
 /** The VS Code extension (.vsix) built on this server: downloadable for signed-in users
  *  (Help ▸ OverLyX for VS Code). Not on the marketplace yet — this is the distribution channel. */
-api.get('/vscode-extension', (_req, res) => {
+/*
+ * Help ▸ OverLyX for VS Code: the extension is released by the GitHub Action on every push to
+ * master (packages/vscode/RELEASING.md), so the download is the stable asset of the latest release
+ * of the configured repository — the same build the extension's self-updater installs. A .vsix
+ * packaged into packages/vscode of this checkout is the fallback (offline / self-hosted instances,
+ * or OVERLYX_VSIX_SOURCE=local), checked for a few minutes at a time.
+ */
+const VSIX_RELEASE_URL = config.github.repo && process.env.OVERLYX_VSIX_SOURCE !== 'local' ? `https://github.com/${config.github.repo}/releases/latest/download/overlyx-vscode.vsix` : null;
+let vsixReleaseOk: { at: number; ok: boolean } | null = null;
+async function vsixReleaseAvailable(): Promise<boolean> {
+  if (!VSIX_RELEASE_URL) return false;
+  if (vsixReleaseOk && Date.now() - vsixReleaseOk.at < 10 * 60 * 1000) return vsixReleaseOk.ok;
+  let ok = false;
+  try {
+    const r = await fetch(VSIX_RELEASE_URL, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(4000) });
+    ok = r.ok;
+  } catch { ok = false; }
+  vsixReleaseOk = { at: Date.now(), ok };
+  return ok;
+}
+function localVsix(): string | null {
   const dir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../vscode');
   let files: string[] = [];
-  try { files = fs.readdirSync(dir).filter(f => f.endsWith('.vsix')); } catch { /* not built here */ }
-  if (!files.length) { res.status(404).json({ error: 'The VS Code extension is not built on this server.' }); return; }
+  try { files = fs.readdirSync(dir).filter(f => f.endsWith('.vsix')); } catch { return null; }
+  if (!files.length) return null;
   const file = files.map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs })).sort((a, b) => b.m - a.m)[0].f;
+  return path.join(dir, file);
+}
+api.get('/vscode-extension', async (_req, res) => {
+  if (await vsixReleaseAvailable()) { res.redirect(302, VSIX_RELEASE_URL!); return; }
+  const file = localVsix();
+  if (!file) { res.status(404).json({ error: 'The VS Code extension is not available from this server — install it from the GitHub releases.' }); return; }
   res.setHeader('Content-Type', 'application/octet-stream');
-  res.setHeader('Content-Disposition', `attachment; filename="${file}"`);
-  res.sendFile(path.join(dir, file));
+  res.setHeader('Content-Disposition', `attachment; filename="${path.basename(file)}"`);
+  res.sendFile(file);
 });
 
 app.use('/api', api);

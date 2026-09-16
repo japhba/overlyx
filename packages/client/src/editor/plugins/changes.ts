@@ -6,7 +6,8 @@
  */
 import { Plugin, PluginKey, TextSelection, type Command, type Transaction, type EditorState } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
-import type { Node as PMNode } from 'prosemirror-model';
+import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
+import { ReplaceStep } from 'prosemirror-transform';
 import { schema, changeDomAttrs } from '@overlyx/core';
 import { editorContext } from '../context';
 
@@ -28,40 +29,161 @@ const UNTRACKED_NODES = new Set(['sketch']);
  * node replaced by a new version of itself (a formula being edited, an inset opened or closed)
  * stays as it was — LyX does not track edits inside math either.
  */
+function withChange(node: PMNode, attrs: Record<string, unknown>): Record<string, unknown> {
+  const marks = JSON.parse(node.attrs.marks || '[]').filter((m: any) => m.type !== 'change');
+  marks.push({ type: 'change', attrs });
+  return { ...node.attrs, marks: JSON.stringify(marks) };
+}
+
+/** Keep removed original content in the document, including paragraph boundaries. */
+function deletedSlice(slice: Slice): Slice {
+  const del = changeMark('deleted');
+  const walk = (content: Fragment, openEnd: number): Fragment => {
+    const nodes: PMNode[] = [];
+    let joinNext = false;
+    content.forEach((node, _offset, index) => {
+      const end = index === content.childCount - 1 ? openEnd : 0;
+      const ch = changeOf(node);
+      if (node.isInline) {
+        if (UNTRACKED_NODES.has(node.type.name) || (ch?.type === 'inserted' && ch.author === editorContext.changeAuthorId)) return;
+        if (ch?.type === 'deleted') nodes.push(node);
+        else nodes.push(node.isText ? node.mark(del.addToSet(node.marks)) : node.type.create(withChange(node, del.attrs), node.content, node.marks));
+      } else {
+        const boundary = node.attrs.endChange ? JSON.parse(node.attrs.endChange) : null;
+        const cancelBoundary = node.type.name === 'paragraph' && end === 0 && boundary?.type === 'inserted' && boundary.author === editorContext.changeAuthorId;
+        const attrs = node.type.name === 'paragraph' && end === 0 ? { ...node.attrs, endChange: cancelBoundary ? null : JSON.stringify(del.attrs) } : node.attrs;
+        const rebuilt = node.type.create(attrs, walk(node.content, Math.max(0, end - 1)), node.marks);
+        if (joinNext && rebuilt.type.name === 'paragraph' && nodes.at(-1)?.type === rebuilt.type) {
+          const previous = nodes.pop()!;
+          nodes.push(previous.type.create({ ...previous.attrs, endChange: rebuilt.attrs.endChange }, previous.content.append(rebuilt.content), previous.marks));
+        } else nodes.push(rebuilt);
+        joinNext = cancelBoundary;
+      }
+    });
+    return Fragment.from(nodes);
+  };
+  return new Slice(walk(slice.content, slice.openEnd), slice.openStart, slice.openEnd);
+}
+
 export function changeTrackingPlugin(): Plugin {
   return new Plugin({
     key: changesKey,
     appendTransaction(trs, _old, newState) {
       if (!editorContext.trackChanges || editorContext.changeAuthorId === undefined) return null;
-      const holder: { tr: Transaction | null } = { tr: null };
-      for (const t of trs) {
+      const tr = newState.tr;
+      for (let ti = 0; ti < trs.length; ti++) {
+        const t = trs[ti];
         if (!t.docChanged || t.getMeta('lyx-changes') || t.getMeta('y-sync$') || t.getMeta('addToHistory') === false) continue;
-        // mark inserted ranges
-        t.mapping.maps.forEach((map, i) => {
-          map.forEach((os, oe, ns, ne) => {
-            let from = ns, to = ne;
-            for (let j = i + 1; j < t.mapping.maps.length; j++) { from = t.mapping.maps[j].map(from, 1); to = t.mapping.maps[j].map(to, -1); }
-            if (to <= from) return;
-            holder.tr = holder.tr ?? newState.tr;
-            const tr = holder.tr;
-            const ins = changeMark('inserted');
-            const pureInsert = os === oe;
-            newState.doc.nodesBetween(from, to, (node, pos) => {
-              if (node.isText) {
-                const existing = node.marks.find(m => m.type === schema.marks.change);
-                if (!existing) tr.addMark(Math.max(from, pos), Math.min(to, pos + node.nodeSize), ins);
-              } else if (node.isInline && pureInsert && pos >= from && pos + node.nodeSize <= to && !UNTRACKED_NODES.has(node.type.name) && !changeOf(node)) {
-                const marks = JSON.parse(node.attrs.marks || '[]').filter((m: any) => m.type !== 'change');
-                marks.push({ type: 'change', attrs: ins.attrs });
-                tr.setNodeMarkup(pos, undefined, { ...node.attrs, marks: JSON.stringify(marks) });
-              }
-              return true;
-            });
-          });
+        const structural: { from: number; to: number }[] = [];
+        const structure = (n: PMNode) => JSON.stringify([n.attrs.columns, n.content.content.map(row => row.content.content.map(cell => [cell.attrs.colspan, cell.attrs.rowspan]))]);
+        t.before.descendants((old, pos) => {
+          if (old.type.name !== 'table') return true;
+          const next = t.doc.nodeAt(t.mapping.map(pos, 1));
+          if (!next || next.type !== old.type || structure(next) === structure(old)) return false;
+          structural.push({ from: pos, to: pos + old.nodeSize });
+          let at = t.mapping.map(pos, 1);
+          for (let j = ti + 1; j < trs.length; j++) at = trs[j].mapping.map(at, 1);
+          at = tr.mapping.map(at, 1);
+          const current = tr.doc.nodeAt(at);
+          if (current?.type !== old.type) return false;
+          // A structural table edit is one reviewable replacement. Keep the complete
+          // original grid (including spans and cell formatting) so rejection is lossless.
+          tr.setNodeMarkup(at, undefined, withChange(current, changeMark('inserted').attrs));
+          if (!(changeOf(old)?.type === 'inserted' && changeOf(old)?.author === editorContext.changeAuthorId)) {
+            tr.insert(at, old.type.create(withChange(old, changeMark('deleted').attrs), old.content));
+          }
+          return false;
         });
+        for (let i = 0; i < t.steps.length; i++) {
+          const step = t.steps[i];
+          if (!(step instanceof ReplaceStep)) continue;
+          if (structural.some(r => step.from >= r.from && step.from <= r.to)) continue;
+          // Editing attributes of an existing formula is not a textual replacement.
+          const oldNode = t.docs[i].nodeAt(step.from);
+          if (step.to > step.from && oldNode && !oldNode.isText && oldNode.isAtom && step.to - step.from === oldNode.nodeSize && step.slice.content.childCount === 1 && step.slice.content.firstChild?.type === oldNode.type) continue;
+          const mapToCurrent = (pos: number, assoc: number) => {
+            for (let j = i + 1; j < t.mapping.maps.length; j++) pos = t.mapping.maps[j].map(pos, assoc);
+            for (let j = ti + 1; j < trs.length; j++) pos = trs[j].mapping.map(pos, assoc);
+            return tr.mapping.map(pos, assoc);
+          };
+          step.getMap().forEach((os, oe, ns, ne) => {
+            const from = mapToCurrent(ns, 1), to = mapToCurrent(ne, -1);
+            if (to > from) {
+              const ins = changeMark('inserted');
+              tr.doc.nodesBetween(from, to, (node, pos) => {
+                if (node.isText) {
+                  if (!changeOf(node)) tr.addMark(Math.max(from, pos), Math.min(to, pos + node.nodeSize), ins);
+                } else if (node.isInline && pos >= from && pos + node.nodeSize <= to && !UNTRACKED_NODES.has(node.type.name)) {
+                  if (!changeOf(node)) tr.setNodeMarkup(pos, undefined, withChange(node, ins.attrs));
+                  return false;
+                } else if (node.type.name === 'paragraph' && !node.attrs.endChange && pos + node.nodeSize - 1 >= from && pos + node.nodeSize - 1 < to) {
+                  tr.setNodeMarkup(pos, undefined, { ...node.attrs, endChange: JSON.stringify(ins.attrs) });
+                }
+                return true;
+              });
+            }
+            if (oe > os) {
+              const original = t.docs[i].slice(os, oe);
+              let removed = deletedSlice(original);
+              let at = mapToCurrent(ns, -1);
+              // Block paste expands a selection at the start of a paragraph to include
+              // its opening token. Restore that partial paragraph inside the pasted
+              // first paragraph, rather than inventing another paragraph boundary.
+              if (!removed.openStart && removed.openEnd && removed.content.firstChild?.type.name === 'paragraph' && tr.doc.nodeAt(at)?.type.name === 'paragraph') {
+                at++;
+                removed = new Slice(removed.content, 1, removed.openEnd);
+              }
+              if (to > from && removed.openEnd === 1 && removed.content.childCount > 1 && removed.content.lastChild?.type.name === 'paragraph') {
+                const destination = tr.doc.resolve(at).parent;
+                if (destination.type.name === 'paragraph') {
+                  const last = removed.content.lastChild;
+                  const tail = last.type.create({ ...last.attrs, endChange: destination.attrs.endChange }, last.content, last.marks);
+                  removed = new Slice(removed.content.replaceChild(removed.content.childCount - 1, tail), removed.openStart, removed.openEnd);
+                }
+              }
+              if (removed.size) {
+                tr.replace(at, at, removed);
+              }
+              // Fitting an open slice keeps the destination paragraph's attributes.
+              // Restore its boundary marker, including cancellation of a new break.
+              if (removed.openStart && original.content.childCount > 1 && removed.content.firstChild?.type.name === 'paragraph') {
+                const $at = tr.doc.resolve(at);
+                if ($at.parent.type.name === 'paragraph') tr.setNodeMarkup($at.before(), undefined, { ...$at.parent.attrs, endChange: removed.content.firstChild.attrs.endChange });
+              }
+            }
+          });
+        }
       }
-      if (holder.tr && holder.tr.docChanged) { holder.tr.setMeta('lyx-changes', true); return holder.tr; }
+      if (tr.docChanged) return tr.setMeta('lyx-changes', true);
       return null;
+    },
+    props: {
+      decorations(state) {
+        const decos: Decoration[] = [];
+        const filter = changesFilterKey.getState(state);
+        state.doc.descendants((node, pos) => {
+          if (node.type.name !== 'paragraph' || !node.attrs.endChange) return true;
+          const change = JSON.parse(node.attrs.endChange);
+          if (change.type === 'inserted' ? filter?.showInsertions === false : filter?.showDeletions === false) return true;
+          const at = pos + node.nodeSize - 1;
+          decos.push(Decoration.widget(at, view => {
+            const el = document.createElement('span');
+            for (const [name, value] of Object.entries(changeDomAttrs(change))) el.setAttribute(name, value);
+            el.classList.add('lyx-change-boundary');
+            el.textContent = '¶';
+            el.title = `${change.type === 'inserted' ? 'Inserted' : 'Deleted'} paragraph break`;
+            el.setAttribute('aria-label', el.title);
+            el.onmousedown = event => {
+              event.preventDefault();
+              view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at, Math.min(at + 2, view.state.doc.content.size))).setMeta('addToHistory', false));
+              view.focus();
+            };
+            return el;
+          }, { side: 1 }));
+          return true;
+        });
+        return decos.length ? DecorationSet.create(state.doc, decos) : null;
+      },
     },
   });
 }
@@ -92,6 +214,7 @@ export function trackedDelete(dir: -1 | 1): Command {
   return (state, dispatch) => {
     if (!editorContext.trackChanges || editorContext.changeAuthorId === undefined) return false;
     const sel = state.selection;
+    if (!sel.empty && !sel.$from.sameParent(sel.$to)) return false;
     let from: number, to: number;
     if (!sel.empty) { from = sel.from; to = sel.to; }
     else {
@@ -135,18 +258,21 @@ export function acceptAllChanges(): Command {
     const deletions: [number, number][] = [];
     const unmark: [number, number][] = [];
     const nodeFix: [number, PMNode][] = [];
+    const joins: number[] = [];
     state.doc.descendants((node, pos) => {
       if (node.isText) {
         const ch = node.marks.find(m => m.type === schema.marks.change);
-        if (ch?.attrs.type === 'deleted') deletions.push([pos, pos + node.nodeSize]);
+        if (ch?.attrs.type === 'deleted') { deletions.push([pos, pos + node.nodeSize]); return false; }
         else if (ch) unmark.push([pos, pos + node.nodeSize]);
       } else if (node.isInline) {
         const marks: any[] = JSON.parse(node.attrs.marks || '[]');
         const ch = marks.find(m => m.type === 'change');
-        if (ch?.attrs.type === 'deleted') deletions.push([pos, pos + node.nodeSize]);
+        if (ch?.attrs.type === 'deleted') { deletions.push([pos, pos + node.nodeSize]); return false; }
         else if (ch) nodeFix.push([pos, node]);
       } else if (node.type.name === 'paragraph' && node.attrs.endChange) {
         nodeFix.push([pos, node]);
+        const ch = JSON.parse(node.attrs.endChange);
+        if (ch.type === 'deleted') joins.push(pos + node.nodeSize);
       }
       return true;
     });
@@ -156,6 +282,10 @@ export function acceptAllChanges(): Command {
       else tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, marks: JSON.stringify(JSON.parse(node.attrs.marks || '[]').filter((m: any) => m.type !== 'change')) });
     }
     for (const [s, e] of deletions.sort((a, b) => b[0] - a[0])) tr = tr.delete(tr.mapping.map(s), tr.mapping.map(e));
+    for (const pos of joins.sort((a, b) => b - a)) {
+      const at = tr.mapping.map(pos, -1);
+      if (at > 0 && at < tr.doc.content.size && tr.doc.resolve(at).nodeBefore?.type === schema.nodes.paragraph && tr.doc.resolve(at).nodeAfter?.type === schema.nodes.paragraph) tr.join(at);
+    }
     if (!tr.docChanged) return false;
     dispatch?.(tr.setMeta('lyx-changes', true));
     return true;
@@ -168,17 +298,21 @@ export function rejectAllChanges(): Command {
     const deletions: [number, number][] = [];
     const unmark: [number, number][] = [];
     const nodeFix: [number, PMNode][] = [];
+    const joins: number[] = [];
     state.doc.descendants((node, pos) => {
       if (node.isText) {
         const ch = node.marks.find(m => m.type === schema.marks.change);
-        if (ch?.attrs.type === 'inserted') deletions.push([pos, pos + node.nodeSize]);
+        if (ch?.attrs.type === 'inserted') { deletions.push([pos, pos + node.nodeSize]); return false; }
         else if (ch) unmark.push([pos, pos + node.nodeSize]);
       } else if (node.isInline) {
         const marks: any[] = JSON.parse(node.attrs.marks || '[]');
         const ch = marks.find(m => m.type === 'change');
-        if (ch?.attrs.type === 'inserted') deletions.push([pos, pos + node.nodeSize]);
+        if (ch?.attrs.type === 'inserted') { deletions.push([pos, pos + node.nodeSize]); return false; }
         else if (ch) nodeFix.push([pos, node]);
-      } else if (node.type.name === 'paragraph' && node.attrs.endChange) nodeFix.push([pos, node]);
+      } else if (node.type.name === 'paragraph' && node.attrs.endChange) {
+        nodeFix.push([pos, node]);
+        if (JSON.parse(node.attrs.endChange).type === 'inserted') joins.push(pos + node.nodeSize);
+      }
       return true;
     });
     for (const [s, e] of unmark) tr = tr.removeMark(s, e, schema.marks.change);
@@ -187,6 +321,10 @@ export function rejectAllChanges(): Command {
       else tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, marks: JSON.stringify(JSON.parse(node.attrs.marks || '[]').filter((m: any) => m.type !== 'change')) });
     }
     for (const [s, e] of deletions.sort((a, b) => b[0] - a[0])) tr = tr.delete(tr.mapping.map(s), tr.mapping.map(e));
+    for (const pos of joins.sort((a, b) => b - a)) {
+      const at = tr.mapping.map(pos, -1);
+      if (at > 0 && at < tr.doc.content.size && tr.doc.resolve(at).nodeBefore?.type === schema.nodes.paragraph && tr.doc.resolve(at).nodeAfter?.type === schema.nodes.paragraph) tr.join(at);
+    }
     if (!tr.docChanged) return false;
     dispatch?.(tr.setMeta('lyx-changes', true));
     return true;
@@ -197,7 +335,8 @@ export function hasChanges(doc: PMNode): boolean {
   let found = false;
   doc.descendants((node) => {
     if (found) return false;
-    if (node.isText && node.marks.some(m => m.type === schema.marks.change)) found = true;
+    if (node.type.name === 'paragraph' && node.attrs.endChange) found = true;
+    else if (node.isText && node.marks.some(m => m.type === schema.marks.change)) found = true;
     else if (node.isInline && (node.attrs.marks || '').includes('"change"')) found = true;
     return !found;
   });
@@ -206,7 +345,7 @@ export function hasChanges(doc: PMNode): boolean {
 
 /* ------------------------------------------------ single change at the cursor */
 
-export interface ChangeRange { from: number; to: number; type: 'inserted' | 'deleted'; author: number; time: number }
+export interface ChangeRange { from: number; to: number; type: 'inserted' | 'deleted'; author: number; time: number; boundary?: boolean }
 
 export function changeOf(node: PMNode): { type: 'inserted' | 'deleted'; author: number; time: number } | null {
   if (node.isText) {
@@ -232,7 +371,17 @@ export function changeAt(state: EditorState, pos: number): ChangeRange | null {
   let child = parent.maybeChild(idx);
   let ch = child ? changeOf(child) : null;
   if (!ch && idx > 0) { idx--; child = parent.child(idx); ch = changeOf(child); }
-  if (!ch || !child) return null;
+  if (!ch || !child) {
+    for (let depth = $p.depth; depth > 0; depth--) {
+      const ancestor = $p.node(depth), change = changeOf(ancestor);
+      if (change) return { from: $p.before(depth), to: $p.before(depth) + ancestor.nodeSize, ...change };
+    }
+    if (parent.attrs.endChange) {
+      const change = JSON.parse(parent.attrs.endChange);
+      return { from: base + parent.content.size, to: base + parent.content.size + 2, ...change, boundary: true };
+    }
+    return null;
+  }
   const same = (n: PMNode) => { const c = changeOf(n); return !!c && c.type === ch!.type && c.author === ch!.author; };
   let a = idx, b = idx;
   while (a > 0 && same(parent.child(a - 1))) a--;
@@ -249,6 +398,12 @@ export function resolveChange(range: ChangeRange, accept: boolean): Command {
   return (state, dispatch) => {
     let tr = state.tr;
     const remove = accept ? range.type === 'deleted' : range.type === 'inserted';
+    if (range.boundary) {
+      resolveBoundary(tr, range, remove);
+      if (!tr.docChanged) return false;
+      dispatch?.(tr.setMeta('lyx-changes', true));
+      return true;
+    }
     if (remove) tr = tr.delete(range.from, range.to);
     else {
       tr = tr.removeMark(range.from, range.to, schema.marks.change);
@@ -271,15 +426,24 @@ export function resolveChange(range: ChangeRange, accept: boolean): Command {
 export function allChanges(doc: PMNode): ChangeRange[] {
   const out: ChangeRange[] = [];
   doc.descendants((node, pos) => {
+    if (node.type.name === 'paragraph' && node.attrs.endChange) out.push({ from: pos + node.nodeSize - 1, to: pos + node.nodeSize + 1, ...JSON.parse(node.attrs.endChange), boundary: true });
     if (!node.isInline) return true;
     const c = changeOf(node);
-    if (!c) return false;
+    if (!c) return true;
     const last = out[out.length - 1];
-    if (last && last.to === pos && last.type === c.type && last.author === c.author) last.to = pos + node.nodeSize;
+    if (last && !last.boundary && last.to === pos && last.type === c.type && last.author === c.author) last.to = pos + node.nodeSize;
     else out.push({ from: pos, to: pos + node.nodeSize, ...c });
     return false;
   });
-  return out;
+  return out.sort((a, b) => a.from - b.from);
+}
+
+function resolveBoundary(tr: Transaction, range: ChangeRange, remove: boolean): void {
+  const $end = tr.doc.resolve(Math.min(range.from, tr.doc.content.size));
+  if ($end.parent.type.name !== 'paragraph') return;
+  tr.setNodeMarkup($end.before(), undefined, { ...$end.parent.attrs, endChange: null });
+  const at = $end.after();
+  if (remove && at < tr.doc.content.size && tr.doc.resolve(at).nodeAfter?.type.name === 'paragraph') tr.join(at);
 }
 
 /** Move the cursor to the next / previous tracked change (wraps around); selects it. */
@@ -311,6 +475,7 @@ export function resolveSelectionChanges(accept: boolean): Command {
     let tr = state.tr;
     for (const r of ranges.sort((a, b) => b.from - a.from)) {
       const remove = accept ? r.type === 'deleted' : r.type === 'inserted';
+      if (r.boundary) { resolveBoundary(tr, r, remove); continue; }
       if (remove) tr = tr.delete(r.from, r.to);
       else {
         tr = tr.removeMark(r.from, r.to, schema.marks.change);

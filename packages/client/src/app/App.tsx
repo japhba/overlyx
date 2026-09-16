@@ -1,8 +1,8 @@
 import { editorViewMenu } from './editorViewMenu';
-import { editorToolbars, type ToolbarId as SharedToolbarId, type ToolbarMode } from './editorToolbars';
 import { inkToolbar } from './inkToolbar';
 import { StatsDialog } from './StatsDialog';
 import { documentMenus } from './documentMenus';
+import { referenceTransaction } from '../editor/references';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
@@ -13,15 +13,17 @@ import { Login } from './Login';
 import { DocPanel } from './DocPanel';
 import { Home, projectDocs } from './Home';
 import { TextEditor } from './TextEditor';
+import { ViewModeSwitch, type ViewMode } from './ViewModeSwitch';
 import { MarkdownEditor } from './MarkdownEditor';
 import { ShareDialog } from './Share';
 import { GuestCallout } from './Guest';
 import { GitDialog } from './Git';
-import type { Mark } from 'prosemirror-model';
 import { MenuBar, openPalette, PALETTE_LABEL, PALETTE_DEFAULT, type MenuDef } from './MenuBar';
 import { setThemePref, useTheme } from './theme';
-import { Toolbar, mathPanelPalettes, type ToolButton, type DelimChoice } from './Toolbar';
-import { buildOutline, type OutlineItem } from './Outline';
+import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
+import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
+import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats } from './shellutil';
+import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
 import { Versions } from './Versions';
 import { AgentPanel } from './AgentPanel';
@@ -34,12 +36,13 @@ import { Tour, tourWanted, rememberTour, type TourEnd } from './Tour';
 import { FeedbackDialog } from './Feedback';
 import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog } from './Dialogs';
 import { SettingsPanel } from './Settings';
-import { createEditor, refreshMacros, describeChange, type EditorHandle, type SaveState } from '../editor/editor';
+import { createEditor, type EditorHandle, type SaveState } from '../editor/editor';
+import { refreshMacros } from '../editor/macrodefs';
+import { describeChange } from '../editor/assembly';
 import { useProjectEvents } from './FileBrowser';
 import { newerVersionAvailable } from './update';
 import { generateLyx } from './SourcePane';
 import { editorContext, viewDocId } from '../editor/context';
-import { insertImageFiles, readClipboardImages } from '../editor/imagepaste';
 import { navHistory, type NavLocation } from './navhistory';
 import { restoredCursorPos } from '../editor/cursormemory';
 import { PdfViewer, type PdfTarget } from './PdfViewer';
@@ -55,25 +58,11 @@ import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilter
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '../editor/plugins/find';
-import { schema, unquote, llanglePreamble, hasLlangleSnippet, definesLlangle } from '@overlyx/core';
+import { schema, unquote } from '@overlyx/core';
 
 type Dialog = { name: string; arg?: unknown } | null;
 
 /** LyX language name → BCP 47 tag (for the browser's spell checker). */
-function bcp47(lyxLang: string): string {
-  const t: Record<string, string> = {
-    english: 'en', american: 'en-US', british: 'en-GB', canadian: 'en-CA', australian: 'en-AU', newzealand: 'en-NZ',
-    german: 'de', ngerman: 'de', 'german-ch': 'de-CH', 'ngerman-ch': 'de-CH', austrian: 'de-AT', naustrian: 'de-AT',
-    french: 'fr', spanish: 'es', 'spanish-mexico': 'es-MX', italian: 'it', dutch: 'nl', portuguese: 'pt', brazilian: 'pt-BR',
-    russian: 'ru', ukrainian: 'uk', polish: 'pl', czech: 'cs', slovak: 'sk', slovene: 'sl', croatian: 'hr', serbian: 'sr',
-    swedish: 'sv', danish: 'da', norsk: 'nb', nynorsk: 'nn', finnish: 'fi', icelandic: 'is', estonian: 'et', latvian: 'lv', lithuanian: 'lt',
-    greek: 'el', turkish: 'tr', hungarian: 'hu', romanian: 'ro', bulgarian: 'bg', hebrew: 'he', arabic_arabi: 'ar', arabic_arabtex: 'ar',
-    japanese: 'ja', 'japanese-cjk': 'ja', 'chinese-simplified': 'zh-Hans', 'chinese-traditional': 'zh-Hant', korean: 'ko',
-    catalan: 'ca', basque: 'eu', galician: 'gl', irish: 'ga', welsh: 'cy', latin: 'la', esperanto: 'eo', afrikaans: 'af', indonesian: 'id', malay: 'ms', thai: 'th', vietnamese: 'vi', hindi: 'hi', farsi: 'fa',
-  };
-  return t[lyxLang] ?? lyxLang.slice(0, 2);
-}
-
 export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [google, setGoogle] = useState(false);
@@ -136,12 +125,6 @@ function parseHash(): { id: string | null; goto: string | null; heading: number 
   return { id: idPart || null, goto: params?.get('goto') ?? null, heading: h !== null && h !== undefined && /^\d+$/.test(h) ? Number(h) : null, share: null };
 }
 
-type ToolbarId = SharedToolbarId | 'vcs';
-type ToolbarPrefs = Partial<Record<ToolbarId, ToolbarMode>>;
-/** LyX's default.ui: standard, view/update and extra on top, vcs off, the contextual rows automatic (docked at the bottom). */
-const DEFAULT_TOOLBARS: ToolbarPrefs = { standard: 'on', viewupdate: 'on', extra: 'on', vcs: 'off', math: 'auto', mathpanels: 'on', table: 'auto', review: 'auto' };
-function loadToolbarPrefs(): ToolbarPrefs { try { return { ...DEFAULT_TOOLBARS, ...JSON.parse(localStorage.getItem('ol.toolbars') || '{}') }; } catch { return { ...DEFAULT_TOOLBARS }; } }
-
 /** Navigate ▸ Back / Forward (navhistory.ts); the ids are the menu paths, so the palette can rebind them */
 const NAV_BACK_ID = 'Navigate ▸ Back', NAV_FORWARD_ID = 'Navigate ▸ Forward';
 const NAV_BACK_KEY = 'Ctrl+Alt+←', NAV_FORWARD_KEY = 'Ctrl+Alt+→';
@@ -171,6 +154,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [hashId, setHashId] = useState<string | null>(parseHash().id);
   const docId = hashId ? hashId.replace(/^raw:/, '') : null;
   const rawSplit = !!hashId && hashId.startsWith('raw:');
+  const [sourceOnly, setSourceOnly] = useState(false);
+  const viewMode = rawSplit ? (sourceOnly ? 'tex' : 'split') : 'wysiwyg';
+  const changeViewMode = (mode: ViewMode) => { setSourceOnly(mode === 'tex'); if (docId) location.hash = '#/' + (mode === 'wysiwyg' ? '' : 'raw:') + docId; };
   /** The Source switches (Ctrl+Alt+S, the right rail, the panel tabs, the View menu): the LaTeX source beside the document. */
   const toggleRawSplit = () => { if (docId) location.hash = '#/' + (rawSplit ? docId : 'raw:' + docId); };
   // .tex documents open in the collaborative editor, other text files in a plain text editor (ids
@@ -650,7 +636,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           a.download = (id.split('/').pop() ?? 'document.tex').replace(/\.tex$/, '') + '-offline-changes.lyx';
           a.click();
           kept = 'Your unsynced edits could not be stored on the server; they were downloaded as a .lyx file instead (import it into the project to recover them).';
-        } catch { kept = 'Your unsynced edits could not be kept.'; }
+        } catch { notify('Your unsynced edits could not be exported. This local copy has been kept; copy your edits before reloading.', 'error'); return; }
       }
     }
     await h.discardLocal();
@@ -890,16 +876,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { label: 'Close (back to the projects)', action: closeDoc },
     ] },
   ] : [];
-  /** the font marks the toolbar reports: stored marks / marks at the caret, or the marks of the first selected text */
-  const marksAtCursor = (): readonly Mark[] => {
-    if (!view) return [];
-    const { $from, empty } = view.state.selection;
-    if (empty) return view.state.storedMarks ?? $from.marks();
-    return $from.nodeAfter?.marks ?? $from.marks();
-  };
-  /** the value of a font mark at the cursor (null when unset) */
-  const markValue = (name: string): string | null => (marksAtCursor().find(m => m.type.name === name)?.attrs.value as string | undefined) ?? null;
-  const textColor = markValue('color');
+  const textColor = markValue(view, 'color');
   // the shortcut table is searchable too (a match opens the table)
   const helpSearchEntries = useMemo(() => HELP_ROWS.map(([k, v]) => ({ id: 'Keyboard shortcuts ▸ ' + v, label: v, path: ['Keyboard shortcuts'], shortcut: k, fixed: true, action: () => setDialog({ name: 'help' }) })), []);
   const sectionItems = useMemo<MenuDef['items']>(() => {
@@ -1032,92 +1009,39 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   };
 
 
-  const markActive = (name: string, value: string) => marksAtCursor().some(m => m.type.name === name && m.attrs.value === value);
-
   /* ------------------------------------------------------------------ toolbars (LyX stdtoolbars.inc) */
-  const mathExec = (cmd: string, ...args: unknown[]) => {
-    const f = activeMathField();
-    if (f) { f.execute(cmd, ...args); f.focus(); return; }
-    if (view) { C.insertMath(false)(view); setTimeout(() => activeMathField()?.execute(cmd, ...args), 60); }
-  };
-  /** ⟪ ⟫ are no LaTeX / LyX delimiters: add the macro (once) to the preamble of the document (or its master). */
-  const ensureLlangle = async () => {
-    if (!docId) return;
-    try {
-      const target = meta?.master ?? docId;
-      let lines = headerLines;
-      if (target !== docId) lines = (await api.header(target)).headerLines;
-      const a = lines.indexOf('\\begin_preamble'), b = lines.indexOf('\\end_preamble');
-      const preamble = a >= 0 && b > a ? lines.slice(a + 1, b).join('\n') : '';
-      if (hasLlangleSnippet(preamble)) return;
-      const defined = definesLlangle(preamble, Object.keys(meta?.macros ?? {}));
-      await api.setHeader(target, { preamble: (preamble ? preamble.replace(/\s+$/, '') + '\n' : '') + llanglePreamble(defined) });
-      notify(`Added the \\llangle / \\rrangle macro to the preamble of ${target.split('/').pop()}`);
-    } catch (e) { notify('Could not add the \\llangle macro to the preamble: ' + (e as Error).message, 'error'); }
-  };
-  const insertDelim = (c: DelimChoice) => {
-    if (c.pair.left === '\\llangle') void ensureLlangle();
-    if (c.size === '') mathExec('delim', c.pair.left, c.pair.right);
-    else if (c.size === 'none') mathExec('pair', c.pair.left, c.pair.right);
-    else mathExec('bigdelim', `${c.size}l`, c.pair.left, `${c.size}r`, c.pair.right);
-  };
-  const mathPanels = useMemo(() => mathPanelPalettes(it => { if (it.kind === 'size') mathExec('style', it.latex); else mathExec('insert', it.latex); }), []);
-  const clipboard = (op: 'cut' | 'copy' | 'paste') => {
-    const v = activeViewRef.current ?? editorRef.current?.view;
-    if (!v) return;
-    const f = activeMathField();
-    if (op === 'paste') {
-      const fallback = () => notify('Paste with Ctrl+V (the browser does not allow the toolbar to read the clipboard)', 'error');
-      const nav = navigator.clipboard;
-      if (!nav?.readText) { fallback(); return; }
-      const pasteText = () => nav.readText().then(t => { if (!t) return; if (f) f.execute('insert', t); else { v.focus(); v.pasteText(t); } }).catch(fallback);
-      if (f) { void pasteText(); return; }
-      // an image on the clipboard becomes a graphics inset (same as Ctrl+V in the editor)
-      readClipboardImages().then(imgs => { if (imgs.length) void insertImageFiles(v, imgs); else void pasteText(); }).catch(() => void pasteText());
-      return;
-    }
-    if (f) { const c = f.cursor; const sel = c.selection ? c.grabSelection() : f.latex; void navigator.clipboard?.writeText(sel); if (op === 'cut' && c.selection) f.execute('insert', ''); return; }
-    v.focus();
-    document.execCommand(op);
-  };
-  const layoutBtn = (id: string, name: string, title: string, icon: string): ToolButton => ({ id, title, icon, action: () => run(C.setLayout(layout === name && name !== 'Standard' ? 'Standard' : name)), active: layout === name });
+  const mathExec = mathExecutor(() => activeViewRef.current ?? editorRef.current?.view);
+  const mathPanels = useMathPanels(mathExec);
+  const clipboard = toolbarClipboard(() => activeViewRef.current ?? editorRef.current?.view, notify);
   const aiComplete = prefs.aiCompleteText || prefs.aiCompleteMath;
-  const inTable = !!view && !!C.tableContext(view.state);
-  const tableSt = view ? T.tableToolbarState(view.state) : null;
-  const changesFilterSt = view ? changesFilterKey.getState(view.state) : null;
-  const docHasChanges = useMemo(() => !!view && hasChanges(view.state.doc), [docTick, view]);
-  // Word / character count for the status bar: the selection when there is one, else the whole
-  // document (like LyX's statistics; a math formula or other inset counts as a word boundary).
-  const docStats = useMemo(() => {
-    if (!view) return null;
-    const { from, to, empty } = view.state.selection;
-    const doc = view.state.doc;
-    const text = doc.textBetween(empty ? 0 : from, empty ? doc.content.size : to, '\n', ' ');
-    const words = (text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
-    return { words, chars: text.replace(/\s+/g, '').length, sel: !empty };
-  }, [view, docTick, selTick]);
-  const showMath = tbMode('math') === 'on' || (tbMode('math') === 'auto' && !!mathField);
-  const showTable = tbMode('table') === 'on' || (tbMode('table') === 'auto' && inTable);
-  const showReview = tbMode('review') === 'on' || (tbMode('review') === 'auto' && (tracking || docHasChanges));
-  const outputChanges = headerLines.some(l => l === '\\output_changes true');
-
-  /** LyX's toolbar-toggle popup (On / Off / Automatic) for a contextual toolbar. */
-  const tbTogglePalette = (id: ToolbarId, title: string) => ({
-    title, list: true, cols: 1, items: [
-      { label: 'On', action: () => setToolbar(id, 'on'), active: tbMode(id) === 'on' },
-      { label: 'Off', action: () => setToolbar(id, 'off'), active: tbMode(id) === 'off' },
-      { label: 'Automatic', action: () => setToolbar(id, 'auto'), active: tbMode(id) === 'auto' },
-    ],
+  const docStats = useMemo(() => (view ? documentStats(view) : null), [view, docTick, selTick]);
+  // The LyX toolbars (toolbars.tsx — one definition with the VS Code extension); what only the web
+  // client has (files, navigation history, the outline sidebar, ink, AI, the master's PDF) goes into the slots.
+  const tb = buildToolbars({
+    view, docId, meta, headerLines, prefs, layout, mathField, tracking, marginMode, tbMode, setToolbar,
+    run, runView, mathExec, mathPanels, clipboard, setDialog, openFind: () => setFindOpen(true), notify,
+    toggleTracking: () => { void toggleTracking(); }, toggleMargin,
+    build: () => { void build(); }, updatePdf: () => { void build({ open: false }); }, syncToPdf: () => { void syncToPdf(); },
+    slots: {
+      leading: [
+        { id: 'new', title: 'New document (Ctrl+N)', icon: 'new', action: () => editorContext.ui?.newFile() },
+        { id: 'open', title: 'Open (Ctrl+O)', icon: 'open', action: () => setShowFiles(true) },
+      ],
+      navigation: [{ id: 'navback', title: 'Navigate back (Ctrl+Alt+←)', icon: 'navback', action: navBack }],
+      sidebars: [{ id: 'outline', title: LEFT_TITLE, icon: 'outline', action: () => setShowFiles(s => !s), active: showFiles }],
+      tools: [
+        { id: 'ink', title: inkMode ? 'Margin drawing is on — click to put the pen away' : 'Draw in the margins (pen, highlighter; pans sideways for more space)', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode },
+        // the ✦ button exists only once it is enabled in the preferences; it switches autocomplete (text + formulas) on and off
+        ...(prefs.aiButton ? [{ id: 'ai', title: aiComplete ? 'AI autocomplete is on — click to switch it off' : 'AI autocomplete is off — click to switch it on (ghost text after a pause while typing; Tab inserts it)', icon: 'ai', action: () => { setPref('aiCompleteText', !aiComplete); setPref('aiCompleteMath', !aiComplete); notify(!aiComplete ? 'AI autocomplete on' : 'AI autocomplete off'); }, active: aiComplete } as ToolButton] : []),
+      ],
+      pdf: meta?.master ? [{ id: 'pdfmaster', title: `View master document (${meta.master.split('/').pop()})`, icon: 'viewmaster', action: () => openInTab(meta.master!) }] : [],
+    },
   });
-  /** Text properties (LyX's custom text styles / Text Properties dialog): shared by the standard and extra toolbars. */
-  const textStylesPalette = { title: 'Text properties', list: true, cols: 2, items: [
-    ['Emphasis', 'emph'], ['Bold', 'bold'], ['Noun (small caps)', 'noun'], ['Underline', 'underline'], ['Strikeout', 'strikeout'], ['Typewriter', 'typewriter'], ['Sans serif', 'sans'], ['Italic', 'italic'], ['Slanted', 'slanted'], ['Small caps', 'smallcaps'], ['Double underline', 'uuline'], ['Wavy underline', 'uwave'], ['Crossed out', 'xout'],
-  ].map(([l, k]) => ({ label: l, action: () => run((C.fontCommands as Record<string, any>)[k]) })).concat(
-    [['Tiny', 'tiny'], ['Small', 'small'], ['Normal size', 'normal'], ['Large', 'large'], ['Huge', 'huge']].map(([l, v]) => ({ label: `Size: ${l}`, action: () => run(C.setValueMark('size', v === 'normal' ? null : v)) })),
-    [{ label: 'Reset to default (Alt+C Space)', action: () => run(C.fontDefault) }]) };
-  // The LyX standard toolbar (lib/ui/stdtoolbars.inc) with LyX's items, order and icons; OverLyX's
-  // own buttons (italic, colour, display formula, margin notes, AI) close their groups.
-  const { standardGroups, viewUpdateGroups, extraGroups, mathGroups, mathPanelGroups, tableGroups, reviewGroups } = editorToolbars({ aiComplete, build, changesFilterSt, clipboard, inkMode, insertDelim, layoutBtn, marginMode, markActive, mathExec, mathField, mathPanels, meta, navBack, notify, openInTab, outputChanges, prefs, run, runView, setDialog, setFindOpen, setInkMode, setShowFiles, showFiles, showMath, showReview, showTable, syncToPdf, tableSt, tbMode, tbTogglePalette, textColor, textStylesPalette, toggleMargin, toggleTracking, tracking, view, outlineTitle: LEFT_TITLE, toggleOutputChanges: () => { if (docId) api.setHeader(docId, { set: { output_changes: outputChanges ? 'false' : 'true' } }).then(() => notify(outputChanges ? 'Changes are no longer shown in the output' : 'Changes are shown in the output')).catch(e => notify(String(e), 'error')); } });
+  // The margin-ink toolbar (bottom-docked while drawing is on): tool, then the colour and width
+  // of the pen in use — pen and highlighter each keep their own (Goodnotes), so the swatches and
+  // dots change with the tool; picking one while erasing or lassoing takes the pen up again.
+  // The swatches and dots are presets: one click selects, a click on the selected one opens a
+  // picker that replaces it (Goodnotes). The laser is the one tool that works over the text too.
   const inkGroups = inkToolbar();
   // The LyX Version Control toolbar, mapped onto the project's git repository (off by default, as in LyX).
   const vcsGroups: ToolButton[][] = [
@@ -1195,10 +1119,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         if (target?.node && target.pos !== undefined) {
           const p = commandParams(target.node);
           const tpos = target.pos, tnode = target.node;
-          return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: p.get('LatexCommand') ?? 'ref' }} onClose={close}
-            onInsert={(n, k) => { const params = [`LatexCommand ${k}`, `reference "${n}"`, 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '']; view.dispatch(view.state.tr.setNodeMarkup(tpos, undefined, { ...tnode.attrs, params: JSON.stringify(params) })); }} />;
+          return <RefDialog view={view} labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: unquote(p.get('package')) === 'cleveref' ? 'cref' : p.get('LatexCommand') ?? 'ref', tuple: unquote(p.get('tuple')) === 'range' ? 'range' : 'list', caps: unquote(p.get('caps')) === 'true' }} onClose={close}
+            onInsert={(n, k, o) => view.dispatch(referenceTransaction(view.state, n, k, o, tpos))} />;
         }
-        return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={target?.prefill ? { name: target.prefill, kind: 'ref' } : undefined} onClose={close} onInsert={(n, k) => run(C.insertRef(n, k))} />;
+        return <RefDialog view={view} labels={labels} useRefstyle={!!meta?.useRefstyle} initial={target?.prefill ? { name: target.prefill, kind: 'ref' } : undefined} onClose={close} onInsert={(n, k, o) => view.dispatch(referenceTransaction(view.state, n, k, o))} />;
       }
       case 'cite': {
         const target = dialog.arg as { pos: number; node: any } | undefined;
@@ -1265,14 +1189,15 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         users={isLyxDoc ? status.users : undefined} onJumpToUser={jumpToUser}
         onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? shareProject}”: invite people or turn on a link` : undefined}
         onSignIn={user.guest ? signIn : undefined}
-        right={docId ? <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span> : null} />
+        primary={isLyxDoc && <ViewModeSwitch mode={viewMode} onChange={changeViewMode} />}
+        right={docId && <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span>} />
       {user.guest && <GuestCallout user={user} project={curProject} google={google} onSignIn={signIn} />}
-      {isLyxDoc && tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={standardGroups} />}
+      {isLyxDoc && tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={tb.standard} />}
       {/* LyX's default.ui puts View/Update and Extra on one row ("samerow") */}
       {isLyxDoc && (tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
         <div class="tb-samerow">
-          {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={viewUpdateGroups} />}
-          {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={extraGroups} />}
+          {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={tb.viewUpdate} />}
+          {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={tb.extra} />}
         </div>
       )}
       {isLyxDoc && tbMode('vcs') === 'on' && <Toolbar id="vcs" label="Version Control" groups={vcsGroups} />}
@@ -1328,20 +1253,20 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           <div class="rail left"><button data-rail="outline" title={LEFT_TITLE} onClick={() => setShowFiles(true)}>Documents</button></div>
         )}
         {showFiles && <SidebarGrip side="left" />}
-        <div class={'editor-column' + (rawSplit && isLyxDoc ? ' split' : '')}>
+        <div class={'editor-column' + (isLyxDoc ? ' view-' + viewMode + (viewMode === 'wysiwyg' ? '' : ' split') : '')}>
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
           {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/'))} toolbar={<a class="small-btn" href={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/')) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : !isLyxDoc ? (/\.(md|markdown)$/i.test(textId!) ? <MarkdownEditor key={docId} id={textId!} notify={notify} /> : <TextEditor key={docId} id={textId!} notify={notify} />) :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (
-                <ChildEditor key={id} id={id} user={user} marginMode={marginMode} readOnly={viewOnly} onSelection={onSelection} onDocChange={() => { setDocTick(t => t + 1); }}
+                <ChildEditor key={id + ':' + reloadKey} id={id} user={user} marginMode={marginMode} readOnly={viewOnly} onSelection={onSelection} onDocChange={() => { setDocTick(t => t + 1); }} onStale={resolveStale}
                   register={(cid, h) => { if (h) childRefs.current.set(cid, h); else childRefs.current.delete(cid); rerender(); }} />
               ))}
             </div>
           ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); setTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} onSignIn={signIn} notify={notify} />}
         </div>
-        {isLyxDoc && rawSplit && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => { location.hash = '#/' + docId; }} />}
+        {isLyxDoc && <SourcePane key={docId!} target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => changeViewMode('wysiwyg')} />}
         </div>
         {isLyxDoc && !rightTab && (
           <div class="rail right">
@@ -1370,12 +1295,12 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       {/* Contextual toolbars, docked above the status bar like LyX. They are an overlay
           (.bottom-toolbars is absolutely positioned), so their coming and going with the cursor
           never shifts the document. */}
-      {isLyxDoc && (showMath || showTable || showReview || inkMode) && (
+      {isLyxDoc && (tb.showMath || tb.showTable || tb.showReview || inkMode) && (
         <div class="bottom-toolbars" style={{ left: showFiles ? 'var(--left-width, 272px)' : '24px', right: rightTab ? (rightTab === 'pdf' ? 'var(--right-width, 46%)' : 'var(--right-width, 360px)') : '24px' }}>
-          {showMath && <Toolbar id="math" label="Math" groups={mathGroups} />}
-          {showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={mathPanelGroups} />}
-          {showTable && <Toolbar id="table" label="Table" groups={tableGroups} />}
-          {showReview && <Toolbar id="review" label="Review" groups={reviewGroups} />}
+          {tb.showMath && <Toolbar id="math" label="Math" groups={tb.math} />}
+          {tb.showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={tb.mathPanels} />}
+          {tb.showTable && <Toolbar id="table" label="Table" groups={tb.table} />}
+          {tb.showReview && <Toolbar id="review" label="Review" groups={tb.review} />}
           {inkMode && <Toolbar id="ink" label="Draw" groups={inkGroups} />}
         </div>
       )}
@@ -1406,7 +1331,7 @@ function collectChildren(view: EditorView): string[] {
   return out;
 }
 
-function ChildEditor({ id, user, marginMode, readOnly, onSelection, onDocChange, register }: { id: string; user: User; marginMode: boolean; readOnly?: boolean; onSelection: (v: EditorView) => void; onDocChange: () => void; register: (id: string, h: EditorHandle | null) => void }) {
+function ChildEditor({ id, user, marginMode, readOnly, onSelection, onDocChange, onStale, register }: { id: string; user: User; marginMode: boolean; readOnly?: boolean; onSelection: (v: EditorView) => void; onDocChange: () => void; onStale: (handle: EditorHandle, id: string, pending: boolean) => Promise<void>; register: (id: string, h: EditorHandle | null) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<Status>({ connected: false, synced: false, users: [] });
   const [error, setError] = useState<string | null>(null);
@@ -1418,7 +1343,7 @@ function ChildEditor({ id, user, marginMode, readOnly, onSelection, onDocChange,
       if (cancelled || !ref.current) return;
       ref.current.innerHTML = '';
       handle = createEditor({ docId: id, user, container: ref.current, marginMode, child: true, onStatus: setStatus, onSelectionChange: onSelection, onDocChange,
-        onStale: () => { void handle?.discardLocal().then(() => setTimeout(() => location.reload(), 800)); } });
+        onStale: info => { if (handle) void onStale(handle, id, info.pendingLocal); } });
       register(id, handle);
       if (readOnly || m.role === 'view') { handle.setViewOnly(true); handle.setEditable(false); }
       refreshMacros(handle.view, m.macros, true);
@@ -1438,66 +1363,6 @@ function ChildEditor({ id, user, marginMode, readOnly, onSelection, onDocChange,
       {error ? <div class="child-doc-error">Child document cannot be opened: {error}</div> : <div class="editor-host child" ref={ref} />}
     </div>
   );
-}
-
-function LayoutPicker({ layouts, onPick, onClose }: { layouts: { name: string; category?: string }[]; onPick: (n: string) => void; onClose: () => void }) {
-  const [q, setQ] = useState('');
-  const list = layouts.filter(l => l.name.toLowerCase().includes(q.toLowerCase()));
-  return (
-    <div class="dialog-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div class="dialog"><h2>Paragraph layout</h2><div class="body">
-        <input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter' && list[0]) { onPick(list[0].name); onClose(); } if (e.key === 'Escape') onClose(); }} placeholder="type to filter…" />
-        <div class="list">{list.map(l => <div key={l.name} onClick={() => { onPick(l.name); onClose(); }}>{l.name} <span class="sub">{l.category}</span></div>)}</div>
-      </div></div>
-    </div>
-  );
-}
-
-function suggestLabel(view: EditorView): string {
-  const p = C.currentParagraph(view.state);
-  if (!p) return '';
-  const layout = p.node.attrs.layout as string;
-  const text = p.node.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
-  const prefix = /^Section/.test(layout) ? 'sec:' : /^Subsection/.test(layout) ? 'subsec:' : /^Chapter/.test(layout) ? 'chap:' : 'sec:';
-  const $from = view.state.selection.$from;
-  for (let d = $from.depth; d > 0; d--) {
-    const n = $from.node(d);
-    if (n.type.name === 'inset' && n.attrs.name === 'Caption') {
-      let ft = 'fig';
-      for (let dd = d - 1; dd > 0; dd--) { const f = $from.node(dd); if (f.type.name === 'inset' && f.attrs.name === 'Float') { ft = f.attrs.arg === 'table' ? 'tab' : f.attrs.arg === 'algorithm' ? 'alg' : 'fig'; break; } }
-      return `${ft}:${text || 'label'}`;
-    }
-  }
-  return prefix + (text || 'label');
-}
-
-/** One colour per LyX author for change tracking (stable across sessions: by author id order). */
-function applyAuthorColors(authors: { id: number; name: string }[]): void {
-  const palette = ['#2e7d32', '#c62828', '#1565c0', '#6a1b9a', '#ef6c00', '#00838f', '#ad1457', '#4e342e', '#558b2f', '#283593'];
-  // the same hues, lifted so that they read on the dark page (app/theme.ts)
-  const dark = ['#7bd88f', '#ff8a80', '#82b1ff', '#d6a2ff', '#ffb74d', '#4dd0e1', '#f48fb1', '#d7ccc8', '#c5e1a5', '#9fa8da'];
-  let el = document.getElementById('ol-author-colors') as HTMLStyleElement | null;
-  if (!el) { el = document.createElement('style'); el.id = 'ol-author-colors'; document.head.appendChild(el); }
-  // an agent's tracked changes (the MCP connector's authors, "… (MCP)") are grey by default,
-  // so the colours stay for human co-authors and the eye can skim the machine's insertions
-  const isAgent = (n: string) => /\(MCP\)\s*$/.test(n);
-  el.textContent = authors.map((a, i) => {
-    const light = isAgent(a.name) ? '#757575' : palette[i % palette.length];
-    const dk = isAgent(a.name) ? '#9e9e9e' : dark[i % dark.length];
-    return `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: ${light}; }\n`
-      + `html[data-theme="dark"] .lyx-change[data-author="${a.id}"], html[data-theme="dark"] .lyx-inset[data-author="${a.id}"] { --change-color: ${dk}; }`;
-  }).join('\n');
-}
-
-function hashAuthor(name: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < name.length; i++) { h ^= name.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
-  return h | 0;
-}
-
-function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T {
-  let t: ReturnType<typeof setTimeout> | null = null;
-  return ((...a: any[]) => { if (t) clearTimeout(t); t = setTimeout(() => fn(...a), ms); }) as T;
 }
 
 export { schema };

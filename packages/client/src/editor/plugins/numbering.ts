@@ -10,6 +10,7 @@ import { ENUM_STYLES, ITEMIZE_BULLETS, isNumberedSection, sectionLevel } from '.
 import { parseHeader } from '@overlyx/core';
 import { parseFormula } from '@overlyx/core';
 import { editorContext } from '../context';
+import { authorInitials, authorHue } from '../commentops';
 
 export const numberingKey = new PluginKey<DecorationSet>('lyx-numbering');
 
@@ -45,10 +46,24 @@ function build(doc: PMNode): DecorationSet {
           else label = `${ft[0].toUpperCase()}${ft.slice(1)}:`;
           decos.push(Decoration.node(p, p + child.nodeSize, { 'data-caption-label': label }));
         } else if (name === 'Note' && arg === 'Comment') {
-          // comment thread headers
+          // comment thread headers: "Name (2026-08-26 14:03):" — shown as an avatar + name + time line
+          // (the avatar and the muted time come from the attributes; the parentheses and the colon are
+          // made invisible, the text itself stays where it is)
           child.forEach((para, poff) => {
-            const h = parseHeader(para.textContent.trim());
-            if (h) decos.push(Decoration.node(p + 1 + poff, p + 1 + poff + para.nodeSize, { class: 'comment-header' + (h.resolved ? ' resolved' : ''), 'data-author': h.author, 'data-time': h.time }));
+            const text = para.textContent;
+            const h = parseHeader(text.trim());
+            if (!h) return;
+            const start = p + 1 + poff;
+            decos.push(Decoration.node(start, start + para.nodeSize, { class: 'comment-header' + (h.resolved ? ' resolved' : ''), 'data-author': h.author, 'data-time': h.time, 'data-initials': authorInitials(h.author), style: `--who-hue:${authorHue(h.author)}` }));
+            const t0 = start + 1;   // first character of the paragraph
+            const iAuthor = text.indexOf(h.author);
+            if (iAuthor >= 0) decos.push(Decoration.inline(t0 + iAuthor, t0 + iAuthor + h.author.length, { class: 'comment-who' }));
+            const iTime = text.indexOf('(' + h.time + ')', iAuthor >= 0 ? iAuthor + h.author.length : 0);
+            if (iTime >= 0) {
+              decos.push(Decoration.inline(t0 + iTime, t0 + iTime + 1, { class: 'comment-hide' }));
+              decos.push(Decoration.inline(t0 + iTime + 1, t0 + iTime + 1 + h.time.length, { class: 'comment-when' }));
+              decos.push(Decoration.inline(t0 + iTime + 1 + h.time.length, t0 + text.length, { class: h.resolved ? 'comment-hide comment-resolved-tag' : 'comment-hide' }));
+            }
           });
         }
         const inner = name === 'Float' || name === 'Wrap' ? arg : floatType;

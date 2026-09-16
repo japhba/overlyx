@@ -20,6 +20,7 @@ export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.
   }
   const base = webview.asWebviewUri(dist).toString();
   const nonce = crypto.randomBytes(16).toString('base64');
+  const bridgeOrigin = new URL(String(globals.base)).origin;
   const response = live ? await fetch(`${localDev}/${page}.html`) : null;
   if (response && !response.ok) throw new Error(`OverLyX development server: HTTP ${response.status}`);
   let html = response ? await response.text() : fs.readFileSync(file, 'utf8');
@@ -31,11 +32,11 @@ export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.
   const csp = [
     "default-src 'none'",
     `base-uri ${live ? dev : "'none'"}`,
-    `img-src ${webview.cspSource} data: blob: http://127.0.0.1:* ${dev}`,
+    `img-src ${webview.cspSource} data: blob: http://127.0.0.1:* ${bridgeOrigin} ${dev}`,
     `style-src ${webview.cspSource} 'unsafe-inline' ${dev}`,
     `font-src ${webview.cspSource} data: ${dev}`,
     `script-src 'nonce-${nonce}' ${webview.cspSource} ${dev}`,
-    `connect-src http://127.0.0.1:* ${webview.cspSource} ${dev} ${dev.replace(/^http/, 'ws')}`,
+    `connect-src http://127.0.0.1:* ${bridgeOrigin} ${webview.cspSource} ${dev} ${dev.replace(/^http/, 'ws')}`,
     "worker-src blob: data:",
   ].join('; ');
   const inject = `<meta http-equiv="Content-Security-Policy" content="${csp}">\n` +
@@ -47,8 +48,8 @@ export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.
     `<script nonce="${nonce}">
       window.__OVERLYX_VSCAPI = acquireVsCodeApi();
       window.__OVERLYX_VSCODE__ = ${JSON.stringify({ ...globals, assetBase: base + '/' })};
-      window.addEventListener('error', e => { if (!e.message) return; try { window.__OVERLYX_VSCAPI.postMessage({ type: 'notify', kind: 'error', text: 'webview: ' + e.message + ' @ ' + (e.filename || '?') + ':' + (e.lineno || 0) }); } catch {} }, true);
-      window.addEventListener('unhandledrejection', e => { try { window.__OVERLYX_VSCAPI.postMessage({ type: 'notify', kind: 'error', text: 'webview promise: ' + String(e.reason).slice(0, 300) }); } catch {} });
+      window.addEventListener('error', e => { if (!e.message) return; try { window.__OVERLYX_VSCAPI.postMessage({ type: 'notify', kind: 'error', text: 'webview: ' + e.message + ' @ ' + (e.filename || '?') + ':' + (e.lineno || 0), stack: e.error && e.error.stack ? String(e.error.stack).slice(0, 4000) : '' }); } catch {} }, true);
+      window.addEventListener('unhandledrejection', e => { try { const r = e.reason; window.__OVERLYX_VSCAPI.postMessage({ type: 'notify', kind: 'error', text: 'webview promise: ' + String(r && r.message ? r.message : r).slice(0, 300), stack: r && r.stack ? String(r.stack).slice(0, 4000) : '' }); } catch {} });
     </script>`;
   return html.replace('<head>', '<head>\n' + inject);
 }

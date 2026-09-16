@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { isDirectImage, toPng } from './graphics.ts';
+import { isDirectImage, isGraphicsFile, resolveGraphicsPath, toPng } from './graphics.ts';
 
 export interface BridgeDelegate {
   /** project name → absolute root directory (undefined: unknown project) */
@@ -19,6 +19,7 @@ export interface BridgeDelegate {
   meta(docId: string): Promise<Record<string, unknown>>;
   /** current LaTeX text of a document (the open editor's state, else the file) */
   texText(docId: string): Promise<string>;
+  applySource(docId: string, text: string): Promise<{ ok: boolean; warnings: string[] }>;
   clip(docId: string, latex: string): Promise<{ blocks: unknown[]; warnings: string[] }>;
   headerGet(docId: string): Promise<{ headerLines: string[] }>;
   headerSet(docId: string, body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<{ ok: boolean; headerLines: string[] }>;
@@ -107,6 +108,11 @@ export class Bridge {
       const kind = m[3] ? `${m[2]}/${m[3]}` : m[2];
       if (kind === 'meta') { send(res, 200, await d.meta(docId)); return; }
       if (kind === 'tex') { res.setHeader('Content-Type', 'application/x-tex; charset=utf-8'); res.end(await d.texText(docId)); return; }
+      if (kind === 'source' && req.method === 'POST') {
+        const b = await body(req);
+        if (typeof b?.text !== 'string') { send(res, 400, { error: 'source text required' }); return; }
+        send(res, 200, await d.applySource(docId, b.text)); return;
+      }
       if (kind === 'outline') { send(res, 200, d.outline(docId)); return; }
       if (kind === 'header' && req.method === 'GET') { send(res, 200, await d.headerGet(docId)); return; }
       if (kind === 'header' && req.method === 'POST') { send(res, 200, await d.headerSet(docId, await body(req))); return; }
@@ -164,14 +170,32 @@ export class Bridge {
       return;
     }
 
+    /* ---- project events (server-sent): a graphics file was rewritten → the editor reloads the image ---- */
+    m = /^\/projects\/([^/]+)\/events$/.exec(api);
+    if (m) {
+      const root = d.projectRoot(decodeURIComponent(m[1]));
+      if (!root) { send(res, 404, { error: 'unknown project' }); return; }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+      res.write(': connected\n\n');
+      const hb = setInterval(() => res.write(': hb\n\n'), 20000);
+      const stop = watchGraphics(root, (rel, v) => res.write(`data: ${JSON.stringify({ kind: 'graphics', path: rel, v })}\n\n`));
+      req.on('close', () => { clearInterval(hb); stop(); });
+      return;
+    }
+
     /* ---- project files: graphics (converted) and raw files ---- */
     m = /^\/projects\/([^/]+)\/(graphics|file)\/(.+)$/.exec(api);
     if (m) {
       const root = d.projectRoot(decodeURIComponent(m[1]));
       if (!root) { send(res, 404, { error: 'unknown project' }); return; }
       const rel = m[3].split('/').map(decodeURIComponent).join('/');
-      const abs = path.resolve(root, rel);
-      if (abs !== root && !abs.startsWith(root + path.sep)) { send(res, 403, { error: 'path escapes project' }); return; }
+      const requested = path.resolve(root, rel);
+      const abs = m[2] === 'graphics' ? resolveGraphicsPath(requested) : requested;
+      // Local papers may reference shared figures above their own directory. Permit supported
+      // graphics through the image endpoint; raw file reads and uploads remain project-bounded.
+      if (abs !== root && !abs.startsWith(root + path.sep) && (m[2] !== 'graphics' || !isGraphicsFile(abs))) {
+        send(res, 403, { error: 'path escapes project' }); return;
+      }
       if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) { send(res, 404, { error: 'not found' }); return; }
       if (m[2] === 'graphics' && !isDirectImage(abs)) {
         try {
@@ -190,6 +214,46 @@ export class Bridge {
 
     send(res, 404, { error: 'not found: ' + api });
   }
+}
+
+/**
+ * Graphics files under a project root, watched while an editor listens (one recursive fs.watch
+ * per root, shared; changes are reported once the file has been quiet for a moment — a plot
+ * script writes in several chunks). Platforms without recursive watching simply report nothing.
+ */
+type GraphicsWatch = { watcher: fs.FSWatcher | null; subs: Set<(rel: string, v: number) => void>; timers: Map<string, NodeJS.Timeout> };
+const graphicsWatchers = new Map<string, GraphicsWatch>();
+export function watchGraphics(root: string, cb: (rel: string, v: number) => void): () => void {
+  let w = graphicsWatchers.get(root);
+  if (!w) {
+    const entry: GraphicsWatch = { watcher: null, subs: new Set(), timers: new Map() };
+    try {
+      entry.watcher = fs.watch(root, { recursive: true, persistent: false }, (_event, filename) => {
+        if (!filename) return;
+        const rel = String(filename).split(path.sep).join('/');
+        if (!isGraphicsFile(rel) || rel.split('/').some(seg => seg.startsWith('.') || seg === 'node_modules' || seg === '_build')) return;
+        clearTimeout(entry.timers.get(rel));
+        entry.timers.set(rel, setTimeout(() => {
+          entry.timers.delete(rel);
+          let v = Date.now();
+          try { const st = fs.statSync(path.join(root, rel)); if (!st.isFile()) return; v = Math.round(st.mtimeMs); } catch { return; }   // removed
+          for (const s of [...entry.subs]) s(rel, v);
+        }, 400));
+      });
+      entry.watcher.on('error', () => { /* the directory went away; the editor simply stops reloading */ });
+    } catch { entry.watcher = null; }
+    w = entry;
+    graphicsWatchers.set(root, w);
+  }
+  const mine = w;
+  mine.subs.add(cb);
+  return () => {
+    mine.subs.delete(cb);
+    if (mine.subs.size) return;
+    for (const t of mine.timers.values()) clearTimeout(t);
+    mine.watcher?.close();
+    if (graphicsWatchers.get(root) === mine) graphicsWatchers.delete(root);
+  };
 }
 
 function send(res: http.ServerResponse, status: number, data: unknown): void {

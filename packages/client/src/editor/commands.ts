@@ -586,6 +586,28 @@ export function insertMath(display: boolean, env?: string): (view: EditorView) =
   };
 }
 
+/** Inside raw LaTeX (ERT, listings) or a code-like paragraph, where every character is literal. */
+export function inRawText(state: EditorState): boolean {
+  const $from = state.selection.$from;
+  for (let d = $from.depth; d > 0; d--) {
+    const n = $from.node(d);
+    if (n.type.name === 'inset' && (n.attrs.name === 'ERT' || n.attrs.name === 'listings')) return true;
+    if (n.type.name === 'paragraph' && /^(LyX-Code|Verbatim\*?|Code)$/.test(String(n.attrs.layout))) return true;
+  }
+  return false;
+}
+
+/**
+ * `$` typed in the text opens an inline formula (a second `$` right away makes it a display
+ * formula, `$` inside closes it, Backspace in the empty formula gives the typed dollars back as
+ * text — see LyxMathField.dollar). In raw LaTeX the dollar stays a character.
+ */
+export const typeDollar: Command = (state, _dispatch, view) => {
+  if (!view || !state.selection.$from.parent.isTextblock || inRawText(state)) return false;
+  pendingFocus.dollar = '$';
+  return insertMath(false)(view);
+};
+
 /** Toggle inline <-> display for the math node at/near the selection. */
 export const toggleMathDisplay: Command = (state, dispatch) => {
   const sel = state.selection;

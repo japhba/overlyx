@@ -54,6 +54,7 @@ export class OpenDoc {
   isChild = false;
   /** what the .tex file on disk contains: state vector of the Y.Doc when it was last written / read */
   lastSavedSV: Uint8Array = Y.encodeStateVector(this.ydoc);
+  lastSavedSnapshot: Uint8Array = Y.encodeSnapshot(Y.snapshot(this.ydoc));
   lastSavedAt = 0;
   /** notified after every successful save (the WebSocket layer tells the clients) */
   savedListeners = new Set<() => void>();
@@ -186,6 +187,7 @@ export class OpenDoc {
   /** The file on disk now corresponds to the current state. */
   markSaved(): void {
     this.lastSavedSV = Y.encodeStateVector(this.ydoc);
+    this.lastSavedSnapshot = Y.encodeSnapshot(Y.snapshot(this.ydoc));
     this.lastSavedAt = Date.now();
     for (const l of this.savedListeners) { try { l(); } catch { /* ignore */ } }
   }
@@ -260,6 +262,7 @@ export class OpenDoc {
       // merge that first — writing over it would silently discard their change.
       this.absorbExternalChange();
       const sv = Y.encodeStateVector(this.ydoc);
+      const snapshot = Y.encodeSnapshot(Y.snapshot(this.ydoc));
       const { text, files } = this.render();
       this.writeSidecars(files);   // even when the .tex itself is unchanged (a stroke changes only the SVG)
       const hash = sha1(text);
@@ -287,6 +290,7 @@ export class OpenDoc {
       this.saveError = null;
       this.persistState();
       this.lastSavedSV = sv;
+      this.lastSavedSnapshot = snapshot;
       this.lastSavedAt = Date.now();
       for (const l of this.savedListeners) { try { l(); } catch { /* ignore */ } }
       return true;
@@ -438,6 +442,9 @@ export const fileWrittenListeners = new Set<(project: string, userIds: number[])
  * (SSE, `GET /api/projects/:project/events`) so they refresh themselves.
  */
 export const projectChangedListeners = new Set<(project: string) => void>();
+/** a graphics file of a project was written or created: (project, project-relative path, mtime) — the editors reload the image */
+export const graphicsChangedListeners = new Set<(project: string, file: string, version: number) => void>();
+const GRAPHICS_FILE = /\.(png|jpe?g|gif|webp|svgz?|pdf|eps|ps|tiff?|bmp)$/i;
 
 export class DocManager {
   docs = new Map<string, OpenDoc>();
@@ -639,7 +646,20 @@ export class DocManager {
     this.watcher.on('add', (file: string) => void this.onExternalChange(file));
     this.watcher.on('unlink', (file: string) => void this.onExternalRemove(file));
     // structural changes only ('change' would fire on every document save while someone types)
-    this.watcher.on('all', (event: string, file: string) => { if (event !== 'change') this.notifyProjectChanged(file); });
+    this.watcher.on('all', (event: string, file: string) => {
+      if (event !== 'change') this.notifyProjectChanged(file);
+      if ((event === 'change' || event === 'add') && GRAPHICS_FILE.test(file)) this.notifyGraphicsChanged(file);
+    });
+  }
+
+  /** A figure was (re)written — a plot script ran, a file was uploaded: tell the editors showing it. */
+  private notifyGraphicsChanged(file: string): void {
+    const parts = path.relative(config.projectsDir, file).split(path.sep);
+    const project = parts.shift();
+    if (!project || project === '..' || project.startsWith('.') || !parts.length) return;
+    let version = Date.now();
+    try { version = Math.round(fs.statSync(file).mtimeMs); } catch { /* gone again */ }
+    for (const l of graphicsChangedListeners) l(project, parts.join('/'), version);
   }
 
   /** Tell the subscribed clients (debounced per project) that the project's file list changed. */

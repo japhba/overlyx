@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import type { DocMeta } from '@client/api';
 import { api } from '@client/api';
-import { refreshMacros } from '@client/editor/editor';
+import { refreshMacros } from '@client/editor/macrodefs';
 import { setMarginMode } from '@client/editor/plugins/margin';
 import { editorSessions } from './editorSession';
 import { createLocalEditor, type LocalEditorHandle } from './localEditor';

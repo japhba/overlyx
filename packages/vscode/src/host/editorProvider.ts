@@ -13,11 +13,12 @@ import type { TexContext } from './texdoc.ts';
 import { projectDirFor } from './project.ts';
 
 export interface ProviderDeps {
-  bridgeBase(): string;
+  bridgeBase(): Promise<string>;
   layoutDir(): string;
   /** register a project root; returns its project name */
   registerRoot(root: string): string;
   startBuild(e: OpenEditor, opts?: { open?: boolean }): void;
+  reportError(error: unknown, area: string): void;
   cancelBuild(docId: string): void;
   openPdfPanel(docId: string): void;
   postToPdf(docId: string, msg: unknown): void;
@@ -36,7 +37,9 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
   private applyChain: Promise<void> = Promise.resolve();
   constructor(private context: vscode.ExtensionContext, private registry: Registry, private deps: ProviderDeps) {}
 
-  async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
+  async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel, token: vscode.CancellationToken): Promise<void> {
+    const base = await this.deps.bridgeBase();
+    if (token.isCancellationRequested) return;
     // the project is the directory that holds the file, not the whole workspace (a child
     // document adopts its master's directory so it keeps the master's class and preamble)
     const folder = vscode.workspace.getWorkspaceFolder(document.uri);
@@ -45,7 +48,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     const relPath = path.relative(root, document.uri.fsPath);
     let ctx: TexContext;
     try {
-      ctx = { root, layoutDir: this.deps.layoutDir() };
+      ctx = { root, layoutDir: this.deps.layoutDir(), readText: abs => vscode.workspace.textDocuments.find(d => !d.isClosed && d.uri.fsPath === abs)?.getText() };
     } catch (e) {
       panel.webview.html = `<!doctype html><body style="font-family:sans-serif;padding:2em">${String(e)}</body>`;
       return;
@@ -55,7 +58,6 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     this.registry.add(entry);
 
     panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] };
-    const base = (await vscode.env.asExternalUri(vscode.Uri.parse(this.deps.bridgeBase()))).toString().replace(/\/$/, '');
 
     const post = (msg: HostToEditor) => void panel.webview.postMessage(msg);
     const subs: vscode.Disposable[] = [];
@@ -77,7 +79,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
     };
     let metadataTimer: NodeJS.Timeout | undefined;
     const metadataChanged = () => { clearTimeout(metadataTimer); metadataTimer = setTimeout(() => post({ type: 'metadataChanged' }), 300); };
-    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/*.{tex,bib,sty,cls}'));
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/*.{tex,bib,sty,cls,lyx}'));
     const diskChanged = (uri: vscode.Uri) => {
       if (path.relative(root, uri.fsPath).split(path.sep).some(part => part === '_build' || part === '.git')) return;
       this.applyChain = this.applyChain.then(async () => {
@@ -150,6 +152,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           entry.selectionPos = msg.pos;
           break;
         case 'notify':
+          if (msg.kind === 'error') this.deps.reportError(Object.assign(new Error(msg.text), msg.stack ? { stack: msg.stack } : {}), 'webview.editor');
           if (msg.kind === 'error') void vscode.window.showErrorMessage('OverLyX: ' + msg.text);
           else vscode.window.setStatusBarMessage('OverLyX: ' + msg.text, 5000);
           break;
@@ -157,7 +160,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           this.applyChain = this.applyChain.then(async () => {
             for (const target of [session, ...related.values()]) {
               if (await target.syncFromDisk()) pushSnapshot(target);
-              if (target.document.isDirty) await target.document.save();
+              await target.save();
             }
           }).catch(e => console.error('overlyx save failed', e));
           break;

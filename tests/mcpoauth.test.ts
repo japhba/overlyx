@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import crypto from 'node:crypto';
 import http from 'node:http';
 import express from 'express';
+import { setSecurityHeaders } from '../packages/server/src/security.ts';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-oauth-test');
 rmSync(ROOT, { recursive: true, force: true });
@@ -34,6 +35,7 @@ const cookie = 'ol_session=' + signSession(toSessionUser(owner));
 
 const app = express();
 app.use(authMiddleware);
+app.use((_req, res, next) => { setSecurityHeaders(res); next(); });
 app.use(wellKnownRoutes());
 app.use('/oauth', oauthRoutes());
 app.use('/mcp', mcpRouter());
@@ -138,6 +140,21 @@ describe('authorization + token', () => {
     const html = await (await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } })).text();
     expect(html).toContain('Connect ChatGPT test?');
     expect(html).toContain('Owner');
+  });
+
+  it('permits only the validated callback origin in the consent form policy', async () => {
+    const q = new URLSearchParams({ client_id: clientId, redirect_uri: REDIRECT, response_type: 'code', code_challenge: 'abc', code_challenge_method: 'S256' });
+    const anonymous = await fetch(`${base}/oauth/authorize?${q}`);
+    const baseline = anonymous.headers.get('content-security-policy')!;
+    expect(baseline).toContain("form-action 'self';");
+    const consent = await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } });
+    expect(consent.headers.get('content-security-policy')).toBe(baseline.replace("form-action 'self';", "form-action 'self' https://chatgpt.com;"));
+    q.set('redirect_uri', 'https://unregistered.example/callback');
+    const invalid = await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie }, redirect: 'manual' });
+    expect(invalid.status).toBe(400);
+    expect(invalid.headers.get('content-security-policy')).toBe(baseline);
+    const otherPage = await fetch(`${base}/.well-known/oauth-authorization-server`, { headers: { cookie } });
+    expect(otherPage.headers.get('content-security-policy')).toBe(baseline);
   });
 
   it('code + PKCE exchange yields a working token pair; codes are single-use', async () => {

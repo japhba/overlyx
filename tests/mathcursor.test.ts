@@ -3,7 +3,7 @@
  * same LaTeX and cursor positions as LyX.
  */
 import { describe, it, expect } from 'vitest';
-import { parseFormula, writeFormula, MathCursor, completeCommand, isKnownCommand, type MacroTable } from '../packages/core/src/math';
+import { parseFormula, writeFormula, MathCursor, completeCommand, isKnownCommand, atomCells, type MacroTable, type Slice } from '../packages/core/src/math';
 
 const MACROS: MacroTable = { inv: { nargs: 1 }, Pfi: { nargs: 0 }, cum: { nargs: 2 } };
 
@@ -247,5 +247,51 @@ describe('command completion (Tab in macro mode)', () => {
     expect(isKnownCommand('frac', MACROS)).toBe(true);
     expect(isKnownCommand('inv', MACROS)).toBe(true);
     expect(isKnownCommand('alp', MACROS)).toBe(false);
+  });
+});
+
+describe('selection with anchor and cursor at different depths (normalAnchor)', () => {
+  function withAnchor(latex: string, anchor: (h: ReturnType<typeof parseFormula>) => Slice[]) {
+    const h = parseFormula(latex, {});
+    const c = new MathCursor(h, {});
+    c.slices = anchor(h);
+    c.resetAnchor();
+    return { h, c, frac: atomCells(h)[0][4] };
+  }
+  it('an anchor inside a fraction and the cursor after it select the fraction whole', () => {
+    const { h, c, frac } = withAnchor('$abc+\\frac{u}{v}+xyz$', h => [{ owner: h, idx: 0, pos: 4 }, { owner: atomCells(h)[0][4], idx: 0, pos: 1 }]);
+    c.slices = [{ owner: h, idx: 0, pos: 6 }]; c.setSelection();
+    expect(c.selection).toBe(true);
+    expect(c.grabSelection()).toBe('\\frac{u}{v}+');
+    c.slices = [{ owner: h, idx: 0, pos: 2 }]; c.setSelection();
+    expect(c.grabSelection()).toBe('c+\\frac{u}{v}');
+    c.slices = [{ owner: h, idx: 0, pos: 4 }]; c.setSelection();   // right before the fraction: still the fraction
+    expect(c.selection).toBe(true);
+    expect(c.grabSelection()).toBe('\\frac{u}{v}');
+    c.slices = [{ owner: h, idx: 0, pos: 4 }, { owner: frac, idx: 0, pos: 1 }]; c.setSelection();   // back where it started
+    expect(c.selection).toBe(false);
+  });
+  it('numerator and denominator: whole cells of the fraction', () => {
+    const { h, c, frac } = withAnchor('$abc+\\frac{u}{v}+xyz$', h => [{ owner: h, idx: 0, pos: 4 }, { owner: atomCells(h)[0][4], idx: 0, pos: 0 }]);
+    c.slices = [{ owner: h, idx: 0, pos: 4 }, { owner: frac, idx: 1, pos: 1 }]; c.setSelection();
+    const r = c.selRange()!;
+    expect([r.idx1, r.idx2]).toEqual([0, 1]);
+    expect(c.selCells(r)).toEqual([[0, 1]]);
+  });
+  it('setCursorSelectionTo (Shift+click) takes an inset off the anchor whole, on the side it lies', () => {
+    const { h, c, frac } = withAnchor('$abc+\\frac{u}{v}+xyz$', h => [{ owner: h, idx: 0, pos: 6 }]);
+    c.setCursorSelectionTo([{ owner: h, idx: 0, pos: 4 }, { owner: frac, idx: 0, pos: 1 }]);
+    expect(c.grabSelection()).toBe('\\frac{u}{v}+');
+    expect(c.depth).toBe(1);
+    const { c: c2, frac: f2, h: h2 } = withAnchor('$abc+\\frac{u}{v}+xyz$', h => [{ owner: h, idx: 0, pos: 1 }]);
+    c2.setCursorSelectionTo([{ owner: h2, idx: 0, pos: 4 }, { owner: f2, idx: 1, pos: 0 }]);
+    expect(c2.grabSelection()).toBe('bc+\\frac{u}{v}');
+  });
+  it('setSelection without a move is no selection; a click elsewhere keeps the anchor for Shift+click', () => {
+    const { h, c } = withAnchor('$abc$', h => [{ owner: h, idx: 0, pos: 1 }]);
+    c.setSelection();
+    expect(c.selection).toBe(false);
+    c.setCursorSelectionTo([{ owner: h, idx: 0, pos: 3 }]);
+    expect(c.grabSelection()).toBe('bc');
   });
 });

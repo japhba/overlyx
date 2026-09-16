@@ -6,6 +6,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } from '../api';
+import { subscribeProjectEvents } from '../projectevents';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
 
 /**
@@ -18,9 +19,7 @@ export function useProjectEvents(project: string | null | undefined, onChange: (
   cb.current = onChange;
   useEffect(() => {
     if (!project) return;
-    const es = new EventSource(`/api/projects/${encodeURIComponent(project)}/events`);
-    es.onmessage = () => cb.current();
-    return () => es.close();
+    return subscribeProjectEvents(project, ev => { if (ev.kind === 'files') cb.current(); });
   }, [project]);
 }
 

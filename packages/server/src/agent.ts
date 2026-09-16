@@ -77,9 +77,8 @@ interface PendingReq { resolve: (v: any) => void; reject: (e: Error) => void; ti
 const agentHomeDir = (userId: number) => path.join(config.dataDir, 'agent-home', String(userId));
 
 const AGENT_TOKEN_NAME = 'Agent panel';
-/** The internal MCP token the embedded agent authenticates with (plaintext kept so every codex
- *  start can pass it via the environment; visible and revocable like any agent token — a deleted
- *  one is re-minted on the next start). */
+/** The hidden internal MCP credential the embedded agent authenticates with (plaintext kept so
+ *  every codex start can pass it via the environment; re-minted if it is ever deleted). */
 function agentMcpToken(userId: number): string {
   const row = db.prepare('SELECT token_plain FROM mcp_tokens WHERE user_id = ? AND name = ? AND token_plain IS NOT NULL').get(userId, AGENT_TOKEN_NAME) as { token_plain: string } | undefined;
   return row ? row.token_plain : createMcpToken(userId, AGENT_TOKEN_NAME, true).token;
@@ -444,7 +443,7 @@ const threadRow = (tid: string) => db.prepare('SELECT * FROM agent_threads WHERE
 
 export function agentRoutes(): express.Router {
   const r = express.Router();
-  r.use((req, res, next) => { if (!config.agent.enabled) { res.status(404).json({ error: 'the agent is not enabled on this server' }); return; } next(); });
+  r.use(['/agent', '/projects/:project/agent'], (_req, res, next) => { if (!config.agent.enabled) { res.status(404).json({ error: 'the agent is not enabled on this server' }); return; } next(); });
 
   const fail = (res: Response, e: unknown, code = 500) => { if (!res.headersSent) res.status(code).json({ error: (e as Error)?.message ?? String(e) }); };
 

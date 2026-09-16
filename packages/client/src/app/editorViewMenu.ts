@@ -1,6 +1,6 @@
 import type { Command } from 'prosemirror-state';
 import type { MenuDef, MenuEntry } from './MenuBar';
-import type { ToolbarId, ToolbarMode } from './editorToolbars';
+import type { ToolbarId, ToolbarMode } from './toolbars';
 import { editorContext } from '../editor/context';
 import * as C from '../editor/commands';
 

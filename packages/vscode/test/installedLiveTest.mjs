@@ -82,20 +82,32 @@ try {
   assert.ok(result.fonts.every(f => f.status === 'loaded'), 'No font request may fail');
   assert.equal(result.fonts.filter(f => f.family === 'CMU Serif').length, 4, 'All four Computer Modern text faces load');
   assert.ok(result.fonts.some(f => f.family === 'KaTeX_Main'), 'Computer Modern math fonts load');
-  assert.deepEqual(await frame.locator('.menubar .menu > button').allTextContents(), ['File', 'Edit', 'View', 'Insert', 'Navigate', 'Document', 'Tools', 'Help']);
-  await frame.locator('.menubar .menu > button').getByText('Help', { exact: true }).click();
+  const menuTitles = ['File', 'Edit', 'View', 'Insert', 'Navigate', 'Document', 'Tools', 'Help'];
+  const compact = await frame.locator('.menu-overflow').count() > 0;
+  if (compact) {
+    await frame.locator('.menu-overflow > button').click();
+    assert.deepEqual(await frame.locator('.menu-overflow-panel [role="menuitem"]').allTextContents(), menuTitles);
+    await page.keyboard.press('Escape');
+  } else assert.deepEqual(await frame.locator('.menubar .menu > button').allTextContents(), menuTitles);
+  const openMenu = async title => {
+    if (compact) {
+      await frame.locator('.menu-overflow > button').click();
+      await frame.locator('.menu-overflow-panel [role="menuitem"]').getByText(title, { exact: true }).click();
+    } else await frame.locator('.menubar .menu > button').getByText(title, { exact: true }).click();
+  };
+  await openMenu('Help');
   await frame.locator('[data-help-search]').fill('statistics');
   assert.ok(await frame.locator('.help-menu').innerText().then(text => text.includes('Statistics')));
   await page.keyboard.press('Escape');
-  await frame.locator('.menubar .menu > button').getByText('Tools', { exact: true }).click();
+  await openMenu('Tools');
   await frame.locator('.menu-item').getByText('Settings…', { exact: true }).click();
   assert.equal(await frame.locator('[data-pref="autoCorrect"]').count(), 1);
   await page.keyboard.press('Escape');
   const rulerBefore = await frame.locator('.ruler').count();
-  await frame.locator('.menubar .menu > button').getByText('View', { exact: true }).click();
+  await openMenu('View');
   await frame.locator('.menu-item').filter({ hasText: /^Ruler$/ }).click();
   assert.notEqual(await frame.locator('.ruler').count(), rulerBefore);
-  await frame.locator('.menubar .menu > button').getByText('View', { exact: true }).click();
+  await openMenu('View');
   await frame.locator('.menu-item').filter({ hasText: /^Ruler$/ }).click();
   console.log('PASS: shared menus, command search, settings, ruler, and native palette coexistence.');
   if (process.argv[3]) {

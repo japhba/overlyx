@@ -13,7 +13,7 @@ export function SaveIndicator({ save }: { save: SaveState }) {
     case 'stale': return <span class="save-state offline" title="The document on the server has a different history than this copy; it is being reloaded.">⚠ document was re-created on the server — reloading…</span>;
     case 'offline': return (
       <span class="save-state offline" title={(save.unavailable ? 'This document has not been opened on this device yet, so there is no local copy to show. ' : 'You can keep editing: changes are stored in this browser and sync automatically when the connection is back. ') + (save.detail ? 'Reason: ' + save.detail + '.' : '')}>
-        ⚡ Offline{save.unavailable ? ' — document not available offline' : save.pending ? ' — changes kept on this device, will sync when back online' : ' — working from the local copy'}
+        ⚡ Offline{save.unavailable ? ' — document not available offline' : save.localError ? ' — local save failed; keep this tab open' : save.localPending ? ' — saving changes on this device…' : save.pending ? ' — changes kept on this device, will sync when back online' : ' — working from the local copy'}
       </span>
     );
   }
@@ -49,10 +49,15 @@ export function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number
 
 export interface DocStats { words: number; chars: number; sel: boolean }
 
+function BuildVersion() {
+  const version = import.meta.env.VITE_BUILD_VERSION;
+  return <span class="build-version" title={`OverLyX build (UTC): ${version}`}>{version}</span>;
+}
+
 export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, stats, zoom, onZoom }: {
   layout: string; status: Status; chord: string | null; message: { text: string; kind: 'info' | 'error' } | null; save: SaveState;
   tracking: boolean; trackingAs?: string; change?: string | null; docLabel?: string | null; readOnly?: boolean;
-  /** no document editor is open (start screen, text file): only messages */
+  /** no document editor is open (start screen, text file): only messages and the build version */
   quiet?: boolean;
   /** a newer build of OverLyX is deployed than the one running in this tab */
   updateReady?: boolean;
@@ -63,7 +68,7 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
   zoom?: number;
   onZoom?: (z: number) => void;
 }) {
-  if (quiet) return <div class="statusbar">{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" /></div>;
+  if (quiet) return <div class="statusbar">{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" /><BuildVersion /></div>;
   return (
     <div class="statusbar">
       <span><span class={'dot' + (status.connected ? ' on' : '')} />{status.connected ? (status.synced ? 'connected' : 'syncing…') : save.state === 'connecting' ? 'connecting…' : 'offline'}</span>
@@ -84,6 +89,7 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
       )}
       <SaveIndicator save={save} />
       {zoom !== undefined && onZoom && <ZoomControl zoom={zoom} onZoom={onZoom} />}
+      <BuildVersion />
     </div>
   );
 }

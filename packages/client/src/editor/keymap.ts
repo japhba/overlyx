@@ -10,7 +10,7 @@ import { undo, redo } from 'y-prosemirror';
 import { goToNextCell } from 'prosemirror-tables';
 import type { EditorView } from 'prosemirror-view';
 import {
-  paragraphBreak, paragraphBreakInverse, fontCommands, fontDefault, changeDepth, listIndent, insertMath, toggleMathDisplay,
+  paragraphBreak, paragraphBreakInverse, fontCommands, fontDefault, changeDepth, listIndent, insertMath, toggleMathDisplay, typeDollar,
   insertNewline, insertSpace, insertSpecial, insertERT, insertFootnote, insertNote, insertComment, selectInset, toggleInset,
   moveParagraph, deleteToParagraphEnd, setLayout, setKnownLayout, setParagraphAttrs, arrowIntoMath, setValueMark, insertHyphens, insertQuote, smartQuote, insertMarginal,
 } from './commands';
@@ -242,6 +242,7 @@ export function lyxKeymap(): Plugin {
     'Shift-ArrowRight': shiftOverAtom(1),
     'Shift-ArrowLeft': shiftOverAtom(-1),
     '"': smartQuote,
+    '$': typeDollar,   // $…$ / $$…$$ typed as in LaTeX open an inline / display formula
     'Alt-"': insertQuote('l', 'e', 's'),
     'Shift-Mod-"': (state, dispatch) => dispatch ? (dispatch(state.tr.insertText('"')), true) : true,
     'Alt-m': (_s, _d, view) => (view ? insertMath(false)(view) : false),

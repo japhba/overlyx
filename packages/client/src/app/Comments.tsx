@@ -6,7 +6,7 @@
  */
 import { useMemo, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
-import { collectComments, gotoComment, setCommentResolved, type CommentInfo } from '../editor/commentops';
+import { collectComments, gotoComment, setCommentResolved, authorInitials, authorHue, type CommentInfo } from '../editor/commentops';
 import { viewDocId } from '../editor/context';
 import { navHistory } from './navhistory';
 
@@ -20,6 +20,7 @@ export function Comments({ views, tick }: { views: EditorView[]; /** bumps when 
     <div key={viewDocId(it.view) + ':' + it.pos} class={'comment-row' + (it.resolved ? ' resolved' : '')} data-comment={it.resolved ? 'resolved' : 'open'}
       onClick={() => navHistory.jump(() => gotoComment(it.view, it.pos))} title="Show this comment in the text">
       <div class="who">
+        <span class="avatar" style={`--who-hue:${authorHue(it.author || 'Comment')}`}>{authorInitials(it.author || 'C')}</span>
         <span class="author">{it.author || 'Comment'}</span>
         {it.time && <span class="time">{it.time}</span>}
         {many && <span class="doc">{viewDocId(it.view).split('/').pop()}</span>}

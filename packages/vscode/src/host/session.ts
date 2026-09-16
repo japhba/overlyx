@@ -11,9 +11,10 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { lyxToPm, headerValue, mergeLyx, type LyxDocument, type PMJSON } from '@overlyx/core';
 import { documentModel, sameModel, modelDocument, type DocumentModel } from '../shared/documentModel.ts';
-import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, type TexContext } from './texdoc.ts';
+import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, sameDocumentText, type TexContext } from './texdoc.ts';
 import { buildMeta } from './meta.ts';
 import { findMaster } from './project.ts';
+import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 
 export class DocSession {
   private headerLines: string[] = [];
@@ -22,6 +23,14 @@ export class DocSession {
   private lastWritten: string | null = null;
   private disposed = false;
   private diskText: string;
+  private writes: Promise<unknown> = Promise.resolve();
+
+  /** Source, visual edits, settings and saves share one ordered write queue. */
+  private enqueue<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.writes.catch(() => {}).then(work);
+    this.writes = next;
+    return next;
+  }
 
   constructor(
     public document: vscode.TextDocument,
@@ -55,9 +64,13 @@ export class DocSession {
   }
 
   /** The webview sent an updated PM doc: write it into the TextDocument. */
-  async applyPmUpdate(pmDoc: PMJSON, headerLines: string[], base: DocumentModel): Promise<boolean> {
+  applyPmUpdate(pmDoc: PMJSON, headerLines: string[], base: DocumentModel): Promise<boolean> {
+    return this.enqueue(() => this.writePmUpdate(pmDoc, headerLines, base));
+  }
+
+  private async writePmUpdate(pmDoc: PMJSON, headerLines: string[], base: DocumentModel): Promise<boolean> {
     if (this.disposed) return false;
-    const diskChanged = await this.syncFromDisk();
+    const diskChanged = await this.readDisk();
     const incoming = documentModel(pmDoc, headerLines);
     if (sameModel(incoming, base)) return diskChanged;
     const current = parseDocumentText(this.document.getText(), this.ctx, this.relPath);
@@ -76,7 +89,9 @@ export class DocSession {
   }
 
   /** VS Code does not reload a dirty TextDocument when another process changes its file. */
-  async syncFromDisk(): Promise<boolean> {
+  syncFromDisk(): Promise<boolean> { return this.enqueue(() => this.readDisk()); }
+
+  private async readDisk(): Promise<boolean> {
     // Child editors in a joint view do not own VS Code tabs, so their buffers may be released.
     const reopened = this.document.isClosed;
     if (reopened) this.document = await vscode.workspace.openTextDocument(this.document.uri);
@@ -92,7 +107,7 @@ export class DocSession {
         });
         const timeout = setTimeout(() => { listener.dispose(); reject(new Error(`VS Code did not reload ${this.docId} from disk`)); }, 5000);
       });
-      return this.syncFromDisk();
+      return this.readDisk();
     }
     const local = this.document.getText();
     let text = disk;
@@ -133,7 +148,7 @@ export class DocSession {
     this.lastWritten = text;
     const edit = new vscode.WorkspaceEdit();
     edit.replace(this.document.uri, new vscode.Range(0, 0, this.document.lineCount, 0), text);
-    if (!await vscode.workspace.applyEdit(edit)) throw new Error(`Could not apply the edit to ${this.docId}`);
+    if (!await vscode.workspace.applyEdit(edit)) { this.lastWritten = null; throw new Error('VS Code could not apply the document edit'); }
   }
 
   /**
@@ -143,12 +158,36 @@ export class DocSession {
   externalChange(): { pmDoc: PMJSON; headerLines: string[] } | null {
     const text = this.document.getText();
     if (text === this.lastWritten) return null;
+    // VS Code changed our own write cosmetically (whitespace trimmed / final newline on save): the
+    // document is the same — re-parsing and pushing it would undo what was typed since
+    if (this.lastWritten !== null && sameDocumentText(text, this.lastWritten, this.ctx, this.relPath)) { this.lastWritten = text; return null; }
     const r = this.parseCurrent();
     return { pmDoc: r.pmDoc, headerLines: r.headerLines };
   }
 
+  /** Source view edits use the same TextDocument and parsing path as external edits. */
+  applySource(text: string): Promise<ReturnType<DocSession['parseCurrent']>> {
+    return this.enqueue(() => this.writeSource(text));
+  }
+
+  private async writeSource(text: string): Promise<ReturnType<DocSession['parseCurrent']>> {
+    if (this.disposed) throw new Error('The document has closed');
+    // Validate before replacing the TextDocument, retaining the original on a parser failure.
+    parseDocumentText(text, this.ctx, this.relPath);
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(this.document.uri, new vscode.Range(0, 0, this.document.lineCount, 0), text);
+    if (!await vscode.workspace.applyEdit(edit)) throw new Error('VS Code could not apply the source edit');
+    this.lastWritten = text;
+    return this.parseCurrent();
+  }
+
   /** Update header lines (document settings / tracking switches) and re-serialize. */
-  async setHeader(body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<string[]> {
+  setHeader(body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<string[]> {
+    return this.enqueue(() => this.writeHeader(body));
+  }
+
+  private async writeHeader(body: { headerLines?: string[]; preamble?: string; set?: Record<string, string> }): Promise<string[]> {
+    await this.readDisk();
     const before = this.toLyxDocument();
     const base = documentModel(lyxToPm(before), before.header.lines);
     let lines = [...this.headerLines];
@@ -165,8 +204,16 @@ export class DocSession {
         if (i >= 0) lines[i] = `\\${k} ${v}`; else lines.push(`\\${k} ${v}`);
       }
     }
-    await this.applyPmUpdate(base.pmDoc, lines, base);
+    lines = markEditedSettings(this.headerLines, lines, Object.keys(body.set ?? {}));
+    await this.writePmUpdate(base.pmDoc, lines, base);
     return this.getHeaderLines();
+  }
+
+  save(): Promise<void> {
+    return this.enqueue(async () => {
+      await this.readDisk();
+      if (this.document.isDirty && !await this.document.save()) throw new Error('VS Code could not save the document');
+    });
   }
 
   meta(): Record<string, unknown> {

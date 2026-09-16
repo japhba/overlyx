@@ -57,7 +57,7 @@ export function layout(view: EditorView): void {
   const top = cards.filter(c => !c.parentElement?.closest('.lyx-inset-note') && !c.classList.contains('resolved'));
   if (!on) {
     ((root.closest('.editor-scroll') as HTMLElement | null) ?? root).style.removeProperty('--margin-col');
-    for (const c of cards) { c.classList.remove('in-margin'); const b = c.querySelector<HTMLElement>(':scope > .inset-box'); if (b) { b.style.top = ''; b.style.left = ''; } }
+    for (const c of cards) { c.classList.remove('in-margin'); const b = c.querySelector<HTMLElement>(':scope > .inset-box'); if (b) { b.style.top = ''; b.style.left = ''; b.style.width = ''; } }
     return;
   }
   // the note column is 320px wide (a `--note-width` on the page overrides that), less on a narrow

@@ -4,6 +4,7 @@
  */
 import { useEffect, useState } from 'preact/hooks';
 import { api, type AdminProjectInfo, type Project, type User } from '../api';
+import { OverleafImport } from './OverleafImport';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -21,6 +22,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
 }) {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [adminList, setAdminList] = useState<AdminProjectInfo[] | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const load = () => Promise.all([
     api.projects().then(r => setProjects(r.projects)).catch(e => { setProjects([]); notify('Could not load projects: ' + (e as Error).message, 'error'); }),
     user.isAdmin ? api.adminProjects().then(r => setAdminList(r.projects)).catch(() => setAdminList(null)) : Promise.resolve(),
@@ -95,8 +97,10 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {user.guest
           ? <button class="btn primary" data-guest-signin onClick={onSignIn}>Sign in</button>
           : <button class="btn primary" onClick={() => void newProject()}>+ New project</button>}
+        {!user.guest && <button class="btn" data-import-overleaf onClick={() => setImportOpen(true)} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
         <button class="btn" onClick={onBrowse}>Show the documents panel</button>
       </div>
+      {importOpen && <OverleafImport existing={(projects ?? []).map(p => p.name)} onClose={() => setImportOpen(false)} onImported={() => { void load(); onChanged(); }} notify={notify} />}
       {projects === null && <div class="meta">Loading your projects…</div>}
       {example && <div class="cards">{card(example)}</div>}
       {mine.length > 0 && <><h3>Your projects</h3><div class="cards">{mine.map(card)}</div></>}

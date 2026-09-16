@@ -25,8 +25,9 @@ EnvironmentFile=-/root/lyx/overlyx/deploy/secrets.env
 # LaTeX builds and image conversions run in a bubblewrap sandbox (apt install bubblewrap);
 # OVERLYX_SANDBOX=bwrap refuses to start without it, =none disables it (not recommended)
 #Environment=OVERLYX_SANDBOX=bwrap
-# Feedback / error reports go to GitHub issues of GITHUB_REPO (default japhba/overlyx) when a
-# GITHUB_TOKEN is in secrets.env; OVERLYX_ERROR_REPORTS=off keeps only the manual Help ▸ Report a problem
+# Feedback / browser, server and VS Code extension error reports go to GitHub issues of GITHUB_REPO
+# (default japhba/overlyx) when a GITHUB_TOKEN is in secrets.env; OVERLYX_ERROR_REPORTS=off keeps
+# only the manual Help ▸ Report a problem
 #Environment=OVERLYX_ERROR_REPORTS=off
 # node runs the server directly (not via npx): with KillMode=process the stop signal only
 # reaches the MAIN process — behind npx the real server lingered on :8080 through a restart

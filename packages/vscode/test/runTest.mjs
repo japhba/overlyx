@@ -33,7 +33,11 @@ const CHILD = `\\section{Details}
 More text with a formula $a+b$.
 `;
 
-const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-vscode-ws-'));
+const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-vscode-ws-'));
+const ws = path.join(fixtureRoot, 'paper');
+fs.mkdirSync(ws);
+fs.mkdirSync(path.join(fixtureRoot, 'figures'));
+fs.copyFileSync(path.join(pkg, 'test/fixtures/graphics.png'), path.join(fixtureRoot, 'figures/plot #1.png'));
 fs.writeFileSync(path.join(ws, 'main.tex'), MAIN);
 fs.writeFileSync(path.join(ws, 'chapter.tex'), CHILD);
 fs.writeFileSync(path.join(ws, 'refs.bib'), '@article{knuth84, author={Donald E. Knuth}, title={Literate Programming}, year={1984}, journal={The Computer Journal}}\n');
@@ -51,5 +55,5 @@ try {
   console.error('integration test FAILED', e);
   process.exit(1);
 } finally {
-  fs.rmSync(ws, { recursive: true, force: true });
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
 }

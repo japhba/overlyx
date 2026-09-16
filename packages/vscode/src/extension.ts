@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { texHeadings, lyxToPm } from '@overlyx/core';
 import { Bridge, type BridgeDelegate } from './host/bridge.ts';
+import { connectWebviewBridge } from './host/webviewBridge.ts';
 import { Registry, type OpenEditor } from './host/registry.ts';
 import { DocSession } from './host/session.ts';
 import { OverlyxEditorProvider } from './host/editorProvider.ts';
@@ -20,6 +21,7 @@ import { registerTexSymbols } from './host/symbols.ts';
 import { collectFiles, readTextFile } from './host/project.ts';
 import { cachedParseFile, parseFragmentText, masterHeaderFor, type TexContext } from './host/texdoc.ts';
 import { buildMeta, bibEntriesFor } from './host/meta.ts';
+import { OverlyxTelemetry } from './host/telemetry.ts';
 import * as build from './host/build.ts';
 import type { HostToEditor } from './shared/protocol.ts';
 
@@ -27,6 +29,8 @@ import type { HostToEditor } from './shared/protocol.ts';
 export interface OverlyxTestApi { registry: Registry; bridgeBase(): string; checkForUpdates(opts?: { interactive: boolean; apiOverride?: string; dryRun?: boolean }): Promise<CheckResult> }
 
 export async function activate(context: vscode.ExtensionContext): Promise<OverlyxTestApi> {
+  const telemetry = new OverlyxTelemetry(context);
+  context.subscriptions.push(telemetry);
   const registry = new Registry();
   /** project name → root directory (each open file's own directory — projectDirFor —, plus the workspace folders) */
   const projectRoots = new Map<string, string>();
@@ -66,7 +70,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       docId: session.docId, absPath: target.absPath, header: target.header, latexmk,
       prepare: async () => {
         // the .tex file on disk is what latexmk compiles: write the editor's state first
-        if (session.document.isDirty && !await session.document.save()) throw new Error('Save the document before building the PDF.');
+        await session.save();
         if (!await vscode.workspace.saveAll(false)) throw new Error('Resolve the unsaved file changes before building the PDF.');
       },
     });
@@ -84,7 +88,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   };
 
   const bridge = new Bridge(makeDelegate());
-  const pdfPanels = new PdfPanels(context.extensionUri, () => bridge.base, onInverse);
+  context.subscriptions.push({ dispose: () => bridge.dispose() });
+  let webviewBase: string;
+  // Resolve again when opening a webview, since the user can close a forwarding tunnel.
+  const bridgeBase = async (): Promise<string> => webviewBase = await connectWebviewBridge(bridge.base);
+  try {
+    await bridge.start();
+    await bridgeBase();
+  } catch (e) {
+    telemetry.report(e, 'activation.bridge');
+    bridge.dispose();
+    void vscode.window.showErrorMessage('OverLyX: could not connect to the preview server: ' + String(e));
+    throw e;
+  }
+  const pdfPanels = new PdfPanels(context.extensionUri, bridgeBase, onInverse, (error, area) => telemetry.report(error, area));
 
   function makeDelegate(): BridgeDelegate {
     const DICT_PKG: Record<string, string> = { en: 'dictionary-en', 'en-gb': 'dictionary-en-gb', de: 'dictionary-de', fr: 'dictionary-fr' };
@@ -100,6 +117,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       texText: async (docId) => {
         const l = locate(docId);
         return l.session ? l.session.toText() : readTextFile(path.join(l.root, l.relPath));
+      },
+      applySource: async (docId, text) => {
+        const session = registry.sessionByDocId(docId);
+        if (!session) throw new Error('Open the document before editing its source');
+        const parsed = await session.applySource(text);
+        for (const entry of registry.all()) {
+          if (entry.session.docId === docId) await entry.panel.webview.postMessage({ type: 'externalUpdate', pmDoc: parsed.pmDoc, headerLines: parsed.headerLines });
+          else if (registry.relatedSessions(entry).has(docId)) await entry.panel.webview.postMessage({ type: 'relatedExternalUpdate', id: docId, pmDoc: parsed.pmDoc, headerLines: parsed.headerLines });
+        }
+        return { ok: true, warnings: parsed.warnings };
       },
       clip: async (docId, latex) => {
         const l = locate(docId);
@@ -158,7 +185,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         const job = build.currentJob(docId);
         const tex = withTex && b?.tex_path && fs.existsSync(b.tex_path) ? fs.readFileSync(b.tex_path, 'utf8') : undefined;
         return {
-          build: b ? { ...b, pdf: b.pdf_path && fs.existsSync(b.pdf_path) ? `${bridge.base}/api/docs/${encodeURIComponent(docId)}/pdf?t=${b.updated_at}` : null, tex } : null,
+          build: b ? { ...b, pdf: b.pdf_path && fs.existsSync(b.pdf_path) ? `${webviewBase}/api/docs/${encodeURIComponent(docId)}/pdf?t=${b.updated_at}` : null, tex } : null,
           job: job ? build.publicJob(job) : null,
         };
       },
@@ -187,7 +214,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   };
 
   const provider = new OverlyxEditorProvider(context, registry, {
-    bridgeBase: () => bridge.base,
+    bridgeBase,
     layoutDir,
     registerRoot,
     startBuild,
@@ -195,6 +222,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     openPdfPanel: (docId) => void pdfPanels.show(docId),
     postToPdf: (docId, msg) => pdfPanels.post(docId, msg as never),
     openDoc,
+    reportError: (error, area) => telemetry.report(error, area),
   });
 
   const outlineTree = new OutlineTree(registry);
@@ -205,7 +233,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   void vscode.commands.executeCommand('setContext', 'overlyx.active', false);
 
   context.subscriptions.push(
-    { dispose: () => bridge.dispose() },
     vscode.window.registerCustomEditorProvider('overlyx.texEditor', provider, {
       webviewOptions: { retainContextWhenHidden: true },
       supportsMultipleEditorsPerDocument: false,
@@ -231,19 +258,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       const e = registry.active;
       if (e) void e.panel.webview.postMessage({ type: 'command', name: 'syncToPdf' } satisfies HostToEditor);
     }),
+    vscode.commands.registerCommand('overlyx.toggleCombined', () => {
+      const e = registry.active;
+      if (e) void e.panel.webview.postMessage({ type: 'command', name: 'toggleCombined' } satisfies HostToEditor);
+    }),
     vscode.commands.registerCommand('overlyx.toggleMargin', () => {
       const e = registry.active;
       if (e) void e.panel.webview.postMessage({ type: 'command', name: 'toggleMargin' } satisfies HostToEditor);
     }),
     vscode.commands.registerCommand('overlyx.refreshOutline', () => outlineTree.refresh()),
-    vscode.commands.registerCommand('overlyx.checkForUpdates', () => void updater.check({ interactive: true }).catch(e => vscode.window.showErrorMessage('OverLyX update check failed: ' + String(e)))),
+    vscode.commands.registerCommand('overlyx.checkForUpdates', () => void updater.check({ interactive: true }).catch(e => {
+      telemetry.report(e, 'update.manual');
+      return vscode.window.showErrorMessage('OverLyX update check failed: ' + String(e));
+    })),
     vscode.commands.registerCommand('overlyx.gotoOutline', (pos: number) => {
       const e = registry.active;
       if (e) void e.panel.webview.postMessage({ type: 'goto', pos } satisfies HostToEditor);
     }),
   );
-
-  await bridge.start();
 
   updater.schedule();
 

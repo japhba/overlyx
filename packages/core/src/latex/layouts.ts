@@ -11,6 +11,31 @@
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import type { ModuleInfo } from '../modules.ts';
+
+const moduleCache = new Map<string, { at: number; list: ModuleInfo[] }>();
+export function describeModules(layoutDir: string, localDirs: string[] = []): ModuleInfo[] {
+  const dirs = [...localDirs, layoutDir], key = dirs.join('\0');
+  const cached = moduleCache.get(key);
+  if (cached && Date.now() - cached.at < 30000) return cached.list;
+  const modules = new Map<string, ModuleInfo>();
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue;
+    for (const file of readdirSync(dir).filter(n => n.endsWith('.module')).sort()) {
+      const id = file.slice(0, -7);
+      if (modules.has(id)) continue;
+      try {
+        const text = readFileSync(join(dir, file), 'utf8');
+        const deps = (name: string) => (new RegExp('^#' + name + ':\\s*(.*)', 'm').exec(text)?.[1] ?? '').split('|').map(s => s.trim()).filter(Boolean);
+        modules.set(id, { id, title: /\\DeclareLyXModule(?:\[[^\]]*\])?\{([^}]+)\}/.exec(text)?.[1] ?? id,
+          description: /#DescriptionBegin\s*([\s\S]*?)#DescriptionEnd/.exec(text)?.[1].replace(/^#\s?/gm, '').replace(/\s+/g, ' ').trim() ?? '', requires: deps('Requires'), excludes: deps('Excludes') });
+      } catch { /* unreadable project module */ }
+    }
+  }
+  const list = [...modules.values()].sort((a, b) => a.title.localeCompare(b.title));
+  moduleCache.set(key, { at: Date.now(), list });
+  return list;
+}
 
 /* ------------------------------------------------------------------ types */
 

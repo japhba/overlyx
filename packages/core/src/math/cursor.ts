@@ -45,6 +45,9 @@ export const isActive = (a: Atom) => a.t !== 'ref' && nargs(a) > 0;
 export const confirmDeletion = (a: Atom) => nargs(a) > 0;
 
 const gridOf = (o: Owner): Grid | undefined => (isHull(o) ? o : o.t === 'grid' ? o : undefined);
+/** CursorSlice ordering within one inset: by cell index, then position */
+const sliceLE = (a: Slice, b: Slice) => a.idx < b.idx || (a.idx === b.idx && a.pos <= b.pos);
+const sliceGT = (a: Slice, b: Slice) => !sliceLE(a, b);
 const ncolsOf = (o: Owner) => gridOf(o)?.ncols ?? 1;
 
 /** Script inset helpers (InsetMathScript::idxOfScript etc.) */
@@ -111,41 +114,86 @@ export class MathCursor {
     this.selecting = selecting;
     return true;
   }
-  /** the selection's common cell and its range [from, to) with idx range for grids (LyX selBegin/selEnd) */
+  /**
+   * CursorData::normalAnchor: the anchor cut to the cursor's depth. When the anchor is deeper and
+   * the cursor stands at or before the inset it descends into, the anchor moves behind that inset,
+   * so a selection between them takes the inset whole.
+   */
+  normalAnchor(): Slice {
+    const a = this.anchor;
+    const d = this.depth;
+    if (!a || a.length < d) return { ...this.top };
+    const normal = { ...a[d - 1] };
+    if (d < a.length && sliceLE(this.top, normal)) normal.pos++;
+    return normal;
+  }
+  /** CursorData::setSelection: selecting, unless the normalized anchor is where the cursor is */
+  setSelection(): void {
+    this.selecting = true;
+    if (!this.anchor) { this.selecting = false; return; }
+    const n = this.normalAnchor();
+    if (n.idx === this.idx && n.pos === this.pos) this.selecting = false;
+  }
+  /**
+   * Cursor::setCursorSelectionTo: move the cursor to `dit` keeping the anchor, with `dit` cut to
+   * where it diverges from the anchor (an inset the anchor is not in is taken whole; a position
+   * deeper on the anchor's own chain is cut back to the anchor's depth). Shift+click.
+   */
+  setCursorSelectionTo(dit: Slice[]): void {
+    const a = this.anchor ?? this.clone();
+    let i = 0;
+    while (i < dit.length && i < a.length && MathCursor.sameCell(dit[i], a[i]) && dit[i].pos === a[i].pos) i++;
+    let d = dit.map(x => ({ ...x }));
+    if (i !== d.length) {
+      if (i === a.length) d = d.slice(0, Math.max(1, i));            // a proper extension of the anchor
+      else if (i + 1 < d.length) {
+        d = d.slice(0, i + 1);                                       // remove the excess below the divergence
+        if (sliceGT(d[i], a[i])) d[i].pos++;                          // place it after the inset it was in
+      }
+    }
+    this.slices = d;
+    this.setSelection();
+  }
+  /**
+   * The selection: its common cell and range [from, to), or a range of whole cells of the common
+   * inset (LyX selBegin/selEnd with the normalized anchor: the side that is deeper than the common
+   * cell contributes the position of the inset it is in, moved behind it when the other side is at
+   * or before it — the inset is taken whole).
+   */
   selRange(): { owner: Owner; idx1: number; idx2: number; from: number; to: number; depth: number } | null {
     if (!this.selection || !this.anchor) return null;
     const a = this.anchor, c = this.slices;
-    let d = 0;
-    while (d < a.length && d < c.length && a[d].owner === c[d].owner && (a[d].idx === c[d].idx || gridOf(a[d].owner))) d++;
-    if (d === 0) return null;
-    const i = d - 1;
-    const sa = a[i], sc = c[i];
-    if (sa.idx !== sc.idx) return { owner: sa.owner, idx1: Math.min(sa.idx, sc.idx), idx2: Math.max(sa.idx, sc.idx), from: 0, to: 0, depth: i };
-    // positions: if one side is deeper, its position in this cell is the index of the inset it descends into (+1 for the end)
-    const pa = a.length > d ? a[d].pos + 0 : sa.pos;
-    const pc = c.length > d ? c[d].pos + 0 : sc.pos;
-    let from = Math.min(pa, pc), to = Math.max(pa, pc);
-    if (a.length > d || c.length > d) { const deeperPos = (a.length > d ? a[i + 1] : c[i + 1]); void deeperPos; }
-    // LyX: selBegin/selEnd are the slices at the common depth; a deeper side contributes the position of its inset
-    const posAt = (s: Slice[]) => (s.length > d ? s[d].pos : s[i].pos);
-    // when one side is inside an inset at position p of this cell, the range must include that inset
-    const endAt = (s: Slice[]) => (s.length > d ? s[d].pos + 1 : s[i].pos);
-    const aIsBegin = posAt(a) < posAt(c) || (posAt(a) === posAt(c) && a.length <= c.length);
-    from = aIsBegin ? posAt(a) : posAt(c);
-    to = aIsBegin ? endAt(c) : endAt(a);
-    return { owner: sa.owner, idx1: sa.idx, idx2: sa.idx, from, to, depth: i };
+    let k = 0;
+    for (;;) {
+      const sa = a[k], sc = c[k];
+      if (!sa || !sc || sa.owner !== sc.owner) { k--; break; }
+      if (sa.idx !== sc.idx) return { owner: sa.owner, idx1: Math.min(sa.idx, sc.idx), idx2: Math.max(sa.idx, sc.idx), from: 0, to: 0, depth: k };
+      if (sa.pos !== sc.pos || k === a.length - 1 || k === c.length - 1) break;
+      k++;
+    }
+    if (k < 0) return null;
+    const pa = a[k].pos, pc = c[k].pos;
+    const na = a.length > k + 1 && pc <= pa ? pa + 1 : pa;
+    const nc = c.length > k + 1 && pa <= pc ? pc + 1 : pc;
+    return { owner: a[k].owner, idx1: a[k].idx, idx2: a[k].idx, from: Math.min(na, nc), to: Math.max(na, nc), depth: k };
+  }
+  /** the cells of a whole-cell selection: a rectangle in a grid (InsetMathGrid::idxBetween), idx1..idx2 in other insets */
+  selCells(r: { owner: Owner; idx1: number; idx2: number }): number[][] {
+    const g = gridOf(r.owner);
+    if (!g) { const out: number[] = []; for (let i = r.idx1; i <= r.idx2; i++) out.push(i); return [out]; }
+    const nc = g.ncols;
+    const r1 = Math.floor(r.idx1 / nc), r2 = Math.floor(r.idx2 / nc), c1 = Math.min(r.idx1 % nc, r.idx2 % nc), c2 = Math.max(r.idx1 % nc, r.idx2 % nc);
+    const rows: number[][] = [];
+    for (let row = r1; row <= r2; row++) { const cols: number[] = []; for (let col = c1; col <= c2; col++) cols.push(row * nc + col); rows.push(cols); }
+    return rows;
   }
   /** cap::grabSelection: LaTeX of the selection */
   grabSelection(): string {
     const r = this.selRange();
     if (!r) return '';
     if (r.idx1 === r.idx2) return writeCellLatex(this.cellAt({ owner: r.owner, idx: r.idx1, pos: 0 }).slice(r.from, r.to));
-    const g = gridOf(r.owner)!;
-    const nc = g.ncols;
-    const r1 = Math.floor(r.idx1 / nc), r2 = Math.floor(r.idx2 / nc), c1 = Math.min(r.idx1 % nc, r.idx2 % nc), c2 = Math.max(r.idx1 % nc, r.idx2 % nc);
-    const parts: string[] = [];
-    for (let row = r1; row <= r2; row++) { const cells: string[] = []; for (let col = c1; col <= c2; col++) cells.push(writeCellLatex(g.rows[row].cells[col])); parts.push(cells.join('&')); }
-    return parts.join('\\\\');
+    const cells = atomCells(r.owner);
+    return this.selCells(r).map(row => row.map(i => writeCellLatex(cells[i] ?? [])).join('&')).join('\\\\');
   }
   /** cap::eraseSelection */
   eraseSelection(): boolean {
@@ -157,10 +205,8 @@ export class MathCursor {
       this.cell.splice(r.from, r.to - r.from);
       this.top.pos = r.from;
     } else {
-      const g = gridOf(r.owner)!;
-      const nc = g.ncols;
-      const r1 = Math.floor(r.idx1 / nc), r2 = Math.floor(r.idx2 / nc), c1 = Math.min(r.idx1 % nc, r.idx2 % nc), c2 = Math.max(r.idx1 % nc, r.idx2 % nc);
-      for (let row = r1; row <= r2; row++) for (let col = c1; col <= c2; col++) g.rows[row].cells[col].splice(0);
+      const cells = atomCells(r.owner);
+      for (const row of this.selCells(r)) for (const i of row) cells[i]?.splice(0);
       this.top.pos = 0;
     }
     this.clearSelection();
@@ -827,6 +873,59 @@ export class MathCursor {
     cand.limits = cand.limits === 'limits' ? 'nolimits' : cand.limits === 'nolimits' ? undefined : 'limits';
   }
 
+  /**
+   * Grow (dir 1) or shrink (dir -1) the innermost pair of delimiters around the cursor by one
+   * step of the ladder plain → \big → \Big → \bigg → \Bigg → \left…\right (variable). The pair
+   * is a \left…\right inset the cursor is in, or matching delimiters (plain or \bigl…\bigr) in
+   * a cell on the cursor's path. The cursor keeps its place in the content. False: no pair.
+   */
+  delimResize(dir: 1 | -1): boolean {
+    const ladder = ['', 'big', 'Big', 'bigg', 'Bigg', 'left'];
+    for (let k = this.depth - 1; k >= 0; k--) {
+      const sl = this.slices[k];
+      // the cell at depth k is inside a \left…\right inset: that pair
+      if (k >= 1 && !isHull(sl.owner) && sl.owner.t === 'delim') {
+        const d = sl.owner;
+        const next = ladder[ladder.indexOf('left') + dir];
+        if (!next || next === 'left') return false;
+        if (d.l === '.' || d.r === '.') return false;   // an invisible side has no fixed-size form
+        const parent = this.slices[k - 1];
+        const pcell = this.cellAt(parent);
+        const at = parent.pos;
+        if (pcell[at] !== d) return false;
+        const l = delimLatex(d.l), r = delimLatex(d.r);
+        const repl: Cell = [...sizedPair(next, l, r, d.body)];
+        pcell.splice(at, 1, ...repl);
+        // the cursor: from inside the body to the same place in the parent cell
+        const deeper = this.slices.slice(k + 1);
+        this.slices = [...this.slices.slice(0, k - 1), { owner: parent.owner, idx: parent.idx, pos: at + 1 + sl.pos }, ...deeper];
+        return true;
+      }
+      // matching delimiters in this cell around the position
+      const cell = this.cellAt(sl);
+      const pair = enclosingDelims(cell, sl.pos);
+      if (!pair) continue;
+      const { open, close, size, l, r } = pair;
+      const i = ladder.indexOf(size);
+      const next = ladder[i + dir];
+      if (next === undefined) return false;
+      const body = cell.slice(open + 1, close);
+      const repl = sizedPair(next, l, r, body);
+      cell.splice(open, close - open + 1, ...repl);
+      if (next === 'left') {
+        const delim = repl[0];
+        const inside = sl.pos > open && sl.pos <= close;
+        const deeper = this.slices.slice(k + 1);
+        if (inside) this.slices = [...this.slices.slice(0, k), { owner: sl.owner, idx: sl.idx, pos: open }, { owner: delim, idx: 0, pos: sl.pos - open - 1 }, ...deeper];
+        else this.slices = [...this.slices.slice(0, k), { owner: sl.owner, idx: sl.idx, pos: open + 1 }];
+      } else if (sl.pos > close) {
+        this.slices = [...this.slices.slice(0, k), { owner: sl.owner, idx: sl.idx, pos: sl.pos + (repl.length - (close - open + 1)) }];
+      }
+      return true;
+    }
+    return false;
+  }
+
   /** InsetMathScript::notifyCursorLeaves: empty scripts vanish when the cursor leaves them. Call with the previous slices. */
   notifyLeave(old: Slice[]) {
     for (let d = old.length - 1; d >= 1; d--) {
@@ -855,6 +954,76 @@ export class MathCursor {
 
 const ROW_HULLS = new Set<HullType>(['eqnarray', 'align', 'flalign', 'alignat', 'xalignat', 'xxalignat', 'gather', 'multline']);
 const COL_HULLS = new Set<HullType>(['align', 'flalign', 'alignat', 'xalignat', 'xxalignat']);
+
+/** LyX's delimiter name (`(`, `{`, `langle`) as LaTeX (`(`, `\{`, `\langle`) */
+export function delimLatex(name: string): string {
+  if (name === '{' || name === '}') return '\\' + name;
+  return /^[A-Za-z]+$/.test(name) ? '\\' + name : name;
+}
+
+const OPENERS = new Set(['(', '[', '\\{', '\\langle', '\\lfloor', '\\lceil', '\\llbracket', '\\llangle', '\\lvert', '\\lVert', '\\lbrace']);
+const CLOSERS = new Set([')', ']', '\\}', '\\rangle', '\\rfloor', '\\rceil', '\\rrbracket', '\\rrangle', '\\rvert', '\\rVert', '\\rbrace']);
+const AMBIGUOUS = new Set(['|', '\\|', '\\vert', '\\Vert']);
+
+/** A delimiter atom's LaTeX and side ('l', 'r', or '?' for | and friends), with the size of a \big… atom ('' for a plain one). */
+function delimAtom(a: Atom | undefined): { d: string; side: 'l' | 'r' | '?'; size: string } | null {
+  if (!a) return null;
+  let d: string, size = '';
+  if (a.t === 'big') {
+    d = a.d;
+    const m = /^(big|Big|bigg|Bigg)([lmr]?)$/.exec(a.n);
+    if (!m) return null;
+    size = m[1];
+    if (m[2] === 'l') return { d, side: 'l', size };
+    if (m[2] === 'r') return { d, side: 'r', size };
+  } else if (a.t === 'char') d = a.c;
+  else if (a.t === 'sym' || a.t === 'cmd') d = delimLatex(a.n);
+  else return null;
+  if (OPENERS.has(d)) return { d, side: 'l', size };
+  if (CLOSERS.has(d)) return { d, side: 'r', size };
+  if (AMBIGUOUS.has(d)) return { d, side: '?', size };
+  return null;
+}
+
+/** The innermost matching delimiter pair around position `pos` of a cell (or just before it). */
+export function enclosingDelims(cell: Cell, pos: number): { open: number; close: number; size: string; l: string; r: string } | null {
+  // an opener before the position, skipping closed pairs
+  let depth = 0, open = -1, od: ReturnType<typeof delimAtom> = null;
+  for (let i = Math.min(pos, cell.length) - 1; i >= 0; i--) {
+    const d = delimAtom(cell[i]);
+    if (!d) continue;
+    if (d.side === 'r') { depth++; continue; }
+    if (d.side === 'l' || d.side === '?') { if (depth === 0) { open = i; od = d; break; } if (d.side === 'l') depth--; }
+  }
+  if (open < 0 || !od) {
+    // the cursor may sit right after the closing delimiter: look at the atom before it
+    const last = delimAtom(cell[pos - 1]);
+    if (last && (last.side === 'r' || last.side === '?') && pos - 1 > 0) return enclosingDelims(cell, pos - 1);
+    return null;
+  }
+  // the matching closer after the opener
+  depth = 0;
+  for (let j = open + 1; j < cell.length; j++) {
+    const d = delimAtom(cell[j]);
+    if (!d) continue;
+    if (d.side === 'l') { depth++; continue; }
+    if (d.side === 'r' || d.side === '?') {
+      if (depth === 0) {
+        if (j < pos) return null;   // the pair closed before the cursor
+        return d.size === od.size ? { open, close: j, size: od.size, l: od.d, r: d.d } : null;
+      }
+      if (d.side === 'r') depth--;
+    }
+  }
+  return null;
+}
+
+/** The atoms for a delimiter pair of the given size around `body`: plain characters, \bigl…\bigr atoms, or one \left…\right inset. */
+function sizedPair(size: string, l: string, r: string, body: Cell): Cell {
+  if (size === 'left') return [{ t: 'delim', l: delimName(l), r: delimName(r), body }];
+  if (size === '') return [...parseCell(l), ...body, ...parseCell(r)];
+  return [{ t: 'big', n: size + 'l', d: l }, ...body, { t: 'big', n: size + 'r', d: r }];
+}
 
 export function numberedType(h: Hull): boolean {
   if (h.type === 'simple' || h.type === 'none' || h.type === 'unknown') return false;

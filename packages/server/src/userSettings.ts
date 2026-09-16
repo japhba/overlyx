@@ -2,8 +2,8 @@
  * Per-account server-side settings (users.settings, a small JSON object). Unlike the client's
  * prefs (localStorage, per browser) these follow the account and gate server behaviour.
  *
- * `allowRecopyTokens`: access/agent tokens this user creates keep their plaintext so they can be
- * copied again later from the Git dialog (normally only a hash is stored and a token is shown
+ * `allowRecopyTokens`: the account token keeps its plaintext so it can be copied again later from
+ * the Git dialog (normally only a hash is stored and the token is shown
  * exactly once). Storing recoverable secrets is a deliberate trade-off, so it is off by default
  * and switched on per account by an administrator (POST /api/admin/users/:id/settings — the
  * Settings panel's Account section). The instance owner (OVERLYX_OWNER_EMAIL) has it on unless

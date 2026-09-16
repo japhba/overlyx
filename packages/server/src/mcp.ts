@@ -38,6 +38,8 @@ import { verifyMcpToken } from './mcpTokens.ts';
 import { wwwAuthenticate } from './mcpOauth.ts';
 import { config } from './config.ts';
 import { roleFor, atLeast, logAccess, accessibleProjects } from './access.ts';
+import { createOwnedProject } from './projectCreate.ts';
+import { ensureRepo } from './git.ts';
 import { toSessionUser, type SessionUser } from './auth.ts';
 import { db, type UserRow } from './db.ts';
 
@@ -507,6 +509,24 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     inputSchema: {},
   }, async () => { try { return ok(accessibleProjects(user).map(pr => ({ project: pr.name, title: pr.title ?? null, role: pr.role }))); } catch (e) { return fail(e); } });
 
+  // Project creation is account-wide, so it belongs only on /mcp. Once created, the ordinary
+  // write_document/write_file tools can populate it; a local client can alternatively push its
+  // existing repository with the OverLyX CLI.
+  if (!fixedProject) server.registerTool('create_project', {
+    description: 'Create an empty project owned by this account. Then populate it with create_document, write_document and write_file, or push an existing local repository with the OverLyX CLI.',
+    inputSchema: {
+      name: z.string().describe('Project name (letters, numbers, spaces, dot, dash and underscore)'),
+      title: z.string().max(200).optional(),
+    },
+  }, async ({ name, title }) => {
+    try {
+      const clean = name.trim();
+      createOwnedProject(clean, userId, { title: title?.trim() || null });
+      await ensureRepo(clean);
+      return ok({ project: clean, title: title?.trim() || null, role: 'owner' });
+    } catch (e) { return fail(e); }
+  });
+
   // ChatGPT's connector pair (deep research requires exactly these two; citations need a url)
   server.registerTool('search', {
     description: 'Full-text search across the LaTeX documents, .tex and .bib files of every project this account can access. Returns ids for fetch.',
@@ -540,7 +560,7 @@ async function handle(req: Request, res: Response): Promise<void> {
   const auth = req.header('authorization') ?? '';
   const m = /^Bearer\s+(\S+)/i.exec(auth);
   // 401 + WWW-Authenticate points OAuth clients (ChatGPT) at the protected-resource metadata
-  if (!m) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'Authorization: Bearer <token> required (create one in File \u25b8 Git repository\u2026, or connect via OAuth)' }); return; }
+  if (!m) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'Authorization: Bearer <token> required (use your account token from File \u25b8 Git repository\u2026, or connect via OAuth)' }); return; }
   const identity = verifyMcpToken(m[1]);
   if (!identity) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'invalid or expired token' }); return; }
   const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(identity.userId) as UserRow | undefined;

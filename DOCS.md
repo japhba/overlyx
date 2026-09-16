@@ -20,7 +20,14 @@ blend.
 * **WYSIWYG without compiling.** Text, insets, floats, tables and math render as you type.
   Formulas (inline and display, `equation`/`align`/`gather`/`multline`/…) are edited in place
   with KaTeX; document macros (`FormulaMacro` insets, preamble `\newcommand`/`\def`,
-  `\input{macros}` files, child documents) render immediately.
+  `\input{macros}` files, child documents) render immediately. Formulas are typed the LaTeX way
+  too: `$` opens an inline formula, `$` inside it closes it, `$$` opens a display formula, and
+  Backspace in the empty formula gives the typed dollar back as text (the way to type a literal
+  `$`; in TeX code and listings the dollar is always a character). The math toolbar's ( )↑ / ( )↓
+  grow and shrink the delimiter pair around the cursor (`( )` → `\big` → `\Big` → `\bigg` →
+  `\Bigg` → `\left…\right` and back). A script on a macro whose definition ends in a script
+  (`\q := q_{a}`, typed `\q^x_y`) is drawn greedily on screen — `x` above the `q`, `y` appended to
+  the `a` — where TeX hangs both off the right of the whole `q_a`; the LaTeX is unchanged.
 * **Multi-user editing** (Yjs CRDT, per-user undo, live cursors) with automatic and named
   **versions** (diff & restore).
 * **Autosave and offline editing** (Google-Docs style): there is no Save button — every edit goes
@@ -33,7 +40,25 @@ blend.
   paragraphs that actually changed. See *Offline mode* below.
 * **Notes and comments**: LyX-style notes (Note / Comment / Greyed out) and OverLyX comment
   threads (author, time, replies, resolve) are kept in the `.tex` file as `%%` comment blocks.
-  *View ▸ Notes & comments in the margin* moves them into a right-hand column (Google-Docs style).
+  On screen a note is a yellow sticky, a greyed-out part a quiet grey box, and a comment thread a
+  card with an avatar, name and time per message (the header paragraph `Name (time):` stays as
+  text in the file — `numbering.ts` decorates it, `styles.css` draws it) and Reply / Resolve at
+  the top right. *View ▸ Notes & comments in the margin* moves them into a right-hand column
+  (Google-Docs style).
+* **Figures keep up with their files**: the server watches the projects (chokidar) and tells the
+  open editors over the project's event stream (`/api/projects/:p/events`, `{"kind":"graphics"}`)
+  when a graphics file is rewritten — a plot script ran, an upload landed — and the image reloads
+  in place (the URL carries the file's mtime). In the dark theme figures get an iOS-style *smart
+  invert*: a plot or diagram (dark strokes on a light or transparent ground, judged from a small
+  canvas copy of the pixels, `figureinvert.ts`) is shown light-on-dark with a CSS filter, a
+  photograph keeps its colours; *Settings ▸ Editor ▸ Figures* switches it off.
+* **Import from Overleaf** (start page): paste the links of the projects to bring over and an
+  Overleaf Git token — each ticked project is cloned by the server from `git.overleaf.com` into a
+  new project (Overleaf's Git access, paid and institutional plans; history and `origin` are kept,
+  the token is passed to git through `GIT_ASKPASS` and never stored) — or upload the zip Overleaf's
+  *Menu ▸ Download ▸ Source* produces (every account; several at once). Overleaf has no API that
+  lists projects, so the selection is made from pasted links. `server/zip.ts` is a small ZIP reader
+  (central directory, deflate) with a traversal-safe extraction.
 * **PDF** via `latexmk` on the document's own `.tex` file (plus the child documents it inputs);
   embedded graphics (SVG/PDF/EPS/…) are rendered to PNG for the editor and downloadable as PNG,
   and formats pdflatex cannot include are converted to PDF for the build. PDF builds only start on
@@ -84,8 +109,8 @@ blend.
   set `OVERLYX_SIGNUP=invited` to allow only e-mails that were invited to a project.
 * **Every project is a git repository** you can clone, pull and push from your own machine
   (*File ▸ Git repository…*, the ⎇ button in the file browser, or *Git…* on a project card):
-  `git clone https://<server>/git/<project>.git` with your username and an **access token** created
-  in that dialog (or your OverLyX password; Google accounts have no password). The project directory
+  `git clone https://<server>/git/<project>.git` with your username and your **account access
+  token** created in that dialog (or your OverLyX password; Google accounts have no password). The project directory
   is the working tree, so desktop LyX, OverLyX and git all work on the same files. OverLyX commits
   what people edit in the browser by itself — a couple of minutes after the last change and always
   right before a clone, pull or push (attributed to the people who edited) — so the repository is
@@ -94,8 +119,24 @@ blend.
   documents merge the change like an external save; uncommitted changes in files the push does not
   touch are kept — a push that would clash with one is refused, and a push behind what OverLyX
   committed meanwhile has to `git pull` first, as usual). Viewers can clone and pull but not push.
-  A `.gitignore` for LaTeX build products and LyX backups is created with the repository; symlinks
-  are never checked out as links. `OVERLYX_GIT=off` disables all of this.
+  The downloadable CLI adds a `gh`-style import path for work that already exists locally:
+
+  ```sh
+  curl -fsSL https://overlyx.app/install-cli.sh | sh
+  overlyx auth login --host https://overlyx.app --username NAME --with-token
+  overlyx repo create my-paper --source . --push
+  # shorthand, and safe to retry after a failed first push:
+  overlyx repo push . --name my-paper
+  ```
+
+  `repo push` initialises and commits an ordinary folder; an existing repository must be clean so
+  no uncommitted work is silently omitted. The server creates an unborn repository for the first
+  push, preserving the local history without an unrelated synthetic merge. Its Basic-authenticated
+  `/git/api/user` and `/git/api/projects` endpoints use the account token and the same rate limiting
+  as smart HTTP. The remote URL stores the username but not the token.
+  Projects created in the app get a `.gitignore` for LaTeX build products and LyX backups; CLI
+  imports preserve the local project's own ignore rules. Symlinks are never checked out as links.
+  `OVERLYX_GIT=off` disables all of this.
 * **Personal example project**: every account gets *Welcome to OverLyX* — a tour of the editor
   written for that user (`packages/server/templates/welcome`, generated by
   `scripts/gen-welcome.py`): layouts, formulas incl. a macro and `\llangle`, a figure, a table,
@@ -118,8 +159,13 @@ blend.
   message only when ticked; never document content) and that the tracker is public; 10 reports per
   person and hour. Uncaught browser errors (`main.tsx`) and server errors (`unhandledRejection`) are
   reported automatically as one issue per distinct message (numbers / ids normalised), repeats become
-  a count and at most one comment per 10 minutes; `OVERLYX_ERROR_REPORTS=off` keeps only the manual
-  dialog. Without a token the dialog opens GitHub's pre-filled *new issue* form in a new tab instead.
+  a count and at most one comment per 10 minutes. The no-account VS Code extension uses its own
+  narrow, IP-rate-limited `/api/vscode-telemetry` receiver for errors when both VS Code telemetry and
+  `overlyx.errorReports` are enabled. VS Code sanitizes the exception first; only extension/VS Code
+  versions, OS/CPU family and local/remote host kind accompany it — never document text, filenames,
+  paths, account details, email or stable IDs (`packages/vscode/telemetry.json` declares the schema).
+  `OVERLYX_ERROR_REPORTS=off` keeps only the manual dialog. Without a token the dialog opens GitHub's
+  pre-filled *new issue* form in a new tab instead.
 * **Documents panel, one project at a time** (`app/DocPanel.tsx`, Google-Docs style, left; `Ctrl+Alt+O`):
   the project switcher at the top lists your projects and the ones shared with you — choosing another
   one opens *its* main document (there is no tab bar across projects any more; the hash names the one
@@ -140,7 +186,8 @@ blend.
   version and yours. Viewers get it read-only. `+ File` in the file browser creates one.
 * **Dark mode**: follows the system preference by default; the sun/moon button in the menu bar
   flips it (remembered in this browser), *View ▸ Theme ▸ Follow the system* goes back to the OS
-  setting. Text and formulas are white on a near-black page; everything in
+  setting. In VS Code the same button sits in the editor's top bar next to the WYSIWYG / TeX /
+  Split switch and cycles VS Code's theme → light → dark. Text and formulas are white on a near-black page; everything in
   `packages/client/src/styles.css` goes through the theme tokens at the top of the file (light values
   on `:root`, dark ones on `html[data-theme="dark"]`, set by `app/theme.ts`).
 * **Ruler**: a Google-Docs-style ruler above the page (*View ▸ Ruler*) with draggable margin
@@ -156,7 +203,21 @@ blend.
   Tab moves between cells, LyX's corner markers around every inset on the cursor path, macros with
   arguments are expanded from their definitions with editable argument cells; typing `\` starts a
   command shown red until it names a real command (then green), with LyX's completion in grey — Tab
-  completes it. Right-click menus on
+  completes it. **The mouse works on LyX's coordinate model** (`editor/lyxmath/geometry.ts`): the
+  renderer wraps every cell *and every atom* in `\htmlClass` spans (transparent for KaTeX's spacing)
+  and copies KaTeX's own height/depth of each box into the markup, so every atom has a box and every
+  cell a baseline and a content-tight height — an inline span's client rect is only ever its font's
+  line box, which is why fractions and big operators used to get markers and highlights at text
+  height. On top of that sit ports of `MathData::x2pos` (the nearest boundary, insets kept in
+  front), `InsetMathNest::editXY` (nearest cell, down into the inset under the pointer),
+  `Cursor::moveToClosestEdge`, `lfunMouseMotion`'s anchor rule (a drag never dives deeper than its
+  anchor; an inset off the anchor's chain is taken whole at its closest edge), `normalAnchor` /
+  `setCursorSelectionTo` (an anchor inside an inset selects it whole from outside; Shift+click takes
+  the clicked inset whole), double click = the cell, triple click = all cells; a drag that leaves the
+  formula continues in the text with the formula whole and comes back into it when the pointer
+  returns. The corner markers are drawn as `MathRow::drawMarkers` does (3px hooks one pixel outside
+  the inset's box; four corners for fractions, grids and macros) and follow the anchor while the
+  mouse selects. Right-click menus on
   formulas, cross-references (go to label, reference format), citations, hyperlinks, child documents,
   insets and tracked changes; `Ctrl/⌘+click` follows a reference or opens a child document; **tabs**
   for open documents (new tabs open right of the current one); the text column is centred and its
@@ -438,6 +499,8 @@ packages/server   Express + WebSocket (Yjs sync/awareness), SQLite persistence, 
                   JWT cookie, optional Google OAuth), .tex file sync & watcher, versions, builds
 packages/client   Vite + Preact UI, ProseMirror editor, LyX math editor (editor/lyxmath, KaTeX), LyX keymap,
                   numbering/margin/change-tracking/find plugins
+packages/vscode   the same editor inside VS Code (a custom editor for .tex files): an extension host
+                  that parses/writes the file and a webview that imports the client's code (@client/*)
 * **Theorem environments**: a document's own `\newtheorem{definition}{Definition}` declarations
   become real layouts (`latex/layouts.ts applyDocumentTheorems`, aliased onto the AMS theorem
   styles by label, `Theorem` as fallback) — parsing, writing (the environment keeps its declared
@@ -448,6 +511,18 @@ packages/client   Vite + Preact UI, ProseMirror editor, LyX math editor (editor/
   (`app/MarkdownEditor.tsx`, prosemirror-markdown): `## ` resizes into a live heading as you
   type, bold/lists/quotes/links likewise; Source switches to the plain text editor; files stay
   ordinary markdown on disk.
+
+**One editor, two shells.** The web client (`app/App.tsx`) and the VS Code webview
+(`packages/vscode/src/webview/EditorShell.tsx`) do not each assemble an editor: the plugins in their
+order, the node views and every view handler (clicks, paste, drop, context menu) come from
+`client/src/editor/assembly.ts` (`assemblePlugins`, `editorViewProps`, `installEditorDom`); a shell
+adds only how the document is synced — `editor/editor.ts` a Yjs document over the WebSocket with the
+IndexedDB copy, `vscode/.../localEditor.ts` a local Y.Doc fed from the file. The seven LyX toolbars
+are one definition too (`app/toolbars.tsx buildToolbars`, from a `ToolbarContext`; what only one
+shell has — files, navigation history, ink, the comments panel — goes into its *slots*), as are the
+document helpers of the shells (`app/shellutil.tsx`). `tests/parity.test.ts` fails as soon as a shell
+grows a plugin list, a toolbar button or one of those helpers of its own again — that is how the
+extension once lacked autocorrect, markdown headings, image paste and the delimiter buttons.
 
 tests/            vitest: .tex parse/write stability (tex.test.ts: features + a corpus of real
                   papers and LyX's example documents), LyX round trips (import path), PM/Yjs
@@ -502,6 +577,17 @@ the project directory is mounted read-only, there is no network, a private `/tmp
 (`<data dir>/sandbox-home`, where TeX/fontconfig/inkscape caches and LyX's user directory persist),
 and an empty environment. Without bubblewrap the server starts with a warning and runs the tools
 unsandboxed (`packages/server/src/sandbox.ts`).
+
+**Deploying.** Production runs from a separate clean checkout (`/root/lyx/overlyx-production`, the
+systemd unit's `WorkingDirectory`), and the VS Code extension is released by
+`.github/workflows/extension-release.yml` from `origin/master` (`packages/vscode/RELEASING.md`), so
+both must come from the same commit: `scripts/deploy.sh` refuses a diverged `master`/`origin/master`,
+pushes (which starts the extension release), fast-forwards the production checkout, runs `npm ci`
+when the lockfile changed, builds the client, restarts the unit and checks that https://overlyx.app
+serves the new bundle. Run the checks below first — the script deploys, it does not test.
+*Help ▸ OverLyX for VS Code* (`/api/vscode-extension`) redirects to the latest GitHub release's
+`overlyx-vscode.vsix` (the build the extension's self-updater installs); a `.vsix` packaged into
+`packages/vscode` of the running checkout is the fallback (`OVERLYX_VSIX_SOURCE=local` forces it).
 
 A systemd unit is installed as `overlyx.service` (see `deploy/`). `deploy/overlyx-backup.timer` runs
 `scripts/backup.sh` every night: an online backup of the SQLite database and a tarball of the
@@ -594,6 +680,8 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/smoke.spec.ts e2e
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sharing.spec.ts e2e/textfiles.spec.ts e2e/toolbar.spec.ts e2e/collab.spec.ts   # bob, carol, u1…u6
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts e2e/cite.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
+npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
 # offline mode needs the built client (service worker): build into $S/dist, then
 (cd packages/client && npx vite build --outDir $S/dist)
 OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e2e/git.spec.ts   # git: a real clone / push / pull with a token
@@ -619,7 +707,8 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/paperwriting-vae.
 # (OVERLYX_OWNER_EMAIL, japhba@gmail.com) so the latest typed-via-GUI papers can be inspected there:
 scripts/publish-typed-papers.sh $S/projects
 # mouse selection (LyX rules: insets taken whole at their closest edge, no drag-and-drop of a
-# selection, word/paragraph drags, autoscroll) in the text and in formulas:
+# selection, word/paragraph drags, autoscroll) in the text and in formulas (LyX's coordinate model:
+# click precision, corner markers around the fraction, double/triple click, drag out and back in):
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/textselect.spec.ts e2e/mathselect.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/pdfview.spec.ts e2e/rawsplit.spec.ts   # pdf.js viewer, SyncTeX, PDF tabs; the [raw] split tab, scroll sync, live apply
 ```
@@ -743,14 +832,14 @@ connect as a collaborator — to **all of an account's projects at `<origin>/mcp
 every call), or fixed to one project at `<origin>/mcp/<project>` (the classic form in File ▸ Git
 repository…, `Git.tsx`). Two ways to authenticate:
 
-* **Agent tokens** (`Authorization: Bearer olxmcp_…`, `packages/server/src/mcpTokens.ts`; created
-  in File ▸ Git repository…, revocable, one per agent) — for clients that take a header.
+* **Account token** (`Authorization: Bearer olx_…`; created in File ▸ Git repository…, revocable)
+  — the same one manually configured for Git and the CLI. MCP changes are attributed to the account.
 * **OAuth 2.1** (`packages/server/src/mcpOauth.ts`) — for ChatGPT and other clients that speak the
   MCP authorization flow: RFC 8414/9728 discovery under `/.well-known/…`, dynamic client
   registration (RFC 7591) plus ChatGPT's URL-client-id form, authorization code + PKCE (S256),
   RFC 9207 `iss`, refresh-token rotation. The consent page rides the normal session cookie; an
-  approved grant mints an expiring agent token named after the client, so it is listed with the
-  account's other tokens and revoking it there cuts the connection. In ChatGPT: Settings ▸ Apps ▸
+  approved grant mints a separate expiring credential named after the client, so it is listed under
+  OAuth connections and revoking it cuts only that connection. In ChatGPT: Settings ▸ Apps ▸
   Developer mode ▸ Create, server URL `https://overlyx.app/mcp`, OAuth — the `search`/`fetch` tool
   pair serves deep research (citations link into the app), the full tool set works in developer
   mode (read-only tools are annotated, so only writes ask for confirmation).
@@ -784,13 +873,22 @@ exposes these tools:
   untracked like the raw-source view (Versions and git keep the prior state).
 * `list_files`, `read_file(path)`, `write_file(path, text)` — the project's other text files
   (`refs.bib`, `macros.tex`, `.sty`, …); binary files and documents are refused.
+* On the account-wide `/mcp` endpoint, `create_project(name, title?)` creates an empty project owned
+  by the token's account. An agent can populate it with `create_document`, `write_document` and
+  `write_file`; local files, including binaries and an existing Git history, are imported with the
+  CLI instead. This tool is intentionally absent from a fixed `/mcp/<project>` connection.
 
 ## Authentication and identity
 
-Two separate token systems exist and are not interchangeable, but both are account-scoped:
-**git tokens** (`/api/git/tokens`) stand for a signed-in *account* in git; **MCP tokens**
-(`/api/mcp-tokens`) stand for one *agent* acting with an account's access (its role checked
-per project on every request).
+Each user has one manually-managed **account access token** (`olx_…`, `/api/git/tokens`). Creating
+it again atomically rotates it, so the previous value immediately stops working in Git, the CLI and
+MCP. The account's role is still checked per project on every request. MCP passes the token as
+Bearer, while Git and the CLI use the protocol-required username plus token over HTTP Basic.
+
+OAuth clients are the deliberate exception: each grant has a separate, expiring `olxmcp_…`
+credential and refresh token so one client can be disconnected without rotating the user's account
+token. The embedded agent likewise uses a hidden internal credential. Existing manual agent tokens
+remain valid for compatibility and are shown only for revocation; the UI no longer creates them.
 
 ## License
 
@@ -799,4 +897,3 @@ layout files, data tables and icons (LyX is GPL-2.0-or-later), and the PDF viewe
 (Apache-2.0) — the combination is distributed under the GPL v3. See LICENSE and
 packages/vscode/THIRD-PARTY-NOTICES.md. LyX is a trademark of the LyX team; this project is not
 affiliated with or endorsed by the LyX team, Overleaf, or Microsoft.
-

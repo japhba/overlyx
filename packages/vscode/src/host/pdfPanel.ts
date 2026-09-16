@@ -11,8 +11,9 @@ export class PdfPanels {
 
   constructor(
     private extensionUri: vscode.Uri,
-    private bridgeBase: () => string,
+    private bridgeBase: () => Promise<string>,
     private onInverse: (docId: string, page: number, x: number, y: number) => void,
+    private reportError: (error: unknown, area: string) => void,
   ) {}
 
   /** Show (or open) the PDF panel of a document. */
@@ -25,14 +26,24 @@ export class PdfPanels {
     this.panels.set(docId, panel);
     panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'assets/overlyx.svg');
     const dark = [vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighContrast].includes(vscode.window.activeColorTheme.kind);
-    const target = panel;
-    void vscode.env.asExternalUri(vscode.Uri.parse(this.bridgeBase())).then(async uri => {
-      const html = await webviewHtml(target.webview, this.extensionUri, 'pdf', { page: 'pdf', docId, base: uri.toString().replace(/\/$/, ''), dark });
-      if (this.panels.get(docId) === target) target.webview.html = html;
-    }).then(undefined, e => vscode.window.showErrorMessage(`OverLyX PDF view: ${String(e)}`));
+    const openedPanel = panel;
+    void this.bridgeBase().then(async base => {
+      if (this.panels.get(docId) !== openedPanel) return;
+      openedPanel.webview.html = await webviewHtml(openedPanel.webview, this.extensionUri, 'pdf', { page: 'pdf', docId, base, dark });
+    }).catch(e => {
+      this.reportError(e, 'pdf.bridge');
+      void vscode.window.showErrorMessage('OverLyX: could not connect to the PDF preview server: ' + String(e));
+    });
     panel.webview.onDidReceiveMessage((msg: PdfToHost) => {
       if (msg.type === 'inverse') this.onInverse(docId, msg.page, msg.x, msg.y);
-      else if (msg.type === 'notify') void (msg.kind === 'error' ? vscode.window.showErrorMessage(msg.text) : vscode.window.showInformationMessage(msg.text));
+      else if (msg.type === 'notify') {
+        if (msg.kind === 'error') {
+          const error = new Error(msg.text);
+          if (msg.stack) error.stack = msg.stack;
+          this.reportError(error, 'pdf.webview');
+        }
+        void (msg.kind === 'error' ? vscode.window.showErrorMessage(msg.text) : vscode.window.showInformationMessage(msg.text));
+      }
     });
     panel.onDidDispose(() => { if (this.panels.get(docId) === panel) this.panels.delete(docId); });
     return panel;

@@ -1,5 +1,5 @@
 dist/
 node_modules/
 *.vsix
-.vscode-test/
+.vscode-test
 test/gui-shots/

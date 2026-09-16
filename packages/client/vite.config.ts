@@ -3,6 +3,7 @@ import preact from '@preact/preset-vite';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { buildVersion } from '../build-version';
 
 /**
  * Emits dist/sw.js from src/sw.js with the list of built files to precache (offline app shell)
@@ -67,6 +68,7 @@ function dictionaries(): Plugin {
 
 export default defineConfig({
   plugins: [preact(), serviceWorker(), dictionaries()],
+  define: { 'import.meta.env.VITE_BUILD_VERSION': JSON.stringify(buildVersion) },
   resolve: {
     alias: { '@overlyx/core': path.resolve(__dirname, '../core/src/index.ts') },
     dedupe: ['prosemirror-model', 'prosemirror-state', 'prosemirror-view', 'prosemirror-transform', 'yjs'],

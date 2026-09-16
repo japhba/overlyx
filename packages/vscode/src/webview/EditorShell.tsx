@@ -1,15 +1,15 @@
 import { MenuBar, openPalette, PALETTE_LABEL, type MenuDef } from '@client/app/MenuBar';
 import { documentMenus } from '@client/app/documentMenus';
 import { editorViewMenu } from '@client/app/editorViewMenu';
-import { editorToolbars, type ToolbarId, type ToolbarMode } from '@client/app/editorToolbars';
+import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
+import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats } from '@client/app/shellutil';
+import { referenceTransaction } from '@client/editor/references';
 import { inkToolbar } from '@client/app/inkToolbar';
 import { StatsDialog } from '@client/app/StatsDialog';
 import { SettingsPanel } from '@client/app/Settings';
 import { HelpDialog, HELP_ROWS } from '@client/app/Dialogs';
 import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
 import { setInk, subscribeInk } from '@client/editor/plugins/ink';
-import { insertImageFiles, readClipboardImages } from '@client/editor/imagepaste';
-import { llanglePreamble, hasLlangleSnippet, definesLlangle } from '@overlyx/core';
 /**
  * The OverLyX editor inside VS Code: the web client's Workspace (App.tsx) trimmed to the editor
  * itself — LyX toolbars, find & replace, contextual math/table/review rows, comments margin and
@@ -24,11 +24,12 @@ import { vscode, applyTheme } from './globals';
 import type { HostToEditor, OutlineEntry } from '../shared/protocol';
 import { api, type DocMeta } from '@client/api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '@client/prefs';
-import { Toolbar, mathPanelPalettes, type ToolButton, type DelimChoice } from '@client/app/Toolbar';
+import { Toolbar } from '@client/app/Toolbar';
 import { buildOutline } from '@client/app/Outline';
 import { Comments } from '@client/app/Comments';
 import { StatusBar, type Status } from '@client/app/StatusBar';
-import { cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
+import { SourcePane, cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
+import { ViewModeSwitch, type ViewMode } from '@client/app/ViewModeSwitch';
 import { locateSourceLine } from '@client/app/sourcelocate';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '@client/editor/lyxmath/field';
 import {
@@ -39,71 +40,20 @@ import { createLocalEditor, type LocalEditorHandle } from './localEditor';
 import { editorSessions } from './editorSession';
 import { RelatedEditor, type RelatedHandle } from './RelatedEditor';
 import { documentOrder } from './documentOrder';
-import { refreshMacros } from '@client/editor/editor';
+import { refreshMacros } from '@client/editor/macrodefs';
 import { editorContext, viewDocId } from '@client/editor/context';
 import { STANDARD_LAYOUTS, sectionLevel } from '@client/editor/layouts';
 import { chordKey } from '@client/editor/keymap';
 import * as C from '@client/editor/commands';
 import { setMarginMode } from '@client/editor/plugins/margin';
-import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilterKey } from '@client/editor/plugins/changes';
-import * as T from '@client/editor/tablecommands';
+import { acceptAllChanges, rejectAllChanges, changeAt } from '@client/editor/plugins/changes';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '@client/editor/plugins/find';
 import { unquote } from '@overlyx/core';
-import { describeChange } from '@client/editor/editor';
+import { describeChange } from '@client/editor/assembly';
 
 type DialogState = { name: string; arg?: unknown } | null;
-type ToolbarPrefs = Partial<Record<ToolbarId, ToolbarMode>>;
 
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
-const loadToolbarPrefs = (): ToolbarPrefs => { try { return JSON.parse(stored('ol.toolbars') ?? '{}'); } catch { return {}; } };
-
-function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T & { cancel(): void } {
-  let t: ReturnType<typeof setTimeout> | null = null;
-  return Object.assign(((...a: any[]) => { if (t) clearTimeout(t); t = setTimeout(() => fn(...a), ms); }) as T, { cancel() { if (t) clearTimeout(t); } });
-}
-
-function hashAuthor(name: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < name.length; i++) { h ^= name.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
-  return h | 0;
-}
-
-function applyAuthorColors(authors: { id: number; name: string }[]): void {
-  const palette = ['#2e7d32', '#c62828', '#1565c0', '#6a1b9a', '#ef6c00', '#00838f', '#ad1457', '#4e342e', '#558b2f', '#283593'];
-  const dark = ['#7bd88f', '#ff8a80', '#82b1ff', '#d6a2ff', '#ffb74d', '#4dd0e1', '#f48fb1', '#d7ccc8', '#c5e1a5', '#9fa8da'];
-  let el = document.getElementById('ol-author-colors') as HTMLStyleElement | null;
-  if (!el) { el = document.createElement('style'); el.id = 'ol-author-colors'; document.head.appendChild(el); }
-  el.textContent = authors.map((a, i) => `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: ${palette[i % palette.length]}; }\n`
-    + `html[data-theme="dark"] .lyx-change[data-author="${a.id}"], html[data-theme="dark"] .lyx-inset[data-author="${a.id}"] { --change-color: ${dark[i % dark.length]}; }`).join('\n');
-}
-
-function bcp47(lyxLang: string): string {
-  const t: Record<string, string> = {
-    english: 'en', american: 'en-US', british: 'en-GB', german: 'de', ngerman: 'de', french: 'fr', spanish: 'es', italian: 'it',
-    dutch: 'nl', portuguese: 'pt', brazilian: 'pt-BR', russian: 'ru', polish: 'pl', czech: 'cs', swedish: 'sv', danish: 'da',
-    norsk: 'nb', finnish: 'fi', greek: 'el', turkish: 'tr', hungarian: 'hu', romanian: 'ro', japanese: 'ja', korean: 'ko',
-    'chinese-simplified': 'zh-Hans', 'chinese-traditional': 'zh-Hant',
-  };
-  return t[lyxLang] ?? lyxLang.slice(0, 2);
-}
-
-function suggestLabel(view: EditorView): string {
-  const p = C.currentParagraph(view.state);
-  if (!p) return '';
-  const layout = p.node.attrs.layout as string;
-  const text = p.node.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
-  const prefix = /^Section/.test(layout) ? 'sec:' : /^Subsection/.test(layout) ? 'subsec:' : /^Chapter/.test(layout) ? 'chap:' : 'sec:';
-  const $from = view.state.selection.$from;
-  for (let d = $from.depth; d > 0; d--) {
-    const n = $from.node(d);
-    if (n.type.name === 'inset' && n.attrs.name === 'Caption') {
-      let ft = 'fig';
-      for (let dd = d - 1; dd > 0; dd--) { const f = $from.node(dd); if (f.type.name === 'inset' && f.attrs.name === 'Float') { ft = f.attrs.arg === 'table' ? 'tab' : f.attrs.arg === 'algorithm' ? 'alg' : 'fig'; break; } }
-      return `${ft}:${text || 'label'}`;
-    }
-  }
-  return prefix + (text || 'label');
-}
 
 export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'init' }> }) {
   const docId = init.docId;
@@ -122,6 +72,17 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [chord, setChord] = useState<string | null>(null);
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [zoom, setZoom] = useState(Number(stored('ol.zoom') || 1) || 1);
+  const [viewMode, setViewMode] = useState<ViewMode>('wysiwyg');
+  // light / dark: VS Code's theme unless the user picked one here (the sun / moon button; stored like the web client's ol.theme)
+  const [themePref, setThemePref] = useState<'system' | 'light' | 'dark'>(() => { const v = stored('ol.theme'); return v === 'light' || v === 'dark' ? v : 'system'; });
+  const hostDark = useRef(init.dark);
+  const shownDark = themePref === 'system' ? hostDark.current : themePref === 'dark';
+  useEffect(() => { applyTheme(shownDark); }, [shownDark]);
+  const cycleTheme = () => {
+    const next = themePref === 'system' ? (hostDark.current ? 'light' : 'dark') : themePref === 'light' ? 'dark' : 'system';
+    setThemePref(next);
+    try { if (next === 'system') localStorage.removeItem('ol.theme'); else localStorage.setItem('ol.theme', next); } catch { /* ignore */ }
+  };
   const [textWidth, setTextWidth] = useState(Number(stored('ol.textWidth') ?? DEFAULT_WIDTH));
   const [noteScale, setNoteScale] = useState(Number(stored('ol.noteScale') ?? NOTE_SCALE_DEFAULT));
   const [showRuler, setShowRuler] = useState(stored('ol.ruler') !== '0');
@@ -255,7 +216,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       handle = createLocalEditor({
         docId, container: containerRef.current, pmDoc: init.pmDoc, headerLines: headerRef.current, marginMode,
         onSelectionChange: onSelection,
-        onDocChange: (v) => { setDocTick(t => t + 1); postUpdate(v); postOutline(v); },
+        onDocChange: v => { setDocTick(t => t + 1); postUpdate(v); postOutline(v); },
       });
       handleRef.current = handle;
       // HMR keeps the local document/undo manager, but init belongs to the old mount.
@@ -296,14 +257,19 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
 
   /* ---------------------------------------------------------------- host messages */
   const metaReload = useMemo(() => debounce(() => {
-    api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; const v = handleRef.current?.view; if (v) refreshMacros(v, m.macros ?? {}); }).catch(() => {});
+    api.meta(docId).then(m => {
+      setMeta(m); editorContext.meta = m;
+      const v = handleRef.current?.view;
+      if (v) refreshMacros(v, m.macros ?? {});
+    }).catch(() => {});
   }, 1500), []);
 
   useEffect(() => {
     const onMsg = (ev: MessageEvent<HostToEditor>) => {
       const m = ev.data;
+      if (!m) return;
       const v = handleRef.current?.view;
-      if (!m || !v) return;
+      if (!v) return;
       switch (m.type) {
         case 'init':
         case 'externalUpdate':
@@ -336,9 +302,10 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           else if (m.name === 'syncToPdf') void syncToPdf();
           else if (m.name === 'buildPdf') build();
           else if (m.name === 'toggleTracking') void toggleTracking();
+          else if (m.name === 'toggleCombined') setCombined(c => !c);
           break;
         case 'inverseSync': void gotoTexLine(m.line); break;
-        case 'theme': applyTheme(m.dark); break;
+        case 'theme': hostDark.current = m.dark; rerender(); break;
       }
     };
     window.addEventListener('message', onMsg);
@@ -466,7 +433,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       openDialog: (name, arg) => setDialog({ name, arg }),
       toggleTrackChanges: () => { void toggleTracking(); },
       toggleOutline: () => hostCommand('outline'),
-      toggleSource: () => hostCommand('openSource'),
+      toggleSource: () => setViewMode(mode => mode === 'wysiwyg' ? 'split' : 'wysiwyg'),
       toggleCombined: () => setCombined(value => !value),
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
@@ -477,6 +444,10 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       newFile: () => hostCommand('newFile'),
     };
   });
+
+  const activeId = view ? viewDocId(view) : docId;
+  const activeMeta = activeId === docId ? meta : relatedRefs.current.get(activeId)!.meta;
+  const sourceTarget = view && handleRef.current ? { view, ydoc: activeId === docId ? handleRef.current.ydoc : editorSessions.get(activeId)!.ydoc, docId: activeId } : null;
 
   /* ---------------------------------------------------------------- labels, marks, table state */
   const labels = useMemo(() => {
@@ -511,104 +482,24 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     return n;
   };
 
-  const marksAtCursor = () => {
-    const v = currentView();
-    if (!v) return [] as any[];
-    const { $from, empty } = v.state.selection;
-    return (empty ? v.state.storedMarks ?? $from.marks() : $from.marks()) as any[];
-  };
-  const markActive = (name: string, value: string) => marksAtCursor().some(m => m.type.name === name && m.attrs.value === value);
-  const textColor = (marksAtCursor().find(m => m.type.name === 'color')?.attrs.value as string | undefined) ?? null;
-
-  const mathExec = (cmd: string, ...args: unknown[]) => {
-    const f = activeMathField();
-    if (f) { f.execute(cmd, ...args); f.focus(); return; }
-    const v = currentView();
-    if (v) { C.insertMath(false)(v); setTimeout(() => activeMathField()?.execute(cmd, ...args), 60); }
-  };
-  const ensureLlangle = async () => {
-    const activeMeta = editorContext.meta!;
-    const target = activeMeta.master ?? viewDocId(currentView()!);
-    const lines = (await api.header(target)).headerLines;
-    const a = lines.indexOf('\\begin_preamble'), b = lines.indexOf('\\end_preamble');
-    const preamble = a >= 0 && b > a ? lines.slice(a + 1, b).join('\n') : '';
-    if (hasLlangleSnippet(preamble)) return;
-    const defined = definesLlangle(preamble, Object.keys(activeMeta.macros));
-    await api.setHeader(target, { preamble: preamble + '\n' + llanglePreamble(defined) });
-  };
-  const insertDelim = (c: DelimChoice) => {
-    if (c.pair.left === '\\llangle') void ensureLlangle().catch(e => notify(String(e), 'error'));
-
-    if (c.size === '') mathExec('delim', c.pair.left, c.pair.right);
-    else if (c.size === 'none') mathExec('pair', c.pair.left, c.pair.right);
-    else mathExec('bigdelim', `${c.size}l`, c.pair.left, `${c.size}r`, c.pair.right);
-  };
-  const insertInMath = (latex: string) => {
-    const active = activeMathField();
-    if (active) { active.execute('insert', latex); return; }
-    const v = currentView();
-    if (v) { C.insertMath(false)(v); setTimeout(() => activeMathField()?.execute('insert', latex), 60); }
-  };
-  const mathPanels = useMemo(() => mathPanelPalettes(it => { if (it.kind === 'size') mathExec('style', it.latex); else mathExec('insert', it.latex); }), []);
-  const clipboard = (op: 'cut' | 'copy' | 'paste') => {
-    const v = currentView();
-    if (!v) return;
-    const f = activeMathField();
-    if (op === 'paste') {
-      const fallback = () => notify('Paste with Ctrl+V (the toolbar cannot read the clipboard here)', 'error');
-      const nav = navigator.clipboard;
-      if (!nav?.readText) { fallback(); return; }
-      const pasteText = () => nav.readText().then(t => { if (!t) return; if (f) f.execute('insert', t); else { v.focus(); v.pasteText(t); } }).catch(fallback);
-      if (f) void pasteText();
-      else readClipboardImages().then(async images => { if (images.length) await insertImageFiles(v, images); else await pasteText(); }).catch(() => void pasteText());
-      return;
-    }
-    if (f) { const c = f.cursor; const sel = c.selection ? c.grabSelection() : f.latex; void navigator.clipboard?.writeText(sel); if (op === 'cut' && c.selection) f.execute('insert', ''); return; }
-    v.focus();
-    document.execCommand(op);
-  };
-  const layoutBtn = (id: string, name: string, title: string, icon: string): ToolButton => ({ id, title, icon, action: () => run(C.setLayout(layout === name && name !== 'Standard' ? 'Standard' : name)), active: layout === name });
-
-  const inTable = !!view && !!C.tableContext(view.state);
-  const tableSt = view ? T.tableToolbarState(view.state) : null;
-  const changesFilterSt = view ? changesFilterKey.getState(view.state) : null;
-  const docHasChanges = useMemo(() => !!view && hasChanges(view.state.doc), [docTick, view]);
-  const showMath = tbMode('math') === 'on' || (tbMode('math') === 'auto' && !!mathField);
-  const showTable = tbMode('table') === 'on' || (tbMode('table') === 'auto' && inTable);
-  const showReview = tbMode('review') === 'on' || (tbMode('review') === 'auto' && (tracking || docHasChanges));
-  const activeId = view ? viewDocId(view) : docId;
-  const activeMeta = activeId === docId ? meta : relatedRefs.current.get(activeId)!.meta;
-  const outputChanges = docHeaders(activeId).some(l => l === '\\output_changes true');
-  const docStats = useMemo(() => {
-    if (!view) return null;
-    const { from, to, empty } = view.state.selection;
-    const doc = view.state.doc;
-    const text = doc.textBetween(empty ? 0 : from, empty ? doc.content.size : to, '\n', ' ');
-    const words = (text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length;
-    return { words, chars: text.replace(/\s+/g, '').length, sel: !empty };
-  }, [view, docTick, selTick]);
-
-  const tbTogglePalette = (id: ToolbarId, title: string) => ({
-    title, list: true, cols: 1, items: [
-      { label: 'On', action: () => setToolbar(id, 'on'), active: tbMode(id) === 'on' },
-      { label: 'Off', action: () => setToolbar(id, 'off'), active: tbMode(id) === 'off' },
-      { label: 'Automatic', action: () => setToolbar(id, 'auto'), active: tbMode(id) === 'auto' },
-    ],
-  });
-  const textStylesPalette = { title: 'Text properties', list: true, cols: 2, items: [
-    ['Emphasis', 'emph'], ['Bold', 'bold'], ['Noun (small caps)', 'noun'], ['Underline', 'underline'], ['Strikeout', 'strikeout'], ['Typewriter', 'typewriter'], ['Sans serif', 'sans'], ['Italic', 'italic'], ['Slanted', 'slanted'], ['Small caps', 'smallcaps'], ['Double underline', 'uuline'], ['Wavy underline', 'uwave'], ['Crossed out', 'xout'],
-  ].map(([l, k]) => ({ label: l, action: () => run((C.fontCommands as Record<string, any>)[k]) })).concat(
-    [['Tiny', 'tiny'], ['Small', 'small'], ['Normal size', 'normal'], ['Large', 'large'], ['Huge', 'huge']].map(([l, v]) => ({ label: `Size: ${l}`, action: () => run(C.setValueMark('size', v === 'normal' ? null : v)) })),
-    [{ label: 'Reset to default (Alt+C Space)', action: () => run(C.fontDefault) }]) };
-
-  /* ---------------------------------------------------------------- toolbar groups (LyX stdtoolbars.inc) */
-  const { standardGroups, viewUpdateGroups, extraGroups, mathGroups, mathPanelGroups, tableGroups, reviewGroups } = editorToolbars({
-    view, meta: activeMeta, prefs: { ...prefs, aiButton: false }, mathField, aiComplete: false, inkMode, marginMode, outputChanges, tracking,
-    showFiles: false, showMath, showReview, showTable, textColor, outlineTitle: 'OverLyX Structure', run, runView, build, syncToPdf,
-    toggleOutputChanges: () => { void api.setHeader(activeId, { set: { output_changes: outputChanges ? 'false' : 'true' } }).then(r => { updateHeader(activeId, r.headerLines); setDocTick(t => t + 1); }); },
-    toggleMargin, toggleTracking, navBack: () => hostCommand('back'), openInTab: id => vscode.postMessage({ type: 'openDoc', id }),
-    setDialog, setFindOpen, setInkMode, setShowFiles: () => hostCommand('outline'), notify, clipboard, insertDelim, mathExec, layoutBtn, markActive,
-    tbMode, tbTogglePalette, textStylesPalette, mathPanels, tableSt, changesFilterSt,
+  const textColor = markValue(view, 'color');
+  const mathExec = mathExecutor(currentView);
+  const mathPanels = useMathPanels(mathExec);
+  const clipboard = toolbarClipboard(currentView, notify);
+  const insertInMath = (latex: string) => { const field = activeMathField(); if (field) { field.execute('insert', latex); field.focus(); } else mathExec('insert', latex); };
+  const docStats = useMemo(() => view ? documentStats(view) : null, [view, docTick, selTick]);
+  const tb = buildToolbars({
+    view, docId: activeId, meta: activeMeta, headerLines: docHeaders(activeId), prefs: { ...prefs, aiButton: false }, layout, mathField, tracking, marginMode,
+    tbMode, setToolbar, run, runView, mathExec, mathPanels, clipboard, setDialog, openFind: () => setFindOpen(true), notify,
+    toggleTracking: () => { void toggleTracking(); }, toggleMargin, build: () => build(), updatePdf: () => build({ open: false }), syncToPdf: () => { void syncToPdf(); },
+    onHeaderLines: lines => { updateHeader(activeId, lines); setDocTick(t => t + 1); },
+    slots: {
+      leading: [{ id: 'new', title: 'New document', icon: 'new', action: () => hostCommand('newFile') }, { id: 'open', title: 'Open', icon: 'open', action: () => hostCommand('openFile') }],
+      navigation: [{ id: 'navback', title: 'Navigate back', icon: 'navback', action: () => hostCommand('back') }],
+      sidebars: [{ id: 'outline', title: 'OverLyX Structure', icon: 'outline', action: () => hostCommand('outline') }],
+      tools: [{ id: 'ink', title: 'Draw in the margins', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode }, { id: 'comments-panel', title: 'Comments', icon: 'notes', action: () => setShowComments(s => !s), active: showComments }],
+      pdf: activeMeta?.master ? [{ id: 'pdfmaster', title: 'View master document', icon: 'viewmaster', action: () => vscode.postMessage({ type: 'openDoc', id: activeMeta.master! }) }] : [],
+    },
   });
   const inkGroups = inkToolbar();
   const toggleCellLine = (key: string) => {
@@ -634,7 +525,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     editingMenus.edit,
     editorViewMenu({ combined, setCombined, marginMode, toggleMargin, run, showRuler, setShowRuler, tbMode, setToolbar, textWidth, setTextWidth, stepTextWidth,
       hostItems: [
-        { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', action: () => hostCommand('openSource') },
+        { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', action: () => setViewMode(mode => mode === 'wysiwyg' ? 'split' : 'wysiwyg') },
         { label: 'Outline', shortcut: 'Ctrl+Alt+O', action: () => hostCommand('outline') },
         { label: 'PDF preview', action: () => vscode.postMessage({ type: 'openPdfPanel' }) },
         { label: 'Comments', checked: showComments, action: () => setShowComments(v => !v) },
@@ -728,10 +619,10 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         if (target?.node && target.pos !== undefined) {
           const p = commandParams(target.node);
           const tpos = target.pos, tnode = target.node;
-          return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: p.get('LatexCommand') ?? 'ref' }} onClose={close}
-            onInsert={(n: string, k: string) => { const params = [`LatexCommand ${k}`, `reference "${n}"`, 'plural "false"', 'caps "false"', 'noprefix "false"', 'nolink "false"', '']; view.dispatch(view.state.tr.setNodeMarkup(tpos, undefined, { ...tnode.attrs, params: JSON.stringify(params) })); }} />;
+          return <RefDialog view={view} labels={labels} useRefstyle={!!meta?.useRefstyle} initial={{ name: unquote(p.get('reference')), kind: unquote(p.get('package')) === 'cleveref' ? 'cref' : p.get('LatexCommand') ?? 'ref', tuple: unquote(p.get('tuple')) === 'range' ? 'range' : 'list', caps: unquote(p.get('caps')) === 'true' }} onClose={close}
+            onInsert={(n, k, o) => view.dispatch(referenceTransaction(view.state, n, k, o, tpos))} />;
         }
-        return <RefDialog labels={labels} useRefstyle={!!meta?.useRefstyle} initial={target?.prefill ? { name: target.prefill, kind: 'ref' } : undefined} onClose={close} onInsert={(n: string, k: string) => run(C.insertRef(n, k))} />;
+        return <RefDialog view={view} labels={labels} useRefstyle={!!meta?.useRefstyle} initial={target?.prefill ? { name: target.prefill, kind: 'ref' } : undefined} onClose={close} onInsert={(n, k, o) => view.dispatch(referenceTransaction(view.state, n, k, o))} />;
       }
       case 'cite': {
         const target = dialog.arg as { pos: number; node: any } | undefined;
@@ -779,11 +670,22 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   return (
     <div class="app" data-vscode="1">
       <MenuBar menus={menus} showThemeToggle={false} paletteShortcut="Ctrl+Alt+Shift+P" captureF1={false} searchEntries={helpSearchEntries} />
-      {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={standardGroups} />}
+      <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong>
+        <span class="topbar-right">
+          <button type="button" class="theme-toggle" data-theme-toggle data-current={shownDark ? 'dark' : 'light'} onClick={cycleTheme}
+            title={`${shownDark ? 'Dark' : 'Light'} theme${themePref === 'system' ? " (following VS Code's)" : ''} — click for ${themePref === 'system' ? (shownDark ? 'light' : 'dark') : themePref === 'light' ? 'dark' : "VS Code's theme"}`}>
+            {shownDark
+              ? <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" /></svg>
+              : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" /></svg>}
+          </button>
+          <ViewModeSwitch mode={viewMode} onChange={setViewMode} />
+        </span>
+      </div>
+      {tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={(n: string) => run(C.setLayout(n))} groups={tb.standard} />}
       {(tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
         <div class="tb-samerow">
-          {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={viewUpdateGroups} />}
-          {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={extraGroups} />}
+          {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={tb.viewUpdate} />}
+          {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={tb.extra} />}
         </div>
       )}
       {meta && meta.health.length > 0 && (
@@ -818,7 +720,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         </div>
       )}
       <div class="main">
-        <div class="editor-column">
+        <div class={'editor-column view-' + viewMode + (viewMode === 'wysiwyg' ? '' : ' split')}>
           {showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
           <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode ? ' ink-mode' : '')} ref={scrollRef} style={{ zoom }} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
             <div class="editor-page">
@@ -829,6 +731,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
                 onSelection={onSelection} onDocChange={() => setDocTick(t => t + 1)} />)}
             </div>
           </div>
+          {viewMode !== 'wysiwyg' && <SourcePane target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => setViewMode('wysiwyg')} onSave={() => vscode.postMessage({ type: 'save' })} />}
         </div>
         {showComments && (
           <div class="sidebar right">
@@ -840,31 +743,18 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           </div>
         )}
       </div>
-      {(showMath || showTable || showReview || inkMode) && (
+      {(tb.showMath || tb.showTable || tb.showReview || inkMode) && (
         <div class="bottom-toolbars" style={{ left: '24px', right: showComments ? 'var(--right-width, 360px)' : '24px' }}>
-          {showMath && <Toolbar id="math" label="Math" groups={mathGroups} />}
-          {showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={mathPanelGroups} />}
-          {showTable && <Toolbar id="table" label="Table" groups={tableGroups} />}
-          {showReview && <Toolbar id="review" label="Review" groups={reviewGroups} />}
+          {tb.showMath && <Toolbar id="math" label="Math" groups={tb.math} />}
+          {tb.showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={tb.mathPanels} />}
+          {tb.showTable && <Toolbar id="table" label="Table" groups={tb.table} />}
+          {tb.showReview && <Toolbar id="review" label="Review" groups={tb.review} />}
           {inkMode && <Toolbar id="ink" label="Draw" groups={inkGroups} />}
         </div>
       )}
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={{ state: 'saved', pending: false, savedAt: 0, unavailable: false }}
         tracking={tracking} trackingAs="You" change={changeInfo} stats={docStats} zoom={zoom} onZoom={setZoom} />
       {renderDialog()}
-    </div>
-  );
-}
-
-function LayoutPicker({ layouts, onPick, onClose }: { layouts: { name: string; category?: string }[]; onPick: (n: string) => void; onClose: () => void }) {
-  const [q, setQ] = useState('');
-  const list = layouts.filter(l => l.name.toLowerCase().includes(q.toLowerCase()));
-  return (
-    <div class="dialog-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div class="dialog"><h2>Paragraph layout</h2><div class="body">
-        <input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter' && list[0]) { onPick(list[0].name); onClose(); } if (e.key === 'Escape') onClose(); }} placeholder="type to filter…" />
-        <div class="list">{list.map(l => <div key={l.name} onClick={() => { onPick(l.name); onClose(); }}>{l.name} <span class="sub">{l.category}</span></div>)}</div>
-      </div></div>
     </div>
   );
 }

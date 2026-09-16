@@ -61,7 +61,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
 
-  const check = (key: 'spellcheck' | 'autoCorrect' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath', label: string, hint: string) => (
+  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath', label: string, hint: string) => (
     <label class="pref"><input type="checkbox" data-pref={key} checked={p[key]} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
   );
   const toggleRecopy = async (u: AdminUser) => {
@@ -88,6 +88,8 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
               <option value="overlyx">OverLyX — instant, knows LaTeX (skips formulas, commands, code), suggestions in the menu; English, British, German, French</option>
               <option value="browser">Browser — the browser's own checker (checks slowly after a click; suggestions only via {/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click)</option>
             </select></Row>
+            <h3>Figures</h3>
+            {check('invertFigures', 'Invert figures in the dark theme', 'Plots and diagrams — dark strokes on a light ground — are shown light-on-dark, like iOS Smart Invert; photographs keep their colours. Figures reload by themselves when their file changes on disk.')}
           </>}
           {section === 'ai' && <>
             <h3>AI assistance</h3>
@@ -114,7 +116,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             <h3>Signed in</h3>
             <div data-setting="whoami">{user.name} ({user.username}){user.isAdmin ? ' — administrator' : ''}</div>
             <h3>Token re-copy</h3>
-            <div class="sub">Access tokens and MCP agent tokens (File ▸ Git repository…) are normally shown exactly once — only a hash is kept. With re-copy enabled for an account, tokens that account creates keep their plaintext on the server, and the Git dialog offers Copy again later. A convenience that stores recoverable secrets, so it is off by default; an administrator switches it per account.</div>
+            <div class="sub">The account access token (File ▸ Git repository…) works with Git, the CLI and MCP. It is normally shown exactly once — only a hash is kept. With re-copy enabled, its plaintext remains on the server and the Git dialog offers Copy again later. This convenience stores a recoverable secret, so it is off by default; an administrator switches it per account.</div>
             <div data-setting="recopy"><b>{settings === null ? 'Checking…' : settings.allowRecopyTokens ? 'Enabled for your account' : 'Disabled for your account'}</b>{settings !== null && !settings.allowRecopyTokens ? ' (the default)' : ''}</div>
             {user.isAdmin && <>
               <h3>Per-account (administrator)</h3>

@@ -4,14 +4,15 @@
  * server metadata, RFC 9728 protected-resource metadata, RFC 7591 dynamic client registration
  * (ChatGPT registers itself), authorization code + PKCE (S256, public clients), refresh-token
  * rotation. The consent page uses the normal OverLyX session cookie; an approved grant mints an
- * ordinary MCP access token (mcpTokens.ts) with an expiry, named after the client — it shows up
- * with the user's other agent tokens and revoking it there cuts the connection.
+ * separate MCP access credential (mcpTokens.ts) with an expiry, named after the client — it shows
+ * up under OAuth connections and revoking it there cuts only that connection.
  */
 import express, { type Request, type Response } from 'express';
 import crypto from 'node:crypto';
 import { config } from './config.ts';
 import { db } from './db.ts';
 import { createMcpToken } from './mcpTokens.ts';
+import { setSecurityHeaders } from './security.ts';
 
 const ACCESS_MS = 30 * 24 * 3600 * 1000;   // access tokens; ChatGPT refreshes with the refresh token
 const CODE_MS = 10 * 60 * 1000;
@@ -115,11 +116,12 @@ export function oauthRoutes(): express.Router {
       page(res, 200, `<h2>Sign in first</h2><p><b>${esc(v.client.name)}</b> asks to connect to your OverLyX projects, but this browser is not signed in.</p><p><a class="btn" href="/" target="_blank" rel="noreferrer">Open OverLyX and sign in</a></p><p><a class="btn primary" href="${esc(req.originalUrl)}">I signed in — continue</a></p>`);
       return;
     }
+    setSecurityHeaders(res, v.redirectUri);
     const keep = ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope', 'response_type']
       .map(k => `<input type="hidden" name="${k}" value="${esc(String(req.query[k] ?? (k === 'response_type' ? 'code' : k === 'code_challenge_method' ? 'S256' : '')))}">`).join('');
     page(res, 200, `<h2>Connect ${esc(v.client.name)}?</h2>
 <p><b>${esc(v.client.name)}</b> wants to work with the OverLyX projects of <b>${esc(req.user.name)}</b> (@${esc(req.user.username)}) — read documents and files, propose tracked-change edits, comment, and build PDFs, with your role in each project.</p>
-<p class="muted">This creates an agent token on your account; remove it any time in OverLyX under File ▸ Git repository ▸ agent tokens.</p>
+<p class="muted">This creates a short-lived credential for this OAuth connection; disconnect it any time in OverLyX under File ▸ Git repository ▸ OAuth connections.</p>
 <form method="post" action="/oauth/authorize">${keep}<button class="primary" name="decision" value="approve">Allow</button> <button name="decision" value="deny">Deny</button></form>`);
   });
 

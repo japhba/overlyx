@@ -1,6 +1,6 @@
 /**
- * Git dialog: the project's clone URL and how to use it from a local machine, personal access
- * tokens (the password for git over HTTPS — Google accounts have no other), the recent commits
+ * Git dialog: the project's clone URL and how to use it from a local machine, the account access
+ * token (shared by git, the CLI and MCP — Google accounts have no password), the recent commits
  * and what OverLyX has not committed yet. Every project is a repository; OverLyX commits its own
  * writes automatically and before every clone / pull / push, and a push updates the project.
  */
@@ -44,18 +44,14 @@ function CopyMini({ value }: { value: string }) {
   return <button class="mini" data-token-copy title="Copy this token (re-copy is enabled for your account)" onClick={() => void copy()}>{copied ? 'Copied ✓' : 'Copy'}</button>;
 }
 
-export function GitDialog({ project, user, onClose }: { project: string; user: User; onClose: () => void }) {
+export function GitDialog({ project, onClose }: { project: string; user: User; onClose: () => void }) {
   const [info, setInfo] = useState<GitInfo | null>(null);
   const [tokens, setTokens] = useState<GitToken[] | null>(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const [tokenName, setTokenName] = useState('');
-  const [newToken, setNewToken] = useState<{ name: string; token: string } | null>(null);
+  const [newToken, setNewToken] = useState<{ id: number; token: string } | null>(null);
   const [message, setMessage] = useState('');
   const [mcpTokens, setMcpTokens] = useState<GitToken[] | null>(null);
-  const [mcpName, setMcpName] = useState('');
-  const [newMcpToken, setNewMcpToken] = useState<{ name: string; token: string } | null>(null);
-  const [mcpBusy, setMcpBusy] = useState(false);
   const [mirror, setMirror] = useState<MirrorStatus | null>(null);
   const [mirrorBusy, setMirrorBusy] = useState(false);
 
@@ -73,32 +69,22 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
 
   const createToken = async () => {
     if (busy) return;
+    if (tokens?.length && !confirm('Rotate your account access token? Every Git, CLI and manual MCP client using the current token will need the new one.')) return;
     setBusy(true); setErr('');
     try {
-      const name = tokenName.trim() || defaultTokenName();
-      const r = await api.createGitToken(name);
-      setTokens(r.tokens); setNewToken({ name, token: r.token }); setTokenName('');
+      const r = await api.rotateGitToken();
+      setTokens(r.tokens); setNewToken({ id: r.id, token: r.token });
     } catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
   };
   const revoke = async (t: GitToken) => {
-    if (!confirm(`Revoke the token “${t.name}”? Clones using it will no longer be able to pull or push.`)) return;
-    try { setTokens((await api.deleteGitToken(t.id)).tokens); if (newToken && tokens?.find(x => x.id === t.id)?.name === newToken.name) setNewToken(null); }
+    if (!confirm('Revoke your account access token? Every Git, CLI and manual MCP client using it will stop working.')) return;
+    try { setTokens((await api.deleteGitToken(t.id)).tokens); if (newToken?.id === t.id) setNewToken(null); }
     catch (e) { setErr((e as Error).message); }
   };
-  const createMcpToken = async () => {
-    if (mcpBusy) return;
-    setMcpBusy(true); setErr('');
-    try {
-      const name = mcpName.trim() || 'agent';
-      const r = await api.createMcpToken(name);
-      setMcpTokens(r.tokens); setNewMcpToken({ name, token: r.token }); setMcpName('');
-    } catch (e) { setErr((e as Error).message); }
-    finally { setMcpBusy(false); }
-  };
   const revokeMcpToken = async (t: GitToken) => {
-    if (!confirm(`Revoke the agent token “${t.name}”? It will no longer be able to connect.`)) return;
-    try { setMcpTokens((await api.deleteMcpToken(t.id)).tokens); if (newMcpToken?.name === t.name) setNewMcpToken(null); }
+    if (!confirm(`Disconnect “${t.name}”? That OAuth or legacy connection will stop working.`)) return;
+    try { setMcpTokens((await api.deleteMcpToken(t.id)).tokens); }
     catch (e) { setErr((e as Error).message); }
   };
 
@@ -137,30 +123,26 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
             {!canPush && <> You have <b>view</b> access to this project: you can clone and pull, but not push.</>}
           </div>
 
-          <h4>Access tokens</h4>
-          <div class="hint">A token stands for your account in git only — one list for your whole account, the same in every project's dialog. Create one per computer and revoke it when the computer is gone.</div>
+          <h4>Your account access token — Git, CLI and MCP</h4>
+          <div class="hint">Your account has one manually-managed token, shared by every project and client. Use it as the password for Git or the OverLyX CLI, or as an MCP Bearer token. Rotating it replaces the old token everywhere.</div>
           {newToken && (
             <div class="git-newtoken">
-              <div><b>Your new token “{newToken.name}”</b> — copy it now, it is not shown again:</div>
+              <div><b>Your new account token</b> — copy it now; unless token re-copy is enabled for your account, it is not shown again:</div>
               <CopyField value={newToken.token} />
             </div>
           )}
           <div class="git-tokens">
             {(tokens ?? []).map(t => (
               <div class="git-token" key={t.id}>
-                <span class="name">🔑 {t.name}</span>
+                <span class="name">🔑 Account access token</span>
                 <span class="meta">created {fmtDate(t.created_at)}{t.last_used_at ? ` · last used ${ago(t.last_used_at)}` : ' · never used'}</span>
                 {t.token && <CopyMini value={t.token} />}
                 <button class="mini" title="Revoke this token" onClick={() => void revoke(t)}>Revoke</button>
               </div>
             ))}
-            {tokens && !tokens.length && <div class="hint">No tokens yet.</div>}
+            {tokens && !tokens.length && <div class="hint">No account token yet.</div>}
           </div>
-          <div class="share-add">
-            <input type="text" placeholder={`Token name, e.g. ${defaultTokenName()}`} value={tokenName} onInput={e => setTokenName((e.target as HTMLInputElement).value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void createToken(); } }} />
-            <button class="btn" disabled={busy} onClick={() => void createToken()}>New token</button>
-          </div>
+          <button class="btn" disabled={busy} onClick={() => void createToken()}>{tokens?.length ? 'Rotate token' : 'Create token'}</button>
 
           <h4>MCP connector — let an AI agent read, comment and propose edits</h4>
           <div class="hint">
@@ -170,33 +152,23 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
             the PDF, and (with edit access) comment and write raw LaTeX — paragraph edits land as a <b>tracked
             change</b> attributed to the agent, never a silent overwrite, so you review them from the Review toolbar
             like any collaborator's edit. <b>ChatGPT</b> connects with no token at all (Settings ▸ Apps ▸ Developer
-            mode ▸ Create, this URL, OAuth — you approve it on a consent page); Claude, Claude Code and others use an
-            agent token from below as a Bearer header.
+            mode ▸ Create, this URL, OAuth — you approve it on a consent page); Claude, Claude Code and others use
+            your account token above as a Bearer header.
           </div>
           <CopyField value={`${location.origin}/mcp`} label="MCP server URL (all your projects)" />
           <div class="hint">To pin a client to just this project, give it <code>{location.origin}/mcp/{encodeURIComponent(project)}</code> instead.</div>
-          {newMcpToken && (
-            <div class="git-newtoken">
-              <div><b>Agent token “{newMcpToken.name}”</b> — copy it now, it is not shown again. Use it as an
-                <code> Authorization: Bearer {'<token>'}</code> header, or in your MCP client's config as the token/API key for this server.</div>
-              <CopyField value={newMcpToken.token} />
-            </div>
-          )}
+          <h4>OAuth connections and legacy agent tokens</h4>
+          <div class="hint">OAuth clients keep separate, short-lived credentials so you can disconnect one without rotating your account token. Older manually-created agent tokens remain usable and can be revoked here, but new manual connections use the account token above.</div>
           <div class="git-tokens">
             {(mcpTokens ?? []).map(t => (
               <div class="git-token" key={t.id}>
                 <span class="name">🤖 {t.name}</span>
-                <span class="meta">created {fmtDate(t.created_at)}{t.last_used_at ? ` · last used ${ago(t.last_used_at)}` : ' · never used'}</span>
+                <span class="meta">created {fmtDate(t.created_at)}{t.expires_at ? ` · expires ${fmtDate(t.expires_at)}` : ''}{t.last_used_at ? ` · last used ${ago(t.last_used_at)}` : ' · never used'}</span>
                 {t.token && <CopyMini value={t.token} />}
                 <button class="mini" title="Revoke this token" onClick={() => void revokeMcpToken(t)}>Revoke</button>
               </div>
             ))}
-            {mcpTokens && !mcpTokens.length && <div class="hint">No agent tokens yet.</div>}
-          </div>
-          <div class="share-add">
-            <input type="text" placeholder="Agent name, e.g. Research assistant" value={mcpName} onInput={e => setMcpName((e.target as HTMLInputElement).value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void createMcpToken(); } }} />
-            <button class="btn" disabled={mcpBusy} onClick={() => void createMcpToken()}>New agent token</button>
+            {mcpTokens && !mcpTokens.length && <div class="hint">No OAuth or legacy connections.</div>}
           </div>
 
           <h4>Off-site mirror</h4>
@@ -252,9 +224,4 @@ export function GitDialog({ project, user, onClose }: { project: string; user: U
     </Dialog>
   );
 
-  function defaultTokenName(): string {
-    const ua = navigator.userAgent;
-    const os = /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows PC' : /Linux/.test(ua) ? 'Linux machine' : 'computer';
-    return `${user.name.split(/\s+/)[0]}'s ${os}`;
-  }
 }

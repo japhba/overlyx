@@ -24,7 +24,7 @@ export type HostToEditor =
   | { type: 'goto'; pos: number }
   | { type: 'navigate'; label?: string; heading?: number }
   /** run a UI command (keybindings / menus contributed on the VS Code side) */
-  | { type: 'command'; name: 'toggleMargin' | 'find' | 'syncToPdf' | 'buildPdf' | 'toggleTracking' }
+  | { type: 'command'; name: 'toggleMargin' | 'toggleCombined' | 'find' | 'syncToPdf' | 'buildPdf' | 'toggleTracking' }
   /** SyncTeX inverse search: a line (1-based) of the LaTeX as built — locate it and move the cursor */
   | { type: 'inverseSync'; line: number }
   | { type: 'theme'; dark: boolean };
@@ -39,7 +39,7 @@ export type EditorToHost =
   | { type: 'update'; pmDoc: PmDoc; headerLines: string[]; base: DocumentModel }
   | { type: 'outline'; items: OutlineEntry[] }
   | { type: 'selection'; pos: number }
-  | { type: 'notify'; text: string; kind?: 'info' | 'error' }
+  | { type: 'notify'; text: string; kind?: 'info' | 'error'; stack?: string }
   /** flush pending edits and save the TextDocument (Ctrl+S inside the editor) */
   | { type: 'save' }
   /** start a PDF build (and open the PDF panel) / cancel it / just open the panel */
@@ -62,4 +62,4 @@ export type PdfToHost =
   | { type: 'ready' }
   /** double-click in the PDF: inverse search at this point (PDF points from the page's top-left) */
   | { type: 'inverse'; page: number; x: number; y: number }
-  | { type: 'notify'; text: string; kind?: 'info' | 'error' };
+  | { type: 'notify'; text: string; kind?: 'info' | 'error'; stack?: string };

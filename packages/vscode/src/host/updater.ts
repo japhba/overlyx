@@ -1,6 +1,6 @@
 /**
  * Self-update from GitHub releases (the extension is distributed as a .vsix, not through the
- * marketplace, so VS Code will not update it by itself): once a day — and on demand through
+ * marketplace, so VS Code will not update it by itself): every five minutes — and on demand through
  * "OverLyX: Check for Updates" — the latest release is compared with the running version; a newer
  * .vsix is downloaded and installed with the built-in installExtension command, then VS Code only
  * needs a reload. `overlyx.updates`: "prompt" (default) asks first, "auto" installs silently,
@@ -10,12 +10,13 @@ import * as vscode from 'vscode';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fetchLatestRelease, isNewer, type ReleaseInfo } from './updateCheck.ts';
+import { LiveUpdater } from './liveUpdater.ts';
 
 const DEFAULT_REPO = 'japhba/overlyx';
 const CHECK_EVERY_MS = 5 * 60 * 1000;   // updates land fast; one small API call per check
 
 export interface CheckResult {
-  status: 'up-to-date' | 'update-available' | 'installed' | 'skipped' | 'no-release' | 'dry-run-downloaded';
+  status: 'up-to-date' | 'update-available' | 'installed' | 'skipped' | 'no-release' | 'dry-run-downloaded' | 'live-up-to-date' | 'live-updated' | 'live-checking' | 'live-blocked' | 'live-error';
   current: string;
   latest?: string;
   vsixPath?: string;
@@ -26,15 +27,21 @@ export class Updater {
   /** versions already handled this session — a 5-minute cadence must not nag or install in a loop */
   private promptedVersion: string | null = null;
   private installedVersion: string | null = null;
+  private live: LiveUpdater | undefined;
 
   constructor(private context: vscode.ExtensionContext) {}
 
   private get currentVersion(): string { return String(this.context.extension.packageJSON.version ?? '0.0.0'); }
   private get config() { return vscode.workspace.getConfiguration('overlyx'); }
 
+  private liveUpdater(): LiveUpdater {
+    if (!this.live) { this.live = new LiveUpdater(this.context, this.config.get<string>('developmentPath')!); this.context.subscriptions.push(this.live); }
+    return this.live;
+  }
+
   /** Kick off the periodic check (production installs only — a dev host updating itself would be chaos). */
   schedule(): void {
-    if (this.config.get<string>('developmentPath')) return;
+    if (this.config.get<string>('developmentPath')) { this.liveUpdater().schedule(); return; }
     if (this.context.extensionMode !== vscode.ExtensionMode.Production) return;
     if (this.config.get<string>('updates') === 'off') return;
     const last = this.context.globalState.get<number>('updateLastCheck') ?? 0;
@@ -51,6 +58,10 @@ export class Updater {
    * download (the integration test exercises the pipeline without installing into the host).
    */
   async check(opts: { interactive: boolean; apiOverride?: string; dryRun?: boolean } = { interactive: true }): Promise<CheckResult> {
+    if (this.config.get<string>('developmentPath') && !opts.dryRun) {
+      const result = await this.liveUpdater().check();
+      return { status: `live-${result.status}`, current: result.head, latest: result.upstream };
+    }
     void this.context.globalState.update('updateLastCheck', Date.now());
     const repo = this.config.get<string>('updateRepo') || DEFAULT_REPO;
     const apiOverride = opts.apiOverride ?? this.config.get<string>('updateApi') ?? undefined;

@@ -13,6 +13,23 @@ reproduced byte for byte until you change them.
 - **OverLyX editor** for `.tex` files (right-click a file ▸ *Reopen Editor With…* ▸ *OverLyX
   Editor*, or the editor-title button). The document stays an ordinary VS Code `TextDocument`:
   dirty state, Ctrl+S, autosave, git and extensions all see the same file.
+- **The web client's editor, not a copy of it.** The plugins, toolbars and dialogs are the same
+  code the website runs (`packages/client`), so what lands there lands here with the next release:
+  autocorrect, `- ` / `# ` lists and headings, images pasted or dropped into the text, the
+  delimiter size buttons, ⟪ ⟫, nomenclature entries.
+- **Light / dark** button in the top bar: VS Code's theme, or a light or dark editor of your own choosing.
+- **Figures reload** when their file changes on disk (a plot script ran); in the dark theme line art is shown
+  light-on-dark, photos are left alone. `$…$` and `$$` type formulas the LaTeX way; `- ` / `# ` at a
+  paragraph start make lists and headings.
+- **WYSIWYG / TeX / Split** buttons in the top bar switch views within the editor. Ctrl+S in
+  TeX view applies the source and saves the file. The ruler above the page resizes the writing
+  width; drag its handles or focus a handle and use the arrow keys.
+- **Imported math macros** from project files update when those files change, including
+  unsaved definitions in another open VS Code editor.
+- **Shared figures** using `../` and `../../` paths render from parent directories. Common
+  image and PDF extensions can be omitted in `\includegraphics` references.
+- **Remote workspaces** route image and PDF previews through VS Code's connection to the
+  extension host. Install or update OverLyX in the remote window, then reload that window.
 - **Structure view** (OverLyX icon in the activity bar): the live outline — sections, floats —
   click to jump.
 - **PDF panel** (Ctrl+R): builds with your local `latexmk` next to the file, shows the PDF with
@@ -21,6 +38,10 @@ reproduced byte for byte until you change them.
 - **Comments & notes** live in the file as `%%` comment blocks (any other LaTeX tool ignores
   them); show them in the margin or the comments panel. Change tracking uses LyX's
   `\lyxadded`/`\lyxdeleted` macros.
+- **Master and child documents in one view** (right-click an `\include` ▸ *Show master and
+  child documents in one view*, or the *OverLyX: Show Master and Child Documents in One View*
+  command): the `\include`d / `\input` files are edited below the master as one scrolling page,
+  each still saved through its own file; Ctrl+S saves them all.
 - **Editing a file that changes underneath** (git checkout, a coding agent, you in a split text
   editor) refreshes every open view, including cached child documents and inherited macros.
   Pending edits in separate paragraphs are merged; stale snapshots cannot restore removed text.
@@ -86,6 +107,17 @@ reload.
 Extension-affecting pushes to `master` automatically build, test, and publish a
 GitHub release. Website deployment is independent. See [RELEASING.md](RELEASING.md)
 for versioning, source provenance, and manual workflow runs.
+
+## Error diagnostics and privacy
+
+When VS Code telemetry is enabled, OverLyX sends errors from the extension host and its webviews
+to `https://overlyx.app/api/vscode-telemetry`. Reports contain the sanitized error and stack trace,
+the OverLyX and VS Code versions, operating-system/CPU family, and whether the extension host is
+local or remote. They never contain document content, filenames, workspace paths, account details,
+email addresses, or stable machine/session identifiers. Distinct errors are deduplicated in the
+project's issue tracker. Set `overlyx.errorReports` to false, or turn off VS Code telemetry globally,
+to disable sending. The exact event schema is in `telemetry.json`; local details remain available in
+the **OverLyX** output channel.
 
 ## License
 
@@ -165,7 +197,10 @@ Extension Development Host to load it. Changes to command/menu declarations in `
 also require this reload. Stop the watch task when finished.
 
 The website and extension live in the same repository and share `packages/core` and much of
-`packages/client`. Use a branch for each piece of work, push it to GitHub, and merge through
+`packages/client`: the webview imports the client's editor assembly (`editor/assembly.ts`), its
+toolbars (`app/toolbars.tsx`) and dialogs directly, and `tests/parity.test.ts` fails if the webview
+starts assembling an editor or toolbars of its own — put shared behaviour into the client, and only
+what is specific to VS Code into `packages/vscode`. Use a branch for each piece of work, push it to GitHub, and merge through
 `master`; the server and any other workstation then fetch the same commits. Before starting new
 work on either machine, fetch and update from `origin/master`. Avoid editing the same branch on
 two machines at once; use separate branches and merge or rebase them through Git.
@@ -173,3 +208,20 @@ two machines at once; use separate branches and merge or rebase them through Git
 Pushing extension-affecting changes to `master` automatically runs the extension checks and
 publishes a new VSIX release. A local F5 session always uses your current working tree, so you do
 not need to publish while iterating.
+
+### Persistent live install and upstream updates
+
+`npm run dev:service -w packages/vscode` installs the persistent live development server and a
+separate `overlyx-live-update.timer`. The timer fetches `origin/master` every five minutes and
+merges new upstream commits with committed local fixes. It builds and checks a separate candidate
+before advancing the running checkout. Uncommitted source edits, merge conflicts and failed
+checks leave the running source unchanged and appear in the **OverLyX Live** status bar.
+Commit local source work before expecting automatic upstream integration. No updater pushes to GitHub.
+
+**OverLyX: Check for Updates** runs this source update service in a live install; it never installs
+a release VSIX over the live loader. Live status compares Git commits, not the loader's version.
+Each source update also refreshes the live VSIX manifest so new commands and settings become
+available after reloading. The service records its status in Git's `overlyx-live-status.json`; validation and activation logs
+are retained under `$FAST_CACHE_DIR/overlyx-live/update-*`. The status bar offers **Reload Window**
+when a new extension host is ready. UI edits still use Vite HMR, while changes requiring a full
+reload are reported so the editor's in-memory undo history is not discarded automatically.

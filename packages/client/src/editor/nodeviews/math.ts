@@ -5,7 +5,7 @@
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
-import { dragFromAtom } from '../plugins/dragselect';
+import { dragFromAtom, shiftClickAt } from '../plugins/dragselect';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { macroFromLyxLines, parseFormula, renderHullSource, numberedType, type HullType } from '@overlyx/core';
 import { LyxMathField, renderStaticHtml, activeMathField, rowRectsOf } from '../lyxmath/field';
@@ -16,9 +16,10 @@ import { editorContext, viewDocDir, viewProject } from '../context';
 import { getPrefs } from '../../prefs';
 import { openRewriteMath, REWRITE_KEY } from '../ai/rewrite';
 import { applyChangeAttrs } from '../plugins/changes';
+import { FormulaReview } from '../mathconflict';
 
 /** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
-export const pendingFocus: { pos: number | null; keys: string[] } = { pos: null, keys: [] };
+export const pendingFocus: { pos: number | null; keys: string[]; /** the formula was opened by typing $ / $$ (see LyxMathField.dollar) */ dollar: '' | '$' | '$$' } = { pos: null, keys: [], dollar: '' };
 
 /* ------------------------------------------------ deferred static rendering */
 
@@ -136,14 +137,19 @@ function deleteFormula(view: EditorView, getPos: () => number | undefined) {
  * formula left with a horizontal cursor move, as LyX does): the formula is removed and the cursor
  * takes its place.
  */
-function moveOut(view: EditorView, getPos: () => number | undefined, dir: string, insertSpace: boolean, dissolve = false) {
+function moveOut(view: EditorView, getPos: () => number | undefined, dir: string, insertSpace: boolean, dissolve = false, putBack = '') {
   const pos = getPos();
   if (pos === undefined) return;
   const node = view.state.doc.nodeAt(pos);
   const size = node ? node.nodeSize : 1;
   const back = dir === 'backward' || dir === 'upward';
   let tr = view.state.tr;
-  if (dissolve && node) { tr = tr.delete(pos, pos + size); tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos), back ? -1 : 1)); }
+  if (dissolve && node && putBack) {
+    // Backspace in the empty formula that `$` / `$$` opened: the typed dollars come back as text
+    tr = tr.replaceWith(pos, pos + size, view.state.schema.text(putBack));
+    tr = tr.setSelection(TextSelection.create(tr.doc, pos + putBack.length));
+  }
+  else if (dissolve && node) { tr = tr.delete(pos, pos + size); tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos), back ? -1 : 1)); }
   else tr = tr.setSelection(TextSelection.near(view.state.doc.resolve(back ? pos : pos + size), back ? -1 : 1));
   if (insertSpace) tr = tr.insertText(' ');
   view.dispatch(tr);
@@ -161,12 +167,21 @@ function selectOutOf(view: EditorView, getPos: () => number | undefined, dir: st
   try { view.dispatch(view.state.tr.setSelection(TextSelection.between(view.state.doc.resolve(back ? pos + size : pos), view.state.doc.resolve(back ? pos : pos + size))).scrollIntoView()); } catch { /* gone */ }
 }
 
-/** A drag left the formula: continue as a document drag with the formula selected whole (LyX's undispatched mouse motion). */
-function dragOutOf(view: EditorView, getPos: () => number | undefined, ev: MouseEvent) {
+/**
+ * A drag left the formula: continue as a document drag with the formula selected whole (LyX's
+ * undispatched mouse motion). When the pointer comes back into the formula the field resumes its
+ * own drag (`reenter`) and the document selection collapses onto the formula.
+ */
+function dragOutOf(view: EditorView, getPos: () => number | undefined, ev: MouseEvent, reenter: (ev: MouseEvent) => boolean) {
   const pos = getPos();
   if (pos === undefined) return;
   const node = view.state.doc.nodeAt(pos);
-  dragFromAtom(view, pos, pos + (node ? node.nodeSize : 1), ev);
+  dragFromAtom(view, pos, pos + (node ? node.nodeSize : 1), ev, mv => {
+    if (!reenter(mv)) return false;
+    const p = getPos();
+    if (p !== undefined) { try { view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(p)))); } catch { /* gone */ } }
+    return true;
+  });
 }
 
 /** Common field wiring: context menu, mouse isolation from ProseMirror, keyboard passthrough. */
@@ -188,6 +203,7 @@ function focusIfPending(f: LyxMathField, getPos: () => number | undefined) {
   const pos = getPos();
   if (pos === undefined || pendingFocus.pos !== pos) return;
   pendingFocus.pos = null;
+  if (pendingFocus.dollar) { f.dollar = pendingFocus.dollar; pendingFocus.dollar = ''; }
   // a formula made from selected text continues at its end; an empty one starts in its first cell (LyX: align, cases, ... begin left of the first &)
   requestAnimationFrame(() => { f.focus(f.isEmpty() ? 'start' : 'end'); for (const k of pendingFocus.keys.splice(0)) f.execute('insert', k); });
 }
@@ -201,12 +217,14 @@ export class MathInlineView implements NodeView {
   private staticKey = '';
   private updating = false;
   private lastLatex: string;
+  private review: FormulaReview;
   /** shows its source; rendered later (idle time / scrolled near / macros known) */
   pending = false;
 
   constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-math-inline';
+    this.review = new FormulaReview(view, getPos, false, node.attrs.editClock);
     this.lastLatex = String(node.attrs.latex);
     this.dom.classList.toggle('empty', !this.lastLatex.trim());
     applyChangeAttrs(this.dom, node);
@@ -253,9 +271,26 @@ export class MathInlineView implements NodeView {
       latex: '$' + this.lastLatex + '$', display: false, macros: table,
       imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex),
-      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
-      onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
+      onBlur: () => {
+        this.review.adopt(this.node.attrs.editClock);
+        this.lastLatex = String(this.node.attrs.latex);
+        if (this.field) { this.updating = true; this.field.setLatex('$' + this.lastLatex + '$'); this.updating = false; }
+      },
+      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve, o.putBack),
+      onDragOut: (ev, reenter) => dragOutOf(this.view, this.getPos, ev, reenter),
+      onShiftClick: ev => shiftClickAt(this.view, ev.clientX, ev.clientY),
       onSelectOut: dir => selectOutOf(this.view, this.getPos, dir),
+      onCommand: k => {
+        // `$$` typed: the (empty) inline formula becomes a display formula, the cursor stays inside
+        if (k !== '$$') return;
+        const pos = this.getPos();
+        if (pos === undefined) return;
+        pendingFocus.pos = pos; pendingFocus.keys = []; pendingFocus.dollar = '$$';
+        this.selectSelf();
+        toggleMathDisplay(this.view.state, this.view.dispatch);
+        const focusNew = (): boolean => { const spec = ((this.view as any).nodeDOM(pos) as any)?.pmViewDesc?.spec; if (!spec?.focus) return false; spec.focus('start'); return true; };
+        if (!focusNew()) requestAnimationFrame(() => focusNew());
+      },
     });
     (f as any)._macroKey = key;
     (f as any)._toggleDisplay = () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); };
@@ -279,9 +314,10 @@ export class MathInlineView implements NodeView {
     if (pos === undefined) return;
     const cur = this.view.state.doc.nodeAt(pos);
     if (!cur || cur.attrs.latex === body) return;
+    const editClock = this.review.edited(body);
     this.lastLatex = body;
     this.dom.classList.toggle('empty', !body.trim());
-    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex: body }).setMeta('addToHistory', true));
+    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex: body, editClock }).setMeta('addToHistory', true));
   }
   refreshMacros() {
     pump();   // macros may have just arrived: deferred lazy upgrades can proceed
@@ -296,6 +332,7 @@ export class MathInlineView implements NodeView {
     this.node = node;
     applyChangeAttrs(this.dom, node);
     const latex = String(node.attrs.latex);
+    this.review.received(latex, node.attrs.editClock, !!this.field?.hasFocus());
     if (this.field) {
       this.refreshMacros();
       if (latex !== this.lastLatex && !this.field.hasFocus()) {
@@ -317,7 +354,7 @@ export class MathInlineView implements NodeView {
   stopEvent(ev: Event) { return !!this.field && this.field.dom.contains(ev.target as Node); }
   ignoreMutation() { return true; }
   focus(where: 'start' | 'end' = 'end') { this.ensureField().focus(where); }
-  destroy() { mathViews.delete(this); unwatchLazy(this); this.field?.destroy(); }
+  destroy() { this.review.destroy(); mathViews.delete(this); unwatchLazy(this); this.field?.destroy(); }
 }
 
 /* ------------------------------------------------ display formulas */
@@ -342,12 +379,14 @@ export class MathDisplayView implements NodeView {
   metaEl: HTMLElement;
   private updating = false;
   private lastLatex: string;
+  private review: FormulaReview;
   private ro: ResizeObserver | null = null;
   private mo: MutationObserver | null = null;
   /** shows its source; rendered later (idle time / scrolled near / macros known) */
   pending = false;
 
   constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined) {
+    this.review = new FormulaReview(view, getPos, true, node.attrs.editClock);
     this.lastLatex = String(node.attrs.latex);
     this.dom = document.createElement('span');
     this.dom.className = 'lyx-math-display';
@@ -418,8 +457,14 @@ export class MathDisplayView implements NodeView {
       latex: this.lastLatex, display: true, macros: table,
       imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex),
-      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve),
-      onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
+      onBlur: () => {
+        this.review.adopt(this.node.attrs.editClock);
+        this.lastLatex = String(this.node.attrs.latex);
+        if (this.field) { this.updating = true; this.field.setLatex(this.lastLatex); this.updating = false; }
+      },
+      onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace, !!o.dissolve, o.putBack),
+      onDragOut: (ev, reenter) => dragOutOf(this.view, this.getPos, ev, reenter),
+      onShiftClick: ev => shiftClickAt(this.view, ev.clientX, ev.clientY),
       onSelectOut: dir => selectOutOf(this.view, this.getPos, dir),
       onCommand: key => { if (key === 'n') this.toggleNumbering(); },
     });
@@ -555,8 +600,9 @@ export class MathDisplayView implements NodeView {
     if (pos === undefined) return;
     const cur = this.view.state.doc.nodeAt(pos);
     if (!cur || cur.attrs.latex === latex) return;
+    const editClock = this.review.edited(latex);
     this.lastLatex = latex;
-    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex }));
+    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, latex, editClock }));
     this.renderMeta();
   }
 
@@ -593,6 +639,7 @@ export class MathDisplayView implements NodeView {
     this.node = node;
     applyChangeAttrs(this.dom, node);
     const latex = String(node.attrs.latex);
+    this.review.received(latex, node.attrs.editClock, !!this.field?.hasFocus());
     if (this.field) this.refreshMacros();
     if (latex !== this.lastLatex) {
       this.lastLatex = latex;
@@ -608,7 +655,7 @@ export class MathDisplayView implements NodeView {
   stopEvent(ev: Event) { return (!!this.field && this.field.dom.contains(ev.target as Node)) || this.metaEl.contains(ev.target as Node); }
   ignoreMutation() { return true; }
   focus(where: 'start' | 'end' = 'end') { this.ensureField().focus(where); }
-  destroy() { mathViews.delete(this); unwatchLazy(this); cancelAnimationFrame(this.relayoutRaf); this.ro?.disconnect(); this.mo?.disconnect(); this.field?.destroy(); }
+  destroy() { this.review.destroy(); mathViews.delete(this); unwatchLazy(this); cancelAnimationFrame(this.relayoutRaf); this.ro?.disconnect(); this.mo?.disconnect(); this.field?.destroy(); }
 }
 
 /* ------------------------------------------------ macro definitions */
@@ -637,7 +684,8 @@ export class MacroView implements NodeView {
       imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex.replace(/^\$|\$$/g, '')),
       onMoveOut: (dir, o) => moveOut(this.view, this.getPos, dir, !!o.insertSpace),
-      onDragOut: ev => dragOutOf(this.view, this.getPos, ev),
+      onDragOut: (ev, reenter) => dragOutOf(this.view, this.getPos, ev, reenter),
+      onShiftClick: ev => shiftClickAt(this.view, ev.clientX, ev.clientY),
       onSelectOut: dir => selectOutOf(this.view, this.getPos, dir),
     });
     (this.field as any)._macroKey = key;

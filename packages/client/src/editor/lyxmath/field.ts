@@ -4,14 +4,18 @@
  *
  * DOM: <span class="lm-field"><span class="lm-content">KaTeX</span><span class="lm-overlay">caret,
  * selection, corner markers</span><textarea class="lm-input"></textarea></span>
- * Every cell of the model is wrapped in `\htmlClass{lm-c<id>}{…}` by the renderer, so caret and
- * selection positions are measured from the boxes KaTeX produced (per character for text runs).
+ * Every cell of the model is wrapped in `\htmlClass{lm-c<id>}{…}` and every atom in
+ * `\htmlClass{lm-a}{…}` by the renderer, and KaTeX's own height/depth of each wrapper is copied
+ * into the markup, so the caret, the selection, the corner markers and the mouse work on LyX's
+ * coordinate model (geometry.ts): every atom has a box, every cell a baseline and a content-tight
+ * box. The mouse follows InsetMathNest::editXY / lfunMousePress / lfunMouseMotion exactly.
  */
 import katex from 'katex';
 import {
-  parseFormula, writeFormula, writeCellLatex, parseCell, renderHullSource, katexMacros, MathCursor, atomCells, isHull, nargs, numberedType, isKnownCommand, completeCommand,
+  parseFormula, writeFormula, writeCellLatex, parseCell, renderHullSource, katexMacros, MathCursor, atomCells, nargs, numberedType, isKnownCommand, completeCommand,
   type Hull, type HullType, type MacroTable, type Slice, type Atom, type Cell, type CellRef, type Owner,
 } from '@overlyx/core';
+import { MathGeometry, editXY, moveToClosestEdge, partOfAnchor, insetAt, boundaryX, x2pos, type AtomGeom } from './geometry';
 import { graphicsUrl } from '../../api';
 import { editorContext, resolveDocPath } from '../context';
 import { getPrefs } from '../../prefs';
@@ -31,13 +35,19 @@ export interface FieldOptions {
    * move (arrow / Backspace / Delete) — the owner may remove it (an empty formula left behind
    * by Ctrl+M, then a cursor key, is never wanted).
    */
-  onMoveOut?: (dir: MoveOutDirection, opts: { insertSpace?: boolean; dissolve?: boolean }) => void;
+  onMoveOut?: (dir: MoveOutDirection, opts: { insertSpace?: boolean; dissolve?: boolean; putBack?: string }) => void;
   onFocus?: () => void;
   onBlur?: () => void;
-  /** Alt+M n/d/t: numbering / environment commands handled by the node view */
+  /** Alt+M n/d/t: numbering / environment commands handled by the node view; '$$' = a second $ typed into an empty inline formula opened with $ (make it a display formula) */
   onCommand?: (key: string) => void;
-  /** a drag left the formula (LyX: the motion bubbles to the surrounding text, formula taken whole) */
-  onDragOut?: (ev: MouseEvent) => void;
+  /**
+   * A drag left the formula (LyX: the motion bubbles to the surrounding text, formula taken whole).
+   * `reenter(ev)` hands the drag back when the pointer returns into the formula (returns false when
+   * the pointer is not over it): the selection shrinks back into the formula, as in LyX.
+   */
+  onDragOut?: (ev: MouseEvent, reenter: (ev: MouseEvent) => boolean) => void;
+  /** Shift+click on a formula that has no cursor of its own to extend from: the document selects, the formula taken whole */
+  onShiftClick?: (ev: MouseEvent) => void;
   /** a Shift+arrow hit the formula's edge: the selection continues outside, formula taken whole */
   onSelectOut?: (dir: MoveOutDirection) => void;
 }
@@ -77,7 +87,6 @@ export function resolveMathImageHtml(html: string, context?: MathImageContext): 
   });
 }
 
-interface AtomBox { el: Element; from: number; to: number; text: boolean }
 interface Parent { owner: Owner; idx: number; pos: number }
 
 const MARKER_COLOR = '#c000c0';   // LyX Color_mathframe
@@ -127,11 +136,24 @@ export class LyxMathField {
   private raf = 0;
   private opts: FieldOptions;
   private altM = false;
+  /**
+   * Set when the formula was opened by typing `$` (or `$$`) in the text: `$` then closes it again
+   * (the cursor leaves forwards, as after the closing dollar of `$x$`), a second `$` in the still
+   * empty inline formula makes it a display formula, and Backspace in the empty formula puts the
+   * typed marker back as text (the convention of the `- ` / `# ` triggers: Backspace undoes them).
+   */
+  dollar: '' | '$' | '$$' = '';
   private dragging = false;
   private deadHat = false;
   private lastLatex: string;
   private _macroKey = '';
   private hoverAtom: Atom | null = null;
+  /** measured boxes of the current rendering (rebuilt when the content is re-rendered or moved) */
+  private geom: MathGeometry | null = null;
+  private geomStamp = '';
+  /** the anchor of the mouse drag in progress (LyX's real anchor: the markers follow it while selecting) */
+  private dragAnchor: Slice[] | null = null;
+  private windowListeners: [string, (ev: MouseEvent) => void][] = [];
   /** an autocomplete suggestion shown faintly after the caret (ai/mathassist.ts); Tab inserts it */
   private ghost: string | null = null;
   readonly id = ++seq;
@@ -214,7 +236,7 @@ export class LyxMathField {
     this.scheduleLayout();
   }
   blur(): void { this.input.blur(); }
-  destroy(): void { cancelAnimationFrame(this.raf); this.dom.remove(); }
+  destroy(): void { cancelAnimationFrame(this.raf); for (const [t, l] of this.windowListeners) window.removeEventListener(t, l as EventListener); this.windowListeners = []; this.dom.remove(); }
 
   /** Commands for menus, toolbars and shortcuts. */
   execute(cmd: string, ...args: unknown[]): boolean {
@@ -231,6 +253,7 @@ export class LyxMathField {
       case 'bigdelim': return change('bigdelim', () => { const [ln, ld, rn, rd] = args as string[]; const sel = c.grabAndEraseSelection(); c.insertAtom({ t: 'big', n: ln, d: ld }); if (rn) { c.insertAtom({ t: 'big', n: rn, d: rd }); c.posBackward(); } if (sel) c.niceInsert(sel, false); });
       case 'matrix': return change('matrix', () => { const rows = Number(args[0] ?? 2), cols = Number(args[1] ?? 2), env = String(args[2] ?? 'matrix'); const halign = String(args[3] ?? ''); c.niceInsertAtom({ t: 'grid', env, ncols: cols, rows: Array.from({ length: rows }, () => ({ cells: Array.from({ length: cols }, () => [] as Cell) })), halign: env === 'array' ? (halign || 'c'.repeat(cols)) : undefined }); });
       case 'font': return change('font', () => c.handleFont(String(args[0] ?? 'mathrm')));
+      case 'delimSize': { this.snapshot('delim'); const ok = c.delimResize(Number(args[0]) < 0 ? -1 : 1); if (ok) this.commit(); else this.undoStack.pop(); return ok; }
       case 'limits': return change('limits', () => c.toggleLimits());
       case 'numberToggle': return change('number', () => c.numberToggle());
       case 'numberLineToggle': return change('number', () => c.numberLineToggle());
@@ -289,7 +312,7 @@ export class LyxMathField {
 
   render(): void {
     this.updateMacroModeHint();
-    const rendered = renderHullSource(this.hull, this.macros);
+    const rendered = renderHullSource(this.hull, this.macros, { atoms: true });
     let latex = rendered.latex;
     const cells = rendered.cells;
     this.cells = cells;
@@ -300,11 +323,17 @@ export class LyxMathField {
     }
     let html: string;
     try {
-      html = katex.renderToString((this.display ? '\\displaystyle ' : '') + latex, { throwOnError: false, strict: false, trust: true, displayMode: false, output: 'html', macros: katexMacros(this.macros) });
+      // KaTeX's build tree carries the height/depth of every box; the cell and atom wrappers take
+      // theirs into the markup (data-h / data-d, in em) for the geometry — the same markup
+      // renderToString produces otherwise
+      const tree = (katex as unknown as { __renderToDomTree(src: string, opts: object): KatexTreeNode }).__renderToDomTree((this.display ? '\\displaystyle ' : '') + latex, { throwOnError: false, strict: false, trust: true, displayMode: false, output: 'html', macros: katexMacros(this.macros) });
+      annotateMetrics(tree);
+      html = tree.toMarkup();
     } catch (e) {
       html = `<span class="lm-error">${escapeHtml(this.lastLatex)}</span>`;
     }
     this.content.innerHTML = resolveMathImageHtml(html, this.opts.imageContext);
+    this.geom = null;
     this.dom.classList.toggle('empty', this.isEmpty());
     this.scheduleLayout();
   }
@@ -321,68 +350,27 @@ export class LyxMathField {
 
   private scheduleLayout(): void { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; this.layout(); }); }
 
-  private cellEl(owner: Owner, idx: number): HTMLElement | null {
-    const ref = this.cells.find(c => c.owner === owner && c.idx === idx);
-    return ref ? this.content.querySelector(`.lm-c${ref.id}`) as HTMLElement | null : null;
+  /** the boxes of the current rendering, re-measured when the content was re-rendered or has moved (scrolling, reflow) */
+  private geometry(): MathGeometry {
+    const r = this.content.getBoundingClientRect();
+    const stamp = `${r.left},${r.top},${r.width},${r.height}`;
+    if (!this.geom || stamp !== this.geomStamp) { this.geom = new MathGeometry(this.content, this.cells, this.parents); this.geomStamp = stamp; }
+    return this.geom;
   }
 
-  /** KaTeX boxes of a cell's atoms, in order (glue spans skipped, merged text runs measured per character) */
-  private atomBoxes(cell: Cell, el: HTMLElement): AtomBox[] {
-    const kids = Array.from(el.children).filter(k => !(k.classList.contains('mspace') && !k.classList.contains('enclosing')) && !k.classList.contains('katex-strut') && !k.classList.contains('vlist-s') && !k.classList.contains('lm-ghost'));
-    const boxes: AtomBox[] = [];
-    let i = 0;
-    for (const k of kids) {
-      if (i >= cell.length) break;
-      const textLen = k.childNodes.length === 1 && k.firstChild?.nodeType === Node.TEXT_NODE ? (k.textContent ?? '').length : 0;
-      if (textLen > 1) {
-        let n = 0;
-        while (n < textLen && i + n < cell.length && cell[i + n].t === 'char') n++;
-        if (n === 0) n = 1;
-        boxes.push({ el: k, from: i, to: i + n, text: n > 1 });
-        i += n;
-      } else { boxes.push({ el: k, from: i, to: i + 1, text: false }); i++; }
-    }
-    // atoms without a box (should not happen): attach them to the last box
-    if (boxes.length && i < cell.length) boxes[boxes.length - 1].to = cell.length;
-    return boxes;
-  }
-
-  private charRect(box: AtomBox, atomIndex: number): DOMRect {
-    const node = box.el.firstChild as Text;
-    const k = atomIndex - box.from;
-    try { const r = document.createRange(); r.setStart(node, k); r.setEnd(node, k + 1); return r.getBoundingClientRect(); } catch { return box.el.getBoundingClientRect(); }
-  }
-
-  /** x of the caret before position `pos` in a cell (client coordinates) plus the cell's vertical extent */
+  /** the caret before position `pos` of a cell: x of the boundary (MathData::pos2x), the cell's font line box (client coordinates) */
   private caretRect(owner: Owner, idx: number, pos: number): { x: number; top: number; bottom: number } | null {
-    const el = this.cellEl(owner, idx);
-    if (!el) return null;
-    const cell = atomCells(owner)[idx] ?? [];
-    const cr = el.getBoundingClientRect();
-    if (!cell.length) return { x: cr.left + 1, top: cr.top, bottom: cr.bottom };
-    const boxes = this.atomBoxes(cell, el);
-    const rectOfAtom = (i: number) => { const b = boxes.find(x => i >= x.from && i < x.to) ?? boxes[boxes.length - 1]; return b.text ? this.charRect(b, i) : b.el.getBoundingClientRect(); };
-    let x: number;
-    if (pos <= 0) x = rectOfAtom(0).left; else x = rectOfAtom(Math.min(pos, cell.length) - 1).right;
-    return { x, top: cr.top, bottom: cr.bottom };
+    const cg = this.geometry().cell(owner, idx);
+    if (!cg) return null;
+    return { x: boundaryX(cg, pos), top: cg.lineTop, bottom: cg.lineBottom };
   }
 
+  /** MathCursor host: the position in a cell closest to a client x (the x target of up/down moves) */
   private xToPos(cell: Cell, x: number | null): number {
     if (x === null) return 0;
     const ref = this.cells.find(c => (atomCells(c.owner)[c.idx] ?? null) === cell);
-    if (!ref) return 0;
-    const el = this.content.querySelector(`.lm-c${ref.id}`) as HTMLElement | null;
-    if (!el || !cell.length) return 0;
-    return this.posFromX(cell, el, x);
-  }
-  private posFromX(cell: Cell, el: HTMLElement, x: number): number {
-    const boxes = this.atomBoxes(cell, el);
-    let best = 0, bestD = Infinity;
-    const consider = (pos: number, px: number) => { const d = Math.abs(px - x); if (d < bestD) { bestD = d; best = pos; } };
-    if (!boxes.length) return 0;
-    consider(0, (boxes[0].text ? this.charRect(boxes[0], 0) : boxes[0].el.getBoundingClientRect()).left);
-    for (const b of boxes) for (let i = b.from; i < b.to; i++) { const r = b.text ? this.charRect(b, i) : b.el.getBoundingClientRect(); consider(i + 1, r.right); }
-    return best;
+    const cg = ref ? this.geometry().cell(ref.owner, ref.idx) : null;
+    return cg ? x2pos(cg, x) : 0;
   }
 
   layout(): void {
@@ -390,27 +378,26 @@ export class LyxMathField {
     ov.replaceChildren();
     const base = this.dom.getBoundingClientRect();
     const c = this.cursor;
-    // LyX highlights the inset under the mouse pointer (Color_mathframe) even when not editing
+    const g = this.geometry();
+    // the inset under the mouse pointer is marked (Color_mathframe), also when not editing
     const hover = this.hoverAtom;
-    if (hover && !(this.focused && c.slices.some(s => s.owner === hover))) { const r = this.atomRect(hover); if (r) this.corners(ov, base, r, hover.t === 'frac' || hover.t === 'grid' || hover.t === 'macro' ? 'both' : 'lower'); }
+    if (hover && !(this.focused && c.slices.some(s => s.owner === hover))) { const r = g.atom(hover); if (r) this.corners(ov, base, r, markerKind(hover)); }
     if (!this.focused) return;
-    // selection
+    // selection (MathData::drawSelection): inside one cell from boundary to boundary over the
+    // cell's height; whole cells when it spans cells
     const sel = c.selRange();
     if (sel) {
-      const cellsToMark: { owner: Owner; idx: number; from: number; to: number }[] = [];
-      if (sel.idx1 === sel.idx2) cellsToMark.push({ owner: sel.owner, idx: sel.idx1, from: sel.from, to: sel.to });
-      else { const nc = 'ncols' in sel.owner ? (sel.owner as { ncols: number }).ncols : 1; const r1 = Math.floor(sel.idx1 / nc), r2 = Math.floor(sel.idx2 / nc), c1 = Math.min(sel.idx1 % nc, sel.idx2 % nc), c2 = Math.max(sel.idx1 % nc, sel.idx2 % nc); for (let r = r1; r <= r2; r++) for (let col = c1; col <= c2; col++) cellsToMark.push({ owner: sel.owner, idx: r * nc + col, from: 0, to: atomCells(sel.owner)[r * nc + col]?.length ?? 0 }); }
-      for (const m of cellsToMark) {
-        const el = this.cellEl(m.owner, m.idx);
-        if (!el) continue;
-        const cell = atomCells(m.owner)[m.idx] ?? [];
-        const cr = el.getBoundingClientRect();
-        let x1 = cr.left, x2 = cr.right;
-        if (cell.length) { const a = this.caretRect(m.owner, m.idx, m.from), b = this.caretRect(m.owner, m.idx, m.to); if (a && b) { x1 = a.x; x2 = b.x; } }
+      const paint = (x1: number, x2: number, top: number, bottom: number) => {
         const d = document.createElement('span');
         d.className = 'lm-sel';
-        d.style.cssText = `left:${x1 - base.left}px;top:${cr.top - base.top}px;width:${Math.max(2, x2 - x1)}px;height:${cr.height}px`;
+        d.style.cssText = `left:${x1 - base.left}px;top:${top - base.top}px;width:${Math.max(2, x2 - x1)}px;height:${bottom - top}px`;
         ov.appendChild(d);
+      };
+      if (sel.idx1 === sel.idx2) {
+        const cg = g.cell(sel.owner, sel.idx1);
+        if (cg) paint(boundaryX(cg, sel.from), boundaryX(cg, sel.to), cg.top, cg.bottom);
+      } else {
+        for (const row of c.selCells(sel)) for (const idx of row) { const cg = g.cell(sel.owner, idx); if (cg) paint(cg.left, cg.right, cg.top, cg.bottom); }
       }
     }
     // caret
@@ -423,62 +410,33 @@ export class LyxMathField {
       // keep the hidden input near the caret so IME popups appear in place
       this.input.style.left = `${cr.x - base.left}px`; this.input.style.top = `${cr.top - base.top}px`;
     }
-    // LyX corner markers around every inset on the cursor's path
-    for (let d = 1; d < c.slices.length; d++) {
-      const inset = c.slices[d].owner as Atom;
-      const p = c.slices[d - 1];
-      const el = this.cellEl(p.owner, p.idx);
-      if (!el) continue;
-      const cell = atomCells(p.owner)[p.idx] ?? [];
-      const boxes = this.atomBoxes(cell, el);
-      const box = boxes.find(b => p.pos >= b.from && p.pos < b.to);
-      if (!box) continue;
-      const r = box.el.getBoundingClientRect();
-      const kind = inset.t === 'frac' || inset.t === 'grid' || inset.t === 'macro' ? 'both' : 'lower';
-      this.corners(ov, base, r, kind, inset.t === 'macro' ? '\\' + inset.n : undefined);
+    // LyX corner markers around every inset on the cursor's path — the anchor's path while the
+    // mouse selects (Inset::editing: no flicker from the moving cursor)
+    const path = this.dragging && this.dragAnchor ? this.dragAnchor : c.slices;
+    for (let d = 1; d < path.length; d++) {
+      const inset = path[d].owner as Atom;
+      const r = g.atom(inset);
+      if (!r) continue;
+      this.corners(ov, base, r, markerKind(inset), inset.t === 'macro' ? '\\' + inset.n : undefined);
     }
   }
 
-  /** the KaTeX box of an inset atom (found through its parent cell) */
-  private atomRect(atom: Atom): DOMRect | null {
-    const p = this.parents.get(atom);
-    if (!p) return null;
-    const el = this.cellEl(p.owner, p.idx);
-    if (!el) return null;
-    const cell = atomCells(p.owner)[p.idx] ?? [];
-    const box = this.atomBoxes(cell, el).find(b => p.pos >= b.from && p.pos < b.to);
-    return box ? box.el.getBoundingClientRect() : null;
-  }
-
-  /** the innermost inset whose box contains the point (LyX: the hovered inset) */
-  private insetFromPoint(x: number, y: number): Atom | null {
-    let el = document.elementFromPoint(x, y) as Element | null;
-    if (!el || !this.content.contains(el)) return null;
-    // the nearest cell around the element, and the atom box of that cell containing it
-    for (let e: Element | null = el; e && e !== this.content; e = e.parentElement) {
-      const m = /(?:^|\s)lm-c(\d+)(?:\s|$)/.exec(e.className ?? '');
-      if (!m) continue;
-      const ref = this.cells[Number(m[1])];
-      if (!ref) return null;
-      const cell = atomCells(ref.owner)[ref.idx] ?? [];
-      const box = this.atomBoxes(cell, e as HTMLElement).find(b => b.el === el || b.el.contains(el!));
-      if (box && !box.text) { const a = cell[box.from]; if (a && nargs(a) > 0) return a; }
-      return isHull(ref.owner) ? null : ref.owner;
-    }
-    return null;
-  }
-
-  private corners(ov: HTMLElement, base: DOMRect, r: DOMRect, kind: 'lower' | 'both', label?: string): void {
-    // LyX reserves a small margin around marked insets; the hooks sit symmetrically 2px outside the box
-    const l = r.left - base.left - 2, rt = r.right - base.left - 2, t = r.top - base.top - 2, b = r.bottom - base.top - 2;
+  /**
+   * MathRow drawMarkers: 3px hooks in the corners of the inset's box — one pixel left of its
+   * content, at its right edge, one pixel above and below (LyX reserves that margin around marked
+   * insets); the lower pair always, the upper pair for MARKER2 insets.
+   */
+  private corners(ov: HTMLElement, base: DOMRect, r: AtomGeom, kind: 'lower' | 'both', label?: string): void {
+    const l = r.glyphLeft - base.left - 1, rt = r.glyphRight - base.left;
+    const t = r.top - base.top - 1, b = r.bottom - base.top + 1;
     const corner = (x: number, y: number, h: 'left' | 'right', v: 'top' | 'bottom') => {
       const d = document.createElement('span');
       d.className = 'lm-corner';
       d.style.cssText = `left:${x}px;top:${y}px;border-${h}:1px solid ${MARKER_COLOR};border-${v}:1px solid ${MARKER_COLOR}`;
       ov.appendChild(d);
     };
-    corner(l, b, 'left', 'bottom'); corner(rt, b, 'right', 'bottom');
-    if (kind === 'both') { corner(l, t, 'left', 'top'); corner(rt, t, 'right', 'top'); }
+    corner(l, b - 3, 'left', 'bottom'); corner(rt - 3, b - 3, 'right', 'bottom');
+    if (kind === 'both') { corner(l, t, 'left', 'top'); corner(rt - 3, t, 'right', 'top'); }
     if (label) { const d = document.createElement('span'); d.className = 'lm-macro-name'; d.textContent = label; d.style.cssText = `left:${l}px;top:${t - 10}px`; ov.appendChild(d); }
   }
 
@@ -496,13 +454,6 @@ export class LyxMathField {
     }
     this.cursor.slices = slices;
     return true;
-  }
-  /** slices for a cell reached from a click, with the given position */
-  private slicesFor(ref: CellRef, pos: number): Slice[] {
-    const chain: Slice[] = [{ owner: ref.owner, idx: ref.idx, pos }];
-    let o = ref.owner;
-    while (!isHull(o)) { const p = this.parents.get(o); if (!p) break; chain.unshift({ owner: p.owner, idx: p.idx, pos: p.pos }); o = p.owner; }
-    return chain;
   }
 
   /* ------------------------------------------------------------ editing plumbing */
@@ -590,106 +541,106 @@ export class LyxMathField {
     input.addEventListener('copy', ev => { ev.preventDefault(); ev.clipboardData?.setData('text/plain', this.cursor.selection ? this.cursor.grabSelection() : ''); });
     input.addEventListener('cut', ev => { ev.preventDefault(); if (!this.cursor.selection || this.readOnly) return; ev.clipboardData?.setData('text/plain', this.cursor.grabSelection()); this.snapshot('cut'); this.cursor.eraseSelection(); this.commit(); });
     input.addEventListener('paste', ev => { ev.preventDefault(); if (this.readOnly) return; const t = ev.clipboardData?.getData('text/plain') ?? ''; if (!t) return; this.snapshot('paste'); this.cursor.niceInsert(stripMathDelims(t), false); this.commit(); });
-    // mouse: place the cursor / drag a selection
-    this.content.addEventListener('mousedown', ev => {
-      if (ev.button !== 0) return;
-      ev.preventDefault();
-      const s = this.slicesFromPoint(ev.clientX, ev.clientY);
-      if (ev.shiftKey) { if (!this.cursor.selection) this.cursor.selHandle(true); }
-      else this.cursor.clearSelection();
-      const old = this.cursor.clone();
-      if (s) this.cursor.slices = s;
-      this.cursor.macroModeClose();
-      this.dragging = true;
-      this.input.focus({ preventScroll: true });
-      this.moved(old);
-      if (ev.detail === 2) { this.cursor.selHandle(true); this.cursor.resetAnchor(); const o = this.cursor.clone(); this.cursor.mathBackward(true); this.cursor.anchor = this.cursor.clone(); this.cursor.setSlices(o); this.cursor.mathForward(true); this.scheduleLayout(); }
-      if (ev.detail === 3) { this.cursor.selectAll(); this.scheduleLayout(); }
-    });
-    window.addEventListener('mousemove', ev => {
-      if (!this.dragging) return;
-      // out of the formula: the drag continues in the surrounding text with the formula taken
-      // whole (LyX lfunMouseMotion leaves motions outside the inset to the outer text)
-      if (this.opts.onDragOut) {
-        const r = this.dom.getBoundingClientRect();
-        if (ev.clientX < r.left - 4 || ev.clientX > r.right + 4 || ev.clientY < r.top - 6 || ev.clientY > r.bottom + 6) {
-          this.dragging = false;
-          this.cursor.clearSelection();
-          this.scheduleLayout();
-          this.opts.onDragOut(ev);
-          return;
-        }
-      }
-      const s = this.slicesForDrag(ev.clientX, ev.clientY);
-      if (!s) return;
-      if (!this.cursor.selection) this.cursor.selHandle(true);
-      if (this.pathOf(s).join() === this.pathOf(this.cursor.slices).join()) return;   // no move: no relayout
-      this.cursor.slices = s;
-      this.scheduleLayout();
-    });
-    window.addEventListener('mouseup', () => { if (this.dragging) { this.dragging = false; if (this.cursor.selection && this.cursor.anchor && this.pathOf(this.cursor.anchor).join() === this.pathOf(this.cursor.slices).join()) this.cursor.clearSelection(); this.scheduleLayout(); } });
-    this.content.addEventListener('pointermove', ev => { const a = this.insetFromPoint(ev.clientX, ev.clientY); if (a !== this.hoverAtom) { this.hoverAtom = a; this.scheduleLayout(); } });
+    // mouse (InsetMathNest::lfunMousePress / Motion / Release)
+    this.dom.addEventListener('mousedown', ev => this.press(ev));
+    const move = (ev: MouseEvent) => this.motion(ev);
+    const up = () => this.release();
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    this.windowListeners.push(['mousemove', move], ['mouseup', up]);
+    this.content.addEventListener('pointermove', ev => { const a = insetAt(this.geometry(), this.hull, ev.clientX, ev.clientY); if (a !== this.hoverAtom) { this.hoverAtom = a; this.scheduleLayout(); } });
     this.content.addEventListener('pointerleave', () => { if (this.hoverAtom) { this.hoverAtom = null; this.scheduleLayout(); } });
     // the field re-lays out when its box moves
-    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => this.scheduleLayout()).observe(this.dom);
-  }
-
-  private slicesFromPoint(x: number, y: number): Slice[] | null {
-    let el = document.elementFromPoint(x, y) as Element | null;
-    let ref: CellRef | undefined;
-    for (; el && el !== this.content; el = el.parentElement) {
-      const m = /(?:^|\s)lm-c(\d+)(?:\s|$)/.exec(el.className ?? '');
-      if (m) { ref = this.cells[Number(m[1])]; break; }
-    }
-    let cellEl = ref ? el as HTMLElement : null;
-    if (!ref || !cellEl) {
-      // the point hit no cell box (between rows, above / below the glyphs, over another element):
-      // the nearest cell wins, as in LyX (InsetMathNest::editXY takes the cell with the smallest
-      // distance) — snapping to the start / end of the whole formula made dragging jumpy
-      const near = this.nearestCell(x, y);
-      if (!near) return null;
-      ref = near.ref; cellEl = near.el;
-    }
-    const cell = atomCells(ref.owner)[ref.idx] ?? [];
-    return this.slicesFor(ref, cell.length ? this.posFromX(cell, cellEl, x) : 0);
-  }
-
-  /** the cell whose box is closest to the point (LyX InsetMathNest::editXY; ties go to the innermost box) */
-  private nearestCell(x: number, y: number): { ref: CellRef; el: HTMLElement } | null {
-    let best: { ref: CellRef; el: HTMLElement } | null = null;
-    let bestD = Infinity, bestA = Infinity;
-    for (const ref of this.cells) {
-      const el = this.content.querySelector(`.lm-c${ref.id}`) as HTMLElement | null;
-      if (!el) continue;
-      const r = el.getBoundingClientRect();
-      if (!r.width && !r.height) continue;
-      const dx = x < r.left ? r.left - x : x > r.right ? x - r.right : 0;
-      const dy = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
-      const d = dx + dy, a = r.width * r.height;
-      if (d < bestD - 0.5 || (d < bestD + 0.5 && a < bestA)) { best = { ref, el }; bestD = d; bestA = a; }
-    }
-    return best;
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { this.geom = null; this.scheduleLayout(); }).observe(this.dom);
   }
 
   /**
-   * Cursor position for a drag: never deeper than the anchor's own nest chain (LyX
-   * lfunMouseMotion ignores motions nested deeper than the anchor — they bubble to the common
-   * parent). An inset off that chain is taken whole, the cursor lands on its closest edge
-   * (Cursor::moveToClosestEdge).
+   * lfunMousePress: the cursor goes to the point (editXY: the nearest cell, the closest position,
+   * down into the inset under the pointer), then behind the next inset when the pointer is nearer
+   * to its right edge (moveToClosestEdge); Shift extends the selection from the anchor with the
+   * clicked inset taken whole (setCursorSelectionTo); a double click selects the cell, a triple
+   * click all cells of the inset (LFUN_MOUSE_DOUBLE / TRIPLE). No drag-and-drop of a selection: a
+   * press always places the cursor, a drag always selects.
    */
-  private slicesForDrag(x: number, y: number): Slice[] | null {
-    const s = this.slicesFromPoint(x, y);
-    const a = this.cursor.anchor;
-    if (!s || !a) return s;
-    let d = 0;
-    while (d < s.length && d < a.length && s[d].owner === a[d].owner) d++;
-    if (d >= s.length) return s;                    // on (or above) the anchor's chain
-    const t = s.slice(0, Math.max(1, d));
-    const last = t[t.length - 1];
-    const inset = s[t.length].owner as Atom;        // the off-chain inset the point dived into
-    const r = this.atomRect(inset);
-    if (r && x > (r.left + r.right) / 2) last.pos = Math.min(last.pos + 1, atomCells(last.owner)[last.idx]?.length ?? last.pos + 1);
-    return t;
+  private press(ev: MouseEvent): void {
+    if (ev.button !== 0) return;
+    if (ev.shiftKey && !this.focused && this.opts.onShiftClick) { ev.preventDefault(); this.opts.onShiftClick(ev); return; }
+    ev.preventDefault();
+    const old = this.cursor.clone();
+    // mouseSetCursor closes an unfinished \command at the old cursor before it moves; the boxes
+    // are measured on what is rendered, so re-render when that changed the formula
+    const before = this.latex;
+    this.cursor.macroModeClose();
+    if (this.latex !== before) this.render();
+    const g = this.geometry();
+    const s = editXY(g, this.hull, ev.clientX, ev.clientY);
+    moveToClosestEdge(g, s, ev.clientX);
+    const c = this.cursor;
+    c.xTarget = null;
+    if (ev.shiftKey) { if (!c.anchor) c.resetAnchor(); c.setCursorSelectionTo(s); }
+    else {
+      c.slices = s; c.clearSelection(); c.resetAnchor();
+      if (ev.detail === 2) { c.pos = 0; c.resetAnchor(); c.pos = c.lastpos; c.setSelection(); }
+      else if (ev.detail === 3) { c.idx = 0; c.pos = 0; c.resetAnchor(); c.idx = c.lastidx; c.pos = c.lastpos; c.setSelection(); }
+    }
+    this.dragAnchor = c.anchor ? c.anchor.map(x => ({ ...x })) : c.clone();
+    this.dragging = true;
+    this.input.focus({ preventScroll: true });
+    this.moved(old);
+  }
+
+  /** the pointer is outside the formula's box (with a little slack: LyX's hull margins) */
+  private outside(ev: MouseEvent): boolean {
+    const r = this.dom.getBoundingClientRect();
+    return ev.clientX < r.left - 4 || ev.clientX > r.right + 4 || ev.clientY < r.top - 6 || ev.clientY > r.bottom + 6;
+  }
+
+  /**
+   * lfunMouseMotion: the cursor of the point, popped out of any inset that is not on the anchor's
+   * chain (or deeper than the anchor) — that inset is taken whole at its closest edge — and the
+   * selection between the anchor and it. Outside the formula the surrounding text carries on with
+   * the formula taken whole (the motion is undispatched here in LyX), until the pointer returns.
+   */
+  private motion(ev: MouseEvent): void {
+    if (!this.dragging) return;
+    const anchor = this.dragAnchor;
+    if (!anchor) return;
+    if (this.opts.onDragOut && this.outside(ev)) {
+      this.dragging = false;
+      this.cursor.clearSelection();
+      this.scheduleLayout();
+      this.opts.onDragOut(ev, mv => this.reenter(mv));
+      return;
+    }
+    const g = this.geometry();
+    const s = partOfAnchor(anchor, editXY(g, this.hull, ev.clientX, ev.clientY));
+    moveToClosestEdge(g, s, ev.clientX);
+    if (this.pathOf(s).join() === this.pathOf(this.cursor.slices).join()) return;   // no move: no update
+    this.cursor.slices = s;
+    this.cursor.anchor = anchor.map(x => ({ ...x }));
+    this.cursor.setSelection();
+    this.scheduleLayout();
+    if (this.focused) notifyCursor(this);
+  }
+
+  /** the drag that left the formula came back: it goes on inside, from the same anchor */
+  private reenter(ev: MouseEvent): boolean {
+    if (!this.dragAnchor || this.outside(ev)) return false;
+    this.cursor.slices = this.dragAnchor.map(x => ({ ...x }));
+    this.cursor.anchor = this.dragAnchor.map(x => ({ ...x }));
+    this.dragging = true;
+    this.input.focus({ preventScroll: true });
+    this.motion(ev);
+    this.scheduleLayout();
+    return true;
+  }
+
+  /** lfunMouseRelease: a drag that did not move leaves no selection */
+  private release(): void {
+    if (!this.dragging) return;
+    this.dragging = false;
+    if (this.cursor.selection && this.cursor.anchor && this.pathOf(this.cursor.anchor).join() === this.pathOf(this.cursor.slices).join()) this.cursor.clearSelection();
+    this.scheduleLayout();
   }
 
   private typed(text: string): void {
@@ -697,6 +648,7 @@ export class LyxMathField {
     let keep = false;
     for (const ch of text) {
       if (this.altM) { this.altM = false; if (this.altMKey(ch)) continue; }
+      if (ch === '$' && this.dollarKey()) return;
       // typing what the suggestion starts with keeps the rest of it on show
       const g = this.ghost;
       keep = !!g && ch !== '\\' && ch !== ' ' && g.startsWith(ch) && g.length > 1;
@@ -706,6 +658,18 @@ export class LyxMathField {
       if (!ok) { this.commit(); this.opts.onMoveOut?.('forward', { insertSpace: ch === ' ' }); return; }
     }
     this.commit(keep);
+  }
+
+  /** `$` typed into a formula that was opened with `$`: close it, or (still empty, inline) make it a display formula. */
+  private dollarKey(): boolean {
+    if (!this.dollar) return false;
+    if (this.isEmpty()) {
+      if (!this.display && this.dollar === '$') { this.dollar = '$$'; this.opts.onCommand?.('$$'); return true; }
+      return true;   // a third $ in an empty display formula: nothing to do
+    }
+    this.commit();
+    this.opts.onMoveOut?.('forward', {});
+    return true;
   }
 
   private altMKey(k: string): boolean {
@@ -740,13 +704,20 @@ export class LyxMathField {
       else this.moved(old);
       handled();
     };
+    if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown' && !ev.key.startsWith('Shift') && !ev.key.startsWith('Control') && !ev.key.startsWith('Meta') && !ev.key.startsWith('Alt')) c.xTarget = null;
     if (ev.altKey && !mod && ev.key.toLowerCase() === 'm') { this.altM = true; handled(); return; }
     if (this.altM && !ev.ctrlKey && !ev.metaKey && ev.key.length === 1) { this.altM = false; if (this.altMKey(ev.key)) { handled(); return; } }
     switch (ev.key) {
       case 'ArrowRight': move(() => c.mathForward(mod), 'forward', true); return;
       case 'ArrowLeft': move(() => c.mathBackward(mod), 'backward', true); return;
-      case 'ArrowUp': move(() => c.upDown(true), 'upward'); return;
-      case 'ArrowDown': move(() => c.upDown(false), 'downward'); return;
+      case 'ArrowUp': case 'ArrowDown': {
+        // Cursor::upDownInMath keeps an x target across vertical moves, so the cursor stays in its column
+        if (c.xTarget === null) c.xTarget = this.caretRect(c.owner, c.idx, c.pos)?.x ?? null;
+        const x = c.xTarget;
+        move(() => c.upDown(ev.key === 'ArrowUp'), ev.key === 'ArrowUp' ? 'upward' : 'downward');
+        c.xTarget = x;
+        return;
+      }
       case 'Home': move(() => c.lineBegin(), 'backward'); return;
       case 'End': move(() => c.lineEnd(), 'forward'); return;
       case 'Tab': {
@@ -772,7 +743,7 @@ export class LyxMathField {
       }
       case 'Escape': if (this.ghost) { this.clearGhost(); this.render(); handled(); return; } if (c.selection) { c.clearSelection(); this.scheduleLayout(); } else if (c.inMacroMode()) { c.macroModeClose(true); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } handled(); return;
       case 'Enter': if (this.readOnly) return; handled(); if (c.inMacroMode()) { this.snapshot('macro'); c.macroModeClose(); c.editInsertedInset(); this.commit(); return; } if (mod || ev.shiftKey || this.display) { this.snapshot('newline'); c.newline(); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } return;
-      case 'Backspace': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.backspace()) { const dissolve = this.isEmpty(); this.commit(); this.opts.onMoveOut?.('backward', { dissolve }); return; } this.commit(); return;
+      case 'Backspace': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.backspace()) { const dissolve = this.isEmpty(); this.commit(); this.opts.onMoveOut?.('backward', { dissolve, putBack: dissolve && this.dollar ? this.dollar : undefined }); return; } this.commit(); return;
       case 'Delete': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.erase()) { const dissolve = this.isEmpty(); this.commit(); this.opts.onMoveOut?.('forward', { dissolve }); return; } this.commit(); return;
       default: break;
     }
@@ -796,6 +767,22 @@ export class LyxMathField {
 }
 
 function escapeHtml(s: string): string { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+/** the node type of KaTeX's build tree (katex.__renderToDomTree) that matters here */
+interface KatexTreeNode { classes?: string[]; height?: number; depth?: number; children?: KatexTreeNode[]; setAttribute?(k: string, v: string): void; toMarkup(): string }
+
+/** copies KaTeX's height/depth (em) of every cell and atom wrapper into the markup: data-h / data-d */
+function annotateMetrics(node: KatexTreeNode): void {
+  const cls = node.classes;
+  if (cls && node.setAttribute && cls.includes('enclosing') && cls.some(c => c === 'lm-a' || /^lm-c\d+$/.test(c))) {
+    node.setAttribute('data-h', (node.height ?? 0).toFixed(4));
+    node.setAttribute('data-d', (node.depth ?? 0).toFixed(4));
+  }
+  if (node.children) for (const ch of node.children) annotateMetrics(ch);
+}
+
+/** InsetMath::marker: fractions, grids and macros are marked in all four corners (MARKER2), other insets below */
+function markerKind(a: Atom): 'lower' | 'both' { return a.t === 'frac' || a.t === 'grid' || a.t === 'macro' ? 'both' : 'lower'; }
 
 /**
  * Puts the ghost text into the KaTeX source at the end of the cell `lm-c<id>` (as

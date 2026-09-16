@@ -95,7 +95,8 @@ test('graphics settings: height, aspect ratio and rotation are written as \\incl
 
 test('math delimiters and matrix dialogs insert into a formula', async ({ page }) => {
   await open(page);
-  await page.locator('.lyx-editor .lyx-par').first().click();
+  // at its left edge: the graphic the earlier test rotated is a block now and may cover the paragraph's centre
+  await page.locator('.lyx-editor .lyx-par').first().click({ position: { x: 4, y: 8 } });
   await page.keyboard.press('End');
   await openDialog(page, 'delimiters');
   await page.locator('.dialog .row', { hasText: 'Left' }).locator('button', { hasText: '[' }).click();

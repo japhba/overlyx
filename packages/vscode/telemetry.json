@@ -1,0 +1,62 @@
+{
+  "commonProperties": {
+    "extensionVersion": {
+      "classification": "SystemMetaData",
+      "purpose": "PerformanceAndHealth",
+      "comment": "Installed OverLyX extension version."
+    },
+    "vscodeVersion": {
+      "classification": "SystemMetaData",
+      "purpose": "PerformanceAndHealth",
+      "comment": "VS Code version hosting the extension."
+    },
+    "platform": {
+      "classification": "SystemMetaData",
+      "purpose": "PerformanceAndHealth",
+      "comment": "Operating-system family."
+    },
+    "arch": {
+      "classification": "SystemMetaData",
+      "purpose": "PerformanceAndHealth",
+      "comment": "CPU architecture."
+    },
+    "remote": {
+      "classification": "SystemMetaData",
+      "purpose": "PerformanceAndHealth",
+      "comment": "Whether the extension host is local or remote."
+    },
+    "uiKind": {
+      "classification": "SystemMetaData",
+      "purpose": "PerformanceAndHealth",
+      "comment": "Desktop or web VS Code UI."
+    }
+  },
+  "events": {
+    "error": {
+      "comment": "A handled extension error shown to the user.",
+      "area": {
+        "classification": "SystemMetaData",
+        "purpose": "PerformanceAndHealth",
+        "comment": "Coarse extension subsystem in which the error occurred."
+      },
+      "errorName": {
+        "classification": "SystemMetaData",
+        "purpose": "PerformanceAndHealth",
+        "comment": "JavaScript error class."
+      },
+      "message": {
+        "classification": "CallstackOrException",
+        "purpose": "PerformanceAndHealth",
+        "comment": "Error message after VS Code telemetry sanitization."
+      },
+      "stack": {
+        "classification": "CallstackOrException",
+        "purpose": "PerformanceAndHealth",
+        "comment": "Stack trace after VS Code telemetry sanitization."
+      }
+    },
+    "unhandled-error": {
+      "comment": "An otherwise-unhandled error attributed by VS Code to the OverLyX extension."
+    }
+  }
+}
