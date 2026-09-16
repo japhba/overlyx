@@ -71,7 +71,13 @@ sleep 2
 systemctl is-active --quiet "$UNIT" || { echo "$UNIT is not active" >&2; systemctl status "$UNIT" --no-pager | tail -20 >&2; exit 1; }
 
 step "check $SITE"
-code=$(curl -s -o /tmp/overlyx-deploy-index.html -w '%{http_code}' "$SITE/")
+# the restarted server takes a moment to listen; the reverse proxy answers 502 until then
+code=000
+for _ in $(seq 1 15); do
+  code=$(curl -s --max-time 5 -o /tmp/overlyx-deploy-index.html -w '%{http_code}' "$SITE/")
+  [ "$code" = 200 ] && break
+  sleep 2
+done
 [ "$code" = 200 ] || { echo "$SITE answered $code" >&2; exit 1; }
 served=$(grep -o 'assets/index-[^"]*' /tmp/overlyx-deploy-index.html | head -1)
 built=$(grep -o 'assets/index-[^"]*' "$PROD/packages/client/dist/index.html" | head -1)
