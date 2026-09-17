@@ -1,6 +1,7 @@
 /**
  * Shared state of one LaTeX export run.
  */
+import type { TexStream } from './stream.ts';
 import type { LyxDocument, Paragraph } from '../lyx/ast.ts';
 import type { BufferParams } from './params.ts';
 import type { DocumentClass, InsetLayout } from './layouts.ts';
@@ -70,6 +71,11 @@ export interface ExportContext {
   encodingName: string;
   outputChanges: boolean;
   isChild: boolean;
+  /**
+   * Source map of the main text (writeTex): the output span of every body paragraph in `stream`,
+   * by paragraph index — recorded by texOnePar while it writes into that very stream.
+   */
+  parSpans?: { stream: TexStream | null; spans: ({ start: number; end: number } | undefined)[] };
   /** \maketitle bookkeeping (shared by the whole document) */
   needMaketitle: boolean;
   haveMaketitle: boolean;

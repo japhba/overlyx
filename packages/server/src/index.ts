@@ -882,10 +882,11 @@ api.post('/docs/*/ai/complete', async (req, res) => {
   }
 });
 
-/** The document's LaTeX source (what the file on disk contains once saved). */
+/** The document's LaTeX source (what the file on disk contains once saved); `?map=1`: as JSON with the source map (paragraph → character range). */
 api.get('/docs/*/tex', async (req, res) => {
   try {
     const doc = await manager.open(docId(req));
+    if (req.query.map === '1') { res.json(doc.toTextMap()); return; }
     res.setHeader('Content-Type', 'application/x-tex; charset=utf-8');
     if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${path.basename(doc.relPath)}"`);
     res.send(doc.toText());

@@ -42,6 +42,13 @@ export interface WriteTexResult {
   graphics: { src: string; dest: string }[];
   /** sidecar files the document owns (sketch SVGs): path relative to the document → content */
   files: Record<string, string>;
+  /**
+   * Source map: for every body paragraph (by index) the character range of `text` it was written
+   * to, leading / trailing whitespace excluded — `null` for a paragraph that produced no output
+   * (deleted, written to the preamble). What the editor uses to mirror cursor and scrolling
+   * between the document and its source.
+   */
+  spans: ({ start: number; end: number } | null)[];
 }
 
 /** The managed block: packages / macros for the features the body uses that the preamble lacks. */
@@ -124,6 +131,7 @@ export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTex
   ctx.warnings.push(...ctx.dc.warnings);
   collectBibLabels(ctx);
   validateParams(ctx);
+  ctx.parSpans = { stream: null, spans: [] };
   const body = writeBody(ctx);
   ctx.features.resolveAlternatives(name => (ctx.bp.usePackage.get(name) ?? 1) !== 0);
   const f = ctx.features;
@@ -131,9 +139,13 @@ export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTex
   if (f.isRequired('textcyrillic')) f.addFontEncoding('T2A');
   const settings = settingsFromHeader(doc.header.lines);
   let text: string;
+  /** what precedes the body in `text` (the source map's offsets are shifted by its length) */
+  let bodyAt: number;
   const bodyText = body.replace(/\n+$/, '') + '\n';
   if (opts.fragment) {
-    text = settingsLine(settings) + '\n' + bodyText;
+    const head = settingsLine(settings) + '\n';
+    bodyAt = head.length;
+    text = head + bodyText;
   } else {
     let preamble: string;
     if (opts.fromLyx) {
@@ -148,9 +160,26 @@ export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTex
       if (bp.preamble.trim()) preamble += bp.preamble.replace(/\s+$/, '') + '\n';
     }
     const head = [...(opts.head ?? []), ...doc.preamble];
-    text = (head.length ? head.join('\n') + '\n' : '') + preamble + '\n' + managedBlock(ctx, provided, settings) + '\n\\begin{document}\n' + bodyText + '\n\\end{document}\n';
+    const before = (head.length ? head.join('\n') + '\n' : '') + preamble + '\n' + managedBlock(ctx, provided, settings) + '\n\\begin{document}\n';
+    bodyAt = before.length;
+    text = before + bodyText + '\n\\end{document}\n';
     if (doc.trailer.length) text += doc.trailer.join('\n') + '\n';
   }
   const res = finishExport(ctx, text);
-  return { text: res.tex, warnings: res.warnings, requires: res.requires, graphics: res.graphics, files: res.files };
+  return { text: res.tex, warnings: res.warnings, requires: res.requires, graphics: res.graphics, files: res.files, spans: bodySpans(ctx, body, bodyAt, doc.body.length) };
+}
+
+/** The recorded paragraph spans as offsets into the file, trimmed to the paragraph's own text. */
+function bodySpans(ctx: ExportContext, body: string, bodyAt: number, count: number): WriteTexResult['spans'] {
+  const rec = ctx.parSpans?.spans ?? [];
+  const out: WriteTexResult['spans'] = [];
+  for (let i = 0; i < count; i++) {
+    const s = rec[i];
+    if (!s) { out.push(null); continue; }
+    let start = s.start, end = Math.min(s.end, body.length);
+    while (start < end && /\s/.test(body[start])) start++;
+    while (end > start && /\s/.test(body[end - 1])) end--;
+    out.push(start < end ? { start: bodyAt + start, end: bodyAt + end } : null);
+  }
+  return out;
 }

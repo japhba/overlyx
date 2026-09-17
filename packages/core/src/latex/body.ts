@@ -383,6 +383,14 @@ function spacingEnv(ctx: ExportContext, spacing: string | undefined): { begin: s
 }
 
 function texOnePar(ctx: ExportContext, text: TextInfo, pit: number, os: TexStream, rp: RunParams, state: { prevLang: string }, force = false): void {
+  // the source map (ExportContext.parSpans): where in the main stream this body paragraph lands
+  const rec = ctx.parSpans && text.isMainText && os === ctx.parSpans.stream ? ctx.parSpans : null;
+  const start = os.length;
+  texOneParImpl(ctx, text, pit, os, rp, state, force);
+  if (rec) rec.spans[pit] = { start, end: os.length };
+}
+
+function texOneParImpl(ctx: ExportContext, text: TextInfo, pit: number, os: TexStream, rp: RunParams, state: { prevLang: string }, force: boolean): void {
   const pars = text.pars;
   const par = pars[pit];
   const style = styleOf(ctx, par, rp);

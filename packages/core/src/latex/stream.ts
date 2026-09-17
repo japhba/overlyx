@@ -15,6 +15,8 @@ export class TexStream {
   column = 0;
   /** Total number of newlines written (used to detect multi-line inset output). */
   newlines = 0;
+  /** Total number of characters written so far (the offset the next write lands at). */
+  length = 0;
 
   get afterParbreak(): boolean { return this.parbreak; }
   get canBreakLine(): boolean { return this.canBreak; }
@@ -31,6 +33,7 @@ export class TexStream {
   private raw(s: string): void {
     if (!s) return;
     this.chunks.push(s);
+    this.length += s.length;
     for (const c of s) this.track(c);
   }
 

@@ -292,16 +292,23 @@ blend.
   (LyX's `\start_of_appendix`, written as `\appendix`).
 * **The raw view** — *View ▸ LaTeX source beside the document* opens `raw:<document>`: the same
   editor instance with its LaTeX source in a resizable pane on the right (`app/SourcePane.tsx`
-  layout="right"). The two scroll together (the top paragraph ↔ its source line, via
-  `app/sourcelocate.ts`) and the **cursor is mirrored both ways**, character by character: the
-  document cursor is a thin bar in the coloured source (the textarea's own caret is put there too
-  while nobody types in it), and a click or arrow key in the source puts the document cursor at that
-  word (`locateSourceCaret`: the line's block, then the words before the column) and scrolls it into
-  view — drawn as a blinking *mirror caret* (`editor/plugins/mirrorcaret.ts`) while the editor has no
-  focus. Edits in the source are applied to the document as one types — parsed on the server and
-  merged as a diff — a moment after the last keystroke, held back while the LaTeX is unbalanced
-  (`checkTexHealth`), `Ctrl+Enter` applies at once; the source is regenerated from the document when
-  the pane loses the focus (`Ctrl+Alt+S` toggles the pane).
+  layout="right"). The server sends the source with a **source map** (`GET /tex?map=1`: the character
+  range every top-level paragraph was written to, recorded by the writer — core `WriteTexResult.spans`,
+  `latex/body.ts texOnePar`), and `app/sourcemap.ts` builds the mirroring on it: the two **scroll
+  together** (the paragraph at the top of one view, and how far it is scrolled into, sets the other; a
+  scroll a pane caused itself is recognised by its exact target and not answered), and **cursor and
+  selection are mirrored both ways**: the document's selection is a thin bar (its head) and a tint (the
+  range, a third `pre` layer) in the coloured source — the textarea's own selection is put there too
+  while nobody types in it — and a click, arrow key or drag in the source puts the document's selection
+  at those words (drawn as a blinking *mirror caret* / tint, `editor/plugins/mirrorcaret.ts`, while the
+  editor has no focus). The words around the cursor are matched (`app/sourcelocate.ts`) *within the
+  paragraph's own range only*, so repeated phrases cannot mislead; the pane with the keyboard leads.
+  Edits in the source are applied to the document as one types — parsed on the server and merged as a
+  diff — a moment after the last keystroke, held back while the LaTeX is unbalanced (`checkTexHealth`,
+  fragment-aware for child documents; the pane's foot names the problem and offers *go to line*),
+  `Ctrl+Enter` applies at once; the spans are carried through the edits typed so the mirroring keeps
+  working meanwhile, and the source is regenerated from the document when the pane loses the focus,
+  with the caret and the scroll position kept (mapped through the change; `Ctrl+Alt+S` toggles the pane).
   The menubar's right side names the project.
 * **Command palette** (`app/MenuBar.tsx`): `Ctrl+Shift+P` (`⇧⌘P` on a Mac; `F1` as well) or the
   *Help* menu opens a search over every menu item and the shortcut table — results show the menu

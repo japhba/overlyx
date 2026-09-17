@@ -93,7 +93,13 @@ export class DocSession {
 
   /** Serialize the current model to .tex text. */
   toText(): string {
-    return writeDocumentText(this.toLyxDocument(), this.ctx, this.relPath, this.isChild, includeResolver(this.ctx, this.relPath)).text;
+    return this.toTextMap().text;
+  }
+
+  /** The .tex text with its source map (the character range of every top-level paragraph: the source pane's cursor / scroll sync). */
+  toTextMap(): { text: string; spans: ({ start: number; end: number } | null)[] } {
+    const r = writeDocumentText(this.toLyxDocument(), this.ctx, this.relPath, this.isChild, includeResolver(this.ctx, this.relPath));
+    return { text: r.text, spans: r.spans };
   }
 
   /**

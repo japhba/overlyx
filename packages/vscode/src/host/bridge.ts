@@ -19,6 +19,8 @@ export interface BridgeDelegate {
   meta(docId: string): Promise<Record<string, unknown>>;
   /** current LaTeX text of a document (the open editor's state, else the file) */
   texText(docId: string): Promise<string>;
+  /** the same with its source map (paragraph → character range); `spans: null` when the document is not open */
+  texMap(docId: string): Promise<{ text: string; spans: ({ start: number; end: number } | null)[] | null }>;
   applySource(docId: string, text: string): Promise<{ ok: boolean; warnings: string[] }>;
   clip(docId: string, latex: string): Promise<{ blocks: unknown[]; warnings: string[] }>;
   headerGet(docId: string): Promise<{ headerLines: string[] }>;
@@ -107,6 +109,7 @@ export class Bridge {
       const docId = decodeURIComponent(m[1]);
       const kind = m[3] ? `${m[2]}/${m[3]}` : m[2];
       if (kind === 'meta') { send(res, 200, await d.meta(docId)); return; }
+      if (kind === 'tex' && url.searchParams.get('map') === '1') { send(res, 200, await d.texMap(docId)); return; }
       if (kind === 'tex') { res.setHeader('Content-Type', 'application/x-tex; charset=utf-8'); res.end(await d.texText(docId)); return; }
       if (kind === 'source' && req.method === 'POST') {
         const b = await body(req);

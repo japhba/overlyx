@@ -166,6 +166,8 @@ export const api = {
   meta: (id: string) => req<DocMeta>('GET', `/api/docs/${encId(id)}/meta`),
   /** the document's LaTeX source (what its .tex file contains) */
   texText: (id: string) => fetch(`${API_BASE}/api/docs/${encId(id)}/tex`).then(r => r.text()),
+  /** the LaTeX source with its source map: the character range of every top-level paragraph (null: the server has none) */
+  texMap: (id: string) => req<{ text: string; spans: ({ start: number; end: number } | null)[] | null }>('GET', `/api/docs/${encId(id)}/tex?map=1`),
   /** replace the document by hand-edited LaTeX source */
   applySource: (id: string, text: string) => req<{ ok: boolean; warnings: string[] }>('POST', `/api/docs/${encId(id)}/source`, { text }),
   /** parse pasted LaTeX in the document's context: ProseMirror block JSON to insert */

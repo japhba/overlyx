@@ -20,6 +20,9 @@ import { listProjects, resolveProjectPath, projectDir, type ProjectFile } from '
 import { applyLyxDocument } from './ydiff.ts';
 import { parseDocumentText, writeDocumentText, readTextFile, looksLikeDocument, cachedParseFile } from './texdoc.ts';
 
+/** a top-level paragraph's character range in the .tex text (null: it produced no output) */
+export type SourceSpan = { start: number; end: number } | null;
+
 export { readTextFile, looksLikeDocument };
 /** @deprecated name kept for older call sites */
 export const readLyxFile = readTextFile;
@@ -95,15 +98,21 @@ export class OpenDoc {
     return { preamble: meta.preamble, format: meta.format, header: { lines: meta.headerLines }, body: pmToLyxBody(json), trailer: meta.trailer };
   }
 
-  /** Current document as .tex text (plus the sidecar files it owns, e.g. sketch SVGs). */
-  protected render(): { text: string; files: Record<string, string> } {
+  /** Current document as .tex text (plus the sidecar files it owns, e.g. sketch SVGs, and the source map). */
+  protected render(): { text: string; files: Record<string, string>; spans: SourceSpan[] } {
     const r = writeDocumentText(this.toLyxDocument(), this.project, this.relPath, this.isChild, (fn) => resolveIncludeFor(this, fn));
-    return { text: r.text, files: r.files };
+    return { text: r.text, files: r.files, spans: r.spans };
   }
 
   /** Current document as .tex text. */
   toText(): string {
     return this.render().text;
+  }
+
+  /** Current document as .tex text with its source map: the character range of every top-level paragraph (the source pane's cursor / scroll sync). */
+  toTextMap(): { text: string; spans: SourceSpan[] } {
+    const r = this.render();
+    return { text: r.text, spans: r.spans };
   }
 
   /**
@@ -360,12 +369,12 @@ export class BoardDoc extends OpenDoc {
 
   override health(): HealthIssue[] { return []; }
 
-  protected override render(): { text: string; files: Record<string, string> } {
+  protected override render(): { text: string; files: Record<string, string>; spans: SourceSpan[] } {
     const m = this.objects;
     const keys = [...m.keys()].sort();
     let s = '{"overlyx":"board","v":1,"objects":{';
     s += keys.map(k => `\n${JSON.stringify(k)}: ${JSON.stringify(m.get(k))}`).join(',');
-    return { text: s + '\n}}\n', files: {} };
+    return { text: s + '\n}}\n', files: {}, spans: [] };
   }
 
   /** Load board JSON into the CRDT; only objects that differ are touched, so cursors and undo of others survive. */

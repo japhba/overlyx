@@ -144,6 +144,7 @@ export function validateParams(ctx: ExportContext): void {
 /** Body of the document (paragraphs between \begin{document} and \end{document}). */
 export function writeBody(ctx: ExportContext): string {
   const os = new TexStream();
+  if (ctx.parSpans) ctx.parSpans.stream = os;
   const rp = newRunParams(ctx.bp.language, true);
   rp.owner = 'main';
   latexParagraphs(ctx, { pars: ctx.doc.body, isMainText: true }, os, rp);

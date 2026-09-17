@@ -118,6 +118,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         const l = locate(docId);
         return l.session ? l.session.toText() : readTextFile(path.join(l.root, l.relPath));
       },
+      texMap: async (docId) => {
+        const l = locate(docId);
+        return l.session ? l.session.toTextMap() : { text: readTextFile(path.join(l.root, l.relPath)), spans: null };
+      },
       applySource: async (docId, text) => {
         const session = registry.sessionByDocId(docId);
         if (!session) throw new Error('Open the document before editing its source');
