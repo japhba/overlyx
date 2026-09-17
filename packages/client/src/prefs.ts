@@ -23,7 +23,7 @@ export interface Prefs {
   aiCompleteMath: boolean;
   /** pause before a completion is requested (ms) */
   aiCompleteDelay: number;
-  /** dark theme: plots and diagrams (dark strokes on a light ground) are shown light-on-dark; photos are left alone */
+  /** Smart inversion adapts plots on a white base to the dark theme; photographs keep their colours. */
   invertFigures: boolean;
   /** OpenRouter model ids for ⌘K and for autocomplete ('' = the server's default) */
   aiModel: string;

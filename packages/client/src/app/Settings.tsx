@@ -89,7 +89,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
               <option value="browser">Browser — the browser's own checker (checks slowly after a click; suggestions only via {/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click)</option>
             </select></Row>
             <h3>Figures</h3>
-            {check('invertFigures', 'Invert figures in the dark theme', 'Plots and diagrams — dark strokes on a light ground — are shown light-on-dark, like iOS Smart Invert; photographs keep their colours. Figures reload by themselves when their file changes on disk.')}
+            {check('invertFigures', 'Invert figures in the dark theme', 'Plots and diagrams use a white base, including transparent images, and turn light-on-dark in the dark theme. Photographs keep their colours. Figures reload when their file changes on disk.')}
           </>}
           {section === 'ai' && <>
             <h3>AI assistance</h3>

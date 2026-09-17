@@ -139,7 +139,6 @@ html[data-theme="dark"] .ProseMirror-yjs-selection { background: rgba(122,167,23
 html[data-theme="dark"] .lm-sel { background: rgba(122,167,234,0.35); }
 html[data-theme="dark"] .lyx-color-black { color: #fff; }        /* "black" text = the default text colour */
 html[data-theme="dark"] .lyx-color-blue { color: #7f9fff; } html[data-theme="dark"] .lyx-color-red { color: #ff6b6b; } html[data-theme="dark"] .lyx-color-purple { color: #d07fd0; } html[data-theme="dark"] .lyx-color-brown { color: #d9a066; } html[data-theme="dark"] .lyx-color-darkgray { color: #bbb; }
-html[data-theme="dark"] .lyx-graphics img { filter: brightness(0.92); }
 /* smart invert (figureinvert.ts): white → the page's dark grey, black strokes → light; hue-rotate keeps coloured lines roughly their colour */
 html[data-theme="dark"] .lyx-graphics.smart-invert img { filter: invert(0.93) hue-rotate(180deg); }
 html[data-theme="dark"] .menu-list, html[data-theme="dark"] .ctx-menu, html[data-theme="dark"] .tb-popup, html[data-theme="dark"] .dialog, html[data-theme="dark"] .tour-card { box-shadow: 0 6px 24px rgba(0,0,0,0.6); }
@@ -440,6 +439,8 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .lyx-inset-float > .inset-box > .inset-label { background: #5a7ea8; }
 .lyx-inset-wrap { display: block; margin: 0.6em 0; }
 .lyx-inset-wrap > .inset-box { display: block; padding: 6px 10px; }
+/* Figure insets share the white page base and follow its dark-theme colour. */
+.lyx-inset-float-figure > .inset-box, .lyx-inset-wrap-figure > .inset-box { background: var(--page-bg); }
 .lyx-inset-caption { display: block; margin-top: 0.3em; }
 .lyx-inset-caption > .inset-box { display: block; border: 0; padding: 2px 0; background: transparent; }
 .lyx-inset-caption > .inset-box > .inset-content, .lyx-inset-caption > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
@@ -539,7 +540,7 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 
 /* graphics */
 .lyx-graphics { display: block; max-width: 100%; text-align: center; }
-.lyx-graphics img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.lyx-graphics img { display: block; max-width: 100%; height: auto; margin: 0 auto; background: #fff; }
 .lyx-graphics .graphics-caption { display: block; font-family: var(--ui-font); font-size: 0.8em; color: var(--ui-muted); border: 1px dashed var(--ui-border); padding: 8px; }
 .lyx-graphics.ProseMirror-selectednode img { outline: 2px solid var(--accent); }
 

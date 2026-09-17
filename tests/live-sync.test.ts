@@ -17,6 +17,15 @@ beforeEach(() => {
   git(local, 'config', 'user.name', 'Live test'); git(local, 'config', 'user.email', 'live@example.invalid');
 });
 
+it('fast-forwards a clean checkout to the exact upstream commit without creating local history', async () => {
+  commit(remote, 'upstream.txt', 'New editor feature\n');
+  const upstream = git(remote, 'rev-parse', 'HEAD');
+  const result = await syncLiveCheckout(local, { validate(candidate: string) { expect(candidate).toBe(upstream); } });
+  expect(result.status).toBe('updated');
+  expect(git(local, 'rev-parse', 'HEAD')).toBe(upstream);
+  expect(git(local, 'rev-list', '--count', 'origin/master..HEAD')).toBe('0');
+});
+
 it('integrates upstream while retaining local commits, after validating the exact candidate', async () => {
   commit(local, 'local.txt', 'Local live fixes\n'); commit(remote, 'upstream.txt', 'New editor feature\n');
   let checked: string;

@@ -29,7 +29,9 @@ export async function syncLiveCheckout(repo, { validate, beforeApply = () => {},
     if (!clean(repo)) return report('blocked', 'Uncommitted source edits prevent an automatic update. Commit or resolve them, then check again.');
     report('checking', 'Validating the upstream update in a separate checkout.');
     let commit = head;
-    if (!current) {
+    if (!current && git(repo, 'rev-list', '--count', 'origin/master..HEAD') === '0') {
+      commit = upstream;
+    } else if (!current) {
       let tree;
       try { tree = git(repo, 'merge-tree', '--write-tree', head, upstream).split('\n')[0]; }
       catch (error) {

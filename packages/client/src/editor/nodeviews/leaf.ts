@@ -60,7 +60,7 @@ export class GraphicsView implements NodeView {
     });
   }
 
-  /** dark theme: line art is shown light-on-dark (a CSS filter; photos keep their colours) */
+  /** Smart inversion adapts line art on its white base to the dark theme. */
   private applyInvert() {
     this.dom.classList.toggle('smart-invert', this.kind === 'lineart' && getPrefs().invertFigures);
   }
