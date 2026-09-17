@@ -79,6 +79,8 @@ describe('one toolbar definition for both front ends', () => {
       // mouse hit testing (the extension's drags stopped following the pointer when zoomed)
       expect(src, `${file} must zoom through applyEditorZoom (app/shellutil.tsx)`).toMatch(/applyEditorZoom\(zoom\)/);
       expect(src, `${file} must not use CSS zoom`).not.toMatch(/style=\{\{\s*zoom|--editor-zoom/);
+      // the sun/moon switch (with its right-click tone menu) is MenuBar's ThemeToggle in both shells
+      expect(src, `${file} builds its own theme switch — use ThemeToggle from app/MenuBar.tsx`).not.toContain('class="theme-toggle"');
     });
   }
 

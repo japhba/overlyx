@@ -134,10 +134,14 @@ html[data-theme="dark"] {
   --example-bg: linear-gradient(135deg, #1f2738, #26262d);
   --backdrop: rgba(0,0,0,0.55);
 }
+/* right-click on the sun/moon switch (prefs.darkTone → data-tone, app/theme.ts): the dark theme's white
+   text, formulas and caret in a warmer or softer tone, like Apple Books' sepia and grey reading themes */
+html[data-theme="dark"][data-tone="sepia"] { --editor-fg: #e8d9bd; --caret: #f1e4ca; }
+html[data-theme="dark"][data-tone="gray"] { --editor-fg: #c9cbd3; --caret: #dfe2ea; }
 /* things that were fine as literals in light mode but need a darker twin */
 html[data-theme="dark"] .ProseMirror-yjs-selection { background: rgba(122,167,234,0.25); }
 html[data-theme="dark"] .lm-sel { background: rgba(122,167,234,0.35); }
-html[data-theme="dark"] .lyx-color-black { color: #fff; }        /* "black" text = the default text colour */
+html[data-theme="dark"] .lyx-color-black { color: var(--editor-fg); }        /* "black" text = the default text colour */
 html[data-theme="dark"] .lyx-color-blue { color: #7f9fff; } html[data-theme="dark"] .lyx-color-red { color: #ff6b6b; } html[data-theme="dark"] .lyx-color-purple { color: #d07fd0; } html[data-theme="dark"] .lyx-color-brown { color: #d9a066; } html[data-theme="dark"] .lyx-color-darkgray { color: #bbb; }
 /* smart invert (figureinvert.ts): white → the page's dark grey, black strokes → light; hue-rotate keeps coloured lines roughly their colour */
 html[data-theme="dark"] .lyx-graphics.smart-invert img { filter: invert(0.93) hue-rotate(180deg); }

@@ -5,17 +5,31 @@ import type { PresenceUser } from '../editor/editor';
 import { UserAvatars } from './StatusBar';
 import { Wordmark } from './Logo';
 import { AvatarContent, initials } from './Avatar';
-import { toggleTheme, useTheme } from './theme';
+import { toggleTheme, useTheme, DARK_TONES } from './theme';
+import { getPrefs, setPref } from '../prefs';
+import { showContextMenu, type MenuItem } from '../editor/contextmenu';
 import { formatShortcut } from './shortcuts';
 import { canonical, effectiveShortcut, getBindings, isCustom, keyFromEvent, setBinding, subscribeBindings } from './keybindings';
 
-/** Sun / moon button: flips between light and dark (View ▸ Theme ▸ System follows the OS again). */
-function ThemeToggle() {
+/** the right-click menu of the switch: the text tone of the dark theme (app/theme.ts DARK_TONES) */
+export function darkToneMenuItems(): MenuItem[] {
+  const current = getPrefs().darkTone;
+  return [{ label: 'Text in the dark theme', info: true }, ...DARK_TONES.map(t => ({ label: t.label, checked: current === t.id, action: () => setPref('darkTone', t.id) }))];
+}
+
+/**
+ * Sun / moon button: flips between light and dark (View ▸ Theme ▸ System follows the OS again); a
+ * right-click picks the dark theme's text tone. Without props it follows the browser's theme
+ * preference (the web client); the VS Code shell passes what it shows and its own cycling.
+ */
+export function ThemeToggle({ dark: shownDark, title, onClick }: { dark?: boolean; title?: string; onClick?: () => void } = {}) {
   const { theme, pref } = useTheme();
-  const dark = theme === 'dark';
+  const dark = shownDark ?? theme === 'dark';
+  const label = title ?? `${dark ? 'Dark' : 'Light'} theme${pref === 'system' ? ' (following the system)' : ''} — click for ${dark ? 'light' : 'dark'}`;
+  const tones = (e: MouseEvent) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, darkToneMenuItems()); };
   return (
-    <button type="button" class="theme-toggle" data-theme-toggle data-current={theme} onClick={toggleTheme}
-      title={`${dark ? 'Dark' : 'Light'} theme${pref === 'system' ? ' (following the system)' : ''} — click for ${dark ? 'light' : 'dark'}`}>
+    <button type="button" class="theme-toggle" data-theme-toggle data-current={dark ? 'dark' : 'light'} onClick={onClick ?? toggleTheme} onContextMenu={tones}
+      title={`${label}; right-click: text tone of the dark theme`}>
       {dark
         ? <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" /></svg>
         : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" /></svg>}

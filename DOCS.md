@@ -187,7 +187,10 @@ blend.
 * **Dark mode**: follows the system preference by default; the sun/moon button in the menu bar
   flips it (remembered in this browser), *View ▸ Theme ▸ Follow the system* goes back to the OS
   setting. In VS Code the same button sits in the editor's top bar next to the WYSIWYG / TeX /
-  Split switch and cycles VS Code's theme → light → dark. Text and formulas are white on a near-black page; everything in
+  Split switch and cycles VS Code's theme → light → dark. A right-click on the button (both shells:
+  `app/MenuBar.tsx ThemeToggle`) picks the text tone of the dark theme — white, or a sepia / grey tone
+  like Apple Books' reading themes, for everything white on the page (text, formulas, caret;
+  `prefs.darkTone` → `data-tone` on html, tokens in styles.css). Text and formulas are white on a near-black page; everything in
   `packages/client/src/styles.css` goes through the theme tokens at the top of the file (light values
   on `:root`, dark ones on `html[data-theme="dark"]`, set by `app/theme.ts`).
 * **Ruler**: a Google-Docs-style ruler above the page (*View ▸ Ruler*) with draggable margin

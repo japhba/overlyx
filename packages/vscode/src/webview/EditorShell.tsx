@@ -1,4 +1,4 @@
-import { MenuBar, openPalette, PALETTE_LABEL, type MenuDef } from '@client/app/MenuBar';
+import { MenuBar, openPalette, PALETTE_LABEL, type MenuDef, ThemeToggle } from '@client/app/MenuBar';
 import { documentMenus } from '@client/app/documentMenus';
 import { editorViewMenu } from '@client/app/editorViewMenu';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
@@ -672,12 +672,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       <MenuBar menus={menus} showThemeToggle={false} paletteShortcut="Ctrl+Alt+Shift+P" captureF1={false} searchEntries={helpSearchEntries} />
       <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong>
         <span class="topbar-right">
-          <button type="button" class="theme-toggle" data-theme-toggle data-current={shownDark ? 'dark' : 'light'} onClick={cycleTheme}
-            title={`${shownDark ? 'Dark' : 'Light'} theme${themePref === 'system' ? " (following VS Code's)" : ''} — click for ${themePref === 'system' ? (shownDark ? 'light' : 'dark') : themePref === 'light' ? 'dark' : "VS Code's theme"}`}>
-            {shownDark
-              ? <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" /></svg>
-              : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" /></svg>}
-          </button>
+          <ThemeToggle dark={shownDark} onClick={cycleTheme} title={`${shownDark ? 'Dark' : 'Light'} theme${themePref === 'system' ? " (following VS Code's)" : ''} — click for ${themePref === 'system' ? (shownDark ? 'light' : 'dark') : themePref === 'light' ? 'dark' : "VS Code's theme"}`} />
           <ViewModeSwitch mode={viewMode} onChange={setViewMode} />
         </span>
       </div>

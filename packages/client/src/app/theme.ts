@@ -4,6 +4,7 @@
  * tokens in styles.css). Imported first by main.tsx so the attribute is set before the first paint.
  */
 import { useEffect, useState } from 'preact/hooks';
+import { getPrefs, subscribePrefs, type Prefs } from '../prefs';
 
 export type Theme = 'light' | 'dark';
 export type ThemePref = Theme | 'system';
@@ -43,6 +44,19 @@ function apply(): void {
 
 media?.addEventListener('change', () => { if (pref === 'system') apply(); });
 apply();
+
+/**
+ * The dark theme's text tone (prefs.darkTone, chosen by right-clicking the sun/moon switch): white, or —
+ * like Apple Books' sepia and grey reading themes — a warmer or softer tone for everything that is
+ * white on the near-black page (text, formulas, the caret). `data-tone` on <html>; styles.css redefines
+ * --editor-fg and --caret for it, so nothing but those tokens knows about it. Both shells import this
+ * module, so both get it.
+ */
+export type DarkTone = Prefs['darkTone'];
+export const DARK_TONES: { id: DarkTone; label: string }[] = [{ id: 'white', label: 'White' }, { id: 'sepia', label: 'Sepia' }, { id: 'gray', label: 'Gray' }];
+function applyTone(p: Prefs): void { document.documentElement.dataset.tone = p.darkTone; }
+subscribePrefs(applyTone);
+applyTone(getPrefs());
 
 /** Preact hook: re-renders when the preference or the system theme changes. */
 export function useTheme(): { pref: ThemePref; theme: Theme } {
