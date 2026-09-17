@@ -551,7 +551,10 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 /* tables */
 .lyx-tabular { display: inline-block; vertical-align: middle; margin: 4px 0; max-width: none; }
 .lyx-tabular table { border-collapse: collapse; }
-.lyx-cell { padding: 2px 6px; border: 1px dotted var(--ui-border2); min-width: 2em; }
+.lyx-cell { padding: 2px 6px; border: 1px dotted var(--cell-grid, var(--ui-border2)); min-width: 2em; }
+/* the dotted grid — LyX's hint for cell boundaries without a line — only while the cursor is in the
+   table (editor/plugins/envfocus.ts marks it); the colour changes, never the layout */
+.lyx-tabular:not(.ol-editing) { --cell-grid: transparent; }
 .lyx-cell.topline { border-top: 1px solid var(--editor-fg); }
 .lyx-cell.bottomline { border-bottom: 1px solid var(--editor-fg); }
 .lyx-cell.leftline { border-left: 1px solid var(--editor-fg); }
@@ -586,6 +589,11 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .lm-macro-name { position: absolute; font: 8px/10px system-ui, sans-serif; color: var(--math-arg); background: var(--math-arg-bg); padding: 0 2px; border-radius: 2px; white-space: nowrap; }
 .lm-input { position: absolute; width: 1px; height: 1px; opacity: 0; left: 0; top: 0; padding: 0; border: 0; margin: 0; resize: none; overflow: hidden; pointer-events: none; }
 .lm-empty { display: inline-block; width: 0.5em; height: 0.75em; border: 1px solid var(--muted2); border-radius: 1px; vertical-align: -0.1em; box-sizing: border-box; }
+/* the boxes of empty cells only while the formula is being edited (its field has the focus; formulas
+   on screen are fields even at rest, math.ts's lazy upgrade): otherwise they keep their room but not
+   their outline — except for a formula that is empty altogether, whose one box is all there is to click on */
+.lyx-math-static .lm-empty, .lm-field:not(.focused) .lm-empty { border-color: transparent; }
+.lyx-math-inline.empty .lm-empty, .lyx-math-display.empty .lm-empty { border-color: var(--muted2); }
 .lm-unknown { color: var(--err); }
 .lm-mm { color: var(--math-cmd); }
 .lm-mm.lm-mm-typing { color: var(--err); }          /* not (yet) a command */

@@ -24,6 +24,7 @@ import { marginPlugin } from './plugins/margin';
 import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
 import { fontCarryPlugin } from './plugins/fontcarry';
 import { insetCaretPlugin } from './plugins/insetcaret';
+import { envFocusPlugin } from './plugins/envfocus';
 import { dragSelectPlugin } from './plugins/dragselect';
 import { findPlugin } from './plugins/find';
 import { mirrorCaretPlugin } from './plugins/mirrorcaret';
@@ -114,6 +115,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     gapCursor(),
     dropCursor({ color: '#3b6ea5' }),
     tableEditing(),
+    envFocusPlugin(),
     numberingPlugin(),
     marginPlugin(o.marginMode),
     ...(o.ink ? [o.ink] : []),

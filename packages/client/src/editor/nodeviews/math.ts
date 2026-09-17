@@ -443,6 +443,7 @@ export class MathDisplayView implements NodeView {
     if (!this.staticEl) return;
     this.pending = false; staticQueue.delete(this); this.staticEl.classList.remove('pending');
     const { key, table } = macroTableFor(this.view, this.getPos());
+    this.dom.classList.toggle('empty', !this.lastLatex.trim());   // an empty formula keeps its one box visible (styles.css .lm-empty)
     this.staticEl.innerHTML = renderStaticHtml(this.lastLatex, true, table, { project: viewProject(this.view), docDir: viewDocDir(this.view) });
     this.staticKey = key;
     this.scheduleRelayout();

@@ -238,6 +238,10 @@ blend.
   the first use adds a small macro to the document preamble (`packages/core/src/math/llangle.ts`) that
   makes the plain, `\left…\right` and `\bigl…\bigr` forms compile with symmetric scaled brackets. The
   table row implements LyX's `tabular-feature` commands (`packages/client/src/editor/tablecommands.ts`).
+  The dotted cell grid (LyX's hint for boundaries without a line) and the boxes of a formula's empty
+  cells show only while the cursor is in that table / formula (`editor/plugins/envfocus.ts` marks the
+  table with `ol-editing`; the static formula rendering hides its `lm-empty` outlines) — a document
+  reads as it prints, the scaffolding appears where one works.
 * **Landing page / sign-in** (`app/Login.tsx` + `app/landing.css`): a hero (wordmark, tagline, pitch
   list, GitHub links) with the sign-in card beside it — *Continue with Google* is the way in (repeated
   at the bottom of the page); the username + password form (accounts created by an administrator,
