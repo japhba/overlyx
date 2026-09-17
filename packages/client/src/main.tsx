@@ -4,6 +4,7 @@ import { App } from './app/App';
 import { editorContext } from './editor/context';
 import { api } from './api';
 import { isBenignBrowserError } from './error-reporting';
+import { initUsage, recordUsage, noticeTemplate } from './usage';
 import './styles.css';
 import 'katex/dist/katex.min.css';
 import 'prosemirror-view/style/prosemirror.css';
@@ -11,6 +12,7 @@ import 'prosemirror-gapcursor/style/gapcursor.css';
 import 'prosemirror-tables/style/tables.css';
 
 render(<App />, document.getElementById('app')!);
+initUsage();   // anonymous usage statistics (usage.ts): the session, screen changes, flushing on leave
 
 // Errors that escape (a node view, a promise nobody awaited) must not vanish in the console: show
 // them. The same message is shown at most once per 5 s.
@@ -27,6 +29,7 @@ render(<App />, document.getElementById('app')!);
     last = msg; lastAt = now;
     editorContext.notify?.('Something went wrong: ' + msg.slice(0, 200) + ' (details in the browser console)', 'error');
     editorContext.lastError = msg + (stack ? '\n' + stack : '');
+    recordUsage('error', noticeTemplate(msg));
     // ...and reach the developers: an issue per distinct message (deduplicated on the server; no
     // document content, see server/src/feedback.ts). At most a few per page load.
     if (sent.size < 5 && !sent.has(msg) && !/Failed to fetch|NetworkError|Load failed/.test(msg)) {

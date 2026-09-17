@@ -30,9 +30,11 @@ export interface Prefs {
   aiCompletionModel: string;
   /** the dark theme's text and formulas: white, or a sepia / grey tone like Apple Books' reading themes (right-click the sun/moon switch) */
   darkTone: 'white' | 'sepia' | 'gray';
+  /** anonymous usage statistics (usage.ts): which actions are taken and which go wrong — never content or identity */
+  usageStats: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: true, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white' };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: true, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

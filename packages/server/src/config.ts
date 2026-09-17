@@ -90,6 +90,8 @@ export const config = {
   s2ApiKey: (process.env.S2_API_KEY ?? '').trim(),
   /** SerpApi key (https://serpapi.com): real Google Scholar results through their API */
   serpApiKey: (process.env.SERPAPI_KEY ?? '').trim(),
+  /** anonymous usage statistics from the web app (usage.ts; OVERLYX_USAGE_STATS=off refuses them — the client then stops sending) */
+  usageStats: process.env.OVERLYX_USAGE_STATS !== 'off',
   /** automatic issues for uncaught browser / server errors (OVERLYX_ERROR_REPORTS=off keeps only Help ▸ Report a problem) */
   errorReports: process.env.OVERLYX_ERROR_REPORTS !== 'off',
   /** "Escalate to AI" document repair (OpenRouter, https://openrouter.ai/keys); unset disables the feature */

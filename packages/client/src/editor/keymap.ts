@@ -19,6 +19,7 @@ import { activeMathField } from './lyxmath/field';
 import { ATOMS } from './plugins/dragselect';
 import { trackedDelete } from './plugins/changes';
 import { openRewrite, rewriteEnabled } from './ai/rewrite';
+import { recordUsage } from '../usage';
 
 export interface UiActions {
   save(): void;
@@ -43,6 +44,19 @@ export interface UiActions {
 }
 
 const ui = (fn: (a: UiActions) => void): Command => () => { const a = editorContext.ui; if (a) fn(a); return true; };
+
+/**
+ * Usage statistics (usage.ts): the shortcuts worth counting — modifier combinations, F-keys, Tab and
+ * Escape; not typing keys, arrows or the word deletes — and whether their command did anything.
+ */
+const TRACED_KEY = /^(?:(?:Shift-)?Tab|Escape|F\d+)$|^(?=.*(?:Mod|Alt|Ctrl)-)(?!.*(?:Arrow\w*|Home|End|Page\w*|Backspace|Delete)$)/;
+const traced = (key: string, cmd: Command): Command => (state, dispatch, view) => {
+  const ok = cmd(state, dispatch, view);
+  if (dispatch) recordUsage('key', key, { ok });
+  return ok;
+};
+/** 'M-p' → 'Alt+P' for the statistics */
+const chordLabel = (prefix: string) => prefix.replace(/^M-(\w)/, (_m, c: string) => 'Alt+' + c.toUpperCase());
 
 /** LyX word-delete-backward/forward: within a paragraph's text; at an inset or paragraph edge the character command takes over. */
 const deleteWord = (dir: -1 | 1, fallback: Command): Command => (state, dispatch, view) => {
@@ -93,6 +107,9 @@ export function chordPlugin(): Plugin<string | null> {
           setPrefix(null);
           if (ev.key === 'Escape') return true;
           const k = ev.key;
+          recordUsage('chord', chordLabel(prefix));
+          /** a key the chord does not know: LyX swallows it too, but it is what the person tried */
+          const miss = () => { recordUsage('chord', `${chordLabel(prefix)} ${k}`, { ok: false }); return true; };
           if (prefix === 'M-p') {
             if (k === '*') { setPrefix('M-p*'); return true; }
             const layout = LAYOUT_PREFIX[k];
@@ -103,12 +120,12 @@ export function chordPlugin(): Plugin<string | null> {
             if (k === 'ArrowUp') { moveParagraph(-1)(view.state, view.dispatch); return true; }
             if (k === 'ArrowDown') { moveParagraph(1)(view.state, view.dispatch); return true; }
             if (k === 'Enter') { paragraphBreakInverse(view.state, view.dispatch); return true; }
-            return true;
+            return miss();
           }
           if (prefix === 'M-p*') {
             const layout = LAYOUT_PREFIX[k];
             if (layout && /^[0-6]$/.test(k)) { setLayout(layout + '*')(view.state, view.dispatch); return true; }
-            return true;
+            return miss();
           }
           if (prefix === 'M-a') {
             const map: Record<string, Command> = {
@@ -119,12 +136,12 @@ export function chordPlugin(): Plugin<string | null> {
             };
             if (map[k]) { map[k](view.state, view.dispatch); return true; }
             if (/^[0-9]$/.test(k)) { editorContext.ui?.openDialog('argument', k === '0' ? 'post:1' : k); return true; }
-            return true;
+            return miss();
           }
           if (prefix === 'M-s') {
             const size = SIZE_PREFIX[k];
             if (size) { setValueMark('size', size === 'normal' ? null : size)(view.state, view.dispatch); return true; }
-            return true;
+            return miss();
           }
           if (prefix === 'M-m') {
             if (k === 'm') { insertMath(false)(view); return true; }
@@ -132,12 +149,12 @@ export function chordPlugin(): Plugin<string | null> {
             if (k === 'n') { insertMath(true, 'equation')(view); return true; }
             if (k === 't') { setPrefix('M-m t'); return true; }
             if (k === 'f') { insertMath(false)(view); setTimeout(() => activeMathField()?.execute('insert', '\\frac{#0}{}'), 30); return true; }
-            return true;
+            return miss();
           }
           if (prefix === 'M-m t') {
             const envs: Record<string, string> = { a: 'align', i: 'simple', d: 'equation', e: 'eqnarray', m: 'multline', g: 'gather', n: 'simple' };
             if (envs[k]) { insertMath(true, envs[k] === 'simple' ? undefined : envs[k])(view); return true; }
-            return true;
+            return miss();
           }
           return true;
         }
@@ -263,6 +280,7 @@ export function lyxKeymap(): Plugin {
     bindings['Ctrl-Alt-c'] = bindings['Alt-Mod-c'];
     bindings['Ctrl-r'] = bindings['Mod-r'];
   }
+  for (const k of Object.keys(bindings)) if (TRACED_KEY.test(k)) bindings[k] = traced(k, bindings[k]);
   return keymap(bindings);
 }
 

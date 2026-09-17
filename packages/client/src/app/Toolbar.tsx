@@ -10,6 +10,7 @@ import { createInsetMath, nargs, KATEX_BASE_MACROS } from '@overlyx/core';
 import type { LayoutInfo } from '../api';
 import { MATH_PANELS, type PanelItem } from './mathpanels';
 import { LYX_ICONS } from './lyxicons';
+import { recordUsage } from '../usage';
 
 /** The face of a toolbar button: LyX's own icon file when there is one, else a KaTeX preview, a hand-drawn SVG, or plain text. */
 function btnIcon(b: ToolButton) {
@@ -369,6 +370,7 @@ function PaletteButton({ b }: { b: ToolButton }) {
   const close = () => setOpen(false);
   const preset = !!b.paletteWhenActive;
   const onClick = () => {
+    recordUsage('toolbar', b.id);
     if (preset && !b.active) { b.action?.(); return; }   // select first; a second click edits
     setOpen(o => !o);
   };
@@ -385,7 +387,7 @@ function PaletteButton({ b }: { b: ToolButton }) {
           {p.render ? p.render(close) : (
             <div class="tb-popup-grid" style={p.list ? undefined : { gridTemplateColumns: `repeat(${p.cols ?? 8}, minmax(30px, auto))` }}>
               {p.items!.map((it, i) => (
-                <button key={i} type="button" class={'tb-pal-item' + (it.active ? ' active' : '')} title={it.title ?? it.label} onMouseDown={e => e.preventDefault()} onClick={() => { close(); it.action(); }}>
+                <button key={i} type="button" class={'tb-pal-item' + (it.active ? ' active' : '')} title={it.title ?? it.label} onMouseDown={e => e.preventDefault()} onClick={() => { close(); recordUsage('toolbar', `${b.id} ▸ ${it.label}`); it.action(); }}>
                   {it.html ? <span class="tb-pal-sym" dangerouslySetInnerHTML={{ __html: it.html }} /> : <span class="tb-pal-sym text">{it.label}</span>}
                   {p.list && <span class="tb-pal-label">{it.label}</span>}
                 </button>
@@ -405,7 +407,7 @@ export function Toolbar({ id, layouts, layout, onLayout, groups, label }: Toolba
     <div class={'toolbar toolbar-' + id} data-toolbar={id} onMouseDown={e => { const t = e.target as HTMLInputElement; if (t.tagName !== 'SELECT' && !(t.tagName === 'INPUT' && t.type === 'range')) e.preventDefault(); }}>
       {label && <span class="tb-label">{label}</span>}
       {layouts && (
-        <select value={layout} onChange={e => onLayout?.((e.target as HTMLSelectElement).value)} title="Paragraph layout (Alt+P …)">
+        <select value={layout} onChange={e => { const v = (e.target as HTMLSelectElement).value; recordUsage('toolbar', `layout ▸ ${v}`); onLayout?.(v); }} title="Paragraph layout (Alt+P …)">
           {names.map(n => <option key={n} value={n}>{n}</option>)}
         </select>
       )}
@@ -413,7 +415,7 @@ export function Toolbar({ id, layouts, layout, onLayout, groups, label }: Toolba
         <span key={gi} style="display:contents">
           {(gi > 0 || layouts || label) && <span class="tb-sep" />}
           {g.map(b => b.palette ? <PaletteButton key={b.id} b={b} /> : (
-            <button key={b.id} type="button" class={'tb-btn' + (b.active ? ' active' : '') + (b.kind === 'math' ? ' math' : '')} title={b.title} disabled={b.disabled} data-tb={b.id} onClick={b.action}>{btnIcon(b)}</button>
+            <button key={b.id} type="button" class={'tb-btn' + (b.active ? ' active' : '') + (b.kind === 'math' ? ' math' : '')} title={b.title} disabled={b.disabled} data-tb={b.id} onClick={() => { recordUsage('toolbar', b.id); b.action?.(); }}>{btnIcon(b)}</button>
           ))}
         </span>
       ))}

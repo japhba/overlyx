@@ -35,6 +35,7 @@ import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
 import { aiRewritePlugin } from './ai/rewrite';
 import { aiCompletePlugin } from './ai/complete';
 import { macroDefsPlugin } from './macrodefs';
+import { usagePlugin } from './plugins/usage';
 import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
@@ -134,6 +135,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
         },
       }),
     }),
+    usagePlugin(),   // last: a key nothing above handled is an unanswered request (usage statistics)
   ];
 }
 

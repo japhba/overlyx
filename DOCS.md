@@ -166,6 +166,23 @@ blend.
   paths, account details, email or stable IDs (`packages/vscode/telemetry.json` declares the schema).
   `OVERLYX_ERROR_REPORTS=off` keeps only the manual dialog. Without a token the dialog opens GitHub's
   pre-filled *new issue* form in a new tab instead.
+* **Anonymous usage statistics** (`packages/client/src/usage.ts`, `packages/server/src/usage.ts`,
+  `usageReport.ts`): the web app records the *kind* of every deliberate action — a menu entry
+  ("Edit ▸ Text Style ▸ Bold"), toolbar button, shortcut or Alt+P chord, and whether its command did
+  anything — plus modifier combinations that reached the editor unanswered, dialogs (applied or
+  dismissed, how long open), error messages as templates, uncaught errors, undo/redo, the kind of
+  screen, and once per page load the platform / browser / width class. Every event carries where it
+  happened (text, formula, table, inset, dialog) and a random per-page-load session id; no user id,
+  document, project or file name, text or formula: quoted strings, file names, e-mail addresses and
+  numbers are scrubbed in the browser and again on the server, the Navigate menu's heading entries
+  become `<heading>`. Batches go to `POST /api/usage` (authenticated, rate-limited per account, the
+  account is not stored); rows are kept 180 days. *Settings ▸ Privacy* switches it off per browser
+  (the browser's Global Privacy Control signal does too), `OVERLYX_USAGE_STATS=off` for the whole
+  instance. The VS Code extension sends nothing. The point is to find counter-intuitive parts of the
+  interface: `npx tsx scripts/usage-report.ts [--days 30]` (read-only on the database; `--json` for
+  the raw summary) and `GET /api/admin/usage` rank actions by how often they failed, were undone
+  within 5 s or were repeated in bursts, list the unanswered shortcuts, the dismissed dialogs and the
+  error templates.
 * **Documents panel, one project at a time** (`app/DocPanel.tsx`, Google-Docs style, left; `Ctrl+Alt+O`):
   the project switcher at the top lists your projects and the ones shared with you — choosing another
   one opens *its* main document (there is no tab bar across projects any more; the hash names the one
@@ -594,8 +611,8 @@ and `OVERLYX_MAIL_FROM` (optional From header override),
 `OVERLYX_GIT` (`off` to not expose projects as git repositories), `OVERLYX_GIT_COMMIT_MS` (idle time
 before OverLyX commits what changed, default 2 min) and `OVERLYX_GIT_COMMIT_MAX_WAIT` (longest time
 changes stay uncommitted while editing goes on, default 15 min), `GITHUB_REPO` / `GITHUB_TOKEN` /
-`GITHUB_API_URL` (feedback and error reports as issues, see above) and `OVERLYX_ERROR_REPORTS` (`off`
-disables the automatic ones), `OVERLYX_LITERATURE` (`off` disables the literature search of the
+`GITHUB_API_URL` (feedback and error reports as issues, see above), `OVERLYX_ERROR_REPORTS` (`off`
+disables the automatic ones), `OVERLYX_USAGE_STATS` (`off` refuses the anonymous usage statistics), `OVERLYX_LITERATURE` (`off` disables the literature search of the
 citation dialog) and `OVERLYX_CONTACT_EMAIL` (optional, for the OpenAlex / Crossref polite pools). Git itself runs with an empty
 environment (`HOME=<data dir>/git-home`, `safe.directory=*` because projects may belong to another
 account) — the server's own git configuration never applies.
@@ -726,6 +743,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
+OVERLYX_DATA_DIR=/root/lyx/overlyx/data npx tsx scripts/usage-report.ts --days 30   # on the production server: what people did and what went wrong (anonymous usage statistics)
 journalctl -u overlyx-autodeploy -n 50   # on the production server: what the last push to origin/master went through (checks, deploy, verification)
 # a real project in the extension (VS Code under xvfb, driven over CDP): notifications, broken node views, KaTeX
 # errors, raw LaTeX left in the text, formula image glyphs and their placement, screenshots — for "this document

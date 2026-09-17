@@ -1,3 +1,4 @@
+import { recordUsage, noticeTemplate } from '../usage';
 import { editorViewMenu } from './editorViewMenu';
 import { inkToolbar } from './inkToolbar';
 import { StatsDialog } from './StatsDialog';
@@ -320,7 +321,11 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [, force] = useState(0);
   const rerender = () => force(x => x + 1);
 
-  const notify = useCallback((text: string, kind: 'info' | 'error' = 'info') => { setMessage({ text, kind }); setTimeout(() => setMessage(m => (m?.text === text ? null : m)), 4000); }, []);
+  const notify = useCallback((text: string, kind: 'info' | 'error' = 'info') => {
+    setMessage({ text, kind });
+    setTimeout(() => setMessage(m => (m?.text === text ? null : m)), 4000);
+    if (kind === 'error') recordUsage('notice', noticeTemplate(text));   // what went wrong, as a template (usage.ts)
+  }, []);
 
   useEffect(() => {
     const onHash = () => {
@@ -473,7 +478,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     const handles = [editorRef.current, ...childRefs.current.values()].filter((h): h is EditorHandle => !!h);
     const hit = navHistory.jump(() => handles.find(h => h.gotoUser(u.clientId)));
     if (hit) notify(`Jumped to ${u.name}'s cursor`);
-    else notify(`${u.name} has no cursor in this document (yet)`, 'error');
+    else notify(`“${u.name}” has no cursor in this document (yet)`, 'error');
   };
 
   /**
@@ -887,6 +892,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     return outline.filter(it => it.level < 99 && it.layout !== 'Title').slice(0, 120).map(it => ({
       label: `${'\u2003'.repeat(Math.max(0, it.level - 1))}${it.num ? it.num + '\u2002' : ''}${it.text}`,
       action: () => jumpToOutline(v, it),
+      stat: '<heading>',   // the label is the heading's text: the usage statistics see only that a heading was chosen
     }));
   }, [outline, masterView]);
   const toggleCellLine = (key: string) => {

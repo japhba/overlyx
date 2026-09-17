@@ -31,6 +31,7 @@ import { sandboxAvailable } from './sandbox.ts';
 import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests } from './access.ts';
 import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
 import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, feedbackEnabled, appVersion, appCommit } from './feedback.ts';
+import { usageRoutes } from './usage.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
@@ -105,6 +106,7 @@ api.use((req, res, next) => {
 });
 api.use(express.json({ limit: '5mb' }));
 api.use(feedbackRoutes());
+api.use(usageRoutes());
 api.use(agentRoutes());
 
 /* ----------------------------------------------------------------- access */

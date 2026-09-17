@@ -9,6 +9,7 @@ import { toggleTheme, useTheme, DARK_TONES } from './theme';
 import { getPrefs, setPref } from '../prefs';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
 import { formatShortcut } from './shortcuts';
+import { recordUsage, menuKey } from '../usage';
 import { canonical, effectiveShortcut, getBindings, isCustom, keyFromEvent, setBinding, subscribeBindings } from './keybindings';
 
 /** the right-click menu of the switch: the text tone of the dark theme (app/theme.ts DARK_TONES) */
@@ -37,7 +38,11 @@ export function ThemeToggle({ dark: shownDark, title, onClick }: { dark?: boolea
   );
 }
 
-export interface MenuEntry { label?: string; shortcut?: string; action?: () => void; checked?: boolean; disabled?: boolean; sep?: boolean; sub?: MenuEntry[] }
+export interface MenuEntry {
+  label?: string; shortcut?: string; action?: () => void; checked?: boolean; disabled?: boolean; sep?: boolean; sub?: MenuEntry[];
+  /** what the usage statistics record instead of the label — for entries whose label is document content (the Navigate menu's headings) */
+  stat?: string;
+}
 /** `search`: the menu starts with the command palette (a search over all menus and shortcuts) — the Help menu */
 export interface MenuDef { title: string; items: MenuEntry[]; search?: boolean }
 /**
@@ -45,7 +50,7 @@ export interface MenuDef { title: string; items: MenuEntry[]; search?: boolean }
  * shortcut from the table). `id` = the menu path, the key of a user shortcut; `fixed` entries
  * cannot be given one (the shortcut is informational).
  */
-export interface SearchEntry { id: string; label: string; path: string[]; shortcut?: string; checked?: boolean; action?: () => void; fixed?: boolean }
+export interface SearchEntry { id: string; label: string; path: string[]; shortcut?: string; checked?: boolean; action?: () => void; fixed?: boolean; stat?: string }
 
 /** the Help menu item that opens the palette (its id = 'Help ▸ ' + label); rebindable like any other */
 export const PALETTE_LABEL = 'Search menus and shortcuts (command palette)';
@@ -65,7 +70,7 @@ export function collectEntries(menus: MenuDef[]): SearchEntry[] {
       if (it.sep || !it.label) continue;
       if (it.sub) { walk(it.sub, [...path, cleanLabel(it.label)]); continue; }
       if (it.disabled || !it.action) continue;
-      out.push({ id: entryId(path, it.label), label: cleanLabel(it.label), path, shortcut: it.shortcut, checked: it.checked, action: it.action });
+      out.push({ id: entryId(path, it.label), label: cleanLabel(it.label), path, shortcut: it.shortcut, checked: it.checked, action: it.action, stat: it.stat });
     }
   };
   for (const m of menus) walk(m.items, [m.title]);
@@ -122,7 +127,7 @@ function MenuList({ items, path, close, style, back }: { items: MenuEntry[]; pat
       if (it.sep) return <div key={i} class="menu-sep" role="separator" />;
       if (it.sub) return <SubMenuItem key={i} entry={it} path={path} close={close} />;
       const sc = it.label ? effectiveShortcut(entryId(path, it.label), it.shortcut) : it.shortcut;
-      const run = () => { if (!it.disabled) { close(); it.action?.(); } };
+      const run = () => { if (!it.disabled) { close(); recordUsage('menu', menuKey(path, it.stat ?? it.label ?? '')); it.action?.(); } };
       return <div key={i} role="menuitem" tabIndex={-1} aria-disabled={!!it.disabled} class={'menu-item' + (it.checked ? ' checked' : '') + (it.disabled ? ' disabled' : '')} onClick={run} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); run(); } }}><span>{it.label}</span>{sc && <span class="shortcut">{formatShortcut(sc)}</span>}</div>;
     })}
   </div>;
@@ -158,7 +163,7 @@ function SearchMenu({ menu, entries, close, recording, setRecording, paletteShor
   useLayoutEffect(() => { input.current?.focus(); }, []);
   useEffect(() => { setSel(0); }, [q]);
   useEffect(() => () => setRecording(null), []);
-  const run = (e: SearchEntry) => { close(); e.action?.(); };
+  const run = (e: SearchEntry) => { close(); recordUsage('palette', menuKey(e.path, e.stat ?? e.label)); e.action?.(); };
 
   /** a recorded key for `id`: collisions are confirmed, the other command then loses the key */
   const assign = (id: string, key: string) => {
@@ -293,7 +298,7 @@ export function MenuBar({ menus, user, right, primary, onLogout, onSettings, onH
       if (k === paletteKey || (captureF1 && k === 'F1')) { e.preventDefault(); e.stopPropagation(); openSearch(); return; }
       const { custom, shadowed } = live.current.keyIndex;
       const hit = custom.get(k);
-      if (hit?.action) { e.preventDefault(); e.stopPropagation(); if (live.current.open !== null || live.current.overflowOpen) close(); hit.action(); return; }
+      if (hit?.action) { e.preventDefault(); e.stopPropagation(); if (live.current.open !== null || live.current.overflowOpen) close(); recordUsage('shortcut', menuKey(hit.path, hit.stat ?? hit.label)); hit.action(); return; }
       if (shadowed.has(k)) { e.preventDefault(); e.stopPropagation(); }
     };
     const onOpen = () => openSearch();

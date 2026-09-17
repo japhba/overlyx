@@ -12,12 +12,16 @@ import type { EditorView } from 'prosemirror-view';
 import { referenceTargets, type ReferenceOptions } from '../editor/references';
 import { editorContext } from '../editor/context';
 import { diffLines } from './diff';
+import { recordUsage, dialogKey } from '../usage';
 
 export function Dialog({ title, onClose, children, buttons, wide }: { title: string; onClose: () => void; children: ComponentChildren; buttons?: ComponentChildren; wide?: boolean }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  // usage statistics: the dialog's kind, whether its primary button was used, how long it was open (usage.ts)
+  const usage = useRef({ key: dialogKey(title), opened: performance.now(), applied: false });
+  useEffect(() => () => { const u = usage.current; recordUsage('dialog', u.key, { ok: u.applied, dt: performance.now() - u.opened, where: 'dialog' }); }, []);
   useLayoutEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const box = boxRef.current!;
@@ -47,7 +51,7 @@ export function Dialog({ title, onClose, children, buttons, wide }: { title: str
       <div class={'dialog' + (wide ? ' wide' : '')} ref={boxRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <h2 id={titleId}>{title}</h2>
         <div class="body">{children}</div>
-        <div class="buttons">{buttons}<button class="btn" onClick={onClose}>Close</button></div>
+        <div class="buttons" onClickCapture={e => { if ((e.target as HTMLElement).closest?.('button.primary')) usage.current.applied = true; }}>{buttons}<button class="btn" onClick={onClose}>Close</button></div>
       </div>
     </div>
   );

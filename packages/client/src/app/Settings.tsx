@@ -16,7 +16,7 @@ import { setThemePref, useTheme, type ThemePref } from './theme';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import { Dialog } from './Dialogs';
 
-const SECTIONS = [['editor', 'Editor'], ['ai', 'AI assistance'], ['appearance', 'Appearance'], ['account', 'Account']] as const;
+const SECTIONS = [['editor', 'Editor'], ['ai', 'AI assistance'], ['appearance', 'Appearance'], ['privacy', 'Privacy'], ['account', 'Account']] as const;
 export type SettingsSection = (typeof SECTIONS)[number][0];
 
 const Row = ({ label, children }: { label: string; children: ComponentChildren }) => <div class="row"><label>{label}</label>{children}</div>;
@@ -61,7 +61,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
 
-  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath', label: string, hint: string) => (
+  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'usageStats', label: string, hint: string) => (
     <label class="pref"><input type="checkbox" data-pref={key} checked={p[key]} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
   );
   const toggleRecopy = async (u: AdminUser) => {
@@ -111,6 +111,11 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             {THEMES.map(([v, label, hint]) => (
               <label class="pref" key={v}><input type="radio" name="ol-theme" data-theme-pref={v} checked={themeChoice === v} onChange={() => setThemePref(v)} /><span>{label}{hint && <span class="sub">{hint}</span>}</span></label>
             ))}
+          </>}
+          {section === 'privacy' && <>
+            <h3>Usage statistics</h3>
+            {check('usageStats', 'Send anonymous usage statistics', 'Which menu entries, buttons, shortcuts and dialogs are used, and which of them do nothing, are undone right away or end in an error message — so that confusing parts of the editor can be found and fixed.')}
+            <div class="sub" data-setting="usage-what">What is sent: the kind of action (for example “Edit ▸ Text Style ▸ Bold”, “toolbar m-frac”, “Ctrl+Shift+K unbound”, “Citation dialog dismissed”), where it happened (text, formula, table, dialog), the template of an error message with its data removed, the kind of screen, and a random id for this page load. Never your name or account, document or project names, text, formulas or file names — quoted strings, file names and numbers are removed before anything leaves the browser, and again on the server. The browser’s Global Privacy Control signal switches it off as well. Kept in this browser.</div>
           </>}
           {section === 'account' && <>
             <h3>Signed in</h3>
