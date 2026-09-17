@@ -184,6 +184,10 @@ blend.
   after the last change (or `Ctrl+S`), and a conflict check — if the file changed on the server
   meanwhile (someone else, git) the save is refused and you choose between the server's
   version and yours. Viewers get it read-only. `+ File` in the file browser creates one.
+* **Presentation mode**: *View ▸ Presentation mode* (Shift+F11, rebindable) shows the document alone —
+  menu bar, all toolbars (the docked contextual ones too), status bar, rulers and side panels are hidden,
+  the page keeps its layout and stays editable; Esc leaves, a hint in the corner says so for a moment.
+  One module for both shells (`app/presentation.ts`, `html[data-presenting]` in styles.css).
 * **Dark mode**: follows the system preference by default; the sun/moon button in the menu bar
   flips it (remembered in this browser), *View ▸ Theme ▸ Follow the system* goes back to the OS
   setting. In VS Code the same button sits in the editor's top bar next to the WYSIWYG / TeX /

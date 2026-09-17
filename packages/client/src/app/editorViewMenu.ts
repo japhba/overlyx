@@ -3,6 +3,7 @@ import type { MenuDef, MenuEntry } from './MenuBar';
 import type { ToolbarId, ToolbarMode } from './toolbars';
 import { editorContext } from '../editor/context';
 import * as C from '../editor/commands';
+import { isPresenting, togglePresentation, PRESENTATION_KEY } from './presentation';
 
 export interface ViewMenuContext {
   hostItems: MenuEntry[]; themeItems: MenuEntry[]; hostToolbars: MenuEntry[];
@@ -24,6 +25,8 @@ export function editorViewMenu({ hostItems, themeItems, hostToolbars, combined, 
       { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => editorContext.ui?.zoom(-1) },
       { label: 'Reset zoom', action: () => editorContext.ui?.zoom(0) },   // Ctrl+0 is Part now (Edit ▸ Paragraph style); rebindable in the palette
       { label: 'Ruler', checked: showRuler, action: () => setShowRuler(r => !r) },
+      // the document alone: menu bar, toolbars, status bar, rulers and panels hidden; Esc leaves (app/presentation.ts)
+      { label: 'Presentation mode', shortcut: PRESENTATION_KEY, checked: isPresenting(), action: togglePresentation },
       ...themeItems,
       { label: 'Toolbars ▸', sub: [
         // the LyX toolbar set (stdtoolbars.inc); the contextual ones are docked at the bottom of the window

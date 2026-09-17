@@ -3,6 +3,7 @@ import { documentMenus } from '@client/app/documentMenus';
 import { editorViewMenu } from '@client/app/editorViewMenu';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
 import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom } from '@client/app/shellutil';
+import { usePresentation } from '@client/app/presentation';
 import { referenceTransaction } from '@client/editor/references';
 import { inkToolbar } from '@client/app/inkToolbar';
 import { StatsDialog } from '@client/app/StatsDialog';
@@ -150,6 +151,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   useEffect(() => { localStorage.setItem('ol.toolbars', JSON.stringify(toolbars)); }, [toolbars]);
   useEffect(() => subscribePrefs(setPrefsState), []);
   useEffect(() => applyEditorZoom(zoom), [zoom]);
+  usePresentation();   // View ▸ Presentation mode: Shift+F11 toggles, Esc leaves
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.vscode.combined', combined ? '1' : '0'); }, [combined]);
   useEffect(() => { try { localStorage.setItem('ol.vscode.comments', showComments ? '1' : '0'); } catch { /* ignore */ } }, [showComments]);
   useEffect(() => { const l = (f: LyxMathField | null) => { setMathField(f); editorContext.mathField = f; }; mathFocusListeners.add(l); return () => { mathFocusListeners.delete(l); }; }, []);

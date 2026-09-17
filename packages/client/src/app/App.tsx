@@ -20,6 +20,7 @@ import { GuestCallout } from './Guest';
 import { GitDialog } from './Git';
 import { MenuBar, openPalette, PALETTE_LABEL, PALETTE_DEFAULT, type MenuDef } from './MenuBar';
 import { setThemePref, useTheme } from './theme';
+import { usePresentation } from './presentation';
 import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
 import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom } from './shellutil';
@@ -281,6 +282,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [viewOnly, setViewOnly] = useState(false);
   // LyX toolbars: standard / extra always (unless hidden), math / table / review on, off or automatic (LyX's "auto")
   const { pref: themePref } = useTheme();
+  usePresentation();   // View ▸ Presentation mode: Shift+F11 toggles, Esc leaves
   // per-browser preferences (spell checking, AI assistance) and whether the server can answer AI requests
   const [prefs, setPrefsState] = useState<Prefs>(getPrefs);
   useEffect(() => subscribePrefs(setPrefsState), []);
