@@ -9,7 +9,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { paramMap, unquote } from '@overlyx/core';
 import type { MenuItem } from './contextmenu';
 import { editorContext, viewDocDir, viewProject } from './context';
-import { insertImageFiles, readClipboardImages } from './imagepaste';
+import { clipboardMenuItems, selectionCovers, MOD } from './clipmenu';
 import * as C from './commands';
 import { changeAt, resolveChange } from './plugins/changes';
 import { fileUrl, graphicsUrl } from '../api';
@@ -37,7 +37,6 @@ function setParam(view: EditorView, pos: number, node: PMNode, key: string, valu
 }
 
 const isMac = /Mac/.test(navigator.platform);
-const MOD = isMac ? '⌘' : 'Ctrl';
 
 export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: { word: string; from: number; to: number; suggestions: string[] }): MenuItem[] {
   const state = view.state;
@@ -50,7 +49,9 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
     }
     const sel = state.selection;
     if (target) {
-      if (!(sel instanceof NodeSelection && sel.from === target.pos)) view.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, target.pos)));
+      // a formula / inset that lies inside the selection (an equation selected whole, text dragged across
+      // one): the menu acts on that selection — otherwise the node under the pointer is selected
+      if (!selectionCovers(sel, target.pos, target.node.nodeSize)) view.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, target.pos)));
     } else if (sel.empty || coords.pos < sel.from || coords.pos > sel.to) {
       try { view.dispatch(state.tr.setSelection(TextSelection.near(state.doc.resolve(coords.pos)))); } catch { /* ignore */ }
     }
@@ -137,6 +138,11 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
         { label: 'Export as PNG…', action: () => window.open(graphicsUrl(project, rel, 2400) + '&download=1', '_blank') },
         { sep: true },
       );
+    } else if (node.type.name === 'math_inline' || node.type.name === 'math_display') {
+      // a right-click on a formula's row outside the field (its margins, a static rendering): the formula's own
+      // entries (nodeviews/math.ts — numbering, label, environment, conversion), Cut / Copy / Paste follow below
+      const nv = (view.nodeDOM(pos) as any)?.pmViewDesc?.spec as { formulaMenu?: () => MenuItem[] } | undefined;
+      if (nv?.formulaMenu) items.push(...nv.formulaMenu(), { sep: true });
     } else if (node.type.name === 'macro') {
       items.push({ label: 'Math macro definition', info: true }, { label: 'Delete macro definition', action: () => { view.dispatch(view.state.tr.delete(pos, pos + node.nodeSize)); } }, { sep: true });
     } else if (node.type.name === 'inset') {
@@ -165,16 +171,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
   // generic editing: clipboard and AI first, then formatting, structure, insertion
   const hasSel = !view.state.selection.empty;
   const prefs = getPrefs();
-  items.push(
-    { label: 'Cut', shortcut: MOD + '+X', disabled: !hasSel, action: () => { view.focus(); document.execCommand('cut'); } },
-    { label: 'Copy', shortcut: MOD + '+C', disabled: !hasSel, action: () => { view.focus(); document.execCommand('copy'); } },
-    { label: 'Paste', shortcut: MOD + '+V', action: () => {
-      view.focus();
-      const pasteText = () => navigator.clipboard?.readText().then(t => { if (t) view.dispatch(view.state.tr.insertText(t)); }).catch(() => editorContext.notify?.('Use ' + MOD + '+V to paste', 'error'));
-      readClipboardImages().then(imgs => { if (imgs.length) void insertImageFiles(view, imgs); else void pasteText(); }).catch(() => void pasteText());
-    } },
-    { sep: true },
-  );
+  items.push(...clipboardMenuItems(view), { sep: true });
   if (prefs.aiRewrite) {
     items.push(
       { label: hasSel ? 'Rewrite selection with AI…' : 'Write here with AI…', shortcut: REWRITE_KEY, action: () => openRewrite(view) },
@@ -182,9 +179,10 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
     );
   }
   if (hasSel) {
+    const formulaSelected = view.state.selection instanceof NodeSelection && /^math_/.test(view.state.selection.node.type.name);
     items.push(
       { label: 'Comment on this', shortcut: MOD + '+Alt+C', action: run(C.insertComment) },
-      { label: 'Turn into a formula', shortcut: MOD + '+M', action: () => C.insertMath(false)(view) },
+      ...(formulaSelected ? [] : [{ label: 'Turn into a formula', shortcut: MOD + '+M', action: () => C.insertMath(false)(view) }]),
       { sep: true },
     );
   }

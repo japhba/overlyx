@@ -207,10 +207,13 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
       return false;
     },
     handleClickOn(view, _pos, node, nodePos, event) {
-      // a statically rendered formula (touch devices: no hover to upgrade it): make it editable and focus it
+      // a click on a formula's row — its margins, or a statically rendered formula (touch devices: no hover
+      // to upgrade it) — enters the formula; a right-click is left to ProseMirror, which selects the formula
+      // whole for the menu that follows (editormenu.ts: the formula's entries, Cut / Copy / Paste)
       if (node.type.name === 'math_inline' || node.type.name === 'math_display') {
+        if (event.button !== 0) return false;
         const nv = (view.nodeDOM(nodePos) as any)?.pmViewDesc?.spec;
-        if (nv && !nv.mf && nv.ensureField) { const mf = nv.ensureField(); requestAnimationFrame(() => mf.focus()); return true; }
+        if (nv?.ensureField) { const mf = nv.ensureField(); requestAnimationFrame(() => mf.focus()); return true; }
         return false;
       }
       // Ctrl/Cmd+click: follow cross-references, hyperlinks and child documents
@@ -232,8 +235,7 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
         return false;
       },
       contextmenu(view, ev) {
-        const t = ev.target as HTMLElement;
-        if (t.closest?.('math-field')) return false;   // the field shows its own menu
+        // (a formula field shows its own menu and stops the event before it gets here — nodeviews/math.ts)
         if (ev.shiftKey) return false;                  // Shift+right-click: the browser's own menu
         ev.preventDefault();
         // a misspelt word under the pointer: fetch the suggestions first (a few ms), then the menu

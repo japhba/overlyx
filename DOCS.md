@@ -459,7 +459,8 @@ blend.
   label width), Table settings (cell / column / row / table tabs incl. longtable), Document settings
   (class & options, page & margins, text layout, numbering & floats, fonts, branches, PDF properties,
   preamble, raw header), Graphics (scale, width/height, rotation, clipping, LaTeX options), math
-  Delimiters and Matrix insertion — all writing exactly the LyX parameters. Right-click menus on formulas, cross-references (go
+  Delimiters and Matrix insertion — all writing exactly the LyX parameters. Right-click menus on formulas (a formula inside the selection — an equation selected whole, text
+  dragged across one — gets that selection's Cut / Copy / Paste next to its own entries), cross-references (go
   to label, reference format), citations, hyperlinks, child documents, insets and tracked changes;
   `Ctrl/⌘+click` follows a reference or opens a child document (in place — the documents panel on
   the left is where one switches between the files of the project); *View ▸ Master + child documents in one

@@ -563,7 +563,9 @@ export class LyxMathField {
    * press always places the cursor, a drag always selects.
    */
   private press(ev: MouseEvent): void {
-    if (ev.button !== 0) return;
+    // a right (or middle) button: nothing of the browser's own — no caret moved into the formula's DOM, no
+    // focus change — so the document's selection (a selected equation, say) is still there for the menu
+    if (ev.button !== 0) { ev.preventDefault(); return; }
     if (ev.shiftKey && !this.focused && this.opts.onShiftClick) { ev.preventDefault(); this.opts.onShiftClick(ev); return; }
     ev.preventDefault();
     const old = this.cursor.clone();

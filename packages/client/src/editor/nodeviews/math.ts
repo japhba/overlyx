@@ -11,6 +11,7 @@ import { macroFromLyxLines, parseFormula, renderHullSource, numberedType, type H
 import { LyxMathField, renderStaticHtml, activeMathField, rowRectsOf } from '../lyxmath/field';
 import { macroTableFor, mathViews, macroVersion, macrosReady } from '../lyxmath/macrotable';
 import { showContextMenu, type MenuItem } from '../contextmenu';
+import { clipboardMenuItems, selectionCovers } from '../clipmenu';
 import { toggleMathDisplay, countLabelRefs, renameLabelRefs } from '../commands';
 import { editorContext, viewDocDir, viewProject } from '../context';
 import { getPrefs } from '../../prefs';
@@ -184,11 +185,29 @@ function dragOutOf(view: EditorView, getPos: () => number | undefined, ev: Mouse
   });
 }
 
-/** Common field wiring: context menu, mouse isolation from ProseMirror, keyboard passthrough. */
-function wire(f: LyxMathField, menu: () => MenuItem[]) {
+/**
+ * The selection's Cut / Copy / Paste (and the formula's LaTeX) when the formula at getPos lies inside the
+ * document's selection — an equation selected whole, text dragged across it — else null.
+ */
+function selectedFormulaItems(view: EditorView, getPos: () => number | undefined, f: LyxMathField): MenuItem[] | null {
+  const pos = getPos();
+  if (pos === undefined) return null;
+  const node = view.state.doc.nodeAt(pos);
+  if (!node || !selectionCovers(view.state.selection, pos, node.nodeSize)) return null;
+  return [...clipboardMenuItems(view), { label: 'Copy LaTeX', action: () => { void navigator.clipboard?.writeText(f.latex); } }];
+}
+
+/**
+ * Common field wiring: context menu, mouse isolation from ProseMirror, keyboard passthrough. The menu
+ * shows the formula's entries and then either the field's editing entries (insert, font, …) or —
+ * while the field has no cursor and the formula lies inside the document's selection (`selected`) —
+ * that selection's Cut / Copy / Paste, so a selected equation can be cut from a right-click on it.
+ */
+function wire(f: LyxMathField, menu: () => MenuItem[], selected?: () => MenuItem[] | null) {
   f.dom.addEventListener('contextmenu', (ev: MouseEvent) => {
     ev.preventDefault(); ev.stopPropagation();
-    showContextMenu(ev.clientX, ev.clientY, [...menu(), { sep: true }, ...commonMathMenu(f)]);
+    const sel = !f.hasFocus() && selected ? selected() : null;
+    showContextMenu(ev.clientX, ev.clientY, [...menu(), { sep: true }, ...(sel ?? commonMathMenu(f))]);
   });
   f.dom.addEventListener('mousedown', ev => { ev.stopPropagation(); });
   f.dom.addEventListener('keydown', (ev: KeyboardEvent) => {
@@ -297,14 +316,18 @@ export class MathInlineView implements NodeView {
     this.field = f;
     this.dom.replaceChildren(f.dom);
     this.staticEl = null;
-    wire(f, () => [
-      { label: 'Inline formula', info: true },
-      { label: 'Convert to display formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
-      { label: 'Delete formula', action: () => deleteFormula(this.view, this.getPos) },
-    ]);
+    wire(f, () => this.formulaMenu(), () => selectedFormulaItems(this.view, this.getPos, f));
     focusIfPending(f, this.getPos);
   }
   ensureField(): LyxMathField { this.upgrade(); return this.field!; }
+  /** the formula's own menu entries (also the editor's right-click menu on the formula's row, editormenu.ts) */
+  formulaMenu(): MenuItem[] {
+    return [
+      { label: 'Inline formula', info: true },
+      { label: 'Convert to display formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
+      { label: 'Delete formula', action: () => deleteFormula(this.view, this.getPos) },
+    ];
+  }
 
   private commit(latex: string) {
     if (this.updating) return;
@@ -474,7 +497,7 @@ export class MathDisplayView implements NodeView {
     this.field = f;
     if (this.staticEl) { this.staticEl.replaceWith(f.dom); this.staticEl = null; } else this.dom.insertBefore(f.dom, this.metaEl);
     this.ro?.observe(f.dom);
-    wire(f, () => this.menu());
+    wire(f, () => this.formulaMenu(), () => selectedFormulaItems(this.view, this.getPos, f));
     focusIfPending(f, this.getPos);
   }
   ensureField(): LyxMathField { this.upgrade(); return this.field!; }
@@ -561,7 +584,8 @@ export class MathDisplayView implements NodeView {
 
   private hull() { return this.field ? this.field.hull : parseFormula(this.lastLatex, macroTableFor(this.view, this.getPos()).table); }
 
-  private menu(): MenuItem[] {
+  /** the formula's own menu entries (also the editor's right-click menu on the formula's row, editormenu.ts) */
+  formulaMenu(): MenuItem[] {
     const h = this.hull();
     const numbered = numberedType(h);
     const labels = h.labels.filter(Boolean) as string[];
@@ -693,7 +717,7 @@ export class MacroView implements NodeView {
     this.dom.append(this.nameEl, this.field.dom);
     mathViews.add(this);
     if (def?.display) { const d = document.createElement('span'); d.className = 'macro-display'; d.textContent = ' (shown as: ' + def.display + ')'; d.contentEditable = 'false'; this.dom.append(d); }
-    wire(this.field, () => [{ label: 'Math macro definition', info: true }, { label: 'Delete macro definition', action: () => deleteFormula(this.view, this.getPos) }]);
+    wire(this.field, () => [{ label: 'Math macro definition', info: true }, { label: 'Delete macro definition', action: () => deleteFormula(this.view, this.getPos) }], () => selectedFormulaItems(this.view, this.getPos, this.field));
     this.nameEl.addEventListener('mousedown', (ev) => { ev.preventDefault(); const pos = this.getPos(); if (pos !== undefined) { this.view.dispatch(this.view.state.tr.setSelection(NodeSelection.create(this.view.state.doc, pos))); this.view.focus(); } });
   }
   private parse() { try { return macroFromLyxLines(JSON.parse(this.node.attrs.lines)); } catch { return null; } }
