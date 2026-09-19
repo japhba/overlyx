@@ -10,6 +10,7 @@
  * the surrounding content, and is left for a human or the "Escalate to AI" repair instead.
  */
 import { MANAGED_BEGIN, MANAGED_END, SETTINGS_PREFIX, readSettings, maskComments } from './preamble.ts';
+import { maskOpaque } from './lint.ts';
 
 export interface HealthIssue {
   code: 'managed-block-duplicated-begin' | 'managed-block-duplicated-end' | 'managed-block-missing-end'
@@ -50,9 +51,11 @@ export function checkTexHealth(text: string, opts: { isFragment?: boolean } = {}
     if (beginDoc !== 1 || endDoc !== 1) issues.push({ code: 'document-boundary', message: `Found ${beginDoc} \\begin{document} and ${endDoc} \\end{document} (expected exactly one each).`, severity: 'error', fixable: false });
   }
 
+  // braces: on the text with comments, \verb, URL arguments and verbatim-like environments blanked (lint.ts) — a `%` or `}` in a URL is literal
+  const opaque = maskOpaque(text);
   let depth = 0;
-  for (let i = 0; i < masked.length; i++) {
-    const c = masked[i];
+  for (let i = 0; i < opaque.length; i++) {
+    const c = opaque[i];
     if (c === '\\') { i++; continue; }   // an escaped char (incl. \{ \}) is literal, not a group delimiter
     if (c === '{') depth++;
     else if (c === '}') depth--;

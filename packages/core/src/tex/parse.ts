@@ -188,8 +188,13 @@ const NOTE_HEADER = /^% @(note|comment|greyedout)(?:\s+(open|collapsed))?\s*$/;
 /** the closer of a note block (`%% @end`); older files have none — a note then ends at the first line that is not `%% …` */
 const NOTE_END = /^% @end\s*$/;
 
+/** the 1-based line of the scanner's position within its text (for messages) */
+function lineAt(s: Scanner): number { let n = 1; for (let i = 0; i < s.pos && i < s.s.length; i++) if (s.s.charCodeAt(i) === 10) n++; return n; }
+
 class BodyParser {
   warnings: string[] = [];
+  /** lines of the file before the body text (so warnings name the file's line) */
+  lineBase = 0;
   /** preamble material found in the body (agents type it there): collected, re-homed by parseTex */
   absorbPreamble = false;
   absorbedPreamble: string[] = [];
@@ -1250,7 +1255,8 @@ class BodyParser {
       this.pushInset(ctx, st, { type: 'Text', name, arg, params: [], status: 'open', paragraphs: pars });
       return;
     }
-    // unknown environment: ERT around its content
+    // unknown environment: ERT around its content — and a note for the user (the source pane shows it)
+    this.warnings.push(`\\begin{${env}} on line ${this.lineBase + lineAt(s)} is not an environment OverLyX knows: kept as raw LaTeX`);
     let raw = `\\begin{${env}}`;
     for (;;) {
       const c = s.peekChar();
@@ -1658,6 +1664,7 @@ export function parseTex(text: string, opts: ParseTexOptions = {}): ParseTexResu
   const quotes = setStr('quotes_style') ?? masterValue('quotes_style') ?? 'english';
   const parser = new BodyParser(dc, unicode, langs, facts, { language, quotes });
   parser.absorbPreamble = split.hasDocument && /\\newtheorem/.test(body);
+  { const at = text.indexOf(body); if (at > 0) { let n = 0; for (let i = 0; i < at; i++) if (text.charCodeAt(i) === 10) n++; parser.lineBase = n; } }
   parser.readFile = opts.readFile;
   const pars = parser.parseBody(body);
   warnings.push(...parser.warnings);

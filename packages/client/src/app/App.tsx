@@ -24,7 +24,7 @@ import { setThemePref, useTheme } from './theme';
 import { usePresentation } from './presentation';
 import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
-import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom } from './shellutil';
+import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, SidebarGrip, restoreSidebarWidths } from './shellutil';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
 import { Versions } from './Versions';
@@ -131,25 +131,6 @@ function parseHash(): { id: string | null; goto: string | null; heading: number 
 const NAV_BACK_ID = 'Navigate ▸ Back', NAV_FORWARD_ID = 'Navigate ▸ Forward';
 const NAV_BACK_KEY = 'Ctrl+Alt+←', NAV_FORWARD_KEY = 'Ctrl+Alt+→';
 
-/** Drag handle beside a sidebar: sets --left-width / --right-width on the root (kept per browser). */
-function SidebarGrip({ side }: { side: 'left' | 'right' }) {
-  return (
-    <div class={'sidebar-grip ' + side} title="Drag to resize" onPointerDown={(e) => {
-      e.preventDefault();
-      const move = (ev: PointerEvent) => {
-        const w = Math.round(Math.max(180, Math.min(window.innerWidth * 0.6, side === 'left' ? ev.clientX : window.innerWidth - ev.clientX)));
-        document.documentElement.style.setProperty(`--${side}-width`, w + 'px');
-      };
-      const up = () => {
-        window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
-        try { localStorage.setItem('ol.' + side + 'w', document.documentElement.style.getPropertyValue(`--${side}-width`)); } catch { /* ignore */ }
-      };
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
-    }} />
-  );
-}
-
 function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: boolean; onSignIn: () => void; onLogout: () => void }) {
   // what the hash shows (one project, one file at a time): a document, "text:"/"pdf:" files, or
   // "raw:<document>" — the document beside its LaTeX source
@@ -157,6 +138,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const docId = hashId ? hashId.replace(/^raw:/, '') : null;
   const rawSplit = !!hashId && hashId.startsWith('raw:');
   const [sourceOnly, setSourceOnly] = useState(false);
+  useEffect(() => { restoreSidebarWidths(); }, []);
   const viewMode = rawSplit ? (sourceOnly ? 'tex' : 'split') : 'wysiwyg';
   const changeViewMode = (mode: ViewMode) => { setSourceOnly(mode === 'tex'); if (docId) location.hash = '#/' + (mode === 'wysiwyg' ? '' : 'raw:') + docId; };
   /** The Source switches (Ctrl+Alt+S, the right rail, the panel tabs, the View menu): the LaTeX source beside the document. */

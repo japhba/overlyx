@@ -11,6 +11,8 @@ export type { ImportLyxOptions, ImportLyxResult } from './import.ts';
 export { splitDocument, readSettings, settingsFromHeader, settingsLine, preambleFacts, providedFeatures, makeHeaderLines, MANAGED_BEGIN, MANAGED_END, SETTINGS_PREFIX } from './preamble.ts';
 export { Scanner } from './scanner.ts';
 export { checkTexHealth, repairTex } from './health.ts';
+export { lintTex, maskOpaque } from './lint.ts';
+export type { LintIssue } from './lint.ts';
 export type { HealthIssue } from './health.ts';
 export { texHeadings, headingPlainText } from './headings.ts';
 export type { TexHeading } from './headings.ts';

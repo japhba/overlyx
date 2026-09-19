@@ -27,12 +27,12 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode, ResolvedPos } from 'prosemirror-model';
 import type * as Y from 'yjs';
-import { writeLyx, pmToLyxBody, checkTexHealth, type HealthIssue } from '@overlyx/core';
+import { writeLyx, pmToLyxBody, checkTexHealth, lintTex } from '@overlyx/core';
 import { api } from '../api';
 import { highlightTexBlocks, highlightLineList } from './texhighlight';
 import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask } from './codearea';
 import { findSourceLine, findSourceOffset, locateSourceLine, locateSourceCaret, type LocateBlock, type CursorContext } from './sourcelocate';
-import { spanIndexAt, spansFit, editRange, mapOffset, mapSpans, sourceOffsetInSpan, locateInSpan, unbalancedBraceAt, lineOfOffset, offsetOfLine, type Span } from './sourcemap';
+import { spanIndexAt, spansFit, editRange, mapOffset, mapSpans, sourceOffsetInSpan, locateInSpan, lineOfOffset, offsetOfLine, type Span } from './sourcemap';
 import { setMirrorCaret } from '../editor/plugins/mirrorcaret';
 import { openSourceRewrite } from '../editor/ai/rewrite';
 import { getPrefs } from '../prefs';
@@ -165,13 +165,12 @@ function storedWidth(): number {
   try { const v = Number(localStorage.getItem('ol.source.w')); return v >= 280 ? v : 520; } catch { return 520; }
 }
 
-/** what holds an apply back, with the line of the problem when it has one */
-function describeIssue(issue: HealthIssue, text: string): { note: string; at: number | null } {
-  if (issue.code === 'brace-imbalance') {
-    const at = unbalancedBraceAt(text, commentMask(text));
-    return { note: issue.message.replace(/ — the document may fail to compile\.$/, ''), at: at >= 0 ? at : null };
-  }
-  return { note: issue.message, at: null };
+/** a problem or note about the source, with where it is (null: nowhere in particular) */
+interface Remark { note: string; at: number | null }
+/** the offset a message names ("… on line 12 …"), when it names one */
+function offsetNamed(text: string, message: string): number | null {
+  const m = /\bline (\d+)\b/.exec(message);
+  return m ? offsetOfLine(text, Number(m[1]) - 1) : null;
 }
 
 /** The LaTeX source beside the document (Ctrl+Alt+S / the "[raw]" tab), with synchronized scrolling, cursor and selection, and live apply. */
@@ -204,8 +203,10 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   /** live apply: what happened to the last edited source */
   const [applied, setApplied] = useState<'idle' | 'waiting' | 'applying' | 'ok' | 'held' | 'error'>('idle');
   const [applyNote, setApplyNote] = useState('');
-  /** where in the source the problem holding the apply back is (the "go to" link) */
-  const [problemAt, setProblemAt] = useState<number | null>(null);
+  /** what holds the live apply back (the linter's findings, a server error), each with its place */
+  const [problems, setProblems] = useState<Remark[]>([]);
+  /** what the parser noted about the last applied source (constructs kept as raw LaTeX) */
+  const [notes, setNotes] = useState<Remark[]>([]);
   const applyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
   const pre = useRef<HTMLPreElement>(null);
@@ -411,20 +412,26 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     if (!target) return false;
     if (inFlight.current) { try { await inFlight.current; } catch { /* reflected below */ } return apply(force); }
     const current = textRef.current;
-    const issues = checkTexHealth(current, { isFragment: fragmentRef.current }).filter(i => i.severity === 'error' || i.code === 'brace-imbalance');   // a half-typed {…} would turn into ERT
-    if (issues.length && !force) { const d = describeIssue(issues[0], current); setApplied('held'); setApplyNote(d.note); setProblemAt(d.at); return false; }
-    setApplied('applying'); setProblemAt(null);
+    // the structure must be sound first (lintTex: braces, environments, $ and \[ \] with their lines; the health
+    // check: the document's boundaries and the managed block) — a half-typed \begin{…} would turn the rest into ERT
+    const found: Remark[] = [
+      ...checkTexHealth(current, { isFragment: fragmentRef.current }).filter(i => i.severity === 'error').map(i => ({ note: i.message, at: null })),
+      ...lintTex(current).map(i => ({ note: i.message, at: i.offset })),
+    ];
+    if (found.length && !force) { setApplied('held'); setApplyNote(found[0].note); setProblems(found); return false; }
+    setApplied('applying'); setProblems([]);
     try {
       const request = api.applySource(target.docId, current);
       inFlight.current = request;
       const r = await request;
       if (textRef.current !== current) { setApplied('waiting'); scheduleApply(); return false; }   // typed on meanwhile: apply again
       markDirty(false);
-      setApplied('ok'); setApplyNote(r.warnings.length ? `${r.warnings.length} warning${r.warnings.length > 1 ? 's' : ''}: ${r.warnings[0]}` : '');
+      setApplied('ok'); setApplyNote(r.warnings.length ? `${r.warnings.length} note${r.warnings.length > 1 ? 's' : ''}` : '');
+      setNotes(r.warnings.map(w => ({ note: w, at: offsetNamed(current, w) })));
       void refreshMap(current);
       return true;
     } catch (e) {
-      setApplied('error'); setApplyNote((e as Error).message); setProblemAt(null);
+      setApplied('error'); setApplyNote((e as Error).message); setProblems([{ note: (e as Error).message, at: null }]);
       return false;
     } finally { inFlight.current = null; }
   };
@@ -434,24 +441,33 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     applyTimer.current = setTimeout(() => { applyTimer.current = null; void apply(); }, 1200);
   };
   useEffect(() => () => { if (applyTimer.current) clearTimeout(applyTimer.current); }, []);
-  const revert = () => { if (applyTimer.current) clearTimeout(applyTimer.current); markDirty(false); setApplied('idle'); setProblemAt(null); void load(); };
+  const revert = () => { if (applyTimer.current) clearTimeout(applyTimer.current); markDirty(false); setApplied('idle'); setProblems([]); setNotes([]); void load(); };
   const onBlur = () => { focused.current = false; setHasFocus(false); setSel(null); if (pendingReload.current && !dirtyRef.current) { pendingReload.current = false; void load(); } };
   /** the text was edited (typed, an editing key, undo, an AI rewrite): the map follows the edit, the document a moment later */
   const changed = (el: HTMLTextAreaElement, record = true) => {
     const prev = textRef.current, v = el.value;
     if (record) undo.current.record({ value: v, start: el.selectionStart, end: el.selectionEnd });
     if (spansRef.current) spansRef.current = mapSpans(spansRef.current, editRange(prev, v));
-    textRef.current = v; setText(v); markDirty(true); updateSel(); scheduleApply();
+    textRef.current = v; setText(v); markDirty(true); setNotes([]); updateSel(); scheduleApply();
   };
-  const gotoProblem = () => {
+  /** put the caret at a remark's place and show that line */
+  const gotoOffset = (at: number) => {
     const el = ta.current;
-    if (!el || problemAt === null) return;
+    if (!el) return;
+    const off = Math.min(at, el.value.length);
     el.focus();
-    try { el.setSelectionRange(problemAt, problemAt); } catch { /* ignore */ }
-    const line = pre.current?.querySelectorAll<HTMLElement>('.l')[lineOfOffset(el.value, problemAt)];
+    try { el.setSelectionRange(off, off); } catch { /* ignore */ }
+    const line = pre.current?.querySelectorAll<HTMLElement>('.l')[lineOfOffset(el.value, off)];
     if (line) scrollSrc(Math.max(0, line.offsetTop - el.clientHeight / 3));
     updateSel();
   };
+  /** the remarks of the foot: each with a "go to line" link when it has a place */
+  const remarkList = (list: Remark[], max = 3) => (
+    <>
+      {list.slice(0, max).map((r, i) => <span class="item" key={i}>{i > 0 ? ' · ' : ''}{r.note}{r.at !== null && <button class="goto" onClick={() => gotoOffset(r.at!)}>go to line {lineOfOffset(text, r.at) + 1}</button>}</span>)}
+      {list.length > max && <span class="item"> · {list.length - max} more</span>}
+    </>
+  );
 
   /* ---- the split view: the two panes scroll together — the paragraph at the top of one, and how far it is scrolled into, sets the other */
   const lineEls = () => Array.from(pre.current?.querySelectorAll<HTMLElement>('.l') ?? []);
@@ -547,8 +563,8 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   }, [target?.docId]);
 
   const name = target?.docId.split('/').pop() ?? '';
-  const problem = applied === 'held' || applied === 'error' ? applyNote : '';
-  const problemLine = problemAt !== null ? lineOfOffset(text, problemAt) + 1 : null;
+  const showProblems = (applied === 'held' || applied === 'error') && problems.length > 0;
+  const showNotes = !showProblems && !dirty && notes.length > 0;
   return (
     <div class="source-pane right" style={{ width: width + 'px' }}>
       <div class="grip v" title="Drag to resize" onPointerDown={startResizeW} />
@@ -603,9 +619,9 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
             if (s) { e.preventDefault(); applySnapshot(el, s); changed(el); }
           }} />
       </div>
-      <div class={'hint' + (problem ? ' problem' : '')}>
-        {problem
-          ? <>{'Not applied: ' + problem}{problemLine !== null && <button class="goto" onClick={gotoProblem}>go to line {problemLine}</button>}</>
+      <div class={'hint' + (showProblems ? ' problem' : showNotes ? ' notes' : '')}>
+        {showProblems ? <>{'Not applied: '}{remarkList(problems)}</>
+          : showNotes ? <>{'Applied — '}{remarkList(notes)}</>
           : dirty ? 'Edits are applied to the document as you type (once the LaTeX is well-formed; Ctrl+Enter applies at once).' : 'The LaTeX source beside the document: cursor, selection and scrolling are mirrored; edit here and the document follows.'}
       </div>
     </div>

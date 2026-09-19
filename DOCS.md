@@ -214,6 +214,12 @@ blend.
   `prefs.darkTone` → `data-tone` on html, tokens in styles.css). Text and formulas are white on a near-black page; everything in
   `packages/client/src/styles.css` goes through the theme tokens at the top of the file (light values
   on `:root`, dark ones on `html[data-theme="dark"]`, set by `app/theme.ts`).
+* **Lists, Google-Docs style** (`editor/commands.ts leaveList`, `editor/plugins/mdrules.ts`): `- ` or `* ` at
+  the start of a paragraph starts a bullet list, `1. ` a numbered one, `## ` a heading (Backspace right
+  after brings the marker back); Enter continues a list, Enter on an *empty* item ends it, and Backspace
+  at the start of an item takes the bullet away and keeps the text instead of joining the paragraphs — a
+  nested item moves out one level first. Tab / Shift+Tab nest and unnest (`listIndent`), Alt+Enter always
+  starts a plain paragraph.
 * **Ruler**: a Google-Docs-style ruler above the page (*View ▸ Ruler*) with draggable margin
   handles sets the text width (also *View ▸ Text width*, `Ctrl+Alt+±`); double-click resets it.
 * **LyX math editor**: formulas are edited with our own port of LyX's mathed (`packages/core/src/math`:
@@ -304,9 +310,13 @@ blend.
   editor has no focus). The words around the cursor are matched (`app/sourcelocate.ts`) *within the
   paragraph's own range only*, so repeated phrases cannot mislead; the pane with the keyboard leads.
   Edits in the source are applied to the document as one types — parsed on the server and merged as a
-  diff — a moment after the last keystroke, held back while the LaTeX is unbalanced (`checkTexHealth`,
-  fragment-aware for child documents; the pane's foot names the problem and offers *go to line*),
-  `Ctrl+Enter` applies at once; the spans are carried through the edits typed so the mirroring keeps
+  diff — a moment after the last keystroke, held back while the LaTeX is structurally unsound: a
+  linter (core `tex/lint.ts lintTex`) finds the brace, `\begin`/`\end`, `$` or `\[ \]` without a
+  partner and names its line, with `%` comments, `\verb`, URL arguments and verbatim-like environments
+  blanked first (`maskOpaque`, also behind the health check's brace count) so a `%` in a URL is no
+  false alarm; `checkTexHealth` adds the document boundaries, fragment-aware for child documents. The
+  pane's foot lists the problems, each with *go to line*; after an apply it lists what the parser kept
+  as raw LaTeX (an unknown environment, with its line: `parseTex` warnings). `Ctrl+Enter` applies at once; the spans are carried through the edits typed so the mirroring keeps
   working meanwhile, and the source is regenerated from the document when the pane loses the focus,
   with the caret and the scroll position kept (mapped through the change; `Ctrl+Alt+S` toggles the pane).
   The menubar's right side names the project.
@@ -536,7 +546,10 @@ packages/server   Express + WebSocket (Yjs sync/awareness), SQLite persistence, 
 packages/client   Vite + Preact UI, ProseMirror editor, LyX math editor (editor/lyxmath, KaTeX), LyX keymap,
                   numbering/margin/change-tracking/find plugins
 packages/vscode   the same editor inside VS Code (a custom editor for .tex files): an extension host
-                  that parses/writes the file and a webview that imports the client's code (@client/*)
+                  that parses/writes the file and a webview that imports the client's code (@client/*);
+                  the outline is a panel inside the editor (the client's `app/Outline.tsx`: click to
+                  jump, ▲▼ move a section, ◀▶ promote / demote; the toolbar's outline button, `Ctrl+Alt+O`),
+                  the host's Structure tree view in the activity bar mirrors it
 * **Theorem environments**: a document's own `\newtheorem{definition}{Definition}` declarations
   become real layouts (`latex/layouts.ts applyDocumentTheorems`, aliased onto the AMS theorem
   styles by label, `Theorem` as fallback) — parsing, writing (the environment keeps its declared

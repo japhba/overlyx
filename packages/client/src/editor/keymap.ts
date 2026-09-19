@@ -13,7 +13,7 @@ import {
   paragraphBreak, paragraphBreakInverse, fontCommands, fontDefault, changeDepth, listIndent, insertMath, toggleMathDisplay, typeDollar,
   insertNewline, insertSpace, insertSpecial, insertERT, insertFootnote, insertNote, insertComment, selectInset, toggleInset,
   moveParagraph, deleteToParagraphEnd, setLayout, setKnownLayout, setParagraphAttrs, arrowIntoMath, setValueMark, insertHyphens, insertQuote, smartQuote, insertMarginal,
-} from './commands';
+ listExitBackspace } from './commands';
 import { editorContext } from './context';
 import { activeMathField } from './lyxmath/field';
 import { ATOMS } from './plugins/dragselect';
@@ -169,7 +169,8 @@ export function chordPlugin(): Plugin<string | null> {
   });
 }
 
-const backspace: Command = chainCommands(trackedDelete(-1), undoInputRule, deleteSelection, joinBackward, selectNodeBackward);
+// the marker typed for a markdown trigger comes back first (undoInputRule), then Backspace at the start of a list item leaves the list
+const backspace: Command = chainCommands(undoInputRule, listExitBackspace, trackedDelete(-1), deleteSelection, joinBackward, selectNodeBackward);
 const del: Command = chainCommands(trackedDelete(1), deleteSelection, joinForward, selectNodeForward);
 
 export function lyxKeymap(): Plugin {

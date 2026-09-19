@@ -86,6 +86,22 @@ test('"- ", "1. " and "## " at a paragraph start become a bullet, a numbered ite
   // "2. " and a dash mid-sentence are left alone
   await page.keyboard.type('and - not a list');
   await expect(pars.nth(5)).toHaveAttribute('data-layout', 'Standard');
+  // Google Docs: Enter on an empty item ends the list, Backspace at the start of an item takes the bullet away and keeps the text
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('- third point');
+  await expect(pars.nth(6)).toHaveAttribute('data-layout', 'Itemize');
+  await page.keyboard.press('Enter');
+  await expect(pars.nth(7)).toHaveAttribute('data-layout', 'Itemize');   // an empty item…
+  await page.keyboard.press('Enter');
+  await expect(pars.nth(7)).toHaveAttribute('data-layout', 'Standard');  // …Enter again: out of the list, no new paragraph
+  await expect(pars).toHaveCount(8);
+  await page.keyboard.type('after the list');
+  await pars.nth(6).click({ position: { x: 4, y: 8 } });
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Backspace');
+  await expect(pars.nth(6)).toHaveAttribute('data-layout', 'Standard');
+  await expect(pars.nth(6)).toHaveText('third point');
+  await expect(pars).toHaveCount(8);   // the paragraph was not joined to the previous one
   await expect.poll(() => readFileSync(`${DIR}/md.tex`, 'utf8'), { timeout: 15000 }).toMatch(/\\begin\{itemize\}\n\\item first point\n\\item second point\n\\end\{itemize\}/);
   expect(readFileSync(`${DIR}/md.tex`, 'utf8')).toContain('\\subsection{Heading here}');
 });

@@ -107,3 +107,29 @@ export function LayoutPicker({ layouts, onPick, onClose }: { layouts: { name: st
     </div>
   );
 }
+
+/** Drag handle beside a sidebar: sets --left-width / --right-width on the root (kept per browser). */
+export function SidebarGrip({ side }: { side: 'left' | 'right' }) {
+  return (
+    <div class={'sidebar-grip ' + side} title="Drag to resize" onPointerDown={(e) => {
+      e.preventDefault();
+      const move = (ev: PointerEvent) => {
+        const w = Math.round(Math.max(180, Math.min(window.innerWidth * 0.6, side === 'left' ? ev.clientX : window.innerWidth - ev.clientX)));
+        document.documentElement.style.setProperty(`--${side}-width`, w + 'px');
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+        try { localStorage.setItem('ol.' + side + 'w', document.documentElement.style.getPropertyValue(`--${side}-width`)); } catch { /* ignore */ }
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    }} />
+  );
+}
+
+/** The sidebar widths a SidebarGrip stored in this browser, applied again (call once when a shell mounts). */
+export function restoreSidebarWidths(): void {
+  for (const side of ['left', 'right'] as const) {
+    try { const w = localStorage.getItem('ol.' + side + 'w'); if (w && /^\d+px$/.test(w)) document.documentElement.style.setProperty(`--${side}-width`, w); } catch { /* ignore */ }
+  }
+}

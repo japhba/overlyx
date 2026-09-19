@@ -100,6 +100,8 @@ const kill = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gon
 process.on('exit', kill);
 
 let failed = false;
+/** a screenshot of the state a failure was found in (set once the page exists) */
+let shotOnFail = async () => {};
 try {
   await until(async () => (await fetch('http://127.0.0.1:' + PORT + '/json/version')).ok, 60000, 'the CDP endpoint');
   const browser = await chromium.connectOverCDP('http://127.0.0.1:' + PORT);
@@ -110,6 +112,7 @@ try {
   }, 60000, 'the workbench page');
   page.setDefaultTimeout(30000);
   const shot = async (name) => { await page.screenshot({ path: path.join(shots, name + '.png') }); log('screenshot', name); };
+  shotOnFail = () => shot('99-fail');
   log('workbench up');
 
   const dumpState = async () => {
@@ -213,7 +216,7 @@ try {
   log('view modes, ruler and imported macro refresh OK');
 
   /* ---- 3. type into the document, save with Ctrl+S, verify the .tex on disk ---- */
-  await editorFrame.click('text=are studied');
+  await editorFrame.locator('.lyx-par', { hasText: 'are studied' }).first().click({ position: { x: 4, y: 8 } });
   await page.keyboard.press('End');
   await page.keyboard.type(' Typed via the GUI test.');
   await until(async () => (await editorFrame.evaluate(() => document.body.innerText)).includes('Typed via the GUI test.'), 15000, 'typed text in the editor');
@@ -305,6 +308,7 @@ try {
   await browser.close().catch(() => {});
 } catch (e) {
   failed = true;
+  await shotOnFail().catch(() => {});
   throw e;
 } finally {
   kill();

@@ -2,7 +2,7 @@ import { MenuBar, openPalette, PALETTE_LABEL, type MenuDef, ThemeToggle } from '
 import { documentMenus } from '@client/app/documentMenus';
 import { editorViewMenu } from '@client/app/editorViewMenu';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
-import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom } from '@client/app/shellutil';
+import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, SidebarGrip, restoreSidebarWidths } from '@client/app/shellutil';
 import { usePresentation } from '@client/app/presentation';
 import { referenceTransaction } from '@client/editor/references';
 import { inkToolbar } from '@client/app/inkToolbar';
@@ -26,7 +26,7 @@ import type { HostToEditor, OutlineEntry } from '../shared/protocol';
 import { api, type DocMeta } from '@client/api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '@client/prefs';
 import { Toolbar } from '@client/app/Toolbar';
-import { buildOutline } from '@client/app/Outline';
+import { buildOutline, Outline, type OutlineItem } from '@client/app/Outline';
 import { Comments } from '@client/app/Comments';
 import { StatusBar, type Status } from '@client/app/StatusBar';
 import { SourcePane, cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
@@ -69,6 +69,10 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [message, setMessage] = useState<{ text: string; kind: 'info' | 'error' } | null>(null);
   const [marginMode, setMarginModeState] = useState(stored('ol.margin') === '1');
   const [showComments, setShowComments] = useState(stored('ol.vscode.comments') === '1');
+  // the outline as a panel inside the editor (the web client's Outline: click to jump, ▲▼ to move a section, ◀▶ to promote / demote) — shown unless hidden
+  const [showOutline, setShowOutline] = useState(stored('ol.vscode.outline') !== '0');
+  const [outline, setOutline] = useState<OutlineItem[]>([]);
+  const [activePos, setActivePos] = useState(0);
   const [tracking, setTracking] = useState(false);
   const [chord, setChord] = useState<string | null>(null);
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
@@ -154,6 +158,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   usePresentation();   // View ▸ Presentation mode: Shift+F11 toggles, Esc leaves
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.vscode.combined', combined ? '1' : '0'); }, [combined]);
   useEffect(() => { try { localStorage.setItem('ol.vscode.comments', showComments ? '1' : '0'); } catch { /* ignore */ } }, [showComments]);
+  useEffect(() => { try { localStorage.setItem('ol.vscode.outline', showOutline ? '1' : '0'); } catch { /* ignore */ } }, [showOutline]);
+  useEffect(() => { restoreSidebarWidths(); }, []);
   useEffect(() => { const l = (f: LyxMathField | null) => { setMathField(f); editorContext.mathField = f; }; mathFocusListeners.add(l); return () => { mathFocusListeners.delete(l); }; }, []);
   useEffect(() => { const l = () => setSelTick(t => t + 1); mathCursorListeners.add(l); return () => { mathCursorListeners.delete(l); }; }, []);
 
@@ -167,6 +173,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   }, 300), []);
   const postOutline = useMemo(() => debounce((v: EditorView) => {
     const items: OutlineEntry[] = buildOutline(v.state.doc, true, editorContext.meta?.secnumdepth ?? 3);
+    setOutline(items);
     vscode.postMessage({ type: 'outline', items });
   }, 300), []);
   const postSelection = useMemo(() => debounce((v: EditorView) => {
@@ -194,7 +201,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     const ch = changeAt(v.state, v.state.selection.from);
     setChangeInfo(ch ? describeChange(ch.type, ch.author, ch.time) : null);
     setSelTick(t => t + 1);
-    if (viewDocId(v) === docId) postSelection(v);
+    if (viewDocId(v) === docId) { postSelection(v); setActivePos(v.state.selection.from); }
     rerender();
   };
 
@@ -434,7 +441,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       find: () => setFindOpen(true),
       openDialog: (name, arg) => setDialog({ name, arg }),
       toggleTrackChanges: () => { void toggleTracking(); },
-      toggleOutline: () => hostCommand('outline'),
+      toggleOutline: () => setShowOutline(s => !s),
       toggleSource: () => setViewMode(mode => mode === 'wysiwyg' ? 'split' : 'wysiwyg'),
       toggleCombined: () => setCombined(value => !value),
       acceptAll: () => run(acceptAllChanges()),
@@ -498,7 +505,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     slots: {
       leading: [{ id: 'new', title: 'New document', icon: 'new', action: () => hostCommand('newFile') }, { id: 'open', title: 'Open', icon: 'open', action: () => hostCommand('openFile') }],
       navigation: [{ id: 'navback', title: 'Navigate back', icon: 'navback', action: () => hostCommand('back') }],
-      sidebars: [{ id: 'outline', title: 'OverLyX Structure', icon: 'outline', action: () => hostCommand('outline') }],
+      sidebars: [{ id: 'outline', title: 'Outline (sections: click to jump, move and promote / demote them)', icon: 'outline', action: () => setShowOutline(s => !s), active: showOutline }],
       tools: [{ id: 'ink', title: 'Draw in the margins', icon: 'ink', action: () => setInkMode(m => !m), active: inkMode }, { id: 'comments-panel', title: 'Comments', icon: 'notes', action: () => setShowComments(s => !s), active: showComments }],
       pdf: activeMeta?.master ? [{ id: 'pdfmaster', title: 'View master document', icon: 'viewmaster', action: () => vscode.postMessage({ type: 'openDoc', id: activeMeta.master! }) }] : [],
     },
@@ -528,7 +535,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     editorViewMenu({ combined, setCombined, marginMode, toggleMargin, run, showRuler, setShowRuler, tbMode, setToolbar, textWidth, setTextWidth, stepTextWidth,
       hostItems: [
         { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', action: () => setViewMode(mode => mode === 'wysiwyg' ? 'split' : 'wysiwyg') },
-        { label: 'Outline', shortcut: 'Ctrl+Alt+O', action: () => hostCommand('outline') },
+        { label: 'Outline', shortcut: 'Ctrl+Alt+O', action: () => setShowOutline(s => !s) },
         { label: 'PDF preview', action: () => vscode.postMessage({ type: 'openPdfPanel' }) },
         { label: 'Comments', checked: showComments, action: () => setShowComments(v => !v) },
         { label: 'Draw in the margins', checked: inkMode, action: () => setInkMode(v => !v) },
@@ -717,6 +724,16 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         </div>
       )}
       <div class="main">
+        {showOutline && (
+          <div class="sidebar left outline-panel">
+            <div class="panel-tabs">
+              <button class="active" data-tab="outline">Outline</button>
+              <button class="hide" title="Hide the outline" onClick={() => setShowOutline(false)}>«</button>
+            </div>
+            <div class="panel-body"><Outline view={view} items={outline} activePos={activePos} /></div>
+          </div>
+        )}
+        {showOutline && <SidebarGrip side="left" />}
         <div class={'editor-column view-' + viewMode + (viewMode === 'wysiwyg' ? '' : ' split')}>
           {showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
           <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode ? ' ink-mode' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
@@ -741,7 +758,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
         )}
       </div>
       {(tb.showMath || tb.showTable || tb.showReview || inkMode) && (
-        <div class="bottom-toolbars" style={{ left: '24px', right: showComments ? 'var(--right-width, 360px)' : '24px' }}>
+        <div class="bottom-toolbars" style={{ left: showOutline ? 'var(--left-width, 220px)' : '24px', right: showComments ? 'var(--right-width, 360px)' : '24px' }}>
           {tb.showMath && <Toolbar id="math" label="Math" groups={tb.math} />}
           {tb.showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={tb.mathPanels} />}
           {tb.showTable && <Toolbar id="table" label="Table" groups={tb.table} />}

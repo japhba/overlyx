@@ -129,7 +129,7 @@ test('edits in the source are applied to the document as one types; unbalanced L
   await expect(page.locator('.source-pane [data-apply-state="held"]')).toBeVisible({ timeout: 10000 });
   await expect(page.locator('.source-pane [data-apply-state="held"]')).toContainText(/not applied/);
   // the foot of the pane names the problem in full and "go to line" puts the caret at the unclosed brace
-  await expect(page.locator('.source-pane .hint.problem')).toContainText(/Unbalanced braces \(1 unclosed\)/);
+  await expect(page.locator('.source-pane .hint.problem')).toContainText(/an opening brace on line \d+ is never closed/);
   const braceLine = await ta.evaluate(el => el.value.slice(0, el.value.indexOf('\\section{Methods')).split('\n').length);
   await expect(page.locator('.source-pane .hint.problem .goto')).toHaveText(`go to line ${braceLine}`);
   await page.locator('.source-pane .hint.problem .goto').click();

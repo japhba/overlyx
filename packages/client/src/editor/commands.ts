@@ -149,7 +149,7 @@ export const toggleAppendix: Command = (state, dispatch) => {
 };
 
 /** Enter: split paragraph; the new paragraph gets LyX's "next layout". */
-export const paragraphBreak: Command = (state, dispatch) => {
+export const paragraphBreak: Command = (state, dispatch, view) => {
   const cur = currentParagraph(state);
   if (!cur) return false;
   const { $from } = state.selection;
@@ -157,6 +157,8 @@ export const paragraphBreak: Command = (state, dispatch) => {
   const inset = inInset(state);
   const layouts = editorContext.meta?.layouts;
   const next = nextLayout(cur.node.attrs.layout, inset, layouts);
+  // Enter on an empty list item ends the list (Google Docs): the item becomes an ordinary paragraph
+  if (state.selection.empty && cur.node.content.size === 0 && $from.parent === cur.node && isListLayout(cur.node.attrs.layout as string)) return leaveList(state, dispatch, view);
   if (!dispatch) return true;
   let tr = state.tr.deleteSelection();
   const pos = tr.selection.from;
@@ -179,6 +181,31 @@ export const paragraphBreak: Command = (state, dispatch) => {
   void $pos;
   dispatch(tr.scrollIntoView());
   return true;
+};
+
+/**
+ * Out of the list, Google-Docs style: a nested item (or any nested paragraph) moves out one level
+ * first; an item at the top level becomes an ordinary paragraph, its text kept. Bound to Backspace
+ * at the start of an item (`listExitBackspace`) and to Enter on an empty one (`paragraphBreak`).
+ */
+const leaveList: Command = (state, dispatch) => {
+  const cur = currentParagraph(state);
+  if (!cur) return false;
+  const depth = (cur.node.attrs.depth as number) || 0;
+  if (!dispatch) return true;
+  if (depth > 0) dispatch(state.tr.setNodeMarkup(cur.pos, undefined, { ...cur.node.attrs, depth: depth - 1 }).scrollIntoView());
+  else dispatch(state.tr.setNodeMarkup(cur.pos, undefined, { ...cur.node.attrs, layout: inInset(state) ? 'Plain Layout' : 'Standard' }).scrollIntoView());
+  return true;
+};
+
+/** Backspace at the start of a list item takes the bullet away instead of joining the paragraphs (Google Docs); a nested paragraph moves out one level. */
+export const listExitBackspace: Command = (state, dispatch, view) => {
+  const { $from, empty } = state.selection;
+  if (!empty || $from.parentOffset !== 0) return false;
+  const par = $from.parent;
+  if (par.type.name !== 'paragraph') return false;
+  if (!isListLayout(par.attrs.layout as string) && !(((par.attrs.depth as number) || 0) > 0)) return false;
+  return leaveList(state, dispatch, view);
 };
 
 /** Alt+Enter — "paragraph-break inverse": new paragraph with the default layout (or keep). */
