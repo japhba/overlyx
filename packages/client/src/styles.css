@@ -351,8 +351,10 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .lyx-layout-subparagraph, .lyx-layout-subparagraphstar { font-weight: 700; font-style: italic; margin: 0.5em 0 0.2em; }
 .lyx-par[data-label]::before { content: attr(data-label) " "; font-weight: inherit; }
 .lyx-layout-section[data-label]::before, .lyx-layout-subsection[data-label]::before, .lyx-layout-subsubsection[data-label]::before, .lyx-layout-chapter[data-label]::before, .lyx-layout-part[data-label]::before { content: attr(data-label) "  "; color: var(--fg2); }
-.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling { padding-left: 2em; position: relative; }
-.lyx-layout-itemize[data-label]::before, .lyx-layout-enumerate[data-label]::before { position: absolute; left: 0.3em; width: 1.6em; text-align: right; content: attr(data-label); }
+/* list items: the label (bullet / number) sits in a right-aligned box left of the text with a clear gap to it — LaTeX's
+   \labelsep is 0.5em; the box ends 0.6em before the text starts */
+.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling { padding-left: 2.4em; position: relative; }
+.lyx-layout-itemize[data-label]::before, .lyx-layout-enumerate[data-label]::before { position: absolute; left: 0; width: 1.8em; text-align: right; content: attr(data-label); }
 .lyx-layout-itemize[data-depth="1"], .lyx-layout-enumerate[data-depth="1"] { margin-left: 2em; }
 .lyx-layout-itemize[data-depth="2"], .lyx-layout-enumerate[data-depth="2"] { margin-left: 4em; }
 .lyx-layout-itemize[data-depth="3"], .lyx-layout-enumerate[data-depth="3"] { margin-left: 6em; }
