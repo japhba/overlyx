@@ -77,6 +77,14 @@ export function cancelBuild(docId: string): boolean {
   return false;
 }
 
+type BuildListener = (docId: string, r: BuildResult) => void;
+const buildListeners = new Set<BuildListener>();
+/** Called after every finished build (the requested document, and its master when a child was built through it). */
+export function onBuildFinished(fn: BuildListener): () => void { buildListeners.add(fn); return () => { buildListeners.delete(fn); }; }
+function notifyBuilt(docId: string, r: BuildResult): void {
+  for (const l of buildListeners) { try { l(docId, r); } catch (e) { console.error('[build] listener failed:', e); } }
+}
+
 /** Wait for a document's build to finish (used by the synchronous API variant). */
 export function buildPdf(docId: string, opts: { engine?: string; requestedBy?: string } = {}): Promise<BuildResult> {
   const job = requestBuild(docId, 'overlyx', opts.requestedBy ?? 'api');
@@ -119,7 +127,7 @@ async function runJob(job: BuildJob): Promise<void> {
 /** Forget the build products and versions of a project's documents (the project was deleted). */
 export function cleanupProjectData(project: string): void {
   const ids = new Set<string>();
-  for (const t of ['builds', 'versions']) {
+  for (const t of ['builds', 'versions', 'pdf_links', 'pdf_publish']) {
     for (const r of db.prepare(`SELECT DISTINCT doc_id FROM ${t} WHERE substr(doc_id, 1, ?) = ?`).all(project.length + 1, project + '/') as { doc_id: string }[]) ids.add(r.doc_id);
     db.prepare(`DELETE FROM ${t} WHERE substr(doc_id, 1, ?) = ?`).run(project.length + 1, project + '/');
   }
@@ -252,7 +260,8 @@ export async function exportTex(docId: string): Promise<{ dir: string; main: str
  * find/keep their conversion cache (svg-inkscape/) and to compare timestamps.
  */
 export function linkDocumentAssets(docDir: string, buildDirPath: string): void {
-  const LINK_EXT = new Set(['.svg', '.svgz', '.png', '.jpg', '.jpeg', '.eps', '.ps', '.tif', '.tiff', '.gif', '.bmp', '.webp', '.pdf_tex', '.pdf']);
+  // graphics, and font files kept next to the document (fontspec's `Path=./` looks in the build directory)
+  const LINK_EXT = new Set(['.svg', '.svgz', '.png', '.jpg', '.jpeg', '.eps', '.ps', '.tif', '.tiff', '.gif', '.bmp', '.webp', '.pdf_tex', '.pdf', '.ttf', '.otf', '.ttc', '.pfb', '.pfa', '.afm']);
   // Sub-directories are re-created as real directories with symlinked files (never symlinked as a
   // whole): LaTeX may write .aux/.bbl files into them, and those must land in the build directory,
   // not in the user's project.
@@ -298,7 +307,8 @@ export function texInputs(docDir: string, buildDirPath: string): NodeJS.ProcessE
   // not recursive: a stray main.bbl/main.aux in some sub-directory of the project must not be picked up
   const inputs = `${buildDirPath}:${docDir}:`;
   // openout_any=p: TeX may only write below the build directory (the sandbox enforces the same)
-  return { TEXINPUTS: inputs, BIBINPUTS: inputs, BSTINPUTS: inputs, openout_any: 'p', max_print_line: '1000' };
+  // fonts next to the document (fontspec by file name, LuaTeX / XeTeX) are found through the font paths
+  return { TEXINPUTS: inputs, BIBINPUTS: inputs, BSTINPUTS: inputs, TTFONTS: inputs, OPENTYPEFONTS: inputs, T1FONTS: inputs, AFMFONTS: inputs, openout_any: 'p', max_print_line: '1000' };
 }
 
 async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
@@ -328,7 +338,10 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   const header = doc.toLyxDocument().header;
   const outFmt = headerValue(header, 'default_output_format') ?? 'default';
   const nonTex = headerValue(header, 'use_non_tex_fonts') === 'true';
-  const engineFlag = outFmt === 'pdf5' ? '-pdflua' : outFmt === 'pdf4' || nonTex ? '-pdfxe' : '-pdf';
+  // a TeX magic comment at the top of the file (`%!TEX TS-program = lualatex`, `% !TeX program =
+  // xelatex` — what TeXShop, Overleaf and LaTeX Workshop read) names the engine the author builds with
+  const magic = magicEngine(doc.fileText ?? doc.toText());
+  const engineFlag = magic ?? (outFmt === 'pdf5' ? '-pdflua' : outFmt === 'pdf4' || nonTex ? '-pdfxe' : '-pdf');
   // build products must be real files in the build directory, never links into the project
   for (const ext of ['.pdf', '.synctex.gz', '.aux', '.log', '.out', '.bbl', '.blg', '.toc', '.fls', '.fdb_latexmk']) {
     const f = path.join(exp.dir, base + ext);
@@ -341,7 +354,9 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
     const f = path.join(docDir, rc);
     if (fs.existsSync(f)) { args.push('-r', f); break; }
   }
-  args.push(engineFlag, '-g', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
+  // -pvc-: a latexmkrc written for the author's desktop ($preview_continuous_mode = 1) must not
+  // keep latexmk watching the files until the timeout
+  args.push(engineFlag, '-pvc-', '-g', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
   const proc = run('latexmk', args, {
     cwd: exp.dir, env: texInputs(docDir, exp.dir), timeoutMs: 420000, nice: true,
     // the build directory (and the svg package's cache next to the document) are the only writable places
@@ -372,7 +387,21 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   const res: BuildResult = { ok, log, pdfPath: fs.existsSync(pdf) ? pdf : undefined, texPath: exp.main, warnings, tex: exp.tex };
   record(requestedId, res);
   if (docId !== requestedId) record(docId, res);
+  notifyBuilt(requestedId, res);
+  if (docId !== requestedId) notifyBuilt(docId, res);
   return res;
+}
+
+/** The latexmk engine flag named by a TeX magic comment in the first lines of a document, if any. */
+export function magicEngine(text: string): '-pdf' | '-pdfxe' | '-pdflua' | null {
+  const head = text.split('\n', 40).join('\n');
+  const m = /^\s*%\s*!\s*TeX\s+(?:TS-)?program\s*=\s*([A-Za-z-]+)/im.exec(head);
+  if (!m) return null;
+  const e = m[1].toLowerCase();
+  if (e === 'lualatex' || e === 'luatex' || e === 'lualatex-dev') return '-pdflua';
+  if (e === 'xelatex' || e === 'xetex' || e === 'xelatex-dev') return '-pdfxe';
+  if (e === 'pdflatex' || e === 'pdftex' || e === 'latex' || e === 'pdflatex-dev') return '-pdf';
+  return null;
 }
 
 function record(docId: string, r: BuildResult): void {

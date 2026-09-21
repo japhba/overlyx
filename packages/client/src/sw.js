@@ -60,6 +60,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/pdf/')) return;   // a public PDF link: the file itself, never the app shell
   if (req.mode === 'navigate') { e.respondWith(networkFirst(req, SHELL, '/index.html')); return; }
   if (url.pathname.startsWith('/assets/')) { e.respondWith(cacheFirst(req, SHELL)); return; }
   if (API_CACHED.test(url.pathname)) { e.respondWith(networkFirst(req, API)); return; }

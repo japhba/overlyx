@@ -68,3 +68,30 @@ div.login .hero { display: grid; grid-template-columns: 1fr 350px; gap: 56px; al
   .login .hero-copy .pitch { text-align: left; }
   .login form.signin { width: min(350px, 100%); }
 }
+
+/* "Coming from Overleaf?" — the import before the sign-in (OverleafStart.tsx) */
+.login .overleaf-start { display: grid; grid-template-columns: 1fr 1.15fr; gap: 30px; align-items: start; padding: 26px 30px; margin: 8px 0 26px; border: 1px solid var(--ui-border); border-radius: 14px; background: var(--surface); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.09); }
+.login .overleaf-start h2 { margin: 0 0 8px; font-size: 22px; }
+.login .overleaf-start p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.5; opacity: 0.8; }
+.login .overleaf-start ol { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.55; opacity: 0.85; }
+.login .overleaf-start ol li + li { margin-top: 3px; }
+.login .overleaf-start .git-toggle { display: block; border: 0; background: none; color: var(--ui-muted); font-size: 12px; text-align: left; text-decoration: underline; text-decoration-style: dotted; cursor: pointer; padding: 0; margin-top: 14px; }
+.login .overleaf-start .git-toggle:hover { color: var(--accent); }
+.login .overleaf-start .git textarea, .login .overleaf-start .git input { width: 100%; box-sizing: border-box; font-size: 12.5px; padding: 6px 8px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--page-bg); color: var(--ui-fg); margin-top: 6px; }
+.login .overleaf-start .git textarea { font: 12px/1.4 "DejaVu Sans Mono", Menlo, monospace; resize: vertical; }
+.login .overleaf-start .small { font-size: 11.5px; color: var(--ui-muted); line-height: 1.4; margin-top: 8px; }
+.login .dropzone { border: 2px dashed var(--ui-border); border-radius: 12px; padding: 26px 18px; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; outline: none; }
+.login .dropzone:hover, .login .dropzone:focus-visible, .login .dropzone.over { border-color: var(--accent); background: rgba(59, 110, 165, 0.07); }
+.login .dropzone strong { display: block; font-size: 15px; margin-bottom: 4px; }
+.login .dropzone span { font-size: 12.5px; opacity: 0.7; }
+.login .overleaf-start .files { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.login .overleaf-start .files li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.login .overleaf-start .files li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.login .overleaf-start .files .size { opacity: 0.6; font-size: 11.5px; white-space: nowrap; }
+.login .overleaf-start .files button { margin-left: auto; border: 0; background: none; cursor: pointer; color: var(--ui-muted); font-size: 13px; padding: 0 4px; }
+.login .overleaf-start .files button:hover { color: var(--err); }
+.login .overleaf-start .go { margin-top: 14px; }
+.login .overleaf-start button.google { width: 100%; font: inherit; font-weight: 600; font-size: 15px; cursor: pointer; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--accent); box-shadow: 0 2px 10px rgba(59, 110, 165, 0.25); }
+.login .overleaf-start button.google:disabled { cursor: default; opacity: 0.55; border-color: var(--ui-border); box-shadow: none; transform: none; }
+.login .overleaf-start button.google .g { width: 20px; height: 20px; }
+@media (max-width: 900px) { .login .overleaf-start { grid-template-columns: 1fr; gap: 20px; padding: 22px 20px; } }

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import JSZip from 'jszip';
-import { readZip, extractZip, safeZipPath } from '../packages/server/src/zip.ts';
+import { readZip, extractZip, safeZipPath, bundledZips, projectNameFromZip } from '../packages/server/src/zip.ts';
 import { overleafProjectId, overleafGitUrl, describeCloneError } from '../packages/server/src/overleaf.ts';
 import { parseOverleafRefs, projectNameFrom } from '../packages/client/src/app/OverleafImport.tsx';
 
@@ -47,6 +47,25 @@ describe('extractZip', () => {
     const buf = await zipOf({ 'main.tex': 'A', 'refs.bib': 'B', 'figures/f.png': 'C' });
     const dest = tmp();
     expect(extractZip(buf, dest).files.sort()).toEqual(['figures/f.png', 'main.tex', 'refs.bib']);
+  });
+  it("recognises Overleaf's bundle of project zips (the project list's download) and names the projects after them", async () => {
+    const inner = await zipOf({ 'main.tex': 'A', 'res.cls': 'B' });
+    const other = await zipOf({ 'paper.tex': 'C' });
+    const bundle = new JSZip();
+    bundle.file('CV_Jan_Bauer.zip', inner);
+    bundle.file('My Paper (final).zip', other);
+    const buf = Buffer.from(await bundle.generateAsync({ type: 'nodebuffer', compression: 'STORE' }));
+    const parts = bundledZips(buf)!;
+    expect(parts.map(p => p.name).sort()).toEqual(['CV_Jan_Bauer.zip', 'My Paper (final).zip']);
+    expect(readZip(parts.find(p => p.name === 'CV_Jan_Bauer.zip')!.data()).map(e => e.name).sort()).toEqual(['main.tex', 'res.cls']);
+    expect(projectNameFromZip('CV_Jan_Bauer.zip')).toBe('CV_Jan_Bauer');
+    expect(projectNameFromZip('My Paper (final).zip')).toBe('My Paper -final');
+    // an ordinary project archive is not a bundle, even when it carries a zip among its files
+    expect(bundledZips(inner)).toBeNull();
+    expect(bundledZips(await zipOf({ 'main.tex': 'A', 'data/raw.zip': 'Z' }))).toBeNull();
+    // Finder's leftovers do not make it one
+    const mac = new JSZip(); mac.file('CV.zip', inner); mac.file('__MACOSX/._CV.zip', 'junk');
+    expect(bundledZips(Buffer.from(await mac.generateAsync({ type: 'nodebuffer' })))!.map(p => p.name)).toEqual(['CV.zip']);
   });
   it('safeZipPath refuses escapes', () => {
     expect(safeZipPath('../etc/passwd')).toBeNull();

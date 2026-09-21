@@ -52,13 +52,18 @@ blend.
   invert*: a plot or diagram (dark strokes on a light or transparent ground, judged from a small
   canvas copy of the pixels, `figureinvert.ts`) is shown light-on-dark with a CSS filter, a
   photograph keeps its colours; *Settings ▸ Editor ▸ Figures* switches it off.
-* **Import from Overleaf** (start page): paste the links of the projects to bring over and an
+* **Import from Overleaf** (start page, and the landing page for visitors who have no account yet): paste the links of the projects to bring over and an
   Overleaf Git token — each ticked project is cloned by the server from `git.overleaf.com` into a
   new project (Overleaf's Git access, paid and institutional plans; history and `origin` are kept,
   the token is passed to git through `GIT_ASKPASS` and never stored) — or upload the zip Overleaf's
   *Menu ▸ Download ▸ Source* produces (every account; several at once). Overleaf has no API that
   lists projects, so the selection is made from pasted links. `server/zip.ts` is a small ZIP reader
-  (central directory, deflate) with a traversal-safe extraction.
+  (central directory, deflate) with a traversal-safe extraction. The download of a whole project
+  list ("Overleaf Projects -N items.zip", one zip per project inside) is recognised as a bundle:
+  every project in it becomes a project named after its zip (`bundledZips`). On the landing page
+  (*Coming from Overleaf?*, `app/OverleafStart.tsx`) the zips (or links + token) are parked in
+  IndexedDB (`app/pendingImport.ts`), survive the Google round trip, and the start page imports
+  them the moment there is an account and opens a lone project's document; guests cannot import.
 * **PDF** via `latexmk` on the document's own `.tex` file (plus the child documents it inputs);
   embedded graphics (SVG/PDF/EPS/…) are rendered to PNG for the editor and downloadable as PNG,
   and formats pdflatex cannot include are converted to PDF for the build. PDF builds only start on
@@ -68,6 +73,10 @@ blend.
   elapsed time / last log line and has a *Cancel* button, and a build keeps running if you switch
   documents or tabs (the panel picks it up again). A request while a build is running re-builds
   once more afterwards with the latest content.
+  A TeX magic comment in the first lines (`%!TEX TS-program = lualatex`, `% !TeX program =
+  xelatex`) names the engine; without one, `fontspec` (LyX's *use non-TeX fonts*) means XeTeX, the
+  LyX output format *pdf5* LuaTeX, everything else pdfTeX. A `latexmkrc` in the document's
+  directory is honoured, except that preview-continuous mode is switched off (`-pvc-`).
 * **Copy & paste** keeps every inset: a paragraph copied and pasted elsewhere (or into another
   OverLyX tab) still has its citations, cross-references, labels, formulas, tables and figures; the
   plain-text form of the clipboard is LaTeX-ish (`$…$`, `\ref{…}`, `\citep{…}`), so pasting into a
@@ -107,6 +116,20 @@ blend.
   that exist without an owner are adopted by the instance owner. *File ▸ Share project…*, the 👥
   button in the file browser, or the start screen. Anyone with a Google account may sign in (they only see their own and shared projects);
   set `OVERLYX_SIGNUP=invited` to allow only e-mails that were invited to a project.
+* **Public PDF link** (Share dialog ▸ *Public PDF link*, per document; also 🔗 *Public link* in
+  the PDF panel): `https://<server>/pdf/<token>/<name>.pdf` serves the document's latest build to
+  anyone, no account — the address a personal web page links its CV to. The last PDF is served at
+  once; when the project's files are newer than the build, a rebuild is queued in the background
+  (at most one a minute per document), and a document that was never built is built while the
+  first reader waits (`server/pdflinks.ts`, table `pdf_links`; ETag / 304, `?download=1`, no frame
+  restrictions so the PDF can be embedded elsewhere; fetches are counted for the owner). Turning
+  the link off kills the address; turning it on again keeps the token people already point at.
+  **Publishing into a GitHub repository** (administrators; `GITHUB_PUBLISH_TOKEN`, a fine-grained
+  token with *Contents: read & write* on the target repositories): after every successful build
+  the PDF is committed to `<owner>/<repo>` at a path (a Hugo site's `static/uploads/cv/cv.pdf`
+  keeps its old address) through the Contents API — one request, no clone, nothing committed when
+  the file is byte-identical; failures show in the dialog with *Push now* (`server/pdfpublish.ts`,
+  table `pdf_publish`).
 * **Every project is a git repository** you can clone, pull and push from your own machine
   (*File ▸ Git repository…*, the ⎇ button in the file browser, or *Git…* on a project card):
   `git clone https://<server>/git/<project>.git` with your username and your **account access
@@ -690,7 +713,10 @@ password login only and the feedback dialog falls back to GitHub's issue form. T
 secret (`<data dir>/secret.key`) is generated on first start and is part of every backup too.
 
 Do not put a broad-scope token (your `gh` login) in there: the server runs user-supplied LaTeX, and a
-token with *Issues* on one repository is all the feedback channel needs.
+token with *Issues* on one repository is all the feedback channel needs. `GITHUB_PUBLISH_TOKEN`
+(optional) lets administrators publish built PDFs into repositories (Share dialog ▸ *Public PDF
+link* ▸ *commit the PDF to a GitHub repository*): a fine-grained token with *Contents: read & write*
+on exactly the repositories that receive PDFs, nothing else.
 
 `OPENROUTER_API_KEY` (from [openrouter.ai/keys](https://openrouter.ai/keys)) enables "Escalate to AI…"
 document repair (see "Document health" below); `OPENROUTER_REPAIR_MODEL` overrides the model

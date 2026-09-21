@@ -1551,3 +1551,18 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .overleaf-import .status.error { color: var(--err); white-space: normal; }
 .overleaf-import .status.working { color: var(--ui-muted); font-style: italic; }
 .overleaf-import tr.ok td { opacity: 0.75; }
+
+/* Share dialog ▸ public PDF link (one row per document) */
+.pdf-links { display: flex; flex-direction: column; gap: 6px; }
+.pdf-link-row { display: flex; align-items: center; gap: 6px; }
+.pdf-link-row .doc { flex: none; font-size: 12.5px; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-link-row input { flex: 1; min-width: 0; font-size: 12px; padding: 4px 6px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface2); }
+.pdf-link-row .btn.small { margin-left: auto; }
+.pdf-links .hint.small { margin: 0 0 2px 22px; font-size: 11px; }
+.pdf-publish { margin: 2px 0 6px 22px; }
+.pdf-publish .fallback-link.left { align-self: flex-start; padding: 0; text-align: left; }
+.pdf-publish .hint.small { margin: 0; }
+.pdf-publish .hint .err { display: inline; font-size: inherit; }
+.pdf-publish-form { flex-wrap: wrap; margin-top: 4px; }
+.pdf-publish-form input { font-size: 12px; }
+.pdf-publish-form input.branch { flex: 0 0 90px; }

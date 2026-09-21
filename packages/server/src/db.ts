@@ -103,6 +103,26 @@ CREATE TABLE IF NOT EXISTS access_log (
   at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS access_log_project ON access_log(project, at);
+CREATE TABLE IF NOT EXISTS pdf_links (
+  token TEXT PRIMARY KEY,
+  doc_id TEXT UNIQUE NOT NULL,
+  created_by INTEGER,
+  created_at INTEGER NOT NULL,
+  hits INTEGER NOT NULL DEFAULT 0,
+  last_hit_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS pdf_publish (
+  doc_id TEXT PRIMARY KEY,
+  repo TEXT NOT NULL,
+  path TEXT NOT NULL,
+  branch TEXT,
+  created_by INTEGER,
+  created_at INTEGER NOT NULL,
+  last_pushed_at INTEGER,
+  last_attempt_at INTEGER,
+  last_sha TEXT,
+  last_error TEXT
+);
 `);
 
 // documents get an "epoch" (random id of their Yjs history); clients holding a different epoch are stale

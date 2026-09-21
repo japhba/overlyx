@@ -23,6 +23,14 @@ export interface Project {
   owner?: { id: number; name: string; username: string } | null;
 }
 export interface ShareMember { id: number; role: 'view' | 'edit'; via: string; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }
+/** a zip import: `projects` lists every project the archive produced (several for an Overleaf bundle of zips), `errors` the ones that failed */
+export interface ZipImportResult { ok: boolean; name: string; files: number; skipped: string[]; projects: { name: string; files: number; skipped: string[] }[]; errors: { name: string; error: string }[] }
+/** a public PDF link of a document (Share dialog); the address is `/pdf/<token>/<fileName>` on this origin */
+export interface PdfLinkInfo { doc: string; token: string; hits: number; lastHitAt: number | null; createdAt: number; fileName: string; built: boolean }
+export const pdfLinkUrl = (l: { token: string; fileName: string }) => `${location.origin}/pdf/${l.token}/${encodeURIComponent(l.fileName)}`;
+/** a document's PDF is committed into a GitHub repository after every successful build (administrators; the server's GITHUB_PUBLISH_TOKEN) */
+export interface PdfPublishInfo { doc: string; repo: string; path: string; branch: string | null; lastPushedAt: number | null; lastAttemptAt: number | null; lastError: string | null; htmlUrl: string }
+export interface PdfLinksInfo { docs: string[]; links: PdfLinkInfo[]; publish: PdfPublishInfo[]; publishAvailable: boolean }
 export interface ShareInfo { name?: string; title?: string | null; owner: { id: number; name: string; username: string } | null; members: ShareMember[]; link: { token: string; role: 'view' | 'edit' } | null }
 export interface LayoutInfo { name: string; category?: string; labelType?: string; tocLevel?: number; latexType?: string; latexName?: string; isNumbered?: boolean }
 export interface TexHeading { level: number; text: string; n: number; num?: string; starred: boolean }
@@ -124,7 +132,14 @@ export const api = {
   createProject: (name: string) => req<{ project: Project }>('POST', '/api/projects', { name }),
   /** Overleaf import: clone the selected projects with the user's Overleaf Git token (per-project results), or unpack a downloaded zip */
   importOverleaf: (body: { token: string; projects: { id: string; name: string }[] }) => req<{ results: { id: string; name: string; ok: boolean; error?: string }[] }>('POST', '/api/import/overleaf', body),
-  importZip: (name: string, file: Blob) => req<{ ok: boolean; name: string; files: number; skipped: string[] }>('POST', `/api/import/zip?name=${encodeURIComponent(name)}`, undefined, file),
+  importZip: (name: string, file: Blob) => req<ZipImportResult>('POST', `/api/import/zip?name=${encodeURIComponent(name)}`, undefined, file),
+  // public PDF links (owner only): a stable address that serves a document's latest build to anyone
+  pdfLinks: (project: string) => req<PdfLinksInfo>('GET', `/api/projects/${encodeURIComponent(project)}/pdf-links`),
+  setPdfPublish: (project: string, body: { doc: string; repo: string; path: string; branch?: string | null }) => req<{ publish: PdfPublishInfo[] }>('POST', `/api/projects/${encodeURIComponent(project)}/pdf-publish`, body),
+  pushPdfPublish: (project: string, doc: string) => req<{ publish: PdfPublishInfo[] }>('POST', `/api/projects/${encodeURIComponent(project)}/pdf-publish/push`, { doc }),
+  deletePdfPublish: (project: string, doc: string) => req<{ publish: PdfPublishInfo[] }>('DELETE', `/api/projects/${encodeURIComponent(project)}/pdf-publish/${encodeURIComponent(doc)}`),
+  createPdfLink: (project: string, doc: string) => req<{ link: PdfLinkInfo; links: PdfLinkInfo[] }>('POST', `/api/projects/${encodeURIComponent(project)}/pdf-links`, { doc }),
+  deletePdfLink: (project: string, token: string) => req<{ ok: boolean; links: PdfLinkInfo[] }>('DELETE', `/api/projects/${encodeURIComponent(project)}/pdf-links/${encodeURIComponent(token)}`),
   deleteProject: (name: string) => req<{ ok: boolean }>('DELETE', `/api/projects/${encodeURIComponent(name)}`),
   // sharing (owner only)
   share: (project: string) => req<ShareInfo>('GET', `/api/projects/${encodeURIComponent(project)}/share`),

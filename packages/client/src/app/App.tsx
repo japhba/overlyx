@@ -13,6 +13,7 @@ import { openRewrite, REWRITE_KEY } from '../editor/ai/rewrite';
 import { Login } from './Login';
 import { DocPanel } from './DocPanel';
 import { Home, projectDocs } from './Home';
+import { pendingImportFlag } from './pendingImport';
 import { TextEditor } from './TextEditor';
 import { ViewModeSwitch, type ViewMode } from './ViewModeSwitch';
 import { MarkdownEditor } from './MarkdownEditor';
@@ -261,7 +262,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [gitFor, setGitFor] = useState<string | null>(null);
   /** the interactive walkthrough: offered once per browser, restartable from Help */
   // guests came for somebody's document, not for a tour (it is offered once they have an account)
-  const [tour, setTour] = useState<'intro' | 'steps' | null>(() => (!user.guest && tourWanted() ? 'intro' : null));
+  // (and not over an import that is about to run — Home.tsx picks it up; the tour is offered on the next visit)
+  const [tour, setTour] = useState<'intro' | 'steps' | null>(() => (!user.guest && tourWanted() && !pendingImportFlag() ? 'intro' : null));
   const [viewOnly, setViewOnly] = useState(false);
   // LyX toolbars: standard / extra always (unless hidden), math / table / review on, off or automatic (LyX's "auto")
   const { pref: themePref } = useTheme();
@@ -1276,7 +1278,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
               <button class="hide" title="Hide the sidebar" onClick={() => setRightTab(null)}>»</button>
             </div>
             {rightTab === 'comments' && <div class="panel-body"><Comments views={[masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} /></div>}
-            {rightTab === 'pdf' && <PdfPanel docId={docId} state={pdf} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }} />}
+            {rightTab === 'pdf' && <PdfPanel docId={docId} state={pdf} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }}
+              onPublicLink={shareProject ? () => setShareFor(shareProject) : undefined} />}
             {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
             {rightTab === 'agent' && <AgentPanel project={docId.split('/')[0]} notify={notify} />}
           </div>

@@ -2,7 +2,16 @@
  * Landing page (sign-in) and the sidebars' show / hide affordances.
  */
 import { test, expect } from '@playwright/test';
-import { login, openDoc, TOUR_SEEN_SCRIPT } from './helpers';
+import { existsSync, rmSync } from 'node:fs';
+import JSZip from 'jszip';
+import { login, openDoc, adminCredentials, apiLogin, BASE_URL, PROJECTS_DIR, TOUR_SEEN_SCRIPT } from './helpers';
+
+async function zipOf(files: Record<string, string | Buffer>): Promise<Buffer> {
+  const z = new JSZip();
+  for (const [k, v] of Object.entries(files)) z.file(k, v);
+  return Buffer.from(await z.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+}
+const TEX = '\\documentclass{article}\n\\begin{document}\nImported from Overleaf.\n\\end{document}\n';
 
 test.describe('landing page', () => {
   test('without Google: the password form, no animation on its own, links', async ({ page }) => {
@@ -61,6 +70,80 @@ test.describe('landing page', () => {
     await page.unroute('**/api/auth/me');
     await page.goto('/');
     await expect(page.locator('.signin [data-vscode-get]')).toBeVisible();
+  });
+
+  test('coming from Overleaf: a zip chosen before the sign-in is imported right after it and the document opens', async ({ page, browser }) => {
+    test.setTimeout(150000);
+    const PROJECT = 'e2e-landing-import';
+    const admin = await browser.newContext();
+    await apiLogin(admin);
+    await admin.request.delete(`${BASE_URL}/api/projects/${PROJECT}`).catch(() => {});
+    rmSync(`${PROJECTS_DIR}/${PROJECT}`, { recursive: true, force: true });
+    await admin.close();
+
+    await page.addInitScript(TOUR_SEEN_SCRIPT);
+    await page.goto('/');
+    const start = page.locator('[data-overleaf-start]');
+    await expect(start).toBeVisible();
+    await expect(start).toContainText('Coming from Overleaf?');
+    // the sign-in card points at it
+    await expect(page.locator('.signin [data-overleaf-hint]')).toBeVisible();
+    const go = page.locator('[data-overleaf-start-go]');
+    await expect(go).toBeDisabled();
+    // the Git access alternative is folded away; links without a token do not enable the button
+    await page.locator('[data-overleaf-start-git]').click();
+    await page.locator('[data-overleaf-start-links]').fill('https://www.overleaf.com/project/5f1a2b3c4d5e6f7a8b9c0d1e');
+    await expect(start).toContainText('1 project recognised — the Git token is still missing');
+    await expect(go).toBeDisabled();
+    await page.locator('[data-overleaf-start-links]').fill('');
+    // a zip: chosen through the (hidden) file input of the drop zone
+    await page.locator('[data-overleaf-start-zip]').setInputFiles({ name: `${PROJECT}.zip`, mimeType: 'application/zip', buffer: await zipOf({ 'main.tex': TEX, 'refs.bib': '' }) });
+    await expect(page.locator('[data-overleaf-start-files] li')).toHaveCount(1);
+    await expect(page.locator('[data-overleaf-start-files]')).toContainText(`${PROJECT}.zip`);
+    await expect(go).toBeEnabled();
+    await expect(go).toHaveText(/Import 1 project & continue/);   // no Google here: the password form follows
+    await go.click();
+    // the sign-in card says what will happen and takes the password
+    await expect(page.locator('[data-login-note]')).toContainText('1 Overleaf project will be imported');
+    const creds = adminCredentials();
+    await page.getByPlaceholder('Username').fill(creds.username);
+    await page.getByPlaceholder('Password').fill(creds.password);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    // the import runs by itself on the start page and the lone document opens
+    await page.waitForSelector('.lyx-editor', { timeout: 60000 });
+    await expect(page).toHaveURL(new RegExp(`#/${PROJECT}/main\\.tex$`));
+    await expect(page.locator('.lyx-editor')).toContainText('Imported from Overleaf', { timeout: 30000 });
+    expect(existsSync(`${PROJECTS_DIR}/${PROJECT}/refs.bib`)).toBe(true);
+    // nothing is left waiting: the start page does not import it again
+    await page.goto('/');
+    await expect(page.locator('.home')).toBeVisible();
+    await expect(page.locator('[data-overleaf-import]')).toHaveCount(0);
+    await page.request.delete(`${BASE_URL}/api/projects/${PROJECT}`);
+  });
+
+  test("Overleaf's bundle of project zips (the project list's download) becomes one project per zip", async ({ browser }) => {
+    const admin = await browser.newContext();
+    await apiLogin(admin);
+    const names = ['e2e-bundle-a', 'e2e-bundle-b'];
+    for (const n of names) { await admin.request.delete(`${BASE_URL}/api/projects/${n}`).catch(() => {}); rmSync(`${PROJECTS_DIR}/${n}`, { recursive: true, force: true }); }
+    const bundle = new JSZip();
+    bundle.file('e2e-bundle-a.zip', await zipOf({ 'main.tex': TEX }));
+    bundle.file('e2e-bundle-b.zip', await zipOf({ 'paper.tex': TEX, 'figs/x.png': Buffer.from([1, 2, 3]) }));
+    const buf = Buffer.from(await bundle.generateAsync({ type: 'nodebuffer', compression: 'STORE' }));
+    const r = await admin.request.post(`${BASE_URL}/api/import/zip?name=Overleaf%20Projects%20-2%20items`, { data: buf, headers: { 'content-type': 'application/zip' } });
+    expect(r.ok()).toBe(true);
+    const body = await r.json() as { projects: { name: string; files: number }[]; errors: unknown[] };
+    expect(body.projects.map(p => p.name).sort()).toEqual(names);
+    expect(body.projects.find(p => p.name === 'e2e-bundle-b')!.files).toBe(2);
+    expect(body.errors).toEqual([]);
+    expect(existsSync(`${PROJECTS_DIR}/e2e-bundle-b/figs/x.png`)).toBe(true);
+    expect(existsSync(`${PROJECTS_DIR}/Overleaf Projects -2 items`)).toBe(false);
+    // once more: the names are taken now, and the answer says so per project
+    const again = await admin.request.post(`${BASE_URL}/api/import/zip?name=Overleaf%20Projects%20-2%20items`, { data: buf, headers: { 'content-type': 'application/zip' } });
+    expect(again.status()).toBe(400);
+    expect((await again.json()).error).toMatch(/exists already/);
+    for (const n of names) await admin.request.delete(`${BASE_URL}/api/projects/${n}`);
+    await admin.close();
   });
 
   test('demo wheel: auto-plays in view, rotates to the next clip, dots jump, replay restarts, dark variants', async ({ page }) => {

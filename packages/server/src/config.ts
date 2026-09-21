@@ -74,6 +74,8 @@ export const config = {
     repo: (process.env.GITHUB_REPO ?? 'japhba/overlyx').trim(),
     token: (process.env.GITHUB_TOKEN ?? '').trim(),
     api: (process.env.GITHUB_API_URL ?? 'https://api.github.com').replace(/\/$/, ''),
+    /** publishing built PDFs into repositories (pdfpublish.ts): a fine-grained token with Contents: read & write on the target repositories */
+    publishToken: (process.env.GITHUB_PUBLISH_TOKEN ?? '').trim(),
   },
   /** off-site mirror of every project repository in a GitHub organisation (mirror.ts); OVERLYX_MIRROR_URL=file:///…/{repo}.git is the test hook */
   mirror: {

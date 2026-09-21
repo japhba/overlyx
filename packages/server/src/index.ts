@@ -21,12 +21,14 @@ import { manager, projectChangedListeners, graphicsChangedListeners } from './do
 import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile, isDocumentFile } from './projects.ts';
 import { cachedParseFile, importLyxFile, parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
-import { extractZip } from './zip.ts';
+import { extractZip, bundledZips, projectNameFromZip } from './zip.ts';
+import { pdfLinkByToken, pdfLinksOf, createPdfLink, deletePdfLink, countHit, pdfForLink, pdfLinkFileName, linkableDocs } from './pdflinks.ts';
+import { publishAvailable, publishTargetsOf, setPublishTarget, deletePublishTarget, publishPdf, startPublishing } from './pdfpublish.ts';
 import { overleafProjectId, cloneOverleafProject } from './overleaf.ts';
 import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit } from './export.ts';
 import { db } from './db.ts';
-import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
+import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
 import { sandboxAvailable } from './sandbox.ts';
 import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests } from './access.ts';
 import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
@@ -99,7 +101,7 @@ api.use(requireAuth);
  * Guests act only inside the projects their links opened: no projects, tokens, agents or
  * administration of their own (their role in a project is checked like everybody's, below).
  */
-const GUEST_DENIED = /^\/(git\/tokens|mcp-tokens|admin(\/|$)|users$|agent(\/|$)|projects\/[^/]+\/agent(\/|$))/;
+const GUEST_DENIED = /^\/(git\/tokens|mcp-tokens|admin(\/|$)|users$|agent(\/|$)|import(\/|$)|projects\/[^/]+\/agent(\/|$))/;
 api.use((req, res, next) => {
   if (req.user!.guest && (GUEST_DENIED.test(req.path) || (req.method === 'POST' && req.path === '/projects'))) { res.status(403).json({ error: 'Sign in to do this' }); return; }
   next();
@@ -196,19 +198,44 @@ api.post('/import/overleaf', async (req, res) => {
 api.post('/import/zip', express.raw({ type: '*/*', limit: '300mb' }), (req, res) => {
   const name = String(req.query.name ?? '').trim();
   if (!/^[A-Za-z0-9._ -]+$/.test(name)) { res.status(400).json({ error: 'invalid project name (letters, digits, space, . _ -)' }); return; }
-  if (fs.existsSync(projectDir(name))) { res.status(409).json({ error: 'a project with this name exists already' }); return; }
   if (!Buffer.isBuffer(req.body) || !req.body.length) { res.status(400).json({ error: 'no archive received' }); return; }
-  const dir = projectDir(name);
+  const unpack = (project: string, buf: Buffer): { name: string; files: number; skipped: string[] } => {
+    if (fs.existsSync(projectDir(project))) throw new Error('a project with this name exists already');
+    const dir = projectDir(project);
+    try {
+      const { files, skipped } = extractZip(buf, dir);
+      if (!files.length) throw new Error('the archive contains no files');
+      registerProject(project, req.user!.id);
+      ensureRepo(project).catch(e => console.error('[git] init failed:', e));
+      touchProject(project, req.user!.id);
+      return { name: project, files: files.length, skipped };
+    } catch (e) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* nothing */ }
+      throw e;
+    }
+  };
+  let bundle: ReturnType<typeof bundledZips>;
+  try { bundle = bundledZips(req.body); } catch (e) { res.status(400).json({ error: (e as Error).message }); return; }
+  if (bundle) {
+    // "Overleaf Projects -3 items.zip" (the project list's download): one project per zip inside,
+    // each named after its file — a single one takes the name the user chose
+    const projects: { name: string; files: number; skipped: string[] }[] = [];
+    const errors: { name: string; error: string }[] = [];
+    for (const z of bundle) {
+      const project = bundle.length === 1 ? name : projectNameFromZip(z.name);
+      try { projects.push(unpack(project, z.data())); }
+      catch (e) { errors.push({ name: project, error: (e as Error).message }); }
+    }
+    if (!projects.length) { res.status(400).json({ error: errors[0]?.error ?? 'the archive contains no projects' }); return; }
+    console.log(`[import] ${req.user!.username} imported an Overleaf bundle: ${projects.map(p => `“${p.name}”`).join(', ')}${errors.length ? ` (${errors.length} failed)` : ''}`);
+    res.json({ ok: true, name: projects[0].name, files: projects[0].files, skipped: projects[0].skipped, projects, errors });
+    return;
+  }
   try {
-    const { files, skipped } = extractZip(req.body, dir);
-    if (!files.length) { fs.rmSync(dir, { recursive: true, force: true }); res.status(400).json({ error: 'the archive contains no files' }); return; }
-    registerProject(name, req.user!.id);
-    ensureRepo(name).catch(e => console.error('[git] init failed:', e));
-    touchProject(name, req.user!.id);
-    res.json({ ok: true, name, files: files.length, skipped });
+    const r = unpack(name, req.body);
+    res.json({ ok: true, ...r, projects: [r], errors: [] });
   } catch (e) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* nothing */ }
-    res.status(400).json({ error: (e as Error).message });
+    res.status(fs.existsSync(projectDir(name)) && /exists already/.test((e as Error).message) ? 409 : 400).json({ error: (e as Error).message });
   }
 });
 
@@ -291,6 +318,72 @@ api.post('/projects/:project/share/link', needProject('owner'), (req, res) => {
     logAccess(req.params.project, req.user!.id, 'share', role ? `turned on link sharing (${role === 'edit' ? 'editors' : 'viewers'})` : 'turned off link sharing');
     res.json({ link, share: shareInfo(req.params.project) });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+/**
+ * Public PDF links (pdflinks.ts): `https://<server>/pdf/<token>/<name>.pdf` serves the latest
+ * build of a document to anyone. Owner only; one link per document.
+ */
+const pdfLinkInfo = (project: string) => {
+  const title = shareInfo(project).title ?? null;
+  return pdfLinksOf(project).map(l => {
+    const b = lastBuild(l.doc_id);
+    return { doc: l.doc_id.slice(project.length + 1), token: l.token, hits: l.hits, lastHitAt: l.last_hit_at, createdAt: l.created_at, fileName: pdfLinkFileName(l.doc_id, title), built: !!(b?.pdf_path && fs.existsSync(b.pdf_path)) };
+  });
+};
+const publishInfo = (project: string) => publishTargetsOf(project).map(t => ({
+  doc: t.doc_id.slice(project.length + 1), repo: t.repo, path: t.path, branch: t.branch, lastPushedAt: t.last_pushed_at, lastAttemptAt: t.last_attempt_at, lastError: t.last_error,
+  htmlUrl: `https://github.com/${t.repo}/blob/${encodeURIComponent(t.branch ?? 'HEAD')}/${t.path.split('/').map(encodeURIComponent).join('/')}`,
+}));
+api.get('/projects/:project/pdf-links', needProject('owner'), (req, res) => {
+  res.json({ docs: linkableDocs(req.params.project), links: pdfLinkInfo(req.params.project), publish: publishInfo(req.params.project), publishAvailable: publishAvailable() && !!req.user!.isAdmin });
+});
+/** Publishing the PDF into a GitHub repository (pdfpublish.ts): administrators, with the server's GITHUB_PUBLISH_TOKEN. */
+const needPublisher = (req: express.Request, res: express.Response): boolean => {
+  if (!req.user!.isAdmin) { res.status(403).json({ error: "only administrators can publish PDFs into repositories (the server's token is used)" }); return false; }
+  if (!publishAvailable()) { res.status(400).json({ error: 'GITHUB_PUBLISH_TOKEN is not configured on this server (deploy/secrets.env)' }); return false; }
+  return true;
+};
+api.post('/projects/:project/pdf-publish', needProject('owner'), async (req, res) => {
+  const project = req.params.project;
+  if (!needPublisher(req, res)) return;
+  const doc = String(req.body?.doc ?? '').trim();
+  if (!doc || !linkableDocs(project).includes(doc)) { res.status(400).json({ error: 'not a document of this project' }); return; }
+  try {
+    setPublishTarget(`${project}/${doc}`, { repo: String(req.body?.repo ?? ''), path: String(req.body?.path ?? ''), branch: req.body?.branch == null ? null : String(req.body.branch) }, req.user!.id);
+    logAccess(project, req.user!.id, 'share', `publishes the PDF of ${doc} to ${String(req.body?.repo ?? '').trim()}`);
+    await publishPdf(`${project}/${doc}`, 'published');
+    res.json({ publish: publishInfo(project) });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+api.post('/projects/:project/pdf-publish/push', needProject('owner'), async (req, res) => {
+  const project = req.params.project;
+  if (!needPublisher(req, res)) return;
+  const doc = String(req.body?.doc ?? '').trim();
+  await publishPdf(`${project}/${doc}`, 'pushed by hand');
+  res.json({ publish: publishInfo(project) });
+});
+api.delete('/projects/:project/pdf-publish/*', needProject('owner'), (req, res) => {
+  const project = req.params.project;
+  if (!req.user!.isAdmin) { res.status(403).json({ error: 'only administrators can change this' }); return; }
+  const doc = decodeURIComponent(String((req.params as any)[0] ?? ''));
+  if (deletePublishTarget(`${project}/${doc}`)) logAccess(project, req.user!.id, 'share', `stopped publishing the PDF of ${doc}`);
+  res.json({ publish: publishInfo(project) });
+});
+api.post('/projects/:project/pdf-links', needProject('owner'), (req, res) => {
+  const project = req.params.project;
+  const doc = String(req.body?.doc ?? '').trim();
+  if (!doc || !linkableDocs(project).includes(doc)) { res.status(400).json({ error: 'not a document of this project' }); return; }
+  const link = createPdfLink(`${project}/${doc}`, req.user!.id);
+  logAccess(project, req.user!.id, 'share', `turned on the public PDF link of ${doc}`);
+  res.json({ link: pdfLinkInfo(project).find(l => l.token === link.token), links: pdfLinkInfo(project) });
+});
+api.delete('/projects/:project/pdf-links/:token', needProject('owner'), (req, res) => {
+  const project = req.params.project;
+  const link = pdfLinkByToken(String(req.params.token));
+  if (!link || link.doc_id.split('/')[0] !== project) { res.status(404).json({ error: 'no such link' }); return; }
+  deletePdfLink(link.doc_id);
+  logAccess(project, req.user!.id, 'share', `turned off the public PDF link of ${link.doc_id.slice(project.length + 1)}`);
+  res.json({ ok: true, links: pdfLinkInfo(project) });
 });
 api.post('/projects/:project/share/owner', needProject('owner'), (req, res) => {
   try { setOwner(req.params.project, String(req.body?.username ?? '')); logAccess(req.params.project, req.user!.id, 'share', `made ${String(req.body?.username ?? '')} the owner`); res.json({ share: shareInfo(req.params.project) }); }
@@ -1164,6 +1257,44 @@ api.get('/vscode-extension', async (_req, res) => {
   res.sendFile(file);
 });
 
+/**
+ * The PDF behind a public link — for anyone, no account (a web page links or embeds it). The last
+ * build is served straight away; a project that changed since is rebuilt in the background, a
+ * document never built is built now (pdflinks.ts). `?download=1` saves instead of showing.
+ */
+app.get(['/pdf/:token', '/pdf/:token/:name'], async (req, res) => {
+  const link = pdfLinkByToken(String(req.params.token).replace(/\.pdf$/i, ''));
+  const project = link?.doc_id.split('/')[0];
+  const row = project ? projectRow(project) : undefined;
+  if (!link || !row || !fs.existsSync(projectDir(project!))) { res.status(404).type('text').send('No PDF here: the link was turned off or the project is gone.'); return; }
+  // embedding on other sites is the point of the link: no frame restrictions, no scripts
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors *");
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  let pdf: Awaited<ReturnType<typeof pdfForLink>>;
+  try { pdf = await pdfForLink(link, row.title); }
+  catch (e) { console.error('[pdf-link] build failed:', e); pdf = null; }
+  if (!pdf) {
+    const job = currentJob(link.doc_id);
+    const busy = !!job && (job.status === 'queued' || job.status === 'exporting' || job.status === 'compiling');
+    res.status(503).setHeader('Retry-After', '30');
+    res.type('text').send(busy ? 'The PDF is being built — try again in a moment.' : 'The PDF could not be built. The owner can see the errors in the editor.');
+    return;
+  }
+  const st = fs.statSync(pdf.path);
+  const etag = `"${st.size.toString(16)}-${Math.floor(pdf.updatedAt).toString(16)}"`;
+  res.setHeader('ETag', etag);
+  res.setHeader('Last-Modified', new Date(pdf.updatedAt).toUTCString());
+  res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `${req.query.download === '1' ? 'attachment' : 'inline'}; filename="${pdf.fileName}"`);
+  if (pdf.building) res.setHeader('X-OverLyX-Rebuilding', '1');
+  if (req.headers['if-none-match'] === etag) { res.status(304).end(); return; }
+  countHit(link.token);
+  res.sendFile(pdf.path);
+});
+
 // which commit runs here — public, so a deploy (scripts/deploy.sh, scripts/autodeploy.sh) and a
 // developer on another machine can confirm that their push is live
 app.get('/api/version', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ commit: appCommit, version: appVersion }); });
@@ -1180,6 +1311,7 @@ if (fs.existsSync(config.clientDist)) {
 
 adoptProjects();
 sandboxAvailable();
+startPublishing();
 void ensureAllRepos().then(() => startMirrorSweeper());
 pruneAccessLog();
 pruneGuests();

@@ -89,3 +89,20 @@ export function extractZip(buf: Buffer, dest: string, opts: { maxFiles?: number;
   }
   return { files, skipped };
 }
+
+/**
+ * Overleaf's project list downloads several projects as one archive ("Overleaf Projects -3
+ * items.zip") that holds one zip per project. Such an archive is a bundle: every project inside
+ * it becomes a project of its own (named after its zip), nothing else is written.
+ */
+export function bundledZips(buf: Buffer): { name: string; data: () => Buffer }[] | null {
+  const entries = readZip(buf).filter(e => !e.dir && safeZipPath(e.name) !== null);
+  if (!entries.length || !entries.every(e => /\.zip$/i.test(e.name))) return null;
+  return entries.map(e => ({ name: e.name.replace(/\\/g, '/').split('/').pop()!, data: e.data }));
+}
+
+/** A legal project name from a zip file name (`CV_Jan_Bauer.zip` → `CV_Jan_Bauer`). */
+export function projectNameFromZip(file: string): string {
+  const base = file.replace(/\.zip$/i, '').replace(/[^A-Za-z0-9._ -]+/g, '-').replace(/^[-. ]+|[-. ]+$/g, '').slice(0, 60);
+  return base || 'overleaf-project';
+}

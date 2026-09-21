@@ -12,7 +12,7 @@ export interface PdfState {
 
 const PHASE: Record<string, string> = { queued: 'waiting for a free build slot', exporting: 'exporting LaTeX', compiling: 'running latexmk' };
 
-export function PdfPanel({ docId, state, onBuild, onCancel, onShowTex, syncTarget, onForward, onInverse }: { docId: string; state: PdfState; onBuild: () => void; onCancel: () => void; onShowTex: () => void; /** SyncTeX: the place to show (forward search), and the double-clicked place (inverse search) */ syncTarget?: PdfTarget | null; onForward?: () => void; onInverse?: (page: number, x: number, y: number) => void }) {
+export function PdfPanel({ docId, state, onBuild, onCancel, onShowTex, syncTarget, onForward, onInverse, onPublicLink }: { docId: string; state: PdfState; onBuild: () => void; onCancel: () => void; onShowTex: () => void; /** SyncTeX: the place to show (forward search), and the double-clicked place (inverse search) */ syncTarget?: PdfTarget | null; onForward?: () => void; onInverse?: (page: number, x: number, y: number) => void; /** the owner: a public address for this PDF (opens the Share dialog) */ onPublicLink?: () => void }) {
   const [showLog, setShowLog] = useState(false);
   const [, tick] = useState(0);
   useEffect(() => { if (!state.busy) return; const t = setInterval(() => tick(x => x + 1), 1000); return () => clearInterval(t); }, [state.busy]);
@@ -26,6 +26,7 @@ export function PdfPanel({ docId, state, onBuild, onCancel, onShowTex, syncTarge
         <button class="small-btn" onClick={onShowTex} title="Show the LaTeX source as built">LaTeX</button>
         <button class="small-btn" onClick={() => setShowLog(!showLog)}>{showLog ? 'Hide log' : 'Log'}</button>
         {state.url && <a class="small-btn" href={`/api/docs/${encId(docId)}/pdf?download=1`} target="_blank">Download</a>}
+        {onPublicLink && <button class="small-btn" data-pdf-public-link onClick={onPublicLink} title="A stable public address for this PDF — link it from your web page (Share dialog ▸ Public PDF link)">🔗 Public link</button>}
         <span style={{ color: state.ok === false ? '#b00' : '#3a3', fontSize: '11px' }} title={state.builtAt ? 'built at ' + new Date(state.builtAt).toLocaleTimeString() : ''}>{state.ok === null ? '' : state.ok ? '✓ built' : '✗ errors'}</span>
       </div>
       {state.busy && job && (

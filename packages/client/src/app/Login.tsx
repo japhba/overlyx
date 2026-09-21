@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { Wordmark } from './Logo';
 import { api, googleSignInUrl, type User } from '../api';
 import { useTheme } from './theme';
+import { OverleafStart } from './OverleafStart';
 import './landing.css';
 
 export const GITHUB_URL = 'https://github.com/japhba/overlyx';
@@ -155,6 +156,15 @@ export function Login({ onLogin, google, note, onBack }: {
   const [wantPassword, setWantPassword] = useState(false);
   const showPassword = wantPassword || !google;
   const hash = useHash();
+  // projects chosen in "Coming from Overleaf?" below: they follow the visitor through the sign-in
+  const [pendingCount, setPendingCount] = useState(0);
+  const scrollTo = (sel: string) => document.querySelector(sel)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const importAndSignIn = () => {
+    if (google) { location.href = googleSignInUrl(''); return; }
+    setWantPassword(true);
+    document.querySelector('.login')?.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => document.querySelector<HTMLInputElement>('.login input[placeholder="Username"]')?.focus(), 350);
+  };
   const submit = async (e: Event) => {
     e.preventDefault();
     setBusy(true); setErr('');
@@ -185,7 +195,9 @@ export function Login({ onLogin, google, note, onBack }: {
           </div>
           <form class="signin" onSubmit={submit}>
             <h2>Get started</h2>
-            {note ? <p class="signin-note link-note" data-login-note>{note}</p> : <p class="signin-note">Sign in and your first project is one click away.</p>}
+            {note ? <p class="signin-note link-note" data-login-note>{note}</p>
+              : pendingCount ? <p class="signin-note link-note" data-login-note>{pendingCount} Overleaf project{pendingCount === 1 ? '' : 's'} will be imported right after you sign in.</p>
+              : <p class="signin-note">Sign in and your first project is one click away.</p>}
             {google && <GoogleButton />}
             <a class="vscode-get" data-vscode-get href={VSCODE_URL} target="_blank" rel="noopener">
               <VscodeIcon /><span>Get the VS Code extension</span>
@@ -205,9 +217,11 @@ export function Login({ onLogin, google, note, onBack }: {
               </div>
             )}
             {onBack && <button type="button" class="fallback-link" data-login-back onClick={onBack}>← Continue as a guest for now</button>}
-            <a class="demos-hint" href="#demos">▾ See it in action</a>
+            <a class="demos-hint" href="#overleaf" data-overleaf-hint onClick={e => { e.preventDefault(); scrollTo('#overleaf'); }}>Coming from Overleaf? Bring your projects along ▾</a>
+            <a class="demos-hint" href="#demos" onClick={e => { e.preventDefault(); scrollTo('#demos'); }}>▾ See it in action</a>
           </form>
         </header>
+        <OverleafStart google={google} onSignIn={importAndSignIn} googleIcon={<GoogleG />} onChange={setPendingCount} />
         <section class="demos" id="demos" aria-label="What OverLyX can do">
           <h2>See it in action</h2>
           <DemoWheel />

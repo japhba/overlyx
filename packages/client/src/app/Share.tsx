@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from 'preact/hooks';
 import { AvatarContent, initials } from './Avatar';
-import { api, type ActivityEntry, type ShareInfo, type User } from '../api';
+import { api, pdfLinkUrl, type ActivityEntry, type PdfLinkInfo, type PdfLinksInfo, type PdfPublishInfo, type ShareInfo, type User } from '../api';
 import { ago } from './Git';
 import { Dialog } from './Dialogs';
 
@@ -35,12 +35,21 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[] | null>(null);
+  // public PDF links: the project's documents and which of them have one
+  const [pdf, setPdf] = useState<PdfLinksInfo | null>(null);
+  const [copiedPdf, setCopiedPdf] = useState<string | null>(null);
+  // publishing into a GitHub repository: the document whose target is being edited, and the fields
+  const [pubEdit, setPubEdit] = useState<string | null>(null);
+  const [pubRepo, setPubRepo] = useState('');
+  const [pubPath, setPubPath] = useState('');
+  const [pubBranch, setPubBranch] = useState('');
   // people join through the link while the dialog is open: keep the list fresh (poll + on focus)
   useEffect(() => {
     let alive = true;
     const load = () => Promise.all([
       api.share(project).then(i => { if (alive) setInfo(i); }),
       api.activity(project, 40).then(r => { if (alive) setActivity(r.entries); }).catch(() => {}),
+      api.pdfLinks(project).then(r => { if (alive) setPdf(r); }).catch(() => {}),
     ]).catch(e => { if (alive) setErr((e as Error).message); });
     void load();
     const t = setInterval(() => { if (!document.hidden) void load(); }, 4000);
@@ -62,6 +71,27 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
     setCopied(true); setTimeout(() => setCopied(false), 2000);
   };
   const title = info?.title ?? project;
+  const updatePdf = async (fn: () => Promise<{ links: PdfLinkInfo[] }>) => {
+    setBusy(true); setErr('');
+    try { const r = await fn(); setPdf(p => p ? { ...p, links: r.links } : p); onChanged?.(); }
+    catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const updatePublish = async (fn: () => Promise<{ publish: PdfPublishInfo[] }>): Promise<boolean> => {
+    setBusy(true); setErr('');
+    try { const r = await fn(); setPdf(p => p ? { ...p, publish: r.publish } : p); onChanged?.(); return true; }
+    catch (e) { setErr((e as Error).message); return false; }
+    finally { setBusy(false); }
+  };
+  const editPublish = (doc: string, cur?: PdfPublishInfo) => { setPubEdit(doc); setPubRepo(cur?.repo ?? ''); setPubPath(cur?.path ?? ''); setPubBranch(cur?.branch ?? ''); };
+  const savePublish = async (doc: string) => {
+    if (await updatePublish(() => api.setPdfPublish(project, { doc, repo: pubRepo, path: pubPath, branch: pubBranch || null }))) setPubEdit(null);
+  };
+  const copyPdf = async (l: PdfLinkInfo) => {
+    const url = pdfLinkUrl(l);
+    try { await navigator.clipboard.writeText(url); } catch { const el = document.querySelector<HTMLInputElement>(`[data-pdf-link-doc="${l.doc}"] input`); el?.select(); document.execCommand('copy'); }
+    setCopiedPdf(l.token); setTimeout(() => setCopiedPdf(null), 2000);
+  };
 
   return (
     <Dialog title={`Share “${title}”`} onClose={onClose}>
@@ -120,6 +150,55 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
               <button class="btn" onClick={() => void copy()}>{copied ? 'Copied ✓' : 'Copy link'}</button>
             </div>
           )}
+          <h4>Public PDF link</h4>
+          <div class="hint">A stable address that serves the latest PDF of a document to anyone — link it from your web page, or embed it. It is rebuilt when the project changed; readers need no account.</div>
+          <div class="pdf-links" data-pdf-links>
+            {(pdf?.docs ?? []).map(d => {
+              const l = pdf?.links.find(x => x.doc === d);
+              return (
+                <div key={d} data-pdf-link-doc={d}>
+                  <div class="pdf-link-row">
+                    <span class="doc" title={d}>📄 {d}</span>
+                    {l ? (
+                      <>
+                        <input type="text" readonly value={pdfLinkUrl(l)} onFocus={e => (e.target as HTMLInputElement).select()} />
+                        <button class="btn" disabled={busy} onClick={() => void copyPdf(l)}>{copiedPdf === l.token ? 'Copied ✓' : 'Copy'}</button>
+                        <button class="mini" title="Turn the link off — the address stops working" disabled={busy} data-pdf-link-off onClick={() => void updatePdf(() => api.deletePdfLink(project, l.token))}>✕</button>
+                      </>
+                    ) : <button class="btn small" disabled={busy} data-pdf-link-on onClick={() => void updatePdf(() => api.createPdfLink(project, d))}>Turn on</button>}
+                  </div>
+                  {l && <div class="hint small">{l.built ? '' : 'Not built yet — the first reader waits for the build. '}{l.hits ? `Fetched ${l.hits} time${l.hits === 1 ? '' : 's'}${l.lastHitAt ? `, last ${ago(l.lastHitAt)}` : ''}.` : 'Nobody has fetched it yet.'}</div>}
+                  {pdf?.publishAvailable && (() => {
+                    const pub = pdf.publish.find(x => x.doc === d);
+                    return (
+                      <div class="pdf-publish" data-pdf-publish-doc={d}>
+                        {pub && pubEdit !== d && (
+                          <div class="hint small">
+                            After every build the PDF is committed to <a href={pub.htmlUrl} target="_blank" rel="noopener">{pub.repo}:{pub.path}</a>{pub.branch ? ` (${pub.branch})` : ''} —{' '}
+                            {pub.lastError ? <span class="err">{pub.lastError}</span> : pub.lastPushedAt ? `last pushed ${ago(pub.lastPushedAt)}` : 'nothing pushed yet'}.{' '}
+                            <button class="mini" disabled={busy} data-pdf-publish-push onClick={() => void updatePublish(() => api.pushPdfPublish(project, d))}>Push now</button>{' '}
+                            <button class="mini" disabled={busy} onClick={() => editPublish(d, pub)}>Change…</button>{' '}
+                            <button class="mini" disabled={busy} title="Stop publishing (the file in the repository stays)" data-pdf-publish-off onClick={() => void updatePublish(() => api.deletePdfPublish(project, d))}>✕</button>
+                          </div>
+                        )}
+                        {!pub && pubEdit !== d && <button type="button" class="fallback-link left" data-pdf-publish-on onClick={() => editPublish(d)}>Also commit the PDF to a GitHub repository (GitHub Pages)…</button>}
+                        {pubEdit === d && (
+                          <form class="share-add pdf-publish-form" onSubmit={e => { e.preventDefault(); void savePublish(d); }}>
+                            <input type="text" placeholder="owner/repository" value={pubRepo} disabled={busy} data-pdf-publish-repo onInput={e => setPubRepo((e.target as HTMLInputElement).value)} />
+                            <input type="text" placeholder="path/in/repo/name.pdf" value={pubPath} disabled={busy} data-pdf-publish-path onInput={e => setPubPath((e.target as HTMLInputElement).value)} />
+                            <input type="text" class="branch" placeholder="branch" title="Branch (the default branch when empty)" value={pubBranch} disabled={busy} onInput={e => setPubBranch((e.target as HTMLInputElement).value)} />
+                            <button class="btn" disabled={busy || !pubRepo.trim() || !pubPath.trim()} data-pdf-publish-save>Save & push</button>
+                            <button type="button" class="mini" disabled={busy} onClick={() => setPubEdit(null)}>Cancel</button>
+                          </form>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+            {pdf && !pdf.docs.length && <div class="hint">No documents in this project yet.</div>}
+          </div>
           <h4>Activity</h4>
           <div class="hint">Who opened, built, pulled or pushed this project, changes to its sharing, and every time an administrator opened it (repeated opens by the same person are one entry per 10 minutes).</div>
           <div class="share-activity git-tokens" data-share-activity>

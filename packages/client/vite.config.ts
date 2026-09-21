@@ -78,6 +78,7 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
+      '/pdf': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
       '/ws': { target: `ws://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`, ws: true },
     },
   },

@@ -4,7 +4,8 @@
  */
 import { useEffect, useState } from 'preact/hooks';
 import { api, type AdminProjectInfo, type Project, type User } from '../api';
-import { OverleafImport } from './OverleafImport';
+import { OverleafImport, type ImportInitial } from './OverleafImport';
+import { takePendingImport } from './pendingImport';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -23,6 +24,21 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [adminList, setAdminList] = useState<AdminProjectInfo[] | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  // an import chosen on the landing page before the sign-in: runs now, and a lone project opens itself
+  const [pending, setPending] = useState<ImportInitial | null>(null);
+  useEffect(() => {
+    if (user.guest) return;
+    void takePendingImport().then(p => { if (p) { setPending({ links: p.links, token: p.token, zips: p.zips }); setImportOpen(true); } });
+  }, []);
+  const openImported = async (names: string[]) => {
+    if (names.length !== 1) return;
+    try {
+      const r = await api.projects();
+      const p = r.projects.find(x => x.name === names[0]);
+      const doc = p && projectDocs(p)[0];
+      if (doc) { setImportOpen(false); setPending(null); onOpen(p.name + '/' + doc); }
+    } catch { /* the start page shows the project */ }
+  };
   const load = () => Promise.all([
     api.projects().then(r => setProjects(r.projects)).catch(e => { setProjects([]); notify('Could not load projects: ' + (e as Error).message, 'error'); }),
     user.isAdmin ? api.adminProjects().then(r => setAdminList(r.projects)).catch(() => setAdminList(null)) : Promise.resolve(),
@@ -100,7 +116,8 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {!user.guest && <button class="btn" data-import-overleaf onClick={() => setImportOpen(true)} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
         <button class="btn" onClick={onBrowse}>Show the documents panel</button>
       </div>
-      {importOpen && <OverleafImport existing={(projects ?? []).map(p => p.name)} onClose={() => setImportOpen(false)} onImported={() => { void load(); onChanged(); }} notify={notify} />}
+      {importOpen && <OverleafImport existing={(projects ?? []).map(p => p.name)} onClose={() => { setImportOpen(false); setPending(null); }} onImported={() => { void load(); onChanged(); }} notify={notify}
+        initial={pending ?? undefined} autostart={!!pending} onDone={names => void openImported(names)} />}
       {projects === null && <div class="meta">Loading your projects…</div>}
       {example && <div class="cards">{card(example)}</div>}
       {mine.length > 0 && <><h3>Your projects</h3><div class="cards">{mine.map(card)}</div></>}
