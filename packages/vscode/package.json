@@ -172,7 +172,7 @@
         "overlyx.defaultEditor": {
           "type": "boolean",
           "default": false,
-          "description": "Open .tex files in the OverLyX editor by default (otherwise use “Reopen Editor With…” or the editor-title button)."
+          "description": "Open .tex files in the OverLyX editor by default: keeps the *.tex entry of workbench.editorAssociations pointing at the OverLyX editor (off: files open in the text editor; use “Reopen Editor With…” or the editor-title button)."
         },
         "overlyx.updates": {
           "type": "string",

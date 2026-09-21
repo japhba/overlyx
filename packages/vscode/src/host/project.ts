@@ -5,6 +5,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { hasSettingsLine } from '@overlyx/core';
 
 export type FileKind = 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'dir' | 'other';
 export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: FileKind }
@@ -24,18 +25,20 @@ function fileKind(name: string): FileKind {
 export function isBackupFile(name: string): boolean { return name.endsWith('~') || name.endsWith('.bak'); }
 
 /** What a .tex file contains, cached by mtime + size. */
-const texInfoCache = new Map<string, { key: string; hasDocument: boolean; includes: string[]; bodyIncludes: string[] }>();
-/** `includes`: every \input / \include; `bodyIncludes`: those after \begin{document} — the child documents (a preamble \input{macros} is a macro file, not a child) */
-export function texInfo(abs: string, st: fs.Stats): { hasDocument: boolean; includes: string[]; bodyIncludes: string[] } {
+const texInfoCache = new Map<string, { key: string; hasDocument: boolean; authored: boolean; includes: string[]; bodyIncludes: string[] }>();
+/** `includes`: every \input / \include; `bodyIncludes`: those after \begin{document} — the child documents (a preamble \input{macros} is a macro file, not a child); `authored`: OverLyX wrote the file (settings line) */
+export function texInfo(abs: string, st: fs.Stats): { hasDocument: boolean; authored: boolean; includes: string[]; bodyIncludes: string[] } {
   const key = `${st.mtimeMs}:${st.size}`;
   const hit = texInfoCache.get(abs);
   if (hit && hit.key === key) return hit;
   let hasDocument = false;
+  let authored = false;
   const includes: string[] = [];
   const bodyIncludes: string[] = [];
   if (st.size < 16 * 1024 * 1024) {
     let text = '';
     try { text = fs.readFileSync(abs, 'utf8'); } catch { /* ignore */ }
+    authored = hasSettingsLine(text);
     // comments do not count (a note may quote \begin{document})
     const code = text.split('\n').map(l => {
       let out = '';
@@ -54,7 +57,7 @@ export function texInfo(abs: string, st: fs.Stats): { hasDocument: boolean; incl
       if (docStart < 0 || (m.index ?? 0) > docStart) bodyIncludes.push(m[1].trim());
     }
   }
-  const info = { key, hasDocument, includes, bodyIncludes };
+  const info = { key, hasDocument, authored, includes, bodyIncludes };
   if (texInfoCache.size > 500) texInfoCache.clear();
   texInfoCache.set(abs, info);
   return info;
@@ -79,7 +82,7 @@ export function collectFiles(root: string, dir = root, out: ProjectFile[] = [], 
   return depth === 0 ? classifyDocs(root, out.sort((a, b) => a.path.localeCompare(b.path))) : out;
 }
 
-/** .tex files with \begin{document}, and everything they (transitively) include, are documents. */
+/** .tex files with \begin{document} or written by OverLyX (settings line), and everything they (transitively) include, are documents. */
 function classifyDocs(root: string, files: ProjectFile[]): ProjectFile[] {
   const byPath = new Map(files.map(f => [f.path, f]));
   const docs: ProjectFile[] = [];
@@ -87,7 +90,8 @@ function classifyDocs(root: string, files: ProjectFile[]): ProjectFile[] {
     if (f.kind !== 'tex' || isBackupFile(f.name)) continue;
     let st: fs.Stats;
     try { st = fs.statSync(path.join(root, f.path)); } catch { continue; }
-    if (texInfo(path.join(root, f.path), st).hasDocument) { f.kind = 'doc'; docs.push(f); }
+    const info = texInfo(path.join(root, f.path), st);
+    if (info.hasDocument || info.authored) { f.kind = 'doc'; docs.push(f); }
   }
   const queue = [...docs];
   const seen = new Set(docs.map(d => d.path));
@@ -95,7 +99,8 @@ function classifyDocs(root: string, files: ProjectFile[]): ProjectFile[] {
     const d = queue.shift()!;
     let st: fs.Stats;
     try { st = fs.statSync(path.join(root, d.path)); } catch { continue; }
-    for (const inc of texInfo(path.join(root, d.path), st).includes) {
+    // only what the body includes is a child; a preamble \input{macros} stays a macro file (as on the server)
+    for (const inc of texInfo(path.join(root, d.path), st).bodyIncludes) {
       const rel = path.normalize(path.join(path.dirname(d.path), inc.endsWith('.tex') ? inc : inc + '.tex'));
       const f = byPath.get(rel);
       if (f && f.kind === 'tex' && !seen.has(rel)) { f.kind = 'doc'; seen.add(rel); queue.push(f); }

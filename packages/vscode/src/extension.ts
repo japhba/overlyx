@@ -281,6 +281,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     }),
   );
 
+  // `overlyx.defaultEditor`: .tex files open in the OverLyX editor unless the user picks another.
+  // The custom editor is registered with priority "option" (installing the extension must not take
+  // .tex files away from anyone), so the setting is carried out through the user's own
+  // `workbench.editorAssociations` — the entry VS Code consults for every open (explorer, Quick
+  // Open, `code file.tex`). Switching the setting off removes only the entry it wrote.
+  const applyDefaultEditor = async (switched: boolean): Promise<void> => {
+    const want = vscode.workspace.getConfiguration('overlyx').get<boolean>('defaultEditor') ?? false;
+    const workbench = vscode.workspace.getConfiguration('workbench');
+    const associations = { ...(workbench.inspect<Record<string, string>>('editorAssociations')?.globalValue ?? {}) };
+    if (want && associations['*.tex'] !== 'overlyx.texEditor') {
+      associations['*.tex'] = 'overlyx.texEditor';
+      await workbench.update('editorAssociations', associations, vscode.ConfigurationTarget.Global);
+    } else if (!want && switched && associations['*.tex'] === 'overlyx.texEditor') {
+      delete associations['*.tex'];
+      await workbench.update('editorAssociations', Object.keys(associations).length ? associations : undefined, vscode.ConfigurationTarget.Global);
+    }
+  };
+  const defaultEditorFailed = (e: unknown): void => {
+    telemetry.report(e instanceof Error ? e : new Error(String(e)), 'settings.defaultEditor');
+    void vscode.window.showErrorMessage(`OverLyX could not update workbench.editorAssociations: ${String(e)}`);
+  };
+  void applyDefaultEditor(false).catch(defaultEditorFailed);
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('overlyx.defaultEditor')) void applyDefaultEditor(true).catch(defaultEditorFailed); }));
+
   updater.schedule();
 
   return { registry, bridgeBase: () => bridge.base, checkForUpdates: (opts) => updater.check(opts ?? { interactive: true }) };

@@ -104,6 +104,13 @@ describe('vscode host document pipeline', () => {
     expect(child?.kind).toBe('doc');   // included by a document
     expect(findMaster(root, 'chapter.tex')).toBe('main.tex');
     expect(findMaster(root, 'main.tex')).toBeNull();
+    // fragments nobody includes: plain LaTeX sources — unless OverLyX wrote them (settings line)
+    expect(files.find(f => f.path === 'loose.tex')?.kind).toBe('tex');
+    expect(files.find(f => f.path === 'macros.tex')?.kind).toBe('tex');
+    fs.writeFileSync(path.join(root, 'plan.tex'), '%% overlyx-settings: {"textclass":"article"}\n\n\\section{Plan}\nNotes edited on their own.\n');
+    const plan = collectFiles(root).find(f => f.path === 'plan.tex');
+    expect(plan?.kind).toBe('doc');
+    expect(findMaster(root, 'plan.tex')).toBeNull();
   });
 
   it('parses a child document with its master header', () => {

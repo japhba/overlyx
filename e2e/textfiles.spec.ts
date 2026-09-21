@@ -129,6 +129,31 @@ test('text files open in a tab with the text editor; edits are saved automatical
   await admin.close();
 });
 
+test('a fragment OverLyX saved on its own (settings line, no master) opens in the document editor', async ({ browser }) => {
+  // written by the VS Code extension for a new .tex file and pushed to the server: no \documentclass,
+  // no \begin{document}, nobody \inputs it — still a document, not a preamble file
+  const PLAN = '%% overlyx-settings: {"textclass":"article"}\n\n\\section{Plan}\n\\begin{itemize}\n\\item first step\n\\end{itemize}\n';
+  writeFileSync(`${DIR}/plan.tex`, PLAN);
+  const admin = await asUser(browser);
+  const page = await admin.newPage();
+  await page.goto('/#/' + PROJECT + '/plan.tex');
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  await expect(page).toHaveURL(/#\/e2e-text\/plan\.tex$/);          // not redirected to #/text:…
+  await expect(page.locator('.text-editor')).toHaveCount(0);
+  await expect(page.locator('.lyx-editor')).toContainText('first step');
+  await expect(page.locator('.docpanel .doc-tab[data-doc="plan.tex"]')).toBeVisible();   // listed as a document
+  // editing keeps it a fragment: the settings line stays, no \begin{document} is added
+  await page.locator('.lyx-editor .lyx-par').last().click({ timeout: 10000 });
+  await page.keyboard.press('End');
+  await page.keyboard.type(' done');
+  await expect.poll(() => readFileSync(`${DIR}/plan.tex`, 'utf8'), { timeout: 15000 }).toContain('first step done');
+  const saved = readFileSync(`${DIR}/plan.tex`, 'utf8');
+  expect(saved.startsWith('%% overlyx-settings: ')).toBe(true);
+  expect(saved).not.toContain('\\begin{document}');
+  await admin.close();
+  rmSync(`${DIR}/plan.tex`, { force: true });
+});
+
 test('a change on the server is detected instead of overwritten', async ({ browser }) => {
   const admin = await asUser(browser);
   const page = await admin.newPage();

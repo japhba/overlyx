@@ -8,7 +8,7 @@ export { writeTex } from './write.ts';
 export type { WriteTexOptions, WriteTexResult } from './write.ts';
 export { importLyx, lyxDocumentToTex, prepareForTex } from './import.ts';
 export type { ImportLyxOptions, ImportLyxResult } from './import.ts';
-export { splitDocument, readSettings, settingsFromHeader, settingsLine, preambleFacts, providedFeatures, makeHeaderLines, MANAGED_BEGIN, MANAGED_END, SETTINGS_PREFIX } from './preamble.ts';
+export { splitDocument, readSettings, settingsFromHeader, settingsLine, preambleFacts, providedFeatures, makeHeaderLines, MANAGED_BEGIN, MANAGED_END, SETTINGS_PREFIX, hasSettingsLine } from './preamble.ts';
 export { Scanner } from './scanner.ts';
 export { checkTexHealth, repairTex } from './health.ts';
 export { lintTex, maskOpaque } from './lint.ts';

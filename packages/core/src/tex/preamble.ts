@@ -10,6 +10,13 @@ import { stripComments } from '../macros.ts';
 export const MANAGED_BEGIN = '%% OverLyX ------------------------------------------------------------------';
 export const MANAGED_END = '%% end OverLyX --------------------------------------------------------------';
 export const SETTINGS_PREFIX = '%% overlyx-settings: ';
+const SETTINGS_LINE_RE = new RegExp('^[ \\t]*' + SETTINGS_PREFIX.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&'), 'm');
+/**
+ * Does the text carry an OverLyX settings line? OverLyX writes one into every file it saves as a
+ * document — in the managed block of a full document, at the top of a fragment (a child, or a
+ * note edited on its own) — so it marks a .tex file as a document even without \\begin{document}.
+ */
+export function hasSettingsLine(text: string): boolean { return SETTINGS_LINE_RE.test(text); }
 export const EARLY_BEGIN = '%% OverLyX package options';
 export const EARLY_END = '%% end OverLyX package options';
 

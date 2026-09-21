@@ -11,7 +11,8 @@ reproduced byte for byte until you change them.
 ## What you get
 
 - **OverLyX editor** for `.tex` files (right-click a file ▸ *Reopen Editor With…* ▸ *OverLyX
-  Editor*, or the editor-title button). The document stays an ordinary VS Code `TextDocument`:
+  Editor*, or the editor-title button; the `overlyx.defaultEditor` setting makes it the default for
+  every `.tex` file). The document stays an ordinary VS Code `TextDocument`:
   dirty state, Ctrl+S, autosave, git and extensions all see the same file.
 - **The web client's editor, not a copy of it.** The plugins, toolbars and dialogs are the same
   code the website runs (`packages/client`), so what lands there lands here with the next release:

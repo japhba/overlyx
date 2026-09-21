@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { hasSettingsLine } from '@overlyx/core';
 import { config } from './config.ts';
 
-/** `doc`: a .tex document (has \\begin{document}, or is \\input by one); `tex`: other LaTeX sources (preamble, macros, .sty); `dir`: a directory (so empty folders show in the explorer) */
+/** `doc`: a .tex document (has \\begin{document}, is \\input by one, or was written by OverLyX — a fragment with its settings line); `tex`: other LaTeX sources (preamble, macros, .sty); `dir`: a directory (so empty folders show in the explorer) */
 export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'dir' | 'other' }
 export interface Project { name: string; path: string; files: ProjectFile[] }
 
@@ -32,16 +33,19 @@ export function listProjects(): Project[] {
 }
 
 /** What a .tex file contains, cached by mtime + size. */
-const texInfoCache = new Map<string, { key: string; hasDocument: boolean; includes: string[] }>();
-function texInfo(abs: string, st: fs.Stats): { hasDocument: boolean; includes: string[] } {
+const texInfoCache = new Map<string, { key: string; hasDocument: boolean; authored: boolean; includes: string[] }>();
+/** `authored`: OverLyX wrote the file (it carries a settings line) — a fragment edited on its own is a document, not a preamble. */
+function texInfo(abs: string, st: fs.Stats): { hasDocument: boolean; authored: boolean; includes: string[] } {
   const key = `${st.mtimeMs}:${st.size}`;
   const hit = texInfoCache.get(abs);
   if (hit && hit.key === key) return hit;
   let hasDocument = false;
+  let authored = false;
   const includes: string[] = [];
   if (st.size < 16 * 1024 * 1024) {
     let text = '';
     try { text = fs.readFileSync(abs, 'utf8'); } catch { /* ignore */ }
+    authored = hasSettingsLine(text);
     // comments do not count (a note may quote \begin{document})
     const code = text.split('\n').map(l => { let out = ''; for (let i = 0; i < l.length; i++) { const c = l[i]; if (c === '\\') { out += c + (l[i + 1] ?? ''); i++; continue; } if (c === '%') break; out += c; } return out; }).join('\n');
     const begin = code.indexOf('\\begin{document}');
@@ -51,12 +55,12 @@ function texInfo(abs: string, st: fs.Stats): { hasDocument: boolean; includes: s
     for (const m of body.matchAll(/\\(?:input|include)\s*\{([^}]+)\}/g)) includes.push(m[1].trim());
   }
   if (texInfoCache.size > 2000) texInfoCache.clear();
-  const info = { key, hasDocument, includes };
+  const info = { key, hasDocument, authored, includes };
   texInfoCache.set(abs, info);
   return info;
 }
 
-/** Mark .tex files that are documents (own \\begin{document}, or \\input by a document's body). */
+/** Mark .tex files that are documents (own \\begin{document}, written by OverLyX, or \\input by a document's body). */
 function classifyDocs(root: string, files: ProjectFile[]): ProjectFile[] {
   const byPath = new Map(files.map(f => [f.path, f]));
   const docs: ProjectFile[] = [];
@@ -64,7 +68,8 @@ function classifyDocs(root: string, files: ProjectFile[]): ProjectFile[] {
     if (f.kind !== 'tex' || !f.name.endsWith('.tex') || isBackupFile(f.name)) continue;
     let st: fs.Stats;
     try { st = fs.statSync(path.join(root, f.path)); } catch { continue; }
-    if (texInfo(path.join(root, f.path), st).hasDocument) { f.kind = 'doc'; docs.push(f); }
+    const info = texInfo(path.join(root, f.path), st);
+    if (info.hasDocument || info.authored) { f.kind = 'doc'; docs.push(f); }
   }
   // children (transitively)
   const queue = [...docs];
