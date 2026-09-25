@@ -1,10 +1,9 @@
 /**
- * The left panel, Google-Docs style: one project at a time — a switcher at the top, then the
- * project's documents as "document tabs" (main, appendix, macros …). A tab opens its document
- * and reveals its outline: live (the editor's headings, with the section tools) for the open
- * document, from the file on disk (`GET /api/docs/<id>/outline`) for the others — a heading of
- * another document opens that document at the heading. Below the documents, the project's other
- * files (the file browser without its own project picker).
+ * The left panel: one project at a time — a switcher at the top, then the project's files (the
+ * file browser without its own project picker). A document in the tree expands into its outline:
+ * the open one by itself, live (the editor's headings, with the section tools); any other with
+ * its twisty, from the file on disk (`GET /api/docs/<id>/outline`) — a heading of another
+ * document opens that document at the heading.
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
@@ -37,7 +36,6 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
   const [projects, setProjects] = useState<Project[]>([]);
   const [picked, setPicked] = useState<string | null>(() => stored('ol.project'));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [filesOpen, setFilesOpen] = useState(() => stored('ol.files.section') !== '0');
   const [statics, setStatics] = useState<Record<string, TexHeading[]>>({});
   // fsTick: the server told us the project's files changed on disk (SSE), or the window came back
   // into focus — reload the panel and the file browser without any refresh button
@@ -50,7 +48,6 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
     window.addEventListener('focus', f);
     return () => window.removeEventListener('focus', f);
   }, []);
-  useEffect(() => { try { localStorage.setItem('ol.files.section', filesOpen ? '1' : '0'); } catch { /* ignore */ } }, [filesOpen]);
 
   // the project shown: the current file's, else the last picked one, else the first
   const currentProject = current ? current.split('/')[0] : null;
@@ -75,7 +72,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
   useEffect(() => { const key = project ? `${project.name}:${project.role}:${project.via}` : ''; if (reported.current !== key) { reported.current = key; onProject?.(project); } }, [project]);
   const docs = useMemo(() => (project ? projectDocs(project) : []), [project]);
 
-  // the open document's tab is expanded (its outline is the live one)
+  // the open document is expanded (its outline is the live one)
   useEffect(() => { if (currentDoc) setExpanded(e => (e[currentDoc] ? e : { ...e, [currentDoc]: true })); }, [currentDoc]);
 
   // the agent's context: which documents are open here (the active one first)
@@ -136,31 +133,11 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
         <button class="hide" title="Hide the documents panel (Ctrl+Alt+O)" onClick={onHide}>«</button>
       </div>
       <div class="panel-body">
-        {project && (
-          <div class="doc-tabs" data-doc-tabs>
-            {docs.map(d => {
-              const id = `${project.name}/${d}`;
-              const active = id === current || id === currentDoc;
-              const open = !!expanded[id];
-              return (
-                <div key={id} class={'doc-tab' + (active ? ' active' : '') + (open ? ' open' : '')} data-doc={d}>
-                  <div class="doc-tab-row">
-                    <button class="twisty" title={open ? 'Hide the outline' : 'Show the outline'} onClick={() => toggle(id)}>{open ? '▾' : '▸'}</button>
-                    <a class="doc-name" href={'#/' + id} title={id} onClick={e => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(id); setExpanded(x => ({ ...x, [id]: true })); } }}>
-                      <span class="ficon">📄</span><span class="fname">{d}</span>
-                    </a>
-                  </div>
-                  {open && <div class="doc-outline">{id === currentDoc ? <Outline view={view} items={outline} activePos={activePos} /> : staticOutline(id)}</div>}
-                </div>
-              );
-            })}
-            {!docs.length && <div class="empty">No documents yet — add one with + Doc below.</div>}
-          </div>
-        )}
-        <div class={'section-head' + (filesOpen ? ' open' : '')} onClick={() => setFilesOpen(o => !o)} data-files-section>
-          <span class="twisty">{filesOpen ? '▾' : '▸'}</span> Files
-        </div>
-        {filesOpen && <FileBrowser current={current} project={selected} refreshKey={listKey} onOpen={id => onOpen(id)} onGit={onGit} />}
+        <FileBrowser current={current} project={selected} refreshKey={listKey} onOpen={id => onOpen(id)} onGit={onGit} outlines={{
+          open: id => !!expanded[id],
+          toggle,
+          render: id => id === currentDoc ? <Outline view={view} items={outline} activePos={activePos} /> : staticOutline(id),
+        }} />
       </div>
     </div>
   );

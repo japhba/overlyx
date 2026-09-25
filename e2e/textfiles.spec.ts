@@ -39,7 +39,7 @@ test.beforeAll(async ({ browser }) => {
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
-test('the documents panel shows one project at a time (documents as tabs, other files below) and hides build files', async ({ browser }) => {
+test('the documents panel shows one project at a time (one tree: documents expand into their outlines) and hides build files', async ({ browser }) => {
   const admin = await asUser(browser);
   const page = await admin.newPage();
   await page.goto('/#/' + PROJECT + '/main.tex');
@@ -48,7 +48,7 @@ test('the documents panel shows one project at a time (documents as tabs, other 
   const tree = page.locator('.filetree');
   await expect(panel).toHaveAttribute('data-project', PROJECT);
   await expect(panel.locator('.project-switch')).toHaveValue(PROJECT);
-  await expect(panel.locator('.doc-tab')).toHaveCount(1);                 // main.tex is a document tab …
+  await expect(panel.locator('.doc-tab')).toHaveCount(1);                 // main.tex is a document (it has an outline) …
   await expect(tree.locator('.tree-row.file')).toHaveCount(4);          // … and the tree lists every file: main.tex, macros.tex, notes.md, refs.bib
   await expect(tree.locator('.tree-row.folder', { hasText: 'figures' })).toHaveCount(1);   // empty folders show too
   await expect(tree.locator('[data-file="main.aux"]')).toHaveCount(0);
@@ -120,7 +120,7 @@ test('text files open in a tab with the text editor; edits are saved automatical
   await page.keyboard.press('Control+s');
   await expect(ed.locator('.state')).toHaveText('✓ Saved', { timeout: 10000 });
   expect(readFileSync(`${DIR}/macros.tex`, 'utf8')).toContain('\n  % indented');
-  // the document tab still works next to it
+  // the document row still works next to it
   await page.locator('.docpanel .doc-tab[data-doc="main.tex"] .doc-name').click();
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   await expect(page.locator('.text-editor')).toHaveCount(0);

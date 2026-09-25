@@ -241,7 +241,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; const v = editorRef.current?.view; if (v) refreshMacros(v, m.macros); }).catch(() => { /* transient */ });
     }, Math.max(2500, 20000 - (Date.now() - metaAt.current)));
   });
-  // sidebars: the documents panel (left: project, document tabs, outlines, files) and the right
+  // sidebars: the documents panel (left: project, its file tree with the documents' outlines) and the right
   // panels; shown / hidden state is kept per browser (a hidden sidebar leaves a rail to bring it back)
   const [showFiles, setShowFiles] = useState(() => stored('ol.files') !== '0');
   const [rightTab, setRightTab] = useState<RightTab | null>(() => { const v = stored('ol.right'); return v !== null && (RIGHT_TABS as readonly string[]).includes(v) ? v as RightTab : null; });

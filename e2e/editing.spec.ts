@@ -406,7 +406,10 @@ test('clicking into a formula does not move the page (the math toolbars appear a
   await openPaper(page);
   const f = page.locator('.lyx-math-display').nth(3);
   await f.scrollIntoViewIfNeeded();
-  await page.mouse.move(5, 400);
+  // a neutral spot: the grey beside the page (the left panel's rows open files and headings)
+  const box = (await page.locator('.editor-scroll').boundingBox())!;
+  const aside = { x: box.x + 10, y: 400 };
+  await page.mouse.move(aside.x, aside.y);
   await page.waitForTimeout(500);
   const top = () => f.evaluate(el => el.getBoundingClientRect().top);
   const before = await top();
@@ -416,7 +419,7 @@ test('clicking into a formula does not move the page (the math toolbars appear a
   await page.waitForTimeout(300);
   expect(Math.abs((await top()) - before)).toBeLessThan(2);          // … and the formula did not move on screen
   await page.keyboard.press('Escape');
-  await page.mouse.click(5, 400);
+  await page.mouse.click(aside.x, aside.y);
   await expect(page.locator('.toolbar-math')).toHaveCount(0);
   await page.waitForTimeout(300);
   expect(Math.abs((await top()) - before)).toBeLessThan(2);

@@ -225,12 +225,14 @@ blend.
 * **Documents panel, one project at a time** (`app/DocPanel.tsx`, Google-Docs style, left; `Ctrl+Alt+O`):
   the project switcher at the top lists your projects and the ones shared with you — choosing another
   one opens *its* main document (there is no tab bar across projects any more; the hash names the one
-  file shown). Below it the project's `.tex` documents are **document tabs** (main, appendix, macros …):
-  a tab opens its document in place, and its ▸ reveals the outline — the live one (headings numbered,
-  with the ▲ ▼ ◀ ▶ section tools) for the open document, the file's headings (`GET /api/docs/<id>/outline`,
-  `core/tex/headings.ts`, no parse) for the others, where a heading opens that document at the heading
-  (`#/<doc>?heading=<n>`). *Files* underneath is the file browser for everything else (figures, `.bib`,
-  `.sty`, uploads, `+ Doc` / `+ File` / `+ Folder`); files — or whole folders — dragged in from the
+  file shown). Below it one tree of the project's files (`app/FileBrowser.tsx`, VS Code-like: folders
+  start closed, except the ones holding the open document), where a **`.tex` document expands into its
+  outline**: the open one by itself — the live outline (headings numbered, with the ▲ ▼ ◀ ▶ section
+  tools), its row brought near the top of the panel — and any other with its ▸, showing the file's
+  headings (`GET /api/docs/<id>/outline`, `core/tex/headings.ts`, no parse), where a heading opens that
+  document at the heading (`#/<doc>?heading=<n>`). A click on a row opens the file in place (figures,
+  `.bib`, `.sty` … in the text editor or a browser tab); `+ Doc` / `+ File` / `+ Folder`, and what was
+  just created, moved or uploaded is revealed; files — or whole folders — dragged in from the
   computer are uploaded to where they are dropped (the project, or the folder row under the pointer);
   LaTeX build products (`.aux`, `.log`, `.bbl`, …) and LyX
   backups are hidden unless *All files* is on. The *Navigate* menu lists the sections as well

@@ -179,14 +179,15 @@ test.describe('landing page', () => {
 });
 
 test.describe('sidebars', () => {
-  test('the documents panel (project, document tabs, outline) and the right panels hide into rails; the state survives a reload', async ({ page }) => {
+  test('the documents panel (project, file tree, outline) and the right panels hide into rails; the state survives a reload', async ({ page }) => {
     await login(page);
     await openDoc(page, 'recurrent_feature/main.tex');
-    // the documents panel is shown at first: the project, its documents, the open one expanded with its live outline; no top tab bar; the right side is a rail
+    // the documents panel is shown at first: the project, its files, the open document expanded into its live outline; no top tab bar; the right side is a rail
     await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
     await expect(page.locator('.docpanel .project-switch')).toHaveValue('recurrent_feature');
     await expect(page.locator('.docpanel .doc-tab.active .fname')).toHaveText('main.tex');
     await expect(page.locator('.docpanel .doc-tab.active .outline-item').first()).toBeVisible();
+    await expect(page.locator('.docpanel .filetree .doc-tab.active > .tree-row.current')).toHaveCount(1);   // one tree: the document's row is a file row, its outline under it
     await expect(page.locator('.tabbar')).toHaveCount(0);
     await expect(page.locator('.rail.left')).toHaveCount(0);
     await expect(page.locator('.rail.right')).toBeVisible();
@@ -218,18 +219,18 @@ test.describe('sidebars', () => {
     await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
   });
 
-  test('document tabs open the documents of the project in place and reveal their outlines; a heading of a closed document opens it there', async ({ page }) => {
+  test('documents in the file tree open in place and expand into their outlines; a heading of a closed document opens it there', async ({ page }) => {
     await login(page);
     await openDoc(page, 'recurrent_feature/main.tex');
     const tabs = page.locator('.docpanel .doc-tab');
     const main = page.locator('.docpanel .doc-tab[data-doc="main.tex"]');   // (the project also has main.tex files in sub-directories)
     await expect(main).toHaveClass(/active/);
-    // the appendix is not open: its tab expands to the headings of the file
+    // the appendix is not open: its twisty expands it into the headings of the file
     const app = page.locator('.docpanel .doc-tab[data-doc="appendix.tex"]');
     await app.locator('.twisty').click();
     await expect(app.locator('.outline-item.static').first()).toBeVisible({ timeout: 10000 });
     const second = (await app.locator('.outline-item.static').nth(1).textContent() ?? '').replace(/^[A-Z0-9.]+\s*/, '').trim();
-    // a heading opens that document with the cursor on the heading; the tab becomes the active one with the live outline
+    // a heading opens that document with the cursor on the heading; its row becomes the active one with the live outline
     await app.locator('.outline-item.static').nth(1).click();
     await expect(page).toHaveURL(/appendix\.tex\?heading=1$/);
     await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
@@ -247,7 +248,7 @@ test.describe('sidebars', () => {
     await page.locator('.menubar .menu button', { hasText: 'Navigate' }).click();
     await expect(page.locator('.menu-item', { hasText: second.slice(0, 12) })).not.toHaveCount(0);
     await page.keyboard.press('Escape');
-    // back to the main document by its tab; the project switcher shows the project
+    // back to the main document by its row; the project switcher shows the project
     await main.locator('.doc-name').click();
     await expect(page).toHaveURL(/recurrent_feature\/main\.tex$/);
     await expect(main).toHaveClass(/active/);

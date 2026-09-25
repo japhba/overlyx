@@ -2,8 +2,9 @@
  * File browser: one project at a time (a switcher at the top lists everything the user can open —
  * own projects, shared ones, and for administrators all others). Documents and text files open in
  * tabs; images and PDFs open in a browser tab. LaTeX build products and LyX backups are hidden
- * unless "all files" is on.
+ * unless "all files" is on. Under the documents panel a document row expands into its outline.
  */
+import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } from '../api';
 import { subscribeProjectEvents } from '../projectevents';
@@ -53,10 +54,15 @@ let fileClip: { project: string; path: string; cut: boolean } | null = null;
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 export const projectLabel = (p: Project) => p.title ?? p.name;
 
-export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, project: controlled }: {
+/** A document row's outline (the documents panel): whether it is expanded, the twisty, and what to show under the row. */
+export interface DocOutlines { open: (id: string) => boolean; toggle: (id: string) => void; render: (id: string) => ComponentChildren }
+
+export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, project: controlled, outlines }: {
   current: string | null; onOpen: (id: string) => void; onShare?: (project: string) => void; onGit?: (project: string) => void; refreshKey: number;
   /** the project to show, chosen outside (the documents panel): no picker of its own */
   project?: string | null;
+  /** documents expand into their outline in place */
+  outlines?: DocOutlines;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('ol.tree') || '{}'); } catch { return {}; } });
@@ -99,7 +105,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   const via = project?.via ?? 'owner';
   const canEdit = role !== 'view';
   // standalone the browser refreshes itself; under the documents panel the panel subscribes (it
-  // shows the document tabs from the same listing) and bumps refreshKey for both
+  // needs the same listing for the documents' outlines) and bumps refreshKey for both
   useProjectEvents(controlled === undefined ? selected : null, load);
 
   // auto-expand the folders of the current document
@@ -110,7 +116,34 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     for (let i = 1; i < parts.length - 1; i++) open[parts[0] + ':' + parts.slice(1, i + 1).join('/')] = false;
     setCollapsed(c => ({ ...c, ...open }));
   }, [current]);
+  // … and bring its row to the top of the panel when it is out of view or low down (the outline opens under it)
+  const treeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!current) return;
+    let t = 0, tries = 0;
+    const place = () => {
+      const row = treeRef.current?.querySelector<HTMLElement>('.tree-row.current');
+      let box = row?.parentElement ?? null;
+      while (box && !(box.scrollHeight > box.clientHeight && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+      if (!row || !box) return;
+      const r = row.getBoundingClientRect(), b = box.getBoundingClientRect();
+      if (r.top >= b.top && r.top <= b.top + b.height / 2) return;
+      box.scrollTop += r.top - b.top - 8;
+      // stopped by the end of the list: the outline under the row is still coming — try again while nobody scrolled
+      if (box.scrollTop + box.clientHeight >= box.scrollHeight - 1 && ++tries < 6) t = window.setTimeout(place, 200);
+    };
+    t = window.setTimeout(place, 50);
+    return () => clearTimeout(t);
+  }, [current, project?.name]);
   const toggle = (key: string) => setCollapsed(c => ({ ...c, [key]: !c[key] }));
+  /** open the folders above a path (VS Code reveals what was just created, moved or uploaded) */
+  const reveal = (rel: string) => {
+    if (!project) return;
+    const parts = rel.split('/');
+    const open: Record<string, boolean> = {};
+    for (let i = 1; i < parts.length; i++) open[project.name + ':' + parts.slice(0, i).join('/')] = false;
+    setCollapsed(c => ({ ...c, ...open }));
+  };
 
   const newDoc = async (dir = '') => {
     if (!project) return;
@@ -154,6 +187,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
       for (const f of Array.from(input.files ?? [])) {
         try { await api.upload(project.name, (dir ? dir + '/' : '') + f.name, f); } catch (e) { alert(String((e as Error).message)); }
       }
+      if (dir) reveal(dir + '/');
       load();
     };
     input.click();
@@ -200,6 +234,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     const errors: string[] = [];
     for (const d of emptyDirs) { try { await api.fileOp(project.name, { op: 'mkdir', to: d }); } catch (e) { errors.push(`${d}: ${(e as Error).message}`); } }
     for (const { rel, file } of keep) { try { await api.upload(project.name, rel, file); } catch (e) { errors.push(`${rel}: ${(e as Error).message}`); } }
+    if (dir) reveal(dir + '/');
     await load();
     if (errors.length) alert('Not everything could be uploaded:\n' + errors.slice(0, 10).join('\n'));
   };
@@ -216,7 +251,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   /* ---- the VS Code-like context menu (right click on a file, a folder, or the background) */
   const doOp = async (body: { op: 'rename' | 'delete' | 'mkdir' | 'copy'; from?: string; to?: string }) => {
     if (!project) return;
-    try { await api.fileOp(project.name, body); await load(); } catch (e) { alert(String((e as Error).message)); }
+    try { await api.fileOp(project.name, body); if (body.to) reveal(body.to); await load(); } catch (e) { alert(String((e as Error).message)); }
   };
   /** a free name in `dir` for paste / duplicate: name.ext, name copy.ext, name copy 2.ext … */
   const freeName = (dir: string, base: string) => {
@@ -296,7 +331,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   const renderNode = (node: TreeNode, depth: number) => {
     const key = project!.name + ':' + node.path;
     if (!node.file) {
-      const isCollapsed = collapsed[key] ?? (depth > 0);
+      const isCollapsed = collapsed[key] ?? (depth > 0 || !!outlines);   // under the documents panel folders start closed: the open document stays near the top
       return (
         <div key={key}>
           <div class={'tree-row folder' + (dropDir === node.path ? ' drop-target' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }} onClick={() => toggle(key)} onContextMenu={folderCtx(node.path)}
@@ -325,22 +360,34 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
       try { const r = await api.importLyx(project!.name, f.path); await load(); onOpen(r.id); if (r.warnings.length) alert('Imported with warnings:\n' + r.warnings.slice(0, 10).join('\n')); }
       catch (e) { alert('Import failed: ' + (e as Error).message); }
     };
-    return (
-      <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (!isDoc ? ' other' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }}
+    const outlined = isDoc && !!outlines;
+    const open = outlined && outlines!.open(id);
+    const row = (
+      <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (!isDoc ? ' other' : '') + (outlined ? ' doc-name' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }}
         href={href} target={inTab ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB${isLyx ? ' · click to import as .tex' : inTab && isPdf ? ' · opens in the PDF viewer' : inTab && !isDoc ? ' · opens in the text editor' : ''}`}
         data-file={f.path}
         onDragOver={dragOver(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
         onDrop={drop(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
         onContextMenu={fileCtx(f, () => { if (isLyx) void importLyx(); else if (inTab) onOpen(tabId); else window.open(href, '_blank'); })}
         onClick={e => { if (isLyx) { e.preventDefault(); void importLyx(); return; } if (inTab && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) { e.preventDefault(); onOpen(tabId); } }}>
+        {outlines && (outlined
+          ? <span class="twisty" role="button" title={open ? 'Hide the outline' : 'Show the outline'} onClick={e => { e.preventDefault(); e.stopPropagation(); outlines.toggle(id); }}>{open ? '▾' : '▸'}</span>
+          : <span class="twisty" />)}
         <span class="ficon">{ICON[f.kind] ?? '·'}</span><span class="fname">{node.name}</span>
         {isDoc && offlineDocs.has(id) && <span class="offline-mark" title="A copy of this document is stored in this browser: it can be opened and edited offline">⬇</span>}
       </a>
     );
+    if (!outlined) return row;
+    return (
+      <div key={key} class={'doc-tab' + (id === current ? ' active' : '') + (open ? ' open' : '')} data-doc={f.path}>
+        {row}
+        {open && <div class="doc-outline" style={{ paddingLeft: 6 + depth * 14 + 17 + 'px' }}>{outlines!.render(id)}</div>}
+      </div>
+    );
   };
 
   return (
-    <div class={'filetree' + (dropDir !== null ? ' dropping' : '')} data-project={project?.name ?? ''} onContextMenu={bgCtx}
+    <div ref={treeRef} class={'filetree' + (dropDir !== null ? ' dropping' : '')} data-project={project?.name ?? ''} onContextMenu={bgCtx}
       onDragOver={dragOver('')} onDrop={drop('')}
       onDragLeave={e => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) setDropDir(null); }}>
       {controlled === undefined && <div class="project-picker">
