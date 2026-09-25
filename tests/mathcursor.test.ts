@@ -295,3 +295,27 @@ describe('selection with anchor and cursor at different depths (normalAnchor)', 
     expect(c.grabSelection()).toBe('bc');
   });
 });
+
+describe('math-mode (Ctrl+M): \\text{} in math, math again inside text (LyX LFUN_MATH_MODE)', () => {
+  it('math inside \\text{} is \\ensuremath, not a second \\text', () => {
+    const c = at('$0$');
+    c.mathMode();
+    expect(c.mode).toBe('text');
+    type(c, ' (requires ');
+    c.mathMode();
+    expect(c.mode).toBe('math');
+    type(c, 'p(x)');
+    expect(out(c)).toBe('$0\\text{ (requires \\ensuremath{p(x)}}$');
+  });
+  it('wraps a selection inside text into math', () => {
+    const h = parseFormula('$\\text{if xy}$', {});
+    const c = new MathCursor(h, {});
+    const text = atomCells(h)[0][0];
+    c.slices = [{ owner: h, idx: 0, pos: 0 }, { owner: text, idx: 0, pos: 3 }];
+    c.resetAnchor();
+    c.setCursorSelectionTo([{ owner: h, idx: 0, pos: 0 }, { owner: text, idx: 0, pos: 5 }]);
+    expect(c.grabSelection()).toBe('xy');
+    c.mathMode();
+    expect(out(c)).toBe('$\\text{if \\ensuremath{xy}}$');
+  });
+});

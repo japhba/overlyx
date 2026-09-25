@@ -351,7 +351,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
     ],
     [
       { id: 'm-limits', title: 'Toggle limits placement (\\limits)', icon: 'lim', html: mathPreview('\\sum\\limits_{i}') ?? undefined, action: () => mathExec('limits') },
-      { id: 'm-text', title: 'Text in formula (Ctrl+M)', icon: 'Tx', action: () => mathExec('text') },
+      { id: 'm-text', title: 'Text in formula; inside text, math again (Ctrl+M)', icon: 'Tx', action: () => mathExec('text') },
       { id: 'tb-mathpanels', title: 'Show math panels', icon: 'mathpanelstb', active: tbMode('mathpanels') !== 'off', palette: toggle('mathpanels', 'Show math panels') },
     ],
   ];

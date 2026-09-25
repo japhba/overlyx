@@ -111,7 +111,7 @@ function commonMathMenu(f: LyxMathField): MenuItem[] {
       { label: 'Sum', shortcut: 'Alt+M U', action: ins('\\sum') },
       { label: 'Integral', shortcut: 'Alt+M I', action: ins('\\int') },
       { label: 'Limit', shortcut: 'Alt+M L', action: ins('\\lim') },
-      { label: 'Text', shortcut: 'Ctrl+M', action: () => { f.focus(); f.execute('text'); } },
+      { label: c.mode === 'text' ? 'Math inside the text' : 'Text', shortcut: 'Ctrl+M', action: () => { f.focus(); f.execute('text'); } },
       { label: 'Superscript', shortcut: 'Alt+M E', action: () => { f.focus(); f.execute('moveToSuperscript'); } },
       { label: 'Subscript', shortcut: 'Alt+M X', action: () => { f.focus(); f.execute('moveToSubscript'); } },
       { label: 'Delimiters', sub: DELIMS.map(([l, a, b]) => ({ label: l, action: () => { f.focus(); f.execute('delim', a, b); } })) },

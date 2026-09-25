@@ -274,7 +274,7 @@ export class LyxMathField {
         this.commit();
         return true;
       }
-      case 'text': return change('text', () => { const sel = c.grabAndEraseSelection(); c.niceInsertAtom({ t: 'font', n: 'text', body: parseCell(sel, this.macros, 'text'), mode: 'text' }); });
+      case 'text': return change('text', () => c.mathMode());
       // plain delimiter pair around the selection (no \left / \bigl): `\llangle x \rrangle`
       case 'pair': return change('pair', () => { const [l, r] = args as string[]; const sel = c.grabAndEraseSelection(); c.niceInsert(l, false); c.niceInsert(r, false); c.posBackward(); if (sel) c.niceInsert(sel, false); });
       // LyX math-size: \displaystyle etc. wrap the selection (or start an inset at the cursor)

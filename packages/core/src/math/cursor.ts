@@ -439,6 +439,11 @@ export class MathCursor {
       this.editInsertedInset();
     }
   }
+  /** LyX math-mode (Ctrl+M): `\text{}` in math; inside text math again (`\ensuremath{}`, as `$…$` in \text would be); around the selection */
+  mathMode() {
+    const sel = this.grabAndEraseSelection();
+    this.niceInsertAtom(this.mode === 'text' ? { t: 'ensuremath', body: parseCell(sel, this.macros, 'math') } : { t: 'font', n: 'text', body: parseCell(sel, this.macros, 'text'), mode: 'text' });
+  }
   /** Cursor::niceInsert(docstring): parse and insert; a single inset is entered */
   niceInsert(latex: string, enter = true): number {
     if (!latex) return 0;
