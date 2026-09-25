@@ -129,7 +129,7 @@ test('the PDF pane: its age, outdated after an edit, automatic builds, and a reb
   await expect(page.locator('.pdf-panel .build-progress')).toBeVisible({ timeout: 15000 });
   await expect(page.locator('.pdf-panel .build-progress')).toHaveCount(0, { timeout: 180000 });
   await expect(page.locator('.pdf-panel .bar span')).toContainText('built');
-  await expect(page.locator('.pdf-panel [data-pdf-age="current"]')).toContainText(/built (just now|\d+ s ago)/);
+  await expect(page.locator('.pdf-panel [data-pdf-age="current"]')).toContainText(/built (just now|\d+ min ago)/);
   await expect(page.locator('.statusbar [data-pdf-status="current"]')).toContainText('PDF');
   await expect(page.locator('.pdf-panel .pdf-page-box').nth(1)).toBeAttached({ timeout: 30000 });
 

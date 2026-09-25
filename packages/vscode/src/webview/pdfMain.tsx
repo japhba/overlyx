@@ -74,7 +74,7 @@ function PdfApp() {
   const job = pdf.job;
   const elapsed = job ? Math.max(0, Math.round((Date.now() - job.startedAt) / 1000)) : 0;
   // how old the PDF is (the file's time; the editor saves the file itself, so "outdated" is not known here)
-  const st = pdfStatus(pdf, 0, useTicker(pdf.busy || (!!pdf.pdfAt && Date.now() + (pdf.skew ?? 0) - pdf.pdfAt < 60000)));
+  const st = pdfStatus(pdf, 0, useTicker(pdf.busy));
   // floats over the pages while a build runs (nothing moves)
   const progress = pdf.busy && job ? (
     <div class="build-progress" title={job.progress}>

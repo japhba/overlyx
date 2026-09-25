@@ -56,8 +56,7 @@ export interface DocStats { words: number; chars: number; sel: boolean }
  * when it is missing, outdated or from a failed build.
  */
 export function PdfStatusChip({ pdf, savedAt, onClick }: { pdf: PdfStatusInput; savedAt: number; onClick: (rebuild: boolean) => void }) {
-  const young = !!pdf.pdfAt && Date.now() + (pdf.skew ?? 0) - pdf.pdfAt < 60000;
-  const st = pdfStatus(pdf, savedAt, useTicker(pdf.busy || young));
+  const st = pdfStatus(pdf, savedAt, useTicker());
   if (st.kind === 'none' && !pdf.busy) return null;
   const rebuild = st.kind === 'outdated' || st.kind === 'error';
   return (

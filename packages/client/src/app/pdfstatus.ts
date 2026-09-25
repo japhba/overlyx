@@ -38,19 +38,19 @@ export interface PdfStatus {
   title: string;
 }
 
-/** "just now", "12 s", "3 min", "2 h", "3 days" */
+/** In whole minutes: "just now" for the first minute, then "1 min" … "59 min", "2 h", "3 days". */
 export function formatAge(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 5) return 'just now';
-  if (s < 60) return `${s} s`;
-  const m = Math.floor(s / 60);
+  const m = Math.floor(Math.max(0, ms) / 60000);
+  if (m < 1) return 'just now';
   if (m < 60) return `${m} min`;
   const h = Math.floor(m / 60);
   if (h < 48) return `${h} h`;
-  const d = Math.floor(h / 24);
-  return `${d} days`;
+  return `${Math.floor(h / 24)} days`;
 }
+/** "just now" / "3 min ago" */
 const ago = (ms: number) => { const a = formatAge(ms); return a === 'just now' ? a : a + ' ago'; };
+/** "just built" / "3 min old" (the status bar) */
+const old = (ms: number) => { const a = formatAge(ms); return a === 'just now' ? 'just built' : a + ' old'; };
 
 /** A save this long after the PDF was written counts as newer (the two clocks are the same server's; allow for rounding). */
 const SLACK = 1500;
@@ -62,7 +62,7 @@ export function pdfStatus(s: PdfStatusInput, savedAt: number, now = Date.now()):
   const behind = !!s.pdfAt && savedAt > s.pdfAt + SLACK;
   const behindNote = behind ? ` The document was changed after it (saved ${new Date(savedAt - (s.skew ?? 0)).toLocaleTimeString()}).` : '';
   if (s.busy) {
-    return { kind: 'building', age, label: age !== null ? `building… · PDF ${formatAge(age)} old` : 'building…', short: 'PDF building…',
+    return { kind: 'building', age, label: age !== null ? `building… · last PDF ${ago(age)}` : 'building…', short: 'PDF building…',
       title: 'A build is running in the background — you can keep editing.' + (when ? ` The PDF shown was built at ${when}.` : '') };
   }
   if (!s.url) {
@@ -70,21 +70,21 @@ export function pdfStatus(s: PdfStatusInput, savedAt: number, now = Date.now()):
     return { kind: 'none', age: null, label: '', short: 'no PDF yet', title: 'No PDF built yet — Ctrl+R builds it.' };
   }
   if (s.ok === false) {
-    return { kind: 'error', age, label: age !== null ? `✗ errors · PDF ${formatAge(age)} old` : '✗ errors', short: age !== null ? `PDF ✗ errors · ${formatAge(age)}` : 'PDF ✗ errors',
+    return { kind: 'error', age, label: age !== null ? `✗ errors · last PDF ${ago(age)}` : '✗ errors', short: 'PDF ✗ errors',
       title: 'The last build had errors — see the log.' + (when ? ` The PDF shown is from ${when}.` : '') + behindNote };
   }
   if (behind && age !== null) {
-    return { kind: 'outdated', age, label: `✓ built ${ago(age)} · outdated`, short: `PDF ${formatAge(age)} old · outdated`, title: `Built at ${when}.${behindNote} Ctrl+R builds it again.` };
+    return { kind: 'outdated', age, label: `✓ built ${ago(age)} · outdated`, short: `PDF ${old(age)} · outdated`, title: `Built at ${when}.${behindNote} Ctrl+R builds it again.` };
   }
-  return { kind: 'current', age, label: age !== null ? `✓ built ${ago(age)}` : '✓ built', short: age !== null ? `PDF ${formatAge(age) === 'just now' ? 'just built' : formatAge(age) + ' old'}` : 'PDF built',
+  return { kind: 'current', age, label: age !== null ? `✓ built ${ago(age)}` : '✓ built', short: age !== null ? `PDF ${old(age)}` : 'PDF built',
     title: (when ? `Built at ${when}` : 'Built') + ' — up to date with the document.' };
 }
 
-/** Re-render as time passes: every second while `fast`, else every 15 s. */
-export function useTicker(fast: boolean): number {
+/** Re-render as time passes: every second while `fast` (a build's elapsed seconds), else every 10 s (the age is in whole minutes). */
+export function useTicker(fast = false): number {
   const [t, setT] = useState(() => Date.now());
   useEffect(() => {
-    const iv = setInterval(() => setT(Date.now()), fast ? 1000 : 15000);
+    const iv = setInterval(() => setT(Date.now()), fast ? 1000 : 10000);
     return () => clearInterval(iv);
   }, [fast]);
   return t;

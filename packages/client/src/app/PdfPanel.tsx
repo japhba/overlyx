@@ -51,7 +51,7 @@ export function PdfPanel({ docId, state, savedAt, onBuild, onCancel, onShowTex, 
   useEffect(() => subscribePrefs(setPrefs), []);
   const menuRef = useRef<HTMLDivElement>(null);
   const job = state.job;
-  const st = pdfStatus(state, savedAt, useTicker(state.busy || (state.pdfAt ? Date.now() + (state.skew ?? 0) - state.pdfAt < 60000 : false)));
+  const st = pdfStatus(state, savedAt, useTicker(state.busy));
   const elapsed = job ? Math.max(0, Math.round((Date.now() - job.startedAt) / 1000)) : 0;
 
   // a build you asked for that failed opens the log; the next good build closes it again (an automatic one never opens it)

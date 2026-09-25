@@ -63,22 +63,24 @@ describe('pane layout', () => {
 
 describe('PDF status', () => {
   const T = 1_800_000_000_000;
-  it('formats ages', () => {
-    expect([3000, 12000, 125000, 2 * 3600e3 + 5, 3 * 86400e3].map(formatAge)).toEqual(['just now', '12 s', '2 min', '2 h', '3 days']);
+  it('counts in whole minutes', () => {
+    expect([3000, 59000, 60000, 125000, 59 * 60000 + 59000, 2 * 3600e3 + 5, 3 * 86400e3].map(formatAge)).toEqual(['just now', 'just now', '1 min', '2 min', '59 min', '2 h', '3 days']);
   });
   it('is current, outdated after a later save, and says so for errors, builds and no PDF', () => {
     const base = { url: '/pdf?t=1', busy: false, ok: true, pdfAt: T - 120000, skew: 0 };
     expect(pdfStatus(base, T - 130000, T)).toMatchObject({ kind: 'current', label: '✓ built 2 min ago', short: 'PDF 2 min old' });
     expect(pdfStatus(base, T - 60000, T)).toMatchObject({ kind: 'outdated', label: '✓ built 2 min ago · outdated' });
     expect(pdfStatus({ ...base, ok: false }, 0, T).kind).toBe('error');
-    expect(pdfStatus({ ...base, busy: true }, 0, T)).toMatchObject({ kind: 'building', label: 'building… · PDF 2 min old' });
+    expect(pdfStatus({ ...base, busy: true }, 0, T)).toMatchObject({ kind: 'building', label: 'building… · last PDF 2 min ago' });
+    expect(pdfStatus({ ...base, ok: false }, 0, T)).toMatchObject({ label: '✗ errors · last PDF 2 min ago', short: 'PDF ✗ errors' });
+    expect(pdfStatus({ ...base, pdfAt: T - 30000 }, T - 10000, T)).toMatchObject({ kind: 'outdated', label: '✓ built just now · outdated', short: 'PDF just built · outdated' });
     expect(pdfStatus({ url: null, busy: false, ok: null }, 0, T).kind).toBe('none');
     expect(pdfStatus({ url: null, busy: false, ok: false }, 0, T).kind).toBe('error');
     expect(pdfStatus({ ...base, pdfAt: T - 1000 }, 0, T).short).toBe('PDF just built');
   });
   it('measures the age on the server clock (a browser clock that is off does not matter)', () => {
     // the browser runs 10 minutes behind the server: its "now" is T - 600 s
-    const st = pdfStatus({ url: '/pdf', busy: false, ok: true, pdfAt: T - 30000, skew: 600000 }, 0, T - 600000);
-    expect(st.label).toBe('✓ built 30 s ago');
+    const st = pdfStatus({ url: '/pdf', busy: false, ok: true, pdfAt: T - 180000, skew: 600000 }, 0, T - 600000);
+    expect(st.label).toBe('✓ built 3 min ago');
   });
 });
