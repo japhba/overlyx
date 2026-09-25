@@ -81,3 +81,17 @@ test('Document ▸ Settings ▸ Fonts: a font set writes its text and math fonts
   await expect(dlg.locator('[data-font-set]')).toBeDisabled();
   expect(errors).toEqual([]);
 });
+
+test('the sans-serif face: San Francisco where the system has it, formulas with the bundled Fira Math; a saved "Noto Sans" becomes it', async ({ page }) => {
+  const errors = collectErrors(page);
+  const requested = await open(page, 'noto');
+  expect(await page.evaluate(() => document.documentElement.dataset.editorFont)).toBe('sans');
+  expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "SF Pro Display", "Fira Sans", sans-serif/);
+  expect(await style(page, '.lyx-editor .katex', 'font-family')).toMatch(/^-apple-system, .*"Fira Sans", "Fira Math", KaTeX_Main/);
+  expect(requested.some(u => u.includes('family=Fira+Sans') && !u.includes('Math'))).toBe(true);
+  // no San Francisco on the test machine and Google stubbed: the formulas are drawn in Fira Math, served with the client
+  await expect.poll(() => page.evaluate(async () => { await document.fonts.ready; return [...document.fonts].some(f => f.family.replace(/"/g, '') === 'Fira Math' && f.status === 'loaded'); })).toBe(true);
+  await openDialog(page, 'preferences');
+  await expect(page.locator('.dialog [data-pref="editorFont"]')).toHaveValue('sans');
+  expect(errors).toEqual([]);
+});

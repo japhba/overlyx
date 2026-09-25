@@ -1,4 +1,5 @@
 @import './fonts/computer-modern/fonts.css';
+@import './fonts/fira-math/fonts.css';
 
 /* ------------------------------------------------------------ theme tokens
    Light values first; the dark theme (html[data-theme="dark"], set by app/theme.ts from the View menu,
@@ -49,6 +50,11 @@
   --purple-bg: #f6f0fb;
   --purple-border: #b39ddb;
   --editor-font: "CMU Serif", serif;
+  /* San Francisco where the system has it (fonts/catalog.ts, the sans-serif face): Apple's system-font
+     keywords (Safari and Firefox, Chrome on macOS), then a copy installed by name; empty-handed
+     elsewhere, so the face's web font follows. On phones, SF Compact — Apple's cut for small displays —
+     comes first where it is installed (see the media query below). */
+  --sf-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "SF Pro Display";
   --ui-font: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --note-bg: #fff8c4;
   --note-border: #d9c76a;
@@ -69,6 +75,10 @@
   --example-bg: linear-gradient(135deg, #eef4fb, #fff);
   --backdrop: rgba(0,0,0,0.25);
   --editor-zoom: 1;
+}
+/* phones (a touch screen, narrow in either orientation): SF Compact first */
+@media (pointer: coarse) and (max-width: 700px), (pointer: coarse) and (max-height: 500px) {
+  :root { --sf-font: "SF Compact Text", "SF Compact", -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "SF Pro Display"; }
 }
 /* dark: text and formulas are white on a near-black page, the chrome a shade lighter */
 html[data-theme="dark"] {

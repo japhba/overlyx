@@ -1,0 +1,2 @@
+/* The sans face's math font (fonts/catalog.ts): not on Google Fonts, so bundled; fetched only once the face is chosen. */
+@font-face { font-family: "Fira Math"; src: url("./FiraMath-Regular.otf") format("opentype"); font-style: normal; font-weight: 400; font-display: swap; }

@@ -22,6 +22,9 @@ It contains, or is a derivative of, the following third-party material:
 - **Computer Modern Unicode / CMU Serif** (https://ctan.org/pkg/cm-unicode) — SIL OFL 1.1.
   Unmodified Roman, bold, italic and bold italic text fonts; copyright the original Metafont
   authors and Andrey V. Panov. Full license and copyright notices: `dist/webview/licenses/cm-unicode-OFL.txt`.
+- **Fira Math** (https://github.com/firamath/firamath) — SIL OFL 1.1. The unmodified
+  `FiraMath-Regular.otf`, version 0.3.4, copyright 2018–2020 Xiangdong Zeng; the sans-serif editor
+  face's formula symbols. Full license: `dist/webview/licenses/firamath-OFL.txt`.
 
 Corresponding source: the extension is built from the OverLyX source tree. A copy of the
 complete corresponding source for any released .vsix is available to anyone on request —

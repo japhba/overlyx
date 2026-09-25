@@ -92,8 +92,8 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
         <div class="settings-content">
           {section === 'editor' && <>
             <h3>Font</h3>
-            <div class="sub">How the editor shows the text and formulas, in this browser. The PDF has its own fonts: Document ▸ Settings ▸ Fonts. Fonts other than Computer Modern come from Google Fonts, loaded once you choose one.</div>
-            <Row label="Editor font"><select data-pref="editorFont" value={p.editorFont} onChange={e => setPref('editorFont', (e.target as HTMLSelectElement).value)}>
+            <div class="sub">How the editor shows the text and formulas, in this browser. The PDF has its own fonts: Document ▸ Settings ▸ Fonts. Fonts other than Computer Modern come from Google Fonts, loaded once you choose one; the sans-serif is the system’s San Francisco where it has one.</div>
+            <Row label="Editor font"><select data-pref="editorFont" value={p.editorFont === FOLLOW_DOCUMENT ? p.editorFont : editorFace(p.editorFont).id} onChange={e => setPref('editorFont', (e.target as HTMLSelectElement).value)}>
               <option value={FOLLOW_DOCUMENT}>As in the document — the closest of these to the PDF’s font (now {editorFace(resolvedFace(FOLLOW_DOCUMENT)).label})</option>
               {EDITOR_FACES.map(f => <option key={f.id} value={f.id}>{f.label} — {f.hint}</option>)}
             </select></Row>

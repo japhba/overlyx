@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { loadLatexFonts } from '../packages/core/src/latex/latexfonts.ts';
 import { parseTex, writeTex } from '../packages/core/src/tex/index.ts';
 import { markEditedSettings } from '../packages/core/src/tex/preamble.ts';
@@ -89,6 +90,27 @@ describe('editor faces', () => {
     }
     expect(googleFontsUrl(editorFace('libertinus'))).toContain('family=Libertinus+Serif:ital,wght@0,400;0,700;1,400;1,700&family=Libertinus+Sans');
     expect(editorFace('nonsense').id).toBe('cm');
+  });
+
+  it('the sans-serif is San Francisco where the system has it, SF Compact first on phones, with the bundled Fira Math', () => {
+    const sans = editorFace('sans');
+    expect(sans.text).toMatch(/^var\(--sf-font\), "Fira Sans", sans-serif$/);
+    expect(sans.math).toMatch(/^var\(--sf-font\), "Fira Sans", "Fira Math"$/);
+    expect(sans.mathItalic).toMatch(/^var\(--sf-font\), "Fira Sans"$/);
+    // Fira Math is not on Google Fonts: bundled, and never asked of Google
+    expect(googleFontsUrl(sans)).toContain('family=Fira+Sans:ital');
+    expect(googleFontsUrl(sans)).not.toContain('Math');
+    const css = readFileSync(join(__dirname, '../packages/client/src/styles.css'), 'utf8');
+    expect(css).toContain("@import './fonts/fira-math/fonts.css';");
+    expect(readFileSync(join(__dirname, '../packages/client/src/fonts/fira-math/fonts.css'), 'utf8')).toMatch(/font-family: "Fira Math"; src: url\("\.\/FiraMath-Regular\.otf"\)/);
+    // Apple's keywords for the system font in every engine, and nothing that means another system's UI font
+    const sf = css.match(/^ {2}--sf-font: ([^;]+);/m)![1];
+    expect(sf).toBe('-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "SF Pro Display"');
+    const phone = css.match(/@media \(pointer: coarse\) and \(max-width: 700px\)[^{]*\{\s*:root \{ --sf-font: ([^;]+);/)![1];
+    expect(phone).toBe('"SF Compact Text", "SF Compact", ' + sf);
+    // the face that was called Noto Sans
+    expect(editorFace('noto').id).toBe('sans');
+    expect(resolvedFace('noto')).toBe('sans');
   });
 
   it('"As in the document" is the face closest to the roman font', () => {

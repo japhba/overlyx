@@ -267,12 +267,17 @@ blend.
   catalogue in `client/src/fonts/catalog.ts`). *Settings ▸ Editor ▸ Font* (per browser, both shells,
   `prefs.editorFont`) chooses the face the editor shows: Computer Modern (bundled, the default) or a
   web font from Google Fonts — Libertinus, STIX Two, Palatino (the computer's own), Charis (Charter),
-  Crimson Pro, EB Garamond, Noto Sans — linked only once chosen (both CSPs allow fonts.googleapis.com /
-  fonts.gstatic.com), or *As in the document*: the face closest to the open document's roman font
+  Crimson Pro, EB Garamond — linked only once chosen (both CSPs allow fonts.googleapis.com /
+  fonts.gstatic.com); *Sans-serif* is San Francisco where the system has it (`--sf-font` in
+  styles.css: `-apple-system` / `BlinkMacSystemFont`, then an installed SF Pro by name; on phones —
+  coarse pointer, narrow — an installed SF Compact first, Apple's cut for small displays), else Fira
+  Sans from Google Fonts, with Fira Math (bundled, `fonts/fira-math`, not on Google Fonts) for the
+  formula symbols (it replaced Noto Sans + Noto Sans Math; a saved `noto` preference maps to it). Or
+  *As in the document*: the face closest to the open document's roman font
   (each shell reports its header through `setDocumentFonts`, `tests/parity.test.ts`). Formulas follow
   the face (`fonts/editorfont.ts` sets `--math-font` / `--math-italic-font` / `--math-scale` and
   `data-editor-font` on html): variables in its italic, digits and operators upright from it, other
-  symbols from the closest OpenType math font (Libertinus Math, STIX Two Math, Noto Sans Math), KaTeX's
+  symbols from the closest OpenType math font (Libertinus Math, STIX Two Math, Fira Math), KaTeX's
   Computer Modern for the rest — large operators, delimiters, blackboard and calligraphic letters —
   and for its metrics (so an accent can sit a little off-centre in another face). *Document ▸ Settings
   ▸ Fonts ▸ Font set* writes LyX's `\font_roman` / `\font_sans` / `\font_typewriter` / `\font_math`

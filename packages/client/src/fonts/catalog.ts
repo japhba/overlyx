@@ -4,7 +4,8 @@
  *
  *   EDITOR_FACES        what the editor shows the text in (Settings ▸ Editor ▸ Font, per browser).
  *                       Computer Modern is bundled; the others are web fonts from Google Fonts,
- *                       fetched only once chosen. Formulas take their letters and digits from the same
+ *                       fetched only once chosen — except that the sans-serif face is the system's San
+ *                       Francisco where it has one. Formulas take their letters and digits from the same
  *                       face and their symbols from the closest OpenType math font (KaTeX keeps its
  *                       layout and its large operators and delimiters) — fonts/editorfont.ts, styles.css.
  *   DOCUMENT_FONT_SETS  what the PDF is typeset in (Document ▸ Settings ▸ Fonts): LyX font names
@@ -39,6 +40,8 @@ export interface EditorFace {
 const CM = '"CMU Serif", serif';
 const STIX_MATH = 'STIX Two Math';
 const LIBERTINUS_MATH = 'Libertinus Math';
+/** San Francisco where the system has it, SF Compact first on phones (styles.css --sf-font) */
+const SF = 'var(--sf-font)';
 const FOUR = ':ital,wght@0,400;0,700;1,400;1,700';
 
 export const DEFAULT_EDITOR_FACE = 'cm';
@@ -73,11 +76,17 @@ export const EDITOR_FACES: EditorFace[] = [
     math: `"EB Garamond", "${LIBERTINUS_MATH}"`, mathItalic: '"EB Garamond"', google: ['EB Garamond' + FOUR, LIBERTINUS_MATH], mathScale: 1.05,
   },
   {
-    id: 'noto', label: 'Noto Sans', hint: 'a sans-serif for the screen, with Noto Sans Math', text: '"Noto Sans", "CMU Serif", sans-serif',
-    mono: '"Noto Sans Mono"', math: '"Noto Sans", "Noto Sans Math"', mathItalic: '"Noto Sans"',
-    google: ['Noto Sans' + FOUR, 'Noto Sans Mono', 'Noto Sans Math'], mathScale: 1,
+    // Fira Math (bundled, fonts/fira-math) is a sans math font drawn to go with Fira Sans; symbols
+    // San Francisco lacks come from it too
+    id: 'sans', label: 'Sans-serif', hint: 'San Francisco where the system has it (SF Compact on phones), else Fira Sans; with Fira Math',
+    text: `${SF}, "Fira Sans", sans-serif`, mono: '"SF Mono", "Fira Mono"',
+    math: `${SF}, "Fira Sans", "Fira Math"`, mathItalic: `${SF}, "Fira Sans"`,
+    google: ['Fira Sans' + FOUR, 'Fira Mono'], mathScale: 1,
   },
 ];
+
+/** Faces that were renamed: a preference saved under the old id keeps its face. */
+const FORMER_FACES: Record<string, string> = { noto: 'sans' };
 
 /** Settings ▸ Editor ▸ Font: a face, or the face closest to the document's roman font */
 export const FOLLOW_DOCUMENT = 'document';
@@ -121,6 +130,7 @@ const ROMAN_FACES: Record<string, string> = {
 };
 
 export function editorFace(id: string): EditorFace {
+  id = FORMER_FACES[id] ?? id;
   return EDITOR_FACES.find(f => f.id === id) ?? EDITOR_FACES[0];
 }
 
