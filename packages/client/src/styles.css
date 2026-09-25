@@ -1115,6 +1115,8 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .tb-pal-sym.text { font-family: var(--editor-font); font-style: italic; font-size: 12px; }
 .tb-popup.list .tb-pal-sym { min-width: 44px; max-width: 110px; overflow: hidden; text-align: center; }
 .tb-pal-label { font-size: 11px; color: var(--fg2); }
+/* a text-only list (toolbar On/Off/Automatic, text properties): the label is the entry itself */
+.tb-pal-item > .tb-pal-label:first-child { font-size: 12px; color: var(--ui-fg); padding: 0 4px; }
 .tb-delims table { border-collapse: collapse; }
 .tb-delims th { font-size: 11px; font-weight: 500; color: var(--fg2); padding: 2px 4px; text-align: center; }
 .tb-delims td { padding: 0; }

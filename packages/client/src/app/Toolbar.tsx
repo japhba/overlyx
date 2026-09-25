@@ -369,6 +369,7 @@ function PaletteButton({ b }: { b: ToolButton }) {
   const p = b.palette!;
   const close = () => setOpen(false);
   const preset = !!b.paletteWhenActive;
+  const withSyms = !!p.items?.some(it => it.html);
   const onClick = () => {
     recordUsage('toolbar', b.id);
     if (preset && !b.active) { b.action?.(); return; }   // select first; a second click edits
@@ -388,7 +389,8 @@ function PaletteButton({ b }: { b: ToolButton }) {
             <div class="tb-popup-grid" style={p.list ? undefined : { gridTemplateColumns: `repeat(${p.cols ?? 8}, minmax(30px, auto))` }}>
               {p.items!.map((it, i) => (
                 <button key={i} type="button" class={'tb-pal-item' + (it.active ? ' active' : '')} title={it.title ?? it.label} onMouseDown={e => e.preventDefault()} onClick={() => { close(); recordUsage('toolbar', `${b.id} ▸ ${it.label}`); it.action(); }}>
-                  {it.html ? <span class="tb-pal-sym" dangerouslySetInnerHTML={{ __html: it.html }} /> : <span class="tb-pal-sym text">{it.label}</span>}
+                  {/* a list shows the label anyway: its symbol column only where the palette has symbols (empty when KaTeX failed) */}
+                  {it.html ? <span class="tb-pal-sym" dangerouslySetInnerHTML={{ __html: it.html }} /> : !p.list ? <span class="tb-pal-sym text">{it.label}</span> : withSyms && <span class="tb-pal-sym" />}
                   {p.list && <span class="tb-pal-label">{it.label}</span>}
                 </button>
               ))}
