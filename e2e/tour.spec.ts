@@ -63,7 +63,7 @@ test('offered on the first visit; each step notices what the user did; remembere
 
   // 6. a PDF build (started — that is what the step waits for)
   await expect(step(page, 'pdf')).toBeVisible();
-  await expect(page.locator('.sidebar.right')).toBeVisible();
+  await expect(page.locator('.pdf-panel')).toBeVisible();   // the step opens the PDF pane beside the text
   await page.locator('[data-tb="pdf"]').click();
   await expect(done(page)).toHaveCount(1, { timeout: 20000 });
   await next(page).click();

@@ -26,7 +26,7 @@ describe('one editor assembly for both front ends', () => {
     'markdownRulesPlugin(', 'autocorrectPlugin(', 'dragSelectPlugin(', 'findPlugin(', 'fontCarryPlugin(', 'insetCaretPlugin(', 'mirrorCaretPlugin(',
     'pasteTargetsPlugin(', 'aiRewritePlugin(', 'aiCompletePlugin(', 'gapCursor(', 'dropCursor(', 'tableEditing(', 'macroDefsPlugin(',
     'handlePaste', 'handleDrop', 'handleClickOn', 'handleDoubleClickOn', 'handleDOMEvents', 'nodeViews:', 'new MathInlineView', 'new InsetView',
-    'clipboardTextSerializer', 'function guarded', 'usagePlugin(',
+    'clipboardTextSerializer', 'function guarded', 'usagePlugin(', 'foldPlugin(',
   ];
   for (const [name, file] of Object.entries(EDITORS)) {
     it(`the ${name} editor is built from assemblePlugins / editorViewProps / installEditorDom`, () => {

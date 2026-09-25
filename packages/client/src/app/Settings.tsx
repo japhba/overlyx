@@ -2,7 +2,7 @@
  * The centralized Settings panel (Tools ▸ Settings…, and the avatar menu on every screen — so it
  * is reachable from the start screen too, which has no Tools menu). One dialog for everything a
  * user configures:
- *   Editor       spell checking                    (this browser, prefs.ts)
+ *   Editor       spell checking, automatic PDF builds (this browser, prefs.ts)
  *   AI           the AI features and models        (this browser, prefs.ts)
  *   Appearance   light / dark / follow the system  (this browser, theme.ts)
  *   Account      who is signed in, and the per-account server settings (userSettings.ts):
@@ -15,6 +15,7 @@ import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { setThemePref, useTheme, type ThemePref } from './theme';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import { Dialog } from './Dialogs';
+import { AUTO_BUILD_CHOICES, AUTO_BUILD_DELAYS } from './pdfstatus';
 
 const SECTIONS = [['editor', 'Editor'], ['ai', 'AI assistance'], ['appearance', 'Appearance'], ['privacy', 'Privacy'], ['account', 'Account']] as const;
 export type SettingsSection = (typeof SECTIONS)[number][0];
@@ -87,6 +88,14 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             <Row label="Checker"><select data-pref="spellEngine" value={p.spellEngine} onChange={e => setPref('spellEngine', (e.target as HTMLSelectElement).value as Prefs['spellEngine'])}>
               <option value="overlyx">OverLyX — instant, knows LaTeX (skips formulas, commands, code), suggestions in the menu; English, British, German, French</option>
               <option value="browser">Browser — the browser's own checker (checks slowly after a click; suggestions only via {/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click)</option>
+            </select></Row>
+            <h3>PDF</h3>
+            <div class="sub">Build the PDF by itself a moment after the document is saved (it is saved 1.5 s after you stop typing). Builds run in the background on the server.</div>
+            {AUTO_BUILD_CHOICES.map(([v, label, hint]) => (
+              <label class="pref" key={v}><input type="radio" name="ol-autobuild-settings" data-pref-autobuild={v} checked={p.autoBuild === v} onChange={() => setPref('autoBuild', v)} /><span>{label}<span class="sub">{hint}</span></span></label>
+            ))}
+            <Row label="Start after the save"><select data-pref="autoBuildDelay" value={String(p.autoBuildDelay)} disabled={p.autoBuild === 'off'} onChange={e => setPref('autoBuildDelay', Number((e.target as HTMLSelectElement).value))}>
+              {AUTO_BUILD_DELAYS.map(d => <option key={d} value={String(d)}>{d === 0 ? 'right away' : `${d} s`}</option>)}
             </select></Row>
             <h3>Figures</h3>
             {check('invertFigures', 'Invert figures in the dark theme', 'Plots and diagrams use a white base, including transparent images, and turn light-on-dark in the dark theme. Photographs keep their colours. Figures reload when their file changes on disk.')}

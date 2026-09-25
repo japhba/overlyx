@@ -174,7 +174,7 @@ function offsetNamed(text: string, message: string): number | null {
 }
 
 /** The LaTeX source beside the document (Ctrl+Alt+S / the "[raw]" tab), with synchronized scrolling, cursor and selection, and live apply. */
-export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose, onSave }: { target: SourceTarget | null; tick: number; selTick?: number; /** the formula being edited, if any */ mathField?: LyxMathField | null; onNotify: (msg: string, kind?: 'info' | 'error') => void; onClose?: () => void; onSave?: () => void }) {
+export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose, onSave, fill, style }: { target: SourceTarget | null; tick: number; selTick?: number; /** the formula being edited, if any */ mathField?: LyxMathField | null; onNotify: (msg: string, kind?: 'info' | 'error') => void; onClose?: () => void; onSave?: () => void; /** a pane of the web client's pane row (app/panes.ts): its width comes from there, no own width or grip */ fill?: boolean; style?: Record<string, string | number> }) {
   const [text, setText] = useState('');
   /** the text as typed, ahead of the render (a live apply scheduled by a keystroke must send it, not the previous render's) */
   const textRef = useRef('');
@@ -566,8 +566,8 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
   const showProblems = (applied === 'held' || applied === 'error') && problems.length > 0;
   const showNotes = !showProblems && !dirty && notes.length > 0;
   return (
-    <div class="source-pane right" style={{ width: width + 'px' }}>
-      <div class="grip v" title="Drag to resize" onPointerDown={startResizeW} />
+    <div class={'source-pane right' + (fill ? ' fill' : '')} data-pane={fill ? 'tex' : undefined} style={fill ? style : { width: width + 'px' }}>
+      {!fill && <div class="grip v" title="Drag to resize" onPointerDown={startResizeW} />}
       <div class="bar">
         <span class="small-btn active" title="The LaTeX source of the document (its .tex file)">LaTeX</span>
         <span class="name" title={target?.docId}>{name}</span>

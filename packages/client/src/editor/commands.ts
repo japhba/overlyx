@@ -562,6 +562,15 @@ export const insertNewline = (kind: 'newline' | 'linebreak' = 'newline') => inse
 export const insertNewpage = (kind = 'newpage') => insertNode(schema.nodes.newpage.create({ kind }));
 export const insertSpecial = (arg: string) => insertNode(schema.nodes.special.create({ token: '\\SpecialChar', arg }));
 export const insertHyphens = (token: '\\twohyphens' | '\\threehyphens') => insertNode(schema.nodes.special.create({ token, arg: '' }));
+/**
+ * Type an em dash (—) or en dash (–) as the character itself — what a keyboard that has the key
+ * produces, and what the parser makes of `---` / `--` in the file (the writer turns it back into the
+ * ligature). Alt+- / Alt+Shift+- (keymap.ts) and Insert ▸ Special Character.
+ */
+export const insertDash = (kind: 'em' | 'en'): Command => (state, dispatch) => {
+  dispatch?.(state.tr.insertText(kind === 'em' ? '\u2014' : '\u2013').scrollIntoView());
+  return true;
+};
 export const insertVSpace = (kind = 'defskip') => insertNode(schema.nodes.leaf.create({ name: 'VSpace', arg: kind, params: '[]' }));
 export const insertMacroDef = (name: string, args = 0, def = '') => insertNode(schema.nodes.macro.create({ lines: JSON.stringify([`\\newcommand{\\${name}}${args ? `[${args}]` : ''}{${def}}`]) }));
 

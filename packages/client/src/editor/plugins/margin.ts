@@ -70,7 +70,8 @@ export function layout(view: EditorView): void {
   const holder = (root.closest('.editor-scroll') as HTMLElement | null) ?? root;
   if (holder.style.getPropertyValue('--margin-col') !== col) holder.style.setProperty('--margin-col', col);
   const columnLeft = view.dom.getBoundingClientRect().right + 28; // just right of the text column
-  const items = top.map(c => {
+  // cards in folded-away sections (plugins/fold.ts) have no box: they must not push the others down
+  const items = top.filter(c => c.getClientRects().length > 0).map(c => {
     const anchor = c.querySelector<HTMLElement>(':scope > .inset-anchor') ?? c;
     return { el: c, anchorTop: anchor.getBoundingClientRect().top };
   }).sort((a, b) => a.anchorTop - b.anchorTop);

@@ -1,5 +1,6 @@
 import type { SaveState, PresenceUser } from '../editor/editor';
 import { AvatarContent, initials } from './Avatar';
+import { pdfStatus, useTicker, type PdfStatusInput } from './pdfstatus';
 
 export interface Status { connected: boolean; synced: boolean; users: PresenceUser[] }
 
@@ -49,12 +50,29 @@ export function ZoomControl({ zoom, onZoom }: { zoom: number; onZoom: (z: number
 
 export interface DocStats { words: number; chars: number; sel: boolean }
 
+/**
+ * How old the PDF is, and whether the document has changed since (app/pdfstatus.ts) — in the
+ * status bar, so it is there with the PDF pane closed too. A click shows the PDF, and builds it
+ * when it is missing, outdated or from a failed build.
+ */
+export function PdfStatusChip({ pdf, savedAt, onClick }: { pdf: PdfStatusInput; savedAt: number; onClick: (rebuild: boolean) => void }) {
+  const young = !!pdf.pdfAt && Date.now() + (pdf.skew ?? 0) - pdf.pdfAt < 60000;
+  const st = pdfStatus(pdf, savedAt, useTicker(pdf.busy || young));
+  if (st.kind === 'none' && !pdf.busy) return null;
+  const rebuild = st.kind === 'outdated' || st.kind === 'error';
+  return (
+    <button type="button" class={'pdf-status ' + st.kind} data-pdf-status={st.kind} title={st.title + (rebuild ? ' Click to show and rebuild the PDF.' : ' Click to show the PDF.')} onClick={() => onClick(rebuild)}>
+      {st.kind === 'building' && <i class="spinner" />}{st.short}
+    </button>
+  );
+}
+
 function BuildVersion() {
   const version = import.meta.env.VITE_BUILD_VERSION;
   return <span class="build-version" title={`OverLyX build (UTC): ${version}`}>{version}</span>;
 }
 
-export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, stats, zoom, onZoom }: {
+export function StatusBar({ layout, status, chord, message, save, tracking, trackingAs, change, docLabel, readOnly, quiet, updateReady, aiBusy, stats, zoom, onZoom, pdf }: {
   layout: string; status: Status; chord: string | null; message: { text: string; kind: 'info' | 'error' } | null; save: SaveState;
   tracking: boolean; trackingAs?: string; change?: string | null; docLabel?: string | null; readOnly?: boolean;
   /** no document editor is open (start screen, text file): only messages and the build version */
@@ -67,6 +85,8 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
   stats?: DocStats | null;
   zoom?: number;
   onZoom?: (z: number) => void;
+  /** the PDF's age / state (a document with a PDF pane) */
+  pdf?: { state: PdfStatusInput; onClick: (rebuild: boolean) => void };
 }) {
   if (quiet) return <div class="statusbar">{message && <span class={'msg ' + message.kind}>{message.text}</span>}<span class="spacer" /><BuildVersion /></div>;
   return (
@@ -88,6 +108,7 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
         </span>
       )}
       <SaveIndicator save={save} />
+      {pdf && <PdfStatusChip pdf={pdf.state} savedAt={save.savedAt} onClick={pdf.onClick} />}
       {zoom !== undefined && onZoom && <ZoomControl zoom={zoom} onZoom={onZoom} />}
       <BuildVersion />
     </div>

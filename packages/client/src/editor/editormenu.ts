@@ -18,6 +18,7 @@ import { resolveDocPath } from './context';
 import { getPrefs, setPref } from '../prefs';
 import { openRewrite, REWRITE_KEY } from './ai/rewrite';
 import { addToDictionary, ignoreWord } from './spell/plugin';
+import { foldAllSections, unfoldAllSections, setSectionFolded, sectionFoldState, foldedCount } from './plugins/fold';
 
 const REF_TYPES: [string, string][] = [
   ['ref', '<reference>'], ['eqref', '(<reference>)'], ['pageref', '<page>'], ['vref', '<reference> on page <page>'],
@@ -203,6 +204,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
       { label: 'Reset font', shortcut: MOD + '+Alt+D', action: run(C.fontDefault) },
     ] },
     { label: 'Paragraph layout', sub: layouts.map(l => ({ label: l.name, checked: cur?.node.attrs.layout === l.name, action: run(C.setLayout(l.name)) })) },
+    ...sectionItems(view, run),
     ...(C.tableContext(view.state) ? [{ label: 'Table settings…', action: () => editorContext.openDialog?.('tablesettings') }] : []),
     { label: 'Paragraph', sub: [
       { label: 'Paragraph settings…', shortcut: MOD + '+Alt+P', action: () => editorContext.openDialog?.('paragraph') },
@@ -257,4 +259,17 @@ function pushInsetItems(view: EditorView, node: PMNode, pos: number, items: Menu
     { label: 'Dissolve inset', action: () => { C.dissolveInset(pos)(view.state, view.dispatch); view.focus(); } },
     { sep: true },
   );
+}
+
+/** Section folding in the right-click menu (editor/plugins/fold.ts): this section, and all of them. */
+function sectionItems(view: EditorView, run: (cmd: Command) => () => void): MenuItem[] {
+  const here = sectionFoldState(view.state);
+  const any = foldedCount(view.state) > 0;
+  if (!here && !any) return [];
+  const head = view.state.selection.head;
+  return [{ label: 'Sections', sub: [
+    ...(here ? [{ label: here.folded ? 'Expand this section' : 'Fold this section', disabled: !here.folded && !here.foldable, action: run(setSectionFolded(head, !here.folded)) }, { sep: true }] : []),
+    { label: 'Fold all sections', action: run(foldAllSections) },
+    { label: 'Expand all sections', disabled: !any, action: run(unfoldAllSections) },
+  ] }];
 }

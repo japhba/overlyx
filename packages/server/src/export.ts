@@ -52,11 +52,16 @@ export function publicJob(j: BuildJob): PublicJob {
   return { id: j.id, status: j.status, engine: j.engine, requestedBy: j.requestedBy, startedAt: j.startedAt, phaseAt: j.phaseAt, finishedAt: j.finishedAt, progress: j.progress, rerun: j.rerun };
 }
 
-/** Enqueue a build (or attach to the running one) and return its job. */
-export function requestBuild(docId: string, _engine: string, requestedBy: string): BuildJob {
+/**
+ * Enqueue a build (or attach to the running one) and return its job. `auto`: an automatic build
+ * (the client's auto-build setting) never marks a running build for a re-run — the client asks
+ * again when the document is still newer than the PDF once it is done, so several open editors
+ * reacting to the same save do not build twice.
+ */
+export function requestBuild(docId: string, _engine: string, requestedBy: string, opts: { auto?: boolean } = {}): BuildJob {
   const cur = jobs.get(docId);
   if (cur && (cur.status === 'queued' || cur.status === 'exporting' || cur.status === 'compiling')) {
-    if (cur.status !== 'queued') cur.rerun = true;   // the content may have changed: build once more afterwards
+    if (cur.status !== 'queued' && !opts.auto) cur.rerun = true;   // the content may have changed: build once more afterwards
     return cur;
   }
   const job: BuildJob = { id: nextJobId++, docId, engine: 'overlyx', status: 'queued', requestedBy, startedAt: Date.now(), phaseAt: Date.now(), progress: '', rerun: false, waiters: [] };

@@ -20,6 +20,7 @@ import { ySyncPluginKey } from 'y-prosemirror';
 import { unquote, paramMap } from '@overlyx/core';
 import { lyxKeymap, chordPlugin } from './keymap';
 import { numberingPlugin } from './plugins/numbering';
+import { foldPlugin } from './plugins/fold';
 import { marginPlugin } from './plugins/margin';
 import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
 import { fontCarryPlugin } from './plugins/fontcarry';
@@ -109,6 +110,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     markdownRulesPlugin(),   // `- ` / `1. ` / `# ` at a paragraph start, before autocorrect looks at the space
     autocorrectPlugin(),
     chordPlugin(),
+    foldPlugin(),   // section folding (before the keymap: ↑ / ↓ beside a fold skip the hidden text)
     lyxKeymap(),
     fontCarryPlugin(),
     insetCaretPlugin(),

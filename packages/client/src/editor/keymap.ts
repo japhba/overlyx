@@ -12,7 +12,7 @@ import type { EditorView } from 'prosemirror-view';
 import {
   paragraphBreak, paragraphBreakInverse, fontCommands, fontDefault, changeDepth, listIndent, insertMath, toggleMathDisplay, typeDollar,
   insertNewline, insertSpace, insertSpecial, insertERT, insertFootnote, insertNote, insertComment, selectInset, toggleInset,
-  moveParagraph, deleteToParagraphEnd, setLayout, setKnownLayout, setParagraphAttrs, arrowIntoMath, setValueMark, insertHyphens, insertQuote, smartQuote, insertMarginal,
+  moveParagraph, deleteToParagraphEnd, setLayout, setKnownLayout, setParagraphAttrs, arrowIntoMath, setValueMark, insertHyphens, insertDash, insertQuote, smartQuote, insertMarginal,
  listExitBackspace } from './commands';
 import { editorContext } from './context';
 import { activeMathField } from './lyxmath/field';
@@ -212,7 +212,9 @@ export function lyxKeymap(): Plugin {
     'Shift-Mod- ': insertSpace('\\thinspace{}'),
     'Mod-.': insertSpecial('endofsentence'),
     'Alt-.': insertSpecial('ldots'),
-    'Alt--': insertSpecial('softhyphen'),
+    // Alt+- types an em dash (the hyphenation point it used to insert is invisible, so the key seemed
+    // dead — and on a Mac it took over ⌥-, whose en dash reaches ProseMirror as Alt+- by key code)
+    'Alt--': insertDash('em'),
     'Alt-Mod--': insertSpecial('nobreakdash'),
     'Shift-Mod-l': insertSpecial('ligaturebreak'),
     'Mod-/': insertSpecial('breakableslash'),
@@ -274,6 +276,8 @@ export function lyxKeymap(): Plugin {
     bindings[`Mod-${digit}`] = setKnownLayout(layout);
     bindings[`Alt-Mod-${digit}`] = setKnownLayout(layout + '*');
   }
+  // Alt+Shift+- is the en dash; on a Mac ⌥⇧- stays macOS's own em dash (typed by the system)
+  if (!isMac()) bindings['Shift-Alt--'] = insertDash('en');
   if (isMac()) {
     // ⌘M minimises the window, ⌘⌥C opens DevTools and ⌃R reloads — macOS/Chrome act on those
     // before or besides the page, so the Ctrl variants work as well (and the tour shows them)

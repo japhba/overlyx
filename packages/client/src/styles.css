@@ -281,7 +281,6 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .main { display: flex; flex: 1; min-height: 0; }
 .sidebar { width: 260px; border-right: 1px solid var(--ui-border); background: var(--surface2); overflow: auto; display: flex; flex-direction: column; }
 .sidebar.right { border-right: 0; border-left: 1px solid var(--ui-border); width: var(--right-width, 360px); }
-.sidebar.wide { width: var(--right-width, 46%); }
 .sidebar-grip { flex: none; width: 5px; margin: 0 -2px; cursor: col-resize; touch-action: none; z-index: 5; }
 .sidebar-grip:hover, .sidebar-grip:active { background: var(--accent); opacity: 0.4; }
 .panel-tabs { display: flex; border-bottom: 1px solid var(--ui-border); background: var(--ui-bg2); }
@@ -351,6 +350,19 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .lyx-layout-subparagraph, .lyx-layout-subparagraphstar { font-weight: 700; font-style: italic; margin: 0.5em 0 0.2em; }
 .lyx-par[data-label]::before { content: attr(data-label) " "; font-weight: inherit; }
 .lyx-layout-section[data-label]::before, .lyx-layout-subsection[data-label]::before, .lyx-layout-subsubsection[data-label]::before, .lyx-layout-chapter[data-label]::before, .lyx-layout-part[data-label]::before { content: attr(data-label) "  "; color: var(--fg2); }
+/* section folding (editor/plugins/fold.ts): the arrow sits in the page margin left of a heading — on hover,
+   and always while the section is folded; the folded-away paragraphs are not displayed */
+.lyx-fold-hidden { display: none !important; }
+.lyx-fold-toggle { position: absolute; left: -28px; top: calc(0.15em + 0.725em - 11px); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--muted2); opacity: 0; cursor: pointer; user-select: none; -webkit-user-select: none; transition: opacity 0.12s; }
+.lyx-fold-toggle svg { transition: transform 0.12s; }
+.lyx-par:hover > .lyx-fold-toggle, .lyx-fold-toggle.closed { opacity: 1; }
+.lyx-fold-toggle.closed { color: var(--accent); }
+.lyx-fold-toggle.closed svg { transform: rotate(-90deg); }
+.lyx-fold-toggle:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.lyx-par:hover > .lyx-fold-toggle.empty { opacity: 0.3; cursor: default; }
+.lyx-fold-toggle.empty:hover { background: none; }
+@media (hover: none) { .lyx-fold-toggle { opacity: 0.45; } .lyx-fold-toggle.empty { opacity: 0; } }
+@media print { .lyx-fold-toggle { display: none; } }
 /* list items: the label (bullet / number) sits in a right-aligned box left of the text with a clear gap to it — LaTeX's
    \labelsep is 0.5em; the box ends 0.6em before the text starts */
 .lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling { padding-left: 2.4em; position: relative; }
@@ -695,6 +707,11 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .statusbar .zoom-btn:hover { background: var(--ui-hover); border-color: var(--ui-border); }
 .statusbar .zoom-select { height: 18px; font-size: 11px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); color: var(--ui-fg); }
 .statusbar .save-state.saved { color: var(--ok); }
+/* the PDF's age in the status bar (app/StatusBar.tsx PdfStatusChip) */
+.statusbar .pdf-status { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; font: inherit; color: var(--ui-muted); background: none; border: 1px solid transparent; border-radius: 3px; padding: 0 6px; line-height: 18px; cursor: pointer; white-space: nowrap; }
+.statusbar .pdf-status:hover { border-color: var(--ui-border); background: var(--surface); }
+.statusbar .pdf-status.outdated { color: var(--warn-fg); }
+.statusbar .pdf-status.error { color: var(--err); }
 .statusbar .save-state.saving { color: var(--ui-muted); }
 .statusbar .save-state.offline { color: var(--warn-fg); background: var(--warn-bg); padding: 0 8px; border-radius: 3px; }
 .statusbar .update-hint { font: inherit; color: var(--accent, #1a5fb4); background: transparent; border: 1px solid currentColor; border-radius: 3px; padding: 0 8px; margin-right: 10px; cursor: pointer; line-height: 18px; }
@@ -895,9 +912,12 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
   background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 8px; z-index: 10; }
 .board-conn { font-family: var(--ui-font); font-size: 11px; color: var(--ui-muted); margin-left: 4px; white-space: nowrap; }
 .board-conn.offline { color: var(--err); }
-.pdf-panel .build-progress { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 11px; color: var(--fg2); background: var(--surface2); border-bottom: 1px solid var(--ui-border); white-space: nowrap; overflow: hidden; }
-.pdf-panel .build-progress .progress-line { color: var(--muted2); font-family: monospace; overflow: hidden; text-overflow: ellipsis; }
-.pdf-panel .spinner { width: 10px; height: 10px; border: 2px solid var(--ui-border); border-top-color: var(--accent); border-radius: 50%; animation: ol-spin 0.8s linear infinite; flex: none; }
+/* a build in progress floats over the pages (it never pushes them down): a small note top right */
+.pdf-panel .build-progress { position: absolute; top: 8px; right: 14px; z-index: 3; display: flex; align-items: center; gap: 6px; max-width: calc(100% - 28px); padding: 3px 10px; font-size: 11px; color: var(--fg2); background: var(--surface); border: 1px solid var(--ui-border); border-radius: 12px; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.15); white-space: nowrap; overflow: hidden; opacity: 0.94; pointer-events: none; }
+.pdf-panel .build-progress i { font-style: normal; }
+.pdf-panel .build-progress .progress-line { color: var(--muted2); font-family: monospace; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pdf-panel .pdf-empty .build-progress { position: static; margin-bottom: 10px; }
+.pdf-panel .spinner, .statusbar .pdf-status .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--ui-border); border-top-color: var(--accent); border-radius: 50%; animation: ol-spin 0.8s linear infinite; flex: none; }
 @keyframes ol-spin { to { transform: rotate(360deg); } }
 .editor-loading { color: var(--muted2); font-family: var(--ui-font); padding: 20px 0; }
 .child-doc { margin-top: 28px; border-top: 2px solid var(--ui-border); }
@@ -959,10 +979,37 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .version-diff .add { background: var(--ok-bg); } .version-diff .del { background: var(--err-bg); }
 
 /* pdf */
-.pdf-panel { display: flex; flex-direction: column; height: 100%; }
+.pdf-panel { display: flex; flex-direction: column; height: 100%; position: relative; }
 .pdf-panel iframe { flex: 1; border: 0; background: var(--muted2); }
 .pdf-panel .log { font-family: monospace; font-size: 11px; white-space: pre-wrap; max-height: 40%; overflow: auto; background: var(--surface2); border-top: 1px solid var(--ui-border); padding: 6px; color: var(--err); }
-.pdf-panel .bar { display: flex; gap: 6px; padding: 4px 6px; align-items: center; border-bottom: 1px solid var(--ui-border); }
+.pdf-panel .bar { display: flex; gap: 6px; padding: 4px 6px; align-items: center; border-bottom: 1px solid var(--ui-border); min-height: 29px; background: var(--surface2); }
+.pdf-panel .bar .pdf-bar-fill { flex: 1; }
+.pdf-panel .bar .small-btn { white-space: nowrap; flex-shrink: 0; }
+.pdf-panel .bar .pdf-age { flex: 0 1 auto; }
+.pdf-panel .bar .small-btn.warn { color: var(--err); border-color: currentColor; }
+.pdf-panel .bar .small-btn.close { border-color: transparent; background: none; color: var(--ui-muted); }
+.pdf-panel .bar .small-btn.close:hover { color: var(--ui-fg); background: var(--ui-hover); }
+.pdf-panel .bar a.small-btn { text-decoration: none; color: inherit; }
+/* View PDF ▾: the build button and the auto-build settings under the caret */
+.pdf-build-split { position: relative; display: inline-flex; }
+.pdf-build-split .small-btn.primary { border-top-right-radius: 0; border-bottom-right-radius: 0; font-weight: 600; min-width: 64px; }
+.pdf-build-split .small-btn.caret { border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; padding: 2px 5px; }
+.pdf-build-split .small-btn.caret.auto-on { color: var(--accent); }
+.pdf-build-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 290px; padding: 8px 10px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); font-size: 12px; color: var(--ui-fg); }
+.pdf-build-menu .head { font-weight: 700; margin-bottom: 4px; }
+.pdf-build-menu .choice { display: flex; gap: 8px; align-items: flex-start; padding: 4px 2px; border-radius: 4px; cursor: pointer; }
+.pdf-build-menu .choice:hover { background: var(--row-hover); }
+.pdf-build-menu .choice input { margin-top: 2px; }
+.pdf-build-menu .sub { color: var(--ui-muted); font-size: 11px; }
+.pdf-build-menu .delay { display: flex; align-items: center; gap: 6px; margin: 8px 0 4px; }
+.pdf-build-menu .delay select { font-size: 12px; }
+.pdf-build-menu .foot { margin-top: 6px; }
+/* how old the PDF is (app/pdfstatus.ts): green when current, amber when the document changed since, red after errors */
+.pdf-panel .pdf-age { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--ok); }
+.pdf-panel .pdf-age.outdated { color: var(--warn-fg); }
+.pdf-panel .pdf-age.error { color: var(--err); }
+.pdf-panel .pdf-age.building { color: var(--ui-muted); }
+.pdf-panel .pdf-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted2); padding: 16px; text-align: center; }
 
 /* dialogs */
 .dialog-backdrop { position: fixed; inset: 0; background: var(--backdrop); z-index: 100; display: flex; align-items: center; justify-content: center; }
@@ -1293,10 +1340,15 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .pdf-toolbar .pdf-page { width: 3.2em; font-size: 11px; padding: 1px 3px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--page-bg); color: var(--ui-fg); text-align: right; }
 .pdf-toolbar .pdf-count { color: var(--muted2); }
 .pdf-toolbar .pdf-sep { width: 1px; height: 14px; background: var(--ui-border); margin: 0 4px; }
-.pdf-toolbar .pdf-hint { margin-left: auto; color: var(--muted2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pdf-toolbar .pdf-hint { flex: 1 1 0; min-width: 0; margin-left: 6px; text-align: right; color: var(--muted2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the pages and what floats over them (a build's progress); a thin line runs along the top while building */
+.pdf-stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pdf-busy-line { position: absolute; top: 0; left: 0; right: 0; height: 2px; z-index: 3; overflow: hidden; pointer-events: none; }
+.pdf-busy-line::before { content: ''; position: absolute; top: 0; bottom: 0; width: 30%; background: var(--accent); animation: pdf-busy 1.3s ease-in-out infinite; }
+@keyframes pdf-busy { 0% { left: -30%; } 100% { left: 100%; } }
 .pdf-pages { flex: 1; overflow: auto; padding: 12px 0; position: relative; }
 .pdf-page-box { position: relative; margin: 0 auto 12px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.35); overflow: hidden; }
-.pdf-page-box canvas { display: block; }
+.pdf-page-box canvas { display: block; width: 100%; height: 100%; }
 .pdf-flash { position: absolute; border: 2px solid var(--accent); background: rgba(59,110,165,0.18); border-radius: 3px; pointer-events: none; animation: pdf-flash 2.5s ease-out forwards; }
 @keyframes pdf-flash { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
 .pdf-error { color: var(--err); padding: 12px; background: var(--surface); margin: 12px; border-radius: 4px; }
@@ -1304,6 +1356,21 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 
 /* the "[raw]" tab: the document and its LaTeX source side by side (app/SourcePane.tsx layout="right") */
 .editor-column.split { flex-direction: row; }
+/* the web client's pane row (app/panes.ts): WYSIWYG, TeX and PDF in the order and widths of the layout
+   (CSS order and flex-grow set inline), a draggable divider between neighbours */
+.editor-column.panes { flex-direction: row; }
+.editor-column.panes > [data-pane] { min-width: 0; min-height: 0; }
+.editor-column.panes > .source-pane.fill { width: auto; height: auto; border-left: 0; }
+.editor-column.panes > .pdf-pane { display: flex; flex-direction: column; background: var(--surface2); }
+.pane-grip { flex: none; width: 7px; margin: 0 -3px; z-index: 6; cursor: col-resize; touch-action: none; position: relative; }
+.pane-grip::before { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--ui-border); }
+.pane-grip:hover::before, html.pane-resizing .pane-grip::before { left: 2px; width: 3px; background: var(--accent); opacity: 0.6; }
+html.pane-resizing, html.pane-resizing * { cursor: col-resize !important; user-select: none !important; }
+html.pane-resizing canvas, html.pane-resizing textarea { pointer-events: none; }
+@media (max-width: 760px) { .pane-grip { display: none; } }
+/* presentation mode shows the document alone */
+html[data-presenting] .editor-column.panes > :not(.editor-scroll) { display: none !important; }
+html[data-presenting] .editor-column.panes > .editor-scroll { display: block !important; flex: 1 1 auto !important; }
 .source-pane.right { flex: none; position: relative; border-left: 1px solid var(--ui-border); background: var(--page-bg); height: auto; min-height: 0; }
 .source-pane .grip.v { position: absolute; top: 0; bottom: 0; left: -3px; right: auto; width: 6px; height: auto; cursor: col-resize; z-index: 2; }
 .source-pane .bar .apply-state { font-size: 11px; color: var(--muted2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
@@ -1512,6 +1579,27 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .view-mode-switch button:hover { background: var(--ui-hover); }
 .view-mode-switch button.active { background: var(--accent); color: var(--page-bg); }
 .view-mode-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the pane switch (app/PaneSwitch.tsx): the chips stand in the panes' order and can be dragged; ▾ lists every arrangement */
+.pane-switch-wrap { position: relative; display: inline-flex; align-items: center; gap: 3px; }
+.pane-switch button { touch-action: none; user-select: none; -webkit-user-select: none; transition: transform 0.15s ease, background 0.1s; }
+.pane-switch button:not(.active) { color: var(--ui-muted); }
+.pane-switch.dragging button { transition: transform 0.15s ease; }
+.pane-switch button.lifted { transition: none; position: relative; z-index: 2; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); cursor: grabbing; }
+.pane-menu-btn { height: 26px; min-width: 20px; padding: 0 4px; border: 1px solid transparent; border-radius: 5px; background: none; color: var(--ui-muted); cursor: pointer; font-size: 12px; }
+.pane-menu-btn:hover, .pane-menu-btn.open { background: var(--ui-hover); color: var(--ui-fg); }
+.pane-menu { position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 80; padding: 10px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2); display: flex; flex-direction: column; gap: 8px; width: max-content; max-width: calc(100vw - 24px); }
+.pane-presets { display: flex; gap: 6px; flex-wrap: wrap; }
+.pane-preset { display: flex; gap: 2px; padding: 3px; height: 34px; border: 1px solid var(--ui-border); border-radius: 5px; background: var(--surface2); cursor: pointer; }
+.pane-preset:hover { border-color: var(--accent); }
+.pane-preset.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pane-preset .mini { display: flex; align-items: center; justify-content: center; width: 30px; border-radius: 2px; font-size: 9px; font-weight: 700; letter-spacing: 0.2px; color: var(--ui-fg); }
+.pane-preset .mini-doc { background: var(--page-bg); border: 1px solid var(--ui-border); font-family: var(--editor-font); font-size: 10px; }
+.pane-preset .mini-tex { background: var(--code-bg); border: 1px solid var(--ui-border); font-family: "DejaVu Sans Mono", Menlo, monospace; }
+.pane-preset .mini-pdf { background: var(--muted2); color: #fff; }
+.pane-menu-actions { display: flex; gap: 6px; border-top: 1px solid var(--ui-border2); padding-top: 8px; }
+.pane-menu-actions button { font-size: 12px; padding: 3px 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: var(--surface); color: var(--ui-fg); cursor: pointer; }
+.pane-menu-actions button:disabled { opacity: 0.5; cursor: default; }
+.pane-menu-hint { font-size: 11px; color: var(--ui-muted); max-width: 300px; }
 @media (max-width: 700px) {
   .menubar .brand, .menubar-actions .doc-title, .menubar-actions .users, .menubar .gh-link, .menubar .theme-toggle { display: none; }
   .menubar-primary { padding: 0 8px; }

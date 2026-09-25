@@ -729,6 +729,7 @@ export const HELP_ROWS: [string, string][] = [
     ['Ctrl+Shift+G, Ctrl+Alt+T', 'Graphics, table'],
     ['Ctrl+Alt+I, Ctrl+Alt+Shift+I', 'Open/close inset, inset settings'],
     ['Ctrl+Space, Ctrl+Enter', 'Protected space, line break'],
+    ['Alt+- / Alt+Shift+-', 'Em dash — / en dash – (on a Mac ⌥⇧- stays the system’s em dash)'],
     ['Ctrl+A', 'Select inset content (again: whole document)'],
     ['Ctrl+S / Ctrl+R / Ctrl+F', 'Write the file now (everything is saved automatically anyway) / view PDF / find & replace'],
     ['Ctrl+Shift+E', 'Track changes'],

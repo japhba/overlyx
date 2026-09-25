@@ -7,6 +7,7 @@ import type { DocMeta } from '../api';
 import type { MenuDef, MenuEntry } from './MenuBar';
 import { NAMED_COLORS } from './Toolbar';
 import * as C from '../editor/commands';
+import { isMac } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import { changeAt, resolveChange, acceptAllChanges, rejectAllChanges } from '../editor/plugins/changes';
 
@@ -139,12 +140,12 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
         { label: 'Ellipsis …', shortcut: 'Alt+.', action: () => run(C.insertSpecial('ldots')) },
         { label: 'End of sentence', shortcut: 'Ctrl+.', action: () => run(C.insertSpecial('endofsentence')) },
         { label: 'Non-breaking dash', shortcut: 'Ctrl+Alt+-', action: () => run(C.insertSpecial('nobreakdash')) },
-        { label: 'Hyphenation point', shortcut: 'Alt+-', action: () => run(C.insertSpecial('softhyphen')) },
+        { label: 'Hyphenation point', action: () => run(C.insertSpecial('softhyphen')) },
         { label: 'Ligature break', shortcut: 'Ctrl+Shift+L', action: () => run(C.insertSpecial('ligaturebreak')) },
         { label: 'Breakable slash', shortcut: 'Ctrl+/', action: () => run(C.insertSpecial('breakableslash')) },
         { label: 'Menu separator', action: () => run(C.insertSpecial('menuseparator')) },
-        { label: 'En dash –', action: () => run(C.insertHyphens('\\twohyphens')) },
-        { label: 'Em dash —', action: () => run(C.insertHyphens('\\threehyphens')) },
+        { label: 'En dash –', ...(isMac() ? {} : { shortcut: 'Alt+Shift+-' }), action: () => run(C.insertDash('en')) },
+        { label: 'Em dash —', shortcut: 'Alt+-', action: () => run(C.insertDash('em')) },
         { label: 'LyX / TeX / LaTeX logos', action: () => run(C.insertSpecial('LaTeX')) },
         { label: 'Opening quote', action: () => run(C.insertQuote('l')) }, { label: 'Closing quote', action: () => run(C.insertQuote('r')) },
         { label: 'Single quotes ‘ ’', action: () => run(C.insertQuote('l', 'e', 's')) },

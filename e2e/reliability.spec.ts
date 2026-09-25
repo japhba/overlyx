@@ -62,9 +62,10 @@ test('delayed LaTeX paste stays at its original target after moving the cursor',
 
 test('view modes, automatic reference labels and accessible narrow dialogs', async ({ page }) => {
   await login(page); await openDoc(page, 'e2e-reliability/ui.tex');
-  await page.getByRole('button', { name: 'Split', exact: true }).click();
-  await expect(page.locator('textarea.source')).toBeVisible();
+  // the pane switch: TeX beside the document, then WYSIWYG off (the source alone), then on again
   await page.getByRole('button', { name: 'TeX', exact: true }).click();
+  await expect(page.locator('textarea.source')).toBeVisible();
+  await page.getByRole('button', { name: 'WYSIWYG', exact: true }).click();
   await expect(page.locator('.editor-scroll')).toBeHidden();
   await page.getByRole('button', { name: 'WYSIWYG', exact: true }).click();
   await expect(page.locator('.editor-scroll')).toBeVisible();

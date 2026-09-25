@@ -188,9 +188,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         const b = build.lastBuild(docId);
         const job = build.currentJob(docId);
         const tex = withTex && b?.tex_path && fs.existsSync(b.tex_path) ? fs.readFileSync(b.tex_path, 'utf8') : undefined;
+        let pdfAt: number | null = null;
+        try { if (b?.pdf_path) pdfAt = Math.round(fs.statSync(b.pdf_path).mtimeMs); } catch { /* gone */ }
         return {
-          build: b ? { ...b, pdf: b.pdf_path && fs.existsSync(b.pdf_path) ? `${webviewBase}/api/docs/${encodeURIComponent(docId)}/pdf?t=${b.updated_at}` : null, tex } : null,
+          build: b ? { ...b, pdf: pdfAt !== null ? `${webviewBase}/api/docs/${encodeURIComponent(docId)}/pdf?t=${b.updated_at}` : null, pdf_at: pdfAt, tex } : null,
           job: job ? build.publicJob(job) : null,
+          now: Date.now(),
         };
       },
       cancelBuild: (docId) => build.cancelBuild(docId),

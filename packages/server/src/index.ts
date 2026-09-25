@@ -1128,7 +1128,7 @@ api.post('/docs/*/export', async (req, res) => {
       return;
     }
     // background job: returns at once, poll GET /build for progress and the result
-    const job = requestBuild(id, engine, req.user!.name);
+    const job = requestBuild(id, engine, req.user!.name, { auto: req.body?.auto === true });
     res.json({ ok: true, job: publicJob(job) });
   } catch (e) { res.status(500).json({ error: String(e) }); }
 });
@@ -1161,15 +1161,22 @@ api.get('/docs/*/synctex/edit', async (req, res) => {
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
-/** Last build result + the current job (running / queued / just finished), for the PDF panel. */
+/**
+ * Last build result + the current job (running / queued / just finished), for the PDF panel.
+ * `pdf_at` is when the PDF file was written (a failed build can leave the previous PDF), `now` the
+ * server's clock — the client shows the PDF's age with it, whatever its own clock says.
+ */
 api.get('/docs/*/build', (req, res) => {
   const id = docId(req);
   const b = lastBuild(id);
   const job = currentJob(id);
   const tex = req.query.tex === '1' && b?.tex_path && fs.existsSync(b.tex_path) ? fs.readFileSync(b.tex_path, 'utf8') : undefined;
+  let pdfAt: number | null = null;
+  try { if (b?.pdf_path) pdfAt = Math.round(fs.statSync(b.pdf_path).mtimeMs); } catch { /* gone */ }
   res.json({
-    build: b ? { ...b, pdf: b.pdf_path && fs.existsSync(b.pdf_path) ? `/api/docs/${encodeURIComponent(id)}/pdf?t=${b.updated_at}` : null, tex } : null,
+    build: b ? { ...b, pdf: pdfAt !== null ? `/api/docs/${encodeURIComponent(id)}/pdf?t=${b.updated_at}` : null, pdf_at: pdfAt, tex } : null,
     job: job ? publicJob(job) : null,
+    now: Date.now(),
   });
 });
 

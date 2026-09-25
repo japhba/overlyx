@@ -10,6 +10,7 @@ import * as pdfjs from 'pdfjs-dist';
 import { api } from '@client/api';
 import { PdfViewer, type PdfTarget } from '@client/app/PdfViewer';
 import { stateFromBuild, jobActive, type PdfState } from '@client/app/PdfPanel';
+import { pdfStatus, useTicker } from '@client/app/pdfstatus';
 import type { HostToPdf } from '../shared/protocol';
 import '@client/styles.css';
 
@@ -72,6 +73,15 @@ function PdfApp() {
   useEffect(() => { if (!pdf.busy) return; const t = setInterval(() => tick(x => x + 1), 1000); return () => clearInterval(t); }, [pdf.busy]);
   const job = pdf.job;
   const elapsed = job ? Math.max(0, Math.round((Date.now() - job.startedAt) / 1000)) : 0;
+  // how old the PDF is (the file's time; the editor saves the file itself, so "outdated" is not known here)
+  const st = pdfStatus(pdf, 0, useTicker(pdf.busy || (!!pdf.pdfAt && Date.now() + (pdf.skew ?? 0) - pdf.pdfAt < 60000)));
+  // floats over the pages while a build runs (nothing moves)
+  const progress = pdf.busy && job ? (
+    <div class="build-progress" title={job.progress}>
+      <i class="spinner" /> {PHASE[job.status] ?? job.status} · {elapsed} s{job.rerun ? ' · will build again with your latest changes' : ''}
+      {job.progress && <i class="progress-line">{job.progress}</i>}
+    </div>
+  ) : null;
 
   return (
     <div class="pdf-panel" style="height:100vh">
@@ -79,17 +89,11 @@ function PdfApp() {
         <button class="small-btn" disabled={pdf.busy} onClick={() => void build()} title="Compile with latexmk (Ctrl+R in the editor)">{pdf.busy ? 'Building…' : 'Build PDF'}</button>
         {pdf.busy && <button class="small-btn" onClick={() => { void api.cancelBuild(G.docId).then(() => poll(true)); }}>Cancel</button>}
         <button class="small-btn" onClick={() => setShowLog(s => !s)}>{showLog ? 'Hide log' : 'Log'}</button>
-        <span style={{ color: pdf.ok === false ? '#b00' : '#3a3', fontSize: '11px' }} title={pdf.builtAt ? 'built at ' + new Date(pdf.builtAt).toLocaleTimeString() : ''}>{pdf.ok === null ? '' : pdf.ok ? '✓ built' : '✗ errors'}</span>
+        <span class={'pdf-age ' + st.kind} title={st.title}>{st.label}</span>
       </div>
-      {pdf.busy && job && (
-        <div class="build-progress" title={job.progress}>
-          <span class="spinner" /> {PHASE[job.status] ?? job.status} · {elapsed} s{job.rerun ? ' · will build again with your latest changes' : ''}
-          {job.progress && <span class="progress-line">{job.progress}</span>}
-        </div>
-      )}
       {pdf.url
-        ? <PdfViewer url={pdf.url} target={target} onSync={(page, x, y) => vscode.postMessage({ type: 'inverse', page, x, y })} hint="Double-click the PDF to jump to that place in the document" />
-        : <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#888">{pdf.busy ? 'Building the PDF in the background — you can keep editing.' : 'No PDF yet — click “Build PDF” (Ctrl+R in the editor).'}</div>}
+        ? <PdfViewer url={pdf.url} target={target} onSync={(page, x, y) => vscode.postMessage({ type: 'inverse', page, x, y })} hint="Double-click the PDF to jump to that place in the document" busy={pdf.busy} overlay={progress} />
+        : <div class="pdf-empty">{progress}{pdf.busy ? 'Building the PDF in the background — you can keep editing.' : 'No PDF yet — click “Build PDF” (Ctrl+R in the editor).'}</div>}
       {(showLog || pdf.ok === false) && (
         <div class="log">{pdf.warnings.length ? 'Warnings:\n' + pdf.warnings.join('\n') + '\n\n' : ''}{pdf.log || '(no log)'}</div>
       )}

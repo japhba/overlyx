@@ -15,7 +15,8 @@ import { DocPanel } from './DocPanel';
 import { Home, projectDocs } from './Home';
 import { pendingImportFlag } from './pendingImport';
 import { TextEditor } from './TextEditor';
-import { ViewModeSwitch, type ViewMode } from './ViewModeSwitch';
+import { PaneSwitch } from './PaneSwitch';
+import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, resizeBetween, type PaneId, type PaneLayout } from './panes';
 import { MarkdownEditor } from './MarkdownEditor';
 import { ShareDialog } from './Share';
 import { GuestCallout } from './Guest';
@@ -30,7 +31,7 @@ import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
 import { Versions } from './Versions';
 import { AgentPanel } from './AgentPanel';
-import { PdfPanel, stateFromBuild, jobActive, type PdfState } from './PdfPanel';
+import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
 import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX } from './Ruler';
 import { StatusBar, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget, cursorLine, docBlocks, blockPos } from './SourcePane';
@@ -109,10 +110,24 @@ async function clearLocalData(): Promise<void> {
   } catch { /* ignore */ }
 }
 
-type RightTab = 'comments' | 'pdf' | 'versions' | 'agent';
-const RIGHT_TABS = ['comments', 'pdf', 'versions', 'agent'] as const;
-const RIGHT_TAB_LABELS: Record<RightTab, string> = { comments: 'Comments', pdf: 'PDF', versions: 'Versions', agent: 'Agent' };
-const RIGHT_TAB_TITLES: Record<RightTab, string> = { comments: 'Comment threads: open ones and the resolved archive', pdf: 'PDF preview', versions: 'Versions of this document', agent: 'The coding agent (OpenAI Codex) working in this project' };
+type RightTab = 'comments' | 'versions' | 'agent';
+const RIGHT_TABS = ['comments', 'versions', 'agent'] as const;
+const RIGHT_TAB_LABELS: Record<RightTab, string> = { comments: 'Comments', versions: 'Versions', agent: 'Agent' };
+const RIGHT_TAB_TITLES: Record<RightTab, string> = { comments: 'Comment threads: open ones and the resolved archive', versions: 'Versions of this document', agent: 'The coding agent (OpenAI Codex) working in this project' };
+const PDF_TITLE = 'The PDF beside the text (Ctrl+R builds it)';
+/** below this width one pane at a time (the pane switch works like tabs) */
+const NARROW_PANES = '(max-width: 760px)';
+function useMedia(query: string): boolean {
+  const [on, setOn] = useState(() => typeof matchMedia === 'function' && matchMedia(query).matches);
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return;
+    const m = matchMedia(query);
+    const l = () => setOn(m.matches);
+    m.addEventListener('change', l);
+    return () => m.removeEventListener('change', l);
+  }, [query]);
+  return on;
+}
 const LEFT_TITLE = 'Documents of the project and their outlines (Ctrl+Alt+O)';
 const SOURCE_TITLE = 'LaTeX source beside the text (Ctrl+Alt+S)';
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -138,12 +153,66 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [hashId, setHashId] = useState<string | null>(parseHash().id);
   const docId = hashId ? hashId.replace(/^raw:/, '') : null;
   const rawSplit = !!hashId && hashId.startsWith('raw:');
-  const [sourceOnly, setSourceOnly] = useState(false);
   useEffect(() => { restoreSidebarWidths(); }, []);
-  const viewMode = rawSplit ? (sourceOnly ? 'tex' : 'split') : 'wysiwyg';
-  const changeViewMode = (mode: ViewMode) => { setSourceOnly(mode === 'tex'); if (docId) location.hash = '#/' + (mode === 'wysiwyg' ? '' : 'raw:') + docId; };
+  // The writing area's panes — WYSIWYG, TeX source, PDF — any of them, in any order (app/panes.ts,
+  // the PaneSwitch in the menu bar); kept per browser. "raw:<doc>" in the hash asks for the source.
+  const [panes, setPanesState] = useState<PaneLayout>(loadLayout);
+  const setPanes = (fn: (l: PaneLayout) => PaneLayout) => setPanesState(l => { const n = fn(l); if (n !== l) saveLayout(n); return n; });
+  const narrowPanes = useMedia(NARROW_PANES);
+  const prevHash = useRef<{ doc: string | null; raw: boolean }>({ doc: null, raw: false });
+  useEffect(() => {
+    const prev = prevHash.current;
+    prevHash.current = { doc: docId, raw: rawSplit };
+    if (!docId) return;
+    if (rawSplit) setPanes(l => setPaneShown(l, 'tex', true));
+    else if (prev.doc === docId && prev.raw) setPanes(l => setPaneShown(l, 'tex', false));   // the same document without "raw:" (Back, a switch)
+  }, [hashId]);
+  // the layout as of now: keys and menus may run a handler from an earlier render (Preact installs the
+  // new ones after the paint), and two quick Ctrl+Alt+S must toggle twice
+  const panesRef = useRef(panes);
+  panesRef.current = panes;
+  /** A new pane layout (from the switch, a menu, a key); the source pane is mirrored in the hash ("raw:"), so Back undoes it. */
+  const changePanes = (next: PaneLayout | ((l: PaneLayout) => PaneLayout)) => {
+    const cur = panesRef.current;
+    const n = typeof next === 'function' ? next(cur) : next;
+    if (n === cur) return;
+    panesRef.current = n;
+    setPanes(() => n);
+    const h = parseHash().id;
+    const id = h ? h.replace(/^raw:/, '') : null;
+    if (id && n.shown.tex !== h!.startsWith('raw:')) location.hash = '#/' + (n.shown.tex ? 'raw:' : '') + id;
+  };
+  const showPane = (id: PaneId, on = true) => changePanes(l => setPaneShown(l, id, on));
+  const flipPane = (id: PaneId) => changePanes(l => togglePane(l, id));
   /** The Source switches (Ctrl+Alt+S, the right rail, the panel tabs, the View menu): the LaTeX source beside the document. */
-  const toggleRawSplit = () => { if (docId) location.hash = '#/' + (rawSplit ? docId : 'raw:' + docId); };
+  const toggleRawSplit = () => flipPane('tex');
+  /** the panes on screen, left to right (one at a time on a phone-width screen) */
+  const shownPanes = narrowPanes ? visiblePanes(panes).slice(0, 1) : visiblePanes(panes);
+  /** CSS order places the panes (they stay mounted in one DOM order, so moving one never reloads the editor or the PDF); flex-grow is its width */
+  const paneStyle = (id: PaneId) => ({ order: 2 * panes.order.indexOf(id), flex: `${panes.weights[id]} 1 0px`, ...(shownPanes.includes(id) ? {} : { display: 'none' }) });
+  // the PDF pane is mounted the first time it is shown and then kept (hidden), so showing it again does not reload the PDF
+  const pdfMountedRef = useRef(false);
+  if (panes.shown.pdf) pdfMountedRef.current = true;
+  const pdfMounted = pdfMountedRef.current;
+  const columnRef = useRef<HTMLDivElement>(null);
+  /** a divider between two panes dragged: their widths change, the others keep theirs */
+  const startPaneResize = (a: PaneId, b: PaneId, e: PointerEvent) => {
+    if (e.button !== 0) return;
+    const col = columnRef.current;
+    const ea = col?.querySelector<HTMLElement>(`:scope > [data-pane="${a}"]`), eb = col?.querySelector<HTMLElement>(`:scope > [data-pane="${b}"]`);
+    if (!ea || !eb) return;
+    e.preventDefault();
+    const widths: [number, number] = [ea.getBoundingClientRect().width, eb.getBoundingClientRect().width];
+    const base = panes, x0 = e.clientX;
+    document.documentElement.classList.add('pane-resizing');
+    const move = (ev: PointerEvent) => setPanesState(resizeBetween(base, a, b, widths, ev.clientX - x0));
+    const up = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+      document.documentElement.classList.remove('pane-resizing');
+      setPanesState(l => { saveLayout(l); return l; });
+    };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+  };
   // .tex documents open in the collaborative editor, other text files in a plain text editor (ids
   // prefixed with "text:"), a project's PDF files in the PDF viewer ("pdf:")
   const isTextTab = !!docId && docId.startsWith('text:');
@@ -185,7 +254,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       if (v) document.documentElement.style.setProperty(`--${side}-width`, v);
     }
   }, []);
-  const [pdf, setPdf] = useState<PdfState>({ url: null, log: '', busy: false, ok: null, warnings: [] });
+  const [pdf, setPdf] = useState<PdfState>(EMPTY_PDF);
+  /** the save an automatic build was last started for (never twice for the same one, even if it failed) */
+  const lastAutoFor = useRef(0);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [message, setMessage] = useState<{ text: string; kind: 'info' | 'error' } | null>(null);
   const [marginMode, setMarginModeState] = useState(localStorage.getItem('ol.margin') === '1');
@@ -236,7 +307,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const scrollTop = useRef<number | null>(null);
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el) { scrollTop.current = null; return; }
+    if (!el || !el.getClientRects().length) { scrollTop.current = null; return; }   // gone, or its pane is hidden
     const top = el.getBoundingClientRect().top;
     if (scrollTop.current !== null && top !== scrollTop.current) el.scrollTop += top - scrollTop.current;
     scrollTop.current = top;
@@ -509,7 +580,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   useEffect(() => {
     editorRef.current?.destroy();
     editorRef.current = null; activeViewRef.current = null;
-    setMeta(null); setOutline([]); setChildIds([]); setPdf({ url: null, log: '', busy: false, ok: null, warnings: [] });
+    setMeta(null); setOutline([]); setChildIds([]); setPdf(EMPTY_PDF); lastAutoFor.current = 0;
     setDialog(null);   // a dialog belongs to the document it was opened in
     if (!docId || !containerRef.current) return;
     containerRef.current.innerHTML = '';
@@ -684,7 +755,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       let r: Awaited<ReturnType<typeof api.build>>;
       try { r = await api.build(id); } catch { pollRef.current = setTimeout(step, 3000); return; }
       if (editorContext.docId !== id) return;
-      setPdf(p => stateFromBuild(p, r));
+      setPdf(p => ({ ...stateFromBuild(p, r), known: true }));
       if (jobActive(r.job)) { pollRef.current = setTimeout(step, 1000); return; }
       if (announce && r.job) notify(r.job.status === 'ok' ? 'PDF built' : r.job.status === 'cancelled' ? 'PDF build cancelled' : 'PDF build failed — see log', r.job.status === 'ok' ? 'info' : 'error');
     };
@@ -694,21 +765,39 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // when a document opens: show its last PDF, and resume polling if a build is running
   useEffect(() => { if (docId) pollBuild(docId, false); }, [docId]);
 
-  const build = async (opts: { open?: boolean } = {}) => {
+  /** Build the PDF. `open: false` (LyX's Update) leaves the PDF pane as it is; `auto`: started by the auto-build setting (quiet). */
+  const build = async (opts: { open?: boolean; auto?: boolean } = {}) => {
     if (!docId) return;
-    if (opts.open !== false) setRightTab('pdf');   // LyX Update rebuilds without switching to the viewer
-    setPdf(p => ({ ...p, busy: true }));
+    if (opts.open !== false) showPane('pdf');
+    setPdf(p => ({ ...p, busy: true, auto: !!opts.auto }));
     try {
-      const r = await api.export(docId, 'pdf');
+      const r = await api.export(docId, 'pdf', { auto: opts.auto });
       setPdf(p => ({ ...p, busy: true, job: r.job ?? p.job }));
-      pollBuild(docId, true);
+      pollBuild(docId, !opts.auto);
     } catch (e) {
       setPdf(p => ({ ...p, busy: false, ok: false, log: String((e as Error).message) }));
-      notify('Could not start the PDF build: ' + String((e as Error).message), 'error');
+      if (!opts.auto) notify('Could not start the PDF build: ' + String((e as Error).message), 'error');
     }
   };
+  // Auto-build (Settings ▸ Editor ▸ PDF, or the ▾ beside View PDF): a moment after the document was
+  // saved, when the PDF is older than that save — while the PDF pane is shown, or always. Never
+  // while a build runs (when it is done and the document is still newer, this asks again), and
+  // never twice for the same save (a failing document is not rebuilt in a loop).
+  const pdfPaneVisible = isLyxDoc && panes.shown.pdf && (!narrowPanes || visiblePanes(panes)[0] === 'pdf');
+  useEffect(() => {
+    const mode = prefs.autoBuild;
+    if (!docId || !isLyxDoc || mode === 'off' || (mode === 'shown' && !pdfPaneVisible)) return;
+    if (!pdf.known || pdf.busy) return;
+    const saved = save.savedAt;
+    if (!saved || saved <= lastAutoFor.current) return;
+    if (pdf.pdfAt && saved <= pdf.pdfAt + 1500) return;               // the PDF already has this save
+    if (pdf.ok === false && pdf.builtAt && saved <= pdf.builtAt) return;   // the failed build already tried it
+    const t = setTimeout(() => { lastAutoFor.current = saved; void build({ open: false, auto: true }); }, Math.max(0, prefs.autoBuildDelay) * 1000);
+    return () => clearTimeout(t);
+  }, [docId, save.savedAt, pdf.known, pdf.busy, pdf.pdfAt, pdf.builtAt, pdf.ok, prefs.autoBuild, prefs.autoBuildDelay, pdfPaneVisible]);
   const cancelBuild = async () => {
     if (!docId) return;
+    lastAutoFor.current = Math.max(lastAutoFor.current, save.savedAt);   // cancelled: no automatic build for this save either
     await api.cancelBuild(docId).catch(() => {});
     pollBuild(docId, true);
   };
@@ -731,7 +820,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       const { boxes } = await api.synctexView(docId, where.line + 1);
       if (!boxes.length) { notify(`SyncTeX has no position for line ${where.line + 1} of the built LaTeX`, 'error'); return; }
       const b = boxes[0];
-      setRightTab('pdf');
+      showPane('pdf');
       setSyncTarget({ page: b.page, x: b.h, y: b.v - b.H, w: b.W, h: b.H, seq: Date.now() });
     } catch (e) { notify('SyncTeX: ' + (e as Error).message, 'error'); }
   };
@@ -931,9 +1020,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     editingMenus.edit,
     editorViewMenu({ combined, setCombined, marginMode, toggleMargin, run, showRuler, setShowRuler, tbMode, setToolbar, textWidth, setTextWidth, stepTextWidth,
       hostItems: [
-      { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', checked: rawSplit, action: toggleRawSplit },
+      { label: 'LaTeX source beside the document (raw view)', shortcut: 'Ctrl+Alt+S', checked: panes.shown.tex, action: toggleRawSplit },
       { label: 'Outline', shortcut: 'Ctrl+Alt+O', checked: showFiles, action: () => setShowFiles(!showFiles) },
-      { label: 'PDF preview', checked: rightTab === 'pdf', action: () => setRightTab(rightTab === 'pdf' ? null : 'pdf') },
+      { label: 'PDF preview', checked: panes.shown.pdf, action: () => flipPane('pdf') },
+      { label: 'WYSIWYG document', checked: panes.shown.doc, action: () => flipPane('doc') },
       { label: 'Versions', checked: rightTab === 'versions', action: () => setRightTab(rightTab === 'versions' ? null : 'versions') },
       { sep: true },
       ],
@@ -1181,7 +1271,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         users={isLyxDoc ? status.users : undefined} onJumpToUser={jumpToUser}
         onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? shareProject}”: invite people or turn on a link` : undefined}
         onSignIn={user.guest ? signIn : undefined}
-        primary={isLyxDoc && <ViewModeSwitch mode={viewMode} onChange={changeViewMode} />}
+        primary={isLyxDoc && <PaneSwitch layout={panes} onChange={changePanes} narrow={narrowPanes} />}
         right={docId && <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span>} />
       {user.guest && <GuestCallout user={user} project={curProject} google={google} onSignIn={signIn} />}
       {isLyxDoc && tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={tb.standard} />}
@@ -1245,8 +1335,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           <div class="rail left"><button data-rail="outline" title={LEFT_TITLE} onClick={() => setShowFiles(true)}>Documents</button></div>
         )}
         {showFiles && <SidebarGrip side="left" />}
-        <div class={'editor-column' + (isLyxDoc ? ' view-' + viewMode + (viewMode === 'wysiwyg' ? '' : ' split') : '')}>
-        <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
+        <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')} ref={columnRef}>
+        <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
           {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/'))} toolbar={<a class="small-btn" href={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/')) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : !isLyxDoc ? (/\.(md|markdown)$/i.test(textId!) ? <MarkdownEditor key={docId} id={textId!} notify={notify} /> : <TextEditor key={docId} id={textId!} notify={notify} />) :
             <div class="editor-page">
@@ -1258,28 +1348,34 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
             </div>
           ) : <Home user={user} refreshKey={refreshKey} onOpen={id => openInTab(id)} onStartTour={id => { openInTab(id); setTour('steps'); }} onShare={p => setShareFor(p)} onGit={p => setGitFor(p)} onChanged={() => setRefreshKey(k => k + 1)} onBrowse={() => setShowFiles(true)} onSignIn={signIn} notify={notify} />}
         </div>
-        {isLyxDoc && <SourcePane key={docId!} target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => changeViewMode('wysiwyg')} />}
+        {isLyxDoc && <SourcePane key={docId!} fill style={paneStyle('tex')} target={sourceTarget} tick={docTick} selTick={selTick} mathField={mathField} onNotify={notify} onClose={() => showPane('tex', false)} />}
+        {isLyxDoc && pdfMounted && (
+          <div class="pdf-pane" data-pane="pdf" style={paneStyle('pdf')}>
+            <PdfPanel key={docId} docId={docId} state={pdf} savedAt={save.savedAt} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }}
+              onPublicLink={shareProject ? () => setShareFor(shareProject) : undefined} onClose={() => showPane('pdf', false)} />
+          </div>
+        )}
+        {isLyxDoc && shownPanes.slice(0, -1).map((a, i) => <div key={a + '|' + shownPanes[i + 1]} class="pane-grip" style={{ order: 2 * panes.order.indexOf(a) + 1 }} title="Drag to resize the panes" onPointerDown={e => startPaneResize(a, shownPanes[i + 1], e as unknown as PointerEvent)} />)}
         </div>
         {isLyxDoc && !rightTab && (
           <div class="rail right">
             {RIGHT_TABS.filter(t => t !== 'agent' || aiActivated).map(t => <button key={t} data-rail={t} title={RIGHT_TAB_TITLES[t]} onClick={() => { setRightTab(t); if (t === 'versions') setSelVersion(v => v + 1); }}>{RIGHT_TAB_LABELS[t]}</button>)}
-            <button data-rail="source" class={rawSplit ? 'active' : ''} title={SOURCE_TITLE} onClick={toggleRawSplit}>Source</button>
+            <button data-rail="pdf" class={panes.shown.pdf ? 'active' : ''} title={PDF_TITLE} onClick={() => flipPane('pdf')}>PDF</button>
+            <button data-rail="source" class={panes.shown.tex ? 'active' : ''} title={SOURCE_TITLE} onClick={toggleRawSplit}>Source</button>
           </div>
         )}
         {isLyxDoc && rightTab && <SidebarGrip side="right" />}
         {isLyxDoc && rightTab && (
-          <div class={'sidebar right' + (rightTab === 'pdf' ? ' wide' : '')}>
+          <div class="sidebar right">
             <div class="panel-tabs">
               <button class={rightTab === 'comments' ? 'active' : ''} data-tab="comments" onClick={() => setRightTab('comments')} title={RIGHT_TAB_TITLES.comments}>Comments</button>
-              <button class={rightTab === 'pdf' ? 'active' : ''} data-tab="pdf" onClick={() => setRightTab('pdf')} title={RIGHT_TAB_TITLES.pdf}>PDF</button>
               <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }} title={RIGHT_TAB_TITLES.versions}>Versions</button>
               {aiActivated && <button class={rightTab === 'agent' ? 'active' : ''} data-tab="agent" onClick={() => setRightTab('agent')} title={RIGHT_TAB_TITLES.agent}>Agent</button>}
-              <button class={'toggle' + (rawSplit ? ' on' : '')} data-tab="source" onClick={toggleRawSplit} title={SOURCE_TITLE}>Source</button>
+              <button class={'toggle' + (panes.shown.pdf ? ' on' : '')} data-tab="pdf" onClick={() => flipPane('pdf')} title={PDF_TITLE}>PDF</button>
+              <button class={'toggle' + (panes.shown.tex ? ' on' : '')} data-tab="source" onClick={toggleRawSplit} title={SOURCE_TITLE}>Source</button>
               <button class="hide" title="Hide the sidebar" onClick={() => setRightTab(null)}>»</button>
             </div>
             {rightTab === 'comments' && <div class="panel-body"><Comments views={[masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} /></div>}
-            {rightTab === 'pdf' && <PdfPanel docId={docId} state={pdf} onBuild={build} onCancel={cancelBuild} onShowTex={showTex} syncTarget={syncTarget} onForward={() => { void syncToPdf(); }} onInverse={(pg, x, y) => { void syncFromPdf(pg, x, y); }}
-              onPublicLink={shareProject ? () => setShareFor(shareProject) : undefined} />}
             {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
             {rightTab === 'agent' && <AgentPanel project={docId.split('/')[0]} notify={notify} />}
           </div>
@@ -1289,7 +1385,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           (.bottom-toolbars is absolutely positioned), so their coming and going with the cursor
           never shifts the document. */}
       {isLyxDoc && (tb.showMath || tb.showTable || tb.showReview || inkMode) && (
-        <div class="bottom-toolbars" style={{ left: showFiles ? 'var(--left-width, 272px)' : '24px', right: rightTab ? (rightTab === 'pdf' ? 'var(--right-width, 46%)' : 'var(--right-width, 360px)') : '24px' }}>
+        <div class="bottom-toolbars" style={{ left: showFiles ? 'var(--left-width, 272px)' : '24px', right: rightTab ? 'var(--right-width, 360px)' : '24px' }}>
           {tb.showMath && <Toolbar id="math" label="Math" groups={tb.math} />}
           {tb.showMath && tbMode('mathpanels') !== 'off' && <Toolbar id="mathpanels" label="Panels" groups={tb.mathPanels} />}
           {tb.showTable && <Toolbar id="table" label="Table" groups={tb.table} />}
@@ -1300,13 +1396,14 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={save} tracking={tracking} trackingAs={user.name} change={changeInfo}
         docLabel={view && masterView && view !== masterView ? viewDocId(view).split('/').pop() ?? null : null}
         readOnly={!!docId && viewOnly} updateReady={updateReady} aiBusy={aiBusy > 0}
-        quiet={!!docId && !isLyxDoc} stats={docStats} zoom={zoom} onZoom={setZoom} />
+        quiet={!!docId && !isLyxDoc} stats={docStats} zoom={zoom} onZoom={setZoom}
+        pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />
       {renderDialog()}
       {shareFor && <ShareDialog project={shareFor} user={user} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
       {tour && <Tour intro={tour === 'intro'} onEnd={endTour}
         ctx={{ docId, ready: isLyxDoc && status.synced && !!view, docTick, layout, inMath: !!mathField, saveState: save.state, rightTab, pdfBusy: pdf.busy, pdfBuiltAt: pdf.builtAt ?? 0, shareOpen: !!shareFor, gitOpen: !!gitFor, marginMode }}
-        actions={{ openExample, showRight: () => { if (!rightTab) setRightTab('pdf'); }, showFiles: () => setShowFiles(true) }} />}
+        actions={{ openExample, showRight: () => { if (!rightTab) setRightTab('comments'); }, showPdf: () => showPane('pdf'), showFiles: () => setShowFiles(true) }} />}
     </div>
   );
 }

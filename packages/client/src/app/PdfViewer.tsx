@@ -1,16 +1,32 @@
 /**
  * A PDF viewer (pdf.js): the pages of a document rendered to canvases, lazily as they scroll
- * into view, fitted to the width of the panel or zoomed. Used for the built PDF in the side
- * panel and for PDF files of a project opened in a tab. SyncTeX: `target` scrolls to a box of
- * the page and flashes it (forward search); a double-click on a page reports the point in PDF
- * points from the page's top-left (inverse search) through `onSync`.
+ * into view, fitted to the width of the panel or zoomed. Used for the built PDF in its pane and
+ * for PDF files of a project opened in a tab. SyncTeX: `target` scrolls to a box of the page and
+ * flashes it (forward search); a double-click on a page reports the point in PDF points from the
+ * page's top-left (inverse search) through `onSync`.
+ *
+ * A rebuilt PDF (a new `url`) replaces the old one without a flicker: the new document loads while
+ * the old pages stay on screen, every page is rendered off-screen and copied onto its canvas in
+ * one step, and the reader stays on the same page at the same place in it (the page and the
+ * offset into it are kept, not the scroll fraction, so pages added above do not move the view).
+ * `busy` draws a thin progress line along the top; `overlay` floats over the pages.
  */
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import * as pdfjs from 'pdfjs-dist';
-import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+
+/**
+ * One pdf.js worker for every document this page opens: a worker of its own per document would be
+ * started (its script parsed) on every rebuild, which delays the new PDF by most of a second.
+ * Created on first use, so a page that replaces `workerSrc` first (the VS Code webview) gets its own.
+ */
+let sharedWorker: pdfjs.PDFWorker | null = null;
+function worker(): pdfjs.PDFWorker | undefined {
+  try { return (sharedWorker ??= new pdfjs.PDFWorker({})); } catch { return undefined; }
+}
 
 /** A place in the PDF (points from the page's top-left): the box to show, `seq` makes a repeated target scroll again. */
 export interface PdfTarget { page: number; x: number; y: number; w?: number; h?: number; seq: number }
@@ -18,8 +34,12 @@ export interface PdfTarget { page: number; x: number; y: number; w?: number; h?:
 interface PageInfo { width: number; height: number }
 
 const ZOOMS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+/** vertical gap below every page (px, styles.css .pdf-page-box margin) */
+const GAP = 12;
+/** padding above the first page (styles.css .pdf-pages) */
+const PAD = 12;
 
-export function PdfViewer({ url, target, onSync, toolbar, hint }: { url: string; target?: PdfTarget | null; onSync?: (page: number, x: number, y: number) => void; toolbar?: ComponentChildren; hint?: string }) {
+export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }: { url: string; target?: PdfTarget | null; onSync?: (page: number, x: number, y: number) => void; toolbar?: ComponentChildren; hint?: string; busy?: boolean; overlay?: ComponentChildren }) {
   const host = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState<PageInfo[]>([]);
@@ -31,27 +51,54 @@ export function PdfViewer({ url, target, onSync, toolbar, hint }: { url: string;
   const [flash, setFlash] = useState<{ page: number; x: number; y: number; w: number; h: number } | null>(null);
   const rendered = useRef(new Map<number, { scale: number; task: RenderTask | null }>());
   const canvases = useRef(new Map<number, HTMLCanvasElement>());
-  const keepScroll = useRef<number | null>(null);
+  /** the document shown and its loading task (destroyed when replaced, after the new one is up) */
+  const shownTask = useRef<PDFDocumentLoadingTask | null>(null);
+  const retired = useRef<PDFDocumentLoadingTask[]>([]);
+  /** where the reader was when a new document came in: page index and how far into it the viewport's top is */
+  const anchor = useRef<{ page: number; frac: number } | null>(null);
+  const layoutRef = useRef<{ pages: PageInfo[]; scaleFor: (p: PageInfo) => number }>({ pages: [], scaleFor: () => 1 });
 
-  // load the document (a rebuilt PDF keeps the scroll position)
+  const scaleFor = (p: PageInfo) => (zoom === 'width' ? Math.max(0.2, (width - 28) / p.width) : zoom * (96 / 72));
+  layoutRef.current = { pages, scaleFor };
+
+  /** the page at the viewport's top and the fraction of it above the top edge */
+  const readAnchor = (): { page: number; frac: number } | null => {
+    const el = host.current;
+    const { pages: ps, scaleFor: sf } = layoutRef.current;
+    if (!el || !ps.length) return null;
+    let y = PAD;
+    for (let i = 0; i < ps.length; i++) {
+      const h = ps[i].height * sf(ps[i]) + GAP;
+      if (y + h > el.scrollTop || i === ps.length - 1) return { page: i, frac: Math.max(0, Math.min(1, (el.scrollTop - y) / h)) };
+      y += h;
+    }
+    return null;
+  };
+
+  // load the document; the old one stays on screen until the new one is ready
   useEffect(() => {
     let cancelled = false;
-    setError(null);
-    if (host.current && host.current.scrollHeight > 0) keepScroll.current = host.current.scrollTop / host.current.scrollHeight;
-    const task = pdfjs.getDocument({ url, withCredentials: true });
+    const task = pdfjs.getDocument({ url, withCredentials: true, worker: worker() });
     task.promise.then(async d => {
       if (cancelled) return;
       const infos: PageInfo[] = [];
       for (let i = 1; i <= d.numPages; i++) { const p = await d.getPage(i); const v = p.getViewport({ scale: 1 }); infos.push({ width: v.width, height: v.height }); }
       if (cancelled) return;
-      rendered.current.clear();
+      anchor.current = readAnchor();
+      if (shownTask.current) retired.current.push(shownTask.current);
+      shownTask.current = task;
+      setError(null);
       setDoc(d);
       setPages(infos);
     }).catch(e => { if (!cancelled) setError(String((e as Error).message ?? e)); });
-    // destroying the loading task frees the document (and its worker data) when the URL changes or
-    // the viewer goes away; renders still in flight are cancelled first (they would fail on the gone transport)
-    return () => { cancelled = true; for (const s of rendered.current.values()) s.task?.cancel(); rendered.current.clear(); void task.destroy(); };
+    // a URL replaced before its document arrived is dropped; the shown one lives until its successor is up
+    return () => { cancelled = true; if (shownTask.current !== task) void task.destroy(); };
   }, [url]);
+  useEffect(() => () => {
+    for (const s of rendered.current.values()) s.task?.cancel();
+    for (const t of retired.current) void t.destroy();
+    void shownTask.current?.destroy();
+  }, []);
 
   // the panel's width (fit-to-width) and the visible page
   useEffect(() => {
@@ -63,20 +110,32 @@ export function PdfViewer({ url, target, onSync, toolbar, hint }: { url: string;
     return () => ro.disconnect();
   }, []);
 
-  const scaleFor = (p: PageInfo) => (zoom === 'width' ? Math.max(0.2, (width - 28) / p.width) : zoom * (96 / 72));
+  // a new document: back to the same page, the same distance into it (before the paint)
+  useLayoutEffect(() => {
+    const el = host.current, a = anchor.current;
+    if (!el || !a || !pages.length || !width) return;
+    anchor.current = null;
+    const page = Math.min(a.page, pages.length - 1);
+    let y = PAD;
+    for (let i = 0; i < page; i++) y += pages[i].height * scaleFor(pages[i]) + GAP;
+    const top = Math.round(y + a.frac * (pages[page].height * scaleFor(pages[page]) + GAP));
+    if (Math.abs(el.scrollTop - top) > 1) el.scrollTop = top;
+  }, [pages]);
 
-  // render the pages that are (nearly) visible, at the current scale
+  // render the pages that are (nearly) visible, at the current scale — off-screen, then copied in one step
   useEffect(() => {
     const el = host.current;
     if (!el || !doc || !pages.length || !width) return;
+    // the documents this one replaced can go now (their renders were cancelled with the previous run)
+    for (const t of retired.current.splice(0)) void t.destroy();
     let disposed = false;
     const renderVisible = () => {
       if (disposed) return;
       const top = el.scrollTop - el.clientHeight, bottom = el.scrollTop + 2 * el.clientHeight;
-      let y = 0, cur = 1, best = Infinity;
+      let y = PAD, cur = 1, best = Infinity;
       pages.forEach((p, i) => {
         const scale = scaleFor(p);
-        const h = p.height * scale + 12;
+        const h = p.height * scale + GAP;
         const mid = y + h / 2;
         if (Math.abs(mid - (el.scrollTop + el.clientHeight / 3)) < best) { best = Math.abs(mid - (el.scrollTop + el.clientHeight / 3)); cur = i + 1; }
         if (y + h >= top && y <= bottom) void renderPage(i + 1, scale);
@@ -94,19 +153,24 @@ export function PdfViewer({ url, target, onSync, toolbar, hint }: { url: string;
       try {
         const page = await doc.getPage(n);
         if (disposed) return;
-        const viewport = page.getViewport({ scale: scale * (window.devicePixelRatio || 1) });
-        canvas.width = viewport.width; canvas.height = viewport.height;
-        canvas.style.width = `${viewport.width / (window.devicePixelRatio || 1)}px`;
-        canvas.style.height = `${viewport.height / (window.devicePixelRatio || 1)}px`;
-        const task = page.render({ canvas, viewport });
+        const dpr = window.devicePixelRatio || 1;
+        const viewport = page.getViewport({ scale: scale * dpr });
+        const off = document.createElement('canvas');
+        off.width = Math.ceil(viewport.width); off.height = Math.ceil(viewport.height);
+        const task = page.render({ canvas: off, viewport });
         rendered.current.set(n, { scale, task });
-        task.promise.then(() => { const s = rendered.current.get(n); if (s?.task === task) s.task = null; }, () => { /* cancelled */ });
+        await task.promise;
+        if (disposed || rendered.current.get(n)?.task !== task) return;
+        rendered.current.get(n)!.task = null;
+        // resizing clears a canvas: size it and draw the finished page in the same task, so the old picture never blanks
+        canvas.width = off.width; canvas.height = off.height;
+        canvas.getContext('2d')?.drawImage(off, 0, 0);
+        canvas.classList.add('ready');
       } catch {
-        rendered.current.delete(n);   // the document was replaced or destroyed meanwhile
+        if (rendered.current.get(n)?.scale === scale) rendered.current.delete(n);   // cancelled, or the document was replaced meanwhile
       }
     };
     renderVisible();
-    if (keepScroll.current !== null) { el.scrollTop = keepScroll.current * el.scrollHeight; keepScroll.current = null; renderVisible(); }
     let raf = 0;
     const onScroll = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(renderVisible); };
     el.addEventListener('scroll', onScroll);
@@ -117,8 +181,8 @@ export function PdfViewer({ url, target, onSync, toolbar, hint }: { url: string;
   useEffect(() => {
     const el = host.current;
     if (!el || !target || !pages.length || target.page < 1 || target.page > pages.length) return;
-    let y = 0;
-    for (let i = 0; i < target.page - 1; i++) y += pages[i].height * scaleFor(pages[i]) + 12;
+    let y = PAD;
+    for (let i = 0; i < target.page - 1; i++) y += pages[i].height * scaleFor(pages[i]) + GAP;
     const scale = scaleFor(pages[target.page - 1]);
     const boxY = y + target.y * scale;
     el.scrollTo({ top: Math.max(0, boxY - el.clientHeight / 3), behavior: 'smooth' });
@@ -138,9 +202,9 @@ export function PdfViewer({ url, target, onSync, toolbar, hint }: { url: string;
     const el = host.current;
     if (!el || !pages.length) return;
     n = Math.max(1, Math.min(pages.length, n));
-    let y = 0;
-    for (let i = 0; i < n - 1; i++) y += pages[i].height * scaleFor(pages[i]) + 12;
-    el.scrollTo({ top: y });
+    let y = PAD;
+    for (let i = 0; i < n - 1; i++) y += pages[i].height * scaleFor(pages[i]) + GAP;
+    el.scrollTo({ top: y - PAD });
   };
 
   return (
@@ -158,19 +222,23 @@ export function PdfViewer({ url, target, onSync, toolbar, hint }: { url: string;
         {toolbar}
         {hint && <span class="pdf-hint">{hint}</span>}
       </div>
-      <div class="pdf-pages" ref={host}>
-        {error && <div class="pdf-error">Could not open the PDF: {error}</div>}
-        {pages.map((p, i) => {
-          const scale = scaleFor(p);
-          const n = i + 1;
-          return (
-            <div key={n} class="pdf-page-box" style={{ width: `${p.width * scale}px`, height: `${p.height * scale}px` }} data-page={n}
-              onDblClick={e => { if (!onSync) return; const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); onSync(n, (e.clientX - r.left) / scale, (e.clientY - r.top) / scale); }}>
-              <canvas ref={c => { if (c) canvases.current.set(n, c); else canvases.current.delete(n); }} />
-              {flash && flash.page === n && <div class="pdf-flash" style={{ left: `${flash.x * scale - 4}px`, top: `${flash.y * scale - 3}px`, width: `${Math.max(24, flash.w * scale + 8)}px`, height: `${flash.h * scale + 6}px` }} />}
-            </div>
-          );
-        })}
+      <div class="pdf-stage">
+        {busy && <div class="pdf-busy-line" aria-hidden="true" />}
+        {overlay}
+        <div class="pdf-pages" ref={host}>
+          {error && <div class="pdf-error">Could not open the PDF: {error}</div>}
+          {pages.map((p, i) => {
+            const scale = scaleFor(p);
+            const n = i + 1;
+            return (
+              <div key={n} class="pdf-page-box" style={{ width: `${p.width * scale}px`, height: `${p.height * scale}px` }} data-page={n}
+                onDblClick={e => { if (!onSync) return; const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); onSync(n, (e.clientX - r.left) / scale, (e.clientY - r.top) / scale); }}>
+                <canvas ref={c => { if (c) canvases.current.set(n, c); else canvases.current.delete(n); }} />
+                {flash && flash.page === n && <div class="pdf-flash" style={{ left: `${flash.x * scale - 4}px`, top: `${flash.y * scale - 3}px`, width: `${Math.max(24, flash.w * scale + 8)}px`, height: `${flash.h * scale + 6}px` }} />}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

@@ -66,13 +66,25 @@ blend.
   them the moment there is an account and opens a lone project's document; guests cannot import.
 * **PDF** via `latexmk` on the document's own `.tex` file (plus the child documents it inputs);
   embedded graphics (SVG/PDF/EPS/…) are rendered to PNG for the editor and downloadable as PNG,
-  and formats pdflatex cannot include are converted to PDF for the build. PDF builds only start on
-  request (Ctrl+R, the toolbar or the PDF panel) and run as **background jobs**: `latexmk` runs
+  and formats pdflatex cannot include are converted to PDF for the build. PDF builds start on
+  request (Ctrl+R, the toolbar or the PDF pane) or **by themselves** (Overleaf's auto compile: the ▾
+  beside *View PDF*, or *Settings ▸ Editor ▸ PDF* — off, *while the PDF is shown* (the default) or
+  *always*, which keeps a public PDF link current; a delay after the save, 1 s by default). An
+  automatic build starts when the document was saved after the PDF was written, never while a build
+  runs (the client asks again when it is done and the document is still newer), never twice for the
+  same save (a failing document is not rebuilt in a loop, a cancelled build is not restarted), and it
+  is quiet: no message, the log does not open. Builds run as **background jobs**: `latexmk` runs
   `nice`d with at most `OVERLYX_MAX_BUILDS` (2) in parallel (XeTeX or LuaTeX when the document uses
-  non-TeX fonts or asks for them via its default output format), the PDF panel shows the phase /
-  elapsed time / last log line and has a *Cancel* button, and a build keeps running if you switch
-  documents or tabs (the panel picks it up again). A request while a build is running re-builds
-  once more afterwards with the latest content.
+  non-TeX fonts or asks for them via its default output format), the PDF pane shows the phase /
+  elapsed time / last log line in a small note floating over the pages (a thin line runs along the
+  top — nothing moves) and has a *Cancel* button, and a build keeps running if you switch documents
+  or tabs (the pane picks it up again). A request while a build is running re-builds once more
+  afterwards with the latest content (`requestBuild`; an automatic request never does, so several
+  open editors reacting to the same save do not build twice). **How old the PDF is** stands in the
+  pane's bar (“✓ built 2 min ago”, amber *· outdated* once the document was saved after it, red after
+  errors) and in the status bar, also with the pane closed (a click shows the PDF and rebuilds an
+  outdated one); the build status carries the PDF file's time (`pdf_at`) and the server's clock
+  (`now`), so the age is right whatever the browser's clock says (`app/pdfstatus.ts`).
   A TeX magic comment in the first lines (`%!TEX TS-program = lualatex`, `% !TeX program =
   xelatex`) names the engine; without one, `fontspec` (LyX's *use non-TeX fonts*) means XeTeX, the
   LyX output format *pdf5* LuaTeX, everything else pdfTeX. A `latexmkrc` in the document's
@@ -309,9 +321,12 @@ blend.
   frame replays the one showing. Regenerate the recordings with `scripts/recording/` (see the
   comments in `record-demos.spec.ts` — an isolated instance — and `record-vscode.mjs` — xvfb);
   `e2e/landing.spec.ts` covers autoplay, rotation, the dots, replay and the theme swap.
-* **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in the side
-  panel by our own viewer (fit-to-width / zoom, page navigation, a rebuilt PDF keeps the scroll
-  position), and a project's `.pdf` files open in a tab of their own from the file browser (ids
+* **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in its pane
+  by our own viewer (fit-to-width / zoom, page navigation). A **rebuilt PDF replaces the old one
+  without a flicker**: the new document loads while the old pages stay in view (one shared pdf.js
+  worker, so no worker start-up per build), each page is rendered off-screen and copied onto its
+  canvas in one step, and the view stays on the same page at the same offset into it (not the
+  scroll fraction, so pages added above do not move it). A project's `.pdf` files open in a tab of their own from the file browser (ids
   `pdf:<project>/<file>`), like an editor tab in VS Code. latexmk runs with `-synctex=1`; *Navigate ▸
   Sync to PDF* (`Ctrl+Alt+J`, the panel's ⇄ Sync button) finds the cursor's line in the LaTeX as
   built (`app/sourcelocate.ts`) and asks `synctex view` (server, `export.ts`) where it is — the
@@ -319,9 +334,22 @@ blend.
   source line and puts the cursor into the paragraph or formula with those words (inverse search).
   *Document ▸ Start Appendix Here* marks the cursor's paragraph as the start of the appendix
   (LyX's `\start_of_appendix`, written as `\appendix`).
-* **The raw view** — *View ▸ LaTeX source beside the document* opens `raw:<document>`: the same
-  editor instance with its LaTeX source in a resizable pane on the right (`app/SourcePane.tsx`
-  layout="right"). The server sends the source with a **source map** (`GET /tex?map=1`: the character
+* **Panes: WYSIWYG · TeX · PDF** (web client, `app/panes.ts`, `app/PaneSwitch.tsx`): the writing
+  area shows the rendered document, its LaTeX source and the PDF side by side — any one, two or all
+  three, in any order (Overleaf's split view with a third pane). The switch in the middle of the menu
+  bar has a chip per pane, standing in the panes' order: a click shows or hides one (the last one
+  stays), a double-click shows it alone, dragging a chip sideways moves its pane; ▾ draws all fifteen
+  arrangements as small pictures, plus *Mirror* and *Equal widths*. The dividers between panes are
+  dragged; order, visibility and widths are kept per browser (`ol.panes`). The panes stay mounted in
+  one DOM order and are placed with CSS `order`, so rearranging never reloads the editor or the PDF;
+  the PDF pane is mounted the first time it is shown and kept. On a phone-width screen one pane at a
+  time (the switch works like tabs). The PDF used to be a tab of the right sidebar; that sidebar now
+  has *PDF* and *Source* switches beside Comments / Versions / Agent (a stored PDF tab becomes the
+  PDF pane once). The VS Code extension keeps its WYSIWYG / TeX / Split switch — its PDF is a VS Code
+  panel of its own.
+* **The raw view** — *View ▸ LaTeX source beside the document* (or the TeX chip) opens
+  `raw:<document>`: the same editor instance with its LaTeX source in the TeX pane (`app/SourcePane.tsx`;
+  the hash asks for the pane, and switching it off drops the prefix, so Back undoes it). The server sends the source with a **source map** (`GET /tex?map=1`: the character
   range every top-level paragraph was written to, recorded by the writer — core `WriteTexResult.spans`,
   `latex/body.ts texOnePar`), and `app/sourcemap.ts` builds the mirroring on it: the two **scroll
   together** (the paragraph at the top of one view, and how far it is scrolled into, sets the other; a
@@ -343,6 +371,20 @@ blend.
   working meanwhile, and the source is regenerated from the document when the pane loses the focus,
   with the caret and the scroll position kept (mapped through the change; `Ctrl+Alt+S` toggles the pane).
   The menubar's right side names the project.
+* **Section folding**, Google-Docs style (`editor/plugins/fold.ts`, both shells): an arrow left of a
+  heading (Part … Subparagraph, numbered or not; shown on hover, always while folded) folds away
+  everything up to the next heading of the same or a higher level. *View ▸ Fold all sections /
+  Expand all sections / Fold / expand this section* and the right-click menu's *Sections* do it for
+  one or all. Folding is a way of looking, never a change: no step touches the document, the folds
+  are remembered per document in the browser (`ol.fold:<doc>`, by heading layout + text), and
+  whatever puts the cursor into folded text — find, the outline, a label jump, Back — unfolds that
+  section (a selection reaching into a fold from visible text, Select All, does not); ↑ / ↓ beside a
+  fold skip it. The folded headings are positions mapped through every transaction; a collaborator's
+  change arrives from y-prosemirror as a whole-document replacement, so the heading is found again by
+  node identity (unchanged paragraphs keep their node objects) or by layout and text.
+* **Dashes**: Alt+- types an em dash (—), Alt+Shift+- an en dash (–) — the characters themselves,
+  written as `---` / `--` (on a Mac ⌥⇧- stays the system's em dash). The hyphenation point `\-`
+  that Alt+- used to insert is in *Insert ▸ Special Character*.
 * **Command palette** (`app/MenuBar.tsx`): `Ctrl+Shift+P` (`⇧⌘P` on a Mac; `F1` as well) or the
   *Help* menu opens a search over every menu item and the shortcut table — results show the menu
   path and the shortcut, ↑/↓ + Enter runs one, Escape returns the keyboard to the text. The ✎ next
@@ -828,6 +870,7 @@ scripts/publish-typed-papers.sh $S/projects
 # click precision, corner markers around the fraction, double/triple click, drag out and back in):
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/textselect.spec.ts e2e/mathselect.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/pdfview.spec.ts e2e/rawsplit.spec.ts   # pdf.js viewer, SyncTeX, PDF tabs; the [raw] split tab, scroll sync, live apply
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/panes.spec.ts   # WYSIWYG · TeX · PDF panes, PDF age / auto-build / flicker-free rebuild, section folding, dash keys
 ```
 
 ## Offline mode

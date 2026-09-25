@@ -3,6 +3,7 @@ import type { MenuDef, MenuEntry } from './MenuBar';
 import type { ToolbarId, ToolbarMode } from './toolbars';
 import { editorContext } from '../editor/context';
 import * as C from '../editor/commands';
+import { foldAllSections, unfoldAllSections, toggleSectionAtCursor } from '../editor/plugins/fold';
 import { isPresenting, togglePresentation, PRESENTATION_KEY } from './presentation';
 
 export interface ViewMenuContext {
@@ -20,6 +21,10 @@ export function editorViewMenu({ hostItems, themeItems, hostToolbars, combined, 
       { label: 'Notes & comments in the margin', checked: marginMode, action: toggleMargin },
       { label: 'Open all insets', action: () => run(C.setAllInsets('open')) },
       { label: 'Close all insets', action: () => run(C.setAllInsets('collapsed')) },
+      // Google-Docs-style section folding (editor/plugins/fold.ts): the arrow left of a heading does it for one
+      { label: 'Fold / expand this section', action: () => run(toggleSectionAtCursor) },
+      { label: 'Fold all sections', action: () => run(foldAllSections) },
+      { label: 'Expand all sections', action: () => run(unfoldAllSections) },
       { sep: true },
       { label: 'Zoom in', shortcut: 'Ctrl++', action: () => editorContext.ui?.zoom(1) },
       { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => editorContext.ui?.zoom(-1) },
