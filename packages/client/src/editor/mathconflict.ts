@@ -1,6 +1,6 @@
 import { ySyncPluginKey } from 'y-prosemirror';
 import type { EditorView } from 'prosemirror-view';
-import { schema } from '@overlyx/core';
+import { schema, parseFormula, writeFormula } from '@overlyx/core';
 import { editorContext } from './context';
 
 /** Preserve a competing local formula as a normal, persistent review comment. */
@@ -9,6 +9,17 @@ function clockValue(text: string): Record<string, number> {
     const value = JSON.parse(text || '{}');
     return value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, v]) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0)) as Record<string, number> : {};
   } catch { return {}; }
+}
+
+/**
+ * Two spellings of one formula. A server that reopens a document from its .tex (after a restart)
+ * brings back the file's spelling of what the editor wrote — an inline formula on one line where
+ * the editor put each row of a matrix on its own — with an empty clock: that is not a competing edit.
+ */
+export function sameFormula(a: string, b: string, display: boolean): boolean {
+  if (a === b) return true;
+  const written = (latex: string) => writeFormula(parseFormula(display ? latex : '$' + latex + '$'));
+  try { return written(a) === written(b); } catch { return false; }
 }
 
 export class FormulaReview {
@@ -35,6 +46,7 @@ export class FormulaReview {
     // A later author who started from our displayed version is making an ordinary
     // sequential edit. Only a version based on older content needs conflict preservation.
     if (Object.entries(this.localClock).every(([id, count]) => (incoming[id] ?? 0) >= count)) { this.local = null; return; }
+    if (sameFormula(this.local, latex, this.display)) { this.local = null; return; }
     this.pending = this.local;
     if (!this.queued) { this.queued = true; queueMicrotask(() => { this.queued = false; this.flush(); }); }
   }

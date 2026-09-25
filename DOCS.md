@@ -941,6 +941,14 @@ How it works, in order of what happens when you open a document:
    (two people editing the same sentence simply both get their words in). External changes of
    the file are applied on the server as a *diff* (`packages/server/src/ydiff.ts`), so paragraphs
    they did not touch keep their identity and offline edits inside them survive.
+   A formula is one value, not text: when two people change the same formula from the same version,
+   the one who loses keeps their version in a comment beside it (*"Concurrent formula edit by … —
+   retained for review"*, `client/src/editor/mathconflict.ts`; each formula carries an edit clock,
+   `editClock`). A version that is only spelled differently is not a competing one — a restarted
+   server reopens the document from its .tex and brings back the file's spelling of an edited formula
+   (an inline matrix on one line, rows on lines of their own in the editor) with an empty clock, which
+   once left a copy of an edited matrix beside itself after every deploy (`sameFormula`, compared as
+   written).
 5. **Unmergeable case.** If the server's copy of the document has a *different history* (its Yjs
    state was reset with *POST /api/docs/…/reset*, or its database was wiped) the local copy cannot
    be merged: the editor stores the unsynced edits as a version named *"offline changes by …"*
