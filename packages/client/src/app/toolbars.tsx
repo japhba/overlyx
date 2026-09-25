@@ -19,7 +19,7 @@ import { activeMathField, type LyxMathField } from '../editor/lyxmath/field';
 import * as C from '../editor/commands';
 import * as T from '../editor/tablecommands';
 import { acceptAllChanges, rejectAllChanges, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
-import { insertImageFiles, readClipboardImages } from '../editor/imagepaste';
+import { pasteFromClipboard } from '../editor/clipmenu';
 
 export type ToolbarId = 'standard' | 'viewupdate' | 'extra' | 'vcs' | 'math' | 'mathpanels' | 'table' | 'review';
 export type ToolbarMode = 'on' | 'off' | 'auto';
@@ -159,7 +159,7 @@ export function insertDelimiter(o: Pick<ToolbarContext, 'mathExec' | 'docId' | '
   else o.mathExec('bigdelim', `${c.size}l`, c.pair.left, `${c.size}r`, c.pair.right);
 }
 
-/** Cut / copy / paste from the toolbar: the formula's selection when a formula is focused, else the editor's; pasted images become graphics insets. */
+/** Cut / copy / paste from the toolbar: the formula's selection when a formula is focused, else the editor's; pasted images become graphics insets, table cells go in as with Ctrl+V. */
 export function toolbarClipboard(getView: () => EditorView | null | undefined, notify: Notify): ToolbarContext['clipboard'] {
   return (op) => {
     const v = getView();
@@ -167,12 +167,9 @@ export function toolbarClipboard(getView: () => EditorView | null | undefined, n
     const f = activeMathField();
     if (op === 'paste') {
       const fallback = () => notify('Paste with Ctrl+V (the toolbar is not allowed to read the clipboard here)', 'error');
-      const nav = navigator.clipboard;
-      if (!nav?.readText) { fallback(); return; }
-      const pasteText = () => nav.readText().then(t => { if (!t) return; if (f) f.execute('insert', t); else { v.focus(); v.pasteText(t); } }).catch(fallback);
-      if (f) { void pasteText(); return; }
-      // an image on the clipboard becomes a graphics inset (same as Ctrl+V in the editor)
-      readClipboardImages().then(imgs => { if (imgs.length) void insertImageFiles(v, imgs); else void pasteText(); }).catch(() => void pasteText());
+      // in a formula: the text, rows / cells copied from a grid cell by cell (the field's paste)
+      if (f) { navigator.clipboard?.readText?.().then(t => { if (t) f.execute('paste', t); }).catch(fallback) ?? fallback(); return; }
+      pasteFromClipboard(v).then(ok => { if (!ok) fallback(); }).catch(fallback);
       return;
     }
     if (f) { const c = f.cursor; const sel = c.selection ? c.grabSelection() : f.latex; void navigator.clipboard?.writeText(sel); if (op === 'cut' && c.selection) f.execute('insert', ''); return; }

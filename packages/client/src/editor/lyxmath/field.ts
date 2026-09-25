@@ -245,6 +245,8 @@ export class LyxMathField {
     const change = (kind: string, f: () => void) => { this.snapshot(kind); f(); this.commit(); return true; };
     switch (cmd) {
       case 'insert': return change('insert', () => this.insertLatex(String(args[0] ?? '')));
+      // clipboard text: rows / cells copied from a grid go in cell by cell (MathCursor.paste)
+      case 'paste': { const t = stripMathDelims(String(args[0] ?? '')); return t ? change('paste', () => c.paste(t)) : false; }
       case 'moveToMathfieldStart': this.focus('start'); return true;
       case 'moveToMathfieldEnd': this.focus('end'); return true;
       case 'moveToSuperscript': return change('script', () => c.script(true));
@@ -540,7 +542,7 @@ export class LyxMathField {
     input.addEventListener('input', ev => { const ie = ev as InputEvent; if (ie.isComposing || ie.inputType === 'insertCompositionText') return; if (input.value) { const v = input.value; input.value = ''; this.typed(v); } });
     input.addEventListener('copy', ev => { ev.preventDefault(); ev.clipboardData?.setData('text/plain', this.cursor.selection ? this.cursor.grabSelection() : ''); });
     input.addEventListener('cut', ev => { ev.preventDefault(); if (!this.cursor.selection || this.readOnly) return; ev.clipboardData?.setData('text/plain', this.cursor.grabSelection()); this.snapshot('cut'); this.cursor.eraseSelection(); this.commit(); });
-    input.addEventListener('paste', ev => { ev.preventDefault(); if (this.readOnly) return; const t = ev.clipboardData?.getData('text/plain') ?? ''; if (!t) return; this.snapshot('paste'); this.cursor.niceInsert(stripMathDelims(t), false); this.commit(); });
+    input.addEventListener('paste', ev => { ev.preventDefault(); if (this.readOnly) return; const t = ev.clipboardData?.getData('text/plain') ?? ''; if (!t) return; this.snapshot('paste'); this.cursor.paste(stripMathDelims(t)); this.commit(); });
     // mouse (InsetMathNest::lfunMousePress / Motion / Release)
     this.dom.addEventListener('mousedown', ev => this.press(ev));
     const move = (ev: MouseEvent) => this.motion(ev);

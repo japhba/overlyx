@@ -10,7 +10,7 @@
  */
 import type { Atom, Cell, Grid, Hull, HullType, MacroTable, Limits } from './ast';
 import { cloneCell } from './ast';
-import { parseCell, SYMBOLS } from './parse';
+import { parseCell, parseGridCells, SYMBOLS } from './parse';
 import { writeCellLatex } from './write';
 
 export type Owner = Atom | Hull;
@@ -451,6 +451,41 @@ export class MathCursor {
     if (md.length === 1 && (enter || this.selection)) this.niceInsertAtom(md[0]);
     else this.insertCell(md);
     return md.length;
+  }
+  /**
+   * LFUN_PASTE (InsetMathGrid::doDispatch): cells copied from a grid (`x & =1 \\ y & =2`) go in
+   * cell by cell from the cursor's cell — each at the cursor position — and columns / rows are
+   * added for what does not fit. Where the formula cannot grow (a `$…$`, an equation, a fraction …)
+   * the rest is appended to its last cell, so nothing pasted is lost. One cell is niceInsert.
+   */
+  paste(latex: string): void {
+    if (!latex) return;
+    const mode = this.mode === 'text' ? 'text' : 'math';
+    const rows = parseGridCells(latex, this.macros, mode);
+    if (rows.length === 1 && rows[0].length === 1) { this.niceInsert(latex, false); return; }
+    this.macroModeClose();
+    if (this.selection) this.eraseSelection();
+    const g = gridOf(this.owner);
+    if (!g) { this.insertCell(rows.flat(2)); return; }
+    const startRow = this.row, startCol = this.col, pos = this.pos;
+    const growRows = this.gridRowsOK(), growCols = this.gridColsOK();
+    // the part that lands in existing cells is inserted at the cursor position, the rest appended
+    const fitRows = Math.min(rows.length, g.rows.length - startRow), fitCols = g.ncols - startCol;
+    rows.forEach((cells, r) => {
+      if (startRow + r >= g.rows.length && growRows) this.addRow(g.rows.length - 1);
+      const row = g.rows[Math.min(startRow + r, g.rows.length - 1)];
+      cells.forEach((cell, c) => {
+        if (startCol + c >= g.ncols && growCols) {
+          addCol(g, g.ncols);
+          if (!isHull(this.owner) && g.halign !== undefined) g.halign += 'c';
+        }
+        const target = row.cells[Math.min(startCol + c, g.ncols - 1)];
+        if (r < fitRows && c < fitCols) target.splice(Math.min(pos, target.length), 0, ...cell);
+        else target.push(...cell);
+      });
+    });
+    this.idx = startRow * g.ncols + startCol;
+    this.pos = Math.min(pos, this.lastpos);
   }
   /** Cursor::editInsertedInset: enter the inset just inserted (first empty cell) */
   editInsertedInset() {

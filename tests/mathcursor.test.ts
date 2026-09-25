@@ -296,6 +296,57 @@ describe('selection with anchor and cursor at different depths (normalAnchor)', 
   });
 });
 
+describe('copying and pasting rows of a grid (InsetMathGrid LFUN_PASTE)', () => {
+  const ALIGN = '\n\\begin{align}\nx & =1\\\\\ny & =2\\\\\nz & =3\n\\end{align}\n';
+  /** a cursor with rows 0–1 of the align selected, as a drag from x to the end of =2 makes it */
+  function twoRows() {
+    const h = parseFormula(ALIGN, {});
+    const c = new MathCursor(h, {});
+    c.slices = [{ owner: h, idx: 0, pos: 0 }]; c.resetAnchor();
+    c.slices = [{ owner: h, idx: 3, pos: 2 }]; c.setSelection();
+    return c;
+  }
+  it('whole rows copy as rows of cells', () => {
+    expect(twoRows().grabSelection()).toBe('x&=1\\\\y&=2');
+  });
+  it('rows pasted into an empty last row fill it and are appended below it', () => {
+    const c = twoRows();
+    const rows = c.grabSelection();
+    c.clearSelection();
+    c.idx = c.lastidx; c.pos = c.lastpos;
+    c.newline();                        // Ctrl+Enter: an empty row below z = 3
+    c.idx = 3 * c.ncols; c.pos = 0;     // its first cell
+    c.paste(rows);
+    expect(out(c)).toBe('\n\\begin{align}\nx & =1\\\\\ny & =2\\\\\nz & =3\\\\\nx & =1\\\\\ny & =2\n\\end{align}\n');
+    expect([c.row, c.col]).toEqual([3, 0]);
+  });
+  it('rows cut from the grid leave their cells empty and paste back in', () => {
+    const c = twoRows();
+    const rows = c.grabAndEraseSelection();
+    expect(atomCells(c.hull).map(cell => cell.length)).toEqual([0, 0, 0, 0, 1, 2]);   // the rows stay, empty (LyX cutSelection)
+    c.idx = 0; c.pos = 0;
+    c.paste(rows);
+    expect(out(c)).toBe(ALIGN);
+  });
+  it('a matrix grows by the columns and rows that do not fit', () => {
+    const c = at('$\\begin{pmatrix}a\\end{pmatrix}$');
+    c.idx = 0; c.pos = 0;
+    c.push(atomCells(c.hull)[0][0], 0, 1);   // after the a
+    c.paste('1&2\\\\3&4');
+    expect(out(c)).toBe('$\\begin{pmatrix}a1 & 2\\\\\n3 & 4\n\\end{pmatrix}$');
+  });
+  it('a formula that cannot grow keeps every pasted cell (appended to its last cell)', () => {
+    const c = at('$$');
+    c.paste('x&=1\\\\y&=2');
+    expect(out(c)).toBe('$x=1y=2$');
+  });
+  it('one cell is inserted at the cursor as before', () => {
+    const c = at('\n\\begin{align}\nx & =1\n\\end{align}\n');
+    c.paste('+\\alpha');
+    expect(out(c)).toBe('\n\\begin{align}\nx & =1+\\alpha\n\\end{align}\n');
+  });
+});
+
 describe('math-mode (Ctrl+M): \\text{} in math, math again inside text (LyX LFUN_MATH_MODE)', () => {
   it('math inside \\text{} is \\ensuremath, not a second \\text', () => {
     const c = at('$0$');

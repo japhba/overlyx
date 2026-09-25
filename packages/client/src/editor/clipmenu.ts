@@ -8,7 +8,7 @@ import type { EditorView } from 'prosemirror-view';
 import type { Selection } from 'prosemirror-state';
 import type { MenuItem } from './contextmenu';
 import { editorContext } from './context';
-import { insertImageFiles, readClipboardImages } from './imagepaste';
+import { insertImageFiles } from './imagepaste';
 
 const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
 export const MOD = isMac ? '⌘' : 'Ctrl';
@@ -18,7 +18,48 @@ export function selectionCovers(sel: Selection, pos: number, size: number): bool
   return !sel.empty && sel.from <= pos && sel.to >= pos + size;
 }
 
-/** Cut and Copy (disabled without a selection) and Paste (images become graphics insets, text is inserted) */
+/** What the async clipboard API holds: images, the HTML and the plain text ('' when absent). */
+export async function readClipboard(): Promise<{ images: File[]; html: string; text: string }> {
+  const out = { images: [] as File[], html: '', text: '' };
+  for (const item of await navigator.clipboard?.read?.() ?? []) {
+    // prefer the vector form when both are offered (Chromium 124+ carries image/svg+xml)
+    const image = item.types.find(t => t === 'image/svg+xml') ?? item.types.find(t => t.startsWith('image/'));
+    if (image) out.images.push(new File([await item.getType(image)], 'image', { type: image }));
+    if (!out.html && item.types.includes('text/html')) out.html = await (await item.getType('text/html')).text();
+    if (!out.text && item.types.includes('text/plain')) out.text = await (await item.getType('text/plain')).text();
+  }
+  return out;
+}
+
+/**
+ * Paste from a menu or the toolbar (no paste event, so the async clipboard is read): images become
+ * graphics insets; everything else takes the same way as Ctrl+V — the HTML an OverLyX copy wrote
+ * keeps its insets, and table cells copied from a table (whole rows too) go in cell by cell from
+ * the cursor's cell (prosemirror-tables, as LyX pastes a tabular selection); plain text is split
+ * into paragraphs, LaTeX in it parsed. False when the clipboard could not be read.
+ */
+export async function pasteFromClipboard(view: EditorView): Promise<boolean> {
+  let clip: { images: File[]; html: string; text: string };
+  try { clip = await readClipboard(); } catch {
+    // no clipboard.read (older Safari / Firefox, some webviews): the text alone
+    try { clip = { images: [], html: '', text: await navigator.clipboard?.readText?.() ?? '' }; } catch { return false; }
+  }
+  if (view.isDestroyed) return false;
+  if (clip.images.length) { await insertImageFiles(view, clip.images); return true; }
+  if (!clip.html && !clip.text) return true;   // an empty clipboard: nothing to paste
+  view.focus();
+  // the editor's handlePaste reads clipboardData (LaTeX, SVG markup …): hand it the same data
+  let event: ClipboardEvent | undefined;
+  try {
+    const data = new DataTransfer();
+    if (clip.text) data.setData('text/plain', clip.text);
+    if (clip.html) data.setData('text/html', clip.html);
+    event = new ClipboardEvent('paste', { clipboardData: data });
+  } catch { /* no DataTransfer constructor: ProseMirror makes an empty event */ }
+  return clip.html ? view.pasteHTML(clip.html, event) : view.pasteText(clip.text, event);
+}
+
+/** Cut and Copy (disabled without a selection) and Paste (images become graphics insets, text and table cells go in as with Ctrl+V) */
 export function clipboardMenuItems(view: EditorView): MenuItem[] {
   const hasSel = !view.state.selection.empty;
   return [
@@ -26,8 +67,7 @@ export function clipboardMenuItems(view: EditorView): MenuItem[] {
     { label: 'Copy', shortcut: MOD + '+C', disabled: !hasSel, action: () => { view.focus(); document.execCommand('copy'); } },
     { label: 'Paste', shortcut: MOD + '+V', action: () => {
       view.focus();
-      const pasteText = () => navigator.clipboard?.readText().then(t => { if (t) view.dispatch(view.state.tr.insertText(t)); }).catch(() => editorContext.notify?.('Use ' + MOD + '+V to paste', 'error'));
-      readClipboardImages().then(imgs => { if (imgs.length) void insertImageFiles(view, imgs); else void pasteText(); }).catch(() => void pasteText());
+      pasteFromClipboard(view).then(ok => { if (!ok) editorContext.notify?.('Use ' + MOD + '+V to paste', 'error'); }).catch(() => editorContext.notify?.('Use ' + MOD + '+V to paste', 'error'));
     } },
   ];
 }

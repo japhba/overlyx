@@ -179,6 +179,13 @@ class Parser {
     return g.rows[0].cells[0];
   }
 
+  /** mathed_parse_normal into a free grid: every cell, `&` starting the next one and `\\` the next row */
+  parseRows(flags: number, mode: PMode): Cell[][] {
+    const g = newGrid('');
+    this.parse1(g, flags, mode, false);
+    return g.rows.map(r => r.cells);
+  }
+
   /** parse2(MathAtom, flags, mode, numbered): fill an existing grid atom */
   parseGrid(g: PGrid, flags: number, mode: PMode, numbered: boolean) {
     this.parse1(g, flags, mode, numbered);
@@ -768,6 +775,11 @@ export function completeCommand(prefix: string, macros: MacroTable, limit = 12):
 /** Parse the content of a cell (no `$` / environment around it). */
 export function parseCell(latex: string, macros: MacroTable = {}, mode: Mode = 'math'): Cell {
   return new Parser(latex, macros).parseCell(0, mode);
+}
+
+/** Parse pasted LaTeX into rows of cells (`x & =1 \\ y & =2` → two rows of two cells); one cell when it has no `&` / `\\`. */
+export function parseGridCells(latex: string, macros: MacroTable = {}, mode: Mode = 'math'): Cell[][] {
+  return new Parser(latex, macros).parseRows(0, mode);
 }
 
 const HULL_ENVS: Record<string, HullType> = { equation: 'equation', eqnarray: 'eqnarray', align: 'align', alignat: 'alignat', xalignat: 'xalignat', xxalignat: 'xxalignat', flalign: 'flalign', multline: 'multline', gather: 'gather' };

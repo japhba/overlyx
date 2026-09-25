@@ -97,7 +97,15 @@ blend.
   OverLyX tab) still has its citations, cross-references, labels, formulas, tables and figures; the
   plain-text form of the clipboard is LaTeX-ish (`$…$`, `\ref{…}`, `\citep{…}`), so pasting into a
   `.tex` file or a chat gives something useful; HTML from a web page or another editor pastes as
-  LyX content (headings, bold/italic/typewriter, lists, tables).
+  LyX content (headings, bold/italic/typewriter, lists, tables). **Rows of a table** (any cell
+  selection — drag across cells, Shift+click, Shift+↓) paste as in LyX (`InsetTabular::pasteClipboard`):
+  cell by cell from the cursor's cell, overwriting, with rows and columns added past the table's end;
+  cut empties the cells, and outside a table they paste as a new table. Ctrl+V, the right-click menu
+  and the toolbar's Paste take the same way (`editor/clipmenu.ts pasteFromClipboard` feeds the async
+  clipboard's HTML through the editor's paste handling). **Rows of a formula** (`align`, `eqnarray`,
+  matrices) copy as `x&=1\\y&=2` and paste into a formula as rows (`MathCursor.paste`, LyX's
+  InsetMathGrid LFUN_PASTE): Enter at the end of the last row opens an empty row, ← its first cell,
+  and the pasted rows fill it and are added below; what a formula cannot grow for (`$…$`) is kept in its last cell.
 * **Safe with the file on disk.** The `.tex` file is written atomically (temporary file + rename,
   fsync'ed). If somebody else wrote the file meanwhile (git, another editor, Overleaf), that
   change is merged *three-way* at paragraph level before we write: only the paragraphs they changed
@@ -861,7 +869,7 @@ OVERLYX_DATA_DIR=$S/data OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_CLIENT_DIST=$S
 export OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_E2E_CREDENTIALS=$S/data/credentials.txt
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/smoke.spec.ts e2e/editing.spec.ts e2e/features.spec.ts e2e/dialogs.spec.ts e2e/fonts.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sharing.spec.ts e2e/textfiles.spec.ts e2e/toolbar.spec.ts e2e/collab.spec.ts   # bob, carol, u1…u6
-OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts e2e/cite.spec.ts
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts e2e/tablerows.spec.ts e2e/cite.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
