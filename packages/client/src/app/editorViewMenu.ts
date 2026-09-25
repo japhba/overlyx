@@ -3,7 +3,7 @@ import type { MenuDef, MenuEntry } from './MenuBar';
 import type { ToolbarId, ToolbarMode } from './toolbars';
 import { editorContext } from '../editor/context';
 import * as C from '../editor/commands';
-import { foldAllSections, unfoldAllSections, toggleSectionAtCursor } from '../editor/plugins/fold';
+import { foldAllSections, unfoldAllSections, toggleSectionAtCursor, toggleLevelAtCursor } from '../editor/plugins/fold';
 import { isPresenting, togglePresentation, PRESENTATION_KEY } from './presentation';
 
 export interface ViewMenuContext {
@@ -23,6 +23,8 @@ export function editorViewMenu({ hostItems, themeItems, hostToolbars, combined, 
       { label: 'Close all insets', action: () => run(C.setAllInsets('collapsed')) },
       // Google-Docs-style section folding (editor/plugins/fold.ts): the arrow left of a heading does it for one
       { label: 'Fold / expand this section', action: () => run(toggleSectionAtCursor) },
+      { label: 'Fold all at this level', action: () => run(toggleLevelAtCursor(true)) },
+      { label: 'Expand all at this level', action: () => run(toggleLevelAtCursor(false)) },
       { label: 'Fold all sections', action: () => run(foldAllSections) },
       { label: 'Expand all sections', action: () => run(unfoldAllSections) },
       { sep: true },

@@ -189,7 +189,7 @@ test('the PDF pane: its age, outdated after an edit, automatic builds, and a reb
   expect(noise(errors)).toEqual([]);
 });
 
-test('section folding: the arrow beside a heading, fold all / expand all, remembered, and unfolded by find', async ({ page }) => {
+test('section folding: the arrow beside a heading and its right-click menu (this level, all), fold all / expand all, remembered, unfolded by find', async ({ page }) => {
   const errors = collectErrors(page);
   await prefs(page, { autoBuild: 'off' });
   await login(page);
@@ -234,6 +234,26 @@ test('section folding: the arrow beside a heading, fold all / expand all, rememb
   await page.locator('.ctx-item', { hasText: 'Expand this section' }).click();
   await expect(text('First section text.')).toBeVisible();
   await expect(text('Sub text.')).toBeHidden();    // One a is still folded itself
+
+  // a right-click on an arrow: every heading of its level, or all
+  const arrowMenu = async (t: string, item: string) => {
+    await heading(t).hover();
+    await heading(t).locator('.lyx-fold-toggle').click({ button: 'right' });
+    await page.locator('.ctx-item', { hasText: item }).click();
+  };
+  await arrowMenu('Two', 'Fold all at this level (sections)');
+  expect(await page.locator('.lyx-editor > .lyx-par:visible').allTextContents()).toEqual(['One', 'Two', 'Three']);
+  await arrowMenu('Three', 'Expand all at this level (sections)');
+  await expect(text('Second section text')).toBeVisible();
+  await expect(text('Third text.')).toBeVisible();
+  await expect(text('Sub text.')).toBeHidden();    // the subsection keeps its own fold
+  await arrowMenu('One a', 'Expand all at this level (subsections)');
+  await expect(text('Sub text.')).toBeVisible();
+  await arrowMenu('One a', 'Fold all at this level (subsections)');
+  await expect(text('Sub text.')).toBeHidden();
+  await expect(text('First section text.')).toBeVisible();
+  await arrowMenu('Two', 'Expand all sections');
+  await expect(text('Sub text.')).toBeVisible();
   expect(noise(errors)).toEqual([]);
 });
 

@@ -1,8 +1,9 @@
 /**
  * Section folding, Google-Docs style. A heading (Part … Subparagraph, numbered or starred) folds
  * away everything up to the next heading of the same or a higher level: an arrow left of the
- * heading (shown on hover, always shown while folded) toggles it; View ▸ Fold all sections /
- * Expand all sections, and the right-click menu on a heading, do the same for all of them.
+ * heading (shown on hover, always shown while folded) toggles it; a right-click on the arrow — and
+ * the text's right-click menu (Sections), and the View menu — fold or expand this section, every
+ * heading of its level (all subsections, say), or all of them.
  *
  * Folding is a way of looking at the document, never a change of it: no step touches the document
  * (collaborators and the .tex file are unaffected), the folded headings are remembered per
@@ -19,6 +20,7 @@ import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { sectionLevel } from '../layouts';
 import { viewDocId } from '../context';
+import { showContextMenu, type MenuItem } from '../contextmenu';
 
 export interface FoldState { /** document positions of the folded headings, ascending */ folded: readonly number[]; decos: DecorationSet }
 export const foldKey = new PluginKey<FoldState>('lyx-fold');
@@ -74,13 +76,20 @@ function toggleWidget(closed: boolean, body: boolean, hidden: number) {
     el.setAttribute('role', 'button');
     el.setAttribute('aria-expanded', String(!closed));
     el.setAttribute('data-fold-toggle', '');
-    el.title = closed ? `Expand this section (${hidden} hidden paragraph${hidden === 1 ? '' : 's'})` : body ? 'Fold this section' : 'Nothing to fold: the section is empty';
+    el.title = (closed ? `Expand this section (${hidden} hidden paragraph${hidden === 1 ? '' : 's'})` : body ? 'Fold this section' : 'Nothing to fold: the section is empty') + ' — right-click: fold or expand all of this level, or all';
     el.innerHTML = CHEVRON;
     el.addEventListener('mousedown', ev => {
       ev.preventDefault(); ev.stopPropagation();
       const p = getPos();
       if (p === undefined || ev.button !== 0) return;
       setSectionFolded(p - 1, 'toggle')(view.state, view.dispatch, view);
+    });
+    // right-click: this section, all of its level, all
+    el.addEventListener('contextmenu', ev => {
+      ev.preventDefault(); ev.stopPropagation();
+      const p = getPos();
+      if (p === undefined) return;
+      showContextMenu(ev.clientX, ev.clientY, foldMenuItems(view, p - 1));
     });
     return el;
   };
@@ -271,6 +280,55 @@ export function sectionFoldState(state: EditorState, pos = state.selection.head)
   const h = headingAt(state.doc, pos);
   if (!h) return null;
   return { folded: foldKey.getState(state)?.folded.includes(h.pos) ?? false, foldable: hasBody(h) };
+}
+
+/** the headings of a level, by name: "sections", "subsections", … (the level menu entries) */
+const LEVEL_PLURAL: Record<number, string> = { [-1]: 'parts', 0: 'chapters', 1: 'sections', 2: 'subsections', 3: 'subsubsections', 4: 'paragraph headings', 5: 'subparagraph headings' };
+
+/** Fold (or expand) every heading of the level of the heading at / above `pos` — all subsections, say. */
+export function setLevelFolded(pos: number, fold: boolean): Command {
+  return (state, dispatch) => {
+    const h = headingAt(state.doc, pos);
+    if (!h) return false;
+    const cur = new Set(foldKey.getState(state)?.folded ?? []);
+    const same = foldHeadings(state.doc).filter(x => x.level === h.level);
+    const change = same.filter(x => (fold ? hasBody(x) && !cur.has(x.pos) : cur.has(x.pos))).map(x => x.pos);
+    if (!change.length) return false;
+    dispatch?.(foldTransaction(state, fold ? { fold: change } : { unfold: change }));
+    return true;
+  };
+}
+export const toggleLevelAtCursor = (fold: boolean): Command => (state, dispatch, view) => setLevelFolded(state.selection.head, fold)(state, dispatch, view);
+
+/**
+ * The folding entries for the heading at / above `pos`: this section, every heading of its level,
+ * all — the arrow's right-click menu, the text's right-click Sections submenu. Entries that would do
+ * nothing are disabled.
+ */
+export function foldMenuItems(view: EditorView, pos: number): MenuItem[] {
+  const state = view.state;
+  const run = (cmd: Command) => () => { cmd(view.state, view.dispatch, view); view.focus(); };
+  const h = headingAt(state.doc, pos);
+  const folded = new Set(foldKey.getState(state)?.folded ?? []);
+  const heads = foldHeadings(state.doc);
+  const items: MenuItem[] = [];
+  if (h) {
+    const closed = folded.has(h.pos);
+    const same = heads.filter(x => x.level === h.level);
+    const name = LEVEL_PLURAL[h.level] ?? 'headings of this level';
+    items.push(
+      { label: closed ? 'Expand this section' : 'Fold this section', disabled: !closed && !hasBody(h), action: run(setSectionFolded(h.pos, !closed)) },
+      { sep: true },
+      { label: `Fold all at this level (${name})`, disabled: !same.some(x => hasBody(x) && !folded.has(x.pos)), action: run(setLevelFolded(h.pos, true)) },
+      { label: `Expand all at this level (${name})`, disabled: !same.some(x => folded.has(x.pos)), action: run(setLevelFolded(h.pos, false)) },
+      { sep: true },
+    );
+  }
+  items.push(
+    { label: 'Fold all sections', disabled: !heads.some(x => hasBody(x) && !folded.has(x.pos)), action: run(foldAllSections) },
+    { label: 'Expand all sections', disabled: !folded.size, action: run(unfoldAllSections) },
+  );
+  return items;
 }
 
 /** View ▸ Fold all sections: every heading with something under it (Google Docs' Collapse all headings). */

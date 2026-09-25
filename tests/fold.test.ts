@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { Slice, Fragment, type Node as PMNode } from 'prosemirror-model';
 import { schema } from '@overlyx/core';
-import { foldPlugin, foldKey, foldHeadings, setSectionFolded, foldAllSections, unfoldAllSections, sectionFoldState, foldedCount } from '../packages/client/src/editor/plugins/fold';
+import { foldPlugin, foldKey, foldHeadings, setSectionFolded, setLevelFolded, foldAllSections, unfoldAllSections, sectionFoldState, foldedCount } from '../packages/client/src/editor/plugins/fold';
 
 const par = (layout: string, text: string) => schema.node('paragraph', { layout }, text ? [schema.text(text)] : []);
 /** Section A (with Subsection A1, A2), Section B, trailing text */
@@ -100,6 +100,21 @@ describe('section folding', () => {
     s = s.apply(s.tr.replace(0, s.doc.content.size, new Slice(Fragment.from(kids2), 0, 0)));
     expect(foldKey.getState(s)!.folded).toEqual([posOf(s.doc, 'A2')]);
     expect(hiddenTexts(s)).toEqual(['a2 text']);
+  });
+
+  it('folds and expands every heading of a level (all subsections), from a heading or from text in its section', () => {
+    const s0 = state();
+    const { ok, state: s1 } = run(s0, setLevelFolded(posOf(s0.doc, 'a1 text') + 2, true));   // the cursor in A1's text: level of A1
+    expect(ok).toBe(true);
+    expect(foldKey.getState(s1)!.folded).toEqual([posOf(s1.doc, 'A1'), posOf(s1.doc, 'A2')]);
+    expect(hiddenTexts(s1)).toEqual(['a1 text', 'a2 text']);
+    expect(run(s1, setLevelFolded(posOf(s1.doc, 'A2'), true)).ok).toBe(false);   // nothing left to fold at that level
+    // expanding the sections' level leaves the subsections folded
+    const { state: s2 } = run(s1, setSectionFolded(posOf(s1.doc, 'A'), true));
+    const { state: s3 } = run(s2, setLevelFolded(posOf(s2.doc, 'B'), false));
+    expect(foldKey.getState(s3)!.folded).toEqual([posOf(s3.doc, 'A1'), posOf(s3.doc, 'A2')]);
+    const { state: s4 } = run(s3, setLevelFolded(posOf(s3.doc, 'A1'), false));
+    expect(foldedCount(s4)).toBe(0);
   });
 
   it('an empty section cannot be folded', () => {

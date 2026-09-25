@@ -373,9 +373,10 @@ blend.
   The menubar's right side names the project.
 * **Section folding**, Google-Docs style (`editor/plugins/fold.ts`, both shells): an arrow left of a
   heading (Part … Subparagraph, numbered or not; shown on hover, always while folded) folds away
-  everything up to the next heading of the same or a higher level. *View ▸ Fold all sections /
-  Expand all sections / Fold / expand this section* and the right-click menu's *Sections* do it for
-  one or all. Folding is a way of looking, never a change: no step touches the document, the folds
+  everything up to the next heading of the same or a higher level. A right-click on the arrow, the
+  text's right-click menu (*Sections*) and the View menu fold or expand this section, every heading
+  of its level (*Fold all at this level* — all subsections, say — and *Expand all at this level*),
+  or all of them (*Fold all sections / Expand all sections*). Folding is a way of looking, never a change: no step touches the document, the folds
   are remembered per document in the browser (`ol.fold:<doc>`, by heading layout + text), and
   whatever puts the cursor into folded text — find, the outline, a label jump, Back — unfolds that
   section (a selection reaching into a fold from visible text, Select All, does not); ↑ / ↓ beside a
