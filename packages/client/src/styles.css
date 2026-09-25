@@ -1445,6 +1445,8 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .agent-item.cmd { font-family: ui-monospace, monospace; font-size: 12px; background: var(--ui-bg2); border: 1px solid var(--ui-border); border-radius: 6px; padding: 5px 8px; overflow-x: auto; }
 .agent-item.cmd .line { cursor: pointer; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-item.cmd .err { color: indianred; }
+.agent-item.error { color: var(--err); background: var(--err-bg); border: 1px solid color-mix(in srgb, var(--err) 35%, transparent); border-radius: 6px; padding: 6px 9px; font-size: 12.5px; overflow-wrap: anywhere; }
+.agent-item.error a { color: inherit; text-decoration: underline; }
 .agent-item.cmd .out { color: var(--ui-muted); max-height: 180px; overflow: auto; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-item .declined { color: var(--ui-muted); font-size: 12px; }
 .agent-diff { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; border: 1px solid var(--ui-border); border-radius: 6px; padding: 5px 8px; max-height: 240px; overflow-y: auto; }

@@ -90,7 +90,7 @@ export interface AgentItem {
   summary?: string[]; command?: string; cwd?: string; aggregatedOutput?: string | null; exitCode?: number | null;
   changes?: AgentChange[]; server?: string; tool?: string;
 }
-export interface AgentTurn { id: string; items: AgentItem[]; status: string }
+export interface AgentTurn { id: string; items: AgentItem[]; status: string; error?: { message?: string } | null }
 /** one message of the agent events stream (SSE) */
 export interface AgentEventMsg { kind: 'notification' | 'request' | 'status'; method?: string; params?: any; requestId?: string; running?: boolean }
 export interface AgentTurnContext { docId?: string; content?: PMJSON[]; layout?: string; mathLatex?: string; openDocs?: string[] }

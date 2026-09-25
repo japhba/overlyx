@@ -117,6 +117,19 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await page.locator('[data-agent="approval"] [data-approve="decline"]').click();
   await expect(page.locator('.agent-msg.assistant').last()).toContainText('Stub reply', { timeout: 15000 });
 
+  // a turn that fails (here: the ChatGPT account's usage limit) says so in the transcript, also
+  // after a reload; codex's retries before it ("Reconnecting... 1/5") neither end the turn nor pop up
+  await page.locator('.agent-compose textarea').fill('pretend we hit the usage limit');
+  await page.keyboard.press('Enter');
+  const failed = page.locator('[data-agent="error"]');
+  await expect(failed).toContainText('You’ve hit your usage limit', { timeout: 15000 });
+  await expect(failed).toHaveCount(1);
+  await expect(failed.locator('a[href="https://chatgpt.com/codex/settings/usage"]')).toHaveCount(1);
+  await expect(page.getByText('Reconnecting...')).toHaveCount(0);
+  await page.reload();
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  await expect(page.locator('[data-agent="error"]')).toContainText('You’ve hit your usage limit', { timeout: 15000 });
+
   // the thread is in the project's list under its first message
   await page.locator('[data-agent-back]').click();
   await expect(page.locator('[data-agent-thread] .title').first()).toContainText('hello agent');

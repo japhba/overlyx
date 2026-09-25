@@ -222,6 +222,10 @@ function AddBibButton({ r, project, notify }: { r: BibRef; project: string; noti
   );
 }
 
+/** The transcript entry for a turn that failed — nothing else shows why the agent did not answer. */
+export const turnErrorItems = (turn: { id?: string; status?: string; error?: { message?: string } | null }): AgentItem[] =>
+  turn.status === 'failed' && turn.error?.message ? [{ type: 'error', id: `error-${turn.id}`, text: turn.error.message }] : [];
+
 function ItemView({ it, project, notify }: { it: AgentItem; project?: string; notify?: Notify }) {
   const [open, setOpen] = useState(false);
   switch (it.type) {
@@ -270,6 +274,13 @@ function ItemView({ it, project, notify }: { it: AgentItem; project?: string; no
       return <FileChangeView key={it.id} it={it} />;
     case 'plan':
       return <div class="agent-msg assistant plan"><RichText text={it.text ?? ''} /></div>;
+    case 'error':
+      // a turn that failed (usage limit, expired sign-in…): codex's message, its links clickable
+      return (
+        <div class="agent-item error" data-agent="error" role="alert">
+          {(it.text ?? '').split(/(https?:\/\/[^\s)]+[^\s).,])/).map((part, i) => i % 2 ? <a key={i} href={part} target="_blank" rel="noopener">{part}</a> : part)}
+        </div>
+      );
     default:
       return null;
   }
@@ -413,8 +424,14 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
       };
       switch (msg.method) {
         case 'turn/started': setBusyTurn(p.turn?.id ?? null); break;
-        case 'turn/completed': setBusyTurn(null); setApprovals([]); void refreshThreads(); break;
-        case 'error': setBusyTurn(null); notify(p.error?.message ?? 'The agent reported an error', 'error'); break;
+        case 'turn/completed': setBusyTurn(null); setApprovals([]); turnErrorItems(p.turn ?? {}).forEach(upsert); void refreshThreads(); break;
+        case 'error':
+          // codex reports its retries ("Reconnecting... 2/5") as errors too — the turn goes on
+          if (p.willRetry) break;
+          setBusyTurn(null);
+          if (p.turnId && p.error?.message) upsert({ type: 'error', id: `error-${p.turnId}`, text: p.error.message });
+          else notify(p.error?.message ?? 'The agent reported an error', 'error');
+          break;
         case 'item/started': if (p.item?.type !== 'userMessage') upsert(p.item); break;   // user echoes only count once complete
         case 'item/completed': p.item?.type === 'userMessage' ? mergeUser(p.item) : upsert(p.item); setApprovals(a => a.filter(x => x.params?.itemId !== p.item?.id)); break;
         case 'item/agentMessage/delta':
@@ -439,7 +456,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
   /** (Re)load a thread from the server: items, whether a turn is running, pending approvals —
    *  used on open and to resync after the events stream reconnected (laptop sleep, a deploy). */
   const syncThread = (tid: string) => api.agentThread(project, tid).then(r => {
-    setItems(r.thread.turns.flatMap(turn => turn.items));
+    setItems(r.thread.turns.flatMap(turn => [...turn.items, ...turnErrorItems(turn)]));
     setMine(r.mine);
     setApprovals((r.approvals ?? []).map(a => ({ requestId: a.requestId, method: a.method, params: a.params })));
     const last = r.thread.turns[r.thread.turns.length - 1] as { id?: string; status?: string } | undefined;

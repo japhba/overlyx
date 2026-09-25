@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // A stand-in for the `codex` CLI's app-server mode (agent.ts) for unit and e2e tests: speaks
 // just enough of the JSON-RPC/JSONL protocol — device-code login (completes by itself after a
-// moment), threads, turns that echo the input as streamed deltas, and a file-change approval
-// round-trip for prompts containing "write hello". No network, state under $CODEX_HOME.
+// moment), threads, turns that echo the input as streamed deltas, a file-change approval
+// round-trip for prompts containing "write hello", and a failed turn for "hit the usage limit". No network, state under $CODEX_HOME.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -61,6 +61,19 @@ function runTurn(id, p) {
       requestedSchema: { type: 'object', properties: {} },
       _meta: { persist: ['session', 'always'], tool_params_display: [{ name: 'latex', value: '\\section{Probe}', display_name: 'latex' }] },
     } });
+    return;
+  }
+  if (/hit the usage limit/i.test(text)) {
+    // an account out of quota: codex retries first (an error with willRetry), then fails the turn
+    const error = { message: 'You’ve hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 26th, 2026 12:19 PM.', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null };
+    notify('error', { error: { message: 'Reconnecting... 1/5', codexErrorInfo: 'other', additionalDetails: null }, willRetry: true, threadId: t.id, turnId });
+    setTimeout(() => {
+      const failed = { ...turn('failed'), error, completedAt: 2, durationMs: 1 };
+      notify('error', { error, willRetry: false, threadId: t.id, turnId });
+      t.turns.push({ ...failed, items: [userItem] });
+      notify('turn/completed', { threadId: t.id, turn: failed });
+      result(id, { turn: failed });
+    }, Number(process.env.STUB_DELAY ?? 150));
     return;
   }
   if (/write hello/i.test(text)) {
