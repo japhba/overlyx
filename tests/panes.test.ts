@@ -84,3 +84,22 @@ describe('PDF status', () => {
     expect(st.label).toBe('✓ built 3 min ago');
   });
 });
+
+describe('projects by recency (the start screen)', async () => {
+  const { sortByRecency, recencyLabel, projectRecency } = await import('../packages/client/src/app/recency');
+  const T = 1_800_000_000_000;
+  const f = (mtime: number, kind: 'doc' | 'dir' = 'doc') => ({ path: 'x', name: 'x', size: 1, mtime, kind });
+  const a = { name: 'a', files: [f(T - 5 * 86400e3)], lastOpened: T - 3600e3 };            // opened an hour ago
+  const b = { name: 'b', files: [f(T - 120e3), f(T, 'dir')], lastOpened: null };           // a file changed 2 min ago (a directory's time does not count)
+  const c = { name: 'c', title: 'Aardvark', files: [], lastOpened: null };                  // never touched
+  const d = { name: 'd', title: 'Zebra', files: [], lastOpened: null };
+  it('puts the most recently opened or changed first, untouched ones by title', () => {
+    expect(sortByRecency([c, a, d, b]).map(p => p.name)).toEqual(['b', 'a', 'c', 'd']);
+    expect(projectRecency(b)).toBe(T - 120e3);
+  });
+  it('says what put a project there', () => {
+    expect(recencyLabel(a, T)).toBe('opened 1 h ago');
+    expect(recencyLabel(b, T)).toBe('changed 2 min ago');
+    expect(recencyLabel(c, T)).toBe('');
+  });
+});

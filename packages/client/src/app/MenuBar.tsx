@@ -272,7 +272,7 @@ export function MenuBar({ menus, user, right, primary, onLogout, onSettings, onH
   const live = useRef({ keyIndex, recording, open, searchIndex, overflowOpen });
   live.current = { keyIndex, recording, open, searchIndex, overflowOpen };
 
-  const close = () => { setOpen(null); setOverflowOpen(false); setUserOpen(false); setRecording(null); const p = prevFocus.current; prevFocus.current = null; if (p && document.contains(p)) p.focus(); };
+  const close = () => { setOpen(null); setOverflowOpen(false); setUserOpen(false); setRecording(null); const p = prevFocus.current; prevFocus.current = null; if (p && document.contains(p)) p.focus({ preventScroll: true }); };   // back to where the focus was — without scrolling to a caret that is off screen
   const openSearch = () => { if (live.current.searchIndex < 0) return; if (live.current.open === null && !live.current.overflowOpen) prevFocus.current = document.activeElement as HTMLElement | null; setOverflowOpen(false); setUserOpen(false); setOpen(live.current.searchIndex); };
   useEffect(() => {
     const bar = barRef.current!;

@@ -1,11 +1,13 @@
 /**
  * Start screen (no document open): the user's projects as cards — their personal example project
- * first, then their own projects, then what others shared with them.
+ * first, then their own projects, then what others shared with them, each group most recent first
+ * (app/recency.ts: last opened by you, or last changed).
  */
 import { useEffect, useState } from 'preact/hooks';
 import { api, type AdminProjectInfo, type Project, type User } from '../api';
 import { OverleafImport, type ImportInitial } from './OverleafImport';
 import { takePendingImport } from './pendingImport';
+import { sortByRecency, recencyLabel } from './recency';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -53,8 +55,8 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const others = (adminList ?? []).filter(p => p.access === null && p.kind !== 'example-gone');
 
   const example = projects?.find(p => p.kind === 'example' && p.via === 'owner') ?? null;
-  const mine = projects?.filter(p => p.via === 'owner' && p !== example) ?? [];
-  const shared = projects?.filter(p => p.via === 'member' || p.via === 'link') ?? [];
+  const mine = sortByRecency(projects?.filter(p => p.via === 'owner' && p !== example) ?? []);
+  const shared = sortByRecency(projects?.filter(p => p.via === 'member' || p.via === 'link') ?? []);
   const admin = projects?.filter(p => p.via === 'admin') ?? [];
   const firstName = user.guest ? 'guest' : user.name.split(/\s+/)[0];
 
@@ -87,7 +89,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
             <b>Start the tour</b> opens it with an interactive walkthrough that asks you to try the essentials (every step can be skipped).
           </div>
         )}
-        {!isExample && <div class="meta">{p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · {docs.length} document{docs.length === 1 ? '' : 's'}, {p.files.length} file{p.files.length === 1 ? '' : 's'}</div>}
+        {!isExample && <div class="meta">{p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · {docs.length} document{docs.length === 1 ? '' : 's'}, {p.files.length} file{p.files.length === 1 ? '' : 's'}{recencyLabel(p) ? ` · ${recencyLabel(p)}` : ''}</div>}
         <div class="docs">
           {docs.slice(0, isExample ? 1 : 6).map(d => <a key={d} href={'#/' + p.name + '/' + d} onClick={e => { e.preventDefault(); onOpen(p.name + '/' + d); }}>📄 {d}</a>)}
           {!isExample && docs.length > 6 && <span class="meta">+{docs.length - 6} more in the documents panel</span>}

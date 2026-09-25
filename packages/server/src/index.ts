@@ -14,7 +14,7 @@ import { agentRoutes, disconnectAgents } from './agent.ts';
 import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
 import { listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { cliDownloadRoutes } from './cliDownload.ts';
-import { userSettings, setUserSettings, userKeys, setUserKeys } from './userSettings.ts';
+import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocFolds, lastOpenedByProject } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
@@ -136,10 +136,11 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
  */
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
-  const m = /^(.*?)(?:\/(meta|tex|outline|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|synctex\/(?:view|edit)))?$/.exec(full)!;
+  const m = /^(.*?)(?:\/(meta|tex|outline|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|synctex\/(?:view|edit)))?$/.exec(full)!;
   const id = decodeURIComponent(m[1]);
   const action = m[2] ?? '';
-  const write = req.method !== 'GET' && !/^export/.test(action);
+  // exporting only reads the document; the folds are the user's own way of looking at it (viewers keep theirs too)
+  const write = req.method !== 'GET' && !/^(export|folds)/.test(action);
   const role = roleFor(req.user!, id.split('/')[0]);
   if (!atLeast(role, write ? 'edit' : 'view')) { deny(res, role); return; }
   req.role = role!;
@@ -150,7 +151,9 @@ api.all('/docs/*', (req, res, next) => {
 
 api.get('/projects', (req, res) => {
   ensureWelcomeProject(req.user!);
-  res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, owner: p.owner, files: p.files })) });
+  // when this user last opened each project (the start screen sorts by recency)
+  const opened = lastOpenedByProject(req.user!.id);
+  res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null })) });
   void ensureAllRepos();   // directories that appeared since (created by hand, the welcome project) get their repository
 });
 
@@ -1160,6 +1163,10 @@ api.get('/docs/*/synctex/edit', async (req, res) => {
   try { res.json(await synctexEdit(docId(req), Math.floor(page), x, y) ?? { line: null }); }
   catch (e) { res.status(500).json({ error: String(e) }); }
 });
+
+/** The user's folded sections of a document (client editor/plugins/fold.ts): per user, on every browser. */
+api.get('/docs/*/folds', (req, res) => { res.json(docFolds(req.user!.id, docId(req))); });
+api.put('/docs/*/folds', (req, res) => { res.json(setDocFolds(req.user!.id, docId(req), req.body?.folds, req.body?.at)); });
 
 /**
  * Last build result + the current job (running / queued / just finished), for the PDF panel.

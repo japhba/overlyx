@@ -111,6 +111,16 @@ CREATE TABLE IF NOT EXISTS pdf_links (
   hits INTEGER NOT NULL DEFAULT 0,
   last_hit_at INTEGER
 );
+-- per user and document: how they look at it (the folded sections — client editor/plugins/fold.ts);
+-- never the document itself
+CREATE TABLE IF NOT EXISTS user_doc_state (
+  user_id INTEGER NOT NULL,
+  doc_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, doc_id, key)
+);
 CREATE TABLE IF NOT EXISTS pdf_publish (
   doc_id TEXT PRIMARY KEY,
   repo TEXT NOT NULL,

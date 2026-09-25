@@ -341,6 +341,9 @@ export function adoptGuest(guest: SessionUser, userId: number): string[] {
       }
     }
     db.prepare('UPDATE access_log SET user_id = ? WHERE user_id = ?').run(userId, guest.id);
+    // the guest's folded sections come along (the account's own win where both have some)
+    db.prepare('UPDATE OR IGNORE user_doc_state SET user_id = ? WHERE user_id = ?').run(userId, guest.id);
+    db.prepare('DELETE FROM user_doc_state WHERE user_id = ?').run(guest.id);
     db.prepare('DELETE FROM users WHERE id = ? AND is_guest = 1').run(guest.id);
   })();
   return moved;
@@ -352,6 +355,7 @@ export function pruneGuests(days = config.sessionDays + 1): number {
   db.transaction(() => {
     for (const id of stale) {
       db.prepare('DELETE FROM project_members WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM user_doc_state WHERE user_id = ?').run(id);
       db.prepare('DELETE FROM users WHERE id = ?').run(id);
     }
   })();

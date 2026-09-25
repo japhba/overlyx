@@ -132,7 +132,7 @@ async function runJob(job: BuildJob): Promise<void> {
 /** Forget the build products and versions of a project's documents (the project was deleted). */
 export function cleanupProjectData(project: string): void {
   const ids = new Set<string>();
-  for (const t of ['builds', 'versions', 'pdf_links', 'pdf_publish']) {
+  for (const t of ['builds', 'versions', 'pdf_links', 'pdf_publish', 'user_doc_state']) {
     for (const r of db.prepare(`SELECT DISTINCT doc_id FROM ${t} WHERE substr(doc_id, 1, ?) = ?`).all(project.length + 1, project + '/') as { doc_id: string }[]) ids.add(r.doc_id);
     db.prepare(`DELETE FROM ${t} WHERE substr(doc_id, 1, ?) = ?`).run(project.length + 1, project + '/');
   }

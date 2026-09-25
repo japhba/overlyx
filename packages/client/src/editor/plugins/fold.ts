@@ -6,9 +6,12 @@
  * heading of its level (all subsections, say), or all of them.
  *
  * Folding is a way of looking at the document, never a change of it: no step touches the document
- * (collaborators and the .tex file are unaffected), the folded headings are remembered per
- * document in this browser, and whatever puts the cursor into folded-away text — find, the
- * outline, a jump to a label, Back — unfolds that section first.
+ * (collaborators and the .tex file are unaffected), and whatever puts the cursor into folded-away
+ * text — find, the outline, a jump to a label, Back — unfolds that section first. The folds are
+ * the user's: kept with the account per document (/api/docs/<id>/folds — every browser, every
+ * device), cached in the browser for offline use and a quick start; the newer of the two wins
+ * when a document opens. A fold never moves what the reader looks at: the heading clicked (or the
+ * block at the top of the view) stays where it is on screen (dispatchInPlace).
  *
  * The folded headings are kept as positions and mapped through every transaction. A
  * collaborator's change arrives from y-prosemirror as a replacement of the whole document, which
@@ -19,8 +22,9 @@ import { Plugin, PluginKey, Selection, TextSelection, type Command, type EditorS
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { sectionLevel } from '../layouts';
-import { viewDocId } from '../context';
+import { editorContext, viewDocId } from '../context';
 import { showContextMenu, type MenuItem } from '../contextmenu';
+import { api, API_BASE, type SavedFold } from '../../api';
 
 export interface FoldState { /** document positions of the folded headings, ascending */ folded: readonly number[]; decos: DecorationSet }
 export const foldKey = new PluginKey<FoldState>('lyx-fold');
@@ -208,33 +212,162 @@ export function foldPlugin(): Plugin<FoldState> {
         return true;
       },
     },
-    view(view) {
+    view() {
       let restored = false;
-      let last = foldKey.getState(view.state)?.folded ?? [];
+      let lastFolded: readonly number[] = [];
+      let lastJson = '[]';
+      let applying = false;   // folds being put back from storage: not a change of the user's
+      let touched = false;    // the user changed the folds since the document opened (a late answer from the server must not undo that)
+      let pushTimer: ReturnType<typeof setTimeout> | undefined;
+      let pending: { docId: string; rec: FoldRecord } | null = null;
+      const push = (leaving = false) => {
+        clearTimeout(pushTimer);
+        const p = pending;
+        pending = null;
+        if (!p) return;
+        if (leaving) { sendFoldsOnLeave(p.docId, p.rec); return; }
+        api.setFolds(p.docId, p.rec.folds, p.rec.at).catch(() => { /* offline: the browser's copy is newer and goes up the next time */ });
+      };
+      // the tab closes or goes to the background with a change still waiting: send it now, in a request that outlives the page
+      const onHide = (e: Event) => { if (e.type === 'pagehide' || document.visibilityState === 'hidden') push(true); };
+      document.addEventListener('visibilitychange', onHide);
+      window.addEventListener('pagehide', onHide);
+      /** saved folds applied to the document (a fold hiding the cursor stays open: it was put back there, or moved meanwhile) */
+      const putBack = (v: EditorView, saved: SavedFold[]) => {
+        const heads = foldHeadings(v.state.doc);
+        const want = matchSaved(heads, saved);
+        const hiding = new Set(hidingAt(heads, new Set(want), v.state.selection.head).map(h => h.pos));
+        const keep = want.filter(p => !hiding.has(p));
+        if (!keep.length && !(foldKey.getState(v.state)?.folded.length)) return;
+        applying = true;
+        try { dispatchInPlace(v, foldTransaction(v.state, { set: keep }), null); } finally { applying = false; }
+      };
       return {
         update(v, prev) {
           const st = foldKey.getState(v.state);
           if (!st) return;
-          if (!restored && v.state.doc !== prev.doc && foldHeadings(v.state.doc).length) {
+          if (!restored) {
+            if (v.state.doc === prev.doc || !foldHeadings(v.state.doc).length) return;
             restored = true;
-            // after this update (the first content usually arrives inside y-prosemirror's own dispatch)
             const docId = viewDocId(v);
+            // after this update (the first content usually arrives inside y-prosemirror's own dispatch)
             void Promise.resolve().then(() => {
               if (v.isDestroyed) return;
-              // a remembered fold stays open where the cursor already is (it was put back there, or moved meanwhile)
-              const heads = foldHeadings(v.state.doc);
-              const saved = loadFolds(docId, v.state.doc);
-              const hiding = new Set(hidingAt(heads, new Set(saved), v.state.selection.head).map(h => h.pos));
-              const keep = saved.filter(p => !hiding.has(p));
-              if (keep.length) v.dispatch(foldTransaction(v.state, { set: keep }));
+              const local = readLocal(docId);
+              if (local?.folds.length) putBack(v, local.folds);
+              if (!accountSync()) return;
+              api.folds(docId).then(r => {
+                if (v.isDestroyed || touched) return;
+                if (r.at > (local?.at ?? 0)) { writeLocal(docId, r); putBack(v, r.folds); }
+                else if (local && local.at > r.at) api.setFolds(docId, local.folds, local.at).catch(() => { /* next time */ });
+              }).catch(() => { /* offline: the browser's copy stands */ });
             });
             return;
           }
-          if (st.folded !== last) { last = st.folded; if (restored || st.folded.length) { restored = true; saveFolds(viewDocId(v), v.state.doc, st.folded); } }
+          if (st.folded === lastFolded) return;
+          lastFolded = st.folded;
+          // positions move with every keystroke; what is stored (the headings' layout and text) seldom does
+          const folds = serializeFolds(v.state.doc, st.folded);
+          const json = JSON.stringify(folds);
+          if (json === lastJson) return;
+          lastJson = json;
+          if (applying) return;
+          touched = true;
+          const docId = viewDocId(v);
+          const rec: FoldRecord = { at: Date.now(), folds };
+          writeLocal(docId, rec);
+          if (!accountSync()) return;
+          pending = { docId, rec };
+          clearTimeout(pushTimer);
+          pushTimer = setTimeout(push, 500);
+        },
+        destroy() {
+          document.removeEventListener('visibilitychange', onHide);
+          window.removeEventListener('pagehide', onHide);
+          push(true);
         },
       };
     },
   });
+}
+
+/* ------------------------------------------------------------------ in place: nothing jumps */
+
+/** The editor's scrolling ancestor (the web client's .editor-scroll), or the page. */
+function scrollParent(el: HTMLElement): HTMLElement {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') return p;
+  }
+  return (document.scrollingElement as HTMLElement | null) ?? document.documentElement;
+}
+/** blank space added below the document so a fold near its end can keep the view where it was */
+const spacers = new WeakMap<EditorView, number>();
+
+/**
+ * The element to hold still on screen: the anchor heading (the one clicked) when it is in view — or,
+ * folded away by this change, the outermost heading folding it; otherwise the first block in view
+ * that stays visible (a fold-all keeps the heading one is looking at), failing that the heading that
+ * folds away the first block in view.
+ */
+function anchorElement(view: EditorView, after: EditorState, anchorPos: number | null, top: number, bottom: number): HTMLElement | null {
+  const folded = new Set(foldKey.getState(after)?.folded ?? []);
+  const heads = foldHeadings(after.doc);
+  const shownAs = (pos: number) => { const hid = hidingAt(heads, folded, pos + 1); return hid.length ? hid[0].pos : pos; };
+  const dom = (pos: number) => { const d = view.nodeDOM(pos); return d instanceof HTMLElement ? d : null; };
+  const inView = (el: HTMLElement | null) => { if (!el || !el.getClientRects().length) return false; const r = el.getBoundingClientRect(); return r.bottom > top + 1 && r.top < bottom; };
+  if (anchorPos !== null && inView(dom(anchorPos))) {
+    const el = dom(shownAs(anchorPos));
+    if (inView(el)) return el;
+  }
+  let firstInView: number | null = null, staying: number | null = null, done = false;
+  view.state.doc.forEach((_child, off) => {
+    if (done) return;
+    const el = dom(off);
+    if (!el || !el.getClientRects().length) return;
+    const r = el.getBoundingClientRect();
+    if (r.bottom <= top + 1) return;
+    if (r.top >= bottom) { done = true; return; }
+    if (firstInView === null) firstInView = off;
+    if (!hidingAt(heads, folded, off + 1).length) { staying = off; done = true; }
+  });
+  if (staying !== null) return dom(staying);
+  return firstInView === null ? null : dom(shownAs(firstInView));
+}
+
+/**
+ * Dispatch a fold change without moving what the reader looks at (see anchorElement). The browser
+ * clamps the scroll position the moment the document gets shorter, so the document first gets a
+ * generous blank end, the anchor is put back where it was, and the blank end is then trimmed to
+ * what that position needs (a fold near the end keeps some; it goes again with the next fold change
+ * once the text is long enough).
+ */
+function dispatchInPlace(view: EditorView, tr: Transaction, anchorPos: number | null): void {
+  if (!view.dom.isConnected) { view.dispatch(tr); return; }
+  const scroller = scrollParent(view.dom);
+  const page = scroller === document.scrollingElement || scroller === document.documentElement;
+  const box = page ? { top: 0, bottom: window.innerHeight } : scroller.getBoundingClientRect();
+  const el = anchorElement(view, view.state.apply(tr), anchorPos, box.top, box.bottom);
+  if (!el) { view.dispatch(tr); return; }
+  const before = el.getBoundingClientRect().top;
+  const roomy = (spacers.get(view) ?? 0) + scroller.scrollHeight;
+  // the browser's own scroll anchoring would move the view as well (it compensates what folds away above)
+  const anchoring = scroller.style.overflowAnchor;
+  scroller.style.overflowAnchor = 'none';
+  view.dom.style.paddingBottom = roomy + 'px';
+  view.dispatch(tr);
+  if (el.isConnected) scroller.scrollTop += el.getBoundingClientRect().top - before;
+  const content = scroller.scrollHeight - roomy;   // the document's own height below the scroll origin
+  const need = Math.max(0, Math.ceil(scroller.scrollTop + scroller.clientHeight - content));
+  spacers.set(view, need);
+  view.dom.style.paddingBottom = need ? need + 'px' : '';
+  void scroller.scrollTop;   // lay out now, with the browser's anchoring still off
+  requestAnimationFrame(() => { scroller.style.overflowAnchor = anchoring; });
+}
+/** a command's dispatch: in place when there is a view */
+function send(tr: Transaction, dispatch: ((tr: Transaction) => void) | undefined, view: EditorView | undefined, anchorPos: number | null): void {
+  if (!dispatch) return;
+  if (view) dispatchInPlace(view, tr, anchorPos); else dispatch(tr);
 }
 
 /* ------------------------------------------------------------------ commands */
@@ -261,13 +394,13 @@ function headingAt(doc: PMNode, pos: number): FoldHeading | null {
 
 /** Fold / unfold / toggle the section of the heading at `pos` (or, not a heading, the section `pos` is in). */
 export function setSectionFolded(pos: number, how: boolean | 'toggle'): Command {
-  return (state, dispatch) => {
+  return (state, dispatch, view) => {
     const h = headingAt(state.doc, pos);
     if (!h) return false;
     const folded = foldKey.getState(state)?.folded.includes(h.pos) ?? false;
     const fold = how === 'toggle' ? !folded : how;
     if (fold === folded || (fold && !hasBody(h))) return false;
-    dispatch?.(foldTransaction(state, fold ? { fold: [h.pos] } : { unfold: [h.pos] }));
+    send(foldTransaction(state, fold ? { fold: [h.pos] } : { unfold: [h.pos] }), dispatch, view, h.pos);
     return true;
   };
 }
@@ -287,14 +420,14 @@ const LEVEL_PLURAL: Record<number, string> = { [-1]: 'parts', 0: 'chapters', 1: 
 
 /** Fold (or expand) every heading of the level of the heading at / above `pos` — all subsections, say. */
 export function setLevelFolded(pos: number, fold: boolean): Command {
-  return (state, dispatch) => {
+  return (state, dispatch, view) => {
     const h = headingAt(state.doc, pos);
     if (!h) return false;
     const cur = new Set(foldKey.getState(state)?.folded ?? []);
     const same = foldHeadings(state.doc).filter(x => x.level === h.level);
     const change = same.filter(x => (fold ? hasBody(x) && !cur.has(x.pos) : cur.has(x.pos))).map(x => x.pos);
     if (!change.length) return false;
-    dispatch?.(foldTransaction(state, fold ? { fold: change } : { unfold: change }));
+    send(foldTransaction(state, fold ? { fold: change } : { unfold: change }), dispatch, view, h.pos);
     return true;
   };
 }
@@ -325,65 +458,91 @@ export function foldMenuItems(view: EditorView, pos: number): MenuItem[] {
     );
   }
   items.push(
-    { label: 'Fold all sections', disabled: !heads.some(x => hasBody(x) && !folded.has(x.pos)), action: run(foldAllSections) },
-    { label: 'Expand all sections', disabled: !folded.size, action: run(unfoldAllSections) },
+    { label: 'Fold all sections', disabled: !heads.some(x => hasBody(x) && !folded.has(x.pos)), action: run(setAllFolded(true, h?.pos ?? null)) },
+    { label: 'Expand all sections', disabled: !folded.size, action: run(setAllFolded(false, h?.pos ?? null)) },
   );
   return items;
 }
 
-/** View ▸ Fold all sections: every heading with something under it (Google Docs' Collapse all headings). */
-export const foldAllSections: Command = (state, dispatch) => {
-  const all = foldHeadings(state.doc).filter(hasBody).map(h => h.pos);
-  if (!all.length) return false;
-  dispatch?.(foldTransaction(state, { set: all }));
-  return true;
-};
-
+/**
+ * Fold every heading with something under it (Google Docs' Collapse all headings), or expand them
+ * all; `anchorPos`: the heading that stays put on screen (the one right-clicked), else the top of the view.
+ */
+export function setAllFolded(fold: boolean, anchorPos: number | null = null): Command {
+  return (state, dispatch, view) => {
+    const all = fold ? foldHeadings(state.doc).filter(hasBody).map(h => h.pos) : [];
+    const cur = foldKey.getState(state)?.folded ?? [];
+    if (fold ? !all.length || all.every(p => cur.includes(p)) : !cur.length) return false;
+    send(foldTransaction(state, { set: all }), dispatch, view, anchorPos);
+    return true;
+  };
+}
+/** View ▸ Fold all sections. */
+export const foldAllSections: Command = setAllFolded(true);
 /** View ▸ Expand all sections. */
-export const unfoldAllSections: Command = (state, dispatch) => {
-  if (!foldKey.getState(state)?.folded.length) return false;
-  dispatch?.(foldTransaction(state, { set: [] }));
-  return true;
-};
+export const unfoldAllSections: Command = setAllFolded(false);
 
 /** how many sections are folded (menus enable Expand all with it) */
 export const foldedCount = (state: EditorState): number => foldKey.getState(state)?.folded.length ?? 0;
 
-/* ------------------------------------------------------------------ remembered per document */
+/* ------------------------------------------------------------------ remembered per user and document */
 
-interface SavedFold { l: string; t: string; n: number }
-const storageKey = (docId: string) => 'ol.fold:' + docId;
+interface FoldRecord { /** when the user changed them (ms) */ at: number; folds: SavedFold[] }
+/** the web app, signed in: the folds live with the account (elsewhere API_BASE is the VS Code extension's bridge) */
+const accountSync = (): boolean => API_BASE === '' && !!editorContext.user?.id;
+/** the browser's copy, per user (a shared browser keeps each person's own) */
+const localKey = (docId: string): string => { const u = editorContext.user?.id; return u ? `ol.fold:${u}:${docId}` : `ol.fold:${docId}`; };
+const LEGACY = (docId: string) => 'ol.fold:' + docId;
 
-function saveFolds(docId: string, doc: PMNode, folded: readonly number[]): void {
+/** the last change, sent while the page goes away (a keepalive request is not cancelled with the page) */
+function sendFoldsOnLeave(docId: string, rec: FoldRecord): void {
+  try {
+    void fetch(`/api/docs/${docId.split('/').map(encodeURIComponent).join('/')}/folds`, {
+      method: 'PUT', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folds: rec.folds, at: rec.at }),
+    }).catch(() => { /* the browser's copy is newer: it goes up the next time */ });
+  } catch { /* ignore */ }
+}
+
+function readLocal(docId: string): FoldRecord | null {
+  if (!docId) return null;
+  try {
+    // an earlier build kept a plain list per browser: it counts as older than anything the account has
+    const raw = localStorage.getItem(localKey(docId)) ?? localStorage.getItem(LEGACY(docId));
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    if (Array.isArray(v)) return { at: 1, folds: v };
+    if (v && typeof v === 'object' && Array.isArray(v.folds)) return { at: Number(v.at) || 0, folds: v.folds };
+  } catch { /* storage unavailable or damaged */ }
+  return null;
+}
+function writeLocal(docId: string, rec: FoldRecord): void {
   if (!docId) return;
   try {
-    if (!folded.length) { localStorage.removeItem(storageKey(docId)); return; }
-    const heads = foldHeadings(doc);
-    const seen = new Map<string, number>();
-    const out: SavedFold[] = [];
-    for (const h of heads) {
-      const k = h.node.attrs.layout + '\n' + h.node.textContent;
-      const n = seen.get(k) ?? 0;
-      seen.set(k, n + 1);
-      if (folded.includes(h.pos)) out.push({ l: String(h.node.attrs.layout), t: h.node.textContent, n });
-    }
-    localStorage.setItem(storageKey(docId), JSON.stringify(out));
+    localStorage.setItem(localKey(docId), JSON.stringify(rec));
+    if (localKey(docId) !== LEGACY(docId)) localStorage.removeItem(LEGACY(docId));
   } catch { /* storage unavailable */ }
 }
 
-function loadFolds(docId: string, doc: PMNode): number[] {
-  if (!docId) return [];
-  let saved: SavedFold[] = [];
-  try { saved = JSON.parse(localStorage.getItem(storageKey(docId)) ?? '[]'); } catch { return []; }
-  if (!Array.isArray(saved) || !saved.length) return [];
-  const heads = foldHeadings(doc);
+/** The folded headings by layout, text and which of the equal headings (the n-th "Results") it is — positions do not survive a reload. */
+function serializeFolds(doc: PMNode, folded: readonly number[]): SavedFold[] {
+  const seen = new Map<string, number>();
+  const out: SavedFold[] = [];
+  for (const h of foldHeadings(doc)) {
+    const k = h.node.attrs.layout + '\n' + h.node.textContent;
+    const n = seen.get(k) ?? 0;
+    seen.set(k, n + 1);
+    if (folded.includes(h.pos)) out.push({ l: String(h.node.attrs.layout), t: h.node.textContent, n });
+  }
+  return out;
+}
+function matchSaved(heads: FoldHeading[], saved: SavedFold[]): number[] {
   const seen = new Map<string, number>();
   const out: number[] = [];
   for (const h of heads) {
     const k = h.node.attrs.layout + '\n' + h.node.textContent;
     const n = seen.get(k) ?? 0;
     seen.set(k, n + 1);
-    if (hasBody(h) && saved.some(s => s.l === h.node.attrs.layout && s.t === h.node.textContent && s.n === n)) out.push(h.pos);
+    if (hasBody(h) && saved.some(x => x.l === h.node.attrs.layout && x.t === h.node.textContent && x.n === n)) out.push(h.pos);
   }
   return out;
 }

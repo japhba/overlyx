@@ -21,6 +21,8 @@ export interface Project {
   /** how the user got access: owns it / shared with them / joined via link / administrator */
   via?: 'owner' | 'member' | 'link' | 'admin';
   owner?: { id: number; name: string; username: string } | null;
+  /** when this user last opened the project (server clock), null: never */
+  lastOpened?: number | null;
 }
 export interface ShareMember { id: number; role: 'view' | 'edit'; via: string; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }
 /** a zip import: `projects` lists every project the archive produced (several for an Overleaf bundle of zips), `errors` the ones that failed */
@@ -59,6 +61,8 @@ export interface DocMeta {
   /** structural damage found in the file on disk (an external edit broke an OverLyX convention) */
   health: HealthIssue[];
 }
+/** a folded heading (editor/plugins/fold.ts): its layout, text, and which of the equal headings it is */
+export interface SavedFold { l: string; t: string; n: number }
 export interface BuildJob { id: number; status: 'queued' | 'exporting' | 'compiling' | 'ok' | 'error' | 'cancelled'; engine: string; requestedBy: string; startedAt: number; phaseAt: number; finishedAt?: number; progress: string; rerun: boolean }
 export interface BuildInfo { status: string; log: string; pdf: string | null; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[]; tex?: string; /** when the PDF file was written (server clock) */ pdf_at?: number | null }
 export interface VersionInfo { id: number; name: string; author: string; kind: string; created_at: number; size: number }
@@ -167,6 +171,9 @@ export const api = {
   /** the signed-in account's server-side settings; administrators switch them per user */
   settings: () => req<{ settings: UserSettings }>('GET', '/api/settings'),
   /** the account's custom keyboard shortcuts (keybindings.ts syncs them) */
+  /** the user's folded sections of a document (editor/plugins/fold.ts), kept with the account */
+  folds: (id: string) => req<{ folds: SavedFold[]; at: number }>('GET', `/api/docs/${encId(id)}/folds`),
+  setFolds: (id: string, folds: SavedFold[], at: number) => req<{ folds: SavedFold[]; at: number }>('PUT', `/api/docs/${encId(id)}/folds`, { folds, at }),
   keys: () => req<{ keys: Record<string, string | null> }>('GET', '/api/keys'),
   setKeys: (keys: Record<string, string | null>) => req<{ keys: Record<string, string | null> }>('POST', '/api/keys', { keys }),
   adminUserSettings: (id: number, patch: Partial<UserSettings>) => req<{ settings: UserSettings }>('POST', `/api/admin/users/${id}/settings`, patch),

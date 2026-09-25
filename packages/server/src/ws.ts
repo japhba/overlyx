@@ -12,6 +12,7 @@ import * as decoding from 'lib0/decoding';
 import { manager, type OpenDoc } from './docs.ts';
 import { userFromCookieHeader, type SessionUser } from './auth.ts';
 import { roleFor, logAccess } from './access.ts';
+import { markDocOpened } from './userSettings.ts';
 import { config } from './config.ts';
 
 const MSG_SYNC = 0;
@@ -117,6 +118,7 @@ export function attachWebSocket(server: Server): void {
     const role = roleFor(user, docId.split('/')[0]);
     if (!role) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     logAccess(docId.split('/')[0], user.id, 'open', docId.slice(docId.indexOf('/') + 1) || null);
+    markDocOpened(user.id, docId);
     wss.handleUpgrade(req, socket, head, (ws) => void handleConnection(ws, docId, user, role === 'view'));
   });
 

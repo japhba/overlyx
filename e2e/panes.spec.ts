@@ -5,11 +5,13 @@
  * folding (editor/plugins/fold.ts) and the dash keys.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
-import { login, collectErrors, PROJECTS_DIR, texDoc } from './helpers';
+import { mkdirSync, rmSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
+import { login, collectErrors, PROJECTS_DIR, texDoc, shareProject, userCredentials, BASE_URL } from './helpers';
 
 const PROJECT = 'e2e-panes';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
+const STAMP = Date.now().toString(36);
+const RECENT_OLDER = `e2e-recent-older-${STAMP}`, RECENT_NEWER = `e2e-recent-newer-${STAMP}`;
 const SHORT = texDoc('\\section{One}\n\nFirst section text.\n\n\\subsection{One a}\n\nSub text.\n\n\\section{Two}\n\nSecond section text with a findme word.\n\n\\section{Three}\n\nThird text.');
 
 test.beforeAll(() => {
@@ -22,8 +24,28 @@ test.beforeAll(() => {
   writeFileSync(`${DIR}/long.tex`, texDoc(paras.join('\n')));
   writeFileSync(`${DIR}/short.tex`, SHORT);
   writeFileSync(`${DIR}/dash.tex`, texDoc('Dashes here'));
+  // six sections with a subsection each, long enough to scroll: the folds per user, and nothing jumps
+  const secs: string[] = [];
+  for (let k = 1; k <= 6; k++) {
+    secs.push(`\\section{Part ${k}}`, '');
+    for (let i = 1; i <= 8; i++) secs.push(`Part ${k} paragraph ${i}: words enough to make the part tall, so that folding it changes what the page shows below.`, '');
+    secs.push(`\\subsection{Part ${k} detail}`, '');
+    for (let i = 1; i <= 4; i++) secs.push(`Detail ${k}.${i} with more words to fill the lines.`, '');
+  }
+  writeFileSync(`${DIR}/parts.tex`, texDoc(secs.join('\n')));
+  // the start screen's order: two projects (fresh names — the server remembers opens), the files of one changed more recently
+  for (const [name, daysAgo] of [[RECENT_OLDER, 10], [RECENT_NEWER, 5]] as const) {
+    rmSync(`${PROJECTS_DIR}/${name}`, { recursive: true, force: true });
+    mkdirSync(`${PROJECTS_DIR}/${name}`, { recursive: true });
+    writeFileSync(`${PROJECTS_DIR}/${name}/main.tex`, texDoc(`The ${name} project.`));
+    const t = new Date(Date.now() - daysAgo * 86400e3);
+    utimesSync(`${PROJECTS_DIR}/${name}/main.tex`, t, t);
+  }
 });
-test.afterAll(() => rmSync(DIR, { recursive: true, force: true }));
+test.afterAll(() => {
+  rmSync(DIR, { recursive: true, force: true });
+  for (const name of [RECENT_OLDER, RECENT_NEWER]) rmSync(`${PROJECTS_DIR}/${name}`, { recursive: true, force: true });
+});
 
 const prefs = (page: Page, p: Record<string, unknown>) => page.addInitScript(v => { try { localStorage.setItem('ol.prefs', JSON.stringify(v)); } catch { /* ignore */ } }, p);
 async function open(page: Page, name: string): Promise<void> {
@@ -193,6 +215,7 @@ test('section folding: the arrow beside a heading and its right-click menu (this
   const errors = collectErrors(page);
   await prefs(page, { autoBuild: 'off' });
   await login(page);
+  await page.request.put(`/api/docs/${PROJECT}/short.tex/folds`, { data: { folds: [], at: Date.now() } });   // the folds are kept with the account: start from none
   await open(page, 'short.tex');
   const heading = (t: string) => page.locator('.lyx-editor > .lyx-par', { hasText: new RegExp(`^${t}$`) });
   const text = (t: string) => page.locator('.lyx-editor > .lyx-par', { hasText: t });
@@ -255,6 +278,88 @@ test('section folding: the arrow beside a heading and its right-click menu (this
   await arrowMenu('Two', 'Expand all sections');
   await expect(text('Sub text.')).toBeVisible();
   expect(noise(errors)).toEqual([]);
+});
+
+test('the folds are the user\'s — another browser of the same account sees them, another user does not — and folding never moves the heading', async ({ browser }) => {
+  test.setTimeout(150000);
+  const ctxA = await browser.newContext({ baseURL: BASE_URL, viewport: { width: 1300, height: 850 } });
+  const a = await ctxA.newPage();
+  const errors = collectErrors(a);
+  await prefs(a, { autoBuild: 'off' });
+  await login(a);
+  // earlier runs may have left folds with the account
+  await a.request.put(`/api/docs/${PROJECT}/parts.tex/folds`, { data: { folds: [], at: Date.now() } });
+  await open(a, 'parts.tex');
+  const H = (p: Page, t: string) => p.locator('.lyx-editor > .lyx-par', { hasText: new RegExp(`^${t}$`) });
+  const top = (p: Page, t: string) => H(p, t).evaluate(e => e.getBoundingClientRect().top);
+  const place = (p: Page, t: string, y: number) => H(p, t).evaluate((e, y) => { const s = document.querySelector('.editor-scroll')!; s.scrollTop += e.getBoundingClientRect().top - y; }, y);
+  const fold = async (p: Page, t: string) => { await H(p, t).hover(); const y = await top(p, t); await H(p, t).locator('.lyx-fold-toggle').click(); return y; };
+
+  // a section in the middle, with the cursor in it: the heading stays where it is
+  await place(a, 'Part 3', 300);
+  await a.locator('.lyx-editor .lyx-par', { hasText: 'Part 3 paragraph 5' }).click();
+  let y = await fold(a, 'Part 3');
+  await expect(a.locator('.lyx-editor .lyx-par', { hasText: 'Part 3 paragraph 5' })).toBeHidden();
+  expect(Math.abs(await top(a, 'Part 3') - y)).toBeLessThan(2);
+  // the last section, near the end of the document: the page keeps room so the heading stays too
+  await a.locator('.editor-scroll').evaluate(s => { s.scrollTop = s.scrollHeight; });
+  y = await fold(a, 'Part 6');
+  expect(Math.abs(await top(a, 'Part 6') - y)).toBeLessThan(2);
+  // View ▸ Fold all sections, a heading in view: it stays
+  await place(a, 'Part 4', 260);
+  await a.mouse.move(5, 845);
+  y = await top(a, 'Part 4');
+  await a.locator('.menubar .menu button', { hasText: 'View' }).click();
+  await a.locator('.menu-item', { hasText: 'Fold all sections' }).click();
+  await expect(a.locator('.lyx-editor .lyx-par', { hasText: 'Part 4 paragraph 1' })).toBeHidden();
+  expect(Math.abs(await top(a, 'Part 4') - y)).toBeLessThan(2);
+  // leave Part 3 and Part 6 folded
+  await a.locator('.menubar .menu button', { hasText: 'View' }).click();
+  await a.locator('.menu-item', { hasText: 'Expand all sections' }).click();
+  await fold(a, 'Part 3');
+  await a.locator('.editor-scroll').evaluate(s => { s.scrollTop = s.scrollHeight; });
+  await fold(a, 'Part 6');
+  // kept with the account
+  await expect.poll(async () => (await (await a.request.get(`/api/docs/${PROJECT}/parts.tex/folds`)).json()).folds.map((f: { t: string }) => f.t), { timeout: 10000 }).toEqual(['Part 3', 'Part 6']);
+
+  // another browser, the same account: the same folds
+  const ctxB = await browser.newContext({ baseURL: BASE_URL, viewport: { width: 1300, height: 850 } });
+  const b = await ctxB.newPage();
+  await prefs(b, { autoBuild: 'off' });
+  await login(b);
+  await open(b, 'parts.tex');
+  await expect(b.locator('.lyx-editor .lyx-par', { hasText: 'Part 3 paragraph 1' })).toBeHidden({ timeout: 10000 });
+  await expect(b.locator('.lyx-editor .lyx-par', { hasText: 'Part 6 paragraph 1' })).toBeHidden();
+  await expect(b.locator('.lyx-editor .lyx-par', { hasText: 'Part 4 paragraph 1' })).toBeVisible();
+
+  // another user: their own view, nothing folded
+  await shareProject(browser, PROJECT, ['bob']);
+  const ctxC = await browser.newContext({ baseURL: BASE_URL, viewport: { width: 1300, height: 850 } });
+  const c = await ctxC.newPage();
+  await prefs(c, { autoBuild: 'off' });
+  await login(c, userCredentials('bob'));
+  await open(c, 'parts.tex');
+  await c.waitForTimeout(1500);
+  await expect(c.locator('.lyx-editor .lyx-par', { hasText: 'Part 3 paragraph 1' })).toBeVisible();
+  expect(noise(errors)).toEqual([]);
+  await Promise.all([ctxA.close(), ctxB.close(), ctxC.close()]);
+});
+
+test('the start screen lists the projects most recent first: last opened by you, or last changed', async ({ page }) => {
+  await prefs(page, { autoBuild: 'off' });
+  await login(page);
+  await page.request.get('/api/projects');   // registers the new directories
+  await page.goto('/#/');
+  const order = () => page.locator(`.home-card[data-project$="-${STAMP}"]`).evaluateAll(els => els.map(e => (e as HTMLElement).dataset.project));
+  await expect.poll(order, { timeout: 15000 }).toEqual([RECENT_NEWER, RECENT_OLDER]);   // by the files' dates
+  await expect(page.locator(`.home-card[data-project="${RECENT_NEWER}"] .meta`)).toContainText('changed 5 days ago');
+  // opening the older one puts it first
+  await page.goto(`/#/${RECENT_OLDER}/main.tex`);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+  await page.goto('/#/');
+  await expect.poll(order, { timeout: 15000 }).toEqual([RECENT_OLDER, RECENT_NEWER]);
+  await expect(page.locator(`.home-card[data-project="${RECENT_OLDER}"] .meta`)).toContainText('opened just now');
+  for (const name of [RECENT_OLDER, RECENT_NEWER]) await page.request.delete(`/api/projects/${name}`);   // their records go with them
 });
 
 test('Alt+- types an em dash (written as --- in the file), Alt+Shift+- an en dash', async ({ page }) => {

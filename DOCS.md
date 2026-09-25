@@ -52,6 +52,10 @@ blend.
   invert*: a plot or diagram (dark strokes on a light or transparent ground, judged from a small
   canvas copy of the pixels, `figureinvert.ts`) is shown light-on-dark with a CSS filter, a
   photograph keeps its colours; *Settings ▸ Editor ▸ Figures* switches it off.
+* **The start page** lists the user's projects, then those shared with them, each most recent first:
+  the later of when they last opened a document of it (`user_doc_state` *opened*, every open; the
+  activity log for older history) and when a file of it last changed; the card says which
+  (“opened 3 min ago”, “changed 2 days ago”; `app/recency.ts`).
 * **Import from Overleaf** (start page, and the landing page for visitors who have no account yet): paste the links of the projects to bring over and an
   Overleaf Git token — each ticked project is cloned by the server from `git.overleaf.com` into a
   new project (Overleaf's Git access, paid and institutional plans; history and `origin` are kept,
@@ -376,11 +380,20 @@ blend.
   everything up to the next heading of the same or a higher level. A right-click on the arrow, the
   text's right-click menu (*Sections*) and the View menu fold or expand this section, every heading
   of its level (*Fold all at this level* — all subsections, say — and *Expand all at this level*),
-  or all of them (*Fold all sections / Expand all sections*). Folding is a way of looking, never a change: no step touches the document, the folds
-  are remembered per document in the browser (`ol.fold:<doc>`, by heading layout + text), and
+  or all of them (*Fold all sections / Expand all sections*). Folding is a way of looking, never a change: no step touches the document, and
   whatever puts the cursor into folded text — find, the outline, a label jump, Back — unfolds that
   section (a selection reaching into a fold from visible text, Select All, does not); ↑ / ↓ beside a
-  fold skip it. The folded headings are positions mapped through every transaction; a collaborator's
+  fold skip it. **The folds are the user's**: kept with the account per document (`user_doc_state`,
+  `GET/PUT /api/docs/<id>/folds`, by heading layout + text + which of the equal headings; viewers
+  keep theirs too), so every browser and device shows them, other people see their own; the browser
+  keeps a copy per user (`ol.fold:<user>:<doc>`) for offline use and a quick start, the newer of the
+  two wins when a document opens, a change goes up half a second later (a keepalive request when the
+  tab closes). A guest who signs in keeps theirs; they go with a deleted project. The VS Code
+  extension keeps them in the webview. **Nothing jumps**: a fold holds the clicked heading (or, from
+  the View menu, the first block in view that stays visible) at the same place on screen — the
+  browser's own scroll anchoring is off for that moment, and a fold near the end gives the page a
+  blank end so the heading can stay (recomputed on the next fold change). Closing a menu gives the
+  focus back without scrolling to a cursor that is off screen. The folded headings are positions mapped through every transaction; a collaborator's
   change arrives from y-prosemirror as a whole-document replacement, so the heading is found again by
   node identity (unchanged paragraphs keep their node objects) or by layout and text.
 * **Dashes**: Alt+- types an em dash (—), Alt+Shift+- an en dash (–) — the characters themselves,
