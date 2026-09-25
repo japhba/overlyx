@@ -2,7 +2,7 @@
  * The centralized Settings panel (Tools ▸ Settings…, and the avatar menu on every screen — so it
  * is reachable from the start screen too, which has no Tools menu). One dialog for everything a
  * user configures:
- *   Editor       spell checking, automatic PDF builds (this browser, prefs.ts)
+ *   Editor       the editor's font, spell checking, automatic PDF builds (this browser, prefs.ts)
  *   AI           the AI features and models        (this browser, prefs.ts)
  *   Appearance   light / dark / follow the system  (this browser, theme.ts)
  *   Account      who is signed in, and the per-account server settings (userSettings.ts):
@@ -16,6 +16,9 @@ import { setThemePref, useTheme, type ThemePref } from './theme';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import { Dialog } from './Dialogs';
 import { AUTO_BUILD_CHOICES, AUTO_BUILD_DELAYS } from './pdfstatus';
+import { EDITOR_FACES, FOLLOW_DOCUMENT, editorFace } from '../fonts/catalog';
+import { resolvedFace } from '../fonts/editorfont';
+import katex from 'katex';
 
 const SECTIONS = [['editor', 'Editor'], ['ai', 'AI assistance'], ['appearance', 'Appearance'], ['privacy', 'Privacy'], ['account', 'Account']] as const;
 export type SettingsSection = (typeof SECTIONS)[number][0];
@@ -41,6 +44,12 @@ function ModelPicker({ label, value, fallback, models, onChange, pref }: { label
       </div>
     </div>
   );
+}
+
+/** A line of text with a formula in the editor's current face (the sample under Settings ▸ Editor ▸ Font). */
+const FONT_SAMPLE_MATH = katex.renderToString('\\nabla_{\\!\\theta}\\, \\mathcal{L} = \\sum_{k=1}^{n} \\alpha_k x_k^2 \\le \\int_0^\\infty e^{-t}\\, dt', { throwOnError: false, output: 'html' });
+function FontSample() {
+  return <div class="lyx-editor font-sample" data-font-sample aria-hidden="true">The quick brown fox, <i>jumps over</i> <b>the lazy dog</b> — 0123456789. <span dangerouslySetInnerHTML={{ __html: FONT_SAMPLE_MATH }} /></div>;
 }
 
 const THEMES: [ThemePref, string, string][] = [
@@ -82,6 +91,13 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
         </div>
         <div class="settings-content">
           {section === 'editor' && <>
+            <h3>Font</h3>
+            <div class="sub">How the editor shows the text and formulas, in this browser. The PDF has its own fonts: Document ▸ Settings ▸ Fonts. Fonts other than Computer Modern come from Google Fonts, loaded once you choose one.</div>
+            <Row label="Editor font"><select data-pref="editorFont" value={p.editorFont} onChange={e => setPref('editorFont', (e.target as HTMLSelectElement).value)}>
+              <option value={FOLLOW_DOCUMENT}>As in the document — the closest of these to the PDF’s font (now {editorFace(resolvedFace(FOLLOW_DOCUMENT)).label})</option>
+              {EDITOR_FACES.map(f => <option key={f.id} value={f.id}>{f.label} — {f.hint}</option>)}
+            </select></Row>
+            <FontSample />
             <h3>Text</h3>
             {check('spellcheck', 'Spell checking', 'Misspelt words are underlined; the right-click menu offers corrections.')}
             {check('autoCorrect', 'Autocorrect typos', 'A minor typo is fixed when the word is finished (never in formulas); Backspace right after puts it back.')}

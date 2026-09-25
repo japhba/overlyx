@@ -255,6 +255,24 @@ blend.
   `prefs.darkTone` → `data-tone` on html, tokens in styles.css). Text and formulas are white on a near-black page; everything in
   `packages/client/src/styles.css` goes through the theme tokens at the top of the file (light values
   on `:root`, dark ones on `html[data-theme="dark"]`, set by `app/theme.ts`).
+* **Fonts, for the editor and for the PDF separately** (like LyX's screen fonts and document fonts;
+  catalogue in `client/src/fonts/catalog.ts`). *Settings ▸ Editor ▸ Font* (per browser, both shells,
+  `prefs.editorFont`) chooses the face the editor shows: Computer Modern (bundled, the default) or a
+  web font from Google Fonts — Libertinus, STIX Two, Palatino (the computer's own), Charis (Charter),
+  Crimson Pro, EB Garamond, Noto Sans — linked only once chosen (both CSPs allow fonts.googleapis.com /
+  fonts.gstatic.com), or *As in the document*: the face closest to the open document's roman font
+  (each shell reports its header through `setDocumentFonts`, `tests/parity.test.ts`). Formulas follow
+  the face (`fonts/editorfont.ts` sets `--math-font` / `--math-italic-font` / `--math-scale` and
+  `data-editor-font` on html): variables in its italic, digits and operators upright from it, other
+  symbols from the closest OpenType math font (Libertinus Math, STIX Two Math, Noto Sans Math), KaTeX's
+  Computer Modern for the rest — large operators, delimiters, blackboard and calligraphic letters —
+  and for its metrics (so an accent can sit a little off-centre in another face). *Document ▸ Settings
+  ▸ Fonts ▸ Font set* writes LyX's `\font_roman` / `\font_sans` / `\font_typewriter` / `\font_math`
+  (a .lyx file opens with the same fonts in LyX): each text font with the math font made for it —
+  Latin Modern, Libertinus + Libertinus Math, Times + Helvetica + Courier + newtx math, Palatino
+  (mathpazo), Charter (Mathdesign), Utopia (Fourier), Crimson Pro + newtx math (Cochineal) — all TeX
+  fonts of TeX Live, built with pdfLaTeX; the fields below the set stay editable (*Custom*), and with
+  non-TeX fonts the sets step aside. `tests/fonts.test.ts`, `e2e/fonts.spec.ts`.
 * **Lists, Google-Docs style** (`editor/commands.ts leaveList`, `editor/plugins/mdrules.ts`): `- ` or `* ` at
   the start of a paragraph starts a bullet list, `1. ` a numbered one, `## ` a heading (Backspace right
   after brings the marker back); Enter continues a list, Enter on an *empty* item ends it, and Backspace
@@ -841,7 +859,7 @@ OVERLYX_DATA_DIR=$S/data npx tsx packages/server/src/seed.ts admin Admin bob Bob
 OVERLYX_DATA_DIR=$S/data OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_CLIENT_DIST=$S/dist PORT=3001 npx tsx packages/server/src/index.ts &
 (cd packages/client && OVERLYX_API_PORT=3001 npx vite --port 5174 &)
 export OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_E2E_CREDENTIALS=$S/data/credentials.txt
-OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/smoke.spec.ts e2e/editing.spec.ts e2e/features.spec.ts e2e/dialogs.spec.ts
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/smoke.spec.ts e2e/editing.spec.ts e2e/features.spec.ts e2e/dialogs.spec.ts e2e/fonts.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sharing.spec.ts e2e/textfiles.spec.ts e2e/toolbar.spec.ts e2e/collab.spec.ts   # bob, carol, u1…u6
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts e2e/cite.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards

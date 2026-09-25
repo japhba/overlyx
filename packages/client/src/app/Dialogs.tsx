@@ -13,6 +13,7 @@ import { referenceTargets, type ReferenceOptions } from '../editor/references';
 import { editorContext } from '../editor/context';
 import { diffLines } from './diff';
 import { recordUsage, dialogKey } from '../usage';
+import { DOCUMENT_FONT_SETS, matchFontSet, fontSetValues } from '../fonts/catalog';
 
 export function Dialog({ title, onClose, children, buttons, wide }: { title: string; onClose: () => void; children: ComponentChildren; buttons?: ComponentChildren; wide?: boolean }) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -457,6 +458,8 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose }: {
   const bool = (k: string) => <input type="checkbox" checked={v[k] === 'true'} onChange={e => set(k, String((e.target as HTMLInputElement).checked))} />;
   const TABS: [Tab, string][] = [['general', 'Class & options'], ['page', 'Page'], ['text', 'Text layout'], ['numbering', 'Numbering & floats'], ['fonts', 'Fonts'], ['pdf', 'PDF'], ['branches', 'Branches'], ['preamble', 'LaTeX preamble'], ['raw', 'Raw settings']];
   const geometry = v.use_geometry === 'true';
+  const fontFields = { font_roman: v.font_roman, font_sans: v.font_sans, font_typewriter: v.font_typewriter, font_math: v.font_math, font_sf_scale: v.font_sf_scale };
+  const fontSet = matchFontSet(fontFields);
   return (
     <Dialog title="Document Settings" onClose={onClose} wide buttons={<button class="btn primary" onClick={save}>Apply</button>}>
       <div class="hint">Changes here apply to the PDF and take precedence over matching settings in your preamble. Your preamble remains editable.</div>
@@ -513,6 +516,13 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose }: {
       </>}
       {tab === 'fonts' && <>
         <Row label="Non-TeX fonts">{bool('use_non_tex_fonts')}<span class="sub">(XeTeX/LuaTeX)</span></Row>
+        <Row label="Font set"><select data-font-set value={fontSet?.id ?? ''} disabled={v.use_non_tex_fonts === 'true'} onChange={e => { const s = DOCUMENT_FONT_SETS.find(x => x.id === (e.target as HTMLSelectElement).value); if (s) for (const [k, val] of Object.entries(fontSetValues(s, fontFields))) set(k, val); }}>
+          {!fontSet && <option value="">Custom — as set below</option>}
+          {DOCUMENT_FONT_SETS.map(s => <option key={s.id} value={s.id}>{s.label} — {s.hint}</option>)}
+        </select></Row>
+        <div class="sub">{v.use_non_tex_fonts === 'true'
+          ? 'The font sets are TeX fonts (pdfLaTeX); with non-TeX fonts, name fonts installed on the build server below (second value of each).'
+          : 'Each text font comes with the math font made for it. The editor’s own font is set in Settings ▸ Editor ▸ Font (“As in the document” follows this choice).'}</div>
         <Row label="Roman">{text('font_roman', '"default" "default" — LaTeX name, non-TeX name')}</Row>
         <Row label="Sans serif">{text('font_sans', '"default" "default"')}</Row>
         <Row label="Typewriter">{text('font_typewriter', '"default" "default"')}</Row>

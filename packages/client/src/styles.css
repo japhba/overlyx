@@ -384,7 +384,7 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .lyx-emph-on { font-style: italic; } .lyx-emph-off { font-style: normal; } .lyx-emph-toggle { font-style: italic; }
 .lyx-series-bold { font-weight: 700; } .lyx-series-medium { font-weight: 400; }
 .lyx-shape-italic { font-style: italic; } .lyx-shape-slanted { font-style: oblique; } .lyx-shape-smallcaps { font-variant: small-caps; } .lyx-shape-up { font-style: normal; }
-.lyx-family-sans { font-family: "Latin Modern Sans", Helvetica, Arial, sans-serif; } .lyx-family-typewriter { font-family: "Latin Modern Mono", "DejaVu Sans Mono", Menlo, monospace; font-size: 0.92em; } .lyx-family-roman { font-family: var(--editor-font); }
+.lyx-family-sans { font-family: var(--editor-sans-font, "Latin Modern Sans"), Helvetica, Arial, sans-serif; } .lyx-family-typewriter { font-family: var(--editor-mono-font, "Latin Modern Mono"), "DejaVu Sans Mono", Menlo, monospace; font-size: 0.92em; } .lyx-family-roman { font-family: var(--editor-font); }
 .lyx-size-tiny { font-size: 0.5em; } .lyx-size-scriptsize { font-size: 0.7em; } .lyx-size-footnotesize { font-size: 0.8em; } .lyx-size-small { font-size: 0.9em; } .lyx-size-normal { font-size: 1em; } .lyx-size-large { font-size: 1.2em; } .lyx-size-larger { font-size: 1.44em; } .lyx-size-largest { font-size: 1.73em; } .lyx-size-huge { font-size: 2.07em; } .lyx-size-giant { font-size: 2.49em; }
 .lyx-bar-under { text-decoration: underline; }
 .lyx-strikeout-on { text-decoration: line-through; }
@@ -628,7 +628,14 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .lm-comment { color: var(--muted2); font-size: 0.8em; }
 .lm-error { font-family: "DejaVu Sans Mono", monospace; font-size: 0.8em; color: var(--err); }
 .lm-field.display, .lyx-math-static.display { font-size: 1.05em; }
-.lyx-editor .katex { font-size: 1.1em; }
+.lyx-editor .katex { font-size: calc(var(--math-scale, 1.1) * 1em); }
+/* Settings ▸ Editor ▸ Font (fonts/editorfont.ts): formulas take their letters, digits and operators
+   from the editor's face and the remaining symbols from its math font; KaTeX keeps its metrics and
+   its own large operators, delimiters, AMS, calligraphic and blackboard letters. Greek the face
+   lacks falls back to KaTeX's. */
+html[data-editor-font] .lyx-editor .katex { font-family: var(--math-font), KaTeX_Main, "Times New Roman", serif; font-variant-numeric: lining-nums; }
+html[data-editor-font] .lyx-editor .katex :is(.mathit, .mathbf, .textrm, .mainrm) { font-family: var(--math-font), KaTeX_Main; }
+html[data-editor-font] .lyx-editor .katex :is(.mathnormal, .boldsymbol) { font-family: var(--math-italic-font), KaTeX_Math; }
 .lyx-editor .lm-field .katex-display { margin: 0; }
 .lyx-math-display .lm-field.display { grid-column: 2; display: inline-block; min-width: 4em; max-width: none; text-align: center; justify-self: center; }
 .lyx-math-display { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; column-gap: 0.6em; position: relative; margin: 0.5em 0; width: 100%; box-sizing: border-box; }
@@ -1411,6 +1418,7 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .settings-nav button.active { background: var(--row-sel); font-weight: 600; }
 .settings-content { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 460px; }
 .settings-content h3 { margin: 4px 0 0; }
+.lyx-editor.font-sample { flex: none; min-height: 0; max-width: none; margin: 0; padding: 8px 12px; font-size: 15.5px; background: var(--page-bg); border: 1px solid var(--ui-border); border-radius: 4px; }
 .settings-users { border: 1px solid var(--ui-border); border-radius: 4px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
 .settings-users label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
 

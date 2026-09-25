@@ -78,6 +78,8 @@ describe('one toolbar definition for both front ends', () => {
       // zoom scales the font through --editor-zoom in both shells; CSS `zoom` on a container breaks
       // mouse hit testing (the extension's drags stopped following the pointer when zoomed)
       expect(src, `${file} must zoom through applyEditorZoom (app/shellutil.tsx)`).toMatch(/applyEditorZoom\(zoom\)/);
+      // Settings ▸ Editor ▸ Font ▸ "As in the document" needs the shown document's settings (fonts/editorfont.ts)
+      expect(src, `${file} must report its document's fonts through setDocumentFonts`).toMatch(/setDocumentFonts\(headerLines\)/);
       expect(src, `${file} must not use CSS zoom`).not.toMatch(/style=\{\{\s*zoom|--editor-zoom/);
       // the sun/moon switch (with its right-click tone menu) is MenuBar's ThemeToggle in both shells
       expect(src, `${file} builds its own theme switch — use ThemeToggle from app/MenuBar.tsx`).not.toContain('class="theme-toggle"');
