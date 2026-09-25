@@ -6,7 +6,8 @@
  * required; only the thread's creator drives it).
  */
 import { describe, it, expect, afterAll } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import http from 'node:http';
@@ -22,7 +23,7 @@ process.env.OVERLYX_CODEX_BIN = resolve(process.cwd(), 'scripts/codex-stub.mjs')
 process.env.STUB_LOGIN_DELAY = '120';
 process.env.STUB_DELAY = '60';
 
-const { agentRoutes, shutdownAgents, disconnectAgents } = await import('../packages/server/src/agent.ts');
+const { agentRoutes, shutdownAgents, disconnectAgents, installedCodexVersion } = await import('../packages/server/src/agent.ts');
 const { createUser } = await import('../packages/server/src/auth.ts');
 const { registerProject } = await import('../packages/server/src/access.ts');
 const { db } = await import('../packages/server/src/db.ts');
@@ -255,5 +256,25 @@ describe('legacyThreadNote (threads from before the overlyx MCP tools)', () => {
     expect(note).toContain('\\lyxadded{Agent panel (MCP)}{Thu Sep  3 09:15:00 2026}');
     expect(note).toContain('\\lyxdeleted{Agent panel (MCP)}');
     expect(note).toContain('%%');
+  });
+});
+
+describe('codex updates (scripts/update-codex.sh)', () => {
+  it("reads the installed codex version through npm's bin link; the stub has none", () => {
+    const npm = join(ROOT, 'npm');
+    const pkg = join(npm, 'lib', 'node_modules', '@openai', 'codex');
+    mkdirSync(join(pkg, 'bin'), { recursive: true });
+    mkdirSync(join(npm, 'bin'), { recursive: true });
+    writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@openai/codex', version: '0.157.0' }));
+    writeFileSync(join(pkg, 'bin', 'codex.js'), '');
+    symlinkSync('../lib/node_modules/@openai/codex/bin/codex.js', join(npm, 'bin', 'codex'));
+    expect(installedCodexVersion('codex', `${join(ROOT, 'nowhere')}:${join(npm, 'bin')}`)).toBe('0.157.0');
+    expect(installedCodexVersion(join(npm, 'bin', 'codex'))).toBe('0.157.0');
+    expect(installedCodexVersion('codex', join(ROOT, 'nowhere'))).toBeNull();
+    expect(installedCodexVersion(process.env.OVERLYX_CODEX_BIN!)).toBeNull();
+  });
+  it('the smoke test passes a codex that answers initialize and model/list', () => {
+    const out = execFileSync(process.execPath, ['scripts/codex-smoke.mjs', process.env.OVERLYX_CODEX_BIN!], { encoding: 'utf8', timeout: 20000 });
+    expect(out).toMatch(/answers; \d+ models/);
   });
 });

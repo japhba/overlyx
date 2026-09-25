@@ -1,0 +1,11 @@
+[Unit]
+Description=OverLyX: update codex for the Agent panel (scripts/update-codex.sh)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME=/root
+ExecStart=/bin/bash /root/lyx/overlyx-production/scripts/update-codex.sh
+TimeoutStartSec=15min
+Nice=10

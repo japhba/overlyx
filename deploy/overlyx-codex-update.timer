@@ -1,0 +1,10 @@
+[Unit]
+Description=Look for a new codex (new GPT models for the Agent panel) every day
+
+[Timer]
+OnCalendar=*-*-* 04:15:00 UTC
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -188,8 +188,21 @@ default_tools_approval_mode = "approve"
     await this.attach(sock);
   }
 
+  private versionPath(): string { return path.join(this.home(), 'codex-version'); }
+
+  /** A newer codex was installed since this user's keeper started its child (a keeper from
+   *  before the version stamp counts as outdated). */
+  codexOutdated(): boolean {
+    const now = installedCodexVersion();
+    if (!now) return false;
+    let ran = '';
+    try { ran = fs.readFileSync(this.versionPath(), 'utf8').trim(); } catch { /* no stamp */ }
+    return ran !== now;
+  }
+
   private spawnKeeper(): void {
     try { fs.unlinkSync(this.sockPath()); } catch { /* none */ }
+    try { fs.writeFileSync(this.versionPath(), installedCodexVersion() ?? ''); } catch { /* the check just stays off */ }
     const child = spawn(process.execPath, [KEEPER_SCRIPT], {
       detached: true, stdio: 'ignore', cwd: this.home(),
       env: {
@@ -215,6 +228,8 @@ default_tools_approval_mode = "approve"
         clearTimeout(t);
         (async () => {
           if (!h.initialized) {
+            // a fresh codex process: none of the threads is loaded in it any more
+            this.loaded.clear();
             await this.request('initialize', { clientInfo: { name: 'overlyx', title: 'OverLyX', version: '0.1.0' } });
             this.send({ jsonrpc: '2.0', method: 'initialized' });
             this.control({ keeper: 'mark-initialized' });
@@ -354,7 +369,10 @@ default_tools_approval_mode = "approve"
   private touch(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
-      if (this.activeTurns.size || this.subscribers.size) { this.touch(); return; }
+      // an open panel keeps codex running — unless a newer codex was installed since it started
+      // (scripts/update-codex.sh): then a quiet one stops too, and the next request starts the new one
+      if (this.activeTurns.size || (this.subscribers.size && !this.codexOutdated())) { this.touch(); return; }
+      if (this.subscribers.size) console.log(`[agent ${this.userId}] codex ${installedCodexVersion()} is installed — restarting the quiet agent on it`);
       this.stop();
     }, config.agent.idleMs);
     this.idleTimer.unref();
@@ -378,6 +396,24 @@ default_tools_approval_mode = "approve"
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.conn?.destroy();
   }
+}
+
+/** The version of the @openai/codex package that `bin` runs (a name on PATH or a path, npm's bin
+ *  link resolved); null for anything else, such as the test stub. */
+export function installedCodexVersion(bin: string = config.agent.bin, pathEnv: string = process.env.PATH ?? ''): string | null {
+  const candidates = bin.includes('/') ? [bin] : pathEnv.split(':').filter(Boolean).map(d => path.join(d, bin));
+  for (const c of candidates) {
+    let real: string;
+    try { real = fs.realpathSync(c); } catch { continue; }
+    // the nearest package.json above the executable decides
+    for (let dir = path.dirname(real); dir !== path.dirname(dir); dir = path.dirname(dir)) {
+      let pkg: { name?: unknown; version?: unknown };
+      try { pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); } catch { continue; }
+      return pkg.name === '@openai/codex' && typeof pkg.version === 'string' ? pkg.version : null;
+    }
+    return null;
+  }
+  return null;
 }
 
 const KEEPER_SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../scripts/agent-keeper.mjs');

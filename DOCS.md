@@ -563,7 +563,13 @@ blend.
   reload. Needs `KillMode=process` in the systemd unit. The keeper exits with codex, on idle
   (`KEEPER_IDLE_MS`, default 2 h without a server), or when its socket file is deleted.
   `OVERLYX_AGENT=off` disables it, `OVERLYX_CODEX_BIN` points at a stub for tests,
-  `OVERLYX_AGENT_MODEL` overrides the model.
+  `OVERLYX_AGENT_MODEL` overrides the model. The model picker lists what the installed codex
+  offers, and new GPT models need a newer codex: `deploy/overlyx-codex-update.timer` runs
+  `scripts/update-codex.sh` every night (newest `@openai/codex` from npm, checked by
+  `scripts/codex-smoke.mjs` — `initialize` + `model/list` — else the previous version goes back;
+  `journalctl -u overlyx-codex-update`). A keeper started on an older codex (the version is
+  stamped in `data/agent-home/<id>/codex-version`) is stopped once quiet for `OVERLYX_AGENT_IDLE_MS`
+  even with the panel open, so the next request runs the new one.
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or
   Preferences — the switches are menu items, so the command palette finds them): needs
   `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.1 Flash Lite rewrites,
