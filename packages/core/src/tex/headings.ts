@@ -27,10 +27,11 @@ function braceGroup(text: string, open: number): { body: string; end: number } |
 /** the words the editor shows for a heading: markup commands unwrapped, formulas kept as their LaTeX */
 export function headingPlainText(latex: string): string {
   let s = latex.replace(/\\\\/g, ' ');
+  // labels first: a tracked insertion often holds one (`\lyxadded{…}{…}{title\protect\label{sec:x}}`)
+  s = s.replace(/\\(?:label|index)\s*\{[^{}]*\}/g, '');
   // change tracking (OverLyX's \lyxadded / \lyxdeleted{author}{time}{text}): inserted text stays, deleted text goes
   for (let i = 0; i < 3; i++) s = s.replace(/\\lyxadded\s*\{[^{}]*\}\s*\{[^{}]*\}\s*\{([^{}]*)\}/g, '$1').replace(/\\lyxdeleted\s*\{[^{}]*\}\s*\{[^{}]*\}\s*\{[^{}]*\}/g, '');
   for (let i = 0; i < 4; i++) s = s.replace(/\\(?:emph|textbf|textit|texttt|textsc|textrm|textsf|mbox|protect|uppercase|MakeUppercase|text)\s*\{([^{}]*)\}/g, '$1');
-  s = s.replace(/\\(?:label|index)\s*\{[^{}]*\}/g, '');
   s = s.replace(/\\(?:protect|relax)\b/g, '');
   return s.replace(/[{}]/g, '').replace(/\s+/g, ' ').trim();
 }

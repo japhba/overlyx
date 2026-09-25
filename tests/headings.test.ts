@@ -27,5 +27,7 @@ describe('texHeadings', () => {
   it('headingPlainText', () => {
     expect(headingPlainText('\\textbf{Bold} and \\texttt{code}\\\\next')).toBe('Bold and code next');
     expect(headingPlainText('\\lyxadded{Jan}{Sun May 12}{New} \\lyxdeleted{Jan}{Sun May 12}{old} title')).toBe('New title');
+    // a tracked insertion holding the heading's label (recurrent_feature's appendix)
+    expect(headingPlainText('\\lyxadded{Jan Bauer}{Sun May 24 00:00:23 2026}{Ordering of the noiseless\nand stationary limits\\protect\\label{subsubsec:noiseless-limit-commutation}}')).toBe('Ordering of the noiseless and stationary limits');
   });
 });
