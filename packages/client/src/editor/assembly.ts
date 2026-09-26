@@ -26,6 +26,7 @@ import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
 import { fontCarryPlugin } from './plugins/fontcarry';
 import { insetCaretPlugin } from './plugins/insetcaret';
 import { envFocusPlugin } from './plugins/envfocus';
+import { wideTablesPlugin } from './plugins/widetables';
 import { dragSelectPlugin } from './plugins/dragselect';
 import { findPlugin } from './plugins/find';
 import { mirrorCaretPlugin } from './plugins/mirrorcaret';
@@ -121,6 +122,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     dropCursor({ color: '#3b6ea5' }),
     tableEditing(),
     envFocusPlugin(),
+    wideTablesPlugin(),   // tables alone on their line: centred, a wide one spills into both margins
     numberingPlugin(),
     marginPlugin(o.marginMode),
     ...(o.ink ? [o.ink] : []),

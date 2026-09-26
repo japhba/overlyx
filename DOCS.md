@@ -386,6 +386,16 @@ blend.
   the first use adds a small macro to the document preamble (`packages/core/src/math/llangle.ts`) that
   makes the plain, `\left…\right` and `\bigl…\bigr` forms compile with symmetric scaled brackets. The
   table row implements LyX's `tabular-feature` commands (`packages/client/src/editor/tablecommands.ts`).
+  **Tables are as wide as LaTeX sets them**: `l` / `c` / `r` columns take their content's width and never
+  wrap, a `p{…}` / `m{…}` / `b{…}` column (or a `\multicolumn{n}{p{…}}`) gets its width from the
+  table's `<colgroup>` and wraps there (core `schema.ts` `lyxLengthCss`: `cm`/`in`/`pt`…, and
+  `30text%` / `0.3\linewidth` of the text column, `--ol-column`). A **table on a line of its own** — a
+  tabular, or a formula that is one `matrix` / `pmatrix` / `array` … (a table typed as
+  `$\begin{matrix}…\end{matrix}$`) alone in its paragraph, blanks, labels, a caption, a display formula
+  or a figure beside it allowed (`editor/plugins/widetables.ts`) — is centred on the text column; one
+  wider than the column spills into both margins by the same amount, as far as the page reaches on
+  the left, and the rest overflows to the right (the page scrolls) — the rule of wide display
+  formulas. A table amid text stays in the line; a paragraph set flush left / right keeps its alignment.
   The dotted cell grid (LyX's hint for boundaries without a line) and the boxes of a formula's empty
   cells show only while the cursor is in that table / formula (`editor/plugins/envfocus.ts` marks the
   table with `ol-editing`; the static formula rendering hides its `lm-empty` outlines) — a document

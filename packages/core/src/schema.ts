@@ -20,6 +20,31 @@ export const DEFAULT_CELL_ATTRS: [string, string][] = [['alignment', 'center'], 
 export const DEFAULT_COLUMN_ATTRS: [string, string][] = [['alignment', 'center'], ['valignment', 'top']];
 const DEFAULT_TABLE_ATTRS: [string, string][] = [['version', '3']];
 const DEFAULT_TABLE_FEATURES: [string, string][] = [['tabularvalignment', 'middle']];
+
+const TEX_UNITS: Record<string, [number, string]> = { cm: [1, 'cm'], mm: [1, 'mm'], in: [1, 'in'], pt: [1, 'pt'], bp: [1, 'pt'], pc: [1, 'pc'], dd: [1.07, 'pt'], cc: [12.84, 'pt'], em: [1, 'em'], ex: [1, 'ex'], mu: [1 / 18, 'em'], px: [1, 'px'] };
+/**
+ * A LyX length (a p{…} column's width: "5.5cm", "2in", "30text%", "0.4\\linewidth") as CSS, or null when
+ * it cannot be drawn. Widths relative to the text or the line are taken of the editor's text column
+ * (`--ol-column`, set by the client's wide-tables plugin; 720px until it is known).
+ */
+export function lyxLengthCss(v: string | undefined | null): string | null {
+  const t = (v ?? '').trim();
+  let m = /^(\d*\.?\d+)\s*([a-z]{2})$/.exec(t);
+  if (m && TEX_UNITS[m[2]]) { const [f, u] = TEX_UNITS[m[2]]; return `${+(Number(m[1]) * f).toFixed(3)}${u}`; }
+  m = /^(\d*\.?\d+)\s*(text|col|line|page)%$/.exec(t);
+  if (m) return `calc(var(--ol-column, 720px) * ${+(Number(m[1]) / 100).toFixed(4)})`;
+  m = /^(\d*\.?\d+)?\s*\\(linewidth|textwidth|columnwidth|hsize)$/.exec(t);
+  if (m) return `calc(var(--ol-column, 720px) * ${m[1] ? +Number(m[1]).toFixed(4) : 1})`;
+  return null;
+}
+const widthOf = (attrs: [string, string][]) => lyxLengthCss(attrs.find(([k]) => k === 'width')?.[1]);
+/** the table's <colgroup>: a p{…} / m{…} / b{…} column gets its width — the text in it wraps there, as in LaTeX; l / c / r columns take their content's width */
+function colgroupDOM(columns: string): DOMOutputSpec {
+  let cols: [string, string][][] = [];
+  try { cols = JSON.parse(columns || '[]'); } catch { /* an empty group */ }
+  return ['colgroup', ...cols.map(c => { const w = Array.isArray(c) ? widthOf(c) : null; return w ? ['col', { style: `width: ${w}` }] : ['col']; })] as unknown as DOMOutputSpec;
+}
+
 const LAYOUT_OF_TAG: Record<string, string> = { h1: 'Section', h2: 'Subsection', h3: 'Subsubsection', h4: 'Paragraph', h5: 'Subparagraph', h6: 'Subparagraph', li: 'Itemize' };
 
 export const INSET_NAMES_WITH_STATUS = new Set([
@@ -171,7 +196,7 @@ const nodes: Record<string, NodeSpec> = {
     tableRole: 'table',
     isolating: true,
     attrs: { attrs: jsonAttr([]), features: jsonAttr([]), columns: jsonAttr([]) },
-    toDOM: node => ['span', { class: 'lyx-tabular', 'data-attrs': node.attrs.attrs, 'data-features': node.attrs.features, 'data-columns': node.attrs.columns }, ['table', ['tbody', 0]]],
+    toDOM: node => ['span', { class: 'lyx-tabular', 'data-attrs': node.attrs.attrs, 'data-features': node.attrs.features, 'data-columns': node.attrs.columns }, ['table', colgroupDOM(node.attrs.columns), ['tbody', 0]]],
     parseDOM: [
       { tag: 'span.lyx-tabular', contentElement: 'tbody', getAttrs: (d: HTMLElement) => ({ attrs: jsonFrom(d, 'data-attrs', '[]'), features: jsonFrom(d, 'data-features', '[]'), columns: jsonFrom(d, 'data-columns', '[]') }) },
       // a foreign HTML table: columns get LyX's defaults (the converter fills in what is missing)
@@ -209,6 +234,9 @@ const nodes: Record<string, NodeSpec> = {
       const cls: string[] = ['lyx-cell'];
       for (const k of ['topline', 'bottomline', 'leftline', 'rightline']) if (m.get(k) === 'true') cls.push(k);
       if (m.get('alignment')) cls.push('align-' + m.get('alignment'));
+      // a \multicolumn{n}{p{…}}: the width of the spanning cell
+      const w = lyxLengthCss(m.get('width'));
+      if (w) a.style = `width: ${w}`;
       a.class = cls.join(' ');
       a['data-attrs'] = node.attrs.attrs;
       if (node.attrs.cont !== '[]') a['data-cont'] = node.attrs.cont;
