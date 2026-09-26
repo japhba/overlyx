@@ -312,7 +312,11 @@ export function delimLatex(c: DelimChoice): string {
 
 /* ------------------------------------------------------------------ math panels */
 
-/** LyX's math panel palettes (Greek, arrows, relations, …) as toolbar palettes. */
+/**
+ * LyX's math panel palettes (Greek, arrows, relations, …) as toolbar palettes. The ~830 symbol
+ * previews are rendered when a palette first opens (`html` is a getter; mathPreview caches), not
+ * when the toolbar is built — with MathJax, drawing them all up front held every page load ~0.75 s.
+ */
 export function mathPanelPalettes(insert: (item: PanelItem) => void): { id: string; title: string; palette: Palette }[] {
   return MATH_PANELS.map(p => ({
     id: p.id, title: p.title,
@@ -320,7 +324,7 @@ export function mathPanelPalettes(insert: (item: PanelItem) => void): { id: stri
       title: p.title,
       list: ['functions', 'space', 'style', 'frac-square', 'font', 'sqrt-square'].includes(p.id),
       cols: p.id === 'functions' ? 6 : 8,
-      items: p.items.map(it => ({ label: it.label, title: it.latex, html: mathPreview(it.latex) ?? undefined, action: () => insert(it) })),
+      items: p.items.map(it => ({ label: it.label, title: it.latex, get html() { return mathPreview(it.latex) ?? undefined; }, action: () => insert(it) })),
     },
   }));
 }
@@ -367,7 +371,8 @@ function PaletteButton({ b }: { b: ToolButton }) {
   const p = b.palette!;
   const close = () => setOpen(false);
   const preset = !!b.paletteWhenActive;
-  const withSyms = !!p.items?.some(it => it.html);
+  // only while open: an item's `html` may be rendered on first access (mathPanelPalettes)
+  const withSyms = open && !!p.items?.some(it => it.html);
   const onClick = (e: MouseEvent) => {
     recordUsage('toolbar', b.id);
     if (!open) tipFor(b, e.currentTarget);
