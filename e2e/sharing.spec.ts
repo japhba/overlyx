@@ -130,8 +130,8 @@ test('every account gets its own personalised example project', async ({ browser
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 20, null, { timeout: 30000 });
   await expect(page.locator('.lyx-editor')).toContainText('Welcome to OverLyX');
   await expect(page.locator('.lyx-editor')).toContainText('Bob');
-  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .katex').length > 5, null, { timeout: 30000 });
-  expect(await page.locator('.lyx-editor .katex-error').count()).toBe(0);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor mjx-container').length > 5, null, { timeout: 30000 });
+  expect(await page.locator('.lyx-editor .lm-error:not(.lm-pending), .lm-undefined').count()).toBe(0);
   await expect(page.locator('.statusbar .readonly-badge')).toHaveCount(0);
   // one per account, invisible to others
   const admin = await asUser(browser);

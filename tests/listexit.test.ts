@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 // the client's math node views touch `window` at import time
-vi.hoisted(() => { const g = globalThis as any; if (typeof g.window === 'undefined') g.window = g; });
+vi.hoisted(() => { const g = globalThis as any; if (typeof g.window === 'undefined') { g.window = g; /* MathJax reads navigator.appVersion (node's navigator has none) */ if (g.navigator && g.navigator.appVersion === undefined) Object.defineProperty(g.navigator, 'appVersion', { value: '', configurable: true }); } });
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { schema } from '../packages/core/src/schema.ts';
 import { listExitBackspace, paragraphBreak } from '../packages/client/src/editor/commands.ts';

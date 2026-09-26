@@ -1,11 +1,11 @@
 /**
- * Scripts on a macro whose expansion ends in scripts of its own (core/math/katex.ts): \q := q_{a},
+ * Scripts on a macro whose expansion ends in scripts of its own (core/math/mathjax.ts): \q := q_{a},
  * typed \q^x_y — on screen x goes above q and y joins a, instead of both hanging to the right of
  * the whole q_a as TeX sets them.
  */
 import { describe, it, expect } from 'vitest';
 import { parseFormula, renderHullSource, type MacroTable } from '../packages/core/src/math';
-import { splitTrailingScripts } from '../packages/core/src/math/katex.ts';
+import { splitTrailingScripts } from '../packages/core/src/math/mathjax.ts';
 
 const MACROS: MacroTable = {
   q: { nargs: 0, def: 'q_{a}' },

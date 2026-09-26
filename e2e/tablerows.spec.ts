@@ -122,7 +122,9 @@ test('rows of an align formula copy and paste as rows (Ctrl+C / Ctrl+V and the t
   const errors = collectErrors(page);
   await open(page, 'math');
   const latex = () => page.evaluate(() => { let out = ''; (window as any).overlyx.activeView.state.doc.descendants((n: any) => { if (n.type.name === 'math_display') out = n.attrs.latex; }); return out; });
-  const glyph = (ch: string) => page.locator('.lyx-editor .lyx-math-display .mord', { hasText: new RegExp('^' + ch + '$') }).first();
+  // a character of the formula: MathJax's box of it (letters are math italic, U+1D44E…)
+  const charClass = (ch: string) => 'mjx-c' + (/[a-z]/.test(ch) ? 0x1D44E + ch.charCodeAt(0) - 97 : ch.charCodeAt(0)).toString(16).toUpperCase();
+  const glyph = (ch: string) => page.locator(`.lyx-editor .lyx-math-display mjx-c.${charClass(ch)}`).first();
   const disp = (await page.locator('.lyx-editor .lyx-math-display').first().boundingBox())!;
   await page.mouse.move(disp.x + disp.width / 2, disp.y + disp.height / 2);
   // drag from before x to after the 2: rows one and two
@@ -144,7 +146,7 @@ test('rows of an align formula copy and paste as rows (Ctrl+C / Ctrl+V and the t
   await expect.poll(latex).toBe('\\begin{align}\nx & =1\\\\\ny & =2\\\\\nz & =3\\\\\nx & =1\\\\\ny & =2\n\\end{align}');
   // the toolbar's paste inside the formula takes the same way
   await page.evaluate(() => navigator.clipboard.writeText('u&=4\\\\v&=5'));
-  const lastTwo = (await page.locator('.lyx-editor .lyx-math-display .mord', { hasText: /^2$/ }).last().boundingBox())!;
+  const lastTwo = (await page.locator(`.lyx-editor .lyx-math-display mjx-c.${charClass('2')}`).last().boundingBox())!;
   await page.mouse.move(lastTwo.x, lastTwo.y);
   await page.mouse.click(lastTwo.x + lastTwo.width - 1, lastTwo.y + lastTwo.height / 2);
   await page.keyboard.press('Enter');

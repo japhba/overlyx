@@ -893,7 +893,7 @@ test('writing "Generative Adversarial Nets", the experiments, conclusions, ackno
   expect(text).toMatch(new RegExp(`\\\\begin\\{enumerate\\}\\n\\\\item A conditional generative model \\$p\\(x\\|c\\)\\$ can be obtained[\\s\\S]*\\n\\\\item Learned approximate inference[\\s\\S]*wake-sleep algorithm \\\\citep?\\{${keys.hinton1995}\\} but[\\s\\S]*\\n\\\\item One can approximately model all conditionals \\$p\\(x_\\{S\\}\\|x_\\{\\\\not S\\}\\)\\$[\\s\\S]*MP-DBM \\\\citep?\\{${keys.goodfellow2013multi}\\}\\.\\n\\\\item Semi-supervised learning[\\s\\S]*\\n\\\\item Efficiency improvements[\\s\\S]*during training\\.\\n\\\\end\\{enumerate\\}`));
   expect(text).toMatch(new RegExp(`Pylearn2 \\\\citep?\\{${keys.goodfellow2013pylearn2}\\} and Theano \\\\citep?\\{${keys.bergstra2010theano},${keys.bastien2012theano}\\}, particularly`));
   expect(text).toMatch(/\\bibliographystyle\{plain\}\s*\\bibliography\{cited\}/);
-  await expect(page.locator('.katex-error')).toHaveCount(0);
+  await expect(page.locator('.lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(noErrors(errors)).toEqual([]);
   writeFileSync(`${DIR}/.complete`, 'gan');
 });

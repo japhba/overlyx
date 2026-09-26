@@ -1,7 +1,7 @@
 # OverLyX for VS Code
 
 The [OverLyX](https://overlyx.app) editor as a VS Code custom editor for `.tex` files: LyX-style
-WYSIWYG editing of plain LaTeX documents — rendered text, formulas edited in place (KaTeX,
+WYSIWYG editing of plain LaTeX documents — rendered text, formulas edited in place (MathJax 4,
 LyX cursor model), LyX toolbars and keybindings, change tracking, notes and comment threads,
 tables, floats, citations and cross-references — while **file browsing, git, search and coding
 agents stay VS Code's own**. No server and no account: the extension embeds the OverLyX engine

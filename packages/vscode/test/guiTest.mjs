@@ -1,7 +1,7 @@
 /**
  * GUI test: launches the cached VS Code under xvfb with --remote-debugging-port, connects
  * Playwright over CDP and drives the *rendered* UI — opens a .tex in the OverLyX custom editor,
- * checks the WYSIWYG rendering (headings, KaTeX formulas, toolbar icons), types into the
+ * checks the WYSIWYG rendering (headings, MathJax formulas, toolbar icons), types into the
  * document, saves with Ctrl+S and verifies the text reached the .tex file on disk, opens the
  * Structure view, builds the PDF and waits for pdf.js to paint pages. Screenshots at every step
  * go to test/gui-shots/. Run: `npm run test:gui` (xvfb-run wrapper).
@@ -166,7 +166,7 @@ try {
     return {
       hasIntro: /Introduction/.test(text),
       hasMethods: /Methods/.test(text),
-      katex: document.querySelectorAll('.katex').length,
+      formulas: document.querySelectorAll('mjx-container').length,
       displayMath: document.querySelectorAll('.lyx-math-display').length,
       inlineMath: document.querySelectorAll('.lyx-math-inline').length,
       icons: icons.length,
@@ -177,7 +177,7 @@ try {
   });
   log('render checks:', JSON.stringify(checks));
   if (!checks.hasIntro || !checks.hasMethods) fail('headings not rendered');
-  if (checks.katex < 2) fail('KaTeX formulas not rendered (found ' + checks.katex + ')');
+  if (checks.formulas < 2) fail('formulas not rendered (found ' + checks.formulas + ')');
   if (checks.displayMath < 1 || checks.inlineMath < 1) fail('math nodes missing');
   if (!checks.statusbar) fail('status bar missing');
   if (checks.icons < 20) fail('toolbar icons missing (found ' + checks.icons + ')');
@@ -187,7 +187,7 @@ try {
   if (rawMacro) fail('the \\RR macro is shown as raw LaTeX — document macros not applied to formulas');
   await shot('01-editor');
 
-  const macroState = await editorFrame.evaluate(() => ({ macros: window.overlyx?.meta?.macros, errors: [...document.querySelectorAll('.katex-error')].map(n => n.textContent), math: [...document.querySelectorAll('.lyx-math-inline')].map(n => n.innerText) }));
+  const macroState = await editorFrame.evaluate(() => ({ macros: window.overlyx?.meta?.macros, errors: [...document.querySelectorAll('.lm-error:not(.lm-pending), .lm-undefined')].map(n => n.textContent), math: [...document.querySelectorAll('.lyx-math-inline')].map(n => n.innerText) }));
   log('macro state', JSON.stringify(macroState));
   if (!macroState.macros?.bx || macroState.math.some(t => t.includes('\\bx'))) fail('imported bx macro did not render');
   await editorFrame.getByRole('button', { name: 'Split', exact: true }).click();
@@ -248,8 +248,8 @@ try {
   await sleep(500);
   await page.keyboard.press('Enter');
   await until(() => editorFrame.evaluate(() => document.querySelectorAll('.child-doc').length === 0), 10000, 'the combined view to switch off again');
-  /* ---- 4. click into a formula: the static KaTeX upgrades to an editable math field ---- */
-  await editorFrame.click('.lyx-math-display .katex');
+  /* ---- 4. click into a formula: the static rendering upgrades to an editable math field ---- */
+  await editorFrame.click('.lyx-math-display mjx-container');
   await until(() => editorFrame.evaluate(() => {
     const a = document.activeElement;
     return !!(a && (a.closest('.lyx-math-display') || (a.tagName || '').toLowerCase().indexOf('math') >= 0));

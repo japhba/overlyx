@@ -333,7 +333,7 @@ function unmath(s: string): string {
   return m ? m[1] : t;
 }
 
-/** Keep explicit baseline shifts; KaTeX's raisebox needs math inside its text box. */
+/** Keep explicit baseline shifts; \raisebox takes its math inside its text box. */
 export function approximateRaisebox(content: string, args: string[]): string {
   const lift = args[args.length - 1].trim(), body = unmath(content);
   return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)\s*[a-z]{2}$/.test(lift)
@@ -354,7 +354,7 @@ export function approximateOverlapSymbols(offset: string, args: string[]): strin
 export function approximateImageSymbols(def: string): string {
   if (!/\\include(?:graphics|svg)\b/.test(def)) return def;
   const heights = new Map<string, number>();
-  // Computer Modern / KaTeX Main: a digit is 0.64444em tall, a capital 0.68333em.
+  // Computer Modern: a digit is 0.64444em tall, a capital 0.68333em.
   // A font-character height is not an em (which was making these symbols ~55% too tall).
   let d = def.replace(/\\([A-Za-z@]+)\s*=\s*\\fontcharht\s*\\font\s*`([0-9A-Z])/g, (_all, register: string, glyph: string) => {
     heights.set(register, /[0-9]/.test(glyph) ? 0.64444 : 0.68333);
@@ -373,7 +373,7 @@ export function approximateImageSymbols(def: string): string {
       const body = `\\includegraphics${sizes ? `[${sizes}]` : ''}{${file}}`;
       return (/\.svgz?\s*$/i.test(file) || /^\s*\\mathord\b/.test(def)) && !alreadyMarked ? `\\htmlClass{lm-image-glyph}{${body}}` : body;
     };
-    // KaTeX's em lengths refer to textstyle even in scripts. Account for its 0.7/0.5
+    // TeX's em lengths refer to textstyle even in scripts (so do OverLyX's \includegraphics). Account for the 0.7/0.5
     // script scales so the image and its layout box shrink together with nearby letters.
     return fontSized ? `\\mathchoice{${image(1)}}{${image(1)}}{${image(0.7)}}{${image(0.5)}}` : image(1);
   });
@@ -400,14 +400,14 @@ export function sanitizeForMathlive(def: string, m: { name: string; args: number
   d = replaceCommand(d, 'accentset', (c, o) => `\\overset{${o[0] ?? ''}}{${c}}`, 2);
   // Approximate the paper's \\sbox/\\ooalign double-glyph helper with a supported inline overlay.
   d = replaceCommand(d, 'OverlapSymbols', approximateOverlapSymbols, 3);
-  // KaTeX supports \includegraphics. Treat \includesvg the same way; the client sends both
+  // OverLyX's MathJax has \includegraphics. Treat \includesvg the same way; the client sends both
   // through the project's graphics endpoint, which converts PDF/SVG to a browser image.
   d = approximateImageSymbols(d);
-  // KaTeX requires adjacent groups for mathchoice, unlike TeX.
+  // \mathchoice with its four arguments as adjacent groups
   d = replaceCommand(d, 'mathchoice', (last, args) => '\\mathchoice' + [...args, last].map(value => `{${value}}`).join(''), 4);
   if (/\\includegraphics\b/.test(d)) {
     d = d.replace(/\\normalfont\b/g, '');
-    // \includegraphics is a math-mode KaTeX command, even when the LaTeX definition used a
+    // \includegraphics is a math-mode command in OverLyX's MathJax, even when the LaTeX definition used a
     // text/raise box only to establish its baseline.
     d = replaceCommand(d, 'text', c => /\\includegraphics\b/.test(c) ? `{${c}}` : `\\text{${c}}`);
   }

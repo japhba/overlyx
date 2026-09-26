@@ -1,6 +1,6 @@
 /** Pasted/dropped images: file-type detection, LaTeX-safe names, SVG-markup detection, doc-relative paths. */
 import { describe, it, expect, vi } from 'vitest';
-vi.hoisted(() => { const g = globalThis as any; if (typeof g.window === 'undefined') g.window = g; });
+vi.hoisted(() => { const g = globalThis as any; if (typeof g.window === 'undefined') { g.window = g; /* MathJax reads navigator.appVersion (node's navigator has none) */ if (g.navigator && g.navigator.appVersion === undefined) Object.defineProperty(g.navigator, 'appVersion', { value: '', configurable: true }); } });
 import { imageExt, imageFiles, safeGraphicsName, uploadBaseName, pastedName, isSvgMarkup, looksLikeImageFileName } from '../packages/client/src/editor/imagepaste.ts';
 import { toDocRel, resolveDocPath } from '../packages/client/src/editor/context.ts';
 

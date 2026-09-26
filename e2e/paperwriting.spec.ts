@@ -115,7 +115,7 @@ test('writing "Attention Is All You Need" from a blank document', async ({ page 
   expect(text).toContain('\\section{Model Architecture}');
   expect(text).toMatch(/\\begin\{equation\}\n\\mathrm\{Attention\}\(Q,K,V\)=\\mathrm\{softmax\}\(\\frac\{QK\^\{?T\}?\}\{\\sqrt\{d_\{?k\}?\}\}\)V\n\\end\{equation\}/);
 
-  await expect(page.locator('.lyx-math-display .katex-error')).toHaveCount(0);
+  await expect(page.locator('.lyx-math-display .lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
 });
 
@@ -198,7 +198,7 @@ test('writing "On the Gap between Scalar and Vector Solutions of Generalized Com
   expect(text).toContain('\\section{Preliminaries}');
   expect(text).toMatch(/\\begin\{equation\}\nq\^\{?a\}?\s*\\leq\s*\\frac\{n\}\{k\}\s*<\s*\\gamma\s*q\^\{?a\}?\n\\end\{equation\}/);
 
-  await expect(page.locator('.lyx-math-display .katex-error')).toHaveCount(0);
+  await expect(page.locator('.lyx-math-display .lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
 });
 
@@ -254,7 +254,7 @@ test('writing "Attention Is All You Need", the appendix: attention visualization
   expect(text).toMatch(/\\includegraphics\[width=1\\columnwidth\]\{figures\/attention-anaphora\.png\}[\s\S]*\\caption\{Two attention heads, also in layer 5 of 6,[\s\S]*sharp[\s\S]*for[\s\S]*this[\s\S]*word\.\}\\label\{fig:anaphora\}/);
   expect(text).toMatch(/\\includegraphics\[width=1\\columnwidth\]\{figures\/attention-structure\.png\}[\s\S]*\\caption\{Many of the attention heads exhibit behaviour[\s\S]*different[\s\S]*tasks\.\}\\label\{fig:structure\}/);
   for (const f of ['attention-making', 'attention-anaphora', 'attention-structure']) expect(existsSync(`${DIR}/figures/${f}.png`)).toBe(true);
-  await expect(page.locator('.katex-error')).toHaveCount(0);
+  await expect(page.locator('.lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
 });
 

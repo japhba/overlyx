@@ -19,7 +19,7 @@ test('Shift+F11 hides the chrome, Esc brings it back, the View menu shows the st
   await login(page);
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); });
   await page.goto(`/#/${PROJECT}/talk.tex`);
-  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .katex').length >= 1, null, { timeout: 60000 });
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor mjx-container').length >= 1, null, { timeout: 60000 });
   await page.locator('.lyx-editor .lyx-par').first().click();
   await expect(page.locator('.menubar')).toBeVisible();
   await expect(page.locator('.toolbar').first()).toBeVisible();
@@ -40,7 +40,7 @@ test('Shift+F11 hides the chrome, Esc brings it back, the View menu shows the st
   await page.keyboard.type(' Typed while presenting.');
   await expect(page.locator('.lyx-editor')).toContainText('Typed while presenting.');
   // the math toolbar would dock at the bottom in a formula: not now
-  await page.locator('.lyx-math-inline .katex').first().click();
+  await page.locator('.lyx-math-inline mjx-container').first().click();
   await page.waitForSelector('.lyx-math-inline .lm-field.focused', { timeout: 10000 });
   expect(await page.locator('.toolbar:visible').count()).toBe(0);
   // Esc: first out of the formula, then out of the presentation

@@ -1,6 +1,6 @@
 /**
  * Plain-text (LaTeX) form of a DOM selection over rendered agent output. The transcript shows
- * formulas through the math editor's KaTeX path; copying that DOM verbatim would yield glyph
+ * formulas through the math editor's MathJax path; copying that DOM verbatim would yield glyph
  * soup, so the rendered spans carry their source in `data-latex` and a copy handler rebuilds the
  * text with the formulas as `$…$` / `\[…\]` again. The result pastes as a real formula into the
  * editor (the LaTeX paste path), into a formula (the field strips the delimiters), into the
@@ -36,7 +36,7 @@ export function latexSelectionText(sel: Selection | null): string | null {
   let out = '', any = false;
   for (let i = 0; i < sel.rangeCount; i++) {
     const range = sel.getRangeAt(i);
-    // a drag inside one formula's own KaTeX DOM: that formula as a whole
+    // a drag inside one formula's own MathJax DOM: that formula as a whole
     const anc = range.commonAncestorContainer;
     const host = (anc.nodeType === 1 ? (anc as Element) : anc.parentElement)?.closest('[data-latex]');
     if (host) { out += mathText(host); any = true; continue; }

@@ -80,7 +80,7 @@ try {
   for (const page of pages) {
     await page.waitForSelector('[data-live-test="updated"]', { state: 'detached', timeout: 60000 });
     await page.waitForFunction(() => !document.querySelector('.lyx-math-display[data-pending="true"]'));
-    const failures = await page.locator('.katex-error,.lm-error,.lm-unknown').allTextContents();
+    const failures = await page.locator('.lm-error:not(.lm-pending),.lm-undefined,.lm-unknown').allTextContents();
     assert.deepEqual(failures, [], 'Every formula renders without an error or unknown command');
   }
   // Reopening uses the same service and fresh host initialization, without restarting the service.

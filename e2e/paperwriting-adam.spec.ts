@@ -601,7 +601,7 @@ test('writing "Adam: A Method for Stochastic Optimization" from a blank document
   await expect(page.locator('.lyx-layout-description')).toHaveCount(2);
 
   await expect.poll(() => fileText().includes('infinitely large parameter updates.'), { timeout: 20000 }).toBe(true);
-  await expect(page.locator('.katex-error')).toHaveCount(0);
+  await expect(page.locator('.lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(noErrors(errors)).toEqual([]);
   writeFileSync(KEYS_FILE, JSON.stringify(keys));   // the citation keys, for the second session
 });
@@ -953,7 +953,7 @@ test('writing "Adam", sections 6-8, acknowledgments and the bibliography', async
   has(r`$\bar{\theta}_{t}=\frac{1}{t}\sum_{k=1}^{n}\theta_{k}$`);
   has(r`$\hat{\theta}_{t}=\bar{\theta}_{t}/(1-\beta_{2}^{t})$`);
   expect(text).toMatch(/\\bibliographystyle\{plain\}\s*\\bibliography\{cited\}/);
-  await expect(page.locator('.katex-error')).toHaveCount(0);
+  await expect(page.locator('.lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(noErrors(errors)).toEqual([]);
   writeFileSync(`${DIR}/.complete`, 'adam');
 });
@@ -1218,7 +1218,7 @@ test('writing "Adam", the appendix: the convergence proof', async ({ page }) => 
   expect(text).toMatch(/Therefore, we have the following regret bound:\n\n\\\[\nR\(T\)\\leq[\s\S]*\n\\\]\n\\end\{proof\}\n\n\\end\{document\}/);
   expect((text.match(/\\begin\{lem\}/g) ?? []).length).toBe(3);
   expect((text.match(/\\begin\{proof\}/g) ?? []).length).toBe(3);
-  await expect(page.locator('.katex-error')).toHaveCount(0);
+  await expect(page.locator('.lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(noErrors(errors)).toEqual([]);
   writeFileSync(`${DIR}/.appendix`, 'adam');
 });

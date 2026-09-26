@@ -10,7 +10,6 @@ import { editorContext } from '@client/editor/context';
 import { EditorShell } from './EditorShell';
 import type { HostToEditor } from '../shared/protocol';
 import '@client/styles.css';
-import 'katex/dist/katex.min.css';
 import 'prosemirror-view/style/prosemirror.css';
 import 'prosemirror-gapcursor/style/gapcursor.css';
 import 'prosemirror-tables/style/tables.css';

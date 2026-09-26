@@ -6,6 +6,21 @@ import crypto from 'node:crypto';
 import { buildVersion } from '../build-version';
 
 /**
+ * Each MathJax font's files (its per-block data, its woff2) in assets/mathjax/<font>/: the service
+ * worker precaches only the default font (New Computer Modern); the others are fetched when chosen.
+ */
+const mathjaxFont = (id: string | null | undefined) => /@mathjax\/mathjax-([a-z0-9]+)-font(?:-extension)?\//.exec(id ?? '')?.[1];
+export const MATHJAX_ASSETS = {
+  chunkFileNames: (c: { facadeModuleId: string | null }) => { const f = mathjaxFont(c.facadeModuleId); return f ? `assets/mathjax/${f}/[name]-[hash].js` : 'assets/[name]-[hash].js'; },
+  assetFileNames: (a: { originalFileNames?: readonly string[] }) => { const f = mathjaxFont(a.originalFileNames?.[0]); return f ? `assets/mathjax/${f}/[name]-[hash][extname]` : 'assets/[name]-[hash][extname]'; },
+  // MathJax itself in a chunk of its own: it changes only with MathJax, so a browser keeps it across deployments
+  manualChunks: (id: string) => (id.includes('/node_modules/@mathjax/src/') ? 'mathjax' : undefined),
+};
+
+/** MathJax and its fonts (packages/client/package.json) */
+const MATHJAX_PACKAGES = Object.keys(JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')).dependencies).filter(d => d.startsWith('@mathjax/'));
+
+/**
  * Emits dist/sw.js from src/sw.js with the list of built files to precache (offline app shell)
  * and a version derived from their names (content-hashed), so every deployment gets a new cache.
  */
@@ -25,7 +40,8 @@ function serviceWorker(): Plugin {
         }
       };
       walk(outDir);
-      const precache = files.filter(f => f === '/index.html' || f.startsWith('/assets/') || f === '/manifest.webmanifest' || f === '/icon.svg').sort();
+      // MathJax's other fonts (assets/mathjax/<font>/, see MATHJAX_ASSETS) are cached once used, not with the shell
+      const precache = files.filter(f => f === '/index.html' || (f.startsWith('/assets/') && (!f.startsWith('/assets/mathjax/') || f.startsWith('/assets/mathjax/newcm/'))) || f === '/manifest.webmanifest' || f === '/icon.svg').sort();
       const version = crypto.createHash('sha1').update(precache.join('\n')).digest('hex').slice(0, 12);
       const src = fs.readFileSync(path.resolve(__dirname, 'src/sw.js'), 'utf8')
         .replace('__VERSION__', version)
@@ -69,6 +85,9 @@ function dictionaries(): Plugin {
 export default defineConfig({
   plugins: [preact(), serviceWorker(), dictionaries()],
   define: { 'import.meta.env.VITE_BUILD_VERSION': JSON.stringify(buildVersion) },
+  // MathJax's fonts load their per-block data from the package itself: pre-bundling MathJax for the
+  // dev server would give those modules a second copy of MathJax's classes (editor/lyxmath/mathfonts.ts)
+  optimizeDeps: { exclude: MATHJAX_PACKAGES },
   resolve: {
     alias: { '@overlyx/core': path.resolve(__dirname, '../core/src/index.ts') },
     dedupe: ['prosemirror-model', 'prosemirror-state', 'prosemirror-view', 'prosemirror-transform', 'yjs'],
@@ -82,5 +101,5 @@ export default defineConfig({
       '/ws': { target: `ws://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`, ws: true },
     },
   },
-  build: { outDir: 'dist', sourcemap: true, chunkSizeWarningLimit: 3000 },
+  build: { outDir: 'dist', sourcemap: true, chunkSizeWarningLimit: 3500, rollupOptions: { output: MATHJAX_ASSETS } },
 });

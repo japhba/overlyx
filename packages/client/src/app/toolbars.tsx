@@ -16,6 +16,7 @@ import { api, type DocMeta } from '../api';
 import { setPref, type Prefs } from '../prefs';
 import { ColorPalette, colorIcon, DelimPalette, TableSizePicker, mathPanelPalettes, mathPreview, type ToolButton, type DelimChoice, type Palette } from './Toolbar';
 import { activeMathField, type LyxMathField } from '../editor/lyxmath/field';
+import { useMathRendererVersion } from '../editor/lyxmath/usemath';
 import * as C from '../editor/commands';
 import * as T from '../editor/tablecommands';
 import { acceptAllChanges, rejectAllChanges, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
@@ -130,9 +131,14 @@ export function mathExecutor(getView: () => EditorView | null | undefined): Tool
   };
 }
 
-/** The math panel palettes (Toolbar.tsx), inserting through `mathExec`; memoised, like any palette set. */
+/**
+ * The math panel palettes (Toolbar.tsx), inserting through `mathExec`; memoised, like any palette
+ * set — and made again with another math font, when the shell calling this re-renders (so do the
+ * formula previews on its toolbar buttons).
+ */
 export function useMathPanels(mathExec: ToolbarContext['mathExec']): MathPanel[] {
-  return useMemo(() => mathPanelPalettes(it => { if (it.kind === 'size') mathExec('style', it.latex); else mathExec('insert', it.latex); }), []);
+  const version = useMathRendererVersion();
+  return useMemo(() => mathPanelPalettes(it => { if (it.kind === 'size') mathExec('style', it.latex); else mathExec('insert', it.latex); }), [version]);
 }
 
 /** ⟪ ⟫ are no LaTeX / LyX delimiters: add the macro (once) to the preamble of the document (or its master). */

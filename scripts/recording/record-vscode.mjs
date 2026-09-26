@@ -119,7 +119,7 @@ try {
   };
   const editorFrame = await until(findEditorFrame, 60000, 'the OverLyX editor webview');
   await until(async () => (await editorFrame.evaluate(() => document.body.innerText)).includes('least-squares'), 60000, 'the rendered document');
-  await sleep(1200);   // icons, KaTeX settle
+  await sleep(1200);   // icons, formulas settle
   const text = await editorFrame.evaluate(() => document.body.innerText);
   if (text.includes('Notifications') || !text.includes('least-squares')) throw new Error('stray keystrokes reached the document — aborting the recording');
 
@@ -158,7 +158,7 @@ try {
   // the display formula upgrades to an editable math field; a bias term typed at its end
   // (clicking just right of the last glyph lands the caret at the formula's top level, not
   // inside the k(...) argument)
-  const eq = await editorFrame.locator('.lyx-math-display .katex').first().boundingBox();
+  const eq = await editorFrame.locator('.lyx-math-display mjx-container').first().boundingBox();
   await page.mouse.click(eq.x + eq.width + 22, eq.y + eq.height / 2);
   await until(() => editorFrame.evaluate(() => {
     const a = document.activeElement;

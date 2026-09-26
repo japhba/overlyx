@@ -6,7 +6,6 @@ import { api } from './api';
 import { isBenignBrowserError } from './error-reporting';
 import { initUsage, recordUsage, noticeTemplate } from './usage';
 import './styles.css';
-import 'katex/dist/katex.min.css';
 import 'prosemirror-view/style/prosemirror.css';
 import 'prosemirror-gapcursor/style/gapcursor.css';
 import 'prosemirror-tables/style/tables.css';

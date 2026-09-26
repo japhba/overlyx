@@ -25,7 +25,7 @@ test('login, open a .tex document and render it', async ({ page }) => {
   await expect(page.locator('.lyx-inset-note-note').first()).toBeVisible();
   expect(await page.locator('.lyx-inset-note-note .inset-label').first().textContent()).toBe('Note');
   // a macro-using formula (\Pfi) renders without error atoms
-  const err = await page.locator('.lyx-editor .katex-error').count();
+  const err = await page.locator('.lyx-editor .lm-error:not(.lm-pending), .lm-undefined').count();
   expect(err).toBeLessThan(5);
   // outline lists sections
   await expect(page.locator('.outline-item').first()).toBeVisible();

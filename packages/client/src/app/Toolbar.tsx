@@ -1,18 +1,18 @@
 /**
  * Toolbars (a port of LyX's lib/ui/stdtoolbars.inc): the Standard and Extra rows, and the
  * contextual Math / Table / Review rows. Buttons are plain, toggles (`active`) or palettes
- * (a popup grid of KaTeX-rendered symbols, LyX's "IconPalette" / "PopupMenu").
+ * (a popup grid of symbols rendered by MathJax, LyX's "IconPalette" / "PopupMenu").
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import katex from 'katex';
-import { createInsetMath, nargs, KATEX_BASE_MACROS } from '@overlyx/core';
+import { createInsetMath, nargs } from '@overlyx/core';
+import { renderMath, onMathRendererChange } from '../editor/lyxmath/mathjax';
 import type { LayoutInfo } from '../api';
 import { MATH_PANELS, type PanelItem } from './mathpanels';
 import { LYX_ICONS } from './lyxicons';
 import { recordUsage } from '../usage';
 
-/** The face of a toolbar button: LyX's own icon file when there is one, else a KaTeX preview, a hand-drawn SVG, or plain text. */
+/** The face of a toolbar button: LyX's own icon file when there is one, else a formula preview, a hand-drawn SVG, or plain text. */
 function btnIcon(b: ToolButton) {
   if (LYX_ICONS[b.icon]) return <img class="tb-img" src={LYX_ICONS[b.icon]} alt="" draggable={false} />;
   if (b.html) return <span dangerouslySetInnerHTML={{ __html: b.html }} />;
@@ -35,7 +35,7 @@ export interface ToolButton {
   id: string; title: string;
   /** key into ICONS, or (when not found) the text shown on the button */
   icon: string;
-  /** pre-rendered HTML (KaTeX) instead of an icon */
+  /** pre-rendered HTML (a formula) instead of an icon */
   html?: string;
   action?: () => void;
   active?: boolean; disabled?: boolean;
@@ -167,14 +167,12 @@ export const ICONS: Record<string, string> = {
   delimsize: '<svg viewBox="0 0 16 16"><text x="0" y="14" font-size="15" font-family="serif">(</text><text x="5" y="13" font-size="12" font-family="serif">(</text><text x="9" y="12" font-size="9" font-family="serif">(</text><text x="12.5" y="11" font-size="6" font-family="serif">(</text></svg>',
 };
 
-/* ------------------------------------------------------------------ KaTeX previews */
+/* ------------------------------------------------------------------ formula previews */
 
+/** samples for palette entries that are no command of their own (LyX's names) */
 const PREVIEW_MACROS: Record<string, string> = {
-  ...KATEX_BASE_MACROS,
-  '\\llangle': '\\langle\\mkern-4.5mu\\langle', '\\rrangle': '\\rangle\\mkern-4.5mu\\rangle',
-  '\\llbracket': '[\\mkern-3mu[', '\\rrbracket': ']\\mkern-3mu]',
   '\\root': '\\sqrt[n]{a}', '\\cases': '\\begin{cases}a\\\\b\\end{cases}',
-  '\\smasht': '\\smash{a}', '\\smashb': '\\smash{a}', '\\mathds': '\\mathbb', '\\utilde': '\\underset{\\sim}',
+  '\\smasht': '\\smash{a}', '\\smashb': '\\smash{a}', '\\utilde': '\\underset{\\sim}',
   '\\unitone': '\\mathrm{km}', '\\unittwo': '864\\,\\mathrm{m}', '\\unitfrac': '{}^{\\mathrm{km}}\\!/\\!{}_{\\mathrm{h}}', '\\unitfracthree': '20\\,{}^{\\mathrm{km}}\\!/\\!{}_{\\mathrm{h}}',
   '\\nicefrac': '{}^{3}\\!/\\!{}_{4}', '\\cfracleft': '\\cfrac{a}{b}', '\\cfracright': '\\cfrac{a}{b}',
   '\\sideset': '{}_a^b\\!\\sum\\!{}_c^d', '\\sidesetr': '\\sum{}_c^d', '\\sidesetl': '{}_a^b\\!\\sum', '\\sidesetn': '\\sum',
@@ -184,7 +182,7 @@ const PREVIEW_MACROS: Record<string, string> = {
   '\\lhook': '\\hookleftarrow', '\\rhook': '\\hookrightarrow', '\\Join': '\\bowtie',
 };
 
-/** Explicit preview sources for commands whose arity KaTeX or our parser does not know. */
+/** Explicit preview sources for commands whose arity MathJax or our parser does not know. */
 const PREVIEW_SRC: Record<string, string> = {
   cfrac: '\\cfrac{a}{b}', cancelto: '\\cancelto{0}{ab}', utilde: '\\underset{\\sim}{a}', dddot: '\\dddot{a}', ddddot: '\\overset{\\cdots\\!\\cdot}{a}',
   overset: '\\overset{a}{x}', underset: '\\underset{a}{x}', stackrel: '\\stackrel{a}{=}', binom: '\\binom{n}{k}', tbinom: '\\tbinom{n}{k}', dbinom: '\\dbinom{n}{k}',
@@ -203,7 +201,7 @@ function previewSource(latex: string): string {
     const arg = m[2].trim();
     return `\\${name}{${arg}}`;
   }
-  if (PREVIEW_MACROS['\\' + name] !== undefined && !(name in KATEX_BASE_MACROS)) return latex;
+  if (PREVIEW_MACROS['\\' + name] !== undefined) return latex;
   let n = 0;
   try { n = nargs(createInsetMath(name, {})); } catch { n = 0; }
   if (n === 0) return latex;
@@ -213,18 +211,20 @@ function previewSource(latex: string): string {
 }
 
 const previewCache = new Map<string, string | null>();
-/** KaTeX HTML for a symbol / command, or null when KaTeX cannot render it (the label is shown instead). */
-export function mathPreview(latex: string): string | null {
-  const cached = previewCache.get(latex);
+// another math font: every preview is drawn again
+onMathRendererChange(() => previewCache.clear());
+/** A formula's markup (MathJax), or null when MathJax cannot render it (the caller shows a label instead). */
+export function formulaHtml(src: string, macros?: Record<string, string>): string | null {
+  const cached = previewCache.get(src);
   if (cached !== undefined) return cached;
-  let html: string | null = null;
-  try {
-    const src = previewSource(latex);
-    html = katex.renderToString(src, { throwOnError: false, strict: false, trust: true, output: 'html', macros: { ...PREVIEW_MACROS } });
-    if (html.includes('katex-error') || html.includes('mord text') && /\\[A-Za-z]/.test(src) && !src.startsWith('\\text')) html = null;
-  } catch { html = null; }
-  previewCache.set(latex, html);
+  const r = renderMath(src, { macros });
+  const html = r.node && !r.undefinedCommands.length ? r.node.outerHTML : null;
+  if (!r.retry) previewCache.set(src, html);   // (font data still loading: asked again next time)
   return html;
+}
+/** The preview of a symbol / command (sample arguments where it takes some), or null when MathJax cannot render it (the label is shown instead). */
+export function mathPreview(latex: string): string | null {
+  try { return formulaHtml(previewSource(latex), PREVIEW_MACROS); } catch { return null; }
 }
 
 /* ------------------------------------------------------------------ delimiters */
@@ -263,19 +263,10 @@ export const DELIM_SIZES: { id: string; label: string; title: string }[] = [
 export interface DelimChoice { pair: DelimPair; size: string }
 
 function delimPreview(pair: DelimPair, size: string): string {
-  const inner = '\\square';
-  // KaTeX has no double delimiters: build ⟪ ⟫ / ⟦ ⟧ from two glyphs of the same size
-  const two = (name: string): [string, string] | null =>
-    name === '\\llangle' ? ['\\langle', '4.5mu'] : name === '\\rrangle' ? ['\\rangle', '4.5mu'] : name === '\\llbracket' ? ['[', '3mu'] : name === '\\rrbracket' ? [']', '3mu'] : null;
-  const wrap = (cmd: string, name: string): string => {
-    const t = two(name);
-    if (!t) return cmd + name;
-    return `${cmd}${t[0]}\\mkern-${t[1]}${cmd}${t[0]}`;   // with \left/\right this nests two balanced pairs
-  };
   const lcmd = size === '' ? '\\left' : size === 'none' ? '' : `\\${size}l`;
   const rcmd = size === '' ? '\\right' : size === 'none' ? '' : `\\${size}r`;
-  const src = wrap(lcmd, pair.left) + inner + wrap(rcmd, pair.right);
-  try { return katex.renderToString(src, { throwOnError: false, strict: false, output: 'html' }); } catch { return pair.label; }
+  const sep = (d: string) => (/^\\[A-Za-z]+$/.test(d) ? d + ' ' : d);
+  return formulaHtml(lcmd + sep(pair.left) + '\\square' + rcmd + sep(pair.right)) ?? pair.label;
 }
 
 /** The delimiter palette: pairs × sizes (LyX's "braces of varying sizes"). */
@@ -389,7 +380,7 @@ function PaletteButton({ b }: { b: ToolButton }) {
             <div class="tb-popup-grid" style={p.list ? undefined : { gridTemplateColumns: `repeat(${p.cols ?? 8}, minmax(30px, auto))` }}>
               {p.items!.map((it, i) => (
                 <button key={i} type="button" class={'tb-pal-item' + (it.active ? ' active' : '')} title={it.title ?? it.label} onMouseDown={e => e.preventDefault()} onClick={() => { close(); recordUsage('toolbar', `${b.id} ▸ ${it.label}`); it.action(); }}>
-                  {/* a list shows the label anyway: its symbol column only where the palette has symbols (empty when KaTeX failed) */}
+                  {/* a list shows the label anyway: its symbol column only where the palette has symbols (empty when MathJax could not render one) */}
                   {it.html ? <span class="tb-pal-sym" dangerouslySetInnerHTML={{ __html: it.html }} /> : !p.list ? <span class="tb-pal-sym text">{it.label}</span> : withSyms && <span class="tb-pal-sym" />}
                   {p.list && <span class="tb-pal-label">{it.label}</span>}
                 </button>

@@ -4,7 +4,7 @@
  * used to, and the writer then emitted \appendix before every paragraph of the appendix).
  */
 import { describe, it, expect, vi } from 'vitest';
-vi.hoisted(() => { const g = globalThis as any; if (typeof g.window === 'undefined') g.window = g; });
+vi.hoisted(() => { const g = globalThis as any; if (typeof g.window === 'undefined') { g.window = g; /* MathJax reads navigator.appVersion (node's navigator has none) */ if (g.navigator && g.navigator.appVersion === undefined) Object.defineProperty(g.navigator, 'appVersion', { value: '', configurable: true }); } });
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { schema } from '../packages/core/src/schema.ts';
 import { pmToLyxBody } from '../packages/core/src/convert.ts';

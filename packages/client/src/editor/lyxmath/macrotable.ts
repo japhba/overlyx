@@ -7,17 +7,14 @@ import type { MacroTable } from '@overlyx/core';
 
 interface InlineDef { pos: number; name: string; def: string; args: number }
 
-/** Fallbacks for packages KaTeX does not know; document macros override them. */
+/** Fallbacks for packages MathJax does not know (physics); document macros override them. */
 const FALLBACK_MACROS: Record<string, { def: string; args: number }> = {
-  llbracket: { def: '[\\![', args: 0 }, rrbracket: { def: ']\\!]', args: 0 },
-  llangle: { def: '\\langle\\!\\langle', args: 0 }, rrangle: { def: '\\rangle\\!\\rangle', args: 0 },
   dv: { def: '\\frac{d #1}{d #2}', args: 2 }, pdv: { def: '\\frac{\\partial #1}{\\partial #2}', args: 2 },
   dd: { def: '\\mathrm{d}#1', args: 1 }, ev: { def: '\\left\\langle #1\\right\\rangle', args: 1 },
   abs: { def: '\\left|#1\\right|', args: 1 }, norm: { def: '\\left\\lVert #1\\right\\rVert', args: 1 },
   qty: { def: '\\left(#1\\right)', args: 1 }, order: { def: '\\mathcal{O}\\left(#1\\right)', args: 1 },
   tr: { def: '\\operatorname{tr}', args: 0 }, Tr: { def: '\\operatorname{Tr}', args: 0 },
   var: { def: '\\operatorname{Var}', args: 0 }, expval: { def: '\\left\\langle #1\\right\\rangle', args: 1 },
-  intercal: { def: '\\top', args: 0 },
 };
 
 /**

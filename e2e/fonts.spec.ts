@@ -1,8 +1,8 @@
 /**
  * Fonts, chosen separately for the editor (Settings ▸ Editor ▸ Text font / Math font, per browser)
  * and for the PDF (Document ▸ Settings ▸ Fonts, in the file). The editor's fonts come with the client
- * (fonts/web): checked are the faces the formulas ask for, that they load, and that nothing is
- * requested from anywhere else.
+ * (fonts/web for the text, MathJax's font packages for formulas): checked are the fonts the text and
+ * the formulas are drawn in, that they load, and that nothing is requested from anywhere else.
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
@@ -25,19 +25,24 @@ async function open(page: Page, prefs?: Record<string, string>) {
   await login(page);
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.setItem('ol.combined', '0'); });
   await page.goto('/#/admin/e2e-fonts/main.tex');
-  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-math-inline .katex').length >= 1, null, { timeout: 60000 });
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-math-inline mjx-container').length >= 1, null, { timeout: 60000 });
   return foreign;
 }
 /** the families of the page's fonts that have loaded */
 const loaded = (page: Page) => page.evaluate(async () => { await document.fonts.ready; return [...document.fonts].filter(f => f.status === 'loaded').map(f => f.family.replace(/"/g, '')); });
 const openDialog = (page: Page, name: string) => page.evaluate((n) => (window as any).overlyx.openDialog(n), name);
 const style = (page: Page, sel: string, prop: string) => page.locator(sel).first().evaluate((e, p) => getComputedStyle(e).getPropertyValue(p), prop);
+/** the MathJax font a formula is drawn in: the class of its mjx-math (the font's CSS prefix) */
+const mathClass = (page: Page, sel = '.lyx-editor .lyx-math-inline mjx-math') => page.locator(sel).first().getAttribute('class');
 
 test('Settings ▸ Editor ▸ Text font and Math font: text and formulas switch face independently; the sample shows them', async ({ page }) => {
   const errors = collectErrors(page);
   const foreign = await open(page);
   expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^"CMU Serif"/);
-  expect(await style(page, '.lyx-editor .katex .mathnormal', 'font-family')).toMatch(/^KaTeX_Math/);
+  // MathJax with New Computer Modern, its woff2 files served with the client
+  expect(await page.evaluate(() => document.documentElement.dataset.mathFont)).toBe('newcm');
+  expect(await mathClass(page)).toBe('NCM-N');
+  await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^MJX-NCM-/)]));
   await openDialog(page, 'preferences');
   const dlg = page.locator('.dialog');
   await expect(dlg.locator('[data-pref="editorMathFont"]')).toHaveValue('match');
@@ -45,21 +50,20 @@ test('Settings ▸ Editor ▸ Text font and Math font: text and formulas switch 
   const sample = dlg.locator('[data-font-sample]');
   await expect(sample).toContainText('Residue theorem');
   await expect(sample).toContainText('Maximum modulus');
-  expect(await sample.locator('.katex-display').count()).toBe(3);
-  expect(await sample.locator('.katex-accent').count()).toBeGreaterThanOrEqual(10);
+  expect(await sample.locator('.sample-display mjx-container').count()).toBe(3);
+  expect(await sample.locator('mjx-mover').count()).toBeGreaterThanOrEqual(10);
   await dlg.locator('[data-pref="editorFont"]').selectOption('libertinus');
   await expect.poll(() => style(page, '.lyx-editor', 'font-family')).toMatch(/^"OLT libertinus"/);
-  // matching: the formulas in Libertinus Math's faces, each before the KaTeX font it stands in for
-  expect(await style(page, '.lyx-editor .katex .mathnormal', 'font-family')).toBe('"OLM libertinus It", KaTeX_Math');
-  expect(await style(page, '.lyx-editor .katex', 'font-family')).toMatch(/^"OLM libertinus", KaTeX_Main/);
-  expect(await style(page, '[data-font-sample] .katex .op-symbol.large-op', 'font-family')).toBe('"OLM libertinus S2", KaTeX_Size2');
+  // matching: the formulas in STIX Two, the MathJax font closest to Libertinus; the sample too
+  await expect.poll(() => mathClass(page)).toBe('STX-N');
+  expect(await mathClass(page, '[data-font-sample] mjx-math')).toBe('STX-N');
   expect(await style(page, '[data-font-sample]', 'font-family')).toMatch(/^"OLT libertinus"/);
-  await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining(['OLT libertinus', 'OLM libertinus', 'OLM libertinus It', 'OLM libertinus S2']));
-  // the math font on its own
+  await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining(['OLT libertinus', expect.stringMatching(/^MJX-STX-/)]));
+  // the math font on its own: Euler's letters over New Computer Modern
   await dlg.locator('[data-pref="editorMathFont"]').selectOption('euler');
-  await expect.poll(() => style(page, '.lyx-editor .katex .mathnormal', 'font-family')).toBe('"OLM euler It", KaTeX_Math');
+  await expect.poll(() => mathClass(page)).toBe('NCM-N');
+  await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^MJX-NE-/)]));
   expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^"OLT libertinus"/);
-  await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining(['OLM euler', 'OLM euler It']));
   const prefs = JSON.parse((await page.evaluate(() => localStorage.getItem('ol.prefs')))!);
   expect([prefs.editorFont, prefs.editorMathFont]).toEqual(['libertinus', 'euler']);
   // the PDF's fonts are untouched
@@ -67,7 +71,7 @@ test('Settings ▸ Editor ▸ Text font and Math font: text and formulas switch 
   await dlg.locator('[data-pref="editorFont"]').selectOption('cm');
   await dlg.locator('[data-pref="editorMathFont"]').selectOption('match');
   await expect.poll(() => style(page, '.lyx-editor', 'font-family')).toMatch(/^"CMU Serif"/);
-  expect(await style(page, '.lyx-editor .katex .mathnormal', 'font-family')).toMatch(/^KaTeX_Math/);
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.mathFont)).toBe('newcm');
   expect(foreign).toEqual([]);
   expect(errors).toEqual([]);
 });
@@ -101,18 +105,17 @@ test('Document ▸ Settings ▸ Fonts: a font set writes its text and math fonts
   expect(errors).toEqual([]);
 });
 
-test('the sans-serif face: San Francisco where the system has it, formulas with its letters and Fira Math\'s symbols; a saved "Noto Sans" becomes it', async ({ page }) => {
+test('the sans-serif face: San Francisco where the system has it, formulas in Fira Math; a saved "Noto Sans" becomes it', async ({ page }) => {
   const errors = collectErrors(page);
   const foreign = await open(page, { editorFont: 'noto' });
   expect(await page.evaluate(() => document.documentElement.dataset.editorFont)).toBe('sans');
   expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "SF Pro Display", "OLT fira", sans-serif/);
-  expect(await style(page, '.lyx-editor .katex', 'font-family')).toMatch(/^"OLM fira", KaTeX_Main/);
-  expect(await style(page, '.lyx-editor .katex .mathnormal', 'font-family')).toMatch(/^-apple-system, .*"OLT fira", sans-serif$/);
-  // no San Francisco on the test machine: the letters are Fira Sans, the symbols Fira Math, both served with the client
-  await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining(['OLT fira', 'OLM fira']));
+  await expect.poll(() => mathClass(page)).toBe('FIRA-N');
+  // no San Francisco on the test machine: the text is Fira Sans, the formulas Fira Math, both served with the client
+  await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining(['OLT fira', expect.stringMatching(/^MJX-FIRA-/)]));
   await openDialog(page, 'preferences');
   await expect(page.locator('.dialog [data-pref="editorFont"]')).toHaveValue('sans');
-  await expect(page.locator('.dialog [data-pref="editorMathFont"] option').first()).toContainText('Fira Math, letters from the text font');
+  await expect(page.locator('.dialog [data-pref="editorMathFont"] option').first()).toContainText('Matching the text font (now Fira Math)');
   expect(foreign).toEqual([]);
   expect(errors).toEqual([]);
 });

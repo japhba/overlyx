@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 // the client's math node views touch `window` at import time
-vi.hoisted(() => { const g = globalThis as any; if (typeof g.window === 'undefined') g.window = g; });
+vi.hoisted(() => { const g = globalThis as any; if (typeof g.window === 'undefined') { g.window = g; /* MathJax reads navigator.appVersion (node's navigator has none) */ if (g.navigator && g.navigator.appVersion === undefined) Object.defineProperty(g.navigator, 'appVersion', { value: '', configurable: true }); } });
 import { EditorState, TextSelection, type Command } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 import { CellSelection } from 'prosemirror-tables';

@@ -642,7 +642,7 @@ test('writing "Auto-Encoding Variational Bayes" from a blank document: abstract,
   expect(text).toMatch(/Student's t, Logistic/);
   expect(text).toMatch(new RegExp(`\\(see e\\.g\\. \\\\citep?\\{${keys.devroye1986sample}\\} for some methods\\)\\.`));
   expect(Object.keys(keys).length).toBe(3);
-  await expect(page.locator('.katex-error')).toHaveCount(0);
+  await expect(page.locator('.lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(noErrors(errors)).toEqual([]);
   writeFileSync(KEYS_FILE, JSON.stringify(keys));
   writeFileSync(`${DIR}/.part1`, 'vae');
@@ -893,7 +893,7 @@ test('writing "Auto-Encoding Variational Bayes", the example, related work, expe
   expect(Object.keys(keys).length).toBe(17);
   const bib = readFileSync(`${DIR}/cited.bib`, 'utf8');
   for (const k of Object.values(keys)) expect(bib).toContain(`{${k},`);
-  await expect(page.locator('.katex-error')).toHaveCount(0);
+  await expect(page.locator('.lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(noErrors(errors)).toEqual([]);
   writeFileSync(KEYS_FILE, JSON.stringify(keys));
   writeFileSync(`${DIR}/.complete`, 'vae');
@@ -1302,7 +1302,7 @@ test('writing "Auto-Encoding Variational Bayes", the appendices: visualisations,
   has(r`\begin{align*}q_{\phi}(\theta)\quad\mathrm{as}\quad\tilde{\theta} & =\mu_{\theta}+\sigma_{\theta}\odot\zeta\quad\mathrm{where}\quad\zeta\sim\mathcal{N}(0,I)\\ q_{\phi}(z|x)\quad\mathrm{as}\quad\tilde{z} & =\mu_{z}+\sigma_{z}\odot\epsilon\quad\mathrm{where}\quad\epsilon\sim\mathcal{N}(0,I)\end{align*}`);
   has(r`\mathcal{L}(\phi;X) & \simeq\frac{1}{L}\sum_{l=1}^{L}N\cdot\left(\frac{1}{2}\sum_{j=1}^{J}\left(1+\log((\sigma_{z,j}^{(l)})^{2})-(\mu_{z,j}^{(l)})^{2}-(\sigma_{z,j}^{(l)})^{2}\right)+\log p_{\theta}(x^{(i)}|z^{(i)})\right)\nonumber \\`);
   expect(text).toMatch(/\(eqs \\eqref\{eq:f\} and \\eqref\{eq:fullvb-estimator\}\)\./);
-  await expect(page.locator('.katex-error')).toHaveCount(0);
+  await expect(page.locator('.lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(noErrors(errors)).toEqual([]);
   writeFileSync(`${DIR}/.appendix`, 'vae');
 });

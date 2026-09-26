@@ -7,11 +7,10 @@
  *                       https://tex.stackexchange.com/q/425098 and a few more, all served with the
  *                       client (fonts/web, scripts/build-editor-fonts.py) and fetched only once
  *                       chosen — except the computer's own Palatino and San Francisco.
- *   MATH_FONTS          the editor's formulas (Settings ▸ Editor ▸ Math font): KaTeX's own Computer
- *                       Modern, or one of those OpenType math fonts, taken apart by the build script
- *                       into faces that stand in for KaTeX's fonts glyph by glyph (KaTeX keeps its
- *                       layout: it cannot read a MATH table) — fonts/editorfont.ts, styles.css.
- *                       "Matching the text font" is the math font drawn for the text face.
+ *   MATH_FONTS          the editor's formulas (Settings ▸ Editor ▸ Math font): MathJax's fonts, each
+ *                       made from an OpenType math font, which MathJax lays formulas out with
+ *                       (editor/lyxmath/mathfonts.ts loads them). "Matching the text font" is the
+ *                       math font closest in style to the text face.
  *   DOCUMENT_FONT_SETS  what the PDF is typeset in (Document ▸ Settings ▸ Fonts): LyX font names
  *                       (lib/latexfonts) of TeX fonts that come with TeX Live, each text font with the
  *                       math font made for it, so text and formulas agree. Written as LyX's
@@ -32,7 +31,7 @@ export interface EditorFace {
   /** the sans-serif and typewriter families (Text Style ▸ Family) when the face has its own */
   sans?: string;
   mono?: string;
-  /** the math font drawn for it (Math font ▸ "Matching the text font") */
+  /** the math font closest in style (Math font ▸ "Matching the text font") */
   math: string;
   /** its x-height (em): formulas are sized to it */
   xHeight: number;
@@ -42,20 +41,18 @@ export interface MathFont {
   id: string;
   label: string;
   hint: string;
-  /** taken apart into fonts/web/math/<id> (absent: KaTeX's own Computer Modern) */
-  built?: string;
-  /** the letters of formulas from the text face, the rest from `built` (a face that cannot be shipped: the system's San Francisco) */
-  textLetters?: boolean;
+  /** its x-height (em; MathJax's font data): formulas are sized by it */
+  xHeight: number;
 }
 
 const CM = '"CMU Serif", serif';
 /** San Francisco where the system has it, SF Compact first on phones (styles.css --sf-font) */
 const SF = 'var(--sf-font)';
-/** Computer Modern's x-height, KaTeX's and every built math font's (scripts/build-editor-fonts.py) */
+/** Computer Modern's x-height (CMU Serif's) */
 export const CM_X_HEIGHT = 0.4306;
 
 export const DEFAULT_EDITOR_FACE = 'cm';
-export const DEFAULT_MATH_FONT = 'cm';
+export const DEFAULT_MATH_FONT = 'newcm';
 /** Math font ▸ the math font drawn for the text face */
 export const MATCH_TEXT = 'match';
 
@@ -66,11 +63,11 @@ function served(id: string, label: string, hint: string, math: string, extra: { 
 }
 
 export const EDITOR_FACES: EditorFace[] = [
-  { id: 'cm', label: 'Computer Modern', hint: 'LaTeX’s own typeface (built in)', text: CM, math: 'cm', xHeight: CM_X_HEIGHT },
-  served('newcm', 'New Computer Modern', 'Computer Modern in the heavier Book weight', 'newcm-book'),
-  served('libertinus', 'Libertinus', 'Linux Libertine’s successor; serif, sans and mono', 'libertinus', { sans: '"OLT libertinus sans"', mono: '"OLT libertinus mono"' }),
+  { id: 'cm', label: 'Computer Modern', hint: 'LaTeX’s own typeface (built in)', text: CM, math: 'newcm', xHeight: CM_X_HEIGHT },
+  served('newcm', 'New Computer Modern', 'Computer Modern in the heavier Book weight', 'newcm'),
+  served('libertinus', 'Libertinus', 'Linux Libertine’s successor; serif, sans and mono', 'stix2', { sans: '"OLT libertinus sans"', mono: '"OLT libertinus mono"' }),
   served('stix', 'STIX Two', 'a Times for science', 'stix2', { files: 'stix2' }),
-  served('xits', 'XITS', 'STIX’s first version, a Times', 'xits'),
+  served('xits', 'XITS', 'STIX’s first version, a Times', 'stix2'),
   served('termes', 'TeX Gyre Termes', 'a Times', 'termes'),
   served('pagella', 'TeX Gyre Pagella', 'a Palatino', 'pagella'),
   {
@@ -80,69 +77,54 @@ export const EDITOR_FACES: EditorFace[] = [
   served('bonum', 'TeX Gyre Bonum', 'a Bookman', 'bonum'),
   served('schola', 'TeX Gyre Schola', 'a Century Schoolbook', 'schola'),
   served('dejavu', 'DejaVu Serif', 'Bitstream Vera’s serif', 'dejavu'),
-  served('garamond', 'EB Garamond', 'Garamond', 'garamond'),
-  served('crimson', 'Crimson Pro', 'an old-style book face', 'libertinus'),
-  served('charis', 'Charis SIL', 'Charter, extended', 'xcharter'),
-  served('xcharter', 'XCharter', 'Charter', 'xcharter'),
-  served('erewhon', 'Erewhon', 'Utopia', 'erewhon'),
-  served('kp', 'Kp Roman', 'the Kp fonts (Johannes Kepler)', 'kp'),
-  served('concrete', 'Concrete', 'Knuth’s Concrete Roman (Concrete Mathematics)', 'concrete'),
-  served('oldstandard', 'Old Standard', 'a 19th-century Modern', 'oldstandard'),
-  served('neohellenic', 'GFS Neohellenic', 'with only slight serifs', 'neohellenic'),
-  served('plex', 'IBM Plex Serif', 'IBM’s corporate serif', 'plex'),
-  served('pl46', 'PL46', 'a Polish typeface of 1946 (no italic)', 'pl46'),
+  served('garamond', 'EB Garamond', 'Garamond', 'pagella'),
+  served('crimson', 'Crimson Pro', 'an old-style book face', 'pagella'),
+  served('charis', 'Charis SIL', 'Charter, extended', 'schola'),
+  served('xcharter', 'XCharter', 'Charter', 'schola'),
+  served('erewhon', 'Erewhon', 'Utopia', 'stix2'),
+  served('kp', 'Kp Roman', 'the Kp fonts (Johannes Kepler)', 'pagella'),
+  served('concrete', 'Concrete', 'Knuth’s Concrete Roman (Concrete Mathematics)', 'euler'),
+  served('oldstandard', 'Old Standard', 'a 19th-century Modern', 'modern'),
+  served('neohellenic', 'GFS Neohellenic', 'with only slight serifs', 'newcm'),
+  served('plex', 'IBM Plex Serif', 'IBM’s corporate serif', 'stix2'),
+  served('pl46', 'PL46', 'a Polish typeface of 1946 (no italic)', 'newcm'),
   served('fira', 'Fira Sans', 'sans-serif; typewriter Fira Mono', 'fira', { mono: '"OLT fira mono"' }),
   {
-    // Fira Math is drawn to go with Fira Sans; San Francisco cannot be served, so its formulas take their letters from it
     id: 'sans', label: 'Sans-serif (this computer’s)', hint: 'San Francisco where the system has it (SF Compact on phones), else Fira Sans',
-    text: `${SF}, "OLT fira", sans-serif`, mono: '"SF Mono", "OLT fira mono"', math: 'fira-text', xHeight: 0.52,
+    text: `${SF}, "OLT fira", sans-serif`, mono: '"SF Mono", "OLT fira mono"', math: 'fira', xHeight: 0.52,
   },
-  served('lato', 'Lato', 'sans-serif', 'lete'),
-  served('notosans', 'Noto Sans', 'sans-serif, for every script', 'noto'),
-  served('arsenal', 'Arsenal', 'sans-serif', 'arsenal'),
-  served('luciole', 'Luciole', 'sans-serif drawn for readers with low vision', 'luciole'),
-  served('pennstander', 'Pennstander', 'informal, handwriting-like', 'pennstander'),
+  served('lato', 'Lato', 'sans-serif', 'fira'),
+  served('notosans', 'Noto Sans', 'sans-serif, for every script', 'fira'),
+  served('arsenal', 'Arsenal', 'sans-serif', 'fira'),
+  served('luciole', 'Luciole', 'sans-serif drawn for readers with low vision', 'fira'),
+  served('pennstander', 'Pennstander', 'informal, handwriting-like', 'fira'),
 ];
 
-const built = (id: string, label: string, hint: string): MathFont => ({ id, label, hint, built: id });
-
+/** MathJax's fonts (x-heights from their font data), in the order of the menu */
 export const MATH_FONTS: MathFont[] = [
-  { id: 'cm', label: 'Computer Modern', hint: 'KaTeX’s own (built in)' },
-  built('lm', 'Latin Modern Math', 'Computer Modern as an OpenType math font'),
-  built('newcm', 'New Computer Modern Math', 'Latin Modern extended'),
-  built('newcm-book', 'New Computer Modern Math Book', 'in the heavier Book weight'),
-  built('stix2', 'STIX Two Math', 'a Times'),
-  built('xits', 'XITS Math', 'STIX’s first version'),
-  built('termes', 'TeX Gyre Termes Math', 'a Times'),
-  built('pagella', 'TeX Gyre Pagella Math', 'a Palatino'),
-  built('asana', 'Asana Math', 'a Palatino (pxfonts)'),
-  built('euler', 'Euler Math', 'Hermann Zapf’s upright AMS Euler'),
-  built('bonum', 'TeX Gyre Bonum Math', 'a Bookman'),
-  built('schola', 'TeX Gyre Schola Math', 'a Century Schoolbook'),
-  built('dejavu', 'TeX Gyre DejaVu Math', 'DejaVu Serif'),
-  built('libertinus', 'Libertinus Math', 'Libertinus'),
-  built('garamond', 'Garamond Math', 'EB Garamond'),
-  built('xcharter', 'XCharter Math', 'Charter'),
-  built('erewhon', 'Erewhon Math', 'Utopia, Fourier’s symbols'),
-  built('kp', 'KpMath', 'the Kp fonts'),
-  built('kp-light', 'KpMath Light', 'the Kp fonts, light'),
-  built('kp-sans', 'KpMath Sans', 'the Kp fonts, sans-serif'),
-  built('concrete', 'Concrete Math', 'Concrete'),
-  built('oldstandard', 'Old Standard Math', 'Old Standard'),
-  built('neohellenic', 'GFS Neohellenic Math', 'GFS Neohellenic'),
-  built('plex', 'IBM Plex Math', 'IBM Plex'),
-  built('pl46', 'PL46 Math', 'PL46'),
-  built('fira', 'Fira Math', 'sans-serif, Fira Sans'),
-  { id: 'fira-text', label: 'Fira Math, letters from the text font', hint: 'the letters of the text face (San Francisco…), Fira Math’s symbols', built: 'fira', textLetters: true },
-  built('lete', 'Lete Sans Math', 'sans-serif, Lato'),
-  built('noto', 'Noto Sans Math', 'sans-serif, Noto Sans'),
-  built('arsenal', 'Arsenal Math', 'sans-serif, Arsenal'),
-  built('luciole', 'Luciole Math', 'sans-serif, for low vision'),
-  built('pennstander', 'Pennstander Math', 'informal'),
+  { id: 'newcm', label: 'New Computer Modern', hint: 'LaTeX’s Computer Modern, complete', xHeight: 0.442 },
+  { id: 'modern', label: 'Latin Modern', hint: 'Computer Modern as lmodern draws it', xHeight: 0.442 },
+  { id: 'tex', label: 'MathJax TeX', hint: 'Computer Modern as MathJax 3 and KaTeX draw it', xHeight: 0.442 },
+  { id: 'stix2', label: 'STIX Two', hint: 'a Times, the largest set of symbols', xHeight: 0.479 },
+  { id: 'termes', label: 'TeX Gyre Termes', hint: 'a Times', xHeight: 0.441 },
+  { id: 'pagella', label: 'TeX Gyre Pagella', hint: 'a Palatino', xHeight: 0.482 },
+  { id: 'asana', label: 'Asana Math', hint: 'a Palatino (pxfonts)', xHeight: 0.482 },
+  { id: 'bonum', label: 'TeX Gyre Bonum', hint: 'a Bookman', xHeight: 0.499 },
+  { id: 'schola', label: 'TeX Gyre Schola', hint: 'a Century Schoolbook', xHeight: 0.47 },
+  { id: 'dejavu', label: 'TeX Gyre DejaVu', hint: 'DejaVu Serif', xHeight: 0.519 },
+  { id: 'euler', label: 'Euler', hint: 'Hermann Zapf’s upright AMS Euler letters', xHeight: 0.46 },
+  { id: 'fira', label: 'Fira Math', hint: 'sans-serif, Fira Sans', xHeight: 0.527 },
 ];
 
 /** Faces that were renamed: a preference saved under the old id keeps its face. */
 const FORMER_FACES: Record<string, string> = { noto: 'sans' };
+
+/** The math fonts of before MathJax (KaTeX with stand-in faces, 26 Sep 2026): a saved preference gets the closest one. */
+const FORMER_MATH_FONTS: Record<string, string> = {
+  cm: 'tex', lm: 'modern', 'newcm-book': 'newcm', xits: 'stix2', libertinus: 'stix2', garamond: 'pagella', xcharter: 'schola',
+  erewhon: 'stix2', kp: 'pagella', 'kp-light': 'pagella', 'kp-sans': 'fira', concrete: 'euler', oldstandard: 'modern', neohellenic: 'newcm',
+  plex: 'stix2', pl46: 'newcm', 'fira-text': 'fira', lete: 'fira', noto: 'fira', arsenal: 'fira', luciole: 'fira', pennstander: 'fira',
+};
 
 /** Settings ▸ Editor ▸ Text font: a face, or the face closest to the document's roman font */
 export const FOLLOW_DOCUMENT = 'document';
@@ -196,6 +178,7 @@ export function editorFace(id: string): EditorFace {
 }
 
 export function mathFont(id: string): MathFont {
+  id = FORMER_MATH_FONTS[id] ?? id;
   return MATH_FONTS.find(f => f.id === id) ?? MATH_FONTS[0];
 }
 
@@ -205,11 +188,11 @@ export function resolvedMathFont(pref: string, face: string): MathFont {
 }
 
 /**
- * The size of formulas relative to the text: their x-height 1.1 times the text's, as KaTeX's
- * Computer Modern beside CMU Serif has always been.
+ * The size of formulas relative to the text: their x-height 1.1 times the text's, as formulas
+ * beside CMU Serif have always been in OverLyX.
  */
-export function mathScale(face: EditorFace): number {
-  return Math.round(1.1 * face.xHeight / CM_X_HEIGHT * 1000) / 1000;
+export function mathScale(face: EditorFace, math: MathFont): number {
+  return Math.round(1.1 * face.xHeight / math.xHeight * 1000) / 1000;
 }
 
 /** The quoted values of a font header line: `"libertinus" "default"` → ['libertinus', 'default']. */

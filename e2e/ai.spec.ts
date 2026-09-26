@@ -141,7 +141,7 @@ test.describe('with the AI stub', () => {
     await page.keyboard.press('Enter');
     await expect(page.locator('.ai-new')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.ai-old').first()).toBeVisible();
-    await expect(page.locator('.ai-new .katex')).toHaveCount(1);              // the proposal's $g$ is rendered in the preview
+    await expect(page.locator('.ai-new mjx-container')).toHaveCount(1);              // the proposal's $g$ is rendered in the preview
     // the proposal's LaTeX can be copied from the panel
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.click('[data-ai-copy]');
@@ -170,7 +170,7 @@ test.describe('with the AI stub', () => {
     await page.keyboard.press('Enter');
     await expect(page.locator('.ai-new.block')).toBeVisible({ timeout: 10000 });
     await page.keyboard.press('Enter');
-    await expect(page.locator('.lyx-editor .lyx-par').nth(-2)).toHaveText('The last paragraph of the paper.First proposed paragraph with x2.');
+    await expect(page.locator('.lyx-editor .lyx-par').nth(-2)).toHaveText('The last paragraph of the paper.First proposed paragraph with 𝑥2.');   // (MathJax's x is the math italic U+1D465)
     await expect(page.locator('.lyx-editor .lyx-par').last()).toHaveText('Second proposed paragraph.');
   });
 
@@ -257,7 +257,7 @@ test.describe('with the AI stub', () => {
     const ghost = page.locator('.ai-ghost');
     await expect(ghost).toBeVisible({ timeout: 10000 });
     await expect(ghost).toContainText('is governed by the largest Lyapunov exponent');
-    await expect(ghost.locator('.katex')).toHaveCount(1);
+    await expect(ghost.locator('mjx-container')).toHaveCount(1);
     await page.keyboard.press('Tab');
     await expect(ghost).toHaveCount(0);
     await expect(p).toContainText('The chaos is governed by the largest Lyapunov exponent');
@@ -305,7 +305,7 @@ test.describe('with the AI stub', () => {
     await expect(page.locator('.ai-panel[data-ai-panel="math"]')).toBeVisible();
     await page.keyboard.type('as a fraction');
     await page.keyboard.press('Enter');
-    await expect(page.locator('.ai-preview .katex')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.ai-preview mjx-container')).toBeVisible({ timeout: 10000 });
     await page.keyboard.press('Enter');
     await expect(page.locator('.ai-panel')).toHaveCount(0);
     expect(await latex()).toContain('\\frac{\\alpha}{\\beta}+\\sqrt{x}');

@@ -1,6 +1,6 @@
 /**
  * Static rendering of editor nodes outside the editor: the AI ghost text and the rewrite preview
- * show the proposed content the way it will look once inserted — formulas through KaTeX, cross
+ * show the proposed content the way it will look once inserted — formulas through MathJax, cross
  * references and citations as the text they stand for.
  */
 import { DOMSerializer, Fragment, type Node as PMNode } from 'prosemirror-model';

@@ -4,8 +4,9 @@
  * document's font sets (Document ▸ Settings ▸ Fonts) — packages/client/src/fonts. Every font set must
  * name fonts LyX knows (so a .lyx file opens with them in LyX) and load its matching math package in
  * the PDF; every set names an editor face; "As in the document" finds the face closest to a
- * document's roman font. Every face and math font the catalogue offers is served with the client
- * (fonts/web, scripts/build-editor-fonts.py), with every face KaTeX's fonts need.
+ * document's roman font. Every text face the catalogue offers is served with the client (fonts/web,
+ * scripts/build-editor-fonts.py); every math font is one of MathJax's, bundled with it
+ * (editor/lyxmath/mathfonts.ts).
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';
@@ -15,8 +16,10 @@ import { parseTex, writeTex } from '../packages/core/src/tex/index.ts';
 import { markEditedSettings } from '../packages/core/src/tex/preamble.ts';
 import { EDITOR_FACES, MATH_FONTS, DOCUMENT_FONT_SETS, documentFace, matchFontSet, fontSetValues, fontValues, editorFace, mathFont, resolvedMathFont, mathScale, CM_X_HEIGHT } from '../packages/client/src/fonts/catalog.ts';
 import { setDocumentFonts, resolvedFace, resolvedMath } from '../packages/client/src/fonts/editorfont.ts';
-import { MATH_FACES, TEXT_X_HEIGHT } from '../packages/client/src/fonts/web/metrics.gen.ts';
+import { TEXT_X_HEIGHT } from '../packages/client/src/fonts/web/metrics.gen.ts';
 import { setPref } from '../packages/client/src/prefs.ts';
+import { isMathFont } from '../packages/client/src/editor/lyxmath/mathfonts.ts';
+import { currentMathFont } from '../packages/client/src/editor/lyxmath/mathjax.ts';
 
 const FONTS = loadLatexFonts(join(__dirname, '../lyx/lib/latexfonts'));
 const SAMPLE = '\\documentclass{article}\n\\usepackage{amsmath}\n\\usepackage{amssymb}\n\\begin{document}\nText $\\alpha + \\sum_i x_i^2$.\n\\end{document}\n';
@@ -112,48 +115,45 @@ describe('editor faces', () => {
     expect(css).toContain("@import './fonts/web/webfonts.css';");
   });
 
-  it('math fonts are built with every face KaTeX\'s fonts need', () => {
-    const built = MATH_FONTS.filter(m => m.built);
-    expect(built.length).toBeGreaterThanOrEqual(30);
-    for (const m of built) {
-      const got = MATH_FACES[m.built!];
-      expect(got, m.id).toBeDefined();
-      for (const face of ['main', 'it', 'bf', 'bfit', 'cal', 'bb', 'size1', 'size2']) expect(got, `${m.id}: ${face}`).toContain(face);
-      for (const face of got) {
-        const suffix = { main: '', it: ' It', bf: ' Bf', bfit: ' BfIt', cal: ' Cal', frak: ' Frak', bb: ' Bb', sf: ' Sf', tt: ' Tt', size1: ' S1', size2: ' S2', size3: ' S3', size4: ' S4' }[face];
-        expect(faces(`OLM ${m.built}${suffix}`), `${m.id}: ${face}`).toEqual([`math/${m.built}/${face}.woff2`]);
-        expect(existsSync(join(WEB, `math/${m.built}/${face}.woff2`))).toBe(true);
-      }
-      // the AMS family: the same file, without the ASCII letters (\Bbbk is a "k" in KaTeX_AMS)
-      expect(WEBFONTS).toContain(`@font-face { font-family: "OLM ${m.built} AMS"; src: url("./math/${m.built}/main.woff2") format("woff2"); font-display: swap; unicode-range: U+00A0-10FFFF; }`);
+  it('math fonts are MathJax\'s, each bundled with its font data and x-height; former ids get the closest', () => {
+    expect(MATH_FONTS.map(m => m.id)).toEqual(['newcm', 'modern', 'tex', 'stix2', 'termes', 'pagella', 'asana', 'bonum', 'schola', 'dejavu', 'euler', 'fira']);
+    for (const m of MATH_FONTS) {
+      expect(isMathFont(m.id), m.id).toBe(true);
+      expect(m.xHeight, m.id).toBeGreaterThan(0.4);
+      expect(m.xHeight, m.id).toBeLessThan(0.55);
     }
-    // italic and bold faces are declared with the style KaTeX's CSS asks for, so nothing is synthesised
-    expect(WEBFONTS).toMatch(/"OLM stix2 It"; src: url\("\.\/math\/stix2\/it\.woff2"\) format\("woff2"\); font-style: italic; font-weight: 400;/);
-    expect(WEBFONTS).toMatch(/"OLM stix2 BfIt"; [^}]*font-style: italic; font-weight: 700;/);
-    expect(WEBFONTS).toMatch(/"OLM stix2 Bf"; [^}]*font-style: normal; font-weight: 700;/);
-    expect(mathFont('nonsense').id).toBe('cm');
+    // the stand-in faces of the KaTeX days (26 Sep 2026) are gone; a preference naming one gets the nearest
+    expect(existsSync(join(WEB, 'math'))).toBe(false);
+    expect(WEBFONTS).not.toContain('OLM ');
+    expect(mathFont('cm').id).toBe('tex');
+    expect(mathFont('libertinus').id).toBe('stix2');
+    expect(mathFont('concrete').id).toBe('euler');
+    expect(mathFont('fira-text').id).toBe('fira');
+    expect(mathFont('nonsense').id).toBe('newcm');
   });
 
-  it('"Matching the text font" is the face\'s own math font; formulas are sized to the face\'s x-height', () => {
-    expect(resolvedMathFont('match', 'cm').id).toBe('cm');
-    expect(resolvedMathFont('match', 'garamond').id).toBe('garamond');
+  it('"Matching the text font" is the MathJax font closest in style; formulas are sized to the text\'s x-height', () => {
+    expect(resolvedMathFont('match', 'cm').id).toBe('newcm');
+    expect(resolvedMathFont('match', 'garamond').id).toBe('pagella');
     expect(resolvedMathFont('match', 'palatino').id).toBe('pagella');
+    expect(resolvedMathFont('match', 'termes').id).toBe('termes');
+    expect(resolvedMathFont('match', 'concrete').id).toBe('euler');
     expect(resolvedMathFont('euler', 'palatino').id).toBe('euler');
-    expect(mathScale(editorFace('cm'))).toBe(1.1);
-    expect(mathScale(editorFace('garamond'))).toBeCloseTo(1.1 * TEXT_X_HEIGHT.garamond / CM_X_HEIGHT, 3);
+    // the formula's x-height is 1.1 times the text's
+    expect(mathScale(editorFace('cm'), mathFont('newcm'))).toBeCloseTo(1.1 * CM_X_HEIGHT / 0.442, 3);
+    expect(mathScale(editorFace('garamond'), mathFont('pagella'))).toBeCloseTo(1.1 * TEXT_X_HEIGHT.garamond / 0.482, 3);
   });
 
-  it('the sans-serif is San Francisco where the system has it, SF Compact first on phones; its formulas take their letters from it, the rest from Fira Math', () => {
+  it('the sans-serif is San Francisco where the system has it, SF Compact first on phones; its formulas are Fira Math', () => {
     const sans = editorFace('sans');
     expect(sans.text).toMatch(/^var\(--sf-font\), "OLT fira", sans-serif$/);
-    expect(resolvedMathFont('match', 'sans')).toMatchObject({ id: 'fira-text', built: 'fira', textLetters: true });
+    expect(resolvedMathFont('match', 'sans').id).toBe('fira');
     const css = readFileSync(join(__dirname, '../packages/client/src/styles.css'), 'utf8');
     // Apple's keywords for the system font in every engine, and nothing that means another system's UI font
     const sf = css.match(/^ {2}--sf-font: ([^;]+);/m)![1];
     expect(sf).toBe('-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "SF Pro Display"');
     const phone = css.match(/@media \(pointer: coarse\) and \(max-width: 700px\)[^{]*\{\s*:root \{ --sf-font: ([^;]+);/)![1];
     expect(phone).toBe('"SF Compact Text", "SF Compact", ' + sf);
-    expect(css).toMatch(/html\[data-math-letters="text"\] \.lyx-editor \.katex :is\(\.mathnormal, \.mathit, \.mathbf, \.boldsymbol\) \{ font-family: var\(--editor-font\); font-size-adjust: 0\.4306; \}/);
     // the face that was called Noto Sans
     expect(editorFace('noto').id).toBe('sans');
     expect(resolvedFace('noto')).toBe('sans');
@@ -178,47 +178,37 @@ describe('applying the editor font', () => {
   const v = (name: string) => root().style.getPropertyValue(name);
   beforeEach(() => { setPref('editorFont', 'cm'); setPref('editorMathFont', 'match'); setDocumentFonts([]); });
 
-  it('Computer Modern is built in: no variables', () => {
+  it('Computer Modern is built in: no text variables; formulas in New Computer Modern', () => {
     expect(v('--editor-font')).toBe('');
-    expect(v('--mf-main')).toBe('');
-    expect(v('--math-scale')).toBe('');
+    expect(Number(v('--math-scale'))).toBeCloseTo(mathScale(editorFace('cm'), mathFont('newcm')), 3);
     expect(root().dataset.editorFont).toBeUndefined();
-    expect(root().dataset.mathFont).toBeUndefined();
+    expect(root().dataset.mathFont).toBe('newcm');
+    expect(currentMathFont()).toBe('newcm');
   });
 
-  it('a face sets the text and, matching, the formula faces; either can be chosen on its own', () => {
+  it('a face sets the text and, matching, the math font; either can be chosen on its own', () => {
     setPref('editorFont', 'libertinus');
     expect(v('--editor-font')).toBe('"OLT libertinus", "CMU Serif", serif');
     expect(v('--editor-sans-font')).toBe('"OLT libertinus sans"');
-    expect(v('--mf-main')).toBe('"OLM libertinus"');
-    expect(v('--mf-it')).toBe('"OLM libertinus It"');
-    expect(v('--mf-s2')).toBe('"OLM libertinus S2"');
-    expect(v('--mf-ams')).toBe('"OLM libertinus AMS"');
-    expect(Number(v('--math-scale'))).toBeCloseTo(mathScale(editorFace('libertinus')), 3);
+    expect(Number(v('--math-scale'))).toBeCloseTo(mathScale(editorFace('libertinus'), mathFont('stix2')), 3);
     expect(root().dataset.editorFont).toBe('libertinus');
-    expect(root().dataset.mathFont).toBe('libertinus');
+    expect(root().dataset.mathFont).toBe('stix2');
+    expect(currentMathFont()).toBe('stix2');
     // a face without its own sans keeps the default one
     setPref('editorFont', 'stix');
     expect(v('--editor-sans-font')).toBe('');
-    expect(v('--mf-main')).toBe('"OLM stix2"');
     // the math font alone
     setPref('editorMathFont', 'euler');
     expect(v('--editor-font')).toContain('OLT stix2');
-    expect(v('--mf-it')).toBe('"OLM euler It"');
     expect(resolvedMath()).toBe('euler');
-    // KaTeX's own Computer Modern beside another text face
-    setPref('editorMathFont', 'cm');
-    expect(v('--mf-main')).toBe('');
-    expect(root().dataset.mathFont).toBeUndefined();
-    expect(root().dataset.editorFont).toBe('stix');
+    expect(currentMathFont()).toBe('euler');
+    expect(Number(v('--math-scale'))).toBeCloseTo(mathScale(editorFace('stix'), mathFont('euler')), 3);
     setPref('editorFont', 'sans');
     setPref('editorMathFont', 'match');
-    expect(root().dataset.mathFont).toBe('fira-text');
-    expect(root().dataset.mathLetters).toBe('text');
-    expect(v('--mf-main')).toBe('"OLM fira"');
+    expect(root().dataset.mathFont).toBe('fira');
     setPref('editorFont', 'cm');
-    expect(root().dataset.mathLetters).toBeUndefined();
     expect(root().dataset.editorFont).toBeUndefined();
+    expect(root().dataset.mathFont).toBe('newcm');
   });
 
   it('"As in the document" follows the document shown', () => {
@@ -230,6 +220,6 @@ describe('applying the editor font', () => {
     expect(root().dataset.mathFont).toBe(editorFace('crimson').math);
     setDocumentFonts(['\\font_roman "default" "default"']);
     expect(root().dataset.editorFont).toBeUndefined();
-    expect(root().dataset.mathFont).toBeUndefined();
+    expect(root().dataset.mathFont).toBe('newcm');
   });
 });

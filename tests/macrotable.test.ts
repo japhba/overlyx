@@ -20,7 +20,7 @@ describe('per-view macro tables (open documents must not clobber each other)', (
     expect(macroTableFor(A, undefined).table.b).toBeUndefined();
   });
   it('fallback macros are present and cache keys differ per view', () => {
-    expect(macroTableFor(A, undefined).table.llbracket).toBeTruthy();
+    expect(macroTableFor(A, undefined).table.abs).toBeTruthy();
     expect(macroTableFor(A, undefined).key).not.toBe(macroTableFor(B, undefined).key);
   });
 });

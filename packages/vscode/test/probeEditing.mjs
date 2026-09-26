@@ -86,7 +86,7 @@ try {
     p.scrollIntoView({ block: 'center' });
     const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
     const texts = [];
-    let n; while ((n = walker.nextNode())) if (n.nodeValue.trim().length > 3 && !n.parentElement.closest('.lyx-math-inline, .katex')) texts.push(n);
+    let n; while ((n = walker.nextNode())) if (n.nodeValue.trim().length > 3 && !n.parentElement.closest('.lyx-math-inline, mjx-container')) texts.push(n);
     const math = p.querySelector('.lyx-math-inline');
     const after = texts.find(t => (math.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING) && t.nodeValue.trim().length > 8);
     const rectOf = (t, i) => { const r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + 1); return r.getBoundingClientRect(); };

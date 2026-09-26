@@ -9,7 +9,7 @@
 import { describe, it, expect, vi } from 'vitest';
 vi.hoisted(() => {
   const g = globalThis as any;
-  if (typeof g.window === 'undefined') g.window = g;
+  if (typeof g.window === 'undefined') { g.window = g; /* MathJax reads navigator.appVersion (node's navigator has none) */ if (g.navigator && g.navigator.appVersion === undefined) Object.defineProperty(g.navigator, 'appVersion', { value: '', configurable: true }); }
   const store = new Map<string, string>();
   // an old px-based case from before widths were mm: pen 4 px thick, highlighter presets ×4 implied
   store.set('ol.inkPens', JSON.stringify({ pen: { color: '#d93025', width: 4, colors: ['#111111'], widths: [1.5, 2.5, 4] }, highlighter: { width: 2.5 } }));

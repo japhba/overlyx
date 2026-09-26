@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseFormula, writeFormula, parseCell, writeCellLatex, MathCursor, renderHullSource, LLANGLE_PREAMBLE, definesLlangle, llanglePreamble, hasLlangleSnippet } from '@overlyx/core';
+import { toMathml } from './mathjax';
 
 const rt = (s: string) => writeFormula(parseFormula(s));
 
@@ -20,11 +21,14 @@ describe('double angle brackets (\\llangle … \\rrangle)', () => {
     expect(cell[2]).toMatchObject({ t: 'big', n: 'bigr', d: '\\rrangle' });
     expect(rt(src)).toBe(src);
   });
-  it('renders for KaTeX as two kerned angle glyphs of the same size', () => {
+  it('renders with MathJax as stretchy ⟪ ⟫ delimiters (OverLyX\'s \\llangle, mathjax-tex.ts)', () => {
     const { latex } = renderHullSource(parseFormula('$\\left\\llangle x\\right\\rrangle +\\bigl\\llangle y\\bigr\\rrangle $'), {});
-    expect(latex).toContain('\\left\\langle\\!\\langle');
-    expect(latex).toContain('\\bigl\\langle\\mkern-4.5mu\\bigl\\langle');
-    expect(latex).toContain('\\bigr\\rangle\\mkern-4.5mu\\bigr\\rangle');
+    expect(latex).toContain('\\left\\llangle ');
+    expect(latex).toContain('\\right\\rrangle ');
+    expect(latex).toContain('\\bigl\\llangle ');
+    const mml = toMathml(latex);
+    expect(mml).toMatch(/<mo[^>]*>(?:⟪|&#x27EA;)<\/mo>/);
+    expect(mml).toMatch(/<mo[^>]*>(?:⟫|&#x27EB;)<\/mo>/);
   });
   it('preamble snippet detection', () => {
     expect(hasLlangleSnippet(LLANGLE_PREAMBLE)).toBe(true);

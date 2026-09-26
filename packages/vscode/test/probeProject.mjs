@@ -1,6 +1,6 @@
 /**
  * Open a real project in the extension (VS Code under xvfb, driven over CDP like guiTest.mjs) and
- * report what the OverLyX editor made of it: notifications, broken node views, KaTeX errors, raw
+ * report what the OverLyX editor made of it: notifications, broken node views, formula errors, raw
  * LaTeX left in the rendered text, webview console errors, and screenshots. For reproducing a
  * "this document does not work in the extension" report without guessing.
  *
@@ -79,15 +79,15 @@ try {
     return {
       chars: text.length,
       paragraphs: document.querySelectorAll('.lyx-editor > *').length,
-      katex: document.querySelectorAll('.katex').length,
-      katexErrors: [...document.querySelectorAll('.katex-error')].map(n => n.textContent?.slice(0, 80)),
+      formulas: document.querySelectorAll('mjx-container').length,
+      mathErrors: [...document.querySelectorAll('.lm-error:not(.lm-pending), .lm-undefined')].map(n => n.textContent?.slice(0, 80)),
       broken: [...document.querySelectorAll('.lyx-broken')].map(n => n.title.slice(0, 160)),
       rawLatexInText: Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 25),
       images: [...document.querySelectorAll('.lyx-graphics img')].map(i => ({ src: i.getAttribute('src')?.slice(-60), ok: i.complete && i.naturalWidth > 0 })),
-      // image glyphs inside formulas (\includegraphics in a macro → KaTeX <img>): are they there, loaded, and how are they placed?
-      mathImages: [...document.querySelectorAll('.katex img')].slice(0, 6).map(i => { const cs = getComputedStyle(i); const p = i.parentElement; const pcs = p ? getComputedStyle(p) : null; return { src: i.getAttribute('src')?.slice(0, 120), ok: i.complete && i.naturalWidth > 0, height: cs.height, verticalAlign: cs.verticalAlign, parentClass: p?.className, parentStyle: p?.getAttribute('style'), parentVAlign: pcs?.verticalAlign, parentPosition: pcs?.position, parentTop: pcs?.top }; }),
-      mathImageCount: document.querySelectorAll('.katex img').length,
-      firstGlyphChain: (() => { const img = document.querySelector('.katex img'); const out = []; for (let e = img, n = 0; e && n < 5; e = e.parentElement, n++) out.push({ tag: e.tagName.toLowerCase(), cls: e.className, style: e.getAttribute('style'), va: getComputedStyle(e).verticalAlign, pos: getComputedStyle(e).position, top: getComputedStyle(e).top, h: getComputedStyle(e).height }); return out; })(),
+      // image glyphs inside formulas (\includegraphics in a macro → MathJax <img>): are they there, loaded, and how are they placed?
+      mathImages: [...document.querySelectorAll('mjx-container img')].slice(0, 6).map(i => { const cs = getComputedStyle(i); const p = i.parentElement; const pcs = p ? getComputedStyle(p) : null; return { src: i.getAttribute('src')?.slice(0, 120), ok: i.complete && i.naturalWidth > 0, height: cs.height, verticalAlign: cs.verticalAlign, parentClass: p?.className, parentStyle: p?.getAttribute('style'), parentVAlign: pcs?.verticalAlign, parentPosition: pcs?.position, parentTop: pcs?.top }; }),
+      mathImageCount: document.querySelectorAll('mjx-container img').length,
+      firstGlyphChain: (() => { const img = document.querySelector('mjx-container img'); const out = []; for (let e = img, n = 0; e && n < 5; e = e.parentElement, n++) out.push({ tag: e.tagName.toLowerCase(), cls: e.className, style: e.getAttribute('style'), va: getComputedStyle(e).verticalAlign, pos: getComputedStyle(e).position, top: getComputedStyle(e).top, h: getComputedStyle(e).height }); return out; })(),
       macros: Object.keys(window.overlyx?.meta?.macros ?? {}).length,
       health: window.overlyx?.meta?.health ?? null,
       layouts: window.overlyx?.meta?.layouts?.length ?? null,
@@ -100,11 +100,11 @@ try {
   const result = { notifications: notes, console: consoleLines.slice(0, 40), ...report };
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(result, null, 2));
   // a close-up of the first formula that carries an image glyph
-  const glyphBox = await editorFrame.evaluate(() => { const img = document.querySelector('.katex img'); const host = img?.closest('.lyx-math-inline, .lyx-math-display, .katex'); if (!host) return null; host.scrollIntoView({ block: 'center' }); const r = host.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  const glyphBox = await editorFrame.evaluate(() => { const img = document.querySelector('mjx-container img'); const host = img?.closest('.lyx-math-inline, .lyx-math-display, mjx-container'); if (!host) return null; host.scrollIntoView({ block: 'center' }); const r = host.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
   if (glyphBox) {
     await sleep(500);
     const fr = await editorFrame.frameElement().then(e => e.boundingBox()).catch(() => null);
-    const box = await editorFrame.evaluate(() => { const img = document.querySelector('.katex img'); const host = img?.closest('.lyx-math-inline, .lyx-math-display, .katex'); const r = host.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+    const box = await editorFrame.evaluate(() => { const img = document.querySelector('mjx-container img'); const host = img?.closest('.lyx-math-inline, .lyx-math-display, mjx-container'); const r = host.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
     const clip = { x: Math.max(0, (fr?.x ?? 0) + box.x - 40), y: Math.max(0, (fr?.y ?? 0) + box.y - 30), width: box.w + 80, height: box.h + 60 };
     await page.screenshot({ path: path.join(out, '02-glyph.png'), clip });
     log('screenshot', path.join(out, '02-glyph.png'), JSON.stringify(box));
@@ -143,14 +143,14 @@ try {
     await page.screenshot({ path: path.join(out, 'scripted-formula.png'), clip: { x: Math.max(0, fr.x + box2.x - 30), y: Math.max(0, fr.y + box2.y - 30), width: box2.w + 60, height: box2.h + 60 } });
     console.log('scripted formula screenshot', path.join(out, 'scripted-formula.png'), JSON.stringify(box));
   }
-  // click into the first scripted formula: the static KaTeX becomes an editable field (atom markers) — same rendering?
+  // click into the first scripted formula: the static rendering becomes an editable field (atom markers) — same rendering?
   if (scripted.formulas?.[0]) {
     const target = scripted.formulas.find(f => f.latex.length < 40) ?? scripted.formulas[0];
     const clicked = await editorFrame.evaluate(async (pos) => {
       const view = window.overlyx.activeView;
       const dom = view.nodeDOM(pos);
       dom.scrollIntoView({ block: 'center' });
-      const k = dom.querySelector('.katex') ?? dom;
+      const k = dom.querySelector('mjx-container') ?? dom;
       const r = k.getBoundingClientRect();
       const ev = (type) => new MouseEvent(type, { bubbles: true, cancelable: true, clientX: r.x + 4, clientY: r.y + r.height / 2, button: 0 });
       k.dispatchEvent(ev('mousedown')); k.dispatchEvent(ev('mouseup')); k.dispatchEvent(ev('click'));

@@ -232,7 +232,7 @@ async function precisionField(page: Page): Promise<{ atoms: Rect[]; num: Rect; f
   const atoms = await wrap.locator('.lm-c0 > .lm-a').evaluateAll(els => els.map(e => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; }));
   expect(atoms.length).toBe(5);
   const num = (await wrap.locator('.lm-c1').boundingBox())!;
-  const frac = (await wrap.locator('.lm-c0 .mfrac .vlist-t').first().boundingBox())!;   // the visible fraction
+  const frac = (await wrap.locator('.lm-c0 mjx-mfrac').first().boundingBox())!;   // the visible fraction
   const sup = (await wrap.locator('.lm-c4').boundingBox())!;
   return { atoms, num, frac, sup };
 }
@@ -257,7 +257,7 @@ test('clicks land on the nearest boundary, inside the inset under the pointer, a
   const { atoms, num, frac, sup } = await precisionField(page);
   const [two, pi] = atoms;
   const midY = two.y + two.height / 2;
-  // "2π" is one text run for KaTeX — every character still has its own box: the left quarter of π
+  // every character has its own box: the left quarter of π
   // puts the caret before it, the right quarter behind it
   await page.mouse.click(pi.x + pi.width * 0.25, midY);
   let s = await secondState(page);
@@ -269,8 +269,7 @@ test('clicks land on the nearest boundary, inside the inset under the pointer, a
   s = await secondState(page);
   expect([s.depth, s.pos]).toEqual([1, 0]);
   // into the numerator: the slice above points at the fraction, the fraction gets all four corners,
-  // one pixel outside its visible box (MathRow::drawMarkers) — not around KaTeX's null delimiters,
-  // not at the height of the text line
+  // one pixel outside its visible box (MathRow::drawMarkers) — not at the height of the text line
   await page.mouse.click(num.x + num.width / 2, num.y + num.height / 2);
   s = await secondState(page);
   expect([s.depth, s.inset, s.idx]).toEqual([2, 'frac', 0]);

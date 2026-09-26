@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { parseCell, parseFormula, writeFormula, writeCellLatex, renderHullSource, type MacroTable, type Atom } from '../packages/core/src/math';
-import katex from 'katex';
+import { toMathml } from './mathjax';
 
 const MACROS: MacroTable = { inv: { nargs: 1 }, lndet: { nargs: 1 }, Pfi: { nargs: 0 }, kap: { nargs: 0 }, cum: { nargs: 2 }, mdiag: { nargs: 1 } };
 
@@ -81,8 +81,9 @@ describe('math parse structure (LyX semantics)', () => {
     expect(writeFormula(hull)).toBe(latex);
     const source = renderHullSource(hull, {}).latex;
     expect(source).toContain('\\middle\\Vert');
-    const html = katex.renderToString(source, { throwOnError: true, trust: true, strict: false });
-    expect(html).not.toContain('lm-unknown');
+    const mml = toMathml(source);
+    expect(mml).not.toContain('lm-unknown');
+    expect(mml).toMatch(/<mo[^>]*>(?:‖|&#x2016;)<\/mo>/);
   });
   it('scripts attach to the previous atom and merge', () => {
     const c = parseCell('x_{i}^{2}');
@@ -151,13 +152,13 @@ describe('corpus (all formulas of the local LyX projects, when present)', () => 
   });
 });
 
-describe('katex limits placement (the \\htmlClass cell markup must not detach scripts)', () => {
+describe('limits placement (the \\htmlClass cell markup must not detach scripts)', () => {
   const kx = (latex: string) => renderHullSource(parseFormula(latex, {}), {}).latex;
-  const renders = (latex: string, display = false) => katex.renderToString(latex, { displayMode: display, trust: true, strict: false, throwOnError: true });
+  const renders = (latex: string, display = false) => toMathml(latex, undefined, display);
   it('underbrace: the subscript goes below the brace (\\mathop…\\limits)', () => {
     const l = kx('$\\underbrace{x+y}_{i}$');
     expect(l).toMatch(/\\mathop\{.*\\underbrace\{.*\}.*\}\\limits_\{/);
-    expect(renders(l)).toContain('op-limits');
+    expect(renders(l)).toMatch(/<munder[ >]/);
   });
   it('overbrace: the superscript goes above', () => {
     expect(kx('$\\overbrace{x+y}^{n}$')).toMatch(/\\mathop\{.*\\overbrace\{.*\}\\limits\^\{/);
@@ -165,7 +166,8 @@ describe('katex limits placement (the \\htmlClass cell markup must not detach sc
   it('big operators carry limits in display style, not inline', () => {
     const disp = kx('\\[\\sum_{i}x\\]');
     expect(disp).toMatch(/\\mathop\{.*\\sum.*\}\\limits_\{/);
-    expect(renders(disp, true)).toContain('op-limits');
+    expect(renders(disp, true)).toMatch(/<munder[ >]/);
+    expect(renders(kx('$\\sum_{i}x$'))).not.toMatch(/<munder[ >]/);
     expect(kx('$\\sum_{i}x$')).not.toContain('\\mathop');
   });
   it('explicit \\limits and \\nolimits are respected', () => {

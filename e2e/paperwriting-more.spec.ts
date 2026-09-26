@@ -163,7 +163,7 @@ test('writing "BERT" from a blank document: lists, footnote, emphasis, subsectio
   const rows = ['System & MNLI & QQP', 'BiLSTM\\+ELMo\\+Attn & 76\\.4 & 64\\.8', 'BERT\\$_\\{BASE\\}\\$ & 84\\.6 & 71\\.2', 'BERT\\$_\\{LARGE\\}\\$ & 86\\.7 & 72\\.1'];
   expect(text).toMatch(new RegExp('\\\\begin\\{tabular\\}\\{\\|c\\|c\\|c\\|\\}\\n\\\\hline\\s*' + rows.join('\\\\tabularnewline\\n\\\\hline\\s*') + '\\\\tabularnewline\\n\\\\hline\\s*\\\\end\\{tabular\\}'));
 
-  await expect(page.locator('.katex-error')).toHaveCount(0);
+  await expect(page.locator('.lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(noErrors(errors)).toEqual([]);
   writeFileSync(`${DIR}/.complete`, 'bert');   // the appendix sessions below continue from here
 });
@@ -363,7 +363,7 @@ test('writing "BERT", the appendix: additional details (A)', async ({ page }) =>
   expect(text).toMatch(/\\caption\{Differences in pre-training model architectures\. BERT uses a bidirectional Transformer\.[\s\S]*feature-based approach\.\}\\label\{fig:archs\}/);
   expect(text).toMatch(/\\caption\{Illustrations of Fine-tuning BERT on Different Tasks\.\}\\label\{fig:finetune\}/);
   expect(text).toMatch(/E represents the input embedding, \$T_\{i\}\$ represents the contextual representation of token \$i\$/);
-  await expect(page.locator('.katex-error')).toHaveCount(0);
+  await expect(page.locator('.lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(noErrors(errors)).toEqual([]);
   writeFileSync(`${DIR}/.appendix-a`, 'bert');
 });
@@ -529,7 +529,7 @@ test('writing "BERT", the appendix: experimental setup and ablation studies (B, 
   expect(text).toContain('80\\% & 10\\% & 10\\% & 84.2 & 95.4 & 94.9\\tabularnewline');
   expect(text).toContain('0\\% & 0\\% & 100\\% & 83.6 & 94.9 & 94.6\\tabularnewline');
   expect(text).toMatch(/best approach in Section 5\.3\./);
-  await expect(page.locator('.katex-error')).toHaveCount(0);
+  await expect(page.locator('.lm-error:not(.lm-pending), .lm-undefined')).toHaveCount(0);
   expect(noErrors(errors)).toEqual([]);
   writeFileSync(`${DIR}/.appendix`, 'bert');
 });

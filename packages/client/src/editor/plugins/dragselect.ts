@@ -2,7 +2,7 @@
  * LyX-like mouse selection (a port of Text3.cpp LFUN_MOUSE_PRESS / MOTION and
  * TextMetrics::setCursorFromCoordinates).
  *
- * The browser's native drag cannot cross the formula widgets (their KaTeX DOM and hidden textarea
+ * The browser's native drag cannot cross the formula widgets (their MathJax DOM and hidden textarea
  * break it), ProseMirror's own mouse handling resets whatever a plugin dispatches mid-drag, and a
  * press inside an existing selection starts a drag-and-drop of that text (LyX has no such thing:
  * a press always places the cursor, a drag always selects). So every gesture that starts on text

@@ -63,7 +63,7 @@ async function openDoc(ctx: BrowserContext, project: string): Promise<Page> {
   const page = await ctx.newPage();
   await page.goto(BASE_URL + '/#/' + project + '/main.tex');
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
-  await page.waitForTimeout(900);   // fonts, KaTeX, presence settle before the clip starts
+  await page.waitForTimeout(900);   // fonts, formulas, presence settle before the clip starts
   return page;
 }
 
@@ -156,7 +156,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.waitForTimeout(500);
     await page.keyboard.type('in the ridgeless limit $\\lambda\\to0$', { delay: 34 });
     await expect(page.locator('.lyx-editor .lyx-par', { hasText: 'ridgeless limit' }).first()).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.lyx-editor .lyx-math-inline .katex').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.lyx-editor .lyx-math-inline mjx-container').first()).toBeVisible({ timeout: 10000 });
     await finish(ctx, page, 'tex', theme, t0, opened);
   });
 

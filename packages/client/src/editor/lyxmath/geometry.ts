@@ -2,26 +2,26 @@
  * Geometry of a rendered formula — the mathed part of LyX's coordinate cache and the algorithms
  * that read it (MathRow::metrics for the boxes, MathData::pos2x / x2pos / dist,
  * InsetMathNest::editXY, Cursor::moveToClosestEdge, the `realAnchor().hasPart()` rule of
- * InsetMathNest::lfunMouseMotion), measured from KaTeX's output.
+ * InsetMathNest::lfunMouseMotion), measured from MathJax's output.
  *
- * The renderer wraps every cell in a `.lm-c<id>` span and every atom of a cell in an `.lm-a` span
- * (core/math/katex.ts), so a cell's children, in order, are its atoms — the MathRow LyX lays out
- * for a MathData. Horizontal extents are the boxes the browser laid out. Vertical extents come
- * from KaTeX's own height/depth of each wrapper (`data-h` / `data-d`, in em of the wrapper's font
- * size; the field copies them out of KaTeX's build tree), placed around the cell's baseline: an
- * inline span's client rect is always its font's line box, whatever it contains, and a fraction or
- * a big operator is far taller than that. As in LyX, a cell (and an inset) is never shorter than
- * the font's line box (MathData::metrics: "set a minimal ascent/descent for the cell").
+ * The renderer wraps every cell in a `.lm-c<id>` box and every atom of a cell in an `.lm-a` box
+ * (core/math/mathjax.ts; MathJax mrows), so a cell's children, in order, are its atoms — the
+ * MathRow LyX lays out for a MathData. The boxes are MathJax's: inline blocks exactly as tall and
+ * deep as their content; the glue between two atoms is a margin before the second one. The
+ * baseline is measured with a probe; the font size of a cell is the formula's, scaled by its
+ * script level (`data-sl`: MathJax scales the characters inside, not the box). As in LyX, a cell
+ * (and an inset) is never shorter than the font's line box (MathData::metrics: "set a minimal
+ * ascent/descent for the cell").
  */
 import { atomCells, nargs, isHull, type Atom, type CellRef, type Owner, type Slice, type Hull } from '@overlyx/core';
 
 export interface Box { left: number; right: number; top: number; bottom: number }
 
-/** an atom of a cell: its wrapper box (with the spacing KaTeX puts after it, as LyX's inset widths include their spacing) and the visible content */
+/** an atom of a cell: its box and the visible content (the same box: MathJax puts the glue before the next atom) */
 export interface AtomGeom extends Box {
   atom: Atom;
   el: HTMLElement;
-  /** the visible content, without the trailing inter-atom glue (a fraction: its bar and cells, not KaTeX's null delimiters) */
+  /** the visible content */
   glyphLeft: number;
   glyphRight: number;
   /** the atom has cells the cursor can enter */
@@ -50,8 +50,8 @@ export interface GeomLookup {
 
 /**
  * MathData::pos2x: the x of the boundary before position `pos`. LyX splits the spacing between
- * two atoms evenly, so the boundary lies in the middle of the gap; KaTeX puts the glue after the
- * first atom, so the middle between its glyphs and the next atom is taken.
+ * two atoms evenly, so the boundary lies in the middle of the gap between the first atom's glyphs
+ * and the next atom.
  */
 export function boundaryX(cg: CellGeom, pos: number): number {
   const n = cg.atoms.length;
@@ -180,7 +180,15 @@ export function insetAt(g: GeomLookup, hull: Hull, x: number, y: number): Atom |
   return found;
 }
 
-/* ------------------------------------------------------------------ measuring KaTeX's output */
+/* ------------------------------------------------------------------ measuring MathJax's output */
+
+/** an empty box on the baseline */
+function probe(): HTMLElement {
+  const p = document.createElement('span');
+  p.className = 'lm-probe';
+  p.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline;padding:0;margin:0;border:0';
+  return p;
+}
 
 const CELL_RE = /(?:^|\s)lm-c(\d+)(?:\s|$)/;
 
@@ -192,13 +200,16 @@ const CELL_RE = /(?:^|\s)lm-c(\d+)(?:\s|$)/;
 export class MathGeometry implements GeomLookup {
   private byId = new Map<number, HTMLElement>();
   private cache = new Map<Owner, (CellGeom | null)[]>();
-  /** baseline offset of a wrapper span in units of its font size (measured once with a probe) */
-  private k: number | null = null;
+  /** the formula's font size (px) */
+  private fs0 = 0;
 
   constructor(private content: HTMLElement, private cells: CellRef[], private parents: Map<Owner, { owner: Owner; idx: number; pos: number }>) {
-    for (const el of Array.from(content.querySelectorAll<HTMLElement>('.enclosing'))) {
+    for (const el of Array.from(content.querySelectorAll<HTMLElement>('[class*="lm-c"]'))) {
       const m = CELL_RE.exec(el.className);
-      if (m) this.byId.set(Number(m[1]), el);
+      if (!m) continue;
+      this.byId.set(Number(m[1]), el);
+      // a probe standing on the cell's baseline, in every cell at once: reading them costs one layout
+      if (!(el.lastElementChild as HTMLElement | null)?.classList.contains('lm-probe')) el.appendChild(probe());
     }
   }
 
@@ -222,35 +233,30 @@ export class MathGeometry implements GeomLookup {
     return a && a.atom === atom ? a : cg?.atoms.find(x => x.atom === atom) ?? null;
   }
 
-  /** the distance of the baseline from the top of a wrapper's line box, in em (KaTeX's fonts; measured, not assumed) */
-  private baselineRatio(el: HTMLElement, rect: DOMRect, fs: number): number {
-    if (this.k !== null) return this.k;
-    const probe = document.createElement('span');
-    probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline;padding:0;margin:0;border:0';
-    el.appendChild(probe);
-    const y = probe.getBoundingClientRect().top;
-    probe.remove();
-    const k = (y - rect.top) / fs;
-    this.k = isFinite(k) && k > 0 && k < 2 ? k : 0.91;
-    return this.k;
+  /** the y of the baseline of a cell box (its probe) */
+  private baselineOf(el: HTMLElement): number {
+    const p = el.lastElementChild as HTMLElement | null;
+    return (p?.classList.contains('lm-probe') ? p : el.appendChild(probe())).getBoundingClientRect().top;
+  }
+
+  /** the font size (px) of a cell or atom box: the formula's, scaled for its script level (TeX's 0.7 / 0.5) */
+  private fontSize(el: HTMLElement): number {
+    if (!this.fs0) this.fs0 = parseFloat(getComputedStyle(this.content.querySelector('mjx-math') ?? this.content).fontSize) || 16;
+    const sl = Math.min(2, Math.max(0, Number(el.getAttribute('data-sl')) || 0));
+    return this.fs0 * [1, 0.707, 0.5][sl];
   }
 
   private measure(ref: CellRef, el: HTMLElement): CellGeom {
     const rect = el.getBoundingClientRect();
-    const fs = parseFloat(getComputedStyle(el).fontSize) || 16;
+    const fs = this.fontSize(el);
     const empty = el.classList.contains('lm-empty');
+    const baseline = this.baselineOf(el);
+    // the font's line box around the baseline: the caret's extent, the least a cell is tall
+    const lineTop = baseline - 0.8 * fs, lineBottom = baseline + 0.25 * fs;
     if (empty) {
-      return { ref, el, empty, baseline: rect.bottom - 0.1 * fs, fontSize: fs, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, lineTop: rect.top, lineBottom: rect.bottom, atoms: [] };
+      return { ref, el, empty, baseline, fontSize: fs, left: rect.left, right: rect.right, top: Math.min(rect.top, lineTop), bottom: Math.max(rect.bottom, lineBottom), lineTop, lineBottom, atoms: [] };
     }
-    const baseline = rect.top + this.baselineRatio(el, rect, fs) * fs;
     const cell = atomCells(ref.owner)[ref.idx] ?? [];
-    const metric = (e: HTMLElement): [number, number] | null => {
-      const h = parseFloat(e.getAttribute('data-h') ?? ''), d = parseFloat(e.getAttribute('data-d') ?? '');
-      return isFinite(h) && isFinite(d) ? [baseline - h * fs, baseline + d * fs] : null;
-    };
-    // the cell: KaTeX's height/depth of its content, never less than the font's line box
-    const m = metric(el);
-    const top = Math.min(rect.top, m ? m[0] : rect.top), bottom = Math.max(rect.bottom, m ? m[1] : rect.bottom);
     const atoms: AtomGeom[] = [];
     let i = 0;
     for (const child of Array.from(el.children) as HTMLElement[]) {
@@ -258,23 +264,14 @@ export class MathGeometry implements GeomLookup {
       const atom = cell[i];
       if (!atom) break;
       const r = child.getBoundingClientRect();
-      // KaTeX inserts the glue between two atoms as a trailing .mspace inside the first one's wrapper
-      const kids = Array.from(child.children) as HTMLElement[];
-      const last = kids.length > 1 && kids[kids.length - 1].classList.contains('mspace') ? kids[kids.length - 2] : kids[kids.length - 1];
-      let glyphLeft = r.left, glyphRight = last ? Math.max(r.left, last.getBoundingClientRect().right) : r.right;
-      if (atom.t === 'frac') {
-        const bar = child.querySelector<HTMLElement>('.mfrac');
-        if (bar) { const br = bar.getBoundingClientRect(); if (br.width) { glyphLeft = br.left; glyphRight = br.right; } }
-      }
-      const am = metric(child);
       atoms.push({
         atom, el: child, nest: nargs(atom) > 0,
-        left: r.left, right: Math.max(r.right, glyphRight), glyphLeft, glyphRight,
-        top: Math.min(rect.top, am ? am[0] : rect.top), bottom: Math.max(rect.bottom, am ? am[1] : rect.bottom),
+        left: r.left, right: r.right, glyphLeft: r.left, glyphRight: r.right,
+        top: Math.min(lineTop, r.top), bottom: Math.max(lineBottom, r.bottom),
       });
       i++;
     }
-    return { ref, el, empty, baseline, fontSize: fs, left: rect.left, right: rect.right, top, bottom, lineTop: rect.top, lineBottom: rect.bottom, atoms };
+    return { ref, el, empty, baseline, fontSize: fs, left: rect.left, right: rect.right, top: Math.min(rect.top, lineTop), bottom: Math.max(rect.bottom, lineBottom), lineTop, lineBottom, atoms };
   }
 }
 

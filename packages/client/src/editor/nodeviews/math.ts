@@ -8,7 +8,8 @@ import { NodeSelection, TextSelection } from 'prosemirror-state';
 import { dragFromAtom, shiftClickAt } from '../plugins/dragselect';
 import type { EditorView, NodeView } from 'prosemirror-view';
 import { macroFromLyxLines, parseFormula, renderHullSource, numberedType, type HullType } from '@overlyx/core';
-import { LyxMathField, renderStaticHtml, activeMathField, rowRectsOf } from '../lyxmath/field';
+import { LyxMathField, renderStaticInto, activeMathField, rowRectsOf } from '../lyxmath/field';
+import { onMathRendererChange } from '../lyxmath/mathjax';
 import { macroTableFor, mathViews, macroVersion, macrosReady } from '../lyxmath/macrotable';
 import { showContextMenu, type MenuItem } from '../contextmenu';
 import { clipboardMenuItems, selectionCovers } from '../clipmenu';
@@ -24,14 +25,14 @@ export const pendingFocus: { pos: number | null; keys: string[]; /** the formula
 
 /* ------------------------------------------------ deferred static rendering */
 
-interface Deferrable { dom: HTMLElement; view: EditorView; pending: boolean; renderPending(): void }
+interface Deferrable { dom: HTMLElement; view: EditorView; pending: boolean; stale: boolean; renderPending(): void }
 /** formulas showing their source instead of a rendering; rendered in idle time (document order) or when scrolled near */
 const staticQueue = new Set<Deferrable>();
 let staticPumpScheduled = false;
 let batchStart = 0, lastBudgetCheck = 0;
 /**
  * Synchronous rendering budget: one burst of node-view constructions (the initial render of a
- * document) may spend ~40 ms on KaTeX; the formulas after that only show their source and are
+ * document) may spend ~40 ms on MathJax; the formulas after that only show their source and are
  * rendered in idle time. Keeps the first paint of a long paper fast without the formulas at the
  * top (where the cursor is) ever appearing unrendered.
  */
@@ -53,6 +54,7 @@ function pumpStatic(deadline: { timeRemaining(): number }): void {
   let waiting = false;
   for (const v of staticQueue) {
     if (deadline.timeRemaining() < 3) { waiting = true; break; }
+    if (!v.pending && !v.stale) { staticQueue.delete(v); continue; }
     if (!macrosReady(v.view)) continue;     // stays queued until its document's macros are known
     v.renderPending();
   }
@@ -93,6 +95,15 @@ function pump() {
 }
 function watchLazy(v: Upgradable) { (v.dom as any).__lyxMathView = v; io?.observe(v.dom); }
 function unwatchLazy(v: Upgradable) { io?.unobserve(v.dom); staticQueue.delete(v); const i = lazyQueue.indexOf(v); if (i >= 0) lazyQueue.splice(i, 1); }
+
+/**
+ * Another math font (or LyX's macros for MathJax changed): fields draw themselves again; static
+ * formulas keep their old rendering until idle time renders them anew, in document order.
+ */
+onMathRendererChange(() => {
+  for (const v of mathViews) (v as { markStale?(): void }).markStale?.();
+  schedulePump();
+});
 
 /* ------------------------------------------------ shared */
 
@@ -239,6 +250,9 @@ export class MathInlineView implements NodeView {
   private review: FormulaReview;
   /** shows its source; rendered later (idle time / scrolled near / macros known) */
   pending = false;
+  /** rendered with a math font no longer chosen: rendered again in idle time */
+  stale = false;
+  private renderStamp = 0;
 
   constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('span');
@@ -270,21 +284,24 @@ export class MathInlineView implements NodeView {
     schedulePump();
   }
   renderPending() {
-    if (!this.pending) return;
+    if (!this.pending && !this.stale) return;
     this.renderStatic();
   }
+  markStale() { if (this.field || this.pending) return; this.stale = true; staticQueue.add(this); }
   private renderStatic() {
     const el = this.ensureStaticEl();
-    this.pending = false; staticQueue.delete(this); el.classList.remove('pending');
+    this.pending = false; this.stale = false; staticQueue.delete(this); el.classList.remove('pending');
     const { key, table } = macroTableFor(this.view, this.getPos());
-    el.innerHTML = renderStaticHtml('$' + this.lastLatex + '$', false, table, { project: viewProject(this.view), docDir: viewDocDir(this.view) });
+    const stamp = ++this.renderStamp;
+    renderStaticInto(el, '$' + this.lastLatex + '$', false, table, { project: viewProject(this.view), docDir: viewDocDir(this.view) },
+      () => { if (stamp === this.renderStamp && !this.field) this.renderStatic(); });
     this.staticKey = key;
   }
 
   upgrade() {
     if (this.field) return;
     unwatchLazy(this);
-    this.pending = false;
+    this.pending = false; this.stale = false; this.renderStamp++;
     const { key, table } = macroTableFor(this.view, this.getPos());
     const f = new LyxMathField({
       latex: '$' + this.lastLatex + '$', display: false, macros: table,
@@ -407,6 +424,9 @@ export class MathDisplayView implements NodeView {
   private mo: MutationObserver | null = null;
   /** shows its source; rendered later (idle time / scrolled near / macros known) */
   pending = false;
+  /** rendered with a math font no longer chosen: rendered again in idle time */
+  stale = false;
+  private renderStamp = 0;
 
   constructor(private node: PMNode, public view: EditorView, private getPos: () => number | undefined) {
     this.review = new FormulaReview(view, getPos, true, node.attrs.editClock);
@@ -459,15 +479,19 @@ export class MathDisplayView implements NodeView {
     schedulePump();
   }
   renderPending() {
-    if (!this.pending) return;
+    if (!this.pending && !this.stale) return;
     this.renderStatic();
   }
+  markStale() { if (this.field || this.pending) return; this.stale = true; staticQueue.add(this); }
   private renderStatic() {
-    if (!this.staticEl) return;
-    this.pending = false; staticQueue.delete(this); this.staticEl.classList.remove('pending');
+    const el = this.staticEl;
+    if (!el) return;
+    this.pending = false; this.stale = false; staticQueue.delete(this); el.classList.remove('pending');
     const { key, table } = macroTableFor(this.view, this.getPos());
     this.dom.classList.toggle('empty', !this.lastLatex.trim());   // an empty formula keeps its one box visible (styles.css .lm-empty)
-    this.staticEl.innerHTML = renderStaticHtml(this.lastLatex, true, table, { project: viewProject(this.view), docDir: viewDocDir(this.view) });
+    const stamp = ++this.renderStamp;
+    renderStaticInto(el, this.lastLatex, true, table, { project: viewProject(this.view), docDir: viewDocDir(this.view) },
+      () => { if (stamp === this.renderStamp && this.staticEl === el) this.renderStatic(); });
     this.staticKey = key;
     this.scheduleRelayout();
   }
@@ -475,7 +499,7 @@ export class MathDisplayView implements NodeView {
   upgrade() {
     if (this.field) return;
     unwatchLazy(this);
-    this.pending = false;
+    this.pending = false; this.stale = false; this.renderStamp++;
     const { key, table } = macroTableFor(this.view, this.getPos());
     const f = new LyxMathField({
       latex: this.lastLatex, display: true, macros: table,

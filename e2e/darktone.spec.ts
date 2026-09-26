@@ -16,10 +16,10 @@ test.beforeAll(() => {
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
 const textColor = (page: Page) => page.evaluate(() => getComputedStyle(document.querySelector('.lyx-editor')!).color);
-const formulaColor = (page: Page) => page.evaluate(() => getComputedStyle(document.querySelector('.lyx-editor .katex')!).color);
+const formulaColor = (page: Page) => page.evaluate(() => getComputedStyle(document.querySelector('.lyx-editor mjx-container')!).color);
 async function open(page: Page) {
   await page.goto(`/#/${PROJECT}/tone.tex`);
-  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .katex').length >= 1, null, { timeout: 60000 });
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor mjx-container').length >= 1, null, { timeout: 60000 });
   await page.waitForTimeout(500);
 }
 

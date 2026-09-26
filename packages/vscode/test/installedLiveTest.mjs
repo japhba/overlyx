@@ -59,15 +59,15 @@ try {
   }, 'installed live editor');
   await frame.waitForFunction(() => !!window.overlyx?.activeView);
   await sleep(4000);
-  // A formula can have valid KaTeX markup while all of its font URLs fail. Check actual
+  // A formula can have valid MathJax markup while all of its font URLs fail. Check actual
   // font loading in the real webview, including every bundled text face.
   await frame.evaluate(async () => {
     await Promise.all(['400', '700', 'italic 400', 'italic 700'].map(face => document.fonts.load(`${face} 16px "CMU Serif"`, 'Computer Modern')));
     await document.fonts.ready;
   });
   const result = await frame.evaluate(() => ({
-    formulas: document.querySelectorAll('.katex').length,
-    errors: [...document.querySelectorAll('.katex-error,.lm-error,.lm-unknown')].map(n => n.textContent),
+    formulas: document.querySelectorAll('mjx-container').length,
+    errors: [...document.querySelectorAll('.lm-error:not(.lm-pending),.lm-undefined,.lm-unknown')].map(n => n.textContent),
     live: [...document.scripts].some(s => s.src.includes('/@vite/client')),
     iconsLoaded: [...document.querySelectorAll('img.tb-img')].every(i => i.complete && i.naturalWidth > 0),
     textFont: getComputedStyle(document.querySelector('.lyx-editor')).fontFamily,
@@ -81,7 +81,7 @@ try {
   assert.match(result.textFont, /^"?CMU Serif"?,/);
   assert.ok(result.fonts.every(f => f.status === 'loaded'), 'No font request may fail');
   assert.equal(result.fonts.filter(f => f.family === 'CMU Serif').length, 4, 'All four Computer Modern text faces load');
-  assert.ok(result.fonts.some(f => f.family === 'KaTeX_Main'), 'Computer Modern math fonts load');
+  assert.ok(result.fonts.some(f => /^MJX-NCM-/.test(f.family)), 'New Computer Modern math fonts (MathJax) load');
   const menuTitles = ['File', 'Edit', 'View', 'Insert', 'Navigate', 'Document', 'Tools', 'Help'];
   const compact = await frame.locator('.menu-overflow').count() > 0;
   if (compact) {
@@ -138,7 +138,7 @@ try {
     await frame.waitForFunction(() => document.querySelectorAll('.lyx-editor').length === 4);
     const ids = await frame.locator('.lyx-editor').evaluateAll(nodes => nodes.map(n => n.dataset.docId.split('/').slice(2).join('/')));
     assert.deepEqual(ids, ['main.tex', 'sections/chapter.tex', 'sections/nested.tex', 'second.tex']);
-    assert.deepEqual(await frame.locator('.katex-error,.lm-error,.lm-unknown').allTextContents(), []);
+    assert.deepEqual(await frame.locator('.lm-error:not(.lm-pending),.lm-undefined,.lm-unknown').allTextContents(), []);
     const childEditor = frame.locator('.lyx-editor[data-doc-id$="/sections/chapter.tex"]');
     await childEditor.locator('p').last().click();
     await frame.evaluate(() => {
@@ -216,7 +216,7 @@ try {
       await target.waitForFunction(() => {
         const editor = document.querySelector('.lyx-editor[data-doc-id$="/sections/chapter.tex"]');
         return editor.textContent.includes('MSRJD appendix') && editor.textContent.includes('UNSAVED NOTE')
-          && !editor.querySelector('.katex-error,.lm-error,.lm-unknown');
+          && !editor.querySelector('.lm-error:not(.lm-pending),.lm-undefined,.lm-unknown');
       });
     }
     assert.equal(fs.readFileSync(childPath, 'utf8'), external, 'External refresh does not save a cached view over the file');

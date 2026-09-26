@@ -25,6 +25,8 @@ After the table.
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
 const borderOf = (page: Page, sel: string) => page.evaluate(s => getComputedStyle(document.querySelector(s)!).borderTopColor, sel);
+/** an empty cell's outline: an inset box-shadow (a border would change MathJax's box), 'none' when hidden */
+const outlineOf = (page: Page, sel: string) => page.evaluate(s => getComputedStyle(document.querySelector(s)!).boxShadow, sel);
 
 test('empty-cell boxes and the table grid appear only while editing inside', async ({ page }) => {
   await login(page);
@@ -36,17 +38,17 @@ test('empty-cell boxes and the table grid appear only while editing inside', asy
 
   // the formula at rest (a field or the static rendering — on-screen formulas are upgraded lazily):
   // the empty numerator keeps its room but shows no box
-  expect(await borderOf(page, '.lyx-math-inline .lm-empty')).toBe(TRANSPARENT);
+  expect(await outlineOf(page, '.lyx-math-inline .lm-empty')).toBe('none');
   const room = await page.evaluate(() => document.querySelector('.lyx-math-inline .lm-empty')!.getBoundingClientRect().width);
   expect(room).toBeGreaterThan(3);
   // editing the formula: the box is there
-  await page.locator('.lyx-math-inline .katex').first().click();
+  await page.locator('.lyx-math-inline mjx-container').first().click();
   await page.waitForSelector('.lyx-math-inline .lm-field.focused .lm-empty', { timeout: 10000 });
-  expect(await borderOf(page, '.lyx-math-inline .lm-field.focused .lm-empty')).not.toBe(TRANSPARENT);
+  expect(await outlineOf(page, '.lyx-math-inline .lm-field.focused .lm-empty')).not.toBe('none');
   // leaving it: gone again
   await page.locator('.lyx-editor .lyx-par', { hasText: 'After the table.' }).click();
   await expect(page.locator('.lyx-math-inline .lm-field.focused')).toHaveCount(0);
-  expect(await borderOf(page, '.lyx-math-inline .lm-empty')).toBe(TRANSPARENT);
+  expect(await outlineOf(page, '.lyx-math-inline .lm-empty')).toBe('none');
 
   // the table at rest: no dotted grid (its cells have no lines)
   await page.locator('.lyx-editor .lyx-par', { hasText: 'After the table.' }).click();
@@ -59,7 +61,7 @@ test('empty-cell boxes and the table grid appear only while editing inside', asy
   expect(await borderOf(page, '.lyx-tabular .lyx-cell')).not.toBe(TRANSPARENT);
   expect(await page.evaluate(() => document.querySelector('.lyx-tabular')!.getBoundingClientRect().width)).toBe(before);
   // a formula outside the table takes the keyboard: the table is no longer where one works
-  await page.locator('.lyx-math-inline .katex').first().click();
+  await page.locator('.lyx-math-inline mjx-container').first().click();
   await page.waitForSelector('.lyx-math-inline .lm-field.focused', { timeout: 10000 });
   await expect(page.locator('.lyx-tabular')).not.toHaveClass(/ol-editing/);
   // and away again

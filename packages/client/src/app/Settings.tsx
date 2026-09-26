@@ -8,7 +8,7 @@
  *   Account      who is signed in, and the per-account server settings (userSettings.ts):
  *                token re-copy — administrators switch it per account right here.
  */
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser } from '../api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
@@ -18,7 +18,8 @@ import { Dialog } from './Dialogs';
 import { AUTO_BUILD_CHOICES, AUTO_BUILD_DELAYS } from './pdfstatus';
 import { EDITOR_FACES, MATH_FONTS, FOLLOW_DOCUMENT, MATCH_TEXT, editorFace, mathFont } from '../fonts/catalog';
 import { resolvedFace, resolvedMath } from '../fonts/editorfont';
-import katex from 'katex';
+import { renderMath } from '../editor/lyxmath/mathjax';
+import { useMathRendererVersion } from '../editor/lyxmath/usemath';
 
 const SECTIONS = [['editor', 'Editor'], ['ai', 'AI assistance'], ['appearance', 'Appearance'], ['privacy', 'Privacy'], ['account', 'Account']] as const;
 export type SettingsSection = (typeof SECTIONS)[number][0];
@@ -51,12 +52,17 @@ function ModelPicker({ label, value, fallback, models, onChange, pref }: { label
  * https://tex.stackexchange.com/q/425098 (which OpenType math fonts are available — the fonts offered
  * here), with a line of accents added.
  */
-const SAMPLE_MACROS = {
-  '\\Res': '\\operatorname{Res}', '\\diff': '\\mathop{}\\!\\mathrm{d}', '\\BbbC': '\\mathbb{C}',
-  '\\iiiint': '\\mathop{\\int\\kern-0.65em\\int\\kern-0.65em\\int\\kern-0.65em\\int}', // not in KaTeX
-};
-const m = (src: string, display = false) => katex.renderToString(src, { throwOnError: false, strict: false, displayMode: display, output: 'html', macros: { ...SAMPLE_MACROS } });
-const FONT_SAMPLE = [
+const SAMPLE_MACROS = { '\\Res': '\\operatorname{Res}', '\\diff': '\\mathop{}\\!\\mathrm{d}', '\\BbbC': '\\mathbb{C}' };
+/** the sample's markup, and what it waits for (font data still loading) */
+function fontSample(): { html: string; retry: Promise<void> | null } {
+  const waits: Promise<void>[] = [];
+  const m = (src: string, display = false) => {
+    const r = renderMath(src, { display, macros: SAMPLE_MACROS });
+    if (r.retry) waits.push(r.retry);
+    const html = r.node?.outerHTML ?? `<span class="lm-error lm-pending">${src.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>`;
+    return display ? `<div class="sample-display">${html}</div>` : html;
+  };
+  const html = [
   `<p><b>Theorem 1</b> (Residue theorem). <i>Let ${m('f')} be analytic in the region ${m('G')} except for the isolated singularities ${m('a_1,a_2,\\dots,a_m')}. If ${m('\\gamma')} is a closed rectifiable curve in ${m('G')} which does not pass through any of the points ${m('a_k')} and if ${m('\\gamma\\approx 0')} in ${m('G')}, then</i></p>`,
   m('\\frac{1}{2\\pi i} \\int\\limits_\\gamma f\\Bigl(x^{\\mathbf{N}\\in\\mathbb{C}^{N\\times 10}}\\Bigr) = \\sum_{k=1}^m n(\\gamma;a_k)\\Res(f;a_k)\\,.', true),
   `<p><b>Theorem 2</b> (Maximum modulus). <i>Let ${m('G')} be a bounded open set in ${m('\\BbbC')} and suppose that ${m('f')} is a continuous function on ${m('G^-')} which is analytic in ${m('G')}. Then</i></p>`,
@@ -64,9 +70,16 @@ const FONT_SAMPLE = [
   `<p>First some large operators both in text: ${m('\\iiint\\limits_{Q}f(x,y,z) \\diff x \\diff y \\diff z')} and ${m('\\prod_{\\gamma\\in\\Gamma_{\\bar{C}}}\\partial(\\tilde{X}_\\gamma)')}; and also on display</p>`,
   m('\\iiiint\\limits_{Q}f(w,x,y,z) \\diff w \\diff x \\diff y \\diff z \\leq \\oint_{\\partial Q} f\'\\Biggl(\\max\\Biggl\\{ \\frac{\\Vert w\\Vert}{\\vert w^2+x^2\\vert}; \\frac{\\Vert z\\Vert}{\\vert y^2+z^2\\vert}; \\frac{\\Vert w\\oplus z\\Vert}{\\vert x\\oplus y\\vert} \\Biggr\\}\\Biggr)\\,.', true),
   `<p>Accents: ${m('\\hat{a}\\ \\tilde{b}\\ \\bar{c}\\ \\vec{v}\\ \\dot{x}\\ \\ddot{y}\\ \\breve{u}\\ \\check{z}\\ \\acute{e}\\ \\grave{e}\\quad \\hat{A}\\ \\tilde{N}\\ \\bar{X}\\ \\dot{\\Phi}\\quad \\widehat{xyz}\\ \\widetilde{abc}\\ \\overline{z+w}')}, and ${m('a\\neq b,\\ x\\not< y,\\ \\mathcal{L},\\ \\mathfrak{g},\\ \\boldsymbol{\\alpha}\\cdot\\mathbf{v},\\ \\varepsilon\\ne\\epsilon,\\ \\varphi\\ne\\phi')}.</p>`,
-].join('');
+  ].join('');
+  return { html, retry: waits.length ? Promise.all(waits).then(() => {}) : null };
+}
+/** the sample, drawn again whenever the math font changes */
 function FontSample() {
-  return <div class="lyx-editor font-sample" data-font-sample aria-hidden="true" dangerouslySetInnerHTML={{ __html: FONT_SAMPLE }} />;
+  const version = useMathRendererVersion();
+  const [stamp, setStamp] = useState(0);
+  const sample = useMemo(fontSample, [version, stamp]);
+  useEffect(() => { let live = true; void sample.retry?.then(() => { if (live) setStamp(n => n + 1); }); return () => { live = false; }; }, [sample]);
+  return <div class="lyx-editor font-sample" data-font-sample aria-hidden="true" dangerouslySetInnerHTML={{ __html: sample.html }} />;
 }
 
 const THEMES: [ThemePref, string, string][] = [
@@ -109,7 +122,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
         <div class="settings-content">
           {section === 'editor' && <>
             <h3>Font</h3>
-            <div class="sub">How the editor shows the text and formulas, in this browser; the PDF has its own fonts (Document ▸ Settings ▸ Fonts). The fonts come with OverLyX and are loaded once chosen. Formulas keep KaTeX’s layout: the math font gives them its letters, symbols, accents, big operators and delimiters, but not its spacing, radical signs, wide accents or the tallest delimiters.</div>
+            <div class="sub">How the editor shows the text and formulas, in this browser; the PDF has its own fonts (Document ▸ Settings ▸ Fonts). The fonts come with OverLyX and are loaded once chosen. Formulas are laid out by MathJax from the math font’s own data, as TeX does from an OpenType math font; text inside formulas is in the text font.</div>
             <Row label="Text font"><select data-pref="editorFont" value={p.editorFont === FOLLOW_DOCUMENT ? p.editorFont : editorFace(p.editorFont).id} onChange={e => setPref('editorFont', (e.target as HTMLSelectElement).value)}>
               <option value={FOLLOW_DOCUMENT}>As in the document — the closest of these to the PDF’s font (now {editorFace(resolvedFace(FOLLOW_DOCUMENT)).label})</option>
               {EDITOR_FACES.map(f => <option key={f.id} value={f.id}>{f.label} — {f.hint}</option>)}

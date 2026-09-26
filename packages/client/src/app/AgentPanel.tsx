@@ -5,7 +5,7 @@
  * the server; its transcript streams in over SSE (message/reasoning deltas, command output,
  * file-change diffs) and codex's approval requests are answered from here — with an optional
  * comment that steers the running turn. Model and reasoning effort come from codex's own list
- * and are sent per turn. Assistant text renders LaTeX through the math editor's KaTeX path with
+ * and are sent per turn. Assistant text renders LaTeX through the math editor's MathJax path with
  * the open document's macros. Completed diffs collapse to a summary and only unfold by
  * themselves when they look important (small, or touching the open document); the transcript
  * follows the stream while you are at the bottom. Threads belong to the project: every editor
@@ -16,6 +16,7 @@ import type { ComponentChildren } from 'preact';
 import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel, type LitHit } from '../api';
 import { editorContext } from '../editor/context';
 import { renderStaticHtml } from '../editor/lyxmath/field';
+import { useMathRendererVersion } from '../editor/lyxmath/usemath';
 import { latexSelectionText } from './richcopy';
 import { bibRefs, type BibRef } from './bibrefs';
 import { parseBlocks, type MdBlock } from './mdblocks';
@@ -68,9 +69,12 @@ const userText = (it: AgentItem): string =>
 /* ------------------------------------------------------------------ LaTeX + markdown-lite rendering */
 
 function MathBit({ latex, display }: { latex: string; display: boolean }) {
+  // drawn again with another math font, or once the font data it waited for has arrived
+  const version = useMathRendererVersion();
+  const [retried, setRetried] = useState(0);
   const html = useMemo(() => {
-    try { return renderStaticHtml(latex, display, (editorContext.meta?.macros ?? {}) as never); } catch { return null; }
-  }, [latex, display]);
+    try { return renderStaticHtml(latex, display, (editorContext.meta?.macros ?? {}) as never, undefined, () => setRetried(n => n + 1)); } catch { return null; }
+  }, [latex, display, version, retried]);
   const attrs = { 'data-latex': latex, 'data-display': display ? '1' : undefined };
   if (!html) return <span class="agent-math" {...attrs}>{display ? `\\[${latex}\\]` : `$${latex}$`}</span>;
   return <span class={'agent-math' + (display ? ' display' : '')} {...attrs} dangerouslySetInnerHTML={{ __html: html }} />;

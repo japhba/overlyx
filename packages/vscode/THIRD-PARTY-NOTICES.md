@@ -9,8 +9,10 @@ It contains, or is a derivative of, the following third-party material:
   editing engine are TypeScript ports of LyX source code (math parser/writer/cursor, LaTeX
   export). LyX is a trademark of the LyX team; this project is not affiliated with or endorsed by
   the LyX team.
-- **KaTeX** (https://katex.org) — MIT. Formula rendering; portions of the math renderer are
-  adapted from KaTeX source.
+- **MathJax 4** (https://www.mathjax.org) — Apache-2.0. Formula rendering, with MathJax's fonts
+  (New Computer Modern, Latin Modern, MathJax TeX, STIX Two, TeX Gyre, Asana, Fira Math, Euler; their
+  OpenType sources under the GUST Font License and the SIL OFL 1.1). OverLyX adds TeX commands of its
+  own. Licence and font credits: `dist/webview/licenses/mathjax.txt`.
 - **pdf.js** (https://mozilla.github.io/pdf.js/) — Apache-2.0. The PDF panel viewer.
 - **ProseMirror** (https://prosemirror.net) — MIT. The rich-text editing framework.
 - **Yjs / y-prosemirror / y-protocols / lib0** — MIT.
@@ -18,17 +20,16 @@ It contains, or is a derivative of, the following third-party material:
 - **nspell** (https://github.com/wooorm/nspell) — MIT. Hunspell-style spell checking.
 - **Spell-checker dictionaries** (`dict/`): `dictionary-en`, `dictionary-en-gb` (BSD-style /
   SCOWL licenses), `dictionary-de` (igerman98, GPL-2.0 or GPL-3.0), `dictionary-fr` (MPL-2.0).
-- **IBM Plex / KaTeX fonts** — SIL OFL 1.1.
+- **IBM Plex** — SIL OFL 1.1.
 - **Computer Modern Unicode / CMU Serif** (https://ctan.org/pkg/cm-unicode) — SIL OFL 1.1.
   Unmodified Roman, bold, italic and bold italic text fonts; copyright the original Metafont
   authors and Andrey V. Panov. Full license and copyright notices: `dist/webview/licenses/cm-unicode-OFL.txt`.
-- **Editor fonts** (Settings ▸ Editor ▸ Text font / Math font) — the text faces and OpenType math
-  fonts of `fonts/web` (Latin Modern, New Computer Modern, STIX Two, XITS, Libertinus, TeX Gyre, Asana,
-  Euler, Garamond, XCharter, Charis SIL, Erewhon, Kp, Concrete, Old Standard, GFS Neohellenic, IBM Plex,
-  PL46, Fira, Lete Sans, Lato, Noto Sans, Arsenal, Luciole, Pennstander, DejaVu, Crimson Pro, EB Garamond),
-  subset and, for the math fonts, rearranged for KaTeX by `scripts/build-editor-fonts.py` under family
-  names of their own. SIL OFL 1.1, GUST Font License, the Bitstream Charter and Vera licences and
-  CC BY 4.0 (Luciole). Every font's copyright and licence: `dist/webview/licenses/editor-fonts.txt`.
+- **Editor text fonts** (Settings ▸ Editor ▸ Text font) — the text faces of `fonts/web` (New Computer
+  Modern, STIX Two, XITS, Libertinus, TeX Gyre, Charis SIL, XCharter, Erewhon, Kp, Concrete, Old Standard,
+  GFS Neohellenic, IBM Plex, PL46, Fira, Lato, Noto Sans, Arsenal, Luciole, Pennstander, DejaVu, Crimson Pro,
+  EB Garamond), subset by `scripts/build-editor-fonts.py` under family names of their own. SIL OFL 1.1,
+  GUST Font License, the Bitstream Charter and Vera licences and CC BY 4.0 (Luciole). Every font's
+  copyright and licence: `dist/webview/licenses/editor-fonts.txt`.
 
 Corresponding source: the extension is built from the OverLyX source tree. A copy of the
 complete corresponding source for any released .vsix is available to anyone on request —

@@ -23,12 +23,12 @@ test('dark theme follows the system, the toggle overrides it and is remembered',
   const errors = collectErrors(page);
   await login(page);
   await openDoc(page, `${PROJECT}/t.tex`);
-  await page.waitForSelector('.lyx-editor .katex');
+  await page.waitForSelector('.lyx-editor mjx-container');
   // the OS prefers dark and nothing is stored: dark
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   expect(await page.evaluate(() => localStorage.getItem('ol.theme'))).toBeNull();
   expect(await page.evaluate(() => getComputedStyle(document.querySelector('.lyx-editor')!).color)).toBe('rgb(255, 255, 255)');
-  expect(await page.evaluate(() => getComputedStyle(document.querySelector('.lyx-editor .katex')!).color)).toBe('rgb(255, 255, 255)');
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector('.lyx-editor mjx-container')!).color)).toBe('rgb(255, 255, 255)');
   const pageBg = await page.evaluate(() => getComputedStyle(document.querySelector('.editor-page')!).backgroundColor);
   expect(pageBg).not.toBe('rgb(255, 255, 255)');
 

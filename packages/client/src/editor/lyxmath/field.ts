@@ -1,24 +1,25 @@
 /**
- * LyxMathField — the editable formula widget: the LyX math model rendered with KaTeX, a LyX
- * cursor (core/math/cursor.ts) drawn as an overlay, LyX's keyboard and mouse behaviour, undo.
+ * LyxMathField — the editable formula widget: the LyX math model rendered with MathJax
+ * (mathjax.ts), a LyX cursor (core/math/cursor.ts) drawn as an overlay, LyX's keyboard and mouse
+ * behaviour, undo.
  *
- * DOM: <span class="lm-field"><span class="lm-content">KaTeX</span><span class="lm-overlay">caret,
+ * DOM: <span class="lm-field"><span class="lm-content">MathJax</span><span class="lm-overlay">caret,
  * selection, corner markers</span><textarea class="lm-input"></textarea></span>
  * Every cell of the model is wrapped in `\htmlClass{lm-c<id>}{…}` and every atom in
- * `\htmlClass{lm-a}{…}` by the renderer, and KaTeX's own height/depth of each wrapper is copied
- * into the markup, so the caret, the selection, the corner markers and the mouse work on LyX's
- * coordinate model (geometry.ts): every atom has a box, every cell a baseline and a content-tight
- * box. The mouse follows InsetMathNest::editXY / lfunMousePress / lfunMouseMotion exactly.
+ * `\htmlClass{lm-a}{…}` by the renderer (core/math/mathjax.ts), each a box of MathJax's layout,
+ * so the caret, the selection, the corner markers and the mouse work on LyX's coordinate model
+ * (geometry.ts): every atom has a box, every cell a baseline and a content-tight box. The mouse
+ * follows InsetMathNest::editXY / lfunMousePress / lfunMouseMotion exactly.
  */
-import katex from 'katex';
 import {
-  parseFormula, writeFormula, writeCellLatex, parseCell, renderHullSource, katexMacros, MathCursor, atomCells, nargs, numberedType, isKnownCommand, completeCommand,
+  parseFormula, writeFormula, writeCellLatex, parseCell, renderHullSource, mathjaxMacros, MathCursor, atomCells, nargs, numberedType, isKnownCommand, completeCommand,
   type Hull, type HullType, type MacroTable, type Slice, type Atom, type Cell, type CellRef, type Owner,
 } from '@overlyx/core';
 import { MathGeometry, editXY, moveToClosestEdge, partOfAnchor, insetAt, boundaryX, x2pos, type AtomGeom } from './geometry';
 import { graphicsUrl } from '../../api';
 import { editorContext, resolveDocPath } from '../context';
 import { getPrefs } from '../../prefs';
+import { renderMath, onMathRendererChange } from './mathjax';
 
 export type MoveOutDirection = 'backward' | 'forward' | 'upward' | 'downward';
 
@@ -54,37 +55,25 @@ export interface FieldOptions {
 
 export interface MathImageContext { project?: string | null; docDir?: string }
 
-function decodeHtmlAttribute(s: string): string {
-  return s.replace(/&quot;/g, '"').replace(/&#(?:39|x27);/gi, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+/** how a formula's \includegraphics files are found: the project's graphics endpoint (PDF and SVG converted for the browser) */
+export function mathImageResolver(context?: MathImageContext): (src: string) => string {
+  return (src: string) => {
+    const project = context?.project ?? editorContext.project;
+    const docDir = context?.docDir ?? editorContext.docDir;
+    // explicit web/data URLs are already usable; TeX project file names are relative paths
+    if (!project || !src || /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(src)) return src;
+    return graphicsUrl(project, resolveDocPath(src, docDir), 400);
+  };
 }
 
-function escapeHtmlAttribute(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-}
-
-/** Resolve math images and use image glyphs as alpha masks so their ink follows currentColor. */
-export function resolveMathImageHtml(html: string, context?: MathImageContext): string {
-  if (!html.includes('<img')) return html;
-  const project = context?.project ?? editorContext.project;
-  const docDir = context?.docDir ?? editorContext.docDir;
-  const resolved = html.replace(/(<img\b[^>]*\bsrc=")([^"]*)(")/gi, (all, before: string, encoded: string, after: string) => {
-    const src = decodeHtmlAttribute(encoded);
-    // Explicit web/data URLs are already usable. TeX project filenames are relative paths.
-    if (!project || !src || /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(src)) return all;
-    const url = graphicsUrl(project, resolveDocPath(src, docDir), 400);
-    return before + escapeHtmlAttribute(url) + after;
-  });
-  return resolved.replace(/(<span\b[^>]*\bclass="[^"]*\blm-image-glyph\b[^"]*"[^>]*>)(<img\b[^>]*\bsrc="([^"]*)"[^>]*>)/gi, (_all, span: string, img: string, encoded: string) => {
-    // Keep the image's intrinsic aspect ratio and KaTeX height. Its transparent pixels
-    // mask the wrapper's text-coloured background; the original black ink is hidden.
-    const url = decodeHtmlAttribute(encoded).replace(/["\\\n\r\f]/g, c => '\\' + c.charCodeAt(0).toString(16) + ' ');
-    const align = /vertical-align:([^;"']+)/.exec(img);
-    const style = `mask-image:url("${url}");${align ? `vertical-align:${align[1]};` : ''}`;
-    const masked = /\bstyle="/.test(span)
-      ? span.replace(/\bstyle="([^"]*)"/, (_attr, existing: string) => `style="${existing};${escapeHtmlAttribute(style)}"`)
-      : span.replace(/>$/, ` style="${escapeHtmlAttribute(style)}">`);
-    return masked + img;
-  });
+/** Image glyphs (`lm-image-glyph`, core/macros.ts) are drawn as alpha masks, so their ink follows the text colour. */
+export function maskImageGlyphs(root: ParentNode): void {
+  for (const glyph of Array.from(root.querySelectorAll<HTMLElement>('.lm-image-glyph mjx-mglyph'))) {
+    const img = glyph.querySelector('img');
+    if (!img) continue;
+    const url = img.getAttribute('src')!.replace(/["\\\n\r\f]/g, c => '\\' + c.charCodeAt(0).toString(16) + ' ');
+    glyph.setAttribute('style', `${glyph.getAttribute('style') ?? ''}mask-image:url("${url}");`);
+  }
 }
 
 interface Parent { owner: Owner; idx: number; pos: number }
@@ -156,6 +145,9 @@ export class LyxMathField {
   private windowListeners: [string, (ev: MouseEvent) => void][] = [];
   /** an autocomplete suggestion shown faintly after the caret (ai/mathassist.ts); Tab inserts it */
   private ghost: string | null = null;
+  /** counts renderings (a retry renders again only if nothing else did meanwhile) */
+  private renderStamp = 0;
+  private offRenderer: () => void;
   readonly id = ++seq;
 
   constructor(opts: FieldOptions) {
@@ -179,6 +171,8 @@ export class LyxMathField {
     this.input.autocomplete = 'off'; this.input.spellcheck = false; this.input.tabIndex = -1;
     this.dom.append(this.content, this.overlay, this.input);
     this.wire();
+    // another math font: drawn again
+    this.offRenderer = onMathRendererChange(() => this.render());
     this.render();
   }
 
@@ -236,7 +230,7 @@ export class LyxMathField {
     this.scheduleLayout();
   }
   blur(): void { this.input.blur(); }
-  destroy(): void { cancelAnimationFrame(this.raf); for (const [t, l] of this.windowListeners) window.removeEventListener(t, l as EventListener); this.windowListeners = []; this.dom.remove(); }
+  destroy(): void { cancelAnimationFrame(this.raf); this.offRenderer(); this.renderStamp++; for (const [t, l] of this.windowListeners) window.removeEventListener(t, l as EventListener); this.windowListeners = []; this.dom.remove(); }
 
   /** Commands for menus, toolbars and shortcuts. */
   execute(cmd: string, ...args: unknown[]): boolean {
@@ -323,18 +317,11 @@ export class LyxMathField {
       const ref = cells.find(c => c.owner === this.cursor.owner && c.idx === this.cursor.idx);
       if (ref) latex = injectGhost(latex, ref.id, this.ghost, this.cursor.mode === 'text');
     }
-    let html: string;
-    try {
-      // KaTeX's build tree carries the height/depth of every box; the cell and atom wrappers take
-      // theirs into the markup (data-h / data-d, in em) for the geometry — the same markup
-      // renderToString produces otherwise
-      const tree = (katex as unknown as { __renderToDomTree(src: string, opts: object): KatexTreeNode }).__renderToDomTree((this.display ? '\\displaystyle ' : '') + latex, { throwOnError: false, strict: false, trust: true, displayMode: false, output: 'html', macros: katexMacros(this.macros) });
-      annotateMetrics(tree);
-      html = tree.toMarkup();
-    } catch (e) {
-      html = `<span class="lm-error">${escapeHtml(this.lastLatex)}</span>`;
-    }
-    this.content.innerHTML = resolveMathImageHtml(html, this.opts.imageContext);
+    const r = renderMath(latex, { display: this.display, macros: mathjaxMacros(this.macros), image: mathImageResolver(this.opts.imageContext) });
+    if (r.node) { this.content.replaceChildren(r.node); maskImageGlyphs(this.content); }
+    else if (r.error || !this.content.firstChild) this.content.innerHTML = `<span class="${r.error ? 'lm-error' : 'lm-error lm-pending'}">${escapeHtml(this.lastLatex)}</span>`;
+    // font data (or an image's shape) still on its way: rendered again once it is here
+    if (r.retry) { const stamp = ++this.renderStamp; void r.retry.then(() => { if (stamp === this.renderStamp && this.dom.isConnected) this.render(); }); }
     this.geom = null;
     this.dom.classList.toggle('empty', this.isEmpty());
     this.scheduleLayout();
@@ -772,24 +759,11 @@ export class LyxMathField {
 
 function escapeHtml(s: string): string { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
 
-/** the node type of KaTeX's build tree (katex.__renderToDomTree) that matters here */
-interface KatexTreeNode { classes?: string[]; height?: number; depth?: number; children?: KatexTreeNode[]; setAttribute?(k: string, v: string): void; toMarkup(): string }
-
-/** copies KaTeX's height/depth (em) of every cell and atom wrapper into the markup: data-h / data-d */
-function annotateMetrics(node: KatexTreeNode): void {
-  const cls = node.classes;
-  if (cls && node.setAttribute && cls.includes('enclosing') && cls.some(c => c === 'lm-a' || /^lm-c\d+$/.test(c))) {
-    node.setAttribute('data-h', (node.height ?? 0).toFixed(4));
-    node.setAttribute('data-d', (node.depth ?? 0).toFixed(4));
-  }
-  if (node.children) for (const ch of node.children) annotateMetrics(ch);
-}
-
 /** InsetMath::marker: fractions, grids and macros are marked in all four corners (MARKER2), other insets below */
 function markerKind(a: Atom): 'lower' | 'both' { return a.t === 'frac' || a.t === 'grid' || a.t === 'macro' ? 'both' : 'lower'; }
 
 /**
- * Puts the ghost text into the KaTeX source at the end of the cell `lm-c<id>` (as
+ * Puts the ghost text into the TeX source at the end of the cell `lm-c<id>` (as
  * `\htmlClass{lm-ghost}{…}`, which the caret measurement skips): the suggestion is rendered
  * with the formula's own metrics and macros, exactly as it will look once inserted.
  */
@@ -827,16 +801,28 @@ export function rowRectsOf(hull: Hull, cells: CellRef[], container: HTMLElement)
   return out;
 }
 
-/** Static rendering of a formula (no editing) — the same source as the field, so it looks identical. */
-export function renderStaticHtml(latex: string, display: boolean, macros: MacroTable, imageContext?: MathImageContext): string {
+/**
+ * Static rendering of a formula (no editing) into `el` — the same source as the field, so it looks
+ * identical. `onRetry`: called when it should be rendered again (font data or an image's shape
+ * arrived after this rendering had to do without).
+ */
+export function renderStaticInto(el: HTMLElement, latex: string, display: boolean, macros: MacroTable, imageContext?: MathImageContext, onRetry?: () => void): void {
+  let r: ReturnType<typeof renderMath> | null = null;
   try {
     const hull = parseFormula(latex, macros);
     const { latex: src } = renderHullSource(hull, macros);
-    const html = katex.renderToString((display ? '\\displaystyle ' : '') + src, { throwOnError: false, strict: false, trust: true, displayMode: false, output: 'html', macros: katexMacros(macros) });
-    return resolveMathImageHtml(html, imageContext);
-  } catch {
-    return `<span class="lm-error">${escapeHtml(latex)}</span>`;
-  }
+    r = renderMath(src, { display, macros: mathjaxMacros(macros), image: mathImageResolver(imageContext) });
+  } catch { /* shown as an error */ }
+  if (r?.node) { el.replaceChildren(r.node); maskImageGlyphs(el); }
+  else el.innerHTML = `<span class="${r && !r.error ? 'lm-error lm-pending' : 'lm-error'}">${escapeHtml(latex)}</span>`;
+  if (r?.retry && onRetry) void r.retry.then(onRetry);
+}
+
+/** Static rendering of a formula as markup (see renderStaticInto). */
+export function renderStaticHtml(latex: string, display: boolean, macros: MacroTable, imageContext?: MathImageContext, onRetry?: () => void): string {
+  const el = document.createElement('span');
+  renderStaticInto(el, latex, display, macros, imageContext, onRetry);
+  return el.innerHTML;
 }
 
 export { writeCellLatex, numberedType };

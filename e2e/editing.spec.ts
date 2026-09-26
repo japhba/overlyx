@@ -138,10 +138,10 @@ test('LyX math keys: inset markers, Backspace/Delete dissolve a cell, Space leav
   await setPath([[0, 10]]);
   await page.keyboard.type('\\alp');
   await page.waitForTimeout(150);
-  expect(await page.evaluate(() => { const f = document.querySelector('.lyx-editor .lyx-math-inline .lm-field')!; return { typing: !!f.querySelector('.lm-mm-typing'), hint: f.querySelector('.lm-mm-hint')?.textContent }; })).toEqual({ typing: true, hint: 'ha' });
+  expect(await page.evaluate(() => { const f = document.querySelector('.lyx-editor .lyx-math-inline .lm-field')!; return { typing: !!f.querySelector('.lm-mm-typing'), hint: f.querySelector('.lm-mm-hint')?.textContent?.normalize('NFKC') }; })).toEqual({ typing: true, hint: 'ha' });   // (MathJax's \texttt letters are Unicode monospace)
   await page.keyboard.press('Tab');
   await page.waitForTimeout(150);
-  expect(await page.evaluate(() => { const f = document.querySelector('.lyx-editor .lyx-math-inline .lm-field')!; return { ok: !!f.querySelector('.lm-mm-ok'), text: f.querySelector('.lm-mm')?.textContent }; })).toEqual({ ok: true, text: '\\alpha' });
+  expect(await page.evaluate(() => { const f = document.querySelector('.lyx-editor .lyx-math-inline .lm-field')!; return { ok: !!f.querySelector('.lm-mm-ok'), text: f.querySelector('.lm-mm')?.textContent?.normalize('NFKC') }; })).toEqual({ ok: true, text: '\\alpha' });
   await page.keyboard.press('Tab');
   await page.waitForTimeout(150);
   expect((await state()).latex).toContain('\\hat{z}\\alpha');
@@ -173,19 +173,21 @@ test('formulas: tight inline spacing, no change background, ln|H| via redefined 
   const r = await page.evaluate(() => {
     const st = [...document.querySelectorAll('.lyx-math-inline .lyx-math-static')].find(s => s.textContent && s.textContent.length < 3)!;
     const wrap = st.parentElement!;
-    const base = st.querySelector('.katex')!.getBoundingClientRect();
+    const base = st.querySelector('mjx-container')!.getBoundingClientRect();
     const w = wrap.getBoundingClientRect();
     const ins = document.querySelector('.lyx-change-inserted');
     const lndet = [...document.querySelectorAll('.lyx-math-inline')].find(x => /\\lndet\{\\HH\}/.test((x as any).pmViewDesc?.node?.attrs?.latex ?? ''));
     const ld = lndet?.querySelector('.lyx-math-static, .lm-field');
-    return { left: base.left - w.left, right: w.right - base.right, bg: ins ? getComputedStyle(ins).backgroundColor : null, lndet: ld ? { text: ld.textContent, open: ld.querySelectorAll('.mopen').length, close: ld.querySelectorAll('.mclose').length } : null };
+    // the \left| … \right| bars: MathJax's (stretchy) operators
+    const bars = ld ? [...ld.querySelectorAll('mjx-mo')].filter(m => /[|∣]/.test(m.textContent ?? '') || m.querySelector('mjx-stretchy-v')) : [];
+    return { left: base.left - w.left, right: w.right - base.right, bg: ins ? getComputedStyle(ins).backgroundColor : null, lndet: ld ? { text: ld.textContent, bars: bars.length } : null };
   });
   expect(r.left).toBeLessThan(6);
   expect(r.right).toBeLessThan(6);
   expect(r.bg === null || r.bg === 'rgba(0, 0, 0, 0)').toBe(true);
-  // bars surround the argument (\lndet redefined after a stale \det): KaTeX draws sized delimiters as SVG
+  // bars surround the argument (\lndet redefined after a stale \det)
   expect(r.lndet?.text).toMatch(/^ln/);
-  expect(r.lndet?.open).toBeGreaterThan(0); expect(r.lndet?.close).toBeGreaterThan(0);
+  expect(r.lndet?.bars).toBeGreaterThanOrEqual(2);
 });
 
 test('wide display formulas are centred on the column and equation numbers never overlap', async ({ page }) => {

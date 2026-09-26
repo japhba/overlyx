@@ -129,7 +129,7 @@ test('a formula inserted while tracking changes is coloured as an insertion and 
   const colours = await page.evaluate(() => {
     const text = document.querySelector('.lyx-editor .lyx-change-inserted:not(.lyx-math-inline)')!;
     const m = document.querySelector('.lyx-editor .lyx-math-inline')!;
-    const glyph = m.querySelector('.katex, .lm-field') ?? m;
+    const glyph = m.querySelector('mjx-container, .lm-field') ?? m;
     return { text: getComputedStyle(text).color, math: getComputedStyle(glyph).color, plain: getComputedStyle(document.querySelector('.lyx-editor > .lyx-par')!).color };
   });
   expect(colours.math).toBe(colours.text);
