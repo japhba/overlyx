@@ -1404,6 +1404,10 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .pdf-pages { flex: 1; overflow: auto; padding: 12px 0; position: relative; }
 .pdf-page-box { position: relative; margin: 0 auto 12px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.35); overflow: hidden; }
 .pdf-page-box canvas { display: block; width: 100%; height: 100%; }
+/* dark pages (app/pdfdark.ts, drawn into the canvases): paper → the editor's page colour, ink → its text tone */
+.pdf-viewer.dark-pages { background: #0a0a0d; }
+.pdf-viewer.dark-pages .pdf-page-box { background: var(--page-bg); box-shadow: 0 0 0 1px rgba(255,255,255,0.07), 0 1px 6px rgba(0,0,0,0.6); }
+.pdf-toolbar .pdf-dark-toggle { font-size: 13px; line-height: 1; }
 .pdf-flash { position: absolute; border: 2px solid var(--accent); background: rgba(59,110,165,0.18); border-radius: 3px; pointer-events: none; animation: pdf-flash 2.5s ease-out forwards; }
 @keyframes pdf-flash { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
 .pdf-error { color: var(--err); padding: 12px; background: var(--surface); margin: 12px; border-radius: 4px; }

@@ -25,6 +25,8 @@ export interface Prefs {
   aiCompleteDelay: number;
   /** Smart inversion adapts plots on a white base to the dark theme; photographs keep their colours. */
   invertFigures: boolean;
+  /** in the dark theme, PDF pages are shown light on dark with their photographs in colour (app/pdfdark.ts) */
+  darkPdf: boolean;
   /** OpenRouter model ids for ⌘J (rewrite) and for autocomplete ('' = the server's default) */
   aiModel: string;
   aiCompletionModel: string;
@@ -51,7 +53,7 @@ export interface Prefs {
   shortcutTips: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: true, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: true, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, darkPdf: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

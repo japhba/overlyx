@@ -15,6 +15,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import * as pdfjs from 'pdfjs-dist';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
+import { paintDark, useDarkPages } from './pdfdark';
+import { setPref } from '../prefs';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
@@ -51,6 +53,12 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
   const [flash, setFlash] = useState<{ page: number; x: number; y: number; w: number; h: number } | null>(null);
   const rendered = useRef(new Map<number, { scale: number; task: RenderTask | null }>());
   const canvases = useRef(new Map<number, HTMLCanvasElement>());
+  /** dark pages (pdfdark.ts): baked into the canvases when they are drawn, so a change draws the pages again */
+  const { colours, themeDark, invertFigures } = useDarkPages();
+  const dark = !!colours;
+  const darkKey = colours ? JSON.stringify(colours) + (invertFigures ? '' : ' all') : '';
+  const darkRef = useRef({ colours, invertFigures });
+  darkRef.current = { colours, invertFigures };
   /** the document shown and its loading task (destroyed when replaced, after the new one is up) */
   const shownTask = useRef<PDFDocumentLoadingTask | null>(null);
   const retired = useRef<PDFDocumentLoadingTask[]>([]);
@@ -157,14 +165,18 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
         const viewport = page.getViewport({ scale: scale * dpr });
         const off = document.createElement('canvas');
         off.width = Math.ceil(viewport.width); off.height = Math.ceil(viewport.height);
-        const task = page.render({ canvas: off, viewport });
+        // recordImages: where the raster images went (pdf.js keeps them on the page, as fractions of the canvas), for the dark pages' photographs
+        const task = page.render({ canvas: off, viewport, recordImages: true });
         rendered.current.set(n, { scale, task });
         await task.promise;
         if (disposed || rendered.current.get(n)?.task !== task) return;
         rendered.current.get(n)!.task = null;
         // resizing clears a canvas: size it and draw the finished page in the same task, so the old picture never blanks
         canvas.width = off.width; canvas.height = off.height;
-        canvas.getContext('2d')?.drawImage(off, 0, 0);
+        const ctx = canvas.getContext('2d');
+        const { colours: dc, invertFigures: smart } = darkRef.current;
+        if (ctx && dc) paintDark(ctx, off, dc, (page as unknown as { imageCoordinates?: ArrayLike<number> | null }).imageCoordinates, !smart);
+        else ctx?.drawImage(off, 0, 0);
         canvas.classList.add('ready');
       } catch {
         if (rendered.current.get(n)?.scale === scale) rendered.current.delete(n);   // cancelled, or the document was replaced meanwhile
@@ -175,7 +187,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
     const onScroll = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(renderVisible); };
     el.addEventListener('scroll', onScroll);
     return () => { disposed = true; el.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf); for (const s of rendered.current.values()) s.task?.cancel(); rendered.current.clear(); };
-  }, [doc, pages, width, zoom]);
+  }, [doc, pages, width, zoom, darkKey]);
 
   // forward search: scroll the target box into view and flash it
   useEffect(() => {
@@ -208,7 +220,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
   };
 
   return (
-    <div class="pdf-viewer">
+    <div class={'pdf-viewer' + (dark ? ' dark-pages' : '')}>
       <div class="pdf-toolbar">
         <button class="small-btn" title="Previous page" onClick={() => gotoPage(current - 1)}>‹</button>
         <input class="pdf-page" type="number" min={1} max={pages.length || 1} value={current} onChange={e => gotoPage(Number((e.target as HTMLInputElement).value))} title="Page" />
@@ -218,6 +230,8 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
         <button class="small-btn" title="Zoom out" onClick={() => zoomStep(-1)}>−</button>
         <button class={'small-btn' + (zoom === 'width' ? ' active' : '')} title="Fit the page width" onClick={() => setZoom('width')}>{zoom === 'width' ? 'Fit width' : `${Math.round(zoom * 100)}%`}</button>
         <button class="small-btn" title="Zoom in" onClick={() => zoomStep(1)}>+</button>
+        {themeDark && <button class={'small-btn pdf-dark-toggle' + (dark ? ' active' : '')} data-pdf-dark aria-pressed={dark} onClick={() => setPref('darkPdf', !dark)}
+          title={dark ? 'Dark pages: the PDF light on dark, photographs in their colours — click for the PDF’s own colours' : 'The PDF’s own colours — click for dark pages'}>◐</button>}
         {toolbar && <span class="pdf-sep" />}
         {toolbar}
         {hint && <span class="pdf-hint">{hint}</span>}

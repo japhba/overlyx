@@ -102,7 +102,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
 
-  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'usageStats' | 'shortcutTips', label: string, hint: string) => (
+  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'usageStats' | 'shortcutTips' | 'darkPdf', label: string, hint: string) => (
     <label class="pref"><input type="checkbox" data-pref={key} checked={p[key]} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
   );
   const toggleRecopy = async (u: AdminUser) => {
@@ -148,6 +148,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             <Row label="Start after the save"><select data-pref="autoBuildDelay" value={String(p.autoBuildDelay)} disabled={p.autoBuild === 'off'} onChange={e => setPref('autoBuildDelay', Number((e.target as HTMLSelectElement).value))}>
               {AUTO_BUILD_DELAYS.map(d => <option key={d} value={String(d)}>{d === 0 ? 'right away' : `${d} s`}</option>)}
             </select></Row>
+            {check('darkPdf', 'Dark PDF pages in the dark theme', 'The PDF is shown light on dark, in the editor’s page colour and text tone; colours keep their hue and photographs their colours (with “Invert figures” off, every picture does). The ◐ button in the PDF toolbar switches it too.')}
             <h3>Figures</h3>
             {check('invertFigures', 'Invert figures in the dark theme', 'Plots and diagrams use a white base, including transparent images, and turn light-on-dark in the dark theme. Photographs keep their colours. Figures reload when their file changes on disk.')}
             <h3>Shortcuts</h3>

@@ -420,13 +420,28 @@ blend.
   source line and puts the cursor into the paragraph or formula with those words (inverse search).
   *Document ▸ Start Appendix Here* marks the cursor's paragraph as the start of the appendix
   (LyX's `\start_of_appendix`, written as `\appendix`).
+  **Dark pages** (`app/pdfdark.ts`, like PDF Expert's night mode): in the dark theme the pages are
+  light on dark — the paper in the editor's page colour (`--page-bg`), the ink in its text tone
+  (`--editor-fg`, so the sepia / grey tones apply), colours with their hue kept (inversion + a 180°
+  hue rotation) — while photographs keep their colours: pdf.js reports where it drew each raster
+  image (`recordImages`), each is classified like the editor's figures (`editor/figureinvert.ts`;
+  line art on white is inverted) and a photograph is copied back from the unfiltered rendering; with
+  *Invert figures* off every picture keeps its colours. The colours are baked into the canvas when a
+  page is drawn (an SVG filter through the canvas's `filter`, pixel by pixel where a browser lacks it —
+  Safari); a CSS filter on the canvases cost a re-filter on every frame and halved the frame rate
+  while scrolling. The ◐ button in the PDF toolbar (dark theme only) and *Settings ▸ Editor ▸ PDF*
+  switch it (pref `darkPdf`); the VS Code PDF panel follows VS Code's dark themes the same way.
+  `e2e/darkpdf.spec.ts` reads the canvas pixels back.
 * **Panes: WYSIWYG · TeX · PDF** (web client, `app/panes.ts`, `app/PaneSwitch.tsx`): the writing
   area shows the rendered document, its LaTeX source and the PDF side by side — any one, two or all
   three, in any order (Overleaf's split view with a third pane). The switch in the middle of the menu
   bar has a chip per pane, standing in the panes' order: a click shows or hides one (the last one
   stays), a double-click shows it alone, dragging a chip sideways moves its pane; ▾ draws all fifteen
   arrangements as small pictures, plus *Mirror* and *Equal widths*. The dividers between panes are
-  dragged; order, visibility and widths are kept per browser (`ol.panes`). The panes stay mounted in
+  dragged; order, visibility and widths are kept per browser (`ol.panes`). A pane's width is its
+  weight as `flex-grow`, scaled over the panes on screen to add up to their number (`paneGrow`):
+  flexbox shares out only part of the row when the factors add up to less than 1, which left a blank
+  column after the PDF was closed beside a narrowed document. The panes stay mounted in
   one DOM order and are placed with CSS `order`, so rearranging never reloads the editor or the PDF;
   the PDF pane is mounted the first time it is shown and kept. On a phone-width screen one pane at a
   time (the switch works like tabs). The PDF used to be a tab of the right sidebar; that sidebar now
