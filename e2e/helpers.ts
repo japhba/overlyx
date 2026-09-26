@@ -1,10 +1,14 @@
 import { readFileSync } from 'node:fs';
 import type { Page, BrowserContext, Browser } from '@playwright/test';
 
-/** Root of the projects served by the server under test (an isolated copy when OVERLYX_PROJECTS_DIR is set). */
+/**
+ * Root of the projects served by the server under test (an isolated copy when OVERLYX_PROJECTS_DIR
+ * is set). Projects live in their owner's namespace, `<root>/<owner>/<name>`, with the key
+ * `<owner>/<name>`: the specs' scratch projects are the admin's (`admin/e2e-…`).
+ */
 export const PROJECTS_DIR = process.env.OVERLYX_PROJECTS_DIR ?? '/root/projects';
-/** Real papers used as fixtures (read-only; specs copy them into scratch projects under PROJECTS_DIR). */
-export const FIXTURES_DIR = process.env.OVERLYX_E2E_FIXTURES ?? '/root/projects';
+/** Real papers used as fixtures (read-only; specs copy them into scratch projects under PROJECTS_DIR): the owner's projects. */
+export const FIXTURES_DIR = process.env.OVERLYX_E2E_FIXTURES ?? '/root/projects/jan';
 export const BASE_URL = process.env.OVERLYX_E2E_BASE ?? 'http://localhost:5173';
 
 /** A minimal .tex document around `body` (paragraphs separated by blank lines). */
@@ -63,8 +67,9 @@ export async function apiLogin(ctx: BrowserContext, creds = adminCredentials()):
 }
 
 /**
- * Projects are private to their owner (scratch directories created by the specs belong to the
- * admin): share one with other test users so that they can open it. Runs as the admin.
+ * Projects are private to their owner (scratch directories the specs create in the admin's
+ * namespace belong to the admin): share one with other test users so that they can open it. Runs
+ * as the admin; `project` is the key (`admin/e2e-…`).
  */
 export async function shareProject(browser: Browser, project: string, usernames: string[], role: 'view' | 'edit' = 'edit'): Promise<void> {
   const ctx = await browser.newContext();

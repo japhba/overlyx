@@ -12,7 +12,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import zlib from 'node:zlib';
 import { login, openDoc, texDoc, PROJECTS_DIR } from './helpers';
 
-const PROJECT = 'e2e-dollar';
+const PROJECT = 'admin/e2e-dollar';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 /** a small RGBA PNG painted by `px(x, y)` */

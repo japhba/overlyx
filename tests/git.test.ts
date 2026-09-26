@@ -4,6 +4,8 @@
  * smart-HTTP remote — a real `git clone` / `push` / `pull` against the router with Basic auth,
  * the project's roles (viewers cannot push), a push updating the working tree in place while
  * uncommitted changes in other files survive, and an open document absorbing a pushed change.
+ * The project starts in the flat layout (`projects/paper`) and moves into its owner's namespace
+ * (`jan/paper`): the old remote URL keeps working.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -41,7 +43,9 @@ const jan = toSessionUser(createUser('jan', 'Jan Bauer', null, { email: 'owner@e
 const bob = toSessionUser(createUser('bob', 'Bob Builder', 'bobs-password'));
 const vera = toSessionUser(createUser('vera', 'Vera Viewer', 'veras-password'));
 
-const PROJECT = join(ROOT, 'projects', 'paper');
+/** where the project starts (the flat layout) and where it lives once adopted: jan's namespace */
+const LEGACY = join(ROOT, 'projects', 'paper');
+const PROJECT = join(ROOT, 'projects', 'jan', 'paper');
 /** git on the server's working tree / a clone (same environment rules as the server) */
 /** (asynchronous: the test process is also the server — a blocking git would deadlock a clone) */
 const execFileP = promisify(execFile);
@@ -53,17 +57,18 @@ const g = async (dir: string, ...args: string[]): Promise<string> => (await exec
 let server: http.Server;
 let base = '';
 let bobToken = '';
-const url = (user: string, secret: string, project = 'paper') => `${base.replace('http://', `http://${user}:${encodeURIComponent(secret)}@`)}/git/${encodeURIComponent(project)}.git`;
+const url = (user: string, secret: string, project = 'jan/paper') => `${base.replace('http://', `http://${user}:${encodeURIComponent(secret)}@`)}/git/${project.split('/').map(encodeURIComponent).join('/')}.git`;
 
 beforeAll(async () => {
-  writeFileSync(join(PROJECT, 'main.tex'), docText('one', 'two', 'three'));
-  writeFileSync(join(PROJECT, 'refs.bib'), '@article{a, title={A}}\n');
-  writeFileSync(join(PROJECT, 'main.aux'), 'aux junk\n');
-  writeFileSync(join(PROJECT, 'main.tex~'), 'backup\n');
-  writeFileSync(join(PROJECT, 'figures', 'plot.txt'), 'not really a plot\n');
-  access.adoptProjects();                                   // paper -> jan
-  access.addMember('paper', 'bob', 'edit', jan);
-  access.addMember('paper', 'vera', 'view', jan);
+  writeFileSync(join(LEGACY, 'main.tex'), docText('one', 'two', 'three'));
+  writeFileSync(join(LEGACY, 'refs.bib'), '@article{a, title={A}}\n');
+  writeFileSync(join(LEGACY, 'main.aux'), 'aux junk\n');
+  writeFileSync(join(LEGACY, 'main.tex~'), 'backup\n');
+  writeFileSync(join(LEGACY, 'figures', 'plot.txt'), 'not really a plot\n');
+  access.adoptProjects();                                   // paper -> jan/paper
+  expect(existsSync(join(PROJECT, 'main.tex'))).toBe(true);
+  access.addMember('jan/paper', 'bob', 'edit', jan);
+  access.addMember('jan/paper', 'vera', 'view', jan);
   const app = express();
   app.use('/git', gitmod.gitRouter());
   server = http.createServer(app);
@@ -76,7 +81,7 @@ afterAll(async () => {
 
 describe('repository', () => {
   it('is initialised with a .gitignore and an initial commit that skips build products and backups', async () => {
-    await gitmod.ensureRepo('paper');
+    await gitmod.ensureRepo('jan/paper');
     expect(existsSync(join(PROJECT, '.git'))).toBe(true);
     expect(readFileSync(join(PROJECT, '.gitignore'), 'utf8')).toContain('*.aux');
     const files = (await g(PROJECT, 'ls-files')).trim().split('\n').sort();
@@ -92,12 +97,12 @@ describe('repository', () => {
   it('brings a .gitignore it wrote earlier up to date, and leaves a user-written one alone', async () => {
     const projects = join(ROOT, 'projects');
     // an older OverLyX repository: our header, but without the patterns added since (Python caches …)
-    const old = join(projects, 'older');
+    const old = join(projects, 'jan', 'older');
     mkdirSync(old, { recursive: true });
     writeFileSync(join(old, 'main.tex'), docText('one'));
     writeFileSync(join(old, '.gitignore'), gitmod.DEFAULT_GITIGNORE.split('\n').filter(l => !/pycache|\.pyc|ipynb|Thumbs|\.swp/.test(l)).join('\n') + 'mine/\n');
     await g(old, 'init', '-q', '-b', 'main');
-    await gitmod.ensureRepo('older');
+    await gitmod.ensureRepo('jan/older');
     const upgraded = readFileSync(join(old, '.gitignore'), 'utf8');
     expect(upgraded).toContain('__pycache__/');
     expect(upgraded).toContain('*.pyc');
@@ -105,17 +110,17 @@ describe('repository', () => {
     expect(upgraded.startsWith(gitmod.DEFAULT_GITIGNORE.split('\n')[0])).toBe(true);
     expect(gitmod.upgradeGitignore(old)).toBe(false);        // idempotent
     // a repository whose .gitignore the user wrote (or pushed): not ours to touch
-    const theirs = join(projects, 'theirs');
+    const theirs = join(projects, 'jan', 'theirs');
     mkdirSync(theirs, { recursive: true });
     writeFileSync(join(theirs, 'main.tex'), docText('one'));
     writeFileSync(join(theirs, '.gitignore'), '*.aux\n');
     await g(theirs, 'init', '-q', '-b', 'main');
-    await gitmod.ensureRepo('theirs');
+    await gitmod.ensureRepo('jan/theirs');
     expect(readFileSync(join(theirs, '.gitignore'), 'utf8')).toBe('*.aux\n');
   });
 
   it('commits OverLyX writes, attributed to the people who edited', async () => {
-    const doc = await manager.open('paper/main.tex');
+    const doc = await manager.open('jan/paper/main.tex');
     doc.editors.add(bob.id);
     doc.loadFromLyx(doc.parse(docText('one', 'two edited by bob', 'three')), 'test');
     expect(await doc.saveToFile()).toBe(true);              // -> fileWrittenListeners -> touchProject (300 ms)
@@ -124,15 +129,15 @@ describe('repository', () => {
     expect((await g(PROJECT, 'log', '-1', '--format=%an <%ae>%n%cn%n%s%n%b')).trim()).toBe('Bob Builder <bob@overlyx.local>\nOverLyX\nUpdate main.tex\nEdited in OverLyX by Bob Builder\n\nFiles:\n  main.tex');
     expect((await g(PROJECT, 'status', '--porcelain')).trim()).toBe('');
     // nothing to commit: no commit
-    expect(await gitmod.commitProject('paper')).toBe(false);
-    const info = await gitmod.repoInfo('paper');
+    expect(await gitmod.commitProject('jan/paper')).toBe(false);
+    const info = await gitmod.repoInfo('jan/paper');
     expect(info.branch).toBe('main');
     expect(info.commits.length).toBe(2);
     expect(info.pending).toBe(0);
     // an explicit commit with a message, by a user
     writeFileSync(join(PROJECT, 'notes.tex'), '% notes\n');
-    expect((await gitmod.repoInfo('paper')).pendingFiles).toEqual(['notes.tex']);
-    expect(await gitmod.commitProject('paper', { message: 'Add notes', by: jan.id })).toBe(true);
+    expect((await gitmod.repoInfo('jan/paper')).pendingFiles).toEqual(['notes.tex']);
+    expect(await gitmod.commitProject('jan/paper', { message: 'Add notes', by: jan.id })).toBe(true);
     expect((await g(PROJECT, 'log', '-1', '--format=%an|%s')).trim()).toBe('Jan Bauer|Add notes');
   });
 });
@@ -167,18 +172,18 @@ describe('git over HTTP', () => {
   const clone = join(ROOT, 'clones', 'bob');
 
   it('refuses without credentials, with wrong ones, and for people without access', async () => {
-    const r = await fetch(`${base}/git/paper.git/info/refs?service=git-upload-pack`);
+    const r = await fetch(`${base}/git/jan/paper.git/info/refs?service=git-upload-pack`);
     expect(r.status).toBe(401);
     expect(r.headers.get('www-authenticate')).toMatch(/^Basic/);
-    const bad = await fetch(`${base}/git/paper.git/info/refs?service=git-upload-pack`, { headers: { authorization: 'Basic ' + Buffer.from('bob:nope').toString('base64') } });
+    const bad = await fetch(`${base}/git/jan/paper.git/info/refs?service=git-upload-pack`, { headers: { authorization: 'Basic ' + Buffer.from('bob:nope').toString('base64') } });
     expect(bad.status).toBe(401);
     const stranger = toSessionUser(createUser('eve', 'Eve', 'eves-password'));
     void stranger;
-    const no = await fetch(`${base}/git/paper.git/info/refs?service=git-upload-pack`, { headers: { authorization: 'Basic ' + Buffer.from('eve:eves-password').toString('base64') } });
+    const no = await fetch(`${base}/git/jan/paper.git/info/refs?service=git-upload-pack`, { headers: { authorization: 'Basic ' + Buffer.from('eve:eves-password').toString('base64') } });
     expect(no.status).toBe(403);
     const missing = await fetch(`${base}/git/nope.git/info/refs?service=git-upload-pack`, { headers: { authorization: 'Basic ' + Buffer.from('bob:bobs-password').toString('base64') } });
     expect(missing.status).toBe(404);
-    const dumb = await fetch(`${base}/git/paper.git/HEAD`, { headers: { authorization: 'Basic ' + Buffer.from('bob:bobs-password').toString('base64') } });
+    const dumb = await fetch(`${base}/git/jan/paper.git/HEAD`, { headers: { authorization: 'Basic ' + Buffer.from('bob:bobs-password').toString('base64') } });
     expect(dumb.status).toBe(404);
   });
 
@@ -229,7 +234,7 @@ describe('git over HTTP', () => {
     await expect(g(clone, 'push', '-q', PROJECT, 'main')).rejects.toThrow(/rejected|push-to-checkout/);
     expect(readFileSync(join(PROJECT, 'notes.tex'), 'utf8')).toBe('% changed on the server, not committed\n');
     await g(clone, 'reset', '-q', '--hard', 'HEAD~1');
-    expect(await gitmod.commitProject('paper')).toBe(true);   // the server side gets committed as usual
+    expect(await gitmod.commitProject('jan/paper')).toBe(true);   // the server side gets committed as usual
     await g(clone, 'pull', '-q', '--no-rebase', 'origin', 'main');
     expect(readFileSync(join(clone, 'notes.tex'), 'utf8')).toBe('% changed on the server, not committed\n');
   });
@@ -244,7 +249,7 @@ describe('git over HTTP', () => {
   });
 
   it('pull gets what OverLyX wrote since; a pushed document change reaches the open document', async () => {
-    const doc = await manager.open('paper/main.tex');
+    const doc = await manager.open('jan/paper/main.tex');
     doc.loadFromLyx(doc.parse(docText('one', 'two edited by bob', 'three', 'four from the browser')), 'test');
     // not even written yet: the fetch saves and commits first
     await g(clone, 'pull', '-q', '--no-rebase', 'origin', 'main');
@@ -258,16 +263,24 @@ describe('git over HTTP', () => {
   });
 
   it('a project name with spaces works, and an unborn repository can be pushed to', async () => {
-    mkdirSync(join(ROOT, 'projects', 'my paper'), { recursive: true });
+    mkdirSync(join(ROOT, 'projects', 'jan', 'my paper'), { recursive: true });
     access.adoptProjects();
-    await gitmod.ensureRepo('my paper');
+    await gitmod.ensureRepo('jan/my paper');
     const c = join(ROOT, 'clones', 'my-paper');
     const tj = gitmod.createToken(jan.id, 'x');
-    await g(ROOT, 'clone', '-q', url('jan', tj.token, 'my paper'), c);
+    await g(ROOT, 'clone', '-q', url('jan', tj.token, 'jan/my paper'), c);
     expect((await g(c, 'ls-files')).trim()).toBe('.gitignore');
     writeFileSync(join(c, 'main.tex'), docText('hello'));
     await g(c, 'add', '-A'); await g(c, 'commit', '-q', '-m', 'first');
     await g(c, 'push', '-q', 'origin', 'main');
-    expect(readFileSync(join(ROOT, 'projects', 'my paper', 'main.tex'), 'utf8')).toBe(docText('hello'));
+    expect(readFileSync(join(ROOT, 'projects', 'jan', 'my paper', 'main.tex'), 'utf8')).toBe(docText('hello'));
+  });
+
+  it('a remote from before namespaces (/git/<name>.git) still clones the project', async () => {
+    const c = join(ROOT, 'clones', 'legacy-remote');
+    await g(ROOT, 'clone', '-q', url('bob', bobToken, 'paper'), c);
+    expect(readFileSync(join(c, 'refs.bib'), 'utf8')).toContain('title={B}');
+    const a = await fetch(`${base}/git/paper/info/refs?service=git-upload-pack`, { headers: { authorization: 'Basic ' + Buffer.from('bob:bobs-password').toString('base64') } });
+    expect(a.status).toBe(200);
   });
 });

@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { login, openDoc, collectErrors, PROJECTS_DIR, texDoc } from './helpers';
 
-const PROJECT = 'e2e-theme';
+const PROJECT = 'admin/e2e-theme';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 test.beforeAll(() => {

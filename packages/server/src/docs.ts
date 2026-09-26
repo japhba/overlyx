@@ -11,7 +11,7 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { yDocToProsemirrorJSON } from 'y-prosemirror';
 import {
-  mergeLyx, pmToLyxBody, writeParagraphs, type LyxDocument, type PMJSON,
+  mergeLyx, pmToLyxBody, writeParagraphs, isProjectKey, splitDocId, type LyxDocument, type PMJSON,
 } from '@overlyx/core';
 import { checkTexHealth, repairTex, type HealthIssue } from '@overlyx/core/tex/index.ts';
 import { db } from './db.ts';
@@ -464,11 +464,11 @@ export class DocManager {
     this.watch();
   }
 
-  /** ids look like "project/sub/dir/file.tex" */
+  /** ids look like "owner/project/sub/dir/file.tex" (core projectKey.ts) */
   static parseId(id: string): { project: string; relPath: string } {
-    const idx = id.indexOf('/');
-    if (idx < 0) throw new Error('bad doc id');
-    return { project: id.slice(0, idx), relPath: id.slice(idx + 1) };
+    const { project, path: relPath } = splitDocId(id);
+    if (!project || !relPath) throw new Error('bad doc id');
+    return { project, relPath };
   }
 
   async open(id: string): Promise<OpenDoc> {
@@ -650,7 +650,7 @@ export class DocManager {
     // watched (the root itself may live under a dotted path)
     const root = config.projectsDir;
     const ignored = (p: string) => path.relative(root, p).split(path.sep).some(seg => (seg.startsWith('.') && seg !== '.' && seg !== '..') || seg === 'node_modules' || seg === '_build');
-    this.watcher = chokidar.watch(root, { ignoreInitial: true, depth: 7, awaitWriteFinish: { stabilityThreshold: 400, pollInterval: 100 }, ignored });
+    this.watcher = chokidar.watch(root, { ignoreInitial: true, depth: 8, awaitWriteFinish: { stabilityThreshold: 400, pollInterval: 100 }, ignored });
     this.watcher.on('change', (file: string) => void this.onExternalChange(file));
     this.watcher.on('add', (file: string) => void this.onExternalChange(file));
     this.watcher.on('unlink', (file: string) => void this.onExternalRemove(file));
@@ -664,8 +664,8 @@ export class DocManager {
   /** A figure was (re)written — a plot script ran, a file was uploaded: tell the editors showing it. */
   private notifyGraphicsChanged(file: string): void {
     const parts = path.relative(config.projectsDir, file).split(path.sep);
-    const project = parts.shift();
-    if (!project || project === '..' || project.startsWith('.') || !parts.length) return;
+    const project = parts.splice(0, 2).join('/');   // <owner>/<name>
+    if (!isProjectKey(project) || project.startsWith('.') || !parts.length) return;
     let version = Date.now();
     try { version = Math.round(fs.statSync(file).mtimeMs); } catch { /* gone again */ }
     for (const l of graphicsChangedListeners) l(project, parts.join('/'), version);
@@ -673,8 +673,8 @@ export class DocManager {
 
   /** Tell the subscribed clients (debounced per project) that the project's file list changed. */
   private notifyProjectChanged(file: string): void {
-    const project = path.relative(config.projectsDir, file).split(path.sep)[0];
-    if (!project || project === '..' || project.startsWith('.')) return;
+    const project = path.relative(config.projectsDir, file).split(path.sep).slice(0, 2).join('/');
+    if (!isProjectKey(project) || project.startsWith('.')) return;
     clearTimeout(this.changeTimers.get(project));
     this.changeTimers.set(project, setTimeout(() => {
       this.changeTimers.delete(project);

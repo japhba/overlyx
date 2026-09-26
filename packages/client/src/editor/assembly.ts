@@ -17,7 +17,7 @@ import { gapCursor } from 'prosemirror-gapcursor';
 import { dropCursor } from 'prosemirror-dropcursor';
 import { tableEditing } from 'prosemirror-tables';
 import { ySyncPluginKey } from 'y-prosemirror';
-import { unquote, paramMap } from '@overlyx/core';
+import { unquote, paramMap, projectOfDoc, docDirOf } from '@overlyx/core';
 import { lyxKeymap, chordPlugin } from './keymap';
 import { numberingPlugin } from './plugins/numbering';
 import { foldPlugin } from './plugins/fold';
@@ -324,8 +324,8 @@ export function installEditorDom(view: EditorView, docId: string): void {
   const createdAt = performance.now();
   view.dom.addEventListener('dblclick', (ev) => { if (performance.now() - createdAt < 600) { ev.stopPropagation(); ev.preventDefault(); } }, true);
   view.dom.dataset.docId = docId;
-  view.dom.dataset.project = docId.split('/')[0];
-  view.dom.dataset.docDir = docId.split('/').slice(1, -1).join('/');
+  view.dom.dataset.project = projectOfDoc(docId);
+  view.dom.dataset.docDir = docDirOf(docId);
   view.dom.addEventListener('mouseover', (ev) => {
     const el = (ev.target as HTMLElement).closest?.('.lyx-change, .lyx-inset[data-change]') as HTMLElement | null;
     if (!el || el.title) return;

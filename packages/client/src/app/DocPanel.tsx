@@ -12,6 +12,7 @@ import { FileBrowser, projectLabel, useProjectEvents } from './FileBrowser';
 import { projectDocs } from './Home';
 import { Outline, type OutlineItem } from './Outline';
 import { editorContext } from '../editor/context';
+import { projectOfDoc } from '@overlyx/core';
 
 export interface DocPanelProps {
   /** the file shown (project/path, no prefix) */
@@ -50,7 +51,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
   }, []);
 
   // the project shown: the current file's, else the last picked one, else the first
-  const currentProject = current ? current.split('/')[0] : null;
+  const currentProject = current ? projectOfDoc(current) || null : null;
   useEffect(() => { if (currentProject) setPicked(currentProject); }, [currentProject]);
   useEffect(() => { if (picked) try { localStorage.setItem('ol.project', picked); } catch { /* ignore */ } }, [picked]);
   const groups = useMemo(() => {

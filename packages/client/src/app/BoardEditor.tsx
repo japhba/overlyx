@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import * as decoding from 'lib0/decoding';
-import { strokePathD, laserPathD, polylineHitsPolygon, rectHitsPolygon, type InkStroke } from '@overlyx/core';
+import { strokePathD, laserPathD, polylineHitsPolygon, rectHitsPolygon, splitDocId, type InkStroke } from '@overlyx/core';
 import { api, fileUrl, type User } from '../api';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../editor/imagepaste';
 import { HIGHLIGHT_OPACITY, LASER_COLOR, LASER_FADE_MS, getInk, setInk, subscribeInk, inkColorName, formatMm, mmToPx, type InkPen } from '../editor/plugins/ink';
@@ -62,8 +62,7 @@ function strokeD(obj: BoardObj): string {
 }
 
 export function BoardEditor({ id, user, notify }: { id: string; user: User; notify: (text: string, kind?: 'info' | 'error') => void }) {
-  const project = id.split('/')[0];
-  const path = id.slice(project.length + 1);
+  const { project, path } = splitDocId(id);
   const vpRef = useRef<HTMLDivElement>(null);
   const [, bump] = useState(0);
   const rerender = () => bump(t => t + 1);

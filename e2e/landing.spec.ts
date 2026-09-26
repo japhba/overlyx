@@ -39,8 +39,8 @@ test.describe('landing page', () => {
     await expect(g).toHaveAttribute('href', '/api/auth/google');
     await expect(g).toContainText('Continue with Google');
     // a deep link (a document, a share link) is where the sign-in returns to
-    await page.goto('/#/paper/main.tex');
-    await expect(page.locator('[data-google-login]')).toHaveAttribute('href', '/api/auth/google?next=%23%2Fpaper%2Fmain.tex');
+    await page.goto('/#/jan/paper/main.tex');
+    await expect(page.locator('[data-google-login]')).toHaveAttribute('href', '/api/auth/google?next=%23%2Fjan%2Fpaper%2Fmain.tex');
     await page.goto('/');
     await expect(page.getByPlaceholder('Username')).toHaveCount(0);
     const box = await g.boundingBox();
@@ -74,11 +74,11 @@ test.describe('landing page', () => {
 
   test('coming from Overleaf: a zip chosen before the sign-in is imported right after it and the document opens', async ({ page, browser }) => {
     test.setTimeout(150000);
-    const PROJECT = 'e2e-landing-import';
+    const PROJECT = 'e2e-landing-import', KEY = 'admin/' + PROJECT;   // imported into the admin's namespace
     const admin = await browser.newContext();
     await apiLogin(admin);
-    await admin.request.delete(`${BASE_URL}/api/projects/${PROJECT}`).catch(() => {});
-    rmSync(`${PROJECTS_DIR}/${PROJECT}`, { recursive: true, force: true });
+    await admin.request.delete(`${BASE_URL}/api/projects/${encodeURIComponent(KEY)}`).catch(() => {});
+    rmSync(`${PROJECTS_DIR}/${KEY}`, { recursive: true, force: true });
     await admin.close();
 
     await page.addInitScript(TOUR_SEEN_SCRIPT);
@@ -111,21 +111,21 @@ test.describe('landing page', () => {
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     // the import runs by itself on the start page and the lone document opens
     await page.waitForSelector('.lyx-editor', { timeout: 60000 });
-    await expect(page).toHaveURL(new RegExp(`#/${PROJECT}/main\\.tex$`));
+    await expect(page).toHaveURL(new RegExp(`#/${KEY}/main\\.tex$`));
     await expect(page.locator('.lyx-editor')).toContainText('Imported from Overleaf', { timeout: 30000 });
-    expect(existsSync(`${PROJECTS_DIR}/${PROJECT}/refs.bib`)).toBe(true);
+    expect(existsSync(`${PROJECTS_DIR}/${KEY}/refs.bib`)).toBe(true);
     // nothing is left waiting: the start page does not import it again
     await page.goto('/');
     await expect(page.locator('.home')).toBeVisible();
     await expect(page.locator('[data-overleaf-import]')).toHaveCount(0);
-    await page.request.delete(`${BASE_URL}/api/projects/${PROJECT}`);
+    await page.request.delete(`${BASE_URL}/api/projects/${encodeURIComponent(KEY)}`);
   });
 
   test("Overleaf's bundle of project zips (the project list's download) becomes one project per zip", async ({ browser }) => {
     const admin = await browser.newContext();
     await apiLogin(admin);
-    const names = ['e2e-bundle-a', 'e2e-bundle-b'];
-    for (const n of names) { await admin.request.delete(`${BASE_URL}/api/projects/${n}`).catch(() => {}); rmSync(`${PROJECTS_DIR}/${n}`, { recursive: true, force: true }); }
+    const names = ['admin/e2e-bundle-a', 'admin/e2e-bundle-b'];   // in the admin's namespace
+    for (const n of names) { await admin.request.delete(`${BASE_URL}/api/projects/${encodeURIComponent(n)}`).catch(() => {}); rmSync(`${PROJECTS_DIR}/${n}`, { recursive: true, force: true }); }
     const bundle = new JSZip();
     bundle.file('e2e-bundle-a.zip', await zipOf({ 'main.tex': TEX }));
     bundle.file('e2e-bundle-b.zip', await zipOf({ 'paper.tex': TEX, 'figs/x.png': Buffer.from([1, 2, 3]) }));
@@ -134,15 +134,15 @@ test.describe('landing page', () => {
     expect(r.ok()).toBe(true);
     const body = await r.json() as { projects: { name: string; files: number }[]; errors: unknown[] };
     expect(body.projects.map(p => p.name).sort()).toEqual(names);
-    expect(body.projects.find(p => p.name === 'e2e-bundle-b')!.files).toBe(2);
+    expect(body.projects.find(p => p.name === 'admin/e2e-bundle-b')!.files).toBe(2);
     expect(body.errors).toEqual([]);
-    expect(existsSync(`${PROJECTS_DIR}/e2e-bundle-b/figs/x.png`)).toBe(true);
-    expect(existsSync(`${PROJECTS_DIR}/Overleaf Projects -2 items`)).toBe(false);
+    expect(existsSync(`${PROJECTS_DIR}/admin/e2e-bundle-b/figs/x.png`)).toBe(true);
+    expect(existsSync(`${PROJECTS_DIR}/admin/Overleaf Projects -2 items`)).toBe(false);
     // once more: the names are taken now, and the answer says so per project
     const again = await admin.request.post(`${BASE_URL}/api/import/zip?name=Overleaf%20Projects%20-2%20items`, { data: buf, headers: { 'content-type': 'application/zip' } });
     expect(again.status()).toBe(400);
     expect((await again.json()).error).toMatch(/exists already/);
-    for (const n of names) await admin.request.delete(`${BASE_URL}/api/projects/${n}`);
+    for (const n of names) await admin.request.delete(`${BASE_URL}/api/projects/${encodeURIComponent(n)}`);
     await admin.close();
   });
 
@@ -181,10 +181,10 @@ test.describe('landing page', () => {
 test.describe('sidebars', () => {
   test('the documents panel (project, file tree, outline) and the right panels hide into rails; the state survives a reload', async ({ page }) => {
     await login(page);
-    await openDoc(page, 'recurrent_feature/main.tex');
+    await openDoc(page, 'admin/recurrent_feature/main.tex');
     // the documents panel is shown at first: the project, its files, the open document expanded into its live outline; no top tab bar; the right side is a rail
     await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
-    await expect(page.locator('.docpanel .project-switch')).toHaveValue('recurrent_feature');
+    await expect(page.locator('.docpanel .project-switch')).toHaveValue('admin/recurrent_feature');
     await expect(page.locator('.docpanel .doc-tab.active .fname')).toHaveText('main.tex');
     await expect(page.locator('.docpanel .doc-tab.active .outline-item').first()).toBeVisible();
     await expect(page.locator('.docpanel .filetree .doc-tab.active > .tree-row.current')).toHaveCount(1);   // one tree: the document's row is a file row, its outline under it
@@ -221,7 +221,7 @@ test.describe('sidebars', () => {
 
   test('documents in the file tree open in place and expand into their outlines; a heading of a closed document opens it there', async ({ page }) => {
     await login(page);
-    await openDoc(page, 'recurrent_feature/main.tex');
+    await openDoc(page, 'admin/recurrent_feature/main.tex');
     const tabs = page.locator('.docpanel .doc-tab');
     const main = page.locator('.docpanel .doc-tab[data-doc="main.tex"]');   // (the project also has main.tex files in sub-directories)
     await expect(main).toHaveClass(/active/);
@@ -252,14 +252,14 @@ test.describe('sidebars', () => {
     await main.locator('.doc-name').click();
     await expect(page).toHaveURL(/recurrent_feature\/main\.tex$/);
     await expect(main).toHaveClass(/active/);
-    await expect(page.locator('.docpanel .project-switch')).toHaveValue('recurrent_feature');
+    await expect(page.locator('.docpanel .project-switch')).toHaveValue('admin/recurrent_feature');
   });
 });
 
 test.describe('command palette', () => {
   test('Ctrl+Shift+P opens a search over all menus; results show the path and the shortcut; Enter runs the item', async ({ page }) => {
     await login(page);
-    await openDoc(page, 'recurrent_feature/main.tex');
+    await openDoc(page, 'admin/recurrent_feature/main.tex');
     await page.locator('.lyx-editor > .lyx-par').first().click();
     await page.keyboard.press('Control+Shift+p');
     const input = page.locator('[data-help-search]');
@@ -291,7 +291,7 @@ test.describe('command palette', () => {
 
   test('shortcuts can be changed: recorder, collision prompt, the new key works, the old one no longer, reset', async ({ page }) => {
     await login(page);
-    await openDoc(page, 'recurrent_feature/main.tex');
+    await openDoc(page, 'admin/recurrent_feature/main.tex');
     await page.locator('.lyx-editor > .lyx-par').first().click();
     // give "View ▸ Outline" the key Ctrl+Shift+9
     await page.keyboard.press('F1');
@@ -350,7 +350,7 @@ test.describe('command palette', () => {
 test.describe('source pane', () => {
   test('follows the cursor into a display formula (the row under the cursor is marked)', async ({ page }) => {
     await login(page);
-    await openDoc(page, 'recurrent_feature/main.tex');
+    await openDoc(page, 'admin/recurrent_feature/main.tex');
     const p = page.locator('.lyx-editor > .lyx-par.lyx-layout-standard').filter({ hasText: /neural network/i }).first();
     await p.click({ position: { x: 4, y: 8 } });
     await page.keyboard.press('Control+Alt+s');

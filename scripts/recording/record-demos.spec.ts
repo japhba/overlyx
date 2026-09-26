@@ -97,7 +97,7 @@ async function finish(ctx: BrowserContext, page: Page, name: string, theme: Them
 
 for (const theme of ['light', 'dark'] as const) {
   test(`wysiwyg (${theme})`, async ({ browser }) => {
-    const project = theme === 'light' ? 'spectral-learning' : 'spectral-dynamics';
+    const project = theme === 'light' ? 'admin/spectral-learning' : 'admin/spectral-dynamics';   // the admin's namespace
     const ctx = await recordingContext(browser, theme);
     await freshProject(ctx, project, doc('Spectral Learning Dynamics', 'Ada Lovelace',
       '\\section{Introduction}\n\nGradient descent couples the modes of a deep network through the spectrum of the input correlations. Each mode converges at a rate set by its singular value, so a network learns the strongest structure in the data first.\n'));
@@ -122,7 +122,7 @@ for (const theme of ['light', 'dark'] as const) {
   });
 
   test(`tex (${theme})`, async ({ browser }) => {
-    const project = theme === 'light' ? 'kernel-regression' : 'kernel-methods';
+    const project = theme === 'light' ? 'admin/kernel-regression' : 'admin/kernel-methods';
     const ctx = await recordingContext(browser, theme);
     await freshProject(ctx, project, doc('Kernel Regression without Regularization', 'Ada Lovelace',
       '\\section{Setup}\n\nThe kernel regression estimator interpolates the training data whenever the kernel matrix is invertible. Generalization is then controlled by the spectrum of the kernel operator.\n'));
@@ -161,7 +161,7 @@ for (const theme of ['light', 'dark'] as const) {
   });
 
   test(`collab (${theme})`, async ({ browser }) => {
-    const project = theme === 'light' ? 'deep-ensembles' : 'loss-landscapes';
+    const project = theme === 'light' ? 'admin/deep-ensembles' : 'admin/loss-landscapes';
     const ctx = await recordingContext(browser, theme);
     // the recorded (admin) view shows comment threads in the margin, Google-Docs style
     await ctx.addInitScript(() => { try { localStorage.setItem('ol.margin', '1'); } catch { /* ignore */ } });

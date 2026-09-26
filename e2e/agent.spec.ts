@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { login, PROJECTS_DIR, texDoc } from './helpers';
 
-const PROJECT = 'e2e-agent';
+const PROJECT = 'admin/e2e-agent';
 const DOC = `${PROJECT}/paper.tex`;
 const AGENT_STUB = !!process.env.OVERLYX_E2E_AGENT_STUB;
 

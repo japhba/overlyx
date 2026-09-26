@@ -95,6 +95,31 @@ export interface EditorOptions {
 /** IndexedDB database name of a document's local copy */
 export const localDbName = (docId: string) => 'overlyx:' + docId;
 
+/**
+ * Local copies kept under a document's old id — from before projects lived in their owner's
+ * namespace (`thesis/main.tex`, now `jan/thesis/main.tex`) — are copied to its current id, offline
+ * edits the server has not seen yet included; the old copy stays. `ids`: old id → current id.
+ */
+export async function moveLocalCopies(ids: Record<string, string>): Promise<void> {
+  const dbs = await (indexedDB as any).databases?.() as { name?: string }[] | undefined;
+  const have = new Set((dbs ?? []).map(d => d.name));
+  for (const [from, to] of Object.entries(ids)) {
+    if (!have.has(localDbName(from)) || have.has(localDbName(to))) continue;
+    const ydoc = new Y.Doc();
+    const src = new IndexeddbPersistence(localDbName(from), ydoc);
+    try {
+      await src.whenSynced;
+      const [epoch, pending] = await Promise.all([src.get('epoch'), src.get('pending')]);
+      const dst = new IndexeddbPersistence(localDbName(to), ydoc);   // stores the loaded state under the new name
+      await dst.whenSynced;
+      if (epoch !== undefined) await dst.set('epoch', epoch);
+      if (pending !== undefined) await dst.set('pending', pending);
+      await dst.destroy();
+    } catch (e) { console.warn(`[offline] could not move the local copy of ${from}:`, e); }
+    finally { await src.destroy(); ydoc.destroy(); }
+  }
+}
+
 export function createEditor(opts: EditorOptions): EditorHandle {
   const ydoc = new Y.Doc();
   const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;

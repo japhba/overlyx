@@ -16,7 +16,7 @@ const scratch = mkdtempSync(join(tmpdir(), 'ol-reparse-'));
 process.env.OVERLYX_DATA_DIR = join(scratch, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(scratch, 'projects');
 mkdirSync(process.env.OVERLYX_DATA_DIR, { recursive: true });
-mkdirSync(join(scratch, 'projects', 'p'), { recursive: true });
+mkdirSync(join(scratch, 'projects', 'u', 'p'), { recursive: true });
 
 const sha1 = (t: string) => createHash('sha1').update(t).digest('hex');
 
@@ -41,7 +41,7 @@ Plain text after.
 `;
     // normal form, so that the healed state writes the file byte-identically
     const text = writeTex(parseTex(raw).doc).text;
-    const abs = join(scratch, 'projects', 'p', 'paper.tex');
+    const abs = join(scratch, 'projects', 'u', 'p', 'paper.tex');
     writeFileSync(abs, text);
 
     // the "old parser's" state: without the \newtheorem declarations the environment is ERT
@@ -56,11 +56,11 @@ Plain text after.
     applyLyxDocument(ydoc, stale, 'test');
     const epoch = 'cafe0123deadbeef';
     db.prepare('INSERT INTO ydocs (id, state, file_hash, updated_at, epoch) VALUES (?,?,?,?,?)')
-      .run('p/paper.tex', Buffer.from(Y.encodeStateAsUpdate(ydoc)), sha1(text), Date.now(), epoch);
+      .run('u/p/paper.tex', Buffer.from(Y.encodeStateAsUpdate(ydoc)), sha1(text), Date.now(), epoch);
 
     const dm = new DocManager();
     try {
-      const doc = await dm.open('p/paper.tex');
+      const doc = await dm.open('u/p/paper.tex');
       const layouts = doc.toLyxDocument().body.map(par => par.layout);
       expect(layouts).toContain('Definition');                    // healed
       expect(doc.epoch).toBe(epoch);                              // by merging, not by starting over

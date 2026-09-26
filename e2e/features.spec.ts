@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from
 import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 /** Each test works on its own copy of a document inside a scratch project. */
-const PROJECT = 'e2e-scratch';
+const PROJECT = 'admin/e2e-scratch';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 function freshDoc(name: string): string {
@@ -260,9 +260,9 @@ test('versions can be created, listed and restored', async ({ page }) => {
 });
 
 test('PDF export builds a PDF for a revtex document', async ({ page, request }) => {
-  test.skip(!existsSync(`${PROJECTS_DIR}/bayesian_chaos/main.tex`), 'the revtex paper is not in the projects directory under test');
+  test.skip(!existsSync(`${PROJECTS_DIR}/admin/bayesian_chaos/main.tex`), 'the revtex paper is not in the projects directory under test');
   test.setTimeout(400000);
-  await openDoc(page, 'bayesian_chaos/main.tex');
+  await openDoc(page, 'admin/bayesian_chaos/main.tex');
   await page.locator('.tb-btn[title^="View PDF"]').click();
   // builds run in the background: wait for this one (progress shown, then gone), not a previous PDF
   await expect(page.locator('.pdf-panel .build-progress')).toBeVisible({ timeout: 15000 });

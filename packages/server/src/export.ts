@@ -5,11 +5,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { headerValue } from '@overlyx/core';
 import { config } from './config.ts';
 import { db } from './db.ts';
+import { buildDirPath } from './namespaces.ts';
 import { manager, DocManager } from './docs.ts';
 import { projectDir, resolveProjectPath, findMaster, childDocuments } from './projects.ts';
 import { toPdf, cacheDir } from './graphics.ts';
@@ -137,13 +137,12 @@ export function cleanupProjectData(project: string): void {
     db.prepare(`DELETE FROM ${t} WHERE substr(doc_id, 1, ?) = ?`).run(project.length + 1, project + '/');
   }
   for (const id of ids) {
-    const d = path.join(config.dataDir, 'build', crypto.createHash('sha1').update(id).digest('hex').slice(0, 16));
-    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(buildDirPath(id), { recursive: true, force: true }); } catch { /* ignore */ }
   }
 }
 
 export function buildDir(docId: string): string {
-  const d = path.join(config.dataDir, 'build', crypto.createHash('sha1').update(docId).digest('hex').slice(0, 16));
+  const d = buildDirPath(docId);
   fs.mkdirSync(d, { recursive: true });
   return d;
 }

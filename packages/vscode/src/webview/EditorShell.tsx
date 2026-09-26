@@ -50,7 +50,7 @@ import * as C from '@client/editor/commands';
 import { setMarginMode } from '@client/editor/plugins/margin';
 import { acceptAllChanges, rejectAllChanges, changeAt } from '@client/editor/plugins/changes';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '@client/editor/plugins/find';
-import { unquote } from '@overlyx/core';
+import { unquote, projectOfDoc, docDirOf } from '@overlyx/core';
 import { describeChange } from '@client/editor/assembly';
 
 type DialogState = { name: string; arg?: unknown } | null;
@@ -189,8 +189,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     editorContext.activeView = v;
     const id = viewDocId(v);
     editorContext.docId = id;
-    editorContext.project = id.split('/')[0];
-    editorContext.docDir = id.split('/').slice(1, -1).join('/');
+    editorContext.project = projectOfDoc(id);
+    editorContext.docDir = docDirOf(id);
     const activeMeta = id === docId ? metaRef.current : relatedRefs.current.get(id)?.meta;
     if (activeMeta) {
       editorContext.meta = activeMeta;
@@ -214,8 +214,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     void (async () => {
       editorContext.user = { id: 1, username: 'you', name: 'You', color: '#3b6ea5', isAdmin: false };
       editorContext.docId = docId;
-      editorContext.project = docId.split('/')[0];
-      editorContext.docDir = docId.split('/').slice(1, -1).join('/');
+      editorContext.project = projectOfDoc(docId);
+      editorContext.docDir = docDirOf(docId);
       editorContext.trackChanges = false;
       editorContext.combined = combined;
       // metadata FIRST (macros, authors, layouts): formulas must render once, with the macros —
@@ -583,7 +583,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     const close = () => { setDialog(null); view.focus(); };
     const targetId = viewDocId(view);
     const targetMeta = targetId === docId ? meta : relatedRefs.current.get(targetId)!.meta;
-    const project = targetId.split('/')[0];
+    const project = projectOfDoc(targetId);
     const docDir = view.dom.dataset.docDir ?? editorContext.docDir;
     switch (dialog.name) {
       case 'preferences': return <SettingsPanel ai={null} user={editorContext.user!} sections={['editor']} onClose={close} />;

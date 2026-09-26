@@ -10,7 +10,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { login, openDoc, texDoc, collectErrors, PROJECTS_DIR } from './helpers';
 
-const PROJECT = 'e2e-ink';
+const PROJECT = 'admin/e2e-ink';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 test.describe.configure({ mode: 'serial' });

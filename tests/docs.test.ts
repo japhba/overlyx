@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-docs-test');
 rmSync(ROOT, { recursive: true, force: true });
-mkdirSync(join(ROOT, 'projects', 'p'), { recursive: true });
+mkdirSync(join(ROOT, 'projects', 'u', 'p'), { recursive: true });
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 
@@ -25,7 +25,7 @@ const docText = (...pars: string[]) => HEAD + pars.map(par).join('') + TAIL;
 /** what the writer makes of a document (the file on disk after a save) */
 const canon = (text: string) => writeTex(parseTex(text).doc).text;
 
-const file = (name: string) => join(ROOT, 'projects', 'p', name);
+const file = (name: string) => join(ROOT, 'projects', 'u', 'p', name);
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /** Simulate a user's edit: load a modified document as a non-file origin (the manager schedules a save). */
@@ -39,7 +39,7 @@ beforeAll(() => {
 
 describe('saving', () => {
   it('an edit is written to the file, in canonical form, and a second save changes nothing', async () => {
-    const doc = await manager.open('p/a.tex');
+    const doc = await manager.open('u/p/a.tex');
     edit(doc, docText('one', 'two edited', 'three'));
     expect(doc.dirty).toBe(true);
     expect(await doc.saveToFile()).toBe(true);
@@ -53,7 +53,7 @@ describe('saving', () => {
   });
 
   it('a change written to the file meanwhile (git, another editor) is merged, not overwritten', async () => {
-    const doc = await manager.open('p/a.tex');
+    const doc = await manager.open('u/p/a.tex');
     // someone else changes paragraph 1 on disk while paragraph 3 is edited here (save pending)
     writeFileSync(file('a.tex'), docText('one from Overleaf', 'two edited', 'three'));
     edit(doc, docText('one', 'two edited', 'three from the web'));
@@ -64,7 +64,7 @@ describe('saving', () => {
   });
 
   it('never replaces the file with something that is not a document', async () => {
-    const doc = await manager.open('p/a.tex');
+    const doc = await manager.open('u/p/a.tex');
     const before = readFileSync(file('a.tex'), 'utf8');
     const asAny = doc as unknown as { render: () => { text: string; files: Record<string, string> } };
     const orig = asAny.render.bind(doc);
@@ -84,23 +84,23 @@ describe('saving', () => {
 
   it('keeps a version of the old content before a drastic shrink', async () => {
     writeFileSync(file('big.tex'), docText(...Array.from({ length: 120 }, (_, i) => `paragraph number ${i} with some words in it to make it long enough`)));
-    const doc = await manager.open('p/big.tex');
+    const doc = await manager.open('u/p/big.tex');
     edit(doc, docText('almost everything deleted'));
     expect(await doc.saveToFile()).toBe(true);
     expect(readFileSync(file('big.tex'), 'utf8')).toContain('almost everything deleted');
-    const v = db.prepare("SELECT name, lyx FROM versions WHERE doc_id = ? AND name = 'before large deletion'").get('p/big.tex') as { name: string; lyx: string } | undefined;
+    const v = db.prepare("SELECT name, lyx FROM versions WHERE doc_id = ? AND name = 'before large deletion'").get('u/p/big.tex') as { name: string; lyx: string } | undefined;
     expect(v).toBeDefined();
     expect(v!.lyx).toContain('paragraph number 119');
   });
 
   it('refuses to open something that is not a .tex document', async () => {
     writeFileSync(file('junk.lyx'), 'this is not lyx\n');
-    await expect(manager.open('p/junk.lyx')).rejects.toThrow(/not a .tex document/);
+    await expect(manager.open('u/p/junk.lyx')).rejects.toThrow(/not a .tex document/);
   });
 
   it('opens a fragment (child document without a preamble) and writes it back as one', async () => {
     writeFileSync(file('child.tex'), 'A child paragraph.\n\nAnother one with $x$.\n');
-    const doc = await manager.open('p/child.tex');
+    const doc = await manager.open('u/p/child.tex');
     expect(doc.isChild).toBe(true);
     edit(doc, 'A child paragraph, edited.\n\nAnother one with $x$.\n');
     expect(await doc.saveToFile()).toBe(true);
@@ -116,10 +116,10 @@ describe('saving', () => {
   });
 
   it('restores a version stored in LyX format (from before the switch, or offline edits)', async () => {
-    const doc = await manager.open('p/a.tex');
+    const doc = await manager.open('u/p/a.tex');
     const lyx = '#LyX 2.5 created this file. For more info see https://www.lyx.org/\n\\lyxformat 643\n\\begin_document\n\\begin_header\n\\textclass article\n\\end_header\n\n\\begin_body\n\n\\begin_layout Standard\nfrom a LyX version\n\\end_layout\n\n\\end_body\n\\end_document\n';
-    const vid = await manager.createVersion('p/a.tex', 'lyx version', 'test', 'offline', lyx);
-    await manager.restoreVersion('p/a.tex', vid, 'test');
+    const vid = await manager.createVersion('u/p/a.tex', 'lyx version', 'test', 'offline', lyx);
+    await manager.restoreVersion('u/p/a.tex', vid, 'test');
     expect(doc.toText()).toContain('from a LyX version');
     expect(doc.toText()).toContain('\\begin{document}');
   });
@@ -128,14 +128,14 @@ describe('saving', () => {
 describe('the file disappears', () => {
   it('closes the document and keeps its content as a version', async () => {
     writeFileSync(file('gone.tex'), docText('will be deleted'));
-    const doc = await manager.open('p/gone.tex');
+    const doc = await manager.open('u/p/gone.tex');
     edit(doc, docText('will be deleted', 'unsaved edit'));
     await sleep(300);           // let chokidar settle on the file
     unlinkSync(file('gone.tex'));
-    for (let i = 0; i < 60 && manager.docs.has('p/gone.tex'); i++) await sleep(100);
-    expect(manager.docs.has('p/gone.tex')).toBe(false);
+    for (let i = 0; i < 60 && manager.docs.has('u/p/gone.tex'); i++) await sleep(100);
+    expect(manager.docs.has('u/p/gone.tex')).toBe(false);
     expect(existsSync(file('gone.tex'))).toBe(false);   // not re-created by a pending save
-    const v = db.prepare("SELECT lyx FROM versions WHERE doc_id = ? AND name = 'file removed on disk'").get('p/gone.tex') as { lyx: string } | undefined;
+    const v = db.prepare("SELECT lyx FROM versions WHERE doc_id = ? AND name = 'file removed on disk'").get('u/p/gone.tex') as { lyx: string } | undefined;
     expect(v?.lyx).toContain('unsaved edit');
   }, 15000);
 });

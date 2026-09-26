@@ -2,7 +2,7 @@ import { test, expect, type WebSocketRoute } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { login, openDoc, PROJECTS_DIR, texDoc } from './helpers';
 
-const dir = `${PROJECTS_DIR}/e2e-reliability`;
+const dir = `${PROJECTS_DIR}/admin/e2e-reliability`;
 test.beforeAll(() => {
   mkdirSync(dir, { recursive: true });
   for (const name of ['save', 'paste', 'ui']) writeFileSync(`${dir}/${name}.tex`, texDoc('First paragraph.\n\nSecond paragraph.\n\n\\section{A new target}\n\nTarget text.'));
@@ -18,7 +18,7 @@ test('a delayed save acknowledgment does not confirm a newer deletion', async ({
     upstream.onMessage(m => { if (holdAck && Buffer.from(m)[0] === 3) acks.push(m); else route.send(m); });
     route.onMessage(m => { if (holdUpdates && Buffer.from(m)[0] === 0) updates.push(m); else upstream.send(m); });
   });
-  await login(page); await openDoc(page, 'e2e-reliability/save.tex');
+  await login(page); await openDoc(page, 'admin/e2e-reliability/save.tex');
   expect((await page.request.get('/api/projects')).status()).toBe(200);
   await expect(page.locator('.save-state')).toContainText('All changes saved');
   const first = page.locator('.lyx-editor > .lyx-par').first();
@@ -40,7 +40,7 @@ test('a delayed save acknowledgment does not confirm a newer deletion', async ({
 });
 
 test('delayed LaTeX paste stays at its original target after moving the cursor', async ({ page }) => {
-  await login(page); await openDoc(page, 'e2e-reliability/paste.tex');
+  await login(page); await openDoc(page, 'admin/e2e-reliability/paste.tex');
   let release!: () => void, requested = false;
   const gate = new Promise<void>(r => { release = r; });
   await page.route('**/api/docs/**/clip', async route => { requested = true; await gate; await route.continue(); });
@@ -61,7 +61,7 @@ test('delayed LaTeX paste stays at its original target after moving the cursor',
 });
 
 test('view modes, automatic reference labels and accessible narrow dialogs', async ({ page }) => {
-  await login(page); await openDoc(page, 'e2e-reliability/ui.tex');
+  await login(page); await openDoc(page, 'admin/e2e-reliability/ui.tex');
   // the pane switch: TeX beside the document, then WYSIWYG off (the source alone), then on again
   await page.getByRole('button', { name: 'TeX', exact: true }).click();
   await expect(page.locator('textarea.source')).toBeVisible();

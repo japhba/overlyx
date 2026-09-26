@@ -16,3 +16,4 @@ export { lintTex, maskOpaque, type LintIssue } from './tex/lint.ts';
 export { texHeadings, headingPlainText, type TexHeading } from './tex/headings.ts';
 export { moduleWarnings, type ModuleInfo } from './modules.ts';
 export { markEditedSettings, hasSettingsLine } from './tex/preamble.ts';
+export * from './projectKey.ts';

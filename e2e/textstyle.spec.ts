@@ -6,7 +6,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { login, openDoc, collectErrors, PROJECTS_DIR, texDoc } from './helpers';
 
-const PROJECT = 'e2e-textstyle';
+const PROJECT = 'admin/e2e-textstyle';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const FILE = `${DIR}/s.tex`;
 

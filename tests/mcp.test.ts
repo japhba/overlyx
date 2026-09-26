@@ -13,7 +13,7 @@ import express from 'express';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-mcp-test');
 rmSync(ROOT, { recursive: true, force: true });
-mkdirSync(join(ROOT, 'projects', 'p'), { recursive: true });
+mkdirSync(join(ROOT, 'projects', 'owner', 'p'), { recursive: true });
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 
@@ -27,10 +27,10 @@ const { createToken: createPersonalToken } = await import('../packages/server/sr
 
 // tokens are account-scoped: the agent gets the account's role in the requested project
 const owner = createUser('owner', 'Owner', 'pw');
-registerProject('p', owner.id);
+registerProject('owner/p', owner.id);
 const outsider = createUser('mallory', 'Mallory', 'pw');
 
-const file = (name: string) => join(ROOT, 'projects', 'p', name);
+const file = (name: string) => join(ROOT, 'projects', 'owner', 'p', name);
 const doc = (body: string) => `\\documentclass{article}\n\\begin{document}\n${body}\n\\end{document}\n`;
 
 const app = express();
@@ -38,7 +38,7 @@ app.use('/mcp', mcpRouter());
 const server = http.createServer(app);
 await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
 const port = (server.address() as { port: number }).port;
-const base = `http://127.0.0.1:${port}/mcp/p`;
+const base = `http://127.0.0.1:${port}/mcp/owner/p`;
 
 afterAll(() => { server.close(); rmSync(ROOT, { recursive: true, force: true }); });
 
@@ -111,7 +111,7 @@ describe('auth', () => {
 
   it('a view-only member reads, but cannot edit or comment', async () => {
     const viewer = createUser('vera', 'Vera', 'pw');
-    db.prepare('INSERT INTO project_members (project, user_id, role, via, created_at) VALUES (?,?,?,?,?)').run('p', viewer.id, 'view', 'member', Date.now());
+    db.prepare('INSERT INTO project_members (project, user_id, role, via, created_at) VALUES (?,?,?,?,?)').run('owner/p', viewer.id, 'view', 'member', Date.now());
     const t = createMcpToken(viewer.id, 'viewer-agent').token;
     const docs = await callTool(t, 'list_documents', {});
     expect(docs.map((d: { path: string }) => d.path)).toContain('a.tex');
@@ -136,11 +136,29 @@ describe('tools/list', () => {
     const listed = await rpcAt(allProjects, token, 'tools/list');
     expect(listed.body.result.tools.map((x: any) => x.name)).toContain('create_project');
     const created = await callToolAt(allProjects, token, 'create_project', { name: 'MCP import', title: 'Made by an agent' });
-    expect(created).toEqual({ project: 'MCP import', title: 'Made by an agent', role: 'owner' });
-    expect(existsSync(join(ROOT, 'projects', 'MCP import', '.git'))).toBe(true);
-    expect(readFileSync(join(ROOT, 'projects', 'MCP import', '.git', 'HEAD'), 'utf8')).toContain('refs/heads/main');
-    const written = await callToolAt(allProjects, token, 'write_document', { project: 'MCP import', path: 'main.tex', tex: doc('Created through MCP.') });
+    expect(created).toEqual({ project: 'owner/MCP import', title: 'Made by an agent', role: 'owner' });   // in the account's namespace
+    expect(existsSync(join(ROOT, 'projects', 'owner', 'MCP import', '.git'))).toBe(true);
+    expect(readFileSync(join(ROOT, 'projects', 'owner', 'MCP import', '.git', 'HEAD'), 'utf8')).toContain('refs/heads/main');
+    const written = await callToolAt(allProjects, token, 'write_document', { project: 'owner/MCP import', path: 'main.tex', tex: doc('Created through MCP.') });
     expect(written.created).toBe(true);
+  });
+});
+
+describe('names from before namespaces', () => {
+  it('a project\'s old name (an alias, namespaces.ts) still reaches it: /mcp/<name>, `project`, fetch ids', async () => {
+    db.prepare('INSERT OR REPLACE INTO project_aliases (alias, name, created_at) VALUES (?, ?, ?)').run('p', 'owner/p', Date.now());
+    const t = createMcpToken(owner.id, 'old-agent').token;
+    const old = `http://127.0.0.1:${port}/mcp/p`;
+    expect((await callToolAt(old, t, 'list_documents', {})).map((d: { path: string }) => d.path)).toContain('a.tex');
+    const all = `http://127.0.0.1:${port}/mcp`;
+    expect((await callToolAt(all, t, 'list_documents', { project: 'p' })).map((d: { path: string }) => d.path)).toContain('a.tex');
+    const projects = await callToolAt(all, t, 'list_projects', {});
+    expect(projects.map((x: { project: string }) => x.project)).toContain('owner/p');
+    const r = await rpcAt(all, t, 'tools/call', { name: 'fetch', arguments: { id: 'p/a.tex' } });
+    const got = r.body.result.structuredContent ?? JSON.parse(r.body.result.content[0].text);
+    expect(got.id).toBe('owner/p/a.tex');
+    expect(got.url).toMatch(/#\/owner\/p\/a\.tex$/);
+    db.prepare('DELETE FROM project_aliases WHERE alias = ?').run('p');
   });
 });
 
@@ -164,7 +182,7 @@ describe('propose_edit', () => {
     const t = createMcpToken(owner.id, 'Fixit Bot').token;
     const r = await callTool(t, 'propose_edit', { path: 'a.tex', paragraph_index: 0, new_text: 'First paragraph revised text.' });
     expect(r.changed).toBe(true);
-    const openDoc = await manager.open('p/a.tex');
+    const openDoc = await manager.open('owner/p/a.tex');
     const text = openDoc.toText();
     expect(text).toContain('\\lyxadded{Fixit Bot (MCP)}');
     expect(text).toContain('revised');
@@ -213,7 +231,7 @@ describe('comments', () => {
 
     // the raw file LaTeX-escapes brackets inside the comment text (harmless: it's a %% comment,
     // and unescaped again on the next parse — list_comments above already proved that round trip)
-    const openDoc = await manager.open('p/c.tex');
+    const openDoc = await manager.open('owner/p/c.tex');
     expect(openDoc.toText()).toMatch(/resolved/);
   });
 
@@ -229,7 +247,7 @@ describe('raw LaTeX', () => {
     const t = createMcpToken(owner.id, 'TeX Bot').token;
     const r = await callTool(t, 'replace_paragraph', { path: 'd.tex', index: 0, latex: 'The loss $L=\\sum_i x_i^2$ converges.' });
     expect(r.ok).toBe(true);
-    const text = (await manager.open('p/d.tex')).toText();
+    const text = (await manager.open('owner/p/d.tex')).toText();
     expect(text).toContain('\\lyxadded{TeX Bot (MCP)}');
     expect(text).toContain('\\lyxdeleted{TeX Bot (MCP)}');
     expect(text).toContain('x_i^2');
@@ -245,7 +263,7 @@ describe('raw LaTeX', () => {
     const after = await callTool(t, 'read_document', { path: 'd.tex' });
     expect(after.paragraphs.length).toBe(before.paragraphs.length + 2);
     expect(after.paragraphs.at(-2).layout).toBe('Section');
-    expect((await manager.open('p/d.tex')).toText()).toContain('Results');
+    expect((await manager.open('owner/p/d.tex')).toText()).toContain('Results');
   });
 
   it('delete_paragraph marks a paragraph deleted (tracked)', async () => {
@@ -253,7 +271,7 @@ describe('raw LaTeX', () => {
     const read = await callTool(t, 'read_document', { path: 'd.tex' });
     const r = await callTool(t, 'delete_paragraph', { path: 'd.tex', index: read.paragraphs.length - 1 });
     expect(r.ok).toBe(true);
-    expect((await manager.open('p/d.tex')).toText()).toContain('\\lyxdeleted');
+    expect((await manager.open('owner/p/d.tex')).toText()).toContain('\\lyxdeleted');
   });
 
   it('write_document replaces the whole source, and creates a new document', async () => {
@@ -294,7 +312,7 @@ describe('project text files', () => {
 
   it('a view-only account cannot use any writing tool', async () => {
     const viewer2 = createUser('viewer2', 'Viewer Two', 'pw');
-    db.prepare('INSERT INTO project_members (project, user_id, role, via, created_at) VALUES (?,?,?,?,?)').run('p', viewer2.id, 'view', 'member', Date.now());
+    db.prepare('INSERT INTO project_members (project, user_id, role, via, created_at) VALUES (?,?,?,?,?)').run('owner/p', viewer2.id, 'view', 'member', Date.now());
     const t = createMcpToken(viewer2.id, 'ro-agent').token;
     await expect(callTool(t, 'write_file', { path: 'refs.bib', text: 'x' })).rejects.toThrow(/view-only/);
     await expect(callTool(t, 'replace_paragraph', { path: 'a.tex', index: 0, latex: 'x' })).rejects.toThrow(/view-only/);
@@ -308,7 +326,7 @@ describe('comments inside insets', () => {
     writeFileSync(file('f.tex'), doc('Host paragraph.'));
     const core = await import('../packages/core/src/index.ts');
     const t = createMcpToken(owner.id, 'Deep Bot').token;
-    const d = await manager.open('p/f.tex');
+    const d = await manager.open('owner/p/f.tex');
     const lyx = d.toLyxDocument();
     const mkComment = (text: string) => core.textInset('Note', 'Comment', [
       core.paragraph('Plain Layout', [core.textItem(core.commentHeader('Reviewer (MCP)', core.formatTimestamp()))]),

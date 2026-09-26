@@ -10,7 +10,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { login, openDoc, collectErrors, texDoc, PROJECTS_DIR } from './helpers';
 
-const PROJECT = 'e2e-textselect';
+const PROJECT = 'admin/e2e-textselect';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const LONG = Array.from({ length: 79 }, (_, i) => `word${i + 1}`).join(' ');
 const BODY = `First paragraph ${LONG} end of first paragraph.

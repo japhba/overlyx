@@ -16,6 +16,7 @@ import { inputRules, textblockTypeInputRule, wrappingInputRule, smartQuotes, ell
 import { schema, defaultMarkdownParser, defaultMarkdownSerializer } from 'prosemirror-markdown';
 import { api } from '../api';
 import { TextEditor } from './TextEditor';
+import { splitDocId } from '@overlyx/core';
 
 function mdInputRules() {
   const rules = [
@@ -62,8 +63,7 @@ export function MarkdownEditor({ id, notify }: { id: string; notify: (text: stri
 }
 
 function RichMarkdown({ id, notify, onSource }: { id: string; notify: (text: string, kind?: 'info' | 'error') => void; onSource: () => void }) {
-  const project = id.split('/')[0];
-  const path = id.slice(project.length + 1);
+  const { project, path } = splitDocId(id);
   const host = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<SaveState>('loading');
   const stateRef = useRef<SaveState>('loading');

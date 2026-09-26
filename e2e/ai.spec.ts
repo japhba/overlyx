@@ -8,7 +8,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { login, PROJECTS_DIR, texDoc } from './helpers';
 
-const PROJECT = 'e2e-ai';
+const PROJECT = 'admin/e2e-ai';
 const DOC = `${PROJECT}/paper.tex`;
 const AI_STUB = !!process.env.OVERLYX_E2E_AI_STUB;
 const BODY = `\\section{Introduction}

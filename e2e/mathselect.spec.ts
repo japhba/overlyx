@@ -13,7 +13,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { login, openDoc, collectErrors, texDoc, PROJECTS_DIR } from './helpers';
 
-const PROJECT = 'e2e-mathselect';
+const PROJECT = 'admin/e2e-mathselect';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 test.beforeAll(() => {

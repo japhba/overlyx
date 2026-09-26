@@ -12,7 +12,7 @@ import express from 'express';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-ai-test');
 rmSync(ROOT, { recursive: true, force: true });
-mkdirSync(join(ROOT, 'projects', 'p'), { recursive: true });
+mkdirSync(join(ROOT, 'projects', 'u', 'p'), { recursive: true });
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 
@@ -39,7 +39,7 @@ const { manager } = await import('../packages/server/src/docs.ts');
 
 afterAll(() => { stubServer.close(); rmSync(ROOT, { recursive: true, force: true }); });
 
-const file = (name: string) => join(ROOT, 'projects', 'p', name);
+const file = (name: string) => join(ROOT, 'projects', 'u', 'p', name);
 const PAPER = `\\documentclass{article}
 \\newcommand{\\bW}{\\mathbf{W}}
 \\begin{document}
@@ -51,7 +51,7 @@ The variance of the weights is $\\sigma^2$, and the gain $g$ controls the transi
 \\end{document}
 `;
 writeFileSync(file('paper.tex'), PAPER);
-const doc = await manager.open('p/paper.tex');
+const doc = await manager.open('u/p/paper.tex');
 
 const par = (text: string) => ({ type: 'paragraph', attrs: { layout: 'Standard', depth: 0 }, content: [{ type: 'text', text }] });
 

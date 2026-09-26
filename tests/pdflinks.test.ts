@@ -20,35 +20,35 @@ const { blobSha, normalizeTarget, setPublishTarget, publishTargetFor, deletePubl
 const fs = await import('node:fs');
 
 describe('public PDF links', () => {
-  it('names the file after the project for its main document, project-document otherwise', () => {
-    expect(pdfLinkFileName('CV/main.tex')).toBe('CV.pdf');
-    expect(pdfLinkFileName('CV/main.tex', 'Curriculum Vitae (2026)')).toBe('Curriculum_Vitae_2026.pdf');
-    expect(pdfLinkFileName('thesis/chapters/appendix.tex')).toBe('thesis-appendix.pdf');
-    expect(pdfLinkFileName('My Paper/main.lyx', null)).toBe('My_Paper.pdf');
+  it('names the file after the project (not its owner) for its main document, project-document otherwise', () => {
+    expect(pdfLinkFileName('jan/CV/main.tex')).toBe('CV.pdf');
+    expect(pdfLinkFileName('jan/CV/main.tex', 'Curriculum Vitae (2026)')).toBe('Curriculum_Vitae_2026.pdf');
+    expect(pdfLinkFileName('jan/thesis/chapters/appendix.tex')).toBe('thesis-appendix.pdf');
+    expect(pdfLinkFileName('jan/My Paper/main.lyx', null)).toBe('My_Paper.pdf');
   });
   it('one link per document, a stable token, gone when turned off', () => {
-    const a = createPdfLink('p/main.tex', 1);
+    const a = createPdfLink('u/p/main.tex', 1);
     expect(a.token).toMatch(/^[A-Za-z0-9_-]{20,}$/);
-    expect(createPdfLink('p/main.tex', 1).token).toBe(a.token);   // turning it on again keeps the address people have
-    expect(pdfLinkByToken(a.token)?.doc_id).toBe('p/main.tex');
+    expect(createPdfLink('u/p/main.tex', 1).token).toBe(a.token);   // turning it on again keeps the address people have
+    expect(pdfLinkByToken(a.token)?.doc_id).toBe('u/p/main.tex');
     expect(pdfLinkByToken('not a token')).toBeUndefined();
     expect(pdfLinkByToken(a.token.toUpperCase() + 'x')).toBeUndefined();
-    expect(deletePdfLink('p/main.tex')).toBe(true);
-    expect(pdfLinkFor('p/main.tex')).toBeUndefined();
+    expect(deletePdfLink('u/p/main.tex')).toBe(true);
+    expect(pdfLinkFor('u/p/main.tex')).toBeUndefined();
     expect(pdfLinkByToken(a.token)).toBeUndefined();
   });
   it('notices files written after a build, ignoring build products and backups', () => {
-    const dir = join(ROOT, 'projects', 'chg');
+    const dir = join(ROOT, 'projects', 'u', 'chg');
     mkdirSync(join(dir, 'figs'), { recursive: true });
     fs.writeFileSync(join(dir, 'main.tex'), 'x');
     const t = Date.now() + 1000;
-    expect(projectChangedSince('chg', t)).toBe(false);
+    expect(projectChangedSince('u/chg', t)).toBe(false);
     fs.writeFileSync(join(dir, 'main.tex~'), 'backup');
     fs.utimesSync(join(dir, 'main.tex~'), new Date(t + 5000), new Date(t + 5000));
-    expect(projectChangedSince('chg', t)).toBe(false);
+    expect(projectChangedSince('u/chg', t)).toBe(false);
     fs.writeFileSync(join(dir, 'figs', 'plot.png'), 'p');
     fs.utimesSync(join(dir, 'figs', 'plot.png'), new Date(t + 5000), new Date(t + 5000));
-    expect(projectChangedSince('chg', t)).toBe(true);
+    expect(projectChangedSince('u/chg', t)).toBe(true);
   });
 });
 
@@ -92,11 +92,11 @@ describe('publishing into a GitHub repository', () => {
     expect(() => normalizeTarget({ repo: 'a/b', path: 'x.pdf', branch: 'bad branch' })).toThrow(/branch/);
   });
   it('stores one target per document', () => {
-    setPublishTarget('p/main.tex', { repo: 'a/b', path: 'x.pdf' }, 1);
-    expect(publishTargetFor('p/main.tex')).toMatchObject({ repo: 'a/b', path: 'x.pdf', branch: null });
-    setPublishTarget('p/main.tex', { repo: 'a/c', path: 'y.pdf', branch: 'gh-pages' }, 1);
-    expect(publishTargetFor('p/main.tex')).toMatchObject({ repo: 'a/c', path: 'y.pdf', branch: 'gh-pages' });
-    expect(deletePublishTarget('p/main.tex')).toBe(true);
-    expect(publishTargetFor('p/main.tex')).toBeUndefined();
+    setPublishTarget('u/p/main.tex', { repo: 'a/b', path: 'x.pdf' }, 1);
+    expect(publishTargetFor('u/p/main.tex')).toMatchObject({ repo: 'a/b', path: 'x.pdf', branch: null });
+    setPublishTarget('u/p/main.tex', { repo: 'a/c', path: 'y.pdf', branch: 'gh-pages' }, 1);
+    expect(publishTargetFor('u/p/main.tex')).toMatchObject({ repo: 'a/c', path: 'y.pdf', branch: 'gh-pages' });
+    expect(deletePublishTarget('u/p/main.tex')).toBe(true);
+    expect(publishTargetFor('u/p/main.tex')).toBeUndefined();
   });
 });

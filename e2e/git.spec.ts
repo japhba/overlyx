@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { login, BASE_URL, PROJECTS_DIR } from './helpers';
 
-const PROJECT = 'e2e-git';
+const PROJECT = 'admin/e2e-git';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const CLONE = join(tmpdir(), 'overlyx-e2e-git-clone');
 const git = (dir: string, ...args: string[]) => execFileSync('git', ['-C', dir, ...args], {

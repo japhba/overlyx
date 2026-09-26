@@ -13,7 +13,7 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import { apiLogin, adminCredentials, userCredentials, BASE_URL, PROJECTS_DIR, TOUR_SEEN_SCRIPT } from './helpers';
 
-const PROJECT = 'e2e-share';
+const PROJECT = 'admin/e2e-share';
 const DOC = `${PROJECT}/main.tex`;
 const FILE = `${PROJECTS_DIR}/${DOC}`;
 const enc = (id: string) => encodeURIComponent(id);
@@ -89,8 +89,8 @@ test.beforeAll(async ({ browser }) => {
   expect((await admin.request.post(`${BASE_URL}/api/projects/${PROJECT}/new`, { data: { path: 'main.tex', title: 'A shared paper' } })).ok()).toBe(true);
   // the admin's own example project must not be shared with bob (earlier runs / manual tests)
   await admin.request.get(BASE_URL + '/api/projects');
-  const share = await admin.request.get(`${BASE_URL}/api/projects/welcome-admin/share`);
-  if (share.ok()) for (const m of (await share.json()).members as { id: number; user: { username: string } | null }[]) if (m.user?.username === 'bob') await admin.request.delete(`${BASE_URL}/api/projects/welcome-admin/share/members/${m.id}`);
+  const share = await admin.request.get(`${BASE_URL}/api/projects/admin/welcome/share`);
+  if (share.ok()) for (const m of (await share.json()).members as { id: number; user: { username: string } | null }[]) if (m.user?.username === 'bob') await admin.request.delete(`${BASE_URL}/api/projects/admin/welcome/share/members/${m.id}`);
   await admin.close();
 });
 
@@ -108,7 +108,7 @@ test('a project is private to its owner', async ({ browser }) => {
   await page.goto('/#/' + DOC);
   await page.waitForSelector('.menubar');
   await expect(page.locator('.statusbar .msg.error')).toContainText('access', { timeout: 15000 });
-  await expect(page.locator('.filetree[data-project="e2e-share"]')).toHaveCount(0);
+  await expect(page.locator('.filetree[data-project="admin/e2e-share"]')).toHaveCount(0);
   await bob.close();
 });
 
@@ -116,8 +116,8 @@ test('every account gets its own personalised example project', async ({ browser
   const bob = await asUser(browser, 'bob');
   const ex = (await projectsOf(bob)).find(p => p.kind === 'example' && p.via === 'owner');
   expect(ex).toBeTruthy();
-  expect([ex!.name, ex!.title, ex!.role, ex!.via]).toEqual(['welcome-bob', 'Welcome to OverLyX', 'owner', 'owner']);
-  const text = readFileSync(`${PROJECTS_DIR}/welcome-bob/welcome.tex`, 'utf8');
+  expect([ex!.name, ex!.title, ex!.role, ex!.via]).toEqual(['bob/welcome', 'Welcome to OverLyX', 'owner', 'owner']);
+  const text = readFileSync(`${PROJECTS_DIR}/bob/welcome/welcome.tex`, 'utf8');
   expect(text).toMatch(/\\author\{Bob/);
   expect(text).not.toContain('@@');
   // the start screen shows it first; it opens and renders (formulas incl. the double angle brackets)
@@ -135,9 +135,9 @@ test('every account gets its own personalised example project', async ({ browser
   await expect(page.locator('.statusbar .readonly-badge')).toHaveCount(0);
   // one per account, invisible to others
   const admin = await asUser(browser);
-  expect((await projectsOf(admin)).find(p => p.name === 'welcome-admin')?.via).toBe('owner');
-  expect((await projectsOf(bob)).map(p => p.name)).not.toContain('welcome-admin');
-  expect((await bob.request.get(`${BASE_URL}/api/docs/${enc('welcome-admin/welcome.tex')}/meta`)).status()).toBe(403);
+  expect((await projectsOf(admin)).find(p => p.name === 'admin/welcome')?.via).toBe('owner');
+  expect((await projectsOf(bob)).map(p => p.name)).not.toContain('admin/welcome');
+  expect((await bob.request.get(`${BASE_URL}/api/docs/${enc('admin/welcome/welcome.tex')}/meta`)).status()).toBe(403);
   await bob.close(); await admin.close();
 });
 
@@ -156,7 +156,7 @@ test('sharing with a person: a viewer only reads, an editor can type', async ({ 
   expect(await metaStatus(bob)).toBe(200);
   const pageB = await openDocPage(bob);
   await expect(pageB.locator('.statusbar .readonly-badge')).toBeVisible({ timeout: 15000 });
-  await expect(pageB.locator('.docpanel[data-project="e2e-share"] .badge')).toHaveText('view');
+  await expect(pageB.locator('.docpanel[data-project="admin/e2e-share"] .badge')).toHaveText('view');
   const before = readFileSync(FILE, 'utf8');
   await pageB.locator('.lyx-editor .lyx-par').last().click();
   await pageB.keyboard.type('VIEWER-TYPED');
@@ -201,12 +201,12 @@ test('link sharing: joining through the link, revoked when the link is turned of
   expect((await projectsOf(carol)).map(p => p.name)).not.toContain(PROJECT);
   const pageC = await carol.newPage();
   await pageC.goto(url.replace(/^https?:\/\/[^/]+/, ''));
-  await pageC.waitForURL(/#\/e2e-share\/main\.tex$/, { timeout: 20000 });
+  await pageC.waitForURL(/#\/admin\/e2e-share\/main\.tex$/, { timeout: 20000 });
   await pageC.waitForSelector('.lyx-editor', { timeout: 30000 });
   await expect(pageC.locator('.statusbar .msg')).toContainText('You can now edit', { timeout: 10000 });
   await expect(pageC.locator('.statusbar')).toContainText('connected', { timeout: 20000 });
   expect((await projectsOf(carol)).find(p => p.name === PROJECT)?.via).toBe('link');
-  await expect(pageC.locator('.docpanel[data-project="e2e-share"] .badge')).toHaveText('edit');   // the role badge sits in the documents panel since the one-project workspace
+  await expect(pageC.locator('.docpanel[data-project="admin/e2e-share"] .badge')).toHaveText('edit');   // the role badge sits in the documents panel since the one-project workspace
   await pageC.locator('.lyx-editor .lyx-par').last().click();
   await pageC.keyboard.type('LINK-TYPED');
   await expect.poll(() => readFileSync(FILE, 'utf8'), { timeout: 15000 }).toContain('LINK-TYPED');
@@ -243,7 +243,7 @@ test('anyone with the link: a visitor without an account comes in as a guest and
   const guest = await browser.newContext();
   const page = await guest.newPage();
   await page.goto(`/#/share/${token}`);
-  await page.waitForURL(/#\/e2e-share\/main\.tex$/, { timeout: 20000 });
+  await page.waitForURL(/#\/admin\/e2e-share\/main\.tex$/, { timeout: 20000 });
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   await expect(page.locator('.statusbar')).toContainText('connected', { timeout: 20000 });
   await expect(page.locator('.login')).toHaveCount(0);
@@ -258,7 +258,7 @@ test('anyone with the link: a visitor without an account comes in as a guest and
   await expect(callout).toContainText(me.name);
   await expect(callout).toContainText('edit “e2e-share”');
   await expect(page.locator('.menubar [data-signin]')).toBeVisible();
-  await expect(page.locator('.docpanel[data-project="e2e-share"] .badge')).toHaveText('edit');
+  await expect(page.locator('.docpanel[data-project="admin/e2e-share"] .badge')).toHaveText('edit');
   // guests edit like any editor and show up in the owner's dialog — but get nothing of their own
   await page.locator('.lyx-editor .lyx-par').last().click();
   await page.keyboard.type('GUEST-TYPED');
@@ -288,7 +288,7 @@ test('anyone with the link: a visitor without an account comes in as a guest and
   await page.locator('.login input[placeholder="Password"]').fill(creds.password);
   await page.locator('.login button', { hasText: 'Sign in' }).click();
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
-  await expect(page).toHaveURL(/#\/e2e-share\/main\.tex$/);
+  await expect(page).toHaveURL(/#\/admin\/e2e-share\/main\.tex$/);
   await expect(page.locator('.statusbar')).toContainText('connected', { timeout: 20000 });
   await expect(page.locator('[data-guest-callout]')).toHaveCount(0);
   await expect(page.locator('.menubar [data-signin]')).toHaveCount(0);
@@ -332,7 +332,8 @@ test('the owner can delete a project (it goes to the trash)', async ({ browser }
   await page.locator(`.home-card[data-project="${PROJECT}"] button`, { hasText: 'Delete' }).click();
   await expect(page.locator(`.home-card[data-project="${PROJECT}"]`)).toHaveCount(0, { timeout: 15000 });
   expect(existsSync(`${PROJECTS_DIR}/${PROJECT}`)).toBe(false);
-  expect(readdirSync(`${DATA_DIR}/trash`).some(n => n.startsWith(PROJECT + '-'))).toBe(true);
+  const [owner, name] = PROJECT.split('/');   // the trash keeps the namespaces: <data>/trash/<owner>/<name>-<date>
+  expect(readdirSync(`${DATA_DIR}/trash/${owner}`).some(n => n.startsWith(name + '-'))).toBe(true);
   expect((await projectsOf(admin)).map(p => p.name)).not.toContain(PROJECT);
   await admin.close();
 });

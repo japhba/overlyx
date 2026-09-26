@@ -7,7 +7,7 @@ import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature/main.tex`;
-const DIR = `${PROJECTS_DIR}/e2e-dialogs`;
+const DIR = `${PROJECTS_DIR}/admin/e2e-dialogs`;
 const FILE = `${DIR}/main.tex`;
 
 const body = `Hello dialogs.
@@ -27,7 +27,7 @@ const file = () => readFileSync(FILE, 'utf8');
 async function open(page: Page) {
   await login(page);
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.setItem('ol.combined', '0'); });
-  await page.goto('/#/e2e-dialogs/main.tex');
+  await page.goto('/#/admin/e2e-dialogs/main.tex');
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length >= 2, null, { timeout: 60000 });
   await page.waitForTimeout(800);
 }

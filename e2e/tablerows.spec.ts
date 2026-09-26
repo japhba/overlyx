@@ -9,7 +9,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { login, openDoc, collectErrors, texDoc, PROJECTS_DIR } from './helpers';
 
-const PROJECT = 'e2e-tablerows';
+const PROJECT = 'admin/e2e-tablerows';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const BODY = `First paragraph.
 

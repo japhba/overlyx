@@ -113,7 +113,7 @@ export function setSessionCookie(req: Request, res: Response, u: SessionUser): v
 }
 
 /**
- * Where to go after a sign-in: a location hash (`#/project/doc.tex`) the client asked to return
+ * Where to go after a sign-in: a location hash (`#/owner/project/doc.tex`) the client asked to return
  * to. Anything else is dropped — a hash never leaves our origin, so this is not an open redirect.
  */
 function safeNext(x: unknown): string {
@@ -175,7 +175,7 @@ export function authRouter(hooks: AuthHooks = {}): Router {
     if (!config.google.clientId) { res.status(404).send('Google login not configured'); return; }
     const state = crypto.randomBytes(16).toString('hex');
     res.cookie('ol_oauth_state', state, { httpOnly: true, sameSite: 'lax', maxAge: 600000, path: '/' });
-    // ?next=#/project/doc.tex: back to the document afterwards (a guest saving a shared project, a deep link)
+    // ?next=#/owner/project/doc.tex: back to the document afterwards (a guest saving a shared project, a deep link)
     const next = safeNext(req.query.next);
     if (next) res.cookie('ol_oauth_next', next, { httpOnly: true, sameSite: 'lax', maxAge: 600000, path: '/' });
     else res.clearCookie('ol_oauth_next', { path: '/' });

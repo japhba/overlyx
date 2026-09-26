@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node
 import { login, collectErrors, PROJECTS_DIR } from './helpers';
 import { blankArticle, openPaper, afterAuthor, setLayout, newParagraph, citeFromPastedBibtex, typeFrac, typeSqrt, typeScript, typeSymbol, typeBareSymbol, insertFloat, uploadGraphics, typeCaption, leaveFloat, placeholderPng, resumeAtEnd } from './papertyping';
 
-const PROJECT = 'e2e-paperwriting';
+const PROJECT = 'admin/e2e-paperwriting';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const TMP = process.env.CLAUDE_JOB_DIR ? `${process.env.CLAUDE_JOB_DIR}/tmp` : '/tmp';
 const FIGS = `${TMP}/e2e-attention-figs`;

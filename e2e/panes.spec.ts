@@ -8,10 +8,10 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { login, collectErrors, PROJECTS_DIR, texDoc, shareProject, userCredentials, BASE_URL } from './helpers';
 
-const PROJECT = 'e2e-panes';
+const PROJECT = 'admin/e2e-panes';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const STAMP = Date.now().toString(36);
-const RECENT_OLDER = `e2e-recent-older-${STAMP}`, RECENT_NEWER = `e2e-recent-newer-${STAMP}`;
+const RECENT_OLDER = `admin/e2e-recent-older-${STAMP}`, RECENT_NEWER = `admin/e2e-recent-newer-${STAMP}`;
 const SHORT = texDoc('\\section{One}\n\nFirst section text.\n\n\\subsection{One a}\n\nSub text.\n\n\\section{Two}\n\nSecond section text with a findme word.\n\n\\section{Three}\n\nThird text.');
 
 test.beforeAll(() => {

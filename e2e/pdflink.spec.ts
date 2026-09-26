@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { apiLogin, BASE_URL, PROJECTS_DIR, TOUR_SEEN_SCRIPT } from './helpers';
 
-const PROJECT = 'e2e-pdflink';
+const PROJECT = 'admin/e2e-pdflink';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 test.describe.configure({ mode: 'serial' });
@@ -32,7 +32,7 @@ test('a public PDF link serves the latest build to anyone, counts the fetches, a
   await row.locator('[data-pdf-link-on]').click();
   const url = await row.locator('input').inputValue();
   expect(url.startsWith(`${BASE_URL}/pdf/`)).toBe(true);
-  expect(url).toMatch(new RegExp(`/pdf/[A-Za-z0-9_-]{20,}/${PROJECT}\\.pdf$`));
+  expect(url).toMatch(new RegExp(`/pdf/[A-Za-z0-9_-]{20,}/${PROJECT.split('/')[1]}\\.pdf$`));   // named after the project, not its owner
   await expect(row).toContainText('Nobody has fetched it yet');
 
   // anyone: no cookies, no account; the first fetch waits for the build
@@ -40,7 +40,7 @@ test('a public PDF link serves the latest build to anyone, counts the fetches, a
   const r = await anon.request.get(url, { timeout: 180000 });
   expect(r.status()).toBe(200);
   expect(r.headers()['content-type']).toContain('application/pdf');
-  expect(r.headers()['content-disposition']).toContain(`inline; filename="${PROJECT}.pdf"`);
+  expect(r.headers()['content-disposition']).toContain(`inline; filename="${PROJECT.split('/')[1]}.pdf"`);
   expect(r.headers()['x-frame-options']).toBeUndefined();
   expect(r.headers()['access-control-allow-origin']).toBe('*');
   expect((await r.body()).subarray(0, 5).toString()).toBe('%PDF-');

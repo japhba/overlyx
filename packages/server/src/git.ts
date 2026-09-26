@@ -7,7 +7,8 @@
  *  - OverLyX **commits its own writes** automatically: a couple of minutes after the last change
  *    (`OVERLYX_GIT_COMMIT_MS`), and always right before a clone / fetch / push is served, so the
  *    remote is never behind what the editor shows. Commits are attributed to the people who edited;
- *  - the repository is served over **smart HTTP** at `/git/<project>.git` by `git http-backend`,
+ *  - the repository is served over **smart HTTP** at `/git/<owner>/<name>.git` by `git http-backend`
+ *    (a remote from before namespaces, `/git/<name>.git`, keeps working: namespaces.ts aliases),
  *    with HTTP Basic authentication (username + OverLyX password, or either kind of *access token* —
  *    Google accounts have no password) and the project's roles: viewers may fetch, editors and the
  *    owner may push;
@@ -21,6 +22,7 @@ import crypto from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import express, { type Request, type Response } from 'express';
+import { isProjectKey, projectShortName } from '@overlyx/core';
 import { config } from './config.ts';
 import { db, type UserRow } from './db.ts';
 import { projectDir, listProjects } from './projects.ts';
@@ -28,11 +30,11 @@ import { manager, fileWrittenListeners } from './docs.ts';
 import { verifyPassword, toSessionUser, type SessionUser } from './auth.ts';
 import { roleFor, atLeast, logAccess, accessibleProjects } from './access.ts';
 import { createOwnedProject } from './projectCreate.ts';
+import { canonicalProject } from './namespaces.ts';
 import { verifyAccessToken } from './tokenAuth.ts';
 
 const execFileP = promisify(execFile);
 
-const PROJECT_NAME = /^[A-Za-z0-9._ -]+$/;
 
 /** Files git should never track in a LyX project: LaTeX build products, LyX backups, our temp files. */
 export const DEFAULT_GITIGNORE = `# OverLyX: LaTeX build products
@@ -182,7 +184,7 @@ export function serverIdentity(): { name: string; email: string } {
  */
 export async function ensureRepo(project: string, opts: { initialCommit?: boolean } = {}): Promise<void> {
   if (!config.git) return;
-  if (!PROJECT_NAME.test(project)) throw new Error('bad project name');
+  if (!isProjectKey(project)) throw new Error('bad project name');
   const dir = projectDir(project);
   if (!fs.existsSync(dir)) throw new Error('project not found');
   // prepared in this process — unless the project was deleted and created again under the same name meanwhile
@@ -208,7 +210,7 @@ export async function ensureRepo(project: string, opts: { initialCommit?: boolea
     if (!fs.existsSync(hook)) fs.writeFileSync(hook, PUSH_TO_CHECKOUT_HOOK, { mode: 0o755 });
     prepared.add(project);
     if (fresh && opts.initialCommit !== false) {
-      const n = await commitLocked(project, { message: `Import "${project}" into OverLyX` });
+      const n = await commitLocked(project, { message: `Import "${projectShortName(project)}" into OverLyX` });
       console.log(`[git] initialised repository for "${project}"${n ? ' (initial commit)' : ''}`);
     } else if (fresh) {
       console.log(`[git] initialised empty repository for "${project}"`);
@@ -336,7 +338,7 @@ export async function repoInfo(project: string, limit = 12): Promise<RepoInfo> {
 /** The clone URL of a project as seen from outside. */
 export function cloneUrl(req: Request, project: string): string {
   const base = (config.publicUrl || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
-  return `${base}/git/${encodeURIComponent(project)}.git`;
+  return `${base}/git/${project.split('/').map(encodeURIComponent).join('/')}.git`;
 }
 
 /* --------------------------------------------------------------------- tokens */
@@ -452,11 +454,11 @@ async function createCliProject(req: Request, res: Response): Promise<void> {
   try {
     const name = String(req.body?.name ?? '').trim();
     const title = typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 200) || null : null;
-    createOwnedProject(name, user.id, { title });
+    const key = createOwnedProject(name, user.id, { title }).name;
     // No synthetic .gitignore/commit: an existing local repository can push HEAD:main without
     // merging unrelated histories. Its own .gitignore, if any, arrives in that first push.
-    await ensureRepo(name, { initialCommit: false });
-    res.status(201).json({ project: { name, title, role: 'owner' }, url: cloneUrl(req, name), username: user.username });
+    await ensureRepo(key, { initialCommit: false });
+    res.status(201).json({ project: { name: key, title, role: 'owner' }, url: cloneUrl(req, key), username: user.username });
   } catch (e) {
     const message = (e as Error).message ?? String(e);
     res.status(/already exists/.test(message) ? 409 : 400).json({ error: message });
@@ -465,10 +467,11 @@ async function createCliProject(req: Request, res: Response): Promise<void> {
 
 async function handle(req: Request, res: Response): Promise<void> {
   if (!config.git) { res.status(404).type('text').send('git access is disabled on this server\n'); return; }
-  const m = /^\/([^/]+?)(?:\.git)?\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(req.path);
-  if (!m) { res.status(404).type('text').send('not found — clone with: git clone <server>/git/<project>.git\n'); return; }
+  const m = /^\/([^/]+?(?:\/[^/]+?)?)(?:\.git)?\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(req.path);
+  if (!m) { res.status(404).type('text').send('not found — clone with: git clone <server>/git/<owner>/<project>.git\n'); return; }
   let project: string;
-  try { project = decodeURIComponent(m[1]); } catch { res.status(400).end(); return; }
+  // `<owner>/<name>`, or a name the project had before (the flat layout, another owner)
+  try { project = canonicalProject(m[1].split('/').map(decodeURIComponent).join('/')); } catch { res.status(400).end(); return; }
   const endpoint = m[2];
   const service = endpoint === 'info/refs' ? String(req.query.service ?? '') : endpoint;
   if (!SERVICES.has(service)) { res.status(403).type('text').send('only the smart HTTP protocol is supported (git >= 1.6.6)\n'); return; }
@@ -481,7 +484,7 @@ async function handle(req: Request, res: Response): Promise<void> {
   if (!user) return;
 
   // --- what they may do
-  if (!PROJECT_NAME.test(project) || !fs.existsSync(projectDir(project))) { res.status(404).type('text').send(`no project "${project}"\n`); return; }
+  if (!isProjectKey(project) || !fs.existsSync(projectDir(project))) { res.status(404).type('text').send(`no project "${project}"\n`); return; }
   const write = service === 'git-receive-pack';
   const role = roleFor(user, project);
   if (!atLeast(role, write ? 'edit' : 'view')) {

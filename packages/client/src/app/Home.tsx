@@ -8,6 +8,7 @@ import { api, type AdminProjectInfo, type Project, type User } from '../api';
 import { OverleafImport, type ImportInitial } from './OverleafImport';
 import { takePendingImport } from './pendingImport';
 import { sortByRecency, recencyLabel } from './recency';
+import { projectShortName, splitProjectKey } from '@overlyx/core';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -15,7 +16,8 @@ const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) 
 export function projectDocs(p: Project): string[] {
   return p.files.filter(f => f.kind === 'doc' && !isBackup(f.name)).map(f => f.path).sort(mainFirst);
 }
-export const projectTitle = (p: Project) => p.title ?? p.name;
+/** a project's title, else its name without the owner (`jan/thesis` → `thesis`) */
+export const projectTitle = (p: Project) => p.title ?? projectShortName(p.name);
 
 export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, onChanged, onBrowse, onSignIn, notify }: {
   user: User; refreshKey: number; onOpen: (id: string) => void; onStartTour: (id: string) => void; onShare: (project: string) => void; onGit: (project: string) => void; onChanged: () => void; onBrowse: () => void;
@@ -118,7 +120,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {!user.guest && <button class="btn" data-import-overleaf onClick={() => setImportOpen(true)} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
         <button class="btn" onClick={onBrowse}>Show the documents panel</button>
       </div>
-      {importOpen && <OverleafImport existing={(projects ?? []).map(p => p.name)} onClose={() => { setImportOpen(false); setPending(null); }} onImported={() => { void load(); onChanged(); }} notify={notify}
+      {importOpen && <OverleafImport existing={(projects ?? []).filter(p => splitProjectKey(p.name).owner === user.username).map(p => projectShortName(p.name))} onClose={() => { setImportOpen(false); setPending(null); }} onImported={() => { void load(); onChanged(); }} notify={notify}
         initial={pending ?? undefined} autostart={!!pending} onDone={names => void openImported(names)} />}
       {projects === null && <div class="meta">Loading your projects…</div>}
       {example && <div class="cards">{card(example)}</div>}

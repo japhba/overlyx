@@ -13,7 +13,7 @@ import express from 'express';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-airepair-test');
 rmSync(ROOT, { recursive: true, force: true });
-mkdirSync(join(ROOT, 'projects', 'p'), { recursive: true });
+mkdirSync(join(ROOT, 'projects', 'u', 'p'), { recursive: true });
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 
@@ -42,7 +42,7 @@ const { checkTexHealth } = await import('../packages/core/src/tex/index.ts');
 
 afterAll(() => { stubServer.close(); rmSync(ROOT, { recursive: true, force: true }); });
 
-const file = (name: string) => join(ROOT, 'projects', 'p', name);
+const file = (name: string) => join(ROOT, 'projects', 'u', 'p', name);
 
 describe('requestAiRepair', () => {
   it('sends the file and the detected issues, and returns the model reply verbatim', async () => {
@@ -78,7 +78,7 @@ describe('requestAiRepair', () => {
 describe('OpenDoc.applyAiRepair (the merge editor\'s Apply)', () => {
   it('applies the reviewed proposal and snapshots the pre-repair text as a version', async () => {
     writeFileSync(file('a.tex'), '\\documentclass{article}\n\\begin{document}\noriginal broken\n');
-    const doc = await manager.open('p/a.tex');
+    const doc = await manager.open('u/p/a.tex');
     const original = doc.fileText!;
     const proposed = '\\documentclass{article}\n\\begin{document}\nrepaired\n\\end{document}\n';
     const r = doc.applyAiRepair(proposed, original);
@@ -87,13 +87,13 @@ describe('OpenDoc.applyAiRepair (the merge editor\'s Apply)', () => {
     await doc.saveToFile();
     expect(readFileSync(file('a.tex'), 'utf8')).toContain('repaired');
     const { db } = await import('../packages/server/src/db.ts');
-    const v = db.prepare("SELECT lyx FROM versions WHERE doc_id = ? AND name = 'before AI repair'").get('p/a.tex') as { lyx: string } | undefined;
+    const v = db.prepare("SELECT lyx FROM versions WHERE doc_id = ? AND name = 'before AI repair'").get('u/p/a.tex') as { lyx: string } | undefined;
     expect(v?.lyx).toBe(original);
   });
 
   it('refuses to apply when the file changed since the proposal was generated (race guard)', async () => {
     writeFileSync(file('b.tex'), '\\documentclass{article}\n\\begin{document}\nv1\n\\end{document}\n');
-    const doc = await manager.open('p/b.tex');
+    const doc = await manager.open('u/p/b.tex');
     const staleOriginal = doc.fileText!;
     // the file changes on disk (or the CRDT is edited) after the proposal was fetched, before Apply
     writeFileSync(file('b.tex'), '\\documentclass{article}\n\\begin{document}\nv2 (someone else edited)\n\\end{document}\n');

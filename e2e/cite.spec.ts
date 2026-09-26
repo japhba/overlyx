@@ -8,7 +8,7 @@ import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node
 import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
-const PROJECT = 'e2e-cite';
+const PROJECT = 'admin/e2e-cite';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 const doc = () => withPreambleOf(`${SRC}/main.tex`, `Transformers changed everything.

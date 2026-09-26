@@ -11,6 +11,7 @@
  */
 import { db } from './db.ts';
 import { config } from './config.ts';
+import { projectOfDoc } from '@overlyx/core';
 
 export interface UserSettings { allowRecopyTokens: boolean }
 
@@ -105,6 +106,6 @@ export function lastOpenedByProject(userId: number): Map<string, number> {
   const out = new Map<string, number>();
   const note = (project: string, at: number) => { if (at > (out.get(project) ?? 0)) out.set(project, at); };
   for (const r of db.prepare("SELECT project, MAX(at) AS at FROM access_log WHERE user_id = ? AND action = 'open' GROUP BY project").all(userId) as { project: string; at: number }[]) note(r.project, r.at);
-  for (const r of db.prepare("SELECT doc_id, updated_at FROM user_doc_state WHERE user_id = ? AND key = 'opened'").all(userId) as { doc_id: string; updated_at: number }[]) note(r.doc_id.split('/')[0], r.updated_at);
+  for (const r of db.prepare("SELECT doc_id, updated_at FROM user_doc_state WHERE user_id = ? AND key = 'opened'").all(userId) as { doc_id: string; updated_at: number }[]) note(projectOfDoc(r.doc_id), r.updated_at);
   return out;
 }

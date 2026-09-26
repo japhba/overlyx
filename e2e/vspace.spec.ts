@@ -8,7 +8,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { login, PROJECTS_DIR, texDoc } from './helpers';
 
-const PROJECT = 'e2e-vspace';
+const PROJECT = 'admin/e2e-vspace';
 const DOC = `${PROJECT}/spaces.tex`;
 
 test.beforeAll(() => {

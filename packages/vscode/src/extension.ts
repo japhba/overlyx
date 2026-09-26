@@ -7,7 +7,7 @@
 import * as vscode from 'vscode';
 import fs from 'node:fs';
 import path from 'node:path';
-import { texHeadings, lyxToPm } from '@overlyx/core';
+import { texHeadings, lyxToPm, splitDocId, projectOfDoc } from '@overlyx/core';
 import { Bridge, type BridgeDelegate } from './host/bridge.ts';
 import { connectWebviewBridge } from './host/webviewBridge.ts';
 import { Registry, type OpenEditor } from './host/registry.ts';
@@ -32,13 +32,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   const telemetry = new OverlyxTelemetry(context);
   context.subscriptions.push(telemetry);
   const registry = new Registry();
-  /** project name → root directory (each open file's own directory — projectDirFor —, plus the workspace folders) */
+  /**
+   * project key → root directory (each open file's own directory — projectDirFor —, plus the
+   * workspace folders). Keys have the server's `<owner>/<name>` form (core projectKey.ts), so the
+   * shared editor code reads document ids the same way: `local/<folder name>`.
+   */
   const projectRoots = new Map<string, string>();
   const registerRoot = (root: string): string => {
     for (const [name, r] of projectRoots) if (r === root) return name;
-    let name = path.basename(root) || 'project';
+    const base = path.basename(root) || 'project';
+    let name = `local/${base}`;
     let i = 2;
-    while (projectRoots.has(name)) name = `${path.basename(root)}-${i++}`;
+    while (projectRoots.has(name)) name = `local/${base}-${i++}`;
     projectRoots.set(name, root);
     return name;
   };
@@ -55,8 +60,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   const locate = (docId: string): { ctx: TexContext; root: string; relPath: string; session?: import('./host/session.ts').DocSession } => {
     const session = registry.sessionByDocId(docId);
     if (session) return { ctx: session.ctx, root: session.ctx.root, relPath: session.relPath, session };
-    const slash = docId.indexOf('/');
-    const project = docId.slice(0, slash), relPath = docId.slice(slash + 1);
+    const { project, path: relPath } = splitDocId(docId);
     const root = projectRoots.get(project);
     if (!root) throw new Error(`unknown project ${project}`);
     return { ctx: { root, layoutDir: layoutDir() }, root, relPath };
@@ -112,7 +116,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         const l = locate(docId);
         if (l.session) return l.session.meta();
         const r = cachedParseFile(l.ctx, l.relPath);
-        return buildMeta({ ctx: l.ctx, project: docId.slice(0, docId.indexOf('/')), relPath: l.relPath, lyx: r.doc, isChild: r.fragment, fileText: readTextFile(path.join(l.root, l.relPath)) });
+        return buildMeta({ ctx: l.ctx, project: projectOfDoc(docId), relPath: l.relPath, lyx: r.doc, isChild: r.fragment, fileText: readTextFile(path.join(l.root, l.relPath)) });
       },
       texText: async (docId) => {
         const l = locate(docId);

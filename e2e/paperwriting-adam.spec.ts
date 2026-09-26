@@ -28,7 +28,7 @@ import {
   freshPaper, placeholderPng,
 } from './papertyping';
 
-const PROJECT = 'e2e-paper-adam';
+const PROJECT = 'admin/e2e-paper-adam';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const TMP = process.env.CLAUDE_JOB_DIR ? `${process.env.CLAUDE_JOB_DIR}/tmp` : '/tmp';
 const FIGS = `${TMP}/e2e-adam-figs`;

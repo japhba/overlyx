@@ -1,10 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { hasSettingsLine } from '@overlyx/core';
+import { hasSettingsLine, isProjectKey } from '@overlyx/core';
 import { config } from './config.ts';
+import { db } from './db.ts';
 
 /** `doc`: a .tex document (has \\begin{document}, is \\input by one, or was written by OverLyX — a fragment with its settings line); `tex`: other LaTeX sources (preamble, macros, .sty); `dir`: a directory (so empty folders show in the explorer) */
 export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'dir' | 'other' }
+/** `name`: the project's key, `<owner>/<name>` (core projectKey.ts) */
 export interface Project { name: string; path: string; files: ProjectFile[] }
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf', '.eps', '.ps', '.tif', '.tiff', '.webp', '.bmp']);
@@ -20,14 +22,30 @@ export function fileKind(name: string): ProjectFile['kind'] {
   return 'other';
 }
 
+/**
+ * The top-level directories of the projects root that are namespaces: one per account, named by its
+ * username (`<root>/<owner>/<name>` is a project). Anything else at the top level is not listed —
+ * a directory put there by hand is moved into a namespace first (access.ts adoptProjects).
+ */
+export function namespaces(): Set<string> {
+  return new Set((db.prepare('SELECT username FROM users').all() as { username: string }[]).map(r => r.username));
+}
+
 export function listProjects(): Project[] {
   const root = config.projectsDir;
   if (!fs.existsSync(root)) return [];
+  const owners = namespaces();
   const out: Project[] = [];
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-    const p = path.join(root, entry.name);
-    out.push({ name: entry.name, path: p, files: classifyDocs(p, collect(p, p, [], 0)) });
+  for (const ns of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!ns.isDirectory() || ns.name.startsWith('.') || !owners.has(ns.name)) continue;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(path.join(root, ns.name), { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      const name = `${ns.name}/${entry.name}`;
+      if (!entry.isDirectory() || entry.name.startsWith('.') || !isProjectKey(name)) continue;
+      const p = path.join(root, ns.name, entry.name);
+      out.push({ name, path: p, files: classifyDocs(p, collect(p, p, [], 0)) });
+    }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -131,7 +149,7 @@ function collect(root: string, dir: string, out: ProjectFile[], depth: number): 
 
 /** Resolve a path inside a project, refusing to escape the project directory. */
 export function resolveProjectPath(project: string, rel: string): string {
-  if (!/^[A-Za-z0-9._ -]+$/.test(project)) throw new Error('bad project name');
+  if (!isProjectKey(project)) throw new Error('bad project name');
   const root = path.join(config.projectsDir, project);
   const abs = path.resolve(root, rel);
   if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error('path escapes project');

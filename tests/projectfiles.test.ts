@@ -15,9 +15,12 @@ process.env.OVERLYX_DATA_DIR = path.join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = path.join(ROOT, 'projects');
 const { listProjects, isDocumentFile, findMaster } = await import('../packages/server/src/projects.ts');
 const { hasSettingsLine } = await import('../packages/core/src/tex/preamble.ts');
+const { createUser } = await import('../packages/server/src/auth.ts');
 
-const P = path.join(ROOT, 'projects', 'paper');
+// projects live in their owner's namespace: <projects>/<owner>/<name>
+const P = path.join(ROOT, 'projects', 'alice', 'paper');
 beforeAll(() => {
+  createUser('alice', 'Alice', 'pw');
   fs.mkdirSync(P, { recursive: true });
   fs.writeFileSync(path.join(P, 'main.tex'), '\\documentclass{article}\n\\input{macros}\n% a comment quoting \\begin{document} does not count\n\\begin{document}\n\\input{chapter}\n\\end{document}\n');
   fs.writeFileSync(path.join(P, 'chapter.tex'), '\\section{Chapter}\nText.\n');
@@ -30,7 +33,7 @@ beforeAll(() => {
 });
 afterAll(() => { fs.rmSync(ROOT, { recursive: true, force: true }); });
 
-const kinds = () => Object.fromEntries((listProjects().find(p => p.name === 'paper')?.files ?? []).map(f => [f.path, f.kind]));
+const kinds = () => Object.fromEntries((listProjects().find(p => p.name === 'alice/paper')?.files ?? []).map(f => [f.path, f.kind]));
 
 describe('project file classification', () => {
   it('documents: \\begin{document}, children of a document body, fragments OverLyX wrote', () => {
@@ -45,16 +48,16 @@ describe('project file classification', () => {
   });
 
   it('isDocumentFile agrees (the text-file API refuses documents)', () => {
-    expect(isDocumentFile('paper', 'plan.tex')).toBe(true);
-    expect(isDocumentFile('paper', 'chapter.tex')).toBe(true);
-    expect(isDocumentFile('paper', 'macros.tex')).toBe(false);
-    expect(isDocumentFile('paper', 'notes.tex')).toBe(false);
-    expect(isDocumentFile('paper', 'refs.bib')).toBe(false);
+    expect(isDocumentFile('alice/paper', 'plan.tex')).toBe(true);
+    expect(isDocumentFile('alice/paper', 'chapter.tex')).toBe(true);
+    expect(isDocumentFile('alice/paper', 'macros.tex')).toBe(false);
+    expect(isDocumentFile('alice/paper', 'notes.tex')).toBe(false);
+    expect(isDocumentFile('alice/paper', 'refs.bib')).toBe(false);
   });
 
   it('the settings line does not make a fragment a master', () => {
-    expect(findMaster('paper', 'plan.tex')).toBeNull();
-    expect(findMaster('paper', 'chapter.tex')).toBe('main.tex');
+    expect(findMaster('alice/paper', 'plan.tex')).toBeNull();
+    expect(findMaster('alice/paper', 'chapter.tex')).toBe('main.tex');
   });
 
   it('hasSettingsLine: at the top of a fragment or inside the managed block, not mid-line', () => {

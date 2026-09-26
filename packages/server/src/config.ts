@@ -10,7 +10,7 @@ export const config = {
   port: Number(process.env.PORT ?? 3000),
   host: process.env.HOST ?? '0.0.0.0',
   dataDir: path.resolve(process.env.OVERLYX_DATA_DIR ?? path.join(REPO_ROOT, 'data')),
-  /** directory whose sub-directories are projects (each may hold .lyx files) */
+  /** the projects: `<projectsDir>/<owner>/<name>`, one namespace per account (namespaces.ts) */
   projectsDir: path.resolve(process.env.OVERLYX_PROJECTS_DIR ?? '/root/projects'),
   layoutDir: process.env.LYX_LAYOUT_DIR ?? (fs.existsSync('/root/lyx/lib/layouts') ? '/root/lyx/lib/layouts' : path.join(REPO_ROOT, 'lyx/lib/layouts')),
   lyxBin: process.env.OVERLYX_LYX_BIN ?? 'lyx',
@@ -63,7 +63,7 @@ export const config = {
   },
   /** minimum interval between automatic versions (ms) */
   autoVersionIntervalMs: Number(process.env.OVERLYX_AUTOVERSION_MS ?? 10 * 60 * 1000),
-  /** every project is a git repository served at /git/<project>.git (OVERLYX_GIT=off disables it) */
+  /** every project is a git repository served at /git/<owner>/<name>.git (OVERLYX_GIT=off disables it) */
   git: process.env.OVERLYX_GIT !== 'off',
   /** idle time after the last change before OverLyX commits it (ms) */
   gitCommitMs: Number(process.env.OVERLYX_GIT_COMMIT_MS ?? 30 * 1000),

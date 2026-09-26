@@ -4,10 +4,12 @@
 #
 #   GITHUB_MIRROR_ORG=… GITHUB_MIRROR_TOKEN=… scripts/restore-from-mirror.sh [/root/projects]
 #
-# Every non-archived repository of the organisation is cloned under its original project name (kept
-# in the repository description; the repository name itself is the GitHub-safe form). Directories
-# that exist already are left alone. INCLUDE_ARCHIVED=1 also restores deleted projects. Afterwards
-# start the server (or open the project list): the directories are adopted for the instance owner
+# Every non-archived repository of the organisation is cloned under its original project key (kept
+# in the repository description, `<owner>/<name>`; the repository name itself is the GitHub-safe
+# form), i.e. into <projects dir>/<owner>/<name>. Directories that exist already are left alone.
+# INCLUDE_ARCHIVED=1 also restores deleted projects. Afterwards start the server (or open the project
+# list): the directories are adopted by their namespace's account — mirrors from before namespaces
+# (a plain name) land at the top level and move into the instance owner's namespace
 # (OVERLYX_OWNER_EMAIL). Users, sharing and named versions live in the database — restore that
 # from the nightly backup (scripts/backup.sh) separately.
 set -euo pipefail

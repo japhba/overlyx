@@ -7,7 +7,7 @@ import { referenceTransaction } from '../editor/references';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { NodeSelection, TextSelection } from 'prosemirror-state';
-import { api, googleSignInUrl, type AiStatus, type BibAddResult, type DocMeta, type Project, type User, fileUrl } from '../api';
+import { api, googleSignInUrl, knownProjects, type AiStatus, type BibAddResult, type DocMeta, type Project, type User, fileUrl } from '../api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { openRewrite, REWRITE_KEY } from '../editor/ai/rewrite';
 import { Login } from './Login';
@@ -41,7 +41,7 @@ import { Tour, tourWanted, rememberTour, type TourEnd } from './Tour';
 import { FeedbackDialog } from './Feedback';
 import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog } from './Dialogs';
 import { SettingsPanel } from './Settings';
-import { createEditor, type EditorHandle, type SaveState } from '../editor/editor';
+import { createEditor, moveLocalCopies, type EditorHandle, type SaveState } from '../editor/editor';
 import { refreshMacros } from '../editor/macrodefs';
 import { describeChange } from '../editor/assembly';
 import { useProjectEvents } from './FileBrowser';
@@ -63,7 +63,7 @@ import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilter
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
 import { setQuery, findNext, replaceCurrent, replaceAll, findKey } from '../editor/plugins/find';
-import { schema, unquote } from '@overlyx/core';
+import { schema, unquote, projectOfDoc, docPathOf, docDirOf, projectShortName } from '@overlyx/core';
 
 type Dialog = { name: string; arg?: unknown } | null;
 
@@ -96,7 +96,16 @@ export function App() {
   // a guest asked to sign in (no Google here, or the callout's plain button): the sign-in page over
   // the workspace — the guest cookie stays, so the login moves the guest's projects to the account
   const [wantLogin, setWantLogin] = useState(false);
-  if (!ready) return <div style="padding:40px;color:#666">Loading…</div>;
+  // an old link in the URL is replaced by the document's current id before the workspace opens it
+  // (later changes of the hash: Workspace's hashchange handler)
+  const [linkChecked, setLinkChecked] = useState<number | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    let live = true;
+    void rekeyLocalCopies().then(canonicalHash).finally(() => { if (live) setLinkChecked(user.id); });
+    return () => { live = false; };
+  }, [user?.id]);
+  if (!ready || (user && linkChecked !== user.id)) return <div style="padding:40px;color:#666">Loading…</div>;
   if (!user) return <Login google={google} onLogin={setUser} note={linkNote} />;
   if (user.guest && wantLogin) return <Login google={google} onLogin={u => { setUser(u); setWantLogin(false); }} onBack={() => setWantLogin(false)} note="Sign in to keep the shared project in your account." />;
   return <Workspace user={user} google={google} onSignIn={() => setWantLogin(true)} onLogout={() => api.logout().then(clearLocalData).then(() => { try { localStorage.removeItem('ol.user'); } catch { /* ignore */ } setUser(null); })} />;
@@ -142,6 +151,45 @@ function parseHash(): { id: string | null; goto: string | null; heading: number 
   const params = q >= 0 ? new URLSearchParams(raw.slice(q + 1)) : null;
   const h = params?.get('heading');
   return { id: idPart || null, goto: params?.get('goto') ?? null, heading: h !== null && h !== undefined && /^\d+$/.test(h) ? Number(h) : null, share: null };
+}
+
+/**
+ * A link that names a document by an old id — from before projects lived in their owner's
+ * namespace (`#/thesis/main.tex`, now `#/jan/thesis/main.tex`) or before a project changed owner:
+ * the server names its current id, which replaces the old one in the URL (history entry included).
+ * Ids of projects the server listed are current already; offline the URL stays as it is.
+ */
+async function canonicalHash(): Promise<boolean> {
+  const raw = location.hash.replace(/^#\/?/, '');
+  const q = raw.indexOf('?');
+  let idPart: string;
+  try { idPart = decodeURIComponent(q >= 0 ? raw.slice(0, q) : raw); } catch { return false; }
+  if (!idPart || idPart.startsWith('share/')) return false;
+  const prefix = /^(raw|text|pdf):/.exec(idPart)?.[0] ?? '';
+  const id = idPart.slice(prefix.length);
+  if (knownProjects.has(projectOfDoc(id))) return false;
+  try {
+    const r = await Promise.race([api.resolveId(id), new Promise<null>(res => setTimeout(res, 3000, null))]);
+    if (!r || r.id === id || location.hash.replace(/^#\/?/, '') !== raw) return false;
+    location.replace('#/' + prefix + r.id + (q >= 0 ? raw.slice(q) : ''));
+    return true;
+  } catch { return false; /* offline, or no such document: as it is */ }
+}
+
+/**
+ * Once per browser: the local copies of documents (editor.ts) named by ids from before owner
+ * namespaces move to the documents' current ids, so offline edits not yet sent are not stranded.
+ * Offline it is tried again at the next start.
+ */
+async function rekeyLocalCopies(): Promise<void> {
+  const FLAG = 'ol.localCopiesKeyed';
+  try { if (localStorage.getItem(FLAG)) return; } catch { return; }
+  try {
+    const dbs = await (indexedDB as any).databases?.() as { name?: string }[] | undefined;
+    const ids = (dbs ?? []).map(d => d.name ?? '').filter(n => n.startsWith('overlyx:')).map(n => n.slice('overlyx:'.length));
+    if (ids.length) await Promise.race([api.resolveIds(ids).then(r => moveLocalCopies(r.ids)), new Promise((_, no) => setTimeout(no, 8000, new Error('timeout')))]);
+    localStorage.setItem(FLAG, '1');
+  } catch { /* offline: next time */ }
 }
 
 /** Navigate ▸ Back / Forward (navhistory.ts); the ids are the menu paths, so the palette can rebind them */
@@ -234,7 +282,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // "Reload metadata" (throttled — the events also fire for this document's own saves).
   const metaTimer = useRef<number | undefined>(undefined);
   const metaAt = useRef(0);
-  useProjectEvents(isLyxDoc ? docId!.split('/')[0] : null, () => {
+  useProjectEvents(isLyxDoc ? projectOfDoc(docId!) : null, () => {
     if (!docId) return;
     window.clearTimeout(metaTimer.current);
     metaTimer.current = window.setTimeout(() => {
@@ -385,7 +433,14 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
 
   useEffect(() => {
     const onHash = () => {
-      const h = parseHash(); pendingGoto.current = h.goto; pendingHeading.current = h.heading; setHashId(h.id);
+      const h = parseHash();
+      // a document of a project the server did not list may be named by an old id: its current id
+      // replaces it first (and comes back through hashchange); nothing opens under the old one
+      if (h.id && !knownProjects.has(projectOfDoc(h.id.replace(/^(raw|text|pdf):/, '')))) { void canonicalHash().then(moved => { if (!moved && parseHash().id === h.id) apply(parseHash()); }); return; }
+      apply(h);
+    };
+    const apply = (h: ReturnType<typeof parseHash>) => {
+      pendingGoto.current = h.goto; pendingHeading.current = h.heading; setHashId(h.id);
       if (h.id?.startsWith('text:')) navHistory.visit(h.id, null);
       if ((h.goto || h.heading !== null) && h.id === editorContext.docId) runGoto();
     };
@@ -402,7 +457,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       const token = parseHash().share;
       if (!token) return;
       api.acceptShare(token).then(r => {
-        notify(`You can now ${r.role === 'view' ? 'view' : 'edit'} “${r.title ?? r.project}”`);
+        notify(`You can now ${r.role === 'view' ? 'view' : 'edit'} “${r.title ?? projectShortName(r.project)}”`);
         setRefreshKey(k => k + 1);
         location.hash = r.doc ? '#/' + r.doc : '';
       }).catch(e => { notify((e as Error).message, 'error'); location.hash = ''; });
@@ -587,8 +642,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     setDialog(null);   // a dialog belongs to the document it was opened in
     if (!docId || !containerRef.current) return;
     containerRef.current.innerHTML = '';
-    editorContext.user = user; editorContext.docId = docId; editorContext.project = docId.split('/')[0]; editorContext.meta = null;
-    editorContext.docDir = docId.split('/').slice(1, -1).join('/');
+    editorContext.user = user; editorContext.docId = docId; editorContext.project = projectOfDoc(docId); editorContext.meta = null;
+    editorContext.docDir = docDirOf(docId);
     // never carry the previous document's author id / tracking state over (changes would be mis-attributed)
     editorContext.changeAuthorId = undefined; editorContext.trackChanges = false;
     let cancelled = false;
@@ -655,7 +710,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       api.meta(docId).then(m => {
         metaAttempt = 0;
         // a .tex file that is not a document (a preamble / macro file opened by URL) belongs to the text editor
-        const rel = docId.slice(docId.indexOf('/') + 1);
+        const rel = docPathOf(docId);
         const entry = m.files?.find(f => f.path === rel);
         if (entry && entry.kind === 'tex') { location.hash = '#/text:' + docId; return; }
         withMeta(m);
@@ -739,7 +794,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       zoom: (d) => setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))),
       textWidth: stepTextWidth,
       openFile: () => setShowFiles(true),
-      newFile: () => { const p = textId?.split('/')[0]; if (p) { const name = prompt('New document name:', 'untitled.tex'); if (name) api.newDoc(p, name, { title: name.replace(/\.(tex|lyx)$/, '') }).then(r => { location.hash = '#/' + r.id; setRefreshKey(k => k + 1); }); } },
+      newFile: () => { const p = textId ? projectOfDoc(textId) : null; if (p) { const name = prompt('New document name:', 'untitled.tex'); if (name) api.newDoc(p, name, { title: name.replace(/\.(tex|lyx)$/, '') }).then(r => { location.hash = '#/' + r.id; setRefreshKey(k => k + 1); }); } },
     };
   });
 
@@ -908,8 +963,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       return true;
     });
     scan(view);
-    if (masterView && masterView !== view) scan(masterView, viewDocId(masterView).split('/').slice(1).join('/'));
-    for (const h of childRefs.current.values()) if (h.view !== view) scan(h.view, viewDocId(h.view).split('/').slice(1).join('/'));
+    if (masterView && masterView !== view) scan(masterView, docPathOf(viewDocId(masterView)));
+    for (const h of childRefs.current.values()) if (h.view !== view) scan(h.view, docPathOf(viewDocId(h.view)));
     // labels from the master document and its other children (server-side scan)
     const own = new Set(out.map(l => l.name));
     for (const l of meta?.labels ?? []) if (!own.has(l.name) && l.file !== meta?.path) out.push({ name: l.name, context: l.context, file: l.file });
@@ -932,10 +987,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
 
   const layouts = meta?.layouts?.length ? meta.layouts : STANDARD_LAYOUTS;
   // the Share button (top right) belongs to the project's owner; the panel reports the project it shows
-  const shareProject = curProject && curProject.role === 'owner' && curProject.via !== 'admin' && (!docId || docId.replace(/^(text|pdf):/, '').split('/')[0] === curProject.name) ? curProject.name : null;
+  const shareProject = curProject && curProject.role === 'owner' && curProject.via !== 'admin' && (!docId || projectOfDoc(docId.replace(/^(text|pdf):/, '')) === curProject.name) ? curProject.name : null;
   const base = (id: string) => id.split('/').pop() ?? id;
   // the project's name: the tab already names the file (a combined master shows the children it includes)
-  const docLabel = docId ? (combined && childIds.length ? [docId, ...childIds].map(base).join(' + ') : docId.replace(/^(text|pdf):/, '').split('/')[0]) : '';
+  const docLabel = docId ? (combined && childIds.length ? [docId, ...childIds].map(base).join(' + ') : projectShortName(projectOfDoc(docId.replace(/^(text|pdf):/, '')))) : '';
 
   // Help is available everywhere (the start screen has no other menus; feedback must be reachable there)
   const helpMenu: MenuDef = { title: 'Help', search: true, items: [
@@ -952,9 +1007,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { label: 'Open… (documents panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
       ...(isPdfTab ? [] : [{ label: 'Saved automatically (Ctrl+S saves now)', disabled: true, action: () => {} }]),
       { sep: true },
-      { label: 'Download', action: () => window.open(`/api/projects/${encodeURIComponent(textId!.split('/')[0])}/file/${textId!.split('/').slice(1).map(encodeURIComponent).join('/')}`) },
-      { label: 'Share project…', action: () => setShareFor(textId!.split('/')[0]) },
-      { label: 'Git repository…', action: () => setGitFor(textId!.split('/')[0]) },
+      { label: 'Download', action: () => window.open(`/api/projects/${encodeURIComponent(projectOfDoc(textId!))}/file/${docPathOf(textId!).split('/').map(encodeURIComponent).join('/')}`) },
+      { label: 'Share project…', action: () => setShareFor(projectOfDoc(textId!)) },
+      { label: 'Git repository…', action: () => setGitFor(projectOfDoc(textId!)) },
       { sep: true },
       { label: 'Close (back to the projects)', action: closeDoc },
     ] },
@@ -996,7 +1051,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       { label: 'New whiteboard…', action: () => {
-        const p = textId?.split('/')[0];
+        const p = textId ? projectOfDoc(textId) : null;
         if (!p) return;
         let name = prompt('New whiteboard name:', 'whiteboard.board');
         if (!name) return;
@@ -1015,8 +1070,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         { label: 'Download PDF', action: () => window.open(`/api/docs/${encodeURIComponent(docId)}/pdf?download=1`) },
       ] },
       { label: 'Versions…', action: () => setRightTab('versions') },
-      { label: 'Share project…', action: () => setShareFor(docId.split('/')[0]) },
-      { label: 'Git repository…', action: () => setGitFor(docId.split('/')[0]) },
+      { label: 'Share project…', action: () => setShareFor(projectOfDoc(docId)) },
+      { label: 'Git repository…', action: () => setGitFor(projectOfDoc(docId)) },
       { sep: true },
       { label: 'Close (back to the projects)', action: closeDoc },
     ] },
@@ -1131,7 +1186,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // The LyX Version Control toolbar, mapped onto the project's git repository (off by default, as in LyX).
   const vcsGroups: ToolButton[][] = [
     [
-      { id: 'vc-git', title: 'Git repository — clone address, access tokens, mirror', icon: 'vcregister', action: () => { const p = (docId ?? '').split('/')[0]; if (p) setGitFor(p); } },
+      { id: 'vc-git', title: 'Git repository — clone address, access tokens, mirror', icon: 'vcregister', action: () => { const p = projectOfDoc(docId ?? ''); if (p) setGitFor(p); } },
       { id: 'vc-log', title: 'Revision log (the Versions panel)', icon: 'vclog', action: () => { setRightTab('versions'); setSelVersion(v => v + 1); } },
       { id: 'vc-compare', title: 'Compare with an older revision (the Versions panel)', icon: 'vccompare', action: () => { setRightTab('versions'); setSelVersion(v => v + 1); } },
     ],
@@ -1158,7 +1213,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     if (dialog.name === 'preferences') return <SettingsPanel ai={ai} user={user!} initial={dialog.arg as 'ai' | undefined} onClose={() => { setDialog(null); view?.focus(); }} />;
     if (!view || !docId) return null;
     const close = () => { setDialog(null); view.focus(); };
-    const project = viewDocId(view).split('/')[0] || docId.split('/')[0];
+    const project = projectOfDoc(viewDocId(view)) || projectOfDoc(docId);
     const docDir = view.dom.dataset.docDir ?? editorContext.docDir;
     switch (dialog.name) {
       case 'graphics': return <GraphicsDialog meta={meta} project={project} docDir={docDir} onClose={close} onInsert={(f, o) => run(C.insertGraphics(f, o))} />;
@@ -1272,7 +1327,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     <div class="app">
       <MenuBar menus={menus} user={user} onLogout={onLogout} onSettings={() => setDialog({ name: 'preferences' })} onHome={() => { location.hash = '#/'; }} searchEntries={helpSearchEntries}
         users={isLyxDoc ? status.users : undefined} onJumpToUser={jumpToUser}
-        onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? shareProject}”: invite people or turn on a link` : undefined}
+        onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? projectShortName(shareProject)}”: invite people or turn on a link` : undefined}
         onSignIn={user.guest ? signIn : undefined}
         primary={isLyxDoc && <PaneSwitch layout={panes} onChange={changePanes} narrow={narrowPanes} />}
         right={docId && <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span>} />
@@ -1341,7 +1396,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')} ref={columnRef}>
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
-          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/'))} toolbar={<a class="small-btn" href={fileUrl(textId!.split('/')[0], textId!.split('/').slice(1).join('/')) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : !isLyxDoc ? (/\.(md|markdown)$/i.test(textId!) ? <MarkdownEditor key={docId} id={textId!} notify={notify} /> : <TextEditor key={docId} id={textId!} notify={notify} />) :
+          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : !isLyxDoc ? (/\.(md|markdown)$/i.test(textId!) ? <MarkdownEditor key={docId} id={textId!} notify={notify} /> : <TextEditor key={docId} id={textId!} notify={notify} />) :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (
@@ -1380,7 +1435,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
             </div>
             {rightTab === 'comments' && <div class="panel-body"><Comments views={[masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} /></div>}
             {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
-            {rightTab === 'agent' && <AgentPanel project={docId.split('/')[0]} notify={notify} />}
+            {rightTab === 'agent' && <AgentPanel project={projectOfDoc(docId)} notify={notify} />}
           </div>
         )}
       </div>

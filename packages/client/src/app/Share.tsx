@@ -9,6 +9,7 @@ import { AvatarContent, initials } from './Avatar';
 import { api, pdfLinkUrl, type ActivityEntry, type PdfLinkInfo, type PdfLinksInfo, type PdfPublishInfo, type ShareInfo, type User } from '../api';
 import { ago } from './Git';
 import { Dialog } from './Dialogs';
+import { projectShortName } from '@overlyx/core';
 
 export function shareUrl(token: string): string { return `${location.origin}/#/share/${token}`; }
 
@@ -70,7 +71,7 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
     try { await navigator.clipboard.writeText(url); } catch { const el = document.querySelector<HTMLInputElement>('.share-link input'); el?.select(); document.execCommand('copy'); }
     setCopied(true); setTimeout(() => setCopied(false), 2000);
   };
-  const title = info?.title ?? project;
+  const title = info?.title ?? projectShortName(project);
   const updatePdf = async (fn: () => Promise<{ links: PdfLinkInfo[] }>) => {
     setBusy(true); setErr('');
     try { const r = await fn(); setPdf(p => p ? { ...p, links: r.links } : p); onChanged?.(); }

@@ -112,7 +112,7 @@ exports.run = async function run() {
   const originalHtml = webview.html;
   const csp = /<meta http-equiv="Content-Security-Policy" content="[^"]*">/.exec(originalHtml)[0];
   const nonce = /'nonce-([^']+)'/.exec(csp)[1];
-  const imageUrl = `${forwarding.base}/api/projects/${encodeURIComponent(entry.session.docId.split('/')[0])}/graphics/${encodeURIComponent('../figures/plot #1.png')}`;
+  const imageUrl = `${forwarding.base}/api/projects/${encodeURIComponent(entry.session.docId.split('/').slice(0, 2).join('/'))}/graphics/${encodeURIComponent('../figures/plot #1.png')}`;
   const probeImage = id => new Promise((resolve, reject) => {
     const sub = webview.onDidReceiveMessage(m => {
       if (m?.type !== 'graphicsProbe' || m.id !== id) return;

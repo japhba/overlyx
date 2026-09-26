@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node
 import { login, collectErrors, PROJECTS_DIR } from './helpers';
 import { openPaper, afterAuthor, setLayout, newParagraph, citeFromPastedBibtex, inlineMath, inlineLatex, typeBareSymbol, insertFloat, uploadGraphics, typeCaption, leaveFloat, insertRef, placeholderPng, resumeAtEnd, freshPaper as serverFreshPaper } from './papertyping';
 
-const PROJECT = 'e2e-paperwriting-more';
+const PROJECT = 'admin/e2e-paperwriting-more';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const TMP = process.env.CLAUDE_JOB_DIR ? `${process.env.CLAUDE_JOB_DIR}/tmp` : '/tmp';
 const FIGS = `${TMP}/e2e-bert-figs`;

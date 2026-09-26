@@ -136,7 +136,7 @@ try {
     await frame.locator('.lyx-include').first().click({ button: 'right' });
     await frame.locator('.ctx-item').filter({ hasText: 'Show master and child documents in one view' }).click();
     await frame.waitForFunction(() => document.querySelectorAll('.lyx-editor').length === 4);
-    const ids = await frame.locator('.lyx-editor').evaluateAll(nodes => nodes.map(n => n.dataset.docId.split('/').slice(1).join('/')));
+    const ids = await frame.locator('.lyx-editor').evaluateAll(nodes => nodes.map(n => n.dataset.docId.split('/').slice(2).join('/')));
     assert.deepEqual(ids, ['main.tex', 'sections/chapter.tex', 'sections/nested.tex', 'second.tex']);
     assert.deepEqual(await frame.locator('.katex-error,.lm-error,.lm-unknown').allTextContents(), []);
     const childEditor = frame.locator('.lyx-editor[data-doc-id$="/sections/chapter.tex"]');
@@ -251,9 +251,9 @@ try {
     assert.equal(fs.readFileSync(documentPath, 'utf8'), masterBefore);
     console.log('PASS: dirty appendix buffer, external rewrite, inherited macro refresh, cached view toggles, webview reload, and saving without stale or duplicated sections.');
     console.log('PASS: context menu, separate VS Code tab, master/child/nested views, inherited macros, child save isolation, undo/redo across toggles, external file sync.');
-    await childFrame.evaluate(() => window.overlyx.openInTab('workspace/second.tex', { heading: 1 }));
+    await childFrame.evaluate(() => window.overlyx.openInTab('local/workspace/second.tex', { heading: 1 }));
     const destination = await until(async () => {
-      for (const candidate of page.frames()) if (await candidate.evaluate(() => window.__OVERLYX_VSCODE__?.docId === 'workspace/second.tex')) return candidate;
+      for (const candidate of page.frames()) if (await candidate.evaluate(() => window.__OVERLYX_VSCODE__?.docId === 'local/workspace/second.tex')) return candidate;
     }, 'heading destination editor');
     await destination.waitForFunction(() => window.overlyx?.activeView?.state.selection.$from.parent.textContent === 'Destination');
     console.log('PASS: cross-document navigation waits for the new editor and selects the requested heading.');

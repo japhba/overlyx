@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } from '../api';
 import { subscribeProjectEvents } from '../projectevents';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
+import { projectOfDoc, splitDocId, projectShortName } from '@overlyx/core';
 
 /**
  * Subscribe to the server's change stream for one project (SSE): `onChange` fires whenever files
@@ -52,7 +53,8 @@ const ICON: Record<string, string> = { doc: '📄', lyx: '📥', bib: '📚', im
 /** the explorer's cut/copy clipboard (paths within one project; survives re-renders) */
 let fileClip: { project: string; path: string; cut: boolean } | null = null;
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
-export const projectLabel = (p: Project) => p.title ?? p.name;
+/** a project's title, else its name without the owner (`jan/thesis` → `thesis`) */
+export const projectLabel = (p: Project) => p.title ?? projectShortName(p.name);
 
 /** A document row's outline (the documents panel): whether it is expanded, the twisty, and what to show under the row. */
 export interface DocOutlines { open: (id: string) => boolean; toggle: (id: string) => void; render: (id: string) => ComponentChildren }
@@ -83,7 +85,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   useEffect(() => { localStorage.setItem('ol.tree', JSON.stringify(collapsed)); }, [collapsed]);
 
   // the project shown: the current document's, else the last picked one, else the first
-  const currentProject = current ? current.split('/')[0] : null;
+  const currentProject = current ? projectOfDoc(current) || null : null;
   useEffect(() => { if (currentProject) setPicked(currentProject); }, [currentProject]);   // a newly opened document brings its project up; the picker can then switch away
   useEffect(() => { if (picked) localStorage.setItem('ol.project', picked); }, [picked]);
   const groups = useMemo(() => {
@@ -111,9 +113,10 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   // auto-expand the folders of the current document
   useEffect(() => {
     if (!current) return;
-    const parts = current.split('/');
+    const { project: p, path: rel } = splitDocId(current);
+    const parts = rel.split('/');
     const open: Record<string, boolean> = {};
-    for (let i = 1; i < parts.length - 1; i++) open[parts[0] + ':' + parts.slice(1, i + 1).join('/')] = false;
+    for (let i = 1; i < parts.length; i++) open[p + ':' + parts.slice(0, i).join('/')] = false;
     setCollapsed(c => ({ ...c, ...open }));
   }, [current]);
   // … and bring its row to the top of the panel when it is out of view or low down (the outline opens under it)

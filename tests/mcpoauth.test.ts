@@ -16,7 +16,7 @@ import { setSecurityHeaders } from '../packages/server/src/security.ts';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-oauth-test');
 rmSync(ROOT, { recursive: true, force: true });
-mkdirSync(join(ROOT, 'projects', 'p'), { recursive: true });
+mkdirSync(join(ROOT, 'projects', 'owner', 'p'), { recursive: true });
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 
@@ -28,8 +28,8 @@ const { createMcpToken } = await import('../packages/server/src/mcpTokens.ts');
 
 const owner = createUser('owner', 'Owner', 'pw');
 const outsider = createUser('mallory', 'Mallory', 'pw');
-registerProject('p', owner.id);
-writeFileSync(join(ROOT, 'projects', 'p', 'a.tex'),
+registerProject('owner/p', owner.id);
+writeFileSync(join(ROOT, 'projects', 'owner', 'p', 'a.tex'),
   '\\documentclass{article}\n\\begin{document}\nChaotic dynamics of recurrent networks.\n\\end{document}\n');
 const cookie = 'ol_session=' + signSession(toSessionUser(owner));
 
@@ -183,27 +183,27 @@ describe('authorization + token', () => {
 describe('the token against the all-projects endpoint', () => {
   it('list_projects, then project-scoped tools', async () => {
     const projects = await callTool(access, 'list_projects', {});
-    expect(projects.map((p: any) => p.project)).toContain('p');
-    const r = await callTool(access, 'read_document', { project: 'p', path: 'a.tex' });
+    expect(projects.map((p: any) => p.project)).toContain('owner/p');
+    const r = await callTool(access, 'read_document', { project: 'owner/p', path: 'a.tex' });
     expect(r.text).toContain('Chaotic dynamics');
     await expect(callTool(access, 'read_document', { path: 'a.tex' })).rejects.toThrow(/No project given/);
   });
 
   it('search finds a passage and fetch returns the file, ChatGPT-shaped', async () => {
     const s = await callTool(access, 'search', { query: 'chaotic recurrent' });
-    expect(s.results[0].id).toBe('p/a.tex');
-    expect(s.results[0].url).toContain('#/p/a.tex');
-    const f = await callTool(access, 'fetch', { id: 'p/a.tex' });
+    expect(s.results[0].id).toBe('owner/p/a.tex');
+    expect(s.results[0].url).toContain('#/owner/p/a.tex');
+    const f = await callTool(access, 'fetch', { id: 'owner/p/a.tex' });
     expect(f.text).toContain('Chaotic dynamics');
-    expect(f.metadata).toMatchObject({ project: 'p', path: 'a.tex' });
+    expect(f.metadata).toMatchObject({ project: 'owner/p', path: 'a.tex' });
   });
 
   it('roles are enforced per call', async () => {
     const t = createMcpToken(outsider.id, 'outside-agent').token;
     const projects = await callTool(t, 'list_projects', {});
-    expect(projects.map((p: any) => p.project)).not.toContain('p');
-    await expect(callTool(t, 'read_document', { project: 'p', path: 'a.tex' })).rejects.toThrow(/no access/);
-    await expect(callTool(t, 'fetch', { id: 'p/a.tex' })).rejects.toThrow(/no access/);
+    expect(projects.map((p: any) => p.project)).not.toContain('owner/p');
+    await expect(callTool(t, 'read_document', { project: 'owner/p', path: 'a.tex' })).rejects.toThrow(/no access/);
+    await expect(callTool(t, 'fetch', { id: 'owner/p/a.tex' })).rejects.toThrow(/no access/);
   });
 });
 
@@ -215,7 +215,7 @@ describe('refresh rotation', () => {
     const old = await rpc(access, 'tools/list');
     expect(old.status).toBe(401);
     const projects = await callTool(t.body.access_token, 'list_projects', {});
-    expect(projects.map((p: any) => p.project)).toContain('p');
+    expect(projects.map((p: any) => p.project)).toContain('owner/p');
     const reuse = await tokenReq({ grant_type: 'refresh_token', refresh_token: refresh, client_id: clientId });
     expect(reuse.status).toBe(400);
   });

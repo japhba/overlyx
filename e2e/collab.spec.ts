@@ -13,7 +13,7 @@ import { test, expect, type Browser, type BrowserContext, type Page } from '@pla
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { login, openDoc, collectErrors, PROJECTS_DIR, adminCredentials, shareProject, userCredentials, texDoc } from './helpers';
 
-const PROJECT = 'e2e-collab';
+const PROJECT = 'admin/e2e-collab';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const DOC = `${PROJECT}/collab.tex`;
 const FILE = `${DIR}/collab.tex`;

@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
 import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, texDoc } from './helpers';
 
-const PROJECT = 'e2e-pdfview';
+const PROJECT = 'admin/e2e-pdfview';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const ID = `${PROJECT}/two.tex`;
 
@@ -66,7 +66,7 @@ test('a PDF file of the project opens in a tab with the viewer', async ({ page }
   await page.goto('/#/' + ID);
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
   await page.locator('.tree-row.file', { hasText: 'paper.pdf' }).click();
-  await expect(page).toHaveURL(/#\/pdf:e2e-pdfview\/paper\.pdf$/);
+  await expect(page).toHaveURL(/#\/pdf:admin\/e2e-pdfview\/paper\.pdf$/);
   await expect(page.locator('.pdf-tab .pdf-page-box')).toHaveCount(9, { timeout: 30000 });
   await expect(page.locator('.filetree .tree-row.current')).toContainText('paper.pdf');   // the file is marked in the documents panel
   await expect(page.locator('.pdf-tab .pdf-toolbar a', { hasText: 'Download' })).toHaveAttribute('href', /paper\.pdf\?download=1$/);

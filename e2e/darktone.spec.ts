@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, writeFileSync, copyFileSync, existsSync } from 'node
 import { login, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
-const PROJECT = 'e2e-darktone';
+const PROJECT = 'admin/e2e-darktone';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 test.beforeAll(() => {

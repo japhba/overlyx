@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, writeFileSync, copyFileSync, existsSync } from 'node
 import { login, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
-const PROJECT = 'e2e-envboxes';
+const PROJECT = 'admin/e2e-envboxes';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const TRANSPARENT = 'rgba(0, 0, 0, 0)';
 

@@ -8,7 +8,7 @@ import { mkdirSync, copyFileSync, rmSync, existsSync, readFileSync, writeFileSyn
 import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
-const PROJECT = 'e2e-paper';
+const PROJECT = 'admin/e2e-paper';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const FILES = ['main.tex', 'appendix.tex', 'lyxmacros.tex', 'macros.tex', 'preamble.tex', 'latexmkrc', 'bib.bib', 'icml2026.sty', 'icml2026.bst', 'icml.layout', 'fancyhdr.sty', 'algorithm.sty', 'algorithmic.sty'];
 

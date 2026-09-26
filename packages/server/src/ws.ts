@@ -12,6 +12,8 @@ import * as decoding from 'lib0/decoding';
 import { manager, type OpenDoc } from './docs.ts';
 import { userFromCookieHeader, type SessionUser } from './auth.ts';
 import { roleFor, logAccess } from './access.ts';
+import { canonicalDocId } from './namespaces.ts';
+import { splitDocId } from '@overlyx/core';
 import { markDocOpened } from './userSettings.ts';
 import { config } from './config.ts';
 
@@ -114,10 +116,12 @@ export function attachWebSocket(server: Server): void {
     if (!originAllowed(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     const user = userFromCookieHeader(req.headers.cookie);
     if (!user) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
-    const docId = decodeURIComponent(url.searchParams.get('doc') ?? '');
-    const role = roleFor(user, docId.split('/')[0]);
+    // an id from before its project moved (namespaces.ts) joins the document under its current key
+    const docId = canonicalDocId(decodeURIComponent(url.searchParams.get('doc') ?? ''));
+    const { project, path: rel } = splitDocId(docId);
+    const role = roleFor(user, project);
     if (!role) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
-    logAccess(docId.split('/')[0], user.id, 'open', docId.slice(docId.indexOf('/') + 1) || null);
+    logAccess(project, user.id, 'open', rel || null);
     markDocOpened(user.id, docId);
     wss.handleUpgrade(req, socket, head, (ws) => void handleConnection(ws, docId, user, role === 'view'));
   });

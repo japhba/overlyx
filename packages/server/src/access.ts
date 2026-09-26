@@ -1,9 +1,11 @@
 /**
  * Who may see and edit which project — a Google-Docs-like model:
  *
- *  - every project (a directory under the projects root) has an **owner**; new projects belong to
- *    whoever created them, directories that exist without a row (created by hand, or from before
- *    sharing existed) are adopted by the instance owner (`OVERLYX_OWNER_EMAIL`, else the first admin);
+ *  - every project has an **owner** and lives in the owner's namespace: `<owner>/<name>`, the
+ *    directory `<projects root>/<owner>/<name>` (namespaces.ts, core projectKey.ts). New projects
+ *    belong to whoever created them; a directory without a row in a namespace is adopted by that
+ *    namespace's account, one at the top level (created by hand) moves into the instance owner's
+ *    namespace (`OVERLYX_OWNER_EMAIL`, else the first admin);
  *  - the owner **shares** it with people (by username or e-mail — an e-mail that has not signed in
  *    yet is kept as an invitation and matched on the first Google sign-in) as *viewer* or *editor*;
  *  - or turns on **link sharing**: anyone who opens `/#/share/<token>` joins as viewer/editor —
@@ -19,18 +21,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { LLANGLE_PREAMBLE } from '@overlyx/core';
+import { LLANGLE_PREAMBLE, isProjectKey, splitProjectKey } from '@overlyx/core';
 import { db, type MemberRow, type ProjectRow, type UserRow } from './db.ts';
 import { config } from './config.ts';
 import type { SessionUser } from './auth.ts';
-import { listProjects, resolveProjectPath, type Project } from './projects.ts';
+import { listProjects, namespaces, resolveProjectPath, type Project } from './projects.ts';
+import { freeKey, moveFlatProjects, moveProject } from './namespaces.ts';
 
 export type Role = 'owner' | 'edit' | 'view';
 const RANK: Record<Role, number> = { view: 1, edit: 2, owner: 3 };
 export function atLeast(role: Role | null | undefined, min: Role): boolean { return !!role && RANK[role] >= RANK[min]; }
 export function isRole(x: unknown): x is 'view' | 'edit' { return x === 'view' || x === 'edit'; }
-
-const PROJECT_NAME = /^[A-Za-z0-9._ -]+$/;
 
 export function projectRow(name: string): ProjectRow | undefined {
   return db.prepare('SELECT * FROM projects WHERE name = ?').get(name) as ProjectRow | undefined;
@@ -51,16 +52,28 @@ export function defaultOwner(): UserRow | undefined {
   return db.prepare('SELECT * FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1').get() as UserRow | undefined;
 }
 
-/** Give every project directory that has no row yet to the instance owner. Cheap; run on every listing. */
+/**
+ * Give every project directory that has no row yet an owner: the account whose namespace it is in.
+ * Directories at the top level (created by hand, or of the flat layout from before namespaces) move
+ * into their owner's namespace first — the instance owner's, when no row names one. Cheap; run on
+ * every listing.
+ */
 export function adoptProjects(): void {
+  moveFlatProjects(defaultOwner()?.username ?? null);
   if (!fs.existsSync(config.projectsDir)) return;
   const known = new Set((db.prepare('SELECT name FROM projects').all() as { name: string }[]).map(r => r.name));
-  let owner: UserRow | undefined | null = null;
-  for (const e of fs.readdirSync(config.projectsDir, { withFileTypes: true })) {
-    if (!e.isDirectory() || e.name.startsWith('.') || known.has(e.name) || !PROJECT_NAME.test(e.name)) continue;
-    if (owner === null) owner = defaultOwner();
-    registerProject(e.name, owner?.id ?? null);
-    console.log(`[access] adopted project directory "${e.name}"${owner ? ` for ${owner.username}` : ' (no owner yet)'}`);
+  const users = namespaces();
+  for (const ns of fs.readdirSync(config.projectsDir, { withFileTypes: true })) {
+    if (!ns.isDirectory() || !users.has(ns.name)) continue;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(path.join(config.projectsDir, ns.name), { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      const key = `${ns.name}/${e.name}`;
+      if (!e.isDirectory() || e.name.startsWith('.') || known.has(key) || !isProjectKey(key)) continue;
+      const owner = db.prepare('SELECT id FROM users WHERE username = ?').get(ns.name) as { id: number } | undefined;
+      registerProject(key, owner?.id ?? null);
+      console.log(`[access] adopted project directory "${key}"`);
+    }
   }
 }
 
@@ -68,7 +81,7 @@ function userEmail(user: SessionUser): string { return (user.email ?? '').trim()
 
 /** The user's role in a project (null = no access). An administrator's access is an explicit, logged grant (see below). */
 export function roleFor(user: SessionUser, project: string): Role | null {
-  if (!PROJECT_NAME.test(project)) return null;
+  if (!isProjectKey(project)) return null;
   const row = projectRow(project);
   if (!row) return null;
   if (row.owner_id === user.id) return 'owner';
@@ -123,7 +136,7 @@ export function adminGrantActive(userId: number, project: string): boolean {
 /** Give an administrator owner rights on a project for `minutes` (at most a day); the owner sees it in the activity log. */
 export function grantAdminAccess(user: SessionUser, project: string, minutes = 60): number {
   if (!user.isAdmin) throw new Error('administrators only');
-  if (!PROJECT_NAME.test(project) || !projectRow(project)) throw new Error('project not found');
+  if (!isProjectKey(project) || !projectRow(project)) throw new Error('project not found');
   const m = Math.max(1, Math.min(Math.round(Number(minutes) || 60), 24 * 60));
   const until = Date.now() + m * 60 * 1000;
   db.prepare('INSERT INTO admin_grants (project, user_id, until) VALUES (?, ?, ?) ON CONFLICT(project, user_id) DO UPDATE SET until = excluded.until').run(project, user.id, until);
@@ -296,12 +309,26 @@ export function acceptLink(token: string, user: SessionUser): { project: Project
   return { project: row, role: row.link_role };
 }
 
-export function setOwner(project: string, username: string): void {
-  const u = db.prepare('SELECT id, is_guest FROM users WHERE username = ? OR lower(email) = ?').get(username.toLowerCase(), username.toLowerCase()) as { id: number; is_guest: number } | undefined;
+/** The account a project is handed to (by username or e-mail); throws when there is none. */
+export function newOwner(username: string): { id: number; username: string } {
+  const u = db.prepare('SELECT id, username, is_guest FROM users WHERE username = ? OR lower(email) = ?').get(username.toLowerCase(), username.toLowerCase()) as { id: number; username: string; is_guest: number } | undefined;
   if (!u) throw new Error(`no user "${username}"`);
   if (u.is_guest) throw new Error('a guest cannot own a project — they have to sign in first');
-  db.prepare('UPDATE projects SET owner_id = ? WHERE name = ?').run(u.id, project);
-  db.prepare('DELETE FROM project_members WHERE project = ? AND user_id = ?').run(project, u.id);
+  return { id: u.id, username: u.username };
+}
+
+/**
+ * Hand a project to another account: it moves into the new owner's namespace (the old key stays an
+ * alias). Nothing of the project may be open (DocManager.closeProject). Returns the new key.
+ */
+export function setOwner(project: string, owner: { id: number; username: string }): string {
+  db.prepare('UPDATE projects SET owner_id = ? WHERE name = ?').run(owner.id, project);
+  db.prepare('DELETE FROM project_members WHERE project = ? AND user_id = ?').run(project, owner.id);
+  const { owner: ns, name } = splitProjectKey(project);
+  if (ns === owner.username) return project;
+  const to = freeKey(owner.username, name);
+  moveProject(project, to);
+  return to;
 }
 
 /** After a sign-in with a known e-mail: invitations addressed to that e-mail now belong to the account. */
@@ -376,6 +403,7 @@ export function trashProject(project: string): string {
   const trash = path.join(config.dataDir, 'trash');
   fs.mkdirSync(trash, { recursive: true });
   const dest = path.join(trash, `${project}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
   if (fs.existsSync(dir)) {
     try { fs.renameSync(dir, dest); }
     catch { fs.cpSync(dir, dest, { recursive: true }); fs.rmSync(dir, { recursive: true, force: true }); }
@@ -385,8 +413,11 @@ export function trashProject(project: string): string {
   // administrator grants and the activity log belong to this project, not to a later one of the same name
   db.prepare('DELETE FROM admin_grants WHERE project = ?').run(project);
   db.prepare('DELETE FROM access_log WHERE project = ?').run(project);
-  // a deleted example project is not re-created: keep a tombstone row
-  if (row?.kind === 'example') db.prepare("UPDATE projects SET kind = 'example-gone', link_token = NULL, link_role = NULL WHERE name = ?").run(project);
+  // old names do not lead to a later project of this name
+  db.prepare('DELETE FROM project_aliases WHERE name = ?').run(project);
+  // a deleted example project is not re-created: keep a tombstone row, under a hidden name that no
+  // project can take (core isProjectName)
+  if (row?.kind === 'example') db.prepare("UPDATE projects SET name = ?, kind = 'example-gone', link_token = NULL, link_role = NULL WHERE name = ?").run(project.replace('/', '/.deleted-') + '-' + Date.now(), project);
   else db.prepare('DELETE FROM projects WHERE name = ?').run(project);
   return dest;
 }
@@ -410,9 +441,7 @@ export function ensureWelcomeProject(user: SessionUser): string | null {
   const existing = db.prepare("SELECT name, kind FROM projects WHERE owner_id = ? AND kind IN ('example', 'example-gone') ORDER BY created_at LIMIT 1").get(user.id) as { name: string; kind: string } | undefined;
   if (existing) return existing.kind === 'example' ? existing.name : null;
   if (!fs.existsSync(path.join(TEMPLATE_DIR, 'welcome.tex'))) return null;
-  const base = 'welcome-' + user.username.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 40);
-  let name = base;
-  for (let k = 2; fs.existsSync(path.join(config.projectsDir, name)) || projectRow(name); k++) name = `${base}-${k}`;
+  const name = freeKey(user.username, 'welcome');
   const dir = resolveProjectPath(name, '.');
   fs.mkdirSync(dir, { recursive: true });
   copyTemplate(TEMPLATE_DIR, dir, { NAME: lyxSafe(user.name), FIRSTNAME: lyxSafe(user.name).split(/\s+/)[0], USERNAME: user.username, LLANGLE: LLANGLE_PREAMBLE.trimEnd() });

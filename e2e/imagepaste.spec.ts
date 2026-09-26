@@ -10,7 +10,7 @@ import { execSync, spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { login, collectErrors, BASE_URL, PROJECTS_DIR, texDoc } from './helpers';
 
-const PROJECT = 'e2e-imgpaste';
+const PROJECT = 'admin/e2e-imgpaste';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 // a 1×1 red PNG

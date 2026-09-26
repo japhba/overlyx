@@ -79,11 +79,11 @@ describe('OverLyX CLI', () => {
     expect(readFileSync(config, 'utf8')).toContain(token);
 
     const pushed = await cli('repo', 'push', join(ROOT, 'source'), '--name', 'Imported paper');
-    expect(pushed.stdout).toContain('Created project "Imported paper"');
+    expect(pushed.stdout).toContain('Created project "ada/Imported paper"');   // in the account's namespace
     expect(pushed.stdout).toContain('Pushed');
-    expect(readFileSync(join(ROOT, 'projects', 'Imported paper', 'main.tex'), 'utf8')).toContain('Hello from an existing folder.');
-    expect(readFileSync(join(ROOT, 'projects', 'Imported paper', 'figures', 'result.txt'), 'utf8')).toBe('42\n');
-    expect(existsSync(join(ROOT, 'projects', 'Imported paper', '.git'))).toBe(true);
+    expect(readFileSync(join(ROOT, 'projects', 'ada', 'Imported paper', 'main.tex'), 'utf8')).toContain('Hello from an existing folder.');
+    expect(readFileSync(join(ROOT, 'projects', 'ada', 'Imported paper', 'figures', 'result.txt'), 'utf8')).toBe('42\n');
+    expect(existsSync(join(ROOT, 'projects', 'ada', 'Imported paper', '.git'))).toBe(true);
     expect(await localGit('log', '-1', '--format=%s')).toBe('Import "Imported paper" into OverLyX');
     const remote = await localGit('remote', 'get-url', 'overlyx');
     expect(remote).toContain('ada@127.0.0.1');
@@ -92,9 +92,10 @@ describe('OverLyX CLI', () => {
 
   it('lists projects and can safely retry a push to an existing editable project', async () => {
     const listed = await cli('repo', 'list');
-    expect(listed.stdout).toContain('Imported paper\towner');
-    const retried = await cli('repo', 'push', join(ROOT, 'source'), '--name', 'Imported paper');
-    expect(retried.stdout).toContain('Using project "Imported paper"');
+    expect(listed.stdout).toContain('ada/Imported paper\towner');
+    // the key form (`<username>/<name>`) names the same project
+    const retried = await cli('repo', 'push', join(ROOT, 'source'), '--name', 'ada/Imported paper');
+    expect(retried.stdout).toContain('Using project "ada/Imported paper"');
     expect(retried.stdout).toContain('Pushed');
   });
 
@@ -107,13 +108,13 @@ describe('OverLyX CLI', () => {
     await execFileP('git', ['-C', source, '-c', 'user.name=Local Author', '-c', 'user.email=local@example.test', 'commit', '-q', '-m', 'The existing history']);
 
     await cli('repo', 'create', 'History import', '--source', source, '--push');
-    const subject = (await execFileP('git', ['-C', join(ROOT, 'projects', 'History import'), 'log', '-1', '--format=%s'], { encoding: 'utf8' })).stdout.trim();
+    const subject = (await execFileP('git', ['-C', join(ROOT, 'projects', 'ada', 'History import'), 'log', '-1', '--format=%s'], { encoding: 'utf8' })).stdout.trim();
     expect(subject).toBe('The existing history');
 
     writeFileSync(join(source, 'paper.tex'), 'Uncommitted work.\n');
     await expect(cli('repo', 'push', source, '--name', 'Should not exist'))
       .rejects.toMatchObject({ stderr: expect.stringContaining('uncommitted files') });
-    expect(existsSync(join(ROOT, 'projects', 'Should not exist'))).toBe(false);
+    expect(existsSync(join(ROOT, 'projects', 'ada', 'Should not exist'))).toBe(false);
   });
 
   it('validates credentials during login', async () => {
@@ -125,7 +126,7 @@ describe('OverLyX CLI', () => {
     const agent = createMcpToken(user.id, 'CLI agent').token;
     const login = await cli('auth', 'login', '--host', host, '--username', 'ada', '--token', agent);
     expect(login.stdout).toContain('Logged in');
-    expect((await cli('repo', 'list')).stdout).toContain('Imported paper\towner');
+    expect((await cli('repo', 'list')).stdout).toContain('ada/Imported paper\towner');
 
     const expired = createMcpToken(user.id, 'expired', false, Date.now() - 1).token;
     await expect(cli('auth', 'login', '--host', host, '--username', 'ada', '--token', expired))

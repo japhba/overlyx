@@ -7,7 +7,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { login, collectErrors, adminCredentials, PROJECTS_DIR } from './helpers';
 
-const PROJECT = 'e2e-offline';
+const PROJECT = 'admin/e2e-offline';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const DOC = `${PROJECT}/doc.tex`;
 const FILE = `${DIR}/doc.tex`;

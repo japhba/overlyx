@@ -7,7 +7,7 @@ import { test, expect, type Browser, type BrowserContext } from '@playwright/tes
 import { mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { apiLogin, adminCredentials, userCredentials, shareProject, BASE_URL, PROJECTS_DIR } from './helpers';
 
-const PROJECT = 'e2e-text';
+const PROJECT = 'admin/e2e-text';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const LYX = `\\documentclass{article}
 \\input{macros}
@@ -62,9 +62,9 @@ test('the documents panel shows one project at a time (one tree: documents expan
   const options = await panel.locator('.project-switch option').allTextContents();
   expect(options.some(o => o.startsWith('Welcome to OverLyX'))).toBe(true);
   await expect(panel.locator('.doc-tab[data-doc="welcome.tex"]')).toHaveCount(0);
-  await panel.locator('.project-switch').selectOption('welcome-admin');
-  await expect(page).toHaveURL(/#\/welcome-admin\/welcome\.tex$/);
-  await expect(panel).toHaveAttribute('data-project', 'welcome-admin');
+  await panel.locator('.project-switch').selectOption('admin/welcome');
+  await expect(page).toHaveURL(/#\/admin\/welcome\/welcome\.tex$/);
+  await expect(panel).toHaveAttribute('data-project', 'admin/welcome');
   await expect(panel.locator('.doc-tab[data-doc="welcome.tex"]')).toHaveClass(/active/);
   await expect(tree.locator('[data-file="macros.tex"]')).toHaveCount(0);
   // and back
@@ -98,7 +98,7 @@ test('text files open in a tab with the text editor; edits are saved automatical
   await page.goto('/#/' + PROJECT + '/main.tex');
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   await page.locator('.filetree [data-file="macros.tex"]').click();
-  await expect(page).toHaveURL(/#\/text:e2e-text\/macros\.tex$/);
+  await expect(page).toHaveURL(/#\/text:admin\/e2e-text\/macros\.tex$/);
   const ed = page.locator('.text-editor');
   await expect(ed).toBeVisible();
   await expect(ed.locator('textarea')).toHaveValue(MACROS);
@@ -138,7 +138,7 @@ test('a fragment OverLyX saved on its own (settings line, no master) opens in th
   const page = await admin.newPage();
   await page.goto('/#/' + PROJECT + '/plan.tex');
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
-  await expect(page).toHaveURL(/#\/e2e-text\/plan\.tex$/);          // not redirected to #/text:…
+  await expect(page).toHaveURL(/#\/admin\/e2e-text\/plan\.tex$/);          // not redirected to #/text:…
   await expect(page.locator('.text-editor')).toHaveCount(0);
   await expect(page.locator('.lyx-editor')).toContainText('first step');
   await expect(page.locator('.docpanel .doc-tab[data-doc="plan.tex"]')).toBeVisible();   // listed as a document

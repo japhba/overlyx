@@ -3,11 +3,11 @@ import { readFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
 
 // a scratch copy of a real paper: tests must never type into the user's own documents
-const DOC = 'e2e-scratch/smoke-main.tex';
+const DOC = 'admin/e2e-scratch/smoke-main.tex';
 test.beforeAll(() => {
-  mkdirSync(`${PROJECTS_DIR}/e2e-scratch`, { recursive: true });
+  mkdirSync(`${PROJECTS_DIR}/admin/e2e-scratch`, { recursive: true });
   copyFileSync(`${FIXTURES_DIR}/recurrent_feature/main.tex`, PROJECTS_DIR + '/' + DOC);
-  for (const f of ['lyxmacros.tex', 'macros.tex', 'preamble.tex']) copyFileSync(`${FIXTURES_DIR}/recurrent_feature/${f}`, `${PROJECTS_DIR}/e2e-scratch/${f}`);
+  for (const f of ['lyxmacros.tex', 'macros.tex', 'preamble.tex']) copyFileSync(`${FIXTURES_DIR}/recurrent_feature/${f}`, `${PROJECTS_DIR}/admin/e2e-scratch/${f}`);
 });
 
 test('login, open a .tex document and render it', async ({ page }) => {

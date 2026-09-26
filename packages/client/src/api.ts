@@ -12,8 +12,9 @@ export function googleSignInUrl(next: string = location.hash): string {
 export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'dir' | 'other' }
 export type Role = 'owner' | 'edit' | 'view';
 export interface Project {
+  /** the project's key, `<owner>/<name>` (core projectKey.ts): documents are `<key>/<path>`, the URL `#/<key>/<path>` */
   name: string; files: ProjectFile[];
-  /** display name (the directory name otherwise) */
+  /** display name (the name without the owner otherwise) */
   title?: string | null;
   /** 'project' | 'example' (the personal welcome project) */
   kind?: string;
@@ -119,6 +120,9 @@ async function req<T>(method: string, url: string, body?: unknown, raw?: BodyIni
 
 export const encId = (id: string) => encodeURIComponent(id);
 
+/** keys of the projects the server listed for this user (a link naming one needs no resolveId) */
+export const knownProjects = new Set<string>();
+
 export interface LitHit { id: string; title: string; authors: string[]; year: number | null; venue: string; type: string; doi: string | null; arxiv: string | null; url: string | null; citations: number | null; sources: string[]; dblp?: string }
 export interface BibAddResult { key: string; file: string; existed: boolean; bibtex: string; entry: BibItem }
 export interface FeedbackInfo { enabled: boolean; repo: string; newIssueUrl: string; version: string; errorReports: boolean }
@@ -132,8 +136,11 @@ export const api = {
   me: () => req<{ user: User | null; google: boolean; signup?: 'open' | 'invited' }>('GET', '/api/auth/me'),
   login: (username: string, password: string) => req<{ user: User }>('POST', '/api/auth/login', { username, password }),
   logout: () => req<{ ok: boolean }>('POST', '/api/auth/logout'),
-  projects: () => req<{ projects: Project[] }>('GET', '/api/projects'),
+  projects: () => req<{ projects: Project[] }>('GET', '/api/projects').then(r => { for (const p of r.projects) knownProjects.add(p.name); return r; }),
   createProject: (name: string) => req<{ project: Project }>('POST', '/api/projects', { name }),
+  /** the current id of a document (or project) an old link names — before projects lived in their owner's namespace */
+  resolveId: (id: string) => req<{ id: string }>('GET', `/api/resolve?id=${encodeURIComponent(id)}`),
+  resolveIds: (ids: string[]) => req<{ ids: Record<string, string> }>('POST', '/api/resolve', { ids }),
   /** Overleaf import: clone the selected projects with the user's Overleaf Git token (per-project results), or unpack a downloaded zip */
   importOverleaf: (body: { token: string; projects: { id: string; name: string }[] }) => req<{ results: { id: string; name: string; ok: boolean; error?: string }[] }>('POST', '/api/import/overleaf', body),
   importZip: (name: string, file: Blob) => req<ZipImportResult>('POST', `/api/import/zip?name=${encodeURIComponent(name)}`, undefined, file),

@@ -136,10 +136,31 @@ blend.
   `is_admin` in the database) do **not** see other people's projects: the start screen lists them
   under *Administration*, and *Open as administrator…* grants owner rights for one hour — logged in
   that project's **activity log**, which its owner sees in the Share dialog together with who
-  opened, built, pulled, pushed or changed the sharing (`GET /api/projects/:p/activity`). Directories
-  that exist without an owner are adopted by the instance owner. *File ▸ Share project…*, the 👥
+  opened, built, pulled, pushed or changed the sharing (`GET /api/projects/:p/activity`). A
+  directory without an owner in a namespace is adopted by that namespace's account, one put at the
+  top level by hand moves into the instance owner's namespace. *File ▸ Share project…*, the 👥
   button in the file browser, or the start screen. Anyone with a Google account may sign in (they only see their own and shared projects);
   set `OVERLYX_SIGNUP=invited` to allow only e-mails that were invited to a project.
+* **Project addresses** (`core/src/projectKey.ts`, `server/src/namespaces.ts`): projects live in
+  their owner's namespace, like repositories on GitHub. The project *thesis* of the account *jan* is
+  `jan/thesis` — its directory `<projects dir>/jan/thesis`, its documents `jan/thesis/<path>` — and
+  that is also its URL: `https://<server>/#/jan/thesis/main.tex` opens the same document for
+  everybody who has access, so a link from the address bar can be sent to a collaborator as it is
+  (someone without access needs the share link). Two accounts can each have a *thesis*. The same key
+  names the git remote (`/git/jan/thesis.git`), the MCP connection (`/mcp/jan/thesis`, the keys
+  `list_projects` returns) and the REST routes (`/api/projects/jan%2Fthesis/…`, one path segment as
+  the client sends it; `/api/projects/jan/thesis/…` works too). New projects (start screen, Overleaf
+  import, CLI, MCP `create_project`) are created in the creator's namespace; the welcome project is
+  `<user>/welcome`. Handing a project to another account (`POST /api/projects/:p/share/owner`) moves
+  it into the new owner's namespace. Until 25 Sep 2026 projects were top-level directories with one
+  global name (`/root/projects/thesis`): at startup every such project moves into its owner's
+  namespace together with everything that names it — the rows of every table, document ids, build
+  directories (`moveFlatProjects`, journalled in `project_moves` so an interrupted move is finished
+  at the next start). Every earlier name stays an **alias** (`project_aliases`): old links (the
+  client asks `GET /api/resolve?id=` and rewrites its URL before opening the document), git remotes
+  (`/git/thesis.git`), MCP clients (`/mcp/thesis`, `project: "thesis"`, fetch ids) and API calls keep
+  working. The VS Code extension keys its local folders the same way, `local/<folder name>`, so the
+  shared editor code reads document ids alike.
 * **Public PDF link** (Share dialog ▸ *Public PDF link*, per document; also 🔗 *Public link* in
   the PDF panel): `https://<server>/pdf/<token>/<name>.pdf` serves the document's latest build to
   anyone, no account — the address a personal web page links its CV to. The last PDF is served at
@@ -156,7 +177,7 @@ blend.
   table `pdf_publish`).
 * **Every project is a git repository** you can clone, pull and push from your own machine
   (*File ▸ Git repository…*, the ⎇ button in the file browser, or *Git…* on a project card):
-  `git clone https://<server>/git/<project>.git` with your username and your **account access
+  `git clone https://<server>/git/<owner>/<project>.git` with your username and your **account access
   token** created in that dialog (or your OverLyX password; Google accounts have no password). The project directory
   is the working tree, so desktop LyX, OverLyX and git all work on the same files. OverLyX commits
   what people edit in the browser by itself — a couple of minutes after the last change and always
@@ -171,7 +192,7 @@ blend.
   ```sh
   curl -fsSL https://overlyx.app/install-cli.sh | sh
   overlyx auth login --host https://overlyx.app --username NAME --with-token
-  overlyx repo create my-paper --source . --push
+  overlyx repo create my-paper --source . --push     # creates <your username>/my-paper
   # shorthand, and safe to retry after a failed first push:
   overlyx repo push . --name my-paper
   ```
@@ -347,7 +368,7 @@ blend.
   e2e) is folded away behind a small link while Google sign-in is configured, and is the only form
   otherwise; *Get the VS Code extension* sits right under the Google button with the same weight,
   linking to the newest GitHub release. The Google buttons carry the location hash as `?next=`,
-  so a deep link (`#/project/doc.tex`, a share link) is where the sign-in returns to; a share link
+  so a deep link (`#/owner/project/doc.tex`, a share link) is where the sign-in returns to; a share link
   that did not open, or a guest asked to sign in, shows a note above the button (and *Continue as
   a guest for now* to go back). Below the hero, a demo gallery wheel with four clips
   (`public/landing/*.{webm,mp4,jpg}`): real recordings of the editor (WYSIWYG math typing, the raw
@@ -731,8 +752,9 @@ npm run build        # production client build -> packages/client/dist (served b
 npm start            # production server (serves the built client)
 ```
 
-Environment: `PORT` (default 3000), `OVERLYX_PROJECTS_DIR` (default `/root/projects`; every
-sub-directory is a project holding `.tex` files, figures and `.bib`s), `OVERLYX_DATA_DIR`
+Environment: `PORT` (default 3000), `OVERLYX_PROJECTS_DIR` (default `/root/projects`; one
+sub-directory per account, named by its username, and in it one directory per project holding
+`.tex` files, figures and `.bib`s — `<dir>/<owner>/<name>`), `OVERLYX_DATA_DIR`
 (SQLite, caches, builds, `credentials.txt`), `OVERLYX_CLIENT_DIST` (built client to serve, default
 `packages/client/dist`), `OVERLYX_UNLOAD_MS` (how long an idle document stays loaded, default 6 h),
 `OVERLYX_MAX_BUILDS` (parallel PDF builds, default 2), `OVERLYX_BUILD_NICE` (niceness of latexmk,
@@ -740,7 +762,8 @@ default 10), `OVERLYX_SANDBOX` (`auto` — use bubblewrap when installed, the de
 `none`),
 `LYX_LAYOUT_DIR` (LyX `lib/layouts`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` +
 `OVERLYX_PUBLIC_URL` to enable Google sign-in, `OVERLYX_OWNER_EMAIL` (the instance owner: made an
-administrator at sign-in and given every project directory that has no owner yet),
+administrator at sign-in; a project directory put at the top level of the projects directory moves
+into its namespace),
 `OVERLYX_SMTP_URL` (an SMTP URL with credentials, e.g.
 `smtps://you%40gmail.com:app-password@smtp.gmail.com/` — the owner is e-mailed on every sign-up;
 without it the notification is only logged, since outbound port 25 is blocked on typical hosts)
@@ -868,12 +891,13 @@ npm test                                  # vitest (round trips, conversions, La
 npx playwright test                       # e2e (needs the dev servers running)
 ```
 
-The e2e suites copy real papers into scratch projects; to keep them away from the production
-server and its data, run them against an isolated instance:
+The e2e suites copy real papers (`OVERLYX_E2E_FIXTURES`, default `/root/projects/jan`) into scratch
+projects in the admin's namespace (`admin/e2e-…`); to keep them away from the production server and
+its data, run them against an isolated instance:
 
 ```bash
 S=/tmp/overlyx-e2e; mkdir -p $S/projects $S/data
-rsync -a --exclude _build --exclude .git /root/projects/recurrent_feature /root/projects/bayesian_chaos $S/projects/   # features.spec compiles bayesian_chaos
+mkdir -p $S/projects/admin && rsync -a --exclude _build --exclude .git /root/projects/jan/recurrent_feature /root/projects/jan/bayesian_chaos $S/projects/admin/   # features.spec compiles bayesian_chaos; landing.spec opens recurrent_feature
 OVERLYX_DATA_DIR=$S/data npx tsx packages/server/src/seed.ts admin Admin bob Bob carol Carol u1 U1 u2 U2 u3 U3 u4 U4 u5 U5 u6 U6
 OVERLYX_DATA_DIR=$S/data OVERLYX_PROJECTS_DIR=$S/projects OVERLYX_CLIENT_DIST=$S/dist PORT=3001 npx tsx packages/server/src/index.ts &
 (cd packages/client && OVERLYX_API_PORT=3001 npx vite --port 5174 &)
@@ -914,8 +938,8 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/paperwriting-gan.
 # Bayes" in two sessions plus its six appendices (unnumbered align rows, \eqref, a formula in a
 # section title and in a footnote, \paragraph headings, \left. … \right|, lettered subsections):
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/paperwriting-vae.spec.ts
-# OVERLYX_E2E_KEEP=1 leaves the typed projects on disk (e2e-paperwriting, e2e-paperwriting-more,
-# e2e-paper-gan, e2e-paper-adam, e2e-paper-vae); publish them into the owner's production account
+# OVERLYX_E2E_KEEP=1 leaves the typed projects on disk (admin/e2e-paperwriting, admin/e2e-paperwriting-more,
+# admin/e2e-paper-gan, admin/e2e-paper-adam, admin/e2e-paper-vae); publish them into the owner's production account
 # (OVERLYX_OWNER_EMAIL, japhba@gmail.com) so the latest typed-via-GUI papers can be inspected there:
 scripts/publish-typed-papers.sh $S/projects
 # mouse selection (LyX rules: insets taken whole at their closest edge, no drag-and-drop of a
@@ -1050,8 +1074,10 @@ editor listing what it found. Two ways to fix it:
 Any [MCP](https://modelcontextprotocol.io)-compatible client (ChatGPT, Claude, Claude Code, …) can
 connect as a collaborator — to **all of an account's projects at `<origin>/mcp`** (each tool takes a
 `project` argument; `list_projects` names the reachable ones and the account's role is checked on
-every call), or fixed to one project at `<origin>/mcp/<project>` (the classic form in File ▸ Git
-repository…, `Git.tsx`). Two ways to authenticate:
+every call), or fixed to one project at `<origin>/mcp/<owner>/<project>` (the classic form in File ▸ Git
+repository…, `Git.tsx`). Projects are named by their key `<owner>/<name>` (document ids
+`<owner>/<name>/<path>`); a name a project had before (see *Project addresses*) is still accepted.
+Two ways to authenticate:
 
 * **Account token** (`Authorization: Bearer olx_…`; created in File ▸ Git repository…, revocable)
   — the same one manually configured for Git and the CLI. MCP changes are attributed to the account.
@@ -1095,9 +1121,9 @@ exposes these tools:
 * `list_files`, `read_file(path)`, `write_file(path, text)` — the project's other text files
   (`refs.bib`, `macros.tex`, `.sty`, …); binary files and documents are refused.
 * On the account-wide `/mcp` endpoint, `create_project(name, title?)` creates an empty project owned
-  by the token's account. An agent can populate it with `create_document`, `write_document` and
+  by the token's account, `<username>/<name>`. An agent can populate it with `create_document`, `write_document` and
   `write_file`; local files, including binaries and an existing Git history, are imported with the
-  CLI instead. This tool is intentionally absent from a fixed `/mcp/<project>` connection.
+  CLI instead. This tool is intentionally absent from a fixed `/mcp/<owner>/<project>` connection.
 
 ## Authentication and identity
 

@@ -26,8 +26,9 @@ import fs from 'node:fs';
 import {
   plainText, itemText, paragraph, textItem, insetItem, textInset, addAuthor, lyxAuthorId, fontsEqual,
   setHeaderValue, diffText, commentHeader, formatTimestamp, parseHeader, parseThread,
-  type LyxDocument, type Item, type TextInset,
+  splitDocId, type LyxDocument, type Item, type TextInset,
 } from '@overlyx/core';
+import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import nodePath from 'node:path';
 import { manager } from './docs.ts';
 import { listProjects, projectDir, resolveProjectPath, isDocumentFile, newDocumentText } from './projects.ts';
@@ -336,7 +337,7 @@ function listFiles(project: string) {
 
 /* ---------------------------------------------------- search across all projects (ChatGPT's search/fetch pair) */
 
-const docUrl = (project: string, path: string) => `${(config.publicUrl || 'https://overlyx.app').replace(/\/$/, '')}/#/${encodeURIComponent(project)}/${path}`;
+const docUrl = (project: string, path: string) => `${(config.publicUrl || 'https://overlyx.app').replace(/\/$/, '')}/#/${project.split('/').map(encodeURIComponent).join('/')}/${path}`;
 
 /** Naive full-text search over the account's projects (documents, .tex, .bib) — enough for a
  *  connector's "find the passage, then fetch the file"; projects are small LaTeX trees. */
@@ -365,10 +366,9 @@ function searchDocs(user: SessionUser, query: string) {
 }
 
 async function fetchDoc(user: SessionUser, id: string) {
-  const slash = id.indexOf('/');
-  const project = slash > 0 ? id.slice(0, slash) : '';
-  const rel = slash > 0 ? id.slice(slash + 1) : '';
-  if (!project || !rel) throw new Error('id must be "project/path" (from search or list_files).');
+  id = canonicalDocId(id);   // an id from before its project moved (namespaces.ts)
+  const { project, path: rel } = splitDocId(id);
+  if (!project || !rel) throw new Error('id must be "owner/project/path" (from search or list_files).');
   if (!atLeast(roleFor(user, project), 'view')) throw new Error(`This account has no access to project "${project}".`);
   let text: string;
   if (isDocumentFile(project, rel)) {
@@ -394,11 +394,12 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   const projArg = {
     project: z.string().optional().describe(fixedProject
       ? 'Ignored — this connection is fixed to one project'
-      : 'The project to work in — a name from list_projects (required on this all-projects connection)'),
+      : 'The project to work in — its key "owner/name" from list_projects (required on this all-projects connection)'),
   };
   /** Resolve and authorize the project of one call. */
   const need = (arg: unknown, min: 'view' | 'edit'): string => {
-    const project = fixedProject ?? String(arg ?? '').trim();
+    // a key `<owner>/<name>` from list_projects, or a name the project had before (namespaces.ts)
+    const project = fixedProject ?? canonicalProject(String(arg ?? '').trim());
     if (!project) throw new Error('No project given — pass `project` (list_projects names the reachable ones).');
     const role = roleFor(user, project);
     if (!atLeast(role, 'view')) throw new Error(`This account has no access to a project "${project}" (see list_projects).`);
@@ -515,15 +516,14 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   if (!fixedProject) server.registerTool('create_project', {
     description: 'Create an empty project owned by this account. Then populate it with create_document, write_document and write_file, or push an existing local repository with the OverLyX CLI.',
     inputSchema: {
-      name: z.string().describe('Project name (letters, numbers, spaces, dot, dash and underscore)'),
+      name: z.string().describe('Project name (letters, numbers, spaces, dot, dash and underscore); the project is created as "<your username>/<name>"'),
       title: z.string().max(200).optional(),
     },
   }, async ({ name, title }) => {
     try {
-      const clean = name.trim();
-      createOwnedProject(clean, userId, { title: title?.trim() || null });
-      await ensureRepo(clean);
-      return ok({ project: clean, title: title?.trim() || null, role: 'owner' });
+      const key = createOwnedProject(name, userId, { title: title?.trim() || null }).name;
+      await ensureRepo(key);
+      return ok({ project: key, title: title?.trim() || null, role: 'owner' });
     } catch (e) { return fail(e); }
   });
 
@@ -535,7 +535,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ query }) => { try { return okStruct({ results: searchDocs(user, query) }); } catch (e) { return fail(e); } });
 
   server.registerTool('fetch', {
-    description: 'The full text of one search result or file, by id ("project/path").',
+    description: 'The full text of one search result or file, by id ("owner/project/path").',
     annotations: { readOnlyHint: true },
     inputSchema: { id: z.string() },
   }, async ({ id }) => { try { return okStruct(await fetchDoc(user, id)); } catch (e) { return fail(e); } });
@@ -543,19 +543,21 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   return server;
 }
 
-/** POST /mcp/:project — one stateless request/response per JSON-RPC call (no session, no SSE stream kept open). */
+/** POST /mcp/<owner>/<project> — one stateless request/response per JSON-RPC call (no session, no SSE stream kept open). */
 export function mcpRouter(): express.Router {
   const r = express.Router();
   r.use(express.json({ limit: '2mb' }));
   r.post('/', (req, res) => { void handle(req, res); });          // all projects (tools take `project`)
-  r.post('/:project', (req, res) => { void handle(req, res); }); // fixed to one project
+  // fixed to one project: its key, or a name it had before (the flat layout's `/mcp/<name>`)
+  r.post('/:owner/:project', (req, res) => { void handle(req, res); });
+  r.post('/:project', (req, res) => { void handle(req, res); });
   return r;
 }
 
 async function handle(req: Request, res: Response): Promise<void> {
   let project: string | null = null;
   if (req.params.project !== undefined) {
-    try { project = decodeURIComponent(req.params.project); } catch { res.status(400).json({ error: 'bad project name' }); return; }
+    try { project = canonicalProject((req.params.owner !== undefined ? req.params.owner + '/' : '') + decodeURIComponent(req.params.project)); } catch { res.status(400).json({ error: 'bad project name' }); return; }
   }
   const auth = req.header('authorization') ?? '';
   const m = /^Bearer\s+(\S+)/i.exec(auth);

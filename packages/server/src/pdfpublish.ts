@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { config } from './config.ts';
 import { db } from './db.ts';
+import { docPathOf } from '@overlyx/core';
 import { lastBuild, onBuildFinished } from './export.ts';
 
 export interface PublishRow { doc_id: string; repo: string; path: string; branch: string | null; created_by: number | null; created_at: number; last_pushed_at: number | null; last_sha: string | null; last_error: string | null; last_attempt_at: number | null }
@@ -95,7 +96,7 @@ export function publishPdf(docId: string, reason = 'built'): Promise<PublishRow 
       else if (cur.status === 401 || cur.status === 403) return fail(`GitHub refused the token for ${t.repo} (${cur.status}${cur.json?.message ? `: ${cur.json.message}` : ''}) — it needs Contents: read & write on that repository`);
       else if (cur.status !== 404) return fail(`GitHub: ${cur.status}${cur.json?.message ? ` ${cur.json.message}` : ''}`);
       if (existing === sha) { db.prepare('UPDATE pdf_publish SET last_sha = ?, last_error = NULL, last_attempt_at = ? WHERE doc_id = ?').run(sha, Date.now(), docId); return publishTargetFor(docId); }
-      const name = docId.slice(docId.indexOf('/') + 1);
+      const name = docPathOf(docId);
       const put = await gh('PUT', file, {
         message: `${existing ? 'Update' : 'Add'} ${t.path.split('/').pop()} (${name} ${reason} on OverLyX)`,
         content: content.toString('base64'),

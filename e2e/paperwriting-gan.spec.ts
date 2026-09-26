@@ -31,7 +31,7 @@ import {
   freshPaper, placeholderPng, resumeAtEnd,
 } from './papertyping';
 
-const PROJECT = 'e2e-paper-gan';
+const PROJECT = 'admin/e2e-paper-gan';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const KEYS_FILE = `${DIR}/.keys.json`;
 const TMP = process.env.CLAUDE_JOB_DIR ? `${process.env.CLAUDE_JOB_DIR}/tmp` : '/tmp';

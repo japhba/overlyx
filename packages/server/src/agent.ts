@@ -27,6 +27,7 @@ import { config } from './config.ts';
 import { db } from './db.ts';
 import { manager } from './docs.ts';
 import { projectDir } from './projects.ts';
+import { canonicalProject } from './namespaces.ts';
 import { roleFor, atLeast, logAccess } from './access.ts';
 import { createMcpToken } from './mcpTokens.ts';
 import { selectionToTex, documentContext } from './ai.ts';
@@ -485,7 +486,8 @@ export function agentRoutes(): express.Router {
 
   /** at least `min` in `:project`, else 403; returns the role or null */
   const needRole = (req: Request, res: Response, min: 'view' | 'edit'): boolean => {
-    const role = roleFor(req.user!, String(req.params.project ?? ''));
+    req.params.project = canonicalProject(String(req.params.project ?? ''));   // an old name (namespaces.ts)
+    const role = roleFor(req.user!, req.params.project);
     if (!atLeast(role, min)) { res.status(403).json({ error: 'You do not have access to this project' }); return false; }
     return true;
   };
@@ -601,7 +603,8 @@ export function agentRoutes(): express.Router {
       const effort = typeof req.body?.effort === 'string' && req.body.effort ? String(req.body.effort).slice(0, 20) : undefined;
       // the panel's optimistic message id: codex echoes it on the userMessage item, so the client can dedupe
       const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
-      const turn = h.request('turn/start', { threadId: row.thread_id, input, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(cmid ? { clientUserMessageId: cmid } : {}) }, 0);
+      // cwd: the project's directory now — a thread started before the project moved (namespaces.ts) follows it
+      const turn = h.request('turn/start', { threadId: row.thread_id, input, cwd: projectDir(row.project), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(cmid ? { clientUserMessageId: cmid } : {}) }, 0);
       turn.catch(e => console.error(`[agent ${req.user!.id}] turn failed:`, (e as Error).message));
       // the turn runs long; its progress arrives over the events stream — answer as soon as it is accepted
       const quick = await Promise.race([turn.then(t => t), new Promise(r2 => setTimeout(r2, 5000, null))]);

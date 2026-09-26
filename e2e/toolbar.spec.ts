@@ -6,7 +6,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { login, collectErrors, userCredentials, PROJECTS_DIR, shareProject } from './helpers';
 
-const DIR = `${PROJECTS_DIR}/e2e-toolbar`;
+const DIR = `${PROJECTS_DIR}/admin/e2e-toolbar`;
 const FILE = `${DIR}/main.tex`;
 
 const para = (t: string) => `${t}\n\n`;
@@ -19,7 +19,7 @@ test.beforeAll(async ({ browser }) => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
   writeFileSync(FILE, body);
-  await shareProject(browser, 'e2e-toolbar', ['bob']);
+  await shareProject(browser, 'admin/e2e-toolbar', ['bob']);
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
@@ -27,7 +27,7 @@ const file = () => readFileSync(FILE, 'utf8');
 async function open(page: Page, creds?: { username: string; password: string }) {
   await login(page, creds);
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.setItem('ol.combined', '0'); localStorage.removeItem('ol.toolbars'); });
-  await page.goto('/#/e2e-toolbar/main.tex');
+  await page.goto('/#/admin/e2e-toolbar/main.tex');
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length >= 3, null, { timeout: 60000 });
   await expect(page.locator('.statusbar')).toContainText('connected', { timeout: 20000 });
   await page.waitForTimeout(500);

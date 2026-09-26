@@ -5,7 +5,7 @@ import { keymap } from 'prosemirror-keymap';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { ySyncPlugin, yCursorPlugin, yUndoPlugin, ySyncPluginKey, yUndoPluginKey, defaultDeleteFilter, undo, redo, initProseMirrorDoc, prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
-import { schema } from '@overlyx/core';
+import { schema, projectOfDoc, docDirOf } from '@overlyx/core';
 import { assemblePlugins, editorViewProps, editorAttributes, dispatchTransactionProp, installEditorDom } from '@client/editor/assembly';
 import { inkPlugin } from '@client/editor/plugins/ink';
 import { getPrefs, subscribePrefs } from '@client/prefs';
@@ -94,7 +94,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
   });
 
   const state = EditorState.create({ schema, doc: initialDoc, plugins });
-  const attributes = (prefs: { spellcheck: boolean; spellEngine: string }) => ({ ...editorAttributes(opts.child ?? false, prefs), 'data-doc-id': opts.docId, 'data-project': opts.docId.split('/')[0], 'data-doc-dir': opts.docId.split('/').slice(1, -1).join('/') });
+  const attributes = (prefs: { spellcheck: boolean; spellEngine: string }) => ({ ...editorAttributes(opts.child ?? false, prefs), 'data-doc-id': opts.docId, 'data-project': projectOfDoc(opts.docId), 'data-doc-dir': docDirOf(opts.docId) });
   const view: EditorView = new EditorView(opts.container, {
     state,
     dispatchTransaction: dispatchTransactionProp(() => view, () => false),

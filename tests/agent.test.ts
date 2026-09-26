@@ -15,8 +15,8 @@ import express from 'express';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-agent-test');
 rmSync(ROOT, { recursive: true, force: true });
-mkdirSync(join(ROOT, 'projects', 'p'), { recursive: true });
-writeFileSync(join(ROOT, 'projects', 'p', 'paper.tex'), '\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n');
+mkdirSync(join(ROOT, 'projects', 'owner', 'p'), { recursive: true });
+writeFileSync(join(ROOT, 'projects', 'owner', 'p', 'paper.tex'), '\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n');
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 process.env.OVERLYX_CODEX_BIN = resolve(process.cwd(), 'scripts/codex-stub.mjs');
@@ -31,8 +31,8 @@ const { db } = await import('../packages/server/src/db.ts');
 const owner = createUser('owner', 'Owner', 'pw');
 const editor = createUser('bob', 'Bob', 'pw');
 const outsider = createUser('mallory', 'Mallory', 'pw');
-registerProject('p', owner.id);
-db.prepare('INSERT INTO project_members (project, user_id, role, via, created_at) VALUES (?,?,?,?,?)').run('p', editor.id, 'edit', 'member', Date.now());
+registerProject('owner/p', owner.id);
+db.prepare('INSERT INTO project_members (project, user_id, role, via, created_at) VALUES (?,?,?,?,?)').run('owner/p', editor.id, 'edit', 'member', Date.now());
 
 // a bare app: the test authenticates via an x-user header instead of the cookie middleware
 const users = { owner, bob: editor, mallory: outsider } as Record<string, { id: number; username: string }>;
@@ -53,7 +53,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /** Collect SSE events of the project stream until `done` says stop (or the timeout). */
 async function collectEvents(u: string, done: (evs: any[]) => boolean, timeoutMs = 8000): Promise<any[]> {
-  const res = await fetch(base + '/projects/p/agent/events', { headers: asUser(u) });
+  const res = await fetch(base + '/projects/owner%2Fp/agent/events', { headers: asUser(u) });
   const reader = res.body!.getReader();
   const evs: any[] = [];
   const dec = new TextDecoder();
@@ -104,11 +104,11 @@ describe('agent sign-in', () => {
 describe('threads and turns', () => {
   let tid = '';
   it('starts a thread in the project directory and lists it', async () => {
-    const r = await post('/projects/p/agent/threads');
+    const r = await post('/projects/owner%2Fp/agent/threads');
     expect(r.status).toBe(200);
     tid = r.body.id;
     expect(tid).toMatch(/^thread-/);
-    const list = await get('/projects/p/agent/threads');
+    const list = await get('/projects/owner%2Fp/agent/threads');
     expect(list.body.threads).toHaveLength(1);
     expect(list.body.threads[0]).toMatchObject({ id: tid, mine: true });
   });
@@ -116,7 +116,7 @@ describe('threads and turns', () => {
   it('a turn streams deltas and completes over the events route', async () => {
     const events = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
     await sleep(150);   // subscribe before the turn starts
-    const r = await post(`/projects/p/agent/threads/${tid}/turn`, { text: 'hello agent', context: { docId: 'p/paper.tex' }, clientMessageId: 'local-xyz' });
+    const r = await post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'hello agent', context: { docId: 'owner/p/paper.tex' }, clientMessageId: 'local-xyz' });
     expect(r.status).toBe(200);
     const evs = await events;
     // the user's message comes back as a real item carrying the client id (the panel dedupes on it)
@@ -126,23 +126,23 @@ describe('threads and turns', () => {
     expect(deltas).toContain('Stub reply to: hello agent');
     expect(evs.some(e => e.method === 'turn/completed')).toBe(true);
     // the first message names the thread
-    const list = await get('/projects/p/agent/threads');
+    const list = await get('/projects/owner%2Fp/agent/threads');
     expect(list.body.threads[0].title).toBe('hello agent');
   });
 
   it('codex survives a server handover: the keeper keeps the same process and threads', async () => {
-    const before = await get(`/projects/p/agent/threads/${tid}`);
+    const before = await get(`/projects/owner%2Fp/agent/threads/${tid}`);
     const nTurns = before.body.thread.turns.length;
     expect(nTurns).toBeGreaterThan(0);
     disconnectAgents();   // what a deploy's restart does now — the keeper keeps codex alive
     await sleep(150);
-    const after = await get(`/projects/p/agent/threads/${tid}`);
+    const after = await get(`/projects/owner%2Fp/agent/threads/${tid}`);
     expect(after.status).toBe(200);
     expect(after.body.thread.turns.length).toBe(nTurns);   // the same in-memory stub answered
     // …and the reconnected host still drives turns in that thread
     const events = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
     await sleep(150);
-    await post(`/projects/p/agent/threads/${tid}/turn`, { text: 'after handover' });
+    await post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'after handover' });
     const evs = await events;
     expect(evs.filter(e => e.method === 'item/agentMessage/delta').map(e => e.params.delta).join('')).toContain('after handover');
   });
@@ -150,14 +150,14 @@ describe('threads and turns', () => {
   it('the context item names the open documents and marks the selection in the file', async () => {
     const events = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
     await sleep(150);
-    await post(`/projects/p/agent/threads/${tid}/turn`, { text: 'about this', context: {
-      docId: 'p/paper.tex', layout: 'Standard', openDocs: ['p/paper.tex', 'p/notes.tex'],
+    await post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'about this', context: {
+      docId: 'owner/p/paper.tex', layout: 'Standard', openDocs: ['owner/p/paper.tex', 'owner/p/notes.tex'],
       content: [{ type: 'paragraph', attrs: { layout: 'Standard', depth: 0 }, content: [{ type: 'text', text: 'Hello.' }] }],
     } });
     const evs = await events;
     const um = evs.find(e => e.method === 'item/completed' && e.params.item?.type === 'userMessage');
     const ctxText = um?.params.item.content?.[0]?.text ?? '';
-    expect(ctxText).toContain('Also open in their workspace: p/notes.tex');
+    expect(ctxText).toContain('Also open in their workspace: owner/p/notes.tex');
     expect(ctxText).toContain('Their current selection in that document:');
     expect(ctxText).toContain('⟦SELECTION⟧Hello.⟦/SELECTION⟧');
     expect(ctxText.trimEnd().endsWith('[/context]')).toBe(true);
@@ -174,24 +174,24 @@ describe('threads and turns', () => {
   it('passes the chosen model and effort through to the turn', async () => {
     const events = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
     await sleep(150);
-    await post(`/projects/p/agent/threads/${tid}/turn`, { text: 'model check', model: 'stub-mini', effort: 'high' });
+    await post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'model check', model: 'stub-mini', effort: 'high' });
     const evs = await events;
     const deltas = evs.filter(e => e.method === 'item/agentMessage/delta').map(e => e.params.delta).join('');
     expect(deltas).toContain('[model=stub-mini effort=high]');
   });
 
   it('steer reaches the running turn (and only for the creator)', async () => {
-    expect((await post(`/projects/p/agent/threads/${tid}/steer`, { turnId: 'turn-1', text: 'go left' })).status).toBe(200);
-    expect((await post(`/projects/p/agent/threads/${tid}/steer`, { turnId: 'turn-1', text: 'go right' }, 'bob')).status).toBe(403);
+    expect((await post(`/projects/owner%2Fp/agent/threads/${tid}/steer`, { turnId: 'turn-1', text: 'go left' })).status).toBe(200);
+    expect((await post(`/projects/owner%2Fp/agent/threads/${tid}/steer`, { turnId: 'turn-1', text: 'go right' }, 'bob')).status).toBe(403);
   });
 
   it('the transcript can be read back — by the creator and by another editor of the project', async () => {
-    const own = await get(`/projects/p/agent/threads/${tid}`);
+    const own = await get(`/projects/owner%2Fp/agent/threads/${tid}`);
     expect(own.status).toBe(200);
     expect(own.body.mine).toBe(true);
     const items = own.body.thread.turns.flatMap((t: any) => t.items);
     expect(items.some((i: any) => i.type === 'agentMessage' && i.text.includes('hello agent'))).toBe(true);
-    const bobs = await get(`/projects/p/agent/threads/${tid}`, 'bob');
+    const bobs = await get(`/projects/owner%2Fp/agent/threads/${tid}`, 'bob');
     expect(bobs.status).toBe(200);
     expect(bobs.body.mine).toBe(false);
   });
@@ -200,13 +200,13 @@ describe('threads and turns', () => {
     // the stub holds the turn until its file-change approval is answered
     const untilRequest = collectEvents('owner', evs => evs.some(e => e.kind === 'request'), 6000);
     await sleep(150);
-    const turn = post(`/projects/p/agent/threads/${tid}/turn`, { text: 'please write hello somewhere' });
+    const turn = post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'please write hello somewhere' });
     const evs = await untilRequest;
     const request = evs.find(e => e.kind === 'request');
     expect(request?.method).toBe('item/fileChange/requestApproval');
-    const ok = await post(`/projects/p/agent/threads/${tid}/approval`, { requestId: request.requestId, decision: 'accept' });
+    const ok = await post(`/projects/owner%2Fp/agent/threads/${tid}/approval`, { requestId: request.requestId, decision: 'accept' });
     expect(ok.status).toBe(200);
-    const file = join(ROOT, 'projects', 'p', 'hello.txt');
+    const file = join(ROOT, 'projects', 'owner', 'p', 'hello.txt');
     for (let i = 0; i < 30 && !existsSync(file); i++) await sleep(100);
     expect(readFileSync(file, 'utf8')).toContain('hello from the stub agent');
     expect((await turn).status).toBe(200);
@@ -217,25 +217,25 @@ describe('threads and turns', () => {
     // overlyx write tool return "user rejected MCP tool call"
     const untilRequest = collectEvents('owner', evs => evs.some(e => e.kind === 'request' && e.method === 'mcpServer/elicitation/request'), 6000);
     await sleep(150);
-    const turn = post(`/projects/p/agent/threads/${tid}/turn`, { text: 'please use the mcp tool' });
+    const turn = post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'please use the mcp tool' });
     const request = (await untilRequest).find(e => e.kind === 'request' && e.method === 'mcpServer/elicitation/request');
     expect(request?.params.message).toContain('insert_paragraphs');
     expect(request?.params._meta?.tool_params_display?.[0]?.name).toBe('latex');
     const untilDone = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
     await sleep(150);
-    expect((await post(`/projects/p/agent/threads/${tid}/approval`, { requestId: request.requestId, decision: 'acceptForSession' })).status).toBe(200);
+    expect((await post(`/projects/owner%2Fp/agent/threads/${tid}/approval`, { requestId: request.requestId, decision: 'acceptForSession' })).status).toBe(200);
     const deltas = (await untilDone).filter(e => e.method === 'item/agentMessage/delta').map(e => e.params.delta).join('');
     expect(deltas).toContain('elicitation accepted persist=session');   // the ElicitResult reached the stub
     expect((await turn).status).toBe(200);
   });
 
   it('only project members reach the agent; only the creator drives a thread', async () => {
-    expect((await get('/projects/p/agent/threads', 'mallory')).status).toBe(403);
-    expect((await post(`/projects/p/agent/threads/${tid}/turn`, { text: 'hi' }, 'mallory')).status).toBe(403);
-    const bob = await post(`/projects/p/agent/threads/${tid}/turn`, { text: 'let me in' }, 'bob');
+    expect((await get('/projects/owner%2Fp/agent/threads', 'mallory')).status).toBe(403);
+    expect((await post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'hi' }, 'mallory')).status).toBe(403);
+    const bob = await post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'let me in' }, 'bob');
     expect(bob.status).toBe(403);
     expect(bob.body.error).toContain('creator');
-    expect((await post(`/projects/p/agent/threads/${tid}/approval`, { requestId: 'x', decision: 'accept' }, 'bob')).status).toBe(403);
+    expect((await post(`/projects/owner%2Fp/agent/threads/${tid}/approval`, { requestId: 'x', decision: 'accept' }, 'bob')).status).toBe(403);
   });
 
   it('signing out forgets the account', async () => {

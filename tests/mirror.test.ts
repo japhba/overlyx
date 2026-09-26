@@ -14,8 +14,8 @@ import { promisify } from 'node:util';
 const execFileP = promisify(execFile);
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-mirror-test');
 rmSync(ROOT, { recursive: true, force: true });
-mkdirSync(join(ROOT, 'projects', 'My Paper v2'), { recursive: true });
-writeFileSync(join(ROOT, 'projects', 'My Paper v2', 'main.tex'), '\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n');
+mkdirSync(join(ROOT, 'projects', 'jan', 'My Paper v2'), { recursive: true });
+writeFileSync(join(ROOT, 'projects', 'jan', 'My Paper v2', 'main.tex'), '\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n');
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 process.env.OVERLYX_OWNER_EMAIL = 'owner@example.com';
@@ -30,12 +30,14 @@ const { createUser } = await import('../packages/server/src/auth.ts');
 
 createUser('jan', 'Jan Bauer', null, { email: 'owner@example.com', googleSub: 'g-jan' });
 access.adoptProjects();
-const PROJECT = 'My Paper v2';
-const bare = join(ROOT, 'mirrors', 'My-Paper-v2.git');
+const PROJECT = 'jan/My Paper v2';
+const bare = join(ROOT, 'mirrors', 'jan-My-Paper-v2.git');
 const bareHead = async () => (await execFileP('git', ['-C', bare, 'rev-parse', 'main'])).stdout.trim();
 
 describe('mirror', () => {
-  it('names the repository after the project, GitHub-safe', () => {
+  it('names the repository after the project and its owner, GitHub-safe', () => {
+    expect(mirror.repoNameFor('jan/My Paper v2')).toBe('jan-My-Paper-v2');
+    expect(mirror.repoNameFor('noah.rw.wells/thesis')).toBe('noah.rw.wells-thesis');
     expect(mirror.repoNameFor('My Paper v2')).toBe('My-Paper-v2');
     expect(mirror.repoNameFor('Ideas (draft) #3')).toBe('Ideas-draft-3');
     expect(mirror.repoNameFor('recurrent_feature')).toBe('recurrent_feature');
@@ -82,13 +84,13 @@ describe('mirror', () => {
   });
 
   it('the sweeper covers every project and a deleted project loses its row', async () => {
-    mkdirSync(join(ROOT, 'projects', 'second'), { recursive: true });
-    writeFileSync(join(ROOT, 'projects', 'second', 'a.tex'), 'x\n');
+    mkdirSync(join(ROOT, 'projects', 'jan', 'second'), { recursive: true });
+    writeFileSync(join(ROOT, 'projects', 'jan', 'second', 'a.tex'), 'x\n');
     access.adoptProjects();
     await mirror.mirrorAll();
-    expect(existsSync(join(ROOT, 'mirrors', 'second.git'))).toBe(true);
-    expect(mirror.mirrorRow('second')?.last_head).toBeTruthy();
-    await mirror.archiveMirror('second');
-    expect(mirror.mirrorRow('second')).toBeUndefined();
+    expect(existsSync(join(ROOT, 'mirrors', 'jan-second.git'))).toBe(true);
+    expect(mirror.mirrorRow('jan/second')?.last_head).toBeTruthy();
+    await mirror.archiveMirror('jan/second');
+    expect(mirror.mirrorRow('jan/second')).toBeUndefined();
   });
 });

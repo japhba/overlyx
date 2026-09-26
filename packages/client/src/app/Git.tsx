@@ -156,7 +156,7 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
             your account token above as a Bearer header.
           </div>
           <CopyField value={`${location.origin}/mcp`} label="MCP server URL (all your projects)" />
-          <div class="hint">To pin a client to just this project, give it <code>{location.origin}/mcp/{encodeURIComponent(project)}</code> instead.</div>
+          <div class="hint">To pin a client to just this project, give it <code>{location.origin}/mcp/{project.split('/').map(encodeURIComponent).join('/')}</code> instead.</div>
           <h4>OAuth connections and legacy agent tokens</h4>
           <div class="hint">OAuth clients keep separate, short-lived credentials so you can disconnect one without rotating your account token. Older manually-created agent tokens remain usable and can be revoked here, but new manual connections use the account token above.</div>
           <div class="git-tokens">

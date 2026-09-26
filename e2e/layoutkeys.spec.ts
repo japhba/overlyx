@@ -11,7 +11,7 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { login, openDoc, texDoc, PROJECTS_DIR } from './helpers';
 
-const PROJECT = 'e2e-layoutkeys';
+const PROJECT = 'admin/e2e-layoutkeys';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 test.describe.configure({ mode: 'serial' });

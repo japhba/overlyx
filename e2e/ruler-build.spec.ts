@@ -7,8 +7,8 @@ import { login, openDoc, PROJECTS_DIR, FIXTURES_DIR } from './helpers';
 
 // the whole paper (children, class files, figures): its build takes long enough to be cancelled
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
-const DIR = `${PROJECTS_DIR}/e2e-build`;
-const DOC = 'e2e-build/main.tex';
+const DIR = `${PROJECTS_DIR}/admin/e2e-build`;
+const DOC = 'admin/e2e-build/main.tex';
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(`${DIR}/figures`, { recursive: true });

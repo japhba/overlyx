@@ -7,7 +7,7 @@ import { mkdirSync, rmSync, readFileSync, writeFileSync, copyFileSync, existsSyn
 import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
-const PROJECT = 'e2e-misc';
+const PROJECT = 'admin/e2e-misc';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 const doc = () => withPreambleOf(`${SRC}/main.tex`, `The cat sat on the Cat mat; concatenate cats.

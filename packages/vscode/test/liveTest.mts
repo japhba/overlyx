@@ -18,7 +18,7 @@ const ctx = { root: path.dirname(input), layoutDir: path.join(repo, 'lyx/lib/lay
 const relPath = path.basename(input), fileText = fs.readFileSync(input, 'utf8');
 const parsed = parseDocumentText(fileText, ctx, relPath);
 const fixture = { pmDoc: lyxToPm(parsed.doc), headerLines: parsed.doc.header.lines,
-  meta: buildMeta({ ctx, project: 'test', relPath, lyx: parsed.doc, isChild: parsed.fragment, fileText }) };
+  meta: buildMeta({ ctx, project: 'local/test', relPath, lyx: parsed.doc, isChild: parsed.fragment, fileText }) };
 const server = process.env.OVERLYX_TEST_SERVER || 'http://127.0.0.1:18765';
 const source = path.join(repo, 'packages/vscode/src/webview/EditorShell.tsx');
 const original = fs.readFileSync(source, 'utf8');
@@ -33,7 +33,7 @@ try {
     page.on('pageerror', e => errors.push(String(e)));
     await page.addInitScript(({ fixture, server, i }) => {
       const w = window as any;
-      w.__OVERLYX_VSCODE__ = { page: 'editor', docId: `test/${i}.tex`, base: server, assetBase: server + '/', dark: false };
+      w.__OVERLYX_VSCODE__ = { page: 'editor', docId: `local/test/${i}.tex`, base: server, assetBase: server + '/', dark: false };
       w.__messages = [];
       w.__OVERLYX_VSCAPI = { postMessage(m: any) {
         w.__messages.push(m);

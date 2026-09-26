@@ -11,13 +11,13 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { api, fileUrl, type Role } from '../api';
 import { highlightTex, highlightLines } from './texhighlight';
 import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask, type Snapshot } from './codearea';
+import { splitDocId } from '@overlyx/core';
 
 type SaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'conflict' | 'error' | 'readonly';
 const LABEL: Record<SaveState, string> = { loading: 'Loading…', saved: '✓ Saved', dirty: 'Unsaved changes…', saving: 'Saving…', conflict: 'Not saved — changed on the server', error: 'Could not save', readonly: '👁 view only' };
 
 export function TextEditor({ id, notify }: { id: string; notify: (text: string, kind?: 'info' | 'error') => void }) {
-  const project = id.split('/')[0];
-  const path = id.slice(project.length + 1);
+  const { project, path } = splitDocId(id);
   const [text, setText] = useState('');
   const [state, setState] = useState<SaveState>('loading');
   const [err, setErr] = useState('');

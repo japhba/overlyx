@@ -226,9 +226,13 @@ async function setRemote(dir, name, url) {
   await git(dir, ['remote', 'add', name, url]);
 }
 
+/** Projects live in their owner's namespace: `<username>/<name>` is the key the server uses. */
+const projectKey = (creds, name) => `${creds.username}/${name}`;
+const gitUrl = (creds, key) => `${creds.host}/git/${key.split('/').map(encodeURIComponent).join('/')}.git`;
+
 async function existingProject(creds, name) {
   const result = await api(creds, '/git/api/projects');
-  return result.projects.find(project => project.name === name && (project.role === 'owner' || project.role === 'edit')) ?? null;
+  return result.projects.find(project => project.name === projectKey(creds, name) && (project.role === 'owner' || project.role === 'edit')) ?? null;
 }
 
 async function createRemote(creds, name, title, allowExisting) {
@@ -237,8 +241,8 @@ async function createRemote(creds, name, title, allowExisting) {
   } catch (e) {
     if (!allowExisting || !/already exists/i.test(e.message)) throw e;
     const found = await existingProject(creds, name);
-    if (!found) fail(`a project named "${name}" exists, but this account cannot push to it`);
-    return { project: found, url: `${creds.host}/git/${encodeURIComponent(name)}.git`, username: creds.username, existing: true };
+    if (!found) fail(`a project named "${projectKey(creds, name)}" exists, but this account cannot push to it`);
+    return { project: found, url: gitUrl(creds, found.name), username: creds.username, existing: true };
   }
 }
 
@@ -297,9 +301,11 @@ async function repoCommand(action, args, flags) {
   if (action !== 'create' && action !== 'push') fail(`unknown repo command: ${action || '(missing)'}`);
   const source = flags.source ?? (action === 'push' ? args[0] ?? '.' : flags.push ? '.' : null);
   const inferred = source ? path.basename(path.resolve(source)) : '';
-  const name = String(flags.name ?? (action === 'create' ? args[0] : '') ?? inferred).trim() || inferred;
+  let name = String(flags.name ?? (action === 'create' ? args[0] : '') ?? inferred).trim() || inferred;
+  // the project's key may be given as it reads elsewhere (`<username>/<name>`)
+  if (name.startsWith(creds.username + '/')) name = name.slice(creds.username.length + 1);
   if (!name) fail('project name is required');
-  if (!/^[A-Za-z0-9._ -]+$/.test(name)) fail('invalid project name (use letters, numbers, spaces, dot, dash or underscore)');
+  if (!/^[A-Za-z0-9._ -]+$/.test(name) || name.startsWith('.') || name.trim() !== name) fail('invalid project name (use letters, numbers, spaces, dot, dash or underscore)');
   // Validate (and, for a plain directory, initialise) locally before creating anything remotely.
   // That way a typo, empty folder or dirty repository cannot leave an accidental empty project.
   let prepared = null;
@@ -311,13 +317,14 @@ async function repoCommand(action, args, flags) {
     prepared = dir;
   }
   const remote = await createRemote(creds, name, flags.title, action === 'push');
-  process.stdout.write(`${remote.existing ? 'Using' : 'Created'} project "${name}" on ${creds.host}\n`);
+  const key = remote.project?.name ?? projectKey(creds, name);
+  process.stdout.write(`${remote.existing ? 'Using' : 'Created'} project "${key}" on ${creds.host}\n`);
   if (source) {
     const dir = path.resolve(source);
     const remoteName = String(flags.remote ?? 'overlyx');
     if (!/^[A-Za-z0-9._-]+$/.test(remoteName)) fail('invalid Git remote name');
-    const remoteUrl = remote.url ?? `${creds.host}/git/${encodeURIComponent(name)}.git`;
-    if (flags.push || action === 'push') await pushSource(creds, prepared ?? dir, name, remoteName, { ...remote, url: remoteUrl });
+    const remoteUrl = remote.url ?? gitUrl(creds, key);
+    if (flags.push || action === 'push') await pushSource(creds, prepared ?? dir, key, remoteName, { ...remote, url: remoteUrl });
     else {
       const url = new URL(remoteUrl); url.username = creds.username;
       await setRemote(dir, remoteName, url.toString());

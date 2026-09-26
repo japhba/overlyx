@@ -5,8 +5,8 @@ import { parseFormula, writeFormula, type MacroTable } from '../packages/core/sr
 const dir = process.argv[2] ?? '/tmp/claude-0/-root-lyx/9250d901-48e6-4b48-98b5-a211e39f6f1d/scratchpad/corpus';
 const formulas: { file: string; latex: string }[] = JSON.parse(readFileSync(dir + '/formulas.json', 'utf8'));
 const macroInsets: { file: string; lines: string[] }[] = JSON.parse(readFileSync(dir + '/macros.json', 'utf8'));
-// macro tables per project (top-level directory under /root/projects): FormulaMacro insets + macros.tex
-const project = (f: string) => f.split('/').slice(0, 4).join('/');
+// macro tables per project (/root/projects/<owner>/<name>): FormulaMacro insets + macros.tex
+const project = (f: string) => f.split('/').slice(0, 5).join('/');
 const tables = new Map<string, MacroTable>();
 const tableFor = (f: string): MacroTable => { const p = project(f); let t = tables.get(p); if (!t) { t = {}; tables.set(p, t); } return t; };
 for (const m of macroInsets) {

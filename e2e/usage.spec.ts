@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { login, collectErrors, PROJECTS_DIR } from './helpers';
 
-const DIR = `${PROJECTS_DIR}/e2e-usage`;
+const DIR = `${PROJECTS_DIR}/admin/e2e-usage`;
 const FILE = `${DIR}/main.tex`;
 const body = '\\documentclass{article}\n\\begin{document}\n\nHello statistics, a first paragraph.\n\nA second paragraph for the cursor.\n\n\\end{document}\n';
 
@@ -21,7 +21,7 @@ test('actions arrive as one anonymous, scrubbed batch; the summary lists them; t
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.setItem('ol.combined', '0'); });
   const batches: { session: string; events: { name: string; detail: string; ok?: boolean; where?: string; dt?: number }[] }[] = [];
   page.on('request', r => { if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/usage') { try { batches.push(JSON.parse(r.postData() ?? '{}')); } catch { /* not ours */ } } });
-  await page.goto('/#/e2e-usage/main.tex');
+  await page.goto('/#/admin/e2e-usage/main.tex');
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length >= 2, null, { timeout: 60000 });
   await expect(page.locator('.statusbar')).toContainText('connected', { timeout: 20000 });
 

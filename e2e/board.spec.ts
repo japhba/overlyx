@@ -7,7 +7,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { login, texDoc, collectErrors, PROJECTS_DIR } from './helpers';
 
-const PROJECT = 'e2e-board';
+const PROJECT = 'admin/e2e-board';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const BOARD = `${DIR}/plan.board`;
 const LASSO_BOARD = `${DIR}/lasso.board`;

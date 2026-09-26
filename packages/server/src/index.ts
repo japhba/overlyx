@@ -28,7 +28,9 @@ import { overleafProjectId, cloneOverleafProject } from './overleaf.ts';
 import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit } from './export.ts';
 import { db } from './db.ts';
-import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
+import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
+import { canonicalProject, canonicalDocId } from './namespaces.ts';
+import { ownProjectKey } from './projectCreate.ts';
 import { sandboxAvailable } from './sandbox.ts';
 import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests } from './access.ts';
 import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
@@ -37,7 +39,7 @@ import { usageRoutes } from './usage.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
-import { texHeadings, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText, lyxToPm } from '@overlyx/core';
+import { texHeadings, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText, lyxToPm, splitDocId, projectOfDoc, docPathOf } from '@overlyx/core';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -98,6 +100,21 @@ app.post('/api/share/:token/accept', (req, res) => {
 const api = express.Router();
 api.use(requireAuth);
 /**
+ * `/projects/<owner>/<name>/…` with the key's slash as it is (a script, a URL typed by hand): the
+ * routes take the key as one path segment, `jan%2Fthesis`, as the client sends it. First, so that
+ * the guest rule below sees the one form.
+ */
+api.use((req, _res, next) => {
+  const q = req.url.indexOf('?');
+  const m = /^\/projects\/([^/]+)\/([^/]+)(\/.*)?$/.exec(q < 0 ? req.url : req.url.slice(0, q));
+  if (m && !/%2f/i.test(m[1])) {
+    let key = '';
+    try { key = decodeURIComponent(m[1]) + '/' + decodeURIComponent(m[2]); } catch { /* not a key */ }
+    if (key && projectRow(key)) req.url = `/projects/${encodeURIComponent(key)}${m[3] ?? ''}${q < 0 ? '' : req.url.slice(q)}`;
+  }
+  next();
+});
+/**
  * Guests act only inside the projects their links opened: no projects, tokens, agents or
  * administration of their own (their role in a project is checked like everybody's, below).
  */
@@ -122,9 +139,13 @@ function deny(res: express.Response, role: Role | null): void {
   res.status(403).json({ error: role ? 'You can only view this project' : 'You do not have access to this project (ask its owner to share it with you)' });
 }
 
-/** Project routes: the user needs at least `min` in `:project`. */
+/**
+ * Project routes: the user needs at least `min` in `:project` — a project key `<owner>/<name>`, one
+ * path segment (the client encodes the slash); an old name (namespaces.ts) stands for the project.
+ */
 const needProject = (min: Role) => (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const role = roleFor(req.user!, String(req.params.project ?? ''));
+  req.params.project = canonicalProject(String(req.params.project ?? ''));
+  const role = roleFor(req.user!, req.params.project);
   if (!atLeast(role, min)) { deny(res, role); return; }
   req.role = role!;
   next();
@@ -137,11 +158,12 @@ const needProject = (min: Role) => (req: express.Request, res: express.Response,
 api.all('/docs/*', (req, res, next) => {
   const full = String((req.params as any)[0] ?? '');
   const m = /^(.*?)(?:\/(meta|tex|outline|source|bib|reset|save|header|versions(?:\/\d+(?:\/restore)?)?|export(?:\/cancel)?|pdf|build|folds|synctex\/(?:view|edit)))?$/.exec(full)!;
-  const id = decodeURIComponent(m[1]);
+  // an id from before a project moved (namespaces.ts) names the document under its current key
+  const id = canonicalDocId(decodeURIComponent(m[1]));
   const action = m[2] ?? '';
   // exporting only reads the document; the folds are the user's own way of looking at it (viewers keep theirs too)
   const write = req.method !== 'GET' && !/^(export|folds)/.test(action);
-  const role = roleFor(req.user!, id.split('/')[0]);
+  const role = roleFor(req.user!, projectOfDoc(id));
   if (!atLeast(role, write ? 'edit' : 'view')) { deny(res, role); return; }
   req.role = role!;
   next();
@@ -157,11 +179,27 @@ api.get('/projects', (req, res) => {
   void ensureAllRepos();   // directories that appeared since (created by hand, the welcome project) get their repository
 });
 
+/**
+ * The current id of a document (or project) that an old link names — from before projects lived in
+ * their owner's namespace, or before one changed owner (namespaces.ts): the client puts it into its
+ * URL. Only for people who can open it; anything else comes back unchanged.
+ */
+const resolveId = (user: NonNullable<express.Request['user']>, id: string) => { const cur = canonicalDocId(id); return cur !== id && roleFor(user, projectOfDoc(cur)) ? cur : id; };
+api.get('/resolve', (req, res) => { res.json({ id: resolveId(req.user!, String(req.query.id ?? '')) }); });
+/** Many at once (the documents a browser keeps local copies of): `{ ids }` → `{ ids: { old: current } }`, only those that changed. */
+api.post('/resolve', (req, res) => {
+  const ids: unknown[] = Array.isArray(req.body?.ids) ? req.body.ids.slice(0, 1000) : [];
+  const out: Record<string, string> = {};
+  for (const id of ids) if (typeof id === 'string') { const cur = resolveId(req.user!, id); if (cur !== id) out[id] = cur; }
+  res.json({ ids: out });
+});
+
+/** A new project of the user, `{ name }` in their namespace: answers with its key as `name`. */
 api.post('/projects', (req, res) => {
   try {
-    const name = String(req.body?.name ?? '').trim();
-    if (!/^[A-Za-z0-9._ -]+$/.test(name)) { res.status(400).json({ error: 'invalid project name' }); return; }
-    if (fs.existsSync(projectDir(name))) { res.status(409).json({ error: 'a project with this name exists already' }); return; }
+    let name: string;
+    try { name = ownProjectKey(req.user!.id, String(req.body?.name ?? '')); } catch (e) { res.status(400).json({ error: (e as Error).message }); return; }
+    if (fs.existsSync(projectDir(name)) || projectRow(name)) { res.status(409).json({ error: 'a project with this name exists already' }); return; }
     const p = createProject(name);
     registerProject(name, req.user!.id);
     ensureRepo(name).catch(e => console.error('[git] init failed:', e));
@@ -182,11 +220,12 @@ api.post('/import/overleaf', async (req, res) => {
   if (!items.length || items.length > 25) { res.status(400).json({ error: 'select between 1 and 25 projects' }); return; }
   const results: { id: string; name: string; ok: boolean; error?: string }[] = [];
   for (const it of items) {
-    const ref = String(it.id ?? ''), name = String(it.name ?? '').trim();
+    const ref = String(it.id ?? ''), short = String(it.name ?? '').trim();
     const id = overleafProjectId(ref);
-    if (!id) { results.push({ id: ref, name, ok: false, error: 'not an Overleaf project link or id' }); continue; }
-    if (!/^[A-Za-z0-9._ -]+$/.test(name)) { results.push({ id, name, ok: false, error: 'invalid project name (letters, digits, space, . _ -)' }); continue; }
-    if (fs.existsSync(projectDir(name))) { results.push({ id, name, ok: false, error: 'a project with this name exists already' }); continue; }
+    if (!id) { results.push({ id: ref, name: short, ok: false, error: 'not an Overleaf project link or id' }); continue; }
+    let name: string;
+    try { name = ownProjectKey(req.user!.id, short); } catch { results.push({ id, name: short, ok: false, error: 'invalid project name (letters, digits, space, . _ -)' }); continue; }
+    if (fs.existsSync(projectDir(name)) || projectRow(name)) { results.push({ id, name, ok: false, error: 'a project with this name exists already' }); continue; }
     try {
       await cloneOverleafProject(id, token, projectDir(name));
       registerProject(name, req.user!.id);
@@ -199,11 +238,11 @@ api.post('/import/overleaf', async (req, res) => {
   res.json({ results });
 });
 api.post('/import/zip', express.raw({ type: '*/*', limit: '300mb' }), (req, res) => {
-  const name = String(req.query.name ?? '').trim();
-  if (!/^[A-Za-z0-9._ -]+$/.test(name)) { res.status(400).json({ error: 'invalid project name (letters, digits, space, . _ -)' }); return; }
+  let name: string;
+  try { name = ownProjectKey(req.user!.id, String(req.query.name ?? '')); } catch { res.status(400).json({ error: 'invalid project name (letters, digits, space, . _ -)' }); return; }
   if (!Buffer.isBuffer(req.body) || !req.body.length) { res.status(400).json({ error: 'no archive received' }); return; }
   const unpack = (project: string, buf: Buffer): { name: string; files: number; skipped: string[] } => {
-    if (fs.existsSync(projectDir(project))) throw new Error('a project with this name exists already');
+    if (fs.existsSync(projectDir(project)) || projectRow(project)) throw new Error('a project with this name exists already');
     const dir = projectDir(project);
     try {
       const { files, skipped } = extractZip(buf, dir);
@@ -225,7 +264,7 @@ api.post('/import/zip', express.raw({ type: '*/*', limit: '300mb' }), (req, res)
     const projects: { name: string; files: number; skipped: string[] }[] = [];
     const errors: { name: string; error: string }[] = [];
     for (const z of bundle) {
-      const project = bundle.length === 1 ? name : projectNameFromZip(z.name);
+      const project = bundle.length === 1 ? name : ownProjectKey(req.user!.id, projectNameFromZip(z.name));
       try { projects.push(unpack(project, z.data())); }
       catch (e) { errors.push({ name: project, error: (e as Error).message }); }
     }
@@ -383,14 +422,26 @@ api.post('/projects/:project/pdf-links', needProject('owner'), (req, res) => {
 api.delete('/projects/:project/pdf-links/:token', needProject('owner'), (req, res) => {
   const project = req.params.project;
   const link = pdfLinkByToken(String(req.params.token));
-  if (!link || link.doc_id.split('/')[0] !== project) { res.status(404).json({ error: 'no such link' }); return; }
+  if (!link || projectOfDoc(link.doc_id) !== project) { res.status(404).json({ error: 'no such link' }); return; }
   deletePdfLink(link.doc_id);
   logAccess(project, req.user!.id, 'share', `turned off the public PDF link of ${link.doc_id.slice(project.length + 1)}`);
   res.json({ ok: true, links: pdfLinkInfo(project) });
 });
-api.post('/projects/:project/share/owner', needProject('owner'), (req, res) => {
-  try { setOwner(req.params.project, String(req.body?.username ?? '')); logAccess(req.params.project, req.user!.id, 'share', `made ${String(req.body?.username ?? '')} the owner`); res.json({ share: shareInfo(req.params.project) }); }
-  catch (e) { res.status(400).json({ error: (e as Error).message }); }
+/**
+ * Hand the project to another account: it moves into their namespace (`<new owner>/<name>`; the
+ * old key keeps working as an alias). Open editors are disconnected first and reconnect under the
+ * new key. Answers with the new key as `project`.
+ */
+api.post('/projects/:project/share/owner', needProject('owner'), async (req, res) => {
+  try {
+    const from = req.params.project;
+    const owner = newOwner(String(req.body?.username ?? ''));
+    await commitProject(from).catch(e => console.error('[git] commit before the owner change failed:', e));
+    await manager.closeProject(from);
+    const project = setOwner(from, owner);
+    logAccess(project, req.user!.id, 'share', `made ${owner.username} the owner`);
+    res.json({ share: shareInfo(project), project });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
 /** The owner's activity log: who opened, built, pulled/pushed, shared — and administrator access. */
 api.get('/projects/:project/activity', needProject('owner'), (req, res) => {
@@ -672,8 +723,9 @@ api.get('/projects/:project/graphics/*', needProject('view'), async (req, res) =
 
 /* -------------------------------------------------------------------- docs */
 
+/** The document of a /docs route — under its current key, also when the id is from before its project moved (namespaces.ts). */
 function docId(req: express.Request): string {
-  return decodeURIComponent((req.params as any)[0] ?? req.params.id);
+  return canonicalDocId(decodeURIComponent((req.params as any)[0] ?? req.params.id));
 }
 
 /**
@@ -993,7 +1045,7 @@ api.get('/docs/*/tex', async (req, res) => {
 api.get('/docs/*/outline', (req, res) => {
   try {
     const id = docId(req);
-    const project = id.split('/')[0], rel = id.slice(project.length + 1);
+    const { project, path: rel } = splitDocId(id);
     const abs = resolveProjectPath(project, rel);
     if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) { res.status(404).json({ error: 'not found' }); return; }
     const st = fs.statSync(abs);
@@ -1123,7 +1175,7 @@ api.post('/docs/*/export', async (req, res) => {
       res.json({ ok: true, tex: r.tex, warnings: r.warnings });
       return;
     }
-    logAccess(id.split('/')[0], req.user!.id, 'build', id.slice(id.indexOf('/') + 1));
+    logAccess(projectOfDoc(id), req.user!.id, 'build', docPathOf(id));
     if (req.body?.wait) {
       // synchronous variant (scripts): wait for the build to finish
       const r = await buildPdf(id, { engine, requestedBy: req.user!.name });
@@ -1278,7 +1330,7 @@ api.get('/vscode-extension', async (_req, res) => {
  */
 app.get(['/pdf/:token', '/pdf/:token/:name'], async (req, res) => {
   const link = pdfLinkByToken(String(req.params.token).replace(/\.pdf$/i, ''));
-  const project = link?.doc_id.split('/')[0];
+  const project = link ? projectOfDoc(link.doc_id) : undefined;
   const row = project ? projectRow(project) : undefined;
   if (!link || !row || !fs.existsSync(projectDir(project!))) { res.status(404).type('text').send('No PDF here: the link was turned off or the project is gone.'); return; }
   // embedding on other sites is the point of the link: no frame restrictions, no scripts
@@ -1323,6 +1375,8 @@ if (fs.existsSync(config.clientDist)) {
   app.get('/', (_req, res) => res.type('text').send('OverLyX server running. Build the client (npm run build) or use the Vite dev server.'));
 }
 
+// before anything reads the projects: the flat layout's projects move into their owners' namespaces
+// (namespaces.ts) — synchronously, so the file watcher (docs.ts, scanning asynchronously) sees the result
 adoptProjects();
 sandboxAvailable();
 startPublishing();

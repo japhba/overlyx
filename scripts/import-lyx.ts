@@ -3,9 +3,9 @@
  * are left untouched), converting graphics pdflatex cannot include. Child documents (included by
  * another .lyx file) become fragments. Uses the server's configuration (OVERLYX_PROJECTS_DIR).
  *
- *   OVERLYX_PROJECTS_DIR=/root/projects npx tsx scripts/import-lyx.ts recurrent_feature bayesian_chaos
+ *   OVERLYX_PROJECTS_DIR=/root/projects npx tsx scripts/import-lyx.ts jan/recurrent_feature jan/bayesian_chaos
  *   npx tsx scripts/import-lyx.ts --all            # every project
- *   npx tsx scripts/import-lyx.ts --force <project> # overwrite existing .tex files
+ *   npx tsx scripts/import-lyx.ts --force <owner>/<project> # overwrite existing .tex files
  */
 import fs from 'node:fs';
 import path from 'node:path';

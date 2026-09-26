@@ -10,14 +10,14 @@ import { tmpdir } from 'node:os';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-board-test');
 rmSync(ROOT, { recursive: true, force: true });
-mkdirSync(join(ROOT, 'projects', 'p'), { recursive: true });
+mkdirSync(join(ROOT, 'projects', 'u', 'p'), { recursive: true });
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 
 const { manager, BoardDoc } = await import('../packages/server/src/docs.ts');
 const { inkSvg } = await import('../packages/core/src/ink.ts');
 
-const file = (name: string) => join(ROOT, 'projects', 'p', name);
+const file = (name: string) => join(ROOT, 'projects', 'u', 'p', name);
 const EMPTY = '{"overlyx":"board","v":1,"objects":{\n}}\n';
 
 beforeAll(() => {
@@ -27,7 +27,7 @@ beforeAll(() => {
 
 describe('board documents', () => {
   it('opens a .board file as a BoardDoc and loads its objects', async () => {
-    const doc = await manager.open('p/full.board');
+    const doc = await manager.open('u/p/full.board');
     expect(doc).toBeInstanceOf(BoardDoc);
     const b = doc as InstanceType<typeof BoardDoc>;
     expect(b.objects.size).toBe(2);
@@ -35,7 +35,7 @@ describe('board documents', () => {
   });
 
   it('writes edits back as deterministic, sorted, line-per-object JSON', async () => {
-    const doc = await manager.open('p/plan.board') as InstanceType<typeof BoardDoc>;
+    const doc = await manager.open('u/p/plan.board') as InstanceType<typeof BoardDoc>;
     doc.ydoc.transact(() => {
       doc.objects.set('s1', { t: 'note', x: 10, y: 20, w: 120, h: 60, text: 'todo' });
       doc.objects.set('a9', { t: 'stroke', x: 0, y: 0, color: '#1a73e8', w: 2, pts: [[0, 0, 0.5]] });
@@ -53,7 +53,7 @@ describe('board documents', () => {
   });
 
   it('absorbs an external change to the file (git, another editor)', async () => {
-    const doc = await manager.open('p/plan.board') as InstanceType<typeof BoardDoc>;
+    const doc = await manager.open('u/p/plan.board') as InstanceType<typeof BoardDoc>;
     const text = '{"overlyx":"board","v":1,"objects":{\n"x": {"t":"note","x":0,"y":0,"w":50,"h":20,"text":"from git"}\n}}\n';
     writeFileSync(file('plan.board'), text);
     expect(doc.absorbExternalChange(text)).toBe(true);
@@ -68,7 +68,7 @@ describe('sketch sidecar files', () => {
     mkdirSync(file('figures'), { recursive: true });
     writeFileSync(file('figures/sketch-t.svg'), inkSvg(data));
     writeFileSync(file('s.tex'), '\\documentclass{article}\n\\begin{document}\n\\olsketch{figures/sketch-t.svg}Anchored paragraph.\n\\end{document}\n');
-    const doc = await manager.open('p/s.tex');
+    const doc = await manager.open('u/p/s.tex');
     expect(doc.toText()).toContain('\\olsketch{figures/sketch-t.svg}');
     // the drawing changes (as a client stroke commit would): the save regenerates the SVG
     const d2 = JSON.stringify({ v: 1, strokes: [{ side: 'left', color: '#d93025', w: 3, pts: [[0, 0, 0.7], [12, 8, 0.9], [20, 2, 0.4]] }] });

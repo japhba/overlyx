@@ -7,7 +7,7 @@
  * current state. Only the `%% @note` header lines are patched — the document is not rewritten.
  *
  *   OVERLYX_PROJECTS_DIR=/root/projects npx tsx scripts/restore-note-folding.ts --all [--dry-run]
- *   npx tsx scripts/restore-note-folding.ts <project>...
+ *   npx tsx scripts/restore-note-folding.ts <owner>/<project>...
  *
  * Run it against a server that already understands `%% @note collapsed` (it absorbs the change
  * from disk); an older server would parse the notes open and write the file back without it.

@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { login, collectErrors, PROJECTS_DIR, texDoc } from './helpers';
 
-const PROJECT = 'e2e-rawsplit';
+const PROJECT = 'admin/e2e-rawsplit';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const ID = `${PROJECT}/long.tex`;
 
@@ -39,7 +39,7 @@ const openDoc = async (page: import('@playwright/test').Page) => {
 test('View ▸ LaTeX source beside the document opens the raw view with the same editor; the menubar names the project', async ({ page }) => {
   const errors = collectErrors(page);
   await openDoc(page);
-  await expect(page.locator('.doc-title')).toHaveText(PROJECT);
+  await expect(page.locator('.doc-title')).toHaveText(PROJECT.split('/')[1]);   // the project's name, without its owner
   await page.evaluate(() => { (window as any).__ed = document.querySelector('.lyx-editor'); });
   const viewItem = async () => { await page.locator('.menubar .menu button', { hasText: 'View' }).click(); await page.locator('.menu-item', { hasText: 'LaTeX source beside' }).click(); };
   await viewItem();

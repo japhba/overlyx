@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
 import { writeFileSync, rmSync } from 'node:fs';
 import { login, apiLogin, userCredentials, texDoc, PROJECTS_DIR, BASE_URL } from './helpers';
 
-const PROJECT = 'e2e-bobs-paper';
+const PROJECT = 'bob/e2e-bobs-paper';   // bob's namespace: he creates it
 
 test.afterAll(() => { rmSync(`${PROJECTS_DIR}/${PROJECT}`, { recursive: true, force: true }); });
 
@@ -19,8 +19,9 @@ test('administrator access is an explicit, logged grant; the owner sees it; the 
   await apiLogin(bobCtx, userCredentials('bob'));
   await bobCtx.request.delete(BASE_URL + `/api/projects/${PROJECT}`);       // a leftover of an earlier run (its grant and log go with it)
   rmSync(`${PROJECTS_DIR}/${PROJECT}`, { recursive: true, force: true });
-  const created = await bobCtx.request.post(BASE_URL + '/api/projects', { data: { name: PROJECT } });
+  const created = await bobCtx.request.post(BASE_URL + '/api/projects', { data: { name: 'e2e-bobs-paper' } });
   expect(created.ok()).toBe(true);
+  expect((await created.json()).project.name).toBe(PROJECT);
   writeFileSync(`${PROJECTS_DIR}/${PROJECT}/main.tex`, texDoc('Bob writes here.'));
 
   // the administrator: no card for it, an entry under Administration, and the API refuses

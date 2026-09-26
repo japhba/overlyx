@@ -8,7 +8,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { login, PROJECTS_DIR, texDoc } from './helpers';
 
-const PROJECT = 'e2e-spell';
+const PROJECT = 'admin/e2e-spell';
 const DOC = `${PROJECT}/paper.tex`;
 
 test.beforeAll(() => {

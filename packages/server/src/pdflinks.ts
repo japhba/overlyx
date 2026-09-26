@@ -14,6 +14,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { db } from './db.ts';
 import { projectDir, listProjects, isBackupFile } from './projects.ts';
+import { splitDocId, projectOfDoc, projectShortName } from '@overlyx/core';
 import { lastBuild, requestBuild, buildPdf, currentJob } from './export.ts';
 
 export interface PdfLinkRow { token: string; doc_id: string; created_by: number | null; created_at: number; hits: number; last_hit_at: number | null }
@@ -51,12 +52,10 @@ export function countHit(token: string): void {
  * the document otherwise (`thesis-appendix.pdf`). Only characters every browser and file system take.
  */
 export function pdfLinkFileName(docId: string, title?: string | null): string {
-  const slash = docId.indexOf('/');
-  const project = slash >= 0 ? docId.slice(0, slash) : docId;
-  const rel = slash >= 0 ? docId.slice(slash + 1) : '';
+  const { project, path: rel } = splitDocId(docId);
   const base = path.basename(rel).replace(/\.(tex|lyx)$/i, '');
   const clean = (s: string) => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);
-  const projectPart = clean(title || project) || 'document';
+  const projectPart = clean(title || projectShortName(project)) || 'document';
   const name = /^main$/i.test(base) || !base ? projectPart : `${projectPart}-${clean(base) || 'document'}`;
   return name + '.pdf';
 }
@@ -102,7 +101,7 @@ const lastPublicBuild = new Map<string, number>();
  */
 export async function pdfForLink(link: PdfLinkRow, title: string | null | undefined, opts: { waitMs?: number } = {}): Promise<ServedPdf | null> {
   const docId = link.doc_id;
-  const project = docId.split('/')[0];
+  const project = projectOfDoc(docId);
   const fileName = pdfLinkFileName(docId, title);
   const have = () => { const b = lastBuild(docId); return b?.pdf_path && fs.existsSync(b.pdf_path) ? { path: b.pdf_path, updatedAt: b.updated_at } : null; };
   const job = currentJob(docId);

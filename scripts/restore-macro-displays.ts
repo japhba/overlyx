@@ -7,7 +7,7 @@
  * Macros are matched by name in document order; only the definition lines are patched.
  *
  *   OVERLYX_PROJECTS_DIR=/root/projects npx tsx scripts/restore-macro-displays.ts --all [--dry-run]
- *   npx tsx scripts/restore-macro-displays.ts <project>...
+ *   npx tsx scripts/restore-macro-displays.ts <owner>/<project>...
  *
  * Run it against a server that already understands `%% @display` (it absorbs the change from disk).
  */

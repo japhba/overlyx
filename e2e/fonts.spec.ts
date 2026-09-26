@@ -7,7 +7,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { login, collectErrors, PROJECTS_DIR, texDoc } from './helpers';
 
-const DIR = `${PROJECTS_DIR}/e2e-fonts`;
+const DIR = `${PROJECTS_DIR}/admin/e2e-fonts`;
 const FILE = `${DIR}/main.tex`;
 
 test.beforeEach(() => {
@@ -23,7 +23,7 @@ async function open(page: Page, editorFont?: string) {
   await page.addInitScript((f) => { if (f && !sessionStorage.getItem('fonts-e2e')) { sessionStorage.setItem('fonts-e2e', '1'); localStorage.setItem('ol.prefs', JSON.stringify({ autoBuild: 'off', editorFont: f })); } }, editorFont ?? '');
   await login(page);
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.setItem('ol.combined', '0'); });
-  await page.goto('/#/e2e-fonts/main.tex');
+  await page.goto('/#/admin/e2e-fonts/main.tex');
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-math-inline .katex').length >= 1, null, { timeout: 60000 });
   return requested;
 }

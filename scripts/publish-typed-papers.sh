@@ -8,10 +8,11 @@
 #
 #   scripts/publish-typed-papers.sh <projects-dir-of-the-isolated-run>
 #
-# Every e2e-paper* directory found there (e2e-paperwriting, e2e-paperwriting-more,
-# e2e-paper-gan, e2e-paper-adam, e2e-paper-vae) is rsynced into $OVERLYX_PROJECTS_DIR (default
-# /root/projects) and its projects row is created/updated to belong to the instance owner's
-# account — the admin user whose e-mail is $OVERLYX_OWNER_EMAIL (default japhba@gmail.com, the
+# Every e2e-paper* project found there (e2e-paperwriting, e2e-paperwriting-more,
+# e2e-paper-gan, e2e-paper-adam, e2e-paper-vae — in the admin's namespace, <dir>/admin/, or at the
+# top level of an older run) is rsynced into the instance owner's namespace of $OVERLYX_PROJECTS_DIR
+# (default /root/projects: <dir>/<owner>/<name>) and its projects row (<owner>/<name>) is
+# created/updated to belong to the instance owner's account — the admin user whose e-mail is $OVERLYX_OWNER_EMAIL (default japhba@gmail.com, the
 # account the papers are inspected from), falling back to the seeded `admin` user; the running
 # server picks up the new content through its file watcher, so no restart is needed.
 set -euo pipefail
@@ -28,15 +29,15 @@ ADMIN=$(sqlite3 "$DB" "SELECT id FROM users WHERE lower(email)=lower('$OWNER_EMA
 OWNER=$(sqlite3 "$DB" "SELECT username FROM users WHERE id=$ADMIN")
 
 published=0
-for dir in "$SRC"/e2e-paper*; do
+for dir in "$SRC"/e2e-paper* "$SRC"/admin/e2e-paper*; do
   [ -d "$dir" ] || continue
   name=$(basename "$dir")
-  mkdir -p "$DEST/$name"
+  mkdir -p "$DEST/$OWNER/$name"
   # test markers, citation-key caches, build products and the scratch git history stay behind
-  rsync -a --delete --exclude _build --exclude .git --exclude '.keys.json' --exclude '.complete' --exclude '.appendix*' "$dir/" "$DEST/$name/"
-  sqlite3 "$DB" "INSERT INTO projects (name, owner_id, kind, created_at) VALUES ('$name', $ADMIN, 'project', CAST(strftime('%s','now') AS INTEGER) * 1000)
+  rsync -a --delete --exclude _build --exclude .git --exclude '.keys.json' --exclude '.complete' --exclude '.appendix*' "$dir/" "$DEST/$OWNER/$name/"
+  sqlite3 "$DB" "INSERT INTO projects (name, owner_id, kind, created_at) VALUES ('$OWNER/$name', $ADMIN, 'project', CAST(strftime('%s','now') AS INTEGER) * 1000)
                  ON CONFLICT(name) DO UPDATE SET owner_id = $ADMIN;"
-  echo "published $name -> $DEST/$name (owner: $OWNER, user #$ADMIN)"
+  echo "published $OWNER/$name -> $DEST/$OWNER/$name (owner: $OWNER, user #$ADMIN)"
   published=$((published + 1))
 done
 

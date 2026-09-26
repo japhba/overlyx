@@ -61,16 +61,16 @@ describe('folds per user and document', () => {
 
 describe('last opened, per user', () => {
   it('every open counts (not only one per 10 minutes like the activity log); per project, the newest document open', async () => {
-    markDocOpened(ben.id, 'q/a.tex');
+    markDocOpened(ben.id, 'ben/q/a.tex');
     await new Promise(r => setTimeout(r, 5));
-    markDocOpened(ben.id, 'q/b.tex');
-    const first = lastOpenedByProject(ben.id).get('q')!;
+    markDocOpened(ben.id, 'ben/q/sub/b.tex');
+    const first = lastOpenedByProject(ben.id).get('ben/q')!;
     await new Promise(r => setTimeout(r, 5));
-    markDocOpened(ben.id, 'q/a.tex');
-    expect(lastOpenedByProject(ben.id).get('q')!).toBeGreaterThan(first);
-    expect(lastOpenedByProject(ann.id).get('q')).toBeUndefined();
+    markDocOpened(ben.id, 'ben/q/a.tex');
+    expect(lastOpenedByProject(ben.id).get('ben/q')!).toBeGreaterThan(first);
+    expect(lastOpenedByProject(ann.id).get('ben/q')).toBeUndefined();
     // the activity log's older history counts too
-    db.prepare("INSERT INTO access_log (project, user_id, action, detail, at) VALUES ('old', ?, 'open', 'x.tex', 12345)").run(ben.id);
-    expect(lastOpenedByProject(ben.id).get('old')).toBe(12345);
+    db.prepare("INSERT INTO access_log (project, user_id, action, detail, at) VALUES ('ben/old', ?, 'open', 'x.tex', 12345)").run(ben.id);
+    expect(lastOpenedByProject(ben.id).get('ben/old')).toBe(12345);
   });
 });

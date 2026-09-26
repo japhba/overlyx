@@ -8,7 +8,7 @@ import { mkdirSync, copyFileSync, rmSync, existsSync, readFileSync, writeFileSyn
 import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
-const PROJECT = 'e2e-clip';
+const PROJECT = 'admin/e2e-clip';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
 const doc = () => withPreambleOf(`${SRC}/main.tex`, `\\section{Intro}\\label{sec:intro}
