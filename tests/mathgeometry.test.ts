@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { parseFormula, atomCells, type Owner, type Atom, type Slice } from '../packages/core/src/math';
-import { boundaryX, x2pos, editXY, moveToClosestEdge, partOfAnchor, insetAt, squareDistance, type CellGeom, type AtomGeom, type GeomLookup } from '../packages/client/src/editor/lyxmath/geometry';
+import { boundaryX, x2pos, editXY, moveToClosestEdge, partOfAnchor, insetAt, squareDistance, lineOf, selectionBoxes, type CellGeom, type AtomGeom, type GeomLookup } from '../packages/client/src/editor/lyxmath/geometry';
 
 const el = {} as HTMLElement;
 
@@ -18,13 +18,14 @@ function cellGeom(owner: Owner, idx: number, left: number, baseline: number, opt
   for (const atom of cell) {
     const nest = 'body' in atom || atom.t === 'frac' || atom.t === 'script' || atom.t === 'grid';
     const ww = nest ? 3 * w : w;
-    atoms.push({ atom, el, nest, left: x, right: x + ww + gap, glyphLeft: x, glyphRight: x + ww, top: baseline - (nest ? 2 * asc : asc), bottom: baseline + (nest ? 2 * des : des) });
+    atoms.push({ atom, el, nest, line: 0, left: x, right: x + ww + gap, glyphLeft: x, glyphRight: x + ww, top: baseline - (nest ? 2 * asc : asc), bottom: baseline + (nest ? 2 * des : des) });
     x += ww + gap;
   }
   const right = atoms.length ? atoms[atoms.length - 1].glyphRight : left + 6;
   // a cell is as tall as its tallest atom, never shorter than the font's line box (MathData::metrics)
   const top = Math.min(baseline - asc, ...atoms.map(a => a.top)), bottom = Math.max(baseline + des, ...atoms.map(a => a.bottom));
-  return { ref: { id: 0, owner, idx }, el, empty: !cell.length, baseline, fontSize: 10, left, right, top, bottom, lineTop: baseline - asc, lineBottom: baseline + des, atoms };
+  const lines = [{ left, right, top, bottom, baseline, lineTop: baseline - asc, lineBottom: baseline + des, from: 0, to: atoms.length }];
+  return { ref: { id: 0, owner, idx }, el, empty: !cell.length, baseline, fontSize: 10, left, right, top, bottom, lineTop: baseline - asc, lineBottom: baseline + des, atoms, lines };
 }
 
 /** a lookup over a formula: hull cells side by side on one baseline, an inset's cells stacked inside its box */
@@ -55,6 +56,44 @@ describe('x2pos / pos2x on one cell', () => {
     const e = cellGeom(parseFormula('$$', {}), 0, 10, 20);
     expect(x2pos(e, 15)).toBe(0);
     expect(boundaryX(e, 0)).toBe(11);
+  });
+});
+
+describe('a cell broken into lines (a long display formula)', () => {
+  // a+b+c on the first line, +d+e on the second (MathJax breaks before the operator)
+  const hull = parseFormula('$a+b+c+d+e$');
+  const one = cellGeom(hull, 0, 0, 20);
+  const n = one.atoms.length;   // 9
+  const split = 5;              // atoms 0..4 on line 0, 5..8 on line 1
+  const atoms = one.atoms.map((a, i) => i < split ? a : { ...a, line: 1, left: a.left - 70 + 20, right: a.right - 70 + 20, glyphLeft: a.glyphLeft - 70 + 20, glyphRight: a.glyphRight - 70 + 20, top: a.top + 20, bottom: a.bottom + 20 });
+  const lines = [
+    { left: 0, right: atoms[split - 1].glyphRight, top: 12, bottom: 23, baseline: 20, lineTop: 12, lineBottom: 23, from: 0, to: split },
+    { left: atoms[split].left, right: atoms[n - 1].glyphRight, top: 32, bottom: 43, baseline: 40, lineTop: 32, lineBottom: 43, from: split, to: n },
+  ];
+  const cg: CellGeom = { ...one, atoms, lines, top: 12, bottom: 43 };
+  it('a position at the break is shown at the start of the next line', () => {
+    expect(boundaryX(cg, split)).toBe(atoms[split].left);
+    expect(lineOf(cg, split)).toBe(1);
+    expect(lineOf(cg, split - 1)).toBe(0);
+    expect(lineOf(cg, n)).toBe(1);
+  });
+  it('a click is resolved on the line nearest to it', () => {
+    const x = atoms[split + 1].glyphLeft + 1;   // over the second atom of line 2 …
+    expect(x2pos(cg, x, 40)).toBe(split + 1);
+    // … and the same x on the first line is a position of the first line
+    expect(x2pos(cg, x, 20)).toBeLessThan(split);
+    // past the end of the first line: after its last atom
+    expect(x2pos(cg, 999, 20)).toBe(split);
+    expect(x2pos(cg, 999, 40)).toBe(n);
+    // a line asked for by number (↑/↓)
+    expect(x2pos(cg, x, undefined, 0)).toBe(x2pos(cg, x, 20));
+  });
+  it('a selection across the break is painted on both lines', () => {
+    const boxes = selectionBoxes(cg, 2, split + 2);
+    expect(boxes.length).toBe(2);
+    expect(boxes[0].top).toBe(12); expect(boxes[1].top).toBe(32);
+    expect(boxes[0].right).toBe(atoms[split - 1].glyphRight);
+    expect(boxes[1].left).toBe(atoms[split].left);
   });
 });
 

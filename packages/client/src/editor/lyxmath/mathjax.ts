@@ -74,7 +74,9 @@ function makeRenderer(font: LoadedMathFont): Renderer {
   const tex = makeTexInput();
   const chtml = new CHTML<HTMLElement, Text, Document>({
     fontData: font.data,
+    // display formulas given a width break into lines to fit it (RenderOptions.width); inline ones never
     linebreaks: { inline: false },
+    displayOverflow: 'linebreak',
     matchFontHeight: false,
     mtextInheritFont: true,
   } as never);
@@ -178,6 +180,12 @@ export interface RenderOptions {
   macros?: Record<string, string>;
   /** an image file of \includegraphics → its URL */
   image?: (src: string) => string;
+  /**
+   * With `display`: the room the formula has, in em of its own font — MathJax's display math, broken
+   * into lines where it is wider (TeX's rules: after relations and binary operators, never inside a
+   * fraction or a script). Without it the formula is one line however wide.
+   */
+  width?: number;
 }
 
 export interface Rendered {
@@ -201,10 +209,13 @@ const MAX_RETRIES = 4;
 export function renderMath(tex: string, opts: RenderOptions = {}): Rendered {
   const r = renderer();
   if (!r) return { node: null, error: null, retry: fontLoading(), undefinedCommands: [] };
-  const key = r.font.id + '\0' + (opts.display ? 'D' : '') + tex;
+  const key = r.font.id + '\0' + (opts.display ? 'D' + (opts.width ?? '') : '') + tex;
   try {
+    // (em = 16px throughout: lengths in px — image glyphs — are text ems; the width is scaled to match)
+    const broken = !!opts.display && !!opts.width;
     const { value: node, images, undefinedCommands } = withFormula(opts.macros, opts.image, () =>
-      r.html.convert((opts.display ? '\\displaystyle ' : '') + tex, { display: false, em: 16, ex: 16 * r.chtml.font.params.x_height, containerWidth: 1e5 }) as HTMLElement);
+      r.html.convert(broken ? tex : (opts.display ? '\\displaystyle ' : '') + tex,
+        { display: broken, em: 16, ex: 16 * r.chtml.font.params.x_height, containerWidth: broken ? opts.width! * 16 : 1e5 }) as HTMLElement);
     updateSheet(r);
     retries.delete(key);
     return { node, error: null, retry: images.length ? Promise.all(images).then(() => {}) : null, undefinedCommands };

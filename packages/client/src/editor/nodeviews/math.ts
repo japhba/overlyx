@@ -420,6 +420,10 @@ export class MathDisplayView implements NodeView {
   field: LyxMathField | null = null;
   private staticEl: HTMLElement | null = null;
   private staticKey = '';
+  /** the room the formula was last drawn for before breaking into lines (em), see breakWidth */
+  private drawnWidth: number | undefined;
+  private breakable = false;
+  private breakableFor: string | null = null;
   numberEl: HTMLElement;
   labelEl: HTMLElement;
   metaEl: HTMLElement;
@@ -496,8 +500,9 @@ export class MathDisplayView implements NodeView {
     const { key, table } = macroTableFor(this.view, this.getPos());
     this.dom.classList.toggle('empty', !this.lastLatex.trim());   // an empty formula keeps its one box visible (styles.css .lm-empty)
     const stamp = ++this.renderStamp;
+    this.drawnWidth = this.breakWidth();
     renderStaticInto(el, this.lastLatex, true, table, { project: viewProject(this.view), docDir: viewDocDir(this.view) },
-      () => { if (stamp === this.renderStamp && this.staticEl === el) this.renderStatic(); });
+      () => { if (stamp === this.renderStamp && this.staticEl === el) this.renderStatic(); }, this.drawnWidth);
     this.staticKey = key;
     this.scheduleRelayout();
   }
@@ -508,7 +513,7 @@ export class MathDisplayView implements NodeView {
     this.pending = false; this.stale = false; this.renderStamp++;
     const { key, table } = macroTableFor(this.view, this.getPos());
     const f = new LyxMathField({
-      latex: this.lastLatex, display: true, macros: table,
+      latex: this.lastLatex, display: true, macros: table, width: (this.drawnWidth = this.breakWidth()),
       imageContext: { project: viewProject(this.view), docDir: viewDocDir(this.view) },
       onChange: latex => this.commit(latex),
       onBlur: () => {
@@ -577,6 +582,13 @@ export class MathDisplayView implements NodeView {
     const dom = this.dom;
     const scroll = dom.closest('.editor-scroll') as HTMLElement | null;
     if (!scroll || !dom.isConnected) return;
+    // the column (or the equation number) changed width: a long formula breaks anew
+    const w = this.breakWidth();
+    if (w !== this.drawnWidth && !this.pending) {
+      this.drawnWidth = w;
+      if (this.field) this.field.setWidth(w);
+      else if (this.staticEl) { this.renderStatic(); return; }
+    }
     const content = this.contentEl();
     const contentW = Math.ceil(content.scrollWidth + 8);
     const shifted = dom.style.gridTemplateColumns !== '';
@@ -613,6 +625,25 @@ export class MathDisplayView implements NodeView {
   }
 
   private hull() { return this.field ? this.field.hull : parseFormula(this.lastLatex, macroTableFor(this.view, this.getPos()).table); }
+
+  /**
+   * The room a one-line formula has before MathJax breaks it into lines, in em of its font: the
+   * text column, less room for the equation number on both sides (the formula stays centred).
+   * Formulas of several rows (align, gather …) and cells with a grid are laid out as they are.
+   */
+  private breakWidth(): number | undefined {
+    const latex = this.field?.latex ?? this.lastLatex;
+    if (this.breakableFor !== latex) { const h = this.hull(); this.breakable = h.rows.length === 1 && h.ncols === 1; this.breakableFor = latex; }
+    if (!this.breakable || !this.dom.isConnected) return undefined;
+    const avail = this.dom.style.gridTemplateColumns ? this.dom.parentElement!.clientWidth : this.dom.clientWidth;
+    if (!avail) return undefined;
+    const room = avail - 2 * (this.metaEl.offsetWidth + 14) - 8;
+    const box = (this.field?.dom ?? this.staticEl ?? this.dom).querySelector('mjx-container') ?? this.field?.dom ?? this.staticEl ?? this.dom;
+    const fs = parseFloat(getComputedStyle(box).fontSize) * (box.tagName === 'MJX-CONTAINER' ? 1 : (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--math-scale')) || 1));
+    if (!fs) return undefined;
+    // in half ems: a few pixels more or less draw the formula anew only when that changes where it breaks
+    return Math.max(10, Math.floor((room / fs) * 2) / 2);
+  }
 
   /** the formula's own menu entries (also the editor's right-click menu on the formula's row, editormenu.ts) */
   formulaMenu(): MenuItem[] {

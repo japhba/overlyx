@@ -358,7 +358,15 @@ blend.
   `setCursorSelectionTo` (an anchor inside an inset selects it whole from outside; Shift+click takes
   the clicked inset whole), double click = the cell, triple click = all cells; a drag that leaves the
   formula continues in the text with the formula whole and comes back into it when the pointer
-  returns. The corner markers are drawn as `MathRow::drawMarkers` does (3px hooks one pixel outside
+  returns. **Long display formulas break into lines** to fit the text column (MathJax's display line
+  breaking, TeX's rules: before relations and binary operators, never inside a script;
+  `nodeviews/math.ts breakWidth` gives one-row formulas the column's width less the equation
+  number's on both sides, and they break anew when it changes; formulas of several rows stay as
+  written). The top cell then has a box per line: a click is resolved on the nearest line, ↑/↓ go
+  from line to line before they leave the formula, a selection is painted per line
+  (`e2e/mathbreak.spec.ts`); the file keeps the formula as written. At very narrow widths (under
+  about 11 em) MathJax's breaker sometimes keeps a long first line when the editor's atom boxes are
+  in the formula; that line overflows into the margin like any too-wide formula. The corner markers are drawn as `MathRow::drawMarkers` does (3px hooks one pixel outside
   the inset's box; four corners for fractions, grids and macros) and follow the anchor while the
   mouse selects. Right-click menus on
   formulas, cross-references (go to label, reference format), citations, hyperlinks, child documents,

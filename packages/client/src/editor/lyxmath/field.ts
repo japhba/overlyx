@@ -15,7 +15,7 @@ import {
   parseFormula, writeFormula, writeCellLatex, parseCell, renderHullSource, mathjaxMacros, MathCursor, atomCells, nargs, numberedType, isKnownCommand, completeCommand,
   type Hull, type HullType, type MacroTable, type Slice, type Atom, type Cell, type CellRef, type Owner,
 } from '@overlyx/core';
-import { MathGeometry, editXY, moveToClosestEdge, partOfAnchor, insetAt, boundaryX, x2pos, type AtomGeom } from './geometry';
+import { MathGeometry, editXY, moveToClosestEdge, partOfAnchor, insetAt, boundaryX, x2pos, lineOf, selectionBoxes, type AtomGeom } from './geometry';
 import { graphicsUrl } from '../../api';
 import { editorContext, resolveDocPath } from '../context';
 import { getPrefs } from '../../prefs';
@@ -29,6 +29,8 @@ export interface FieldOptions {
   macros: MacroTable;
   /** Project location used to resolve image-based math macros. */
   imageContext?: MathImageContext;
+  /** a display formula: the room it has before it breaks into lines, in em of its font (setWidth) */
+  width?: number;
   readOnly?: boolean;
   onChange?: (latex: string) => void;
   /**
@@ -147,6 +149,10 @@ export class LyxMathField {
   private ghost: string | null = null;
   /** counts renderings (a retry renders again only if nothing else did meanwhile) */
   private renderStamp = 0;
+  /** a display formula's room before it breaks into lines (em), see FieldOptions.width */
+  private width: number | undefined;
+  /** the y of the caret's line (up/down into a cell broken into lines keep to it) */
+  private caretY: number | undefined;
   private offRenderer: () => void;
   readonly id = ++seq;
 
@@ -154,6 +160,7 @@ export class LyxMathField {
     this.opts = opts;
     this.macros = opts.macros;
     this.display = opts.display;
+    this.width = opts.width;
     this.readOnly = !!opts.readOnly;
     this.hull = parseFormula(opts.latex, this.macros);
     this.lastLatex = opts.latex;
@@ -204,6 +211,8 @@ export class LyxMathField {
     this.render();
   }
   hasFocus(): boolean { return this.focused; }
+  /** the room a display formula has before it breaks into lines (em of its font); drawn again when it changed */
+  setWidth(width: number | undefined): void { if (width === this.width) return; this.width = width; this.render(); }
   /** the row of the top-level cell the cursor is in (0 for inline / single-row formulas) */
   topRow(): number { return Math.floor(this.cursor.slices[0].idx / Math.max(1, this.hull.ncols)); }
   /** no content in any cell */
@@ -317,7 +326,7 @@ export class LyxMathField {
       const ref = cells.find(c => c.owner === this.cursor.owner && c.idx === this.cursor.idx);
       if (ref) latex = injectGhost(latex, ref.id, this.ghost, this.cursor.mode === 'text');
     }
-    const r = renderMath(latex, { display: this.display, macros: mathjaxMacros(this.macros), image: mathImageResolver(this.opts.imageContext) });
+    const r = renderMath(latex, { display: this.display, width: this.display ? this.width : undefined, macros: mathjaxMacros(this.macros), image: mathImageResolver(this.opts.imageContext) });
     if (r.node) { this.content.replaceChildren(r.node); maskImageGlyphs(this.content); }
     else if (r.error || !this.content.firstChild) this.content.innerHTML = `<span class="${r.error ? 'lm-error' : 'lm-error lm-pending'}">${escapeHtml(this.lastLatex)}</span>`;
     // font data (or an image's shape) still on its way: rendered again once it is here
@@ -351,7 +360,8 @@ export class LyxMathField {
   private caretRect(owner: Owner, idx: number, pos: number): { x: number; top: number; bottom: number } | null {
     const cg = this.geometry().cell(owner, idx);
     if (!cg) return null;
-    return { x: boundaryX(cg, pos), top: cg.lineTop, bottom: cg.lineBottom };
+    const line = cg.lines[lineOf(cg, pos)] ?? cg;
+    return { x: boundaryX(cg, pos), top: line.lineTop, bottom: line.lineBottom };
   }
 
   /** MathCursor host: the position in a cell closest to a client x (the x target of up/down moves) */
@@ -359,7 +369,7 @@ export class LyxMathField {
     if (x === null) return 0;
     const ref = this.cells.find(c => (atomCells(c.owner)[c.idx] ?? null) === cell);
     const cg = ref ? this.geometry().cell(ref.owner, ref.idx) : null;
-    return cg ? x2pos(cg, x) : 0;
+    return cg ? x2pos(cg, x, this.caretY) : 0;
   }
 
   layout(): void {
@@ -384,7 +394,7 @@ export class LyxMathField {
       };
       if (sel.idx1 === sel.idx2) {
         const cg = g.cell(sel.owner, sel.idx1);
-        if (cg) paint(boundaryX(cg, sel.from), boundaryX(cg, sel.to), cg.top, cg.bottom);
+        if (cg) for (const b of selectionBoxes(cg, sel.from, sel.to)) paint(b.left, b.right, b.top, b.bottom);
       } else {
         for (const row of c.selCells(sel)) for (const idx of row) { const cg = g.cell(sel.owner, idx); if (cg) paint(cg.left, cg.right, cg.top, cg.bottom); }
       }
@@ -392,6 +402,7 @@ export class LyxMathField {
     // caret
     const cr = this.caretRect(c.owner, c.idx, c.pos);
     if (cr) {
+      this.caretY = (cr.top + cr.bottom) / 2;
       const d = document.createElement('span');
       d.className = 'lm-caret';
       d.style.cssText = `left:${cr.x - base.left - 0.5}px;top:${cr.top - base.top}px;height:${cr.bottom - cr.top}px`;
@@ -705,6 +716,17 @@ export class LyxMathField {
         // Cursor::upDownInMath keeps an x target across vertical moves, so the cursor stays in its column
         if (c.xTarget === null) c.xTarget = this.caretRect(c.owner, c.idx, c.pos)?.x ?? null;
         const x = c.xTarget;
+        // a display formula broken into lines: up and down go from line to line of the cell first
+        const cg = c.inMacroMode() ? null : this.geometry().cell(c.owner, c.idx);
+        const line = cg ? lineOf(cg, c.pos) + (ev.key === 'ArrowUp' ? -1 : 1) : -1;
+        if (cg && x !== null && line >= 0 && line < cg.lines.length) {
+          c.selHandle(ev.shiftKey);
+          c.pos = x2pos(cg, x, undefined, line);
+          this.moved(old);
+          c.xTarget = x;
+          handled();
+          return;
+        }
         move(() => c.upDown(ev.key === 'ArrowUp'), ev.key === 'ArrowUp' ? 'upward' : 'downward');
         c.xTarget = x;
         return;
@@ -790,11 +812,12 @@ export function rowRectsOf(hull: Hull, cells: CellRef[], container: HTMLElement)
     let box: DOMRect | null = null;
     for (let c = 0; c < hull.ncols; c++) {
       const ref = cells.find(x => x.owner === hull && x.idx === r * hull.ncols + c);
-      const el = ref ? container.querySelector(`.lm-c${ref.id}`) : null;
-      if (!el) continue;
-      const rr = el.getBoundingClientRect();
-      if (!rr.height) continue;
-      box = box ? new DOMRect(Math.min(box.left, rr.left), Math.min(box.top, rr.top), Math.max(box.right, rr.right) - Math.min(box.left, rr.left), Math.max(box.bottom, rr.bottom) - Math.min(box.top, rr.top)) : rr;
+      // (a cell broken into lines has a box per line)
+      for (const el of ref ? Array.from(container.querySelectorAll(`.lm-c${ref.id}`)) : []) {
+        const rr = el.getBoundingClientRect();
+        if (!rr.height) continue;
+        box = box ? new DOMRect(Math.min(box.left, rr.left), Math.min(box.top, rr.top), Math.max(box.right, rr.right) - Math.min(box.left, rr.left), Math.max(box.bottom, rr.bottom) - Math.min(box.top, rr.top)) : rr;
+      }
     }
     out.push(box ?? new DOMRect(0, 0, 0, 0));
   }
@@ -804,14 +827,14 @@ export function rowRectsOf(hull: Hull, cells: CellRef[], container: HTMLElement)
 /**
  * Static rendering of a formula (no editing) into `el` — the same source as the field, so it looks
  * identical. `onRetry`: called when it should be rendered again (font data or an image's shape
- * arrived after this rendering had to do without).
+ * arrived after this rendering had to do without). `width`: as FieldOptions.width.
  */
-export function renderStaticInto(el: HTMLElement, latex: string, display: boolean, macros: MacroTable, imageContext?: MathImageContext, onRetry?: () => void): void {
+export function renderStaticInto(el: HTMLElement, latex: string, display: boolean, macros: MacroTable, imageContext?: MathImageContext, onRetry?: () => void, width?: number): void {
   let r: ReturnType<typeof renderMath> | null = null;
   try {
     const hull = parseFormula(latex, macros);
     const { latex: src } = renderHullSource(hull, macros);
-    r = renderMath(src, { display, macros: mathjaxMacros(macros), image: mathImageResolver(imageContext) });
+    r = renderMath(src, { display, width: display ? width : undefined, macros: mathjaxMacros(macros), image: mathImageResolver(imageContext) });
   } catch { /* shown as an error */ }
   if (r?.node) { el.replaceChildren(r.node); maskImageGlyphs(el); }
   else el.innerHTML = `<span class="${r && !r.error ? 'lm-error lm-pending' : 'lm-error'}">${escapeHtml(latex)}</span>`;

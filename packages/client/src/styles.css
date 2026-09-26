@@ -644,6 +644,9 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .lm-field.display, .lyx-math-static.display { font-size: 1.05em; }
 /* formulas (MathJax, editor/lyxmath/mathjax.ts): their x-height 1.1 times the text's (fonts/editorfont.ts --math-scale) */
 .lyx-editor mjx-container[jax="CHTML"] { font-size: calc(var(--math-scale, 1.072) * 1em); }
+/* a one-line display formula is MathJax's display math, broken into lines to fit the column (math.ts
+   breakWidth): an inline box in the node view's grid, not MathJax's own centred block */
+.lyx-editor mjx-container[jax="CHTML"][display="true"] { display: inline-block; margin: 0; padding: 0; min-width: 0; }
 .lyx-math-display .lm-field.display { grid-column: 2; display: inline-block; min-width: 4em; max-width: none; text-align: center; justify-self: center; }
 .lyx-math-display { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; column-gap: 0.6em; position: relative; margin: 0.5em 0; width: 100%; box-sizing: border-box; }
 .lyx-math-display .eq-left { grid-column: 1; }
