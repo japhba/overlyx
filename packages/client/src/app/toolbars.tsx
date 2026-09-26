@@ -21,6 +21,7 @@ import * as C from '../editor/commands';
 import * as T from '../editor/tablecommands';
 import { acceptAllChanges, rejectAllChanges, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import { pasteFromClipboard } from '../editor/clipmenu';
+import { openLinkBoxFor, LINK_KEY } from '../editor/links';
 
 export type ToolbarId = 'standard' | 'viewupdate' | 'extra' | 'vcs' | 'math' | 'mathpanels' | 'table' | 'review';
 export type ToolbarMode = 'on' | 'off' | 'auto';
@@ -309,7 +310,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 'note', title: 'LyX note (Ctrl+Alt+Shift+N)', icon: 'note', action: () => run(C.insertNote('Note')) },
       { id: 'comment', title: 'Comment thread (Ctrl+Alt+C)', icon: 'comment', action: () => run(C.insertComment) },
       { id: 'boxinset', title: 'Insert box', icon: 'boxinset', action: () => run(C.insertBox) },
-      { id: 'href', title: 'Hyperlink (Ctrl+Alt+K)', icon: 'href', action: () => setDialog({ name: 'href' }) },
+      { id: 'href', title: `Link (${LINK_KEY})`, icon: 'href', action: () => runView(openLinkBoxFor) },
       { id: 'ert', title: 'TeX code (Ctrl+L)', icon: 'ert', action: () => run(C.insertERT) },
       { id: 'macro', title: 'Math macro definition', icon: 'macro', action: () => { const n = prompt('Macro name (without backslash):'); if (n) run(C.insertMacroDef(n, Number(prompt('Number of arguments:', '0') || 0), '')); } },
       { id: 'include', title: 'Include file (child document)', icon: 'include', action: () => { const fn = prompt('Child document file name (relative):', 'chapter1.tex'); if (fn) run(C.insertInclude(fn, 'include')); } },

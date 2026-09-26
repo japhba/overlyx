@@ -35,8 +35,10 @@ export interface EditorContext {
   ai?: AiStatus;
   /** an AI request is in flight (the status bar shows it) */
   aiBusy?: (on: boolean) => void;
-  /** ⌘K inside a formula (set by editor/ai/rewrite.ts; the math field calls it) */
+  /** ⌘J inside a formula (set by editor/ai/rewrite.ts; the math field calls it) */
   aiRewriteMath?: (field: import('./lyxmath/field').LyxMathField) => void;
+  /** ⌘K inside a formula: the link box (set by editor/links.ts; the math field calls it) */
+  mathLink?: (field: import('./lyxmath/field').LyxMathField) => void;
   /** the formula field currently being edited (App.tsx tracks focus) — the Agent panel reads its
    *  selection when the ProseMirror selection is empty */
   mathField?: import('./lyxmath/field').LyxMathField | null;

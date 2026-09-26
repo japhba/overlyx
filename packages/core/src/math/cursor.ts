@@ -28,7 +28,7 @@ export function atomCells(o: Owner): Cell[] {
     case 'script': return a.up && a.down ? [a.nuc, a.up, a.down] : a.up ? [a.nuc, a.up] : a.down ? [a.nuc, a.down] : [a.nuc];
     case 'frac': return a.c2 ? [a.c0, a.c1, a.c2] : [a.c0, a.c1];
     case 'sqrt': return a.index ? [a.body, a.index] : [a.body];
-    case 'delim': case 'brace': case 'font': case 'oldfont': case 'box': case 'deco': case 'style': case 'class': case 'color': case 'phantom': case 'ensuremath': case 'env':
+    case 'delim': case 'brace': case 'font': case 'oldfont': case 'box': case 'deco': case 'style': case 'class': case 'color': case 'phantom': case 'ensuremath': case 'env': case 'href':
       return [a.body];
     case 'makebox': return [a.width, a.align, a.body];
     case 'overset': case 'underset': case 'stackrel': return a.bottom ? [a.body, a.top, a.bottom] : [a.body, a.top];
@@ -504,6 +504,60 @@ export class MathCursor {
     if (cells.length) cells[a.t === 'macro' ? a.nopt : 0].push(...parseCell(safe, this.macros, this.mode === 'text' ? 'text' : 'math'));
     this.insertAtom(a);
     this.editInsertedInset();
+  }
+
+  /* ---- hyperlinks (\href{target}{…}, the link box of editor/links.ts) */
+  /**
+   * The link the cursor is in, else the one right beside it (a link counts as under the cursor
+   * while the cursor touches it, as in a word processor): the atom, the index of the slice whose
+   * cell holds it and its position in that cell.
+   */
+  linkAt(): { atom: Extract<Atom, { t: 'href' }>; slice: number; pos: number } | null {
+    for (let i = this.slices.length - 1; i >= 1; i--) {
+      const o = this.slices[i].owner as Atom;
+      if (o.t === 'href') return { atom: o, slice: i - 1, pos: this.slices[i - 1].pos };
+    }
+    const prev = this.prevAtom(), next = this.nextAtom();
+    if (prev?.t === 'href') return { atom: prev, slice: this.depth - 1, pos: this.pos - 1 };
+    if (next?.t === 'href') return { atom: next, slice: this.depth - 1, pos: this.pos };
+    return null;
+  }
+  /**
+   * Make the selection a link to `target`, or insert a new link whose content is `text` typed as
+   * it would be typed (in math, inside `\text{}`); the cursor ends behind the link. False when the
+   * selection spans cells of a grid.
+   */
+  insertLink(target: string, text: string): boolean {
+    const r = this.selRange();
+    if (r && r.idx1 !== r.idx2) return false;
+    this.macroModeClose();
+    if (this.selection) { this.handleNest({ t: 'href', target, body: [] }); return true; }
+    const link: Atom = { t: 'href', target, body: [] };
+    this.insertAtom(link);
+    this.posBackward();
+    this.push(link);
+    const depth = this.depth;
+    if (text && this.mode === 'math') this.niceInsertAtom({ t: 'font', n: 'text', body: [], mode: 'text' });
+    for (const ch of text) { if (ch === '\\') this.insertAtom({ t: 'cmd', n: 'textbackslash' }); else this.interpretChar(ch); }
+    this.macroModeClose();
+    this.slices = this.slices.slice(0, depth);
+    this.popForward();
+    return true;
+  }
+  /** Take the link under the cursor away; its content stays where it was, the cursor too. */
+  unlink(): boolean {
+    const l = this.linkAt();
+    if (!l) return false;
+    this.clearSelection();
+    const inside = this.slices[l.slice + 1]?.owner === l.atom;
+    const cell = this.cellAt(this.slices[l.slice]);
+    cell.splice(l.pos, 1, ...l.atom.body);
+    if (inside) {
+      const at = this.slices[l.slice + 1].pos;
+      this.slices.splice(l.slice + 1, 1);
+      this.slices[l.slice].pos = l.pos + at;
+    } else if (this.pos > l.pos) this.pos = l.pos + l.atom.body.length;
+    return true;
   }
 
   /** the mode of the cell the cursor is in (text inside \text{}, \mbox{} …) */

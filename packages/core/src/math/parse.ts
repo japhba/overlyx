@@ -464,6 +464,11 @@ class Parser {
         push(opt ? { t: 'ref', n: t.cs, label: ref, opt } : { t: 'ref', n: t.cs, label: ref });
       }
 
+      else if (t.cs === 'href') {
+        const target = this.parseVerbatimItem();
+        push({ t: 'href', target, body: this.parseCell(FLAG_ITEM, mode) });
+      }
+
       else if (t.cs === 'left') {
         this.skipSpaces();
         const tl = this.getToken();
@@ -752,7 +757,7 @@ export function isValidLength(s: string): boolean { return LENGTH_RE.test(s.trim
 /** Commands the parser handles itself (not in the symbol table). */
 export const PARSER_COMMANDS: string[] = ['frac', 'dfrac', 'tfrac', 'cfrac', 'nicefrac', 'binom', 'dbinom', 'tbinom', 'sqrt', 'left', 'middle', 'right', 'begin', 'end', 'text', 'label', 'nonumber', 'notag',
   'limits', 'nolimits', 'hline', 'cancelto', 'unit', 'unitfrac', 'stackrel', 'kern', 'mkern', 'choose', 'over', 'atop', 'brace', 'brack', 'color', 'textcolor', 'normalcolor', 'substack', 'framebox', 'makebox',
-  'tag', 'hspace', 'smash', 'lyxmathsym', 'ensuremath', 'boxed', 'fbox', 'multicolumn', ...PHANTOMS, ...ONE_CELL_CMDS, ...XARROWS, ...REFS, 'sideset'];
+  'href', 'tag', 'hspace', 'smash', 'lyxmathsym', 'ensuremath', 'boxed', 'fbox', 'multicolumn', ...PHANTOMS, ...ONE_CELL_CMDS, ...XARROWS, ...REFS, 'sideset'];
 
 /** Is `\name` a command LyX would understand here (symbol table, parser or a document macro)? */
 export function isKnownCommand(name: string, macros: MacroTable): boolean {

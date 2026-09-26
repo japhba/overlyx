@@ -58,6 +58,13 @@ export type Atom =
   | { t: 'xarrow'; n: string; body: Cell; opt?: Cell }
   /** InsetMathRef: `\ref{label}` `\eqref{…}` … stored verbatim */
   | { t: 'ref'; n: string; label: string; opt?: string }
+  /**
+   * A hyperlink inside a formula: hyperref's `\href{target}{body}` (an OverLyX addition; LyX keeps it
+   * as an unknown command followed by two groups, which writes the same LaTeX). The target is kept
+   * verbatim, as LaTeX (`%` and `#` escaped); the body is in the mode of the cell around it, so a
+   * link in `\text{…}` has text in it.
+   */
+  | { t: 'href'; target: string; body: Cell }
   /** InsetMathGrid family: matrices, cases, array, aligned/split/gathered, substack (see Grid) */
   | ({ t: 'grid' } & Grid)
   /** InsetMathMacro with a known definition and arguments (cells: optionals first, then mandatory) */
@@ -136,7 +143,7 @@ export function cellsOf(a: Atom): Cell[] {
     case 'script': return [a.nuc, ...(a.down ? [a.down] : []), ...(a.up ? [a.up] : [])];
     case 'frac': return a.c2 ? [a.c0, a.c1, a.c2] : [a.c0, a.c1];
     case 'sqrt': return a.index ? [a.body, a.index] : [a.body];
-    case 'delim': case 'brace': case 'font': case 'oldfont': case 'box': case 'deco': case 'style': case 'class': case 'color': case 'phantom': case 'ensuremath': case 'env':
+    case 'delim': case 'brace': case 'font': case 'oldfont': case 'box': case 'deco': case 'style': case 'class': case 'color': case 'phantom': case 'ensuremath': case 'env': case 'href':
       return [a.body];
     case 'makebox': return [a.width, a.align, a.body];
     case 'overset': case 'underset': case 'stackrel': return a.bottom ? [a.body, a.top, a.bottom] : [a.body, a.top];

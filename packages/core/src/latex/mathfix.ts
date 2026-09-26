@@ -16,7 +16,7 @@ const TEXT_OK = new Set([
   'textcolor', 'color', 'underline', 'uline', 'sout', 'textendash', 'textemdash', 'textquoteleft', 'textquoteright', 'textquotedblleft',
   'textquotedblright', 'textdegree', 'S', 'P', 'dag', 'ddag', 'copyright', 'pounds', 'textasciitilde', 'textasciicircum', 'textbar', 'textless', 'textgreater',
   'newline', 'linebreak', 'hfill', 'thinspace', 'negthinspace', 'enspace', 'enskip', 'noindent', 'par', 'textvisiblespace', 'raggedright', 'centering', 'raggedleft',
-  'textipa', 'lyxarrow', 'lyxmathsym', 'nobreakdash',
+  'textipa', 'lyxarrow', 'lyxmathsym', 'nobreakdash', 'href', 'url',
 ]);
 
 function isMathCommand(name: string, db: MathSymbolDB, macros: Set<string>): boolean {

@@ -765,15 +765,6 @@ export function moveParagraph(dir: -1 | 1): Command {
   };
 }
 
-/** Delete to end of line/paragraph (Ctrl+K: line-delete-forward). */
-export const deleteToParagraphEnd: Command = (state, dispatch) => {
-  const $from = state.selection.$from;
-  const end = $from.end();
-  if ($from.pos === end) return false;
-  dispatch?.(state.tr.delete($from.pos, end));
-  return true;
-};
-
 /* ------------------------------------------------------------------ tables */
 
 export function insertTable(rows: number, cols: number): Command {

@@ -592,8 +592,8 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
               return;
             }
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && dirty) { e.preventDefault(); if (applyTimer.current) clearTimeout(applyTimer.current); void apply(true); return; }
-            // ⌘K in the source view: rewrite the selected LaTeX (or write at the cursor) with AI
-            if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k' && getPrefs().aiRewrite && target) {
+            // ⌘J in the source view: rewrite the selected LaTeX (or write at the cursor) with AI
+            if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'j' && getPrefs().aiRewrite && target) {
               e.preventDefault();
               const el = ta.current!;
               const line = lineOfOffset(el.value, el.selectionStart);

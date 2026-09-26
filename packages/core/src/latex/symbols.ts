@@ -22,7 +22,7 @@ const EXTRA_REQUIRES: Record<string, string> = {
   lyxmathsym: 'lyxmathsym', mathclap: 'mathtools', mathllap: 'mathtools', mathrlap: 'mathtools', coloneqq: 'mathtools',
   cancel: 'cancel', bcancel: 'cancel', xcancel: 'cancel', cancelto: 'cancel', nicefrac: 'units', unitfrac: 'units', unit: 'units',
   xleftrightarrow: 'amsmath', overbrace: '', underbrace: '', mathring: 'amsmath', iddots: 'mathdots', utilde: 'undertilde',
-  mathcircumflex: 'mathcircumflex', ensuremath: '', ce: 'mhchem', cf: 'mhchem', stackrel: '',
+  mathcircumflex: 'mathcircumflex', ensuremath: '', ce: 'mhchem', cf: 'mhchem', stackrel: '', href: 'hyperref',
 };
 
 const AMS_ENVIRONMENTS = new Set([

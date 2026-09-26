@@ -17,6 +17,7 @@ import { toggleMathDisplay, countLabelRefs, renameLabelRefs } from '../commands'
 import { editorContext, viewDocDir, viewProject } from '../context';
 import { getPrefs } from '../../prefs';
 import { openRewriteMath, REWRITE_KEY } from '../ai/rewrite';
+import { openMathLinkBox, openLink, mathLinkUrl, LINK_KEY } from '../links';
 import { applyChangeAttrs } from '../plugins/changes';
 import { FormulaReview } from '../mathconflict';
 
@@ -119,9 +120,19 @@ const DELIMS: [string, string, string][] = [['( )', '(', ')'], ['[ ]', '[', ']']
 function commonMathMenu(f: LyxMathField): MenuItem[] {
   const ins = (latex: string) => () => { f.focus(); f.execute('insert', latex); };
   const c = f.cursor;
+  const link = c.selection ? null : f.linkAtCursor();
+  const url = link ? mathLinkUrl(link.target) : '';
   return [
-    ...(getPrefs().aiRewrite ? [{ label: c.selection ? 'Rewrite selected part with AI…' : 'Rewrite formula with AI…', shortcut: REWRITE_KEY, action: () => openRewriteMath(f) } as MenuItem, { sep: true } as MenuItem] : []),
-    { label: 'Insert', sub: [
+    ...(link ? [
+      { label: url, info: true },
+      { label: 'Open link', icon: 'open', shortcut: (/Mac/.test(navigator.platform) ? '⌘' : 'Ctrl') + '+click', action: () => openLink(url) },
+      { label: 'Edit link…', icon: 'edit', shortcut: LINK_KEY, action: () => openMathLinkBox(f) },
+      { label: 'Copy link', icon: 'copy', action: () => { void navigator.clipboard?.writeText(url); } },
+      { label: 'Remove link', icon: 'unlink', action: () => { f.execute('unlink'); } },
+    ] as MenuItem[] : [{ label: 'Insert link', icon: 'link', shortcut: LINK_KEY, action: () => openMathLinkBox(f) } as MenuItem]),
+    ...(getPrefs().aiRewrite ? [{ label: c.selection ? 'Rewrite selected part with AI…' : 'Rewrite formula with AI…', icon: 'ai', shortcut: REWRITE_KEY, action: () => openRewriteMath(f) } as MenuItem] : []),
+    { sep: true },
+    { label: 'Insert', icon: 'insert', sub: [
       { label: 'Fraction', shortcut: 'Alt+M F', action: ins('\\frac{#0}{}') },
       { label: 'Square root', shortcut: 'Alt+M S', action: ins('\\sqrt{#0}') },
       { label: 'Root', shortcut: 'Alt+M R', action: ins('\\sqrt[]{#0}') },
@@ -135,9 +146,9 @@ function commonMathMenu(f: LyxMathField): MenuItem[] {
       { label: 'Matrix', sub: [['2×2', 2, 2, 'pmatrix'], ['3×3', 3, 3, 'pmatrix'], ['2×2 brackets', 2, 2, 'bmatrix'], ['cases', 2, 2, 'cases']].map(([l, r, cc, env]) => ({ label: String(l), action: () => { f.focus(); f.execute('matrix', r, cc, env); } })) },
       { label: 'Thin space', shortcut: 'Ctrl+Space', action: ins('\\,') },
     ] },
-    { label: 'Font', sub: [['Roman', 'mathrm'], ['Bold', 'mathbf'], ['Bold symbol', 'boldsymbol'], ['Calligraphic', 'mathcal'], ['Blackboard', 'mathbb'], ['Fraktur', 'mathfrak'], ['Sans serif', 'mathsf'], ['Typewriter', 'mathtt'], ['Italic', 'mathit']].map(([l, n]) => ({ label: l, action: () => { f.focus(); f.execute('font', n); } })) },
+    { label: 'Font', icon: 'format', sub: [['Roman', 'mathrm'], ['Bold', 'mathbf'], ['Bold symbol', 'boldsymbol'], ['Calligraphic', 'mathcal'], ['Blackboard', 'mathbb'], ['Fraktur', 'mathfrak'], ['Sans serif', 'mathsf'], ['Typewriter', 'mathtt'], ['Italic', 'mathit']].map(([l, n]) => ({ label: l, action: () => { f.focus(); f.execute('font', n); } })) },
     { label: 'Toggle limits (\\limits)', action: () => { f.focus(); f.execute('limits'); } },
-    { label: c.selection ? 'Copy LaTeX of selection' : 'Copy LaTeX', action: () => { void navigator.clipboard?.writeText(c.selection ? c.grabSelection() : f.latex); } },
+    { label: c.selection ? 'Copy LaTeX of selection' : 'Copy LaTeX', icon: 'copy', action: () => { void navigator.clipboard?.writeText(c.selection ? c.grabSelection() : f.latex); } },
   ];
 }
 
@@ -211,7 +222,7 @@ function selectedFormulaItems(view: EditorView, getPos: () => number | undefined
   if (pos === undefined) return null;
   const node = view.state.doc.nodeAt(pos);
   if (!node || !selectionCovers(view.state.selection, pos, node.nodeSize)) return null;
-  return [...clipboardMenuItems(view), { label: 'Copy LaTeX', action: () => { void navigator.clipboard?.writeText(f.latex); } }];
+  return [...clipboardMenuItems(view), { label: 'Copy LaTeX', icon: 'copy', action: () => { void navigator.clipboard?.writeText(f.latex); } }];
 }
 
 /**
@@ -347,8 +358,8 @@ export class MathInlineView implements NodeView {
   formulaMenu(): MenuItem[] {
     return [
       { label: 'Inline formula', info: true },
-      { label: 'Convert to display formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
-      { label: 'Delete formula', action: () => deleteFormula(this.view, this.getPos) },
+      { label: 'Convert to display formula', icon: 'formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
+      { label: 'Delete formula', icon: 'delete', action: () => deleteFormula(this.view, this.getPos) },
     ];
   }
 
@@ -654,12 +665,12 @@ export class MathDisplayView implements NodeView {
       { label: 'Display formula', info: true },
       { label: 'Numbered', shortcut: 'Alt+M N', checked: numbered, action: () => this.toggleNumbering() },
       { label: 'Number this line', checked: h.rows.length > 1 && !!h.numberedRows[this.currentRow()], disabled: h.rows.length < 2, action: () => this.ensureField().execute('numberLineToggle') },
-      { label: labels.length ? `Edit label (${labels.join(', ')})…` : 'Add label…', action: () => this.editLabel() },
-      { label: 'Copy label name', disabled: !labels.length, action: () => { void navigator.clipboard?.writeText(labels[0] ?? ''); } },
-      { label: 'Environment', sub: ENV_MENU.map(e => ({ label: e.label, checked: h.type === e.env, action: () => this.setEnv(e.env) })) },
-      { label: 'New line (row)', shortcut: 'Enter', action: () => this.ensureField().execute('newline') },
-      { label: 'Convert to inline formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
-      { label: 'Delete formula', action: () => deleteFormula(this.view, this.getPos) },
+      { label: labels.length ? `Edit label (${labels.join(', ')})…` : 'Add label…', icon: 'label', action: () => this.editLabel() },
+      { label: 'Copy label name', icon: 'copy', disabled: !labels.length, action: () => { void navigator.clipboard?.writeText(labels[0] ?? ''); } },
+      { label: 'Environment', icon: 'layout', sub: ENV_MENU.map(e => ({ label: e.label, checked: h.type === e.env, action: () => this.setEnv(e.env) })) },
+      { label: 'New line (row)', icon: 'insert', shortcut: 'Enter', action: () => this.ensureField().execute('newline') },
+      { label: 'Convert to inline formula', icon: 'formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
+      { label: 'Delete formula', icon: 'delete', action: () => deleteFormula(this.view, this.getPos) },
     ];
   }
   private currentRow(): number { const f = this.field; if (!f) return 0; const s = f.cursor.slices[0]; return Math.floor(s.idx / Math.max(1, f.hull.ncols)); }

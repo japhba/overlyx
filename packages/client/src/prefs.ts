@@ -15,7 +15,7 @@ export interface Prefs {
   autoCorrect: boolean;
   /** the ✦ button on the toolbar (switches autocomplete on and off); hidden until it is enabled here */
   aiButton: boolean;
-  /** ⌘K / Ctrl+K: rewrite the selection with an instruction */
+  /** ⌘J / Ctrl+J: rewrite the selection with an instruction */
   aiRewrite: boolean;
   /** ghost-text continuation after a pause while typing text */
   aiCompleteText: boolean;
@@ -25,7 +25,7 @@ export interface Prefs {
   aiCompleteDelay: number;
   /** Smart inversion adapts plots on a white base to the dark theme; photographs keep their colours. */
   invertFigures: boolean;
-  /** OpenRouter model ids for ⌘K and for autocomplete ('' = the server's default) */
+  /** OpenRouter model ids for ⌘J (rewrite) and for autocomplete ('' = the server's default) */
   aiModel: string;
   aiCompletionModel: string;
   /** the dark theme's text and formulas: white, or a sepia / grey tone like Apple Books' reading themes (right-click the sun/moon switch) */

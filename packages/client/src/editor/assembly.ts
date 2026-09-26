@@ -10,7 +10,7 @@
  * handler added to one shell only is exactly the divergence this file exists to prevent
  * (tests/parity.test.ts checks that neither front end assembles an editor of its own).
  */
-import { Plugin, type EditorState, type Transaction } from 'prosemirror-state';
+import { Plugin, NodeSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import type { EditorView, EditorProps, NodeView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { gapCursor } from 'prosemirror-gapcursor';
@@ -37,6 +37,7 @@ import { aiRewritePlugin } from './ai/rewrite';
 import { aiCompletePlugin } from './ai/complete';
 import { macroDefsPlugin } from './macrodefs';
 import { usagePlugin } from './plugins/usage';
+import { linksPlugin, installLinks, openLink, openLinkBox, pasteLinkOverSelection } from './links';
 import { MathInlineView, MathDisplayView, MacroView } from './nodeviews/math';
 import { InsetView } from './nodeviews/inset';
 import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
@@ -101,6 +102,7 @@ export interface AssemblyOptions {
 
 /** The ProseMirror plugins of an OverLyX editor, in the order the key bindings depend on. */
 export function assemblePlugins(o: AssemblyOptions): Plugin[] {
+  installLinks();   // ⌘K and the link bubble inside formulas, ⌘/Ctrl+click on their links
   return [
     ...o.sync,
     // AI preview / ghost text come first: their Tab / Escape must win over the LyX bindings and table navigation
@@ -126,6 +128,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     changesFilterPlugin(),
     findPlugin(),
     pasteTargetsPlugin(),
+    linksPlugin(),   // the bubble under a hyperlink, the selection shown while the link box is open
     mirrorCaretPlugin(),
     macroDefsPlugin(o.getView),
     new Plugin({
@@ -204,6 +207,11 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
         if (id) editorContext.openInTab?.(id);
         return true;
       }
+      // a hyperlink: the link box, to change its address or text (as ⌘K on it)
+      if (node.type.name === 'command' && node.attrs.cmd === 'href') {
+        if (view.editable) { view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, nodePos))); openLinkBox(view); }
+        return true;
+      }
       if (node.type.name === 'command' && (node.attrs.cmd === 'ref' || node.attrs.cmd === 'citation')) {
         editorContext.openDialog?.(node.attrs.cmd === 'ref' ? 'ref' : 'cite', { pos: nodePos, node });
         return true;
@@ -226,7 +234,7 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
       try { p = paramMap(JSON.parse(node.attrs.params || '[]')); } catch { return false; }
       const cmd = node.attrs.cmd as string;
       if (cmd === 'ref') { editorContext.gotoLabel?.(unquote(p.get('reference')).split(',')[0].trim(), view); return true; }
-      if (cmd === 'href') { const t = unquote(p.get('target')); window.open(/^[a-z]+:/i.test(t) ? t : 'https://' + t, '_blank', 'noopener'); return true; }
+      if (cmd === 'href') { const t = unquote(p.get('target')), type = unquote(p.get('type')); openLink(type && !t.startsWith(type) ? type + t : t); return true; }
       if (cmd === 'include') { const id = includeTarget(node, viewProject(view), viewDocDir(view)); if (id) editorContext.openInTab?.(id); return true; }
       return false;
     },
@@ -263,6 +271,8 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
       const html = event.clipboardData?.getData('text/html');
       // SVG markup on the text clipboard ("Copy as SVG" in drawing tools): an image, not text
       if (text && !viewOnly() && isSvgMarkup(text)) { void insertImageFiles(view, [svgFile(text)]); return true; }
+      // an address pasted over selected text: the text becomes a link to it (Google Docs)
+      if (text && !viewOnly() && pasteLinkOverSelection(view, text)) return true;
       /** plain text without LaTeX: LyX semantics (blank line = new paragraph, no HTML structure) */
       const plainPaste = () => {
         const paras = text!.replace(/\r\n/g, '\n').split(/\n{2,}/);

@@ -10,6 +10,7 @@ import * as C from '../editor/commands';
 import { isMac } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import { changeAt, resolveChange, acceptAllChanges, rejectAllChanges } from '../editor/plugins/changes';
+import { openLinkBoxFor, LINK_KEY } from '../editor/links';
 
 const SECTION_LAYOUTS: [string, string][] = [['0', 'Part'], ['1', 'Chapter'], ['2', 'Section'], ['3', 'Subsection'], ['4', 'Subsubsection'], ['5', 'Paragraph'], ['6', 'Subparagraph']];
 export interface DocumentMenuContext {
@@ -185,7 +186,7 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
       { label: 'Label…', shortcut: 'Ctrl+Alt+L', action: () => setDialog({ name: 'label' }) },
       { label: 'Cross-reference…', shortcut: 'Ctrl+Shift+I', action: () => setDialog({ name: 'ref' }) },
       { label: 'Citation…', shortcut: 'Ctrl+Shift+C', action: () => setDialog({ name: 'cite' }) },
-      { label: 'Hyperlink…', shortcut: 'Ctrl+Alt+K', action: () => setDialog({ name: 'href' }) },
+      { label: 'Link…', shortcut: LINK_KEY, action: () => runView(openLinkBoxFor) },
       { label: 'Footnote', shortcut: 'Ctrl+Alt+F', action: () => run(C.insertFootnote) },
       { label: 'Marginal note', shortcut: 'Ctrl+Alt+M', action: () => run(C.insertMarginal) },
       { label: 'Index entry', action: () => run(C.insertIndex) },

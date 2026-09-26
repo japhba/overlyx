@@ -227,6 +227,24 @@ try {
   log('typing reached the .tex file on disk through Ctrl+S');
   await shot('02-typed-and-saved');
 
+  /* ---- 3a. Ctrl+K: the link box (VS Code must not take the key as the start of its Ctrl+K chord) ---- */
+  await editorFrame.evaluate(() => {
+    const v = window.overlyx.activeView; let at = -1;
+    v.state.doc.descendants((n, pos) => { if (at < 0 && n.isText && n.text.includes('Typed')) at = pos + n.text.indexOf('Typed'); });
+    v.dispatch(v.state.tr.setSelection(v.state.selection.constructor.create(v.state.doc, at, at + 5))); v.focus();
+  });
+  await page.keyboard.press('Control+k');
+  await editorFrame.locator('.link-box input').waitFor({ state: 'visible', timeout: 5000 });
+  await sleep(300);
+  // VS Code hears every key of the webview; without the extension's own Ctrl+K binding it waits for the second key of its chord
+  if (/second key of chord/i.test(await page.locator('.statusbar').innerText())) fail('Ctrl+K in the editor started VS Code\'s Ctrl+K chord');
+  await page.keyboard.type('example.org');
+  await page.keyboard.press('Enter');
+  await until(() => editorFrame.locator('.lyx-editor .lyx-href').count().then(n => n === 1), 5000, 'the link inset');
+  await page.keyboard.press('Control+s');
+  await until(() => fs.readFileSync(path.join(ws, 'main.tex'), 'utf8').includes('\\href{https://example.org}{Typed}'), 20000, 'the link in the saved .tex file');
+  log('Ctrl+K made a link over the selection (no VS Code chord)');
+
   /* ---- 3b. the combined view: the \include'd child is edited below the master and saved to its own file ---- */
   await page.keyboard.press('Control+Shift+p');
   await page.waitForSelector('.quick-input-widget input', { timeout: 15000 });

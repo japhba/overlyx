@@ -1115,7 +1115,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { label: 'Spell checking', checked: prefs.spellcheck, action: () => setPref('spellcheck', !prefs.spellcheck) },
       { sep: true },
       { label: 'AI assistance ▸', sub: [
-        { label: ai === null ? 'Checking the server…' : ai.available ? `Models: ${prefs.aiModel || ai.model} (⌘K) · ${prefs.aiCompletionModel || ai.completionModel} (autocomplete)` : 'Not configured on this server (OPENROUTER_API_KEY)', disabled: true },
+        { label: ai === null ? 'Checking the server…' : ai.available ? `Models: ${prefs.aiModel || ai.model} (${REWRITE_KEY}) · ${prefs.aiCompletionModel || ai.completionModel} (autocomplete)` : 'Not configured on this server (OPENROUTER_API_KEY)', disabled: true },
         { label: 'Choose the models… (Settings)', action: () => setDialog({ name: 'preferences', arg: 'ai' }) },
         { label: 'Show the ✦ button on the toolbar (autocomplete on/off)', checked: prefs.aiButton, action: () => setPref('aiButton', !prefs.aiButton) },
         { sep: true },
@@ -1123,7 +1123,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         { label: 'Autocomplete text (ghost text, Tab inserts)', checked: prefs.aiCompleteText, action: () => setPref('aiCompleteText', !prefs.aiCompleteText) },
         { label: 'Autocomplete formulas', checked: prefs.aiCompleteMath, action: () => setPref('aiCompleteMath', !prefs.aiCompleteMath) },
         { sep: true },
-        { label: 'Rewrite selection with AI…', shortcut: 'Ctrl+K', disabled: !prefs.aiRewrite, action: () => runView(v => openRewrite(v)) },
+        { label: 'Rewrite selection with AI…', shortcut: REWRITE_KEY, disabled: !prefs.aiRewrite, action: () => runView(v => openRewrite(v)) },
       ] },
       { sep: true },
       { label: 'Settings…', action: () => setDialog({ name: 'preferences' }) },

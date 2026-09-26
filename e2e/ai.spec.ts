@@ -1,6 +1,6 @@
 /**
  * The right-click menu, the spell-checking switch, the preferences, and — when the server under
- * test talks to the AI stub (scripts/ai-stub.mjs, `OVERLYX_E2E_AI_STUB=1`) — the ⌘K rewrite with
+ * test talks to the AI stub (scripts/ai-stub.mjs, `OVERLYX_E2E_AI_STUB=1`) — the ⌘J rewrite with
  * its in-place preview and the ghost-text autocomplete in text and formulas.
  */
 import { test, expect, type Page } from '@playwright/test';
@@ -49,14 +49,16 @@ const selectParagraph = (page: Page, i: number) => page.evaluate((i) => {
   v.dispatch(v.state.tr.setSelection(v.state.selection.constructor.create(doc, start + 1, start + 1 + doc.child(i).content.size)));
 }, i);
 
-test('the right-click menu: clipboard first, formatting, insert, spell checking; Shift passes to the browser', async ({ page }) => {
+test('the right-click menu (Google Docs order): clipboard first, comment and link, format options, insert, spell checking; Shift passes to the browser', async ({ page }) => {
   await open(page, { spellcheck: true, spellEngine: 'browser', aiRewrite: false });   // OverLyX's checker has its own spec
   const par = page.locator('.lyx-editor .lyx-par').nth(2);
   await par.click({ button: 'right', position: { x: 12, y: 8 } });
-  const items = (await page.locator('.ctx-menu .ctx-item').allTextContents()).map(t => t.replace(/Ctrl\+\w|⌘\w|▸/g, '').trim());
-  expect(items.slice(0, 3)).toEqual(['Cut', 'Copy', 'Paste']);
-  expect(items).toContain('Text style');
-  expect(items).toContain('Paragraph layout');
+  const items = (await page.locator('.ctx-menu .ctx-item .ctx-label').allTextContents()).map(t => t.trim());
+  expect(items.slice(0, 5)).toEqual(['Cut', 'Copy', 'Paste', 'Paste without formatting', 'Delete']);
+  expect(items.slice(5, 7)).toEqual(['Comment', 'Insert link']);
+  expect(items).toContain('Format options');
+  expect(items).toContain('Paragraph style');
+  expect(items).toContain('Clear formatting');
   expect(items).toContain('Insert');
   expect(items).toContain('Spell checking');
   expect(items.some(t => t.startsWith('Write here with AI'))).toBe(false);   // off by default
@@ -66,11 +68,11 @@ test('the right-click menu: clipboard first, formatting, insert, spell checking;
   // Shift+right-click is left to the browser: no OverLyX menu
   await par.click({ button: 'right', position: { x: 12, y: 8 }, modifiers: ['Shift'] });
   await expect(page.locator('.ctx-menu')).toHaveCount(0);
-  // a selection adds "Comment on this" / "Turn into a formula"
+  // a selection adds "Turn into a formula"
   await selectParagraph(page, 2);
   await par.click({ button: 'right', position: { x: 12, y: 8 } });
   await expect(page.locator('.ctx-menu .ctx-item', { hasText: 'Turn into a formula' })).toHaveCount(1);
-  await expect(page.locator('.ctx-menu .ctx-item', { hasText: 'Comment on this' })).toHaveCount(1);
+  await expect(page.locator('.ctx-menu .ctx-item', { hasText: /^Comment/ })).toHaveCount(1);
   await page.keyboard.press('Escape');
 });
 
@@ -129,12 +131,12 @@ test('AI switches live in Tools ▸ AI assistance and the preferences; the palet
 test.describe('with the AI stub', () => {
   test.skip(!AI_STUB, 'start the server with OPENROUTER_API_URL=http://127.0.0.1:3999 OPENROUTER_API_KEY=test-key and `node scripts/ai-stub.mjs`, then OVERLYX_E2E_AI_STUB=1');
 
-  test('⌘K rewrites a selection: preview in place (formula and citation rendered), Enter applies, Esc rejects', async ({ page }) => {
+  test('⌘J rewrites a selection: preview in place (formula and citation rendered), Enter applies, Esc rejects', async ({ page }) => {
     await open(page, { aiRewrite: true, aiCompleteText: false, aiCompleteMath: false });
     const par = page.locator('.lyx-editor .lyx-par').nth(2);
     await par.click({ position: { x: 12, y: 8 } });
     await selectParagraph(page, 2);
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('Control+j');
     const panel = page.locator('.ai-panel[data-ai-panel="text"]');
     await expect(panel).toBeVisible();
     await page.keyboard.type('make it crisper');
@@ -154,7 +156,7 @@ test.describe('with the AI stub', () => {
     expect(await par.evaluate(el => el.textContent)).toContain('The variance of the weights');
     // again, and accept this time
     await selectParagraph(page, 2);
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('Control+j');
     await page.keyboard.type('make it crisper');
     await page.keyboard.press('Enter');
     await expect(page.locator('.ai-new')).toBeVisible({ timeout: 10000 });
@@ -165,7 +167,7 @@ test.describe('with the AI stub', () => {
     await expect(par.locator('.lyx-command-citation')).toHaveCount(1);
     // an empty selection writes at the cursor; a two-paragraph reply becomes two paragraphs
     await cursorAtEndOf(page, 4);
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('Control+j');
     await page.keyboard.type('two paragraphs please');
     await page.keyboard.press('Enter');
     await expect(page.locator('.ai-new.block')).toBeVisible({ timeout: 10000 });
@@ -174,17 +176,17 @@ test.describe('with the AI stub', () => {
     await expect(page.locator('.lyx-editor .lyx-par').last()).toHaveText('Second proposed paragraph.');
   });
 
-  test('⌘K: model picker in the panel, follow-ups refine the proposal, and the source view rewrites raw LaTeX', async ({ page }) => {
+  test('⌘J: model picker in the panel, follow-ups refine the proposal, and the source view rewrites raw LaTeX', async ({ page }) => {
     await open(page, { aiRewrite: true, aiCompleteText: false, aiCompleteMath: false });
     await page.locator('.lyx-editor .lyx-par').nth(2).click({ position: { x: 12, y: 8 } });   // focus the editor first
     await selectParagraph(page, 2);
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('Control+j');
     const panel = page.locator('.ai-panel');
     await expect(panel).toBeVisible();
     // a real mouse press must reach the select (the panel's focus-keeping mousedown handler used
     // to preventDefault on it, so the native dropdown never opened): not default-prevented
     expect(await panel.locator('.ai-model').evaluate(el => el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })))).toBe(true);
-    // the model is chosen right in the panel and kept as the ⌘K preference
+    // the model is chosen right in the panel and kept as the rewrite preference
     await panel.locator('.ai-model option[value="anthropic/claude-haiku-4.5"]').waitFor({ state: 'attached' });   // options are never 'visible'
     await panel.locator('.ai-model').selectOption('anthropic/claude-haiku-4.5');
     await panel.locator('.ai-input').click();
@@ -203,7 +205,7 @@ test.describe('with the AI stub', () => {
     await expect(panel).toHaveCount(0);
     await expect(page.locator('.lyx-editor .lyx-par').nth(2)).toContainText('Refined (shorter please)');
 
-    // the source view: ⌘K over selected raw LaTeX proposes raw source and applies it to the document
+    // the source view: ⌘J over selected raw LaTeX proposes raw source and applies it to the document
     await page.keyboard.press('Control+Alt+s');
     const ta = page.locator('.source-pane textarea');
     await expect(ta).toBeVisible();
@@ -212,7 +214,7 @@ test.describe('with the AI stub', () => {
       const at = el.value.indexOf('The last paragraph of the paper.');
       el.focus(); el.setSelectionRange(at, at + 'The last paragraph of the paper.'.length);
     });
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('Control+j');
     const srcPanel = page.locator('.ai-panel[data-ai-panel="source"]');
     await expect(srcPanel).toBeVisible();
     await page.keyboard.type('bold it');
@@ -289,7 +291,7 @@ test.describe('with the AI stub', () => {
     await expect(ghost).toHaveText(/^(rned| is governed) by the largest/);
   });
 
-  test('formulas: ghost continuation at the caret (Tab inserts) and ⌘K rewrite with a rendered proposal', async ({ page }) => {
+  test('formulas: ghost continuation at the caret (Tab inserts) and ⌘J rewrite with a rendered proposal', async ({ page }) => {
     await open(page, { aiRewrite: true, aiCompleteText: false, aiCompleteMath: true, aiCompleteDelay: 200 });
     const disp = page.locator('.lyx-editor .lyx-math-display').first();
     await disp.click();
@@ -301,7 +303,7 @@ test.describe('with the AI stub', () => {
     const latex = () => page.evaluate(() => { let l = ''; (window as any).overlyx.activeView.state.doc.descendants((n: any) => { if (n.type.name === 'math_display') l = n.attrs.latex; }); return l; });
     expect(await latex()).toContain('\\log g+1+\\frac{\\sigma^{2}}{2}g^{2}');
     await expect(page.locator('.lm-ghost')).toHaveCount(0);
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('Control+j');
     await expect(page.locator('.ai-panel[data-ai-panel="math"]')).toBeVisible();
     await page.keyboard.type('as a fraction');
     await page.keyboard.press('Enter');

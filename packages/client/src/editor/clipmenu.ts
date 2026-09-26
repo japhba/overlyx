@@ -59,15 +59,33 @@ export async function pasteFromClipboard(view: EditorView): Promise<boolean> {
   return clip.html ? view.pasteHTML(clip.html, event) : view.pasteText(clip.text, event);
 }
 
-/** Cut and Copy (disabled without a selection) and Paste (images become graphics insets, text and table cells go in as with Ctrl+V) */
+/** Paste the clipboard's text as plain text: no formatting, no LaTeX parsed (Google Docs' "Paste without formatting"). */
+export async function pastePlainFromClipboard(view: EditorView): Promise<boolean> {
+  let text: string;
+  try { text = await navigator.clipboard?.readText?.() ?? ''; } catch { return false; }
+  if (view.isDestroyed) return false;
+  view.focus();
+  if (text) view.pasteText(text);
+  return true;
+}
+
+/**
+ * Cut and Copy (disabled without a selection), Paste (images become graphics insets, text and
+ * table cells go in as with Ctrl+V), Paste without formatting, and Delete (of the selection).
+ */
 export function clipboardMenuItems(view: EditorView): MenuItem[] {
   const hasSel = !view.state.selection.empty;
+  const failed = (keys: string) => () => editorContext.notify?.('Use ' + keys + ' to paste', 'error');
   return [
-    { label: 'Cut', shortcut: MOD + '+X', disabled: !hasSel, action: () => { view.focus(); document.execCommand('cut'); } },
-    { label: 'Copy', shortcut: MOD + '+C', disabled: !hasSel, action: () => { view.focus(); document.execCommand('copy'); } },
-    { label: 'Paste', shortcut: MOD + '+V', action: () => {
+    { label: 'Cut', icon: 'cut', shortcut: MOD + '+X', disabled: !hasSel, action: () => { view.focus(); document.execCommand('cut'); } },
+    { label: 'Copy', icon: 'copy', shortcut: MOD + '+C', disabled: !hasSel, action: () => { view.focus(); document.execCommand('copy'); } },
+    { label: 'Paste', icon: 'paste', shortcut: MOD + '+V', action: () => {
       view.focus();
-      pasteFromClipboard(view).then(ok => { if (!ok) editorContext.notify?.('Use ' + MOD + '+V to paste', 'error'); }).catch(() => editorContext.notify?.('Use ' + MOD + '+V to paste', 'error'));
+      pasteFromClipboard(view).then(ok => { if (!ok) failed(MOD + '+V')(); }).catch(failed(MOD + '+V'));
     } },
+    { label: 'Paste without formatting', icon: 'pastePlain', shortcut: MOD + '+Shift+V', action: () => {
+      pastePlainFromClipboard(view).then(ok => { if (!ok) failed(MOD + '+Shift+V')(); }).catch(failed(MOD + '+Shift+V'));
+    } },
+    { label: 'Delete', icon: 'delete', disabled: !hasSel, action: () => { view.dispatch(view.state.tr.deleteSelection().scrollIntoView()); view.focus(); } },
   ];
 }

@@ -1,5 +1,5 @@
 /**
- * ⌘K / Ctrl+K "rewrite with AI" (Tools ▸ AI ▸ Rewrite with AI): a small prompt appears under the
+ * ⌘J / Ctrl+J "rewrite with AI" (Tools ▸ AI ▸ Rewrite with AI): a small prompt appears under the
  * selection; the instruction and the selected passage go to the server (ai.ts), which returns
  * the replacement as LaTeX and as editor nodes. The proposal is previewed in place — the old
  * text struck through, the new content rendered after it (formulas included) — and applied only
@@ -53,7 +53,7 @@ export function closeRewrite(): void { panel?.close(); }
 export function rewriteOpen(): boolean { return !!panel; }
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
-export const REWRITE_KEY = isMac ? '⌘K' : 'Ctrl+K';
+export const REWRITE_KEY = isMac ? '⌘J' : 'Ctrl+J';
 
 type Target =
   | { kind: 'text'; view: EditorView; from: number; to: number; content: PMJSON[]; layout: string; before: string; after: string }
@@ -81,7 +81,7 @@ class RewritePanel {
     this.dom.dataset.aiPanel = target.kind;
     this.dom.innerHTML = `
       <div class="ai-row">
-        <select class="ai-model" title="Model for this rewrite (kept as your ⌘K model)"></select>
+        <select class="ai-model" title="Model for this rewrite (kept as your rewrite model)"></select>
         <textarea class="ai-input" rows="1" placeholder="${target.kind === 'math' ? 'What to do with the formula… (Enter to ask)' : target.from === target.to ? 'What to write here… (Enter to ask)' : 'What to do with the selection… (Enter to ask)'}"></textarea>
         <button type="button" class="ai-close" title="Close (Esc)">✕</button>
       </div>
@@ -146,7 +146,7 @@ class RewritePanel {
     this.host.appendChild(this.dom);
     this.place(anchor);
     this.setStatus(target.kind === 'math' ? 'Describe the change to the formula.' : target.from === target.to ? 'Describe what to write at the cursor.' : 'Describe the change — e.g. “more concise”, “fix grammar”, “as a bulleted list”, “make the argument rigorous”.');
-    // the keyboard goes to the prompt at once (a key typed right after ⌘K must not land in the editor)
+    // the keyboard goes to the prompt at once (a key typed right after ⌘J must not land in the editor)
     this.input.focus();
     requestAnimationFrame(() => { if (document.activeElement !== this.input && this.dom.isConnected) this.input.focus(); });
     // the passage is tracked in the plugin state from now on, so that it follows edits made meanwhile
@@ -304,7 +304,7 @@ class RewritePanel {
 
 function escapeAttr(s: string): string { return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 
-/** True when ⌘K should open the AI prompt (the preference is on). */
+/** True when ⌘J should open the AI prompt (the preference is on). */
 export function rewriteEnabled(): boolean { return getPrefs().aiRewrite; }
 
 function notConfigured(): void {
@@ -343,7 +343,7 @@ export function openSourceRewrite(t: { docId: string; host: HTMLElement; textare
   panel = new RewritePanel({ kind: 'source', docId: t.docId, host: t.host, textarea: t.textarea, from: t.textarea.selectionStart, to: t.textarea.selectionEnd, onAccept: t.onAccept }, t.anchor);
 }
 
-/** Open the rewrite prompt for a formula being edited (⌘K inside the field, or its context menu). */
+/** Open the rewrite prompt for a formula being edited (⌘J inside the field, or its context menu). */
 export function openRewriteMath(field: LyxMathField, view: EditorView | null = editorContext.activeView ?? null): void {
   if (!editorContext.ai?.available) { notConfigured(); return; }
   closeRewrite();

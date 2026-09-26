@@ -12,13 +12,14 @@ import type { EditorView } from 'prosemirror-view';
 import {
   paragraphBreak, paragraphBreakInverse, fontCommands, fontDefault, changeDepth, listIndent, insertMath, toggleMathDisplay, typeDollar,
   insertNewline, insertSpace, insertSpecial, insertERT, insertFootnote, insertNote, insertComment, selectInset, toggleInset,
-  moveParagraph, deleteToParagraphEnd, setLayout, setKnownLayout, setParagraphAttrs, arrowIntoMath, setValueMark, insertHyphens, insertDash, insertQuote, smartQuote, insertMarginal,
+  moveParagraph, setLayout, setKnownLayout, setParagraphAttrs, arrowIntoMath, setValueMark, insertHyphens, insertDash, insertQuote, smartQuote, insertMarginal,
  listExitBackspace } from './commands';
 import { editorContext } from './context';
 import { activeMathField } from './lyxmath/field';
 import { ATOMS } from './plugins/dragselect';
 import { trackedDelete } from './plugins/changes';
 import { openRewrite, rewriteEnabled } from './ai/rewrite';
+import { openLinkBox } from './links';
 import { recordUsage } from '../usage';
 
 export interface UiActions {
@@ -196,6 +197,7 @@ export function lyxKeymap(): Plugin {
     'Shift-Mod-o': fontCommands.strikeout,
     'Shift-Mod-n': fontCommands.noun,
     'Alt-Mod-d': fontDefault,
+    'Mod-\\': fontDefault,   // Google Docs' "Clear formatting"
     'Mod-m': (_s, _d, view) => (view ? insertMath(false)(view) : false),
     'Shift-Mod-m': (_s, _d, view) => (view ? insertMath(true)(view) : false),
     'Alt-Mod-n': (_s, _d, view) => (view ? insertMath(true, 'equation')(view) : false),
@@ -226,8 +228,10 @@ export function lyxKeymap(): Plugin {
     // cell-forward; depth-increment. Outside tables and lists the browser keeps the key.
     Tab: chainCommands(goToNextCell(1), listIndent(1)),
     'Shift-Tab': chainCommands(goToNextCell(-1), listIndent(-1)),
-    // LyX: delete to the end of the paragraph — unless "Rewrite with AI" is switched on (Tools ▸ AI), then ⌘K/Ctrl+K opens the AI prompt
-    'Mod-k': (state, dispatch, view) => (view && rewriteEnabled() ? openRewrite(view) : deleteToParagraphEnd(state, dispatch, view)),
+    // ⌘K / Ctrl+K: a link over the selection, as in Google Docs (editor/links.ts; LyX's Ctrl+K deleted to the
+    // end of the paragraph). ⌘J / Ctrl+J: rewrite with AI, when that is switched on (Tools ▸ AI)
+    'Mod-k': (_state, _dispatch, view) => { if (view) openLinkBox(view); return true; },
+    'Mod-j': (_state, _dispatch, view) => !!view && rewriteEnabled() && openRewrite(view),
     'Mod-s': ui(a => a.save()),
     F2: ui(a => a.save()),
     'Mod-r': ui(a => a.viewPdf()),
@@ -253,7 +257,7 @@ export function lyxKeymap(): Plugin {
     'Alt-Mod-p': ui(a => a.openDialog('paragraph')),
     'Shift-Mod-i': ui(a => a.openDialog('ref')),
     'Alt-Mod-l': ui(a => a.openDialog('label')),
-    'Alt-Mod-k': ui(a => a.openDialog('href')),
+    'Alt-Mod-k': (_state, _dispatch, view) => { if (view) openLinkBox(view); return true; },
     'Mod-ArrowRight': (state, dispatch, view) => arrowIntoMath(1)(state, dispatch, view) || false,
     ArrowRight: (state, dispatch, view) => arrowIntoMath(1)(state, dispatch, view),
     ArrowLeft: (state, dispatch, view) => arrowIntoMath(-1)(state, dispatch, view),

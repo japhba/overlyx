@@ -322,8 +322,7 @@ export class MathGeometry implements GeomLookup {
       const lineTop = baseline - 0.8 * fs, lineBottom = baseline + 0.25 * fs;
       const from = atoms.length, line = lines.length;
       if (!empty) {
-        for (const child of Array.from(part.children) as HTMLElement[]) {
-          if (!child.classList.contains('lm-a') || child.classList.contains('lm-ghost')) continue;
+        for (const child of atomBoxes(part)) {
           const atom = cell[atoms.length];
           if (!atom) break;
           const r = child.getBoundingClientRect();
@@ -343,6 +342,19 @@ export class MathGeometry implements GeomLookup {
       top: Math.min(...lines.map(l => l.top)), bottom: Math.max(...lines.map(l => l.bottom)),
     };
   }
+}
+
+/**
+ * The atom boxes of a cell box, in order: its `.lm-a` children, also those inside a class-less row
+ * MathJax puts around them (the pieces of a `\text{…}` of more than one character).
+ */
+function atomBoxes(part: HTMLElement): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  for (const child of Array.from(part.children) as HTMLElement[]) {
+    if (child.classList.contains('lm-a')) { if (!child.classList.contains('lm-ghost')) out.push(child); }
+    else if (child.tagName === 'MJX-MROW' && !child.getAttribute('class')) out.push(...atomBoxes(child));
+  }
+  return out;
 }
 
 export { isHull };

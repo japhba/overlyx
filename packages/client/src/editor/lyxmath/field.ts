@@ -239,6 +239,34 @@ export class LyxMathField {
     this.scheduleLayout();
   }
   blur(): void { this.input.blur(); }
+
+  private held = false;
+  /**
+   * A popup that works on this field's cursor takes the keyboard (the link box, editor/links.ts):
+   * the field keeps its cursor and selection — its owner does not hear of the blur, which would
+   * set the formula again from the document — until endHold: back into the field (`refocus`), or
+   * the popup closed elsewhere, and the blur takes its course.
+   */
+  hold(): void { this.held = true; }
+  endHold(refocus: boolean): void {
+    if (!this.held) return;
+    this.held = false;
+    if (refocus) { this.input.focus({ preventScroll: true }); this.scheduleLayout(); }
+    else if (!this.focused) { this.overlay.replaceChildren(); this.opts.onBlur?.(); }
+  }
+  /** the link (\href) the cursor is in or touches: its target as written in the LaTeX */
+  linkAtCursor(): { target: string } | null {
+    const l = this.cursor.linkAt();
+    return l ? { target: l.atom.target } : null;
+  }
+  /** the box of the link at the cursor, else of the caret (client coordinates; the link box and bubble are placed under it) */
+  linkAnchor(): { left: number; top: number; bottom: number } | null {
+    const c = this.cursor, l = c.linkAt();
+    const box = l ? this.geometry().atom(l.atom) : null;
+    if (box) return { left: box.left, top: box.top, bottom: box.bottom };
+    const cr = this.caretRect(c.owner, c.idx, c.pos);
+    return cr ? { left: cr.x, top: cr.top, bottom: cr.bottom } : null;
+  }
   destroy(): void { cancelAnimationFrame(this.raf); this.offRenderer(); this.renderStamp++; for (const [t, l] of this.windowListeners) window.removeEventListener(t, l as EventListener); this.windowListeners = []; this.dom.remove(); }
 
   /** Commands for menus, toolbars and shortcuts. */
@@ -280,6 +308,18 @@ export class LyxMathField {
         return true;
       }
       case 'text': return change('text', () => c.mathMode());
+      // ⌘K (editor/links.ts): the selection becomes a link to args[0] (LaTeX), else a new link with the text args[1];
+      // on a link: its target changes
+      case 'link': {
+        const target = String(args[0] ?? ''), text = String(args[1] ?? '');
+        const on = c.selection ? null : c.linkAt();
+        if (on) return change('link', () => { on.atom.target = target; });
+        this.snapshot('link');
+        if (!c.insertLink(target, text)) { this.undoStack.pop(); return false; }
+        this.commit();
+        return true;
+      }
+      case 'unlink': return c.linkAt() ? change('unlink', () => c.unlink()) : false;
       // plain delimiter pair around the selection (no \left / \bigl): `\llangle x \rrangle`
       case 'pair': return change('pair', () => { const [l, r] = args as string[]; const sel = c.grabAndEraseSelection(); c.niceInsert(l, false); c.niceInsert(r, false); c.posBackward(); if (sel) c.niceInsert(sel, false); });
       // LyX math-size: \displaystyle etc. wrap the selection (or start an inset at the cursor)
@@ -381,7 +421,7 @@ export class LyxMathField {
     // the inset under the mouse pointer is marked (Color_mathframe), also when not editing
     const hover = this.hoverAtom;
     if (hover && !(this.focused && c.slices.some(s => s.owner === hover))) { const r = g.atom(hover); if (r) this.corners(ov, base, r, markerKind(hover)); }
-    if (!this.focused) return;
+    if (!this.focused && !this.held) return;
     // selection (MathData::drawSelection): inside one cell from boundary to boundary over the
     // cell's height; whole cells when it spans cells
     const sel = c.selRange();
@@ -505,7 +545,12 @@ export class LyxMathField {
   private wire(): void {
     const input = this.input;
     input.addEventListener('focus', () => { this.focused = true; active = this; this.dom.classList.add('focused'); this.opts.onFocus?.(); this.scheduleLayout(); notifyFocus(); });
-    input.addEventListener('blur', () => { this.focused = false; if (active === this) active = null; this.altM = false; this.deadHat = false; this.dom.classList.remove('focused'); this.cursor.macroModeClose(); this.overlay.replaceChildren(); if (this.clearGhost()) this.render(); this.opts.onBlur?.(); notifyFocus(); });
+    input.addEventListener('blur', () => {
+      this.focused = false; if (active === this) active = null; this.altM = false; this.deadHat = false; this.dom.classList.remove('focused'); this.cursor.macroModeClose(); this.overlay.replaceChildren(); if (this.clearGhost()) this.render();
+      // held by a popup (the link box): the cursor and selection stay, drawn as they are, until endHold
+      if (this.held) this.scheduleLayout(); else this.opts.onBlur?.();
+      notifyFocus();
+    });
     input.addEventListener('keydown', ev => this.keydown(ev));
     input.addEventListener('beforeinput', ev => {
       if (ev.inputType === 'insertText' || ev.inputType === 'insertCompositionText') { if (ev.inputType === 'insertText') { ev.preventDefault(); this.typed(ev.data ?? ''); } return; }
@@ -770,7 +815,9 @@ export class LyxMathField {
         case ' ': if (!this.readOnly) { this.snapshot('type'); c.insertAtom({ t: 'space', n: ',' }); this.commit(); } handled(); return;
         case 'b': if (!this.readOnly) this.execute('font', c.mode === 'text' ? 'textbf' : 'mathbf'); handled(); return;
         case 'e': if (!this.readOnly) this.execute('font', c.mode === 'text' ? 'emph' : 'mathcal'); handled(); return;
-        case 'k': if (!this.readOnly && getPrefs().aiRewrite && editorContext.aiRewriteMath) { handled(); editorContext.aiRewriteMath(this); } return;
+        // ⌘K / Ctrl+K: a link over the selection (editor/links.ts); ⌘J / Ctrl+J: rewrite with AI
+        case 'k': if (!this.readOnly && editorContext.mathLink) { handled(); editorContext.mathLink(this); } return;
+        case 'j': if (!this.readOnly && getPrefs().aiRewrite && editorContext.aiRewriteMath) { handled(); editorContext.aiRewriteMath(this); } return;
         default: return;   // Ctrl+S etc. bubble to the editor
       }
     }

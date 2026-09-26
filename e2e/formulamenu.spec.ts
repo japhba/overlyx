@@ -31,7 +31,7 @@ const selection = (page: Page) => page.evaluate(() => {
   const s = (window as any).overlyx.activeView.state.selection;
   return { type: s.constructor.name.replace(/^_/, ''), from: s.from as number, to: s.to as number, empty: s.empty as boolean, inField: document.activeElement?.classList.contains('lm-input') ?? false };
 });
-const menuLabels = (page: Page) => page.locator('.ctx-menu .ctx-item').evaluateAll(rows => rows.map(r => (r.firstChild as HTMLElement).textContent + (r.classList.contains('disabled') ? ' [disabled]' : '')));
+const menuLabels = (page: Page) => page.locator('.ctx-menu .ctx-item').evaluateAll(rows => rows.map(r => r.querySelector('.ctx-label')!.textContent + (r.classList.contains('disabled') ? ' [disabled]' : '')));
 
 async function open(page: Page) {
   await login(page);

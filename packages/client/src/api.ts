@@ -42,7 +42,7 @@ export interface BibItem { key: string; author: string; year: string; title: str
 export interface HealthIssue { code: string; message: string; severity: 'warning' | 'error'; fixable: boolean }
 /** ProseMirror JSON (nodes of the editor schema) as the server returns them for AI proposals */
 export interface PMJSON { type: string; attrs?: Record<string, any>; content?: PMJSON[]; marks?: { type: string; attrs?: Record<string, any> }[]; text?: string }
-export interface AiModelInfo { id: string; label: string; note: string; /** Artificial Analysis Intelligence Index */ aa?: number; /** measured ⌘K response time */ speed: string }
+export interface AiModelInfo { id: string; label: string; note: string; /** Artificial Analysis Intelligence Index */ aa?: number; /** measured rewrite (⌘J) response time */ speed: string }
 export interface AiStatus { available: boolean; model: string; completionModel: string; models: AiModelInfo[] }
 export interface AiRewriteRequest { instruction: string; content: PMJSON[]; layout?: string; before?: string; after?: string; model?: string; math?: { latex: string; display: boolean; selection?: string }; source?: { text: string; before?: string; after?: string }; history?: { instruction: string; tex: string }[] }
 export interface AiRewriteResult { tex: string; nodes: PMJSON[]; original: string }
@@ -212,7 +212,7 @@ export const api = {
   aiRepair: (id: string) => req<{ original: string; proposed: string; issues: HealthIssue[] }>('POST', `/api/docs/${encId(id)}/ai-repair`),
   /** Apply an AI-proposed fix once approved in the merge editor. */
   applyAiRepair: (id: string, original: string, proposed: string) => req<{ ok: true; remaining: HealthIssue[] }>('POST', `/api/docs/${encId(id)}/ai-repair/apply`, { original, proposed }),
-  /** AI assistance (ai.ts on the server): availability, ⌘K rewrite, autocomplete */
+  /** AI assistance (ai.ts on the server): availability, ⌘J rewrite, autocomplete */
   aiStatus: () => req<AiStatus>('GET', '/api/ai/status'),
   aiRewrite: (id: string, body: AiRewriteRequest, signal?: AbortSignal) => req<AiRewriteResult>('POST', `/api/docs/${encId(id)}/ai/rewrite`, body, undefined, signal),
   aiComplete: (id: string, body: AiCompleteRequest, signal?: AbortSignal) => req<AiCompleteResult>('POST', `/api/docs/${encId(id)}/ai/complete`, body, undefined, signal),

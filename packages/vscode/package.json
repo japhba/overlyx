@@ -75,6 +75,11 @@
         "command": "overlyx.checkForUpdates",
         "title": "Check for Updates",
         "category": "OverLyX"
+      },
+      {
+        "command": "overlyx.editorKey",
+        "title": "Editor key (handled by the OverLyX editor)",
+        "category": "OverLyX"
       }
     ],
     "viewsContainers": {
@@ -132,6 +137,9 @@
           "when": "view == overlyx.structureExplorer",
           "group": "navigation"
         }
+      ],
+      "commandPalette": [
+        { "command": "overlyx.editorKey", "when": "false" }
       ]
     },
     "keybindings": [
@@ -146,7 +154,10 @@
         "key": "ctrl+alt+j",
         "mac": "cmd+alt+j",
         "when": "activeCustomEditorId == overlyx.texEditor"
-      }
+      },
+      { "command": "overlyx.editorKey", "key": "ctrl+k", "mac": "cmd+k", "when": "activeCustomEditorId == overlyx.texEditor && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus" },
+      { "command": "overlyx.editorKey", "key": "ctrl+j", "mac": "cmd+j", "when": "activeCustomEditorId == overlyx.texEditor && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus" },
+      { "command": "overlyx.editorKey", "key": "ctrl+\\", "mac": "cmd+\\", "when": "activeCustomEditorId == overlyx.texEditor && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus" }
     ],
     "configuration": {
       "title": "OverLyX",

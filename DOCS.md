@@ -566,13 +566,30 @@ blend.
   where they are editing (their cursor is scrolled into view and flashes) —, then the **Share**
   button (the project's owner only; also *File ▸ Share project…*), the theme toggle and your own
   avatar, whose menu signs out.
-* **Right-click menu** (`editor/editormenu.ts`): what the click landed on comes first (a
-  cross-reference, citation, link, child document, graphics, inset, tracked change — with the
-  actions that make sense for it), then Cut / Copy / Paste, *Rewrite with AI* (when switched on),
-  *Comment on this* and *Turn into a formula* for a selection, the text style, paragraph layout,
-  paragraph, insert and track-changes submenus, and the spell-checking switch. Formulas have their
-  own menu (numbering, environment, label, insert, fonts, AI); a misspelt word puts its
-  corrections first. Shift+right-click gives the browser's own menu.
+* **Right-click menu** (`editor/editormenu.ts`, drawn by `editor/contextmenu.ts` with the line
+  icons of `editor/menuicons.ts`), laid out like Google Docs': what the click landed on comes
+  first (a cross-reference, citation, link — open, edit, copy, remove —, child document, graphics,
+  inset, tracked change), then Cut / Copy / Paste / *Paste without formatting* / Delete, *Comment*,
+  *Insert link* (⌘K), *Rewrite with AI* (⌘J, when switched on) and *Turn into a formula* for a
+  selection, *Format options* (bold … typewriter, alignment, indent depth, paragraph settings),
+  *Paragraph style* (the layouts), *Clear formatting* (⌘\\), the insert, sections and
+  track-changes submenus, and the spell-checking switches. ↑/↓ choose an entry, → / ← open and
+  close a submenu, Enter runs it. Formulas have their own menu (link, AI, numbering, environment,
+  label, insert, fonts); a misspelt word puts its corrections first. Shift+right-click gives the
+  browser's own menu.
+* **Links** (`editor/links.ts`), as in Google Docs: ⌘K / Ctrl+K (also Ctrl+Alt+K, the toolbar's
+  link button, Insert ▸ Link…, *Insert link* in the menus) opens the link box under the selection —
+  the address for the selected text (plain text within one paragraph), text and address for a new
+  link at the cursor, or the link under the cursor to change it; `arxiv.org/…` gets `https://`,
+  `a@b.org` becomes `mailto:`. While the cursor is on a link a bubble under it shows the address
+  (a click opens it in a new tab — only web, mail and ftp addresses), Copy, Edit and Remove link;
+  ⌘/Ctrl+click follows a link, a double-click edits it, and an address pasted over selected text
+  links that text. Text links are LyX's hyperlink insets (`\href{…}{…}` in the file). Inside a
+  formula the same keys make `\href{target}{…}` in the math model (core `math/ast.ts`, an OverLyX
+  addition LyX keeps as an unknown command): the selection — say the `Wang24` of a table's
+  `\text{Wang24}` cell — becomes `\text{\href{https://…}{Wang24}}`, drawn in the link colour
+  (`.lm-href`; not MathJax's own `\href`, which would navigate on a click), with the same bubble;
+  the target is kept as LaTeX (`%`, `#` escaped) and the document loads hyperref.
 * **Spell checking** (`editor/spell/`): OverLyX's own checker by default — a Hunspell dictionary
   (nspell) in a Web Worker, chosen by the document's language (English, British, German, French;
   served from `/dict/`, loaded on demand), checking starts as soon as a document opens and only the
@@ -598,7 +615,7 @@ blend.
   enabled (internet access; sandboxed shell commands still ask). They also tell it the documents
   are live-edited: re-read before editing, never restore earlier content from memory. The panel streams
   message/reasoning deltas, tool calls (folded) and diffs over SSE. Every message carries editor
-  context automatically: the open documents and the current selection — as LaTeX (the ⌘K
+  context automatically: the open documents and the current selection — as LaTeX (the ⌘J
   conversion) and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in an excerpt of the file. Formulas in the
   transcript (assistant, user and reasoning text) render through the math editor's MathJax path
   with the document's macros; they select as one unit, and copying puts their LaTeX source on
@@ -622,16 +639,15 @@ blend.
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or
   Preferences — the switches are menu items, so the command palette finds them): needs
   `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.1 Flash Lite rewrites,
-  Gemini 2.5 Flash Lite completes (`OVERLYX_AI_MODEL`, `OVERLYX_AI_COMPLETION_MODEL`). The ⌘K
-  panel has its own model picker (kept as the ⌘K preference), accepts follow-up instructions that
+  Gemini 2.5 Flash Lite completes (`OVERLYX_AI_MODEL`, `OVERLYX_AI_COMPLETION_MODEL`). The ⌘J
+  panel has its own model picker (kept as the rewrite preference), accepts follow-up instructions that
   refine the shown proposal (Enter with an empty box accepts), and also works in the source view
-  (⌘K over selected raw LaTeX proposes raw source; accepting splices it and the live apply carries
+  (⌘J over selected raw LaTeX proposes raw source; accepting splices it and the live apply carries
   it into the document). Autocorrect (Tools ▸ Autocorrect typos, on by default): a minor typo is
   fixed when the word is finished — dictionary-based (adjacent-swap candidates checked directly:
   Hunspell never suggests 'the' for 'teh'), never in formulas or code, Backspace right after
   reverts and pins the word for the session.
-  * *Rewrite with AI* — `⌘K` / `Ctrl+K` (LyX's delete-to-end-of-paragraph on that key steps aside
-    while this is on): select a passage — or nothing, to write at the cursor — and describe the
+  * *Rewrite with AI* — `⌘J` / `Ctrl+J` (⌘K is the link box, as in Google Docs): select a passage — or nothing, to write at the cursor — and describe the
     change in the small prompt under it. The passage, the instruction and the document's LaTeX
     (for context: notation, macros, citation keys) go to the model; the reply comes back as LaTeX
     parsed into real editor nodes and is previewed *in place* — old text struck through, the
@@ -649,8 +665,8 @@ blend.
     characters keeps it, Tab inserts it as LaTeX. Replies are cached and rate-limited per user.
   * *The ✦ toolbar button* — off the toolbar until *Preferences ▸ Show the ✦ AI button* (or Tools ▸
     AI assistance) enables it; it is a plain on/off switch for autocomplete (text and formulas
-    together), nothing else — rewriting stays on ⌘K / the Tools menu.
-  * *Models* — Preferences ▸ Models chooses the model for ⌘K and for autocomplete separately (a
+    together), nothing else — rewriting stays on ⌘J / the Tools menu.
+  * *Models* — Preferences ▸ Models chooses the model for ⌘J (rewrite) and for autocomplete separately (a
     list with measured notes, or any OpenRouter id typed in); the choice is per browser and sent with
     each request (`model`, validated on the server); the server defaults apply otherwise.
 * **Cursor memory**: a document reopens with the cursor where it was the last time it was open in
@@ -867,7 +883,7 @@ on exactly the repositories that receive PDFs, nothing else.
 `OPENROUTER_API_KEY` (from [openrouter.ai/keys](https://openrouter.ai/keys)) enables "Escalate to AI…"
 document repair (see "Document health" below); `OPENROUTER_REPAIR_MODEL` overrides the model
 (default `anthropic/claude-opus-5`). Without a key the feature is hidden. The same key powers the
-editor's AI assistance (⌘K rewrite, autocomplete; `OVERLYX_AI_MODEL` /
+editor's AI assistance (⌘J rewrite, autocomplete; `OVERLYX_AI_MODEL` /
 `OVERLYX_AI_COMPLETION_MODEL`, defaults `google/gemini-3.7-flash` for rewrites and
 `google/gemini-2.5-flash-lite` for autocomplete — the 3.7 model spends ~100 hidden reasoning tokens on
 every reply (2.6 s) and, like 3.5 Flash Lite, answered sentence ends of a real paper with a word or
@@ -949,7 +965,7 @@ journalctl -u overlyx-autodeploy -n 50   # on the production server: what the la
 # offline mode needs the built client (service worker): build into $S/dist, then
 (cd packages/client && npx vite build --outDir $S/dist)
 OVERLYX_E2E_BASE=http://127.0.0.1:3001 npx playwright test e2e/offline.spec.ts e2e/git.spec.ts   # git: a real clone / push / pull with a token
-# AI assistance (e2e/ai.spec.ts): the menus / preferences part runs anywhere; the ⌘K and autocomplete
+# AI assistance (e2e/ai.spec.ts): the menus / preferences part runs anywhere; the ⌘J and autocomplete
 # flows need the server to talk to the stub model: `node scripts/ai-stub.mjs` (port 3999) and the server
 # started with OPENROUTER_API_URL=http://127.0.0.1:3999 OPENROUTER_API_KEY=test-key, then
 OVERLYX_E2E_AI_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/ai.spec.ts
