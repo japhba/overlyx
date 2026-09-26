@@ -5,6 +5,7 @@ import { editorContext } from './editor/context';
 import { api } from './api';
 import { isBenignBrowserError } from './error-reporting';
 import { initUsage, recordUsage, noticeTemplate } from './usage';
+import { currentMathFont, onMathRendererChange } from './editor/lyxmath/mathjax';
 import './styles.css';
 import 'prosemirror-view/style/prosemirror.css';
 import 'prosemirror-gapcursor/style/gapcursor.css';
@@ -50,9 +51,13 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     if (id) urls.push(`/api/docs/${encodeURIComponent(id)}/meta`);
     for (const u of urls) fetch(u, { credentials: 'same-origin' }).catch(() => {});
   };
+  // the math font in use is cached whole (sw.js 'math-font'), by the worker that controls the page — a new one after a deployment starts with an empty cache
+  const cacheMathFont = () => navigator.serviceWorker.controller?.postMessage({ type: 'math-font', font: currentMathFont() });
+  onMathRendererChange(cacheMathFont);
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(e => console.warn('service worker registration failed', e));
-    if (navigator.serviceWorker.controller) warm();
+    if (navigator.serviceWorker.controller) { warm(); cacheMathFont(); }
     else navigator.serviceWorker.addEventListener('controllerchange', warm, { once: true });
+    navigator.serviceWorker.addEventListener('controllerchange', cacheMathFont);
   });
 }

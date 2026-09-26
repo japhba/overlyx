@@ -159,3 +159,37 @@ test('offline edits that cannot be merged (server history re-created) are kept a
   expect(content.lyx).toContain('UNMERGEABLE-EDIT');
   await admin.close();
 });
+
+test('the chosen math font is cached whole, so formulas keep their font offline', async ({ page, context }) => {
+  await login(page);
+  // Libertinus text with its matching math font (STIX Two), which is not part of the precached shell
+  await page.evaluate(() => { const p = JSON.parse(localStorage.getItem('ol.prefs') || '{}'); p.editorFont = 'libertinus'; p.editorMathFont = 'match'; localStorage.setItem('ol.prefs', JSON.stringify(p)); });
+  await openDoc(page);
+  await page.reload();   // the preferences are read at start
+  await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller && document.documentElement.dataset.mathFont === 'stix2', null, { timeout: 20000 });
+  const expected = await page.evaluate(async () => ((await (await fetch('/sw.js')).text()).match(/\/assets\/mathjax\/stix2\/[^"]+/g) ?? []).length);
+  expect(expected).toBeGreaterThan(50);
+  const cached = () => page.evaluate(async () => {
+    let n = 0;
+    for (const k of await caches.keys()) if (k.startsWith('overlyx-shell-')) n += (await (await caches.open(k)).keys()).filter(r => new URL(r.url).pathname.startsWith('/assets/mathjax/stix2/')).length;
+    return n;
+  });
+  await expect.poll(cached, { timeout: 30000 }).toBe(expected);
+  // offline, a formula in a style no formula had used (bold italic, script) still gets its font
+  await context.setOffline(true);
+  const failed: string[] = [];
+  page.on('requestfailed', r => { if (r.url().includes('/assets/')) failed.push(r.url()); });
+  await page.reload();
+  await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  const ok = await page.evaluate(async () => {
+    const files = ((await (await fetch('/sw.js')).text()).match(/\/assets\/mathjax\/stix2\/[^"]+\.woff2/g) ?? []);
+    const res = await Promise.all(files.map(f => fetch(f).then(r => r.ok, () => false)));
+    return res.every(Boolean) && files.length > 0;
+  });
+  expect(ok).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.dataset.mathFont)).toBe('stix2');
+  expect(failed).toEqual([]);
+  await context.setOffline(false);
+  await page.evaluate(() => { const p = JSON.parse(localStorage.getItem('ol.prefs') || '{}'); delete p.editorFont; delete p.editorMathFont; localStorage.setItem('ol.prefs', JSON.stringify(p)); });
+});

@@ -6,12 +6,18 @@
  *  - a few read-only API responses that the editor needs to open a document (who am I, the project
  *    list, a document's metadata/versions, rendered graphics) are network-first with the last
  *    response kept as an offline fallback;
+ *  - the math font chosen in the editor, if not the precached default, is cached whole when the page
+ *    names it ('math-font' message, on every load and on a change): MathJax fetches a font's files
+ *    as formulas need them, so offline a formula could miss a style that had not been drawn yet —
+ *    and every deployment starts a new cache;
  *  - everything else (edits go through the WebSocket, mutations through POST) is untouched.
  * The documents themselves live in IndexedDB (y-indexeddb) and sync through Yjs; the service worker
  * never sees them.
  */
 const VERSION = '__VERSION__';
 const PRECACHE = __PRECACHE__;
+/** each MathJax font other than the precached default: its files (assets/mathjax/<font>/) */
+const FONTS = __FONTS__;
 const SHELL = 'overlyx-shell-' + VERSION;
 const API = 'overlyx-api';
 const API_CACHED = /^\/api\/(auth\/me$|projects$|users\/\d+\/avatar$|docs\/[^/]+\/(meta|versions)$|projects\/[^/]+\/(graphics|file)\/)/;
@@ -24,6 +30,12 @@ self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
     .then((keys) => Promise.all(keys.filter((k) => k.startsWith('overlyx-shell-') && k !== SHELL).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
+});
+
+self.addEventListener('message', (e) => {
+  const files = e.data && e.data.type === 'math-font' ? FONTS[e.data.font] : undefined;
+  if (!files) return;
+  e.waitUntil(caches.open(SHELL).then((c) => Promise.all(files.map((f) => c.match(f).then((hit) => hit || c.add(f)).catch(() => {})))));
 });
 
 async function networkFirst(req, cacheName, fallbackUrl) {

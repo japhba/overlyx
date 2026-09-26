@@ -42,10 +42,14 @@ function serviceWorker(): Plugin {
       walk(outDir);
       // MathJax's other fonts (assets/mathjax/<font>/, see MATHJAX_ASSETS) are cached once used, not with the shell
       const precache = files.filter(f => f === '/index.html' || (f.startsWith('/assets/') && (!f.startsWith('/assets/mathjax/') || f.startsWith('/assets/mathjax/newcm/'))) || f === '/manifest.webmanifest' || f === '/icon.svg').sort();
+      // … and all of a font's files once it is chosen (the page tells the worker, src/sw.js 'math-font')
+      const fonts: Record<string, string[]> = {};
+      for (const f of files) { const m = /^\/assets\/mathjax\/([a-z0-9]+)\//.exec(f); if (m && m[1] !== 'newcm') (fonts[m[1]] ??= []).push(f); }
       const version = crypto.createHash('sha1').update(precache.join('\n')).digest('hex').slice(0, 12);
       const src = fs.readFileSync(path.resolve(__dirname, 'src/sw.js'), 'utf8')
         .replace('__VERSION__', version)
-        .replace('__PRECACHE__', JSON.stringify(precache));
+        .replace('__PRECACHE__', JSON.stringify(precache))
+        .replace('__FONTS__', JSON.stringify(fonts));
       fs.writeFileSync(path.join(outDir, 'sw.js'), src);
       this.info?.(`sw.js: precaching ${precache.length} files (version ${version})`);
     },
