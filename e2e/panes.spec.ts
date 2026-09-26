@@ -129,6 +129,38 @@ test('the pane switch shows WYSIWYG, TeX and PDF in any combination and order; w
   expect(noise(errors)).toEqual([]);
 });
 
+test('a pane left alone fills the writing area whatever its dragged width — no blank column where the PDF was', async ({ page }) => {
+  const errors = collectErrors(page);
+  await prefs(page, { autoBuild: 'off' });
+  await login(page);
+  await page.evaluate(() => localStorage.removeItem('ol.panes'));
+  await open(page, 'short.tex');
+  const column = () => page.locator('.editor-column.panes').evaluate(e => Math.round(e.getBoundingClientRect().width));
+  await chip(page, 'pdf').click();
+  expect(await shown(page)).toEqual(['doc', 'pdf']);
+  // the divider dragged well towards the document, then the PDF pane closed with its ✕
+  const grip = (await page.locator('.pane-grip').first().boundingBox())!;
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + grip.width / 2 - 300, grip.y + 200, { steps: 8 });
+  await page.mouse.up();
+  await page.locator('.pdf-panel .bar .close').click();
+  expect(await shown(page)).toEqual(['doc']);
+  expect(Math.abs((await widths(page)).doc - await column())).toBeLessThanOrEqual(2);
+  // the same after a reload (the dragged widths are kept) and for TeX or the PDF shown alone
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+  expect(Math.abs((await widths(page)).doc - await column())).toBeLessThanOrEqual(2);
+  for (const id of ['tex', 'pdf'] as const) {
+    await chip(page, id).dblclick();
+    await expect.poll(() => shown(page)).toEqual([id]);
+    expect(Math.abs((await widths(page))[id] - await column())).toBeLessThanOrEqual(2);
+  }
+  await chip(page, 'doc').dblclick();
+  await page.evaluate(() => localStorage.removeItem('ol.panes'));
+  expect(noise(errors)).toEqual([]);
+});
+
 test('on a phone-width screen the switch shows one pane at a time', async ({ page }) => {
   await page.setViewportSize({ width: 600, height: 800 });
   await prefs(page, { autoBuild: 'off' });

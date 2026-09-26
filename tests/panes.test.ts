@@ -4,7 +4,7 @@
  * (app/pdfstatus.ts).
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_LAYOUT, PRESETS, applyPreset, loadLayout, mirrorPanes, movePane, normalizeLayout, presetMatches, resizeBetween, saveLayout, setPaneShown, soloPane, togglePane, visiblePanes } from '../packages/client/src/app/panes';
+import { DEFAULT_LAYOUT, PRESETS, applyPreset, loadLayout, mirrorPanes, movePane, normalizeLayout, paneGrow, presetMatches, resizeBetween, saveLayout, setPaneShown, soloPane, togglePane, visiblePanes } from '../packages/client/src/app/panes';
 import { formatAge, pdfStatus } from '../packages/client/src/app/pdfstatus';
 
 beforeEach(() => localStorage.clear());
@@ -49,6 +49,22 @@ describe('pane layout', () => {
     const clamped = resizeBetween(l, 'doc', 'pdf', [600, 600], -1000);
     expect(clamped.weights.doc / (clamped.weights.doc + clamped.weights.pdf)).toBeCloseTo(200 / 1200, 5);
     expect(r.weights.tex).toBe(l.weights.tex);
+  });
+  it('the panes on screen always fill the row: their grow factors add up to their number, in the ratio of their widths', () => {
+    // a divider dragged towards the document, then the PDF closed: the document alone must take the whole row
+    const dragged = resizeBetween(applyPreset(DEFAULT_LAYOUT, ['doc', 'pdf']), 'doc', 'pdf', [600, 600], -300);
+    expect(dragged.weights.doc).toBeLessThan(1);
+    const alone = setPaneShown(dragged, 'pdf', false);
+    expect(paneGrow(alone, 'doc', visiblePanes(alone))).toBe(1);
+    // TeX or the PDF alone (default weights 0.8 / 0.9)
+    expect(paneGrow(DEFAULT_LAYOUT, 'tex', ['tex'])).toBe(1);
+    expect(paneGrow(DEFAULT_LAYOUT, 'pdf', ['pdf'])).toBe(1);
+    // side by side: the sum is the count, the ratio the weights'
+    const g = (['doc', 'pdf'] as const).map(p => paneGrow(dragged, p, ['doc', 'pdf']));
+    expect(g[0] + g[1]).toBeCloseTo(2, 10);
+    expect(g[0] / g[1]).toBeCloseTo(dragged.weights.doc / dragged.weights.pdf, 10);
+    const three = (['doc', 'tex', 'pdf'] as const).map(p => paneGrow(DEFAULT_LAYOUT, p, ['doc', 'tex', 'pdf']));
+    expect(three.reduce((a, b) => a + b)).toBeCloseTo(3, 10);
   });
   it('is kept in the browser; a damaged value falls back to the default; an old PDF sidebar tab becomes the PDF pane', () => {
     const l = applyPreset(DEFAULT_LAYOUT, ['pdf', 'tex']);

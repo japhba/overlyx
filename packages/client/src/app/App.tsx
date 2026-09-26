@@ -16,7 +16,7 @@ import { Home, projectDocs } from './Home';
 import { pendingImportFlag } from './pendingImport';
 import { TextEditor } from './TextEditor';
 import { PaneSwitch } from './PaneSwitch';
-import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, resizeBetween, type PaneId, type PaneLayout } from './panes';
+import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, resizeBetween, paneGrow, type PaneId, type PaneLayout } from './panes';
 import { MarkdownEditor } from './MarkdownEditor';
 import { ShareDialog } from './Share';
 import { GuestCallout } from './Guest';
@@ -238,7 +238,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   /** the panes on screen, left to right (one at a time on a phone-width screen) */
   const shownPanes = narrowPanes ? visiblePanes(panes).slice(0, 1) : visiblePanes(panes);
   /** CSS order places the panes (they stay mounted in one DOM order, so moving one never reloads the editor or the PDF); flex-grow is its width */
-  const paneStyle = (id: PaneId) => ({ order: 2 * panes.order.indexOf(id), flex: `${panes.weights[id]} 1 0px`, ...(shownPanes.includes(id) ? {} : { display: 'none' }) });
+  const paneStyle = (id: PaneId) => ({ order: 2 * panes.order.indexOf(id), flex: `${paneGrow(panes, id, shownPanes)} 1 0px`, ...(shownPanes.includes(id) ? {} : { display: 'none' }) });
   // the PDF pane is mounted the first time it is shown and then kept (hidden), so showing it again does not reload the PDF
   const pdfMountedRef = useRef(false);
   if (panes.shown.pdf) pdfMountedRef.current = true;

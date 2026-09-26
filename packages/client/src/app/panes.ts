@@ -119,3 +119,14 @@ export function resizeBetween(l: PaneLayout, left: PaneId, right: PaneId, widths
 }
 
 export const resetWidths = (l: PaneLayout): PaneLayout => ({ ...l, weights: { ...DEFAULT_WEIGHTS } });
+
+/**
+ * The flex-grow of a pane among those on screen: its weight scaled so that the shown panes' factors
+ * add up to their number. Flexbox hands out only that fraction of the free space when the factors
+ * add up to less than 1 — the WYSIWYG pane alone with a dragged-down weight of 0.56 (or TeX alone
+ * at 0.8) left the rest of the row empty, a blank column where the PDF had been.
+ */
+export function paneGrow(l: PaneLayout, id: PaneId, shown: readonly PaneId[]): number {
+  const sum = shown.reduce((s, p) => s + l.weights[p], 0);
+  return sum > 0 && shown.includes(id) ? (l.weights[id] / sum) * shown.length : 1;
+}
