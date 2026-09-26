@@ -15,7 +15,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import * as pdfjs from 'pdfjs-dist';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
-import { paintDark, useDarkPages } from './pdfdark';
+import { formRects, paintDark, useDarkPages } from './pdfdark';
 import { setPref } from '../prefs';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
@@ -168,14 +168,17 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
         // recordImages: where the raster images went (pdf.js keeps them on the page, as fractions of the canvas), for the dark pages' photographs
         const task = page.render({ canvas: off, viewport, recordImages: true });
         rendered.current.set(n, { scale, task });
+        // dark pages: where the included figures went (the drawing commands, from the worker alongside the rendering)
+        const ops = darkRef.current.colours ? page.getOperatorList().catch(() => null) : null;
         await task.promise;
+        const figures = ops ? formRects(await ops, viewport.transform, off.width, off.height) : [];
         if (disposed || rendered.current.get(n)?.task !== task) return;
         rendered.current.get(n)!.task = null;
         // resizing clears a canvas: size it and draw the finished page in the same task, so the old picture never blanks
         canvas.width = off.width; canvas.height = off.height;
         const ctx = canvas.getContext('2d');
         const { colours: dc, invertFigures: smart } = darkRef.current;
-        if (ctx && dc) paintDark(ctx, off, dc, (page as unknown as { imageCoordinates?: ArrayLike<number> | null }).imageCoordinates, !smart);
+        if (ctx && dc) paintDark(ctx, off, dc, (page as unknown as { imageCoordinates?: ArrayLike<number> | null }).imageCoordinates, !smart, figures);
         else ctx?.drawImage(off, 0, 0);
         canvas.classList.add('ready');
       } catch {

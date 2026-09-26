@@ -30,6 +30,24 @@ test.beforeAll(async ({ browser }) => {
   await p.close();
   writeFileSync(`${DIR}/photo.jpg`, Buffer.from(photo.split(',')[1], 'base64'));
   writeFileSync(`${DIR}/plot.png`, Buffer.from(plot.split(',')[1], 'base64'));
+  // a PDF figure (as \includegraphics of a matplotlib PDF): a flat, light heat map beside a grainy photograph, on white
+  const fig = await browser.newPage();
+  const [heat, grain] = await fig.evaluate(() => {
+    const h = document.createElement('canvas'); h.width = 64; h.height = 64;
+    const a = h.getContext('2d')!;
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { a.fillStyle = (x + y) % 2 ? '#ffd0a0' : '#a8ccff'; a.fillRect(x * 8, y * 8, 8, 8); }
+    const g = document.createElement('canvas'); g.width = 256; g.height = 256;
+    const b = g.getContext('2d')!;
+    const img = b.createImageData(256, 256);
+    // grain a few pixels across, as a photograph has detail at every scale (single-pixel noise would average out when drawn smaller)
+    for (let i = 0; i < img.data.length; i += 4) { const p = i / 4, cell = ((p % 256) >> 3) + 97 * ((p >> 8) >> 3); const v = (Math.sin(cell * 12.9898) * 43758.5453 % 1 + 1) % 1; img.data[i] = 60 + v * 150; img.data[i + 1] = 90 + v * 120; img.data[i + 2] = 40 + v * 90; img.data[i + 3] = 255; }
+    b.putImageData(img, 0, 0);
+    return [h.toDataURL('image/png'), g.toDataURL('image/png')];
+  });
+  await fig.setContent(`<body style="margin:0;background:#fff"><div style="display:flex;gap:90px;padding:70px 90px"><img src="${heat}" style="width:140px;height:140px;image-rendering:pixelated"><img src="${grain}" style="width:140px;height:140px"></div><div style="margin:0 90px;border-top:2px solid #000"></div></body>`);
+  writeFileSync(`${DIR}/fig.pdf`, await fig.pdf({ width: '600px', height: '300px', printBackground: true }));
+  await fig.close();
+  writeFileSync(`${DIR}/figure.tex`, texDoc('\\begin{figure}[h]\\centering\\includegraphics[width=0.9\\linewidth]{fig.pdf}\\caption{A PDF figure.}\\end{figure}', '\\usepackage{graphicx}'));
   writeFileSync(`${DIR}/main.tex`, texDoc([
     'Dark pages: \\textcolor{red}{red text} and black text.',
     '',
@@ -97,3 +115,47 @@ test('dark pages: the paper in the page colour, colours keep their hue, the phot
   await page.locator('.menubar .theme-toggle').click();
   expect(errors.filter(e => !/favicon|ResizeObserver|willReadFrequently/.test(e))).toEqual([]);
 });
+
+test('a PDF figure is judged as a whole: its heat map turns dark with it, the photograph in it keeps its colours', async ({ page }) => {
+  await page.addInitScript(() => { try { const p = JSON.parse(localStorage.getItem('ol.prefs') || '{}'); p.autoBuild = 'off'; delete p.darkPdf; localStorage.setItem('ol.prefs', JSON.stringify(p)); localStorage.setItem('ol.theme', 'light'); } catch { /* ignore */ } });
+  await login(page);
+  await page.goto(`/#/${PROJECT}/figure.tex`);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par, .lyx-editor .lyx-inset').length > 0, null, { timeout: 30000 });
+  await page.locator('[data-pane-chip="pdf"]').click();
+  await page.locator('[data-pdf-build]').click();
+  await page.waitForSelector('.pdf-pane .pdf-page-box canvas.ready', { timeout: 180000 });
+  await page.waitForTimeout(500);
+  // light: the heat map's peach blocks and the photograph's middle, found by their colours
+  const spots = await page.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>('.pdf-pane .pdf-page-box canvas.ready')!;
+    const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+    let hx = 0, hy = 0, hn = 0, gx = 0, gy = 0, gn = 0;
+    for (let y = 0; y < c.height; y += 2) for (let x = 0; x < c.width; x += 2) {
+      const i = (y * c.width + x) * 4, [r, g, b] = [d[i], d[i + 1], d[i + 2]];
+      if (r > 240 && g > 190 && g < 225 && b > 140 && b < 180) { hx += x; hy += y; hn++; }   // #ffd0a0
+      else if (g > r && r > b && g < 215 && r + g + b < 560 && r + g + b > 150) { gx += x; gy += y; gn++; }   // the photograph's greens
+    }
+    return { heat: [hx / hn / c.width, hy / hn / c.height], grain: [gx / gn / c.width, gy / gn / c.height], hn, gn };
+  });
+  expect(spots.hn).toBeGreaterThan(100);
+  expect(spots.gn).toBeGreaterThan(100);
+  // a peach block of the heat map: the centre of a block next to the found centroid is not needed — average a small area
+  const area = (fx: number, fy: number) => page.evaluate(([fx, fy]) => {
+    const c = document.querySelector<HTMLCanvasElement>('.pdf-pane .pdf-page-box canvas.ready')!;
+    const d = c.getContext('2d')!.getImageData(Math.floor(c.width * fx) - 6, Math.floor(c.height * fy) - 6, 12, 12).data;
+    let l = 0; for (let i = 0; i < d.length; i += 4) l += (d[i] + d[i + 1] + d[i + 2]) / 3;
+    return l / (d.length / 4);
+  }, [fx, fy]);
+  const heatLight = await area(spots.heat[0], spots.heat[1]);
+  const grainLight = await pixel(page, spots.grain[0], spots.grain[1]);
+  expect(heatLight).toBeGreaterThan(180);
+
+  await page.locator('.menubar .theme-toggle').click();
+  await expect(page.locator('.pdf-viewer')).toHaveClass(/dark-pages/);
+  await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([18, 18, 22]);
+  // the heat map is dark with the figure; the photograph in the same figure is as it was
+  expect(await area(spots.heat[0], spots.heat[1])).toBeLessThan(110);
+  expect(near(await pixel(page, spots.grain[0], spots.grain[1]), grainLight, 8)).toBe(true);
+  await page.locator('.menubar .theme-toggle').click();
+});
+

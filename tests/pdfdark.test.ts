@@ -5,7 +5,7 @@
  * images (the photographs that keep their colours).
  */
 import { describe, it, expect } from 'vitest';
-import { parseColor, toneMap, imageRects, ensureDarkFilter, darkenPixels, DARK_FILTER_ID } from '../packages/client/src/app/pdfdark.ts';
+import { parseColor, toneMap, imageRects, formRects, texture, PHOTO_TEXTURE, ensureDarkFilter, darkenPixels, DARK_FILTER_ID } from '../packages/client/src/app/pdfdark.ts';
 
 describe('dark pages', () => {
   it('reads the theme colours', () => {
@@ -60,4 +60,53 @@ describe('dark pages', () => {
     expect(imageRects([-0.1, 0.5, -0.1, 0, 0.5, 0.5], 100, 100)).toEqual([{ x: 0, y: 1, w: 49, h: 48 }]);
     expect(imageRects(null, 100, 100)).toEqual([]);
   });
+
+  // pdf.js operator codes: save 10, restore 11, transform 12, form begin/end 74/75, group begin/end 76/77
+  const ops = (list: [number, unknown[] | null][]) => ({ fnArray: list.map(o => o[0]), argsArray: list.map(o => o[1]) });
+  /** a 600×800 pt page at scale 1, y downwards (the viewport's transform) */
+  const BASE = [1, 0, 0, -1, 0, 800];
+
+  it('finds the included figures: a form placed by the page, through the transforms around it', () => {
+    const figure = ops([
+      [10, null], [12, [0.5, 0, 0, 0.5, 100, 200]],   // \includegraphics scales and places
+      [74, [null, [0, 0, 400, 300]]], [10, null], [11, null], [75, []],
+      [11, null],
+    ]);
+    // box (100,200)–(300,350) in pt → y flipped: 450..600 px
+    expect(formRects(figure, BASE, 600, 800)).toEqual([{ x: 101, y: 451, w: 198, h: 148 }]);
+  });
+
+  it('a figure with a transparency group: the group has the box, the form inside none; nested forms do not count again', () => {
+    const grouped = ops([
+      [76, [{ bbox: [0, 0, 400, 200], matrix: [1, 0, 0, 1, 50, 100] }]],
+      [74, [[1, 0, 0, 1, 50, 100], null]],
+      [74, [null, [0, 0, 400, 200]]], [75, []],   // an inner form with the same box
+      [75, []],
+      [77, [{}]],
+    ]);
+    const r = formRects(grouped, BASE, 600, 800);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toEqual({ x: 51, y: 501, w: 398, h: 198 });
+  });
+
+  it('leaves out forms that cover the page (a template, an included page) and tiny ones (a logo)', () => {
+    const page = ops([[74, [null, [0, 0, 600, 800]]], [75, []], [74, [[1, 0, 0, 1, 10, 10], [0, 0, 20, 20]]], [75, []]]);
+    expect(formRects(page, BASE, 600, 800)).toEqual([]);
+    expect(formRects(null, BASE, 600, 800)).toEqual([]);
+  });
+
+  it('texture: a photograph is grainy, a heat map or a chart flat between its edges', () => {
+    const img = (w: number, h: number, px: (x: number, y: number) => number) => {
+      const d = new Uint8ClampedArray(w * h * 4);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const v = px(x, y), i = (y * w + x) * 4; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; }
+      return d;
+    };
+    const noise = img(64, 64, (x, y) => (Math.sin(x * 12.9898 + y * 78.233) * 43758.5453 % 1 + 1) % 1 * 255);
+    const blocks = img(64, 64, (x, y) => ((x >> 4) + (y >> 4)) % 2 ? 40 : 220);
+    const smooth = img(64, 64, (x, y) => x * 4);
+    expect(texture(noise, 64)).toBeGreaterThan(PHOTO_TEXTURE);
+    expect(texture(blocks, 64)).toBeLessThan(PHOTO_TEXTURE);
+    expect(texture(smooth, 64)).toBeLessThan(PHOTO_TEXTURE);
+  });
 });
+

@@ -31,6 +31,14 @@ describe('classifyPixels', () => {
   it('a blank white image has nothing to invert', () => {
     expect(classifyPixels(image(16, 16, () => white))).toBe('photo');
   });
+  it('two-tone pictures — dense black marks on white, some red — are line art however dark they are', () => {
+    // a spike raster: every other row black over most of its length
+    expect(classifyPixels(image(64, 32, (x, y) => (y % 2 && (x * 7 + y * 13) % 10 < 7 ? black : white)))).toBe('lineart');
+    expect(classifyPixels(image(64, 32, (x, y) => (y % 2 ? (x % 5 < 3 ? black : [220, 40, 40, 255]) : white)))).toBe('lineart');
+  });
+  it('a dark photograph (mostly dark, its mid-tones, a fifth highlights) stays a photograph', () => {
+    expect(classifyPixels(image(64, 64, (x, y) => { const v = (x * 5 + y * 3) % 5 === 0 ? 240 : 20 + ((x + y) % 120); return [v, v, v, 255]; }))).toBe('photo');
+  });
   it('a mostly coloured picture on white (a heat map) is not line art', () => {
     expect(classifyPixels(image(64, 64, (x, y) => (y < 8 ? white : [255, (x * 4) % 256, 40, 255])))).toBe('photo');
   });

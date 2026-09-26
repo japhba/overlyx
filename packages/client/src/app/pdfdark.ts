@@ -2,11 +2,12 @@
  * Dark PDF pages (like PDF Expert's night mode, or macOS Preview under Smart Invert): in the dark
  * theme the pages of a PDF are shown light on dark — white paper becomes the editor's dark page
  * (--page-bg), black ink its text tone (--editor-fg: white, sepia or grey), and colours keep their
- * hue (the inversion is combined with a 180° hue rotation). The PDF's photographs keep their real
- * colours: pdf.js reports where each raster image was drawn (`recordImages`), each is classified
- * like the editor's figures (editor/figureinvert.ts: line art on a light ground is inverted, a photo
- * is not) and a photo is copied back from the unfiltered rendering. With the `invertFigures`
- * preference off every image keeps its colours.
+ * hue (the inversion is combined with a 180° hue rotation). The PDF's graphics are smart-inverted
+ * like the editor's figures (editor/figureinvert.ts: line art on a light ground is inverted, a
+ * photograph is not): pdf.js reports where each raster image was drawn (`recordImages`), the
+ * operator list where each included figure (a form XObject) went (formRects); each is classified by
+ * its own pixels and a photo-like one is copied back from the unfiltered rendering. With the
+ * `invertFigures` preference off every graphic keeps its colours.
  *
  * The colours are baked into the page's canvas when it is drawn (PdfViewer renders off-screen and
  * copies): through the SVG filter below with the canvas's own `filter` where the browser has it,
@@ -158,24 +159,129 @@ export function imageRects(coords: ArrayLike<number> | null | undefined, width: 
   return out;
 }
 
-/** Is this region of the rendered page a photograph (rather than line art on a light ground)? */
-function isPhoto(src: HTMLCanvasElement, r: PhotoRect): boolean {
+/** pdf.js operator codes (pdfjs-dist OPS) that move the drawing's coordinate system */
+const OP = { save: 10, restore: 11, transform: 12, formBegin: 74, formEnd: 75, groupBegin: 76, groupEnd: 77 } as const;
+type Matrix = [number, number, number, number, number, number];
+const mul = (m: Matrix, n: ArrayLike<number>): Matrix => [
+  m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5],
+];
+
+/**
+ * The page's included graphics — form XObjects, which is what \includegraphics of a PDF figure
+ * becomes — as rectangles in pixels of the canvas the page was rendered on (`base`: the viewport's
+ * transform, `width`×`height` its size). Only the outermost of nested forms count; a form that
+ * covers nearly the whole page (a page template, an included page) or is smaller than `min` px
+ * either way (a logo, a symbol) is left out — the page's own drawing (TikZ) cannot be told apart.
+ */
+export function formRects(ops: { fnArray: ArrayLike<number>; argsArray: ArrayLike<unknown> } | null | undefined, base: ArrayLike<number>, width: number, height: number, min = 48): PhotoRect[] {
+  const out: PhotoRect[] = [];
+  if (!ops) return out;
+  let ctm = Array.from(base) as Matrix;
+  const stack: Matrix[] = [];
+  /** per open form or group: whether it (or one around it) is a graphic already */
+  const inside: boolean[] = [];
+  /** a form's or group's box drawn through `m`: a graphic when it is not inside one and has a plausible size */
+  const consider = (bbox: ArrayLike<number> | null | undefined, m: Matrix): boolean => {
+    if (inside.length && inside[inside.length - 1]) return true;
+    if (!bbox || bbox.length !== 4) return false;
+    const pts = [[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[0], bbox[3]], [bbox[2], bbox[3]]].map(([x, y]) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]);
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    // rounded inwards and a pixel in, as the images' rectangles
+    const left = Math.max(0, Math.ceil(Math.min(...xs)) + 1), right = Math.min(width, Math.floor(Math.max(...xs)) - 1);
+    const top = Math.max(0, Math.ceil(Math.min(...ys)) + 1), bottom = Math.min(height, Math.floor(Math.max(...ys)) - 1);
+    const w = right - left, h = bottom - top;
+    if (w < min || h < min || w * h >= 0.85 * width * height) return false;
+    out.push({ x: left, y: top, w, h });
+    return true;
+  };
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    const fn = ops.fnArray[i], args = ops.argsArray[i] as unknown[] | null;
+    if (fn === OP.save) stack.push(ctm);
+    else if (fn === OP.restore) ctm = stack.pop() ?? ctm;
+    else if (fn === OP.transform && args) ctm = mul(ctm, args as number[]);
+    else if (fn === OP.groupBegin) {
+      // a form with a transparency group (most included figures): pdf.js gives the group the form's
+      // box and matrix, the form inside it only the matrix; the group itself does not move the drawing
+      stack.push(ctm);
+      const g = (args?.[0] ?? {}) as { bbox?: ArrayLike<number> | null; matrix?: ArrayLike<number> | null };
+      inside.push(consider(g.bbox, g.matrix && g.matrix.length === 6 ? mul(ctm, g.matrix) : ctm));
+    } else if (fn === OP.groupEnd) { inside.pop(); ctm = stack.pop() ?? ctm; }
+    else if (fn === OP.formBegin) {
+      stack.push(ctm);
+      const [matrix, bbox] = (args ?? []) as [ArrayLike<number> | null, ArrayLike<number> | null];
+      if (matrix && matrix.length === 6) ctm = mul(ctm, matrix);
+      inside.push(consider(bbox, ctm));
+    } else if (fn === OP.formEnd) { inside.pop(); ctm = stack.pop() ?? ctm; }
+  }
+  return out;
+}
+
+/** a region of the rendered page, sampled (not averaged, as figureinvert.ts classifyImage) into at most 64 px either way */
+function sample(src: HTMLCanvasElement, r: PhotoRect): Uint8ClampedArray | null {
   const c = document.createElement('canvas');
   const cw = Math.min(64, r.w), ch = Math.max(1, Math.min(64, Math.round((cw * r.h) / r.w)));
   c.width = cw; c.height = ch;
   const ctx = c.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return false;
+  if (!ctx) return null;
+  ctx.imageSmoothingEnabled = false;
   ctx.drawImage(src, r.x, r.y, r.w, r.h, 0, 0, cw, ch);
-  return classifyPixels(ctx.getImageData(0, 0, cw, ch).data) === 'photo';
+  return ctx.getImageData(0, 0, cw, ch).data;
+}
+
+/**
+ * Texture: the share of horizontally neighbouring pixels (of a `width` px wide sample) whose
+ * brightness differs noticeably. A photograph is grain everywhere; a heat map, a colour bar, a
+ * chart is flat between its edges, even enlarged with interpolation.
+ */
+export function texture(data: ArrayLike<number>, width: number): number {
+  let n = 0, busy = 0;
+  const lum = (i: number) => 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+  for (let i = 0; i + 7 < data.length; i += 4) {
+    if ((i / 4 + 1) % width === 0) continue;   // the row's last pixel has no right neighbour
+    n++;
+    if (Math.abs(lum(i) - lum(i + 4)) > 16) busy++;
+  }
+  return n ? busy / n : 0;
+}
+
+
+/** a photograph's grain: at least this share of neighbouring pixels differ (a heat map or a chart stays well below) */
+export const PHOTO_TEXTURE = 0.25;
+
+/**
+ * Which graphics of a page keep their colours on the dark page. Each included figure is judged as a
+ * whole, like a figure in the editor: a plot or diagram on white is inverted with everything in it —
+ * its heat maps and colour bars too, so one figure never turns into a patchwork of dark and light
+ * panels — except the photographs placed in it (grainy raster images: sample pictures of a data
+ * set); a photo-like figure keeps its colours. A raster image outside any figure (a PNG or JPEG
+ * included by itself) is judged by itself. `allImages`: every graphic keeps its colours.
+ */
+export function keptGraphics(src: HTMLCanvasElement, images: PhotoRect[], figures: PhotoRect[], allImages: boolean): PhotoRect[] {
+  if (allImages) return [...figures, ...images];
+  const kept: PhotoRect[] = [];
+  const lineArt: PhotoRect[] = [];
+  for (const f of figures) {
+    const d = sample(src, f);
+    if (d && classifyPixels(d) === 'photo') kept.push(f); else lineArt.push(f);
+  }
+  const within = (r: PhotoRect, f: PhotoRect) => r.x + r.w / 2 >= f.x && r.x + r.w / 2 <= f.x + f.w && r.y + r.h / 2 >= f.y && r.y + r.h / 2 <= f.y + f.h;
+  for (const r of images) {
+    if (kept.some(f => within(r, f))) continue;   // copied back with its figure
+    const d = sample(src, r);
+    if (!d || classifyPixels(d) !== 'photo') continue;
+    if (lineArt.some(f => within(r, f)) && texture(d, Math.min(64, r.w)) < PHOTO_TEXTURE) continue;   // a heat map in a plot: dark with the plot
+    kept.push(r);
+  }
+  return kept;
 }
 
 /**
  * Draw a rendered page (`src`, the PDF's own colours) onto `ctx` as a dark page: everything
- * through the dark map, then the photographs (or, `allImages`, every raster image) copied back
- * unchanged. `coords`: pdf.js's image coordinates of the page.
+ * through the dark map, then the graphics that keep their colours (keptGraphics) copied back
+ * unchanged. `coords`: pdf.js's image coordinates of the page; `figures`: its included figures (formRects).
  */
-export function paintDark(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement, colours: DarkColours, coords: ArrayLike<number> | null | undefined, allImages: boolean): void {
-  const photos = imageRects(coords, src.width, src.height).filter(r => allImages || isPhoto(src, r));
+export function paintDark(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement, colours: DarkColours, coords: ArrayLike<number> | null | undefined, allImages: boolean, figures: PhotoRect[] = []): void {
+  const photos = keptGraphics(src, imageRects(coords, src.width, src.height), figures, allImages);
   if (canvasFilter()) {
     ensureDarkFilter(colours.bg, colours.fg);
     ctx.filter = `url(#${DARK_FILTER_ID})`;

@@ -311,7 +311,9 @@ blend.
   google/fonts — run it again after changing its tables; needs `pip install fonttools brotli`),
   declared in `fonts/web/webfonts.css` and fetched by the browser only once text uses them; MathJax's
   woff2 files and per-block font data come with the bundle too (`assets/mathjax/<font>/`; the service
-  worker precaches only New Computer Modern). The CSPs allow no other font source. Formulas are
+  worker precaches only New Computer Modern, and caches the chosen math font whole once the page names
+  it — `'math-font'` message on every load, on a change and to a new worker — so that offline no
+  formula style that had not been drawn yet falls back; `e2e/offline.spec.ts`). The CSPs allow no other font source. Formulas are
   sized so that their x-height is 1.1 times the text face's (`mathScale`, from the face's and the math
   font's x-heights); `\text` in formulas is the text face (MathJax's `mtextInheritFont`). *Document ▸ Settings
   ▸ Fonts ▸ Font set* writes LyX's `\font_roman` / `\font_sans` / `\font_typewriter` / `\font_math`
@@ -433,10 +435,18 @@ blend.
   **Dark pages** (`app/pdfdark.ts`, like PDF Expert's night mode): in the dark theme the pages are
   light on dark — the paper in the editor's page colour (`--page-bg`), the ink in its text tone
   (`--editor-fg`, so the sepia / grey tones apply), colours with their hue kept (inversion + a 180°
-  hue rotation) — while photographs keep their colours: pdf.js reports where it drew each raster
-  image (`recordImages`), each is classified like the editor's figures (`editor/figureinvert.ts`;
-  line art on white is inverted) and a photograph is copied back from the unfiltered rendering; with
-  *Invert figures* off every picture keeps its colours. The colours are baked into the canvas when a
+  hue rotation) — and the graphics are smart-inverted like the editor's figures
+  (`editor/figureinvert.ts`: line art on white is inverted, a photograph is not). Each included figure
+  (a form XObject — what `\includegraphics` of a PDF becomes; `formRects` walks the operator list for
+  its box, through the transforms and transparency groups) is judged as a whole: a plot or diagram on
+  white turns light-on-dark with everything in it, its heat maps and colour bars too (no patchwork of
+  dark and light panels in one figure), except the photographs placed in it (grainy raster images,
+  `texture` ≥ 0.25 — heat maps and charts are flat between their edges); a photo-like figure keeps its
+  colours. A raster image outside any figure (a PNG or JPEG included by itself; pdf.js reports where
+  it drew each, `recordImages`) is judged by itself. What keeps its colours is copied back from the
+  unfiltered rendering; with *Invert figures* off every graphic keeps its colours. The classifier
+  samples a picture without smoothing (fine black lines stay black) and takes a two-tone picture —
+  dense black marks on white, a spike raster — as line art however dark it is. The colours are baked into the canvas when a
   page is drawn (an SVG filter through the canvas's `filter`, pixel by pixel where a browser lacks it —
   Safari); a CSS filter on the canvases cost a re-filter on every frame and halved the frame rate
   while scrolling. The ◐ button in the PDF toolbar (dark theme only) and *Settings ▸ Editor ▸ PDF*

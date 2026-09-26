@@ -24,9 +24,14 @@ export function classifyPixels(data: ArrayLike<number>): FigureKind {
   }
   if (!n) return 'photo';
   const groundF = ground / n, darkF = dark / n, colourF = colourful / n, midF = mid / n;
+  const drawn = darkF + colourF + midF >= 0.002;
   // a light ground that is most of the picture, not too many greys (anti-aliasing only) and not a
   // predominantly coloured picture; and something drawn on it at all
-  return groundF >= 0.4 && midF <= 0.25 && colourF <= 0.45 && darkF + colourF + midF >= 0.002 ? 'lineart' : 'photo';
+  if (groundF >= 0.4 && midF <= 0.25 && colourF <= 0.45 && drawn) return 'lineart';
+  // two-tone — dense black marks on white (a spike raster, a scanned drawing): light and dark with
+  // hardly any grey between is line art however much of it is dark; a photograph has its mid-tones
+  if (groundF >= 0.15 && midF <= 0.1 && colourF <= 0.35 && drawn) return 'lineart';
+  return 'photo';
 }
 
 /** Classify a loaded <img>; null when its pixels cannot be read (cross-origin without CORS). */
@@ -39,6 +44,7 @@ export function classifyImage(img: HTMLImageElement): FigureKind | null {
     canvas.width = cw; canvas.height = ch;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return null;
+    ctx.imageSmoothingEnabled = false;   // sampled, not averaged: fine black lines would turn grey and read as a photograph
     ctx.drawImage(img, 0, 0, cw, ch);
     return classifyPixels(ctx.getImageData(0, 0, cw, ch).data);
   } catch { return null; }
