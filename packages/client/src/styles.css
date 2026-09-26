@@ -764,6 +764,16 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .ctx-item .shortcut { color: var(--ui-muted); font-size: 12px; margin-left: 28px; }
 .ctx-item .arrow { color: var(--ui-muted); font-size: 11px; margin-left: 10px; }
 .ctx-sep { border-top: 1px solid var(--ui-border2); margin: 6px 0; }
+/* shortcut tips (shortcuttips.ts): the shortcut of an action just taken with the mouse */
+.shortcut-tip { position: fixed; z-index: 210; display: flex; align-items: center; gap: 10px; max-width: min(420px, calc(100vw - 12px)); padding: 6px 6px 6px 12px; background: var(--surface); color: var(--ui-fg); border: 1px solid var(--ui-border2); border-radius: 8px; box-shadow: 0 2px 6px 2px rgba(60,64,67,0.15), 0 1px 2px rgba(60,64,67,0.3); font: 13px var(--ui-font); user-select: none; pointer-events: none; animation: ol-tip-in .12s ease-out; }
+@keyframes ol-tip-in { from { opacity: 0; transform: translateY(-3px); } }
+.shortcut-tip-text { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.shortcut-tip-label { color: var(--ui-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shortcut-tip kbd { font: 600 12.5px var(--ui-font); border: 1px solid var(--ui-border); border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; background: var(--surface2); white-space: nowrap; }
+/* only the buttons take the pointer: a click on the tip's text reaches what is under it (and closes the tip) */
+.shortcut-tip button { pointer-events: auto; border: 0; background: none; color: var(--ui-muted); font: 12px var(--ui-font); padding: 3px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.shortcut-tip button:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.shortcut-tip .shortcut-tip-close { font-size: 15px; line-height: 1; padding: 2px 6px; }
 
 /* the link box (⌘K) and the bubble under a link (editor/links.ts), as in Google Docs */
 .link-box, .link-bubble { position: fixed; z-index: 190; background: var(--surface); border: 1px solid var(--ui-border2); border-radius: 8px; box-shadow: 0 2px 6px 2px rgba(60,64,67,0.15), 0 1px 2px rgba(60,64,67,0.3); font-family: var(--ui-font); font-size: 13.5px; color: var(--ui-fg); }

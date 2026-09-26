@@ -182,3 +182,51 @@ test('clicking a user avatar jumps to that user\'s cursor', async ({ browser }) 
   await expect(pageA.locator('.statusbar')).toContainText(/Jumped to Bob[^']*'s cursor/);   // bob's display name depends on the seed
   await ctxA.close(); await ctxB.close();
 });
+
+test('shortcut tips: from the third mouse use on, the shortcut shows under the button; pressing it or "Don\'t show again" ends them', async ({ page }) => {
+  const errors = collectErrors(page);
+  await open(page);
+  await page.evaluate(() => { localStorage.removeItem('ol.shortcutTips'); });
+  await page.locator('.lyx-editor .lyx-par', { hasText: 'Hello toolbar.' }).click();
+  const tip = page.locator('.shortcut-tip');
+
+  // Emphasis (Ctrl+E) from the toolbar: nothing twice, the tip the third time — below the button, the editor keeps the keyboard
+  for (let i = 0; i < 2; i++) { await tb(page, 'emph').click(); await page.waitForTimeout(150); await expect(tip).toHaveCount(0); }
+  await tb(page, 'emph').click();
+  await expect(tip).toBeVisible();
+  await expect(tip.locator('kbd')).toHaveText('Ctrl+E');
+  await expect(tip).toContainText('Emphasis');
+  const [btn, box] = [await tb(page, 'emph').boundingBox(), await tip.boundingBox()];
+  expect(box!.y).toBeGreaterThanOrEqual(btn!.y + btn!.height);
+  expect(Math.abs(box!.x - btn!.x)).toBeLessThan(40);
+  await expect(page.locator('.lyx-editor')).toBeFocused();
+  // pressing the shortcut: the tip goes, and does not come back for it
+  await page.keyboard.press('Control+e');
+  await expect(tip).toHaveCount(0);
+  await tb(page, 'emph').click();
+  await page.waitForTimeout(150);
+  await expect(tip).toHaveCount(0);
+
+  // a menu entry counts too: the tip stands where the entry was
+  for (let i = 0; i < 3; i++) {
+    await page.locator('.menubar .menu button', { hasText: 'Navigate' }).click();
+    await page.locator('.menu-item', { hasText: 'Outline pane' }).click();
+  }
+  await expect(tip).toBeVisible();
+  await expect(tip.locator('kbd')).toHaveText('Ctrl+Alt+O');
+  // a click beside it closes it (the text lets the click through)
+  await page.locator('.editor-scroll').click({ position: { x: 5, y: 300 } });
+  await expect(tip).toHaveCount(0);
+
+  // "Don't show again" switches every tip off
+  for (let i = 0; i < 3; i++) await tb(page, 'italic').click();
+  await expect(tip.locator('kbd')).toHaveText('Ctrl+I');
+  await tip.locator('.shortcut-tip-off').click();
+  await expect(tip).toHaveCount(0);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ol.prefs') ?? '{}').shortcutTips)).toBe(false);
+  for (let i = 0; i < 3; i++) await tb(page, 'noun').click();
+  await page.waitForTimeout(150);
+  await expect(tip).toHaveCount(0);
+  await page.evaluate(() => { const p = JSON.parse(localStorage.getItem('ol.prefs') ?? '{}'); p.shortcutTips = true; localStorage.setItem('ol.prefs', JSON.stringify(p)); localStorage.removeItem('ol.shortcutTips'); });
+  expect(errors).toEqual([]);
+});

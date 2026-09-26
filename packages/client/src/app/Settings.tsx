@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser } from '../api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
+import { resetShortcutTips } from '../shortcuttips';
 import { setThemePref, useTheme, type ThemePref } from './theme';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import { Dialog } from './Dialogs';
@@ -101,7 +102,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
 
-  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'usageStats', label: string, hint: string) => (
+  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'usageStats' | 'shortcutTips', label: string, hint: string) => (
     <label class="pref"><input type="checkbox" data-pref={key} checked={p[key]} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
   );
   const toggleRecopy = async (u: AdminUser) => {
@@ -149,6 +150,9 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             </select></Row>
             <h3>Figures</h3>
             {check('invertFigures', 'Invert figures in the dark theme', 'Plots and diagrams use a white base, including transparent images, and turn light-on-dark in the dark theme. Photographs keep their colours. Figures reload when their file changes on disk.')}
+            <h3>Shortcuts</h3>
+            {check('shortcutTips', 'Shortcut tips', 'An action that has a shortcut but is taken with the mouse — a toolbar button, a menu entry, the right-click menu — shows its shortcut from the third time on, five times; pressing the shortcut once ends its tips.')}
+            <Row label=""><button type="button" data-reset-shortcut-tips disabled={!p.shortcutTips} onClick={() => resetShortcutTips()}>Show all tips again</button></Row>
           </>}
           {section === 'ai' && <>
             <h3>AI assistance</h3>

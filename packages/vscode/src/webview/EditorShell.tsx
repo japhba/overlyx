@@ -560,6 +560,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     { title: 'Tools', items: [
       { label: 'Spell checking', checked: prefs.spellcheck, action: () => setPref('spellcheck', !prefs.spellcheck) },
       { label: 'Autocorrect typos', checked: prefs.autoCorrect, action: () => setPref('autoCorrect', !prefs.autoCorrect) },
+      { label: 'Shortcut tips after mouse actions', checked: prefs.shortcutTips, action: () => setPref('shortcutTips', !prefs.shortcutTips) },
       { label: 'Settings…', action: () => setDialog({ name: 'preferences' }) },
     ] },
     { title: 'Help', search: true, items: [

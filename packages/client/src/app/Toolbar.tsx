@@ -11,6 +11,7 @@ import type { LayoutInfo } from '../api';
 import { MATH_PANELS, type PanelItem } from './mathpanels';
 import { LYX_ICONS } from './lyxicons';
 import { recordUsage } from '../usage';
+import { splitTitle, tookActionWithout } from '../shortcuttips';
 
 /** The face of a toolbar button: LyX's own icon file when there is one, else a formula preview, a hand-drawn SVG, or plain text. */
 function btnIcon(b: ToolButton) {
@@ -18,6 +19,12 @@ function btnIcon(b: ToolButton) {
   if (b.html) return <span dangerouslySetInnerHTML={{ __html: b.html }} />;
   if (ICONS[b.icon]) return <span dangerouslySetInnerHTML={{ __html: ICONS[b.icon] }} />;
   return <span>{b.icon}</span>;
+}
+
+/** a button was clicked: the shortcut at the end of its tooltip ("Emphasis (Ctrl+E)") gets a tip now and then (shortcuttips.ts) */
+function tipFor(b: { title?: string }, el: EventTarget | null): void {
+  const t = splitTitle(b.title);
+  tookActionWithout(t.shortcut, t.label, el as Element | null);
 }
 
 export interface PaletteItem { label: string; html?: string; title?: string; action: () => void; active?: boolean }
@@ -361,8 +368,9 @@ function PaletteButton({ b }: { b: ToolButton }) {
   const close = () => setOpen(false);
   const preset = !!b.paletteWhenActive;
   const withSyms = !!p.items?.some(it => it.html);
-  const onClick = () => {
+  const onClick = (e: MouseEvent) => {
     recordUsage('toolbar', b.id);
+    if (!open) tipFor(b, e.currentTarget);
     if (preset && !b.active) { b.action?.(); return; }   // select first; a second click edits
     setOpen(o => !o);
   };
@@ -379,7 +387,7 @@ function PaletteButton({ b }: { b: ToolButton }) {
           {p.render ? p.render(close) : (
             <div class="tb-popup-grid" style={p.list ? undefined : { gridTemplateColumns: `repeat(${p.cols ?? 8}, minmax(30px, auto))` }}>
               {p.items!.map((it, i) => (
-                <button key={i} type="button" class={'tb-pal-item' + (it.active ? ' active' : '')} title={it.title ?? it.label} onMouseDown={e => e.preventDefault()} onClick={() => { close(); recordUsage('toolbar', `${b.id} ▸ ${it.label}`); it.action(); }}>
+                <button key={i} type="button" class={'tb-pal-item' + (it.active ? ' active' : '')} title={it.title ?? it.label} onMouseDown={e => e.preventDefault()} onClick={() => { close(); recordUsage('toolbar', `${b.id} ▸ ${it.label}`); tipFor({ title: it.title ?? it.label }, ref.current); it.action(); }}>
                   {/* a list shows the label anyway: its symbol column only where the palette has symbols (empty when MathJax could not render one) */}
                   {it.html ? <span class="tb-pal-sym" dangerouslySetInnerHTML={{ __html: it.html }} /> : !p.list ? <span class="tb-pal-sym text">{it.label}</span> : withSyms && <span class="tb-pal-sym" />}
                   {p.list && <span class="tb-pal-label">{it.label}</span>}
@@ -408,7 +416,7 @@ export function Toolbar({ id, layouts, layout, onLayout, groups, label }: Toolba
         <span key={gi} style="display:contents">
           {(gi > 0 || layouts || label) && <span class="tb-sep" />}
           {g.map(b => b.palette ? <PaletteButton key={b.id} b={b} /> : (
-            <button key={b.id} type="button" class={'tb-btn' + (b.active ? ' active' : '') + (b.kind === 'math' ? ' math' : '')} title={b.title} disabled={b.disabled} data-tb={b.id} onClick={() => { recordUsage('toolbar', b.id); b.action?.(); }}>{btnIcon(b)}</button>
+            <button key={b.id} type="button" class={'tb-btn' + (b.active ? ' active' : '') + (b.kind === 'math' ? ' math' : '')} title={b.title} disabled={b.disabled} data-tb={b.id} onClick={e => { recordUsage('toolbar', b.id); tipFor(b, e.currentTarget); b.action?.(); }}>{btnIcon(b)}</button>
           ))}
         </span>
       ))}

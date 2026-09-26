@@ -1113,6 +1113,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     editingMenus.document,
     { title: 'Tools', items: [
       { label: 'Spell checking', checked: prefs.spellcheck, action: () => setPref('spellcheck', !prefs.spellcheck) },
+      { label: 'Shortcut tips after mouse actions', checked: prefs.shortcutTips, action: () => setPref('shortcutTips', !prefs.shortcutTips) },
       { sep: true },
       { label: 'AI assistance ▸', sub: [
         { label: ai === null ? 'Checking the server…' : ai.available ? `Models: ${prefs.aiModel || ai.model} (${REWRITE_KEY}) · ${prefs.aiCompletionModel || ai.completionModel} (autocomplete)` : 'Not configured on this server (OPENROUTER_API_KEY)', disabled: true },

@@ -10,6 +10,7 @@ import { getPrefs, setPref } from '../prefs';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
 import { formatShortcut } from './shortcuts';
 import { recordUsage, menuKey } from '../usage';
+import { tookActionWithout } from '../shortcuttips';
 import { canonical, effectiveShortcut, getBindings, isCustom, keyFromEvent, setBinding, subscribeBindings } from './keybindings';
 
 /** the right-click menu of the switch: the text tone of the dark theme (app/theme.ts DARK_TONES) */
@@ -127,8 +128,13 @@ function MenuList({ items, path, close, style, back }: { items: MenuEntry[]; pat
       if (it.sep) return <div key={i} class="menu-sep" role="separator" />;
       if (it.sub) return <SubMenuItem key={i} entry={it} path={path} close={close} />;
       const sc = it.label ? effectiveShortcut(entryId(path, it.label), it.shortcut) : it.shortcut;
-      const run = () => { if (!it.disabled) { close(); recordUsage('menu', menuKey(path, it.stat ?? it.label ?? '')); it.action?.(); } };
-      return <div key={i} role="menuitem" tabIndex={-1} aria-disabled={!!it.disabled} class={'menu-item' + (it.checked ? ' checked' : '') + (it.disabled ? ' disabled' : '')} onClick={run} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); run(); } }}><span>{it.label}</span>{sc && <span class="shortcut">{formatShortcut(sc)}</span>}</div>;
+      // the shortcut tip goes where the entry was (the menu closes)
+      const run = (row: EventTarget | null) => {
+        if (it.disabled) return;
+        const at = (row as Element | null)?.getBoundingClientRect();
+        close(); recordUsage('menu', menuKey(path, it.stat ?? it.label ?? '')); tookActionWithout(sc, it.stat ?? it.label ?? '', at); it.action?.();
+      };
+      return <div key={i} role="menuitem" tabIndex={-1} aria-disabled={!!it.disabled} class={'menu-item' + (it.checked ? ' checked' : '') + (it.disabled ? ' disabled' : '')} onClick={e => run(e.currentTarget)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); run(e.currentTarget); } }}><span>{it.label}</span>{sc && <span class="shortcut">{formatShortcut(sc)}</span>}</div>;
     })}
   </div>;
 }
@@ -163,7 +169,10 @@ function SearchMenu({ menu, entries, close, recording, setRecording, paletteShor
   useLayoutEffect(() => { input.current?.focus(); }, []);
   useEffect(() => { setSel(0); }, [q]);
   useEffect(() => () => setRecording(null), []);
-  const run = (e: SearchEntry) => { close(); recordUsage('palette', menuKey(e.path, e.stat ?? e.label)); e.action?.(); };
+  const run = (e: SearchEntry, row?: Element | null) => {
+    const at = row?.getBoundingClientRect();
+    close(); recordUsage('palette', menuKey(e.path, e.stat ?? e.label)); tookActionWithout(effectiveShortcut(e.id, e.shortcut), e.stat ?? e.label, at); e.action?.();
+  };
 
   /** a recorded key for `id`: collisions are confirmed, the other command then loses the key */
   const assign = (id: string, key: string) => {
@@ -188,7 +197,7 @@ function SearchMenu({ menu, entries, close, recording, setRecording, paletteShor
     }
     if (ev.key === 'ArrowDown') { ev.preventDefault(); setSel(s => Math.min(results.length - 1, s + 1)); }
     else if (ev.key === 'ArrowUp') { ev.preventDefault(); setSel(s => Math.max(0, s - 1)); }
-    else if (ev.key === 'Enter') { ev.preventDefault(); if (results[sel]) run(results[sel]); }
+    else if (ev.key === 'Enter') { ev.preventDefault(); if (results[sel]) run(results[sel], input.current); }
     else if (ev.key === 'Escape') { ev.preventDefault(); close(); }
     ev.stopPropagation();
   };
@@ -203,7 +212,7 @@ function SearchMenu({ menu, entries, close, recording, setRecording, paletteShor
           const sc = effectiveShortcut(r.id, r.shortcut);
           const custom = isCustom(r.id);
           return (
-            <div key={r.id} class={'menu-result' + (i === sel ? ' sel' : '') + (r.checked ? ' checked' : '') + (recording === r.id ? ' recording' : '')} data-help-result onMouseEnter={() => setSel(i)} onClick={() => { if (recording !== r.id) run(r); }}>
+            <div key={r.id} class={'menu-result' + (i === sel ? ' sel' : '') + (r.checked ? ' checked' : '') + (recording === r.id ? ' recording' : '')} data-help-result onMouseEnter={() => setSel(i)} onClick={e => { if (recording !== r.id) run(r, e.currentTarget); }}>
               <span class="label"><span class="path">{r.path.join(' ▸ ')} ▸ </span>{r.label}</span>
               {recording === r.id
                 ? <span class="rec" data-recording>Press the new keys… (Backspace: none, Esc: cancel)</span>
@@ -220,7 +229,7 @@ function SearchMenu({ menu, entries, close, recording, setRecording, paletteShor
           if (it.sep) return <div key={i} class="menu-sep" />;
           const sc = it.label ? effectiveShortcut(entryId([menu.title], it.label), it.shortcut) : it.shortcut;
           return (
-            <div key={i} class={'menu-item' + (it.checked ? ' checked' : '') + (it.disabled ? ' disabled' : '')} onClick={() => { if (!it.disabled) { close(); it.action?.(); } }}>
+            <div key={i} class={'menu-item' + (it.checked ? ' checked' : '') + (it.disabled ? ' disabled' : '')} onClick={e => { if (!it.disabled) { const at = e.currentTarget.getBoundingClientRect(); close(); tookActionWithout(sc, it.label ?? '', at); it.action?.(); } }}>
               <span>{it.label}</span>{sc && <span class="shortcut">{formatShortcut(sc)}</span>}
             </div>
           );

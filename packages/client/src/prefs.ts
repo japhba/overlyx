@@ -47,9 +47,11 @@ export interface Prefs {
   editorFont: string;
   /** the editor's math font (fonts/catalog.ts MATH_FONTS), or 'match' for the one drawn for the text face */
   editorMathFont: string;
+  /** a tip with the shortcut after an action was taken with the mouse a few times (shortcuttips.ts) */
+  shortcutTips: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: true, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match' };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: true, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

@@ -490,6 +490,14 @@ blend.
   commands, so the editor's built-in bindings never fire for them. Shortcuts are written once in LyX
   style (`Ctrl+Alt+O`) and rendered per platform (`⌥⌘O` on a Mac; `app/shortcuts.ts`). LyX's
   `Ctrl+Shift+P` (typewriter) gave way to the palette; give it a key there if you want one.
+* **Shortcut tips** (`shortcuttips.ts`): an action that has a shortcut but is taken with the mouse —
+  a toolbar button (the shortcut at the end of its tooltip), a menu entry, a palette result, the
+  right-click menu — shows a small tip with the shortcut, below the button or where the entry was,
+  from the third time on and five times per shortcut (counted per shortcut, so toolbar and menu add
+  up; `localStorage.ol.shortcutTips`). Pressing the shortcut once ends its tips; the tip never takes
+  the focus, lets clicks on its text through and closes after 5 s. *Don't show again* switches them
+  all off (pref `shortcutTips`: *Tools ▸ Shortcut tips after mouse actions*, *Settings ▸ Editor ▸
+  Shortcuts*, which can also start the counts over). Web client and VS Code extension alike.
 * **Text-file tabs and the source pane** (`app/TextEditor.tsx`, `app/SourcePane.tsx`, shared logic
   in `app/codearea.ts`): a textarea under a coloured copy of the text (`app/texhighlight.ts`) with
   VS Code habits — own undo / redo (`Ctrl+Z`, `Ctrl+Shift+Z` / `Ctrl+Y`; the browser's breaks as soon

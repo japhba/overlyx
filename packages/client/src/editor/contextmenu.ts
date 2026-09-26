@@ -4,6 +4,7 @@
  * keyboard works too: ↑/↓ choose, → opens a submenu, ← closes it, Enter runs the entry.
  */
 import { menuIcon, type MenuIcon } from './menuicons';
+import { tookActionWithout } from '../shortcuttips';
 
 export interface MenuItem {
   label?: string;
@@ -74,7 +75,8 @@ function build(items: MenuItem[], x: number, y: number, level: number): HTMLElem
       row.addEventListener('mouseenter', () => { mark(menu, row); openSub(row, it, level, false); });
       (row as any).__open = (select: boolean) => openSub(row, it, level, select);
     } else if (!it.disabled && !it.info) {
-      const run = () => { closeContextMenu(); it.action?.(); };
+      // the shortcut tip goes where the entry was (the menu closes)
+      const run = () => { const at = row.getBoundingClientRect(); closeContextMenu(); tookActionWithout(it.shortcut, it.label ?? '', at); it.action?.(); };
       row.addEventListener('click', (ev) => { ev.preventDefault(); ev.stopPropagation(); run(); });
       row.addEventListener('mouseenter', () => { mark(menu, row); for (const m of open.splice(level + 1)) m.remove(); });
       (row as any).__run = run;
