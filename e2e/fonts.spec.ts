@@ -14,7 +14,7 @@ const FILE = `${DIR}/main.tex`;
 test.beforeEach(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
-  writeFileSync(FILE, texDoc('Text with $\\alpha + x_i^2 \\le \\sum_k y_k$ inside.\n\nMore text.', '\\usepackage{amsmath}\n\\usepackage{amssymb}'));
+  writeFileSync(FILE, texDoc('Text with $\\alpha + x_i^2 \\le \\sum_k y_k$ inside.\n\nMore text with $\\theta\\,\\mathcal{L}\\,\\mathfrak{g}$.', '\\usepackage{amsmath}\n\\usepackage{amssymb}'));
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
@@ -59,10 +59,13 @@ test('Settings ▸ Editor ▸ Text font and Math font: text and formulas switch 
   expect(await mathClass(page, '[data-font-sample] mjx-math')).toBe('STX-N');
   expect(await style(page, '[data-font-sample]', 'font-family')).toMatch(/^"OLT libertinus"/);
   await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining(['OLT libertinus', expect.stringMatching(/^MJX-STX-/)]));
-  // the math font on its own: Euler's letters over New Computer Modern
+  // the math font on its own: Euler's letters over New Computer Modern — also the Greek, calligraphic
+  // and fraktur letters of its blocks loaded on demand (choosing Euler used to hang the page on those)
   await dlg.locator('[data-pref="editorMathFont"]').selectOption('euler');
   await expect.poll(() => mathClass(page)).toBe('NCM-N');
   await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^MJX-NE-/)]));
+  await expect.poll(() => page.locator('.lyx-editor .lyx-math-inline').nth(1).locator('mjx-c[class*="NE-"]').count(), { timeout: 10000 }).toBe(3);
+  expect(await page.locator('.lyx-editor .lm-error').count()).toBe(0);
   expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^"OLT libertinus"/);
   const prefs = JSON.parse((await page.evaluate(() => localStorage.getItem('ol.prefs')))!);
   expect([prefs.editorFont, prefs.editorMathFont]).toEqual(['libertinus', 'euler']);

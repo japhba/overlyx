@@ -97,11 +97,17 @@ function watchLazy(v: Upgradable) { (v.dom as any).__lyxMathView = v; io?.observ
 function unwatchLazy(v: Upgradable) { io?.unobserve(v.dom); staticQueue.delete(v); const i = lazyQueue.indexOf(v); if (i >= 0) lazyQueue.splice(i, 1); }
 
 /**
- * Another math font (or LyX's macros for MathJax changed): fields draw themselves again; static
- * formulas keep their old rendering until idle time renders them anew, in document order.
+ * Another math font: fields draw themselves again; static formulas near the viewport are drawn at
+ * once (their old markup has lost its font's CSS), the others in idle time, in document order.
  */
 onMathRendererChange(() => {
   for (const v of mathViews) (v as { markStale?(): void }).markStale?.();
+  if (typeof window !== 'undefined') {
+    const h = window.innerHeight;
+    // measured first, rendered after: one layout, not one per formula
+    const near = [...staticQueue].filter(v => { if (!v.stale) return false; const r = v.dom.getBoundingClientRect(); return r.height > 0 && r.bottom > -900 && r.top < h + 900; });
+    for (const v of near) if (macrosReady(v.view)) v.renderPending();
+  }
   schedulePump();
 });
 

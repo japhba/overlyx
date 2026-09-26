@@ -88,9 +88,39 @@ function makeRenderer(font: LoadedMathFont): Renderer {
   if (font.extension) {
     // its fonts' CSS goes into the style sheet MathJax has at that moment, which must be in the page
     updateSheet(r);
-    chtml.addExtension(font.extension as never, `@mathjax/${(font.extension as { name: string }).name}-font-extension/js/chtml/dynamic`);
+    const name = (font.extension as { name: string }).name;
+    chtml.addExtension(font.extension as never, `@mathjax/${name}-font-extension/js/chtml/dynamic`);
+    // MathJax 4.1's FontData.addExtension files the extension's blocks under the prefix instead of the
+    // extension's name, and then finds no prefix to load them from (every formula needing one retried forever)
+    const ext = (chtml.font as unknown as { CLASS: { dynamicExtensions: Map<string, { files: Record<string, { extension: string }> }> } }).CLASS.dynamicExtensions.get(name);
+    for (const f of Object.values(ext?.files ?? {})) f.extension = name;
+    protectExtensionChars(chtml.font as unknown as ExtensibleFont);
   }
   return r;
+}
+
+/** a character of a font's table: its metrics (an extension's carry its CSS font `ff`), or the block that will define it (MathJax's DynamicFile) */
+type CharData = [number, number, number, { ff?: string }?] | { extension?: string } | number;
+interface ExtensibleFont { variant: Record<string, { chars: Record<number, CharData> }>; defineChars(name: string, chars: Record<number, CharData>): void }
+const extensionOwned = (c: CharData | undefined) =>
+  Array.isArray(c) ? !!c[3]?.ff : !!c && typeof c === 'object' && !!(c as { extension?: string }).extension;
+/**
+ * The base font's blocks must not overwrite the characters of a font extension (Euler's letters):
+ * MathJax's defineChars replaces whatever a block defines, so a base block loaded after the
+ * extension's (the preload, a rare character) took Euler's Greek, script or fraktur letters back.
+ */
+function protectExtensionChars(font: ExtensibleFont): void {
+  const define = font.defineChars.bind(font);
+  font.defineChars = (name, chars) => {
+    const cur = font.variant[name]?.chars ?? {};
+    const keep: Record<number, CharData> = {};
+    for (const k of Object.keys(chars)) {
+      const n = Number(k);
+      if (extensionOwned(cur[n]) && !extensionOwned(chars[n])) continue;
+      keep[n] = chars[n];
+    }
+    define(name, keep);
+  };
 }
 
 let fontId = 'newcm';
@@ -118,6 +148,9 @@ function switchTo(font: LoadedMathFont): Renderer {
   if (!r) { r = makeRenderer(font); renderers.set(font.id, r); }
   if (active && active !== r) active.dispose();
   active = r;
+  // A font extension's blocks register with CHTML.genericFont when they arrive: the font of the
+  // output jax made last, unless this is set (Euler's blocks went to another font, and retried forever)
+  (CHTML as unknown as { genericFont: unknown }).genericFont = r.chtml.font.constructor;
   // the blocks formulas usually need, in the background (a formula that needs one first renders again once it is here)
   void mathReady();
   return r;
@@ -158,17 +191,33 @@ export interface Rendered {
   undefinedCommands: string[];
 }
 
+/**
+ * Formulas that asked for font data and were rendered again without success: a few rounds at
+ * most, then the formula counts as failed (font data that never takes must not spin the page).
+ */
+const retries = new Map<string, number>();
+const MAX_RETRIES = 4;
+
 export function renderMath(tex: string, opts: RenderOptions = {}): Rendered {
   const r = renderer();
   if (!r) return { node: null, error: null, retry: fontLoading(), undefinedCommands: [] };
+  const key = r.font.id + '\0' + (opts.display ? 'D' : '') + tex;
   try {
     const { value: node, images, undefinedCommands } = withFormula(opts.macros, opts.image, () =>
       r.html.convert((opts.display ? '\\displaystyle ' : '') + tex, { display: false, em: 16, ex: 16 * r.chtml.font.params.x_height, containerWidth: 1e5 }) as HTMLElement);
     updateSheet(r);
+    retries.delete(key);
     return { node, error: null, retry: images.length ? Promise.all(images).then(() => {}) : null, undefinedCommands };
   } catch (err) {
     const e = err as Error & { retry?: Promise<unknown> };
-    if (e?.retry) return { node: null, error: null, retry: e.retry.then(() => {}, () => {}), undefinedCommands: [] };
+    if (e?.retry) {
+      const n = (retries.get(key) ?? 0) + 1;
+      if (retries.size > 1000) retries.clear();
+      retries.set(key, n);
+      if (n > MAX_RETRIES) return { node: null, error: 'the math font\'s data for this formula did not load', retry: null, undefinedCommands: [] };
+      // (a failed load is no reason to render again: the promise then never settles for the caller)
+      return { node: null, error: null, retry: e.retry.then(() => {}, () => new Promise<void>(() => {})), undefinedCommands: [] };
+    }
     return { node: null, error: e?.message ? String(e.message) : String(err), retry: null, undefinedCommands: [] };
   }
 }
@@ -198,8 +247,16 @@ export function mathReady(): Promise<void> {
   const r = renderer();
   if (!r) return fontLoading().then(() => mathReady());
   return r.ready ??= (async () => {
-    const font = r.chtml.font as unknown as { CLASS: { dynamicFiles: Record<string, object> }; loadDynamicFile(d: object): Promise<void> };
+    const font = r.chtml.font as unknown as { CLASS: { dynamicFiles: Record<string, object>; dynamicExtensions: Map<string, { files: Record<string, object> }> }; loadDynamicFile(d: object): Promise<void> };
     const files = font.CLASS.dynamicFiles;
-    await Promise.all(r.font.preloadBlocks.filter(b => files[b]).map(b => font.loadDynamicFile(files[b]).catch(() => {})));
+    // A font extension's blocks all come first (Euler has three), and the base font's blocks they
+    // replace are not preloaded: which of two blocks arrived last decided the letter otherwise.
+    const ext = r.font.extension ? font.CLASS.dynamicExtensions.get((r.font.extension as { name: string }).name) : undefined;
+    const extFiles = Object.values(ext?.files ?? {});
+    await Promise.all(extFiles.map(f => font.loadDynamicFile(f).catch(() => {})));
+    const replaced = new Set(Object.keys(ext?.files ?? {}));
+    await Promise.all(r.font.preloadBlocks.filter(b => files[b] && !replaced.has(b)).map(b => font.loadDynamicFile(files[b]).catch(() => {})));
+    // formulas drawn while the extension's letters were still on their way: drawn again with them
+    if (extFiles.length && active === r) bump();
   })();
 }
