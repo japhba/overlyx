@@ -41,13 +41,15 @@ export interface Prefs {
   /** seconds to wait after the save before an automatic build starts (the save follows the last keystroke by 1.5 s) */
   autoBuildDelay: number;
   /**
-   * the editor's typeface (fonts/catalog.ts EDITOR_FACES), or 'document' for the face closest to the open
+   * the editor's text face (fonts/catalog.ts EDITOR_FACES), or 'document' for the face closest to the open
    * document's roman font; independent of the PDF's fonts (Document ▸ Settings ▸ Fonts)
    */
   editorFont: string;
+  /** the editor's math font (fonts/catalog.ts MATH_FONTS), or 'match' for the one drawn for the text face */
+  editorMathFont: string;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: true, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm' };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: true, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match' };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

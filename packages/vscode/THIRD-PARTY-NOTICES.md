@@ -22,9 +22,13 @@ It contains, or is a derivative of, the following third-party material:
 - **Computer Modern Unicode / CMU Serif** (https://ctan.org/pkg/cm-unicode) — SIL OFL 1.1.
   Unmodified Roman, bold, italic and bold italic text fonts; copyright the original Metafont
   authors and Andrey V. Panov. Full license and copyright notices: `dist/webview/licenses/cm-unicode-OFL.txt`.
-- **Fira Math** (https://github.com/firamath/firamath) — SIL OFL 1.1. The unmodified
-  `FiraMath-Regular.otf`, version 0.3.4, copyright 2018–2020 Xiangdong Zeng; the sans-serif editor
-  face's formula symbols. Full license: `dist/webview/licenses/firamath-OFL.txt`.
+- **Editor fonts** (Settings ▸ Editor ▸ Text font / Math font) — the text faces and OpenType math
+  fonts of `fonts/web` (Latin Modern, New Computer Modern, STIX Two, XITS, Libertinus, TeX Gyre, Asana,
+  Euler, Garamond, XCharter, Charis SIL, Erewhon, Kp, Concrete, Old Standard, GFS Neohellenic, IBM Plex,
+  PL46, Fira, Lete Sans, Lato, Noto Sans, Arsenal, Luciole, Pennstander, DejaVu, Crimson Pro, EB Garamond),
+  subset and, for the math fonts, rearranged for KaTeX by `scripts/build-editor-fonts.py` under family
+  names of their own. SIL OFL 1.1, GUST Font License, the Bitstream Charter and Vera licences and
+  CC BY 4.0 (Luciole). Every font's copyright and licence: `dist/webview/licenses/editor-fonts.txt`.
 
 Corresponding source: the extension is built from the OverLyX source tree. A copy of the
 complete corresponding source for any released .vsix is available to anyone on request —

@@ -137,8 +137,12 @@ describe('corpus (all formulas of the local LyX projects, when present)', () => 
   it.skipIf(!existsSync(dir + '/formulas.json'))('≥ 99% of LyX-2.5-written formulas round-trip byte-exactly', () => {
     const formulas: { file: string; latex: string }[] = JSON.parse(readFileSync(dir + '/formulas.json', 'utf8'));
     const fmt = new Map<string, string>();
-    // the projects' .lyx originals moved into <project>/lyx_deprecated/ when the documents became .tex
-    const lyxPath = (f: string) => (existsSync(f) ? f : f.replace(/^(\/root\/projects\/[^/]+\/)/, '$1lyx_deprecated/'));
+    // the projects' .lyx originals moved into <project>/lyx_deprecated/ when the documents became .tex, and
+    // the projects into their owner's namespace (/root/projects/jan/<project>) on 26 Sep 2026
+    const lyxPath = (f: string) => {
+      const moved = f.replace(/^\/root\/projects\/([^/]+\/)/, '/root/projects/jan/$1');
+      return [f, moved].flatMap(p => [p, p.replace(/^(\/root\/projects\/(?:jan\/)?[^/]+\/)/, '$1lyx_deprecated/')]).find(p => existsSync(p)) ?? f;
+    };
     for (const f of new Set(formulas.map(x => x.file))) { const m = /\\lyxformat (\d+)/.exec(readFileSync(lyxPath(f), 'utf8').slice(0, 400)); fmt.set(f, m?.[1] ?? '?'); }
     const sel = formulas.filter(f => fmt.get(f.file) === '643');
     let ok = 0;

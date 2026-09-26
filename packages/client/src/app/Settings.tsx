@@ -16,8 +16,8 @@ import { setThemePref, useTheme, type ThemePref } from './theme';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import { Dialog } from './Dialogs';
 import { AUTO_BUILD_CHOICES, AUTO_BUILD_DELAYS } from './pdfstatus';
-import { EDITOR_FACES, FOLLOW_DOCUMENT, editorFace } from '../fonts/catalog';
-import { resolvedFace } from '../fonts/editorfont';
+import { EDITOR_FACES, MATH_FONTS, FOLLOW_DOCUMENT, MATCH_TEXT, editorFace, mathFont } from '../fonts/catalog';
+import { resolvedFace, resolvedMath } from '../fonts/editorfont';
 import katex from 'katex';
 
 const SECTIONS = [['editor', 'Editor'], ['ai', 'AI assistance'], ['appearance', 'Appearance'], ['privacy', 'Privacy'], ['account', 'Account']] as const;
@@ -46,10 +46,27 @@ function ModelPicker({ label, value, fallback, models, onChange, pref }: { label
   );
 }
 
-/** A line of text with a formula in the editor's current face (the sample under Settings ▸ Editor ▸ Font). */
-const FONT_SAMPLE_MATH = katex.renderToString('\\nabla_{\\!\\theta}\\, \\mathcal{L} = \\sum_{k=1}^{n} \\alpha_k x_k^2 \\le \\int_0^\\infty e^{-t}\\, dt', { throwOnError: false, output: 'html' });
+/**
+ * The sample under Settings ▸ Editor ▸ Font, in the fonts chosen: the test document of
+ * https://tex.stackexchange.com/q/425098 (which OpenType math fonts are available — the fonts offered
+ * here), with a line of accents added.
+ */
+const SAMPLE_MACROS = {
+  '\\Res': '\\operatorname{Res}', '\\diff': '\\mathop{}\\!\\mathrm{d}', '\\BbbC': '\\mathbb{C}',
+  '\\iiiint': '\\mathop{\\int\\kern-0.65em\\int\\kern-0.65em\\int\\kern-0.65em\\int}', // not in KaTeX
+};
+const m = (src: string, display = false) => katex.renderToString(src, { throwOnError: false, strict: false, displayMode: display, output: 'html', macros: { ...SAMPLE_MACROS } });
+const FONT_SAMPLE = [
+  `<p><b>Theorem 1</b> (Residue theorem). <i>Let ${m('f')} be analytic in the region ${m('G')} except for the isolated singularities ${m('a_1,a_2,\\dots,a_m')}. If ${m('\\gamma')} is a closed rectifiable curve in ${m('G')} which does not pass through any of the points ${m('a_k')} and if ${m('\\gamma\\approx 0')} in ${m('G')}, then</i></p>`,
+  m('\\frac{1}{2\\pi i} \\int\\limits_\\gamma f\\Bigl(x^{\\mathbf{N}\\in\\mathbb{C}^{N\\times 10}}\\Bigr) = \\sum_{k=1}^m n(\\gamma;a_k)\\Res(f;a_k)\\,.', true),
+  `<p><b>Theorem 2</b> (Maximum modulus). <i>Let ${m('G')} be a bounded open set in ${m('\\BbbC')} and suppose that ${m('f')} is a continuous function on ${m('G^-')} which is analytic in ${m('G')}. Then</i></p>`,
+  m('\\max\\{\\, |f(z)|:z\\in G^- \\,\\} = \\max\\{\\, |f(z)|:z\\in \\partial G \\,\\}\\,.', true),
+  `<p>First some large operators both in text: ${m('\\iiint\\limits_{Q}f(x,y,z) \\diff x \\diff y \\diff z')} and ${m('\\prod_{\\gamma\\in\\Gamma_{\\bar{C}}}\\partial(\\tilde{X}_\\gamma)')}; and also on display</p>`,
+  m('\\iiiint\\limits_{Q}f(w,x,y,z) \\diff w \\diff x \\diff y \\diff z \\leq \\oint_{\\partial Q} f\'\\Biggl(\\max\\Biggl\\{ \\frac{\\Vert w\\Vert}{\\vert w^2+x^2\\vert}; \\frac{\\Vert z\\Vert}{\\vert y^2+z^2\\vert}; \\frac{\\Vert w\\oplus z\\Vert}{\\vert x\\oplus y\\vert} \\Biggr\\}\\Biggr)\\,.', true),
+  `<p>Accents: ${m('\\hat{a}\\ \\tilde{b}\\ \\bar{c}\\ \\vec{v}\\ \\dot{x}\\ \\ddot{y}\\ \\breve{u}\\ \\check{z}\\ \\acute{e}\\ \\grave{e}\\quad \\hat{A}\\ \\tilde{N}\\ \\bar{X}\\ \\dot{\\Phi}\\quad \\widehat{xyz}\\ \\widetilde{abc}\\ \\overline{z+w}')}, and ${m('a\\neq b,\\ x\\not< y,\\ \\mathcal{L},\\ \\mathfrak{g},\\ \\boldsymbol{\\alpha}\\cdot\\mathbf{v},\\ \\varepsilon\\ne\\epsilon,\\ \\varphi\\ne\\phi')}.</p>`,
+].join('');
 function FontSample() {
-  return <div class="lyx-editor font-sample" data-font-sample aria-hidden="true">The quick brown fox, <i>jumps over</i> <b>the lazy dog</b> — 0123456789. <span dangerouslySetInnerHTML={{ __html: FONT_SAMPLE_MATH }} /></div>;
+  return <div class="lyx-editor font-sample" data-font-sample aria-hidden="true" dangerouslySetInnerHTML={{ __html: FONT_SAMPLE }} />;
 }
 
 const THEMES: [ThemePref, string, string][] = [
@@ -92,10 +109,14 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
         <div class="settings-content">
           {section === 'editor' && <>
             <h3>Font</h3>
-            <div class="sub">How the editor shows the text and formulas, in this browser. The PDF has its own fonts: Document ▸ Settings ▸ Fonts. Fonts other than Computer Modern come from Google Fonts, loaded once you choose one; the sans-serif is the system’s San Francisco where it has one.</div>
-            <Row label="Editor font"><select data-pref="editorFont" value={p.editorFont === FOLLOW_DOCUMENT ? p.editorFont : editorFace(p.editorFont).id} onChange={e => setPref('editorFont', (e.target as HTMLSelectElement).value)}>
+            <div class="sub">How the editor shows the text and formulas, in this browser; the PDF has its own fonts (Document ▸ Settings ▸ Fonts). The fonts come with OverLyX and are loaded once chosen. Formulas keep KaTeX’s layout: the math font gives them its letters, symbols, accents, big operators and delimiters, but not its spacing, radical signs, wide accents or the tallest delimiters.</div>
+            <Row label="Text font"><select data-pref="editorFont" value={p.editorFont === FOLLOW_DOCUMENT ? p.editorFont : editorFace(p.editorFont).id} onChange={e => setPref('editorFont', (e.target as HTMLSelectElement).value)}>
               <option value={FOLLOW_DOCUMENT}>As in the document — the closest of these to the PDF’s font (now {editorFace(resolvedFace(FOLLOW_DOCUMENT)).label})</option>
               {EDITOR_FACES.map(f => <option key={f.id} value={f.id}>{f.label} — {f.hint}</option>)}
+            </select></Row>
+            <Row label="Math font"><select data-pref="editorMathFont" value={p.editorMathFont === MATCH_TEXT ? p.editorMathFont : mathFont(p.editorMathFont).id} onChange={e => setPref('editorMathFont', (e.target as HTMLSelectElement).value)}>
+              <option value={MATCH_TEXT}>Matching the text font (now {mathFont(resolvedMath({ editorFont: p.editorFont, editorMathFont: MATCH_TEXT })).label})</option>
+              {MATH_FONTS.map(f => <option key={f.id} value={f.id}>{f.label} — {f.hint}</option>)}
             </select></Row>
             <FontSample />
             <h3>Text</h3>
