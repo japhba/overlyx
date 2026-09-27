@@ -84,10 +84,11 @@ export function trackDiff(oldPars: Paragraph[], newPars: Paragraph[], as: TrackA
   return cx.paragraphs(oldPars, newPars, false);
 }
 
-/** Characters (and paragraph breaks) inserted / deleted by exactly this change (author + time). */
-export function changeStats(pars: Paragraph[], as: TrackAs): { inserted: number; deleted: number } {
+/** Characters (and paragraph breaks) marked inserted / deleted by exactly this change (author + time), or by the changes `which` selects. */
+export function changeStats(pars: Paragraph[], as: TrackAs | ((c: Change) => boolean)): { inserted: number; deleted: number } {
   const st = { inserted: 0, deleted: 0 };
-  const mine = (c?: Change) => !!c && c.author === as.author && c.time === as.time;
+  const sel = typeof as === 'function' ? as : (c: Change) => c.author === as.author && c.time === as.time;
+  const mine = (c?: Change) => !!c && sel(c);
   const visit = (ps: Paragraph[]): void => {
     for (const p of ps) {
       if (mine(p.endChange)) st[p.endChange!.type]++;

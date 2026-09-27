@@ -88,6 +88,16 @@ function runTurn(id, p) {
     setTimeout(finish, Number(process.env.STUB_DELAY ?? 150));
     return;
   }
+  if (/break the paper/i.test(text)) {
+    // a patch that breaks the LaTeX build (an undefined macro) — the checkpoint's build check catches it
+    const itemId = 'item-' + ++nItem, file = path.join(t.cwd, 'paper.tex');
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('this paper.', '\\brokenmacro{} this paper.'));
+    const change = { path: file, kind: 'update', diff: '-this paper.\n+\\brokenmacro{} this paper.\n' };
+    notify('item/started', { threadId: t.id, turnId, item: { type: 'fileChange', id: itemId, changes: [change], status: 'inProgress' }, startedAtMs: Date.now() });
+    notify('item/completed', { threadId: t.id, turnId, item: { type: 'fileChange', id: itemId, changes: [change], status: 'completed' }, completedAtMs: Date.now() });
+    setTimeout(finish, Number(process.env.STUB_DELAY ?? 150));
+    return;
+  }
   if (/write hello/i.test(text)) {
     const itemId = 'item-' + ++nItem, reqId = ++nReq;
     const change = { path: path.join(t.cwd, 'hello.txt'), kind: 'add', diff: '+hello from the stub agent\n' };

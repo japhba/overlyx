@@ -33,14 +33,18 @@ import { canonicalProject } from './namespaces.ts';
 import { roleFor, atLeast, logAccess } from './access.ts';
 import { createMcpToken } from './mcpTokens.ts';
 import { selectionToTex, documentContext } from './ai.ts';
-import { prepareWorkspace, syncWorkspace, pruneWorkspaces } from './agentwork.ts';
+import {
+  prepareWorkspace, syncWorkspace, pruneWorkspaces, finishTurn, checkBuilds, noteTurnId, listCheckpoints, onCheckpoint,
+  publicCheckpoint, undoCheckpoint, UndoError, type Checkpoint,
+} from './agentwork.ts';
 import type { PMJSON } from '@overlyx/core';
 
 /* ------------------------------------------------------------------ protocol types (the subset we touch) */
 
 interface JsonRpcMsg { jsonrpc?: string; id?: number | string; method?: string; params?: any; result?: any; error?: { code: number; message: string } }
 export interface AgentEvent {
-  kind: 'notification' | 'request' | 'status';
+  /** 'checkpoint': what a turn changed in the project, its build check, its undo (params: { threadId, checkpoint }) */
+  kind: 'notification' | 'request' | 'status' | 'checkpoint';
   method?: string;
   params?: any;
   /** for kind 'request': answer via POST …/approval with this id */
@@ -59,7 +63,7 @@ export const isNativeThread = (createdAt: number): boolean => createdAt >= NATIV
 const NATIVE_INSTRUCTIONS = (project: string) => `You are embedded in OverLyX, a collaborative WYSIWYG LaTeX editor. The working directory is your private working copy of the user's LaTeX project "${project}", refreshed from the live project at the start of every turn. Edit files here directly with your usual tools (apply_patch; a script for mechanical changes). Every change you make to a .tex document is picked up right away and applied to the live document as tracked changes — marked word by word, a changed digit is one digit — which the user reviews and accepts or rejects in the editor; that is the whole point, so edit exactly what needs to change and leave the rest byte-for-byte alone. Changes to other files (.bib, a new figure or .tex file) are copied into the project; build output you produce here (latexmk's .aux/.log, the PDF next to a .tex) stays here.
 The copy does not change under you during a turn, but the live document does — the user edits between and during your turns and your edits are merged in — so read a file afresh at the start of each turn instead of relying on what it said earlier.
 Pending tracked changes appear in the source as \\lyxadded{author}{time}{text} and \\lyxdeleted{author}{time}{text}: text inside \\lyxdeleted is already deleted — don't restore it unless asked; edit around and inside these macros freely (you never need to write them yourself). Comment lines starting with %% are OverLyX bookkeeping (notes, settings) — leave them unless asked. Never run git: OverLyX versions every change.
-The "overlyx" MCP server (project "${project}") has the comment threads (list_comments / add_comment / resolve_comment) and build_pdf, which compiles the live document (your edits are already in it). Do NOT recompile after every edit: the user builds from the editor whenever they want to look — compile only when explicitly asked, or once at the end of a larger change when you genuinely need to check it compiles.
+The "overlyx" MCP server (project "${project}") has the comment threads (list_comments / add_comment / resolve_comment), build_pdf, which compiles the live document (your edits are already in it), and undo_turn. Do NOT recompile after every edit: when a turn has changed a .tex document, OverLyX builds it after the turn and shows the user whether the PDF still compiles — compile yourself only when asked, or once at the end of a larger or riskier change (new packages, macros, environments, tables). If build_pdf says your changes broke the build (it compares with the build before your changes), fix the error, or take the turn's changes back with undo_turn when you cannot fix it quickly — never end a turn leaving a document that no longer compiles. undo_turn with turns_back 1, 2, … takes back an earlier turn's changes exactly (the user's edits since are kept) — use it when the user asks you to roll back.
 You have internet access through the web_search tool — use it for literature, references and facts (a shell command that needs the network still asks for approval).
 By default the user is here to understand and explore their document and the literature around it — answering, explaining, finding and summarizing is the normal mode, and most turns should not touch any file. Editing happens every so often, only when the user explicitly asks for a change; when a request is ambiguous about whether to edit, explain first and offer the edit instead of making it.
 Each user message may be preceded by a [context]…[/context] item the editor adds (the user did not write it): the document being edited, the other open documents, and the current selection — quoted, and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in a file excerpt. Use it to resolve "this", "here" or an unqualified request.`;
@@ -362,19 +366,42 @@ default_tools_approval_mode = "approve"
     if (m === 'thread/name/updated' && tid && p.name) db.prepare('UPDATE agent_threads SET title = ? WHERE thread_id = ?').run(String(p.name).slice(0, 120), tid);
     if (m === 'thread/closed' && tid) this.loaded.delete(tid);
     this.emit({ kind: 'notification', method: m, params: p }, tid);
+    if (!tid) return;
     // the agent changed files in its working copy: take them over into the live project
-    if (tid && (m === 'turn/completed' || (m === 'item/completed' && (p.item?.type === 'fileChange' || p.item?.type === 'commandExecution')))) this.scheduleSync(tid);
+    if (m === 'item/completed' && (p.item?.type === 'fileChange' || p.item?.type === 'commandExecution')) this.scheduleSync(tid);
+    if (m === 'turn/started' && p.turn?.id) this.native(tid, () => noteTurnId(tid, String(p.turn.id)));
+    if (m === 'turn/completed') this.native(tid, row => this.endTurn(tid, row.project));
+  }
+
+  /** Run `f` for a thread that works in a copy (agentwork.ts). */
+  private native(tid: string, f: (row: ThreadRow) => unknown): void {
+    const row = threadRow(tid);
+    if (row && isNativeThread(row.created_at)) f(row);
   }
 
   private syncTimers = new Map<string, NodeJS.Timeout>();
   private scheduleSync(tid: string): void {
-    const row = threadRow(tid);
-    if (!row || !isNativeThread(row.created_at)) return;
+    this.native(tid, row => {
+      clearTimeout(this.syncTimers.get(tid));
+      this.syncTimers.set(tid, setTimeout(() => {
+        this.syncTimers.delete(tid);
+        syncWorkspace(tid, row.project, this.userId).catch(e => console.error(`[agent ${this.userId}] sync of ${tid} failed:`, (e as Error).message));
+      }, 150));
+    });
+  }
+
+  /** The turn is over: its last changes go live, its checkpoint closes, and what it changed is built (the panel follows through onCheckpoint). */
+  private endTurn(tid: string, project: string): void {
     clearTimeout(this.syncTimers.get(tid));
-    this.syncTimers.set(tid, setTimeout(() => {
-      this.syncTimers.delete(tid);
-      syncWorkspace(tid, row.project, this.userId).catch(e => console.error(`[agent ${this.userId}] sync of ${tid} failed:`, (e as Error).message));
-    }, 150));
+    this.syncTimers.delete(tid);
+    void (async () => {
+      const cp = await finishTurn(tid, project, this.userId);
+      if (cp) await checkBuilds(tid, project, cp.n);
+    })().catch(e => console.error(`[agent ${this.userId}] end of turn in ${tid} failed:`, (e as Error).message));
+  }
+
+  emitCheckpoint(tid: string, cp: Checkpoint): void {
+    this.emit({ kind: 'checkpoint', params: { threadId: tid, checkpoint: publicCheckpoint(cp) } }, tid);
   }
 
   /** Push an event to this user's panels — of the thread's project, or all of them for account-level events. */
@@ -502,11 +529,14 @@ async function composeInput(text: string, ctx: TurnContext | undefined): Promise
 
 /* ------------------------------------------------------------------ routes */
 
-const threadRow = (tid: string) => db.prepare('SELECT * FROM agent_threads WHERE thread_id = ?').get(tid) as { thread_id: string; project: string; user_id: number; title: string | null; created_at: number; updated_at: number } | undefined;
+interface ThreadRow { thread_id: string; project: string; user_id: number; title: string | null; created_at: number; updated_at: number }
+const threadRow = (tid: string) => db.prepare('SELECT * FROM agent_threads WHERE thread_id = ?').get(tid) as ThreadRow | undefined;
 
 export function agentRoutes(): express.Router {
   const r = express.Router();
   if (config.agent.enabled) { try { pruneWorkspaces(); } catch { /* best-effort */ } }
+  // what a turn changed, its build check, its undo: to the thread owner's open panels
+  onCheckpoint((tid, cp) => { const row = threadRow(tid); if (row) hosts.get(row.user_id)?.emitCheckpoint(tid, cp); });
   r.use(['/agent', '/projects/:project/agent'], (_req, res, next) => { if (!config.agent.enabled) { res.status(404).json({ error: 'the agent is not enabled on this server' }); return; } next(); });
 
   const fail = (res: Response, e: unknown, code = 500) => { if (!res.headersSent) res.status(code).json({ error: (e as Error)?.message ?? String(e) }); };
@@ -607,7 +637,8 @@ export function agentRoutes(): express.Router {
       const h = host(row.user_id); await h.ensure();       // transcripts are read through their owner's codex
       const out = await h.request('thread/read', { threadId: row.thread_id, includeTurns: true });
       const approvals = row.user_id === req.user!.id ? h.pendingApprovals(row.thread_id) : [];
-      res.json({ thread: out.thread, mine: row.user_id === req.user!.id, user: row.user_id, approvals });
+      const checkpoints = isNativeThread(row.created_at) ? listCheckpoints(row.thread_id).map(publicCheckpoint) : [];
+      res.json({ thread: out.thread, mine: row.user_id === req.user!.id, user: row.user_id, approvals, checkpoints });
     } catch (e) { fail(res, e); }
   })(); });
 
@@ -640,6 +671,21 @@ export function agentRoutes(): express.Router {
       const quick = await Promise.race([turn.then(t => t), new Promise(r2 => setTimeout(r2, 5000, null))]);
       res.json({ ok: true, turn: quick ? (quick as any).turn ?? null : null });
     } catch (e) { fail(res, e); }
+  })(); });
+
+  /** Take back what a turn changed (its checkpoint): the documents as before it, edits made since kept. */
+  r.post('/projects/:project/agent/threads/:tid/checkpoints/:n/undo', (req, res) => { void (async () => {
+    if (!needRole(req, res, 'edit')) return;
+    const row = threadRow(String(req.params.tid));
+    if (!row || row.project !== String(req.params.project)) { res.status(404).json({ error: 'no such thread in this project' }); return; }
+    if (row.user_id !== req.user!.id) { res.status(403).json({ error: "Only the thread's creator can undo its changes (reject them in the editor instead)" }); return; }
+    try {
+      const r2 = await undoCheckpoint(row.thread_id, row.project, Number(req.params.n), req.user!.id);
+      res.json({ ok: true, checkpoint: publicCheckpoint(r2.checkpoint), reverted: r2.reverted, kept: r2.kept });
+    } catch (e) {
+      if (e instanceof UndoError) { res.status(409).json({ error: e.message }); return; }
+      fail(res, e);
+    }
   })(); });
 
   r.post('/projects/:project/agent/threads/:tid/approval', (req, res) => {

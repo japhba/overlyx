@@ -109,6 +109,11 @@ export class OpenDoc {
     return this.render().text;
   }
 
+  /** Another version of this document (parsed, e.g. a merge result) as .tex text, written the way toText writes the current one. */
+  textOf(doc: LyxDocument): string {
+    return writeDocumentText(doc, this.project, this.relPath, this.isChild, (fn) => resolveIncludeFor(this, fn)).text;
+  }
+
   /** Current document as .tex text with its source map: the character range of every top-level paragraph (the source pane's cursor / scroll sync). */
   toTextMap(): { text: string; spans: SourceSpan[] } {
     const r = this.render();

@@ -658,9 +658,26 @@ blend.
   word by word (`docedit.ts` + `core/src/lyx/trackdiff.ts`, author `Agent panel (MCP)`; a
   neighbouring paragraph somebody changed meanwhile keeps their version — `mergeInPlace`), other
   files (`.bib`, a new figure or `.tex`) are copied into the project, build output stays in the
-  copy. What was mirrored is kept beside the copy, so a restart mid-turn loses nothing. OverLyX's
-  own MCP connector (a managed `[mcp_servers.overlyx]` entry pointing at `/mcp` with an internal
-  per-account token) remains for comments and `build_pdf`. Threads started before 27 Sep 2026
+  copy. What was mirrored is kept beside the copy, so a restart mid-turn loses nothing.
+  **Checkpoints and rollback:** every turn that changes files leaves a checkpoint
+  (`data/agent-work/<thread>.turns/<n>/`): per file the version its changes can be taken back to (a
+  document's live source before the turn's first change to it, with what people edited during the
+  turn folded in — `foldEdits`) and the version the agent left; plus a document version "before an
+  Agent panel change" (kind `agent`, File ▸ Versions) as a manual fallback. When the turn is over,
+  the documents it changed are built (`buildIncluding` reuses a build that already includes the
+  last change — the editor's auto-build, the agent's own `build_pdf`) if they had been built before,
+  and the result is compared with that earlier build: the panel ends the turn with a card — files
+  changed (+/− characters), "✓ builds" or "⚠ no longer builds" with the first errors — and **Undo**
+  / **Ask the agent to fix it**. Undo (`undoCheckpoint`, route `…/checkpoints/:n/undo`, the thread's
+  owner) restores exactly: the documents return to their state before the turn, marks and all,
+  while everything edited since — typing, accepting or rejecting a change — survives (a paragraph
+  both the turn and a person changed keeps its current text and is reported); files it copied in
+  get their old content back unless changed since; files it created go to the trash; the working
+  copy follows. The agent can do the same itself with the MCP tool `undo_turn` (turns_back 0 = the
+  running turn, e.g. an edit that broke the build, 1 = the previous editing turn, …; only the
+  panel's token has it), and `build_pdf` tells it whether its changes broke the build.
+  OverLyX's own MCP connector (a managed `[mcp_servers.overlyx]` entry pointing at `/mcp` with an
+  internal per-account token) remains for comments, `build_pdf` and `undo_turn`. Threads started before 27 Sep 2026
   keep their original setup (project directory as cwd, read-only sandbox, every edit through the
   MCP document tools — tracked word by word as well). A write outside the copy is a sandbox
   exception the panel asks the user to grant. The developer instructions steer the agent to explore
@@ -1220,7 +1237,12 @@ exposes these tools:
   `Note Comment` inset shape and header convention — `Name (date time):` — as the client's comment
   cards); new threads attach at the end of a top-level paragraph.
 * `build_pdf(path, wait_seconds?)`, `build_status(path)` — compile with latexmk (viewers may,
-  like in the app) and read the result: status, LaTeX warnings, and the compile-log tail.
+  like in the app) and read the result: status, LaTeX warnings, and the compile-log tail. A build
+  started before the latest edit never counts. A failed build_pdf also returns the first errors
+  (`file:line: message — at «context»`), `previous_build` (for the Agent panel: the last build before
+  its changes in this turn) and a note when it built before — "a recent edit broke it".
+* `undo_turn(turns_back?)` — only for the Agent panel's agent: take back one of its turns exactly
+  (see the Agent panel above).
 * `insert_paragraphs(path, index, latex)`, `replace_paragraph(path, index, latex)`,
   `delete_paragraph(path, index)` — **raw LaTeX** (formulas, citations, sections, environments;
   parsed by the same `.tex` parser as the editor) addressed by paragraph index, tracked as above.

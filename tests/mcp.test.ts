@@ -432,4 +432,23 @@ describe('build', () => {
     expect(s.last.status).toBe('ok');
     expect(s.last.pdf).toBe(true);
   }, 180_000);
+
+  it('a build that an edit broke says so: the first errors and a note', async () => {
+    const t = createMcpToken(owner.id, 'Build Bot').token;
+    await callTool(t, 'edit_document', { path: 'e.tex', old_text: 'Rewritten entirely.', new_text: 'Rewritten \\brokenmacro{} entirely.' });
+    const r = await callTool(t, 'build_pdf', { path: 'e.tex', wait_seconds: 150 });
+    expect(r.ok).toBe(false);
+    expect(r.previous_build).toBe('ok');
+    expect(r.errors[0]).toMatch(/Undefined control sequence/);
+    expect(r.note).toMatch(/broke it.*reject your tracked changes/);
+  }, 180_000);
+
+  it("undo_turn is the Agent panel's: other agents do not see it; with no panel turn it explains", async () => {
+    const other = await rpc(createMcpToken(owner.id, 'Build Bot').token, 'tools/list');
+    expect(other.body.result.tools.map((x: any) => x.name)).not.toContain('undo_turn');
+    const panel = createMcpToken(owner.id, 'Agent panel').token;
+    const listed = await rpc(panel, 'tools/list');
+    expect(listed.body.result.tools.map((x: any) => x.name)).toContain('undo_turn');
+    await expect(callTool(panel, 'undo_turn', {})).rejects.toThrow(/No Agent panel thread has changed this project/);
+  });
 });

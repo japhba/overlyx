@@ -90,10 +90,21 @@ export interface AgentItem {
   content?: { type: string; text?: string }[];
   summary?: string[]; command?: string; cwd?: string; aggregatedOutput?: string | null; exitCode?: number | null;
   changes?: AgentChange[]; server?: string; tool?: string;
+  /** (client-side, type 'overlyxCheckpoint') what the turn changed in the project — rendered as a checkpoint card */
+  checkpoint?: AgentCheckpoint;
 }
 export interface AgentTurn { id: string; items: AgentItem[]; status: string; error?: { message?: string } | null }
-/** one message of the agent events stream (SSE) */
-export interface AgentEventMsg { kind: 'notification' | 'request' | 'status'; method?: string; params?: any; requestId?: string; running?: boolean }
+/** a build of a document an agent turn changed, compared with its build before the change (agentwork.ts) */
+export interface AgentBuildCheck { doc: string; status: 'building' | 'ok' | 'error'; before: 'ok' | 'error' | null; broke: boolean; errors: string[] }
+/** what one agent turn changed in the project, and whether it was taken back (agentwork.ts Checkpoint) */
+export interface AgentCheckpoint {
+  n: number; turnId: string | null; startedAt: number; updatedAt: number; finished: boolean;
+  files: { path: string; kind: 'doc' | 'file'; created?: boolean; inserted?: number; deleted?: number }[];
+  builds: AgentBuildCheck[];
+  undone: null | { at: number; by: number; kept: { path: string; why: string }[] };
+}
+/** one message of the agent events stream (SSE); kind 'checkpoint' carries { threadId, checkpoint } */
+export interface AgentEventMsg { kind: 'notification' | 'request' | 'status' | 'checkpoint'; method?: string; params?: any; requestId?: string; running?: boolean }
 export interface AgentTurnContext { docId?: string; content?: PMJSON[]; layout?: string; mathLatex?: string; openDocs?: string[] }
 export interface AgentModel { id: string; label: string; description: string; efforts: string[]; defaultEffort: string | null; isDefault: boolean }
 
@@ -223,7 +234,8 @@ export const api = {
   agentLogout: () => req<{ ok: boolean }>('POST', '/api/agent/logout'),
   agentThreads: (project: string) => req<{ threads: AgentThreadInfo[] }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads`),
   agentStartThread: (project: string) => req<{ id: string; model: string | null }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads`),
-  agentThread: (project: string, tid: string) => req<{ thread: { id: string; turns: AgentTurn[] }; mine: boolean; approvals?: { requestId: string; method: string; params: unknown }[] }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}`),
+  agentThread: (project: string, tid: string) => req<{ thread: { id: string; turns: AgentTurn[] }; mine: boolean; approvals?: { requestId: string; method: string; params: unknown }[]; checkpoints?: AgentCheckpoint[] }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}`),
+  agentUndo: (project: string, tid: string, n: number) => req<{ ok: boolean; checkpoint: AgentCheckpoint; reverted: string[]; kept: { path: string; why: string }[] }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/checkpoints/${n}/undo`),
   agentModels: () => req<{ models: AgentModel[] }>('GET', '/api/agent/models'),
   agentTurn: (project: string, tid: string, body: { text: string; context?: AgentTurnContext; model?: string; effort?: string; clientMessageId?: string }) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/turn`, body),
   agentSteer: (project: string, tid: string, turnId: string, text: string, clientMessageId?: string, context?: AgentTurnContext) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/steer`, { turnId, text, clientMessageId, context }),

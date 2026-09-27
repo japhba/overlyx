@@ -9,11 +9,13 @@
  * the open document's macros. Completed diffs collapse to a summary and only unfold by
  * themselves when they look important (small, or touching the open document); the transcript
  * follows the stream while you are at the bottom. Threads belong to the project: every editor
- * sees them, the one who started a thread drives it.
+ * sees them, the one who started a thread drives it. A turn that changed files ends with a
+ * checkpoint card (the server's agentwork.ts): what it changed, whether the PDF still builds,
+ * and Undo — the turn's changes taken back exactly, edits made since kept.
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel, type LitHit } from '../api';
+import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel, type LitHit, type AgentCheckpoint } from '../api';
 import { editorContext } from '../editor/context';
 import { renderStaticHtml } from '../editor/lyxmath/field';
 import { useMathRendererVersion } from '../editor/lyxmath/usemath';
@@ -290,6 +292,55 @@ function ItemView({ it, project, notify }: { it: AgentItem; project?: string; no
   }
 }
 
+const cpItem = (cp: AgentCheckpoint): AgentItem => ({ type: 'overlyxCheckpoint', id: 'cp-' + cp.n, checkpoint: cp });
+const baseName = (p: string) => p.split('/').slice(-2).join('/');
+
+/** The message "Ask the agent to fix it" sends. */
+export function fixRequest(cp: AgentCheckpoint): string {
+  const broken = cp.builds.filter(b => b.broke);
+  const errs = (b: AgentCheckpoint['builds'][number]) => (b.errors.length ? b.errors : ['(no error message in the log)']).map(e => '  ' + e).join('\n');
+  return `The PDF no longer builds after your changes:\n${broken.map(b => `${b.doc}:\n${errs(b)}`).join('\n')}\nPlease fix it — or take your changes back with undo_turn if you cannot.`;
+}
+
+/**
+ * The end of a turn that changed files: what it changed, whether the documents still build, and
+ * the way back. `actions`: the viewer drives the thread and no turn is running.
+ */
+function CheckpointCard({ cp, actions, onUndo, onFix }: { cp: AgentCheckpoint; actions: boolean; onUndo: () => void; onFix: () => void }) {
+  const broke = cp.builds.some(b => b.broke);
+  return (
+    <div class={`agent-checkpoint${broke && !cp.undone ? ' broke' : ''}${cp.undone ? ' undone' : ''}`} data-agent="checkpoint" data-n={cp.n}>
+      <div class="files">
+        {cp.undone ? 'Took back' : cp.finished ? 'Changed' : 'Changing'}{' '}
+        {cp.files.map((f, i) => (
+          <span key={f.path} class="file">
+            {i > 0 && ', '}
+            <b title={f.path}>{baseName(f.path)}</b>
+            {f.created && ' (new)'}
+            {!!(f.inserted || f.deleted) && <span class="stats"> <span class="add">+{f.inserted}</span> <span class="del">−{f.deleted}</span></span>}
+          </span>
+        ))}
+      </div>
+      {!cp.undone && cp.builds.map(b => (
+        <div key={b.doc} class={`build ${b.status}${b.broke ? ' broke' : ''}`} data-agent-build={b.status} data-broke={b.broke ? '1' : '0'}>
+          {b.status === 'building' ? `Checking that ${baseName(b.doc)} still builds…`
+            : b.status === 'ok' ? `✓ ${baseName(b.doc)} builds${b.before === 'error' ? ' again' : ''}`
+            : b.broke ? `⚠ ${baseName(b.doc)} no longer builds`
+            : `${baseName(b.doc)} did not build before this turn either`}
+          {b.status === 'error' && b.errors.length > 0 && <div class="errors">{b.errors.slice(0, 3).map(e => <div key={e}>{e}</div>)}</div>}
+        </div>
+      ))}
+      {cp.undone?.kept.map(k => <div key={k.path} class="kept">{baseName(k.path)}: {k.why}</div>)}
+      {actions && cp.finished && !cp.undone && (
+        <div class="row">
+          <button class="small-btn" data-agent-undo title="Take this turn's changes back: the files as they were before it, with everything edited since kept" onClick={onUndo}>Undo</button>
+          {broke && <button class="small-btn" data-agent-fix onClick={onFix}>Ask the agent to fix it</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The tool arguments of an MCP elicitation (codex gating an MCP tool call), compactly. */
 function ElicitParams({ meta }: { meta: any }) {
   const rows: { name?: string; display_name?: string; value?: unknown }[] | null = Array.isArray(meta?.tool_params_display) ? meta.tool_params_display : null;
@@ -335,6 +386,10 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
   const [items, setItems] = useState<AgentItem[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [busyTurn, setBusyTurn] = useState<string | null>(null);
+  /** the running turn's checkpoint (shown below the transcript until the turn is over) */
+  const [liveCp, setLiveCpState] = useState<AgentCheckpoint | null>(null);
+  const liveCpRef = useRef<AgentCheckpoint | null>(null);
+  const setLiveCp = (cp: AgentCheckpoint | null) => { liveCpRef.current = cp; setLiveCpState(cp); };
   const [text, setText] = useState('');
   const [models, setModels] = useState<AgentModel[]>([]);
   const [model, setModel] = useState(stored('ol.agent.model') ?? '');
@@ -348,7 +403,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
 
   useEffect(() => { void refreshStatus(); }, []);
   useEffect(() => {
-    setSel(null); setItems([]); setApprovals([]);
+    setSel(null); setItems([]); setApprovals([]); setLiveCp(null);
     if (!status?.authenticated) return;
     // reopen the thread that was open here last time (kept per project, survives reloads)
     void api.agentThreads(project).then(r => {
@@ -390,6 +445,10 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
       let msg: AgentEventMsg;
       try { msg = JSON.parse(e.data); } catch { return; }
       const p = msg.params ?? {};
+      if (msg.kind === 'checkpoint') {
+        if (p.threadId === selRef.current && p.checkpoint) showCheckpoint(p.checkpoint as AgentCheckpoint);
+        return;
+      }
       if (msg.kind === 'request') {
         // re-delivered after a reconnect (the keeper replays unanswered approvals): count once
         if (p.threadId === selRef.current && msg.requestId) setApprovals(a => a.some(x => x.requestId === msg.requestId) ? a : [...a, { requestId: msg.requestId!, method: msg.method ?? '', params: p }]);
@@ -457,10 +516,32 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
   useEffect(() => { const el = scrollRef.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [items, approvals, busyTurn]);
   const onScroll = () => { const el = scrollRef.current; if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120; };
 
+  /** A checkpoint arrived: the running turn's shows below the transcript; a finished one takes its
+   *  place in it (after its turn's items — the turn just ended), or is updated where it is. */
+  const showCheckpoint = (cp: AgentCheckpoint) => {
+    const put = (c: AgentCheckpoint) => setItems(list => {
+      const i = list.findIndex(x => x.id === 'cp-' + c.n);
+      return i >= 0 ? [...list.slice(0, i), cpItem(c), ...list.slice(i + 1)] : [...list, cpItem(c)];
+    });
+    const live = liveCpRef.current;
+    if (!cp.finished) {
+      if (live && live.n !== cp.n) put(live);   // (taken back mid-turn: the turn goes on in a new checkpoint)
+      setLiveCp(cp);
+      return;
+    }
+    if (live && live.n === cp.n) setLiveCp(null);
+    put(cp);
+  };
+
   /** (Re)load a thread from the server: items, whether a turn is running, pending approvals —
    *  used on open and to resync after the events stream reconnected (laptop sleep, a deploy). */
   const syncThread = (tid: string) => api.agentThread(project, tid).then(r => {
-    setItems(r.thread.turns.flatMap(turn => [...turn.items, ...turnErrorItems(turn)]));
+    const cps = r.checkpoints ?? [];
+    const done = cps.filter(c => c.finished || c.undone);
+    const list = r.thread.turns.flatMap(turn => [...turn.items, ...turnErrorItems(turn), ...done.filter(c => c.turnId === turn.id).map(cpItem)]);
+    const placed = new Set(list.map(x => x.id));
+    setItems([...list, ...done.filter(c => !placed.has('cp-' + c.n)).map(cpItem)]);
+    setLiveCp(cps.find(c => !c.finished && !c.undone) ?? null);
     setMine(r.mine);
     setApprovals((r.approvals ?? []).map(a => ({ requestId: a.requestId, method: a.method, params: a.params })));
     const last = r.thread.turns[r.thread.turns.length - 1] as { id?: string; status?: string } | undefined;
@@ -468,26 +549,34 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
   });
 
   const openThread = (t: AgentThreadInfo) => {
-    setSel(t.id); setMine(t.mine); setItems([]); setApprovals([]); stick.current = true;
+    setSel(t.id); setMine(t.mine); setItems([]); setApprovals([]); setLiveCp(null); stick.current = true;
     store('ol.agent.sel:' + project, t.id);
     syncThread(t.id).catch(e => notify(errText(e), 'error'));
   };
 
-  const send = () => {
-    const t = text.trim();
+  const undo = (cp: AgentCheckpoint) => {
+    const tid = selRef.current;
+    if (!tid || !confirm(`Take back the changes of this turn (${cp.files.map(f => baseName(f.path)).join(', ')})? Whatever was edited since stays.`)) return;
+    api.agentUndo(project, tid, cp.n)
+      .then(r => { showCheckpoint(r.checkpoint); if (r.kept.length) notify(`Taken back, except: ${r.kept.map(k => `${baseName(k.path)} — ${k.why}`).join('; ')}`); })
+      .catch(e => notify(errText(e), 'error'));
+  };
+
+  const send = (fixed?: string) => {
+    const t = (fixed ?? text).trim();
     if (!t) return;
     stick.current = true;
     const localItem: AgentItem = { type: 'userMessage', id: 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), content: [{ type: 'text', text: t }] };
     // while a turn runs, the composer steers it instead of queueing a new turn
     if (busyTurn && busyTurn !== 'pending' && selRef.current) {
-      setText('');
+      if (fixed === undefined) setText('');
       setItems(list => [...list, localItem]);
       void api.agentSteer(project, selRef.current, busyTurn, t, localItem.id, selectionContext()).catch(e => notify(errText(e), 'error'));
       return;
     }
     if (busyTurn) return;
     const context = selectionContext();
-    setText('');
+    if (fixed === undefined) setText('');
     void (async () => {
       try {
         let tid = selRef.current;
@@ -557,7 +646,10 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
         </div>
       ) : (
         <div class="agent-scroll" ref={scrollRef} onScroll={onScroll} onCopy={transcriptCopy}>
-          {items.map(it => <ItemView key={it.id} it={it} project={project} notify={notify} />)}
+          {items.map(it => it.type === 'overlyxCheckpoint' && it.checkpoint
+            ? <CheckpointCard key={it.id} cp={it.checkpoint} actions={mine && !busyTurn} onUndo={() => undo(it.checkpoint!)} onFix={() => send(fixRequest(it.checkpoint!))} />
+            : <ItemView key={it.id} it={it} project={project} notify={notify} />)}
+          {liveCp && <CheckpointCard cp={liveCp} actions={false} onUndo={() => undefined} onFix={() => undefined} />}
           {approvals.map(a => <ApprovalCard key={a.requestId} a={a} onDecide={(d, fb) => decide(a, d, fb)} />)}
           {busyTurn && !approvals.length && <div class="agent-item reasoning" data-agent="busy">Working…</div>}
         </div>
@@ -585,7 +677,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
             )}
             <span class="spacer" />
             {busyTurn && busyTurn !== 'pending' && sel && <button class="small-btn" data-agent-stop onClick={() => void api.agentInterrupt(project, sel, busyTurn).catch(e => notify(errText(e), 'error'))}>Stop</button>}
-            <button class="small-btn" data-agent-send disabled={!text.trim() || busyTurn === 'pending'} onClick={send}>{busyTurn && busyTurn !== 'pending' ? 'Steer' : 'Send'}</button>
+            <button class="small-btn" data-agent-send disabled={!text.trim() || busyTurn === 'pending'} onClick={() => send()}>{busyTurn && busyTurn !== 'pending' ? 'Steer' : 'Send'}</button>
           </div>
         </div>
       )}

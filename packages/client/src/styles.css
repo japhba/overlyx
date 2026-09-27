@@ -1497,6 +1497,19 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .agent-item.cmd .err { color: indianred; }
 .agent-item.error { color: var(--err); background: var(--err-bg); border: 1px solid color-mix(in srgb, var(--err) 35%, transparent); border-radius: 6px; padding: 6px 9px; font-size: 12.5px; overflow-wrap: anywhere; }
 .agent-item.error a { color: inherit; text-decoration: underline; }
+.agent-checkpoint { border: 1px solid var(--ui-border); border-radius: 6px; padding: 6px 9px; font-size: 12.5px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.agent-checkpoint .files { color: var(--ui-muted); }
+.agent-checkpoint .files b { color: var(--ui-fg); font-weight: 600; }
+.agent-checkpoint .stats .add { color: var(--ok); }
+.agent-checkpoint .stats .del { color: var(--err); }
+.agent-checkpoint .build { color: var(--ui-muted); }
+.agent-checkpoint .build.ok { color: var(--ok); }
+.agent-checkpoint .build.broke { color: var(--err); font-weight: 600; }
+.agent-checkpoint .build .errors { font-family: ui-monospace, monospace; font-size: 11.5px; font-weight: 400; margin-top: 2px; white-space: pre-wrap; }
+.agent-checkpoint.broke { border-color: color-mix(in srgb, var(--err) 45%, transparent); background: var(--err-bg); }
+.agent-checkpoint.undone { opacity: .75; }
+.agent-checkpoint .kept { color: var(--ui-muted); font-size: 12px; }
+.agent-checkpoint .row { display: flex; gap: 6px; flex-wrap: wrap; }
 .agent-item.cmd .out { color: var(--ui-muted); max-height: 180px; overflow: auto; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-item .declined { color: var(--ui-muted); font-size: 12px; }
 .agent-diff { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; border: 1px solid var(--ui-border); border-radius: 6px; padding: 5px 8px; max-height: 240px; overflow-y: auto; }

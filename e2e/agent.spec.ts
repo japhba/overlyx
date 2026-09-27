@@ -92,6 +92,29 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await expect(page.locator('.lyx-editor .lyx-change-inserted')).toHaveText('assist');
   await expect(page.locator('.lyx-editor')).toContainText('The agent will helpassist with this paper.');
   await expect.poll(() => readFileSync(join(PROJECTS_DIR, DOC), 'utf8'), { timeout: 10000 }).toMatch(/\\lyxdeleted\{Agent panel \(MCP\)\}\{[^}]*\}\{help\}\\lyxadded\{Agent panel \(MCP\)\}\{[^}]*\}\{assist\}/);
+  // the turn ends with its checkpoint: what it changed, and the way back
+  const firstCp = page.locator('[data-agent="checkpoint"]').last();
+  await expect(firstCp).toContainText('Changed paper.tex +6 −4', { timeout: 15000 });
+  await expect(firstCp.locator('[data-agent-undo]')).toBeVisible();
+
+  // a turn that breaks the build: the document built before, so the check says so — and Undo
+  // takes the turn back exactly (the earlier help → assist change stays)
+  const built = await page.request.post(`/api/docs/${encodeURIComponent(DOC)}/export`, { data: { format: 'pdf' } });
+  expect(built.ok()).toBe(true);
+  await expect.poll(async () => (await (await page.request.get(`/api/docs/${encodeURIComponent(DOC)}/build`)).json()).build?.status, { timeout: 60000 }).toBe('ok');
+  await page.locator('.agent-compose textarea').fill('break the paper please');
+  await page.keyboard.press('Enter');
+  const brokeCp = page.locator('[data-agent="checkpoint"]').last();
+  await expect(brokeCp.locator('[data-agent-build="error"][data-broke="1"]')).toContainText('paper.tex no longer builds', { timeout: 60000 });
+  await expect(brokeCp).toContainText('Undefined control sequence');
+  await expect(brokeCp.locator('[data-agent-fix]')).toBeVisible();
+  await expect(page.locator('.lyx-editor')).toContainText('brokenmacro');
+  page.once('dialog', d => void d.accept());
+  await brokeCp.locator('[data-agent-undo]').click();
+  await expect(brokeCp).toContainText('Took back paper.tex', { timeout: 15000 });
+  await expect(page.locator('.lyx-editor')).not.toContainText('brokenmacro');
+  await expect(page.locator('.lyx-editor .lyx-change-inserted')).toHaveText('assist');
+  await expect.poll(() => readFileSync(join(PROJECTS_DIR, DOC), 'utf8'), { timeout: 10000 }).not.toContain('brokenmacro');
 
   // codex gating an overlyx MCP tool call arrives as an elicitation: the card shows the
   // question and the tool arguments; allowing it answers with an ElicitResult (accept)

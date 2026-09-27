@@ -12,7 +12,8 @@
  * wrappers) the source contains, and with different whitespace.
  */
 import {
-  mergeLyx, mergeInPlace, trackDiff, changeStats, addAuthor, lyxAuthorId, setHeaderValue, type LyxDocument,
+  mergeLyx, mergeInPlace, trackDiff, changeStats, addAuthor, lyxAuthorId, setHeaderValue, writeParagraphs,
+  type LyxDocument, type Paragraph, type RegionMerge,
 } from '@overlyx/core';
 import type { OpenDoc } from './docs.ts';
 
@@ -24,6 +25,9 @@ export interface TrackedResult {
   deleted: number;
   /** the edited passage as the document now reads (a few lines around the change), or '' */
   excerpt: string;
+  /** the live document's source right before and right after the edit */
+  before: string;
+  after: string;
 }
 
 /**
@@ -47,7 +51,38 @@ export function applyTrackedSource(doc: OpenDoc, before: string, after: string, 
   doc.dirty = true;
   void doc.saveToFile();
   const st = changeStats(target.body, as);
-  return { ...st, excerpt: excerptOfChange(oldText, doc.toText()) };
+  const newText = doc.toText();
+  return { ...st, excerpt: excerptOfChange(oldText, newText), before: oldText, after: newText };
+}
+
+/* ------------------------------------------------------------------ taking an edit back */
+
+/**
+ * `shadow` — another version of the document, e.g. as it was before an agent's changes — with
+ * the edits that turned `base` into `live` carried over: what people changed meanwhile (typing,
+ * accepting or rejecting a change) survives. Where `shadow` and those edits touch the same
+ * paragraph, the live paragraph wins; `conflicts` counts those paragraphs.
+ */
+export function foldEdits(doc: OpenDoc, shadow: string, base: string, live: string): { text: string; conflicts: number } {
+  if (live === base) return { text: shadow, conflicts: 0 };
+  if (shadow === base) return { text: live, conflicts: 0 };
+  let conflicts = 0;
+  const w = (ps: Paragraph[]) => ps.map(p => writeParagraphs([p]));
+  const combine: RegionMerge = (b, o, t) => {
+    const kb = w(b), ko = w(o), kt = w(t);
+    if (kb.length === ko.length && kb.length === kt.length) conflicts += kb.filter((x, k) => ko[k] !== x && kt[k] !== x && kt[k] !== ko[k]).length;
+    else if (ko.join('\n') !== kb.join('\n') && ko.join('\n') !== kt.join('\n')) conflicts += Math.max(1, ko.filter((x, k) => x !== kb[k]).length);
+    return mergeInPlace(b, o, t);
+  };
+  return { text: doc.textOf(mergeLyx(doc.parse(base), doc.parse(shadow), doc.parse(live), combine)), conflicts };
+}
+
+/** Put `text` in place of the live document (not as a tracked change: it restores an earlier state, marks and all). */
+export function restoreSource(doc: OpenDoc, text: string): string {
+  doc.loadFromLyx(doc.parse(text), 'mcp');   // clients apply it like an agent edit: Ctrl+Z takes it back
+  doc.dirty = true;
+  void doc.saveToFile();
+  return doc.toText();
 }
 
 /** The lines of `next` that differ from `prev` (after the preamble), with two lines of context. */

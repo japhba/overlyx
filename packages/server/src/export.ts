@@ -34,6 +34,8 @@ export interface BuildJob {
   startedAt: number;
   phaseAt: number;
   finishedAt?: number;
+  /** when the export began (the content the build compiles is from then) */
+  exportedAt?: number;
   /** last line of latexmk output */
   progress: string;
   rerun: boolean;
@@ -88,6 +90,26 @@ const buildListeners = new Set<BuildListener>();
 export function onBuildFinished(fn: BuildListener): () => void { buildListeners.add(fn); return () => { buildListeners.delete(fn); }; }
 function notifyBuilt(docId: string, r: BuildResult): void {
   for (const l of buildListeners) { try { l(docId, r); } catch (e) { console.error('[build] listener failed:', e); } }
+}
+
+const isRunning = (j: BuildJob) => j.status === 'queued' || j.status === 'exporting' || j.status === 'compiling';
+const waitFor = (j: BuildJob): Promise<BuildResult> => (!isRunning(j) && j.result ? Promise.resolve(j.result) : new Promise(res => j.waiters.push(res)));
+
+/**
+ * The result of a build that includes everything written up to `since` (ms): a build exported
+ * after then — finished, running or queued — is reused; otherwise one is requested (a running
+ * older build is marked for a re-run, and that re-run is awaited).
+ */
+export async function buildIncluding(docId: string, requestedBy: string, since: number): Promise<BuildResult> {
+  for (let attempt = 0; ; attempt++) {
+    const cur = jobs.get(docId);
+    const fresh = (j: BuildJob) => j.status === 'queued' || (j.exportedAt ?? 0) >= since;
+    if (cur && cur.status !== 'cancelled' && fresh(cur)) return waitFor(cur);
+    const job = requestBuild(docId, 'overlyx', requestedBy);
+    const r = await waitFor(job);
+    if (fresh(job) || attempt >= 3) return r;
+    await new Promise(res => setImmediate(res));   // the re-run is queued as the old build winds down
+  }
 }
 
 /** Wait for a document's build to finish (used by the synchronous API variant). */
@@ -325,6 +347,7 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   const doc = await manager.open(docId);
   const docDir = path.dirname(doc.absPath);
   setPhase(job, 'exporting');
+  job.exportedAt = Date.now();
   job.cancel = () => { /* the export cannot be interrupted; its result is discarded (see isCancelled below) */ };
   let exp: Awaited<ReturnType<typeof exportTex>>;
   try {
@@ -430,6 +453,28 @@ export function errorLocations(log: string): { file: string; line: number; messa
     if (m && !/^(l|line)$/.test(m[1])) out.push({ file: m[1], line: Number(m[2]), message: m[3] });
     else if (l.startsWith('! ')) out.push({ file: '', line: 0, message: l.slice(2) });
   }
+  return out;
+}
+
+/** The first errors of a failed build's log, one line each ("paper.tex:42: Undefined control sequence. \\foo"), most useful first. */
+export function buildErrors(log: string, max = 5): string[] {
+  const out: string[] = [];
+  const lines = log.split('\n');
+  for (let i = 0; i < lines.length && out.length < max; i++) {
+    const fl = /^(.+?\.(?:tex|sty|cls|bbl)):(\d+): (.*)$/.exec(lines[i]);
+    const m = fl ? [fl[1], fl[2], fl[3]] : lines[i].startsWith('! ') ? ['', '', lines[i].slice(2)] : null;
+    if (!m) continue;
+    // TeX's "l.42 \foo" context line tells where on the line it stopped
+    let ctx = '';
+    for (let j = i + 1; j < Math.min(lines.length, i + 8); j++) { const c = /^l\.\d+ (.*)$/.exec(lines[j]); if (c) { ctx = c[1].trim().slice(-60); break; } }
+    const where = m[0] ? `${path.basename(m[0])}:${m[1]}: ` : '';
+    const head = `${where}${m[2].trim()}`, line = `${head}${ctx ? ` — at «${ctx}»` : ''}`;
+    // the log holds an error twice (the terminal transcript and the .log file): once, with its context
+    const k = out.findIndex(e => e === head || e.startsWith(head + ' — at «'));
+    if (k < 0) out.push(line);
+    else if (ctx && out[k] === head) out[k] = line;
+  }
+  if (!out.length && /Fatal error|Emergency stop|export failed|build failed/.test(log)) out.push((/.*(Fatal error|Emergency stop|export failed|build failed).*/.exec(log)?.[0] ?? 'the build failed').slice(0, 200));
   return out;
 }
 

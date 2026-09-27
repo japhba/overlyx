@@ -16,8 +16,10 @@
  * one-word change. read_file/write_file reach the project's other text files (refs.bib,
  * macros.tex, …). propose_edit remains for plain-text paragraphs. Comment threads are found anywhere in the body —
  * inside tables, floats and other insets too; new threads attach at a top-level paragraph.
- * build_pdf compiles with latexmk (viewers may, like in the app) and hands back the warnings
- * and the compile-log tail.
+ * build_pdf compiles with latexmk (viewers may, like in the app) and hands back the warnings,
+ * the first errors, whether the build before the agent's changes succeeded, and the compile-log
+ * tail. The Agent panel's agent also has undo_turn: its turns leave checkpoints (agentwork.ts),
+ * and it can take one back exactly — e.g. an edit that broke the build.
  */
 import express, { type Request, type Response } from 'express';
 import { z } from 'zod';
@@ -33,10 +35,11 @@ import { applyTrackedSource, replaceInSource } from './docedit.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import nodePath from 'node:path';
 import { manager } from './docs.ts';
-import { listProjects, projectDir, resolveProjectPath, isDocumentFile, newDocumentText } from './projects.ts';
+import { listProjects, projectDir, resolveProjectPath, isDocumentFile, newDocumentText, findMaster } from './projects.ts';
 import { parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { touchProject } from './git.ts';
-import { buildPdf as runBuild, lastBuild, currentJob } from './export.ts';
+import { buildIncluding, buildErrors, lastBuild, currentJob } from './export.ts';
+import { PANEL_AGENT, buildBeforeTurn, agentCheckpoint, undoCheckpoint } from './agentwork.ts';
 import { verifyMcpToken } from './mcpTokens.ts';
 import { wwwAuthenticate } from './mcpOauth.ts';
 import { config } from './config.ts';
@@ -189,15 +192,37 @@ async function buildDocument(project: string, agentName: string, userId: number,
   const id = `${project}/${path}`;
   await manager.open(id);                                   // validates the path, flushes pending state
   logAccess(project, userId, 'build', path);
+  // what the build is compared with: the panel agent's last build before its changes in this
+  // turn (a build since, e.g. the editor's auto-build, may already include them), else the last one
+  const panel = agentName === PANEL_AGENT;
+  const turnBefore = panel ? buildBeforeTurn(project, userId, `${project}/${findMaster(project, path) ?? path}`) : undefined;
+  const previous = turnBefore !== undefined ? turnBefore?.status ?? null : (lastBuild(id)?.status as 'ok' | 'error' | undefined) ?? null;
   const wait = Math.max(5, Math.min(600, waitSeconds));
   let timer: NodeJS.Timeout | undefined;
   const result = await Promise.race([
-    runBuild(id, { requestedBy: authorName(agentName) }),
+    buildIncluding(id, authorName(agentName), Date.now()),   // a build that started before the latest edit does not count
     new Promise<null>(res => { timer = setTimeout(() => res(null), wait * 1000); }),
   ]);
   clearTimeout(timer);
   if (result === null) return { ...buildStatus(project, path), note: `Still building after ${wait}s — the build continues; poll build_status.` };
-  return { ok: result.ok, warnings: result.warnings, pdf: !!result.pdfPath, log_tail: logTail(result.log) };
+  const out: Record<string, unknown> = { ok: result.ok, warnings: result.warnings, pdf: !!result.pdfPath, previous_build: previous };
+  if (!result.ok) {
+    out.errors = buildErrors(result.log);
+    if (previous === 'ok') out.note = `The build before ${turnBefore !== undefined ? 'your changes in this turn' : 'this one'} succeeded — a recent edit broke it. If it was yours, fix it${panel ? ', or take your changes back with undo_turn' : ', or reject your tracked changes'}; never leave the document not compiling.`;
+  }
+  out.log_tail = logTail(result.log);
+  return out;
+}
+
+async function undoTurn(project: string, userId: number, turnsBack: number) {
+  const { tid, n } = agentCheckpoint(project, userId, turnsBack);
+  const r = await undoCheckpoint(tid, project, n, userId);
+  return {
+    ok: true,
+    reverted: r.reverted,
+    ...(r.kept.length ? { kept: r.kept } : {}),
+    note: 'Taken back: those files are as they were before that turn (edits made since are kept). Your working copy was refreshed — re-read the files before editing them again.',
+  };
 }
 
 
@@ -454,9 +479,14 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path, index }) => { try { return ok(await resolveComment(need(p, 'edit'), path, index)); } catch (e) { return fail(e); } });
 
   server.registerTool('build_pdf', {
-    description: 'Compile the document to PDF with latexmk and wait for the result (viewers may build, like in the app). Returns ok, the LaTeX warnings, and the tail of the compile log; on timeout the build keeps running — poll build_status. Humans open the PDF in the app.',
+    description: 'Compile the document to PDF with latexmk and wait for the result (viewers may build, like in the app). Returns ok, the LaTeX warnings, previous_build (whether the build before your changes succeeded), on failure the first errors (file:line: message) and a note when your changes broke it, and the tail of the compile log; on timeout the build keeps running — poll build_status. Humans open the PDF in the app.',
     inputSchema: { ...projArg, path: z.string(), wait_seconds: z.number().int().positive().max(600).optional().describe('How long to wait before returning (default 180; the build continues on timeout)') },
   }, async ({ project: p, path, wait_seconds }) => { try { return ok(await buildDocument(need(p, 'view'), agentName, userId, path, wait_seconds ?? 180)); } catch (e) { return fail(e); } });
+
+  if (agentName === PANEL_AGENT) server.registerTool('undo_turn', {
+    description: "Take back every change one of your turns made to the project: its documents return exactly to their state before that turn (your tracked changes of the turn disappear, as if rejected — earlier marks and everybody else's edits since are kept), files it wrote get their old content back, files it created are removed. turns_back 0 (default) = the changes of the turn you are in (e.g. an edit that broke the build and cannot be fixed quickly); 1 = the last earlier turn that changed files, 2 = the one before, … Your working copy is refreshed afterwards.",
+    inputSchema: { ...projArg, turns_back: z.number().int().min(0).max(30).optional().describe('0 = this turn (default), 1 = the previous turn that changed files, …') },
+  }, async ({ project: p, turns_back }) => { try { return ok(await undoTurn(need(p, 'edit'), userId, turns_back ?? 0)); } catch (e) { return fail(e); } });
 
   server.registerTool('build_status', {
     description: "The document's build state: whether a build is running, and the last result (status, LaTeX warnings, compile-log tail, whether a PDF exists).",
