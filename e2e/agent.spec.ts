@@ -3,7 +3,8 @@
  * app-server stub: the server under test must run with OVERLYX_CODEX_BIN=scripts/codex-stub.mjs
  * and OVERLYX_E2E_AGENT_STUB=1 exported for this spec. Covers the device-code sign-in (the stub
  * completes it by itself), a streamed reply in a fresh thread, the file-change approval writing
- * into the project, and the thread list.
+ * into the project, a patch in the agent's working copy arriving as word-level tracked changes,
+ * and the thread list.
  */
 import { test, expect } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -82,6 +83,15 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await expect.poll(() => existsSync(helloFile), { timeout: 10000 }).toBe(true);
   expect(readFileSync(helloFile, 'utf8')).toContain('hello from the stub agent');
   await expect(page.locator('.agent-msg.assistant').last()).toContainText('Stub reply', { timeout: 15000 });
+
+  // the agent patches the document in its working copy: the live document gets just the changed
+  // word as tracked changes (the rest of the sentence untouched), in the editor and in the file
+  await page.locator('.agent-compose textarea').fill('edit the paper please');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.lyx-editor .lyx-change-deleted')).toHaveText('help', { timeout: 15000 });
+  await expect(page.locator('.lyx-editor .lyx-change-inserted')).toHaveText('assist');
+  await expect(page.locator('.lyx-editor')).toContainText('The agent will helpassist with this paper.');
+  await expect.poll(() => readFileSync(join(PROJECTS_DIR, DOC), 'utf8'), { timeout: 10000 }).toMatch(/\\lyxdeleted\{Agent panel \(MCP\)\}\{[^}]*\}\{help\}\\lyxadded\{Agent panel \(MCP\)\}\{[^}]*\}\{assist\}/);
 
   // codex gating an overlyx MCP tool call arrives as an elicitation: the card shows the
   // question and the tool arguments; allowing it answers with an ElicitResult (accept)

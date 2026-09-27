@@ -12,7 +12,7 @@
  * wrappers) the source contains, and with different whitespace.
  */
 import {
-  mergeLyx, trackDiff, changeStats, addAuthor, lyxAuthorId, setHeaderValue, type LyxDocument,
+  mergeLyx, mergeInPlace, trackDiff, changeStats, addAuthor, lyxAuthorId, setHeaderValue, type LyxDocument,
 } from '@overlyx/core';
 import type { OpenDoc } from './docs.ts';
 
@@ -33,8 +33,9 @@ export interface TrackedResult {
 export function applyTrackedSource(doc: OpenDoc, before: string, after: string, author: string): TrackedResult {
   const base = doc.parse(before), theirs = doc.parse(after);
   const ours = doc.toLyxDocument();
-  // the live document with the agent's changed regions taken over (untracked) …
-  const target: LyxDocument = mergeLyx(base, ours, theirs);
+  // the live document with the agent's changed paragraphs taken over (untracked; a neighbouring
+  // paragraph somebody changed meanwhile keeps their version) …
+  const target: LyxDocument = mergeLyx(base, ours, theirs, mergeInPlace);
   // … and then the difference to the live document as the agent's tracked changes
   const authorId = lyxAuthorId(author, '');
   addAuthor(target.header, authorId, author, '');

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseLyx } from '../packages/core/src/lyx/parser.ts';
 import { writeLyx } from '../packages/core/src/lyx/writer.ts';
-import { mergeLyx, align } from '../packages/core/src/lyx/merge.ts';
+import { mergeLyx, mergeInPlace, align } from '../packages/core/src/lyx/merge.ts';
 
 const HEAD = `#LyX 2.5 created this file. For more info see https://www.lyx.org/
 \\lyxformat 643
@@ -87,5 +87,16 @@ describe('mergeLyx', () => {
     const m = mergeLyx(doc(...base), doc('one', 'two here', 'three', 'four', 'five'), doc('one', 'two', 'three', 'four on disk', 'five'));
     expect(writeLyx(m)).toContain('four on disk');
     expect(writeLyx(m)).toContain('two here');
+  });
+
+  it('mergeInPlace keeps both sides of neighbouring in-place edits (theirs wins only on the same paragraph)', () => {
+    const b = ['one', 'two', 'three', 'four'];
+    // plain mergeLyx: touching regions are one region, taken from theirs
+    expect(merge(b, ['one', 'two ours', 'three', 'four'], ['one', 'two', 'three theirs', 'four'])).toEqual(['one', 'two', 'three theirs', 'four']);
+    const fine = (o: string[], t: string[]) => pars(mergeLyx(doc(...b), doc(...o), doc(...t), mergeInPlace));
+    expect(fine(['one', 'two ours', 'three', 'four'], ['one', 'two', 'three theirs', 'four'])).toEqual(['one', 'two ours', 'three theirs', 'four']);
+    expect(fine(['one', 'two ours', 'three', 'four'], ['one', 'two theirs', 'three', 'four'])).toEqual(['one', 'two theirs', 'three', 'four']);
+    // a touching region with a different paragraph count: theirs for the region
+    expect(fine(['one', 'two', 'three ours', 'four'], ['one', 'two', 'three', 'new', 'four'])).toEqual(['one', 'two', 'three', 'new', 'four']);
   });
 });

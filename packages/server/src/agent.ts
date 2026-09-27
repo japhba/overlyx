@@ -3,8 +3,10 @@
  * JSON-lines on stdio — the same interface the Codex VS Code extension uses). One codex child
  * process per signed-in *user*, `CODEX_HOME` under data/agent-home/<userId>/ — so credentials
  * (the user's own ChatGPT account, device-code sign-in) and codex's memories are per user and
- * shared across that user's projects. Threads run with the *project* directory as cwd in codex's
- * workspace-write sandbox; every thread is recorded in agent_threads (db.ts) so access follows
+ * shared across that user's projects. Threads work in a private copy of the project (agentwork.ts:
+ * codex's workspace-write sandbox with the copy as its only writable root) and edit files the way
+ * coding agents do; their document changes reach the live documents as tracked changes, word by
+ * word. Every thread is recorded in agent_threads (db.ts) so access follows
  * the project's sharing: any editor of the project sees its threads and may read transcripts,
  * only the thread's creator drives it.
  *
@@ -31,6 +33,7 @@ import { canonicalProject } from './namespaces.ts';
 import { roleFor, atLeast, logAccess } from './access.ts';
 import { createMcpToken } from './mcpTokens.ts';
 import { selectionToTex, documentContext } from './ai.ts';
+import { prepareWorkspace, syncWorkspace, pruneWorkspaces } from './agentwork.ts';
 import type { PMJSON } from '@overlyx/core';
 
 /* ------------------------------------------------------------------ protocol types (the subset we touch) */
@@ -45,14 +48,24 @@ export interface AgentEvent {
   running?: boolean;
 }
 
-const DEV_INSTRUCTIONS = (project: string) => `You are embedded in OverLyX, a collaborative WYSIWYG LaTeX editor. The working directory is the user's LaTeX project "${project}"; its .tex files are the live documents — edits you make to them appear in the user's editor within seconds, and are versioned automatically.
-Read project files directly as much as you like — but ALL edits go through the "overlyx" MCP server's tools with project "${project}". For .tex documents the workflow is: read_document (its \`text\` is the LaTeX source), then edit_document to replace a passage of that source — old_text copied from it (unique; the \\lyxadded/\\lyxdeleted markup may be left out), new_text any LaTeX. Every edit is applied as tracked changes the user reviews and accepts in the editor, marked word by word (a changed digit is one digit), which is the whole point; the result's now_reads shows the passage as it now reads. Several small edit_document calls beat one big one. NEVER use apply_patch or shell edits on .tex files. write_file is for .bib and other non-document text files; build_pdf compiles through OverLyX's queue. The filesystem is sandboxed read-only, and note the .tex files on disk are live documents that change as people type — a byte-level patch will often fail; edit_document does not.
-The user edits these documents live, between and during your turns: what you read earlier may be stale, so RE-READ a document (read_document) immediately before proposing an edit to it, and never re-instate earlier content from your memory of the file — the file on disk is the truth.
+// Threads started before NATIVE_EDITS_SINCE keep the instructions they were started with (codex
+// binds them at thread/start): project directory as cwd, read-only, every edit through the
+// overlyx MCP document tools — which apply tracked changes word by word too (mcp.ts).
+
+/** Threads from this moment on edit a private working copy with codex's own tools (agentwork.ts). */
+export const NATIVE_EDITS_SINCE = Date.parse('2026-09-27T09:48:00Z');
+export const isNativeThread = (createdAt: number): boolean => createdAt >= NATIVE_EDITS_SINCE;
+
+const NATIVE_INSTRUCTIONS = (project: string) => `You are embedded in OverLyX, a collaborative WYSIWYG LaTeX editor. The working directory is your private working copy of the user's LaTeX project "${project}", refreshed from the live project at the start of every turn. Edit files here directly with your usual tools (apply_patch; a script for mechanical changes). Every change you make to a .tex document is picked up right away and applied to the live document as tracked changes — marked word by word, a changed digit is one digit — which the user reviews and accepts or rejects in the editor; that is the whole point, so edit exactly what needs to change and leave the rest byte-for-byte alone. Changes to other files (.bib, a new figure or .tex file) are copied into the project; build output you produce here (latexmk's .aux/.log, the PDF next to a .tex) stays here.
+The copy does not change under you during a turn, but the live document does — the user edits between and during your turns and your edits are merged in — so read a file afresh at the start of each turn instead of relying on what it said earlier.
+Pending tracked changes appear in the source as \\lyxadded{author}{time}{text} and \\lyxdeleted{author}{time}{text}: text inside \\lyxdeleted is already deleted — don't restore it unless asked; edit around and inside these macros freely (you never need to write them yourself). Comment lines starting with %% are OverLyX bookkeeping (notes, settings) — leave them unless asked. Never run git: OverLyX versions every change.
+The "overlyx" MCP server (project "${project}") has the comment threads (list_comments / add_comment / resolve_comment) and build_pdf, which compiles the live document (your edits are already in it). Do NOT recompile after every edit: the user builds from the editor whenever they want to look — compile only when explicitly asked, or once at the end of a larger change when you genuinely need to check it compiles.
 You have internet access through the web_search tool — use it for literature, references and facts (a shell command that needs the network still asks for approval).
 By default the user is here to understand and explore their document and the literature around it — answering, explaining, finding and summarizing is the normal mode, and most turns should not touch any file. Editing happens every so often, only when the user explicitly asks for a change; when a request is ambiguous about whether to edit, explain first and offer the edit instead of making it.
-Conventions: comment lines starting with %% are OverLyX bookkeeping (notes, settings) — leave them unless asked; \\lyxadded/\\lyxdeleted macros are tracked changes — preserve them; never run git commit or push (OverLyX commits automatically). Do NOT recompile the PDF after every edit: the user builds from the editor whenever they want to look — compile only when explicitly asked, or once at the end of a larger change when you genuinely need to check it compiles.
-Each user message may be preceded by a [context]…[/context] item the editor adds (the user did not write it): the document being edited, the other open documents, and the current selection — quoted, and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in a file excerpt. Use it to resolve "this", "here" or an unqualified request.
-The ONE exception to the MCP-only rule: if the "overlyx" MCP tools are not available in this conversation, edit the .tex file directly (the write triggers an approval card — expected) and mark the edit up as a tracked change YOURSELF, exactly as the tools would: wrap every insertion in \\lyxadded{Agent panel (MCP)}{<asctime, e.g. Wed Sep  2 21:30:00 2026>}{…} and keep every deletion inside \\lyxdeleted{Agent panel (MCP)}{<asctime>}{old text} instead of removing it; re-read the file immediately before patching (it changes live) and patch whole lines.`;
+Each user message may be preceded by a [context]…[/context] item the editor adds (the user did not write it): the document being edited, the other open documents, and the current selection — quoted, and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in a file excerpt. Use it to resolve "this", "here" or an unqualified request.`;
+
+/** The sandbox of a turn in a working copy: only the copy (and /tmp) is writable. */
+const workspaceSandbox = (dir: string) => ({ type: 'workspaceWrite', writableRoots: [dir], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false });
 
 /**
  * Threads started before the managed codex config gained the overlyx MCP server were created
@@ -349,6 +362,19 @@ default_tools_approval_mode = "approve"
     if (m === 'thread/name/updated' && tid && p.name) db.prepare('UPDATE agent_threads SET title = ? WHERE thread_id = ?').run(String(p.name).slice(0, 120), tid);
     if (m === 'thread/closed' && tid) this.loaded.delete(tid);
     this.emit({ kind: 'notification', method: m, params: p }, tid);
+    // the agent changed files in its working copy: take them over into the live project
+    if (tid && (m === 'turn/completed' || (m === 'item/completed' && (p.item?.type === 'fileChange' || p.item?.type === 'commandExecution')))) this.scheduleSync(tid);
+  }
+
+  private syncTimers = new Map<string, NodeJS.Timeout>();
+  private scheduleSync(tid: string): void {
+    const row = threadRow(tid);
+    if (!row || !isNativeThread(row.created_at)) return;
+    clearTimeout(this.syncTimers.get(tid));
+    this.syncTimers.set(tid, setTimeout(() => {
+      this.syncTimers.delete(tid);
+      syncWorkspace(tid, row.project, this.userId).catch(e => console.error(`[agent ${this.userId}] sync of ${tid} failed:`, (e as Error).message));
+    }, 150));
   }
 
   /** Push an event to this user's panels — of the thread's project, or all of them for account-level events. */
@@ -480,6 +506,7 @@ const threadRow = (tid: string) => db.prepare('SELECT * FROM agent_threads WHERE
 
 export function agentRoutes(): express.Router {
   const r = express.Router();
+  if (config.agent.enabled) { try { pruneWorkspaces(); } catch { /* best-effort */ } }
   r.use(['/agent', '/projects/:project/agent'], (_req, res, next) => { if (!config.agent.enabled) { res.status(404).json({ error: 'the agent is not enabled on this server' }); return; } next(); });
 
   const fail = (res: Response, e: unknown, code = 500) => { if (!res.headersSent) res.status(code).json({ error: (e as Error)?.message ?? String(e) }); };
@@ -560,7 +587,7 @@ export function agentRoutes(): express.Router {
         // reads are free (the project is the cwd); every write goes through the MCP tools as a
         // tracked change — a direct filesystem write is a sandbox exception the user must grant
         sandbox: 'read-only',
-        developerInstructions: DEV_INSTRUCTIONS(project),
+        developerInstructions: NATIVE_INSTRUCTIONS(project),
         ...(config.agent.model ? { model: config.agent.model } : {}),
       });
       const tid = out.thread.id as string;
@@ -603,8 +630,11 @@ export function agentRoutes(): express.Router {
       const effort = typeof req.body?.effort === 'string' && req.body.effort ? String(req.body.effort).slice(0, 20) : undefined;
       // the panel's optimistic message id: codex echoes it on the userMessage item, so the client can dedupe
       const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
-      // cwd: the project's directory now — a thread started before the project moved (namespaces.ts) follows it
-      const turn = h.request('turn/start', { threadId: row.thread_id, input, cwd: projectDir(row.project), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(cmid ? { clientUserMessageId: cmid } : {}) }, 0);
+      // cwd: the thread's working copy, mirrored from the live project now (older threads: the
+      // project's directory itself — a thread started before the project moved follows it)
+      const native = isNativeThread(row.created_at);
+      const cwd = native ? await prepareWorkspace(row.thread_id, row.project, req.user!.id) : projectDir(row.project);
+      const turn = h.request('turn/start', { threadId: row.thread_id, input, cwd, ...(native ? { sandboxPolicy: workspaceSandbox(cwd) } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(cmid ? { clientUserMessageId: cmid } : {}) }, 0);
       turn.catch(e => console.error(`[agent ${req.user!.id}] turn failed:`, (e as Error).message));
       // the turn runs long; its progress arrives over the events stream — answer as soon as it is accepted
       const quick = await Promise.race([turn.then(t => t), new Promise(r2 => setTimeout(r2, 5000, null))]);

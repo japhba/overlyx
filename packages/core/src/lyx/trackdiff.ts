@@ -515,6 +515,9 @@ function sliceVisible(parts: Part[], from: number, to: number): Part[] {
   return out;
 }
 
+const wordChar = (c: string | undefined): boolean => !!c && /[\p{L}\p{N}]/u.test(c);
+const wordEdge = (str: string, i: number): boolean => !(wordChar(str[i - 1]) && wordChar(str[i]));
+
 /**
  * A replaced stretch of text in one font that mostly survives (a changed number, a typo, a
  * spelling variant, the same words tokenised differently) is narrowed to the characters that
@@ -530,6 +533,12 @@ function refine(del: Tok[], add: Tok[]): Op[] {
   while (p < a.length && p < b.length && a[p] === b[p]) p++;
   let s = 0;
   while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  // inside one replaced word any cut is fine (colo[u]r); across words only at word edges, so a
+  // reworded phrase does not read "[S→The s]econd"
+  if (!(del.length === 1 && add.length === 1)) {
+    while (p > 0 && !(wordEdge(a, p) && wordEdge(b, p))) p--;
+    while (s > 0 && !(wordEdge(a, a.length - s) && wordEdge(b, b.length - s))) s--;
+  }
   if (!(p + s > 0 && (p + s) * 2 >= Math.max(a.length, b.length))) return whole;
   const parts = del.flatMap(t => t.parts);
   const tok = (ps: Part[]): Tok => ({ key: '', text: ps.map(x => ('item' in x || partDel(x) ? '' : x.text)).join(''), isText: true, ws: false, font: del[0].font, parts: ps });

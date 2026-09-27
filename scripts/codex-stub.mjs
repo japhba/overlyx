@@ -24,6 +24,7 @@ const thread = (t) => ({ id: t.id, preview: '', ephemeral: false, status: { type
 
 function runTurn(id, p) {
   const t = threads.get(p.threadId);
+  if (p.cwd) t.cwd = p.cwd;                    // like codex: the per-turn cwd override sticks
   const turnId = 'turn-' + ++nTurn;
   // several input items arrive when the server prepends editor context; the user's message is last
   const all = (p.input ?? []).map(i => i.text ?? '');
@@ -74,6 +75,17 @@ function runTurn(id, p) {
       notify('turn/completed', { threadId: t.id, turn: failed });
       result(id, { turn: failed });
     }, Number(process.env.STUB_DELAY ?? 150));
+    return;
+  }
+  if (/edit the paper/i.test(text)) {
+    // a patch applied in the working copy without asking (workspace-write): paper.tex, one word
+    const itemId = 'item-' + ++nItem, file = path.join(t.cwd, 'paper.tex');
+    const before = fs.readFileSync(file, 'utf8');
+    fs.writeFileSync(file, before.replace('will help with', 'will assist with'));
+    const change = { path: file, kind: 'update', diff: '-will help with\n+will assist with\n' };
+    notify('item/started', { threadId: t.id, turnId, item: { type: 'fileChange', id: itemId, changes: [change], status: 'inProgress' }, startedAtMs: Date.now() });
+    notify('item/completed', { threadId: t.id, turnId, item: { type: 'fileChange', id: itemId, changes: [change], status: 'completed' }, completedAtMs: Date.now() });
+    setTimeout(finish, Number(process.env.STUB_DELAY ?? 150));
     return;
   }
   if (/write hello/i.test(text)) {

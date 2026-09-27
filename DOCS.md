@@ -647,16 +647,26 @@ blend.
   right sidebar, driven over its app-server protocol (the same JSON-RPC interface the Codex VS
   Code extension speaks) — one `codex` child process per signed-in user, `CODEX_HOME` under
   `data/agent-home/<user>/` so ChatGPT credentials and codex's memories are per account and shared
-  across that user's projects. Users sign in with their *own* ChatGPT account (device code); a
-  thread runs with the project directory as cwd in codex's **read-only** sandbox — the agent reads
-  every project file freely, and all *edits* go through OverLyX's own MCP connector (a managed
-  `[mcp_servers.overlyx]` entry pointing at `/mcp` with an internal per-account token): document
-  edits arrive as tracked changes (`\lyxadded`), reviewable like a collaborator's, `write_file`
-  covers `.bib` and friends, `build_pdf` compiles through the app's queue. A direct filesystem
-  write is a sandbox exception the panel asks the user to grant. The developer instructions steer the agent to explore
+  across that user's projects. Users sign in with their *own* ChatGPT account (device code). A
+  thread works in its **private working copy** of the project (`agentwork.ts`,
+  `data/agent-work/<thread>/<project>/`) and edits files the way coding agents do — `apply_patch`,
+  a script — in codex's workspace-write sandbox whose only writable root is the copy (binary files
+  are symlinked in read-only; the sandbox refuses writes through them). Every turn mirrors the
+  live project in first (documents as their live source, with the tracked-change markup); every
+  applied patch, command and finished turn takes the agent's changes back: a document is diffed
+  against what was mirrored and merged into the live document as the agent's tracked changes,
+  word by word (`docedit.ts` + `core/src/lyx/trackdiff.ts`, author `Agent panel (MCP)`; a
+  neighbouring paragraph somebody changed meanwhile keeps their version — `mergeInPlace`), other
+  files (`.bib`, a new figure or `.tex`) are copied into the project, build output stays in the
+  copy. What was mirrored is kept beside the copy, so a restart mid-turn loses nothing. OverLyX's
+  own MCP connector (a managed `[mcp_servers.overlyx]` entry pointing at `/mcp` with an internal
+  per-account token) remains for comments and `build_pdf`. Threads started before 27 Sep 2026
+  keep their original setup (project directory as cwd, read-only sandbox, every edit through the
+  MCP document tools — tracked word by word as well). A write outside the copy is a sandbox
+  exception the panel asks the user to grant. The developer instructions steer the agent to explore
   and explain by default — document edits only on an explicit ask — and codex's web_search tool is
   enabled (internet access; sandboxed shell commands still ask). They also tell it the documents
-  are live-edited: re-read before editing, never restore earlier content from memory. The panel streams
+  are live-edited: read a file afresh each turn, never restore earlier content from memory. The panel streams
   message/reasoning deltas, tool calls (folded) and diffs over SSE. Every message carries editor
   context automatically: the open documents and the current selection — as LaTeX (the ⌘J
   conversion) and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in an excerpt of the file. Formulas in the

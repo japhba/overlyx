@@ -63,7 +63,20 @@ function changedRegions(baseLen: number, pairs: [number, number][], otherLen: nu
   return out;
 }
 
-export function mergeLyx(base: LyxDocument, ours: LyxDocument, theirs: LyxDocument): LyxDocument {
+/** How a region both sides touched is resolved: base, ours and theirs versions of it → the result. */
+export type RegionMerge = (base: Paragraph[], ours: Paragraph[], theirs: Paragraph[]) => Paragraph[];
+
+/**
+ * A region resolved paragraph by paragraph when all three versions have the same number of
+ * paragraphs (edits in place, e.g. neighbouring paragraphs changed on either side): each side's
+ * change is kept, theirs where both changed the same paragraph; otherwise theirs as a whole.
+ */
+export const mergeInPlace: RegionMerge = (b, o, t) => {
+  if (b.length !== o.length || b.length !== t.length) return t;
+  return b.map((bp, k) => (writeParagraph(t[k]) === writeParagraph(bp) ? o[k] : t[k]));
+};
+
+export function mergeLyx(base: LyxDocument, ours: LyxDocument, theirs: LyxDocument, combine?: RegionMerge): LyxDocument {
   const kb = base.body.map(writeParagraph), ko = ours.body.map(writeParagraph), kt = theirs.body.map(writeParagraph);
   const bo = align(kb, ko), bt = align(kb, kt);
   const mapO = new Map(bo), mapT = new Map(bt);
@@ -90,7 +103,8 @@ export function mergeLyx(base: LyxDocument, ours: LyxDocument, theirs: LyxDocume
     const oursEnd = end >= kb.length ? body.length : mapO.get(end)!;
     const theirsStart = start === 0 ? 0 : mapT.get(start - 1)! + 1;
     const theirsEnd = end >= kb.length ? theirs.body.length : mapT.get(end)!;
-    body.splice(oursStart, oursEnd - oursStart, ...theirs.body.slice(theirsStart, theirsEnd));
+    const theirsPart = theirs.body.slice(theirsStart, theirsEnd);
+    body.splice(oursStart, oursEnd - oursStart, ...(combine ? combine(base.body.slice(start, end), body.slice(oursStart, oursEnd), theirsPart) : theirsPart));
   }
   const same = (x: string[], y: string[]) => x.length === y.length && x.every((l, i) => l === y[i]);
   return {
