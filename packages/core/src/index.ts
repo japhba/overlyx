@@ -2,6 +2,7 @@ export * from './lyx/ast.ts';
 export { parseLyx } from './lyx/parser.ts';
 export { writeLyx, writeParagraphs, writeInset } from './lyx/writer.ts';
 export { mergeLyx } from './lyx/merge.ts';
+export { trackDiff, resolveChanges, rejectOwnChanges, changeStats, type TrackAs } from './lyx/trackdiff.ts';
 export { diffText, diffTokens, tokenize, coalesce } from './lyx/tokendiff.ts';
 export type { DiffToken } from './lyx/tokendiff.ts';
 export * from './schema.ts';

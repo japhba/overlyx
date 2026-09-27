@@ -3,17 +3,18 @@
  * read/add/resolve comment threads, and propose text edits. The bearer token identifies an
  * *account* (see mcpTokens.ts) — the agent may connect to any project that account can access,
  * with the account's role there: viewers read, editors also comment and propose edits. Edits are NEVER applied as a plain overwrite: every
- * `propose_edit` call is turned into change-tracked insertions/deletions (the same `\lyxadded` /
+ * document edit is turned into change-tracked insertions/deletions (the same `\lyxadded` /
  * `\lyxdeleted` machinery a human editor's Track Changes produces), attributed to the token's name
  * suffixed "(MCP)" — so a misbehaving or over-eager agent is always reviewable and revertible from
  * the Review toolbar / Versions, exactly like a human collaborator's tracked edit.
  *
- * Raw LaTeX is a first-class input: insert_paragraphs / replace_paragraph accept any LaTeX
- * (formulas, citations, sections, environments — the same .tex parser as the editor) and are
- * applied as tracked changes; write_document replaces or creates a whole document's source,
- * untracked like the raw-source view (Versions/git keep the prior state); read_file/write_file
- * reach the project's other text files (refs.bib, macros.tex, …). propose_edit remains the
- * word-diff tool for plain-text paragraphs. Comment threads are found anywhere in the body —
+ * Raw LaTeX is a first-class input. edit_document replaces a passage of the document's source
+ * (old text → new text, the way coding agents edit files); write_document writes a whole source;
+ * insert_paragraphs / replace_paragraph / delete_paragraph address paragraphs by index. Whatever
+ * the tool, the result is diffed against the live document (trackDiff, docedit.ts), so only what
+ * actually changed is marked — a word, a digit, a table cell — never a whole paragraph for a
+ * one-word change. read_file/write_file reach the project's other text files (refs.bib,
+ * macros.tex, …). propose_edit remains for plain-text paragraphs. Comment threads are found anywhere in the body —
  * inside tables, floats and other insets too; new threads attach at a top-level paragraph.
  * build_pdf compiles with latexmk (viewers may, like in the app) and hands back the warnings
  * and the compile-log tail.
@@ -24,10 +25,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import fs from 'node:fs';
 import {
-  plainText, itemText, paragraph, textItem, insetItem, textInset, addAuthor, lyxAuthorId, fontsEqual,
-  setHeaderValue, diffText, commentHeader, formatTimestamp, parseHeader, parseThread,
-  splitDocId, type LyxDocument, type Item, type TextInset,
+  itemText, paragraph, textItem, insetItem, textInset, addAuthor, lyxAuthorId, fontsEqual,
+  setHeaderValue, diffText, commentHeader, formatTimestamp, parseHeader, parseThread, trackDiff, changeStats,
+  splitDocId, type LyxDocument, type Item, type TextInset, type Paragraph,
 } from '@overlyx/core';
+import { applyTrackedSource, replaceInSource } from './docedit.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import nodePath from 'node:path';
 import { manager } from './docs.ts';
@@ -94,15 +96,10 @@ async function proposeEdit(project: string, agentName: string, path: string, par
   }
   const oldText = par.items.map(itemText).join('');
   if (oldText === newText) return { changed: false, message: 'No difference from the current text.' };
-  const author = authorName(agentName);
-  const authorId = lyxAuthorId(author, '');
-  const time = Math.floor(Date.now() / 1000);
-  const runs = diffText(oldText, newText);
-  par.items = runs.map(r => textItem(r.text, font, r.type === 'same' ? undefined : { type: r.type === 'add' ? 'inserted' : 'deleted', author: authorId, time }));
-  addAuthor(lyx.header, authorId, author, '');
-  setHeaderValue(lyx.header, 'tracking_changes', 'true');
-  commitEdit(doc, lyx);
-  return { changed: true, paragraph_index: paragraphIndex, runs, note: 'Applied as a tracked change; a human reviewer can accept/reject it from the Review toolbar.' };
+  const next = lyx.body.slice();
+  next[paragraphIndex] = { ...par, items: [textItem(newText, font)] };
+  commitTracked(doc, lyx, next, agentName);
+  return { changed: true, paragraph_index: paragraphIndex, runs: diffText(oldText, newText), note: 'Applied as a tracked change; a human reviewer can accept/reject it from the Review toolbar.' };
 }
 
 interface CommentEntry { index: number; paragraph_index: number; /** 'body', or where the thread sits: 'Float figure', 'table', … */ location: string; resolved: boolean; messages: { author: string; time: string; text: string }[] }
@@ -210,10 +207,6 @@ const FRAGMENT_MAX = 256 * 1024;
 const DOC_MAX = 20_000_000;
 const FILE_MAX = 4 * 1024 * 1024;
 
-function trackItems(items: Item[], authorId: number, type: 'inserted' | 'deleted', time: number): void {
-  for (const it of items) it.change = { type, author: authorId, time };
-}
-
 /** Register the agent as a change-tracking author and switch tracking on. */
 function beginTracking(lyx: LyxDocument, agentName: string): { authorId: number; time: number } {
   const author = authorName(agentName);
@@ -221,6 +214,14 @@ function beginTracking(lyx: LyxDocument, agentName: string): { authorId: number;
   addAuthor(lyx.header, authorId, author, '');
   setHeaderValue(lyx.header, 'tracking_changes', 'true');
   return { authorId, time: Math.floor(Date.now() / 1000) };
+}
+
+/** Replace the body by `next` as the agent's tracked changes — only what differs is marked. */
+function commitTracked(doc: Awaited<ReturnType<typeof manager.open>>, lyx: LyxDocument, next: Paragraph[], agentName: string): { inserted: number; deleted: number } {
+  const { authorId, time } = beginTracking(lyx, agentName);
+  lyx.body = trackDiff(lyx.body, next, { author: authorId, time });
+  commitEdit(doc, lyx);
+  return changeStats(lyx.body, { author: authorId, time });
 }
 
 /** Parse a raw LaTeX fragment in the document's context (its header: class, macros, packages). */
@@ -236,10 +237,9 @@ async function insertParagraphs(project: string, agentName: string, path: string
   const { doc, lyx, pars, warnings } = await parseFragment(project, path, latex);
   if (!pars.length) throw new Error('The LaTeX parsed to no paragraphs.');
   if (index < 0 || index > lyx.body.length) throw new Error(`Insert position ${index} out of range — the document has ${lyx.body.length} paragraph(s); 0 inserts at the top, ${lyx.body.length} appends.`);
-  const { authorId, time } = beginTracking(lyx, agentName);
-  for (const p of pars) trackItems(p.items, authorId, 'inserted', time);
-  lyx.body.splice(index, 0, ...pars);
-  commitEdit(doc, lyx);
+  const next = lyx.body.slice();
+  next.splice(index, 0, ...pars);
+  commitTracked(doc, lyx, next, agentName);
   return { ok: true, inserted: pars.length, at: index, warnings, note: 'Inserted as a tracked change (reviewable from the Review toolbar); paragraph indices shifted — re-run read_document.' };
 }
 
@@ -248,33 +248,23 @@ async function replaceParagraph(project: string, agentName: string, path: string
   const par = lyx.body[index];
   if (!par) throw new Error(`No paragraph ${index} — this document has ${lyx.body.length} paragraph(s) (see read_document).`);
   if (!pars.length) throw new Error('The LaTeX parsed to no paragraphs — use delete_paragraph to remove one.');
-  const { authorId, time } = beginTracking(lyx, agentName);
-  const plain = (p: typeof par) => p.items.every((it: Item) => it.kind === 'text' && fontsEqual(it.font, p.items[0]?.font ?? {}));
-  if (pars.length === 1 && plain(par) && plain(pars[0]) && pars[0].layout === par.layout) {
-    // plain text to plain text: a word-level diff, like propose_edit — the minimal reviewable change
-    const font = par.items[0]?.font ?? {};
-    const runs = diffText(par.items.map(itemText).join(''), pars[0].items.map(itemText).join(''));
-    par.items = runs.map(r => textItem(r.text, font, r.type === 'same' ? undefined : { type: r.type === 'add' ? 'inserted' : 'deleted', author: authorId, time }));
-  } else {
-    trackItems(par.items, authorId, 'deleted', time);
-    for (const p of pars) trackItems(p.items, authorId, 'inserted', time);
-    lyx.body.splice(index + 1, 0, ...pars);
-  }
-  commitEdit(doc, lyx);
-  return { ok: true, warnings, note: 'Applied as a tracked change (old text marked deleted, new content inserted); a reviewer accepts or rejects it.' };
+  const next = lyx.body.slice();
+  next.splice(index, 1, ...pars);
+  const st = commitTracked(doc, lyx, next, agentName);
+  return { ok: true, warnings, inserted_chars: st.inserted, deleted_chars: st.deleted, note: 'Applied as tracked changes — only the words / characters that differ are marked; a reviewer accepts or rejects them.' };
 }
 
 async function deleteParagraph(project: string, agentName: string, path: string, index: number) {
   const { doc, lyx } = await openLyx(project, path);
   const par = lyx.body[index];
   if (!par) throw new Error(`No paragraph ${index} — this document has ${lyx.body.length} paragraph(s).`);
-  const { authorId, time } = beginTracking(lyx, agentName);
-  trackItems(par.items, authorId, 'deleted', time);
-  commitEdit(doc, lyx);
+  const next = lyx.body.slice();
+  next.splice(index, 1);
+  commitTracked(doc, lyx, next, agentName);
   return { ok: true, note: 'Marked deleted as a tracked change; the text disappears when a reviewer accepts it.' };
 }
 
-async function writeDocument(project: string, userId: number, path: string, tex: string) {
+async function writeDocument(project: string, userId: number, agentName: string, path: string, tex: string) {
   if (!tex.trim()) throw new Error('tex missing');
   if (tex.length > DOC_MAX) throw new Error('too large');
   if (!path.endsWith('.tex')) throw new Error('a .tex path is expected');
@@ -288,9 +278,21 @@ async function writeDocument(project: string, userId: number, path: string, tex:
   }
   const doc = await manager.open(`${project}/${path}`);
   const r = parseDocumentText(tex, doc.project, doc.relPath);
-  doc.loadFromLyx(r.doc, 'source');
-  doc.scheduleSave();
-  return { ok: true, created: false, warnings: r.warnings, note: 'Replaced the whole source (not a tracked change — like the raw-source view; the prior state is kept in Versions and git).' };
+  const st = applyTrackedSource(doc, doc.toText(), tex, authorName(agentName));
+  return { ok: true, created: false, warnings: r.warnings, inserted_chars: st.inserted, deleted_chars: st.deleted, note: 'Applied as tracked changes against the current document — only what differs is marked; a reviewer accepts or rejects them.' };
+}
+
+async function editDocument(project: string, agentName: string, path: string, oldText: string, newText: string, all: boolean) {
+  const doc = await manager.open(`${project}/${path}`);
+  const before = doc.toText();
+  const after = replaceInSource(before, oldText, newText, all);
+  const r = parseDocumentText(after, doc.project, doc.relPath);
+  const st = applyTrackedSource(doc, before, after, authorName(agentName));
+  return {
+    ok: true, inserted_chars: st.inserted, deleted_chars: st.deleted, warnings: r.warnings,
+    ...(st.inserted + st.deleted === 0 ? { note: 'The edit parsed to the same document — nothing changed (e.g. only whitespace differed).' } : {}),
+    now_reads: st.excerpt,
+  };
 }
 
 function createDocument(project: string, userId: number, agentName: string, relPath: string, title?: string) {
@@ -415,7 +417,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p }) => { try { return ok(listDocuments(need(p, 'view'))); } catch (e) { return fail(e); } });
 
   server.registerTool('read_document', {
-    description: 'Read a document: its full LaTeX text, and its paragraphs (index, layout, depth, plain text) for addressing propose_edit / add_comment.',
+    description: 'Read a document: its full LaTeX source (`text` — what edit_document edits), and its paragraphs (index, layout, depth, plain text) for the paragraph tools and add_comment.',
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg, path: z.string().describe('Project-relative path, e.g. "main.tex"') },
   }, async ({ project: p, path }) => { try { return ok(await readDocument(need(p, 'view'), path)); } catch (e) { return fail(e); } });
@@ -479,13 +481,24 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     inputSchema: { ...projArg, path: z.string(), text: z.string() },
   }, async ({ project: p, path, text }) => { try { return ok(writeFile(need(p, 'edit'), userId, path, text)); } catch (e) { return fail(e); } });
 
+  server.registerTool('edit_document', {
+    description: "Edit a document by replacing a passage of its LaTeX source (the `text` read_document returns): old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to this agent and diffed against the live document, so only what actually changes is marked (a word, a digit, a table cell); the user reviews them in the editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the document now reads, for follow-up edits. Prefer this over the paragraph tools.",
+    inputSchema: {
+      ...projArg,
+      path: z.string().describe('Project-relative path, e.g. "main.tex"'),
+      old_text: z.string().describe('The passage to replace, copied from the document source'),
+      new_text: z.string().describe('Its replacement (raw LaTeX)'),
+      replace_all: z.boolean().optional().describe('Replace every occurrence (default: old_text must be unique)'),
+    },
+  }, async ({ project: p, path, old_text, new_text, replace_all }) => { try { return ok(await editDocument(need(p, 'edit'), agentName, path, old_text, new_text, !!replace_all)); } catch (e) { return fail(e); } });
+
   server.registerTool('insert_paragraphs', {
     description: 'Insert raw LaTeX (anything: formulas, citations, sections, environments — parsed like the editor parses .tex) as new paragraphs at a position: 0 = top, paragraph count = append. Applied as a tracked insertion, reviewable like any collaborator edit. Indices shift — re-run read_document afterwards.',
     inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative().describe('Position from read_document; the paragraph count appends'), latex: z.string() },
   }, async ({ project: p, path, index, latex }) => { try { return ok(await insertParagraphs(need(p, 'edit'), agentName, path, index, latex)); } catch (e) { return fail(e); } });
 
   server.registerTool('replace_paragraph', {
-    description: 'Replace one paragraph by raw LaTeX (may parse to several paragraphs; formulas, citations, anything allowed). Tracked: plain-text→plain-text becomes a word-level diff; anything else marks the old paragraph deleted and inserts the new content after it.',
+    description: 'Replace one paragraph by raw LaTeX (may parse to several paragraphs; formulas, citations, anything allowed). Tracked, and diffed against the old paragraph: only the words / characters that differ are marked (inside tables and footnotes too).',
     inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative().describe("From read_document's paragraphs list"), latex: z.string() },
   }, async ({ project: p, path, index, latex }) => { try { return ok(await replaceParagraph(need(p, 'edit'), agentName, path, index, latex)); } catch (e) { return fail(e); } });
 
@@ -495,9 +508,9 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path, index }) => { try { return ok(await deleteParagraph(need(p, 'edit'), agentName, path, index)); } catch (e) { return fail(e); } });
 
   server.registerTool('write_document', {
-    description: "Replace a document's whole raw LaTeX source, or create the document when the path does not exist. NOT a tracked change — like the raw-source view; the prior state stays in Versions and git. Prefer replace_paragraph / insert_paragraphs for reviewable edits.",
+    description: "Write a document's whole raw LaTeX source, or create the document when the path does not exist. On an existing document the new source is diffed against the current one and applied as tracked changes (only what differs is marked). For a local change prefer edit_document.",
     inputSchema: { ...projArg, path: z.string(), tex: z.string() },
-  }, async ({ project: p, path, tex }) => { try { return ok(await writeDocument(need(p, 'edit'), userId, path, tex)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, tex }) => { try { return ok(await writeDocument(need(p, 'edit'), userId, agentName, path, tex)); } catch (e) { return fail(e); } });
 
   server.registerTool('create_document', {
     description: 'Create a new .tex document from the standard template (write_document with full source also creates).',

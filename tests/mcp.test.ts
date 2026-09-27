@@ -126,7 +126,7 @@ describe('tools/list', () => {
     const { status, body } = await rpc(t.token, 'tools/list');
     expect(status).toBe(200);
     const names = body.result.tools.map((x: any) => x.name).sort();
-    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'fetch', 'insert_paragraphs', 'list_comments',
+    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'edit_document', 'fetch', 'insert_paragraphs', 'list_comments',
       'list_documents', 'list_files', 'list_projects', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'resolve_comment', 'search', 'write_document', 'write_file']);
   });
 
@@ -295,6 +295,76 @@ describe('raw LaTeX', () => {
   });
 });
 
+describe('edits are tracked at word / character granularity', () => {
+  const CV = String.raw`\section*{Education}
+
+\textbf{PhD in Theoretical Neuroscience}, University College London \hfill 2021--2025\\
+Thesis: \emph{Learning dynamics} in recurrent networks. Advisor: \href{https://example.org}{Prof.\ A. Smith}.
+
+\begin{tabular}{ll}
+2019--2021 & MSc Physics, \textbf{LMU Munich} \\
+2016--2019 & BSc Physics, TU Munich \\
+\end{tabular}`;
+  const cvDoc = `\\documentclass{article}\n\\usepackage{hyperref}\n\\begin{document}\n${CV}\n\\end{document}\n`;
+  const marks = (text: string) => [...text.matchAll(/\\lyx(added|deleted)\{CV Bot \(MCP\)\}\{[^}]*\}\{([^}]*)\}/g)].map(m => `${m[1] === 'added' ? '+' : '-'}${m[2]}`);
+
+  it('edit_document marks only the changed digit of a year in a formatted paragraph', async () => {
+    writeFileSync(file('cv.tex'), cvDoc);
+    const t = createMcpToken(owner.id, 'CV Bot').token;
+    const r = await callTool(t, 'edit_document', { path: 'cv.tex', old_text: '2021--2025', new_text: '2021--2026' });
+    expect(r.ok).toBe(true);
+    expect(r.inserted_chars).toBe(1);
+    expect(r.deleted_chars).toBe(1);
+    expect(r.now_reads).toContain('2021--202\\lyxdeleted');
+    const text = (await manager.open('owner/p/cv.tex')).toText();
+    expect(marks(text)).toEqual(['-5', '+6']);
+    expect(text).toContain('\\textbf{PhD in Theoretical Neuroscience}, University College London');
+  });
+
+  it('a follow-up edit may quote the text without the markup, and refines its own change', async () => {
+    const t = createMcpToken(owner.id, 'CV Bot').token;
+    await callTool(t, 'edit_document', { path: 'cv.tex', old_text: 'London \\hfill{}2021--2026', new_text: 'London \\hfill{}2021--2027' });
+    const text = (await manager.open('owner/p/cv.tex')).toText();
+    expect(marks(text)).toEqual(['-5', '+7']);
+  });
+
+  it('a table cell edit stays in the cell', async () => {
+    const t = createMcpToken(owner.id, 'CV Bot').token;
+    await callTool(t, 'edit_document', { path: 'cv.tex', old_text: 'BSc Physics, TU Munich', new_text: 'BSc Physics (Hons), TU Munich' });
+    const text = (await manager.open('owner/p/cv.tex')).toText();
+    expect(marks(text)).toEqual(['-5', '+7', '+ (Hons)']);   // "Physics," → "Physics (Hons),": only the insertion
+    expect(text).toContain('\\begin{tabular}{ll}');
+  });
+
+  it('replace_paragraph on a formatted paragraph diffs instead of striking the paragraph', async () => {
+    const t = createMcpToken(owner.id, 'CV Bot').token;
+    const read = await callTool(t, 'read_document', { path: 'cv.tex' });
+    const i = read.paragraphs.findIndex((p: any) => p.text.includes('Thesis'));
+    const src: string = read.text;
+    const par = src.slice(src.indexOf('\\textbf{PhD'), src.indexOf('Smith}.') + 'Smith}.'.length);
+    await callTool(t, 'replace_paragraph', { path: 'cv.tex', index: i, latex: par.replace('recurrent', 'spiking') });
+    const text = (await manager.open('owner/p/cv.tex')).toText();
+    expect(marks(text)).toEqual(['-5', '+7', '-recurrent', '+spiking', '+ (Hons)']);
+  });
+
+  it('write_document on an existing document is tracked, not a silent overwrite', async () => {
+    const t = createMcpToken(owner.id, 'CV Bot').token;
+    const src: string = (await callTool(t, 'read_document', { path: 'cv.tex' })).text;
+    const r = await callTool(t, 'write_document', { path: 'cv.tex', tex: src.replace('MSc Physics', 'MSc Theoretical Physics') });
+    expect(r.created).toBe(false);
+    expect(r.inserted_chars).toBeGreaterThan(0);
+    expect(marks((await manager.open('owner/p/cv.tex')).toText())).toContain('+Theoretical ');
+  });
+
+  it('explains a failed match: not found (where it diverges), ambiguous, unbalanced braces', async () => {
+    const t = createMcpToken(owner.id, 'CV Bot').token;
+    await expect(callTool(t, 'edit_document', { path: 'cv.tex', old_text: 'Thesis: \\emph{Learning dynamics} in convolutional networks', new_text: 'x' }))
+      .rejects.toThrow(/not found.*first \d+ characters match/s);
+    await expect(callTool(t, 'edit_document', { path: 'cv.tex', old_text: 'Physics', new_text: 'Chemistry' })).rejects.toThrow(/occurs \d times/);
+    await expect(callTool(t, 'edit_document', { path: 'cv.tex', old_text: 'Advisor:', new_text: 'Advisor: \\textbf{' })).rejects.toThrow(/unbalanced/);
+  });
+});
+
 describe('project text files', () => {
   it('write_file / read_file round-trip refs.bib', async () => {
     const t = createMcpToken(owner.id, 'Bib Bot').token;
@@ -317,6 +387,7 @@ describe('project text files', () => {
     await expect(callTool(t, 'write_file', { path: 'refs.bib', text: 'x' })).rejects.toThrow(/view-only/);
     await expect(callTool(t, 'replace_paragraph', { path: 'a.tex', index: 0, latex: 'x' })).rejects.toThrow(/view-only/);
     await expect(callTool(t, 'write_document', { path: 'a.tex', tex: 'x' })).rejects.toThrow(/view-only/);
+    await expect(callTool(t, 'edit_document', { path: 'a.tex', old_text: 'First', new_text: 'x' })).rejects.toThrow(/view-only/);
     await expect(callTool(t, 'create_document', { path: 'nope' })).rejects.toThrow(/view-only/);
   });
 });

@@ -1184,15 +1184,27 @@ A token or grant stands for the *account* behind it — in every project it gets
 stateless Streamable HTTP transport (one request/response per JSON-RPC call, no session) and
 exposes these tools:
 
-* `list_documents`, `read_document(path)` — the project's `.tex` documents and one document's text
-  plus its paragraphs (index, layout, depth, plain text) for addressing the tools below.
-* `propose_edit(path, paragraph_index, new_text)` — replaces one paragraph's text. **Always** a
-  tracked change: a word-level diff (`core/src/lyx/tokendiff.ts`) turns the edit into
-  `\lyxadded`/`\lyxdeleted` runs attributed to the agent (author name `"<agent> (MCP)"`), the same
-  representation a human's Track Changes produces — never a silent overwrite, always reviewable
-  from the Review toolbar or rejectable like anyone else's edit. Only plain, uniformly-formatted
-  text paragraphs are supported (no formulas/citations/other insets, no mixed bold/italic runs);
-  anything else is refused with an explanatory error.
+* `list_documents`, `read_document(path)` — the project's `.tex` documents and one document's LaTeX
+  source (`text`) plus its paragraphs (index, layout, depth, plain text) for the paragraph tools.
+* `edit_document(path, old_text, new_text, replace_all?)` — the main edit tool: replaces a passage of
+  the document's source, the way coding agents edit files. `old_text` must be unique; it may be
+  quoted without the `\lyxadded`/`\lyxdeleted` markup the source contains, and with different
+  whitespace (`docedit.ts` `replaceInSource`; a miss reports where the quote diverges). The result
+  carries `now_reads`, the edited lines as they now read, for follow-up edits.
+* **Every document edit is tracked, and only what changed is marked.** Whatever the tool, the
+  edited source or paragraphs are diffed against the live document (`core/src/lyx/trackdiff.ts`):
+  paragraphs are aligned, similar ones diffed word by word (a single changed word down to its
+  characters: 202~~5~~6), formulas and links as units, footnotes, boxes, floats and same-shaped
+  tables entered and diffed inside; the result is `\lyxadded`/`\lyxdeleted` runs and tracked
+  paragraph breaks attributed to the agent (author `"<agent> (MCP)"`) — the representation a human's
+  Track Changes produces, reviewable and rejectable from the Review toolbar. Accept all gives exactly
+  the agent's version, Reject all exactly the previous one. Text already marked deleted is invisible
+  to the comparison (it stays deleted when the agent's version leaves it out); another author's
+  pending insertion that the agent keeps stays theirs; the agent's *own* pending changes in an edited
+  region are taken back and re-derived, so refining a proposal never stacks changes on changes.
+  Other people's concurrent edits elsewhere survive (three-way merge, `mergeLyx`).
+* `propose_edit(path, paragraph_index, new_text)` — replaces one plain, uniformly formatted text
+  paragraph's text (formulas / insets / mixed formatting are refused).
 * `list_comments(path)`, `add_comment(path, text, paragraph_index?)`, `resolve_comment(path, index)`
   — comment threads anywhere in the body, inside tables, floats and other insets included (same
   `Note Comment` inset shape and header convention — `Name (date time):` — as the client's comment
@@ -1201,10 +1213,9 @@ exposes these tools:
   like in the app) and read the result: status, LaTeX warnings, and the compile-log tail.
 * `insert_paragraphs(path, index, latex)`, `replace_paragraph(path, index, latex)`,
   `delete_paragraph(path, index)` — **raw LaTeX** (formulas, citations, sections, environments;
-  parsed by the same `.tex` parser as the editor), applied as tracked changes (plain-text→plain-text
-  replaces via a word-level diff; anything else marks the old paragraph deleted and inserts the new
-  content). `write_document(path, tex)` replaces — or creates — a whole document's source,
-  untracked like the raw-source view (Versions and git keep the prior state).
+  parsed by the same `.tex` parser as the editor) addressed by paragraph index, tracked as above.
+  `write_document(path, tex)` creates a document, or writes a whole existing one — tracked as above
+  (only the differences to the current document are marked).
 * `list_files`, `read_file(path)`, `write_file(path, text)` — the project's other text files
   (`refs.bib`, `macros.tex`, `.sty`, …); binary files and documents are refused.
 * On the account-wide `/mcp` endpoint, `create_project(name, title?)` creates an empty project owned
