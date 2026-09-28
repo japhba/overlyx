@@ -26,7 +26,20 @@ export interface SandboxSpec {
 
 const BWRAP = ['/usr/bin/bwrap', '/usr/local/bin/bwrap', '/bin/bwrap'];
 /** read-only system directories: binaries, libraries, the TeX distribution, fonts and their caches */
-const SYSTEM_RO = ['/usr', '/etc', '/lib', '/lib64', '/lib32', '/bin', '/sbin', '/opt', '/var/lib/texmf', '/var/cache/fontconfig', '/var/lib/ghostscript'];
+const SYSTEM_RO = ['/usr', '/lib', '/lib64', '/lib32', '/bin', '/sbin', '/opt', '/var/lib/texmf', '/var/cache/fontconfig', '/var/lib/ghostscript'];
+/**
+ * Not the whole of `/etc`: the build runs as uid 0 (see below), so binding all of `/etc` would let a
+ * document read `/etc/shadow`, the host's SSH keys and the like — via `\input` (blocked by
+ * openin_any=p) but also via a `-shell-escape` command, which that setting does not reach. Bind only
+ * what LaTeX, fontconfig and the dynamic linker actually need. `/etc/texmf/web2c/texmf.cnf` is the
+ * first texmf.cnf kpathsea finds, so the TeX distribution will not run without it.
+ */
+const ETC_RO = [
+  '/etc/texmf', '/etc/fonts', '/etc/alternatives',
+  '/etc/ld.so.cache', '/etc/ld.so.conf', '/etc/ld.so.conf.d',
+  '/etc/nsswitch.conf', '/etc/passwd', '/etc/group',
+  '/etc/ssl', '/etc/ca-certificates.conf',
+];
 
 let available: boolean | null = null;
 
@@ -59,7 +72,7 @@ export function sandboxed(cmd: string, args: string[], spec: SandboxSpec): Sandb
   if (!sandboxAvailable()) return { cmd, args, env: { ...process.env, ...spec.env } };
   const home = sandboxHome();
   const b: string[] = [];
-  for (const d of SYSTEM_RO) if (fs.existsSync(d)) b.push('--ro-bind', d, d);
+  for (const d of [...SYSTEM_RO, ...ETC_RO]) if (fs.existsSync(d)) b.push('--ro-bind', d, d);
   b.push('--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp');
   b.push('--bind', home, home);
   for (const d of new Set(spec.ro ?? [])) if (fs.existsSync(d)) b.push('--ro-bind', d, d);

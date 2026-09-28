@@ -134,8 +134,15 @@ export function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
     HOME: gitHome(),
     LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8',
     GIT_TERMINAL_PROMPT: '0',
-    GIT_CONFIG_COUNT: '1',
+    // Command-level config (highest priority, overrides any repository .git/config): the projects
+    // hold user-editable files, so a repo's own config must never make git run code as the server
+    // user. hooksPath → nowhere disables every hook (pre-commit, post-receive, …); fsmonitor=false
+    // stops core.fsmonitor from launching a program on status/add. safe.directory=* because the
+    // projects may be owned by another account (rsynced from a laptop).
+    GIT_CONFIG_COUNT: '3',
     GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: '*',
+    GIT_CONFIG_KEY_1: 'core.hooksPath', GIT_CONFIG_VALUE_1: '/dev/null',
+    GIT_CONFIG_KEY_2: 'core.fsmonitor', GIT_CONFIG_VALUE_2: 'false',
     ...extra,
   };
 }

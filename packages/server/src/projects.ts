@@ -147,6 +147,22 @@ function collect(root: string, dir: string, out: ProjectFile[], depth: number): 
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+/**
+ * Refuse a project-relative path that a user must not write to: one that escapes the project, is
+ * empty, or reaches into a git repository's `.git`. Writing `.git/config` or `.git/hooks/*` would
+ * turn a later `git` run (which happens as the server user) into arbitrary code execution, so no
+ * write route — upload, text, new document, file operations, fetched PDFs — may touch it.
+ * (`.gitignore`, `.gitattributes`, `.gitmodules` are ordinary tracked files and stay allowed.)
+ */
+export function assertWritableRelPath(rel: string): void {
+  const parts = String(rel).split(/[/\\]+/);
+  for (const p of parts) {
+    if (p === '' || p === '.' || p === '..') throw new Error('bad path');
+    const low = p.toLowerCase();
+    if (low === '.git' || low === 'git~1') throw new Error('bad path');   // .git, and its NTFS 8.3 short name
+  }
+}
+
 /** Resolve a path inside a project, refusing to escape the project directory. */
 export function resolveProjectPath(project: string, rel: string): string {
   if (!isProjectKey(project)) throw new Error('bad project name');

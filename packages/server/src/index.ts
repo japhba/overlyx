@@ -18,7 +18,7 @@ import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocF
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
-import { listProjects, resolveProjectPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile, isDocumentFile } from './projects.ts';
+import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile, isDocumentFile } from './projects.ts';
 import { cachedParseFile, importLyxFile, parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
 import { extractZip, bundledZips, projectNameFromZip } from './zip.ts';
@@ -548,6 +548,7 @@ api.post('/projects/:project/new', needProject('edit'), (req, res) => {
     let rel = String(req.body?.path ?? 'untitled.tex');
     if (rel.endsWith('.lyx')) rel = rel.slice(0, -4) + '.tex';
     if (!rel.endsWith('.tex')) rel += '.tex';
+    assertWritableRelPath(rel);
     const abs = resolveProjectPath(req.params.project, rel);
     if (fs.existsSync(abs)) { res.status(409).json({ error: 'file exists' }); return; }
     fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -561,7 +562,8 @@ api.post('/projects/:project/new', needProject('edit'), (req, res) => {
 api.post('/projects/:project/upload', needProject('edit'), express.raw({ type: '*/*', limit: '100mb' }), (req, res) => {
   try {
     const rel = String(req.query.path ?? '');
-    if (!rel || rel.includes('..')) { res.status(400).json({ error: 'bad path' }); return; }
+    if (!rel) { res.status(400).json({ error: 'bad path' }); return; }
+    assertWritableRelPath(rel);
     const abs = resolveProjectPath(req.params.project, rel);
     // overwrite=0 (editor image paste/drop): never replace — the client counts up to a free name
     if (req.query.overwrite === '0' && fs.existsSync(abs)) { res.status(409).json({ error: 'file exists' }); return; }
@@ -578,10 +580,7 @@ api.post('/projects/:project/fileops', needProject('edit'), (req, res) => {
   try {
     const project = req.params.project;
     const op = String(req.body?.op ?? '');
-    const guard = (rel: string) => {
-      if (!rel || rel.split('/').some(part => part === '.git' || part === '..' || part === '' || part === '.')) throw new Error('bad path');
-      return resolveProjectPath(project, rel);
-    };
+    const guard = (rel: string) => { assertWritableRelPath(rel); return resolveProjectPath(project, rel); };
     const moveOut = (abs: string, rel: string) => {   // to the trash; a rename across file systems falls back to copy + delete
       const trash = path.join(config.dataDir, 'trash', 'files', `${project}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
       const dest = path.join(trash, rel);
@@ -683,6 +682,7 @@ api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
     if (rel.endsWith('.lyx') || isDocumentFile(req.params.project, rel)) { res.status(400).json({ error: 'Documents are opened as documents, not as text' }); return; }
+    assertWritableRelPath(rel);
     const abs = resolveProjectPath(req.params.project, rel);
     const text = req.body?.text;
     if (typeof text !== 'string') { res.status(400).json({ error: 'text missing' }); return; }

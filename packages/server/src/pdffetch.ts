@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseBibtex, cleanTex, type BibEntry } from '@overlyx/core';
 import { fetchImpl, type Hit } from './bibsearch.ts';
+import { assertWritableRelPath } from './projects.ts';
 
 const MAX_PDF_BYTES = 64 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT = 60000;
@@ -72,6 +73,7 @@ export async function fetchPdfForEntry(projectDir: string, bibtex: string, hit?:
   const e = parseBibtex(bibtex)[0];
   if (!e) return null;
   const rel = path.join('pdf', pdfFileName(e));
+  assertWritableRelPath(rel);
   const abs = path.join(projectDir, rel);
   if (fs.existsSync(abs)) return { file: rel, existed: true };
   for (const candidate of pdfCandidates(e, hit)) {

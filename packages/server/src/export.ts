@@ -334,7 +334,10 @@ export function texInputs(docDir: string, buildDirPath: string): NodeJS.ProcessE
   const inputs = `${buildDirPath}:${docDir}:`;
   // openout_any=p: TeX may only write below the build directory (the sandbox enforces the same)
   // fonts next to the document (fontspec by file name, LuaTeX / XeTeX) are found through the font paths
-  return { TEXINPUTS: inputs, BIBINPUTS: inputs, BSTINPUTS: inputs, TTFONTS: inputs, OPENTYPEFONTS: inputs, T1FONTS: inputs, AFMFONTS: inputs, openout_any: 'p', max_print_line: '1000' };
+  // openin_any=p (paranoid): TeX may not \input / \openin absolute or parent-directory paths, so a
+  // document cannot read /etc/passwd or files outside its own tree into the PDF or log; openout_any=p
+  // likewise confines writes below the build directory (the sandbox enforces both as well).
+  return { TEXINPUTS: inputs, BIBINPUTS: inputs, BSTINPUTS: inputs, TTFONTS: inputs, OPENTYPEFONTS: inputs, T1FONTS: inputs, AFMFONTS: inputs, openin_any: 'p', openout_any: 'p', max_print_line: '1000' };
 }
 
 async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
