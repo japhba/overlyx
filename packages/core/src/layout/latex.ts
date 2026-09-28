@@ -26,12 +26,12 @@ export const LAYOUT_MACROS = String.raw`% OverLyX layout objects: positioned on 
 \pgfqkeys{/ol}{x/.store in=\ol@x,y/.store in=\ol@y,w/.store in=\ol@w,h/.store in=\ol@h,rotate/.store in=\ol@rot,
   fill/.code={\ol@setcolor\ol@fill{#1}},draw/.code={\ol@setcolor\ol@draw{#1}},color/.code={\ol@setcolor\ol@color{#1}},
   line/.store in=\ol@line,radius/.store in=\ol@radius,pad/.store in=\ol@pad,valign/.store in=\ol@valign,shape/.store in=\ol@shape,
-  font/.store in=\ol@font,leading/.store in=\ol@leading,opacity/.store in=\ol@opacity,step/.store in=\ol@step,
+  font/.store in=\ol@font,leading/.store in=\ol@leading,opacity/.store in=\ol@opacity,step/.store in=\ol@step,align/.store in=\ol@align,
   vb/.store in=\ol@vb,crop/.store in=\ol@crop,dash/.store in=\ol@dash,arrows/.store in=\ol@arrows,
   transition/.store in=\ol@trans,.unknown/.code={}}
 \def\ol@reset{\def\ol@x{0mm}\def\ol@y{0mm}\def\ol@w{10mm}\def\ol@h{10mm}\def\ol@rot{0}\def\ol@fill{}\def\ol@draw{}\def\ol@color{}%
   \def\ol@line{0.4pt}\def\ol@radius{0pt}\def\ol@pad{0pt}\def\ol@valign{t}\def\ol@shape{rect}\def\ol@font{}\def\ol@leading{1.2}%
-  \def\ol@opacity{1}\def\ol@step{}\def\ol@vb{0 0 1 1}\def\ol@crop{0 0 0 0}\def\ol@dash{}\def\ol@arrows{}\def\ol@trans{}}
+  \def\ol@opacity{1}\def\ol@step{}\def\ol@align{left}\def\ol@vb{0 0 1 1}\def\ol@crop{0 0 0 0}\def\ol@dash{}\def\ol@arrows{}\def\ol@trans{}}
 \def\ol@setcolor#1#2{\def#1{}\if\relax\detokenize{#2}\relax\else\ol@@setcolor#1#2\relax\fi}
 \def\ol@@setcolor#1#2#3\relax{\ifx[#2\ol@@@setcolor#1[#3\relax\else\def#1{#2#3}\fi}
 \def\ol@@@setcolor#1[#2]#3\relax{\definecolor{ol\expandafter\@gobble\string#1}{#2}{#3}\edef#1{ol\expandafter\@gobble\string#1}}
@@ -54,8 +54,9 @@ export const LAYOUT_MACROS = String.raw`% OverLyX layout objects: positioned on 
   \end{scope}\end{tikzpicture}}
 \newenvironment{olbox}[1]{\ol@reset\pgfqkeys{/ol}{#1}\ol@boxbegin
   \ifx\ol@font\empty\else\pgfmathsetlengthmacro\ol@lead{\ol@leading*(\ol@font)}\fontsize{\ol@font}{\ol@lead}\selectfont\fi
-  \ifx\ol@color\empty\else\color{\ol@color}\fi\ignorespaces}%
+  \ifx\ol@color\empty\else\color{\ol@color}\fi\csname ol@align@\ol@align\endcsname\ignorespaces}%
   {\par\end{minipage}\end{lrbox}\ol@style\ol@place{\ol@boxdraw}}
+\def\ol@align@left{\raggedright}\def\ol@align@center{\centering}\def\ol@align@right{\raggedleft}\def\ol@align@justify{}
 \newenvironment{olraw}[1]{\ol@reset\pgfqkeys{/ol}{#1}\ol@boxbegin\ignorespaces}%
   {\par\end{minipage}\end{lrbox}\ol@style\ol@place{\ol@boxdraw}}
 \newcommand\olshape[2]{\ol@reset\pgfqkeys{/ol}{#1}\ol@style\expandafter\ol@parsevb\ol@vb\relax

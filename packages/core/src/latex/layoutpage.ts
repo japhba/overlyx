@@ -7,7 +7,7 @@ import { paramMap } from '../lyx/ast.ts';
 import type { ExportContext, RunParams } from './context.ts';
 import type { TexStream } from './stream.ts';
 import { insetTextLatex } from './insets.ts';
-import { PAGE_PROPS_INSET, NOTES_INSET } from '../layout/model.ts';
+import { PAGE_PROPS_INSET, NOTES_INSET, parseShapeKeys, writeShapeKeys, shapeInBoxUnits } from '../layout/model.ts';
 
 /** `keys …` / `path …` parameter lines of an object inset (the rest of the line, verbatim). */
 function param(params: string[], key: string): string | undefined {
@@ -61,7 +61,13 @@ function latexLayoutObject(ctx: ExportContext, os: TexStream, rp: RunParams, it:
   if (ins.type !== 'Leaf') return;
   const p = paramMap(ins.params);
   switch (ins.name) {
-    case 'OLShape': os.write(`\\olshape{${keys}}{${p.get('path') ?? ''}}\n`); break;
+    case 'OLShape': {
+      // the path in the box's own millimetres (equal scales in both directions: see shapeInBoxUnits)
+      const k = parseShapeKeys(keys);
+      const norm = shapeInBoxUnits(p.get('path') ?? '', k.vb, k.w, k.h);
+      os.write(`\\olshape{${writeShapeKeys({ ...k, vb: norm.vb })}}{${norm.d}}\n`);
+      break;
+    }
     case 'OLImage': os.write(`\\olimage{${keys}}{${p.get('src') ?? ''}}\n`); break;
     case 'OLRaw': {
       let latex = '';

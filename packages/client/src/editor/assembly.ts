@@ -52,6 +52,7 @@ import { includeTarget } from './commands';
 import { LAYOUT_NODE_VIEWS } from './layout/nodeviews';
 import { layoutPlugin, layoutKey } from './layout/controller';
 import { layoutPaste, layoutDrop } from './layout/images';
+import { layoutContextMenu } from './layout/menu';
 
 /**
  * A node view that throws (a malformed attribute that arrived over the wire, a rendering bug) must
@@ -260,6 +261,7 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
       contextmenu(view, ev) {
         // (a formula field shows its own menu and stops the event before it gets here — nodeviews/math.ts)
         if (ev.shiftKey) return false;                  // Shift+right-click: the browser's own menu
+        if (layoutContextMenu(view, ev)) return true;   // an object or the empty page of a layout document
         ev.preventDefault();
         // a misspelt word under the pointer: fetch the suggestions first (a few ms), then the menu
         const coords = view.posAtCoords({ left: ev.clientX, top: ev.clientY });

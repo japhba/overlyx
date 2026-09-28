@@ -23,7 +23,23 @@ export function buildOutline(doc: PMNode, includeFloats = true, secnumdepth = 3)
   const items: OutlineItem[] = [];
   const counters = [0, 0, 0, 0, 0, 0, 0];
   let appendix = false;
+  let page = 0;
   doc.forEach((para, pos) => {
+    // a layout document: its pages (named, or by the text of their biggest-font box)
+    if (para.type.name === 'ol_page') {
+      page++;
+      let best = '', bestSize = -1;
+      para.descendants(n => {
+        if (n.type.name !== 'ol_box') return n.type.name === 'ol_group';
+        const t = n.textContent.trim();
+        const size = Number(n.attrs.font) || 0;
+        if (t && size > bestSize) { best = t; bestSize = size; }
+        return false;
+      });
+      const text = para.attrs.name || best.slice(0, 80) || '(empty page)';
+      items.push({ pos, level: 0, text, layout: 'Page', num: String(page) });
+      return;
+    }
     if (para.type.name !== 'paragraph') return;
     // \appendix: the top-level counter restarts and is lettered from here on
     if (para.attrs.appendix && !appendix) { appendix = true; counters.fill(0); }

@@ -15,6 +15,8 @@ import { projectDir, resolveProjectPath, findMaster, childDocuments } from './pr
 import { toPdf, cacheDir } from './graphics.ts';
 import { sandboxed, type SandboxSpec } from './sandbox.ts';
 import { readTextFile } from './texdoc.ts';
+import { rewriteParentPaths } from './texpaths.ts';
+export { rewriteParentPaths };
 
 export interface BuildResult { ok: boolean; log: string; pdfPath?: string; texPath?: string; warnings: string[]; tex?: string }
 
@@ -275,7 +277,7 @@ export async function exportTex(docId: string): Promise<{ dir: string; main: str
     const target = path.join(dir, relToDoc);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     try { if (fs.lstatSync(target).isSymbolicLink()) fs.unlinkSync(target); } catch { /* not there */ }
-    const rewritten = await rewriteGraphics(text, path.dirname(path.join(proj, rel)), path.dirname(target), warnings);
+    const rewritten = rewriteParentPaths(await rewriteGraphics(text, path.dirname(path.join(proj, rel)), path.dirname(target), warnings), path.dirname(path.join(proj, rel)), proj);
     fs.writeFileSync(target, rewritten, 'utf8');
     if (rel === doc.relPath) mainText = rewritten;
   }
@@ -331,9 +333,10 @@ export function linkDocumentAssets(docDir: string, buildDirPath: string): void {
   try { if (!fs.existsSync(cacheLink)) fs.symlinkSync(cache, cacheLink); } catch { /* ignore */ }
 }
 
-export function texInputs(docDir: string, buildDirPath: string): NodeJS.ProcessEnv {
-  // not recursive: a stray main.bbl/main.aux in some sub-directory of the project must not be picked up
-  const inputs = `${buildDirPath}:${docDir}:`;
+export function texInputs(docDir: string, buildDirPath: string, projDir?: string): NodeJS.ProcessEnv {
+  // not recursive: a stray main.bbl/main.aux in some sub-directory of the project must not be picked up;
+  // the project's root last, for the paths rewriteParentPaths made root-relative
+  const inputs = `${buildDirPath}:${docDir}:${projDir && projDir !== docDir ? projDir + ':' : ''}`;
   // openout_any=p: TeX may only write below the build directory (the sandbox enforces the same)
   // fonts next to the document (fontspec by file name, LuaTeX / XeTeX) are found through the font paths
   // openin_any=p (paranoid): TeX may not \input / \openin absolute or parent-directory paths, so a
@@ -390,7 +393,7 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   // keep latexmk watching the files until the timeout
   args.push(engineFlag, '-pvc-', '-g', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
   const proc = run('latexmk', args, {
-    cwd: exp.dir, env: texInputs(docDir, exp.dir), timeoutMs: 420000, nice: true,
+    cwd: exp.dir, env: texInputs(docDir, exp.dir, projectDir(project)), timeoutMs: 420000, nice: true,
     // the build directory (and the svg package's cache next to the document) are the only writable places
     sandbox: { rw: [exp.dir, path.join(docDir, 'svg-inkscape')], ro: [projectDir(project), cacheDir] },
     onLine: (l) => { job.progress = l.slice(0, 200); },

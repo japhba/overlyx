@@ -18,6 +18,7 @@ import * as L from '../editor/layout/commands';
 import { docColors, boxOf, objectBounds } from '../editor/layout/geom';
 import { placeImage, placeImageFiles } from '../editor/layout/images';
 import { startPresentation } from '../editor/layout/present';
+import { openRawEditor } from '../editor/layout/rawedit';
 
 const I = (body: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round">${body}</svg>`;
 Object.assign(ICONS, {
@@ -158,6 +159,7 @@ function BoxStylePanel({ view, pos, close }: { view: EditorView; pos: number; cl
       <label>Font size <NumberInput value={a.font ?? 0} step={1} onCommit={v => set({ font: v > 0 ? v : null })} /> pt <span class="ol-hint">(0: the document’s)</span></label>
       <label>Line spacing <NumberInput value={a.leading ?? 1.2} step={0.05} onCommit={v => set({ leading: v > 0 && Math.abs(v - 1.2) > 1e-3 ? v : null })} /> × size</label>
       <div class="ol-seg">Vertical {(['t', 'c', 'b'] as const).map(v => <button key={v} type="button" class={'small-btn' + (a.valign === v ? ' active' : '')} onClick={() => set({ valign: v })}>{v === 't' ? 'Top' : v === 'c' ? 'Middle' : 'Bottom'}</button>)}</div>
+      <div class="ol-seg">Text {(['left', 'justify', 'center', 'right'] as const).map(v => <button key={v} type="button" class={'small-btn' + ((a.align ?? 'left') === v ? ' active' : '')} onClick={() => set({ align: v })}>{v === 'left' ? 'Left' : v === 'justify' ? 'Justified' : v === 'center' ? 'Centred' : 'Right'}</button>)}</div>
       <div class="ol-seg">Shape {(['rect', 'ellipse'] as const).map(v => <button key={v} type="button" class={'small-btn' + (a.shape === v ? ' active' : '')} onClick={() => set({ shape: v })}>{v === 'rect' ? 'Rectangle' : 'Ellipse'}</button>)}</div>
       <label class="ol-check"><input type="checkbox" checked={!!a.grow} onChange={e => set({ grow: (e.target as HTMLInputElement).checked })} /> Height follows the text</label>
       <div class="ol-panel-foot"><button type="button" class="small-btn" onClick={close}>Done</button></div>
@@ -274,11 +276,11 @@ export function layoutToolbar(ctx: ToolbarContext): ToolButton[][] {
     { id: 'ol-raw', icon: 'ol-tex', title: 'Raw LaTeX object (TikZ, pgfplots, anything): shown as its compiled image', action: () => run(v => {
       const page = ctl?.currentPage();
       if (!page) return;
-      const latex = window.prompt('LaTeX of the object (typeset with the document’s preamble):', '\\begin{tikzpicture}\n  \\draw[thick,->] (0,0) -- (2,1);\n\\end{tikzpicture}');
-      if (!latex) return;
+      const latex = '\\begin{tikzpicture}\n  \\draw[thick,->] (0,0) -- (2,1) node[right] {$e^{i\\pi}$};\n\\end{tikzpicture}';
       const node = view.state.schema.nodes.ol_raw.create({ latex, x: pageSz.w * 0.3, y: pageSz.h * 0.3, w: pageSz.w * 0.3, h: pageSz.h * 0.25 });
       const r = L.insertObject(v.state, page.pos, node);
       v.dispatch(selectObjects(r.tr, [r.pos]));
+      openRawEditor(v, r.pos);
     }) },
   ];
 

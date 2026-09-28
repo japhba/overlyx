@@ -1758,7 +1758,7 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
   max-width: none; min-height: 0; font-size: 14px; line-height: 1.2; color: #000;
 }
 .editor-page:has(> .editor-host > .ol-layout) { background: var(--canvas-bg, #e7e8ea); padding: 34px 36px 140px 36px; }
-.editor-scroll:has(.ol-layout) > .ruler { display: none; }
+.editor-scroll:has(.ol-layout) > .ruler, :root:has(.lyx-editor.ol-layout) .ruler { display: none; }
 .ol-page-wrap { position: relative; width: calc(var(--ol-mm) * var(--ol-page-w, 160)); margin: 0 auto 30px; }
 .ol-page {
   position: relative; display: block; width: calc(var(--ol-mm) * var(--ol-page-w, 160)); height: calc(var(--ol-mm) * var(--ol-page-h, 90));
@@ -1913,3 +1913,12 @@ html[data-theme="dark"] { --canvas-bg: #121215; }
 .fs-list { position: absolute; top: 100%; left: 0; z-index: 50; min-width: 150px; max-height: 60vh; overflow-y: auto; }
 .fs-list .tb-pal-item { display: flex; justify-content: space-between; gap: 12px; width: 100%; }
 .fs-pt { color: var(--ui-muted); font-size: 11px; }
+/* a page is paper: the editing markers of spaces stay off it */
+.ol-page .lyx-space { background: none; }
+/* in the slideshow the page is only what the PDF shows: no editing aids */
+.ol-present .ol-invisible > svg, .ol-present .ol-raw, .ol-present .ol-box.ol-empty-frame:hover { outline: none; }
+.ol-present .ol-raw-code, .ol-present .ol-hit { display: none; }
+.ol-present .spell-error, .ol-present .ol-misspelled, .ol-present [class*="spell"] { text-decoration: none !important; background: none !important; }
+
+/* the raw LaTeX object's editor (editor/layout/rawedit.ts) */
+.ol-rawedit-code { width: min(70vw, 760px); min-height: 40vh; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: var(--surface); color: var(--ui-fg); resize: vertical; }

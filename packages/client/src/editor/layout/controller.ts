@@ -33,6 +33,7 @@ import { boxOf, objectBounds, unionBounds, isLayoutObject, pageObjects, rotatePo
 import * as L from './commands';
 import type { PageView } from './nodeviews';
 import { startPresentation } from './present';
+import { openRawEditor } from './rawedit';
 
 export type Tool = 'select' | 'text' | 'shape' | 'line' | 'arrow' | 'pen' | 'pencil' | 'nodes' | 'crop';
 
@@ -125,6 +126,18 @@ export function layoutPlugin(): Plugin<LayoutPluginState> {
       },
     },
     view: (view) => { controller = new LayoutController(view); return controller; },
+    // a text selection never spans two text boxes: its head is kept in the anchor's box
+    appendTransaction: (trs, _old, state) => {
+      if (!trs.some(t => t.selectionSet) || !L.isLayoutDoc(state.doc)) return null;
+      const s = state.selection;
+      if (!(s instanceof TextSelection) || s.empty) return null;
+      const boxOf = (p: number) => { const $p = state.doc.resolve(p); for (let d = $p.depth; d > 0; d--) if ($p.node(d).type.name === 'ol_box' || $p.node(d).type.name === 'ol_notes') return $p.before(d); return -1; };
+      const a = boxOf(s.anchor), h = boxOf(s.head);
+      if (a === h || a < 0) return null;
+      const box = state.doc.nodeAt(a)!;
+      const head = s.head > s.anchor ? a + box.nodeSize - 1 : a + 1;
+      return state.tr.setSelection(TextSelection.between(state.doc.resolve(s.anchor), state.doc.resolve(head)));
+    },
     props: {
       handleDOMEvents: {
         pointerdown: (view, ev) => controller?.pointerDown(ev as PointerEvent) ?? false,
@@ -162,6 +175,22 @@ type Gesture = { move(ev: PointerEvent): void; up(ev: PointerEvent): void; cance
 const HANDLE_DIRS: Record<string, [number, number]> = { nw: [-1, -1], n: [0, -1], ne: [1, -1], e: [1, 0], se: [1, 1], s: [0, 1], sw: [-1, 1], w: [-1, 0] };
 
 const controllers = new WeakMap<EditorView, LayoutController>();
+
+/**
+ * The document header as the shell holds it: the web client's is in the Y meta map, the VS Code
+ * webview's is not (both shells call setLayoutHeader with it, next to setDocumentFonts).
+ */
+let shellHeader: string[] | null = null;
+const shellHeaderListeners = new Set<() => void>();
+export function setLayoutHeader(lines: string[]): void {
+  shellHeader = lines;
+  for (const f of shellHeaderListeners) f();
+}
+
+/** a stable number per page node (the overlays of unchanged pages are not drawn again) */
+const nodeIds = new WeakMap<PMNode, number>();
+let nodeSeq = 0;
+const nodeId = (n: PMNode) => { let v = nodeIds.get(n); if (v === undefined) { v = ++nodeSeq; nodeIds.set(n, v); } return v; };
 
 class LayoutController {
   private active = false;
@@ -232,15 +261,17 @@ class LayoutController {
     if (this.metaUnobserve) return;
     const sync = ySyncPluginKey.getState(this.view.state) as { doc?: import('yjs').Doc } | undefined;
     const meta = sync?.doc?.getMap<string>('meta');
-    if (!meta) return;
-    const f = () => { this.readHeader(); this.renderOverlays(); };
-    meta.observe(f);
-    this.metaUnobserve = () => meta.unobserve(f);
+    const f = () => { if (this.view.isDestroyed) return; this.readHeader(); this.renderOverlays(true); };
+    meta?.observe(f);
+    shellHeaderListeners.add(f);
+    this.metaUnobserve = () => { meta?.unobserve(f); shellHeaderListeners.delete(f); };
   }
 
   private headerLines(): string[] {
     const sync = ySyncPluginKey.getState(this.view.state) as { doc?: import('yjs').Doc } | undefined;
-    try { return JSON.parse(sync?.doc?.getMap<string>('meta').get('header') ?? '[]'); } catch { return []; }
+    const raw = sync?.doc?.getMap<string>('meta').get('header');
+    if (raw) { try { return JSON.parse(raw); } catch { /* damaged */ } }
+    return shellHeader ?? [];
   }
 
   /** page size, base font size and colours from the document header */
@@ -360,7 +391,7 @@ class LayoutController {
 
   /* ---------------------------------------------------------------- overlays */
 
-  private renderOverlays(): void {
+  private renderOverlays(force = false): void {
     if (!this.active) return;
     const state = this.view.state;
     const st = layoutKey.getState(state)!;
@@ -373,6 +404,13 @@ class LayoutController {
       if (!page) continue;
       const end = pagePos + page.nodeSize;
       const mine = sel.filter(o => o.pos > pagePos && o.pos < end);
+      const editedHere = edited && edited.pos > pagePos && edited.pos < end ? edited.pos : -1;
+      const key = [nodeId(page), pagePos, mine.map(o => o.pos).join(','), editedHere, editedHere >= 0 ? nodeId(edited!.node) : 0, st.tool, st.target ?? '',
+        this.nodeSel ? `${this.nodeSel.seg}:${this.nodeSel.pt}` : '', JSON.stringify(this.guides.filter(g => g.page === pagePos)),
+        this.marquee?.page === pagePos ? JSON.stringify(this.marquee) : '', this.pen?.page === pagePos ? JSON.stringify(this.pen.nodes) : '', this.page.w, this.page.h].join('|');
+      const pvk = pv as PageView & { olOverlayKey?: string };
+      if (!force && pvk.olOverlayKey === key) continue;
+      pvk.olOverlayKey = key;
       const out: HTMLElement[] = [];
       // animation badges: the step an object appears on
       pageObjects(page, pagePos).forEach(o => {
@@ -474,7 +512,8 @@ class LayoutController {
     return this.take(ev);
   }
 
-  private take(ev: Event): boolean { ev.preventDefault(); return true; }
+  /** the gesture is ours: no native selection, but the keyboard goes to the editor (Delete, arrows, F5) */
+  private take(ev: Event): boolean { ev.preventDefault(); if (!this.view.hasFocus()) this.view.focus(); return true; }
 
   private samePage(a: number, b: number): boolean {
     const doc = this.view.state.doc;
@@ -1406,6 +1445,20 @@ class LayoutController {
     if (edited) {
       // Esc leaves the text for the box
       if (ev.key === 'Escape') { view.dispatch(selectObjects(view.state.tr, [edited.pos])); return true; }
+      // Ctrl+A: the box's text (the whole document would be every page)
+      if (mod && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === 'a') {
+        view.dispatch(view.state.tr.setSelection(TextSelection.between(view.state.doc.resolve(edited.pos + 1), view.state.doc.resolve(edited.pos + edited.node.nodeSize - 1))));
+        return true;
+      }
+      // the arrows stop at the box's edges
+      if (!mod && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown' || ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) {
+        const back = ev.key === 'ArrowUp' || ev.key === 'ArrowLeft';
+        const $h = view.state.selection.$head;
+        const first = edited.node.firstChild, last = edited.node.lastChild;
+        const atStart = $h.parent === first && (ev.key === 'ArrowLeft' ? $h.parentOffset === 0 : view.endOfTextblock('up'));
+        const atEnd = $h.parent === last && (ev.key === 'ArrowRight' ? $h.parentOffset === $h.parent.content.size : view.endOfTextblock('down'));
+        if (back ? atStart : atEnd) return true;
+      }
       return false;
     }
     if (ev.key === 'Escape') {
@@ -1575,14 +1628,8 @@ class LayoutController {
 
 /* ------------------------------------------------------------------ raw LaTeX editing */
 
-/** Edit the source of a raw LaTeX object (a simple prompt for now; the object re-renders). */
-export function editRawLatex(view: EditorView, pos: number): void {
-  const node = view.state.doc.nodeAt(pos);
-  if (!node || node.type.name !== 'ol_raw') return;
-  const v = window.prompt('LaTeX of this object (typeset with the document’s preamble):', String(node.attrs.latex ?? ''));
-  if (v === null || v === node.attrs.latex) return;
-  view.dispatch(L.setAttrs(view.state.tr, pos, { latex: v }));
-}
+/** Edit the source of a raw LaTeX object (rawedit.ts; the object re-renders). */
+export function editRawLatex(view: EditorView, pos: number): void { openRawEditor(view, pos); }
 
 /** After editing a path: its box becomes the path's bounds again (in the box's own frame). */
 function refitShape(tr: Transaction, pos: number, d: string): void {

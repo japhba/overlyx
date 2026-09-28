@@ -112,6 +112,7 @@ export class BoxView implements NodeView {
     c.fontSize = a.font ? PT(a.font) : '';
     c.lineHeight = a.leading ? String(a.leading) : '';
     c.color = color(a.color) ?? '';
+    c.textAlign = a.align === 'justify' ? 'justify' : a.align === 'center' ? 'center' : a.align === 'right' ? 'right' : 'left';
     this.dom.style.opacity = a.opacity !== null && a.opacity !== undefined ? String(a.opacity) : '';
     this.dom.dataset.step = a.step ?? '';
     this.dom.classList.toggle('ol-grow', !!a.grow);

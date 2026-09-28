@@ -711,7 +711,12 @@ api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
 api.get('/projects/:project/graphics/*', needProject('view'), async (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
-    const abs = resolveProjectPath(req.params.project, rel);
+    let abs = resolveProjectPath(req.params.project, rel);
+    // \includegraphics{fig} names no extension: the first file graphicx would take
+    if (!fs.existsSync(abs) && !path.extname(abs)) {
+      const hit = ['.pdf', '.png', '.jpg', '.jpeg', '.eps', '.svg'].map(e => abs + e).find(f => fs.existsSync(f));
+      if (hit) abs = hit;
+    }
     if (!fs.existsSync(abs)) { res.status(404).json({ error: 'not found' }); return; }
     const width = Math.min(4000, Math.max(100, Number(req.query.w ?? 1200)));
     const download = req.query.download === '1';

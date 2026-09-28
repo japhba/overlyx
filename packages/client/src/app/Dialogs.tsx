@@ -762,6 +762,12 @@ export const HELP_ROWS: [string, string][] = [
     ['Ctrl+Alt++ / Ctrl+Alt+-', 'Wider / narrower text column'],
     ['Ctrl+Alt+S', 'Source pane below the text'],
     ['Ctrl+Shift+P (or F1)', 'Command palette: search the menus and shortcuts, set your own shortcuts'],
+    ['F5 / Shift+F5', 'Layout documents: present from the first / the current page (→ next step, ← back, B black, L laser, S presenter view, Esc end)'],
+    ['V, T, R, E, L, A, B, P, N, C', 'Layout documents: select, text box, rectangle, ellipse, line, arrow, Bézier pen, pencil, nodes, crop'],
+    ['Ctrl+G / Ctrl+Shift+G', 'Layout documents: group / ungroup the selected objects'],
+    ['Ctrl+] / Ctrl+[', 'Layout documents: bring forward / send backward (with Shift: to the front / the back)'],
+    ['Ctrl+D', 'Layout documents: duplicate the selected objects'],
+    ['Arrows (Shift / Alt)', 'Layout documents: nudge the selection by 1 mm (10 mm / 0.1 mm)'],
 ];
 
 export function HelpDialog({ onClose }: { onClose: () => void }) {

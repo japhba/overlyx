@@ -60,6 +60,7 @@ import { setMarginMode } from '../editor/plugins/margin';
 import { setInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
 import { BoardEditor } from './BoardEditor';
 import { NewLayoutDialog } from './NewLayoutDialog';
+import { setLayoutHeader } from '../editor/layout/controller';
 import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilterKey } from '../editor/plugins/changes';
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
@@ -472,7 +473,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
 
   useEffect(() => applyEditorZoom(zoom), [zoom]);
   // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
-  useEffect(() => setDocumentFonts(headerLines), [headerLines]);
+  useEffect(() => { setDocumentFonts(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
   // Ctrl/Cmd +/- zoom the document text, never the browser chrome — wherever the focus is (formula
   // fields, panels). Ctrl+0 is a paragraph style now (Part, like LyX's Alt+P 0); reset via the status bar.
   useEffect(() => {

@@ -271,6 +271,86 @@ blend.
   after the last change (or `Ctrl+S`), and a conflict check — if the file changed on the server
   meanwhile (someone else, git) the save is refused and you choose between the server's
   version and yours. Viewers get it read-only. `+ File` in the file browser creates one.
+* **Layout documents** (Pages' *page layout* next to its word processing; `editor/layout/`, core
+  `layout/`): slides, posters and free-form pages — fixed-size pages whose objects sit anywhere:
+  **text boxes** (ordinary OverLyX text: formulas, lists, colours, citations…), **vector shapes**
+  (SVG path data: rectangles, ellipses, stars, arrows, lines, Bézier curves), **images** (cropped),
+  **groups** and **raw LaTeX** (TikZ, pgfplots, `\qrcode`… shown as its compiled image). *File ▸ New
+  slides / poster / page…* (`app/NewLayoutDialog.tsx`) offers beamer's slide sizes (16:9, 16:10, 4:3),
+  A0/A1 posters and A4 / Letter pages (`layout/templates.ts`); *Page size* on the Layout toolbar
+  changes it later (the document's custom paper size). A document is a layout document when it has
+  pages; a project holds both kinds side by side.
+  * **The file is a plain beamer `.tex`** (so it compiles anywhere, git diffs stay readable, the
+    agent and MCP edit it like any document). A page is `\begin{frame}[plain] … \end{frame}`, its
+    objects lines of a small macro package the managed block defines (`layout/latex.ts`: TikZ overlay
+    pictures anchored at the page corner, adjustbox for crops, beamer's `\only` for steps):
+    `\begin{olbox}{x=20mm,y=30mm,w=100mm,h=40mm,fill=paleblue,radius=3mm,pad=4mm,font=25pt} … \end{olbox}`,
+    `\olshape{x=…,vb=0 0 40 30,fill=red!20,draw=black,line=0.8pt,arrows=-Stealth}{M 0 0 L 40 0 …}`,
+    `\olimage{x=…,crop=0.1 0 0 0.2}{figures/plot.pdf}`, `\begin{olgroup}{step=2-} … \end{olgroup}`,
+    `\begin{olraw}{x=…} …LaTeX… \end{olraw}`, `\olpage{fill=…,transition=fade}` and `\note{…}` (speaker
+    notes). Geometry is millimetres from the page's top left, `rotate` TikZ's (counter-clockwise,
+    about the centre); colours are xcolor's (`jblue!25`, the document's own `\definecolor`s,
+    `[HTML]D62728` for a picked colour); keys a version does not know are kept. In the document model a
+    page is a paragraph of layout `OLPage` holding object insets (as LyX keeps a box in a paragraph),
+    so diffs, merges, tracked agent edits and the source map work on pages unchanged; the editor
+    converts them to typed ProseMirror nodes (`ol_page`, `ol_box`, `ol_shape`, `ol_image`, `ol_group`,
+    `ol_raw`, `ol_notes`; `convert.ts`). The writer puts every shape's path into its box's millimetres
+    (`shapeInBoxUnits`: TikZ overflows on a path stretched much more one way than the other).
+    Anything else inside a layout frame is kept verbatim where it stood (an unplaced raw object).
+  * **Canvas** (`editor/layout/controller.ts`, a plugin of the shared assembly, so the VS Code
+    extension has it too): Keynote's selection — a click selects (Shift adds), a drag moves (Ctrl/⌘
+    copies, Shift keeps the axis, Alt disables snapping), handles resize (Shift keeps proportions;
+    images keep them by default; Alt about the centre) and rotate (Shift: 15°), a drag on the empty
+    page is a rubber band; a second click (or a double click, or typing) edits a text box, Esc returns
+    to the box. Moves and resizes snap to the page's edges and centre and the other objects' edges and
+    centres, with guides; arrow keys nudge 1 mm (Shift 10, Alt 0.1). Objects dropped on another page
+    move there. Live previews are transactions outside the undo history; the result is one undoable
+    step (and collaborators see objects move live). Everything on a page is sized in CSS through
+    `--ol-mm` / `--ol-pt` (never CSS zoom or transforms on the editor): the page fits the window's
+    width, the editor zoom scales it. Text boxes with *height follows the text* grow with what is typed.
+  * **Tools** (the *Layout* toolbar, `app/layouttoolbar.tsx`, and Inkscape's keys): select (V), text
+    box (T), shapes (R rectangle, E ellipse, palette), line (L), arrow (A), Bézier pen (B: click =
+    corner, drag = smooth node, click the first node / double-click / Enter finishes), pencil (P,
+    smoothed), node editor (N or double-click a shape: drag nodes and handles — smooth nodes keep their
+    handles in line — double-click the outline for a node, Delete removes one, C toggles smooth /
+    corner), crop (C or double-click an image: the handles crop, dragging the picture pans it), images
+    (upload, the project's files, paste or drop onto a page), raw LaTeX. Arrangement: front / forward /
+    backward / back (Ctrl+Shift+] … — the order in the file is the drawing order), align and distribute
+    (one object aligns on the page), group / ungroup (Ctrl+G / Ctrl+Shift+G), rotate and flip, lock
+    (a locked object is not hit by clicks: backgrounds). Style: fill and outline (the document's own
+    colours first, LaTeX's, a picker, lighter / darker mixes), line width in pt, dashes, arrow tips,
+    opacity; a text box's margin, corner radius, vertical and horizontal alignment (ragged right by
+    default, like Keynote; *justified* writes `align=justify`), base font size and line spacing;
+    X / Y / W / H / angle fields in millimetres. Pages: new, duplicate, delete, move, background,
+    transition, name, speaker notes under the pages. The documents panel lists the pages.
+  * **Animations and presentation** (`editor/layout/present.ts`): an object's *step* is a beamer
+    overlay specification (`2-`, `2-4`, `1,3-`): the PDF gets one page per step, as beamer does, and
+    the badge on the canvas shows it; *Animation* picks the step ("appear next") and an entrance for
+    the live presentation (fade, fly in from a side, zoom, wipe). **F5** (or *View ▸ Presentation
+    mode*, Ctrl+Enter from the current page) presents full screen: pages at the screen's size (copies
+    of the editor's DOM re-sized through `--ol-mm`, so text and formulas stay sharp), →/Space/click
+    for the next step, ←/right-click back, a number + Enter jumps, B / W black / white screen, L a
+    laser pointer, S the presenter view in a second window (this page, the next, notes, timer), Esc
+    ends. Page transitions: fade, push, wipe.
+  * **Raw LaTeX objects** are typeset with the document's preamble on a page of the object's size in
+    the build sandbox and shown as SVG (`POST /api/docs/:id/snippet`, `server/snippets.ts`; cached by
+    content in `data/cache/snippets/`, two at a time) — TikZ, pgfplots or `\qrcode` look as in the PDF.
+  * **Fidelity**: pages use beamer's text face (CMU Sans Serif, bundled; Noto Sans when the preamble
+    loads Noto, CMU Serif with `\usefonttheme{serif}`), list labels are beamer's triangles, colours
+    come from the preamble. The example `poster_bernstein26` (a beamerposter of minipages and
+    tcolorboxes) was rebuilt as native objects by `scratch/layoutmode/poster-gen.mts` and compiles to
+    the same poster.
+  * **Builds of documents in sub-folders**: `\input{../macros}`, `\graphicspath{{../figures/}}` and
+    `\includegraphics{../logos/x}` are rewritten to project paths for the build (`server/texpaths.ts`)
+    — TeX runs with `openin_any=p`, which refuses `../`, and the project root is on TEXINPUTS; the
+    editor's image route finds extension-less graphics names the way graphicx does.
+* **Font sizes everywhere** (`editor/fontsize.ts`, `app/fontsize.tsx`): the standard toolbar's size box
+  (− / field / list / +) sets the size of selected text, of table cells (a cell selection), of a formula
+  as a whole (`{\small $…$}` — LaTeX sizes do not work inside math; the formula draws at that size) and
+  of a selected text box. Sizes are LaTeX's: a named size (`\small` … `\Huge`) wherever the points match
+  one at the document's base size, `\fontsize{N}{1.2N}\selectfont` otherwise (the size mark's `Npt`
+  value, read back from the file); on layout pages a point ladder. Colours and sizes set on a selection
+  now reach the formulas and insets in it too (their `marks` attribute).
 * **Presentation mode**: *View ▸ Presentation mode* (Shift+F11, rebindable) shows the document alone —
   menu bar, all toolbars (the docked contextual ones too), status bar, rulers and side panels are hidden,
   the page keeps its layout and stays editable; Esc leaves, a hint in the corner says so for a moment.
@@ -1036,6 +1116,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sharing.spec.ts e
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts e2e/tablerows.spec.ts e2e/cite.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layout.spec.ts   # layout documents: new deck, text box + formula, move / resize / undo, toolbar, presentation steps; the font size box
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
 OVERLYX_DATA_DIR=/root/lyx/overlyx/data npx tsx scripts/usage-report.ts --days 30   # on the production server: what people did and what went wrong (anonymous usage statistics)
 journalctl -u overlyx-autodeploy -n 50   # on the production server: what the last push to origin/master went through (checks, deploy, verification)

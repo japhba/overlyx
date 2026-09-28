@@ -421,7 +421,7 @@ export const LAYOUT_NODES: Record<string, NodeSpec> = {
     attrs: {
       ...placeAttrs, ...commonAttrs,
       fill: { default: null }, stroke: { default: null }, lw: { default: null }, radius: { default: null }, pad: { default: null },
-      valign: { default: 't' }, shape: { default: 'rect' }, font: { default: null }, leading: { default: null }, color: { default: null }, grow: { default: false },
+      valign: { default: 't' }, shape: { default: 'rect' }, font: { default: null }, leading: { default: null }, color: { default: null }, grow: { default: false }, align: { default: 'left' },
     },
     toDOM: olDOM('div', 'ol-box', true),
     parseDOM: olParse('div', 'ol-box'),

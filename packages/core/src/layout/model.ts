@@ -145,6 +145,8 @@ export interface BoxProps extends Placement, CommonProps {
   color: string | null;
   /** the height follows the text (the editor measures it) */
   grow: boolean;
+  /** how the text is set: ragged right (the default, like Keynote), justified, centred, ragged left */
+  align: 'left' | 'justify' | 'center' | 'right';
 }
 
 export interface ShapeProps extends Placement, CommonProps {
@@ -199,7 +201,7 @@ function takeKeys(keys: KeyList, known: Set<string>): { get(k: string): string |
 
 const PLACE_KEYS = ['x', 'y', 'w', 'h', 'rotate'];
 const COMMON_KEYS = ['step', 'effect', 'name', 'lock', 'opacity'];
-const BOX_KEYS = new Set([...PLACE_KEYS, ...COMMON_KEYS, 'fill', 'draw', 'line', 'radius', 'pad', 'valign', 'shape', 'font', 'leading', 'color', 'grow']);
+const BOX_KEYS = new Set([...PLACE_KEYS, ...COMMON_KEYS, 'fill', 'draw', 'line', 'radius', 'pad', 'valign', 'shape', 'font', 'leading', 'color', 'grow', 'align']);
 const SHAPE_KEYS = new Set([...PLACE_KEYS, ...COMMON_KEYS, 'fill', 'draw', 'line', 'dash', 'arrows', 'vb']);
 const IMAGE_KEYS = new Set([...PLACE_KEYS, ...COMMON_KEYS, 'crop']);
 const RAW_KEYS = new Set([...PLACE_KEYS, ...COMMON_KEYS]);
@@ -232,6 +234,7 @@ export function parseBoxKeys(s: string): BoxProps {
     shape: k.get('shape') === 'ellipse' ? 'ellipse' : 'rect',
     font: toPt(k.get('font') ?? null), leading: num(k.get('leading')), color: k.get('color') || null,
     grow: k.has('grow') && k.get('grow') !== 'false',
+    align: k.get('align') === 'justify' || k.get('align') === 'center' || k.get('align') === 'right' ? k.get('align') as BoxProps['align'] : 'left',
   };
 }
 
@@ -296,6 +299,7 @@ export function writeBoxKeys(p: BoxProps): string {
   if (p.font) out.push(['font', pt(p.font)]);
   if (p.leading) out.push(['leading', fmtNum(p.leading, 3)]);
   if (p.color) out.push(['color', p.color]);
+  if (p.align && p.align !== 'left') out.push(['align', p.align]);
   if (p.grow) out.push(['grow', null]);
   return commonKeys(p, out);
 }
@@ -478,6 +482,21 @@ export function parseViewBox(vb: string): { x: number; y: number; w: number; h: 
   const v = vb.trim().split(/[\s,]+/).map(Number);
   if (v.length === 4 && v.every(Number.isFinite) && v[2] > 0 && v[3] > 0) return { x: v[0], y: v[1], w: v[2], h: v[3] };
   return { x: 0, y: 0, w: 1, h: 1 };
+}
+
+/**
+ * A shape's path in its own box's millimetres: `vb` becomes "0 0 w h" and the path is scaled into it.
+ * The writer does this on every save — TikZ fails ("Dimension too large") on a path stretched much
+ * more in one direction than the other (a thin bar drawn from a 100 × 100 preset), and with equal
+ * scales in both directions it never is.
+ */
+export function shapeInBoxUnits(d: string, vb: string, w: number, h: number): { d: string; vb: string } {
+  const v = parseViewBox(vb);
+  const target = `0 0 ${fmtNum(w, 3)} ${fmtNum(h, 3)}`;
+  if (v.x === 0 && v.y === 0 && Math.abs(v.w - w) < 5e-4 && Math.abs(v.h - h) < 5e-4) return { d, vb: target };
+  const sx = w / v.w, sy = h / v.h;
+  const segs = normalizePath(d).map(sg => (sg.c === 'Z' ? sg : { c: sg.c, p: sg.p.map((n, i) => (i % 2 === 0 ? (n - v.x) * sx : (n - v.y) * sy)) }) as PathSeg);
+  return { d: pathToString(segs, 3), vb: target };
 }
 
 /** Standard shapes as (normalised) path data in a 100 × 100 box. */

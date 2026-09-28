@@ -1,4 +1,5 @@
 import { MenuBar, openPalette, PALETTE_LABEL, type MenuDef, ThemeToggle } from '@client/app/MenuBar';
+import { setLayoutHeader } from '@client/editor/layout/controller';
 import { documentMenus } from '@client/app/documentMenus';
 import { editorViewMenu } from '@client/app/editorViewMenu';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
@@ -157,7 +158,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   useEffect(() => subscribePrefs(setPrefsState), []);
   useEffect(() => applyEditorZoom(zoom), [zoom]);
   // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
-  useEffect(() => setDocumentFonts(headerLines), [headerLines]);
+  useEffect(() => { setDocumentFonts(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
   usePresentation();   // View ▸ Presentation mode: Shift+F11 toggles, Esc leaves
   useEffect(() => { editorContext.combined = combined; localStorage.setItem('ol.vscode.combined', combined ? '1' : '0'); }, [combined]);
   useEffect(() => { try { localStorage.setItem('ol.vscode.comments', showComments ? '1' : '0'); } catch { /* ignore */ } }, [showComments]);

@@ -10,6 +10,10 @@
    change tracking, comment threads and sharing; every project is a git repository.
 4. **Offline support** — documents are mirrored in the browser, edits keep going without a
    connection and merge when you're back.
+5. **Layout mode** — slides, posters and free-form pages: text boxes with formulas, vector
+   shapes, cropped images and raw TikZ placed anywhere on fixed-size pages, Keynote-style with
+   Inkscape's pen and node tools; the file is a plain beamer `.tex` (animations are overlays) and
+   presents full screen.
 
 ## Try it
 
