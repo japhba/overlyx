@@ -60,7 +60,7 @@ import { setMarginMode } from '../editor/plugins/margin';
 import { setInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
 import { BoardEditor } from './BoardEditor';
 import { NewLayoutDialog } from './NewLayoutDialog';
-import { setLayoutHeader } from '../editor/layout/controller';
+import { setLayoutHeader, layoutZoomStep } from '../editor/layout/controller';
 import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilterKey } from '../editor/plugins/changes';
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
@@ -356,11 +356,16 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // move the page below them: keep what is on screen where it is by scrolling the same amount.
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTop = useRef<number | null>(null);
+  const scrollDoc = useRef<string | null>(null);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el || !el.getClientRects().length) { scrollTop.current = null; return; }   // gone, or its pane is hidden
+    // another document: nothing on screen to keep in place
+    if (scrollDoc.current !== docId) { scrollDoc.current = docId; scrollTop.current = null; }
     const top = el.getBoundingClientRect().top;
-    if (scrollTop.current !== null && top !== scrollTop.current) el.scrollTop += top - scrollTop.current;
+    // (at the very top the document's start stays in view: the rows a document brings when it
+    // opens — a layout document's toolbar — must not scroll its first lines away)
+    if (scrollTop.current !== null && top !== scrollTop.current && el.scrollTop > 0) el.scrollTop += top - scrollTop.current;
     scrollTop.current = top;
   });
   const [showRuler, setShowRuler] = useState(localStorage.getItem('ol.ruler') !== '0');
@@ -795,7 +800,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
       closeTab: () => closeDoc(),
-      zoom: (d) => setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))),
+      zoom: (d) => { if (!layoutZoomStep(d)) setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))); },
       textWidth: stepTextWidth,
       openFile: () => setShowFiles(true),
       newFile: () => { const p = textId ? projectOfDoc(textId) : null; if (p) { const name = prompt('New document name:', 'untitled.tex'); if (name) api.newDoc(p, name, { title: name.replace(/\.(tex|lyx)$/, '') }).then(r => { location.hash = '#/' + r.id; setRefreshKey(k => k + 1); }); } },

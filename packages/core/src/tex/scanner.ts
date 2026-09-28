@@ -148,6 +148,32 @@ export class Scanner {
     return inner;
   }
 
+  /**
+   * An argument between other delimiters than [ ] — beamer's overlay specifications `<2->` and
+   * default overlays `[<+->]` (a layout argument's LeftDelim / RightDelim). Braces inside are kept
+   * together; null (nothing consumed) when the argument is not there.
+   */
+  readDelimited(left: string, right: string): string | null {
+    const save = this.pos;
+    this.skipBlanks();
+    if (!this.s.startsWith(left, this.pos)) { this.pos = save; return null; }
+    let i = this.pos + left.length, depth = 0;
+    for (; i < this.s.length; i++) {
+      const c = this.s[i];
+      if (c === '\\') { i++; continue; }
+      if (c === '{') depth++;
+      else if (c === '}') { if (depth === 0) break; depth--; }
+      else if (depth === 0 && this.s.startsWith(right, i)) {
+        const inner = this.s.slice(this.pos + left.length, i);
+        this.pos = i + right.length;
+        return inner;
+      }
+      else if (c === '\n' && this.s[i + 1] === '\n') break;
+    }
+    this.pos = save;
+    return null;
+  }
+
   /** `*` directly following (a starred command); consumed when present. */
   readStar(): boolean {
     if (this.s[this.pos] === '*') { this.pos++; return true; }

@@ -28,12 +28,15 @@ import { Plugin, PluginKey, NodeSelection, TextSelection, type EditorState, type
 import type { EditorView } from 'prosemirror-view';
 import { DOMSerializer, Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
 import { ySyncPluginKey } from 'y-prosemirror';
-import { schema, normalizePath, pathToString, preambleColors, pageSizeOf, rgbToHex, SHAPE_PRESETS, type PathSeg } from '@overlyx/core';
+import { schema, normalizePath, pathToString, preambleColors, pageSizeOf, pageFontsOf, rgbToHex, SHAPE_PRESETS, type PathSeg } from '@overlyx/core';
+import { setLayoutMathFont } from '../../fonts/editorfont';
+import { sizeTable, NAMED_SIZES } from '../fontsize';
 import { boxOf, objectBounds, unionBounds, isLayoutObject, pageObjects, rotatePoint, MM, docColors, boundsOf, type Box } from './geom';
 import * as L from './commands';
 import type { PageView } from './nodeviews';
 import { startPresentation } from './present';
 import { openRawEditor } from './rawedit';
+import { editorContext } from '../context';
 
 export type Tool = 'select' | 'text' | 'shape' | 'line' | 'arrow' | 'pen' | 'pencil' | 'nodes' | 'crop';
 
@@ -144,7 +147,6 @@ export function layoutPlugin(): Plugin<LayoutPluginState> {
         dblclick: (view, ev) => controller?.doubleClick(ev as MouseEvent) ?? false,
         copy: (view, ev) => controller?.clipboard(ev as ClipboardEvent, false) ?? false,
         cut: (view, ev) => controller?.clipboard(ev as ClipboardEvent, true) ?? false,
-        wheel: (view, ev) => controller?.wheel(ev as WheelEvent) ?? false,
       },
       handleKeyDown: (view, ev) => controller?.keyDown(ev) ?? false,
       handlePaste: (view, ev, slice) => controller?.paste(slice) ?? false,
@@ -185,6 +187,33 @@ const shellHeaderListeners = new Set<() => void>();
 export function setLayoutHeader(lines: string[]): void {
   shellHeader = lines;
   for (const f of shellHeaderListeners) f();
+}
+
+/* ------------------------------------------------------------------ canvas zoom (status bar, keys) */
+
+const activeZoom = new Set<LayoutController>();
+const zoomListeners = new Set<() => void>();
+function zoomChanged(): void { for (const f of zoomListeners) f(); }
+/** at most 16 × the paper's real size */
+const zoomMax = (fitPt: number) => Math.max(1, 16 * (96 / 25.4) / 2.845276 / fitPt);
+function zoomTarget(): LayoutController | null {
+  const v = editorContext.activeView;
+  const own = v ? controllers.get(v) : undefined;
+  if (own && activeZoom.has(own)) return own;
+  return activeZoom.size === 1 ? [...activeZoom][0] : null;
+}
+/** The canvas zoom of the open layout document (null: none open): the status bar's zoom shows it. */
+export function layoutZoom(): { percent: number; fit: boolean } | null {
+  const c = zoomTarget();
+  return c ? { percent: c.zoomPercent(), fit: c.isFit() } : null;
+}
+export function onLayoutZoom(f: () => void): () => void { zoomListeners.add(f); return () => { zoomListeners.delete(f); }; }
+/** Zoom in (1), out (−1), to the whole page (0) or to a percentage of the real size; false without a layout document. */
+export function layoutZoomStep(d: number | { pct: number }): boolean {
+  const c = zoomTarget();
+  if (!c) return false;
+  c.zoomStep(d);
+  return true;
 }
 
 /** a stable number per page node (the overlays of unchanged pages are not drawn again) */
@@ -243,17 +272,123 @@ class LayoutController {
   private colorStyle: HTMLStyleElement | null = null;
 
   private attach(): void {
-    const scroller = this.view.dom.closest('.editor-scroll') ?? this.view.dom.parentElement;
+    const scroller = (this.view.dom.closest('.editor-scroll') ?? this.view.dom.parentElement) as HTMLElement | null;
+    this.scroller = scroller;
     if (scroller && typeof ResizeObserver !== 'undefined') {
       this.resize = new ResizeObserver(() => this.fit());
       this.resize.observe(scroller);
     }
+    // a document opens with its whole page in the window
+    this.zoom = 1;
+    if (scroller) {
+      scroller.addEventListener('wheel', this.onWheel, { passive: false });
+      // Safari's trackpad pinch
+      scroller.addEventListener('gesturestart', this.onGesture as EventListener, { passive: false });
+      scroller.addEventListener('gesturechange', this.onGesture as EventListener, { passive: false });
+    }
+    activeZoom.add(this);
     this.readHeader(true);
   }
 
   private detach(): void {
     this.resize?.disconnect(); this.resize = null;
-    for (const p of ['--ol-page-w', '--ol-page-h', '--ol-fit-pt']) this.view.dom.style.removeProperty(p);
+    if (this.scroller) {
+      this.scroller.removeEventListener('wheel', this.onWheel);
+      this.scroller.removeEventListener('gesturestart', this.onGesture as EventListener);
+      this.scroller.removeEventListener('gesturechange', this.onGesture as EventListener);
+    }
+    this.scroller = null;
+    activeZoom.delete(this);
+    zoomChanged();
+    for (const p of ['--ol-page-w', '--ol-page-h', '--ol-fit-pt', '--ol-page-font', '--ol-text-scale', '--ol-math-rel']) this.view.dom.style.removeProperty(p);
+    setLayoutMathFont(null);
+  }
+
+  /* ---------------------------------------------------------------- zoom */
+
+  /** the canvas zoom, relative to the page fitting the window (1: the whole page is visible) */
+  private zoom = 1;
+  /** a TeX point in pixels when the page fits the window */
+  private fitPagePt = 1;
+  private scroller: HTMLElement | null = null;
+  private pendingZoom: { z: number; x: number; y: number } | null = null;
+  private gestureStart = 1;
+
+  /** a pinch on a trackpad (Ctrl + wheel in Chromium and Firefox) or Ctrl/⌘ + wheel zooms about the pointer */
+  private onWheel = (ev: WheelEvent): void => {
+    if (!(ev.ctrlKey || ev.metaKey)) return;
+    ev.preventDefault();
+    const dy = ev.deltaMode === 1 ? ev.deltaY * 16 : ev.deltaMode === 2 ? ev.deltaY * 400 : ev.deltaY;
+    const base = this.pendingZoom?.z ?? this.zoom;
+    // a trackpad sends many small deltas, a mouse wheel ±100 per notch (×1.28 then)
+    this.zoomAt(base * Math.exp(-Math.max(-25, Math.min(25, dy)) * 0.01), ev.clientX, ev.clientY);
+  };
+
+  private onGesture = (ev: Event & { scale?: number; clientX?: number; clientY?: number }): void => {
+    ev.preventDefault();
+    if (ev.type === 'gesturestart') { this.gestureStart = this.zoom; return; }
+    const r = this.scroller?.getBoundingClientRect();
+    this.zoomAt(this.gestureStart * (ev.scale ?? 1), ev.clientX ?? (r ? r.left + r.width / 2 : 0), ev.clientY ?? (r ? r.top + r.height / 2 : 0));
+  };
+
+  /** zoom to `z` keeping the point under (x, y) where it is (applied once per frame) */
+  zoomAt(z: number, x: number, y: number): void {
+    z = Math.max(0.1, Math.min(zoomMax(this.fitPagePt), z));
+    const first = !this.pendingZoom;
+    this.pendingZoom = { z, x, y };
+    if (first) requestAnimationFrame(() => this.applyZoom());
+  }
+
+  private applyZoom(): void {
+    const p = this.pendingZoom;
+    this.pendingZoom = null;
+    if (!p || this.view.isDestroyed || !this.active) return;
+    const sc = this.scroller;
+    // the page under the pointer (or the nearest) anchors the zoom: the same spot of it stays under the pointer
+    const wraps = [...this.view.dom.querySelectorAll<HTMLElement>(':scope > .ol-page-wrap')];
+    let anchor: HTMLElement | null = null, best = Infinity;
+    for (const w of wraps) {
+      const r = w.getBoundingClientRect();
+      const d = p.y < r.top ? r.top - p.y : p.y > r.bottom ? p.y - r.bottom : 0;
+      if (d < best) { best = d; anchor = w; }
+      if (d === 0) break;
+    }
+    const r0 = anchor?.getBoundingClientRect();
+    const fx = r0 ? (p.x - r0.left) / r0.width : 0, fy = r0 ? (p.y - r0.top) / r0.height : 0;
+    this.zoom = p.z;
+    this.fit();
+    if (sc && anchor && r0) {
+      const r1 = anchor.getBoundingClientRect();
+      sc.scrollLeft += r1.left + fx * r1.width - p.x;
+      sc.scrollTop += r1.top + fy * r1.height - p.y;
+    }
+    this.renderOverlays(true);
+  }
+
+  /** the zoom in percent of the paper's real size (96 px to the inch) */
+  zoomPercent(): number { return Math.round(this.fitPagePt * this.zoom * 2.845276 / (96 / 25.4) * 100); }
+  isFit(): boolean { return Math.abs(this.zoom - 1) < 1e-3; }
+  /** the Zoom menu / keys: d = 1 in, −1 out, 0 back to the whole page; 'pct' a percentage of the real size */
+  zoomStep(d: number | { pct: number }): void {
+    const r = this.scroller?.getBoundingClientRect();
+    const cx = r ? r.left + r.width / 2 : 0, cy = r ? r.top + Math.min(r.height, 600) / 2 : 0;
+    if (typeof d === 'object') { this.zoomAt(d.pct / 100 * (96 / 25.4) / 2.845276 / this.fitPagePt, cx, cy); return; }
+    if (d === 0) {
+      // the whole page (the one mostly in view)
+      this.zoom = 1; this.fit(); this.renderOverlays(true);
+      const sel = L.pageAt(this.view.state.doc, this.view.state.selection.from);
+      const dom = sel ? this.view.nodeDOM(sel.pos) as HTMLElement | null : null;
+      dom?.scrollIntoView({ block: 'start', inline: 'center' });
+      return;
+    }
+    // the usual percentages of the paper's real size, and the whole page among them
+    const perPct = (96 / 25.4) / 2.845276 / this.fitPagePt / 100;
+    const steps = [5, 10, 15, 25, 33, 50, 67, 75, 100, 125, 150, 200, 300, 400, 600, 800, 1200, 1600].map(p => p * perPct);
+    steps.push(1);
+    steps.sort((a, b) => a - b);
+    const cur = this.zoom;
+    const next = d > 0 ? steps.find(v => v > cur * 1.01) ?? cur : [...steps].reverse().find(v => v < cur / 1.01) ?? cur;
+    this.zoomAt(next, cx, cy);
   }
 
   /** the header lives in the Y meta map: follow its changes (document settings, the page size) */
@@ -303,18 +438,29 @@ class LayoutController {
     if (!this.active) return;
     s.setProperty('--ol-page-w', String(this.page.w));
     s.setProperty('--ol-page-h', String(this.page.h));
-    this.view.dom.dataset.olFont = /\\usefonttheme\s*\{\s*serif\s*\}/.test(preamble) ? 'serif' : /noto/i.test(preamble) ? 'noto' : 'sans';
+    // LaTeX's named sizes are the class's absolute sizes (\small in a 25 pt box is 10 pt at 11 pt)
+    const sizes = sizeTable(this.basePt);
+    NAMED_SIZES.forEach((n, i) => s.setProperty(`--ol-size-${n}`, String(sizes[i])));
+    // the PDF's fonts: the page's face, the scale its package loads it at (notomath: 0.9) and the math font
+    const fonts = pageFontsOf(preamble, cls || 'beamer');
+    this.view.dom.dataset.olFont = fonts.id;
+    s.setProperty('--ol-page-font', fonts.family);
+    s.setProperty('--ol-text-scale', String(fonts.textScale));
+    s.setProperty('--ol-math-rel', String(Math.round(fonts.mathScale / fonts.textScale * 1000) / 1000));
+    setLayoutMathFont(fonts.sansMath ? 'fira' : null);
     this.fit();
     if (changed) this.rerenderViews();
   }
 
-  /** the zoom that fits the page's width into the window (× the editor zoom, see styles.css) */
+  /** the page's scale: the zoom at which the whole page fits the window, times the canvas zoom */
   private fit(): void {
-    const scroller = (this.view.dom.closest('.editor-scroll') ?? this.view.dom.parentElement) as HTMLElement | null;
-    const width = Math.max(200, (scroller?.clientWidth ?? 1000) - 72);
-    const pxPerMm = width / this.page.w;
-    const fitPt = Math.min(pxPerMm / 2.845276, 4);
-    this.view.dom.style.setProperty('--ol-fit-pt', `${fitPt.toFixed(4)}px`);
+    const sc = this.scroller ?? (this.view.dom.closest('.editor-scroll') ?? this.view.dom.parentElement) as HTMLElement | null;
+    const width = Math.max(200, (sc?.clientWidth ?? 1000) - 72);
+    const height = Math.max(150, (sc?.clientHeight ?? 800) - 70);
+    const pxPerMm = Math.min(width / this.page.w, height / this.page.h);
+    this.fitPagePt = Math.min(pxPerMm / 2.845276, 4);
+    this.view.dom.style.setProperty('--ol-fit-pt', `${(this.fitPagePt * this.zoom).toFixed(4)}px`);
+    zoomChanged();
   }
 
   private rerenderViews(): void {
@@ -592,7 +738,6 @@ class LayoutController {
     return false;
   }
 
-  wheel(_ev: WheelEvent): boolean { return false; }
 
   /* ---------------------------------------------------------------- gestures */
 

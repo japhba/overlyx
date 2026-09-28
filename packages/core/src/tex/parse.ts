@@ -148,6 +148,8 @@ interface TextCtx {
   openBrackets: number;
   /** the next blank is dropped (after an inset the writer puts on its own line) */
   skipSpace: boolean;
+  /** index in `pars` of the enclosing environment's first paragraph */
+  envStart?: number;
 }
 
 interface Stop { close?: boolean; env?: string; item?: boolean; cell?: boolean }
@@ -217,6 +219,7 @@ class BodyParser {
   private cmdStyles = new Map<string, LayoutStyle[]>();
   private envStyles = new Map<string, LayoutStyle>();
   private cmdInsets = new Map<string, InsetLayout>();
+  private cmdInsetParams = new Map<string, InsetLayout[]>();
   private envInsets = new Map<string, InsetLayout>();
   private unicodeRev = new Map<string, string>();
   private babelToLang = new Map<string, string>();
@@ -225,6 +228,8 @@ class BodyParser {
   /** read a file relative to the document (sketch SVGs; set from ParseTexOptions.readFile) */
   readFile?: (name: string) => string | undefined;
   private envStack: string[] = [];
+  /** where the last environment layout ended (a separator goes between two of the same style) */
+  private lastEnvEnd: { src: string; pos: number } | null = null;
   private quoteStyle: string;
 
   constructor(readonly dc: DocumentClass, unicode: UnicodeDB, langs: LanguageDB, readonly facts: PreambleFacts, private readonly settings: { language: string; quotes: string }) {
@@ -237,6 +242,8 @@ class BodyParser {
       if (il.obsoletedBy || !il.latexName) continue;
       const map = il.latexType === 'command' ? this.cmdInsets : il.latexType === 'environment' ? this.envInsets : null;
       if (map && !map.has(il.latexName)) map.set(il.latexName, il);
+      // beamer's \mode<article> / \mode<presentation>: one command, told apart by the parameter that follows
+      if (il.latexType === 'command' && il.latexParam) { const l = this.cmdInsetParams.get(il.latexName) ?? []; l.push(il); this.cmdInsetParams.set(il.latexName, l); }
     }
     for (const [code, sym] of unicode) {
       if (!sym.textCommand || sym.combining) continue;
@@ -581,7 +588,7 @@ class BodyParser {
       this.pushERT(ctx, st, env === null ? '\\end' : `\\end{${env}}`);
       return null;
     }
-    if (name === 'item') {
+    if (name === 'item' || (stop.item && ctx.itemStyle && name === ctx.itemStyle.itemCommand)) {
       if (stop.item) return 'item';
       const opt = s.readOptional();
       this.pushERT(ctx, st, '\\item' + (opt !== null ? `[${opt}]` : '') + (t.spaceAfter ? ' ' : ''));
@@ -665,7 +672,13 @@ class BodyParser {
     }
 
     // insets defined by inset layouts (\footnote, \caption, \url, \code, ...)
-    const il = this.cmdInsets.get(name);
+    let il = this.cmdInsets.get(name);
+    for (const cand of this.cmdInsetParams.get(name) ?? []) {
+      const save = s.pos;
+      s.skipBlanks();
+      if (s.s.startsWith(cand.latexParam, s.pos)) { s.pos += cand.latexParam.length; il = cand; break; }
+      s.pos = save;
+    }
     // beamer's overlay-aware font commands (Flex:Bold = \textbf<2>{…}) are fonts without an overlay
     if (il && !(FONT_CMDS[name] && s.peekChar() !== '<')) { this.handleInsetCommand(s, ctx, st, il); return null; }
 
@@ -1124,7 +1137,17 @@ class BodyParser {
 
   /** \section{...}-like commands: a paragraph of the style. */
   private handleCommandLayout(s: Scanner, ctx: TextCtx, st: State, style: LayoutStyle): void {
-    const par = this.newPar(ctx, style.name, ctx.depth);
+    // inside an environment that auto-nests it (beamer: \frametitle, \pause, \column in a frame): one level deeper
+    // beamer's \pause inside a paragraph stays where it is (LyX's Pause is a paragraph of its own)
+    if (style.name === 'Pause' && ctx.cur?.items.length) {
+      const o = s.readOptional();
+      this.pushERT(ctx, st, '\\pause' + (o !== null ? `[${o}]` : ' '));
+      return;
+    }
+    const env = ctx.envLayout ? this.dc.styles.get(ctx.envLayout) : undefined;
+    const nested = !!env?.autoNests.includes(style.name);
+    if (nested) { this.endPar(ctx); this.hangFrom(ctx); }
+    const par = this.newPar(ctx, style.name, nested ? ctx.nestDepth : ctx.depth);
     const inner: State = { font: {}, change: st.change };
     for (const a of this.readArguments(s, style.args)) par.items.push({ kind: 'inset', font: {}, inset: a });
     s.skipBlanks();
@@ -1140,7 +1163,9 @@ class BodyParser {
 
   /**
    * The arguments declared by a layout ("1", "2", ... in order): mandatory ones as {...} (an empty
-   * {} is a missing one), optional ones as [...]. Stops at the first argument that is not there.
+   * {} is a missing one), optional ones as [...], and those with their own delimiters as declared
+   * (beamer's overlay specifications <2->, default overlays [<+->], a frame's title {...}). An
+   * absent optional argument is skipped; the first absent mandatory one ends the list.
    */
   private readArguments(s: Scanner, args: Map<string, import('../latex/layouts.ts').ArgumentSpec>, prefix = ''): TextInset[] {
     const out: TextInset[] = [];
@@ -1148,25 +1173,35 @@ class BodyParser {
     if (!ids.length) {
       // no declared arguments: keep [...] options anyway
       let n = 1;
-      for (;;) { const o = s.readOptional(); if (o === null) break; out.push(argumentInset(String(n++), this.parseInsetString(o, 'Plain Layout'))); }
+      for (;;) { const o = s.readOptional(); if (o === null) break; out.push(argumentInset(prefix + String(n++), this.parseInsetString(o, 'Plain Layout'))); }
       return out;
     }
-    const max = ids[ids.length - 1];
-    for (let n = 1; n <= max; n++) {
-      const spec = args.get(prefix + n);
-      if (!spec) continue;
-      if (spec.mandatory) {
+    const specs = ids.map(n => args.get(prefix + n)!).filter(Boolean);
+    const delims = (a: import('../latex/layouts.ts').ArgumentSpec) => [a.leftDelim || (a.mandatory ? '{' : '['), a.rightDelim || (a.mandatory ? '}' : ']')];
+    for (const [i, spec] of specs.entries()) {
+      const id = spec.id.startsWith(prefix) ? spec.id : prefix + spec.id;
+      const [l, r] = delims(spec);
+      if (l === '{') {
         const save = s.pos;
         s.skipBlanks();
-        // the last mandatory argument of a command layout is the paragraph itself
-        if (s.peekChar() !== '{' || n === max && !prefix && this.lastMandatoryIsContent(args, max)) { s.pos = save; break; }
+        if (s.peekChar() !== '{') { s.pos = save; if (spec.mandatory) break; continue; }
         const g = s.readGroup();
         if (g === null) { s.pos = save; break; }
-        if (g.trim()) out.push(argumentInset(String(n), this.parseInsetString(g, 'Plain Layout')));
-      } else {
+        if (g.trim()) out.push(argumentInset(id, this.parseInsetString(g, 'Plain Layout')));
+      } else if (l === '[' && r === ']') {
+        // "[<+->]" belongs to a later argument delimited by "[<"
+        const save = s.pos;
+        s.skipBlanks();
+        const other = s.s.startsWith('[<', s.pos) && specs.slice(i + 1).some(a => delims(a)[0] === '[<');
+        s.pos = save;
+        if (other) continue;
         const o = s.readOptional();
-        if (o === null) break;
-        out.push(argumentInset(String(n), this.parseInsetString(o, 'Plain Layout')));
+        if (o === null) { if (spec.mandatory) break; continue; }
+        out.push(argumentInset(id, this.parseInsetString(o, 'Plain Layout')));
+      } else {
+        const d = s.readDelimited(l, r);
+        if (d === null) { if (spec.mandatory) break; continue; }
+        out.push(argumentInset(id, this.parseInsetString(d, 'Plain Layout')));
       }
     }
     return out;
@@ -1278,9 +1313,13 @@ class BodyParser {
     const il = this.envInsets.get(env);
     if (il) {
       const { name, arg } = insetNameOf(il);
-      if (il.args.size) s.readOptional();
+      const args = il.args.size ? this.readArguments(s, il.args) : [];
       const base = name === 'Branch' || (name === 'Flex' && !il.forcePlain && il.multiPar) ? 'Standard' : 'Plain Layout';
       const pars = this.parseInsetEnv(s, env, base, st);
+      if (args.length) {
+        if (!pars.length) pars.push({ layout: base, depth: 0, params: {}, items: [] });
+        pars[0].items.unshift(...args.map(a => ({ kind: 'inset' as const, font: {}, inset: a })));
+      }
       this.pushInset(ctx, st, { type: 'Text', name, arg, params: [], status: 'open', paragraphs: pars });
       return;
     }
@@ -1413,44 +1452,59 @@ class BodyParser {
 
   /** \begin{itemize} / \begin{quote} / \begin{theorem} ...: paragraphs of the style, nested by depth. */
   private handleEnvLayout(s: Scanner, ctx: TextCtx, st: State, env: string, style: LayoutStyle): void {
+    const beginPos = s.pos - `\\begin{${env}}`.length;
     this.endPar(ctx);
     const isItem = style.latexType === 'Item_Environment' || style.latexType === 'List_Environment' || style.latexType === 'Bib_Environment';
-    const saved = { layout: ctx.layout, depth: ctx.depth, nestDepth: ctx.nestDepth, envLayout: ctx.envLayout, itemStyle: ctx.itemStyle };
+    const saved = { layout: ctx.layout, depth: ctx.depth, nestDepth: ctx.nestDepth, envLayout: ctx.envLayout, itemStyle: ctx.itemStyle, envStart: ctx.envStart };
     // a nested environment needs a paragraph of the enclosing one to hang from
-    if (ctx.envLayout && !ctx.pars.some(p => p.layout === ctx.envLayout && p.depth === ctx.nestDepth - 1)) {
-      ctx.pars.push({ layout: ctx.envLayout, depth: ctx.nestDepth - 1, params: {}, items: [] });
-    }
+    this.hangFrom(ctx);
     const depth = ctx.nestDepth;
+    // right after an environment of the same style: a separator keeps the two apart (else the
+    // writer merges them — two frames would become one); LyX's plain one is written as "%"
+    const last = [...ctx.pars].reverse().find(p => p.depth <= depth);
+    if (last && last.layout === style.name && last.depth === depth && ctx.pars.indexOf(last) >= (ctx.envStart ?? 0)) {
+      const between = this.lastEnvEnd?.src === s.s ? s.s.slice(this.lastEnvEnd.pos, beginPos) : '';
+      const kind = /\n[ \t]*\n/.test(between) ? 'parbreak' : 'plain';
+      ctx.pars.push({ layout: ctx.base, depth, params: {}, items: [{ kind: 'inset', font: {}, inset: { type: 'Leaf', name: 'Separator', arg: kind, params: [] } }] });
+    }
     ctx.layout = style.name; ctx.depth = depth; ctx.nestDepth = depth + 1; ctx.envLayout = style.name; ctx.itemStyle = isItem ? style : null;
+    ctx.envStart = ctx.pars.length;
     // environment arguments → Argument insets of the first paragraph
     const args: TextInset[] = [];
     if (style.latexType === 'Bib_Environment' || style.labelType === 'Bibliography') s.readGroup();
     else if (style.latexType === 'List_Environment' && style.latexParam === '') { const g = s.readGroup(); if (g !== null && g.trim()) args.push(argumentInset('listpreamble:1', this.parseInsetString(g, 'Plain Layout'))); }
-    if (style.args.size) {
-      let n = 1;
-      for (;;) {
-        const o = s.readOptional();
-        if (o === null) break;
-        args.push(argumentInset(String(n++), this.parseInsetString(o, 'Plain Layout')));
-      }
+    if (style.args.size) args.push(...this.readArguments(s, style.args));
+    // beamer's frame subtitle, \begin{frame}{Title}{Subtitle}: LyX's FrameSubtitle paragraph
+    let subtitle: string | null = null;
+    if (env === 'frame' && args.some(a => a.arg === '4') && this.dc.styles.has('FrameSubtitle')) {
+      const save = s.pos;
+      s.skipBlanks();
+      subtitle = s.peekChar() === '{' ? s.readGroup() : null;
+      if (subtitle === null) s.pos = save;
     }
     this.envStack.push(env);
     if (isItem) {
       // text before the first \item is unusual; it lands in a paragraph of the layout
       let r = this.parseText(s, ctx, cloneState(st), { env, item: true });
       let first = true;
+      const overlay = [...style.args.values()].some(a => a.id.startsWith('item:') && a.leftDelim === '<');
       while (r === 'item') {
+        // beamer: \item<2-> and \item<2->[label] (the overlay specification is an argument of the item)
+        const itemArgs = overlay ? this.readArguments(s, new Map([...style.args].filter(([id, a]) => id.startsWith('item:') && a.leftDelim === '<')), 'item:') : [];
         const opt = s.readOptional();
+        if (overlay && !itemArgs.length) itemArgs.push(...this.readArguments(s, new Map([...style.args].filter(([id, a]) => id.startsWith('item:') && a.leftDelim === '<')), 'item:'));
         const par = this.newPar(ctx, style.name, depth);
         if (first) { for (const a of args) par.items.push({ kind: 'inset', font: {}, inset: a }); first = false; }
+        for (const a of itemArgs) par.items.push({ kind: 'inset', font: {}, inset: a });
         if (opt !== null) {
+          const labelArg = [...style.args.values()].find(a => a.id.startsWith('item:') && (a.leftDelim || '[') === '[');
           if (style.labelType === 'Manual') {
             // description-like: the label is the first word(s) of the paragraph, spaces protected
             this.pushLabelWords(ctx, cloneState(st), opt);
           } else if (style.latexType === 'Bib_Environment') {
             /* handled below */
           } else {
-            par.items.push({ kind: 'inset', font: {}, inset: argumentInset('item:1', this.parseInsetString(opt, 'Plain Layout')) });
+            par.items.push({ kind: 'inset', font: {}, inset: argumentInset(labelArg?.id ?? 'item:1', this.parseInsetString(opt, 'Plain Layout')) });
           }
         }
         if (style.latexType === 'Bib_Environment' || style.labelType === 'Bibliography') {
@@ -1468,16 +1522,39 @@ class BodyParser {
         ctx.layout = style.name; ctx.depth = depth;
       }
     } else {
+      if (subtitle !== null) {
+        // the frame's own (empty) first paragraph, then the subtitle nested in it
+        this.newPar(ctx, style.name, depth);
+        this.endPar(ctx);
+        const sp = this.newPar(ctx, 'FrameSubtitle', depth + 1);
+        ctx.cur = sp;
+        const sub = new Scanner(subtitle);
+        this.parseText(sub, ctx, { font: {}, change: st.change }, {});
+        this.endPar(ctx);
+        s.skipBlanks();
+      }
       const r0 = this.parseText(s, ctx, cloneState(st), { env });
       void r0;
       if (args.length) {
-        const firstPar = ctx.pars.find(p => p.layout === style.name && p.depth === depth);
-        if (firstPar) firstPar.items.unshift(...args.map(a => ({ kind: 'inset' as const, font: {}, inset: a })));
+        let firstPar = ctx.pars.slice(ctx.envStart).find(p => p.layout === style.name && p.depth === depth);
+        // a frame with only nested content (a title, a list): its own first paragraph holds the arguments
+        if (!firstPar) { firstPar = { layout: style.name, depth, params: {}, items: [] }; ctx.pars.splice(ctx.envStart!, 0, firstPar); }
+        firstPar.items.unshift(...args.map(a => ({ kind: 'inset' as const, font: {}, inset: a })));
       }
     }
     this.envStack.pop();
     this.endPar(ctx);
+    this.lastEnvEnd = { src: s.s, pos: s.pos };
     Object.assign(ctx, saved);
+  }
+
+  /** Nested material (an environment, an auto-nested command) needs a paragraph of the enclosing environment to hang from. */
+  private hangFrom(ctx: TextCtx): void {
+    if (!ctx.envLayout) return;
+    const mine = ctx.pars.slice(ctx.envStart ?? 0);
+    if (!mine.some(p => p.layout === ctx.envLayout && p.depth === ctx.nestDepth - 1)) {
+      ctx.pars.push({ layout: ctx.envLayout, depth: ctx.nestDepth - 1, params: {}, items: [] });
+    }
   }
 
   /** "\item[foo bar] text" in a description: "foo~bar text" (LyX's manual label). */

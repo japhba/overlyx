@@ -146,7 +146,8 @@ export function latexArgInsets(ctx: ExportContext, os: TexStream, rp: RunParams,
     if (spec.mandatory) os.write((spec.leftDelim || '{') + preset + (spec.rightDelim || '}'));
     else if (preset) os.write((spec.leftDelim || '[') + preset + (spec.rightDelim || ']'));
     else if (required.has(id)) os.write((spec.leftDelim || '[') + (spec.rightDelim || ']'));
-    else break;
+    // (LyX's `break` here leaves only its search for the argument's definition: the next argument
+    // is still written — beamer's frame title after an absent overlay specification)
   }
 }
 
@@ -618,7 +619,8 @@ function texOneParImpl(ctx: ExportContext, text: TextInfo, pit: number, os: TexS
 
 function endsWithSeparator(par: Paragraph): boolean {
   const last = par.items[par.items.length - 1];
-  return !!last && last.kind === 'inset' && last.inset.type === 'Leaf' && last.inset.name === 'Separator' && last.inset.arg !== 'plain';
+  // Paragraph::isEnvSeparator: a separator of either kind
+  return !!last && last.kind === 'inset' && last.inset.type === 'Leaf' && last.inset.name === 'Separator';
 }
 
 /* -------------------------------------------------------- change tracking */
@@ -672,7 +674,7 @@ function beginOfBody(units: Unit[], style: LayoutStyle): number {
   if (style.labelType !== 'Manual') return 0;
   let i = 0;
   const end = units.length;
-  const stop = (u: Unit) => u.kind === 'inset' && u.inset.type === 'Leaf' && (u.inset.name === 'Newline' || (u.inset.name === 'Separator' && u.inset.arg !== 'plain'));
+  const stop = (u: Unit) => u.kind === 'inset' && u.inset.type === 'Leaf' && (u.inset.name === 'Newline' || u.inset.name === 'Separator');
   if (i < end && !stop(units[i])) {
     ++i;
     if (i < end && !stop(units[i])) {

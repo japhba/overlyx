@@ -116,6 +116,8 @@ export interface LayoutStyle {
   font: LayoutFont;
   labelFont: LayoutFont;
   args: Map<string, ArgumentSpec>;
+  /** styles that are nested one level deeper when they follow a paragraph of this style (AutoNests) */
+  autoNests: string[];
   obsoletedBy?: string;
   dependsOn?: string;
   /** Raw single-line properties that were not interpreted (lower-cased key). */
@@ -302,7 +304,7 @@ function newStyle(name: string): LayoutStyle {
     parbreakIsNewline: false, needProtect: false, needCProtect: false, needMBoxProtect: false, inTitle: false,
     inPreamble: false, resetArgs: false, align: 'block', alignPossible: [], toggleIndent: 'default',
     leftDelim: '', rightDelim: '', preamble: '', langPreamble: '', babelPreamble: '', requires: [], refPrefix: '',
-    font: {}, labelFont: {}, args: new Map(), props: new Map(),
+    font: {}, labelFont: {}, args: new Map(), props: new Map(), autoNests: [],
   };
 }
 
@@ -336,7 +338,7 @@ function cloneArgs(m: Map<string, ArgumentSpec>): Map<string, ArgumentSpec> {
 function cloneStyle(s: LayoutStyle, name: string): LayoutStyle {
   return {
     ...s, name, requires: [...s.requires], alignPossible: [...s.alignPossible],
-    font: cloneFont(s.font), labelFont: cloneFont(s.labelFont), args: cloneArgs(s.args), props: new Map(s.props),
+    font: cloneFont(s.font), labelFont: cloneFont(s.labelFont), args: cloneArgs(s.args), props: new Map(s.props), autoNests: [...s.autoNests],
   };
 }
 
@@ -378,7 +380,7 @@ const BLOCK_END: Record<string, string> = {
   preamble: 'endpreamble', langpreamble: 'endlangpreamble', babelpreamble: 'endbabelpreamble',
   htmlpreamble: 'endpreamble', htmlstyle: 'endhtmlstyle', addtopreamble: 'endpreamble',
   addtohtmlpreamble: 'endpreamble', htmlstyles: 'endstyles', addtohtmlstyles: 'endstyles',
-  docbookpreamble: 'enddocbookpreamble',
+  docbookpreamble: 'enddocbookpreamble', autonests: 'endautonests', isautonestedby: 'endisautonestedby',
 };
 
 function readFont(r: LineReader): LayoutFont {
@@ -450,6 +452,7 @@ function readStyle(r: LineReader, s: LayoutStyle, dc: DocumentClass): void {
       if (k === 'preamble') s.preamble = text;
       else if (k === 'langpreamble') s.langPreamble = text;
       else if (k === 'babelpreamble') s.babelPreamble = text;
+      else if (k === 'autonests') s.autoNests = [...new Set([...s.autoNests, ...splitList((v + ',' + text).replace(/\s+/g, '')).map(n => n.replace(/_/g, ' '))])];
       continue;
     }
     switch (k) {

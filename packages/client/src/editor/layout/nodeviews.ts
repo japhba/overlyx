@@ -109,10 +109,13 @@ export class BoxView implements NodeView {
     const c = this.contentDOM.style;
     c.padding = a.pad ? MM(a.pad) : '0';
     c.justifyContent = a.valign === 'c' ? 'center' : a.valign === 'b' ? 'flex-end' : 'flex-start';
-    c.fontSize = a.font ? PT(a.font) : '';
-    c.lineHeight = a.leading ? String(a.leading) : '';
+    // the nominal size (\fontsize{25}{33.5}): the font package may load the face smaller (notomath:
+    // 0.9), the baselines stay the nominal size's — a unitless line height relative to the scaled face
+    c.fontSize = a.font ? `calc(var(--ol-pt) * ${a.font} * var(--ol-text-scale, 1))` : '';
+    c.lineHeight = a.leading ? `calc(${a.leading} / var(--ol-text-scale, 1))` : '';
     c.color = color(a.color) ?? '';
     c.textAlign = a.align === 'justify' ? 'justify' : a.align === 'center' ? 'center' : a.align === 'right' ? 'right' : 'left';
+    this.contentDOM.dataset.align = a.align ?? 'left';
     this.dom.style.opacity = a.opacity !== null && a.opacity !== undefined ? String(a.opacity) : '';
     this.dom.dataset.step = a.step ?? '';
     this.dom.classList.toggle('ol-grow', !!a.grow);

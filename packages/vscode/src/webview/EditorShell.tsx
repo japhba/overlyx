@@ -1,5 +1,5 @@
 import { MenuBar, openPalette, PALETTE_LABEL, type MenuDef, ThemeToggle } from '@client/app/MenuBar';
-import { setLayoutHeader } from '@client/editor/layout/controller';
+import { setLayoutHeader, layoutZoomStep } from '@client/editor/layout/controller';
 import { documentMenus } from '@client/app/documentMenus';
 import { editorViewMenu } from '@client/app/editorViewMenu';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
@@ -451,7 +451,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       acceptAll: () => run(acceptAllChanges()),
       rejectAll: () => run(rejectAllChanges()),
       closeTab: () => hostCommand('closeTab'),
-      zoom: (d) => setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))),
+      zoom: (d) => { if (!layoutZoomStep(d)) setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))); },
       textWidth: stepTextWidth,
       openFile: () => hostCommand('openFile'),
       newFile: () => hostCommand('newFile'),

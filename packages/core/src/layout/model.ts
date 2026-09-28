@@ -510,3 +510,64 @@ export const SHAPE_PRESETS: Record<string, { label: string; d: string; vb?: stri
   star: { label: 'Star', d: 'M 50 0 L 61.8 35.4 L 100 38.2 L 69.1 61.8 L 80.9 100 L 50 76.4 L 19.1 100 L 30.9 61.8 L 0 38.2 L 38.2 35.4 Z' },
   roundrect: { label: 'Rounded rectangle', d: 'M 15 0 L 85 0 C 93.28 0 100 6.72 100 15 L 100 85 C 100 93.28 93.28 100 85 100 L 15 100 C 6.72 100 0 93.28 0 85 L 0 15 C 0 6.72 6.72 0 15 0 Z' },
 };
+
+/* ------------------------------------------------------------------ the page's fonts */
+
+export interface PageFonts {
+  /** CSS font-family of the page's text (a face served with the client, else Computer Modern) */
+  family: string;
+  /** 'serif' | 'sans' | 'noto' | 'fira' | 'lato' (the page's data-ol-font) */
+  id: string;
+  /** the size the text font is loaded at, relative to the nominal size (notomath: 0.9) */
+  textScale: number;
+  /** the same for the math font */
+  mathScale: number;
+  /** formulas in a sans-serif math font (beamer's default font theme, notomath's sfdefault, sfmath…) */
+  sansMath: boolean;
+}
+
+/**
+ * The fonts a layout document's PDF has, from its preamble: which face the page's text is set in,
+ * at which scale the font packages load it (notomath loads Noto Sans at 0.9 of the nominal size —
+ * \fontsize{94}{106} gives 84.6 pt glyphs on a 106 pt baseline), and whether formulas are
+ * sans-serif (beamer's default font theme; `professionalfonts` leaves math to the packages).
+ */
+export function pageFontsOf(preamble: string, textclass = 'beamer'): PageFonts {
+  const pkgs = new Map<string, string>();
+  for (const m of preamble.replace(/(^|[^\\])%.*$/gm, '$1').matchAll(/\\usepackage\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}/g)) {
+    for (const name of m[2].split(',').map(n => n.trim()).filter(Boolean)) pkgs.set(name, m[1] ?? '');
+  }
+  const scaleOf = (opts: string | undefined, dflt = 1): number => {
+    const v = /(?:^|,)\s*scaled?\s*=\s*([\d.]+)/.exec(opts ?? '')?.[1];
+    return v && Number(v) > 0 ? Number(v) : dflt;
+  };
+  const beamer = textclass.startsWith('beamer');
+  const serifTheme = /\\usefonttheme\s*(?:\[[^\]]*\])?\s*\{\s*serif\s*\}/.test(preamble);
+  const professional = /\\usefonttheme\s*\{\s*professionalfonts\s*\}/.test(preamble);
+  const sfdefault = (opts: string | undefined) => /(?:^|,)\s*(?:sfdefault|sf)\s*(?:,|$)/.test(opts ?? '');
+  let sans = beamer && !serifTheme;
+  let id = sans ? 'sans' : 'serif';
+  let family = sans ? '"CMU Sans Serif", sans-serif' : '"CMU Serif", serif';
+  let textScale = 1, mathScale = 1;
+  // the beamer default: math in sans-serif too; with professionalfonts, whatever the packages set
+  let sansMath = beamer && !serifTheme && !professional;
+  if (pkgs.has('notomath')) {
+    const o = pkgs.get('notomath');
+    mathScale = scaleOf(o);
+    textScale = Math.round(0.9 * mathScale * 10000) / 10000;
+    if (sfdefault(o) || sans) { id = 'noto'; family = '"OLT notosans", "CMU Sans Serif", sans-serif'; sans = true; }
+    sansMath = sfdefault(o);
+  } else if (pkgs.has('noto-sans') || pkgs.has('noto')) {
+    const o = pkgs.get('noto-sans') ?? pkgs.get('noto');
+    if (sfdefault(o) || sans) { id = 'noto'; family = '"OLT notosans", "CMU Sans Serif", sans-serif'; textScale = scaleOf(o); }
+  } else if (pkgs.has('FiraSans') || pkgs.has('firasans')) {
+    const o = pkgs.get('FiraSans') ?? pkgs.get('firasans');
+    if (sfdefault(o) || sans) { id = 'fira'; family = '"OLT fira", "CMU Sans Serif", sans-serif'; textScale = scaleOf(o); }
+  } else if (pkgs.has('lato')) {
+    const o = pkgs.get('lato');
+    if (sfdefault(o) || sans) { id = 'lato'; family = '"OLT lato", "CMU Sans Serif", sans-serif'; textScale = scaleOf(o); }
+  }
+  if (['sfmath', 'sansmath', 'arevmath', 'cmbright', 'firamath', 'firamath-otf', 'mathastext'].some(p => pkgs.has(p))) sansMath = true;
+  if (pkgs.has('kpfonts') && /sfmath/.test(pkgs.get('kpfonts') ?? '')) sansMath = true;
+  return { family, id, textScale, mathScale, sansMath };
+}

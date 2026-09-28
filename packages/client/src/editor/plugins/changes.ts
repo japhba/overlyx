@@ -224,7 +224,7 @@ export function applyNodeFont(dom: HTMLElement, node: PMNode): void {
   if (size) {
     dom.dataset.size = size;
     const abs = /^(\d+(?:\.\d+)?)pt/.exec(size);
-    if (abs) dom.style.fontSize = `calc(var(--ol-pt) * ${abs[1]})`;
+    if (abs) dom.style.fontSize = `calc(var(--ol-pt) * ${abs[1]} * var(--ol-text-scale, 1))`;
     else { dom.classList.add('lyx-size-' + size); dom.style.fontSize = ''; }
   } else if (prevSize) { delete dom.dataset.size; dom.style.fontSize = ''; }
   if (color) { dom.dataset.color = color; dom.style.color = color.startsWith('#') ? color : `var(--lyx-color-${color}, ${color})`; }

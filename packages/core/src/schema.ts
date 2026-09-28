@@ -482,7 +482,7 @@ const marks: Record<string, MarkSpec> = {
   shape: valueMark('shape', v => ['span', { class: 'lyx-shape-' + v, 'data-shape': v }, 0]),
   family: valueMark('family', v => ['span', { class: 'lyx-family-' + v, 'data-family': v }, 0], { parseDOM: [{ tag: 'span[data-family]', getAttrs: (d: HTMLElement) => ({ value: d.getAttribute('data-family') }) }, ...foreign(['code', 'tt', 'kbd', 'samp'], 'typewriter')] }),
   // a named LaTeX size (tiny … giant), or points ("25pt", "25pt/30pt"): `--ol-pt` is a point at the editor's zoom
-  size: valueMark('size', v => (/^\d/.test(v) ? ['span', { class: 'lyx-size-abs', 'data-size': v, style: `font-size: calc(var(--ol-pt) * ${parseFloat(v)})` }, 0] : ['span', { class: 'lyx-size-' + v, 'data-size': v }, 0])),
+  size: valueMark('size', v => (/^\d/.test(v) ? ['span', { class: 'lyx-size-abs', 'data-size': v, style: `font-size: calc(var(--ol-pt) * ${parseFloat(v)} * var(--ol-text-scale, 1))` }, 0] : ['span', { class: 'lyx-size-' + v, 'data-size': v }, 0])),
   bar: valueMark('bar', v => ['span', { class: 'lyx-bar-' + v, 'data-bar': v }, 0], { parseDOM: [{ tag: 'span[data-bar]', getAttrs: (d: HTMLElement) => ({ value: d.getAttribute('data-bar') }) }, ...foreign(['u'], 'under')] }),
   strikeout: valueMark('strikeout', v => ['span', { class: 'lyx-strikeout-' + v, 'data-strikeout': v }, 0], { parseDOM: [{ tag: 'span[data-strikeout]', getAttrs: (d: HTMLElement) => ({ value: d.getAttribute('data-strikeout') }) }, ...foreign(['s', 'strike', 'del'], 'on')] }),
   xout: valueMark('xout', v => ['span', { class: 'lyx-xout-' + v, 'data-xout': v }, 0]),

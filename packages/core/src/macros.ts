@@ -190,6 +190,16 @@ const STRUCTURAL = new Set(['left', 'right', 'begin', 'end']);
 
 /** Scan LaTeX source for macro definitions. Also returns \input/\include file references. */
 export function macrosFromLatex(text: string, source: MacroDef['source'] = 'preamble'): { macros: MacroDef[]; inputs: string[] } {
+  // "\global\long\def\inv#1{\myinv{(#1)}}%% @display {(#1)^{-1}}": the display form OverLyX writes
+  // for a LyX macro (latexMacro) — kept for the editor also when the file is read as plain text
+  const displays = new Map<string, string>();
+  for (const line of text.split('\n')) {
+    const dm = /%% @display (\{.*\})\s*$/.exec(line);
+    if (!dm) continue;
+    const nm = /\\(?:(?:global|long|protected)\s*\\)*(?:[gex]?def)\s*\\([A-Za-z@]+)|\\(?:re|provide)?newcommand\*?\s*\{?\s*\\([A-Za-z@]+)/.exec(line.slice(0, dm.index));
+    const g = readGroup(dm[1], 0);
+    if (nm && g && g[0].trim()) displays.set(nm[1] ?? nm[2], g[0].trim());
+  }
   const s = stripComments(text);
   const macros: MacroDef[] = [];
   const inputs: string[] = [];
@@ -198,7 +208,12 @@ export function macrosFromLatex(text: string, source: MacroDef['source'] = 'prea
     const inp = /^\\(?:input|include)\s*\{([^}]+)\}/.exec(s.slice(i));
     if (inp) { inputs.push(inp[1].trim()); i += inp[0].length - 1; continue; }
     const res = parseMacroAt(s, i, source);
-    if (res) { if (!STRUCTURAL.has(res[0].name)) macros.push(res[0]); i = res[1] - 1; }
+    if (res) {
+      const d = displays.get(res[0].name);
+      if (d !== undefined && res[0].display === undefined) res[0].display = d;
+      if (!STRUCTURAL.has(res[0].name)) macros.push(res[0]);
+      i = res[1] - 1;
+    }
   }
   return { macros, inputs };
 }

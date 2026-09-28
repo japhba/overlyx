@@ -496,6 +496,17 @@ class InkLayer {
     // the sticky canvas must stay first: its unshifted place is the top of the content (Preact may
     // prepend the ruler in front of it)
     if (this.scroller.firstChild !== this.canvas) this.scroller.insertBefore(this.canvas, this.scroller.firstChild);
+    // nothing to draw (no ink in the document, no tool up, nobody drawing or pointing): the canvas
+    // stays blank — scrolling then costs no layout read and no canvas upload per frame
+    if (this.nothingToDraw()) {
+      if (!this.blank) {
+        this.canvas.getContext('2d')?.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.selBox.hidden = true;
+        this.blank = true;
+      }
+      return;
+    }
+    this.blank = false;
     const g = this.geom();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const W = Math.max(1, Math.round(g.width * dpr)), H = Math.max(1, Math.round(g.height * dpr));
@@ -600,6 +611,18 @@ class InkLayer {
     } else this.selBox.hidden = true;
     // laser traces on top of everything: the others' (fading once their field vanished), then mine
     if (this.paintLasers(ctx, g, z)) this.schedule();
+  }
+
+  private blank = false;
+  private nothingToDraw(): boolean {
+    if (ui.active || this.live || this.lasso || this.selection || this.laser || this.laserFade || this.remoteLasers.size) return false;
+    if (this.entries.some(e => e.data.strokes.length || e.data.imgs.length)) return false;
+    let remote = false;
+    this.awareness.getStates().forEach((state, clientId) => {
+      const st = state as { ink?: LiveInk | null; laser?: LiveLaser | null };
+      if (clientId !== this.awareness.clientID && (st.ink?.pts?.length || st.laser?.pts?.length)) remote = true;
+    });
+    return !remote;
   }
 
   /** Position of the `i`-th top-level block, or null when the document is shorter. */

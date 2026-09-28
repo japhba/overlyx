@@ -10,10 +10,12 @@
  * (tests/parity.test.ts).
  */
 import { getPrefs, subscribePrefs, type Prefs } from '../prefs';
-import { editorFace, documentFace, resolvedMathFont, mathScale, FOLLOW_DOCUMENT } from './catalog';
+import { editorFace, documentFace, resolvedMathFont, mathScale, mathFont, FOLLOW_DOCUMENT } from './catalog';
 import { setMathFont } from '../editor/lyxmath/mathjax';
 
 let docFace = 'cm';
+/** the math font a layout document's pages are drawn with (null: the editor's own choice) */
+let layoutMath: string | null = null;
 
 /** The face shown for a Text font preference, given the open document's closest face. */
 export function resolvedFace(pref: string, forDocument = docFace): string {
@@ -27,7 +29,7 @@ export function resolvedMath(p: Pick<Prefs, 'editorFont' | 'editorMathFont'> = g
 
 function apply(p: Prefs): void {
   const face = editorFace(resolvedFace(p.editorFont));
-  const math = resolvedMathFont(p.editorMathFont, face.id);
+  const math = layoutMath ? mathFont(layoutMath) : resolvedMathFont(p.editorMathFont, face.id);
   setMathFont(math.id);
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
@@ -48,6 +50,17 @@ export function setDocumentFonts(headerLines: string[]): void {
   const face = documentFace(headerLines);
   if (face === docFace) return;
   docFace = face;
+  apply(getPrefs());
+}
+
+/**
+ * A layout document's pages are paper: their formulas are drawn in the font its PDF has — a
+ * sans-serif page (beamer's default math, notomath, sfmath) in Fira Math — whatever math font the
+ * editor uses for linear documents (editor/layout/controller.ts; null gives the choice back).
+ */
+export function setLayoutMathFont(id: string | null): void {
+  if (id === layoutMath) return;
+  layoutMath = id;
   apply(getPrefs());
 }
 

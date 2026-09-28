@@ -15,6 +15,9 @@ import { pageSizeOf } from '@overlyx/core';
 import { pages as docPages } from './commands';
 import { layoutControllerOf } from './controller';
 
+/** the page's fonts (editor/layout/controller.ts readHeader): the presentation draws with the same */
+const PAGE_FONT_VARS = ['--ol-page-font', '--ol-text-scale', '--ol-math-rel'];
+
 interface Slide { el: HTMLElement; steps: number; transition: string | null; notes: string; name: string | null }
 
 /** Is the object shown on step `n` of its page (a beamer overlay specification like `2-`, `-3`, `1,3-5`)? */
@@ -142,8 +145,9 @@ class Presentation {
     this.stage.style.setProperty('--ol-pt', `${pxPerMm / 2.845276}px`);
     this.stage.style.setProperty('--ol-page-w', String(this.page.w));
     this.stage.style.setProperty('--ol-page-h', String(this.page.h));
-    const base = getComputedStyle(this.view.dom).getPropertyValue('--ol-basept') || '11';
-    this.stage.style.setProperty('--ol-basept', base);
+    const cs = getComputedStyle(this.view.dom);
+    this.stage.style.setProperty('--ol-basept', cs.getPropertyValue('--ol-basept') || '11');
+    for (const v of PAGE_FONT_VARS) { const x = cs.getPropertyValue(v); if (x) this.stage.style.setProperty(v, x); }
   }
 
   private apply(slide: Slide, step: number, entering: boolean): void {
@@ -272,6 +276,7 @@ class Presentation {
       holder.className = 'lyx-editor ol-layout';
       holder.dataset.olFont = this.stage.dataset.olFont ?? 'sans';
       holder.style.cssText = `--ol-mm:${px}px;--ol-pt:${px / 2.845276}px;--ol-page-w:${this.page.w};--ol-page-h:${this.page.h};--ol-basept:${this.stage.style.getPropertyValue('--ol-basept')};max-width:none`;
+      for (const v of PAGE_FONT_VARS) { const x = this.stage.style.getPropertyValue(v); if (x) holder.style.setProperty(v, x); }
       const copy = slide.el.cloneNode(true) as HTMLElement;
       copy.classList.remove('ol-tr-in', 'ol-tr-out', 'ol-tr-fade', 'ol-tr-push', 'ol-tr-wipe');
       for (const e of copy.querySelectorAll<HTMLElement>('[data-step]')) e.classList.toggle('ol-hidden', !stepVisible(e.dataset.step, step));

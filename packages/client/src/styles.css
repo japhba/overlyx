@@ -1746,28 +1746,41 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 
 /* ------------------------------------------------------------------ layout documents
  * Pages of positioned objects (editor/layout). Everything on a page is sized in --ol-mm / --ol-pt
- * (the layout plugin sets --ol-fit-pt: the zoom that fits the page's width; the editor zoom
- * multiplies it), so a zoom is one custom property. The page itself is paper: white, black text,
- * in the dark theme too — what is on it is what the PDF shows. */
+ * (the layout plugin sets --ol-fit-pt: a TeX point in pixels — the whole page in the window, times
+ * the canvas zoom, which pinching and Ctrl + wheel change), so a zoom is one custom property. The
+ * page itself is paper: white, black text, in the dark theme too — what is on it is what the PDF shows. */
 /* a TeX point at the editor's zoom: the editor's text size is the document's base size */
 .lyx-editor { --ol-pt: calc(15.5px * var(--editor-zoom) / var(--ol-basept, 10)); }
 .lyx-editor.ol-layout {
-  --ol-pt: calc(var(--ol-fit-pt, 1.33px) * var(--editor-zoom));
+  --ol-pt: var(--ol-fit-pt, 1.33px);
   --ol-mm: calc(var(--ol-pt) * 2.845276);
   --ol-sel: #1a73e8;
   max-width: none; min-height: 0; font-size: 14px; line-height: 1.2; color: #000;
 }
-.editor-page:has(> .editor-host > .ol-layout) { background: var(--canvas-bg, #e7e8ea); padding: 34px 36px 140px 36px; }
+.editor-page:has(> .editor-host > .ol-layout) { background: var(--canvas-bg, #e7e8ea); padding: 34px 36px 140px 36px; width: max-content; min-width: 100%; }
+/* zoomed in, the canvas is wider than the window: it scrolls sideways, the page stays centred otherwise */
+.lyx-editor.ol-layout { width: max-content; min-width: 100%; }
 .editor-scroll:has(.ol-layout) > .ruler, :root:has(.lyx-editor.ol-layout) .ruler { display: none; }
 .ol-page-wrap { position: relative; width: calc(var(--ol-mm) * var(--ol-page-w, 160)); margin: 0 auto 30px; }
 .ol-page {
   position: relative; display: block; width: calc(var(--ol-mm) * var(--ol-page-w, 160)); height: calc(var(--ol-mm) * var(--ol-page-h, 90));
   background: #fff; color: #000; box-shadow: 0 1px 3px rgba(0,0,0,0.18), 0 4px 18px rgba(0,0,0,0.08);
-  font-family: "CMU Sans Serif", "CMU Serif", sans-serif; font-size: calc(var(--ol-pt) * var(--ol-basept, 11)); line-height: 1.2;
+  font-family: var(--ol-page-font, "CMU Sans Serif", "CMU Serif", sans-serif); font-size: calc(var(--ol-pt) * var(--ol-basept, 11) * var(--ol-text-scale, 1)); line-height: calc(1.2 / var(--ol-text-scale, 1));
   --editor-fg: #000; --caret: #1a3d6d;
 }
-.ol-layout[data-ol-font="serif"] .ol-page { font-family: "CMU Serif", serif; }
-.ol-layout[data-ol-font="noto"] .ol-page { font-family: "OLT notosans", "CMU Sans Serif", sans-serif; }
+/* named sizes on paper are the class's absolute sizes (the controller sets --ol-size-*); justified
+   text is hyphenated, as TeX does */
+.ol-page .lyx-size-tiny { font-size: calc(var(--ol-pt) * var(--ol-size-tiny) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-scriptsize { font-size: calc(var(--ol-pt) * var(--ol-size-scriptsize) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-footnotesize { font-size: calc(var(--ol-pt) * var(--ol-size-footnotesize) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-small { font-size: calc(var(--ol-pt) * var(--ol-size-small) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-normal { font-size: calc(var(--ol-pt) * var(--ol-size-normal) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-large { font-size: calc(var(--ol-pt) * var(--ol-size-large) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-larger { font-size: calc(var(--ol-pt) * var(--ol-size-larger) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-largest { font-size: calc(var(--ol-pt) * var(--ol-size-largest) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-huge { font-size: calc(var(--ol-pt) * var(--ol-size-huge) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-giant { font-size: calc(var(--ol-pt) * var(--ol-size-giant) * var(--ol-text-scale, 1)); }
+.ol-page .ol-box-content[data-align="justify"] { hyphens: auto; -webkit-hyphens: auto; }
+/* formulas on paper: no field padding or border around them (hover / editing show an outline), an
+   empty script base ($^{1}$) takes no room unless the formula is being edited, displays at the text size */
+.ol-page .lm-field { padding: 0; border: 0; }
+.ol-page .lm-field:hover { outline: 1px solid rgba(26,115,232,0.3); }
+.ol-page .lm-field.focused { outline: 1px solid var(--accent); }
+.ol-page .lm-field:not(.focused) .lm-empty mjx-mspace, .ol-present-stage .lm-empty mjx-mspace { width: 0 !important; }
+.ol-page .lm-field.display { font-size: 1em; }
+/* formulas at the text's nominal size, in the math font's own scale (not the editor's x-height match) */
+.lyx-editor.ol-layout .ol-page mjx-container[jax="CHTML"], .ol-present-stage .ol-page mjx-container[jax="CHTML"] { font-size: calc(var(--ol-math-rel, 1) * 1em); }
 .ol-page-label { position: absolute; right: calc(100% + 10px); top: 0; font: 12px/1.3 var(--ui-font); color: var(--ui-muted); white-space: nowrap; user-select: none; max-width: 30px; overflow: hidden; text-overflow: ellipsis; }
 .ol-obj { position: absolute; box-sizing: border-box; transform-origin: 50% 50%; }
 .ol-box-frame { position: absolute; box-sizing: border-box; pointer-events: none; }

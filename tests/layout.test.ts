@@ -12,6 +12,8 @@ import {
   lyxToPmNode, pmToLyxBody, PAGE_PRESETS, setHeaderValue, LAYOUT_MACROS,
 } from '../packages/core/src/index.ts';
 import { parseTex, writeTex } from '../packages/core/src/tex/index.ts';
+import { pageFontsOf } from '../packages/core/src/layout/model.ts';
+import { macrosFromLatex, toMathliveMacros } from '../packages/core/src/macros.ts';
 import { markEditedSettings } from '../packages/core/src/tex/preamble.ts';
 import { rewriteParentPaths } from '../packages/server/src/texpaths.ts';
 
@@ -196,5 +198,31 @@ describe('packages for symbols the document defines itself', () => {
     const doc = parseTex(src, { ...opts, readFile }).doc;
     expect(writeTex(doc, { ...opts, readFile }).text).not.toContain('hepnames');
     expect(writeTex(doc, opts).text).toContain('hepnames');   // without the file, LyX's symbol table decides
+  });
+});
+
+describe('the page fonts of a layout document (what its PDF is set in)', () => {
+  it('notomath loads Noto Sans at 0.9 of the nominal size, its math at 1; sans-serif math with sfdefault', () => {
+    const f = pageFontsOf('\\usefonttheme{professionalfonts}\n\\usepackage[sfdefault]{notomath}\n\\usepackage[scale=0.9]{noto-mono}', 'beamer');
+    expect(f).toMatchObject({ id: 'noto', textScale: 0.9, mathScale: 1, sansMath: true });
+    expect(f.family).toContain('OLT notosans');
+    expect(pageFontsOf('\\usepackage[scaled=1.1]{notomath}', 'beamer')).toMatchObject({ textScale: 0.99, mathScale: 1.1, sansMath: false });
+  });
+  it("beamer's default font theme: sans-serif text and math; the serif theme and professionalfonts change that", () => {
+    expect(pageFontsOf('', 'beamer')).toMatchObject({ id: 'sans', textScale: 1, sansMath: true });
+    expect(pageFontsOf('\\usefonttheme{serif}', 'beamer')).toMatchObject({ id: 'serif', sansMath: false });
+    expect(pageFontsOf('\\usefonttheme{professionalfonts}', 'beamer')).toMatchObject({ id: 'sans', sansMath: false });
+    expect(pageFontsOf('% \\usepackage[sfdefault]{notomath}', 'beamer').id).toBe('sans');   // a comment is no package
+  });
+});
+
+describe('macro files read as text keep the display form OverLyX writes after a definition', () => {
+  it('"\\def\\inv#1{\\myinv{(#1)}}%% @display {(#1)^{-1}}"', () => {
+    const r = macrosFromLatex('\\global\\long\\def\\inv#1{\\myinv{(#1)}}%% @display {(#1)^{-1}}\n\\newcommand{\\rinv}[1]{\\myinv{#1}}% @display {#1{}^{-1}}\n\\newcommand\\plain{x}\n', 'file');
+    const by = Object.fromEntries(r.macros.map(m => [m.name, m]));
+    expect(by.inv.display).toBe('(#1)^{-1}');
+    expect(by.rinv.display).toBeUndefined();   // one % is an ordinary comment
+    expect(by.plain.display).toBeUndefined();
+    expect(toMathliveMacros(r.macros).inv.def).toBe('(#1)^{-1}');
   });
 });
