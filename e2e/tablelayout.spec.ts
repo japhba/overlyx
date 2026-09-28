@@ -230,3 +230,31 @@ test('the column width palette: wrap a column to fill the table (X), at a fixed 
   await expect(btn).not.toHaveClass(/active/);
   expect(errors).toEqual([]);
 });
+
+test('a table typed as a formula (a matrix) cannot wrap; converted to a table, its columns can', async ({ page }) => {
+  const errors = collectErrors(page);
+  // the table toolbar always on, as some users keep it: its column width palette is there in a formula too
+  await page.addInitScript(() => localStorage.setItem('ol.toolbars', JSON.stringify({ table: 'on' })));
+  await open(page);
+  const body = () => { const f = readFileSync(FILE, 'utf8'); return f.slice(f.indexOf('\\begin{document}')); };
+  await page.locator(SOLO_FORMULA).first().click();   // the Feature / RBMs / VAE matrix
+  await expect(page.locator('[data-tb="m-totable"]')).toBeEnabled();
+  await page.locator('[data-tb="t-width"]').click();
+  const pal = page.locator('.tb-popup[data-palette="t-width"]');
+  await expect(pal.locator('[data-colwidth-note]')).toContainText('This table is a formula');
+  await expect(pal.locator('[data-colwidth="variable"]')).toBeDisabled();
+  await pal.locator('[data-colwidth="convert"]').click();
+  // a tabular now: the \text{…} of the cells is text, the numbers too
+  await expect.poll(body, { timeout: 15000 }).toMatch(/\\begin\{tabular\}\{ccc\}\n\\textbf\{Feature\} & \\textbf\{RBMs\} & \\textbf\{VAE\}\\tabularnewline\nweight sharing & 1 & 0\\tabularnewline\n\\end\{tabular\}/);
+  expect(body()).not.toContain('\\text{\\textbf{Feature}}');
+  // the cursor is in its first cell: the palette applies — the first column wraps, filling the text width
+  await page.locator('[data-tb="t-width"]').click();
+  await expect(pal.locator('[data-colwidth="natural"]')).toHaveClass(/active/);
+  await pal.locator('[data-colwidth="variable"]').click();
+  await expect.poll(body, { timeout: 15000 }).toContain('\\begin{tabularx}{\\columnwidth}{>{\\centering\\arraybackslash}Xcc}');
+  // one undo step back to the formula
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await expect.poll(body, { timeout: 15000 }).toContain('\\text{\\textbf{Feature}}');
+  expect(errors).toEqual([]);
+});

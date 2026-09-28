@@ -401,6 +401,11 @@ blend.
   wraps to fill the table) and fixed (`p{…}`, a width typed as `5cm`, `30%` or `0.4\linewidth`,
   stored as the LyX length) — with `Tabular::setColumnPWidth`'s side effects
   (`tablecommands.ts setColumnWidth`); a multi-column cell takes a width of its own (never `X`).
+  A table typed as a formula (one `matrix` / `smallmatrix` / `array` alone in the formula) cannot
+  wrap — LaTeX sets math on one line — so the palette says so there and offers **Convert to table**
+  (also the formula's right-click menu and the math toolbar's `m-totable`): `editor/formulatable.ts`
+  writes the grid as a tabular (`\text{…}` as text, `\mathbf{\text{…}}` as `\textbf`, other math as
+  `$…$`, numbers as text) and reads it back through the pasted-LaTeX parser (`api.parseClip`).
   A **table on a line of its own** — a
   tabular, or a formula that is one `matrix` / `pmatrix` / `array` … (a table typed as
   `$\begin{matrix}…\end{matrix}$`) alone in its paragraph, blanks, labels, a caption, a display formula

@@ -20,6 +20,7 @@ import { openRewriteMath, REWRITE_KEY } from '../ai/rewrite';
 import { openMathLinkBox, openLink, mathLinkUrl, LINK_KEY } from '../links';
 import { applyChangeAttrs } from '../plugins/changes';
 import { FormulaReview } from '../mathconflict';
+import { formulaNodeGrid, convertFormulaToTable } from '../formulatable';
 
 /** Position of a formula that was just inserted by the user and should grab the keyboard once mounted. */
 export const pendingFocus: { pos: number | null; keys: string[]; /** the formula was opened by typing $ / $$ (see LyxMathField.dollar) */ dollar: '' | '$' | '$$' } = { pos: null, keys: [], dollar: '' };
@@ -150,6 +151,19 @@ function commonMathMenu(f: LyxMathField): MenuItem[] {
     { label: 'Toggle limits (\\limits)', action: () => { f.focus(); f.execute('limits'); } },
     { label: c.selection ? 'Copy LaTeX of selection' : 'Copy LaTeX', icon: 'copy', action: () => { void navigator.clipboard?.writeText(c.selection ? c.grabSelection() : f.latex); } },
   ];
+}
+
+/** a formula that is one matrix / array made a real table, whose text can wrap (formulatable.ts) */
+function toTable(view: EditorView, getPos: () => number | undefined): void {
+  const pos = getPos();
+  if (pos !== undefined) void convertFormulaToTable(view, pos, macroTableFor(view, pos).table);
+}
+/** "Convert to table" in the menu of a formula that is a table */
+function toTableItems(view: EditorView, getPos: () => number | undefined): MenuItem[] {
+  const pos = getPos();
+  const node = pos === undefined ? null : view.state.doc.nodeAt(pos);
+  if (!node || !formulaNodeGrid(node, macroTableFor(view, pos).table)) return [];
+  return [{ label: 'Convert to table (its text can wrap)', icon: 'table', action: () => toTable(view, getPos) }];
 }
 
 function deleteFormula(view: EditorView, getPos: () => number | undefined) {
@@ -347,6 +361,7 @@ export class MathInlineView implements NodeView {
     });
     (f as any)._macroKey = key;
     (f as any)._toggleDisplay = () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); };
+    (f as any)._toTable = () => toTable(this.view, this.getPos);
     this.field = f;
     this.dom.replaceChildren(f.dom);
     this.staticEl = null;
@@ -359,6 +374,7 @@ export class MathInlineView implements NodeView {
     return [
       { label: 'Inline formula', info: true },
       { label: 'Convert to display formula', icon: 'formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
+      ...toTableItems(this.view, this.getPos),
       { label: 'Delete formula', icon: 'delete', action: () => deleteFormula(this.view, this.getPos) },
     ];
   }
@@ -540,6 +556,7 @@ export class MathDisplayView implements NodeView {
     });
     (f as any)._macroKey = key;
     (f as any)._toggleDisplay = () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); };
+    (f as any)._toTable = () => toTable(this.view, this.getPos);
     this.field = f;
     if (this.staticEl) { this.staticEl.replaceWith(f.dom); this.staticEl = null; } else this.dom.insertBefore(f.dom, this.metaEl);
     this.ro?.observe(f.dom);
@@ -670,6 +687,7 @@ export class MathDisplayView implements NodeView {
       { label: 'Environment', icon: 'layout', sub: ENV_MENU.map(e => ({ label: e.label, checked: h.type === e.env, action: () => this.setEnv(e.env) })) },
       { label: 'New line (row)', icon: 'insert', shortcut: 'Enter', action: () => this.ensureField().execute('newline') },
       { label: 'Convert to inline formula', icon: 'formula', action: () => { this.selectSelf(); toggleMathDisplay(this.view.state, this.view.dispatch); } },
+      ...toTableItems(this.view, this.getPos),
       { label: 'Delete formula', icon: 'delete', action: () => deleteFormula(this.view, this.getPos) },
     ];
   }

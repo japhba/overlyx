@@ -353,13 +353,14 @@ export type ColumnWidthChoice = 'natural' | 'variable' | 'fixed';
  * Popup of the table toolbar's column width button: the three ways LaTeX makes a column as wide as
  * it is — natural l / c / r (never wraps), variable X (wraps; the X columns share what the others
  * leave of the table width, as tabularx sets them) and fixed p{…} (wraps at the width typed). `kind`
- * is the cursor column's ('special': its own LaTeX spec decides); in a multi-column cell the width is
- * the cell's own, which cannot be an X column.
+ * is the cursor column's ('special': its own LaTeX spec decides; null: the cursor is in no table); in
+ * a multi-column cell the width is the cell's own, which cannot be an X column. In a table typed as a
+ * formula (a matrix) nothing can wrap: `onConvert` makes it a table.
  */
-export function ColumnWidthPicker({ kind, width, multicolumn, valid, onPick, close }: { kind: string | null; width: string; multicolumn: boolean; valid: (w: string) => boolean; onPick: (kind: ColumnWidthChoice, width?: string) => void; close: () => void }) {
+export function ColumnWidthPicker({ kind, width, multicolumn, valid, onPick, onConvert, close }: { kind: string | null; width: string; multicolumn: boolean; valid: (w: string) => boolean; onPick: (kind: ColumnWidthChoice, width?: string) => void; onConvert?: () => void; close: () => void }) {
   const [w, setW] = useState(width || '5cm');
   const pick = (k: ColumnWidthChoice, wd?: string) => { close(); onPick(k, wd); };
-  const special = kind === 'special';
+  const special = kind === 'special' || kind === null;
   const ok = valid(w);
   return (
     <div class="tb-colwidth" data-colwidth-palette>
@@ -376,7 +377,10 @@ export function ColumnWidthPicker({ kind, width, multicolumn, valid, onPick, clo
           onMouseDown={e => e.stopPropagation()} onInput={e => setW((e.target as HTMLInputElement).value)} />
         <button type="submit" class="small-btn" disabled={!ok || special} onMouseDown={e => e.preventDefault()}>Set</button>
       </form>
-      <div class="tb-cw-note">{special ? 'This column has its own LaTeX column spec (Table settings), which decides its width.' : multicolumn ? 'In a multi-column cell: the width of this cell.' : 'For the cursor’s column, or every selected column.'}</div>
+      <div class="tb-cw-note" data-colwidth-note>{kind === null
+        ? (onConvert ? 'This table is a formula (a matrix): LaTeX sets formulas on one line, so its cells cannot wrap. As a table they can.' : 'Put the cursor in a table: the width is set for its column.')
+        : special ? 'This column has its own LaTeX column spec (Table settings), which decides its width.' : multicolumn ? 'In a multi-column cell: the width of this cell.' : 'For the cursor’s column, or every selected column.'}</div>
+      {kind === null && onConvert && <button type="button" class="small-btn tb-cw-convert" data-colwidth="convert" onMouseDown={e => e.preventDefault()} onClick={() => { close(); onConvert(); }}>Convert the formula to a table</button>}
     </div>
   );
 }

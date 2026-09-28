@@ -1202,6 +1202,7 @@ button.tb-cw:hover:not(:disabled) { background: var(--row-hover); border-color: 
 .tb-cw input { flex: 1; min-width: 0; font-size: 12px; padding: 2px 4px; }
 .tb-cw input.invalid { border-color: var(--danger, #c0392b); outline-color: var(--danger, #c0392b); }
 .tb-cw-note { font-size: 11px; color: var(--ui-muted); padding: 4px 6px 2px; }
+.tb-cw-convert { align-self: flex-start; margin: 4px 6px 2px; }
 
 /* text colour palette (Toolbar.tsx ColorPalette) */
 .tb-colors { padding: 2px 4px 4px; }

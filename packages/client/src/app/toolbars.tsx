@@ -19,6 +19,7 @@ import { activeMathField, type LyxMathField } from '../editor/lyxmath/field';
 import { useMathRendererVersion } from '../editor/lyxmath/usemath';
 import * as C from '../editor/commands';
 import * as T from '../editor/tablecommands';
+import { formulaTableGrid } from '../editor/formulatable';
 import { acceptAllChanges, rejectAllChanges, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import { pasteFromClipboard } from '../editor/clipmenu';
 import { openLinkBoxFor, LINK_KEY } from '../editor/links';
@@ -322,6 +323,8 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
   ];
 
   const mf = () => activeMathField();
+  // the focused formula is a table typed as a matrix: it can become a real one (editor/formulatable.ts)
+  const toTable = mathField && formulaTableGrid(mathField.hull) ? () => (mf() as any)?._toTable?.() : undefined;
   const math: ToolButton[][] = [
     [{ id: 'm-display', title: 'Toggle display / inline formula (Ctrl+Shift+M)', icon: 'display', active: !!mathField?.display, action: () => { const f = mf() as any; if (f?._toggleDisplay) f._toggleDisplay(); else run(C.toggleMathDisplay); } }],
     [
@@ -352,6 +355,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 'm-addcol', title: 'Add column (matrix / align)', icon: 'addcol', disabled: !!mathField && !mathField.cursor.gridColsOK(), action: () => mathExec('appendColumn') },
       { id: 'm-delrow', title: 'Delete row', icon: 'delrow', disabled: !!mathField && !mathField.cursor.gridRowsOK(), action: () => mathExec('deleteRow') },
       { id: 'm-delcol', title: 'Delete column', icon: 'delcol', disabled: !!mathField && !mathField.cursor.gridColsOK(), action: () => mathExec('deleteColumn') },
+      { id: 'm-totable', title: 'Convert to table: a formula that is one matrix / array becomes a tabular, whose text can wrap in its columns (a formula is set on one line)', icon: 'table', disabled: !toTable, action: () => toTable?.() },
     ],
     [
       { id: 'm-limits', title: 'Toggle limits placement (\\limits)', icon: 'lim', html: mathPreview('\\sum\\limits_{i}') ?? undefined, action: () => mathExec('limits') },
@@ -397,7 +401,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
     ],
     [
       { id: 't-width', title: 'Column width — wrap text: natural (l c r), wrap to fill the table (X), or wrap at a fixed width (p{…})', icon: 'colwidth', active: tableSt?.colWidth === 'variable' || tableSt?.colWidth === 'fixed',
-        palette: { title: 'Column width', render: close => <ColumnWidthPicker kind={tableSt?.colWidth ?? null} width={tableSt?.width ?? ''} multicolumn={!!tableSt?.multicolumnWidth} valid={w => !!columnWidthLength(w)} close={close} onPick={(k, w) => run(T.setColumnWidth(k, w))} /> } },
+        palette: { title: 'Column width', render: close => <ColumnWidthPicker kind={tableSt?.colWidth ?? null} width={tableSt?.width ?? ''} multicolumn={!!tableSt?.multicolumnWidth} valid={w => !!columnWidthLength(w)} close={close} onPick={(k, w) => run(T.setColumnWidth(k, w))} onConvert={toTable} /> } },
     ],
     [
       { id: 't-rotcell', title: 'Rotate cell by 90° or unset rotation', icon: 'rotatecell', active: !!tableSt?.rotateCell, action: () => run(T.toggleRotateCell) },
