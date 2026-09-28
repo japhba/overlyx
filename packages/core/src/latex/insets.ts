@@ -155,7 +155,7 @@ function mathUnicode(ctx: ExportContext, latex: string): string {
 }
 
 function latexFormula(ctx: ExportContext, os: TexStream, rp: RunParams, f: FormulaInset, pos: InsetPosition): void {
-  for (const r of mathRequirements(f.latex, ctx.symbols)) ctx.features.require(r);
+  for (const r of mathRequirements(f.latex, ctx.symbols, ctx.opts.definedMacros, ctx.macroNames)) ctx.features.require(r);
   if (/\\(iint|iiint|iiiint|idotsint|oiint|oiiint|ointctrclockwise|ointclockwise|sqint|varointclockwise|varointctrclockwise|landupint|landdownint)\b/.test(f.latex)) ctx.features.require('esint|amsmath');
   if (f.inline) {
     let latex = mathUnicode(ctx, normalizeMath(f.latex.replace(/\n/g, ' '), ctx.symbols, ctx.macroNames));

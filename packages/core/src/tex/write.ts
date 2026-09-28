@@ -129,6 +129,7 @@ export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTex
     // an imported LyX document gets the packages LyX would load itself, whatever the user's
     // preamble files load: the user's \input{macros} may need them before \input{preamble}
     texMode: true, provided: opts.fromLyx ? undefined : provided, isChild: opts.fragment,
+    definedMacros: opts.fromLyx ? undefined : facts.defined,
   };
   const ctx = makeContext(doc, eopts);
   ctx.warnings.push(...ctx.dc.warnings);

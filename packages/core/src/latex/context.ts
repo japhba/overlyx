@@ -33,6 +33,8 @@ export interface ExportOptions {
   texMode?: boolean;
   /** Features the user's preamble already provides (tex mode: no second \usepackage). */
   provided?: Set<string>;
+  /** commands the preamble (and the files it \\inputs) defines: a symbol of that name needs no package (a user's \\Pfi is no hepnames particle) */
+  definedMacros?: Set<string>;
 }
 
 export interface ExportResult {

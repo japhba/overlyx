@@ -77,12 +77,14 @@ export function loadMathSymbols(file: string): MathSymbolDB {
  * Scan LaTeX math source and return the set of required features
  * (package names, possibly "a|b" alternatives).
  */
-export function mathRequirements(latex: string, db: MathSymbolDB): Set<string> {
+export function mathRequirements(latex: string, db: MathSymbolDB, ...defined: (Set<string> | undefined)[]): Set<string> {
   const out = new Set<string>();
   const cmdRe = /\\([A-Za-z]+\*?)/g;
   let m: RegExpExecArray | null;
   while ((m = cmdRe.exec(latex))) {
     const name = m[1];
+    // the document defines it itself: whatever package has a symbol of that name is not needed
+    if (defined.some(d => d?.has(name))) continue;
     const req = db.get(name);
     if (req) out.add(req);
     if (name === 'begin') {

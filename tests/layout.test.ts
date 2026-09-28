@@ -187,3 +187,14 @@ describe('build paths', () => {
     expect(out).toBe('\\input{macros}\n\\graphicspath{{}{figures/}}\n\\includegraphics[width=2cm]{logos/a}\n\\olimage{x=1mm,y=1mm}{figures/b.pdf}\n\\input{local}\n\\input{../../outside}');
   });
 });
+
+describe('packages for symbols the document defines itself', () => {
+  it('a macro from an \\input file (\\Pfi) is no hepnames particle', () => {
+    const files: Record<string, string> = { 'lyxmacros.tex': '\\global\\long\\def\\Pfi{\\Phi}%\n' };
+    const src = '\\documentclass{article}\n\\input{lyxmacros}\n\\begin{document}\n$\\Pfi$\n\\end{document}\n';
+    const readFile = (n: string) => files[n];
+    const doc = parseTex(src, { ...opts, readFile }).doc;
+    expect(writeTex(doc, { ...opts, readFile }).text).not.toContain('hepnames');
+    expect(writeTex(doc, opts).text).toContain('hepnames');   // without the file, LyX's symbol table decides
+  });
+});
