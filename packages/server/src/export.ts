@@ -171,7 +171,7 @@ export function buildDir(docId: string): string {
 
 interface RunHandle { done: Promise<{ code: number; out: string }>; kill: () => void }
 /** Spawn a (niced) command, collecting its output; `onLine` receives every output line. */
-function run(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; nice?: boolean; onLine?: (l: string) => void; sandbox?: Omit<SandboxSpec, 'cwd' | 'env'> }): RunHandle {
+export function run(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; nice?: boolean; onLine?: (l: string) => void; sandbox?: Omit<SandboxSpec, 'cwd' | 'env'> }): RunHandle {
   let child: ChildProcess;
   let killed = false;
   const done = new Promise<{ code: number; out: string }>((resolve) => {
@@ -219,6 +219,8 @@ async function rewriteGraphics(text: string, texDir: string, buildTexDir: string
   const re = /\\includegraphics\s*(\*?)\s*(\[[^\]]*\])?\s*\{([^}]*)\}/g;
   const jobs: { m: string; name: string }[] = [];
   for (const m of text.matchAll(re)) jobs.push({ m: m[0], name: m[3].trim() });
+  // images of layout pages: \olimage{keys}{file}
+  for (const m of text.matchAll(/\\olimage\s*\{(?:[^{}]|\{[^{}]*\})*\}\s*\{([^}]*)\}/g)) jobs.push({ m: m[0], name: m[1].trim() });
   let out = text;
   const done = new Map<string, string>();
   for (const j of jobs) {

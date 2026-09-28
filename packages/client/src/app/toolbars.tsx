@@ -23,6 +23,9 @@ import { formulaTableGrid } from '../editor/formulatable';
 import { acceptAllChanges, rejectAllChanges, gotoChange, resolveSelectionChanges, hasChanges, changesFilterKey, setChangesFilter } from '../editor/plugins/changes';
 import { pasteFromClipboard } from '../editor/clipmenu';
 import { openLinkBoxFor, LINK_KEY } from '../editor/links';
+import { layoutToolbar } from './layouttoolbar';
+import { FontSizeBox } from './fontsize';
+import { isLayoutDoc } from '../editor/layout/commands';
 
 export type ToolbarId = 'standard' | 'viewupdate' | 'extra' | 'vcs' | 'math' | 'mathpanels' | 'table' | 'review';
 export type ToolbarMode = 'on' | 'off' | 'auto';
@@ -103,6 +106,9 @@ export interface Toolbars {
   mathPanels: ToolButton[][];
   table: ToolButton[][];
   review: ToolButton[][];
+  /** layout documents: tools, arrangement, styles, animation, pages (layouttoolbar.tsx) */
+  layout: ToolButton[][];
+  showLayout: boolean;
   /** the contextual toolbars' visibility: their mode, or (automatic) the cursor's context */
   showMath: boolean;
   showTable: boolean;
@@ -255,6 +261,8 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 'italic', title: 'Italic (Ctrl+I)', icon: 'italic', action: () => run(C.fontCommands.italic), active: markActive('shape', 'italic') },
       { id: 'textcolor', title: textColor ? `Text colour: ${textColor}` : 'Text colour', icon: 'textcolor', html: colorIcon(textColor), active: !!textColor,
         palette: { title: 'Text colour', render: close => <ColorPalette current={textColor} close={close} onPick={c => run(C.setValueMark('color', c))} /> } },
+      // font size: text, table cells, a formula as a whole, a selected text box (editor/fontsize.ts)
+      ...(view ? [{ id: 'fontsize', title: 'Font size (points)', icon: '', widget: () => <FontSizeBox view={view} /> } as ToolButton] : []),
     ],
     [
       { id: 'math', title: 'Inline formula (Ctrl+M)', icon: 'math', action: () => runView(C.insertMath(false)) },
@@ -442,5 +450,8 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
     ],
   ];
 
-  return { standard, viewUpdate, extra, math, mathPanels, table, review, showMath, showTable, showReview };
+  const showLayout = !!view && isLayoutDoc(view.state.doc);
+  const layoutRow = showLayout ? layoutToolbar(ctx) : [];
+
+  return { standard, viewUpdate, extra, math, mathPanels, table, review, layout: layoutRow, showLayout, showMath, showTable, showReview };
 }

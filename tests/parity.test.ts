@@ -57,7 +57,8 @@ describe('one editor assembly for both front ends', () => {
 
   it('the view props cover every LyX node type and every interaction', () => {
     const nv = editorNodeViews();
-    expect(Object.keys(nv).sort()).toEqual(['command', 'graphics', 'inset', 'leaf', 'macro', 'math_display', 'math_inline']);
+    // the LyX node types, and the pages and objects of layout documents (editor/layout)
+    expect(Object.keys(nv).sort()).toEqual(['command', 'graphics', 'inset', 'leaf', 'macro', 'math_display', 'math_inline', 'ol_box', 'ol_group', 'ol_image', 'ol_page', 'ol_raw', 'ol_shape']);
     const props = editorViewProps({ docId: 'p/a.tex' });
     for (const k of ['nodeViews', 'clipboardTextSerializer', 'handleDoubleClickOn', 'handleClickOn', 'handleDOMEvents', 'handlePaste', 'handleDrop']) expect(props, k).toHaveProperty(k);
     expect(Object.keys(props.handleDOMEvents!).sort()).toEqual(['contextmenu', 'keyup']);

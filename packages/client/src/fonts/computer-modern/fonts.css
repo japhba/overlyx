@@ -3,3 +3,8 @@
 @font-face { font-family: "CMU Serif"; src: url("./cmunbx.otf") format("opentype"); font-style: normal; font-weight: 700; font-display: swap; }
 @font-face { font-family: "CMU Serif"; src: url("./cmunti.otf") format("opentype"); font-style: italic; font-weight: 400; font-display: swap; }
 @font-face { font-family: "CMU Serif"; src: url("./cmunbi.otf") format("opentype"); font-style: italic; font-weight: 700; font-display: swap; }
+/* CMU Sans Serif: beamer's default text face (layout documents) */
+@font-face { font-family: "CMU Sans Serif"; src: url("./cmunss.otf") format("opentype"); font-style: normal; font-weight: 400; font-display: swap; }
+@font-face { font-family: "CMU Sans Serif"; src: url("./cmunsx.otf") format("opentype"); font-style: normal; font-weight: 700; font-display: swap; }
+@font-face { font-family: "CMU Sans Serif"; src: url("./cmunsi.otf") format("opentype"); font-style: italic; font-weight: 400; font-display: swap; }
+@font-face { font-family: "CMU Sans Serif"; src: url("./cmunso.otf") format("opentype"); font-style: italic; font-weight: 700; font-display: swap; }

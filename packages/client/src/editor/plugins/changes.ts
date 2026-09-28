@@ -195,6 +195,7 @@ export function changeTrackingPlugin(): Plugin {
  * hover tooltip reads the attributes. Node views call this whenever they (re)render their DOM.
  */
 export function applyChangeAttrs(dom: HTMLElement, node: PMNode): void {
+  applyNodeFont(dom, node);
   const c = changeOf(node);
   if (!c) {
     if (dom.dataset.changed === undefined) return;
@@ -207,6 +208,27 @@ export function applyChangeAttrs(dom: HTMLElement, node: PMNode): void {
   dom.classList.toggle('lyx-change-inserted', c.type === 'inserted');
   dom.classList.toggle('lyx-change-deleted', c.type === 'deleted');
   for (const [k, v] of Object.entries(attrs)) if (k !== 'class' && dom.getAttribute(k) !== v) dom.setAttribute(k, v);
+}
+
+/**
+ * The font an inline node (a formula) carries in its `marks` attr, drawn on its element: the size
+ * (a named LaTeX size, or points — `--ol-pt` is a point at the current zoom) and the colour.
+ */
+export function applyNodeFont(dom: HTMLElement, node: PMNode): void {
+  let list: { type: string; attrs?: { value?: string } }[] = [];
+  try { list = JSON.parse(node.attrs.marks || '[]'); } catch { /* none */ }
+  const size = list.find(m => m.type === 'size')?.attrs?.value;
+  const color = list.find(m => m.type === 'color')?.attrs?.value;
+  const prevSize = dom.dataset.size;
+  if (prevSize && prevSize !== size) dom.classList.remove('lyx-size-' + prevSize);
+  if (size) {
+    dom.dataset.size = size;
+    const abs = /^(\d+(?:\.\d+)?)pt/.exec(size);
+    if (abs) dom.style.fontSize = `calc(var(--ol-pt) * ${abs[1]})`;
+    else { dom.classList.add('lyx-size-' + size); dom.style.fontSize = ''; }
+  } else if (prevSize) { delete dom.dataset.size; dom.style.fontSize = ''; }
+  if (color) { dom.dataset.color = color; dom.style.color = color.startsWith('#') ? color : `var(--lyx-color-${color}, ${color})`; }
+  else if (dom.dataset.color) { delete dom.dataset.color; dom.style.color = ''; }
 }
 
 /** Backspace/Delete while tracking: mark as deleted (unless the text was inserted by tracking, then remove). */

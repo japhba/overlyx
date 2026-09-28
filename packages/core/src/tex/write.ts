@@ -12,6 +12,7 @@ import { colorOptions, packages, lyxMacros, tclassPreamble, tclassI18nPreamble, 
 import { babelName } from '../latex/text.ts';
 import type { ExportContext, ExportOptions } from '../latex/context.ts';
 import { nativeClassOptions, nativeEarlySettings, nativeSettings } from './settings.ts';
+import { LAYOUT_PACKAGES } from '../layout/latex.ts';
 import { MANAGED_BEGIN, MANAGED_END, preambleFacts, providedFeatures, settingsFromHeader, settingsLine } from './preamble.ts';
 
 export interface WriteTexOptions {
@@ -68,6 +69,8 @@ function managedBlock(ctx: ExportContext, provided: Set<string>, settings: Recor
   if (f.isRequired('hyperref') && !f.isProvided('hyperref')) s += '\\usepackage{hyperref}\n';
   else if (f.isRequired('nameref') && !f.isProvided('nameref') && !f.isProvided('hyperref')) s += '\\usepackage{nameref}\n';
   if (f.mustProvide('cleveref')) s += '\\usepackage{cleveref}\n';
+  // layout pages: TikZ overlay pictures and adjustbox (the macros themselves follow with the other definitions)
+  if (f.isRequired('olayout')) for (const pkg of LAYOUT_PACKAGES) if (!f.isProvided(pkg)) s += `\\usepackage{${pkg}}\n`;
   if (f.mustProvide('bibtopic')) s += '\\usepackage[dot]{bibtopic}\n';
   let at = '';
   const macros = lyxMacros(c);

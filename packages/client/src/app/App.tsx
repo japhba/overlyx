@@ -59,6 +59,7 @@ import * as C from '../editor/commands';
 import { setMarginMode } from '../editor/plugins/margin';
 import { setInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
 import { BoardEditor } from './BoardEditor';
+import { NewLayoutDialog } from './NewLayoutDialog';
 import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilterKey } from '../editor/plugins/changes';
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
@@ -378,6 +379,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const [findOpen, setFindOpen] = useState(false);
   // sharing: the project whose share dialog is open; view-only when the current project was shared for viewing
   const [shareFor, setShareFor] = useState<string | null>(null);
+  // File ▸ New slides / poster / page…: the project a layout document is created in
+  const [newLayoutFor, setNewLayoutFor] = useState<string | null>(null);
   // the project whose git dialog (clone URL, tokens, history) is open
   const [gitFor, setGitFor] = useState<string | null>(null);
   /** the interactive walkthrough: offered once per browser, restartable from Help */
@@ -1050,6 +1053,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const menus: MenuDef[] = [...(docId && !isLyxDoc ? textFileMenus : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
+      { label: 'New slides / poster / page…', action: () => { const p = textId ? projectOfDoc(textId) : null; if (p) setNewLayoutFor(p); } },
       { label: 'New whiteboard…', action: () => {
         const p = textId ? projectOfDoc(textId) : null;
         if (!p) return;
@@ -1342,6 +1346,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         </div>
       )}
       {isLyxDoc && tbMode('vcs') === 'on' && <Toolbar id="vcs" label="Version Control" groups={vcsGroups} />}
+      {isLyxDoc && tb.showLayout && <Toolbar id="layout" label="Layout" groups={tb.layout} />}
       {/* the contextual math / table / review rows are docked at the bottom (before the StatusBar below) */}
       {docId && meta && meta.health.length > 0 && (
         <div class="health-bar">
@@ -1459,6 +1464,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         pdf={isLyxDoc ? { state: pdf, onClick: rebuild => { if (rebuild && !pdf.busy) void build(); else if (!pdfPaneVisible) changePanes(l => (narrowPanes ? { ...setPaneShown(l, 'pdf', true), order: ['pdf', ...l.order.filter(p => p !== 'pdf')] } : setPaneShown(l, 'pdf', true))); } } : undefined} />
       {renderDialog()}
       {shareFor && <ShareDialog project={shareFor} user={user} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
+      {newLayoutFor && <NewLayoutDialog project={newLayoutFor} dir={textId ? docPathOf(textId).split('/').slice(0, -1).join('/') : ''} notify={notify} onClose={() => setNewLayoutFor(null)} onCreated={id => { location.hash = '#/' + id; setRefreshKey(k => k + 1); }} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
       {tour && <Tour intro={tour === 'intro'} onEnd={endTour}
         ctx={{ docId, ready: isLyxDoc && status.synced && !!view, docTick, layout, inMath: !!mathField, saveState: save.state, rightTab, pdfBusy: pdf.busy, pdfBuiltAt: pdf.builtAt ?? 0, shareOpen: !!shareFor, gitOpen: !!gitFor, marginMode }}

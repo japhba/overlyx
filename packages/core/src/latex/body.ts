@@ -15,6 +15,7 @@ import {
   type EffectiveFont,
 } from './text.ts';
 import { latexInset, isFontSwitchInset, type InsetPosition } from './insets.ts';
+import { isLayoutPage, latexLayoutPage } from './layoutpage.ts';
 
 /** A text (list of paragraphs) being written, with its owning inset's layout. */
 export interface TextInfo {
@@ -304,6 +305,17 @@ export function latexParagraphs(ctx: ExportContext, text: TextInfo, os: TexStrea
   let pit = 0;
   while (pit < pars.length) {
     const par = pars[pit];
+    // a page of a layout document: a plain beamer frame of positioned objects (layoutpage.ts)
+    if (isLayoutPage(par)) {
+      const rec = ctx.parSpans && text.isMainText && os === ctx.parSpans.stream ? ctx.parSpans : null;
+      const start = os.length;
+      latexLayoutPage(ctx, os, rp, par);
+      if (rec) rec.spans[pit] = { start, end: os.length };
+      os.write('\n');
+      if (pit + 1 < pars.length) os.write('\n');
+      pit++;
+      continue;
+    }
     const style = styleOf(ctx, par, rp);
     // title handling
     if (style.inTitle) {

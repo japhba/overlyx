@@ -1743,3 +1743,173 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .pdf-publish-form { flex-wrap: wrap; margin-top: 4px; }
 .pdf-publish-form input { font-size: 12px; }
 .pdf-publish-form input.branch { flex: 0 0 90px; }
+
+/* ------------------------------------------------------------------ layout documents
+ * Pages of positioned objects (editor/layout). Everything on a page is sized in --ol-mm / --ol-pt
+ * (the layout plugin sets --ol-fit-pt: the zoom that fits the page's width; the editor zoom
+ * multiplies it), so a zoom is one custom property. The page itself is paper: white, black text,
+ * in the dark theme too — what is on it is what the PDF shows. */
+/* a TeX point at the editor's zoom: the editor's text size is the document's base size */
+.lyx-editor { --ol-pt: calc(15.5px * var(--editor-zoom) / var(--ol-basept, 10)); }
+.lyx-editor.ol-layout {
+  --ol-pt: calc(var(--ol-fit-pt, 1.33px) * var(--editor-zoom));
+  --ol-mm: calc(var(--ol-pt) * 2.845276);
+  --ol-sel: #1a73e8;
+  max-width: none; min-height: 0; font-size: 14px; line-height: 1.2; color: #000;
+}
+.editor-page:has(> .editor-host > .ol-layout) { background: var(--canvas-bg, #e7e8ea); padding: 34px 36px 140px 36px; }
+.editor-scroll:has(.ol-layout) > .ruler { display: none; }
+.ol-page-wrap { position: relative; width: calc(var(--ol-mm) * var(--ol-page-w, 160)); margin: 0 auto 30px; }
+.ol-page {
+  position: relative; display: block; width: calc(var(--ol-mm) * var(--ol-page-w, 160)); height: calc(var(--ol-mm) * var(--ol-page-h, 90));
+  background: #fff; color: #000; box-shadow: 0 1px 3px rgba(0,0,0,0.18), 0 4px 18px rgba(0,0,0,0.08);
+  font-family: "CMU Sans Serif", "CMU Serif", sans-serif; font-size: calc(var(--ol-pt) * var(--ol-basept, 11)); line-height: 1.2;
+  --editor-fg: #000; --caret: #1a3d6d;
+}
+.ol-layout[data-ol-font="serif"] .ol-page { font-family: "CMU Serif", serif; }
+.ol-layout[data-ol-font="noto"] .ol-page { font-family: "OLT notosans", "CMU Sans Serif", sans-serif; }
+.ol-page-label { position: absolute; right: calc(100% + 10px); top: 0; font: 12px/1.3 var(--ui-font); color: var(--ui-muted); white-space: nowrap; user-select: none; max-width: 30px; overflow: hidden; text-overflow: ellipsis; }
+.ol-obj { position: absolute; box-sizing: border-box; transform-origin: 50% 50%; }
+.ol-box-frame { position: absolute; box-sizing: border-box; pointer-events: none; }
+.ol-box-content { position: relative; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; outline: none; }
+.ol-box-content > .lyx-par, .ol-box-content .lyx-par { margin: 0; padding: 0; text-indent: 0; }
+.ol-box-content .lyx-par.lyx-layout-itemize, .ol-box-content .lyx-par.lyx-layout-enumerate { padding-left: 1.7em; }
+/* beamer's list labels: the structure colour's triangles */
+.ol-page .lyx-layout-itemize[data-label]::before { content: '\25B6'; font-size: 0.5em; line-height: 2.4; left: 1.1em; width: auto; text-align: left; color: var(--ol-item-color, #3333b3); }
+.ol-page .lyx-layout-enumerate[data-label]::before { width: 1.3em; color: var(--ol-item-color, #3333b3); }
+.ol-layout .ol-box.ol-empty-frame:hover, .ol-layout .ol-box.ol-empty-frame:focus-within { outline: 1px dashed rgba(26,115,232,0.35); outline-offset: 0; }
+.ol-shape { pointer-events: none; }
+.ol-shape > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.ol-shape path { pointer-events: visiblePainted; }
+.ol-shape.ol-invisible > svg { outline: 1px dashed rgba(0,0,0,0.25); }
+.ol-image { overflow: hidden; background: transparent; }
+.ol-image > img { position: absolute; max-width: none; user-select: none; -webkit-user-drag: none; }
+.ol-image.ol-missing { background: repeating-linear-gradient(45deg, #f1f1f1 0 8px, #e2e2e2 8px 16px); outline: 1px dashed #999; }
+.ol-image.ol-missing::after { content: attr(data-file); position: absolute; inset: 4px; font: 11px/1.2 var(--ui-font); color: #666; overflow: hidden; }
+.ol-raw { outline: 1px dashed rgba(120,120,120,0.45); overflow: hidden; }
+.ol-raw > img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: none; }
+.ol-raw.ol-rendered > img { display: block; }
+.ol-raw.ol-rendered > .ol-raw-code { display: none; }
+.ol-raw.ol-rendered { outline-color: transparent; }
+.ol-layout .ol-raw.ol-rendered:hover { outline-color: rgba(120,120,120,0.45); }
+.ol-raw-code { margin: 0; padding: 2px 4px; font: calc(var(--ol-pt) * 6) / 1.25 ui-monospace, monospace; color: #555; white-space: pre-wrap; overflow: hidden; height: 100%; box-sizing: border-box; background: rgba(245,245,245,0.8); }
+.ol-raw.ol-pending > .ol-raw-code { opacity: 0.6; }
+.ol-raw-unplaced { display: none; }
+.ol-group { display: contents; }
+.ol-notes { display: none; }
+.ol-layout.ol-show-notes .ol-notes {
+  display: block; position: absolute; left: 0; right: 0; top: calc(100% + 8px); padding: 8px 12px; min-height: 2.5em;
+  background: var(--surface); color: var(--editor-fg); border: 1px solid var(--ui-border); border-radius: 6px; font: 13px/1.4 var(--ui-font);
+}
+.ol-layout.ol-show-notes .ol-page-wrap { margin-bottom: 110px; }
+.ol-layout .ol-notes::before { content: 'Speaker notes'; display: block; font-size: 11px; color: var(--ui-muted); margin-bottom: 2px; }
+/* tools */
+.ol-layout[data-ol-tool="text"] .ol-page { cursor: text; }
+.ol-layout[data-ol-tool="shape"] .ol-page, .ol-layout[data-ol-tool="line"] .ol-page, .ol-layout[data-ol-tool="arrow"] .ol-page, .ol-layout[data-ol-tool="pen"] .ol-page, .ol-layout[data-ol-tool="pencil"] .ol-page { cursor: crosshair; }
+.ol-layout:not([data-ol-tool="select"]) .ol-box-content { pointer-events: none; }
+/* the overlay: selection, handles, guides, drafts (page coordinates) */
+.ol-overlay { position: absolute; left: 0; top: 0; width: calc(var(--ol-mm) * var(--ol-page-w, 160)); height: calc(var(--ol-mm) * var(--ol-page-h, 90)); pointer-events: none; z-index: 5; }
+.ol-overlay > * { position: absolute; box-sizing: border-box; }
+.ol-selframe, .ol-editing { transform-origin: 50% 50%; outline: 1.5px solid var(--ol-sel); }
+.ol-editing { outline: 1px dashed var(--ol-sel); }
+.ol-selframe.ol-thin { outline: 1px dashed var(--ol-sel); }
+.ol-selframe.ol-groupframe { outline-style: dashed; }
+.ol-selframe.ol-lockedframe { outline-color: #999; }
+.ol-h { position: absolute; width: 9px; height: 9px; margin: -5px 0 0 -5px; background: #fff; border: 1.5px solid var(--ol-sel); border-radius: 2px; box-sizing: border-box; pointer-events: auto; z-index: 2; }
+.ol-h-nw { left: 0; top: 0; cursor: nwse-resize; } .ol-h-n { left: 50%; top: 0; cursor: ns-resize; } .ol-h-ne { left: 100%; top: 0; cursor: nesw-resize; }
+.ol-h-e { left: 100%; top: 50%; cursor: ew-resize; } .ol-h-se { left: 100%; top: 100%; cursor: nwse-resize; } .ol-h-s { left: 50%; top: 100%; cursor: ns-resize; }
+.ol-h-sw { left: 0; top: 100%; cursor: nesw-resize; } .ol-h-w { left: 0; top: 50%; cursor: ew-resize; }
+.ol-h-rot { left: 50%; top: -26px; border-radius: 50%; cursor: grab; width: 11px; height: 11px; margin: -6px 0 0 -6px; }
+.ol-h-rotline { position: absolute; left: 50%; top: -22px; height: 22px; border-left: 1px solid var(--ol-sel); pointer-events: none; }
+.ol-badge { font: 600 10px/14px var(--ui-font); color: #fff; background: #d0701a; border-radius: 7px; padding: 0 5px; transform: translate(-40%, -60%); white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+.ol-guide-v { top: -12px; bottom: -12px; width: 0; border-left: 1px solid #e0249a; }
+.ol-guide-h { left: -12px; right: -12px; height: 0; border-top: 1px solid #e0249a; }
+.ol-marquee { border: 1px solid var(--ol-sel); background: rgba(26,115,232,0.08); }
+.ol-draft-wrap, .ol-nodes { left: 0; top: 0; width: 100%; height: 100%; }
+.ol-draft { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.ol-node { width: 9px; height: 9px; margin: -5px 0 0 -5px; background: #fff; border: 1.5px solid var(--ol-sel); pointer-events: auto; cursor: move; transform: rotate(45deg); }
+.ol-node.ol-node-first { background: #cfe0ff; }
+.ol-node.ol-node-sel { background: var(--ol-sel); }
+.ol-ctl { width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--ol-sel); pointer-events: auto; cursor: move; }
+.ol-ctlline { stroke: var(--ol-sel); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ol-nodepath { fill: none; stroke: transparent; stroke-width: 8; vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: copy; }
+.ol-cropframe { transform-origin: 50% 50%; }
+.ol-cropghost { position: absolute; opacity: 0.35; pointer-events: auto; cursor: move; outline: 1px dashed #888; }
+.ol-cropghost > img { width: 100%; height: 100%; display: block; user-select: none; -webkit-user-drag: none; }
+.ol-cropwindow { position: absolute; inset: 0; outline: 2px solid #111; box-shadow: 0 0 0 1px #fff; pointer-events: none; }
+.ol-crop-h { background: #111; border-color: #fff; }
+html[data-theme="dark"] { --canvas-bg: #121215; }
+/* the layout toolbar */
+.toolbar-layout .tb-widget { display: inline-flex; align-items: center; }
+.ol-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.35); margin-left: -3px; vertical-align: -1px; }
+.ol-swatch-none { background: linear-gradient(to top right, transparent 44%, #d33 44% 56%, transparent 56%), #fff; }
+.tb-btn svg + .ol-swatch { position: relative; top: 4px; left: -5px; width: 7px; height: 7px; }
+.ol-geom { display: inline-flex; gap: 6px; align-items: center; font: 11px var(--ui-font); color: var(--ui-muted); padding: 0 4px; }
+.ol-geom-field { display: inline-flex; align-items: center; gap: 3px; }
+.ol-num { width: 46px; height: 20px; padding: 0 4px; font: 11px var(--ui-font); border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); color: var(--ui-fg); text-align: right; }
+.ol-num:disabled { opacity: 0.45; }
+.ol-panel { display: flex; flex-direction: column; gap: 7px; padding: 4px 2px; font: 12px var(--ui-font); color: var(--ui-fg); min-width: 250px; max-width: 360px; }
+.ol-panel label { display: flex; align-items: center; gap: 6px; }
+.ol-panel .ol-check { gap: 5px; }
+.ol-seg { display: flex; align-items: center; gap: 4px; }
+.ol-seg.ol-wrap { flex-wrap: wrap; }
+.ol-seg .small-btn.active, .ol-presets .small-btn.active { background: var(--active-bg); border-color: var(--active-border); }
+.ol-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.ol-presets .small-btn { text-align: left; }
+.ol-hint { color: var(--ui-muted); font-size: 11px; }
+.ol-text-in { flex: 1; min-width: 120px; height: 22px; font: 12px var(--ui-font); border: 1px solid var(--ui-border); border-radius: 3px; padding: 0 5px; background: var(--surface); color: var(--ui-fg); }
+.ol-panel-foot { display: flex; justify-content: flex-end; }
+.ol-colors-title { font: 600 11px var(--ui-font); color: var(--ui-muted); margin: 4px 0 2px; }
+.ol-colors .tb-color-grid { margin-bottom: 2px; }
+/* presentation (editor/layout/present.ts) */
+.ol-present { position: fixed; inset: 0; z-index: 100000; background: #000; display: flex; align-items: center; justify-content: center; cursor: none; outline: none; overflow: hidden; }
+.ol-present.ol-present-moving { cursor: default; }
+.ol-present-stage { position: relative; width: calc(var(--ol-mm) * var(--ol-page-w)); height: calc(var(--ol-mm) * var(--ol-page-h)); color: #000; }
+.ol-present-stage > .ol-page { position: absolute; left: 0; top: 0; box-shadow: none; }
+.ol-present .ol-hidden { visibility: hidden; }
+.ol-present-blank .ol-present-stage { visibility: hidden; }
+.ol-present-white { background: #fff; }
+.ol-present-end::after { content: 'End of the presentation — click or press a key to leave'; position: absolute; color: #aaa; font: 15px var(--ui-font); }
+.ol-present-counter { position: absolute; right: 14px; bottom: 10px; font: 12px var(--ui-font); color: rgba(255,255,255,0.55); opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+.ol-present-moving .ol-present-counter { opacity: 1; }
+.ol-present-laser { position: fixed; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: radial-gradient(circle, #ff3b30 0 35%, rgba(255,59,48,0.45) 60%, transparent 72%); pointer-events: none; display: none; z-index: 2; }
+.ol-present-laser-on .ol-present-laser { display: block; }
+.ol-present-laser-on, .ol-present-laser-on.ol-present-moving { cursor: none; }
+@keyframes ol-fx-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ol-fx-fly-left { from { translate: -120vw 0; } to { translate: 0 0; } }
+@keyframes ol-fx-fly-right { from { translate: 120vw 0; } to { translate: 0 0; } }
+@keyframes ol-fx-fly-up { from { translate: 0 110vh; } to { translate: 0 0; } }
+@keyframes ol-fx-fly-down { from { translate: 0 -110vh; } to { translate: 0 0; } }
+@keyframes ol-fx-zoom { from { scale: 0.2; opacity: 0; } to { scale: 1; opacity: 1; } }
+@keyframes ol-fx-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+.ol-fx-fade { animation: ol-fx-fade 0.5s ease-out both; }
+.ol-fx-fly-left { animation: ol-fx-fly-left 0.55s cubic-bezier(.2,.7,.2,1) both; }
+.ol-fx-fly-right { animation: ol-fx-fly-right 0.55s cubic-bezier(.2,.7,.2,1) both; }
+.ol-fx-fly-up { animation: ol-fx-fly-up 0.55s cubic-bezier(.2,.7,.2,1) both; }
+.ol-fx-fly-down { animation: ol-fx-fly-down 0.55s cubic-bezier(.2,.7,.2,1) both; }
+.ol-fx-zoom { animation: ol-fx-zoom 0.45s cubic-bezier(.2,.9,.3,1.2) both; }
+.ol-fx-wipe { animation: ol-fx-wipe 0.6s ease-out both; }
+@keyframes ol-tr-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ol-tr-push { from { translate: 100% 0; } to { translate: 0 0; } }
+@keyframes ol-tr-push-back { from { translate: -100% 0; } to { translate: 0 0; } }
+@keyframes ol-tr-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+.ol-present-stage > .ol-tr-in.ol-tr-fade { animation: ol-tr-fade 0.6s ease both; }
+.ol-present-stage > .ol-tr-in.ol-tr-push { animation: ol-tr-push 0.55s cubic-bezier(.3,.7,.2,1) both; }
+.ol-present-stage > .ol-tr-in.ol-tr-push.ol-tr-back { animation-name: ol-tr-push-back; }
+.ol-present-stage > .ol-tr-in.ol-tr-wipe { animation: ol-tr-wipe 0.6s ease both; }
+.ol-present-stage { overflow: hidden; }
+/* File ▸ New slides / poster / page… */
+.ol-newgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+.ol-newcard { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px 8px; border: 1px solid var(--ui-border); border-radius: 6px; background: var(--surface); color: var(--ui-fg); cursor: pointer; font: 12px var(--ui-font); }
+.ol-newcard:hover { background: var(--row-hover); }
+.ol-newcard.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-border); }
+.ol-newthumb { display: block; background: #fff; border: 1px solid #bbb; box-shadow: 0 1px 3px rgba(0,0,0,0.15); margin: 4px 0 2px; }
+.ol-newsize { color: var(--ui-muted); font-size: 11px; }
+/* the font size box (app/fontsize.tsx) */
+.fs-box { position: relative; display: inline-flex; align-items: center; gap: 0; margin: 0 2px; }
+.fs-box .fs-step { width: 20px; min-width: 20px; font: 15px/1 var(--ui-font); padding: 0; }
+.fs-box .fs-drop { width: 14px; min-width: 14px; font-size: 9px; padding: 0; margin-left: -1px; }
+.fs-input { width: 38px; height: 22px; padding: 0 3px; text-align: center; font: 12px var(--ui-font); border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); color: var(--ui-fg); }
+.fs-list { position: absolute; top: 100%; left: 0; z-index: 50; min-width: 150px; max-height: 60vh; overflow-y: auto; }
+.fs-list .tb-pal-item { display: flex; justify-content: space-between; gap: 12px; width: 100%; }
+.fs-pt { color: var(--ui-muted); font-size: 11px; }

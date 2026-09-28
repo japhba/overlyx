@@ -6,6 +6,10 @@ import type {
   Change, FontState, Inset, Item, LyxDocument, Paragraph, TabularInset, TabularCell,
 } from './lyx/ast.ts';
 import { FONT_KEYS } from './lyx/ast.ts';
+import {
+  PAGE_LAYOUT, GROUP_LAYOUT, PAGE_PROPS_INSET, NOTES_INSET, parseBoxKeys, parseShapeKeys, parseImageKeys, parseRawKeys, parseGroupKeys, parsePageKeys,
+  writeBoxKeys, writeShapeKeys, writeImageKeys, writeRawKeys, writeGroupKeys, writePageKeys, type PageProps,
+} from './layout/model.ts';
 import { schema } from './schema.ts';
 import type { Node as PMNode } from 'prosemirror-model';
 
@@ -170,7 +174,141 @@ function tabularToPm(t: TabularInset): PMJSON {
 }
 
 export function lyxToPm(doc: LyxDocument): PMJSON {
-  return { type: 'doc', content: doc.body.length ? doc.body.map(paragraphToPm) : [{ type: 'paragraph', attrs: { layout: 'Standard', depth: 0 } }] };
+  if (!doc.body.length) return { type: 'doc', content: [{ type: 'paragraph', attrs: { layout: 'Standard', depth: 0 } }] };
+  // a layout document: pages only (the schema's doc is paragraphs or pages); anything between
+  // its pages is kept as unplaced raw LaTeX on the page before (or after, before the first)
+  if (doc.body.some(p => p.layout === PAGE_LAYOUT)) return { type: 'doc', content: layoutBodyToPm(doc.body) };
+  return { type: 'doc', content: doc.body.map(paragraphToPm) };
+}
+
+/* ----------------------------------------------------------------- layout pages */
+
+function keysOf(params: string[]): string {
+  for (const l of params) if (l === 'keys' || l.startsWith('keys ')) return l.slice(5);
+  return '';
+}
+function paramOf(params: string[], key: string): string | undefined {
+  for (const l of params) { if (l === key) return ''; if (l.startsWith(key + ' ')) return l.slice(key.length + 1); }
+  return undefined;
+}
+
+function layoutBodyToPm(body: Paragraph[]): PMJSON[] {
+  const pages: PMJSON[] = [];
+  let stray: PMJSON[] = [];
+  for (const p of body) {
+    if (p.layout === PAGE_LAYOUT) {
+      const page = pageToPm(p);
+      if (stray.length) { page.content = [...stray, ...(page.content ?? [])]; stray = []; }
+      pages.push(page);
+      continue;
+    }
+    // text outside any page (a hand-edited file): unplaced raw LaTeX, written back where it was
+    const latex = paragraphText(p);
+    if (!latex.trim()) continue;
+    const raw: PMJSON = { type: 'ol_raw', attrs: { latex, placed: false } };
+    const last = pages[pages.length - 1];
+    if (last) insertBeforeNotes(last, raw); else stray.push(raw);
+  }
+  if (stray.length) pages.push({ type: 'ol_page', attrs: {}, content: stray });
+  return pages;
+}
+function insertBeforeNotes(page: PMJSON, node: PMJSON): void {
+  const c = page.content ?? (page.content = []);
+  const notes = c.length && c[c.length - 1].type === 'ol_notes';
+  c.splice(notes ? c.length - 1 : c.length, 0, node);
+}
+/** a paragraph outside the pages as LaTeX-ish text (only its raw material survives) */
+function paragraphText(p: Paragraph): string {
+  return p.items.map(it => it.kind === 'text' ? it.text : it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'ERT'
+    ? it.inset.paragraphs.map(q => q.items.map(i => i.kind === 'text' ? i.text : '').join('')).join('\n') : '').join('');
+}
+
+export function pageToPm(p: Paragraph): PMJSON {
+  let attrs: Record<string, any> = {};
+  const content: PMJSON[] = [];
+  let notes: PMJSON | null = null;
+  for (const it of p.items) {
+    if (it.kind !== 'inset') continue;
+    const ins = it.inset;
+    if (ins.type === 'Leaf' && ins.name === PAGE_PROPS_INSET) { attrs = { ...parsePageKeys(keysOf(ins.params), paramOf(ins.params, 'frame') ?? 'plain') }; continue; }
+    if (ins.type === 'Text' && ins.name === NOTES_INSET) { notes = { type: 'ol_notes', content: paragraphsToPm(ins.paragraphs) }; continue; }
+    const o = objectToPm(it);
+    if (o) content.push(o);
+  }
+  if (notes) content.push(notes);
+  return { type: 'ol_page', attrs, content };
+}
+
+function objectToPm(it: Item): PMJSON | null {
+  if (it.kind !== 'inset') return null;
+  const ins = it.inset;
+  if (ins.type === 'Text' && ins.name === 'OLBox') return { type: 'ol_box', attrs: { ...parseBoxKeys(keysOf(ins.params)) }, content: paragraphsToPm(ins.paragraphs) };
+  if (ins.type === 'Text' && ins.name === 'OLGroup') {
+    const children = ins.paragraphs.flatMap(q => q.items.map(objectToPm).filter((x): x is PMJSON => !!x));
+    if (!children.length) return null;
+    return { type: 'ol_group', attrs: { ...parseGroupKeys(keysOf(ins.params)) }, content: children };
+  }
+  if (ins.type !== 'Leaf') return null;
+  const keys = keysOf(ins.params);
+  if (ins.name === 'OLShape') return { type: 'ol_shape', attrs: { ...parseShapeKeys(keys), d: paramOf(ins.params, 'path') ?? '' } };
+  if (ins.name === 'OLImage') {
+    const { crop, ...rest } = parseImageKeys(keys);
+    return { type: 'ol_image', attrs: { ...rest, cl: crop[0], ct: crop[1], cr: crop[2], cb: crop[3], src: paramOf(ins.params, 'src') ?? '' } };
+  }
+  if (ins.name === 'OLRaw') {
+    let latex = '';
+    try { latex = JSON.parse(paramOf(ins.params, 'latex') ?? '""'); } catch { /* damaged */ }
+    const placed = paramOf(ins.params, 'placed') !== 'false';
+    return { type: 'ol_raw', attrs: { ...parseRawKeys(keys, placed), latex, placed } };
+  }
+  return null;
+}
+
+const objItem = (inset: Inset): Item => ({ kind: 'inset', font: {}, inset });
+
+export function pmPageToLyx(page: PMJSON): Paragraph {
+  const a = (page.attrs ?? {}) as PageProps;
+  const props: Inset = { type: 'Leaf', name: PAGE_PROPS_INSET, arg: '', params: ['keys ' + writePageKeys({ fill: a.fill ?? null, transition: a.transition ?? null, name: a.name ?? null, frame: a.frame ?? 'plain', extra: a.extra ?? '' }), `frame ${a.frame ?? 'plain'}`] };
+  const items: Item[] = [objItem(props)];
+  for (const c of page.content ?? []) {
+    if (c.type === 'ol_notes') { items.push(objItem({ type: 'Text', name: NOTES_INSET, arg: '', params: [], paragraphs: pmBlocksToParagraphs(c.content ?? []) })); continue; }
+    const it = pmObjectToLyx(c);
+    if (it) items.push(it);
+  }
+  return { layout: PAGE_LAYOUT, depth: 0, params: {}, items };
+}
+
+function withDefaults<T>(a: Record<string, any> | undefined, defs: T): T {
+  const out: any = { ...defs };
+  for (const k of Object.keys(defs as object)) if (a && a[k] !== undefined) out[k] = a[k];
+  return out;
+}
+
+function pmObjectToLyx(c: PMJSON): Item | null {
+  const a = c.attrs ?? {};
+  switch (c.type) {
+    case 'ol_box':
+      return objItem({ type: 'Text', name: 'OLBox', arg: '', params: ['keys ' + writeBoxKeys(withDefaults(a, parseBoxKeys('')))], paragraphs: pmBlocksToParagraphs(c.content ?? []) });
+    case 'ol_group': {
+      const children = (c.content ?? []).map(pmObjectToLyx).filter((x): x is Item => !!x);
+      return objItem({ type: 'Text', name: 'OLGroup', arg: '', params: ['keys ' + writeGroupKeys(withDefaults(a, parseGroupKeys('')))], paragraphs: [{ layout: GROUP_LAYOUT, depth: 0, params: {}, items: children }] });
+    }
+    case 'ol_shape':
+      return objItem({ type: 'Leaf', name: 'OLShape', arg: '', params: ['keys ' + writeShapeKeys(withDefaults(a, parseShapeKeys(''))), 'path ' + String(a.d ?? '')] });
+    case 'ol_image': {
+      const p = withDefaults(a, parseImageKeys(''));
+      p.crop = [Number(a.cl) || 0, Number(a.ct) || 0, Number(a.cr) || 0, Number(a.cb) || 0];
+      return objItem({ type: 'Leaf', name: 'OLImage', arg: '', params: ['keys ' + writeImageKeys(p), 'src ' + String(a.src ?? '')] });
+    }
+    case 'ol_raw': {
+      const placed = a.placed !== false;
+      const params = ['keys ' + (placed ? writeRawKeys(withDefaults(a, parseRawKeys(''))) : ''), 'latex ' + JSON.stringify(String(a.latex ?? ''))];
+      if (!placed) params.push('placed false');
+      return objItem({ type: 'Leaf', name: 'OLRaw', arg: '', params });
+    }
+    default:
+      return null;
+  }
 }
 
 /* ----------------------------------------------------------------- PM -> LyX */
@@ -271,6 +409,7 @@ export function pmBlocksToParagraphs(blocks: PMJSON[]): Paragraph[] {
   const out: Paragraph[] = [];
   for (const b of blocks) {
     if (b.type === 'paragraph') out.push(pmParagraphToLyx(b));
+    else if (b.type === 'ol_page') out.push(pmPageToLyx(b));
     else {
       // any other block (should not happen with our schema) — wrap as a Plain Layout paragraph
       const it = pmInlineToItem(b);

@@ -49,6 +49,9 @@ import { sliceText } from './cliptext';
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
 import { includeTarget } from './commands';
+import { LAYOUT_NODE_VIEWS } from './layout/nodeviews';
+import { layoutPlugin, layoutKey } from './layout/controller';
+import { layoutPaste, layoutDrop } from './layout/images';
 
 /**
  * A node view that throws (a malformed attribute that arrived over the wire, a rendering bug) must
@@ -82,6 +85,8 @@ export function editorNodeViews(): NonNullable<EditorProps['nodeViews']> {
     graphics: (node, view, getPos) => guarded(node, () => new GraphicsView(node, view, getPos as () => number | undefined)),
     command: (node, view, getPos) => guarded(node, () => new CommandView(node, view, getPos as () => number | undefined)),
     leaf: (node, view, getPos) => guarded(node, () => new LeafView(node, view, getPos as () => number | undefined)),
+    // layout documents: pages of positioned objects (editor/layout)
+    ...Object.fromEntries(Object.entries(LAYOUT_NODE_VIEWS).map(([name, make]) => [name, (node: PMNode, view: EditorView, getPos: () => number | undefined) => guarded(node, () => make(node, view, getPos as () => number | undefined))])),
   };
 }
 
@@ -114,6 +119,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     markdownRulesPlugin(),   // `- ` / `1. ` / `# ` at a paragraph start, before autocorrect looks at the space
     autocorrectPlugin(),
     chordPlugin(),
+    layoutPlugin(),   // layout documents: object selection, handles, drawing tools (before the keymap and the mouse selection)
     foldPlugin(),   // section folding (before the keymap: ↑ / ↓ beside a fold skip the hidden text)
     lyxKeymap(),
     fontCarryPlugin(),
@@ -139,7 +145,8 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
       view: () => ({
         update: (view, prev: EditorState) => {
           const docChanged = prev.doc !== view.state.doc;
-          const selectionChanged = !prev.selection.eq(view.state.selection);
+          // a layout document's object selection and tool count as selection changes (the toolbars follow them)
+          const selectionChanged = !prev.selection.eq(view.state.selection) || layoutKey.getState(prev) !== layoutKey.getState(view.state);
           if (docChanged || selectionChanged) o.onUpdate?.(view, { docChanged, selectionChanged });
         },
       }),
@@ -265,6 +272,8 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
       },
     },
     handlePaste(view, event) {
+      // a layout document: images become image objects on the page (editor/layout/images.ts)
+      if (!viewOnly() && layoutPaste(view, event)) return true;
       // an image on the clipboard (a screenshot, a copied image file): upload it, insert a graphics inset
       const images = imageFiles(event.clipboardData);
       if (images.length) {
@@ -311,6 +320,7 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
     handleDrop(view, event, _slice, moved) {
       if (moved || !event.dataTransfer?.files.length) return false;   // internal drags and text drops: ProseMirror's own handling
       if (viewOnly()) return true;
+      if (layoutDrop(view, event)) return true;   // onto a layout page: image objects where they were dropped
       const images = imageFiles(event.dataTransfer);
       if (!images.length) { editorContext.notify?.('Only images can be dropped into the text — other files go into the file browser', 'error'); return true; }
       const pos = view.posAtCoords({ left: event.clientX, top: event.clientY });

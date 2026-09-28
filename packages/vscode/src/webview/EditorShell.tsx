@@ -696,6 +696,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={tb.extra} />}
         </div>
       )}
+      {tb.showLayout && <Toolbar id="layout" label="Layout" groups={tb.layout} />}
       {meta && meta.health.length > 0 && (
         <div class="health-bar">
           <span class="health-icon">⚠</span>

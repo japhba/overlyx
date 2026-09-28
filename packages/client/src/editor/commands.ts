@@ -9,6 +9,7 @@ import { schema, commentHeader, formatTimestamp, unquote, paramMap, FONT_KEYS } 
 import { nextLayout, isHeadingLayout, isListLayout, isEnvironmentLayout } from './layouts';
 import { editorContext } from './context';
 import { MathInlineView, MathDisplayView, pendingFocus } from './nodeviews/math';
+import { setValueMarkIn } from './fontsize';
 
 /* ------------------------------------------------------------ paragraphs */
 
@@ -257,15 +258,17 @@ export function toggleValueMark(markName: string, onValue: string, offValue?: st
 export function setValueMark(markName: string, value: string | null): Command {
   return (state, dispatch) => {
     const type: MarkType = schema.marks[markName];
-    const { from, to, empty, $cursor } = state.selection as TextSelection;
+    const { empty, $cursor } = state.selection as TextSelection;
     if (!dispatch) return true;
     if (empty && $cursor) {
       const marks = (state.storedMarks ?? $cursor.marks()).filter(m => m.type !== type);
       dispatch(state.tr.setStoredMarks(value ? marks.concat([type.create({ value })]) : marks));
       return true;
     }
-    let tr = state.tr.removeMark(from, to, type);
-    if (value) tr = tr.addMark(from, to, type.create({ value }));
+    // every range of the selection (table cells), and inline nodes in it — formulas, insets — through
+    // their `marks` attr (y-prosemirror keeps no marks on non-text nodes)
+    let tr = state.tr;
+    for (const r of state.selection.ranges) tr = setValueMarkIn(tr, r.$from.pos, r.$to.pos, markName, value);
     dispatch(tr);
     return true;
   };

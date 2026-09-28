@@ -138,7 +138,8 @@ function withMarks(spec: DOMOutputSpec, marks: string): DOMOutputSpec {
 }
 
 const nodes: Record<string, NodeSpec> = {
-  doc: { content: 'paragraph+' },
+  // a linear document is paragraphs; a layout document is pages (layout/model.ts)
+  doc: { content: 'paragraph+ | ol_page+' },
 
   paragraph: {
     content: 'inline*',
@@ -395,6 +396,73 @@ const nodes: Record<string, NodeSpec> = {
   },
 };
 
+/* ------------------------------------------------------------------ layout documents */
+
+/** attribute defaults of positioned objects (layout/model.ts; geometry in mm, rotation in degrees CCW) */
+const placeAttrs = { x: { default: 0 }, y: { default: 0 }, w: { default: 40 }, h: { default: 20 }, rot: { default: 0 } };
+const commonAttrs = { step: { default: null }, effect: { default: null }, name: { default: null }, lock: { default: false }, opacity: { default: null }, extra: { default: '' } };
+/** An object's attributes travel through the clipboard as JSON (`data-ol`). */
+const olDOM = (tag: string, cls: string, hole: boolean) => (node: import('prosemirror-model').Node): DOMOutputSpec =>
+  hole ? [tag, { class: cls, 'data-ol': JSON.stringify(node.attrs) }, 0] : [tag, { class: cls, 'data-ol': JSON.stringify(node.attrs) }];
+const olParse = (tag: string, cls: string) => [{ tag: `${tag}.${cls}`, getAttrs: (d: HTMLElement) => { try { const a = JSON.parse(d.getAttribute('data-ol') ?? '{}'); return typeof a === 'object' && a ? a : {}; } catch { return {}; } } }];
+
+export const LAYOUT_NODES: Record<string, NodeSpec> = {
+  /** a fixed-size page (a beamer frame): its objects in drawing order, then the speaker notes */
+  ol_page: {
+    content: 'ol_object* ol_notes?',
+    isolating: true,
+    attrs: { fill: { default: null }, transition: { default: null }, name: { default: null }, frame: { default: 'plain' }, extra: { default: '' } },
+    toDOM: olDOM('section', 'ol-page', true),
+    parseDOM: olParse('section', 'ol-page'),
+  },
+  /** a text box: LyX paragraphs in a positioned frame */
+  ol_box: {
+    group: 'ol_object', content: 'block+', isolating: true, defining: true,
+    attrs: {
+      ...placeAttrs, ...commonAttrs,
+      fill: { default: null }, stroke: { default: null }, lw: { default: null }, radius: { default: null }, pad: { default: null },
+      valign: { default: 't' }, shape: { default: 'rect' }, font: { default: null }, leading: { default: null }, color: { default: null }, grow: { default: false },
+    },
+    toDOM: olDOM('div', 'ol-box', true),
+    parseDOM: olParse('div', 'ol-box'),
+  },
+  /** a vector shape: SVG path data (absolute M / L / C / Z) in its own box `vb`, stretched to w × h */
+  ol_shape: {
+    group: 'ol_object', atom: true, selectable: true,
+    attrs: { ...placeAttrs, ...commonAttrs, d: { default: '' }, vb: { default: '0 0 100 100' }, fill: { default: null }, stroke: { default: null }, lw: { default: null }, dash: { default: null }, arrows: { default: null } },
+    toDOM: olDOM('div', 'ol-shape', false),
+    parseDOM: olParse('div', 'ol-shape'),
+  },
+  /** an image file, cropped by fractions of its own size */
+  ol_image: {
+    group: 'ol_object', atom: true, selectable: true,
+    attrs: { ...placeAttrs, ...commonAttrs, src: { default: '' }, cl: { default: 0 }, ct: { default: 0 }, cr: { default: 0 }, cb: { default: 0 } },
+    toDOM: olDOM('div', 'ol-image', false),
+    parseDOM: olParse('div', 'ol-image'),
+  },
+  /** objects that move, animate and select together */
+  ol_group: {
+    group: 'ol_object', content: 'ol_object+',
+    attrs: { ...commonAttrs },
+    toDOM: olDOM('div', 'ol-group', true),
+    parseDOM: olParse('div', 'ol-group'),
+  },
+  /** raw LaTeX in a positioned box (shown as its compiled image); `placed: false` — LaTeX of the page that is no object */
+  ol_raw: {
+    group: 'ol_object', atom: true, selectable: true,
+    attrs: { ...placeAttrs, ...commonAttrs, latex: { default: '' }, placed: { default: true } },
+    toDOM: olDOM('div', 'ol-raw', false),
+    parseDOM: olParse('div', 'ol-raw'),
+  },
+  /** speaker notes of a page (beamer's \note) */
+  ol_notes: {
+    content: 'block+', isolating: true,
+    toDOM: () => ['aside', { class: 'ol-notes' }, 0],
+    parseDOM: [{ tag: 'aside.ol-notes' }],
+  },
+};
+Object.assign(nodes, LAYOUT_NODES);
+
 function valueMark(name: string, dom: (v: string) => DOMOutputSpec, extra: Partial<MarkSpec> = {}): MarkSpec {
   return {
     attrs: { value: { default: 'on' } },
@@ -413,7 +481,8 @@ const marks: Record<string, MarkSpec> = {
   series: valueMark('series', v => ['span', { class: 'lyx-series-' + v, 'data-series': v }, 0], { parseDOM: [{ tag: 'span[data-series]', getAttrs: (d: HTMLElement) => ({ value: d.getAttribute('data-series') }) }, ...foreign(['b', 'strong'], 'bold'), ...fontStyle('font-weight', /^(bold|bolder|[6-9]00)$/, 'bold')] }),
   shape: valueMark('shape', v => ['span', { class: 'lyx-shape-' + v, 'data-shape': v }, 0]),
   family: valueMark('family', v => ['span', { class: 'lyx-family-' + v, 'data-family': v }, 0], { parseDOM: [{ tag: 'span[data-family]', getAttrs: (d: HTMLElement) => ({ value: d.getAttribute('data-family') }) }, ...foreign(['code', 'tt', 'kbd', 'samp'], 'typewriter')] }),
-  size: valueMark('size', v => ['span', { class: 'lyx-size-' + v, 'data-size': v }, 0]),
+  // a named LaTeX size (tiny … giant), or points ("25pt", "25pt/30pt"): `--ol-pt` is a point at the editor's zoom
+  size: valueMark('size', v => (/^\d/.test(v) ? ['span', { class: 'lyx-size-abs', 'data-size': v, style: `font-size: calc(var(--ol-pt) * ${parseFloat(v)})` }, 0] : ['span', { class: 'lyx-size-' + v, 'data-size': v }, 0])),
   bar: valueMark('bar', v => ['span', { class: 'lyx-bar-' + v, 'data-bar': v }, 0], { parseDOM: [{ tag: 'span[data-bar]', getAttrs: (d: HTMLElement) => ({ value: d.getAttribute('data-bar') }) }, ...foreign(['u'], 'under')] }),
   strikeout: valueMark('strikeout', v => ['span', { class: 'lyx-strikeout-' + v, 'data-strikeout': v }, 0], { parseDOM: [{ tag: 'span[data-strikeout]', getAttrs: (d: HTMLElement) => ({ value: d.getAttribute('data-strikeout') }) }, ...foreign(['s', 'strike', 'del'], 'on')] }),
   xout: valueMark('xout', v => ['span', { class: 'lyx-xout-' + v, 'data-xout': v }, 0]),

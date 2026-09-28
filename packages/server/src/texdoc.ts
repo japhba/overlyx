@@ -7,6 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseTex, writeTex, importLyx, type ParseTexResult } from '@overlyx/core/tex/index.ts';
 import type { LyxDocument } from '@overlyx/core';
+import { layoutTemplate, setHeaderValue } from '@overlyx/core';
+import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 import { config } from './config.ts';
 import { projectDir, findMaster, resolveProjectPath } from './projects.ts';
 
@@ -163,4 +165,18 @@ function isIncludedByAnyLyx(project: string, relPath: string): boolean {
     return false;
   };
   return walk(proj, 0);
+}
+
+/**
+ * A new layout document (slides, poster, page; core layout/templates.ts) written through the .tex
+ * writer, so its managed block (the layout macros, the page size) is there before the first edit
+ * and the file compiles right away.
+ */
+export function newLayoutDocumentText(project: string, relPath: string, preset: string, opts: { title?: string; author?: string }): string {
+  const tpl = layoutTemplate(preset, opts);
+  const doc = parseDocumentText(tpl.text, project, relPath).doc;
+  const before = [...doc.header.lines];
+  for (const [k, v] of Object.entries(tpl.settings)) setHeaderValue(doc.header, k, v);
+  doc.header.lines = markEditedSettings(before, doc.header.lines, Object.keys(tpl.settings));
+  return writeDocumentText(doc, project, relPath, false).text;
 }

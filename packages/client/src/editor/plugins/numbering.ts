@@ -131,7 +131,24 @@ function build(doc: PMNode): DecorationSet {
     prevLayout = layout; prevDepth = depth;
   };
 
+  // layout documents: the paragraphs of every text box (and the notes); lists restart per box
+  const walkLayout = (node: PMNode, pos: number) => {
+    node.forEach((child, off) => {
+      const p = pos + 1 + off;
+      if (child.type.name === 'ol_group') { walkLayout(child, p); return; }
+      if (child.type.name !== 'ol_box' && child.type.name !== 'ol_notes') return;
+      c.enumOpen.fill(false);
+      prevLayout = '';
+      child.forEach((para, poff) => {
+        if (para.type.name !== 'paragraph') return;
+        decorateParagraph(para, p + 1 + poff, true);
+        walkInsets(para, p + 1 + poff + 1, null);
+      });
+    });
+  };
+
   doc.forEach((para, off) => {
+    if (para.type.name === 'ol_page') { walkLayout(para, off); return; }
     if (para.type.name !== 'paragraph') return;
     decorateParagraph(para, off, false);
     walkInsets(para, off + 1, null);

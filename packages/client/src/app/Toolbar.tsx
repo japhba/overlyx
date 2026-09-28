@@ -51,6 +51,8 @@ export interface ToolButton {
   palette?: Palette;
   /** Goodnotes presets: the first click runs `action` (selects); only a click on the already `active` button opens `palette` */
   paletteWhenActive?: boolean;
+  /** an inline control instead of a button (the layout toolbar's position fields, the font size box) */
+  widget?: () => ComponentChildren;
 }
 export interface ToolbarProps {
   id: string;
@@ -450,7 +452,7 @@ export function Toolbar({ id, layouts, layout, onLayout, groups, label }: Toolba
   const names = layouts ? layouts.map(l => l.name) : [];
   if (layouts && layout && !names.includes(layout)) names.unshift(layout);
   return (
-    <div class={'toolbar toolbar-' + id} data-toolbar={id} onMouseDown={e => { const t = e.target as HTMLInputElement; if (t.tagName !== 'SELECT' && !(t.tagName === 'INPUT' && t.type === 'range')) e.preventDefault(); }}>
+    <div class={'toolbar toolbar-' + id} data-toolbar={id} onMouseDown={e => { const t = e.target as HTMLInputElement; if (t.tagName !== 'SELECT' && t.tagName !== 'INPUT') e.preventDefault(); }}>
       {label && <span class="tb-label">{label}</span>}
       {layouts && (
         <select value={layout} onChange={e => { const v = (e.target as HTMLSelectElement).value; recordUsage('toolbar', `layout ▸ ${v}`); onLayout?.(v); }} title="Paragraph layout (Alt+P …)">
@@ -460,7 +462,7 @@ export function Toolbar({ id, layouts, layout, onLayout, groups, label }: Toolba
       {groups.map((g, gi) => (
         <span key={gi} style="display:contents">
           {(gi > 0 || layouts || label) && <span class="tb-sep" />}
-          {g.map(b => b.palette ? <PaletteButton key={b.id} b={b} /> : (
+          {g.map(b => b.widget ? <span key={b.id} class="tb-widget" data-tb={b.id} title={b.title}>{b.widget()}</span> : b.palette ? <PaletteButton key={b.id} b={b} /> : (
             <button key={b.id} type="button" class={'tb-btn' + (b.active ? ' active' : '') + (b.kind === 'math' ? ' math' : '')} title={b.title} disabled={b.disabled} data-tb={b.id} onClick={e => { recordUsage('toolbar', b.id); tipFor(b, e.currentTarget); b.action?.(); }}>{btnIcon(b)}</button>
           ))}
         </span>

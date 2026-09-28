@@ -8,6 +8,9 @@
  */
 import { useEffect, useState } from 'preact/hooks';
 import { canonical, effectiveShortcut, keyFromEvent } from './keybindings';
+import { editorContext } from '../editor/context';
+import { isLayoutDoc } from '../editor/layout/commands';
+import { startPresentation } from '../editor/layout/present';
 
 export const PRESENTATION_ID = 'View ▸ Presentation mode';
 export const PRESENTATION_KEY = 'Shift+F11';
@@ -22,7 +25,12 @@ export function setPresenting(value: boolean): void {
   if (value) document.documentElement.dataset.presenting = '1'; else delete document.documentElement.dataset.presenting;
   listeners.forEach(l => l());
 }
-export function togglePresentation(): void { setPresenting(!on); }
+export function togglePresentation(): void {
+  // a layout document (slides, a poster) is presented page by page, full screen (editor/layout/present.ts)
+  const v = editorContext.activeView;
+  if (!on && v && !v.isDestroyed && isLayoutDoc(v.state.doc)) { startPresentation(v, { fromCurrent: true }); return; }
+  setPresenting(!on);
+}
 
 /** things whose own Escape comes first: a formula field, a dialog, a menu, an input */
 const OWN_ESCAPE = '.lm-input, [role=dialog], .dialog, .ctx-menu, .menubar, input, textarea, select';

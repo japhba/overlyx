@@ -150,6 +150,15 @@ export function escapeText(ctx: ExportContext, s: string): string {
 
 /* ----------------------------------------------------------------- fonts */
 
+/** An absolute size value of the size mark ("25pt", "25pt/33.5pt") as \fontsize arguments. */
+export function absoluteFontSize(v: string): { size: string; skip: string } | null {
+  const m = /^(\d+(?:\.\d+)?)pt(?:\/(\d+(?:\.\d+)?)pt)?$/.exec(v);
+  if (!m) return null;
+  const a = Number(m[1]);
+  const b = m[2] ? Number(m[2]) : Math.round(a * 1.2 * 100) / 100;
+  return { size: `${m[1]}`, skip: `${String(b)}` };
+}
+
 const SIZE_CMDS: Record<string, string> = {
   tiny: 'tiny', scriptsize: 'scriptsize', footnotesize: 'footnotesize', small: 'small', normal: 'normalsize',
   large: 'large', larger: 'Large', largest: 'LARGE', huge: 'huge', giant: 'Huge',
@@ -225,6 +234,11 @@ export function openFont(ctx: ExportContext, os: TexStream, rp: RunParams, f: Ef
   if (f.size) {
     const cmd = SIZE_CMDS[f.size];
     if (cmd) { os.write('{\\' + cmd); os.termcmd(); count++; }
+    else {
+      // an absolute size ("25pt", or "25pt/33.5pt" with its leading): \fontsize…\selectfont
+      const abs = absoluteFontSize(f.size);
+      if (abs) { os.write(`{\\fontsize{${abs.size}}{${abs.skip}}\\selectfont`); os.termcmd(); count++; }
+    }
   }
   if (f.family) { const cmd = FAMILY_CMDS[f.family]; if (cmd) w('\\' + cmd + '{'); }
   if (f.series) { const cmd = SERIES_CMDS[f.series]; if (cmd) w('\\' + cmd + '{'); }

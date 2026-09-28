@@ -19,6 +19,7 @@ import { Scanner, groupEnd, type Tok } from './scanner.ts';
 import { extractInkData } from '../ink.ts';
 import { makeHeaderLines, preambleFacts, splitDocument, type PreambleFacts } from './preamble.ts';
 import { parseTabular } from './table.ts';
+import { PAGE_LAYOUT, GROUP_LAYOUT, PAGE_PROPS_INSET, NOTES_INSET } from '../layout/model.ts';
 
 export interface ParseTexOptions {
   layoutDir?: string;
@@ -190,6 +191,20 @@ const NOTE_END = /^% @end\s*$/;
 
 /** the 1-based line of the scanner's position within its text (for messages) */
 function lineAt(s: Scanner): number { let n = 1; for (let i = 0; i < s.pos && i < s.s.length; i++) if (s.s.charCodeAt(i) === 10) n++; return n; }
+
+/** `\\fontsize{25}{30}` → "25pt" (leading 1.2 × the size), "25pt/33.5pt" otherwise; null for sizes that are no plain lengths */
+function absoluteSize(size: string, skip: string): string | null {
+  const num = (v: string) => { const m = /^\s*(\d+(?:\.\d+)?)\s*(pt)?\s*$/.exec(v); return m ? Number(m[1]) : null; };
+  const a = num(size), b = num(skip);
+  if (a === null || b === null || a <= 0) return null;
+  const f = (n: number) => String(Math.round(n * 100) / 100);
+  return Math.abs(b - 1.2 * a) < 0.051 ? `${f(a)}pt` : `${f(a)}pt/${f(b)}pt`;
+}
+
+/** a frame holding OverLyX layout objects is a layout page */
+const LAYOUT_OBJECT_RE = /\\(?:begin\{ol(?:box|group|raw)\}|ol(?:shape|image|page)(?![a-zA-Z]))/;
+/** where the next layout object starts (at the beginning of a line) */
+const LAYOUT_NEXT_RE = /\n[ \t]*\\(?:begin\{ol(?:box|group|raw)\}|ol(?:shape|image|page)(?![a-zA-Z])|note(?![a-zA-Z]))/g;
 
 class BodyParser {
   warnings: string[] = [];
@@ -580,6 +595,17 @@ class BodyParser {
       return null;
     }
     if (name === 'par') { this.endPar(ctx); return null; }
+    // an absolute font size, \fontsize{25}{30}\selectfont: the size mark "25pt" (with its leading when it is not 1.2 ×)
+    if (name === 'fontsize') {
+      const save = s.pos;
+      const a = s.readGroup(), b = a !== null ? s.readGroup() : null;
+      s.skipBlanks();
+      if (a !== null && b !== null && s.s.startsWith('\\selectfont', s.pos) && !/[a-zA-Z]/.test(s.s[s.pos + 11] ?? '')) {
+        const size = absoluteSize(a, b);
+        if (size) { s.pos += 11; while (s.s[s.pos] === ' ' || s.s[s.pos] === '\t') s.pos++; st.font.size = size; return null; }
+      }
+      s.pos = save;
+    }
     if (name === 'protect' || name === 'relax' || name === 'ignorespaces' || name === 'unskip' || name === 'leavevmode') return null;
     if (name === 'makeatletter') { s.atLetter = true; this.pushERT(ctx, st, '\\makeatletter' + (t.spaceAfter ? ' ' : '')); return null; }
     if (name === 'makeatother') { s.atLetter = false; this.pushERT(ctx, st, '\\makeatother' + (t.spaceAfter ? ' ' : '')); return null; }
@@ -640,7 +666,8 @@ class BodyParser {
 
     // insets defined by inset layouts (\footnote, \caption, \url, \code, ...)
     const il = this.cmdInsets.get(name);
-    if (il) { this.handleInsetCommand(s, ctx, st, il); return null; }
+    // beamer's overlay-aware font commands (Flex:Bold = \textbf<2>{…}) are fonts without an overlay
+    if (il && !(FONT_CMDS[name] && s.peekChar() !== '<')) { this.handleInsetCommand(s, ctx, st, il); return null; }
 
     // fonts
     const fc = FONT_CMDS[name];
@@ -1243,6 +1270,8 @@ class BodyParser {
       return;
     }
     if (env === 'minipage') { this.handleMinipage(s, ctx, st, 'Frameless'); return; }
+    // a page of a layout document: a frame that holds positioned objects (layout/model.ts)
+    if (env === 'frame' && ctx.owner === 'main' && this.tryLayoutPage(s, ctx)) return;
     // environments from the layout files
     const style = this.envStyles.get(env);
     if (style) { this.handleEnvLayout(s, ctx, st, env, style); return; }
@@ -1269,6 +1298,87 @@ class BodyParser {
     const r = this.parseText(s, ctx, cloneState(st), { env });
     this.envStack.pop();
     if (r === 'end') this.pushERT(ctx, st, `\\end{${env}}`);
+  }
+
+  /* ---------------------------------------------------------- layout pages */
+
+  /**
+   * `\begin{frame}[opts] … \end{frame}` holding OverLyX layout objects (\begin{olbox}, \olshape,
+   * \olimage, \begin{olgroup}, \begin{olraw}, \olpage, \note) → a paragraph of layout OLPage whose
+   * items are the object insets, in drawing order. Anything else in the frame is kept as unplaced
+   * raw LaTeX where it stood. A frame without layout objects is left to beamer's Frame layout.
+   */
+  private tryLayoutPage(s: Scanner, ctx: TextCtx): boolean {
+    const save = s.pos;
+    const opts = s.readOptional();
+    const inner = s.readUntilEnd('frame');
+    if (!LAYOUT_OBJECT_RE.test(inner)) { s.pos = save; return false; }
+    const sc = new Scanner(inner);
+    const items = this.parseLayoutObjects(sc, null);
+    let props = items.find(it => it.kind === 'inset' && it.inset.type === 'Leaf' && it.inset.name === PAGE_PROPS_INSET);
+    if (!props) { props = { kind: 'inset', font: {}, inset: { type: 'Leaf', name: PAGE_PROPS_INSET, arg: '', params: ['keys ', `frame ${opts ?? ''}`] } }; items.unshift(props); }
+    else if (props.kind === 'inset' && props.inset.type === 'Leaf') { props.inset.params.push(`frame ${opts ?? ''}`); items.splice(items.indexOf(props), 1); items.unshift(props); }
+    this.endPar(ctx);
+    ctx.pars.push({ layout: PAGE_LAYOUT, depth: 0, params: {}, items });
+    ctx.cur = null;
+    return true;
+  }
+
+  /** The objects of a page (or of a group, until `\end{olgroup}`). */
+  private parseLayoutObjects(sc: Scanner, endEnv: string | null): Item[] {
+    const items: Item[] = [];
+    const leaf = (name: string, params: string[]): Item => ({ kind: 'inset', font: {}, inset: { type: 'Leaf', name, arg: '', params } });
+    const unplaced = (latex: string) => { if (latex.trim()) items.push(leaf('OLRaw', ['keys ', 'latex ' + JSON.stringify(latex.replace(/^\s*\n|\s+$/g, '')), 'placed false'])); };
+    for (;;) {
+      const start = sc.pos;
+      while (sc.pos < sc.s.length && /\s/.test(sc.s[sc.pos])) sc.pos++;
+      if (sc.pos >= sc.s.length) break;
+      const rest = sc.s.slice(sc.pos, sc.pos + 20);
+      if (endEnv && rest.startsWith(`\\end{${endEnv}}`)) { sc.pos += `\\end{${endEnv}}`.length; break; }
+      const m = /^\\(?:begin\{(olbox|olgroup|olraw)\}|(olshape|olimage|olpage|note)(?![a-zA-Z]))/.exec(rest);
+      if (!m) {
+        // raw LaTeX up to the next object (or the end of the group / page)
+        LAYOUT_NEXT_RE.lastIndex = sc.pos;
+        const nx = LAYOUT_NEXT_RE.exec(sc.s);
+        let end = nx ? nx.index + nx[0].indexOf('\\') : sc.s.length;
+        if (endEnv) { const e = sc.s.indexOf(`\\end{${endEnv}}`, sc.pos); if (e >= 0 && e < end) end = e; }
+        if (end <= sc.pos) end = sc.s.length;
+        unplaced(sc.s.slice(start, end));
+        sc.pos = end;
+        continue;
+      }
+      const env = m[1], cmd = m[2];
+      sc.pos += m[0].length;
+      if (env === 'olbox') {
+        const keys = sc.readGroup() ?? '';
+        const pars = this.parseInsetEnv(sc, 'olbox', 'Plain Layout');
+        items.push({ kind: 'inset', font: {}, inset: { type: 'Text', name: 'OLBox', arg: '', params: ['keys ' + keys], paragraphs: pars } });
+      } else if (env === 'olgroup') {
+        const keys = sc.readGroup() ?? '';
+        const children = this.parseLayoutObjects(sc, 'olgroup');
+        items.push({ kind: 'inset', font: {}, inset: { type: 'Text', name: 'OLGroup', arg: '', params: ['keys ' + keys], paragraphs: [{ layout: GROUP_LAYOUT, depth: 0, params: {}, items: children }] } });
+      } else if (env === 'olraw') {
+        const keys = sc.readGroup() ?? '';
+        const latex = sc.readUntilEnd('olraw');
+        items.push(leaf('OLRaw', ['keys ' + keys, 'latex ' + JSON.stringify(latex.replace(/^[ \t]*\n/, '').replace(/\n[ \t]*$/, ''))]));
+      } else if (cmd === 'olshape') {
+        const keys = sc.readGroup() ?? '';
+        const d = sc.readGroup() ?? '';
+        items.push(leaf('OLShape', ['keys ' + keys, 'path ' + d.replace(/\s+/g, ' ').trim()]));
+      } else if (cmd === 'olimage') {
+        const keys = sc.readGroup() ?? '';
+        const src = sc.readGroup() ?? '';
+        items.push(leaf('OLImage', ['keys ' + keys, 'src ' + src.trim()]));
+      } else if (cmd === 'olpage') {
+        items.push(leaf(PAGE_PROPS_INSET, ['keys ' + (sc.readGroup() ?? '')]));
+      } else if (cmd === 'note') {
+        const opt = sc.readOptional();
+        const text = sc.readGroup();
+        if (text === null || opt !== null) { unplaced(sc.s.slice(start, sc.pos)); continue; }
+        items.push({ kind: 'inset', font: {}, inset: { type: 'Text', name: NOTES_INSET, arg: '', params: [], paragraphs: this.parseInsetString(text, 'Plain Layout') } });
+      }
+    }
+    return items;
   }
 
   /** \begin{minipage}[pos][height][inner]{width} (the environment name has been read) → a Box inset. */

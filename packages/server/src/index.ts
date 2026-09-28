@@ -19,7 +19,8 @@ import { authMiddleware, authRouter, requireAuth, createUser, createGuest, gener
 import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
 import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile, isDocumentFile } from './projects.ts';
-import { cachedParseFile, importLyxFile, parseDocumentText, parseFragmentText } from './texdoc.ts';
+import { snippetSvg, snippetFile } from './snippets.ts';
+import { cachedParseFile, importLyxFile, parseDocumentText, parseFragmentText, newLayoutDocumentText } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
 import { extractZip, bundledZips, projectNameFromZip } from './zip.ts';
 import { pdfLinkByToken, pdfLinksOf, createPdfLink, deletePdfLink, countHit, pdfForLink, pdfLinkFileName, linkableDocs } from './pdflinks.ts';
@@ -552,7 +553,8 @@ api.post('/projects/:project/new', needProject('edit'), (req, res) => {
     const abs = resolveProjectPath(req.params.project, rel);
     if (fs.existsSync(abs)) { res.status(409).json({ error: 'file exists' }); return; }
     fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, newDocumentText({ textclass: req.body?.textclass, title: req.body?.title, author: req.user?.name }), 'utf8');
+    const layout = typeof req.body?.layout === 'string' ? req.body.layout : null;
+    fs.writeFileSync(abs, layout ? newLayoutDocumentText(req.params.project, rel, layout, { title: req.body?.title, author: req.user?.name }) : newDocumentText({ textclass: req.body?.textclass, title: req.body?.title, author: req.user?.name }), 'utf8');
     touchProject(req.params.project, req.user!.id);
     res.json({ id: `${req.params.project}/${rel}` });
   } catch (e) { res.status(400).json({ error: String(e) }); }
@@ -1031,6 +1033,23 @@ api.post('/docs/*/ai/complete', async (req, res) => {
 });
 
 /** The document's LaTeX source (what the file on disk contains once saved); `?map=1`: as JSON with the source map (paragraph → character range). */
+/** A raw LaTeX object of a layout page, typeset with the document's preamble (snippets.ts): the URL of its SVG. */
+api.post('/docs/*/snippet', async (req, res) => {
+  try {
+    const latex = String(req.body?.latex ?? '');
+    const w = Number(req.body?.w), h = Number(req.body?.h);
+    if (!latex.trim() || latex.length > 64 * 1024 || !(w > 0) || !(h > 0)) { res.status(400).json({ error: 'bad snippet' }); return; }
+    const key = await snippetSvg(docId(req), latex, w, h);
+    res.json({ url: `/api/snippets/${key}.svg` });
+  } catch (e) { res.status(422).json({ error: String((e as Error).message ?? e) }); }
+});
+api.get('/snippets/:key.svg', (req, res) => {
+  const f = snippetFile(String(req.params.key));
+  if (!f) { res.status(404).end(); return; }
+  res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+  res.type('image/svg+xml').sendFile(f);
+});
+
 api.get('/docs/*/tex', async (req, res) => {
   try {
     const doc = await manager.open(docId(req));
