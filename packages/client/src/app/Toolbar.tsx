@@ -163,6 +163,7 @@ export const ICONS: Record<string, string> = {
   valignbottom: '<svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" fill="none" stroke="#bbb"/><path d="M4 9.5h8M4 12h5" stroke="currentColor" stroke-width="1.5"/></svg>',
   rotatecell: '<svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" fill="none" stroke="#bbb"/><text x="9" y="13" font-size="9" font-family="serif" transform="rotate(-90 9 9)">ab</text></svg>',
   rotatetable: '<svg viewBox="0 0 16 16"><rect x="3" y="2" width="10" height="12" fill="none" stroke="currentColor"/><path d="M3 6h10M3 10h10" stroke="currentColor"/><path d="M14 1a4 4 0 010 5" fill="none" stroke="currentColor"/></svg>',
+  colwidth: '<svg viewBox="0 0 16 16"><path d="M2 1.5v13M14 1.5v13" stroke="#bbb"/><path d="M4 4h8M4 7h8M4 10h8M4 13h4.5" stroke="currentColor" stroke-width="1.4"/></svg>',
   multicolumn: '<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" fill="none" stroke="currentColor"/><path d="M1.5 8h13M6 8v5.5M10.5 8v5.5" stroke="currentColor"/><path d="M4 5.5h8M10 4l2 1.5-2 1.5" fill="none" stroke="currentColor"/></svg>',
   multirow: '<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" fill="none" stroke="currentColor"/><path d="M8 2.5v11M8 6h6.5M8 10h6.5" stroke="currentColor"/><path d="M4.5 4v8M3 10l1.5 2 1.5-2" fill="none" stroke="currentColor"/></svg>',
   tablesettings: '<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" fill="none" stroke="currentColor"/><path d="M1.5 6.5h13M6 2.5v11" stroke="currentColor"/><circle cx="11" cy="10.5" r="2.2" fill="#fff" stroke="currentColor"/></svg>',
@@ -341,6 +342,41 @@ export function TableSizePicker({ onPick, close, max = 10 }: { onPick: (rows: nu
     <div class="tb-tablepick" onMouseDown={e => e.preventDefault()}>
       <div class="tb-grid" style={{ gridTemplateColumns: `repeat(${max}, 14px)` }}>{cells}</div>
       <div class="tb-grid-label">{hover[0]} × {hover[1]} table</div>
+    </div>
+  );
+}
+
+/** a column width kind, as tablecommands.ts ColumnWidthKind has it */
+export type ColumnWidthChoice = 'natural' | 'variable' | 'fixed';
+
+/**
+ * Popup of the table toolbar's column width button: the three ways LaTeX makes a column as wide as
+ * it is — natural l / c / r (never wraps), variable X (wraps; the X columns share what the others
+ * leave of the table width, as tabularx sets them) and fixed p{…} (wraps at the width typed). `kind`
+ * is the cursor column's ('special': its own LaTeX spec decides); in a multi-column cell the width is
+ * the cell's own, which cannot be an X column.
+ */
+export function ColumnWidthPicker({ kind, width, multicolumn, valid, onPick, close }: { kind: string | null; width: string; multicolumn: boolean; valid: (w: string) => boolean; onPick: (kind: ColumnWidthChoice, width?: string) => void; close: () => void }) {
+  const [w, setW] = useState(width || '5cm');
+  const pick = (k: ColumnWidthChoice, wd?: string) => { close(); onPick(k, wd); };
+  const special = kind === 'special';
+  const ok = valid(w);
+  return (
+    <div class="tb-colwidth" data-colwidth-palette>
+      <button type="button" class={'tb-cw' + (kind === 'natural' ? ' active' : '')} data-colwidth="natural" disabled={special} onMouseDown={e => e.preventDefault()} onClick={() => pick('natural')}>
+        <code>l c r</code><span><b>Natural</b> — as wide as its text, never wraps</span>
+      </button>
+      <button type="button" class={'tb-cw' + (kind === 'variable' ? ' active' : '')} data-colwidth="variable" disabled={special || multicolumn} onMouseDown={e => e.preventDefault()} onClick={() => pick('variable')}
+        title={multicolumn ? 'A multi-column cell cannot be an X column: give it a fixed width' : 'tabularx: the X columns share what the other columns leave of the table width (Table settings ▸ Table width; the text width when none is set)'}>
+        <code>X</code><span><b>Wrap to fill the table</b> — the wrapping columns share the table width</span>
+      </button>
+      <form class={'tb-cw' + (kind === 'fixed' ? ' active' : '')} data-colwidth="fixed" onSubmit={e => { e.preventDefault(); if (ok && !special) pick('fixed', w); }}>
+        <code>p{'{…}'}</code><span><b>Wrap at</b></span>
+        <input type="text" value={w} size={10} class={ok ? '' : 'invalid'} disabled={special} spellcheck={false} title="A LaTeX length: 5cm, 1.5in, 30% (of the text width), 0.4\linewidth"
+          onMouseDown={e => e.stopPropagation()} onInput={e => setW((e.target as HTMLInputElement).value)} />
+        <button type="submit" class="small-btn" disabled={!ok || special} onMouseDown={e => e.preventDefault()}>Set</button>
+      </form>
+      <div class="tb-cw-note">{special ? 'This column has its own LaTeX column spec (Table settings), which decides its width.' : multicolumn ? 'In a multi-column cell: the width of this cell.' : 'For the cursor’s column, or every selected column.'}</div>
     </div>
   );
 }

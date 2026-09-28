@@ -27,6 +27,7 @@ import { fontCarryPlugin } from './plugins/fontcarry';
 import { insetCaretPlugin } from './plugins/insetcaret';
 import { envFocusPlugin } from './plugins/envfocus';
 import { wideTablesPlugin } from './plugins/widetables';
+import { tabularxPlugin } from './plugins/tabularx';
 import { dragSelectPlugin } from './plugins/dragselect';
 import { findPlugin } from './plugins/find';
 import { mirrorCaretPlugin } from './plugins/mirrorcaret';
@@ -123,6 +124,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     tableEditing(),
     envFocusPlugin(),
     wideTablesPlugin(),   // tables alone on their line: centred, a wide one spills into both margins
+    tabularxPlugin(),   // X columns (variable width) share what the other columns leave of the table width
     numberingPlugin(),
     marginPlugin(o.marginMode),
     ...(o.ink ? [o.ink] : []),

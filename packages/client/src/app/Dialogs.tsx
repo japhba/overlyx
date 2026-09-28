@@ -3,10 +3,11 @@ import { formatShortcut } from './shortcuts';
 import type { ComponentChildren } from 'preact';
 import type { DocMeta, ProjectFile, BibItem } from '../api';
 import type { GraphicsOpts, TableChanges } from '../editor/commands';
+import type { ColumnWidthKind } from '../editor/tablecommands';
 import { api, graphicsUrl } from '../api';
 import type { LitHit, BibAddResult } from '../api';
 import type { Node as PMNode } from 'prosemirror-model';
-import { paramMap, unquote, moduleWarnings, markEditedSettings } from '@overlyx/core';
+import { paramMap, unquote, moduleWarnings, markEditedSettings, columnWidthLength } from '@overlyx/core';
 import { resolveDocPath, toDocRel as docRelPath } from '../editor/context';
 import type { EditorView } from 'prosemirror-view';
 import { referenceTargets, type ReferenceOptions } from '../editor/references';
@@ -573,13 +574,18 @@ export function TableSettingsDialog({ initial, onApply, onClose }: { initial: Ta
   const [column, setColumn] = useState<Record<string, string>>(mk(initial.column));
   const [row, setRow] = useState<Record<string, string>>(mk(initial.row));
   const [table, setTable] = useState<Record<string, string>>(mk(initial.table));
+  // LyX's column width type (GuiTabular columnTypeCO): natural l/c/r, variable X, fixed p{…}
+  const [colKind, setColKind] = useState<ColumnWidthKind>(() => { const w = initial.column.get('width'); return w && parseFloat(w) !== 0 ? 'fixed' : initial.column.get('varwidth') === 'true' ? 'variable' : 'natural'; });
+  const pickColKind = (k: ColumnWidthKind) => { setColKind(k); setColumn(p => ({ ...p, varwidth: k === 'variable' ? 'true' : '', width: k === 'fixed' ? (p.width || '5cm') : '' })); };
   const diff = (before: Map<string, string>, after: Record<string, string>): [string, string | null][] => {
     const out: [string, string | null][] = [];
     for (const [k, val] of Object.entries(after)) if (before.get(k) !== val) out.push([k, val === '' ? null : val]);
     for (const k of before.keys()) if (!(k in after)) out.push([k, null]);
     return out;
   };
-  const apply = () => { onApply({ cell: diff(initial.cell, cell), column: diff(initial.column, column), row: diff(initial.row, row), table: diff(initial.table, table) }); onClose(); };
+  // a width typed as "30%" or "0.3\linewidth" is stored as the LyX length (30col%, 30line%)
+  const lengths = (st: Record<string, string>, ...keys: string[]) => { const out = { ...st }; for (const k of keys) if (out[k]) out[k] = columnWidthLength(out[k]) ?? out[k]; return out; };
+  const apply = () => { onApply({ cell: diff(initial.cell, lengths(cell, 'width')), column: diff(initial.column, lengths(column, 'width')), row: diff(initial.row, row), table: diff(initial.table, lengths(table, 'tabularwidth')) }); onClose(); };
   const field = (st: Record<string, string>, setSt: (f: (p: Record<string, string>) => Record<string, string>) => void) => ({
     sel: (k: string, opts: (string | [string, string])[]) => <select value={st[k] ?? ''} onChange={e => { const val = (e.target as HTMLSelectElement).value; setSt(p => ({ ...p, [k]: val })); }}>{opts.map(o => { const [val, label] = Array.isArray(o) ? o : [o, o]; return <option key={val} value={val}>{label}</option>; })}</select>,
     bool: (k: string) => <input type="checkbox" checked={st[k] === 'true'} onChange={e => { const c = (e.target as HTMLInputElement).checked; setSt(p => ({ ...p, [k]: c ? 'true' : '' })); }} />,
@@ -602,7 +608,11 @@ export function TableSettingsDialog({ initial, onApply, onClose }: { initial: Ta
       {tab === 'column' && <>
         <Row label="Horizontal alignment">{col.sel('alignment', H_ALIGN.slice(1))}</Row>
         <Row label="Vertical alignment">{col.sel('valignment', V_ALIGN.slice(1))}</Row>
-        <Row label="Width">{col.text('width', 'e.g. 3cm (empty/0pt = automatic)')}</Row>
+        <Row label="Width"><select value={colKind} onChange={e => pickColKind((e.target as HTMLSelectElement).value as ColumnWidthKind)}>
+          <option value="natural">Natural (l c r): as wide as its text</option>
+          <option value="variable">Variable (X): wraps, sharing the table width</option>
+          <option value="fixed">Fixed (p{'{…}'}): wraps at</option>
+        </select>{colKind === 'fixed' && col.text('width', 'e.g. 3cm, 30%, 0.4\\linewidth')}</Row>
         <Row label="LaTeX column spec">{col.text('special', 'e.g. p{3cm} or >{\\raggedright}X (overrides the above)')}</Row>
       </>}
       {tab === 'row' && <>
@@ -619,7 +629,7 @@ export function TableSettingsDialog({ initial, onApply, onClose }: { initial: Ta
       </>}
       {tab === 'table' && <>
         <Row label="Vertical alignment">{t.sel('tabularvalignment', [['', 'Middle (default)'], ['top', 'Top'], ['middle', 'Middle'], ['bottom', 'Bottom']])}</Row>
-        <Row label="Table width">{t.text('tabularwidth', 'e.g. 100col% (empty = automatic)')}</Row>
+        <Row label="Table width">{t.text('tabularwidth', 'e.g. 100col% (X columns fill it; empty: the text width)')}</Row>
         <Row label="Rotate">{t.sel('rotate', [['', 'No'], ['90', '90°'], ['-90', '−90°']])}</Row>
         <Row label="Booktabs style">{t.bool('booktabs')}</Row>
         <Row label="Long table">{t.bool('islongtable')} <span class="sub">(multi-page)</span>{table.islongtable === 'true' && t.sel('longtabularalignment', ['center', 'left', 'right'])}</Row>

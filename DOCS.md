@@ -391,7 +391,17 @@ blend.
   **Tables are as wide as LaTeX sets them**: `l` / `c` / `r` columns take their content's width and never
   wrap, a `p{…}` / `m{…}` / `b{…}` column (or a `\multicolumn{n}{p{…}}`) gets its width from the
   table's `<colgroup>` and wraps there (core `schema.ts` `lyxLengthCss`: `cm`/`in`/`pt`…, and
-  `30text%` / `0.3\linewidth` of the text column, `--ol-column`). A **table on a line of its own** — a
+  `30text%` / `0.3\linewidth` of the text column, `--ol-column`), and the `X` columns of a
+  `tabularx` (LyX's variable-width columns, `varwidth="true"`) wrap and share equally what the other
+  columns leave of the table width — Table width, else `\columnwidth` — as tabularx sets them: the
+  schema draws them `calc((width − var(--ol-xrest)) / n)` and `editor/plugins/tabularx.ts` measures
+  `--ol-xrest`, the other columns' drawn width. **Wrapping text in a column** is the table toolbar's
+  column width palette (also Table settings ▸ This column ▸ Width, Edit ▸ Table, and the right-click
+  menu's "Wrap text in this column"): LyX 2.4's three kinds — natural (`l c r`), variable (`X`,
+  wraps to fill the table) and fixed (`p{…}`, a width typed as `5cm`, `30%` or `0.4\linewidth`,
+  stored as the LyX length) — with `Tabular::setColumnPWidth`'s side effects
+  (`tablecommands.ts setColumnWidth`); a multi-column cell takes a width of its own (never `X`).
+  A **table on a line of its own** — a
   tabular, or a formula that is one `matrix` / `pmatrix` / `array` … (a table typed as
   `$\begin{matrix}…\end{matrix}$`) alone in its paragraph, blanks, labels, a caption, a display formula
   or a figure beside it allowed (`editor/plugins/widetables.ts`) — is centred on the text column; one

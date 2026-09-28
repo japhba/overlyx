@@ -67,6 +67,22 @@ test('table settings: cell alignment, row lines and table features', async ({ pa
   await expect.poll(() => /\\multicolumn\{1\}\{[^}]*r[^}]*\}/.test(file()) && file().includes('\\toprule'), { timeout: 10000 }).toBe(true);
   // the first row lost its bottom line: only the top rule and the rules of the other rows remain
   expect((file().match(/\\(top|mid|bottom)rule/g) ?? []).length).toBe(3);
+  // the column width (LyX's natural / variable / fixed): a fixed width typed as 30% is stored as 30col%
+  await page.locator('.lyx-editor .lyx-cell').first().click();
+  await openDialog(page, 'tablesettings');
+  await page.locator('.dialog .panel-tabs button', { hasText: 'This column' }).click();
+  await row(page, 'Width').locator('select').selectOption('fixed');
+  await row(page, 'Width').locator('input').fill('30%');
+  await apply(page);
+  await expect.poll(() => file().includes('p{0.3\\columnwidth}'), { timeout: 10000 }).toBe(true);
+  // variable: an X column of a tabularx as wide as the text
+  await page.locator('.lyx-editor .lyx-cell').first().click();
+  await openDialog(page, 'tablesettings');
+  await page.locator('.dialog .panel-tabs button', { hasText: 'This column' }).click();
+  await expect(row(page, 'Width').locator('input')).toHaveValue('30col%');
+  await row(page, 'Width').locator('select').selectOption('variable');
+  await apply(page);
+  await expect.poll(() => /\\begin\{tabularx\}\{\\columnwidth\}\{[^\n]*X/.test(file()) && !file().includes('p{0.3'), { timeout: 10000 }).toBe(true);
 });
 
 test('document settings: a new branch is kept in the settings line', async ({ page }) => {

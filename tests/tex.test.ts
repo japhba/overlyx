@@ -257,6 +257,21 @@ describe('floats, graphics, tables, boxes', () => {
     expect(bodyOf(out)).toContain('\\multirow{2}{*}{tall}');
   });
 
+  it('tabularx: X columns keep their alignment (>{\\raggedright\\arraybackslash}X) and the table width', () => {
+    const src = doc('\\begin{tabularx}{\\linewidth}{l>{\\raggedright\\arraybackslash}XX}\na & wraps & justified \\\\\n\\end{tabularx}');
+    const d = parse(src);
+    const t = [...walkInsets(d.body)].map(x => x.inset).find(i => i.type === 'Tabular') as { columns: { attrs: [string, string][] }[]; features: [string, string][] };
+    const col = (c: number, k: string) => t.columns[c].attrs.find(a => a[0] === k)?.[1];
+    expect([col(0, 'alignment'), col(0, 'varwidth')]).toEqual(['left', undefined]);
+    expect([col(1, 'alignment'), col(1, 'varwidth')]).toEqual(['left', 'true']);
+    expect([col(2, 'alignment'), col(2, 'varwidth')]).toEqual(['block', 'true']);
+    expect(t.features.find(f => f[0] === 'tabularwidth')?.[1]).toBe('100line%');
+    const out = expectStable(src);
+    // (LyX's Length::asLatexString: 100line% is 1\\linewidth)
+    expect(bodyOf(out)).toContain('\\begin{tabularx}{1\\linewidth}{l>{\\raggedright\\arraybackslash}XX}');
+    expect(out).toContain('\\usepackage{tabularx}');
+  });
+
   it('booktabs and a longtable', () => {
     const src = doc('\\begin{tabular}{ll}\n\\toprule\nh1 & h2 \\\\\n\\midrule\na & b \\\\\n\\bottomrule\n\\end{tabular}\n\n\\begin{longtable}{cc}\n1 & 2 \\\\\n\\end{longtable}');
     const d = parse(src);

@@ -7,6 +7,7 @@ import type { DocMeta } from '../api';
 import type { MenuDef, MenuEntry } from './MenuBar';
 import { NAMED_COLORS } from './Toolbar';
 import * as C from '../editor/commands';
+import * as T from '../editor/tablecommands';
 import { isMac } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import { changeAt, resolveChange, acceptAllChanges, rejectAllChanges } from '../editor/plugins/changes';
@@ -102,6 +103,9 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
         { label: 'Top line on/off', action: () => toggleCellLine('topline') }, { label: 'Bottom line on/off', action: () => toggleCellLine('bottomline') },
         { label: 'Left line on/off', action: () => toggleCellLine('leftline') }, { label: 'Right line on/off', action: () => toggleCellLine('rightline') },
         { label: 'Align cell left', action: () => run(C.setCellAttr('alignment', 'left')) }, { label: 'Align cell center', action: () => run(C.setCellAttr('alignment', 'center')) }, { label: 'Align cell right', action: () => run(C.setCellAttr('alignment', 'right')) },
+        { sep: true },
+        { label: 'Column: natural width (l c r, no wrapping)', action: () => run(T.setColumnWidth('natural')) },
+        { label: 'Column: wrap text, filling the table width (X)', action: () => run(T.setColumnWidth('variable')) },
         { sep: true },
         { label: 'Delete table', action: () => run(deleteTable) },
         { sep: true },

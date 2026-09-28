@@ -12,6 +12,7 @@ import type { MenuItem } from './contextmenu';
 import { editorContext, viewDocDir, viewProject } from './context';
 import { clipboardMenuItems, selectionCovers, MOD } from './clipmenu';
 import * as C from './commands';
+import { tableToolbarState, setColumnWidth } from './tablecommands';
 import { changeAt, resolveChange } from './plugins/changes';
 import { fileUrl, graphicsUrl } from '../api';
 import { STANDARD_LAYOUTS } from './layouts';
@@ -233,7 +234,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
       { label: 'TeX code (ERT)', action: run(C.insertERT) },
     ] },
     ...sectionItems(view),
-    ...(C.tableContext(view.state) ? [{ label: 'Table settings…', icon: 'table', action: () => editorContext.openDialog?.('tablesettings') } as MenuItem] : []),
+    ...(C.tableContext(view.state) ? tableItems(view, run) : []),
     { label: 'Track changes', icon: 'track', sub: [
       { label: 'Track changes', checked: editorContext.trackChanges, action: () => editorContext.ui?.toggleTrackChanges() },
       { label: 'Accept all changes', action: () => editorContext.ui?.acceptAll?.() },
@@ -245,6 +246,16 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
     { label: (isMac ? '⇧' : 'Shift+') + 'right-click: the browser menu', info: true },
   );
   return items;
+}
+
+/** in a table: wrapping the column's text on and off (an X column, or back to l / c / r), the settings */
+function tableItems(view: EditorView, run: (cmd: Command) => () => void): MenuItem[] {
+  const st = tableToolbarState(view.state);
+  const wraps = st.colWidth === 'variable' || st.colWidth === 'fixed';
+  return [
+    ...(st.colWidth === 'special' || (st.multicolumnWidth && !wraps) ? [] : [{ label: 'Wrap text in this column', checked: wraps, action: run(setColumnWidth(wraps ? 'natural' : 'variable')) }]),
+    { label: 'Table settings…', icon: 'table', action: () => editorContext.openDialog?.('tablesettings') },
+  ];
 }
 
 function pushInsetItems(view: EditorView, node: PMNode, pos: number, items: MenuItem[]): void {

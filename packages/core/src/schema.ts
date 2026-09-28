@@ -37,12 +37,52 @@ export function lyxLengthCss(v: string | undefined | null): string | null {
   if (m) return `calc(var(--ol-column, 720px) * ${m[1] ? +Number(m[1]).toFixed(4) : 1})`;
   return null;
 }
-const widthOf = (attrs: [string, string][]) => lyxLengthCss(attrs.find(([k]) => k === 'width')?.[1]);
-/** the table's <colgroup>: a p{…} / m{…} / b{…} column gets its width — the text in it wraps there, as in LaTeX; l / c / r columns take their content's width */
-function colgroupDOM(columns: string): DOMOutputSpec {
-  let cols: [string, string][][] = [];
+/**
+ * A width typed for a fixed-width table column (client tablecommands.ts setColumnWidth, the Table
+ * Settings dialog) as the LyX length the file stores, or null when it is none
+ * (or zero): "3cm", "1.5in", "30col%" (of the text column; "30%" is taken for that), "40text%",
+ * "0.3\linewidth" / "\textwidth" (→ 30line% / 100text%, as tex2lyx reads them).
+ */
+export function columnWidthLength(input: string | undefined | null): string | null {
+  let t = (input ?? '').trim().replace(/\s+/g, '');
+  if (/^\d*\.?\d+%$/.test(t)) t = t.slice(0, -1) + 'col%';
+  const rel = /^(\d*\.?\d+)?\\(textwidth|columnwidth|linewidth)$/.exec(t);
+  if (rel) t = `${+((rel[1] ? Number(rel[1]) : 1) * 100).toFixed(4)}${({ textwidth: 'text%', columnwidth: 'col%', linewidth: 'line%' } as Record<string, string>)[rel[2]]}`;
+  // lyxLengthCss knows the units LyX does (and px, which is no TeX unit)
+  if (/px$/.test(t) || !lyxLengthCss(t) || !(parseFloat(t) > 0)) return null;
+  return t;
+}
+
+const attrOf = (attrs: [string, string][], key: string) => attrs.find(([k]) => k === key)?.[1];
+/** a width LyX writes (it writes none for zero) as CSS */
+const widthOf = (attrs: [string, string][]) => { const v = attrOf(attrs, 'width'); return v && parseFloat(v) === 0 ? null : lyxLengthCss(v); };
+/**
+ * A variable-width column (LyX's `varwidth="true"`, an X column of tabularx): no fixed width and no
+ * LaTeX spec of its own (either wins in Tabular::latex).
+ */
+export function isVarwidthColumn(attrs: [string, string][]): boolean {
+  return Array.isArray(attrs) && attrOf(attrs, 'varwidth') === 'true' && !attrOf(attrs, 'special') && !widthOf(attrs);
+}
+/**
+ * The table's <colgroup>: a p{…} / m{…} / b{…} column gets its width — the text in it wraps there, as
+ * in LaTeX; l / c / r columns take their content's width. X columns share equally what the other
+ * columns leave of the table width, as tabularx sets them: the table width (Table width; else
+ * \columnwidth, the text column) less `--ol-xrest`, the other columns' width, which the client's
+ * tabularx plugin measures and sets on the table (until then they split the whole width).
+ */
+function colgroupDOM(columns: string, features: string): DOMOutputSpec {
+  let cols: [string, string][][] = [], feats: [string, string][] = [];
   try { cols = JSON.parse(columns || '[]'); } catch { /* an empty group */ }
-  return ['colgroup', ...cols.map(c => { const w = Array.isArray(c) ? widthOf(c) : null; return w ? ['col', { style: `width: ${w}` }] : ['col']; })] as unknown as DOMOutputSpec;
+  try { feats = JSON.parse(features || '[]'); } catch { /* no table width */ }
+  const nx = cols.filter(isVarwidthColumn).length;
+  const tw = Array.isArray(feats) ? widthOf([['width', attrOf(feats, 'tabularwidth') ?? '']]) : null;
+  const xw = `width: calc((${tw ?? 'var(--ol-column, 720px)'} - var(--ol-xrest, 0px)) / ${nx})`;
+  return ['colgroup', ...cols.map(c => {
+    if (!Array.isArray(c)) return ['col'];
+    if (isVarwidthColumn(c)) return ['col', { class: 'ol-xcol', style: xw }];
+    const w = widthOf(c);
+    return w ? ['col', { style: `width: ${w}` }] : ['col'];
+  })] as unknown as DOMOutputSpec;
 }
 
 const LAYOUT_OF_TAG: Record<string, string> = { h1: 'Section', h2: 'Subsection', h3: 'Subsubsection', h4: 'Paragraph', h5: 'Subparagraph', h6: 'Subparagraph', li: 'Itemize' };
@@ -196,7 +236,7 @@ const nodes: Record<string, NodeSpec> = {
     tableRole: 'table',
     isolating: true,
     attrs: { attrs: jsonAttr([]), features: jsonAttr([]), columns: jsonAttr([]) },
-    toDOM: node => ['span', { class: 'lyx-tabular', 'data-attrs': node.attrs.attrs, 'data-features': node.attrs.features, 'data-columns': node.attrs.columns }, ['table', colgroupDOM(node.attrs.columns), ['tbody', 0]]],
+    toDOM: node => ['span', { class: 'lyx-tabular', 'data-attrs': node.attrs.attrs, 'data-features': node.attrs.features, 'data-columns': node.attrs.columns }, ['table', colgroupDOM(node.attrs.columns, node.attrs.features), ['tbody', 0]]],
     parseDOM: [
       { tag: 'span.lyx-tabular', contentElement: 'tbody', getAttrs: (d: HTMLElement) => ({ attrs: jsonFrom(d, 'data-attrs', '[]'), features: jsonFrom(d, 'data-features', '[]'), columns: jsonFrom(d, 'data-columns', '[]') }) },
       // a foreign HTML table: columns get LyX's defaults (the converter fills in what is missing)

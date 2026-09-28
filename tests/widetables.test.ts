@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 /**
- * Tables as LaTeX sets them (core schema.ts): p{…} column widths as CSS in the table's <colgroup>;
+ * Tables as LaTeX sets them (core schema.ts): p{…} column widths as CSS in the table's <colgroup>,
+ * X columns sharing what the others leave of the table width (client editor/plugins/tabularx.ts);
  * which paragraphs hold a table alone on its line (client editor/plugins/widetables.ts), and that the
  * marks follow edits.
  */
@@ -9,9 +10,10 @@ import { DOMSerializer } from 'prosemirror-model';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { schema, lyxLengthCss } from '../packages/core/src/schema.ts';
 import { isTableFormula, isSoloTable, wideTablesPlugin, wideTablesKey } from '../packages/client/src/editor/plugins/widetables.ts';
+import { tabularxPlugin, tabularxKey, xColumns } from '../packages/client/src/editor/plugins/tabularx.ts';
 
 const cell = (text: string, attrs: [string, string][] = [['alignment', 'left']]) => schema.nodes.table_cell.create({ attrs: JSON.stringify(attrs) }, schema.nodes.paragraph.create({ layout: 'Plain Layout' }, text ? schema.text(text) : undefined));
-const table = (columns: [string, string][][]) => schema.nodes.table.create({ columns: JSON.stringify(columns) }, schema.nodes.table_row.create(null, columns.map((_, i) => cell('c' + i))));
+const table = (columns: [string, string][][], features: [string, string][] = []) => schema.nodes.table.create({ columns: JSON.stringify(columns), features: JSON.stringify(features) }, schema.nodes.table_row.create(null, columns.map((_, i) => cell('c' + i))));
 const par = (...content: any[]) => schema.nodes.paragraph.create(null, content);
 const math = (latex: string) => schema.nodes.math_inline.create({ latex });
 
@@ -40,6 +42,41 @@ describe('column widths', () => {
     expect(dom.querySelector('table > colgroup + tbody')).not.toBeNull();
     // the cells are still the table's content, and read back without the colgroup
     expect(dom.querySelectorAll('tbody td').length).toBe(3);
+  });
+});
+
+describe('X columns (variable width, tabularx)', () => {
+  const X: [string, string][] = [['alignment', 'block'], ['varwidth', 'true']];
+  const styles = (t: ReturnType<typeof table>) => ((schema.nodes.table.spec.toDOM!(t) as any[])[2][1] as any[]).slice(1).map(c => c[1]?.style ?? null);
+
+  it('share the table width less the other columns (--ol-xrest), the text width when the table has none', () => {
+    expect(styles(table([[['alignment', 'left']], X, X]))).toEqual([null, 'width: calc((var(--ol-column, 720px) - var(--ol-xrest, 0px)) / 2)', 'width: calc((var(--ol-column, 720px) - var(--ol-xrest, 0px)) / 2)']);
+    expect(styles(table([X, [['alignment', 'left'], ['width', '2cm']]], [['tabularwidth', '50col%']]))).toEqual(['width: calc((calc(var(--ol-column, 720px) * 0.5) - var(--ol-xrest, 0px)) / 1)', 'width: 2cm']);
+    // a width or a LaTeX spec of its own wins over varwidth (Tabular::latex)
+    expect(styles(table([[...X, ['width', '3cm']], [...X, ['special', 'S']]]))).toEqual(['width: 3cm', null]);
+    expect(xColumns(table([[['alignment', 'left']], X]))).toEqual([false, true]);
+    expect(xColumns(table([[['alignment', 'left']], [...X, ['width', '3cm']]]))).toBeNull();
+  });
+
+  it('the plugin marks the tables with X columns, follows edits and sets the measured width on the table', () => {
+    const doc = schema.nodes.doc.create(null, [par(schema.text('Before.')), par(table([[['alignment', 'left']], X])), par(table([[['alignment', 'left']]]))]);
+    let state = EditorState.create({ doc, plugins: [tabularxPlugin()] });
+    const marked = () => tabularxKey.getState(state)!.find().map(d => ({ at: d.from, rest: (d.spec as { rest: number }).rest, style: ((d as any).type.attrs.style ?? null) as string | null }));
+    const at = doc.child(0).nodeSize + 1;   // the X table
+    expect(marked()).toEqual([{ at, rest: 0, style: null }]);
+    state = state.apply(state.tr.setMeta(tabularxKey, [[at, 120]]));
+    expect(marked()).toEqual([{ at, rest: 120, style: '--ol-xrest: 120px' }]);
+    // typing before the table moves the mark along; typing in a cell keeps it and its width
+    state = state.apply(state.tr.insertText('!', 1));
+    expect(marked()).toEqual([{ at: at + 1, rest: 120, style: '--ol-xrest: 120px' }]);
+    state = state.apply(state.tr.insertText('more', at + 1 + 4));
+    expect(marked()).toEqual([{ at: at + 1, rest: 120, style: '--ol-xrest: 120px' }]);
+    // the other table gets X columns: now it is marked too; the first loses them: unmarked
+    const second = state.doc.child(0).nodeSize + state.doc.child(1).nodeSize + 1;
+    state = state.apply(state.tr.setNodeMarkup(second, undefined, { ...state.doc.nodeAt(second)!.attrs, columns: JSON.stringify([X]) }));
+    expect(marked().map(m => m.at)).toEqual([at + 1, second]);
+    state = state.apply(state.tr.setNodeMarkup(at + 1, undefined, { ...state.doc.nodeAt(at + 1)!.attrs, columns: JSON.stringify([[['alignment', 'left']], [['alignment', 'left']]]) }));
+    expect(marked().map(m => m.at)).toEqual([second]);
   });
 });
 

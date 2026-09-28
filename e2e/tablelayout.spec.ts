@@ -2,8 +2,10 @@
  * Tables on a line of their own (editor/plugins/widetables.ts): a tabular or a matrix formula alone
  * in its paragraph is centred on the text column, one wider than the column spills into both margins
  * by the same amount (never past the page's left edge), a table amid text stays in the text. Tables
- * are as wide as LaTeX sets them: l / c / r columns are never wrapped, a p{…} column wraps at its width.
- * Editing a cell keeps working, and a table that grows while typing stays centred.
+ * are as wide as LaTeX sets them: l / c / r columns are never wrapped, a p{…} column wraps at its width,
+ * X columns (tabularx) wrap and share equally what the other columns leave of the table width
+ * (editor/plugins/tabularx.ts). Editing a cell keeps working, and a table that grows while typing stays
+ * centred. The table toolbar's column width palette makes a column natural, X or p{…}.
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
@@ -48,6 +50,12 @@ key & a paragraph column whose text wraps at three centimetres like in the PDF &
 \\hline
 \\end{tabular}
 
+\\begin{tabularx}{\\linewidth}{|l|X|X|}
+\\hline
+key & an X column whose long text wraps, sharing the room the key column leaves with the other X column & short\\\\
+\\hline
+\\end{tabularx}
+
 Text with a small matrix $\\begin{matrix}a & b\\\\ c & d\\end{matrix}$ inside a sentence.
 
 $\\begin{matrix}\\text{\\textbf{Feature}} & \\text{\\textbf{RBMs}} & \\text{\\textbf{VAE}}\\\\ \\text{weight sharing} & 1 & 0\\end{matrix}$
@@ -70,7 +78,7 @@ async function open(page: Page) {
   await page.setViewportSize({ width: 1500, height: 1000 });
   await openDoc(page, `${PROJECT}/main.tex`);
   await page.waitForSelector('.lyx-editor .lyx-tabular td');
-  await expect(page.locator('.lyx-editor .ol-solo-table')).toHaveCount(6, { timeout: 10000 });
+  await expect(page.locator('.lyx-editor .ol-solo-table')).toHaveCount(7, { timeout: 10000 });
   await page.waitForFunction(() => !document.querySelector('.lyx-editor .lyx-math-static.pending'), null, { timeout: 20000 });
   await page.waitForTimeout(600);
 }
@@ -150,5 +158,75 @@ test('editing a centred table: typing in a cell reaches the file, the growing ta
   await page.keyboard.press('Tab');
   await page.keyboard.type('Z');
   await expect(page.locator(TABULAR).first().locator('td').nth(5)).toContainText('Z');
+  expect(errors).toEqual([]);
+});
+
+/** the widths of the cells of a table's first row, the table's and the text column's */
+const widths = (page: Page, i: number) => page.locator(TABULAR).nth(i).evaluate(el => ({
+  table: el.getBoundingClientRect().width,
+  cells: [...el.querySelectorAll('tr:first-child > td')].map(td => td.getBoundingClientRect().width),
+  heights: [...el.querySelectorAll('tr:first-child > td')].map(td => td.getBoundingClientRect().height),
+  col: document.querySelector('.lyx-editor')!.clientWidth,
+}));
+
+test('X columns wrap and share what the other columns leave of the table width, while typing too', async ({ page }) => {
+  const errors = collectErrors(page);
+  await open(page);
+  const w = await widths(page, 4);
+  // tabularx{\linewidth}: as wide as the text column; the two X columns alike, the long text wrapped
+  expect(Math.abs(w.table - w.col)).toBeLessThanOrEqual(3);
+  expect(Math.abs(w.cells[1] - w.cells[2])).toBeLessThanOrEqual(1);
+  expect(w.heights[1]).toBeGreaterThan(40);
+  // the key column (l) grows as it is typed in; the X columns give way, the table keeps its width
+  const key = page.locator(TABULAR).nth(4).locator('td').first();
+  await key.click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' column, much wider now');
+  await expect(key).toHaveText('key column, much wider now');
+  await expect.poll(async () => { const v = await widths(page, 4); return v.cells[0] > w.cells[0] + 60 && Math.abs(v.table - v.col) <= 3 && Math.abs(v.cells[1] - v.cells[2]) <= 1; }).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('the column width palette: wrap a column to fill the table (X), at a fixed width (p{…}), and back', async ({ page }) => {
+  const errors = collectErrors(page);
+  await open(page);
+  const body = () => { const f = readFileSync(FILE, 'utf8'); return f.slice(f.indexOf('\\begin{document}')); };
+  const spec = () => /\\begin\{tabular[x*]?\}(?:\{[^}]*\})?\{(.*)\}\n\\hline\s*\na & /.exec(body())?.[1] ?? '';
+  await page.locator(TABULAR).first().locator('td').nth(1).click();   // b: the c column
+  await expect(page.locator('.toolbar-table')).toBeVisible();
+  const btn = page.locator('[data-tb="t-width"]');
+  const pal = page.locator('.tb-popup[data-palette="t-width"]');
+  await expect(btn).not.toHaveClass(/active/);
+  await btn.click();
+  await expect(pal.locator('[data-colwidth="natural"]')).toHaveClass(/active/);
+  await pal.locator('[data-colwidth="variable"]').click();
+  await expect(pal).toHaveCount(0);
+  await expect.poll(spec, { timeout: 15000 }).toBe('|l|>{\\centering\\arraybackslash}X|r|');
+  expect(body()).toContain('\\begin{tabularx}{\\columnwidth}{|l|>{\\centering\\arraybackslash}X|r|}');
+  await expect(btn).toHaveClass(/active/);
+  await expect.poll(async () => { const v = await widths(page, 0); return Math.abs(v.table - v.col) <= 3; }).toBe(true);
+  // a fixed width, typed into the palette
+  await btn.click();
+  await expect(pal.locator('[data-colwidth="variable"]')).toHaveClass(/active/);
+  const input = pal.locator('[data-colwidth="fixed"] input');
+  await input.fill('wide');
+  await expect(input).toHaveClass(/invalid/);
+  await expect(pal.locator('[data-colwidth="fixed"] button')).toBeDisabled();
+  await input.fill('3cm');
+  await input.press('Enter');
+  await expect.poll(spec, { timeout: 15000 }).toBe('|l|>{\\centering}p{3cm}|r|');
+  const fixed = await widths(page, 0);
+  expect(fixed.cells[1]).toBeGreaterThan(100);
+  expect(fixed.cells[1]).toBeLessThan(130);   // 3cm ≈ 113px
+  // typing keeps working in the cell (the palette gave the focus back)
+  await page.keyboard.type('Q');
+  await expect(page.locator(TABULAR).first().locator('td').nth(1)).toContainText('Q');
+  // natural again: the plain c column
+  await btn.click();
+  await expect(pal.locator('[data-colwidth="fixed"]')).toHaveClass(/active/);
+  await expect(pal.locator('[data-colwidth="fixed"] input')).toHaveValue('3cm');
+  await pal.locator('[data-colwidth="natural"]').click();
+  await expect.poll(spec, { timeout: 15000 }).toBe('|l|c|r|');
+  await expect(btn).not.toHaveClass(/active/);
   expect(errors).toEqual([]);
 });

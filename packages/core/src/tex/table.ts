@@ -8,6 +8,14 @@ import type { Paragraph, TabularCell, TabularInset, TabularRow } from '../lyx/as
 import { Scanner, groupEnd } from './scanner.ts';
 import { lyxLength } from './parse.ts';
 
+/** the alignment of a p / m / b / X column from the >{…} before it (justified without one), as Tabular::latex writes it */
+function parboxAlign(before: string): string {
+  if (/raggedright/.test(before)) return 'left';
+  if (/centering/.test(before)) return 'center';
+  if (/raggedleft/.test(before)) return 'right';
+  return 'block';
+}
+
 interface ColSpec { alignment: string; valignment: string; width: string; special: string; varwidth: boolean; leftline: boolean; rightline: boolean }
 
 /** Expand *{n}{spec} and split a column specification into columns with their rules. */
@@ -49,12 +57,8 @@ export function parseColumnSpec(spec: string): ColSpec[] | null {
       const e = groupEnd(s, i + 1);
       const width = lyxLength(s.slice(i + 2, e - 1));
       i = e - 1;
-      let align = 'block';
-      if (/raggedright/.test(pendingBefore)) align = 'left';
-      else if (/centering/.test(pendingBefore)) align = 'center';
-      else if (/raggedleft/.test(pendingBefore)) align = 'right';
-      col = newCol(align, c === 'm' ? 'middle' : c === 'b' ? 'bottom' : 'top', width);
-    } else if (c === 'X') { col = newCol('block'); col.varwidth = true; }
+      col = newCol(parboxAlign(pendingBefore), c === 'm' ? 'middle' : c === 'b' ? 'bottom' : 'top', width);
+    } else if (c === 'X') { col = newCol(parboxAlign(pendingBefore)); col.varwidth = true; }
     else {
       // unknown column type (S, N, ...): keep it as a special column
       let special = c;

@@ -8,10 +8,11 @@ vi.hoisted(() => { const g = globalThis as any; if (typeof g.window === 'undefin
 import { EditorState, TextSelection, type Command } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 import { CellSelection } from 'prosemirror-tables';
-import { schema } from '../packages/core/src/schema.ts';
+import { schema, columnWidthLength } from '../packages/core/src/schema.ts';
 import { parseLyx } from '../packages/core/src/lyx/parser.ts';
 import { writeLyx } from '../packages/core/src/lyx/writer.ts';
 import { lyxToPmNode, pmToLyxBody } from '../packages/core/src/convert.ts';
+import { exportLatex } from '../packages/core/src/latex/export.ts';
 import { insertTable, setTableAttrs } from '../packages/client/src/editor/commands.ts';
 import * as tc from '../packages/client/src/editor/tablecommands.ts';
 
@@ -133,7 +134,8 @@ describe('table toolbar: setup', () => {
     s = s.apply(s.tr.setSelection(TextSelection.create(s.doc, 2)));
     for (const cmd of [tc.appendRow, tc.appendColumn, tc.deleteRow, tc.deleteColumn, tc.moveRowUp, tc.moveRowDown, tc.moveColumnLeft, tc.moveColumnRight,
       tc.toggleLine('top'), tc.toggleBorderLines, tc.toggleInnerLines, tc.toggleAllLines, tc.unsetAllLines, tc.resetFormalDefault,
-      tc.setAlignment('left'), tc.setVAlignment('middle'), tc.toggleRotateCell, tc.toggleRotateTable, tc.toggleMultiColumn, tc.toggleMultiRow]) {
+      tc.setAlignment('left'), tc.setVAlignment('middle'), tc.toggleRotateCell, tc.toggleRotateTable, tc.toggleMultiColumn, tc.toggleMultiRow,
+      tc.setColumnWidth('natural'), tc.setColumnWidth('variable'), tc.setColumnWidth('fixed', '3cm')]) {
       expect(cmd(s, () => { throw new Error('dispatched'); })).toBe(false);
     }
     expect(tc.tableToolbarState(s).inTable).toBe(false);
@@ -549,13 +551,105 @@ describe('multicolumn / multirow', () => {
   });
 });
 
+describe('column width: natural (l c r), variable (X), fixed (p{…})', () => {
+  /** the LaTeX of the table, through the LyX file */
+  const texOf = (s: EditorState) => { const t = exportLatex(parseLyx(roundTrip(s))).tex; return t.slice(t.indexOf('\\begin{tab')); };
+  const specOf = (s: EditorState) => /\\begin\{tabular[x*]?\}(?:\{[^}]*\})?\{(.*)\}\n/.exec(texOf(s))?.[1];
+
+  it('variable: the selected columns become X columns; the table a tabularx as wide as the text', () => {
+    const s = apply(select(mkState(), 0, 1, 1, 2), tc.setColumnWidth('variable'));
+    const cols = table(s).columns;
+    expect(cols.map(c => get(c, 'varwidth') ?? null)).toEqual([null, 'true', 'true']);
+    expect(roundTrip(s)).toContain('<column alignment="center" valignment="top" varwidth="true">');
+    expect(texOf(s)).toMatch(/^\\begin\{tabularx\}\{\\columnwidth\}/);
+    expect(specOf(s)!.match(/>\{\\centering\\arraybackslash\}X/g)).toHaveLength(2);
+    expect(exportLatex(parseLyx(roundTrip(s))).tex).toContain('\\usepackage{tabularx}');
+    expect(tc.tableToolbarState(cursorIn(s, 2, 1))).toMatchObject({ colWidth: 'variable', width: '', multicolumnWidth: false });
+    expect(tc.tableToolbarState(cursorIn(s, 2, 0))).toMatchObject({ colWidth: 'natural', width: '' });
+    // a justified X column is a plain X
+    expect(specOf(apply(cursorIn(s, 0, 2), tc.setAlignment('block')))).toMatch(/X\|?$/);
+  });
+
+  it('fixed: p{…} at the width given (m{…} / b{…} with a vertical alignment); lengths as LyX stores them', () => {
+    let s = apply(cursorIn(mkState(), 0, 2), tc.setColumnWidth('fixed', '3cm'));
+    expect(table(s).columns[2]).toEqual([['alignment', 'center'], ['valignment', 'top'], ['width', '3cm']]);
+    expect(specOf(s)).toContain('>{\\centering}p{3cm}');
+    expect(tc.tableToolbarState(s)).toMatchObject({ colWidth: 'fixed', width: '3cm' });
+    s = apply(s, tc.setVAlignment('middle'));
+    expect(specOf(s)).toContain('>{\\centering}m{3cm}');
+    s = apply(s, tc.setColumnWidth('fixed', '30%'));
+    expect(get(table(s).columns[2], 'width')).toBe('30col%');
+    expect(specOf(s)).toContain('m{0.3\\columnwidth}');
+    // fixed → variable: the width goes, and so does the vertical alignment (only fixed widths have one)
+    s = apply(s, tc.setColumnWidth('variable'));
+    expect(table(s).columns[2]).toEqual([['alignment', 'center'], ['valignment', 'top'], ['varwidth', 'true']]);
+    for (const bad of [undefined, '', 'wide', '0cm', '12px']) expect(run(s, tc.setColumnWidth('fixed', bad)).ok).toBe(false);
+  });
+
+  it('natural: back to l / c / r — no width, top alignment, a justified column centred', () => {
+    let s = apply(cursorIn(mkState(), 0, 1), tc.setColumnWidth('fixed', '2cm'));
+    s = apply(apply(s, tc.setVAlignment('bottom')), tc.setAlignment('block'));
+    expect(specOf(s)).toContain('b{2cm}');
+    s = apply(s, tc.setColumnWidth('natural'));
+    expect(table(s).columns[1]).toEqual([['alignment', 'center'], ['valignment', 'top']]);
+    for (let r = 0; r < 3; r++) expect(get(cellAt(s, r, 1).attrs, 'alignment')).toBe('center');
+    expect(specOf(s)).toBe(specOf(mkState()));
+    // a variable column goes back as well
+    s = apply(apply(s, tc.setColumnWidth('variable')), tc.setColumnWidth('natural'));
+    expect(table(s).columns[1]).toEqual([['alignment', 'center'], ['valignment', 'top']]);
+  });
+
+  it('multirow cells of a column with a width are left aligned (Tabular::setColumnPWidth)', () => {
+    let s = apply(select(mkState(), 1, 1, 2, 1), tc.toggleMultiRow);
+    s = apply(cursorIn(s, 0, 1), tc.setColumnWidth('fixed', '2cm'));
+    expect(get(cellAt(s, 1, 1).attrs, 'alignment')).toBe('left');
+    expect(get(cellAt(s, 0, 1).attrs, 'alignment')).toBe('center');
+    expect(texOf(s)).toContain('\\multirow{2}{2cm}{');
+    s = apply(s, tc.setColumnWidth('variable'));
+    expect(get(cellAt(s, 1, 1).attrs, 'alignment')).toBe('center');
+    expect(texOf(s)).toContain('\\multirow{2}{=}{');
+  });
+
+  it('a multicolumn cell has a width of its own; it cannot be an X column', () => {
+    let s = cursorIn(apply(select(mkState(), 1, 0, 1, 1), tc.toggleMultiColumn), 1, 0);
+    expect(tc.tableToolbarState(s)).toMatchObject({ colWidth: 'natural', multicolumnWidth: true });
+    expect(run(s, tc.setColumnWidth('variable')).ok).toBe(false);
+    s = apply(s, tc.setColumnWidth('fixed', '4cm'));
+    expect(get(cellAt(s, 1, 0).attrs, 'width')).toBe('4cm');
+    expect(get(table(s).columns[0], 'width')).toBeUndefined();
+    expect(texOf(s)).toMatch(/\\multicolumn\{2\}\{\|?>\{\\centering\}p\{4cm\}\|?\}/);
+    expect(tc.tableToolbarState(s)).toMatchObject({ colWidth: 'fixed', width: '4cm', multicolumnWidth: true });
+    s = apply(s, tc.setColumnWidth('natural'));
+    expect(get(cellAt(s, 1, 0).attrs, 'width')).toBeUndefined();
+  });
+
+  it('a column with a LaTeX spec of its own keeps it', () => {
+    let s = cursorIn(mkState(), 0, 1);
+    setTableAttrs({ column: [['special', 'S']] })(s, tr => { s = s.apply(tr); });
+    expect(tc.tableToolbarState(s).colWidth).toBe('special');
+    for (const k of ['natural', 'variable'] as const) expect(run(s, tc.setColumnWidth(k)).ok).toBe(false);
+    expect(run(s, tc.setColumnWidth('fixed', '2cm')).ok).toBe(false);
+  });
+
+  it('columnWidthLength: what may be typed for a fixed width', () => {
+    expect(columnWidthLength('3 cm')).toBe('3cm');
+    expect(columnWidthLength('2.5in')).toBe('2.5in');
+    expect(columnWidthLength('.5em')).toBe('.5em');
+    expect(columnWidthLength('30%')).toBe('30col%');
+    expect(columnWidthLength('40text%')).toBe('40text%');
+    expect(columnWidthLength('0.4\\linewidth')).toBe('40line%');
+    expect(columnWidthLength('\\textwidth')).toBe('100text%');
+    for (const bad of [undefined, null, '', 'wide', '0pt', '12px', '-3cm', '3', '\\hsize']) expect(columnWidthLength(bad)).toBeNull();
+  });
+});
+
 describe('tableToolbarState', () => {
   it('reports the cursor cell', () => {
     const s = mkState();
     expect(tc.tableToolbarState(cursorIn(s, 0, 0))).toEqual({
       inTable: true, rotateCell: false, rotateTable: false, multicolumn: false, multirow: false,
       lines: { top: true, bottom: true, left: true, right: true }, borderLines: true, innerLines: false, allLines: false,
-      booktabs: false, align: 'center', valign: 'top',
+      booktabs: false, align: 'center', valign: 'top', colWidth: 'natural', width: '', multicolumnWidth: false,
     });
     expect(tc.tableToolbarState(cursorIn(s, 1, 1)).lines).toEqual({ top: false, bottom: true, left: false, right: true });
   });

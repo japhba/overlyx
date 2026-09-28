@@ -11,10 +11,10 @@ import { useMemo } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
 import { undo, redo } from 'y-prosemirror';
-import { llanglePreamble, hasLlangleSnippet, definesLlangle } from '@overlyx/core';
+import { llanglePreamble, hasLlangleSnippet, definesLlangle, columnWidthLength } from '@overlyx/core';
 import { api, type DocMeta } from '../api';
 import { setPref, type Prefs } from '../prefs';
-import { ColorPalette, colorIcon, DelimPalette, TableSizePicker, mathPanelPalettes, mathPreview, type ToolButton, type DelimChoice, type Palette } from './Toolbar';
+import { ColorPalette, colorIcon, ColumnWidthPicker, DelimPalette, TableSizePicker, mathPanelPalettes, mathPreview, type ToolButton, type DelimChoice, type Palette } from './Toolbar';
 import { activeMathField, type LyxMathField } from '../editor/lyxmath/field';
 import { useMathRendererVersion } from '../editor/lyxmath/usemath';
 import * as C from '../editor/commands';
@@ -394,6 +394,10 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 't-vt', title: 'Align top', icon: 'valigntop', active: tableSt?.valign === 'top', action: () => run(T.setVAlignment('top')) },
       { id: 't-vm', title: 'Align middle', icon: 'valignmiddle', active: tableSt?.valign === 'middle', action: () => run(T.setVAlignment('middle')) },
       { id: 't-vb', title: 'Align bottom', icon: 'valignbottom', active: tableSt?.valign === 'bottom', action: () => run(T.setVAlignment('bottom')) },
+    ],
+    [
+      { id: 't-width', title: 'Column width — wrap text: natural (l c r), wrap to fill the table (X), or wrap at a fixed width (p{…})', icon: 'colwidth', active: tableSt?.colWidth === 'variable' || tableSt?.colWidth === 'fixed',
+        palette: { title: 'Column width', render: close => <ColumnWidthPicker kind={tableSt?.colWidth ?? null} width={tableSt?.width ?? ''} multicolumn={!!tableSt?.multicolumnWidth} valid={w => !!columnWidthLength(w)} close={close} onPick={(k, w) => run(T.setColumnWidth(k, w))} /> } },
     ],
     [
       { id: 't-rotcell', title: 'Rotate cell by 90° or unset rotation', icon: 'rotatecell', active: !!tableSt?.rotateCell, action: () => run(T.toggleRotateCell) },

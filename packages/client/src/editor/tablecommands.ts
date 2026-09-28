@@ -14,7 +14,7 @@
 import { type Command, type EditorState, Selection, TextSelection } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 import { CellSelection } from 'prosemirror-tables';
-import { schema, insetToPm, pmBlocksToParagraphs, type PMJSON, type TabularInset, type TabularCell, type Paragraph } from '@overlyx/core';
+import { schema, insetToPm, pmBlocksToParagraphs, columnWidthLength, type PMJSON, type TabularInset, type TabularCell, type Paragraph } from '@overlyx/core';
 import { tableContext, type TableContext } from './commands';
 
 /* ------------------------------------------------------------- attributes */
@@ -97,7 +97,9 @@ function hasMultiRow(T: Tab, r: number): boolean {
 }
 
 const useBooktabs = (T: Tab) => get(T.features, 'booktabs') === 'true';
-const columnHasWidth = (T: Tab, c: number) => !!get(T.columns[c].attrs, 'width');
+/** a LyX length that is set and not zero (Length::zero: LyX writes no width="0pt") */
+const isLength = (v: string | undefined) => !!v && !!v.trim() && parseFloat(v) !== 0;
+const columnHasWidth = (T: Tab, c: number) => isLength(get(T.columns[c].attrs, 'width'));
 
 /* lines (Tabular::topLine & co. — left/right lines do not exist with booktabs) */
 const lineOf = (T: Tab, r: number, c: number, key: string) => get(cellInfo(T, r, c).attrs, key) === 'true';
@@ -260,21 +262,21 @@ function swapColumns(T: Tab, c1: number, c2: number): void {
 
 /** Tabular::setAlignment(cell, align, has_width) */
 function setAlignmentT(T: Tab, r: number, c: number, align: string, hasWidth: boolean): void {
-  const [, col] = startOf(T, r, c);
-  if (!isMultiColumn(T, r, c)) {
-    for (let rr = 0; rr < nrows(T); rr++) {
-      const mr = isMultiRow(T, rr, col), mc = isMultiColumn(T, rr, col);
-      if (!(mr && hasWidth) && !mc) set(cellData(T, rr, col).attrs, 'alignment', align, CELL_ORDER);
-      if (mr && hasWidth && !mc) set(cellData(T, rr, col).attrs, 'alignment', 'left', CELL_ORDER);
-    }
-    const ca = T.columns[col].attrs;
-    set(ca, 'alignment', align, COLUMN_ORDER);
-    // LyX keeps the decimal point in memory but writes it only for decimal columns
-    if (align === 'decimal') { if (!get(ca, 'decimal_point')) set(ca, 'decimal_point', '.', COLUMN_ORDER); }
-    else set(ca, 'decimal_point', null, COLUMN_ORDER);
-  } else {
-    set(cellInfo(T, r, c).attrs, 'alignment', align, CELL_ORDER);
+  if (!isMultiColumn(T, r, c)) setColumnAlignmentT(T, startOf(T, r, c)[1], align, hasWidth);
+  else set(cellInfo(T, r, c).attrs, 'alignment', align, CELL_ORDER);
+}
+/** Tabular::setAlignment outside a multicolumn: the column and its cells (multicolumns keep theirs) */
+function setColumnAlignmentT(T: Tab, col: number, align: string, hasWidth: boolean): void {
+  for (let rr = 0; rr < nrows(T); rr++) {
+    const mr = isMultiRow(T, rr, col), mc = isMultiColumn(T, rr, col);
+    if (!(mr && hasWidth) && !mc) set(cellData(T, rr, col).attrs, 'alignment', align, CELL_ORDER);
+    if (mr && hasWidth && !mc) set(cellData(T, rr, col).attrs, 'alignment', 'left', CELL_ORDER);
   }
+  const ca = T.columns[col].attrs;
+  set(ca, 'alignment', align, COLUMN_ORDER);
+  // LyX keeps the decimal point in memory but writes it only for decimal columns
+  if (align === 'decimal') { if (!get(ca, 'decimal_point')) set(ca, 'decimal_point', '.', COLUMN_ORDER); }
+  else set(ca, 'decimal_point', null, COLUMN_ORDER);
 }
 
 /** Tabular::setVAlignment(cell, align, onlycolumn) */
@@ -705,6 +707,60 @@ export const toggleMultiRow: Command = feature(C => {
   return { r: first.r, c: first.c };
 });
 
+/* ------------------------------------------------------------ column width */
+
+/**
+ * How a column is as wide as it is — the "Column width" of LyX's Table Settings (GuiTabular's
+ * columnTypeCO), and the column types LaTeX has for it:
+ *  - natural: l / c / r, as wide as its widest cell; the text never wraps;
+ *  - variable: X of tabularx — the text wraps, and the variable columns share equally what the
+ *    other columns leave of the table width (Table width; \columnwidth when none is set);
+ *  - fixed: p{…} (m{…} / b{…} with a vertical alignment) — the text wraps at the given width.
+ */
+export type ColumnWidthKind = 'natural' | 'variable' | 'fixed';
+
+/** the width kind of column c ('special': its own LaTeX column spec overrides the width) */
+function columnWidthKind(T: Tab, c: number): ColumnWidthKind | 'special' {
+  const a = T.columns[c].attrs;
+  if (get(a, 'special')) return 'special';
+  if (isLength(get(a, 'width'))) return 'fixed';
+  return get(a, 'varwidth') === 'true' ? 'variable' : 'natural';
+}
+
+/**
+ * tabular-feature set-pwidth + toggle-varwidth-column, as the Table Settings dialog applies its
+ * column width (GuiTabular::getTabFeatures): the selected columns become natural, variable (X) or
+ * fixed at `width` (a length core's columnWidthLength accepts). Like Tabular::setColumnPWidth, a column
+ * without a fixed width goes back to the top vertical alignment and its multirow cells follow its
+ * alignment (left once it has a width); a natural column cannot stay justified (it becomes
+ * centred). In a multicolumn cell (no selection) natural and fixed set the cell's own width
+ * (set-mpwidth); an X column cannot be spanned, so variable does not apply there. Columns with
+ * their own LaTeX spec keep it: the command does not apply to them.
+ */
+export function setColumnWidth(kind: ColumnWidthKind, width?: string): Command {
+  return feature(C => {
+    const { T, rect: { cs, ce }, cur } = C;
+    const len = kind === 'fixed' ? columnWidthLength(width) : null;
+    if (kind === 'fixed' && !len) return false;
+    if (!C.multi && isMultiColumn(T, cur.r, cur.c)) {
+      if (kind === 'variable') return false;
+      set(cellInfo(T, cur.r, cur.c).attrs, 'width', len, CELL_ORDER);
+      return { r: cur.r, c: cur.c, keepOffset: true };
+    }
+    for (let c = cs; c <= ce; c++) if (columnWidthKind(T, c) === 'special') return false;
+    for (let c = cs; c <= ce; c++) {
+      const a = T.columns[c].attrs;
+      set(a, 'width', len, COLUMN_ORDER);
+      set(a, 'varwidth', kind === 'variable' ? 'true' : null, COLUMN_ORDER);
+      if (!len) set(a, 'valignment', 'top', COLUMN_ORDER);
+      const align = get(a, 'alignment') ?? 'center';
+      for (let r = 0; r < nrows(T); r++) if (isMultiRow(T, r, c)) setAlignmentT(T, r, c, align, !!len);
+      if (kind === 'natural' && align === 'block') setColumnAlignmentT(T, c, 'center', false);
+    }
+    return { r: cur.r, c: cur.c, keepOffset: true, sel: sameSel(C) };
+  });
+}
+
 /* ------------------------------------------------------------- toolbar state */
 
 export interface TableToolbarState {
@@ -723,12 +779,18 @@ export interface TableToolbarState {
   /** effective alignment of the cursor cell: its own for multicolumns, the column's otherwise */
   align: string | null;
   valign: string | null;
+  /** the width kind of the cursor column — of the cell itself in a multicolumn cell (natural or fixed) */
+  colWidth: ColumnWidthKind | 'special' | null;
+  /** its fixed width (a LyX length), '' when it has none */
+  width: string;
+  /** the cursor cell is a multicolumn (its width is its own; it cannot be variable) */
+  multicolumnWidth: boolean;
 }
 
 const NOT_IN_TABLE: TableToolbarState = {
   inTable: false, rotateCell: false, rotateTable: false, multicolumn: false, multirow: false,
   lines: { top: false, bottom: false, left: false, right: false }, borderLines: false, innerLines: false, allLines: false,
-  booktabs: false, align: null, valign: null,
+  booktabs: false, align: null, valign: null, colWidth: null, width: '', multicolumnWidth: false,
 };
 
 /** On/off state of the table toolbar buttons (InsetTabular::getFeatureStatus). */
@@ -750,5 +812,16 @@ export function tableToolbarState(state: EditorState): TableToolbarState {
     booktabs: useBooktabs(T),
     align: getAlignment(T, cur.r, cur.c),
     valign: getVAlignment(T, cur.r, cur.c),
+    ...cursorWidth(T, cur.r, cur.c),
   };
+}
+
+function cursorWidth(T: Tab, r: number, c: number): Pick<TableToolbarState, 'colWidth' | 'width' | 'multicolumnWidth'> {
+  if (isMultiColumn(T, r, c)) {
+    const w = get(cellInfo(T, r, c).attrs, 'width');
+    return isLength(w) ? { colWidth: 'fixed', width: w!, multicolumnWidth: true } : { colWidth: 'natural', width: '', multicolumnWidth: true };
+  }
+  const col = startOf(T, r, c)[1];
+  const kind = columnWidthKind(T, col);
+  return { colWidth: kind, width: kind === 'fixed' ? get(T.columns[col].attrs, 'width')! : '', multicolumnWidth: false };
 }
