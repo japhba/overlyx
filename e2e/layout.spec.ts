@@ -33,12 +33,24 @@ Second page
 \end{document}
 `;
 
+const TOOLS = String.raw`\documentclass[aspectratio=169]{beamer}
+\begin{document}
+\begin{frame}[plain]
+\olshape{x=20mm,y=20mm,w=30mm,h=30mm,vb=0 0 30 30,fill=blue!20,draw=blue,name=Circle}{M 30 15 C 30 23.28 23.28 30 15 30 C 6.72 30 0 23.28 0 15 C 0 6.72 6.72 0 15 0 C 23.28 0 30 6.72 30 15 Z}
+\olimage{x=80mm,y=20mm,w=40mm,h=30mm,name=Pic}{pic.png}
+\end{frame}
+\end{document}
+`;
+
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
   writeFileSync(`${DIR}/main.tex`, texDoc('Some text here and a formula $x^{2}$ in it.\n\n\\begin{tabular}{cc}\na & b\\tabularnewline\nc & d\\tabularnewline\n\\end{tabular}'));
   writeFileSync(`${DIR}/slides.tex`, SLIDES);
   writeFileSync(`${DIR}/present.tex`, SLIDES);
+  writeFileSync(`${DIR}/tools.tex`, TOOLS);
+  // a 40 × 30 px PNG for the crop test
+  writeFileSync(`${DIR}/pic.png`, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAKklEQVR4nO3NMQ0AAAgDsAmb/yALGXA06d9MeyJisVgsFovFYrFYLP4bL9HP3Ew1mJ9PAAAAAElFTkSuQmCC', 'base64'));
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
@@ -191,6 +203,37 @@ test('a raw LaTeX object is typeset with the document\'s preamble and shown as i
   await page.keyboard.press('Control+Enter');
   await expect(page.locator('.ol-raw.ol-rendered')).toHaveCount(1, { timeout: 60000 });
   await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\begin\{olraw\}\{[^}]*\}\n\\begin\{tikzpicture\}\\fill\[jblue\] \(0,0\) circle \(5mm\);\\end\{tikzpicture\}\n\\end\{olraw\}/);
+  expect(errors).toEqual([]);
+});
+
+test('the node editor moves a node with its handles; the crop tool crops from an edge', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await openLayout(page, 'tools.tex');
+  const pg = (await page.locator('.ol-page').first().boundingBox())!;
+  const mm = pg.width / 160;
+  const circle = (await page.locator('.ol-shape').first().boundingBox())!;
+  await page.mouse.dblclick(circle.x + circle.width / 2, circle.y + circle.height / 2);
+  await expect(page.locator('.ol-node')).toHaveCount(5);
+  await expect(page.locator('.ol-ctl')).toHaveCount(8);
+  // the first node (the right-most point) 5 mm further right: the box grows by 5 mm
+  const node = (await page.locator('.ol-node').first().boundingBox())!;
+  await page.mouse.move(node.x + node.width / 2, node.y + node.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(node.x + node.width / 2 + 5 * mm, node.y + node.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(() => fileText('tools.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=20mm,y=20mm,w=35(\.\d+)?mm,h=30mm,vb=0 0 35(\.\d+)? 30,[^}]*name=Circle\}\{M 35(\.\d+)? 15 C 35/);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  // crop: double-click the image, the west handle 10 mm to the right
+  const img = (await page.locator('.ol-image').first().boundingBox())!;
+  await page.mouse.dblclick(img.x + img.width / 2, img.y + img.height / 2);
+  const w = (await page.locator('.ol-crop-h.ol-h-w').boundingBox())!;
+  await page.mouse.move(w.x + w.width / 2, w.y + w.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(w.x + w.width / 2 + 10 * mm, w.y + w.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(() => fileText('tools.tex'), { timeout: 15000 }).toMatch(/\\olimage\{x=90mm,y=20mm,w=30mm,h=30mm,crop=0\.25 0 0 0,name=Pic\}\{pic\.png\}/);
   expect(errors).toEqual([]);
 });
 

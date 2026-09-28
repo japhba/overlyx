@@ -427,7 +427,11 @@ class LayoutController {
         if (o.node.type.name === 'ol_group') {
           const b = objectBounds(o.node);
           out.push(this.frameEl({ ...b, rot: 0 }, 'ol-selframe ol-groupframe', true, o.pos));
-        } else out.push(this.frameEl(boxOf(o.node), 'ol-selframe' + (o.node.attrs.lock ? ' ol-lockedframe' : ''), !o.node.attrs.lock, o.pos));
+        } else {
+          // editing its nodes or its crop: the frame without its handles (they would cover the nodes)
+          const busy = (st.tool === 'nodes' || st.tool === 'crop') && st.target === o.pos;
+          out.push(this.frameEl(boxOf(o.node), 'ol-selframe' + (o.node.attrs.lock ? ' ol-lockedframe' : '') + (busy ? ' ol-thin' : ''), !o.node.attrs.lock && !busy, o.pos));
+        }
       } else if (mine.length > 1) {
         for (const o of mine) out.push(this.frameEl(o.node.type.name === 'ol_group' ? { ...objectBounds(o.node), rot: 0 } : boxOf(o.node), 'ol-selframe ol-thin', false, o.pos));
         const u = unionBounds(mine.map(o => objectBounds(o.node)))!;
@@ -1174,9 +1178,27 @@ class LayoutController {
           if (s.c === 'C') { s.p[2] += dx; s.p[3] += dy; }
           const next = segs[seg + 1] as { c: string; p: number[] } | undefined;
           if (next && next.c === 'C') { next.p[0] += dx; next.p[1] += dy; }
-          // a closed path's start node moves with its end
-          const first = segs[0] as { c: string; p: number[] };
-          if (segs[seg + 1]?.c === 'Z' && first.c === 'M' && Math.abs(first.p[0] - ox) < 1e-6 && Math.abs(first.p[1] - oy) < 1e-6) { first.p[0] += dx; first.p[1] += dy; }
+          // a closed path's start node and the end of its last segment are one node: both move
+          const same = (q: number[], i: number) => Math.abs(q[i] - ox) < 1e-6 && Math.abs(q[i + 1] - oy) < 1e-6;
+          if (s.c === 'M') {
+            let k = seg + 1;
+            while (k < segs.length && segs[k].c !== 'Z' && segs[k].c !== 'M') k++;
+            const last = segs[k - 1] as { c: string; p: number[] } | undefined;
+            if (segs[k]?.c === 'Z' && last && last !== s && last.c !== 'Z') {
+              const n = last.p.length;
+              if (same(last.p, n - 2)) { last.p[n - 2] += dx; last.p[n - 1] += dy; if (last.c === 'C') { last.p[2] += dx; last.p[3] += dy; } }
+            }
+          } else if (segs[seg + 1]?.c === 'Z') {
+            // the end of the last segment: the start node (and its outgoing handle) come along
+            let k = seg;
+            while (k > 0 && segs[k].c !== 'M') k--;
+            const first = segs[k] as { c: string; p: number[] };
+            if (first.c === 'M' && same(first.p, 0)) {
+              first.p[0] += dx; first.p[1] += dy;
+              const after = segs[k + 1] as { c: string; p: number[] } | undefined;
+              if (after && after.c === 'C' && after !== s) { after.p[0] += dx; after.p[1] += dy; }
+            }
+          }
         } else if (e.altKey === false) {
           // a smooth node: the opposite handle turns with this one
           const other = pt === 0 ? { seg: seg - 1, pt: 1 } : { seg: seg + 1, pt: 0 };

@@ -1827,6 +1827,7 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .ol-marquee { border: 1px solid var(--ol-sel); background: rgba(26,115,232,0.08); }
 .ol-draft-wrap, .ol-nodes { left: 0; top: 0; width: 100%; height: 100%; }
 .ol-draft { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.ol-node, .ol-ctl { position: absolute; }
 .ol-node { width: 9px; height: 9px; margin: -5px 0 0 -5px; background: #fff; border: 1.5px solid var(--ol-sel); pointer-events: auto; cursor: move; transform: rotate(45deg); }
 .ol-node.ol-node-first { background: #cfe0ff; }
 .ol-node.ol-node-sel { background: var(--ol-sel); }
