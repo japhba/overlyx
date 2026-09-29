@@ -31,7 +31,7 @@ export function namespaces(): Set<string> {
   return new Set((db.prepare('SELECT username FROM users').all() as { username: string }[]).map(r => r.username));
 }
 
-export function listProjects(): Project[] {
+export function listProjects(opts: { files?: boolean } = {}): Project[] {
   const root = config.projectsDir;
   if (!fs.existsSync(root)) return [];
   const owners = namespaces();
@@ -44,7 +44,8 @@ export function listProjects(): Project[] {
       const name = `${ns.name}/${entry.name}`;
       if (!entry.isDirectory() || entry.name.startsWith('.') || !isProjectKey(name)) continue;
       const p = path.join(root, ns.name, entry.name);
-      out.push({ name, path: p, files: classifyDocs(p, collect(p, p, [], 0)) });
+      // `files: false`: names only (a workspace sync polls this; walking every project would be wasted)
+      out.push({ name, path: p, files: opts.files === false ? [] : classifyDocs(p, collect(p, p, [], 0)) });
     }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));

@@ -158,6 +158,16 @@ class Parser {
     }
     return s;
   }
+  /**
+   * The colour of \color / \textcolor: a name, `#RRGGBB` for xcolor's `[HTML]{RRGGBB}` (what the
+   * colour picker gives text too), or another model kept as written, `[rgb]{1,0,0}`.
+   */
+  private parseColorSpec(): string {
+    const model = this.parseVerbatimOption();
+    const spec = this.parseVerbatimItem();
+    if (!model) return spec;
+    return model === 'HTML' && /^[0-9A-Fa-f]{6}$/.test(spec) ? '#' + spec : `[${model}]{${spec}}`;
+  }
   private parseVerbatimOption(): string {
     this.skipSpaces();
     if (this.nextToken().ch !== '[') return '';
@@ -564,13 +574,13 @@ class Parser {
       }
 
       else if (t.cs === 'color') {
-        const color = this.parseVerbatimItem();
+        const color = this.parseColorSpec();
         const body = this.parseCell(flags, mode);
         push({ t: 'color', color, body, old: true });
         return this.success;
       }
       else if (t.cs === 'textcolor') {
-        const color = this.parseVerbatimItem();
+        const color = this.parseColorSpec();
         const body = this.parseCell(FLAG_ITEM, 'text');
         push({ t: 'color', color, body, old: false });
       }

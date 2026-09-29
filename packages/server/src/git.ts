@@ -30,6 +30,7 @@ import { manager, fileWrittenListeners } from './docs.ts';
 import { verifyPassword, toSessionUser, type SessionUser } from './auth.ts';
 import { roleFor, atLeast, logAccess, accessibleProjects } from './access.ts';
 import { createOwnedProject } from './projectCreate.ts';
+import { buildIncluding, buildErrors, errorLocations, lastBuild } from './export.ts';
 import { canonicalProject } from './namespaces.ts';
 import { verifyAccessToken } from './tokenAuth.ts';
 
@@ -236,7 +237,7 @@ export async function ensureAllRepos(): Promise<void> {
 
 /* -------------------------------------------------------------------- commits */
 
-interface Pending { editors: Set<number>; timer: NodeJS.Timeout | null; since: number }
+interface Pending { editors: Set<number>; timer: NodeJS.Timeout | null; since: number; last: number }
 const pending = new Map<string, Pending>();
 
 function editorsOf(ids: Iterable<number>): { name: string; email: string; username: string }[] {
@@ -280,7 +281,7 @@ function takeEditors(project: string, extra?: number | null): Set<number> {
 
 /** A commit failed: keep its editors for the next attempt. */
 function keepEditors(project: string, editors: Set<number>): void {
-  const again = pending.get(project) ?? { editors: new Set<number>(), timer: null, since: Date.now() };
+  const again = pending.get(project) ?? { editors: new Set<number>(), timer: null, since: Date.now(), last: Date.now() };
   for (const id of editors) again.editors.add(id);
   pending.set(project, again);
 }
@@ -305,7 +306,8 @@ export async function commitProject(project: string, opts: { message?: string; b
 export function touchProject(project: string, userIds?: number[] | number | null): void {
   if (!config.git) return;
   let p = pending.get(project);
-  if (!p) { p = { editors: new Set(), timer: null, since: Date.now() }; pending.set(project, p); }
+  if (!p) { p = { editors: new Set(), timer: null, since: Date.now(), last: 0 }; pending.set(project, p); }
+  p.last = Date.now();
   for (const id of userIds == null ? [] : Array.isArray(userIds) ? userIds : [userIds]) p.editors.add(id);
   if (p.timer) clearTimeout(p.timer);
   const delay = Math.max(1000, Math.min(config.gitCommitMs, p.since + config.gitCommitMaxWaitMs - Date.now()));
@@ -340,6 +342,68 @@ export async function repoInfo(project: string, limit = 12): Promise<RepoInfo> {
   const status = (await git(project, ['status', '--porcelain', '-z', '--untracked-files=all'])).split('\0').filter(Boolean);
   const pendingFiles = status.map(l => l.slice(3));
   return { branch, commits, pending: pendingFiles.length, pendingFiles: pendingFiles.slice(0, 50), head: commits[0]?.hash ?? null };
+}
+
+/**
+ * What a local copy needs to know whether it is behind, without asking git: the commit the
+ * checked-out branch points at (read from the ref files) and when OverLyX last wrote a file it has
+ * not committed yet (null: nothing pending; `idle` = milliseconds since, so the client needs no
+ * synchronised clock). A workspace sync (`overlyx sync`) polls this for all projects in one
+ * request and fetches only those whose state moved — edits in the editor once they have settled,
+ * so a fetch (which commits them) does not cut a paragraph somebody is typing into many commits.
+ */
+export function syncState(project: string): { head: string | null; changed: number | null; idle: number | null } {
+  const last = pending.get(project)?.last || null;
+  return { head: readHead(projectDir(project)), changed: last, idle: last ? Date.now() - last : null };
+}
+
+function readHead(dir: string): string | null {
+  try {
+    const gitDir = path.join(dir, '.git');
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+    if (/^[0-9a-f]{40,64}$/.test(head)) return head;
+    const ref = /^ref: (refs\/[^\s]+)$/.exec(head)?.[1];
+    if (!ref || ref.includes('..')) return null;
+    try { return fs.readFileSync(path.join(gitDir, ref), 'utf8').trim() || null; }
+    catch {
+      const packed = fs.readFileSync(path.join(gitDir, 'packed-refs'), 'utf8');
+      return new RegExp(`^([0-9a-f]{40,64}) ${ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm').exec(packed)?.[1] ?? null;
+    }
+  } catch { return null; }
+}
+
+/**
+ * Step back: the whole project as it was at `hash` (a commit of its history), as a new commit on
+ * top — nothing is rewritten, so the restore itself can be undone the same way. What people edited
+ * meanwhile is committed first (it stays in the history). Files the commit did not have are
+ * removed, ignored files (build products) are left alone; open documents take the restored files
+ * over like any external change.
+ */
+export async function restoreProject(project: string, hash: string, by: number | null): Promise<{ restored: boolean; head: string | null; files: string[] }> {
+  if (!/^[0-9a-f]{7,64}$/.test(hash)) throw new Error('not a commit');
+  await ensureRepo(project);
+  await manager.saveProject(project);
+  const result = await withRepoLock(project, async () => {
+    const editors = takeEditors(project);
+    try { await commitLocked(project, { editors }); } catch (e) { keepEditors(project, editors); throw e; }
+    const full = (await git(project, ['rev-parse', '--verify', '--quiet', `${hash}^{commit}`]).catch(() => '')).trim();
+    if (!full) throw new Error(`no commit ${hash} in this project`);
+    const ancestor = await git(project, ['merge-base', '--is-ancestor', full, 'HEAD']).then(() => true, () => false);
+    if (!ancestor) throw new Error(`${hash} is not in this project's history`);
+    const subject = (await git(project, ['log', '-1', '--format=%s', full])).trim();
+    const files = (await git(project, ['diff', '--name-only', '-z', 'HEAD', full])).split('\0').filter(Boolean);
+    if (!files.length) return { restored: false, files };
+    // index and working tree as the commit had them (tracked files it lacks are removed)
+    await git(project, ['read-tree', '-u', '--reset', full]);
+    const who = editorsOf(by == null ? [] : [by])[0];
+    await git(project, ['commit', '-q', '--no-verify', '-m', `Restore the project to ${full.slice(0, 7)} (“${subject.slice(0, 120)}”)\n\nFiles:\n${files.map(f => '  ' + f).join('\n')}\n`,
+      ...(who ? ['--author', `${who.name} <${who.email}>`] : [])], { env: { GIT_COMMITTER_NAME: serverIdentity().name, GIT_COMMITTER_EMAIL: serverIdentity().email } });
+    return { restored: true, files };
+  });
+  // open documents: take the restored text over now rather than when the watcher gets to it
+  if (result.restored) for (const [id, doc] of manager.docs) if (id.startsWith(project + '/')) { try { doc.absorbExternalChange(); } catch (e) { console.error(`[git] ${id}: reload after restore failed:`, e); } }
+  if (result.restored) console.log(`[git] "${project}" restored to ${hash.slice(0, 7)} (${result.files.length} files)`);
+  return { ...result, head: readHead(projectDir(project)) };
 }
 
 /** The clone URL of a project as seen from outside. */
@@ -429,9 +493,14 @@ export function gitRouter(): express.Router {
   r.get('/api/projects', (req, res) => {
     const user = authenticateBasic(req, res);
     if (!user) return;
-    res.json({ projects: accessibleProjects(user).map(p => ({ name: p.name, title: p.title, role: p.role })) });
+    res.json({ projects: accessibleProjects(user, { files: false }).map(p => ({ name: p.name, title: p.title, role: p.role, ...syncState(p.name) })) });
   });
   r.post('/api/projects', express.json({ limit: '32kb' }), (req, res) => { void createCliProject(req, res); });
+  // what a local agent needs besides the files: the server's build of a document, its PDF, and a
+  // restore of the whole project to an earlier commit (`overlyx build` / `overlyx restore`)
+  r.post('/api/build', express.json({ limit: '32kb' }), (req, res) => { void cliBuild(req, res); });
+  r.get('/api/pdf', (req, res) => { void cliPdf(req, res); });
+  r.post('/api/restore', express.json({ limit: '32kb' }), (req, res) => { void cliRestore(req, res); });
   r.all(/.*/, (req, res) => { void handle(req, res); });
   return r;
 }
@@ -470,6 +539,72 @@ async function createCliProject(req: Request, res: Response): Promise<void> {
     const message = (e as Error).message ?? String(e);
     res.status(/already exists/.test(message) ? 409 : 400).json({ error: message });
   }
+}
+
+/** The project and document a CLI request names (`project` = `<owner>/<name>` or an alias, `path` project-relative), with the caller's role checked. */
+function cliTarget(req: Request, res: Response, user: SessionUser, need: 'view' | 'edit', withPath: boolean): { project: string; path: string } | null {
+  const src = req.method === 'GET' ? req.query : req.body ?? {};
+  let project: string;
+  try { project = canonicalProject(String(src.project ?? '')); } catch { res.status(400).json({ error: 'bad project name' }); return null; }
+  const role = isProjectKey(project) && fs.existsSync(projectDir(project)) ? roleFor(user, project) : null;
+  if (!role) { res.status(404).json({ error: `no project "${String(src.project ?? '')}" (or no access to it)` }); return null; }
+  if (!atLeast(role, need)) { res.status(403).json({ error: `You can only view "${project}"` }); return null; }
+  const rel = String(src.path ?? '').replace(/^\.?\/+/, '');
+  if (withPath && (!rel || rel.split('/').some(s => s === '..' || s === ''))) { res.status(400).json({ error: 'path must name a document of the project, e.g. main.tex' }); return null; }
+  return { project, path: rel };
+}
+
+const BUILD_LOG_TAIL = 8000;
+
+/** Compile a document as the editor's PDF button does and answer with the outcome (waits up to `wait` seconds). */
+async function cliBuild(req: Request, res: Response): Promise<void> {
+  const user = authenticateBasic(req, res);
+  if (!user) return;
+  const t = cliTarget(req, res, user, 'view', true);
+  if (!t) return;
+  const id = `${t.project}/${t.path}`;
+  try {
+    await manager.open(id);   // validates the path
+    // a push a moment ago: its files may not have reached the open documents yet (the watcher waits for writes to settle)
+    for (const [docId, doc] of manager.docs) if (docId.startsWith(t.project + '/')) { try { doc.absorbExternalChange(); } catch { /* the watcher retries */ } }
+  } catch (e) { res.status(404).json({ error: (e as Error).message }); return; }
+  logAccess(t.project, user.id, 'build', t.path);
+  const previous = (lastBuild(id)?.status as 'ok' | 'error' | undefined) ?? null;
+  const wait = Math.max(5, Math.min(600, Number(req.body?.wait) || 180));
+  let timer: NodeJS.Timeout | undefined;
+  const result = await Promise.race([
+    buildIncluding(id, `${user.name} (CLI)`, Date.now()),
+    new Promise<null>(r => { timer = setTimeout(() => r(null), wait * 1000); }),
+  ]);
+  clearTimeout(timer);
+  if (!result) { res.status(202).json({ ok: null, running: true, note: `still building after ${wait}s` }); return; }
+  res.json({
+    ok: result.ok, warnings: result.warnings, pdf: !!result.pdfPath, previous_build: previous,
+    ...(result.ok ? {} : { errors: buildErrors(result.log, 10), locations: errorLocations(result.log).slice(0, 20) }),
+    log_tail: result.log.length > BUILD_LOG_TAIL ? '…' + result.log.slice(-BUILD_LOG_TAIL) : result.log,
+  });
+}
+
+async function cliPdf(req: Request, res: Response): Promise<void> {
+  const user = authenticateBasic(req, res);
+  if (!user) return;
+  const t = cliTarget(req, res, user, 'view', true);
+  if (!t) return;
+  const b = lastBuild(`${t.project}/${t.path}`);
+  if (!b?.pdf_path || !fs.existsSync(b.pdf_path)) { res.status(404).json({ error: 'no PDF yet — run overlyx build first' }); return; }
+  res.type('application/pdf').sendFile(path.resolve(b.pdf_path));
+}
+
+async function cliRestore(req: Request, res: Response): Promise<void> {
+  const user = authenticateBasic(req, res);
+  if (!user) return;
+  const t = cliTarget(req, res, user, 'edit', false);
+  if (!t) return;
+  try {
+    const r = await restoreProject(t.project, String(req.body?.commit ?? ''), user.id);
+    logAccess(t.project, user.id, 'git-push', `restore ${String(req.body?.commit ?? '').slice(0, 12)}`);
+    res.json(r);
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 }
 
 async function handle(req: Request, res: Response): Promise<void> {

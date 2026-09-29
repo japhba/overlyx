@@ -13,6 +13,7 @@
  */
 import type { Atom, Cell, Grid, Hull, MacroTable } from './ast';
 import { SYMBOLS } from './parse';
+import { evalColor } from '../layout/colors';
 import { approximateImageSymbols, approximateOverlapSymbols, approximateRaisebox, replaceCommand } from '../macros';
 import mathjaxMacrosTable from './mathjax-macros.json';
 
@@ -83,6 +84,8 @@ function charToTex(c: string, mode: 'math' | 'text'): string {
   }
 }
 
+/** the colours of LyX's text colour menu: styles.css has a class for each (`.lyx-color-red`, …) */
+const TEXT_COLOR_CLASSES = new Set(['black', 'darkgray', 'gray', 'lightgray', 'white', 'red', 'orange', 'yellow', 'lime', 'green', 'olive', 'teal', 'cyan', 'blue', 'violet', 'purple', 'magenta', 'pink', 'brown']);
 const TEXT_OK = new Set<Atom['t']>(['char', 'space', 'kern', 'font', 'box', 'color', 'ref', 'hash', 'comment', 'raw', 'unknown', 'cmd', 'brace', 'oldfont', 'style', 'href']);
 
 export function atomsToTex(cell: Cell, ctx: TexContext, mode: 'math' | 'text' = 'math'): string {
@@ -185,7 +188,17 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
       const n = a.n === 'bm' || a.n === 'heavysymbol' ? 'boldsymbol' : a.n === 'lefteqn' ? 'mathrlap' : a.n;
       return `\\${n}{${cellToTex(a.body, ctx, a, 0)}}` + (a.limits ? '\\' + a.limits : '');
     }
-    case 'color': return a.old ? (a.color === 'normalcolor' ? `{\\htmlClass{lm-normalcolor}{${cellToTex(a.body, ctx, a, 0, mode)}}}` : `{\\color{${a.color}}${cellToTex(a.body, ctx, a, 0, mode)}}`) : `\\textcolor{${a.color}}{${cellToTex(a.body, ctx, a, 0, 'text')}}`;
+    case 'color': {
+      if (a.old && a.color === 'normalcolor') return `{\\htmlClass{lm-normalcolor}{${cellToTex(a.body, ctx, a, 0, mode)}}}`;
+      const body = cellToTex(a.body, ctx, a, 0, a.old ? mode : 'text');
+      // LyX's text colours look as coloured text does (styles.css .lyx-color-*, dark mode included)
+      if (TEXT_COLOR_CLASSES.has(a.color)) return `{\\htmlClass{lyx-color-${a.color}}{${body}}}`;
+      // anything else xcolor can say (a picked #RRGGBB, [rgb]{…}, red!50!blue) evaluated to MathJax's RGB
+      // model — its \color knows neither the HTML model nor mixes; a colour that cannot be evaluated
+      // (one the document defines itself) leaves the body plain
+      const rgb = evalColor(a.color);
+      return rgb ? `{\\color[RGB]{${rgb.map(v => Math.round(Math.min(1, Math.max(0, v)) * 255)).join(',')}}${body}}` : `{${body}}`;
+    }
     case 'phantom': { const n = a.n === 'smasht' ? 'smash[t]' : a.n === 'smashb' ? 'smash[b]' : a.n; return `\\${n}{${cellToTex(a.body, ctx, a, 0)}}`; }
     case 'ensuremath': return `{${cellToTex(a.body, ctx, a, 0, 'math')}}`;
     case 'overset': case 'underset': return `\\${a.t}{${cellToTex(a.top, ctx, a, 1)}}{${cellToTex(a.body, ctx, a, 0)}}`;

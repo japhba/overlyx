@@ -1,7 +1,8 @@
 /**
- * Git dialog: the project's clone URL and how to use it from a local machine, the account access
- * token (shared by git, the CLI and MCP — Google accounts have no password), the recent commits
- * and what OverLyX has not committed yet. Every project is a repository; OverLyX commits its own
+ * Git dialog: the project's clone URL and how to use it from a local machine (and how to hand all
+ * projects to a local agent through `overlyx sync`), the account access token (shared by git, the
+ * CLI and MCP — Google accounts have no password), the recent commits (each can be restored as a
+ * new commit) and what OverLyX has not committed yet. Every project is a repository; OverLyX commits its own
  * writes automatically and before every clone / pull / push, and a push updates the project.
  */
 import { useEffect, useState } from 'preact/hooks';
@@ -96,6 +97,15 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
     finally { setBusy(false); }
   };
 
+  const restore = async (c: GitInfo['commits'][number]) => {
+    if (busy) return;
+    if (!confirm(`Put the whole project back to how it was at ${c.hash.slice(0, 7)} (“${c.message}”, ${fmtDate(c.date)})?\n\nThis is a new commit on top: everything since stays in the history, so it can be undone the same way. Open documents take the restored text over.`)) return;
+    setBusy(true); setErr('');
+    try { const r = await api.gitRestore(project, c.hash); setInfo(i => ({ ...(i as GitInfo), ...r })); if (!r.restored) setErr('The project is already as it was at that commit.'); }
+    catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
   const mirrorUpdate = async (body: { enabled?: boolean; now?: boolean }) => {
     if (mirrorBusy) return;
     setMirrorBusy(true); setErr('');
@@ -122,6 +132,20 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
             (<code>git config --global credential.helper store</code>, or the macOS keychain / Windows credential manager).
             {!canPush && <> You have <b>view</b> access to this project: you can clone and pull, but not push.</>}
           </div>
+
+          <h4>Local agents — Claude Code, Codex, … on your computer</h4>
+          <div class="hint" data-git-agents>
+            Give an agent on your own machine <b>ordinary files</b>: the OverLyX CLI keeps a folder with <b>all your projects</b> in
+            sync — a git clone of each, committed, merged with what people edit here, and pushed within seconds. The agent edits
+            with its own tools, checks its work with <code>overlyx build</code> (the server's compile: errors, exit code), and every
+            change is a commit, so one that broke something is taken back with <i>Restore</i> below or <code>git revert</code> — no
+            tracked-change markup, no shell on the server: it acts with your access token and your roles.
+            An <code>AGENTS.md</code> in the folder tells the agent the rules.
+          </div>
+          <pre class="git-cmds">{`curl -fsSL ${location.origin}/install-cli.sh | sh
+overlyx auth login --host ${location.origin} --username ${info.username} --with-token
+overlyx sync ~/OverLyX --watch        # keeps running: all your projects, both ways
+cd ~/OverLyX && claude                # or codex, …`}</pre>
 
           <h4>Your account access token — Git, CLI and MCP</h4>
           <div class="hint">Your account has one manually-managed token, shared by every project and client. Use it as the password for Git or the OverLyX CLI, or as an MCP Bearer token. Rotating it replaces the old token everywhere.</div>
@@ -196,7 +220,7 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
           <div class="hint">
             OverLyX commits what people edit here about half a minute after the last change, and always before a clone, pull or push, so the
             repository is never behind the editor. A push into the project updates it at once — open documents merge the change like an
-            external save.
+            external save. <i>Restore</i> puts the whole project back to an earlier commit, as a new commit on top.
           </div>
           {info.pending > 0 && (
             <div class="git-pending">
@@ -210,11 +234,12 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
           )}
           {info.pending === 0 && <div class="hint">Everything is committed (branch <code>{info.branch}</code>).</div>}
           <div class="git-log" data-git-log>
-            {info.commits.map(c => (
+            {info.commits.map((c, i) => (
               <div class="git-commit" key={c.hash} title={c.hash}>
                 <code class="hash">{c.hash.slice(0, 7)}</code>
                 <span class="msg">{c.message}</span>
                 <span class="meta">{c.author} · {ago(c.date)}</span>
+                {canPush && i > 0 && <button class="mini" disabled={busy} data-git-restore={c.hash} title="Put the whole project back to how it was at this commit (a new commit on top)" onClick={() => void restore(c)}>Restore</button>}
               </div>
             ))}
             {!info.commits.length && <div class="hint">No commits yet.</div>}

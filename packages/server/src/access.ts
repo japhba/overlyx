@@ -101,7 +101,7 @@ export interface ProjectAccess extends Project {
 }
 
 /** Projects the user can open, with their role in each. */
-export function accessibleProjects(user: SessionUser): ProjectAccess[] {
+export function accessibleProjects(user: SessionUser, opts: { files?: boolean } = {}): ProjectAccess[] {
   adoptProjects();
   const rows = new Map((db.prepare('SELECT * FROM projects').all() as ProjectRow[]).map(r => [r.name, r]));
   const memberships = new Map<string, MemberRow>();
@@ -111,7 +111,7 @@ export function accessibleProjects(user: SessionUser): ProjectAccess[] {
   }
   const owners = new Map((db.prepare('SELECT id, display_name, username FROM users').all() as { id: number; display_name: string; username: string }[]).map(u => [u.id, { id: u.id, name: u.display_name, username: u.username }]));
   const out: ProjectAccess[] = [];
-  for (const p of listProjects()) {
+  for (const p of listProjects(opts)) {
     const row = rows.get(p.name);
     const m = memberships.get(p.name);
     let role: Role | null = null;
@@ -444,10 +444,55 @@ export function ensureWelcomeProject(user: SessionUser): string | null {
   const name = freeKey(user.username, 'welcome');
   const dir = resolveProjectPath(name, '.');
   fs.mkdirSync(dir, { recursive: true });
-  copyTemplate(TEMPLATE_DIR, dir, { NAME: lyxSafe(user.name), FIRSTNAME: lyxSafe(user.name).split(/\s+/)[0], USERNAME: user.username, LLANGLE: LLANGLE_PREAMBLE.trimEnd() });
+  copyTemplate(TEMPLATE_DIR, dir, templateVars(user));
   registerProject(name, user.id, { title: WELCOME_TITLE, kind: 'example' });
   console.log(`[access] created example project "${name}" for ${user.username}`);
   return name;
+}
+
+/* --------------------------------------------------------- starter projects */
+
+const STARTER_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../templates/starters');
+/** The starters every account gets besides the welcome project (templates/starters/<id>, scripts/gen-starters.ts). */
+export const STARTERS: { id: string; title: string }[] = [
+  { id: 'slides', title: 'Example: beamer slides' },
+  { id: 'poster', title: 'Example: poster' },
+  { id: 'paper', title: 'Example: paper' },
+];
+
+/**
+ * A beamer deck, a poster and a paper to start from, each an ordinary project of the account
+ * (`<user>/example-slides`, …) with the account's name as author. Each is created once per account —
+ * new accounts on their first visit, older ones on their next — and never again once deleted
+ * (`starter_projects` keeps a row per account and template). Guests get none.
+ */
+export function ensureStarterProjects(user: SessionUser): string[] {
+  if (user.guest) return [];
+  const done = new Set((db.prepare('SELECT template FROM starter_projects WHERE user_id = ?').all(user.id) as { template: string }[]).map(r => r.template));
+  const created: string[] = [];
+  for (const s of STARTERS) {
+    if (done.has(s.id)) continue;
+    const src = path.join(STARTER_DIR, s.id);
+    if (!fs.existsSync(src)) continue;
+    const name = freeKey(user.username, `example-${s.id}`);
+    // claim the template first: two listings at once must not both create it
+    if (db.prepare('INSERT OR IGNORE INTO starter_projects (user_id, template, project, created_at) VALUES (?,?,?,?)').run(user.id, s.id, name, Date.now()).changes === 0) continue;
+    try {
+      fs.mkdirSync(resolveProjectPath(name, '.'), { recursive: true });
+      copyTemplate(src, resolveProjectPath(name, '.'), templateVars(user));
+      registerProject(name, user.id, { title: s.title, kind: 'project' });
+      created.push(name);
+    } catch (e) {
+      db.prepare('DELETE FROM starter_projects WHERE user_id = ? AND template = ?').run(user.id, s.id);   // try again next time
+      console.error(`[access] starter project "${name}" for ${user.username} failed:`, e);
+    }
+  }
+  if (created.length) console.log(`[access] created starter projects ${created.join(', ')} for ${user.username}`);
+  return created;
+}
+
+function templateVars(user: SessionUser): Record<string, string> {
+  return { NAME: lyxSafe(user.name), FIRSTNAME: lyxSafe(user.name).split(/\s+/)[0], USERNAME: user.username, LLANGLE: LLANGLE_PREAMBLE.trimEnd() };
 }
 
 function copyTemplate(from: string, to: string, vars: Record<string, string>): void {

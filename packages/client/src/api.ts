@@ -175,6 +175,7 @@ export const api = {
   acceptShare: (token: string) => req<{ project: string; title: string | null; role: Role; doc: string | null; user?: User }>('POST', `/api/share/${encodeURIComponent(token)}/accept`),
   // git: every project is a repository (clone URL, history); the account token is the HTTPS password
   gitInfo: (project: string) => req<GitInfo>('GET', `/api/projects/${encodeURIComponent(project)}/git`),
+  gitRestore: (project: string, commit: string) => req<{ restored: boolean; files: string[] } & Omit<GitInfo, 'url' | 'username' | 'role' | 'hasPassword'>>('POST', `/api/projects/${encodeURIComponent(project)}/git/restore`, { commit }),
   gitCommit: (project: string, message?: string) => req<{ committed: boolean } & Omit<GitInfo, 'url' | 'username' | 'role' | 'hasPassword'>>('POST', `/api/projects/${encodeURIComponent(project)}/git/commit`, message ? { message } : {}),
   mirrorStatus: (project: string) => req<MirrorStatus>('GET', `/api/projects/${encodeURIComponent(project)}/mirror`),
   mirrorUpdate: (project: string, body: { enabled?: boolean; now?: boolean }) => req<MirrorStatus>('POST', `/api/projects/${encodeURIComponent(project)}/mirror`, body),

@@ -370,3 +370,67 @@ describe('math-mode (Ctrl+M): \\text{} in math, math again inside text (LyX LFUN
     expect(out(c)).toBe('$\\text{if \\ensuremath{xy}}$');
   });
 });
+
+describe('the Text colour palette in a formula (LyX: InsetMathNest::handleFont2 → {\\color{c} …})', () => {
+  /** a cursor at position `from` of the formula's cell, selecting to `to` */
+  function sel(latex: string, from: number, to: number) {
+    const h = parseFormula(latex, MACROS);
+    const c = new MathCursor(h, MACROS);
+    c.pos = from; c.resetAnchor(); c.selHandle(true); c.pos = to;
+    return c;
+  }
+  it('wraps the selection in a colour group; the colour reads back at the cursor inside it', () => {
+    const c = sel('$a+b=c$', 2, 5);
+    expect(c.setColor('red')).toBe(true);
+    expect(out(c)).toBe('$a+{\\color{red}b=c}$');
+    expect(c.selection).toBe(false);
+    c.pos = 2; c.mathForward();
+    expect(c.colorAt()).toBe('red');
+  });
+  it('a picked colour is written with xcolor\'s HTML model and parses back to the same colour', () => {
+    const c = sel('$x^2$', 0, 1);
+    c.setColor('#FF8800');
+    expect(out(c)).toBe('${\\color[HTML]{FF8800}x^{2}}$');
+    expect(writeFormula(parseFormula(out(c)))).toBe(out(c));
+  });
+  it('selecting a coloured group (or all of its content) changes its colour instead of nesting', () => {
+    const c = sel('$a{\\color{red}bc}d$', 1, 2);
+    c.setColor('blue');
+    expect(out(c)).toBe('$a{\\color{blue}bc}d$');
+    const inner = parseFormula('$a{\\color{red}bc}d$', MACROS);
+    const c2 = new MathCursor(inner, MACROS);
+    c2.pos = 1; c2.mathForward();                    // into the group, before b
+    c2.resetAnchor(); c2.selHandle(true); c2.pos = 2;
+    c2.setColor('green');
+    expect(writeFormula(inner)).toBe('$a{\\color{green}bc}d$');
+  });
+  it('colours inside a new selection give way to the new colour', () => {
+    const c = sel('$a{\\color{red}b}c$', 0, 3);
+    c.setColor('blue');
+    expect(out(c)).toBe('${\\color{blue}abc}$');
+  });
+  it('the default colour removes a group: selected, around the cursor, or \\normalcolor for part of one', () => {
+    const a = sel('$a{\\color{red}bc}d$', 1, 2);
+    a.setColor(null);
+    expect(out(a)).toBe('$abcd$');
+    const h = parseFormula('$a{\\color{red}bc}d$', MACROS);
+    const b = new MathCursor(h, MACROS);
+    b.pos = 1; b.mathForward(); b.mathForward();      // inside the group, between b and c
+    expect(b.setColor(null)).toBe(true);
+    expect(writeFormula(h)).toBe('$abcd$');
+    expect(b.pos).toBe(2);                             // still between b and c
+    const h2 = parseFormula('$a{\\color{red}bcd}e$', MACROS);
+    const p = new MathCursor(h2, MACROS);
+    p.pos = 1; p.mathForward(); p.mathForward();       // select c only
+    p.resetAnchor(); p.selHandle(true); p.pos = 2;
+    p.setColor(null);
+    expect(writeFormula(h2)).toBe('$a{\\color{red}b{\\normalcolor c}d}e$');
+  });
+  it('without a selection a colour group opens for what is typed next', () => {
+    const c = at('$a$');
+    c.setColor('red');
+    type(c, 'b');
+    expect(out(c)).toBe('$a{\\color{red}b}$');
+    expect(c.colorAt()).toBe('red');
+  });
+});

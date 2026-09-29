@@ -23,7 +23,7 @@ const { manager } = await import('../packages/server/src/docs.ts');
 const { createUser } = await import('../packages/server/src/auth.ts');
 const { registerProject } = await import('../packages/server/src/access.ts');
 const { db } = await import('../packages/server/src/db.ts');
-const { createToken: createPersonalToken } = await import('../packages/server/src/git.ts');
+const { createToken: createPersonalToken, commitProject, ensureRepo } = await import('../packages/server/src/git.ts');
 
 // tokens are account-scoped: the agent gets the account's role in the requested project
 const owner = createUser('owner', 'Owner', 'pw');
@@ -127,7 +127,7 @@ describe('tools/list', () => {
     expect(status).toBe(200);
     const names = body.result.tools.map((x: any) => x.name).sort();
     expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'edit_document', 'fetch', 'insert_paragraphs', 'list_comments',
-      'list_documents', 'list_files', 'list_projects', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'resolve_comment', 'search', 'write_document', 'write_file']);
+      'list_documents', 'list_files', 'list_projects', 'project_history', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'resolve_comment', 'restore_project', 'search', 'write_document', 'write_file']);
   });
 
   it('creates a project from the account-wide MCP endpoint', async () => {
@@ -440,8 +440,30 @@ describe('build', () => {
     expect(r.ok).toBe(false);
     expect(r.previous_build).toBe('ok');
     expect(r.errors[0]).toMatch(/Undefined control sequence/);
-    expect(r.note).toMatch(/broke it.*reject your tracked changes/);
+    expect(r.note).toMatch(/broke it.*project_history \+ restore_project/);
   }, 180_000);
+
+  it('project_history and restore_project step back from an edit that broke the build', async () => {
+    const t = createMcpToken(owner.id, 'Build Bot').token;
+    await ensureRepo('owner/p');
+    writeFileSync(file('r.tex'), doc('Fine text.'));
+    await commitProject('owner/p', { message: 'Good state' });
+    await callTool(t, 'edit_document', { path: 'r.tex', old_text: 'Fine text.', new_text: 'Fine \\brokenmacro{} text.' });
+    await commitProject('owner/p');
+    expect(readFileSync(file('r.tex'), 'utf8')).toContain('brokenmacro');
+    const h = await callTool(t, 'project_history', { limit: 5 });
+    const good = h.commits.find((c: { message: string }) => c.message === 'Good state');
+    expect(good).toBeTruthy();
+    expect(h.commits[0].message).not.toBe('Good state');
+    const r = await callTool(t, 'restore_project', { commit: good.hash.slice(0, 9) });
+    expect(r.restored_files).toContain('r.tex');
+    expect(readFileSync(file('r.tex'), 'utf8')).not.toContain('brokenmacro');
+    expect((await callTool(t, 'read_document', { path: 'r.tex' })).text).not.toContain('brokenmacro');
+    // nothing was rewritten: the broken edit is still in the history, above it the restore
+    const after = await callTool(t, 'project_history', { limit: 5 });
+    expect(after.commits[0].message).toMatch(/^Restore the project to/);
+    await expect(callTool(createMcpToken(outsider.id, 'x').token, 'restore_project', { commit: good.hash })).rejects.toThrow();
+  });
 
   it("undo_turn is the Agent panel's: other agents do not see it; with no panel turn it explains", async () => {
     const other = await rpc(createMcpToken(owner.id, 'Build Bot').token, 'tools/list');

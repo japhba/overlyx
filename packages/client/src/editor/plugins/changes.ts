@@ -227,8 +227,11 @@ export function applyNodeFont(dom: HTMLElement, node: PMNode): void {
     if (abs) dom.style.fontSize = `calc(var(--ol-pt) * ${abs[1]} * var(--ol-text-scale, 1))`;
     else { dom.classList.add('lyx-size-' + size); dom.style.fontSize = ''; }
   } else if (prevSize) { delete dom.dataset.size; dom.style.fontSize = ''; }
-  if (color) { dom.dataset.color = color; dom.style.color = color.startsWith('#') ? color : `var(--lyx-color-${color}, ${color})`; }
-  else if (dom.dataset.color) { delete dom.dataset.color; dom.style.color = ''; }
+  // the colour as coloured text has it: LyX's named colours by their class (styles.css, dark mode too), a picked one as it is
+  const prevColor = dom.dataset.color;
+  if (prevColor && prevColor !== color) dom.classList.remove('lyx-color-' + prevColor);
+  if (color) { dom.dataset.color = color; if (color.startsWith('#')) dom.style.color = color; else { dom.classList.add('lyx-color-' + color); dom.style.color = ''; } }
+  else if (prevColor) { delete dom.dataset.color; dom.style.color = ''; }
 }
 
 /** Backspace/Delete while tracking: mark as deleted (unless the text was inserted by tracking, then remove). */

@@ -560,6 +560,67 @@ export class MathCursor {
     return true;
   }
 
+  /* ---- colour: LyX's text colour applied in a formula (InsetMathNest::handleFont2 wraps the
+   * selection in InsetMathColor, written `{\color{c} …}`) */
+  /** The innermost colour the cursor is in (`\color` / `\textcolor`; `\normalcolor` resets it). */
+  colorAt(): string | null {
+    for (let i = this.slices.length - 1; i >= 1; i--) {
+      const o = this.slices[i].owner as Atom;
+      if (o.t === 'color') return o.color === 'normalcolor' ? null : o.color;
+    }
+    return null;
+  }
+  /**
+   * Colour the selection `color` (null: the default colour again). A selection that is one colour
+   * atom, or all of one's content, changes that atom; otherwise the selection is wrapped in a new
+   * one, and colours inside it give way (as in a word processor). No selection: a colour atom to
+   * type into (LyX), or the one the cursor is in changes / goes away. False when the selection
+   * spans cells of a grid.
+   */
+  setColor(color: string | null): boolean {
+    this.macroModeClose();
+    const r = this.selRange();
+    if (r && r.idx1 !== r.idx2) return false;
+    if (!r) {
+      let i = this.slices.length - 1;
+      while (i >= 1 && (this.slices[i].owner as Atom).t !== 'color') i--;
+      const around = i >= 1 ? this.slices[i].owner as Extract<Atom, { t: 'color' }> : null;
+      if (!color) { if (!around) return false; this.unwrapSlice(i, false); return true; }
+      if (around && !around.body.length) { around.color = color; return true; }
+      this.handleNest({ t: 'color', color, body: [], old: true });
+      return true;
+    }
+    const cell = this.cellAt({ owner: r.owner, idx: r.idx1, pos: 0 });
+    const one = r.to - r.from === 1 && cell[r.from]?.t === 'color' ? cell[r.from] as Extract<Atom, { t: 'color' }> : null;
+    const owner = (r.owner as Atom).t === 'color' && r.from === 0 && r.to === cell.length ? r.owner as Extract<Atom, { t: 'color' }> : null;
+    if (one && color) { one.color = color; return true; }
+    if (owner && color) { owner.color = color; return true; }
+    if (one) {
+      cell.splice(r.from, 1, ...one.body);
+      this.clearSelection();
+      this.slices = this.slices.slice(0, r.depth + 1);
+      Object.assign(this.slices[r.depth], { idx: r.idx1, pos: r.from + one.body.length });
+      return true;
+    }
+    if (owner) { this.clearSelection(); this.slices = this.slices.slice(0, r.depth + 1); this.unwrapSlice(r.depth, true); return true; }
+    const inside = this.colorAt() !== null;
+    const body = uncolor(parseCell(this.grabAndEraseSelection(), this.macros, this.mode === 'text' ? 'text' : 'math'));
+    if (color) this.insertAtom({ t: 'color', color, body, old: true });
+    else if (inside) this.insertAtom({ t: 'color', color: 'normalcolor', body, old: true });
+    else this.insertCell(body);
+    return true;
+  }
+  /** Replace the colour atom that slice `i` is inside of by its content; the cursor stays in the content (or goes behind it, `after`). */
+  private unwrapSlice(i: number, after: boolean): void {
+    const atom = this.slices[i].owner as Extract<Atom, { t: 'color' }>;
+    const parent = this.slices[i - 1];
+    const at = after ? atom.body.length : this.slices[i].pos;
+    this.cellAt(parent).splice(parent.pos, 1, ...atom.body);
+    this.slices.splice(i, 1);
+    parent.pos += at;
+    if (after) this.slices = this.slices.slice(0, i);
+  }
+
   /** the mode of the cell the cursor is in (text inside \text{}, \mbox{} …) */
   get mode(): 'math' | 'text' {
     for (let i = this.slices.length - 1; i >= 1; i--) {
@@ -1265,3 +1326,14 @@ export function mutateHull(h: Hull, newtype: HullType): void {
 export { ROW_HULLS, COL_HULLS };
 export const cloneHull = (h: Hull): Hull => JSON.parse(JSON.stringify(h));
 export { cloneCell };
+
+/** The cell without `\color` groups (their content stays), inside nested atoms too: a new colour for a selection replaces the ones in it. */
+function uncolor(cell: Cell): Cell {
+  const out: Cell = [];
+  for (const a of cell) {
+    if (a.t === 'color' && a.old) { out.push(...uncolor(a.body)); continue; }
+    for (const c of atomCells(a)) c.splice(0, c.length, ...uncolor(c));
+    out.push(a);
+  }
+  return out;
+}

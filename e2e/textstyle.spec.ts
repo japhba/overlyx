@@ -77,3 +77,41 @@ test('Ctrl+I / Ctrl+B / Ctrl+U and the colour palette', async ({ page }) => {
   expect(tex).not.toContain('textcolor{red}');
   expect(errors).toEqual([]);
 });
+
+test('the colour palette colours part of a formula as LyX does ({\\color{…} …})', async ({ page }) => {
+  const errors = collectErrors(page);
+  writeFileSync(`${DIR}/m.tex`, texDoc('Energy $E=mc^2$ here.'));
+  await login(page);
+  await openDoc(page, `${PROJECT}/m.tex`);
+  const formula = page.locator('.lyx-editor .lyx-math-inline').first();
+  await formula.click();
+  await expect(page.locator('.lm-field.focused')).toHaveCount(1);
+  await page.keyboard.press('End');
+  await page.keyboard.press('Shift+ArrowLeft');   // c^2
+  await page.keyboard.press('Shift+ArrowLeft');   // m c^2
+  await page.click('[data-tb="textcolor"]');
+  await expect(page.locator('[data-palette="textcolor"]')).toContainText('Colour in the formula');
+  await page.click('[data-color-palette] [data-color="red"]');
+  const red = formula.locator('.lyx-color-red');
+  await expect(red).toHaveCount(1);
+  await expect(red).toHaveCSS('color', 'rgb(221, 0, 0)');              // as red text is
+  await expect(page.locator('.lm-field.focused')).toHaveCount(1);       // still editing the formula
+  // a picked colour for the E: the native picker takes the focus, the formula keeps its selection
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.click('[data-tb="textcolor"]');
+  await page.locator('[data-color-palette] input[type="color"]').fill('#00aa00');
+  await expect(page.locator('.lm-field.focused')).toHaveCount(1);
+  await expect(formula.locator('.lm-error')).toHaveCount(0);
+  await expect(formula.locator('[style*="color"]').first()).toHaveCSS('color', 'rgb(0, 170, 0)');
+  // the cursor inside the red part: the button shows it
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('[data-tb="textcolor"]')).toHaveAttribute('title', 'Text colour: red');
+  await page.locator('.lyx-editor .lyx-par').first().click({ position: { x: 5, y: 5 } });
+  await expect.poll(() => readFileSync(`${DIR}/m.tex`, 'utf8'), { timeout: 15000 }).toContain('\\color[HTML]{00AA00}');
+  const tex = readFileSync(`${DIR}/m.tex`, 'utf8');
+  expect(tex).toContain('${\\color[HTML]{00AA00}E}={\\color{red}mc^{2}}$');
+  expect(tex).toMatch(/\\usepackage(\[[^\]]*\])?\{xcolor\}/);
+  expect(errors).toEqual([]);
+});

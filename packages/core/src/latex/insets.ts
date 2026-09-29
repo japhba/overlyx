@@ -11,7 +11,7 @@ import { findInsetLayout } from './layouts.ts';
 import { latexLength, isZeroLength, parseLength } from './lengths.ts';
 import { TexStream } from './stream.ts';
 import { mathRequirements } from './symbols.ts';
-import { escapeText, latexQuotes, type EffectiveFont } from './text.ts';
+import { escapeText, latexQuotes, EXTENDED_COLORS, type EffectiveFont } from './text.ts';
 import { latexParagraphs, latexArgInsets, type Unit } from './body.ts';
 import { latexTabular } from './tabular.ts';
 import { exportChild } from './export.ts';
@@ -157,6 +157,8 @@ function mathUnicode(ctx: ExportContext, latex: string): string {
 function latexFormula(ctx: ExportContext, os: TexStream, rp: RunParams, f: FormulaInset, pos: InsetPosition): void {
   for (const r of mathRequirements(f.latex, ctx.symbols, ctx.opts.definedMacros, ctx.macroNames)) ctx.features.require(r);
   if (/\\(iint|iiint|iiiint|idotsint|oiint|oiiint|ointctrclockwise|ointclockwise|sqint|varointclockwise|varointctrclockwise|landupint|landdownint)\b/.test(f.latex)) ctx.features.require('esint|amsmath');
+  // colours in the formula (the Text colour palette in a formula writes {\color{red} …}, a picked one [HTML]{…})
+  for (const m of f.latex.matchAll(/\\(?:text)?color\s*(\[[^\]]*\])?\s*\{([^}]*)\}/g)) ctx.features.require(m[1] || EXTENDED_COLORS.has(m[2].trim()) ? 'xcolor' : 'color');
   if (f.inline) {
     let latex = mathUnicode(ctx, normalizeMath(f.latex.replace(/\n/g, ' '), ctx.symbols, ctx.macroNames));
     if (rp.movingArg && ctx.macroNames.size) {

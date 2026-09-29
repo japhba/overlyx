@@ -220,6 +220,18 @@ CREATE TABLE IF NOT EXISTS agent_threads (
 CREATE INDEX IF NOT EXISTS agent_threads_project ON agent_threads(project, updated_at);
 `);
 
+// The starter projects each account got (access.ts ensureStarterProjects): one row per account and
+// template, kept when the project is deleted, so a starter is created exactly once.
+db.exec(`
+CREATE TABLE IF NOT EXISTS starter_projects (
+  user_id INTEGER NOT NULL,
+  template TEXT NOT NULL,
+  project TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, template)
+);
+`);
+
 // OAuth for the MCP connector (mcpOauth.ts): dynamically registered clients (ChatGPT), short-lived
 // authorization codes, and refresh grants. Access tokens are rows in mcp_tokens (with expires_at).
 db.exec(`

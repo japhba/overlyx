@@ -1,0 +1,157 @@
+\documentclass[aspectratio=169]{beamer}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usetheme{default}
+\setbeamertemplate{navigation symbols}{}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\norm}[1]{\left\lVert #1\right\rVert}
+
+%% OverLyX ------------------------------------------------------------------
+%% overlyx-settings: {"textclass":"beamer"}
+%% Packages and macros needed by the content (generated on every save; put your own preamble above this block).
+\makeatletter
+\providecommand{\LyX}{%
+  L\kern-.1667em\lower.25em\hbox{Y}\kern-.125emX\@}
+%% Because html converters don't know tabularnewline
+\providecommand{\tabularnewline}{\\}
+% this default might be overridden by plain title style
+\newcommand\makebeamertitle{\frame{\maketitle}}%
+% (ERT) argument for the TOC
+\AtBeginDocument{%
+  \let\origtableofcontents=\tableofcontents
+  \def\tableofcontents{\@ifnextchar[{\origtableofcontents}{\gobbletableofcontents}}
+  \def\gobbletableofcontents#1{\origtableofcontents}
+}
+\makeatother
+%% end OverLyX --------------------------------------------------------------
+
+\begin{document}
+\title{Presenting with OverLyX}
+\subtitle{An ordinary beamer deck, edited as you see it}
+\author{@@NAME@@}
+\institute{Made with OverLyX}
+\makebeamertitle
+
+\section{Getting started}
+\begin{frame}{This is an ordinary beamer file}
+\begin{itemize}
+\item The file is plain \LaTeX{} (\texttt{slides.tex}): it compiles anywhere, and desktop \LyX{} opens it too.
+\item Every frame is a paragraph of the layout \emph{Frame}; its title is the argument in the frame's first line.
+\item Edit the text right here --- lists, formulas and figures look as they will in the PDF.
+\item Compile the PDF with the build button; the PDF panel shows the result.
+\end{itemize}
+
+\note[item]{Speaker notes are written with \texttt{\textbackslash note} in a frame: they show in the presenter view (press S while presenting), not on the slide.}
+
+\end{frame}
+
+\begin{frame}{Presenting}
+\begin{itemize}
+\item Press \textbf{F5} to present from the first slide (\textbf{Shift+F5}: from the current one).
+\item \textbf{Space}, \textbf{Right} or a click go forward, \textbf{Left} goes back, \textbf{Esc} ends.
+\item \textbf{S} opens the presenter view: this slide, the next one, your notes and a timer.
+\item \textbf{B} / \textbf{W} blank the screen, \textbf{L} is a laser pointer, a number + \textbf{Enter} jumps there.
+\end{itemize}
+
+\note[item]{Try it now: press F5.}
+\end{frame}
+
+\section{Overlays}
+\begin{frame}{One item at a time}
+\begin{itemize}[<+->]
+\item \texttt{{[}<+->{]}} after \texttt{\textbackslash begin\{itemize\}} uncovers the items one by one.
+\item The presentation shows the same steps as the PDF, which gets one page per step.
+\item Formulas work in every step: $\E[X]=\sum_{x}x\,p(x)$.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Pauses and item specifications}
+\begin{itemize}
+\item<1-> \texttt{\textbackslash item<1->} is there from the first step.
+\item<2-> \texttt{\textbackslash item<2->} appears with the second.
+\item<3-> \texttt{\textbackslash item<3->} with the third.
+\end{itemize}
+A \texttt{\textbackslash pause} stops here \pause and the rest follows on the next step.
+\end{frame}
+
+\begin{frame}{Only, uncover, alert and alt}
+\only<1>{\texttt{\textbackslash only<1>} --- this sentence is there on the first step only.}\only<2->{\texttt{\textbackslash only<2->} --- and this one replaces it from the second.}
+
+\uncover<3->{\texttt{\textbackslash uncover<3->} keeps its room while covered and appears on step three.}
+
+\alert<2>{\texttt{\textbackslash alert<2>} turns red on step two.}
+
+\alt<4>{\textbf{On step four, alt shows its first text.}}{\texttt{\textbackslash alt<4>\{\ldots\}\{\ldots\}} shows its second text on the other steps.}
+\end{frame}
+
+\section{Structure}
+\begin{frame}{Columns and figures}
+\begin{columns}
+
+\column{0.45\textwidth}
+
+Columns sit side by side, as in the PDF.
+\begin{itemize}
+\item Their widths come from \texttt{\textbackslash begin\{column\}\{0.45\textbackslash textwidth\}}.
+\item A figure is an ordinary \texttt{\textbackslash includegraphics}.
+\end{itemize}
+
+\column{0.5\textwidth}
+
+\includegraphics[width=1\linewidth]{figures/decay}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Blocks}
+\begin{block}{A block}
+Blocks have a title and a body.
+\end{block}
+\begin{alertblock}<2->{An alert block}
+This one appears on the second step: blocks take overlay specifications too.
+\end{alertblock}
+\begin{exampleblock}<3->{An example block}
+And this one on the third.
+\end{exampleblock}
+\end{frame}
+
+\begin{frame}{Theorems and formulas}
+\begin{theorem}[Jensen]
+For a convex function $\varphi$ and an integrable random variable $X$,
+\[
+\varphi\left(\E[X]\right)\le\E\left[\varphi(X)\right].
+\]
+\end{theorem}
+
+\begin{proof}
+Take a tangent line $\ell(x)=a+bx\le\varphi(x)$ at $\E[X]$ and use the linearity of $\E$.
+\end{proof}
+
+Macros from the preamble render in the editor: $\norm{x-\E[X]}^{2}$.
+\end{frame}
+
+\begin{frame}{A table}
+\begin{center}
+\begin{tabular}{lcc}
+\hline 
+Method & Steps & Error\tabularnewline
+\hline 
+Euler & 1000 & $3.1\times10^{-2}$\tabularnewline
+Heun & 500 & $4.7\times10^{-4}$\tabularnewline
+Runge--Kutta 4 & 100 & $2.2\times10^{-7}$\tabularnewline
+\hline 
+\end{tabular}
+\par\end{center}
+Tables are edited cell by cell; Tab moves to the next cell.
+\end{frame}
+
+\begin{frame}{Your turn}
+\begin{enumerate}
+\item Change a word in this frame and watch the PDF follow.
+\item Make a new frame: put the cursor after a frame, press Enter and choose the layout \emph{Frame}.
+\item Copy an item with an overlay from the frames above and change its number --- or edit the \LaTeX{} source in the source pane.
+\item Press F5 and present it.
+\end{enumerate}
+\end{frame}
+
+\end{document}

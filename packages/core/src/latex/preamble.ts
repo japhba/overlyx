@@ -343,9 +343,11 @@ export function lyxMacros(ctx: ExportContext): string {
   if (f.mustProvide('LyX')) {
     m += '\\providecommand{\\LyX}';
     if (f.isRequired('hyperref')) m += '{\\texorpdfstring';
-    if (ctx.useBabel) m += '{\\ensureascii';
+    // \ensureascii is babel's: a .tex file loads babel only when its own preamble does
+    const babel = ctx.useBabel && (!ctx.texMode || f.isProvided('babel'));
+    if (babel) m += '{\\ensureascii';
     m += LYX_DEF;
-    if (ctx.useBabel) m += '}';
+    if (babel) m += '}';
     if (f.isRequired('hyperref')) m += '{LyX}}';
     m += '\n';
   }

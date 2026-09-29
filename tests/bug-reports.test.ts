@@ -97,8 +97,8 @@ describe('GitHub bug reports', () => {
     };
     const html = renderStaticHtml(String.raw`{\color{red}\Pfi}\logo`, false, macros, { project: 'paper', docDir: '' });
     expect(html.match(/mask-image:/g)).toHaveLength(1);
-    // the red of \color reaches the masked glyph (it is drawn in currentColor)
-    expect(html).toMatch(/style="color: red;?"[^]*class="lm-image-glyph"[^]*<mjx-mglyph[^>]*mask-image: ?url\(&quot;[^&]*doublephi\.svg\?w=400/);
+    // the red of \color (drawn with the text colour's class) reaches the masked glyph (it is drawn in currentColor)
+    expect(html).toMatch(/class="lyx-color-red"[^]*class="lm-image-glyph"[^]*<mjx-mglyph[^>]*mask-image: ?url\(&quot;[^&]*doublephi\.svg\?w=400/);
     expect(html).toContain('src="/api/projects/paper/graphics/logo.png?w=400"');
   });
 

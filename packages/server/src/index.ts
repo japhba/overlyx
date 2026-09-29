@@ -29,7 +29,7 @@ import { overleafProjectId, cloneOverleafProject } from './overleaf.ts';
 import { toPng, isDirectImage } from './graphics.ts';
 import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit } from './export.ts';
 import { db } from './db.ts';
-import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, type Role } from './access.ts';
+import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import { ownProjectKey } from './projectCreate.ts';
 import { sandboxAvailable } from './sandbox.ts';
@@ -39,7 +39,7 @@ import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, feedbackEnabl
 import { usageRoutes } from './usage.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
-import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
+import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, restoreProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
 import { texHeadings, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText, lyxToPm, splitDocId, projectOfDoc, docPathOf } from '@overlyx/core';
 
 const app = express();
@@ -174,10 +174,11 @@ api.all('/docs/*', (req, res, next) => {
 
 api.get('/projects', (req, res) => {
   ensureWelcomeProject(req.user!);
+  ensureStarterProjects(req.user!);
   // when this user last opened each project (the start screen sorts by recency)
   const opened = lastOpenedByProject(req.user!.id);
   res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null })) });
-  void ensureAllRepos();   // directories that appeared since (created by hand, the welcome project) get their repository
+  void ensureAllRepos();   // directories that appeared since (created by hand, the welcome and starter projects) get their repository
 });
 
 /**
@@ -508,6 +509,13 @@ api.post('/projects/:project/git/commit', needProject('edit'), async (req, res) 
     const committed = await commitProject(req.params.project, { message: typeof req.body?.message === 'string' && req.body.message.trim() ? req.body.message.trim().slice(0, 500) : undefined, by: req.user!.id });
     res.json({ committed, ...(await repoInfo(req.params.project)) });
   } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+/** Step back: the whole project as it was at an earlier commit, as a new commit (editors). */
+api.post('/projects/:project/git/restore', needProject('edit'), async (req, res) => {
+  try {
+    const r = await restoreProject(req.params.project, String(req.body?.commit ?? ''), req.user!.id);
+    res.json({ ...r, ...(await repoInfo(req.params.project)) });
+  } catch (e) { res.status(400).json({ error: (e as Error).message ?? String(e) }); }
 });
 /** The account's one manually-managed token (valid for Git, CLI and MCP). POST rotates it. */
 api.get('/git/tokens', (req, res) => { res.json({ tokens: listTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) }); });

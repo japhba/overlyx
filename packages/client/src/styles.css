@@ -1277,11 +1277,12 @@ button.tb-cw:hover:not(:disabled) { background: var(--row-hover); border-color: 
 .git-pending > span { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-pending .files { color: var(--fg2); }
 .git-pending input { flex: 1; min-width: 80px; font-size: 12px; padding: 3px 6px; border: 1px solid var(--ui-border); border-radius: 3px; }
-.git-log { display: flex; flex-direction: column; gap: 1px; max-height: 200px; overflow: auto; font-size: 12px; }
+.git-log { display: flex; flex-direction: column; gap: 1px; flex: none; max-height: 200px; overflow: auto; font-size: 12px; }
 .git-commit { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
 .git-commit .hash { color: var(--muted2); font-size: 11px; flex: none; }
-.git-commit .msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-commit .msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-commit .meta { color: var(--muted2); font-size: 11px; flex: none; }
+.git-commit .mini { flex: none; padding: 0 6px; font-size: 11px; }
 
 /* ---- file browser: one project at a time */
 .filetree .project-picker { display: flex; align-items: center; gap: 6px; padding: 6px 6px 2px; }
@@ -1881,12 +1882,12 @@ html[data-theme="dark"] { --canvas-bg: #121215; }
 .ol-present-stage { position: relative; width: calc(var(--ol-mm) * var(--ol-page-w)); height: calc(var(--ol-mm) * var(--ol-page-h)); color: #000; }
 .ol-present-stage > .ol-page { position: absolute; left: 0; top: 0; box-shadow: none; }
 .ol-present .ol-hidden { visibility: hidden; }
-/* beamer overlays in text (overlays.ts): \only is absent, \alert red, \alt shows its alternative */
+/* beamer overlays in text (overlays.ts): \only is absent, \alert red, \alt shows its first text (argument 2) on its slides */
 .ol-present .ol-gone, .ol-presenter .ol-gone { display: none !important; }
 .ol-ov-alert { color: #e60000 !important; }
 .ol-ov-bold { font-weight: bold; } .ol-ov-emph { font-style: italic; }
 .ol-present-page .lyx-inset[data-name="Flex"][data-arg="Alternative"] .lyx-inset-argument-2 { display: none; }
-.ol-present-page .ol-ov-alt > .inset-box > .inset-content > .lyx-par > :not(.lyx-inset-argument-2) { display: none; }
+.ol-present-page .ol-ov-alt .ol-alt-else { display: none; }
 .ol-present-page .ol-ov-alt .lyx-inset-argument-2 { display: inline !important; }
 /* text insets on a presented page: their content, no editing chrome */
 .ol-present-page .lyx-inset-argument, .ol-present-page .lyx-inset-ert, .ol-present-page .lyx-inset-note { display: none; }

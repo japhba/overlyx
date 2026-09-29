@@ -254,6 +254,8 @@ export class LyxMathField {
     if (refocus) { this.input.focus({ preventScroll: true }); this.scheduleLayout(); }
     else if (!this.focused) { this.overlay.replaceChildren(); this.opts.onBlur?.(); }
   }
+  /** the colour the cursor is in (the Text colour button shows it), null for the default */
+  colorAtCursor(): string | null { return this.cursor.colorAt(); }
   /** the link (\href) the cursor is in or touches: its target as written in the LaTeX */
   linkAtCursor(): { target: string } | null {
     const l = this.cursor.linkAt();
@@ -320,6 +322,13 @@ export class LyxMathField {
         return true;
       }
       case 'unlink': return c.linkAt() ? change('unlink', () => c.unlink()) : false;
+      // the Text colour palette in a formula: the selection coloured {\color{c} …} as LyX does (null: default colour)
+      case 'color': {
+        this.snapshot('color');
+        if (!c.setColor(args[0] == null ? null : String(args[0]))) { this.undoStack.pop(); return false; }
+        this.commit();
+        return true;
+      }
       // plain delimiter pair around the selection (no \left / \bigl): `\llangle x \rrangle`
       case 'pair': return change('pair', () => { const [l, r] = args as string[]; const sel = c.grabAndEraseSelection(); c.niceInsert(l, false); c.niceInsert(r, false); c.posBackward(); if (sel) c.niceInsert(sel, false); });
       // LyX math-size: \displaystyle etc. wrap the selection (or start an inset at the cursor)

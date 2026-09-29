@@ -152,7 +152,7 @@ function inlineOverlays(p: HTMLElement, counter: OverlayCounter, setPause: (s: s
       return e.classList.contains('lyx-inset') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
     },
   });
-  const pauses: HTMLElement[] = [];
+  const pauses: HTMLElement[] = [], alts: HTMLElement[] = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const e = n as HTMLElement;
     if (e.dataset.name === 'ERT') {
@@ -165,6 +165,16 @@ function inlineOverlays(p: HTMLElement, counter: OverlayCounter, setPause: (s: s
     const spec = counter.resolve(argText(e, '1'));
     if (spec === null) continue;
     mark(e, spec, mode);
+    if (mode === 'alt') alts.push(e);
+  }
+  // \alt<…>{a}{b}: a is the inset's argument 2, b its content — wrapped, so that it can be hidden while a shows
+  for (const e of alts) {
+    for (const par of e.querySelectorAll<HTMLElement>(':scope > .inset-box > .inset-content > .lyx-par')) {
+      const wrap = document.createElement('span');
+      wrap.className = 'ol-alt-else';
+      for (const c of [...par.childNodes]) if (!(c instanceof HTMLElement && c.classList.contains('lyx-inset-argument'))) wrap.append(c);
+      par.append(wrap);
+    }
   }
   // an inline \pause: what follows it in the paragraph is covered until its slide
   for (const ert of pauses) {
@@ -197,6 +207,7 @@ export function applyOverlays(root: HTMLElement, n: number): void {
     e.classList.toggle('ol-ov-alert', mode === 'alert' && on);
     e.classList.toggle('ol-ov-bold', mode === 'bold' && on);
     e.classList.toggle('ol-ov-emph', mode === 'emph' && on);
-    e.classList.toggle('ol-ov-alt', mode === 'alt' && !on);
+    // \alt: its first text (argument 2) on the specified slides, the second (the content) on the others
+    e.classList.toggle('ol-ov-alt', mode === 'alt' && on);
   }
 }

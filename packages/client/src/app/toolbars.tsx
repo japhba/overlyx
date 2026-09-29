@@ -7,7 +7,7 @@
  * margin ink, the comments panel) goes into the slots. tests/parity.test.ts checks that no shell
  * keeps toolbar definitions of its own.
  */
-import { useMemo } from 'preact/hooks';
+import { useEffect, useMemo, useRef } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
 import { undo, redo } from 'y-prosemirror';
@@ -220,13 +220,38 @@ export function docHasChanges(doc: PMNode): boolean {
   return v;
 }
 
+/**
+ * The Text colour palette: text gets the colour mark; in a formula (focused when the palette
+ * opened) its selection is coloured as LyX does, `{\color{c} …}`. The formula is held while the
+ * palette is open — the custom colour's picker takes the focus, and a formula losing the focus
+ * would otherwise drop its selection.
+ */
+function TextColorPalette({ field, current, close, onText }: { field: LyxMathField | null; current: string | null; close: () => void; onText: (c: string | null) => void }) {
+  const target = useRef(field);
+  const picked = useRef(false);
+  useEffect(() => {
+    const f = target.current;
+    f?.hold();
+    return () => { if (!picked.current) f?.endHold(false); };
+  }, []);
+  const pick = (c: string | null) => {
+    const f = target.current;
+    if (!f) { onText(c); return; }
+    picked.current = true;
+    f.execute('color', c && c.startsWith('#') ? c.toUpperCase() : c);
+    f.endHold(true);
+  };
+  return <ColorPalette current={current} close={close} onPick={pick} />;
+}
+
 /* ---------------------------------------------------------------- the toolbars */
 
 export function buildToolbars(ctx: ToolbarContext): Toolbars {
   const { view, docId, meta, prefs, layout, mathField, tracking, marginMode, tbMode, run, runView, mathExec, setDialog, notify } = ctx;
   const slots = ctx.slots ?? {};
   const markActive = (name: string, value: string) => cursorMarks(view).some(m => m.type.name === name && m.attrs.value === value);
-  const textColor = markValue(view, 'color');
+  // in a formula: its colour at the cursor, and the palette colours the formula's selection (LyX's {\color{c} …})
+  const textColor = mathField ? mathField.colorAtCursor() : markValue(view, 'color');
   const insertDelim = (c: DelimChoice) => insertDelimiter(ctx, c);
   const layoutBtn = (id: string, name: string, title: string, icon: string): ToolButton => ({ id, title, icon, action: () => run(C.setLayout(layout === name && name !== 'Standard' ? 'Standard' : name)), active: layout === name });
   const styles = textStylesPalette(run);
@@ -260,7 +285,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 'charstyles', title: 'Custom text styles', icon: 'charstyles', palette: styles },
       { id: 'italic', title: 'Italic (Ctrl+I)', icon: 'italic', action: () => run(C.fontCommands.italic), active: markActive('shape', 'italic') },
       { id: 'textcolor', title: textColor ? `Text colour: ${textColor}` : 'Text colour', icon: 'textcolor', html: colorIcon(textColor), active: !!textColor,
-        palette: { title: 'Text colour', render: close => <ColorPalette current={textColor} close={close} onPick={c => run(C.setValueMark('color', c))} /> } },
+        palette: { title: mathField ? 'Colour in the formula' : 'Text colour', render: close => <TextColorPalette field={mathField} current={textColor} close={close} onText={c => run(C.setValueMark('color', c))} /> } },
       // font size: text, table cells, a formula as a whole, a selected text box (editor/fontsize.ts)
       ...(view ? [{ id: 'fontsize', title: 'Font size (points)', icon: '', widget: () => <FontSizeBox view={view} /> } as ToolButton] : []),
     ],

@@ -145,8 +145,8 @@ export function writeAtom(a: Atom, os: MathWriter): void {
     }
     case 'oldfont': case 'style': os.s('{\\' + a.n + ' '); writeCell(a.body, os); os.s('}'); return;
     case 'color': {
-      if (a.old) { os.s(a.color === 'normalcolor' ? '{\\normalcolor ' : '{\\color{' + a.color + '}'); writeCell(a.body, os); os.s('}'); }
-      else { os.s('\\textcolor{' + a.color + '}{'); const tm = os.textMode; os.textMode = true; writeCell(a.body, os); os.textMode = tm; os.s('}'); }
+      if (a.old) { os.s(a.color === 'normalcolor' ? '{\\normalcolor ' : '{\\color' + colorSpec(a.color)); writeCell(a.body, os); os.s('}'); }
+      else { os.s('\\textcolor' + colorSpec(a.color) + '{'); const tm = os.textMode; os.textMode = true; writeCell(a.body, os); os.textMode = tm; os.s('}'); }
       return;
     }
     case 'overset': case 'underset': os.s('\\' + a.t); braced(os, a.top); braced(os, a.body); return;
@@ -325,4 +325,11 @@ export function writeCellLatex(cell: Cell): string {
   const os = new MathWriter();
   writeCell(cell, os);
   return os.text();
+}
+
+/** A colour atom's colour as \color's arguments: `{red}`, `#FF8800` → `[HTML]{FF8800}`, `[rgb]{1,0,0}` as it is. */
+export function colorSpec(color: string): string {
+  if (color.startsWith('#')) return `[HTML]{${color.slice(1)}}`;
+  if (color.startsWith('[')) return color;
+  return `{${color}}`;
 }

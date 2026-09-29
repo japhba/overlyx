@@ -1147,7 +1147,9 @@ class BodyParser {
       return;
     }
     const env = ctx.envLayout ? this.dc.styles.get(ctx.envLayout) : undefined;
-    const nested = !!env?.autoNests.includes(style.name);
+    // …and so does beamer's \note[item] (LyX's NoteItem) in an environment that nests its content:
+    // at the environment's own depth it would end the frame
+    const nested = !!env && (env.autoNests.includes(style.name) || (env.autoNests.length > 0 && style.name === 'NoteItem'));
     if (nested) { this.endPar(ctx); this.hangFrom(ctx); }
     const par = this.newPar(ctx, style.name, nested ? ctx.nestDepth : ctx.depth);
     const inner: State = { font: {}, change: st.change };

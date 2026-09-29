@@ -18,8 +18,10 @@
  * inside tables, floats and other insets too; new threads attach at a top-level paragraph.
  * build_pdf compiles with latexmk (viewers may, like in the app) and hands back the warnings,
  * the first errors, whether the build before the agent's changes succeeded, and the compile-log
- * tail. The Agent panel's agent also has undo_turn: its turns leave checkpoints (agentwork.ts),
- * and it can take one back exactly — e.g. an edit that broke the build.
+ * tail. project_history lists the project's commits and restore_project puts the whole project back
+ * to one of them (a new commit on top) — the way back from changes that broke the build. The Agent
+ * panel's agent also has undo_turn: its turns leave checkpoints (agentwork.ts), and it can take
+ * one back exactly.
  */
 import express, { type Request, type Response } from 'express';
 import { z } from 'zod';
@@ -37,7 +39,7 @@ import nodePath from 'node:path';
 import { manager } from './docs.ts';
 import { listProjects, projectDir, resolveProjectPath, isDocumentFile, newDocumentText, findMaster } from './projects.ts';
 import { parseDocumentText, parseFragmentText } from './texdoc.ts';
-import { touchProject } from './git.ts';
+import { touchProject, repoInfo, restoreProject } from './git.ts';
 import { buildIncluding, buildErrors, lastBuild, currentJob } from './export.ts';
 import { PANEL_AGENT, buildBeforeTurn, agentCheckpoint, undoCheckpoint } from './agentwork.ts';
 import { verifyMcpToken } from './mcpTokens.ts';
@@ -208,7 +210,7 @@ async function buildDocument(project: string, agentName: string, userId: number,
   const out: Record<string, unknown> = { ok: result.ok, warnings: result.warnings, pdf: !!result.pdfPath, previous_build: previous };
   if (!result.ok) {
     out.errors = buildErrors(result.log);
-    if (previous === 'ok') out.note = `The build before ${turnBefore !== undefined ? 'your changes in this turn' : 'this one'} succeeded — a recent edit broke it. If it was yours, fix it${panel ? ', or take your changes back with undo_turn' : ', or reject your tracked changes'}; never leave the document not compiling.`;
+    if (previous === 'ok') out.note = `The build before ${turnBefore !== undefined ? 'your changes in this turn' : 'this one'} succeeded — a recent edit broke it. If it was yours, fix it${panel ? ', or take your changes back with undo_turn' : ', or step back with project_history + restore_project'}; never leave the document not compiling.`;
   }
   out.log_tail = logTail(result.log);
   return out;
@@ -487,6 +489,17 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     description: "Take back every change one of your turns made to the project: its documents return exactly to their state before that turn (your tracked changes of the turn disappear, as if rejected — earlier marks and everybody else's edits since are kept), files it wrote get their old content back, files it created are removed. turns_back 0 (default) = the changes of the turn you are in (e.g. an edit that broke the build and cannot be fixed quickly); 1 = the last earlier turn that changed files, 2 = the one before, … Your working copy is refreshed afterwards.",
     inputSchema: { ...projArg, turns_back: z.number().int().min(0).max(30).optional().describe('0 = this turn (default), 1 = the previous turn that changed files, …') },
   }, async ({ project: p, turns_back }) => { try { return ok(await undoTurn(need(p, 'edit'), userId, turns_back ?? 0)); } catch (e) { return fail(e); } });
+
+  server.registerTool('project_history', {
+    description: "The project's recent history: its git commits, newest first (hash, author, date, message). OverLyX commits what people and agents edit a moment after it happens, so a commit from before a change is the state to go back to with restore_project.",
+    annotations: { readOnlyHint: true },
+    inputSchema: { ...projArg, limit: z.number().int().positive().max(100).optional().describe('How many commits (default 20)') },
+  }, async ({ project: p, limit }) => { try { const info = await repoInfo(need(p, 'view'), limit ?? 20); return ok({ commits: info.commits.map(c => ({ ...c, date: new Date(c.date).toISOString() })), uncommitted_files: info.pendingFiles }); } catch (e) { return fail(e); } });
+
+  server.registerTool('restore_project', {
+    description: "Step back: put the whole project (every file) back to how it was at a commit from project_history — e.g. before changes that broke the build and cannot be fixed quickly. Done as a new commit on top, so nothing is lost and the restore can itself be undone the same way; edits made since that commit (anybody's) are taken back too, so check project_history first. Open documents take the restored text over.",
+    inputSchema: { ...projArg, commit: z.string().describe('A commit hash (7+ hex digits) from project_history') },
+  }, async ({ project: p, commit }) => { try { const project = need(p, 'edit'); const r = await restoreProject(project, commit.trim().toLowerCase(), userId); logAccess(project, userId, 'git-push', `restore ${commit.slice(0, 12)} (MCP)`); return ok(r.restored ? { ok: true, restored_files: r.files, note: 'Restored as a new commit. Re-read documents before editing them again.' } : { ok: true, restored_files: [], note: 'The project already is as it was at that commit.' }); } catch (e) { return fail(e); } });
 
   server.registerTool('build_status', {
     description: "The document's build state: whether a build is running, and the last result (status, LaTeX warnings, compile-log tail, whether a PDF exists).",

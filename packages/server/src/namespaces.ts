@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS project_moves (
 `);
 
 /** Tables naming a project, and tables naming documents (ids `<project>/<path>`). */
-const PROJECT_COLUMNS: [string, string][] = [['projects', 'name'], ['project_members', 'project'], ['admin_grants', 'project'], ['access_log', 'project'], ['mirrors', 'project'], ['agent_threads', 'project']];
+const PROJECT_COLUMNS: [string, string][] = [['projects', 'name'], ['project_members', 'project'], ['admin_grants', 'project'], ['access_log', 'project'], ['mirrors', 'project'], ['agent_threads', 'project'], ['starter_projects', 'project']];
 const DOC_COLUMNS: [string, string][] = [['ydocs', 'id'], ['versions', 'doc_id'], ['builds', 'doc_id'], ['pdf_links', 'doc_id'], ['user_doc_state', 'doc_id'], ['pdf_publish', 'doc_id']];
 
 /** A document's build directory (export.ts buildDir): named by a hash of its id. */

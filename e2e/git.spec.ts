@@ -92,8 +92,20 @@ test('clone with the token, push a change, pull what OverLyX committed', async (
   await expect(dlg).toContainText('Everything is committed');
   git(CLONE, 'pull', '-q', '--no-rebase', 'origin', 'main');
   expect(readFileSync(join(CLONE, 'refs.bib'), 'utf8')).toContain('From OverLyX');
-  // the token can be revoked
+  // how to hand all projects to a local agent
+  await expect(dlg.locator('[data-git-agents]')).toContainText('AGENTS.md');
+  await expect(dlg).toContainText('overlyx sync ~/OverLyX --watch');
+  // Restore: the whole project as it was at the laptop's commit, as a new commit on top
   page.on('dialog', d => d.accept());
+  const laptop = dlg.locator('.git-commit', { hasText: 'Notes from the laptop' });
+  await expect(dlg.locator('.git-commit').first().locator('[data-git-restore]')).toHaveCount(0);   // the current state
+  await laptop.locator('[data-git-restore]').click();
+  await expect(dlg.locator('.git-commit').first()).toContainText('Restore the project to', { timeout: 15000 });
+  expect(existsSync(join(DIR, 'refs.bib'))).toBe(false);
+  expect(readFileSync(join(DIR, 'notes.tex'), 'utf8')).toBe('% pushed from the laptop\n');
+  git(CLONE, 'pull', '-q', '--no-rebase', 'origin', 'main');
+  expect(existsSync(join(CLONE, 'refs.bib'))).toBe(false);
+  // the token can be revoked
   await dlg.locator('.git-token button', { hasText: 'Revoke' }).click();
   await expect(dlg.locator('.git-token')).toHaveCount(0, { timeout: 10000 });
   expect(() => git(CLONE, 'fetch', '-q', 'origin')).toThrow(/401|Authentication|failed/);

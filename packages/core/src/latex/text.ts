@@ -11,7 +11,7 @@ import { isForced } from './unicode.ts';
 
 /* ------------------------------------------------------------ characters */
 
-const EXTENDED_COLORS = new Set(['brown', 'darkgray', 'lightgray', 'lime', 'olive', 'orange', 'pink', 'purple', 'teal', 'violet', 'gray']);
+export const EXTENDED_COLORS = new Set(['brown', 'darkgray', 'lightgray', 'lime', 'olive', 'orange', 'pink', 'purple', 'teal', 'violet', 'gray']);
 
 /** Convert a non-ASCII character via lib/unicodesymbols. Returns undefined when it may pass through. */
 export function unicodeCommand(ctx: ExportContext, code: number, inMath = false): { cmd: string; terminate: boolean; preamble: string } | undefined {
