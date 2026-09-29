@@ -256,7 +256,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       const target = uri ?? vscode.window.activeTextEditor?.document.uri;
       if (target) void vscode.commands.executeCommand('vscode.openWith', target, 'overlyx.texEditor');
     }),
-    // ⌘K (link), ⌘J (rewrite with AI), ⌘\ (clear formatting) belong to the editor in the webview, which
+    // ⌘K (link), ⌘J (rewrite with AI), ⌘\ (clear formatting), F5 (present slides) belong to the editor in the webview, which
     // handles them itself; bound here so that VS Code does not also start its ⌘K chord, toggle the panel or split
     vscode.commands.registerCommand('overlyx.editorKey', () => undefined),
     vscode.commands.registerCommand('overlyx.openAsText', () => {

@@ -1881,6 +1881,65 @@ html[data-theme="dark"] { --canvas-bg: #121215; }
 .ol-present-stage { position: relative; width: calc(var(--ol-mm) * var(--ol-page-w)); height: calc(var(--ol-mm) * var(--ol-page-h)); color: #000; }
 .ol-present-stage > .ol-page { position: absolute; left: 0; top: 0; box-shadow: none; }
 .ol-present .ol-hidden { visibility: hidden; }
+/* beamer overlays in text (overlays.ts): \only is absent, \alert red, \alt shows its alternative */
+.ol-present .ol-gone, .ol-presenter .ol-gone { display: none !important; }
+.ol-ov-alert { color: #e60000 !important; }
+.ol-ov-bold { font-weight: bold; } .ol-ov-emph { font-style: italic; }
+.ol-present-page .lyx-inset[data-name="Flex"][data-arg="Alternative"] .lyx-inset-argument-2 { display: none; }
+.ol-present-page .ol-ov-alt > .inset-box > .inset-content > .lyx-par > :not(.lyx-inset-argument-2) { display: none; }
+.ol-present-page .ol-ov-alt .lyx-inset-argument-2 { display: inline !important; }
+/* text insets on a presented page: their content, no editing chrome */
+.ol-present-page .lyx-inset-argument, .ol-present-page .lyx-inset-ert, .ol-present-page .lyx-inset-note { display: none; }
+.ol-present-page .lyx-inset > .inset-box { border: 0 !important; background: none !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; }
+.ol-present-page .lyx-inset > .inset-box > .inset-content, .ol-present-page .lyx-inset > .inset-box > .inset-content > .lyx-par { display: inline; }
+.ol-present-page [class*="spell"], .ol-present-page .lyx-typo { text-decoration: none !important; background: none !important; }
+.ol-present-page .lm-field { border: 0; padding: 0; }
+
+/* a linear beamer deck in the editor: a frame begins with its title (beamer's structure colour), the
+   overlay arguments are small chips */
+.lyx-par[data-layout$="Frame"][data-depth="0"]:has(> .lyx-inset-argument[data-arg="4"]) { margin-top: 1.4em; padding-top: 0.5em; border-top: 1px solid var(--ui-border); }
+.lyx-inset-argument[data-owner$="Frame"][data-arg="4"] > .inset-box { border-color: transparent; background: none; }
+.lyx-inset-argument[data-owner$="Frame"][data-arg="4"] > .inset-box > .inset-content { font-size: 1.3em; color: #3333b3; }
+html[data-theme="dark"] .lyx-inset-argument[data-owner$="Frame"][data-arg="4"] > .inset-box > .inset-content { color: #9d9dff; }
+.lyx-par[data-layout="FrameTitle"] { font-size: 1.3em; color: #3333b3; }
+html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
+.lyx-inset-argument[data-arg="item:2"] > .inset-box, .lyx-inset-argument[data-owner^="inset:"][data-arg="1"] > .inset-box { font-size: 0.8em; vertical-align: 0.1em; }
+
+/* a linear beamer deck presented (beamerslides.ts): the default theme's look */
+.bm-slide { display: flex; flex-direction: column; overflow: hidden; background: #fff; color: #000; --bm-structure: #3333b3;
+  font-family: var(--ol-page-font, "CMU Sans Serif", sans-serif); font-size: calc(var(--ol-pt) * var(--ol-basept, 11) * var(--ol-text-scale, 1)); line-height: calc(1.2 / var(--ol-text-scale, 1)); }
+.bm-slide mjx-container[jax="CHTML"] { font-size: calc(var(--ol-math-rel, 1) * 1em); }
+.bm-head { flex: none; padding: calc(var(--ol-mm) * 3.2) calc(var(--ol-mm) * 10) calc(var(--ol-mm) * 1.2); color: var(--bm-structure); }
+.bm-frametitle { font-size: 1.31em; line-height: 1.2; }
+.bm-framesubtitle { font-size: 0.91em; margin-top: 0.2em; }
+.bm-body { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 calc(var(--ol-mm) * 10) calc(var(--ol-mm) * 5); }
+.bm-body.bm-top { justify-content: flex-start; padding-top: calc(var(--ol-mm) * 2); }
+.bm-body.bm-bottom { justify-content: flex-end; }
+.bm-slide .lyx-par { margin: 0 0 0.45em; padding: 0; text-indent: 0; font-size: 1em; line-height: inherit; text-align: left; position: relative; min-height: 0; border: 0; background: none; }
+.bm-slide .lyx-par::before { content: none; }
+.bm-slide .lyx-par[data-rel="1"] { margin-left: 1.6em; } .bm-slide .lyx-par[data-rel="2"] { margin-left: 3.2em; } .bm-slide .lyx-par[data-rel="3"] { margin-left: 4.8em; }
+.bm-slide .lyx-par:is([data-layout="Itemize"], [data-layout="Enumerate"], [data-layout="Description"]) { padding-left: 1.5em; }
+.bm-slide .lyx-par[data-layout="Itemize"]::before { content: '\25B6'; position: absolute; left: 0.35em; top: 0.42em; font-size: 0.62em; line-height: 1; color: var(--bm-structure); }
+.bm-slide .lyx-par[data-layout="Itemize"][data-rel="1"]::before { content: '\25B8'; font-size: 0.7em; top: 0.32em; }
+.bm-slide .lyx-par[data-layout="Enumerate"]::before { content: attr(data-label); position: absolute; left: 0; color: var(--bm-structure); }
+.bm-slide .lyx-par[data-layout="Description"] { padding-left: 0; }
+.bm-columns { display: flex; gap: calc(var(--ol-mm) * 4); align-items: center; }
+.bm-columns.bm-cols-top { align-items: flex-start; }
+.bm-column { flex: 1 1 0; min-width: 0; }
+.bm-block { margin: 0.3em 0 0.6em; }
+.bm-block-title { color: var(--bm-structure); font-weight: normal; margin-bottom: 0.2em; }
+.bm-alertblock > .bm-block-title { color: #e60000; } .bm-example > .bm-block-title { color: #007a00; }
+.bm-quote { margin: 0.2em 0 0.5em 1.6em; }
+.bm-proof > .bm-block-title { color: inherit; font-style: italic; }
+/* \setbeamercovered{transparent}: covered text greyed out instead of hidden */
+.bm-transparent .ol-hidden { visibility: visible !important; opacity: 0.15; }
+.ol-present-page .lyx-newline::after { content: none; }
+.bm-titlepage { justify-content: center; align-items: center; text-align: center; }
+.bm-tp { display: flex; flex-direction: column; align-items: center; gap: 0.5em; padding: 0 calc(var(--ol-mm) * 12); }
+.bm-tp > * { margin: 0; padding: 0; text-indent: 0; white-space: pre-line; }
+.bm-tp-title { font-size: 1.57em; color: var(--bm-structure); line-height: 1.2; }
+.bm-tp-subtitle { font-size: 1.09em; color: var(--bm-structure); }
+.bm-tp-author { margin-top: 0.8em; } .bm-tp-institute, .bm-tp-date { font-size: 0.82em; }
 .ol-present-blank .ol-present-stage { visibility: hidden; }
 .ol-present-white { background: #fff; }
 .ol-present-end::after { content: 'End of the presentation — click or press a key to leave'; position: absolute; color: #aaa; font: 15px var(--ui-font); }

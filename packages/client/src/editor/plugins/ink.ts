@@ -501,12 +501,13 @@ class InkLayer {
     if (this.nothingToDraw()) {
       if (!this.blank) {
         this.canvas.getContext('2d')?.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.canvas.style.display = 'none';   // (unsized, it would take room at the top)
         this.selBox.hidden = true;
         this.blank = true;
       }
       return;
     }
-    this.blank = false;
+    if (this.blank) { this.canvas.style.display = ''; this.blank = false; }
     const g = this.geom();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const W = Math.max(1, Math.round(g.width * dpr)), H = Math.max(1, Math.round(g.height * dpr));

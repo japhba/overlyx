@@ -306,8 +306,11 @@ blend.
     centres, with guides; arrow keys nudge 1 mm (Shift 10, Alt 0.1). Objects dropped on another page
     move there. Live previews are transactions outside the undo history; the result is one undoable
     step (and collaborators see objects move live). Everything on a page is sized in CSS through
-    `--ol-mm` / `--ol-pt` (never CSS zoom or transforms on the editor): the page fits the window's
-    width, the editor zoom scales it. Text boxes with *height follows the text* grow with what is typed.
+    `--ol-mm` / `--ol-pt` (never CSS zoom or transforms on the editor). A document opens with its whole
+    page in the window; a trackpad pinch or Ctrl/⌘ + wheel zooms the canvas about the pointer (Safari's
+    gesture events too), Ctrl+Plus / Minus and the status bar's zoom step through the usual percentages
+    of the paper's real size, *Fit* returns to the whole page (`layoutZoomStep`, which both shells'
+    zoom commands try first). Text boxes with *height follows the text* grow with what is typed.
   * **Tools** (the *Layout* toolbar, `app/layouttoolbar.tsx`, and Inkscape's keys): select (V), text
     box (T), shapes (R rectangle, E ellipse, palette), line (L), arrow (A), Bézier pen (B: click =
     corner, drag = smooth node, click the first node / double-click / Enter finishes), pencil (P,
@@ -331,13 +334,36 @@ blend.
     of the editor's DOM re-sized through `--ol-mm`, so text and formulas stay sharp), →/Space/click
     for the next step, ←/right-click back, a number + Enter jumps, B / W black / white screen, L a
     laser pointer, S the presenter view in a second window (this page, the next, notes, timer), Esc
-    ends. Page transitions: fade, push, wipe.
+    ends. Page transitions: fade, push, wipe. Beamer's overlays in a box's text work there too
+    (`editor/layout/overlays.ts`): `\pause`, `\item<2->`, a list's `[<+->]`, `\only` / `\uncover` /
+    `\visible` / `\invisible` / `\alert` / `\textbf<…>` / `\alt`, blocks and theorems with an action,
+    `+` and `.` counted like beamer's `beamerpauses`.
+  * **Ordinary beamer decks** (frames of text, `editor/layout/beamerslides.ts`): F5 presents them the
+    same way, one frame per slide at the deck's aspect ratio in the default theme's look (the frame
+    title, content centred or `[t]`, `columns` side by side, blocks and theorems with their titles,
+    the title page from the Title… paragraphs or the preamble's `\title` / `\author`, `\setbeamercovered{transparent}`),
+    with the overlays above. The parser reads beamer's syntax as LyX does (`tests/beamer.test.ts`):
+    arguments with their own delimiters (`\begin{frame}<2->[<+->][fragile]{Title}{Subtitle}`,
+    `\item<2->`, `\only<1>{…}`), `\frametitle` / `\pause` / `\column` nested in their frame, a
+    separator between two environments of the same style (frames, lists) so they are not merged, item
+    commands (`\onslide` in `overprint`), `\mode<article>`, `\begin{column}{w}…\end{column}` as LyX's
+    Column paragraph (like `\column{w}`), `\parbox` as a frameless box (its text may have paragraphs);
+    the writer no longer drops the arguments
+    after an absent optional one. In the editor the frame title and the overlay arguments carry
+    LyX's labels (*Frame title*, *On slide*, *Action*, *Default overlay*).
   * **Raw LaTeX objects** are typeset with the document's preamble on a page of the object's size in
     the build sandbox and shown as SVG (`POST /api/docs/:id/snippet`, `server/snippets.ts`; cached by
     content in `data/cache/snippets/`, two at a time) — TikZ, pgfplots or `\qrcode` look as in the PDF.
-  * **Fidelity**: pages use beamer's text face (CMU Sans Serif, bundled; Noto Sans when the preamble
-    loads Noto, CMU Serif with `\usefonttheme{serif}`), list labels are beamer's triangles, colours
-    come from the preamble. The example `poster_bernstein26` (a beamerposter of minipages and
+  * **Fidelity**: pages use the PDF's fonts (`pageFontsOf` in core `layout/model.ts`): beamer's text
+    face (CMU Sans Serif, bundled; Noto / Fira / Lato when the preamble loads them, CMU Serif with
+    `\usefonttheme{serif}`) at the scale its package loads it (notomath: 0.9 of the nominal size —
+    the baselines stay the nominal size's), formulas in Fira Math when the PDF's math is sans-serif
+    (beamer's default font theme, notomath's `sfdefault`, sfmath…; `setLayoutMathFont` overrides the
+    editor's math font while a layout document is open) at the text's nominal size, without the
+    formula fields' padding, an empty script base (`$^{1}$`) taking no room. LaTeX's named sizes are
+    the class's absolute sizes (`\small` in a 25 pt box is 10 pt), justified boxes hyphenate, list
+    labels are beamer's triangles, colours come from the preamble. Macro files the preamble `\input`s
+    keep OverLyX's `%% @display` forms (`macrosFromLatex`). The example `poster_bernstein26` (a beamerposter of minipages and
     tcolorboxes) was rebuilt as native objects by `scratch/layoutmode/poster-gen.mts` and compiles to
     the same poster.
   * **Builds of documents in sub-folders**: `\input{../macros}`, `\graphicspath{{../figures/}}` and
@@ -1116,7 +1142,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sharing.spec.ts e
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts e2e/tablerows.spec.ts e2e/cite.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
-OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layout.spec.ts   # layout documents: new deck, text box + formula, move / resize / undo, toolbar, presentation steps; the font size box
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layout.spec.ts   # layout documents: new deck, text box + formula, move / resize / undo, toolbar, presentation steps, zoom, text overlays, a linear beamer deck presented; the font size box
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
 OVERLYX_DATA_DIR=/root/lyx/overlyx/data npx tsx scripts/usage-report.ts --days 30   # on the production server: what people did and what went wrong (anonymous usage statistics)
 journalctl -u overlyx-autodeploy -n 50   # on the production server: what the last push to origin/master went through (checks, deploy, verification)

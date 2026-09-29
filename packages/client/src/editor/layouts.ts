@@ -100,6 +100,38 @@ export function roman(n: number): string {
   return out;
 }
 
+/**
+ * LyX's labels of layout arguments that only beamer defines (its layout file's LabelStrings), by
+ * the layout or Flex inset that owns the argument; other arguments stay "Arg n".
+ */
+const ARG_LABELS: Record<string, Record<string, string>> = (() => {
+  const frame = { 1: 'Action', 2: 'Default overlay', 3: 'Options', 4: 'Frame title' };
+  const block = { 1: 'Action', 2: 'Title' };
+  const onSlide = { 1: 'On slide' };
+  return {
+    Frame: frame, PlainFrame: frame, FragileFrame: frame, AgainFrame: { 1: 'Action', 2: 'Default overlay', 3: 'Frame label' },
+    FrameTitle: { 1: 'On slide', 2: 'Short title' }, FrameSubtitle: onSlide,
+    Block: block, ExampleBlock: block, AlertBlock: block, Pause: { 1: 'Pause number' }, Column: { 1: 'Options' }, Columns: { 1: 'Placement' },
+    Overprint: { 1: 'Width', 'item:1': 'On slide' }, OverlayArea: { 1: 'Width', 2: 'Height' }, Uncover: onSlide, Only: onSlide,
+    'inset:Only': onSlide, 'inset:Uncover': onSlide, 'inset:Visible': onSlide, 'inset:Invisible': onSlide, 'inset:Alert': onSlide,
+    'inset:Structure': onSlide, 'inset:Bold': onSlide, 'inset:Emphasize': onSlide, 'inset:Alternative': { 1: 'On slide', 2: 'Alternative' },
+    'inset:Beamer_Note': { 1: 'Action', 2: 'Options' },
+  };
+})();
+
+/** The label of an Argument inset owned by `owner` (a paragraph layout, or "inset:<Flex name>"). */
+export function argumentLabel(owner: string | null | undefined, id: string, content = ''): string {
+  if (owner) {
+    const l = ARG_LABELS[owner]?.[id];
+    if (l) return l;
+    // a list's default overlay, beamer's [<+->]
+    if (id === '1' && /^(Itemize|Enumerate|Description)$/.test(owner) && /^[\s\d+.,\-()|@:a-z]*[+\d][\s\d+.,\-()|@:a-z]*$/.test(content) && /[+\-]/.test(content)) return 'Default overlay';
+    // beamer's item overlay (\item<2->): no other class has a second item argument
+    if (id === 'item:2' && !owner.startsWith('inset:')) return 'On slide';
+  }
+  return 'Arg ' + id;
+}
+
 /** Human-readable inset button labels, mirroring LyX. */
 export function insetLabel(name: string, arg: string, params?: string[]): string {
   switch (name) {

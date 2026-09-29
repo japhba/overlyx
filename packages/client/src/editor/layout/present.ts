@@ -11,14 +11,16 @@
  */
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { pageSizeOf } from '@overlyx/core';
-import { pages as docPages } from './commands';
+import { pageSizeOf, pageFontsOf } from '@overlyx/core';
+import { pages as docPages, isLayoutDoc } from './commands';
 import { layoutControllerOf } from './controller';
+import { annotateOverlays, applyOverlays, OverlayCounter } from './overlays';
+import { beamerSlides, hasFrames, clean } from './beamerslides';
 
 /** the page's fonts (editor/layout/controller.ts readHeader): the presentation draws with the same */
 const PAGE_FONT_VARS = ['--ol-page-font', '--ol-text-scale', '--ol-math-rel'];
 
-interface Slide { el: HTMLElement; steps: number; transition: string | null; notes: string; name: string | null }
+interface Slide { el: HTMLElement; steps: number; transition: string | null; notes: string; name: string | null; pos: number }
 
 /** Is the object shown on step `n` of its page (a beamer overlay specification like `2-`, `-3`, `1,3-5`)? */
 export function stepVisible(spec: string | null | undefined, n: number): boolean {
@@ -47,16 +49,63 @@ let active: Presentation | null = null;
 
 export function isPresentingLayout(): boolean { return !!active; }
 
+/** Can the document be presented: a layout document, or a beamer deck of frames (beamerslides.ts)? */
+export function canPresent(view: EditorView): boolean {
+  if (isLayoutDoc(view.state.doc)) return true;
+  return !!layoutControllerOf(view)?.beamer && hasFrames(view.state.doc);
+}
+
 export function startPresentation(view: EditorView, opts: { fromCurrent?: boolean } = {}): void {
   if (active) return;
-  const list = docPages(view.state.doc);
-  if (!list.length) return;
-  let start = 0;
-  if (opts.fromCurrent) {
-    const cur = layoutControllerOf(view)?.currentPage();
-    if (cur) start = Math.max(0, list.findIndex(p => p.pos === cur.pos));
-  }
-  active = new Presentation(view, list, start);
+  const ctl = layoutControllerOf(view);
+  let slides: Slide[], start = 0, deck: 'layout' | 'beamer';
+  if (isLayoutDoc(view.state.doc)) {
+    const list = docPages(view.state.doc);
+    if (!list.length) return;
+    slides = list.map(p => layoutSlide(view, p.node, p.pos));
+    deck = 'layout';
+    if (opts.fromCurrent) {
+      const cur = ctl?.currentPage();
+      if (cur) start = Math.max(0, list.findIndex(p => p.pos === cur.pos));
+    }
+  } else if (ctl?.beamer && hasFrames(view.state.doc)) {
+    slides = beamerSlides(view, ctl.preamble);
+    if (!slides.length) return;
+    deck = 'beamer';
+    if (opts.fromCurrent) {
+      const at = view.state.selection.from;
+      slides.forEach((sl, i) => { if (sl.pos <= at) start = i; });
+    }
+  } else return;
+  active = new Presentation(view, slides, ctl?.page ?? pageSizeOf([]), start, deck);
+}
+
+/** a copy of the editor's page, stripped of everything that belongs to editing */
+function layoutSlide(view: EditorView, node: PMNode, pos: number): Slide {
+  const live = view.nodeDOM(pos) as HTMLElement | null;
+  const section = live?.querySelector(':scope > .ol-page') as HTMLElement | null;
+  const el = (section ?? document.createElement('section')).cloneNode(true) as HTMLElement;
+  el.className = 'ol-page ol-present-page';
+  clean(el);
+  el.querySelectorAll('.ol-selatom').forEach(n => n.classList.remove('ol-selatom'));
+  el.querySelectorAll('.ol-notes, .ol-raw-unplaced').forEach(n => n.remove());
+  let notes = '';
+  node.forEach(c => { if (c.type.name === 'ol_notes') notes = c.textContent; });
+  // the objects' steps and effects from the document (the copy's data attributes may lag)
+  const objs = [...el.querySelectorAll<HTMLElement>('.ol-obj, .ol-group')];
+  let i = 0;
+  const walk = (n: PMNode) => n.forEach(c => {
+    if (c.type.name === 'ol_notes') return;
+    if (c.type.name === 'ol_raw' && c.attrs.placed === false) return;
+    const e = objs[i++];
+    if (e) { e.dataset.step = c.attrs.step ?? ''; e.dataset.effect = c.attrs.effect ?? ''; }
+    if (c.type.name === 'ol_group') walk(c);
+  });
+  walk(node);
+  // beamer overlays in the boxes' text (\pause, \item<2->, \only<…>{}…), counted through the page in order
+  const counter = new OverlayCounter();
+  for (const content of el.querySelectorAll<HTMLElement>('.ol-box-content')) annotateOverlays([...content.querySelectorAll<HTMLElement>(':scope > .lyx-par')], counter);
+  return { el, steps: Math.max(stepCount(node), counter.max), transition: node.attrs.transition ?? null, notes, name: node.attrs.name ?? null, pos };
 }
 
 class Presentation {
@@ -73,21 +122,28 @@ class Presentation {
   private startedAt = Date.now();
   private page: { w: number; h: number };
   private cleanup: (() => void)[] = [];
+  private fontVars: Record<string, string> | null = null;
 
-  constructor(private view: EditorView, list: { node: PMNode; pos: number }[], start: number) {
-    this.page = layoutControllerOf(view)?.page ?? pageSizeOf([]);
+  constructor(private view: EditorView, slides: Slide[], page: { w: number; h: number }, start: number, private deck: 'layout' | 'beamer') {
+    this.page = page;
     this.root = document.createElement('div');
     this.root.className = 'ol-present';
     this.root.tabIndex = -1;
     this.stage = document.createElement('div');
-    this.stage.className = 'ol-present-stage ' + [...view.dom.classList].filter(c => c === 'ol-layout').join(' ');
+    this.stage.className = 'ol-present-stage ol-layout' + (deck === 'beamer' ? ' bm-deck' : '');
     this.stage.dataset.olFont = view.dom.dataset.olFont ?? 'sans';
+    if (deck === 'beamer') {
+      // a linear deck's fonts from its preamble (a layout document's are on the editor already)
+      const f = pageFontsOf(layoutControllerOf(view)?.preamble ?? '', 'beamer');
+      this.stage.dataset.olFont = f.id;
+      this.fontVars = { '--ol-page-font': f.family, '--ol-text-scale': String(f.textScale), '--ol-math-rel': String(Math.round(f.mathScale / f.textScale * 1000) / 1000) };
+    }
     this.counter = document.createElement('div');
     this.counter.className = 'ol-present-counter';
     this.laser = document.createElement('div');
     this.laser.className = 'ol-present-laser';
     this.root.append(this.stage, this.counter, this.laser);
-    for (const p of list) this.slides.push(this.makeSlide(p.node, p.pos));
+    this.slides = slides;
     document.body.append(this.root);
     this.fit();
     this.index = start;
@@ -112,32 +168,6 @@ class Presentation {
     this.root.focus();
   }
 
-  /** a copy of the editor's page, stripped of everything that belongs to editing */
-  private makeSlide(node: PMNode, pos: number): Slide {
-    const live = this.view.nodeDOM(pos) as HTMLElement | null;
-    const section = live?.querySelector(':scope > .ol-page') as HTMLElement | null;
-    const el = (section ?? document.createElement('section')).cloneNode(true) as HTMLElement;
-    el.className = 'ol-page ol-present-page';
-    el.removeAttribute('contenteditable');
-    el.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
-    el.querySelectorAll('.ProseMirror-selectednode, .ol-selatom').forEach(n => n.classList.remove('ProseMirror-selectednode', 'ol-selatom'));
-    el.querySelectorAll('.ol-notes, .ol-raw-unplaced, .ProseMirror-trailingBreak, .lm-input, .inset-actions').forEach(n => n.remove());
-    let notes = '';
-    node.forEach(c => { if (c.type.name === 'ol_notes') notes = c.textContent; });
-    // the objects' steps and effects from the document (the copy's data attributes may lag)
-    const objs = [...el.querySelectorAll<HTMLElement>('.ol-obj, .ol-group')];
-    let i = 0;
-    const walk = (n: PMNode) => n.forEach(c => {
-      if (c.type.name === 'ol_notes') return;
-      if (c.type.name === 'ol_raw' && c.attrs.placed === false) return;
-      const e = objs[i++];
-      if (e) { e.dataset.step = c.attrs.step ?? ''; e.dataset.effect = c.attrs.effect ?? ''; }
-      if (c.type.name === 'ol_group') walk(c);
-    });
-    walk(node);
-    return { el, steps: stepCount(node), transition: node.attrs.transition ?? null, notes, name: node.attrs.name ?? null };
-  }
-
   private fit(): void {
     const W = window.innerWidth, H = window.innerHeight;
     const pxPerMm = Math.min(W / this.page.w, H / this.page.h);
@@ -147,10 +177,11 @@ class Presentation {
     this.stage.style.setProperty('--ol-page-h', String(this.page.h));
     const cs = getComputedStyle(this.view.dom);
     this.stage.style.setProperty('--ol-basept', cs.getPropertyValue('--ol-basept') || '11');
-    for (const v of PAGE_FONT_VARS) { const x = cs.getPropertyValue(v); if (x) this.stage.style.setProperty(v, x); }
+    for (const v of PAGE_FONT_VARS) { const x = this.fontVars?.[v] ?? cs.getPropertyValue(v); if (x) this.stage.style.setProperty(v, x); }
   }
 
   private apply(slide: Slide, step: number, entering: boolean): void {
+    applyOverlays(slide.el, step);
     for (const e of slide.el.querySelectorAll<HTMLElement>('[data-step]')) {
       const vis = stepVisible(e.dataset.step, step);
       const was = !e.classList.contains('ol-hidden');
@@ -170,6 +201,7 @@ class Presentation {
     this.index = index; this.step = step;
     if (changing) {
       for (const e of slide.el.querySelectorAll<HTMLElement>('[data-step]')) e.classList.toggle('ol-hidden', !stepVisible(e.dataset.step, step));
+      applyOverlays(slide.el, step);
       this.transition(prev, slide, dir);
     } else this.apply(slide, step, true);
     this.counter.textContent = `${index + 1} / ${this.slides.length}${slide.steps > 1 ? ` · ${step}/${slide.steps}` : ''}`;
@@ -273,13 +305,14 @@ class Presentation {
       const r = box.getBoundingClientRect();
       const px = Math.min(r.width / this.page.w, r.height / this.page.h) || 2;
       const holder = d.createElement('div');
-      holder.className = 'lyx-editor ol-layout';
+      holder.className = 'lyx-editor ol-layout' + (this.deck === 'beamer' ? ' bm-deck' : '');
       holder.dataset.olFont = this.stage.dataset.olFont ?? 'sans';
       holder.style.cssText = `--ol-mm:${px}px;--ol-pt:${px / 2.845276}px;--ol-page-w:${this.page.w};--ol-page-h:${this.page.h};--ol-basept:${this.stage.style.getPropertyValue('--ol-basept')};max-width:none`;
       for (const v of PAGE_FONT_VARS) { const x = this.stage.style.getPropertyValue(v); if (x) holder.style.setProperty(v, x); }
       const copy = slide.el.cloneNode(true) as HTMLElement;
       copy.classList.remove('ol-tr-in', 'ol-tr-out', 'ol-tr-fade', 'ol-tr-push', 'ol-tr-wipe');
       for (const e of copy.querySelectorAll<HTMLElement>('[data-step]')) e.classList.toggle('ol-hidden', !stepVisible(e.dataset.step, step));
+      applyOverlays(copy, step);
       holder.append(copy);
       box.append(holder);
     };

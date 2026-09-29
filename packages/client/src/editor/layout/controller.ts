@@ -224,6 +224,10 @@ const nodeId = (n: PMNode) => { let v = nodeIds.get(n); if (v === undefined) { v
 class LayoutController {
   private active = false;
   page = { w: 160, h: 90 };
+  /** a beamer document (linear or layout): the presentation shows its frames */
+  beamer = false;
+  /** the document's own preamble (the fonts of a presented deck) */
+  preamble = '';
   private basePt = 11;
   private headerJson = '';
   private metaUnobserve: (() => void) | null = null;
@@ -423,6 +427,8 @@ class LayoutController {
     this.basePt = fs && fs !== 'default' && Number(fs) ? Number(fs) : cls.startsWith('beamer') ? 11 : 10;
     const a = lines.indexOf('\\begin_preamble'), b = lines.indexOf('\\end_preamble');
     const preamble = a >= 0 && b > a ? lines.slice(a + 1, b).join('\n') : '';
+    this.beamer = cls.startsWith('beamer');
+    this.preamble = preamble;
     const colors = preambleColors(preamble);
     const changed = JSON.stringify(colors) !== JSON.stringify(docColors.map);
     docColors.map = colors;
@@ -1874,7 +1880,7 @@ function smoothPath(pts: [number, number][]): PathSeg[] {
 export const SHAPE_TOOLS = Object.entries(SHAPE_PRESETS).filter(([k]) => k !== 'line').map(([id, p]) => ({ id, label: p.label, d: p.d }));
 
 /** The controller of a view (the toolbars and menus act through it). */
-export function layoutControllerOf(view: EditorView): { currentPage(): { pos: number; node: PMNode } | null; finishPen(closed: boolean): void; page: { w: number; h: number } } | null {
+export function layoutControllerOf(view: EditorView): { currentPage(): { pos: number; node: PMNode } | null; finishPen(closed: boolean): void; page: { w: number; h: number }; beamer: boolean; preamble: string } | null {
   return controllers.get(view) ?? null;
 }
 

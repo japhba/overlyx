@@ -9,8 +9,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { canonical, effectiveShortcut, keyFromEvent } from './keybindings';
 import { editorContext } from '../editor/context';
-import { isLayoutDoc } from '../editor/layout/commands';
-import { startPresentation, isPresentingLayout } from '../editor/layout/present';
+import { startPresentation, isPresentingLayout, canPresent } from '../editor/layout/present';
 
 export const PRESENTATION_ID = 'View ▸ Presentation mode';
 export const PRESENTATION_KEY = 'Shift+F11';
@@ -26,9 +25,9 @@ export function setPresenting(value: boolean): void {
   listeners.forEach(l => l());
 }
 export function togglePresentation(): void {
-  // a layout document (slides, a poster) is presented page by page, full screen (editor/layout/present.ts)
+  // a layout document (slides, a poster) or a beamer deck is presented slide by slide, full screen (editor/layout/present.ts)
   const v = editorContext.activeView;
-  if (!on && v && !v.isDestroyed && isLayoutDoc(v.state.doc)) { startPresentation(v, { fromCurrent: true }); return; }
+  if (!on && v && !v.isDestroyed && canPresent(v)) { startPresentation(v, { fromCurrent: true }); return; }
   setPresenting(!on);
 }
 
@@ -45,10 +44,10 @@ export function usePresentation(): boolean {
       if (e.defaultPrevented) return;   // a rebound command was run by the palette's listener
       const k = keyFromEvent(e);
       if (k && k === canonical(effectiveShortcut(PRESENTATION_ID, PRESENTATION_KEY))) { e.preventDefault(); e.stopImmediatePropagation(); togglePresentation(); return; }
-      // F5 presents a layout document (PowerPoint's key; Shift+F5 from the current page) — not a reload there
+      // F5 presents a layout document or a beamer deck (PowerPoint's key; Shift+F5 from the current slide) — not a reload there
       if (e.key === 'F5' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const v = editorContext.activeView;
-        if (v && !v.isDestroyed && isLayoutDoc(v.state.doc) && !isPresentingLayout()) { e.preventDefault(); e.stopImmediatePropagation(); startPresentation(v, { fromCurrent: e.shiftKey }); return; }
+        if (v && !v.isDestroyed && canPresent(v) && !isPresentingLayout()) { e.preventDefault(); e.stopImmediatePropagation(); startPresentation(v, { fromCurrent: e.shiftKey }); return; }
       }
       if (on && e.key === 'Escape' && !(e.target as HTMLElement).closest?.(OWN_ESCAPE)) setPresenting(false);
     };

@@ -42,6 +42,50 @@ const TOOLS = String.raw`\documentclass[aspectratio=169]{beamer}
 \end{document}
 `;
 
+// beamer's overlays in a text box: an item from slide 2, a phrase only on slide 3
+const OVERLAYS = String.raw`\documentclass[aspectratio=169]{beamer}
+\begin{document}
+\begin{frame}[plain]
+\begin{olbox}{x=10mm,y=10mm,w=120mm,h=60mm,font=14pt}
+\begin{itemize}
+\item<1-> Point one
+\item<2-> Point two
+\end{itemize}
+\only<3>{Only on three}
+\end{olbox}
+\end{frame}
+\end{document}
+`;
+
+// an ordinary (linear) beamer deck: title from the preamble, frames with overlays
+const DECK = String.raw`\documentclass[aspectratio=169]{beamer}
+\title{Deck title}
+\author{Somebody}
+\begin{document}
+\begin{frame}
+\titlepage
+\end{frame}
+
+\begin{frame}{Incremental}
+\begin{itemize}[<+->]
+\item First
+\item Second
+\end{itemize}
+Before \pause after the pause.
+\end{frame}
+
+\begin{frame}{Only and alert}
+\only<1>{On one.}\only<2>{On two.} \alert<2>{Alerted on two.}
+\begin{columns}
+\column{0.5\textwidth}
+Left column
+\column{0.5\textwidth}
+Right column
+\end{columns}
+\end{frame}
+\end{document}
+`;
+
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
@@ -49,6 +93,9 @@ test.beforeAll(() => {
   writeFileSync(`${DIR}/slides.tex`, SLIDES);
   writeFileSync(`${DIR}/present.tex`, SLIDES);
   writeFileSync(`${DIR}/tools.tex`, TOOLS);
+  writeFileSync(`${DIR}/zoom.tex`, SLIDES);
+  writeFileSync(`${DIR}/overlays.tex`, OVERLAYS);
+  writeFileSync(`${DIR}/deck.tex`, DECK);
   // a 40 × 30 px PNG for the crop test
   writeFileSync(`${DIR}/pic.png`, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAKklEQVR4nO3NMQ0AAAgDsAmb/yALGXA06d9MeyJisVgsFovFYrFYLP4bL9HP3Ew1mJ9PAAAAAElFTkSuQmCC', 'base64'));
 });
@@ -251,6 +298,107 @@ test('presentation: F5, overlay steps, the next page, Esc', async ({ page }) => 
   await expect(page.locator('.ol-present .ol-shape.ol-hidden')).toHaveCount(0);
   await page.keyboard.press('ArrowRight');
   await expect(page.locator('.ol-present-stage')).toContainText('Second page');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.ol-present')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('a layout document opens with its whole page in the window; a pinch (Ctrl + wheel) zooms about the pointer', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await openLayout(page, 'zoom.tex');
+  const scroller = (await page.locator('.editor-scroll').boundingBox())!;
+  const pg0 = (await page.locator('.ol-page').first().boundingBox())!;
+  // the whole page is visible (both sides) and the status bar says so
+  expect(pg0.width).toBeLessThanOrEqual(scroller.width);
+  expect(pg0.height).toBeLessThanOrEqual(scroller.height);
+  await expect(page.locator('.zoom-select')).toHaveValue('fit');
+  // zoom in about a point of the page: that point stays under the pointer
+  const px = pg0.x + pg0.width * 0.3, py = pg0.y + pg0.height * 0.4;
+  await page.mouse.move(px, py);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, -20); await page.waitForTimeout(30); }
+  await page.keyboard.up('Control');
+  await page.waitForTimeout(300);
+  const pg1 = (await page.locator('.ol-page').first().boundingBox())!;
+  expect(pg1.width).toBeGreaterThan(pg0.width * 1.5);
+  expect(Math.abs(pg1.x + pg1.width * 0.3 - px)).toBeLessThan(6);
+  expect(Math.abs(pg1.y + pg1.height * 0.4 - py)).toBeLessThan(6);
+  await expect(page.locator('.zoom-select')).not.toHaveValue('fit');
+  // Ctrl+Minus steps out, Fit goes back to the whole page
+  await page.keyboard.press('Control+Minus');
+  await page.waitForTimeout(200);
+  expect((await page.locator('.ol-page').first().boundingBox())!.width).toBeLessThan(pg1.width);
+  await page.selectOption('.zoom-select', 'fit');
+  await page.waitForTimeout(200);
+  expect(Math.abs((await page.locator('.ol-page').first().boundingBox())!.width - pg0.width)).toBeLessThan(2);
+  expect(errors).toEqual([]);
+});
+
+test("presentation: beamer's overlays in a box's text (\\item<2->, \\only<3>)", async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await openLayout(page, 'overlays.tex');
+  const pg = (await page.locator('.ol-page').first().boundingBox())!;
+  await page.mouse.click(pg.x + pg.width - 8, pg.y + pg.height - 8);
+  await page.keyboard.press('F5');
+  await expect(page.locator('.ol-present')).toBeVisible();
+  await expect(page.locator('.ol-present-counter')).toContainText('1/3');
+  const item2 = page.locator('.ol-present .lyx-par', { hasText: 'Point two' });
+  const only = page.locator('.ol-present .lyx-inset', { hasText: 'Only on three' });
+  await expect(item2).toHaveClass(/ol-hidden/);
+  await expect(only).toBeHidden();
+  await page.keyboard.press('ArrowRight');
+  await expect(item2).not.toHaveClass(/ol-hidden/);
+  await expect(only).toBeHidden();
+  await page.keyboard.press('ArrowRight');
+  await expect(only).toBeVisible();
+  await page.keyboard.press('Escape');
+  expect(errors).toEqual([]);
+});
+
+test('an ordinary beamer deck: F5 presents its frames — title page, incremental lists, pauses, \\only, \\alert, columns', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await page.goto(`/#/${PROJECT}/deck.tex`);
+  await page.waitForSelector('.lyx-editor .lyx-par[data-layout="Frame"]', { timeout: 30000 });
+  await page.waitForTimeout(800);
+  // the frame title is labelled as LyX does
+  await expect(page.locator('.lyx-inset-argument[data-arg="4"] .inset-label').first()).toHaveText('Frame title');
+  await page.locator('.lyx-editor .lyx-par').first().click();
+  await page.keyboard.press('F5');
+  await expect(page.locator('.ol-present')).toBeVisible();
+  // the title page from the preamble's \title and \author
+  await expect(page.locator('.ol-present-stage .bm-tp-title')).toHaveText('Deck title');
+  await expect(page.locator('.ol-present-stage .bm-tp-author')).toHaveText('Somebody');
+  await page.keyboard.press('ArrowRight');
+  // [<+->]: the items one per slide; the text after \pause on the slide after them
+  await expect(page.locator('.ol-present-stage .bm-frametitle')).toHaveText('Incremental');
+  const second = page.locator('.ol-present-stage .lyx-par', { hasText: 'Second' });
+  const afterPause = page.locator('.ol-present-stage .ol-ov-after-pause');
+  await expect(page.locator('.ol-present-counter')).toContainText('1/4');
+  await expect(second).toHaveClass(/ol-hidden/);
+  await page.keyboard.press('ArrowRight');
+  await expect(second).not.toHaveClass(/ol-hidden/);
+  await expect(afterPause).toHaveClass(/ol-hidden/);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(afterPause).not.toHaveClass(/ol-hidden/);
+  await page.keyboard.press('ArrowRight');
+  // \only / \alert, and two columns side by side
+  await expect(page.locator('.ol-present-stage .bm-frametitle')).toHaveText('Only and alert');
+  const onOne = page.locator('.ol-present-stage .lyx-inset[data-arg="Only"]', { hasText: 'On one.' });
+  const onTwo = page.locator('.ol-present-stage .lyx-inset[data-arg="Only"]', { hasText: 'On two.' });
+  await expect(onOne).toBeVisible();
+  await expect(onTwo).toBeHidden();
+  const cols = page.locator('.ol-present-stage .bm-column');
+  await expect(cols).toHaveCount(2);
+  const [a, b] = [(await cols.nth(0).boundingBox())!, (await cols.nth(1).boundingBox())!];
+  expect(b.x).toBeGreaterThan(a.x + a.width * 0.8);
+  await page.keyboard.press('ArrowRight');
+  await expect(onTwo).toBeVisible();
+  await expect(onOne).toBeHidden();
+  await expect(page.locator('.ol-present-stage .ol-ov-alert')).toContainText('Alerted on two');
   await page.keyboard.press('Escape');
   await expect(page.locator('.ol-present')).toHaveCount(0);
   expect(errors).toEqual([]);

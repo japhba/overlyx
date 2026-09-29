@@ -99,3 +99,28 @@ describe('hand-written beamer decks', () => {
     expect(writeTex(parseTex(w).doc).text).toBe(w);
   });
 });
+
+describe('beamer column environments and \\parbox', () => {
+  it('\\begin{column}{w} … \\end{column} is LyX\'s Column paragraph; environments inside stay inside', () => {
+    const t = '\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{T}\n\\begin{columns}[t]\n\\begin{column}{0.5\\textwidth}\n\\begin{center}\nLeft\n\\end{center}\n\\end{column}\n\\begin{column}[T]{0.4\\textwidth}\nRight\n\\end{column}\n\\end{columns}\n\\end{frame}\n\\end{document}\n';
+    const d = parseTex(t).doc;
+    expect(d.body.filter(p => p.layout === 'Column').map(p => p.depth)).toEqual([2, 2]);
+    const w1 = writeTex(d).text;
+    expect(w1).toContain('\\column{0.5\\textwidth}');
+    expect(w1).toContain('\\column[T]{0.4\\textwidth}');
+    const body = w1.slice(w1.indexOf('\\begin{columns}'), w1.indexOf('\\end{columns}'));
+    expect(body).toContain('Left');
+    expect(body).toContain('Right');
+    expect((w1.match(/\\begin\{center\}/g) ?? []).length).toBe((w1.match(/\\end\{center\}/g) ?? []).length);
+    expect(writeTex(parseTex(w1).doc).text).toBe(w1);
+  });
+  it('\\parbox with a paragraph break inside is a frameless box (the paragraph around it stays whole)', () => {
+    const t = '\\documentclass{article}\n\\begin{document}\nBefore \\parbox[c]{0.5\\linewidth}{One\\par\\medskip\nTwo} after.\n\\end{document}\n';
+    const d = parseTex(t).doc;
+    const box = d.body[0].items.find(it => it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'Box');
+    expect(box).toBeTruthy();
+    const w1 = writeTex(d).text;
+    expect(w1).toMatch(/\\parbox\[c\]\{0\.5\\linewidth\}\{%\nOne\n\n\\medskip\{\}\nTwo%\n\}/);
+    expect(writeTex(parseTex(w1).doc).text).toBe(w1);
+  });
+});

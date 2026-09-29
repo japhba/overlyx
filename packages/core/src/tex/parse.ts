@@ -671,6 +671,8 @@ class BodyParser {
       if (style) { this.handleCommandLayout(s, ctx, st, style); return null; }
     }
 
+    // \parbox[pos][height][inner]{width}{…}: LyX's frameless box with use_parbox (its text may have paragraphs)
+    if (name === 'parbox' && this.handleParbox(s, ctx, st)) return null;
     // insets defined by inset layouts (\footnote, \caption, \url, \code, ...)
     let il = this.cmdInsets.get(name);
     for (const cand of this.cmdInsetParams.get(name) ?? []) {
@@ -1307,6 +1309,9 @@ class BodyParser {
     if (env === 'minipage') { this.handleMinipage(s, ctx, st, 'Frameless'); return; }
     // a page of a layout document: a frame that holds positioned objects (layout/model.ts)
     if (env === 'frame' && ctx.owner === 'main' && this.tryLayoutPage(s, ctx)) return;
+    // beamer's column environment, \begin{column}[T]{0.5\textwidth} … \end{column}: LyX's Column
+    // paragraph (\column{…}) with the content after it, as for the command form
+    if (env === 'column' && ctx.envLayout?.startsWith('Columns') && this.dc.styles.has('Column')) { this.handleColumnEnv(s, ctx, st); return; }
     // environments from the layout files
     const style = this.envStyles.get(env);
     if (style) { this.handleEnvLayout(s, ctx, st, env, style); return; }
@@ -1440,6 +1445,21 @@ class BodyParser {
     this.pushInset(ctx, st, { type: 'Text', name: 'Box', arg, params, status: 'open', paragraphs: pars });
   }
 
+  private handleParbox(s: Scanner, ctx: TextCtx, st: State): boolean {
+    const save = s.pos;
+    const pos = s.readOptional();
+    const height = pos !== null ? s.readOptional() : null;
+    const innerPos = height !== null ? s.readOptional() : null;
+    const width = s.readGroup();
+    s.skipBlanks();
+    if (width === null || s.peekChar() !== '{') { s.pos = save; return false; }
+    const p = (pos ?? 'c').trim() || 'c';
+    const params = [`position "${p}"`, 'hor_pos "c"', 'has_inner_box 1', `inner_pos "${(innerPos ?? p).trim()}"`, 'use_parbox 1', 'use_makebox 0', `width "${lyxLength(width)}"`, 'special "none"', `height "${height ? lyxLength(height) : '1in'}"`, `height_special "${height ? 'none' : 'totalheight'}"`, 'thickness "0.4pt"', 'separation "3pt"', 'shadowsize "4pt"', 'framecolor "black"', 'backgroundcolor "none"'];
+    const pars = this.parseInsetGroup(s, 'Plain Layout', st);
+    this.pushInset(ctx, st, { type: 'Text', name: 'Box', arg: 'Frameless', params, status: 'open', paragraphs: pars });
+    return true;
+  }
+
   private floatOf(env: string): { type: string; wide: boolean; sideways: boolean } | null {
     let name = env;
     const wide = name.endsWith('*');
@@ -1545,6 +1565,27 @@ class BodyParser {
     this.envStack.pop();
     this.endPar(ctx);
     this.lastEnvEnd = { src: s.s, pos: s.pos };
+    Object.assign(ctx, saved);
+  }
+
+  private handleColumnEnv(s: Scanner, ctx: TextCtx, st: State): void {
+    this.endPar(ctx);
+    this.hangFrom(ctx);
+    const par = this.newPar(ctx, 'Column', ctx.nestDepth);
+    const opt = s.readOptional();
+    if (opt !== null) par.items.push({ kind: 'inset', font: {}, inset: argumentInset('1', this.parseInsetString(opt, 'Plain Layout')) });
+    s.skipBlanks();
+    if (s.peekChar() === '{') {
+      s.pos++;
+      ctx.cur = par;
+      this.parseText(s, ctx, { font: {}, change: st.change }, { close: true });
+    }
+    this.endPar(ctx);
+    const saved = { layout: ctx.layout, depth: ctx.depth };
+    this.envStack.push('column');
+    this.parseText(s, ctx, cloneState(st), { env: 'column' });
+    this.envStack.pop();
+    this.endPar(ctx);
     Object.assign(ctx, saved);
   }
 

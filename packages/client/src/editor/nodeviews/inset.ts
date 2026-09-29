@@ -5,7 +5,7 @@
 import type { Node as PMNode } from 'prosemirror-model';
 import { TextSelection } from 'prosemirror-state';
 import type { EditorView, NodeView } from 'prosemirror-view';
-import { insetLabel } from '../layouts';
+import { insetLabel, argumentLabel } from '../layouts';
 import { parseHeader, commentHeader, formatTimestamp } from '@overlyx/core';
 import { editorContext } from '../context';
 import { toggleCommentResolved } from '../commentops';
@@ -57,6 +57,17 @@ export class InsetView implements NodeView {
 
   private isComment(): boolean { return this.node.attrs.name === 'Note' && this.node.attrs.arg === 'Comment'; }
 
+  private argumentOwner(): string | null {
+    try {
+      const pos = this.getPos();
+      if (pos === undefined) return null;
+      const $p = this.view.state.doc.resolve(pos);
+      const outer = $p.depth >= 2 ? $p.node($p.depth - 1) : null;
+      if (outer?.type.name === 'inset' && outer.attrs.name !== 'Argument') return 'inset:' + (outer.attrs.name === 'Flex' ? outer.attrs.arg : outer.attrs.name);
+      return String($p.parent.attrs.layout ?? '') || null;
+    } catch { return null; }
+  }
+
   private render() {
     const a = this.node.attrs;
     const name = String(a.name), arg = String(a.arg ?? '');
@@ -65,6 +76,17 @@ export class InsetView implements NodeView {
     this.dom.dataset.name = name;
     this.dom.dataset.arg = arg;
     this.label.textContent = insetLabel(name, arg, JSON.parse(a.params || '[]'));
+    if (name === 'Argument') {
+      // whose argument: the paragraph's layout, or the inset whose first paragraph holds it (LyX's label)
+      const setOwner = () => {
+        const owner = this.argumentOwner();
+        if (owner) this.dom.dataset.owner = owner; else delete this.dom.dataset.owner;
+        this.label.textContent = argumentLabel(owner, arg, this.node.textContent);
+        return owner;
+      };
+      // (while the view is being built the position is not known yet: once it is)
+      if (!setOwner()) queueMicrotask(() => { if (this.dom.isConnected || this.view) setOwner(); });
+    }
     if (name === 'Note' || name === 'Foot' || name === 'Marginal' || name === 'ERT' || name === 'Float' || name === 'Caption' || name === 'Box' || name === 'Branch' || name === 'Flex' || name === 'Argument' || name === 'listings' || name === 'Index' || name === 'Wrap') {
       this.label.title = `${insetLabel(name, arg)} — click to ${status === 'open' ? 'collapse' : 'open'}, double-click for settings`;
     }
