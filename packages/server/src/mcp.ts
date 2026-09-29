@@ -1,20 +1,24 @@
 /**
- * MCP connector: lets an external agent (any MCP-compatible client) read a project's documents,
- * read/add/resolve comment threads, and propose text edits. The bearer token identifies an
+ * MCP connector: lets an external agent (any MCP-compatible client, e.g. Claude Code or Codex on
+ * the user's own machine) read a project's documents, read/add/resolve comment threads, and edit
+ * the files on this server — no sync, no shell. The bearer token identifies an
  * *account* (see mcpTokens.ts) — the agent may connect to any project that account can access,
- * with the account's role there: viewers read, editors also comment and propose edits. Edits are NEVER applied as a plain overwrite: every
+ * with the account's role there: viewers read, editors also comment and edit. By default every
  * document edit is turned into change-tracked insertions/deletions (the same `\lyxadded` /
  * `\lyxdeleted` machinery a human editor's Track Changes produces), attributed to the token's name
- * suffixed "(MCP)" — so a misbehaving or over-eager agent is always reviewable and revertible from
- * the Review toolbar / Versions, exactly like a human collaborator's tracked edit.
+ * suffixed "(MCP)" — reviewable like a human collaborator's tracked edit. Tracked editing must not
+ * leave a document broken or an agent stuck, so edit_document / write_document also take
+ * `tracked: false` (applyPlainSource: the same merge, no marks, a commit right before as the
+ * restore point), and the server's MCP_INSTRUCTIONS tell the agent to fall back to it on any
+ * problem; the git history (project_history / restore_project) is the way back either way.
  *
  * Raw LaTeX is a first-class input. edit_document replaces a passage of the document's source
  * (old text → new text, the way coding agents edit files); write_document writes a whole source;
  * insert_paragraphs / replace_paragraph / delete_paragraph address paragraphs by index. Whatever
  * the tool, the result is diffed against the live document (trackDiff, docedit.ts), so only what
  * actually changed is marked — a word, a digit, a table cell — never a whole paragraph for a
- * one-word change. read_file/write_file reach the project's other text files (refs.bib,
- * macros.tex, …). propose_edit remains for plain-text paragraphs. Comment threads are found anywhere in the body —
+ * one-word change. read_file/write_file/edit_file reach the project's other text files (refs.bib,
+ * macros.tex, …), always directly. propose_edit remains for plain-text paragraphs. Comment threads are found anywhere in the body —
  * inside tables, floats and other insets too; new threads attach at a top-level paragraph.
  * build_pdf compiles with latexmk (viewers may, like in the app) and hands back the warnings,
  * the first errors, whether the build before the agent's changes succeeded, and the compile-log
@@ -33,13 +37,13 @@ import {
   setHeaderValue, diffText, commentHeader, formatTimestamp, parseHeader, parseThread, trackDiff, changeStats,
   splitDocId, type LyxDocument, type Item, type TextInset, type Paragraph,
 } from '@overlyx/core';
-import { applyTrackedSource, replaceInSource } from './docedit.ts';
+import { applyTrackedSource, applyPlainSource, replaceInSource } from './docedit.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import nodePath from 'node:path';
 import { manager } from './docs.ts';
 import { listProjects, projectDir, resolveProjectPath, isDocumentFile, newDocumentText, findMaster } from './projects.ts';
 import { parseDocumentText, parseFragmentText } from './texdoc.ts';
-import { touchProject, repoInfo, restoreProject } from './git.ts';
+import { touchProject, repoInfo, restoreProject, commitProject } from './git.ts';
 import { buildIncluding, buildErrors, lastBuild, currentJob } from './export.ts';
 import { PANEL_AGENT, buildBeforeTurn, agentCheckpoint, undoCheckpoint } from './agentwork.ts';
 import { verifyMcpToken } from './mcpTokens.ts';
@@ -210,7 +214,7 @@ async function buildDocument(project: string, agentName: string, userId: number,
   const out: Record<string, unknown> = { ok: result.ok, warnings: result.warnings, pdf: !!result.pdfPath, previous_build: previous };
   if (!result.ok) {
     out.errors = buildErrors(result.log);
-    if (previous === 'ok') out.note = `The build before ${turnBefore !== undefined ? 'your changes in this turn' : 'this one'} succeeded — a recent edit broke it. If it was yours, fix it${panel ? ', or take your changes back with undo_turn' : ', or step back with project_history + restore_project'}; never leave the document not compiling.`;
+    if (previous === 'ok') out.note = `The build before ${turnBefore !== undefined ? 'your changes in this turn' : 'this one'} succeeded — a recent edit broke it. If it was yours, fix it${panel ? ', or take your changes back with undo_turn' : ', or step back with project_history + restore_project'}; if tracked-change markup is involved, redo the edit with tracked: false. Never leave the document not compiling.`;
   }
   out.log_tail = logTail(result.log);
   return out;
@@ -291,7 +295,12 @@ async function deleteParagraph(project: string, agentName: string, path: string,
   return { ok: true, note: 'Marked deleted as a tracked change; the text disappears when a reviewer accepts it.' };
 }
 
-async function writeDocument(project: string, userId: number, agentName: string, path: string, tex: string) {
+/** Before a direct (untracked) edit: what is pending is committed, so the state right before it is a commit restore_project can return to. */
+async function restorePoint(project: string, userId: number): Promise<void> {
+  try { await commitProject(project, { by: userId }); } catch (e) { console.error(`[mcp] commit before a direct edit of "${project}" failed:`, e); }
+}
+
+async function writeDocument(project: string, userId: number, agentName: string, path: string, tex: string, tracked = true) {
   if (!tex.trim()) throw new Error('tex missing');
   if (tex.length > DOC_MAX) throw new Error('too large');
   if (!path.endsWith('.tex')) throw new Error('a .tex path is expected');
@@ -305,15 +314,31 @@ async function writeDocument(project: string, userId: number, agentName: string,
   }
   const doc = await manager.open(`${project}/${path}`);
   const r = parseDocumentText(tex, doc.project, doc.relPath);
+  if (!tracked) {
+    await restorePoint(project, userId);
+    const st = applyPlainSource(doc, doc.toText(), tex);
+    touchProject(project, userId);
+    return { ok: true, created: false, tracked: false, changed: st.changed, warnings: r.warnings, note: 'Written directly (no tracked changes); the previous state is in the project history (project_history / restore_project).' };
+  }
   const st = applyTrackedSource(doc, doc.toText(), tex, authorName(agentName));
   return { ok: true, created: false, warnings: r.warnings, inserted_chars: st.inserted, deleted_chars: st.deleted, note: 'Applied as tracked changes against the current document — only what differs is marked; a reviewer accepts or rejects them.' };
 }
 
-async function editDocument(project: string, agentName: string, path: string, oldText: string, newText: string, all: boolean) {
+async function editDocument(project: string, userId: number, agentName: string, path: string, oldText: string, newText: string, all: boolean, tracked = true) {
   const doc = await manager.open(`${project}/${path}`);
   const before = doc.toText();
   const after = replaceInSource(before, oldText, newText, all);
   const r = parseDocumentText(after, doc.project, doc.relPath);
+  if (!tracked) {
+    await restorePoint(project, userId);
+    const st = applyPlainSource(doc, before, after);   // three-way: an edit somebody made meanwhile elsewhere survives
+    touchProject(project, userId);
+    return {
+      ok: true, tracked: false, warnings: r.warnings,
+      ...(st.changed ? {} : { note: 'The edit parsed to the same document — nothing changed (e.g. only whitespace differed).' }),
+      now_reads: st.excerpt,
+    };
+  }
   const st = applyTrackedSource(doc, before, after, authorName(agentName));
   return {
     ok: true, inserted_chars: st.inserted, deleted_chars: st.deleted, warnings: r.warnings,
@@ -357,6 +382,16 @@ function writeFile(project: string, userId: number, rel: string, text: string) {
   fs.renameSync(tmp, abs);
   touchProject(project, userId);
   return { ok: true, size: Buffer.byteLength(text) };
+}
+
+function editFile(project: string, userId: number, rel: string, oldText: string, newText: string, all: boolean) {
+  const { text } = readFile(project, rel);
+  if (!oldText) throw new Error('old_text is empty — write_file replaces a whole file.');
+  const n = text.split(oldText).length - 1;
+  if (!n) throw new Error(`old_text does not occur in ${rel} — read_file it again and copy the passage exactly.`);
+  if (n > 1 && !all) throw new Error(`old_text occurs ${n} times in ${rel} — include more context, or set replace_all.`);
+  const next = all ? text.split(oldText).join(newText) : text.replace(oldText, () => newText);
+  return { ...writeFile(project, userId, rel, next), replaced: all ? n : 1 };
 }
 
 function listFiles(project: string) {
@@ -414,12 +449,29 @@ async function fetchDoc(user: SessionUser, id: string) {
   return { id, title: id, text, url: docUrl(project, rel), metadata: { project, path: rel } };
 }
 
+/**
+ * How an agent should work here — the MCP `instructions` a client passes to its model. Tracked
+ * changes are the default (reviewable), but they must never leave a document broken or an agent
+ * stuck: on any problem it falls back to direct edits, and the git history is the way back.
+ */
+export const MCP_INSTRUCTIONS = `OverLyX projects are LaTeX documents that people may be editing in a browser at the same time. You edit the files on the OverLyX server directly through these tools; there is nothing to sync.
+
+Workflow: list_projects → list_documents / list_files → read_document (a document's full LaTeX source) or read_file (other text files) → edit → build_pdf.
+
+Editing documents: edit_document (replace a passage) and write_document (a whole source) apply your change as TRACKED CHANGES by default, so the user can review them. Tracked editing must never block you or leave a document broken. On ANY problem with it, switch to direct editing at once by passing tracked: false to edit_document / write_document — the same edit, applied without tracked-change marks. Problems that call for the fallback include: an edit that fails to apply or does not match (do not retry a failing tracked edit more than once); tracked-change markup (\\lyxadded / \\lyxdeleted) making the passage hard to address; a result (now_reads) that looks garbled, duplicated or incomplete; a build that fails after your tracked edit, or whose errors point at tracked-change markup; math, tables, environments or preamble changes the tracked form mangles; the user asking for direct edits. When a tracked edit of yours broke something, take it back (project_history + restore_project, or edit_document with tracked: false restoring the old text) and redo it with tracked: false. Keep other people's tracked changes intact.
+
+Other text files (refs.bib, macros, .sty) are always edited directly: edit_file (replace a passage) or write_file.
+
+After every change run build_pdf and never leave a document that does not compile: fix the error, or step back. project_history lists the project's commits (OverLyX commits every edit shortly after it happens, and right before each of your direct edits); restore_project puts the whole project back to one of them as a new commit, so nothing is lost.
+
+Leave the block between "%% OverLyX ---" and "%% end OverLyX ---" alone (regenerated on every save); put preamble additions above it. OverLyX may rewrite what you wrote into its canonical form (spacing, line breaks) — read again before editing the same passage.`;
+
 /** One MCP server instance for `user`'s account: scoped to `fixedProject` when connected at
  *  /mcp/<project> (the classic form), or across every project the account can reach when
  *  connected at /mcp — each tool then takes `project`, and the account's role in that project
  *  is checked per call. Tools are attributed to `agentName`. */
 function buildMcpServer(user: SessionUser, agentName: string, userId: number, fixedProject: string | null): McpServer {
-  const server = new McpServer({ name: 'overlyx', version: '1.0.0' });
+  const server = new McpServer({ name: 'overlyx', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
   const projArg = {
     project: z.string().optional().describe(fixedProject
       ? 'Ignored — this connection is fixed to one project'
@@ -524,16 +576,27 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     inputSchema: { ...projArg, path: z.string(), text: z.string() },
   }, async ({ project: p, path, text }) => { try { return ok(writeFile(need(p, 'edit'), userId, path, text)); } catch (e) { return fail(e); } });
 
+  server.registerTool('edit_file', {
+    description: 'Edit a text file of the project (refs.bib, macros.tex, a .sty, …) by replacing a passage: old_text must occur exactly once unless replace_all. Applied directly, like write_file — git history keeps every prior state. For documents use edit_document.',
+    inputSchema: {
+      ...projArg, path: z.string(),
+      old_text: z.string().describe('The passage to replace, exactly as read_file returned it'),
+      new_text: z.string(),
+      replace_all: z.boolean().optional(),
+    },
+  }, async ({ project: p, path, old_text, new_text, replace_all }) => { try { return ok(editFile(need(p, 'edit'), userId, path, old_text, new_text, !!replace_all)); } catch (e) { return fail(e); } });
+
   server.registerTool('edit_document', {
-    description: "Edit a document by replacing a passage of its LaTeX source (the `text` read_document returns): old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to this agent and diffed against the live document, so only what actually changes is marked (a word, a digit, a table cell); the user reviews them in the editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the document now reads, for follow-up edits. Prefer this over the paragraph tools.",
+    description: "Edit a document by replacing a passage of its LaTeX source (the `text` read_document returns): old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to this agent and diffed against the live document, so only what actually changes is marked (a word, a digit, a table cell); the user reviews them in the editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the document now reads, for follow-up edits. Prefer this over the paragraph tools. With tracked: false the same edit is applied directly, without marks — use that as soon as a tracked edit fails, garbles the passage or breaks the build.",
     inputSchema: {
       ...projArg,
       path: z.string().describe('Project-relative path, e.g. "main.tex"'),
       old_text: z.string().describe('The passage to replace, copied from the document source'),
       new_text: z.string().describe('Its replacement (raw LaTeX)'),
       replace_all: z.boolean().optional().describe('Replace every occurrence (default: old_text must be unique)'),
+      tracked: z.boolean().optional().describe('true (default): a tracked change for review. false: applied directly, no tracked-change marks — the fallback whenever tracked editing runs into any problem (see the server instructions); the previous state stays in the project history'),
     },
-  }, async ({ project: p, path, old_text, new_text, replace_all }) => { try { return ok(await editDocument(need(p, 'edit'), agentName, path, old_text, new_text, !!replace_all)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, old_text, new_text, replace_all, tracked }) => { try { return ok(await editDocument(need(p, 'edit'), userId, agentName, path, old_text, new_text, !!replace_all, tracked !== false)); } catch (e) { return fail(e); } });
 
   server.registerTool('insert_paragraphs', {
     description: 'Insert raw LaTeX (anything: formulas, citations, sections, environments — parsed like the editor parses .tex) as new paragraphs at a position: 0 = top, paragraph count = append. Applied as a tracked insertion, reviewable like any collaborator edit. Indices shift — re-run read_document afterwards.',
@@ -551,9 +614,12 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path, index }) => { try { return ok(await deleteParagraph(need(p, 'edit'), agentName, path, index)); } catch (e) { return fail(e); } });
 
   server.registerTool('write_document', {
-    description: "Write a document's whole raw LaTeX source, or create the document when the path does not exist. On an existing document the new source is diffed against the current one and applied as tracked changes (only what differs is marked). For a local change prefer edit_document.",
-    inputSchema: { ...projArg, path: z.string(), tex: z.string() },
-  }, async ({ project: p, path, tex }) => { try { return ok(await writeDocument(need(p, 'edit'), userId, agentName, path, tex)); } catch (e) { return fail(e); } });
+    description: "Write a document's whole raw LaTeX source, or create the document when the path does not exist. On an existing document the new source is diffed against the current one and applied as tracked changes (only what differs is marked) — or, with tracked: false, written directly. For a local change prefer edit_document.",
+    inputSchema: {
+      ...projArg, path: z.string(), tex: z.string(),
+      tracked: z.boolean().optional().describe('true (default): a tracked change for review. false: applied directly, no tracked-change marks — the fallback whenever tracked editing runs into any problem (see the server instructions); the previous state stays in the project history'),
+    },
+  }, async ({ project: p, path, tex, tracked }) => { try { return ok(await writeDocument(need(p, 'edit'), userId, agentName, path, tex, tracked !== false)); } catch (e) { return fail(e); } });
 
   server.registerTool('create_document', {
     description: 'Create a new .tex document from the standard template (write_document with full source also creates).',

@@ -197,43 +197,15 @@ blend.
   overlyx repo push . --name my-paper
   ```
 
-  **A workspace of all projects, for local agents** (`overlyx sync`, CLI 0.2): Claude Code, Codex or
-  any other agent on the user's own machine works on ordinary files instead of through MCP's tracked
-  edits — with the account's roles and nothing more (no shell or ssh on the server, no sudo):
-
-  ```sh
-  overlyx sync ~/OverLyX --watch     # every project the account can access, kept in step both ways
-  cd ~/OverLyX && claude             # or codex; AGENTS.md (CLAUDE.md imports it) explains the rules
-  overlyx build jan/thesis/main.tex  # the server's compile: errors file:line, exit code 1 on failure
-  overlyx restore jan/thesis 3f2a91c # the whole project back to that commit, as a new commit
-  ```
-
-  The workspace holds one clone per project at `<owner>/<name>` (`.overlyx/workspace.json`,
-  `.overlyx/state.json`; an existing folder is only taken over when it is empty or holds such
-  clones). A pass commits what changed locally (per project, a message naming the files), fetches
-  (the server commits pending editor writes first), rebases onto it and pushes; a rebase that
-  conflicts is aborted and reported — the local commit stays, nothing is lost, the next pass retries
-  once the agent has resolved it (`git pull --rebase`). Projects the account can only view are pulled
-  and never pushed; a folder created under `<username>/` becomes a new project; projects no longer
-  reachable keep their folders. `--watch` reacts to local changes within ~2 s (a recursive file
-  watcher, else polling) and polls the server every `--interval` seconds (default 10) with one cheap
-  request: `GET /git/api/projects` returns each project's `head` (read from the ref files) and, while
-  editor writes are uncommitted, `changed` / `idle` (`syncState`); those edits are fetched once they
-  have rested 10 s, so a fetch does not cut somebody's typing into many commits. After a push the
-  project is looked at again a few seconds later: an open document may have rewritten the pushed
-  text into OverLyX's canonical form. Each clone gets the account's name as `user.name` and the CLI as
-  its git credential helper (`overlyx auth git-credential`), so plain `git pull` / `push` work there
-  while the token stays out of `.git/config`. `overlyx build` syncs the project first (unless
-  `--no-sync`), then `POST /git/api/build` compiles it like the PDF button (open documents absorb a
-  just-pushed file first) and answers with the errors and log tail; `--pdf FILE` fetches
-  `GET /git/api/pdf`. `overlyx restore` / `POST /git/api/restore` / *Restore* next to each commit in
-  the Git dialog (`POST /api/projects/:p/git/restore`) all call `restoreProject`: pending edits are
-  committed, the commit's tree is read into index and working tree (`read-tree -u --reset`: files it
-  lacked are removed, ignored build products stay) and committed on top, and open documents take the
-  restored text over. The generated `AGENTS.md` (kept while it still starts with the generated mark)
-  tells the agent: commit each logical change with a message, sync, build after every change and
-  never leave a document not compiling, leave the managed block and tracked-change markup alone,
-  step back with `git revert` / `overlyx restore`.
+  `overlyx build <owner>/<project>/<file>.tex` compiles a document on the server like the PDF button
+  (`POST /git/api/build`; errors `file:line`, exit code 1 on failure, `--pdf FILE` fetches
+  `GET /git/api/pdf`, `--log`), and `overlyx restore <owner>/<project> <commit>` puts the whole
+  project back to an earlier commit (`POST /git/api/restore`). Both use the account token and roles
+  (restore needs edit access). `restoreProject` in `server/git.ts` (also *Restore* next to each commit
+  in the Git dialog, `POST /api/projects/:p/git/restore`, and the MCP tool `restore_project`) commits
+  what is pending, reads the commit's tree into index and working tree (`read-tree -u --reset`: files
+  it lacked are removed, ignored build products stay), commits that on top — nothing is rewritten, so
+  a restore is undone the same way — and open documents take the restored text over.
 
   `repo push` initialises and commits an ordinary folder; an existing repository must be clean so
   no uncommitted work is silently omitted. The server creates an unborn repository for the first
@@ -1425,6 +1397,23 @@ exposes these tools:
   its changes in this turn) and a note when it built before — "a recent edit broke it".
 * `undo_turn(turns_back?)` — only for the Agent panel's agent: take back one of its turns exactly
   (see the Agent panel above).
+* **Local agents edit here, directly.** Claude Code, Codex or any MCP client on the user's own
+  machine connects to `/mcp` with the account token (the Git dialog shows `claude mcp add --transport
+  http overlyx <server>/mcp --header "Authorization: Bearer …"` and the Codex `config.toml` block) and
+  edits the project files on this server — no local copy, no sync, no shell. Document edits are
+  tracked by default; `edit_document` and `write_document` take `tracked: false` for the same edit
+  applied directly (`applyPlainSource` in `server/docedit.ts`: merged three-way like the tracked form,
+  so concurrent edits elsewhere and other people's tracked changes survive; pending changes are
+  committed right before, so the state before the direct edit is a commit to restore). The server's
+  MCP `instructions` (`MCP_INSTRUCTIONS` in `server/mcp.ts`, sent in the initialize result) tell the
+  agent to switch to `tracked: false` on **any** problem with tracked editing — an edit that fails or
+  does not match (never retry a failing tracked edit more than once), markup in the way, a garbled
+  `now_reads`, a build that breaks after a tracked edit or whose errors point at `\lyxadded` /
+  `\lyxdeleted`, math / tables / preamble the tracked form mangles, or the user asking — and to
+  build after every change and step back with `project_history` / `restore_project` rather than
+  leave a document not compiling. A failed `build_pdf` repeats the hint.
+* `edit_file(path, old_text, new_text, replace_all?)` — a passage of a text file (refs.bib, macros,
+  `.sty`) replaced directly, like `write_file`; documents are refused (use `edit_document`).
 * `project_history(limit?)`, `restore_project(commit)` — the way back for any agent: the project's
   git commits, and the whole project put back to one of them as a new commit on top (`restoreProject`
   in `server/git.ts`, the same operation as *Restore* in the Git dialog and `overlyx restore`;

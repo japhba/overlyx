@@ -1,6 +1,6 @@
 {
   "name": "@overlyx/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The official command-line client for OverLyX",
   "type": "module",
   "bin": {

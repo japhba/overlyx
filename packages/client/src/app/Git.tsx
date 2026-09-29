@@ -1,7 +1,7 @@
 /**
- * Git dialog: the project's clone URL and how to use it from a local machine (and how to hand all
- * projects to a local agent through `overlyx sync`), the account access token (shared by git, the
- * CLI and MCP — Google accounts have no password), the recent commits (each can be restored as a
+ * Git dialog: the project's clone URL and how to use it from a local machine, how to connect a
+ * local agent (Claude Code, Codex) to the MCP connector, the account access token (shared by git,
+ * the CLI and MCP — Google accounts have no password), the recent commits (each can be restored as a
  * new commit) and what OverLyX has not committed yet. Every project is a repository; OverLyX commits its own
  * writes automatically and before every clone / pull / push, and a push updates the project.
  */
@@ -135,17 +135,21 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
 
           <h4>Local agents — Claude Code, Codex, … on your computer</h4>
           <div class="hint" data-git-agents>
-            Give an agent on your own machine <b>ordinary files</b>: the OverLyX CLI keeps a folder with <b>all your projects</b> in
-            sync — a git clone of each, committed, merged with what people edit here, and pushed within seconds. The agent edits
-            with its own tools, checks its work with <code>overlyx build</code> (the server's compile: errors, exit code), and every
-            change is a commit, so one that broke something is taken back with <i>Restore</i> below or <code>git revert</code> — no
-            tracked-change markup, no shell on the server: it acts with your access token and your roles.
-            An <code>AGENTS.md</code> in the folder tells the agent the rules.
+            An agent on your own machine edits your projects <b>right here on the server</b>, through the MCP connector below — no
+            copy of the projects, no sync, no shell: it acts with your account token and your role in each project. Its document
+            edits are tracked changes you review; when tracked editing runs into any problem (an edit that will not apply, a build
+            it breaks) the server tells the agent to fall back to direct edits. Every state stays in the history — <i>Restore</i>{' '}
+            below, or the agent's own <code>restore_project</code>, steps back.
           </div>
-          <pre class="git-cmds">{`curl -fsSL ${location.origin}/install-cli.sh | sh
-overlyx auth login --host ${location.origin} --username ${info.username} --with-token
-overlyx sync ~/OverLyX --watch        # keeps running: all your projects, both ways
-cd ~/OverLyX && claude                # or codex, …`}</pre>
+          <pre class="git-cmds">{`# Claude Code
+claude mcp add --transport http overlyx ${location.origin}/mcp \\
+  --header "Authorization: Bearer $OVERLYX_TOKEN"
+
+# Codex: ~/.codex/config.toml
+[mcp_servers.overlyx]
+url = "${location.origin}/mcp"
+bearer_token_env_var = "OVERLYX_TOKEN"`}</pre>
+          <div class="hint">With <code>OVERLYX_TOKEN</code> set to your account access token (below).</div>
 
           <h4>Your account access token — Git, CLI and MCP</h4>
           <div class="hint">Your account has one manually-managed token, shared by every project and client. Use it as the password for Git or the OverLyX CLI, or as an MCP Bearer token. Rotating it replaces the old token everywhere.</div>
@@ -168,14 +172,15 @@ cd ~/OverLyX && claude                # or codex, …`}</pre>
           </div>
           <button class="btn" disabled={busy} onClick={() => void createToken()}>{tokens?.length ? 'Rotate token' : 'Create token'}</button>
 
-          <h4>MCP connector — let an AI agent read, comment and propose edits</h4>
+          <h4>MCP connector — let an AI agent read, comment and edit</h4>
           <div class="hint">
             Any MCP-compatible client can connect — it acts as <b>your account</b>: one connection reaches{' '}
             <b>every project you can access</b> (a <code>list_projects</code> tool names them; the other tools take a{' '}
             <code>project</code> argument), with your role in each: read documents, comments and project files, build
-            the PDF, and (with edit access) comment and write raw LaTeX — paragraph edits land as a <b>tracked
-            change</b> attributed to the agent, never a silent overwrite, so you review them from the Review toolbar
-            like any collaborator's edit. <b>ChatGPT</b> connects with no token at all (Settings ▸ Apps ▸ Developer
+            the PDF, and (with edit access) comment and write raw LaTeX — document edits land as a <b>tracked
+            change</b> attributed to the agent, reviewed from the Review toolbar like any collaborator's edit (or, as
+            the fallback when tracked editing gets in the way, directly — the history keeps the state before).
+            <b>ChatGPT</b> connects with no token at all (Settings ▸ Apps ▸ Developer
             mode ▸ Create, this URL, OAuth — you approve it on a consent page); Claude, Claude Code and others use
             your account token above as a Bearer header.
           </div>

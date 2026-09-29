@@ -2,9 +2,7 @@
  * The gh-like CLI against the real Basic-authenticated repository API and smart-HTTP backend:
  * login stores a Git token securely, repo push turns an ordinary directory into a repository,
  * creates an unborn OverLyX project, and pushes without writing the secret into .git/config.
- * `overlyx sync` mirrors every accessible project into a workspace both ways (conflicts undone and
- * reported, view-only projects never pushed, new folders become projects); `overlyx build` compiles
- * on the server; `overlyx restore` puts a project back to an earlier commit.
+ * `overlyx build` compiles on the server; `overlyx restore` puts a project back to an earlier commit.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -50,8 +48,6 @@ const cli = async (...args: string[]) => execFileP(process.execPath, [CLI, ...ar
     GIT_CONFIG_NOSYSTEM: '1',
   },
 });
-const WS = join(ROOT, 'workspace');
-const inWs = (...p: string[]) => join(WS, ...p);
 const serverFile = (...p: string[]) => join(ROOT, 'projects', ...p);
 const gitIn = async (dir: string, ...args: string[]) => (await execFileP('git', ['-C', dir, ...args], { encoding: 'utf8', env: { ...process.env, OVERLYX_CONFIG_DIR: join(ROOT, 'config'), GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' } })).stdout.trim();
 const localGit = async (...args: string[]) => (await execFileP('git', ['-C', join(ROOT, 'source'), ...args], { encoding: 'utf8' })).stdout.trim();
@@ -76,10 +72,10 @@ describe('OverLyX CLI', () => {
       encoding: 'utf8',
       env: { ...process.env, OVERLYX_ORIGIN: host, OVERLYX_INSTALL_DIR: installDir },
     });
-    expect(installed.stdout).toContain('Installed OverLyX CLI 0.2.0');
+    expect(installed.stdout).toContain('Installed OverLyX CLI 0.3.0');
     expect(statSync(join(installDir, 'overlyx')).mode & 0o777).toBe(0o755);
     expect(existsSync(join(installDir, 'olx'))).toBe(true);
-    expect((await execFileP(join(installDir, 'overlyx'), ['--version'], { encoding: 'utf8' })).stdout.trim()).toBe('0.2.0');
+    expect((await execFileP(join(installDir, 'overlyx'), ['--version'], { encoding: 'utf8' })).stdout.trim()).toBe('0.3.0');
   });
 
   it('logs in, creates a project, and pushes an existing non-Git folder', async () => {
@@ -145,119 +141,47 @@ describe('OverLyX CLI', () => {
   });
 });
 
-describe('overlyx sync: a workspace of all projects for local agents', () => {
+describe('overlyx build / restore: the server compiles and steps back', () => {
   const bob = createUser('bob', 'Bob Builder', 'password');
-  const THESIS = '\\documentclass{article}\n\\begin{document}\nFirst line of the thesis.\n\nSecond line.\n\\end{document}\n';
+  const THESIS = '\\documentclass{article}\n\\begin{document}\nFirst line of the thesis.\n\\end{document}\n';
 
   beforeAll(async () => {
     await cli('auth', 'login', '--host', host, '--username', 'ada', '--token', token);
     createOwnedProject('thesis', user.id);
     writeFileSync(serverFile('ada', 'thesis', 'main.tex'), THESIS);
     await gitmod.ensureRepo('ada/thesis');
-    // somebody else's project, shared with ada for viewing only
     createOwnedProject('notes', bob.id);
     writeFileSync(serverFile('bob', 'notes', 'notes.tex'), 'Bob\'s notes.\n');
     await gitmod.ensureRepo('bob/notes');
     addMember('bob/notes', 'ada', 'view', toSessionUser(db.prepare('SELECT * FROM users WHERE id = ?').get(bob.id) as never));
   });
 
-  it('clones every accessible project into <owner>/<name> and writes the agent notes', async () => {
-    const r = await cli('sync', WS);
-    expect(r.stdout).toMatch(/cloned/);
-    expect(readFileSync(inWs('ada', 'thesis', 'main.tex'), 'utf8')).toBe(THESIS);
-    expect(readFileSync(inWs('bob', 'notes', 'notes.tex'), 'utf8')).toBe('Bob\'s notes.\n');
-    expect(existsSync(inWs('ada', 'Imported paper', 'main.tex'))).toBe(true);
-    const agents = readFileSync(inWs('AGENTS.md'), 'utf8');
-    expect(agents).toContain('overlyx build <owner>/<project>/<file>.tex');
-    expect(agents).toContain('\\lyxadded');
-    expect(readFileSync(inWs('CLAUDE.md'), 'utf8')).toContain('@AGENTS.md');
-    // the token is never written into a repository; the CLI is git's credential helper instead
-    const cfg = readFileSync(inWs('ada', 'thesis', '.git', 'config'), 'utf8');
-    expect(cfg).not.toContain(token);
-    expect(cfg).toContain('auth git-credential');
-    expect(await gitIn(inWs('ada', 'thesis'), 'config', 'user.name')).toBe('Ada Lovelace');
-    // …so plain git works in a clone without any environment
-    expect(await gitIn(inWs('ada', 'thesis'), 'pull', '--quiet')).toBe('');
-  });
-
-  it('pushes local edits into the project and pulls what was edited on the server', async () => {
-    writeFileSync(inWs('ada', 'thesis', 'main.tex'), THESIS.replace('Second line.', 'Second line, edited by an agent.'));
-    writeFileSync(inWs('ada', 'thesis', 'refs.bib'), '@misc{a, title={A}}\n');
-    const r = await cli('sync', WS);
-    expect(r.stdout).toMatch(/ada\/thesis: 1 commit pushed \(main\.tex, refs\.bib\)/);
-    expect(readFileSync(serverFile('ada', 'thesis', 'main.tex'), 'utf8')).toContain('edited by an agent');
-    expect(existsSync(serverFile('ada', 'thesis', 'refs.bib'))).toBe(true);
-
-    // an edit made in OverLyX (written, not yet committed): the fetch commits and brings it
-    writeFileSync(serverFile('ada', 'thesis', 'main.tex'), readFileSync(serverFile('ada', 'thesis', 'main.tex'), 'utf8').replace('First line', 'First line, from the browser'));
-    const again = await cli('sync', WS);
-    expect(again.stdout).toMatch(/ada\/thesis: 1 change from OverLyX \(main\.tex\)/);
-    expect(readFileSync(inWs('ada', 'thesis', 'main.tex'), 'utf8')).toContain('First line, from the browser');
-    expect(readFileSync(inWs('ada', 'thesis', 'main.tex'), 'utf8')).toContain('edited by an agent');
-  });
-
-  it('never pushes into a project the account can only view', async () => {
-    writeFileSync(inWs('bob', 'notes', 'notes.tex'), 'Changed locally.\n');
-    const r = await cli('sync', WS);
-    expect(r.stdout).toContain('bob/notes: you can only view this project');
-    expect(readFileSync(serverFile('bob', 'notes', 'notes.tex'), 'utf8')).toBe('Bob\'s notes.\n');
-    await gitIn(inWs('bob', 'notes'), 'checkout', '--', 'notes.tex');
-  });
-
-  it('undoes a conflicting rebase, keeps the local commit and reports it', async () => {
-    const serverText = readFileSync(serverFile('ada', 'thesis', 'main.tex'), 'utf8');
-    writeFileSync(serverFile('ada', 'thesis', 'main.tex'), serverText.replace(/Second line[^\n]*/, 'Second line, rewritten in the browser.'));
-    await gitmod.commitProject('ada/thesis');
-    writeFileSync(inWs('ada', 'thesis', 'main.tex'), readFileSync(inWs('ada', 'thesis', 'main.tex'), 'utf8').replace(/Second line[^\n]*/, 'Second line, rewritten by the agent.'));
-    const r = await cli('sync', WS).catch(e => e as { stdout: string; code: number });
-    expect(r.stdout).toContain('ada/thesis: your changes and changes made in OverLyX overlap (main.tex)');
-    expect((r as { code?: number }).code).toBe(1);
-    expect(existsSync(inWs('ada', 'thesis', '.git', 'rebase-merge'))).toBe(false);
-    expect(await gitIn(inWs('ada', 'thesis'), 'log', '-1', '--format=%s')).toBe('Edit main.tex');
-    expect(readFileSync(inWs('ada', 'thesis', 'main.tex'), 'utf8')).toContain('rewritten by the agent');
-    expect(readFileSync(serverFile('ada', 'thesis', 'main.tex'), 'utf8')).toContain('rewritten in the browser');
-    // resolved by taking the browser's version: the next sync goes through
-    await gitIn(inWs('ada', 'thesis'), 'reset', '--hard', 'origin/main');
-    expect((await cli('sync', WS)).stdout).not.toContain('overlap');
-  });
-
-  it('turns a new folder in the account\'s own directory into a project', async () => {
-    mkdirSync(inWs('ada', 'talk'));
-    writeFileSync(inWs('ada', 'talk', 'slides.tex'), '\\documentclass{beamer}\n\\begin{document}\n\\end{document}\n');
-    const r = await cli('sync', WS);
-    expect(r.stdout).toContain('ada/talk: new project created from the folder and pushed');
-    expect(readFileSync(serverFile('ada', 'talk', 'slides.tex'), 'utf8')).toContain('beamer');
-    expect((await cli('repo', 'list')).stdout).toContain('ada/talk\towner');
-  });
-
-  it('restores a project to an earlier commit as a new commit, and pulls it', async () => {
-    const dir = inWs('ada', 'thesis');
-    const first = (await gitIn(dir, 'log', '--reverse', '--format=%H')).split('\n')[0];
+  it('restores a project to an earlier commit as a new commit; view-only projects are refused', async () => {
+    const dir = serverFile('ada', 'thesis');
+    const first = (await gitIn(dir, 'rev-parse', 'HEAD'));
+    writeFileSync(join(dir, 'main.tex'), THESIS.replace('First line', 'A broken first line'));
+    writeFileSync(join(dir, 'refs.bib'), '@misc{a, title={A}}\n');
+    await gitmod.commitProject('ada/thesis', { message: 'An agent edit' });
     const r = await cli('restore', 'ada/thesis', first.slice(0, 10));
-    expect(r.stdout).toMatch(/ada\/thesis: restored to [0-9a-f]+ as a new commit/);
-    expect(readFileSync(serverFile('ada', 'thesis', 'main.tex'), 'utf8')).toBe(THESIS);
-    expect(existsSync(serverFile('ada', 'thesis', 'refs.bib'))).toBe(false);          // added later: removed
+    expect(r.stdout).toMatch(/ada\/thesis: restored to [0-9a-f]+ as a new commit \(2 files/);
     expect(readFileSync(join(dir, 'main.tex'), 'utf8')).toBe(THESIS);
+    expect(existsSync(join(dir, 'refs.bib'))).toBe(false);           // added later: removed
     expect(await gitIn(dir, 'log', '-1', '--format=%s')).toMatch(/^Restore the project to/);
-    // nothing was rewritten: the agent's edit is still in the history
-    expect(await gitIn(dir, 'log', '--format=%s')).toContain('Edit main.tex, refs.bib');
+    expect(await gitIn(dir, 'log', '--format=%s')).toContain('An agent edit');   // nothing rewritten
     await expect(cli('restore', 'bob/notes', first.slice(0, 10))).rejects.toMatchObject({ stderr: expect.stringContaining('only view') });
   });
 
   it('builds a document on the server and reports errors with exit code 1', { timeout: 120_000 }, async () => {
     if (spawnSync('which', ['latexmk']).status !== 0) return;
-    writeFileSync(inWs('ada', 'thesis', 'broken.tex'), '\\documentclass{article}\n\\begin{document}\nHello \\undefinedmacro{} world.\n\\end{document}\n');
-    const bad = await cli('build', inWs('ada', 'thesis', 'broken.tex')).catch(e => e as { stdout: string; code: number });
+    writeFileSync(serverFile('ada', 'thesis', 'broken.tex'), '\\documentclass{article}\n\\begin{document}\nHello \\undefinedmacro{} world.\n\\end{document}\n');
+    const bad = await cli('build', 'ada/thesis/broken.tex').catch(e => e as { stdout: string; code: number });
     expect(bad.stdout).toContain('✗ ada/thesis/broken.tex does not compile');
     expect(bad.stdout).toContain('Undefined control sequence');
     expect((bad as { code?: number }).code).toBe(1);
-    writeFileSync(inWs('ada', 'thesis', 'broken.tex'), '\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}\n');
+    writeFileSync(serverFile('ada', 'thesis', 'broken.tex'), '\\documentclass{article}\n\\begin{document}\nHello world.\n\\end{document}\n');
     const pdf = join(ROOT, 'out.pdf');
-    const good = await cli('build', 'ada/thesis/broken.tex', '--pdf', pdf, '--no-sync').catch(e => e as { stdout: string });
-    // --no-sync: the server still has the broken version
-    expect(good.stdout).toContain('does not compile');
-    const synced = await cli('build', inWs('ada', 'thesis', 'broken.tex'), '--pdf', pdf);
-    expect(synced.stdout).toContain('✓ ada/thesis/broken.tex compiled');
+    const good = await cli('build', 'ada/thesis/broken.tex', '--pdf', pdf);
+    expect(good.stdout).toContain('✓ ada/thesis/broken.tex compiled');
     expect(readFileSync(pdf).subarray(0, 5).toString()).toBe('%PDF-');
   });
 });

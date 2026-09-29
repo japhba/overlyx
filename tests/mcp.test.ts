@@ -121,12 +121,21 @@ describe('auth', () => {
 });
 
 describe('tools/list', () => {
+  it('tells the agent in its instructions to fall back to direct edits on any problem', async () => {
+    const t = createMcpToken(owner.id, 'test-agent');
+    const { body } = await rpc(t.token, 'initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const ins: string = body.result.instructions;
+    expect(ins).toMatch(/On ANY problem[^.]*tracked: false/);
+    expect(ins).toContain('restore_project');
+    expect(ins).toContain('\\lyxadded');
+  });
+
   it('lists all the tools', async () => {
     const t = createMcpToken(owner.id, 'test-agent');
     const { status, body } = await rpc(t.token, 'tools/list');
     expect(status).toBe(200);
     const names = body.result.tools.map((x: any) => x.name).sort();
-    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'edit_document', 'fetch', 'insert_paragraphs', 'list_comments',
+    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'edit_document', 'edit_file', 'fetch', 'insert_paragraphs', 'list_comments',
       'list_documents', 'list_files', 'list_projects', 'project_history', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'resolve_comment', 'restore_project', 'search', 'write_document', 'write_file']);
   });
 
@@ -321,6 +330,26 @@ Thesis: \emph{Learning dynamics} in recurrent networks. Advisor: \href{https://e
     expect(text).toContain('\\textbf{PhD in Theoretical Neuroscience}, University College London');
   });
 
+  it('tracked: false applies the edit directly — no marks, others\' tracked changes kept, a commit right before it', async () => {
+    await ensureRepo('owner/p');
+    writeFileSync(file('plain.tex'), cvDoc);
+    const t = createMcpToken(owner.id, 'CV Bot').token;
+    await callTool(t, 'edit_document', { path: 'plain.tex', old_text: '2019--2021 & MSc', new_text: '2018--2021 & MSc' });   // a tracked change first
+    const r = await callTool(t, 'edit_document', { path: 'plain.tex', old_text: 'Thesis: \\emph{Learning dynamics}', new_text: 'Thesis: \\emph{Learning dynamics and chaos}', tracked: false });
+    expect(r.tracked).toBe(false);
+    expect(r.now_reads).toContain('\\emph{Learning dynamics and chaos}');
+    const text = (await manager.open('owner/p/plain.tex')).toText();
+    expect(text).toContain('\\emph{Learning dynamics and chaos}');
+    expect(marks(text)).toEqual(['-9', '+8']);              // only the earlier tracked change carries marks
+    // the state right before the direct edit is a commit (restore_project can return to it)
+    const h = await callTool(t, 'project_history', { limit: 3 });
+    expect(h.uncommitted_files).toContain('plain.tex');
+    const w = await callTool(t, 'write_document', { path: 'plain.tex', tex: text.replace('TU Munich', 'TU München'), tracked: false });
+    expect(w.tracked).toBe(false);
+    expect((await manager.open('owner/p/plain.tex')).toText()).toContain('TU München');
+    expect(marks((await manager.open('owner/p/plain.tex')).toText())).toEqual(['-9', '+8']);
+  });
+
   it('a follow-up edit may quote the text without the markup, and refines its own change', async () => {
     const t = createMcpToken(owner.id, 'CV Bot').token;
     await callTool(t, 'edit_document', { path: 'cv.tex', old_text: 'London \\hfill{}2021--2026', new_text: 'London \\hfill{}2021--2027' });
@@ -372,6 +401,15 @@ describe('project text files', () => {
     const w = await callTool(t, 'write_file', { path: 'refs.bib', text: bib });
     expect(w.ok).toBe(true);
     expect((await callTool(t, 'read_file', { path: 'refs.bib' })).text).toBe(bib);
+  });
+
+  it('edit_file replaces a passage of a text file directly, and explains a failed match', async () => {
+    const t = createMcpToken(owner.id, 'Bib Bot').token;
+    const r = await callTool(t, 'edit_file', { path: 'refs.bib', old_text: 'year={2026}', new_text: 'year={2027}' });
+    expect(r.replaced).toBe(1);
+    expect(readFileSync(file('refs.bib'), 'utf8')).toContain('year={2027}');
+    await expect(callTool(t, 'edit_file', { path: 'refs.bib', old_text: 'year={1999}', new_text: 'x' })).rejects.toThrow(/does not occur/);
+    await expect(callTool(t, 'edit_file', { path: 'a.tex', old_text: 'First', new_text: 'x' })).rejects.toThrow(/edit_document|read_document/);
   });
 
   it('documents are refused (use the document tools)', async () => {

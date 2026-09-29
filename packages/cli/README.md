@@ -1,7 +1,7 @@
 # OverLyX CLI
 
-A small `gh`-style client for creating OverLyX projects, pushing existing local work, and keeping
-a local workspace of all your projects in sync (for you or a local agent).
+A small `gh`-style client for creating OverLyX projects, pushing existing local work, building
+documents on the server and restoring a project to an earlier commit.
 
 ```sh
 curl -fsSL https://overlyx.app/install-cli.sh | sh
@@ -30,28 +30,17 @@ plus its `olx` alias in `~/.local/bin`. Set `OVERLYX_INSTALL_DIR=/usr/local/bin`
 permissions) to choose another location. The installer is ordinary shell text, so it can be
 downloaded and inspected before running instead of piped directly to `sh`.
 
-## A workspace for local agents
-
-`overlyx sync` keeps a folder with every project your account can access — one git clone each, at
-`<owner>/<project>` — in step with OverLyX both ways, so an agent on your machine (Claude Code,
-Codex, …) or your own editor works on ordinary files:
+## Building and stepping back
 
 ```sh
-overlyx sync ~/OverLyX --watch       # keeps running; without --watch: one pass
-cd ~/OverLyX && claude               # AGENTS.md / CLAUDE.md there explain the rules to the agent
-overlyx build ada/paper/main.tex     # compile on the server; errors and exit code 1 if it fails
+overlyx build ada/paper/main.tex                 # compile on the server; errors and exit code 1 if it fails
 overlyx build ada/paper/main.tex --pdf paper.pdf
-overlyx restore ada/paper 3f2a91c    # the whole project back to that commit (a new commit on top)
-overlyx status                       # what is not pushed yet
+overlyx restore ada/paper 3f2a91c                # the whole project back to that commit (a new commit on top)
 ```
 
-Local changes are committed, rebased onto what was edited in OverLyX and pushed; edits made in
-OverLyX arrive once they have rested for a few seconds. A rebase that conflicts is undone and
-reported (the local commit stays); resolve it with `git pull --rebase` in that project. Projects
-you can only view are never pushed. A folder you create under `<your username>/` becomes a new
-project. `--only ada/paper,ada/talk` limits the workspace to some projects (`--only all` undoes it).
-The agent acts with your account's access token and roles — it gets no shell on the server.
-In the clones, plain `git pull` and `git push` work too: the CLI is their credential helper.
+A local agent (Claude Code, Codex, …) does not need the CLI: it edits your projects on the server
+through the MCP connector (`<server>/mcp` with your account token; File > Git repository shows the
+setup commands).
 
 ## Commands
 
@@ -62,10 +51,8 @@ overlyx auth logout [--host URL]
 overlyx repo list [--host URL]
 overlyx repo create [NAME] [--source PATH] [--push] [--remote NAME]
 overlyx repo push [PATH] [--name NAME] [--remote NAME]
-overlyx sync [DIR] [--watch] [--interval SECONDS] [--only KEYS]
-overlyx status [DIR]
-overlyx build [DOCUMENT] [--pdf FILE] [--log] [--wait SECONDS] [--no-sync]
-overlyx restore [PROJECT] COMMIT
+overlyx build OWNER/PROJECT/FILE.tex [--pdf FILE] [--log] [--wait SECONDS]
+overlyx restore OWNER/PROJECT COMMIT
 ```
 
 Passing `--token` is convenient for automation but can expose it in shell history; prefer

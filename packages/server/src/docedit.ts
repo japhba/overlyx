@@ -1,5 +1,6 @@
 /**
- * Agent edits of a document's LaTeX source, applied as tracked changes.
+ * Agent edits of a document's LaTeX source, applied as tracked changes (or, as the fallback,
+ * directly: applyPlainSource).
  *
  * An agent edits text: it replaces a passage of the source (edit_document), writes the whole
  * source (write_document), or patches its private copy of the file (the agent panel). Whatever
@@ -53,6 +54,22 @@ export function applyTrackedSource(doc: OpenDoc, before: string, after: string, 
   const st = changeStats(target.body, as);
   const newText = doc.toText();
   return { ...st, excerpt: excerptOfChange(oldText, newText), before: oldText, after: newText };
+}
+
+/**
+ * The same edit applied directly, without tracked-change marks — the fallback when tracked editing
+ * gets in the way (an edit that will not match around markup, a construct the tracked diff mangles,
+ * a build the markup breaks). Merged like the tracked form, so concurrent edits elsewhere survive;
+ * other people's tracked changes stay as they are.
+ */
+export function applyPlainSource(doc: OpenDoc, before: string, after: string): { changed: boolean; excerpt: string; before: string; after: string } {
+  const target: LyxDocument = mergeLyx(doc.parse(before), doc.toLyxDocument(), doc.parse(after), mergeInPlace);
+  const oldText = doc.toText();
+  doc.loadFromLyx(target, 'mcp');   // clients apply it like an agent edit
+  doc.dirty = true;
+  void doc.saveToFile();
+  const newText = doc.toText();
+  return { changed: newText !== oldText, excerpt: excerptOfChange(oldText, newText), before: oldText, after: newText };
 }
 
 /* ------------------------------------------------------------------ taking an edit back */

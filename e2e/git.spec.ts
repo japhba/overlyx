@@ -92,9 +92,9 @@ test('clone with the token, push a change, pull what OverLyX committed', async (
   await expect(dlg).toContainText('Everything is committed');
   git(CLONE, 'pull', '-q', '--no-rebase', 'origin', 'main');
   expect(readFileSync(join(CLONE, 'refs.bib'), 'utf8')).toContain('From OverLyX');
-  // how to hand all projects to a local agent
-  await expect(dlg.locator('[data-git-agents]')).toContainText('AGENTS.md');
-  await expect(dlg).toContainText('overlyx sync ~/OverLyX --watch');
+  // how to connect a local agent: it edits here, through the MCP connector
+  await expect(dlg.locator('[data-git-agents]')).toContainText('right here on the server');
+  await expect(dlg).toContainText('claude mcp add --transport http overlyx');
   // Restore: the whole project as it was at the laptop's commit, as a new commit on top
   page.on('dialog', d => d.accept());
   const laptop = dlg.locator('.git-commit', { hasText: 'Notes from the laptop' });

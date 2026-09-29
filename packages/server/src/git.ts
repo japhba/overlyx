@@ -237,7 +237,7 @@ export async function ensureAllRepos(): Promise<void> {
 
 /* -------------------------------------------------------------------- commits */
 
-interface Pending { editors: Set<number>; timer: NodeJS.Timeout | null; since: number; last: number }
+interface Pending { editors: Set<number>; timer: NodeJS.Timeout | null; since: number }
 const pending = new Map<string, Pending>();
 
 function editorsOf(ids: Iterable<number>): { name: string; email: string; username: string }[] {
@@ -281,7 +281,7 @@ function takeEditors(project: string, extra?: number | null): Set<number> {
 
 /** A commit failed: keep its editors for the next attempt. */
 function keepEditors(project: string, editors: Set<number>): void {
-  const again = pending.get(project) ?? { editors: new Set<number>(), timer: null, since: Date.now(), last: Date.now() };
+  const again = pending.get(project) ?? { editors: new Set<number>(), timer: null, since: Date.now() };
   for (const id of editors) again.editors.add(id);
   pending.set(project, again);
 }
@@ -306,8 +306,7 @@ export async function commitProject(project: string, opts: { message?: string; b
 export function touchProject(project: string, userIds?: number[] | number | null): void {
   if (!config.git) return;
   let p = pending.get(project);
-  if (!p) { p = { editors: new Set(), timer: null, since: Date.now(), last: 0 }; pending.set(project, p); }
-  p.last = Date.now();
+  if (!p) { p = { editors: new Set(), timer: null, since: Date.now() }; pending.set(project, p); }
   for (const id of userIds == null ? [] : Array.isArray(userIds) ? userIds : [userIds]) p.editors.add(id);
   if (p.timer) clearTimeout(p.timer);
   const delay = Math.max(1000, Math.min(config.gitCommitMs, p.since + config.gitCommitMaxWaitMs - Date.now()));
@@ -344,19 +343,7 @@ export async function repoInfo(project: string, limit = 12): Promise<RepoInfo> {
   return { branch, commits, pending: pendingFiles.length, pendingFiles: pendingFiles.slice(0, 50), head: commits[0]?.hash ?? null };
 }
 
-/**
- * What a local copy needs to know whether it is behind, without asking git: the commit the
- * checked-out branch points at (read from the ref files) and when OverLyX last wrote a file it has
- * not committed yet (null: nothing pending; `idle` = milliseconds since, so the client needs no
- * synchronised clock). A workspace sync (`overlyx sync`) polls this for all projects in one
- * request and fetches only those whose state moved — edits in the editor once they have settled,
- * so a fetch (which commits them) does not cut a paragraph somebody is typing into many commits.
- */
-export function syncState(project: string): { head: string | null; changed: number | null; idle: number | null } {
-  const last = pending.get(project)?.last || null;
-  return { head: readHead(projectDir(project)), changed: last, idle: last ? Date.now() - last : null };
-}
-
+/** The commit the checked-out branch points at, read from the ref files (no git process). */
 function readHead(dir: string): string | null {
   try {
     const gitDir = path.join(dir, '.git');
@@ -493,11 +480,11 @@ export function gitRouter(): express.Router {
   r.get('/api/projects', (req, res) => {
     const user = authenticateBasic(req, res);
     if (!user) return;
-    res.json({ projects: accessibleProjects(user, { files: false }).map(p => ({ name: p.name, title: p.title, role: p.role, ...syncState(p.name) })) });
+    res.json({ projects: accessibleProjects(user, { files: false }).map(p => ({ name: p.name, title: p.title, role: p.role })) });
   });
   r.post('/api/projects', express.json({ limit: '32kb' }), (req, res) => { void createCliProject(req, res); });
-  // what a local agent needs besides the files: the server's build of a document, its PDF, and a
-  // restore of the whole project to an earlier commit (`overlyx build` / `overlyx restore`)
+  // the server's build of a document, its PDF, and a restore of the whole project to an earlier
+  // commit (`overlyx build` / `overlyx restore`; the MCP connector has the same as tools)
   r.post('/api/build', express.json({ limit: '32kb' }), (req, res) => { void cliBuild(req, res); });
   r.get('/api/pdf', (req, res) => { void cliPdf(req, res); });
   r.post('/api/restore', express.json({ limit: '32kb' }), (req, res) => { void cliRestore(req, res); });

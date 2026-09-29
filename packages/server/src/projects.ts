@@ -44,7 +44,7 @@ export function listProjects(opts: { files?: boolean } = {}): Project[] {
       const name = `${ns.name}/${entry.name}`;
       if (!entry.isDirectory() || entry.name.startsWith('.') || !isProjectKey(name)) continue;
       const p = path.join(root, ns.name, entry.name);
-      // `files: false`: names only (a workspace sync polls this; walking every project would be wasted)
+      // `files: false`: names only (the CLI's project list needs no walk through every project)
       out.push({ name, path: p, files: opts.files === false ? [] : classifyDocs(p, collect(p, p, [], 0)) });
     }
   }
