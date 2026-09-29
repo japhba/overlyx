@@ -41,7 +41,7 @@ import { applyTrackedSource, applyPlainSource, replaceInSource } from './docedit
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import nodePath from 'node:path';
 import { manager } from './docs.ts';
-import { listProjects, projectDir, resolveProjectPath, isDocumentFile, newDocumentText, findMaster } from './projects.ts';
+import { listProjects, projectDir, resolveProjectPath, assertWritableRelPath, isDocumentFile, newDocumentText, findMaster } from './projects.ts';
 import { parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { touchProject, repoInfo, restoreProject, commitProject } from './git.ts';
 import { buildIncluding, buildErrors, lastBuild, currentJob } from './export.ts';
@@ -304,6 +304,7 @@ async function writeDocument(project: string, userId: number, agentName: string,
   if (!tex.trim()) throw new Error('tex missing');
   if (tex.length > DOC_MAX) throw new Error('too large');
   if (!path.endsWith('.tex')) throw new Error('a .tex path is expected');
+  assertWritableRelPath(path);
   const abs = resolveProjectPath(project, path);
   if (!fs.existsSync(abs)) {
     const r = parseDocumentText(tex, project, path);   // validate and collect warnings before creating
@@ -351,6 +352,7 @@ function createDocument(project: string, userId: number, agentName: string, relP
   let rel = relPath;
   if (rel.endsWith('.lyx')) rel = rel.slice(0, -4) + '.tex';
   if (!rel.endsWith('.tex')) rel += '.tex';
+  assertWritableRelPath(rel);
   const abs = resolveProjectPath(project, rel);
   if (fs.existsSync(abs)) throw new Error('file exists — write_document replaces an existing document');
   fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
@@ -361,6 +363,7 @@ function createDocument(project: string, userId: number, agentName: string, relP
 
 function assertTextFilePath(project: string, rel: string): string {
   if (rel.endsWith('.lyx') || isDocumentFile(project, rel)) throw new Error('This is a document — use read_document / write_document (or the paragraph tools).');
+  assertWritableRelPath(rel);   // never reach into a repository's .git (a hook/config would run as the server user)
   return resolveProjectPath(project, rel);
 }
 

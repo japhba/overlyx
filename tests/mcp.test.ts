@@ -418,6 +418,18 @@ describe('project text files', () => {
     await expect(callTool(t, 'write_file', { path: 'a.tex', text: 'x' })).rejects.toThrow(/write_document/);
   });
 
+  it('no tool may reach into .git (a hook or config there would run as the server user)', async () => {
+    const t = createMcpToken(owner.id, 'Bib Bot').token;
+    // an agent can be steered by injected document content, so these paths must be refused outright
+    await expect(callTool(t, 'write_file', { path: '.git/hooks/pre-commit', text: '#!/bin/sh\ntouch /tmp/pwned\n' })).rejects.toThrow(/bad path/);
+    await expect(callTool(t, 'write_file', { path: '.git/config', text: '[core]\n' })).rejects.toThrow(/bad path/);
+    await expect(callTool(t, 'read_file', { path: '.git/config' })).rejects.toThrow(/bad path/);
+    await expect(callTool(t, 'edit_file', { path: 'sub/.git/config', old_text: 'a', new_text: 'b' })).rejects.toThrow(/bad path/);
+    await expect(callTool(t, 'write_document', { path: '.git/x.tex', tex: doc('x') })).rejects.toThrow(/bad path/);
+    await expect(callTool(t, 'create_document', { path: '.git/hooks/pre-commit' })).rejects.toThrow(/bad path/);
+    expect(existsSync(file('.git/hooks/pre-commit'))).toBe(false);
+  });
+
   it('a view-only account cannot use any writing tool', async () => {
     const viewer2 = createUser('viewer2', 'Viewer Two', 'pw');
     db.prepare('INSERT INTO project_members (project, user_id, role, via, created_at) VALUES (?,?,?,?,?)').run('owner/p', viewer2.id, 'view', 'member', Date.now());

@@ -39,6 +39,15 @@ KillSignal=SIGINT
 # (scripts/agent-keeper.mjs) survive a deploy and the new server reconnects to them
 KillMode=process
 TimeoutStopSec=20
+# Contain a runaway or malicious LaTeX build — a memory/CPU bomb via TeX macros or a -shell-escape
+# command — to this service's cgroup so it cannot exhaust the host. With no swap, MemoryMax is a
+# hard ceiling: on breach the kernel OOM-kills the largest task in the cgroup (the runaway build,
+# not the node server). MemoryHigh throttles and reclaims first; Restart=always recovers if the
+# server itself is the one killed. Tune to the box; these suit ~8 GB / 4 cores.
+MemoryHigh=4G
+MemoryMax=5G
+MemorySwapMax=0
+CPUQuota=350%
 
 [Install]
 WantedBy=multi-user.target
