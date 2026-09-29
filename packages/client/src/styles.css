@@ -1852,9 +1852,18 @@ mjx-mtable:has(.lyx-size-tiny, .lyx-size-scriptsize, .lyx-size-footnotesize, .ly
 }
 .ol-layout.ol-show-notes .ol-page-wrap { margin-bottom: 110px; }
 .ol-layout .ol-notes::before { content: 'Speaker notes'; display: block; font-size: 11px; color: var(--ui-muted); margin-bottom: 2px; }
+/* the pointer: an arrow on the canvas and over objects (the page is not text to click into); the
+   text cursor over the text box being edited or a selected one (a click puts the caret there) */
+.lyx-editor.ol-layout, .ol-layout .ol-page, .ol-layout .ol-obj, .ol-layout .ol-obj * { cursor: default; }
+.ol-layout .ol-box.ol-edited .ol-box-content, .ol-layout .ol-box.ol-edited .ol-box-content *,
+.ol-layout .ol-box.ol-sel .ol-box-content, .ol-layout .ol-box.ol-sel .ol-box-content * { cursor: text; }
+.ol-layout .ol-notes, .ol-layout .ol-notes * { cursor: text; }
+/* nothing selected is a gap cursor at the page's start: it draws nothing */
+.ol-layout .ProseMirror-gapcursor { display: none; }
 /* tools */
-.ol-layout[data-ol-tool="text"] .ol-page { cursor: text; }
-.ol-layout[data-ol-tool="shape"] .ol-page, .ol-layout[data-ol-tool="line"] .ol-page, .ol-layout[data-ol-tool="arrow"] .ol-page, .ol-layout[data-ol-tool="pen"] .ol-page, .ol-layout[data-ol-tool="pencil"] .ol-page { cursor: crosshair; }
+.ol-layout[data-ol-tool="text"] .ol-page, .ol-layout[data-ol-tool="text"] .ol-page * { cursor: text; }
+.ol-layout[data-ol-tool="shape"] .ol-page, .ol-layout[data-ol-tool="line"] .ol-page, .ol-layout[data-ol-tool="arrow"] .ol-page, .ol-layout[data-ol-tool="pen"] .ol-page, .ol-layout[data-ol-tool="pencil"] .ol-page,
+.ol-layout[data-ol-tool="shape"] .ol-page *, .ol-layout[data-ol-tool="line"] .ol-page *, .ol-layout[data-ol-tool="arrow"] .ol-page *, .ol-layout[data-ol-tool="pen"] .ol-page *, .ol-layout[data-ol-tool="pencil"] .ol-page * { cursor: crosshair; }
 .ol-layout:not([data-ol-tool="select"]) .ol-box-content { pointer-events: none; }
 /* the overlay: selection, handles, guides, drafts (page coordinates) */
 .ol-overlay { position: absolute; left: 0; top: 0; width: calc(var(--ol-mm) * var(--ol-page-w, 160)); height: calc(var(--ol-mm) * var(--ol-page-h, 90)); pointer-events: none; z-index: 5; }

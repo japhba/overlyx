@@ -102,6 +102,19 @@ Hello world
 \end{document}
 `;
 
+// selecting: two shapes above a text box
+const SELECT = String.raw`\documentclass[aspectratio=169]{beamer}
+\begin{document}
+\begin{frame}[plain]
+\olshape{x=30mm,y=20mm,w=25mm,h=20mm,vb=0 0 25 20,fill=blue,name=A}{M 0 0 L 25 0 L 25 20 L 0 20 Z}
+\olshape{x=60mm,y=20mm,w=25mm,h=20mm,vb=0 0 25 20,fill=red,name=B}{M 0 0 L 25 0 L 25 20 L 0 20 Z}
+\begin{olbox}{x=20mm,y=50mm,w=70mm,h=15mm,font=14pt}
+Some words in a box
+\end{olbox}
+\end{frame}
+\end{document}
+`;
+
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
@@ -113,6 +126,7 @@ test.beforeAll(() => {
   writeFileSync(`${DIR}/overlays.tex`, OVERLAYS);
   writeFileSync(`${DIR}/deck.tex`, DECK);
   writeFileSync(`${DIR}/texlines.tex`, TEXLINES);
+  writeFileSync(`${DIR}/select.tex`, SELECT);
   // a 40 × 30 px PNG for the crop test
   writeFileSync(`${DIR}/pic.png`, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAKklEQVR4nO3NMQ0AAAgDsAmb/yALGXA06d9MeyJisVgsFovFYrFYLP4bL9HP3Ew1mJ9PAAAAAElFTkSuQmCC', 'base64'));
 });
@@ -488,5 +502,105 @@ test("text boxes set their lines as TeX does: the first line's letters at the to
   expect(Math.abs(m.trailing)).toBeLessThan(1);
   // the first baseline is as far below the box's top as the tallest letters reach (TeX's first line), not half the leading + the font's ascent
   expect(Math.abs(m.firstBaseline - m.tallest)).toBeLessThan(1.5);
+  expect(errors).toEqual([]);
+});
+
+test('selecting like Inkscape: a click on nothing deselects, rubber bands from the canvas and with Shift, Ctrl locks the axis, Space leaves a copy; an arrow pointer', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await openLayout(page, 'select.tex');
+  const pg = (await page.locator('.ol-page').first().boundingBox())!;
+  const at = (x: number, y: number): [number, number] => [pg.x + x / 160 * pg.width, pg.y + y / 90 * pg.height];
+  const frames = page.locator('.ol-selframe:not(.ol-thin):not(.ol-union)');
+  // the shapes by name — the first one: a copy left by Space comes later in the page
+  const state = () => page.evaluate(() => {
+    const v = (window as any).overlyx.activeView;
+    const shapes: Record<string, { x: number; y: number }> = {};
+    let count = 0;
+    v.state.doc.descendants((n: any) => { if (n.type.name === 'ol_shape') { count++; if (n.attrs.name && !shapes[n.attrs.name]) shapes[n.attrs.name] = { x: n.attrs.x, y: n.attrs.y }; } return true; });
+    return { sel: v.state.selection.constructor.name.replace(/^_/, ''), editing: !!document.querySelector('.ol-editing'), frames: document.querySelectorAll('.ol-selframe').length, count, shapes, text: v.state.doc.textContent };
+  });
+  const cursorAt = (x: number, y: number) => page.evaluate(([cx, cy]) => getComputedStyle(document.elementFromPoint(cx, cy)!).cursor, at(x, y));
+
+  // an arrow over the page and over objects — not the text cursor
+  expect(await cursorAt(120, 75)).toBe('default');
+  expect(await cursorAt(40, 30)).toBe('default');
+  expect(await cursorAt(30, 57)).toBe('default');
+
+  // a click on an object selects it; the page does not move when the toolbar follows the selection
+  await page.mouse.click(...at(40, 30));
+  await expect(frames).toHaveCount(1);
+  expect(Math.abs((await page.locator('.ol-page').first().boundingBox())!.y - pg.y)).toBeLessThan(1);
+  // a click beside the page: nothing selected (and no caret dropped into a box); Delete then deletes nothing
+  await page.mouse.click(pg.x - 20, pg.y + pg.height / 2);
+  let s = await state();
+  expect(s).toMatchObject({ sel: 'GapCursor', editing: false, frames: 0 });
+  await page.keyboard.press('Delete');
+  await page.keyboard.type('q');
+  s = await state();
+  expect(s.count).toBe(2);
+  expect(s.text).not.toContain('q');
+
+  // editing the box: the text cursor over it; a click on an empty spot of the page leaves it
+  await page.mouse.click(...at(30, 57));
+  await page.mouse.click(...at(30, 57));
+  await expect(page.locator('.ol-editing')).toHaveCount(1);
+  expect(await cursorAt(30, 57)).toBe('text');
+  await page.mouse.click(...at(120, 75));
+  expect(await state()).toMatchObject({ sel: 'GapCursor', editing: false, frames: 0 });
+
+  // a rubber band that starts beside the page selects what it encloses
+  const [lx, ly] = [pg.x - 15, at(0, 12)[1]];
+  await page.mouse.move(lx, ly); await page.mouse.down();
+  for (let i = 1; i <= 8; i++) { const [tx, ty] = at(95, 45); await page.mouse.move(lx + (tx - lx) * i / 8, ly + (ty - ly) * i / 8); }
+  await page.mouse.up();
+  await expect(page.locator('.ol-selframe.ol-union')).toHaveCount(1);
+  await expect(page.locator('.ol-selframe.ol-thin')).toHaveCount(2);
+  // Shift+click takes one out again
+  await page.keyboard.down('Shift'); await page.mouse.click(...at(40, 30)); await page.keyboard.up('Shift');
+  await expect(frames).toHaveCount(1);
+  await page.mouse.click(pg.x - 20, pg.y + 20);
+  await expect(page.locator('.ol-selframe')).toHaveCount(0);
+  // with Shift a drag that starts on an object is a rubber band too
+  const [bx, by] = at(22, 62), [ex, ey] = at(95, 15);
+  await page.keyboard.down('Shift');
+  await page.mouse.move(bx, by); await page.mouse.down();
+  for (let i = 1; i <= 8; i++) await page.mouse.move(bx + (ex - bx) * i / 8, by + (ey - by) * i / 8);
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  await expect(page.locator('.ol-selframe.ol-thin')).toHaveCount(2);
+  s = await state();
+  expect(s.shapes.A).toEqual({ x: 30, y: 20 });   // nothing moved
+  await page.mouse.click(pg.x - 20, pg.y + 20);
+
+  // Ctrl while dragging (Inkscape): only horizontally, though the pointer wanders up and down
+  const [ax0, ay0] = at(40, 30);
+  await page.mouse.move(ax0, ay0); await page.mouse.down();
+  await page.keyboard.down('Control');
+  for (const [dx, dy] of [[10, 3], [25, -4], [40, 6], [60, 5]]) await page.mouse.move(ax0 + dx, ay0 + dy);
+  await page.mouse.up();
+  await page.keyboard.up('Control');
+  s = await state();
+  expect(s.shapes.A.y).toBe(20);
+  expect(s.shapes.A.x).toBeGreaterThan(35);
+  // pressed while the pointer rests, it applies at once: pressed, the drag snaps back onto the axis
+  const bStart = s.shapes.B;
+  const [b0x, b0y] = at(bStart.x + 10, bStart.y + 10);
+  await page.mouse.move(b0x, b0y); await page.mouse.down();
+  await page.mouse.move(b0x + 8, b0y + 30); await page.mouse.move(b0x + 10, b0y + 40);
+  await page.keyboard.down('Control');
+  const mid = await state();
+  expect(mid.shapes.B.x).toBe(bStart.x);
+  expect(mid.shapes.B.y).toBeGreaterThan(bStart.y);
+  await page.keyboard.up('Control');
+  // Space leaves a copy where the object is at that moment, and the drag goes on
+  await page.keyboard.press(' ');
+  await page.mouse.move(b0x + 10, b0y + 80);
+  await page.mouse.up();
+  s = await state();
+  expect(s.count).toBe(3);
+  expect(s.shapes.B.y).toBeGreaterThan(mid.shapes.B.y);
+  await page.keyboard.press('Control+z');
+  expect((await state()).count).toBe(2);
   expect(errors).toEqual([]);
 });

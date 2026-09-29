@@ -322,10 +322,22 @@ blend.
     (`shapeInBoxUnits`: TikZ overflows on a path stretched much more one way than the other).
     Anything else inside a layout frame is kept verbatim where it stood (an unplaced raw object).
   * **Canvas** (`editor/layout/controller.ts`, a plugin of the shared assembly, so the VS Code
-    extension has it too): Keynote's selection — a click selects (Shift adds), a drag moves (Ctrl/⌘
-    copies, Shift keeps the axis, Alt disables snapping), handles resize (Shift keeps proportions;
-    images keep them by default; Alt about the centre) and rotate (Shift: 15°), a drag on the empty
-    page is a rubber band; a second click (or a double click, or typing) edits a text box, Esc returns
+    extension has it too): Keynote's selection with Inkscape's modifiers — a click selects (Shift adds or
+    takes out), a drag moves; **Ctrl/⌘ (Inkscape) or Shift constrains** every gesture: a move goes only
+    horizontally or only vertically (objects, and nodes in the node editor), a resize keeps the
+    proportions (images keep them by default), a rotation and a drawn line or pen segment go in 15°
+    steps (a line drawn with Shift in 45°), a rectangle or ellipse is square — pressed or released
+    mid-drag it applies at once (`runGesture` replays the pointer on modifier keys). **Space** while
+    dragging leaves a copy where the objects are at that moment (Inkscape's stamp; formerly Ctrl-drag);
+    Alt disables snapping (and resizes about the centre). A drag on empty page **or on the canvas
+    beside it** (the scroller's padding too: `onCanvasDown`) is a rubber band selecting what it
+    encloses; with Shift a drag that starts on an object is one as well. A click on nothing selects
+    nothing — no objects and no caret in a box (`deselectAll`: a hidden gap cursor at the page's start,
+    where typing, Delete and Enter do nothing, and pasted text becomes a new text box). The pointer is
+    an arrow on the canvas and over objects, the text cursor over the box being edited or a selected
+    one (`ol-edited` / `ol-sel` marks). The Layout toolbar keeps its width whatever is selected
+    (disabled position fields and box style when nothing applies), so the page never jumps under the
+    pointer. A second click (or a double click, or typing) edits a text box, Esc returns
     to the box. Moves and resizes snap to the page's edges and centre and the other objects' edges and
     centres, with guides; arrow keys nudge 1 mm (Shift 10, Alt 0.1). Objects dropped on another page
     move there. Live previews are transactions outside the undo history; the result is one undoable

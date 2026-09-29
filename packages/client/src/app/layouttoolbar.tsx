@@ -100,7 +100,8 @@ export function LayoutColorPalette({ current, onPick, close, noneLabel }: { curr
 /** X / Y / W / H / rotation of the selection, in millimetres and degrees. */
 function GeomFields({ view, objs }: { view: EditorView; objs: { node: PMNode; pos: number }[] }) {
   const single = objs.length === 1 && objs[0].node.type.name !== 'ol_group' ? objs[0] : null;
-  const b = single ? boxOf(single.node) : (() => { const u = objs.map(o => objectBounds(o.node)); const x = Math.min(...u.map(v => v.x)), y = Math.min(...u.map(v => v.y)); return { x, y, w: Math.max(...u.map(v => v.x + v.w)) - x, h: Math.max(...u.map(v => v.y + v.h)) - y, rot: 0 }; })();
+  const none = !objs.length;
+  const b = none ? { x: NaN, y: NaN, w: NaN, h: NaN, rot: NaN } : single ? boxOf(single.node) : (() => { const u = objs.map(o => objectBounds(o.node)); const x = Math.min(...u.map(v => v.x)), y = Math.min(...u.map(v => v.y)); return { x, y, w: Math.max(...u.map(v => v.x + v.w)) - x, h: Math.max(...u.map(v => v.y + v.h)) - y, rot: 0 }; })();
   const set = (k: 'x' | 'y' | 'w' | 'h' | 'rot', v: number) => {
     if (!Number.isFinite(v)) return;
     const tr = view.state.tr;
@@ -115,7 +116,7 @@ function GeomFields({ view, objs }: { view: EditorView; objs: { node: PMNode; po
   };
   const field = (k: 'x' | 'y' | 'w' | 'h' | 'rot', label: string, val: number, title: string, disabled = false) => (
     <label class="ol-geom-field" title={title}>{label}
-      <NumberInput value={val} disabled={disabled} onCommit={v => set(k, v)} step={k === 'rot' ? 1 : 0.5} />
+      <NumberInput value={val} disabled={disabled || none} onCommit={v => set(k, v)} step={k === 'rot' ? 1 : 0.5} />
     </label>
   );
   return (
@@ -130,7 +131,7 @@ function GeomFields({ view, objs }: { view: EditorView; objs: { node: PMNode; po
 }
 
 function NumberInput({ value, onCommit, step, disabled }: { value: number; onCommit: (v: number) => void; step: number; disabled?: boolean }) {
-  const shown = String(Math.round(value * 10) / 10);
+  const shown = Number.isFinite(value) ? String(Math.round(value * 10) / 10) : '';
   const [text, setText] = useState(shown);
   const [focused, setFocused] = useState(false);
   useEffect(() => { if (!focused) setText(shown); }, [shown, focused]);
@@ -312,7 +313,8 @@ export function layoutToolbar(ctx: ToolbarContext): ToolButton[][] {
     { id: 'ol-width', icon: 'ol-width', title: `Line width: ${curLw} pt`, disabled: !strokable.length, palette: { title: 'Line width (pt)', list: true, cols: 1, items: [0.4, 0.6, 0.8, 1, 1.5, 2, 3, 4, 6, 8].map(w => ({ label: `${w} pt${w === 0.4 ? ' (TikZ’s default)' : ''}`, active: Math.abs(curLw - w) < 1e-3, action: () => setStyle(strokable, { lw: w, ...(strokable.some(o => !o.node.attrs.stroke) ? {} : {}) }) })) } },
     { id: 'ol-dash', icon: 'ol-dash', title: 'Dashes', disabled: !shapesOnly.length, palette: { title: 'Dash pattern', list: true, cols: 1, items: [['', 'Solid'], ['dashed', 'Dashed'], ['densely dashed', 'Densely dashed'], ['loosely dashed', 'Loosely dashed'], ['dotted', 'Dotted'], ['densely dotted', 'Densely dotted'], ['dashdotted', 'Dash-dotted']].map(([v, l]) => ({ label: l, active: (shapesOnly[0]?.node.attrs.dash ?? '') === v, action: () => setStyle(shapesOnly, { dash: v || null }) })) } },
     { id: 'ol-tips', icon: 'ol-tips', title: 'Arrow tips', disabled: !shapesOnly.length, palette: { title: 'Arrow tips (TikZ)', list: true, cols: 1, items: [['', 'None'], ['-Stealth', 'End: Stealth'], ['Stealth-', 'Start: Stealth'], ['Stealth-Stealth', 'Both: Stealth'], ['-Latex', 'End: LaTeX'], ['->', 'End: open'], ['<->', 'Both: open']].map(([v, l]) => ({ label: l, active: (shapesOnly[0]?.node.attrs.arrows ?? '') === v, action: () => setStyle(shapesOnly, { arrows: v || null }) })) } },
-    ...(flat.length === 1 && flat[0].node.type.name === 'ol_box' ? [{ id: 'ol-boxstyle', icon: 'ol-boxstyle', title: 'Text box: margin, corners, alignment, font size', palette: { title: 'Text box', render: (close: () => void) => <BoxStylePanel view={view} pos={flat[0].pos} close={close} /> } } as ToolButton] : []),
+    // always there (disabled unless one text box is selected): the row keeps its width, so the page below never jumps when the selection changes
+    { id: 'ol-boxstyle', icon: 'ol-boxstyle', title: 'Text box: margin, corners, alignment, font size', disabled: !(flat.length === 1 && flat[0].node.type.name === 'ol_box'), palette: { title: 'Text box', render: (close: () => void) => <BoxStylePanel view={view} pos={flat[0].pos} close={close} /> } } as ToolButton,
     { id: 'ol-opacity', icon: 'α', title: 'Opacity', disabled: !flat.length, palette: { title: 'Opacity', list: true, cols: 1, items: [1, 0.85, 0.7, 0.5, 0.3, 0.15].map(o => ({ label: `${Math.round(o * 100)} %`, active: Math.abs((flat[0]?.node.attrs.opacity ?? 1) - o) < 1e-3, action: () => setStyle(flat, { opacity: o === 1 ? null : o }) })) } },
   ];
 
@@ -358,9 +360,10 @@ export function layoutToolbar(ctx: ToolbarContext): ToolButton[][] {
     { id: 'ol-present', icon: 'ol-present', title: 'Present — full screen from this page (F5; Shift+F5 from the start)', action: () => run(v => startPresentation(v, { fromCurrent: true })) },
   ];
 
-  const geom: ToolButton[] = objs.length ? [{ id: 'ol-geom', icon: '', title: 'Position and size (mm)', widget: () => <GeomFields view={view} objs={objs} /> }] : [];
+  // the fields are there with nothing selected too (empty, disabled): the row keeps its width
+  const geom: ToolButton[] = [{ id: 'ol-geom', icon: '', title: 'Position and size (mm)', widget: () => <GeomFields view={view} objs={objs} /> }];
   void hasAttr;
-  return [tools, arrange, style, anim, ...(geom.length ? [geom] : []), pages];
+  return [tools, arrange, style, anim, geom, pages];
 }
 
 /** A project path as the document references it (relative to the document's folder). */

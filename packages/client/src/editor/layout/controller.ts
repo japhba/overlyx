@@ -26,6 +26,7 @@
  */
 import { Plugin, PluginKey, NodeSelection, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
+import { GapCursor } from 'prosemirror-gapcursor';
 import { DOMSerializer, Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
 import { ySyncPluginKey } from 'y-prosemirror';
 import { schema, normalizePath, pathToString, preambleColors, pageSizeOf, pageFontsOf, rgbToHex, SHAPE_PRESETS, type PathSeg } from '@overlyx/core';
@@ -111,6 +112,27 @@ export function selectObjects(tr: Transaction, positions: number[]): Transaction
   return tr;
 }
 
+/**
+ * Nothing selected — no objects, no caret in a box (a click on the empty canvas): a gap cursor at the
+ * start of the page, which draws nothing, and where typing, Delete and Enter do nothing.
+ */
+export function deselectAll(tr: Transaction, pagePos?: number | null): Transaction {
+  selectObjects(tr, []);
+  const page = pagePos ?? L.pageAt(tr.doc, tr.selection.from)?.pos;
+  if (page !== undefined && page !== null && tr.doc.nodeAt(page)?.type.name === 'ol_page') {
+    try { tr.setSelection(new GapCursor(tr.doc.resolve(page + 1))); } catch { /* not there */ }
+  }
+  return tr;
+}
+
+/** Inkscape's Ctrl (and Keynote's Shift): lock the axis, keep the proportions, 15° steps */
+const constrained = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): boolean => e.shiftKey || e.ctrlKey || e.metaKey;
+/** (x, y) turned about (ax, ay) to the nearest 15° direction, at the same distance */
+function snapAngle(ax: number, ay: number, x: number, y: number): [number, number] {
+  const step = Math.PI / 12, ang = Math.round(Math.atan2(y - ay, x - ax) / step) * step, len = Math.hypot(x - ax, y - ay);
+  return [ax + len * Math.cos(ang), ay + len * Math.sin(ang)];
+}
+
 export function setTool(view: EditorView, tool: Tool, shape?: string): void {
   const meta: Meta = { tool };
   if (shape) meta.shape = shape;
@@ -180,9 +202,9 @@ export function layoutPlugin(): Plugin<LayoutPluginState> {
       handleKeyDown: (view, ev) => controller?.keyDown(ev) ?? false,
       handlePaste: (view, ev, slice) => controller?.paste(slice) ?? false,
       handleTextInput: (view) => {
-        // typing while objects are selected: never replace an object by text
+        // typing while objects are selected, or nothing is: never replace an object, never a new box by accident
         const s = view.state.selection;
-        return s instanceof NodeSelection && isLayoutObject(s.node);
+        return (s instanceof NodeSelection && isLayoutObject(s.node)) || (s instanceof GapCursor && L.isLayoutDoc(view.state.doc));
       },
     },
   });
@@ -201,7 +223,8 @@ interface PageCtx {
   mmPerPx: number;
 }
 
-type Gesture = { move(ev: PointerEvent): void; up(ev: PointerEvent): void; cancel(): void };
+/** a pointer gesture; `key` sees the keys pressed during it (true: handled) */
+type Gesture = { move(ev: PointerEvent): void; up(ev: PointerEvent): void; cancel(): void; key?(ev: KeyboardEvent): boolean };
 
 const HANDLE_DIRS: Record<string, [number, number]> = { nw: [-1, -1], n: [0, -1], ne: [1, -1], e: [1, 0], se: [1, 1], s: [0, 1], sw: [-1, 1], w: [-1, 0] };
 
@@ -315,6 +338,7 @@ class LayoutController {
     this.zoom = 1;
     if (scroller) {
       scroller.addEventListener('wheel', this.onWheel, { passive: false });
+      scroller.addEventListener('pointerdown', this.onCanvasDown);
       // Safari's trackpad pinch
       scroller.addEventListener('gesturestart', this.onGesture as EventListener, { passive: false });
       scroller.addEventListener('gesturechange', this.onGesture as EventListener, { passive: false });
@@ -327,6 +351,7 @@ class LayoutController {
     this.resize?.disconnect(); this.resize = null;
     if (this.scroller) {
       this.scroller.removeEventListener('wheel', this.onWheel);
+      this.scroller.removeEventListener('pointerdown', this.onCanvasDown);
       this.scroller.removeEventListener('gesturestart', this.onGesture as EventListener);
       this.scroller.removeEventListener('gesturechange', this.onGesture as EventListener);
     }
@@ -615,12 +640,20 @@ class LayoutController {
 
   /* ---------------------------------------------------------------- overlays */
 
+  /** the objects marked for the pointer's shape (styles.css): the text box being edited, the selected ones */
+  private marked: HTMLElement[] = [];
+
   private renderOverlays(force = false): void {
     if (!this.active) return;
     const state = this.view.state;
     const st = layoutKey.getState(state)!;
     const sel = selectedObjects(state);
     const edited = L.editedBox(state);
+    for (const el of this.marked) el.classList.remove('ol-edited', 'ol-sel');
+    this.marked = [];
+    const mark = (pos: number, cls: string) => { const el = this.view.nodeDOM(pos) as HTMLElement | null; if (el?.classList) { el.classList.add(cls); this.marked.push(el); } };
+    if (edited) mark(edited.pos, 'ol-edited');
+    for (const o of sel) mark(o.pos, 'ol-sel');
     for (const pv of this.pageViews()) {
       const pagePos = pv.pos();
       if (pagePos === undefined) continue;
@@ -700,6 +733,16 @@ class LayoutController {
 
   /* ---------------------------------------------------------------- pointer */
 
+  /** a press on the canvas around the editor (the scroller's padding, below the last page): as one beside the pages — not on its scroll bars */
+  private onCanvasDown = (ev: PointerEvent): void => {
+    const sc = this.scroller;
+    if (!sc || this.view.dom.contains(ev.target as Node)) return;
+    const r = sc.getBoundingClientRect();
+    if (ev.clientX >= r.left + sc.clientLeft + sc.clientWidth || ev.clientY >= r.top + sc.clientTop + sc.clientHeight) return;
+    if (!(ev.target as HTMLElement).closest?.('.editor-page, .editor-host') && ev.target !== sc) return;
+    this.pointerDown(ev);
+  };
+
   pointerDown(ev: PointerEvent): boolean {
     if (!this.active || ev.button !== 0 || !this.view.editable) return false;
     const target = ev.target as HTMLElement;
@@ -707,10 +750,14 @@ class LayoutController {
     const ctx = this.pageCtxFromEl(target);
     const st = layoutKey.getState(this.view.state)!;
     if (!ctx) {
-      // beside the pages: nothing to select there
       if (target.closest('.ol-notes')) return false;
-      if (st.sel.length) this.view.dispatch(selectObjects(this.view.state.tr, []));
-      return false;
+      // beside the pages: a click selects nothing (no caret in the nearest box either), a drag
+      // selects with a rubber band from there — on a full poster the canvas is where one starts
+      const near = this.pageCtxAtPoint(ev.clientX, ev.clientY);
+      if (st.tool === 'nodes' || st.tool === 'crop') this.finishTargetTool();
+      if (near && (st.tool === 'select' || st.tool === 'nodes' || st.tool === 'crop')) this.startMarquee(ev, near);
+      else this.view.dispatch(deselectAll(this.view.state.tr, near?.pos));
+      return this.take(ev);
     }
     if (target.closest('.ol-notes')) return false;
     // tools that draw
@@ -728,8 +775,9 @@ class LayoutController {
     }
     const wasSelected = st.sel.includes(hit.pos);
     if (ev.shiftKey) {
-      const next = wasSelected ? st.sel.filter(p => p !== hit.pos) : [...st.sel.filter(p => this.samePage(p, hit.pos)), hit.pos];
-      this.view.dispatch(selectObjects(this.view.state.tr, next));
+      // Shift: a click adds the object or takes it out of the selection; a drag is a rubber band
+      // even though it starts on an object (Inkscape)
+      this.startMarquee(ev, ctx, hit.pos);
       this.view.focus();
       return this.take(ev);
     }
@@ -823,20 +871,32 @@ class LayoutController {
     this.gesture?.cancel();
     this.gesture = g;
     const id = ev.pointerId;
-    const move = (e: PointerEvent) => { if (e.pointerId === id) g.move(e); };
+    let last: PointerEvent | null = null;
+    const move = (e: PointerEvent) => { if (e.pointerId === id) { last = e; g.move(e); } };
     const up = (e: PointerEvent) => { if (e.pointerId !== id) return; stop(); g.up(e); };
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); stop(); g.cancel(); } };
+    const key = (e: KeyboardEvent) => {
+      if (e.type === 'keydown' && e.key === 'Escape') { e.preventDefault(); stop(); g.cancel(); return; }
+      if (e.type === 'keydown' && g.key?.(e)) { e.preventDefault(); e.stopPropagation(); return; }
+      // Ctrl, Shift or Alt pressed or released while the pointer rests: the gesture follows at once
+      if ((e.key === 'Control' || e.key === 'Meta' || e.key === 'Shift' || e.key === 'Alt') && last) {
+        const p = last;
+        g.move({ clientX: p.clientX, clientY: p.clientY, pointerId: p.pointerId, button: p.button, buttons: p.buttons, target: p.target,
+          shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, preventDefault() { /* synthetic */ }, stopPropagation() { /* synthetic */ } } as unknown as PointerEvent);
+      }
+    };
     const stop = () => {
       window.removeEventListener('pointermove', move, true);
       window.removeEventListener('pointerup', up, true);
       window.removeEventListener('pointercancel', up, true);
       window.removeEventListener('keydown', key, true);
+      window.removeEventListener('keyup', key, true);
       if (this.gesture === g) this.gesture = null;
     };
     window.addEventListener('pointermove', move, true);
     window.addEventListener('pointerup', up, true);
     window.addEventListener('pointercancel', up, true);
     window.addEventListener('keydown', key, true);
+    window.addEventListener('keyup', key, true);
   }
 
   /*
@@ -846,7 +906,7 @@ class LayoutController {
    */
   private liveOrig: PMNode | null = null;
   private liveTouched: number[] = [];
-  private liveInserted: { pos: number; size: number } | null = null;
+  private liveInserted: { pos: number; size: number }[] = [];
 
   private beginLive(positions: number[]): void {
     const doc = this.view.state.doc;
@@ -855,11 +915,12 @@ class LayoutController {
     const add = (pos: number) => { const n = doc.nodeAt(pos); if (!n) return; all.push(pos); if (n.type.name === 'ol_group') n.forEach((_c, off) => add(pos + 1 + off)); };
     for (const p of positions) add(p);
     this.liveTouched = all;
-    this.liveInserted = null;
+    this.liveInserted = [];
   }
 
   private revertInto(tr: Transaction): void {
-    if (this.liveInserted) { tr.delete(this.liveInserted.pos, this.liveInserted.pos + this.liveInserted.size); this.liveInserted = null; }
+    for (const ins of this.liveInserted.slice().reverse()) tr.delete(ins.pos, ins.pos + ins.size);
+    this.liveInserted = [];
     const orig = this.liveOrig;
     if (!orig) return;
     for (const pos of this.liveTouched) {
@@ -940,8 +1001,27 @@ class LayoutController {
     const bounds = unionBounds(objs.map(o => objectBounds(o.node)));
     if (!bounds) return;
     const lines = this.snapLines(ctx, new Set(positions));
-    let moved = false, dx = 0, dy = 0, copied = false;
+    let moved = false, dx = 0, dy = 0;
+    /** Space while dragging (Inkscape's stamp): a copy left where the objects are at that moment */
+    const stamps: [number, number][] = [];
     const x0 = ev.clientX, y0 = ev.clientY;
+    /** the objects moved by (dx, dy), the stamped copies at the end of the page (after every object, so no position moves) */
+    const apply = (tr: Transaction, live: boolean) => {
+      for (const o of objs) L.translate(tr, o.pos, dx, dy);
+      const made: number[] = [];
+      for (const [sx, sy] of stamps) {
+        for (const o of objs) {
+          const page = tr.doc.nodeAt(ctx.pos)!;
+          let at = ctx.pos + page.nodeSize - 1;
+          if (page.lastChild?.type.name === 'ol_notes') at -= page.lastChild.nodeSize;
+          tr.insert(at, o.node);
+          L.translate(tr, at, sx, sy);
+          made.push(at);
+          if (live) this.liveInserted.push({ pos: at, size: tr.doc.nodeAt(at)!.nodeSize });
+        }
+      }
+      return made;
+    };
     this.beginLive(objs.map(o => o.pos));
     this.runGesture(ev, {
       move: (e) => {
@@ -949,18 +1029,23 @@ class LayoutController {
         moved = true;
         const [mx, my] = ctx.mm(e);
         dx = mx - start[0]; dy = my - start[1];
-        if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
+        // Ctrl (Inkscape) or Shift: only horizontally or only vertically, whichever the drag is more
+        const lock = constrained(e);
+        if (lock) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
         this.guides = [];
         if (!e.altKey) {
           const tol = 6 * ctx.mmPerPx;
           const sx = this.snap([bounds.x + dx, bounds.x + bounds.w / 2 + dx, bounds.x + bounds.w + dx], lines.xs, tol);
           const sy = this.snap([bounds.y + dy, bounds.y + bounds.h / 2 + dy, bounds.y + bounds.h + dy], lines.ys, tol);
-          if (!(e.shiftKey && dx === 0)) { dx += sx.d; if (sx.at !== undefined) this.guides.push({ x: sx.at, page: ctx.pos }); }
-          if (!(e.shiftKey && dy === 0)) { dy += sy.d; if (sy.at !== undefined) this.guides.push({ y: sy.at, page: ctx.pos }); }
+          if (!(lock && dx === 0)) { dx += sx.d; if (sx.at !== undefined) this.guides.push({ x: sx.at, page: ctx.pos }); }
+          if (!(lock && dy === 0)) { dy += sy.d; if (sy.at !== undefined) this.guides.push({ y: sy.at, page: ctx.pos }); }
         }
-        copied = e.ctrlKey || e.metaKey;
-        const ddx = dx, ddy = dy;
-        this.liveApply(tr => { for (const o of objs) L.translate(tr, o.pos, ddx, ddy); });
+        this.liveApply(tr => { apply(tr, true); });
+      },
+      key: (e) => {
+        if (e.key !== ' ') return false;
+        if (!e.repeat) { stamps.push([dx, dy]); moved = true; this.liveApply(tr => { apply(tr, true); }); }
+        return true;
       },
       up: (e) => {
         this.guides = [];
@@ -981,9 +1066,14 @@ class LayoutController {
           return;
         }
         const ddx = dx, ddy = dy;
+        if (stamps.length) {
+          // the moved objects stay selected, the copies are left behind
+          this.commit(tr => { apply(tr, false); }, () => objs.map(o => o.pos));
+          return;
+        }
         // dropped on another page: the objects move there
         const target = this.pageCtxAtPoint(e.clientX, e.clientY);
-        if (target && target.pos !== ctx.pos && !copied) {
+        if (target && target.pos !== ctx.pos) {
           const [mx, my] = target.mm(e);
           const [sx, sy] = start;
           let made: number[] = [];
@@ -995,22 +1085,6 @@ class LayoutController {
             if (tpage.lastChild?.type.name === 'ol_notes') at -= tpage.lastChild.nodeSize;
             let p = at;
             for (const o of objs) { tr.insert(p, o.node); L.translate(tr, p, mx - sx, my - sy); made.push(p); p += o.node.nodeSize; }
-          }, () => made);
-          return;
-        }
-        if (copied) {
-          let made: number[] = [];
-          this.commit(tr => {
-            const steps: { pos: number; step: number }[] = [];
-            for (const o of objs) {
-              const page = L.pageAt(tr.doc, tr.mapping.map(o.pos))!;
-              let at = page.pos + page.node.nodeSize - 1;
-              if (page.node.lastChild?.type.name === 'ol_notes') at -= page.node.lastChild.nodeSize;
-              tr.insert(at, o.node);
-              L.translate(tr, at, ddx, ddy);
-              steps.push({ pos: at, step: tr.steps.length });
-            }
-            made = steps.map(m => tr.mapping.slice(m.step).map(m.pos));
           }, () => made);
           return;
         }
@@ -1049,7 +1123,7 @@ class LayoutController {
         const [lx, ly] = rotatePoint(mx - start[0], my - start[1], 0, 0, -b0.rot);
         let w = dxh ? b0.w + dxh * lx * (e.altKey ? 2 : 1) : b0.w;
         let hh = dyh ? b0.h + dyh * ly * (e.altKey ? 2 : 1) : b0.h;
-        const keep = dxh !== 0 && dyh !== 0 && keepAspectDefault !== e.shiftKey;
+        const keep = dxh !== 0 && dyh !== 0 && keepAspectDefault !== constrained(e);
         if (keep) { const sc = Math.max(w / b0.w, hh / b0.h); w = b0.w * sc; hh = b0.h * sc; }
         w = Math.max(1, w); hh = Math.max(1, hh);
         let nb: Box;
@@ -1112,7 +1186,7 @@ class LayoutController {
       move: (e) => {
         const [mx, my] = ctx.mm(e);
         let d = -(Math.atan2(my - cy, mx - cx) - a0) * 180 / Math.PI;   // TikZ: counter-clockwise
-        if (e.shiftKey) d = Math.round((b.rot + d) / 15) * 15 - b.rot;
+        if (constrained(e)) d = Math.round((b.rot + d) / 15) * 15 - b.rot;
         const dd = d;
         this.liveApply(tr => {
           if (single) { L.setAttrs(tr, objs[0].pos, { rot: L.normDeg(b.rot + dd) }); return; }
@@ -1130,14 +1204,17 @@ class LayoutController {
     });
   }
 
-  private startMarquee(ev: PointerEvent, ctx: PageCtx): void {
+  /** a rubber band from the pointer; a click without a drag selects nothing — or, with Shift on an object (`toggle`), adds it or takes it out */
+  private startMarquee(ev: PointerEvent, ctx: PageCtx, toggle?: number): void {
     const [x0, y0] = ctx.mm(ev);
     const additive = ev.shiftKey;
     const before = layoutKey.getState(this.view.state)!.sel;
-    if (!additive) this.view.dispatch(selectObjects(this.view.state.tr, []));
-    // leave text editing (the caret would stay in a box otherwise)
+    const cx = ev.clientX, cy = ev.clientY;
+    let dragging = false;
     this.runGesture(ev, {
       move: (e) => {
+        if (!dragging && Math.hypot(e.clientX - cx, e.clientY - cy) < 3) return;
+        dragging = true;
         const [x, y] = ctx.mm(e);
         this.marquee = { page: ctx.pos, x: Math.min(x0, x), y: Math.min(y0, y), w: Math.abs(x - x0), h: Math.abs(y - y0) };
         this.renderOverlays();
@@ -1145,10 +1222,11 @@ class LayoutController {
       up: () => {
         const m = this.marquee;
         this.marquee = null;
-        if (!m || m.w < 0.5 && m.h < 0.5) {
-          // a plain click on the page: leave text editing
-          const s = this.view.state.selection;
-          if (!(s instanceof NodeSelection) && L.editedBox(this.view.state)) this.view.dispatch(selectObjects(this.view.state.tr, []));
+        if (!m || !dragging) {
+          if (toggle !== undefined) {
+            const next = before.includes(toggle) ? before.filter(p => p !== toggle) : [...before.filter(p => this.samePage(p, toggle)), toggle];
+            this.view.dispatch(next.length ? selectObjects(this.view.state.tr, next) : deselectAll(this.view.state.tr, ctx.pos));
+          } else if (!additive) this.view.dispatch(deselectAll(this.view.state.tr, ctx.pos));   // a plain click on nothing: nothing selected, text editing left
           this.renderOverlays();
           return;
         }
@@ -1181,8 +1259,9 @@ class LayoutController {
     const isLine = tool === 'line' || tool === 'arrow';
     const nodeFor = (x1: number, y1: number, e: PointerEvent | null): PMNode => {
       let bx = x1, by = y1;
-      if (e?.shiftKey) {
-        if (isLine) { const ang = Math.round(Math.atan2(by - ay, bx - ax) / (Math.PI / 4)) * (Math.PI / 4); const len = Math.hypot(bx - ax, by - ay); bx = ax + len * Math.cos(ang); by = ay + len * Math.sin(ang); }
+      if (e && constrained(e)) {
+        // a line: Shift in 45° steps, Ctrl in Inkscape's 15° steps (both include horizontal and vertical)
+        if (isLine) { const step = e.shiftKey ? Math.PI / 4 : Math.PI / 12; const ang = Math.round(Math.atan2(by - ay, bx - ax) / step) * step; const len = Math.hypot(bx - ax, by - ay); bx = ax + len * Math.cos(ang); by = ay + len * Math.sin(ang); }
         else { const sq = Math.max(Math.abs(bx - ax), Math.abs(by - ay)); bx = ax + Math.sign(bx - ax || 1) * sq; by = ay + Math.sign(by - ay || 1) * sq; }
       }
       if (isLine) return L.shapeFromPath([{ c: 'M', p: [ax, ay] }, { c: 'L', p: [bx, by] }], { ...NEW_STYLE.line, arrows: tool === 'arrow' ? '-Stealth' : null });
@@ -1207,7 +1286,7 @@ class LayoutController {
           const at = endOfPage(tr);
           const n = nodeFor(cur[0], cur[1], e);
           tr.insert(at, n);
-          this.liveInserted = { pos: at, size: n.nodeSize };
+          this.liveInserted = [{ pos: at, size: n.nodeSize }];
         });
       },
       up: (e) => {
@@ -1268,18 +1347,22 @@ class LayoutController {
   /* ---------------------------------------------------------------- Bézier pen */
 
   private penDown(ev: PointerEvent, ctx: PageCtx): void {
-    const [x, y] = ctx.mm(ev);
+    let [x, y] = ctx.mm(ev);
     if (!this.pen || this.pen.page !== ctx.pos) this.pen = { page: ctx.pos, nodes: [] };
     const pen = this.pen;
     const first = pen.nodes[0];
+    const prev = pen.nodes[pen.nodes.length - 1];
+    // Ctrl (Inkscape) or Shift: the segment from the previous node in 15° steps
+    if (prev && constrained(ev)) [x, y] = snapAngle(prev.x, prev.y, x, y);
     if (first && pen.nodes.length > 2 && Math.hypot(first.x - x, first.y - y) < 8 * ctx.mmPerPx) { this.finishPen(true); return; }
     const node: { x: number; y: number; cin?: [number, number]; cout?: [number, number] } = { x, y };
     pen.nodes.push(node);
     this.renderOverlays();
     this.runGesture(ev, {
       move: (e) => {
-        const [mx, my] = ctx.mm(e);
+        let [mx, my] = ctx.mm(e);
         if (Math.hypot(mx - x, my - y) < 2 * ctx.mmPerPx) return;
+        if (constrained(e)) [mx, my] = snapAngle(x, y, mx, my);
         node.cout = [mx, my];
         node.cin = [2 * x - mx, 2 * y - my];
         this.renderOverlays();
@@ -1386,12 +1469,16 @@ class LayoutController {
     const s0 = segs0[seg] as { c: string; p: number[] };
     const isEnd = pt === s0.p.length / 2 - 1;
     const [ox, oy] = [s0.p[2 * pt], s0.p[2 * pt + 1]];
-    const [sx, sy] = toVb(...ctx.mm(ev));
+    const p0 = ctx.mm(ev);
+    const [sx, sy] = toVb(...p0);
     this.renderOverlays();
     this.beginLive([pos]);
     this.runGesture(ev, {
       move: (e) => {
-        const [mx, my] = toVb(...ctx.mm(e));
+        // Ctrl (Inkscape) or Shift: the node moves only horizontally or only vertically on the page
+        let [px, py] = ctx.mm(e);
+        if (constrained(e)) { if (Math.abs(px - p0[0]) > Math.abs(py - p0[1])) py = p0[1]; else px = p0[0]; }
+        const [mx, my] = toVb(px, py);
         const dx = mx - sx, dy = my - sy;
         const segs = segs0.map(s => (s.c === 'Z' ? s : { c: s.c, p: [...s.p] }) as PathSeg);
         const s = segs[seg] as { c: string; p: number[] };
@@ -1708,7 +1795,7 @@ class LayoutController {
     }
     if (ev.key === 'Escape') {
       if (st.tool !== 'select') { setTool(view, 'select'); return true; }
-      if (sel.length) { view.dispatch(selectObjects(view.state.tr, [])); return true; }
+      if (sel.length) { view.dispatch(deselectAll(view.state.tr)); return true; }
       return false;
     }
     // tool shortcuts (Inkscape's letters) when no text is being edited
@@ -1722,6 +1809,10 @@ class LayoutController {
         const ctx = this.currentPage();
         if (ctx) { view.dispatch(selectObjects(view.state.tr, pageObjects(ctx.node, ctx.pos).filter(o => !o.node.attrs.lock).map(o => o.pos))); return true; }
       }
+      // nothing selected (a gap cursor, or an object's node selection left behind): Delete, Backspace
+      // and Enter have nothing to act on — ProseMirror would delete a page or an object
+      const s = view.state.selection;
+      if ((s instanceof GapCursor || s instanceof NodeSelection) && (ev.key === 'Delete' || ev.key === 'Backspace' || ev.key === 'Enter')) return true;
       return false;
     }
     const positions = sel.map(o => o.pos);
@@ -1804,9 +1895,9 @@ class LayoutController {
     const nodes: PMNode[] = [];
     slice.content.forEach(n => { if (isLayoutObject(n)) nodes.push(n); else if (n.type.name === 'ol_page') n.forEach(c => { if (isLayoutObject(c)) nodes.push(c); }); });
     if (!nodes.length) {
-      // text pasted while objects are selected (not editing): a new text box with it
+      // text pasted while objects are selected or nothing is (not editing): a new text box with it
       const st = this.view.state.selection;
-      if (st instanceof NodeSelection && isLayoutObject(st.node)) {
+      if ((st instanceof NodeSelection && isLayoutObject(st.node)) || st instanceof GapCursor) {
         const ctx = this.currentPage();
         if (!ctx) return true;
         const blocks: PMNode[] = [];
