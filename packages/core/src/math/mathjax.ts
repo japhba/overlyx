@@ -31,11 +31,12 @@ export interface TexContext {
   cells: CellRef[];
   /** `true` while rendering a macro's expansion template (its cells are not editable) */
   inTemplate?: boolean;
-  /** `true` in a display hull: big operators carry their scripts above/below by default */
-  display?: boolean;
   /** wrap every atom of an editable cell in `\htmlClass{lm-a}{…}` (the editor measures them) */
   atoms?: boolean;
 }
+
+/** LaTeX's size commands → the editor's size classes (styles.css .lyx-size-*) */
+const TEXT_SIZE_CLASS: Record<string, string> = { tiny: 'tiny', scriptsize: 'scriptsize', footnotesize: 'footnotesize', small: 'small', normalsize: 'normal', large: 'large', Large: 'larger', LARGE: 'largest', huge: 'huge', Huge: 'giant' };
 
 /** Operators whose scripts sit above/below in display style (LaTeX \displaylimits default). */
 const LIMIT_OPS = new Set(['sum', 'prod', 'coprod', 'bigcap', 'bigcup', 'bigodot', 'bigoplus', 'bigotimes', 'bigsqcup', 'biguplus', 'bigvee', 'bigwedge', 'lim', 'liminf', 'limsup', 'max', 'min', 'sup', 'inf', 'det', 'gcd', 'Pr', 'injlim', 'projlim', 'varinjlim', 'varprojlim', 'varliminf', 'varlimsup'])
@@ -124,11 +125,15 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
       const nuc = cellToTex(a.nuc, ctx, a, 0);
       // The cell markup (\htmlClass{lm-cN}{…}) hides the operator inside the nucleus from TeX's
       // limits rule, and MathJax then hangs the scripts to the right — even for \underbrace or a
-      // display \sum. \mathop{…}\limits restores the above/below placement wherever LaTeX would use it.
+      // display \sum. \mathop{…}\limits restores the above/below placement where it is forced
+      // (\limits, the braces); for \sum & co. \mathop{…} alone has TeX's own rule (\displaylimits):
+      // above/below in display style, to the right in text style — \textstyle, a numerator, inline.
       const one = a.nuc.length === 1 ? a.nuc[0] : null;
-      const wantLimits = a.limits !== 'nolimits' && (a.limits === 'limits' || (one && (
+      const forced = a.limits !== 'nolimits' && (a.limits === 'limits' || (!!one && (
         (one.t === 'deco' && (one.n === 'underbrace' || one.n === 'overbrace'))
-        || (one.t === 'sym' && one.limits !== 'nolimits' && (one.limits === 'limits' || (!!ctx.display && LIMIT_OPS.has(one.n)))))));
+        || (one.t === 'sym' && one.limits === 'limits'))));
+      const movable = !forced && !a.limits && !!one && one.t === 'sym' && !one.limits && LIMIT_OPS.has(one.n);
+      const wantLimits = forced || movable;
       // Scripts on a macro whose expansion ends in scripts of its own (\q := q_{a}, typed \q^x_y):
       // TeX — and the PDF — hang the new x and y to the right of the whole q_a. On screen the new
       // scripts join the macro's: x above q, y appended to a, so nothing dangles off to the side.
@@ -137,7 +142,8 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
         if (merged !== null) return merged;
       }
       let s = a.nuc.length ? nuc : '{' + nuc + '}';
-      if (wantLimits) s = `\\mathop{${s}}\\limits`;
+      if (forced) s = `\\mathop{${s}}\\limits`;
+      else if (movable) s = `\\mathop{${s}}`;
       else if (a.limits) s += '\\' + a.limits;
       if (a.up) s += '^' + braced(a.up, ctx, a, a.up && a.down ? 1 : 1);
       if (a.down) s += '_' + braced(a.down, ctx, a, a.up ? 2 : 1);
@@ -183,7 +189,13 @@ export function atomToTex(a: Atom, ctx: TexContext, mode: 'math' | 'text'): stri
       const n = DECO_MAP[a.n] ?? '\\' + a.n;
       return `${n}{${cellToTex(a.body, ctx, a, 0)}}` + (a.limits ? '\\' + a.limits : '');
     }
-    case 'style': return `{\\${a.n} ${cellToTex(a.body, ctx, a, 0, mode)}}`;
+    case 'style': {
+      // a size in text (\text{\small …}): the editor's size class — on a layout page LaTeX's absolute
+      // size (10 pt in an 11 pt class, however large the box's text), elsewhere relative as MathJax's
+      const cls = mode === 'text' ? TEXT_SIZE_CLASS[a.n] : undefined;
+      if (cls) return `\\htmlClass{lyx-size-${cls}}{${cellToTex(a.body, ctx, a, 0, mode)}}`;
+      return `{\\${a.n} ${cellToTex(a.body, ctx, a, 0, mode)}}`;
+    }
     case 'class': {
       const n = a.n === 'bm' || a.n === 'heavysymbol' ? 'boldsymbol' : a.n === 'lefteqn' ? 'mathrlap' : a.n;
       return `\\${n}{${cellToTex(a.body, ctx, a, 0)}}` + (a.limits ? '\\' + a.limits : '');
@@ -393,7 +405,6 @@ export function mathjaxMacros(table: MacroTable): Record<string, string> {
 
 /** The hull as TeX for MathJax (display environments become their inner AMS equivalents). */
 export function hullToTex(h: Hull, ctx: TexContext): string {
-  ctx.display = !(h.type === 'simple' || h.type === 'none' || h.type === 'unknown');
   const cell = (ri: number, ci: number) => cellToTex(h.rows[ri].cells[ci], ctx, h, ri * h.ncols + ci);
   switch (h.type) {
     case 'simple': case 'equation': case 'none': case 'unknown':

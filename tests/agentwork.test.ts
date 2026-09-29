@@ -93,4 +93,25 @@ describe('agent working copy', () => {
     await prepareWorkspace(T, 'owner/cv', 1);   // no sync in between (a missed notification)
     expect((await manager.open('owner/cv/cv.tex')).toText()).toMatch(/\\lyxdeleted\{Agent panel \(MCP\)\}\{[^}]*\}\{Second\}\\lyxadded\{Agent panel \(MCP\)\}\{[^}]*\}\{The second\} paragraph stays, edited live\./);
   });
+  it("with the panel's Track changes box off, a turn's edits go in directly — and its checkpoint can take them back", async () => {
+    const { workspaceTracking, listCheckpoints, undoCheckpoint, finishTurn } = await import('../packages/server/src/agentwork.ts');
+    expect(workspaceTracking(T)).toBe(true);
+    const dir = await prepareWorkspace(T, 'owner/cv', 1, false);
+    expect(workspaceTracking(T)).toBe(false);
+    const before = (await manager.open('owner/cv/cv.tex')).toText();
+    writeFileSync(join(dir, 'cv.tex'), readFileSync(join(dir, 'cv.tex'), 'utf8').replace('\\section*{Education}', '\\section*{Education and training}'));
+    expect(await syncWorkspace(T, 'owner/cv', 1)).toEqual([{ path: 'cv.tex', action: 'edited' }]);
+    const text = (await manager.open('owner/cv/cv.tex')).toText();
+    expect(text).toContain('\\section*{Education and training}');
+    expect(text).not.toMatch(/\\lyx(added|deleted)\{[^}]*\}\{[^}]*\}\{[^}]*training/);
+    // earlier tracked changes are left alone
+    expect(text.match(/\\lyx(added|deleted)\{/g)?.length).toBe(before.match(/\\lyx(added|deleted)\{/g)?.length);
+    const cp = await finishTurn(T, 'owner/cv', 1);
+    expect(cp).not.toBeNull();
+    await undoCheckpoint(T, 'owner/cv', listCheckpoints(T).at(-1)!.n, 1);
+    expect((await manager.open('owner/cv/cv.tex')).toText()).toBe(before);
+    // the next turn tracks again
+    await prepareWorkspace(T, 'owner/cv', 1);
+    expect(workspaceTracking(T)).toBe(true);
+  });
 });

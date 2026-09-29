@@ -394,6 +394,8 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
   const [models, setModels] = useState<AgentModel[]>([]);
   const [model, setModel] = useState(stored('ol.agent.model') ?? '');
   const [effort, setEffort] = useState(stored('ol.agent.effort') ?? '');
+  /** the agent's document edits as tracked changes (the default) or straight into the text */
+  const [tracked, setTracked] = useState(stored('ol.agent.tracked') !== '0');
   const selRef = useRef(sel); selRef.current = sel;
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);   // follow the stream while the user is at the bottom
@@ -583,7 +585,7 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
         if (!tid) { const r = await api.agentStartThread(project); tid = r.id; setSel(tid); setMine(true); setItems([]); store('ol.agent.sel:' + project, tid); void refreshThreads(); }
         setItems(list => [...list, localItem]);
         setBusyTurn('pending');
-        await api.agentTurn(project, tid, { text: t, context, clientMessageId: localItem.id, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
+        await api.agentTurn(project, tid, { text: t, context, clientMessageId: localItem.id, tracked, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
       } catch (e) { setBusyTurn(null); notify(errText(e), 'error'); }
     })();
   };
@@ -675,6 +677,10 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
                 {efforts.map(ef => <option key={ef} value={ef}>{ef}</option>)}
               </select>
             )}
+            <label data-agent-tracked title={tracked ? 'The agent’s edits to documents arrive as tracked changes you accept or reject — untick to let it edit the text directly (a turn can still be taken back)' : 'The agent edits the documents directly, without tracked changes (a turn can still be taken back) — tick to review its edits as tracked changes'}>
+              <input type="checkbox" checked={tracked} onChange={e => { const v = (e.target as HTMLInputElement).checked; setTracked(v); store('ol.agent.tracked', v ? '1' : '0'); }} />
+              Track changes
+            </label>
             <span class="spacer" />
             {busyTurn && busyTurn !== 'pending' && sel && <button class="small-btn" data-agent-stop onClick={() => void api.agentInterrupt(project, sel, busyTurn).catch(e => notify(errText(e), 'error'))}>Stop</button>}
             <button class="small-btn" data-agent-send disabled={!text.trim() || busyTurn === 'pending'} onClick={() => send()}>{busyTurn && busyTurn !== 'pending' ? 'Steer' : 'Send'}</button>

@@ -45,7 +45,7 @@ import { listProjects, projectDir, resolveProjectPath, isDocumentFile, newDocume
 import { parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { touchProject, repoInfo, restoreProject, commitProject } from './git.ts';
 import { buildIncluding, buildErrors, lastBuild, currentJob } from './export.ts';
-import { PANEL_AGENT, buildBeforeTurn, agentCheckpoint, undoCheckpoint } from './agentwork.ts';
+import { PANEL_AGENT, buildBeforeTurn, agentCheckpoint, undoCheckpoint, panelTracking } from './agentwork.ts';
 import { verifyMcpToken } from './mcpTokens.ts';
 import { wwwAuthenticate } from './mcpOauth.ts';
 import { config } from './config.ts';
@@ -488,6 +488,8 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     if (!fs.existsSync(projectDir(project))) throw new Error(`No project "${project}".`);
     return project;
   };
+  /** `tracked` when a document tool is called without it: tracked, unless it is the panel's agent and its Track changes box is off */
+  const trackedDefault = (project: string): boolean => agentName !== PANEL_AGENT || panelTracking(userId, project);
 
   server.registerTool('list_documents', {
     description: 'List the .tex documents in a project.',
@@ -596,7 +598,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
       replace_all: z.boolean().optional().describe('Replace every occurrence (default: old_text must be unique)'),
       tracked: z.boolean().optional().describe('true (default): a tracked change for review. false: applied directly, no tracked-change marks — the fallback whenever tracked editing runs into any problem (see the server instructions); the previous state stays in the project history'),
     },
-  }, async ({ project: p, path, old_text, new_text, replace_all, tracked }) => { try { return ok(await editDocument(need(p, 'edit'), userId, agentName, path, old_text, new_text, !!replace_all, tracked !== false)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, old_text, new_text, replace_all, tracked }) => { try { const project = need(p, 'edit'); return ok(await editDocument(project, userId, agentName, path, old_text, new_text, !!replace_all, tracked ?? trackedDefault(project))); } catch (e) { return fail(e); } });
 
   server.registerTool('insert_paragraphs', {
     description: 'Insert raw LaTeX (anything: formulas, citations, sections, environments — parsed like the editor parses .tex) as new paragraphs at a position: 0 = top, paragraph count = append. Applied as a tracked insertion, reviewable like any collaborator edit. Indices shift — re-run read_document afterwards.',
@@ -619,7 +621,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
       ...projArg, path: z.string(), tex: z.string(),
       tracked: z.boolean().optional().describe('true (default): a tracked change for review. false: applied directly, no tracked-change marks — the fallback whenever tracked editing runs into any problem (see the server instructions); the previous state stays in the project history'),
     },
-  }, async ({ project: p, path, tex, tracked }) => { try { return ok(await writeDocument(need(p, 'edit'), userId, agentName, path, tex, tracked !== false)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, tex, tracked }) => { try { const project = need(p, 'edit'); return ok(await writeDocument(project, userId, agentName, path, tex, tracked ?? trackedDefault(project))); } catch (e) { return fail(e); } });
 
   server.registerTool('create_document', {
     description: 'Create a new .tex document from the standard template (write_document with full source also creates).',

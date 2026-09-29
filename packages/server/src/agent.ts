@@ -35,7 +35,7 @@ import { createMcpToken } from './mcpTokens.ts';
 import { selectionToTex, documentContext } from './ai.ts';
 import {
   prepareWorkspace, syncWorkspace, pruneWorkspaces, finishTurn, checkBuilds, noteTurnId, listCheckpoints, onCheckpoint,
-  publicCheckpoint, undoCheckpoint, UndoError, type Checkpoint,
+  publicCheckpoint, undoCheckpoint, UndoError, setPanelTracking, panelTracking, workspaceTracking, type Checkpoint,
 } from './agentwork.ts';
 import type { PMJSON } from '@overlyx/core';
 
@@ -70,6 +70,16 @@ Each user message may be preceded by a [context]…[/context] item the editor ad
 
 /** The sandbox of a turn in a working copy: only the copy (and /tmp) is writable. */
 const workspaceSandbox = (dir: string) => ({ type: 'workspaceWrite', writableRoots: [dir], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false });
+
+/**
+ * A note in front of a turn's message when the panel's Track changes box is off (or back on after
+ * a turn with it off): the thread's instructions speak of tracked changes.
+ */
+function trackingNote(tracked: boolean, wasTracked: boolean | undefined): string | null {
+  if (!tracked) return '[context] Note from the OverLyX editor (the user did not write this): Track changes is OFF for this turn — the user unticked it in the agent panel. Your edits to .tex documents go into the live documents directly, without tracked-change marks (the overlyx MCP document tools default to tracked: false too). OverLyX still keeps a checkpoint of the turn that the user can take back. Everything else in your instructions applies. [/context]';
+  if (wasTracked === false) return '[context] Note from the OverLyX editor (the user did not write this): Track changes is ON again for this turn — your edits to .tex documents are tracked changes the user reviews, as your instructions say. [/context]';
+  return null;
+}
 
 /**
  * Threads started before the managed codex config gained the overlyx MCP server were created
@@ -664,7 +674,13 @@ export function agentRoutes(): express.Router {
       // cwd: the thread's working copy, mirrored from the live project now (older threads: the
       // project's directory itself — a thread started before the project moved follows it)
       const native = isNativeThread(row.created_at);
-      const cwd = native ? await prepareWorkspace(row.thread_id, row.project, req.user!.id) : projectDir(row.project);
+      // the panel's Track changes box: off, the turn's document edits go in without tracked-change marks
+      const tracked = req.body?.tracked !== false;
+      const wasTracked = native ? workspaceTracking(row.thread_id) : panelTracking(req.user!.id, row.project);
+      setPanelTracking(req.user!.id, row.project, tracked);
+      const note = trackingNote(tracked, wasTracked);
+      if (note) input.unshift({ type: 'text', text: note, text_elements: [] });
+      const cwd = native ? await prepareWorkspace(row.thread_id, row.project, req.user!.id, tracked) : projectDir(row.project);
       const turn = h.request('turn/start', { threadId: row.thread_id, input, cwd, ...(native ? { sandboxPolicy: workspaceSandbox(cwd) } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(cmid ? { clientUserMessageId: cmid } : {}) }, 0);
       turn.catch(e => console.error(`[agent ${req.user!.id}] turn failed:`, (e as Error).message));
       // the turn runs long; its progress arrives over the events stream — answer as soon as it is accepted

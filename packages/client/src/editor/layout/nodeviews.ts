@@ -112,7 +112,7 @@ export class BoxView implements NodeView {
     // the nominal size (\fontsize{25}{33.5}): the font package may load the face smaller (notomath:
     // 0.9), the baselines stay the nominal size's — a unitless line height relative to the scaled face
     c.fontSize = a.font ? `calc(var(--ol-pt) * ${a.font} * var(--ol-text-scale, 1))` : '';
-    c.lineHeight = a.leading ? `calc(${a.leading} / var(--ol-text-scale, 1))` : '';
+    if (a.leading) c.setProperty('--ol-lh', `calc(${a.leading} / var(--ol-text-scale, 1))`); else c.removeProperty('--ol-lh');
     c.color = color(a.color) ?? '';
     c.textAlign = a.align === 'justify' ? 'justify' : a.align === 'center' ? 'center' : a.align === 'right' ? 'right' : 'left';
     this.contentDOM.dataset.align = a.align ?? 'left';

@@ -385,8 +385,23 @@ blend.
     (beamer's default font theme, notomath's `sfdefault`, sfmath…; `setLayoutMathFont` overrides the
     editor's math font while a layout document is open) at the text's nominal size, without the
     formula fields' padding, an empty script base (`$^{1}$`) taking no room. LaTeX's named sizes are
-    the class's absolute sizes (`\small` in a 25 pt box is 10 pt), justified boxes hyphenate, list
-    labels are beamer's triangles, colours come from the preamble. Macro files the preamble `\input`s
+    the class's absolute sizes (`\small` in a 25 pt box is 10 pt — also in a formula's `\text{\small …}`,
+    which becomes the size class `lyx-size-small`), justified boxes hyphenate, colours come from the
+    preamble. **Lines as TeX sets them** (a text box is a minipage; styles.css, measured against the
+    PDF box by box): the first line's letters touch the top of the box and the last baseline is its
+    bottom (a browser puts half the leading plus the font's whole ascent above the first baseline —
+    that put every top-aligned text 0.25 em too low); the controller measures the page font with a
+    canvas (`--ol-fhalf`, `--ol-asc`, then `--ol-tex-lines: 1`). A display formula gets the class's
+    `\abovedisplayskip`/`\belowdisplayskip` (`displaySkips(base)` in `fontsize.ts`, in pt at every box
+    size), TeX's empty line above it when it starts a paragraph (then `\belowdisplayshortskip`), no
+    line after it when it ends one (ProseMirror's trailing break overlaps it) and no skip at the end
+    of the box; the layout plugin marks those displays and paragraphs (`ol-disp-first`/`-last`,
+    `ol-par-disp-first`/`-last`). Beamer's lists: the text `\leftmargini` in (2 em of `\normalsize`),
+    the label `\labelsep` before it, 3 pt between items, the bullet of the preamble's
+    `\setbeamertemplate{itemize item}[triangle|circle|square|ball]` in its `\setbeamercolor{itemize item}`
+    (`--ol-leftmargin`, `--ol-bullet`, `--ol-item-color`; copied into a presentation with
+    `TEX_LINE_VARS`). What remains different is horizontal: the browser breaks lines greedily where
+    TeX optimises the paragraph, and glyph widths differ by about 1 %. Macro files the preamble `\input`s
     keep OverLyX's `%% @display` forms (`macrosFromLatex`). The example `poster_bernstein26` (a beamerposter of minipages and
     tcolorboxes) was rebuilt as native objects by `scratch/layoutmode/poster-gen.mts` and compiles to
     the same poster.
@@ -468,7 +483,10 @@ blend.
   `\textsc`, stmaryrd's `\llangle`/`\llbracket` as stretchy delimiters, a `\middle` that works inside
   a cell, the document's macros looked up per formula, undefined commands shown in red; `mathjax.ts`
   the CHTML output, one per math font; `core/src/math/mathjax.ts` translates the LyX model into that
-  TeX; `core/src/math/mathjax-macros.json`, from `scripts/gen-mathjax-macros.ts`, is the part of
+  TeX — the cell markup would hide a big operator from TeX's limits rule, so `\sum` & co. are wrapped
+  in `\mathop{…}` (MathJax's movable limits: above/below in display style, to the side under
+  `\textstyle`, in a numerator or inline, as TeX's `\displaylimits`) and only a written `\limits`
+  or a brace forces `\mathop{…}\limits`; `core/src/math/mathjax-macros.json`, from `scripts/gen-mathjax-macros.ts`, is the part of
   LyX's `lib/symbols` MathJax lacks; `scripts/math-mathjax-check.ts` parses a corpus of real
   formulas). Everything behaves as in LyX: cursor
   movement into and out of insets, `^`/`_`, `\` command mode with name completion by Space, Space
@@ -573,7 +591,12 @@ blend.
   comments in `record-demos.spec.ts` — an isolated instance — and `record-vscode.mjs` — xvfb);
   `e2e/landing.spec.ts` covers autoplay, rotation, the dots, replay and the theme swap.
 * **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in its pane
-  by our own viewer (fit-to-width / zoom, page navigation). A **rebuilt PDF replaces the old one
+  by our own viewer (fit-to-width / zoom, page navigation). **Pinch zoom**: a trackpad pinch
+  (Ctrl + wheel in Chromium and Firefox, Safari's gesture events) or Ctrl/⌘ + wheel zooms about the
+  pointer, one step per frame; meanwhile the drawn pages stretch and are drawn anew once the pinch
+  settles (160 ms). A page whose canvas would exceed 2²⁵ pixels (an A0 poster zoomed in — browsers
+  draw nothing on far bigger canvases) is drawn coarser, with a sharp detail canvas (`.pdf-detail`)
+  over the part in view and half a window around it. A **rebuilt PDF replaces the old one
   without a flicker**: the new document loads while the old pages stay in view (one shared pdf.js
   worker, so no worker start-up per build), each page is rendered off-screen and copied onto its
   canvas in one step, and the view stays on the same page at the same offset into it (not the
@@ -812,6 +835,11 @@ blend.
   neighbouring paragraph somebody changed meanwhile keeps their version — `mergeInPlace`), other
   files (`.bib`, a new figure or `.tex`) are copied into the project, build output stays in the
   copy. What was mirrored is kept beside the copy, so a restart mid-turn loses nothing.
+  **Track changes box** (the composer's checkbox, remembered in the browser, sent with every turn):
+  unticked, the turn's document changes go in directly (`applyPlainSource`, no marks; manifest
+  `tracked: false`), the turn's message gets a note saying so (and another when it is ticked again),
+  and the MCP document tools of the panel's agent default to `tracked: false` (`panelTracking`).
+  The checkpoint takes such a turn back all the same.
   **Checkpoints and rollback:** every turn that changes files leaves a checkpoint
   (`data/agent-work/<thread>.turns/<n>/`): per file the version its changes can be taken back to (a
   document's live source before the turn's first change to it, with what people edited during the

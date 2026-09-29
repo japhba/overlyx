@@ -25,13 +25,13 @@
  * The page size, base font and colours come from the document header (the Y meta map).
  */
 import { Plugin, PluginKey, NodeSelection, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
-import type { EditorView } from 'prosemirror-view';
+import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { DOMSerializer, Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
 import { ySyncPluginKey } from 'y-prosemirror';
 import { schema, normalizePath, pathToString, preambleColors, pageSizeOf, pageFontsOf, rgbToHex, SHAPE_PRESETS, type PathSeg } from '@overlyx/core';
 import { setLayoutMathFont } from '../../fonts/editorfont';
-import { sizeTable, NAMED_SIZES } from '../fontsize';
-import { boxOf, objectBounds, unionBounds, isLayoutObject, pageObjects, rotatePoint, MM, docColors, boundsOf, type Box } from './geom';
+import { sizeTable, displaySkips, NAMED_SIZES } from '../fontsize';
+import { boxOf, objectBounds, unionBounds, isLayoutObject, pageObjects, rotatePoint, MM, docColors, boundsOf, color, TEX_LINE_VARS, type Box } from './geom';
 import * as L from './commands';
 import type { PageView } from './nodeviews';
 import { startPresentation } from './present';
@@ -51,6 +51,34 @@ export interface LayoutPluginState {
 }
 
 export const layoutKey = new PluginKey<LayoutPluginState>('layout');
+
+/** beamer's itemize item templates: the character drawn and its size (em of the text) */
+const BULLETS: Record<string, [string, number]> = { triangle: ['\\25B6', 0.5], circle: ['\\2022', 1.05], square: ['\\25A0', 0.5], ball: ['\\25CF', 0.45] };
+
+/**
+ * Display formulas that start or end a paragraph of a text box, and those paragraphs, get a class:
+ * TeX sets an empty line above a display that starts a paragraph and nothing after one that ends
+ * the box (styles.css). Kept per document.
+ */
+const displayMarks = (() => {
+  let doc: PMNode | null = null, set = DecorationSet.empty;
+  return (d: PMNode): DecorationSet => {
+    if (d === doc) return set;
+    doc = d;
+    const decos: Decoration[] = [];
+    if (L.isLayoutDoc(d)) d.descendants((node, pos) => {
+      if (!node.isTextblock) return node.type.name !== 'ol_notes';
+      if (!node.childCount) return false;
+      const first = node.firstChild!.type.name === 'math_display', last = node.lastChild!.type.name === 'math_display';
+      if (!first && !last) return false;
+      decos.push(Decoration.node(pos, pos + node.nodeSize, { class: [first ? 'ol-par-disp-first' : '', last ? 'ol-par-disp-last' : ''].join(' ').trim() }));
+      if (first) decos.push(Decoration.node(pos + 1, pos + 1 + node.firstChild!.nodeSize, { class: 'ol-disp-first' }));
+      if (last) { const at = pos + 1 + node.content.size - node.lastChild!.nodeSize; decos.push(Decoration.node(at, at + node.lastChild!.nodeSize, { class: 'ol-disp-last' })); }
+      return false;
+    });
+    return (set = DecorationSet.create(d, decos));
+  };
+})();
 
 type Meta = Partial<LayoutPluginState>;
 
@@ -142,6 +170,7 @@ export function layoutPlugin(): Plugin<LayoutPluginState> {
       return state.tr.setSelection(TextSelection.between(state.doc.resolve(s.anchor), state.doc.resolve(head)));
     },
     props: {
+      decorations: (state) => displayMarks(state.doc),
       handleDOMEvents: {
         pointerdown: (view, ev) => controller?.pointerDown(ev as PointerEvent) ?? false,
         dblclick: (view, ev) => controller?.doubleClick(ev as MouseEvent) ?? false,
@@ -304,7 +333,8 @@ class LayoutController {
     this.scroller = null;
     activeZoom.delete(this);
     zoomChanged();
-    for (const p of ['--ol-page-w', '--ol-page-h', '--ol-fit-pt', '--ol-page-font', '--ol-text-scale', '--ol-math-rel']) this.view.dom.style.removeProperty(p);
+    for (const p of ['--ol-page-w', '--ol-page-h', '--ol-fit-pt', '--ol-page-font', '--ol-text-scale', '--ol-math-rel', ...TEX_LINE_VARS]) this.view.dom.style.removeProperty(p);
+    this.metricsFamily = null;
     setLayoutMathFont(null);
   }
 
@@ -453,9 +483,51 @@ class LayoutController {
     s.setProperty('--ol-page-font', fonts.family);
     s.setProperty('--ol-text-scale', String(fonts.textScale));
     s.setProperty('--ol-math-rel', String(Math.round(fonts.mathScale / fonts.textScale * 1000) / 1000));
+    // TeX's lines in text boxes (styles.css): the class's display skips, the page font's metrics
+    const [dskip, dshort] = displaySkips(this.basePt);
+    s.setProperty('--ol-dskip', String(dskip));
+    s.setProperty('--ol-dskip-short', String(dshort));
+    this.measurePageFont(fonts.family);
+    // beamer's lists: \leftmargini (2em of \normalsize at every font size), the bullet template and colour
+    s.setProperty('--ol-leftmargin', String(({ 10: 20, 11: 21.9, 12: 23.5 } as Record<number, number>)[this.basePt] ?? 2 * this.basePt));
+    const pre = preamble.replace(/(^|[^\\])%.*$/gm, '$1');
+    const bullet = BULLETS[/\\setbeamertemplate\s*\{\s*itemize items?\s*\}\s*\[\s*(\w+)/.exec(pre)?.[1] ?? 'triangle'] ?? BULLETS.triangle;
+    s.setProperty('--ol-bullet', `"${bullet[0]}"`);
+    s.setProperty('--ol-bullet-k', String(bullet[1]));
+    const fg = (el: string) => new RegExp(`\\\\setbeamercolor\\s*\\{\\s*${el}\\s*\\}\\s*\\{[^}]*?\\bfg\\s*=\\s*([^,}]+)`).exec(pre)?.[1]?.trim();
+    const itemColor = color(fg('itemize items?') ?? fg('item') ?? fg('structure'));
+    if (itemColor) s.setProperty('--ol-item-color', itemColor); else s.removeProperty('--ol-item-color');
     setLayoutMathFont(fonts.sansMath ? 'fira' : null);
     this.fit();
     if (changed) this.rerenderViews();
+  }
+
+  private metricsFamily: string | null = null;
+
+  /**
+   * The page font's metrics, in fractions of its size, for TeX's lines in text boxes (styles.css):
+   * --ol-fhalf half of the ascent minus the descent a browser's line box is built from, --ol-asc
+   * the height of the tallest letters (TeX's first line reaches that high above its baseline).
+   * Measured once the face has loaded; --ol-tex-lines switches the rules on.
+   */
+  private measurePageFont(family: string): void {
+    if (family === this.metricsFamily) return;
+    this.metricsFamily = family;
+    const measure = () => {
+      if (this.metricsFamily !== family || this.view.isDestroyed) return;
+      const ctx = document.createElement('canvas').getContext('2d');
+      if (!ctx) return;
+      ctx.font = `100px ${family}`;
+      const m = ctx.measureText('bdfhklAT');
+      if (!m.fontBoundingBoxAscent || !m.actualBoundingBoxAscent) return;
+      const s = this.view.dom.style;
+      s.setProperty('--ol-fhalf', ((m.fontBoundingBoxAscent - m.fontBoundingBoxDescent) / 200).toFixed(4));
+      s.setProperty('--ol-asc', (m.actualBoundingBoxAscent / 100).toFixed(4));
+      s.setProperty('--ol-tex-lines', '1');
+    };
+    const face = family.split(',')[0].trim();
+    if (typeof document !== 'undefined' && document.fonts?.load) document.fonts.load(`100px ${face}`).then(measure, measure);
+    else measure();
   }
 
   /** the page's scale: the zoom at which the whole page fits the window, times the canvas zoom */

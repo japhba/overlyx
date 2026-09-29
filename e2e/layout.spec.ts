@@ -86,6 +86,22 @@ Right column
 \end{document}
 `;
 
+// TeX's lines in text boxes: a display formula alone in a centred box, a top-aligned line of text
+const TEXLINES = String.raw`\documentclass[aspectratio=169]{beamer}
+\begin{document}
+\begin{frame}[plain]
+\begin{olbox}{x=10mm,y=10mm,w=100mm,h=30mm,font=20pt,leading=1.2,valign=c,fill=blue!10}
+\[
+x^{2}+y^{2}=z^{2}
+\]
+\end{olbox}
+\begin{olbox}{x=10mm,y=50mm,w=100mm,h=20mm,font=20pt,leading=1.2}
+Hello world
+\end{olbox}
+\end{frame}
+\end{document}
+`;
+
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
@@ -96,6 +112,7 @@ test.beforeAll(() => {
   writeFileSync(`${DIR}/zoom.tex`, SLIDES);
   writeFileSync(`${DIR}/overlays.tex`, OVERLAYS);
   writeFileSync(`${DIR}/deck.tex`, DECK);
+  writeFileSync(`${DIR}/texlines.tex`, TEXLINES);
   // a 40 × 30 px PNG for the crop test
   writeFileSync(`${DIR}/pic.png`, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAKklEQVR4nO3NMQ0AAAgDsAmb/yALGXA06d9MeyJisVgsFovFYrFYLP4bL9HP3Ew1mJ9PAAAAAElFTkSuQmCC', 'base64'));
 });
@@ -436,5 +453,40 @@ test('the font size box: text, a formula as a whole, table cells', async ({ page
   await page.keyboard.type('14');
   await page.keyboard.press('Enter');
   await expect.poll(() => fileText('main.tex'), { timeout: 15000 }).toContain('{\\fontsize{14}{16.8}\\selectfont a}');
+  expect(errors).toEqual([]);
+});
+
+test("text boxes set their lines as TeX does: the first line's letters at the top, a display formula below TeX's empty line", async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await openLayout(page, 'texlines.tex');
+  await expect(page.locator('.ol-page .lyx-math-display.ol-disp-first.ol-disp-last mjx-container')).toBeVisible({ timeout: 15000 });
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.querySelector('.lyx-editor')!).getPropertyValue('--ol-tex-lines').trim())).toBe('1');
+  const m = await page.evaluate(() => {
+    const boxes = [...document.querySelectorAll<HTMLElement>('.ol-page .ol-box')];
+    const disp = boxes[0], text = boxes[1];
+    const r = (e: Element) => e.getBoundingClientRect();
+    const math = disp.querySelector('mjx-math')!, par = disp.querySelector('.lyx-par')!, display = disp.querySelector('.lyx-math-display')!;
+    // the text box's first baseline: a range's box reaches the font's descent below it
+    const content = text.querySelector<HTMLElement>('.ol-box-content')!;
+    const node = text.querySelector('.lyx-par')!.firstChild!;
+    const range = document.createRange(); range.setStart(node, 0); range.setEnd(node, 5);
+    const cs = getComputedStyle(content), f = parseFloat(cs.fontSize);
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    ctx.font = `100px ${cs.fontFamily}`;
+    const tm = ctx.measureText('bdfhklAT');
+    const baseline = range.getBoundingClientRect().bottom - tm.fontBoundingBoxDescent / 100 * f;
+    return {
+      mathCentre: (r(math).top + r(math).bottom) / 2, boxCentre: (r(disp).top + r(disp).bottom) / 2,
+      trailing: r(par).bottom - r(display).bottom,
+      firstBaseline: baseline - r(content).top, tallest: tm.actualBoundingBoxAscent / 100 * f,
+    };
+  });
+  // TeX puts an empty line above a display that starts a paragraph: in a centred box the formula sits below the middle
+  expect(m.mathCentre).toBeGreaterThan(m.boxCentre + 1);
+  // and nothing after one that ends it (ProseMirror's trailing break takes no room)
+  expect(Math.abs(m.trailing)).toBeLessThan(1);
+  // the first baseline is as far below the box's top as the tallest letters reach (TeX's first line), not half the leading + the font's ascent
+  expect(Math.abs(m.firstBaseline - m.tallest)).toBeLessThan(1.5);
   expect(errors).toEqual([]);
 });

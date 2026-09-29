@@ -31,7 +31,7 @@ import { config } from './config.ts';
 import { db } from './db.ts';
 import { manager, docFiles, readTextFile, type OpenDoc } from './docs.ts';
 import { projectDir, resolveProjectPath, isDocumentFile, findMaster } from './projects.ts';
-import { applyTrackedSource, foldEdits, restoreSource } from './docedit.ts';
+import { applyTrackedSource, applyPlainSource, foldEdits, restoreSource } from './docedit.ts';
 import { lastBuild, buildIncluding, buildErrors, requestBuild } from './export.ts';
 import { touchProject } from './git.ts';
 
@@ -56,7 +56,19 @@ interface Manifest {
   usedAt: number;
   /** the turn running (or last run) in the copy: its changes go into checkpoint `n` */
   turn?: { n: number; startedAt: number; turnId: string | null };
+  /** false: the turn's document changes go in directly, without tracked-change marks (the panel's Track changes box) */
+  tracked?: boolean;
 }
+
+/**
+ * The panel's Track changes box, per user and project, as of their last turn: the default of the
+ * MCP document tools' `tracked` for the panel's agent (threads without a working copy edit through them).
+ */
+const panelTrackingState = new Map<string, boolean>();
+export function setPanelTracking(userId: number, project: string, tracked: boolean): void { panelTrackingState.set(`${userId}\0${project}`, tracked); }
+export function panelTracking(userId: number, project: string): boolean { return panelTrackingState.get(`${userId}\0${project}`) ?? true; }
+/** whether the thread's last turn tracked its changes (undefined: no turn in a working copy yet) */
+export function workspaceTracking(tid: string): boolean | undefined { const m = readManifest(tid); return m?.turn ? m.tracked !== false : undefined; }
 
 const root = () => path.join(config.dataDir, 'agent-work');
 const safeId = (tid: string) => tid.replace(/[^A-Za-z0-9._-]/g, '_');
@@ -101,14 +113,17 @@ function liveText(project: string, rel: string): string {
 
 /* ------------------------------------------------------------------ live → copy */
 
-/** Mirror the live project into the thread's copy (taking over anything not synced yet first); returns the copy's path. */
-export function prepareWorkspace(tid: string, project: string, userId: number): Promise<string> {
+/**
+ * Mirror the live project into the thread's copy (taking over anything not synced yet first); returns
+ * the copy's path. `tracked` false: the new turn's document changes go in without tracked-change marks.
+ */
+export function prepareWorkspace(tid: string, project: string, userId: number, tracked = true): Promise<string> {
   return serial(tid, async () => {
     const dir = workspaceDir(tid, project);
     if (fs.existsSync(dir)) await syncNow(tid, project, userId);
     fs.mkdirSync(dir, { recursive: true });
     const old = readManifest(tid);
-    const manifest: Manifest = { project, files: {}, usedAt: Date.now() };
+    const manifest: Manifest = { project, files: {}, usedAt: Date.now(), ...(tracked ? {} : { tracked: false }) };
     for (const f of docFiles(project)) {
       if (f.kind === 'dir') continue;
       const live = resolveProjectPath(project, f.path), dst = path.join(dir, f.path);
@@ -151,7 +166,7 @@ export function prepareWorkspace(tid: string, project: string, userId: number): 
 
 /* ------------------------------------------------------------------ copy → live */
 
-export interface SyncedFile { path: string; action: 'tracked' | 'copied' | 'created'; inserted?: number; deleted?: number; error?: string }
+export interface SyncedFile { path: string; action: 'tracked' | 'edited' | 'copied' | 'created'; inserted?: number; deleted?: number; error?: string }
 
 /** Take the agent's changes in its copy over into the live project. */
 export function syncWorkspace(tid: string, project: string, userId: number): Promise<SyncedFile[]> {
@@ -196,9 +211,16 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
         if (base === null || text === base) continue;
         if (isDocumentFile(project, rel)) {
           const doc = await manager.open(`${project}/${rel}`);
-          const r = applyTrackedSource(doc, base, text, AGENT_AUTHOR);
-          out.push({ path: rel, action: 'tracked', inserted: r.inserted, deleted: r.deleted });
-          if (r.after !== r.before) recordDoc(tid, manifest, doc, rel, r.before, r.after);
+          if (manifest.tracked === false) {
+            // Track changes off: the agent's change goes in as it is (the checkpoint can still take it back)
+            const r = applyPlainSource(doc, base, text);
+            out.push({ path: rel, action: 'edited' });
+            if (r.after !== r.before) recordDoc(tid, manifest, doc, rel, r.before, r.after);
+          } else {
+            const r = applyTrackedSource(doc, base, text, AGENT_AUTHOR);
+            out.push({ path: rel, action: 'tracked', inserted: r.inserted, deleted: r.deleted });
+            if (r.after !== r.before) recordDoc(tid, manifest, doc, rel, r.before, r.after);
+          }
         } else {
           const live = resolveProjectPath(project, rel);
           const prev = readIfFile(live);

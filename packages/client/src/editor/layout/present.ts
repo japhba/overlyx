@@ -14,11 +14,12 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { pageSizeOf, pageFontsOf } from '@overlyx/core';
 import { pages as docPages, isLayoutDoc } from './commands';
 import { layoutControllerOf } from './controller';
+import { TEX_LINE_VARS } from './geom';
 import { annotateOverlays, applyOverlays, OverlayCounter } from './overlays';
 import { beamerSlides, hasFrames, clean } from './beamerslides';
 
 /** the page's fonts (editor/layout/controller.ts readHeader): the presentation draws with the same */
-const PAGE_FONT_VARS = ['--ol-page-font', '--ol-text-scale', '--ol-math-rel'];
+const PAGE_FONT_VARS = ['--ol-page-font', '--ol-text-scale', '--ol-math-rel', ...TEX_LINE_VARS];
 
 interface Slide { el: HTMLElement; steps: number; transition: string | null; notes: string; name: string | null; pos: number }
 

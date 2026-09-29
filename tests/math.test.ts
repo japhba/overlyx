@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { parseCell, parseFormula, writeFormula, writeCellLatex, renderHullSource, type MacroTable, type Atom } from '../packages/core/src/math';
-import { toMathml } from './mathjax';
+import { toMathml, toChtml } from './mathjax';
 
 const MACROS: MacroTable = { inv: { nargs: 1 }, lndet: { nargs: 1 }, Pfi: { nargs: 0 }, kap: { nargs: 0 }, cum: { nargs: 2 }, mdiag: { nargs: 1 } };
 
@@ -163,12 +163,16 @@ describe('limits placement (the \\htmlClass cell markup must not detach scripts)
   it('overbrace: the superscript goes above', () => {
     expect(kx('$\\overbrace{x+y}^{n}$')).toMatch(/\\mathop\{.*\\overbrace\{.*\}\\limits\^\{/);
   });
-  it('big operators carry limits in display style, not inline', () => {
-    const disp = kx('\\[\\sum_{i}x\\]');
-    expect(disp).toMatch(/\\mathop\{.*\\sum.*\}\\limits_\{/);
-    expect(renders(disp, true)).toMatch(/<munder[ >]/);
-    expect(renders(kx('$\\sum_{i}x$'))).not.toMatch(/<munder[ >]/);
-    expect(kx('$\\sum_{i}x$')).not.toContain('\\mathop');
+  it('big operators follow TeX\'s limits rule: above/below in display style, to the right in text style', async () => {
+    // \mathop{…} without \limits: MathJax's movable limits, as TeX's \displaylimits
+    const under = async (latex: string, display: boolean) => /<mjx-under/.test(await toChtml((display ? '\\displaystyle ' : '') + kx(latex)));
+    expect(kx('\\[\\sum_{i}x\\]')).toMatch(/\\mathop\{.*\\sum.*\}_\{/);
+    expect(kx('\\[\\sum_{i}x\\]')).not.toContain('\\limits');
+    expect(await under('\\[\\sum_{i}x\\]', true)).toBe(true);
+    expect(await under('$\\sum_{i}x$', false)).toBe(false);
+    // \textstyle in a display, a display fraction's numerator: to the right, as in the PDF
+    expect(await under('\\[\\textstyle\\sum_{i}x\\]', true)).toBe(false);
+    expect(await under('\\[\\frac{\\sum_{i}x}{2}\\]', true)).toBe(false);
   });
   it('explicit \\limits and \\nolimits are respected', () => {
     expect(kx('$\\sum\\limits_{i}x$')).toMatch(/\\mathop\{.*\\sum.*\}\\limits_\{/);

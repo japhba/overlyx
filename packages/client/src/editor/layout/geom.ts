@@ -96,3 +96,6 @@ export function objectBounds(node: PMNode): { x: number; y: number; w: number; h
 }
 
 export const isLayoutObject = (n: PMNode | null | undefined): boolean => !!n && n.type.spec.group === 'ol_object';
+
+/** the variables of TeX's lines and lists in text boxes (styles.css; set by the controller), also copied into a presentation */
+export const TEX_LINE_VARS = ['--ol-fhalf', '--ol-asc', '--ol-tex-lines', '--ol-dskip', '--ol-dskip-short', '--ol-leftmargin', '--ol-bullet', '--ol-bullet-k', '--ol-item-color'];

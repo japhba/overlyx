@@ -2,7 +2,8 @@
  * The PDF viewer (pdf.js) and SyncTeX: a small multi-page document is built; the PDF panel shows its
  * pages; forward search (Ctrl+Alt+J) from a paragraph on the last page scrolls the viewer there
  * and flashes the box; a double-click on the first page's abstract puts the cursor into that
- * paragraph (inverse search); a PDF file of the project opens in a tab of its own with the viewer.
+ * paragraph (inverse search); a PDF file of the project opens in a tab of its own with the viewer;
+ * a pinch (Ctrl + wheel) zooms about the pointer, and a huge page (A0) stays sharp where it is in view.
  */
 import { test, expect } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
@@ -21,7 +22,27 @@ test.beforeAll(() => {
   writeFileSync(`${DIR}/two.tex`, texDoc(paras.join('\n')));
   const fixture = `${FIXTURES_DIR}/example-gan/arxiv-1406.2661.pdf`;
   if (existsSync(fixture)) copyFileSync(fixture, `${DIR}/paper.pdf`);
+  writeFileSync(`${DIR}/poster.pdf`, a0Pdf());
 });
+
+/** A one-page A0 PDF (a line of text and a diagonal), written by hand */
+function a0Pdf(): Buffer {
+  const content = 'BT /F1 60 Tf 150 3150 Td (An A0 poster) Tj ET 0 0 1 RG 12 w 100 100 m 2284 3270 l S';
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 2384 3370] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objs.forEach((o, i) => { offsets.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offsets.map(o => `${String(o).padStart(10, '0')} 00000 n \n`).join('')
+    + `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
 test.afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 test.beforeEach(async ({ page }) => { await login(page); });
 
@@ -78,4 +99,43 @@ test('a PDF file of the project opens in a tab with the viewer', async ({ page }
   // back to the document tab: the editor is still there
   await page.locator('.docpanel .doc-tab[data-doc="two.tex"] .doc-name').click();
   await expect(page.locator('.lyx-editor .lyx-par').first()).toBeVisible({ timeout: 15000 });
+});
+
+test('a pinch (Ctrl + wheel) zooms the viewer about the pointer; an A0 page stays sharp where it is in view', async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.request.get('/api/projects');
+  await page.goto('/#/' + ID);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+  await page.locator('.tree-row.file', { hasText: 'poster.pdf' }).click();
+  const pageBox = page.locator('.pdf-tab .pdf-page-box');
+  await expect(pageBox).toHaveCount(1, { timeout: 30000 });
+  await expect(page.locator('.pdf-tab .pdf-page-box canvas.ready').first()).toBeAttached({ timeout: 15000 });
+  const b0 = (await pageBox.boundingBox())!;
+  const x = b0.x + b0.width * 0.3, y = b0.y + 200;
+  const fx = (x - b0.x) / b0.width, fy = (y - b0.y) / b0.height;
+  await page.mouse.move(x, y);
+  // a trackpad pinch arrives as Ctrl + wheel: it zooms this viewer, not the whole page
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 9; i++) { await page.mouse.wheel(0, -100); await page.waitForTimeout(40); }
+  await page.keyboard.up('Control');
+  await expect(page.locator('.pdf-tab .pdf-toolbar .small-btn[title="Fit the page width"]')).toHaveText(/^\d+%$/);
+  const b1 = (await pageBox.boundingBox())!;
+  expect(b1.width / b0.width).toBeGreaterThan(6);
+  // the spot that was under the pointer still is
+  expect(Math.abs((x - b1.x) / b1.width - fx)).toBeLessThan(0.01);
+  expect(Math.abs((y - b1.y) / b1.height - fy)).toBeLessThan(0.01);
+  expect(await page.evaluate(() => (window.visualViewport?.scale ?? 1))).toBe(1);
+  // the page's own canvas is kept within the browser's limits (drawn coarser); a sharp detail canvas covers the part in view
+  await expect(page.locator('.pdf-tab canvas.pdf-detail.ready')).toBeVisible({ timeout: 15000 });
+  const sizes = await page.locator('.pdf-tab .pdf-page-box canvas').evaluateAll(cs => cs.map(c => ({ detail: c.classList.contains('pdf-detail'), px: (c as HTMLCanvasElement).width * (c as HTMLCanvasElement).height, w: (c as HTMLCanvasElement).width })));
+  expect(sizes.find(s => !s.detail)!.px).toBeLessThanOrEqual(2 ** 25);
+  const detail = await page.locator('.pdf-tab canvas.pdf-detail').boundingBox();
+  const view = (await page.locator('.pdf-tab .pdf-pages').boundingBox())!;
+  expect(detail!.x).toBeLessThanOrEqual(view.x + 1);
+  expect(detail!.y).toBeLessThanOrEqual(view.y + 1);
+  expect(detail!.x + detail!.width).toBeGreaterThanOrEqual(view.x + view.width - 20);   // (less the scroll bar)
+  // back to the whole width
+  await page.locator('.pdf-tab .pdf-toolbar .small-btn[title="Fit the page width"]').click();
+  await expect(page.locator('.pdf-tab .pdf-toolbar .small-btn[title="Fit the page width"]')).toHaveText('Fit width');
+  expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
 });

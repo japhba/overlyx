@@ -29,6 +29,18 @@ export function sizeTable(base: number): number[] {
   return TABLES[10].map(v => Math.round(v * base / 10 * 100) / 100);
 }
 
+/**
+ * The class's display skips at a base size, in points: [\abovedisplayskip = \belowdisplayskip,
+ * \belowdisplayshortskip] (\abovedisplayshortskip is 0). They belong to \normalsize, so a box at
+ * 30 pt (\fontsize) keeps them. Measured with beamer and article (size1x.clo, beamer's 8–20 pt).
+ */
+export function displaySkips(base: number): [number, number] {
+  const known: [number, number, number][] = [[8, 8, 5], [10, 10, 6], [11, 11, 6.5], [12, 12, 6.5], [14, 14, 7], [17, 15, 8], [20, 17, 10]];
+  let best = known[0];
+  for (const k of known) if (k[0] <= base) best = k;
+  return [best[1], best[2]];
+}
+
 /** A size mark's value in points ("25pt", "25pt/30pt", a named size); null for no size. */
 export function sizeToPt(value: string | null | undefined, base: number): number | null {
   if (!value) return null;
