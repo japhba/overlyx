@@ -7,7 +7,7 @@
 import * as vscode from 'vscode';
 import fs from 'node:fs';
 import path from 'node:path';
-import { texHeadings, lyxToPm, splitDocId, projectOfDoc } from '@overlyx/core';
+import { texHeadings, lyxToPm, splitDocId, projectOfDoc, layoutCheck } from '@overlyx/core';
 import { Bridge, type BridgeDelegate } from './host/bridge.ts';
 import { connectWebviewBridge } from './host/webviewBridge.ts';
 import { Registry, type OpenEditor } from './host/registry.ts';
@@ -92,6 +92,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   };
 
   const bridge = new Bridge(makeDelegate());
+  // a finished build: the document's editor fetches the check of its layout text boxes
+  context.subscriptions.push({ dispose: build.onBuilt(docId => { const e = registry.byDocId(docId); if (e) void e.panel.webview.postMessage({ type: 'built' } satisfies HostToEditor); }) });
   context.subscriptions.push({ dispose: () => bridge.dispose() });
   let webviewBase: string;
   // Resolve again when opening a webview, since the user can close a forwarding tunnel.
@@ -199,6 +201,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
           job: job ? build.publicJob(job) : null,
           now: Date.now(),
         };
+      },
+      layoutCheck: (docId) => {
+        const b = build.lastBuild(docId);
+        const olx = b?.tex_path ? b.tex_path.replace(/\.tex$/, '.olx') : null;
+        if (!b?.source || !olx || !fs.existsSync(olx)) return { params: null, boxes: [] };
+        try {
+          const l = locate(docId);
+          return layoutCheck(fs.readFileSync(olx, 'utf8'), b.source, l.session ? l.session.toText() : readTextFile(path.join(l.root, l.relPath)));
+        } catch { return { params: null, boxes: [] }; }
       },
       cancelBuild: (docId) => build.cancelBuild(docId),
       pdfPath: (docId) => build.lastBuild(docId)?.pdf_path ?? null,

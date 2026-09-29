@@ -27,7 +27,7 @@ import { pdfLinkByToken, pdfLinksOf, createPdfLink, deletePdfLink, countHit, pdf
 import { publishAvailable, publishTargetsOf, setPublishTarget, deletePublishTarget, publishPdf, startPublishing } from './pdfpublish.ts';
 import { overleafProjectId, cloneOverleafProject } from './overleaf.ts';
 import { toPng, isDirectImage } from './graphics.ts';
-import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit } from './export.ts';
+import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit, layoutCheckOf } from './export.ts';
 import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
@@ -1269,6 +1269,11 @@ api.get('/docs/*/build', (req, res) => {
     job: job ? publicJob(job) : null,
     now: Date.now(),
   });
+});
+
+/** A layout document's text boxes as TeX set them in the last build, for the editor's check against the PDF (export.ts layoutCheckOf). */
+api.get('/docs/*/layoutcheck', (req, res) => {
+  try { res.json(layoutCheckOf(docId(req))); } catch (e) { res.status(500).json({ error: String((e as Error).message ?? e) }); }
 });
 
 /* ------------------------------------------------------------------- users */

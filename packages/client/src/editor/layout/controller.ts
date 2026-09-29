@@ -29,7 +29,7 @@ import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { GapCursor } from 'prosemirror-gapcursor';
 import { DOMSerializer, Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
 import { ySyncPluginKey } from 'y-prosemirror';
-import { schema, normalizePath, pathToString, preambleColors, pageSizeOf, pageFontsOf, rgbToHex, SHAPE_PRESETS, type PathSeg } from '@overlyx/core';
+import { schema, normalizePath, pathToString, preambleColors, pageSizeOf, pageFontsOf, rgbToHex, boxKey, SHAPE_PRESETS, type PathSeg, type LayoutCheck, type LayoutCheckBox, type OlxParams } from '@overlyx/core';
 import { setLayoutMathFont } from '../../fonts/editorfont';
 import { sizeTable, displaySkips, NAMED_SIZES } from '../fontsize';
 import { boxOf, objectBounds, unionBounds, isLayoutObject, pageObjects, rotatePoint, MM, docColors, boundsOf, color, TEX_LINE_VARS, type Box } from './geom';
@@ -131,6 +131,17 @@ const constrained = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean 
 function snapAngle(ax: number, ay: number, x: number, y: number): [number, number] {
   const step = Math.PI / 12, ang = Math.round(Math.atan2(y - ay, x - ax) / step) * step, len = Math.hypot(x - ax, y - ay);
   return [ax + len * Math.cos(ang), ay + len * Math.sin(ang)];
+}
+
+/**
+ * The check of the text boxes against the last build (core layout/check.ts), fetched by the shell
+ * after each build (`fetch`): TeX's own spacing replaces the editor's tables, and every box unchanged
+ * since the build whose text is laid out differently here, or runs out of its box in the PDF, is marked.
+ */
+export function refreshLayoutCheck(view: EditorView, fetch: () => Promise<LayoutCheck>): void {
+  const c = controllers.get(view);
+  if (!c || !L.isLayoutDoc(view.state.doc)) return;
+  fetch().then(check => { if (!view.isDestroyed) c.setCheck(check); }, () => { /* no build yet */ });
 }
 
 export function setTool(view: EditorView, tool: Tool, shape?: string): void {
@@ -363,6 +374,88 @@ class LayoutController {
     setLayoutMathFont(null);
   }
 
+  /* ---------------------------------------------------------------- the check against the PDF */
+
+  private check: LayoutCheck | null = null;
+  /** boxes that differ from the PDF — by node: a box edited or moved since is another node, its mark goes */
+  private flags = new WeakMap<PMNode, CheckFlag>();
+  private checkStamp = 0;
+  /** TeX's spacing from the last build (and the base size it was measured at) */
+  private texParams: { params: OlxParams; base: number } | null = null;
+
+  setCheck(check: LayoutCheck): void {
+    this.check = check;
+    if (check.params) { this.texParams = { params: check.params, base: this.basePt }; this.applyTexParams(); }
+    // measured once the new spacing is laid out (and the page font is in)
+    const measure = () => requestAnimationFrame(() => requestAnimationFrame(() => this.measureCheck()));
+    if (typeof document !== 'undefined' && document.fonts?.ready) void document.fonts.ready.then(measure); else measure();
+  }
+
+  /** TeX's display and list spacing in place of the tables (styles.css), while the base size is the one it was measured at */
+  private applyTexParams(): void {
+    const t = this.texParams;
+    if (!t || t.base !== this.basePt || !this.active) return;
+    const s = this.view.dom.style, p = t.params, f = (v: number) => String(Math.round(v * 1000) / 1000);
+    s.setProperty('--ol-dskip', f(p.above));
+    s.setProperty('--ol-dskip-short', f(p.bshort));
+    s.setProperty('--ol-leftmargin', f(p.leftmargin));
+    s.setProperty('--ol-labelsep', f(p.labelsep));
+    s.setProperty('--ol-itemsep', f(p.itemsep));
+  }
+
+  /** compare every box unchanged since the build with what TeX made of it */
+  private measureCheck(): void {
+    const c = this.check;
+    if (!c || this.view.isDestroyed || !this.active) return;
+    this.flags = new WeakMap();
+    const byKey = new Map(c.boxes.map(b => [`${b.page}|${b.key}`, b]));
+    const pxPerPt = this.fitPagePt * this.zoom;
+    let page = -1;
+    this.view.state.doc.forEach((pageNode, offset) => {
+      if (pageNode.type.name !== 'ol_page') return;
+      page++;
+      const seen = new Map<string, number>();
+      // the boxes in the order the writer writes them (groups entered), numbered like core's olboxBlocks
+      pageNode.descendants((n, p) => {
+        if (n.type.name !== 'ol_box') return n.type.name === 'ol_group';
+        const geo = boxKey(Number(n.attrs.x), Number(n.attrs.y), Number(n.attrs.w), Number(n.attrs.h));
+        const k = seen.get(geo) ?? 0;
+        seen.set(geo, k + 1);
+        const rec = byKey.get(`${page}|${geo}#${k}`);
+        if (!rec?.fresh) return false;
+        // an empty box (a background card) has no text to compare: TeX sets nothing, the editor an empty line
+        let atoms = false, display = false;
+        n.descendants(d => { if (d.isInline && !d.isText) atoms = true; if (d.type.name === 'math_display') display = true; return !atoms || !display; });
+        if (!atoms && !n.textContent.trim()) return false;
+        const content = (this.view.nodeDOM(offset + 1 + p) as HTMLElement | null)?.querySelector?.(':scope > .ol-box-content') as HTMLElement | null;
+        const flag = content ? compareWithPdf(content, rec, pxPerPt, display) : null;
+        if (flag) this.flags.set(n, flag);
+        return false;
+      });
+    });
+    this.checkStamp++;
+    this.renderOverlays(true);
+  }
+
+  private checkBadge(node: PMNode, pos: number, f: CheckFlag): HTMLElement {
+    const b = objectBounds(node);
+    const el = div('ol-check ol-check-' + f.kind, { left: MM(b.x + b.w), top: MM(b.y) });
+    el.textContent = f.kind === 'overflow' ? '!' : '≠';
+    el.title = f.text;
+    el.dataset.olCheck = f.kind;
+    if (f.kind === 'overflow') {
+      el.addEventListener('pointerdown', e => {
+        e.preventDefault(); e.stopPropagation();
+        // as tall as TeX's text (and the margins), from the same top
+        const n = this.view.state.doc.nodeAt(pos);
+        if (!n || n.type.name !== 'ol_box') return;
+        const h = L.r3(f.natural * 25.4 / 72.27 + 2 * Number(n.attrs.pad ?? 0) + 0.5);
+        this.view.dispatch(selectObjects(L.setAttrs(this.view.state.tr, pos, { h }), [pos]));
+      });
+    }
+    return el;
+  }
+
   /* ---------------------------------------------------------------- zoom */
 
   /** the canvas zoom, relative to the page fitting the window (1: the whole page is visible) */
@@ -513,6 +606,7 @@ class LayoutController {
     s.setProperty('--ol-dskip', String(dskip));
     s.setProperty('--ol-dskip-short', String(dshort));
     this.measurePageFont(fonts.family);
+    this.applyTexParams();
     // beamer's lists: \leftmargini (2em of \normalsize at every font size), the bullet template and colour
     s.setProperty('--ol-leftmargin', String(({ 10: 20, 11: 21.9, 12: 23.5 } as Record<number, number>)[this.basePt] ?? 2 * this.basePt));
     const pre = preamble.replace(/(^|[^\\])%.*$/gm, '$1');
@@ -664,7 +758,7 @@ class LayoutController {
       const editedHere = edited && edited.pos > pagePos && edited.pos < end ? edited.pos : -1;
       const key = [nodeId(page), pagePos, mine.map(o => o.pos).join(','), editedHere, editedHere >= 0 ? nodeId(edited!.node) : 0, st.tool, st.target ?? '',
         this.nodeSel ? `${this.nodeSel.seg}:${this.nodeSel.pt}` : '', JSON.stringify(this.guides.filter(g => g.page === pagePos)),
-        this.marquee?.page === pagePos ? JSON.stringify(this.marquee) : '', this.pen?.page === pagePos ? JSON.stringify(this.pen.nodes) : '', this.page.w, this.page.h].join('|');
+        this.marquee?.page === pagePos ? JSON.stringify(this.marquee) : '', this.pen?.page === pagePos ? JSON.stringify(this.pen.nodes) : '', this.page.w, this.page.h, this.checkStamp].join('|');
       const pvk = pv as PageView & { olOverlayKey?: string };
       if (!force && pvk.olOverlayKey === key) continue;
       pvk.olOverlayKey = key;
@@ -677,6 +771,13 @@ class LayoutController {
         badge.textContent = String(o.node.attrs.step);
         badge.title = `Appears on step ${o.node.attrs.step}${o.node.attrs.effect ? ` (${o.node.attrs.effect})` : ''}`;
         out.push(badge);
+      });
+      // the check against the PDF: its marks on boxes that differ
+      if (this.check) page.descendants((n, p) => {
+        if (n.type.name !== 'ol_box') return n.type.name === 'ol_group';
+        const f = this.flags.get(n);
+        if (f) out.push(this.checkBadge(n, pagePos + 1 + p, f));
+        return false;
       });
       if (edited && edited.pos > pagePos && edited.pos < end) out.push(this.frameEl(boxOf(edited.node), 'ol-editing', true, edited.pos));
       if (mine.length === 1) {
@@ -1985,6 +2086,40 @@ function refitShape(tr: Transaction, pos: number, d: string): void {
   // the new box's centre, in page coordinates (the old frame turned about the old centre)
   const [ncx, ncy] = rotatePoint(b.x + x0 + w / 2, b.y + y0 + h / 2, b.x + b.w / 2, b.y + b.h / 2, b.rot);
   L.setAttrs(tr, pos, { d: pathToString(rel, 3), vb: `0 0 ${L.r3(w)} ${L.r3(h)}`, x: L.r3(ncx - w / 2), y: L.r3(ncy - h / 2), w: L.r3(w), h: L.r3(h) });
+}
+
+/* ------------------------------------------------------------------ the check against the PDF */
+
+/** a box whose text differs from the PDF: it runs out of its box there, or has another number of lines */
+interface CheckFlag { kind: 'overflow' | 'lines'; text: string; natural: number }
+
+const ptToMmText = (pt: number) => String(Math.round(pt * 25.4 / 72.27 * 10) / 10);
+
+/**
+ * A box's text here against TeX's (its natural height, pt): the editor's text height is measured
+ * from its paragraphs' margin boxes (the TeX line rules of styles.css trim them to TeX's), in layout
+ * pixels — unaffected by the box's rotation or the zoom's transform.
+ */
+function compareWithPdf(content: HTMLElement, rec: LayoutCheckBox, pxPerPt: number, display: boolean): CheckFlag | null {
+  const blocks = ([...content.children] as HTMLElement[]).filter(k => k.offsetParent === content && k.offsetHeight > 0);
+  if (!blocks.length || !(pxPerPt > 0)) return null;
+  const first = blocks[0], last = blocks[blocks.length - 1];
+  const top = first.offsetTop - (parseFloat(getComputedStyle(first).marginTop) || 0);
+  const bottom = last.offsetTop + last.offsetHeight + (parseFloat(getComputedStyle(last).marginBottom) || 0);
+  const here = (bottom - top) / pxPerPt;
+  const diff = rec.natural - here, bs = rec.baselineskip;
+  const differs = Math.abs(diff) > bs / 2;
+  // whole lines more or fewer (and no display formula, which TeX and MathJax size differently): other line breaks
+  const lines = Math.round(Math.abs(diff) / bs);
+  const byLines = differs && !display && lines > 0 && Math.abs(Math.abs(diff) - lines * bs) < bs / 4;
+  const diffText = byLines ? `${lines} line${lines > 1 ? 's' : ''} ${diff > 0 ? 'longer' : 'shorter'} than here — TeX breaks its lines differently`
+    : `${ptToMmText(Math.abs(diff))} mm ${diff > 0 ? 'taller' : 'shorter'} than here`;
+  // running out of the box by a visible amount (a quarter of a line; a sliver of a point is not)
+  if (rec.natural - rec.inner > Math.max(2, bs / 4)) {
+    return { kind: 'overflow', natural: rec.natural, text: `In the PDF this text is ${ptToMmText(rec.natural - rec.inner)} mm taller than its box and runs out of it${differs ? ` (and ${diffText})` : ''}. Click to make the box that tall.` };
+  }
+  if (differs) return { kind: 'lines', natural: rec.natural, text: `In the PDF this text is ${diffText}.` };
+  return null;
 }
 
 /* ------------------------------------------------------------------ small helpers */

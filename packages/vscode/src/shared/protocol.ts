@@ -31,6 +31,8 @@ export type HostToEditor =
   | { type: 'command'; name: 'toggleMargin' | 'toggleCombined' | 'find' | 'syncToPdf' | 'buildPdf' | 'toggleTracking' }
   /** SyncTeX inverse search: a line (1-based) of the LaTeX as built — locate it and move the cursor */
   | { type: 'inverseSync'; line: number }
+  /** a PDF build of this document finished (a layout document fetches the check of its text boxes) */
+  | { type: 'built' }
   | { type: 'theme'; dark: boolean };
 
 /** editor webview → host */

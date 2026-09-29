@@ -413,7 +413,24 @@ blend.
     `\setbeamertemplate{itemize item}[triangle|circle|square|ball]` in its `\setbeamercolor{itemize item}`
     (`--ol-leftmargin`, `--ol-bullet`, `--ol-item-color`; copied into a presentation with
     `TEX_LINE_VARS`). What remains different is horizontal: the browser breaks lines greedily where
-    TeX optimises the paragraph, and glyph widths differ by about 1 %. Macro files the preamble `\input`s
+    TeX optimises the paragraph, and glyph widths differ by about 1 %.
+  * **The check against the PDF** (core `layout/check.ts`): the `olbox` macro sets a box's text at
+    its natural height first (then places it exactly as before — the PDF is unchanged, pixel for
+    pixel) and writes `<job>.olx`: the class's display and list spacing once (`\abovedisplayskip`…,
+    `\leftmargini`, `\labelsep`, `\itemsep` from `\@listi`), and per box and slide its frame, geometry,
+    natural height, inner height and baselineskip. The server keeps the source as built
+    (`<job>.olsrc`, before the path rewriting) and answers `GET /api/docs/:id/layoutcheck`
+    (`layoutCheckOf`): each record paired with its box by frame and geometry (the n-th of equal ones),
+    `fresh` while the box's source is unchanged since the build. A document last saved before these
+    macros builds with today's managed block anyway (`freshManagedBlock`; the file changes on its next
+    save). The editor fetches the check after every build (App.tsx on a new PDF and on opening; VS
+    Code: the host posts `built`, the bridge answers `layoutcheck` from the `.olx` beside the file and
+    the source it compiled), puts TeX's spacing in place of its tables (`applyTexParams`), and
+    compares each fresh box's text height (its paragraphs' margin boxes, in layout pixels) with TeX's:
+    a **red !** where the text runs out of its box in the PDF by more than a quarter line (a click
+    makes the box that tall), an **amber ≠** where it has another number of lines (or, with display
+    formulas, another height) than here. Marks belong to the node: editing or moving a box drops its
+    mark until the next build. Empty boxes (background cards) are not compared. Macro files the preamble `\input`s
     keep OverLyX's `%% @display` forms (`macrosFromLatex`). The example `poster_bernstein26` (a beamerposter of minipages and
     tcolorboxes) was rebuilt as native objects by `scratch/layoutmode/poster-gen.mts` and compiles to
     the same poster.

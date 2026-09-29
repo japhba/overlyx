@@ -60,7 +60,7 @@ import { setMarginMode } from '../editor/plugins/margin';
 import { setInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
 import { BoardEditor } from './BoardEditor';
 import { NewLayoutDialog } from './NewLayoutDialog';
-import { setLayoutHeader, layoutZoomStep } from '../editor/layout/controller';
+import { setLayoutHeader, layoutZoomStep, refreshLayoutCheck } from '../editor/layout/controller';
 import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilterKey } from '../editor/plugins/changes';
 import * as T from '../editor/tablecommands';
 import type { PresenceUser } from '../editor/editor';
@@ -687,7 +687,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     const h = handle;
     let firstSync = true;
     h.provider.on('sync', () => {
-      if (firstSync) { firstSync = false; navHistory.visitState(docId, h.view.state); }
+      if (firstSync) { firstSync = false; navHistory.visitState(docId, h.view.state); refreshLayoutCheck(h.view, () => api.layoutCheck(docId)); }
       setOutline(buildOutline(h.view.state.doc, true, editorContext.meta?.secnumdepth ?? 3));
       setChildIds(collectChildren(h.view));
       setDocTick(x => x + 1);
@@ -831,6 +831,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current); }, []);
   // when a document opens: show its last PDF, and resume polling if a build is running
   useEffect(() => { if (docId) pollBuild(docId, false); }, [docId]);
+  // a layout document: each new PDF brings the check of its text boxes against it (editor/layout/controller.ts)
+  useEffect(() => { const v = editorRef.current?.view; if (v && docId && pdf.url) refreshLayoutCheck(v, () => api.layoutCheck(docId)); }, [docId, pdf.url]);
 
   /** Build the PDF. `open: false` (LyX's Update) leaves the PDF pane as it is; `auto`: started by the auto-build setting (quiet). */
   const build = async (opts: { open?: boolean; auto?: boolean } = {}) => {

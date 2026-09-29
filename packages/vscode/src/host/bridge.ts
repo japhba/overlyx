@@ -29,6 +29,8 @@ export interface BridgeDelegate {
   bibSearch(docId: string, q: string, keys: string[], limit: number): Promise<{ entries: unknown[]; total: number; matches?: number }>;
   exportDoc(docId: string, format: string): Promise<Record<string, unknown>>;
   buildStatus(docId: string, withTex: boolean): Record<string, unknown>;
+  /** the check of a layout document's text boxes against its last build (core layout/check.ts) */
+  layoutCheck(docId: string): unknown;
   cancelBuild(docId: string): boolean;
   pdfPath(docId: string): string | null;
   synctexView(docId: string, line: number, column: number): Promise<unknown>;
@@ -135,6 +137,7 @@ export class Bridge {
       if (kind === 'export' && req.method === 'POST') { send(res, 200, await d.exportDoc(docId, String((await body(req))?.format ?? 'pdf'))); return; }
       if (kind === 'export/cancel' && req.method === 'POST') { send(res, 200, { ok: d.cancelBuild(docId) }); return; }
       if (kind === 'build') { send(res, 200, d.buildStatus(docId, url.searchParams.get('tex') === '1')); return; }
+      if (kind === 'layoutcheck') { send(res, 200, d.layoutCheck(docId)); return; }
       if (kind === 'pdf') {
         const file = d.pdfPath(docId);
         if (!file || !fs.existsSync(file)) { send(res, 404, { error: 'no pdf built yet' }); return; }

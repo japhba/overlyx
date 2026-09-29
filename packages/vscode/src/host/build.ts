@@ -16,7 +16,7 @@ export interface BuildJob {
   cancel?: () => void;
 }
 export interface PublicJob { id: number; status: JobStatus; engine: string; requestedBy: string; startedAt: number; phaseAt: number; finishedAt?: number; progress: string; rerun: boolean }
-export interface BuildRecord { status: 'ok' | 'error'; log: string; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[] }
+export interface BuildRecord { status: 'ok' | 'error'; log: string; pdf_path: string | null; tex_path: string | null; updated_at: number; warnings: string[]; /** the main file as compiled (the layout check's "as built") */ source?: string }
 
 export interface BuildRequest {
   docId: string;
@@ -30,6 +30,9 @@ export interface BuildRequest {
 }
 
 const jobs = new Map<string, BuildJob>();
+const builtListeners = new Set<(docId: string) => void>();
+/** told of every build that finished (with a PDF or not) */
+export function onBuilt(fn: (docId: string) => void): () => void { builtListeners.add(fn); return () => { builtListeners.delete(fn); }; }
 const lastBuilds = new Map<string, BuildRecord>();
 const queue: { job: BuildJob; req: BuildRequest }[] = [];
 let active = 0;
@@ -88,10 +91,13 @@ async function runJob(job: BuildJob, req: BuildRequest): Promise<void> {
     await req.prepare?.();
     if (isCancelled(job)) { job.finishedAt = Date.now(); return; }
     job.status = 'compiling'; job.phaseAt = Date.now();
+    let source: string | undefined;
+    try { source = fs.readFileSync(req.absPath, 'utf8'); } catch { /* read by latexmk or not at all */ }
     const r = await runLatexmk(job, req);
     if (isCancelled(job)) { job.finishedAt = Date.now(); return; }
-    lastBuilds.set(job.docId, r);
+    lastBuilds.set(job.docId, { ...r, source });
     job.status = r.status; job.finishedAt = Date.now();
+    for (const fn of builtListeners) { try { fn(job.docId); } catch { /* a listener's problem */ } }
   } catch (e) {
     lastBuilds.set(job.docId, { status: 'error', log: 'build failed: ' + String(e), pdf_path: null, tex_path: req.absPath, updated_at: Date.now(), warnings: [] });
     job.status = 'error'; job.finishedAt = Date.now();

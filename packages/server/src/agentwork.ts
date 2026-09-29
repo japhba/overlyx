@@ -45,7 +45,7 @@ const TEXT_EXT = new Set(['.tex', '.bib', '.sty', '.cls', '.bst', '.bbx', '.cbx'
 /** New binary files of these kinds are copied back too (a figure the agent made) */
 const FIGURE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.eps', '.pdf', '.webp']);
 /** LaTeX / tool output that never goes back into the project */
-const AUX_EXT = new Set(['.aux', '.log', '.out', '.toc', '.lof', '.lot', '.fls', '.fdb_latexmk', '.bbl', '.blg', '.bcf', '.xml', '.nav', '.snm', '.vrb', '.idx', '.ind', '.ilg', '.xdv', '.dvi', '.gz', '.synctex', '.run', '.pyc', '.tmp', '.bak', '.swp']);
+const AUX_EXT = new Set(['.olx', '.olsrc', '.aux', '.log', '.out', '.toc', '.lof', '.lot', '.fls', '.fdb_latexmk', '.bbl', '.blg', '.bcf', '.xml', '.nav', '.snm', '.vrb', '.idx', '.ind', '.ilg', '.xdv', '.dvi', '.gz', '.synctex', '.run', '.pyc', '.tmp', '.bak', '.swp']);
 const MAX_TEXT = 4 * 1024 * 1024;
 const MAX_NEW = 20 * 1024 * 1024;
 

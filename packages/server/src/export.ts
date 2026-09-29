@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
-import { headerValue } from '@overlyx/core';
+import { headerValue, layoutCheck, MANAGED_BEGIN, MANAGED_END, type LayoutCheck } from '@overlyx/core';
 import { config } from './config.ts';
 import { db } from './db.ts';
 import { buildDirPath } from './namespaces.ts';
@@ -258,6 +258,16 @@ function documentText(project: string, rel: string): string {
   return readTextFile(resolveProjectPath(project, rel));
 }
 
+/** `text` with the managed block OverLyX writes now (`current`'s) in place of its own */
+export function freshManagedBlock(text: string, current: string): string {
+  const block = (t: string): [number, number] | null => {
+    const a = t.indexOf(MANAGED_BEGIN), b = a >= 0 ? t.indexOf(MANAGED_END, a) : -1;
+    return a >= 0 && b > a ? [a, b + MANAGED_END.length] : null;
+  };
+  const x = block(text), y = block(current);
+  return x && y ? text.slice(0, x[0]) + current.slice(y[0], y[1]) + text.slice(x[1]) : text;
+}
+
 /** Put the document and its children into the build dir (graphics converted) and return the main file. */
 export async function exportTex(docId: string): Promise<{ dir: string; main: string; warnings: string[]; tex: string }> {
   const doc = await manager.open(docId);
@@ -268,10 +278,13 @@ export async function exportTex(docId: string): Promise<{ dir: string; main: str
   linkDocumentAssets(docDir, dir);
   const files = [doc.relPath, ...childDocuments(doc.project, doc.relPath)];
   const proj = projectDir(doc.project);
-  let mainText = '';
+  let mainText = '', mainSource = '';
   for (const rel of files) {
     let text: string;
     try { text = documentText(doc.project, rel); } catch { continue; }
+    // a layout document last saved before the layout macros changed builds with today's (they
+    // write what the editor's check of its text boxes needs); the file itself changes on its next save
+    if (rel === doc.relPath && text.includes('\\begin{olbox}')) text = freshManagedBlock(text, doc.toText());
     const relToDoc = path.relative(docDir, path.join(proj, rel));
     if (relToDoc.startsWith('..')) continue;   // outside the document's directory: found through TEXINPUTS
     const target = path.join(dir, relToDoc);
@@ -279,8 +292,12 @@ export async function exportTex(docId: string): Promise<{ dir: string; main: str
     try { if (fs.lstatSync(target).isSymbolicLink()) fs.unlinkSync(target); } catch { /* not there */ }
     const rewritten = rewriteParentPaths(await rewriteGraphics(text, path.dirname(path.join(proj, rel)), path.dirname(target), warnings), path.dirname(path.join(proj, rel)), proj);
     fs.writeFileSync(target, rewritten, 'utf8');
-    if (rel === doc.relPath) mainText = rewritten;
+    if (rel === doc.relPath) { mainText = rewritten; mainSource = text; }
   }
+  // a layout document: the source as built (before the path rewriting), for the check of its text
+  // boxes against the PDF (layoutCheckOf: which boxes are unchanged since)
+  const olsrc = path.join(dir, path.basename(doc.relPath, '.tex') + '.olsrc');
+  if (mainSource.includes('\\begin{olbox}')) fs.writeFileSync(olsrc, mainSource, 'utf8'); else fs.rmSync(olsrc, { force: true });
   return { dir, main: path.join(dir, path.basename(doc.relPath)), warnings, tex: mainText };
 }
 
@@ -549,4 +566,20 @@ export async function synctexEdit(docId: string, page: number, x: number, y: num
   const column = Number(/^Column:(-?\d+)/m.exec(out)?.[1] ?? -1);
   if (!Number.isFinite(line) || line < 1) return null;
   return { file: path.basename(file), line, column };
+}
+
+/**
+ * The check of a layout document's text boxes against its last build (core layout/check.ts): what
+ * TeX wrote to `<job>.olx`, paired with the boxes of the document now — those unchanged since the build are `fresh`.
+ */
+export function layoutCheckOf(docId: string): LayoutCheck {
+  const b = lastBuild(docId);
+  if (!b?.tex_path) return { params: null, boxes: [] };
+  const base = b.tex_path.replace(/\.tex$/, '');
+  let olx: string, built: string;
+  try { olx = fs.readFileSync(base + '.olx', 'utf8'); built = fs.readFileSync(base + '.olsrc', 'utf8'); } catch { return { params: null, boxes: [] }; }
+  const open = manager.docs.get(docId);
+  let live: string;
+  try { const { project, relPath } = DocManager.parseId(docId); live = open ? open.toText() : readTextFile(resolveProjectPath(project, relPath)); } catch { return { params: null, boxes: [] }; }
+  return layoutCheck(olx, built, live);
 }

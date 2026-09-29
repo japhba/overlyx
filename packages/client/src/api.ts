@@ -1,3 +1,5 @@
+import type { LayoutCheck } from '@overlyx/core';
+
 export interface User {
   id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null;
   /** a temporary account: came in through a share link without signing in; signing in keeps what the link opened */
@@ -257,6 +259,8 @@ export const api = {
   docOutline: (id: string) => req<{ headings: TexHeading[]; mtime: number }>('GET', `/api/docs/${encId(id)}/outline`),
   synctexView: (id: string, line: number) => req<{ boxes: SyncBox[] }>('GET', `/api/docs/${encId(id)}/synctex/view?line=${line}`),
   synctexEdit: (id: string, page: number, x: number, y: number) => req<{ file?: string; line: number | null; column?: number }>('GET', `/api/docs/${encId(id)}/synctex/edit?page=${page}&x=${x.toFixed(2)}&y=${y.toFixed(2)}`),
+  /** a layout document's text boxes as TeX set them in the last build (the editor's check against the PDF) */
+  layoutCheck: (id: string) => req<LayoutCheck>('GET', `/api/docs/${encId(id)}/layoutcheck`),
   build: (id: string, withTex = false) => req<{ build: BuildInfo | null; job: BuildJob | null; /** the server's clock */ now?: number }>('GET', `/api/docs/${encId(id)}/build${withTex ? '?tex=1' : ''}`),
   users: () => req<{ users: AdminUser[] }>('GET', '/api/users'),
   createUser: (username: string, name: string, password?: string) => req<{ user: User; password: string }>('POST', '/api/users', { username, name, password }),
@@ -271,7 +275,7 @@ export function isTextFile(name: string): boolean {
   const ext = base.includes('.') ? base.slice(base.lastIndexOf('.') + 1).toLowerCase() : '';
   return TEXT_EXTS.has(ext);
 }
-const AUX_EXTS = new Set(['aux', 'log', 'bbl', 'blg', 'fls', 'fdb_latexmk', 'out', 'toc', 'lof', 'lot', 'nav', 'snm', 'bcf', 'dvi', 'xdv', 'spl', 'idx', 'ind', 'ilg', 'glo', 'gls', 'glg', 'acn', 'acr', 'alg', 'ist', 'loa', 'lol', 'thm', 'vrb', 'xcp', 'upa', 'upb', 'synctex']);
+const AUX_EXTS = new Set(['olx', 'olsrc', 'aux', 'log', 'bbl', 'blg', 'fls', 'fdb_latexmk', 'out', 'toc', 'lof', 'lot', 'nav', 'snm', 'bcf', 'dvi', 'xdv', 'spl', 'idx', 'ind', 'ilg', 'glo', 'gls', 'glg', 'acn', 'acr', 'alg', 'ist', 'loa', 'lol', 'thm', 'vrb', 'xcp', 'upa', 'upb', 'synctex']);
 /** LaTeX build products — hidden in the file browser unless "all files" is on. */
 export function isAuxFile(name: string): boolean {
   const base = (name.split('/').pop() ?? name).toLowerCase();

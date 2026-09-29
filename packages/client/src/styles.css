@@ -1805,11 +1805,12 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .ol-page .ol-box-content > :last-child { margin-bottom: calc(-1em * var(--ol-tex-lines, 0) * (var(--ol-lh) / 2 - var(--ol-fhalf, 0))); }
 .ol-page .ol-box-content > .ol-par-disp-first:first-child { margin-top: calc(-1em * var(--ol-tex-lines, 0) * (var(--ol-lh) / 2 + var(--ol-fhalf, 0))); }
 .ol-page .ol-box-content > .ol-par-disp-last:last-child { margin-bottom: 0; }
-.ol-page .lyx-math-display { margin: calc(var(--ol-pt) * var(--ol-dskip, 11)) 0; }
-.ol-page .lyx-math-display.ol-disp-first { margin-top: 1lh; margin-bottom: calc(var(--ol-pt) * var(--ol-dskip-short, 6.5)); }
-.ol-page .lyx-math-display.ol-disp-last { margin-bottom: calc(var(--ol-pt) * var(--ol-dskip, 11) - 1lh); }
-.ol-page .lyx-math-display.ol-disp-first.ol-disp-last { margin-bottom: calc(var(--ol-pt) * var(--ol-dskip-short, 6.5) - 1lh); }
-.ol-page .ol-box-content > .ol-par-disp-last:last-child > .lyx-math-display.ol-disp-last { margin-bottom: -1lh; }
+.ol-page .lyx-math-display { --ol-after: calc(var(--ol-pt) * var(--ol-dskip, 11)); margin: calc(var(--ol-pt) * var(--ol-dskip, 11)) 0 var(--ol-after); }
+.ol-page .lyx-math-display.ol-disp-first { margin-top: 1lh; --ol-after: calc(var(--ol-pt) * var(--ol-dskip-short, 6.5)); }
+.ol-page .ol-box-content > .ol-par-disp-last:last-child > .lyx-math-display.ol-disp-last { --ol-after: 0px; }
+/* ProseMirror's trailing break after a display that ends its paragraph: its empty line overlaps the
+   formula (a presentation's copy has no such break) */
+.ol-page .lyx-math-display.ol-disp-last:has(~ .ProseMirror-trailingBreak) { margin-bottom: calc(var(--ol-after) - 1lh); }
 .ol-page .lm-field.display { line-height: inherit; }
 /* a size in a formula's text (\text{\small …}) is the size classes' (absolute on paper); MathJax laid
    the table out at the full size — its min-width would leave the difference beside it (off-centre) */
@@ -1823,8 +1824,8 @@ mjx-mtable:has(.lyx-size-tiny, .lyx-size-scriptsize, .lyx-size-footnotesize, .ly
 .ol-page .lyx-layout-itemize[data-depth="1"], .ol-page .lyx-layout-enumerate[data-depth="1"] { margin-left: calc(var(--ol-pt) * var(--ol-leftmargin, 21.9)); }
 .ol-page .lyx-layout-itemize[data-depth="2"], .ol-page .lyx-layout-enumerate[data-depth="2"] { margin-left: calc(var(--ol-pt) * var(--ol-leftmargin, 21.9) * 2); }
 .ol-page .lyx-layout-itemize[data-depth="3"], .ol-page .lyx-layout-enumerate[data-depth="3"] { margin-left: calc(var(--ol-pt) * var(--ol-leftmargin, 21.9) * 3); }
-.ol-page .lyx-layout-itemize[data-depth="0"] + .lyx-layout-itemize[data-depth="0"], .ol-page .lyx-layout-enumerate[data-depth="0"] + .lyx-layout-enumerate[data-depth="0"] { margin-top: calc(var(--ol-pt) * 3); }
-.ol-page .lyx-layout-itemize[data-label]::before, .ol-page .lyx-layout-enumerate[data-label]::before { left: auto; right: calc(100% - var(--ol-pt) * var(--ol-leftmargin, 21.9) * 0.75); width: auto; text-align: right; color: var(--ol-item-color, #3333b3); }
+.ol-page .lyx-layout-itemize[data-depth="0"] + .lyx-layout-itemize[data-depth="0"], .ol-page .lyx-layout-enumerate[data-depth="0"] + .lyx-layout-enumerate[data-depth="0"] { margin-top: calc(var(--ol-pt) * var(--ol-itemsep, 3)); }
+.ol-page .lyx-layout-itemize[data-label]::before, .ol-page .lyx-layout-enumerate[data-label]::before { left: auto; right: calc(100% - var(--ol-pt) * (var(--ol-leftmargin, 21.9) - var(--ol-labelsep, 5.475))); width: auto; text-align: right; color: var(--ol-item-color, #3333b3); }
 .ol-page .lyx-layout-itemize[data-label]::before { content: var(--ol-bullet, '\25B6'); font-size: calc(1em * var(--ol-bullet-k, 0.5)); line-height: calc(var(--ol-lh) / var(--ol-bullet-k, 0.5)); }
 .ol-layout .ol-box.ol-empty-frame:hover, .ol-layout .ol-box.ol-empty-frame:focus-within { outline: 1px dashed rgba(26,115,232,0.35); outline-offset: 0; }
 .ol-shape { pointer-events: none; }
@@ -1879,6 +1880,11 @@ mjx-mtable:has(.lyx-size-tiny, .lyx-size-scriptsize, .lyx-size-footnotesize, .ly
 .ol-h-sw { left: 0; top: 100%; cursor: nesw-resize; } .ol-h-w { left: 0; top: 50%; cursor: ew-resize; }
 .ol-h-rot { left: 50%; top: -26px; border-radius: 50%; cursor: grab; width: 11px; height: 11px; margin: -6px 0 0 -6px; }
 .ol-h-rotline { position: absolute; left: 50%; top: -22px; height: 22px; border-left: 1px solid var(--ol-sel); pointer-events: none; }
+/* the check against the PDF (controller: after a build): a box whose text differs from the PDF —
+   red: it runs out of its box there (a click makes the box that tall), amber: other line breaks */
+.ol-overlay > .ol-check { width: 18px; height: 18px; border-radius: 50%; transform: translate(-50%, -50%); font: 700 12px/18px var(--ui-font); text-align: center; color: #fff; background: #d97706; box-shadow: 0 1px 3px rgba(0,0,0,0.35); pointer-events: auto; cursor: help; z-index: 7; }
+.ol-overlay > .ol-check.ol-check-overflow { background: #dc2626; cursor: pointer; }
+.ol-overlay > .ol-check.ol-check-lines { width: 14px; height: 14px; font-size: 10px; line-height: 14px; opacity: 0.8; }
 .ol-badge { font: 600 10px/14px var(--ui-font); color: #fff; background: #d0701a; border-radius: 7px; padding: 0 5px; transform: translate(-40%, -60%); white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
 .ol-guide-v { top: -12px; bottom: -12px; width: 0; border-left: 1px solid #e0249a; }
 .ol-guide-h { left: -12px; right: -12px; height: 0; border-top: 1px solid #e0249a; }

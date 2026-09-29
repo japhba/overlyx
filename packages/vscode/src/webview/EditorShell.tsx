@@ -1,5 +1,5 @@
 import { MenuBar, openPalette, PALETTE_LABEL, type MenuDef, ThemeToggle } from '@client/app/MenuBar';
-import { setLayoutHeader, layoutZoomStep } from '@client/editor/layout/controller';
+import { setLayoutHeader, layoutZoomStep, refreshLayoutCheck } from '@client/editor/layout/controller';
 import { documentMenus } from '@client/app/documentMenus';
 import { editorViewMenu } from '@client/app/editorViewMenu';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from '@client/app/toolbars';
@@ -246,6 +246,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       }
       refreshMacros(handle.view, m?.macros ?? {});
       postOutline(handle.view);
+      // a layout document: the check of its text boxes against the last build (again after every build)
+      refreshLayoutCheck(handle.view, () => api.layoutCheck(docId));
       rerender();
       api.aiStatus().then(s => { editorContext.ai = s; }).catch(() => { editorContext.ai = { available: false, model: '', completionModel: '', models: [] }; });
       handle.view.focus();
@@ -318,6 +320,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
           else if (m.name === 'toggleCombined') setCombined(c => !c);
           break;
         case 'inverseSync': void gotoTexLine(m.line); break;
+        case 'built': { const hv = handleRef.current?.view; if (hv) refreshLayoutCheck(hv, () => api.layoutCheck(docId)); break; }
         case 'theme': hostDark.current = m.dark; rerender(); break;
       }
     };

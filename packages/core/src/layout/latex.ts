@@ -52,10 +52,25 @@ export const LAYOUT_MACROS = String.raw`% OverLyX layout objects: positioned on 
   \else\path[ol@frame,rounded corners=\ol@radius] (-\ol@w/2,-\ol@h/2) rectangle (\ol@w/2,\ol@h/2);\fi
   \node[anchor=center,inner sep=0pt,outer sep=0pt,transform shape] at (0,0) {\usebox\ol@box};
   \end{scope}\end{tikzpicture}}
-\newenvironment{olbox}[1]{\ol@reset\pgfqkeys{/ol}{#1}\ol@boxbegin
+% a text box's text is set at its natural height first, then placed in the box; that height goes to
+% \jobname.olx with the class's display and list spacing (OverLyX checks its editor against the PDF)
+\newwrite\ol@olx
+\AtBeginDocument{\immediate\openout\ol@olx=\jobname.olx
+  \begingroup\ifdefined\@listi\@listi\fi\immediate\write\ol@olx{olx params above=\the\dimexpr\abovedisplayskip\relax\space
+  ashort=\the\dimexpr\abovedisplayshortskip\relax\space below=\the\dimexpr\belowdisplayskip\relax\space
+  bshort=\the\dimexpr\belowdisplayshortskip\relax\space leftmargin=\the\leftmargini\space labelsep=\the\labelsep\space
+  itemsep=\the\dimexpr\itemsep\relax}\endgroup}
+\def\ol@tboxbegin{\pgfmathsetlengthmacro\ol@iw{\ol@w-2*(\ol@pad)}\pgfmathsetlengthmacro\ol@ih{\ol@h-2*(\ol@pad)}%
+  \begin{lrbox}{\ol@box}\begin{minipage}[t]{\ol@iw}}
+\def\ol@tboxend{\xdef\ol@bs{\the\dimexpr\baselineskip\relax}\par\end{minipage}\end{lrbox}%
+  \immediate\write\ol@olx{olx box \ifcsname c@framenumber\endcsname\the\c@framenumber\else\the\c@page\fi\space
+  \ifcsname beamer@slideinframe\endcsname\the\beamer@slideinframe\else1\fi\space x=\ol@x\space y=\ol@y\space w=\ol@w\space h=\ol@h\space
+  natural=\the\dimexpr\ht\ol@box+\dp\ol@box\relax\space inner=\ol@ih\space baselineskip=\ol@bs}%
+  \sbox\ol@box{\begin{minipage}[c][\ol@ih][\ol@valign]{\ol@iw}\usebox\ol@box\end{minipage}}}
+\newenvironment{olbox}[1]{\ol@reset\pgfqkeys{/ol}{#1}\ol@tboxbegin
   \ifx\ol@font\empty\else\pgfmathsetlengthmacro\ol@lead{\ol@leading*(\ol@font)}\fontsize{\ol@font}{\ol@lead}\selectfont\fi
   \ifx\ol@color\empty\else\color{\ol@color}\fi\csname ol@align@\ol@align\endcsname\ignorespaces}%
-  {\par\end{minipage}\end{lrbox}\ol@style\ol@place{\ol@boxdraw}}
+  {\ol@tboxend\ol@style\ol@place{\ol@boxdraw}}
 \def\ol@align@left{\raggedright}\def\ol@align@center{\centering}\def\ol@align@right{\raggedleft}\def\ol@align@justify{}
 \newenvironment{olraw}[1]{\ol@reset\pgfqkeys{/ol}{#1}\ol@boxbegin\ignorespaces}%
   {\par\end{minipage}\end{lrbox}\ol@style\ol@place{\ol@boxdraw}}

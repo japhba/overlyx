@@ -115,6 +115,20 @@ Some words in a box
 \end{document}
 `;
 
+// the check against the PDF: a box far too small for its text, and one that fits
+const CHECK = String.raw`\documentclass[aspectratio=169]{beamer}
+\begin{document}
+\begin{frame}[plain]
+\begin{olbox}{x=10mm,y=10mm,w=60mm,h=8mm,font=14pt}
+This box is much too small for its text: in the PDF the words run out of it, over whatever lies below, which the editor points out after a build.
+\end{olbox}
+\begin{olbox}{x=10mm,y=60mm,w=100mm,h=20mm,font=14pt}
+A short line.
+\end{olbox}
+\end{frame}
+\end{document}
+`;
+
 test.beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(DIR, { recursive: true });
@@ -127,6 +141,7 @@ test.beforeAll(() => {
   writeFileSync(`${DIR}/deck.tex`, DECK);
   writeFileSync(`${DIR}/texlines.tex`, TEXLINES);
   writeFileSync(`${DIR}/select.tex`, SELECT);
+  writeFileSync(`${DIR}/check.tex`, CHECK);
   // a 40 × 30 px PNG for the crop test
   writeFileSync(`${DIR}/pic.png`, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAKklEQVR4nO3NMQ0AAAgDsAmb/yALGXA06d9MeyJisVgsFovFYrFYLP4bL9HP3Ew1mJ9PAAAAAElFTkSuQmCC', 'base64'));
 });
@@ -603,4 +618,29 @@ test('selecting like Inkscape: a click on nothing deselects, rubber bands from t
   await page.keyboard.press('Control+z');
   expect((await state()).count).toBe(2);
   expect(errors).toEqual([]);
+});
+
+test('after a build, a text box whose text runs out of it in the PDF is marked; a click makes it that tall', async ({ page }) => {
+  test.setTimeout(300000);
+  const errors = collectErrors(page);
+  await login(page);
+  await openLayout(page, 'check.tex');
+  // an edit first: the file gets OverLyX's block (the layout macros) on its save
+  await page.locator('.ol-box', { hasText: 'A short line.' }).click();
+  await page.locator('.ol-box', { hasText: 'A short line.' }).click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Yes.');
+  await expect.poll(() => fileText('check.tex'), { timeout: 15000 }).toContain('A short line. Yes.');
+  await page.locator('.tb-btn[title^="View PDF"]').click();
+  const badge = page.locator('.ol-check.ol-check-overflow');
+  await expect(badge).toHaveCount(1, { timeout: 240000 });
+  await expect(badge).toHaveAttribute('title', /taller than its box and runs out of it/);
+  await expect(page.locator('.ol-check')).toHaveCount(1);   // the short box fits and matches
+  const h0 = await page.evaluate(() => { let h = 0; (window as any).overlyx.activeView.state.doc.descendants((n: any) => { if (n.type.name === 'ol_box' && n.textContent.startsWith('This box')) h = n.attrs.h; return true; }); return h; });
+  expect(h0).toBe(8);
+  await badge.click();
+  await expect(page.locator('.ol-check')).toHaveCount(0);
+  const h1 = await page.evaluate(() => { let h = 0; (window as any).overlyx.activeView.state.doc.descendants((n: any) => { if (n.type.name === 'ol_box' && n.textContent.startsWith('This box')) h = n.attrs.h; return true; }); return h; });
+  expect(h1).toBeGreaterThan(20);
+  expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
 });

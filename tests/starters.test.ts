@@ -9,6 +9,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statS
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { parseOlx, layoutCheck } from '../packages/core/src/layout/check.ts';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-starters-test');
 rmSync(ROOT, { recursive: true, force: true });
@@ -140,6 +141,16 @@ describe('starter templates', () => {
       expect(existsSync(join(dir, file.replace('.tex', '.pdf')))).toBe(true);
       expect(log).not.toMatch(/Citation .* undefined/);
       expect(log).not.toMatch(/Reference .* undefined/);
+      // a layout document: TeX wrote the check of its text boxes — the class's spacing and one record per box
+      if (id === 'poster') {
+        const olx = parseOlx(readFileSync(join(dir, 'poster.olx'), 'utf8'));
+        expect(olx.params).toMatchObject({ above: 11, bshort: 6.5, itemsep: 3 });
+        const tex = readFileSync(join(dir, file), 'utf8');
+        expect(olx.boxes.length).toBe((tex.match(/\\begin\{olbox\}/g) ?? []).length);
+        const check = layoutCheck(readFileSync(join(dir, 'poster.olx'), 'utf8'), tex, tex);
+        expect(check.boxes.length).toBe(olx.boxes.length);
+        expect(check.boxes.every(b => b.fresh && b.natural >= 0 && b.inner > 0)).toBe(true);
+      }
     }, 300000);
   }
 });
