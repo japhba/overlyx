@@ -6,7 +6,7 @@
  */
 import { Plugin, PluginKey, TextSelection, type Command, type Transaction, type EditorState } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
-import { Fragment, Slice, type Node as PMNode } from 'prosemirror-model';
+import { Fragment, Slice, type Mark, type Node as PMNode } from 'prosemirror-model';
 import { ReplaceStep } from 'prosemirror-transform';
 import { schema, changeDomAttrs } from '@overlyx/core';
 import { editorContext } from '../context';
@@ -17,6 +17,16 @@ function now(): number { return Math.floor(Date.now() / 1000); }
 
 function changeMark(type: 'inserted' | 'deleted') {
   return schema.marks.change.create({ type, author: editorContext.changeAuthorId ?? 0, time: now() });
+}
+
+/**
+ * The author's own insertion right before `pos`: typing on extends it (one \lyxadded group) —
+ * the change mark is not inclusive, and LyX's Change::isSimilarTo ignores the time as well.
+ */
+function ownInsertionBefore(doc: PMNode, pos: number): Mark | null {
+  const before = doc.resolve(pos).nodeBefore;
+  const m = before?.isText ? before.marks.find(x => x.type === schema.marks.change) : undefined;
+  return m && m.attrs.type === 'inserted' && m.attrs.author === (editorContext.changeAuthorId ?? 0) ? m : null;
 }
 
 /** Inline nodes that never carry a tracked change of their own: a margin drawing's anchor is not text. */
@@ -109,7 +119,7 @@ export function changeTrackingPlugin(): Plugin {
           step.getMap().forEach((os, oe, ns, ne) => {
             const from = mapToCurrent(ns, 1), to = mapToCurrent(ne, -1);
             if (to > from) {
-              const ins = changeMark('inserted');
+              const ins = ownInsertionBefore(tr.doc, from) ?? changeMark('inserted');
               tr.doc.nodesBetween(from, to, (node, pos) => {
                 if (node.isText) {
                   if (!changeOf(node)) tr.addMark(Math.max(from, pos), Math.min(to, pos + node.nodeSize), ins);

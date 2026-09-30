@@ -496,7 +496,9 @@ const marks: Record<string, MarkSpec> = {
   /** change tracking */
   change: {
     attrs: { type: { default: 'inserted' }, author: { default: 0 }, time: { default: 0 } },
-    inclusive: true,
+    // not carried into typed text: with tracking off, text typed after a suggestion is not part of
+    // it; with tracking on, the change tracking plugin marks the typed text as the typist's own
+    inclusive: false,
     toDOM: m => ['span', { class: 'lyx-change lyx-change-' + m.attrs.type, 'data-change': m.attrs.type, 'data-author': String(m.attrs.author), 'data-time': String(m.attrs.time) }, 0],
     parseDOM: [{ tag: 'span[data-change]', getAttrs: (d: HTMLElement) => ({ type: d.getAttribute('data-change'), author: Number(d.getAttribute('data-author')), time: Number(d.getAttribute('data-time')) }) }],
   },

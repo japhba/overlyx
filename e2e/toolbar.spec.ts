@@ -20,6 +20,7 @@ test.beforeAll(async ({ browser }) => {
   mkdirSync(DIR, { recursive: true });
   writeFileSync(FILE, body);
   await shareProject(browser, 'admin/e2e-toolbar', ['bob']);
+  await shareProject(browser, 'admin/e2e-toolbar', ['carol'], 'view');
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
@@ -153,6 +154,89 @@ test('review toolbar appears with change tracking', async ({ page }) => {
   await tb(page, 'r-accept').click();
   await expect.poll(() => file().includes('\\lyxadded{')).toBe(false);
   expect(file().replace(/\n/g, ' ')).toContain('Hello toolbar. tracked');
+});
+
+test('the mode switch at the top right: Editing · Suggesting · Viewing, and which changes are shown', async ({ page, browser }) => {
+  const errors = collectErrors(page);
+  page.on('dialog', d => { void d.accept(); });
+  await open(page);
+  const sw = page.locator('.tb-toprow .edit-mode-btn');
+  await expect(sw).toBeVisible();
+  // it ends the standard toolbar's row, as in Google Docs
+  const row = (await page.locator('.tb-toprow').boundingBox())!, btn = (await sw.boundingBox())!;
+  expect(row.x + row.width - (btn.x + btn.width)).toBeLessThan(20);
+  expect(btn.y - row.y).toBeLessThan(10);
+  const pick = async (sel: string) => { await sw.click(); await page.locator(`.edit-mode-menu ${sel}`).click(); await expect(page.locator('.edit-mode-menu')).toHaveCount(0); };
+  // at the end of the first paragraph (it starts with the table inserted above)
+  const typeAtEnd = async (text: string) => {
+    await page.locator('.lyx-editor > .lyx-par').first().click();
+    await page.evaluate(() => {
+      const v = (window as any).overlyx.activeView;
+      const end = v.state.selection.$from.end(1);
+      v.dispatch(v.state.tr.setSelection(v.state.selection.constructor.create(v.state.doc, end)));
+    });
+    await page.keyboard.type(text);
+  };
+  await page.locator('.lyx-editor > .lyx-par').first().click();
+  // the review test left change tracking on: Editing switches it off
+  if (await sw.getAttribute('data-edit-mode') !== 'editing') await pick('[data-mode="editing"]');
+  await expect(sw).toHaveAttribute('data-edit-mode', 'editing');
+
+  // Suggesting = change tracking: typed text is tracked, the review toolbar says so
+  await pick('[data-mode="suggesting"]');
+  await expect(sw).toHaveAttribute('data-edit-mode', 'suggesting');
+  await expect(sw).toContainText('Suggesting');
+  await expect(tb(page, 'r-track')).toHaveClass(/active/);
+  await typeAtEnd(' suggested');
+  await expect.poll(() => /\\lyxadded\{[^}]*\}\{[^}]*\}\{ ?suggested\}/.test(file())).toBe(true);
+
+  // Show changes: only deletions folds the insertion away (the review toolbar's switch follows)
+  await sw.click();
+  await expect(page.locator('.edit-mode-menu [data-changes="all"]')).toHaveAttribute('aria-checked', 'true');
+  await page.locator('.edit-mode-menu [data-changes="deletions"]').click();
+  await expect(page.locator('.lyx-editor .lyx-change-hidden')).not.toHaveCount(0);
+  await expect(tb(page, 'r-show-ins')).not.toHaveClass(/active/);
+  await expect(tb(page, 'r-show-del')).toHaveClass(/active/);
+  await sw.click();
+  await expect(page.locator('.edit-mode-menu [data-changes="deletions"]')).toHaveAttribute('aria-checked', 'true');
+  await page.locator('.edit-mode-menu [data-changes="all"]').click();
+  await expect(page.locator('.lyx-editor .lyx-change-hidden')).toHaveCount(0);
+
+  // Viewing: read-only here, the document keeps tracking on
+  await pick('[data-mode="viewing"]');
+  await expect(sw).toHaveAttribute('data-edit-mode', 'viewing');
+  await expect(page.locator('.lyx-editor').first()).toHaveAttribute('contenteditable', 'false');
+  const before = file();
+  await page.locator('.lyx-editor > .lyx-par').first().click();
+  await page.keyboard.type('zzz');
+  await page.waitForTimeout(1500);
+  expect(file()).toBe(before);
+  await expect(tb(page, 'r-track')).toHaveClass(/active/);
+
+  // back to Editing: editable again, untracked; rejecting the suggestion leaves the plain edit
+  await pick('[data-mode="editing"]');
+  await expect(sw).toHaveAttribute('data-edit-mode', 'editing');
+  await expect(page.locator('.lyx-editor').first()).toHaveAttribute('contenteditable', 'true');
+  await expect(tb(page, 'r-track')).not.toHaveClass(/active/);
+  await typeAtEnd(' plain');
+  await expect.poll(() => file().includes(' plain')).toBe(true);
+  await tb(page, 'r-rejectall').click();
+  await expect.poll(() => file().includes('\\lyxadded{')).toBe(false);
+  expect(file()).not.toContain('suggested');
+  expect(file()).toContain(' plain');
+  expect(file()).not.toContain('zzz');
+  expect(errors).toEqual([]);
+
+  // with view access only, Viewing is all there is
+  const ctx = await browser.newContext(); const carol = await ctx.newPage();
+  await open(carol, userCredentials('carol'));
+  const csw = carol.locator('.edit-mode-btn');
+  await expect(csw).toHaveAttribute('data-edit-mode', 'viewing');
+  await csw.click();
+  await expect(carol.locator('.edit-mode-menu [data-mode="editing"]')).toBeDisabled();
+  await expect(carol.locator('.edit-mode-menu [data-mode="suggesting"]')).toBeDisabled();
+  await expect(carol.locator('.edit-mode-menu [data-mode="viewing"]')).toHaveAttribute('aria-checked', 'true');
+  await ctx.close();
 });
 
 test('clicking a user avatar jumps to that user\'s cursor', async ({ browser }) => {

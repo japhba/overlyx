@@ -1324,6 +1324,16 @@ How it works, in order of what happens when you open a document:
 * Change tracking: insertions/deletions are marked per author (matched by the LyX author name);
   the status bar shows who you are tracking as and the change under the cursor; *Edit ▸ Track
   Changes* / the context menu accept or reject single changes or all of them.
+* **Mode switch: Editing · Suggesting · Viewing** (`app/EditModeSwitch.tsx`, both shells — the web
+  client at the right end of the first toolbar row, as in Google Docs; the VS Code webview in its
+  top bar): Suggesting is change tracking — a setting of the document (`\tracking_changes`), so it
+  is on for everyone editing it, and Editing turns it off; Viewing makes only this browser's
+  editors read-only (the same path as a view-only share, which shows Viewing with the other two
+  disabled). Under *Show changes*: all changes, only additions, only deletions, unchanged text
+  only — the review toolbar's insertion / deletion filter, applied to every editor of the combined
+  view. The change mark is not inclusive (`core/src/schema.ts`): text typed at the end of a
+  suggestion is plain while tracking is off, and the typist's own insertion while it is on (typing
+  on at the end of one's own insertion extends it: one `\lyxadded` group); `tests/changes-typing.test.ts`.
 * Macro rendering follows LyX's positional semantics (a `FormulaMacro` applies from its position on;
   later definitions — including ones nested in notes — override earlier ones). Macros with
   arguments are expanded from their definitions with the argument cells kept editable (`core/src/math/mathjax.ts`).

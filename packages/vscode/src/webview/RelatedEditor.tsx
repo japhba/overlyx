@@ -13,6 +13,8 @@ export interface RelatedHandle extends LocalEditorHandle { meta: DocMeta; flush(
 
 export function RelatedEditor(props: {
   id: string; marginMode: boolean;
+  /** Viewing (the mode switch) */
+  readOnly?: () => boolean;
   register(id: string, handle: RelatedHandle | null): void;
   onSelection(view: EditorView): void;
   onDocChange(): void;
@@ -54,6 +56,7 @@ export function RelatedEditor(props: {
       if (msg.type === 'relatedInit' && !handleRef.current) {
         const handle = createLocalEditor({
           docId: id, child: true, container: container.current!, pmDoc: msg.pmDoc, headerLines: msg.headerLines, marginMode,
+          readOnly: () => callbacks.current.readOnly?.() ?? false,
           onSelectionChange: view => callbacks.current.onSelection(view),
           onDocChange: () => { clearTimeout(timer); timer = setTimeout(flush, 300); callbacks.current.onDocChange(); },
         });

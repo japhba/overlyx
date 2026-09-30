@@ -87,6 +87,9 @@ describe('one toolbar definition for both front ends', () => {
       // presentation mode (View menu entry from editorViewMenu.ts, keys from the hook) is one module for both
       expect(src, `${file} must install presentation mode with usePresentation() (app/presentation.ts)`).toContain('usePresentation()');
       expect(src, `${file} must not handle data-presenting itself`).not.toContain('presenting');
+      // Editing · Suggesting · Viewing and the shown changes: one switch (app/EditModeSwitch.tsx)
+      expect(src, `${file} must show the mode switch from app/EditModeSwitch.tsx`).toMatch(/<EditModeSwitch /);
+      expect(src, `${file} must switch modes through applyEditMode`).toMatch(/applyEditMode\(m, /);
     });
   }
 

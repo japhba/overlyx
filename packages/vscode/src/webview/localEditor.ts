@@ -32,6 +32,8 @@ export interface LocalEditorOptions {
   headerLines: string[];
   marginMode?: boolean;
   child?: boolean;
+  /** the mode switch's Viewing: no edits (checked on every transaction; call view.setProps({}) when it changes) */
+  readOnly?: () => boolean;
   onSelectionChange?: (view: EditorView, info: { docChanged: boolean }) => void;
   onDocChange?: (view: EditorView) => void;
 }
@@ -94,12 +96,14 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
   });
 
   const state = EditorState.create({ schema, doc: initialDoc, plugins });
+  const readOnly = () => opts.readOnly?.() ?? false;
   const attributes = (prefs: { spellcheck: boolean; spellEngine: string }) => ({ ...editorAttributes(opts.child ?? false, prefs), 'data-doc-id': opts.docId, 'data-project': projectOfDoc(opts.docId), 'data-doc-dir': docDirOf(opts.docId) });
   const view: EditorView = new EditorView(opts.container, {
     state,
-    dispatchTransaction: dispatchTransactionProp(() => view, () => false),
+    dispatchTransaction: dispatchTransactionProp(() => view, readOnly),
     attributes: attributes(getPrefs()),
-    ...editorViewProps({ docId: opts.docId, onFocus: view => opts.onSelectionChange?.(view, { docChanged: false }) }),
+    editable: () => !readOnly(),
+    ...editorViewProps({ docId: opts.docId, viewOnly: readOnly, onFocus: view => opts.onSelectionChange?.(view, { docChanged: false }) }),
   });
   viewRef = view;
   const unsubscribePrefs = subscribePrefs(p => { view.setProps({ attributes: attributes(p) }); });

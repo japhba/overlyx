@@ -16,6 +16,7 @@ import { Home, projectDocs } from './Home';
 import { pendingImportFlag } from './pendingImport';
 import { TextEditor } from './TextEditor';
 import { PaneSwitch } from './PaneSwitch';
+import { EditModeSwitch, editModeOf, applyEditMode } from './EditModeSwitch';
 import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, resizeBetween, paneGrow, type PaneId, type PaneLayout } from './panes';
 import { MarkdownEditor } from './MarkdownEditor';
 import { ShareDialog } from './Share';
@@ -394,6 +395,11 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // (and not over an import that is about to run — Home.tsx picks it up; the tour is offered on the next visit)
   const [tour, setTour] = useState<'intro' | 'steps' | null>(() => (!user.guest && tourWanted() && !pendingImportFlag() ? 'intro' : null));
   const [viewOnly, setViewOnly] = useState(false);
+  // the mode switch's Viewing: this browser's editors read-only although the user may edit (per document)
+  const [viewing, setViewing] = useState(false);
+  const viewingRef = useRef(false); viewingRef.current = viewing;
+  // the editor has its role from the metadata (until then it is read-only anyway)
+  const metaApplied = useRef(false);
   // LyX toolbars: standard / extra always (unless hidden), math / table / review on, off or automatic (LyX's "auto")
   const { pref: themePref } = useTheme();
   usePresentation();   // View ▸ Presentation mode: Shift+F11 toggles, Esc leaves
@@ -655,6 +661,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     editorContext.docDir = docDirOf(docId);
     // never carry the previous document's author id / tracking state over (changes would be mis-attributed)
     editorContext.changeAuthorId = undefined; editorContext.trackChanges = false;
+    setViewing(false); viewingRef.current = false; metaApplied.current = false;
     let cancelled = false;
     let loadMeta: () => void = () => {};
     const scheduleOutline = debounce((view: EditorView) => { setOutline(buildOutline(view.state.doc, true, editorContext.meta?.secnumdepth ?? 3)); setChildIds(collectChildren(view)); }, 300);
@@ -707,8 +714,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       refreshMacros(h.view, m?.macros ?? null);
       const ro = m?.role === 'view';
       setViewOnly(ro);
-      h.setViewOnly(ro);
-      h.setEditable(!ro);
+      h.setViewOnly(ro || viewingRef.current);
+      h.setEditable(!ro && !viewingRef.current);
+      metaApplied.current = true;
       setOutline(buildOutline(h.view.state.doc, true, m?.secnumdepth ?? 3));
       rerender();
     };
@@ -742,6 +750,14 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     rerender();
     return () => { cancelled = true; clearTimeout(metaRetry); window.removeEventListener('online', loadMeta); handle.destroy(); editorRef.current = null; };
   }, [docId, reloadKey]);
+
+  // Viewing (the mode switch) on or off: the master and the combined view's children follow
+  useEffect(() => {
+    const h = editorRef.current;
+    if (!h || !metaApplied.current) return;
+    const ro = viewOnly || viewing;
+    for (const x of [h, ...childRefs.current.values()]) { x.setViewOnly(ro); x.setEditable(!ro); }
+  }, [viewing]);
 
   /**
    * The server's copy of the document has a different history than our local copy (the server
@@ -1333,6 +1349,13 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     return editorRef.current ? { view: editorRef.current.view, ydoc: editorRef.current.ydoc, docId: docId! } : null;
   })();
 
+  const modeRow = tbMode('standard') !== 'off' ? 'standard' : tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off' ? 'samerow' : 'own';
+  const modeSwitch = (
+    <EditModeSwitch mode={editModeOf(tracking, viewing)} canEdit={!viewOnly} view={view}
+      views={() => [masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)}
+      onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })} />
+  );
+
   // a guest signs in: with Google directly (back to this document afterwards), else on the sign-in page
   const signIn = () => { if (google) location.assign(googleSignInUrl()); else onSignIn(); };
 
@@ -1345,12 +1368,19 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         primary={isLyxDoc && <PaneSwitch layout={panes} onChange={changePanes} narrow={narrowPanes} />}
         right={docId && <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span>} />
       {user.guest && <GuestCallout user={user} project={curProject} google={google} onSignIn={signIn} />}
-      {isLyxDoc && tbMode('standard') !== 'off' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={tb.standard} />}
+      {/* the mode switch (Editing · Suggesting · Viewing) ends the first toolbar row, as in Google Docs */}
+      {isLyxDoc && (modeRow === 'standard' || modeRow === 'own') && (
+        <div class="tb-toprow">
+          {modeRow === 'standard' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={tb.standard} />}
+          {modeSwitch}
+        </div>
+      )}
       {/* LyX's default.ui puts View/Update and Extra on one row ("samerow") */}
       {isLyxDoc && (tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
         <div class="tb-samerow">
           {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={tb.viewUpdate} />}
           {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={tb.extra} />}
+          {modeRow === 'samerow' && modeSwitch}
         </div>
       )}
       {isLyxDoc && tbMode('vcs') === 'on' && <Toolbar id="vcs" label="Version Control" groups={vcsGroups} />}
@@ -1414,7 +1444,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (
-                <ChildEditor key={id + ':' + reloadKey} id={id} user={user} marginMode={marginMode} readOnly={viewOnly} onSelection={onSelection} onDocChange={() => { setDocTick(t => t + 1); }} onStale={resolveStale}
+                <ChildEditor key={id + ':' + reloadKey} id={id} user={user} marginMode={marginMode} readOnly={viewOnly || viewing} onSelection={onSelection} onDocChange={() => { setDocTick(t => t + 1); }} onStale={resolveStale}
                   register={(cid, h) => { if (h) childRefs.current.set(cid, h); else childRefs.current.delete(cid); rerender(); }} />
               ))}
             </div>

@@ -227,6 +227,24 @@ try {
   log('typing reached the .tex file on disk through Ctrl+S');
   await shot('02-typed-and-saved');
 
+  /* ---- 3b. the mode switch (top bar): Viewing makes the editor read-only, Editing gives it back ---- */
+  const editable = () => editorFrame.locator('.lyx-editor').first().getAttribute('contenteditable');
+  const docText = () => editorFrame.evaluate(() => window.overlyx.activeView.state.doc.textContent);
+  await editorFrame.locator('.editor-topbar .edit-mode-btn').click();
+  await editorFrame.locator('.edit-mode-menu [data-mode="viewing"]').click();
+  await until(() => editable().then(v => v === 'false'), 5000, 'Viewing: a read-only editor');
+  const textBefore = await docText();
+  await editorFrame.locator('.lyx-par', { hasText: 'are studied' }).first().click({ position: { x: 4, y: 8 } });
+  await page.keyboard.type('zzz');
+  // a command (a toolbar button) is refused as well
+  await editorFrame.evaluate(() => { const v = window.overlyx.activeView; v.dispatch(v.state.tr.insertText('yyy', 2)); });
+  await sleep(300);
+  if (await docText() !== textBefore) fail('Viewing mode let an edit through');
+  await editorFrame.locator('.editor-topbar .edit-mode-btn').click();
+  await editorFrame.locator('.edit-mode-menu [data-mode="editing"]').click();
+  await until(() => editable().then(v => v === 'true'), 5000, 'Editing: editable again');
+  log('mode switch: Viewing is read-only, Editing is editable again');
+
   /* ---- 3a. Ctrl+K: the link box (VS Code must not take the key as the start of its Ctrl+K chord) ---- */
   await editorFrame.evaluate(() => {
     const v = window.overlyx.activeView; let at = -1;

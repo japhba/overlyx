@@ -33,6 +33,7 @@ import { Comments } from '@client/app/Comments';
 import { StatusBar, type Status } from '@client/app/StatusBar';
 import { SourcePane, cursorLine, docBlocks, blockPos } from '@client/app/SourcePane';
 import { ViewModeSwitch, type ViewMode } from '@client/app/ViewModeSwitch';
+import { EditModeSwitch, editModeOf, applyEditMode } from '@client/app/EditModeSwitch';
 import { locateSourceLine } from '@client/app/sourcelocate';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '@client/editor/lyxmath/field';
 import {
@@ -76,6 +77,10 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [activePos, setActivePos] = useState(0);
   const [tracking, setTracking] = useState(false);
+  // the mode switch's Viewing: the editors are read-only (the file itself stays writable)
+  const [viewing, setViewing] = useState(false);
+  const viewingRef = useRef(false); viewingRef.current = viewing;
+  const readOnly = useCallback(() => viewingRef.current, []);
   const [chord, setChord] = useState<string | null>(null);
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [zoom, setZoom] = useState(Number(stored('ol.zoom') || 1) || 1);
@@ -227,7 +232,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       if (m) { setMeta(m); editorContext.meta = m; }
       const cached = editorSessions.has(docId);
       handle = createLocalEditor({
-        docId, container: containerRef.current, pmDoc: init.pmDoc, headerLines: headerRef.current, marginMode,
+        docId, container: containerRef.current, pmDoc: init.pmDoc, headerLines: headerRef.current, marginMode, readOnly,
         onSelectionChange: onSelection,
         onDocChange: v => { setDocTick(t => t + 1); postUpdate(v); postOutline(v); },
       });
@@ -375,6 +380,11 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       return next;
     });
   };
+
+  // Viewing on or off (or a related document's editor came): the editors re-read `editable`
+  useEffect(() => {
+    for (const v of allViews()) { v.setProps({}); v.dom.classList.toggle('view-only', viewing); }
+  }, [viewing, relatedRefs.current.size]);
 
   const toggleTracking = async () => {
     const target = viewDocId(currentView()!);
@@ -690,6 +700,8 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong>
         <span class="topbar-right">
           <ThemeToggle dark={shownDark} onClick={cycleTheme} title={`${shownDark ? 'Dark' : 'Light'} theme${themePref === 'system' ? " (following VS Code's)" : ''} — click for ${themePref === 'system' ? (shownDark ? 'light' : 'dark') : themePref === 'light' ? 'dark' : "VS Code's theme"}`} />
+          <EditModeSwitch mode={editModeOf(tracking, viewing)} canEdit view={view} views={allViews}
+            onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })} />
           <ViewModeSwitch mode={viewMode} onChange={setViewMode} />
         </span>
       </div>
@@ -750,7 +762,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
               {visibleIds.map(id => id === docId ? <div key={id}>
                 {combined && <div class="child-doc-header"><span class="name">{id.split('/').pop()}</span><button class="small-btn" onClick={() => setCombined(false)}>Show this document only</button></div>}
                 <div class="editor-host" ref={containerRef} />
-              </div> : <RelatedEditor key={id} id={id} marginMode={marginMode} register={registerRelated}
+              </div> : <RelatedEditor key={id} id={id} marginMode={marginMode} readOnly={readOnly} register={registerRelated}
                 onSelection={onSelection} onDocChange={() => setDocTick(t => t + 1)} />)}
             </div>
           </div>
