@@ -5,7 +5,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { login, collectErrors, PROJECTS_DIR, texDoc } from './helpers';
+import { login, collectErrors, PROJECTS_DIR, texDoc, pickTheme } from './helpers';
 
 const PROJECT = 'admin/e2e-darkpdf';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -93,7 +93,7 @@ test('dark pages: the paper in the page colour, colours keep their hue, the phot
   const photoLight = await pixel(page, spot[0], spot[1]);
 
   // dark theme: the paper takes the editor's page colour (#121216), the photograph keeps its colours
-  await page.locator('.menubar .theme-toggle').click();
+  await pickTheme(page, 'Dark');
   await expect(page.locator('.pdf-viewer')).toHaveClass(/dark-pages/);
   await expect(page.locator('[data-pdf-dark]')).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([18, 18, 22]);
@@ -112,7 +112,7 @@ test('dark pages: the paper in the page colour, colours keep their hue, the phot
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ol.prefs') || '{}').darkPdf)).toBe(false);
   await page.locator('[data-pdf-dark]').click();
   await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([18, 18, 22]);
-  await page.locator('.menubar .theme-toggle').click();
+  await pickTheme(page, 'Light');
   expect(errors.filter(e => !/favicon|ResizeObserver|willReadFrequently/.test(e))).toEqual([]);
 });
 
@@ -150,12 +150,12 @@ test('a PDF figure is judged as a whole: its heat map turns dark with it, the ph
   const grainLight = await pixel(page, spots.grain[0], spots.grain[1]);
   expect(heatLight).toBeGreaterThan(180);
 
-  await page.locator('.menubar .theme-toggle').click();
+  await pickTheme(page, 'Dark');
   await expect(page.locator('.pdf-viewer')).toHaveClass(/dark-pages/);
   await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([18, 18, 22]);
   // the heat map is dark with the figure; the photograph in the same figure is as it was
   expect(await area(spots.heat[0], spots.heat[1])).toBeLessThan(110);
   expect(near(await pixel(page, spots.grain[0], spots.grain[1]), grainLight, 8)).toBe(true);
-  await page.locator('.menubar .theme-toggle').click();
+  await pickTheme(page, 'Light');
 });
 

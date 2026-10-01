@@ -449,13 +449,15 @@ blend.
   menu bar, all toolbars (the docked contextual ones too), status bar, rulers and side panels are hidden,
   the page keeps its layout and stays editable; Esc leaves, a hint in the corner says so for a moment.
   One module for both shells (`app/presentation.ts`, `html[data-presenting]` in styles.css).
-* **Dark mode**: follows the system preference by default; the sun/moon button in the menu bar
-  flips it (remembered in this browser), *View ▸ Theme ▸ Follow the system* goes back to the OS
-  setting. In VS Code the same button sits in the editor's top bar next to the WYSIWYG / TeX /
-  Split switch and cycles VS Code's theme → light → dark. A right-click on the button (both shells:
-  `app/MenuBar.tsx ThemeToggle`) picks the text tone of the dark theme — white, or a sepia / grey tone
-  like Apple Books' reading themes, for everything white on the page (text, formulas, caret;
-  `prefs.darkTone` → `data-tone` on html, tokens in styles.css). Text and formulas are white on a near-black page; everything in
+* **Dark mode**: follows the system preference by default. The theme switch in the menu bar (sun =
+  light, moon = dark, half circle = default) opens a menu on a click or a right-click (both shells:
+  `app/MenuBar.tsx ThemeToggle` / `themeMenuItems`): *Default (follows the system)* — in VS Code,
+  where the switch sits in the editor's top bar next to WYSIWYG / TeX / Split, *Default (follows
+  VS Code)* —, *Light* or *Dark* (remembered in this browser / webview as `ol.theme`; Default
+  removes it), as do *View ▸ Theme* and *Settings ▸ Appearance* in the web client. Below them the
+  text tone of the dark theme — white, or a sepia / grey tone like Apple Books' reading themes, for
+  everything white on the page (text, formulas, caret; `prefs.darkTone` → `data-tone` on html,
+  tokens in styles.css). e2e tests switch with `pickTheme()` (e2e/helpers.ts). Text and formulas are white on a near-black page; everything in
   `packages/client/src/styles.css` goes through the theme tokens at the top of the file (light values
   on `:root`, dark ones on `html[data-theme="dark"]`, set by `app/theme.ts`).
 * **Fonts, for the editor and for the PDF separately** (like LyX's screen fonts and document fonts;

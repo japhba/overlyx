@@ -30,8 +30,6 @@ export function setThemePref(p: ThemePref): void {
   try { if (p === 'system') localStorage.removeItem(KEY); else localStorage.setItem(KEY, p); } catch { /* ignore */ }
   apply();
 }
-/** the menu-bar button: flip what is shown (and remember it; View ▸ Theme ▸ System goes back to following the OS) */
-export function toggleTheme(): void { setThemePref(currentTheme() === 'dark' ? 'light' : 'dark'); }
 
 function apply(): void {
   if (externalTheme) return;

@@ -91,3 +91,9 @@ export function userCredentials(username: string): { username: string; password:
   const [u, password] = lines[lines.length - 1].split('\t');
   return { username: u, password };
 }
+
+/** The theme switch (menu bar / VS Code top bar) opens a menu: Default, Light or Dark. */
+export async function pickTheme(page: Page, choice: 'Default' | 'Light' | 'Dark'): Promise<void> {
+  await page.locator('[data-theme-toggle]').first().click();
+  await page.locator('.ctx-menu[data-theme-menu] .ctx-item:not(.info)', { hasText: new RegExp('^' + choice) }).click();
+}

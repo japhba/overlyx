@@ -1115,7 +1115,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       ],
       themeItems: [
       { label: 'Theme ▸', sub: [
-        { label: 'Follow the system', checked: themePref === 'system', action: () => setThemePref('system') },
+        { label: 'Default (follows the system)', checked: themePref === 'system', action: () => setThemePref('system') },
         { label: 'Light', checked: themePref === 'light', action: () => setThemePref('light') },
         { label: 'Dark', checked: themePref === 'dark', action: () => setThemePref('dark') },
       ] },

@@ -82,7 +82,7 @@ describe('one toolbar definition for both front ends', () => {
       // Settings ▸ Editor ▸ Font ▸ "As in the document" needs the shown document's settings (fonts/editorfont.ts)
       expect(src, `${file} must report its document's fonts through setDocumentFonts`).toMatch(/setDocumentFonts\(headerLines\)/);
       expect(src, `${file} must not use CSS zoom`).not.toMatch(/style=\{\{\s*zoom|--editor-zoom/);
-      // the sun/moon switch (with its right-click tone menu) is MenuBar's ThemeToggle in both shells
+      // the theme switch (Default / Light / Dark and the dark text tone) is MenuBar's ThemeToggle in both shells
       expect(src, `${file} builds its own theme switch — use ThemeToggle from app/MenuBar.tsx`).not.toContain('class="theme-toggle"');
       // presentation mode (View menu entry from editorViewMenu.ts, keys from the hook) is one module for both
       expect(src, `${file} must install presentation mode with usePresentation() (app/presentation.ts)`).toContain('usePresentation()');

@@ -84,7 +84,7 @@ function FontSample() {
 }
 
 const THEMES: [ThemePref, string, string][] = [
-  ['system', 'Follow the system', 'Light or dark with the operating system.'],
+  ['system', 'Default', 'Light or dark with the operating system.'],
   ['light', 'Light', ''],
   ['dark', 'Dark', ''],
 ];

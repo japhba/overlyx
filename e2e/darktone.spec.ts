@@ -1,7 +1,7 @@
 /** Right-click on the sun/moon switch: the dark theme's text tone (white / sepia / grey), remembered per browser. */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
-import { login, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
+import { login, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf, pickTheme } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
 const PROJECT = 'admin/e2e-darktone';
@@ -27,7 +27,7 @@ test('right-click on the theme switch picks a sepia tone for the dark theme; it 
   await login(page);
   await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); localStorage.removeItem('ol.prefs'); localStorage.removeItem('ol.theme'); });
   await open(page);
-  if (await page.locator('html').getAttribute('data-theme') !== 'dark') await page.locator('[data-theme-toggle]').click();
+  await pickTheme(page, 'Dark');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect(page.locator('html')).toHaveAttribute('data-tone', 'white');
   expect(await textColor(page)).toBe('rgb(255, 255, 255)');
@@ -35,7 +35,8 @@ test('right-click on the theme switch picks a sepia tone for the dark theme; it 
   await page.locator('[data-theme-toggle]').click({ button: 'right' });
   const menu = page.locator('.ctx-menu');
   await expect(menu).toContainText('Text in the dark theme');
-  await expect(menu.locator('.ctx-item.checked')).toHaveText(/White/);
+  await expect(menu.locator('.ctx-item.checked').first()).toHaveText(/^Dark$/);   // the theme, then the tone
+  await expect(menu.locator('.ctx-item.checked').last()).toHaveText(/White/);
   await menu.locator('.ctx-item', { hasText: 'Sepia' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-tone', 'sepia');
   expect(await textColor(page)).toBe('rgb(232, 217, 189)');
@@ -47,11 +48,11 @@ test('right-click on the theme switch picks a sepia tone for the dark theme; it 
   await expect(page.locator('html')).toHaveAttribute('data-tone', 'sepia');
   expect(await textColor(page)).toBe('rgb(232, 217, 189)');
   await page.locator('[data-theme-toggle]').click({ button: 'right' });
-  await expect(page.locator('.ctx-menu .ctx-item.checked')).toHaveText(/Sepia/);
+  await expect(page.locator('.ctx-menu .ctx-item.checked').last()).toHaveText(/Sepia/);
   await page.keyboard.press('Escape');
 
   // the tone is a dark-theme setting: the light theme keeps its colours
-  await page.locator('[data-theme-toggle]').click();
+  await pickTheme(page, 'Light');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   expect(await textColor(page)).not.toBe('rgb(232, 217, 189)');
   expect(await textColor(page)).not.toBe('rgb(255, 255, 255)');

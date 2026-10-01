@@ -10,7 +10,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import zlib from 'node:zlib';
-import { login, openDoc, texDoc, PROJECTS_DIR } from './helpers';
+import { login, openDoc, texDoc, PROJECTS_DIR, pickTheme } from './helpers';
 
 const PROJECT = 'admin/e2e-dollar';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -113,10 +113,10 @@ test('a rewritten graphics file reloads by itself; dark theme inverts line art b
   // smart invert: classes come from the pixels, the filter only applies in the dark theme
   await expect(page.locator('.lyx-graphics').nth(0)).toHaveClass(/smart-invert/);
   await expect(page.locator('.lyx-graphics').nth(1)).not.toHaveClass(/smart-invert/);
-  await page.locator('.menubar .theme-toggle').click();
+  await pickTheme(page, 'Dark');
   await expect.poll(() => imgs.nth(0).evaluate(i => getComputedStyle(i).filter)).toMatch(/invert/);
   expect(await imgs.nth(1).evaluate(i => getComputedStyle(i).filter)).not.toMatch(/invert/);
-  await page.locator('.menubar .theme-toggle').click();
+  await pickTheme(page, 'Default');
 });
 
 test('a comment thread is a card: avatar, name and time per message, Reply / Resolve', async ({ page }) => {

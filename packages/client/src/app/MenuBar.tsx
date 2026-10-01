@@ -5,7 +5,7 @@ import type { PresenceUser } from '../editor/editor';
 import { UserAvatars } from './StatusBar';
 import { Wordmark } from './Logo';
 import { AvatarContent, initials } from './Avatar';
-import { toggleTheme, useTheme, DARK_TONES } from './theme';
+import { setThemePref, useTheme, DARK_TONES, type ThemePref } from './theme';
 import { getPrefs, setPref } from '../prefs';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
 import { formatShortcut } from './shortcuts';
@@ -20,21 +20,54 @@ export function darkToneMenuItems(): MenuItem[] {
 }
 
 /**
- * Sun / moon button: flips between light and dark (View ▸ Theme ▸ System follows the OS again); a
- * right-click picks the dark theme's text tone. Without props it follows the browser's theme
- * preference (the web client); the VS Code shell passes what it shows and its own cycling.
+ * The theme switch's menu: Default (the system's theme — VS Code's in the extension), Light or
+ * Dark, then the text tone of the dark theme.
  */
-export function ThemeToggle({ dark: shownDark, title, onClick }: { dark?: boolean; title?: string; onClick?: () => void } = {}) {
-  const { theme, pref } = useTheme();
+export function themeMenuItems(pref: ThemePref, pick: (p: ThemePref) => void, host = 'the system'): MenuItem[] {
+  return [
+    { label: 'Theme', info: true },
+    { label: `Default (follows ${host})`, checked: pref === 'system', action: () => pick('system') },
+    { label: 'Light', checked: pref === 'light', action: () => pick('light') },
+    { label: 'Dark', checked: pref === 'dark', action: () => pick('dark') },
+    { sep: true },
+    ...darkToneMenuItems(),
+  ];
+}
+
+const THEME_ICONS: Record<ThemePref, string> = {
+  light: '<circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" />',
+  dark: '<path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" />',
+  // half light, half dark: whichever the system (or VS Code) shows
+  system: '<circle cx="12" cy="12" r="8.5" /><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none" />',
+};
+
+/**
+ * The theme switch (sun = light, moon = dark, half circle = default): a click or a right-click
+ * opens themeMenuItems. Without props it uses the browser's preference (theme.ts, the web
+ * client); the VS Code shell passes its own preference, what it shows and `host` = "VS Code".
+ */
+export function ThemeToggle({ pref: givenPref, dark: shownDark, onPick, host = 'the system' }: { pref?: ThemePref; dark?: boolean; onPick?: (p: ThemePref) => void; host?: string } = {}) {
+  const { theme, pref: ownPref } = useTheme();
+  const pref = givenPref ?? ownPref;
   const dark = shownDark ?? theme === 'dark';
-  const label = title ?? `${dark ? 'Dark' : 'Light'} theme${pref === 'system' ? ' (following the system)' : ''} — click for ${dark ? 'light' : 'dark'}`;
-  const tones = (e: MouseEvent) => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, darkToneMenuItems()); };
+  // a click while the menu is open closes it (the menu's own mousedown handler) and must not reopen it
+  const wasOpen = useRef(false);
+  const menu = (x: number, y: number) => {
+    showContextMenu(x, y, themeMenuItems(pref, onPick ?? setThemePref, host));
+    document.querySelector('.ctx-menu')?.setAttribute('data-theme-menu', '');
+  };
+  const shown = pref === 'system' ? `default (${dark ? 'dark' : 'light'}, as ${host})` : dark ? 'dark' : 'light';
   return (
-    <button type="button" class="theme-toggle" data-theme-toggle data-current={dark ? 'dark' : 'light'} onClick={onClick ?? toggleTheme} onContextMenu={tones}
-      title={`${label}; right-click: text tone of the dark theme`}>
-      {dark
-        ? <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" /></svg>
-        : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" /></svg>}
+    <button type="button" class="theme-toggle" data-theme-toggle data-current={dark ? 'dark' : 'light'} data-pref={pref} aria-haspopup="menu"
+      title={`Theme: ${shown} — choose default, light or dark, and the text tone of the dark theme`}
+      onPointerDown={() => { wasOpen.current = !!document.querySelector('.ctx-menu[data-theme-menu]'); }}
+      onClick={e => {
+        if (wasOpen.current) { wasOpen.current = false; return; }
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        menu(r.left, r.bottom + 4);
+      }}
+      onContextMenu={e => { e.preventDefault(); menu(e.clientX, e.clientY); }}>
+      <svg viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: THEME_ICONS[pref] }} />
     </button>
   );
 }

@@ -245,6 +245,24 @@ try {
   await until(() => editable().then(v => v === 'true'), 5000, 'Editing: editable again');
   log('mode switch: Viewing is read-only, Editing is editable again');
 
+  /* ---- 3c. the theme switch: Default follows VS Code, Light / Dark override it ---- */
+  const themeOf = () => editorFrame.evaluate(() => document.documentElement.dataset.theme);
+  const vscodeTheme = await themeOf();
+  const pickTheme = async (choice) => {
+    await editorFrame.locator('.editor-topbar [data-theme-toggle]').click();
+    await editorFrame.locator('.ctx-menu[data-theme-menu] .ctx-item:not(.info)', { hasText: new RegExp('^' + choice) }).click();
+  };
+  if (await editorFrame.locator('.editor-topbar [data-theme-toggle]').getAttribute('data-pref') !== 'system') fail('the theme switch does not start on Default');
+  await editorFrame.locator('.editor-topbar [data-theme-toggle]').click();
+  if (!/^Default \(follows VS Code\)/.test(await editorFrame.locator('.ctx-menu[data-theme-menu] .ctx-item.checked').first().innerText())) fail('the theme menu does not offer Default (follows VS Code) as the current choice');
+  await page.keyboard.press('Escape');
+  const other = vscodeTheme === 'dark' ? 'Light' : 'Dark';
+  await pickTheme(other);
+  await until(() => themeOf().then(t => t === other.toLowerCase()), 5000, `the ${other} theme`);
+  await pickTheme('Default');
+  await until(() => themeOf().then(t => t === vscodeTheme), 5000, "VS Code's theme again");
+  log(`theme switch: ${other} overrides VS Code's ${vscodeTheme} theme, Default follows it again`);
+
   /* ---- 3a. Ctrl+K: the link box (VS Code must not take the key as the start of its Ctrl+K chord) ---- */
   await editorFrame.evaluate(() => {
     const v = window.overlyx.activeView; let at = -1;

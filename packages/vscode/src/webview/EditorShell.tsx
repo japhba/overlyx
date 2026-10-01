@@ -85,13 +85,12 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const [changeInfo, setChangeInfo] = useState<string | null>(null);
   const [zoom, setZoom] = useState(Number(stored('ol.zoom') || 1) || 1);
   const [viewMode, setViewMode] = useState<ViewMode>('wysiwyg');
-  // light / dark: VS Code's theme unless the user picked one here (the sun / moon button; stored like the web client's ol.theme)
+  // light / dark: VS Code's theme (Default) unless the user picked one in the theme switch (stored like the web client's ol.theme)
   const [themePref, setThemePref] = useState<'system' | 'light' | 'dark'>(() => { const v = stored('ol.theme'); return v === 'light' || v === 'dark' ? v : 'system'; });
   const hostDark = useRef(init.dark);
   const shownDark = themePref === 'system' ? hostDark.current : themePref === 'dark';
   useEffect(() => { applyTheme(shownDark); }, [shownDark]);
-  const cycleTheme = () => {
-    const next = themePref === 'system' ? (hostDark.current ? 'light' : 'dark') : themePref === 'light' ? 'dark' : 'system';
+  const pickTheme = (next: 'system' | 'light' | 'dark') => {
     setThemePref(next);
     try { if (next === 'system') localStorage.removeItem('ol.theme'); else localStorage.setItem('ol.theme', next); } catch { /* ignore */ }
   };
@@ -699,7 +698,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       <MenuBar menus={menus} showThemeToggle={false} paletteShortcut="Ctrl+Alt+Shift+P" captureF1={false} searchEntries={helpSearchEntries} />
       <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong>
         <span class="topbar-right">
-          <ThemeToggle dark={shownDark} onClick={cycleTheme} title={`${shownDark ? 'Dark' : 'Light'} theme${themePref === 'system' ? " (following VS Code's)" : ''} — click for ${themePref === 'system' ? (shownDark ? 'light' : 'dark') : themePref === 'light' ? 'dark' : "VS Code's theme"}`} />
+          <ThemeToggle pref={themePref} dark={shownDark} onPick={pickTheme} host="VS Code" />
           <EditModeSwitch mode={editModeOf(tracking, viewing)} canEdit view={view} views={allViews}
             onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })} />
           <ViewModeSwitch mode={viewMode} onChange={setViewMode} />
