@@ -115,6 +115,25 @@ function argInsetsOf(par: Paragraph, prefix: string): Map<string, TextInset> {
   return m;
 }
 
+/**
+ * Where the environment starting at paragraph `pit` ends because a later paragraph of it brings an
+ * argument the environment has already (a second "Uncover" paragraph with its own <3->): that one
+ * starts an environment of its own — merged, its argument was lost. pars.length when none does.
+ */
+function argumentBreak(pars: Paragraph[], pit: number): number {
+  const first = pars[pit];
+  const seen = new Set(argInsetsOf(first, '').keys());
+  for (let i = pit + 1; i < pars.length; i++) {
+    const p = pars[i];
+    if (p.depth < first.depth || (p.depth === first.depth && p.layout !== first.layout)) break;
+    if (p.depth > first.depth) continue;
+    const ids = [...argInsetsOf(p, '').keys()];
+    if (ids.some(id => seen.has(id))) return i;
+    for (const id of ids) seen.add(id);
+  }
+  return pars.length;
+}
+
 /** Output the LaTeX arguments (Argument insets) of a paragraph/inset, like getArgInsets(). */
 export function latexArgInsets(ctx: ExportContext, os: TexStream, rp: RunParams, args: Map<string, ArgumentSpec>, found: Map<string, TextInset>, prefix: string): void {
   const relevant = [...args.entries()].filter(([id]) => (prefix ? id.startsWith(prefix) : !id.includes(':')));
@@ -211,7 +230,8 @@ function prepareEnvironment(ctx: ExportContext, text: TextInfo, pit: number, os:
     if (hasArgsStyle(style)) {
       // arguments may sit in any paragraph of the environment (same layout & depth)
       const found = new Map<string, TextInset>();
-      for (let i = pit; i < pars.length; i++) {
+      const stop = argumentBreak(pars, pit);
+      for (let i = pit; i < stop; i++) {
         const p = pars[i];
         if (p.layout !== par.layout || p.depth < par.depth) break;
         if (p.depth > par.depth) continue;
@@ -261,7 +281,9 @@ function texEnvironment(ctx: ExportContext, text: TextInfo, pit: number, os: Tex
   const currentLayout = first.layout;
   const currentDepth = first.depth;
   const currentIndent = first.params.leftindent ?? '';
+  const stop = hasArgsStyle(styleOf(ctx, first, rp)) ? argumentBreak(pars, pit) : pars.length;
   while (pit < pars.length) {
+    if (pit === stop) return pit;
     const par = pars[pit];
     let goOut = par.depth < currentDepth;
     if (par.depth === currentDepth) {
