@@ -1,4 +1,4 @@
-import { Plugin, PluginKey, type SelectionBookmark } from 'prosemirror-state';
+import { Plugin, PluginKey, TextSelection, type SelectionBookmark } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { Fragment, Slice } from 'prosemirror-model';
 import { schema } from '@overlyx/core';
@@ -46,4 +46,25 @@ export async function pasteLatex(view: EditorView, docId: string, text: string):
   const tr = view.state.tr.setSelection(target).replaceSelection(slice).setMeta(key, { remove: id });
   if (moved) tr.setSelection(current.map(tr.doc, tr.mapping));
   view.dispatch(moved ? tr : tr.scrollIntoView());
+}
+
+/**
+ * Several blocks pasted into an empty paragraph take its place, so that the first keeps its layout —
+ * a pasted heading stays a heading (ProseMirror would pour its text into the empty paragraph, which
+ * keeps its own layout). One paragraph, or blocks pasted into text, are left to ProseMirror: they
+ * merge with the paragraph, or split it.
+ */
+export function pasteBlocksIntoEmpty(view: EditorView, slice: Slice): boolean {
+  const sel = view.state.selection;
+  if (!(sel instanceof TextSelection) || !sel.empty) return false;
+  const { $from } = sel;
+  if ($from.parent.type !== schema.nodes.paragraph || $from.parent.content.size || slice.content.childCount < 2) return false;
+  let blocks = true;
+  slice.content.forEach(n => { if (n.type !== schema.nodes.paragraph) blocks = false; });
+  if (!blocks) return false;
+  const at = $from.before();
+  const tr = view.state.tr.replaceWith(at, $from.after(), slice.content);
+  tr.setSelection(TextSelection.near(tr.doc.resolve(at + slice.content.size - 1), -1));
+  view.dispatch(tr.scrollIntoView().setMeta('paste', true).setMeta('uiEvent', 'paste'));
+  return true;
 }
