@@ -137,26 +137,51 @@ describe('Enter in the middle of a paragraph while somebody else edits it', () =
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)));
     splitBlock(view.state, view.dispatch);
   };
+  const once = (t: string, s: string) => expect(t.split(s).length - 1, s).toBe(1);
 
-  it('text typed offline into the first half survives the other side\'s split (formulas in the paragraph)', () => {
+  it('a split near the end keeps the first half: offline typing before the split survives, also beside formulas', () => {
     const state = baseState({ type: 'doc', content: [par(...ENCODER), par(text('Next paragraph.'))] });
     const online = client(state, 200), offline = client(state, 100);
-    typeBefore(online.view, 'multi-head', 'Zon ');
-    enterBefore(online.view, 'multi-head');
-    typeBefore(offline.view, 'identical layers', 'OFFLINE ');
-    typeBefore(offline.view, 'multi-head', 'Zoff ');
+    enterBefore(online.view, 'That is');
+    typeBefore(offline.view, 'a stack', 'OFFONE ');
+    typeBefore(offline.view, 'identical layers', 'OFFTWO ');
+    typeBefore(offline.view, 'That is', 'OFFTHREE ');
     merge(online.ydoc, offline.ydoc);
     const t = pars(online.view);
     expect(pars(offline.view)).toEqual(t);
-    expect(t.join('\n')).toContain('OFFLINE identical layers');
-    expect(t.join('\n')).toContain('Zoff');
-    expect(t[1]).toMatch(/^multi-head self-attention mechanism/);
-    // nothing doubled
-    expect(t.join('\n').match(/The encoder is composed/g)).toHaveLength(1);
-    expect(t.join('\n').match(/multi-head/g)).toHaveLength(1);
+    expect(t[0]).toContain('of OFFONE a stack');
+    expect(t[0]).toContain('OFFTWO identical layers');
+    expect(t.join('\n')).toContain('OFFTHREE');
+    expect(t[1]).toMatch(/^That is, the output/);
+    for (const s of ['The encoder is composed', 'multi-head', 'That is', 'is the function']) once(t.join('\n'), s);
   });
 
-  it('two people splitting the same paragraph: no half appears twice except the part after both split points', () => {
+  it('a split near the start keeps the second half: offline typing behind the formulas survives', () => {
+    const state = baseState({ type: 'doc', content: [par(...ENCODER)] });
+    const online = client(state, 200), offline = client(state, 100);
+    enterBefore(online.view, 'stack of');
+    typeBefore(offline.view, 'multi-head', 'OFFONE ');
+    typeBefore(offline.view, 'is the function', 'OFFTWO ');
+    merge(online.ydoc, offline.ydoc);
+    const t = pars(online.view);
+    expect(pars(offline.view)).toEqual(t);
+    expect(t[0]).toBe('The encoder is composed of a ');
+    expect(t[1]).toContain('a OFFONE multi-head');
+    expect(t[1]).toContain('OFFTWO is the function');
+  });
+
+  it('two people typing at the start of a paragraph and pressing Enter: the paragraph is there once', () => {
+    const state = baseState({ type: 'doc', content: [par(text('Decoder: the decoder is also composed of a stack of identical layers.'))] });
+    const c1 = client(state, 100), c2 = client(state, 200);
+    for (const [c, tok] of [[c1, 'Zone '], [c2, 'Ztwo ']] as const) { typeBefore(c.view, 'Decoder:', tok); enterBefore(c.view, 'Decoder:'); }
+    merge(c1.ydoc, c2.ydoc);
+    const t = pars(c1.view);
+    expect(pars(c2.view)).toEqual(t);
+    once(t.join('\n'), 'the decoder is also composed');
+    for (const tok of ['Zone', 'Ztwo']) once(t.join('\n'), tok);
+  });
+
+  it('two people splitting the same paragraph: only the stretch both copied can appear twice', () => {
     const state = baseState({ type: 'doc', content: [par(...ENCODER)] });
     const c1 = client(state, 100), c2 = client(state, 200);
     enterBefore(c1.view, 'multi-head');
@@ -164,18 +189,19 @@ describe('Enter in the middle of a paragraph while somebody else edits it', () =
     merge(c1.ydoc, c2.ydoc);
     const t = pars(c1.view).join('\n');
     expect(pars(c2.view).join('\n')).toBe(t);
-    expect(t.match(/The encoder is composed/g)).toHaveLength(1);
-    expect(t.match(/multi-head/g)).toHaveLength(1);   // between the two split points: once
+    once(t, 'The encoder is composed');
+    once(t, 'multi-head');   // between the two split points: once
   });
 
-  it('a split inside a list item keeps its layout; text typed meanwhile after the split point ends the first half', () => {
+  it('a split inside a list item keeps its layout; text typed meanwhile into the copied half lands at the split point', () => {
     const state = baseState({ type: 'doc', content: [{ type: 'paragraph', attrs: { layout: 'Itemize' }, content: [text('keys, values and queries come from the same place.')] }] });
     const c1 = client(state, 100), c2 = client(state, 200);
-    enterBefore(c1.view, 'queries');
+    enterBefore(c1.view, 'from the same');
+    typeBefore(c2.view, 'values', 'all ');
     typeBefore(c2.view, 'same place', 'very ');
     merge(c1.ydoc, c2.ydoc);
-    // Yjs cannot move text: the second half is a copy, so what was typed into it meanwhile stays where its characters were
-    expect(pars(c1.view)).toEqual(['keys, values and very ', 'queries come from the same place.']);
+    // Yjs cannot move text: the second (smaller) half is a copy, so what was typed into it meanwhile stays where its characters were
+    expect(pars(c1.view)).toEqual(['keys, all values and queries come very ', 'from the same place.']);
     expect(pars(c2.view)).toEqual(pars(c1.view));
     c1.view.state.doc.forEach(p => expect(p.attrs.layout).toBe('Itemize'));
   });

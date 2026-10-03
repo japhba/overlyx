@@ -16,13 +16,15 @@
  *
  * Enter in the middle of a paragraph is a second case. Yjs cannot move text, so a split keeps one half
  * in the paragraph's Yjs element and copies the other into a new one — and y-prosemirror picked the
- * half by a similarity score: with formulas in the paragraph it often kept the *second* half, rewrote
- * the paragraph's first text run with it and deleted the run behind it, so whatever somebody offline
- * had typed into that run was lost on reconnect, and two people splitting one paragraph duplicated
- * both halves. A split here always keeps the first half in place, its text runs trimmed (never
- * deleted): text typed meanwhile on another device survives (after the split point it lands at the end
- * of the first half), and two concurrent splits share their first half — only the stretch after both
- * split points can appear twice (a new paragraph's copy is all Yjs can do).
+ * half by a similarity score and aligned the text runs from the left: with formulas in the paragraph
+ * it rewrote the paragraph's *first* text run with the second half and deleted the run that was
+ * split, so whatever somebody offline had typed into that run was lost on reconnect, and two people
+ * splitting one paragraph duplicated both halves. Here the larger half stays in place (the first one
+ * on a tie) with the split run trimmed, never deleted, and only the smaller half is copied: text typed
+ * meanwhile on another device into the split run survives (inside the copied part it lands at the
+ * split point), and two people typing at the start of a paragraph and pressing Enter no longer
+ * duplicate it. What a copy cannot keep: text typed meanwhile into the copied half beyond the split
+ * run, and — when two people split one paragraph — the stretch both copied.
  */
 import { Plugin, TextSelection } from 'prosemirror-state';
 import type { Node as PMNode, MarkType } from 'prosemirror-model';
@@ -158,11 +160,37 @@ export function anchorSplit(binding: SyncBinding, y: Y.XmlFragment | Y.XmlElemen
   if (!old || Array.isArray(old) || !old.inlineContent || a.type !== old.type || b.type !== old.type) return false;
   if (!a.content.append(b.content).eq(old.content)) return false;
   const doc = y.doc!;
-  updateYFragment(doc, el, a, binding);   // the first half: same element, its runs trimmed
-  const second = new Y.XmlElement(b.type.name);
-  y.insert(left + 1, [second]);
-  updateYFragment(doc, second, b, binding);
+  if (b.content.size <= a.content.size) {
+    updateYFragment(doc, el, a, binding);   // the first half: same element, the split run trimmed, what follows it deleted
+    const second = new Y.XmlElement(b.type.name);
+    y.insert(left + 1, [second]);
+    updateYFragment(doc, second, b, binding);
+    return true;
+  }
+  // the second half is the larger one (Enter near the start): it stays, the first half is copied
+  const at = splitPoint(old, a.content.size);
+  const kids = el.toArray();
+  if (!at || kids.length !== normalized(old).length || (at.offset > 0 && !(kids[at.index] instanceof Y.XmlText))) return false;
+  if (at.offset > 0) (kids[at.index] as Y.XmlText).delete(0, at.offset);
+  if (at.index > 0) el.delete(0, at.index);
+  updateYFragment(doc, el, b, binding);
+  const first = new Y.XmlElement(a.type.name);
+  y.insert(left, [first]);
+  updateYFragment(doc, first, a, binding);
   return true;
+}
+
+/** Where content offset `pos` of a textblock falls among its children as Yjs stores them: before child `index`, `offset` characters into it (a text run only). */
+function splitPoint(node: PMNode, pos: number): { index: number; offset: number } | null {
+  const groups = normalized(node);
+  for (let index = 0; index < groups.length; index++) {
+    if (pos === 0) return { index, offset: 0 };
+    const g = groups[index];
+    const size = Array.isArray(g) ? g.reduce((n, t) => n + t.nodeSize, 0) : g.nodeSize;
+    if (pos < size) return Array.isArray(g) ? { index, offset: pos } : null;
+    pos -= size;
+  }
+  return null;   // at the very end: no second half to keep
 }
 
 /** Installs the anchoring in front of y-prosemirror's own PM → Yjs sync (place it right after ySyncPlugin). */

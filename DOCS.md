@@ -1318,14 +1318,16 @@ How it works, in order of what happens when you open a document:
    "queries") off the old text, and two people typing at the same place, one of them offline, got
    their words spliced into each other mid-word — `editor/plugins/typinganchor.ts` places such an
    insertion at the cursor first (`tests/typing-anchor.test.ts`, the token-accounting test in
-   `e2e/offline.spec.ts`). Yjs cannot move text, so Enter in the middle of a paragraph keeps the first
-   half in the paragraph's Yjs element (its text run trimmed) and *copies* the second half into a new
-   one (typinganchor.ts again: y-prosemirror sometimes kept the second half and deleted the run
-   before it, losing what somebody offline had typed there). What others typed meanwhile into the
-   split text run survives (behind the split point it ends up at the end of the first half), but two
-   limits remain: text typed meanwhile into the copied half *behind its next formula or inset* is
-   lost, and when two people split the same paragraph before syncing, the stretch after both split
-   points appears twice. External changes of
+   `e2e/offline.spec.ts`). Yjs cannot move text, so Enter in the middle of a paragraph keeps one half
+   in the paragraph's Yjs element and *copies* the other into a new one: typinganchor.ts keeps the
+   larger half (the first on a tie) with the split text run trimmed, never deleted, and copies the
+   smaller one (y-prosemirror aligned the runs from the left and, with formulas in the paragraph,
+   rewrote the first run and deleted the split one — what somebody offline had typed there was lost,
+   and two people typing at a paragraph's start and pressing Enter duplicated it). What others typed
+   meanwhile into the split run survives (inside the copied part it ends up at the split point). Two
+   limits remain: text typed meanwhile into the copied half *beyond a formula or inset* is lost, and
+   when two people split the same paragraph before syncing, a stretch both of them copied can appear
+   twice. External changes of
    the file are applied on the server as a *diff* (`packages/server/src/ydiff.ts`), so paragraphs
    they did not touch keep their identity and offline edits inside them survive.
    A formula is one value, not text: when two people change the same formula from the same version,

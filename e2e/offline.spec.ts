@@ -190,7 +190,7 @@ test('a minute offline beside another writer in the same paragraph and list: eve
       await p.keyboard.type(` ${token} `, { delay: 30 });
       typed.push(token);
       // the online side splits the list item (one text run): what the offline side typed into it survives the split
-      // (formulas: text typed meanwhile behind the next formula of a split-off half is not kept, nor are two splits of one paragraph — DOCS.md)
+      // (not kept: text typed meanwhile beyond a formula in the copied half; two splits of one paragraph may copy a stretch twice — DOCS.md)
       if (tag === 'zb' && inPar === 'previous decoder layer' && needle) await p.keyboard.press('Enter');
       await p.waitForTimeout(400 + Math.random() * 800);
     }
