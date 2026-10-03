@@ -98,7 +98,11 @@ blend.
   OverLyX tab) still has its citations, cross-references, labels, formulas, tables and figures; the
   plain-text form of the clipboard is LaTeX-ish (`$…$`, `\ref{…}`, `\citep{…}`), so pasting into a
   `.tex` file or a chat gives something useful; HTML from a web page or another editor pastes as
-  LyX content (headings, bold/italic/typewriter, lists, tables). **Rows of a table** (any cell
+  LyX content (headings, bold/italic/typewriter, lists — numbered ones as Enumerate, Google Docs'
+  `<li><p>` items too —, tables). Several blocks pasted into the middle of a paragraph split it and
+  land as paragraphs: ProseMirror's content fitting never wraps them into an inset (the only inline
+  node that holds paragraphs — a Note by default, missing from the PDF) or a table, which
+  `core/src/schema.ts` marks as not generatable. **Rows of a table** (any cell
   selection — drag across cells, Shift+click, Shift+↓) paste as in LyX (`InsetTabular::pasteClipboard`):
   cell by cell from the cursor's cell, overwriting, with rows and columns added past the table's end;
   cut empties the cells, and outside a table they paste as a new table. Ctrl+V, the right-click menu
