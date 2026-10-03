@@ -5,7 +5,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { login, collectErrors, adminCredentials, PROJECTS_DIR, shareProject, userCredentials } from './helpers';
+import { login, collectErrors, adminCredentials, PROJECTS_DIR, shareProject, userCredentials, acceptDialog } from './helpers';
 
 const PROJECT = 'admin/e2e-offline';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -255,11 +255,12 @@ test('offline edits that cannot be merged (server history re-created) are kept a
   expect((await admin.request.post(base + '/api/auth/login', { data: adminCredentials() })).ok()).toBe(true);
   expect((await admin.request.post(base + `/api/docs/${encodeURIComponent(DOC)}/reset`)).ok()).toBe(true);
 
-  const dialogs: string[] = [];
-  page.on('dialog', d => { dialogs.push(d.message()); void d.accept(); });
   await context.setOffline(false);
-  await expect.poll(() => dialogs.length, { timeout: 20000 }).toBe(1);
-  expect(dialogs[0]).toContain('kept as the version');
+  // the app's own alert dialog (not a native one): "Document Replaced"
+  const replacedDlg = page.locator('.dialog-backdrop').last().locator('.dialog', { hasText: 'Document Replaced' });
+  await replacedDlg.waitFor({ state: 'visible', timeout: 20000 });
+  await expect(replacedDlg).toContainText('kept as the version');
+  await acceptDialog(page);
   // the document reloads from the server (without the edit) and the edit is available as a version
   await expect(saveState(page)).toHaveText(/All changes saved/, { timeout: 20000 });
   await expect(page.locator('.lyx-editor')).not.toContainText('UNMERGEABLE-EDIT');

@@ -12,6 +12,7 @@ import { api, fileUrl, type Role } from '../api';
 import { highlightTex, highlightLines } from './texhighlight';
 import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask, type Snapshot } from './codearea';
 import { splitDocId } from '@overlyx/core';
+import { uiConfirm } from './Dialogs';
 
 type SaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'conflict' | 'error' | 'readonly';
 const LABEL: Record<SaveState, string> = { loading: 'Loading…', saved: '✓ Saved', dirty: 'Unsaved changes…', saving: 'Saving…', conflict: 'Not saved — changed on the server', error: 'Could not save', readonly: '👁 view only' };
@@ -142,7 +143,7 @@ export function TextEditor({ id, notify }: { id: string; notify: (text: string, 
         <span class={'state ' + state} data-state={state}>{LABEL[state]}{state === 'error' && err ? ': ' + err : ''}</span>
         <span class="spacer" />
         <span title="Line and column of the cursor">Ln {pos.line}, Col {pos.col} · {lines} lines</span>
-        <button class="small-btn" title="Reload from the server" onClick={() => { if (!dirty.current || confirm('Discard your unsaved changes and reload?')) void load(); }}>↻ Reload</button>
+        <button class="small-btn" title="Reload from the server" onClick={() => { void (async () => { if (!dirty.current || await uiConfirm('Reload', 'Discard your unsaved changes and reload?', { danger: true, okLabel: 'Discard and Reload' })) void load(); })(); }}>↻ Reload</button>
         <a class="small-btn" href={fileUrl(project, path)} download={path.split('/').pop()} title="Download this file">⬇</a>
       </div>
       {conflict && (

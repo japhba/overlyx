@@ -22,6 +22,7 @@ import { useMathRendererVersion } from '../editor/lyxmath/usemath';
 import { latexSelectionText } from './richcopy';
 import { bibRefs, type BibRef } from './bibrefs';
 import { parseBlocks, type MdBlock } from './mdblocks';
+import { uiConfirm } from './Dialogs';
 
 interface Approval { requestId: string; method: string; params: any }
 
@@ -556,9 +557,9 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
     syncThread(t.id).catch(e => notify(errText(e), 'error'));
   };
 
-  const undo = (cp: AgentCheckpoint) => {
+  const undo = async (cp: AgentCheckpoint) => {
     const tid = selRef.current;
-    if (!tid || !confirm(`Take back the changes of this turn (${cp.files.map(f => baseName(f.path)).join(', ')})? Whatever was edited since stays.`)) return;
+    if (!tid || !(await uiConfirm('Undo Turn', `Take back the changes of this turn (${cp.files.map(f => baseName(f.path)).join(', ')})? Whatever was edited since stays.`, { okLabel: 'Undo' }))) return;
     api.agentUndo(project, tid, cp.n)
       .then(r => { showCheckpoint(r.checkpoint); if (r.kept.length) notify(`Taken back, except: ${r.kept.map(k => `${baseName(k.path)} — ${k.why}`).join('; ')}`); })
       .catch(e => notify(errText(e), 'error'));
