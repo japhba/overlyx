@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { parseFormula, renderHullSource, type MacroTable } from '../packages/core/src/math';
-import { splitTrailingScripts } from '../packages/core/src/math/mathjax.ts';
+import { splitTrailingScripts, expandUserMacros } from '../packages/core/src/math/mathjax.ts';
 
 const MACROS: MacroTable = {
   q: { nargs: 0, def: 'q_{a}' },
@@ -53,5 +53,27 @@ describe('macro scripts render greedily', () => {
   it('the LaTeX written back is untouched', async () => {
     const { writeFormula } = await import('../packages/core/src/math');
     expect(writeFormula(parseFormula('$\\q^{x}_{y}$', MACROS))).toBe('$\\q^{x}_{y}$');
+  });
+});
+
+describe('macros that use other macros', () => {
+  const NESTED: MacroTable = {
+    bb: { nargs: 1, def: '\\mathbf{#1}' },
+    bz: { nargs: 0, def: '\\bb{z}' },
+    vect: { nargs: 1, def: '\\bb{#1}' },
+    pair: { nargs: 2, def: '(\\bz, #2)' },
+  } as MacroTable;
+  const show = (latex: string) => renderHullSource(parseFormula(latex, NESTED), NESTED).latex;
+  it('expands the inner macro instead of showing its name (\\bz := \\bb{z} rendered as "\\bb z")', () => {
+    expect(show('q(\\bz)')).toContain('\\mathbf{');
+    expect(show('q(\\bz)')).not.toMatch(/\\bb(?![a-z])/);
+    expect(show('\\vect{y}')).toContain('\\mathbf');
+    expect(show('\\pair{a}{b}')).toContain('\\mathbf');
+  });
+  it('expandUserMacros: groups, single tokens, recursion limit', () => {
+    expect(expandUserMacros('\\bb{z}+\\bb x', NESTED)).toBe('{\\mathbf{{z}}}+{\\mathbf{{x}}}');
+    expect(expandUserMacros('\\bz', NESTED)).toBe('{{\\mathbf{{z}}}}');
+    const loop = { a: { nargs: 0, def: '\\a' } } as MacroTable;
+    expect(() => expandUserMacros('\\a', loop)).not.toThrow();
   });
 });

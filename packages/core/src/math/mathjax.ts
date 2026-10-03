@@ -14,7 +14,7 @@
 import type { Atom, Cell, Grid, Hull, MacroTable } from './ast';
 import { SYMBOLS } from './parse';
 import { evalColor } from '../layout/colors';
-import { approximateImageSymbols, approximateOverlapSymbols, approximateRaisebox, replaceCommand } from '../macros';
+import { approximateImageSymbols, approximateOverlapSymbols, approximateRaisebox, replaceCommand, readGroup } from '../macros';
 import mathjaxMacrosTable from './mathjax-macros.json';
 
 /** LyX predefined macros MathJax lacks, as macro definitions (scripts/gen-mathjax-macros.ts) */
@@ -327,13 +327,50 @@ function macroToTex(a: Atom & { t: 'macro' }, ctx: TexContext, mode: 'math' | 't
     // no definition: show the name with its arguments
     return `\\htmlClass{lm-macro}{\\htmlClass{lm-unknown}{\\text{\\textbackslash ${escapeText(a.n)}}}${args.map(s => `\\{${s}\\}`).join('')}}`;
   }
-  const def = sanitizeForMathjax(info.def, a.n, a.args.length);
+  const def = expandUserMacros(sanitizeForMathjax(info.def, a.n, a.args.length), ctx.macros);
   const nopt = info.nopt ?? 0;
   let body = def;
   // template: arguments are substituted as already-wrapped cells; the rest renders non-editable
   body = body.replace(/#(\d)/g, (_m, d) => { const k = Number(d) - 1; return k < args.length ? `{${args[k]}}` : ''; });
   void nopt; void id;
   return `\\htmlClass{lm-macro}{${body}}`;
+}
+
+/**
+ * User macros used inside another user macro's definition, expanded as TeX would expand them
+ * (`\newcommand{\bb}[1]{\mathbf{#1}}`, `\newcommand{\bz}{\bb{z}}`): MathJax knows none of the
+ * document's macros, so `\bz` used to show as "\bb" followed by z. Arguments are `{groups}` or
+ * single tokens; an absent optional argument is empty; recursion stops after a few levels.
+ */
+export function expandUserMacros(tex: string, macros: MacroTable, depth = 0): string {
+  if (depth > 6 || !tex.includes('\\')) return tex;
+  let out = '';
+  for (let i = 0; i < tex.length;) {
+    if (tex[i] !== '\\') { out += tex[i++]; continue; }
+    const m = /^\\([A-Za-z]+|.)/.exec(tex.slice(i));
+    if (!m) { out += tex[i++]; continue; }
+    const name = m[1], info = macros[name];
+    let j = i + m[0].length;
+    if (!info?.def || !/^[A-Za-z]/.test(name)) { out += m[0]; i = j; continue; }
+    const nopt = info.nopt ?? 0, args: string[] = [];
+    let ok = true;
+    for (let k = 0; k < info.nargs; k++) {
+      while (tex[j] === ' ') j++;
+      if (k < nopt) {
+        if (tex[j] === '[') { const close = tex.indexOf(']', j); if (close < 0) { ok = false; break; } args.push(tex.slice(j + 1, close)); j = close + 1; } else args.push('');
+        continue;
+      }
+      if (tex[j] === '{') { const g = readGroup(tex, j); if (!g) { ok = false; break; } args.push(g[0]); j = g[1]; continue; }
+      const tok = /^(\\[A-Za-z]+|\\.|[^\s{}])/.exec(tex.slice(j));
+      if (!tok) { ok = false; break; }
+      args.push(tok[0]); j += tok[0].length;
+    }
+    if (!ok) { out += m[0]; i += m[0].length; continue; }
+    const body = sanitizeForMathjax(info.def, name, info.nargs).replace(/#(\d)/g, (_x, d) => `{${args[Number(d) - 1] ?? ''}}`);
+    out += `{${expandUserMacros(body, macros, depth + 1)}}`;
+    i = j;
+  }
+  return out;
 }
 
 const unmath = (s: string) => { const t = s.trim(); const m = /^\$([\s\S]*)\$$/.exec(t); return m ? m[1] : t; };
