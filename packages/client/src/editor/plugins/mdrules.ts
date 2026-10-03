@@ -13,7 +13,7 @@
  */
 import { InputRule, inputRules } from 'prosemirror-inputrules';
 import { schema, SYMBOLS } from '@overlyx/core';
-import { inRawText } from '../commands';
+import { inRawText } from '../rawtext';
 import type { Plugin } from 'prosemirror-state';
 import type { LayoutInfo } from '../../api';
 import { editorContext } from '../context';
