@@ -988,7 +988,8 @@ blend.
   beside the text (`Ctrl+Alt+S`, the *Source* switch in the right tab strip): the document's LaTeX with
   syntax colours (`app/texhighlight.ts`), following the cursor (`app/sourcelocate.ts`: the words before
   the cursor are searched in the source, or the current row of the formula being edited) — edit and
-  *Apply* —, drag its top edge to resize; wide display
+  *Apply* —, regenerated when the document or its settings change (the header lives in the CRDT's
+  `meta` map, which the pane observes: a new class or package shows without an edit), drag its top edge to resize; wide display
   formulas overflow symmetrically into the margins (Google-Docs style) with equation numbers kept
   clear of the formula.
 * **Citations from the literature** (`Ctrl+Shift+C` ▸ *Find online / paste BibTeX*): type a title,

@@ -308,6 +308,17 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     try { const r = await api.texMap(target.docId); if (textRef.current === forText && r.text === forText && r.spans) spansRef.current = r.spans; } catch { /* keep what we have */ }
   };
 
+  // the document settings change the source too (class, packages, the preamble): they live in the
+  // CRDT's meta map, not in the document the `tick` follows
+  const [settingsTick, setSettingsTick] = useState(0);
+  useEffect(() => {
+    if (!target) return;
+    const settings = target.ydoc.getMap('meta');
+    const changed = () => setSettingsTick(t => t + 1);
+    settings.observe(changed);
+    return () => settings.unobserve(changed);
+  }, [target?.ydoc]);
+
   // regenerate the source when the document changes — not while the user is editing it or has the
   // keyboard in it (a live apply changes the document; replacing the text under the cursor would be
   // disruptive): then it is regenerated when the pane loses the focus
@@ -317,7 +328,7 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => { void load(); }, 700);
     return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [target?.docId, tick, dirty]);
+  }, [target?.docId, tick, settingsTick, dirty]);
 
   // follow the document's selection: its head marked (a bar) and kept in view, its range tinted, and
   // the textarea's own selection put there — not while the source is being edited or has the keyboard
