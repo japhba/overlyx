@@ -300,7 +300,27 @@ async function restorePoint(project: string, userId: number): Promise<void> {
   try { await commitProject(project, { by: userId }); } catch (e) { console.error(`[mcp] commit before a direct edit of "${project}" failed:`, e); }
 }
 
-async function writeDocument(project: string, userId: number, agentName: string, path: string, tex: string, tracked = true) {
+const docLocks = new Map<string, Promise<unknown>>();
+/**
+ * Agent edits of one document run one after the other. A direct edit waits for its restore point
+ * (a git commit) between reading the document and applying the change; two calls in flight at once
+ * (parallel tool calls, two agents) both read the same text, both reported success, and the later
+ * one silently replaced the earlier one's change. Serialized, the second call reads the first one's
+ * result — and fails clearly when its old_text is gone.
+ */
+async function withDocLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const prev = docLocks.get(id) ?? Promise.resolve();
+  const run = prev.catch(() => {}).then(fn);
+  docLocks.set(id, run);
+  try { return await run; }
+  finally { if (docLocks.get(id) === run) docLocks.delete(id); }
+}
+
+function writeDocument(project: string, userId: number, agentName: string, path: string, tex: string, tracked = true) {
+  return withDocLock(`${project}/${path}`, () => writeDocumentLocked(project, userId, agentName, path, tex, tracked));
+}
+
+async function writeDocumentLocked(project: string, userId: number, agentName: string, path: string, tex: string, tracked: boolean) {
   if (!tex.trim()) throw new Error('tex missing');
   if (tex.length > DOC_MAX) throw new Error('too large');
   if (!path.endsWith('.tex')) throw new Error('a .tex path is expected');
@@ -325,13 +345,23 @@ async function writeDocument(project: string, userId: number, agentName: string,
   return { ok: true, created: false, warnings: r.warnings, inserted_chars: st.inserted, deleted_chars: st.deleted, note: 'Applied as tracked changes against the current document — only what differs is marked; a reviewer accepts or rejects them.' };
 }
 
-async function editDocument(project: string, userId: number, agentName: string, path: string, oldText: string, newText: string, all: boolean, tracked = true) {
+function editDocument(project: string, userId: number, agentName: string, path: string, oldText: string, newText: string, all: boolean, tracked = true) {
+  return withDocLock(`${project}/${path}`, () => editDocumentLocked(project, userId, agentName, path, oldText, newText, all, tracked));
+}
+
+async function editDocumentLocked(project: string, userId: number, agentName: string, path: string, oldText: string, newText: string, all: boolean, tracked: boolean) {
   const doc = await manager.open(`${project}/${path}`);
-  const before = doc.toText();
-  const after = replaceInSource(before, oldText, newText, all);
-  const r = parseDocumentText(after, doc.project, doc.relPath);
   if (!tracked) {
-    await restorePoint(project, userId);
+    let before = doc.toText();
+    let after = replaceInSource(before, oldText, newText, all);   // a passage that does not match fails before the commit
+    let typed = false;
+    const onUpdate = () => { typed = true; };
+    doc.ydoc.on('update', onUpdate);
+    try { await restorePoint(project, userId); } finally { doc.ydoc.off('update', onUpdate); }
+    // whatever was typed into the document during the commit is what the edit applies to (an
+    // old_text somebody changed meanwhile no longer matches — said, not overwritten)
+    if (typed) { before = doc.toText(); after = replaceInSource(before, oldText, newText, all); }
+    const r = parseDocumentText(after, doc.project, doc.relPath);
     const st = applyPlainSource(doc, before, after);   // three-way: an edit somebody made meanwhile elsewhere survives
     touchProject(project, userId);
     return {
@@ -340,6 +370,9 @@ async function editDocument(project: string, userId: number, agentName: string, 
       now_reads: st.excerpt,
     };
   }
+  const before = doc.toText();
+  const after = replaceInSource(before, oldText, newText, all);
+  const r = parseDocumentText(after, doc.project, doc.relPath);
   const st = applyTrackedSource(doc, before, after, authorName(agentName));
   return {
     ok: true, inserted_chars: st.inserted, deleted_chars: st.deleted, warnings: r.warnings,

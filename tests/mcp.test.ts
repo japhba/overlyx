@@ -394,6 +394,59 @@ Thesis: \emph{Learning dynamics} in recurrent networks. Advisor: \href{https://e
   });
 });
 
+describe('edits in flight at the same time', () => {
+  it('parallel direct edits of one passage: one applies, the others fail clearly — none is reported done and lost', async () => {
+    await ensureRepo('owner/p');
+    writeFileSync(file('race.tex'), `\\documentclass{article}\n\\title{Huge Stress Test}\n\\begin{document}\n\\maketitle\nBody text.\n\\end{document}\n`);
+    const t = createMcpToken(owner.id, 'Race Bot').token;
+    const calls = [1, 2, 3].map(i => callTool(t, 'edit_document', { path: 'race.tex', old_text: 'Huge Stress Test', new_text: `Race Winner ${i}`, tracked: false }));
+    const res = await Promise.allSettled(calls);
+    const won = res.flatMap((r, i) => (r.status === 'fulfilled' ? [i + 1] : []));
+    expect(won).toHaveLength(1);
+    for (const r of res) if (r.status === 'rejected') expect(String(r.reason)).toMatch(/not found/);
+    const text = (await manager.open('owner/p/race.tex')).toText();
+    expect(text).toContain(`\\title{Race Winner ${won[0]}}`);
+  });
+
+  it('parallel edits of different passages of one paragraph all arrive, tracked or not', async () => {
+    writeFileSync(file('race2.tex'), doc('Alpha beta gamma delta epsilon zeta eta theta.'));
+    const t = createMcpToken(owner.id, 'Race Bot').token;
+    const res = await Promise.all([
+      callTool(t, 'edit_document', { path: 'race2.tex', old_text: 'beta', new_text: 'BETA', tracked: false }),
+      callTool(t, 'edit_document', { path: 'race2.tex', old_text: 'delta', new_text: 'DELTA', tracked: false }),
+      callTool(t, 'edit_document', { path: 'race2.tex', old_text: 'zeta', new_text: 'ZETA' }),
+      callTool(t, 'edit_document', { path: 'race2.tex', old_text: 'theta', new_text: 'THETA', tracked: false }),
+    ]);
+    expect(res.every(r => r.ok)).toBe(true);
+    const text = (await manager.open('owner/p/race2.tex')).toText();
+    for (const w of ['BETA', 'DELTA', 'ZETA', 'THETA']) expect(text).toContain(w);
+  });
+
+  it('a direct edit applies to the document as it is after its restore point: typing during the commit survives', async () => {
+    await ensureRepo('owner/p');
+    writeFileSync(file('typing.tex'), doc('Alpha beta gamma.\n\nSecond paragraph.'));
+    const t = createMcpToken(owner.id, 'Race Bot').token;
+    const live = await manager.open('owner/p/typing.tex');
+    // somebody types into the same paragraph while the restore-point commit runs
+    const userTypes = (from: string, to: string) => {
+      const lyx = live.toLyxDocument();
+      const par = lyx.body.find(p => p.items.some(it => it.kind === 'text' && it.text.includes(from)))!;
+      for (const it of par.items) if (it.kind === 'text') it.text = it.text.replace(from, to);
+      live.loadFromLyx(lyx, 'browser');
+    };
+    const saveProject = manager.saveProject;
+    manager.saveProject = async (project: string) => { manager.saveProject = saveProject; userTypes('gamma.', 'gamma delta.'); return saveProject.call(manager, project); };
+    const r = await callTool(t, 'edit_document', { path: 'typing.tex', old_text: 'beta', new_text: 'BETA', tracked: false });
+    expect(r.ok).toBe(true);
+    expect(live.toText()).toContain('Alpha BETA gamma delta.');
+    // … and when the typing changed the very passage, the edit fails instead of overwriting it
+    manager.saveProject = async (project: string) => { manager.saveProject = saveProject; userTypes('BETA', 'BETA!'); return saveProject.call(manager, project); };
+    await expect(callTool(t, 'edit_document', { path: 'typing.tex', old_text: 'Alpha BETA gamma', new_text: 'Alpha beta gamma', tracked: false })).rejects.toThrow(/not found/);
+    manager.saveProject = saveProject;
+    expect(live.toText()).toContain('Alpha BETA! gamma delta.');
+  });
+});
+
 describe('project text files', () => {
   it('write_file / read_file round-trip refs.bib', async () => {
     const t = createMcpToken(owner.id, 'Bib Bot').token;
