@@ -21,7 +21,8 @@ blend.
   Formulas (inline and display, `equation`/`align`/`gather`/`multline`/…) are edited in place
   and rendered with MathJax 4; document macros (`FormulaMacro` insets, preamble `\newcommand`/`\def`,
   `\input{macros}` files, child documents) render immediately. Formulas are typed the LaTeX way
-  too: `$` opens an inline formula, `$` inside it closes it, `$$` opens a display formula, and
+  too: `$` opens an inline formula, `$` inside it closes it (Space does not leave such a formula —
+  `$r \ll d$` types as written), `$$` opens a display formula, and
   Backspace in the empty formula gives the typed dollar back as text (the way to type a literal
   `$`; in TeX code and listings the dollar is always a character). The math toolbar's ( )↑ / ( )↓
   grow and shrink the delimiter pair around the cursor (`( )` → `\big` → `\Big` → `\bigg` →
@@ -44,7 +45,8 @@ blend.
   card with an avatar, name and time per message (the header paragraph `Name (time):` stays as
   text in the file — `numbering.ts` decorates it, `styles.css` draws it) and Reply / Resolve at
   the top right. *View ▸ Notes & comments in the margin* moves them into a right-hand column
-  (Google-Docs style).
+  (Google-Docs style). A thread is a point in the text (`%% @comment` has no range): commenting on
+  selected text keeps the text and anchors the thread right after it (`editor/commands.ts insertComment`).
 * **Figures keep up with their files**: the server watches the projects (chokidar) and tells the
   open editors over the project's event stream (`/api/projects/:p/events`, `{"kind":"graphics"}`)
   when a graphics file is rewritten — a plot script ran, an upload landed — and the image reloads
@@ -97,7 +99,12 @@ blend.
   OverLyX tab) still has its citations, cross-references, labels, formulas, tables and figures; the
   plain-text form of the clipboard is LaTeX-ish (`$…$`, `\ref{…}`, `\citep{…}`), so pasting into a
   `.tex` file or a chat gives something useful; HTML from a web page or another editor pastes as
-  LyX content (headings, bold/italic/typewriter, lists, tables). **Rows of a table** (any cell
+  LyX content (headings, bold/italic/typewriter, lists — numbered ones as Enumerate, Google Docs'
+  `<li><p>` items too —, tables). Several blocks pasted into the middle of a paragraph split it and
+  land as paragraphs: ProseMirror's content fitting never wraps them into an inset (the only inline
+  node that holds paragraphs — a Note by default, missing from the PDF) or a table, which
+  `core/src/schema.ts` marks as not generatable; pasted into an empty paragraph they replace it, so the
+  first keeps its layout (a pasted heading stays a heading: `editor/plugins/paste.ts pasteBlocksIntoEmpty`). **Rows of a table** (any cell
   selection — drag across cells, Shift+click, Shift+↓) paste as in LyX (`InsetTabular::pasteClipboard`):
   cell by cell from the cursor's cell, overwriting, with rows and columns added past the table's end;
   cut empties the cells, and outside a table they paste as a new table. Ctrl+V, the right-click menu
@@ -333,7 +340,10 @@ blend.
     beside it** (the scroller's padding too: `onCanvasDown`) is a rubber band selecting what it
     encloses; with Shift a drag that starts on an object is one as well. A click on nothing selects
     nothing — no objects and no caret in a box (`deselectAll`: a hidden gap cursor at the page's start,
-    where typing, Delete and Enter do nothing, and pasted text becomes a new text box). The pointer is
+    where typing, Delete and Enter do nothing, and pasted text becomes a new text box; *Insert ▸
+    Graphics* places an image object on that page, and the other inserts ask for a text box first —
+    ProseMirror would otherwise put them into the page's speaker notes or onto a new page:
+    `editor/commands.ts outsideLayoutText`). The pointer is
     an arrow on the canvas and over objects, the text cursor over the box being edited or a selected
     one (`ol-edited` / `ol-sel` marks). The Layout toolbar keeps its width whatever is selected
     (disabled position fields and box style when nothing applies), so the page never jumps under the
@@ -527,7 +537,7 @@ blend.
   Tab moves between cells, LyX's corner markers around every inset on the cursor path, macros with
   arguments are expanded from their definitions with editable argument cells; typing `\` starts a
   command shown red until it names a real command (then green), with LyX's completion in grey — Tab
-  completes it. **The mouse works on LyX's coordinate model** (`editor/lyxmath/geometry.ts`): the
+  completes it; Esc keeps a green command and cancels a red one (LyX cancels both). **The mouse works on LyX's coordinate model** (`editor/lyxmath/geometry.ts`): the
   renderer wraps every cell *and every atom* in `\htmlClass` boxes (MathJax mrows, transparent for
   TeX's spacing; an atom that is one character carries the class itself), so every atom has a box
   and every cell a baseline (a probe in each cell, read in one layout) and a content-tight height —
@@ -554,6 +564,19 @@ blend.
   insets and tracked changes; `Ctrl/⌘+click` follows a reference or opens a child document; **tabs**
   for open documents (new tabs open right of the current one); the text column is centred and its
   width is a View setting (*View ▸ Text width*, `Ctrl+Alt+±`).
+* **Inserting with a selection** (`editor/commands.ts`) never throws the selection away. An inset —
+  footnote, note, box, branch, caption, a float — takes the selected text, object or paragraphs in, as
+  LyX does (`doInsertInset`: the selection moves into the new inset): a clicked image with *Insert ▸
+  Float ▸ Figure* becomes the figure's content (the cursor goes to its caption), *Insert ▸ Caption* on
+  a clicked image outside a float makes it a figure with a caption, inside one adds the caption
+  paragraph below it (above a table). A new table takes the selection into its first cell. A selected
+  object (image, formula, table, inset) is never replaced by a label, reference, formula or other
+  inline insertion — that goes right after it; selected table cells keep their content. A selection
+  that cannot move in one piece (cells, from inside an inset to outside it) stays, and the inset goes
+  after it. Selected text is replaced only by what is typed or pasted over it.
+* **A caption is one paragraph** (LyX: `MultiPar false`; also an optional argument and an index
+  entry): Enter and Alt+Enter do nothing there and the status bar says why — a paragraph break would
+  end the LaTeX argument (`\caption{…}`) and break the build (`editor/commands.ts singleParagraphInset`).
 * **LyX toolbars** (a port of `lib/ui/stdtoolbars.inc`): the *Standard* and *Extra* rows, and the
   contextual *Math*, *Math panels*, *Table* and *Review* rows that appear automatically when the cursor
   is in a formula / a table / a document with tracked changes (or always / never: *View ▸ Toolbars*,
@@ -781,7 +804,8 @@ blend.
   back to centre; on tablets the pen comes out by itself (`localStorage.ol.ink` overrides). Strokes
   and pasted images are anchored to the paragraph beside them (an invisible `\olsketch{figures/ink-….svg}`
   in the .tex, the drawing in a sidecar SVG the server writes; nothing shows in the PDF) and move with
-  the text. The bottom *Draw* row has a pen and a highlighter (each with its own colour and width),
+  the text; the text column still fits the pane, so a narrow one (the PDF beside the text on a
+  tablet) reflows the text instead of cutting it off at both sides. The bottom *Draw* row has a pen and a highlighter (each with its own colour and width),
   an eraser (whole strokes, also the pen's eraser end), a lasso (closes itself, selects whatever it
   touches; drag to move, corner handles to resize, Delete) and a **laser pointer**: a glowing trace
   over the text or the margins that stays while the pen is down and fades when it lifts — never
@@ -967,7 +991,8 @@ blend.
   beside the text (`Ctrl+Alt+S`, the *Source* switch in the right tab strip): the document's LaTeX with
   syntax colours (`app/texhighlight.ts`), following the cursor (`app/sourcelocate.ts`: the words before
   the cursor are searched in the source, or the current row of the formula being edited) — edit and
-  *Apply* —, drag its top edge to resize; wide display
+  *Apply* —, regenerated when the document or its settings change (the header lives in the CRDT's
+  `meta` map, which the pane observes: a new class or package shows without an edit), drag its top edge to resize; wide display
   formulas overflow symmetrically into the margins (Google-Docs style) with equation numbers kept
   clear of the formula.
 * **Citations from the literature** (`Ctrl+Shift+C` ▸ *Find online / paste BibTeX*): type a title,
@@ -1233,6 +1258,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sharing.spec.ts e
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts e2e/tablerows.spec.ts e2e/cite.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/selection-inserts.spec.ts   # comments / floats / captions keep the selection, pasted blocks, Enter in a caption, Insert ▸ Graphics on a layout page, live authors, TeX pane after settings, tracked tables, formula notice, tablet reflow
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layout.spec.ts   # layout documents: new deck, text box + formula, move / resize / undo, toolbar, presentation steps, zoom, text overlays, a linear beamer deck presented; the font size box
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
 OVERLYX_DATA_DIR=/root/lyx/overlyx/data npx tsx scripts/usage-report.ts --days 30   # on the production server: what people did and what went wrong (anonymous usage statistics)
@@ -1325,7 +1351,13 @@ How it works, in order of what happens when you open a document:
   header editing is available for anything else.
 * Change tracking: insertions/deletions are marked per author (matched by the LyX author name);
   the status bar shows who you are tracking as and the change under the cursor; *Edit ▸ Track
-  Changes* / the context menu accept or reject single changes or all of them.
+  Changes* / the context menu accept or reject single changes or all of them. What the editor draws
+  from the document's metadata follows it live (`editorContext.meta` tells `onMetaChange` listeners
+  when it is replaced): an author who starts tracking is named and coloured at once, and a citation an
+  agent or a collaborator inserted shows author and year as soon as the refreshed metadata (project
+  events) knows the key — no reload. A table inserted or deleted as a whole has its rules and cell
+  boundaries in the author's colour, an outline and a tinted ground (a deleted one is crossed out), so it
+  never reads as an accepted table.
 * **Mode switch: Editing · Suggesting · Viewing** (`app/EditModeSwitch.tsx`, both shells — the web
   client at the right end of the first toolbar row, as in Google Docs; the VS Code webview in its
   top bar): Suggesting is change tracking — a setting of the document (`\tracking_changes`), so it
@@ -1336,6 +1368,10 @@ How it works, in order of what happens when you open a document:
   view. The change mark is not inclusive (`core/src/schema.ts`): text typed at the end of a
   suggestion is plain while tracking is off, and the typist's own insertion while it is on (typing
   on at the end of one's own insertion extends it: one `\lyxadded` group); `tests/changes-typing.test.ts`.
+  Edits inside a formula that was there before are applied directly, not as a suggestion — LyX does not
+  track inside math either (a formula is one value); the first such edit of a session says so in the
+  status bar (to suggest a different formula, insert the new one beside it and delete the old one). A
+  formula inserted as a suggestion stays one, edits included.
 * Macro rendering follows LyX's positional semantics (a `FormulaMacro` applies from its position on;
   later definitions — including ones nested in notes — override earlier ones). Macros with
   arguments are expanded from their definitions with the argument cells kept editable (`core/src/math/mathjax.ts`).

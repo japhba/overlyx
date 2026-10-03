@@ -85,7 +85,9 @@ function colgroupDOM(columns: string, features: string): DOMOutputSpec {
   })] as unknown as DOMOutputSpec;
 }
 
-const LAYOUT_OF_TAG: Record<string, string> = { h1: 'Section', h2: 'Subsection', h3: 'Subsubsection', h4: 'Paragraph', h5: 'Subparagraph', h6: 'Subparagraph', li: 'Itemize' };
+const LAYOUT_OF_TAG: Record<string, string> = { h1: 'Section', h2: 'Subsection', h3: 'Subsubsection', h4: 'Paragraph', h5: 'Subparagraph', h6: 'Subparagraph' };
+/** the LyX list layout of a foreign list item: Enumerate in an <ol>, else Itemize */
+const listLayoutOf = (li: HTMLElement) => (li.parentElement?.tagName === 'OL' ? 'Enumerate' : 'Itemize');
 
 export const INSET_NAMES_WITH_STATUS = new Set([
   'Note', 'ERT', 'Foot', 'Marginal', 'Float', 'Wrap', 'Box', 'Branch', 'Flex', 'Argument', 'Index',
@@ -165,6 +167,9 @@ const nodes: Record<string, NodeSpec> = {
       }) },
       // foreign HTML (a web page, Google Docs, …): headings and list items become LyX layouts
       ...Object.entries(LAYOUT_OF_TAG).map(([tag, layout]) => ({ tag, getAttrs: () => ({ layout }) })),
+      // list items: numbered in an <ol>; an item made of paragraphs (Google Docs: <li><p>…</p></li>) is its first paragraph
+      { tag: 'li', getAttrs: (dom: HTMLElement) => (dom.querySelector(':scope > p') ? false : { layout: listLayoutOf(dom) }) },
+      { tag: 'li > p', priority: 55, getAttrs: (dom: HTMLElement) => ({ layout: dom.previousElementSibling ? 'Standard' : listLayoutOf(dom.parentElement!), depth: dom.previousElementSibling ? 1 : 0 }) },
     ],
     toDOM(node) {
       const a = node.attrs;
@@ -527,6 +532,16 @@ export const FONT_MARKS = ['family', 'series', 'shape', 'size', 'emph', 'numeric
 
 export const schema = new Schema({ nodes, marks });
 export type LyxSchema = typeof schema;
+
+/**
+ * The generic inset and the table are never made up by ProseMirror's content fitting. Blocks pasted
+ * or dropped into a paragraph would otherwise be wrapped into the one inline node that holds
+ * paragraphs — the inset, whose default is a Note (`%% @note`, missing from the PDF) — or, without
+ * it, into a table; with neither eligible, the pasted blocks split the paragraph. ProseMirror only
+ * generates node types without required attributes (ContentMatch.findWrapping / fillBefore); these
+ * attributes have defaults, so the two types are marked as having required ones.
+ */
+for (const type of [schema.nodes.inset, schema.nodes.table]) type.hasRequiredAttrs = () => true;
 
 /** A LyX/LaTeX length as CSS (em-ish approximations for TeX units and relative lengths). */
 export function cssLength(len: string): string {

@@ -75,6 +75,21 @@ function deletedSlice(slice: Slice): Slice {
   return new Slice(walk(slice.content, slice.openEnd), slice.openStart, slice.openEnd);
 }
 
+/**
+ * Said once per session, the first time a formula that was there before is edited while changes are
+ * tracked: the edit is applied as it is, not as a suggestion — LyX does not track inside math either
+ * (a formula is one value). A formula inserted as a suggestion is one, edits included.
+ */
+let formulaNoticeShown = false;
+function noticeUntrackedFormula(before: PMNode, after: PMNode): void {
+  if (formulaNoticeShown || !/^math_/.test(before.type.name) || before.attrs.latex === after.attrs.latex) return;
+  if (changeOf(before)?.type === 'inserted') return;
+  formulaNoticeShown = true;
+  editorContext.notify?.('Suggesting: edits inside an existing formula are applied directly, not tracked (as in LyX) — to suggest a different formula, insert the new one beside it and delete the old one');
+}
+/** tests: show the notice again */
+export function resetFormulaNotice(): void { formulaNoticeShown = false; }
+
 export function changeTrackingPlugin(): Plugin {
   return new Plugin({
     key: changesKey,
@@ -110,7 +125,10 @@ export function changeTrackingPlugin(): Plugin {
           if (structural.some(r => step.from >= r.from && step.from <= r.to)) continue;
           // Editing attributes of an existing formula is not a textual replacement.
           const oldNode = t.docs[i].nodeAt(step.from);
-          if (step.to > step.from && oldNode && !oldNode.isText && oldNode.isAtom && step.to - step.from === oldNode.nodeSize && step.slice.content.childCount === 1 && step.slice.content.firstChild?.type === oldNode.type) continue;
+          if (step.to > step.from && oldNode && !oldNode.isText && oldNode.isAtom && step.to - step.from === oldNode.nodeSize && step.slice.content.childCount === 1 && step.slice.content.firstChild?.type === oldNode.type) {
+            noticeUntrackedFormula(oldNode, step.slice.content.firstChild);
+            continue;
+          }
           const mapToCurrent = (pos: number, assoc: number) => {
             for (let j = i + 1; j < t.mapping.maps.length; j++) pos = t.mapping.maps[j].map(pos, assoc);
             for (let j = ti + 1; j < trs.length; j++) pos = trs[j].mapping.map(pos, assoc);

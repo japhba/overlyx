@@ -5,8 +5,15 @@
  * Section otherwise). The typed marker disappears; Backspace right after puts it back
  * (prosemirror-inputrules' undoInputRule, bound in keymap.ts). Only Standard / Plain paragraphs
  * change — a heading or a list item already is what it is.
+ *
+ * A math symbol typed as TeX in the text (`\alpha `, `\ll,` — the habit of everyone coming from
+ * Overleaf, and what lands in the text after Space left a formula LyX-style) becomes an inline
+ * formula instead of the literal `\textbackslash alpha` it used to be saved as; Backspace right
+ * after gives the typed text back. Raw TeX (ERT, listings, code) is left alone.
  */
 import { InputRule, inputRules } from 'prosemirror-inputrules';
+import { schema, SYMBOLS } from '@overlyx/core';
+import { inRawText } from '../rawtext';
 import type { Plugin } from 'prosemirror-state';
 import type { LayoutInfo } from '../../api';
 import { editorContext } from '../context';
@@ -33,12 +40,21 @@ function layoutRule(re: RegExp, layoutFor: (m: RegExpMatchArray, layouts?: Layou
   });
 }
 
+/** `\name` + a space or punctuation, where `name` is a math symbol (Greek letters, relations, operators): an inline formula. */
+const mathSymbolRule = new InputRule(/\\([A-Za-z]+)([\s,.;:!?)\]])$/, (state, match, start, end) => {
+  const name = match[1];
+  if (SYMBOLS[name]?.i !== 'sym' || inRawText(state) || !state.selection.$from.parent.isTextblock) return null;
+  const math = schema.nodes.math_inline.create({ latex: '\\' + name, delim: '$' });
+  return state.tr.replaceWith(start, end, [math, schema.text(match[2])]);
+});
+
 export function markdownRulesPlugin(): Plugin {
   return inputRules({
     rules: [
       layoutRule(/^[-*]\s$/, () => 'Itemize'),
       layoutRule(/^1[.)]\s$/, () => 'Enumerate'),
       layoutRule(/^(#{1,6})\s$/, (m, layouts) => headingForHashes(m[1].length, layouts)),
+      mathSymbolRule,
     ],
   });
 }

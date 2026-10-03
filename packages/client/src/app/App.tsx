@@ -962,7 +962,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       if (idx >= 0) lines.splice(idx, 0, line); else lines.push(line);
       await api.setHeader(docId, { headerLines: lines, set: { tracking_changes: 'true' } });
       editorContext.changeAuthorId = id;
-      setMeta(m => (m ? { ...m, authors: [...m.authors, { id, name: user.name }] } : m));
+      // the editor reads the authors from editorContext.meta (the status bar's "Inserted by …", the change menu)
+      const m = editorContext.meta;
+      if (m && !m.authors.some(a => a.id === id)) { const next = { ...m, authors: [...m.authors, { id, name: user.name }] }; editorContext.meta = next; setMeta(next); }
     } else {
       await api.setHeader(docId, { set: { tracking_changes: String(next) } });
     }

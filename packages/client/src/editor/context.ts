@@ -48,6 +48,29 @@ export interface EditorContext {
 
 export const editorContext: EditorContext = { user: null, meta: null, docId: null, project: null, docDir: '', trackChanges: false, combined: false };
 
+/**
+ * `editorContext.meta` tells who listens when it is replaced (the shells assign it after every
+ * metadata fetch — a project event after an agent or a collaborator changed the bibliography, Reload
+ * metadata, the settings dialog, change tracking turned on): what was drawn from it — the authors of
+ * tracked changes, citations' author and year — is redrawn without a reload.
+ */
+const metaListeners = new Set<() => void>();
+let currentMeta: DocMeta | null = null;
+Object.defineProperty(editorContext, 'meta', {
+  enumerable: true,
+  get: () => currentMeta,
+  set(m: DocMeta | null) {
+    if (m === currentMeta) return;
+    currentMeta = m;
+    for (const fn of metaListeners) { try { fn(); } catch (e) { console.error('metadata listener failed', e); } }
+  },
+});
+/** Call `fn` whenever `editorContext.meta` is replaced; returns the unsubscribe. */
+export function onMetaChange(fn: () => void): () => void {
+  metaListeners.add(fn);
+  return () => { metaListeners.delete(fn); };
+}
+
 /** Resolve a document-relative file name (graphics, includes) to a project-relative path. */
 export function resolveDocPath(file: string, docDir: string = editorContext.docDir): string {
   const parts = [...docDir.split('/').filter(Boolean), ...file.split('/')];

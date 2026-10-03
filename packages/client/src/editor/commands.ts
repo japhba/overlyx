@@ -2,6 +2,7 @@
  * LyX-style editing commands on top of ProseMirror.
  */
 import { type Command, type EditorState, TextSelection, NodeSelection, Selection, type Transaction } from 'prosemirror-state';
+import { CellSelection } from 'prosemirror-tables';
 import { type Node as PMNode, type MarkType, type Mark, Fragment, type Attrs, type ResolvedPos } from 'prosemirror-model';
 import { splitBlock } from 'prosemirror-commands';
 import type { EditorView } from 'prosemirror-view';
@@ -10,6 +11,8 @@ import { nextLayout, isHeadingLayout, isListLayout, isEnvironmentLayout } from '
 import { editorContext } from './context';
 import { MathInlineView, MathDisplayView, pendingFocus } from './nodeviews/math';
 import { setValueMarkIn } from './fontsize';
+import { isLayoutDoc, pageAt } from './layout/commands';
+import { placeImage } from './layout/images';
 
 /* ------------------------------------------------------------ paragraphs */
 
@@ -149,8 +152,34 @@ export const toggleAppendix: Command = (state, dispatch) => {
   return true;
 };
 
+/**
+ * Insets that hold one paragraph (LyX: InsetLayout MultiPar false — a paragraph break in
+ * `\caption{…}` or an optional argument would end the LaTeX argument and break the build).
+ */
+const SINGLE_PARAGRAPH_INSETS: Record<string, string> = { Caption: 'A caption', Argument: 'An argument', Index: 'An index entry' };
+
+/** The single-paragraph inset the cursor is in (its description), if the innermost text container is one. */
+export function singleParagraphInset(state: EditorState): string | null {
+  const $from = state.selection.$from;
+  for (let d = $from.depth; d > 0; d--) {
+    const n = $from.node(d);
+    if (n.type.name === 'table_cell' || n.type.name === 'table_header') return null;
+    if (n.type.name === 'inset') return SINGLE_PARAGRAPH_INSETS[n.attrs.name as string] ?? null;
+  }
+  return null;
+}
+
+/** LyX disables the paragraph break in a single-paragraph inset: the key does nothing (the status bar says why). */
+function refuseParagraphBreak(state: EditorState, dispatch: unknown): boolean {
+  const what = singleParagraphInset(state);
+  if (!what) return false;
+  if (dispatch) editorContext.notify?.(`${what} is a single paragraph — Enter does not split it`);
+  return true;
+}
+
 /** Enter: split paragraph; the new paragraph gets LyX's "next layout". */
 export const paragraphBreak: Command = (state, dispatch, view) => {
+  if (refuseParagraphBreak(state, dispatch)) return true;
   const cur = currentParagraph(state);
   if (!cur) return false;
   const { $from } = state.selection;
@@ -211,6 +240,7 @@ export const listExitBackspace: Command = (state, dispatch, view) => {
 
 /** Alt+Enter — "paragraph-break inverse": new paragraph with the default layout (or keep). */
 export const paragraphBreakInverse: Command = (state, dispatch) => {
+  if (refuseParagraphBreak(state, dispatch)) return true;
   const cur = currentParagraph(state);
   if (!cur) return false;
   const inset = inInset(state);
@@ -334,13 +364,39 @@ function withInheritedFont(state: EditorState, node: PMNode): PMNode {
   return node.type.create({ ...node.attrs, marks: JSON.stringify([...inherited, ...existing]) }, node.content, node.marks);
 }
 
+/**
+ * Where something inserted goes when an object is selected: a selected image, formula, table or inset
+ * (ProseMirror selects it as a node when it is clicked) or a block of table cells is never replaced by
+ * it — the insertion goes right after the object, at the end of the last selected cell. Selected text
+ * is replaced, as typing replaces it.
+ */
+export function keepSelectedObjects<T extends Transaction>(tr: T): T {
+  const sel = tr.selection;
+  if (sel instanceof NodeSelection && sel.node.isInline) tr.setSelection(TextSelection.create(tr.doc, sel.to));
+  else if (sel instanceof CellSelection) tr.setSelection(Selection.near(tr.doc.resolve(sel.ranges[sel.ranges.length - 1].$to.pos), -1));
+  return tr;
+}
+
+/**
+ * On a layout page outside its text boxes (a gap cursor on the canvas, an object selected) an inline
+ * node has no paragraph to go into, and ProseMirror would make one up — in the page's speaker notes
+ * (`\note{}`), on a new page. Images become image objects there (insertGraphics); everything else
+ * asks for a text box first.
+ */
+function outsideLayoutText(state: EditorState, dispatch: unknown): boolean {
+  if (!isLayoutDoc(state.doc) || state.selection.$from.parent.inlineContent) return false;
+  if (dispatch) editorContext.notify?.('Click into a text box first (double-click the page to start a new one)');
+  return true;
+}
+
 function insertInline(state: EditorState, node: PMNode): Transaction {
-  const tr = state.tr.replaceSelectionWith(withInheritedFont(state, node), false);
+  const tr = keepSelectedObjects(state.tr).replaceSelectionWith(withInheritedFont(state, node), false);
   return tr;
 }
 
 export function insertNode(node: PMNode, selectInside = false): Command {
   return (state, dispatch) => {
+    if (outsideLayoutText(state, dispatch)) return false;
     if (!dispatch) return true;
     const tr = insertInline(state, node);
     if (selectInside) {
@@ -352,27 +408,59 @@ export function insertNode(node: PMNode, selectInside = false): Command {
   };
 }
 
-/** Insert a text-containing inset around the selection (or empty), cursor inside. */
-export function insertTextInset(name: string, arg = '', params: string[] = [], status: 'open' | 'collapsed' | null = 'open', initialParagraphs?: PMNode[]): Command {
+/**
+ * What an inset inserted around the selection takes in — LyX moves the selection into the new inset
+ * (doInsertInset): the selected text or object of one paragraph as one paragraph, or the selected
+ * paragraphs (cut where the selection starts and ends). null when there is nothing to move, or when the
+ * selection cannot move in one piece (table cells, a range from inside an inset to outside it): the
+ * inset then goes after the selection, and nothing is removed.
+ */
+function selectedParagraphs(state: EditorState): PMNode[] | null {
+  const sel = state.selection;
+  if (sel.empty || sel instanceof CellSelection) return null;
+  const { $from, $to, from, to } = sel;
+  if ($from.sameParent($to) && $from.parent.inlineContent) return [schema.nodes.paragraph.create({ layout: 'Plain Layout' }, state.doc.slice(from, to).content)];
+  if ($from.depth !== $to.depth || $from.parent.type !== schema.nodes.paragraph || $to.parent.type !== schema.nodes.paragraph || $from.node($from.depth - 1) !== $to.node($to.depth - 1)) return null;
+  const paras: PMNode[] = [];
+  state.doc.slice(from, to).content.forEach(p => paras.push(p.type.create({ ...p.attrs, endChange: null, appendix: false }, p.content)));
+  // a selection from the end of a paragraph, or to the start of one, does not take that paragraph along
+  if ($from.parentOffset === $from.parent.content.size && paras.length > 1 && !paras[0].content.size) paras.shift();
+  if ($to.parentOffset === 0 && paras.length > 1 && !paras[paras.length - 1].content.size) paras.pop();
+  return paras;
+}
+
+/** The change mark (in an inline node's `marks` attr) of something inserted while changes are tracked. */
+function insertedMarks(): string | undefined {
+  if (!editorContext.trackChanges || editorContext.changeAuthorId === undefined) return undefined;
+  return JSON.stringify([{ type: 'change', attrs: { type: 'inserted', author: editorContext.changeAuthorId, time: Math.floor(Date.now() / 1000) } }]);
+}
+
+/** Put the inset `node` in place of the selection of `tr`; the cursor goes to the end of its first paragraph. */
+function placeInset(tr: Transaction, node: PMNode): Transaction {
+  tr.replaceSelectionWith(node, false);
+  const pos = tr.selection.from - node.nodeSize;
+  const inner = pos + 1 + 1 + (node.firstChild?.content.size ?? 0);
+  return tr.setSelection(TextSelection.create(tr.doc, Math.min(inner, tr.doc.content.size)));
+}
+
+/**
+ * Insert a text-containing inset around the selection (LyX: the selection moves into it; see
+ * selectedParagraphs), or an empty one, cursor inside. A selection that cannot move in one piece
+ * stays as it is and the inset goes after it.
+ */
+export function insertTextInset(name: string, arg = '', params: string[] = [], status: 'open' | 'collapsed' | null = 'open'): Command {
   return (state, dispatch) => {
-    const { from, to, empty } = state.selection;
-    let paras: PMNode[];
-    if (initialParagraphs) paras = initialParagraphs;
-    else if (!empty && state.selection instanceof TextSelection && state.selection.$from.sameParent(state.selection.$to)) {
-      const slice = state.doc.slice(from, to);
-      paras = [schema.nodes.paragraph.create({ layout: 'Plain Layout' }, slice.content)];
-    } else paras = [schema.nodes.paragraph.create({ layout: 'Plain Layout' })];
+    if (outsideLayoutText(state, dispatch)) return false;
+    const taken = selectedParagraphs(state);
+    const paras = taken ?? [schema.nodes.paragraph.create({ layout: 'Plain Layout' })];
     const attrs: Record<string, unknown> = { name, arg, params: JSON.stringify(params), status };
-    if (editorContext.trackChanges && editorContext.changeAuthorId !== undefined) {
-      attrs.marks = JSON.stringify([{ type: 'change', attrs: { type: 'inserted', author: editorContext.changeAuthorId, time: Math.floor(Date.now() / 1000) } }]);
-    }
+    const marks = insertedMarks();
+    if (marks) attrs.marks = marks;
     const node = schema.nodes.inset.create(attrs, Fragment.from(paras));
     if (!dispatch) return true;
-    let tr = state.tr.replaceSelectionWith(node, false);
-    const pos = tr.selection.from - node.nodeSize;
-    // cursor at end of the first paragraph inside
-    const inner = pos + 1 + 1 + (paras[0].content.size);
-    tr = tr.setSelection(TextSelection.create(tr.doc, Math.min(inner, tr.doc.content.size)));
+    let tr = state.tr;
+    if (!taken && !state.selection.empty) tr.setSelection(Selection.near(tr.doc.resolve(state.selection.to), -1));
+    tr = placeInset(tr, node);
     dispatch(tr.scrollIntoView());
     return true;
   };
@@ -388,33 +476,106 @@ export const insertFlex = (name: string) => insertTextInset('Flex', name, [], 'c
 export const insertArgument = (n: string) => insertTextInset('Argument', n, [], 'open');
 export const insertIndex = insertTextInset('Index', 'idx', ['range none', 'pageformat default'], 'collapsed');
 export const insertListing = insertTextInset('listings', '', ['lstparams ""', 'inline false'], 'open');
-export const insertCaption = insertTextInset('Caption', 'Standard', [], null);
 
-/** OverLyX comment thread: a Note Comment inset with an author/time header paragraph. */
+/** The float inset around `pos`, if any (its node and position). */
+function enclosingFloat($pos: ResolvedPos): { node: PMNode; pos: number; depth: number } | null {
+  for (let d = $pos.depth; d > 0; d--) {
+    const n = $pos.node(d);
+    if (n.type === schema.nodes.inset && (n.attrs.name === 'Float' || n.attrs.name === 'Wrap')) return { node: n, pos: $pos.before(d), depth: d };
+  }
+  return null;
+}
+
+const emptyCaption = () => schema.nodes.inset.create({ name: 'Caption', arg: 'Standard', params: '[]', status: null }, schema.nodes.paragraph.create({ layout: 'Plain Layout' }));
+
+/**
+ * Insert ▸ Caption. Selected text becomes the caption (LyX moves it in). With an image or a table
+ * selected the caption is for it: outside a float the object is put into a new figure / table float
+ * with an empty caption; inside one, the caption gets a paragraph of its own beside the object's —
+ * below a figure, above a table, as insertFloat lays them out. A caption never replaces what is selected.
+ */
+export const insertCaption: Command = (state, dispatch, view) => {
+  const sel = state.selection;
+  if (sel instanceof NodeSelection && sel.node.isInline && !sel.node.isText) {
+    const float = enclosingFloat(sel.$from);
+    if (!float) return insertFloat(sel.node.type === schema.nodes.table ? 'table' : 'figure')(state, dispatch, view);
+    if (!dispatch) return true;
+    // the object's paragraph inside the float, and the caption's beside it
+    const parDepth = sel.$from.depth;
+    const above = float.node.attrs.arg === 'table';
+    const at = above ? sel.$from.before(parDepth) : sel.$from.after(parDepth);
+    const tr = state.tr.insert(at, schema.nodes.paragraph.create({ layout: 'Plain Layout' }, emptyCaption()));
+    dispatch(tr.setSelection(TextSelection.create(tr.doc, at + 3)).scrollIntoView());
+    return true;
+  }
+  return insertTextInset('Caption', 'Standard', [], null)(state, dispatch, view);
+};
+
+/**
+ * OverLyX comment thread: a Note Comment inset with an author/time header paragraph, the cursor in
+ * the empty message paragraph below it. A thread is a point in the text (`%% @comment` in the
+ * file has no range): commenting on a selection keeps the selected text and anchors the thread
+ * right after it, as the margin cards show.
+ */
 export const insertComment: Command = (state, dispatch) => {
+  if (outsideLayoutText(state, dispatch)) return false;
   const user = editorContext.user?.name ?? 'Anonymous';
   const header = schema.nodes.paragraph.create({ layout: 'Plain Layout' }, schema.text(commentHeader(user, formatTimestamp())));
   const body = schema.nodes.paragraph.create({ layout: 'Plain Layout' });
-  const cmd = insertTextInset('Note', 'Comment', [], 'open', [header, body]);
-  return cmd(state, (tr) => {
-    // the cursor sits at the end of the header paragraph: +1 closes it, +1 opens the body paragraph
-    const pos = tr.selection.from + 2;
-    dispatch?.(tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(pos, tr.doc.content.size)))).scrollIntoView());
-  });
+  const attrs: Record<string, unknown> = { name: 'Note', arg: 'Comment', params: '[]', status: 'open' };
+  const marks = insertedMarks();
+  if (marks) attrs.marks = marks;
+  const node = schema.nodes.inset.create(attrs, Fragment.from([header, body]));
+  if (!dispatch) return true;
+  const tr = state.tr.setSelection(Selection.near(state.doc.resolve(commentAnchor(state)), -1));
+  placeInset(tr, node);
+  // the cursor sits at the end of the header paragraph: +1 closes it, +1 opens the body paragraph
+  const pos = tr.selection.from + 2;
+  dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(pos, tr.doc.content.size)))).scrollIntoView());
+  return true;
 };
 
+/** Where a comment on the selection is anchored: the end of the selection — of its last paragraph when it ends at the start of the next one. */
+function commentAnchor(state: EditorState): number {
+  const sel = state.selection;
+  if (sel.empty) return sel.from;
+  const last = sel.ranges[sel.ranges.length - 1];
+  let $to = last.$to;
+  if ($to.parent.inlineContent && $to.parentOffset === 0 && $to.pos > sel.from) {
+    const before = Selection.findFrom(state.doc.resolve($to.before()), -1, true);
+    if (before && before.from >= sel.from) $to = before.$to;
+  }
+  return $to.pos;
+}
+
+/**
+ * Insert ▸ Float: a figure / table / algorithm float with a caption. LyX moves the selection into it
+ * (a selected image, table, text or paragraphs becomes its content) and puts the cursor into the
+ * caption; an empty float gets an empty content paragraph, the cursor there.
+ */
 export function insertFloat(type: 'figure' | 'table' | 'algorithm' = 'figure'): Command {
   return (state, dispatch) => {
-    const caption = schema.nodes.inset.create({ name: 'Caption', arg: 'Standard', params: '[]', status: null }, schema.nodes.paragraph.create({ layout: 'Plain Layout' }));
+    if (outsideLayoutText(state, dispatch)) return false;
+    const taken = selectedParagraphs(state);
     // figures and tables are centered (the usual layout); an algorithm's steps are ordinary left-aligned paragraphs
-    const p1 = schema.nodes.paragraph.create(type === 'algorithm' ? { layout: 'Plain Layout' } : { layout: 'Plain Layout', align: 'center' });
-    const p2 = schema.nodes.paragraph.create({ layout: 'Plain Layout' }, caption);
-    const content = type === 'table' ? [p2, p1] : [p1, p2];
+    const centred = (p?: PMNode) => schema.nodes.paragraph.create(type === 'algorithm' ? { ...p?.attrs, layout: 'Plain Layout' } : { ...p?.attrs, layout: 'Plain Layout', align: 'center' }, p?.content);
+    const body = taken ? (taken.length === 1 ? [centred(taken[0])] : taken) : [centred()];
+    const captionPar = schema.nodes.paragraph.create({ layout: 'Plain Layout' }, emptyCaption());
+    const content = type === 'table' ? [captionPar, ...body] : [...body, captionPar];
     const float = schema.nodes.inset.create({ name: 'Float', arg: type, params: JSON.stringify(['placement document', 'alignment document', 'wide false', 'sideways false']), status: 'open' }, Fragment.from(content));
     if (!dispatch) return true;
-    let tr = state.tr.replaceSelectionWith(float, false);
+    let tr = state.tr;
+    if (!taken && !state.selection.empty) tr.setSelection(Selection.near(tr.doc.resolve(state.selection.to), -1));
+    tr = tr.replaceSelectionWith(float, false);
     const pos = tr.selection.from - float.nodeSize;
-    tr = tr.setSelection(TextSelection.create(tr.doc, pos + 2));
+    // into the caption when something was moved in (its paragraph's start: +1 float, +1 paragraph, +1 caption, +1 its paragraph)
+    let caret = pos + 2;
+    if (taken) {
+      let off = pos + 1;
+      for (let i = 0; i < content.length - 1 && content[i] !== captionPar; i++) off += content[i].nodeSize;
+      caret = off + 3;
+    }
+    tr = tr.setSelection(TextSelection.create(tr.doc, caret));
     dispatch(tr.scrollIntoView());
     return true;
   };
@@ -457,8 +618,17 @@ export function graphicsOpts(params: string[]): GraphicsOpts & { filename: strin
   };
 }
 
+/** Insert ▸ Graphics: a graphics inset at the cursor — on a layout page outside its text boxes, an image object on that page. */
 export function insertGraphics(filename: string, opts: GraphicsOpts = {}): Command {
-  return insertNode(schema.nodes.graphics.create({ params: JSON.stringify(graphicsParams(filename, opts)) }));
+  const inline = insertNode(schema.nodes.graphics.create({ params: JSON.stringify(graphicsParams(filename, opts)) }));
+  return (state, dispatch, view) => {
+    if (isLayoutDoc(state.doc) && !state.selection.$from.parent.inlineContent) {
+      if (!view) return false;
+      if (dispatch) void placeImage(view, filename, pageAt(state.doc, state.selection.from)?.pos);
+      return true;
+    }
+    return inline(state, dispatch, view);
+  };
 }
 
 export function insertCommand(cmd: string, params: string[]): Command {
@@ -600,7 +770,7 @@ export function insertMath(display: boolean, env?: string): (view: EditorView) =
     if (markList.length) attrs.marks = JSON.stringify(markList);
     // selected text becomes the formula content
     const sel = state.selection;
-    const selText = sel.empty ? '' : state.doc.textBetween(sel.from, sel.to, ' ');
+    const selText = sel.empty || sel instanceof NodeSelection || sel instanceof CellSelection ? '' : state.doc.textBetween(sel.from, sel.to, ' ');
     if (display) {
       const e = env ?? 'simple';
       const latex = e === 'simple' ? `\\[\n${selText}\n\\]` : `\\begin{${e}}\n${selText}\n\\end{${e}}`;
@@ -608,9 +778,12 @@ export function insertMath(display: boolean, env?: string): (view: EditorView) =
     } else {
       node = schema.nodes.math_inline.create({ ...attrs, latex: selText, delim: '$' });
     }
-    const pos = state.selection.from;   // the node is inserted where the selection starts
+    if (outsideLayoutText(state, true)) return false;
+    // a selected object stays (keepSelectedObjects): the formula goes after it
+    const tr = keepSelectedObjects(state.tr);
+    const pos = tr.selection.from;   // the node is inserted where the selection starts
     pendingFocus.pos = pos; pendingFocus.keys = [];
-    const tr = state.tr.replaceSelectionWith(node, false);
+    tr.replaceSelectionWith(node, false);
     view.dispatch(tr);
     // focus the mathfield (the node view DOM exists right after dispatch; retry on the next frame)
     const focusField = (): boolean => {
@@ -625,16 +798,8 @@ export function insertMath(display: boolean, env?: string): (view: EditorView) =
   };
 }
 
-/** Inside raw LaTeX (ERT, listings) or a code-like paragraph, where every character is literal. */
-export function inRawText(state: EditorState): boolean {
-  const $from = state.selection.$from;
-  for (let d = $from.depth; d > 0; d--) {
-    const n = $from.node(d);
-    if (n.type.name === 'inset' && (n.attrs.name === 'ERT' || n.attrs.name === 'listings')) return true;
-    if (n.type.name === 'paragraph' && /^(LyX-Code|Verbatim\*?|Code)$/.test(String(n.attrs.layout))) return true;
-  }
-  return false;
-}
+import { inRawText } from './rawtext';
+export { inRawText };
 
 /**
  * `$` typed in the text opens an inline formula (a second `$` right away makes it a display
@@ -770,15 +935,18 @@ export function moveParagraph(dir: -1 | 1): Command {
 
 /* ------------------------------------------------------------------ tables */
 
+/** A rows × cols table at the cursor; selected text (or object, or paragraphs) moves into its first cell (LyX). */
 export function insertTable(rows: number, cols: number): Command {
   return (state, dispatch) => {
+    if (outsideLayoutText(state, dispatch)) return false;
+    const taken = selectedParagraphs(state);
     const cell = (r: number, c: number) => {
       const attrs: [string, string][] = [['alignment', 'center'], ['valignment', 'top']];
       if (r === 0) attrs.push(['topline', 'true']);
       attrs.push(['bottomline', 'true']);
       if (c === 0) attrs.push(['leftline', 'true']);
       attrs.push(['rightline', 'true'], ['usebox', 'none']);
-      return schema.nodes.table_cell.create({ attrs: JSON.stringify(attrs) }, schema.nodes.paragraph.create({ layout: 'Plain Layout' }));
+      return schema.nodes.table_cell.create({ attrs: JSON.stringify(attrs) }, r === 0 && c === 0 && taken ? taken : schema.nodes.paragraph.create({ layout: 'Plain Layout' }));
     };
     const rowsN: PMNode[] = [];
     for (let r = 0; r < rows; r++) {
@@ -789,7 +957,9 @@ export function insertTable(rows: number, cols: number): Command {
     const columns = Array.from({ length: cols }, () => [['alignment', 'center'], ['valignment', 'top']]);
     const table = schema.nodes.table.create({ attrs: JSON.stringify([['version', '3'], ['rows', String(rows)], ['columns', String(cols)]]), features: JSON.stringify([['tabularvalignment', 'middle']]), columns: JSON.stringify(columns) }, Fragment.from(rowsN));
     if (!dispatch) return true;
-    let tr = state.tr.replaceSelectionWith(table, false);
+    let tr = state.tr;
+    if (!taken && !state.selection.empty) tr.setSelection(Selection.near(tr.doc.resolve(state.selection.to), -1));
+    tr = tr.replaceSelectionWith(table, false);
     const pos = tr.selection.from - table.nodeSize;
     tr = tr.setSelection(TextSelection.create(tr.doc, pos + 4));
     dispatch(tr.scrollIntoView());

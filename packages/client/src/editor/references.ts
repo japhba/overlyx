@@ -1,5 +1,5 @@
 import type { Node as PMNode } from 'prosemirror-model';
-import type { EditorState, Transaction } from 'prosemirror-state';
+import { NodeSelection, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import { schema, paramMap, unquote } from '@overlyx/core';
 
 export interface ReferenceTarget { key: string; title: string; kind: string; node: PMNode; labelAt: number; label?: string }
@@ -86,6 +86,10 @@ export function referenceTransaction(state: EditorState, names: string, kind: st
     const pos = tr.mapping.map(editAt), node = tr.doc.nodeAt(pos);
     if (!node || node.type.name !== 'command' || node.attrs.cmd !== 'ref') throw new Error('The reference has moved');
     tr.setNodeMarkup(pos, undefined, { ...node.attrs, params });
-  } else tr.replaceSelectionWith(schema.nodes.command.create({ cmd: 'ref', params }));
+  } else {
+    // a selected object (the formula being referenced, say) stays: the reference goes after it
+    if (tr.selection instanceof NodeSelection && tr.selection.node.isInline) tr.setSelection(TextSelection.create(tr.doc, tr.selection.to));
+    tr.replaceSelectionWith(schema.nodes.command.create({ cmd: 'ref', params }));
+  }
   return tr.scrollIntoView();
 }

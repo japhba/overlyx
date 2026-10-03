@@ -35,6 +35,7 @@ test.beforeAll(() => {
   mkdirSync(`${DIR}/figs`, { recursive: true });
   writeFileSync(`${DIR}/dollar.tex`, texDoc('Type here.\n\nSecond.'));
   writeFileSync(`${DIR}/delims.tex`, texDoc('Formula: $(a+b)$ end.'));
+  writeFileSync(`${DIR}/habits.tex`, texDoc('First.\n\nSecond.\n\nThird.'));
   writeFileSync(`${DIR}/figs/plot.png`, lineArt());
   writeFileSync(`${DIR}/figs/photo.png`, photo());
   writeFileSync(`${DIR}/figs.tex`, texDoc('A plot: \\includegraphics[width=4cm]{figs/plot.png}\n\nA picture: \\includegraphics[width=4cm]{figs/photo.png}'));
@@ -75,6 +76,38 @@ test('$ opens an inline formula, $ closes it, $$ a display formula; Backspace ri
   await page.keyboard.type('5');
   await expect(pars.nth(1)).toHaveText('Second. costs $5');
   await expect.poll(() => readFileSync(`${DIR}/dollar.tex`, 'utf8'), { timeout: 15000 }).toContain('costs \\$5');
+});
+
+test('TeX typed the Overleaf way: spaces inside $…$, \\mathcal{F} braces, Esc keeps a finished command, \\alpha in the text', async ({ page }) => {
+  await login(page);
+  await openDoc(page, `${PROJECT}/habits.tex`);
+  await page.waitForTimeout(500);
+  const pars = page.locator('.lyx-editor > .lyx-par');
+  // spaces inside a formula opened with $ do not leave it; the closing $ does
+  await pars.nth(0).click({ position: { x: 4, y: 8 } });
+  await page.keyboard.press('End');
+  await page.keyboard.type(' $r \\ll d$ and');
+  await expect.poll(() => fieldLatex(page, '.lyx-editor .lyx-par:nth-child(1) .lyx-math-inline')).toBe('r\\ll d');
+  // \mathcal{F} with typed braces, \frac{a}{b}; Esc with a finished command keeps it
+  await pars.nth(1).click({ position: { x: 4, y: 8 } });
+  await page.keyboard.press('End');
+  await page.keyboard.type(' $\\mathcal{F}+\\frac{a}{b}+\\beta');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await expect.poll(() => fieldLatex(page, '.lyx-editor .lyx-par:nth-child(2) .lyx-math-inline')).toBe('\\mathcal{F}+\\frac{a}{b}+\\beta');
+  // a math symbol typed in the text becomes a formula; Backspace right after gives the text back
+  await pars.nth(2).click({ position: { x: 4, y: 8 } });
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Let \\alpha be');
+  await expect.poll(() => fieldLatex(page, '.lyx-editor .lyx-par:nth-child(3) .lyx-math-inline')).toBe('\\alpha');
+  await page.keyboard.type(' and \\gamma ');
+  await page.keyboard.press('Backspace');
+  await expect(pars.nth(2)).toContainText('and \\gamma');
+  await expect.poll(() => readFileSync(`${DIR}/habits.tex`, 'utf8'), { timeout: 15000 }).toContain('Let $\\alpha$ be and');
+  const tex = readFileSync(`${DIR}/habits.tex`, 'utf8');
+  expect(tex).toMatch(/\$r\s*\\ll d\$ and/);
+  expect(tex).toContain('$\\mathcal{F}+\\frac{a}{b}+\\beta$');
+  expect(tex).toMatch(/and \\textbackslash(\{\}| )gamma/);
 });
 
 test('the math toolbar grows and shrinks the delimiters around the cursor', async ({ page }) => {
