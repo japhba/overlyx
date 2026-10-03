@@ -8,6 +8,7 @@ import { useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { currentParagraph } from '../editor/commands';
+import { editorContext, onMetaChange } from '../editor/context';
 
 /**
  * Zoom the document text: a CSS variable the editor's font size is computed from (styles.css
@@ -49,6 +50,10 @@ export function applyAuthorColors(authors: { id: number; name: string }[]): void
       + `html[data-theme="dark"] .lyx-change[data-author="${a.id}"], html[data-theme="dark"] .lyx-inset[data-author="${a.id}"] { --change-color: ${dk}; }`;
   }).join('\n');
 }
+
+// the colours follow the metadata: an author who starts tracking changes (or an agent whose edits arrive
+// live) gets a colour without a reload
+onMetaChange(() => { const m = editorContext.meta; if (m) applyAuthorColors(m.authors); });
 
 /** The BCP 47 tag for a LyX language name (the editor element's `lang`, for hyphenation and the browser's spell checker). */
 export function bcp47(lyxLang: string): string {

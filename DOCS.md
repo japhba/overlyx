@@ -1346,7 +1346,11 @@ How it works, in order of what happens when you open a document:
   header editing is available for anything else.
 * Change tracking: insertions/deletions are marked per author (matched by the LyX author name);
   the status bar shows who you are tracking as and the change under the cursor; *Edit ▸ Track
-  Changes* / the context menu accept or reject single changes or all of them.
+  Changes* / the context menu accept or reject single changes or all of them. What the editor draws
+  from the document's metadata follows it live (`editorContext.meta` tells `onMetaChange` listeners
+  when it is replaced): an author who starts tracking is named and coloured at once, and a citation an
+  agent or a collaborator inserted shows author and year as soon as the refreshed metadata (project
+  events) knows the key — no reload.
 * **Mode switch: Editing · Suggesting · Viewing** (`app/EditModeSwitch.tsx`, both shells — the web
   client at the right end of the first toolbar row, as in Google Docs; the VS Code webview in its
   top bar): Suggesting is change tracking — a setting of the document (`\tracking_changes`), so it
