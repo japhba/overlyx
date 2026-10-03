@@ -363,6 +363,9 @@ export function latexParagraphs(ctx: ExportContext, text: TextInfo, os: TexStrea
 
 /* ------------------------------------------------------------------ TeXOnePar */
 
+const HEADING_ALIGN: Record<string, string> = { center: '\\centering', left: '\\raggedright', right: '\\raggedleft' };
+const RUN_IN = new Set(['paragraph', 'subparagraph']);
+
 function parStartCommand(ctx: ExportContext, os: TexStream, rp: RunParams, par: Paragraph, style: LayoutStyle): void {
   switch (style.latexType) {
     case 'Command':
@@ -509,6 +512,12 @@ function texOneParImpl(ctx: ExportContext, text: TextInfo, pit: number, os: TexS
     }
   }
 
+  // an aligned heading in a .tex document: the alignment around the command, {\centering\section{…}\par}
+  // — inside the argument a \par (of \begin{center}…\end{center}) does not compile. A run-in heading
+  // (\paragraph) has no line of its own to align, and in a group it would be lost: none there
+  const cmdAlign = ctx.texMode && isCommand(style) && !intitleCommand && !RUN_IN.has(style.latexName.replace(/\*$/, '')) ? HEADING_ALIGN[parAlign(par, style)] : undefined;
+  const alignedHeading = !!cmdAlign && parAlign(par, style) !== style.align;
+  if (alignedHeading) os.write(`{${cmdAlign}`);
   if (!intitleCommand) parStartCommand(ctx, os, localRp, par, style);
 
   paragraphLatex(ctx, os, localRp, par, style, parLang, isLastPar, text);
@@ -517,6 +526,7 @@ function texOneParImpl(ctx: ExportContext, text: TextInfo, pit: number, os: TexS
     os.write('}');
     if (style.args.size) latexArgInsets(ctx, os, localRp, style.args, argInsetsOf(par, 'post:'), 'post:');
     if (localRp.postMacro) { os.write(localRp.postMacro); localRp.postMacro = ''; }
+    if (alignedHeading) os.write('\\par}');
   } else if (!intitleCommand && localRp.postMacro) {
     // postponed fragile content of an enclosing moving argument
     rp.postMacro += localRp.postMacro;
@@ -694,6 +704,7 @@ const WRAP_COLUMN = 65;
 /** Write the alignment / noindent parameters at the start of a paragraph (startTeXParParams). */
 function startParParams(ctx: ExportContext, os: TexStream, rp: RunParams, par: Paragraph, style: LayoutStyle, isLastPar: boolean, units: Unit[]): void {
   if (rp.forcePlain || !rp.customPars) return;
+  if (ctx.texMode && isCommand(style) && !style.inTitle) return;   // aligned around the heading (texOneParImpl)
   const canIndent = ctx.bp.paragraphSeparation === 'indent' ? style.toggleIndent !== 'never' : style.toggleIndent === 'always';
   const curAlign = parAlign(par, style);
   if (canIndent && par.params.noindent && !style.passThru && curAlign !== 'center') {
@@ -707,8 +718,9 @@ function startParParams(ctx: ExportContext, os: TexStream, rp: RunParams, par: P
   correctedEnv(os, '\\begin', curAlign === 'left' ? 'flushleft' : curAlign === 'right' ? 'flushright' : 'center', rp, isLastPar);
 }
 
-function endParParams(os: TexStream, rp: RunParams, par: Paragraph, style: LayoutStyle, isLastPar: boolean): void {
+function endParParams(ctx: ExportContext, os: TexStream, rp: RunParams, par: Paragraph, style: LayoutStyle, isLastPar: boolean): void {
   if (rp.forcePlain || !rp.customPars) return;
+  if (ctx.texMode && isCommand(style) && !style.inTitle) return;
   const curAlign = parAlign(par, style);
   if (curAlign === style.align) return;
   if (curAlign !== 'left' && curAlign !== 'right' && curAlign !== 'center') return;
@@ -856,7 +868,7 @@ export function paragraphLatex(ctx: ExportContext, os: TexStream, rp: RunParams,
   if (!rp.inDeletedInset) markChange(ctx, os, rp, runningChange, undefined);
   if (bodyPos > 0 && bodyPos === units.length) os.write('}]~');
   if (style.rightDelim) os.write(style.rightDelim);
-  endParParams(os, rp, par, style, isLastPar);
+  endParParams(ctx, os, rp, par, style, isLastPar);
 }
 
 function sameChange(a?: Change, b?: Change): boolean {

@@ -1,6 +1,7 @@
 /**
  * The writer never produces LaTeX that cannot compile from a document the editor can make:
- * a caption of several paragraphs (Enter pressed in a caption) is one paragraph in \caption{…}.
+ * a caption of several paragraphs (Enter pressed in a caption) is one paragraph in \caption{…};
+ * an aligned heading has its alignment around the command, not a \par inside its argument.
  *   npx vitest run tests/writer-safety.test.ts
  */
 import { describe, it, expect } from 'vitest';
@@ -36,6 +37,36 @@ describe('captions', () => {
     const out = writeTex(doc).text;
     expect(out).toContain('\\caption{Maximum path lengths of sequential operations}');
     expect(out).not.toMatch(/\\caption\{[^}]*\n\s*\n/);
+    compile(out);
+  });
+});
+
+describe('aligned headings', () => {
+  it('are written as {\\centering\\section{…}\\par}, compile, and read back aligned', () => {
+    const src = '\\documentclass{article}\n\\begin{document}\n\\tableofcontents\n\\raggedleft\nSome text.\n\n\\section{Conclusions}\n\\label{sec:conclusions}\n\nMore text.\n\\end{document}\n';
+    const out = writeTex(parseTex(src).doc).text;
+    expect(out).toContain('{\\raggedleft\\section{Conclusions}\\label{sec:conclusions}\\par}');
+    expect(out).not.toContain('\\section{\\protect\\begin');
+    const back = parseTex(out).doc.body;
+    expect(back.find(p => p.layout === 'Section')?.params.align).toBe('right');
+    expect(writeTex(parseTex(out).doc).text).toBe(out);
+    compile(out);
+  });
+
+  it('the old form, \\section{\\protect\\begin{center}…\\protect\\par\\end{center}}, still reads as an aligned heading', () => {
+    const src = '\\documentclass{article}\n\\begin{document}\n\\section{\\protect\\begin{center}\nConclusions\\protect\n\\par\\end{center}}\\label{sec:c}\n\nText.\n\\end{document}\n';
+    const body = parseTex(src).doc.body;
+    expect(body[0].layout).toBe('Section');
+    expect(body[0].params.align).toBe('center');
+    expect(body[0].items.some(it => it.kind === 'text' && it.text.includes('Conclusions'))).toBe(true);
+    expect(body).toHaveLength(2);
+  });
+
+  it('a run-in heading (\\paragraph) is not put in a group, where LaTeX would lose it', () => {
+    const src = '\\documentclass{article}\n\\begin{document}\n\\centering\nSome text.\n\n\\paragraph*{Acknowledgments.}\nThanks.\n\\end{document}\n';
+    const out = writeTex(parseTex(src).doc).text;
+    expect(out).toContain('\n\\paragraph*{Acknowledgments.}');
+    expect(out).not.toContain('{\\centering\\paragraph');
     compile(out);
   });
 });

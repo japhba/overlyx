@@ -252,6 +252,9 @@ class BodyParser {
   private root: TextCtx | null = null;
   /** start of the latest token the body's scanner gave a parse loop */
   private tokStart = 0;
+  /** the heading whose title is being read (\section{…}), and whether inside an alignment there */
+  private titlePar: Paragraph | null = null;
+  private inTitleAlign = false;
   /** where the body's scanner was when something was last put into a top-level paragraph */
   private lastPush = 0;
   /** start of the first token since the last top-level paragraph ended (null: none yet) */
@@ -676,7 +679,7 @@ class BodyParser {
       else { s.readStar(); this.pushInset(ctx, st, { type: 'Leaf', name: 'Newline', arg: 'newline', params: [] }); }
       return null;
     }
-    if (name === 'par') { this.endPar(ctx); return null; }
+    if (name === 'par') { if (!this.inTitleAlign) this.endPar(ctx); return null; }
     // an absolute font size, \fontsize{25}{30}\selectfont: the size mark "25pt" (with its leading when it is not 1.2 ×)
     if (name === 'fontsize') {
       const save = s.pos;
@@ -1235,7 +1238,10 @@ class BodyParser {
     if (s.peekChar() === '{') {
       s.pos++;
       ctx.cur = par;
+      const title = this.titlePar;
+      this.titlePar = par;
       this.parseText(s, ctx, inner, { close: true });
+      this.titlePar = title;
       ctx.cur = par;
     }
     this.absorbLabels(s, ctx, inner);
@@ -1354,6 +1360,18 @@ class BodyParser {
       return;
     }
     const align = ALIGN_ENVS[env];
+    if (align && this.titlePar && ctx.cur === this.titlePar) {
+      // an aligned heading as the writer writes it, \section{\protect\begin{center}…\protect\par\end{center}}:
+      // the heading's alignment (its \par is the environment's, not the end of the heading)
+      this.titlePar.params.align = align;
+      const inAlign = this.inTitleAlign;
+      this.inTitleAlign = true;
+      this.envStack.push(env);
+      this.parseText(s, ctx, cloneState(st), { env });
+      this.envStack.pop();
+      this.inTitleAlign = inAlign;
+      return;
+    }
     if (align) {
       this.endPar(ctx);
       this.startsHere(ctx);
