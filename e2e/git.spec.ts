@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { login, BASE_URL, PROJECTS_DIR, acceptDialog } from './helpers';
+import { login, apiLogin, BASE_URL, PROJECTS_DIR, acceptDialog } from './helpers';
 
 const PROJECT = 'admin/e2e-git';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -23,7 +23,12 @@ test.describe.configure({ mode: 'serial' });
 let token = '';
 let cloneUrl = '';
 
-test.beforeAll(() => {
+test.beforeAll(async ({ browser }) => {
+  // a previous run's project (its row outlives the folder) would make the creation below answer 409
+  const ctx = await browser.newContext();
+  await apiLogin(ctx);
+  await ctx.request.delete(`${BASE_URL}/api/projects/${encodeURIComponent(PROJECT)}`);
+  await ctx.close();
   rmSync(DIR, { recursive: true, force: true });
   rmSync(CLONE, { recursive: true, force: true });
 });
