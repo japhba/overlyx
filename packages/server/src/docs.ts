@@ -63,6 +63,8 @@ export class OpenDoc {
   savedListeners = new Set<() => void>();
   /** accounts whose edits were written to the file since the last time somebody asked (git commits) */
   editors = new Set<number>();
+  /** commands this document defined itself until an agent's edit renamed or removed them (docedit.ts: their struck-out uses would not compile) */
+  retiredMacros = new Set<string>();
 
   constructor(public id: string, public project: string, public relPath: string, public absPath: string) {
     this.awareness = new awarenessProtocol.Awareness(this.ydoc);

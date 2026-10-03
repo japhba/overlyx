@@ -1085,6 +1085,17 @@ on focus) used to be taken for the newer state and undid that update in the edit
 moment ago came back. `tests/vscode-ledger.test.ts` and `tests/vscode-sync.test.ts` cover both;
 `packages/vscode/test/probeEditing.mjs` reproduces them in the real extension.
 
+**A save racing an outside write.** When the file changes on disk while the document has unsaved
+edits, the host merges the change into the document (`readDisk`; the unsaved text is kept as a draft
+in the extension's `recovery` folder first), but VS Code still holds the older file as "saved" and
+refuses its own save (*file modified since*). That refusal used to be logged to the console only:
+the user believed the file was saved, and the edit never reached the disk. `DocSession.save` now
+writes the merged text itself and reverts the document's editor to the file — which then holds the
+same text — so nothing is left modified (`resync` in `host/editorProvider.ts`; the revert runs only
+once that editor is verifiably the active one), with a status-bar note; a save that still fails, or
+an edit the host could not write into the document, is shown as an error with *Retry* / *Save now*.
+The integration test (`test/suite/index.cjs`, step 4b) races both the host's save and the webview's.
+
 tests/            vitest: .tex parse/write stability (tex.test.ts: features + a corpus of real
                   papers and LyX's example documents), LyX round trips (import path), PM/Yjs
                   conversions, LaTeX writer unit tests, latexmk compile tests
@@ -1326,7 +1337,22 @@ How it works, in order of what happens when you open a document:
    be shown offline.
 4. **Back online.** y-websocket reconnects; the Yjs sync sends the offline edits and receives
    everybody else's. Because the document is a CRDT, concurrent edits merge without conflicts
-   (two people editing the same sentence simply both get their words in). External changes of
+   (two people editing the same sentence simply both get their words in, one word after the other).
+   That needs every typed character anchored to the one typed before it: y-prosemirror's
+   prefix-first diff hung the rest of a word typed in front of an equal letter ("q…" before
+   "queries") off the old text, and two people typing at the same place, one of them offline, got
+   their words spliced into each other mid-word — `editor/plugins/typinganchor.ts` places such an
+   insertion at the cursor first (`tests/typing-anchor.test.ts`, the token-accounting test in
+   `e2e/offline.spec.ts`). Yjs cannot move text, so Enter in the middle of a paragraph keeps one half
+   in the paragraph's Yjs element and *copies* the other into a new one: typinganchor.ts keeps the
+   larger half (the first on a tie) with the split text run trimmed, never deleted, and copies the
+   smaller one (y-prosemirror aligned the runs from the left and, with formulas in the paragraph,
+   rewrote the first run and deleted the split one — what somebody offline had typed there was lost,
+   and two people typing at a paragraph's start and pressing Enter duplicated it). What others typed
+   meanwhile into the split run survives (inside the copied part it ends up at the split point). Two
+   limits remain: text typed meanwhile into the copied half *beyond a formula or inset* is lost, and
+   when two people split the same paragraph before syncing, a stretch both of them copied can appear
+   twice. External changes of
    the file are applied on the server as a *diff* (`packages/server/src/ydiff.ts`), so paragraphs
    they did not touch keep their identity and offline edits inside them survive.
    A formula is one value, not text: when two people change the same formula from the same version,
@@ -1488,7 +1514,19 @@ exposes these tools:
   to the comparison (it stays deleted when the agent's version leaves it out); another author's
   pending insertion that the agent keeps stays theirs; the agent's *own* pending changes in an edited
   region are taken back and re-derived, so refining a proposal never stacks changes on changes.
-  Other people's concurrent edits elsewhere survive (three-way merge, `mergeLyx`).
+  Other people's concurrent edits elsewhere survive (three-way merge, `mergeLyx`). The preamble is
+  never tracked: a change to it is applied directly and the result says so (`applied_directly`). A
+  command the document defined itself and an edit renamed or removed (`\newcommand{\R}` →
+  `\newcommand{\Real}`) is remembered on the open document (`retiredMacros`): the agent's own
+  struck-out formulas that use it are removed instead of struck out (a `\lyxdeleted` formula is still
+  typeset, so a tracked macro rename never compiled), and the result names the formulas that still
+  use it. Whether anything changed is judged by the text, not by the marks — a preamble edit or
+  one's own pending insertion taken back is no longer reported as "nothing changed".
+* Agent edits of one document run one after the other (`withDocLock`), and a direct edit reads the
+  document after its restore-point commit: two calls in flight used to both report success while the
+  later one replaced the earlier one's change. Requests over 2 MB, or not JSON, get a JSON-RPC error
+  (413 / parse error), not Express's HTML page. `create_document` puts the account's name in
+  `\author`, as the editor does.
 * `propose_edit(path, paragraph_index, new_text)` — replaces one plain, uniformly formatted text
   paragraph's text (formulas / insets / mixed formatting are refused).
 * `list_comments(path)`, `add_comment(path, text, paragraph_index?)`, `resolve_comment(path, index)`

@@ -5,7 +5,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { login, collectErrors, adminCredentials, PROJECTS_DIR } from './helpers';
+import { login, collectErrors, adminCredentials, PROJECTS_DIR, shareProject, userCredentials } from './helpers';
 
 const PROJECT = 'admin/e2e-offline';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -109,6 +109,117 @@ test('edits of another user made meanwhile merge with the offline edits', async 
   const text = readFileSync(FILE, 'utf8');
   expect(text).toContain('MINE-WHILE-OFFLINE');
   expect(text).toContain('THEIRS-MEANWHILE');
+  await other.close();
+});
+
+/**
+ * Token accounting for a long offline stretch (CHAOS-2): one user offline for a minute, another online,
+ * both typing tagged tokens into the SAME paragraph and list item — mostly right in front of the word
+ * "queries", where a token's own "q" used to anchor the rest of the token to the existing text, so on
+ * reconnect the two users' tokens were spliced into each other mid-token ("Zb Za1q0006Z q0000Z") — while
+ * the online user also splits the list item with Enter. Every token must come out whole and exactly
+ * once, in both editors and on disk, and the original text must be all there, once.
+ */
+const MERGE_FILE = `${DIR}/merge.tex`;
+const MERGE_BODY = [
+  'Shared paragraph: all of the keys $k_i$, values $v_i$ and queries come from the same place, the encoder $E$.',
+  '\\begin{itemize}\n\\item keys, values and queries come from the previous decoder layer.\n\\item Second item stays.\n\\end{itemize}',
+  'Last paragraph of the merge test.',
+];
+const TOKEN = /Z[a-z]+\d?q\d{4}Z/g;
+/** the visible document text, without the remote-cursor labels */
+const docText = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.lyx-editor > .lyx-par')].map(p => {
+  const c = p.cloneNode(true) as HTMLElement;
+  c.querySelectorAll('.ProseMirror-yjs-cursor').forEach(x => x.remove());
+  return c.textContent ?? '';
+}).join('\n'));
+const withoutTokens = (t: string) => t.replace(TOKEN, ' ').replace(/\s+/g, ' ').trim();
+
+/** caret right before `needle` (null: at the end) in the paragraph that contains `inPar` */
+async function caretAt(page: Page, inPar: string, needle: string | null) {
+  await page.locator('.lyx-editor .lyx-par', { hasText: inPar }).first().click({ position: { x: 4, y: 4 } });
+  await page.evaluate(([inPar, needle]) => {
+    const par = [...document.querySelectorAll('.lyx-editor .lyx-par')].find(p => (p.textContent ?? '').includes(inPar!));
+    if (!par) throw new Error('no paragraph with ' + inPar);
+    const walker = document.createTreeWalker(par, NodeFilter.SHOW_TEXT);
+    let target: Text | null = null, offset = 0, last: Text | null = null;
+    for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+      if (n.parentElement?.closest('.ProseMirror-yjs-cursor')) continue;
+      last = n;
+      if (needle && !target && n.data.includes(needle)) { target = n; offset = n.data.indexOf(needle); }
+    }
+    if (!target) { target = last; offset = last?.data.length ?? 0; }   // no needle, or split off by now: the end
+    document.getSelection()!.collapse(target!, offset);
+  }, [inPar, needle] as const);
+  await page.waitForTimeout(60);
+}
+
+test('a minute offline beside another writer in the same paragraph and list: every token once, everywhere', async ({ page, context, browser }) => {
+  test.setTimeout(240000);
+  writeFileSync(MERGE_FILE, `\\documentclass{article}\n\\begin{document}\n${MERGE_BODY.join('\n\n')}\n\\end{document}\n`);
+  let otherCreds = adminCredentials();
+  try { otherCreds = userCredentials('u1'); await shareProject(browser, PROJECT, ['u1']); } catch { /* single-user seed: a second admin tab */ }
+  const errors = collectErrors(page);
+  await login(page);
+  await page.goto('/#/' + `${PROJECT}/merge.tex`);
+  await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  await expect(saveState(page)).toHaveText(/All changes saved/, { timeout: 15000 });
+  await page.waitForFunction(() => navigator.serviceWorker?.controller != null, null, { timeout: 15000 });
+  const original = withoutTokens(await docText(page));
+
+  const other = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+  const page2 = await other.newPage();
+  const errors2 = collectErrors(page2);
+  await login(page2, otherCreds);
+  await page2.goto('/#/' + `${PROJECT}/merge.tex`);
+  await page2.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  await expect(saveState(page2)).toHaveText(/All changes saved/, { timeout: 15000 });
+
+  await context.setOffline(true);
+  await expect(saveState(page)).toHaveText(/Offline/, { timeout: 15000 });
+  const typed: string[] = [];
+  const spots: [string, string | null][] = [
+    ['Shared paragraph', 'queries'], ['previous decoder layer', 'queries'], ['Shared paragraph', 'queries'],
+    ['previous decoder layer', 'queries'], ['Shared paragraph', null], ['previous decoder layer', null], ['Shared paragraph', 'the encoder'],
+  ];
+  const writer = async (p: Page, tag: string, until: number) => {
+    for (let i = 0; Date.now() < until; i++) {
+      const [inPar, needle] = spots[i % spots.length];
+      await caretAt(p, inPar, needle);
+      const token = `Z${tag}q${String(i).padStart(4, '0')}Z`;
+      await p.keyboard.type(` ${token} `, { delay: 30 });
+      typed.push(token);
+      // the online side splits the list item (one text run): what the offline side typed into it survives the split
+      // (not kept: text typed meanwhile beyond a formula in the copied half; two splits of one paragraph may copy a stretch twice — DOCS.md)
+      if (tag === 'zb' && inPar === 'previous decoder layer' && needle) await p.keyboard.press('Enter');
+      await p.waitForTimeout(400 + Math.random() * 800);
+    }
+  };
+  const until = Date.now() + 60000;
+  await Promise.all([writer(page, 'za', until), writer(page2, 'zb', until)]);
+  await expect(saveState(page)).toHaveText(/kept on this device/, { timeout: 15000 });
+  await expect(saveState(page2)).toHaveText(/All changes saved/, { timeout: 15000 });
+
+  await context.setOffline(false);
+  await expect(saveState(page)).toHaveText(/All changes saved/, { timeout: 30000 });
+  await expect(saveState(page2)).toHaveText(/All changes saved/, { timeout: 30000 });
+  await expect.poll(async () => (await docText(page)) === (await docText(page2)), { timeout: 20000 }).toBe(true);
+  const tokensIn = (t: string) => [...(t.match(TOKEN) ?? [])].sort();
+  const inEditor = tokensIn(await docText(page2));
+  await expect.poll(() => tokensIn(readFileSync(MERGE_FILE, 'utf8')), { timeout: 20000 }).toEqual(inEditor);
+
+  const expected = [...typed].sort();
+  expect(typed.length).toBeGreaterThan(40);
+  for (const [where, text] of [['offline editor', await docText(page)], ['online editor', await docText(page2)], ['file', readFileSync(MERGE_FILE, 'utf8')]] as const) {
+    expect(tokensIn(text), `tokens in the ${where}`).toEqual(expected);
+  }
+  const merged = await docText(page);
+  expect(withoutTokens(merged)).toBe(original);
+  const mergedFile = readFileSync(MERGE_FILE, 'utf8');
+  const noItems = (t: string) => withoutTokens(t.replace(/\\item\b/g, ' '));   // a split item is two \items
+  for (const line of MERGE_BODY.flatMap(b => b.split('\n'))) expect(noItems(mergedFile), line).toContain(noItems(line));
+  expect(errors.filter(e => !/favicon|ERR_INTERNET_DISCONNECTED|Failed to fetch|WebSocket/.test(e))).toEqual([]);
+  expect(errors2.filter(e => !/favicon/.test(e))).toEqual([]);
   await other.close();
 });
 

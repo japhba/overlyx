@@ -13,8 +13,8 @@
  * wrappers) the source contains, and with different whitespace.
  */
 import {
-  mergeLyx, mergeInPlace, trackDiff, changeStats, addAuthor, lyxAuthorId, setHeaderValue, writeParagraphs,
-  type LyxDocument, type Paragraph, type RegionMerge,
+  mergeLyx, mergeInPlace, trackDiff, changeStats, addAuthor, lyxAuthorId, setHeaderValue, writeParagraphs, collectMacros, getPreamble,
+  type LyxDocument, type Paragraph, type RegionMerge, type Item,
 } from '@overlyx/core';
 import type { OpenDoc } from './docs.ts';
 
@@ -24,6 +24,10 @@ export interface TrackedResult {
   /** characters (and paragraph breaks) marked inserted / deleted by this edit */
   inserted: number;
   deleted: number;
+  /** the document changed (also when nothing needed a mark: the preamble, one's own pending insertion taken back) */
+  changed: boolean;
+  /** parts of the edit applied without tracked-change marks, in words for the agent */
+  direct: string[];
   /** the edited passage as the document now reads (a few lines around the change), or '' */
   excerpt: string;
   /** the live document's source right before and right after the edit */
@@ -33,7 +37,8 @@ export interface TrackedResult {
 
 /**
  * `before` is the source the agent edited (what it read), `after` its version. Regions it changed
- * are diffed against the live document and applied as tracked changes by `author`.
+ * are diffed against the live document and applied as tracked changes by `author`. The preamble is
+ * never change-tracked (mergeLyx takes it over as it is): that part is applied directly, and said so.
  */
 export function applyTrackedSource(doc: OpenDoc, before: string, after: string, author: string): TrackedResult {
   const base = doc.parse(before), theirs = doc.parse(after);
@@ -41,19 +46,85 @@ export function applyTrackedSource(doc: OpenDoc, before: string, after: string, 
   // the live document with the agent's changed paragraphs taken over (untracked; a neighbouring
   // paragraph somebody changed meanwhile keeps their version) …
   const target: LyxDocument = mergeLyx(base, ours, theirs, mergeInPlace);
+  const direct: string[] = [];
+  if (getPreamble(target) !== getPreamble(ours)) direct.push('the preamble (it is never change-tracked)');
+  retireMacros(doc, ours, target);
   // … and then the difference to the live document as the agent's tracked changes
   const authorId = lyxAuthorId(author, '');
   addAuthor(target.header, authorId, author, '');
   setHeaderValue(target.header, 'tracking_changes', 'true');
   const as = { author: authorId, time: Math.floor(Date.now() / 1000) };
   target.body = trackDiff(ours.body, target.body, as);
+  direct.push(...dropUncompilableDeletions(doc, target, authorId));
   const oldText = doc.toText();
   doc.loadFromLyx(target, 'mcp');
   doc.dirty = true;
   void doc.saveToFile();
   const st = changeStats(target.body, as);
   const newText = doc.toText();
-  return { ...st, excerpt: excerptOfChange(oldText, newText), before: oldText, after: newText };
+  direct.push(...stillUsedRetired(doc, target));
+  return { ...st, changed: newText !== oldText, direct, excerpt: excerptOfChange(oldText, newText), before: oldText, after: newText };
+}
+
+/* ------------------------------------------------------------------ macros an edit stops defining */
+
+const definedMacros = (d: LyxDocument): Set<string> => new Set(collectMacros(d).map(m => m.name));
+const usesAny = (latex: string, names: Set<string>): string[] => [...new Set([...latex.matchAll(/\\([A-Za-z@]+)/g)].map(m => m[1]))].filter(n => names.has(n));
+
+/** Every formula of a body (inside insets and table cells too), with the item that holds it. */
+function eachFormula(pars: Paragraph[], fn: (it: Item, latex: string, items: Item[]) => void): void {
+  for (const p of pars) {
+    for (const it of [...p.items]) {
+      if (it.kind !== 'inset') continue;
+      const ins = it.inset;
+      if (ins.type === 'Formula') fn(it, ins.latex, p.items);
+      else if (ins.type === 'Text') eachFormula(ins.paragraphs, fn);
+      else if (ins.type === 'Tabular') for (const r of ins.rows) for (const c of r.cells) eachFormula(c.paragraphs, fn);
+    }
+  }
+}
+
+/**
+ * Commands the document defined itself (preamble, macro insets) and an edit — this one or an earlier
+ * one — stopped defining: renamed (\newcommand{\R} → \newcommand{\Real}) or removed. Remembered on the
+ * open document, since the uses are typically changed by later edits.
+ */
+function retireMacros(doc: OpenDoc, from: LyxDocument, to: LyxDocument): void {
+  const was = definedMacros(from), now = definedMacros(to);
+  for (const n of was) if (!now.has(n)) doc.retiredMacros.add(n);
+  for (const n of now) doc.retiredMacros.delete(n);
+}
+
+/**
+ * A struck-out formula is still typeset (\lyxdeleted), so one that uses a command the document no
+ * longer defines breaks the build — a tracked macro rename never compiled. Such deletions of the
+ * agent's own are applied directly (the formula goes); somebody else's are left and named.
+ */
+function dropUncompilableDeletions(doc: OpenDoc, target: LyxDocument, authorId: number): string[] {
+  if (!doc.retiredMacros.size) return [];
+  let dropped = 0;
+  const names = new Set<string>(), others = new Set<string>();
+  let othersCount = 0;
+  eachFormula(target.body, (it, latex, items) => {
+    if (it.change?.type !== 'deleted') return;
+    const used = usesAny(latex, doc.retiredMacros);
+    if (!used.length) return;
+    if (it.change.author === authorId) { items.splice(items.indexOf(it), 1); dropped++; used.forEach(n => names.add(n)); }
+    else { othersCount++; used.forEach(n => others.add(n)); }
+  });
+  const list = (s: Set<string>) => [...s].map(n => '\\' + n).join(', ');
+  const out: string[] = [];
+  if (dropped) out.push(`${dropped} old formula${dropped > 1 ? 's' : ''} removed instead of struck out: ${dropped > 1 ? 'they use' : 'it uses'} ${list(names)}, which the document no longer defines (a struck-out formula is still typeset, so it would break the build)`);
+  if (othersCount) out.push(`note: ${othersCount} formula${othersCount > 1 ? 's' : ''} struck out by somebody else still use${othersCount > 1 ? '' : 's'} ${list(others)}, which the document no longer defines — the build fails until those changes are accepted or rejected`);
+  return out;
+}
+
+/** Retired commands the document still uses in formulas that are not struck out: the agent has to update them. */
+function stillUsedRetired(doc: OpenDoc, target: LyxDocument): string[] {
+  if (!doc.retiredMacros.size) return [];
+  const counts = new Map<string, number>();
+  eachFormula(target.body, (it, latex) => { if (it.change?.type !== 'deleted') for (const n of usesAny(latex, doc.retiredMacros)) counts.set(n, (counts.get(n) ?? 0) + 1); });
+  return [...counts].map(([n, c]) => `note: \\${n} is no longer defined, but ${c} formula${c > 1 ? 's' : ''} still use${c > 1 ? '' : 's'} it — update ${c > 1 ? 'them' : 'it'} (tracked edits are fine: the old formulas are removed, not struck out)`);
 }
 
 /**
@@ -63,7 +134,9 @@ export function applyTrackedSource(doc: OpenDoc, before: string, after: string, 
  * other people's tracked changes stay as they are.
  */
 export function applyPlainSource(doc: OpenDoc, before: string, after: string): { changed: boolean; excerpt: string; before: string; after: string } {
-  const target: LyxDocument = mergeLyx(doc.parse(before), doc.toLyxDocument(), doc.parse(after), mergeInPlace);
+  const ours = doc.toLyxDocument();
+  const target: LyxDocument = mergeLyx(doc.parse(before), ours, doc.parse(after), mergeInPlace);
+  retireMacros(doc, ours, target);
   const oldText = doc.toText();
   doc.loadFromLyx(target, 'mcp');   // clients apply it like an agent edit
   doc.dirty = true;
@@ -102,10 +175,17 @@ export function restoreSource(doc: OpenDoc, text: string): string {
   return doc.toText();
 }
 
-/** The lines of `next` that differ from `prev` (after the preamble), with two lines of context. */
+/** The lines of `next` that differ from `prev` (after the preamble — or in the preamble above the OverLyX block when only that changed), with two lines of context. */
 export function excerptOfChange(prev: string, next: string, maxLines = 60): string {
   const bodyOf = (t: string) => { const i = t.indexOf('\\begin{document}'); return i >= 0 ? t.slice(i) : t; };
-  const a = bodyOf(prev).split('\n'), b = bodyOf(next).split('\n');
+  const body = changedLines(bodyOf(prev), bodyOf(next), maxLines);
+  if (body) return body;
+  const userPreamble = (t: string) => { const i = t.indexOf('\\begin{document}'), m = t.indexOf('%% OverLyX ---'); return t.slice(0, m >= 0 && (i < 0 || m < i) ? m : i >= 0 ? i : 0); };
+  return changedLines(userPreamble(prev), userPreamble(next), maxLines);
+}
+
+function changedLines(prev: string, next: string, maxLines: number): string {
+  const a = prev.split('\n'), b = next.split('\n');
   let p = 0;
   while (p < a.length && p < b.length && a[p] === b[p]) p++;
   let s = 0;

@@ -74,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       docId: session.docId, absPath: target.absPath, header: target.header, latexmk,
       prepare: async () => {
         // the .tex file on disk is what latexmk compiles: write the editor's state first
-        await session.save();
+        await session.save(e.resync);
         if (!await vscode.workspace.saveAll(false)) throw new Error('Resolve the unsaved file changes before building the PDF.');
       },
     });

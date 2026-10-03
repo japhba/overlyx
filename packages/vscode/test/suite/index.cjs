@@ -70,6 +70,26 @@ exports.run = async function run() {
   await until(() => entry.outline.some(o => /Renamed Heading/.test(o.text)), 45000, 'the external change to reach the webview');
   log('external change merged into the editor');
 
+  // 4b. a save racing an outside write of the dirty file (sim vscode.md P1): VS Code refuses its own
+  // save ("file modified since") although the change on disk is merged into the document; the save
+  // writes the merged text, VS Code's copy is brought up to date, nothing is left modified
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const race = async (mark, outside) => {
+    await entry.session.applySource(entry.session.document.getText().replace('are studied', 'are studied ' + mark));
+    assert.ok(entry.session.document.isDirty, 'the edit leaves the document modified');
+    fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace('\\end{document}', outside + '\n\n\\end{document}'));
+    await until(() => entry.session.document.getText().includes(outside), 15000, 'the outside write to be merged into the document');
+  };
+  await race('RACE-ONE', 'Outside paragraph one.');
+  assert.strictEqual(await entry.session.document.save(), false, 'VS Code refuses the plain save (the precondition of the bug)');
+  assert.strictEqual(await entry.session.save(entry.resync), 'merged');
+  let disk = fs.readFileSync(p, 'utf8');
+  assert.ok(disk.includes('RACE-ONE') && disk.includes('Outside paragraph one.'), 'both the edit and the outside change are on disk: ' + disk);
+  assert.ok(!entry.session.document.isDirty, 'nothing is left modified');
+  // the webview's own save (Ctrl+S, here through Build PDF, which saves first) takes the same path
+  await race('RACE-TWO', 'Outside paragraph two.');
+  log('save race recovered');
+
   // 5. latexmk build + SyncTeX through the bridge
   await vscode.commands.executeCommand('overlyx.buildPdf');
   const finished = await until(async () => {
@@ -80,6 +100,9 @@ exports.run = async function run() {
     console.log('[overlyx-test] BUILD LOG START\n' + String(finished.build && finished.build.log).slice(0, 20000) + '\n[overlyx-test] BUILD LOG END');
   }
   assert.strictEqual(finished.job.status, 'ok', 'build failed — log above');
+  disk = fs.readFileSync(p, 'utf8');
+  assert.ok(disk.includes('RACE-TWO') && disk.includes('Outside paragraph two.'), 'the webview save wrote the edit and kept the outside change: ' + disk);
+  assert.ok(!entry.session.document.isDirty, 'nothing is left modified after the webview save');
   assert.ok(finished.build.pdf, 'build result carries a PDF URL');
   assert.ok(finished.build.pdf.startsWith(forwarding.base + '/'), 'PDF links use the same forwarded URI as images');
   const pdfResp = await fetch(finished.build.pdf);

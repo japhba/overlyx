@@ -24,6 +24,7 @@ import { foldPlugin } from './plugins/fold';
 import { marginPlugin } from './plugins/margin';
 import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
 import { fontCarryPlugin } from './plugins/fontcarry';
+import { typingAnchorPlugin } from './plugins/typinganchor';
 import { insetCaretPlugin } from './plugins/insetcaret';
 import { envFocusPlugin } from './plugins/envfocus';
 import { wideTablesPlugin } from './plugins/widetables';
@@ -113,6 +114,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
   installLinks();   // ⌘K and the link bubble inside formulas, ⌘/Ctrl+click on their links
   return [
     ...o.sync,
+    typingAnchorPlugin(),   // typed text joins the Yjs history where it was typed (wraps the ySyncPlugin's PM → Yjs step)
     // AI preview / ghost text come first: their Tab / Escape must win over the LyX bindings and table navigation
     aiRewritePlugin(),
     aiCompletePlugin(),

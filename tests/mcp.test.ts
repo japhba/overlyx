@@ -394,6 +394,122 @@ Thesis: \emph{Learning dynamics} in recurrent networks. Advisor: \href{https://e
   });
 });
 
+describe('edits in flight at the same time', () => {
+  it('parallel direct edits of one passage: one applies, the others fail clearly — none is reported done and lost', async () => {
+    await ensureRepo('owner/p');
+    writeFileSync(file('race.tex'), `\\documentclass{article}\n\\title{Huge Stress Test}\n\\begin{document}\n\\maketitle\nBody text.\n\\end{document}\n`);
+    const t = createMcpToken(owner.id, 'Race Bot').token;
+    const calls = [1, 2, 3].map(i => callTool(t, 'edit_document', { path: 'race.tex', old_text: 'Huge Stress Test', new_text: `Race Winner ${i}`, tracked: false }));
+    const res = await Promise.allSettled(calls);
+    const won = res.flatMap((r, i) => (r.status === 'fulfilled' ? [i + 1] : []));
+    expect(won).toHaveLength(1);
+    for (const r of res) if (r.status === 'rejected') expect(String(r.reason)).toMatch(/not found/);
+    const text = (await manager.open('owner/p/race.tex')).toText();
+    expect(text).toContain(`\\title{Race Winner ${won[0]}}`);
+  });
+
+  it('parallel edits of different passages of one paragraph all arrive, tracked or not', async () => {
+    writeFileSync(file('race2.tex'), doc('Alpha beta gamma delta epsilon zeta eta theta.'));
+    const t = createMcpToken(owner.id, 'Race Bot').token;
+    const res = await Promise.all([
+      callTool(t, 'edit_document', { path: 'race2.tex', old_text: 'beta', new_text: 'BETA', tracked: false }),
+      callTool(t, 'edit_document', { path: 'race2.tex', old_text: 'delta', new_text: 'DELTA', tracked: false }),
+      callTool(t, 'edit_document', { path: 'race2.tex', old_text: 'zeta', new_text: 'ZETA' }),
+      callTool(t, 'edit_document', { path: 'race2.tex', old_text: 'theta', new_text: 'THETA', tracked: false }),
+    ]);
+    expect(res.every(r => r.ok)).toBe(true);
+    const text = (await manager.open('owner/p/race2.tex')).toText();
+    for (const w of ['BETA', 'DELTA', 'ZETA', 'THETA']) expect(text).toContain(w);
+  });
+
+  it('a direct edit applies to the document as it is after its restore point: typing during the commit survives', async () => {
+    await ensureRepo('owner/p');
+    writeFileSync(file('typing.tex'), doc('Alpha beta gamma.\n\nSecond paragraph.'));
+    const t = createMcpToken(owner.id, 'Race Bot').token;
+    const live = await manager.open('owner/p/typing.tex');
+    // somebody types into the same paragraph while the restore-point commit runs
+    const userTypes = (from: string, to: string) => {
+      const lyx = live.toLyxDocument();
+      const par = lyx.body.find(p => p.items.some(it => it.kind === 'text' && it.text.includes(from)))!;
+      for (const it of par.items) if (it.kind === 'text') it.text = it.text.replace(from, to);
+      live.loadFromLyx(lyx, 'browser');
+    };
+    const saveProject = manager.saveProject;
+    manager.saveProject = async (project: string) => { manager.saveProject = saveProject; userTypes('gamma.', 'gamma delta.'); return saveProject.call(manager, project); };
+    const r = await callTool(t, 'edit_document', { path: 'typing.tex', old_text: 'beta', new_text: 'BETA', tracked: false });
+    expect(r.ok).toBe(true);
+    expect(live.toText()).toContain('Alpha BETA gamma delta.');
+    // … and when the typing changed the very passage, the edit fails instead of overwriting it
+    manager.saveProject = async (project: string) => { manager.saveProject = saveProject; userTypes('BETA', 'BETA!'); return saveProject.call(manager, project); };
+    await expect(callTool(t, 'edit_document', { path: 'typing.tex', old_text: 'Alpha BETA gamma', new_text: 'Alpha beta gamma', tracked: false })).rejects.toThrow(/not found/);
+    manager.saveProject = saveProject;
+    expect(live.toText()).toContain('Alpha BETA! gamma delta.');
+  });
+});
+
+describe('what an edit reports', () => {
+  it('create_document puts the account\'s name in \\author, not the token label', async () => {
+    const t = createMcpToken(owner.id, 'Account access token').token;
+    await callTool(t, 'create_document', { path: 'authored', title: 'A Paper' });
+    const text = readFileSync(file('authored.tex'), 'utf8');
+    expect(text).toContain('\\author{Owner}');
+    expect(text).not.toContain('access token');
+  });
+
+  it('a preamble edit is applied directly and said so — not "nothing changed"', async () => {
+    writeFileSync(file('pre.tex'), `\\documentclass{article}\n\\usepackage{amssymb}\n\\newcommand{\\R}{\\mathbb{R}}\n\\begin{document}\nA map $f:\\R^n\\to\\R$ here.\n\nAnd $x\\in\\R$ too.\n\\end{document}\n`);
+    const t = createMcpToken(owner.id, 'Macro Bot').token;
+    const r = await callTool(t, 'edit_document', { path: 'pre.tex', old_text: '\\newcommand{\\R}{\\mathbb{R}}', new_text: '\\newcommand{\\Real}{\\mathbb{R}}' });
+    expect(r.note ?? '').not.toMatch(/nothing changed/);
+    expect(r.applied_directly.join(' ')).toMatch(/preamble/);
+    expect(r.applied_directly.join(' ')).toMatch(/\\R is no longer defined, but 2 formulas still use it/);
+    expect(r.now_reads).toContain('\\newcommand{\\Real}{\\mathbb{R}}');
+    expect((await manager.open('owner/p/pre.tex')).toText()).toContain('\\newcommand{\\Real}');
+  });
+
+  it('a tracked macro rename compiles: the old formulas are removed, not struck out with the gone \\R', async () => {
+    const t = createMcpToken(owner.id, 'Macro Bot').token;
+    const r1 = await callTool(t, 'edit_document', { path: 'pre.tex', old_text: 'f:\\R^n\\to\\R', new_text: 'f:\\Real^n\\to\\Real' });
+    expect(r1.applied_directly.join(' ')).toMatch(/1 old formula removed instead of struck out: it uses \\R/);
+    expect(r1.inserted_chars).toBe(1);   // the new formula is a tracked insertion
+    const r2 = await callTool(t, 'edit_document', { path: 'pre.tex', old_text: 'x\\in\\R', new_text: 'x\\in\\Real' });
+    expect(r2.applied_directly.join(' ')).not.toMatch(/still use/);
+    const text = (await manager.open('owner/p/pre.tex')).toText();
+    expect(text).not.toMatch(/\\R[^a-zA-Z]/);
+    expect(text).toMatch(/\\lyxadded\{Macro Bot \(MCP\)\}\{[^}]*\}\{\$f:\\Real\^n\\to\\Real\$\}/);
+    const b = await callTool(t, 'build_pdf', { path: 'pre.tex', wait_seconds: 150 });
+    expect(b.errors ?? []).toEqual([]);
+    expect(b.ok).toBe(true);
+  }, 180_000);
+
+  it('taking back one\'s own pending insertion changes the document and says so', async () => {
+    writeFileSync(file('retract.tex'), doc('First sentence. Last sentence.'));
+    const t = createMcpToken(owner.id, 'Retract Bot').token;
+    const ins = await callTool(t, 'edit_document', { path: 'retract.tex', old_text: 'First sentence.', new_text: 'First sentence. Inserted sentence.' });
+    expect(ins.inserted_chars).toBeGreaterThan(0);
+    const r = await callTool(t, 'edit_document', { path: 'retract.tex', old_text: 'First sentence. Inserted sentence.', new_text: 'First sentence.' });
+    expect(r.note).not.toMatch(/nothing changed/);
+    expect((await manager.open('owner/p/retract.tex')).toText()).not.toContain('Inserted');
+  });
+
+  it('a request over the size limit gets a JSON-RPC error, not an HTML page', async () => {
+    const t = createMcpToken(owner.id, 'Big Bot').token;
+    const res = await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${t}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'write_document', arguments: { path: 'big.tex', tex: doc('x'.repeat(2_300_000)) } } }),
+    });
+    expect(res.status).toBe(413);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    const body = await res.json();
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.error.message).toMatch(/too large.*2MB/);
+    const bad = await fetch(base, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` }, body: '{"jsonrpc":' });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error.code).toBe(-32700);
+  });
+});
+
 describe('project text files', () => {
   it('write_file / read_file round-trip refs.bib', async () => {
     const t = createMcpToken(owner.id, 'Bib Bot').token;
