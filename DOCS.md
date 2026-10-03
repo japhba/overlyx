@@ -68,8 +68,10 @@ blend.
   (*Coming from Overleaf?*, `app/OverleafStart.tsx`) the zips (or links + token) are parked in
   IndexedDB (`app/pendingImport.ts`), survive the Google round trip, and the start page imports
   them the moment there is an account and opens a lone project's document; guests cannot import.
-* **PDF** via `latexmk` on the document's own `.tex` file (plus the child documents it inputs);
-  embedded graphics (SVG/PDF/EPS/…) are rendered to PNG for the editor and downloadable as PNG,
+* **PDF** via `latexmk` on the document's own `.tex` file (plus the child documents it inputs),
+  with `-f`: an error TeX recovers from (an undefined macro) does not stop it before bibtex / biber
+  and the reruns, so the first build of an imported paper has its citations and references (not
+  "??" until a second build); embedded graphics (SVG/PDF/EPS/…) are rendered to PNG for the editor and downloadable as PNG,
   and formats pdflatex cannot include are converted to PDF for the build. PDF builds start on
   request (Ctrl+R, the toolbar or the PDF pane) or **by themselves** (Overleaf's auto compile: the ▾
   beside *View PDF*, or *Settings ▸ Editor ▸ PDF* — off, *while the PDF is shown* (the default) or

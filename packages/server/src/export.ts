@@ -407,8 +407,10 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
     if (fs.existsSync(f)) { args.push('-r', f); break; }
   }
   // -pvc-: a latexmkrc written for the author's desktop ($preview_continuous_mode = 1) must not
-  // keep latexmk watching the files until the timeout
-  args.push(engineFlag, '-pvc-', '-g', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
+  // keep latexmk watching the files until the timeout; -f: an error TeX recovers from (an undefined
+  // macro, a missing figure) must not stop latexmk after the first pass — without bibtex / biber
+  // and the reruns every citation and reference is "??" until the next build
+  args.push(engineFlag, '-pvc-', '-g', '-f', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
   const proc = run('latexmk', args, {
     cwd: exp.dir, env: texInputs(docDir, exp.dir, projectDir(project)), timeoutMs: 420000, nice: true,
     // the build directory (and the svg package's cache next to the document) are the only writable places
