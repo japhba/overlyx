@@ -434,3 +434,34 @@ describe('the Text colour palette in a formula (LyX: InsetMathNest::handleFont2 
     expect(c.colorAt()).toBe('red');
   });
 });
+
+describe('typing TeX braces after a command', () => {
+  it('`{` opens the argument and `}` closes it: \\mathcal{F}, \\frac{a}{b}', () => {
+    const c = at('$$');
+    type(c, '\\mathcal{F}');
+    expect(out(c)).toBe('$\\mathcal{F}$');
+    type(c, '+\\frac{a}{b}');
+    expect(out(c)).toBe('$\\mathcal{F}+\\frac{a}{b}$');
+    expect(c.depth).toBe(1);   // the last `}` left the fraction
+    type(c, 'x');
+    expect(out(c)).toBe('$\\mathcal{F}+\\frac{a}{b}x$');
+  });
+  it('braces elsewhere are still literal brace groups / \\{ \\}', () => {
+    const c = at('$$');
+    type(c, '\\alpha{');           // a command without arguments: a brace group follows it
+    expect(out(c)).toContain('\\alpha');
+    const d = at('$$');
+    type(d, 'x}');
+    expect(out(d)).toBe('$x\\}$');
+  });
+  it('Esc keeps a complete command being typed and cancels an incomplete one', () => {
+    const c = at('$$');
+    type(c, 'x+\\beta');
+    c.macroModeClose(!c.macroNameKnown());
+    expect(out(c)).toBe('$x+\\beta$');
+    const d = at('$$');
+    type(d, 'x+\\bet');
+    d.macroModeClose(!d.macroNameKnown());
+    expect(out(d)).toBe('$x+$');
+  });
+});

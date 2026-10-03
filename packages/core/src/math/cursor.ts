@@ -10,7 +10,7 @@
  */
 import type { Atom, Cell, Grid, Hull, HullType, MacroTable, Limits } from './ast';
 import { cloneCell } from './ast';
-import { parseCell, parseGridCells, SYMBOLS } from './parse';
+import { parseCell, parseGridCells, SYMBOLS, isKnownCommand } from './parse';
 import { writeCellLatex } from './write';
 
 export type Owner = Atom | Hull;
@@ -72,6 +72,10 @@ export class MathCursor {
   anchor: Slice[] | null = null;
   private selecting = false;
   xTarget: number | null = null;
+  /** the argument cell a typed `{` opened (`\mathcal{` …): a `}` typed at its end closes it instead of inserting `\}` */
+  private typedBrace: Cell | null = null;
+  /** the next argument cell a typed `}` moved to: a `{` typed at its start just opens it */
+  private expectBrace: Cell | null = null;
 
   constructor(public hull: Hull, public macros: MacroTable = {}, public host: MathCursorHost = {}) {
     this.slices = [{ owner: hull, idx: 0, pos: 0 }];
@@ -639,6 +643,8 @@ export class MathCursor {
   inMacroMode(): boolean { const p = this.prevAtom(); return !!p && p.t === 'unknown' && !p.final; }
   activeMacro(): Extract<Atom, { t: 'unknown' }> | null { const p = this.prevAtom(); return p && p.t === 'unknown' && !p.final ? p : null; }
   macroName(): string { return this.activeMacro()?.n ?? ''; }
+  /** Is the command name being typed a complete, known command (`\beta`, a document macro)? */
+  macroNameKnown(): boolean { const n = this.macroName().slice(1); return n.length > 0 && isKnownCommand(n, this.macros); }
   /** Cursor::macroModeClose: turn the typed name into the real inset */
   macroModeClose(cancel = false): boolean {
     const p = this.activeMacro();
@@ -715,7 +721,12 @@ export class MathCursor {
       }
       if (this.macroModeClose()) {
         const atom = this.prevAtom();
-        if (atom && isActive(atom)) { this.posBackward(); this.push(atom); this.idxFirst(); if (this.cell.length && !this.idxNext()) this.popForward(); }
+        if (atom && isActive(atom)) {
+          this.posBackward(); this.push(atom); this.idxFirst();
+          // `\mathcal{F}` typed as TeX: the brace opens the argument, it is not a brace group of its own
+          if (c === '{' && !this.cell.length) { this.typedBrace = this.cell; return true; }
+          if (this.cell.length && !this.idxNext()) this.popForward();
+        }
       }
       if (c === '{') this.niceInsertAtom({ t: 'brace', body: [] });
       else if (c !== ' ') this.interpretChar(c);
@@ -751,6 +762,13 @@ export class MathCursor {
       if (c === '^') { this.niceInsertAtom({ t: 'cmd', n: 'textasciicircum' }); return true; }
       if (c === '~') { this.niceInsertAtom({ t: 'cmd', n: 'textasciitilde' }); return true; }
     }
+    if (c === '}' && this.typedBrace === this.cell && this.pos === this.lastpos) {
+      // the closing brace of an argument opened with `{`: on to the next argument (`\frac{a}{b}`) or out
+      this.typedBrace = null;
+      if (this.idxNext()) this.expectBrace = this.cell; else this.popForward();
+      return true;
+    }
+    if (c === '{' && this.expectBrace === this.cell && this.pos === 0 && !this.cell.length) { this.expectBrace = null; this.typedBrace = this.cell; return true; }
     if (c === '{' || c === '}' || c === '&' || c === '$' || c === '#' || c === '%' || c === '_') { this.niceInsertAtom(createInsetMath(c, this.macros)); return true; }
     this.insertChar(c);
     return true;
