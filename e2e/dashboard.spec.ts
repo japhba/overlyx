@@ -9,9 +9,11 @@ import { test, expect } from '@playwright/test';
 import { login, BASE_URL, fillDialog, PROJECTS_DIR } from './helpers';
 import { rmSync } from 'node:fs';
 
-const TILE_PROJECT = 'admin/e2e-dash-tile';
-const SWITCH_PROJECT = 'admin/e2e-dash-switch';
-const ZIP_PROJECT = 'admin/e2e-dash-zip';
+// a fresh suffix per run: the server keeps a project's row after its folder is removed, so a fixed name would answer 409 on the next run
+const RUN = Date.now().toString(36);
+const TILE_PROJECT = `admin/e2e-dash-tile-${RUN}`;
+const SWITCH_PROJECT = `admin/e2e-dash-switch-${RUN}`;
+const ZIP_PROJECT = `admin/e2e-dash-zip-${RUN}`;
 
 test.beforeAll(() => {
   for (const p of [TILE_PROJECT, SWITCH_PROJECT, ZIP_PROJECT]) rmSync(`${PROJECTS_DIR}/${p}`, { recursive: true, force: true });
@@ -22,7 +24,7 @@ test.afterAll(() => {
 
 test('a brand-new project with 0 documents opens from its dashboard tile, and offers to create the first document', async ({ page }) => {
   await login(page);
-  expect((await page.request.post(BASE_URL + '/api/projects', { data: { name: 'e2e-dash-tile' } })).ok()).toBeTruthy();
+  expect((await page.request.post(BASE_URL + '/api/projects', { data: { name: `e2e-dash-tile-${RUN}` } })).ok()).toBeTruthy();
   await page.goto('/');
   const card = page.locator(`.home-card[data-project="${TILE_PROJECT}"]`);
   await expect(card).toBeVisible({ timeout: 15000 });
@@ -32,7 +34,7 @@ test('a brand-new project with 0 documents opens from its dashboard tile, and of
   await open.click();
   await expect(page).toHaveURL(new RegExp(TILE_PROJECT.replace('/', '\\/') + '$'));
   // the project landing: no "Could not save: not found" error, an explicit "create the first one" offer
-  await expect(page.locator('.home h1')).toContainText('e2e-dash-tile');
+  await expect(page.locator('.home h1')).toContainText(`e2e-dash-tile-${RUN}`);
   await expect(page.locator('body')).not.toContainText('Could not save');
   await page.locator('.home button', { hasText: '+ New document' }).click();
   await fillDialog(page, 'main.tex');
@@ -42,18 +44,18 @@ test('a brand-new project with 0 documents opens from its dashboard tile, and of
 
 test('the project switcher also opens an empty project, instead of silently staying put', async ({ page }) => {
   await login(page);
-  expect((await page.request.post(BASE_URL + '/api/projects', { data: { name: 'e2e-dash-switch' } })).ok()).toBeTruthy();
+  expect((await page.request.post(BASE_URL + '/api/projects', { data: { name: `e2e-dash-switch-${RUN}` } })).ok()).toBeTruthy();
   await page.goto('/');
   await page.waitForSelector('.docpanel .project-switch', { timeout: 15000 });
   await page.locator('.docpanel .project-switch').selectOption(SWITCH_PROJECT);
   await expect(page).toHaveURL(new RegExp(SWITCH_PROJECT.replace('/', '\\/') + '$'), { timeout: 10000 });
-  await expect(page.locator('.home h1')).toContainText('e2e-dash-switch');
+  await expect(page.locator('.home h1')).toContainText(`e2e-dash-switch-${RUN}`);
   await expect(page.locator('body')).not.toContainText('Could not save');
 });
 
 test('a project can be downloaded as a whole .zip, excluding LaTeX build byproducts', async ({ page }) => {
   await login(page);
-  expect((await page.request.post(BASE_URL + '/api/projects', { data: { name: 'e2e-dash-zip' } })).ok()).toBeTruthy();
+  expect((await page.request.post(BASE_URL + '/api/projects', { data: { name: `e2e-dash-zip-${RUN}` } })).ok()).toBeTruthy();
   expect((await page.request.post(`${BASE_URL}/api/projects/${encodeURIComponent(ZIP_PROJECT)}/new`, { data: { path: 'main.tex', title: 'Zip test' } })).ok()).toBeTruthy();
   expect((await page.request.put(`${BASE_URL}/api/projects/${encodeURIComponent(ZIP_PROJECT)}/text/main.aux`, { data: { text: '% a build byproduct, not a source file' } })).ok()).toBeTruthy();
   await page.goto('/');

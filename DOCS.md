@@ -57,7 +57,17 @@ blend.
 * **The start page** lists the user's projects, then those shared with them, each most recent first:
   the later of when they last opened a document of it (`user_doc_state` *opened*, every open; the
   activity log for older history) and when a file of it last changed; the card says which
-  (“opened 3 min ago”, “changed 2 days ago”; `app/recency.ts`).
+  (“opened 3 min ago”, “changed 2 days ago”; `app/recency.ts`). Every card has **Open** (a project
+  without documents opens on a small page of its own with *+ New document*, `ProjectRootPanel`) and
+  **Download**: the whole project as a .zip (`GET /api/projects/<key, URL-encoded>/zip`, view rights,
+  without `.git` and LaTeX's build byproducts; `server/src/zip.ts` writes it). The Git dialog
+  has the same link.
+* **Questions are in-app dialogs**, never the browser's `prompt()`/`confirm()`/`alert()`
+  (`uiPrompt`/`uiConfirm`/`uiAlert` in `app/Dialogs.tsx`, one `DialogHost` per shell, VS Code
+  webview included): Enter accepts, Esc cancels, the proposed text is selected. A new file or
+  document whose name exists asks again for another name. Insert ▸ Child document… lists the
+  project's documents to `\include`/`\input`, or creates a *new child document* (an empty fragment)
+  and includes it.
 * **Import from Overleaf** (start page, and the landing page for visitors who have no account yet): paste the links of the projects to bring over and an
   Overleaf Git token — each ticked project is cloned by the server from `git.overleaf.com` into a
   new project (Overleaf's Git access, paid and institutional plans; history and `origin` are kept,
