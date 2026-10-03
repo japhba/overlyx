@@ -44,7 +44,8 @@ blend.
   card with an avatar, name and time per message (the header paragraph `Name (time):` stays as
   text in the file — `numbering.ts` decorates it, `styles.css` draws it) and Reply / Resolve at
   the top right. *View ▸ Notes & comments in the margin* moves them into a right-hand column
-  (Google-Docs style).
+  (Google-Docs style). A thread is a point in the text (`%% @comment` has no range): commenting on
+  selected text keeps the text and anchors the thread right after it (`editor/commands.ts insertComment`).
 * **Figures keep up with their files**: the server watches the projects (chokidar) and tells the
   open editors over the project's event stream (`/api/projects/:p/events`, `{"kind":"graphics"}`)
   when a graphics file is rewritten — a plot script ran, an upload landed — and the image reloads
@@ -554,6 +555,16 @@ blend.
   insets and tracked changes; `Ctrl/⌘+click` follows a reference or opens a child document; **tabs**
   for open documents (new tabs open right of the current one); the text column is centred and its
   width is a View setting (*View ▸ Text width*, `Ctrl+Alt+±`).
+* **Inserting with a selection** (`editor/commands.ts`) never throws the selection away. An inset —
+  footnote, note, box, branch, caption, a float — takes the selected text, object or paragraphs in, as
+  LyX does (`doInsertInset`: the selection moves into the new inset): a clicked image with *Insert ▸
+  Float ▸ Figure* becomes the figure's content (the cursor goes to its caption), *Insert ▸ Caption* on
+  a clicked image outside a float makes it a figure with a caption, inside one adds the caption
+  paragraph below it (above a table). A new table takes the selection into its first cell. A selected
+  object (image, formula, table, inset) is never replaced by a label, reference, formula or other
+  inline insertion — that goes right after it; selected table cells keep their content. A selection
+  that cannot move in one piece (cells, from inside an inset to outside it) stays, and the inset goes
+  after it. Selected text is replaced only by what is typed or pasted over it.
 * **LyX toolbars** (a port of `lib/ui/stdtoolbars.inc`): the *Standard* and *Extra* rows, and the
   contextual *Math*, *Math panels*, *Table* and *Review* rows that appear automatically when the cursor
   is in a formula / a table / a document with tracked changes (or always / never: *View ▸ Toolbars*,
