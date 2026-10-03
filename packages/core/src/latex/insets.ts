@@ -308,8 +308,11 @@ function latexTextInset(ctx: ExportContext, os: TexStream, rp: RunParams, inset:
       const extra: Partial<RunParams> = { movingArg: true, postponeFragile: ctx.bp.postponeFragileContent };
       const saved = rp.postMacro;
       rp.postMacro = '';
-      if (il) insetTextLatex(ctx, os, rp, pars, il, extra);
-      else { os.write('\\caption{'); insetTextLatex(ctx, os, rp, pars, undefined, extra); os.write('}'); }
+      // \caption's argument cannot hold a paragraph break ("Paragraph ended before \addcontentsline
+      // was complete"): a caption of several paragraphs (Enter in a caption) is written as one
+      const one = pars.length > 1 ? [joinParagraphs(pars)] : pars;
+      if (il) insetTextLatex(ctx, os, rp, one, il, extra);
+      else { os.write('\\caption{'); insetTextLatex(ctx, os, rp, one, undefined, extra); os.write('}'); }
       if (rp.postMacro) os.write(rp.postMacro);
       rp.postMacro = saved;
       os.breakln();
@@ -468,6 +471,17 @@ function latexFloat(ctx: ExportContext, os: TexStream, rp: RunParams, inset: Tex
   insetTextLatex(ctx, os, { ...rp, inFloat: 'main', owner: 'float' }, inset.paragraphs, undefined, { owner: 'float', inFloat: 'main' });
   os.breakln();
   os.write(`\\end{${tmptype}}\n`);
+}
+
+/** Paragraphs as one, a blank where each break was (empty ones left out). */
+function joinParagraphs(pars: Paragraph[]): Paragraph {
+  const items: Paragraph['items'] = [];
+  for (const p of pars) {
+    if (!p.items.length) continue;
+    if (items.length) items.push({ kind: 'text', text: ' ', font: {} });
+    items.push(...p.items);
+  }
+  return { ...pars[0], items };
 }
 
 function findCaption(pars: Paragraph[]): TextInset | undefined {
