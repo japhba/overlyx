@@ -196,8 +196,7 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
     }
 
     // compose
-    const pre = parts.pres[preAt];
-    let R = pre;
+    let R = '';   // the body (the preamble goes before it below)
     const spans: Span[] = new Array(n1).fill(null);
     const segments: Segment[] = [];
     let keptPars = 0;
@@ -246,9 +245,17 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
       }
     }
     if (seg) segments.push(seg);
-    const bodyEnd = R.length;
-    R += parts.post;
-    const bodyRange = { start: pre.length, end: bodyEnd };
+    // a file without a managed block gets one when its body uses what only the block defines (the
+    // layout macros, the change-tracking ones, \guillemotleft in OT1, …): it would not compile
+    if (!parts.pres[preAt].includes(MANAGED_BEGIN) && usesDefined(R, parts.blockNames)) {
+      const k = parts.pres.findIndex((x, i) => i > preAt && x.includes(MANAGED_BEGIN));
+      if (k >= 0) preAt = k;
+    }
+    const pre = parts.pres[preAt];
+    for (const sg of segments) { sg.rFrom += pre.length; sg.rTo += pre.length; }
+    for (let q = 0; q < n1; q++) { const x = spans[q]; if (x) spans[q] = { start: x.start + pre.length, end: x.end + pre.length }; }
+    const bodyRange = { start: pre.length, end: pre.length + R.length };
+    R = pre + R + parts.post;
 
     if (R === full.text) return fullOut(retries ? 'verification' : 'nothing kept');
     // verify: the text must read back as the document being saved — or, where the writer itself
@@ -393,6 +400,24 @@ interface Outer {
   pres: string[];
   /** \end{document} and what follows */
   post: string;
+  /** commands and environments the writer's managed block defines (LyX's and OverLyX's own) */
+  blockNames: Set<string>;
+}
+
+/** The names a managed block defines; \tabularnewline is LaTeX's own (LyX provides it for old versions). */
+function definedIn(block: string): Set<string> {
+  const out = new Set<string>();
+  const re = /\\(?:newcommand|renewcommand|providecommand|DeclareRobustCommand|ProvideTextCommandDefault|DeclareTextSymbolDefault|DeclareTextCommandDefault|newenvironment|renewenvironment|def)\*?\s*\{?\\?([A-Za-z@]+)\}?/g;
+  for (const m of maskComments(block).matchAll(re)) if (m[1] !== 'tabularnewline') out.add(m[1]);
+  return out;
+}
+
+/** Does `body` use one of `names` (as a command, or as an environment)? */
+function usesDefined(body: string, names: Set<string>): boolean {
+  if (!names.size) return false;
+  const masked = maskComments(body);
+  for (const m of masked.matchAll(/\\(?:begin\{([A-Za-z@*]+)\}|([A-Za-z@]+))/g)) if (names.has(m[1] ?? m[2])) return true;
+  return false;
 }
 
 /** The preamble and trailer of the result: the base's own, with the writer's changes merged in. */
@@ -400,26 +425,26 @@ function splitOuter(T: string, P0: ParseTexResult, Wb: WriteTexResult, Wn: Write
   const preT = T.slice(0, P0.bodyRange!.start), preB = Wb.text.slice(0, Wb.bodyRange.start), preN = Wn.text.slice(0, Wn.bodyRange.start);
   const postT = T.slice(P0.bodyRange!.end), postB = Wb.text.slice(Wb.bodyRange.end), postN = Wn.text.slice(Wn.bodyRange.end);
   const post = postB === postN ? postT : postN;
-  const asIs: Outer = { pres: [preT, preN], post };
-  if (fragment) return preB === preN ? asIs : { pres: [preN], post };
   const t = managedParts(preT), b = managedParts(preB), n = managedParts(preN);
-  if (!b.block || !n.block || b.after !== n.after) return preB === preN ? asIs : { pres: [preN], post };
-  // the file's managed block is OverLyX's own: it is what the writer makes of the document now
-  // (also after an update of OverLyX's macros); a file without one gets one only when the content
-  // comes to need it
-  const blockSame = t.block ? t.block === n.block : b.block === n.block;
-  if (preB === preN && blockSame) return asIs;
+  const blockNames = fragment ? new Set<string>() : definedIn(n.block);
+  const out = (...pres: string[]): Outer => ({ pres: [...pres, preN], post, blockNames });
+  if (fragment) return preB === preN ? out(preT) : out();
+  if (!b.block || !n.block || b.after !== n.after) return preB === preN ? out(preT) : out();
   const before = b.before === n.before ? t.before : merge3(t.before, b.before, n.before);
-  if (before === null) return { pres: [preN], post };
-  if (blockSame) return { pres: [before + t.block + t.after, preN], post };
+  if (before === null) return out();
   // the new block in place of the base's — or, when there is none, on the lines right before
   // \begin{document} (taking it out again gives the file back)
   const withBlock = before + (before === '' || before.endsWith('\n') ? '' : '\n') + n.block + t.after;
-  if (!trivialBlock(n.block)) return { pres: [withBlock, preN], post };
+  // the file's managed block is OverLyX's own: it is what the writer makes of the document now
+  // (also after an update of OverLyX's macros); a file without one gets one when the content comes
+  // to need it — or uses what it defines (see preserve)
+  const blockSame = t.block ? t.block === n.block : b.block === n.block;
+  if (blockSame) return t.block ? out(before + t.block + t.after) : out(before + t.after, withBlock);
+  if (!trivialBlock(n.block)) return out(withBlock);
   // nothing in it but the settings line: the file may well do without (when reading it back
   // without one gives the same settings); two blank lines around a removed block become one
   const without = before + (before.endsWith('\n\n') && t.after.startsWith('\n') ? t.after.slice(1) : t.after);
-  return { pres: [without, withBlock, preN], post };
+  return out(without, withBlock);
 }
 
 /** A managed block with no packages or macros in it: the markers, the settings line, the comment. */

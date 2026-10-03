@@ -230,6 +230,14 @@ describe('saving keeps the file as it is where nothing changed', () => {
     expect(save(tracked.text, () => {}).text).toBe(tracked.text);
   });
 
+  it('a file that uses what only the managed block defines (layout objects) gets the block', () => {
+    const deck = '\\documentclass[aspectratio=169]{beamer}\n\\begin{document}\n\\begin{frame}[plain]\n\\begin{olbox}{x=10mm,y=10mm,w=60mm,h=10mm}\nFirst words\n\\end{olbox}\n\\end{frame}\n\\end{document}\n';
+    const r = save(deck, () => {});
+    expect(r.text).toContain('%% OverLyX ---');
+    expect(r.text).toContain('\\newenvironment{olbox}');
+    expect(r.text.slice(r.text.indexOf('\\begin{document}'))).toBe(deck.slice(deck.indexOf('\\begin{document}')));
+  });
+
   it('a document setting changed in the dialog is merged into the preamble, the rest kept', () => {
     const r = save(PAPER, d => {
       d.header.lines = d.header.lines.map(l => (l.startsWith('\\use_hyperref') ? '\\use_hyperref true' : l));
