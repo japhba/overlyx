@@ -129,9 +129,11 @@ blend.
   LaTeX byte for byte (hard line breaks, comments, the author's macro spellings, CRLF line ends),
   and so do the preamble and the glue between paragraphs; only edited paragraphs are written by
   the writer, and a document setting changed in the dialog is merged into the preamble line by
-  line. The managed block is added (right before `\begin{document}`) only when the content needs
-  a package or macro the file does not load, and removed again when it holds nothing but the
-  settings line. A co-author's `git diff` after one typed word shows that paragraph, not a
+  line. A file without a managed block gets one (right before `\begin{document}`) only when the
+  content comes to need a package or macro the file does not load, or uses something only the
+  block defines (layout objects, the change-tracking macros); a block is brought up to date when
+  the writer's differs (an update of OverLyX's macros), and removed when it would hold nothing but
+  the settings line. A co-author's `git diff` after one typed word shows that paragraph, not a
   reformatted file. How: the parser records where every body paragraph came from
   (`ParseTexResult.sources`), the writer where it wrote each one (`spans`); paragraphs are matched
   by the writer's text for them, and the base's glue is kept where the writer's glue is the same.
@@ -1441,7 +1443,7 @@ invisible to LaTeX itself:
   `\lyxgreyedout` environment, …) — everything the user's own preamble (and the project's own
   `.sty` files it loads) does not already load — and one `%% overlyx-settings: {...}` line with
   what LaTeX cannot express (LyX layout modules, citation engine, whether tracked changes are
-  shown in the PDF, …). It is regenerated when what it should hold changes (a file brought from
+  shown in the PDF, …). It is rewritten when what it should hold changes (a file brought from
   elsewhere gets one only when its content needs something); put your own preamble above it.
   natbib is loaded through `\@ifpackageloaded`: a journal class or conference style may load it
   itself, and loading it again with options is an option clash.
