@@ -474,13 +474,21 @@ class BodyParser {
           // braces raw too, or "x_{J}^{r1}" comes back as the wrong "x_J^r1"
           const script = lastERTEndsWithScript(ctx);
           if (script) this.pushERT(ctx, st, '{');
+          // a \centering (\raggedright, …) inside the group ends with it, as in TeX: {\centering … \par}
+          // centres what it holds, not the rest of the document
+          const align = ctx.align;
           const r = this.parseText(s, ctx, cloneState(st), { ...stop, close: true, item: false });
+          ctx.align = align;
           if (script) this.pushERT(ctx, st, '}');
           if (r === 'close' || r === 'eof') continue;
           return r;   // \end / \item / cell separator inside a group: propagate
         }
         case 'close':
-          if (stop.close) return 'close';
+          if (stop.close) {
+            // a group closed inside a top-level paragraph is part of it (the brace of \section{…})
+            if (s === this.main && this.root?.cur) this.lastPush = s.pos;
+            return 'close';
+          }
           continue;   // a stray brace
         case 'math': this.handleMath(s, ctx, st); continue;
         case 'amp':

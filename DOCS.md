@@ -1374,10 +1374,13 @@ invisible to LaTeX itself:
 * **A managed block** right before `\begin{document}` (between `%% OverLyX ---` and
   `%% end OverLyX ---`) holds the packages and macro definitions the *content* needs
   (`ulem`/`xcolor` and the change-tracking macros, `graphicx`, `booktabs`, `textcomp`, the
-  `\lyxgreyedout` environment, …) — everything the user's own preamble does not already load —
-  and one `%% overlyx-settings: {...}` line with what LaTeX cannot express (LyX layout modules,
-  citation engine, whether tracked changes are shown in the PDF, …). It is regenerated on every
-  save; put your own preamble above it.
+  `\lyxgreyedout` environment, …) — everything the user's own preamble (and the project's own
+  `.sty` files it loads) does not already load — and one `%% overlyx-settings: {...}` line with
+  what LaTeX cannot express (LyX layout modules, citation engine, whether tracked changes are
+  shown in the PDF, …). It is regenerated when what it should hold changes (a file brought from
+  elsewhere gets one only when its content needs something); put your own preamble above it.
+  natbib is loaded through `\@ifpackageloaded`: a journal class or conference style may load it
+  itself, and loading it again with options is an option clash.
 * **Change tracking**: inserted / deleted text is wrapped in LyX's `\lyxadded{Author}{Tue Aug 26
   14:03:00 2026}{…}` and `\lyxdeleted{…}{…}{…}` macros (a deleted paragraph break is
   `\lyxadded{…}{…}{¶}`). With *show changes in output* on, the managed block defines them to

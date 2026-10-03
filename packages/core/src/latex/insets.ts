@@ -183,7 +183,12 @@ function latexFormula(ctx: ExportContext, os: TexStream, rp: RunParams, f: Formu
 function latexMacro(ctx: ExportContext, os: TexStream, m: FormulaMacroInset): void {
   const def = m.lines[0] ?? '';
   const parsed = parseMacroDefinition(def);
-  if (!parsed) { ctx.warnings.push(`could not parse macro definition '${def}'`); return; }
+  if (!parsed) {
+    // a definition the editor does not model (\providecommand, \edef, …): as it was, never dropped
+    os.breakln();
+    os.write(def.replace(/\s+$/, '') + '\n');
+    return;
+  }
   for (const r of mathRequirements(parsed.body, ctx.symbols)) ctx.features.require(r);
   os.breakln();
   if (parsed.optionals.length) {

@@ -171,6 +171,15 @@ export function preambleFacts(preamble: string, readFile?: (name: string) => str
   const bst = /\\bibliographystyle\s*\{([^}]*)\}/.exec(s);
   if (bst) facts.bibliographystyle = bst[1].trim();
   if (readFile && depth < 3) {
+    // the project's own style files (a conference's .sty loading natbib): what they load is loaded
+    for (const name of [...facts.packages]) {
+      const file = name + '.sty';
+      if (seen.has(file)) continue;
+      const txt = readFile(file);
+      if (txt === undefined) continue;
+      seen.add(file);
+      mergeFacts(facts, preambleFacts(txt, readFile, depth + 1, seen));
+    }
     const inRe = /\\(?:input|include)\s*\{([^}]*)\}/g;
     while ((m = inRe.exec(s))) {
       const name = m[1].trim();
@@ -179,17 +188,20 @@ export function preambleFacts(preamble: string, readFile?: (name: string) => str
         const txt = readFile(cand);
         if (txt === undefined) continue;
         seen.add(cand);
-        const sub = preambleFacts(txt, readFile, depth + 1, seen);
-        for (const p of sub.packages) facts.packages.add(p);
-        for (const [k, v] of sub.packageOptions) facts.packageOptions.set(k, v);
-        for (const d of sub.defined) facts.defined.add(d);
-        facts.addbibresources.push(...sub.addbibresources);
-        if (!facts.bibliographystyle) facts.bibliographystyle = sub.bibliographystyle;
+        mergeFacts(facts, preambleFacts(txt, readFile, depth + 1, seen));
         break;
       }
     }
   }
   return facts;
+}
+
+function mergeFacts(facts: PreambleFacts, sub: PreambleFacts): void {
+  for (const p of sub.packages) facts.packages.add(p);
+  for (const [k, v] of sub.packageOptions) if (!facts.packageOptions.has(k)) facts.packageOptions.set(k, v);
+  for (const d of sub.defined) facts.defined.add(d);
+  facts.addbibresources.push(...sub.addbibresources);
+  if (!facts.bibliographystyle) facts.bibliographystyle = sub.bibliographystyle;
 }
 
 /**
