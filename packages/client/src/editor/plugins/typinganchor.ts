@@ -13,14 +13,32 @@
  * ambiguous insertion placed so that it ends at the cursor (a deletion so that it starts there);
  * y-prosemirror then finds that run unchanged. Only the choice between placements that give the same
  * text changes; whatever this does not recognise is left to y-prosemirror as before.
+ *
+ * Enter in the middle of a paragraph is a second case. Yjs cannot move text, so a split keeps one half
+ * in the paragraph's Yjs element and copies the other into a new one — and y-prosemirror picked the
+ * half by a similarity score: with formulas in the paragraph it often kept the *second* half, rewrote
+ * the paragraph's first text run with it and deleted the run behind it, so whatever somebody offline
+ * had typed into that run was lost on reconnect, and two people splitting one paragraph duplicated
+ * both halves. A split here always keeps the first half in place, its text runs trimmed (never
+ * deleted): text typed meanwhile on another device survives (after the split point it lands at the end
+ * of the first half), and two concurrent splits share their first half — only the stretch after both
+ * split points can appear twice (a new paragraph's copy is all Yjs can do).
  */
 import { Plugin, TextSelection } from 'prosemirror-state';
-import type { Node as PMNode } from 'prosemirror-model';
+import type { Node as PMNode, MarkType } from 'prosemirror-model';
 import * as Y from 'yjs';
-import { ySyncPluginKey } from 'y-prosemirror';
+import { ySyncPluginKey, updateYFragment } from 'y-prosemirror';
 
 /** The parts of y-prosemirror's ProsemirrorBinding used here. */
-interface SyncBinding { type: Y.XmlFragment; _prosemirrorChanged(doc: PMNode): void; prosemirrorView: { state: { selection: unknown } } | null }
+interface SyncBinding {
+  type: Y.XmlFragment;
+  /** Yjs type → the ProseMirror node (or run of text nodes) it was last synced with */
+  mapping: Map<Y.AbstractType<any>, PMNode | PMNode[]>;
+  /** y-prosemirror's cache of which mark types may overlap */
+  isOMark: Map<MarkType, boolean>;
+  _prosemirrorChanged(doc: PMNode): void;
+  prosemirrorView: { state: { selection: unknown } } | null;
+}
 
 /** A child of a node as y-prosemirror stores it: one Y.XmlText per run of adjacent text nodes, one element per other node. */
 interface Group { text: boolean; from: number; to: number; firstChild: number; lastChild: number }
@@ -104,6 +122,49 @@ export function anchorTypedText(fragment: Y.XmlFragment, doc: PMNode, head: numb
   if (edit.insert) ytext.insert(edit.index, edit.insert);
 }
 
+/** A node's children as y-prosemirror stores them: runs of adjacent text nodes, other nodes one by one. */
+function normalized(node: PMNode): (PMNode | PMNode[])[] {
+  const out: (PMNode | PMNode[])[] = [];
+  node.forEach(child => {
+    const last = out[out.length - 1];
+    if (child.isText && Array.isArray(last)) last.push(child);
+    else out.push(child.isText ? [child] : child);
+  });
+  return out;
+}
+
+const sameSynced = (mapped: PMNode | PMNode[] | undefined, p: PMNode | PMNode[]): boolean =>
+  mapped === p || (Array.isArray(mapped) && Array.isArray(p) && mapped.length === p.length && mapped.every((n, i) => n === p[i]));
+
+/**
+ * Find a paragraph split in `doc` against the Yjs tree (the one element whose synced node is now two
+ * nodes of its type, the halves' content together the old content) and apply it with the first
+ * half kept in place. Descends through the one changed child of each level, so splits inside table
+ * cells and insets are found too. True when it applied one.
+ */
+export function anchorSplit(binding: SyncBinding, y: Y.XmlFragment | Y.XmlElement, node: PMNode): boolean {
+  const ys = y.toArray(), ps = normalized(node);
+  const min = Math.min(ys.length, ps.length);
+  let left = 0;
+  while (left < min && sameSynced(binding.mapping.get(ys[left]), ps[left])) left++;
+  let right = 0;
+  while (right < min - left && sameSynced(binding.mapping.get(ys[ys.length - 1 - right]), ps[ps.length - 1 - right])) right++;
+  const yMid = ys.length - left - right, pMid = ps.length - left - right;
+  const el = ys[left], a = ps[left], b = ps[left + 1];
+  if (!(el instanceof Y.XmlElement) || Array.isArray(a)) return false;
+  if (yMid === 1 && pMid === 1) return el.nodeName === a.type.name && anchorSplit(binding, el, a);
+  if (yMid !== 1 || pMid !== 2 || Array.isArray(b)) return false;
+  const old = binding.mapping.get(el);
+  if (!old || Array.isArray(old) || !old.inlineContent || a.type !== old.type || b.type !== old.type) return false;
+  if (!a.content.append(b.content).eq(old.content)) return false;
+  const doc = y.doc!;
+  updateYFragment(doc, el, a, binding);   // the first half: same element, its runs trimmed
+  const second = new Y.XmlElement(b.type.name);
+  y.insert(left + 1, [second]);
+  updateYFragment(doc, second, b, binding);
+  return true;
+}
+
 /** Installs the anchoring in front of y-prosemirror's own PM → Yjs sync (place it right after ySyncPlugin). */
 export function typingAnchorPlugin(): Plugin {
   return new Plugin({
@@ -116,8 +177,10 @@ export function typingAnchorPlugin(): Plugin {
         // one Yjs transaction with y-prosemirror's own origin (the undo manager tracks it as a local edit)
         binding.type.doc!.transact(() => {
           const sel = binding.prosemirrorView?.state.selection;
-          if (doc !== synced && sel instanceof TextSelection) {
-            try { anchorTypedText(binding.type, doc, sel.head); } catch (e) { console.warn('[typing anchor]', e); }
+          if (doc !== synced) {
+            try {
+              if (!anchorSplit(binding, binding.type, doc) && sel instanceof TextSelection) anchorTypedText(binding.type, doc, sel.head);
+            } catch (e) { console.warn('[typing anchor]', e); }
           }
           synced = doc;
           sync(doc);

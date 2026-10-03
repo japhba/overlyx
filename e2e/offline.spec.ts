@@ -116,13 +116,13 @@ test('edits of another user made meanwhile merge with the offline edits', async 
  * Token accounting for a long offline stretch (CHAOS-2): one user offline for a minute, another online,
  * both typing tagged tokens into the SAME paragraph and list item — mostly right in front of the word
  * "queries", where a token's own "q" used to anchor the rest of the token to the existing text, so on
- * reconnect the two users' tokens were spliced into each other mid-token ("Zb Za1q0006Z q0000Z").
- * Every token must come out whole and exactly once, in both editors and on disk, and the original
- * text must be all there, once.
+ * reconnect the two users' tokens were spliced into each other mid-token ("Zb Za1q0006Z q0000Z") — while
+ * the online user also splits the list item with Enter. Every token must come out whole and exactly
+ * once, in both editors and on disk, and the original text must be all there, once.
  */
 const MERGE_FILE = `${DIR}/merge.tex`;
 const MERGE_BODY = [
-  'Shared paragraph: all of the keys, values and queries come from the same place, the encoder.',
+  'Shared paragraph: all of the keys $k_i$, values $v_i$ and queries come from the same place, the encoder $E$.',
   '\\begin{itemize}\n\\item keys, values and queries come from the previous decoder layer.\n\\item Second item stays.\n\\end{itemize}',
   'Last paragraph of the merge test.',
 ];
@@ -148,7 +148,7 @@ async function caretAt(page: Page, inPar: string, needle: string | null) {
       last = n;
       if (needle && !target && n.data.includes(needle)) { target = n; offset = n.data.indexOf(needle); }
     }
-    if (!needle) { target = last; offset = last?.data.length ?? 0; }
+    if (!target) { target = last; offset = last?.data.length ?? 0; }   // no needle, or split off by now: the end
     document.getSelection()!.collapse(target!, offset);
   }, [inPar, needle] as const);
   await page.waitForTimeout(60);
@@ -189,6 +189,9 @@ test('a minute offline beside another writer in the same paragraph and list: eve
       const token = `Z${tag}q${String(i).padStart(4, '0')}Z`;
       await p.keyboard.type(` ${token} `, { delay: 30 });
       typed.push(token);
+      // the online side splits the list item (one text run): what the offline side typed into it survives the split
+      // (formulas: text typed meanwhile behind the next formula of a split-off half is not kept, nor are two splits of one paragraph — DOCS.md)
+      if (tag === 'zb' && inPar === 'previous decoder layer' && needle) await p.keyboard.press('Enter');
       await p.waitForTimeout(400 + Math.random() * 800);
     }
   };
@@ -213,7 +216,8 @@ test('a minute offline beside another writer in the same paragraph and list: eve
   const merged = await docText(page);
   expect(withoutTokens(merged)).toBe(original);
   const mergedFile = readFileSync(MERGE_FILE, 'utf8');
-  for (const line of MERGE_BODY.flatMap(b => b.split('\n'))) expect(withoutTokens(mergedFile), line).toContain(withoutTokens(line).replace(/^\\item /, ''));
+  const noItems = (t: string) => withoutTokens(t.replace(/\\item\b/g, ' '));   // a split item is two \items
+  for (const line of MERGE_BODY.flatMap(b => b.split('\n'))) expect(noItems(mergedFile), line).toContain(noItems(line));
   expect(errors.filter(e => !/favicon|ERR_INTERNET_DISCONNECTED|Failed to fetch|WebSocket/.test(e))).toEqual([]);
   expect(errors2.filter(e => !/favicon/.test(e))).toEqual([]);
   await other.close();

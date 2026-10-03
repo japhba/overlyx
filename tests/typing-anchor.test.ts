@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
+import { splitBlock } from 'prosemirror-commands';
 import { EditorView } from 'prosemirror-view';
 import * as Y from 'yjs';
 import { ySyncPlugin, initProseMirrorDoc, prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
@@ -123,5 +124,59 @@ describe('typing at the same place on two clients that meet later', () => {
     merge(c.ydoc, other.ydoc);
     expect(c.view.state.doc.textContent).toBe('Xaab');
     expect(other.view.state.doc.textContent).toBe('Xaab');
+  });
+});
+
+describe('Enter in the middle of a paragraph while somebody else edits it', () => {
+  const ENCODER = [text('The encoder is composed of a stack of '), math('N=6'), text(' identical layers. Each layer has two sub-layers: a multi-head self-attention mechanism. That is, the output is '), math('\\mathrm{LayerNorm}(x)'), text(', where '), math('f(x)'), text(' is the function.')];
+  const pars = (v: EditorView) => { const out: string[] = []; v.state.doc.forEach(p => out.push(p.textContent)); return out; };
+  /** Enter right before the first occurrence of `needle` */
+  const enterBefore = (view: EditorView, needle: string) => {
+    let at = -1;
+    view.state.doc.descendants((n, pos) => { if (at < 0 && n.isText && n.text!.includes(needle)) at = pos + n.text!.indexOf(needle); });
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)));
+    splitBlock(view.state, view.dispatch);
+  };
+
+  it('text typed offline into the first half survives the other side\'s split (formulas in the paragraph)', () => {
+    const state = baseState({ type: 'doc', content: [par(...ENCODER), par(text('Next paragraph.'))] });
+    const online = client(state, 200), offline = client(state, 100);
+    typeBefore(online.view, 'multi-head', 'Zon ');
+    enterBefore(online.view, 'multi-head');
+    typeBefore(offline.view, 'identical layers', 'OFFLINE ');
+    typeBefore(offline.view, 'multi-head', 'Zoff ');
+    merge(online.ydoc, offline.ydoc);
+    const t = pars(online.view);
+    expect(pars(offline.view)).toEqual(t);
+    expect(t.join('\n')).toContain('OFFLINE identical layers');
+    expect(t.join('\n')).toContain('Zoff');
+    expect(t[1]).toMatch(/^multi-head self-attention mechanism/);
+    // nothing doubled
+    expect(t.join('\n').match(/The encoder is composed/g)).toHaveLength(1);
+    expect(t.join('\n').match(/multi-head/g)).toHaveLength(1);
+  });
+
+  it('two people splitting the same paragraph: no half appears twice except the part after both split points', () => {
+    const state = baseState({ type: 'doc', content: [par(...ENCODER)] });
+    const c1 = client(state, 100), c2 = client(state, 200);
+    enterBefore(c1.view, 'multi-head');
+    enterBefore(c2.view, 'That is');
+    merge(c1.ydoc, c2.ydoc);
+    const t = pars(c1.view).join('\n');
+    expect(pars(c2.view).join('\n')).toBe(t);
+    expect(t.match(/The encoder is composed/g)).toHaveLength(1);
+    expect(t.match(/multi-head/g)).toHaveLength(1);   // between the two split points: once
+  });
+
+  it('a split inside a list item keeps its layout; text typed meanwhile after the split point ends the first half', () => {
+    const state = baseState({ type: 'doc', content: [{ type: 'paragraph', attrs: { layout: 'Itemize' }, content: [text('keys, values and queries come from the same place.')] }] });
+    const c1 = client(state, 100), c2 = client(state, 200);
+    enterBefore(c1.view, 'queries');
+    typeBefore(c2.view, 'same place', 'very ');
+    merge(c1.ydoc, c2.ydoc);
+    // Yjs cannot move text: the second half is a copy, so what was typed into it meanwhile stays where its characters were
+    expect(pars(c1.view)).toEqual(['keys, values and very ', 'queries come from the same place.']);
+    expect(pars(c2.view)).toEqual(pars(c1.view));
+    c1.view.state.doc.forEach(p => expect(p.attrs.layout).toBe('Itemize'));
   });
 });
