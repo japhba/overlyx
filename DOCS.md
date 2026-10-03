@@ -1351,7 +1351,9 @@ How it works, in order of what happens when you open a document:
   from the document's metadata follows it live (`editorContext.meta` tells `onMetaChange` listeners
   when it is replaced): an author who starts tracking is named and coloured at once, and a citation an
   agent or a collaborator inserted shows author and year as soon as the refreshed metadata (project
-  events) knows the key — no reload.
+  events) knows the key — no reload. A table inserted or deleted as a whole has its rules and cell
+  boundaries in the author's colour, an outline and a tinted ground (a deleted one is crossed out), so it
+  never reads as an accepted table.
 * **Mode switch: Editing · Suggesting · Viewing** (`app/EditModeSwitch.tsx`, both shells — the web
   client at the right end of the first toolbar row, as in Google Docs; the VS Code webview in its
   top bar): Suggesting is change tracking — a setting of the document (`\tracking_changes`), so it

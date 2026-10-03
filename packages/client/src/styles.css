@@ -596,10 +596,18 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 /* the dotted grid — LyX's hint for cell boundaries without a line — only while the cursor is in the
    table (editor/plugins/envfocus.ts marks it); the colour changes, never the layout */
 .lyx-tabular:not(.ol-editing) { --cell-grid: transparent; }
-.lyx-cell.topline { border-top: 1px solid var(--editor-fg); }
-.lyx-cell.bottomline { border-bottom: 1px solid var(--editor-fg); }
-.lyx-cell.leftline { border-left: 1px solid var(--editor-fg); }
-.lyx-cell.rightline { border-right: 1px solid var(--editor-fg); }
+.lyx-cell.topline { border-top: 1px solid var(--cell-rule, var(--editor-fg)); }
+.lyx-cell.bottomline { border-bottom: 1px solid var(--cell-rule, var(--editor-fg)); }
+.lyx-cell.leftline { border-left: 1px solid var(--cell-rule, var(--editor-fg)); }
+.lyx-cell.rightline { border-right: 1px solid var(--cell-rule, var(--editor-fg)); }
+/* a table inserted or deleted as a whole (a suggestion, an agent's tracked edit): its rules and cell
+   boundaries in the author's colour on a tinted ground, a deleted one crossed out — it must not read as
+   an ordinary, accepted table */
+.lyx-tabular.lyx-change-inserted { --cell-rule: var(--change-color, var(--ok)); }
+.lyx-tabular.lyx-change-deleted { --cell-rule: var(--change-color, var(--err)); }
+.lyx-tabular.lyx-change-inserted, .lyx-tabular.lyx-change-deleted { --cell-grid: var(--cell-rule); }
+.lyx-tabular.lyx-change-inserted > table, .lyx-tabular.lyx-change-deleted > table { outline: 2px solid var(--cell-rule); outline-offset: 2px; background: color-mix(in srgb, var(--cell-rule) 8%, transparent); }
+.lyx-tabular.lyx-change-deleted .lyx-cell { text-decoration: line-through; text-decoration-thickness: 1.5px; }
 .lyx-cell.align-left { text-align: left; } .lyx-cell.align-right { text-align: right; } .lyx-cell.align-center { text-align: center; } .lyx-cell.align-block { text-align: justify; }
 .lyx-cell .lyx-par { text-indent: 0; padding: 0; }
 .selectedCell { background: var(--row-sel) !important; }
