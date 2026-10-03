@@ -260,8 +260,6 @@ class BodyParser {
   /** start of the first token since the last top-level paragraph ended (null: none yet) */
   private pendingStart: number | null = null;
   private envStack: string[] = [];
-  /** the arguments the last environment layout had (one with the same argument needs no separator) */
-  private lastEnvArgs: { layout: string; depth: number; ids: Set<string> } | null = null;
   /** where the last environment layout ended (a separator goes between two of the same style) */
   private lastEnvEnd: { src: string; pos: number } | null = null;
   private quoteStyle: string;
@@ -1585,12 +1583,9 @@ class BodyParser {
     else if (style.latexType === 'List_Environment' && style.latexParam === '') { const g = s.readGroup(); if (g !== null && g.trim()) args.push(argumentInset('listpreamble:1', this.parseInsetString(g, 'Plain Layout'))); }
     if (style.args.size) args.push(...this.readArguments(s, style.args));
     // right after an environment of the same style: a separator keeps the two apart (else the
-    // writer merges them — two frames would become one); LyX's plain one is written as "%" — unless
-    // this one brings an argument the other has (\begin{uncoverenv}<3-> after <2->), which keeps
-    // them apart in the writer anyway
+    // writer merges them — two frames would become one); LyX's plain one is written as "%"
     const last = [...ctx.pars].reverse().find(p => p.depth <= depth);
-    const apart = !!this.lastEnvArgs && this.lastEnvArgs.layout === style.name && this.lastEnvArgs.depth === depth && args.some(a => !a.arg.includes(':') && this.lastEnvArgs!.ids.has(a.arg));
-    if (last && last.layout === style.name && last.depth === depth && ctx.pars.indexOf(last) >= (ctx.envStart ?? 0) && !apart) {
+    if (last && last.layout === style.name && last.depth === depth && ctx.pars.indexOf(last) >= (ctx.envStart ?? 0)) {
       const between = this.lastEnvEnd?.src === s.s ? s.s.slice(this.lastEnvEnd.pos, beginPos) : '';
       const kind = /\n[ \t]*\n/.test(between) ? 'parbreak' : 'plain';
       ctx.pars.push({ layout: ctx.base, depth, params: {}, items: [{ kind: 'inset', font: {}, inset: { type: 'Leaf', name: 'Separator', arg: kind, params: [] } }] });
@@ -1670,7 +1665,6 @@ class BodyParser {
     this.envStack.pop();
     this.endPar(ctx);
     this.lastEnvEnd = { src: s.s, pos: s.pos };
-    this.lastEnvArgs = { layout: style.name, depth, ids: new Set(args.map(a => a.arg).filter(id => !id.includes(':'))) };
     Object.assign(ctx, saved);
   }
 
