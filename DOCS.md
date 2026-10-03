@@ -802,7 +802,8 @@ blend.
   back to centre; on tablets the pen comes out by itself (`localStorage.ol.ink` overrides). Strokes
   and pasted images are anchored to the paragraph beside them (an invisible `\olsketch{figures/ink-….svg}`
   in the .tex, the drawing in a sidecar SVG the server writes; nothing shows in the PDF) and move with
-  the text. The bottom *Draw* row has a pen and a highlighter (each with its own colour and width),
+  the text; the text column still fits the pane, so a narrow one (the PDF beside the text on a
+  tablet) reflows the text instead of cutting it off at both sides. The bottom *Draw* row has a pen and a highlighter (each with its own colour and width),
   an eraser (whole strokes, also the pen's eraser end), a lasso (closes itself, selects whatever it
   touches; drag to move, corner handles to resize, Delete) and a **laser pointer**: a glowing trace
   over the text or the margins that stays while the pen is down and fades when it lifts — never
