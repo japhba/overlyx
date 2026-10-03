@@ -1300,7 +1300,13 @@ How it works, in order of what happens when you open a document:
    be shown offline.
 4. **Back online.** y-websocket reconnects; the Yjs sync sends the offline edits and receives
    everybody else's. Because the document is a CRDT, concurrent edits merge without conflicts
-   (two people editing the same sentence simply both get their words in). External changes of
+   (two people editing the same sentence simply both get their words in, one word after the other).
+   That needs every typed character anchored to the one typed before it: y-prosemirror's
+   prefix-first diff hung the rest of a word typed in front of an equal letter ("q…" before
+   "queries") off the old text, and two people typing at the same place, one of them offline, got
+   their words spliced into each other mid-word — `editor/plugins/typinganchor.ts` places such an
+   insertion at the cursor first (`tests/typing-anchor.test.ts`, the token-accounting test in
+   `e2e/offline.spec.ts`). External changes of
    the file are applied on the server as a *diff* (`packages/server/src/ydiff.ts`), so paragraphs
    they did not touch keep their identity and offline edits inside them survive.
    A formula is one value, not text: when two people change the same formula from the same version,
