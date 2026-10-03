@@ -1465,7 +1465,19 @@ exposes these tools:
   to the comparison (it stays deleted when the agent's version leaves it out); another author's
   pending insertion that the agent keeps stays theirs; the agent's *own* pending changes in an edited
   region are taken back and re-derived, so refining a proposal never stacks changes on changes.
-  Other people's concurrent edits elsewhere survive (three-way merge, `mergeLyx`).
+  Other people's concurrent edits elsewhere survive (three-way merge, `mergeLyx`). The preamble is
+  never tracked: a change to it is applied directly and the result says so (`applied_directly`). A
+  command the document defined itself and an edit renamed or removed (`\newcommand{\R}` →
+  `\newcommand{\Real}`) is remembered on the open document (`retiredMacros`): the agent's own
+  struck-out formulas that use it are removed instead of struck out (a `\lyxdeleted` formula is still
+  typeset, so a tracked macro rename never compiled), and the result names the formulas that still
+  use it. Whether anything changed is judged by the text, not by the marks — a preamble edit or
+  one's own pending insertion taken back is no longer reported as "nothing changed".
+* Agent edits of one document run one after the other (`withDocLock`), and a direct edit reads the
+  document after its restore-point commit: two calls in flight used to both report success while the
+  later one replaced the earlier one's change. Requests over 2 MB, or not JSON, get a JSON-RPC error
+  (413 / parse error), not Express's HTML page. `create_document` puts the account's name in
+  `\author`, as the editor does.
 * `propose_edit(path, paragraph_index, new_text)` — replaces one plain, uniformly formatted text
   paragraph's text (formulas / insets / mixed formatting are refused).
 * `list_comments(path)`, `add_comment(path, text, paragraph_index?)`, `resolve_comment(path, index)`

@@ -447,6 +447,69 @@ describe('edits in flight at the same time', () => {
   });
 });
 
+describe('what an edit reports', () => {
+  it('create_document puts the account\'s name in \\author, not the token label', async () => {
+    const t = createMcpToken(owner.id, 'Account access token').token;
+    await callTool(t, 'create_document', { path: 'authored', title: 'A Paper' });
+    const text = readFileSync(file('authored.tex'), 'utf8');
+    expect(text).toContain('\\author{Owner}');
+    expect(text).not.toContain('access token');
+  });
+
+  it('a preamble edit is applied directly and said so — not "nothing changed"', async () => {
+    writeFileSync(file('pre.tex'), `\\documentclass{article}\n\\usepackage{amssymb}\n\\newcommand{\\R}{\\mathbb{R}}\n\\begin{document}\nA map $f:\\R^n\\to\\R$ here.\n\nAnd $x\\in\\R$ too.\n\\end{document}\n`);
+    const t = createMcpToken(owner.id, 'Macro Bot').token;
+    const r = await callTool(t, 'edit_document', { path: 'pre.tex', old_text: '\\newcommand{\\R}{\\mathbb{R}}', new_text: '\\newcommand{\\Real}{\\mathbb{R}}' });
+    expect(r.note ?? '').not.toMatch(/nothing changed/);
+    expect(r.applied_directly.join(' ')).toMatch(/preamble/);
+    expect(r.applied_directly.join(' ')).toMatch(/\\R is no longer defined, but 2 formulas still use it/);
+    expect(r.now_reads).toContain('\\newcommand{\\Real}{\\mathbb{R}}');
+    expect((await manager.open('owner/p/pre.tex')).toText()).toContain('\\newcommand{\\Real}');
+  });
+
+  it('a tracked macro rename compiles: the old formulas are removed, not struck out with the gone \\R', async () => {
+    const t = createMcpToken(owner.id, 'Macro Bot').token;
+    const r1 = await callTool(t, 'edit_document', { path: 'pre.tex', old_text: 'f:\\R^n\\to\\R', new_text: 'f:\\Real^n\\to\\Real' });
+    expect(r1.applied_directly.join(' ')).toMatch(/1 old formula removed instead of struck out: it uses \\R/);
+    expect(r1.inserted_chars).toBe(1);   // the new formula is a tracked insertion
+    const r2 = await callTool(t, 'edit_document', { path: 'pre.tex', old_text: 'x\\in\\R', new_text: 'x\\in\\Real' });
+    expect(r2.applied_directly.join(' ')).not.toMatch(/still use/);
+    const text = (await manager.open('owner/p/pre.tex')).toText();
+    expect(text).not.toMatch(/\\R[^a-zA-Z]/);
+    expect(text).toMatch(/\\lyxadded\{Macro Bot \(MCP\)\}\{[^}]*\}\{\$f:\\Real\^n\\to\\Real\$\}/);
+    const b = await callTool(t, 'build_pdf', { path: 'pre.tex', wait_seconds: 150 });
+    expect(b.errors ?? []).toEqual([]);
+    expect(b.ok).toBe(true);
+  }, 180_000);
+
+  it('taking back one\'s own pending insertion changes the document and says so', async () => {
+    writeFileSync(file('retract.tex'), doc('First sentence. Last sentence.'));
+    const t = createMcpToken(owner.id, 'Retract Bot').token;
+    const ins = await callTool(t, 'edit_document', { path: 'retract.tex', old_text: 'First sentence.', new_text: 'First sentence. Inserted sentence.' });
+    expect(ins.inserted_chars).toBeGreaterThan(0);
+    const r = await callTool(t, 'edit_document', { path: 'retract.tex', old_text: 'First sentence. Inserted sentence.', new_text: 'First sentence.' });
+    expect(r.note).not.toMatch(/nothing changed/);
+    expect((await manager.open('owner/p/retract.tex')).toText()).not.toContain('Inserted');
+  });
+
+  it('a request over the size limit gets a JSON-RPC error, not an HTML page', async () => {
+    const t = createMcpToken(owner.id, 'Big Bot').token;
+    const res = await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${t}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'write_document', arguments: { path: 'big.tex', tex: doc('x'.repeat(2_300_000)) } } }),
+    });
+    expect(res.status).toBe(413);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    const body = await res.json();
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.error.message).toMatch(/too large.*2MB/);
+    const bad = await fetch(base, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` }, body: '{"jsonrpc":' });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error.code).toBe(-32700);
+  });
+});
+
 describe('project text files', () => {
   it('write_file / read_file round-trip refs.bib', async () => {
     const t = createMcpToken(owner.id, 'Bib Bot').token;
