@@ -4,7 +4,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { login, collectErrors, userCredentials, PROJECTS_DIR, shareProject } from './helpers';
+import { login, collectErrors, userCredentials, PROJECTS_DIR, shareProject, acceptDialog } from './helpers';
 
 const DIR = `${PROJECTS_DIR}/admin/e2e-toolbar`;
 const FILE = `${DIR}/main.tex`;
@@ -158,7 +158,6 @@ test('review toolbar appears with change tracking', async ({ page }) => {
 
 test('the mode switch at the top right: Editing · Suggesting · Viewing, and which changes are shown', async ({ page, browser }) => {
   const errors = collectErrors(page);
-  page.on('dialog', d => { void d.accept(); });
   await open(page);
   const sw = page.locator('.tb-toprow .edit-mode-btn');
   await expect(sw).toBeVisible();
@@ -221,6 +220,7 @@ test('the mode switch at the top right: Editing · Suggesting · Viewing, and wh
   await typeAtEnd(' plain');
   await expect.poll(() => file().includes(' plain')).toBe(true);
   await tb(page, 'r-rejectall').click();
+  await acceptDialog(page);
   await expect.poll(() => file().includes('\\lyxadded{')).toBe(false);
   expect(file()).not.toContain('suggested');
   expect(file()).toContain(' plain');

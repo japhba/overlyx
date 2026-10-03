@@ -4,7 +4,7 @@
 import { test, expect } from '@playwright/test';
 import { existsSync, rmSync } from 'node:fs';
 import JSZip from 'jszip';
-import { login, openDoc, adminCredentials, apiLogin, BASE_URL, PROJECTS_DIR, TOUR_SEEN_SCRIPT } from './helpers';
+import { login, openDoc, adminCredentials, apiLogin, BASE_URL, PROJECTS_DIR, TOUR_SEEN_SCRIPT, acceptDialog, cancelDialog, dialogLocator } from './helpers';
 
 async function zipOf(files: Record<string, string | Buffer>): Promise<Buffer> {
   const z = new JSZip();
@@ -314,25 +314,28 @@ test.describe('command palette', () => {
     await expect(page.locator('.rail.left')).toBeVisible();
     await page.keyboard.press('Control+Shift+9');
     await expect(page.locator('.sidebar.left .docpanel')).toBeVisible();
-    // the same key for another command: a prompt; accepting moves the key over
-    let prompt = '';
-    page.once('dialog', d => { prompt = d.message(); void d.accept(); });
+    // the same key for another command: a themed confirm (app/Dialogs.tsx); accepting moves the key over
     await page.keyboard.press('F1');
     await page.locator('[data-help-search]').fill('source beside');
     const src = page.locator('[data-help-result]', { hasText: 'View ▸ LaTeX source beside' }).first();
     await src.hover();
     await src.locator('[data-set-shortcut]').click();
     await page.keyboard.press('Control+Shift+9');
+    const reassign = dialogLocator(page);
+    await expect(reassign).toContainText('Shortcut Already Used');
+    const promptText = await reassign.innerText();
+    await acceptDialog(page);
     await expect(src.locator('.shortcut')).toHaveText('Ctrl+Shift+9');
-    expect(prompt).toContain('View ▸ Outline');
+    expect(promptText).toContain('View ▸ Outline');
     expect(JSON.parse(await page.evaluate(() => localStorage.getItem('ol.keys')!))).toEqual({ 'View ▸ Outline': null, 'View ▸ LaTeX source beside the document (raw view)': 'Ctrl+Shift+9' });
     await page.locator('[data-help-search]').fill('outline');
     await expect(first.locator('.shortcut')).toHaveCount(0);   // no key at all now
     // declining keeps things as they are
-    page.once('dialog', d => void d.dismiss());
     await first.hover();
     await first.locator('[data-set-shortcut]').click();
     await page.keyboard.press('Control+Shift+9');
+    await expect(dialogLocator(page)).toContainText('Shortcut Already Used');
+    await cancelDialog(page);
     await expect(first.locator('[data-recording]')).toBeVisible();   // still recording
     await page.keyboard.press('Escape');
     // back to the default with ↺

@@ -6,7 +6,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { writeFileSync, rmSync } from 'node:fs';
-import { login, apiLogin, userCredentials, texDoc, PROJECTS_DIR, BASE_URL } from './helpers';
+import { login, apiLogin, userCredentials, texDoc, PROJECTS_DIR, BASE_URL, acceptDialog } from './helpers';
 
 const PROJECT = 'bob/e2e-bobs-paper';   // bob's namespace: he creates it
 
@@ -32,8 +32,8 @@ test('administrator access is an explicit, logged grant; the owner sees it; the 
   expect((await page.request.get(`/api/docs/${docId}/meta`)).status()).toBe(403);
 
   // open as administrator: confirmed, then the card appears with the admin badge and the API lets the administrator in
-  page.once('dialog', d => void d.accept());
   await page.locator(`[data-admin-project="${PROJECT}"] button`).click();
+  await acceptDialog(page);
   const card = page.locator(`.home-card[data-project="${PROJECT}"]`);
   await expect(card).toBeVisible({ timeout: 15000 });
   await expect(card.locator('.badge')).toHaveText('admin');
