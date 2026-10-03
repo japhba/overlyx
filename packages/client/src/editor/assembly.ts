@@ -32,7 +32,7 @@ import { dragSelectPlugin } from './plugins/dragselect';
 import { findPlugin } from './plugins/find';
 import { mirrorCaretPlugin } from './plugins/mirrorcaret';
 import { markdownRulesPlugin } from './plugins/mdrules';
-import { pasteTargetsPlugin, pasteLatex } from './plugins/paste';
+import { pasteTargetsPlugin, pasteLatex, pasteBlocksIntoEmpty } from './plugins/paste';
 import { autocorrectPlugin } from './spell/autocorrect';
 import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
 import { aiRewritePlugin } from './ai/rewrite';
@@ -273,7 +273,7 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
         return true;
       },
     },
-    handlePaste(view, event) {
+    handlePaste(view, event, slice) {
       // a layout document: images become image objects on the page (editor/layout/images.ts)
       if (!viewOnly() && layoutPaste(view, event)) return true;
       // an image on the clipboard (a screenshot, a copied image file): upload it, insert a graphics inset
@@ -316,6 +316,8 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
         plainPaste();
         return true;
       }
+      // blocks into an empty paragraph: they replace it (a pasted heading stays one)
+      if (!viewOnly() && pasteBlocksIntoEmpty(view, slice)) return true;
       return false;
     },
     // files dragged in from the computer: images are uploaded and inserted where they were dropped
