@@ -50,9 +50,27 @@ function forParagraphsAtCursorLevel(state: EditorState, fn: (node: PMNode, pos: 
   return any;
 }
 
+/** A table, float or display formula: what a heading's LaTeX argument cannot hold. */
+function isBlockAtom(node: PMNode): boolean {
+  const t = node.type.name;
+  return t === 'table' || t === 'math_display' || t === 'macro' || (t === 'inset' && (node.attrs.name === 'Float' || node.attrs.name === 'Wrap'));
+}
+
 export function setLayout(layout: string): Command {
   return (state, dispatch) => {
     const tr = state.tr;
+    // a heading style with the cursor after a table (a float, a display formula) in its paragraph
+    // — the table that ends the document, Ctrl+End, Section — starts a paragraph of its own after
+    // it: a heading cannot hold a table, and one paragraph of both lost the table to a deletion
+    const { $from, empty } = state.selection;
+    if (empty && $from.parent.type.name === 'paragraph' && isHeadingLayout(layout, editorContext.meta?.layouts)) {
+      let after = -1;
+      $from.parent.forEach((child, offset) => { if (offset < $from.parentOffset && isBlockAtom(child)) after = offset + child.nodeSize; });
+      if (after >= 0) {
+        if (dispatch) dispatch(tr.split($from.start() + after, 1, [{ type: $from.parent.type, attrs: { ...$from.parent.attrs, layout } }]).scrollIntoView());
+        return true;
+      }
+    }
     const any = forParagraphsAtCursorLevel(state, (node, pos) => { if (node.attrs.layout !== layout) tr.setNodeMarkup(pos, undefined, { ...node.attrs, layout }); });
     if (!any) return false;
     if (dispatch) dispatch(tr.scrollIntoView());
