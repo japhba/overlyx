@@ -6,8 +6,8 @@
  * writes automatically and before every clone / pull / push, and a push updates the project.
  */
 import { useEffect, useState } from 'preact/hooks';
-import { api, type GitInfo, type GitToken, type MirrorStatus, type User } from '../api';
-import { Dialog } from './Dialogs';
+import { api, zipUrl, type GitInfo, type GitToken, type MirrorStatus, type User } from '../api';
+import { Dialog, uiConfirm } from './Dialogs';
 
 const fmtDate = (t: number) => new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 export const ago = (t: number) => {
@@ -70,7 +70,7 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
 
   const createToken = async () => {
     if (busy) return;
-    if (tokens?.length && !confirm('Rotate your account access token? Every Git, CLI and manual MCP client using the current token will need the new one.')) return;
+    if (tokens?.length && !(await uiConfirm('Rotate Access Token', 'Rotate your account access token? Every Git, CLI and manual MCP client using the current token will need the new one.'))) return;
     setBusy(true); setErr('');
     try {
       const r = await api.rotateGitToken();
@@ -79,12 +79,12 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
     finally { setBusy(false); }
   };
   const revoke = async (t: GitToken) => {
-    if (!confirm('Revoke your account access token? Every Git, CLI and manual MCP client using it will stop working.')) return;
+    if (!(await uiConfirm('Revoke Access Token', 'Revoke your account access token? Every Git, CLI and manual MCP client using it will stop working.', { danger: true, okLabel: 'Revoke' }))) return;
     try { setTokens((await api.deleteGitToken(t.id)).tokens); if (newToken?.id === t.id) setNewToken(null); }
     catch (e) { setErr((e as Error).message); }
   };
   const revokeMcpToken = async (t: GitToken) => {
-    if (!confirm(`Disconnect “${t.name}”? That OAuth or legacy connection will stop working.`)) return;
+    if (!(await uiConfirm('Disconnect', `Disconnect "${t.name}"? That OAuth or legacy connection will stop working.`, { danger: true, okLabel: 'Disconnect' }))) return;
     try { setMcpTokens((await api.deleteMcpToken(t.id)).tokens); }
     catch (e) { setErr((e as Error).message); }
   };
@@ -99,7 +99,7 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
 
   const restore = async (c: GitInfo['commits'][number]) => {
     if (busy) return;
-    if (!confirm(`Put the whole project back to how it was at ${c.hash.slice(0, 7)} (“${c.message}”, ${fmtDate(c.date)})?\n\nThis is a new commit on top: everything since stays in the history, so it can be undone the same way. Open documents take the restored text over.`)) return;
+    if (!(await uiConfirm('Restore Commit', `Put the whole project back to how it was at ${c.hash.slice(0, 7)} ("${c.message}", ${fmtDate(c.date)})?\n\nThis is a new commit on top: everything since stays in the history, so it can be undone the same way. Open documents take the restored text over.`, { okLabel: 'Restore' }))) return;
     setBusy(true); setErr('');
     try { const r = await api.gitRestore(project, c.hash); setInfo(i => ({ ...(i as GitInfo), ...r })); if (!r.restored) setErr('The project is already as it was at that commit.'); }
     catch (e) { setErr((e as Error).message); }
@@ -132,6 +132,7 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
             (<code>git config --global credential.helper store</code>, or the macOS keychain / Windows credential manager).
             {!canPush && <> You have <b>view</b> access to this project: you can clone and pull, but not push.</>}
           </div>
+          <div class="hint">Just want a backup, not a git clone? <a href={zipUrl(project)} data-download-zip={project}>Download the whole project as a .zip</a>.</div>
 
           <h4>Local agents — Claude Code, Codex, … on your computer</h4>
           <div class="hint" data-git-agents>

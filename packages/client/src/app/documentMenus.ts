@@ -12,6 +12,7 @@ import { isMac } from '../editor/keymap';
 import { moveSection, shiftSection } from '../editor/outline';
 import { changeAt, resolveChange, acceptAllChanges, rejectAllChanges } from '../editor/plugins/changes';
 import { openLinkBoxFor, LINK_KEY } from '../editor/links';
+import { uiPrompt } from './Dialogs';
 
 const SECTION_LAYOUTS: [string, string][] = [['0', 'Part'], ['1', 'Chapter'], ['2', 'Section'], ['3', 'Subsection'], ['4', 'Subsubsection'], ['5', 'Paragraph'], ['6', 'Subparagraph']];
 export interface DocumentMenuContext {
@@ -139,7 +140,7 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
         { label: 'Delimiters…', action: () => setDialog({ name: 'delimiters' }) },
         { label: 'Matrix…', action: () => setDialog({ name: 'matrix' }) },
         { sep: true },
-        { label: 'Math macro definition', action: () => { const n = prompt('Macro name (without backslash):'); if (n) run(C.insertMacroDef(n, Number(prompt('Number of arguments:', '0') || 0), '')); } },
+        { label: 'Math macro definition', action: () => { void uiPrompt('Math Macro', 'Macro name (without backslash):').then(n => { if (n) void uiPrompt('Math Macro', 'Number of arguments:', '0').then(a => run(C.insertMacroDef(n, Number(a || 0), ''))); }); } },
       ] },
       { label: 'Special Character ▸', sub: [
         { label: 'Ellipsis …', shortcut: 'Alt+.', action: () => run(C.insertSpecial('ldots')) },
@@ -199,13 +200,13 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
       { label: 'TeX code (ERT)', shortcut: 'Ctrl+L', action: () => run(C.insertERT) },
       { label: 'Program listing', action: () => run(C.insertListing) },
       { label: 'Box', action: () => run(C.insertBox) },
-      { label: 'Branch…', action: () => { const n = prompt('Branch name:'); if (n) run(C.insertBranch(n)); } },
-      { label: 'Custom inset (Flex)…', action: () => { const n = prompt('Flex inset name:', meta?.flexInsets?.[0] ?? 'Code'); if (n) run(C.insertFlex(n)); } },
+      { label: 'Branch…', action: () => { void uiPrompt('Branch', 'Branch name:').then(n => { if (n) run(C.insertBranch(n)); }); } },
+      { label: 'Custom inset (Flex)…', action: () => { void uiPrompt('Custom Inset', 'Flex inset name:', meta?.flexInsets?.[0] ?? 'Code').then(n => { if (n) run(C.insertFlex(n)); }); } },
       { sep: true },
-      { label: 'Child document…', action: () => { const fn = prompt('Child document file name (relative):', 'chapter1.tex'); if (fn) run(C.insertInclude(fn, 'include')); } },
+      { label: 'Child document…', action: () => setDialog({ name: 'childdoc' }) },
       { label: 'Table of contents', action: () => run(C.insertToc()) },
       { label: 'List of figures', action: () => run(C.insertToc('listoffigures')) },
-      { label: 'BibTeX bibliography…', action: () => { const f = prompt('BibTeX file(s), comma separated (without .bib):', (meta?.files.filter(x => x.kind === 'bib').map(x => x.path.replace(/\.bib$/, '')).join(',') || 'references')); if (f) run(C.insertBibtex(f, prompt('Style:', 'plain') || 'plain')); } },
+      { label: 'BibTeX bibliography…', action: () => { void uiPrompt('BibTeX Bibliography', 'BibTeX file(s), comma separated (without .bib):', (meta?.files.filter(x => x.kind === 'bib').map(x => x.path.replace(/\.bib$/, '')).join(',') || 'references')).then(f => { if (f) void uiPrompt('BibTeX Bibliography', 'Style:', 'plain').then(style => run(C.insertBibtex(f, style || 'plain'))); }); } },
       { label: 'Index (print)', action: () => run(C.insertIndexPrint) },
     ] },
     document: { title: 'Document', items: [

@@ -22,7 +22,7 @@ import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, cr
 import { snippetSvg, snippetFile } from './snippets.ts';
 import { cachedParseFile, importLyxFile, parseDocumentText, parseFragmentText, newLayoutDocumentText } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
-import { extractZip, bundledZips, projectNameFromZip } from './zip.ts';
+import { extractZip, bundledZips, projectNameFromZip, writeZip } from './zip.ts';
 import { pdfLinkByToken, pdfLinksOf, createPdfLink, deletePdfLink, countHit, pdfForLink, pdfLinkFileName, linkableDocs } from './pdflinks.ts';
 import { publishAvailable, publishTargetsOf, setPublishTarget, deletePublishTarget, publishPdf, startPublishing } from './pdfpublish.ts';
 import { overleafProjectId, cloneOverleafProject } from './overleaf.ts';
@@ -40,7 +40,7 @@ import { usageRoutes } from './usage.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, restoreProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
-import { texHeadings, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText, lyxToPm, splitDocId, projectOfDoc, docPathOf } from '@overlyx/core';
+import { texHeadings, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText, lyxToPm, splitDocId, projectOfDoc, docPathOf, splitProjectKey } from '@overlyx/core';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -630,6 +630,28 @@ api.get('/projects/:project/file/*', needProject('view'), (req, res) => {
     if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) { res.status(404).end(); return; }
     if (!INLINE_EXT.has(path.extname(abs).toLowerCase()) || req.query.download === '1') res.attachment(path.basename(abs));
     res.sendFile(abs);
+  } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/**
+ * The whole project as a .zip — the backup button Overleaf has and OverLyX didn't (persona-p7 F6):
+ * respects the caller's access (needProject('view'): a viewer can still back up what they can see),
+ * skips `.git` (listProjects' own walk already does — directories starting with "." are not
+ * listed) and LaTeX build byproducts (ZIP_EXCLUDE_EXT, the client's own "aux file" list, api.ts) —
+ * the PDF itself stays in, since that is usually exactly what someone downloading a backup wants.
+ */
+const ZIP_EXCLUDE_EXT = new Set(['olx', 'olsrc', 'aux', 'log', 'bbl', 'blg', 'fls', 'fdb_latexmk', 'out', 'toc', 'lof', 'lot', 'nav', 'snm', 'bcf', 'dvi', 'xdv', 'spl', 'idx', 'ind', 'ilg', 'glo', 'gls', 'glg', 'acn', 'acr', 'alg', 'ist', 'loa', 'lol', 'thm', 'vrb', 'xcp', 'upa', 'upb', 'synctex']);
+api.get('/projects/:project/zip', needProject('view'), (req, res) => {
+  try {
+    const dir = projectDir(req.params.project);
+    const project = listProjects().find(p => p.name === req.params.project);
+    if (!project) { res.status(404).json({ error: 'not found' }); return; }
+    const files = project.files.filter(f => f.kind !== 'dir' && !ZIP_EXCLUDE_EXT.has(path.extname(f.name).slice(1).toLowerCase()) && !isBackupFile(f.name));
+    const entries = files.map(f => ({ name: f.path, data: fs.readFileSync(path.join(dir, f.path)) }));
+    const buf = writeZip(entries);
+    res.setHeader('Content-Disposition', `attachment; filename="${splitProjectKey(req.params.project).name.replace(/[^A-Za-z0-9._ -]+/g, '-')}.zip"`);
+    res.setHeader('Content-Type', 'application/zip');
+    res.end(buf);
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 

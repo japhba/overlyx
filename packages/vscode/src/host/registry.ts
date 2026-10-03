@@ -11,6 +11,8 @@ export interface OpenEditor {
   panel: vscode.WebviewPanel;
   outline: OutlineEntry[];
   selectionPos: number;
+  /** after a save VS Code refused (the file changed outside meanwhile): bring VS Code's copy of the file up to date (DocSession.save) */
+  resync?: (target: DocSession) => Promise<boolean>;
 }
 
 export class Registry {

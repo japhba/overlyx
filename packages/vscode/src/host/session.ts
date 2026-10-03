@@ -268,10 +268,28 @@ export class DocSession {
     return this.getHeaderLines();
   }
 
-  save(): Promise<void> {
+  /**
+   * Save the TextDocument. VS Code refuses a save when the file changed on disk after it last read
+   * it ("file modified since") — also when readDisk has merged that change into the document, which
+   * it always has right before: then the document is exactly what belongs on disk. It is written
+   * directly, and `resync` brings VS Code's copy of the file up to date (reverting its editor to the
+   * file, which now holds the same text) so that it no longer shows the document as modified.
+   * Resolves to how it was saved; throws when it could not be.
+   */
+  save(resync?: (target: DocSession) => Promise<boolean>): Promise<'saved' | 'clean' | 'merged' | 'merged-dirty'> {
     return this.enqueue(async () => {
       await this.readDisk();
-      if (this.document.isDirty && !await this.document.save()) throw new Error('VS Code could not save the document');
+      if (!this.document.isDirty) return 'clean';
+      if (await this.document.save()) return 'saved';
+      await this.readDisk();   // whatever arrived since is in the document too
+      const text = this.document.getText();
+      const file = this.document.uri.fsPath;
+      const tmp = `${file}.overlyx-tmp`;
+      try { fs.writeFileSync(tmp, text); fs.renameSync(tmp, file); }
+      catch (e) { try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ } throw new Error(`the file could not be written (${(e as Error).message})`); }
+      this.diskText = text;
+      const clean = await resync?.(this).catch(() => false) ?? false;
+      return clean && !this.document.isDirty ? 'merged' : 'merged-dirty';
     });
   }
 

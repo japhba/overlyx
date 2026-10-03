@@ -300,7 +300,27 @@ async function restorePoint(project: string, userId: number): Promise<void> {
   try { await commitProject(project, { by: userId }); } catch (e) { console.error(`[mcp] commit before a direct edit of "${project}" failed:`, e); }
 }
 
-async function writeDocument(project: string, userId: number, agentName: string, path: string, tex: string, tracked = true) {
+const docLocks = new Map<string, Promise<unknown>>();
+/**
+ * Agent edits of one document run one after the other. A direct edit waits for its restore point
+ * (a git commit) between reading the document and applying the change; two calls in flight at once
+ * (parallel tool calls, two agents) both read the same text, both reported success, and the later
+ * one silently replaced the earlier one's change. Serialized, the second call reads the first one's
+ * result — and fails clearly when its old_text is gone.
+ */
+async function withDocLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const prev = docLocks.get(id) ?? Promise.resolve();
+  const run = prev.catch(() => {}).then(fn);
+  docLocks.set(id, run);
+  try { return await run; }
+  finally { if (docLocks.get(id) === run) docLocks.delete(id); }
+}
+
+function writeDocument(project: string, userId: number, agentName: string, path: string, tex: string, tracked = true) {
+  return withDocLock(`${project}/${path}`, () => writeDocumentLocked(project, userId, agentName, path, tex, tracked));
+}
+
+async function writeDocumentLocked(project: string, userId: number, agentName: string, path: string, tex: string, tracked: boolean) {
   if (!tex.trim()) throw new Error('tex missing');
   if (tex.length > DOC_MAX) throw new Error('too large');
   if (!path.endsWith('.tex')) throw new Error('a .tex path is expected');
@@ -322,16 +342,30 @@ async function writeDocument(project: string, userId: number, agentName: string,
     return { ok: true, created: false, tracked: false, changed: st.changed, warnings: r.warnings, note: 'Written directly (no tracked changes); the previous state is in the project history (project_history / restore_project).' };
   }
   const st = applyTrackedSource(doc, doc.toText(), tex, authorName(agentName));
-  return { ok: true, created: false, warnings: r.warnings, inserted_chars: st.inserted, deleted_chars: st.deleted, note: 'Applied as tracked changes against the current document — only what differs is marked; a reviewer accepts or rejects them.' };
+  return {
+    ok: true, created: false, warnings: r.warnings, inserted_chars: st.inserted, deleted_chars: st.deleted,
+    ...(st.direct.length ? { applied_directly: st.direct } : {}),
+    note: st.changed ? 'Applied as tracked changes against the current document — only what differs is marked; a reviewer accepts or rejects them.' : 'The source parsed to the same document — nothing changed.',
+  };
 }
 
-async function editDocument(project: string, userId: number, agentName: string, path: string, oldText: string, newText: string, all: boolean, tracked = true) {
+function editDocument(project: string, userId: number, agentName: string, path: string, oldText: string, newText: string, all: boolean, tracked = true) {
+  return withDocLock(`${project}/${path}`, () => editDocumentLocked(project, userId, agentName, path, oldText, newText, all, tracked));
+}
+
+async function editDocumentLocked(project: string, userId: number, agentName: string, path: string, oldText: string, newText: string, all: boolean, tracked: boolean) {
   const doc = await manager.open(`${project}/${path}`);
-  const before = doc.toText();
-  const after = replaceInSource(before, oldText, newText, all);
-  const r = parseDocumentText(after, doc.project, doc.relPath);
   if (!tracked) {
-    await restorePoint(project, userId);
+    let before = doc.toText();
+    let after = replaceInSource(before, oldText, newText, all);   // a passage that does not match fails before the commit
+    let typed = false;
+    const onUpdate = () => { typed = true; };
+    doc.ydoc.on('update', onUpdate);
+    try { await restorePoint(project, userId); } finally { doc.ydoc.off('update', onUpdate); }
+    // whatever was typed into the document during the commit is what the edit applies to (an
+    // old_text somebody changed meanwhile no longer matches — said, not overwritten)
+    if (typed) { before = doc.toText(); after = replaceInSource(before, oldText, newText, all); }
+    const r = parseDocumentText(after, doc.project, doc.relPath);
     const st = applyPlainSource(doc, before, after);   // three-way: an edit somebody made meanwhile elsewhere survives
     touchProject(project, userId);
     return {
@@ -340,15 +374,22 @@ async function editDocument(project: string, userId: number, agentName: string, 
       now_reads: st.excerpt,
     };
   }
+  const before = doc.toText();
+  const after = replaceInSource(before, oldText, newText, all);
+  const r = parseDocumentText(after, doc.project, doc.relPath);
   const st = applyTrackedSource(doc, before, after, authorName(agentName));
   return {
     ok: true, inserted_chars: st.inserted, deleted_chars: st.deleted, warnings: r.warnings,
-    ...(st.inserted + st.deleted === 0 ? { note: 'The edit parsed to the same document — nothing changed (e.g. only whitespace differed).' } : {}),
+    // what changed decides, not the marks: a preamble edit or one's own pending insertion taken back needs none
+    ...(!st.changed ? { note: 'The edit parsed to the same document — nothing changed (e.g. only whitespace differed).' }
+      : st.inserted + st.deleted === 0 && !st.direct.length ? { note: 'Applied; nothing in it needed a tracked-change mark (e.g. it took back text of your own pending insertion).' } : {}),
+    ...(st.direct.length ? { applied_directly: st.direct } : {}),
     now_reads: st.excerpt,
   };
 }
 
-function createDocument(project: string, userId: number, agentName: string, relPath: string, title?: string) {
+/** A new document from the template — with the account's name as its author, like a document made in the editor (not the token's label). */
+function createDocument(project: string, userId: number, accountName: string, relPath: string, title?: string) {
   let rel = relPath;
   if (rel.endsWith('.lyx')) rel = rel.slice(0, -4) + '.tex';
   if (!rel.endsWith('.tex')) rel += '.tex';
@@ -356,7 +397,7 @@ function createDocument(project: string, userId: number, agentName: string, relP
   const abs = resolveProjectPath(project, rel);
   if (fs.existsSync(abs)) throw new Error('file exists — write_document replaces an existing document');
   fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
-  fs.writeFileSync(abs, newDocumentText({ title, author: authorName(agentName) }), 'utf8');
+  fs.writeFileSync(abs, newDocumentText({ title, author: accountName }), 'utf8');
   touchProject(project, userId);
   return { ok: true, path: rel };
 }
@@ -592,7 +633,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   }, async ({ project: p, path, old_text, new_text, replace_all }) => { try { return ok(editFile(need(p, 'edit'), userId, path, old_text, new_text, !!replace_all)); } catch (e) { return fail(e); } });
 
   server.registerTool('edit_document', {
-    description: "Edit a document by replacing a passage of its LaTeX source (the `text` read_document returns): old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to this agent and diffed against the live document, so only what actually changes is marked (a word, a digit, a table cell); the user reviews them in the editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the document now reads, for follow-up edits. Prefer this over the paragraph tools. With tracked: false the same edit is applied directly, without marks — use that as soon as a tracked edit fails, garbles the passage or breaks the build.",
+    description: "Edit a document by replacing a passage of its LaTeX source (the `text` read_document returns): old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to this agent and diffed against the live document, so only what actually changes is marked (a word, a digit, a table cell); the user reviews them in the editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the document now reads, for follow-up edits; applied_directly lists what was applied without marks (the preamble is never tracked). Prefer this over the paragraph tools. With tracked: false the same edit is applied directly, without marks — use that as soon as a tracked edit fails, garbles the passage or breaks the build.",
     inputSchema: {
       ...projArg,
       path: z.string().describe('Project-relative path, e.g. "main.tex"'),
@@ -629,7 +670,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   server.registerTool('create_document', {
     description: 'Create a new .tex document from the standard template (write_document with full source also creates).',
     inputSchema: { ...projArg, path: z.string(), title: z.string().optional() },
-  }, async ({ project: p, path, title }) => { try { return ok(createDocument(need(p, 'edit'), userId, agentName, path, title)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, title }) => { try { return ok(createDocument(need(p, 'edit'), userId, user.name, path, title)); } catch (e) { return fail(e); } });
 
   server.registerTool('list_projects', {
     description: 'The projects this account can reach (name, title, its role in each). On the all-projects connection (/mcp), the other tools take one of these names as `project`.',
@@ -670,14 +711,30 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   return server;
 }
 
+/** the largest JSON-RPC request accepted (a whole document in write_document) */
+const REQUEST_MAX = '2mb';
+
 /** POST /mcp/<owner>/<project> — one stateless request/response per JSON-RPC call (no session, no SSE stream kept open). */
 export function mcpRouter(): express.Router {
   const r = express.Router();
-  r.use(express.json({ limit: '2mb' }));
+  r.use(express.json({ limit: REQUEST_MAX }));
   r.post('/', (req, res) => { void handle(req, res); });          // all projects (tools take `project`)
   // fixed to one project: its key, or a name it had before (the flat layout's `/mcp/<name>`)
   r.post('/:owner/:project', (req, res) => { void handle(req, res); });
   r.post('/:project', (req, res) => { void handle(req, res); });
+  // a request the body parser refused (too large, not JSON) is answered in JSON-RPC, not with
+  // Express's HTML error page (which an MCP client cannot read, and which carried a stack trace)
+  r.use((err: { type?: string; status?: number; message?: string }, _req: Request, res: Response, next: express.NextFunction) => {
+    if (res.headersSent) { next(err); return; }
+    const tooLarge = err.type === 'entity.too.large';
+    const parse = err.type === 'entity.parse.failed';
+    res.status(tooLarge ? 413 : err.status && err.status < 500 ? err.status : 400).json({
+      jsonrpc: '2.0', id: null,
+      error: tooLarge
+        ? { code: -32600, message: `Request too large: a call may carry at most ${REQUEST_MAX.toUpperCase()}. Write a large document in parts — write_document a first part, then add the rest with insert_paragraphs or edit_document.` }
+        : { code: parse ? -32700 : -32600, message: parse ? 'Parse error: the request body is not valid JSON.' : `Invalid request: ${err.message ?? 'unreadable body'}` },
+    });
+  });
   return r;
 }
 

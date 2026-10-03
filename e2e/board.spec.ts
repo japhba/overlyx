@@ -5,7 +5,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { login, texDoc, collectErrors, PROJECTS_DIR } from './helpers';
+import { login, texDoc, collectErrors, PROJECTS_DIR, fillDialog } from './helpers';
 
 const PROJECT = 'admin/e2e-board';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -187,8 +187,8 @@ test('a board can be created from the file browser', async ({ page }) => {
   await login(page);
   await page.goto(`/#/${PROJECT}/main.tex`);
   await page.waitForSelector('.lyx-editor');
-  page.once('dialog', d => void d.accept('scratchpad'));
   await page.click('.filetree .actions button:has-text("+ Board")');
+  await fillDialog(page, 'scratchpad');
   await page.waitForSelector('.board-tools', { timeout: 20000 });
   await expect(page).toHaveURL(new RegExp(`${PROJECT}/scratchpad\\.board`));
 });

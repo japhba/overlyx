@@ -8,7 +8,7 @@ import { paramMap, unquote } from '@overlyx/core';
 import { graphicsUrl } from '../../api';
 import { getPrefs, subscribePrefs } from '../../prefs';
 import { subscribeProjectEvents, sameGraphicsFile } from '../../projectevents';
-import { editorContext, resolveDocPath, viewDocDir, viewProject } from '../context';
+import { editorContext, onMetaChange, resolveDocPath, viewDocDir, viewProject } from '../context';
 import { applyChangeAttrs } from '../plugins/changes';
 import { classifyImage, type FigureKind } from '../figureinvert';
 
@@ -121,6 +121,10 @@ export class GraphicsView implements NodeView {
   }
 }
 
+/** the citation views on screen: their author / year text comes from the metadata's bibliography and is redrawn when it is replaced */
+const citationViews = new Set<CommandView>();
+onMetaChange(() => { for (const v of citationViews) v.refresh(); });
+
 const REF_LABEL: Record<string, string> = { ref: 'Ref', eqref: 'EqRef', pageref: 'Page', vref: 'vRef', vpageref: 'vPage', prettyref: 'Formatted', formatted: 'Formatted', nameref: 'Name', labelonly: 'Label' };
 
 export class CommandView implements NodeView {
@@ -130,6 +134,7 @@ export class CommandView implements NodeView {
     this.dom = document.createElement('span');
     this.dom.contentEditable = 'false';
     this.render();
+    citationViews.add(this);
     this.dom.addEventListener('dblclick', (ev) => {
       ev.preventDefault();
       // child documents open in a tab on double-click (editor.ts handleDoubleClickOn), not a dialog
@@ -225,9 +230,17 @@ export class CommandView implements NodeView {
     this.render();
     return true;
   }
+  /** redraw a citation from the current metadata (the bibliography may know its keys now) */
+  refresh() {
+    if (this.node.attrs.cmd !== 'citation') return;
+    const selected = this.dom.classList.contains('ProseMirror-selectednode');
+    this.render();
+    if (selected) this.dom.classList.add('ProseMirror-selectednode');
+  }
   selectNode() { this.dom.classList.add('ProseMirror-selectednode'); }
   deselectNode() { this.dom.classList.remove('ProseMirror-selectednode'); }
   ignoreMutation() { return true; }
+  destroy() { citationViews.delete(this); }
 }
 
 /** Generic leaf (VSpace, Info, External, Separator, ...) rendered as a LyX button. */

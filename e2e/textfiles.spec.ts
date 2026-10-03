@@ -5,7 +5,7 @@
  */
 import { test, expect, type Browser, type BrowserContext } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
-import { apiLogin, adminCredentials, userCredentials, shareProject, BASE_URL, PROJECTS_DIR } from './helpers';
+import { apiLogin, adminCredentials, userCredentials, shareProject, BASE_URL, PROJECTS_DIR, fillDialog, acceptDialog } from './helpers';
 
 const PROJECT = 'admin/e2e-text';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -262,9 +262,9 @@ test('the explorer context menu works like VS Code: new folder, duplicate, renam
   const refContent = readFileSync(`${DIR}/refs.bib`, 'utf8');   // earlier tests of this file edit refs.bib — compare against what is there now
   const menuItem = (label: string) => page.locator('.ctx-menu .ctx-item', { hasText: label }).first();
   // the background menu: a new folder (empty folders are listed)
-  page.once('dialog', d => void d.accept('assets'));
   await page.evaluate(() => { document.querySelector('.filetree')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 400 })); });
   await menuItem('New Folder…').click();
+  await fillDialog(page, 'assets');
   await expect(tree.locator('.tree-row.folder', { hasText: 'assets' })).toHaveCount(1, { timeout: 10000 });
   // duplicate a file
   await tree.locator('[data-file="refs.bib"]').click({ button: 'right' });
@@ -275,9 +275,9 @@ test('the explorer context menu works like VS Code: new folder, duplicate, renam
   await menuItem('Copy Relative Path').click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('refs copy.bib');
   // rename — a path moves the file
-  page.once('dialog', d => void d.accept('assets/refs2.bib'));
   await tree.locator('[data-file="refs copy.bib"]').click({ button: 'right' });
   await menuItem('Rename…').click();
+  await fillDialog(page, 'assets/refs2.bib');
   await expect(tree.locator('[data-file="assets/refs2.bib"]')).toHaveCount(1, { timeout: 10000 });
   expect(readFileSync(`${DIR}/assets/refs2.bib`, 'utf8')).toBe(refContent);
   // cut … paste into figures/
@@ -289,9 +289,9 @@ test('the explorer context menu works like VS Code: new folder, duplicate, renam
   expect(readFileSync(`${DIR}/figures/refs2.bib`, 'utf8')).toBe(refContent);
   await expect(tree.locator('[data-file="assets/refs2.bib"]')).toHaveCount(0);
   // delete: out of the project, but kept in the server's trash (never erased outright)
-  page.once('dialog', d => void d.accept());
   await tree.locator('[data-file="figures/refs2.bib"]').click({ button: 'right' });
   await menuItem('Delete').click();
+  await acceptDialog(page);
   await expect(tree.locator('[data-file="figures/refs2.bib"]')).toHaveCount(0, { timeout: 10000 });
   const dataDir = process.env.OVERLYX_DATA_DIR;
   if (dataDir) {
@@ -310,8 +310,8 @@ test('folders via the + Folder button, and files dragged in from the computer la
   const tree = page.locator('.filetree');
   await expect(tree.locator('[data-file="macros.tex"]')).toHaveCount(1);
   // the + Folder button next to + Doc / + File
-  page.once('dialog', d => void d.accept('drafts'));
   await tree.locator('button', { hasText: '+ Folder' }).click();
+  await fillDialog(page, 'drafts');
   await expect(tree.locator('.tree-row.folder', { hasText: 'drafts' })).toHaveCount(1, { timeout: 10000 });
   // drop a file from the computer onto the tree background → project root
   await page.evaluate(() => {

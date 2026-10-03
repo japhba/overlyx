@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { login, BASE_URL, PROJECTS_DIR } from './helpers';
+import { login, BASE_URL, PROJECTS_DIR, acceptDialog } from './helpers';
 
 const PROJECT = 'admin/e2e-git';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -55,9 +55,10 @@ test('a new project is a repository; the dialog shows the clone URL and creates 
   await expect.poll(() => existsSync(join(DIR, '.git'))).toBe(true);
   await expect(dlg.locator('[data-git-log]')).toContainText('Import "e2e-git" into OverLyX', { timeout: 15000 });
   // the account's one access token (shared by Git, the CLI and MCP): created here, or rotated
-  // when an earlier run left one — rotation asks for confirmation
-  page.once('dialog', d => void d.accept());
+  // when an earlier run left one — rotation asks for confirmation (the app's own dialog, not a native one)
   await dlg.locator('button.btn', { hasText: /Create token|Rotate token/ }).click();
+  const rotateConfirm = page.locator('.dialog-backdrop').last().locator('h2', { hasText: 'Rotate Access Token' });
+  if (await rotateConfirm.waitFor({ state: 'visible', timeout: 3000 }).then(() => true).catch(() => false)) await acceptDialog(page);
   await expect(dlg.locator('.git-newtoken')).toContainText('Your new account token', { timeout: 10000 });
   token = await dlg.locator('.git-newtoken input').inputValue();
   expect(token).toMatch(/^olx_/);
@@ -95,11 +96,12 @@ test('clone with the token, push a change, pull what OverLyX committed', async (
   // how to connect a local agent: it edits here, through the MCP connector
   await expect(dlg.locator('[data-git-agents]')).toContainText('right here on the server');
   await expect(dlg).toContainText('claude mcp add --transport http overlyx');
-  // Restore: the whole project as it was at the laptop's commit, as a new commit on top
-  page.on('dialog', d => d.accept());
+  // Restore: the whole project as it was at the laptop's commit, as a new commit on top (the app's
+  // own confirm dialog, not a native one)
   const laptop = dlg.locator('.git-commit', { hasText: 'Notes from the laptop' });
   await expect(dlg.locator('.git-commit').first().locator('[data-git-restore]')).toHaveCount(0);   // the current state
   await laptop.locator('[data-git-restore]').click();
+  await acceptDialog(page);
   await expect(dlg.locator('.git-commit').first()).toContainText('Restore the project to', { timeout: 15000 });
   expect(existsSync(join(DIR, 'refs.bib'))).toBe(false);
   expect(readFileSync(join(DIR, 'notes.tex'), 'utf8')).toBe('% pushed from the laptop\n');
@@ -107,19 +109,21 @@ test('clone with the token, push a change, pull what OverLyX committed', async (
   expect(existsSync(join(CLONE, 'refs.bib'))).toBe(false);
   // the token can be revoked
   await dlg.locator('.git-token button', { hasText: 'Revoke' }).click();
+  await acceptDialog(page);
   await expect(dlg.locator('.git-token')).toHaveCount(0, { timeout: 10000 });
   expect(() => git(CLONE, 'fetch', '-q', 'origin')).toThrow(/401|Authentication|failed/);
 });
 
 test('with token re-copy enabled for the account, the account token can be copied again later', async ({ page }) => {
   await login(page);
-  page.on('dialog', d => void d.accept());
   // switch the account setting on (what Settings ▸ Account does)
   const me = await (await page.request.get(BASE_URL + '/api/auth/me')).json();
   const en = await page.request.post(`${BASE_URL}/api/admin/users/${me.user.id}/settings`, { data: { allowRecopyTokens: true } });
   expect(en.ok()).toBeTruthy();
   const dlg = await openGitDialog(page);
   await dlg.locator('button.btn', { hasText: /Create token|Rotate token/ }).click();
+  const rotateConfirm = page.locator('.dialog-backdrop').last().locator('h2', { hasText: 'Rotate Access Token' });
+  if (await rotateConfirm.waitFor({ state: 'visible', timeout: 3000 }).then(() => true).catch(() => false)) await acceptDialog(page);
   await expect(dlg.locator('.git-newtoken')).toContainText('Your new account token', { timeout: 10000 });
   const fresh = await dlg.locator('.git-newtoken input').inputValue();
   // reopen from scratch — normally the token would be gone for good; with the setting on, the row offers Copy

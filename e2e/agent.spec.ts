@@ -9,7 +9,7 @@
 import { test, expect } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { login, PROJECTS_DIR, texDoc } from './helpers';
+import { login, PROJECTS_DIR, texDoc, acceptDialog } from './helpers';
 
 const PROJECT = 'admin/e2e-agent';
 const DOC = `${PROJECT}/paper.tex`;
@@ -115,8 +115,8 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await expect(page.locator('.lyx-editor')).toContainText('brokenmacro');
   await expect.poll(() => readFileSync(join(PROJECTS_DIR, DOC), 'utf8'), { timeout: 10000 }).toContain('\\brokenmacro{} this paper.');
   expect(readFileSync(join(PROJECTS_DIR, DOC), 'utf8')).not.toMatch(/\\lyxadded\{[^}]*\}\{[^}]*\}\{[^}]*brokenmacro/);
-  page.once('dialog', d => void d.accept());
   await brokeCp.locator('[data-agent-undo]').click();
+  await acceptDialog(page);
   await expect(brokeCp).toContainText('Took back paper.tex', { timeout: 15000 });
   await expect(page.locator('.lyx-editor')).not.toContainText('brokenmacro');
   await expect(page.locator('.lyx-editor .lyx-change-inserted')).toHaveText('assist');
