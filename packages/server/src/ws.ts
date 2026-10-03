@@ -13,7 +13,7 @@ import { manager, type OpenDoc } from './docs.ts';
 import { userFromCookieHeader, type SessionUser } from './auth.ts';
 import { roleFor, logAccess } from './access.ts';
 import { canonicalDocId } from './namespaces.ts';
-import { splitDocId } from '@overlyx/core';
+import { splitDocId, sanitizeAwarenessState, MAX_AWARENESS_STATE_JSON } from '@overlyx/core';
 import { markDocOpened } from './userSettings.ts';
 import { config } from './config.ts';
 
@@ -170,9 +170,11 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
           }
           if (encoding.length(enc) > 1) send(doc, conn, encoding.toUint8Array(enc));
           break;
-        case MSG_AWARENESS:
-          awarenessProtocol.applyAwarenessUpdate(doc.awareness, decoding.readVarUint8Array(dec), conn);
+        case MSG_AWARENESS: {
+          const update = sanitizeAwarenessUpdate(decoding.readVarUint8Array(dec), id => [...doc.conns].some(([c, ids]) => c !== conn && ids.has(id)));
+          if (update) awarenessProtocol.applyAwarenessUpdate(doc.awareness, update, conn);
           break;
+        }
       }
     } catch (e) {
       console.error('ws message error', e);
@@ -223,3 +225,33 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
 }
 
 export { Y };
+
+/**
+ * An awareness update as a client sent it, with every state checked before it is applied and relayed
+ * to the other clients of the document (`sanitizeAwarenessState`: a malformed cursor once wiped
+ * documents in the receiving editors). States that are too large or not JSON are relayed as
+ * removals; entries for a client id another connection owns (`ownedElsewhere`) are dropped, so one
+ * client cannot overwrite somebody else's presence. Null when nothing is left or the update is unreadable.
+ */
+export function sanitizeAwarenessUpdate(update: Uint8Array, ownedElsewhere: (clientId: number) => boolean = () => false): Uint8Array | null {
+  try {
+    const dec = decoding.createDecoder(update);
+    const entries: { clientId: number; clock: number; json: string }[] = [];
+    const n = decoding.readVarUint(dec);
+    for (let i = 0; i < n; i++) {
+      const clientId = decoding.readVarUint(dec);
+      const clock = decoding.readVarUint(dec);
+      const raw = decoding.readVarString(dec);
+      if (ownedElsewhere(clientId)) continue;
+      let state: unknown = null;
+      if (raw.length <= MAX_AWARENESS_STATE_JSON) { try { state = JSON.parse(raw); } catch { state = null; } }
+      entries.push({ clientId, clock, json: JSON.stringify(state === null ? null : sanitizeAwarenessState(state)) });
+    }
+    if (!entries.length) return null;
+    const enc = encoding.createEncoder();
+    encoding.writeVarUint(enc, entries.length);
+    for (const e of entries) { encoding.writeVarUint(enc, e.clientId); encoding.writeVarUint(enc, e.clock); encoding.writeVarString(enc, e.json); }
+    return encoding.toUint8Array(enc);
+  } catch { return null; }
+}
+

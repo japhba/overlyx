@@ -10,7 +10,8 @@ import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import * as decoding from 'lib0/decoding';
 import { ySyncPlugin, yCursorPlugin, yUndoPlugin, initProseMirrorDoc, ySyncPluginKey, relativePositionToAbsolutePosition } from 'y-prosemirror';
-import { schema } from '@overlyx/core';
+import { schema, sanitizeAwarenessState } from '@overlyx/core';
+import type { Awareness } from 'y-protocols/awareness';
 import { inkPlugin } from './plugins/ink';
 import { editorContext } from './context';
 import { readSavedCursor, writeSavedCursor, restoredCursorPos, type SavedCursor } from './cursormemory';
@@ -38,6 +39,34 @@ export interface EditorHandle {
   /** move the cursor to where another user (an awareness client) is editing and scroll there; false if unknown */
   gotoUser(clientId: number): boolean;
   destroy(): void;
+}
+
+const checkedCache = new WeakMap<object, Record<string, unknown> | null>();
+/**
+ * Other clients' awareness states with malformed fields removed (`sanitizeAwarenessState`): a
+ * cursor that was not two relative positions made y-prosemirror's cursor plugin throw inside the
+ * Yjs update handler, the binding fell out of step, and the next keystroke saved a nearly empty
+ * document. Our own state is ours and passes as it is.
+ */
+function checkedStates(aw: Awareness): Map<number, Record<string, any>> {
+  const out = new Map<number, Record<string, any>>();
+  aw.getStates().forEach((s, id) => {
+    if (id === aw.clientID) { out.set(id, s); return; }
+    let c = checkedCache.get(s);
+    if (c === undefined) { c = sanitizeAwarenessState(s); checkedCache.set(s, c); }
+    if (c) out.set(id, c);
+  });
+  return out;
+}
+/** The awareness as the cursor plugin sees it: `getStates()` answers `checkedStates`, everything else is the awareness itself. */
+function checkedAwareness(aw: Awareness): Awareness {
+  return new Proxy(aw, {
+    get(target, key) {
+      if (key === 'getStates') return () => checkedStates(target);
+      const v = Reflect.get(target, key, target);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
 }
 
 /** A user connected to the document (one entry per browser tab / awareness client). */
@@ -284,7 +313,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   const plugins = assemblePlugins({
     sync: [
       ySyncPlugin(fragment, { mapping }),
-      yCursorPlugin(provider.awareness, {
+      yCursorPlugin(checkedAwareness(provider.awareness), {
         cursorBuilder: (user: { name: string; color: string }, clientId?: number) => {
           const cursor = document.createElement('span');
           cursor.className = 'ProseMirror-yjs-cursor';
@@ -339,13 +368,13 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   const status = { connected: false, synced: false, users: [] as PresenceUser[] };
   const pushStatus = () => {
     const users: PresenceUser[] = [];
-    provider.awareness.getStates().forEach((s, clientId) => { if (s.user) users.push({ name: s.user.name, color: s.user.color, username: s.user.username, avatar: s.user.avatar ?? null, clientId, hasCursor: !!s.cursor, self: clientId === ydoc.clientID }); });
+    checkedStates(provider.awareness).forEach((s, clientId) => { if (s.user) users.push({ name: s.user.name, color: s.user.color, username: s.user.username, avatar: s.user.avatar ?? null, clientId, hasCursor: !!s.cursor, self: clientId === ydoc.clientID }); });
     status.users = users;
     opts.onStatus?.({ ...status });
   };
   /** Absolute document position of another client's cursor head, if it is in this document. */
   const userCursorPos = (clientId: number): number | null => {
-    const st = provider.awareness.getStates().get(clientId);
+    const st = checkedStates(provider.awareness).get(clientId);
     if (!st?.cursor) return null;
     const ystate = ySyncPluginKey.getState(view.state);
     if (!ystate || ystate.binding.mapping.size === 0) return null;

@@ -7,6 +7,7 @@ export { diffText, diffTokens, tokenize, coalesce } from './lyx/tokendiff.ts';
 export type { DiffToken } from './lyx/tokendiff.ts';
 export * from './schema.ts';
 export * from './ink.ts';
+export * from './awareness.ts';
 export * from './convert.ts';
 export * from './layout/model.ts';
 export * from './layout/colors.ts';
