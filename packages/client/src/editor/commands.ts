@@ -150,8 +150,34 @@ export const toggleAppendix: Command = (state, dispatch) => {
   return true;
 };
 
+/**
+ * Insets that hold one paragraph (LyX: InsetLayout MultiPar false — a paragraph break in
+ * `\caption{…}` or an optional argument would end the LaTeX argument and break the build).
+ */
+const SINGLE_PARAGRAPH_INSETS: Record<string, string> = { Caption: 'A caption', Argument: 'An argument', Index: 'An index entry' };
+
+/** The single-paragraph inset the cursor is in (its description), if the innermost text container is one. */
+export function singleParagraphInset(state: EditorState): string | null {
+  const $from = state.selection.$from;
+  for (let d = $from.depth; d > 0; d--) {
+    const n = $from.node(d);
+    if (n.type.name === 'table_cell' || n.type.name === 'table_header') return null;
+    if (n.type.name === 'inset') return SINGLE_PARAGRAPH_INSETS[n.attrs.name as string] ?? null;
+  }
+  return null;
+}
+
+/** LyX disables the paragraph break in a single-paragraph inset: the key does nothing (the status bar says why). */
+function refuseParagraphBreak(state: EditorState, dispatch: unknown): boolean {
+  const what = singleParagraphInset(state);
+  if (!what) return false;
+  if (dispatch) editorContext.notify?.(`${what} is a single paragraph — Enter does not split it`);
+  return true;
+}
+
 /** Enter: split paragraph; the new paragraph gets LyX's "next layout". */
 export const paragraphBreak: Command = (state, dispatch, view) => {
+  if (refuseParagraphBreak(state, dispatch)) return true;
   const cur = currentParagraph(state);
   if (!cur) return false;
   const { $from } = state.selection;
@@ -212,6 +238,7 @@ export const listExitBackspace: Command = (state, dispatch, view) => {
 
 /** Alt+Enter — "paragraph-break inverse": new paragraph with the default layout (or keep). */
 export const paragraphBreakInverse: Command = (state, dispatch) => {
+  if (refuseParagraphBreak(state, dispatch)) return true;
   const cur = currentParagraph(state);
   if (!cur) return false;
   const inset = inInset(state);

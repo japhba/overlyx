@@ -5,6 +5,7 @@
  * Insert ▸ Float / Caption with a selected image wraps the image (LyX moves the selection into the
  * new inset) instead of replacing it with an empty float; a selected object stays when a label, a
  * formula or a table is inserted; a selection of several paragraphs moves into a footnote whole.
+ * Enter in a caption does not split it (LyX: a caption is one paragraph).
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { EditorState, TextSelection, NodeSelection, type Command } from 'prosemirror-state';
@@ -179,5 +180,31 @@ describe('a selected object stays when something is inserted', () => {
     s = select(s, 5, s.doc.child(0).nodeSize + s.doc.child(1).nodeSize + 5);   // "two" … "Four"
     s = run(s, C.insertFootnote);
     expect(shape(s.doc)).toBe('One [Foot: two | Three | Four] five');
+  });
+});
+
+describe('Enter in a caption', () => {
+  it('does not split the caption paragraph (LyX: one paragraph), and says why', () => {
+    const caption = schema.nodes.inset.create({ name: 'Caption', arg: 'Standard', params: '[]', status: null }, [plain('Maximum path lengths')]);
+    const float = schema.nodes.inset.create({ name: 'Float', arg: 'table', params: '[]', status: 'open' }, [plain(caption), plain()]);
+    let s = stateOf(doc(par(float)));
+    const at = posOf(s.doc, 'paragraph', n => n.textContent === 'Maximum path lengths');
+    s = select(s, at + 8, at + 8);
+    const notes: string[] = [];
+    editorContext.notify = m => notes.push(m);
+    expect(C.paragraphBreak(s, () => { throw new Error('must not dispatch'); })).toBe(true);
+    expect(C.paragraphBreakInverse(s, () => { throw new Error('must not dispatch'); })).toBe(true);
+    expect(notes[0]).toMatch(/caption is a single paragraph/);
+  });
+
+  it('a footnote inside a caption still takes paragraph breaks', () => {
+    const foot = schema.nodes.inset.create({ name: 'Foot', arg: '', params: '[]', status: 'open' }, [plain('note')]);
+    const caption = schema.nodes.inset.create({ name: 'Caption', arg: 'Standard', params: '[]', status: null }, [plain('Cap', foot)]);
+    let s = stateOf(doc(par(caption)));
+    const at = posOf(s.doc, 'paragraph', n => n.textContent === 'note');
+    s = select(s, at + 3, at + 3);
+    let dispatched = false;
+    C.paragraphBreak(s, () => { dispatched = true; });
+    expect(dispatched).toBe(true);
   });
 });

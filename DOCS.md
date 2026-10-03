@@ -565,6 +565,9 @@ blend.
   inline insertion — that goes right after it; selected table cells keep their content. A selection
   that cannot move in one piece (cells, from inside an inset to outside it) stays, and the inset goes
   after it. Selected text is replaced only by what is typed or pasted over it.
+* **A caption is one paragraph** (LyX: `MultiPar false`; also an optional argument and an index
+  entry): Enter and Alt+Enter do nothing there and the status bar says why — a paragraph break would
+  end the LaTeX argument (`\caption{…}`) and break the build (`editor/commands.ts singleParagraphInset`).
 * **LyX toolbars** (a port of `lib/ui/stdtoolbars.inc`): the *Standard* and *Extra* rows, and the
   contextual *Math*, *Math panels*, *Table* and *Review* rows that appear automatically when the cursor
   is in a formula / a table / a document with tracked changes (or always / never: *View ▸ Toolbars*,
