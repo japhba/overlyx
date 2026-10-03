@@ -38,14 +38,19 @@ export function Dialog({ title, onClose, children, buttons, wide }: { title: str
         else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
       }
     };
-    const contain = (e: FocusEvent) => { if (!box.contains(e.target as Node)) focusFirst(); };
+    // focus stays in the dialog — except when an action of the dialog hands it back to where it came
+    // from (Insert ▸ Table runs its command and focuses the editor, then closes): pulling it back here
+    // made the editor regain focus through a plain .focus() at close, and the browser put the caret at
+    // the start of the document instead of in the new table
+    const contain = (e: FocusEvent) => { const t = e.target as Node; if (!box.contains(t) && !(previous && previous.contains(t))) focusFirst(); };
     document.addEventListener('keydown', k, true);
     document.addEventListener('focusin', contain);
     focusFirst();
     return () => {
       document.removeEventListener('keydown', k, true);
       document.removeEventListener('focusin', contain);
-      if (previous?.isConnected) previous.focus();
+      const now = document.activeElement;
+      if (previous?.isConnected && !(now && previous.contains(now))) previous.focus();
     };
   }, []);
   return (
