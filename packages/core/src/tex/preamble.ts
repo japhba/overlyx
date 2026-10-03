@@ -47,6 +47,8 @@ export interface DocumentSplit {
   /** the managed block (between the markers), '' when absent */
   managed: string;
   body: string;
+  /** where `body` starts in the text (-1: it is not one slice of it — a settings line removed from its middle) */
+  bodyStart: number;
   /** text after \end{document} */
   trailer: string;
   /** the file has \begin{document} ... \end{document} */
@@ -82,7 +84,7 @@ function findOutsideComments(s: string, re: RegExp): number {
 }
 
 export function splitDocument(text: string): DocumentSplit {
-  const out: DocumentSplit = { head: '', documentclass: '', classOptions: '', className: '', userPreamble: '', managed: '', body: text, trailer: '', hasDocument: false, settings: {} };
+  const out: DocumentSplit = { head: '', documentclass: '', classOptions: '', className: '', userPreamble: '', managed: '', body: text, bodyStart: 0, trailer: '', hasDocument: false, settings: {} };
   const dcPos = findOutsideComments(text, /\\documentclass\s*(\[[^\]]*\])?\s*\{[^}]*\}/);
   const beginPos = findOutsideComments(text, /\\begin\{document\}/);
   if (beginPos >= 0) {
@@ -91,6 +93,7 @@ export function splitDocument(text: string): DocumentSplit {
     const endPos = findOutsideComments(text, /\\end\{document\}/);
     const bodyStart = beginPos + '\\begin{document}'.length;
     out.body = endPos >= 0 ? text.slice(bodyStart, endPos) : text.slice(bodyStart);
+    out.bodyStart = bodyStart;
     out.trailer = endPos >= 0 ? text.slice(endPos + '\\end{document}'.length) : '';
     if (dcPos >= 0 && dcPos < beginPos) {
       const m = /\\documentclass\s*(\[[^\]]*\])?\s*\{([^}]*)\}/.exec(text.slice(dcPos))!;
@@ -116,7 +119,11 @@ export function splitDocument(text: string): DocumentSplit {
     const settings = readSettings(text);
     if (settings) {
       out.settings = settings;
-      out.body = text.replace(new RegExp('^[ \\t]*' + SETTINGS_PREFIX.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '.*\\n?', 'm'), '');
+      const line = new RegExp('^[ \\t]*' + SETTINGS_PREFIX.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '.*\\n?', 'm').exec(text);
+      if (line) {
+        out.body = text.slice(0, line.index) + text.slice(line.index + line[0].length);
+        out.bodyStart = line.index === 0 ? line[0].length : -1;
+      }
     }
   }
   return out;

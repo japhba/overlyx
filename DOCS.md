@@ -115,6 +115,23 @@ blend.
   version; the writer refuses to replace a document with something that is not a LyX document.
   Damaged files (an unterminated inset, unknown tokens, latin-1 bytes) open and are written back
   structurally complete.
+* **Saving keeps the file as it is where nothing changed** (`core/src/tex/preserve.ts`). A save
+  writes the document *into the text the file holds*: every paragraph nobody edited keeps its own
+  LaTeX byte for byte (hard line breaks, comments, the author's macro spellings, CRLF line ends),
+  and so do the preamble and the glue between paragraphs; only edited paragraphs are written by
+  the writer, and a document setting changed in the dialog is merged into the preamble line by
+  line. The managed block is added (right before `\begin{document}`) only when the content needs
+  a package or macro the file does not load, and removed again when it holds nothing but the
+  settings line. A co-author's `git diff` after one typed word shows that paragraph, not a
+  reformatted file. How: the parser records where every body paragraph came from
+  (`ParseTexResult.sources`), the writer where it wrote each one (`spans`); paragraphs are matched
+  by the writer's text for them, and the base's glue is kept where the writer's glue is the same.
+  The result is always parsed again and must give the document being saved (or, where the writer
+  itself does not reproduce a paragraph it wrote, what a full rewrite reads back as); otherwise
+  more is rewritten, in the end the whole file — never worse than writing it all. Every save path
+  goes through it: the server (`OpenDoc.render`, so autosave, MCP edits, agent turns, restores),
+  and the VS Code extension (`DocSession`, against the TextDocument's text). Costs one extra parse
+  per save; the base's parse and writer output are cached per document between saves.
 * **Sharing** (Google-Docs model): a project is private to its owner until it is shared. The owner
   invites people by username or e-mail address as *viewers* or *editors* (an e-mail that has not
   signed in yet is kept as an invitation and bound to the account on its first Google sign-in), or
@@ -1372,7 +1389,8 @@ invisible to LaTeX itself:
   without the word it is shown open. A comment thread's messages are paragraphs headed
   `Name (2026-08-26 14:03):`, the first one marked `[resolved]` when resolved. A note inside a
   paragraph is preceded by `%` at the end of the line, so the surrounding text joins as in TeX.
-* **No hard line breaks**: a paragraph is one line of the file (LyX re-wrapped at 65 columns; a
+* **No hard line breaks** in what OverLyX writes: a paragraph it writes is one line of the file
+  (paragraphs it only read keep theirs until they are edited; LyX re-wrapped at 65 columns; a
   line break in the file would only move around in diffs). The text editors wrap to their width.
 * **Child documents** (`\input{appendix.tex}` from the body) are fragments without a preamble;
   their first line is their settings line. They are edited on their own and built through their

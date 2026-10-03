@@ -5,7 +5,7 @@
 import type { WriteTexResult } from '@overlyx/core/tex/index.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseTex, writeTex, importLyx, type ParseTexResult } from '@overlyx/core/tex/index.ts';
+import { parseTex, writeTex, writeTexPreserving, importLyx, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import type { LyxDocument } from '@overlyx/core';
 import { layoutTemplate, setHeaderValue } from '@overlyx/core';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
@@ -65,12 +65,20 @@ export function parseFragmentText(latex: string, project: string, relPath: strin
   return parseTex(latex, { layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs), masterHeader });
 }
 
-export function writeDocumentText(doc: LyxDocument, project: string, relPath: string, fragment: boolean, resolveInclude?: (filename: string) => LyxDocument | undefined): { text: string; warnings: string[]; files: Record<string, string>; spans: WriteTexResult['spans'] } {
+/**
+ * The document as .tex text. With `preserve`, written into the text the file holds now (`base`):
+ * what did not change keeps its LaTeX byte for byte (core tex/preserve.ts), so a save shows in
+ * `git diff` as the paragraphs that were edited, not as a reformatted file.
+ */
+export function writeDocumentText(doc: LyxDocument, project: string, relPath: string, fragment: boolean, resolveInclude?: (filename: string) => LyxDocument | undefined, preserve?: { base: string | null; cache?: PreserveCache }): { text: string; warnings: string[]; files: Record<string, string>; spans: WriteTexResult['spans'] } {
   const abs = resolveProjectPath(project, relPath);
-  const r = writeTex(doc, {
+  const opts = {
     layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs),
     fragment, basename: path.basename(relPath, '.tex'), resolveInclude,
-  });
+  };
+  const r = preserve
+    ? writeTexPreserving(doc, { base: preserve.base, cache: preserve.cache, write: d => writeTex(d, opts), parse: t => parseDocumentText(t, project, relPath) })
+    : writeTex(doc, opts);
   return { text: r.text, warnings: r.warnings, files: r.files, spans: r.spans };
 }
 

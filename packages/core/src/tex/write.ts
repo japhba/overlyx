@@ -50,6 +50,8 @@ export interface WriteTexResult {
    * between the document and its source.
    */
   spans: ({ start: number; end: number } | null)[];
+  /** the body's range in `text`: from right after \begin{document} (a fragment: after its settings line) to \end{document} (the end) */
+  bodyRange: { start: number; end: number };
 }
 
 /** The managed block: packages / macros for the features the body uses that the preamble lacks. */
@@ -145,11 +147,13 @@ export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTex
   let text: string;
   /** what precedes the body in `text` (the source map's offsets are shifted by its length) */
   let bodyAt: number;
+  let bodyRange: WriteTexResult['bodyRange'];
   const bodyText = body.replace(/\n+$/, '') + '\n';
   if (opts.fragment) {
     const head = settingsLine(settings) + '\n';
     bodyAt = head.length;
     text = head + bodyText;
+    bodyRange = { start: bodyAt, end: text.length };
   } else {
     let preamble: string;
     if (opts.fromLyx) {
@@ -167,10 +171,11 @@ export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTex
     const before = (head.length ? head.join('\n') + '\n' : '') + preamble + '\n' + managedBlock(ctx, provided, settings) + '\n\\begin{document}\n';
     bodyAt = before.length;
     text = before + bodyText + '\n\\end{document}\n';
+    bodyRange = { start: bodyAt - 1, end: bodyAt + bodyText.length + 1 };
     if (doc.trailer.length) text += doc.trailer.join('\n') + '\n';
   }
   const res = finishExport(ctx, text);
-  return { text: res.tex, warnings: res.warnings, requires: res.requires, graphics: res.graphics, files: res.files, spans: bodySpans(ctx, body, bodyAt, doc.body.length) };
+  return { text: res.tex, warnings: res.warnings, requires: res.requires, graphics: res.graphics, files: res.files, spans: bodySpans(ctx, body, bodyAt, doc.body.length), bodyRange };
 }
 
 /** The recorded paragraph spans as offsets into the file, trimmed to the paragraph's own text. */

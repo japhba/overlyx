@@ -36,6 +36,16 @@ export interface ParseTexResult {
   warnings: string[];
   /** true when the file has no \begin{document} (a child document / fragment) */
   fragment: boolean;
+  /**
+   * Where every body paragraph came from: the character range of the text (after the
+   * normalisation parseTex applies — no byte order mark, \n line ends), from the first token the
+   * writer would write for it to where it ended; null for a paragraph the parser made up (and all
+   * of them when the body is not one slice of the text). What saving keeps unchanged paragraphs'
+   * own LaTeX by (tex/preserve.ts).
+   */
+  sources: ({ start: number; end: number } | null)[];
+  /** the body's range in the normalised text (\begin{document} … \end{document} exclusive), null when unknown */
+  bodyRange: { start: number; end: number } | null;
 }
 
 /* ------------------------------------------------------------ tables */
@@ -225,8 +235,27 @@ class BodyParser {
   private babelToLang = new Map<string, string>();
   private pendingBibStyle = '';
   private pendingNociteAll = false;
+  /** where a \bibliographystyle / \nocite{*} of the body began: the writer writes them with the bibliography (sources) */
+  private bibStart: number | null = null;
   /** read a file relative to the document (sketch SVGs; set from ParseTexOptions.readFile) */
   readFile?: (name: string) => string | undefined;
+  /**
+   * Where each body paragraph lies in the body text (ParseTexResult.sources): its start is the
+   * first token of what the writer writes as the paragraph — a \noindent, a \begin{center}, the
+   * \section or \item, else its first character — but not the \begin of the environment around
+   * it, which the writer writes outside the paragraph too; its end is where it was closed.
+   */
+  readonly starts = new Map<Paragraph, number>();
+  readonly ends = new Map<Paragraph, number>();
+  /** the body's scanner and text context (only their top-level paragraphs have sources) */
+  private main: Scanner | null = null;
+  private root: TextCtx | null = null;
+  /** start of the latest token the body's scanner gave a parse loop */
+  private tokStart = 0;
+  /** where the body's scanner was when something was last put into a top-level paragraph */
+  private lastPush = 0;
+  /** start of the first token since the last top-level paragraph ended (null: none yet) */
+  private pendingStart: number | null = null;
   private envStack: string[] = [];
   /** where the last environment layout ended (a separator goes between two of the same style) */
   private lastEnvEnd: { src: string; pos: number } | null = null;
@@ -282,6 +311,8 @@ class BodyParser {
   /* ---------------------------------------------------------- paragraphs */
 
   private ensurePar(ctx: TextCtx): Paragraph {
+    // (something is put into the paragraph: what the body's scanner read so far is part of it)
+    if (ctx === this.root && this.main) this.lastPush = this.main.pos;
     if (ctx.cur) return ctx.cur;
     const p: Paragraph = { layout: ctx.layout, depth: ctx.depth, params: {}, items: [] };
     if (ctx.align) p.params.align = ctx.align;
@@ -289,6 +320,7 @@ class BodyParser {
     if (ctx.appendix) { p.params.start_of_appendix = true; ctx.appendix = false; }
     ctx.pars.push(p);
     ctx.cur = p;
+    this.noteStart(ctx, p);
     return p;
   }
 
@@ -300,12 +332,44 @@ class BodyParser {
     if (ctx.appendix) { p.params.start_of_appendix = true; ctx.appendix = false; }
     ctx.pars.push(p);
     ctx.cur = p;
+    this.noteStart(ctx, p);
     return p;
+  }
+
+  /** A token of the body's scanner reached a parse loop: what a top-level paragraph's source starts with. */
+  private noteToken(t: Tok): void {
+    this.tokStart = t.start;
+    if (this.pendingStart !== null || this.root?.cur) return;
+    // blanks, closing braces, \end and \maketitle (written after the title block) belong to what came before
+    if (t.kind === 'space' || t.kind === 'par' || t.kind === 'eof' || t.kind === 'close' || (t.kind === 'cs' && (t.value === 'end' || t.value === 'maketitle'))) return;
+    this.pendingStart = t.start;
+  }
+
+  /** The token just read (\appendix, \begin{center}) is part of the next paragraph, which the writer writes it with (sources). */
+  private startsHere(ctx: TextCtx): void {
+    if (ctx === this.root && this.pendingStart === null) this.pendingStart = this.tokStart;
+  }
+
+  private noteBibStart(s: Scanner, t: Tok): void {
+    if (s === this.main && this.bibStart === null) this.bibStart = t.start;
+  }
+
+  /** The bibliography's paragraph starts at its \bibliographystyle when that came first (sources). */
+  private takeBibStart(ctx: TextCtx): void {
+    if (ctx === this.root && this.bibStart !== null && (this.pendingStart === null || this.bibStart < this.pendingStart)) this.pendingStart = this.bibStart;
+    this.bibStart = null;
+  }
+
+  private noteStart(ctx: TextCtx, p: Paragraph): void {
+    if (ctx !== this.root) return;
+    this.starts.set(p, this.pendingStart ?? this.tokStart);
+    this.pendingStart = null;
   }
 
   private endPar(ctx: TextCtx): void {
     const p = ctx.cur;
     ctx.skipSpace = false;
+    if (p && ctx === this.root) this.ends.set(p, Math.max(this.tokStart, this.lastPush));
     if (!p) return;
     // TeX ignores blanks at the end of a paragraph (a tracked change is kept)
     while (p.items.length) {
@@ -389,6 +453,8 @@ class BodyParser {
   parseBody(text: string): Paragraph[] {
     const s = new Scanner(text);
     const ctx = newCtx('Standard', 'main');
+    this.main = s;
+    this.root = ctx;
     this.parseText(s, ctx, { font: {} }, {});
     this.endPar(ctx);
     return ctx.pars;
@@ -397,6 +463,7 @@ class BodyParser {
   private parseText(s: Scanner, ctx: TextCtx, st: State, stop: Stop): StopReason {
     for (;;) {
       const t = s.next();
+      if (s === this.main) this.noteToken(t);
       switch (t.kind) {
         case 'eof': return 'eof';
         case 'par': this.endPar(ctx); continue;
@@ -795,7 +862,7 @@ class BodyParser {
       return null;
     }
     if (name === 'noindent') { if (ctx.cur && ctx.cur.items.length) this.pushERT(ctx, st, '\\noindent' + (t.spaceAfter ? ' ' : '')); else ctx.noindent = true; return null; }
-    if (name === 'appendix') { this.endPar(ctx); ctx.appendix = true; return null; }
+    if (name === 'appendix') { this.endPar(ctx); this.startsHere(ctx); ctx.appendix = true; return null; }
     if (name === 'centering' || name === 'raggedright' || name === 'raggedleft') {
       if (s.peekChar() === '{' && s.peekChar(1) === '}') s.pos += 2;
       const align = ALIGN_ENVS[name];
@@ -880,7 +947,7 @@ class BodyParser {
       const g = s.readGroup();
       if (g === null) { this.pushERT(ctx, st, '\\' + name + (star ? '*' : '')); return null; }
       const key = g.replace(/\s+/g, '');
-      if (name === 'nocite' && key === '*') { this.pendingNociteAll = true; return null; }
+      if (name === 'nocite' && key === '*') { this.pendingNociteAll = true; this.noteBibStart(s, t); return null; }
       const params = ['LatexCommand ' + name + (star ? '*' : '')];
       if (opt2 !== null) { params.push('after ' + quote(opt2), 'before ' + quote(opt1!)); }
       else if (opt1 !== null) params.push('after ' + quote(opt1));
@@ -917,7 +984,7 @@ class BodyParser {
       this.pushInset(ctx, st, { type: 'Leaf', name: 'CommandInset', arg: 'include', params });
       return null;
     }
-    if (name === 'bibliographystyle') { this.pendingBibStyle = (s.readGroup() ?? '').trim(); return null; }
+    if (name === 'bibliographystyle') { this.pendingBibStyle = (s.readGroup() ?? '').trim(); this.noteBibStart(s, t); return null; }
     if (name === 'bibliography') {
       const g = s.readGroup() ?? '';
       const params = ['LatexCommand bibtex', `btprint "${this.pendingNociteAll ? 'btPrintAll' : 'btPrintCited'}"`, 'bibfiles ' + quote(g.replace(/\s+/g, '').replace(/\.bib(?=,|$)/g, ''))];
@@ -926,6 +993,7 @@ class BodyParser {
       params.push('encoding "default"');
       this.pendingBibStyle = ''; this.pendingNociteAll = false;
       this.endPar(ctx);
+      this.takeBibStart(ctx);
       this.pushInset(ctx, st, { type: 'Leaf', name: 'CommandInset', arg: 'bibtex', params });
       this.endPar(ctx);
       return null;
@@ -937,6 +1005,7 @@ class BodyParser {
       params.push('encoding "default"');
       this.pendingNociteAll = false;
       this.endPar(ctx);
+      this.takeBibStart(ctx);
       this.pushInset(ctx, st, { type: 'Leaf', name: 'CommandInset', arg: 'bibtex', params });
       this.endPar(ctx);
       return null;
@@ -1279,6 +1348,7 @@ class BodyParser {
     const align = ALIGN_ENVS[env];
     if (align) {
       this.endPar(ctx);
+      this.startsHere(ctx);
       const saved = ctx.align;
       ctx.align = align;
       this.envStack.push(env);
@@ -1491,6 +1561,8 @@ class BodyParser {
     }
     ctx.layout = style.name; ctx.depth = depth; ctx.nestDepth = depth + 1; ctx.envLayout = style.name; ctx.itemStyle = isItem ? style : null;
     ctx.envStart = ctx.pars.length;
+    // the writer writes the \begin outside the environment's first paragraph (sources)
+    if (ctx === this.root) this.pendingStart = null;
     // environment arguments → Argument insets of the first paragraph
     const args: TextInset[] = [];
     if (style.latexType === 'Bib_Environment' || style.labelType === 'Bibliography') s.readGroup();
@@ -1699,13 +1771,14 @@ function commentOnlyErt(p: Paragraph): Paragraph[] | null {
  *  tall pile of one-line "TeX Code" buttons in the editor. The blank line between the source
  *  paragraphs becomes an empty line inside the ERT (the writer's parbreakIsNewline turns it back
  *  into exactly one blank line), so the written file stays byte-identical. */
-function mergeCommentErts(pars: Paragraph[]): void {
+function mergeCommentErts(pars: Paragraph[], merged?: (into: Paragraph, from: Paragraph) => void): void {
   for (let i = 1; i < pars.length; i++) {
     const prev = pars[i - 1], cur = pars[i];
     if (prev.layout !== cur.layout || prev.depth !== cur.depth) continue;
     const a = commentOnlyErt(prev), b = commentOnlyErt(cur);
     if (!a || !b) continue;
     a.push({ layout: 'Plain Layout', depth: 0, params: {}, items: [] }, ...b);
+    merged?.(prev, cur);
     pars.splice(i, 1);
     i--;
   }
@@ -1894,13 +1967,15 @@ export function parseTex(text: string, opts: ParseTexOptions = {}): ParseTexResu
   const quotes = setStr('quotes_style') ?? masterValue('quotes_style') ?? 'english';
   const parser = new BodyParser(dc, unicode, langs, facts, { language, quotes });
   parser.absorbPreamble = split.hasDocument && /\\newtheorem/.test(body);
-  { const at = text.indexOf(body); if (at > 0) { let n = 0; for (let i = 0; i < at; i++) if (text.charCodeAt(i) === 10) n++; parser.lineBase = n; } }
+  { const at = split.bodyStart >= 0 ? split.bodyStart : text.indexOf(body); if (at > 0) { let n = 0; for (let i = 0; i < at; i++) if (text.charCodeAt(i) === 10) n++; parser.lineBase = n; } }
   parser.readFile = opts.readFile;
   const pars = parser.parseBody(body);
   warnings.push(...parser.warnings);
   let userPreamble = split.userPreamble;
   if (parser.absorbedPreamble.length) userPreamble = (userPreamble.replace(/\s+$/, '') + '\n' + parser.absorbedPreamble.join('\n')).replace(/^\n+/, '');
-  mergeCommentErts(pars);
+  mergeCommentErts(pars, (into, from) => { const e = parser.ends.get(from); if (e !== undefined) parser.ends.set(into, e); });
+  const bodyRange = split.bodyStart >= 0 ? { start: split.bodyStart, end: split.bodyStart + body.length } : null;
+  const sources = sourcesOf(pars, parser, body, bodyRange);
 
   const authors = [...parser.authors.entries()].map(([id, a]) => ({ id, name: a.name, email: a.email }));
   if (!split.hasDocument && opts.masterHeader) {
@@ -1915,7 +1990,30 @@ export function parseTex(text: string, opts: ParseTexOptions = {}): ParseTexResu
     body: pars.length ? pars : [{ layout: 'Standard', depth: 0, params: {}, items: [] }],
     trailer: split.trailer.replace(/^\n/, '').replace(/\s+$/, '') ? split.trailer.replace(/^\n/, '').replace(/\s+$/, '').split('\n') : [],
   };
-  return { doc, warnings, fragment: !split.hasDocument };
+  return { doc, warnings, fragment: !split.hasDocument, sources: pars.length ? sources : [null], bodyRange };
+}
+
+/** The body paragraphs' ranges in the whole text: increasing starts, ends trimmed of blanks. */
+function sourcesOf(pars: Paragraph[], parser: BodyParser, body: string, range: { start: number } | null): ParseTexResult['sources'] {
+  if (!range) return pars.map(() => null);
+  let last = -1;
+  const out = pars.map(p => {
+    const start = parser.starts.get(p);
+    if (start === undefined || start <= last || start >= body.length) return null;
+    last = start;
+    return { start, end: Math.max(start, Math.min(parser.ends.get(p) ?? start, body.length)) };
+  });
+  // a paragraph ends before the next one starts (a \bibliographystyle read while it was open), blanks trimmed
+  let next = body.length;
+  for (let i = out.length - 1; i >= 0; i--) {
+    const s = out[i];
+    if (!s) continue;
+    let end = Math.max(s.start, Math.min(s.end, next));
+    while (end > s.start && /\s/.test(body[end - 1])) end--;
+    out[i] = { start: range.start + s.start, end: range.start + end };
+    next = s.start;
+  }
+  return out;
 }
 
 /** A colour given with an xcolor model → '#rrggbb', or null when the model is not understood. */
