@@ -1364,6 +1364,10 @@ How it works, in order of what happens when you open a document:
   view. The change mark is not inclusive (`core/src/schema.ts`): text typed at the end of a
   suggestion is plain while tracking is off, and the typist's own insertion while it is on (typing
   on at the end of one's own insertion extends it: one `\lyxadded` group); `tests/changes-typing.test.ts`.
+  Edits inside a formula that was there before are applied directly, not as a suggestion — LyX does not
+  track inside math either (a formula is one value); the first such edit of a session says so in the
+  status bar (to suggest a different formula, insert the new one beside it and delete the old one). A
+  formula inserted as a suggestion stays one, edits included.
 * Macro rendering follows LyX's positional semantics (a `FormulaMacro` applies from its position on;
   later definitions — including ones nested in notes — override earlier ones). Macros with
   arguments are expanded from their definitions with the argument cells kept editable (`core/src/math/mathjax.ts`).

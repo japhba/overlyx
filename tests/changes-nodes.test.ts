@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { DOMParser as PMDOMParser, DOMSerializer, Node as PMNode } from 'prosemirror-model';
 import { schema } from '../packages/core/src/schema.ts';
-import { changeTrackingPlugin, applyChangeAttrs, changeOf } from '../packages/client/src/editor/plugins/changes.ts';
+import { changeTrackingPlugin, applyChangeAttrs, changeOf, resetFormulaNotice } from '../packages/client/src/editor/plugins/changes.ts';
 import { editorContext } from '../packages/client/src/editor/context.ts';
 
 const para = (...content: PMNode[]) => schema.nodes.paragraph.create({ layout: 'Standard' }, content);
@@ -44,6 +44,22 @@ describe('changeTrackingPlugin and inline nodes', () => {
     state = state.apply(state.tr.setNodeMarkup(3, undefined, { ...state.doc.nodeAt(3)!.attrs, latex: 'x+1' }));
     expect(state.doc.nodeAt(3)!.attrs.latex).toBe('x+1');
     expect(changeOf(state.doc.nodeAt(3)!)).toBeNull();
+  });
+
+  it('the first untracked edit inside an existing formula says so, once; a suggested formula\'s own edits do not', () => {
+    resetFormulaNotice();
+    const notes: string[] = [];
+    editorContext.notify = m => notes.push(m);
+    try {
+      const mine = JSON.stringify([{ type: 'change', attrs: { type: 'inserted', author: 7, time: 1 } }]);
+      let state = stateWith(doc(para(schema.text('a '), math('y', mine), schema.text(' '), math('x'), schema.text(' b'))));
+      state = state.apply(state.tr.setNodeMarkup(3, undefined, { ...state.doc.nodeAt(3)!.attrs, latex: 'y+1' }));
+      expect(notes).toEqual([]);
+      state = state.apply(state.tr.setNodeMarkup(5, undefined, { ...state.doc.nodeAt(5)!.attrs, latex: 'x+1' }));
+      state = state.apply(state.tr.setNodeMarkup(5, undefined, { ...state.doc.nodeAt(5)!.attrs, latex: 'x+2' }));
+      expect(notes.length).toBe(1);
+      expect(notes[0]).toMatch(/inside an existing formula are applied directly, not tracked/);
+    } finally { editorContext.notify = undefined; }
   });
 
   it('a pasted slice marks its text and its nodes, keeping an existing change', () => {
