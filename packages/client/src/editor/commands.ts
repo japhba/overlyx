@@ -11,6 +11,8 @@ import { nextLayout, isHeadingLayout, isListLayout, isEnvironmentLayout } from '
 import { editorContext } from './context';
 import { MathInlineView, MathDisplayView, pendingFocus } from './nodeviews/math';
 import { setValueMarkIn } from './fontsize';
+import { isLayoutDoc, pageAt } from './layout/commands';
+import { placeImage } from './layout/images';
 
 /* ------------------------------------------------------------ paragraphs */
 
@@ -375,6 +377,18 @@ export function keepSelectedObjects<T extends Transaction>(tr: T): T {
   return tr;
 }
 
+/**
+ * On a layout page outside its text boxes (a gap cursor on the canvas, an object selected) an inline
+ * node has no paragraph to go into, and ProseMirror would make one up — in the page's speaker notes
+ * (`\note{}`), on a new page. Images become image objects there (insertGraphics); everything else
+ * asks for a text box first.
+ */
+function outsideLayoutText(state: EditorState, dispatch: unknown): boolean {
+  if (!isLayoutDoc(state.doc) || state.selection.$from.parent.inlineContent) return false;
+  if (dispatch) editorContext.notify?.('Click into a text box first (double-click the page to start a new one)');
+  return true;
+}
+
 function insertInline(state: EditorState, node: PMNode): Transaction {
   const tr = keepSelectedObjects(state.tr).replaceSelectionWith(withInheritedFont(state, node), false);
   return tr;
@@ -382,6 +396,7 @@ function insertInline(state: EditorState, node: PMNode): Transaction {
 
 export function insertNode(node: PMNode, selectInside = false): Command {
   return (state, dispatch) => {
+    if (outsideLayoutText(state, dispatch)) return false;
     if (!dispatch) return true;
     const tr = insertInline(state, node);
     if (selectInside) {
@@ -435,6 +450,7 @@ function placeInset(tr: Transaction, node: PMNode): Transaction {
  */
 export function insertTextInset(name: string, arg = '', params: string[] = [], status: 'open' | 'collapsed' | null = 'open'): Command {
   return (state, dispatch) => {
+    if (outsideLayoutText(state, dispatch)) return false;
     const taken = selectedParagraphs(state);
     const paras = taken ?? [schema.nodes.paragraph.create({ layout: 'Plain Layout' })];
     const attrs: Record<string, unknown> = { name, arg, params: JSON.stringify(params), status };
@@ -502,6 +518,7 @@ export const insertCaption: Command = (state, dispatch, view) => {
  * right after it, as the margin cards show.
  */
 export const insertComment: Command = (state, dispatch) => {
+  if (outsideLayoutText(state, dispatch)) return false;
   const user = editorContext.user?.name ?? 'Anonymous';
   const header = schema.nodes.paragraph.create({ layout: 'Plain Layout' }, schema.text(commentHeader(user, formatTimestamp())));
   const body = schema.nodes.paragraph.create({ layout: 'Plain Layout' });
@@ -538,6 +555,7 @@ function commentAnchor(state: EditorState): number {
  */
 export function insertFloat(type: 'figure' | 'table' | 'algorithm' = 'figure'): Command {
   return (state, dispatch) => {
+    if (outsideLayoutText(state, dispatch)) return false;
     const taken = selectedParagraphs(state);
     // figures and tables are centered (the usual layout); an algorithm's steps are ordinary left-aligned paragraphs
     const centred = (p?: PMNode) => schema.nodes.paragraph.create(type === 'algorithm' ? { ...p?.attrs, layout: 'Plain Layout' } : { ...p?.attrs, layout: 'Plain Layout', align: 'center' }, p?.content);
@@ -600,8 +618,17 @@ export function graphicsOpts(params: string[]): GraphicsOpts & { filename: strin
   };
 }
 
+/** Insert ▸ Graphics: a graphics inset at the cursor — on a layout page outside its text boxes, an image object on that page. */
 export function insertGraphics(filename: string, opts: GraphicsOpts = {}): Command {
-  return insertNode(schema.nodes.graphics.create({ params: JSON.stringify(graphicsParams(filename, opts)) }));
+  const inline = insertNode(schema.nodes.graphics.create({ params: JSON.stringify(graphicsParams(filename, opts)) }));
+  return (state, dispatch, view) => {
+    if (isLayoutDoc(state.doc) && !state.selection.$from.parent.inlineContent) {
+      if (!view) return false;
+      if (dispatch) void placeImage(view, filename, pageAt(state.doc, state.selection.from)?.pos);
+      return true;
+    }
+    return inline(state, dispatch, view);
+  };
 }
 
 export function insertCommand(cmd: string, params: string[]): Command {
@@ -751,6 +778,7 @@ export function insertMath(display: boolean, env?: string): (view: EditorView) =
     } else {
       node = schema.nodes.math_inline.create({ ...attrs, latex: selText, delim: '$' });
     }
+    if (outsideLayoutText(state, true)) return false;
     // a selected object stays (keepSelectedObjects): the formula goes after it
     const tr = keepSelectedObjects(state.tr);
     const pos = tr.selection.from;   // the node is inserted where the selection starts
@@ -918,6 +946,7 @@ export function moveParagraph(dir: -1 | 1): Command {
 /** A rows × cols table at the cursor; selected text (or object, or paragraphs) moves into its first cell (LyX). */
 export function insertTable(rows: number, cols: number): Command {
   return (state, dispatch) => {
+    if (outsideLayoutText(state, dispatch)) return false;
     const taken = selectedParagraphs(state);
     const cell = (r: number, c: number) => {
       const attrs: [string, string][] = [['alignment', 'center'], ['valignment', 'top']];

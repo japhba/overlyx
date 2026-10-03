@@ -6,6 +6,7 @@
  * new inset) instead of replacing it with an empty float; a selected object stays when a label, a
  * formula or a table is inserted; a selection of several paragraphs moves into a footnote whole.
  * Enter in a caption does not split it (LyX: a caption is one paragraph).
+ * On a layout page outside its text boxes nothing lands in the speaker notes or on a new page.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { EditorState, TextSelection, NodeSelection, type Command } from 'prosemirror-state';
@@ -206,5 +207,26 @@ describe('Enter in a caption', () => {
     let dispatched = false;
     C.paragraphBreak(s, () => { dispatched = true; });
     expect(dispatched).toBe(true);
+  });
+});
+
+describe('inserting on a layout page outside its text boxes', () => {
+  const page = () => schema.nodes.ol_page.create(null, [schema.nodes.ol_box.create({ x: 10, y: 10 }, [plain('Title')])]);
+  it('nothing lands in the speaker notes or on a new page; the status bar asks for a text box', async () => {
+    const { GapCursor } = await import('prosemirror-gapcursor');
+    let s = EditorState.create({ doc: schema.nodes.doc.create(null, [page(), page()]) });
+    const end = s.doc.firstChild!.nodeSize - 1;   // inside the first page, after its box
+    s = s.apply(s.tr.setSelection(new GapCursor(s.doc.resolve(end))));
+    const notes: string[] = [];
+    editorContext.notify = m => notes.push(m);
+    const before = s.doc;
+    for (const cmd of [C.insertLabel('a'), C.insertFootnote, C.insertComment, C.insertFloat('figure'), C.insertTable(2, 2), C.insertCaption]) {
+      expect(cmd(s, tr => { s = s.apply(tr); })).toBe(false);
+    }
+    // Insert ▸ Graphics places an image object instead (needs the view: layout/images.ts placeImage)
+    expect(C.insertGraphics('figures/plot.png')(s, tr => { s = s.apply(tr); })).toBe(false);
+    expect(s.doc.eq(before)).toBe(true);
+    expect(notes.length).toBe(6);
+    expect(notes[0]).toMatch(/text box/);
   });
 });

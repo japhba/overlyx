@@ -334,7 +334,10 @@ blend.
     beside it** (the scroller's padding too: `onCanvasDown`) is a rubber band selecting what it
     encloses; with Shift a drag that starts on an object is one as well. A click on nothing selects
     nothing — no objects and no caret in a box (`deselectAll`: a hidden gap cursor at the page's start,
-    where typing, Delete and Enter do nothing, and pasted text becomes a new text box). The pointer is
+    where typing, Delete and Enter do nothing, and pasted text becomes a new text box; *Insert ▸
+    Graphics* places an image object on that page, and the other inserts ask for a text box first —
+    ProseMirror would otherwise put them into the page's speaker notes or onto a new page:
+    `editor/commands.ts outsideLayoutText`). The pointer is
     an arrow on the canvas and over objects, the text cursor over the box being edited or a selected
     one (`ol-edited` / `ol-sel` marks). The Layout toolbar keeps its width whatever is selected
     (disabled position fields and box style when nothing applies), so the page never jumps under the
