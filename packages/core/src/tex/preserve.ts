@@ -400,15 +400,20 @@ function splitOuter(T: string, P0: ParseTexResult, Wb: WriteTexResult, Wn: Write
   const preT = T.slice(0, P0.bodyRange!.start), preB = Wb.text.slice(0, Wb.bodyRange.start), preN = Wn.text.slice(0, Wn.bodyRange.start);
   const postT = T.slice(P0.bodyRange!.end), postB = Wb.text.slice(Wb.bodyRange.end), postN = Wn.text.slice(Wn.bodyRange.end);
   const post = postB === postN ? postT : postN;
-  if (preB === preN) return { pres: [preT, preN], post };
-  if (fragment) return { pres: [preN], post };
+  const asIs: Outer = { pres: [preT, preN], post };
+  if (fragment) return preB === preN ? asIs : { pres: [preN], post };
   const t = managedParts(preT), b = managedParts(preB), n = managedParts(preN);
-  if (!b.block || !n.block || b.after !== n.after) return { pres: [preN], post };
+  if (!b.block || !n.block || b.after !== n.after) return preB === preN ? asIs : { pres: [preN], post };
+  // the file's managed block is OverLyX's own: it is what the writer makes of the document now
+  // (also after an update of OverLyX's macros); a file without one gets one only when the content
+  // comes to need it
+  const blockSame = t.block ? t.block === n.block : b.block === n.block;
+  if (preB === preN && blockSame) return asIs;
   const before = b.before === n.before ? t.before : merge3(t.before, b.before, n.before);
   if (before === null) return { pres: [preN], post };
-  if (b.block === n.block) return { pres: [before + t.block + t.after, preN], post };
-  // the managed block changed: the new one in place of the base's — or, when there is none, on
-  // the lines right before \begin{document} (taking it out again gives the file back)
+  if (blockSame) return { pres: [before + t.block + t.after, preN], post };
+  // the new block in place of the base's — or, when there is none, on the lines right before
+  // \begin{document} (taking it out again gives the file back)
   const withBlock = before + (before === '' || before.endsWith('\n') ? '' : '\n') + n.block + t.after;
   if (!trivialBlock(n.block)) return { pres: [withBlock, preN], post };
   // nothing in it but the settings line: the file may well do without (when reading it back

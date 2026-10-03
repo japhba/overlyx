@@ -215,6 +215,21 @@ describe('saving keeps the file as it is where nothing changed', () => {
     expect(back.text).toBe(PAPER);
   });
 
+  it("a managed block from an older OverLyX is brought up to date (it is OverLyX's own)", () => {
+    const old = PAPER.replace('\\begin{document}', '%% OverLyX ------------------------------------------------------------------\n%% overlyx-settings: {"textclass":"article"}\n\\providecommand{\\lyxoldmacro}{x}\n%% end OverLyX --------------------------------------------------------------\n\\begin{document}');
+    const r = save(old, () => {});
+    expect(r.text).not.toContain('lyxoldmacro');
+    expect(r.text).toContain('Recent work on things has focused on\ntheir size.');
+    readsBack(r.text, r.doc);
+    // and a block that is current stays as it is
+    const tracked = save(PAPER, d => {
+      const ann = lyxAuthorId('Ann', '');
+      addAuthor(d.header, ann, 'Ann', '');
+      par(d, 'This concludes the method.').items.push({ kind: 'text', text: ' Added.', font: {}, change: { type: 'inserted', author: ann, time: 1790000000 } });
+    });
+    expect(save(tracked.text, () => {}).text).toBe(tracked.text);
+  });
+
   it('a document setting changed in the dialog is merged into the preamble, the rest kept', () => {
     const r = save(PAPER, d => {
       d.header.lines = d.header.lines.map(l => (l.startsWith('\\use_hyperref') ? '\\use_hyperref true' : l));
