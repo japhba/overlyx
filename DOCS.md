@@ -21,7 +21,8 @@ blend.
   Formulas (inline and display, `equation`/`align`/`gather`/`multline`/…) are edited in place
   and rendered with MathJax 4; document macros (`FormulaMacro` insets, preamble `\newcommand`/`\def`,
   `\input{macros}` files, child documents) render immediately. Formulas are typed the LaTeX way
-  too: `$` opens an inline formula, `$` inside it closes it, `$$` opens a display formula, and
+  too: `$` opens an inline formula, `$` inside it closes it (Space does not leave such a formula —
+  `$r \ll d$` types as written), `$$` opens a display formula, and
   Backspace in the empty formula gives the typed dollar back as text (the way to type a literal
   `$`; in TeX code and listings the dollar is always a character). The math toolbar's ( )↑ / ( )↓
   grow and shrink the delimiter pair around the cursor (`( )` → `\big` → `\Big` → `\bigg` →
@@ -527,7 +528,7 @@ blend.
   Tab moves between cells, LyX's corner markers around every inset on the cursor path, macros with
   arguments are expanded from their definitions with editable argument cells; typing `\` starts a
   command shown red until it names a real command (then green), with LyX's completion in grey — Tab
-  completes it. **The mouse works on LyX's coordinate model** (`editor/lyxmath/geometry.ts`): the
+  completes it; Esc keeps a green command and cancels a red one (LyX cancels both). **The mouse works on LyX's coordinate model** (`editor/lyxmath/geometry.ts`): the
   renderer wraps every cell *and every atom* in `\htmlClass` boxes (MathJax mrows, transparent for
   TeX's spacing; an atom that is one character carries the class itself), so every atom has a box
   and every cell a baseline (a probe in each cell, read in one layout) and a content-tight height —
