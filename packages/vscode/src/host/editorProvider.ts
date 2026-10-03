@@ -77,6 +77,43 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       post({ type: 'metadataChanged' });
       this.registry.touch();
     };
+    /**
+     * VS Code reverts editors, not documents: make `target`'s editor the active one for a moment
+     * (this panel, or a text editor for a document of the combined view) and revert it to the
+     * file — only once it is verifiably the active one: a revert of another editor would discard
+     * that editor's unsaved changes.
+     */
+    const resync = async (target: DocSession): Promise<boolean> => {
+      const isActive = () => (target === session ? panel.active : vscode.window.activeTextEditor?.document === target.document);
+      if (target === session) panel.reveal(panel.viewColumn, false);
+      else await vscode.window.showTextDocument(target.document, { preview: true, preserveFocus: false });
+      for (let i = 0; i < 20 && !isActive(); i++) await new Promise(r => setTimeout(r, 50));
+      if (!isActive()) return false;
+      await vscode.commands.executeCommand('workbench.action.files.revert');
+      if (target !== session) { await vscode.commands.executeCommand('workbench.action.closeActiveEditor'); panel.reveal(panel.viewColumn, false); }
+      return !target.document.isDirty;
+    };
+    entry.resync = resync;
+    let updateErrorShown = 0;
+    /** The webview's Ctrl+S: every document of the view, merged with what changed on disk; failures are shown, with a retry. */
+    const save = () => {
+      this.applyChain = this.applyChain.then(async () => {
+        for (const target of [session, ...related.values()]) {
+          if (await target.syncFromDisk()) pushSnapshot(target);
+          const how = await target.save(resync).catch((e: unknown) => { throw Object.assign(new Error(String((e as Error)?.message ?? e)), { target }); });
+          const name = path.basename(target.relPath);
+          if (how === 'merged') vscode.window.setStatusBarMessage(`OverLyX: saved ${name} — merged with the change made to the file outside VS Code`, 8000);
+          else if (how === 'merged-dirty') void vscode.window.showWarningMessage(`OverLyX saved ${name} (merged with the change made to it outside VS Code), but VS Code still marks it as modified. If VS Code asks about a conflict when you save it again, choose Overwrite: the file already holds this text.`);
+        }
+      }).catch((e: Error & { target?: DocSession }) => {
+        console.error('overlyx save failed', e);
+        const name = e.target ? path.basename(e.target.relPath) : relPath;
+        void vscode.window.showErrorMessage(`OverLyX could not save ${name}: ${e.message}. Your changes are still in the editor.`, 'Retry', 'Open as Text').then(a => {
+          if (a === 'Retry') save();
+          else if (a === 'Open as Text') void vscode.commands.executeCommand('vscode.openWith', (e.target ?? session).document.uri, 'default');
+        });
+      });
+    };
     let metadataTimer: NodeJS.Timeout | undefined;
     const metadataChanged = () => { clearTimeout(metadataTimer); metadataTimer = setTimeout(() => post({ type: 'metadataChanged' }), 300); };
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/*.{tex,bib,sty,cls,lyx}'));
@@ -138,7 +175,11 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
         case 'update':
           this.applyChain = this.applyChain.then(async () => {
             if (await session.applyPmUpdate(msg.pmDoc as never, msg.headerLines, msg.base, msg.sync)) pushSnapshot(session);
-          }).catch(e => console.error('overlyx apply failed', e));
+          }).catch(e => {
+            console.error('overlyx apply failed', e);
+            // the editor keeps the text and sends the whole document with the next change; say so once, not per keystroke
+            if (Date.now() - updateErrorShown > 30000) { updateErrorShown = Date.now(); void vscode.window.showErrorMessage(`OverLyX could not write your last edit into ${relPath}: ${String(e)}. The editor keeps it — it is written with your next change or save.`, 'Save now').then(a => { if (a) save(); }); }
+          });
           break;
         case 'outline':
           entry.outline = msg.items;
@@ -156,14 +197,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           if (msg.kind === 'error') void vscode.window.showErrorMessage('OverLyX: ' + msg.text);
           else vscode.window.setStatusBarMessage('OverLyX: ' + msg.text, 5000);
           break;
-        case 'save':
-          this.applyChain = this.applyChain.then(async () => {
-            for (const target of [session, ...related.values()]) {
-              if (await target.syncFromDisk()) pushSnapshot(target);
-              await target.save();
-            }
-          }).catch(e => console.error('overlyx save failed', e));
-          break;
+        case 'save': save(); break;
         case 'build':
           this.applyChain = this.applyChain.then(() => this.deps.startBuild(entry, { open: msg.open })).catch(e => console.error('overlyx build failed', e));
           break;

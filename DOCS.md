@@ -1060,6 +1060,17 @@ on focus) used to be taken for the newer state and undid that update in the edit
 moment ago came back. `tests/vscode-ledger.test.ts` and `tests/vscode-sync.test.ts` cover both;
 `packages/vscode/test/probeEditing.mjs` reproduces them in the real extension.
 
+**A save racing an outside write.** When the file changes on disk while the document has unsaved
+edits, the host merges the change into the document (`readDisk`; the unsaved text is kept as a draft
+in the extension's `recovery` folder first), but VS Code still holds the older file as "saved" and
+refuses its own save (*file modified since*). That refusal used to be logged to the console only:
+the user believed the file was saved, and the edit never reached the disk. `DocSession.save` now
+writes the merged text itself and reverts the document's editor to the file — which then holds the
+same text — so nothing is left modified (`resync` in `host/editorProvider.ts`; the revert runs only
+once that editor is verifiably the active one), with a status-bar note; a save that still fails, or
+an edit the host could not write into the document, is shown as an error with *Retry* / *Save now*.
+The integration test (`test/suite/index.cjs`, step 4b) races both the host's save and the webview's.
+
 tests/            vitest: .tex parse/write stability (tex.test.ts: features + a corpus of real
                   papers and LyX's example documents), LyX round trips (import path), PM/Yjs
                   conversions, LaTeX writer unit tests, latexmk compile tests
