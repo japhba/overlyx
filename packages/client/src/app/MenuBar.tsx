@@ -326,7 +326,9 @@ export function MenuBar({ menus, user, right, primary, onLogout, onSettings, onH
   useLayoutEffect(() => { close(); }, [compact]);
   useEffect(() => {
     if (open === null && !userOpen && !overflowOpen) return;
-    const h = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('.menubar')) close(); };
+    // a themed prompt/confirm/alert (Dialogs.tsx) is a real DOM overlay outside .menubar — clicking its
+    // button must not look like "clicked away from the menu" and close the search/help panel under it
+    const h = (e: MouseEvent) => { const t = e.target as HTMLElement; if (!t.closest('.menubar') && !t.closest('[role=dialog]')) close(); };
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !live.current.recording) close(); };
     document.addEventListener('mousedown', h); document.addEventListener('keydown', k);
     return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
