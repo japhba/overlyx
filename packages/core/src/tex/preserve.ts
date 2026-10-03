@@ -271,7 +271,8 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
       stats.outcome = 'kept'; stats.kept = keptPars; stats.written = n1 - keptPars; stats.retries = retries;
       const text = (bom ? '\ufeff' : '') + (crlf ? R.replace(/\n/g, '\r\n') : R);
       if (!bom && !crlf) return { ...full, text, spans, bodyRange };
-      const at = (off: number) => off + (bom ? 1 : 0) + (crlf ? newlinesBefore(R, off) : 0);
+      const nl = crlf ? newlines(R) : [];
+      const at = (off: number) => off + (bom ? 1 : 0) + countBelow(nl, off);
       return { ...full, text, spans: spans.map(s => s && { start: at(s.start), end: at(s.end) }), bodyRange: { start: at(bodyRange.start), end: at(bodyRange.end) } };
     }
     stats.notes?.push(`verification failed: ${bad.outer ? 'preamble, ' : ''}${bad.segments.map(g => `${g.kept ? 'kept' : 'written'} ${g.j0}..${g.j1}`).join(', ')}`);
@@ -525,10 +526,18 @@ function braceDepth(s: string, from: number, to: number): { delta: number; min: 
   return { delta: depth, min };
 }
 
-function newlinesBefore(s: string, off: number): number {
-  let n = 0;
-  for (let i = 0; i < off && i < s.length; i++) if (s.charCodeAt(i) === 10) n++;
-  return n;
+/** Where `s` has its newlines. */
+function newlines(s: string): number[] {
+  const out: number[] = [];
+  for (let i = s.indexOf('\n'); i >= 0; i = s.indexOf('\n', i + 1)) out.push(i);
+  return out;
+}
+
+/** How many of the sorted `xs` are below `v`. */
+function countBelow(xs: number[], v: number): number {
+  let lo = 0, hi = xs.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (xs[m] < v) lo = m + 1; else hi = m; }
+  return lo;
 }
 
 /* ------------------------------------------------------------ comparing documents */
