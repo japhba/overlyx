@@ -5,7 +5,8 @@
  * LaTeX cannot express. `parseTex(writeTex(doc))` reproduces the document, and writing a parsed
  * file again reproduces the file.
  */
-import type { LyxDocument } from '../lyx/ast.ts';
+import type { Item, LyxDocument, Paragraph } from '../lyx/ast.ts';
+import type { LayoutStyle } from '../latex/layouts.ts';
 import { readBufferParams } from '../latex/params.ts';
 import { makeContext, collectBibLabels, validateParams, writeBody, finishExport } from '../latex/export.ts';
 import { colorOptions, packages, lyxMacros, tclassPreamble, tclassI18nPreamble, writePreamble } from '../latex/preamble.ts';
@@ -50,6 +51,8 @@ export interface WriteTexResult {
    * between the document and its source.
    */
   spans: ({ start: number; end: number } | null)[];
+  /** the body's range in `text`: from right after \begin{document} (a fragment: after its settings line) to \end{document} (the end) */
+  bodyRange: { start: number; end: number };
 }
 
 /** The managed block: packages / macros for the features the body uses that the preamble lacks. */
@@ -133,6 +136,8 @@ export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTex
   };
   const ctx = makeContext(doc, eopts);
   ctx.warnings.push(...ctx.dc.warnings);
+  const lifted = liftBlocks(doc.body, ctx.dc.styles, ctx.dc.defaultStyle);
+  if (lifted) { ctx.doc = { ...doc, body: lifted.body }; ctx.bodyPars = lifted.body; }
   collectBibLabels(ctx);
   validateParams(ctx);
   ctx.parSpans = { stream: null, spans: [] };
@@ -145,11 +150,13 @@ export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTex
   let text: string;
   /** what precedes the body in `text` (the source map's offsets are shifted by its length) */
   let bodyAt: number;
+  let bodyRange: WriteTexResult['bodyRange'];
   const bodyText = body.replace(/\n+$/, '') + '\n';
   if (opts.fragment) {
     const head = settingsLine(settings) + '\n';
     bodyAt = head.length;
     text = head + bodyText;
+    bodyRange = { start: bodyAt, end: text.length };
   } else {
     let preamble: string;
     if (opts.fromLyx) {
@@ -167,10 +174,50 @@ export function writeTex(doc: LyxDocument, opts: WriteTexOptions = {}): WriteTex
     const before = (head.length ? head.join('\n') + '\n' : '') + preamble + '\n' + managedBlock(ctx, provided, settings) + '\n\\begin{document}\n';
     bodyAt = before.length;
     text = before + bodyText + '\n\\end{document}\n';
+    bodyRange = { start: bodyAt - 1, end: bodyAt + bodyText.length + 1 };
     if (doc.trailer.length) text += doc.trailer.join('\n') + '\n';
   }
   const res = finishExport(ctx, text);
-  return { text: res.tex, warnings: res.warnings, requires: res.requires, graphics: res.graphics, files: res.files, spans: bodySpans(ctx, body, bodyAt, doc.body.length) };
+  let spans = bodySpans(ctx, body, bodyAt, ctx.doc.body.length);
+  if (lifted) {
+    // the pieces of a paragraph written as two: one span over both
+    const merged: WriteTexResult['spans'] = doc.body.map(() => null);
+    spans.forEach((x, k) => {
+      if (!x) return;
+      const i = lifted.origin[k], m = merged[i];
+      merged[i] = m ? { start: Math.min(m.start, x.start), end: Math.max(m.end, x.end) } : x;
+    });
+    spans = merged;
+  }
+  return { text: res.tex, warnings: res.warnings, requires: res.requires, graphics: res.graphics, files: res.files, spans, bodyRange };
+}
+
+/** Insets a heading's argument cannot hold: a table, a float, a display formula, a definition. */
+function isBlockItem(it: Item): boolean {
+  if (it.kind !== 'inset') return false;
+  const ins = it.inset;
+  if (ins.type === 'Tabular' || ins.type === 'FormulaMacro') return true;
+  if (ins.type === 'Formula') return !ins.inline;
+  if (ins.type === 'Text') return ins.name === 'Float' || ins.name === 'Wrap';
+  return false;
+}
+
+/**
+ * A heading (a command layout: \section{…}) whose paragraph holds a table, a float or a display
+ * formula is written as two paragraphs: those first, on their own, then the heading with the rest
+ * (a heading style applied with the cursor right after a table that ends the document made one
+ * paragraph of both: \section{\begin{tabular}…\end{tabular}Conclusion} does not compile).
+ * Null when there is none.
+ */
+function liftBlocks(body: Paragraph[], styles: Map<string, LayoutStyle>, standard: string): { body: Paragraph[]; origin: number[] } | null {
+  if (!body.some(p => styles.get(p.layout)?.latexType === 'Command' && p.items.some(isBlockItem))) return null;
+  const out: Paragraph[] = [], origin: number[] = [];
+  body.forEach((p, i) => {
+    if (styles.get(p.layout)?.latexType !== 'Command' || !p.items.some(isBlockItem)) { out.push(p); origin.push(i); return; }
+    out.push({ layout: standard, depth: p.depth, params: {}, items: p.items.filter(isBlockItem) }, { ...p, items: p.items.filter(it => !isBlockItem(it)) });
+    origin.push(i, i);
+  });
+  return { body: out, origin };
 }
 
 /** The recorded paragraph spans as offsets into the file, trimmed to the paragraph's own text. */

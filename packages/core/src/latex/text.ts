@@ -67,6 +67,18 @@ export interface CharContext {
 }
 
 /** Write one text character with LaTeX escaping. */
+/**
+ * A straight double quote. A .tex document keeps the character it was read from (under the default
+ * OT1 encoding \textquotedbl does not exist; with babel's shorthands the " is the user's own); the
+ * LyX export writes \textquotedbl, made available in any encoding.
+ */
+function quoteDbl(ctx: ExportContext, os: TexStream): void {
+  if (ctx.texMode) { os.write('"'); return; }
+  ctx.features.require('textquotedbl');
+  os.write('\\textquotedbl');
+  os.termcmd();
+}
+
 export function latexChar(ctx: ExportContext, os: TexStream, rp: RunParams, c: string, cc: CharContext): void {
   if (cc.passThru || cc.passThruChars.includes(c) || rp.passThruChars.includes(c)) {
     if (c !== '\0') os.write(c);
@@ -80,7 +92,7 @@ export function latexChar(ctx: ExportContext, os: TexStream, rp: RunParams, c: s
         if (cc.next === c) { os.write('\\textcompwordmark'); os.termcmd(); }
         return;
       case '|': os.write(c); return;
-      case '"': os.write('\\textquotedbl'); os.termcmd(); return;
+      case '"': quoteDbl(ctx, os); return;
       default: break;
     }
   }
@@ -100,7 +112,7 @@ export function latexChar(ctx: ExportContext, os: TexStream, rp: RunParams, c: s
       os.write('-');
       if (cc.next === '-') os.write('{}');
       return;
-    case '"': os.write('\\textquotedbl'); os.termcmd(); return;
+    case '"': quoteDbl(ctx, os); return;
     case '$': case '&': case '%': case '#': case '{': case '}': case '_':
       os.write('\\' + c); return;
     case '~': os.write('\\textasciitilde'); os.termcmd(); return;

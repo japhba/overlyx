@@ -334,6 +334,8 @@ function texRow(ctx: ExportContext, os: TexStream, rp: RunParams, g: Grid, tab: 
     if (isPartOfMultiColumn(g, row, c)) continue;
     const cell = g.cells[row][c];
     if (isPartOfMultiRow(g, row, c) && g.cols[c].alignment !== 'decimal') {
+      // (normally empty; what a file had under its \multirow stays there)
+      if (cell.cell.paragraphs.some(p => p.items.length)) insetTextLatex(ctx, os, { ...rp, owner: 'cell', isMainText: false, inTableCell: 'aligned' }, cell.cell.paragraphs, undefined, { owner: 'cell', inTableCell: 'aligned' });
       if (c !== lastcell) os.write(' & ');
       continue;
     }

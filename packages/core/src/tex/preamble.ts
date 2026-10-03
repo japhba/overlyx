@@ -47,6 +47,8 @@ export interface DocumentSplit {
   /** the managed block (between the markers), '' when absent */
   managed: string;
   body: string;
+  /** where `body` starts in the text (-1: it is not one slice of it — a settings line removed from its middle) */
+  bodyStart: number;
   /** text after \end{document} */
   trailer: string;
   /** the file has \begin{document} ... \end{document} */
@@ -82,7 +84,7 @@ function findOutsideComments(s: string, re: RegExp): number {
 }
 
 export function splitDocument(text: string): DocumentSplit {
-  const out: DocumentSplit = { head: '', documentclass: '', classOptions: '', className: '', userPreamble: '', managed: '', body: text, trailer: '', hasDocument: false, settings: {} };
+  const out: DocumentSplit = { head: '', documentclass: '', classOptions: '', className: '', userPreamble: '', managed: '', body: text, bodyStart: 0, trailer: '', hasDocument: false, settings: {} };
   const dcPos = findOutsideComments(text, /\\documentclass\s*(\[[^\]]*\])?\s*\{[^}]*\}/);
   const beginPos = findOutsideComments(text, /\\begin\{document\}/);
   if (beginPos >= 0) {
@@ -91,6 +93,7 @@ export function splitDocument(text: string): DocumentSplit {
     const endPos = findOutsideComments(text, /\\end\{document\}/);
     const bodyStart = beginPos + '\\begin{document}'.length;
     out.body = endPos >= 0 ? text.slice(bodyStart, endPos) : text.slice(bodyStart);
+    out.bodyStart = bodyStart;
     out.trailer = endPos >= 0 ? text.slice(endPos + '\\end{document}'.length) : '';
     if (dcPos >= 0 && dcPos < beginPos) {
       const m = /\\documentclass\s*(\[[^\]]*\])?\s*\{([^}]*)\}/.exec(text.slice(dcPos))!;
@@ -116,7 +119,11 @@ export function splitDocument(text: string): DocumentSplit {
     const settings = readSettings(text);
     if (settings) {
       out.settings = settings;
-      out.body = text.replace(new RegExp('^[ \\t]*' + SETTINGS_PREFIX.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '.*\\n?', 'm'), '');
+      const line = new RegExp('^[ \\t]*' + SETTINGS_PREFIX.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '.*\\n?', 'm').exec(text);
+      if (line) {
+        out.body = text.slice(0, line.index) + text.slice(line.index + line[0].length);
+        out.bodyStart = line.index === 0 ? line[0].length : -1;
+      }
     }
   }
   return out;
@@ -164,6 +171,15 @@ export function preambleFacts(preamble: string, readFile?: (name: string) => str
   const bst = /\\bibliographystyle\s*\{([^}]*)\}/.exec(s);
   if (bst) facts.bibliographystyle = bst[1].trim();
   if (readFile && depth < 3) {
+    // the project's own style files (a conference's .sty loading natbib): what they load is loaded
+    for (const name of [...facts.packages]) {
+      const file = name + '.sty';
+      if (seen.has(file)) continue;
+      const txt = readFile(file);
+      if (txt === undefined) continue;
+      seen.add(file);
+      mergeFacts(facts, preambleFacts(txt, readFile, depth + 1, seen));
+    }
     const inRe = /\\(?:input|include)\s*\{([^}]*)\}/g;
     while ((m = inRe.exec(s))) {
       const name = m[1].trim();
@@ -172,17 +188,20 @@ export function preambleFacts(preamble: string, readFile?: (name: string) => str
         const txt = readFile(cand);
         if (txt === undefined) continue;
         seen.add(cand);
-        const sub = preambleFacts(txt, readFile, depth + 1, seen);
-        for (const p of sub.packages) facts.packages.add(p);
-        for (const [k, v] of sub.packageOptions) facts.packageOptions.set(k, v);
-        for (const d of sub.defined) facts.defined.add(d);
-        facts.addbibresources.push(...sub.addbibresources);
-        if (!facts.bibliographystyle) facts.bibliographystyle = sub.bibliographystyle;
+        mergeFacts(facts, preambleFacts(txt, readFile, depth + 1, seen));
         break;
       }
     }
   }
   return facts;
+}
+
+function mergeFacts(facts: PreambleFacts, sub: PreambleFacts): void {
+  for (const p of sub.packages) facts.packages.add(p);
+  for (const [k, v] of sub.packageOptions) if (!facts.packageOptions.has(k)) facts.packageOptions.set(k, v);
+  for (const d of sub.defined) facts.defined.add(d);
+  facts.addbibresources.push(...sub.addbibresources);
+  if (!facts.bibliographystyle) facts.bibliographystyle = sub.bibliographystyle;
 }
 
 /**

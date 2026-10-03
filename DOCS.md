@@ -80,8 +80,10 @@ blend.
   (*Coming from Overleaf?*, `app/OverleafStart.tsx`) the zips (or links + token) are parked in
   IndexedDB (`app/pendingImport.ts`), survive the Google round trip, and the start page imports
   them the moment there is an account and opens a lone project's document; guests cannot import.
-* **PDF** via `latexmk` on the document's own `.tex` file (plus the child documents it inputs);
-  embedded graphics (SVG/PDF/EPS/…) are rendered to PNG for the editor and downloadable as PNG,
+* **PDF** via `latexmk` on the document's own `.tex` file (plus the child documents it inputs),
+  with `-f`: an error TeX recovers from (an undefined macro) does not stop it before bibtex / biber
+  and the reruns, so the first build of an imported paper has its citations and references (not
+  "??" until a second build); embedded graphics (SVG/PDF/EPS/…) are rendered to PNG for the editor and downloadable as PNG,
   and formats pdflatex cannot include are converted to PDF for the build. PDF builds start on
   request (Ctrl+R, the toolbar or the PDF pane) or **by themselves** (Overleaf's auto compile: the ▾
   beside *View PDF*, or *Settings ▸ Editor ▸ PDF* — off, *while the PDF is shown* (the default) or
@@ -132,6 +134,25 @@ blend.
   version; the writer refuses to replace a document with something that is not a LyX document.
   Damaged files (an unterminated inset, unknown tokens, latin-1 bytes) open and are written back
   structurally complete.
+* **Saving keeps the file as it is where nothing changed** (`core/src/tex/preserve.ts`). A save
+  writes the document *into the text the file holds*: every paragraph nobody edited keeps its own
+  LaTeX byte for byte (hard line breaks, comments, the author's macro spellings, CRLF line ends),
+  and so do the preamble and the glue between paragraphs; only edited paragraphs are written by
+  the writer, and a document setting changed in the dialog is merged into the preamble line by
+  line. A file without a managed block gets one (right before `\begin{document}`) only when the
+  content comes to need a package or macro the file does not load, or uses something only the
+  block defines (layout objects, the change-tracking macros); a block is brought up to date when
+  the writer's differs (an update of OverLyX's macros), and removed when it would hold nothing but
+  the settings line. A co-author's `git diff` after one typed word shows that paragraph, not a
+  reformatted file. How: the parser records where every body paragraph came from
+  (`ParseTexResult.sources`), the writer where it wrote each one (`spans`); paragraphs are matched
+  by the writer's text for them, and the base's glue is kept where the writer's glue is the same.
+  The result is always parsed again and must give the document being saved (or, where the writer
+  itself does not reproduce a paragraph it wrote, what a full rewrite reads back as); otherwise
+  more is rewritten, in the end the whole file — never worse than writing it all. Every save path
+  goes through it: the server (`OpenDoc.render`, so autosave, MCP edits, agent turns, restores),
+  and the VS Code extension (`DocSession`, against the TextDocument's text). Costs one extra parse
+  per save; the base's parse and writer output are cached per document between saves.
 * **Sharing** (Google-Docs model): a project is private to its owner until it is shared. The owner
   invites people by username or e-mail address as *viewers* or *editors* (an e-mail that has not
   signed in yet is kept as an invitation and bound to the account on its first Google sign-in), or
@@ -1429,10 +1450,13 @@ invisible to LaTeX itself:
 * **A managed block** right before `\begin{document}` (between `%% OverLyX ---` and
   `%% end OverLyX ---`) holds the packages and macro definitions the *content* needs
   (`ulem`/`xcolor` and the change-tracking macros, `graphicx`, `booktabs`, `textcomp`, the
-  `\lyxgreyedout` environment, …) — everything the user's own preamble does not already load —
-  and one `%% overlyx-settings: {...}` line with what LaTeX cannot express (LyX layout modules,
-  citation engine, whether tracked changes are shown in the PDF, …). It is regenerated on every
-  save; put your own preamble above it.
+  `\lyxgreyedout` environment, …) — everything the user's own preamble (and the project's own
+  `.sty` files it loads) does not already load — and one `%% overlyx-settings: {...}` line with
+  what LaTeX cannot express (LyX layout modules, citation engine, whether tracked changes are
+  shown in the PDF, …). It is rewritten when what it should hold changes (a file brought from
+  elsewhere gets one only when its content needs something); put your own preamble above it.
+  natbib is loaded through `\@ifpackageloaded`: a journal class or conference style may load it
+  itself, and loading it again with options is an option clash.
 * **Change tracking**: inserted / deleted text is wrapped in LyX's `\lyxadded{Author}{Tue Aug 26
   14:03:00 2026}{…}` and `\lyxdeleted{…}{…}{…}` macros (a deleted paragraph break is
   `\lyxadded{…}{…}{¶}`). With *show changes in output* on, the managed block defines them to
@@ -1444,7 +1468,8 @@ invisible to LaTeX itself:
   without the word it is shown open. A comment thread's messages are paragraphs headed
   `Name (2026-08-26 14:03):`, the first one marked `[resolved]` when resolved. A note inside a
   paragraph is preceded by `%` at the end of the line, so the surrounding text joins as in TeX.
-* **No hard line breaks**: a paragraph is one line of the file (LyX re-wrapped at 65 columns; a
+* **No hard line breaks** in what OverLyX writes: a paragraph it writes is one line of the file
+  (paragraphs it only read keep theirs until they are edited; LyX re-wrapped at 65 columns; a
   line break in the file would only move around in diffs). The text editors wrap to their width.
 * **Child documents** (`\input{appendix.tex}` from the body) are fragments without a preamble;
   their first line is their settings line. They are edited on their own and built through their

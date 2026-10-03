@@ -16,14 +16,11 @@ process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 
 const { manager, readTextFile } = await import('../packages/server/src/docs.ts');
 const { db } = await import('../packages/server/src/db.ts');
-const { parseTex, writeTex } = await import('../packages/core/src/tex/index.ts');
 
 const HEAD = '\\documentclass{article}\n\\begin{document}\n';
 const TAIL = '\\end{document}\n';
 const par = (t: string) => `${t}\n\n`;
 const docText = (...pars: string[]) => HEAD + pars.map(par).join('') + TAIL;
-/** what the writer makes of a document (the file on disk after a save) */
-const canon = (text: string) => writeTex(parseTex(text).doc).text;
 
 const file = (name: string) => join(ROOT, 'projects', 'u', 'p', name);
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -38,13 +35,14 @@ beforeAll(() => {
 });
 
 describe('saving', () => {
-  it('an edit is written to the file, in canonical form, and a second save changes nothing', async () => {
+  it('an edit is written to the file, the rest of the file as it was, and a second save changes nothing', async () => {
     const doc = await manager.open('u/p/a.tex');
     edit(doc, docText('one', 'two edited', 'three'));
     expect(doc.dirty).toBe(true);
     expect(await doc.saveToFile()).toBe(true);
     const onDisk = readFileSync(file('a.tex'), 'utf8');
-    expect(onDisk).toBe(canon(docText('one', 'two edited', 'three')));
+    // source-preserving: only the edited paragraph is written (no managed block: nothing needs one)
+    expect(onDisk).toBe(docText('one', 'two edited', 'three'));
     expect(onDisk).toContain('two edited');
     expect(onDisk).toContain('\\begin{document}');
     expect(doc.dirty).toBe(false);
@@ -107,7 +105,8 @@ describe('saving', () => {
     const onDisk = readFileSync(file('child.tex'), 'utf8');
     expect(onDisk).not.toContain('\\begin{document}');
     expect(onDisk).toContain('A child paragraph, edited.');
-    expect(onDisk).toMatch(/^%% overlyx-settings: /);
+    // the user's fragment stays as it was around the edit (no settings line added to it)
+    expect(onDisk).toBe('A child paragraph, edited.\n\nAnother one with $x$.\n');
   });
 
   it('reads a latin-1 file without turning bytes into U+FFFD', () => {

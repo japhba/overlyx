@@ -198,7 +198,8 @@ describe('VS Code host: its own write-and-reparse is not a change on disk', () =
     const first = edit(base, 'Some text here.', 'Some new text here.');
     expect(await session.applyPmUpdate(first.pmDoc, first.headerLines, base, { epoch: 'e', seq: 1 })).toBe(false);
     expect(doc.text).toContain('Some new text here.');
-    expect(JSON.stringify(documentModel(session.parseCurrent().pmDoc, session.parseCurrent().headerLines))).not.toBe(JSON.stringify(first));
+    // the definition keeps the file's own spelling (saves keep what was not edited)
+    expect(doc.text).toContain('\\newcommand{\\foo}{x}');
     const second = edit(first, 'Some new text here.', 'Some newer text here.');
     expect(await session.applyPmUpdate(second.pmDoc, second.headerLines, first, { epoch: 'e', seq: 2 })).toBe(false);
     expect(doc.text).toContain('Some newer text here.');
