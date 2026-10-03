@@ -15,6 +15,7 @@ import { llanglePreamble, hasLlangleSnippet, definesLlangle, columnWidthLength }
 import { api, type DocMeta } from '../api';
 import { setPref, type Prefs } from '../prefs';
 import { ColorPalette, colorIcon, ColumnWidthPicker, DelimPalette, TableSizePicker, mathPanelPalettes, mathPreview, type ToolButton, type DelimChoice, type Palette } from './Toolbar';
+import { uiPrompt, uiConfirm } from './Dialogs';
 import { activeMathField, type LyxMathField } from '../editor/lyxmath/field';
 import { useMathRendererVersion } from '../editor/lyxmath/usemath';
 import * as C from '../editor/commands';
@@ -294,7 +295,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 'dmath', title: 'Display formula (Ctrl+Shift+M)', icon: 'dmath', action: () => runView(C.insertMath(true)) },
       { id: 'graphics', title: 'Insert graphics (Ctrl+Shift+G)', icon: 'graphics', action: () => setDialog({ name: 'graphics' }) },
       { id: 'table', title: 'Insert table (Ctrl+Alt+T)', icon: 'table', palette: { title: 'Insert table', render: close => <TableSizePicker close={close} onPick={(r, c) => run(C.insertTable(r, c))} /> } },
-      { id: 'flex', title: 'Custom insets (Flex)', icon: 'box', palette: { title: 'Custom insets of this document class', list: true, cols: 1, items: (meta?.flexInsets ?? []).map(n => ({ label: n, action: () => run(C.insertFlex(n)) })).concat([{ label: 'Other…', action: () => { const n = prompt('Flex inset name:', meta?.flexInsets?.[0] ?? 'Code'); if (n) run(C.insertFlex(n)); } }]) } },
+      { id: 'flex', title: 'Custom insets (Flex)', icon: 'box', palette: { title: 'Custom insets of this document class', list: true, cols: 1, items: (meta?.flexInsets ?? []).map(n => ({ label: n, action: () => run(C.insertFlex(n)) })).concat([{ label: 'Other…', action: () => { void uiPrompt('Custom Inset', 'Flex inset name:', meta?.flexInsets?.[0] ?? 'Code').then(n => { if (n) run(C.insertFlex(n)); }); } }]) } },
     ],
     [
       ...(slots.sidebars ?? []),
@@ -336,7 +337,7 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 'ref', title: 'Cross-reference (Ctrl+Shift+I)', icon: 'ref', action: () => setDialog({ name: 'ref' }) },
       { id: 'cite', title: 'Citation (Ctrl+Shift+C)', icon: 'cite', action: () => setDialog({ name: 'cite' }) },
       { id: 'index', title: 'Index entry', icon: 'index', action: () => run(C.insertIndex) },
-      { id: 'nomencl', title: 'Nomenclature entry', icon: 'nomencl', action: () => { const sym = prompt('Nomenclature symbol:'); if (!sym) return; const desc = prompt('Description:', '') ?? ''; run(C.insertCommand('nomenclature', ['LatexCommand nomenclature', 'prefix ""', `symbol "${sym.replace(/"/g, '\\"')}"`, `description "${desc.replace(/"/g, '\\"')}"`, 'literal "false"'])); } },
+      { id: 'nomencl', title: 'Nomenclature entry', icon: 'nomencl', action: () => { void (async () => { const sym = await uiPrompt('Nomenclature Entry', 'Symbol:'); if (!sym) return; const desc = await uiPrompt('Nomenclature Entry', 'Description:', '') ?? ''; run(C.insertCommand('nomenclature', ['LatexCommand nomenclature', 'prefix ""', `symbol "${sym.replace(/"/g, '\\"')}"`, `description "${desc.replace(/"/g, '\\"')}"`, 'literal "false"'])); })(); } },
     ],
     [
       { id: 'footnote', title: 'Footnote (Ctrl+Alt+F)', icon: 'footnote', action: () => run(C.insertFootnote) },
@@ -346,8 +347,8 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 'boxinset', title: 'Insert box', icon: 'boxinset', action: () => run(C.insertBox) },
       { id: 'href', title: `Link (${LINK_KEY})`, icon: 'href', action: () => runView(openLinkBoxFor) },
       { id: 'ert', title: 'TeX code (Ctrl+L)', icon: 'ert', action: () => run(C.insertERT) },
-      { id: 'macro', title: 'Math macro definition', icon: 'macro', action: () => { const n = prompt('Macro name (without backslash):'); if (n) run(C.insertMacroDef(n, Number(prompt('Number of arguments:', '0') || 0), '')); } },
-      { id: 'include', title: 'Include file (child document)', icon: 'include', action: () => { const fn = prompt('Child document file name (relative):', 'chapter1.tex'); if (fn) run(C.insertInclude(fn, 'include')); } },
+      { id: 'macro', title: 'Math macro definition', icon: 'macro', action: () => { void uiPrompt('Math Macro', 'Macro name (without backslash):').then(n => { if (n) void uiPrompt('Math Macro', 'Number of arguments:', '0').then(a => run(C.insertMacroDef(n, Number(a || 0), ''))); }); } },
+      { id: 'include', title: 'Child document… (include/input another file)', icon: 'include', action: () => setDialog({ name: 'childdoc' }) },
     ],
     [
       { id: 'textstyle', title: 'Text properties', icon: 'textstyle', palette: styles },
@@ -466,8 +467,8 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 'r-reject', title: 'Reject change inside selection / at cursor', icon: 'reject', action: () => run(resolveSelectionChanges(false)) },
     ],
     [
-      { id: 'r-acceptall', title: 'Accept all changes', icon: 'acceptall', action: () => { if (confirm('Accept all tracked changes?')) run(acceptAllChanges()); } },
-      { id: 'r-rejectall', title: 'Reject all changes', icon: 'rejectall', action: () => { if (confirm('Reject all tracked changes?')) run(rejectAllChanges()); } },
+      { id: 'r-acceptall', title: 'Accept all changes', icon: 'acceptall', action: () => { void uiConfirm('Accept All Changes', 'Accept all tracked changes?').then(ok => { if (ok) run(acceptAllChanges()); }); } },
+      { id: 'r-rejectall', title: 'Reject all changes', icon: 'rejectall', action: () => { void uiConfirm('Reject All Changes', 'Reject all tracked changes?', { danger: true, okLabel: 'Reject All' }).then(ok => { if (ok) run(rejectAllChanges()); }); } },
     ],
     [
       { id: 'r-note', title: 'Insert note (Ctrl+Alt+Shift+N)', icon: 'note', action: () => run(C.insertNote('Note')) },

@@ -10,7 +10,7 @@ import { referenceTransaction } from '@client/editor/references';
 import { inkToolbar } from '@client/app/inkToolbar';
 import { StatsDialog } from '@client/app/StatsDialog';
 import { SettingsPanel } from '@client/app/Settings';
-import { HelpDialog, HELP_ROWS } from '@client/app/Dialogs';
+import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
 import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
 import { setInk, subscribeInk } from '@client/editor/plugins/ink';
 /**
@@ -38,7 +38,7 @@ import { locateSourceLine } from '@client/app/sourcelocate';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '@client/editor/lyxmath/field';
 import {
 GraphicsDialog,TableDialog,LabelDialog,RefDialog,CiteDialog,HrefDialog,SettingsDialog,InsetDialog,
-TexDialog,MacrosDialog,ParagraphDialog,TableSettingsDialog,DelimiterDialog,MatrixDialog,commandParams
+TexDialog,MacrosDialog,ParagraphDialog,TableSettingsDialog,DelimiterDialog,MatrixDialog,commandParams,ChildDocDialog
 } from '@client/app/Dialogs';
 import { createLocalEditor, type LocalEditorHandle } from './localEditor';
 import { editorSessions } from './editorSession';
@@ -562,7 +562,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
     editingMenus.insert,
     { title: 'Navigate', items: [
       { label: 'Back', action: () => hostCommand('back') }, { label: 'Forward', action: () => hostCommand('forward') },
-      { label: 'Go to label…', action: () => { const name = prompt('Label:'); if (name) editorContext.gotoLabel!(name, view!); } },
+      { label: 'Go to label…', action: () => { void uiPrompt('Go to Label', 'Label:').then(name => { if (name) editorContext.gotoLabel!(name, view!); }); } },
       { label: 'Sync to PDF (forward search)', shortcut: 'Ctrl+Alt+J', action: () => { void syncToPdf(); } },
       { label: 'Beginning of document', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)).scrollIntoView()); view.focus(); } } },
       { label: 'End of document', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView()); view.focus(); } } },
@@ -604,6 +604,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       case 'help': return <HelpDialog onClose={close} />;
       case 'stats': return <StatsDialog view={view} onClose={close} />;
       case 'graphics': return <GraphicsDialog meta={targetMeta} project={project} docDir={docDir} onClose={close} onInsert={(f: string, o: any) => run(C.insertGraphics(f, o))} />;
+      case 'childdoc': return <ChildDocDialog meta={targetMeta} project={project} docDir={docDir} onClose={close} onInsert={(f: string, k: 'include' | 'input') => run(C.insertInclude(f, k))} />;
       case 'paragraph': {
         const cur = C.currentParagraph(view.state);
         if (!cur) { setDialog(null); return null; }
@@ -789,6 +790,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       <StatusBar layout={layout} status={status} chord={chord} message={message} save={{ state: 'saved', pending: false, savedAt: 0, unavailable: false }}
         tracking={tracking} trackingAs="You" change={changeInfo} stats={docStats} zoom={zoom} onZoom={setZoom} />
       {renderDialog()}
+      <DialogHost />
     </div>
   );
 }

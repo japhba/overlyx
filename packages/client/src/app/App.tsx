@@ -12,7 +12,7 @@ import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { openRewrite, REWRITE_KEY } from '../editor/ai/rewrite';
 import { Login } from './Login';
 import { DocPanel } from './DocPanel';
-import { Home, projectDocs } from './Home';
+import { Home, projectDocs, ProjectRootPanel } from './Home';
 import { pendingImportFlag } from './pendingImport';
 import { TextEditor } from './TextEditor';
 import { PaneSwitch } from './PaneSwitch';
@@ -40,7 +40,7 @@ import { SourcePane, type SourceTarget, cursorLine, docBlocks, blockPos } from '
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
 import { Tour, tourWanted, rememberTour, type TourEnd } from './Tour';
 import { FeedbackDialog } from './Feedback';
-import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog } from './Dialogs';
+import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog, ChildDocDialog, DialogHost, uiPrompt, uiConfirm, uiAlert } from './Dialogs';
 import { SettingsPanel } from './Settings';
 import { createEditor, moveLocalCopies, type EditorHandle, type SaveState } from '../editor/editor';
 import { refreshMacros } from '../editor/macrodefs';
@@ -272,6 +272,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const textId = docId ? docId.replace(/^(text|pdf):/, '') : null;
   const isLyxDoc = !!docId && !isTextTab && docId.endsWith('.tex');
   const isBoardTab = !!docId && !isTextTab && !isPdfTab && docId.endsWith('.board');
+  // a bare project link (`#/owner/project`, no file): a brand-new project has nowhere else to send
+  // you yet. Shown as a small landing in the editor area (its file tree is already the left sidebar)
+  // instead of falling through to the plain-text editor, which would 404 trying to load it as a file.
+  const isProjectRoot = !!docId && !isTextTab && !isPdfTab && docPathOf(textId!) === '';
   // the project shown in the documents panel (its owner gets the Share button)
   const [curProject, setCurProject] = useState<Project | null>(null);
   const [meta, setMeta] = useState<DocMeta | null>(null);
@@ -785,7 +789,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       }
     }
     await h.discardLocal();
-    alert(`The document on the server was re-created while this copy was open, so the local copy cannot be merged and will be reloaded.${kept ? '\n\n' + kept : ''}`);
+    await uiAlert('Document Replaced', `The document on the server was re-created while this copy was open, so the local copy cannot be merged and will be reloaded.${kept ? '\n\n' + kept : ''}`);
     setReloadKey(k => k + 1);
   };
 
@@ -819,7 +823,19 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       zoom: (d) => { if (!layoutZoomStep(d)) setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))); },
       textWidth: stepTextWidth,
       openFile: () => setShowFiles(true),
-      newFile: () => { const p = textId ? projectOfDoc(textId) : null; if (p) { const name = prompt('New document name:', 'untitled.tex'); if (name) api.newDoc(p, name, { title: name.replace(/\.(tex|lyx)$/, '') }).then(r => { location.hash = '#/' + r.id; setRefreshKey(k => k + 1); }); } },
+      newFile: () => {
+        const p = textId ? projectOfDoc(textId) : null;
+        if (!p) return;
+        void (async () => {
+          let name = 'untitled.tex', error: string | undefined;
+          for (;;) {
+            const n = await uiPrompt('New Document', error ? `New document name:\n\n${error} — try another name.` : 'New document name:', name);
+            if (!n) return;
+            try { const r = await api.newDoc(p, n, { title: n.replace(/\.(tex|lyx)$/, '') }); location.hash = '#/' + r.id; setRefreshKey(k => k + 1); return; }
+            catch (e) { name = n; error = (e as Error).message; }
+          }
+        })();
+      },
     };
   });
 
@@ -846,7 +862,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   }, []);
   useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current); }, []);
   // when a document opens: show its last PDF, and resume polling if a build is running
-  useEffect(() => { if (docId) pollBuild(docId, false); }, [docId]);
+  useEffect(() => { if (docId && !isProjectRoot) pollBuild(docId, false); }, [docId, isProjectRoot]);
   // a layout document: each new PDF brings the check of its text boxes against it (editor/layout/controller.ts)
   useEffect(() => { const v = editorRef.current?.view; if (v && docId && pdf.url) refreshLayoutCheck(v, () => api.layoutCheck(docId)); }, [docId, pdf.url]);
 
@@ -1027,8 +1043,17 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     { sep: true },
     { label: 'Report a problem / send feedback…', action: () => setDialog({ name: 'feedback' }) },
     { label: 'OverLyX for VS Code (.vsix download)', action: () => { const a = document.createElement('a'); a.href = '/api/vscode-extension'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); notify('Downloading the extension — install it in VS Code with “Extensions: Install from VSIX…”'); } },
-    { label: 'About OverLyX', action: () => alert('OverLyX — a LyX-like collaborative WYSIWYG editor for LaTeX documents.\nDocuments are ordinary .tex files (change tracking and comments live in the file as macros and comment blocks); formulas are edited with a port of LyX\'s math editor; collaboration via Yjs CRDTs.') },
+    { label: 'About OverLyX', action: () => void uiAlert('About OverLyX', 'OverLyX — a LyX-like collaborative WYSIWYG editor for LaTeX documents.\nDocuments are ordinary .tex files (change tracking and comments live in the file as macros and comment blocks); formulas are edited with a port of LyX\'s math editor; collaboration via Yjs CRDTs.') },
   ] };
+  const projectRootMenus: MenuDef[] = docId ? [
+    { title: 'File', items: [
+      { label: 'New document…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
+      { label: 'Share project…', action: () => setShareFor(projectOfDoc(docId)) },
+      { label: 'Git repository…', action: () => setGitFor(projectOfDoc(docId)) },
+      { sep: true },
+      { label: 'Close (back to the projects)', action: closeDoc },
+    ] },
+  ] : [];
   const textFileMenus: MenuDef[] = docId ? [
     { title: 'File', items: [
       { label: 'Open… (documents panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
@@ -1074,19 +1099,21 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     ],
     reloadMetadata: () => { if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); notify('Metadata reloaded'); }); },
   });
-  const menus: MenuDef[] = [...(docId && !isLyxDoc ? textFileMenus : docId ? [
+  const menus: MenuDef[] = [...(isProjectRoot ? projectRootMenus : docId && !isLyxDoc ? textFileMenus : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       { label: 'New slides / poster / page…', action: () => { const p = textId ? projectOfDoc(textId) : null; if (p) setNewLayoutFor(p); } },
       { label: 'New whiteboard…', action: () => {
         const p = textId ? projectOfDoc(textId) : null;
         if (!p) return;
-        let name = prompt('New whiteboard name:', 'whiteboard.board');
+        void uiPrompt('New Whiteboard', 'New whiteboard name:', 'whiteboard.board').then(name0 => {
+        let name = name0;
         if (!name) return;
         if (!name.endsWith('.board')) name += '.board';
         api.upload(p, name, new Blob(['{"overlyx":"board","v":1,"objects":{\n}}\n'], { type: 'application/octet-stream' }), { overwrite: false })
           .then(() => { location.hash = '#/' + p + '/' + name; setRefreshKey(k => k + 1); })
           .catch(e => notify('Could not create the whiteboard: ' + (e as Error).message, 'error'));
+        });
       } },
       { label: 'Open… (documents panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
       { label: save.state === 'offline' ? 'Offline — changes are saved on this device' : save.state === 'saving' ? 'Saving…' : 'All changes saved automatically', disabled: true, action: () => {} },
@@ -1127,7 +1154,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     editingMenus.insert,
     { title: 'Navigate', items: [
       { label: 'Outline pane (documents panel)', shortcut: 'Ctrl+Alt+O', action: () => setShowFiles(true) },
-      { label: 'Go to label…', action: () => { const n = prompt('Label:'); if (n) gotoLabel(n, view ?? undefined); } },
+      { label: 'Go to label…', action: () => { void uiPrompt('Go to Label', 'Label:').then(n => { if (n) gotoLabel(n, view ?? undefined); }); } },
       { label: 'Sync to PDF (forward search)', shortcut: 'Ctrl+Alt+J', action: () => { void syncToPdf(); } },
       { sep: true },
       { label: 'Back', shortcut: NAV_BACK_KEY, disabled: !navHistory.canBack(), action: navBack },
@@ -1246,6 +1273,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     const docDir = view.dom.dataset.docDir ?? editorContext.docDir;
     switch (dialog.name) {
       case 'graphics': return <GraphicsDialog meta={meta} project={project} docDir={docDir} onClose={close} onInsert={(f, o) => run(C.insertGraphics(f, o))} />;
+      case 'childdoc': return <ChildDocDialog meta={meta} project={project} docDir={docDir} onClose={close} onInsert={(f, k) => { run(C.insertInclude(f, k)); setRefreshKey(k2 => k2 + 1); }} />;
       case 'paragraph': {
         const cur = C.currentParagraph(view.state);
         if (!cur) { setDialog(null); return null; }
@@ -1440,7 +1468,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')} ref={columnRef}>
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
-          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : !isLyxDoc ? (/\.(md|markdown)$/i.test(textId!) ? <MarkdownEditor key={docId} id={textId!} notify={notify} /> : <TextEditor key={docId} id={textId!} notify={notify} />) :
+          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? (/\.(md|markdown)$/i.test(textId!) ? <MarkdownEditor key={docId} id={textId!} notify={notify} /> : <TextEditor key={docId} id={textId!} notify={notify} />) :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (
@@ -1507,6 +1535,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       {tour && <Tour intro={tour === 'intro'} onEnd={endTour}
         ctx={{ docId, ready: isLyxDoc && status.synced && !!view, docTick, layout, inMath: !!mathField, saveState: save.state, rightTab, pdfBusy: pdf.busy, pdfBuiltAt: pdf.builtAt ?? 0, shareOpen: !!shareFor, gitOpen: !!gitFor, marginMode }}
         actions={{ openExample, showRight: () => { if (!rightTab) setRightTab('comments'); }, showPdf: () => showPane('pdf'), showFiles: () => setShowFiles(true) }} />}
+      {/* last: any uiPrompt/uiConfirm/uiAlert (Dialogs.tsx) stacks above every other dialog above, including Home's and Git's */}
+      <DialogHost />
     </div>
   );
 }

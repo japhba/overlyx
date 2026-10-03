@@ -8,6 +8,7 @@ import { AvatarContent, initials } from './Avatar';
 import { setThemePref, useTheme, DARK_TONES, type ThemePref } from './theme';
 import { getPrefs, setPref } from '../prefs';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
+import { uiConfirm } from './Dialogs';
 import { formatShortcut } from './shortcuts';
 import { recordUsage, menuKey } from '../usage';
 import { tookActionWithout } from '../shortcuttips';
@@ -208,11 +209,11 @@ function SearchMenu({ menu, entries, close, recording, setRecording, paletteShor
   };
 
   /** a recorded key for `id`: collisions are confirmed, the other command then loses the key */
-  const assign = (id: string, key: string) => {
+  const assign = async (id: string, key: string) => {
     const me = entries.find(e => e.id === id);
     const other = entries.find(e => e.id !== id && canonical(effectiveShortcut(e.id, e.shortcut)) === key);
     if (other) {
-      const ok = confirm(`${formatShortcut(key)} is already used by “${[...other.path, other.label].join(' ▸ ')}”.\n\nUse it for “${[...(me?.path ?? []), me?.label ?? id].join(' ▸ ')}” instead? The other command keeps working from the menu, without a shortcut.`);
+      const ok = await uiConfirm('Shortcut Already Used', `${formatShortcut(key)} is already used by "${[...other.path, other.label].join(' ▸ ')}".\n\nUse it for "${[...(me?.path ?? []), me?.label ?? id].join(' ▸ ')}" instead? The other command keeps working from the menu, without a shortcut.`, { okLabel: 'Reassign' });
       if (!ok) return;
       setBinding(other.id, null);
     }
@@ -225,7 +226,7 @@ function SearchMenu({ menu, entries, close, recording, setRecording, paletteShor
       if (ev.key === 'Escape') { setRecording(null); return; }
       if ((ev.key === 'Backspace' || ev.key === 'Delete') && !ev.ctrlKey && !ev.altKey && !ev.metaKey) { setBinding(recording, null); setRecording(null); return; }
       const k = keyFromEvent(ev);
-      if (k) assign(recording, k);
+      if (k) void assign(recording, k);
       return;
     }
     if (ev.key === 'ArrowDown') { ev.preventDefault(); setSel(s => Math.min(results.length - 1, s + 1)); }

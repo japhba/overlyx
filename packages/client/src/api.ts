@@ -291,3 +291,7 @@ export function graphicsUrl(project: string, path: string, w = 1200): string {
 export function fileUrl(project: string, path: string): string {
   return `${API_BASE}/api/projects/${encodeURIComponent(project)}/file/${encodeURIComponent(path)}`;
 }
+/** The whole project as a downloadable .zip (the project card's "Download" and the Git dialog). */
+export function zipUrl(project: string): string {
+  return `${API_BASE}/api/projects/${encodeURIComponent(project)}/zip`;
+}

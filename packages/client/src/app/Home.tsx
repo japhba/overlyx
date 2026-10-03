@@ -4,11 +4,12 @@
  * (app/recency.ts: last opened by you, or last changed).
  */
 import { useEffect, useState } from 'preact/hooks';
-import { api, type AdminProjectInfo, type Project, type User } from '../api';
+import { api, zipUrl, type AdminProjectInfo, type Project, type User } from '../api';
 import { OverleafImport, type ImportInitial } from './OverleafImport';
 import { takePendingImport } from './pendingImport';
 import { sortByRecency, recencyLabel } from './recency';
-import { projectShortName, splitProjectKey } from '@overlyx/core';
+import { projectShortName, splitProjectKey, isProjectName } from '@overlyx/core';
+import { uiPrompt, uiConfirm } from './Dialogs';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -50,7 +51,8 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   useEffect(() => { void load(); }, [refreshKey]);
   // administrators do not see other people's projects; they can open one for an hour, and the owner sees that in the activity log
   const openAsAdmin = async (p: AdminProjectInfo) => {
-    if (!confirm(`Open “${p.title ?? p.name}” (owned by ${p.owner?.name ?? 'nobody'}) as administrator for one hour?\n\nThe owner will see this in the project's activity log.`)) return;
+    const ok = await uiConfirm('Open as Administrator', `Open "${p.title ?? p.name}" (owned by ${p.owner?.name ?? 'nobody'}) as administrator for one hour?\n\nThe owner will see this in the project's activity log.`);
+    if (!ok) return;
     try { await api.adminAccess(p.name, 60); await load(); onChanged(); }
     catch (e) { notify((e as Error).message, 'error'); }
   };
@@ -63,15 +65,19 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const firstName = user.guest ? 'guest' : user.name.split(/\s+/)[0];
 
   const newProject = async () => {
-    const name = prompt('Name of the new project (letters, digits, space, . _ -):');
+    const name = await uiPrompt('New Project', 'Name of the new project:', '', {
+      placeholder: 'letters, digits, space, . _ -',
+      validate: v => (v && !isProjectName(v) ? 'Only letters, digits, space, . _ - are allowed.' : null),
+    });
     if (!name) return;
-    try { await api.createProject(name.trim()); await load(); onChanged(); notify(`Project “${name.trim()}” created — add a document with + Doc in the documents panel`); }
+    try { await api.createProject(name.trim()); await load(); onChanged(); notify(`Project "${name.trim()}" created — add a document with + Doc in the documents panel`); }
     catch (e) { notify((e as Error).message, 'error'); }
   };
   const remove = async (p: Project) => {
-    const what = p.kind === 'example' ? 'your example project (it will not be re-created)' : `the project “${projectTitle(p)}” and its ${p.files.length} file(s)`;
-    if (!confirm(`Delete ${what}?\n\nThe folder is moved to the server's trash, not destroyed; ask an administrator to get it back.`)) return;
-    try { await api.deleteProject(p.name); await load(); onChanged(); notify(`Project “${projectTitle(p)}” removed`); }
+    const what = p.kind === 'example' ? 'your example project (it will not be re-created)' : `the project "${projectTitle(p)}" and its ${p.files.length} file(s)`;
+    const ok = await uiConfirm('Delete Project', `Delete ${what}?\n\nThe folder is moved to the server's trash, not destroyed; ask an administrator to get it back.`, { danger: true, okLabel: 'Delete' });
+    if (!ok) return;
+    try { await api.deleteProject(p.name); await load(); onChanged(); notify(`Project "${projectTitle(p)}" removed`); }
     catch (e) { notify((e as Error).message, 'error'); }
   };
 
@@ -87,7 +93,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {isExample && (
           <div class="blurb">
             A short tour of OverLyX written for you, {firstName}: text and layouts, formulas and macros, a figure, a table, citations, notes and comments, sharing and compiling.
-            It is a normal LyX file in a project of your own — edit it, press <b>Ctrl+R</b> to see the PDF, share it with a colleague, or delete it when you are done.
+            It is a normal LyX file in a project of your own — edit it, press <b>Ctrl+R</b> to see the PDF, share it with a colleague, or delete it when you are done.{' '}
             <b>Start the tour</b> opens it with an interactive walkthrough that asks you to try the essentials (every step can be skipped).
           </div>
         )}
@@ -98,11 +104,13 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           {!docs.length && <span class="meta">No documents yet.</span>}
         </div>
         <div class="actions">
-          {docs[0] && (isExample
+          {docs[0] ? (isExample
             ? <button class="btn primary small" data-start-tour onClick={() => onStartTour(p.name + '/' + docs[0])}>Start the tour</button>
-            : <button class="btn primary small" onClick={() => onOpen(p.name + '/' + docs[0])}>Open</button>)}
+            : <button class="btn primary small" onClick={() => onOpen(p.name + '/' + docs[0])}>Open</button>)
+            : <button class="btn primary small" onClick={() => onOpen(p.name)} title="This project has no documents yet — open it to create the first one">Open</button>}
           {p.role === 'owner' && p.via !== 'admin' && <button class="btn small" onClick={() => onShare(p.name)} data-share={p.name}>Share…</button>}
           <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>
+          <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>
           {p.role === 'owner' && <button class="btn small danger" title="Move this project to the trash" onClick={() => void remove(p)}>Delete</button>}
         </div>
       </div>
@@ -143,6 +151,38 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * A project with no document yet, opened directly (its bare `#/owner/project` link: a brand-new
+ * project's dashboard tile, the project switcher, or a bookmark). The file tree is already the left
+ * sidebar (DocPanel); this is just the main area's landing, offering the one thing to do next.
+ */
+export function ProjectRootPanel({ project, notify, onCreated }: { project: string; notify: (text: string, kind?: 'info' | 'error') => void; onCreated: (id: string) => void }) {
+  const [info, setInfo] = useState<Project | null | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    setInfo(undefined);
+    api.projects().then(r => { if (alive) setInfo(r.projects.find(p => p.name === project) ?? null); }).catch(() => { if (alive) setInfo(null); });
+    return () => { alive = false; };
+  }, [project]);
+  const createFirstDoc = async () => {
+    const name = await uiPrompt('New Document', `First document of "${projectShortName(project)}":`, 'main.tex', { placeholder: 'main.tex' });
+    if (!name) return;
+    try { const r = await api.newDoc(project, name, { title: name.replace(/\.(tex|lyx)$/, '') }); onCreated(r.id); }
+    catch (e) { notify((e as Error).message, 'error'); }
+  };
+  if (info === undefined) return <div class="home"><div class="meta">Loading…</div></div>;
+  if (info === null) return <div class="home"><h1>Not found</h1><div class="meta">This project does not exist, or you do not have access to it.</div></div>;
+  return (
+    <div class="home">
+      <h1>📁 {projectTitle(info)}</h1>
+      <div class="sub">This project has no documents yet. Its files (if any) are in the documents panel on the left.</div>
+      <div class="home-actions">
+        <button class="btn primary" onClick={() => void createFirstDoc()}>+ New document</button>
+      </div>
     </div>
   );
 }

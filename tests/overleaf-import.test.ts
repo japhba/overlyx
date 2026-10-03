@@ -1,13 +1,14 @@
 /**
  * Importing Overleaf projects: the zip reader / safe extraction (server/zip.ts), Overleaf link
- * parsing (server/overleaf.ts, client OverleafImport.tsx) and the clone error wording.
+ * parsing (server/overleaf.ts, client OverleafImport.tsx) and the clone error wording. Also the zip
+ * writer (same module): the "download project as .zip" button (persona-p7 F6).
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import JSZip from 'jszip';
-import { readZip, extractZip, safeZipPath, bundledZips, projectNameFromZip } from '../packages/server/src/zip.ts';
+import { readZip, writeZip, extractZip, safeZipPath, bundledZips, projectNameFromZip } from '../packages/server/src/zip.ts';
 import { overleafProjectId, overleafGitUrl, describeCloneError } from '../packages/server/src/overleaf.ts';
 import { parseOverleafRefs, projectNameFrom } from '../packages/client/src/app/OverleafImport.tsx';
 
@@ -29,6 +30,41 @@ describe('zip reader', () => {
   });
   it('rejects things that are not zip files', () => {
     expect(() => readZip(Buffer.from('%PDF-1.4 not a zip at all'))).toThrow(/not a zip/);
+  });
+});
+
+describe('writeZip (the project "download as .zip" button, persona-p7 F6)', () => {
+  it('round-trips through our own reader: names, exact bytes, and a highly compressible file deflated smaller', () => {
+    const big = 'The quick brown fox jumps over the lazy dog. '.repeat(500);
+    const entries = [
+      { name: 'main.tex', data: Buffer.from('\\documentclass{article}\n\\begin{document}Hi\\end{document}\n') },
+      { name: 'figures/plot.png', data: Buffer.from([0, 1, 2, 3, 255, 254, 253]) },   // binary, incompressible-ish
+      { name: 'notes.txt', data: Buffer.from(big) },
+      { name: 'empty.tex', data: Buffer.alloc(0) },
+      { name: 'uncode/déjà vu.tex', data: Buffer.from('unicode name') },   // non-ASCII name: the UTF-8 flag must be set
+    ];
+    const zip = writeZip(entries);
+    const read = readZip(zip).filter(e => !e.dir);
+    expect(read.map(e => e.name).sort()).toEqual(entries.map(e => e.name).sort());
+    for (const e of entries) {
+      const got = read.find(r => r.name === e.name)!;
+      expect(got.data().equals(e.data)).toBe(true);
+      expect(got.size).toBe(e.data.length);
+    }
+    // the repetitive file actually got deflated (not stored verbatim)
+    expect(zip.length).toBeLessThan(entries.reduce((s, e) => s + e.data.length, 0));
+  });
+  it('produces an archive a third-party zip library (JSZip) can also read', async () => {
+    const entries = [
+      { name: 'a.tex', data: Buffer.from('A') },
+      { name: 'dir/b.bib', data: Buffer.from('@article{k}') },
+    ];
+    const z = await JSZip.loadAsync(writeZip(entries));
+    expect(Object.keys(z.files).sort()).toEqual(['a.tex', 'dir/b.bib']);
+    expect(await z.file('dir/b.bib')!.async('string')).toBe('@article{k}');
+  });
+  it('an empty project zips to a valid (empty) archive', () => {
+    expect(readZip(writeZip([]))).toEqual([]);
   });
 });
 
