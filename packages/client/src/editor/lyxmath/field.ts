@@ -711,6 +711,9 @@ export class LyxMathField {
       this.snapshot('type');
       const ok = this.cursor.interpretChar(ch);
       if (keep) this.ghost = g!.slice(1).replace(/^\s+/, '');
+      // in a formula opened by typing `$` the closing `$` leaves it, as in LaTeX: Space at its top
+      // level is a TeX space (ignored), not LyX's "leave the inset" — `$r \ll d$` types as written
+      if (!ok && ch === ' ' && this.dollar) continue;
       if (!ok) { this.commit(); this.opts.onMoveOut?.('forward', { insertSpace: ch === ' ' }); return; }
     }
     this.commit(keep);
@@ -808,7 +811,7 @@ export class LyxMathField {
         }
         if (ev.shiftKey) c.cellBackward(); else c.cellForward(); this.moved(old); return;
       }
-      case 'Escape': if (this.ghost) { this.clearGhost(); this.render(); handled(); return; } if (c.selection) { c.clearSelection(); this.scheduleLayout(); } else if (c.inMacroMode()) { c.macroModeClose(true); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } handled(); return;
+      case 'Escape': if (this.ghost) { this.clearGhost(); this.render(); handled(); return; } if (c.selection) { c.clearSelection(); this.scheduleLayout(); } else if (c.inMacroMode()) { c.macroModeClose(!c.macroNameKnown()); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } handled(); return;
       case 'Enter': if (this.readOnly) return; handled(); if (c.inMacroMode()) { this.snapshot('macro'); c.macroModeClose(); c.editInsertedInset(); this.commit(); return; } if (mod || ev.shiftKey || this.display) { this.snapshot('newline'); c.newline(); this.commit(); } else { this.commit(); this.opts.onMoveOut?.('forward', {}); } return;
       case 'Backspace': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.backspace()) { const dissolve = this.isEmpty(); this.commit(); this.opts.onMoveOut?.('backward', { dissolve, putBack: dissolve && this.dollar ? this.dollar : undefined }); return; } this.commit(); return;
       case 'Delete': if (this.readOnly) return; handled(); this.snapshot('delete'); if (!c.erase()) { const dissolve = this.isEmpty(); this.commit(); this.opts.onMoveOut?.('forward', { dissolve }); return; } this.commit(); return;
