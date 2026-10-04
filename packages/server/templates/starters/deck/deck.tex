@@ -1,0 +1,726 @@
+% A slide deck made in OverLyX's Layout mode: 16:9 pages of freely placed objects.
+\documentclass[aspectratio=169]{beamer}
+\usefonttheme{professionalfonts} % keep beamer from overriding the math fonts
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[british]{babel}
+\usepackage{amsmath}
+\usepackage[sfdefault]{notomath} % Noto Sans for text and formulas
+\usepackage{graphicx}
+\usepackage{booktabs}
+
+% the palette: change a colour here and every slide follows
+\definecolor{night}{HTML}{13213C}
+\definecolor{paper}{HTML}{FAF7F2}
+\definecolor{ink}{HTML}{222838}
+\definecolor{mist}{HTML}{6E7487}
+\definecolor{rule}{HTML}{E2DCD2}
+\definecolor{sky}{HTML}{2F7BF6}
+\definecolor{dusk}{HTML}{F2704E}
+\definecolor{sun}{HTML}{FFC24B}
+\definecolor{leaf}{HTML}{3DAA77}
+\definecolor{iris}{HTML}{7A5AF0}
+\colorlet{gold}{sun!70!black}
+
+\setbeamertemplate{navigation symbols}{}
+\setbeamercolor{normal text}{fg=ink}
+\setbeamercolor{itemize item}{fg=sky}
+\setbeamertemplate{itemize item}[circle]
+
+%% OverLyX ------------------------------------------------------------------
+%% overlyx-settings: {"textclass":"beamer","language":"british"}
+%% Packages and macros needed by the content (generated on every save; put your own preamble above this block).
+\usepackage{textcomp}
+\usepackage{amsbsy}
+\usepackage{amstext}
+\usepackage{tikz}
+\usepackage{adjustbox}
+\makeatletter
+%% Because html converters don't know tabularnewline
+\providecommand{\tabularnewline}{\\}
+% OverLyX layout objects: positioned on the page from its top left corner (x, y, w, h;
+% rotate: degrees about the centre), shown on the beamer overlay steps given by step=
+\usetikzlibrary{svg.path,arrows.meta}
+\pgfqkeys{/ol}{x/.store in=\ol@x,y/.store in=\ol@y,w/.store in=\ol@w,h/.store in=\ol@h,rotate/.store in=\ol@rot,
+  fill/.code={\ol@setcolor\ol@fill{#1}},draw/.code={\ol@setcolor\ol@draw{#1}},color/.code={\ol@setcolor\ol@color{#1}},
+  line/.store in=\ol@line,radius/.store in=\ol@radius,pad/.store in=\ol@pad,valign/.store in=\ol@valign,shape/.store in=\ol@shape,
+  font/.store in=\ol@font,leading/.store in=\ol@leading,opacity/.store in=\ol@opacity,step/.store in=\ol@step,align/.store in=\ol@align,
+  vb/.store in=\ol@vb,crop/.store in=\ol@crop,dash/.store in=\ol@dash,arrows/.store in=\ol@arrows,
+  transition/.store in=\ol@trans,.unknown/.code={}}
+\def\ol@reset{\def\ol@x{0mm}\def\ol@y{0mm}\def\ol@w{10mm}\def\ol@h{10mm}\def\ol@rot{0}\def\ol@fill{}\def\ol@draw{}\def\ol@color{}%
+  \def\ol@line{0.4pt}\def\ol@radius{0pt}\def\ol@pad{0pt}\def\ol@valign{t}\def\ol@shape{rect}\def\ol@font{}\def\ol@leading{1.2}%
+  \def\ol@opacity{1}\def\ol@step{}\def\ol@align{left}\def\ol@vb{0 0 1 1}\def\ol@crop{0 0 0 0}\def\ol@dash{}\def\ol@arrows{}\def\ol@trans{}}
+\def\ol@setcolor#1#2{\def#1{}\if\relax\detokenize{#2}\relax\else\ol@@setcolor#1#2\relax\fi}
+\def\ol@@setcolor#1#2#3\relax{\ifx[#2\ol@@@setcolor#1[#3\relax\else\def#1{#2#3}\fi}
+\def\ol@@@setcolor#1[#2]#3\relax{\definecolor{ol\expandafter\@gobble\string#1}{#2}{#3}\edef#1{ol\expandafter\@gobble\string#1}}
+\def\ol@style{\tikzset{ol@frame/.style={}}%
+  \ifx\ol@fill\empty\else\tikzset{ol@frame/.append style/.expanded={fill=\ol@fill}}\fi
+  \ifx\ol@draw\empty\else\tikzset{ol@frame/.append style/.expanded={draw=\ol@draw,line width=\ol@line}}\fi
+  \ifx\ol@dash\empty\else\tikzset{ol@frame/.append style/.expanded={\ol@dash}}\fi
+  \ifx\ol@arrows\empty\else\tikzset{ol@frame/.append style/.expanded={\ol@arrows}}\fi}
+\def\ol@only#1{\only<#1>}
+\def\ol@place#1{\ifx\ol@step\empty#1\else\edef\ol@tmp{\noexpand\ol@only{\ol@step}}\ol@tmp{#1}\fi\ignorespaces}
+\def\ol@at{\path ([xshift=\ol@x+\ol@w/2,yshift=-\ol@y-\ol@h/2]current page.north west) coordinate (ol@c);}
+\newsavebox\ol@box
+\def\ol@boxbegin{\pgfmathsetlengthmacro\ol@iw{\ol@w-2*(\ol@pad)}\pgfmathsetlengthmacro\ol@ih{\ol@h-2*(\ol@pad)}%
+  \begin{lrbox}{\ol@box}\begin{minipage}[c][\ol@ih][\ol@valign]{\ol@iw}}
+\def\ol@boxdraw{\leavevmode\begin{tikzpicture}[remember picture,overlay]\ol@at
+  \begin{scope}[shift={(ol@c)},rotate=\ol@rot,opacity=\ol@opacity]
+  \def\ol@tmp{ellipse}\ifx\ol@shape\ol@tmp\path[ol@frame] (0,0) ellipse [x radius=\ol@w/2,y radius=\ol@h/2];%
+  \else\path[ol@frame,rounded corners=\ol@radius] (-\ol@w/2,-\ol@h/2) rectangle (\ol@w/2,\ol@h/2);\fi
+  \node[anchor=center,inner sep=0pt,outer sep=0pt,transform shape] at (0,0) {\usebox\ol@box};
+  \end{scope}\end{tikzpicture}}
+% a text box's text is set at its natural height first, then placed in the box; that height goes to
+% \jobname.olx with the class's display and list spacing (OverLyX checks its editor against the PDF)
+\newwrite\ol@olx
+\AtBeginDocument{\immediate\openout\ol@olx=\jobname.olx
+  \begingroup\ifdefined\@listi\@listi\fi\immediate\write\ol@olx{olx params above=\the\dimexpr\abovedisplayskip\relax\space
+  ashort=\the\dimexpr\abovedisplayshortskip\relax\space below=\the\dimexpr\belowdisplayskip\relax\space
+  bshort=\the\dimexpr\belowdisplayshortskip\relax\space leftmargin=\the\leftmargini\space labelsep=\the\labelsep\space
+  itemsep=\the\dimexpr\itemsep\relax}\endgroup}
+\def\ol@tboxbegin{\pgfmathsetlengthmacro\ol@iw{\ol@w-2*(\ol@pad)}\pgfmathsetlengthmacro\ol@ih{\ol@h-2*(\ol@pad)}%
+  \begin{lrbox}{\ol@box}\begin{minipage}[t]{\ol@iw}}
+\def\ol@tboxend{\xdef\ol@bs{\the\dimexpr\baselineskip\relax}\par\end{minipage}\end{lrbox}%
+  \immediate\write\ol@olx{olx box \ifcsname c@framenumber\endcsname\the\c@framenumber\else\the\c@page\fi\space
+  \ifcsname beamer@slideinframe\endcsname\the\beamer@slideinframe\else1\fi\space x=\ol@x\space y=\ol@y\space w=\ol@w\space h=\ol@h\space
+  natural=\the\dimexpr\ht\ol@box+\dp\ol@box\relax\space inner=\ol@ih\space baselineskip=\ol@bs}%
+  \sbox\ol@box{\begin{minipage}[c][\ol@ih][\ol@valign]{\ol@iw}\usebox\ol@box\end{minipage}}}
+\newenvironment{olbox}[1]{\ol@reset\pgfqkeys{/ol}{#1}\ol@tboxbegin
+  \ifx\ol@font\empty\else\pgfmathsetlengthmacro\ol@lead{\ol@leading*(\ol@font)}\fontsize{\ol@font}{\ol@lead}\selectfont\fi
+  \ifx\ol@color\empty\else\color{\ol@color}\fi\csname ol@align@\ol@align\endcsname\ignorespaces}%
+  {\ol@tboxend\ol@style\ol@place{\ol@boxdraw}}
+\def\ol@align@left{\raggedright}\def\ol@align@center{\centering}\def\ol@align@right{\raggedleft}\def\ol@align@justify{}
+\newenvironment{olraw}[1]{\ol@reset\pgfqkeys{/ol}{#1}\ol@boxbegin\ignorespaces}%
+  {\par\end{minipage}\end{lrbox}\ol@style\ol@place{\ol@boxdraw}}
+\newcommand\olshape[2]{\ol@reset\pgfqkeys{/ol}{#1}\ol@style\expandafter\ol@parsevb\ol@vb\relax
+  \pgfmathsetmacro\ol@sx{(\ol@w)/\ol@vbw}\pgfmathsetmacro\ol@sy{(\ol@h)/\ol@vbh}\ol@place{\ol@shapedraw{#2}}}
+\def\ol@parsevb#1 #2 #3 #4\relax{\def\ol@vbx{#1}\def\ol@vby{#2}\def\ol@vbw{#3}\def\ol@vbh{#4}}
+\def\ol@shapedraw#1{\leavevmode\begin{tikzpicture}[remember picture,overlay]\ol@at
+  \begin{scope}[shift={(ol@c)},rotate=\ol@rot,shift={(-\ol@w/2,\ol@h/2)},xscale=\ol@sx,yscale=-\ol@sy,shift={(-\ol@vbx pt,-\ol@vby pt)}]
+  \path[ol@frame,opacity=\ol@opacity] svg {#1};\end{scope}\end{tikzpicture}}
+\newcommand\olimage[2]{\ol@reset\pgfqkeys{/ol}{#1}\expandafter\ol@parsecrop\ol@crop\relax\ol@place{\ol@imagedraw{#2}}}
+\def\ol@parsecrop#1 #2 #3 #4\relax{\def\ol@cl{#1}\def\ol@ct{#2}\def\ol@cr{#3}\def\ol@cb{#4}}
+\def\ol@imagedraw#1{\leavevmode\begin{tikzpicture}[remember picture,overlay]\ol@at
+  \node[anchor=center,inner sep=0pt,outer sep=0pt,rotate=\ol@rot,opacity=\ol@opacity] at (ol@c)
+  {\adjincludegraphics[trim={\ol@cl\width} {\ol@cb\height} {\ol@cr\width} {\ol@ct\height},clip,width=\ol@w,height=\ol@h]{#1}};\end{tikzpicture}}
+\newenvironment{olgroup}[1]{\ol@reset\pgfqkeys{/ol}{#1}\ifx\ol@step\empty\def\ol@grpend{}\else
+  \edef\ol@tmp{\noexpand\begin{onlyenv}<\ol@step>}\ol@tmp\def\ol@grpend{\end{onlyenv}}\fi\ignorespaces}{\ol@grpend\ignorespacesafterend}
+\newcommand\olpage[1]{\ol@reset\pgfqkeys{/ol}{#1}\ifx\ol@fill\empty\else\leavevmode\begin{tikzpicture}[remember picture,overlay]
+  \fill[\ol@fill] (current page.north west) rectangle (current page.south east);\end{tikzpicture}\fi
+  \ifx\ol@trans\empty\else\ifcsname trans\ol@trans\endcsname\csname trans\ol@trans\endcsname\fi\fi\ignorespaces}
+\@ifundefined{only}{\def\only<#1>#2{#2}\newenvironment{onlyenv}{\ol@skipspec}{}\def\ol@skipspec<#1>{}}{}
+\@ifundefined{note}{\newcommand\note[2][]{}}{}
+% this default might be overridden by plain title style
+\newcommand\makebeamertitle{\frame{\maketitle}}%
+% (ERT) argument for the TOC
+\AtBeginDocument{%
+  \let\origtableofcontents=\tableofcontents
+  \def\tableofcontents{\@ifnextchar[{\origtableofcontents}{\gobbletableofcontents}}
+  \def\gobbletableofcontents#1{\origtableofcontents}
+}
+\makeatother
+%% end OverLyX --------------------------------------------------------------
+
+\begin{document}
+\begin{frame}[plain]
+\olpage{fill=night,name=Title}
+\olshape{x=92.72mm,y=14.72mm,w=58.56mm,h=58.56mm,vb=0 0 58.56 58.56,draw=sun,line=0.6pt,opacity=0.4,name=Sun ring}{M 58.56 29.28 C 58.56 45.45 45.45 58.56 29.28 58.56 C 13.11 58.56 0 45.45 0 29.28 C 0 13.11 13.11 0 29.28 0 C 45.45 0 58.56 13.11 58.56 29.28 Z}
+\olshape{x=98mm,y=20mm,w=48mm,h=48mm,vb=0 0 48 48,fill=dusk,name=Sun}{M 48 24 C 48 37.26 37.26 48 24 48 C 10.74 48 0 37.26 0 24 C 0 10.74 10.74 0 24 0 C 37.26 0 48 10.74 48 24 Z}
+\olshape{x=97.5mm,y=49.61mm,w=49mm,h=1.19mm,vb=0 0 49 1.19,fill=night,name=Sun stripe 1}{M 0 0 L 49 0 L 49 1.19 L 0 1.19 Z}
+\olshape{x=97.5mm,y=53.22mm,w=49mm,h=1.53mm,vb=0 0 49 1.53,fill=night,name=Sun stripe 2}{M 0 0 L 49 0 L 49 1.53 L 0 1.53 Z}
+\olshape{x=97.5mm,y=56.86mm,w=49mm,h=1.87mm,vb=0 0 49 1.87,fill=night,name=Sun stripe 3}{M 0 0 L 49 0 L 49 1.87 L 0 1.87 Z}
+\olshape{x=97.5mm,y=60.54mm,w=49mm,h=2.21mm,vb=0 0 49 2.21,fill=night,name=Sun stripe 4}{M 0 0 L 49 0 L 49 2.21 L 0 2.21 Z}
+\olshape{x=97.5mm,y=64.25mm,w=49mm,h=2.55mm,vb=0 0 49 2.55,fill=night,name=Sun stripe 5}{M 0 0 L 49 0 L 49 2.55 L 0 2.55 Z}
+\olshape{x=99.7mm,y=11.7mm,w=2.6mm,h=2.6mm,vb=0 0 2.6 2.6,fill=sky,name=Scattered light}{M 2.6 1.3 C 2.6 2.02 2.02 2.6 1.3 2.6 C 0.58 2.6 0 2.02 0 1.3 C 0 0.58 0.58 0 1.3 0 C 2.02 0 2.6 0.58 2.6 1.3 Z}
+\olshape{x=107.7mm,y=7.7mm,w=1.6mm,h=1.6mm,vb=0 0 1.6 1.6,fill=sky,name=Scattered light}{M 1.6 0.8 C 1.6 1.24 1.24 1.6 0.8 1.6 C 0.36 1.6 0 1.24 0 0.8 C 0 0.36 0.36 0 0.8 0 C 1.24 0 1.6 0.36 1.6 0.8 Z}
+\olshape{x=94.3mm,y=18.3mm,w=1.4mm,h=1.4mm,vb=0 0 1.4 1.4,fill=sky,name=Scattered light}{M 1.4 0.7 C 1.4 1.09 1.09 1.4 0.7 1.4 C 0.31 1.4 0 1.09 0 0.7 C 0 0.31 0.31 0 0.7 0 C 1.09 0 1.4 0.31 1.4 0.7 Z}
+\olshape{x=0mm,y=73.5mm,w=160mm,h=1mm,vb=0 0 160 1,fill=white!24!night,name=Horizon}{M 0 0.5 L 160 0.5 L 160 0.8 L 0 0.8 Z}
+\olshape{x=12mm,y=18.5mm,w=8mm,h=0.9mm,vb=0 0 8 0.9,fill=dusk,name=Accent}{M 0 0 L 8 0 L 8 0.9 L 0 0.9 Z}
+\begin{olbox}{x=12mm,y=22mm,w=80mm,h=2.2mm,font=7pt,color=sun,grow,name=Kicker}
+\textbf{AN OVERLYX EXAMPLE DECK}
+\end{olbox}
+\begin{olbox}{x=12mm,y=27mm,w=84mm,h=22.6mm,font=36pt,leading=1.05,color=white,grow,name=Title}
+\textbf{Why the sky}
+
+\textbf{is blue}
+\end{olbox}
+\begin{olbox}{x=12mm,y=57mm,w=84mm,h=9mm,font=11pt,leading=1.3,color=white!72!night,grow,name=Subtitle}
+Rayleigh scattering, from one oscillating
+
+dipole to the colour of the sunset
+\end{olbox}
+\begin{olbox}{x=12mm,y=78mm,w=120mm,h=2.6mm,font=8.5pt,color=white,grow,name=Author}
+\textbf{@@NAME@@}\qquad{}\textcolor{white!60!night}{Your institute\quad{}·\quad{}the date of the talk}
+\end{olbox}
+\note{Welcome to a canvas deck: slides made of freely placed objects, as in PowerPoint or Keynote. Everything on this slide is an object --- the sun, its stripes, every line of text. Click one to select it, drag it to move it, pull its handles to resize or rotate it; double-click a text box (or select it and start typing) to edit its text. The slide rail on the left shows all slides: click a thumbnail to go there. Press F5 to present from the first slide, Shift+F5 from the current one, and S during the presentation for the presenter view with these notes.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=paper,name=Agenda}
+\olshape{x=0mm,y=0mm,w=56mm,h=90mm,vb=0 0 56 90,fill=night,name=Panel}{M 0 0 L 56 0 L 56 90 L 0 90 Z}
+\olshape{x=0mm,y=73.5mm,w=56mm,h=1mm,vb=0 0 56 1,fill=white!24!night,name=Horizon}{M 0 0.5 L 56 0.5 L 56 0.8 L 0 0.8 Z}
+\olshape{x=32mm,y=66mm,w=16mm,h=8mm,vb=0 0 16 8,fill=dusk,name=Sun}{M 0 8 C 0 3.58 3.58 0 8 0 C 12.42 0 16 3.58 16 8 Z}
+\olshape{x=31.5mm,y=70.44mm,w=17mm,h=0.61mm,vb=0 0 17 0.61,fill=night,name=Sun stripe 1}{M 0 0 L 17 0 L 17 0.61 L 0 0.61 Z}
+\olshape{x=31.5mm,y=72.07mm,w=17mm,h=1.32mm,vb=0 0 17 1.32,fill=night,name=Sun stripe 2}{M 0 0 L 17 0 L 17 1.32 L 0 1.32 Z}
+\begin{olbox}{x=10mm,y=22mm,w=40mm,h=8.8mm,font=26pt,leading=1.1,color=white,grow,name=Heading}
+\textbf{Agenda}
+\end{olbox}
+\begin{olbox}{x=10mm,y=34mm,w=38mm,h=7.5mm,font=9pt,leading=1.3,color=white!65!night,grow,name=Heading text}
+Three parts, fifteen slides, twenty minutes
+\end{olbox}
+\begin{olbox}{x=66mm,y=14mm,w=16mm,h=6.1mm,font=24pt,leading=1.1,color=sky,grow,name=Number 1}
+\textbf{01}
+\end{olbox}
+\begin{olbox}{x=84mm,y=15.2mm,w=64mm,h=5.3mm,font=15pt,leading=1.15,color=night,grow,name=Part 1}
+\textbf{Light meets air}
+\end{olbox}
+\begin{olbox}{x=84mm,y=22.6mm,w=61mm,h=7.9mm,font=9.5pt,leading=1.3,color=mist,grow,name=Part 1 text}
+What we see when we look up, and what happens to a sunbeam on its way down.
+\end{olbox}
+\olshape{x=66mm,y=35mm,w=82mm,h=1mm,vb=0 0 82 1,fill=rule,name=Separator}{M 0 0.5 L 82 0.5 L 82 0.75 L 0 0.75 Z}
+\begin{olbox}{x=66mm,y=39mm,w=16mm,h=6.1mm,font=24pt,leading=1.1,color=sky,grow,name=Number 2}
+\textbf{02}
+\end{olbox}
+\begin{olbox}{x=84mm,y=40.2mm,w=64mm,h=5mm,font=15pt,leading=1.15,color=night,grow,name=Part 2}
+\textbf{The $\boldsymbol{\lambda^{-4}}$ law}
+\end{olbox}
+\begin{olbox}{x=84mm,y=47.6mm,w=61mm,h=7.2mm,font=9.5pt,leading=1.3,color=mist,grow,name=Part 2 text}
+Why tiny molecules scatter blue light six times more than red.
+\end{olbox}
+\olshape{x=66mm,y=60mm,w=82mm,h=1mm,vb=0 0 82 1,fill=rule,name=Separator}{M 0 0.5 L 82 0.5 L 82 0.75 L 0 0.75 Z}
+\begin{olbox}{x=66mm,y=64mm,w=16mm,h=6.1mm,font=24pt,leading=1.1,color=sky,grow,name=Number 3}
+\textbf{03}
+\end{olbox}
+\begin{olbox}{x=84mm,y=65.2mm,w=64mm,h=5.3mm,font=15pt,leading=1.15,color=night,grow,name=Part 3}
+\textbf{Beyond blue}
+\end{olbox}
+\begin{olbox}{x=84mm,y=72.6mm,w=61mm,h=7.9mm,font=9.5pt,leading=1.3,color=mist,grow,name=Part 3 text}
+Why clouds are white, why the sky is not violet, and who explained it all.
+\end{olbox}
+\note{Text boxes carry their own font size, line spacing, colour and alignment: select one and use the Layout toolbar or the font size box. While you drag an object, guides snap it to the page's edges and centre and to the other objects. To space several objects evenly, select them (Shift+click, or drag a rubber band on the empty page) and use Align and distribute. The colours of this deck --- night, paper, sky, dusk, sun --- are defined once at the top of the file with \texttt{\textbackslash definecolor}: change one there and every slide follows.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=night,transition=fade,name=Section 01}
+\olshape{x=117.02mm,y=15.02mm,w=21.96mm,h=21.96mm,vb=0 0 21.96 21.96,draw=sun,line=0.6pt,opacity=0.4,name=Sun ring}{M 21.96 10.98 C 21.96 17.04 17.04 21.96 10.98 21.96 C 4.92 21.96 0 17.04 0 10.98 C 0 4.92 4.92 0 10.98 0 C 17.04 0 21.96 4.92 21.96 10.98 Z}
+\olshape{x=119mm,y=17mm,w=18mm,h=18mm,vb=0 0 18 18,fill=sun,name=Sun}{M 18 9 C 18 13.97 13.97 18 9 18 C 4.03 18 0 13.97 0 9 C 0 4.03 4.03 0 9 0 C 13.97 0 18 4.03 18 9 Z}
+\olshape{x=109.9mm,y=13.9mm,w=2.2mm,h=2.2mm,vb=0 0 2.2 2.2,fill=sky,name=Scattered light}{M 2.2 1.1 C 2.2 1.71 1.71 2.2 1.1 2.2 C 0.49 2.2 0 1.71 0 1.1 C 0 0.49 0.49 0 1.1 0 C 1.71 0 2.2 0.49 2.2 1.1 Z}
+\olshape{x=115.8mm,y=8.3mm,w=1.4mm,h=1.4mm,vb=0 0 1.4 1.4,fill=sky,name=Scattered light}{M 1.4 0.7 C 1.4 1.09 1.09 1.4 0.7 1.4 C 0.31 1.4 0 1.09 0 0.7 C 0 0.31 0.31 0 0.7 0 C 1.09 0 1.4 0.31 1.4 0.7 Z}
+\olshape{x=106.4mm,y=22.4mm,w=1.2mm,h=1.2mm,vb=0 0 1.2 1.2,fill=sky,name=Scattered light}{M 1.2 0.6 C 1.2 0.93 0.93 1.2 0.6 1.2 C 0.27 1.2 0 0.93 0 0.6 C 0 0.27 0.27 0 0.6 0 C 0.93 0 1.2 0.27 1.2 0.6 Z}
+\olshape{x=142.7mm,y=38.2mm,w=1.6mm,h=1.6mm,vb=0 0 1.6 1.6,fill=sky,name=Scattered light}{M 1.6 0.8 C 1.6 1.24 1.24 1.6 0.8 1.6 C 0.36 1.6 0 1.24 0 0.8 C 0 0.36 0.36 0 0.8 0 C 1.24 0 1.6 0.36 1.6 0.8 Z}
+\olshape{x=0mm,y=73.5mm,w=160mm,h=1mm,vb=0 0 160 1,fill=white!24!night,name=Horizon}{M 0 0.5 L 160 0.5 L 160 0.8 L 0 0.8 Z}
+\begin{olbox}{x=12mm,y=78mm,w=80mm,h=2.8mm,font=7pt,color=white!45!night,grow,name=Footer}
+Why the sky is blue
+\end{olbox}
+\begin{olbox}{x=12mm,y=15mm,w=70mm,h=18.1mm,font=76pt,leading=1,color=sky,grow,name=Number}
+\textbf{01}
+\end{olbox}
+\begin{olbox}{x=12mm,y=46mm,w=90mm,h=9.4mm,font=28pt,leading=1.1,color=white,grow,name=Section title}
+\textbf{Light meets air}
+\end{olbox}
+\begin{olbox}{x=12mm,y=59.5mm,w=100mm,h=4mm,font=11pt,leading=1.3,color=white!70!night,grow,name=Section text}
+What we see, and what a sunbeam does on its way down
+\end{olbox}
+\note{A section divider is an ordinary slide with a background colour and a transition: the Page menu on the Layout toolbar sets both (this one fades in). New slide adds a slide with the layout you pick; drag the thumbnails in the rail to reorder slides, and duplicate or delete a slide from its thumbnail's menu. A duplicated slide is the quickest way to keep a deck consistent.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=paper,name=Noon and sunset}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker}
+\textbf{01 · LIGHT MEETS AIR}
+\end{olbox}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\textbf{Look up at noon, then west at dusk}
+\end{olbox}
+\olimage{x=12mm,y=27mm,w=66mm,h=40mm,crop=0 0.06 0.5 0.0309,name=Noon}{figures/sky}
+\begin{olbox}{x=15mm,y=30mm,w=13mm,h=5mm,fill=white,radius=2.5mm,valign=c,font=7pt,color=night,align=center,name=Time 1}
+\textbf{12:00}
+\end{olbox}
+\begin{olbox}{x=12mm,y=70mm,w=66mm,h=7.5mm,font=9pt,leading=1.3,color=ink,grow,name=Caption 1}
+\textbf{Noon.} The whole sky glows blue, and its light reaches us from everywhere.
+\end{olbox}
+\olimage{x=82mm,y=27mm,w=66mm,h=40mm,crop=0.5 0.06 0 0.0309,name=Sunset}{figures/sky}
+\begin{olbox}{x=85mm,y=30mm,w=13mm,h=5mm,fill=white,radius=2.5mm,valign=c,font=7pt,color=night,align=center,name=Time 2}
+\textbf{19:42}
+\end{olbox}
+\begin{olbox}{x=82mm,y=70mm,w=66mm,h=7.5mm,font=9pt,leading=1.3,color=ink,grow,name=Caption 2}
+\textbf{Sunset.} The sun itself turns orange and red, illuminating the clouds from below.
+\end{olbox}
+\note{Both pictures are one file, figures/sky.pdf, placed twice and cropped differently. Double-click an image (or select it and press C) to crop it: the handles crop, and dragging inside moves the picture in its frame. To use a picture of your own, drop a PNG, JPEG or PDF onto the slide, or use the image button on the Layout toolbar. The time labels are text boxes with a white fill and rounded corners.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=paper,name=Diagram}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker}
+\textbf{01 · LIGHT MEETS AIR}
+\end{olbox}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.2mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\textbf{One sunbeam, two fates}
+\end{olbox}
+\olshape{x=13mm,y=43mm,w=22mm,h=22mm,vb=0 0 22 22,draw=sun,line=0.6pt,opacity=0.6,name=Sun ring}{M 22 11 C 22 17.08 17.08 22 11 22 C 4.92 22 0 17.08 0 11 C 0 4.92 4.92 0 11 0 C 17.08 0 22 4.92 22 11 Z}
+\olshape{x=16mm,y=46mm,w=16mm,h=16mm,vb=0 0 16 16,fill=sun,name=Sun}{M 16 8 C 16 12.42 12.42 16 8 16 C 3.58 16 0 12.42 0 8 C 0 3.58 3.58 0 8 0 C 12.42 0 16 3.58 16 8 Z}
+\begin{olbox}{x=8mm,y=68mm,w=32mm,h=6mm,font=8pt,leading=1.25,color=mist,align=center,grow,name=Sun label}
+Sunlight:
+
+all colours at once
+\end{olbox}
+\olshape{x=37mm,y=52.3mm,w=25mm,h=1mm,vb=0 0 25 1,draw=sky,line=1.2pt,name=Beam}{M 0 0.5 L 25 0.5}
+\olshape{x=37mm,y=53.5mm,w=25mm,h=1mm,vb=0 0 25 1,draw=leaf,line=1.2pt,name=Beam}{M 0 0.5 L 25 0.5}
+\olshape{x=37mm,y=54.7mm,w=25mm,h=1mm,vb=0 0 25 1,draw=dusk,line=1.2pt,name=Beam}{M 0 0.5 L 25 0.5}
+\begin{olbox}{x=62mm,y=42mm,w=28mm,h=24mm,fill=white,draw=rule,line=0.6pt,radius=3mm,name=Molecule card}
+\end{olbox}
+\olshape{x=68.5mm,y=47.8mm,w=3.4mm,h=3.4mm,vb=0 0 3.4 3.4,fill=night,name=N}{M 3.4 1.7 C 3.4 2.64 2.64 3.4 1.7 3.4 C 0.76 3.4 0 2.64 0 1.7 C 0 0.76 0.76 0 1.7 0 C 2.64 0 3.4 0.76 3.4 1.7 Z}
+\olshape{x=71.5mm,y=47.8mm,w=3.4mm,h=3.4mm,vb=0 0 3.4 3.4,fill=night,name=N}{M 3.4 1.7 C 3.4 2.64 2.64 3.4 1.7 3.4 C 0.76 3.4 0 2.64 0 1.7 C 0 0.76 0.76 0 1.7 0 C 2.64 0 3.4 0.76 3.4 1.7 Z}
+\olshape{x=77.5mm,y=49.3mm,w=3.4mm,h=3.4mm,vb=0 0 3.4 3.4,fill=sky,name=O}{M 3.4 1.7 C 3.4 2.64 2.64 3.4 1.7 3.4 C 0.76 3.4 0 2.64 0 1.7 C 0 0.76 0.76 0 1.7 0 C 2.64 0 3.4 0.76 3.4 1.7 Z}
+\olshape{x=80.5mm,y=49.3mm,w=3.4mm,h=3.4mm,vb=0 0 3.4 3.4,fill=sky,name=O}{M 3.4 1.7 C 3.4 2.64 2.64 3.4 1.7 3.4 C 0.76 3.4 0 2.64 0 1.7 C 0 0.76 0.76 0 1.7 0 C 2.64 0 3.4 0.76 3.4 1.7 Z}
+\begin{olbox}{x=63mm,y=56mm,w=26mm,h=6mm,font=7.5pt,leading=1.25,color=mist,align=center,grow,name=Molecule label}
+air molecules,
+
+N$_{2}$ and O$_{2}$
+\end{olbox}
+\olshape{x=90.5mm,y=37mm,w=8mm,h=11mm,vb=0 0 8 11,draw=sky,line=1.2pt,arrows=-Stealth,step=2-,effect=wipe,name=Scattered}{M 0 11 C 3.5 11 4.5 0 8 0}
+\begin{olbox}{x=99.5mm,y=28mm,w=48.5mm,h=17mm,fill=sky!10!paper,radius=2.5mm,pad=3mm,font=8.5pt,leading=1.3,color=ink,grow,step=2-,effect=fade,name=Blue card}
+\textbf{\textcolor{sky}{Blue scatters sideways}}
+
+Your eyes catch it from every direction: the sky glows blue.
+\end{olbox}
+\olshape{x=90.5mm,y=60mm,w=8mm,h=7mm,vb=0 0 8 7,draw=dusk,line=1.2pt,arrows=-Stealth,step=3-,effect=wipe,name=Transmitted}{M 0 0 C 3.5 0 4.5 7 8 7}
+\begin{olbox}{x=99.5mm,y=58mm,w=48.5mm,h=17mm,fill=dusk!10!paper,radius=2.5mm,pad=3mm,font=8.5pt,leading=1.3,color=ink,grow,step=3-,effect=fade,name=Red card}
+\textbf{\textcolor{dusk}{Red goes straight on}}
+
+At sunset the path is 40 times longer: orange and red remain.
+\end{olbox}
+\note{Diagrams are shapes and arrows: R draws a rectangle, E an ellipse, L a line and A an arrow; the arrows here are curves with a tip (Arrow tips on the Layout toolbar), and N edits a shape's nodes. The two branches appear one after the other: select objects and give them an animation step and an entrance effect under Animation (steps 2 and 3 here). In the PDF every step becomes a page of its own --- beamer overlays.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=night,transition=fade,name=Section 02}
+\olshape{x=114.58mm,y=30.58mm,w=26.84mm,h=26.84mm,vb=0 0 26.84 26.84,draw=sun,line=0.6pt,opacity=0.4,name=Sun ring}{M 26.84 13.42 C 26.84 20.83 20.83 26.84 13.42 26.84 C 6.01 26.84 0 20.83 0 13.42 C 0 6.01 6.01 0 13.42 0 C 20.83 0 26.84 6.01 26.84 13.42 Z}
+\olshape{x=117mm,y=33mm,w=22mm,h=22mm,vb=0 0 22 22,fill=sun!40!dusk,name=Sun}{M 22 11 C 22 17.08 17.08 22 11 22 C 4.92 22 0 17.08 0 11 C 0 4.92 4.92 0 11 0 C 17.08 0 22 4.92 22 11 Z}
+\olshape{x=116.5mm,y=48.06mm,w=23mm,h=1.2mm,vb=0 0 23 1.2,fill=night,name=Sun stripe 1}{M 0 0 L 23 0 L 23 1.2 L 0 1.2 Z}
+\olshape{x=116.5mm,y=51.23mm,w=23mm,h=2.57mm,vb=0 0 23 2.57,fill=night,name=Sun stripe 2}{M 0 0 L 23 0 L 23 2.57 L 0 2.57 Z}
+\olshape{x=0mm,y=73.5mm,w=160mm,h=1mm,vb=0 0 160 1,fill=white!24!night,name=Horizon}{M 0 0.5 L 160 0.5 L 160 0.8 L 0 0.8 Z}
+\begin{olbox}{x=12mm,y=78mm,w=80mm,h=2.8mm,font=7pt,color=white!45!night,grow,name=Footer}
+Why the sky is blue
+\end{olbox}
+\begin{olbox}{x=12mm,y=15mm,w=70mm,h=18.1mm,font=76pt,leading=1,color=sky,grow,name=Number}
+\textbf{02}
+\end{olbox}
+\begin{olbox}{x=12mm,y=46mm,w=90mm,h=8.8mm,font=28pt,leading=1.1,color=white,grow,name=Section title}
+\textbf{The $\boldsymbol{\lambda^{-4}}$ law}
+\end{olbox}
+\begin{olbox}{x=12mm,y=59.5mm,w=100mm,h=4mm,font=11pt,leading=1.3,color=white!70!night,grow,name=Section text}
+Why small molecules prefer short waves
+\end{olbox}
+\note{This divider fades in as well. The section numbers and the sun that sinks from divider to divider are ordinary objects: copy them from one slide to another with Ctrl+C and Ctrl+V, or duplicate a selected object with Ctrl+D.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=paper,name=Formula}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.8mm,font=7pt,color=dusk,grow,name=Kicker}
+\textbf{02 · THE $\boldsymbol{\lambda^{-4}}$ LAW}
+\end{olbox}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\textbf{Where the fourth power comes from}
+\end{olbox}
+\olshape{x=14.35mm,y=36mm,w=1mm,h=7.5mm,vb=0 0 1 7.5,fill=rule,step=2-,effect=fade,name=Thread 1}{M 0.5 0 L 0.8 0 L 0.8 7.5 L 0.5 7.5 Z}
+\olshape{x=14.35mm,y=49.5mm,w=1mm,h=7.5mm,vb=0 0 1 7.5,fill=rule,step=3-,effect=fade,name=Thread 2}{M 0.5 0 L 0.8 0 L 0.8 7.5 L 0.5 7.5 Z}
+\olshape{x=14.35mm,y=63mm,w=1mm,h=7.5mm,vb=0 0 1 7.5,fill=rule,step=4-,effect=fade,name=Thread 3}{M 0.5 0 L 0.8 0 L 0.8 7.5 L 0.5 7.5 Z}
+\begin{olbox}{x=12mm,y=30mm,w=6mm,h=6mm,fill=sky,valign=c,shape=ellipse,font=8pt,color=white,align=center,name=Step 1}
+\textbf{1}
+\end{olbox}
+\begin{olbox}{x=22mm,y=27mm,w=54mm,h=12mm,valign=c,font=9.5pt,leading=1.25,color=ink,name=Step 1 text}
+\textbf{Light shakes the molecule}
+
+\textcolor{mist}{a dipole, driven by the field}
+\end{olbox}
+\begin{olbox}{x=80mm,y=27mm,w=68mm,h=12mm,valign=c,font=11pt,color=night,name=Step 1 formula}
+\[
+p(t)=\alpha\,E_{0}\cos\omega t
+\]
+\end{olbox}
+\begin{olbox}{x=12mm,y=43.5mm,w=6mm,h=6mm,fill=sky,valign=c,shape=ellipse,font=8pt,color=white,align=center,step=2-,effect=fade,name=Step 2}
+\textbf{2}
+\end{olbox}
+\begin{olbox}{x=22mm,y=40.5mm,w=54mm,h=12mm,valign=c,font=9.5pt,leading=1.25,color=ink,step=2-,effect=fade,name=Step 2 text}
+\textbf{The dipole radiates}
+
+\textcolor{mist}{its power grows as $\omega^{4}$}
+\end{olbox}
+\begin{olbox}{x=80mm,y=40.5mm,w=68mm,h=12mm,valign=c,font=11pt,color=night,step=2-,effect=fade,name=Step 2 formula}
+\[
+P=\frac{\alpha^{2}E_{0}^{2}}{12\pi\varepsilon_{0}c^{3}}\,\omega^{4}
+\]
+\end{olbox}
+\begin{olbox}{x=12mm,y=57mm,w=6mm,h=6mm,fill=sky,valign=c,shape=ellipse,font=8pt,color=white,align=center,step=3-,effect=fade,name=Step 3}
+\textbf{3}
+\end{olbox}
+\begin{olbox}{x=22mm,y=54mm,w=54mm,h=12mm,valign=c,font=9.5pt,leading=1.25,color=ink,step=3-,effect=fade,name=Step 3 text}
+\textbf{Frequency is wavelength}
+
+\textcolor{mist}{short waves oscillate faster}
+\end{olbox}
+\begin{olbox}{x=80mm,y=54mm,w=68mm,h=12mm,valign=c,font=11pt,color=night,step=3-,effect=fade,name=Step 3 formula}
+\[
+\omega=\frac{2\pi c}{\lambda}\quad\Longrightarrow\quad P\propto\lambda^{-4}
+\]
+\end{olbox}
+\begin{olbox}{x=12mm,y=70.5mm,w=6mm,h=6mm,fill=sky,valign=c,shape=ellipse,font=8pt,color=white,align=center,step=4-,effect=fade,name=Step 4}
+\textbf{4}
+\end{olbox}
+\begin{olbox}{x=22mm,y=67.5mm,w=54mm,h=12mm,valign=c,font=9.5pt,leading=1.25,color=ink,step=4-,effect=fade,name=Step 4 text}
+\textbf{Blue against red}
+
+\textcolor{mist}{$450\,\mathrm{nm}$ against $700\,\mathrm{nm}$}
+\end{olbox}
+\begin{olbox}{x=80mm,y=67.5mm,w=68mm,h=12mm,fill=sun!28!paper,radius=2.5mm,valign=c,font=11pt,color=night,step=4-,effect=fade,name=Step 4 formula}
+\[
+\frac{P_{\text{blue}}}{P_{\text{red}}}=\left(\frac{700}{450}\right)^{4}\approx5.9
+\]
+\end{olbox}
+\note{Formulas are typed exactly as in OverLyX documents: in a text box, press Ctrl+M (or type a dollar sign) and write LaTeX --- the formula renders as you type, in the fonts of the PDF. Each row appears on a click of its own: rows 2 to 4 have the animation steps 2-, 3- and 4- with a fade. Present with F5 and step through with Space or the arrow keys.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=sky,transition=push,name=Big number}
+\begin{olbox}{x=12mm,y=10mm,w=96mm,h=2.8mm,font=7pt,color=white!78!sky,grow,name=Kicker}
+\textbf{02 · THE $\boldsymbol{\lambda^{-4}}$ LAW}
+\end{olbox}
+\begin{olbox}{x=10mm,y=18mm,w=100mm,h=28.3mm,font=120pt,leading=1,color=white,grow,name=Number}
+\textbf{5.9\texttimes}
+\end{olbox}
+\begin{olbox}{x=12mm,y=55mm,w=96mm,h=13.1mm,font=17pt,leading=1.2,color=white,grow,name=Statement}
+more blue light than red is scattered out of every sunbeam
+\end{olbox}
+\begin{olbox}{x=12mm,y=73mm,w=96mm,h=4mm,font=9pt,color=white!80!sky,grow,name=Formula}
+$(700\,\mathrm{nm}/450\,\mathrm{nm})^{4}=1.556^{4}\approx5.9$
+\end{olbox}
+\olshape{x=114mm,y=75.5mm,w=34mm,h=1mm,vb=0 0 34 1,fill=white!60!sky,step=2-,effect=fade,name=Baseline}{M 0 0.5 L 34 0.5 L 34 0.8 L 0 0.8 Z}
+\olshape{x=118mm,y=32.05mm,w=11mm,h=43.95mm,vb=0 0 11 43.95,fill=white,step=2-,effect=fly-up,name=Blue bar}{M 0 0 L 11 0 L 11 43.95 L 0 43.95 Z}
+\olshape{x=134mm,y=68.5mm,w=11mm,h=7.5mm,vb=0 0 11 7.5,fill=dusk,step=2-,effect=fly-up,name=Red bar}{M 0 0 L 11 0 L 11 7.5 L 0 7.5 Z}
+\begin{olbox}{x=113.5mm,y=26.05mm,w=20mm,h=2.6mm,font=9pt,color=white,align=center,grow,step=2-,effect=fade,name=Blue value}
+\textbf{5.9}
+\end{olbox}
+\begin{olbox}{x=129.5mm,y=62.5mm,w=20mm,h=2.6mm,font=9pt,color=white,align=center,grow,step=2-,effect=fade,name=Red value}
+\textbf{1}
+\end{olbox}
+\begin{olbox}{x=113.5mm,y=78mm,w=20mm,h=2.3mm,font=7pt,color=white!80!sky,align=center,grow,step=2-,effect=fade,name=Blue label}
+$450\,\mathrm{nm}$
+\end{olbox}
+\begin{olbox}{x=129.5mm,y=78mm,w=20mm,h=2.3mm,font=7pt,color=white!80!sky,align=center,grow,step=2-,effect=fade,name=Red label}
+$700\,\mathrm{nm}$
+\end{olbox}
+\note{A bold statement needs only two things: a background colour for the page (the Page menu on the Layout toolbar) and a very large font size --- this number is a text box set at 120 pt. The two bars rise on the second click (effect: fly up), and the slide itself comes in with a push transition.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=paper,name=Plot}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.8mm,font=7pt,color=dusk,grow,name=Kicker}
+\textbf{02 · THE $\boldsymbol{\lambda^{-4}}$ LAW}
+\end{olbox}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=5.4mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\textbf{Blue scatters far more than red}
+\end{olbox}
+\olimage{x=12mm,y=26mm,w=100mm,h=54mm,name=Plot}{figures/scattering}
+\olshape{x=29.32mm,y=30.54mm,w=5.1mm,h=6.3mm,vb=0 0 5.1 6.3,draw=ink,line=0.5pt,name=Violet leader}{M 0 6.3 L 3.1 0 L 5.1 0}
+\olshape{x=27.32mm,y=36.64mm,w=2.2mm,h=2.2mm,vb=0 0 2.2 2.2,fill=night,draw=paper,line=0.8pt,name=Violet point}{M 2.2 1.1 C 2.2 1.71 1.71 2.2 1.1 2.2 C 0.49 2.2 0 1.71 0 1.1 C 0 0.49 0.49 0 1.1 0 C 1.71 0 2.2 0.49 2.2 1.1 Z}
+\begin{olbox}{x=35.22mm,y=28.34mm,w=74mm,h=3.1mm,font=8pt,color=ink,grow,name=Violet callout}
+\textbf{Violet scatters most of all}\,--- so why is the sky not violet?
+\end{olbox}
+\olshape{x=40.37mm,y=41.48mm,w=11.1mm,h=7.1mm,vb=0 0 11.1 7.1,draw=ink,line=0.5pt,name=Blue leader}{M 0 7.1 L 6.1 0 L 11.1 0}
+\olshape{x=38.37mm,y=48.38mm,w=2.2mm,h=2.2mm,vb=0 0 2.2 2.2,fill=night,draw=paper,line=0.8pt,name=Blue point}{M 2.2 1.1 C 2.2 1.71 1.71 2.2 1.1 2.2 C 0.49 2.2 0 1.71 0 1.1 C 0 0.49 0.49 0 1.1 0 C 1.71 0 2.2 0.49 2.2 1.1 Z}
+\begin{olbox}{x=52.27mm,y=39.18mm,w=38mm,h=6mm,font=8pt,leading=1.25,color=ink,grow,name=Blue callout}
+\textbf{Blue,} $\mathbf{450\,nm}$
+
+5.9 times as much as red
+\end{olbox}
+\olshape{x=94.24mm,y=59.67mm,w=1mm,h=4.7mm,vb=0 0 1 4.7,draw=ink,line=0.5pt,name=Red leader}{M 0.5 4.7 L 0.5 0}
+\olshape{x=93.64mm,y=64.57mm,w=2.2mm,h=2.2mm,vb=0 0 2.2 2.2,fill=night,draw=paper,line=0.8pt,name=Red point}{M 2.2 1.1 C 2.2 1.71 1.71 2.2 1.1 2.2 C 0.49 2.2 0 1.71 0 1.1 C 0 0.49 0.49 0 1.1 0 C 1.71 0 2.2 0.49 2.2 1.1 Z}
+\begin{olbox}{x=80.74mm,y=51.67mm,w=28mm,h=6mm,font=8pt,leading=1.25,color=ink,align=center,grow,name=Red callout}
+\textbf{Red,} $\mathbf{700\,nm}$
+
+the reference: 1
+\end{olbox}
+\olshape{x=114.5mm,y=27mm,w=1mm,h=52mm,vb=0 0 1 52,fill=rule,name=Divider}{M 0.5 0 L 0.8 0 L 0.8 52 L 0.5 52 Z}
+\begin{olbox}{x=118.5mm,y=27mm,w=29.5mm,h=3mm,font=10pt,leading=1.2,color=night,grow,name=Panel heading}
+\textbf{How to read it}
+\end{olbox}
+\begin{olbox}{x=118.5mm,y=33.5mm,w=29.5mm,h=29.3mm,font=8.5pt,leading=1.3,color=ink,grow,name=Panel text}
+The curve is
+\[
+\left(\frac{700\,\mathrm{nm}}{\lambda}\right)^{4}
+\]
+Halve the wavelength
+
+and 16 times as much
+
+light is scattered.
+\end{olbox}
+\begin{olbox}{x=118.5mm,y=71mm,w=29.5mm,h=5.7mm,font=7pt,leading=1.3,color=mist,grow,name=Panel note}
+Computed from Rayleigh's law, not measured.
+\end{olbox}
+\note{The plot is a PDF made with pgfplots (figures/scattering.pdf), placed as an image. The callouts on top of it --- dots, leader lines and labels --- are ordinary objects, so they stay editable and can be moved one by one. Select several and press Ctrl+G to group them (Ctrl+Shift+G ungroups). A plot that should be compiled with the deck can be a raw LaTeX object instead (the TeX button on the Layout toolbar).}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=night,transition=fade,name=Section 03}
+\olshape{x=113mm,y=59mm,w=30mm,h=15mm,vb=0 0 30 15,fill=dusk,name=Sun}{M 0 15 C 0 6.72 6.72 0 15 0 C 23.28 0 30 6.72 30 15 Z}
+\olshape{x=112.5mm,y=66.58mm,w=31mm,h=0.82mm,vb=0 0 31 0.82,fill=night,name=Sun stripe 1}{M 0 0 L 31 0 L 31 0.82 L 0 0.82 Z}
+\olshape{x=112.5mm,y=68.94mm,w=31mm,h=1.29mm,vb=0 0 31 1.29,fill=night,name=Sun stripe 2}{M 0 0 L 31 0 L 31 1.29 L 0 1.29 Z}
+\olshape{x=112.5mm,y=71.41mm,w=31mm,h=1.77mm,vb=0 0 31 1.77,fill=night,name=Sun stripe 3}{M 0 0 L 31 0 L 31 1.77 L 0 1.77 Z}
+\olshape{x=0mm,y=73.5mm,w=160mm,h=1mm,vb=0 0 160 1,fill=white!24!night,name=Horizon}{M 0 0.5 L 160 0.5 L 160 0.8 L 0 0.8 Z}
+\begin{olbox}{x=12mm,y=78mm,w=80mm,h=2.8mm,font=7pt,color=white!45!night,grow,name=Footer}
+Why the sky is blue
+\end{olbox}
+\begin{olbox}{x=12mm,y=15mm,w=70mm,h=18.1mm,font=76pt,leading=1,color=sky,grow,name=Number}
+\textbf{03}
+\end{olbox}
+\begin{olbox}{x=12mm,y=46mm,w=90mm,h=9.4mm,font=28pt,leading=1.1,color=white,grow,name=Section title}
+\textbf{Beyond blue}
+\end{olbox}
+\begin{olbox}{x=12mm,y=59.5mm,w=100mm,h=3.6mm,font=11pt,leading=1.3,color=white!70!night,grow,name=Section text}
+Clouds, violet, and who worked it all out
+\end{olbox}
+\note{Last section. Speaker notes like these belong to their slide: they show under the slides when they are switched on (Notes at the top of the slide rail, or the notes button on the Layout toolbar), in the presenter view (S while presenting), and in the file they are beamer's \texttt{\textbackslash note}.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=paper,name=Comparison}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker}
+\textbf{03 · BEYOND BLUE}
+\end{olbox}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\textbf{Why clouds are white}
+\end{olbox}
+\begin{olbox}{x=12mm,y=27mm,w=65mm,h=53mm,fill=sky!9!paper,radius=3mm,name=Card 1,lock}
+\end{olbox}
+\olshape{x=18mm,y=31.8mm,w=24mm,h=4.4mm,vb=0 0 24 4.4,draw=sky,line=1pt,name=Wave}{M 0 2.2 L 0.5 1.36 L 1 0.64 L 1.5 0.17 L 2 0 L 2.5 0.17 L 3 0.64 L 3.5 1.36 L 4 2.2 L 4.5 3.04 L 5 3.76 L 5.5 4.23 L 6 4.4 L 6.5 4.23 L 7 3.76 L 7.5 3.04 L 8 2.2 L 8.5 1.36 L 9 0.64 L 9.5 0.17 L 10 0 L 10.5 0.17 L 11 0.64 L 11.5 1.36 L 12 2.2 L 12.5 3.04 L 13 3.76 L 13.5 4.23 L 14 4.4 L 14.5 4.23 L 15 3.76 L 15.5 3.04 L 16 2.2 L 16.5 1.36 L 17 0.64 L 17.5 0.17 L 18 0 L 18.5 0.17 L 19 0.64 L 19.5 1.36 L 20 2.2 L 20.5 3.04 L 21 3.76 L 21.5 4.23 L 22 4.4 L 22.5 4.23 L 23 3.76 L 23.5 3.04 L 24 2.2}
+\olshape{x=45.1mm,y=33.1mm,w=1.8mm,h=1.8mm,vb=0 0 1.8 1.8,fill=night,name=Molecule}{M 1.8 0.9 C 1.8 1.4 1.4 1.8 0.9 1.8 C 0.4 1.8 0 1.4 0 0.9 C 0 0.4 0.4 0 0.9 0 C 1.4 0 1.8 0.4 1.8 0.9 Z}
+\begin{olbox}{x=18mm,y=41mm,w=54mm,h=4.7mm,font=13pt,leading=1.15,color=night,grow,name=Side 1 title}
+\textbf{Rayleigh scattering}
+\end{olbox}
+\begin{olbox}{x=18mm,y=47.5mm,w=51mm,h=6.7mm,font=8pt,leading=1.3,color=mist,grow,name=Side 1 text}
+tiny particles, far smaller than the wavelength: molecules
+\end{olbox}
+\begin{olbox}{x=18mm,y=56.5mm,w=54mm,h=2mm,font=6.5pt,color=mist,grow,name=Side 1 label 1}
+\textbf{COLOUR}
+\end{olbox}
+\begin{olbox}{x=18mm,y=59.4mm,w=54mm,h=4mm,font=9pt,color=ink,grow,name=Side 1 row 1}
+strongly colour-dependent, $\propto\lambda^{-4}$
+\end{olbox}
+\begin{olbox}{x=18mm,y=64.1mm,w=54mm,h=2mm,font=6.5pt,color=mist,grow,name=Side 1 label 2}
+\textbf{DIRECTION}
+\end{olbox}
+\begin{olbox}{x=18mm,y=67mm,w=54mm,h=2.7mm,font=9pt,color=ink,grow,name=Side 1 row 2}
+forwards and backwards alike
+\end{olbox}
+\begin{olbox}{x=18mm,y=71.7mm,w=54mm,h=2mm,font=6.5pt,color=mist,grow,name=Side 1 label 3}
+\textbf{WHERE YOU SEE IT}
+\end{olbox}
+\begin{olbox}{x=18mm,y=74.6mm,w=54mm,h=3.4mm,font=9pt,color=ink,grow,name=Side 1 row 3}
+the blue sky and the red sunset
+\end{olbox}
+\begin{olbox}{x=83mm,y=27mm,w=65mm,h=53mm,fill=night!6!paper,radius=3mm,name=Card 2,lock}
+\end{olbox}
+\olshape{x=89mm,y=31.8mm,w=24mm,h=4.4mm,vb=0 0 24 4.4,draw=mist,line=1pt,name=Wave}{M 0 2.2 L 0.5 1.36 L 1 0.64 L 1.5 0.17 L 2 0 L 2.5 0.17 L 3 0.64 L 3.5 1.36 L 4 2.2 L 4.5 3.04 L 5 3.76 L 5.5 4.23 L 6 4.4 L 6.5 4.23 L 7 3.76 L 7.5 3.04 L 8 2.2 L 8.5 1.36 L 9 0.64 L 9.5 0.17 L 10 0 L 10.5 0.17 L 11 0.64 L 11.5 1.36 L 12 2.2 L 12.5 3.04 L 13 3.76 L 13.5 4.23 L 14 4.4 L 14.5 4.23 L 15 3.76 L 15.5 3.04 L 16 2.2 L 16.5 1.36 L 17 0.64 L 17.5 0.17 L 18 0 L 18.5 0.17 L 19 0.64 L 19.5 1.36 L 20 2.2 L 20.5 3.04 L 21 3.76 L 21.5 4.23 L 22 4.4 L 22.5 4.23 L 23 3.76 L 23.5 3.04 L 24 2.2}
+\olshape{x=118.4mm,y=29.4mm,w=9.2mm,h=9.2mm,vb=0 0 9.2 9.2,fill=white,draw=mist,line=0.6pt,name=Droplet}{M 9.2 4.6 C 9.2 7.14 7.14 9.2 4.6 9.2 C 2.06 9.2 0 7.14 0 4.6 C 0 2.06 2.06 0 4.6 0 C 7.14 0 9.2 2.06 9.2 4.6 Z}
+\begin{olbox}{x=89mm,y=41mm,w=54mm,h=4.7mm,font=13pt,leading=1.15,color=night,grow,name=Side 2 title}
+\textbf{Mie scattering}
+\end{olbox}
+\begin{olbox}{x=89mm,y=47.5mm,w=51mm,h=6.7mm,font=8pt,leading=1.3,color=mist,grow,name=Side 2 text}
+particles as large as the wavelength, or larger: droplets
+\end{olbox}
+\begin{olbox}{x=89mm,y=56.5mm,w=54mm,h=2mm,font=6.5pt,color=mist,grow,name=Side 2 label 1}
+\textbf{COLOUR}
+\end{olbox}
+\begin{olbox}{x=89mm,y=59.4mm,w=54mm,h=3.4mm,font=9pt,color=ink,grow,name=Side 2 row 1}
+nearly the same for all colours
+\end{olbox}
+\begin{olbox}{x=89mm,y=64.1mm,w=54mm,h=2mm,font=6.5pt,color=mist,grow,name=Side 2 label 2}
+\textbf{DIRECTION}
+\end{olbox}
+\begin{olbox}{x=89mm,y=67mm,w=54mm,h=3.4mm,font=9pt,color=ink,grow,name=Side 2 row 2}
+mostly forwards
+\end{olbox}
+\begin{olbox}{x=89mm,y=71.7mm,w=54mm,h=2mm,font=6.5pt,color=mist,grow,name=Side 2 label 3}
+\textbf{WHERE YOU SEE IT}
+\end{olbox}
+\begin{olbox}{x=89mm,y=74.6mm,w=54mm,h=3.4mm,font=9pt,color=ink,grow,name=Side 2 row 3}
+white clouds, grey haze and fog
+\end{olbox}
+\begin{olbox}{x=76mm,y=49.5mm,w=8mm,h=8mm,fill=night,valign=c,shape=ellipse,font=8pt,color=white,align=center,name=Versus}
+\textbf{vs}
+\end{olbox}
+\note{Two columns are two cards: a text box with a fill and rounded corners (the text box settings on the Layout toolbar) and the text boxes on top of it. The cards are locked, so that clicks reach the text on them --- the lock button unlocks them. The waves are shapes too: double-click one to edit its nodes, or draw your own with the pen (B).}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=paper,name=Table}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker}
+\textbf{03 · BEYOND BLUE}
+\end{olbox}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\textbf{Why is the sky not violet?}
+\end{olbox}
+\begin{olbox}{x=12mm,y=29mm,w=78mm,h=35.3mm,font=12pt,color=ink,grow,name=Table}
+\begin{tabular}{lrr}
+\toprule 
+\textbf{Colour} & \textbf{Wavelength} & \textbf{Scattered}\tabularnewline
+\midrule 
+\textbf{\textcolor{iris}{Violet}} & 400 nm & 9.4\tabularnewline
+\textbf{\textcolor{sky}{Blue}} & 450 nm & 5.9\tabularnewline
+\textbf{\textcolor{leaf}{Green}} & 530 nm & 3.0\tabularnewline
+\textbf{\textcolor{gold}{Yellow}} & 580 nm & 2.1\tabularnewline
+\textbf{\textcolor{dusk}{Red}} & 700 nm & 1.0\tabularnewline
+\bottomrule
+\end{tabular}
+\end{olbox}
+\begin{olbox}{x=12mm,y=72mm,w=78mm,h=3.3mm,font=7.5pt,leading=1.3,color=mist,grow,name=Table note}
+Light scattered, relative to red: $(700\,\mathrm{nm}/\lambda)^{4}$.
+\end{olbox}
+\olshape{x=95.5mm,y=29mm,w=1mm,h=50mm,vb=0 0 1 50,fill=rule,name=Divider}{M 0.5 0 L 0.8 0 L 0.8 50 L 0.5 50 Z}
+\begin{olbox}{x=100mm,y=29mm,w=48mm,h=3.2mm,font=11pt,leading=1.2,color=night,grow,name=Reasons heading}
+\textbf{Three reasons}
+\end{olbox}
+\begin{olbox}{x=100mm,y=38mm,w=6mm,h=6mm,fill=dusk,valign=c,shape=ellipse,font=8pt,color=white,align=center,name=Reason 1 number}
+\textbf{1}
+\end{olbox}
+\begin{olbox}{x=109mm,y=38.3mm,w=39mm,h=6.9mm,font=9pt,leading=1.3,color=ink,grow,name=Reason 1}
+Sunlight brings less violet than blue.
+\end{olbox}
+\begin{olbox}{x=100mm,y=51mm,w=6mm,h=6mm,fill=dusk,valign=c,shape=ellipse,font=8pt,color=white,align=center,name=Reason 2 number}
+\textbf{2}
+\end{olbox}
+\begin{olbox}{x=109mm,y=51.3mm,w=39mm,h=6.9mm,font=9pt,leading=1.3,color=ink,grow,name=Reason 2}
+Our eyes are much less sensitive to violet.
+\end{olbox}
+\begin{olbox}{x=100mm,y=64mm,w=6mm,h=6mm,fill=dusk,valign=c,shape=ellipse,font=8pt,color=white,align=center,name=Reason 3 number}
+\textbf{3}
+\end{olbox}
+\begin{olbox}{x=109mm,y=64.3mm,w=39mm,h=7.5mm,font=9pt,leading=1.3,color=ink,grow,name=Reason 3}
+The mix of violet, blue and green looks pale blue.
+\end{olbox}
+\note{Tables live in text boxes and are edited as in documents: the table button on the toolbar (Ctrl+Alt+T) inserts one, and Tab moves from cell to cell; the rules are booktabs. Text is coloured as anywhere else in OverLyX, with the colours of the preamble. The numbered circles are text boxes with an ellipse shape.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=paper,transition=wipe,name=Timeline}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker}
+\textbf{03 · BEYOND BLUE}
+\end{olbox}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\textbf{150 years of looking up}
+\end{olbox}
+\olshape{x=12mm,y=51.5mm,w=136mm,h=1mm,vb=0 0 136 1,draw=mist!50!paper,line=0.8pt,arrows=-Stealth,name=Time axis}{M 0 0.5 L 136 0.5}
+\olshape{x=19.8mm,y=49.8mm,w=4.4mm,h=4.4mm,vb=0 0 4.4 4.4,fill=sky,draw=paper,line=1.2pt,name=1869 dot}{M 4.4 2.2 C 4.4 3.42 3.42 4.4 2.2 4.4 C 0.98 4.4 0 3.42 0 2.2 C 0 0.98 0.98 0 2.2 0 C 3.42 0 4.4 0.98 4.4 2.2 Z}
+\begin{olbox}{x=10mm,y=41mm,w=24mm,h=4mm,font=15pt,color=night,align=center,grow,name=1869 year}
+\textbf{1869}
+\end{olbox}
+\begin{olbox}{x=8.5mm,y=58mm,w=27mm,h=9.2mm,font=7.5pt,leading=1.3,color=ink,align=center,grow,name=1869 text}
+John Tyndall sees
+
+a beam of light turn
+
+blue in fine mist
+\end{olbox}
+\olshape{x=48.3mm,y=49.8mm,w=4.4mm,h=4.4mm,vb=0 0 4.4 4.4,fill=dusk,draw=paper,line=1.2pt,step=2-,effect=zoom,name=1871 dot}{M 4.4 2.2 C 4.4 3.42 3.42 4.4 2.2 4.4 C 0.98 4.4 0 3.42 0 2.2 C 0 0.98 0.98 0 2.2 0 C 3.42 0 4.4 0.98 4.4 2.2 Z}
+\begin{olbox}{x=38.5mm,y=41mm,w=24mm,h=4mm,font=15pt,color=night,align=center,grow,step=2-,effect=fade,name=1871 year}
+\textbf{1871}
+\end{olbox}
+\begin{olbox}{x=37mm,y=58mm,w=27mm,h=9.8mm,font=7.5pt,leading=1.3,color=ink,align=center,grow,step=2-,effect=fade,name=1871 text}
+Lord Rayleigh finds
+
+the $\lambda^{-4}$ law for
+
+tiny particles
+\end{olbox}
+\olshape{x=76.8mm,y=49.8mm,w=4.4mm,h=4.4mm,vb=0 0 4.4 4.4,fill=sky,draw=paper,line=1.2pt,step=3-,effect=zoom,name=1899 dot}{M 4.4 2.2 C 4.4 3.42 3.42 4.4 2.2 4.4 C 0.98 4.4 0 3.42 0 2.2 C 0 0.98 0.98 0 2.2 0 C 3.42 0 4.4 0.98 4.4 2.2 Z}
+\begin{olbox}{x=67mm,y=41mm,w=24mm,h=4mm,font=15pt,color=night,align=center,grow,step=3-,effect=fade,name=1899 year}
+\textbf{1899}
+\end{olbox}
+\begin{olbox}{x=65.5mm,y=58mm,w=27mm,h=9.8mm,font=7.5pt,leading=1.3,color=ink,align=center,grow,step=3-,effect=fade,name=1899 text}
+Rayleigh shows
+
+that air molecules
+
+alone are enough
+\end{olbox}
+\olshape{x=105.3mm,y=49.8mm,w=4.4mm,h=4.4mm,vb=0 0 4.4 4.4,fill=sky,draw=paper,line=1.2pt,step=4-,effect=zoom,name=1908 dot}{M 4.4 2.2 C 4.4 3.42 3.42 4.4 2.2 4.4 C 0.98 4.4 0 3.42 0 2.2 C 0 0.98 0.98 0 2.2 0 C 3.42 0 4.4 0.98 4.4 2.2 Z}
+\begin{olbox}{x=95.5mm,y=41mm,w=24mm,h=4mm,font=15pt,color=night,align=center,grow,step=4-,effect=fade,name=1908 year}
+\textbf{1908}
+\end{olbox}
+\begin{olbox}{x=94mm,y=58mm,w=27mm,h=9.8mm,font=7.5pt,leading=1.3,color=ink,align=center,grow,step=4-,effect=fade,name=1908 text}
+Gustav Mie solves
+
+scattering by spheres
+
+of any size
+\end{olbox}
+\olshape{x=133.8mm,y=49.8mm,w=4.4mm,h=4.4mm,vb=0 0 4.4 4.4,fill=sky,draw=paper,line=1.2pt,step=5-,effect=zoom,name=1910 dot}{M 4.4 2.2 C 4.4 3.42 3.42 4.4 2.2 4.4 C 0.98 4.4 0 3.42 0 2.2 C 0 0.98 0.98 0 2.2 0 C 3.42 0 4.4 0.98 4.4 2.2 Z}
+\begin{olbox}{x=124mm,y=41mm,w=24mm,h=4mm,font=15pt,color=night,align=center,grow,step=5-,effect=fade,name=1910 year}
+\textbf{1910}
+\end{olbox}
+\begin{olbox}{x=122.5mm,y=58mm,w=27mm,h=9.8mm,font=7.5pt,leading=1.3,color=ink,align=center,grow,step=5-,effect=fade,name=1910 text}
+Albert Einstein
+
+links it to changes
+
+in the air's density
+\end{olbox}
+\note{The milestones appear one at a time (steps 2 to 5), and the slide comes in with a wipe. Even spacing is what Align and distribute is for: select the five dots and choose Distribute horizontally. The arrow keys nudge a selection by 1 mm, with Shift by 10 mm.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=paper,name=Quote}
+\begin{olbox}{x=15mm,y=13mm,w=30mm,h=40mm,font=110pt,leading=1,color=dusk,name=Quote mark}
+\textbf{``}
+\end{olbox}
+\begin{olbox}{x=30mm,y=30mm,w=118mm,h=26.4mm,font=22pt,leading=1.22,color=night,grow,name=Quote}
+The blue of the sky and the red
+
+of the sunset are the same
+
+sunlight, sorted by the air.
+\end{olbox}
+\olshape{x=30mm,y=64.5mm,w=8mm,h=0.9mm,vb=0 0 8 0.9,fill=dusk,name=Accent}{M 0 0 L 8 0 L 8 0.9 L 0 0.9 Z}
+\begin{olbox}{x=30mm,y=67.5mm,w=100mm,h=3mm,font=10pt,color=mist,grow,name=Attribution}
+The whole talk in one sentence
+\end{olbox}
+\note{Build the PDF with Ctrl+R (or the build button). Every slide becomes a page and every animation step an overlay page; OverLyX then compares each text box with the PDF and marks a box whose text runs out of it --- click the mark to make the box tall enough.}
+\end{frame}
+
+\begin{frame}[plain]
+\olpage{fill=night,transition=dissolve,name=Questions}
+\olshape{x=96.5mm,y=11.5mm,w=1mm,h=1mm,vb=0 0 1 1,fill=white,opacity=0.8,name=Star}{M 1 0.5 C 1 0.78 0.78 1 0.5 1 C 0.22 1 0 0.78 0 0.5 C 0 0.22 0.22 0 0.5 0 C 0.78 0 1 0.22 1 0.5 Z}
+\olshape{x=111.65mm,y=20.65mm,w=0.7mm,h=0.7mm,vb=0 0 0.7 0.7,fill=white,opacity=0.8,name=Star}{M 0.7 0.35 C 0.7 0.54 0.54 0.7 0.35 0.7 C 0.16 0.7 0 0.54 0 0.35 C 0 0.16 0.16 0 0.35 0 C 0.54 0 0.7 0.16 0.7 0.35 Z}
+\olshape{x=123.4mm,y=8.4mm,w=1.2mm,h=1.2mm,vb=0 0 1.2 1.2,fill=white,opacity=0.8,name=Star}{M 1.2 0.6 C 1.2 0.93 0.93 1.2 0.6 1.2 C 0.27 1.2 0 0.93 0 0.6 C 0 0.27 0.27 0 0.6 0 C 0.93 0 1.2 0.27 1.2 0.6 Z}
+\olshape{x=138.6mm,y=14.6mm,w=0.8mm,h=0.8mm,vb=0 0 0.8 0.8,fill=white,opacity=0.8,name=Star}{M 0.8 0.4 C 0.8 0.62 0.62 0.8 0.4 0.8 C 0.18 0.8 0 0.62 0 0.4 C 0 0.18 0.18 0 0.4 0 C 0.62 0 0.8 0.18 0.8 0.4 Z}
+\olshape{x=150.5mm,y=26.5mm,w=1mm,h=1mm,vb=0 0 1 1,fill=white,opacity=0.8,name=Star}{M 1 0.5 C 1 0.78 0.78 1 0.5 1 C 0.22 1 0 0.78 0 0.5 C 0 0.22 0.22 0 0.5 0 C 0.78 0 1 0.22 1 0.5 Z}
+\olshape{x=103.65mm,y=32.65mm,w=0.7mm,h=0.7mm,vb=0 0 0.7 0.7,fill=white,opacity=0.8,name=Star}{M 0.7 0.35 C 0.7 0.54 0.54 0.7 0.35 0.7 C 0.16 0.7 0 0.54 0 0.35 C 0 0.16 0.16 0 0.35 0 C 0.54 0 0.7 0.16 0.7 0.35 Z}
+\olshape{x=145.55mm,y=43.55mm,w=0.9mm,h=0.9mm,vb=0 0 0.9 0.9,fill=white,opacity=0.8,name=Star}{M 0.9 0.45 C 0.9 0.7 0.7 0.9 0.45 0.9 C 0.2 0.9 0 0.7 0 0.45 C 0 0.2 0.2 0 0.45 0 C 0.7 0 0.9 0.2 0.9 0.45 Z}
+\olshape{x=117.7mm,y=40.7mm,w=0.6mm,h=0.6mm,vb=0 0 0.6 0.6,fill=white,opacity=0.8,name=Star}{M 0.6 0.3 C 0.6 0.47 0.47 0.6 0.3 0.6 C 0.13 0.6 0 0.47 0 0.3 C 0 0.13 0.13 0 0.3 0 C 0.47 0 0.6 0.13 0.6 0.3 Z}
+\olshape{x=132.7mm,y=30.7mm,w=0.6mm,h=0.6mm,vb=0 0 0.6 0.6,fill=white,opacity=0.8,name=Star}{M 0.6 0.3 C 0.6 0.47 0.47 0.6 0.3 0.6 C 0.13 0.6 0 0.47 0 0.3 C 0 0.13 0.13 0 0.3 0 C 0.47 0 0.6 0.13 0.6 0.3 Z}
+\olshape{x=153.65mm,y=8.65mm,w=0.7mm,h=0.7mm,vb=0 0 0.7 0.7,fill=white,opacity=0.8,name=Star}{M 0.7 0.35 C 0.7 0.54 0.54 0.7 0.35 0.7 C 0.16 0.7 0 0.54 0 0.35 C 0 0.16 0.16 0 0.35 0 C 0.54 0 0.7 0.16 0.7 0.35 Z}
+\olshape{x=119mm,y=65mm,w=18mm,h=9mm,vb=0 0 18 9,fill=dusk!80!night,name=Sun}{M 0 9 C 0 4.03 4.03 0 9 0 C 13.97 0 18 4.03 18 9 Z}
+\olshape{x=118.5mm,y=70mm,w=19mm,h=0.69mm,vb=0 0 19 0.69,fill=night,name=Sun stripe 1}{M 0 0 L 19 0 L 19 0.69 L 0 0.69 Z}
+\olshape{x=118.5mm,y=71.83mm,w=19mm,h=1.48mm,vb=0 0 19 1.48,fill=night,name=Sun stripe 2}{M 0 0 L 19 0 L 19 1.48 L 0 1.48 Z}
+\olshape{x=0mm,y=73.5mm,w=160mm,h=1mm,vb=0 0 160 1,fill=white!24!night,name=Horizon}{M 0 0.5 L 160 0.5 L 160 0.8 L 0 0.8 Z}
+\begin{olbox}{x=12mm,y=26mm,w=90mm,h=12.3mm,font=40pt,leading=1.05,color=white,grow,name=Questions}
+\textbf{Questions?}
+\end{olbox}
+\begin{olbox}{x=12mm,y=43.5mm,w=90mm,h=5mm,font=14pt,leading=1.2,color=white!72!night,grow,name=Thanks}
+Thank you for looking up.
+\end{olbox}
+\begin{olbox}{x=12mm,y=56mm,w=90mm,h=3mm,font=10pt,color=white,grow,name=Name}
+\textbf{@@NAME@@}
+\end{olbox}
+\begin{olbox}{x=12mm,y=61.5mm,w=90mm,h=3.2mm,font=8.5pt,color=white!65!night,grow,name=Contact}
+you@example.org
+\end{olbox}
+\begin{olbox}{x=12mm,y=78mm,w=120mm,h=2.8mm,font=7pt,color=white!45!night,grow,name=Footer}
+Slides made with OverLyX: every object on them is yours to change.
+\end{olbox}
+\note{To start a deck of your own: File, New slides / poster / page\ldots , and pick Slides 16:9 --- or keep this project and replace its content slide by slide. The file, deck.tex, is an ordinary beamer document: it compiles anywhere, and its history stays readable. Delete this project when you no longer need it.}
+\end{frame}
+
+\end{document}

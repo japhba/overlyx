@@ -116,7 +116,9 @@ export function deckStyle(doc: PMNode, page: { w: number; h: number }, basePt = 
       bodies.push({ key: [r1(b.attrs.x), r1(b.attrs.y), r1(b.attrs.w), font(b)].join('|'), value: b });
     }
   }
-  const b = mode(bodies)?.value ?? null;
+  // pages that each have a body of their own (a caption, a table, a card) agree on none: the default then
+  const bm = mode(bodies);
+  const b = bm && (bm.count >= 2 || bodies.length === 1) ? bm.value : null;
   const ta = title.attrs;
   const bodyY = Number(ta.y) + Number(ta.h) + 6;
   const body: BoxStyle = b ? styleOf(b) : {
@@ -222,7 +224,9 @@ export function layoutObjects(layout: SlideLayout, style: DeckStyle, page: { w: 
 /** A new slide of this layout after the page at `afterPos` (null: at the end). */
 export function insertSlide(state: EditorState, afterPos: number | null, layout: SlideLayout, page: { w: number; h: number }, basePt = 11): { tr: Transaction; pos: number } {
   const style = deckStyle(state.doc, page, basePt);
-  const node = schema.nodes.ol_page.create({ fill: style.fill }, layoutObjects(layout, style, page));
+  // the title slide copies the deck's own first page: its background too (a dark cover in a light deck)
+  const fill = layout === 'title' && style.cover ? style.cover.attrs.fill : style.fill;
+  const node = schema.nodes.ol_page.create({ fill }, layoutObjects(layout, style, page));
   const list = pages(state.doc);
   const after = afterPos === null ? null : list.find(p => p.pos === afterPos) ?? null;
   const at = after ? after.pos + after.node.nodeSize : (list.length ? list[list.length - 1].pos + list[list.length - 1].node.nodeSize : state.doc.content.size);

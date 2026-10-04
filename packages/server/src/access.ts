@@ -456,14 +456,15 @@ const STARTER_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname)
 /** The starters every account gets besides the welcome project (templates/starters/<id>, scripts/gen-starters.ts). */
 export const STARTERS: { id: string; title: string }[] = [
   { id: 'slides', title: 'Example: beamer slides' },
+  { id: 'deck', title: 'Example: slide deck' },
   { id: 'poster', title: 'Example: poster' },
   { id: 'paper', title: 'Example: paper' },
 ];
 
 /**
- * A beamer deck, a poster and a paper to start from, each an ordinary project of the account
- * (`<user>/example-slides`, …) with the account's name as author. Each is created once per account —
- * new accounts on their first visit, older ones on their next — and never again once deleted
+ * A beamer deck, a canvas slide deck, a poster and a paper to start from, each an ordinary project of
+ * the account (`<user>/example-slides`, …) with the account's name as author. Each is created once per
+ * account — new accounts on their first visit, older ones on their next — and never again once deleted
  * (`starter_projects` keeps a row per account and template). Guests get none.
  */
 export function ensureStarterProjects(user: SessionUser): string[] {

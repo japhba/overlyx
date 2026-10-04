@@ -5,6 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { EditorState } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 // the schema the client modules use (the same module instance: a node of another instance's schema is not inserted)
@@ -87,6 +88,21 @@ describe('the deck\'s style', () => {
     expect(promptMarks(tr.doc, text, PAGE)).toBeNull();
     // the new empty slide does not outvote the deck: still the deck's titles' style
     expect(deckStyle(tr.doc, PAGE).title.marks.length).toBe(1);
+  });
+
+  it('the example deck (a dark cover, slides each with a body of its own): the cover\'s background, a body below the title', () => {
+    const ex = load(readFileSync(path.resolve('packages/server/templates/starters/deck/deck.tex'), 'utf8')).state;
+    const ds = deckStyle(ex.doc, PAGE, 11);
+    expect(ds.title.attrs).toMatchObject({ x: 12, y: 12.5, w: 136, color: 'night' });
+    expect(Math.round(Number(ds.title.attrs.font))).toBe(20);
+    expect(ds.fill).toBe('paper');
+    // no two pages share a body (captions, cards, a table…): the default, under the title, as wide
+    expect(ds.body.attrs).toMatchObject({ x: 12, w: 136 });
+    expect(Number(ds.body.attrs.y)).toBeLessThan(30);
+    const cover = insertSlide(ex, null, 'title', PAGE, 11);
+    expect(cover.tr.doc.nodeAt(cover.pos)!.attrs.fill).toBe('night');
+    const content = insertSlide(ex, null, 'content', PAGE, 11);
+    expect(content.tr.doc.nodeAt(content.pos)!.attrs.fill).toBe('paper');
   });
 });
 

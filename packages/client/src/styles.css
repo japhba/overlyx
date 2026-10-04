@@ -586,12 +586,16 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
    p{…} columns at their width (the <colgroup>, core schema.ts) — not the column-filling fixed layout
    of prosemirror-tables' stylesheet */
 .lyx-tabular { display: inline-block; vertical-align: middle; margin: 4px 0; max-width: none; width: max-content; text-indent: 0; }
-.ProseMirror .lyx-tabular table { border-collapse: collapse; table-layout: auto; width: auto; }
+.ProseMirror .lyx-tabular table, .ol-present-stage .lyx-tabular table, .ol-rail-holder .lyx-tabular table { border-collapse: collapse; table-layout: auto; width: auto; }
 /* a table alone on its line (editor/plugins/widetables.ts): centred on the text column; one wider than
    the column is moved left by --ol-spill so that it overflows both margins by the same amount */
 .lyx-par.ol-solo-table { text-align: center; text-indent: 0; }
 .lyx-par.ol-solo-table > .lyx-tabular, .lyx-par.ol-solo-table > .lyx-math-inline { margin-left: calc(-1 * var(--ol-spill, 0px)); text-align: initial; }
 .lyx-par.ol-solo-table .ol-solo-blank { font-size: 0; }
+/* in a text box on a page, a table stands where TeX sets it: aligned like the box's text (no \centering
+   around it), its columns \tabcolsep (6 pt) apart from their rules on either side */
+.ol-page .lyx-par.ol-solo-table { text-align: inherit; }
+.ol-page .lyx-cell { padding-left: calc(var(--ol-pt) * 6); padding-right: calc(var(--ol-pt) * 6); }
 .lyx-cell { padding: 2px 6px; border: 1px dotted var(--cell-grid, var(--ui-border2)); min-width: 2em; }
 /* the dotted grid — LyX's hint for cell boundaries without a line — only while the cursor is in the
    table (editor/plugins/envfocus.ts marks it); the colour changes, never the layout */
@@ -1873,12 +1877,13 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .ol-page .lyx-size-tiny { font-size: calc(var(--ol-pt) * var(--ol-size-tiny) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-scriptsize { font-size: calc(var(--ol-pt) * var(--ol-size-scriptsize) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-footnotesize { font-size: calc(var(--ol-pt) * var(--ol-size-footnotesize) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-small { font-size: calc(var(--ol-pt) * var(--ol-size-small) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-normal { font-size: calc(var(--ol-pt) * var(--ol-size-normal) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-large { font-size: calc(var(--ol-pt) * var(--ol-size-large) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-larger { font-size: calc(var(--ol-pt) * var(--ol-size-larger) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-largest { font-size: calc(var(--ol-pt) * var(--ol-size-largest) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-huge { font-size: calc(var(--ol-pt) * var(--ol-size-huge) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-giant { font-size: calc(var(--ol-pt) * var(--ol-size-giant) * var(--ol-text-scale, 1)); }
 .ol-page .ol-box-content[data-align="justify"] { hyphens: auto; -webkit-hyphens: auto; }
 /* formulas on paper: no field padding or border around them (hover / editing show an outline), an
-   empty script base ($^{1}$) takes no room unless the formula is being edited, displays at the text size */
-.ol-page .lm-field { padding: 0; border: 0; }
+   empty script base ($^{1}$) takes no room unless the formula is being edited, displays at the text size;
+   a formula not yet made editable (drawn statically, on pages far from the viewport) the same */
+.ol-page .lm-field, .ol-page .lyx-math-static { padding: 0; border: 0; }
 .ol-page .lm-field:hover { outline: 1px solid rgba(26,115,232,0.3); }
 .ol-page .lm-field.focused { outline: 1px solid var(--accent); }
 .ol-page .lm-field:not(.focused) .lm-empty mjx-mspace, .ol-present-stage .lm-empty mjx-mspace, .ol-rail-holder .lm-empty mjx-mspace { width: 0 !important; }
-.ol-page .lm-field.display { font-size: 1em; }
+.ol-page .lm-field.display, .ol-page .lyx-math-static.display { font-size: 1em; }
 /* formulas at the text's nominal size, in the math font's own scale (not the editor's x-height match) */
 .lyx-editor.ol-layout .ol-page mjx-container[jax="CHTML"], .ol-present-stage .ol-page mjx-container[jax="CHTML"], .ol-rail-holder .ol-page mjx-container[jax="CHTML"] { font-size: calc(var(--ol-math-rel, 1) * 1em); }
 .ol-page-label { position: absolute; right: calc(100% + 10px); top: 0; font: 12px/1.3 var(--ui-font); color: var(--ui-muted); white-space: nowrap; user-select: none; max-width: 30px; overflow: hidden; text-overflow: ellipsis; }
@@ -1909,11 +1914,11 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 /* ProseMirror's trailing break after a display that ends its paragraph: its empty line overlaps the
    formula (a presentation's copy has no such break) */
 .ol-page .lyx-math-display.ol-disp-last:has(~ .ProseMirror-trailingBreak) { margin-bottom: calc(var(--ol-after) - 1lh); }
-.ol-page .lm-field.display { line-height: inherit; }
+.ol-page .lm-field.display, .ol-page .lyx-math-static.display:not(.pending) { line-height: inherit; }
 /* a size in a formula's text (\text{\small …}) is the size classes' (absolute on paper); MathJax laid
    the table out at the full size — its min-width would leave the difference beside it (off-centre) */
 mjx-mtable:has(.lyx-size-tiny, .lyx-size-scriptsize, .lyx-size-footnotesize, .lyx-size-small, .lyx-size-large, .lyx-size-larger, .lyx-size-largest, .lyx-size-huge, .lyx-size-giant) { min-width: 0 !important; }
-.ol-page .lm-field.display > .lm-content, .ol-page .lm-field.display mjx-container { line-height: 0; }
+.ol-page .lm-field.display > .lm-content, .ol-page .lm-field.display mjx-container, .ol-page .lyx-math-static.display mjx-container { line-height: 0; }
 .ol-box-content .lyx-par.lyx-layout-itemize, .ol-box-content .lyx-par.lyx-layout-enumerate { padding-left: 1.7em; }
 /* beamer's lists: the text \leftmargini in (2em of \normalsize, whatever the box's size), the label
    ending \labelsep (a quarter of it) before the text, 3pt between items; the bullet of the
@@ -1974,6 +1979,8 @@ mjx-mtable:has(.lyx-size-tiny, .lyx-size-scriptsize, .lyx-size-footnotesize, .ly
 /* the overlay: selection, handles, guides, drafts (page coordinates) */
 .ol-overlay { position: absolute; left: 0; top: 0; width: calc(var(--ol-mm) * var(--ol-page-w, 160)); height: calc(var(--ol-mm) * var(--ol-page-h, 90)); pointer-events: none; z-index: 5; }
 .ol-overlay > * { position: absolute; box-sizing: border-box; }
+/* a node selection ProseMirror makes by itself (the first object, on opening) selects nothing on the canvas: no outline */
+.ol-layout .ol-obj.ProseMirror-selectednode:not(.ol-sel) { outline: none; }
 .ol-selframe, .ol-editing { transform-origin: 50% 50%; outline: 1.5px solid var(--ol-sel); }
 .ol-editing { outline: 1px dashed var(--ol-sel); }
 .ol-selframe.ol-thin { outline: 1px dashed var(--ol-sel); }

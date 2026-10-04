@@ -1,7 +1,8 @@
 /**
  * The starter projects every account gets besides the welcome project (a beamer deck, a Layout-mode
- * poster and a paper: packages/server/templates/starters, scripts/gen-starters.ts): created once per
- * account, in OverLyX's canonical form (opening and saving them changes nothing), and compiling.
+ * slide deck, a Layout-mode poster and a paper: packages/server/templates/starters,
+ * scripts/gen-starters.ts): created once per account, in OverLyX's canonical form (opening and saving
+ * them changes nothing), and compiling.
  *   npx vitest run tests/starters.test.ts
  */
 import { describe, it, expect } from 'vitest';
@@ -25,20 +26,21 @@ const { walkInsets } = await import('../packages/core/src/index.ts');
 
 const TPL = join(import.meta.dirname, '../packages/server/templates/starters');
 const HAVE_LATEXMK = spawnSync('which', ['latexmk']).status === 0;
-const FILES: Record<string, string> = { slides: 'slides.tex', poster: 'poster.tex', paper: 'paper.tex' };
+const FILES: Record<string, string> = { slides: 'slides.tex', deck: 'deck.tex', poster: 'poster.tex', paper: 'paper.tex' };
 const personalise = (text: string, name: string) => text.replace(/@@NAME@@/g, name);
 
 describe('starter projects', () => {
   const ada = toSessionUser(createUser('ada', 'Ada Lovelace', 'pw'));
 
-  it('every account gets the deck, the poster and the paper once, besides the welcome project', () => {
+  it('every account gets the decks, the poster and the paper once, besides the welcome project', () => {
     expect(access.ensureWelcomeProject(ada)).toBe('ada/welcome');
-    expect(access.ensureStarterProjects(ada)).toEqual(['ada/example-slides', 'ada/example-poster', 'ada/example-paper']);
+    expect(access.ensureStarterProjects(ada)).toEqual(['ada/example-slides', 'ada/example-deck', 'ada/example-poster', 'ada/example-paper']);
     expect(access.ensureStarterProjects(ada)).toEqual([]);
     const mine = access.accessibleProjects(ada);
     expect(mine.map(p => [p.name, p.kind, p.title, p.role])).toEqual(expect.arrayContaining([
       ['ada/welcome', 'example', 'Welcome to OverLyX', 'owner'],
       ['ada/example-slides', 'project', 'Example: beamer slides', 'owner'],
+      ['ada/example-deck', 'project', 'Example: slide deck', 'owner'],
       ['ada/example-poster', 'project', 'Example: poster', 'owner'],
       ['ada/example-paper', 'project', 'Example: paper', 'owner'],
     ]));
@@ -62,7 +64,7 @@ describe('starter projects', () => {
     const bob = toSessionUser(createUser('bob', 'Bob Builder', 'pw'));
     mkdirSync(join(ROOT, 'projects', 'bob', 'example-slides'), { recursive: true });
     writeFileSync(join(ROOT, 'projects', 'bob', 'example-slides', 'mine.tex'), '\\documentclass{article}\n\\begin{document}\nMine.\n\\end{document}\n');
-    expect(access.ensureStarterProjects(bob)).toEqual(['bob/example-slides-2', 'bob/example-poster', 'bob/example-paper']);
+    expect(access.ensureStarterProjects(bob)).toEqual(['bob/example-slides-2', 'bob/example-deck', 'bob/example-poster', 'bob/example-paper']);
     expect(readFileSync(join(ROOT, 'projects', 'bob', 'example-slides', 'mine.tex'), 'utf8')).toContain('Mine.');
   });
 
@@ -116,6 +118,32 @@ describe('starter templates', () => {
     for (const s of ['[<+->]', '\\item<2->', '\\pause', '\\includegraphics', '\\begin{tabular}']) expect(text).toContain(s);
   });
 
+  it('the slide deck is Layout-mode 16:9 pages with notes, steps, transitions, a cropped picture, a plot and a table', () => {
+    const text = readFileSync(join(TPL, 'deck', 'deck.tex'), 'utf8');
+    expect(text).toMatch(/^% .*\n\\documentclass\[aspectratio=169\]\{beamer\}/);
+    const doc = parseTex(text).doc;
+    const pages = doc.body.filter(p => p.layout === 'OLPage');
+    expect(pages.length).toBe(15);
+    expect(doc.body.every(p => p.layout === 'OLPage')).toBe(true);
+    // every slide has speaker notes (the guided tour) and a name for the slide rail
+    for (const [i, p] of pages.entries()) {
+      const notes = p.items.find(it => it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'OLNotes');
+      expect(notes, `slide ${i + 1}`).toBeTruthy();
+      const props = p.items.find(it => it.kind === 'inset' && it.inset.type === 'Leaf' && it.inset.name === 'OLPageProps');
+      expect(props && props.kind === 'inset' && props.inset.type === 'Leaf' && props.inset.params.some(l => /name=/.test(l)), `slide ${i + 1}`).toBe(true);
+    }
+    expect((text.match(/\\note\{/g) ?? []).length).toBe(15);
+    // animation steps with entrance effects, transitions, a cropped picture, the plot, a table
+    expect((text.match(/step=\d-/g) ?? []).length).toBeGreaterThan(10);
+    for (const fx of ['fade', 'wipe', 'zoom', 'fly-up']) expect(text).toContain(`effect=${fx}`);
+    expect((text.match(/\\olpage\{[^}]*transition=/g) ?? []).length).toBeGreaterThanOrEqual(4);
+    expect(text).toMatch(/\\olimage\{[^}]*crop=[^}]*\}\{figures\/sky\}/);
+    expect(text).toContain('{figures/scattering}');
+    expect(text).toContain('\\begin{tabular}');
+    expect(text).toContain('\\definecolor{sky}');
+    expect(readdirSync(join(TPL, 'deck', 'figures')).sort()).toEqual(['scattering.pdf', 'sky.pdf']);
+  });
+
   it('the poster is one Layout-mode A0 page', () => {
     const text = readFileSync(join(TPL, 'poster', 'poster.tex'), 'utf8');
     expect(text).toContain('"papersize":"custom","paperwidth":"841mm","paperheight":"1189mm"');
@@ -142,14 +170,18 @@ describe('starter templates', () => {
       expect(log).not.toMatch(/Citation .* undefined/);
       expect(log).not.toMatch(/Reference .* undefined/);
       // a layout document: TeX wrote the check of its text boxes — the class's spacing and one record per box
-      if (id === 'poster') {
-        const olx = parseOlx(readFileSync(join(dir, 'poster.olx'), 'utf8'));
+      if (id === 'poster' || id === 'deck') {
+        const olxFile = join(dir, file.replace('.tex', '.olx'));
+        const olx = parseOlx(readFileSync(olxFile, 'utf8'));
         expect(olx.params).toMatchObject({ above: 11, bshort: 6.5, itemsep: 3 });
         const tex = readFileSync(join(dir, file), 'utf8');
-        expect(olx.boxes.length).toBe((tex.match(/\\begin\{olbox\}/g) ?? []).length);
-        const check = layoutCheck(readFileSync(join(dir, 'poster.olx'), 'utf8'), tex, tex);
-        expect(check.boxes.length).toBe(olx.boxes.length);
+        const check = layoutCheck(readFileSync(olxFile, 'utf8'), tex, tex);
+        expect(check.boxes.length).toBe((tex.match(/\\begin\{olbox\}/g) ?? []).length);
         expect(check.boxes.every(b => b.fresh && b.natural >= 0 && b.inner > 0)).toBe(true);
+        if (id === 'poster') expect(olx.boxes.length).toBe(check.boxes.length);
+        // no text runs out of its box in the PDF (the editor's mark: a quarter of a line, at least 2 pt)
+        const over = check.boxes.filter(b => b.natural - b.inner > Math.max(2, b.baselineskip / 4));
+        expect(over.map(b => `slide ${b.page + 1}: ${b.key}`)).toEqual([]);
       }
     }, 300000);
   }
