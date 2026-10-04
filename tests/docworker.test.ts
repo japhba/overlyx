@@ -126,7 +126,7 @@ describe('the worker writes what the main thread writes', () => {
     const [w, m] = await twins('agent', docText('First paragraph.', 'The second paragraph stays.', 'Third, with $x^2$.'));
     const before = m.toText();
     const after = before.replace('second paragraph', 'second, edited paragraph').replace('Third', 'The third');
-    const { result: rw } = await w.agentEdit('tracked', before, after, 'Bot (MCP)');
+    const { result: rw } = await w.agentEdit('tracked', before, { after }, { author: 'Bot (MCP)' });
     const rm = applyTrackedSource(m, before, after, 'Bot (MCP)');
     expect(rw.inserted).toBe(rm.inserted);
     expect(rw.deleted).toBe(rm.deleted);
@@ -139,11 +139,14 @@ describe('the worker writes what the main thread writes', () => {
     expect(w.dirty).toBe(false);
 
     const b2 = m.toText(), a2 = b2.replace('First paragraph.', 'First paragraph, plainly.');
-    const { result: pw } = await w.agentEdit('plain', w.toText(), w.toText().replace('First paragraph.', 'First paragraph, plainly.'));
+    const { result: pw } = await w.agentEdit('plain', null, { replace: { oldText: 'First paragraph.', newText: 'First paragraph, plainly.', all: false } });
     const pm = applyPlainSource(m, b2, a2);
     await m.saveToFile();
     expect(pw.changed).toBe(pm.changed);
     expect(untimed(readFileSync(w.absPath, 'utf8'))).toBe(untimed(readFileSync(m.absPath, 'utf8')));
+    // a passage that is not there: the agent gets the message, not a worker's stack trace
+    await expect(w.agentEdit('tracked', null, { replace: { oldText: 'No such passage', newText: 'x', all: false } }, { author: 'Bot (MCP)' }))
+      .rejects.toThrow(/^old_text was not found in the document/);
   });
 
   it('loaded source, read_document\'s paragraphs and parse warnings are the same', async () => {

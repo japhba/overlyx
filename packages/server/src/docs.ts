@@ -24,7 +24,7 @@ import { applyLyxDocument } from './ydiff.ts';
 import { readTextFile, looksLikeDocument, parseDocumentText } from './texdoc.ts';
 import { sha1, metaOf, lyxDocumentOf, renderDoc, renderModel, parseFor, mergeFileText, loadOverStored, type DocState, type DocMeta, type Rendered, type SourceSpan } from './docwork.ts';
 import { DocWorkers, WorkerGone, MirrorLost, type SyncEntry } from './docpool.ts';
-import { applyTrackedSource, applyPlainSource, restoreSource, foldEdits, type EditableDoc, type TrackedResult } from './docedit.ts';
+import { applyTrackedSource, applyPlainSource, restoreSource, foldEdits, replaceInSource, type EditableDoc, type TrackedResult } from './docedit.ts';
 
 export type { SourceSpan, DocMeta };
 export { readTextFile, looksLikeDocument };
@@ -561,22 +561,24 @@ export class OpenDoc implements DocState, EditableDoc {
 
   /**
    * An agent's edit of the source (docedit.ts: tracked, plain or a restore), made by the document
-   * worker; resolves once the file holds it, as the main-thread version does. `warningsOf`: a
-   * source whose parse warnings to report as well.
+   * worker; resolves once the file holds it, as the main-thread version does. `before`: the source
+   * the agent edited (null: the document's text now); the edited source is `after`, or `before` with
+   * a passage replaced (docedit.ts replaceInSource: its EditError when the passage is not there).
+   * `warnings`: also answer with the parse warnings of the edited source.
    */
-  async agentEdit(kind: 'tracked', before: string, after: string, author: string, warningsOf?: string): Promise<{ result: TrackedResult; warnings?: string[] }>;
-  async agentEdit(kind: 'plain', before: string, after: string, author?: string, warningsOf?: string): Promise<{ result: ReturnType<typeof applyPlainSource>; warnings?: string[] }>;
-  async agentEdit(kind: 'restore', before: string, after: string): Promise<{ result: { text: string }; warnings?: string[] }>;
-  async agentEdit(kind: 'tracked' | 'plain' | 'restore', before: string, after: string, author = '', warningsOf?: string): Promise<{ result: any; warnings?: string[] }> {
+  async agentEdit<K extends EditKind>(kind: K, before: string | null, edit: AgentEditSource, opts: { author?: string; warnings?: boolean } = {}): Promise<{ result: EditResults[K]; warnings: string[] }> {
+    const author = opts.author ?? '';
     if (!this.usesWorker) {
-      const warnings = warningsOf != null ? parseDocumentText(warningsOf, this.project, this.relPath).warnings : undefined;
-      const result = kind === 'tracked' ? applyTrackedSource(this, before, after, author) : kind === 'plain' ? applyPlainSource(this, before, after) : { text: restoreSource(this, after) };
-      return { result, warnings };
+      const b = before ?? this.toText();
+      const after = 'after' in edit ? edit.after : replaceInSource(b, edit.replace.oldText, edit.replace.newText, edit.replace.all);
+      const warnings = opts.warnings ? parseDocumentText(after, this.project, this.relPath).warnings : [];
+      const result = kind === 'tracked' ? applyTrackedSource(this, b, after, author) : kind === 'plain' ? applyPlainSource(this, b, after) : { text: restoreSource(this, after) };
+      return { result: result as EditResults[K], warnings };
     }
     const r = await this.exclusive(async () => {
       const seq = this.updateSeq, base = this.fileText;
-      const res = await inWorker(this, 'edit', { kind, before, after, author, warningsOf, retired: [...this.retiredMacros], fileText: base, isChild: this.isChild }) as
-        { result: unknown; warnings?: string[]; update: Uint8Array | null; saved: Rendered | null; retired: string[]; isChild: boolean };
+      const res = await inWorker(this, 'edit', { kind, before, ...edit, author, retired: [...this.retiredMacros], fileText: base, isChild: this.isChild }) as
+        { result: EditResults[K]; warnings: string[]; update: Uint8Array | null; saved: Rendered | null; retired: string[]; isChild: boolean };
       if (this.disposed) throw new Error('the document was closed');
       this.isChild = res.isChild;
       this.retiredMacros = new Set(res.retired);
@@ -661,6 +663,11 @@ export class OpenDoc implements DocState, EditableDoc {
     }
   }
 }
+
+type EditKind = 'tracked' | 'plain' | 'restore';
+interface EditResults { tracked: TrackedResult; plain: ReturnType<typeof applyPlainSource>; restore: { text: string } }
+/** what an agent's edit makes of the source: the whole new text, or a passage replaced */
+export type AgentEditSource = { after: string } | { replace: { oldText: string; newText: string; all: boolean } };
 
 /** The open documents by id, for including a child document's live state. */
 const openDocs = (id: string): OpenDoc | undefined => manager.docs.get(id);

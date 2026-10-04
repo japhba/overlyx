@@ -12,10 +12,10 @@ import type { PreserveCache } from '@overlyx/core/tex/index.ts';
 import { applyLyxDocument } from './ydiff.ts';
 import { parseDocumentText, looksLikeDocument } from './texdoc.ts';
 import {
-  lyxDocumentOf, renderDoc, renderModel, parseFor, mergeFileText, loadOverStored,
+  lyxDocumentOf, renderDoc, renderModel, parseResultFor, mergeFileText, loadOverStored,
   type DocState, type Rendered,
 } from './docwork.ts';
-import { applyTrackedSource, applyPlainSource, restoreSource, foldEdits, type EditableDoc } from './docedit.ts';
+import { applyTrackedSource, applyPlainSource, restoreSource, foldEdits, replaceInSource, type EditableDoc } from './docedit.ts';
 import type { DocInfo, SyncEntry, WorkerRequest, WorkerResponse } from './docpool.ts';
 
 const mirrors = new Map<string, Mirror>();
@@ -33,14 +33,36 @@ class Mirror implements DocState, EditableDoc {
   retiredMacros = new Set<string>();
   /** what the save right after an edit writes (edited()) */
   saved: Rendered | null = null;
+  /** the parser's warnings for the texts parsed in this request */
+  warnings = new Map<string, string[]>();
+  /** counts the mirror's updates: the text made for one count holds while it stays (in one request) */
+  private seq = 0;
+  private memo: { seq: number; base: string | null; r: Rendered } | null = null;
 
   constructor(d: DocInfo) {
     this.id = d.id; this.project = d.project; this.relPath = d.relPath; this.absPath = d.absPath;
+    this.ydoc.on('update', () => { this.seq++; });
   }
 
-  parse(text: string): LyxDocument { return parseFor(this, text); }
+  parse(text: string): LyxDocument {
+    const r = parseResultFor(this, text);
+    this.warnings.set(text, r.warnings);
+    return r.doc;
+  }
   toLyxDocument(): LyxDocument { return lyxDocumentOf(this.ydoc); }
-  toText(): string { return renderDoc(this, lookup).text; }
+  /**
+   * The document's text — made once per state and file text within a request (an agent's edit asks
+   * for the text before it twice: what it edits, and what it reports as changed), as one synchronous
+   * call after another gives the same text anyway.
+   */
+  render(): Rendered {
+    const m = this.memo;
+    if (m && m.seq === this.seq && m.base === this.fileText) return m.r;
+    const r = renderDoc(this, lookup);
+    this.memo = { seq: this.seq, base: this.fileText, r };
+    return r;
+  }
+  toText(): string { return this.render().text; }
   textOf(doc: LyxDocument): string { return renderModel(this, doc, lookup).text; }
   loadFromLyx(doc: LyxDocument, origin: string): void { applyLyxDocument(this.ydoc, doc, origin); }
 
@@ -49,15 +71,17 @@ class Mirror implements DocState, EditableDoc {
    * then holds what was written (the main thread writes `saved` — the same text).
    */
   edited(): void {
-    const r = renderDoc(this, lookup);
+    const r = this.render();
     this.saved = r;
     if (r.text !== this.fileText && looksLikeDocument(r.text, this.isChild)) this.fileText = r.text;
   }
 
-  /** the main thread's view of the document for this request */
+  /** the main thread's view of the document for this request (what an earlier one remembered is dropped) */
   take(a: { fileText?: string | null; isChild?: boolean }): this {
     if (a.fileText !== undefined) this.fileText = a.fileText;
     if (a.isChild !== undefined) this.isChild = a.isChild;
+    this.memo = null;
+    this.warnings.clear();
     return this;
   }
 }
@@ -103,7 +127,7 @@ type Args = Record<string, any>;
 
 const ops: Record<string, (doc: DocInfo | null, a: Args) => unknown> = {
   /** the document as .tex text (+ sidecar files, source map) */
-  render: (d, a) => renderDoc(mirrorOf(d).take(a), lookup),
+  render: (d, a) => mirrorOf(d).take(a).render(),
 
   /** the text and the paragraphs (MCP read_document) */
   read: (d, a) => {
@@ -159,19 +183,21 @@ const ops: Record<string, (doc: DocInfo | null, a: Args) => unknown> = {
     return { update, warnings, isChild: m.isChild };
   },
 
-  /** an agent's edit of the source (docedit.ts), with the text the save right after it writes */
+  /**
+   * An agent's edit of the source (docedit.ts), with the text the save right after it writes.
+   * `before` null: the document's text now; `replace`: the edited text is `before` with a passage
+   * replaced (docedit.ts replaceInSource — its EditError, e.g. a passage not found, is the answer).
+   */
   edit: (d, a) => {
     const m = mirrorOf(d).take(a);
     m.retiredMacros = new Set(a.retired);
     m.saved = null;
-    const { value, update } = capture(m, () => {
-      const warnings = a.warningsOf != null ? parseDocumentText(a.warningsOf, m.project, m.relPath).warnings : undefined;
-      const result = a.kind === 'tracked' ? applyTrackedSource(m, a.before, a.after, a.author)
-        : a.kind === 'plain' ? applyPlainSource(m, a.before, a.after)
-        : { text: restoreSource(m, a.after) };
-      return { result, warnings };
-    });
-    return { ...value, update, saved: m.saved, retired: [...m.retiredMacros], isChild: m.isChild };
+    const before: string = a.before ?? m.toText();
+    const after: string = a.replace ? replaceInSource(before, a.replace.oldText, a.replace.newText, a.replace.all) : a.after;
+    const { value, update } = capture(m, () => a.kind === 'tracked' ? applyTrackedSource(m, before, after, a.author)
+      : a.kind === 'plain' ? applyPlainSource(m, before, after)
+      : { text: restoreSource(m, after) });
+    return { result: value, warnings: m.warnings.get(after) ?? [], update, saved: m.saved, retired: [...m.retiredMacros], isChild: m.isChild };
   },
 
   /** another version of the document with the edits between two others carried over (docedit.ts foldEdits) */
@@ -195,7 +221,7 @@ parentPort!.on('message', (req: WorkerRequest) => {
     res = { id: req.id, ok: true, result: op(req.doc, req.args as Args) };
   } catch (e) {
     const err = e as Error & { resync?: boolean };
-    res = { id: req.id, ok: false, error: err?.stack ?? String(e), ...(err?.resync ? { resync: true } : {}) };
+    res = { id: req.id, ok: false, error: err?.message ?? String(e), stack: err?.stack, ...(err?.resync ? { resync: true } : {}) };
   }
   parentPort!.postMessage(res);
 });

@@ -20,7 +20,7 @@ export interface DocInfo { id: string; project: string; relPath: string; absPath
 export interface SyncEntry { doc: DocInfo; full?: Uint8Array; updates: Uint8Array[] }
 
 export interface WorkerRequest { id: number; op: string; doc: DocInfo | null; sync: SyncEntry[]; args: unknown }
-export type WorkerResponse = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string; resync?: boolean };
+export type WorkerResponse = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string; stack?: string; resync?: boolean };
 
 /** The worker went away while the request was in it (it is replaced; the request may be sent again). */
 export class WorkerGone extends Error {}
@@ -114,7 +114,7 @@ export class DocWorkers {
       s.calls.delete(m.id);
       if (!s.calls.size && s.worker === w) w.unref();
       if (m.ok) c.resolve(m.result);
-      else c.reject(m.resync ? new MirrorLost(m.error) : new Error(m.error));
+      else c.reject(Object.assign(m.resync ? new MirrorLost(m.error) : new Error(m.error), m.stack ? { stack: m.stack } : {}));
     });
     w.on('error', (e) => console.error(`[docs] document worker ${slot} failed:`, e));
     w.on('exit', (code) => {

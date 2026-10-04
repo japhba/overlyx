@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import * as Y from 'yjs';
 import { yDocToProsemirrorJSON } from 'y-prosemirror';
 import { mergeLyx, pmToLyxBody, writeParagraphs, type LyxDocument, type PMJSON } from '@overlyx/core';
-import { primePreserveCache, type PreserveCache } from '@overlyx/core/tex/index.ts';
+import { primePreserveCache, type PreserveCache, type ParseTexResult } from '@overlyx/core/tex/index.ts';
 import { projectDir } from './projectfiles.ts';
 import { parseDocumentText, writeDocumentText, cachedParseFile } from './texdoc.ts';
 
@@ -95,11 +95,16 @@ export function renderDoc(s: DocState, open: OpenDocs): Rendered {
 
 /** Parse .tex text in the document's context (project layouts, master settings for children). */
 export function parseFor(s: DocState, text: string): LyxDocument {
+  return parseResultFor(s, text).doc;
+}
+
+/** parseFor, with the parser's warnings */
+export function parseResultFor(s: DocState, text: string): ParseTexResult {
   const r = parseDocumentText(text, s.project, s.relPath);
   s.isChild = r.fragment;
   // the file's own parse is what the next save writes into: remember it
   if (text === s.fileText) primePreserveCache(s.preserveCache, text, r);
-  return r.doc;
+  return r;
 }
 
 /**

@@ -212,11 +212,11 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
           const doc = await manager.open(`${project}/${rel}`);
           if (manifest.tracked === false) {
             // Track changes off: the agent's change goes in as it is (the checkpoint can still take it back)
-            const { result: r } = await doc.agentEdit('plain', base, text);
+            const { result: r } = await doc.agentEdit('plain', base, { after: text });
             out.push({ path: rel, action: 'edited' });
             if (r.after !== r.before) await recordDoc(tid, manifest, doc, rel, r.before, r.after);
           } else {
-            const { result: r } = await doc.agentEdit('tracked', base, text, AGENT_AUTHOR);
+            const { result: r } = await doc.agentEdit('tracked', base, { after: text }, { author: AGENT_AUTHOR });
             out.push({ path: rel, action: 'tracked', inserted: r.inserted, deleted: r.deleted });
             if (r.after !== r.before) await recordDoc(tid, manifest, doc, rel, r.before, r.after);
           }
@@ -537,7 +537,7 @@ export function undoCheckpoint(tid: string, project: string, n: number, userId: 
           try { doc = await manager.open(`${project}/${f.path}`); } catch { kept.push({ path: f.path, why: 'the document is gone' }); continue; }
           const now = await doc.textAsync();
           const { text: target, conflicts } = await doc.foldEditsAsync(shadow, after, now);
-          const text = target === now ? now : (await doc.agentEdit('restore', now, target)).result.text;
+          const text = target === now ? now : (await doc.agentEdit('restore', now, { after: target })).result.text;
           if (conflicts) kept.push({ path: f.path, why: `${conflicts > 1 ? `${conflicts} paragraphs` : 'a paragraph'} edited since ${conflicts > 1 ? 'were' : 'was'} left as ${conflicts > 1 ? 'they are' : 'it is'}` });
           reverted.push(f.path);
           refresh(f.path, text);

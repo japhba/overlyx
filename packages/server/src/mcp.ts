@@ -331,14 +331,14 @@ async function writeDocumentLocked(project: string, userId: number, agentName: s
     return { ok: true, created: true, warnings: r.warnings };
   }
   const doc = await manager.open(`${project}/${path}`);
-  const warnings = await doc.parseWarnings(tex);   // (a source that does not parse fails here, before anything happens)
   if (!tracked) {
+    await doc.parseWarnings(tex);   // a source that does not parse fails here, before the commit
     await restorePoint(project, userId);
-    const { result: st } = await doc.agentEdit('plain', await doc.textAsync(), tex);
+    const { result: st, warnings } = await doc.agentEdit('plain', null, { after: tex }, { warnings: true });
     touchProject(project, userId);
     return { ok: true, created: false, tracked: false, changed: st.changed, warnings, note: 'Written directly (no tracked changes); the previous state is in the project history (project_history / restore_project).' };
   }
-  const { result: st } = await doc.agentEdit('tracked', await doc.textAsync(), tex, authorName(agentName));
+  const { result: st, warnings } = await doc.agentEdit('tracked', null, { after: tex }, { author: authorName(agentName), warnings: true });
   return {
     ok: true, created: false, warnings, inserted_chars: st.inserted, deleted_chars: st.deleted,
     ...(st.direct.length ? { applied_directly: st.direct } : {}),
@@ -352,16 +352,14 @@ function editDocument(project: string, userId: number, agentName: string, path: 
 
 async function editDocumentLocked(project: string, userId: number, agentName: string, path: string, oldText: string, newText: string, all: boolean, tracked: boolean) {
   const doc = await manager.open(`${project}/${path}`);
+  const replace = { oldText, newText, all };
   if (!tracked) {
-    const seq = doc.updateSeq;
-    let before = await doc.textAsync();
-    let after = replaceInSource(before, oldText, newText, all);   // a passage that does not match fails before the commit
+    replaceInSource(await doc.textAsync(), oldText, newText, all);   // a passage that does not match fails before the commit
     await restorePoint(project, userId);
-    // whatever was typed into the document meanwhile (during the commit) is what the edit applies to
-    // (an old_text somebody changed meanwhile no longer matches — said, not overwritten)
-    if (doc.updateSeq !== seq) { before = await doc.textAsync(); after = replaceInSource(before, oldText, newText, all); }
+    // the edit applies to the document as it is then: whatever was typed meanwhile (during the commit)
+    // is kept (an old_text somebody changed meanwhile no longer matches — said, not overwritten), and
     // three-way: an edit somebody made meanwhile elsewhere survives
-    const { result: st, warnings = [] } = await doc.agentEdit('plain', before, after, '', after);
+    const { result: st, warnings } = await doc.agentEdit('plain', null, { replace }, { warnings: true });
     touchProject(project, userId);
     return {
       ok: true, tracked: false, warnings,
@@ -369,9 +367,7 @@ async function editDocumentLocked(project: string, userId: number, agentName: st
       now_reads: st.excerpt,
     };
   }
-  const before = await doc.textAsync();
-  const after = replaceInSource(before, oldText, newText, all);
-  const { result: st, warnings = [] } = await doc.agentEdit('tracked', before, after, authorName(agentName), after);
+  const { result: st, warnings } = await doc.agentEdit('tracked', null, { replace }, { author: authorName(agentName), warnings: true });
   return {
     ok: true, inserted_chars: st.inserted, deleted_chars: st.deleted, warnings,
     // what changed decides, not the marks: a preamble edit or one's own pending insertion taken back needs none
