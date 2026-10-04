@@ -95,6 +95,17 @@ describe('the worker writes what the main thread writes', () => {
     });
   }
 
+  it('a long document (built in steps by the worker) is the same document', async () => {
+    const pars = Array.from({ length: 450 }, (_, i) => i % 50 === 0 ? `\\section{Part ${i}}` : i % 7 === 0 ? `\\begin{itemize}\n\\item one ${i}\n\\item two\n\\end{itemize}` : `Paragraph ${i} with $x_{${i}}$ and \\emph{words}.`);
+    const [w, m] = await twins('long', docText(...pars));
+    expect(w.fragment.toJSON()).toBe(m.fragment.toJSON());
+    expect(await w.textAsync()).toBe(m.toText());
+    for (const d of [w, m]) type(d, 300, 'Late in the document: ');
+    expect(await w.saveToFile()).toBe(true);
+    expect(await m.saveToFile()).toBe(true);
+    expect(readFileSync(w.absPath, 'utf8')).toBe(readFileSync(m.absPath, 'utf8'));
+  });
+
   it('a master includes its open child\'s live state (the child\'s mirror is in the same worker)', async () => {
     const child = '\\begin{equation}\n\\mathbb{R}\n\\end{equation}\n';
     const [w, m] = await twins('master', docText('Intro.', '\\input{child}', 'End.'), { 'child.tex': child });

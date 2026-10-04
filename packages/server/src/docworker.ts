@@ -7,7 +7,8 @@
  */
 import { parentPort } from 'node:worker_threads';
 import * as Y from 'yjs';
-import { itemText, type LyxDocument } from '@overlyx/core';
+import { prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
+import { itemText, lyxToPm, schema, type LyxDocument } from '@overlyx/core';
 import type { PreserveCache } from '@overlyx/core/tex/index.ts';
 import { applyLyxDocument } from './ydiff.ts';
 import { parseDocumentText, looksLikeDocument } from './texdoc.ts';
@@ -19,6 +20,8 @@ import { applyTrackedSource, applyPlainSource, restoreSource, foldEdits, replace
 import type { DocInfo, SyncEntry, WorkerRequest, WorkerResponse } from './docpool.ts';
 
 const mirrors = new Map<string, Mirror>();
+/** top-level blocks per step of building a document from its file (fresh) */
+const FRESH_STEP = 100;
 const lookup = (id: string) => mirrors.get(id);
 
 class Mirror implements DocState, EditableDoc {
@@ -155,15 +158,29 @@ const ops: Record<string, (doc: DocInfo | null, a: Args) => unknown> = {
     return { ...value, update, isChild: m.isChild };
   },
 
-  /** a document built from its file alone: answers with the whole state */
+  /**
+   * A document built from its file alone: answers with the whole state, and with the same as steps
+   * of a hundred top-level blocks each — the main thread applies a big document's a step at a time
+   * and serves other requests in between.
+   */
   fresh: (d, a) => {
     if (!d) throw new Error('no document');
     mirrors.get(d.id)?.ydoc.destroy();
     const m = new Mirror(d);
     mirrors.set(d.id, m);
     m.fileText = a.text;
-    m.loadFromLyx(m.parse(a.text), 'file-load');
-    return { state: Y.encodeStateAsUpdate(m.ydoc), isChild: m.isChild };
+    const doc = m.parse(a.text);
+    const pm = lyxToPm(doc) as { type: string; content?: unknown[] };
+    const blocks = pm.content ?? [];
+    const steps: Uint8Array[] = [];
+    for (let k = FRESH_STEP; k < blocks.length; k += FRESH_STEP) {
+      const { update } = capture(m, () => prosemirrorJSONToYXmlFragment(schema, { ...pm, content: blocks.slice(0, k) }, m.ydoc.getXmlFragment('prosemirror')));
+      if (update) steps.push(update);
+    }
+    // the whole of it (the blocks so far are its first ones: the rest is appended) and its settings
+    const { update } = capture(m, () => m.loadFromLyx(doc, 'file-load'));
+    if (update) steps.push(update);
+    return { steps, state: Y.encodeStateAsUpdate(m.ydoc), isChild: m.isChild };
   },
 
   /** a change of the file on disk merged in (docs.ts absorbExternalChange) */

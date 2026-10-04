@@ -89,6 +89,14 @@ export class OpenDoc implements DocState, EditableDoc {
   constructor(public id: string, public project: string, public relPath: string, public absPath: string) {
     this.awareness = new awarenessProtocol.Awareness(this.ydoc);
     this.awareness.setLocalState(null);
+  }
+
+  /**
+   * From now on every update counts, and goes to the worker's mirror with the next request. Called
+   * once the document is loaded: the state it was loaded with is the mirror's already, and without
+   * a listener Yjs does not encode it again (a big document's takes a while).
+   */
+  trackUpdates(): void {
     this.ydoc.on('update', (u: Uint8Array) => {
       this.updateSeq++;
       if (this.wsync.slot >= 0 && docWorkers.enabled) this.wsync.pending.push(u);
@@ -930,10 +938,14 @@ export class DocManager {
     fresh.fileText = text;
     if (fresh.usesWorker) {
       // the worker parses the file and builds the state; here it is only applied
-      const r = await inWorker(fresh, 'fresh', { text }, true) as { state: Uint8Array; isChild: boolean };
+      const r = await inWorker(fresh, 'fresh', { text }, true) as { steps: Uint8Array[]; state: Uint8Array; isChild: boolean };
       fresh.isChild = r.isChild;
-      Y.applyUpdate(fresh.ydoc, r.state, 'file-load');
-      fresh.wsync.pending = [];   // the worker's mirror is this state
+      // a step at a time (a big document's state takes a while): other requests are served in
+      // between; no update listeners yet, so nothing encodes it again
+      for (const [i, u] of r.steps.entries()) {
+        if (i) await new Promise(res => setImmediate(res));
+        Y.applyUpdate(fresh.ydoc, u, 'file-load');
+      }
       fresh.markSaved();
       fresh.lastSavedAt = fs.statSync(doc.absPath).mtimeMs;
       fresh.persistStateBytes(r.state);
@@ -949,6 +961,7 @@ export class DocManager {
 
   private register(doc: OpenDoc): void {
     this.docs.set(doc.id, doc);
+    doc.trackUpdates();
     doc.ydoc.on('update', (_u: Uint8Array, origin: unknown) => {
       if (origin === 'file-load' || origin === 'db') return;
       // updates from the WebSocket carry the connection as origin: remember who edited
