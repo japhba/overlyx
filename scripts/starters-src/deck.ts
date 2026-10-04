@@ -324,9 +324,9 @@ export function deck(heights: Heights = new Map()): string {
   /* 10 · section 3 */
   next();
   slides.push(divider('03', 'Beyond blue', 'Clouds, violet, and who worked it all out', sun(128, HORIZON, 15, 'dusk', { half: true, stripes: 3 }),
-    `Last section. Speaker notes like these belong to their slide: they show under the slides when Speaker notes
-    is switched on (the notes button on the Layout toolbar), in the presenter view (S while presenting), and in
-    the file they are beamer's \\texttt{\\textbackslash note}.`));
+    `Last section. Speaker notes like these belong to their slide: they show under the slides when they are
+    switched on (Notes at the top of the slide rail, or the notes button on the Layout toolbar), in the presenter
+    view (S while presenting), and in the file they are beamer's \\texttt{\\textbackslash note}.`));
 
   /* 11 · comparison */
   const sides = [
