@@ -210,15 +210,20 @@ export function startDrag(view: EditorView, anchor: Range, ev: MouseEvent, opts:
       else setSel(view, anchor.to, Math.min(u.from, s.head));
     } else setSel(view, s.anchor, s.head);
   };
-  // dragging past the visible part of the document scrolls it, the selection following
-  const autoscroll = () => {
+  // dragging past the visible part of the document scrolls it, the selection following — at a speed per
+  // time, not per frame: a 120 Hz screen (ProMotion Macs and iPads) scrolled twice as fast as a 60 Hz one,
+  // and a slow machine a fraction of it
+  let lastFrame = 0;
+  const autoscroll = (now: number) => {
     raf = 0;
-    if (!last || !sc) return;
+    if (!last || !sc) { lastFrame = 0; return; }
     const vis = visibleBox(view);
     const dy = last.y < vis.top + 16 ? last.y - (vis.top + 16) : last.y > vis.bottom - 16 ? last.y - (vis.bottom - 16) : 0;
-    if (!dy) return;
+    if (!dy) { lastFrame = 0; return; }
+    const frames = lastFrame ? Math.min(6, (now - lastFrame) / (1000 / 60)) : 1;   // in 60 Hz frames
+    lastFrame = now;
     const before = sc.scrollTop;
-    sc.scrollTop += Math.sign(dy) * Math.min(Math.max(2, Math.abs(dy) * 0.35), 24);
+    sc.scrollTop += Math.sign(dy) * Math.min(Math.max(2, Math.abs(dy) * 0.35), 24) * frames;
     if (sc.scrollTop !== before) apply(last.x, last.y);
     raf = requestAnimationFrame(autoscroll);
   };
