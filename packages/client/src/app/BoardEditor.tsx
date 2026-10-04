@@ -123,6 +123,10 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     provider.on('status', onStatus);
     const onSync = (s: boolean) => { if (s) { setConn('online'); fit(); } };
     provider.on('sync', onSync);
+    // the provider connects as it is created (useMemo above), before this effect runs: a fast
+    // connection (WebKit, a warm second page) was connected and synced already, and the board said
+    // "Connecting…" for good — take the state it is in
+    if (provider.synced) onSync(true); else if (provider.wsconnected) onStatus({ status: 'connected' });
     const onAwareness = () => {
       // laser trails: take the live ones, start fading the ones whose field vanished
       const seen = new Set<number>();
