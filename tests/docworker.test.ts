@@ -280,6 +280,51 @@ describe('a worker that dies', () => {
   });
 });
 
+describe('a client connecting while its document opens', () => {
+  it('gets the document: what it sent meanwhile (its sync step 1) is answered once the document is open', async () => {
+    const http = await import('node:http');
+    const { WebSocket } = await import('ws');
+    const syncProtocol = await import('y-protocols/sync');
+    const encoding = await import('lib0/encoding');
+    const decoding = await import('lib0/decoding');
+    const { attachWebSocket } = await import('../packages/server/src/ws.ts');
+    const { createUser, toSessionUser, signSession } = await import('../packages/server/src/auth.ts');
+    const { registerProject } = await import('../packages/server/src/access.ts');
+    const user = createUser('wsuser', 'WS User', 'pw');
+    registerProject('u/wsopen', user.id);
+    mkdirSync(join(ROOT, 'projects', 'u', 'wsopen'), { recursive: true });
+    writeFileSync(path('wsopen', 'main.tex'), docText('Hello from the file.'));
+    const server = http.createServer();
+    attachWebSocket(server);
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as { port: number }).port;
+    // the open takes a while (a big document's parse in the worker)
+    const open = manager.open.bind(manager);
+    manager.open = async (id: string) => { await sleep(300); return open(id); };
+    try {
+      const client = new Y.Doc();
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?doc=${encodeURIComponent('u/wsopen/main.tex')}`, { headers: { cookie: `ol_session=${signSession(toSessionUser(user))}` } });
+      ws.binaryType = 'arraybuffer';
+      const synced = new Promise<void>((resolve) => {
+        ws.on('message', (data: ArrayBuffer) => {
+          const dec = decoding.createDecoder(new Uint8Array(data));
+          if (decoding.readVarUint(dec) !== 0) return;
+          const enc = encoding.createEncoder();
+          if (syncProtocol.readSyncMessage(dec, enc, client, 'server') === syncProtocol.messageYjsSyncStep2) resolve();
+        });
+      });
+      // like y-websocket: sync step 1 as soon as the socket is open — before the server has the document
+      ws.on('open', () => { const enc = encoding.createEncoder(); encoding.writeVarUint(enc, 0); syncProtocol.writeSyncStep1(enc, client); ws.send(encoding.toUint8Array(enc)); });
+      await Promise.race([synced, sleep(10000).then(() => { throw new Error('no sync step 2'); })]);
+      expect(JSON.stringify(client.getXmlFragment('prosemirror').toJSON())).toContain('Hello from the file.');
+      ws.close();
+    } finally {
+      manager.open = open;
+      server.close();
+    }
+  });
+});
+
 describe('the pool', () => {
   it('gives each project one worker, the least busy one, and frees it when the project closes', () => {
     const pool = new DocWorkers(3);

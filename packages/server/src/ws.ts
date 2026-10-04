@@ -141,19 +141,27 @@ export function originAllowed(req: IncomingMessage): boolean {
 }
 
 async function handleConnection(conn: WebSocket, docId: string, user: SessionUser, readOnly: boolean): Promise<void> {
+  // what the client sends while the document is being opened (its sync step 1 comes right away;
+  // a big document takes a moment) is handled once it is open — after the epoch, as always
+  conn.binaryType = 'arraybuffer';
+  const early: (ArrayBuffer | Buffer)[] = [];
+  const keep = (data: ArrayBuffer | Buffer) => { early.push(data); };
+  conn.on('message', keep);
   let doc: OpenDoc;
   try {
     doc = await manager.open(docId);
   } catch (e) {
     conn.close(4004, String(e));
     return;
+  } finally {
+    conn.off('message', keep);
   }
+  if (conn.readyState !== conn.OPEN) return;   // gone while the document was opened
   ensureDocHandlers(doc);
-  conn.binaryType = 'arraybuffer';
   doc.conns.set(conn, new Set());
   doc.connUsers.set(conn, user.id);
 
-  conn.on('message', (data: ArrayBuffer | Buffer) => {
+  const onMessage = (data: ArrayBuffer | Buffer) => {
     try {
       const message = new Uint8Array(data as ArrayBuffer);
       const enc = encoding.createEncoder();
@@ -179,7 +187,8 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
     } catch (e) {
       console.error('ws message error', e);
     }
-  });
+  };
+  conn.on('message', onMessage);
 
   // liveness: a protocol ping every 30 s (answered by the browser's network stack even when the
   // page is throttled or frozen) and an application-level heartbeat every 10 s (see MSG_PING)
@@ -222,6 +231,7 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
       send(doc, conn, encoding.toUint8Array(enc2));
     }
   }
+  for (const data of early) onMessage(data);
 }
 
 export { Y };
