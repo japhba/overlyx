@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
+import { isMainThread } from 'node:worker_threads';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(here, '../../..');
@@ -121,11 +122,14 @@ export const config = {
   sessionDays: 30,
 };
 
-fs.mkdirSync(config.dataDir, { recursive: true });
-for (const d of ['cache', 'build', 'uploads']) fs.mkdirSync(path.join(config.dataDir, d), { recursive: true });
+// (a document worker, docpool.ts, reads the configuration only: the server has set things up)
+if (isMainThread) {
+  fs.mkdirSync(config.dataDir, { recursive: true });
+  for (const d of ['cache', 'build', 'uploads']) fs.mkdirSync(path.join(config.dataDir, d), { recursive: true });
+}
 
 const secretFile = path.join(config.dataDir, 'secret.key');
-if (!fs.existsSync(secretFile)) {
+if (isMainThread && !fs.existsSync(secretFile)) {
   fs.writeFileSync(secretFile, crypto.randomBytes(48).toString('hex'), { mode: 0o600 });
 }
-export const JWT_SECRET = fs.readFileSync(secretFile, 'utf8').trim();
+export const JWT_SECRET = isMainThread ? fs.readFileSync(secretFile, 'utf8').trim() : '';
