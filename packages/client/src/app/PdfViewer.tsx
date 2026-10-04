@@ -19,12 +19,23 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import * as pdfjs from 'pdfjs-dist';
-import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
+// pdf.js's legacy build: the default ("modern") one needs the newest engines — Map.getOrInsertComputed,
+// Math.sumPrecise, the Iterator global (Safari 26.2, Firefox 144, Chrome 147) — and without them the app
+// did not even start (Safari < 18.4: `Iterator` is evaluated on import) or rendered no page; the
+// legacy build carries polyfills for exactly these
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { formRects, paintDark, useDarkPages } from './pdfdark';
 import { setPref } from '../prefs';
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
+
+/**
+ * Safari's engine (and every browser on iOS): pdf.js turns decoded images into bitmaps on an
+ * OffscreenCanvas in its worker, and in WebKit a page with a JPEG photograph beside a PNG plot showed
+ * the plot twice — images decoded without it are right (scratch/browsers/pdfjsimg.mts).
+ */
+const appleWebKit = typeof navigator !== 'undefined' && /Apple Computer/.test(navigator.vendor);
 
 /**
  * One pdf.js worker for every document this page opens: a worker of its own per document would be
@@ -111,7 +122,7 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
   // load the document; the old one stays on screen until the new one is ready
   useEffect(() => {
     let cancelled = false;
-    const task = pdfjs.getDocument({ url, withCredentials: true, worker: worker() });
+    const task = pdfjs.getDocument({ url, withCredentials: true, worker: worker(), ...(appleWebKit ? { isOffscreenCanvasSupported: false } : {}) });
     task.promise.then(async d => {
       if (cancelled) return;
       const infos: PageInfo[] = [];
