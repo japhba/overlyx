@@ -450,6 +450,17 @@ blend.
     pages, remembered per browser (`ol.notes`); a page without notes then offers *Click to add speaker
     notes* (`PageView`), so showing them adds nothing to the file. In notes, keys type (the canvas's
     tool letters and object keys stay out of them).
+    **Slide sorter** (`editor/layout/sorter.ts`, PowerPoint's View ▸ Slide Sorter; the grid button in
+    the rail's header or its folded strip, or the rail's menu): every slide as a card over the canvas
+    and the rail, with its number, name (or first words), transition, animation clicks and whether it
+    has notes. Click selects, Shift+click a range, Ctrl/⌘+click toggles; dragging moves the selection
+    (`movePagesTo`, only the moved pages are taken out and put back); Delete, Ctrl+D (copies after the
+    last selected), Ctrl+C / X / V (the rail's slide clipboard), Ctrl+Z / Y, arrows and Shift+arrows by
+    the grid's columns, Ctrl+A, F5 / Shift+F5; the right-click menu sets a transition for the whole
+    selection. Enter or a double click opens the slide in the canvas, Esc or *Done* returns to the
+    focused one (the canvas behind follows the focus all along). The slider sizes the cards
+    (`ol.sorter`); only their scale changes. Rail and sorter share `slidekit.ts` (thumbnails, the
+    mutation filter, the layout picker, the clipboard, `undoStep`).
     **New slide layouts** (`editor/layout/slidelayouts.ts`): Title slide, Title and content, Section
     header, Two content, Comparison, Title only, Big statement, Blank — in the deck's own style, read off
     its pages since a beamer file has no masters (`deckStyle`: the title box most content pages share,
@@ -1371,6 +1382,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/selection-inserts.spec.ts   # comments / floats / captions keep the selection, pasted blocks, Enter in a caption, Insert ▸ Graphics on a layout page, live authors, TeX pane after settings, tracked tables, formula notice, tablet reflow
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/slidesorter.spec.ts   # the slide sorter: selection, dragging several, duplicate / delete / undo, keys, transitions, size, the saved order
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sliderail.spec.ts   # the slide rail: thumbnails, new slides in the deck's style, drag to reorder, its menu, undo, the saved file
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layout.spec.ts   # layout documents: new deck, text box + formula, move / resize / undo, toolbar, presentation steps, zoom, text overlays, a linear beamer deck presented; the font size box
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition

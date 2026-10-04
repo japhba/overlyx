@@ -2164,7 +2164,10 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .lyx-editor.ol-layout.ol-has-rail { padding-left: var(--ol-rail-w, 0px); box-sizing: border-box; }
 .ol-slide-rail { position: absolute; z-index: 6; width: 196px; display: flex; flex-direction: column; box-sizing: border-box; background: var(--surface2); border-right: 1px solid var(--ui-border); font: 12px/1.3 var(--ui-font); color: var(--ui-fg); user-select: none; -webkit-user-select: none; }
 .ol-slide-rail.collapsed { width: 26px; }
-.ol-slide-rail.collapsed > :not(.ol-rail-show), .ol-slide-rail:not(.collapsed) > .ol-rail-show { display: none; }
+.ol-slide-rail.collapsed > :not(.ol-rail-show):not(.ol-rail-mini), .ol-slide-rail:not(.collapsed) > .ol-rail-show, .ol-slide-rail:not(.collapsed) > .ol-rail-mini { display: none; }
+.ol-rail-mini { flex: none; height: 30px; padding: 0; border: none; border-bottom: 1px solid var(--ui-border2); background: none; color: var(--ui-muted); }
+.ol-rail-mini svg { fill: currentColor; }
+.ol-rail-mini:hover { color: var(--ui-fg); background: var(--ui-hover); }
 .ol-rail-show { flex: 1; writing-mode: vertical-rl; border: none; background: none; color: var(--ui-muted); padding: 12px 0; font: inherit; cursor: pointer; }
 .ol-rail-show:hover { color: var(--ui-fg); background: var(--ui-hover); }
 .ol-rail-head { display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 12px; border-bottom: 1px solid var(--ui-border2); }
@@ -2175,6 +2178,9 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .ol-rail-notes:hover { color: var(--ui-fg); border-color: var(--active-border); }
 .ol-rail-notes.active { background: var(--active-bg); border-color: var(--active-border); color: var(--ui-fg); }
 .ol-rail-hide:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.ol-rail-sorter { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: none; border-radius: 4px; background: none; color: var(--ui-muted); }
+.ol-rail-sorter svg { fill: currentColor; }
+.ol-rail-sorter:hover { background: var(--ui-hover); color: var(--ui-fg); }
 .ol-rail-list { position: relative; flex: 1; min-height: 0; overflow: hidden auto; padding: 8px 0 12px; outline: none; scrollbar-width: thin; }
 .ol-rail-item { position: relative; display: flex; align-items: flex-start; gap: 6px; padding: 5px 8px 5px 4px; cursor: pointer; }
 .ol-rail-num { flex: none; width: 20px; padding-top: 1px; text-align: right; font-size: 11px; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
@@ -2208,3 +2214,39 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .ol-rail-layout svg .p { fill: #fff; stroke: var(--ui-border); }
 .ol-rail-layout svg .t { fill: var(--accent); }
 .ol-rail-layout svg .l { fill: var(--muted2); }
+
+/* ------------------------------------------------------------ the slide sorter (editor/layout/sorter.ts)
+   PowerPoint's View ▸ Slide Sorter: every slide as a card, over the canvas and the rail */
+.ol-sorter { position: absolute; z-index: 8; display: flex; flex-direction: column; box-sizing: border-box; background: var(--canvas-bg, #e7e8ea); font: 12px/1.3 var(--ui-font); color: var(--ui-fg); user-select: none; -webkit-user-select: none; }
+.ol-sorter-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 14px; background: var(--surface2); border-bottom: 1px solid var(--ui-border); }
+.ol-sorter-title { font-weight: 600; font-size: 13px; }
+.ol-sorter-info { color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.ol-sorter-size { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.ol-sorter-size input { width: 120px; accent-color: var(--accent); }
+.ol-sorter-size-icon { display: inline-block; box-sizing: border-box; border: 1.5px solid var(--ui-muted); border-radius: 2px; }
+.ol-sorter-size-icon.small { width: 9px; height: 7px; }
+.ol-sorter-size-icon.large { width: 15px; height: 11px; }
+.ol-sorter-present, .ol-sorter-done { padding: 4px 12px; border: 1px solid var(--ui-border); border-radius: 5px; background: var(--surface); color: var(--ui-fg); font: inherit; }
+.ol-sorter-present:hover { background: var(--row-hover); border-color: var(--accent-border); }
+.ol-sorter-done { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.ol-sorter-done:hover { filter: brightness(1.08); }
+.ol-sorter-grid { position: relative; flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, var(--card-w)); justify-content: center; align-content: start; gap: 24px 26px; padding: 24px 28px 64px; outline: none; }
+.ol-sorter-card { position: relative; width: var(--card-w); cursor: pointer; touch-action: none; }
+.ol-sorter-thumb { border-radius: 4px; overflow: hidden; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.06); transition: box-shadow 0.1s; }
+.ol-sorter-clip { position: relative; overflow: hidden; }
+.ol-sorter-card:hover .ol-sorter-thumb { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 0 2px var(--active-border); }
+.ol-sorter-card.selected .ol-sorter-thumb { box-shadow: 0 0 0 3px var(--accent); }
+.ol-sorter-grid:focus-visible .ol-sorter-card.focused .ol-sorter-thumb { box-shadow: 0 0 0 3px var(--accent), 0 0 0 6px var(--accent-border); }
+.ol-sorter-card.dragging { opacity: 0.35; }
+.ol-sorter.dragging, .ol-sorter.dragging * { cursor: grabbing; }
+.ol-sorter-meta { display: flex; align-items: baseline; gap: 6px; min-width: 0; margin-top: 7px; }
+.ol-sorter-num { flex: none; font-weight: 600; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.ol-sorter-card.selected .ol-sorter-num { color: var(--accent); }
+.ol-sorter-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ol-sorter-badges { display: inline-flex; flex: none; gap: 4px; }
+.ol-sorter-badges .b { padding: 0 6px; border-radius: 8px; background: var(--ui-bg2); color: var(--ui-muted); font-size: 10.5px; line-height: 16px; white-space: nowrap; }
+.ol-sorter-add { width: var(--card-w); height: var(--card-h); box-sizing: border-box; border: 2px dashed var(--ui-border); border-radius: 6px; background: transparent; color: var(--ui-muted); font: 600 13px var(--ui-font); }
+.ol-sorter-add:hover, .ol-sorter-add:focus-visible { border-color: var(--accent); color: var(--accent); background: var(--surface); outline: none; }
+.ol-sorter-drop { position: absolute; z-index: 2; width: 4px; border-radius: 2px; background: var(--accent); display: none; pointer-events: none; }
+.ol-sorter-ghost { position: absolute; z-index: 12; padding: 4px 11px; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 600; white-space: nowrap; pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); }
+@media (max-width: 600px) { .ol-sorter-grid { padding: 16px 12px 48px; gap: 18px 14px; } .ol-sorter-size input { width: 80px; } }
