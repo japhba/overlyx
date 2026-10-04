@@ -1379,6 +1379,11 @@ What differs, and how the specs deal with it:
   none (`CMU Serif, serif`), so fonts.spec compares families without quotes.
 - **Pointer positions** are whole pixels in WebKit and Firefox, fractions in Chromium: sizes drawn
   with the mouse come out a hair different (layout.spec allows 69.98 mm for 70).
+- **Synthetic events.** Firefox's ClipboardEvent constructor ignores `clipboardData`: specs that paste
+  by dispatching one set the property on the event; Chromium has no `insertFromComposition` input
+  type (misc.spec's Safari composition order runs in WebKit and Firefox only).
+- **Devices.** devices.spec opens the app as a phone and as a tablet; scratch/browsers/ipad.mts
+  (`landscape`, `portrait`, `phone`; `ENGINE=chromium`) taps through a document and takes screenshots.
 - **Settling.** A click Playwright lands on a formula not yet hovered reaches the formula's field
   directly in Chromium but its row in WebKit, which focuses the field a frame later: specs that type
   right after such a click wait for `nextFrames(page)`.
@@ -1460,6 +1465,14 @@ How it works, in order of what happens when you open a document:
   - an Overleaf zip chosen before signing in is parked in IndexedDB as bytes — Safari stores no Blob
     there in a private window; files dropped into the file tree fall back to the dropped `File` where
     WebKit's directory entry cannot be read.
+  - Firefox: after a caret key the caret is put beside an uneditable widget at a line's start
+    (`caretOutOfWidget`, assembly.ts) — Home on a heading left it in the fold toggle, where
+    ProseMirror ignores it, and Shift+End, Delete joined the heading with the next paragraph; the
+    menus' Paste sets clipboardData on the paste event itself (`pasteEventWith`, clipmenu.ts:
+    Firefox's ClipboardEvent constructor drops it, and LaTeX text went in unparsed).
+  - phones (Safari on an iPhone, Chrome on Android): the documents panel starts in its rail and the
+    drawing toolbar stays off (`isTabletClient` excludes screens narrow in either orientation) — the
+    panel and the toolbar left a 393 px iPhone a text column one letter wide.
   - the editor taking the focus back keeps the page where it is (`keepScrollOnFocus`, assembly.ts):
     WebKit reveals the editor's previous DOM selection on focus whatever `preventScroll` says, so a
     click on a child document's link (which takes the focus) scrolled to the old caret.
