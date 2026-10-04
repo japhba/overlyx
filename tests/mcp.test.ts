@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import express from 'express';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-mcp-test');
@@ -135,8 +136,9 @@ describe('tools/list', () => {
     const { status, body } = await rpc(t.token, 'tools/list');
     expect(status).toBe(200);
     const names = body.result.tools.map((x: any) => x.name).sort();
-    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'edit_document', 'edit_file', 'fetch', 'insert_paragraphs', 'list_comments',
-      'list_documents', 'list_files', 'list_projects', 'project_history', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'resolve_comment', 'restore_project', 'search', 'write_document', 'write_file']);
+    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'edit_document', 'edit_file', 'fetch', 'get_presence', 'highlight', 'insert_paragraphs', 'list_comments',
+      'list_documents', 'list_files', 'list_projects', 'project_history', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'reply', 'resolve_comment', 'restore_project', 'search',
+      'wait_for_instructions', 'write_document', 'write_file']);
   });
 
   it('creates a project from the account-wide MCP endpoint', async () => {
@@ -638,5 +640,327 @@ describe('build', () => {
     const listed = await rpc(panel, 'tools/list');
     expect(listed.body.result.tools.map((x: any) => x.name)).toContain('undo_turn');
     await expect(callTool(panel, 'undo_turn', {})).rejects.toThrow(/No Agent panel thread has changed this project/);
+  });
+});
+
+/* ------------------------------------------------------------------ presence, highlights, messages from OverLyX */
+
+const Y = await import('yjs');
+const awarenessProtocol = await import('y-protocols/awareness');
+const encoding = await import('lib0/encoding');
+const { initProseMirrorDoc, absolutePositionToRelativePosition } = await import('y-prosemirror');
+const { schema } = await import('@overlyx/core');
+const { describeCursor } = await import('../packages/server/src/ycursor.ts');
+const { isAgentClient } = await import('../packages/server/src/agentPresence.ts');
+const { sendInstruction, cancelInstruction, mcpAgentRoutes, listAgents } = await import('../packages/server/src/mcpAgents.ts');
+const { dropLiveSessionsForTests } = await import('../packages/server/src/mcp.ts');
+const { toSessionUser, createGuest } = await import('../packages/server/src/auth.ts');
+const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+
+type OpenDocT = Awaited<ReturnType<typeof manager.open>>;
+const sessionUser = (id: number) => toSessionUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id) as never);
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const allBase = `http://127.0.0.1:${port}/mcp`;
+
+/** The editor position of `needle` (+ `delta`) in the document, as the browser's ProseMirror counts it. */
+function pmPos(d: OpenDocT, needle: string, delta = 0): number {
+  const { doc: pm } = initProseMirrorDoc(d.fragment, schema);
+  let found = -1;
+  pm.descendants((n, pos) => {
+    if (found >= 0) return false;
+    if (n.isText) { const i = n.text!.indexOf(needle); if (i >= 0) { found = pos + i + delta; return false; } }
+    return true;
+  });
+  if (found < 0) throw new Error('not found: ' + needle);
+  return found;
+}
+/** That position as y-prosemirror's cursor plugin publishes it (a Yjs relative position). */
+function relAt(d: OpenDocT, pos: number): unknown {
+  const { mapping } = initProseMirrorDoc(d.fragment, schema);
+  return Y.relativePositionToJSON(absolutePositionToRelativePosition(pos, d.fragment, mapping));
+}
+let fakeClientId = 90000;
+/** A browser tab of `userId` in the document: a connection as ws.ts registers it, with its awareness state. */
+function joinAs(d: OpenDocT, userId: number, name: string, cursor: { anchor: unknown; head: unknown } | null) {
+  const conn = { readyState: 1 } as never;
+  const id = ++fakeClientId;
+  d.conns.set(conn, new Set([id]));
+  d.connUsers.set(conn, userId);
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, 1); encoding.writeVarUint(enc, id); encoding.writeVarUint(enc, 1);
+  encoding.writeVarString(enc, JSON.stringify({ user: { name, color: '#336699' }, ...(cursor ? { cursor } : {}) }));
+  awarenessProtocol.applyAwarenessUpdate(d.awareness, encoding.toUint8Array(enc), conn);
+  return () => { d.conns.delete(conn); d.connUsers.delete(conn); awarenessProtocol.removeAwarenessStates(d.awareness, [id], null); };
+}
+/** The awareness states the server shows for agents in the document. */
+const agentStates = (d: OpenDocT) => [...d.awareness.getStates().entries()].filter(([, s]) => (s as any)?.user?.agent).map(([id, s]) => ({ id, state: s as any }));
+const initialize = (token: string, name: string, endpoint = base) => rpcAt(endpoint, token, 'initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name, version: '1.0' } });
+const agentIdOf = (token: string) => {
+  const kind = token.startsWith('olxmcp_') ? 'agent' : 'personal';
+  const t = db.prepare(`SELECT id FROM ${kind === 'agent' ? 'mcp_tokens' : 'git_tokens'} WHERE token_hash = ?`).get(createHash('sha256').update(token).digest('hex')) as { id: number };
+  return (db.prepare('SELECT id FROM mcp_agents WHERE token_kind = ? AND token_id = ? ORDER BY last_seen_at DESC LIMIT 1').get(kind, t.id) as { id: number }).id;
+};
+
+const colin = createUser('colin', 'Colin Collab', 'pw');
+db.prepare('INSERT INTO project_members (project, user_id, role, via, created_at) VALUES (?,?,?,?,?)').run('owner/p', colin.id, 'edit', 'member', Date.now());
+
+describe('presence: where people are (get_presence)', () => {
+  let leave: (() => void)[] = [];
+  afterAll(() => leave.forEach(f => f()));
+
+  it("resolves the user's cursor and selection into paragraph, offset, excerpt and the selected text — read_document's terms", async () => {
+    writeFileSync(file('pres.tex'), doc('Intro paragraph with some words.\n\nThe second paragraph says $x^2$ and more here.\n\nThird one.'));
+    const d = await manager.open('owner/p/pres.tex');
+    const from = pmPos(d, 'says'), to = pmPos(d, 'more', 4);
+    leave.push(joinAs(d, owner.id, 'Owner', { anchor: relAt(d, from), head: relAt(d, to) }));
+    leave.push(joinAs(d, colin.id, 'Colin Collab', { anchor: relAt(d, pmPos(d, 'with')), head: relAt(d, pmPos(d, 'with')) }));
+    const t = createMcpToken(owner.id, 'Presence reader').token;
+    const r = await callTool(t, 'get_presence', { path: 'pres.tex' });
+    expect(r.documents).toHaveLength(1);
+    expect(r.documents[0]).toMatchObject({ project: 'owner/p', path: 'pres.tex' });
+    const me = r.documents[0].people.find((x: any) => x.you);
+    expect(me).toMatchObject({ name: 'Owner', kind: 'person', cursor: { paragraph: 1, layout: 'Standard' }, selection: { from: { paragraph: 1 }, to: { paragraph: 1 }, text: 'says x^2 and more' } });
+    expect(me.cursor.excerpt).toBe('The second paragraph says x^2 and more‸ here.');
+    // the offsets index read_document's paragraph text
+    const pars = (await callTool(t, 'read_document', { path: 'pres.tex' })).paragraphs;
+    expect(pars[1].text.slice(me.selection.from.offset, me.selection.to.offset)).toBe('says x^2 and more');
+    expect(me.cursor.offset).toBe(me.selection.to.offset);
+    const other = r.documents[0].people.find((x: any) => x.name === 'Colin Collab');
+    expect(other.you).toBeUndefined();
+    expect(other.cursor).toMatchObject({ paragraph: 0, offset: 'Intro paragraph '.length, excerpt: 'Intro paragraph ‸with some words.' });
+    expect(other.selection).toBeNull();
+    expect(r.legend).toMatch(/you: the user this connection belongs to/);
+  });
+
+  it('a selection across paragraphs is quoted with its paragraph break', async () => {
+    const d = await manager.open('owner/p/pres.tex');
+    const off = joinAs(d, owner.id, 'Owner (tab 2)', { anchor: relAt(d, pmPos(d, 'some')), head: relAt(d, pmPos(d, 'second', 6)) });
+    try {
+      const r = await callTool(createMcpToken(owner.id, 'p2').token, 'get_presence', { path: 'pres.tex' });
+      const tab = r.documents[0].people.find((x: any) => x.name === 'Owner (tab 2)');
+      expect(tab.selection).toMatchObject({ from: { paragraph: 0 }, to: { paragraph: 1 }, text: 'some words.\n\nThe second' });
+    } finally { off(); }
+  });
+
+  it('without a project (all projects): only where the user is; others learn nothing', async () => {
+    const mine = await callToolAt(allBase, createMcpToken(owner.id, 'finder').token, 'get_presence', {});
+    const doc0 = mine.documents.find((x: any) => x.path === 'pres.tex');
+    expect(doc0.people.every((x: any) => x.you)).toBe(true);
+    // an outsider: no access to the project — not through the fixed endpoint, not by naming it, not by asking around
+    const mal = createMcpToken(outsider.id, 'snoop').token;
+    expect((await rpc(mal, 'tools/list')).status).toBe(403);
+    await expect(callToolAt(allBase, mal, 'get_presence', { project: 'owner/p' })).rejects.toThrow(/no access/);
+    expect((await callToolAt(allBase, mal, 'get_presence', {})).documents).toEqual([]);
+  });
+
+  it('a cursor that does not resolve is no cursor (old state, garbage)', async () => {
+    const d = await manager.open('owner/p/pres.tex');
+    expect(describeCursor(d.ydoc, { anchor: {}, head: {} })).toBeNull();
+    expect(describeCursor(d.ydoc, { anchor: { item: { client: 1, clock: 99999 } }, head: { item: { client: 1, clock: 99999 } } })).toBeNull();
+    expect(describeCursor(d.ydoc, null)).toBeNull();
+  });
+});
+
+describe('agents shown to the people in a document', () => {
+  it('an agent that reads and edits appears as a collaborator, its caret on what it changed; highlight points at a passage', async () => {
+    const t = createMcpToken(owner.id, 'Presence Bot').token;
+    await initialize(t, 'codex-mcp-client');
+    const d = await manager.open('owner/p/pres.tex');
+    await callTool(t, 'read_document', { path: 'pres.tex' });
+    let mine = agentStates(d).filter(a => a.state.user.name === 'Codex (Owner)');
+    expect(mine).toHaveLength(1);
+    expect(mine[0].state.cursor).toBeUndefined();   // reading: present, no caret yet
+    expect(isAgentClient(d, mine[0].id)).toBe(true);   // browsers cannot overwrite it (ws.ts)
+    await callTool(t, 'edit_document', { path: 'pres.tex', old_text: 'Third one.', new_text: 'Third one, edited.' });
+    mine = agentStates(d).filter(a => a.state.user.name === 'Codex (Owner)');
+    const at = describeCursor(d.ydoc, mine[0].state.cursor);
+    expect(at?.cursor.paragraph).toBe(2);
+    expect(at?.selection?.text).toContain('edited');
+    // the agent sees itself
+    const p = await callTool(t, 'get_presence', { path: 'pres.tex' });
+    expect(p.documents[0].people.find((x: any) => x.self)).toMatchObject({ kind: 'agent', name: 'Codex (Owner)' });
+    await callTool(t, 'highlight', { path: 'pres.tex', quote: 'SOME   words' });
+    const hl = describeCursor(d.ydoc, agentStates(d).find(a => a.state.user.name === 'Codex (Owner)')!.state.cursor);
+    expect(hl?.selection).toMatchObject({ from: { paragraph: 0 }, text: 'some words' });
+    await callTool(t, 'highlight', { path: 'pres.tex', paragraph_index: 1 });
+    const whole = describeCursor(d.ydoc, agentStates(d).find(a => a.state.user.name === 'Codex (Owner)')!.state.cursor);
+    expect(whole?.selection?.text).toBe('The second paragraph says x^2 and more here.');
+    await expect(callTool(t, 'highlight', { path: 'pres.tex', quote: 'not in this document' })).rejects.toThrow(/not found/);
+    await callTool(t, 'highlight', { path: 'pres.tex', clear: true });
+    expect(agentStates(d).find(a => a.state.user.name === 'Codex (Owner)')!.state.cursor).toBeUndefined();
+  });
+
+  it("the Agent panel's own agent is not shown as a visitor and has no inbox", async () => {
+    const panel = createMcpToken(owner.id, 'Agent panel').token;
+    const d = await manager.open('owner/p/pres.tex');
+    await callTool(panel, 'read_document', { path: 'pres.tex' });
+    expect(agentStates(d).some(a => /Agent panel/.test(a.state.user.name))).toBe(false);
+    await expect(callTool(panel, 'wait_for_instructions', { timeout_seconds: 1 })).rejects.toThrow(/agents connected from elsewhere/);
+  });
+});
+
+describe('messages from OverLyX to an agent elsewhere', () => {
+  const ownerUser = () => sessionUser(owner.id);
+
+  it('wait_for_instructions returns a message as soon as it is sent, with where the user is; reply answers it', async () => {
+    const t = createMcpToken(owner.id, 'Listener').token;
+    await initialize(t, 'codex-mcp-client');
+    const agentId = agentIdOf(t);
+    const t0 = Date.now();
+    const waiting = callTool(t, 'wait_for_instructions', { timeout_seconds: 20 });
+    await sleep(300);
+    expect(listAgents(owner.id).find(a => a.id === agentId)?.status).toBe('listening');
+    const sent = await sendInstruction(ownerUser(), agentId, 'Tighten the intro', { docId: 'owner/p/pres.tex', content: [{ type: 'text', text: 'some words' }], layout: 'Standard' });
+    const got = await waiting;
+    expect(Date.now() - t0).toBeLessThan(5000);
+    expect(got.messages).toHaveLength(1);
+    expect(got.messages[0]).toMatchObject({ message_id: sent.id, text: 'Tighten the intro' });
+    expect(got.messages[0].from).toMatch(/^Owner \(the owner of your token\)/);
+    expect(got.messages[0].context).toContain('owner/p/pres.tex');
+    expect(got.messages[0].context).toContain('⟦SELECTION⟧some words⟦/SELECTION⟧');
+    const r = await callTool(t, 'reply', { message_id: sent.id, text: 'Done: the intro is tighter.' });
+    expect(r.answered).toBe(sent.id);
+    const rows = db.prepare('SELECT role, state, via, text, reply_to FROM mcp_agent_messages WHERE agent_id = ? ORDER BY id').all(agentId) as any[];
+    expect(rows).toEqual([
+      { role: 'user', state: 'answered', via: 'poll', text: 'Tighten the intro', reply_to: null },
+      { role: 'agent', state: 'final', via: null, text: 'Done: the intro is tighter.', reply_to: sent.id },
+    ]);
+  });
+
+  it('times out empty, well within a client tool timeout', async () => {
+    const t = createMcpToken(owner.id, 'Patient').token;
+    await initialize(t, 'codex-mcp-client');
+    const t0 = Date.now();
+    const got = await callTool(t, 'wait_for_instructions', { timeout_seconds: 1 });
+    expect(got.messages).toEqual([]);
+    expect(got.note).toMatch(/call wait_for_instructions again/i);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(900);
+    expect(Date.now() - t0).toBeLessThan(4000);
+    // asking for longer than the cap waits the cap at most (50 s) — checked by the schema's clamp, not here
+  });
+
+  it('a queued message waits for the next poll; one handed out and then ignored comes again; cancel takes a queued one back', async () => {
+    const t = createMcpToken(owner.id, 'Forgetful').token;
+    await initialize(t, 'codex-mcp-client');
+    const agentId = agentIdOf(t);
+    const a = await sendInstruction(ownerUser(), agentId, 'First task', undefined);
+    expect((await callTool(t, 'wait_for_instructions', { timeout_seconds: 1 })).messages.map((m: any) => m.message_id)).toEqual([a.id]);
+    // no tool call since: the answer was probably lost on the way — handed out again
+    expect((await callTool(t, 'wait_for_instructions', { timeout_seconds: 1 })).messages.map((m: any) => m.message_id)).toEqual([a.id]);
+    await callTool(t, 'list_documents', {});   // the agent works on it
+    expect((await callTool(t, 'wait_for_instructions', { timeout_seconds: 1 })).messages).toEqual([]);
+    const b = await sendInstruction(ownerUser(), agentId, 'Never mind this', undefined);
+    expect(cancelInstruction(ownerUser(), agentId, b.id).state).toBe('cancelled');
+    expect((await callTool(t, 'wait_for_instructions', { timeout_seconds: 1 })).messages).toEqual([]);
+    expect(() => cancelInstruction(ownerUser(), agentId, a.id)).toThrow(/already has/);
+    // a reply without message_id answers the last message it got
+    const r = await callTool(t, 'reply', { text: 'Finished the first task.' });
+    expect(r.answered).toBe(a.id);
+  });
+
+  it("only the token's own account may write to it: not a collaborator, not a guest, not another site", async () => {
+    const t = createMcpToken(owner.id, 'Guarded').token;
+    await initialize(t, 'codex-mcp-client');
+    const agentId = agentIdOf(t);
+    await expect(sendInstruction(sessionUser(colin.id), agentId, 'rm -rf ~', undefined)).rejects.toThrow(/no such agent/);
+    const guest = createGuest();
+    await expect(sendInstruction(toSessionUser(guest), agentId, 'rm -rf ~', undefined)).rejects.toThrow(/no such agent/);
+    // the same over HTTP, through the panel's routes
+    const app2 = express();
+    app2.use((req, _res, next) => { const id = Number(req.header('x-user')); const row = db.prepare('SELECT * FROM users WHERE id = ?').get(id); if (row) req.user = toSessionUser(row as never); next(); });
+    app2.use(express.json());
+    app2.use('/api', mcpAgentRoutes());
+    const srv2 = http.createServer(app2);
+    await new Promise<void>(r => srv2.listen(0, '127.0.0.1', r));
+    const api = `http://127.0.0.1:${(srv2.address() as { port: number }).port}/api`;
+    const post = (user: number, body: unknown, headers: Record<string, string> = {}) => fetch(`${api}/mcp-agents/${agentId}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user': String(user), ...headers }, body: JSON.stringify(body) });
+    try {
+      expect((await post(colin.id, { text: 'hello' })).status).toBe(404);
+      expect((await post(guest.id, { text: 'hello' })).status).toBe(404);
+      expect((await post(owner.id, { text: 'hello' }, { Origin: 'https://evil.example' })).status).toBe(403);
+      expect((await post(owner.id, { text: 'x'.repeat(9000) })).status).toBe(413);
+      const ok = await post(owner.id, { text: 'hello', context: { docId: 'owner/p/pres.tex' } });
+      expect(ok.status).toBe(200);
+      expect((await ok.json()).message).toMatchObject({ role: 'user', state: 'queued', context: { docId: 'owner/p/pres.tex' } });
+      // the collaborator's list does not show the owner's agents; the owner's does
+      expect((await (await fetch(`${api}/mcp-agents`, { headers: { 'x-user': String(colin.id) } })).json()).agents).toEqual([]);
+      const listed = (await (await fetch(`${api}/mcp-agents`, { headers: { 'x-user': String(owner.id) } })).json()).agents;
+      expect(listed.find((a: any) => a.id === agentId)).toMatchObject({ name: 'Codex', label: 'Codex (Owner)', token: 'connector credential' });
+      expect((await fetch(`${api}/mcp-agents/${agentId}/messages`, { headers: { 'x-user': String(colin.id) } })).status).toBe(404);
+      // a context naming a document the sender cannot see is dropped, not read
+      const rita = createUser('rita', 'Rita', 'pw');
+      const rt = createMcpToken(rita.id, 'Rita bot').token;
+      await initialize(rt, 'codex-mcp-client', allBase);
+      const ritaAgent = agentIdOf(rt);
+      const m = await sendInstruction(sessionUser(rita.id), ritaAgent, 'what does it say?', { docId: 'owner/p/pres.tex', content: [{ type: 'text', text: 'some words' }] });
+      expect(m.context).toBeNull();
+      // rate limit: 20 a minute
+      for (let i = 1; i < 20; i++) await sendInstruction(sessionUser(rita.id), ritaAgent, `msg ${i}`, undefined);
+      await expect(sendInstruction(sessionUser(rita.id), ritaAgent, 'one too many', undefined)).rejects.toThrow(/too many/);
+    } finally { srv2.close(); }
+  });
+
+  it('a view-only account\'s agent listens and replies, and still cannot edit', async () => {
+    const vera = db.prepare("SELECT id FROM users WHERE username = 'vera'").get() as { id: number };
+    const t = createMcpToken(vera.id, 'Vera bot').token;
+    await initialize(t, 'codex-mcp-client');
+    const agentId = agentIdOf(t);
+    const waiting = callTool(t, 'wait_for_instructions', { timeout_seconds: 10 });
+    await sleep(200);
+    const m = await sendInstruction(sessionUser(vera.id), agentId, 'Summarize pres.tex', undefined);
+    expect((await waiting).messages[0].message_id).toBe(m.id);
+    expect((await callTool(t, 'reply', { text: 'It has three paragraphs.' })).answered).toBe(m.id);
+    await expect(callTool(t, 'edit_document', { path: 'pres.tex', old_text: 'Third', new_text: 'Fourth' })).rejects.toThrow(/view-only/);
+  });
+
+  it('pushes messages into a Claude Code session (channels), counts them delivered once the channel answered, and survives a server restart', async () => {
+    const token = createMcpToken(owner.id, 'Claude laptop').token;
+    const transport = new StreamableHTTPClientTransport(new URL(allBase), { requestInit: { headers: { Authorization: `Bearer ${token}` } }, reconnectionOptions: { initialReconnectionDelay: 200, maxReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1.5, maxRetries: 5 } });
+    const client = new Client({ name: 'claude-code', version: '9.9.9' });
+    const pushed: any[] = [];
+    client.fallbackNotificationHandler = async (n) => { if (n.method === 'notifications/claude/channel') pushed.push(n.params); };
+    await client.connect(transport);
+    try {
+      expect(transport.sessionId).toBeTruthy();
+      expect(client.getServerCapabilities()?.experimental?.['claude/channel']).toEqual({});
+      expect(client.getInstructions()).toContain('<channel source="overlyx"');
+      const agentId = agentIdOf(token);
+      await expect.poll(() => listAgents(owner.id).find(a => a.id === agentId)?.push, { timeout: 5000 }).toBe('possible');
+      const m1 = await sendInstruction(sessionUser(owner.id), agentId, 'Pushed hello', { docId: 'owner/p/pres.tex' });
+      await expect.poll(() => pushed.length, { timeout: 5000 }).toBe(1);
+      expect(pushed[0].content).toMatch(/^Pushed hello\n\n— Added by OverLyX/);
+      expect(pushed[0].meta).toMatchObject({ message_id: String(m1.id), from: 'Owner', document: 'owner/p/pres.tex' });
+      // not confirmed yet (Claude Code drops channel events silently without the flag): still available to a poll
+      expect((db.prepare('SELECT state, pushed_at FROM mcp_agent_messages WHERE id = ?').get(m1.id) as any).state).toBe('queued');
+      await client.callTool({ name: 'reply', arguments: { message_id: String(m1.id), text: 'Hi back' } });
+      expect(db.prepare('SELECT state, via FROM mcp_agent_messages WHERE id = ?').get(m1.id)).toEqual({ state: 'answered', via: 'push' });
+      expect((db.prepare('SELECT channel_ok FROM mcp_sessions WHERE id = ?').get(transport.sessionId) as any).channel_ok).toBe(1);
+      expect(listAgents(owner.id).find(a => a.id === agentId)?.push).toBe('confirmed');
+      const m2 = await sendInstruction(sessionUser(owner.id), agentId, 'Second push', undefined);
+      await expect.poll(() => pushed.length, { timeout: 5000 }).toBe(2);
+      expect(db.prepare('SELECT state, via FROM mcp_agent_messages WHERE id = ?').get(m2.id)).toEqual({ state: 'delivered', via: 'push' });
+      // a restart: the process forgets its sessions; the client's next request and its event stream bring it back
+      await dropLiveSessionsForTests();
+      const listed = await client.callTool({ name: 'list_projects', arguments: {} });
+      expect(listed.isError).toBeFalsy();
+      await expect.poll(() => listAgents(owner.id).find(a => a.id === agentId)?.push, { timeout: 8000 }).toBe('confirmed');
+      await sendInstruction(sessionUser(owner.id), agentId, 'After the restart', undefined);
+      await expect.poll(() => pushed.length, { timeout: 5000 }).toBe(3);
+      expect(pushed[2].content).toBe('After the restart');
+      // a session id nobody knows: 404, so the client starts afresh
+      const unknown = await fetch(allBase, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${token}`, 'Mcp-Session-Id': 'not-a-session' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+      expect(unknown.status).toBe(404);
+      // somebody else's token cannot use this session
+      const stolen = await fetch(allBase, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${createMcpToken(colin.id, 'c').token}`, 'Mcp-Session-Id': transport.sessionId! }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+      expect(stolen.status).toBe(404);
+      // without a session there is no event stream
+      expect((await fetch(allBase, { headers: { Accept: 'text/event-stream', Authorization: `Bearer ${token}` } })).status).toBe(405);
+      const sid = transport.sessionId!;
+      await transport.terminateSession();
+      expect(db.prepare('SELECT 1 FROM mcp_sessions WHERE id = ?').get(sid)).toBeUndefined();
+    } finally {
+      await client.close().catch(() => { /* closed */ });
+    }
   });
 });

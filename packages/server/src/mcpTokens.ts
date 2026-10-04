@@ -42,7 +42,7 @@ export function deleteMcpToken(userId: number, id: number): boolean {
  * The account + credential identity behind an MCP bearer secret, or null. Both the account token
  * and OAuth/legacy credentials work; the row's name remains the MCP author/audit name.
  */
-export function verifyMcpToken(secret: string): { id: number; userId: number; name: string } | null {
+export function verifyMcpToken(secret: string): { kind: 'personal' | 'agent'; id: number; userId: number; name: string } | null {
   const identity = verifyAccessToken(secret);
-  return identity ? { id: identity.id, userId: identity.userId, name: identity.name } : null;
+  return identity ? { kind: identity.kind, id: identity.id, userId: identity.userId, name: identity.name } : null;
 }

@@ -26,12 +26,24 @@
  * to one of them (a new commit on top) — the way back from changes that broke the build. The Agent
  * panel's agent also has undo_turn: its turns leave checkpoints (agentwork.ts), and it can take
  * one back exactly.
+ *
+ * Presence and messages (agentPresence.ts, ycursor.ts, mcpAgents.ts): get_presence tells an agent
+ * who is in a document and where their cursor and selection are — in read_document's paragraph
+ * terms — so "this" / "here" in a request resolves to the user's own cursor; an agent connected
+ * from elsewhere is shown to the people in the document as a collaborator with a caret where it
+ * last edited (highlight points at a passage). Its owner can write to it from the Agent panel: it
+ * gets the messages from wait_for_instructions (a long poll, any client) or pushed into a Claude
+ * Code session ("channels" — clients in SESSION_CLIENTS keep a session with an event stream; the
+ * session is in the database, so a server restart does not end it), and answers with reply.
  */
 import express, { type Request, type Response } from 'express';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import fs from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
+import * as Y from 'yjs';
 import {
   itemText, paragraph, textItem, insetItem, textInset, addAuthor, lyxAuthorId, fontsEqual,
   setHeaderValue, diffText, commentHeader, formatTimestamp, parseHeader, parseThread, trackDiff, changeStats,
@@ -54,6 +66,13 @@ import { createOwnedProject } from './projectCreate.ts';
 import { ensureRepo } from './git.ts';
 import { toSessionUser, type SessionUser } from './auth.ts';
 import { db, type UserRow } from './db.ts';
+import { showAgent, presenceIn, type AgentLook, type PresentPerson } from './agentPresence.ts';
+import { changedRange, findPassage, type Cursor } from './ycursor.ts';
+import {
+  agentFor, agentRow, agentLabel, agentColor, noteToolCall, wantsSession, recordSession, sessionRow, touchSession, dropSession,
+  registerPusher, unregisterPusher, streamChanged, waitForInstructions, replyFromAgent, forAgent,
+  type AgentRow, type ClientInfo, type TokenIdentity,
+} from './mcpAgents.ts';
 
 function ok(value: unknown) {
   return { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
@@ -498,14 +517,34 @@ Other text files (refs.bib, macros, .sty) are always edited directly: edit_file 
 
 After every change run build_pdf and never leave a document that does not compile: fix the error, or step back. project_history lists the project's commits (OverLyX commits every edit shortly after it happens, and right before each of your direct edits); restore_project puts the whole project back to one of them as a new commit, so nothing is lost.
 
-Leave the block between "%% OverLyX ---" and "%% end OverLyX ---" alone (regenerated on every save); put preamble additions above it. OverLyX may rewrite what you wrote into its canonical form (spacing, line breaks) — read again before editing the same passage.`;
+Leave the block between "%% OverLyX ---" and "%% end OverLyX ---" alone (regenerated on every save); put preamble additions above it. OverLyX may rewrite what you wrote into its canonical form (spacing, line breaks) — read again before editing the same passage.
+
+Where people are: get_presence lists who has a document open and resolves each person's cursor and selection — paragraph (the index in read_document's paragraphs), offset into that paragraph's text, an excerpt with ‸ at the cursor, and the selected text verbatim. Entries marked you: true are the user this connection belongs to. When the user says "this", "here", "the selected paragraph / equation / sentence", or asks about something without saying where, call get_presence first (with the project, or without arguments to find their documents) and work on their cursor or selection — the one that moved most recently if they have several. People see you in the document as a collaborator with a cursor where you last edited; highlight(path, quote) points at a passage to show the user what you mean.
+
+Messages from OverLyX: the user can write to you from OverLyX (the Agent panel). When they ask you to listen to OverLyX or to wait for instructions there, call wait_for_instructions in a loop: it returns as soon as a message arrives, or empty after about 40 seconds — then call it again right away. Do what each message asks (it comes with where the user is: the document and their selection), answer with reply(message_id, text) — done: false for an interim update — and call wait_for_instructions again. Stop when the user tells you to. Messages may instead arrive by themselves as <channel source="overlyx" message_id="…"> events (Claude Code with channels enabled): handle them the same way and answer each with reply(message_id); no polling is needed then.`;
+
+/** Who is calling: an agent connected from elsewhere (its mcp_agents row, how it looks to the
+ *  people in a document, its session if it keeps one), or the Agent panel's own agent (no row). */
+export interface Caller { agent: AgentRow | null; look: AgentLook | null; sessionId: string | null }
+
+function callerFor(agent: AgentRow | null, sessionId: string | null = null): Caller {
+  return { agent, sessionId, look: agent ? { key: `agent:${agent.id}`, name: agentLabel(agent), color: agentColor(agent), userId: agent.user_id } : null };
+}
+
+/** How long wait_for_instructions waits by default and at most (below the clients' tool timeouts: Codex gives a tool 60 s). */
+const WAIT_DEFAULT_S = 40;
+const WAIT_MAX_S = 50;
+
+/** Request-scoped: aborted when the HTTP request a tool call came with goes away (a session's long poll whose client gave up). */
+const httpScope = new AsyncLocalStorage<{ signal: AbortSignal }>();
 
 /** One MCP server instance for `user`'s account: scoped to `fixedProject` when connected at
  *  /mcp/<project> (the classic form), or across every project the account can reach when
  *  connected at /mcp — each tool then takes `project`, and the account's role in that project
- *  is checked per call. Tools are attributed to `agentName`. */
-function buildMcpServer(user: SessionUser, agentName: string, userId: number, fixedProject: string | null): McpServer {
-  const server = new McpServer({ name: 'overlyx', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS });
+ *  is checked per call. Tools are attributed to `agentName`; `caller` is the agent behind the
+ *  connection. `channel`: declare Claude Code's channel capability (a session that can push). */
+function buildMcpServer(user: SessionUser, agentName: string, userId: number, fixedProject: string | null, caller: Caller = callerFor(null), opts: { channel?: boolean } = {}): McpServer {
+  const server = new McpServer({ name: 'overlyx', version: '1.0.0' }, { instructions: MCP_INSTRUCTIONS, ...(opts.channel ? { capabilities: { experimental: { 'claude/channel': {} } } } : {}) });
   const projArg = {
     project: z.string().optional().describe(fixedProject
       ? 'Ignored — this connection is fixed to one project'
@@ -525,19 +564,54 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   /** `tracked` when a document tool is called without it: tracked, unless it is the panel's agent and its Track changes box is off */
   const trackedDefault = (project: string): boolean => agentName !== PANEL_AGENT || panelTracking(userId, project);
 
-  server.registerTool('list_documents', {
+  /** Every tool call of an agent from elsewhere is noted: when it was last seen, and where (the Agent panel lists it). */
+  const register = ((name: string, config: unknown, cb: (...a: any[]) => unknown) => server.registerTool(name, config as never, (async (...a: any[]) => {
+    if (caller.agent) {
+      const args = (a[0] ?? {}) as { project?: unknown; path?: unknown };
+      let project = fixedProject;
+      try { if (!project && typeof args.project === 'string' && args.project.trim()) project = canonicalProject(args.project.trim()); } catch { /* not a key */ }
+      try { noteToolCall(caller.agent.id, name, project, typeof args.path === 'string' ? args.path.slice(0, 300) : null); } catch (e) { console.error('[mcp] noting a tool call failed', e); }
+    }
+    return cb(...a);
+  }) as never)) as typeof server.registerTool;
+
+  /** The agent is in this document (it read it, built it): the people there see it; its caret stays where it was (`cursor` moves it). */
+  const present = async (project: string, path: string, cursor?: Cursor | null): Promise<void> => {
+    if (!caller.look) return;
+    try { showAgent(await manager.open(`${project}/${path}`), caller.look, cursor); } catch { /* presence is best-effort */ }
+  };
+  /** Run an edit of a document; afterwards the agent's caret marks the range it changed (the CRDT events of its transaction). */
+  const traced = async <T>(project: string, path: string, fn: () => Promise<T>): Promise<T> => {
+    const look = caller.look;
+    if (!look) return fn();
+    let doc: Awaited<ReturnType<typeof manager.open>> | null = null;
+    try { if (isDocumentFile(project, path) && fs.existsSync(resolveProjectPath(project, path))) doc = await manager.open(`${project}/${path}`); } catch { doc = null; }
+    if (!doc) { const r = await fn(); await present(project, path); return r; }
+    const fragment = doc.fragment;
+    let range: Cursor | null = null;
+    const observe = (events: Y.YEvent<any>[], tr: Y.Transaction) => { if (tr.origin === 'mcp') { try { range = changedRange(fragment, events) ?? range; } catch { /* best-effort */ } } };
+    fragment.observeDeep(observe);
+    try { return await fn(); }
+    finally {
+      fragment.unobserveDeep(observe);
+      try { if (manager.docs.get(doc.id) === doc) showAgent(doc, look, range ?? undefined); } catch { /* best-effort */ }
+    }
+  };
+  const external = (what: string) => { if (!caller.agent) throw new Error(`${what} is for agents connected from elsewhere; the Agent panel talks to its user in its own thread.`); return caller.agent; };
+
+  register('list_documents', {
     description: 'List the .tex documents in a project.',
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg },
   }, async ({ project: p }) => { try { return ok(listDocuments(need(p, 'view'))); } catch (e) { return fail(e); } });
 
-  server.registerTool('read_document', {
+  register('read_document', {
     description: 'Read a document: its full LaTeX source (`text` — what edit_document edits), and its paragraphs (index, layout, depth, plain text) for the paragraph tools and add_comment.',
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg, path: z.string().describe('Project-relative path, e.g. "main.tex"') },
-  }, async ({ project: p, path }) => { try { return ok(await readDocument(need(p, 'view'), path)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path }) => { try { const project = need(p, 'view'); const r = await readDocument(project, path); await present(project, path); return ok(r); } catch (e) { return fail(e); } });
 
-  server.registerTool('propose_edit', {
+  register('propose_edit', {
     description: 'Replace the text of one plain-text paragraph. Always applied as a tracked change (insertions/deletions attributed to this agent) — never a silent overwrite. Only works on paragraphs with no formulas/insets and uniform formatting; read_document first to get paragraph indices and check the content is plain.',
     inputSchema: {
       ...projArg,
@@ -545,15 +619,15 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
       paragraph_index: z.number().int().nonnegative().describe('From read_document\'s paragraphs list'),
       new_text: z.string().describe('The complete new text of the paragraph'),
     },
-  }, async ({ project: p, path, paragraph_index, new_text }) => { try { return ok(await proposeEdit(need(p, 'edit'), agentName, path, paragraph_index, new_text)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, paragraph_index, new_text }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => proposeEdit(project, agentName, path, paragraph_index, new_text))); } catch (e) { return fail(e); } });
 
-  server.registerTool('list_comments', {
+  register('list_comments', {
     description: 'List comment threads in a document: index, the top-level paragraph they belong to, where they sit (body, a float, a table cell, …), messages, resolved state. Finds threads anywhere — inside tables, floats and other insets too.',
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg, path: z.string() },
-  }, async ({ project: p, path }) => { try { return ok(await listComments(need(p, 'view'), path)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path }) => { try { const project = need(p, 'view'); const r = await listComments(project, path); await present(project, path); return ok(r); } catch (e) { return fail(e); } });
 
-  server.registerTool('add_comment', {
+  register('add_comment', {
     description: 'Add a new comment thread, attached to the end of a paragraph (default: the last paragraph of the document).',
     inputSchema: {
       ...projArg,
@@ -561,58 +635,58 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
       text: z.string(),
       paragraph_index: z.number().int().nonnegative().optional().describe('Defaults to the last paragraph'),
     },
-  }, async ({ project: p, path, text, paragraph_index }) => { try { return ok(await addComment(need(p, 'edit'), agentName, path, text, paragraph_index)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, text, paragraph_index }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => addComment(project, agentName, path, text, paragraph_index))); } catch (e) { return fail(e); } });
 
-  server.registerTool('resolve_comment', {
+  register('resolve_comment', {
     description: 'Mark a comment thread resolved (index from list_comments, in the same call — the document may have changed since an earlier listing).',
     inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative() },
-  }, async ({ project: p, path, index }) => { try { return ok(await resolveComment(need(p, 'edit'), path, index)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, index }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => resolveComment(project, path, index))); } catch (e) { return fail(e); } });
 
-  server.registerTool('build_pdf', {
+  register('build_pdf', {
     description: 'Compile the document to PDF with latexmk and wait for the result (viewers may build, like in the app). Returns ok, the LaTeX warnings, previous_build (whether the build before your changes succeeded), on failure the first errors (file:line: message) and a note when your changes broke it, and the tail of the compile log; on timeout the build keeps running — poll build_status. Humans open the PDF in the app.',
     inputSchema: { ...projArg, path: z.string(), wait_seconds: z.number().int().positive().max(600).optional().describe('How long to wait before returning (default 180; the build continues on timeout)') },
-  }, async ({ project: p, path, wait_seconds }) => { try { return ok(await buildDocument(need(p, 'view'), agentName, userId, path, wait_seconds ?? 180)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, wait_seconds }) => { try { const project = need(p, 'view'); await present(project, path); return ok(await buildDocument(project, agentName, userId, path, wait_seconds ?? 180)); } catch (e) { return fail(e); } });
 
-  if (agentName === PANEL_AGENT) server.registerTool('undo_turn', {
+  if (agentName === PANEL_AGENT) register('undo_turn', {
     description: "Take back every change one of your turns made to the project: its documents return exactly to their state before that turn (your tracked changes of the turn disappear, as if rejected — earlier marks and everybody else's edits since are kept), files it wrote get their old content back, files it created are removed. turns_back 0 (default) = the changes of the turn you are in (e.g. an edit that broke the build and cannot be fixed quickly); 1 = the last earlier turn that changed files, 2 = the one before, … Your working copy is refreshed afterwards.",
     inputSchema: { ...projArg, turns_back: z.number().int().min(0).max(30).optional().describe('0 = this turn (default), 1 = the previous turn that changed files, …') },
   }, async ({ project: p, turns_back }) => { try { return ok(await undoTurn(need(p, 'edit'), userId, turns_back ?? 0)); } catch (e) { return fail(e); } });
 
-  server.registerTool('project_history', {
+  register('project_history', {
     description: "The project's recent history: its git commits, newest first (hash, author, date, message). OverLyX commits what people and agents edit a moment after it happens, so a commit from before a change is the state to go back to with restore_project.",
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg, limit: z.number().int().positive().max(100).optional().describe('How many commits (default 20)') },
   }, async ({ project: p, limit }) => { try { const info = await repoInfo(need(p, 'view'), limit ?? 20); return ok({ commits: info.commits.map(c => ({ ...c, date: new Date(c.date).toISOString() })), uncommitted_files: info.pendingFiles }); } catch (e) { return fail(e); } });
 
-  server.registerTool('restore_project', {
+  register('restore_project', {
     description: "Step back: put the whole project (every file) back to how it was at a commit from project_history — e.g. before changes that broke the build and cannot be fixed quickly. Done as a new commit on top, so nothing is lost and the restore can itself be undone the same way; edits made since that commit (anybody's) are taken back too, so check project_history first. Open documents take the restored text over.",
     inputSchema: { ...projArg, commit: z.string().describe('A commit hash (7+ hex digits) from project_history') },
   }, async ({ project: p, commit }) => { try { const project = need(p, 'edit'); const r = await restoreProject(project, commit.trim().toLowerCase(), userId); logAccess(project, userId, 'git-push', `restore ${commit.slice(0, 12)} (MCP)`); return ok(r.restored ? { ok: true, restored_files: r.files, note: 'Restored as a new commit. Re-read documents before editing them again.' } : { ok: true, restored_files: [], note: 'The project already is as it was at that commit.' }); } catch (e) { return fail(e); } });
 
-  server.registerTool('build_status', {
+  register('build_status', {
     description: "The document's build state: whether a build is running, and the last result (status, LaTeX warnings, compile-log tail, whether a PDF exists).",
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg, path: z.string() },
   }, async ({ project: p, path }) => { try { return ok(buildStatus(need(p, 'view'), path)); } catch (e) { return fail(e); } });
 
-  server.registerTool('list_files', {
+  register('list_files', {
     description: 'All files of the project (kind: doc/tex/bib/image/pdf/…) — documents open with read_document, other text files with read_file.',
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg },
   }, async ({ project: p }) => { try { return ok(listFiles(need(p, 'view'))); } catch (e) { return fail(e); } });
 
-  server.registerTool('read_file', {
+  register('read_file', {
     description: 'Read a text file of the project (refs.bib, macros.tex, .sty, …). For documents use read_document.',
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg, path: z.string() },
   }, async ({ project: p, path }) => { try { return ok(readFile(need(p, 'view'), path)); } catch (e) { return fail(e); } });
 
-  server.registerTool('write_file', {
+  register('write_file', {
     description: 'Write a text file of the project (e.g. add BibTeX entries to refs.bib). Overwrites the file — git history keeps every prior state. For documents use write_document or the paragraph tools.',
     inputSchema: { ...projArg, path: z.string(), text: z.string() },
   }, async ({ project: p, path, text }) => { try { return ok(writeFile(need(p, 'edit'), userId, path, text)); } catch (e) { return fail(e); } });
 
-  server.registerTool('edit_file', {
+  register('edit_file', {
     description: 'Edit a text file of the project (refs.bib, macros.tex, a .sty, …) by replacing a passage: old_text must occur exactly once unless replace_all. Applied directly, like write_file — git history keeps every prior state. For documents use edit_document.',
     inputSchema: {
       ...projArg, path: z.string(),
@@ -622,7 +696,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     },
   }, async ({ project: p, path, old_text, new_text, replace_all }) => { try { return ok(editFile(need(p, 'edit'), userId, path, old_text, new_text, !!replace_all)); } catch (e) { return fail(e); } });
 
-  server.registerTool('edit_document', {
+  register('edit_document', {
     description: "Edit a document by replacing a passage of its LaTeX source (the `text` read_document returns): old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to this agent and diffed against the live document, so only what actually changes is marked (a word, a digit, a table cell); the user reviews them in the editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the document now reads, for follow-up edits; applied_directly lists what was applied without marks (the preamble is never tracked). Prefer this over the paragraph tools. With tracked: false the same edit is applied directly, without marks — use that as soon as a tracked edit fails, garbles the passage or breaks the build.",
     inputSchema: {
       ...projArg,
@@ -632,37 +706,128 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
       replace_all: z.boolean().optional().describe('Replace every occurrence (default: old_text must be unique)'),
       tracked: z.boolean().optional().describe('true (default): a tracked change for review. false: applied directly, no tracked-change marks — the fallback whenever tracked editing runs into any problem (see the server instructions); the previous state stays in the project history'),
     },
-  }, async ({ project: p, path, old_text, new_text, replace_all, tracked }) => { try { const project = need(p, 'edit'); return ok(await editDocument(project, userId, agentName, path, old_text, new_text, !!replace_all, tracked ?? trackedDefault(project))); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, old_text, new_text, replace_all, tracked }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => editDocument(project, userId, agentName, path, old_text, new_text, !!replace_all, tracked ?? trackedDefault(project)))); } catch (e) { return fail(e); } });
 
-  server.registerTool('insert_paragraphs', {
+  register('insert_paragraphs', {
     description: 'Insert raw LaTeX (anything: formulas, citations, sections, environments — parsed like the editor parses .tex) as new paragraphs at a position: 0 = top, paragraph count = append. Applied as a tracked insertion, reviewable like any collaborator edit. Indices shift — re-run read_document afterwards.',
     inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative().describe('Position from read_document; the paragraph count appends'), latex: z.string() },
-  }, async ({ project: p, path, index, latex }) => { try { return ok(await insertParagraphs(need(p, 'edit'), agentName, path, index, latex)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, index, latex }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => insertParagraphs(project, agentName, path, index, latex))); } catch (e) { return fail(e); } });
 
-  server.registerTool('replace_paragraph', {
+  register('replace_paragraph', {
     description: 'Replace one paragraph by raw LaTeX (may parse to several paragraphs; formulas, citations, anything allowed). Tracked, and diffed against the old paragraph: only the words / characters that differ are marked (inside tables and footnotes too).',
     inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative().describe("From read_document's paragraphs list"), latex: z.string() },
-  }, async ({ project: p, path, index, latex }) => { try { return ok(await replaceParagraph(need(p, 'edit'), agentName, path, index, latex)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, index, latex }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => replaceParagraph(project, agentName, path, index, latex))); } catch (e) { return fail(e); } });
 
-  server.registerTool('delete_paragraph', {
+  register('delete_paragraph', {
     description: 'Mark one paragraph deleted as a tracked change (the text disappears when a reviewer accepts it).',
     inputSchema: { ...projArg, path: z.string(), index: z.number().int().nonnegative() },
-  }, async ({ project: p, path, index }) => { try { return ok(await deleteParagraph(need(p, 'edit'), agentName, path, index)); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, index }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => deleteParagraph(project, agentName, path, index))); } catch (e) { return fail(e); } });
 
-  server.registerTool('write_document', {
+  register('write_document', {
     description: "Write a document's whole raw LaTeX source, or create the document when the path does not exist. On an existing document the new source is diffed against the current one and applied as tracked changes (only what differs is marked) — or, with tracked: false, written directly. For a local change prefer edit_document.",
     inputSchema: {
       ...projArg, path: z.string(), tex: z.string(),
       tracked: z.boolean().optional().describe('true (default): a tracked change for review. false: applied directly, no tracked-change marks — the fallback whenever tracked editing runs into any problem (see the server instructions); the previous state stays in the project history'),
     },
-  }, async ({ project: p, path, tex, tracked }) => { try { const project = need(p, 'edit'); return ok(await writeDocument(project, userId, agentName, path, tex, tracked ?? trackedDefault(project))); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path, tex, tracked }) => { try { const project = need(p, 'edit'); return ok(await traced(project, path, () => writeDocument(project, userId, agentName, path, tex, tracked ?? trackedDefault(project)))); } catch (e) { return fail(e); } });
 
-  server.registerTool('create_document', {
+  register('create_document', {
     description: 'Create a new .tex document from the standard template (write_document with full source also creates).',
     inputSchema: { ...projArg, path: z.string(), title: z.string().optional() },
   }, async ({ project: p, path, title }) => { try { return ok(createDocument(need(p, 'edit'), userId, user.name, path, title)); } catch (e) { return fail(e); } });
 
-  server.registerTool('list_projects', {
+  /** Who is where in the open documents of one project (or, without a project on /mcp, only the user, across their projects). */
+  const getPresence = (p: unknown, path: string | undefined) => {
+    const onlyYou = !fixedProject && !(typeof p === 'string' && p.trim());
+    const project = onlyYou ? null : need(p, 'view');
+    const documents: { project: string; path: string; people: PresentPerson[] }[] = [];
+    for (const d of manager.docs.values()) {
+      if (project ? d.project !== project : !atLeast(roleFor(user, d.project), 'view')) continue;
+      if (path && d.relPath !== path) continue;
+      let people = presenceIn(d, userId, caller.look?.key ?? null);
+      if (onlyYou) people = people.filter(x => x.you);
+      if (people.length) documents.push({ project: d.project, path: d.relPath, people });
+    }
+    // the documents where the user moved last first
+    const recency = (x: { people: PresentPerson[] }) => Math.min(...x.people.filter(q => q.you).map(q => q.moved_seconds_ago ?? 1e9), 1e9);
+    documents.sort((a, b) => recency(a) - recency(b));
+    return {
+      documents,
+      legend: "paragraph: index in read_document's paragraphs; offset: characters into that paragraph's text as read_document lists it (null inside a table); ‸ in excerpt marks the cursor; selection.text: the selected (highlighted) text; you: the user this connection belongs to — their cursor / selection is what \"this\" and \"here\" mean; moved_seconds_ago: when that cursor last moved.",
+      ...(documents.length ? {} : { note: onlyYou ? 'You (the user) have no document open in OverLyX right now.' : `Nobody has ${path ? path : 'a document of this project'} open right now.` }),
+    };
+  };
+
+  register('get_presence', {
+    description: "Who is in the project's open documents right now, and where: each person's (and agent's) cursor and selection, resolved to the paragraph (read_document's index), the offset into that paragraph's text, an excerpt with ‸ at the cursor, and the selected text verbatim. Entries with you: true are the user this connection belongs to — when they say \"this\", \"here\" or \"the selected paragraph\", use their cursor / selection. Without a project (on the all-projects connection): where the user is, across their projects.",
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      project: z.string().optional().describe(fixedProject ? 'Ignored — this connection is fixed to one project' : 'The project (its key from list_projects); leave out to find where the user is in any of their projects'),
+      path: z.string().optional().describe('Only this document'),
+    },
+  }, async ({ project: p, path }) => { try { return ok(getPresence(p, path)); } catch (e) { return fail(e); } });
+
+  register('highlight', {
+    description: "Point at a passage in a document: your cursor there selects it, so the people in the document see what you mean (you appear to them as a collaborator, with your name). quote: the passage as plain text, as read_document's paragraphs show it (whitespace, quotes and case are matched loosely; for a long passage its first and last words suffice); paragraph_index narrows the search, or highlights that whole paragraph when there is no quote. clear: true removes your highlight.",
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      ...projArg, path: z.string(),
+      quote: z.string().max(4000).optional(),
+      paragraph_index: z.number().int().nonnegative().optional(),
+      clear: z.boolean().optional(),
+    },
+  }, async ({ project: p, path, quote, paragraph_index, clear }) => {
+    try {
+      const project = need(p, 'view');
+      external('highlight');
+      const look = caller.look!;
+      const doc = await manager.open(`${project}/${path}`);
+      if (clear) { showAgent(doc, look, null); return ok({ ok: true, note: 'Your highlight is gone.' }); }
+      if (!quote?.trim() && paragraph_index === undefined) throw new Error('Give quote (the passage) or paragraph_index.');
+      const hit = findPassage(doc.ydoc, { quote, paragraph: paragraph_index });
+      if (!hit) throw new Error(quote ? `"${quote.slice(0, 80)}" was not found${paragraph_index !== undefined ? ` in paragraph ${paragraph_index}` : ''} — quote the plain text as read_document's paragraphs show it.` : `No paragraph ${paragraph_index} — this document has ${doc.fragment.length}.`);
+      showAgent(doc, look, { anchor: hit.anchor, head: hit.head });
+      return ok({ ok: true, paragraph: hit.paragraph, note: 'Highlighted for the people in the document — it stays until you edit or point elsewhere, or 5 minutes after your last activity.' });
+    } catch (e) { return fail(e); }
+  });
+
+  register('wait_for_instructions', {
+    description: `Wait for the user's next message from OverLyX (they write to you in its Agent panel). Returns as soon as one arrives — message_id, the text, and where the user is (document, selection) — or an empty list after timeout_seconds (default ${WAIT_DEFAULT_S}, at most ${WAIT_MAX_S}): then call it again to keep listening. Answer each message with reply. Use it when the user asks you to listen to OverLyX.`,
+    annotations: { readOnlyHint: true },
+    inputSchema: { timeout_seconds: z.number().optional().describe(`How long to wait (default ${WAIT_DEFAULT_S}, at most ${WAIT_MAX_S})`) },
+  }, async ({ timeout_seconds }, extra) => {
+    try {
+      const agent = external('wait_for_instructions');
+      const wait = Math.max(1, Math.min(WAIT_MAX_S, Math.round(timeout_seconds ?? WAIT_DEFAULT_S)));
+      // a long poll ends when its client gives up: a stateless request's transport closes (extra.signal),
+      // a session's HTTP request goes away (httpScope)
+      const scope = httpScope.getStore();
+      const signal = scope ? AbortSignal.any([extra.signal, scope.signal]) : extra.signal;
+      const progressToken = extra._meta?.progressToken;
+      let n = 0;
+      const tick = progressToken !== undefined ? () => { void extra.sendNotification({ method: 'notifications/progress', params: { progressToken, progress: ++n, message: 'Waiting for a message from OverLyX…' } }).catch(() => { /* gone */ }); } : undefined;
+      const rows = await waitForInstructions(agent.id, wait * 1000, signal, tick);
+      if (!rows.length) return ok({ messages: [], note: 'No message yet. Call wait_for_instructions again to keep listening — the user sees you as listening while you do.' });
+      return ok({ messages: rows.map(forAgent), note: 'Do what each message asks, then answer it with reply(message_id, text) (done: false for an interim update). Then call wait_for_instructions again to keep listening.' });
+    } catch (e) { return fail(e); }
+  });
+
+  register('reply', {
+    description: 'Answer the user in OverLyX: your reply appears in their Agent panel (markdown and $LaTeX$ render). message_id: the message you answer, from wait_for_instructions or the channel event (default: the last one you received); done: false for an interim update — the message stays open.',
+    inputSchema: {
+      text: z.string(),
+      message_id: z.coerce.number().int().positive().optional(),
+      done: z.boolean().optional(),
+    },
+  }, async ({ text, message_id, done }) => {
+    try {
+      const agent = external('reply');
+      const r = replyFromAgent(agent.id, caller.sessionId, text, message_id ?? null, done !== false);
+      return ok({ ok: true, ...(r.answered ? { answered: r.answered.id } : {}), note: 'Sent — the user sees it in OverLyX. If you were asked to listen, call wait_for_instructions again.' });
+    } catch (e) { return fail(e); }
+  });
+
+  register('list_projects', {
     description: 'The projects this account can reach (name, title, its role in each). On the all-projects connection (/mcp), the other tools take one of these names as `project`.',
     annotations: { readOnlyHint: true },
     inputSchema: {},
@@ -671,7 +836,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   // Project creation is account-wide, so it belongs only on /mcp. Once created, the ordinary
   // write_document/write_file tools can populate it; a local client can alternatively push its
   // existing repository with the OverLyX CLI.
-  if (!fixedProject) server.registerTool('create_project', {
+  if (!fixedProject) register('create_project', {
     description: 'Create an empty project owned by this account. Then populate it with create_document, write_document and write_file, or push an existing local repository with the OverLyX CLI.',
     inputSchema: {
       name: z.string().describe('Project name (letters, numbers, spaces, dot, dash and underscore); the project is created as "<your username>/<name>"'),
@@ -686,13 +851,13 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   });
 
   // ChatGPT's connector pair (deep research requires exactly these two; citations need a url)
-  server.registerTool('search', {
+  register('search', {
     description: 'Full-text search across the LaTeX documents, .tex and .bib files of every project this account can access. Returns ids for fetch.',
     annotations: { readOnlyHint: true },
     inputSchema: { query: z.string() },
   }, async ({ query }) => { try { return okStruct({ results: searchDocs(user, query) }); } catch (e) { return fail(e); } });
 
-  server.registerTool('fetch', {
+  register('fetch', {
     description: 'The full text of one search result or file, by id ("owner/project/path").',
     annotations: { readOnlyHint: true },
     inputSchema: { id: z.string() },
@@ -704,14 +869,22 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
 /** the largest JSON-RPC request accepted (a whole document in write_document) */
 const REQUEST_MAX = '2mb';
 
-/** POST /mcp/<owner>/<project> — one stateless request/response per JSON-RPC call (no session, no SSE stream kept open). */
+/**
+ * POST /mcp, /mcp/<owner>/<project> — one stateless request/response per JSON-RPC call (no session,
+ * no event stream kept open) for most clients. Clients in SESSION_CLIENTS (Claude Code) get a
+ * session at initialize: Mcp-Session-Id, a GET event stream that carries pushed messages
+ * (channels), DELETE to end it. Sessions are kept in the database (mcp_sessions): after a server
+ * restart, a request with a known session id brings it back instead of a 404.
+ */
 export function mcpRouter(): express.Router {
   const r = express.Router();
   r.use(express.json({ limit: REQUEST_MAX }));
-  r.post('/', (req, res) => { void handle(req, res); });          // all projects (tools take `project`)
-  // fixed to one project: its key, or a name it had before (the flat layout's `/mcp/<name>`)
-  r.post('/:owner/:project', (req, res) => { void handle(req, res); });
-  r.post('/:project', (req, res) => { void handle(req, res); });
+  for (const route of ['/', '/:owner/:project', '/:project']) {
+    // all projects (tools take `project`); fixed to one project: its key, or a name it had before (the flat layout's `/mcp/<name>`)
+    r.post(route, (req, res) => { void handle(req, res); });
+    r.get(route, (req, res) => { void handle(req, res); });
+    r.delete(route, (req, res) => { void handle(req, res); });
+  }
   // a request the body parser refused (too large, not JSON) is answered in JSON-RPC, not with
   // Express's HTML error page (which an MCP client cannot read, and which carried a stack trace)
   r.use((err: { type?: string; status?: number; message?: string }, _req: Request, res: Response, next: express.NextFunction) => {
@@ -728,6 +901,134 @@ export function mcpRouter(): express.Router {
   return r;
 }
 
+const rpcError = (res: Response, status: number, code: number, message: string) => { res.status(status).json({ jsonrpc: '2.0', id: null, error: { code, message } }); };
+
+/** The clientInfo of an initialize request in the body (a batch, too), or null when it is none. */
+function initializeOf(body: unknown): { client: ClientInfo | null } | null {
+  const msgs = Array.isArray(body) ? body : [body];
+  const init = msgs.find(m => m && typeof m === 'object' && (m as { method?: unknown }).method === 'initialize') as { params?: { clientInfo?: { name?: unknown; title?: unknown; version?: unknown } } } | undefined;
+  if (!init) return null;
+  const ci = init.params?.clientInfo;
+  return { client: ci && typeof ci.name === 'string' ? { name: ci.name, title: typeof ci.title === 'string' ? ci.title : undefined, version: typeof ci.version === 'string' ? ci.version : undefined } : null };
+}
+
+/** A session of a client that keeps one: its transport and server, and who it is. */
+interface LiveSession {
+  id: string; transport: StreamableHTTPServerTransport; server: McpServer;
+  ident: TokenIdentity; user: SessionUser; client: ClientInfo | null; caller: Caller; fixedProject: string | null;
+  lastSeen: number; touchedAt: number;
+}
+const sessions = new Map<string, LiveSession>();
+const reviving = new Map<string, Promise<LiveSession | null>>();
+/** a session nobody used for this long is dropped from memory (it stays in the database and comes back on its next request) */
+const SESSION_IDLE_MS = 30 * 60_000;
+
+/** The session's GET event stream is open (the SDK transport's own bookkeeping). */
+function streamOpen(t: StreamableHTTPServerTransport): boolean {
+  const inner = (t as unknown as { _webStandardTransport?: { _streamMapping?: Map<string, unknown> } })._webStandardTransport;
+  return !!inner?._streamMapping?.has('_GET_stream');
+}
+
+/** Register a session that has its id (new at initialize, or revived): it can push to its client. */
+function adopt(s: LiveSession): void {
+  sessions.set(s.id, s);
+  s.caller.sessionId = s.id;
+  registerPusher({
+    sessionId: s.id, agentId: s.caller.agent!.id,
+    streamOpen: () => streamOpen(s.transport),
+    push: params => s.server.server.notification({ method: 'notifications/claude/channel', params }),
+  });
+  sweepSessions();
+}
+
+function forget(s: LiveSession): void {
+  if (sessions.get(s.id) === s) sessions.delete(s.id);
+  unregisterPusher(s.id);
+}
+
+let sweeper: NodeJS.Timeout | null = null;
+function sweepSessions(): void {
+  if (sweeper) return;
+  sweeper = setInterval(() => {
+    const now = Date.now();
+    for (const s of sessions.values()) {
+      if (now - s.lastSeen < SESSION_IDLE_MS || streamOpen(s.transport)) continue;
+      forget(s);
+      void s.transport.close().catch(() => { /* gone */ });
+    }
+    if (!sessions.size && sweeper) { clearInterval(sweeper); sweeper = null; }
+  }, 5 * 60_000);
+  sweeper.unref();
+}
+
+/** A new session for a client that keeps one (its initialize request is in this POST). */
+async function newSession(req: Request, res: Response, ident: TokenIdentity, user: SessionUser, client: ClientInfo, project: string | null): Promise<void> {
+  const caller = callerFor(agentFor(ident, client));
+  const server = buildMcpServer(user, ident.name, ident.userId, project, caller, { channel: true });
+  let live: LiveSession | null = null;
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+    onsessioninitialized: (id) => {
+      recordSession(id, caller.agent!, project);
+      live = { id, transport, server, ident, user, client, caller, fixedProject: project, lastSeen: Date.now(), touchedAt: Date.now() };
+      adopt(live);
+    },
+    onsessionclosed: (id) => { dropSession(id); },
+  });
+  transport.onclose = () => { if (live) forget(live); };
+  await server.connect(transport);
+  await serve(transport, req, res);
+}
+
+/**
+ * A request with a session id this process does not know — after a restart: when the database has
+ * the session and it belongs to this token, it is set up again as it was (the SDK transport marked
+ * initialized under the same id), so the client carries on. Null: really unknown (→ 404, and the
+ * client starts a new session).
+ */
+function revive(id: string, ident: TokenIdentity, user: SessionUser): Promise<LiveSession | null> {
+  let p = reviving.get(id);
+  if (!p) {
+    p = (async () => {
+      const row = sessionRow(id);
+      if (!row || row.token_kind !== ident.kind || row.token_id !== ident.id) return null;
+      const agent = agentRow(row.agent_id);
+      if (!agent) return null;
+      const client: ClientInfo = { name: agent.client_name, title: agent.client_title ?? undefined, version: agent.client_version ?? undefined };
+      const caller = callerFor(agent, id);
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => id, onsessionclosed: (sid) => { dropSession(sid); } });
+      const inner = (transport as unknown as { _webStandardTransport?: { sessionId?: string; _initialized?: boolean } })._webStandardTransport;
+      if (!inner || !('_initialized' in inner)) return null;   // an SDK that works differently: the client starts afresh
+      inner.sessionId = id;
+      inner._initialized = true;
+      const server = buildMcpServer(user, ident.name, ident.userId, row.project, caller, { channel: true });
+      const live: LiveSession = { id, transport, server, ident, user, client, caller, fixedProject: row.project, lastSeen: Date.now(), touchedAt: 0 };
+      transport.onclose = () => forget(live);
+      await server.connect(transport);
+      adopt(live);
+      return live;
+    })().finally(() => reviving.delete(id));
+    reviving.set(id, p);
+  }
+  return p;
+}
+
+/** Tests: forget every live session as a server restart does (the database keeps them). */
+export async function dropLiveSessionsForTests(): Promise<void> {
+  for (const s of [...sessions.values()]) { forget(s); await s.transport.close().catch(() => { /* gone */ }); }
+}
+
+/** Hand the request to a transport, with the request's lifetime available to long-running tools (httpScope). */
+async function serve(transport: StreamableHTTPServerTransport, req: Request, res: Response): Promise<void> {
+  const ac = new AbortController();
+  res.on('close', () => ac.abort());
+  try {
+    await httpScope.run({ signal: ac.signal }, () => transport.handleRequest(req, res, req.body));
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ error: (e as Error).message ?? String(e) });
+  }
+}
+
 async function handle(req: Request, res: Response): Promise<void> {
   let project: string | null = null;
   if (req.params.project !== undefined) {
@@ -736,7 +1037,7 @@ async function handle(req: Request, res: Response): Promise<void> {
   const auth = req.header('authorization') ?? '';
   const m = /^Bearer\s+(\S+)/i.exec(auth);
   // 401 + WWW-Authenticate points OAuth clients (ChatGPT) at the protected-resource metadata
-  if (!m) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'Authorization: Bearer <token> required (use your account token from File \u25b8 Git repository\u2026, or connect via OAuth)' }); return; }
+  if (!m) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'Authorization: Bearer <token> required (use your account token from File ▸ Git repository…, or connect via OAuth)' }); return; }
   const identity = verifyMcpToken(m[1]);
   if (!identity) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'invalid or expired token' }); return; }
   const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(identity.userId) as UserRow | undefined;
@@ -747,14 +1048,45 @@ async function handle(req: Request, res: Response): Promise<void> {
     if (!atLeast(role, 'view')) { res.status(403).json({ error: `this token's account has no access to project "${project}"` }); return; }
     if (!fs.existsSync(projectDir(project))) { res.status(404).json({ error: `no project "${project}"` }); return; }
   }
+  // the Agent panel's own agent is not an agent "from elsewhere": no entry, no presence, no session
+  const external = identity.name !== PANEL_AGENT;
 
-  const server = buildMcpServer(user, identity.name, identity.userId, project);
+  const sid = req.header('mcp-session-id');
+  if (sid) {
+    const live = sessions.get(sid) ?? await revive(sid, identity, user);
+    if (!live || live.ident.kind !== identity.kind || live.ident.id !== identity.id) { rpcError(res, 404, -32001, 'Session not found'); return; }
+    Object.assign(live.user, user);   // the account as it is now (name, admin)
+    live.lastSeen = Date.now();
+    if (live.lastSeen - live.touchedAt > 60_000) { live.touchedAt = live.lastSeen; touchSession(sid); }
+    // the agent's entry was forgotten in the panel meanwhile: it comes back as a new one
+    if (live.caller.agent && !agentRow(live.caller.agent.id)) {
+      Object.assign(live.caller, callerFor(agentFor(identity, live.client), sid));
+      unregisterPusher(sid);
+      adopt(live);
+    }
+    if (req.method === 'GET') {
+      // the event stream opens with this request: what is waiting goes out once the transport has registered it
+      setTimeout(() => streamChanged(sid), 100).unref();
+      res.on('close', () => setTimeout(() => streamChanged(sid), 50).unref());
+    }
+    await serve(live.transport, req, res);
+    return;
+  }
+  if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); rpcError(res, 405, -32000, 'Method not allowed: this connection has no session (and no event stream).'); return; }
+
+  const init = initializeOf(req.body);
+  if (init && external && wantsSession(init.client)) { await newSession(req, res, identity, user, init.client!, project); return; }
+
+  // stateless: a server and transport for this one request
+  const caller = callerFor(external ? agentFor(identity, init?.client ?? null, { stateless: !!init }) : null);
+  const server = buildMcpServer(user, identity.name, identity.userId, project, caller);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => { void transport.close(); void server.close(); });
   try {
     await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
   } catch (e) {
     if (!res.headersSent) res.status(500).json({ error: (e as Error).message ?? String(e) });
+    return;
   }
+  await serve(transport, req, res);
 }

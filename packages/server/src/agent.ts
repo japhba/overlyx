@@ -37,7 +37,8 @@ import {
   prepareWorkspace, syncWorkspace, pruneWorkspaces, finishTurn, checkBuilds, noteTurnId, listCheckpoints, onCheckpoint,
   publicCheckpoint, undoCheckpoint, UndoError, setPanelTracking, panelTracking, workspaceTracking, type Checkpoint,
 } from './agentwork.ts';
-import type { PMJSON } from '@overlyx/core';
+import { projectOfDoc, type PMJSON } from '@overlyx/core';
+import type { SessionUser } from './auth.ts';
 
 /* ------------------------------------------------------------------ protocol types (the subset we touch) */
 
@@ -502,24 +503,27 @@ export function agentAvailable(): boolean { return config.agent.enabled; }
 
 export interface TurnContext { docId?: string; content?: PMJSON[]; layout?: string; mathLatex?: string; openDocs?: string[] }
 
-/** The input sent to the agent: a context item (where the user is, which documents are open,
- *  what they selected — quoted, and marked in an excerpt of the live file; the client hides
- *  items starting with "[context]") followed by the user's message. */
-async function composeInput(text: string, ctx: TurnContext | undefined): Promise<{ type: 'text'; text: string; text_elements: never[] }[]> {
-  const item = (t: string) => ({ type: 'text' as const, text: t, text_elements: [] as never[] });
-  if (!ctx?.docId) return [item(text)];
-  const lines = [`[context] The user is editing ${ctx.docId} in OverLyX.`];
-  const others = [...new Set(ctx.openDocs ?? [])].filter(d => d !== ctx.docId).slice(0, 8);
+/**
+ * Where the user is, as lines of text for an agent: the document being edited, the other open
+ * documents, and what they selected — quoted as LaTeX, and marked in an excerpt of the live file.
+ * Empty without a document. Only documents `user` may view are read (the ids come from the client).
+ * Used for the Agent panel's turns and for messages to an agent connected from elsewhere (mcpAgents.ts).
+ */
+export async function editorContextLines(ctx: TurnContext | undefined, user: SessionUser, who = 'The user'): Promise<string[]> {
+  if (!ctx?.docId || typeof ctx.docId !== 'string') return [];
+  if (!atLeast(roleFor(user, projectOfDoc(ctx.docId)), 'view')) return [];
+  const lines = [`${who} is editing ${ctx.docId} in OverLyX.`];
+  const others = [...new Set(Array.isArray(ctx.openDocs) ? ctx.openDocs : [])].filter(d => typeof d === 'string' && d !== ctx.docId && atLeast(roleFor(user, projectOfDoc(d)), 'view')).slice(0, 8);
   if (others.length) lines.push(`Also open in their workspace: ${others.join(', ')}.`);
   let sel = '';
   try {
-    if (ctx.content?.length) {
+    if (Array.isArray(ctx.content) && ctx.content.length) {
       const doc = await manager.open(ctx.docId);
       sel = selectionToTex(doc, ctx.content, ctx.layout ?? 'Standard').trim();
       if (sel) lines.push('Their current selection in that document:', '```latex', sel.slice(0, 6000), '```');
     }
   } catch { /* selection context is best-effort */ }
-  if (!sel && ctx.mathLatex?.trim()) {
+  if (!sel && typeof ctx.mathLatex === 'string' && ctx.mathLatex.trim()) {
     sel = ctx.mathLatex.trim();
     lines.push('Their current selection, inside a formula:', '```latex', sel.slice(0, 2000), '```');
   }
@@ -532,6 +536,16 @@ async function composeInput(text: string, ctx: TurnContext | undefined): Promise
       if (excerpt.includes('⟦SELECTION⟧')) lines.push(`Where the selection sits in ${ctx.docId} (the ⟦SELECTION⟧…⟦/SELECTION⟧ markers are not part of the file):`, '```latex', excerpt, '```');
     } catch { /* best-effort */ }
   }
+  return lines;
+}
+
+/** The input sent to the agent: a context item (editorContextLines; the client hides items
+ *  starting with "[context]") followed by the user's message. */
+async function composeInput(text: string, ctx: TurnContext | undefined, user: SessionUser): Promise<{ type: 'text'; text: string; text_elements: never[] }[]> {
+  const item = (t: string) => ({ type: 'text' as const, text: t, text_elements: [] as never[] });
+  const lines = await editorContextLines(ctx, user);
+  if (!lines.length) return [item(text)];
+  lines[0] = '[context] ' + lines[0];
   // codex concatenates input items into one string when it echoes/stores the user message, so the
   // context block carries an explicit terminator the client can strip it by (AgentPanel userText)
   return [item(lines.join('\n') + '\n[/context]'), item(text)];
@@ -662,7 +676,7 @@ export function agentRoutes(): express.Router {
     try {
       const h = host(req.user!.id); await h.ensure();
       await h.ensureThreadLoaded(row.thread_id);
-      const input = await composeInput(text, req.body?.context as TurnContext | undefined);
+      const input = await composeInput(text, req.body?.context as TurnContext | undefined, req.user!);
       const legacy = legacyThreadNote(row.created_at);
       if (legacy) input.unshift({ type: 'text', text: legacy, text_elements: [] });
       if (!row.title) db.prepare('UPDATE agent_threads SET title = ? WHERE thread_id = ?').run(text.slice(0, 100), row.thread_id);
@@ -726,7 +740,7 @@ export function agentRoutes(): express.Router {
     try {
       const h = host(row.user_id); await h.ensure();
       const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
-      const input = await composeInput(text, req.body?.context as TurnContext | undefined);
+      const input = await composeInput(text, req.body?.context as TurnContext | undefined, req.user!);
       const legacy = legacyThreadNote(row.created_at);
       if (legacy) input.unshift({ type: 'text', text: legacy, text_elements: [] });
       await h.request('turn/steer', { threadId: row.thread_id, expectedTurnId: String(req.body?.turnId ?? ''), input, ...(cmid ? { clientUserMessageId: cmid } : {}) });
