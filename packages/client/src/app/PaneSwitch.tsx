@@ -10,7 +10,9 @@ import { PANE_LABELS, PANE_TITLES, PRESETS, applyPreset, mirrorPanes, movePane, 
 
 const MINI: Record<PaneId, string> = { doc: 'Doc', tex: 'TeX', pdf: 'PDF' };
 
-export function PaneSwitch({ layout, onChange, narrow = false }: { layout: PaneLayout; onChange: (l: PaneLayout) => void; narrow?: boolean }) {
+export function PaneSwitch({ layout, onChange, narrow = false, markdown = false }: { layout: PaneLayout; onChange: (l: PaneLayout) => void; narrow?: boolean; /** a markdown document: its source pane holds markdown */ markdown?: boolean }) {
+  const LABELS: Record<PaneId, string> = markdown ? { ...PANE_LABELS, tex: 'Markdown' } : PANE_LABELS;
+  const TITLES: Record<PaneId, string> = markdown ? { ...PANE_TITLES, tex: 'The markdown source of the document (Ctrl+Alt+S)' } : PANE_TITLES;
   const row = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ id: PaneId; dx: number; to: number; w: number } | null>(null);
   const suppressClick = useRef(false);
@@ -73,12 +75,12 @@ export function PaneSwitch({ layout, onChange, narrow = false }: { layout: PaneL
           const shift = drag && drag.id !== id ? (dropOrder.indexOf(id) - layout.order.indexOf(id)) * drag.w : 0;
           return (
             <button type="button" key={id} data-pane-chip={id} aria-pressed={layout.shown[id]} class={(layout.shown[id] ? 'active' : '') + (drag?.id === id ? ' lifted' : '')}
-              title={`${PANE_TITLES[id]} — ${hint}`}
+              title={`${TITLES[id]} — ${hint}`}
               style={drag?.id === id ? { transform: `translateX(${drag.dx}px)` } : shift ? { transform: `translateX(${shift}px)` } : undefined}
               onPointerDown={e => onPointerDown(id, e as unknown as PointerEvent)}
               onClick={() => click(id)}
               onDblClick={() => { if (!narrow) onChange(soloPane(layout, id)); }}>
-              {PANE_LABELS[id]}
+              {LABELS[id]}
             </button>
           );
         })}

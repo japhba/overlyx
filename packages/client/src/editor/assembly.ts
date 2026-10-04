@@ -33,6 +33,7 @@ import { dragSelectPlugin } from './plugins/dragselect';
 import { findPlugin } from './plugins/find';
 import { mirrorCaretPlugin } from './plugins/mirrorcaret';
 import { markdownRulesPlugin } from './plugins/mdrules';
+import { markdownPlugins, isMarkdownDoc, looksLikeMarkdown, pasteMarkdown } from './markdown';
 import { pasteTargetsPlugin, pasteLatex, pasteBlocksIntoEmpty } from './plugins/paste';
 import { autocorrectPlugin } from './spell/autocorrect';
 import { spellPlugin, misspelledAt, spellSuggest } from './spell/plugin';
@@ -107,6 +108,8 @@ export interface AssemblyOptions {
   getView: () => EditorView | null;
   /** every state update that moved the selection or changed the document */
   onUpdate?: (view: EditorView, info: { docChanged: boolean; selectionChanged: boolean }) => void;
+  /** a markdown document (editor/markdown.ts: markdown's editing primitives, only what markdown can hold) */
+  markdown?: boolean;
 }
 
 /** The ProseMirror plugins of an OverLyX editor, in the order the key bindings depend on. */
@@ -120,6 +123,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     aiCompletePlugin(),
     spellPlugin(),
     markdownRulesPlugin(),   // `- ` / `1. ` / `# ` at a paragraph start, before autocorrect looks at the space
+    ...(o.markdown ? markdownPlugins() : []),   // `**bold**`, ``` + Enter …; markdown's blocks and marks only (before the LyX keymap)
     autocorrectPlugin(),
     chordPlugin(),
     layoutPlugin(),   // layout documents: object selection, handles, drawing tools (before the keymap and the mouse selection)
@@ -326,6 +330,11 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
         if (looksLikeImageFileName(text)) {
           plainPaste();
           editorContext.notify?.('Only the file’s name was on the clipboard — to insert the image, drag the file into the text (or copy it in Chrome)');
+          return true;
+        }
+        // a markdown document: markdown pasted as text arrives as structure
+        if (!viewOnly() && isMarkdownDoc(view.dom.dataset.docId ?? o.docId) && looksLikeMarkdown(text)) {
+          void pasteMarkdown(view, text);
           return true;
         }
         // pasted LaTeX (a \command, $…$, \[ …) is parsed on the server against this document's own

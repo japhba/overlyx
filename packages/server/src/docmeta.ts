@@ -12,12 +12,15 @@ import {
   walkParagraphs as walkParagraphsAll, plainText, type LyxDocument,
 } from '@overlyx/core';
 import { applyDocumentTheorems, loadDocumentClass, describeLayouts, flexInsetNames } from '@overlyx/core/latex/layouts.ts';
+import { isMarkdownPath, MARKDOWN_LAYOUTS } from '@overlyx/core/md/index.ts';
 import { config } from './config.ts';
 import { projectDir, findMaster } from './projectfiles.ts';
 import { cachedParseFile } from './texdoc.ts';
 import { lyxDocumentOf, type DocState, type OpenDocs } from './docwork.ts';
 
 export interface DocumentMeta {
+  /** what the file is written as: LaTeX, or markdown (the editor offers only what markdown can hold) */
+  format: 'tex' | 'markdown';
   master: string | null;
   labels: { name: string; context: string; file: string }[];
   /** bibliography files the document tree names (as written), and the keys it cites */
@@ -47,6 +50,7 @@ export function documentMeta(s: DocState, open: OpenDocs): DocumentMeta {
   const lap = (name: string) => { const t = performance.now(); timings[name] = Math.round(t - tPrev); tPrev = t; };
   const lyx = lyxDocumentOf(s.ydoc);
   lap('toLyx');
+  const markdown = isMarkdownPath(s.relPath);
   const proj = projectDir(s.project);
   // child documents inherit macros, bibliography and labels from their master
   const masterRel = findMaster(s.project, s.relPath);
@@ -133,12 +137,14 @@ export function documentMeta(s: DocState, open: OpenDocs): DocumentMeta {
     const userPre = ps >= 0 && pe > ps ? L.slice(ps + 1, pe).join('\n') : '';
     const dc = applyDocumentTheorems(loadDocumentClass(getTextClass(lyx), getModules(lyx), config.layoutDir, [proj, docDir]), userPre, config.layoutDir, [proj, docDir]);
     layouts = describeLayouts(dc);
+    if (markdown && Array.isArray(layouts)) layouts = (layouts as { name: string }[]).filter(l => MARKDOWN_LAYOUTS.includes(l.name));
     flexInsets = dc.insetLayouts ? flexInsetNames(dc) : null;
   } catch {
     layouts = null;
   }
   lap('layouts');
   return {
+    format: markdown ? 'markdown' : 'tex',
     master: masterRel ? `${s.project}/${masterRel}` : null,
     labels, bibFiles: [...bibFiles], citedKeys: [...citedKeys],
     textclass: getTextClass(lyx), modules: getModules(lyx),

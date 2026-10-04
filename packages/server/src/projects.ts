@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isProjectKey } from '@overlyx/core';
+import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { config } from './config.ts';
 import { db } from './db.ts';
 import { type ProjectFile, texInfo, collect, resolveProjectPath, projectDir, isBackupFile } from './projectfiles.ts';
@@ -68,6 +69,7 @@ function classifyDocs(root: string, files: ProjectFile[]): ProjectFile[] {
 
 /** Is the project file a document (opened in the document editor, never served as plain text)? */
 export function isDocumentFile(project: string, relPath: string): boolean {
+  if (isMarkdownPath(relPath)) return true;
   if (!relPath.endsWith('.tex')) return false;
   const root = projectDir(project);
   const rel = path.normalize(relPath);
@@ -117,6 +119,12 @@ const TEMPLATE_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname
 /** Escape text for use in a LaTeX argument (titles, names). */
 function texEscape(s: string): string {
   return s.replace(/[\\{}$&#^_%~]/g, c => ({ '\\': '\\textbackslash{}', '^': '\\^{}', '~': '\\textasciitilde{}' } as Record<string, string>)[c] ?? '\\' + c);
+}
+
+/** A new markdown document: its title as the first heading, then an empty paragraph to type in. */
+export function newMarkdownText(title?: string): string {
+  const t = (title ?? '').replace(/\s+/g, ' ').trim();
+  return t ? `# ${t}\n\n` : '';
 }
 
 export function newDocumentText(opts: { textclass?: string; title?: string; author?: string } = {}): string {

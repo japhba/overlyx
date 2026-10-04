@@ -53,7 +53,8 @@ import { replaceInSource } from './docedit.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import nodePath from 'node:path';
 import { manager } from './docs.ts';
-import { listProjects, projectDir, resolveProjectPath, assertWritableRelPath, isDocumentFile, newDocumentText, findMaster } from './projects.ts';
+import { listProjects, projectDir, resolveProjectPath, assertWritableRelPath, isDocumentFile, newDocumentText, newMarkdownText, findMaster } from './projects.ts';
+import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { parseDocumentText, parseFragmentText } from './texdoc.ts';
 import { touchProject, repoInfo, restoreProject, commitProject } from './git.ts';
 import { buildIncluding, buildErrors, lastBuild, currentJob } from './export.ts';
@@ -339,7 +340,7 @@ function writeDocument(project: string, userId: number, agentName: string, path:
 async function writeDocumentLocked(project: string, userId: number, agentName: string, path: string, tex: string, tracked: boolean) {
   if (!tex.trim()) throw new Error('tex missing');
   if (tex.length > DOC_MAX) throw new Error('too large');
-  if (!path.endsWith('.tex')) throw new Error('a .tex path is expected');
+  if (!path.endsWith('.tex') && !isMarkdownPath(path)) throw new Error('a .tex or .md path is expected');
   assertWritableRelPath(path);
   const abs = resolveProjectPath(project, path);
   if (!fs.existsSync(abs)) {
@@ -401,12 +402,12 @@ async function editDocumentLocked(project: string, userId: number, agentName: st
 function createDocument(project: string, userId: number, accountName: string, relPath: string, title?: string) {
   let rel = relPath;
   if (rel.endsWith('.lyx')) rel = rel.slice(0, -4) + '.tex';
-  if (!rel.endsWith('.tex')) rel += '.tex';
+  if (!rel.endsWith('.tex') && !isMarkdownPath(rel)) rel += '.tex';
   assertWritableRelPath(rel);
   const abs = resolveProjectPath(project, rel);
   if (fs.existsSync(abs)) throw new Error('file exists — write_document replaces an existing document');
   fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
-  fs.writeFileSync(abs, newDocumentText({ title, author: accountName }), 'utf8');
+  fs.writeFileSync(abs, isMarkdownPath(rel) ? newMarkdownText(title) : newDocumentText({ title, author: accountName }), 'utf8');
   touchProject(project, userId);
   return { ok: true, path: rel };
 }

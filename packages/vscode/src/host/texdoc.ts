@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseTex, writeTex, writeTexPreserving, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import type { LyxDocument } from '@overlyx/core';
+import { parseMarkdown, writeMarkdown, writeMarkdownPreserving, isMarkdownPath, markdownForLatex, type MarkdownPreserveCache } from '@overlyx/core/md/index.ts';
 import { findMaster, readTextFile, resolveInside } from './project.ts';
 
 export interface TexContext { root: string; layoutDir: string; /** Unsaved text in an open VS Code document. */ readText?: (absolutePath: string) => string | undefined }
@@ -67,6 +68,8 @@ export function sameDocumentText(a: string, b: string, ctx: TexContext, relPath:
 }
 
 export function parseDocumentText(text: string, ctx: TexContext, relPath: string, depth = 0): ParseTexResult {
+  // a markdown document (core md/): no preamble of its own, no master
+  if (isMarkdownPath(relPath)) { const r = parseMarkdown(text); return { doc: r.doc, warnings: r.warnings, fragment: true, sources: r.parSpans, bodyRange: null }; }
   const abs = resolveInside(ctx.root, relPath);
   const opts = { layoutDir: ctx.layoutDir, localDirs: [ctx.root, path.dirname(abs)], readFile: readerFor(ctx, abs) };
   const first = parseTex(text, opts);
@@ -86,6 +89,12 @@ export function parseFragmentText(latex: string, ctx: TexContext, relPath: strin
  * what did not change keeps its LaTeX byte for byte (core tex/preserve.ts), as the server saves.
  */
 export function writeDocumentText(doc: LyxDocument, ctx: TexContext, relPath: string, fragment: boolean, resolveInclude?: (filename: string) => LyxDocument | undefined, preserve?: { base: string | null; cache?: PreserveCache }): { text: string; warnings: string[]; files: Record<string, string>; spans: ({ start: number; end: number } | null)[] } {
+  if (isMarkdownPath(relPath)) {
+    let cache: MarkdownPreserveCache | undefined;
+    if (preserve?.cache) { cache = mdCaches.get(preserve.cache); if (!cache) mdCaches.set(preserve.cache, cache = {}); }
+    const r = preserve ? writeMarkdownPreserving(doc, preserve.base, cache) : writeMarkdown(doc);
+    return { text: r.text, warnings: r.warnings, files: {}, spans: r.spans };
+  }
   const abs = resolveInside(ctx.root, relPath);
   const opts = {
     layoutDir: ctx.layoutDir, localDirs: [ctx.root, path.dirname(abs)], readFile: readerFor(ctx, abs),
@@ -95,6 +104,15 @@ export function writeDocumentText(doc: LyxDocument, ctx: TexContext, relPath: st
     ? writeTexPreserving(doc, { base: preserve.base, cache: preserve.cache, write: d => writeTex(d, opts), parse: t => parseDocumentText(t, ctx, relPath) })
     : writeTex(doc, opts);
   return { text: r.text, warnings: r.warnings, files: r.files, spans: r.spans };
+}
+
+/** a markdown document's parse of the file text between saves (the counterpart of the .tex PreserveCache) */
+const mdCaches = new WeakMap<PreserveCache, MarkdownPreserveCache>();
+
+/** A markdown document as a complete .tex file, for its PDF (built with LuaLaTeX). */
+export function markdownAsTex(doc: LyxDocument, ctx: TexContext, relPath: string): string {
+  const abs = resolveInside(ctx.root, relPath);
+  return writeTex(markdownForLatex(doc), { layoutDir: ctx.layoutDir, localDirs: [ctx.root, path.dirname(abs)], readFile: readerFor(ctx, abs), basename: path.basename(relPath).replace(/\.[^.]+$/, '') }).text;
 }
 
 /** Resolve a child document referenced by an include inset, for the writer's requirement scan. */

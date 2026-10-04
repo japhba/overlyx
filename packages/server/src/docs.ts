@@ -16,6 +16,7 @@ import * as Y from 'yjs';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { isProjectKey, splitDocId, itemText, type LyxDocument } from '@overlyx/core';
+import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { checkTexHealth, repairTex, type HealthIssue, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { db } from './db.ts';
 import { config } from './config.ts';
@@ -181,7 +182,7 @@ export class OpenDoc implements DocState, EditableDoc {
    * `fileText === null` (never loaded) means nothing to check yet.
    */
   health(): HealthIssue[] {
-    return this.fileText === null ? [] : checkTexHealth(this.fileText, { isFragment: this.isChild });
+    return this.fileText === null || isMarkdownPath(this.relPath) ? [] : checkTexHealth(this.fileText, { isFragment: this.isChild });
   }
 
   /**
@@ -858,7 +859,7 @@ export class DocManager {
 
   private async openCold(id: string): Promise<OpenDoc> {
     const { project, relPath } = DocManager.parseId(id);
-    if (!relPath.endsWith('.tex') && !relPath.endsWith('.board')) throw new Error('not a .tex document');
+    if (!relPath.endsWith('.tex') && !relPath.endsWith('.board') && !isMarkdownPath(relPath)) throw new Error('not a .tex or markdown document');
     const absPath = resolveProjectPath(project, relPath);
     if (!fs.existsSync(absPath)) throw new Error('file not found: ' + id);
     if (relPath.endsWith('.board')) return this.openBoardCold(id, project, relPath, absPath);
@@ -1085,7 +1086,7 @@ export class DocManager {
   }
 
   private async onExternalChange(file: string): Promise<void> {
-    if (!file.endsWith('.tex') && !file.endsWith('.board')) return;
+    if (!file.endsWith('.tex') && !file.endsWith('.board') && !isMarkdownPath(file)) return;
     const doc = [...this.docs.values()].find(d => d.absPath === file);
     if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] fs change ${file} open=${!!doc} hash=${doc?.fileHash.slice(0, 8)} known=${knownHashes.get(file)?.slice(0, 8)}`);
     if (!doc) return;
@@ -1103,7 +1104,7 @@ export class DocManager {
    * the clients are told (close code 4001); the next save would otherwise silently re-create it.
    */
   private async onExternalRemove(file: string): Promise<void> {
-    if (!file.endsWith('.tex') && !file.endsWith('.board')) return;
+    if (!file.endsWith('.tex') && !file.endsWith('.board') && !isMarkdownPath(file)) return;
     const doc = [...this.docs.values()].find(d => d.absPath === file);
     if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] fs change ${file} open=${!!doc} hash=${doc?.fileHash.slice(0, 8)} known=${knownHashes.get(file)?.slice(0, 8)}`);
     if (!doc) return;

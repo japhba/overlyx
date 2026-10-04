@@ -52,6 +52,8 @@ export interface AiCompleteRequest { kind: 'text' | 'math'; before: string; afte
 export interface AiCompleteResult { text: string; nodes: PMJSON[] }
 export interface DocMeta {
   availableModules?: import('@overlyx/core').ModuleInfo[];
+  /** what the file is written as (a markdown document offers only what markdown can hold) */
+  format?: 'tex' | 'markdown';
   id: string; project: string; path: string; role?: Role; textclass: string; modules: string[]; language: string;
   useRefstyle: boolean; citeEngine: string; citeEngineType: string; trackingChanges: boolean; secnumdepth: number; tocdepth: number;
   /** number of entries in the bibliography (meta.bib only holds the cited ones when it is large) */

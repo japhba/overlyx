@@ -13,6 +13,8 @@ import { moveSection, shiftSection } from '../editor/outline';
 import { changeAt, resolveChange, acceptAllChanges, rejectAllChanges } from '../editor/plugins/changes';
 import { openLinkBoxFor, LINK_KEY } from '../editor/links';
 import { uiPrompt } from './Dialogs';
+import { isMarkdownDoc, insertCodeBlock, insertRule } from '../editor/markdown';
+import { viewDocId } from '../editor/context';
 
 const SECTION_LAYOUTS: [string, string][] = [['0', 'Part'], ['1', 'Chapter'], ['2', 'Section'], ['3', 'Subsection'], ['4', 'Subsubsection'], ['5', 'Paragraph'], ['6', 'Subparagraph']];
 export interface DocumentMenuContext {
@@ -27,6 +29,10 @@ export interface DocumentMenuContext {
 }
 
 export function documentMenus({ view, meta, run, runView, setDialog, textColor, tracking, changeInfo, toggleTracking, toggleCellLine, healthItems, reloadMetadata, setFindOpen }: DocumentMenuContext): { edit: MenuDef; insert: MenuDef; document: MenuDef } {
+  // a markdown document: only what markdown can write (editor/markdown.ts)
+  const markdown = meta?.format === 'markdown' || (!!view && isMarkdownDoc(viewDocId(view)));
+  const tex = <T,>(entries: T[]): T[] => (markdown ? [] : entries);
+  const md = <T,>(entries: T[]): T[] => (markdown ? entries : []);
   return {
     edit: { title: 'Edit', items: [
       { label: 'Undo', shortcut: 'Ctrl+Z', action: () => run(undo) },
@@ -39,38 +45,42 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
         { label: 'Emphasized', shortcut: 'Ctrl+E', action: () => run(C.fontCommands.emph) },
         { label: 'Italic', shortcut: 'Ctrl+I', action: () => run(C.fontCommands.italic) },
         { label: 'Bold', shortcut: 'Ctrl+B', action: () => run(C.fontCommands.bold) },
-        { label: 'Noun (small caps)', shortcut: 'Ctrl+Shift+N', action: () => run(C.fontCommands.noun) },
+        ...tex([{ label: 'Noun (small caps)', shortcut: 'Ctrl+Shift+N', action: () => run(C.fontCommands.noun) }]),
         { label: 'Underline', shortcut: 'Ctrl+U', action: () => run(C.fontCommands.underline) },
-        { label: 'Strikeout', shortcut: 'Ctrl+Shift+O', action: () => run(C.fontCommands.strikeout) },
-        { label: 'Typewriter', action: () => run(C.fontCommands.typewriter) },   // Ctrl+Shift+P is the command palette
-        { label: 'Sans serif', action: () => run(C.fontCommands.sans) },
-        { label: 'Small caps shape', action: () => run(C.fontCommands.smallcaps) },
-        { label: 'Double underline', action: () => run(C.fontCommands.uuline) },
-        { label: 'Wavy underline', action: () => run(C.fontCommands.uwave) },
-        { sep: true },
-        ...['tiny', 'scriptsize', 'footnotesize', 'small', 'normal', 'large', 'larger', 'largest', 'huge', 'giant'].map(s => ({ label: 'Size: ' + s, action: () => run(C.setValueMark('size', s === 'normal' ? null : s)) })),
-        { sep: true },
-        ...['red', 'blue', 'green', 'magenta', 'cyan', 'orange', 'purple', 'gray', 'none'].map(c => ({ label: 'Color: ' + c, action: () => run(C.setValueMark('color', c === 'none' ? null : c)) })),
+        { label: markdown ? 'Strikethrough' : 'Strikeout', shortcut: 'Ctrl+Shift+O', action: () => run(C.fontCommands.strikeout) },
+        { label: markdown ? 'Code' : 'Typewriter', action: () => run(C.fontCommands.typewriter) },   // Ctrl+Shift+P is the command palette
+        ...tex([
+          { label: 'Sans serif', action: () => run(C.fontCommands.sans) },
+          { label: 'Small caps shape', action: () => run(C.fontCommands.smallcaps) },
+          { label: 'Double underline', action: () => run(C.fontCommands.uuline) },
+          { label: 'Wavy underline', action: () => run(C.fontCommands.uwave) },
+          { sep: true },
+          ...['tiny', 'scriptsize', 'footnotesize', 'small', 'normal', 'large', 'larger', 'largest', 'huge', 'giant'].map(s => ({ label: 'Size: ' + s, action: () => run(C.setValueMark('size', s === 'normal' ? null : s)) })),
+          { sep: true },
+          ...['red', 'blue', 'green', 'magenta', 'cyan', 'orange', 'purple', 'gray', 'none'].map(c => ({ label: 'Color: ' + c, action: () => run(C.setValueMark('color', c === 'none' ? null : c)) })),
+        ]),
         { sep: true },
         { label: 'Reset font', shortcut: 'Ctrl+Alt+D', action: () => run(C.fontDefault) },
       ] },
-      { label: 'Text colour ▸', sub: [
+      ...tex<MenuEntry>([{ label: 'Text colour ▸', sub: [
         { label: 'Default (no colour)', checked: !textColor, action: () => run(C.setValueMark('color', null)) },
         { sep: true },
         ...NAMED_COLORS.map(([name]) => ({ label: name[0].toUpperCase() + name.slice(1), checked: textColor === name, action: () => run(C.setValueMark('color', name)) })),
         { sep: true },
         { label: 'Custom colour… (palette on the toolbar)', checked: !!textColor && textColor.startsWith('#'), action: () => (document.querySelector('[data-tb="textcolor"]') as HTMLButtonElement | null)?.click() },
-      ] },
+      ] }]),
       { label: 'Paragraph ▸', sub: [
-        { label: 'Paragraph settings…', shortcut: 'Ctrl+Alt+P', action: () => setDialog({ name: 'paragraph' }) },
-        { sep: true },
-        { label: 'Align left', shortcut: 'Alt+A L', action: () => run(C.setParagraphAttrs({ align: 'left' })) },
-        { label: 'Align center', shortcut: 'Alt+A C', action: () => run(C.setParagraphAttrs({ align: 'center' })) },
-        { label: 'Align right', shortcut: 'Alt+A R', action: () => run(C.setParagraphAttrs({ align: 'right' })) },
-        { label: 'Justified', shortcut: 'Alt+A J', action: () => run(C.setParagraphAttrs({ align: 'block' })) },
-        { label: 'Default alignment', shortcut: 'Alt+A E', action: () => run(C.setParagraphAttrs({ align: null })) },
-        { label: 'Toggle indentation', shortcut: 'Alt+A I', action: () => { const p = view && C.currentParagraph(view.state); if (p) run(C.setParagraphAttrs({ noindent: !p.node.attrs.noindent })); } },
-        { sep: true },
+        ...tex<MenuEntry>([
+          { label: 'Paragraph settings…', shortcut: 'Ctrl+Alt+P', action: () => setDialog({ name: 'paragraph' }) },
+          { sep: true },
+          { label: 'Align left', shortcut: 'Alt+A L', action: () => run(C.setParagraphAttrs({ align: 'left' })) },
+          { label: 'Align center', shortcut: 'Alt+A C', action: () => run(C.setParagraphAttrs({ align: 'center' })) },
+          { label: 'Align right', shortcut: 'Alt+A R', action: () => run(C.setParagraphAttrs({ align: 'right' })) },
+          { label: 'Justified', shortcut: 'Alt+A J', action: () => run(C.setParagraphAttrs({ align: 'block' })) },
+          { label: 'Default alignment', shortcut: 'Alt+A E', action: () => run(C.setParagraphAttrs({ align: null })) },
+          { label: 'Toggle indentation', shortcut: 'Alt+A I', action: () => { const p = view && C.currentParagraph(view.state); if (p) run(C.setParagraphAttrs({ noindent: !p.node.attrs.noindent })); } },
+          { sep: true },
+        ]),
         { label: 'Increase depth', shortcut: 'Alt+Shift+→', action: () => run(C.changeDepth(1)) },
         { label: 'Decrease depth', shortcut: 'Alt+Shift+←', action: () => run(C.changeDepth(-1)) },
         { label: 'Move paragraph up', shortcut: 'Alt+↑', action: () => run(C.moveParagraph(-1)) },
@@ -82,7 +92,17 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
         { label: 'Demote section (heading level down)', action: () => run(shiftSection(1, undefined, meta?.layouts)) },
       ] },
       // Google-Docs-style: Ctrl+digit sets a heading level (LyX's Alt+P digits), Ctrl+Alt+digit the unnumbered one
-      { label: 'Paragraph style ▸', sub: [
+      ...md<MenuEntry>([{ label: 'Paragraph style ▸', sub: [
+        { label: 'Normal text', shortcut: 'Alt+P S', action: () => run(C.setKnownLayout('Standard')) },
+        { sep: true },
+        ...[['2', 'Section'], ['3', 'Subsection'], ['4', 'Subsubsection'], ['5', 'Paragraph'], ['6', 'Subparagraph']].map(([digit, name], i) => ({ label: `Heading ${i + 1} (${'#'.repeat(i + 1)})`, shortcut: 'Ctrl+' + digit, action: () => run(C.setKnownLayout(name)) })),
+        { sep: true },
+        { label: 'Bullet list (or type “- ”)', shortcut: 'Alt+P I', action: () => run(C.setKnownLayout('Itemize')) },
+        { label: 'Numbered list (or type “1. ”)', shortcut: 'Alt+P E', action: () => run(C.setKnownLayout('Enumerate')) },
+        { label: 'Quote (or type “> ”)', shortcut: 'Alt+P Q', action: () => run(C.setKnownLayout('Quote')) },
+        { label: 'Code block (or type ``` and Enter)', action: () => run(insertCodeBlock) },
+      ] }]),
+      ...tex<MenuEntry>([{ label: 'Paragraph style ▸', sub: [
         { label: 'Standard', shortcut: 'Alt+P S', action: () => run(C.setKnownLayout('Standard')) },
         { sep: true },
         ...SECTION_LAYOUTS.map(([digit, name]) => ({ label: name, shortcut: 'Ctrl+' + digit, action: () => run(C.setKnownLayout(name)) })),
@@ -94,23 +114,31 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
         { label: 'Description', shortcut: 'Alt+P D', action: () => run(C.setKnownLayout('Description')) },
         { label: 'Quote', shortcut: 'Alt+P Q', action: () => run(C.setKnownLayout('Quote')) },
         { label: 'LyX-Code', shortcut: 'Alt+P C', action: () => run(C.setKnownLayout('LyX-Code')) },
-      ] },
+      ] }]),
       { label: 'Table ▸', sub: [
         { label: 'Add row above', action: () => run(addRowBefore) }, { label: 'Add row below', action: () => run(addRowAfter) },
         { label: 'Add column before', action: () => run(addColumnBefore) }, { label: 'Add column after', action: () => run(addColumnAfter) },
         { label: 'Delete row', action: () => run(deleteRow) }, { label: 'Delete column', action: () => run(deleteColumn) },
-        { label: 'Merge cells (multicolumn)', action: () => run(mergeCells) }, { label: 'Split cell', action: () => run(splitCell) },
-        { sep: true },
-        { label: 'Top line on/off', action: () => toggleCellLine('topline') }, { label: 'Bottom line on/off', action: () => toggleCellLine('bottomline') },
-        { label: 'Left line on/off', action: () => toggleCellLine('leftline') }, { label: 'Right line on/off', action: () => toggleCellLine('rightline') },
-        { label: 'Align cell left', action: () => run(C.setCellAttr('alignment', 'left')) }, { label: 'Align cell center', action: () => run(C.setCellAttr('alignment', 'center')) }, { label: 'Align cell right', action: () => run(C.setCellAttr('alignment', 'right')) },
-        { sep: true },
-        { label: 'Column: natural width (l c r, no wrapping)', action: () => run(T.setColumnWidth('natural')) },
-        { label: 'Column: wrap text, filling the table width (X)', action: () => run(T.setColumnWidth('variable')) },
+        ...tex<MenuEntry>([
+          { label: 'Merge cells (multicolumn)', action: () => run(mergeCells) }, { label: 'Split cell', action: () => run(splitCell) },
+          { sep: true },
+          { label: 'Top line on/off', action: () => toggleCellLine('topline') }, { label: 'Bottom line on/off', action: () => toggleCellLine('bottomline') },
+          { label: 'Left line on/off', action: () => toggleCellLine('leftline') }, { label: 'Right line on/off', action: () => toggleCellLine('rightline') },
+        ]),
+        { label: markdown ? 'Align column left' : 'Align cell left', action: () => run(markdown ? T.setAlignment('left') : C.setCellAttr('alignment', 'left')) },
+        { label: markdown ? 'Align column center' : 'Align cell center', action: () => run(markdown ? T.setAlignment('center') : C.setCellAttr('alignment', 'center')) },
+        { label: markdown ? 'Align column right' : 'Align cell right', action: () => run(markdown ? T.setAlignment('right') : C.setCellAttr('alignment', 'right')) },
+        ...tex<MenuEntry>([
+          { sep: true },
+          { label: 'Column: natural width (l c r, no wrapping)', action: () => run(T.setColumnWidth('natural')) },
+          { label: 'Column: wrap text, filling the table width (X)', action: () => run(T.setColumnWidth('variable')) },
+        ]),
         { sep: true },
         { label: 'Delete table', action: () => run(deleteTable) },
-        { sep: true },
-        { label: 'Table settings…', action: () => setDialog({ name: 'tablesettings' }) },
+        ...tex<MenuEntry>([
+          { sep: true },
+          { label: 'Table settings…', action: () => setDialog({ name: 'tablesettings' }) },
+        ]),
       ] },
       { label: 'Track Changes ▸', sub: [
         { label: 'Track changes', shortcut: 'Ctrl+Shift+E', checked: tracking, action: toggleTracking },
@@ -126,7 +154,36 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
       { label: 'Open/close inset', shortcut: 'Ctrl+Alt+I', action: () => run(C.toggleInset) },
       { label: 'Math: toggle inline/display', action: () => run(C.toggleMathDisplay) },
     ] },
-    insert: { title: 'Insert', items: [
+    insert: markdown ? { title: 'Insert', items: [
+      { label: 'Math ▸', sub: [
+        { label: 'Inline formula ($…$)', shortcut: 'Ctrl+M', action: () => runView(C.insertMath(false)) },
+        { label: 'Display formula ($$…$$)', shortcut: 'Ctrl+Shift+M', action: () => runView(C.insertMath(true)) },
+        { label: 'Numbered equation', shortcut: 'Ctrl+Alt+N', action: () => runView(C.insertMath(true, 'equation')) },
+        { label: 'AMS align environment', shortcut: 'Alt+M T A', action: () => runView(C.insertMath(true, 'align')) },
+        { label: 'AMS gather', action: () => runView(C.insertMath(true, 'gather')) },
+        { sep: true },
+        { label: 'Delimiters…', action: () => setDialog({ name: 'delimiters' }) },
+        { label: 'Matrix…', action: () => setDialog({ name: 'matrix' }) },
+      ] },
+      { label: 'Special Character ▸', sub: [
+        { label: 'Ellipsis …', shortcut: 'Alt+.', action: () => run(C.insertSpecial('ldots')) },
+        { label: 'En dash –', ...(isMac() ? {} : { shortcut: 'Alt+Shift+-' }), action: () => run(C.insertDash('en')) },
+        { label: 'Em dash —', shortcut: 'Alt+-', action: () => run(C.insertDash('em')) },
+        { label: 'Opening quote', action: () => run(C.insertQuote('l')) }, { label: 'Closing quote', action: () => run(C.insertQuote('r')) },
+      ] },
+      { label: 'Line break', shortcut: 'Ctrl+Enter', action: () => run(C.insertNewline('newline')) },
+      { sep: true },
+      { label: 'Link…', shortcut: LINK_KEY, action: () => runView(openLinkBoxFor) },
+      { label: 'Image…', shortcut: 'Ctrl+Shift+G', action: () => setDialog({ name: 'graphics' }) },
+      { label: 'Table…', shortcut: 'Ctrl+Alt+T', action: () => setDialog({ name: 'table' }) },
+      { label: 'Footnote', shortcut: 'Ctrl+Alt+F', action: () => run(C.insertFootnote) },
+      { label: 'Code block', action: () => run(insertCodeBlock) },
+      { label: 'Horizontal rule', action: () => run(insertRule) },
+      { sep: true },
+      { label: 'Comment thread', shortcut: 'Ctrl+Alt+C', action: () => run(C.insertComment) },
+      { label: 'Hidden note (HTML comment)', shortcut: 'Ctrl+Alt+Shift+N', action: () => run(C.insertNote('Note')) },
+      { label: 'Raw HTML', shortcut: 'Ctrl+L', action: () => run(C.insertERT) },
+    ] } : { title: 'Insert', items: [
       { label: 'Math ▸', sub: [
         { label: 'Inline formula', shortcut: 'Ctrl+M', action: () => runView(C.insertMath(false)) },
         { label: 'Display formula', shortcut: 'Ctrl+Shift+M', action: () => runView(C.insertMath(true)) },
@@ -210,9 +267,11 @@ export function documentMenus({ view, meta, run, runView, setDialog, textColor, 
       { label: 'Index (print)', action: () => run(C.insertIndexPrint) },
     ] },
     document: { title: 'Document', items: [
-      { label: 'Settings…', action: () => setDialog({ name: 'settings' }) },
-      { label: 'Start Appendix Here', checked: !!(view && C.currentParagraph(view.state)?.node.attrs.appendix), action: () => run(C.toggleAppendix) },
-      { label: 'Math macros…', action: () => setDialog({ name: 'macros' }) },
+      ...tex<MenuEntry>([
+        { label: 'Settings…', action: () => setDialog({ name: 'settings' }) },
+        { label: 'Start Appendix Here', checked: !!(view && C.currentParagraph(view.state)?.node.attrs.appendix), action: () => run(C.toggleAppendix) },
+        { label: 'Math macros…', action: () => setDialog({ name: 'macros' }) },
+      ]),
       { label: 'Statistics (word count)…', action: () => setDialog({ name: 'stats' }) },
       { label: 'Change tracking', shortcut: 'Ctrl+Shift+E', checked: tracking, action: toggleTracking },
       { sep: true },

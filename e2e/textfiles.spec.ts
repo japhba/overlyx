@@ -48,7 +48,7 @@ test('the documents panel shows one project at a time (one tree: documents expan
   const tree = page.locator('.filetree');
   await expect(panel).toHaveAttribute('data-project', PROJECT);
   await expect(panel.locator('.project-switch')).toHaveValue(PROJECT);
-  await expect(panel.locator('.doc-tab')).toHaveCount(1);                 // main.tex is a document (it has an outline) …
+  await expect(panel.locator('.doc-tab')).toHaveCount(2);                 // main.tex and notes.md are documents (they have outlines) …
   await expect(tree.locator('.tree-row.file')).toHaveCount(4);          // … and the tree lists every file: main.tex, macros.tex, notes.md, refs.bib
   await expect(tree.locator('.tree-row.folder', { hasText: 'figures' })).toHaveCount(1);   // empty folders show too
   await expect(tree.locator('[data-file="main.aux"]')).toHaveCount(0);
@@ -342,29 +342,3 @@ test('folders via the + Folder button, and files dragged in from the computer la
   await admin.close();
 });
 
-test('markdown files open in the WYSIWYG editor: sized headings, ## input rule, source toggle, saved as markdown', async ({ browser }) => {
-  const admin = await asUser(browser);
-  const page = await admin.newPage();
-  await page.goto(BASE_URL + '/#/text:' + PROJECT + '/notes.md');
-  const host = page.locator('[data-md-editor]');
-  await expect(host).toBeVisible({ timeout: 20000 });
-  // the file parses into real, sized structure
-  await expect(host.locator('h1')).toHaveText('Project notes');
-  await expect(host.locator('strong')).toHaveText('bold');
-  // typing "## " turns into a live second-level heading (the input rule)
-  await host.locator('p').last().click();
-  await page.keyboard.press('End');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('## Plan');
-  await expect(host.locator('h2')).toHaveText('Plan');
-  // autosave writes ordinary markdown to disk
-  await expect(page.locator('[data-md-state="saved"]')).toBeVisible({ timeout: 10000 });
-  expect(readFileSync(`${DIR}/notes.md`, 'utf8')).toContain('## Plan');
-  // the Source button shows the raw text; Rich text comes back
-  await page.locator('[data-md-mode]').click();
-  await expect(page.locator('.texted textarea, .md-editor textarea').first()).toBeVisible({ timeout: 10000 });
-  await expect(page.locator('.md-editor textarea')).toHaveValue(/# Project notes/);   // (filled a moment after it shows: Firefox read it empty)
-  await page.locator('[data-md-mode]').click();
-  await expect(host.locator('h2')).toHaveText('Plan');
-  await admin.close();
-});

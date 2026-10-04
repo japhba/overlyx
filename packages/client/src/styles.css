@@ -1651,29 +1651,6 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .ai-panel .ai-model { max-width: 130px; font-size: 11px; background: var(--page-bg); color: var(--ui-muted); border: 1px solid var(--ui-border); border-radius: 5px; padding: 1px 2px; flex: none; }
 .ai-panel .ai-src { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; margin: 0; }
 
-/* Markdown WYSIWYG editor (.md files): headings at their real sizes as you type */
-.md-editor { max-width: 860px; margin: 0 auto; padding: 10px 18px 40px; }
-.md-editor.as-source { position: relative; max-width: none; padding: 0; }
-.md-editor.as-source .md-mode { position: absolute; top: 6px; right: 14px; z-index: 5; }
-.md-bar { display: flex; align-items: center; gap: 10px; padding: 4px 2px 8px; border-bottom: 1px solid var(--ui-border); margin-bottom: 10px; }
-.md-bar .name { font-weight: 600; }
-.md-bar .save-state { color: var(--ui-muted); font-size: 12px; }
-.md-bar .save-state.s-conflict, .md-bar .save-state.s-error { color: indianred; }
-.md-host .ProseMirror { outline: none; line-height: 1.55; font-size: 15px; min-height: 60vh; white-space: pre-wrap; }
-.md-host .ProseMirror h1 { font-size: 2em; font-weight: 700; margin: 0.8em 0 0.4em; line-height: 1.25; }
-.md-host .ProseMirror h2 { font-size: 1.55em; font-weight: 700; margin: 0.8em 0 0.35em; line-height: 1.3; }
-.md-host .ProseMirror h3 { font-size: 1.25em; font-weight: 600; margin: 0.7em 0 0.3em; }
-.md-host .ProseMirror h4 { font-size: 1.1em; font-weight: 600; margin: 0.6em 0 0.25em; }
-.md-host .ProseMirror h5, .md-host .ProseMirror h6 { font-size: 1em; font-weight: 600; margin: 0.5em 0 0.2em; color: var(--ui-muted); }
-.md-host .ProseMirror p { margin: 0.45em 0; }
-.md-host .ProseMirror code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--ui-bg2); border-radius: 4px; padding: 0 3px; }
-.md-host .ProseMirror pre { font-family: ui-monospace, monospace; font-size: 13px; background: var(--ui-bg2); border: 1px solid var(--ui-border); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
-.md-host .ProseMirror pre code { background: none; padding: 0; }
-.md-host .ProseMirror blockquote { border-left: 3px solid var(--ui-border); margin: 0.5em 0; padding: 0.1em 0 0.1em 12px; color: var(--ui-muted); }
-.md-host .ProseMirror ul, .md-host .ProseMirror ol { padding-left: 1.5em; margin: 0.4em 0; }
-.md-host .ProseMirror a { color: var(--accent); }
-.md-host .ProseMirror hr { border: none; border-top: 1px solid var(--ui-border); margin: 1.2em 0; }
-.md-host .ProseMirror img { max-width: 100%; }
 
 /* a word the autocorrecter just fixed flashes briefly */
 .ol-autocorrected { border-radius: 2px; animation: ol-autocorrect-fade 2.2s ease-out forwards; }
@@ -2250,3 +2227,25 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .ol-sorter-drop { position: absolute; z-index: 2; width: 4px; border-radius: 2px; background: var(--accent); display: none; pointer-events: none; }
 .ol-sorter-ghost { position: absolute; z-index: 12; padding: 4px 11px; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 600; white-space: nowrap; pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); }
 @media (max-width: 600px) { .ol-sorter-grid { padding: 16px 12px 48px; gap: 18px 14px; } .ol-sorter-size input { width: 80px; } }
+
+/* Markdown documents (.md, editor/markdown.ts): what LyX draws the LaTeX way, as markdown renders it —
+   a rule across the column, a quote with a bar, code on a tinted ground, a bold header row, task boxes */
+.lyx-editor[data-doc-id$=".md" i] .lyx-line, .lyx-editor[data-doc-id$=".markdown" i] .lyx-line {
+  display: inline-block; width: 100%; height: 0; border-top: 1.5px solid color-mix(in srgb, var(--editor-fg) 28%, transparent); color: transparent; overflow: hidden; vertical-align: middle; }
+.lyx-editor[data-doc-id$=".md" i] .lyx-layout-quote, .lyx-editor[data-doc-id$=".markdown" i] .lyx-layout-quote {
+  margin: 0.5em 0; padding-left: 0.9em; border-left: 3px solid color-mix(in srgb, var(--editor-fg) 22%, transparent); color: color-mix(in srgb, var(--editor-fg) 75%, transparent); }
+.lyx-editor[data-doc-id$=".md" i] .lyx-family-typewriter, .lyx-editor[data-doc-id$=".markdown" i] .lyx-family-typewriter {
+  background: var(--code-bg); border-radius: 3px; padding: 0 0.15em; }
+.lyx-editor[data-doc-id$=".md" i] tr:first-child > .lyx-cell, .lyx-editor[data-doc-id$=".markdown" i] tr:first-child > .lyx-cell { font-weight: 600; }
+.md-task-box { display: inline-flex; align-items: center; justify-content: center; width: 0.95em; height: 0.95em; margin-right: 0.35em; vertical-align: -0.1em;
+  border: 1.5px solid color-mix(in srgb, var(--editor-fg) 55%, transparent); border-radius: 3px; cursor: pointer; font-size: 0.8em; line-height: 1; user-select: none; }
+.md-task-box.done { background: var(--accent); border-color: var(--accent); color: white; }
+.md-task-box.done::after { content: '✓'; }
+.md-task-src { font-size: 0; letter-spacing: 0; }
+.md-task-done-text { text-decoration: line-through; color: color-mix(in srgb, var(--editor-fg) 55%, transparent); }
+
+/* a deck shows one slide at a time (editor/layout/controller.ts syncShownPage), in the middle of the window */
+.lyx-editor.ol-layout.ol-single > .ol-page-wrap:not(.ol-shown) { display: none; }
+.lyx-editor.ol-layout.ol-single > .ol-page-wrap.ol-shown { margin-top: var(--ol-single-top, 0px); margin-bottom: var(--ol-single-bottom, 0px); }
+.lyx-editor.ol-layout.ol-single.ol-show-notes > .ol-page-wrap.ol-shown { margin-bottom: calc(110px + var(--ol-single-bottom, 0px)); }
+.editor-page:has(.lyx-editor.ol-layout.ol-single) { padding-bottom: 34px; }

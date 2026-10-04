@@ -27,6 +27,8 @@ export interface BuildRequest {
   latexmk: string;
   /** called right before compiling (the provider saves dirty documents here) */
   prepare?: () => Promise<void>;
+  /** a directory TeX searches too (a markdown document's: its LaTeX is compiled elsewhere) */
+  texInputs?: string;
 }
 
 const jobs = new Map<string, BuildJob>();
@@ -114,7 +116,8 @@ function runLatexmk(job: BuildJob, req: BuildRequest): Promise<BuildRecord> {
   // (else every citation is "??" until the next build), as the server's build does
   const args = [engineFlag, '-g', '-f', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex'];
   return new Promise((resolve) => {
-    const child = spawn(req.latexmk, args, { cwd, detached: true, env: { ...process.env, max_print_line: '1000' } });
+    const texInputs = req.texInputs ? { TEXINPUTS: req.texInputs + path.delimiter + (process.env.TEXINPUTS ?? '') } : {};
+    const child = spawn(req.latexmk, args, { cwd, detached: true, env: { ...process.env, ...texInputs, max_print_line: '1000' } });
     let out = '';
     let lineBuf = '';
     const onData = (d: Buffer) => {

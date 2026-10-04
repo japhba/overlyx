@@ -20,10 +20,12 @@ export default defineConfig({
   // dev server would give those modules a second copy of MathJax's classes (client editor/lyxmath/mathfonts.ts)
   optimizeDeps: { exclude: MATHJAX_PACKAGES },
   resolve: {
-    alias: {
-      '@overlyx/core': path.resolve(__dirname, '../core/src/index.ts'),
-      '@client': path.resolve(__dirname, '../client/src'),
-    },
+    // `@overlyx/core` is its index; `@overlyx/core/md/index.ts` and the like are its modules
+    alias: [
+      { find: /^@overlyx\/core$/, replacement: path.resolve(__dirname, '../core/src/index.ts') },
+      { find: /^@overlyx\/core\/(.*)$/, replacement: path.resolve(__dirname, '../core/src') + '/$1' },
+      { find: '@client', replacement: path.resolve(__dirname, '../client/src') },
+    ],
     dedupe: ['preact', 'prosemirror-model', 'prosemirror-state', 'prosemirror-view', 'prosemirror-transform', 'yjs'],
   },
   build: {

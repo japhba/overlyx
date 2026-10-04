@@ -19,6 +19,7 @@ import { openRewriteMath } from './ai/rewrite';
 import { installMathAssist } from './ai/mathassist';
 import { getPrefs, subscribePrefs } from '../prefs';
 import { assemblePlugins, editorViewProps, editorAttributes, dispatchTransactionProp, installEditorDom, flushDomSelection as flushSelection } from './assembly';
+import { isMarkdownDoc } from './markdown';
 import type { User } from '../api';
 
 installMathAssist();
@@ -311,6 +312,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   provider.awareness.setLocalStateField('user', { name: opts.user.name, color: opts.user.color, username: opts.user.username, avatar: opts.user.avatar ?? null });
 
   const plugins = assemblePlugins({
+    markdown: isMarkdownDoc(opts.docId),
     sync: [
       ySyncPlugin(fragment, { mapping }),
       yCursorPlugin(checkedAwareness(provider.awareness), {

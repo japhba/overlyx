@@ -13,6 +13,7 @@ import { checkTexHealth, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { documentMeta } from './docmeta.ts';
 import { applyLyxDocument } from './ydiff.ts';
 import { parseDocumentText, looksLikeDocument } from './texdoc.ts';
+import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import {
   lyxDocumentOf, renderDoc, renderModel, parseResultFor, mergeFileText, loadOverStored,
   type DocState, type Rendered,
@@ -234,7 +235,7 @@ const ops: Record<string, (doc: DocInfo | null, a: Args) => unknown> = {
   /** what the editor needs to know about the document besides its content (docmeta.ts), and its structural health */
   meta: (d, a) => {
     const m = mirrorOf(d).take(a);
-    return { ...documentMeta(m, lookup), health: m.fileText === null ? [] : checkTexHealth(m.fileText, { isFragment: m.isChild }) };
+    return { ...documentMeta(m, lookup), health: m.fileText === null || isMarkdownPath(m.relPath) ? [] : checkTexHealth(m.fileText, { isFragment: m.isChild }) };
   },
 
   /** the warnings of parsing a source in the document's context */

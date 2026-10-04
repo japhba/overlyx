@@ -1157,10 +1157,8 @@ packages/vscode   the same editor inside VS Code (a custom editor for .tex files
   name; the declaration is never duplicated), and the layout list in meta all honour them.
   Declarations typed into the body are moved to the user preamble on the next save. The math
   parser knows `\operatorname{…}` and `\operatorname*{…}` (symbols.json; the generator keeps
-  shipped entries on regen). Markdown files (`.md`) open in a WYSIWYG editor
-  (`app/MarkdownEditor.tsx`, prosemirror-markdown): `## ` resizes into a live heading as you
-  type, bold/lists/quotes/links likewise; Source switches to the plain text editor; files stay
-  ordinary markdown on disk.
+  shipped entries on regen). Markdown files (`.md`) are documents
+  too — see *Markdown documents* below.
 
 **One editor, two shells.** The web client (`app/App.tsx`) and the VS Code webview
 (`packages/vscode/src/webview/EditorShell.tsx`) do not each assemble an editor: the plugins in their
@@ -1609,6 +1607,48 @@ How it works, in order of what happens when you open a document:
 * Every document's Yjs history carries an *epoch*; a browser tab whose editor belongs to an older
   epoch (server restarted with a changed file) reloads instead of merging stale content. Cross-tab
   BroadcastChannel syncing of y-websocket is disabled for the same reason.
+
+## Markdown documents
+
+A `.md` (`.markdown`) file opens in the same editor as a `.tex` document — collaborative, with
+comments, change tracking, versions, the outline, agents and a PDF — restricted to what markdown
+can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
+
+* **The model.** `md/parse.ts` (markdown-it: CommonMark, GFM tables / strikethrough / autolinks,
+  plus `$…$` / `$$…$$` math and `[^label]` footnotes) maps markdown onto the LyX model: `#`…`#####`
+  are Section…Subparagraph (unnumbered: `\secnumdepth -1`), lists Itemize / Enumerate with depth
+  (an item's further paragraphs one level deeper), `>` Quote, fenced code a listings inset (its
+  language in `lstparams`), formulas Formula insets, tables a tabular (booktabs rules), images a
+  Graphics inset (alt text as `special alt={…}`, a linked badge's link as a `link` parameter),
+  footnotes Foot insets (with their label). Inline HTML for underline, `<sub>` / `<sup>`, `<br>`
+  is understood; any other HTML is kept verbatim in a raw (ERT) inset. YAML front matter is kept
+  verbatim (the document's preamble lines).
+* **Comments and changes in the file.** A comment thread is an HTML comment right after the
+  commented text, invisible in every markdown viewer:
+  `text<!-- @comment⏎    Jan Bauer (2026-10-04 12:00):⏎    the comment⏎    -->` (lines indented by
+  four spaces so they can never start a markdown block; in a heading or table cell it is one line,
+  `\n` between its lines). A plain `<!-- … -->` is a note. Tracked changes are
+  `<ins author="Jan Bauer" datetime="2026-10-04T12:00:00Z">…</ins>` / `<del …>` (GitHub shows them
+  underlined / struck out); a document's authors are rebuilt from them.
+* **Writing** (`md/write.ts`). Edited blocks are written canonically (`*em*`, `**bold**`, `-`
+  bullets, fenced code, padded tables; text escaped so it reads back as text; emphasis the
+  delimiter rules cannot express — `a**"b"**c` — as `<strong>`); `writeMarkdownPreserving` keeps
+  every unchanged block's bytes (its `*` bullets, setext headings, wrapping, reference links)
+  and the space between blocks, so a save changes the edited blocks only and writing a file that
+  was just parsed gives it back exactly (verified on 400 real READMEs). LaTeX-only constructs that
+  reach a markdown document degrade with warnings (a citation to `\[@key]`, small caps to plain).
+* **The editor** offers markdown's toolbar (bold, italic, strikethrough, code, H1–H3, quote, code
+  block, rule) and menus, and markdown's typing: `**bold**`, `*em*` / `_em_`, `` `code` ``,
+  `~~strike~~` format as you type; `> ` starts a quote (Enter on an empty quote line ends it),
+  "```lang" + Enter a code block, `---` + Enter a rule, `$$` + Enter a display formula, `- [ ]` a
+  task with a box to tick; markdown pasted as text arrives as structure. Layouts and font
+  attributes markdown lacks (pasted from LaTeX, a LaTeX shortcut) become the nearest markdown
+  (Chapter → `#`, Description → bullets) or go; labels, citations and margin notes say they are
+  not available. The source pane is labelled *Markdown*.
+* **PDF**: the model is written as LaTeX (`markdownForLatex`: images on the web become links, raw
+  HTML is left out, code languages listings does not know are dropped) and built with LuaLaTeX.
+* **VS Code**: the extension opens `.md` with *Open With… ▸ OverLyX Editor* (VS Code's own
+  markdown editor stays the default), with the same parser and writer.
 
 ## The .tex format
 
