@@ -141,19 +141,27 @@ export function originAllowed(req: IncomingMessage): boolean {
 }
 
 async function handleConnection(conn: WebSocket, docId: string, user: SessionUser, readOnly: boolean): Promise<void> {
+  // what the client sends while the document is being opened (its sync step 1 comes right away;
+  // a big document takes a moment) is handled once it is open — after the epoch, as always
+  conn.binaryType = 'arraybuffer';
+  const early: (ArrayBuffer | Buffer)[] = [];
+  const keep = (data: ArrayBuffer | Buffer) => { early.push(data); };
+  conn.on('message', keep);
   let doc: OpenDoc;
   try {
     doc = await manager.open(docId);
   } catch (e) {
     conn.close(4004, String(e));
     return;
+  } finally {
+    conn.off('message', keep);
   }
+  if (conn.readyState !== conn.OPEN) return;   // gone while the document was opened
   ensureDocHandlers(doc);
-  conn.binaryType = 'arraybuffer';
   doc.conns.set(conn, new Set());
   doc.connUsers.set(conn, user.id);
 
-  conn.on('message', (data: ArrayBuffer | Buffer) => {
+  const onMessage = (data: ArrayBuffer | Buffer) => {
     try {
       const message = new Uint8Array(data as ArrayBuffer);
       const enc = encoding.createEncoder();
@@ -161,6 +169,13 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
       const type = decoding.readVarUint(dec);
       switch (type) {
         case MSG_SYNC:
+          if (doc.bigForSync && decoding.peekVarUint(dec) === syncProtocol.messageYjsSyncStep1) {
+            // what the client lacks of a big document (all of it, on its first visit) takes a while
+            // to encode: the document worker does it, the answer is sent when it is ready
+            decoding.readVarUint(dec);
+            void sendMissing(doc, conn, decoding.readVarUint8Array(dec));
+            break;
+          }
           encoding.writeVarUint(enc, MSG_SYNC);
           if (readOnly) {
             // a viewer only ever gets the document: answer its state request, drop anything it sends
@@ -179,7 +194,8 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
     } catch (e) {
       console.error('ws message error', e);
     }
-  });
+  };
+  conn.on('message', onMessage);
 
   // liveness: a protocol ping every 30 s (answered by the browser's network stack even when the
   // page is throttled or frozen) and an application-level heartbeat every 10 s (see MSG_PING)
@@ -222,9 +238,23 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
       send(doc, conn, encoding.toUint8Array(enc2));
     }
   }
+  for (const data of early) onMessage(data);
 }
 
 export { Y };
+
+/** Sync step 2 for a client whose state vector is `sv`, encoded by the document worker. */
+async function sendMissing(doc: OpenDoc, conn: WebSocket, sv: Uint8Array): Promise<void> {
+  let update: Uint8Array;
+  try { update = await doc.missingFor(sv); }
+  catch (e) { console.error('[ws] encoding the sync in the worker failed — here instead', doc.id, e); update = Y.encodeStateAsUpdate(doc.ydoc, sv); }
+  if (!doc.conns.has(conn)) return;
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, MSG_SYNC);
+  encoding.writeVarUint(enc, syncProtocol.messageYjsSyncStep2);
+  encoding.writeVarUint8Array(enc, update);
+  send(doc, conn, encoding.toUint8Array(enc));
+}
 
 /**
  * An awareness update as a client sent it, with every state checked before it is applied and relayed

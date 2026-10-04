@@ -1,7 +1,9 @@
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
+import { isMainThread } from 'node:worker_threads';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(here, '../../..');
@@ -38,6 +40,12 @@ export const config = {
   saveMaxWaitMs: Number(process.env.OVERLYX_SAVE_MAX_WAIT ?? 10000),
   /** same for persisting the Yjs state in SQLite (ms) */
   persistMaxWaitMs: Number(process.env.OVERLYX_PERSIST_MAX_WAIT ?? 5000),
+  /**
+   * worker threads for the whole-document work — parsing, writing, merging (docpool.ts); 0 does it
+   * on the main thread. Default: two fewer than the cores (builds and the event loop need theirs),
+   * at least one, at most four; none under vitest unless set (tests drive the main-thread path)
+   */
+  docWorkers: Math.max(0, Number(process.env.OVERLYX_DOC_WORKERS ?? (process.env.VITEST ? 0 : Math.min(4, Math.max(1, os.availableParallelism() - 2))))),
   /** concurrent PDF builds (each latexmk run is one core; more only queue up) */
   maxBuilds: Math.max(1, Number(process.env.OVERLYX_MAX_BUILDS ?? 2)),
   /** `nice` level for latexmk / LyX so that builds never starve the editor */
@@ -121,11 +129,14 @@ export const config = {
   sessionDays: 30,
 };
 
-fs.mkdirSync(config.dataDir, { recursive: true });
-for (const d of ['cache', 'build', 'uploads']) fs.mkdirSync(path.join(config.dataDir, d), { recursive: true });
+// (a document worker, docpool.ts, reads the configuration only: the server has set things up)
+if (isMainThread) {
+  fs.mkdirSync(config.dataDir, { recursive: true });
+  for (const d of ['cache', 'build', 'uploads']) fs.mkdirSync(path.join(config.dataDir, d), { recursive: true });
+}
 
 const secretFile = path.join(config.dataDir, 'secret.key');
-if (!fs.existsSync(secretFile)) {
+if (isMainThread && !fs.existsSync(secretFile)) {
   fs.writeFileSync(secretFile, crypto.randomBytes(48).toString('hex'), { mode: 0o600 });
 }
-export const JWT_SECRET = fs.readFileSync(secretFile, 'utf8').trim();
+export const JWT_SECRET = isMainThread ? fs.readFileSync(secretFile, 'utf8').trim() : '';

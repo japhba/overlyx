@@ -264,6 +264,10 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
     const PR = R === T ? P0 : o.parse(R);
     const exact = sameDocument(PR.doc, doc);
     const bad = (exact ? null : verify(PR, doc, segments, () => (PF ??= o.parse(full.text)))) ?? regenerated(R, bodyRange, T, P0.bodyRange, full, segments);
+    // reading back the same is not enough: the parser tolerates a stray \end{center}, TeX does not
+    // (a kept closing line next to a rewritten one once doubled it). The environments and braces
+    // must balance as in the user's file or as in the full rewrite, else the full rewrite is written.
+    if (!bad) { const b = texBalance(R); if (b !== texBalance(full.text) && b !== texBalance(T)) return fullOut('environment balance'); }
     if (!bad) {
       // the next save's base: this text, its parse, and — reading back as exactly this document —
       // the writer's output for it, which is the one just made
@@ -575,3 +579,24 @@ function sameDocument(a: LyxDocument, b: LyxDocument): boolean {
   for (let i = 0; i < a.body.length; i++) if (canonical(a.body[i]) !== canonical(b.body[i])) return false;
   return true;
 }
+
+/**
+ * How the text's environments and braces balance, as a comparable key: per environment name the
+ * number of `\begin` minus `\end`, and the brace depth at the end — comments (`%` to the end of
+ * the line) and escaped braces left out.
+ */
+export function texBalance(text: string): string {
+  const env = new Map<string, number>();
+  let braces = 0;
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/(^|[^\\])%.*$/, '$1');
+    for (const m of line.matchAll(/\\(begin|end)\s*\{([^}]*)\}/g)) env.set(m[2], (env.get(m[2]) ?? 0) + (m[1] === 'begin' ? 1 : -1));
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '\\') { i++; continue; }
+      if (c === '{') braces++; else if (c === '}') braces--;
+    }
+  }
+  return JSON.stringify([[...env].filter(([, n]) => n !== 0).sort(), braces]);
+}
+
