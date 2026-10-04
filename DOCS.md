@@ -150,9 +150,28 @@ blend.
   The result is always parsed again and must give the document being saved (or, where the writer
   itself does not reproduce a paragraph it wrote, what a full rewrite reads back as); otherwise
   more is rewritten, in the end the whole file — never worse than writing it all. Every save path
-  goes through it: the server (`OpenDoc.render`, so autosave, MCP edits, agent turns, restores),
-  and the VS Code extension (`DocSession`, against the TextDocument's text). Costs one extra parse
-  per save; the base's parse and writer output are cached per document between saves.
+  goes through it: the server (`server/src/docwork.ts renderDoc`, so autosave, MCP edits, agent
+  turns, restores), and the VS Code extension (`DocSession`, against the TextDocument's text). Costs
+  one extra parse per save; the base's parse and writer output are cached per document between saves.
+* **One document's work never stalls the others** (`server/src/docpool.ts`, `docworker.ts`). Making
+  a save's text, opening a document, merging a change on disk, an agent's edit (parse, merge,
+  tracked diff) take seconds for a big paper — on the server's single event loop that stalled every
+  user of the instance (10 papers saving at once: 0.2 s; an 850 kB thesis being edited: 5 s; an
+  agent editing it: 20 s and more). This work runs in `OVERLYX_DOC_WORKERS` worker threads (default:
+  the cores less two, 1–4; `0` does it on the main thread as before). Each keeps a mirror Y.Doc of the
+  open documents of the projects it serves (all documents of a project share one worker: a master
+  includes its children's live state), brought up to date with the CRDT updates the main thread
+  sends along with each request; it answers with the text, or with the CRDT update an edit made,
+  which the main thread applies (`docwork.ts` holds the functions both sides run; tests compare
+  their bytes). The main thread keeps the CRDT, the files and the database, and does each change of
+  a document in turn (`OpenDoc.exclusive`): `saveToFile` resolves once the file holds the state of
+  the call; edits that arrive while a save's text is made leave the document dirty and outside that
+  save's *All changes saved*; a change written to the file meanwhile is merged before writing; a
+  file deleted meanwhile is not re-created. A document whose save took a while (seconds, a big one)
+  is saved at most every other such period while people type in it; an idle one still 1.5 s after
+  the last change. A client's first sync of a document over 100 kB is encoded by the worker too,
+  and a big document opened from its file is applied in steps. A worker that dies is replaced and
+  its mirrors rebuilt from the main thread; five deaths in a minute put the work back on the main thread.
 * **Sharing** (Google-Docs model): a project is private to its owner until it is shared. The owner
   invites people by username or e-mail address as *viewers* or *editors* (an e-mail that has not
   signed in yet is kept as an invitation and bound to the account on its first Google sign-in), or
@@ -1151,7 +1170,8 @@ sub-directory per account, named by its username, and in it one directory per pr
 (SQLite, caches, builds, `credentials.txt`), `OVERLYX_CLIENT_DIST` (built client to serve, default
 `packages/client/dist`), `OVERLYX_UNLOAD_MS` (how long an idle document stays loaded, default 6 h),
 `OVERLYX_MAX_BUILDS` (parallel PDF builds, default 2), `OVERLYX_BUILD_NICE` (niceness of latexmk,
-default 10), `OVERLYX_SANDBOX` (`auto` — use bubblewrap when installed, the default; `bwrap` — required;
+default 10), `OVERLYX_DOC_WORKERS` (worker threads for parsing and writing documents, default the
+cores less two, 1–4; `0`: on the main thread), `OVERLYX_SANDBOX` (`auto` — use bubblewrap when installed, the default; `bwrap` — required;
 `none`),
 `LYX_LAYOUT_DIR` (LyX `lib/layouts`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` +
 `OVERLYX_PUBLIC_URL` to enable Google sign-in, `OVERLYX_OWNER_EMAIL` (the instance owner: made an
@@ -1303,6 +1323,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/selection-inserts.spec.ts   # comments / floats / captions keep the selection, pasted blocks, Enter in a caption, Insert ▸ Graphics on a layout page, live authors, TeX pane after settings, tracked tables, formula notice, tablet reflow
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layout.spec.ts   # layout documents: new deck, text box + formula, move / resize / undo, toolbar, presentation steps, zoom, text overlays, a linear beamer deck presented; the font size box
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
+npx vitest run tests/docworker.test.ts   # the document workers write the bytes the main thread writes; saves in order; a dead worker loses nothing
 OVERLYX_DATA_DIR=/root/lyx/overlyx/data npx tsx scripts/usage-report.ts --days 30   # on the production server: what people did and what went wrong (anonymous usage statistics)
 journalctl -u overlyx-autodeploy -n 50   # on the production server: what the last push to origin/master went through (checks, deploy, verification)
 # a real project in the extension (VS Code under xvfb, driven over CDP): notifications, broken node views, formula
