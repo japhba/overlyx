@@ -363,7 +363,7 @@ test('markdown files open in the WYSIWYG editor: sized headings, ## input rule, 
   // the Source button shows the raw text; Rich text comes back
   await page.locator('[data-md-mode]').click();
   await expect(page.locator('.texted textarea, .md-editor textarea').first()).toBeVisible({ timeout: 10000 });
-  expect(await page.locator('.md-editor textarea').inputValue()).toContain('# Project notes');
+  await expect(page.locator('.md-editor textarea')).toHaveValue(/# Project notes/);   // (filled a moment after it shows: Firefox read it empty)
   await page.locator('[data-md-mode]').click();
   await expect(host.locator('h2')).toHaveText('Plan');
   await admin.close();
