@@ -264,6 +264,11 @@ CREATE TABLE IF NOT EXISTS oauth_grants (
 if (!(db.prepare("PRAGMA table_info(mcp_tokens)").all() as { name: string }[]).some(c => c.name === 'expires_at')) {
   db.exec('ALTER TABLE mcp_tokens ADD COLUMN expires_at INTEGER');
 }
+// a credential narrowed at its authorization (tokenAuth.ts AccessScope, JSON; NULL = the whole account),
+// and the narrowing an OAuth code / grant carries to the tokens it mints
+try { db.exec('ALTER TABLE mcp_tokens ADD COLUMN scope TEXT'); } catch { /* column exists */ }
+try { db.exec('ALTER TABLE oauth_codes ADD COLUMN access_scope TEXT'); } catch { /* column exists */ }
+try { db.exec('ALTER TABLE oauth_grants ADD COLUMN access_scope TEXT'); } catch { /* column exists */ }
 
 // Agents connected over MCP from elsewhere (mcpAgents.ts): one row per token and MCP client
 // ("Claude Code" with the account token, ChatGPT's OAuth grant, …) — what the Agent panel lists —

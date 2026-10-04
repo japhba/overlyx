@@ -5,21 +5,26 @@
  * (ChatGPT registers itself), authorization code + PKCE (S256, public clients), refresh-token
  * rotation. The consent page uses the normal OverLyX session cookie; an approved grant mints an
  * separate MCP access credential (mcpTokens.ts) with an expiry, named after the client — it shows
- * up under OAuth connections and revoking it there cuts only that connection.
+ * up under OAuth connections and revoking it there cuts only that connection. With Settings ▸
+ * Account ▸ Fine-grained access the consent page also narrows it (credentialScope.ts); the grant
+ * keeps that narrowing for every rotated token.
  */
 import express, { type Request, type Response } from 'express';
 import crypto from 'node:crypto';
 import { config } from './config.ts';
 import { db } from './db.ts';
 import { createMcpToken } from './mcpTokens.ts';
+import { parseScope, type AccessScope } from './tokenAuth.ts';
+import { SCOPE_CSS, scopeFields, scopeFromForm } from './credentialScope.ts';
 import { setSecurityHeaders } from './security.ts';
+import type { SessionUser } from './auth.ts';
 
 const ACCESS_MS = 30 * 24 * 3600 * 1000;   // access tokens; ChatGPT refreshes with the refresh token
 const CODE_MS = 10 * 60 * 1000;
 
 interface ClientRow { client_id: string; name: string; redirect_uris: string; created_at: number }
-interface CodeRow { code: string; client_id: string; user_id: number; challenge: string; redirect_uri: string; scope: string | null; expires_at: number }
-interface GrantRow { id: number; refresh_hash: string; client_id: string; user_id: number; token_id: number | null; created_at: number; last_used_at: number | null }
+interface CodeRow { code: string; client_id: string; user_id: number; challenge: string; redirect_uri: string; scope: string | null; access_scope: string | null; expires_at: number }
+interface GrantRow { id: number; refresh_hash: string; client_id: string; user_id: number; token_id: number | null; created_at: number; last_used_at: number | null; access_scope: string | null }
 
 const sha256hex = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 const rand = (n = 32) => crypto.randomBytes(n).toString('base64url');
@@ -95,7 +100,7 @@ export function oauthRoutes(): express.Router {
     });
   });
 
-  const page = (res: Response, status: number, body: string) => { res.status(status).type('html').send(`<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>OverLyX</title><style>body{font:15px/1.5 system-ui;max-width:26em;margin:12vh auto;padding:0 1em;color:#222}button,.btn{font:inherit;padding:8px 18px;border-radius:8px;border:1px solid #bbb;background:#f6f6f6;cursor:pointer;text-decoration:none;color:inherit;display:inline-block}button.primary{background:#2a7ae2;border-color:#2a7ae2;color:#fff}form{display:inline}.muted{color:#777}</style></head><body>${body}</body></html>`); };
+  const page = (res: Response, status: number, body: string) => { res.status(status).type('html').send(`<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>OverLyX</title><style>body{font:15px/1.5 system-ui;max-width:26em;margin:12vh auto;padding:0 1em;color:#222}button,.btn{font:inherit;padding:8px 18px;border-radius:8px;border:1px solid #bbb;background:#f6f6f6;cursor:pointer;text-decoration:none;color:inherit;display:inline-block}button.primary{background:#2a7ae2;border-color:#2a7ae2;color:#fff}form{display:inline}.muted{color:#777}${SCOPE_CSS}</style></head><body>${body}</body></html>`); };
 
   /** Validate an authorize request; returns what the consent page and the code need, or answers the response itself. */
   function checkAuthorize(req: Request, res: Response): { client: ClientRow; redirectUri: string; state: string; challenge: string; scope: string } | null {
@@ -109,6 +114,19 @@ export function oauthRoutes(): express.Router {
     return { client, redirectUri, state: String(q.state ?? ''), challenge: String(q.code_challenge), scope: String(q.scope ?? 'mcp') };
   }
 
+  /** The consent page; again with `error` and the choices made when the form cannot be granted. */
+  function consent(req: Request, res: Response, v: { client: ClientRow; redirectUri: string }, user: SessionUser, error?: string, previous?: Record<string, unknown>) {
+    setSecurityHeaders(res, v.redirectUri);
+    const q = { ...req.query as Record<string, unknown>, ...req.body as Record<string, unknown> };
+    const keep = ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope', 'response_type']
+      .map(k => `<input type="hidden" name="${k}" value="${esc(String(q[k] ?? (k === 'response_type' ? 'code' : k === 'code_challenge_method' ? 'S256' : '')))}">`).join('');
+    const fields = scopeFields(user, { previous });
+    page(res, error ? 400 : 200, `<h2>Connect ${esc(v.client.name)}?</h2>
+<p><b>${esc(v.client.name)}</b> wants to work with the OverLyX projects of <b>${esc(user.name)}</b> (@${esc(user.username)})${fields ? ' chosen below' : ''} — read documents and files, propose tracked-change edits, comment, and build PDFs, with your role in each project.</p>
+<p class="muted">This creates a short-lived credential for this OAuth connection; disconnect it any time in OverLyX under File ▸ Git repository ▸ OAuth connections.</p>
+${error ? `<p class="err">${esc(error)}</p>` : ''}<form method="post" action="/oauth/authorize">${keep}${fields}<button class="primary" name="decision" value="approve">Allow</button> <button name="decision" value="deny">Deny</button></form>`);
+  }
+
   r.get('/authorize', (req, res) => {
     const v = checkAuthorize(req, res);
     if (!v) return;
@@ -116,13 +134,7 @@ export function oauthRoutes(): express.Router {
       page(res, 200, `<h2>Sign in first</h2><p><b>${esc(v.client.name)}</b> asks to connect to your OverLyX projects, but this browser is not signed in.</p><p><a class="btn" href="/" target="_blank" rel="noreferrer">Open OverLyX and sign in</a></p><p><a class="btn primary" href="${esc(req.originalUrl)}">I signed in — continue</a></p>`);
       return;
     }
-    setSecurityHeaders(res, v.redirectUri);
-    const keep = ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope', 'response_type']
-      .map(k => `<input type="hidden" name="${k}" value="${esc(String(req.query[k] ?? (k === 'response_type' ? 'code' : k === 'code_challenge_method' ? 'S256' : '')))}">`).join('');
-    page(res, 200, `<h2>Connect ${esc(v.client.name)}?</h2>
-<p><b>${esc(v.client.name)}</b> wants to work with the OverLyX projects of <b>${esc(req.user.name)}</b> (@${esc(req.user.username)}) — read documents and files, propose tracked-change edits, comment, and build PDFs, with your role in each project.</p>
-<p class="muted">This creates a short-lived credential for this OAuth connection; disconnect it any time in OverLyX under File ▸ Git repository ▸ OAuth connections.</p>
-<form method="post" action="/oauth/authorize">${keep}<button class="primary" name="decision" value="approve">Allow</button> <button name="decision" value="deny">Deny</button></form>`);
+    consent(req, res, v, req.user);
   });
 
   r.post('/authorize', (req, res) => {
@@ -133,25 +145,27 @@ export function oauthRoutes(): express.Router {
     if (v.state) u.searchParams.set('state', v.state);
     u.searchParams.set('iss', oauthBase(req));   // RFC 9207 — lets ChatGPT use its stable redirect URI
     if (String(req.body?.decision) !== 'approve') { u.searchParams.set('error', 'access_denied'); res.redirect(u.href); return; }
+    const asked = scopeFromForm(req.user, req.body ?? {});
+    if ('error' in asked) { consent(req, res, v, req.user, asked.error, req.body); return; }
     const code = 'olxac_' + rand(24);
-    db.prepare('INSERT INTO oauth_codes (code, client_id, user_id, challenge, redirect_uri, scope, expires_at) VALUES (?,?,?,?,?,?,?)')
-      .run(code, v.client.client_id, req.user.id, v.challenge, v.redirectUri, v.scope, Date.now() + CODE_MS);
+    db.prepare('INSERT INTO oauth_codes (code, client_id, user_id, challenge, redirect_uri, scope, access_scope, expires_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(code, v.client.client_id, req.user.id, v.challenge, v.redirectUri, v.scope, asked.scope ? JSON.stringify(asked.scope) : null, Date.now() + CODE_MS);
     u.searchParams.set('code', code);
     res.redirect(u.href);
   });
 
   const tokenError = (res: Response, error: string, desc: string, status = 400) => res.status(status).json({ error, error_description: desc });
 
-  /** Mint an access + refresh pair for a user/client; replaces `previous` (rotation). */
-  function mintPair(userId: number, client: ClientRow, previous?: GrantRow) {
+  /** Mint an access + refresh pair for a user/client, narrowed to `scope`; replaces `previous` (rotation). */
+  function mintPair(userId: number, client: ClientRow, scope: AccessScope | null, previous?: GrantRow) {
     if (previous) {
       if (previous.token_id) db.prepare('DELETE FROM mcp_tokens WHERE id = ?').run(previous.token_id);
       db.prepare('DELETE FROM oauth_grants WHERE id = ?').run(previous.id);
     }
-    const { id, token } = createMcpToken(userId, `${client.name} (OAuth)`, false, Date.now() + ACCESS_MS);
+    const { id, token } = createMcpToken(userId, `${client.name} (OAuth)`, false, Date.now() + ACCESS_MS, scope);
     const refresh = 'olxrt_' + rand(32);
-    db.prepare('INSERT INTO oauth_grants (refresh_hash, client_id, user_id, token_id, created_at) VALUES (?,?,?,?,?)')
-      .run(sha256hex(refresh), client.client_id, userId, id, Date.now());
+    db.prepare('INSERT INTO oauth_grants (refresh_hash, client_id, user_id, token_id, created_at, access_scope) VALUES (?,?,?,?,?,?)')
+      .run(sha256hex(refresh), client.client_id, userId, id, Date.now(), scope ? JSON.stringify(scope) : null);
     return { access_token: token, token_type: 'Bearer', expires_in: Math.floor(ACCESS_MS / 1000), refresh_token: refresh, scope: 'mcp' };
   }
 
@@ -167,7 +181,7 @@ export function oauthRoutes(): express.Router {
       if (b.redirect_uri && String(b.redirect_uri) !== row.redirect_uri) { tokenError(res, 'invalid_grant', 'redirect_uri mismatch'); return; }
       const verifier = String(b.code_verifier ?? '');
       if (!verifier || crypto.createHash('sha256').update(verifier).digest('base64url') !== row.challenge) { tokenError(res, 'invalid_grant', 'PKCE verification failed'); return; }
-      res.json(mintPair(row.user_id, client));
+      res.json(mintPair(row.user_id, client, parseScope(row.access_scope)));
       return;
     }
     if (grant === 'refresh_token') {
@@ -175,7 +189,7 @@ export function oauthRoutes(): express.Router {
       if (!row) { tokenError(res, 'invalid_grant', 'unknown refresh token'); return; }
       const client = resolveClient(row.client_id);
       if (!client || (b.client_id && String(b.client_id) !== row.client_id)) { tokenError(res, 'invalid_client', 'client mismatch', 401); return; }
-      res.json(mintPair(row.user_id, client, row));
+      res.json(mintPair(row.user_id, client, parseScope(row.access_scope), row));
       return;
     }
     tokenError(res, 'unsupported_grant_type', 'authorization_code or refresh_token');

@@ -28,7 +28,7 @@ import { db, type UserRow } from './db.ts';
 import { projectDir, listProjects } from './projects.ts';
 import { manager, fileWrittenListeners } from './docs.ts';
 import { verifyPassword, toSessionUser, type SessionUser } from './auth.ts';
-import { roleFor, atLeast, logAccess, accessibleProjects } from './access.ts';
+import { roleFor, atLeast, logAccess, accessibleProjects, scopeRefusal } from './access.ts';
 import { createOwnedProject } from './projectCreate.ts';
 import { buildIncluding, buildErrors, errorLocations, lastBuild } from './export.ts';
 import { canonicalProject } from './namespaces.ts';
@@ -437,7 +437,7 @@ export function userForCredentials(username: string, secret: string): SessionUse
   const row = db.prepare('SELECT * FROM users WHERE username = ?').get(username.trim().toLowerCase()) as UserRow | undefined;
   if (!row || !secret) return null;
   const token = verifyAccessToken(secret);
-  if (token) return token.userId === row.id ? toSessionUser(row) : null;
+  if (token) return token.userId === row.id ? { ...toSessionUser(row), ...(token.scope ? { scope: token.scope } : {}) } : null;
   if (secret.startsWith('olx_') || secret.startsWith('olxmcp_')) return null; // invalid/revoked token: never try it as a password
   return verifyPassword(secret, row.password_hash) ? toSessionUser(row) : null;
 }
@@ -475,7 +475,7 @@ export function gitRouter(): express.Router {
   // the push that follows it.
   r.get('/api/user', (req, res) => {
     const user = authenticateBasic(req, res);
-    if (user) res.json({ user: { username: user.username, name: user.name, email: user.email } });
+    if (user) res.json({ user: { username: user.username, name: user.name, email: user.email }, ...(user.scope ? { scope: user.scope } : {}) });
   });
   r.get('/api/projects', (req, res) => {
     const user = authenticateBasic(req, res);
@@ -514,6 +514,8 @@ function authenticateBasic(req: Request, res: Response): SessionUser | null {
 async function createCliProject(req: Request, res: Response): Promise<void> {
   const user = authenticateBasic(req, res);
   if (!user) return;
+  const narrowed = scopeRefusal(user, null, 'create');
+  if (narrowed) { res.status(403).json({ error: narrowed }); return; }
   try {
     const name = String(req.body?.name ?? '').trim();
     const title = typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 200) || null : null;
@@ -534,8 +536,8 @@ function cliTarget(req: Request, res: Response, user: SessionUser, need: 'view' 
   let project: string;
   try { project = canonicalProject(String(src.project ?? '')); } catch { res.status(400).json({ error: 'bad project name' }); return null; }
   const role = isProjectKey(project) && fs.existsSync(projectDir(project)) ? roleFor(user, project) : null;
-  if (!role) { res.status(404).json({ error: `no project "${String(src.project ?? '')}" (or no access to it)` }); return null; }
-  if (!atLeast(role, need)) { res.status(403).json({ error: `You can only view "${project}"` }); return null; }
+  if (!role) { res.status(404).json({ error: scopeRefusal(user, project, need) ?? `no project "${String(src.project ?? '')}" (or no access to it)` }); return null; }
+  if (!atLeast(role, need)) { res.status(403).json({ error: scopeRefusal(user, project, need) ?? `You can only view "${project}"` }); return null; }
   const rel = String(src.path ?? '').replace(/^\.?\/+/, '');
   if (withPath && (!rel || rel.split('/').some(s => s === '..' || s === ''))) { res.status(400).json({ error: 'path must name a document of the project, e.g. main.tex' }); return null; }
   return { project, path: rel };
@@ -617,7 +619,8 @@ async function handle(req: Request, res: Response): Promise<void> {
   const write = service === 'git-receive-pack';
   const role = roleFor(user, project);
   if (!atLeast(role, write ? 'edit' : 'view')) {
-    res.status(403).type('text').send(role ? `You can only view "${project}" — pushing needs editor access\n` : `You do not have access to "${project}"\n`);
+    const narrowed = scopeRefusal(user, project, write ? 'edit' : 'view');
+    res.status(403).type('text').send(narrowed ? `OverLyX: ${narrowed}\n` : role ? `You can only view "${project}" — pushing needs editor access\n` : `You do not have access to "${project}"\n`);
     return;
   }
   // the owner's activity log: one entry per person and direction (info/refs precedes every fetch and push)

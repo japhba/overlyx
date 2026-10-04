@@ -26,7 +26,7 @@ import { db, type MemberRow, type ProjectRow, type UserRow } from './db.ts';
 import { config } from './config.ts';
 import type { SessionUser } from './auth.ts';
 import { listProjects, namespaces, resolveProjectPath, type Project } from './projects.ts';
-import { freeKey, moveFlatProjects, moveProject } from './namespaces.ts';
+import { canonicalProject, freeKey, moveFlatProjects, moveProject } from './namespaces.ts';
 
 export type Role = 'owner' | 'edit' | 'view';
 const RANK: Record<Role, number> = { view: 1, edit: 2, owner: 3 };
@@ -84,11 +84,33 @@ export function roleFor(user: SessionUser, project: string): Role | null {
   if (!isProjectKey(project)) return null;
   const row = projectRow(project);
   if (!row) return null;
-  if (row.owner_id === user.id) return 'owner';
-  if (user.isAdmin && adminGrantActive(user.id, project)) return 'owner';
+  if (row.owner_id === user.id) return withinScope(user, project, 'owner');
+  if (user.isAdmin && adminGrantActive(user.id, project)) return withinScope(user, project, 'owner');
   const m = db.prepare(`SELECT role FROM project_members WHERE project = ? AND (user_id = ? OR (email IS NOT NULL AND email = ?))
                         ORDER BY CASE role WHEN 'edit' THEN 0 ELSE 1 END LIMIT 1`).get(project, user.id, userEmail(user) || '\0') as { role: string } | undefined;
-  return m && isRole(m.role) ? m.role : null;
+  return m && isRole(m.role) ? withinScope(user, project, m.role) : null;
+}
+
+/**
+ * A role as far as the credential the user came in with allows: one narrowed at its authorization
+ * (Settings ▸ Account ▸ Fine-grained access, tokenAuth.ts AccessScope) reaches only its projects —
+ * by their current key, so a moved project stays in — and a read-only one only views.
+ */
+function withinScope(user: SessionUser, project: string, role: Role): Role | null {
+  const s = user.scope;
+  if (!s) return role;
+  if (s.projects && !s.projects.some(p => p === project || canonicalProject(p) === project)) return null;
+  return s.readonly ? 'view' : role;
+}
+
+/** Why a narrowed credential cannot do something in a project (null: it is not the credential that stops it). */
+export function scopeRefusal(user: SessionUser, project: string | null, need: 'view' | 'edit' | 'create'): string | null {
+  const s = user.scope;
+  if (!s) return null;
+  if (need === 'create') return 'this sign-in is limited' + (s.projects ? ` to ${s.projects.join(', ')}` : '') + (s.readonly ? ' (read only)' : '') + ' — creating projects needs a sign-in with access to all your projects';
+  if (project && s.projects && !s.projects.some(p => p === project || canonicalProject(p) === project)) return `this sign-in is limited to ${s.projects.join(', ') || 'no projects'} — sign in again (overlyx auth login) to reach "${project}"`;
+  if (need === 'edit' && s.readonly) return `this sign-in is read only — sign in again without "Read only" to change "${project}"`;
+  return null;
 }
 
 export interface ProjectAccess extends Project {
@@ -119,6 +141,7 @@ export function accessibleProjects(user: SessionUser, opts: { files?: boolean } 
     if (row?.owner_id === user.id) { role = 'owner'; via = 'owner'; }
     else if (m && isRole(m.role)) { role = m.role; via = m.via === 'link' ? 'link' : 'member'; }
     else if (user.isAdmin && adminGrantActive(user.id, p.name)) { role = 'owner'; via = 'admin'; }
+    if (role) role = withinScope(user, p.name, role);
     if (!role) continue;
     out.push({ ...p, title: row?.title ?? null, kind: row?.kind ?? 'project', role, via, owner: row?.owner_id != null ? owners.get(row.owner_id) ?? null : null });
   }

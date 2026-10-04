@@ -33,6 +33,7 @@ const { mcpRouter } = await import('../packages/server/src/mcp.ts');
 const { cliLoginRoutes } = await import('../packages/server/src/cliLogin.ts');
 const { authMiddleware, signSession } = await import('../packages/server/src/auth.ts');
 const { listMcpTokens } = await import('../packages/server/src/mcpTokens.ts');
+const { setUserSettings } = await import('../packages/server/src/userSettings.ts');
 const CLI = fileURLToPath(new URL('../packages/cli/bin/overlyx.js', import.meta.url));
 const CLI_VERSION = JSON.parse(readFileSync(fileURLToPath(new URL('../packages/cli/package.json', import.meta.url)), 'utf8')).version as string;
 const execFileP = promisify(execFile);
@@ -320,17 +321,20 @@ describe("overlyx mcp: local agents through the CLI's bridge", () => {
 
 describe('overlyx auth login through the browser', () => {
   const CONFIG = join(ROOT, 'config-web');
+  // the user's global git config, here: with a helper from before that knows a wrong password
+  const GITCONFIG = join(ROOT, 'gitconfig-web');
+  writeFileSync(GITCONFIG, '[credential]\n\thelper = "!f() { echo username=ada; echo password=stale; }; f"\n');
   const cookie = () => `ol_session=${signSession(toSessionUser(db.prepare("SELECT * FROM users WHERE username = 'ada'").get() as never))}`;
 
   /** the CLI waiting for the browser; the test is the browser */
-  async function startLogin() {
+  async function startLogin(opts: { cwd?: string } = {}) {
     const { spawn } = await import('node:child_process');
     // (a desktop as far as the CLI knows: DISPLAY set, no SSH; xdg-open made harmless by an empty PATH entry)
-    const env = { ...process.env, OVERLYX_CONFIG_DIR: CONFIG, DISPLAY: ':99', PATH: `${join(ROOT, 'no-browser')}:${process.env.PATH}` } as Record<string, string>;
+    const env = { ...process.env, OVERLYX_CONFIG_DIR: CONFIG, GIT_CONFIG_GLOBAL: GITCONFIG, GIT_CONFIG_NOSYSTEM: '1', DISPLAY: ':99', PATH: `${join(ROOT, 'no-browser')}:${process.env.PATH}` } as Record<string, string>;
     delete env.SSH_CONNECTION; delete env.SSH_TTY;
     mkdirSync(join(ROOT, 'no-browser'), { recursive: true });
     writeFileSync(join(ROOT, 'no-browser', 'xdg-open'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-    const child = spawn(process.execPath, [CLI, 'auth', 'login', '--web', '--host', host], { env });
+    const child = spawn(process.execPath, [CLI, 'auth', 'login', '--web', '--host', host], { env, cwd: opts.cwd ?? ROOT });
     let err = '', out = '';
     child.stderr.on('data', d => { err += d; });
     child.stdout.on('data', d => { out += d; });
@@ -368,8 +372,88 @@ describe('overlyx auth login through the browser', () => {
     // the credential works: the project list (git API) …
     const list = await execFileP(process.execPath, [CLI, 'repo', 'list'], { encoding: 'utf8', env: { ...process.env, OVERLYX_CONFIG_DIR: CONFIG } });
     expect(list.stdout).toContain('ada/');
+    // … git, too: a plain clone with nothing in the URL, the stale helper of before not asked
+    expect(login.out()).toContain(`Git: clone, pull and push to ${host} use this sign-in`);
+    expect(readFileSync(GITCONFIG, 'utf8')).toContain('auth git-credential');
+    const gitEnv = { ...process.env, OVERLYX_CONFIG_DIR: CONFIG, GIT_CONFIG_GLOBAL: GITCONFIG, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' };
+    const dest = join(ROOT, 'web-clone');
+    await execFileP('git', ['clone', '-q', `${host}/git/ada/Imported%20paper.git`, dest], { encoding: 'utf8', env: gitEnv });
+    expect(readFileSync(join(dest, 'main.tex'), 'utf8')).toContain('Hello from an existing folder.');
+    // logging out takes git's helper away again
+    await execFileP(process.execPath, [CLI, 'auth', 'logout', '--host', host], { encoding: 'utf8', env: gitEnv });
+    expect(readFileSync(GITCONFIG, 'utf8')).not.toContain('auth git-credential');
     // … and a code works once
     expect((await fetch(`${host}/cli/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, verifier: 'x' }) })).status).toBe(400);
+  });
+
+  it('fine-grained access (Settings ▸ Account, off by default): a sign-in narrowed to one project, read only', async () => {
+    const form = (q: Record<string, string>, extra: [string, string][]) => new URLSearchParams([...Object.entries(q), ...extra]).toString();
+    const post = (body: string) => fetch(`${host}/cli/login`, { method: 'POST', redirect: 'manual', headers: { cookie: cookie(), 'content-type': 'application/x-www-form-urlencoded' }, body });
+    const other = createOwnedProject('Other paper', user.id).name;
+    await gitmod.ensureRepo(other);
+    // off: the page offers no choice, a sign-in reaches the account
+    const q0 = { port: '45679', state: 'mnopqrstuvwx', challenge: 'b'.repeat(43), client: 'laptop', mode: 'manual' };
+    expect(await (await fetch(`${host}/cli/login?${new URLSearchParams(q0)}`, { headers: { cookie: cookie() } })).text()).not.toContain('name="reach"');
+
+    setUserSettings(user.id, { fineGrainedAccess: true });
+    try {
+      // in a clone of a project, the CLI suggests that one
+      const login = await startLogin({ cwd: join(ROOT, 'web-clone') });
+      const q = Object.fromEntries(login.url.searchParams);
+      expect(q.project).toBe('ada/Imported paper');
+      const page = await (await fetch(login.url, { headers: { cookie: cookie() } })).text();
+      expect(page).toContain('name="reach" value="some" checked');
+      expect(page).toContain('value="ada/Imported paper" checked');
+      expect(page).toMatch(/value="ada\/Other paper">/);
+      // "only these" with none ticked: the page again, with the reason
+      const none = await post(form(q, [['reach', 'some'], ['decision', 'approve']]));
+      expect(none.status).toBe(400);
+      expect(await none.text()).toContain('Choose at least one project');
+      // one project (and one that is not the account's, ignored), read only
+      const ok = await post(form(q, [['reach', 'some'], ['projects', 'ada/Imported paper'], ['projects', 'someone/else'], ['readonly', '1'], ['decision', 'approve']]));
+      expect(ok.status).toBe(302);
+      await fetch(ok.headers.get('location')!);
+      expect(await login.done).toBe(0);
+      expect(login.out()).toContain('Access: ada/Imported paper (read only)');
+      const narrowed = listMcpTokens(user.id).find(t => t.name === `OverLyX CLI on ${q.client}` && t.scope)!;
+      expect(narrowed.scope).toEqual({ projects: ['ada/Imported paper'], readonly: true });
+
+      const env = { ...process.env, OVERLYX_CONFIG_DIR: CONFIG, GIT_CONFIG_GLOBAL: GITCONFIG, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' };
+      const run = (...args: string[]) => execFileP(process.execPath, [CLI, ...args], { encoding: 'utf8', env });
+      expect((await run('auth', 'status')).stdout).toContain('access: ada/Imported paper (read only)');
+      const list = (await run('repo', 'list')).stdout;
+      expect(list).toContain('ada/Imported paper');
+      expect(list).not.toContain('ada/Other paper');
+      // git: clones the project, cannot push to it, cannot reach the other one
+      const dest = join(ROOT, 'narrow-clone');
+      await execFileP('git', ['clone', '-q', `${host}/git/ada/Imported%20paper.git`, dest], { env });
+      writeFileSync(join(dest, 'main.tex'), readFileSync(join(dest, 'main.tex'), 'utf8') + '% more\n');
+      await execFileP('git', ['-C', dest, '-c', 'user.name=Ada', '-c', 'user.email=ada@example.org', 'commit', '-qam', 'more'], { env });
+      await expect(execFileP('git', ['-C', dest, 'push', '-q', 'origin', 'HEAD'], { env })).rejects.toThrow(/403/);
+      await expect(execFileP('git', ['clone', '-q', `${host}/git/ada/Other%20paper.git`, join(ROOT, 'other-clone')], { env })).rejects.toThrow(/403/);
+      // no new projects either
+      const created = await fetch(`${host}/git/api/projects`, { method: 'POST', headers: { authorization: 'Basic ' + Buffer.from(`ada:${JSON.parse(readFileSync(join(CONFIG, 'hosts.json'), 'utf8')).hosts[host].token}`).toString('base64'), 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Sneaky' }) });
+      expect(created.status).toBe(403);
+      expect((await created.json()).error).toContain('creating projects needs a sign-in with access to all your projects');
+      // MCP: the one project, read only, no create_project
+      const bearer = JSON.parse(readFileSync(join(CONFIG, 'hosts.json'), 'utf8')).hosts[host].token;
+      const rpc = async (method: string, params: object) => {
+        const r = await fetch(`${host}/mcp`, { method: 'POST', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+        const text = await r.text();
+        return JSON.parse(/^data: (.*)$/m.exec(text)?.[1] ?? text);
+      };
+      const tools = (await rpc('tools/list', {})).result.tools.map((t: { name: string }) => t.name);
+      expect(tools).toContain('list_projects');
+      expect(tools).not.toContain('create_project');
+      const projects = JSON.parse((await rpc('tools/call', { name: 'list_projects', arguments: {} })).result.content[0].text);
+      expect(projects).toEqual([expect.objectContaining({ project: 'ada/Imported paper', role: 'view' })]);
+      const write = JSON.stringify((await rpc('tools/call', { name: 'write_file', arguments: { project: 'ada/Imported paper', path: 'notes.txt', text: 'x' } })).result);
+      expect(write).toContain('read only');
+      const elsewhere = JSON.stringify((await rpc('tools/call', { name: 'list_files', arguments: { project: other } })).result);
+      expect(elsewhere).toContain('this sign-in is limited to ada/Imported paper');
+    } finally {
+      setUserSettings(user.id, { fineGrainedAccess: false });
+    }
   });
 
   it('without a browser here (SSH), the page shows the code to paste instead of redirecting', async () => {

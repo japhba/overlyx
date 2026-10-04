@@ -8,11 +8,14 @@ import { config, JWT_SECRET } from './config.ts';
 import { adoptGuest, bindInvitations, isInvited } from './access.ts';
 import { notifySignup } from './mailer.ts';
 import { isDriveCallback, finishConnect } from './gdocs/google.ts';
+import type { AccessScope } from './tokenAuth.ts';
 
 export interface SessionUser {
   id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null; email?: string | null;
   /** a temporary account: came in through a share link without signing in (createGuest) */
   guest?: boolean;
+  /** signed in with a credential narrowed to some projects / read only (tokenAuth.ts); access.ts applies it */
+  scope?: AccessScope;
 }
 
 export function hashPassword(password: string): string {

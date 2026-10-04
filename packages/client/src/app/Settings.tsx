@@ -6,7 +6,8 @@
  *   AI           the AI features and models        (this browser, prefs.ts)
  *   Appearance   light / dark / follow the system  (this browser, theme.ts)
  *   Account      who is signed in, and the per-account server settings (userSettings.ts):
- *                token re-copy — administrators switch it per account right here.
+ *                fine-grained access for new sign-ins (the user's own switch); token re-copy —
+ *                administrators switch it per account right here.
  */
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
@@ -113,6 +114,11 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
       if (u.id === user.id) setSettings(r.settings);
     } catch (e) { setErr((e as Error).message); }
   };
+  const toggleFineGrained = async (on: boolean) => {
+    setErr('');
+    try { setSettings((await api.setSettings({ fineGrainedAccess: on })).settings); }
+    catch (e) { setErr((e as Error).message); }
+  };
 
   return (
     <Dialog title="Settings" onClose={onClose} wide>
@@ -184,6 +190,10 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
           {section === 'account' && <>
             <h3>Signed in</h3>
             <div data-setting="whoami">{user.name} ({user.username}){user.isAdmin ? ' — administrator' : ''}</div>
+            <h3>Sign-ins</h3>
+            <div class="sub">Signing in the OverLyX CLI on a computer (<code>overlyx auth login</code>) gives it — git, builds, the AI agents there — a credential of its own; so does connecting an OAuth client such as ChatGPT. It reaches all your projects, with your role in each, and is revoked in File ▸ Git repository.</div>
+            {!user.guest && <label class="pref"><input type="checkbox" data-setting="fine-grained" disabled={settings === null} checked={!!settings?.fineGrainedAccess} onChange={e => void toggleFineGrained((e.target as HTMLInputElement).checked)} /><span>Fine-grained access<span class="sub">When you authorize a new sign-in, choose which projects it reaches and whether it may only read (clone, pull, read and build — no push, edits or comments). Sign-ins made before keep their access; switching this off does not widen narrowed ones.</span></span></label>}
+            {err && !user.isAdmin && <div class="err">{err}</div>}
             <h3>Token re-copy</h3>
             <div class="sub">The account access token (File ▸ Git repository…) works with Git, the CLI and MCP. It is normally shown exactly once — only a hash is kept. With re-copy enabled, its plaintext remains on the server and the Git dialog offers Copy again later. This convenience stores a recoverable secret, so it is off by default; an administrator switches it per account.</div>
             <div data-setting="recopy"><b>{settings === null ? 'Checking…' : settings.allowRecopyTokens ? 'Enabled for your account' : 'Disabled for your account'}</b>{settings !== null && !settings.allowRecopyTokens ? ' (the default)' : ''}</div>

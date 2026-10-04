@@ -10,15 +10,16 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
 
 Usage:
-  overlyx auth login [--host URL] [--no-browser]        sign in through the browser
+  overlyx auth login [--host URL] [--no-browser] [--no-git]   sign in through the browser (git, too)
   overlyx auth login [--host URL] --username NAME --with-token | --token TOKEN
   overlyx auth status [--host URL]
+  overlyx auth setup-git [--host URL]                   git clone / pull / push to OverLyX use the sign-in
   overlyx auth logout [--host URL]
   overlyx repo list [--host URL]
   overlyx repo create [NAME] [--source PATH] [--push] [--remote NAME]
@@ -52,7 +53,7 @@ function fail(message, code = 1) {
 function parse(argv) {
   const positional = [];
   const flags = {};
-  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser']);
+  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser', 'no-git']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--') { positional.push(...argv.slice(i + 1)); break; }
@@ -310,7 +311,9 @@ async function browserLogin(host, flags) {
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const port = server.address().port;
-  const url = `${host}/cli/login?` + new URLSearchParams({ port: String(port), state, challenge, client: os.hostname(), ...(manual ? { mode: 'manual' } : {}) }).toString();
+  // in a clone of one of the projects: the page suggests it, should the account narrow sign-ins (fine-grained access)
+  const clone = await cloneOf(host);
+  const url = `${host}/cli/login?` + new URLSearchParams({ port: String(port), state, challenge, client: os.hostname(), ...(manual ? { mode: 'manual' } : {}), ...(clone ? { project: clone.project } : {}) }).toString();
   let rl = null;
   if (manual) {
     // a browser on another computer cannot come back here: its page shows the code to paste
@@ -334,7 +337,43 @@ async function browserLogin(host, flags) {
   catch (e) { fail(`cannot reach ${host}: ${e.cause?.message ?? e.message}`); }
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.token) fail(body.error ?? `sign-in failed (${res.status})`);
-  return { username: body.username, token: body.token };
+  return { username: body.username, token: body.token, access: body.access ?? null };
+}
+
+/* ------------------------------------------------------------ git: a credential helper */
+
+/*
+ * After `auth login`, plain git (clone, pull, push in a project's folder) authenticates to OverLyX
+ * with the CLI's sign-in: git asks `overlyx auth git-credential get` for the host's credentials. Set
+ * up per host in the global git config — an empty helper first, so a token another helper kept from
+ * before (osxkeychain, store) does not answer instead.
+ */
+
+const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+const gitHelperKey = (host) => `credential.${host}.helper`;
+
+async function setupGit(host) {
+  const key = gitHelperKey(host);
+  await execFileP('git', ['config', '--global', '--unset-all', key]).catch(() => undefined);
+  await execFileP('git', ['config', '--global', '--add', key, '']);
+  await execFileP('git', ['config', '--global', '--add', key, `!${shq(selfPath())} auth git-credential`]);
+}
+
+async function removeGitSetup(host) {
+  await execFileP('git', ['config', '--global', '--unset-all', gitHelperKey(host)]).catch(() => undefined);
+}
+
+/** git's credential protocol: key=value lines in, username / password out for a host the CLI is signed in to */
+async function gitCredential(op) {
+  const input = fs.readFileSync(0, 'utf8');
+  if (op !== 'get') return;   // store / erase: the sign-in is the CLI's own
+  const fields = Object.fromEntries(input.split('\n').map(l => l.split(/=(.*)/s)).filter(p => p[0]).map(p => [p[0], p[1] ?? '']));
+  if (!fields.protocol || !fields.host) return;
+  let host;
+  try { host = normalizeHost(`${fields.protocol}://${fields.host}`); } catch { return; }
+  const saved = readConfig().hosts[host];
+  if (!saved?.token || !saved.username) return;
+  process.stdout.write(`username=${saved.username}\npassword=${saved.token}\n`);
 }
 
 async function authCommand(action, flags) {
@@ -343,14 +382,14 @@ async function authCommand(action, flags) {
     const host = normalizeHost(flags.host ?? process.env.OVERLYX_HOST ?? config.defaultHost ?? DEFAULT_HOST);
     // a token given (scripts, CI): as before; otherwise the browser
     const withToken = !flags.web && (flags['with-token'] || flags.token || process.env.OVERLYX_TOKEN || (!process.stdin.isTTY && !process.stderr.isTTY));
-    let username, token;
+    let username, token, access = null;
     if (withToken) {
       username = String(flags.username ?? process.env.OVERLYX_USERNAME ?? '').trim();
       if (!username) fail('--username is required with a token (or run overlyx auth login without one to sign in through the browser)');
       token = await tokenFromInput(flags);
       if (!token) fail('no token received');
     } else {
-      ({ username, token } = await browserLogin(host, flags));
+      ({ username, token, access } = await browserLogin(host, flags));
     }
     const creds = { host, username, token };
     const result = await api(creds, '/git/api/user');
@@ -358,15 +397,28 @@ async function authCommand(action, flags) {
     config.defaultHost = host;
     writeConfig(config);
     process.stdout.write(`Logged in to ${host} as ${result.user.username}\n`);
+    if (access) process.stdout.write(`Access: ${access}\n`);
+    // git, too: clones, pulls and pushes to this server use the sign-in (signed in through the browser; scripts set it up with setup-git)
+    if (!withToken && !flags['no-git']) {
+      try { await setupGit(host); process.stdout.write(`Git: clone, pull and push to ${host} use this sign-in\n`); }
+      catch (e) { process.stdout.write(`Git: not set up (${String(e.stderr || e.message).trim()}) — later: overlyx auth setup-git\n`); }
+    }
     // local agents: offered once, when one is installed and none is registered yet
     if (process.stdin.isTTY && !codexRegistered() && (await claudeRegistered()) === null && ((await has('claude')) || (await has('codex')))) await mcpInstall({});
     return;
   }
 
+  if (action === 'git-credential') { await gitCredential(flags._op); return; }
   const creds = credentials(flags, action !== 'logout');
+  if (action === 'setup-git') {
+    await setupGit(creds.host);
+    process.stdout.write(`Git: clone, pull and push to ${creds.host} use the OverLyX CLI's sign-in\n`);
+    return;
+  }
   if (action === 'status') {
     const result = await api(creds, '/git/api/user');
     process.stdout.write(`${creds.host}: logged in as ${result.user.username}\n`);
+    if (result.scope) process.stdout.write(`  access: ${result.scope.projects ? result.scope.projects.join(', ') || 'no projects' : 'all projects'}${result.scope.readonly ? ' (read only)' : ''}\n`);
     return;
   }
   if (action === 'logout') {
@@ -374,6 +426,7 @@ async function authCommand(action, flags) {
     delete creds.config.hosts[creds.host];
     if (creds.config.defaultHost === creds.host) creds.config.defaultHost = Object.keys(creds.config.hosts)[0] ?? null;
     writeConfig(creds.config);
+    await removeGitSetup(creds.host);
     process.stdout.write(`Logged out of ${creds.host}\n`);
     return;
   }
@@ -830,7 +883,7 @@ async function main() {
   if (flags.version || positional[0] === 'version') { process.stdout.write(VERSION + '\n'); return; }
   if (flags.help || !positional.length || positional[0] === 'help') { process.stdout.write(HELP); return; }
   const [group, action, ...args] = positional;
-  if (group === 'auth') await authCommand(action, flags);
+  if (group === 'auth') await authCommand(action, action === 'git-credential' ? { ...flags, _op: args[0] } : flags);
   else if (group === 'repo' || group === 'project') await repoCommand(action, args, flags);
   else if (group === 'build') await buildCommand(positional.slice(1), flags);
   else if (group === 'restore') await restoreCommand(positional.slice(1), flags);
