@@ -123,22 +123,14 @@ export interface ExternalAgent {
   /** pushed messages (Claude Code channels): 'confirmed' once its channel delivered, 'possible' while a session stream is open */
   push: 'confirmed' | 'possible' | null;
   queued: number;
-  /** the OverLyX CLI on the owner's computer running Claude Code for this panel (`overlyx agent install`): where, connected, the turn it runs, what it can run */
-  runner: { host: string; online: boolean; busy: number | null; backends: RunnerBackend[] } | null;
 }
-/** what a runner can run: Claude Code, with the models and reasoning efforts its version takes */
-export interface RunnerBackend { id: string; name: string; version: string | null; models: string[]; efforts: string[] }
-/** how a runner runs one turn (chosen in the panel) */
-export interface RunnerTurnOptions { model?: string; effort?: string; fresh?: boolean }
 /** one message between the owner and an external agent: role 'user' from OverLyX, 'agent' its reply */
 export interface ExternalAgentMessage {
   id: number; role: 'user' | 'agent'; text: string;
   /** user: queued → delivered → answered (or cancelled); agent: final | progress */
-  state: string; via: 'poll' | 'push' | 'run' | null; replyTo: number | null;
+  state: string; via: 'poll' | 'push' | null; replyTo: number | null;
   createdAt: number; deliveredAt: number | null; pushedAt: number | null;
   context: { docId: string; text: string } | null;
-  /** a runner's turn: the model / effort chosen, a fresh conversation */
-  options?: RunnerTurnOptions | null;
 }
 /** the external-agents event stream (SSE): the list changed, or a message was added / changed */
 export type ExternalAgentEvent = { kind: 'agents'; agents: ExternalAgent[] } | { kind: 'message'; agentId: number; message: ExternalAgentMessage };
@@ -284,8 +276,7 @@ export const api = {
   /** agents connected over MCP from elsewhere, and the owner's messages to them */
   externalAgents: () => req<{ agents: ExternalAgent[] }>('GET', '/api/mcp-agents'),
   externalAgentMessages: (id: number) => req<{ agent: ExternalAgent; messages: ExternalAgentMessage[] }>('GET', `/api/mcp-agents/${id}/messages`),
-  externalAgentSend: (id: number, text: string, context?: AgentTurnContext, options?: RunnerTurnOptions) => req<{ message: ExternalAgentMessage }>('POST', `/api/mcp-agents/${id}/messages`, { text, context, options }),
-  externalAgentStop: (id: number, mid: number) => req<{ ok: true }>('POST', `/api/mcp-agents/${id}/messages/${mid}/stop`),
+  externalAgentSend: (id: number, text: string, context?: AgentTurnContext) => req<{ message: ExternalAgentMessage }>('POST', `/api/mcp-agents/${id}/messages`, { text, context }),
   externalAgentCancel: (id: number, mid: number) => req<{ message: ExternalAgentMessage }>('POST', `/api/mcp-agents/${id}/messages/${mid}/cancel`),
   externalAgentForget: (id: number) => req<{ ok: boolean }>('DELETE', `/api/mcp-agents/${id}`),
   versions: (id: string) => req<{ versions: VersionInfo[] }>('GET', `/api/docs/${encId(id)}/versions`),

@@ -22,10 +22,6 @@
  *    server:<name>. Claude Code drops channel events silently when the flag is missing, so a push
  *    counts as delivered only once that session has answered a pushed message (mcp_sessions
  *    .channel_ok); until then the message also stays available to wait_for_instructions.
- *  - run: an agent that is the OverLyX CLI on the owner's computer (`overlyx agent run`,
- *    agentRunner.ts; client `overlyx-runner@<computer>`) gets each message as a turn over its event
- *    stream, one at a time, with the model and reasoning effort chosen in the panel (the message's
- *    `options`), runs Claude Code there and reports progress and its answer back (runnerReport).
  * The agent's replies (reply tool) and every state change reach the owner's browser over an SSE
  * stream (GET /api/mcp-agents/events). Sizes are capped and both directions are rate-limited.
  */
@@ -52,25 +48,10 @@ export interface MessageRow {
   reply_to: number | null;
   /** user: queued → delivered → answered (or cancelled); agent: final | progress */
   state: string;
-  /** how a user message reached the agent: 'poll' | 'push' | 'run' */
+  /** how a user message reached the agent: 'poll' | 'push' */
   via: string | null;
   created_at: number; delivered_at: number | null; pushed_at: number | null;
-  /** JSON TurnOptions: what the panel chose for a runner's turn (model, effort, a fresh conversation) */
-  options: string | null;
 }
-
-/** For an agent that runs on the owner's computer (agentRunner.ts): how to run one turn. */
-export interface TurnOptions { model?: string; effort?: string; fresh?: boolean }
-function turnOptions(v: unknown): TurnOptions | null {
-  if (!v || typeof v !== 'object') return null;
-  const o = v as Record<string, unknown>;
-  const out: TurnOptions = {};
-  if (typeof o.model === 'string' && /^[\w.\-[\]:/@]{1,80}$/.test(o.model)) out.model = o.model;
-  if (typeof o.effort === 'string' && /^[\w-]{1,20}$/.test(o.effort)) out.effort = o.effort;
-  if (o.fresh === true) out.fresh = true;
-  return Object.keys(out).length ? out : null;
-}
-const parseOptions = (json: string | null): TurnOptions | null => { try { return json ? turnOptions(JSON.parse(json)) : null; } catch { return null; } };
 
 /** the longest message the owner can send, and the longest reply */
 export const MESSAGE_MAX = 8000;
@@ -187,11 +168,11 @@ export function streamChanged(sessionId: string): void {
 
 const msgRow = (id: number): MessageRow | undefined => db.prepare('SELECT * FROM mcp_agent_messages WHERE id = ?').get(id) as MessageRow | undefined;
 
-export interface PublicMessage { id: number; role: 'user' | 'agent'; text: string; state: string; via: string | null; replyTo: number | null; createdAt: number; deliveredAt: number | null; pushedAt: number | null; context: { docId: string; text: string } | null; options: TurnOptions | null }
+export interface PublicMessage { id: number; role: 'user' | 'agent'; text: string; state: string; via: string | null; replyTo: number | null; createdAt: number; deliveredAt: number | null; pushedAt: number | null; context: { docId: string; text: string } | null }
 export function publicMessage(m: MessageRow): PublicMessage {
   let context: PublicMessage['context'] = null;
   try { context = m.context ? JSON.parse(m.context) : null; } catch { /* none */ }
-  return { id: m.id, role: m.role, text: m.text, state: m.state, via: m.via, replyTo: m.reply_to, createdAt: m.created_at, deliveredAt: m.delivered_at, pushedAt: m.pushed_at, context, options: parseOptions(m.options) };
+  return { id: m.id, role: m.role, text: m.text, state: m.state, via: m.via, replyTo: m.reply_to, createdAt: m.created_at, deliveredAt: m.delivered_at, pushedAt: m.pushed_at, context };
 }
 
 /** What the agent gets for one message (wait_for_instructions, and the body of a pushed event). */
@@ -220,7 +201,7 @@ const replyLimit = limiter(40, 60_000);
 export class AgentMessageError extends Error { constructor(message: string, public status = 400) { super(message); } }
 
 /** The owner's message to their agent, from the Agent panel: stored, then handed to a waiting poll or pushed. */
-export async function sendInstruction(user: SessionUser, agentId: number, text: string, ctx: TurnContext | undefined, options?: unknown): Promise<MessageRow> {
+export async function sendInstruction(user: SessionUser, agentId: number, text: string, ctx: TurnContext | undefined): Promise<MessageRow> {
   const agent = agentRow(agentId);
   // only the account the agent's token belongs to — never a collaborator, never a link guest
   if (!agent || agent.user_id !== user.id || user.guest) throw new AgentMessageError('no such agent', 404);
@@ -232,8 +213,7 @@ export async function sendInstruction(user: SessionUser, agentId: number, text: 
   if (queued >= QUEUE_MAX) throw new AgentMessageError(`${QUEUE_MAX} messages are already waiting for this agent — it is not picking them up`, 429);
   const lines = await editorContextLines(ctx, user, user.name || 'The user');
   const context = lines.length ? JSON.stringify({ docId: ctx!.docId, text: lines.join('\n') }) : null;
-  const opts = isRunnerRow(agent) ? turnOptions(options) : null;
-  const id = Number(db.prepare("INSERT INTO mcp_agent_messages (agent_id, user_id, role, text, context, state, created_at, options) VALUES (?,?, 'user', ?,?, 'queued', ?, ?)").run(agentId, user.id, body, context, Date.now(), opts ? JSON.stringify(opts) : null).lastInsertRowid);
+  const id = Number(db.prepare("INSERT INTO mcp_agent_messages (agent_id, user_id, role, text, context, state, created_at) VALUES (?,?, 'user', ?,?, 'queued', ?)").run(agentId, user.id, body, context, Date.now()).lastInsertRowid);
   db.prepare("DELETE FROM mcp_agent_messages WHERE agent_id = ? AND id NOT IN (SELECT id FROM mcp_agent_messages WHERE agent_id = ? ORDER BY id DESC LIMIT ?)").run(agentId, agentId, KEEP_MESSAGES);
   const m = msgRow(id)!;
   emit(user.id, { kind: 'message', agentId, message: publicMessage(m) });
@@ -254,14 +234,13 @@ export function cancelInstruction(user: SessionUser, agentId: number, messageId:
 }
 
 /** The agent's answer (reply tool): to one of its messages (default: the last one it got and has not answered), or on its own. */
-export function replyFromAgent(agentId: number, sessionId: string | null, text: string, replyTo: number | null, done: boolean, opts: { runner?: boolean } = {}): { message: MessageRow; answered: MessageRow | null } {
+export function replyFromAgent(agentId: number, sessionId: string | null, text: string, replyTo: number | null, done: boolean): { message: MessageRow; answered: MessageRow | null } {
   const agent = agentRow(agentId);
   if (!agent) throw new AgentMessageError('unknown agent');
   const body = text.trim();
   if (!body) throw new AgentMessageError('empty reply');
   if (body.length > REPLY_MAX) throw new AgentMessageError(`reply too long (at most ${REPLY_MAX} characters) — shorten it, or send it in parts`);
-  // (a runner's reports are its own, batched: its final answer must never be dropped)
-  if (!opts.runner && !replyLimit(agentId)) throw new AgentMessageError('too many replies in a minute — wait a little');
+  if (!replyLimit(agentId)) throw new AgentMessageError('too many replies in a minute — wait a little');
   let target: MessageRow | undefined;
   if (replyTo !== null) {
     target = msgRow(replyTo);
@@ -310,10 +289,8 @@ function takeForPoll(agentId: number): MessageRow[] {
   return out;
 }
 
-/** Hand what is queued to its runner, else to a waiting poll, else push it to a session with an open stream. */
+/** Hand what is queued to a waiting poll, else push it to a session with an open stream. */
 async function deliver(agentId: number): Promise<void> {
-  const runner = runners.get(agentId);
-  if (runner) { runNext(runner); return; }
   const w = waiters.get(agentId)?.[0];
   if (w) { const rows = takeForPoll(agentId); if (rows.length) w.give(rows); return; }
   const sessions = [...pushers.values()].filter(p => p.agentId === agentId && p.streamOpen());
@@ -372,83 +349,6 @@ export function waitForInstructions(agentId: number, ms: number, signal?: AbortS
   });
 }
 
-/* ------------------------------------------------------------------ runners (agentRunner.ts) */
-
-/** the client name of an agent that is the OverLyX CLI running Claude Code on the owner's computer */
-export const RUNNER_PREFIX = 'overlyx-runner@';
-export const isRunnerRow = (row: Pick<AgentRow, 'client_name'>): boolean => row.client_name.startsWith(RUNNER_PREFIX);
-
-/** What a runner can run: Claude Code, with the models and reasoning efforts its version takes. */
-export interface RunnerBackend { id: string; name: string; version: string | null; models: string[]; efforts: string[] }
-export type RunnerEvent =
-  | { type: 'hello'; agent: number; name: string }
-  | { type: 'ping' }
-  | { type: 'turn'; id: number; text: string; from: string; context: string | null; options: TurnOptions }
-  | { type: 'stop'; id: number };
-/** A runner connected right now: its event stream, and the turn it is running. */
-export interface RunnerLink {
-  agentId: number; userId: number; host: string; backends: RunnerBackend[];
-  /** the message it is working on */
-  busy: number | null;
-  send(e: RunnerEvent): void;
-  close(): void;
-}
-const runners = new Map<number, RunnerLink>();
-
-/** A runner connected (again): an older connection of it goes, a turn it lost is closed, what waits goes out. */
-export function registerRunner(link: RunnerLink): void {
-  const old = runners.get(link.agentId);
-  runners.set(link.agentId, link);
-  if (old && old !== link) old.close();
-  // turns it was given and never finished, which it is not running any more (it restarted meanwhile)
-  const lost = db.prepare("SELECT * FROM mcp_agent_messages WHERE agent_id = ? AND role = 'user' AND state = 'delivered' AND via = 'run'").all(link.agentId) as MessageRow[];
-  for (const m of lost) if (m.id !== link.busy) replyFromAgent(link.agentId, null, `This turn was interrupted on ${link.host} (the OverLyX agent there restarted) — send it again.`, m.id, true, { runner: true });
-  if (link.busy !== null && !lost.some(m => m.id === link.busy)) link.busy = null;
-  scheduleAgentsEvent(link.userId);
-  runNext(link);
-}
-export function unregisterRunner(link: RunnerLink): void {
-  if (runners.get(link.agentId) === link) runners.delete(link.agentId);
-  scheduleAgentsEvent(link.userId);
-}
-
-/** The runner is free: give it the oldest message waiting for it. */
-function runNext(link: RunnerLink): void {
-  if (link.busy !== null) return;
-  const m = db.prepare("SELECT * FROM mcp_agent_messages WHERE agent_id = ? AND role = 'user' AND state = 'queued' ORDER BY id LIMIT 1").get(link.agentId) as MessageRow | undefined;
-  if (!m) return;
-  db.prepare("UPDATE mcp_agent_messages SET state = 'delivered', via = 'run', delivered_at = ? WHERE id = ?").run(Date.now(), m.id);
-  link.busy = m.id;
-  const a = forAgent(m);
-  link.send({ type: 'turn', id: m.id, text: a.text, from: a.from, context: a.context ?? null, options: parseOptions(m.options) ?? {} });
-  emit(link.userId, { kind: 'message', agentId: link.agentId, message: publicMessage(msgRow(m.id)!) });
-  scheduleAgentsEvent(link.userId);
-}
-
-/** What a runner reports about a turn: progress (interim), its answer, or why it failed. */
-export function runnerReport(ident: TokenIdentity, messageId: number, body: { progress?: unknown; final?: unknown; error?: unknown }): void {
-  const m = msgRow(messageId);
-  const agent = m ? agentRow(m.agent_id) : undefined;
-  if (!m || !agent || m.role !== 'user' || !isRunnerRow(agent) || agent.token_kind !== ident.kind || agent.token_id !== ident.id) throw new AgentMessageError('no such turn', 404);
-  const cut = (v: unknown) => String(v).slice(0, REPLY_MAX);
-  if (typeof body.progress === 'string' && body.progress.trim()) replyFromAgent(agent.id, null, cut(body.progress), m.id, false, { runner: true });
-  const done = typeof body.final === 'string' ? body.final : typeof body.error === 'string' ? `⚠ ${body.error}` : null;
-  if (done === null) return;
-  replyFromAgent(agent.id, null, cut(done.trim() || '(no answer)'), m.id, true, { runner: true });
-  const link = runners.get(agent.id);
-  if (link && link.busy === m.id) { link.busy = null; runNext(link); }
-  scheduleAgentsEvent(agent.user_id);
-}
-
-/** The owner stops the turn a runner is working on. */
-export function stopTurn(user: SessionUser, agentId: number, messageId: number): void {
-  const link = runners.get(agentId);
-  const m = msgRow(messageId);
-  if (!m || m.agent_id !== agentId || m.user_id !== user.id) throw new AgentMessageError('no such message', 404);
-  if (!link || link.busy !== messageId) throw new AgentMessageError('this message is not running', 409);
-  link.send({ type: 'stop', id: messageId });
-}
-
 /* ------------------------------------------------------------------ what the panel shows */
 
 export interface PublicAgent {
@@ -462,8 +362,6 @@ export interface PublicAgent {
   /** pushed messages: 'confirmed' (its channel has delivered), 'possible' (a session stream is open), null */
   push: 'confirmed' | 'possible' | null;
   queued: number;
-  /** the OverLyX CLI on the owner's computer, running Claude Code (agentRunner.ts): where, whether it is connected, what it runs */
-  runner: { host: string; online: boolean; busy: number | null; backends: RunnerBackend[] } | null;
 }
 
 const ONLINE_MS = 3 * 60_000;
@@ -474,9 +372,7 @@ export function publicAgent(row: AgentRow): PublicAgent {
   const push = streams.some(p => sessionRow(p.sessionId)?.channel_ok === 1) ? 'confirmed' : streams.length ? 'possible' : null;
   const polling = !!waiters.get(row.id)?.length || now - (lastPollEnd.get(row.id) ?? 0) < 20_000;
   const counts = db.prepare("SELECT SUM(state = 'queued') AS queued, SUM(state = 'delivered') AS open FROM mcp_agent_messages WHERE agent_id = ? AND role = 'user'").get(row.id) as { queued: number | null; open: number | null };
-  const link = runners.get(row.id);
-  const status = isRunnerRow(row) ? (link ? (link.busy !== null ? 'working' : 'listening') : 'offline')
-    : (counts.open ?? 0) > 0 && now - row.last_seen_at < 60 * 60_000 ? 'working'
+  const status = (counts.open ?? 0) > 0 && now - row.last_seen_at < 60 * 60_000 ? 'working'
     : polling || push === 'confirmed' ? 'listening'
     : now - row.last_seen_at < ONLINE_MS || streams.length ? 'online' : 'offline';
   return {
@@ -484,7 +380,6 @@ export function publicAgent(row: AgentRow): PublicAgent {
     client: { name: row.client_name, version: row.client_version }, token: tokenLabel(row),
     lastSeen: row.last_seen_at, project: row.last_project, path: row.last_path, lastTool: row.last_tool,
     status, push, queued: counts.queued ?? 0,
-    runner: isRunnerRow(row) ? { host: row.client_name.slice(RUNNER_PREFIX.length), online: !!link, busy: link?.busy ?? null, backends: link?.backends ?? [] } : null,
   };
 }
 
@@ -559,7 +454,7 @@ export function mcpAgentRoutes(): express.Router {
     const row = own(req, res);
     if (!row) return;
     try {
-      const m = await sendInstruction(req.user!, row.id, String(req.body?.text ?? ''), req.body?.context as TurnContext | undefined, req.body?.options);
+      const m = await sendInstruction(req.user!, row.id, String(req.body?.text ?? ''), req.body?.context as TurnContext | undefined);
       res.json({ message: publicMessage(m) });
     } catch (e) { fail(res, e); }
   })(); });
@@ -571,14 +466,6 @@ export function mcpAgentRoutes(): express.Router {
     try { res.json({ message: publicMessage(cancelInstruction(req.user!, row.id, Number(req.params.mid))) }); } catch (e) { fail(res, e); }
   });
 
-  /** Stop the turn a runner (Claude Code on the owner's computer) is working on. */
-  r.post('/mcp-agents/:id/messages/:mid/stop', (req, res) => {
-    if (!sameSite(req, res)) return;
-    const row = own(req, res);
-    if (!row) return;
-    try { stopTurn(req.user!, row.id, Number(req.params.mid)); res.json({ ok: true }); } catch (e) { fail(res, e); }
-  });
-
   /** Forget an agent: its conversation goes; it comes back as a new entry when it connects again. */
   r.delete('/mcp-agents/:id', (req, res) => {
     if (!sameSite(req, res)) return;
@@ -588,8 +475,6 @@ export function mcpAgentRoutes(): express.Router {
     db.prepare('DELETE FROM mcp_sessions WHERE agent_id = ?').run(row.id);
     db.prepare('DELETE FROM mcp_agents WHERE id = ?').run(row.id);
     for (const p of [...pushers.values()]) if (p.agentId === row.id) pushers.delete(p.sessionId);
-    runners.get(row.id)?.close();
-    runners.delete(row.id);
     scheduleAgentsEvent(row.user_id);
     res.json({ ok: true });
   });

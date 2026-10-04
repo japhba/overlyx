@@ -6,11 +6,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import readline from 'node:readline';
 import http from 'node:http';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.6.1';
+const VERSION = '0.6.2';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -29,8 +29,6 @@ Usage:
   overlyx mcp install [--client claude,codex] [--yes]   let local AI agents use OverLyX (Claude Code: in every directory, no prompts)
   overlyx mcp status | uninstall
   overlyx mcp serve                                      (what the agents run: the MCP bridge)
-  overlyx agent install                                  the Agent panel in OverLyX runs Claude Code here
-  overlyx agent status | uninstall | run                 (run: what the service runs)
   overlyx update                                         this CLI from the server
 
 Examples:
@@ -40,7 +38,6 @@ Examples:
   overlyx build ada/my-paper/main.tex     # compile on the server: errors, exit code 1 if it fails
   overlyx restore ada/my-paper 3f2a91c    # the whole project as it was at that commit (a new commit)
   overlyx mcp install                     # Claude Code / Codex get OverLyX's tools (your login, your projects)
-  overlyx agent install                   # pick model + effort in OverLyX's Agent panel; Claude Code runs here
 
 \`auth login\` signs in through the browser and gets a credential of its own (revocable in OverLyX under
 File > Git repository). Scripts can pass your account access token instead (--with-token on stdin,
@@ -676,8 +673,6 @@ async function mcpServe(flags) {
       return;
     }
     if (msg.method === 'initialize') {
-      // started by `overlyx agent run`: the server counts this Claude Code as that agent (its edits, its presence)
-      if (process.env.OVERLYX_RUNNER_CLIENT && msg.params) msg = { ...msg, params: { ...msg.params, clientInfo: { ...msg.params.clientInfo, name: process.env.OVERLYX_RUNNER_CLIENT, title: process.env.OVERLYX_RUNNER_TITLE ?? msg.params.clientInfo?.title } } };
       initialized = post(msg, clone ? (m) => withCloneInstructions(m, clone) : undefined);
       await initialized;
       return;
@@ -925,274 +920,6 @@ async function mcpCommand(action, flags) {
   fail(`unknown mcp command: ${action}`);
 }
 
-/* ------------------------------------------------------------ agent: Claude Code for the Agent panel */
-
-/*
- * `overlyx agent run` makes this computer a runner for OverLyX's Agent panel. It keeps an event
- * stream to the server open (the server cannot reach into this computer) and, for each message
- * written to it in the panel, runs Claude Code here: `claude -p` with the model and reasoning effort
- * chosen there, the Claude login of this computer, and only OverLyX's MCP tools (through `overlyx
- * mcp serve`, under the runner's name) — no shell, no local files, no other MCP servers, unless
- * agent.json next to the login allows more built-in tools ({"allowTools": ["WebSearch"]}). What it
- * does and its answer stream back into the panel. `agent install` keeps it running as a login
- * service (systemd --user, launchd): nothing to start by hand.
- */
-
-const AGENT_SERVICE = 'overlyx-agent';
-const LAUNCHD_LABEL = 'app.overlyx.agent';
-/** Claude Code's built-in tools, switched off where --tools is unknown (older versions) */
-const BUILTIN_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Read', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite', 'SlashCommand', 'Skill'];
-const TURN_MAX_MS = 2 * 3600_000;
-/** what a Claude Code session sets for the programs it starts: not passed on (a runner started from a Claude Code terminal would otherwise hand its session to every turn) */
-const CLAUDE_SESSION_ENV = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ATTENDED', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_CODE_EXECPATH', 'CLAUDE_PID', 'CLAUDE_EFFORT'];
-
-const agentFile = (name) => path.join(path.dirname(configFile()), name);
-function readJson(file, fallback) { try { const v = JSON.parse(fs.readFileSync(file, 'utf8')); return v && typeof v === 'object' ? v : fallback; } catch { return fallback; } }
-function writeJson(file, value) {
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
-}
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-const runnerSystem = (host) => `You were started by the Agent panel of OverLyX (${host}) on the user's own computer. The user wrote the message you get in OverLyX and reads your final message there: answer in it directly (Markdown; LaTeX math in $…$). Work only through the overlyx MCP tools — the projects live on the OverLyX server and your edits are live there (tracked changes by default); you have no shell and no local files here. Do not call wait_for_instructions or reply: your final message reaches the panel by itself.`;
-
-/** Claude Code on this computer, and what its version takes (flags differ between versions). */
-async function probeClaude() {
-  let help;
-  try { help = (await execFileP('claude', ['--help'], { encoding: 'utf8', timeout: 30000, maxBuffer: 8 << 20 })).stdout; } catch { return null; }
-  let version = null;
-  try { version = (await execFileP('claude', ['--version'], { encoding: 'utf8', timeout: 30000 })).stdout.trim().split(/\s+/)[0] || null; } catch { /* unknown */ }
-  const flat = help.replace(/\s+/g, ' ');
-  const efforts = (/--effort <level>[^(]*\(([^)]*)\)/.exec(flat)?.[1] ?? '').split(/[,\s]+/).filter(e => /^[a-z]+$/.test(e));
-  const aliases = (/alias for the latest model \(e\.g\. ([^)]*)\)/.exec(flat)?.[1]?.match(/'[\w.-]+'/g) ?? []).map(a => a.slice(1, -1));
-  return {
-    backend: { id: 'claude', name: 'Claude Code', version, models: [...new Set([...aliases, 'opus', 'sonnet', 'haiku'])], efforts },
-    flags: { effort: /--effort\b/.test(help), tools: /--tools\b/.test(help), dontAsk: /\bdontAsk\b/.test(help) },
-  };
-}
-
-/** `claude -p` for one turn: Claude Code with OverLyX's tools only (the bridge under the runner's name). */
-function claudeArgs(host, client, title, probe, turn, session, allow) {
-  const mcp = { mcpServers: { overlyx: { type: 'stdio', command: process.execPath, args: [selfPath(), 'mcp', 'serve', '--host', host],
-    env: { OVERLYX_RUNNER_CLIENT: client, OVERLYX_RUNNER_TITLE: title, ...(process.env.OVERLYX_CONFIG_DIR ? { OVERLYX_CONFIG_DIR: process.env.OVERLYX_CONFIG_DIR } : {}) } } } };
-  const opts = turn.options ?? {};
-  const args = ['-p', '--output-format', 'stream-json', '--verbose',
-    '--mcp-config', JSON.stringify(mcp), '--strict-mcp-config',
-    '--allowedTools', ['mcp__overlyx', ...allow].join(','),
-    '--append-system-prompt', runnerSystem(host)];
-  if (probe.flags.tools) args.push('--tools', allow.join(','));
-  else args.push('--disallowedTools', BUILTIN_TOOLS.filter(t => !allow.includes(t)).join(','));
-  if (probe.flags.dontAsk) args.push('--permission-mode', 'dontAsk');
-  if (opts.model) args.push('--model', opts.model);
-  if (opts.effort && probe.flags.effort) args.push('--effort', opts.effort);
-  if (session && !opts.fresh) args.push('--resume', session);
-  return args;
-}
-
-/** "→ `read_document` main.tex" for a tool call in the panel (its text renders code, bold, links and math) */
-function toolLine(block) {
-  const name = String(block.name ?? '').replace(/^mcp__overlyx__/, '');
-  const i = block.input ?? {};
-  const what = [i.path ?? i.id ?? (typeof i.query === 'string' ? `“${i.query.slice(0, 60)}”` : null), !i.path && !i.id ? i.project : null].filter(Boolean).join(' · ');
-  return `→ \`${name}\`${what ? ' ' + what : ''}`;
-}
-
-/**
- * One turn: Claude Code runs, its tool calls and interim text go to the panel in batches, its last
- * message is the answer. A conversation that cannot be resumed (Claude Code cleaned it up) starts
- * afresh. Reports go to the server in order; `done` resolves when they are all out.
- */
-function runTurn(ctx, turn) {
-  const allow = (readJson(agentFile('agent.json'), {}).allowTools ?? []).filter(t => typeof t === 'string' && /^[\w() *:.,-]+$/.test(t));
-  const cwd = agentFile('agent-work');
-  fs.mkdirSync(cwd, { recursive: true, mode: 0o700 });
-  const prompt = turn.text + (turn.context ? `\n\n— Added by OverLyX (not typed by the user): ${turn.context}` : '');
-  const saveSession = (id) => { const s = readJson(agentFile('agent-state.json'), {}); s[ctx.host] = { session: id }; writeJson(agentFile('agent-state.json'), s); };
-
-  let chain = Promise.resolve();
-  const report = (body) => { chain = chain.then(() => ctx.post(turn.id, body)).catch(e => ctx.log(`report failed: ${e.message}`)); };
-  const items = [];          // since the last batch: tool lines and interim text
-  let pending = null;        // the latest text block: interim if more follows, else the answer
-  let timer = null, done = false, stopped = null, child = null;
-  const flush = () => {
-    clearTimeout(timer); timer = null;
-    if (!items.length) return;
-    report({ progress: items.splice(0).map((it, k, a) => (k ? (it.tool && a[k - 1].tool ? '\n' : '\n\n') : '') + it.s).join('') });
-  };
-  const later = () => { if (!timer) timer = setTimeout(flush, 2500); };
-  const add = (it) => { if (pending !== null) { items.push({ s: pending }); pending = null; } items.push(it); later(); };
-  const finish = (body) => { if (done) return; done = true; flush(); report(body); };
-  const kill = (sig) => { try { if (process.platform === 'win32') child?.kill(sig); else if (child) process.kill(-child.pid, sig); } catch { /* gone */ } };
-  const deadline = setTimeout(() => { ctx.log(`turn ${turn.id} ran for two hours: stopping it`); stopped = 'time'; kill('SIGTERM'); }, TURN_MAX_MS);
-
-  const attempt = (session) => new Promise(resolve => {
-    const args = claudeArgs(ctx.host, ctx.client, ctx.title, ctx.probe, turn, session, allow);
-    let stderr = '', started = false;
-    const env = { ...process.env };
-    for (const k of CLAUDE_SESSION_ENV) delete env[k];
-    child = spawn('claude', args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
-    child.stdin.on('error', () => undefined);
-    child.stdin.end(prompt);
-    child.stderr.on('data', d => { stderr = (stderr + d).slice(-4000); });
-    readline.createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (line) => {
-      let ev;
-      try { ev = JSON.parse(line); } catch { return; }
-      if (ev.session_id && ev.session_id !== session) saveSession(ev.session_id);
-      if (ev.type === 'system' && ev.subtype === 'init') {
-        started = true;
-        const o = turn.options ?? {};
-        add({ s: `${ev.model ?? o.model ?? 'Claude Code'}${o.effort ? ` · effort ${o.effort}` : ''}${session ? '' : ' · new conversation'}` });
-      } else if (ev.type === 'assistant') {
-        for (const b of ev.message?.content ?? []) {
-          if (b.type === 'text' && b.text?.trim()) { if (pending !== null) items.push({ s: pending }); pending = b.text.trim(); later(); }
-          else if (b.type === 'tool_use') add({ s: toolLine(b), tool: true });
-        }
-      } else if (ev.type === 'result') {
-        const answer = (typeof ev.result === 'string' && ev.result.trim()) || pending || '';
-        pending = null;
-        if (ev.is_error) finish({ error: `Claude Code: ${answer || ev.subtype || 'failed'}` });
-        else finish({ final: answer || '(Claude Code finished without an answer)' });
-      }
-    });
-    child.on('error', (e) => { finish({ error: `cannot start Claude Code: ${e.message}` }); resolve(); });
-    child.on('close', (code) => {
-      if (!done && !stopped && session && !started) { ctx.log(`turn ${turn.id}: the conversation could not be resumed — a new one`); resolve(attempt(null)); return; }
-      if (stopped) finish({ final: (pending ? pending + '\n\n' : '') + (stopped === 'time' ? 'Stopped after two hours.' : 'Stopped.') });
-      else finish({ error: `Claude Code stopped without an answer (exit code ${code})${stderr.trim() ? ':\n\n```\n' + stderr.trim().slice(-1500) + '\n```' : ''}` });
-      resolve();
-    });
-  });
-
-  const resume = turn.options?.fresh ? null : readJson(agentFile('agent-state.json'), {})[ctx.host]?.session ?? null;
-  const exited = attempt(resume).finally(() => clearTimeout(deadline));
-  return {
-    id: turn.id,
-    stop() { if (stopped || done) return; stopped = 'user'; kill('SIGTERM'); setTimeout(() => kill('SIGKILL'), 5000).unref(); },
-    done: exited.then(() => chain),
-  };
-}
-
-async function agentRun(flags) {
-  const log = (t) => process.stderr.write(`${new Date().toISOString()} overlyx agent: ${t}\n`);
-  const probe = await probeClaude();
-  if (!probe) fail('Claude Code (`claude`) was not found on PATH — install it and sign in to it, then run this again');
-  const computer = os.hostname().replace(/[^\w.-]+/g, '-').slice(0, 60) || 'computer';
-  let current = null, lastUpdate = Date.now();
-  log(`Claude Code ${probe.backend.version ?? ''} found; models ${probe.backend.models.join(', ')}${probe.backend.efforts.length ? `; efforts ${probe.backend.efforts.join(', ')}` : ''}`);
-  for (let delay = 1000; ; delay = Math.min(60000, delay * 2)) {
-    const creds = credentials(flags, false);   // read again each time: a new login takes effect
-    if (!creds.token) { log(`not signed in to ${creds.host} — run: overlyx auth login`); await sleep(60000); continue; }
-    const ctx = {
-      probe, log, host: creds.host, client: `overlyx-runner@${computer}`, title: `Claude Code on ${computer}`,
-      post: async (id, body) => {
-        const res = await fetch(`${creds.host}/cli/agent/turns/${id}`, { method: 'POST', headers: { Authorization: `Bearer ${creds.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 200)}`);
-      },
-    };
-    const info = JSON.stringify({ backends: [probe.backend], busy: current?.id ?? null, version: VERSION });
-    const ac = new AbortController();
-    let quiet = setTimeout(() => ac.abort(), 75000);
-    try {
-      const res = await fetch(`${creds.host}/cli/agent/connect?` + new URLSearchParams({ host: computer, info }), { headers: { Authorization: `Bearer ${creds.token}`, Accept: 'text/event-stream' }, signal: ac.signal });
-      if (res.status === 401) { clearTimeout(quiet); log(`${creds.host} refused the sign-in — run: overlyx auth login`); await sleep(60000); continue; }
-      if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 200)}`);
-      for await (const ev of sseMessages(res)) {
-        clearTimeout(quiet); quiet = setTimeout(() => ac.abort(), 75000);
-        delay = 1000;
-        if (ev.type === 'hello') log(`connected to ${creds.host} as “${ev.name}” — ready for the Agent panel`);
-        else if (ev.type === 'turn' && !current) {
-          log(`turn ${ev.id}${ev.options?.model ? ` (${ev.options.model}${ev.options.effort ? ', ' + ev.options.effort : ''})` : ''}`);
-          const t = runTurn(ctx, ev);
-          current = t;
-          void t.done.then(() => { if (current === t) current = null; log(`turn ${t.id} done`); });
-        } else if (ev.type === 'stop' && current?.id === ev.id) { log(`turn ${ev.id}: stopped from OverLyX`); current.stop(); }
-        // a newer CLI: the service starts it again (only while idle, and only as a service)
-        if (!current && process.env.OVERLYX_AGENT_SERVICE === '1' && Date.now() - lastUpdate > 3600_000) {
-          lastUpdate = Date.now();
-          const r = await selfUpdate(creds.host).catch(() => ({}));
-          if (r.updated) { log(`updated to ${r.updated}: restarting`); process.exit(0); }
-        }
-      }
-      log('the server closed the connection');
-    } catch (e) { log(`connection lost (${e.cause?.message ?? e.message})`); }
-    clearTimeout(quiet);
-    await sleep(delay);
-  }
-}
-
-/* the login service that keeps `agent run` going */
-
-function serviceFile() {
-  if (process.platform === 'linux') return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'systemd', 'user', `${AGENT_SERVICE}.service`);
-  if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);
-  return null;
-}
-const sdq = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%')}"`;
-const xml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-async function agentInstall(flags) {
-  const creds = credentials(flags, false);
-  if (!creds.token) fail(`not signed in to ${creds.host} — run: overlyx auth login${creds.host === DEFAULT_HOST ? '' : ` --host ${creds.host}`}`);
-  const probe = await probeClaude();
-  if (!probe) fail('Claude Code (`claude`) was not found on PATH — install it and sign in to it first');
-  const file = serviceFile();
-  if (!file) fail(`no login service on ${process.platform}: keep \`overlyx agent run\` running yourself`);
-  const argv = [process.execPath, selfPath(), 'agent', 'run', '--host', creds.host];
-  // the service does not get the login shell's PATH: the one of now, where claude was found
-  const env = { PATH: process.env.PATH ?? '', OVERLYX_AGENT_SERVICE: '1', ...(process.env.OVERLYX_CONFIG_DIR ? { OVERLYX_CONFIG_DIR: process.env.OVERLYX_CONFIG_DIR } : {}) };
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (process.platform === 'linux') {
-    fs.writeFileSync(file, `[Unit]\nDescription=OverLyX agent: runs Claude Code for the Agent panel in OverLyX\nAfter=network-online.target\n\n[Service]\nExecStart=${argv.map(sdq).join(' ')}\n${Object.entries(env).map(([k, v]) => `Environment=${sdq(`${k}=${v}`)}`).join('\n')}\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=default.target\n`);
-    await execFileP('systemctl', ['--user', 'daemon-reload']);
-    await execFileP('systemctl', ['--user', 'enable', `${AGENT_SERVICE}.service`]);
-    await execFileP('systemctl', ['--user', 'restart', `${AGENT_SERVICE}.service`]);
-    process.stdout.write(`The OverLyX agent runs on this computer now and starts with your login (log: journalctl --user -u ${AGENT_SERVICE}).\n`);
-  } else {
-    const log = path.join(os.homedir(), 'Library', 'Logs', 'overlyx-agent.log');
-    fs.writeFileSync(file, `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${LAUNCHD_LABEL}</string>\n<key>ProgramArguments</key><array>${argv.map(a => `<string>${xml(a)}</string>`).join('')}</array>\n<key>EnvironmentVariables</key><dict>${Object.entries(env).map(([k, v]) => `<key>${xml(k)}</key><string>${xml(v)}</string>`).join('')}</dict>\n<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><true/>\n<key>StandardOutPath</key><string>${xml(log)}</string>\n<key>StandardErrorPath</key><string>${xml(log)}</string>\n</dict></plist>\n`);
-    const domain = `gui/${process.getuid()}`;
-    await execFileP('launchctl', ['bootout', domain, file]).catch(() => undefined);
-    await execFileP('launchctl', ['bootstrap', domain, file]);
-    process.stdout.write(`The OverLyX agent runs on this computer now and starts with your login (log: ${log}).\n`);
-  }
-  process.stdout.write(`In OverLyX, open the Agent panel and pick "Claude Code on ${os.hostname()}": choose the model and effort there. It uses only OverLyX's tools — no shell, no local files.\n`);
-}
-
-async function agentUninstall() {
-  const file = serviceFile();
-  if (!file || !fs.existsSync(file)) { process.stdout.write('The OverLyX agent is not installed as a service here.\n'); return; }
-  if (process.platform === 'linux') {
-    await execFileP('systemctl', ['--user', 'disable', '--now', `${AGENT_SERVICE}.service`]).catch(() => undefined);
-    fs.rmSync(file, { force: true });
-    await execFileP('systemctl', ['--user', 'daemon-reload']).catch(() => undefined);
-  } else {
-    await execFileP('launchctl', ['bootout', `gui/${process.getuid()}`, file]).catch(() => undefined);
-    fs.rmSync(file, { force: true });
-  }
-  process.stdout.write('The OverLyX agent service is removed from this computer.\n');
-}
-
-async function agentStatus(flags) {
-  const creds = credentials(flags, false);
-  const probe = await probeClaude();
-  const file = serviceFile();
-  let running = 'not installed (overlyx agent install)';
-  if (file && fs.existsSync(file)) {
-    if (process.platform === 'linux') running = (await execFileP('systemctl', ['--user', 'is-active', `${AGENT_SERVICE}.service`], { encoding: 'utf8' }).then(r => r.stdout, e => e.stdout ?? '')).trim() || 'unknown';
-    else running = await execFileP('launchctl', ['print', `gui/${process.getuid()}/${LAUNCHD_LABEL}`]).then(() => 'loaded', () => 'not loaded');
-  }
-  process.stdout.write(`Claude Code: ${probe ? `${probe.backend.version ?? 'found'} — models ${probe.backend.models.join(', ')}${probe.backend.efforts.length ? `; efforts ${probe.backend.efforts.join(', ')}` : ''}` : 'not found'}\n`);
-  process.stdout.write(`Service:     ${running}\nServer:      ${creds.host}${creds.token ? ` (signed in as ${creds.username})` : ' — not signed in'}\n`);
-}
-
-async function agentCommand(action, flags) {
-  if (action === 'run') return agentRun(flags);
-  if (action === 'install') return agentInstall(flags);
-  if (action === 'uninstall' || action === 'remove') return agentUninstall();
-  if (action === 'status' || !action) return agentStatus(flags);
-  fail(`unknown agent command: ${action}`);
-}
-
 async function main() {
   const { positional, flags } = parse(process.argv.slice(2));
   if (flags.version || positional[0] === 'version') { process.stdout.write(VERSION + '\n'); return; }
@@ -1203,7 +930,6 @@ async function main() {
   else if (group === 'build') await buildCommand(positional.slice(1), flags);
   else if (group === 'restore') await restoreCommand(positional.slice(1), flags);
   else if (group === 'mcp') await mcpCommand(action, flags);
-  else if (group === 'agent') await agentCommand(action, flags);
   else if (group === 'update') await updateCommand(flags);
   else fail(`unknown command: ${group}\n\n${HELP}`);
 }

@@ -1428,9 +1428,6 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/gdocs.spec.ts e2e
 # agent's caret / highlight, a panel message through wait_for_instructions and back, a pushed Claude Code session;
 # MCP is not proxied by vite, so name the server
 OVERLYX_E2E_SERVER=http://127.0.0.1:3001 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/mcp-presence.spec.ts
-# Claude Code on the user's computer, started from the Agent panel (e2e/agent-runner.spec.ts): runs the real CLI
-# (`overlyx agent run`) with a fake `claude` that prints stream-json; rotates the admin token like the specs above
-OVERLYX_E2E_SERVER=http://127.0.0.1:3001 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/agent-runner.spec.ts
 # "a user writes a paper": real arXiv papers typed from blank documents through the editor UI —
 # paperwriting.spec.ts / paperwriting-more.spec.ts (first pages of Attention, a coding-theory paper, BERT) and
 # the whole GAN and Adam papers from abstract to bibliography with a latexmk build (~15 min each; needs pdftotext):
@@ -2041,33 +2038,6 @@ clientInfo, User-Agent). It exposes these tools:
   account, 25 waiting per agent, 40 replies a minute per agent; view-only accounts' agents can
   listen and reply but still not edit. The panel's live view is one SSE stream per account (`GET
   /api/mcp-agents/events`: the agent list, every message added or changed).
-* **Claude Code on the user's computer, started from the Agent panel** (`server/src/agentRunner.ts`,
-  CLI `overlyx agent …`). An agent in a terminal keeps the model and effort of that terminal; for
-  the panel to choose them, the OverLyX CLI on the user's computer runs Claude Code itself:
-  `overlyx agent run` keeps one outgoing event stream open (`GET /cli/agent/connect?host=<computer>
-  &info={backends, busy, version}`, Bearer = the CLI's sign-in; the server cannot reach into the
-  computer) and reports turns back (`POST /cli/agent/turns/:id` `{progress}` | `{final}` |
-  `{error}`). `overlyx agent install` makes it a login service (systemd `--user` unit
-  `overlyx-agent.service`, launchd `app.overlyx.agent`, with the PATH under which `claude` was
-  found; opt-in, `mcp install` does not set it up), so nothing is kept running by hand; an installed CLI updates
-  itself and the service restarts it. In `mcpAgents.ts` it is an agent like the others — client
-  `overlyx-runner@<computer>`, "Claude Code on <computer>" — whose messages go to the runner one at a
-  time (`via: 'run'`) with `options` `{model, effort, fresh}` from the panel's pickers (the models
-  and efforts come from the runner: it reads `claude --help`). Each turn is `claude -p --output-format
-  stream-json --verbose --mcp-config <the CLI's bridge> --strict-mcp-config --allowedTools
-  mcp__overlyx --tools "" --permission-mode dontAsk [--model] [--effort] [--resume <session>]` in a
-  work directory beside the login (older Claude Code without `--tools`: `--disallowedTools` with
-  the built-in tools) — OverLyX's tools only, no shell, no local files, no other MCP servers; the
-  computer's owner may allow more built-in tools in `agent.json` (`{"allowTools": ["WebSearch"]}`),
-  never the web page. The bridge renames the client in `initialize` to the runner's
-  (`OVERLYX_RUNNER_CLIENT`), so Claude Code's edits and its presence are that agent's. Tool calls
-  and interim text are sent in batches as progress messages, the last message as the answer; the
-  conversation continues (`--resume`, kept in `agent-state.json`) until "New conversation", and one
-  that Claude Code cannot resume any more starts afresh. Stop (`POST
-  /api/mcp-agents/:id/messages/:mid/stop`) kills the process group; a turn the runner lost by
-  restarting is answered as interrupted when it reconnects. Variables of a Claude Code session the
-  runner itself was started from (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, …) are not passed on.
-  Tests: tests/cli.test.ts (a fake `claude` printing stream-json, a fake `systemctl`).
 * **What to run.** The long poll needs nothing: tell the agent (Claude Code, Codex, …) "listen to
   OverLyX". Pushed messages in Claude Code (its research-preview *channels*; Claude Code signed in
   with a claude.ai account or a Console API key, not Bedrock / Vertex / Foundry): add the server as usual (`claude mcp add

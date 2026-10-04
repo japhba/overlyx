@@ -84,26 +84,6 @@ A clone of the OverLyX repository needs no registration at all: its `.mcp.json` 
 `.codex/config.toml` (Codex, once the project is trusted) run the checkout's own CLI as the bridge —
 sign in once per computer with `node packages/cli/bin/overlyx.js auth login`.
 
-## Claude Code for the Agent panel
-
-```sh
-overlyx agent install    # once: a login service (systemd --user / launchd) — nothing to keep open
-overlyx agent status
-overlyx agent uninstall
-```
-
-A Claude Code session you start in a terminal uses that terminal's model and effort. To pick them in
-OverLyX instead, let the CLI run Claude Code for the Agent panel: after `agent install` the panel
-lists "Claude Code on <this computer>" with a model and an effort picker, and every message you write
-there starts `claude -p` here, with your Claude login, and streams its tool calls and its answer
-back (Stop ends a turn; the conversation continues until "New conversation"). The service only keeps
-an outgoing connection to the server open, because the server cannot reach into your computer. The
-sign-in it uses is the one in the config file. Claude Code started this way gets OverLyX's tools and
-nothing else: no shell, no local files and no other MCP servers. To allow more built-in tools, list
-them in `agent.json` next to the login (`{"allowTools": ["WebSearch"]}`). Only you can write to it,
-not the people you share projects with. `overlyx agent run` runs the same in the foreground.
-None of this is needed for the usual way round, where you start Claude Code yourself (above).
-
 ## Commands
 
 ```text
@@ -118,7 +98,6 @@ overlyx repo push [PATH] [--name NAME] [--remote NAME]
 overlyx build OWNER/PROJECT/FILE.tex [--pdf FILE] [--log] [--wait SECONDS]
 overlyx restore OWNER/PROJECT COMMIT
 overlyx mcp install [--client claude,codex] [--yes] [--ask-each-time] | status | uninstall | serve
-overlyx agent install | status | uninstall | run
 overlyx update
 ```
 
