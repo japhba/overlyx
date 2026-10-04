@@ -9,6 +9,7 @@ import { schema } from '../packages/core/src/schema.ts';
 import { editorContext } from '../packages/client/src/editor/context.ts';
 import { CommandView } from '../packages/client/src/editor/nodeviews/leaf.ts';
 import { idleCallback } from '../packages/client/src/editor/nodeviews/math.ts';
+import { stashPendingImport, takePendingImport, pendingImportFlag } from '../packages/client/src/app/pendingImport.ts';
 
 afterEach(() => { editorContext.openInTab = undefined; editorContext.openInsetDialog = undefined; });
 
@@ -95,5 +96,65 @@ describe('idle time without requestIdleCallback (Safari)', () => {
     const calls: unknown[] = [];
     idleCallback(() => {}, { requestIdleCallback: (cb: unknown, o: unknown) => { calls.push(o); } });
     expect(calls).toEqual([{ timeout: 500 }]);
+  });
+});
+
+/**
+ * An Overleaf zip chosen before the sign-in is parked in IndexedDB as bytes: Safari cannot store a Blob
+ * there in a private window, and the import was lost.
+ *
+ * An IndexedDB with one object store per database, values kept by structured clone — and, as Safari's in a
+ * private window, refusing a value that holds a Blob ("Error preparing Blob/File data to be stored in object store").
+ */
+function privateSafariIndexedDB() {
+  const dbs = new Map<string, Map<string, Map<IDBValidKey, unknown>>>();
+  const hasBlob = (v: unknown): boolean => v instanceof Blob || (Array.isArray(v) ? v.some(hasBlob) : !!v && typeof v === 'object' && !(v instanceof ArrayBuffer) && Object.values(v).some(hasBlob));
+  const later = (f: () => void) => setTimeout(f, 0);
+  return {
+    open(name: string) {
+      const req: any = {};
+      later(() => {
+        const fresh = !dbs.has(name);
+        const stores = dbs.get(name) ?? new Map<string, Map<IDBValidKey, unknown>>();
+        dbs.set(name, stores);
+        const db: any = {
+          objectStoreNames: { contains: (n: string) => stores.has(n) },
+          createObjectStore: (n: string) => { stores.set(n, new Map()); },
+          close() {},
+          transaction(store: string) {
+            const t: any = {};
+            const data = stores.get(store)!;
+            const op = (f: () => unknown) => { const r: any = {}; later(() => { try { r.result = f(); r.onsuccess?.(); later(() => t.oncomplete?.()); } catch (e) { r.error = e; t.error = e; r.onerror?.(); later(() => t.onerror?.()); } }); return r; };
+            t.objectStore = () => ({
+              put: (v: unknown, k: IDBValidKey) => op(() => { if (hasBlob(v)) throw new DOMException('Error preparing Blob/File data to be stored in object store', 'UnknownError'); data.set(k, structuredClone(v)); return k; }),
+              get: (k: IDBValidKey) => op(() => structuredClone(data.get(k))),
+              delete: (k: IDBValidKey) => op(() => { data.delete(k); }),
+            });
+            return t;
+          },
+        };
+        req.result = db;
+        if (fresh) req.onupgradeneeded?.();
+        req.onsuccess?.();
+      });
+      return req;
+    },
+  };
+}
+
+describe('an Overleaf import chosen before the sign-in', () => {
+  it('survives the sign-in where IndexedDB takes no Blobs (Safari, private window): the zips come back as Files', async () => {
+    const saved = (globalThis as any).indexedDB;
+    (globalThis as any).indexedDB = privateSafariIndexedDB();
+    try {
+      const zip = new File([new Uint8Array([80, 75, 3, 4, 1, 2, 3])], 'thesis.zip', { type: 'application/zip', lastModified: 1700000000000 });
+      await stashPendingImport({ links: '', token: '', zips: [zip] });
+      expect(pendingImportFlag()).toBe(true);
+      const back = await takePendingImport();
+      expect(back?.zips.map(f => [f.name, f.type, f.size, f instanceof File])).toEqual([['thesis.zip', 'application/zip', 7, true]]);
+      expect([...new Uint8Array(await back!.zips[0].arrayBuffer())]).toEqual([80, 75, 3, 4, 1, 2, 3]);
+      expect(pendingImportFlag()).toBe(false);
+      expect(await takePendingImport()).toBeNull();   // taken: nothing waits any more
+    } finally { (globalThis as any).indexedDB = saved; }
   });
 });
