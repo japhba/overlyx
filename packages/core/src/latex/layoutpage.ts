@@ -29,7 +29,8 @@ export function latexLayoutPage(ctx: ExportContext, os: TexStream, rp: RunParams
   os.breakln();
   os.write(`\\begin{frame}${frame ? `[${frame}]` : ''}\n`);
   const keys = param(pp, 'keys') ?? '';
-  if (keys.trim()) os.write(`\\olpage{${keys}}\n`);
+  // an empty page says \olpage{} all the same: a frame without any object would be read back as a linear beamer frame
+  if (keys.trim() || !par.items.some(it => it !== props)) os.write(`\\olpage{${keys}}\n`);
   for (const it of par.items) if (it !== props) latexLayoutObject(ctx, os, rp, it);
   os.breakln();
   os.write('\\end{frame}');

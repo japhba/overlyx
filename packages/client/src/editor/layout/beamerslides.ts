@@ -77,7 +77,7 @@ function copyOf(view: EditorView, pos: number): HTMLElement | null {
 export function clean(el: HTMLElement): void {
   el.removeAttribute('contenteditable');
   el.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
-  el.querySelectorAll('.inset-label, .inset-actions, .inset-anchor, .lm-input, .lm-overlay, .ProseMirror-trailingBreak, img.ProseMirror-separator, .lyx-fold-toggle').forEach(n => n.remove());
+  el.querySelectorAll('.inset-label, .inset-actions, .inset-anchor, .lm-input, .lm-overlay, .ProseMirror-trailingBreak, img.ProseMirror-separator, .lyx-fold-toggle, .ol-box-prompt').forEach(n => n.remove());
   el.querySelectorAll('.ProseMirror-selectednode').forEach(n => n.classList.remove('ProseMirror-selectednode'));
 }
 
