@@ -121,7 +121,7 @@ test('both press Enter in one paragraph, one of them offline, and type in both h
   expect(pars[3]).toBe('Closing paragraph stays.');
 
   // the saved file: the same words once, the deleted ones gone
-  await expect.poll(() => { const f = readFileSync(FILE, 'utf8'); return ['ONLINEONE', 'ONLINETWO', 'OFFAAA', 'OFFBBB', 'OFFCCC'].every(s => count(f, s) === 1) && !f.includes('before the'); }, { timeout: 20000 }).toBe(true);
+  await expect.poll(() => { const f = readFileSync(FILE, 'utf8'); return ['ONLINEONE', 'ONLINETWO', 'OFFAAA', 'OFFBBB', 'OFFCCC'].every(s => count(f, s) === 1) && !f.includes('before the') ? 'saved' : f; }, { timeout: 20000 }).toBe('saved');
   const file = readFileSync(FILE, 'utf8');
   for (const s of ['Alpha beta gamma', 'into one space', 'where every', 'meets them', 'softmax', 'Closing paragraph']) expect(count(file, s), `"${s}" in the file`).toBe(1);
   expect(errors.filter(e => !/favicon|ERR_INTERNET_DISCONNECTED|Failed to fetch|NetworkError when attempting|Load failed|WebSocket|can’t establish a connection to the server at ws|connection to ws:\/\/\S+ was interrupted/.test(e))).toEqual([]);

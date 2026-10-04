@@ -35,8 +35,10 @@ interface Incoming {
   update: Uint8Array;
   /** sync step 2 (the whole delete set of the sender) or a live update (its own deletions) */
   step2: boolean;
-  /** the state vector the sender reported in its sync step 1 */
+  /** the state vector the sender reported in its sync step 1 (the server's own diff: what it was made on) */
   knows: Map<number, number> | null;
+  /** the server's own diff (a file changed on disk, an agent's edit), made on a mirror of the document */
+  server: boolean;
   ds?: Ranges;
 }
 
@@ -78,10 +80,11 @@ export class MoveRepair {
 
   /**
    * Apply an update a client sent (instead of Y.applyUpdate): `step2` for its answer to the
-   * server's sync step 1, with the state vector of its own step 1 (`knows`).
+   * server's sync step 1, with the state vector of its own step 1 (`knows`). `server`: the server's
+   * own diff made on a mirror of the document (docs.ts applyMirrorUpdate), `knows` what that held.
    */
-  receive(update: Uint8Array, origin: unknown, info: { step2: boolean; knows?: Map<number, number> | null }): void {
-    this.incoming = { origin, update, step2: info.step2, knows: info.knows ?? null };
+  receive(update: Uint8Array, origin: unknown, info: { step2: boolean; knows?: Map<number, number> | null; server?: boolean }): void {
+    this.incoming = { origin, update, step2: info.step2, knows: info.knows ?? null, server: !!info.server };
     try { Y.applyUpdate(this.ydoc, update, origin); } finally { this.incoming = null; }
   }
 
@@ -196,8 +199,17 @@ class Work {
   private isNew(id: Y.ID): boolean { return id.clock >= (this.tr.beforeState.get(id.client) ?? 0); }
   /** the sender deleted it itself (in the same update) */
   private explicit(client: number, clock: number): boolean {
-    if (!this.inc) return clock < (this.tr.beforeState.get(client) ?? 0);
-    return dsOf(this.inc).has(client, clock);
+    if (this.inc) return dsOf(this.inc).has(client, clock);
+    // not from a client (the server's own diff of a file or an agent's edit, applied whole): what it
+    // deleted it deleted itself, unless it went into something that was gone before it arrived
+    if (clock < (this.tr.beforeState.get(client) ?? 0)) return true;
+    let gone = false;
+    forEachStruct(this.doc, client, clock, clock + 1, it => {
+      for (let t = it.parent as Y.AbstractType<any> | null; t instanceof Y.AbstractType && t._item; t = t._item.parent as Y.AbstractType<any>) {
+        if (t._item.deleted && !this.isNew(t._item.id) && !this.deletedInT.hasId(t._item.id)) { gone = true; break; }
+      }
+    });
+    return !gone;
   }
   private mapped(client: number, clock: number) { const m = this.index.lookup(client, clock); return m && m.side !== HANDLED ? m : null; }
   /** a unit that counts for the text around it: alive, or moved (its copy stands for it) */
@@ -244,7 +256,8 @@ class Work {
   private consider(it: Y.Item, from: number, to: number, fresh: boolean): void {
     const a = Math.max(it.id.clock, from), b = Math.min(it.id.clock + it.length, to);
     if (a >= b || (!fresh && this.isNew(Y.createID(it.id.client, a)))) return;
-    if (fresh && !it.deleted && it.parentSub === null && typeOf(it) instanceof Y.XmlElement && this.repair.containerNames.has((typeOf(it) as Y.XmlElement).nodeName)) this.newBlocks.push(it);
+    // (paragraphs the server's own diff made are where it put them: it saw their neighbours)
+    if (fresh && !it.deleted && it.parentSub === null && !this.madeHere && typeOf(it) instanceof Y.XmlElement && this.repair.containerNames.has((typeOf(it) as Y.XmlElement).nodeName)) this.newBlocks.push(it);
     if (it.parentSub !== null) {
       // an attribute value set on a moved inline node
       const el = it.parent;
@@ -292,8 +305,24 @@ class Work {
     else if (r) { for (let u: Unit | null = this.next({ item: it, off: p.off + p.len - 1 }, true); u && !this.same(u, r); u = this.next(u, true)) if (!u.item.deleted && this.isCopy(u, it)) return true; }
     return false;
   }
-  /** a record the sender of this update wrote: its own new items knew it */
-  private known(rec: MoveRecord, by: Y.Item): boolean { return this.own.has(rec) && this.isNew(by.id); }
+  /** `by`'s author knew the record when it made `by`: a record of this update, for what the update made (the server's own diff: whatever it saw) */
+  private known(rec: MoveRecord, by: Y.Item): boolean {
+    // (the update's records are restated in this repair's record)
+    const own = this.own.has(rec) || rec === this.rec;
+    if (own && this.isNew(by.id)) return true;
+    if (!this.madeHere) return false;
+    // the server's own diff: it saw everything it was made on (a client's update can arrive meanwhile)
+    const at = own ? null : this.doc.getMap<unknown>(MOVES_MAP)._map.get(rec.key);
+    return this.saw(by.id) && (own || (!!at && this.saw(at.id)));
+  }
+  /** the update was made by the server on the document as it was (not by a client that may not have seen everything) */
+  private get madeHere(): boolean { return this.tr.local || !!this.inc?.server; }
+  /** its author had it when it made the update (a client is known to have had only what it made in it) */
+  private saw(id: Y.ID): boolean {
+    if (this.isNew(id) || this.tr.local) return true;
+    const k = this.inc?.server ? this.inc.knows : null;
+    return !!k && id.clock < (k.get(id.client) ?? 0);
+  }
   private isSource(u: Unit, by: Y.Item): boolean {
     if (typeOf(u.item) instanceof Y.XmlText) { const last = this.edgeUnit(u.item, true); return !!last && this.isSource(last, by); }
     const m = u.item.deleted ? this.mapped(u.item.id.client, u.item.id.clock + u.off) : null;

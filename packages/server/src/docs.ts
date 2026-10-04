@@ -27,6 +27,7 @@ import { DocWorkers, WorkerGone, MirrorLost, type SyncEntry } from './docpool.ts
 import { documentMeta, type DocumentMeta } from './docmeta.ts';
 import { applyTrackedSource, applyPlainSource, restoreSource, foldEdits, replaceInSource, type EditableDoc, type TrackedResult } from './docedit.ts';
 import { MoveRepair } from './moves.ts';
+import { MOVES_ORIGIN } from '@overlyx/core/moves.ts';
 
 export type { SourceSpan, DocMeta };
 export { readTextFile, looksLikeDocument };
@@ -97,12 +98,15 @@ export class OpenDoc implements DocState, EditableDoc {
     this.moves = new MoveRepair(this.ydoc, { ttlDays: config.moveRecordDays, log: (...a) => console.error(`[moves] ${id}:`, ...a) });
   }
 
+  /** updates are counted and go to the worker's mirror (trackUpdates) */
+  private tracking = false;
   /**
    * From now on every update counts, and goes to the worker's mirror with the next request. Called
    * once the document is loaded: the state it was loaded with is the mirror's already, and without
    * a listener Yjs does not encode it again (a big document's takes a while).
    */
   trackUpdates(): void {
+    this.tracking = true;
     this.ydoc.on('update', (u: Uint8Array) => {
       this.updateSeq++;
       if (this.wsync.slot >= 0 && docWorkers.enabled) this.wsync.pending.push(u);
@@ -381,7 +385,7 @@ export class OpenDoc implements DocState, EditableDoc {
     console.log(`[docs] external change detected: ${this.id} — merging`);
     const hash = sha1(t);
     const seq = this.updateSeq, base = this.fileText;
-    const r = await inWorker(this, 'absorb', { text: t, fileText: base, isChild: this.isChild }) as { dirty: boolean; rendered?: Rendered; update: Uint8Array | null; isChild: boolean };
+    const r = await inWorker(this, 'absorb', { text: t, fileText: base, isChild: this.isChild }) as { dirty: boolean; rendered?: Rendered; update: Uint8Array | null; knew?: Uint8Array; isChild: boolean };
     if (this.disposed) return false;
     this.isChild = r.isChild;
     this.fileHash = hash;
@@ -389,10 +393,11 @@ export class OpenDoc implements DocState, EditableDoc {
     knownHashes.set(this.absPath, hash);
     // edits that arrived while the worker merged are not in the merge's view of the file
     const quiet = this.updateSeq === seq;
-    if (r.update) Y.applyUpdate(this.ydoc, r.update, 'file-load');
+    this.applyMirrorUpdate(r.update, 'file-load', r.knew);
     if (quiet) {
       this.markSaved();
-      if (r.rendered) this.prepared = { seq: this.updateSeq, base: t, r: r.rendered };
+      // (unless the repair of paragraph moves changed something after it: the worker's text is from before)
+      if (r.rendered && this.updateSeq === seq + (r.update ? 1 : 0)) this.prepared = { seq: this.updateSeq, base: t, r: r.rendered };
     }
     if (base !== null && r.dirty) this.dirty = true;   // ours differs from the disk: write it
     await this.persistStateAsync();
@@ -545,10 +550,25 @@ export class OpenDoc implements DocState, EditableDoc {
    * changed the document since the request (`seq`): then what the worker computed for its state
    * holds for the document's.
    */
-  private applyWorkerUpdate(update: Uint8Array | null, origin: string, seq: number): boolean {
+  private applyWorkerUpdate(update: Uint8Array | null, origin: string, seq: number, knew?: Uint8Array): boolean {
     const quiet = this.updateSeq === seq;
-    if (update) Y.applyUpdate(this.ydoc, update, origin);
-    return quiet;
+    this.applyMirrorUpdate(update, origin, knew);
+    // and no repair of paragraph moves after it (the worker's text is from before that)
+    return quiet && this.updateSeq === seq + (update ? 1 : 0);
+  }
+
+  /**
+   * An update the worker made on its mirror of the document (`knew`: the state vector it had):
+   * through the repair of paragraph moves, as the server's own diff. Before the document is
+   * registered (trackUpdates), what the repair changes goes to the mirror here: later updates
+   * would wait for it there.
+   */
+  applyMirrorUpdate(update: Uint8Array | null, origin: string, knew?: Uint8Array): void {
+    if (!update) return;
+    const repairs = this.tracking ? null : (u: Uint8Array, o: unknown) => { if (o === MOVES_ORIGIN && this.wsync.slot >= 0) this.wsync.pending.push(u); };
+    if (repairs) this.ydoc.on('update', repairs);
+    try { this.moves.receive(update, origin, { step2: false, knows: knew ? Y.decodeStateVector(knew) : null, server: true }); }
+    finally { if (repairs) this.ydoc.off('update', repairs); }
   }
 
   /**
@@ -565,10 +585,10 @@ export class OpenDoc implements DocState, EditableDoc {
     }
     return this.exclusive(async () => {
       const seq = this.updateSeq;
-      const r = await inWorker(this, 'load', { text, origin, asDoc, fileText: this.fileText, isChild: this.isChild }) as { update: Uint8Array | null; warnings: string[]; isChild: boolean };
+      const r = await inWorker(this, 'load', { text, origin, asDoc, fileText: this.fileText, isChild: this.isChild }) as { update: Uint8Array | null; knew?: Uint8Array; warnings: string[]; isChild: boolean };
       if (this.disposed) throw new Error('the document was closed');
       this.isChild = r.isChild;
-      this.applyWorkerUpdate(r.update, origin, seq);
+      this.applyWorkerUpdate(r.update, origin, seq, r.knew);
       return r.warnings;
     });
   }
@@ -592,11 +612,11 @@ export class OpenDoc implements DocState, EditableDoc {
     const r = await this.exclusive(async () => {
       const seq = this.updateSeq, base = this.fileText;
       const res = await inWorker(this, 'edit', { kind, before, ...edit, author, retired: [...this.retiredMacros], fileText: base, isChild: this.isChild }) as
-        { result: EditResults[K]; warnings: string[]; update: Uint8Array | null; saved: Rendered | null; retired: string[]; isChild: boolean };
+        { result: EditResults[K]; warnings: string[]; update: Uint8Array | null; knew?: Uint8Array; saved: Rendered | null; retired: string[]; isChild: boolean };
       if (this.disposed) throw new Error('the document was closed');
       this.isChild = res.isChild;
       this.retiredMacros = new Set(res.retired);
-      if (this.applyWorkerUpdate(res.update, 'mcp', seq) && res.saved) this.prepared = { seq: this.updateSeq, base, r: res.saved };
+      if (this.applyWorkerUpdate(res.update, 'mcp', seq, res.knew) && res.saved) this.prepared = { seq: this.updateSeq, base, r: res.saved };
       return res;
     });
     if (r.saved) { this.dirty = true; await this.saveToFile(); }
@@ -718,8 +738,12 @@ async function inWorker(doc: OpenDoc, op: string, args: unknown, created = false
     }
     if (created) doc.wsync = { slot, gen, pending: [] };
     else { const e = doc.syncEntry(slot, gen); if (e) sync.push(e); }
+    // what the mirror holds once synced: what an update the op makes was made on (applyMirrorUpdate)
+    const knew = Y.encodeStateVector(doc.ydoc);
     try {
-      return await docWorkers.call(slot, op, { id: doc.id, project: doc.project, relPath: doc.relPath, absPath: doc.absPath }, sync, args);
+      const r = await docWorkers.call(slot, op, { id: doc.id, project: doc.project, relPath: doc.relPath, absPath: doc.absPath }, sync, args);
+      if (r && typeof r === 'object' && 'update' in r) (r as { knew?: Uint8Array }).knew = knew;
+      return r;
     } catch (e) {
       if (attempt > 0 || !(e instanceof WorkerGone || e instanceof MirrorLost)) throw e;
       // the mirrors are gone: the next attempt sends the whole states
@@ -901,11 +925,11 @@ export class DocManager {
       return r.ok;
     }
     try {
-      const r = await inWorker(doc, 'open', { text, state: new Uint8Array(row.state), sameFile }, true) as { ok: boolean; note?: string; update: Uint8Array | null; isChild: boolean };
+      const r = await inWorker(doc, 'open', { text, state: new Uint8Array(row.state), sameFile }, true) as { ok: boolean; note?: string; update: Uint8Array | null; knew?: Uint8Array; isChild: boolean };
       if (r.note) console.log(`[docs] ${doc.id}: ${r.note}`);
       if (!r.ok) return false;
       doc.isChild = r.isChild;
-      if (r.update) Y.applyUpdate(doc.ydoc, r.update, 'file-load');
+      doc.applyMirrorUpdate(r.update, 'file-load', r.knew);
       return true;
     } catch (e) {
       console.error(`[docs] ${doc.id}: loading the stored state failed`, e);
@@ -973,9 +997,10 @@ export class DocManager {
 
   private register(doc: OpenDoc): void {
     this.docs.set(doc.id, doc);
-    // records older than the retention period go (their originals are collected when it is next loaded)
-    try { doc.moves.prune(); } catch (e) { console.error('[moves] pruning failed', doc.id, e); }
     doc.trackUpdates();
+    // records older than the retention period go (their originals are collected when it is next
+    // loaded); after trackUpdates, so that the worker's mirror, which the state is persisted from, drops them too
+    try { doc.moves.prune(); } catch (e) { console.error('[moves] pruning failed', doc.id, e); }
     doc.ydoc.on('update', (_u: Uint8Array, origin: unknown) => {
       if (origin === 'file-load' || origin === 'db') return;
       // updates from the WebSocket carry the connection as origin: remember who edited
