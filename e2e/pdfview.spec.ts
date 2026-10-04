@@ -158,6 +158,6 @@ test('an older engine (Safari 17, Firefox 130, Chrome 121) starts the app and sh
   expect(await old.evaluate(() => (globalThis as any).__olderEngine)).toBe(true);   // (pdf.js's polyfills have put them back since)
   await old.locator('.tree-row.file', { hasText: 'poster.pdf' }).click();
   await expect(old.locator('.pdf-tab .pdf-page-box canvas.ready').first()).toBeAttached({ timeout: 30000 });
-  expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
+  expect(errors.filter(e => !/favicon|ResizeObserver|\[vite\] failed to connect/.test(e))).toEqual([]);   // (the dev server's own reload socket, once in Chromium)
   await old.close();
 });

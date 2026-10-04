@@ -1,6 +1,6 @@
 // What an iPad user does (WebKit, devices['iPad Pro 11'], touch): open a document, tap into text and type,
 // tap a formula and type, open a menu, scroll; screenshots to $OUT. Env as for Playwright.
-import { webkit, devices } from '@playwright/test';
+import { webkit, chromium, devices } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { login, BASE_URL, PROJECTS_DIR, texDoc } from '../../e2e/helpers';
 const OUT = process.argv[2] ?? '/tmp/ipad'; const orient = process.argv[3] ?? 'landscape';
@@ -8,8 +8,9 @@ mkdirSync(OUT, { recursive: true });
 const DIR = `${PROJECTS_DIR}/admin/e2e-ipad`;
 mkdirSync(DIR, { recursive: true });
 writeFileSync(`${DIR}/main.tex`, texDoc('\\section{Intro}\n\nSome text with a formula $a+b=c$ inside it, and more words here.\n\n\\begin{equation}\nE=mc^{2}\\label{eq:e}\n\\end{equation}\n\nLast paragraph refers to \\ref{eq:e}.\n' + Array.from({ length: 30 }, (_, i) => `\nFiller paragraph ${i} with enough words to wrap across the line on a tablet screen, so that the page scrolls.\n`).join('')));
-const browser = await webkit.launch();
-const dev = orient === 'landscape' ? devices['iPad Pro 11 landscape'] : devices['iPad Pro 11'];
+const browser = await (process.env.ENGINE === 'chromium' ? chromium : webkit).launch();
+const dev = { ...(orient === 'landscape' ? devices['iPad Pro 11 landscape'] : orient === 'phone' ? devices['iPhone 15'] : devices['iPad Pro 11']) } as any;
+if (process.env.ENGINE === 'chromium') delete dev.defaultBrowserType;
 const ctx = await browser.newContext({ ...dev, baseURL: BASE_URL });
 // which event is being dispatched when an editable gets the focus: iOS shows its keyboard only for a focus
 // inside a touch's own event handlers (touchend / mousedown / click), not one from a timer or a frame
@@ -31,7 +32,7 @@ await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par
 await page.waitForTimeout(1500);
 await page.screenshot({ path: `${OUT}/1-doc.png` });
 const info = await page.evaluate(() => ({ vw: innerWidth, sw: document.documentElement.scrollWidth, bw: document.body.scrollWidth, ua: navigator.userAgent }));
-console.log('layout', JSON.stringify(info));
+console.log('layout', JSON.stringify(info), JSON.stringify(await page.evaluate(`(() => { const r = s => { const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().width) : null; }; return { editorScroll: r('.editor-scroll'), editor: r('.lyx-editor'), docpanel: r('.docpanel'), left: localStorage.getItem('ol.left'), coarse: matchMedia('(pointer: coarse)').matches }; })()`)));
 // tap into the text and type
 const par = page.locator('.lyx-editor .lyx-par').nth(1);
 const pb = (await par.boundingBox())!;

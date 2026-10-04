@@ -137,7 +137,8 @@ test('a dead-key ^ (German/French layouts: a composition) makes exactly one supe
   expect(errors).toEqual([]);
 });
 
-test("Safari's composition order (dead key ´ then e): one é in the formula, the caret stays in it", async ({ page }) => {
+test("Safari's composition order (dead key ´ then e): one é in the formula, the caret stays in it", async ({ page, browserName }) => {
+  test.skip(browserName === 'chromium', 'Chromium has no insertFromComposition (Input Events Level 2): its InputEvent drops the type');
   const errors = collectErrors(page);
   await login(page);
   await open(page);
