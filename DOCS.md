@@ -249,7 +249,7 @@ blend.
   The downloadable CLI adds a `gh`-style import path for work that already exists locally:
 
   ```sh
-  curl -fsSL https://overlyx.app/install-cli.sh | sh
+  curl -fsSL https://overlyx.app/install-cli.sh | sh      # then: sign in through the browser (offered)
   overlyx auth login --host https://overlyx.app --username NAME --with-token
   overlyx repo create my-paper --source . --push     # creates <your username>/my-paper
   # shorthand, and safe to retry after a failed first push:
@@ -1907,9 +1907,28 @@ clientInfo, User-Agent). It exposes these tools:
 * `undo_turn(turns_back?)` — only for the Agent panel's agent: take back one of its turns exactly
   (see the Agent panel above).
 * **Local agents edit here, directly.** Claude Code, Codex or any MCP client on the user's own
-  machine connects to `/mcp` with the account token (the Git dialog shows `claude mcp add --transport
-  http overlyx <server>/mcp --header "Authorization: Bearer …"` and the Codex `config.toml` block) and
-  edits the project files on this server — no local copy, no sync, no shell. Document edits are
+  machine connects to `/mcp` with the account token and edits the project files on this server — no
+  local copy, no sync, no shell. The way to register it is the CLI: `overlyx mcp install` (offered by
+  the installer and by `auth login`) registers `overlyx mcp serve` with Claude Code (user scope) and
+  Codex (`~/.codex/config.toml`) — a stdio bridge that reads the current login and the server's
+  `/cli/mcp.json` (endpoint, header template) at every session and relays MCP messages (Streamable
+  HTTP: session id, SSE answers, the GET event stream for Claude Code's session, DELETE at the end),
+  so a changed connector, endpoint or token needs no re-registration; an installed CLI updates itself
+  (checksummed, at most hourly from the bridge). Started in a git clone of an OverLyX project, the
+  bridge prepends to the initialize `instructions` which project the directory is (edit it with the
+  tools, the clone only changes with `git pull`). The OverLyX repository registers the bridge for
+  agents working in a clone of it: `.mcp.json` and `.codex/config.toml` run the checkout's own CLI
+  (`packages/cli/bin/overlyx.js`). The Git dialog shows these steps, and the direct `claude mcp add
+  --transport http …` / Codex `url` + `bearer_token_env_var` forms for use without the CLI.
+* **Signing the CLI in** (`server/src/cliLogin.ts`): `overlyx auth login` opens `/cli/login` with
+  a PKCE challenge and the port of a listener on 127.0.0.1; the consent page rides the browser's
+  OverLyX session; *Authorize* redirects to the listener with a one-time code (CSP `form-action`
+  allows that origin — Chromium checks it on the redirect after the POST; a plain navigation, so no
+  local-network permission prompt). Without a local browser (SSH, `--no-browser`) the page shows the
+  code to paste instead. `/cli/token` exchanges code + verifier (once, 5 minutes) for a credential
+  of the CLI's own (`mcp_tokens`, "OverLyX CLI on <hostname>", revocable in the Git dialog) — good for
+  the git API, git push and the MCP bridge. The installer offers the sign-in right away; scripts still
+  pass the account token (`--with-token`, `OVERLYX_TOKEN`). Document edits are
   tracked by default; `edit_document` and `write_document` take `tracked: false` for the same edit
   applied directly (`applyPlainSource` in `server/docedit.ts`: merged three-way like the tracked form,
   so concurrent edits elsewhere and other people's tracked changes survive; pending changes are

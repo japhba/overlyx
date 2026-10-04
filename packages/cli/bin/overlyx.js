@@ -3,17 +3,21 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import readline from 'node:readline';
+import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
 
 Usage:
-  overlyx auth login [--host URL] --username NAME [--with-token | --token TOKEN]
+  overlyx auth login [--host URL] [--no-browser]        sign in through the browser
+  overlyx auth login [--host URL] --username NAME --with-token | --token TOKEN
   overlyx auth status [--host URL]
   overlyx auth logout [--host URL]
   overlyx repo list [--host URL]
@@ -21,16 +25,22 @@ Usage:
   overlyx repo push [PATH] [--name NAME] [--remote NAME]
   overlyx build OWNER/PROJECT/FILE.tex [--pdf FILE] [--log] [--wait SECONDS]
   overlyx restore OWNER/PROJECT COMMIT
+  overlyx mcp install [--client claude,codex] [--yes]   let local AI agents use OverLyX
+  overlyx mcp status | uninstall
+  overlyx mcp serve                                      (what the agents run: the MCP bridge)
+  overlyx update                                         this CLI from the server
 
 Examples:
-  overlyx auth login --host https://overlyx.app --username ada --with-token
+  overlyx auth login                      # opens the browser: Authorize, and the CLI is signed in
   overlyx repo create my-paper --source . --push
   overlyx repo push . --name my-paper
   overlyx build ada/my-paper/main.tex     # compile on the server: errors, exit code 1 if it fails
   overlyx restore ada/my-paper 3f2a91c    # the whole project as it was at that commit (a new commit)
+  overlyx mcp install                     # Claude Code / Codex get OverLyX's tools (your login, your projects)
 
-Create your account access token in OverLyX under File > Git repository. The token is stored
-with mode 0600. Git remotes contain your username, but never the token.
+\`auth login\` signs in through the browser and gets a credential of its own (revocable in OverLyX under
+File > Git repository). Scripts can pass your account access token instead (--with-token on stdin,
+or OVERLYX_TOKEN). Credentials are stored with mode 0600; Git remotes contain your username, never a token.
 `;
 
 function fail(message, code = 1) {
@@ -42,7 +52,7 @@ function fail(message, code = 1) {
 function parse(argv) {
   const positional = [];
   const flags = {};
-  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log']);
+  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--') { positional.push(...argv.slice(i + 1)); break; }
@@ -93,7 +103,7 @@ function credentials(flags, required = true) {
   const saved = config.hosts[host];
   const username = flags.username ?? process.env.OVERLYX_USERNAME ?? saved?.username;
   const token = flags.token ?? process.env.OVERLYX_TOKEN ?? saved?.token;
-  if (required && (!username || !token)) fail(`not logged in to ${host}; run: overlyx auth login --host ${host} --username NAME --with-token`);
+  if (required && (!username || !token)) fail(`not signed in to ${host}; run: overlyx auth login${host === DEFAULT_HOST ? '' : ` --host ${host}`}`);
   return { config, host, username, token };
 }
 
@@ -260,20 +270,96 @@ async function pushSource(creds, dir, project, remoteName, remote) {
   process.stdout.write(`Remote: ${remoteName} (${url.toString()})\n`);
 }
 
+/* ------------------------------------------------------------ signing in through the browser */
+
+/** Does this computer have a browser the sign-in can come back from (not an SSH session, not a headless server)? */
+function hasLocalBrowser() {
+  if (process.env.SSH_CONNECTION || process.env.SSH_TTY) return false;
+  if (process.platform === 'linux') return !!(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+  return true;
+}
+
+/** Open a URL in the default browser (quietly; the URL is printed anyway). */
+function openBrowser(url) {
+  const [cmd, args] = process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : ['xdg-open', [url]];
+  try { execFile(cmd, args, { timeout: 10000 }, () => undefined).unref?.(); } catch { /* no browser */ }
+}
+
+/**
+ * Sign in as Claude Code does: a listener on 127.0.0.1 and a PKCE pair; the browser — signed in to
+ * OverLyX — authorizes, and hands the one-time code back to the listener, or shows it to paste here
+ * (a browser on another computer). The code and the verifier give this CLI a credential of its own.
+ */
+async function browserLogin(host, flags) {
+  const manual = !!flags['no-browser'] || !hasLocalBrowser();
+  if (manual && !process.stdin.isTTY) fail('no browser on this computer and no terminal to paste a code into: run overlyx auth login in a terminal, or pass a token (--with-token)');
+  const verifier = crypto.randomBytes(32).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const state = crypto.randomBytes(16).toString('base64url');
+  let finish;
+  const got = new Promise(resolve => { finish = resolve; });
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    if (u.pathname === '/callback' && u.searchParams.get('state') === state && u.searchParams.get('code')) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end('<!doctype html><meta charset="utf-8"><title>OverLyX CLI</title><body style="font:15px/1.5 system-ui;max-width:28em;margin:12vh auto;padding:0 1em"><h2>The OverLyX CLI is signed in</h2><p>You can close this tab and go back to the terminal.</p></body>');
+      finish(u.searchParams.get('code'));
+      return;
+    }
+    res.writeHead(404); res.end();
+  });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  const port = server.address().port;
+  const url = `${host}/cli/login?` + new URLSearchParams({ port: String(port), state, challenge, client: os.hostname(), ...(manual ? { mode: 'manual' } : {}) }).toString();
+  let rl = null;
+  if (manual) {
+    // a browser on another computer cannot come back here: its page shows the code to paste
+    process.stderr.write(`Open this address in a browser where you are signed in to OverLyX, and authorize:\n  ${url}\n`);
+    rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+    rl.question('Paste the code it shows: ', answer => { finish(answer.trim() || null); });
+  } else {
+    process.stderr.write(`Opening your browser to sign in to ${host} … if it does not open, go to:\n  ${url}\n`);
+    openBrowser(url);
+    process.stderr.write('Waiting for you to authorize in the browser (browser on another computer? overlyx auth login --no-browser)\n');
+  }
+  const timer = setTimeout(() => finish(null), 10 * 60 * 1000);
+  const code = await got;
+  clearTimeout(timer);
+  rl?.close();
+  server.close();
+  if (!code) fail('signing in timed out — run overlyx auth login again');
+  process.stderr.write('\n');
+  let res;
+  try { res = await fetch(`${host}/cli/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, verifier }) }); }
+  catch (e) { fail(`cannot reach ${host}: ${e.cause?.message ?? e.message}`); }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.token) fail(body.error ?? `sign-in failed (${res.status})`);
+  return { username: body.username, token: body.token };
+}
+
 async function authCommand(action, flags) {
   if (action === 'login') {
     const config = readConfig();
     const host = normalizeHost(flags.host ?? process.env.OVERLYX_HOST ?? config.defaultHost ?? DEFAULT_HOST);
-    const username = String(flags.username ?? process.env.OVERLYX_USERNAME ?? '').trim();
-    if (!username) fail('--username is required');
-    const token = await tokenFromInput(flags);
-    if (!token) fail('no token received');
+    // a token given (scripts, CI): as before; otherwise the browser
+    const withToken = !flags.web && (flags['with-token'] || flags.token || process.env.OVERLYX_TOKEN || (!process.stdin.isTTY && !process.stderr.isTTY));
+    let username, token;
+    if (withToken) {
+      username = String(flags.username ?? process.env.OVERLYX_USERNAME ?? '').trim();
+      if (!username) fail('--username is required with a token (or run overlyx auth login without one to sign in through the browser)');
+      token = await tokenFromInput(flags);
+      if (!token) fail('no token received');
+    } else {
+      ({ username, token } = await browserLogin(host, flags));
+    }
     const creds = { host, username, token };
     const result = await api(creds, '/git/api/user');
     config.hosts[host] = { username: result.user.username, token };
     config.defaultHost = host;
     writeConfig(config);
     process.stdout.write(`Logged in to ${host} as ${result.user.username}\n`);
+    // local agents: offered once, when one is installed and none is registered yet
+    if (process.stdin.isTTY && !codexRegistered() && (await claudeRegistered()) === null && ((await has('claude')) || (await has('codex')))) await mcpInstall({});
     return;
   }
 
@@ -383,6 +469,362 @@ async function restoreCommand(args, flags) {
   process.stdout.write(`${project}: restored to ${commit} as a new commit (${r.files.length} file${r.files.length === 1 ? '' : 's'}: ${r.files.slice(0, 5).join(', ')}${r.files.length > 5 ? ', …' : ''})\n`);
 }
 
+/* ------------------------------------------------------------ MCP: local agents */
+
+/*
+ * Local agents (Claude Code, Codex, any MCP client) are registered with a command, not with an
+ * address and a token: `overlyx mcp serve`. Every agent session starts the bridge, which reads the
+ * login as it is now (a new token after `overlyx auth login` counts at once), asks the server how
+ * to connect (GET /cli/mcp.json: the endpoint and the authorization header), and relays the MCP
+ * messages between the agent (stdio) and the server (Streamable HTTP) — the tools, their
+ * descriptions and instructions are the server's, as they are today. The bridge itself keeps up
+ * to date: it installs a newer CLI from the server (checksummed) for the next session.
+ */
+
+const MCP_NAME = 'overlyx';
+
+/** this CLI's own file (what the agents run) */
+const selfPath = () => fs.realpathSync(process.argv[1]);
+
+/** How the server wants to be reached: its MCP endpoint and authorization header (with a fallback for older servers). */
+async function mcpConnection(creds) {
+  const fallback = { url: `${creds.host}/mcp`, headers: { Authorization: `Bearer ${creds.token}` } };
+  try {
+    const res = await fetch(`${creds.host}/cli/mcp.json`, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return fallback;
+    const info = await res.json();
+    const url = new URL(String(info.url ?? '/mcp'), creds.host + '/').toString();
+    const headers = {};
+    for (const [k, v] of Object.entries(info.headers ?? { Authorization: 'Bearer {token}' })) headers[k] = String(v).replaceAll('{token}', creds.token).replaceAll('{username}', creds.username ?? '');
+    return { url, headers };
+  } catch { return fallback; }
+}
+
+/** the JSON-RPC messages of a text/event-stream body, as they arrive */
+async function* sseMessages(res, onId) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let cut;
+    while ((cut = buf.search(/\r?\n\r?\n/)) >= 0) {
+      const event = buf.slice(0, cut);
+      buf = buf.slice(cut).replace(/^\r?\n\r?\n/, '');
+      let data = '';
+      for (const line of event.split(/\r?\n/)) {
+        if (line.startsWith('data:')) data += (data ? '\n' : '') + line.slice(5).replace(/^ /, '');
+        else if (line.startsWith('id:')) onId?.(line.slice(3).trim());
+      }
+      if (!data) continue;
+      try { yield JSON.parse(data); } catch { /* not a JSON-RPC message */ }
+    }
+  }
+}
+
+/**
+ * The OverLyX project the agent's directory is a clone of (its git remote is `<host>/git/<owner>/<name>.git`),
+ * or null. The agent hears it at initialize: the documents are edited on the server, not in the clone.
+ */
+async function cloneOf(host) {
+  let remotes;
+  try { remotes = (await execFileP('git', ['remote', '-v'], { encoding: 'utf8', timeout: 5000 })).stdout; } catch { return null; }
+  for (const line of remotes.split('\n')) {
+    const url = line.split(/\s+/)[1];
+    if (!url) continue;
+    try {
+      const u = new URL(url);
+      u.username = ''; u.password = '';
+      const m = /^\/git\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(u.pathname);
+      if (m && `${u.protocol}//${u.host}` === host.replace(/\/$/, '')) return { project: `${decodeURIComponent(m[1])}/${decodeURIComponent(m[2])}`, remote: line.split(/\s+/)[0] };
+    } catch { /* an ssh or local remote */ }
+  }
+  return null;
+}
+
+function withCloneInstructions(msg, clone) {
+  if (!msg || !msg.result) return msg;
+  const note = `This directory is a git clone of the OverLyX project "${clone.project}". Its documents live on the OverLyX server: `
+    + `read and edit them with these tools (project "${clone.project}") — they are live there for everybody — rather than the files in this clone, `
+    + `which only change with git pull (git remote "${clone.remote}"). Build with build_pdf.`;
+  return { ...msg, result: { ...msg.result, instructions: msg.result.instructions ? `${note}\n\n${msg.result.instructions}` : note } };
+}
+
+async function mcpServe(flags) {
+  const creds = credentials(flags, false);
+  let session = null, protocol = null, closing = false, lastEventId = null;
+  // to the agent: one message per line; the protocol version the server answered with goes on every later request
+  const out = (m) => {
+    if (m && m.result && typeof m.result.protocolVersion === 'string') protocol = m.result.protocolVersion;
+    process.stdout.write(JSON.stringify(m) + '\n');
+  };
+  const log = (t) => process.stderr.write(`overlyx mcp: ${t}\n`);
+  // a newer CLI for the next session (never on stdout: that is the agent's)
+  void maybeSelfUpdate(creds.host).catch(() => undefined);
+  const notLoggedIn = !creds.token;
+  const clone = await cloneOf(creds.host);
+  const conn = notLoggedIn ? null : await mcpConnection(creds);
+  let initialized = null;   // the initialize round trip: everything else waits for it (the session id)
+
+  const errorFor = (msg, text) => { if (msg && msg.id !== undefined && msg.method) out({ jsonrpc: '2.0', id: msg.id, error: { code: -32000, message: text } }); };
+  const headers = (extra = {}) => ({ ...conn.headers, ...(session ? { 'Mcp-Session-Id': session } : {}), ...(protocol ? { 'MCP-Protocol-Version': protocol } : {}), ...extra });
+
+  async function post(msg, transform) {
+    const emit = transform ? (m) => out(transform(m)) : out;
+    let res;
+    try {
+      res = await fetch(conn.url, { method: 'POST', headers: headers({ 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }), body: JSON.stringify(msg) });
+    } catch (e) { errorFor(msg, `cannot reach ${creds.host}: ${e.cause?.message ?? e.message}`); return; }
+    const sid = res.headers.get('mcp-session-id');
+    if (sid) session = sid;
+    if (res.status === 202) return;
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let detail = text;
+      try { const j = JSON.parse(text); detail = j.error?.message ?? j.error ?? text; } catch { /* plain text */ }
+      if (res.status === 401) detail = `the server refused the login (${detail}) — run: overlyx auth login --host ${creds.host}`;
+      // an answer that is itself a JSON-RPC error goes to the agent as it is
+      try { const j = JSON.parse(text); if (j && j.jsonrpc && msg.id !== undefined) { emit({ ...j, id: j.id ?? msg.id }); return; } } catch { /* not JSON-RPC */ }
+      errorFor(msg, `OverLyX: ${detail || res.status}`);
+      return;
+    }
+    const type = res.headers.get('content-type') ?? '';
+    if (type.includes('text/event-stream')) { for await (const m of sseMessages(res)) emit(m); return; }
+    const text = await res.text();
+    if (!text.trim()) return;
+    const body = JSON.parse(text);
+    for (const m of Array.isArray(body) ? body : [body]) emit(m);
+  }
+
+  /** what the server sends on its own (Claude Code's session: messages written to the agent in OverLyX) */
+  async function eventStream() {
+    let delay = 1000;
+    while (!closing && session) {
+      try {
+        const res = await fetch(conn.url, { method: 'GET', headers: headers({ Accept: 'text/event-stream', ...(lastEventId ? { 'Last-Event-ID': lastEventId } : {}) }) });
+        if (res.status === 405 || res.status === 404) return;   // no stream for this client
+        if (res.ok) { delay = 1000; for await (const m of sseMessages(res, id => { lastEventId = id; })) out(m); }
+      } catch { /* the connection dropped: again in a moment */ }
+      if (closing) return;
+      await new Promise(r => setTimeout(r, delay));
+      delay = Math.min(30000, delay * 2);
+    }
+  }
+
+  async function handle(msg) {
+    if (notLoggedIn) {
+      const cli = path.basename(selfPath()) === 'overlyx' ? 'overlyx' : `node ${selfPath()}`;
+      errorFor(msg, `not signed in to ${creds.host} — run once in a terminal: ${cli} auth login${creds.host === DEFAULT_HOST ? '' : ` --host ${creds.host}`} (it opens the browser to authorize)`);
+      return;
+    }
+    if (msg.method === 'initialize') {
+      initialized = post(msg, clone ? (m) => withCloneInstructions(m, clone) : undefined);
+      await initialized;
+      return;
+    }
+    if (initialized) await initialized;
+    await post(msg);
+    if (msg.method === 'notifications/initialized' && session) void eventStream();
+  }
+
+  const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  const pending = new Set();
+  rl.on('line', (line) => {
+    if (!line.trim()) return;
+    let msg;
+    try { msg = JSON.parse(line); } catch { log('ignored a line that is not JSON'); return; }
+    const p = Promise.all((Array.isArray(msg) ? msg : [msg]).map(m => handle(m).catch(e => errorFor(m, String(e.message ?? e)))));
+    pending.add(p);
+    void p.finally(() => pending.delete(p));
+  });
+  await new Promise(resolve => rl.on('close', resolve));
+  await Promise.allSettled([...pending]);
+  closing = true;
+  if (session && conn) await fetch(conn.url, { method: 'DELETE', headers: headers(), signal: AbortSignal.timeout(3000) }).catch(() => undefined);
+  process.exit(0);
+}
+
+/* ------------------------------------------------------------ keeping the CLI up to date */
+
+const newer = (a, b) => {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0); }
+  return false;
+};
+
+/**
+ * Replace this CLI with the server's newer one (sha256-checked, as the installer does). Only an
+ * installed copy (the file `overlyx` the installer writes) replaces itself — never a checkout.
+ */
+async function selfUpdate(host) {
+  const self = selfPath();
+  if (path.basename(self) !== 'overlyx') return { skipped: `${self} is not an installed copy (the installer's \`overlyx\`)` };
+  const info = await (await fetch(`${host}/cli/version`, { signal: AbortSignal.timeout(8000) })).json();
+  if (!newer(info.version, VERSION)) return { current: VERSION };
+  const res = await fetch(`${host}/cli/v${info.version}/overlyx`, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) fail(`cannot download the CLI: ${res.status}`);
+  const body = Buffer.from(await res.arrayBuffer());
+  if (crypto.createHash('sha256').update(body).digest('hex') !== info.sha256) fail('checksum verification failed');
+  const tmp = path.join(path.dirname(self), `.overlyx.${process.pid}`);
+  fs.writeFileSync(tmp, body, { mode: 0o755 });
+  fs.renameSync(tmp, self);
+  return { updated: info.version };
+}
+
+/** At most once an hour, quietly (the MCP bridge: the next agent session runs the new one). */
+async function maybeSelfUpdate(host) {
+  const stamp = path.join(path.dirname(configFile()), 'update-check');
+  try { if (Date.now() - fs.statSync(stamp).mtimeMs < 3600_000) return; } catch { /* never checked */ }
+  try { fs.mkdirSync(path.dirname(stamp), { recursive: true, mode: 0o700 }); fs.writeFileSync(stamp, ''); } catch { return; }
+  const r = await selfUpdate(host);
+  if (r.updated) process.stderr.write(`overlyx: updated to ${r.updated} (from the next session on)\n`);
+}
+
+async function updateCommand(flags) {
+  const host = credentials(flags, false).host;
+  const r = await selfUpdate(host);
+  process.stdout.write(r.updated ? `Updated the OverLyX CLI to ${r.updated}\n` : r.current ? `The OverLyX CLI is up to date (${VERSION})\n` : `Not updated: ${r.skipped}\n`);
+}
+
+/* ------------------------------------------------------------ registering with the agents */
+
+const codexConfig = () => path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'config.toml');
+
+async function has(command) {
+  try { await execFileP(command, ['--version'], { timeout: 15000 }); return true; } catch { return false; }
+}
+
+/** The bridge command an agent runs (with --host when it is not the default login). */
+function serveArgs(flags) {
+  return ['mcp', 'serve', ...(flags.host ? ['--host', normalizeHost(flags.host)] : [])];
+}
+
+/** config.toml without its [mcp_servers.overlyx] table (and that table's sub-tables) */
+function withoutCodexServer(text) {
+  const lines = text.split('\n');
+  const out = [];
+  let skipping = false;
+  for (const line of lines) {
+    const header = /^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(#.*)?$/.exec(line);
+    if (header) skipping = header[1] === `mcp_servers.${MCP_NAME}` || header[1].startsWith(`mcp_servers.${MCP_NAME}.`);
+    if (!skipping) out.push(line);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+const tomlString = (v) => JSON.stringify(v);   // a TOML basic string: JSON's escapes are TOML's
+
+function codexServerTable(args) {
+  return `[mcp_servers.${MCP_NAME}]\n# OverLyX (overlyx mcp install): the CLI relays to the server with your login — re-run nothing when either changes\ncommand = ${tomlString(selfPath())}\nargs = [${args.map(tomlString).join(', ')}]\n`;
+}
+
+function codexRegistered() {
+  try { return new RegExp(`^\\s*\\[mcp_servers\\.${MCP_NAME}\\]`, 'm').test(fs.readFileSync(codexConfig(), 'utf8')); } catch { return false; }
+}
+
+async function claudeRegistered() {
+  try { const r = await execFileP('claude', ['mcp', 'get', MCP_NAME], { encoding: 'utf8', timeout: 20000 }); return /mcp serve/.test(r.stdout) ? 'bridge' : 'other'; } catch { return null; }
+}
+
+async function registerClaude(args) {
+  // replaced, whatever was there (an older URL + token registration included), in every scope it may be in
+  for (const scope of ['user', 'local']) await execFileP('claude', ['mcp', 'remove', MCP_NAME, '-s', scope], { timeout: 20000 }).catch(() => undefined);
+  await execFileP('claude', ['mcp', 'add', '-s', 'user', MCP_NAME, '--', selfPath(), ...args], { encoding: 'utf8', timeout: 20000 });
+}
+
+function registerCodex(args) {
+  const file = codexConfig();
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch { /* a new config */ }
+  // `overlyx` defined some other way (inline table, dotted keys): left to the user, not duplicated
+  if (new RegExp(`^\\s*(mcp_servers\\.)?${MCP_NAME}\\s*(=|\\.)`, 'm').test(text)) fail(`${file} defines "${MCP_NAME}" in another form — remove it there, then run overlyx mcp install again`);
+  if (text && !fs.existsSync(file + '.bak')) fs.copyFileSync(file, file + '.bak');
+  const rest = withoutCodexServer(text).replace(/\s*$/, '');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, (rest ? rest + '\n\n' : '') + codexServerTable(args));
+}
+
+function unregisterCodex() {
+  const file = codexConfig();
+  try { const t = fs.readFileSync(file, 'utf8'); const r = withoutCodexServer(t); if (r !== t) { fs.writeFileSync(file, r.replace(/\s*$/, '\n')); return true; } } catch { /* none */ }
+  return false;
+}
+
+async function ask(question) {
+  if (!process.stdin.isTTY || !process.stderr.isTTY) return false;
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  const answer = await new Promise(resolve => rl.question(question, resolve));
+  rl.close();
+  return !/^\s*n/i.test(String(answer));
+}
+
+/** Which agents to register with: the ones named, or those found on this computer. */
+async function agentsFor(flags) {
+  const named = flags.client ? String(flags.client).split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : null;
+  const found = { claude: await has('claude'), codex: (await has('codex')) || fs.existsSync(path.dirname(codexConfig())) };
+  return { claude: named ? named.includes('claude') : found.claude, codex: named ? named.includes('codex') : found.codex, found };
+}
+
+async function mcpInstall(flags) {
+  const creds = credentials(flags, false);
+  const args = serveArgs(flags);
+  const agents = await agentsFor(flags);
+  if (!agents.claude && !agents.codex) {
+    process.stdout.write(`No Claude Code or Codex found. For any MCP client, add this command (stdio):\n  ${selfPath()} ${args.join(' ')}\n`);
+    return;
+  }
+  const names = [agents.claude && 'Claude Code', agents.codex && 'Codex'].filter(Boolean).join(' and ');
+  if (!flags.yes && !(await ask(`Let ${names} use OverLyX (registers \`overlyx mcp serve\` with them)? [Y/n] `))) { process.stdout.write('Not registered. Later: overlyx mcp install\n'); return; }
+  if (agents.claude) {
+    try { await registerClaude(args); process.stdout.write('Claude Code: registered "overlyx" (all directories)\n'); }
+    catch (e) { process.stdout.write(`Claude Code: not registered — ${String(e.stderr || e.message).trim()}\n`); }
+  }
+  if (agents.codex) {
+    try { registerCodex(args); process.stdout.write(`Codex: registered "overlyx" in ${codexConfig()}\n`); }
+    catch (e) { process.stdout.write(`Codex: not registered — ${e.message}\n`); }
+  }
+  if (!creds.token) process.stdout.write(`The agents connect once you are signed in: overlyx auth login${creds.host === DEFAULT_HOST ? '' : ` --host ${creds.host}`}\n`);
+  else process.stdout.write(`They act as ${creds.username} on ${creds.host}; new tools and server changes reach them without registering again.\n`);
+}
+
+async function mcpUninstall() {
+  let any = false;
+  if (await has('claude')) for (const scope of ['user', 'local']) { try { await execFileP('claude', ['mcp', 'remove', MCP_NAME, '-s', scope], { timeout: 20000 }); any = true; process.stdout.write(`Claude Code: removed "overlyx" (${scope})\n`); } catch { /* not there */ } }
+  if (unregisterCodex()) { any = true; process.stdout.write(`Codex: removed "overlyx" from ${codexConfig()}\n`); }
+  if (!any) process.stdout.write('OverLyX was not registered with Claude Code or Codex\n');
+}
+
+/** Registrations, and a real round trip through the server: initialize + tools/list. */
+async function mcpStatus(flags) {
+  const claude = await has('claude') ? await claudeRegistered() : undefined;
+  process.stdout.write(`Claude Code: ${claude === undefined ? 'not installed' : claude === 'bridge' ? 'registered' : claude === 'other' ? 'registered another way (overlyx mcp install replaces it)' : 'not registered'}\n`);
+  process.stdout.write(`Codex: ${codexRegistered() ? `registered (${codexConfig()})` : 'not registered'}\n`);
+  const creds = credentials(flags, false);
+  if (!creds.token) { process.stdout.write(`Server: not logged in to ${creds.host}\n`); return; }
+  const conn = await mcpConnection(creds);
+  const call = async (body, session) => {
+    const res = await fetch(conn.url, { method: 'POST', headers: { ...conn.headers, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...(session ? { 'Mcp-Session-Id': session } : {}) }, body: JSON.stringify(body) });
+    if (!res.ok) fail(`${conn.url}: ${res.status} ${(await res.text()).slice(0, 200)}`);
+    const type = res.headers.get('content-type') ?? '';
+    const msgs = [];
+    if (type.includes('text/event-stream')) { for await (const m of sseMessages(res)) msgs.push(m); } else msgs.push(JSON.parse(await res.text()));
+    return { msg: msgs.find(m => m.id === body.id) ?? msgs[0], session: res.headers.get('mcp-session-id') ?? session };
+  };
+  const init = await call({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'overlyx-cli', version: VERSION } } });
+  const tools = await call({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }, init.session);
+  process.stdout.write(`Server: ${conn.url} answers as ${creds.username}: ${tools.msg?.result?.tools?.length ?? 0} tools (${init.msg?.result?.serverInfo?.name ?? 'MCP'} ${init.msg?.result?.serverInfo?.version ?? ''})\n`);
+}
+
+async function mcpCommand(action, flags) {
+  if (action === 'serve') return mcpServe(flags);
+  if (action === 'install') return mcpInstall(flags);
+  if (action === 'uninstall' || action === 'remove') return mcpUninstall();
+  if (action === 'status' || !action) return mcpStatus(flags);
+  fail(`unknown mcp command: ${action}`);
+}
+
 async function main() {
   const { positional, flags } = parse(process.argv.slice(2));
   if (flags.version || positional[0] === 'version') { process.stdout.write(VERSION + '\n'); return; }
@@ -392,6 +834,8 @@ async function main() {
   else if (group === 'repo' || group === 'project') await repoCommand(action, args, flags);
   else if (group === 'build') await buildCommand(positional.slice(1), flags);
   else if (group === 'restore') await restoreCommand(positional.slice(1), flags);
+  else if (group === 'mcp') await mcpCommand(action, flags);
+  else if (group === 'update') await updateCommand(flags);
   else fail(`unknown command: ${group}\n\n${HELP}`);
 }
 

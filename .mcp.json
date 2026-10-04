@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "overlyx": {
+      "command": "sh",
+      "args": ["-c", "exec node \"$(git rev-parse --show-toplevel)/packages/cli/bin/overlyx.js\" mcp serve"]
+    }
+  }
+}

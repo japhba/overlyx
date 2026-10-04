@@ -24,14 +24,18 @@
 
 **Web:** [overlyx.app](https://overlyx.app)
 
-**CLI:** install the dependency-free client, create your account token in *File ▸ Git repository…*,
-then import an existing folder or repository in one command:
+**CLI:** install the dependency-free client, sign in through the browser, then import an existing
+folder or repository in one command:
 
 ```sh
-curl -fsSL https://overlyx.app/install-cli.sh | sh
-overlyx auth login --username YOUR_NAME --with-token
+curl -fsSL https://overlyx.app/install-cli.sh | sh   # offers the sign-in and the AI agents' setup
+overlyx auth login                                   # (if you skipped it) opens the browser: Authorize
 overlyx repo push . --name my-paper
 ```
+
+**Local AI agents** (Claude Code, Codex): `overlyx mcp install` registers OverLyX with them — they
+edit your projects on the server, and keep working when the server or your login changes. In a clone
+of this repository they are connected already (`.mcp.json`, `.codex/config.toml`).
 
 The `olx` alias and the more GitHub-like `overlyx repo create my-paper --source . --push` form are
 equivalent. The installer verifies a SHA-256 checksum and writes to `~/.local/bin` by default;
