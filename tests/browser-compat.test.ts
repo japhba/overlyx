@@ -9,6 +9,7 @@ import { schema } from '../packages/core/src/schema.ts';
 import { editorContext } from '../packages/client/src/editor/context.ts';
 import { CommandView } from '../packages/client/src/editor/nodeviews/leaf.ts';
 import { keepScrollOnFocus } from '../packages/client/src/editor/assembly.ts';
+import { pasteEventWith } from '../packages/client/src/editor/clipmenu.ts';
 import { EditorState } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { idleCallback } from '../packages/client/src/editor/nodeviews/math.ts';
@@ -181,5 +182,22 @@ describe('focusing the editor', () => {
     view.focus();
     expect(scroller.scrollTop).toBe(591);
     view.destroy(); scroller.remove();
+  });
+});
+
+/**
+ * The menus' Paste hands the editor a paste event with the clipboard's data: Firefox's ClipboardEvent
+ * constructor leaves clipboardData empty, and LaTeX text pasted from the menu went in unparsed.
+ */
+describe('a paste event made by the menus', () => {
+  it('carries its data also where the constructor drops it (Firefox)', () => {
+    const Native = globalThis.ClipboardEvent;
+    class FirefoxLike extends Event { clipboardData = new DataTransfer(); constructor(type: string) { super(type); } }
+    (globalThis as any).ClipboardEvent = FirefoxLike;
+    try {
+      const data = new DataTransfer();
+      data.setData('text/plain', '\\section{Pasted}');
+      expect(pasteEventWith(data).clipboardData?.getData('text/plain')).toBe('\\section{Pasted}');
+    } finally { (globalThis as any).ClipboardEvent = Native; }
   });
 });
