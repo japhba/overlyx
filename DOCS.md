@@ -450,6 +450,20 @@ blend.
     pages, remembered per browser (`ol.notes`); a page without notes then offers *Click to add speaker
     notes* (`PageView`), so showing them adds nothing to the file. In notes, keys type (the canvas's
     tool letters and object keys stay out of them).
+    **One slide at a time** (PowerPoint's Normal view; `controller.ts syncShownPage`): in a deck the
+    canvas shows only the page that holds the selection — the other pages are `display: none`
+    (`.ol-single`, `.ol-shown`) but keep their DOM, which the thumbnails copy and where formulas are
+    still drawn in idle time. So everything that moves the selection turns the slide: the rail, the
+    sorter, the outline, Find. PageDown / PageUp (not while text is being edited), the arrows and
+    Home / End with nothing selected, and the wheel beyond the slide's top or bottom edge (once per
+    flick: 60 px of scrolling, then 450 ms of rest) turn it too. The slide is fitted to the window with
+    its notes under it, centred, and nothing scrolls at the fit; the fit uses the scroller's offset
+    size, so the scroll bars a zoom brings do not change it. Zoomed, its margins stay what they were at
+    the fit, on both sides (`--ol-single-top` / `--ol-single-bottom`), so a pinch keeps the point under
+    the pointer anywhere on the slide. Hidden pages are not measured against the PDF; a page is measured
+    when it is shown. Objects can no longer be dragged onto another page of a deck — cut and paste them.
+    Rail and sorter address pages by their node views' live positions (`livePos`): their own remembered
+    positions are as old as their last refresh, a quarter second after an edit.
     **Slide sorter** (`editor/layout/sorter.ts`, PowerPoint's View ▸ Slide Sorter; the grid button in
     the rail's header or its folded strip, or the rail's menu): every slide as a card over the canvas
     and the rail, with its number, name (or first words), transition, animation clicks and whether it
@@ -457,8 +471,9 @@ blend.
     (`movePagesTo`, only the moved pages are taken out and put back); Delete, Ctrl+D (copies after the
     last selected), Ctrl+C / X / V (the rail's slide clipboard), Ctrl+Z / Y, arrows and Shift+arrows by
     the grid's columns, Ctrl+A, F5 / Shift+F5; the right-click menu sets a transition for the whole
-    selection. Enter or a double click opens the slide in the canvas, Esc or *Done* returns to the
-    focused one (the canvas behind follows the focus all along). The slider sizes the cards
+    selection. Enter or a double click opens the slide in the canvas (the double click's target is the grid, which
+    captured the pointer — the card is looked up under it), Esc or *Done* returns to the focused one
+    (the canvas behind follows the focus all along). The slider sizes the cards
     (`ol.sorter`); only their scale changes. Rail and sorter share `slidekit.ts` (thumbnails, the
     mutation filter, the layout picker, the clipboard, `undoStep`).
     **New slide layouts** (`editor/layout/slidelayouts.ts`): Title slide, Title and content, Section

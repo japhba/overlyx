@@ -339,6 +339,12 @@ class LayoutController {
   private growQueued = false;
   /** the thumbnails of a deck (rail.ts) */
   private rail: SlideRail | null = null;
+  /** a deck shows one slide at a time: the page wrapper of the one with the selection */
+  private shownWrap: HTMLElement | null = null;
+  /** the speaker notes were shown under the pages at the last update (one slide at a time: they take room) */
+  private notesWere = false;
+  /** the wheel turns slides: what it has scrolled beyond the slide's edge, and when it last turned one */
+  private wheelTurn = { acc: 0, at: 0 };
 
   constructor(private view: EditorView) {
     controllers.set(view, this);
@@ -368,12 +374,65 @@ class LayoutController {
       // a page added, removed or moved: the pages after it have other numbers
       if (pageOrderChanged(prev.doc, view.state.doc)) for (const pv of this.pageViews()) pv.render();
     }
-    this.syncRail(!!prev && prev.doc !== view.state.doc);
+    this.syncRail();
+    this.syncShownPage();
+    this.rail?.update(!!prev && prev.doc !== view.state.doc);
+    const notes = view.dom.classList.contains('ol-show-notes');
+    if (notes !== this.notesWere) { this.notesWere = notes; if (this.rail) this.fit(); }
     this.renderOverlays();
   }
 
+  /**
+   * A deck shows one slide at a time, PowerPoint's Normal view: the page that has the selection (the
+   * rail, the sorter, PageDown / PageUp, the arrows with nothing selected and the wheel move it there);
+   * the other pages are `display: none` (styles.css `.ol-single`) but keep their DOM — the thumbnails copy it.
+   */
+  private syncShownPage(): void {
+    const single = !!this.rail;
+    this.view.dom.classList.toggle('ol-single', single);
+    let wrap: HTMLElement | null = null;
+    if (single) {
+      const page = L.pageAt(this.view.state.doc, this.view.state.selection.from) ?? L.pages(this.view.state.doc)[0];
+      wrap = page ? this.view.nodeDOM(page.pos) as HTMLElement | null : null;
+    }
+    if (wrap === this.shownWrap) return;
+    this.shownWrap?.classList.remove('ol-shown');
+    wrap?.classList.add('ol-shown');
+    this.shownWrap = wrap;
+    if (!single) { this.view.dom.style.removeProperty('--ol-single-top'); this.view.dom.style.removeProperty('--ol-single-bottom'); return; }
+    this.centerShown(true);
+    if (this.scroller) this.scroller.scrollTop = 0;
+    // the boxes of a page that was hidden were not measured against the PDF
+    if (this.check) requestAnimationFrame(() => this.measureCheck());
+  }
+
+  /**
+   * The shown slide in the middle of the window, when it is smaller than the window — at the fit (or
+   * `force`, another slide shown). Zoomed, the margin stays as it is: a zoom keeps the point under the
+   * pointer where it is, and recentring under it would move the slide away (applyZoom).
+   */
+  private centerShown(force = false): void {
+    const sc = this.scroller;
+    if (!this.shownWrap || !sc || (!force && this.zoom !== 1)) return;
+    const pageH = this.page.h * this.fitPagePt * this.zoom * 2.845276;
+    const notes = this.view.dom.classList.contains('ol-show-notes') ? 118 : 0;
+    const top = Math.max(0, (sc.clientHeight - 68 - notes - pageH) / 2);
+    this.view.dom.style.setProperty('--ol-single-top', `${Math.round(top)}px`);
+    this.view.dom.style.setProperty('--ol-single-bottom', '0px');
+  }
+
+  /** the slide `d` slides on from the shown one (the caret parked on it, nothing selected) */
+  stepSlide(d: number, absolute = false): boolean {
+    const list = L.pages(this.view.state.doc);
+    const cur = list.findIndex(p => this.view.nodeDOM(p.pos) === this.shownWrap);
+    const i = Math.max(0, Math.min(list.length - 1, absolute ? d : cur + d));
+    if (i === cur || !list[i]) return false;
+    this.view.dispatch(deselectAll(this.view.state.tr, list[i].pos));
+    return true;
+  }
+
   /** a deck — slides, or several pages — has the slide rail beside the canvas */
-  private syncRail(docChanged: boolean): void {
+  private syncRail(): void {
     const deck = !!this.scroller && (L.pages(this.view.state.doc).length > 1 || (this.beamer && this.page.w <= 300 && this.page.h <= 200));
     if (deck && !this.rail) {
       this.rail = new SlideRail(this.view, this.scroller!, {
@@ -389,7 +448,7 @@ class LayoutController {
       this.rail.destroy();
       this.rail = null;
       this.fit();
-    } else this.rail?.update(docChanged);
+    }
   }
 
   destroy(): void { this.detach(); this.metaUnobserve?.(); this.metaUnobserve = null; this.colorStyle?.remove(); this.gesture?.cancel(); if (this.checkRetry) clearTimeout(this.checkRetry); }
@@ -419,6 +478,10 @@ class LayoutController {
 
   private detach(): void {
     this.rail?.destroy(); this.rail = null;
+    this.shownWrap?.classList.remove('ol-shown'); this.shownWrap = null;
+    this.view.dom.classList.remove('ol-single');
+    this.view.dom.style.removeProperty('--ol-single-top');
+    this.view.dom.style.removeProperty('--ol-single-bottom');
     this.resize?.disconnect(); this.resize = null;
     if (this.scroller) {
       this.scroller.removeEventListener('wheel', this.onWheel);
@@ -542,13 +605,31 @@ class LayoutController {
 
   /** a pinch on a trackpad (Ctrl + wheel in Chromium and Firefox) or Ctrl/⌘ + wheel zooms about the pointer */
   private onWheel = (ev: WheelEvent): void => {
-    if (!(ev.ctrlKey || ev.metaKey)) return;
+    if (!(ev.ctrlKey || ev.metaKey)) { this.wheelSlides(ev); return; }
     ev.preventDefault();
     const dy = ev.deltaMode === 1 ? ev.deltaY * 16 : ev.deltaMode === 2 ? ev.deltaY * 400 : ev.deltaY;
     const base = this.pendingZoom?.z ?? this.zoom;
     // a trackpad sends many small deltas, a mouse wheel ±100 per notch (×1.28 then)
     this.zoomAt(base * Math.exp(-Math.max(-25, Math.min(25, dy)) * 0.01), ev.clientX, ev.clientY);
   };
+
+  /** one slide at a time: scrolling on beyond the slide's top or bottom edge turns to the previous or next slide */
+  private wheelSlides(ev: WheelEvent): void {
+    const sc = this.scroller;
+    if (!this.shownWrap || !sc || Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) return;
+    const dy = ev.deltaMode === 1 ? ev.deltaY * 16 : ev.deltaMode === 2 ? ev.deltaY * 400 : ev.deltaY;
+    const atTop = sc.scrollTop <= 0, atBottom = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 1;
+    if ((dy > 0 && !atBottom) || (dy < 0 && !atTop)) { this.wheelTurn.acc = 0; return; }
+    ev.preventDefault();
+    const now = performance.now();
+    // a trackpad's flick goes on for a while after the slide turned: that is not another turn
+    if (now - this.wheelTurn.at < 450) { this.wheelTurn.at = now; return; }
+    if (Math.sign(dy) !== Math.sign(this.wheelTurn.acc)) this.wheelTurn.acc = 0;
+    this.wheelTurn.acc += dy;
+    if (Math.abs(this.wheelTurn.acc) < 60) return;
+    this.wheelTurn = { acc: 0, at: now };
+    this.stepSlide(dy > 0 ? 1 : -1);
+  }
 
   private onGesture = (ev: Event & { scale?: number; clientX?: number; clientY?: number }): void => {
     ev.preventDefault();
@@ -571,7 +652,7 @@ class LayoutController {
     if (!p || this.view.isDestroyed || !this.active) return;
     const sc = this.scroller;
     // the page under the pointer (or the nearest) anchors the zoom: the same spot of it stays under the pointer
-    const wraps = [...this.view.dom.querySelectorAll<HTMLElement>(':scope > .ol-page-wrap')];
+    const wraps = this.shownWrap ? [this.shownWrap] : [...this.view.dom.querySelectorAll<HTMLElement>(':scope > .ol-page-wrap')];
     let anchor: HTMLElement | null = null, best = Infinity;
     for (const w of wraps) {
       const r = w.getBoundingClientRect();
@@ -583,6 +664,9 @@ class LayoutController {
     const fx = r0 ? (p.x - r0.left) / r0.width : 0, fy = r0 ? (p.y - r0.top) / r0.height : 0;
     this.zoom = p.z;
     this.fit();
+    // one slide at a time, zoomed: as much room below the slide as above it (the margin it had at the fit),
+    // so that every point of it can stay under the pointer; at the fit nothing scrolls
+    if (this.shownWrap) this.view.dom.style.setProperty('--ol-single-bottom', this.zoom === 1 ? '0px' : this.view.dom.style.getPropertyValue('--ol-single-top') || '0px');
     if (sc && anchor && r0) {
       const r1 = anchor.getBoundingClientRect();
       sc.scrollLeft += r1.left + fx * r1.width - p.x;
@@ -727,11 +811,16 @@ class LayoutController {
   /** the page's scale: the zoom at which the whole page fits the window, times the canvas zoom */
   private fit(): void {
     const sc = this.scroller ?? (this.view.dom.closest('.editor-scroll') ?? this.view.dom.parentElement) as HTMLElement | null;
-    const width = Math.max(200, (sc?.clientWidth ?? 1000) - 72 - (this.rail?.width() ?? 0));
-    const height = Math.max(150, (sc?.clientHeight ?? 800) - 70);
+    // one slide at a time nothing scrolls at the fit: the scroll bars a zoom brings must not change it (offset sizes)
+    const single = !!this.shownWrap;
+    const width = Math.max(200, ((single ? sc?.offsetWidth : sc?.clientWidth) ?? 1000) - 72 - (this.rail?.width() ?? 0));
+    // one slide at a time with its notes under it: the notes have room in the window too
+    const notes = this.rail && this.view.dom.classList.contains('ol-show-notes') ? 118 : 0;
+    const height = Math.max(150, ((single ? sc?.offsetHeight : sc?.clientHeight) ?? 800) - 70 - notes);
     const pxPerMm = Math.min(width / this.page.w, height / this.page.h);
     this.fitPagePt = Math.min(pxPerMm / 2.845276, 4);
     this.view.dom.style.setProperty('--ol-fit-pt', `${(this.fitPagePt * this.zoom).toFixed(4)}px`);
+    this.centerShown();
     zoomChanged();
   }
 
@@ -748,6 +837,12 @@ class LayoutController {
 
   private pageViews(): PageView[] {
     return [...this.view.dom.querySelectorAll<HTMLElement & { olPage?: PageView }>('.ol-page-wrap')].map(e => e.olPage!).filter(Boolean);
+  }
+
+  /** the pages on screen: one slide at a time in a deck */
+  private shownPageViews(): PageView[] {
+    const pv = (this.shownWrap as (HTMLElement & { olPage?: PageView }) | null)?.olPage;
+    return pv ? [pv] : this.pageViews();
   }
 
   private pageCtxFromEl(el: Element | null): PageCtx | null {
@@ -780,7 +875,7 @@ class LayoutController {
     const direct = this.pageCtxFromEl(el);
     if (direct) return direct;
     let best: PageCtx | null = null, dist = Infinity;
-    for (const pv of this.pageViews()) {
+    for (const pv of this.shownPageViews()) {
       const ctx = this.pageCtxFromEl(pv.dom);
       if (!ctx) continue;
       const r = ctx.rect;
@@ -799,7 +894,7 @@ class LayoutController {
     const scroller = (this.view.dom.closest('.editor-scroll') ?? document.documentElement) as HTMLElement;
     const sr = scroller.getBoundingClientRect();
     let best: PageCtx | null = null, bestVis = -1;
-    for (const pv of this.pageViews()) {
+    for (const pv of this.shownPageViews()) {
       const r = pv.contentDOM.getBoundingClientRect();
       const vis = Math.min(r.bottom, sr.bottom) - Math.max(r.top, sr.top);
       if (vis > bestVis) { bestVis = vis; best = this.pageCtxFromEl(pv.dom); }
@@ -1941,6 +2036,8 @@ class LayoutController {
     // typing in a page's speaker notes is typing: no tool letters, no object keys
     const $h = view.state.selection.$head;
     for (let d = $h.depth; d > 0; d--) if ($h.node(d).type.name === 'ol_notes') return false;
+    // one slide at a time: PageDown / PageUp turn slides (not while text is being edited)
+    if (this.shownWrap && !edited && !mod && (ev.key === 'PageDown' || ev.key === 'PageUp')) { this.stepSlide(ev.key === 'PageDown' ? 1 : -1); return true; }
     // the pen: Enter finishes, Esc finishes (or drops a single node)
     if (st.tool === 'pen' && this.pen) {
       if (ev.key === 'Enter') { this.finishPen(false); return true; }
@@ -1984,6 +2081,14 @@ class LayoutController {
       if (tools[k] && !ev.shiftKey) { setTool(view, tools[k][0], tools[k][1]); return true; }
     }
     if (!sel.length) {
+      // one slide at a time, nothing selected: the arrows turn slides, Home / End go to the first / last
+      if (this.shownWrap && !mod && !ev.altKey) {
+        const k = ev.key;
+        if (k === 'ArrowDown' || k === 'ArrowRight') { this.stepSlide(1); return true; }
+        if (k === 'ArrowUp' || k === 'ArrowLeft') { this.stepSlide(-1); return true; }
+        if (k === 'Home') { this.stepSlide(0, true); return true; }
+        if (k === 'End') { this.stepSlide(L.pages(view.state.doc).length - 1, true); return true; }
+      }
       if (mod && ev.key.toLowerCase() === 'a' && !ev.shiftKey) {
         const ctx = this.currentPage();
         if (ctx) { view.dispatch(selectObjects(view.state.tr, pageObjects(ctx.node, ctx.pos).filter(o => !o.node.attrs.lock).map(o => o.pos))); return true; }

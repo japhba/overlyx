@@ -2149,7 +2149,7 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .ol-rail-show:hover { color: var(--ui-fg); background: var(--ui-hover); }
 .ol-rail-head { display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 12px; border-bottom: 1px solid var(--ui-border2); }
 .ol-rail-title { font-weight: 600; }
-.ol-rail-count { margin-left: auto; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.ol-rail-count { margin-right: auto; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ol-rail-hide { width: 22px; height: 22px; padding: 0; border: none; border-radius: 4px; background: none; color: var(--ui-muted); }
 .ol-rail-notes { height: 20px; padding: 0 6px; border: 1px solid var(--ui-border); border-radius: 10px; background: none; color: var(--ui-muted); font: 11px var(--ui-font); }
 .ol-rail-notes:hover { color: var(--ui-fg); border-color: var(--active-border); }

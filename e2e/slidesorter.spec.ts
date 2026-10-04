@@ -95,6 +95,13 @@ test('the slide sorter: select, drag several, duplicate, delete, undo, keys, tra
   await expect(page.locator('.ol-sorter')).toHaveCount(0);
   await expect(page.locator('.ol-rail-item.current .ol-rail-num')).toHaveText('2');
 
+  // a double click opens that slide too
+  await page.locator('[data-rail-sorter]').click();
+  await cards(page).nth(3).dblclick();
+  await expect(page.locator('.ol-sorter')).toHaveCount(0);
+  await expect(page.locator('.ol-rail-item.current .ol-rail-num')).toHaveText('4');
+  await expect(page.locator('.lyx-editor .ol-page-wrap.ol-shown')).toContainText('Slide Four');
+
   // the file: the new order, the transition
   await expect(page.locator('.statusbar')).toContainText('All changes saved', { timeout: 15000 });
   const tex = readFileSync(`${PROJECTS_DIR}/${DOC}`, 'utf8');

@@ -19,7 +19,7 @@ import { showContextMenu, closeContextMenu, type MenuItem } from '../contextmenu
 import { MOD } from '../clipmenu';
 import { startPresentation, stepCount } from './present';
 import { SLIDE_LAYOUTS, insertSlide, type SlideLayout } from './slidelayouts';
-import { div, button, drawPage, scaleThumb, layoutPicker, undoStep, getSlideClipboard, setSlideClipboard, pageOfMutation } from './slidekit';
+import { div, button, drawPage, scaleThumb, layoutPicker, undoStep, getSlideClipboard, setSlideClipboard, pageOfMutation, livePos } from './slidekit';
 
 export interface SorterHost {
   page(): { w: number; h: number };
@@ -226,7 +226,7 @@ export class SlideSorter {
     const f = this.cards[Math.max(0, Math.min(this.cards.length - 1, focus))];
     this.focusWrap = f?.wrap ?? null;
     this.paint();
-    if (f) { f.el.scrollIntoView({ block: 'nearest' }); this.host.show(f.pos); }
+    if (f) { f.el.scrollIntoView({ block: 'nearest' }); this.host.show(livePos(f.wrap, f.pos)); }
   }
 
   private paint(): void {
@@ -256,8 +256,9 @@ export class SlideSorter {
     if (r) this.select(Array.from({ length: r.count }, (_, k) => r.first + k), r.first + r.count - 1);
   }
 
-  private positions(): number[] { return this.indices().map(i => this.cards[i].pos); }
-  private nodes(): PMNode[] { return this.indices().map(i => this.cards[i].node); }
+  private posOf(i: number): number { const c = this.cards[i]; return livePos(c.wrap, c.pos); }
+  private positions(): number[] { return this.indices().map(i => this.posOf(i)); }
+  private nodes(): PMNode[] { return this.indices().map(i => this.view.state.doc.nodeAt(this.posOf(i)) ?? this.cards[i].node); }
 
   private remove(): void {
     const at = this.indices()[0] ?? 0;
@@ -274,7 +275,7 @@ export class SlideSorter {
     const idx = this.indices();
     if (!idx.length) return;
     this.apply(() => {
-      const { tr, first } = L.insertPagesAfter(this.view.state, this.cards[idx[idx.length - 1]].pos, this.nodes());
+      const { tr, first } = L.insertPagesAfter(this.view.state, this.posOf(idx[idx.length - 1]), this.nodes());
       undoStep(this.view);
       this.view.dispatch(tr);
       return { first, count: idx.length };
@@ -291,7 +292,7 @@ export class SlideSorter {
     const nodes = getSlideClipboard();
     if (!nodes.length) return;
     const idx = this.indices();
-    const after = idx.length ? this.cards[idx[idx.length - 1]].pos : null;
+    const after = idx.length ? this.posOf(idx[idx.length - 1]) : null;
     this.apply(() => {
       const { tr, first } = L.insertPagesAfter(this.view.state, after, nodes);
       undoStep(this.view);
@@ -309,7 +310,7 @@ export class SlideSorter {
 
   newSlide(layout: SlideLayout): void {
     const idx = this.indices();
-    const after = idx.length ? this.cards[idx[idx.length - 1]].pos : null;
+    const after = idx.length ? this.posOf(idx[idx.length - 1]) : null;
     const { tr } = insertSlide(this.view.state, after, layout, this.host.page(), this.host.basePt());
     const first = idx.length ? idx[idx.length - 1] + 1 : this.cards.length;
     this.apply(() => { undoStep(this.view); this.view.dispatch(tr); return { first, count: 1 }; });
@@ -332,7 +333,7 @@ export class SlideSorter {
   /** leave the sorter: the canvas shows slide `index` */
   private close(index: number | null): void {
     closeContextMenu();
-    this.host.closed(index === null ? null : this.cards[index]?.pos ?? null);
+    this.host.closed(index === null || !this.cards[index] ? null : this.posOf(index));
   }
 
   private toggleLayouts(): void {
@@ -466,7 +467,8 @@ export class SlideSorter {
   }
 
   private onDblClick = (e: MouseEvent): void => {
-    const i = this.cardAt(e.target);
+    // (the press captured the pointer: the double click's target is the grid, not the card under it)
+    const i = this.cardAt(document.elementFromPoint(e.clientX, e.clientY));
     if (i >= 0) this.close(i);
   };
 

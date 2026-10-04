@@ -20,6 +20,15 @@ export function button(cls: string, text: string, title: string): HTMLButtonElem
   return b;
 }
 
+/**
+ * A page's position now, from its node view (an item's remembered position is as old as the last
+ * refresh, which waits a quarter second after an edit — text typed earlier on the page moves the ones after it).
+ */
+export function livePos(wrap: HTMLElement | null, fallback: number): number {
+  const p = (wrap as (HTMLElement & { olPage?: { pos(): number | undefined } }) | null)?.olPage?.pos();
+  return p === undefined ? fallback : p;
+}
+
 /** The page wrapper whose look a DOM change of the editor changes, if any (selection marks, overlays and labels do not count). */
 export function pageOfMutation(r: MutationRecord): HTMLElement | null {
   const t = (r.target.nodeType === 1 ? r.target : r.target.parentElement) as HTMLElement | null;

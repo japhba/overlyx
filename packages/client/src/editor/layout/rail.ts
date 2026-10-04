@@ -21,7 +21,7 @@ import { MOD } from '../clipmenu';
 import { startPresentation } from './present';
 import { SLIDE_LAYOUTS, insertSlide, type SlideLayout } from './slidelayouts';
 import { SlideSorter } from './sorter';
-import { div, button, drawPage, scaleThumb, layoutPicker, undoStep, getSlideClipboard, setSlideClipboard, pageOfMutation } from './slidekit';
+import { div, button, drawPage, scaleThumb, layoutPicker, undoStep, getSlideClipboard, setSlideClipboard, pageOfMutation, livePos } from './slidekit';
 
 export interface RailHost {
   page(): { w: number; h: number };
@@ -71,10 +71,10 @@ export class SlideRail {
     this.el = div('ol-slide-rail');
     this.el.dataset.olRail = '';
     const head = div('ol-rail-head');
-    const title = document.createElement('span');
-    title.className = 'ol-rail-title'; title.textContent = 'Slides';
+    // the header: which slide of how many, the notes switch, the sorter, folding
     this.count = document.createElement('span');
     this.count.className = 'ol-rail-count';
+    this.count.title = 'The slide shown, of all slides';
     this.notesBtn = button('ol-rail-notes', 'Notes', 'Speaker notes under the slides');
     this.notesBtn.dataset.railNotes = '';
     this.notesBtn.addEventListener('click', () => { this.host.notes(!this.host.notes()); this.syncNotes(); });
@@ -84,7 +84,7 @@ export class SlideRail {
     sorterBtn.addEventListener('click', () => this.openSorter());
     const hide = button('ol-rail-hide', '«', 'Hide the slides');
     hide.addEventListener('click', () => this.setCollapsed(true));
-    head.append(title, this.count, this.notesBtn, sorterBtn, hide);
+    head.append(this.count, this.notesBtn, sorterBtn, hide);
     this.list = div('ol-rail-list');
     this.list.tabIndex = 0;
     this.list.setAttribute('role', 'listbox');
@@ -254,14 +254,15 @@ export class SlideRail {
   };
 
   private syncCurrent(force = false): void {
+    if (this.forced && performance.now() > this.forced.until) this.forced = null;
     let index: number;
     if (this.forced) index = this.forced.index;
     else {
       const pos = this.host.currentPage();
-      index = pos === null ? -1 : this.items.findIndex(i => i.pos === pos);
+      index = pos === null ? -1 : this.items.findIndex(i => livePos(i.wrap, i.pos) === pos);
     }
     if (index >= this.items.length) index = this.items.length - 1;
-    this.count.textContent = this.items.length ? `${index + 1} / ${this.items.length}` : '';
+    this.count.textContent = this.items.length ? `Slide ${index + 1} / ${this.items.length}` : 'Slides';
     if (index === this.current && !force) return;
     this.items.forEach((it, i) => { it.el.classList.toggle('current', i === index); it.el.setAttribute('aria-selected', String(i === index)); });
     const changed = index !== this.current;
@@ -274,12 +275,14 @@ export class SlideRail {
     const it = this.items[Math.max(0, Math.min(this.items.length - 1, index))];
     if (!it) return;
     index = this.items.indexOf(it);
-    this.forced = { index, until: performance.now() + 600 };
-    if (it.wrap) {
+    // (one slide at a time the canvas shows exactly that page: nothing to hold on to while it scrolls there)
+    this.forced = this.view.dom.classList.contains('ol-single') ? null : { index, until: performance.now() + 600 };
+    // (a deck shows one slide at a time: the page is hidden until the caret is parked on it, and then shown at the top)
+    if (it.wrap?.offsetParent && !this.view.dom.classList.contains('ol-single')) {
       const r = it.wrap.getBoundingClientRect(), s = this.scroller.getBoundingClientRect();
       this.scroller.scrollTop += r.top - s.top - 16;
     }
-    this.host.park(it.pos);
+    this.host.park(livePos(it.wrap, it.pos));
     this.syncCurrent(true);
   }
 
@@ -290,12 +293,12 @@ export class SlideRail {
     this.sorter = new SlideSorter(this.view, this.scroller, {
       page: () => this.host.page(),
       basePt: () => this.host.basePt(),
-      show: pos => { this.refresh(); const i = this.items.findIndex(it => it.pos === pos); if (i >= 0) this.goTo(i); },
+      show: pos => { this.refresh(); const i = this.items.findIndex(it => livePos(it.wrap, it.pos) === pos); if (i >= 0) this.goTo(i); },
       closed: pos => {
         this.sorter?.destroy();
         this.sorter = null;
         this.refresh();
-        const i = pos === null ? -1 : this.items.findIndex(it => it.pos === pos);
+        const i = pos === null ? -1 : this.items.findIndex(it => livePos(it.wrap, it.pos) === pos);
         if (i >= 0) this.goTo(i);
         this.list.focus({ preventScroll: true });
       },
@@ -314,7 +317,8 @@ export class SlideRail {
   }
 
   newSlide(layout: SlideLayout, intoTitle = false, after = this.current): void {
-    const at = this.items[after]?.pos ?? null;
+    const it = this.items[after];
+    const at = it ? livePos(it.wrap, it.pos) : null;
     const { tr, pos } = insertSlide(this.view.state, at, layout, this.host.page(), this.host.basePt());
     this.step();
     this.view.dispatch(tr.scrollIntoView());
@@ -332,14 +336,15 @@ export class SlideRail {
     const it = this.items[index];
     if (!it) return;
     this.step();
-    this.view.dispatch(L.insertPage(this.view.state, it.pos + it.node.nodeSize, it.node));
+    const pos = livePos(it.wrap, it.pos), node = this.view.state.doc.nodeAt(pos) ?? it.node;
+    this.view.dispatch(L.insertPage(this.view.state, pos + node.nodeSize, node));
     this.run(() => index + 1);
   }
 
   private remove(index: number): void {
     const it = this.items[index];
     if (!it) return;
-    const tr = L.deletePage(this.view.state, it.pos);
+    const tr = L.deletePage(this.view.state, livePos(it.wrap, it.pos));
     if (!tr) return;
     this.step();
     this.view.dispatch(tr);
@@ -349,7 +354,7 @@ export class SlideRail {
   private move(index: number, to: number): void {
     const it = this.items[index];
     if (!it) return;
-    const tr = L.movePageTo(this.view.state, it.pos, to);
+    const tr = L.movePageTo(this.view.state, livePos(it.wrap, it.pos), to);
     if (!tr) return;
     this.step();
     this.view.dispatch(tr);
@@ -359,7 +364,7 @@ export class SlideRail {
   private copy(index: number, cut: boolean): void {
     const it = this.items[index];
     if (!it) return;
-    setSlideClipboard([it.node]);
+    setSlideClipboard([this.view.state.doc.nodeAt(livePos(it.wrap, it.pos)) ?? it.node]);
     if (cut) this.remove(index);
   }
 
@@ -367,7 +372,8 @@ export class SlideRail {
     const slideClipboard = getSlideClipboard();
     if (!slideClipboard.length) return;
     const it = this.items[index];
-    let at = it ? it.pos + it.node.nodeSize : this.view.state.doc.content.size;
+    const ipos = it ? livePos(it.wrap, it.pos) : -1;
+    let at = it ? ipos + (this.view.state.doc.nodeAt(ipos) ?? it.node).nodeSize : this.view.state.doc.content.size;
     const tr = this.view.state.tr;
     for (const n of slideClipboard) { tr.insert(at, n); at += n.nodeSize; }
     this.step();
@@ -379,7 +385,7 @@ export class SlideRail {
     const it = this.items[index];
     if (!it) return;
     this.step();
-    this.view.dispatch(L.setAttrs(this.view.state.tr, it.pos, { transition: t || null }));
+    this.view.dispatch(L.setAttrs(this.view.state.tr, livePos(it.wrap, it.pos), { transition: t || null }));
   }
 
   private menu(index: number): MenuItem[] {

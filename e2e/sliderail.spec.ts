@@ -15,7 +15,7 @@ const RUN = Date.now().toString(36);
 const PROJECT = `admin/e2e-rail-${RUN}`;
 const DOC = `${PROJECT}/talk.tex`;
 
-test.afterAll(() => { rmSync(`${PROJECTS_DIR}/${PROJECT}`, { recursive: true, force: true }); });
+test.afterAll(() => { for (const p of [PROJECT, `${PROJECT}-single`]) rmSync(`${PROJECTS_DIR}/${p}`, { recursive: true, force: true }); });
 
 const items = (page: Page) => page.locator('.ol-slide-rail .ol-rail-item');
 /** the first line of text on each canvas page, in page order */
@@ -80,7 +80,7 @@ test('the slide rail: thumbnails, new slides in the deck\'s style, reordering, t
   expect(await page.locator('.ol-slide-rail .ol-box-prompt').count()).toBe(0);
 
   // folded away: the page gets the room
-  const wide = async () => (await page.locator('.lyx-editor .ol-page').first().boundingBox())!.width;
+  const wide = async () => (await page.locator('.lyx-editor .ol-page-wrap.ol-shown > .ol-page').boundingBox())!.width;
   const before = await wide();
   await page.locator('.ol-rail-hide').click();
   await expect(page.locator('.ol-slide-rail')).toHaveClass(/collapsed/);
@@ -91,9 +91,11 @@ test('the slide rail: thumbnails, new slides in the deck\'s style, reordering, t
   // speaker notes: the rail shows them; a slide without notes offers to add some, and typing there is typing
   await page.locator('[data-rail-notes]').click();
   await expect(page.locator('.lyx-editor.ol-show-notes')).toHaveCount(1);
+  await items(page).nth(0).click();
   await page.locator('.lyx-editor .ol-page-wrap').nth(0).locator('.ol-notes-add').click();
   await page.keyboard.type('Start with the result.');   // s, t, r, e, a: tool letters on the canvas
   await expect(page.locator('.lyx-editor .ol-page-wrap').nth(0).locator('.ol-notes')).toContainText('Start with the result.');
+  await items(page).nth(1).click();
   await expect(page.locator('.lyx-editor .ol-page-wrap').nth(1).locator('.ol-notes-add')).toBeVisible();
   await page.locator('[data-rail-notes]').click();
   await expect(page.locator('.lyx-editor .ol-notes-add:visible')).toHaveCount(0);
@@ -107,5 +109,48 @@ test('the slide rail: thumbnails, new slides in the deck\'s style, reordering, t
   expect(tex).toMatch(/name=Title/);
   expect(tex).toContain('\\note{Start with the result.}');
   expect((tex.match(/\\begin\{frame\}/g) ?? []).length).toBe(4);
+  expect(errors).toEqual([]);
+});
+
+test('a deck shows one slide at a time: PageDown / PageUp, the arrows, the wheel and the rail turn slides', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  // a deck of its own (the tests of this file may run side by side)
+  const project = `${PROJECT}-single`;
+  expect((await page.request.post(BASE_URL + '/api/projects', { data: { name: project.split('/')[1] } })).ok()).toBeTruthy();
+  expect((await page.request.post(`${BASE_URL}/api/projects/${encodeURIComponent(project)}/new`, { data: { path: 'talk.tex', title: 'One at a time', layout: 'slides169' } })).ok()).toBeTruthy();
+  await page.goto(`/#/${project}/talk.tex`);
+  await page.waitForSelector('.ol-slide-rail .ol-rail-item', { timeout: 30000 });
+  // two more slides from the rail (the template has two)
+  await page.locator('[data-rail-new]').click();
+  await page.locator('[data-rail-new]').click();
+  await expect(items(page)).toHaveCount(4);
+  await items(page).nth(0).click();
+  await page.waitForSelector('.ol-slide-rail .ol-rail-item', { timeout: 30000 });
+  const shown = () => page.locator('.lyx-editor > .ol-page-wrap').evaluateAll(ws => ws.map((w, i) => ((w as HTMLElement).offsetParent ? i + 1 : 0)).filter(Boolean));
+  await expect.poll(shown).toEqual([1]);
+  // nothing scrolls: the slide is the window's
+  expect(await page.locator('.editor-scroll').evaluate(e => e.scrollHeight <= e.clientHeight + 1)).toBeTruthy();
+  const r = (await page.locator('.editor-scroll').boundingBox())!;
+  await page.mouse.click(r.x + r.width - 30, r.y + r.height / 2);   // beside the slide: nothing selected
+  await page.keyboard.press('PageDown');
+  await expect.poll(shown).toEqual([2]);
+  await expect(page.locator('.ol-rail-item.current .ol-rail-num')).toHaveText('2');
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(shown).toEqual([1]);
+  await page.keyboard.press('End');
+  await expect.poll(shown).toEqual([4]);
+  await page.keyboard.press('Home');
+  await expect.poll(shown).toEqual([1]);
+  // the wheel beyond the slide's edge turns one slide, however long a trackpad flick goes on
+  await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+  for (let i = 0; i < 8; i++) { await page.mouse.wheel(0, 40); await page.waitForTimeout(25); }
+  await expect.poll(shown).toEqual([2]);
+  await items(page).nth(2).click();
+  await expect.poll(shown).toEqual([3]);
+  // typing in a text box: PageDown is the text's
+  await page.locator('.lyx-editor .ol-page-wrap.ol-shown .ol-box').first().dblclick();
+  await page.keyboard.press('PageDown');
+  await expect.poll(shown).toEqual([3]);
   expect(errors).toEqual([]);
 });
