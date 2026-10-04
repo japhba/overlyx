@@ -77,6 +77,18 @@ export function movePage(state: EditorState, pagePos: number, dir: -1 | 1): Tran
   return tr;
 }
 
+/** Move a page into the gap before page `gap` (0 … the number of pages; the slide rail's drag). */
+export function movePageTo(state: EditorState, pagePos: number, gap: number): Transaction | null {
+  const list = pages(state.doc);
+  const i = list.findIndex(x => x.pos === pagePos);
+  if (i < 0 || gap < 0 || gap > list.length || gap === i || gap === i + 1) return null;
+  const p = list[i];
+  const tr = state.tr.delete(p.pos, p.pos + p.node.nodeSize);
+  const end = list[list.length - 1];
+  tr.insert(tr.mapping.map(gap < list.length ? list[gap].pos : end.pos + end.node.nodeSize), p.node);
+  return tr;
+}
+
 /* ------------------------------------------------------------------ objects */
 
 export function defaultParagraph(): PMNode {

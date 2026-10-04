@@ -13,6 +13,7 @@ import { resolveDocPath, viewDocDir, viewProject } from '../context';
 import { subscribeProjectEvents } from '../../projectevents';
 import { boxOf, placeElement, MM, PT, color, shapePathInBox, DASHES, ptToMm } from './geom';
 import { rawPreview } from './rawpreview';
+import { BOX_PROMPTS, boxIsEmpty } from './slidelayouts';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 
@@ -47,16 +48,20 @@ export class PageView implements NodeView {
 
   pos(): number | undefined { return this.getPos(); }
 
+  private shown = { fill: null as string | null, transition: null as string | null, label: '' };
+
   render(): void {
     const a = this.node.attrs;
-    this.contentDOM.style.background = color(a.fill) ?? '';
-    this.dom.dataset.transition = a.transition ?? '';
+    // written only when they change: the slide rail redraws a thumbnail on any change of its page's DOM
+    const fill = color(a.fill) ?? '';
+    if (fill !== this.shown.fill) { this.contentDOM.style.background = fill; this.shown.fill = fill; }
+    if ((a.transition ?? '') !== this.shown.transition) { this.dom.dataset.transition = a.transition ?? ''; this.shown.transition = a.transition ?? ''; }
     const pos = this.getPos();
     let index = 0;
     if (pos !== undefined) this.view.state.doc.forEach((c, off) => { if (off < pos && c.type.name === 'ol_page') index++; });
     const name = a.name ? ` — ${a.name}` : '';
-    this.label.textContent = `${index + 1}${name}`;
-    this.label.title = `Page ${index + 1}${name}${a.transition ? ` · transition: ${a.transition}` : ''}`;
+    const label = `${index + 1}${name}`, title = `Page ${index + 1}${name}${a.transition ? ` · transition: ${a.transition}` : ''}`;
+    if (label + title !== this.shown.label) { this.label.textContent = label; this.label.title = title; this.shown.label = label + title; }
   }
 
   update(node: PMNode): boolean {
@@ -82,6 +87,8 @@ export class BoxView implements NodeView {
   dom: HTMLElement;
   contentDOM: HTMLElement;
   frame: HTMLElement;
+  /** "Click to add title" in an empty named box (a new slide's, slidelayouts.ts): the editor's only */
+  private prompt: HTMLElement;
 
   constructor(public node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('div');
@@ -91,8 +98,22 @@ export class BoxView implements NodeView {
     this.frame.contentEditable = 'false';
     this.contentDOM = document.createElement('div');
     this.contentDOM.className = 'ol-box-content';
+    this.prompt = document.createElement('div');
+    this.prompt.className = 'ol-box-prompt';
+    this.frame.append(this.prompt);
     this.dom.append(this.frame, this.contentDOM);
     this.render();
+  }
+
+  private syncPrompt(): void {
+    const a = this.node.attrs;
+    const text = a.name && boxIsEmpty(this.node) ? BOX_PROMPTS[a.name] : undefined;
+    this.prompt.hidden = !text;
+    if (!text) return;
+    if (this.prompt.textContent !== text) this.prompt.textContent = text;
+    // laid out like the text would be: the box's margin, size, alignment and colour
+    const c = this.contentDOM.style, p = this.prompt.style;
+    p.padding = c.padding; p.fontSize = c.fontSize; p.color = c.color; p.textAlign = c.textAlign; p.justifyContent = c.justifyContent;
   }
 
   render(): void {
@@ -120,13 +141,14 @@ export class BoxView implements NodeView {
     this.dom.dataset.step = a.step ?? '';
     this.dom.classList.toggle('ol-grow', !!a.grow);
     this.dom.classList.toggle('ol-locked', !!a.lock);
+    this.syncPrompt();
   }
 
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     const attrsChanged = node.attrs !== this.node.attrs;
     this.node = node;
-    if (attrsChanged) this.render();
+    if (attrsChanged) this.render(); else this.syncPrompt();
     return true;
   }
 

@@ -424,6 +424,30 @@ blend.
     default, like Keynote; *justified* writes `align=justify`), base font size and line spacing;
     X / Y / W / H / angle fields in millimetres. Pages: new, duplicate, delete, move, background,
     transition, name, speaker notes under the pages. The documents panel lists the pages.
+  * **Slide rail** (`editor/layout/rail.ts`, PowerPoint's thumbnail pane; created by the layout
+    controller for a deck — several pages, or one slide-sized beamer page — so both shells have it): a
+    live miniature of every page left of the canvas, numbered, the current one marked as the canvas
+    scrolls or an object is picked. A thumbnail is a copy of the page's own DOM drawn at 320 px and
+    scaled (as the presenter view draws pages), redrawn when that page's DOM changes (a mutation
+    observer; selection marks do not count); it is not inside `.lyx-editor`, so the page's objects
+    appear twice in the DOM — e2e specs scope their locators to `.lyx-editor`. The rail lies over the
+    scroller's left edge inside the editor column (`--ol-rail-w` makes room on the canvas, `fit()`
+    subtracts it); « folds it to a strip (remembered, `ol.slides`; folded by default on a phone). A
+    click goes to a page, a drag reorders (`movePageTo`), right-click or ⋯ has New slide ▸ layouts,
+    duplicate, delete, cut / copy / paste of whole slides, move, transition and *Present from this
+    slide*; with the rail focused ↑ ↓ Home End move, Enter adds a slide, Delete removes one,
+    Ctrl+D duplicates, Ctrl+↑ / ↓ reorder, Ctrl+Z undoes (each command is its own undo step:
+    `stopCapturing`), F5 presents, Esc returns to the canvas.
+    **New slide layouts** (`editor/layout/slidelayouts.ts`): Title slide, Title and content, Section
+    header, Two content, Comparison, Title only, Big statement, Blank — in the deck's own style, read off
+    its pages since a beamer file has no masters (`deckStyle`: the title box most content pages share,
+    the largest box below it, the most common background, the objects repeated on at least 60 % of the
+    content pages — footer bars, logos — which come along; the Title slide is the first page with its
+    text taken out). New boxes are empty and named (`name=Title`, `Text`, `Subtitle`, …): the editor
+    shows *Click to add title* in them (`BoxView` prompt, gone while the caret is in the box, never in
+    the PDF, a thumbnail or the presentation), and text typed into an empty title starts with the
+    deck's title formatting (the layout plugin re-sets the stored marks, also after the box grows).
+    An empty page is written with `\olpage{}`, so it is read back as a page, not as a linear frame.
   * **Animations and presentation** (`editor/layout/present.ts`): an object's *step* is a beamer
     overlay specification (`2-`, `2-4`, `1,3-`): the PDF gets one page per step, as beamer does, and
     the badge on the canvas shows it; *Animation* picks the step ("appear next") and an entrance for
@@ -1323,6 +1347,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/selection-inserts.spec.ts   # comments / floats / captions keep the selection, pasted blocks, Enter in a caption, Insert ▸ Graphics on a layout page, live authors, TeX pane after settings, tracked tables, formula notice, tablet reflow
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sliderail.spec.ts   # the slide rail: thumbnails, new slides in the deck's style, drag to reorder, its menu, undo, the saved file
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layout.spec.ts   # layout documents: new deck, text box + formula, move / resize / undo, toolbar, presentation steps, zoom, text overlays, a linear beamer deck presented; the font size box
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
 npx vitest run tests/docworker.test.ts   # the document workers write the bytes the main thread writes; saves in order; a dead worker loses nothing

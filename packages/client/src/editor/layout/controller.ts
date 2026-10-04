@@ -37,6 +37,8 @@ import * as L from './commands';
 import type { PageView } from './nodeviews';
 import { startPresentation } from './present';
 import { openRawEditor } from './rawedit';
+import { SlideRail } from './rail';
+import { promptMarks, boxIsEmpty, BOX_PROMPTS } from './slidelayouts';
 import { editorContext } from '../context';
 
 export type Tool = 'select' | 'text' | 'shape' | 'line' | 'arrow' | 'pen' | 'pencil' | 'nodes' | 'crop';
@@ -125,6 +127,15 @@ export function deselectAll(tr: Transaction, pagePos?: number | null): Transacti
   return tr;
 }
 
+/** Did pages come, go or change places (not just change inside)? */
+function pageOrderChanged(a: PMNode, b: PMNode): boolean {
+  const pa = L.pages(a).map(p => p.node), pb = L.pages(b).map(p => p.node);
+  if (pa.length !== pb.length) return true;
+  const inB = new Set(pb), inA = new Set(pa);
+  const sa = pa.filter(n => inB.has(n)), sb = pb.filter(n => inA.has(n));
+  return sa.some((n, i) => n !== sb[i]);
+}
+
 /** Inkscape's Ctrl (and Keynote's Shift): lock the axis, keep the proportions, 15° steps */
 const constrained = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): boolean => e.shiftKey || e.ctrlKey || e.metaKey;
 /** (x, y) turned about (ax, ay) to the nearest 15° direction, at the same distance */
@@ -192,9 +203,18 @@ export function layoutPlugin(): Plugin<LayoutPluginState> {
     view: (view) => { controller = new LayoutController(view); return controller; },
     // a text selection never spans two text boxes: its head is kept in the anchor's box
     appendTransaction: (trs, _old, state) => {
-      if (!trs.some(t => t.selectionSet) || !L.isLayoutDoc(state.doc)) return null;
+      if (!L.isLayoutDoc(state.doc)) return null;
       const s = state.selection;
-      if (!(s instanceof TextSelection) || s.empty) return null;
+      // the caret in an empty named box (a new slide's "Click to add title"): what is typed gets the deck's
+      // title formatting — set again after any change of the document too (the box growing to its text), which drops stored marks
+      if (s instanceof TextSelection && s.empty && !state.storedMarks && trs.some(t => t.selectionSet || t.docChanged)) {
+        const eb = L.editedBox(state);
+        if (eb && eb.node.attrs.name && BOX_PROMPTS[eb.node.attrs.name] && boxIsEmpty(eb.node)) {
+          const marks = promptMarks(state.doc, eb.node, controller?.page ?? { w: 160, h: 90 });
+          return marks ? state.tr.setStoredMarks(marks) : null;
+        }
+      }
+      if (!trs.some(t => t.selectionSet) || !(s instanceof TextSelection) || s.empty) return null;
       const boxOf = (p: number) => { const $p = state.doc.resolve(p); for (let d = $p.depth; d > 0; d--) if ($p.node(d).type.name === 'ol_box' || $p.node(d).type.name === 'ol_notes') return $p.before(d); return -1; };
       const a = boxOf(s.anchor), h = boxOf(s.head);
       if (a === h || a < 0) return null;
@@ -305,6 +325,8 @@ class LayoutController {
   private nodeSel: { seg: number; pt: number } | null = null;
   private lastLocalBox: number | null = null;
   private growQueued = false;
+  /** the thumbnails of a deck (rail.ts) */
+  private rail: SlideRail | null = null;
 
   constructor(private view: EditorView) {
     controllers.set(view, this);
@@ -331,8 +353,30 @@ class LayoutController {
       const eb = L.editedBox(view.state);
       if (eb && eb.node.attrs.grow) this.lastLocalBox = eb.pos;
       this.queueGrow();
+      // a page added, removed or moved: the pages after it have other numbers
+      if (pageOrderChanged(prev.doc, view.state.doc)) for (const pv of this.pageViews()) pv.render();
     }
+    this.syncRail(!!prev && prev.doc !== view.state.doc);
     this.renderOverlays();
+  }
+
+  /** a deck — slides, or several pages — has the slide rail beside the canvas */
+  private syncRail(docChanged: boolean): void {
+    const deck = !!this.scroller && (L.pages(this.view.state.doc).length > 1 || (this.beamer && this.page.w <= 300 && this.page.h <= 200));
+    if (deck && !this.rail) {
+      this.rail = new SlideRail(this.view, this.scroller!, {
+        page: () => this.page,
+        basePt: () => this.basePt,
+        currentPage: () => this.currentPage()?.pos ?? null,
+        park: pos => this.view.dispatch(deselectAll(this.view.state.tr, pos)),
+        refit: () => this.fit(),
+      });
+      this.fit();
+    } else if (!deck && this.rail) {
+      this.rail.destroy();
+      this.rail = null;
+      this.fit();
+    } else this.rail?.update(docChanged);
   }
 
   destroy(): void { this.detach(); this.metaUnobserve?.(); this.metaUnobserve = null; this.colorStyle?.remove(); this.gesture?.cancel(); }
@@ -359,6 +403,7 @@ class LayoutController {
   }
 
   private detach(): void {
+    this.rail?.destroy(); this.rail = null;
     this.resize?.disconnect(); this.resize = null;
     if (this.scroller) {
       this.scroller.removeEventListener('wheel', this.onWheel);
@@ -652,7 +697,7 @@ class LayoutController {
   /** the page's scale: the zoom at which the whole page fits the window, times the canvas zoom */
   private fit(): void {
     const sc = this.scroller ?? (this.view.dom.closest('.editor-scroll') ?? this.view.dom.parentElement) as HTMLElement | null;
-    const width = Math.max(200, (sc?.clientWidth ?? 1000) - 72);
+    const width = Math.max(200, (sc?.clientWidth ?? 1000) - 72 - (this.rail?.width() ?? 0));
     const height = Math.max(150, (sc?.clientHeight ?? 800) - 70);
     const pxPerMm = Math.min(width / this.page.w, height / this.page.h);
     this.fitPagePt = Math.min(pxPerMm / 2.845276, 4);
