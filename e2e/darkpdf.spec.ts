@@ -77,6 +77,9 @@ const photoSpot = (page: Page) => page.evaluate(() => {
   return [sx / n / c.width, sy / n / c.height];
 });
 const near = (a: number[], b: number[], tol: number) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
+/** the editor's dark page colour (#121216), give or take the rounding of the canvas filter (Firefox's comes out 2 levels lighter) */
+const PAGE = [18, 18, 22];
+const isPage = (rgb: number[]) => near(rgb, PAGE, 3);
 
 test('dark pages: the paper in the page colour, colours keep their hue, the photograph its colours; ◐ switches back', async ({ page }) => {
   const errors = collectErrors(page);
@@ -99,13 +102,13 @@ test('dark pages: the paper in the page colour, colours keep their hue, the phot
   await pickTheme(page, 'Dark');
   await expect(page.locator('.pdf-viewer')).toHaveClass(/dark-pages/);
   await expect(page.locator('[data-pdf-dark]')).toHaveAttribute('aria-pressed', 'true');
-  await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([18, 18, 22]);
+  await expect.poll(async () => isPage(await pixel(page, 0.03, 0.03)), { timeout: 10000 }).toBe(true);
   expect(near(await pixel(page, spot[0], spot[1]), photoLight, 6)).toBe(true);
 
   // the sepia tone: the ink follows the editor's text colour — the paper stays the page colour
   await page.evaluate(() => { document.documentElement.dataset.tone = 'sepia'; });
   await page.waitForTimeout(600);
-  expect(await pixel(page, 0.03, 0.03)).toEqual([18, 18, 22]);
+  expect(isPage(await pixel(page, 0.03, 0.03))).toBe(true);
 
   // ◐: the PDF's own colours again, kept as a preference
   await page.evaluate(() => { document.documentElement.dataset.tone = 'white'; });
@@ -114,7 +117,7 @@ test('dark pages: the paper in the page colour, colours keep their hue, the phot
   await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([255, 255, 255]);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ol.prefs') || '{}').darkPdf)).toBe(false);
   await page.locator('[data-pdf-dark]').click();
-  await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([18, 18, 22]);
+  await expect.poll(async () => isPage(await pixel(page, 0.03, 0.03)), { timeout: 10000 }).toBe(true);
   await pickTheme(page, 'Light');
   expect(errors.filter(e => !/favicon|ResizeObserver|willReadFrequently/.test(e))).toEqual([]);
 });
@@ -155,7 +158,7 @@ test('a PDF figure is judged as a whole: its heat map turns dark with it, the ph
 
   await pickTheme(page, 'Dark');
   await expect(page.locator('.pdf-viewer')).toHaveClass(/dark-pages/);
-  await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([18, 18, 22]);
+  await expect.poll(async () => isPage(await pixel(page, 0.03, 0.03)), { timeout: 10000 }).toBe(true);
   // the heat map is dark with the figure; the photograph in the same figure is as it was
   expect(await area(spots.heat[0], spots.heat[1])).toBeLessThan(110);
   expect(near(await pixel(page, spots.grain[0], spots.grain[1]), grainLight, 8)).toBe(true);
