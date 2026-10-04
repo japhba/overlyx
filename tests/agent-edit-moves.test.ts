@@ -139,3 +139,37 @@ describe('agent edits of a document with an editor connected', () => {
     await manager.unload(doc.id);
   });
 });
+
+describe('MCP edits (edit_document / write_document) of a document with an editor connected', () => {
+  for (const [where, main] of [['on the worker’s mirror', false], ['on the main thread', true]] as const) it(`made ${where}: a passage replaced, a paragraph split and joined, tracked and not — exactly what was asked, everywhere`, async () => {
+    const { doc, editor, file } = await scenario(main ? 'mcp-main' : 'mcp', main);
+    const check = async (has: string[], hasNot: string[]) => {
+      await settle();
+      const t = await doc.textAsync();
+      expect(doc.toText()).toBe(t);
+      for (const s of has) expect(t).toContain(s);
+      for (const s of hasNot) expect(t).not.toContain(s);
+      await doc.saveToFile();
+      expect(readFileSync(file, 'utf8')).toBe(t);
+      return t;
+    };
+    // edit_document, tracked:false — a paragraph split in two (the second half copied into a new one)
+    await doc.agentEdit('plain', null, { replace: { oldText: 'will help with this paper.', newText: 'will help.\n\nWith this paper.', all: false } });
+    await check(['The agent will help.\n\nWith this paper.$E=mc^2$', 'A second paragraph stays.'], ['will help with']);
+    expect(editor.pars().slice(0, 3)).toEqual(['The agent will help.', 'With this paper.$E=mc^2$', 'A second paragraph stays.']);
+    // edit_document, tracked — words changed in the copied half
+    await doc.agentEdit('tracked', null, { replace: { oldText: 'With this paper.', newText: 'With this draft.', all: false } }, { author: 'Agent' });
+    await check(['With this \\lyxdeleted{Agent}', 'draft'], []);
+    // write_document, tracked:false — the two joined again (the whole source given)
+    const now = await doc.textAsync();
+    const joined = now.replace(/The agent will help\.\n\n/, 'The agent will help. ');
+    expect(joined).not.toBe(now);
+    await doc.agentEdit('plain', null, { after: joined });
+    const t = await check(['The agent will help. With this ', 'A second paragraph stays.'], []);
+    expect(t).toBe(joined);
+    expect(editor.pars()[0]).toMatch(/^The agent will help\. With this /);
+    expect(editor.pars()[0]).toMatch(/\$E=mc\^2\$$/);
+    editor.close();
+    await manager.unload(doc.id);
+  });
+});
