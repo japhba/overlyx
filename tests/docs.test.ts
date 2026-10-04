@@ -93,7 +93,7 @@ describe('saving', () => {
 
   it('refuses to open something that is not a .tex document', async () => {
     writeFileSync(file('junk.lyx'), 'this is not lyx\n');
-    await expect(manager.open('u/p/junk.lyx')).rejects.toThrow(/not a .tex document/);
+    await expect(manager.open('u/p/junk.lyx')).rejects.toThrow(/not a .tex or markdown document/);
   });
 
   it('opens a fragment (child document without a preamble) and writes it back as one', async () => {

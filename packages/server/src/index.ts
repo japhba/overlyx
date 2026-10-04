@@ -877,6 +877,7 @@ api.get('/docs/*/meta', async (req, res) => {
       textclass: m.textclass, modules: m.modules,
       availableModules: describeModules(config.layoutDir, [proj, docDir]),
       language: m.language,
+      format: m.format,
       useRefstyle: m.useRefstyle,
       citeEngine: m.citeEngine,
       citeEngineType: m.citeEngineType,
