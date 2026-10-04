@@ -224,7 +224,20 @@ const NOTE_HEADER = /^% @(note|comment|greyedout)(?:\s+(open|collapsed))?\s*$/;
 const NOTE_END = /^% @end\s*$/;
 
 /** the 1-based line of the scanner's position within its text (for messages) */
-function lineAt(s: Scanner): number { let n = 1; for (let i = 0; i < s.pos && i < s.s.length; i++) if (s.s.charCodeAt(i) === 10) n++; return n; }
+function lineAt(s: Scanner): number {
+  // (the newlines of a text are found once: counting from the start for every warning made a
+  // document with many unknown environments quadratic — 40% of parsing an 850 kB paper)
+  let nl = newlineCache.get(s);
+  if (!nl) {
+    nl = [];
+    for (let i = s.s.indexOf('\n'); i >= 0; i = s.s.indexOf('\n', i + 1)) nl.push(i);
+    newlineCache.set(s, nl);
+  }
+  let lo = 0, hi = nl.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (nl[m] < s.pos) lo = m + 1; else hi = m; }
+  return lo + 1;
+}
+const newlineCache = new WeakMap<Scanner, number[]>();
 
 /** `\\fontsize{25}{30}` → "25pt" (leading 1.2 × the size), "25pt/33.5pt" otherwise; null for sizes that are no plain lengths */
 function absoluteSize(size: string, skip: string): string | null {

@@ -185,9 +185,15 @@ export interface EffectiveFont {
   lang: string;
 }
 
+/** A font attribute against the base's: undefined when it is the base's (or default). */
+function normFont(v: string | undefined, def: string): string | undefined {
+  return v === undefined || v === 'default' ? undefined : v === def ? undefined : v;
+}
+
 /** Reduce an item font against the layout base font; language defaults to `parLang`. */
 export function effectiveFont(f: FontState, base: RunParams['baseFont'], parLang: string): EffectiveFont {
-  const norm = (v: string | undefined, def: string) => (v === undefined || v === 'default' ? undefined : v === def ? undefined : v);
+  // (called for every character written: no closure made per call)
+  const norm = normFont;
   const baseFamily = base.family ?? 'roman';
   const baseSeries = base.series ?? 'medium';
   const baseShape = base.shape ?? 'up';
