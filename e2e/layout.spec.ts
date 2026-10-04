@@ -7,7 +7,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { login, texDoc, collectErrors, PROJECTS_DIR } from './helpers';
+import { login, texDoc, collectErrors, PROJECTS_DIR, browserName } from './helpers';
 
 const PROJECT = 'admin/e2e-layout';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -386,8 +386,10 @@ test('a layout document opens with its whole page in the window; a pinch (Ctrl +
   await page.waitForTimeout(300);
   const pg1 = (await page.locator('.ol-page').first().boundingBox())!;
   expect(pg1.width).toBeGreaterThan(pg0.width * 1.5);
-  expect(Math.abs(pg1.x + pg1.width * 0.3 - px)).toBeLessThan(6);
-  expect(Math.abs(pg1.y + pg1.height * 0.4 - py)).toBeLessThan(6);
+  // (within 6 px — 8 where pointer events carry whole pixels, WebKit and Firefox: the half pixel is zoomed with the page)
+  const slack = browserName(page) === 'chromium' ? 6 : 8;
+  expect(Math.abs(pg1.x + pg1.width * 0.3 - px)).toBeLessThan(slack);
+  expect(Math.abs(pg1.y + pg1.height * 0.4 - py)).toBeLessThan(slack);
   await expect(page.locator('.zoom-select')).not.toHaveValue('fit');
   // Ctrl+Minus steps out, Fit goes back to the whole page
   await page.keyboard.press('Control+Minus');

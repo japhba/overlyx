@@ -275,7 +275,8 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
       keyup(view, event) {
         // Native arrow movement precedes selectionchange; publish its final position
         // before source mirroring or a decoration update can use the previous caret.
-        if (/^(Arrow|Home$|End$|Page)/.test(event.key)) { caretOutOfWidget(view, event.shiftKey); flushDomSelection(view); }
+        // (not after Ctrl+Alt+← / ⌥⌘←, which navigate: the caret is where the jump put it)
+        if (/^(Arrow|Home$|End$|Page)/.test(event.key)) { if (!(event.altKey && (event.ctrlKey || event.metaKey))) caretOutOfWidget(view, event.shiftKey); flushDomSelection(view); }
         return false;
       },
       contextmenu(view, ev) {
