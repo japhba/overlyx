@@ -1924,7 +1924,12 @@ clientInfo, User-Agent). It exposes these tools:
   tools, the clone only changes with `git pull`). The OverLyX repository registers the bridge for
   agents working in a clone of it: `.mcp.json` and `.codex/config.toml` run the checkout's own CLI
   (`packages/cli/bin/overlyx.js`). The Git dialog shows these steps, and the direct `claude mcp add
-  --transport http …` / Codex `url` + `bearer_token_env_var` forms for use without the CLI.
+  --transport http …` / Codex `url` + `bearer_token_env_var` forms for use without the CLI. Claude Code asks before the
+  first use of each tool of a server, and "don't ask again" holds only for the directory it was started
+  in, so `mcp install` also adds `mcp__overlyx` to `permissions.allow` in Claude Code's user settings
+  (`$CLAUDE_CONFIG_DIR` or `~/.claude/settings.json`, merged and written atomically; `--ask-each-time`
+  skips it, `mcp uninstall` takes it out). Started anywhere, Claude Code then works on OverLyX without
+  prompts.
 * **Signing the CLI in** (`server/src/cliLogin.ts`): `overlyx auth login` opens `/cli/login` with
   a PKCE challenge and the port of a listener on 127.0.0.1; the consent page rides the browser's
   OverLyX session; *Authorize* redirects to the listener with a one-time code (CSP `form-action`
@@ -2044,7 +2049,7 @@ clientInfo, User-Agent). It exposes these tools:
   computer) and reports turns back (`POST /cli/agent/turns/:id` `{progress}` | `{final}` |
   `{error}`). `overlyx agent install` makes it a login service (systemd `--user` unit
   `overlyx-agent.service`, launchd `app.overlyx.agent`, with the PATH under which `claude` was
-  found; `mcp install` offers it), so nothing is kept running by hand; an installed CLI updates
+  found; opt-in, `mcp install` does not set it up), so nothing is kept running by hand; an installed CLI updates
   itself and the service restarts it. In `mcpAgents.ts` it is an agent like the others — client
   `overlyx-runner@<computer>`, "Claude Code on <computer>" — whose messages go to the runner one at a
   time (`via: 'run'`) with `options` `{model, effort, fresh}` from the panel's pickers (the models

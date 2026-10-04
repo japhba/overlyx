@@ -20,6 +20,8 @@ mkdirSync(join(ROOT, 'projects'), { recursive: true });
 mkdirSync(join(ROOT, 'source'), { recursive: true });
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
+// Claude Code's settings, for every CLI the tests start (`mcp install` writes there): never the real ones
+process.env.CLAUDE_CONFIG_DIR = join(ROOT, 'claude-home');
 
 const gitmod = await import('../packages/server/src/git.ts');
 const { createUser } = await import('../packages/server/src/auth.ts');
@@ -282,8 +284,11 @@ describe("overlyx mcp: local agents through the CLI's bridge", () => {
     expect(a[1].error.message).toMatch(/not signed in to .* auth login/);
   });
 
-  it('install registers the bridge with Claude Code and Codex (an old registration replaced, the rest of config.toml kept); uninstall removes it', async () => {
+  it('install registers the bridge with Claude Code and Codex (an old registration replaced, the rest of config.toml kept), Claude Code may use its tools without asking; uninstall removes it all', async () => {
     const toml = join(CODEX_HOME, 'config.toml');
+    const settings = join(process.env.CLAUDE_CONFIG_DIR!, 'settings.json');
+    mkdirSync(process.env.CLAUDE_CONFIG_DIR!, { recursive: true });
+    writeFileSync(settings, JSON.stringify({ model: 'opus', permissions: { allow: ['Bash(git status)'], deny: ['WebFetch'] } }, null, 2));
     writeFileSync(toml, 'model = "o4"\n\n[mcp_servers.overlyx]\nurl = "https://old.example/mcp"\n\n[mcp_servers.overlyx.env]\nX = "1"\n\n[mcp_servers.other]\ncommand = "other"\n');
     const r = await execFileP(process.execPath, [CLI, 'mcp', 'install', '--yes'], { encoding: 'utf8', env: agentEnv() });
     expect(r.stdout).toContain('Claude Code: registered');
@@ -298,7 +303,13 @@ describe("overlyx mcp: local agents through the CLI's bridge", () => {
     expect(text).toContain(`[mcp_servers.overlyx]`);
     expect(text).toContain(`command = ${JSON.stringify(CLI)}\nargs = ["mcp", "serve"]`);
     expect(readFileSync(toml + '.bak', 'utf8')).toContain('old.example');
+    // launched from any directory, Claude Code does not ask before each OverLyX tool; the rest of its settings stay
+    expect(r.stdout).toContain("OverLyX's tools run without asking");
+    expect(JSON.parse(readFileSync(settings, 'utf8'))).toEqual({ model: 'opus', permissions: { allow: ['Bash(git status)', 'mcp__overlyx'], deny: ['WebFetch'] } });
+    await execFileP(process.execPath, [CLI, 'mcp', 'install', '--yes'], { encoding: 'utf8', env: agentEnv() });
+    expect(JSON.parse(readFileSync(settings, 'utf8')).permissions.allow).toEqual(['Bash(git status)', 'mcp__overlyx']);   // once
     const u = await execFileP(process.execPath, [CLI, 'mcp', 'uninstall'], { encoding: 'utf8', env: agentEnv() });
+    expect(JSON.parse(readFileSync(settings, 'utf8'))).toEqual({ model: 'opus', permissions: { allow: ['Bash(git status)'], deny: ['WebFetch'] } });
     expect(u.stdout).toContain('Codex: removed');
     expect(readFileSync(toml, 'utf8')).not.toContain('[mcp_servers.overlyx]');
     expect(readFileSync(join(FAKE, 'claude.log'), 'utf8')).toContain('mcp remove overlyx -s user');

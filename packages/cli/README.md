@@ -71,6 +71,15 @@ An installed CLI also keeps itself up to date (`overlyx update`; the bridge chec
 the next session). The agent edits your projects on the server, with your role in each; started
 inside a git clone of an OverLyX project, it is told which project that is.
 
+So you can start `claude` in any directory and tell it to do something in OverLyX ("tighten the
+abstract of my thesis", "fix this paragraph": it sees your cursor and selection in the document you
+have open). Claude Code normally asks before it uses each tool of a server the first time, and "don't
+ask again" holds only for the directory it runs in. `mcp install` therefore allows OverLyX's tools
+once, for every directory: it adds `mcp__overlyx` to `permissions.allow` in Claude Code's user
+settings (`~/.claude/settings.json`) and leaves the rest of that file alone. Its edits are tracked
+changes and every state stays in the project's history. `--ask-each-time` skips this, and
+`mcp uninstall` takes the rule out again.
+
 A clone of the OverLyX repository needs no registration at all: its `.mcp.json` (Claude Code) and
 `.codex/config.toml` (Codex, once the project is trusted) run the checkout's own CLI as the bridge —
 sign in once per computer with `node packages/cli/bin/overlyx.js auth login`.
@@ -92,8 +101,8 @@ an outgoing connection to the server open, because the server cannot reach into 
 sign-in it uses is the one in the config file. Claude Code started this way gets OverLyX's tools and
 nothing else: no shell, no local files and no other MCP servers. To allow more built-in tools, list
 them in `agent.json` next to the login (`{"allowTools": ["WebSearch"]}`). Only you can write to it,
-not the people you share projects with. `mcp install` offers the service when it finds Claude Code;
-`overlyx agent run` runs the same in the foreground.
+not the people you share projects with. `overlyx agent run` runs the same in the foreground.
+None of this is needed for the usual way round, where you start Claude Code yourself (above).
 
 ## Commands
 
@@ -108,7 +117,7 @@ overlyx repo create [NAME] [--source PATH] [--push] [--remote NAME]
 overlyx repo push [PATH] [--name NAME] [--remote NAME]
 overlyx build OWNER/PROJECT/FILE.tex [--pdf FILE] [--log] [--wait SECONDS]
 overlyx restore OWNER/PROJECT COMMIT
-overlyx mcp install [--client claude,codex] [--yes] | status | uninstall | serve
+overlyx mcp install [--client claude,codex] [--yes] [--ask-each-time] | status | uninstall | serve
 overlyx agent install | status | uninstall | run
 overlyx update
 ```

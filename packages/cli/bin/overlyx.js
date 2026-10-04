@@ -10,7 +10,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -26,7 +26,7 @@ Usage:
   overlyx repo push [PATH] [--name NAME] [--remote NAME]
   overlyx build OWNER/PROJECT/FILE.tex [--pdf FILE] [--log] [--wait SECONDS]
   overlyx restore OWNER/PROJECT COMMIT
-  overlyx mcp install [--client claude,codex] [--yes]   let local AI agents use OverLyX
+  overlyx mcp install [--client claude,codex] [--yes]   let local AI agents use OverLyX (Claude Code: in every directory, no prompts)
   overlyx mcp status | uninstall
   overlyx mcp serve                                      (what the agents run: the MCP bridge)
   overlyx agent install                                  the Agent panel in OverLyX runs Claude Code here
@@ -56,7 +56,7 @@ function fail(message, code = 1) {
 function parse(argv) {
   const positional = [];
   const flags = {};
-  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser', 'no-git', 'agent', 'no-agent']);
+  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser', 'no-git', 'ask-each-time']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--') { positional.push(...argv.slice(i + 1)); break; }
@@ -786,6 +786,40 @@ async function claudeRegistered() {
   try { const r = await execFileP('claude', ['mcp', 'get', MCP_NAME], { encoding: 'utf8', timeout: 20000 }); return /mcp serve/.test(r.stdout) ? 'bridge' : 'other'; } catch { return null; }
 }
 
+/*
+ * Claude Code asks before it uses each tool of a server the first time, and "don't ask again" holds
+ * only in the directory it was started in. Launched from anywhere, that is a prompt per tool per
+ * folder: `mcp install` allows OverLyX's tools once, in Claude Code's user settings (the rule
+ * `mcp__overlyx`, merged into permissions.allow; `--ask-each-time` leaves it out). Their edits are
+ * tracked changes and every state stays in the project's history.
+ */
+const CLAUDE_ALLOW = `mcp__${MCP_NAME}`;
+const claudeSettingsFile = () => path.join(process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'), 'settings.json');
+function readClaudeSettings() {
+  const file = claudeSettingsFile();
+  if (!fs.existsSync(file)) return {};
+  let v;
+  try { v = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { throw new Error(`${file} is not plain JSON — add "${CLAUDE_ALLOW}" to permissions.allow there yourself`); }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error(`${file} is not a settings object`);
+  return v;
+}
+function claudeToolsAllowed() {
+  try { const a = readClaudeSettings().permissions?.allow; return Array.isArray(a) && a.includes(CLAUDE_ALLOW); } catch { return false; }
+}
+/** Add (or take out) the rule; everything else in the file stays as it is. Returns whether the file changed. */
+function allowClaudeTools(on) {
+  const settings = readClaudeSettings();
+  const perms = settings.permissions && typeof settings.permissions === 'object' && !Array.isArray(settings.permissions) ? settings.permissions : {};
+  const allow = Array.isArray(perms.allow) ? perms.allow : [];
+  if (allow.includes(CLAUDE_ALLOW) === on) return false;
+  settings.permissions = { ...perms, allow: on ? [...allow, CLAUDE_ALLOW] : allow.filter(r => r !== CLAUDE_ALLOW) };
+  const file = claudeSettingsFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.overlyx-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', { mode: fs.existsSync(file) ? fs.statSync(file).mode & 0o777 : 0o600 });
+  fs.renameSync(tmp, file);
+  return true;
+}
 async function registerClaude(args) {
   // replaced, whatever was there (an older URL + token registration included), in every scope it may be in
   for (const scope of ['user', 'local']) await execFileP('claude', ['mcp', 'remove', MCP_NAME, '-s', scope], { timeout: 20000 }).catch(() => undefined);
@@ -834,10 +868,17 @@ async function mcpInstall(flags) {
     return;
   }
   const names = [agents.claude && 'Claude Code', agents.codex && 'Codex'].filter(Boolean).join(' and ');
-  if (!flags.yes && !(await ask(`Let ${names} use OverLyX (registers \`overlyx mcp serve\` with them)? [Y/n] `))) { process.stdout.write('Not registered. Later: overlyx mcp install\n'); return; }
+  const quiet = agents.claude && !flags['ask-each-time'];
+  if (!flags.yes && !(await ask(`Let ${names} use OverLyX (registers \`overlyx mcp serve\` with them${quiet ? '; Claude Code then uses its tools without asking each time' : ''})? [Y/n] `))) { process.stdout.write('Not registered. Later: overlyx mcp install\n'); return; }
   if (agents.claude) {
-    try { await registerClaude(args); process.stdout.write('Claude Code: registered "overlyx" (all directories)\n'); }
-    catch (e) { process.stdout.write(`Claude Code: not registered — ${String(e.stderr || e.message).trim()}\n`); }
+    try {
+      await registerClaude(args);
+      process.stdout.write('Claude Code: registered "overlyx" (all directories)\n');
+      if (quiet) {
+        try { allowClaudeTools(true); process.stdout.write(`Claude Code: OverLyX's tools run without asking, in every directory (${CLAUDE_ALLOW} in ${claudeSettingsFile()})\n`); }
+        catch (e) { process.stdout.write(`Claude Code: it will ask before each OverLyX tool — ${e.message}\n`); }
+      }
+    } catch (e) { process.stdout.write(`Claude Code: not registered — ${String(e.stderr || e.message).trim()}\n`); }
   }
   if (agents.codex) {
     try { registerCodex(args); process.stdout.write(`Codex: registered "overlyx" in ${codexConfig()}\n`); }
@@ -845,15 +886,12 @@ async function mcpInstall(flags) {
   }
   if (!creds.token) process.stdout.write(`The agents connect once you are signed in: overlyx auth login${creds.host === DEFAULT_HOST ? '' : ` --host ${creds.host}`}\n`);
   else process.stdout.write(`They act as ${creds.username} on ${creds.host}; new tools and server changes reach them without registering again.\n`);
-  // the other direction: OverLyX's Agent panel starts Claude Code here, with the model and effort picked there
-  if (agents.claude && creds.token && serviceFile() && !flags['no-agent'] && (flags.agent || await ask('Also let the Agent panel in OverLyX run Claude Code on this computer, with the model and effort you pick there (a small login service; OverLyX tools only, no shell)? [Y/n] '))) {
-    try { await agentInstall(flags); } catch (e) { process.stdout.write(`Agent service: not installed — ${e.message} (later: overlyx agent install)\n`); }
-  }
 }
 
 async function mcpUninstall() {
   let any = false;
   if (await has('claude')) for (const scope of ['user', 'local']) { try { await execFileP('claude', ['mcp', 'remove', MCP_NAME, '-s', scope], { timeout: 20000 }); any = true; process.stdout.write(`Claude Code: removed "overlyx" (${scope})\n`); } catch { /* not there */ } }
+  try { if (allowClaudeTools(false)) process.stdout.write(`Claude Code: ${CLAUDE_ALLOW} taken out of ${claudeSettingsFile()}\n`); } catch { /* not plain JSON: left alone */ }
   if (unregisterCodex()) { any = true; process.stdout.write(`Codex: removed "overlyx" from ${codexConfig()}\n`); }
   if (!any) process.stdout.write('OverLyX was not registered with Claude Code or Codex\n');
 }
@@ -861,7 +899,7 @@ async function mcpUninstall() {
 /** Registrations, and a real round trip through the server: initialize + tools/list. */
 async function mcpStatus(flags) {
   const claude = await has('claude') ? await claudeRegistered() : undefined;
-  process.stdout.write(`Claude Code: ${claude === undefined ? 'not installed' : claude === 'bridge' ? 'registered' : claude === 'other' ? 'registered another way (overlyx mcp install replaces it)' : 'not registered'}\n`);
+  process.stdout.write(`Claude Code: ${claude === undefined ? 'not installed' : claude === 'bridge' ? `registered${claudeToolsAllowed() ? ', its tools run without asking' : ', asks before each tool (overlyx mcp install allows them)'}` : claude === 'other' ? 'registered another way (overlyx mcp install replaces it)' : 'not registered'}\n`);
   process.stdout.write(`Codex: ${codexRegistered() ? `registered (${codexConfig()})` : 'not registered'}\n`);
   const creds = credentials(flags, false);
   if (!creds.token) { process.stdout.write(`Server: not logged in to ${creds.host}\n`); return; }

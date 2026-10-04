@@ -145,10 +145,7 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
           <pre class="git-cmds">{`# with the OverLyX CLI (above): sign in through the browser, then Claude Code and Codex are registered —
 # nothing to redo when the server or your token changes
 overlyx auth login${location.origin === 'https://overlyx.app' ? '' : ' --host ' + location.origin}
-overlyx mcp install
-# and the other way round: the Agent panel here starts Claude Code on that computer,
-# with the model and effort you pick in the panel (a login service, OverLyX's tools only)
-overlyx agent install`}</pre>
+overlyx mcp install       # then: claude, anywhere — "…in OverLyX, fix the paragraph I'm in"`}</pre>
           <div class="hint">
             The agents run the CLI as their bridge (<code>overlyx mcp serve</code>): it connects with your current login and the server's
             current settings at every session. In a clone of the OverLyX repository nothing needs registering — its <code>.mcp.json</code>{' '}
