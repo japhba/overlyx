@@ -129,7 +129,7 @@ export function replay(script: string[], peers: number, opts: { dumpAt?: number 
     const d = /^\S+ deletes (\S+)/.exec(line); if (d) deleted.add(d[1]);
     // what its author saw when acting (a view between a sync message and the repair that follows it is passing)
     const actor = ps.find(q => line.startsWith(q.name + ' '));
-    if (actor && / (types|Enter|joins|deletes) /.test(line)) views.push(allWords(actor.pars()));
+    if (actor && actor.inbox.length === 0 && / (types|Enter|joins|deletes) /.test(line)) views.push(allWords(actor.pars()));
     for (const q of ps) q.view.dispatch(q.view.state.tr.setSelection(TextSelection.atStart(q.view.state.doc)));
   });
   for (const p of ps) if (!p.online) net.online(p);
@@ -196,6 +196,7 @@ describe.skipIf(!!process.env.OVERLYX_FUZZ_DEBUG)('randomized splits and joins w
         try { res = replay(script, peers); } catch (e) { res = { problems: [String(e)], final: [] }; }
         if (res.problems.length) failures.push(`seed ${seed}: ${res.problems.slice(0, 4).join('; ')}`);
       }
+      if (process.env.OVERLYX_FUZZ_LIST) console.log('failing:', failures.map(f => f.split(':')[0].slice(5)).join(' '));
       expect(failures.slice(0, 5).join('\n'), `${failures.length} of ${count} seeds failed`).toBe('');
     }, 600000);
   }

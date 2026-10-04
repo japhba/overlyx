@@ -177,6 +177,12 @@ class Work {
   private own = new Set<MoveRecord>();
   /** paragraphs the update made */
   private newBlocks: Y.Item[] = [];
+  /** what this update brought into something that had moved (deleted on arrival, not by anybody) */
+  private doa = new Ranges();
+  /** the copies that won a competition (final ids) */
+  private winners = new Set<string>();
+  /** paragraph sizes before the conflicts are resolved */
+  private sizes = new Map<Y.XmlElement, number>();
 
   constructor(private repair: MoveRepair, private tr: Y.Transaction, private inc: Incoming | null) {
     this.index = repair.index;
@@ -248,6 +254,7 @@ class Work {
       if (!this.index.keeps(it)) return;
       if (it.content instanceof Y.ContentFormat) { if (fresh && !this.index.lookup(it.id.client, it.id.clock) && !this.explicit(it.id.client, it.id.clock)) this.formats.add(it); return; }
       if (!(it.content instanceof Y.ContentString || it.content instanceof Y.ContentType || it.content instanceof Y.ContentEmbed)) return;
+      if (fresh) this.doa.add(it.id.client, a, b - a);
       // the stretches nobody moved or deleted yet
       for (let k = a; k < b;) {
         let n = 1;
@@ -297,11 +304,12 @@ class Work {
     const s = this.index.sourceOf(item.id.client, item.id.clock + off);
     return !!s && this.own.has(s.rec);
   }
+  /** a copy a record made (not a late edit the server placed: that is just another concurrent insertion) */
   private isCopy(u: Unit, by: Y.Item): boolean {
     let item = u.item, off = u.off;
     if (typeOf(item) instanceof Y.XmlText) { const first = this.edgeUnit(item, false); if (!first) return false; item = first.item; off = first.off; }
     const s = this.index.sourceOf(item.id.client, item.id.clock + off);
-    return !!s && !this.known(s.rec, by);
+    return !!s && s.side !== PLACED && !this.known(s.rec, by);
   }
 
   /* ------------------------------------------------------------------------------ the repair */
@@ -349,6 +357,7 @@ class Work {
     this.reattribute();
     this.propagateDeletions();
     this.reorderBlocks();
+    this.normalize();
     if (this.rec.entries.length || this.rec.adopt.length || this.rec.protect.length) map.set(this.rec.key, encodeRecord(this.rec));
     else this.index.records.delete(this.rec.key);
   }
@@ -407,8 +416,16 @@ class Work {
       const [side, dst] = mine;
       const oldDst = old.dst ? Y.createID(old.dst.client, old.dst.clock + (k - c.clock)) : null;
       // a move beats a copy that stayed with its neighbours (a re-created run, or the server's placement of
-      // a late edit): those agree with each other, and the earlier one is where the neighbours are
-      const newWins = !oldDst || (side === MOVED && old.side !== MOVED) || (side === MOVED && old.side === MOVED && r.size < old.rec.size);
+      // a late edit): those agree with each other, and the earlier one is where the neighbours are; a copy
+      // its author moved on (a second split) counts as moved; of two moves the one into the smaller
+      // paragraph (the inner split point) wins
+      const ns = this.strength(side, dst), os = oldDst ? this.strength(old.side, oldDst) : KEPT;
+      let newWins = !oldDst || (ns === MOVED && os !== MOVED) || (ns === MOVED && os === MOVED && this.sizeAt(this.resolveId(dst)) < this.sizeAt(this.resolveId(oldDst)));
+      // a late edit the server placed beside its neighbour, also moved by this record (which knew it): it
+      // goes where this record's move of that neighbour went (if the move lost there, it lost here too)
+      if (oldDst && newWins && old.side === PLACED) newWins = this.moveHeld(r, Y.createID(c.client, k), dst);
+      this.winners.add(idKey(this.resolveId(newWins ? dst : oldDst!)));
+      const at = out.length;
       if (newWins) {
         out.push([c.client, k, 1, side, dst.client, dst.clock]);
         if (oldDst) {
@@ -426,13 +443,54 @@ class Work {
         this.drop(fn, recreate);
         if (!sameId(f, fn)) out.push([fn.client, fn.clock, 1, old.side, f.client, f.clock]);
       }
+      // in the index right away: the next unit's decision may look at this one
+      for (const e of out.slice(at)) this.index.entry(this.rec, e[0], e[1], e[2], e[3], e[4], e[5]);
     }
     this.addMany(out);
     this.late.push(...gone);
   }
+  /** the record's copy of the unit is where its move of the unit's left neighbour ended up */
+  private moveHeld(r: MoveRecord, id: Y.ID, dst: Y.ID): boolean {
+    const u = this.unitAt(id);
+    if (!u) return true;
+    for (let a = this.prev(u, true); a; a = this.prev(a, true)) {
+      const mine = entryFor(r, a.item.id.client, a.item.id.clock + a.off);
+      if (!mine || !mine[1]) continue;
+      const fa = this.unitAt(this.resolveId(Y.createID(a.item.id.client, a.item.id.clock + a.off)));
+      const fd = this.unitAt(this.resolveId(dst));
+      return !!fa && !!fd && containerOf(fa.item, this.repair.containerNames) === containerOf(fd.item, this.repair.containerNames);
+    }
+    return true;
+  }
+
+  /** moved, when a copy along the way was moved (not only re-created or placed) */
+  private strength(side: number, dst: Y.ID): number {
+    let id = dst;
+    for (let i = 0; i < 64 && side !== MOVED; i++) {
+      const m = this.mapped(id.client, id.clock);
+      if (!m || !m.dst) break;
+      if (m.side === MOVED) side = MOVED;
+      id = m.dst;
+    }
+    return side;
+  }
+  /** the number of units in the paragraph of a unit */
+  private sizeAt(id: Y.ID): number {
+    const u = this.unitAt(id);
+    const c = u && containerOf(u.item, this.repair.containerNames);
+    if (!c) return Infinity;
+    let cached = this.sizes.get(c);
+    if (cached === undefined) {
+      cached = 0;
+      for (let ch = c._start; ch; ch = ch.right) if (!ch.deleted) { const t = typeOf(ch); cached += t instanceof Y.XmlText ? t._length : 1; }
+      this.sizes.set(c, cached);
+    }
+    return cached;
+  }
+  /** deleted by somebody (not moved, nor arrived inside something that had moved) */
   private isDeleted(id: Y.ID): boolean {
     const u = this.unitAt(id);
-    return !!u && u.item.deleted && !this.mapped(id.client, id.clock);
+    return !!u && u.item.deleted && !this.mapped(id.client, id.clock) && !this.doa.has(id.client, id.clock);
   }
 
   /** take a losing copy out: a character (its run is re-created), an inline node (deleted, kept) */
@@ -481,9 +539,12 @@ class Work {
         stretches[stretches.length - 1].push({ id, item: it, off: o, text: it.content.str[o], attrs: { ...attrs } });
       }
     }
+    // a copy that won against a competing one, or a moved copy that counts for its original, holds its stretch in place
     const counts = (c: Ch) => {
+      if (this.misplaced.has(c.item)) return false;
+      if (this.winners.has(idKey(c.id))) return true;
       const src = this.index.sourceOf(c.id.client, c.id.clock);
-      return !!src && !this.isNew(src.src) && sameId(this.resolveId(src.src), c.id) && !this.misplaced.has(c.item);
+      return !!src && src.side === MOVED && sameId(this.resolveId(src.src), c.id);
     };
     const stay: Ch[] = [], go: Ch[] = [];
     for (const st of stretches) (st.some(counts) ? stay : go).push(...st);
@@ -526,9 +587,25 @@ class Work {
       }
       pieces.sort((a, b) => (order.get(a.item) ?? 0) - (order.get(b.item) ?? 0) || a.off - b.off);
       for (const p of pieces) {
-        try { this.move(p); } catch (e) { this.repair.log('[moves] could not place', idKey(p.item.id), e); }
+        // what a competing record's resolution mapped meanwhile is placed already (a losing copy)
+        for (const q of this.unmappedParts(p)) {
+          try { this.move(q); } catch (e) { this.repair.log('[moves] could not place', idKey(q.item.id), e); }
+        }
       }
     }
+  }
+
+  private unmappedParts(p: Piece): Piece[] {
+    if (typeOf(p.item)) return this.index.lookup(p.item.id.client, p.item.id.clock) ? [] : [p];
+    const out: Piece[] = [];
+    for (let o = p.off; o < p.off + p.len;) {
+      let n = 1;
+      const m = !!this.index.lookup(p.item.id.client, p.item.id.clock + o);
+      while (o + n < p.off + p.len && !!this.index.lookup(p.item.id.client, p.item.id.clock + o + n) === m) n++;
+      if (!m) out.push({ item: p.item, off: o, len: n });
+      o += n;
+    }
+    return out;
   }
 
   private insidePending(it: Y.Item): boolean {
@@ -549,10 +626,13 @@ class Work {
     } else if (t instanceof Y.XmlText) {
       let p = pos;
       for (const seg of this.segments(t)) {
-        const id = this.insertText(p, seg.item.content.str, seg.attrs);
-        this.add(seg.item.id.client, seg.item.id.clock, seg.item.length, PLACED, id.client, id.clock);
-        last = this.unitAt(Y.createID(id.client, id.clock + seg.item.length - 1));
-        p = { ...p, index: p.index + seg.item.length };
+        // what of it was moved elsewhere already (a losing copy resolved onto the winner) stays there
+        for (const part of this.unmappedParts({ item: seg.item, off: 0, len: seg.item.length })) {
+          const id = this.insertText(p, seg.item.content.str.slice(part.off, part.off + part.len), seg.attrs);
+          this.add(seg.item.id.client, seg.item.id.clock + part.off, part.len, PLACED, id.client, id.clock);
+          last = this.unitAt(Y.createID(id.client, id.clock + part.len - 1));
+          p = { ...p, index: p.index + part.len };
+        }
       }
       this.add(it.id.client, it.id.clock, 1, HANDLED, -1, 0);
       this.removeLive(it);
@@ -893,6 +973,27 @@ class Work {
     }
   }
 
+  private knowsCopy(knows: Map<number, number>, client: number, clock: number): boolean {
+    return this.index.copiesOf(client, clock).some(c => (knows.get(c.client) ?? 0) > c.clock);
+  }
+  /** the sender knew a copy of another unit of the deleted run (or inline node) the unit is in */
+  private knowsMoveAround(knows: Map<number, number>, client: number, clock: number): boolean {
+    const u = this.unitAt(Y.createID(client, clock));
+    const parent = u && u.item.parent instanceof Y.AbstractType ? u.item.parent._item : null;
+    if (!parent || !parent.deleted) return false;
+    const t = typeOf(parent);
+    if (!t) return false;
+    let checked = 0;
+    for (let it = t._start; it && checked < 8; it = it.right) {
+      if (it === u!.item || !(it.content instanceof Y.ContentString || typeOf(it))) continue;
+      const m = this.index.lookup(it.id.client, it.id.clock);
+      if (!m || m.side === PLACED || m.side === HANDLED) continue;
+      checked++;
+      if (this.knowsCopy(knows, it.id.client, it.id.clock)) return true;
+    }
+    return false;
+  }
+
   /** originals the sender deleted without having seen their move: their copies go too */
   private propagateDeletions(): void {
     const inc = this.inc;
@@ -903,8 +1004,9 @@ class Work {
         for (let i = 0; i < n; i++) {
           if (this.adoptedSrc.has(client, k + i)) continue;
           // a sync step 2 carries every deletion the sender knows of: one that knew a copy of the unit
-          // (the move's own, or its own copy when it moved the unit too) learnt of the deletion with it
-          if (inc.step2 && (!inc.knows || this.index.copiesOf(client, k + i).some(c => (inc.knows!.get(c.client) ?? 0) > c.clock))) continue;
+          // (the move's own, or its own copy when it moved the unit too) learnt of the deletion with it;
+          // one that knew the move of the run around it got the unit only inside the deleted run
+          if (inc.step2 && (!inc.knows || this.knowsCopy(inc.knows, client, k + i) || this.knowsMoveAround(inc.knows, client, k + i))) continue;
           ids.push(this.resolveId(Y.createID(client, k + i)));
         }
       }
@@ -931,15 +1033,19 @@ class Work {
       const p = c._item!.parent as Y.XmlFragment;
       p.delete(childIndex(p, c._item!), 1);
     }
+    // the paragraphs this update made (an editor's new halves) find their place among the others
     const moved = new Set<Y.Item>(this.newBlocks.filter(it => !it.deleted));
-    const e = this.rec.entries;
-    for (let i = 0; i < e.length; i += 6) {
-      if (e[i + 4] < 0 || e[i + 3] !== MOVED) continue;
-      const u = this.unitAt(this.resolveId(Y.createID(e[i + 4], e[i + 5])));
-      const c = u && containerOf(u.item, this.repair.containerNames);
-      if (c && c._item && isLive(c)) moved.add(c._item);
+    // until nothing moves (a paragraph moved changes what the others are between)
+    let todo = [...moved];
+    for (let round = 0; round < 4 && todo.length; round++) {
+      const next: Y.Item[] = [];
+      for (const it of todo) {
+        if (it.deleted) continue;
+        const copy = this.slot(it);
+        if (copy) next.push(...todo.filter(o => o !== it && !o.deleted), copy._item!);
+      }
+      todo = [...new Set(next)];
     }
-    for (const it of moved) if (!it.deleted) this.slot(it);
   }
 
   /** a paragraph the update made has others between its neighbours that its author did not see */
@@ -948,58 +1054,138 @@ class Work {
       if (x.deleted) return false;
       const right = x.rightOrigin ? this.unitAt(x.rightOrigin)?.item ?? null : null;
       const left = x.origin ? this.unitAt(x.origin)?.item ?? null : null;
+      // a neighbour the server moved since: it may have to follow
+      if ((left?.deleted && this.mapped(left.id.client, left.id.clock)) || (right?.deleted && this.mapped(right.id.client, right.id.clock))) return true;
       for (let it = left ? left.right : (x.parent as Y.XmlFragment)._start; it && it !== right; it = it.right) if (it !== x && !it.deleted && typeOf(it) instanceof Y.XmlElement) return true;
       return false;
     });
   }
 
   /** a paragraph among the paragraphs between its neighbours as its author saw them, where its text came from */
-  private slot(x: Y.Item): void {
+  private slot(x: Y.Item): Y.XmlElement | null {
     const parent = x.parent as Y.XmlFragment;
-    const left = x.origin ? this.unitAt(x.origin)?.item ?? null : null;
-    const right = x.rightOrigin ? this.unitAt(x.rightOrigin)?.item ?? null : null;
-    if ((left && left.parent !== parent) || (right && right.parent !== parent)) return;
+    // its neighbours as its author saw them (where the server moved them since)
+    const where = (id: Y.ID | null) => (id ? this.unitAt(this.resolveId(id))?.item ?? null : null);
+    const left = where(x.origin), right = where(x.rightOrigin);
+    if ((left && left.parent !== parent) || (right && right.parent !== parent)) return null;
+    if (left && right && !isAfter(right, left)) return null;
     const between: Y.Item[] = [];
     for (let it = left ? left.right : parent._start; it && it !== right; it = it.right) if (it !== x && !it.deleted && typeOf(it) instanceof Y.XmlElement) between.push(it);
-    if (!between.length) return;
     const kx = this.blockKey(typeOf(x) as Y.XmlElement);
-    if (!kx) return;
-    // right before the first one whose text comes from further on
-    let before: Y.Item | null = null;
-    for (const it of between) { const k = this.blockKey(typeOf(it) as Y.XmlElement); if (k && cmpKey(k, kx) > 0) { before = it; break; } }
+    if (!kx) return null;
+    // right before the first one whose text comes from further on (else before its right neighbour);
+    // nothing moves past a paragraph whose origin is unknown
+    let before: Y.Item | null = right;
+    const keys = between.map(it => this.blockKey(typeOf(it) as Y.XmlElement));
+    if (keys.some(k => !k)) return null;
+    for (let i = 0; i < between.length; i++) if (cmpKey(keys[i]!, kx) > 0) { before = between[i]; break; }
+    const inside = (!left || isAfter(x, left)) && (!right || isAfter(right, x));
     let next: Y.Item | null = x.right;
     while (next && (next.deleted || !(typeOf(next) instanceof Y.XmlElement))) next = next.right;
-    if (before ? next === before : !between.some(it => isAfter(it, x))) return;
-    const at = before ? childIndex(parent, before) : childIndex(parent, between[between.length - 1]) + 1;
-    this.moveContainer(typeOf(x) as Y.XmlElement, parent, at > childIndex(parent, x) ? at : at);
+    if (inside && next === before) return null;
+    const at = before ? childIndex(parent, before) : parent.length;
+    return this.moveContainer(typeOf(x) as Y.XmlElement, parent, at);
+  }
+
+  /**
+   * Two live text runs side by side in a paragraph this repair touched (an inline node between them
+   * moved away) are re-created as one: y-prosemirror holds one run per stretch of text, and the next
+   * editor to type there would otherwise merge them with an unrecorded copy.
+   */
+  private normalize(): void {
+    const conts = new Set<Y.XmlElement>();
+    const e = this.rec.entries;
+    for (let i = 0; i < e.length; i += 6) {
+      for (const id of [Y.createID(e[i], e[i + 1]), e[i + 4] >= 0 ? Y.createID(e[i + 4], e[i + 5]) : null]) {
+        const u = id && this.unitAt(id);
+        const c = u && containerOf(u.item, this.repair.containerNames);
+        if (c && isLive(c)) conts.add(c);
+      }
+    }
+    for (const c of conts) {
+      for (;;) {
+        const runs: Y.Item[] = [];
+        let pair: Y.Item[] | null = null;
+        for (let ch = c._start; ch && !pair; ch = ch.right) {
+          if (ch.deleted) continue;
+          if (typeOf(ch) instanceof Y.XmlText) { runs.push(ch); if (runs.length === 2) pair = runs; }
+          else runs.length = 0;
+        }
+        if (!pair) break;
+        this.mergeRuns(c, pair[0], pair[1]);
+      }
+    }
+  }
+
+  /** two adjacent live runs of a paragraph re-created as one */
+  private mergeRuns(c: Y.XmlElement, a: Y.Item, b: Y.Item): void {
+    const units: { id: Y.ID; text: string; attrs: Record<string, unknown> }[] = [];
+    for (const runItem of [a, b]) {
+      const run = typeOf(runItem) as Y.XmlText;
+      for (const s of this.segments(run, true)) for (let o = 0; o < s.item.length; o++) units.push({ id: Y.createID(s.item.id.client, s.item.id.clock + o), text: s.item.content.str[o], attrs: s.attrs });
+      for (let it = run._start; it; it = it.right) if (!it.deleted && it.content instanceof Y.ContentFormat) this.add(it.id.client, it.id.clock, it.length, HANDLED, -1, 0);
+    }
+    const at = childIndex(c, a);
+    const copy = new Y.XmlText();
+    insertSeparated(c, at, [copy]);
+    let pos = 0;
+    for (const u of units) copy.insert(pos++, u.text, { ...u.attrs });
+    const ids: Y.ID[] = [];
+    for (let it = copy._start; it; it = it.right) if (it.content instanceof Y.ContentString) for (let o = 0; o < it.length; o++) ids.push(Y.createID(it.id.client, it.id.clock + o));
+    units.forEach((u, i) => this.add(u.id.client, u.id.clock, 1, KEPT, ids[i].client, ids[i].clock));
+    for (const runItem of [a, b]) { c.delete(childIndex(c, runItem), 1); this.ours.add(runItem); this.protect(runItem.id); }
   }
 
   /** where a paragraph's text came from: the place of the paragraph that first held its first unit, and of the unit in it */
   private blockKey(c: Y.XmlElement): [number, number] | null {
-    for (let ch = c._start; ch; ch = ch.right) {
+    // the first unit that is a copy of an original the server has (text typed into a copy since stands
+    // where that copy stands; an editor's own new text it copied at once never reached the server whole),
+    // else the first one
+    let first: Unit | null = null, orig: Unit | null = null;
+    for (let ch = c._start; ch && !orig; ch = ch.right) {
       if (ch.deleted) continue;
       const t = typeOf(ch);
-      let u: Unit | null = null;
-      if (t instanceof Y.XmlText) { for (let it = t._start; it && !u; it = it.right) if (!it.deleted && it.content instanceof Y.ContentString) u = { item: it, off: 0 }; }
-      else if (t instanceof Y.XmlElement) u = { item: ch, off: 0 };
-      if (!u) continue;
-      let id = Y.createID(u.item.id.client, u.item.id.clock);
-      for (let i = 0; i < 64; i++) { const s = this.index.sourceOf(id.client, id.clock); if (!s) break; id = s.src; }
-      const orig = this.unitAt(id);
-      const oc = orig && containerOf(orig.item, this.repair.containerNames);
-      if (!oc || !oc._item || oc._item.parent !== c._item!.parent) return null;
-      let pos = 0;
-      for (let it = (oc._item.parent as Y.XmlFragment)._start; it && it !== oc._item; it = it.right) pos++;
-      let n = 0, at = -1;
-      for (let x = oc._start; x && at < 0; x = x.right) {
-        const tx = typeOf(x);
-        if (x === orig!.item) at = n;
-        else if (tx instanceof Y.XmlText) { for (let it = tx._start; it; it = it.right) { if (it === orig!.item) { at = n + orig!.off; break; } n += it.length; } }
-        n++;
+      const units: Unit[] = [];
+      if (t instanceof Y.XmlText) { for (let it = t._start; it && units.length < 256; it = it.right) if (!it.deleted && it.content instanceof Y.ContentString) for (let o = 0; o < it.length; o++) units.push({ item: it, off: o }); }
+      else if (t instanceof Y.XmlElement) units.push({ item: ch, off: 0 });
+      for (const u of units) {
+        first ??= u;
+        if (!this.index.sourceOf(u.item.id.client, u.item.id.clock + u.off)) continue;
+        const o = this.originalOf(u, 0);
+        if (o && containerOf(o.item, this.repair.containerNames)) { orig = o; break; }
       }
-      return [pos, at];
     }
-    return null;
+    orig ??= first && this.originalOf(first, 0);
+    if (!orig) return null;
+    const oc = orig && containerOf(orig.item, this.repair.containerNames);
+    if (!oc || !oc._item || oc._item.parent !== c._item!.parent) return null;
+    let pos = 0;
+    for (let it = (oc._item.parent as Y.XmlFragment)._start; it && it !== oc._item; it = it.right) pos++;
+    // its place among the units of that paragraph that are not copies
+    const isCopy = (it: Y.Item) => !!this.index.sourceOf(it.id.client, it.id.clock);
+    let n = 0, at = -1;
+    for (let x = oc._start; x && at < 0; x = x.right) {
+      const tx = typeOf(x);
+      if (x === orig!.item) { at = n; break; }
+      if (tx instanceof Y.XmlText) { for (let it = tx._start; it; it = it.right) { if (it === orig!.item) { at = n + orig!.off; break; } if (!isCopy(it) && it.content instanceof Y.ContentString) n += it.length; } }
+      else if (tx instanceof Y.XmlElement && !isCopy(x)) n++;
+    }
+    return [pos, at];
+  }
+
+  /**
+   * The original a unit is a copy of; for text typed into a copy (a re-created run, a new half), the
+   * original of the copy next to it
+   */
+  private originalOf(u: Unit, depth: number): Unit | null {
+    let id = Y.createID(u.item.id.client, u.item.id.clock + u.off);
+    for (let i = 0; i < 64; i++) { const s = this.index.sourceOf(id.client, id.clock); if (!s) break; id = s.src; }
+    const o = this.unitAt(id);
+    if (!o || depth > 4 || !(o.item.parent instanceof Y.XmlText)) return o;
+    const isCopy = (it: Y.Item) => it.content instanceof Y.ContentString && !!this.index.sourceOf(it.id.client, it.id.clock);
+    for (let it = o.item.right; it; it = it.right) if (isCopy(it)) return this.originalOf({ item: it, off: 0 }, depth + 1);
+    for (let it = o.item.left; it; it = it.left) if (isCopy(it)) return this.originalOf({ item: it, off: it.length - 1 }, depth + 1);
+    return o;
   }
 
   /** a paragraph copied to `at` in `parent` (its live content), the original deleted and kept */
@@ -1011,6 +1197,8 @@ class Work {
     pairCopies(c, copy, live, MOVED, out);
     for (let i = 0; i < out.entries.length; i += 6) this.add(...(out.entries.slice(i, i + 6) as [number, number, number, number, number, number]));
     const item = c._item!;
+    // the paragraph itself too: what was inserted next to it follows it
+    this.add(item.id.client, item.id.clock, 1, MOVED, copy._item!.id.client, copy._item!.id.clock);
     parent.delete(childIndex(parent, item), 1);
     this.ours.add(item);
     this.protect(item.id);
