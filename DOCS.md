@@ -1388,8 +1388,9 @@ What differs, and how the specs deal with it:
   only in Chromium and Firefox and skips its long offline sessions in WebKit
   (scratch/browsers/swoffline.mts, wsoffline.mts).
 - **Memory.** A WebKit page holding the dev build and a long paper takes ~0.8 GB, three times
-  Chromium's: collab.spec's six users need more than 3 GB, so run it with `OVERLYX_E2E_COLLAB_USERS=3` in WebKit
-  on a small machine, and give a Playwright run in WebKit 2.3 GB (specs with a second user open several pages).
+  Chromium's: collab.spec's six users need more than 3 GB in WebKit and more than 2.5 GB in Firefox,
+  so run it with `OVERLYX_E2E_COLLAB_USERS=3` there on a small machine, and give a Playwright run in
+  WebKit 2.3 GB (specs with a second user open several pages).
 
 ## Offline mode
 

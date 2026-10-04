@@ -17,7 +17,7 @@ const PROJECT = 'admin/e2e-collab';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const DOC = `${PROJECT}/collab.tex`;
 const FILE = `${DIR}/collab.tex`;
-// six users; OVERLYX_E2E_COLLAB_USERS=3 for WebKit on a small box (six WebKit browsers need more than 3 GB)
+// six users; OVERLYX_E2E_COLLAB_USERS=3 for WebKit and Firefox on a small box (six of their browsers need more than 2.5 GB)
 const USERS = Number(process.env.OVERLYX_E2E_COLLAB_USERS ?? 6);
 
 const body = () => {
