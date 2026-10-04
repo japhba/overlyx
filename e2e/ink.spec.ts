@@ -218,6 +218,7 @@ test('the lasso closes itself and selects what it touches; pen and highlighter k
   await expect(page.locator('[data-tb="i-c-1"]')).toHaveClass(/active/);
   // clean up the strokes for the tests that follow on this document (the page scrolled on reload: re-measure)
   await page.click('[data-tb="i-lasso"]');
+  await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(1);   // the strokes are back from the server
   // …once it has settled: the restored cursor is scrolled to again a moment after the reload (editor.ts restoreCursor),
   // which came after the measuring in Firefox
   const scrollTop = () => page.evaluate(() => document.querySelector('.editor-scroll')!.scrollTop);
