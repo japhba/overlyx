@@ -1581,7 +1581,9 @@ How it works, in order of what happens when you open a document:
      `OVERLYX_FUZZ_JOINS=1`, `OVERLYX_FUZZ_STRICT=1` to fail the known limits too,
      `OVERLYX_FUZZ_DEBUG=<seed>` to replay and shrink one),
      `tests/yjs-net.ts` (the network they run on: real y-prosemirror editors and a server with
-     controlled deliveries) and `e2e/offline-splits.spec.ts` (both press Enter in one paragraph, one
+     controlled deliveries), `tests/agent-edit-moves.test.ts` (Agent-panel and MCP edits through
+     docs.ts with an editor connected, which sends an agent's edit back — the deletions in it are the
+     edit's own moves, not late deletions) and `e2e/offline-splits.spec.ts` (both press Enter in one paragraph, one
      of them offline, and type behind formulas in both halves).
 
    External changes of the file are applied on the server as a *diff* (`packages/server/src/ydiff.ts`),
