@@ -1,4 +1,5 @@
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
@@ -39,6 +40,12 @@ export const config = {
   saveMaxWaitMs: Number(process.env.OVERLYX_SAVE_MAX_WAIT ?? 10000),
   /** same for persisting the Yjs state in SQLite (ms) */
   persistMaxWaitMs: Number(process.env.OVERLYX_PERSIST_MAX_WAIT ?? 5000),
+  /**
+   * worker threads for the whole-document work — parsing, writing, merging (docpool.ts); 0 does it
+   * on the main thread. Default: two fewer than the cores (builds and the event loop need theirs),
+   * at least one, at most four; none under vitest unless set (tests drive the main-thread path)
+   */
+  docWorkers: Math.max(0, Number(process.env.OVERLYX_DOC_WORKERS ?? (process.env.VITEST ? 0 : Math.min(4, Math.max(1, os.availableParallelism() - 2))))),
   /** concurrent PDF builds (each latexmk run is one core; more only queue up) */
   maxBuilds: Math.max(1, Number(process.env.OVERLYX_MAX_BUILDS ?? 2)),
   /** `nice` level for latexmk / LyX so that builds never starve the editor */

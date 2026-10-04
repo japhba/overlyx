@@ -16,7 +16,25 @@ import {
   mergeLyx, mergeInPlace, trackDiff, changeStats, addAuthor, lyxAuthorId, setHeaderValue, writeParagraphs, collectMacros, getPreamble,
   type LyxDocument, type Paragraph, type RegionMerge, type Item,
 } from '@overlyx/core';
-import type { OpenDoc } from './docs.ts';
+
+/**
+ * The document an edit is applied to: an open document (docs.ts OpenDoc), or its mirror in a
+ * document worker (docworker.ts) — which does the work off the server's event loop and hands the
+ * resulting CRDT update back.
+ */
+export interface EditableDoc {
+  parse(text: string): LyxDocument;
+  toLyxDocument(): LyxDocument;
+  /** the current document as .tex text */
+  toText(): string;
+  /** another version of the document as .tex text, written the way toText writes the current one */
+  textOf(doc: LyxDocument): string;
+  loadFromLyx(doc: LyxDocument, origin: string): void;
+  /** the document was changed by the edit: it is saved (an open document writes its file right away) */
+  edited(): void;
+  /** commands the document defined itself until an edit renamed or removed them */
+  retiredMacros: Set<string>;
+}
 
 /* ------------------------------------------------------------------ applying an edited source */
 
@@ -40,7 +58,7 @@ export interface TrackedResult {
  * are diffed against the live document and applied as tracked changes by `author`. The preamble is
  * never change-tracked (mergeLyx takes it over as it is): that part is applied directly, and said so.
  */
-export function applyTrackedSource(doc: OpenDoc, before: string, after: string, author: string): TrackedResult {
+export function applyTrackedSource(doc: EditableDoc, before: string, after: string, author: string): TrackedResult {
   const base = doc.parse(before), theirs = doc.parse(after);
   const ours = doc.toLyxDocument();
   // the live document with the agent's changed paragraphs taken over (untracked; a neighbouring
@@ -58,8 +76,7 @@ export function applyTrackedSource(doc: OpenDoc, before: string, after: string, 
   direct.push(...dropUncompilableDeletions(doc, target, authorId));
   const oldText = doc.toText();
   doc.loadFromLyx(target, 'mcp');
-  doc.dirty = true;
-  void doc.saveToFile();
+  doc.edited();
   const st = changeStats(target.body, as);
   const newText = doc.toText();
   direct.push(...stillUsedRetired(doc, target));
@@ -89,7 +106,7 @@ function eachFormula(pars: Paragraph[], fn: (it: Item, latex: string, items: Ite
  * one — stopped defining: renamed (\newcommand{\R} → \newcommand{\Real}) or removed. Remembered on the
  * open document, since the uses are typically changed by later edits.
  */
-function retireMacros(doc: OpenDoc, from: LyxDocument, to: LyxDocument): void {
+function retireMacros(doc: EditableDoc, from: LyxDocument, to: LyxDocument): void {
   const was = definedMacros(from), now = definedMacros(to);
   for (const n of was) if (!now.has(n)) doc.retiredMacros.add(n);
   for (const n of now) doc.retiredMacros.delete(n);
@@ -100,7 +117,7 @@ function retireMacros(doc: OpenDoc, from: LyxDocument, to: LyxDocument): void {
  * longer defines breaks the build — a tracked macro rename never compiled. Such deletions of the
  * agent's own are applied directly (the formula goes); somebody else's are left and named.
  */
-function dropUncompilableDeletions(doc: OpenDoc, target: LyxDocument, authorId: number): string[] {
+function dropUncompilableDeletions(doc: EditableDoc, target: LyxDocument, authorId: number): string[] {
   if (!doc.retiredMacros.size) return [];
   let dropped = 0;
   const names = new Set<string>(), others = new Set<string>();
@@ -120,7 +137,7 @@ function dropUncompilableDeletions(doc: OpenDoc, target: LyxDocument, authorId: 
 }
 
 /** Retired commands the document still uses in formulas that are not struck out: the agent has to update them. */
-function stillUsedRetired(doc: OpenDoc, target: LyxDocument): string[] {
+function stillUsedRetired(doc: EditableDoc, target: LyxDocument): string[] {
   if (!doc.retiredMacros.size) return [];
   const counts = new Map<string, number>();
   eachFormula(target.body, (it, latex) => { if (it.change?.type !== 'deleted') for (const n of usesAny(latex, doc.retiredMacros)) counts.set(n, (counts.get(n) ?? 0) + 1); });
@@ -133,14 +150,13 @@ function stillUsedRetired(doc: OpenDoc, target: LyxDocument): string[] {
  * a build the markup breaks). Merged like the tracked form, so concurrent edits elsewhere survive;
  * other people's tracked changes stay as they are.
  */
-export function applyPlainSource(doc: OpenDoc, before: string, after: string): { changed: boolean; excerpt: string; before: string; after: string } {
+export function applyPlainSource(doc: EditableDoc, before: string, after: string): { changed: boolean; excerpt: string; before: string; after: string } {
   const ours = doc.toLyxDocument();
   const target: LyxDocument = mergeLyx(doc.parse(before), ours, doc.parse(after), mergeInPlace);
   retireMacros(doc, ours, target);
   const oldText = doc.toText();
   doc.loadFromLyx(target, 'mcp');   // clients apply it like an agent edit
-  doc.dirty = true;
-  void doc.saveToFile();
+  doc.edited();
   const newText = doc.toText();
   return { changed: newText !== oldText, excerpt: excerptOfChange(oldText, newText), before: oldText, after: newText };
 }
@@ -153,7 +169,7 @@ export function applyPlainSource(doc: OpenDoc, before: string, after: string): {
  * accepting or rejecting a change) survives. Where `shadow` and those edits touch the same
  * paragraph, the live paragraph wins; `conflicts` counts those paragraphs.
  */
-export function foldEdits(doc: OpenDoc, shadow: string, base: string, live: string): { text: string; conflicts: number } {
+export function foldEdits(doc: EditableDoc, shadow: string, base: string, live: string): { text: string; conflicts: number } {
   if (live === base) return { text: shadow, conflicts: 0 };
   if (shadow === base) return { text: live, conflicts: 0 };
   let conflicts = 0;
@@ -168,10 +184,9 @@ export function foldEdits(doc: OpenDoc, shadow: string, base: string, live: stri
 }
 
 /** Put `text` in place of the live document (not as a tracked change: it restores an earlier state, marks and all). */
-export function restoreSource(doc: OpenDoc, text: string): string {
+export function restoreSource(doc: EditableDoc, text: string): string {
   doc.loadFromLyx(doc.parse(text), 'mcp');   // clients apply it like an agent edit: Ctrl+Z takes it back
-  doc.dirty = true;
-  void doc.saveToFile();
+  doc.edited();
   return doc.toText();
 }
 
