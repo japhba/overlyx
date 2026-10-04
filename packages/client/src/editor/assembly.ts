@@ -216,11 +216,8 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
     // text/plain for the clipboard: formulas as $…$, references as \ref{…}, … (see cliptext.ts)
     clipboardTextSerializer: sliceText,
     handleDoubleClickOn(view, _pos, node, nodePos) {
-      if (node.type.name === 'command' && node.attrs.cmd === 'include') {
-        const id = includeTarget(node, viewProject(view), viewDocDir(view));
-        if (id) editorContext.openInTab?.(id);
-        return true;
-      }
+      // a child document: opened by its node view on the browser's dblclick (nodeviews/leaf.ts CommandView)
+      if (node.type.name === 'command' && node.attrs.cmd === 'include') return true;
       // a hyperlink: the link box, to change its address or text (as ⌘K on it)
       if (node.type.name === 'command' && node.attrs.cmd === 'href') {
         if (view.editable) { view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, nodePos))); openLinkBox(view); }
