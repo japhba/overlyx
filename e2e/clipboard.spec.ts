@@ -88,7 +88,7 @@ test('foreign HTML pastes as document content (bold, italics, a heading)', async
     const dt = new DataTransfer();
     dt.setData('text/html', '<h2>Pasted title</h2><p>Some <b>bold</b> and <i>italic</i> words</p>');
     dt.setData('text/plain', 'Pasted title\nSome bold and italic words');
-    document.querySelector('.lyx-editor')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    document.querySelector('.lyx-editor')!.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }), 'clipboardData', { value: dt }));
   });
   await expect(page.locator('.lyx-editor .lyx-layout-subsection')).toHaveCount(1, { timeout: 5000 });
   await expect.poll(() => readFileSync(`${DIR}/clip.tex`, 'utf8').includes('\\subsection{Pasted title}'), { timeout: 15000 }).toBe(true);
@@ -108,7 +108,7 @@ test('plain-text LaTeX pastes as real structure: a section, a formula, bold text
   await page.evaluate(() => {
     const dt = new DataTransfer();
     dt.setData('text/plain', '\\subsection{LaTeX paste}\n\nWith $a^{2}+b$ inline, \\textbf{bold words} and \\ref{sec:intro}.');
-    document.querySelector('.lyx-editor')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    document.querySelector('.lyx-editor')!.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }), 'clipboardData', { value: dt }));
   });
   await expect(page.locator('.lyx-editor .lyx-layout-subsection', { hasText: 'LaTeX paste' })).toHaveCount(1, { timeout: 10000 });
   await expect(page.locator('.lyx-editor .lyx-command-ref')).toHaveCount(refsBefore + 1);
@@ -122,7 +122,7 @@ test('plain-text LaTeX pastes as real structure: a section, a formula, bold text
   await page.evaluate(() => {
     const dt = new DataTransfer();
     dt.setData('text/plain', 'Just ordinary words.');
-    document.querySelector('.lyx-editor')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    document.querySelector('.lyx-editor')!.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }), 'clipboardData', { value: dt }));
   });
   await expect.poll(() => readFileSync(`${DIR}/clip.tex`, 'utf8').includes('Just ordinary words.'), { timeout: 15000 }).toBe(true);
 });

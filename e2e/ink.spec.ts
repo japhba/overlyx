@@ -358,7 +358,7 @@ test('with the canvas focused (caret deactivated), a pasted image lands in the m
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const dt = new DataTransfer();
     dt.items.add(new File([bytes], 'shot.png', { type: 'image/png' }));
-    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    document.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }), 'clipboardData', { value: dt }));
   });
 
   // the image becomes a margin object: an anchor appears, it is selected, no graphics inset is inserted
