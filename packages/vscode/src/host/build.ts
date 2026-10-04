@@ -110,7 +110,9 @@ function runLatexmk(job: BuildJob, req: BuildRequest): Promise<BuildRecord> {
   const outFmt = req.header ? headerValue(req.header, 'default_output_format') ?? 'default' : 'default';
   const nonTex = req.header ? headerValue(req.header, 'use_non_tex_fonts') === 'true' : false;
   const engineFlag = outFmt === 'pdf5' ? '-pdflua' : outFmt === 'pdf4' || nonTex ? '-pdfxe' : '-pdf';
-  const args = [engineFlag, '-g', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex'];
+  // -f: latexmk goes on through bibtex / biber and the reruns after an error TeX recovers from
+  // (else every citation is "??" until the next build), as the server's build does
+  const args = [engineFlag, '-g', '-f', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex'];
   return new Promise((resolve) => {
     const child = spawn(req.latexmk, args, { cwd, detached: true, env: { ...process.env, max_print_line: '1000' } });
     let out = '';

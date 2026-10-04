@@ -38,14 +38,19 @@ export function Dialog({ title, onClose, children, buttons, wide }: { title: str
         else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
       }
     };
-    const contain = (e: FocusEvent) => { if (!box.contains(e.target as Node)) focusFirst(); };
+    // focus stays in the dialog — except when an action of the dialog hands it back to where it came
+    // from (Insert ▸ Table runs its command and focuses the editor, then closes): pulling it back here
+    // made the editor regain focus through a plain .focus() at close, and the browser put the caret at
+    // the start of the document instead of in the new table
+    const contain = (e: FocusEvent) => { const t = e.target as Node; if (!box.contains(t) && !(previous && previous.contains(t))) focusFirst(); };
     document.addEventListener('keydown', k, true);
     document.addEventListener('focusin', contain);
     focusFirst();
     return () => {
       document.removeEventListener('keydown', k, true);
       document.removeEventListener('focusin', contain);
-      if (previous?.isConnected) previous.focus();
+      const now = document.activeElement;
+      if (previous?.isConnected && !(now && previous.contains(now))) previous.focus();
     };
   }, []);
   return (
@@ -793,6 +798,155 @@ export function MacrosDialog({ meta, onClose }: { meta: DocMeta | null; onClose:
         {(meta?.macroList ?? []).map(m => <div key={m.name + m.source}><code>\{m.name}{m.args ? `[${m.args}]` : ''}</code> → <code>{m.display ? `${m.display}  (display of ${m.def})` : m.def}</code> <span class="sub">{m.source}</span></div>)}
         {!meta?.macroList.length && <div class="sub">No macros found.</div>}
       </div>
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------ child document
+ *
+ * Insert ▸ Child document… (and the Insert toolbar's matching button): a thesis/report built from
+ * chapter files needs to pick an *existing* one or start a new one — a free-text file name guessed
+ * wrong and silently landed the `\include` on an unrelated file (persona-p7 F1). "New child
+ * document…" writes the file empty, so it opens as a bare fragment (no preamble — a non-empty
+ * `\documentclass` document is rejected by the save validator, "Found 0 \begin{document}…",
+ * persona-p7 F2) ready to `\include`/`\input` into this one.
+ */
+export function ChildDocDialog({ meta, project, docDir, onInsert, onClose }: {
+  meta: DocMeta | null; project: string; docDir: string;
+  onInsert: (filename: string, kind: 'include' | 'input') => void;
+  onClose: () => void;
+}) {
+  const candidates = (meta?.files ?? []).filter(f => f.kind === 'doc' && f.path !== meta?.path);
+  const [q, setQ] = useState('');
+  const [kind, setKind] = useState<'include' | 'input'>('include');
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('chapter1.tex');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const list = candidates.filter(f => f.path.toLowerCase().includes(q.toLowerCase()));
+  const pick = (path: string) => { onInsert(docRelPath(path, docDir), kind); onClose(); };
+  const createNew = async () => {
+    const rel = newName.trim().replace(/^\/+/, '');
+    if (!rel) return;
+    if (!/\.tex$/i.test(rel)) { setError('The file name must end in .tex'); return; }
+    if (meta?.files.some(f => f.path === rel)) { setError('A file with that name already exists.'); return; }
+    setBusy(true); setError('');
+    try { await api.writeText(project, rel, ''); onInsert(docRelPath(rel, docDir), kind); onClose(); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Dialog title="Child Document" onClose={onClose}
+      buttons={creating && <>
+        <button type="button" class="btn" onClick={() => { setCreating(false); setError(''); }}>Back to the list</button>
+        <button type="button" class="btn primary" disabled={busy || !newName.trim()} onClick={() => void createNew()}>Create and Insert</button>
+      </>}>
+      <Row label="Command">
+        <select value={kind} onChange={e => setKind(e.currentTarget.value as 'include' | 'input')}>
+          <option value="include">\include (its own page, like a chapter)</option>
+          <option value="input">\input (inline, no page break)</option>
+        </select>
+      </Row>
+      {!creating ? (
+        <>
+          <Row label="Filter"><input type="text" autofocus value={q} onInput={e => setQ(e.currentTarget.value)} placeholder="Search the project's documents" /></Row>
+          <div class="list reference-list" role="group" aria-label="Project documents">
+            {list.map(f => <button type="button" key={f.path} onClick={() => pick(f.path)}>{f.path}</button>)}
+            {!list.length && <div class="sub">{candidates.length ? 'No match.' : "No other documents in this project yet."}</div>}
+          </div>
+          <button type="button" class="btn" onClick={() => setCreating(true)}>+ New child document…</button>
+        </>
+      ) : (
+        <>
+          <Row label="New file name"><input type="text" autofocus value={newName} onInput={e => setNewName(e.currentTarget.value)} onKeyDown={e => { if (e.key === 'Enter') void createNew(); }} /></Row>
+          <div class="sub">Created empty: a bare fragment with no preamble of its own, ready to be {kind === 'include' ? 'included' : 'input'} here. Open it from the documents panel to write its content.</div>
+          {error && <div class="err" role="alert">{error}</div>}
+        </>
+      )}
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------- generic prompt / confirm / alert
+ *
+ * A themed, async replacement for the browser's native `window.prompt`/`confirm`/`alert`: same
+ * shell as every other dialog (Dialog above), so Escape cancels, Enter accepts, focus is trapped
+ * and returned, and the usage statistics record it as a "dialog" event like any other (Dialog's
+ * own effect, keyed by `title`). One `<DialogHost/>` renders whichever request is pending; mounted
+ * once by each shell (App.tsx's Workspace, the VS Code webview's EditorShell) since both can ask.
+ */
+type UiDialogRequest =
+  | { id: number; kind: 'alert'; title: string; message: string; resolve: () => void }
+  | { id: number; kind: 'confirm'; title: string; message: string; okLabel?: string; danger?: boolean; resolve: (ok: boolean) => void }
+  | { id: number; kind: 'prompt'; title: string; message?: string; value: string; placeholder?: string; okLabel?: string; validate?: (v: string) => string | null; resolve: (v: string | null) => void };
+
+let uiDialogSeq = 0;
+let uiDialogRequest: UiDialogRequest | null = null;
+const uiDialogListeners = new Set<() => void>();
+function setUiDialogRequest(r: UiDialogRequest | null) { uiDialogRequest = r; uiDialogListeners.forEach(l => l()); }
+
+/** A themed replacement for `window.alert`. Resolves once the user dismisses it. */
+export function uiAlert(title: string, message: string): Promise<void> {
+  return new Promise(resolve => setUiDialogRequest({ id: ++uiDialogSeq, kind: 'alert', title, message, resolve }));
+}
+/** A themed replacement for `window.confirm`. `danger` styles the primary button for a destructive action. */
+export function uiConfirm(title: string, message: string, opts: { okLabel?: string; danger?: boolean } = {}): Promise<boolean> {
+  return new Promise(resolve => setUiDialogRequest({ id: ++uiDialogSeq, kind: 'confirm', title, message, ...opts, resolve }));
+}
+/**
+ * A themed replacement for `window.prompt`. `value` is pre-filled and pre-selected; resolves with
+ * `null` on cancel, like the native dialog. `validate` (if given) disables OK and shows its message
+ * while the trimmed value fails it.
+ */
+export function uiPrompt(title: string, message: string | undefined, value = '', opts: { placeholder?: string; okLabel?: string; validate?: (v: string) => string | null } = {}): Promise<string | null> {
+  return new Promise(resolve => setUiDialogRequest({ id: ++uiDialogSeq, kind: 'prompt', title, message, value, ...opts, resolve }));
+}
+
+/** Renders the pending `uiPrompt`/`uiConfirm`/`uiAlert` request, if any. Mount once per shell. */
+export function DialogHost() {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const l = () => bump(n => n + 1);
+    uiDialogListeners.add(l);
+    return () => { uiDialogListeners.delete(l); };
+  }, []);
+  return uiDialogRequest ? <UiDialogBody key={uiDialogRequest.id} req={uiDialogRequest} /> : null;
+}
+
+function UiDialogBody({ req }: { req: UiDialogRequest }) {
+  const [value, setValue] = useState(req.kind === 'prompt' ? req.value : '');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const trimmed = value.trim();
+  const error = req.kind === 'prompt' ? req.validate?.(trimmed) ?? null : null;
+  const finish = (result?: string | boolean) => {
+    setUiDialogRequest(null);
+    if (req.kind === 'alert') req.resolve();
+    else if (req.kind === 'confirm') req.resolve(result === true);
+    else req.resolve(typeof result === 'string' ? result : null);
+  };
+  const cancel = () => finish(req.kind === 'prompt' ? undefined : false);
+  if (req.kind === 'alert') {
+    return (
+      <Dialog title={req.title} onClose={() => finish()} buttons={<button class="btn primary" autofocus onClick={() => finish()}>OK</button>}>
+        <p style="white-space:pre-wrap">{req.message}</p>
+      </Dialog>
+    );
+  }
+  if (req.kind === 'confirm') {
+    return (
+      <Dialog title={req.title} onClose={cancel} buttons={<button class={'btn primary' + (req.danger ? ' danger' : '')} autofocus onClick={() => finish(true)}>{req.okLabel ?? 'OK'}</button>}>
+        <p style="white-space:pre-wrap">{req.message}</p>
+      </Dialog>
+    );
+  }
+  return (
+    <Dialog title={req.title} onClose={cancel} buttons={<button class="btn primary" disabled={!!error} onClick={() => finish(trimmed)}>{req.okLabel ?? 'OK'}</button>}>
+      {req.message && <p style="white-space:pre-wrap">{req.message}</p>}
+      <input ref={inputRef} type="text" autofocus value={value} placeholder={req.placeholder}
+        onFocus={() => inputRef.current?.select()}
+        onInput={e => setValue((e.target as HTMLInputElement).value)}
+        onKeyDown={e => { if (e.key === 'Enter' && !error) { e.preventDefault(); finish(trimmed); } }} />
+      {error && <div class="err" role="alert">{error}</div>}
     </Dialog>
   );
 }

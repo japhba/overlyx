@@ -230,7 +230,16 @@ export function parseTabular(s: Scanner, env: string, parseCell: (text: string) 
     let c = 0;
     let ci = 0;
     while (c < ncols) {
-      if (occupied[r][c]) { cells.push(occupied[r][c]!); c++; continue; }
+      if (occupied[r][c]) {
+        // the row has a cell under the \multirow too (normally empty): it is the continuation —
+        // what it holds is kept in it
+        const under = row.cells[ci++];
+        const cont = occupied[r][c]!;
+        if (under && under.text.trim()) cont.paragraphs = parseCell(under.text.trim());
+        cells.push(cont);
+        c++;
+        continue;
+      }
       const raw = row.cells[ci++];
       const info = cellPrefix(raw ? raw.text : '');
       const col = cols[c];
@@ -279,7 +288,6 @@ export function parseTabular(s: Scanner, env: string, parseCell: (text: string) 
       cell.attrs.splice(i < 0 ? cell.attrs.length : i, 0, ['bottomline', 'true']);
     }
   });
-  // multirow continuation cells: the LaTeX row had no & for them in some styles; drop rows that became empty
   const features: [string, string][] = [];
   if (env === 'longtable' || env === 'xltabular') features.push(['islongtable', 'true']);
   if (booktabs) features.push(['booktabs', 'true']);

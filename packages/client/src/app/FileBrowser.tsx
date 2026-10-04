@@ -10,6 +10,22 @@ import { api, fileUrl, isAuxFile, isTextFile, type Project, type ProjectFile } f
 import { subscribeProjectEvents } from '../projectevents';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
 import { projectOfDoc, splitDocId, projectShortName } from '@overlyx/core';
+import { uiPrompt, uiConfirm, uiAlert } from './Dialogs';
+
+/**
+ * Prompts for a name, retrying with the server's own error shown (typically a name collision)
+ * until the user picks a free one or cancels — a collision here never falls through to offering to
+ * delete anything (persona-p7 F4: the quick-add buttons used to risk exactly that).
+ */
+async function promptUntilCreated(title: string, message: string, initial: string, create: (name: string) => Promise<void>): Promise<void> {
+  let name = initial, error: string | undefined;
+  for (;;) {
+    const n = await uiPrompt(title, error ? `${message}\n\n${error} — try another name.` : message, name);
+    if (!n) return;
+    try { await create(n); return; }
+    catch (e) { name = n; error = (e as Error).message; }
+  }
+}
 
 /**
  * Subscribe to the server's change stream for one project (SSE): `onChange` fires whenever files
@@ -150,37 +166,31 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
 
   const newDoc = async (dir = '') => {
     if (!project) return;
-    const name = prompt(`New document file name (in ${projectLabel(project)}${dir ? '/' + dir : ''}):`, 'untitled.tex');
-    if (!name) return;
-    try {
+    await promptUntilCreated('New Document', `New document file name (in ${projectLabel(project)}${dir ? '/' + dir : ''}):`, 'untitled.tex', async name => {
       const r = await api.newDoc(project.name, (dir ? dir + '/' : '') + name, { title: name.replace(/\.(tex|lyx)$/, '') });
       await load();
       onOpen(r.id);
-    } catch (e) { alert(String((e as Error).message)); }
+    });
   };
   const newTextFile = async (dir = '') => {
     if (!project) return;
-    const name = prompt(`New text file (in ${projectLabel(project)}${dir ? '/' + dir : ''}), e.g. macros.tex or refs.bib:`, 'notes.tex');
-    if (!name) return;
-    const rel = (dir ? dir + '/' : '') + name;
-    try {
+    await promptUntilCreated('New File', `New text file (in ${projectLabel(project)}${dir ? '/' + dir : ''}), e.g. macros.tex or refs.bib:`, 'notes.tex', async name => {
+      const rel = (dir ? dir + '/' : '') + name;
       if (project.files.some(f => f.path === rel)) throw new Error('file exists');
       await api.writeText(project.name, rel, '');
       await load();
       onOpen(project.name + '/' + rel);
-    } catch (e) { alert(String((e as Error).message)); }
+    });
   };
   const newBoard = async (dir = '') => {
     if (!project) return;
-    let name = prompt(`New whiteboard (in ${projectLabel(project)}${dir ? '/' + dir : ''}):`, 'whiteboard.board');
-    if (!name) return;
-    if (!name.endsWith('.board')) name += '.board';
-    const rel = (dir ? dir + '/' : '') + name;
-    try {
+    await promptUntilCreated('New Whiteboard', `New whiteboard (in ${projectLabel(project)}${dir ? '/' + dir : ''}):`, 'whiteboard.board', async name0 => {
+      const name = name0.endsWith('.board') ? name0 : name0 + '.board';
+      const rel = (dir ? dir + '/' : '') + name;
       await api.upload(project.name, rel, new Blob(['{"overlyx":"board","v":1,"objects":{\n}}\n'], { type: 'application/octet-stream' }), { overwrite: false });
       await load();
       onOpen(project.name + '/' + rel);
-    } catch (e) { alert(String((e as Error).message)); }
+    });
   };
   const upload = async (dir = '') => {
     if (!project) return;
@@ -188,7 +198,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     input.type = 'file'; input.multiple = true;
     input.onchange = async () => {
       for (const f of Array.from(input.files ?? [])) {
-        try { await api.upload(project.name, (dir ? dir + '/' : '') + f.name, f); } catch (e) { alert(String((e as Error).message)); }
+        try { await api.upload(project.name, (dir ? dir + '/' : '') + f.name, f); } catch (e) { await uiAlert('Upload Failed', String((e as Error).message)); }
       }
       if (dir) reveal(dir + '/');
       load();
@@ -240,14 +250,14 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     else for (const f of Array.from(dt.files ?? [])) files.push({ rel: prefix + f.name, file: f });
     if (!files.length && !emptyDirs.length) return;
     const clashes = files.filter(x => project.files.some(f => f.path === x.rel));
-    const keep = clashes.length && !confirm(`${clashes.length === 1 ? clashes[0].rel + ' already exists' : clashes.length + ' of these files already exist'} — replace?`)
+    const keep = clashes.length && !(await uiConfirm('Replace Existing Files', `${clashes.length === 1 ? clashes[0].rel + ' already exists' : clashes.length + ' of these files already exist'} — replace?`, { okLabel: 'Replace' }))
       ? files.filter(x => !clashes.includes(x)) : files;
     const errors: string[] = [];
     for (const d of emptyDirs) { try { await api.fileOp(project.name, { op: 'mkdir', to: d }); } catch (e) { errors.push(`${d}: ${(e as Error).message}`); } }
     for (const { rel, file } of keep) { try { await api.upload(project.name, rel, file); } catch (e) { errors.push(`${rel}: ${(e as Error).message}`); } }
     if (dir) reveal(dir + '/');
     await load();
-    if (errors.length) alert('Not everything could be uploaded:\n' + errors.slice(0, 10).join('\n'));
+    if (errors.length) await uiAlert('Upload Failed', 'Not everything could be uploaded:\n' + errors.slice(0, 10).join('\n'));
   };
   const drop = (dir: string) => (e: DragEvent) => {
     if (!wantsFiles(e)) return;
@@ -262,7 +272,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   /* ---- the VS Code-like context menu (right click on a file, a folder, or the background) */
   const doOp = async (body: { op: 'rename' | 'delete' | 'mkdir' | 'copy'; from?: string; to?: string }) => {
     if (!project) return;
-    try { await api.fileOp(project.name, body); if (body.to) reveal(body.to); await load(); } catch (e) { alert(String((e as Error).message)); }
+    try { await api.fileOp(project.name, body); if (body.to) reveal(body.to); await load(); } catch (e) { await uiAlert('Could Not Complete', String((e as Error).message)); }
   };
   /** a free name in `dir` for paste / duplicate: name.ext, name copy.ext, name copy 2.ext … */
   const freeName = (dir: string, base: string) => {
@@ -274,20 +284,20 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     for (let k = 1; ; k++) { rel = (dir ? dir + '/' : '') + `${stem} copy${k > 1 ? ' ' + k : ''}${ext}`; if (!exists(rel)) return rel; }
   };
   const renamePath = async (p: string) => {
-    const nn = prompt('New name (a path moves the file):', p);
+    const nn = await uiPrompt('Rename', 'New name (a path moves the file):', p);
     if (nn && nn !== p) await doOp({ op: 'rename', from: p, to: nn });
   };
   const deletePath = async (p: string, isDir: boolean) => {
-    if (!confirm(`Delete ${p}${isDir ? ' and everything in it' : ''}? (It is moved to the server's trash, not erased.)`)) return;
+    if (!(await uiConfirm('Delete', `Delete ${p}${isDir ? ' and everything in it' : ''}? (It is moved to the server's trash, not erased.)`, { danger: true, okLabel: 'Delete' }))) return;
     await doOp({ op: 'delete', from: p });
   };
   const newFolder = async (dir = '') => {
-    const n = prompt(`New folder${dir ? ' in ' + dir : ''}:`, 'figures');
+    const n = await uiPrompt('New Folder', `New folder${dir ? ' in ' + dir : ''}:`, 'figures');
     if (n) await doOp({ op: 'mkdir', to: (dir ? dir + '/' : '') + n.trim() });
   };
   const pasteInto = async (dir: string) => {
     if (!fileClip || !project) return;
-    if (fileClip.project !== project.name) { alert('Cut / copy and paste work within one project.'); return; }
+    if (fileClip.project !== project.name) { await uiAlert('Cannot Paste', 'Cut / copy and paste work within one project.'); return; }
     await doOp({ op: fileClip.cut ? 'rename' : 'copy', from: fileClip.path, to: freeName(dir, fileClip.path.split('/').pop()!) });
     if (fileClip.cut) fileClip = null;
   };
@@ -367,9 +377,9 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     const tabId = isDoc || isBoard ? id : isPdf ? 'pdf:' + id : 'text:' + id;
     const href = isLyx ? '#' : inTab ? '#/' + tabId : fileUrl(project!.name, f.path);
     const importLyx = async () => {
-      if (!confirm(`Import ${f.name} into a .tex document (${f.name.replace(/\.lyx$/, '.tex')})? The .lyx file is kept; child documents it includes are imported too.`)) return;
-      try { const r = await api.importLyx(project!.name, f.path); await load(); onOpen(r.id); if (r.warnings.length) alert('Imported with warnings:\n' + r.warnings.slice(0, 10).join('\n')); }
-      catch (e) { alert('Import failed: ' + (e as Error).message); }
+      if (!(await uiConfirm('Import LyX File', `Import ${f.name} into a .tex document (${f.name.replace(/\.lyx$/, '.tex')})? The .lyx file is kept; child documents it includes are imported too.`, { okLabel: 'Import' }))) return;
+      try { const r = await api.importLyx(project!.name, f.path); await load(); onOpen(r.id); if (r.warnings.length) await uiAlert('Imported with Warnings', r.warnings.slice(0, 10).join('\n')); }
+      catch (e) { await uiAlert('Import Failed', (e as Error).message); }
     };
     const outlined = isDoc && !!outlines;
     const open = outlined && outlines!.open(id);

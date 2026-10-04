@@ -202,13 +202,20 @@ export class Scanner {
   /** Read inline math after an opening `$` (the `$` is already consumed): up to the closing `$`. */
   readDollarMath(): string | null {
     const s = this.s;
-    let i = this.pos;
-    while (i < s.length) {
-      const c = s[i];
-      if (c === '\\') { i += 2; continue; }
-      if (c === '$') { const out = s.slice(this.pos, i); this.pos = i + 1; return out; }
-      if (c === '\n' && s[i + 1] === '\n') return null;   // a paragraph break inside inline math: not math
-      i++;
+    // a $ inside a group is text-mode math of its own (\text{… $x$ …}): the formula ends at a $
+    // outside groups — or, in unbalanced input, at the first $ as before
+    for (const grouped of [true, false]) {
+      let i = this.pos, depth = 0;
+      while (i < s.length) {
+        const c = s[i];
+        if (c === '\\') { i += 2; continue; }
+        if (c === '%' && grouped) { while (i < s.length && s[i] !== '\n') i++; continue; }
+        if (c === '{' && grouped) depth++;
+        else if (c === '}' && grouped && depth > 0) depth--;
+        else if (c === '$' && depth === 0) { const out = s.slice(this.pos, i); this.pos = i + 1; return out; }
+        if (c === '\n' && s[i + 1] === '\n') break;   // a paragraph break inside inline math: not math
+        i++;
+      }
     }
     return null;
   }

@@ -49,6 +49,24 @@ export async function openDoc(page: Page, id: string): Promise<void> {
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
 }
 
+/**
+ * The app's own themed prompt/confirm/alert (app/Dialogs.tsx `uiPrompt`/`uiConfirm`/`uiAlert`,
+ * replacing the browser's native dialogs — DOCS.md "usage"). It renders as the frontmost `.dialog`
+ * (DialogHost is mounted last), so these helpers always address the one actually on top even when
+ * another dialog (e.g. the Git dialog) is open underneath it.
+ */
+export function dialogLocator(page: Page) { return page.locator('.dialog-backdrop').last().locator('.dialog'); }
+/** Accept (OK/primary button) the frontmost prompt/confirm/alert. */
+export async function acceptDialog(page: Page): Promise<void> { await dialogLocator(page).locator('button.primary').click(); }
+/** Cancel (its Close button — safer than Escape where the page below also binds it) the frontmost prompt/confirm/alert. */
+export async function cancelDialog(page: Page): Promise<void> { await dialogLocator(page).locator('.buttons button.btn:not(.primary)', { hasText: 'Close' }).click(); }
+/** Fill the frontmost prompt's text field, then accept it (set `submit: false` to leave it open). */
+export async function fillDialog(page: Page, value: string, opts: { submit?: boolean } = {}): Promise<void> {
+  const dlg = dialogLocator(page);
+  await dlg.locator('input[type=text]').fill(value);
+  if (opts.submit !== false) await dlg.locator('button.primary').click();
+}
+
 export function collectErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));

@@ -16,3 +16,5 @@ export type { LintIssue } from './lint.ts';
 export type { HealthIssue } from './health.ts';
 export { texHeadings, headingPlainText } from './headings.ts';
 export type { TexHeading } from './headings.ts';
+export { writeTexPreserving, primePreserveCache } from './preserve.ts';
+export type { PreserveCache, PreserveOptions, PreserveStats } from './preserve.ts';

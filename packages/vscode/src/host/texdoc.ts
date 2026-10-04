@@ -5,7 +5,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseTex, writeTex, type ParseTexResult } from '@overlyx/core/tex/index.ts';
+import { parseTex, writeTex, writeTexPreserving, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import type { LyxDocument } from '@overlyx/core';
 import { findMaster, readTextFile, resolveInside } from './project.ts';
 
@@ -81,12 +81,19 @@ export function parseFragmentText(latex: string, ctx: TexContext, relPath: strin
   return parseTex(latex, { layoutDir: ctx.layoutDir, localDirs: [ctx.root, path.dirname(abs)], readFile: readerFor(ctx, abs), masterHeader });
 }
 
-export function writeDocumentText(doc: LyxDocument, ctx: TexContext, relPath: string, fragment: boolean, resolveInclude?: (filename: string) => LyxDocument | undefined): { text: string; warnings: string[]; files: Record<string, string>; spans: ({ start: number; end: number } | null)[] } {
+/**
+ * The document as .tex text. With `preserve`, written into the text the file holds now (`base`):
+ * what did not change keeps its LaTeX byte for byte (core tex/preserve.ts), as the server saves.
+ */
+export function writeDocumentText(doc: LyxDocument, ctx: TexContext, relPath: string, fragment: boolean, resolveInclude?: (filename: string) => LyxDocument | undefined, preserve?: { base: string | null; cache?: PreserveCache }): { text: string; warnings: string[]; files: Record<string, string>; spans: ({ start: number; end: number } | null)[] } {
   const abs = resolveInside(ctx.root, relPath);
-  const r = writeTex(doc, {
+  const opts = {
     layoutDir: ctx.layoutDir, localDirs: [ctx.root, path.dirname(abs)], readFile: readerFor(ctx, abs),
     fragment, basename: path.basename(relPath, '.tex'), resolveInclude,
-  });
+  };
+  const r = preserve
+    ? writeTexPreserving(doc, { base: preserve.base, cache: preserve.cache, write: d => writeTex(d, opts), parse: t => parseDocumentText(t, ctx, relPath) })
+    : writeTex(doc, opts);
   return { text: r.text, warnings: r.warnings, files: r.files, spans: r.spans };
 }
 

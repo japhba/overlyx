@@ -260,7 +260,10 @@ export function packages(ctx: ExportContext): string {
   if (f.mustProvide('esint') && usePackageAllowed(ctx, 'esint')) s += '\\usepackage{esint}\n';
   for (const name of BIBLIO_FEATURES) if (f.mustProvide(name)) s += `\\usepackage{${name}}\n`;
   if (f.mustProvide('natbib') && !f.isProvided('natbib-internal') && !f.isProvided('biblatex') && !f.isProvided('biblatex-natbib') && !f.isProvided('jurabib')) {
-    s += `\\usepackage[${bp.citeEngineType === 'numerical' ? 'numbers' : 'authoryear'}${bp.biblioOptions ? ',' + bp.biblioOptions : ''}]{natbib}\n`;
+    const natbib = `\\usepackage[${bp.citeEngineType === 'numerical' ? 'numbers' : 'authoryear'}${bp.biblioOptions ? ',' + bp.biblioOptions : ''}]{natbib}`;
+    // a .tex document's class or style may load natbib itself (a journal class, a conference
+    // .sty): loading it again with options is an option clash
+    s += ctx.texMode ? `\\makeatletter\n\\@ifpackageloaded{natbib}{}{${natbib}}\n\\makeatother\n` : natbib + '\n';
   }
   if (f.mustProvide('jurabib') && !f.isProvided('natbib-internal') && !f.isProvided('natbib') && !f.isProvided('biblatex')) {
     s += `\\usepackage${bp.biblioOptions ? `[${bp.biblioOptions}]` : ''}{jurabib}[2004/01/25]\n`;

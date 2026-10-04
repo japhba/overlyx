@@ -94,7 +94,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
     setPicked(name);
     const d = projectDocs(p)[0];
     if (d) onOpen(`${name}/${d}`);
-    else { notify(`“${projectLabel(p)}” has no documents yet — create one with + Doc`); location.hash = '#/'; }
+    else onOpen(name);   // no documents yet: open the project itself (App.tsx's ProjectRootPanel offers to create one)
   };
 
   const fetchStatic = (id: string) => {

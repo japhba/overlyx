@@ -13,7 +13,7 @@ import { yDocToProsemirrorJSON } from 'y-prosemirror';
 import {
   mergeLyx, pmToLyxBody, writeParagraphs, isProjectKey, splitDocId, type LyxDocument, type PMJSON,
 } from '@overlyx/core';
-import { checkTexHealth, repairTex, type HealthIssue } from '@overlyx/core/tex/index.ts';
+import { checkTexHealth, repairTex, primePreserveCache, type HealthIssue, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { db } from './db.ts';
 import { config } from './config.ts';
 import { listProjects, resolveProjectPath, projectDir, type ProjectFile } from './projects.ts';
@@ -43,6 +43,8 @@ export class OpenDoc {
   fileHash = '';
   /** what the file contained when it was last read or written: the base for merging external changes */
   fileText: string | null = null;
+  /** the base text's parse and writer output between saves (writing into fileText keeps its unchanged LaTeX) */
+  preserveCache: PreserveCache = {};
   /** the file was deleted on disk (see DocManager.onExternalRemove): nothing is written until it is back */
   fileMissing = false;
   /** identifies this Yjs history; a fresh Y.Doc (after a restart with a changed file) gets a new one */
@@ -100,9 +102,13 @@ export class OpenDoc {
     return { preamble: meta.preamble, format: meta.format, header: { lines: meta.headerLines }, body: pmToLyxBody(json), trailer: meta.trailer };
   }
 
-  /** Current document as .tex text (plus the sidecar files it owns, e.g. sketch SVGs, and the source map). */
+  /**
+   * Current document as .tex text (plus the sidecar files it owns, e.g. sketch SVGs, and the source
+   * map), written into the file's text: the paragraphs, preamble and managed block nobody changed
+   * keep their LaTeX as it is on disk.
+   */
   protected render(): { text: string; files: Record<string, string>; spans: SourceSpan[] } {
-    const r = writeDocumentText(this.toLyxDocument(), this.project, this.relPath, this.isChild, (fn) => resolveIncludeFor(this, fn));
+    const r = writeDocumentText(this.toLyxDocument(), this.project, this.relPath, this.isChild, (fn) => resolveIncludeFor(this, fn), { base: this.fileText, cache: this.preserveCache });
     return { text: r.text, files: r.files, spans: r.spans };
   }
 
@@ -113,7 +119,7 @@ export class OpenDoc {
 
   /** Another version of this document (parsed, e.g. a merge result) as .tex text, written the way toText writes the current one. */
   textOf(doc: LyxDocument): string {
-    return writeDocumentText(doc, this.project, this.relPath, this.isChild, (fn) => resolveIncludeFor(this, fn)).text;
+    return writeDocumentText(doc, this.project, this.relPath, this.isChild, (fn) => resolveIncludeFor(this, fn), { base: this.fileText, cache: this.preserveCache }).text;
   }
 
   /** Current document as .tex text with its source map: the character range of every top-level paragraph (the source pane's cursor / scroll sync). */
@@ -151,10 +157,15 @@ export class OpenDoc {
     return this.fileText === null ? [] : checkTexHealth(this.fileText, { isFragment: this.isChild });
   }
 
-  /** Snapshots the current file as a version, then loads `text` like any external change and schedules a save. */
+  /**
+   * Snapshots the current file as a version, then loads `text` like any external change and writes
+   * it to the file as it is (the reviewed text: a save writes into the file's text, so the repair
+   * must be in the file, not only in the document).
+   */
   private applyRepairedText(text: string, versionName: string): void {
     this.snapshot(versionName, this.fileText ?? '');
     this.absorbExternalChange(text);
+    this.writeText(text);
     this.dirty = true;
     void this.saveToFile();
   }
@@ -188,6 +199,8 @@ export class OpenDoc {
   parse(text: string): LyxDocument {
     const r = parseDocumentText(text, this.project, this.relPath);
     this.isChild = r.fragment;
+    // the file's own parse is what the next save writes into: remember it
+    if (text === this.fileText) primePreserveCache(this.preserveCache, text, r);
     return r.doc;
   }
 
@@ -290,17 +303,7 @@ export class OpenDoc {
         let previous: string | null = null;
         try { previous = readTextFile(this.absPath); } catch { /* new file */ }
         if (previous && previous.length > 5000 && text.length < previous.length * 0.2) this.snapshot('before large deletion', previous);
-        const tmp = this.absPath + '.overlyx-tmp';
-        const fd = fs.openSync(tmp, 'w');
-        try { fs.writeSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-        fs.renameSync(tmp, this.absPath);
-        if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] wrote ${this.id} hash=${hash.slice(0, 8)} len=${text.length}`);
-        this.fileHash = hash;
-        this.fileText = text;
-        knownHashes.set(this.absPath, hash);
-        this.maybeAutoVersion(text);
-        const editors = [...this.editors]; this.editors.clear();
-        for (const l of fileWrittenListeners) { try { l(this.project, editors); } catch { /* ignore */ } }
+        this.writeText(text);
       }
       this.dirty = false;
       this.saveError = null;
@@ -318,6 +321,22 @@ export class OpenDoc {
     } finally {
       this.saving = false;
     }
+  }
+
+  /** Write `text` to the file (atomically) as what it holds now; the git layer is told who edited. */
+  private writeText(text: string): void {
+    const hash = sha1(text);
+    const tmp = this.absPath + '.overlyx-tmp';
+    const fd = fs.openSync(tmp, 'w');
+    try { fs.writeSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, this.absPath);
+    if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] wrote ${this.id} hash=${hash.slice(0, 8)} len=${text.length}`);
+    this.fileHash = hash;
+    this.fileText = text;
+    knownHashes.set(this.absPath, hash);
+    this.maybeAutoVersion(text);
+    const editors = [...this.editors]; this.editors.clear();
+    for (const l of fileWrittenListeners) { try { l(this.project, editors); } catch { /* ignore */ } }
   }
 
   /** Keep a copy of some text as a version of this document (never fails the caller). */

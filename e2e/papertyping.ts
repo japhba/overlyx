@@ -12,7 +12,7 @@
 import { expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
-import { PROJECTS_DIR } from './helpers';
+import { PROJECTS_DIR, fillDialog } from './helpers';
 
 /** What "New document" (server projects.ts newDocumentText) writes for a titled, empty article. */
 export function blankArticle(title: string): string {
@@ -228,15 +228,13 @@ export async function insertRef(page: Page, label: string, kind: 'ref' | 'eqref'
   await expect(page.locator('.lyx-editor .lyx-command-ref').last()).toContainText(label);
 }
 
-/** Insert ▸ BibTeX bibliography… (two prompt()s: the .bib files without extension, the style). */
+/** Insert ▸ BibTeX bibliography… (two prompts, the app's own themed dialog: the .bib files without extension, then the style). */
 export async function insertBibliography(page: Page, files: string, style = 'plain') {
-  const answers = [files, style];
-  const onDialog = (d: import('@playwright/test').Dialog) => { void d.accept(answers.shift() ?? ''); };
-  page.on('dialog', onDialog);
   await page.locator('.menubar .menu button', { hasText: 'Insert' }).first().click();
   await page.locator('.menu-list .menu-item', { hasText: 'BibTeX bibliography' }).click();
+  await fillDialog(page, files);
+  await fillDialog(page, style);
   await expect(page.locator('.lyx-editor .lyx-command-bibtex')).toHaveCount(1, { timeout: 5000 });
-  page.off('dialog', onDialog);
 }
 
 /* ------------------------------------------------------------------ full papers (paperwriting-gan / -adam) */

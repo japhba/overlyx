@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { lyxToPm, headerValue, mergeLyx, type LyxDocument, type PMJSON } from '@overlyx/core';
 import { documentModel, sameModel, modelDocument, type DocumentModel, type SyncTag } from '../shared/documentModel.ts';
 import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, sameDocumentText, type TexContext } from './texdoc.ts';
-import type { ParseTexResult } from '@overlyx/core/tex/index.ts';
+import { primePreserveCache, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { buildMeta } from './meta.ts';
 import { findMaster } from './project.ts';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
@@ -31,6 +31,8 @@ export class DocSession {
   /** file-side forms of the models the webview may name as its base (see baseDocument) */
   private known: { key: string; doc: LyxDocument }[] = [];
   private writes: Promise<unknown> = Promise.resolve();
+  /** the TextDocument text's parse and writer output: writing into it keeps its unchanged LaTeX (core tex/preserve.ts) */
+  private preserveCache: PreserveCache = {};
 
   /** Source, visual edits, settings and saves share one ordered write queue. */
   private enqueue<T>(work: () => Promise<T>): Promise<T> {
@@ -98,7 +100,10 @@ export class DocSession {
 
   /** The .tex text with its source map (the character range of every top-level paragraph: the source pane's cursor / scroll sync). */
   toTextMap(): { text: string; spans: ({ start: number; end: number } | null)[] } {
-    const r = writeDocumentText(this.toLyxDocument(), this.ctx, this.relPath, this.isChild, includeResolver(this.ctx, this.relPath));
+    const text = this.document.getText();
+    const parsed = parseDocumentText(text, this.ctx, this.relPath);
+    primePreserveCache(this.preserveCache, text, parsed);
+    const r = writeDocumentText(parsed.doc, this.ctx, this.relPath, this.isChild, includeResolver(this.ctx, this.relPath), { base: text, cache: this.preserveCache });
     return { text: r.text, spans: r.spans };
   }
 
@@ -119,7 +124,9 @@ export class DocSession {
     const diskChanged = await this.readDisk();
     const incoming = documentModel(pmDoc, headerLines);
     if (sameModel(incoming, base)) return diskChanged;
-    const current = parseDocumentText(this.document.getText(), this.ctx, this.relPath);
+    const currentText = this.document.getText();
+    const current = parseDocumentText(currentText, this.ctx, this.relPath);
+    primePreserveCache(this.preserveCache, currentText, current);
     const currentModel = documentModel(lyxToPm(current.doc), current.doc.header.lines);
     if (sameModel(incoming, currentModel)) { this.remember(incoming, current.doc); return diskChanged; }
     const ours = modelDocument(incoming, current.doc);
@@ -127,7 +134,8 @@ export class DocSession {
     const mergedModel = documentModel(lyxToPm(merged), merged.header.lines);
     const rebased = !sameModel(incoming, mergedModel);
     if (rebased) this.preserveDraft(writeDocumentText(ours, this.ctx, this.relPath, current.fragment, includeResolver(this.ctx, this.relPath)).text);
-    const { text, files } = writeDocumentText(merged, this.ctx, this.relPath, current.fragment, includeResolver(this.ctx, this.relPath));
+    // written into the TextDocument's text: what nobody changed keeps its LaTeX
+    const { text, files } = writeDocumentText(merged, this.ctx, this.relPath, current.fragment, includeResolver(this.ctx, this.relPath), { base: currentText, cache: this.preserveCache });
     this.writeSidecars(files);
     await this.replaceText(text);
     const after = this.parseCurrent();
@@ -166,7 +174,7 @@ export class DocSession {
       const theirs = parseDocumentText(disk, this.ctx, this.relPath);
       this.preserveDraft(local);
       const merged = mergeLyx(base.doc, ours.doc, theirs.doc);
-      text = writeDocumentText(merged, this.ctx, this.relPath, theirs.fragment, includeResolver(this.ctx, this.relPath)).text;
+      text = writeDocumentText(merged, this.ctx, this.relPath, theirs.fragment, includeResolver(this.ctx, this.relPath), { base: disk, cache: this.preserveCache }).text;
     }
     await this.replaceText(text);
     this.diskText = disk;

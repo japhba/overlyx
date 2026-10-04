@@ -29,14 +29,11 @@ const gitmod = await import('../packages/server/src/git.ts');
 const access = await import('../packages/server/src/access.ts');
 const { createUser, toSessionUser } = await import('../packages/server/src/auth.ts');
 const { manager } = await import('../packages/server/src/docs.ts');
-const { parseTex, writeTex } = await import('../packages/core/src/tex/index.ts');
 
 const HEAD = '\\documentclass{article}\n\\begin{document}\n';
 const TAIL = '\\end{document}\n';
 const par = (t: string) => `${t}\n\n`;
 const docText = (...pars: string[]) => HEAD + pars.map(par).join('') + TAIL;
-/** the canonical form the document manager writes */
-const canon = (text: string) => writeTex(parseTex(text).doc).text;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 const jan = toSessionUser(createUser('jan', 'Jan Bauer', null, { email: 'owner@example.com', googleSub: 'g-jan' }));
@@ -189,7 +186,7 @@ describe('git over HTTP', () => {
 
   it('clones with a token and pushes; the push updates the working tree', async () => {
     await g(ROOT, 'clone', '-q', url('bob', bobToken), clone);
-    expect(readFileSync(join(clone, 'main.tex'), 'utf8')).toBe(canon(docText('one', 'two edited by bob', 'three')));
+    expect(readFileSync(join(clone, 'main.tex'), 'utf8')).toBe(docText('one', 'two edited by bob', 'three'));
     expect(existsSync(join(clone, 'main.aux'))).toBe(false);
     expect((await g(clone, 'log', '--format=%s')).trim().split('\n')).toEqual(['Add notes', 'Update main.tex', 'Import "paper" into OverLyX']);
     writeFileSync(join(clone, 'refs.bib'), '@article{a, title={A}}\n@article{b, title={B}}\n');
@@ -253,13 +250,13 @@ describe('git over HTTP', () => {
     doc.loadFromLyx(doc.parse(docText('one', 'two edited by bob', 'three', 'four from the browser')), 'test');
     // not even written yet: the fetch saves and commits first
     await g(clone, 'pull', '-q', '--no-rebase', 'origin', 'main');
-    expect(readFileSync(join(clone, 'main.tex'), 'utf8')).toBe(canon(docText('one', 'two edited by bob', 'three', 'four from the browser')));
-    // now the other way: a paragraph edited locally (in a plain editor, not canonical) and pushed shows up in the open document
+    expect(readFileSync(join(clone, 'main.tex'), 'utf8')).toBe(docText('one', 'two edited by bob', 'three', 'four from the browser'));
+    // now the other way: a paragraph edited locally (in a plain editor) and pushed shows up in the open document
     writeFileSync(join(clone, 'main.tex'), docText('one (local)', 'two edited by bob', 'three', 'four from the browser'));
     await g(clone, 'commit', '-q', '-am', 'Local edit of paragraph one');
     await g(clone, 'push', '-q', 'origin', 'main');
     for (let i = 0; i < 80 && !doc.toText().includes('one (local)'); i++) await sleep(100);
-    expect(doc.toText()).toBe(canon(docText('one (local)', 'two edited by bob', 'three', 'four from the browser')));
+    expect(doc.toText()).toBe(docText('one (local)', 'two edited by bob', 'three', 'four from the browser'));
   });
 
   it('a project name with spaces works, and an unborn repository can be pushed to', async () => {

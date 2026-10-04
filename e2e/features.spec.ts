@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
-import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf, nextFrames } from './helpers';
+import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf, nextFrames, fillDialog, acceptDialog } from './helpers';
 
 /** Each test works on its own copy of a document inside a scratch project. */
 const PROJECT = 'admin/e2e-scratch';
@@ -247,16 +247,16 @@ test('versions can be created, listed and restored', async ({ page }) => {
   await firstStandard(page);
   await page.keyboard.type(' before-version');
   await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('before-version');
-  page.once('dialog', d => d.accept('v1'));
   const vRail = page.locator('.rail.right [data-rail="versions"]');
   if (await vRail.count()) await vRail.click(); else await page.locator('.panel-tabs button', { hasText: 'Versions' }).click();
   await page.locator('.small-btn', { hasText: '+ Save version' }).click();
+  await fillDialog(page, 'v1');
   await expect(page.locator('.version .name', { hasText: 'v1' })).toHaveCount(1);
   await firstStandard(page);
   await page.keyboard.type(' after-version');
   await expect.poll(() => fileText(id), { timeout: 15000 }).toContain('after-version');
-  page.once('dialog', d => d.accept());
   await page.locator('.version', { hasText: 'v1' }).locator('.small-btn', { hasText: 'Restore' }).click();
+  await acceptDialog(page);
   await expect(page.locator('.lyx-editor')).not.toContainText('after-version', { timeout: 15000 });
   await expect.poll(() => fileText(id), { timeout: 15000 }).not.toContain('after-version');
 });

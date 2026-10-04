@@ -115,6 +115,25 @@ function argInsetsOf(par: Paragraph, prefix: string): Map<string, TextInset> {
   return m;
 }
 
+/**
+ * Where the environment starting at paragraph `pit` ends because a later paragraph of it brings an
+ * argument the environment has already (a second "Uncover" paragraph with its own <3->): that one
+ * starts an environment of its own — merged, its argument was lost. pars.length when none does.
+ */
+function argumentBreak(pars: Paragraph[], pit: number): number {
+  const first = pars[pit];
+  const seen = new Set(argInsetsOf(first, '').keys());
+  for (let i = pit + 1; i < pars.length; i++) {
+    const p = pars[i];
+    if (p.depth < first.depth || (p.depth === first.depth && p.layout !== first.layout)) break;
+    if (p.depth > first.depth) continue;
+    const ids = [...argInsetsOf(p, '').keys()];
+    if (ids.some(id => seen.has(id))) return i;
+    for (const id of ids) seen.add(id);
+  }
+  return pars.length;
+}
+
 /** Output the LaTeX arguments (Argument insets) of a paragraph/inset, like getArgInsets(). */
 export function latexArgInsets(ctx: ExportContext, os: TexStream, rp: RunParams, args: Map<string, ArgumentSpec>, found: Map<string, TextInset>, prefix: string): void {
   const relevant = [...args.entries()].filter(([id]) => (prefix ? id.startsWith(prefix) : !id.includes(':')));
@@ -211,7 +230,8 @@ function prepareEnvironment(ctx: ExportContext, text: TextInfo, pit: number, os:
     if (hasArgsStyle(style)) {
       // arguments may sit in any paragraph of the environment (same layout & depth)
       const found = new Map<string, TextInset>();
-      for (let i = pit; i < pars.length; i++) {
+      const stop = argumentBreak(pars, pit);
+      for (let i = pit; i < stop; i++) {
         const p = pars[i];
         if (p.layout !== par.layout || p.depth < par.depth) break;
         if (p.depth > par.depth) continue;
@@ -261,7 +281,9 @@ function texEnvironment(ctx: ExportContext, text: TextInfo, pit: number, os: Tex
   const currentLayout = first.layout;
   const currentDepth = first.depth;
   const currentIndent = first.params.leftindent ?? '';
+  const stop = hasArgsStyle(styleOf(ctx, first, rp)) ? argumentBreak(pars, pit) : pars.length;
   while (pit < pars.length) {
+    if (pit === stop) return pit;
     const par = pars[pit];
     let goOut = par.depth < currentDepth;
     if (par.depth === currentDepth) {
@@ -362,6 +384,9 @@ export function latexParagraphs(ctx: ExportContext, text: TextInfo, os: TexStrea
 }
 
 /* ------------------------------------------------------------------ TeXOnePar */
+
+const HEADING_ALIGN: Record<string, string> = { center: '\\centering', left: '\\raggedright', right: '\\raggedleft' };
+const RUN_IN = new Set(['paragraph', 'subparagraph']);
 
 function parStartCommand(ctx: ExportContext, os: TexStream, rp: RunParams, par: Paragraph, style: LayoutStyle): void {
   switch (style.latexType) {
@@ -509,6 +534,12 @@ function texOneParImpl(ctx: ExportContext, text: TextInfo, pit: number, os: TexS
     }
   }
 
+  // an aligned heading in a .tex document: the alignment around the command, {\centering\section{…}\par}
+  // — inside the argument a \par (of \begin{center}…\end{center}) does not compile. A run-in heading
+  // (\paragraph) has no line of its own to align, and in a group it would be lost: none there
+  const cmdAlign = ctx.texMode && isCommand(style) && !intitleCommand && !RUN_IN.has(style.latexName.replace(/\*$/, '')) ? HEADING_ALIGN[parAlign(par, style)] : undefined;
+  const alignedHeading = !!cmdAlign && parAlign(par, style) !== style.align;
+  if (alignedHeading) os.write(`{${cmdAlign}`);
   if (!intitleCommand) parStartCommand(ctx, os, localRp, par, style);
 
   paragraphLatex(ctx, os, localRp, par, style, parLang, isLastPar, text);
@@ -517,6 +548,7 @@ function texOneParImpl(ctx: ExportContext, text: TextInfo, pit: number, os: TexS
     os.write('}');
     if (style.args.size) latexArgInsets(ctx, os, localRp, style.args, argInsetsOf(par, 'post:'), 'post:');
     if (localRp.postMacro) { os.write(localRp.postMacro); localRp.postMacro = ''; }
+    if (alignedHeading) os.write('\\par}');
   } else if (!intitleCommand && localRp.postMacro) {
     // postponed fragile content of an enclosing moving argument
     rp.postMacro += localRp.postMacro;
@@ -694,6 +726,7 @@ const WRAP_COLUMN = 65;
 /** Write the alignment / noindent parameters at the start of a paragraph (startTeXParParams). */
 function startParParams(ctx: ExportContext, os: TexStream, rp: RunParams, par: Paragraph, style: LayoutStyle, isLastPar: boolean, units: Unit[]): void {
   if (rp.forcePlain || !rp.customPars) return;
+  if (ctx.texMode && isCommand(style) && !style.inTitle) return;   // aligned around the heading (texOneParImpl)
   const canIndent = ctx.bp.paragraphSeparation === 'indent' ? style.toggleIndent !== 'never' : style.toggleIndent === 'always';
   const curAlign = parAlign(par, style);
   if (canIndent && par.params.noindent && !style.passThru && curAlign !== 'center') {
@@ -707,8 +740,9 @@ function startParParams(ctx: ExportContext, os: TexStream, rp: RunParams, par: P
   correctedEnv(os, '\\begin', curAlign === 'left' ? 'flushleft' : curAlign === 'right' ? 'flushright' : 'center', rp, isLastPar);
 }
 
-function endParParams(os: TexStream, rp: RunParams, par: Paragraph, style: LayoutStyle, isLastPar: boolean): void {
+function endParParams(ctx: ExportContext, os: TexStream, rp: RunParams, par: Paragraph, style: LayoutStyle, isLastPar: boolean): void {
   if (rp.forcePlain || !rp.customPars) return;
+  if (ctx.texMode && isCommand(style) && !style.inTitle) return;
   const curAlign = parAlign(par, style);
   if (curAlign === style.align) return;
   if (curAlign !== 'left' && curAlign !== 'right' && curAlign !== 'center') return;
@@ -856,7 +890,7 @@ export function paragraphLatex(ctx: ExportContext, os: TexStream, rp: RunParams,
   if (!rp.inDeletedInset) markChange(ctx, os, rp, runningChange, undefined);
   if (bodyPos > 0 && bodyPos === units.length) os.write('}]~');
   if (style.rightDelim) os.write(style.rightDelim);
-  endParParams(os, rp, par, style, isLastPar);
+  endParParams(ctx, os, rp, par, style, isLastPar);
 }
 
 function sameChange(a?: Change, b?: Change): boolean {

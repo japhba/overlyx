@@ -11,7 +11,7 @@ import * as Y from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import { apiLogin, adminCredentials, userCredentials, BASE_URL, PROJECTS_DIR, TOUR_SEEN_SCRIPT } from './helpers';
+import { apiLogin, adminCredentials, userCredentials, BASE_URL, PROJECTS_DIR, TOUR_SEEN_SCRIPT, acceptDialog } from './helpers';
 
 const PROJECT = 'admin/e2e-share';
 const DOC = `${PROJECT}/main.tex`;
@@ -328,8 +328,8 @@ test('the owner can delete a project (it goes to the trash)', async ({ browser }
   const page = await admin.newPage();
   await page.goto('/');
   await page.waitForSelector('.home', { timeout: 20000 });
-  page.on('dialog', d => void d.accept());
   await page.locator(`.home-card[data-project="${PROJECT}"] button`, { hasText: 'Delete' }).click();
+  await acceptDialog(page);
   await expect(page.locator(`.home-card[data-project="${PROJECT}"]`)).toHaveCount(0, { timeout: 15000 });
   expect(existsSync(`${PROJECTS_DIR}/${PROJECT}`)).toBe(false);
   const [owner, name] = PROJECT.split('/');   // the trash keeps the namespaces: <data>/trash/<owner>/<name>-<date>
