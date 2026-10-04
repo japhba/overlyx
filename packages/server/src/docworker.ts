@@ -19,6 +19,7 @@ import {
 } from './docwork.ts';
 import { applyTrackedSource, applyPlainSource, restoreSource, foldEdits, replaceInSource, type EditableDoc } from './docedit.ts';
 import type { DocInfo, SyncEntry, WorkerRequest, WorkerResponse } from './docpool.ts';
+import { protectMoves } from '@overlyx/core/moves.ts';
 
 const mirrors = new Map<string, Mirror>();
 /** top-level blocks per step of building a document from its file (fresh) */
@@ -46,6 +47,8 @@ class Mirror implements DocState, EditableDoc {
   constructor(d: DocInfo) {
     this.id = d.id; this.project = d.project; this.relPath = d.relPath; this.absPath = d.absPath;
     this.ydoc.on('update', () => { this.seq++; });
+    // the deleted originals paragraph moves keep are kept here too: the state is persisted from the mirror
+    protectMoves(this.ydoc);
   }
 
   parse(text: string): LyxDocument {

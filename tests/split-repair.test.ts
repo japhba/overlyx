@@ -7,7 +7,8 @@
  * copy (server/moves.ts): every typed word survives once, where its author put it.
  */
 import { describe, expect, it } from 'vitest';
-import { Net, par, text, math, emph, once, absent } from './yjs-net';
+import { Net, par, text, math, once, absent } from './yjs-net';
+import { MoveRepair } from '../packages/server/src/moves';
 
 const ENCODER = [
   text('The encoder is composed of a stack of '), math('N=6'),
@@ -149,6 +150,33 @@ describe('joins', () => {
 });
 
 describe('the repair', () => {
+  it('a server restart between the split and the reconnect: the kept originals and the records are loaded again', () => {
+    const net = new Net(encoder());
+    const on = net.peer('online', 200), off = net.peer('offline', 100);
+    net.offline(off);
+    on.enterBefore('That is');
+    net.flush();
+    net.restart();
+    off.typeBefore('is the function', 'LATE ');
+    off.remove('the output is ');
+    net.online(on);
+    net.online(off);
+    const t = net.converged();
+    expect(t[1]).toBe('That is, $\\mathrm{LayerNorm}(x)$, where $f(x)$ LATE is the function.');
+  });
+
+  it('records older than the retention period are dropped', () => {
+    const net = new Net(encoder());
+    const a = net.peer('a', 100);
+    a.enterBefore('That is');
+    net.flush();
+    const map = net.server.getMap('moves');
+    expect(map.size).toBe(1);
+    const later = new MoveRepair(net.server, { now: () => Date.now() + 31 * 86400000 });
+    later.prune();
+    expect(map.size).toBe(0);
+  });
+
   it('a paragraph split while another split arrives later: nothing doubled, nothing lost, repeat reconnects change nothing', () => {
     const net = new Net(encoder());
     const a = net.peer('a', 100), b = net.peer('b', 200), c = net.peer('c', 300);

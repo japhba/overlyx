@@ -116,7 +116,8 @@ export function generate(seed: number, steps: number, peers: number, opts: { joi
 
 /** run a script; the problems found (none: all invariants hold) */
 export function replay(script: string[], peers: number, opts: { dumpAt?: number } = {}): { problems: string[]; final: string[] } {
-  const net = new Net(baseDoc());
+  // OVERLYX_FUZZ_REPAIR=0: the server applies updates as they are (the behaviour before moves.ts)
+  const net = new Net(baseDoc(), { repair: process.env.OVERLYX_FUZZ_REPAIR !== '0' });
   const ps = ['a', 'b', 'c'].slice(0, peers).map((n, i) => net.peer(n, 100 * (i + 1)));
   const base = allWords(net.converged());
   const typed = new Set<string>(), deleted = new Set<string>();
@@ -145,6 +146,8 @@ export function replay(script: string[], peers: number, opts: { dumpAt?: number 
     else if (c !== 1) problems.push(`${w} present ${c}×`);
   }
   for (const w of counts.keys()) if (!typed.has(w) && !base.includes(w)) problems.push(`${w} unknown`);
+  if (process.env.OVERLYX_FUZZ_ONLY === 'lost') return { problems: problems.filter(p => /present 0×/.test(p)), final };
+  if (process.env.OVERLYX_FUZZ_ORDER === '0') return { problems, final };
   // order: what any editor showed keeps its order
   const index = new Map(got.map((w, i) => [w, i]));
   for (const v of views) {
@@ -194,9 +197,19 @@ describe.skipIf(!!process.env.OVERLYX_FUZZ_DEBUG)('randomized splits and joins w
         const script = generate(seed, steps, peers, { joins: JOINS });
         let res: { problems: string[]; final: string[] };
         try { res = replay(script, peers); } catch (e) { res = { problems: [String(e)], final: [] }; }
-        if (res.problems.length) failures.push(`seed ${seed}: ${res.problems.slice(0, 4).join('; ')}`);
+        if (res.problems.length) failures.push(`seed ${seed}: ${res.problems.join('; ')}`);
       }
-      if (process.env.OVERLYX_FUZZ_LIST) console.log('failing:', failures.map(f => f.split(':')[0].slice(5)).join(' '));
+      if (process.env.OVERLYX_FUZZ_LIST) {
+        console.log('failing:', failures.map(f => f.split(':')[0].slice(5)).join(' '));
+        const kinds = { lost: 0, doubled: 0, undeleted: 0, order: 0 };
+        for (const f of failures) {
+          if (/present 0×/.test(f)) kinds.lost++;
+          if (/present [2-9]×/.test(f)) kinds.doubled++;
+          if (/deleted but present/.test(f)) kinds.undeleted++;
+          if (/order:/.test(f)) kinds.order++;
+        }
+        console.log('kinds:', JSON.stringify(kinds));
+      }
       expect(failures.slice(0, 5).join('\n'), `${failures.length} of ${count} seeds failed`).toBe('');
     }, 600000);
   }

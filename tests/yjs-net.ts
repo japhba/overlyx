@@ -104,7 +104,21 @@ export class Net {
   constructor(doc: Json, opts: { repair?: boolean } = {}) {
     this.server.clientID = 1;
     prosemirrorJSONToYXmlFragment(schema, doc, this.server.getXmlFragment('prosemirror'));
-    this.repair = opts.repair === false ? null : new MoveRepair(this.server);
+    this.repair = opts.repair === false ? null : new MoveRepair(this.server, { log: process.env.OVERLYX_MOVES_DEBUG ? (...a) => console.log(...a) : undefined });
+    this.server.on('update', (u: Uint8Array) => { for (const p of this.peers) if (p.online) p.inbox.push(u); });
+  }
+
+  /**
+   * The server restarts: its document is loaded from the persisted state (as docs.ts does, origin
+   * 'db'), garbage collection included; every peer loses its connection.
+   */
+  restart(): void {
+    for (const p of this.peers) if (p.online) this.offline(p);
+    const state = Y.encodeStateAsUpdate(this.server);
+    this.server = new Y.Doc();
+    this.server.clientID = 2;
+    this.repair = this.repair ? new MoveRepair(this.server) : null;
+    Y.applyUpdate(this.server, state, 'db');
     this.server.on('update', (u: Uint8Array) => { for (const p of this.peers) if (p.online) p.inbox.push(u); });
   }
 
@@ -144,10 +158,16 @@ export class Net {
    */
   online(p: Peer, order: 'peer-first' | 'server-first' = 'peer-first') {
     const peerSV = Y.encodeStateVector(p.ydoc), serverSV = Y.encodeStateVector(this.server);
-    this.knows.set(p, Y.decodeStateVector(peerSV));
+    const known = Y.decodeStateVector(peerSV);
+    this.knows.set(p, known);
     const fromPeer = Y.encodeStateAsUpdate(p.ydoc, serverSV);
-    const fromServer = Y.encodeStateAsUpdate(this.server, peerSV);
     p.online = true;
+    // like ws.ts: a peer with edits the server has not seen gets the server's step 2 once its own is applied
+    const news = [...known].some(([client, clock]) => clock > Y.getState(this.server.store, client));
+    if (news || !this.repair) {
+      if (news) { this.toServer(p, fromPeer, true); Y.applyUpdate(p.ydoc, Y.encodeStateAsUpdate(this.server, peerSV), NET); return; }
+    }
+    const fromServer = Y.encodeStateAsUpdate(this.server, peerSV);
     if (order === 'peer-first') { this.toServer(p, fromPeer, true); Y.applyUpdate(p.ydoc, fromServer, NET); }
     else { Y.applyUpdate(p.ydoc, fromServer, NET); this.toServer(p, fromPeer, true); }
   }

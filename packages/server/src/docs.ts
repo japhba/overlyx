@@ -26,6 +26,7 @@ import { sha1, metaOf, lyxDocumentOf, renderDoc, renderModel, parseFor, mergeFil
 import { DocWorkers, WorkerGone, MirrorLost, type SyncEntry } from './docpool.ts';
 import { documentMeta, type DocumentMeta } from './docmeta.ts';
 import { applyTrackedSource, applyPlainSource, restoreSource, foldEdits, replaceInSource, type EditableDoc, type TrackedResult } from './docedit.ts';
+import { MoveRepair } from './moves.ts';
 
 export type { SourceSpan, DocMeta };
 export { readTextFile, looksLikeDocument };
@@ -87,9 +88,13 @@ export class OpenDoc implements DocState, EditableDoc {
   /** dropped from memory: work still under way is discarded */
   disposed = false;
 
+  /** paragraph splits and joins: what others typed meanwhile into the originals is moved after the copies (moves.ts) */
+  readonly moves: MoveRepair;
+
   constructor(public id: string, public project: string, public relPath: string, public absPath: string) {
     this.awareness = new awarenessProtocol.Awareness(this.ydoc);
     this.awareness.setLocalState(null);
+    this.moves = new MoveRepair(this.ydoc, { ttlDays: config.moveRecordDays, log: (...a) => console.error(`[moves] ${id}:`, ...a) });
   }
 
   /**
@@ -968,6 +973,8 @@ export class DocManager {
 
   private register(doc: OpenDoc): void {
     this.docs.set(doc.id, doc);
+    // records older than the retention period go (their originals are collected when it is next loaded)
+    try { doc.moves.prune(); } catch (e) { console.error('[moves] pruning failed', doc.id, e); }
     doc.trackUpdates();
     doc.ydoc.on('update', (_u: Uint8Array, origin: unknown) => {
       if (origin === 'file-load' || origin === 'db') return;

@@ -41,6 +41,11 @@ export const config = {
   /** same for persisting the Yjs state in SQLite (ms) */
   persistMaxWaitMs: Number(process.env.OVERLYX_PERSIST_MAX_WAIT ?? 5000),
   /**
+   * how long a paragraph split's or join's record — and the deleted originals it keeps — stays in a
+   * document (days): edits made offline on the old paragraph are moved after the copy up to then (moves.ts)
+   */
+  moveRecordDays: Number(process.env.OVERLYX_MOVE_RECORD_DAYS ?? 30),
+  /**
    * worker threads for the whole-document work — parsing, writing, merging (docpool.ts); 0 does it
    * on the main thread. Default: two fewer than the cores (builds and the event loop need theirs),
    * at least one, at most four; none under vitest unless set (tests drive the main-thread path)

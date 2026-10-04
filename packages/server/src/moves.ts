@@ -24,7 +24,7 @@
 import * as Y from 'yjs';
 import {
   MOVES_MAP, MOVES_ORIGIN, KEPT, MOVED, HANDLED, PLACED, CONTAINERS, Ranges, EntryList, protectMoves, encodeRecord, decodeRecord,
-  typeOf, isLive, containerOf, valueOf, childIndex, pairCopies, forEachStruct, idKey, insertSeparated,
+  typeOf, isContainer, isLive, containerOf, valueOf, childIndex, pairCopies, forEachStruct, idKey, insertSeparated,
   type MoveIndex, type MoveRecord,
 } from '@overlyx/core/moves.ts';
 
@@ -168,6 +168,8 @@ class Work {
   private rec!: MoveRecord;
   /** the copy last placed after each anchor (concurrent insertions keep their order) */
   private placed = new Map<string, Unit>();
+  /** a placed copy → the anchor it was placed after (first in its chain) */
+  private chain = new Map<string, string>();
   private adoptedSrc = new Ranges();
   /** copies of originals that were deleted before their record arrived */
   private late: Y.ID[] = [];
@@ -353,6 +355,8 @@ class Work {
     for (const c of conflicts) this.resolve(c, recreate);
     for (const runItem of recreate) this.dissolveRun(runItem);
     this.place();
+    // what was typed next to something this repair moved follows it too (a run behind a formula that moved)
+    for (let round = 0; round < 3 && this.followers(); round++) this.place();
     this.reformat();
     this.reattribute();
     this.propagateDeletions();
@@ -421,6 +425,11 @@ class Work {
       // paragraph (the inner split point) wins
       const ns = this.strength(side, dst), os = oldDst ? this.strength(old.side, oldDst) : KEPT;
       let newWins = !oldDst || (ns === MOVED && os !== MOVED) || (ns === MOVED && os === MOVED && this.sizeAt(this.resolveId(dst)) < this.sizeAt(this.resolveId(oldDst)));
+      // a copy inside a paragraph (or run) that is gone — joined into another meanwhile — cannot win
+      if (oldDst) {
+        const pn = this.placeable(this.resolveId(dst)), po = this.placeable(this.resolveId(oldDst));
+        if (pn !== po) newWins = pn;
+      }
       // a late edit the server placed beside its neighbour, also moved by this record (which knew it): it
       // goes where this record's move of that neighbour went (if the move lost there, it lost here too)
       if (oldDst && newWins && old.side === PLACED) newWins = this.moveHeld(r, Y.createID(c.client, k), dst);
@@ -463,6 +472,14 @@ class Work {
     return true;
   }
 
+  /** the unit's run and paragraph are alive (the unit itself may be deleted) */
+  private placeable(id: Y.ID): boolean {
+    const u = this.unitAt(id);
+    if (!u) return false;
+    const c = containerOf(u.item, this.repair.containerNames);
+    return !!c && isLive(c) && (!(u.item.parent instanceof Y.XmlText) || isLive(u.item.parent));
+  }
+
   /** moved, when a copy along the way was moved (not only re-created or placed) */
   private strength(side: number, dst: Y.ID): number {
     let id = dst;
@@ -490,7 +507,9 @@ class Work {
   /** deleted by somebody (not moved, nor arrived inside something that had moved) */
   private isDeleted(id: Y.ID): boolean {
     const u = this.unitAt(id);
-    return !!u && u.item.deleted && !this.mapped(id.client, id.clock) && !this.doa.has(id.client, id.clock);
+    if (!u || !u.item.deleted || this.mapped(id.client, id.clock) || this.doa.has(id.client, id.clock)) return false;
+    // gone with its paragraph or run in this very update (a join deleted it), not deleted by its sender
+    return !(this.deletedInT.has(id.client, id.clock) && !this.explicit(id.client, id.clock));
   }
 
   /** take a losing copy out: a character (its run is re-created), an inline node (deleted, kept) */
@@ -525,6 +544,8 @@ class Work {
     const parent = runItem.parent as Y.XmlElement;
     type Ch = { id: Y.ID; item: Y.Item; off: number; text: string; attrs: Record<string, unknown> };
     const stretches: Ch[][] = [[]];
+    /** the unit that moved away right before each stretch */
+    const before: (Y.ID | null)[] = [null];
     const attrs: Record<string, unknown> = {};
     for (let it = run._start; it; it = it.right) {
       if (it.content instanceof Y.ContentFormat) {
@@ -534,8 +555,11 @@ class Work {
       if (!(it.content instanceof Y.ContentString)) continue;
       for (let o = 0; o < it.length; o++) {
         const id = Y.createID(it.id.client, it.id.clock + o);
-        if (it.deleted) { if (this.mapped(id.client, id.clock) && stretches[stretches.length - 1].length) stretches.push([]); continue; }
-        if (this.misplaced.has(it)) { stretches.push([{ id, item: it, off: o, text: '', attrs: {} }], []); continue; }
+        if (it.deleted) {
+          if (this.mapped(id.client, id.clock)) { if (stretches[stretches.length - 1].length) { stretches.push([]); before.push(id); } else before[before.length - 1] = id; }
+          continue;
+        }
+        if (this.misplaced.has(it)) { stretches.push([{ id, item: it, off: o, text: '', attrs: {} }], []); before.push(null, null); continue; }
         stretches[stretches.length - 1].push({ id, item: it, off: o, text: it.content.str[o], attrs: { ...attrs } });
       }
     }
@@ -546,8 +570,19 @@ class Work {
       const src = this.index.sourceOf(c.id.client, c.id.clock);
       return !!src && src.side === MOVED && sameId(this.resolveId(src.src), c.id);
     };
+    // a stretch that the move put next to the unit before it (a join appending another paragraph's text)
+    // goes where that unit went; one that followed it in the same paragraph before stays with its own
+    const sameSource = (a: Y.ID, b: Y.ID) => {
+      const oa = this.originalOf(this.unitAt(a)!, 0), ob = this.originalOf(this.unitAt(b)!, 0);
+      return !!oa && !!ob && containerOf(oa.item, this.repair.containerNames) === containerOf(ob.item, this.repair.containerNames);
+    };
     const stay: Ch[] = [], go: Ch[] = [];
-    for (const st of stretches) (st.some(counts) ? stay : go).push(...st);
+    stretches.forEach((st, i) => {
+      if (!st.length) return;
+      const prev = before[i];
+      const holds = st.some(counts) && (!prev || !this.unitAt(prev) || sameSource(prev, st[0].id));
+      (holds ? stay : go).push(...st);
+    });
     const at = childIndex(parent, runItem);
     if (stay.length) {
       const copy = new Y.XmlText();
@@ -561,7 +596,13 @@ class Work {
     } else parent.delete(at, 1);
     this.ours.add(runItem);
     this.protect(runItem.id);
-    for (const c of go) this.addPending({ item: c.item, off: c.off, len: 1 });
+    // what goes, in stretches of one item each (a word typed in one go moves as one)
+    for (let i = 0; i < go.length;) {
+      let j = i + 1;
+      while (j < go.length && go[j].item === go[i].item && go[j].off === go[j - 1].off + 1) j++;
+      this.addPending({ item: go[i].item, off: go[i].off, len: j - i });
+      i = j;
+    }
   }
 
   /* ------------------------------------------------------------------------------ placing */
@@ -595,6 +636,23 @@ class Work {
     }
   }
 
+  /** live children of the paragraphs this repair moved things out of, whose neighbour moved meanwhile: pending again */
+  private followers(): boolean {
+    const conts = new Set<Y.XmlElement>();
+    const e = this.rec.entries;
+    for (let i = 0; i < e.length; i += 6) {
+      if (e[i + 3] !== PLACED && e[i + 3] !== MOVED) continue;
+      const u = this.unitAt(Y.createID(e[i], e[i + 1]));
+      const c = u && containerOf(u.item, this.repair.containerNames);
+      if (c && isLive(c)) conts.add(c);
+    }
+    const before = this.pending.length;
+    this.pending = [];
+    for (const c of conts) for (let ch = c._start; ch; ch = ch.right) if (!ch.deleted && !this.isNew(ch.id) && this.liveMisplaced({ item: ch, off: 0, len: 1 })) this.addPending({ item: ch, off: 0, len: 1 });
+    void before;
+    return this.pending.length > 0;
+  }
+
   private unmappedParts(p: Piece): Piece[] {
     if (typeOf(p.item)) return this.index.lookup(p.item.id.client, p.item.id.clock) ? [] : [p];
     const out: Piece[] = [];
@@ -614,10 +672,20 @@ class Work {
   }
 
   private move(x: Piece): void {
-    const pos = this.target(x);
+    let pos = this.target(x);
     if (pos === 'stay') return;
+    // nothing around it is left (its paragraph and its neighbours' went): beside the nearest live paragraph, never lost
+    pos ??= this.fallback(x);
     if (!pos) { this.repair.log('[moves] nowhere to put', idKey(x.item.id)); return; }
     const it = x.item, t = typeOf(it);
+    // a live run or inline node goes first (its copy must not land inside it), then the place is found again
+    if (!it.deleted && t) {
+      const parent = it.parent as Y.XmlElement;
+      parent.delete(childIndex(parent, it), 1);
+      this.ours.add(it);
+      const again = this.target(x);
+      if (again && again !== 'stay') pos = again;
+    }
     let last: Unit | null = null;
     if (it.content instanceof Y.ContentString) {
       const id = this.insertText(pos, it.content.str.slice(x.off, x.off + x.len), this.attrsAt(it));
@@ -645,7 +713,43 @@ class Work {
       this.removeLive(it);
       last = { item: copy._item!, off: 0 };
     }
-    if (last) this.placed.set(pos.key, last);
+    if (last) {
+      // the next one placed after the same unit, or after what was just placed there, goes behind it all
+      const root = this.chain.get(pos.key) ?? pos.key;
+      this.placed.set(root, last);
+      this.chain.set(idKey(Y.createID(last.item.id.client, last.item.id.clock + last.off)), root);
+    }
+  }
+
+  /**
+   * Where something goes that has nothing left around it: at the end of the nearest live paragraph
+   * before its paragraph (or the start of the one after), going up through deleted insets and cells.
+   */
+  private fallback(x: Piece): Pos | null {
+    let t: Y.AbstractType<any> | null = containerOf(x.item, this.repair.containerNames);
+    for (let depth = 0; t && t._item && depth < 16; depth++) {
+      const item = t._item;
+      const parent = item.parent as Y.AbstractType<any>;
+      for (let it = item.left; it; it = it.left) {
+        const c = typeOf(it);
+        if (!it.deleted && isContainer(c, this.repair.containerNames) && isLive(c)) {
+          let n = 0;
+          for (let ch = (c as Y.XmlElement)._start; ch; ch = ch.right) if (!ch.deleted && ch.countable) { const tc = typeOf(ch); n += tc instanceof Y.XmlText ? tc._length : 1; }
+          return { cont: c as Y.XmlElement, index: n, key: 'end:' + idKey(it.id) };
+        }
+      }
+      for (let it = item.right; it; it = it.right) {
+        const c = typeOf(it);
+        if (!it.deleted && isContainer(c, this.repair.containerNames) && isLive(c)) {
+          const key = 'start:' + idKey(it.id), last = this.placed.get(key);
+          return { cont: c as Y.XmlElement, index: last ? this.unitIndex(c as Y.XmlElement, last) + 1 : 0, key };
+        }
+      }
+      t = parent instanceof Y.AbstractType ? parent : null;
+      // past the paragraph level: the inline node holding it, then its paragraph
+      while (t && t._item && !isContainer(t, this.repair.containerNames)) t = t._item.parent instanceof Y.AbstractType ? t._item.parent : null;
+    }
+    return null;
   }
 
   /** a live item that was moved: deleted, and kept as the original of its copy */
@@ -688,7 +792,7 @@ class Work {
     const cont = containerOf(fit, this.repair.containerNames);
     if (!cont || !isLive(cont) || (fit.parent instanceof Y.XmlText && !isLive(fit.parent))) return depth > 8 ? null : this.around(f, x, depth + 1);
     const key = idKey(Y.createID(fit.id.client, fit.id.clock + f.off));
-    const last = this.placed.get(key);
+    const last = this.placed.get(this.chain.get(key) ?? key);
     if (!x.item.deleted && !last && this.adjacentAfter(f, x)) return 'stay';
     const base = last ?? f;
     return { cont, index: this.unitIndex(cont, base) + (base.item.deleted ? 0 : 1), key };
@@ -1032,9 +1136,18 @@ class Work {
       if (!isLive(c) || hasContent(c)) continue;
       const p = c._item!.parent as Y.XmlFragment;
       p.delete(childIndex(p, c._item!), 1);
+      // kept: what is still on its way into its old runs (from somebody who has not seen this) is placed then
+      this.protect(c._item!.id);
     }
-    // the paragraphs this update made (an editor's new halves) find their place among the others
+    // the paragraphs this update made (an editor's new halves), and those holding the copies that won a
+    // competition, find their place among the others
     const moved = new Set<Y.Item>(this.newBlocks.filter(it => !it.deleted));
+    for (const k of this.winners) {
+      const [c, cl] = k.split(':').map(Number);
+      const u = this.unitAt(this.resolveId(Y.createID(c, cl)));
+      const cont = u && containerOf(u.item, this.repair.containerNames);
+      if (cont && cont._item && isLive(cont)) moved.add(cont._item);
+    }
     // until nothing moves (a paragraph moved changes what the others are between)
     let todo = [...moved];
     for (let round = 0; round < 4 && todo.length; round++) {
@@ -1079,7 +1192,9 @@ class Work {
     const keys = between.map(it => this.blockKey(typeOf(it) as Y.XmlElement));
     if (keys.some(k => !k)) return null;
     for (let i = 0; i < between.length; i++) if (cmpKey(keys[i]!, kx) > 0) { before = between[i]; break; }
-    const inside = (!left || isAfter(x, left)) && (!right || isAfter(right, x));
+    // a deleted right neighbour stands for the next live paragraph after it
+    while (before && (before.deleted || !(typeOf(before) instanceof Y.XmlElement))) before = before.right;
+    const inside = (!left || isAfter(x, left)) && (!right || isAfter(right, x) || right.deleted);
     let next: Y.Item | null = x.right;
     while (next && (next.deleted || !(typeOf(next) instanceof Y.XmlElement))) next = next.right;
     if (inside && next === before) return null;
