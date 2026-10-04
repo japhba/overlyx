@@ -284,7 +284,7 @@ export async function exportTex(docId: string): Promise<{ dir: string; main: str
     try { text = documentText(doc.project, rel); } catch { continue; }
     // a layout document last saved before the layout macros changed builds with today's (they
     // write what the editor's check of its text boxes needs); the file itself changes on its next save
-    if (rel === doc.relPath && text.includes('\\begin{olbox}')) text = freshManagedBlock(text, doc.toText());
+    if (rel === doc.relPath && text.includes('\\begin{olbox}')) text = freshManagedBlock(text, await doc.textAsync());
     const relToDoc = path.relative(docDir, path.join(proj, rel));
     if (relToDoc.startsWith('..')) continue;   // outside the document's directory: found through TEXINPUTS
     const target = path.join(dir, relToDoc);
@@ -387,12 +387,12 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   const base = path.basename(exp.main, '.tex');
   // the TeX engine: non-TeX fonts (fontspec) need XeTeX or LuaTeX — like LyX, XeTeX unless the
   // document's default output format says LuaTeX (pdf5); an explicit pdf4 / pdf5 is honoured too
-  const header = doc.toLyxDocument().header;
+  const header = { lines: doc.getMeta().headerLines };
   const outFmt = headerValue(header, 'default_output_format') ?? 'default';
   const nonTex = headerValue(header, 'use_non_tex_fonts') === 'true';
   // a TeX magic comment at the top of the file (`%!TEX TS-program = lualatex`, `% !TeX program =
   // xelatex` — what TeXShop, Overleaf and LaTeX Workshop read) names the engine the author builds with
-  const magic = magicEngine(doc.fileText ?? doc.toText());
+  const magic = magicEngine(doc.fileText ?? await doc.textAsync());
   const engineFlag = magic ?? (outFmt === 'pdf5' ? '-pdflua' : outFmt === 'pdf4' || nonTex ? '-pdfxe' : '-pdf');
   // build products must be real files in the build directory, never links into the project
   for (const ext of ['.pdf', '.synctex.gz', '.aux', '.log', '.out', '.bbl', '.blg', '.toc', '.fls', '.fdb_latexmk']) {
@@ -574,7 +574,7 @@ export async function synctexEdit(docId: string, page: number, x: number, y: num
  * The check of a layout document's text boxes against its last build (core layout/check.ts): what
  * TeX wrote to `<job>.olx`, paired with the boxes of the document now — those unchanged since the build are `fresh`.
  */
-export function layoutCheckOf(docId: string): LayoutCheck {
+export async function layoutCheckOf(docId: string): Promise<LayoutCheck> {
   const b = lastBuild(docId);
   if (!b?.tex_path) return { params: null, boxes: [] };
   const base = b.tex_path.replace(/\.tex$/, '');
@@ -582,6 +582,6 @@ export function layoutCheckOf(docId: string): LayoutCheck {
   try { olx = fs.readFileSync(base + '.olx', 'utf8'); built = fs.readFileSync(base + '.olsrc', 'utf8'); } catch { return { params: null, boxes: [] }; }
   const open = manager.docs.get(docId);
   let live: string;
-  try { const { project, relPath } = DocManager.parseId(docId); live = open ? open.toText() : readTextFile(resolveProjectPath(project, relPath)); } catch { return { params: null, boxes: [] }; }
+  try { const { project, relPath } = DocManager.parseId(docId); live = open ? await open.textAsync() : readTextFile(resolveProjectPath(project, relPath)); } catch { return { params: null, boxes: [] }; }
   return layoutCheck(olx, built, live);
 }

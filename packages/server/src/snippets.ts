@@ -31,7 +31,7 @@ export function snippetFile(key: string): string | null {
 /** The SVG of a snippet (its cache key), compiling it when it is not cached yet. */
 export async function snippetSvg(docId: string, latex: string, wmm: number, hmm: number): Promise<string> {
   const doc = await manager.open(docId);
-  const text = doc.toText();
+  const text = await doc.textAsync();
   const at = text.indexOf('\\begin{document}');
   if (at < 0) throw new Error('not a document');
   const w = Math.max(1, Math.min(2000, wmm)).toFixed(2), h = Math.max(1, Math.min(2000, hmm)).toFixed(2);
