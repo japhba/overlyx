@@ -319,3 +319,5 @@ CREATE TABLE IF NOT EXISTS mcp_agent_messages (
 );
 CREATE INDEX IF NOT EXISTS mcp_agent_messages_agent ON mcp_agent_messages(agent_id, id);
 `);
+// what the panel chose for a turn of an agent on the owner's computer (mcpAgents.ts TurnOptions, JSON)
+try { db.exec('ALTER TABLE mcp_agent_messages ADD COLUMN options TEXT'); } catch { /* column exists */ }

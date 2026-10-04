@@ -6,9 +6,13 @@
  * owner is (the document, the selection — or a passage pinned with "Ask agent about this"), the
  * agent picks it up (wait_for_instructions, or pushed into a Claude Code session) and answers with
  * its reply tool. Only the account the agent's token belongs to sees and drives it.
+ *
+ * One kind runs on the owner's computer: the OverLyX CLI there (`overlyx agent install`) starts
+ * Claude Code for each message, with the model and reasoning effort picked here (agent.runner);
+ * its tool calls arrive as progress, its last message as the answer, and Stop ends the turn.
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { api, type AgentTurnContext, type ExternalAgent, type ExternalAgentEvent, type ExternalAgentMessage } from '../api';
+import { api, type AgentTurnContext, type ExternalAgent, type ExternalAgentEvent, type ExternalAgentMessage, type RunnerTurnOptions } from '../api';
 import { RichText, transcriptCopy } from './agentText';
 import { uiConfirm } from './Dialogs';
 
@@ -55,7 +59,11 @@ export function useExternalAgents(): { agents: ExternalAgent[]; onMessage: (fn: 
 
 const STATUS_TEXT: Record<ExternalAgent['status'], string> = { listening: 'Listening', working: 'Working…', online: 'Connected', offline: 'Offline' };
 
+const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+const store = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
+
 function statusLine(a: ExternalAgent): string {
+  if (a.runner) return a.status === 'offline' ? `Offline · the OverLyX agent on ${a.runner.host} is not running` : a.status === 'working' ? `Working on ${a.runner.host}…` : `Ready on ${a.runner.host}`;
   const where = a.project ? ` · ${a.project}${a.path ? ' › ' + a.path : ''}` : '';
   return a.status === 'offline' ? `Offline · last seen ${ago(a.lastSeen)}${where}` : `${STATUS_TEXT[a.status]}${where}`;
 }
@@ -65,7 +73,11 @@ export function AgentChip({ a }: { a: ExternalAgent }) {
   return <><span class={'ext-dot ' + a.status} style={{ background: a.status === 'offline' ? undefined : a.color }} />{a.name}</>;
 }
 
-function stateText(m: ExternalAgentMessage): string {
+function stateText(m: ExternalAgentMessage, a: ExternalAgent): string {
+  if (a.runner) {
+    if (m.state === 'queued') return a.runner.online ? 'Waiting for the turn before it' : `Waiting for ${a.runner.host} to come online`;
+    if (m.state === 'delivered') return `Running on ${a.runner.host}`;
+  }
   switch (m.state) {
     case 'queued': return m.pushedAt ? 'Sent to its session — waiting for it to answer' : 'Waiting for the agent to pick it up';
     case 'delivered': return m.via === 'push' ? 'Pushed to the agent' : 'The agent has it';
@@ -77,6 +89,12 @@ function stateText(m: ExternalAgentMessage): string {
 
 /** How to make the agent listen — shown while it is not. */
 function ListenHint({ a }: { a: ExternalAgent }) {
+  if (a.runner) return (
+    <div class="ext-hint" data-ext-hint>
+      <p>The OverLyX agent on <b>{a.runner.host}</b> is not running, so it cannot start Claude Code there right now. Messages wait until it is back.</p>
+      <p>On that computer, once: <code class="ext-cmd">overlyx agent install</code> — it then starts with the login. Or keep <code>overlyx agent run</code> open in a terminal.</p>
+    </div>
+  );
   const isClaude = a.client.name === 'claude-code';
   return (
     <div class="ext-hint" data-ext-hint>
@@ -102,6 +120,12 @@ export function ExternalAgentView({ agent, notify, onMessage, resync, pinned, on
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [withSelection, setWithSelection] = useState(true);
+  // a runner's turn: model and effort (kept per agent in this browser), and whether the next message starts a new conversation
+  const key = `ol.runner.${agent.id}`;
+  const [model, setModel] = useState(() => stored(key + '.model') ?? '');
+  const [effort, setEffort] = useState(() => stored(key + '.effort') ?? '');
+  const [fresh, setFresh] = useState(false);
+  const backend = agent.runner?.backends[0] ?? null;
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stick = useRef(true);
@@ -124,15 +148,18 @@ export function ExternalAgentView({ agent, notify, onMessage, resync, pinned, on
     const t = text.trim();
     if (!t || busy) return;
     const context = pinned ?? (withSelection ? contextOf() : undefined);
+    const options: RunnerTurnOptions | undefined = agent.runner ? { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(fresh ? { fresh } : {}) } : undefined;
     setBusy(true); stick.current = true;
-    api.externalAgentSend(agent.id, t, context)
-      .then(r => { setText(''); onUnpin(); setMessages(list => list.some(x => x.id === r.message.id) ? list : [...list, r.message]); })
+    api.externalAgentSend(agent.id, t, context, options)
+      .then(r => { setText(''); setFresh(false); onUnpin(); setMessages(list => list.some(x => x.id === r.message.id) ? list : [...list, r.message]); })
       .catch(e => notify(errText(e), 'error'))
       .finally(() => setBusy(false));
   };
   const cancel = (m: ExternalAgentMessage) => { api.externalAgentCancel(agent.id, m.id).catch(e => notify(errText(e), 'error')); };
 
-  const listening = agent.status === 'listening' || agent.status === 'working' || agent.push === 'confirmed';
+  const stop = (m: ExternalAgentMessage) => { api.externalAgentStop(agent.id, m.id).catch(e => notify(errText(e), 'error')); };
+  const listening = agent.runner ? agent.status !== 'offline' : agent.status === 'listening' || agent.status === 'working' || agent.push === 'confirmed';
+  const optionText = (o: RunnerTurnOptions | null | undefined) => o ? [o.model, o.effort && `effort ${o.effort}`, o.fresh && 'new conversation'].filter(Boolean).join(' · ') : '';
   const pinText = pinned?.content?.length ? 'the selected passage' : pinned?.mathLatex ? 'the selected formula part' : null;
   return (
     <div class="agent-panel ext-agent" data-ext-agent={agent.id}>
@@ -145,12 +172,13 @@ export function ExternalAgentView({ agent, notify, onMessage, resync, pinned, on
           onClick={() => void uiConfirm('Forget Agent', `Remove ${agent.label} and your conversation with it from this list? It appears again the next time it connects.`, { okLabel: 'Forget' }).then(ok => { if (ok) api.externalAgentForget(agent.id).catch(e => notify(errText(e), 'error')); })}>Forget</button>
       </div>
       <div class="agent-scroll" ref={scrollRef} onScroll={onScroll} onCopy={transcriptCopy}>
-        {!messages.length && <div class="empty">Write to {agent.name} below — it gets your message with where you are in the document and answers here.</div>}
+        {!messages.length && <div class="empty">{agent.runner ? `Write below: Claude Code starts on ${agent.runner.host} with the model and effort you pick, works on your projects through OverLyX's tools, and answers here.` : `Write to ${agent.name} below — it gets your message with where you are in the document and answers here.`}</div>}
         {messages.map(m => m.role === 'user' ? (
           <div key={m.id} class="agent-msg user ext-user" data-ext-msg={m.id} data-ext-state={m.state}>
             <RichText text={m.text} />
             {m.context && <div class="ext-context" title={m.context.text}>with {m.context.docId.split('/').slice(2).join('/') || m.context.docId}{/selection/i.test(m.context.text) ? ' · your selection' : ''}</div>}
-            <div class="ext-state">{stateText(m)}{m.state === 'queued' && <> · <a href="#" onClick={e => { e.preventDefault(); cancel(m); }}>take back</a></>}</div>
+            {optionText(m.options) && <div class="ext-context" data-ext-options>{optionText(m.options)}</div>}
+            <div class="ext-state">{stateText(m, agent)}{m.state === 'queued' && <> · <a href="#" onClick={e => { e.preventDefault(); cancel(m); }}>take back</a></>}{agent.runner?.busy === m.id && m.state === 'delivered' && <> · <a href="#" data-ext-stop onClick={e => { e.preventDefault(); stop(m); }}>stop</a></>}</div>
           </div>
         ) : (
           <div key={m.id} class={'agent-msg assistant ext-reply' + (m.state === 'progress' ? ' progress' : '')} data-ext-reply={m.id}>
@@ -165,6 +193,22 @@ export function ExternalAgentView({ agent, notify, onMessage, resync, pinned, on
           placeholder={`Message ${agent.name}… (Enter to send)`}
           onInput={e => setText((e.target as HTMLTextAreaElement).value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
+        {backend && (
+          <div class="row" data-runner-options>
+            <select class="agent-select" data-runner-model title={`Model (Claude Code ${backend.version ?? ''} on ${agent.runner!.host})`} value={model} onChange={e => { const v = (e.target as HTMLSelectElement).value; setModel(v); store(key + '.model', v); }}>
+              <option value="">Default model</option>
+              {[...backend.models, ...(model && !backend.models.includes(model) ? [model] : [])].map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            {backend.efforts.length > 0 && (
+              <select class="agent-select" data-runner-effort title="Reasoning effort" value={effort} onChange={e => { const v = (e.target as HTMLSelectElement).value; setEffort(v); store(key + '.effort', v); }}>
+                <option value="">Default effort</option>
+                {backend.efforts.map(ef => <option key={ef} value={ef}>{ef}</option>)}
+              </select>
+            )}
+            <span class="spacer" />
+            <button class={'small-btn' + (fresh ? ' active' : '')} data-runner-fresh aria-pressed={fresh} title="The next message starts a new Claude Code conversation (otherwise it continues the last one)" onClick={() => setFresh(f => !f)}>New conversation</button>
+          </div>
+        )}
         <div class="row">
           {!pinText && (
             <label title="Send where you are along with the message: the document, and your selection quoted as LaTeX">
@@ -186,6 +230,7 @@ export function NoExternalAgents() {
     <div class="ext-hint ext-none">
       <p>Agents on your own computer — Claude Code, Codex — can work on your projects here through the MCP connector, and you can write to them from this panel.</p>
       <p>Connect one with your account token (File ▸ Git repository…, <i>Local agents</i>), then ask it to <b>listen to OverLyX</b>.</p>
+      <p>Or let this panel start Claude Code on your computer, with the model and effort you pick here: run <code class="ext-cmd">overlyx agent install</code> there once.</p>
     </div>
   );
 }

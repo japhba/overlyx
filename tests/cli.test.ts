@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -34,6 +34,8 @@ const { cliLoginRoutes } = await import('../packages/server/src/cliLogin.ts');
 const { authMiddleware, signSession } = await import('../packages/server/src/auth.ts');
 const { listMcpTokens } = await import('../packages/server/src/mcpTokens.ts');
 const { setUserSettings } = await import('../packages/server/src/userSettings.ts');
+const { agentRunnerRoutes } = await import('../packages/server/src/agentRunner.ts');
+const { mcpAgentRoutes } = await import('../packages/server/src/mcpAgents.ts');
 const CLI = fileURLToPath(new URL('../packages/cli/bin/overlyx.js', import.meta.url));
 const CLI_VERSION = JSON.parse(readFileSync(fileURLToPath(new URL('../packages/cli/package.json', import.meta.url)), 'utf8')).version as string;
 const execFileP = promisify(execFile);
@@ -46,6 +48,8 @@ app.use(cliDownloadRoutes());
 app.use(cliLoginRoutes());
 app.use('/git', gitmod.gitRouter());
 app.use('/mcp', mcpRouter());
+app.use(agentRunnerRoutes());
+app.use('/api', express.json(), mcpAgentRoutes());
 const server = http.createServer(app);
 let host = '';
 
@@ -476,5 +480,190 @@ describe('overlyx auth login through the browser', () => {
     await fetch(`http://127.0.0.1:${q.port}/callback?state=${q.state}&code=${code}`);
     expect(await login.done).toBe(1);
     expect(login.err()).toContain('invalid or expired sign-in code');
+  });
+});
+
+describe("overlyx agent: the Agent panel runs Claude Code on the user's computer", () => {
+  const CFG = join(ROOT, 'config-agent');
+  const FAKE = join(ROOT, 'fake-claude');
+  const LOG = join(ROOT, 'fake-claude.log');
+  const COMPUTER = hostname().replace(/[^\w.-]+/g, '-').slice(0, 60) || 'computer';
+  // (CLAUDECODE: as if the runner were started from a Claude Code terminal — its turns must not inherit that session)
+  const env = () => ({ ...process.env, OVERLYX_CONFIG_DIR: CFG, PATH: `${FAKE}:${process.env.PATH}`, GIT_CONFIG_NOSYSTEM: '1', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'parent' }) as Record<string, string>;
+  const cookie = () => `ol_session=${signSession(toSessionUser(db.prepare("SELECT * FROM users WHERE username = 'ada'").get() as never))}`;
+  const until = async <T,>(what: string, fn: () => Promise<T | null | undefined | false>, ms = 15000): Promise<T> => {
+    const end = Date.now() + ms;
+    for (;;) { const v = await fn(); if (v) return v; if (Date.now() > end) throw new Error('timed out waiting for ' + what); await new Promise(r => setTimeout(r, 100)); }
+  };
+  const agents = async () => (await (await fetch(`${host}/api/mcp-agents`, { headers: { cookie: cookie() } })).json()).agents as any[];
+  const messages = async (id: number) => (await (await fetch(`${host}/api/mcp-agents/${id}/messages`, { headers: { cookie: cookie() } })).json()).messages as any[];
+  const send = async (id: number, text: string, options?: object) => (await (await fetch(`${host}/api/mcp-agents/${id}/messages`, { method: 'POST', headers: { cookie: cookie(), 'content-type': 'application/json' }, body: JSON.stringify({ text, options }) })).json()).message as { id: number };
+  const answer = (id: number, mid: number) => until(`the answer to ${mid}`, async () => (await messages(id)).find(m => m.role === 'agent' && m.replyTo === mid && m.state === 'final'));
+  const calls = () => existsSync(LOG) ? readFileSync(LOG, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l)) as { args: string[]; input: string; cwd: string; parent: string | null }[] : [];
+  let runner: import('node:child_process').ChildProcess | null = null;
+  let runnerLog = '';
+  let agentId = 0;
+
+  beforeAll(async () => {
+    mkdirSync(FAKE, { recursive: true });
+    // Claude Code as far as the runner can tell: its --help, --version, and -p printing stream-json
+    writeFileSync(join(FAKE, 'claude'), `#!/usr/bin/env node
+const fs = require('fs');
+const args = process.argv.slice(2);
+if (args[0] === '--help') { console.log(\`Usage: claude [options]
+  --effort <level>                      Effort level for the current session
+                                        (low, medium, high, xhigh, max)
+  --model <model>                       Model for the current session. Provide
+                                        an alias for the latest model (e.g.
+                                        'fable', 'opus', or 'sonnet') or a
+                                        model's full name.
+  --permission-mode <mode>              (choices: "acceptEdits", "auto", "dontAsk", "plan")
+  --strict-mcp-config                   Only use MCP servers from --mcp-config
+  --tools <tools...>                    Specify the list of available tools\`); process.exit(0); }
+if (args[0] === '--version') { console.log('9.9.9 (Claude Code)'); process.exit(0); }
+let input = '';
+process.stdin.on('data', d => { input += d; });
+process.stdin.on('end', () => {
+  fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ args, input, cwd: process.cwd(), parent: process.env.CLAUDECODE ?? process.env.CLAUDE_CODE_SESSION_ID ?? null }) + '\\n');
+  const resume = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : null;
+  if (resume === 'gone') { process.stderr.write('No conversation found with session ID: gone\\n'); process.exit(1); }
+  const sid = resume || 'sess-1';
+  const out = o => process.stdout.write(JSON.stringify({ ...o, session_id: sid }) + '\\n');
+  out({ type: 'system', subtype: 'init', model: 'claude-test-model' });
+  if (input.includes('SLOW')) { setInterval(() => {}, 1000); return; }
+  out({ type: 'assistant', message: { content: [{ type: 'text', text: 'Let me look.' }, { type: 'tool_use', name: 'mcp__overlyx__read_document', input: { project: 'ada/Imported paper', path: 'main.tex' } }] } });
+  out({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done: it says hello.' }] } });
+  out({ type: 'result', subtype: 'success', is_error: false, result: 'Done: it says hello.' });
+});
+`, { mode: 0o755 });
+    await execFileP(process.execPath, [CLI, 'auth', 'login', '--host', host, '--username', 'ada', '--token', token], { env: env() });
+    const { spawn } = await import('node:child_process');
+    runner = spawn(process.execPath, [CLI, 'agent', 'run', '--host', host], { env: env(), stdio: ['ignore', 'ignore', 'pipe'] });
+    runner.stderr!.on('data', d => { runnerLog += d; });
+    const a = await until('the runner', async () => (await agents()).find(x => x.runner?.online));
+    agentId = a.id;
+  });
+  afterAll(() => { runner?.kill(); });
+
+  it('appears in the panel as "Claude Code on <computer>", with the models and efforts its version takes', async () => {
+    const a = (await agents()).find(x => x.id === agentId);
+    expect(a.name).toBe(`Claude Code on ${COMPUTER}`);
+    expect(a.status).toBe('listening');
+    expect(a.runner.host).toBe(COMPUTER);
+    expect(a.runner.backends[0]).toMatchObject({ id: 'claude', version: '9.9.9', models: ['fable', 'opus', 'sonnet', 'haiku'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'] });
+    expect(runnerLog).toContain('ready for the Agent panel');
+  });
+
+  it('a message runs claude -p with the model and effort chosen, OverLyX tools only; progress and the answer come back', async () => {
+    const m = await send(agentId, 'Summarize main.tex', { model: 'opus', effort: 'high' });
+    const final = await answer(agentId, m.id);
+    expect(final.text).toBe('Done: it says hello.');
+    const all = await messages(agentId);
+    const progress = all.filter(x => x.role === 'agent' && x.replyTo === m.id && x.state === 'progress').map(x => x.text).join('\n');
+    expect(progress).toContain('claude-test-model · effort high · new conversation');
+    expect(progress).toContain('Let me look.');
+    expect(progress).toContain('→ `read_document` main.tex');
+    expect(progress).not.toContain('Done: it says hello.');   // the answer only once, as the answer
+    expect(all.find(x => x.id === m.id)).toMatchObject({ state: 'answered', via: 'run', options: { model: 'opus', effort: 'high' } });
+    const call = calls().at(-1)!;
+    const arg = (k: string) => call.args[call.args.indexOf(k) + 1];
+    expect(arg('--model')).toBe('opus');
+    expect(arg('--effort')).toBe('high');
+    expect(arg('--tools')).toBe('');                    // no built-in tools: no shell, no local files
+    expect(arg('--permission-mode')).toBe('dontAsk');
+    expect(arg('--allowedTools')).toBe('mcp__overlyx');
+    expect(call.args).toContain('--strict-mcp-config');
+    expect(call.args).not.toContain('--resume');
+    const mcp = JSON.parse(arg('--mcp-config')).mcpServers.overlyx;
+    expect(mcp.args.slice(-4)).toEqual(['mcp', 'serve', '--host', host]);
+    expect(mcp.env.OVERLYX_RUNNER_CLIENT).toBe(`overlyx-runner@${COMPUTER}`);
+    expect(call.input).toContain('Summarize main.tex');
+    expect(call.cwd).toBe(join(CFG, 'agent-work'));
+    expect(call.parent).toBeNull();
+  });
+
+  it('the next message continues the conversation; "New conversation" starts another', async () => {
+    const m1 = await send(agentId, 'And now?');
+    await answer(agentId, m1.id);
+    let call = calls().at(-1)!;
+    expect(call.args[call.args.indexOf('--resume') + 1]).toBe('sess-1');
+    expect(call.args).not.toContain('--model');
+    const m2 = await send(agentId, 'Something else', { fresh: true });
+    await answer(agentId, m2.id);
+    call = calls().at(-1)!;
+    expect(call.args).not.toContain('--resume');
+  });
+
+  it('a conversation Claude Code cannot resume any more starts afresh instead of failing', async () => {
+    writeFileSync(join(CFG, 'agent-state.json'), JSON.stringify({ [host]: { session: 'gone' } }));
+    const before = calls().length;
+    const m = await send(agentId, 'After a cleanup');
+    expect((await answer(agentId, m.id)).text).toBe('Done: it says hello.');
+    const tried = calls().slice(before);
+    expect(tried.map(c => c.args.includes('--resume'))).toEqual([true, false]);
+  });
+
+  it('Stop ends the running turn; the next message waits for it, then runs', async () => {
+    const slow = await send(agentId, 'SLOW please');
+    await until('the turn to run', async () => (await agents()).find(x => x.id === agentId && x.runner?.busy === slow.id));
+    expect((await agents()).find(x => x.id === agentId).status).toBe('working');
+    const next = await send(agentId, 'after the slow one');
+    expect((await messages(agentId)).find(x => x.id === next.id).state).toBe('queued');
+    const r = await fetch(`${host}/api/mcp-agents/${agentId}/messages/${slow.id}/stop`, { method: 'POST', headers: { cookie: cookie() } });
+    expect(r.status).toBe(200);
+    expect((await answer(agentId, slow.id)).text).toContain('Stopped');
+    expect((await answer(agentId, next.id)).text).toBe('Done: it says hello.');
+  });
+
+  it("the Claude Code it starts reaches /mcp as that agent (the bridge names it); nobody else's credential can report turns", async () => {
+    const { spawn } = await import('node:child_process');
+    const child = spawn(process.execPath, [CLI, 'mcp', 'serve', '--host', host], { env: { ...env(), OVERLYX_RUNNER_CLIENT: `overlyx-runner@${COMPUTER}`, OVERLYX_RUNNER_TITLE: `Claude Code on ${COMPUTER}` } });
+    let out = '';
+    child.stdout.on('data', d => { out += d; });
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '9.9.9' } } }) + '\n');
+    await until('initialize', async () => out.includes('"id":1'));
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_projects', arguments: {} } }) + '\n');
+    await until('list_projects', async () => out.includes('"id":2'));
+    child.stdin.end();
+    const a = (await agents()).find(x => x.id === agentId);
+    expect(a.lastTool).toBe('list_projects');
+    expect((await agents()).some(x => x.client.name === 'claude-code' && x.id !== agentId && Date.now() - x.lastSeen < 5000)).toBe(false);
+    // another account's credential cannot speak for this runner
+    const eve = createUser('eve', 'Eve', 'password');
+    const eveToken = gitmod.createToken(eve.id, 'eve').token;
+    const last = (await messages(agentId)).filter(x => x.role === 'user').at(-1)!;
+    const forged = await fetch(`${host}/cli/agent/turns/${last.id}`, { method: 'POST', headers: { authorization: `Bearer ${eveToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ final: 'forged' }) });
+    expect(forged.status).toBe(404);
+    const evesCookie = `ol_session=${signSession(toSessionUser(db.prepare("SELECT * FROM users WHERE username = 'eve'").get() as never))}`;
+    expect((await fetch(`${host}/api/mcp-agents/${agentId}/messages`, { method: 'POST', headers: { cookie: evesCookie, 'content-type': 'application/json' }, body: JSON.stringify({ text: 'hi' }) })).status).toBe(404);
+  });
+
+  it('when the runner stops, the panel shows it offline; messages wait for it', async () => {
+    runner!.kill();
+    await until('offline', async () => (await agents()).find(x => x.id === agentId && x.status === 'offline'));
+    const m = await send(agentId, 'while it is away');
+    expect((await messages(agentId)).find(x => x.id === m.id).state).toBe('queued');
+    const { spawn } = await import('node:child_process');
+    runner = spawn(process.execPath, [CLI, 'agent', 'run', '--host', host], { env: env(), stdio: ['ignore', 'ignore', 'pipe'] });
+    expect((await answer(agentId, m.id)).text).toBe('Done: it says hello.');
+  });
+
+  it.runIf(process.platform === 'linux')('agent install keeps it running as a systemd user service (the PATH where claude was found); uninstall removes it', async () => {
+    const XDG = join(ROOT, 'xdg');
+    const SYSLOG = join(ROOT, 'systemctl.log');
+    writeFileSync(join(FAKE, 'systemctl'), `#!/bin/sh\necho "$@" >> ${JSON.stringify(SYSLOG)}\nexit 0\n`, { mode: 0o755 });
+    const e = { ...env(), XDG_CONFIG_HOME: XDG };
+    const r = await execFileP(process.execPath, [CLI, 'agent', 'install', '--host', host], { env: e, encoding: 'utf8' });
+    expect(r.stdout).toContain('starts with your login');
+    const unit = readFileSync(join(XDG, 'systemd', 'user', 'overlyx-agent.service'), 'utf8');
+    expect(unit).toContain(`ExecStart="${process.execPath}" "${CLI}" "agent" "run" "--host" "${host}"`);
+    expect(unit).toContain('Environment="OVERLYX_AGENT_SERVICE=1"');
+    expect(unit).toContain(`Environment="PATH=${FAKE}:`);
+    expect(unit).toContain('Restart=always');
+    expect(readFileSync(SYSLOG, 'utf8').trim().split('\n')).toEqual(['--user daemon-reload', '--user enable overlyx-agent.service', '--user restart overlyx-agent.service']);
+    await execFileP(process.execPath, [CLI, 'agent', 'uninstall'], { env: e });
+    expect(existsSync(join(XDG, 'systemd', 'user', 'overlyx-agent.service'))).toBe(false);
+    expect(readFileSync(SYSLOG, 'utf8')).toContain('--user disable --now overlyx-agent.service');
   });
 });
