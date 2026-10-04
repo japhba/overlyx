@@ -100,7 +100,8 @@ test('clone with the token, push a change, pull what OverLyX committed', async (
   expect(readFileSync(join(CLONE, 'refs.bib'), 'utf8')).toContain('From OverLyX');
   // how to connect a local agent: it edits here, through the MCP connector
   await expect(dlg.locator('[data-git-agents]')).toContainText('right here on the server');
-  await expect(dlg).toContainText('claude mcp add --transport http overlyx');
+  await expect(dlg).toContainText('overlyx mcp install');
+  await expect(dlg).toContainText('claude mcp add -s user --transport http overlyx');
   // Restore: the whole project as it was at the laptop's commit, as a new commit on top (the app's
   // own confirm dialog, not a native one)
   const laptop = dlg.locator('.git-commit', { hasText: 'Notes from the laptop' });

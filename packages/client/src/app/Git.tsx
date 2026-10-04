@@ -142,15 +142,22 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
             it breaks) the server tells the agent to fall back to direct edits. Every state stays in the history — <i>Restore</i>{' '}
             below, or the agent's own <code>restore_project</code>, steps back.
           </div>
-          <pre class="git-cmds">{`# Claude Code
-claude mcp add --transport http overlyx ${location.origin}/mcp \\
+          <pre class="git-cmds">{`# with the OverLyX CLI (above): registers Claude Code and Codex — nothing to redo when the server or your token changes
+overlyx auth login --host ${location.origin} --username ${info.username} --with-token
+overlyx mcp install`}</pre>
+          <div class="hint">
+            The agents run the CLI as their bridge (<code>overlyx mcp serve</code>): it connects with your current login and the server's
+            current settings at every session. In a clone of the OverLyX repository nothing needs registering — its <code>.mcp.json</code>{' '}
+            and <code>.codex/config.toml</code> do it. Without the CLI, register the connector directly (the token below in{' '}
+            <code>OVERLYX_TOKEN</code>):
+          </div>
+          <pre class="git-cmds">{`claude mcp add -s user --transport http overlyx ${location.origin}/mcp \\
   --header "Authorization: Bearer $OVERLYX_TOKEN"
 
 # Codex: ~/.codex/config.toml
 [mcp_servers.overlyx]
 url = "${location.origin}/mcp"
 bearer_token_env_var = "OVERLYX_TOKEN"`}</pre>
-          <div class="hint">With <code>OVERLYX_TOKEN</code> set to your account access token (below).</div>
           <div class="hint" data-git-agents-live>
             The agent <b>sees where you are</b>: your cursor and selection in an open document (its <code>get_presence</code>{' '}
             tool), so "this paragraph" or "the selected equation" means yours. You see it too — as a collaborator with its

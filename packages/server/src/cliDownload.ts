@@ -68,6 +68,22 @@ case ":$PATH:" in
   *:"$install_dir":*) ;;
   *) echo "Add $install_dir to PATH to run overlyx or olx." ;;
 esac
+
+# local AI agents (Claude Code, Codex): registered with the CLI's MCP bridge, which follows the
+# server and the login by itself (OVERLYX_MCP=yes / no answers without asking)
+case "\${OVERLYX_MCP:-ask}" in
+  yes) "$install_dir/overlyx" mcp install --yes || true ;;
+  no) ;;
+  *)
+    if (command -v claude >/dev/null 2>&1 || command -v codex >/dev/null 2>&1) && [ -t 2 ] && { : </dev/tty; } 2>/dev/null; then
+      printf 'Let Claude Code / Codex on this computer use OverLyX (registers the MCP server)? [Y/n] ' >/dev/tty
+      read -r answer </dev/tty || answer=n
+      case "$answer" in
+        [Nn]*) echo "Later: overlyx mcp install" ;;
+        *) "$install_dir/overlyx" mcp install --yes || true ;;
+      esac
+    fi ;;
+esac
 `;
 }
 
@@ -76,6 +92,12 @@ export function cliDownloadRoutes(): express.Router {
   router.get('/install-cli.sh', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.type('text/x-shellscript').send(installer(req));
+  });
+  // how the CLI's MCP bridge (`overlyx mcp serve`) reaches the connector — read at every agent
+  // session, so a change here reaches every registered agent without registering it again
+  router.get('/cli/mcp.json', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ url: '/mcp', headers: { Authorization: 'Bearer {token}' } });
   });
   router.get('/cli/version', (_req, res) => {
     const { version, hash } = release();

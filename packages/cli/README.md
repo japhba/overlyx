@@ -38,9 +38,27 @@ overlyx build ada/paper/main.tex --pdf paper.pdf
 overlyx restore ada/paper 3f2a91c                # the whole project back to that commit (a new commit on top)
 ```
 
-A local agent (Claude Code, Codex, …) does not need the CLI: it edits your projects on the server
-through the MCP connector (`<server>/mcp` with your account token; File > Git repository shows the
-setup commands).
+## Local AI agents (Claude Code, Codex, …)
+
+```sh
+overlyx mcp install      # registers OverLyX with the Claude Code / Codex found on this computer
+overlyx mcp status       # what is registered, and a round trip to the server
+overlyx mcp uninstall
+```
+
+The installer offers this after installing (`OVERLYX_MCP=yes` / `no` answers without asking), and
+`auth login` offers it when nothing is registered yet. What gets registered is a command, not an
+address and a token: `overlyx mcp serve`, a bridge between the agent (stdio) and the server's MCP
+connector. Every agent session starts it anew, so it uses the login as it is then (a new token after
+`overlyx auth login` counts at once), asks the server where and how to connect (`/cli/mcp.json`),
+and the tools are the server's — changes on the server reach the agents without registering again.
+An installed CLI also keeps itself up to date (`overlyx update`; the bridge checks once an hour, for
+the next session). The agent edits your projects on the server, with your role in each; started
+inside a git clone of an OverLyX project, it is told which project that is.
+
+A clone of the OverLyX repository needs no registration at all: its `.mcp.json` (Claude Code) and
+`.codex/config.toml` (Codex, once the project is trusted) run the checkout's own CLI as the bridge —
+log in once per computer with `node packages/cli/bin/overlyx.js auth login …`.
 
 ## Commands
 
@@ -53,6 +71,8 @@ overlyx repo create [NAME] [--source PATH] [--push] [--remote NAME]
 overlyx repo push [PATH] [--name NAME] [--remote NAME]
 overlyx build OWNER/PROJECT/FILE.tex [--pdf FILE] [--log] [--wait SECONDS]
 overlyx restore OWNER/PROJECT COMMIT
+overlyx mcp install [--client claude,codex] [--yes] | status | uninstall | serve
+overlyx update
 ```
 
 Passing `--token` is convenient for automation but can expose it in shell history; prefer

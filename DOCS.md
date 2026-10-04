@@ -1860,9 +1860,19 @@ clientInfo, User-Agent). It exposes these tools:
 * `undo_turn(turns_back?)` — only for the Agent panel's agent: take back one of its turns exactly
   (see the Agent panel above).
 * **Local agents edit here, directly.** Claude Code, Codex or any MCP client on the user's own
-  machine connects to `/mcp` with the account token (the Git dialog shows `claude mcp add --transport
-  http overlyx <server>/mcp --header "Authorization: Bearer …"` and the Codex `config.toml` block) and
-  edits the project files on this server — no local copy, no sync, no shell. Document edits are
+  machine connects to `/mcp` with the account token and edits the project files on this server — no
+  local copy, no sync, no shell. The way to register it is the CLI: `overlyx mcp install` (offered by
+  the installer and by `auth login`) registers `overlyx mcp serve` with Claude Code (user scope) and
+  Codex (`~/.codex/config.toml`) — a stdio bridge that reads the current login and the server's
+  `/cli/mcp.json` (endpoint, header template) at every session and relays MCP messages (Streamable
+  HTTP: session id, SSE answers, the GET event stream for Claude Code's session, DELETE at the end),
+  so a changed connector, endpoint or token needs no re-registration; an installed CLI updates itself
+  (checksummed, at most hourly from the bridge). Started in a git clone of an OverLyX project, the
+  bridge prepends to the initialize `instructions` which project the directory is (edit it with the
+  tools, the clone only changes with `git pull`). The OverLyX repository registers the bridge for
+  agents working in a clone of it: `.mcp.json` and `.codex/config.toml` run the checkout's own CLI
+  (`packages/cli/bin/overlyx.js`). The Git dialog shows these steps, and the direct `claude mcp add
+  --transport http …` / Codex `url` + `bearer_token_env_var` forms for use without the CLI. Document edits are
   tracked by default; `edit_document` and `write_document` take `tracked: false` for the same edit
   applied directly (`applyPlainSource` in `server/docedit.ts`: merged three-way like the tracked form,
   so concurrent edits elsewhere and other people's tracked changes survive; pending changes are
