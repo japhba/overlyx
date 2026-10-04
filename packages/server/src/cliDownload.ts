@@ -69,19 +69,29 @@ case ":$PATH:" in
   *) echo "Add $install_dir to PATH to run overlyx or olx." ;;
 esac
 
-# local AI agents (Claude Code, Codex): registered with the CLI's MCP bridge, which follows the
-# server and the login by itself (OVERLYX_MCP=yes / no answers without asking)
+# sign in (through the browser) and let local AI agents (Claude Code, Codex) use OverLyX — they are
+# registered with the CLI's MCP bridge, which follows the server and the login by itself
+# (OVERLYX_MCP=yes / no answers the agents' question without asking)
 case "\${OVERLYX_MCP:-ask}" in
-  yes) "$install_dir/overlyx" mcp install --yes || true ;;
+  yes) "$install_dir/overlyx" mcp install --yes --host "$origin" || true ;;
   no) ;;
   *)
-    if (command -v claude >/dev/null 2>&1 || command -v codex >/dev/null 2>&1) && [ -t 2 ] && { : </dev/tty; } 2>/dev/null; then
-      printf 'Let Claude Code / Codex on this computer use OverLyX (registers the MCP server)? [Y/n] ' >/dev/tty
-      read -r answer </dev/tty || answer=n
-      case "$answer" in
-        [Nn]*) echo "Later: overlyx mcp install" ;;
-        *) "$install_dir/overlyx" mcp install --yes || true ;;
-      esac
+    if [ -t 2 ] && { : </dev/tty; } 2>/dev/null; then
+      if ! "$install_dir/overlyx" auth status --host "$origin" >/dev/null 2>&1; then
+        printf 'Sign in to OverLyX now (opens your browser)? [Y/n] ' >/dev/tty
+        read -r answer </dev/tty || answer=n
+        case "$answer" in
+          [Nn]*) echo "Later: overlyx auth login" ;;
+          *) "$install_dir/overlyx" auth login --host "$origin" </dev/tty || true ;;
+        esac
+      elif command -v claude >/dev/null 2>&1 || command -v codex >/dev/null 2>&1; then
+        printf 'Let Claude Code / Codex on this computer use OverLyX (registers the MCP server)? [Y/n] ' >/dev/tty
+        read -r answer </dev/tty || answer=n
+        case "$answer" in
+          [Nn]*) echo "Later: overlyx mcp install" ;;
+          *) "$install_dir/overlyx" mcp install --yes || true ;;
+        esac
+      fi
     fi ;;
 esac
 `;

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import readline from 'node:readline';
+import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -15,7 +16,8 @@ const DEFAULT_HOST = 'https://overlyx.app';
 const HELP = `OverLyX CLI ${VERSION}
 
 Usage:
-  overlyx auth login [--host URL] --username NAME [--with-token | --token TOKEN]
+  overlyx auth login [--host URL] [--no-browser]        sign in through the browser
+  overlyx auth login [--host URL] --username NAME --with-token | --token TOKEN
   overlyx auth status [--host URL]
   overlyx auth logout [--host URL]
   overlyx repo list [--host URL]
@@ -29,15 +31,16 @@ Usage:
   overlyx update                                         this CLI from the server
 
 Examples:
-  overlyx auth login --host https://overlyx.app --username ada --with-token
+  overlyx auth login                      # opens the browser: Authorize, and the CLI is signed in
   overlyx repo create my-paper --source . --push
   overlyx repo push . --name my-paper
   overlyx build ada/my-paper/main.tex     # compile on the server: errors, exit code 1 if it fails
   overlyx restore ada/my-paper 3f2a91c    # the whole project as it was at that commit (a new commit)
   overlyx mcp install                     # Claude Code / Codex get OverLyX's tools (your login, your projects)
 
-Create your account access token in OverLyX under File > Git repository. The token is stored
-with mode 0600. Git remotes contain your username, but never the token.
+\`auth login\` signs in through the browser and gets a credential of its own (revocable in OverLyX under
+File > Git repository). Scripts can pass your account access token instead (--with-token on stdin,
+or OVERLYX_TOKEN). Credentials are stored with mode 0600; Git remotes contain your username, never a token.
 `;
 
 function fail(message, code = 1) {
@@ -49,7 +52,7 @@ function fail(message, code = 1) {
 function parse(argv) {
   const positional = [];
   const flags = {};
-  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes']);
+  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--') { positional.push(...argv.slice(i + 1)); break; }
@@ -100,7 +103,7 @@ function credentials(flags, required = true) {
   const saved = config.hosts[host];
   const username = flags.username ?? process.env.OVERLYX_USERNAME ?? saved?.username;
   const token = flags.token ?? process.env.OVERLYX_TOKEN ?? saved?.token;
-  if (required && (!username || !token)) fail(`not logged in to ${host}; run: overlyx auth login --host ${host} --username NAME --with-token`);
+  if (required && (!username || !token)) fail(`not signed in to ${host}; run: overlyx auth login${host === DEFAULT_HOST ? '' : ` --host ${host}`}`);
   return { config, host, username, token };
 }
 
@@ -267,14 +270,88 @@ async function pushSource(creds, dir, project, remoteName, remote) {
   process.stdout.write(`Remote: ${remoteName} (${url.toString()})\n`);
 }
 
+/* ------------------------------------------------------------ signing in through the browser */
+
+/** Does this computer have a browser the sign-in can come back from (not an SSH session, not a headless server)? */
+function hasLocalBrowser() {
+  if (process.env.SSH_CONNECTION || process.env.SSH_TTY) return false;
+  if (process.platform === 'linux') return !!(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+  return true;
+}
+
+/** Open a URL in the default browser (quietly; the URL is printed anyway). */
+function openBrowser(url) {
+  const [cmd, args] = process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : ['xdg-open', [url]];
+  try { execFile(cmd, args, { timeout: 10000 }, () => undefined).unref?.(); } catch { /* no browser */ }
+}
+
+/**
+ * Sign in as Claude Code does: a listener on 127.0.0.1 and a PKCE pair; the browser — signed in to
+ * OverLyX — authorizes, and hands the one-time code back to the listener, or shows it to paste here
+ * (a browser on another computer). The code and the verifier give this CLI a credential of its own.
+ */
+async function browserLogin(host, flags) {
+  const manual = !!flags['no-browser'] || !hasLocalBrowser();
+  if (manual && !process.stdin.isTTY) fail('no browser on this computer and no terminal to paste a code into: run overlyx auth login in a terminal, or pass a token (--with-token)');
+  const verifier = crypto.randomBytes(32).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const state = crypto.randomBytes(16).toString('base64url');
+  let finish;
+  const got = new Promise(resolve => { finish = resolve; });
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    if (u.pathname === '/callback' && u.searchParams.get('state') === state && u.searchParams.get('code')) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end('<!doctype html><meta charset="utf-8"><title>OverLyX CLI</title><body style="font:15px/1.5 system-ui;max-width:28em;margin:12vh auto;padding:0 1em"><h2>The OverLyX CLI is signed in</h2><p>You can close this tab and go back to the terminal.</p></body>');
+      finish(u.searchParams.get('code'));
+      return;
+    }
+    res.writeHead(404); res.end();
+  });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  const port = server.address().port;
+  const url = `${host}/cli/login?` + new URLSearchParams({ port: String(port), state, challenge, client: os.hostname(), ...(manual ? { mode: 'manual' } : {}) }).toString();
+  let rl = null;
+  if (manual) {
+    // a browser on another computer cannot come back here: its page shows the code to paste
+    process.stderr.write(`Open this address in a browser where you are signed in to OverLyX, and authorize:\n  ${url}\n`);
+    rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+    rl.question('Paste the code it shows: ', answer => { finish(answer.trim() || null); });
+  } else {
+    process.stderr.write(`Opening your browser to sign in to ${host} … if it does not open, go to:\n  ${url}\n`);
+    openBrowser(url);
+    process.stderr.write('Waiting for you to authorize in the browser (browser on another computer? overlyx auth login --no-browser)\n');
+  }
+  const timer = setTimeout(() => finish(null), 10 * 60 * 1000);
+  const code = await got;
+  clearTimeout(timer);
+  rl?.close();
+  server.close();
+  if (!code) fail('signing in timed out — run overlyx auth login again');
+  process.stderr.write('\n');
+  let res;
+  try { res = await fetch(`${host}/cli/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, verifier }) }); }
+  catch (e) { fail(`cannot reach ${host}: ${e.cause?.message ?? e.message}`); }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.token) fail(body.error ?? `sign-in failed (${res.status})`);
+  return { username: body.username, token: body.token };
+}
+
 async function authCommand(action, flags) {
   if (action === 'login') {
     const config = readConfig();
     const host = normalizeHost(flags.host ?? process.env.OVERLYX_HOST ?? config.defaultHost ?? DEFAULT_HOST);
-    const username = String(flags.username ?? process.env.OVERLYX_USERNAME ?? '').trim();
-    if (!username) fail('--username is required');
-    const token = await tokenFromInput(flags);
-    if (!token) fail('no token received');
+    // a token given (scripts, CI): as before; otherwise the browser
+    const withToken = !flags.web && (flags['with-token'] || flags.token || process.env.OVERLYX_TOKEN || (!process.stdin.isTTY && !process.stderr.isTTY));
+    let username, token;
+    if (withToken) {
+      username = String(flags.username ?? process.env.OVERLYX_USERNAME ?? '').trim();
+      if (!username) fail('--username is required with a token (or run overlyx auth login without one to sign in through the browser)');
+      token = await tokenFromInput(flags);
+      if (!token) fail('no token received');
+    } else {
+      ({ username, token } = await browserLogin(host, flags));
+    }
     const creds = { host, username, token };
     const result = await api(creds, '/git/api/user');
     config.hosts[host] = { username: result.user.username, token };
@@ -539,7 +616,7 @@ async function mcpServe(flags) {
   async function handle(msg) {
     if (notLoggedIn) {
       const cli = path.basename(selfPath()) === 'overlyx' ? 'overlyx' : `node ${selfPath()}`;
-      errorFor(msg, `not logged in to ${creds.host} — run once: ${cli} auth login --host ${creds.host} --username NAME --with-token (the token: OverLyX ▸ File ▸ Git repository…), or set OVERLYX_TOKEN`);
+      errorFor(msg, `not signed in to ${creds.host} — run once in a terminal: ${cli} auth login${creds.host === DEFAULT_HOST ? '' : ` --host ${creds.host}`} (it opens the browser to authorize)`);
       return;
     }
     if (msg.method === 'initialize') {
@@ -708,7 +785,7 @@ async function mcpInstall(flags) {
     try { registerCodex(args); process.stdout.write(`Codex: registered "overlyx" in ${codexConfig()}\n`); }
     catch (e) { process.stdout.write(`Codex: not registered — ${e.message}\n`); }
   }
-  if (!creds.token) process.stdout.write(`The agents connect once you are logged in: overlyx auth login --host ${creds.host} --username NAME --with-token\n`);
+  if (!creds.token) process.stdout.write(`The agents connect once you are signed in: overlyx auth login${creds.host === DEFAULT_HOST ? '' : ` --host ${creds.host}`}\n`);
   else process.stdout.write(`They act as ${creds.username} on ${creds.host}; new tools and server changes reach them without registering again.\n`);
 }
 

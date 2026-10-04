@@ -1,6 +1,6 @@
 # OverLyX's MCP connector for Codex in this repository (Codex reads this file once the project is
 # trusted). Like .mcp.json for Claude Code: the CLI of this checkout relays to the OverLyX server with
-# your login (`node packages/cli/bin/overlyx.js auth login …`, once per computer) — a git pull brings
+# your login (`node packages/cli/bin/overlyx.js auth login`, once per computer) — a git pull brings
 # its changes, and the server says where and how to connect.
 [mcp_servers.overlyx]
 command = "sh"

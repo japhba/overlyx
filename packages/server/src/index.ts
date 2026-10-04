@@ -15,6 +15,7 @@ import { agentRoutes, disconnectAgents } from './agent.ts';
 import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
 import { listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
 import { cliDownloadRoutes } from './cliDownload.ts';
+import { cliLoginRoutes } from './cliLogin.ts';
 import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocFolds, lastOpenedByProject } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
@@ -55,6 +56,7 @@ app.use((_req, res, next) => {
   next();
 });
 app.use(cliDownloadRoutes());
+app.use(cliLoginRoutes());   // `overlyx auth login` through the browser (after authMiddleware: the consent rides the session)
 // The desktop extension has no OverLyX account/session. Its narrow, rate-limited error endpoint
 // therefore lives outside the authenticated API; all ordinary feedback remains authenticated.
 app.use('/api', vscodeTelemetryRoutes());

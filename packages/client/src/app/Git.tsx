@@ -142,8 +142,9 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
             it breaks) the server tells the agent to fall back to direct edits. Every state stays in the history — <i>Restore</i>{' '}
             below, or the agent's own <code>restore_project</code>, steps back.
           </div>
-          <pre class="git-cmds">{`# with the OverLyX CLI (above): registers Claude Code and Codex — nothing to redo when the server or your token changes
-overlyx auth login --host ${location.origin} --username ${info.username} --with-token
+          <pre class="git-cmds">{`# with the OverLyX CLI (above): sign in through the browser, then Claude Code and Codex are registered —
+# nothing to redo when the server or your token changes
+overlyx auth login${location.origin === 'https://overlyx.app' ? '' : ' --host ' + location.origin}
 overlyx mcp install`}</pre>
           <div class="hint">
             The agents run the CLI as their bridge (<code>overlyx mcp serve</code>): it connects with your current login and the server's

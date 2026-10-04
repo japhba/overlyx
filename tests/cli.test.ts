@@ -30,6 +30,9 @@ const { addMember } = await import('../packages/server/src/access.ts');
 const { createOwnedProject } = await import('../packages/server/src/projectCreate.ts');
 const { toSessionUser } = await import('../packages/server/src/auth.ts');
 const { mcpRouter } = await import('../packages/server/src/mcp.ts');
+const { cliLoginRoutes } = await import('../packages/server/src/cliLogin.ts');
+const { authMiddleware, signSession } = await import('../packages/server/src/auth.ts');
+const { listMcpTokens } = await import('../packages/server/src/mcpTokens.ts');
 const CLI = fileURLToPath(new URL('../packages/cli/bin/overlyx.js', import.meta.url));
 const CLI_VERSION = JSON.parse(readFileSync(fileURLToPath(new URL('../packages/cli/package.json', import.meta.url)), 'utf8')).version as string;
 const execFileP = promisify(execFile);
@@ -37,7 +40,9 @@ const execFileP = promisify(execFile);
 const user = createUser('ada', 'Ada Lovelace', 'password');
 const token = gitmod.createToken(user.id, 'OverLyX CLI').token;
 const app = express();
+app.use(authMiddleware);
 app.use(cliDownloadRoutes());
+app.use(cliLoginRoutes());
 app.use('/git', gitmod.gitRouter());
 app.use('/mcp', mcpRouter());
 const server = http.createServer(app);
@@ -269,7 +274,7 @@ describe("overlyx mcp: local agents through the CLI's bridge", () => {
 
   it('without a login it answers with what to do', async () => {
     const a = await bridge([INIT], { configDir: join(ROOT, 'no-config') });
-    expect(a[1].error.message).toMatch(/not logged in to .* auth login/);
+    expect(a[1].error.message).toMatch(/not signed in to .* auth login/);
   });
 
   it('install registers the bridge with Claude Code and Codex (an old registration replaced, the rest of config.toml kept); uninstall removes it', async () => {
@@ -310,5 +315,82 @@ describe("overlyx mcp: local agents through the CLI's bridge", () => {
     expect((await execFileP(installed, ['--version'], { encoding: 'utf8' })).stdout.trim()).toBe(CLI_VERSION);
     // the repository's own copy never replaces itself
     expect((await execFileP(process.execPath, [CLI, 'update', '--host', host], { encoding: 'utf8', env: agentEnv() })).stdout).toMatch(/up to date|not an installed copy/);
+  });
+});
+
+describe('overlyx auth login through the browser', () => {
+  const CONFIG = join(ROOT, 'config-web');
+  const cookie = () => `ol_session=${signSession(toSessionUser(db.prepare("SELECT * FROM users WHERE username = 'ada'").get() as never))}`;
+
+  /** the CLI waiting for the browser; the test is the browser */
+  async function startLogin() {
+    const { spawn } = await import('node:child_process');
+    // (a desktop as far as the CLI knows: DISPLAY set, no SSH; xdg-open made harmless by an empty PATH entry)
+    const env = { ...process.env, OVERLYX_CONFIG_DIR: CONFIG, DISPLAY: ':99', PATH: `${join(ROOT, 'no-browser')}:${process.env.PATH}` } as Record<string, string>;
+    delete env.SSH_CONNECTION; delete env.SSH_TTY;
+    mkdirSync(join(ROOT, 'no-browser'), { recursive: true });
+    writeFileSync(join(ROOT, 'no-browser', 'xdg-open'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const child = spawn(process.execPath, [CLI, 'auth', 'login', '--web', '--host', host], { env });
+    let err = '', out = '';
+    child.stderr.on('data', d => { err += d; });
+    child.stdout.on('data', d => { out += d; });
+    const url = await new Promise<string>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('no sign-in address: ' + err)), 10000);
+      const poll = setInterval(() => { const m = /(http\S+\/cli\/login\?\S+)/.exec(err); if (m) { clearInterval(poll); clearTimeout(t); resolve(m[1]); } }, 50);
+    });
+    const done = new Promise<number>(r => child.on('exit', c => r(c ?? 1)));
+    return { url: new URL(url), done, out: () => out, err: () => err };
+  }
+
+  it('the browser authorizes, the page hands the code back to the terminal: the CLI has a credential of its own, good for git and MCP', async () => {
+    const login = await startLogin();
+    const q = Object.fromEntries(login.url.searchParams);
+    expect(q.client).toBeTruthy();
+    // not signed in: the page says so
+    expect(await (await fetch(login.url)).text()).toContain('Sign in to OverLyX first');
+    // signed in: the consent page, then Authorize
+    expect(await (await fetch(login.url, { headers: { cookie: cookie() } })).text()).toContain('Sign in the OverLyX CLI?');
+    const consent = await fetch(login.url, { headers: { cookie: cookie() } });
+    expect(consent.headers.get('content-security-policy')).toContain(`form-action 'self' http://127.0.0.1:${q.port}`);
+    const approved = await fetch(`${host}/cli/login`, { method: 'POST', redirect: 'manual', headers: { cookie: cookie(), 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ...q, decision: 'approve' }).toString() });
+    expect(approved.status).toBe(302);
+    const location = approved.headers.get('location')!;
+    expect(location.startsWith(`http://127.0.0.1:${q.port}/callback?state=${q.state}&code=olxcli_`)).toBe(true);
+    const code = new URL(location).searchParams.get('code')!;
+    // the browser follows the redirect back to the terminal
+    const back = await fetch(location);
+    expect(await back.text()).toContain('The OverLyX CLI is signed in');
+    expect(await login.done).toBe(0);
+    expect(login.out()).toContain(`Logged in to ${host} as ada`);
+    const saved = JSON.parse(readFileSync(join(CONFIG, 'hosts.json'), 'utf8'));
+    expect(saved.hosts[host].token).toMatch(/^olxmcp_/);
+    expect(listMcpTokens(user.id).map(t => t.name)).toContain(`OverLyX CLI on ${q.client}`);
+    // the credential works: the project list (git API) …
+    const list = await execFileP(process.execPath, [CLI, 'repo', 'list'], { encoding: 'utf8', env: { ...process.env, OVERLYX_CONFIG_DIR: CONFIG } });
+    expect(list.stdout).toContain('ada/');
+    // … and a code works once
+    expect((await fetch(`${host}/cli/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, verifier: 'x' }) })).status).toBe(400);
+  });
+
+  it('without a browser here (SSH), the page shows the code to paste instead of redirecting', async () => {
+    const q = { port: '45678', state: 'abcdefghijkl', challenge: 'a'.repeat(43), client: 'remote-box', mode: 'manual' };
+    const consent = await fetch(`${host}/cli/login?${new URLSearchParams(q)}`, { headers: { cookie: cookie() } });
+    expect(await consent.text()).toContain('name="mode" value="manual"');
+    const page = await fetch(`${host}/cli/login`, { method: 'POST', redirect: 'manual', headers: { cookie: cookie(), 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ...q, decision: 'approve' }).toString() });
+    expect(page.status).toBe(200);
+    expect(await page.text()).toMatch(/Paste this code into the terminal[\s\S]*olxcli_/);
+  });
+
+  it('a code is refused without the verifier of the CLI that asked for it', async () => {
+    const login = await startLogin();
+    const q = Object.fromEntries(login.url.searchParams);
+    const location = (await fetch(`${host}/cli/login`, { method: 'POST', redirect: 'manual', headers: { cookie: cookie(), 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ...q, decision: 'approve' }).toString() })).headers.get('location')!;
+    const code = new URL(location).searchParams.get('code')!;
+    const stolen = await fetch(`${host}/cli/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, verifier: 'not-the-verifier-of-this-login-xxxxxxxxxxxxxx' }) });
+    expect(stolen.status).toBe(400);
+    // (the code is gone now: the waiting CLI fails when it is handed it)
+    await fetch(`http://127.0.0.1:${q.port}/callback?state=${q.state}&code=${code}`);
+    expect(await login.done).toBe(1);
+    expect(login.err()).toContain('invalid or expired sign-in code');
   });
 });
