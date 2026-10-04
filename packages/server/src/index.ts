@@ -33,6 +33,8 @@ import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, 
 import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
+import { gdocsRoutes } from './gdocs/routes.ts';
+import { startAutoSync } from './gdocs/sync.ts';
 import { ownProjectKey } from './projectCreate.ts';
 import { sandboxAvailable } from './sandbox.ts';
 import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests } from './access.ts';
@@ -173,6 +175,9 @@ api.all('/docs/*', (req, res, next) => {
   req.role = role!;
   next();
 });
+
+// the Google Docs sync (gdocs/): after the document access rules above
+api.use(gdocsRoutes());
 
 /* ---------------------------------------------------------------- projects */
 
@@ -872,12 +877,12 @@ api.get('/docs/*/meta', async (req, res) => {
     bibIndex.set(id, { files: [...bibFiles].map(f => safe(f.endsWith('.bib') ? f : f + '.bib')).filter((x): x is string => !!x), fallbackProject: bibFiles.size ? null : doc.project });
     res.json({
       id, project: doc.project, path: doc.relPath, master: m.master,
+      format: m.format,
       role: req.role ?? 'edit',
       labels: m.labels,
       textclass: m.textclass, modules: m.modules,
       availableModules: describeModules(config.layoutDir, [proj, docDir]),
       language: m.language,
-      format: m.format,
       useRefstyle: m.useRefstyle,
       citeEngine: m.citeEngine,
       citeEngineType: m.citeEngineType,
@@ -1369,6 +1374,7 @@ const server = http.createServer(app);
 attachWebSocket(server);
 
 server.listen(config.port, config.host, () => {
+  startAutoSync();
   console.log(`OverLyX server listening on http://${config.host}:${config.port}  (projects: ${config.projectsDir}, data: ${config.dataDir}, document workers: ${docWorkers.enabled ? docWorkers.size : 'none'})`);
   docWorkers.warm();
 });

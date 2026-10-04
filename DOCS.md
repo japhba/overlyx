@@ -1420,6 +1420,8 @@ OVERLYX_E2E_AI_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test
 # the Agent panel (e2e/agent.spec.ts): start the server with OVERLYX_CODEX_BIN=scripts/codex-stub.mjs
 # (a stand-in for `codex app-server`: sign-in, streamed replies, one approval round-trip), then
 OVERLYX_E2E_AGENT_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/agent.spec.ts
+# the Google Docs sync: a server started with OVERLYX_E2E_GOOGLE_STUB=1 (simulated Google APIs, gdocs/fake.ts)
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/gdocs.spec.ts e2e/markdown.spec.ts
 # agents connected over MCP (e2e/mcp-presence.spec.ts): get_presence on a selection made in the browser, the
 # agent's caret / highlight, a panel message through wait_for_instructions and back, a pushed Claude Code session;
 # MCP is not proxied by vite, so name the server
@@ -1664,6 +1666,54 @@ can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
   HTML is left out, code languages listings does not know are dropped) and built with LuaLaTeX.
 * **VS Code**: the extension opens `.md` with *Open With… ▸ OverLyX Editor* (VS Code's own
   markdown editor stays the default), with the same parser and writer.
+
+## Google Docs sync
+
+*File ▸ Google Docs (sync, comments)…* links a document — markdown or `.tex` — to a Google Doc
+and keeps the two in step both ways (`server/src/gdocs/`): you write in OverLyX, collaborators
+read, comment and edit in Google Docs.
+
+* **Connecting.** Each account connects its Google Drive once (OAuth, scope `drive.file`: OverLyX
+  only ever sees the Google Docs it created). The sign-in's OAuth client and redirect address
+  (`/api/auth/google/callback`) are reused — `auth.ts` hands a Drive connection's callback to
+  `gdocs/google.ts`; the refresh token is stored encrypted (AES-GCM, key derived from the server
+  secret) in `google_drive`. **Setup:** in the Google Cloud project of `GOOGLE_CLIENT_ID`, enable the
+  *Google Docs API* and the *Google Drive API* (APIs & Services ▸ Library); `drive.file` is a
+  non-sensitive scope, so no app verification is needed. Without the APIs enabled the dialog says so.
+* **The model** (`gdocs/model.ts`). A document projects to blocks Google Docs can hold: headings
+  (the document's top heading level is Heading 1), paragraphs, bulleted / numbered lists with
+  nesting, quotes (indented), code blocks (monospace lines on a grey ground), tables, text with
+  bold / italic / underline / strikethrough / monospace / links / super- and subscript, real
+  footnotes. What Docs cannot hold is text that reads back: `$…$` formulas (`$$…$$` centred),
+  `[@key]` citations, `[ref: label]`, `[image: file]`. Tracked changes are shown as accepted (the
+  API cannot write suggestions); notes are left out; comment threads become Google comments.
+* **Writing** (`gdocs/edits.ts`): the Google Doc is diffed against the blocks and edited in place
+  with `documents.batchUpdate`, back to front — a changed paragraph word by word (narrowed to the
+  characters that changed), formatting as style updates, new and removed blocks as insertions and
+  deletions — so comments anchored in Google Docs keep their text. It goes in rounds that re-read
+  the document: a new table is inserted empty and filled in the next round, a new footnote likewise,
+  lists get their bullets last (createParagraphBullets reads nesting levels from leading tabs).
+  Paragraphs with suggestions pending in Google Docs are not touched. A seeded fuzz test
+  (tests/gdocs.test.ts) checks that random edits always converge.
+* **Reading back** (`gdocs/sync.ts`). Each sync compares the Google Doc with the blocks it held after
+  the previous sync; what changed there is mapped onto the document as it was then and applied
+  through the agents' edit path (`docedit.ts` applyTrackedSource): tracked insertions / deletions
+  by “Name (Google Docs)” (Drive's last modifier), merged with edits made here meanwhile. Accepting
+  them changes nothing in Google Docs; rejecting them takes the Google Doc back.
+* **Comments** both ways: a Google comment becomes a thread right after the text it quotes, its
+  replies messages; a thread written here becomes a Google comment (anchored to the text before it
+  with the Docs API's `insertComment` where the project has it — it is in preview — else a Drive
+  comment quoting that text, which Docs lists unanchored), its messages replies; resolving and
+  reopening go both ways. `gdocs_links.comments` maps threads to comments, so nothing is sent twice.
+* **When**: every minute (`startAutoSync`) a linked document is synced if it was saved since its
+  last sync or Drive reports a new version of the Google Doc; *Sync now* in the dialog any time;
+  *Sync automatically* off leaves it to the button. The sync uses the Drive of whoever linked the
+  document. Unlinking keeps the Google Doc; a link whose document is gone is dropped.
+* **Tests**: `tests/gdocs.test.ts` runs against `gdocs/fake.ts`, a simulation of the Docs / Drive
+  APIs (indices, paragraph joins, bullets from tabs, tables, footnotes, anchored comments).
+  `e2e/gdocs.spec.ts` needs a server started with `OVERLYX_E2E_GOOGLE_STUB=1`: the simulation
+  instead of Google, a Drive connection without the consent screen, and `/api/gdocs/e2e/*` for the
+  test to play the collaborator.
 
 ## The .tex format
 

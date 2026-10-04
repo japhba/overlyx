@@ -2249,3 +2249,12 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .lyx-editor.ol-layout.ol-single > .ol-page-wrap.ol-shown { margin-top: var(--ol-single-top, 0px); margin-bottom: var(--ol-single-bottom, 0px); }
 .lyx-editor.ol-layout.ol-single.ol-show-notes > .ol-page-wrap.ol-shown { margin-bottom: calc(110px + var(--ol-single-bottom, 0px)); }
 .editor-page:has(.lyx-editor.ol-layout.ol-single) { padding-bottom: 34px; }
+
+/* File ▸ Google Docs… (app/GoogleDocs.tsx) */
+.gdocs-dialog { max-width: 460px; display: flex; flex-direction: column; gap: 8px; }
+.gdocs-dialog p { margin: 0; }
+.gdocs-dialog .row { display: flex; align-items: center; gap: 6px; }
+.gdocs-dialog .row input:not([type]) { flex: 1; }
+.gdocs-dialog .buttons-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gdocs-dialog .error { color: indianred; }
+.gdocs-dialog button.primary { align-self: flex-start; }

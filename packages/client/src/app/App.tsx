@@ -2,6 +2,7 @@ import { recordUsage, noticeTemplate } from '../usage';
 import { editorViewMenu } from './editorViewMenu';
 import { inkToolbar } from './inkToolbar';
 import { StatsDialog } from './StatsDialog';
+import { GoogleDocsDialog } from './GoogleDocs';
 import { documentMenus } from './documentMenus';
 import { referenceTransaction } from '../editor/references';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
@@ -1124,6 +1125,15 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     ],
     reloadMetadata: () => { if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); notify('Metadata reloaded'); }); },
   });
+  // back from Google's consent screen (File ▸ Google Docs… ▸ Connect): the dialog again, with what happened
+  useEffect(() => {
+    const m = /[?&]gdocs=([^&]*)/.exec(location.hash);
+    if (!m || !docId) return;
+    const what = decodeURIComponent(m[1]);
+    history.replaceState(null, '', location.pathname + location.search + location.hash.replace(/[?&]gdocs=[^&]*/, ''));
+    if (what !== 'connected') notify(what, 'error');
+    setDialog({ name: 'gdocs' });
+  }, [docId]);
   const menus: MenuDef[] = [...(isProjectRoot ? projectRootMenus : docId && !isLyxDoc ? textFileMenus : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
@@ -1151,6 +1161,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       ] },
       { label: 'Versions…', action: () => setRightTab('versions') },
       { label: 'Share project…', action: () => setShareFor(projectOfDoc(docId)) },
+      { label: 'Google Docs (sync, comments)…', action: () => setDialog({ name: 'gdocs' }) },
       { label: 'Git repository…', action: () => setGitFor(projectOfDoc(docId)) },
       { sep: true },
       { label: 'Close (back to the projects)', action: closeDoc },
@@ -1360,6 +1371,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
       case 'airepair': return docId ? <AiRepairDialog docId={docId} onClose={close} onApplied={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; })} /> : null;
       case 'stats': return view ? <StatsDialog view={view} onClose={close} /> : null;
+      case 'gdocs': return docId ? <GoogleDocsDialog docId={docId} onClose={close} notify={notify} /> : null;
       case 'tex': return <TexDialog tex={String(dialog.arg ?? '')} onClose={close} />;
       case 'layout': return <LayoutPicker layouts={layouts} onClose={close} onPick={n => run(C.setLayout(n))} />;
       case 'argument': { run(C.insertArgument(String(dialog.arg ?? '1'))); setDialog(null); return null; }
