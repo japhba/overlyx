@@ -16,8 +16,9 @@ import { pageFontsOf } from '../packages/core/src/layout/model.ts';
 import { macrosFromLatex, toMathliveMacros } from '../packages/core/src/macros.ts';
 import { markEditedSettings } from '../packages/core/src/tex/preamble.ts';
 import { rewriteParentPaths } from '../packages/server/src/texpaths.ts';
+import { LYX_LAYOUTS } from './lyxlib';
 
-const opts = { layoutDir: path.resolve('lyx/lib/layouts'), localDirs: [] };
+const opts = { layoutDir: LYX_LAYOUTS, localDirs: [] };
 
 const DOC = String.raw`\documentclass[aspectratio=169]{beamer}
 \usepackage{lmodern}

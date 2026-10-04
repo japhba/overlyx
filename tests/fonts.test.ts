@@ -20,8 +20,9 @@ import { TEXT_X_HEIGHT } from '../packages/client/src/fonts/web/metrics.gen.ts';
 import { setPref } from '../packages/client/src/prefs.ts';
 import { isMathFont } from '../packages/client/src/editor/lyxmath/mathfonts.ts';
 import { currentMathFont } from '../packages/client/src/editor/lyxmath/mathjax.ts';
+import { LYX_LIB } from './lyxlib';
 
-const FONTS = loadLatexFonts(join(__dirname, '../lyx/lib/latexfonts'));
+const FONTS = loadLatexFonts(join(LYX_LIB, 'latexfonts'));
 const SAMPLE = '\\documentclass{article}\n\\usepackage{amsmath}\n\\usepackage{amssymb}\n\\begin{document}\nText $\\alpha + \\sum_i x_i^2$.\n\\end{document}\n';
 
 /** The managed block of a .tex document saved with a font set chosen in Document ▸ Settings. */
