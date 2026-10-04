@@ -438,6 +438,10 @@ blend.
     slide*; with the rail focused ↑ ↓ Home End move, Enter adds a slide, Delete removes one,
     Ctrl+D duplicates, Ctrl+↑ / ↓ reorder, Ctrl+Z undoes (each command is its own undo step:
     `stopCapturing`), F5 presents, Esc returns to the canvas.
+    *Notes* in its header (and the Layout toolbar's notes button) shows the speaker notes under the
+    pages, remembered per browser (`ol.notes`); a page without notes then offers *Click to add speaker
+    notes* (`PageView`), so showing them adds nothing to the file. In notes, keys type (the canvas's
+    tool letters and object keys stay out of them).
     **New slide layouts** (`editor/layout/slidelayouts.ts`): Title slide, Title and content, Section
     header, Two content, Comparison, Title only, Big statement, Blank — in the deck's own style, read off
     its pages since a beamer file has no masters (`deckStyle`: the title box most content pages share,

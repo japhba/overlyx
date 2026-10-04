@@ -127,6 +127,18 @@ export function deselectAll(tr: Transaction, pagePos?: number | null): Transacti
   return tr;
 }
 
+/** Are the speaker notes shown under the pages (remembered per browser)? */
+export function notesShown(): boolean {
+  try { return localStorage.getItem('ol.notes') === '1'; } catch { return false; }
+}
+
+/** Show or hide the speaker notes under the pages, and remember it. */
+export function showNotes(view: EditorView, on: boolean): void {
+  view.dom.classList.toggle('ol-show-notes', on);
+  try { localStorage.setItem('ol.notes', on ? '1' : '0'); } catch { /* not remembered */ }
+  view.dispatch(view.state.tr);   // the toolbars show the new state
+}
+
 /** Did pages come, go or change places (not just change inside)? */
 function pageOrderChanged(a: PMNode, b: PMNode): boolean {
   const pa = L.pages(a).map(p => p.node), pb = L.pages(b).map(p => p.node);
@@ -370,6 +382,7 @@ class LayoutController {
         currentPage: () => this.currentPage()?.pos ?? null,
         park: pos => this.view.dispatch(deselectAll(this.view.state.tr, pos)),
         refit: () => this.fit(),
+        notes: on => { if (on !== undefined) showNotes(this.view, on); return this.view.dom.classList.contains('ol-show-notes'); },
       });
       this.fit();
     } else if (!deck && this.rail) {
@@ -383,6 +396,8 @@ class LayoutController {
   private colorStyle: HTMLStyleElement | null = null;
 
   private attach(): void {
+    // the speaker notes under the pages, as the reader last had them (the Layout toolbar's and the slide rail's toggle)
+    this.view.dom.classList.toggle('ol-show-notes', notesShown());
     const scroller = (this.view.dom.closest('.editor-scroll') ?? this.view.dom.parentElement) as HTMLElement | null;
     this.scroller = scroller;
     if (scroller && typeof ResizeObserver !== 'undefined') {
@@ -892,7 +907,7 @@ class LayoutController {
   pointerDown(ev: PointerEvent): boolean {
     if (!this.active || ev.button !== 0 || !this.view.editable) return false;
     const target = ev.target as HTMLElement;
-    if (target.closest('.ol-overlay') || target.closest('.ol-page-label')) return false;   // handles have their own listeners
+    if (target.closest('.ol-overlay, .ol-page-label, .ol-notes-add')) return false;   // handles have their own listeners
     const ctx = this.pageCtxFromEl(target);
     const st = layoutKey.getState(this.view.state)!;
     if (!ctx) {
@@ -1908,6 +1923,9 @@ class LayoutController {
       startPresentation(view, { fromCurrent: ev.key !== 'F5' || ev.shiftKey });
       return true;
     }
+    // typing in a page's speaker notes is typing: no tool letters, no object keys
+    const $h = view.state.selection.$head;
+    for (let d = $h.depth; d > 0; d--) if ($h.node(d).type.name === 'ol_notes') return false;
     // the pen: Enter finishes, Esc finishes (or drops a single node)
     if (st.tool === 'pen' && this.pen) {
       if (ev.key === 'Enter') { this.finishPen(false); return true; }

@@ -2,8 +2,9 @@
  * The slide rail of layout decks (editor/layout/rail.ts), PowerPoint's thumbnail pane: live
  * thumbnails, "+ New slide" with the caret in the new title (typed text gets the deck's title
  * formatting), the layout picker, dragging a thumbnail to reorder (the canvas renumbers its pages),
- * the right-click menu, Delete and Ctrl+Z on the focused rail, folding the rail away, and what lands
- * in the .tex file. Needs the seeded admin.
+ * the right-click menu, Delete and Ctrl+Z on the focused rail, folding the rail away, speaker notes
+ * (shown from the rail, added under a slide, typed with letters that are tool keys on the canvas), and
+ * what lands in the .tex file. Needs the seeded admin.
  */
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, rmSync } from 'node:fs';
@@ -25,7 +26,7 @@ test('the slide rail: thumbnails, new slides in the deck\'s style, reordering, t
   await login(page);
   expect((await page.request.post(BASE_URL + '/api/projects', { data: { name: `e2e-rail-${RUN}` } })).ok()).toBeTruthy();
   expect((await page.request.post(`${BASE_URL}/api/projects/${encodeURIComponent(PROJECT)}/new`, { data: { path: 'talk.tex', title: 'Rail test', layout: 'slides169' } })).ok()).toBeTruthy();
-  await page.evaluate(() => { try { localStorage.removeItem('ol.slides'); } catch { /* */ } });
+  await page.evaluate(() => { try { localStorage.removeItem('ol.slides'); localStorage.removeItem('ol.notes'); } catch { /* */ } });
   await page.goto('/#/' + DOC);
   await page.waitForSelector('.lyx-editor .ol-page', { timeout: 30000 });
 
@@ -87,6 +88,16 @@ test('the slide rail: thumbnails, new slides in the deck\'s style, reordering, t
   await page.locator('.ol-rail-show').click();
   await expect(page.locator('.ol-slide-rail')).not.toHaveClass(/collapsed/);
 
+  // speaker notes: the rail shows them; a slide without notes offers to add some, and typing there is typing
+  await page.locator('[data-rail-notes]').click();
+  await expect(page.locator('.lyx-editor.ol-show-notes')).toHaveCount(1);
+  await page.locator('.lyx-editor .ol-page-wrap').nth(0).locator('.ol-notes-add').click();
+  await page.keyboard.type('Start with the result.');   // s, t, r, e, a: tool letters on the canvas
+  await expect(page.locator('.lyx-editor .ol-page-wrap').nth(0).locator('.ol-notes')).toContainText('Start with the result.');
+  await expect(page.locator('.lyx-editor .ol-page-wrap').nth(1).locator('.ol-notes-add')).toBeVisible();
+  await page.locator('[data-rail-notes]').click();
+  await expect(page.locator('.lyx-editor .ol-notes-add:visible')).toHaveCount(0);
+
   // the file: the slides in the rail's order, the new boxes named (an empty one writes no text)
   await expect(page.locator('.statusbar')).toContainText('All changes saved', { timeout: 15000 });
   const tex = readFileSync(`${PROJECTS_DIR}/${DOC}`, 'utf8');
@@ -94,6 +105,7 @@ test('the slide rail: thumbnails, new slides in the deck\'s style, reordering, t
   expect(order.every(i => i > 0)).toBeTruthy();
   expect(order).toEqual([...order].sort((a, b) => a - b));
   expect(tex).toMatch(/name=Title/);
+  expect(tex).toContain('\\note{Start with the result.}');
   expect((tex.match(/\\begin\{frame\}/g) ?? []).length).toBe(4);
   expect(errors).toEqual([]);
 });

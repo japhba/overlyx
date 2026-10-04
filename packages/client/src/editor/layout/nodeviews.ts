@@ -8,6 +8,7 @@
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView, NodeView } from 'prosemirror-view';
+import { TextSelection } from 'prosemirror-state';
 import { graphicsUrl } from '../../api';
 import { resolveDocPath, viewDocDir, viewProject } from '../context';
 import { subscribeProjectEvents } from '../../projectevents';
@@ -29,6 +30,8 @@ export class PageView implements NodeView {
   contentDOM: HTMLElement;
   overlay: HTMLElement;
   label: HTMLElement;
+  /** "Click to add speaker notes" under a page without notes, while the notes are shown */
+  notesAdd: HTMLElement;
 
   constructor(public node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('div');
@@ -41,12 +44,33 @@ export class PageView implements NodeView {
     this.overlay = document.createElement('div');
     this.overlay.className = 'ol-overlay';
     this.overlay.contentEditable = 'false';
-    this.dom.append(this.label, this.contentDOM, this.overlay);
+    this.notesAdd = document.createElement('div');
+    this.notesAdd.className = 'ol-notes-add';
+    this.notesAdd.contentEditable = 'false';
+    this.notesAdd.textContent = 'Click to add speaker notes';
+    this.notesAdd.addEventListener('mousedown', e => { e.preventDefault(); this.addNotes(); });
+    this.dom.append(this.label, this.contentDOM, this.overlay, this.notesAdd);
     (this.dom as HTMLElement & { olPage?: PageView }).olPage = this;
     this.render();
   }
 
   pos(): number | undefined { return this.getPos(); }
+
+  /** the page's speaker notes (beamer's \note), created empty if it has none; the caret into them */
+  private addNotes(): void {
+    const pos = this.getPos();
+    const page = pos === undefined ? null : this.view.state.doc.nodeAt(pos);
+    if (pos === undefined || !page) return;
+    const tr = this.view.state.tr;
+    let notes = page.lastChild?.type.name === 'ol_notes' ? pos + page.nodeSize - 1 - page.lastChild.nodeSize : -1;
+    if (notes < 0) {
+      notes = pos + page.nodeSize - 1;
+      tr.insert(notes, this.view.state.schema.nodes.ol_notes.create(null, this.view.state.schema.nodes.paragraph.create({ layout: 'Plain Layout', depth: 0 })));
+    }
+    tr.setSelection(TextSelection.near(tr.doc.resolve(notes + 2)));
+    this.view.dispatch(tr.scrollIntoView());
+    this.view.focus();
+  }
 
   private shown = { fill: null as string | null, transition: null as string | null, label: '' };
 
@@ -56,6 +80,7 @@ export class PageView implements NodeView {
     const fill = color(a.fill) ?? '';
     if (fill !== this.shown.fill) { this.contentDOM.style.background = fill; this.shown.fill = fill; }
     if ((a.transition ?? '') !== this.shown.transition) { this.dom.dataset.transition = a.transition ?? ''; this.shown.transition = a.transition ?? ''; }
+    this.dom.classList.toggle('ol-has-notes', this.node.lastChild?.type.name === 'ol_notes');
     const pos = this.getPos();
     let index = 0;
     if (pos !== undefined) this.view.state.doc.forEach((c, off) => { if (off < pos && c.type.name === 'ol_page') index++; });
@@ -75,10 +100,10 @@ export class PageView implements NodeView {
     if (m.type === 'selection') return false;
     // the overlay and the label are ours; style changes of the sheet too
     const t = m.target as HTMLElement;
-    return this.overlay.contains(t) || this.label.contains(t) || (m.type === 'attributes' && t === this.contentDOM);
+    return this.overlay.contains(t) || this.label.contains(t) || this.notesAdd.contains(t) || (m.type === 'attributes' && (t === this.contentDOM || t === this.dom));
   }
 
-  stopEvent(e: Event): boolean { return this.overlay.contains(e.target as Node) || this.label.contains(e.target as Node); }
+  stopEvent(e: Event): boolean { return this.overlay.contains(e.target as Node) || this.label.contains(e.target as Node) || this.notesAdd.contains(e.target as Node); }
 }
 
 /* ------------------------------------------------------------------ text box */

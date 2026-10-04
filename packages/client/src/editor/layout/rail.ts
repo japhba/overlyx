@@ -31,6 +31,8 @@ export interface RailHost {
   park(pagePos: number): void;
   /** the room for the canvas changed */
   refit(): void;
+  /** the speaker notes under the pages: shown? (with an argument: show or hide them) */
+  notes(on?: boolean): boolean;
 }
 
 const RAIL_W = 196, RAIL_COLLAPSED_W = 26;
@@ -56,6 +58,7 @@ export class SlideRail {
   readonly el: HTMLElement;
   private list: HTMLElement;
   private count: HTMLElement;
+  private notesBtn: HTMLButtonElement;
   private drop: HTMLElement;
   private items: Item[] = [];
   private current = -1;
@@ -82,9 +85,12 @@ export class SlideRail {
     title.className = 'ol-rail-title'; title.textContent = 'Slides';
     this.count = document.createElement('span');
     this.count.className = 'ol-rail-count';
+    this.notesBtn = button('ol-rail-notes', 'Notes', 'Speaker notes under the slides');
+    this.notesBtn.dataset.railNotes = '';
+    this.notesBtn.addEventListener('click', () => { this.host.notes(!this.host.notes()); this.syncNotes(); });
     const hide = button('ol-rail-hide', '«', 'Hide the slides');
     hide.addEventListener('click', () => this.setCollapsed(true));
-    head.append(title, this.count, hide);
+    head.append(title, this.count, this.notesBtn, hide);
     this.list = div('ol-rail-list');
     this.list.tabIndex = 0;
     this.list.setAttribute('role', 'listbox');
@@ -136,6 +142,13 @@ export class SlideRail {
   update(docChanged: boolean): void {
     if (docChanged) this.schedule();
     this.syncCurrent();
+    this.syncNotes();
+  }
+
+  private syncNotes(): void {
+    const on = this.host.notes();
+    this.notesBtn.classList.toggle('active', on);
+    this.notesBtn.setAttribute('aria-pressed', String(on));
   }
 
   width(): number { return this.collapsed ? RAIL_COLLAPSED_W : RAIL_W; }
