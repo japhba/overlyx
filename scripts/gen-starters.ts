@@ -1,13 +1,15 @@
 /**
  * Generate the starter projects every account gets besides the welcome project
  * (packages/server/templates/starters/<id>, created by ensureStarterProjects in
- * packages/server/src/access.ts): a beamer deck, a Layout-mode A0 poster and a paper.
+ * packages/server/src/access.ts): a beamer deck, a Layout-mode slide deck, a Layout-mode A0 poster
+ * and a paper.
  *
- *   npx tsx scripts/gen-starters.ts             # the three .tex files (and refs.bib)
+ *   npx tsx scripts/gen-starters.ts             # the four .tex files (and refs.bib)
  *   npx tsx scripts/gen-starters.ts --figures   # also recompile the figures (pdflatex, pgfplots)
+ *   npx tsx scripts/gen-starters.ts deck        # only the starters named (slides, deck, poster, paper)
  *
- * The deck and the paper are written by hand (scripts/starters-src/*.tex); the poster is laid out
- * here, object by object. Each goes through OverLyX's own parser and writer, so the templates are in
+ * The beamer deck and the paper are written by hand (scripts/starters-src/*.tex); the poster is laid
+ * out here, object by object, and the Layout-mode deck in scripts/starters-src/deck.ts. Each goes through OverLyX's own parser and writer, so the templates are in
  * the canonical form: opening and saving them in OverLyX changes nothing. Placeholders (@@NAME@@)
  * are filled in when the project is created for a user.
  */
@@ -17,7 +19,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseTex, writeTex } from '../packages/core/src/tex/index.ts';
 import { markEditedSettings } from '../packages/core/src/tex/preamble.ts';
-import { setHeaderValue, writeBoxKeys, writeShapeKeys, writeImageKeys, writeRawKeys, parseBoxKeys, parseShapeKeys, parseImageKeys, parseRawKeys, type BoxProps, type ShapeProps, type ImageProps, type RawProps } from '../packages/core/src/index.ts';
+import { setHeaderValue, writeBoxKeys, writeShapeKeys, writeImageKeys, writeRawKeys, parseBoxKeys, parseShapeKeys, parseImageKeys, parseRawKeys, parseOlx, type BoxProps, type ShapeProps, type ImageProps, type RawProps } from '../packages/core/src/index.ts';
+import { deck, type Heights as DeckHeights } from './starters-src/deck.ts';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const SRC = path.join(HERE, 'starters-src');
@@ -41,11 +44,12 @@ function canonical(text: string, dir: string, settings: Record<string, string> =
 
 /* ------------------------------------------------------------------ figures */
 
-const FIGURES: Record<string, string[]> = { slides: ['decay'], poster: ['model', 'results'], paper: ['convergence'] };
+const FIGURES: Record<string, string[]> = { slides: ['decay'], deck: ['scattering', 'sky'], poster: ['model', 'results'], paper: ['convergence'] };
 
 function compileFigures(): void {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-starters-'));
   for (const [id, figs] of Object.entries(FIGURES)) {
+    if (!wanted(id)) continue;
     fs.mkdirSync(path.join(OUT, id, 'figures'), { recursive: true });
     for (const f of figs) {
       // reproducible PDFs (no creation date, a fixed ID): regenerating does not change the files
@@ -281,7 +285,42 @@ function fitPoster(): string {
 
 const POSTER_SETTINGS = { papersize: 'custom', paperwidth: '841mm', paperheight: '1189mm' };
 
+/* --------------------------------------------------------------------- deck */
+
+/**
+ * Compile the slide deck and give each text box that grows with its text the height TeX gives the
+ * text — the natural height the layout macros write to the .olx file — plus its margins and the half
+ * millimetre the editor's "make the box that tall" adds. One round is enough: a box's height does not change its
+ * text. A box of fixed height that its text overflows in the PDF is an error.
+ */
+function fitDeck(): string {
+  const dir = path.join(OUT, 'deck');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-deck-'));
+  fs.cpSync(path.join(dir, 'figures'), path.join(tmp, 'figures'), { recursive: true });
+  const tex = canonical(deck(), dir);
+  fs.writeFileSync(path.join(tmp, 'deck.tex'), tex.replace(/@@NAME@@/g, 'Ada Lovelace'));
+  const r = spawnSync('pdflatex', ['-interaction=nonstopmode', 'deck.tex'], { cwd: tmp, encoding: 'utf8' });
+  if (r.status !== 0 || !fs.existsSync(path.join(tmp, 'deck.olx'))) throw new Error(`deck failed:\n${r.stdout.slice(-3000)}`);
+  const olx = parseOlx(fs.readFileSync(path.join(tmp, 'deck.olx'), 'utf8'));
+  fs.rmSync(tmp, { recursive: true, force: true });
+  const heights: DeckHeights = new Map();
+  const MM = 25.4 / 72.27;
+  for (const [i, frame] of [...tex.matchAll(/\\begin\{frame\}[\s\S]*?\\end\{frame\}/g)].entries()) {
+    for (const m of frame[0].matchAll(/\\begin\{olbox\}\{([^\n]*)\}\n/g)) {
+      const p = parseBoxKeys(m[1]);
+      const rec = olx.boxes.find(b => b.frame === i + 1 && b.slide === 1 && Math.abs(b.x - p.x) < 0.01 && Math.abs(b.y - p.y) < 0.01 && Math.abs(b.w - p.w) < 0.01);
+      if (!rec) throw new Error(`deck: no .olx record for the box "${p.name}" on slide ${i + 1}`);
+      if (p.grow && p.name) heights.set(`${i + 1}/${p.name}`, Math.ceil((rec.natural * MM + 2 * (p.pad ?? 0) + 0.5) * 10) / 10);
+      else if (rec.natural - rec.inner > 0.5) throw new Error(`deck: the text of "${p.name}" on slide ${i + 1} is ${(rec.natural - rec.inner).toFixed(1)} pt taller than its box`);
+    }
+  }
+  return deck(heights);
+}
+
 /* --------------------------------------------------------------------- main */
+
+const only = process.argv.slice(2).filter(a => !a.startsWith('--'));
+function wanted(id: string): boolean { return !only.length || only.includes(id); }
 
 if (process.argv.includes('--figures')) compileFigures();
 
@@ -290,7 +329,10 @@ const write = (id: string, file: string, text: string) => {
   fs.writeFileSync(path.join(OUT, id, file), text);
   console.log(`${id}/${file}: ${text.length} bytes`);
 };
-write('slides', 'slides.tex', canonical(fs.readFileSync(path.join(SRC, 'slides.tex'), 'utf8'), path.join(OUT, 'slides')));
-fs.copyFileSync(path.join(SRC, 'refs.bib'), path.join(OUT, 'paper', 'refs.bib'));
-write('paper', 'paper.tex', canonical(fs.readFileSync(path.join(SRC, 'paper.tex'), 'utf8'), path.join(OUT, 'paper')));
-write('poster', 'poster.tex', canonical(fitPoster(), path.join(OUT, 'poster'), POSTER_SETTINGS));
+if (wanted('slides')) write('slides', 'slides.tex', canonical(fs.readFileSync(path.join(SRC, 'slides.tex'), 'utf8'), path.join(OUT, 'slides')));
+if (wanted('deck')) write('deck', 'deck.tex', canonical(fitDeck(), path.join(OUT, 'deck')));
+if (wanted('paper')) {
+  fs.copyFileSync(path.join(SRC, 'refs.bib'), path.join(OUT, 'paper', 'refs.bib'));
+  write('paper', 'paper.tex', canonical(fs.readFileSync(path.join(SRC, 'paper.tex'), 'utf8'), path.join(OUT, 'paper')));
+}
+if (wanted('poster')) write('poster', 'poster.tex', canonical(fitPoster(), path.join(OUT, 'poster'), POSTER_SETTINGS));
