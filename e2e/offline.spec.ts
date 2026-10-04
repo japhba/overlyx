@@ -232,7 +232,8 @@ test('a minute offline beside another writer in the same paragraph and list: eve
   const mergedFile = readFileSync(MERGE_FILE, 'utf8');
   const noItems = (t: string) => withoutTokens(t.replace(/\\item\b/g, ' '));   // a split item is two \items
   for (const line of MERGE_BODY.flatMap(b => b.split('\n'))) expect(noItems(mergedFile), line).toContain(noItems(line));
-  expect(errors.filter(e => !/favicon|ERR_INTERNET_DISCONNECTED|Failed to fetch|WebSocket/.test(e))).toEqual([]);
+  // what a browser without a network says: Chromium's, Firefox's and Safari's wording of a failed fetch or WebSocket
+  expect(errors.filter(e => !/favicon|ERR_INTERNET_DISCONNECTED|Failed to fetch|NetworkError when attempting|Load failed|WebSocket|can’t establish a connection to the server at ws|connection to ws:\/\/\S+ was interrupted/.test(e))).toEqual([]);
   expect(errors2.filter(e => !/favicon/.test(e))).toEqual([]);
   await other.close();
 });
