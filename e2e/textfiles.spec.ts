@@ -5,7 +5,7 @@
  */
 import { test, expect, type Browser, type BrowserContext } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
-import { apiLogin, adminCredentials, userCredentials, shareProject, BASE_URL, PROJECTS_DIR } from './helpers';
+import { apiLogin, adminCredentials, userCredentials, shareProject, BASE_URL, PROJECTS_DIR, grantClipboard, readClipboard } from './helpers';
 
 const PROJECT = 'admin/e2e-text';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -253,7 +253,7 @@ test('the text editor has its own undo/redo, bracket matching and VS Code-style 
 
 test('the explorer context menu works like VS Code: new folder, duplicate, rename, cut/paste, delete to the trash', async ({ browser }) => {
   const admin = await asUser(browser);
-  await admin.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await grantClipboard(admin);
   const page = await admin.newPage();
   await page.goto('/#/' + PROJECT + '/main.tex');
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
@@ -273,7 +273,7 @@ test('the explorer context menu works like VS Code: new folder, duplicate, renam
   // copy the relative path
   await tree.locator('[data-file="refs copy.bib"]').click({ button: 'right' });
   await menuItem('Copy Relative Path').click();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('refs copy.bib');
+  expect(await readClipboard(page)).toBe('refs copy.bib');
   // rename — a path moves the file
   page.once('dialog', d => void d.accept('assets/refs2.bib'));
   await tree.locator('[data-file="refs copy.bib"]').click({ button: 'right' });

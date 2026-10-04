@@ -3,7 +3,7 @@
  * the paper in the editor's page colour, colours keeping their hue — while a photograph keeps its
  * colours; the ◐ switch in the PDF toolbar (only in the dark theme) goes back to the PDF's own colours.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, chromium, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { login, collectErrors, PROJECTS_DIR, texDoc, pickTheme } from './helpers';
 
@@ -30,8 +30,10 @@ test.beforeAll(async ({ browser }) => {
   await p.close();
   writeFileSync(`${DIR}/photo.jpg`, Buffer.from(photo.split(',')[1], 'base64'));
   writeFileSync(`${DIR}/plot.png`, Buffer.from(plot.split(',')[1], 'base64'));
-  // a PDF figure (as \includegraphics of a matplotlib PDF): a flat, light heat map beside a grainy photograph, on white
-  const fig = await browser.newPage();
+  // a PDF figure (as \includegraphics of a matplotlib PDF): a flat, light heat map beside a grainy photograph, on white;
+  // printed by Chromium whatever the browser under test (page.pdf exists only there)
+  const printer = browser.browserType().name() === 'chromium' ? browser : await chromium.launch();
+  const fig = await printer.newPage();
   const [heat, grain] = await fig.evaluate(() => {
     const h = document.createElement('canvas'); h.width = 64; h.height = 64;
     const a = h.getContext('2d')!;
@@ -47,6 +49,7 @@ test.beforeAll(async ({ browser }) => {
   await fig.setContent(`<body style="margin:0;background:#fff"><div style="display:flex;gap:90px;padding:70px 90px"><img src="${heat}" style="width:140px;height:140px;image-rendering:pixelated"><img src="${grain}" style="width:140px;height:140px"></div><div style="margin:0 90px;border-top:2px solid #000"></div></body>`);
   writeFileSync(`${DIR}/fig.pdf`, await fig.pdf({ width: '600px', height: '300px', printBackground: true }));
   await fig.close();
+  if (printer !== browser) await printer.close();
   writeFileSync(`${DIR}/figure.tex`, texDoc('\\begin{figure}[h]\\centering\\includegraphics[width=0.9\\linewidth]{fig.pdf}\\caption{A PDF figure.}\\end{figure}', '\\usepackage{graphicx}'));
   writeFileSync(`${DIR}/main.tex`, texDoc([
     'Dark pages: \\textcolor{red}{red text} and black text.',

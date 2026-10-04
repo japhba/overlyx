@@ -137,6 +137,41 @@ test('a dead-key ^ (German/French layouts: a composition) makes exactly one supe
   expect(errors).toEqual([]);
 });
 
+test("Safari's composition order (dead key ´ then e): one é in the formula, the caret stays in it", async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await open(page);
+  await page.locator('.lyx-editor .lyx-par').nth(1).click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Control+m');
+  await page.keyboard.type('x');
+  // WebKit commits a composition as deleteCompositionText, then a cancelable insertFromComposition,
+  // then compositionend — and only after that the keydown of the committing key (keyCode 229, not composing)
+  const prevented = await page.evaluate(() => {
+    const ta = document.activeElement as HTMLTextAreaElement;
+    if (!ta || !ta.classList.contains('lm-input')) throw new Error('math field not focused');
+    const input = (type: string, data: string | null, composing: boolean) => ta.dispatchEvent(new InputEvent('input', { inputType: type, data, isComposing: composing, bubbles: true }));
+    const before = (type: string, data: string | null, cancelable: boolean) => { const e = new InputEvent('beforeinput', { inputType: type, data, isComposing: true, bubbles: true, cancelable }); ta.dispatchEvent(e); return e.defaultPrevented; };
+    ta.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
+    ta.dispatchEvent(new CompositionEvent('compositionupdate', { data: '´' }));
+    before('insertCompositionText', '´', false); ta.value = '´'; input('insertCompositionText', '´', true);
+    ta.dispatchEvent(new CompositionEvent('compositionupdate', { data: 'é' }));
+    before('insertCompositionText', 'é', false); ta.value = 'é'; input('insertCompositionText', 'é', true);
+    before('deleteCompositionText', null, false); ta.value = ''; input('deleteCompositionText', null, true);
+    const p = before('insertFromComposition', 'é', true); if (!p) { ta.value = 'é'; input('insertFromComposition', 'é', false); }
+    ta.dispatchEvent(new CompositionEvent('compositionend', { data: 'é' }));
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', keyCode: 229, isComposing: false, bubbles: true, cancelable: true }));
+    return p;
+  });
+  expect(prevented).toBe(true);   // the field types the composition itself (at compositionend)
+  const latex = () => page.evaluate(() => (Array.from(document.querySelectorAll('.lyx-editor .lyx-math-inline')).pop() as any).pmViewDesc.spec.field.latex as string);
+  expect(await latex()).toBe('$xé$');
+  expect(await page.evaluate(() => document.activeElement!.classList.contains('lm-input'))).toBe(true);
+  await page.keyboard.type('y');
+  expect(await latex()).toBe('$xéy$');
+  expect(errors).toEqual([]);
+});
+
 test('sections can be reordered and re-levelled from the outline', async ({ page }) => {
   writeFileSync(`${DIR}/sections.tex`, withPreambleOf(`${SRC}/main.tex`, '\\section{Alpha}\n\nfirst\n\n\\subsection{Alpha one}\n\nnested\n\n\\section{Beta}\n\nsecond\n'));
   await login(page);

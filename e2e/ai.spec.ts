@@ -6,7 +6,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { login, PROJECTS_DIR, texDoc } from './helpers';
+import { login, PROJECTS_DIR, texDoc, grantClipboard, readClipboard } from './helpers';
 
 const PROJECT = 'admin/e2e-ai';
 const DOC = `${PROJECT}/paper.tex`;
@@ -145,9 +145,9 @@ test.describe('with the AI stub', () => {
     await expect(page.locator('.ai-old').first()).toBeVisible();
     await expect(page.locator('.ai-new mjx-container')).toHaveCount(1);              // the proposal's $g$ is rendered in the preview
     // the proposal's LaTeX can be copied from the panel
-    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await grantClipboard(page.context());
     await page.click('[data-ai-copy]');
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('Rewritten (make it crisper)');
+    expect(await readClipboard(page)).toContain('Rewritten (make it crisper)');
     // the document is untouched while the proposal is on show
     expect(await par.evaluate(el => el.textContent)).toContain('The variance of the weights');
     await page.keyboard.press('Escape');

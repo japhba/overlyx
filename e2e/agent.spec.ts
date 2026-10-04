@@ -9,7 +9,7 @@
 import { test, expect } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { login, PROJECTS_DIR, texDoc } from './helpers';
+import { login, PROJECTS_DIR, texDoc, grantClipboard, readClipboard, browserName } from './helpers';
 
 const PROJECT = 'admin/e2e-agent';
 const DOC = `${PROJECT}/paper.tex`;
@@ -55,7 +55,7 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await expect(page.locator('.agent-msg.user')).toHaveCount(1);                 // the echoed item replaces the local bubble — no doubling
 
   // equations render through the LyX math renderer — in the reply and in the user's own bubble
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await grantClipboard(context);
   await page.locator('.agent-compose textarea').fill('prove $E=mc^2$ please');
   await page.keyboard.press('Enter');
   await expect(page.locator('.agent-msg.assistant .agent-math[data-latex="E=mc^2"]').last()).toBeVisible({ timeout: 15000 });
@@ -67,8 +67,20 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
     const r = document.createRange(); r.selectNodeContents(el);
     const sel = window.getSelection()!; sel.removeAllRanges(); sel.addRange(r);
   });
-  await page.keyboard.press('Control+c');
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('$E=mc^2$');
+  if (browserName(page) === 'webkit') {
+    // Playwright's WebKit runs no copy for Ctrl+C on text outside an editable element (Safari's ⌘C does):
+    // the copy event Safari sends, then the clipboard the paste below reads
+    const copied = await page.evaluate(() => {
+      const data = new DataTransfer();
+      getSelection()!.anchorNode!.parentElement!.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
+      return data.getData('text/plain');
+    });
+    expect(copied).toBe('$E=mc^2$');
+    await page.evaluate(t => navigator.clipboard.writeText(t), copied);
+  } else {
+    await page.keyboard.press('Control+c');
+    expect(await readClipboard(page)).toBe('$E=mc^2$');
+  }
   // pasted into the document it becomes a real, editable formula again
   await page.locator('.lyx-editor .lyx-par').first().click({ position: { x: 12, y: 8 } });
   await page.keyboard.press('End');

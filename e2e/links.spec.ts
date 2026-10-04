@@ -7,7 +7,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { login, openDoc, collectErrors, texDoc, PROJECTS_DIR } from './helpers';
+import { login, openDoc, collectErrors, texDoc, PROJECTS_DIR, grantClipboard } from './helpers';
 
 const PROJECT = 'admin/e2e-links';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -74,7 +74,7 @@ test('Ctrl+K over the text of a table cell inside a formula makes it a link; the
 
 test('links in the text: the right-click menu’s Insert link, Ctrl+K on a link, pasting an address over a selection', async ({ page, context }) => {
   const errors = collectErrors(page);
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await grantClipboard(context);
   await login(page);
   await openDoc(page, `${PROJECT}/doc.tex`);
   const par = page.locator('.lyx-editor .lyx-par').first();

@@ -8,7 +8,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { login, openDoc, texDoc, collectErrors, PROJECTS_DIR } from './helpers';
+import { login, openDoc, texDoc, collectErrors, PROJECTS_DIR, newTouchContext } from './helpers';
 
 const PROJECT = 'admin/e2e-ink';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -377,7 +377,7 @@ test('with the canvas focused (caret deactivated), a pasted image lands in the m
 });
 
 test('the drawing toolbar activates itself on tablet clients', async ({ browser }) => {
-  const ctx = await browser.newContext({ viewport: { width: 1180, height: 820 }, hasTouch: true, isMobile: true });
+  const ctx = await newTouchContext(browser, { viewport: { width: 1180, height: 820 }, isMobile: true });
   const page = await ctx.newPage();
   try {
     await login(page);

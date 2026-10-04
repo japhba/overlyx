@@ -191,7 +191,9 @@ test('draw a text box, type with a formula, move and resize a shape, undo', asyn
   await expect(page.locator('.ol-box').nth(1)).toContainText('Hello');
   await expect(page.locator('.ol-box').nth(1).locator('.lyx-math-inline')).toHaveCount(1);
   await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toContain('Hello $x^{2}$ layout');
-  expect(fileText('slides.tex')).toMatch(/\\begin\{olbox\}\{x=70mm,y=45mm,w=70mm,h=[\d.]+mm,grow\}\nHello \$x\^\{2\}\$ layout\n\\end\{olbox\}/);
+  // (70 mm give or take a pixel: pointer events carry whole pixels in WebKit and Firefox, fractions in Chromium)
+  const box = /\\begin\{olbox\}\{x=([\d.]+)mm,y=([\d.]+)mm,w=([\d.]+)mm,h=[\d.]+mm,grow\}\nHello \$x\^\{2\}\$ layout\n\\end\{olbox\}/.exec(fileText('slides.tex'));
+  expect(box?.slice(1).map(Number).every((v, i) => Math.abs(v - [70, 45, 70][i]) < 1.5 / pxPerMm)).toBe(true);
 
   // Esc leaves the text for the box, Esc again deselects; a click selects the blue shape
   await page.keyboard.press('Escape');
@@ -207,7 +209,10 @@ test('draw a text box, type with a formula, move and resize a shape, undo', asyn
   await page.mouse.move(b0.x + b0.width / 2 + 10 * pxPerMm, b0.y + b0.height / 2 + 5 * pxPerMm, { steps: 8 });
   await page.mouse.up();
   await page.keyboard.up('Alt');
-  await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=30mm,y=25mm,w=30mm,h=20mm,[^}]*name=Blue\}/);
+  // the blue shape's x, y, w, h in mm, within a pixel of the intended values (pointer events carry whole
+  // pixels in WebKit and Firefox, fractions in Chromium)
+  const blueAt = (want: number[]) => { const m = /\\olshape\{x=([\d.]+)mm,y=([\d.]+)mm,w=([\d.]+)mm,h=([\d.]+)mm,[^}]*name=Blue\}/.exec(fileText('slides.tex')); return !!m && m.slice(1).every((v, i) => Math.abs(Number(v) - want[i]) < 1.5 / pxPerMm); };
+  await expect.poll(() => blueAt([30, 25, 30, 20]), { timeout: 15000 }).toBe(true);
   // the east handle: 10 mm wider
   const h = (await page.locator('.ol-h-e').first().boundingBox())!;
   await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
@@ -215,14 +220,14 @@ test('draw a text box, type with a formula, move and resize a shape, undo', asyn
   await page.mouse.down();
   await page.mouse.move(h.x + h.width / 2 + 10 * pxPerMm, h.y + h.height / 2, { steps: 6 });
   await page.mouse.up();
-  await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=30mm,y=25mm,w=40mm,h=20mm,/);
+  await expect.poll(() => blueAt([30, 25, 40, 20]), { timeout: 15000 }).toBe(true);
   // arrow keys nudge by 1 mm
   await page.keyboard.press('ArrowLeft');
-  await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=29mm,y=25mm,w=40mm/);
+  await expect.poll(() => blueAt([29, 25, 40, 20]), { timeout: 15000 }).toBe(true);
   // undo twice: the width comes back
   await page.keyboard.press('Control+z');
   await page.keyboard.press('Control+z');
-  await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=30mm,y=25mm,w=30mm,h=20mm,/);
+  await expect.poll(() => blueAt([30, 25, 30, 20]), { timeout: 15000 }).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -250,7 +255,15 @@ test('toolbar: bring to front and fill colour; a rectangle drawn with the shape 
   await page.mouse.move(pg.x + 120 * pxPerMm, pg.y + 80 * pxPerMm, { steps: 5 });
   await page.mouse.up();
   await page.keyboard.up('Alt');
-  await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=100mm,y=65mm,w=20mm,h=15mm,vb=0 0 20 15,fill=\[HTML\]DCE9F7,draw=\[HTML\]2F5597,line=0.8pt\}\{M 0 0 L 20 0 L 20 15 L 0 15 Z\}/);
+  // a rectangle of 20 × 15 mm at (100, 65) — within a pixel (pointer events carry whole pixels in WebKit and Firefox)
+  const drawn = () => {
+    const m = /\\olshape\{x=([\d.]+)mm,y=([\d.]+)mm,w=([\d.]+)mm,h=([\d.]+)mm,vb=0 0 ([\d.]+) ([\d.]+),fill=\[HTML\]DCE9F7,draw=\[HTML\]2F5597,line=0.8pt\}\{M 0 0 L ([\d.]+) 0 L ([\d.]+) ([\d.]+) L 0 ([\d.]+) Z\}/.exec(fileText('slides.tex'));
+    if (!m) return false;
+    const [x, y, w, h, vw, vh, p1, p2, p3, p4] = m.slice(1).map(Number);
+    const px = 1.5 / pxPerMm;
+    return Math.abs(x - 100) < px && Math.abs(y - 65) < px && Math.abs(w - 20) < 2 * px && Math.abs(h - 15) < 2 * px && vw === w && vh === h && p1 === w && p2 === w && p3 === h && p4 === h;
+  };
+  await expect.poll(drawn, { timeout: 15000 }).toBe(true);
   expect(errors).toEqual([]);
 });
 

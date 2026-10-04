@@ -5,7 +5,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, copyFileSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf } from './helpers';
+import { login, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf, grantClipboard, readClipboard, browserName } from './helpers';
 
 const SRC = `${FIXTURES_DIR}/recurrent_feature`;
 const PROJECT = 'admin/e2e-clip';
@@ -37,7 +37,7 @@ async function open(page: Page) {
 const count = (text: string, re: RegExp) => (text.match(re) ?? []).length;
 
 test('copying a paragraph and pasting it keeps citations, references, formulas and quotes', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await grantClipboard(context);
   const errors = collectErrors(page);
   await login(page);
   await open(page);
@@ -53,7 +53,7 @@ test('copying a paragraph and pasting it keeps citations, references, formulas a
   });
   await page.keyboard.press('Control+c');
   // the text/plain form is LaTeX-ish
-  const plain = await page.evaluate(() => navigator.clipboard.readText());
+  const plain = await readClipboard(page);
   expect(plain).toContain('\\citep{Hubel59}');
   expect(plain).toContain('\\ref{sec:intro}');
   expect(plain).toContain('$E=mc^{2}$');
@@ -71,7 +71,9 @@ test('copying a paragraph and pasting it keeps citations, references, formulas a
   const text = readFileSync(`${DIR}/clip.tex`, 'utf8');
   expect(count(text, /\\ref\{sec:intro\}/g)).toBe(2);
   expect(count(text, /\$E=mc\^\{2\}\$/g)).toBe(2);
-  expect(count(text, /``quoted''/g)).toBe(2);
+  // Playwright's WebKit keeps only text/plain on its pasteboard (Safari keeps the HTML as well): there the paste
+  // takes the LaTeX-ish plain text, whose quotes are typographic characters rather than quote insets
+  expect(count(text, browserName(page) === 'webkit' ? /``quoted''|“quoted”/g : /``quoted''/g)).toBe(2);
   expect(errors).toEqual([]);
 });
 

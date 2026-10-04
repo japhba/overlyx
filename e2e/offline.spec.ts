@@ -5,7 +5,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { login, collectErrors, adminCredentials, PROJECTS_DIR, shareProject, userCredentials } from './helpers';
+import { login, collectErrors, adminCredentials, PROJECTS_DIR, shareProject, userCredentials, browserName } from './helpers';
 
 const PROJECT = 'admin/e2e-offline';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -26,6 +26,14 @@ test.beforeAll(() => { mkdirSync(DIR, { recursive: true }); writeFileSync(FILE, 
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
 const saveState = (page: Page) => page.locator('.statusbar .save-state');
+/**
+ * Playwright's WebKit keeps opening WebSockets while its context is emulated offline (Chromium and
+ * Firefox refuse them, as a Safari without a network does): the editor's reconnect attempts every 5 s
+ * sync the "offline" edits right away there (scratch/browsers/wsoffline.mts). The tests that keep a
+ * page offline for longer than that cannot run in it.
+ */
+const OFFLINE_WS_LEAKS = 'Playwright WebKit opens WebSockets while emulated offline';
+const offlineLeaks = (page: Page) => browserName(page) === 'webkit';
 
 async function openDoc(page: Page) {
   await page.goto('/#/' + DOC);
@@ -67,13 +75,17 @@ test('edits made offline are kept locally and saved once the connection is back'
   await expect(saveState(page)).toHaveText(/kept on this device/, { timeout: 5000 });
   expect(readFileSync(FILE, 'utf8')).not.toContain('OFFLINE-MARK');
 
-  // reloading while offline: app shell from the service worker, document from IndexedDB
-  await page.evaluate(() => { (window as any).__beforeOfflineReload = true; });
-  await page.reload();
-  await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
-  expect(await page.evaluate(() => (window as any).__beforeOfflineReload)).toBeUndefined();
-  await expect(page.locator('.lyx-editor')).toContainText('OFFLINE-MARK');
-  await expect(saveState(page)).toHaveText(/Offline/, { timeout: 15000 });
+  // reloading while offline: app shell from the service worker, document from IndexedDB — not in Playwright's
+  // WebKit, whose emulated offline network fails every navigation ("WebKit encountered an internal error")
+  // before the service worker is asked (Chromium and Firefox reload from it; scratch/browsers/swoffline.mts)
+  if (browserName(page) !== 'webkit') {
+    await page.evaluate(() => { (window as any).__beforeOfflineReload = true; });
+    await page.reload();
+    await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+    expect(await page.evaluate(() => (window as any).__beforeOfflineReload)).toBeUndefined();
+    await expect(page.locator('.lyx-editor')).toContainText('OFFLINE-MARK');
+    await expect(saveState(page)).toHaveText(/Offline/, { timeout: 15000 });
+  }
   await typeInParagraph(page, 1, ' OFFLINE-MARK-2');
 
   await context.setOffline(false);
@@ -84,6 +96,7 @@ test('edits made offline are kept locally and saved once the connection is back'
 });
 
 test('edits of another user made meanwhile merge with the offline edits', async ({ page, context, browser }) => {
+  test.skip(offlineLeaks(page), OFFLINE_WS_LEAKS);
   await login(page);
   await openDoc(page);
   await expect(saveState(page)).toHaveText(/All changes saved/, { timeout: 15000 });
@@ -155,6 +168,7 @@ async function caretAt(page: Page, inPar: string, needle: string | null) {
 }
 
 test('a minute offline beside another writer in the same paragraph and list: every token once, everywhere', async ({ page, context, browser }) => {
+  test.skip(offlineLeaks(page), OFFLINE_WS_LEAKS);
   test.setTimeout(240000);
   writeFileSync(MERGE_FILE, `\\documentclass{article}\n\\begin{document}\n${MERGE_BODY.join('\n\n')}\n\\end{document}\n`);
   let otherCreds = adminCredentials();
@@ -240,6 +254,7 @@ test('an external save from desktop LyX keeps concurrent edits in other paragrap
 });
 
 test('offline edits that cannot be merged (server history re-created) are kept as a version', async ({ page, context, browser }) => {
+  test.skip(offlineLeaks(page), OFFLINE_WS_LEAKS);
   await login(page);
   await openDoc(page);
   await expect(saveState(page)).toHaveText(/All changes saved/, { timeout: 15000 });
@@ -291,8 +306,10 @@ test('the chosen math font is cached whole, so formulas keep their font offline'
   await context.setOffline(true);
   const failed: string[] = [];
   page.on('requestfailed', r => { if (r.url().includes('/assets/')) failed.push(r.url()); });
-  await page.reload();
-  await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  if (browserName(page) !== 'webkit') {   // (Playwright's WebKit cannot navigate offline, see above)
+    await page.reload();
+    await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  }
   const ok = await page.evaluate(async () => {
     const files = ((await (await fetch('/sw.js')).text()).match(/\/assets\/mathjax\/stix2\/[^"]+\.woff2/g) ?? []);
     const res = await Promise.all(files.map(f => fetch(f).then(r => r.ok, () => false)));

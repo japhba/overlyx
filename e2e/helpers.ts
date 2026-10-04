@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { Page, BrowserContext, Browser } from '@playwright/test';
+import type { Page, BrowserContext, Browser, BrowserContextOptions } from '@playwright/test';
 
 /**
  * Root of the projects served by the server under test (an isolated copy when OVERLYX_PROJECTS_DIR
@@ -90,6 +90,56 @@ export function userCredentials(username: string): { username: string; password:
   if (!lines.length) throw new Error(`no credentials for ${username}`);
   const [u, password] = lines[lines.length - 1].split('\t');
   return { username: u, password };
+}
+
+/**
+ * Two animation frames: what the last click or key started is done and drawn. Chromium usually gets
+ * there before a spec's next step, WebKit not. A click that lands on a formula's row rather than in its
+ * field focuses the formula a frame later (editor/assembly.ts handleClickOn), and a key pressed in
+ * between still goes to the text — Playwright's click on a formula not yet hovered reaches the field
+ * directly in Chromium but the row in WebKit (the field replaces the static rendering on pointerenter,
+ * just before the press); a formula's caret is drawn on the next frame (lyxmath/field.ts).
+ */
+export const nextFrames = (page: Page): Promise<void> => page.evaluate('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r())))');
+
+/** The engine a page runs in: 'chromium', 'firefox' or 'webkit' (Safari's engine). */
+export const browserName = (page: Page): string => page.context().browser()?.browserType().name() ?? 'chromium';
+
+/**
+ * Lets the page use the async clipboard (navigator.clipboard). Chromium asks for both permissions;
+ * WebKit knows only clipboard-read (it writes without one) and Firefox neither (Playwright's Firefox
+ * allows both) — granting an unknown permission throws there.
+ */
+export async function grantClipboard(context: BrowserContext): Promise<void> {
+  const name = context.browser()?.browserType().name() ?? 'chromium';
+  if (name === 'chromium') await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  else if (name === 'webkit') await context.grantPermissions(['clipboard-read']);
+}
+
+/**
+ * The clipboard's text. WebKit refuses navigator.clipboard.readText() without a user gesture (Safari
+ * shows a Paste button for it), so there the text is pasted (Ctrl+V) into a scratch page of the same context.
+ */
+export async function readClipboard(page: Page): Promise<string> {
+  if (browserName(page) !== 'webkit') return page.evaluate(() => navigator.clipboard.readText());
+  const scratch = await page.context().newPage();
+  try {
+    await scratch.setContent('<textarea></textarea>');
+    await scratch.focus('textarea');
+    await scratch.keyboard.press('Control+v');
+    return await scratch.inputValue('textarea');
+  } finally { await scratch.close(); await page.bringToFront(); }
+}
+
+/**
+ * A context of a touch device (a tablet). Under hasTouch Playwright's WebKit and Firefox leave
+ * navigator.maxTouchPoints at 0 (Chromium reports 1) — a real iPad says 5, and the app takes a coarse
+ * pointer with touch points for a tablet (plugins/ink.ts isTabletClient) — so there it is set to 5.
+ */
+export async function newTouchContext(browser: Browser, options: BrowserContextOptions = {}): Promise<BrowserContext> {
+  const ctx = await browser.newContext({ ...options, hasTouch: true });
+  if (browser.browserType().name() !== 'chromium') await ctx.addInitScript(() => { Object.defineProperty(Navigator.prototype, 'maxTouchPoints', { get: () => 5, configurable: true }); });
+  return ctx;
 }
 
 /** The theme switch (menu bar / VS Code top bar) opens a menu: Default, Light or Dark. */
