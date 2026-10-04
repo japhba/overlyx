@@ -9,6 +9,7 @@ import { schema } from '../packages/core/src/schema.ts';
 import { editorContext } from '../packages/client/src/editor/context.ts';
 import { CommandView } from '../packages/client/src/editor/nodeviews/leaf.ts';
 import { keepScrollOnFocus, caretOutOfWidget } from '../packages/client/src/editor/assembly.ts';
+import { isTabletClient } from '../packages/client/src/editor/plugins/ink.ts';
 import { pasteEventWith } from '../packages/client/src/editor/clipmenu.ts';
 import { EditorState, Plugin, TextSelection } from 'prosemirror-state';
 import { EditorView, Decoration, DecorationSet } from 'prosemirror-view';
@@ -238,5 +239,22 @@ describe('a caret inside a widget at the start of a line', () => {
     caretOutOfWidget(view, false);
     expect(view.state.selection.from).toBe(19);
     done();
+  });
+});
+
+/** A phone is no tablet: its page has no margins to draw in, and the drawing toolbar took its width. */
+describe('the drawing toolbar on touch devices', () => {
+  const device = (width: number, height: number, touch: number) => {
+    const mm = globalThis.matchMedia, mtp = Object.getOwnPropertyDescriptor(Navigator.prototype, 'maxTouchPoints');
+    (globalThis as any).matchMedia = (q: string) => ({ matches: q.includes('coarse') ? touch > 0 : /max-width: (\d+)px/.test(q) && width <= Number(/max-width: (\d+)px/.exec(q)![1]) || /max-height: (\d+)px/.test(q) && height <= Number(/max-height: (\d+)px/.exec(q)![1]) });
+    Object.defineProperty(Navigator.prototype, 'maxTouchPoints', { get: () => touch, configurable: true });
+    try { return isTabletClient(); } finally { (globalThis as any).matchMedia = mm; if (mtp) Object.defineProperty(Navigator.prototype, 'maxTouchPoints', mtp); }
+  };
+  it('switches itself on for a tablet, not for a phone in either orientation, not for a mouse', () => {
+    expect(device(834, 1194, 5)).toBe(true);    // iPad portrait
+    expect(device(1194, 834, 5)).toBe(true);    // iPad landscape
+    expect(device(393, 852, 5)).toBe(false);    // iPhone portrait
+    expect(device(852, 393, 5)).toBe(false);    // iPhone landscape
+    expect(device(1400, 900, 0)).toBe(false);   // a desktop
   });
 });
