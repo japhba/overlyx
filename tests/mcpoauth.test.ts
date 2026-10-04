@@ -25,6 +25,7 @@ const { mcpRouter } = await import('../packages/server/src/mcp.ts');
 const { createUser, toSessionUser, signSession, authMiddleware } = await import('../packages/server/src/auth.ts');
 const { registerProject } = await import('../packages/server/src/access.ts');
 const { createMcpToken } = await import('../packages/server/src/mcpTokens.ts');
+const { setUserSettings } = await import('../packages/server/src/userSettings.ts');
 
 const owner = createUser('owner', 'Owner', 'pw');
 const outsider = createUser('mallory', 'Mallory', 'pw');
@@ -53,12 +54,12 @@ const pkce = () => {
 };
 
 /** register a client, walk the consent flow, return an authorization code for `challenge`. */
-async function getCode(clientId: string, challenge: string): Promise<string> {
+async function getCode(clientId: string, challenge: string, extra: [string, string][] = []): Promise<string> {
   const q = new URLSearchParams({ client_id: clientId, redirect_uri: REDIRECT, response_type: 'code', state: 'st4te', code_challenge: challenge, code_challenge_method: 'S256', scope: 'mcp' });
   const res = await fetch(`${base}/oauth/authorize`, {
     method: 'POST', redirect: 'manual',
     headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
-    body: form({ ...Object.fromEntries(q), decision: 'approve' }),
+    body: new URLSearchParams([...q, ...extra, ['decision', 'approve']]).toString(),
   });
   expect(res.status).toBe(302);
   const loc = new URL(res.headers.get('location')!);
@@ -218,5 +219,36 @@ describe('refresh rotation', () => {
     expect(projects.map((p: any) => p.project)).toContain('owner/p');
     const reuse = await tokenReq({ grant_type: 'refresh_token', refresh_token: refresh, client_id: clientId });
     expect(reuse.status).toBe(400);
+  });
+});
+
+describe('fine-grained access (Settings ▸ Account, off by default)', () => {
+  it('the consent page narrows the connection to some projects / read only, and refreshed tokens stay narrowed', async () => {
+    registerProject('owner/q', owner.id);
+    mkdirSync(join(ROOT, 'projects', 'owner', 'q'), { recursive: true });
+    writeFileSync(join(ROOT, 'projects', 'owner', 'q', 'b.tex'), '\\documentclass{article}\n\\begin{document}\nOther.\n\\end{document}\n');
+    const q = `client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(REDIRECT)}&response_type=code&code_challenge=abc&code_challenge_method=S256`;
+    expect(await (await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } })).text()).not.toContain('name="reach"');
+    setUserSettings(owner.id, { fineGrainedAccess: true });
+    try {
+      const html = await (await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } })).text();
+      expect(html).toContain('name="reach" value="all" checked');
+      expect(html).toContain('value="owner/q"');
+      const { verifier, challenge } = pkce();
+      const code = await getCode(clientId, challenge, [['reach', 'some'], ['projects', 'owner/p'], ['readonly', '1']]);
+      const t = await tokenReq({ grant_type: 'authorization_code', code, client_id: clientId, redirect_uri: REDIRECT, code_verifier: verifier });
+      let token = t.body.access_token as string;
+      for (const round of [1, 2]) {
+        // round 2: a refreshed token
+        if (round === 2) token = (await tokenReq({ grant_type: 'refresh_token', refresh_token: t.body.refresh_token, client_id: clientId })).body.access_token;
+        expect((await callTool(token, 'list_projects', {})).map((p: any) => [p.project, p.role])).toEqual([['owner/p', 'view']]);
+        expect((await callTool(token, 'read_document', { project: 'owner/p', path: 'a.tex' })).text).toContain('Chaotic dynamics');
+        await expect(callTool(token, 'add_comment', { project: 'owner/p', path: 'a.tex', text: 'hi' })).rejects.toThrow(/read only/);
+        await expect(callTool(token, 'fetch', { id: 'owner/q/b.tex' })).rejects.toThrow(/limited to owner\/p/);
+        expect((await callTool(token, 'search', { query: 'other' })).results).toEqual([]);
+      }
+    } finally {
+      setUserSettings(owner.id, { fineGrainedAccess: false });
+    }
   });
 });

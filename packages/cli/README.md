@@ -25,7 +25,15 @@ there, and the browser hands a one-time code back to the CLI (a redirect to a li
 127.0.0.1, PKCE-protected). On a computer without a browser of its own (an SSH session, a server)
 the page shows the code to paste into the terminal instead (`--no-browser` asks for that). The CLI
 gets a credential of its own, "OverLyX CLI on <computer>", which you can revoke on its own in
-File > Git repository; your account token is not touched. For scripts and CI, pass the account
+File > Git repository; your account token is not touched. Plain git uses it too: the sign-in sets
+the CLI up as git's credential helper for that server (`credential.<server>.helper`, in your global
+git config, ahead of any helper that kept an older token), so `git clone`, `pull` and `push` of your
+OverLyX projects — in any folder — need nothing pasted. `--no-git` skips that, `overlyx auth
+setup-git` does it later, `auth logout` undoes it. The sign-in reaches all your projects, with
+your role in each. To give a computer less, switch on Settings > Account > Fine-grained access in
+OverLyX: the authorization page then lets you pick the projects (signing in from a clone ticks its
+project) and make it read only. Git, builds and agents on that computer then reach only those, and
+`overlyx auth status` shows the limit. For scripts and CI, pass the account
 token instead: `--username NAME --with-token` (stdin), `--token`, or `OVERLYX_HOST` /
 `OVERLYX_USERNAME` / `OVERLYX_TOKEN`.
 
@@ -70,8 +78,9 @@ sign in once per computer with `node packages/cli/bin/overlyx.js auth login`.
 ## Commands
 
 ```text
-overlyx auth login [--host URL] [--no-browser]
+overlyx auth login [--host URL] [--no-browser] [--no-git]
 overlyx auth login [--host URL] --username NAME --with-token | --token TOKEN
+overlyx auth setup-git [--host URL]
 overlyx auth status [--host URL]
 overlyx auth logout [--host URL]
 overlyx repo list [--host URL]

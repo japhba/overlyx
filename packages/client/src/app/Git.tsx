@@ -204,18 +204,18 @@ bearer_token_env_var = "OVERLYX_TOKEN"`}</pre>
           </div>
           <CopyField value={`${location.origin}/mcp`} label="MCP server URL (all your projects)" />
           <div class="hint">To pin a client to just this project, give it <code>{location.origin}/mcp/{project.split('/').map(encodeURIComponent).join('/')}</code> instead.</div>
-          <h4>OAuth connections and legacy agent tokens</h4>
-          <div class="hint">OAuth clients keep separate, short-lived credentials so you can disconnect one without rotating your account token. Older manually-created agent tokens remain usable and can be revoked here, but new manual connections use the account token above.</div>
+          <h4>Sign-ins, OAuth connections and agent tokens</h4>
+          <div class="hint">Each CLI sign-in (<code>overlyx auth login</code>) and each OAuth client keeps a credential of its own, so you can disconnect one without rotating your account token. Older manually-created agent tokens remain usable and can be revoked here, but new manual connections use the account token above. With Settings ▸ Account ▸ Fine-grained access, a new sign-in can be limited to some projects or to reading.</div>
           <div class="git-tokens">
             {(mcpTokens ?? []).map(t => (
               <div class="git-token" key={t.id}>
                 <span class="name">🤖 {t.name}</span>
-                <span class="meta">created {fmtDate(t.created_at)}{t.expires_at ? ` · expires ${fmtDate(t.expires_at)}` : ''}{t.last_used_at ? ` · last used ${ago(t.last_used_at)}` : ' · never used'}</span>
+                <span class="meta">created {fmtDate(t.created_at)}{t.expires_at ? ` · expires ${fmtDate(t.expires_at)}` : ''}{t.last_used_at ? ` · last used ${ago(t.last_used_at)}` : ' · never used'}{t.scope && <span data-token-scope> · {t.scope.projects ? `only ${t.scope.projects.join(', ') || 'no projects'}` : 'all projects'}{t.scope.readonly ? ', read only' : ''}</span>}</span>
                 {t.token && <CopyMini value={t.token} />}
                 <button class="mini" title="Revoke this token" onClick={() => void revokeMcpToken(t)}>Revoke</button>
               </div>
             ))}
-            {mcpTokens && !mcpTokens.length && <div class="hint">No OAuth or legacy connections.</div>}
+            {mcpTokens && !mcpTokens.length && <div class="hint">No sign-ins or OAuth connections.</div>}
           </div>
 
           <h4>Off-site mirror</h4>

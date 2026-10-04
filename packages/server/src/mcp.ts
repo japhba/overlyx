@@ -62,7 +62,7 @@ import { PANEL_AGENT, buildBeforeTurn, agentCheckpoint, undoCheckpoint, panelTra
 import { verifyMcpToken } from './mcpTokens.ts';
 import { wwwAuthenticate } from './mcpOauth.ts';
 import { config } from './config.ts';
-import { roleFor, atLeast, logAccess, accessibleProjects } from './access.ts';
+import { roleFor, atLeast, logAccess, accessibleProjects, scopeRefusal } from './access.ts';
 import { createOwnedProject } from './projectCreate.ts';
 import { ensureRepo } from './git.ts';
 import { toSessionUser, type SessionUser } from './auth.ts';
@@ -487,7 +487,7 @@ async function fetchDoc(user: SessionUser, id: string) {
   id = canonicalDocId(id);   // an id from before its project moved (namespaces.ts)
   const { project, path: rel } = splitDocId(id);
   if (!project || !rel) throw new Error('id must be "owner/project/path" (from search or list_files).');
-  if (!atLeast(roleFor(user, project), 'view')) throw new Error(`This account has no access to project "${project}".`);
+  if (!atLeast(roleFor(user, project), 'view')) throw new Error(`This account has no access to project "${project}"` + (scopeRefusal(user, project, 'view') ? ` (${scopeRefusal(user, project, 'view')}).` : '.'));
   let text: string;
   if (isDocumentFile(project, rel)) {
     const doc = await manager.open(id);
@@ -557,8 +557,8 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     const project = fixedProject ?? canonicalProject(String(arg ?? '').trim());
     if (!project) throw new Error('No project given — pass `project` (list_projects names the reachable ones).');
     const role = roleFor(user, project);
-    if (!atLeast(role, 'view')) throw new Error(`This account has no access to a project "${project}" (see list_projects).`);
-    if (min === 'edit' && !atLeast(role, 'edit')) throw new Error(`This token's account has view-only access to project "${project}" — reading is allowed, editing and commenting are not.`);
+    if (!atLeast(role, 'view')) throw new Error(`This account has no access to a project "${project}" (see list_projects)` + (scopeRefusal(user, project, 'view') ? ` — ${scopeRefusal(user, project, 'view')}.` : '.'));
+    if (min === 'edit' && !atLeast(role, 'edit')) throw new Error(scopeRefusal(user, project, 'edit') ? `This connection is read only for project "${project}" — reading is allowed, editing and commenting are not (${scopeRefusal(user, project, 'edit')}).` : `This token's account has view-only access to project "${project}" — reading is allowed, editing and commenting are not.`);
     if (!fs.existsSync(projectDir(project))) throw new Error(`No project "${project}".`);
     return project;
   };
@@ -834,10 +834,11 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     inputSchema: {},
   }, async () => { try { return ok(accessibleProjects(user).map(pr => ({ project: pr.name, title: pr.title ?? null, role: pr.role }))); } catch (e) { return fail(e); } });
 
-  // Project creation is account-wide, so it belongs only on /mcp. Once created, the ordinary
-  // write_document/write_file tools can populate it; a local client can alternatively push its
-  // existing repository with the OverLyX CLI.
-  if (!fixedProject) register('create_project', {
+  // Project creation is account-wide, so it belongs only on /mcp — and only to a credential that
+  // reaches the whole account (not one narrowed to some projects / read only). Once created, the
+  // ordinary write_document/write_file tools can populate it; a local client can alternatively
+  // push its existing repository with the OverLyX CLI.
+  if (!fixedProject && !user.scope) register('create_project', {
     description: 'Create an empty project owned by this account. Then populate it with create_document, write_document and write_file, or push an existing local repository with the OverLyX CLI.',
     inputSchema: {
       name: z.string().describe('Project name (letters, numbers, spaces, dot, dash and underscore); the project is created as "<your username>/<name>"'),
@@ -1046,10 +1047,10 @@ async function handle(req: Request, res: Response): Promise<void> {
   if (!identity) { res.setHeader('WWW-Authenticate', wwwAuthenticate(req)); res.status(401).json({ error: 'invalid or expired token' }); return; }
   const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(identity.userId) as UserRow | undefined;
   if (!userRow) { res.status(403).json({ error: 'the account behind this token no longer exists' }); return; }
-  const user = toSessionUser(userRow);
+  const user: SessionUser = { ...toSessionUser(userRow), ...(identity.scope ? { scope: identity.scope } : {}) };
   if (project !== null) {
     const role = roleFor(user, project);
-    if (!atLeast(role, 'view')) { res.status(403).json({ error: `this token's account has no access to project "${project}"` }); return; }
+    if (!atLeast(role, 'view')) { res.status(403).json({ error: scopeRefusal(user, project, 'view') ?? `this token's account has no access to project "${project}"` }); return; }
     if (!fs.existsSync(projectDir(project))) { res.status(404).json({ error: `no project "${project}"` }); return; }
   }
   // the Agent panel's own agent is not an agent "from elsewhere": no entry, no presence, no session

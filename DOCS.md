@@ -1927,8 +1927,27 @@ clientInfo, User-Agent). It exposes these tools:
   local-network permission prompt). Without a local browser (SSH, `--no-browser`) the page shows the
   code to paste instead. `/cli/token` exchanges code + verifier (once, 5 minutes) for a credential
   of the CLI's own (`mcp_tokens`, "OverLyX CLI on <hostname>", revocable in the Git dialog) — good for
-  the git API, git push and the MCP bridge. The installer offers the sign-in right away; scripts still
-  pass the account token (`--with-token`, `OVERLYX_TOKEN`). Document edits are
+  the git API, git push and the MCP bridge — and for plain git: the browser sign-in registers the CLI
+  as git's credential helper for that server (`credential.<server>.helper`: an empty entry first,
+  which drops helpers configured before it for that URL, then `!overlyx auth git-credential`; `get`
+  answers with the stored username and credential), so clones, pulls and pushes in any folder need
+  nothing pasted (`--no-git` opts out, `auth setup-git` later, `auth logout` removes it). The
+  installer offers the sign-in right away; scripts still pass the account token (`--with-token`,
+  `OVERLYX_TOKEN`).
+* **Fine-grained access** (opt-in per account: Settings ▸ Account, `users.settings.fineGrainedAccess`,
+  `POST /api/settings`; off by default, so a sign-in reaches every project of the account): the
+  authorization pages of `overlyx auth login` and of OAuth connections (`server/src/credentialScope.ts`,
+  plain form fields) then offer "All your projects" or "Only these projects" (the CLI passes the
+  project of the clone it runs in as `project`, which is ticked first) and "Read only". The choice is
+  stored on the credential (`mcp_tokens.scope`, JSON `{projects: string[] | null, readonly}`; OAuth
+  carries it through `oauth_codes.access_scope` / `oauth_grants.access_scope` to every rotated token)
+  and comes back from `verifyAccessToken` as `SessionUser.scope`. `access.ts` applies it in `roleFor`
+  and `accessibleProjects` (`withinScope`: other projects → no role, matched by their current key so a
+  moved project stays in; read only → `view`), so git, the CLI API and every MCP tool follow it;
+  creating projects (`POST /git/api/projects`, MCP `create_project`, which is not even listed) needs
+  an unnarrowed credential; refusals say why (`scopeRefusal`). The account token and passwords are
+  never narrowed. Switching the setting off leaves narrowed credentials as they are; the Git dialog
+  lists each credential's reach, `overlyx auth status` prints it. Document edits are
   tracked by default; `edit_document` and `write_document` take `tracked: false` for the same edit
   applied directly (`applyPlainSource` in `server/docedit.ts`: merged three-way like the tracked form,
   so concurrent edits elsewhere and other people's tracked changes survive; pending changes are

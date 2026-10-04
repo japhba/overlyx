@@ -296,8 +296,10 @@ test('the explorer context menu works like VS Code: new folder, duplicate, renam
   const dataDir = process.env.OVERLYX_DATA_DIR;
   if (dataDir) {
     const { readdirSync } = await import('node:fs');
-    const bins = readdirSync(`${dataDir}/trash/files`).filter(n => n.startsWith(PROJECT + '-'));
-    expect(bins.some(b => { try { return readFileSync(`${dataDir}/trash/files/${b}/figures/refs2.bib`, 'utf8') === refContent; } catch { return false; } })).toBe(true);
+    // trash/files/<owner>/<name>-<time>/… (the project key has the owner's namespace in it)
+    const [owner, name] = PROJECT.split('/');
+    const bins = readdirSync(`${dataDir}/trash/files/${owner}`).filter(n => n.startsWith(name + '-'));
+    expect(bins.some(b => { try { return readFileSync(`${dataDir}/trash/files/${owner}/${b}/figures/refs2.bib`, 'utf8') === refContent; } catch { return false; } })).toBe(true);
   }
   await admin.close();
 });

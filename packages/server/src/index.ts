@@ -542,6 +542,12 @@ api.delete('/git/tokens/:id', (req, res) => {
 
 /** The signed-in account's server-side settings (userSettings.ts) — the Settings panel. */
 api.get('/settings', (req, res) => { res.json({ settings: userSettings(req.user!.id) }); });
+/** The settings a user switches for themselves (fineGrainedAccess); token re-copy stays an administrator's. */
+api.post('/settings', (req, res) => {
+  if (req.user!.guest) { res.status(403).json({ error: 'sign in first' }); return; }
+  if (typeof req.body?.fineGrainedAccess !== 'boolean') { res.status(400).json({ error: 'fineGrainedAccess must be a boolean' }); return; }
+  res.json({ settings: setUserSettings(req.user!.id, { fineGrainedAccess: req.body.fineGrainedAccess }) });
+});
 
 /** The account's custom keyboard shortcuts — keybindings.ts on the client syncs them across browsers. */
 api.get('/keys', (req, res) => { res.json({ keys: userKeys(req.user!.id) }); });
