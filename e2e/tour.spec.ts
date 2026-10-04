@@ -52,8 +52,10 @@ test('offered on the first visit; each step notices what the user did; remembere
   await expect(done(page)).toHaveCount(1, { timeout: 20000 });
   await next(page).click();
 
-  // 5. a comment thread on a selection
+  // 5. a comment thread on a selection — of the text, clicked into as a user does: after the clicks on
+  // the tour's buttons the keys did not reach the text in WebKit
   await expect(step(page, 'comment')).toBeVisible();
+  await page.locator('.lyx-editor > .lyx-par.lyx-layout-standard').first().click();
   await page.keyboard.press('Home');
   await page.keyboard.press('Shift+End');
   await page.keyboard.press('Control+Alt+c');

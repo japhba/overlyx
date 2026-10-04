@@ -299,7 +299,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   });
   // sidebars: the documents panel (left: project, its file tree with the documents' outlines) and the right
   // panels; shown / hidden state is kept per browser (a hidden sidebar leaves a rail to bring it back)
-  const [showFiles, setShowFiles] = useState(() => stored('ol.files') !== '0');
+  // (a phone-width screen starts with the documents panel folded into its rail: the panel took 270 of an
+  // iPhone's 393 pixels and left the text a column one letter wide)
+  const [showFiles, setShowFiles] = useState(() => { const v = stored('ol.files'); return v !== null ? v !== '0' : !(typeof matchMedia === 'function' && matchMedia(NARROW_PANES).matches); });
   const [rightTab, setRightTab] = useState<RightTab | null>(() => { const v = stored('ol.right'); return v !== null && (RIGHT_TABS as readonly string[]).includes(v) ? v as RightTab : null; });
   // the LaTeX source is a panel below the writing area with its own switch
   useEffect(() => { try { localStorage.setItem('ol.files', showFiles ? '1' : '0'); localStorage.setItem('ol.right', rightTab ?? ''); } catch { /* ignore */ } }, [showFiles, rightTab]);

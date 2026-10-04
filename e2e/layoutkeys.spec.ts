@@ -9,7 +9,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { login, openDoc, texDoc, PROJECTS_DIR } from './helpers';
+import { login, openDoc, texDoc, PROJECTS_DIR, grantClipboard } from './helpers';
 
 const PROJECT = 'admin/e2e-layoutkeys';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -107,7 +107,7 @@ test('"- ", "1. " and "## " at a paragraph start become a bullet, a numbered ite
 });
 
 test('a formula inserted while tracking changes is coloured as an insertion and lands in \\lyxadded', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await grantClipboard(context);
   await login(page);
   await openDoc(page, `${PROJECT}/ct.tex`);
   await page.waitForTimeout(500);

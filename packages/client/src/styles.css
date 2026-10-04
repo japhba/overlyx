@@ -636,7 +636,8 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .lm-sel { position: absolute; background: rgba(90, 140, 220, 0.28); }
 .lm-corner { position: absolute; box-sizing: border-box; width: 4px; height: 4px; }
 .lm-macro-name { position: absolute; font: 8px/10px system-ui, sans-serif; color: var(--math-arg); background: var(--math-arg-bg); padding: 0 2px; border-radius: 2px; white-space: nowrap; }
-.lm-input { position: absolute; width: 1px; height: 1px; opacity: 0; left: 0; top: 0; padding: 0; border: 0; margin: 0; resize: none; overflow: hidden; pointer-events: none; }
+/* (16px: Safari on an iPhone zooms the page into a focused text field whose letters are smaller — on every tap into a formula) */
+.lm-input { position: absolute; width: 1px; height: 1px; opacity: 0; left: 0; top: 0; padding: 0; border: 0; margin: 0; resize: none; overflow: hidden; pointer-events: none; font-size: 16px; }
 /* an empty cell: a blank of a letter's size in MathJax's layout (core EMPTY_CELL), outlined */
 .lm-empty { box-shadow: inset 0 0 0 1px var(--muted2); border-radius: 1px; }
 /* the boxes of empty cells only while the formula is being edited (its field has the focus; formulas
@@ -740,7 +741,7 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .statusbar .zoom { display: inline-flex; flex-shrink: 0; align-items: center; gap: 1px; margin-left: 4px; }
 .statusbar .zoom-btn { border: 1px solid transparent; background: none; color: var(--ui-fg); width: 18px; height: 18px; line-height: 1; border-radius: 3px; font-size: 13px; padding: 0; cursor: pointer; }
 .statusbar .zoom-btn:hover { background: var(--ui-hover); border-color: var(--ui-border); }
-.statusbar .zoom-select { height: 18px; font-size: 11px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); color: var(--ui-fg); }
+.statusbar .zoom-select { height: 18px; font-size: 11px; padding-block: 0; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); color: var(--ui-fg); }   /* (no vertical padding: Safari's own cut the 18 px box's text off at the bottom) */
 .statusbar .save-state.saved { color: var(--ok); }
 /* the PDF's age in the status bar (app/StatusBar.tsx PdfStatusChip) */
 .statusbar .pdf-status { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; font: inherit; color: var(--ui-muted); background: none; border: 1px solid transparent; border-radius: 3px; padding: 0 6px; line-height: 18px; cursor: pointer; white-space: nowrap; }

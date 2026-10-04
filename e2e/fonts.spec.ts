@@ -31,14 +31,15 @@ async function open(page: Page, prefs?: Record<string, string>) {
 /** the families of the page's fonts that have loaded */
 const loaded = (page: Page) => page.evaluate(async () => { await document.fonts.ready; return [...document.fonts].filter(f => f.status === 'loaded').map(f => f.family.replace(/"/g, '')); });
 const openDialog = (page: Page, name: string) => page.evaluate((n) => (window as any).overlyx.openDialog(n), name);
-const style = (page: Page, sel: string, prop: string) => page.locator(sel).first().evaluate((e, p) => getComputedStyle(e).getPropertyValue(p), prop);
+// font families without their quotes: WebKit leaves them out where a name needs none (CMU Serif, serif), Chromium and Firefox keep them
+const style = (page: Page, sel: string, prop: string) => page.locator(sel).first().evaluate((e, p) => getComputedStyle(e).getPropertyValue(p), prop).then(v => prop === 'font-family' ? v.replace(/"/g, '') : v);
 /** the MathJax font a formula is drawn in: the class of its mjx-math (the font's CSS prefix) */
 const mathClass = (page: Page, sel = '.lyx-editor .lyx-math-inline mjx-math') => page.locator(sel).first().getAttribute('class');
 
 test('Settings ▸ Editor ▸ Text font and Math font: text and formulas switch face independently; the sample shows them', async ({ page }) => {
   const errors = collectErrors(page);
   const foreign = await open(page);
-  expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^"CMU Serif"/);
+  expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^CMU Serif,/);
   // MathJax with New Computer Modern, its woff2 files served with the client
   expect(await page.evaluate(() => document.documentElement.dataset.mathFont)).toBe('newcm');
   expect(await mathClass(page)).toBe('NCM-N');
@@ -53,11 +54,11 @@ test('Settings ▸ Editor ▸ Text font and Math font: text and formulas switch 
   expect(await sample.locator('.sample-display mjx-container').count()).toBe(3);
   expect(await sample.locator('mjx-mover').count()).toBeGreaterThanOrEqual(10);
   await dlg.locator('[data-pref="editorFont"]').selectOption('libertinus');
-  await expect.poll(() => style(page, '.lyx-editor', 'font-family')).toMatch(/^"OLT libertinus"/);
+  await expect.poll(() => style(page, '.lyx-editor', 'font-family')).toMatch(/^OLT libertinus,/);
   // matching: the formulas in STIX Two, the MathJax font closest to Libertinus; the sample too
   await expect.poll(() => mathClass(page)).toBe('STX-N');
   expect(await mathClass(page, '[data-font-sample] mjx-math')).toBe('STX-N');
-  expect(await style(page, '[data-font-sample]', 'font-family')).toMatch(/^"OLT libertinus"/);
+  expect(await style(page, '[data-font-sample]', 'font-family')).toMatch(/^OLT libertinus,/);
   await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining(['OLT libertinus', expect.stringMatching(/^MJX-STX-/)]));
   // the math font on its own: Euler's letters over New Computer Modern — also the Greek, calligraphic
   // and fraktur letters of its blocks loaded on demand (choosing Euler used to hang the page on those)
@@ -66,14 +67,14 @@ test('Settings ▸ Editor ▸ Text font and Math font: text and formulas switch 
   await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^MJX-NE-/)]));
   await expect.poll(() => page.locator('.lyx-editor .lyx-math-inline').nth(1).locator('mjx-c[class*="NE-"]').count(), { timeout: 10000 }).toBe(3);
   expect(await page.locator('.lyx-editor .lm-error').count()).toBe(0);
-  expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^"OLT libertinus"/);
+  expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^OLT libertinus,/);
   const prefs = JSON.parse((await page.evaluate(() => localStorage.getItem('ol.prefs')))!);
   expect([prefs.editorFont, prefs.editorMathFont]).toEqual(['libertinus', 'euler']);
   // the PDF's fonts are untouched
   expect(readFileSync(FILE, 'utf8')).not.toMatch(/libertinus|euler/);
   await dlg.locator('[data-pref="editorFont"]').selectOption('cm');
   await dlg.locator('[data-pref="editorMathFont"]').selectOption('match');
-  await expect.poll(() => style(page, '.lyx-editor', 'font-family')).toMatch(/^"CMU Serif"/);
+  await expect.poll(() => style(page, '.lyx-editor', 'font-family')).toMatch(/^CMU Serif,/);
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.mathFont)).toBe('newcm');
   expect(foreign).toEqual([]);
   expect(errors).toEqual([]);
@@ -112,7 +113,7 @@ test('the sans-serif face: San Francisco where the system has it, formulas in Fi
   const errors = collectErrors(page);
   const foreign = await open(page, { editorFont: 'noto' });
   expect(await page.evaluate(() => document.documentElement.dataset.editorFont)).toBe('sans');
-  expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "SF Pro Display", "OLT fira", sans-serif/);
+  expect(await style(page, '.lyx-editor', 'font-family')).toMatch(/^-apple-system, BlinkMacSystemFont, SF Pro Text, SF Pro, SF Pro Display, OLT fira, sans-serif/);
   await expect.poll(() => mathClass(page)).toBe('FIRA-N');
   // no San Francisco on the test machine: the text is Fira Sans, the formulas Fira Math, both served with the client
   await expect.poll(() => loaded(page)).toEqual(expect.arrayContaining(['OLT fira', expect.stringMatching(/^MJX-FIRA-/)]));

@@ -32,6 +32,17 @@ export async function readClipboard(): Promise<{ images: File[]; html: string; t
 }
 
 /**
+ * A paste event carrying `data`. Firefox's ClipboardEvent constructor leaves clipboardData empty
+ * whatever the init says (the menu's Paste of LaTeX text went in as raw text there, not parsed),
+ * so the data is set on the event itself where the browser did not take it.
+ */
+export function pasteEventWith(data: DataTransfer): ClipboardEvent {
+  const event = new ClipboardEvent('paste', { clipboardData: data });
+  if (event.clipboardData !== data) Object.defineProperty(event, 'clipboardData', { value: data });
+  return event;
+}
+
+/**
  * Paste from a menu or the toolbar (no paste event, so the async clipboard is read): images become
  * graphics insets; everything else takes the same way as Ctrl+V — the HTML an OverLyX copy wrote
  * keeps its insets, and table cells copied from a table (whole rows too) go in cell by cell from
@@ -54,7 +65,7 @@ export async function pasteFromClipboard(view: EditorView): Promise<boolean> {
     const data = new DataTransfer();
     if (clip.text) data.setData('text/plain', clip.text);
     if (clip.html) data.setData('text/html', clip.html);
-    event = new ClipboardEvent('paste', { clipboardData: data });
+    event = pasteEventWith(data);
   } catch { /* no DataTransfer constructor: ProseMirror makes an empty event */ }
   return clip.html ? view.pasteHTML(clip.html, event) : view.pasteText(clip.text, event);
 }

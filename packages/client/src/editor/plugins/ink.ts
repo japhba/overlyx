@@ -182,9 +182,13 @@ export function setInk(patch: InkPatch): void {
 }
 export function subscribeInk(fn: () => void): () => void { subs.add(fn); return () => subs.delete(fn); }
 
-/** Should the drawing toolbar switch itself on? Tablets: a coarse pointer with touch. */
+/**
+ * Should the drawing toolbar switch itself on? Tablets: a coarse pointer with touch — not a phone (as
+ * styles.css tells one: narrow in either orientation), whose page has no margins to draw in and whose
+ * width the toolbar took.
+ */
 export function isTabletClient(): boolean {
-  try { return matchMedia('(any-pointer: coarse)').matches && navigator.maxTouchPoints > 0; } catch { return false; }
+  try { return matchMedia('(any-pointer: coarse)').matches && navigator.maxTouchPoints > 0 && !matchMedia('(max-width: 700px), (max-height: 500px)').matches; } catch { return false; }
 }
 
 export const HIGHLIGHT_OPACITY = 0.35;

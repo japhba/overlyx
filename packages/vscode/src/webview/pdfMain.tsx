@@ -6,7 +6,7 @@
 import { G, vscode, applyTheme } from './globals';
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import * as pdfjs from 'pdfjs-dist';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';   // the same build as PdfViewer (one GlobalWorkerOptions)
 import { api } from '@client/api';
 import { PdfViewer, type PdfTarget } from '@client/app/PdfViewer';
 import { stateFromBuild, jobActive, type PdfState } from '@client/app/PdfPanel';

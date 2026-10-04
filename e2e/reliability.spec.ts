@@ -48,7 +48,7 @@ test('delayed LaTeX paste stays at its original target after moving the cursor',
   await paragraphs.first().click(); await page.keyboard.press('End');
   await page.evaluate(() => {
     const data = new DataTransfer(); data.setData('text/plain', '$x^2$');
-    document.querySelector('.lyx-editor')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    document.querySelector('.lyx-editor')!.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }), 'clipboardData', { value: data }));
   });
   await expect.poll(() => requested).toBe(true);
   await paragraphs.nth(1).click(); await page.keyboard.press('End');

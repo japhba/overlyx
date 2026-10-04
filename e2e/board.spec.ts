@@ -183,6 +183,15 @@ test('two clients see each other: an edit appears live on the other side', async
   } finally { await a.close(); await b.close(); }
 });
 
+test('a board that connects before the page has finished rendering says it is live', async ({ page }) => {
+  // a busy page runs Preact's effects late (after a frame, or a 100 ms timeout): delay both, so that the
+  // connection and its first sync come before the effect that listens for them (WebKit under load)
+  await page.addInitScript(`{ const st = window.setTimeout; window.setTimeout = (f, d, ...a) => st(f, d === 100 ? 1500 : d, ...a); window.requestAnimationFrame = f => st(() => f(performance.now()), 1500); }`);
+  await login(page);
+  await openBoard(page);
+  await expect(page.locator('.board-conn')).toHaveClass(/online/);
+});
+
 test('a board can be created from the file browser', async ({ page }) => {
   await login(page);
   await page.goto(`/#/${PROJECT}/main.tex`);
