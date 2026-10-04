@@ -8,10 +8,10 @@ import { readFileSync } from 'node:fs';
 import { schema } from '../packages/core/src/schema.ts';
 import { editorContext } from '../packages/client/src/editor/context.ts';
 import { CommandView } from '../packages/client/src/editor/nodeviews/leaf.ts';
-import { keepScrollOnFocus } from '../packages/client/src/editor/assembly.ts';
+import { keepScrollOnFocus, caretOutOfWidget } from '../packages/client/src/editor/assembly.ts';
 import { pasteEventWith } from '../packages/client/src/editor/clipmenu.ts';
-import { EditorState } from 'prosemirror-state';
-import { EditorView } from 'prosemirror-view';
+import { EditorState, Plugin, TextSelection } from 'prosemirror-state';
+import { EditorView, Decoration, DecorationSet } from 'prosemirror-view';
 import { idleCallback } from '../packages/client/src/editor/nodeviews/math.ts';
 import { stashPendingImport, takePendingImport, pendingImportFlag } from '../packages/client/src/app/pendingImport.ts';
 
@@ -199,5 +199,44 @@ describe('a paste event made by the menus', () => {
       data.setData('text/plain', '\\section{Pasted}');
       expect(pasteEventWith(data).clipboardData?.getData('text/plain')).toBe('\\section{Pasted}');
     } finally { (globalThis as any).ClipboardEvent = Native; }
+  });
+});
+
+/**
+ * Firefox's Home put the caret inside an uneditable widget at the start of a heading (its fold
+ * toggle), where ProseMirror ignores it: Shift+End then selected nothing and Delete joined the
+ * heading with the next paragraph. The caret is put beside the widget, in the text.
+ */
+describe('a caret inside a widget at the start of a line', () => {
+  const setup = () => {
+    const doc = schema.nodes.doc.create(null, [schema.nodes.paragraph.create(null, schema.text('Intro')), schema.nodes.paragraph.create(null, schema.text('Conclusion'))]);
+    const toggle = Decoration.widget(9, () => { const el = document.createElement('span'); el.className = 'toggle'; el.contentEditable = 'false'; el.innerHTML = '<svg></svg>'; return el; }, { side: -1, ignoreSelection: true });
+    const place = document.createElement('div'); document.body.appendChild(place);
+    const view = new EditorView(place, { state: EditorState.create({ doc, plugins: [new Plugin({ props: { decorations: s => DecorationSet.create(s.doc, [toggle]) } })] }) });
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 19)));   // at the end of "Conclusion"
+    const widget = view.dom.querySelector('.toggle')!;
+    return { view, widget, done: () => { view.destroy(); place.remove(); } };
+  };
+  it('Home that landed in the widget: the caret goes to the start of the text', () => {
+    const { view, widget, done } = setup();
+    getSelection()!.collapse(widget, 0);
+    caretOutOfWidget(view, false);
+    expect([view.state.selection.from, view.state.selection.to]).toEqual([9, 9]);
+    done();
+  });
+  it('with Shift held the selection keeps its anchor', () => {
+    const { view, widget, done } = setup();
+    getSelection()!.collapse(widget, 0);
+    caretOutOfWidget(view, true);
+    expect([view.state.selection.anchor, view.state.selection.head]).toEqual([19, 9]);
+    done();
+  });
+  it('a caret in the text is left alone', () => {
+    const { view, done } = setup();
+    const at = view.domAtPos(12);   // inside "Conclusion"
+    getSelection()!.collapse(at.node, at.offset);
+    caretOutOfWidget(view, false);
+    expect(view.state.selection.from).toBe(19);
+    done();
   });
 });

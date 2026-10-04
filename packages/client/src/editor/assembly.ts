@@ -10,7 +10,7 @@
  * handler added to one shell only is exactly the divergence this file exists to prevent
  * (tests/parity.test.ts checks that neither front end assembles an editor of its own).
  */
-import { Plugin, NodeSelection, type EditorState, type Transaction } from 'prosemirror-state';
+import { Plugin, NodeSelection, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import type { EditorView, EditorProps, NodeView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { gapCursor } from 'prosemirror-gapcursor';
@@ -170,6 +170,27 @@ export interface ViewPropsOptions {
  * movement precedes `selectionchange`; the same goes for a remote update or a decoration-only
  * transaction dispatched between a mouse click and the browser's (asynchronous) event.
  */
+/**
+ * Firefox moves the caret *into* an uneditable widget at the start of a line — Home on a heading put it
+ * in the heading's fold toggle (plugins/fold.ts) — where ProseMirror ignores it: its selection stayed
+ * where it had been, so Shift+End selected nothing and Delete joined the heading with the next
+ * paragraph. The caret is put beside the widget, in the text (`extend`: Shift held, the selection's
+ * anchor stays).
+ */
+export function caretOutOfWidget(view: EditorView, extend: boolean): void {
+  const dom = view.dom.ownerDocument.getSelection();
+  const node = dom?.focusNode;
+  const el = node instanceof Element ? node : node?.parentElement;
+  let widget: Element | null | undefined = el;
+  while (widget && widget !== view.dom && !(widget as unknown as { pmViewDesc?: { widget?: unknown } }).pmViewDesc?.widget) widget = widget.parentElement;
+  if (!widget || widget === view.dom || !view.dom.contains(widget)) return;
+  let pos: number;
+  try { pos = view.posAtDOM(widget, 0); } catch { return; }
+  const { state } = view;
+  const anchor = extend ? state.selection.anchor : pos;
+  try { view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, anchor, pos))); } catch { /* not a text position */ }
+}
+
 export function flushDomSelection(view: EditorView | null | undefined): void {
   try { (view as unknown as { domObserver?: { flush(): void } } | null)?.domObserver?.flush(); } catch { /* the view is closing */ }
 }
@@ -254,7 +275,7 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
       keyup(view, event) {
         // Native arrow movement precedes selectionchange; publish its final position
         // before source mirroring or a decoration update can use the previous caret.
-        if (/^(Arrow|Home$|End$|Page)/.test(event.key)) flushDomSelection(view);
+        if (/^(Arrow|Home$|End$|Page)/.test(event.key)) { caretOutOfWidget(view, event.shiftKey); flushDomSelection(view); }
         return false;
       },
       contextmenu(view, ev) {
