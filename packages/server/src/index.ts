@@ -19,7 +19,8 @@ import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocF
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
-import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
+import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
+import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { snippetSvg, snippetFile } from './snippets.ts';
 import { importLyxFile, parseFragmentText, newLayoutDocumentText } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
@@ -32,6 +33,8 @@ import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, 
 import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
+import { gdocsRoutes } from './gdocs/routes.ts';
+import { startAutoSync } from './gdocs/sync.ts';
 import { ownProjectKey } from './projectCreate.ts';
 import { sandboxAvailable } from './sandbox.ts';
 import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests } from './access.ts';
@@ -94,7 +97,7 @@ app.post('/api/share/:token/accept', (req, res) => {
     }
     const { project, role } = acceptLink(token, user);
     const files = listProjects().find(p => p.name === project.name)?.files ?? [];
-    const lyx = files.filter(f => f.kind === 'doc' && !isBackupFile(f.name)).sort((a, b) => Number(!/(^|\/)main\.tex$/.test(a.path)) - Number(!/(^|\/)main\.tex$/.test(b.path)) || a.path.length - b.path.length || a.path.localeCompare(b.path));
+    const lyx = files.filter(f => f.kind === 'doc' && !isBackupFile(f.name)).sort((a, b) => Number(!/(^|\/)main\.tex$/.test(a.path)) - Number(!/(^|\/)main\.tex$/.test(b.path)) || Number(!a.path.endsWith('.tex')) - Number(!b.path.endsWith('.tex')) || a.path.length - b.path.length || a.path.localeCompare(b.path));
     res.json({ project: project.name, title: project.title, role, doc: lyx[0] ? `${project.name}/${lyx[0].path}` : null, ...(joined ? { user } : {}) });
   } catch (e) { res.status(404).json({ error: (e as Error).message }); }
 });
@@ -172,6 +175,9 @@ api.all('/docs/*', (req, res, next) => {
   req.role = role!;
   next();
 });
+
+// the Google Docs sync (gdocs/): after the document access rules above
+api.use(gdocsRoutes());
 
 /* ---------------------------------------------------------------- projects */
 
@@ -559,13 +565,15 @@ api.post('/projects/:project/new', needProject('edit'), (req, res) => {
   try {
     let rel = String(req.body?.path ?? 'untitled.tex');
     if (rel.endsWith('.lyx')) rel = rel.slice(0, -4) + '.tex';
-    if (!rel.endsWith('.tex')) rel += '.tex';
+    const markdown = isMarkdownPath(rel);
+    if (!rel.endsWith('.tex') && !markdown) rel += '.tex';
     assertWritableRelPath(rel);
     const abs = resolveProjectPath(req.params.project, rel);
     if (fs.existsSync(abs)) { res.status(409).json({ error: 'file exists' }); return; }
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     const layout = typeof req.body?.layout === 'string' ? req.body.layout : null;
-    fs.writeFileSync(abs, layout ? newLayoutDocumentText(req.params.project, rel, layout, { title: req.body?.title, author: req.user?.name }) : newDocumentText({ textclass: req.body?.textclass, title: req.body?.title, author: req.user?.name }), 'utf8');
+    if (markdown) fs.writeFileSync(abs, newMarkdownText(req.body?.title), 'utf8');
+    else fs.writeFileSync(abs, layout ? newLayoutDocumentText(req.params.project, rel, layout, { title: req.body?.title, author: req.user?.name }) : newDocumentText({ textclass: req.body?.textclass, title: req.body?.title, author: req.user?.name }), 'utf8');
     touchProject(req.params.project, req.user!.id);
     res.json({ id: `${req.params.project}/${rel}` });
   } catch (e) { res.status(400).json({ error: String(e) }); }
@@ -716,7 +724,9 @@ api.post('/projects/:project/bib/add', needProject('edit'), async (req, res) => 
 api.put('/projects/:project/text/*', needProject('edit'), (req, res) => {
   try {
     const rel = decodeURIComponent((req.params as any)[0]);
-    if (rel.endsWith('.lyx') || isDocumentFile(req.params.project, rel)) { res.status(400).json({ error: 'Documents are opened as documents, not as text' }); return; }
+    // (a new markdown file may be written as text: it is a document once it exists)
+    const newMarkdown = isMarkdownPath(rel) && !fs.existsSync(resolveProjectPath(req.params.project, rel));
+    if (rel.endsWith('.lyx') || (!newMarkdown && isDocumentFile(req.params.project, rel))) { res.status(400).json({ error: 'Documents are opened as documents, not as text' }); return; }
     assertWritableRelPath(rel);
     const abs = resolveProjectPath(req.params.project, rel);
     const text = req.body?.text;
@@ -867,6 +877,7 @@ api.get('/docs/*/meta', async (req, res) => {
     bibIndex.set(id, { files: [...bibFiles].map(f => safe(f.endsWith('.bib') ? f : f + '.bib')).filter((x): x is string => !!x), fallbackProject: bibFiles.size ? null : doc.project });
     res.json({
       id, project: doc.project, path: doc.relPath, master: m.master,
+      format: m.format,
       role: req.role ?? 'edit',
       labels: m.labels,
       textclass: m.textclass, modules: m.modules,
@@ -1363,6 +1374,7 @@ const server = http.createServer(app);
 attachWebSocket(server);
 
 server.listen(config.port, config.host, () => {
+  startAutoSync();
   console.log(`OverLyX server listening on http://${config.host}:${config.port}  (projects: ${config.projectsDir}, data: ${config.dataDir}, document workers: ${docWorkers.enabled ? docWorkers.size : 'none'})`);
   docWorkers.warm();
 });

@@ -9,6 +9,7 @@ import { parseTex, writeTex, writeTexPreserving, importLyx, type ParseTexResult,
 import type { LyxDocument } from '@overlyx/core';
 import { layoutTemplate, setHeaderValue } from '@overlyx/core';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
+import { parseMarkdown, writeMarkdown, writeMarkdownPreserving, isMarkdownPath, markdownForLatex, type MarkdownPreserveCache } from '@overlyx/core/md/index.ts';
 import { config } from './config.ts';
 import { projectDir, findMaster, resolveProjectPath } from './projectfiles.ts';
 
@@ -51,6 +52,8 @@ export function masterHeaderFor(project: string, relPath: string, depth = 0): st
 }
 
 export function parseDocumentText(text: string, project: string, relPath: string, depth = 0): ParseTexResult {
+  // a markdown document: no preamble of its own (written as a fragment), no master
+  if (isMarkdownPath(relPath)) { const r = parseMarkdown(text); return { doc: r.doc, warnings: r.warnings, fragment: true, sources: r.parSpans, bodyRange: null }; }
   const abs = resolveProjectPath(project, relPath);
   const opts = { layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs) };
   const first = parseTex(text, opts);
@@ -65,12 +68,21 @@ export function parseFragmentText(latex: string, project: string, relPath: strin
   return parseTex(latex, { layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs), masterHeader });
 }
 
+/** a markdown document's parse of the file text between saves (the counterpart of the .tex PreserveCache) */
+const mdCaches = new WeakMap<PreserveCache, MarkdownPreserveCache>();
+
 /**
  * The document as .tex text. With `preserve`, written into the text the file holds now (`base`):
  * what did not change keeps its LaTeX byte for byte (core tex/preserve.ts), so a save shows in
  * `git diff` as the paragraphs that were edited, not as a reformatted file.
  */
 export function writeDocumentText(doc: LyxDocument, project: string, relPath: string, fragment: boolean, resolveInclude?: (filename: string) => LyxDocument | undefined, preserve?: { base: string | null; cache?: PreserveCache }): { text: string; warnings: string[]; files: Record<string, string>; spans: WriteTexResult['spans'] } {
+  if (isMarkdownPath(relPath)) {
+    let cache: MarkdownPreserveCache | undefined;
+    if (preserve?.cache) { cache = mdCaches.get(preserve.cache); if (!cache) mdCaches.set(preserve.cache, cache = {}); }
+    const r = preserve ? writeMarkdownPreserving(doc, preserve.base, cache) : writeMarkdown(doc);
+    return { text: r.text, warnings: r.warnings, files: {}, spans: r.spans };
+  }
   const abs = resolveProjectPath(project, relPath);
   const opts = {
     layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs),
@@ -96,10 +108,16 @@ export function readTextFile(absPath: string): string {
   }
 }
 
-/** Does the text look like something we may write back as a document? */
+/** Does the text look like something we may write back as a document? (A markdown document is a fragment: any text.) */
 export function looksLikeDocument(text: string, fragment: boolean): boolean {
   if (fragment) return !text.includes('\0');
   return /\\begin\{document\}/.test(text) && /\\end\{document\}/.test(text);
+}
+
+/** A markdown document as a complete .tex file (its PDF is built from it; core md/latex.ts). */
+export function markdownAsTex(doc: LyxDocument, project: string, relPath: string): string {
+  const abs = resolveProjectPath(project, relPath);
+  return writeTex(markdownForLatex(doc), { layoutDir: config.layoutDir, localDirs: [projectDir(project), path.dirname(abs)], readFile: readerFor(project, abs), basename: path.basename(relPath).replace(/\.[^.]+$/, '') }).text;
 }
 
 /* -------------------------------------------------------------- import */

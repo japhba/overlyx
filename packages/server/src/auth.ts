@@ -7,6 +7,7 @@ import { db, pickColor, type UserRow } from './db.ts';
 import { config, JWT_SECRET } from './config.ts';
 import { adoptGuest, bindInvitations, isInvited } from './access.ts';
 import { notifySignup } from './mailer.ts';
+import { isDriveCallback, finishConnect } from './gdocs/google.ts';
 
 export interface SessionUser {
   id: number; username: string; name: string; color: string; isAdmin: boolean; avatar?: string | null; email?: string | null;
@@ -192,6 +193,8 @@ export function authRouter(hooks: AuthHooks = {}): Router {
   r.get('/google/callback', async (req, res) => {
     try {
       const cookies = parseCookie(req.headers.cookie ?? '');
+      // connecting Google Drive (the Google Docs sync) comes back through the sign-in's redirect address
+      if (isDriveCallback(req.query.state, cookies as Record<string, string>)) { await finishConnect(req, res, cookies as Record<string, string>); return; }
       if (!req.query.state || req.query.state !== cookies.ol_oauth_state) { res.status(400).send('bad state'); return; }
       const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',

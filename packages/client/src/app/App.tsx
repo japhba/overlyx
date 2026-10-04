@@ -2,6 +2,7 @@ import { recordUsage, noticeTemplate } from '../usage';
 import { editorViewMenu } from './editorViewMenu';
 import { inkToolbar } from './inkToolbar';
 import { StatsDialog } from './StatsDialog';
+import { GoogleDocsDialog } from './GoogleDocs';
 import { documentMenus } from './documentMenus';
 import { referenceTransaction } from '../editor/references';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'preact/hooks';
@@ -15,10 +16,10 @@ import { DocPanel } from './DocPanel';
 import { Home, projectDocs, ProjectRootPanel } from './Home';
 import { pendingImportFlag } from './pendingImport';
 import { TextEditor } from './TextEditor';
+import { isMarkdownDoc } from '../editor/markdown';
 import { PaneSwitch } from './PaneSwitch';
 import { EditModeSwitch, editModeOf, applyEditMode } from './EditModeSwitch';
 import { loadLayout, saveLayout, setPaneShown, togglePane, visiblePanes, resizeBetween, paneGrow, type PaneId, type PaneLayout } from './panes';
-import { MarkdownEditor } from './MarkdownEditor';
 import { ShareDialog } from './Share';
 import { GuestCallout } from './Guest';
 import { GitDialog } from './Git';
@@ -153,7 +154,9 @@ function parseHash(): { id: string | null; goto: string | null; heading: number 
   if (idPart.startsWith('share/')) return { id: null, goto: null, heading: null, share: idPart.slice('share/'.length) };
   const params = q >= 0 ? new URLSearchParams(raw.slice(q + 1)) : null;
   const h = params?.get('heading');
-  return { id: idPart || null, goto: params?.get('goto') ?? null, heading: h !== null && h !== undefined && /^\d+$/.test(h) ? Number(h) : null, share: null };
+  // markdown files opened in the plain text editor before they were documents: links stay valid
+  const id = idPart.startsWith('text:') && isMarkdownDoc(idPart) ? idPart.slice(5) : idPart;
+  return { id: id || null, goto: params?.get('goto') ?? null, heading: h !== null && h !== undefined && /^\d+$/.test(h) ? Number(h) : null, share: null };
 }
 
 /**
@@ -265,12 +268,12 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
   };
-  // .tex documents open in the collaborative editor, other text files in a plain text editor (ids
-  // prefixed with "text:"), a project's PDF files in the PDF viewer ("pdf:")
+  // .tex and markdown documents open in the collaborative editor, other text files in a plain text
+  // editor (ids prefixed with "text:"), a project's PDF files in the PDF viewer ("pdf:")
   const isTextTab = !!docId && docId.startsWith('text:');
   const isPdfTab = !!docId && docId.startsWith('pdf:');
   const textId = docId ? docId.replace(/^(text|pdf):/, '') : null;
-  const isLyxDoc = !!docId && !isTextTab && docId.endsWith('.tex');
+  const isLyxDoc = !!docId && !isTextTab && !isPdfTab && (docId.endsWith('.tex') || isMarkdownDoc(docId));
   const isBoardTab = !!docId && !isTextTab && !isPdfTab && docId.endsWith('.board');
   // a bare project link (`#/owner/project`, no file): a brand-new project has nowhere else to send
   // you yet. Shown as a small landing in the editor area (its file tree is already the left sidebar)
@@ -1122,6 +1125,15 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     ],
     reloadMetadata: () => { if (docId) api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); notify('Metadata reloaded'); }); },
   });
+  // back from Google's consent screen (File ▸ Google Docs… ▸ Connect): the dialog again, with what happened
+  useEffect(() => {
+    const m = /[?&]gdocs=([^&]*)/.exec(location.hash);
+    if (!m || !docId) return;
+    const what = decodeURIComponent(m[1]);
+    history.replaceState(null, '', location.pathname + location.search + location.hash.replace(/[?&]gdocs=[^&]*/, ''));
+    if (what !== 'connected') notify(what, 'error');
+    setDialog({ name: 'gdocs' });
+  }, [docId]);
   const menus: MenuDef[] = [...(isProjectRoot ? projectRootMenus : docId && !isLyxDoc ? textFileMenus : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
@@ -1149,6 +1161,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       ] },
       { label: 'Versions…', action: () => setRightTab('versions') },
       { label: 'Share project…', action: () => setShareFor(projectOfDoc(docId)) },
+      { label: 'Google Docs (sync, comments)…', action: () => setDialog({ name: 'gdocs' }) },
       { label: 'Git repository…', action: () => setGitFor(projectOfDoc(docId)) },
       { sep: true },
       { label: 'Close (back to the projects)', action: closeDoc },
@@ -1358,6 +1371,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
       case 'airepair': return docId ? <AiRepairDialog docId={docId} onClose={close} onApplied={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; })} /> : null;
       case 'stats': return view ? <StatsDialog view={view} onClose={close} /> : null;
+      case 'gdocs': return docId ? <GoogleDocsDialog docId={docId} onClose={close} notify={notify} /> : null;
       case 'tex': return <TexDialog tex={String(dialog.arg ?? '')} onClose={close} />;
       case 'layout': return <LayoutPicker layouts={layouts} onClose={close} onPick={n => run(C.setLayout(n))} />;
       case 'argument': { run(C.insertArgument(String(dialog.arg ?? '1'))); setDialog(null); return null; }
@@ -1416,7 +1430,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         users={isLyxDoc ? status.users : undefined} onJumpToUser={jumpToUser}
         onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? projectShortName(shareProject)}”: invite people or turn on a link` : undefined}
         onSignIn={user.guest ? signIn : undefined}
-        primary={isLyxDoc && <PaneSwitch layout={panes} onChange={changePanes} narrow={narrowPanes} />}
+        primary={isLyxDoc && <PaneSwitch layout={panes} onChange={changePanes} narrow={narrowPanes} markdown={isMarkdownDoc(docId)} />}
         right={docId && <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span>} />
       {user.guest && <GuestCallout user={user} project={curProject} google={google} onSignIn={signIn} />}
       {/* the mode switch (Editing · Suggesting · Viewing) ends the first toolbar row, as in Google Docs */}
@@ -1491,7 +1505,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')} ref={columnRef}>
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
-          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? (/\.(md|markdown)$/i.test(textId!) ? <MarkdownEditor key={docId} id={textId!} notify={notify} /> : <TextEditor key={docId} id={textId!} notify={notify} />) :
+          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (

@@ -52,6 +52,8 @@ export interface AiCompleteRequest { kind: 'text' | 'math'; before: string; afte
 export interface AiCompleteResult { text: string; nodes: PMJSON[] }
 export interface DocMeta {
   availableModules?: import('@overlyx/core').ModuleInfo[];
+  /** what the file is written as (a markdown document offers only what markdown can hold) */
+  format?: 'tex' | 'markdown';
   id: string; project: string; path: string; role?: Role; textclass: string; modules: string[]; language: string;
   useRefstyle: boolean; citeEngine: string; citeEngineType: string; trackingChanges: boolean; secnumdepth: number; tocdepth: number;
   /** number of entries in the bibliography (meta.bib only holds the cited ones when it is large) */
@@ -153,6 +155,9 @@ async function req<T>(method: string, url: string, body?: unknown, raw?: BodyIni
 }
 
 export const encId = (id: string) => encodeURIComponent(id);
+
+export interface GdocsLink { fileId: string; url: string; auto: boolean; lastSync: number | null; lastError: string | null; linkedBy: number }
+export interface GdocsStatus { configured: boolean; account: { email: string | null } | null; link: GdocsLink | null; canEdit: boolean; guest: boolean }
 
 /** keys of the projects the server listed for this user (a link naming one needs no resolveId) */
 export const knownProjects = new Set<string>();
@@ -288,6 +293,13 @@ export const api = {
   synctexEdit: (id: string, page: number, x: number, y: number) => req<{ file?: string; line: number | null; column?: number }>('GET', `/api/docs/${encId(id)}/synctex/edit?page=${page}&x=${x.toFixed(2)}&y=${y.toFixed(2)}`),
   /** a layout document's text boxes as TeX set them in the last build (the editor's check against the PDF) */
   layoutCheck: (id: string) => req<LayoutCheck>('GET', `/api/docs/${encId(id)}/layoutcheck`),
+  // the Google Docs sync (server gdocs/)
+  gdocsStatus: (id: string) => req<GdocsStatus>('GET', `/api/gdocs/status?doc=${encId(id)}`),
+  gdocsLink: (id: string, title: string) => req<{ link: GdocsLink }>('POST', `/api/docs/${encId(id)}/gdocs/link`, { title }),
+  gdocsSync: (id: string) => req<{ link: GdocsLink; report: { pulled: number; pushed: number; comments: { fromGoogle: number; toGoogle: number }; warnings: string[] } }>('POST', `/api/docs/${encId(id)}/gdocs/sync`),
+  gdocsAuto: (id: string, auto: boolean) => req<{ link: GdocsLink }>('POST', `/api/docs/${encId(id)}/gdocs/auto`, { auto }),
+  gdocsUnlink: (id: string) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/gdocs/unlink`),
+  gdocsDisconnect: () => req<{ ok: boolean }>('POST', '/api/gdocs/disconnect'),
   build: (id: string, withTex = false) => req<{ build: BuildInfo | null; job: BuildJob | null; /** the server's clock */ now?: number }>('GET', `/api/docs/${encId(id)}/build${withTex ? '?tex=1' : ''}`),
   users: () => req<{ users: AdminUser[] }>('GET', '/api/users'),
   createUser: (username: string, name: string, password?: string) => req<{ user: User; password: string }>('POST', '/api/users', { username, name, password }),

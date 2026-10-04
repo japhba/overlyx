@@ -10,6 +10,7 @@ import {
   type LyxDocument,
 } from '@overlyx/core';
 import { loadDocumentClass, applyDocumentTheorems, describeLayouts, describeModules, flexInsetNames } from '@overlyx/core/latex/layouts.ts';
+import { isMarkdownPath, MARKDOWN_LAYOUTS } from '@overlyx/core/md/index.ts';
 import { collectFiles, findMaster, isBackupFile, readTextFile } from './project.ts';
 import { cachedParseFile, type TexContext } from './texdoc.ts';
 
@@ -90,6 +91,7 @@ function scanBib(ctx: TexContext, relPath: string, rootLyx: LyxDocument, alsoDoc
 export function buildMeta(input: MetaInput): Record<string, unknown> {
   const { ctx, project, relPath, lyx, isChild } = input;
   const proj = ctx.root;
+  const markdown = isMarkdownPath(relPath);
   const masterRel = isChild ? findMaster(proj, relPath) : null;
   const masterId = masterRel ? `${project}/${masterRel}` : null;
   const readDoc = (rel: string): LyxDocument => cachedParseFile(ctx, rel).doc;
@@ -143,13 +145,16 @@ export function buildMeta(input: MetaInput): Record<string, unknown> {
     const userPre = ps >= 0 && pe > ps ? L.slice(ps + 1, pe).join('\n') : '';
     const dc = applyDocumentTheorems(loadDocumentClass(getTextClass(rootLyx), getModules(rootLyx), ctx.layoutDir, [proj, docDir]), userPre, ctx.layoutDir, [proj, docDir]);
     layouts = describeLayouts(dc);
+    // a markdown document: only the blocks markdown has (editor/markdown.ts in the client)
+    if (markdown && Array.isArray(layouts)) layouts = (layouts as { name: string }[]).filter(l => MARKDOWN_LAYOUTS.includes(l.name));
     flexInsets = dc.insetLayouts ? flexInsetNames(dc) : null;
   } catch { layouts = null; }
 
-  const health = input.fileText === null ? [] : checkTexHealth(input.fileText, { isFragment: isChild });
+  const health = input.fileText === null || markdown ? [] : checkTexHealth(input.fileText, { isFragment: isChild });
 
   return {
     id: `${project}/${relPath}`, project, path: relPath, master: masterId,
+    format: markdown ? 'markdown' : 'tex',
     role: 'edit',
     labels,
     textclass: getTextClass(rootLyx), modules: getModules(rootLyx),

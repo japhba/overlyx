@@ -5,9 +5,10 @@ import { EditorState, TextSelection } from 'prosemirror-state';
 import { lyxToPm, schema } from '@overlyx/core';
 import { parseTex } from '../packages/core/src/tex/index.ts';
 import { envFocusPlugin, envFocusKey, editingTables } from '../packages/client/src/editor/plugins/envfocus.ts';
+import { LYX_LAYOUTS } from './lyxlib';
 
 const doc = () => {
-  const r = parseTex('Before.\n\n\\begin{tabular}{cc}\na & \\\\\n & d\n\\end{tabular}\n\nAfter.\n', { layoutDir: path.resolve('lyx/lib/layouts'), localDirs: [] });
+  const r = parseTex('Before.\n\n\\begin{tabular}{cc}\na & \\\\\n & d\n\\end{tabular}\n\nAfter.\n', { layoutDir: LYX_LAYOUTS, localDirs: [] });
   return schema.nodeFromJSON(lyxToPm(r.doc));
 };
 

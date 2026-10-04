@@ -1651,29 +1651,6 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .ai-panel .ai-model { max-width: 130px; font-size: 11px; background: var(--page-bg); color: var(--ui-muted); border: 1px solid var(--ui-border); border-radius: 5px; padding: 1px 2px; flex: none; }
 .ai-panel .ai-src { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; margin: 0; }
 
-/* Markdown WYSIWYG editor (.md files): headings at their real sizes as you type */
-.md-editor { max-width: 860px; margin: 0 auto; padding: 10px 18px 40px; }
-.md-editor.as-source { position: relative; max-width: none; padding: 0; }
-.md-editor.as-source .md-mode { position: absolute; top: 6px; right: 14px; z-index: 5; }
-.md-bar { display: flex; align-items: center; gap: 10px; padding: 4px 2px 8px; border-bottom: 1px solid var(--ui-border); margin-bottom: 10px; }
-.md-bar .name { font-weight: 600; }
-.md-bar .save-state { color: var(--ui-muted); font-size: 12px; }
-.md-bar .save-state.s-conflict, .md-bar .save-state.s-error { color: indianred; }
-.md-host .ProseMirror { outline: none; line-height: 1.55; font-size: 15px; min-height: 60vh; white-space: pre-wrap; }
-.md-host .ProseMirror h1 { font-size: 2em; font-weight: 700; margin: 0.8em 0 0.4em; line-height: 1.25; }
-.md-host .ProseMirror h2 { font-size: 1.55em; font-weight: 700; margin: 0.8em 0 0.35em; line-height: 1.3; }
-.md-host .ProseMirror h3 { font-size: 1.25em; font-weight: 600; margin: 0.7em 0 0.3em; }
-.md-host .ProseMirror h4 { font-size: 1.1em; font-weight: 600; margin: 0.6em 0 0.25em; }
-.md-host .ProseMirror h5, .md-host .ProseMirror h6 { font-size: 1em; font-weight: 600; margin: 0.5em 0 0.2em; color: var(--ui-muted); }
-.md-host .ProseMirror p { margin: 0.45em 0; }
-.md-host .ProseMirror code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--ui-bg2); border-radius: 4px; padding: 0 3px; }
-.md-host .ProseMirror pre { font-family: ui-monospace, monospace; font-size: 13px; background: var(--ui-bg2); border: 1px solid var(--ui-border); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
-.md-host .ProseMirror pre code { background: none; padding: 0; }
-.md-host .ProseMirror blockquote { border-left: 3px solid var(--ui-border); margin: 0.5em 0; padding: 0.1em 0 0.1em 12px; color: var(--ui-muted); }
-.md-host .ProseMirror ul, .md-host .ProseMirror ol { padding-left: 1.5em; margin: 0.4em 0; }
-.md-host .ProseMirror a { color: var(--accent); }
-.md-host .ProseMirror hr { border: none; border-top: 1px solid var(--ui-border); margin: 1.2em 0; }
-.md-host .ProseMirror img { max-width: 100%; }
 
 /* a word the autocorrecter just fixed flashes briefly */
 .ol-autocorrected { border-radius: 2px; animation: ol-autocorrect-fade 2.2s ease-out forwards; }
@@ -2164,17 +2141,23 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .lyx-editor.ol-layout.ol-has-rail { padding-left: var(--ol-rail-w, 0px); box-sizing: border-box; }
 .ol-slide-rail { position: absolute; z-index: 6; width: 196px; display: flex; flex-direction: column; box-sizing: border-box; background: var(--surface2); border-right: 1px solid var(--ui-border); font: 12px/1.3 var(--ui-font); color: var(--ui-fg); user-select: none; -webkit-user-select: none; }
 .ol-slide-rail.collapsed { width: 26px; }
-.ol-slide-rail.collapsed > :not(.ol-rail-show), .ol-slide-rail:not(.collapsed) > .ol-rail-show { display: none; }
+.ol-slide-rail.collapsed > :not(.ol-rail-show):not(.ol-rail-mini), .ol-slide-rail:not(.collapsed) > .ol-rail-show, .ol-slide-rail:not(.collapsed) > .ol-rail-mini { display: none; }
+.ol-rail-mini { flex: none; height: 30px; padding: 0; border: none; border-bottom: 1px solid var(--ui-border2); background: none; color: var(--ui-muted); }
+.ol-rail-mini svg { fill: currentColor; }
+.ol-rail-mini:hover { color: var(--ui-fg); background: var(--ui-hover); }
 .ol-rail-show { flex: 1; writing-mode: vertical-rl; border: none; background: none; color: var(--ui-muted); padding: 12px 0; font: inherit; cursor: pointer; }
 .ol-rail-show:hover { color: var(--ui-fg); background: var(--ui-hover); }
 .ol-rail-head { display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 12px; border-bottom: 1px solid var(--ui-border2); }
 .ol-rail-title { font-weight: 600; }
-.ol-rail-count { margin-left: auto; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.ol-rail-count { margin-right: auto; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ol-rail-hide { width: 22px; height: 22px; padding: 0; border: none; border-radius: 4px; background: none; color: var(--ui-muted); }
 .ol-rail-notes { height: 20px; padding: 0 6px; border: 1px solid var(--ui-border); border-radius: 10px; background: none; color: var(--ui-muted); font: 11px var(--ui-font); }
 .ol-rail-notes:hover { color: var(--ui-fg); border-color: var(--active-border); }
 .ol-rail-notes.active { background: var(--active-bg); border-color: var(--active-border); color: var(--ui-fg); }
 .ol-rail-hide:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.ol-rail-sorter { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: none; border-radius: 4px; background: none; color: var(--ui-muted); }
+.ol-rail-sorter svg { fill: currentColor; }
+.ol-rail-sorter:hover { background: var(--ui-hover); color: var(--ui-fg); }
 .ol-rail-list { position: relative; flex: 1; min-height: 0; overflow: hidden auto; padding: 8px 0 12px; outline: none; scrollbar-width: thin; }
 .ol-rail-item { position: relative; display: flex; align-items: flex-start; gap: 6px; padding: 5px 8px 5px 4px; cursor: pointer; }
 .ol-rail-num { flex: none; width: 20px; padding-top: 1px; text-align: right; font-size: 11px; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
@@ -2208,3 +2191,70 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .ol-rail-layout svg .p { fill: #fff; stroke: var(--ui-border); }
 .ol-rail-layout svg .t { fill: var(--accent); }
 .ol-rail-layout svg .l { fill: var(--muted2); }
+
+/* ------------------------------------------------------------ the slide sorter (editor/layout/sorter.ts)
+   PowerPoint's View ▸ Slide Sorter: every slide as a card, over the canvas and the rail */
+.ol-sorter { position: absolute; z-index: 8; display: flex; flex-direction: column; box-sizing: border-box; background: var(--canvas-bg, #e7e8ea); font: 12px/1.3 var(--ui-font); color: var(--ui-fg); user-select: none; -webkit-user-select: none; }
+.ol-sorter-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 14px; background: var(--surface2); border-bottom: 1px solid var(--ui-border); }
+.ol-sorter-title { font-weight: 600; font-size: 13px; }
+.ol-sorter-info { color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.ol-sorter-size { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.ol-sorter-size input { width: 120px; accent-color: var(--accent); }
+.ol-sorter-size-icon { display: inline-block; box-sizing: border-box; border: 1.5px solid var(--ui-muted); border-radius: 2px; }
+.ol-sorter-size-icon.small { width: 9px; height: 7px; }
+.ol-sorter-size-icon.large { width: 15px; height: 11px; }
+.ol-sorter-present, .ol-sorter-done { padding: 4px 12px; border: 1px solid var(--ui-border); border-radius: 5px; background: var(--surface); color: var(--ui-fg); font: inherit; }
+.ol-sorter-present:hover { background: var(--row-hover); border-color: var(--accent-border); }
+.ol-sorter-done { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.ol-sorter-done:hover { filter: brightness(1.08); }
+.ol-sorter-grid { position: relative; flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, var(--card-w)); justify-content: center; align-content: start; gap: 24px 26px; padding: 24px 28px 64px; outline: none; }
+.ol-sorter-card { position: relative; width: var(--card-w); cursor: pointer; touch-action: none; }
+.ol-sorter-thumb { border-radius: 4px; overflow: hidden; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.06); transition: box-shadow 0.1s; }
+.ol-sorter-clip { position: relative; overflow: hidden; }
+.ol-sorter-card:hover .ol-sorter-thumb { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 0 2px var(--active-border); }
+.ol-sorter-card.selected .ol-sorter-thumb { box-shadow: 0 0 0 3px var(--accent); }
+.ol-sorter-grid:focus-visible .ol-sorter-card.focused .ol-sorter-thumb { box-shadow: 0 0 0 3px var(--accent), 0 0 0 6px var(--accent-border); }
+.ol-sorter-card.dragging { opacity: 0.35; }
+.ol-sorter.dragging, .ol-sorter.dragging * { cursor: grabbing; }
+.ol-sorter-meta { display: flex; align-items: baseline; gap: 6px; min-width: 0; margin-top: 7px; }
+.ol-sorter-num { flex: none; font-weight: 600; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.ol-sorter-card.selected .ol-sorter-num { color: var(--accent); }
+.ol-sorter-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ol-sorter-badges { display: inline-flex; flex: none; gap: 4px; }
+.ol-sorter-badges .b { padding: 0 6px; border-radius: 8px; background: var(--ui-bg2); color: var(--ui-muted); font-size: 10.5px; line-height: 16px; white-space: nowrap; }
+.ol-sorter-add { width: var(--card-w); height: var(--card-h); box-sizing: border-box; border: 2px dashed var(--ui-border); border-radius: 6px; background: transparent; color: var(--ui-muted); font: 600 13px var(--ui-font); }
+.ol-sorter-add:hover, .ol-sorter-add:focus-visible { border-color: var(--accent); color: var(--accent); background: var(--surface); outline: none; }
+.ol-sorter-drop { position: absolute; z-index: 2; width: 4px; border-radius: 2px; background: var(--accent); display: none; pointer-events: none; }
+.ol-sorter-ghost { position: absolute; z-index: 12; padding: 4px 11px; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 600; white-space: nowrap; pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); }
+@media (max-width: 600px) { .ol-sorter-grid { padding: 16px 12px 48px; gap: 18px 14px; } .ol-sorter-size input { width: 80px; } }
+
+/* Markdown documents (.md, editor/markdown.ts): what LyX draws the LaTeX way, as markdown renders it —
+   a rule across the column, a quote with a bar, code on a tinted ground, a bold header row, task boxes */
+.lyx-editor[data-doc-id$=".md" i] .lyx-line, .lyx-editor[data-doc-id$=".markdown" i] .lyx-line {
+  display: inline-block; width: 100%; height: 0; border-top: 1.5px solid color-mix(in srgb, var(--editor-fg) 28%, transparent); color: transparent; overflow: hidden; vertical-align: middle; }
+.lyx-editor[data-doc-id$=".md" i] .lyx-layout-quote, .lyx-editor[data-doc-id$=".markdown" i] .lyx-layout-quote {
+  margin: 0.5em 0; padding-left: 0.9em; border-left: 3px solid color-mix(in srgb, var(--editor-fg) 22%, transparent); color: color-mix(in srgb, var(--editor-fg) 75%, transparent); }
+.lyx-editor[data-doc-id$=".md" i] .lyx-family-typewriter, .lyx-editor[data-doc-id$=".markdown" i] .lyx-family-typewriter {
+  background: var(--code-bg); border-radius: 3px; padding: 0 0.15em; }
+.lyx-editor[data-doc-id$=".md" i] tr:first-child > .lyx-cell, .lyx-editor[data-doc-id$=".markdown" i] tr:first-child > .lyx-cell { font-weight: 600; }
+.md-task-box { display: inline-flex; align-items: center; justify-content: center; width: 0.95em; height: 0.95em; margin-right: 0.35em; vertical-align: -0.1em;
+  border: 1.5px solid color-mix(in srgb, var(--editor-fg) 55%, transparent); border-radius: 3px; cursor: pointer; font-size: 0.8em; line-height: 1; user-select: none; }
+.md-task-box.done { background: var(--accent); border-color: var(--accent); color: white; }
+.md-task-box.done::after { content: '✓'; }
+.md-task-src { font-size: 0; letter-spacing: 0; }
+.md-task-done-text { text-decoration: line-through; color: color-mix(in srgb, var(--editor-fg) 55%, transparent); }
+
+/* a deck shows one slide at a time (editor/layout/controller.ts syncShownPage), in the middle of the window */
+.lyx-editor.ol-layout.ol-single > .ol-page-wrap:not(.ol-shown) { display: none; }
+.lyx-editor.ol-layout.ol-single > .ol-page-wrap.ol-shown { margin-top: var(--ol-single-top, 0px); margin-bottom: var(--ol-single-bottom, 0px); }
+.lyx-editor.ol-layout.ol-single.ol-show-notes > .ol-page-wrap.ol-shown { margin-bottom: calc(110px + var(--ol-single-bottom, 0px)); }
+.editor-page:has(.lyx-editor.ol-layout.ol-single) { padding-bottom: 34px; }
+
+/* File ▸ Google Docs… (app/GoogleDocs.tsx) */
+.gdocs-dialog { max-width: 460px; display: flex; flex-direction: column; gap: 8px; }
+.gdocs-dialog p { margin: 0; }
+.gdocs-dialog .row { display: flex; align-items: center; gap: 6px; }
+.gdocs-dialog .row input:not([type]) { flex: 1; }
+.gdocs-dialog .buttons-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gdocs-dialog .error { color: indianred; }
+.gdocs-dialog button.primary { align-self: flex-start; }

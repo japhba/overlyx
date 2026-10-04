@@ -13,14 +13,15 @@
  */
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { undo, redo, yUndoPluginKey } from 'y-prosemirror';
+import { undo, redo } from 'y-prosemirror';
 import { PAGE_TRANSITIONS } from '@overlyx/core';
 import * as L from './commands';
-import { clean } from './beamerslides';
 import { showContextMenu, closeContextMenu, type MenuItem } from '../contextmenu';
 import { MOD } from '../clipmenu';
 import { startPresentation } from './present';
 import { SLIDE_LAYOUTS, insertSlide, type SlideLayout } from './slidelayouts';
+import { SlideSorter } from './sorter';
+import { div, button, drawPage, scaleThumb, layoutPicker, undoStep, getSlideClipboard, setSlideClipboard, pageOfMutation, livePos } from './slidekit';
 
 export interface RailHost {
   page(): { w: number; h: number };
@@ -36,23 +37,10 @@ export interface RailHost {
 }
 
 const RAIL_W = 196, RAIL_COLLAPSED_W = 26;
-/** the width a page is drawn at before it is scaled into its thumbnail */
-const DRAW_W = 320;
+const GRID_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.5" y="2" width="5.5" height="4" rx="0.8"/><rect x="9" y="2" width="5.5" height="4" rx="0.8"/><rect x="1.5" y="9.5" width="5.5" height="4" rx="0.8"/><rect x="9" y="9.5" width="5.5" height="4" rx="0.8"/></svg>';
 const STORE = 'ol.slides';
-/** selection and editing marks of objects: not a change of the page's look */
-const UI_CLASSES = new Set(['ol-sel', 'ol-edited', 'ol-selatom', 'ProseMirror-selectednode', 'focused', 'ol-hover']);
-
-/** whole pages copied with Ctrl+C in a rail (any document of this tab) */
-let slideClipboard: PMNode[] = [];
 
 interface Item { el: HTMLElement; num: HTMLElement; clip: HTMLElement; wrap: HTMLElement | null; pos: number; node: PMNode }
-
-const div = (cls: string) => { const d = document.createElement('div'); d.className = cls; return d; };
-function button(cls: string, text: string, title: string): HTMLButtonElement {
-  const b = document.createElement('button');
-  b.type = 'button'; b.className = cls; b.textContent = text; b.title = title;
-  return b;
-}
 
 export class SlideRail {
   readonly el: HTMLElement;
@@ -71,7 +59,9 @@ export class SlideRail {
   private mo: MutationObserver;
   private ro: ResizeObserver | null = null;
   private drag: { index: number; y: number; id: number; moved: boolean; gap: number } | null = null;
-  private popup: HTMLElement | null = null;
+  /** closes the open layout picker */
+  private popup: (() => void) | null = null;
+  private sorter: SlideSorter | null = null;
 
   constructor(private view: EditorView, private scroller: HTMLElement, private host: RailHost) {
     let stored: string | null = null;
@@ -81,16 +71,20 @@ export class SlideRail {
     this.el = div('ol-slide-rail');
     this.el.dataset.olRail = '';
     const head = div('ol-rail-head');
-    const title = document.createElement('span');
-    title.className = 'ol-rail-title'; title.textContent = 'Slides';
+    // the header: which slide of how many, the notes switch, the sorter, folding
     this.count = document.createElement('span');
     this.count.className = 'ol-rail-count';
+    this.count.title = 'The slide shown, of all slides';
     this.notesBtn = button('ol-rail-notes', 'Notes', 'Speaker notes under the slides');
     this.notesBtn.dataset.railNotes = '';
     this.notesBtn.addEventListener('click', () => { this.host.notes(!this.host.notes()); this.syncNotes(); });
+    const sorterBtn = button('ol-rail-sorter', '', 'Slide sorter: all slides in a grid');
+    sorterBtn.dataset.railSorter = '';
+    sorterBtn.innerHTML = GRID_ICON;
+    sorterBtn.addEventListener('click', () => this.openSorter());
     const hide = button('ol-rail-hide', '«', 'Hide the slides');
     hide.addEventListener('click', () => this.setCollapsed(true));
-    head.append(title, this.count, this.notesBtn, hide);
+    head.append(this.count, this.notesBtn, sorterBtn, hide);
     this.list = div('ol-rail-list');
     this.list.tabIndex = 0;
     this.list.setAttribute('role', 'listbox');
@@ -107,7 +101,12 @@ export class SlideRail {
     foot.append(add, more);
     const show = button('ol-rail-show', 'Slides', 'Show the slides');
     show.addEventListener('click', () => this.setCollapsed(false));
-    this.el.append(head, this.list, foot, show);
+    // the folded rail (a phone's) still opens the sorter
+    const mini = button('ol-rail-mini', '', 'Slide sorter: all slides in a grid');
+    mini.dataset.railSorterMini = '';
+    mini.innerHTML = GRID_ICON;
+    mini.addEventListener('click', () => this.openSorter());
+    this.el.append(head, this.list, foot, mini, show);
 
     this.list.addEventListener('keydown', this.onKey);
     this.list.addEventListener('pointerdown', this.onPointerDown);
@@ -127,6 +126,7 @@ export class SlideRail {
   }
 
   destroy(): void {
+    this.sorter?.destroy();
     this.mo.disconnect();
     this.ro?.disconnect();
     clearTimeout(this.timer);
@@ -140,6 +140,7 @@ export class SlideRail {
 
   /** the editor state changed: pages may have come or gone, the selection moved */
   update(docChanged: boolean): void {
+    this.sorter?.update(docChanged);
     if (docChanged) this.schedule();
     this.syncCurrent();
     this.syncNotes();
@@ -180,18 +181,7 @@ export class SlideRail {
 
   private onMutations(recs: MutationRecord[]): void {
     let any = false;
-    for (const r of recs) {
-      const t = (r.target.nodeType === 1 ? r.target : r.target.parentElement) as HTMLElement | null;
-      if (!t || t.closest('.ol-overlay, .ol-page-label')) continue;
-      if (r.type === 'attributes' && r.attributeName === 'class') {
-        const before = new Set((r.oldValue ?? '').split(/\s+/).filter(Boolean)), after = new Set(t.classList);
-        const changed = [...before, ...after].filter(c => before.has(c) !== after.has(c) && !UI_CLASSES.has(c));
-        if (!changed.length) continue;
-      }
-      const wrap = t.closest('.ol-page-wrap') as HTMLElement | null;
-      // the wrapper's own attributes (its transition) do not show on the page
-      if (wrap && !(r.type === 'attributes' && t === wrap)) { this.dirty.add(wrap); any = true; }
-    }
+    for (const r of recs) { const wrap = pageOfMutation(r); if (wrap) { this.dirty.add(wrap); any = true; } }
     if (any) this.schedule();
   }
 
@@ -244,34 +234,9 @@ export class SlideRail {
   }
 
   private draw(it: Item, wrap: HTMLElement): void {
-    const section = wrap.querySelector(':scope > .ol-page') as HTMLElement | null;
-    if (!section) return;
-    const pg = this.host.page();
-    // like the presentation's stage, not an editor (.lyx-editor): the page's own rules, its own scale
-    const holder = div('ol-layout ol-rail-holder');
-    // the editor's page variables (fonts, TeX spacing, list metrics), at the drawing scale
-    const src = this.view.dom.style;
-    for (let i = 0; i < src.length; i++) {
-      const name = src[i];
-      if (name.startsWith('--ol-') && !['--ol-fit-pt', '--ol-pt', '--ol-mm', '--ol-rail-w'].includes(name)) holder.style.setProperty(name, src.getPropertyValue(name));
-    }
-    const basept = getComputedStyle(this.view.dom).getPropertyValue('--ol-basept');
-    if (basept) holder.style.setProperty('--ol-basept', basept);
-    holder.style.setProperty('--ol-mm', `${DRAW_W / pg.w}px`);
-    holder.style.setProperty('--ol-pt', `${DRAW_W / pg.w / 2.845276}px`);
-    holder.style.setProperty('--ol-page-w', String(pg.w));
-    holder.style.setProperty('--ol-page-h', String(pg.h));
-    holder.style.transform = `scale(${this.thumbWidth() / DRAW_W})`;
-    if (this.view.dom.dataset.olFont) holder.dataset.olFont = this.view.dom.dataset.olFont;
-    const copy = section.cloneNode(true) as HTMLElement;
-    copy.className = 'ol-page ol-rail-page';
-    clean(copy);
-    copy.querySelectorAll('.ol-notes, .ol-raw-unplaced, .ol-box-prompt').forEach(n => n.remove());
-    copy.querySelectorAll('.ol-sel, .ol-edited, .ol-selatom').forEach(n => n.classList.remove('ol-sel', 'ol-edited', 'ol-selatom'));
-    copy.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
-    holder.append(copy);
-    holder.inert = true;
-    it.clip.style.height = `${this.thumbWidth() * pg.h / pg.w}px`;
+    const holder = drawPage(this.view, wrap, this.host.page());
+    if (!holder) return;
+    scaleThumb(it.clip, holder, this.thumbWidth(), this.host.page());
     it.clip.replaceChildren(holder);
   }
 
@@ -289,14 +254,15 @@ export class SlideRail {
   };
 
   private syncCurrent(force = false): void {
+    if (this.forced && performance.now() > this.forced.until) this.forced = null;
     let index: number;
     if (this.forced) index = this.forced.index;
     else {
       const pos = this.host.currentPage();
-      index = pos === null ? -1 : this.items.findIndex(i => i.pos === pos);
+      index = pos === null ? -1 : this.items.findIndex(i => livePos(i.wrap, i.pos) === pos);
     }
     if (index >= this.items.length) index = this.items.length - 1;
-    this.count.textContent = this.items.length ? `${index + 1} / ${this.items.length}` : '';
+    this.count.textContent = this.items.length ? `Slide ${index + 1} / ${this.items.length}` : 'Slides';
     if (index === this.current && !force) return;
     this.items.forEach((it, i) => { it.el.classList.toggle('current', i === index); it.el.setAttribute('aria-selected', String(i === index)); });
     const changed = index !== this.current;
@@ -309,21 +275,39 @@ export class SlideRail {
     const it = this.items[Math.max(0, Math.min(this.items.length - 1, index))];
     if (!it) return;
     index = this.items.indexOf(it);
-    this.forced = { index, until: performance.now() + 600 };
-    if (it.wrap) {
+    // (one slide at a time the canvas shows exactly that page: nothing to hold on to while it scrolls there)
+    this.forced = this.view.dom.classList.contains('ol-single') ? null : { index, until: performance.now() + 600 };
+    // (a deck shows one slide at a time: the page is hidden until the caret is parked on it, and then shown at the top)
+    if (it.wrap?.offsetParent && !this.view.dom.classList.contains('ol-single')) {
       const r = it.wrap.getBoundingClientRect(), s = this.scroller.getBoundingClientRect();
       this.scroller.scrollTop += r.top - s.top - 16;
     }
-    this.host.park(it.pos);
+    this.host.park(livePos(it.wrap, it.pos));
     this.syncCurrent(true);
+  }
+
+  /** the slide sorter over the canvas, the current slide selected */
+  openSorter(): void {
+    if (this.sorter) return;
+    closeContextMenu();
+    this.sorter = new SlideSorter(this.view, this.scroller, {
+      page: () => this.host.page(),
+      basePt: () => this.host.basePt(),
+      show: pos => { this.refresh(); const i = this.items.findIndex(it => livePos(it.wrap, it.pos) === pos); if (i >= 0) this.goTo(i); },
+      closed: pos => {
+        this.sorter?.destroy();
+        this.sorter = null;
+        this.refresh();
+        const i = pos === null ? -1 : this.items.findIndex(it => livePos(it.wrap, it.pos) === pos);
+        if (i >= 0) this.goTo(i);
+        this.list.focus({ preventScroll: true });
+      },
+    }, Math.max(0, this.current));
   }
 
   /* ---------------------------------------------------------------- page commands */
 
-  /** each slide command is a step of its own for Ctrl+Z (the undo manager joins changes less than 0.5 s apart) */
-  private step(): void {
-    try { (yUndoPluginKey.getState(this.view.state) as { undoManager?: { stopCapturing(): void } } | undefined)?.undoManager?.stopCapturing(); } catch { /* no undo manager */ }
-  }
+  private step(): void { undoStep(this.view); }
 
   private run(f: () => number | null): void {
     const to = f();
@@ -333,7 +317,8 @@ export class SlideRail {
   }
 
   newSlide(layout: SlideLayout, intoTitle = false, after = this.current): void {
-    const at = this.items[after]?.pos ?? null;
+    const it = this.items[after];
+    const at = it ? livePos(it.wrap, it.pos) : null;
     const { tr, pos } = insertSlide(this.view.state, at, layout, this.host.page(), this.host.basePt());
     this.step();
     this.view.dispatch(tr.scrollIntoView());
@@ -351,14 +336,15 @@ export class SlideRail {
     const it = this.items[index];
     if (!it) return;
     this.step();
-    this.view.dispatch(L.insertPage(this.view.state, it.pos + it.node.nodeSize, it.node));
+    const pos = livePos(it.wrap, it.pos), node = this.view.state.doc.nodeAt(pos) ?? it.node;
+    this.view.dispatch(L.insertPage(this.view.state, pos + node.nodeSize, node));
     this.run(() => index + 1);
   }
 
   private remove(index: number): void {
     const it = this.items[index];
     if (!it) return;
-    const tr = L.deletePage(this.view.state, it.pos);
+    const tr = L.deletePage(this.view.state, livePos(it.wrap, it.pos));
     if (!tr) return;
     this.step();
     this.view.dispatch(tr);
@@ -368,7 +354,7 @@ export class SlideRail {
   private move(index: number, to: number): void {
     const it = this.items[index];
     if (!it) return;
-    const tr = L.movePageTo(this.view.state, it.pos, to);
+    const tr = L.movePageTo(this.view.state, livePos(it.wrap, it.pos), to);
     if (!tr) return;
     this.step();
     this.view.dispatch(tr);
@@ -378,14 +364,16 @@ export class SlideRail {
   private copy(index: number, cut: boolean): void {
     const it = this.items[index];
     if (!it) return;
-    slideClipboard = [it.node];
+    setSlideClipboard([this.view.state.doc.nodeAt(livePos(it.wrap, it.pos)) ?? it.node]);
     if (cut) this.remove(index);
   }
 
   private paste(index: number): void {
+    const slideClipboard = getSlideClipboard();
     if (!slideClipboard.length) return;
     const it = this.items[index];
-    let at = it ? it.pos + it.node.nodeSize : this.view.state.doc.content.size;
+    const ipos = it ? livePos(it.wrap, it.pos) : -1;
+    let at = it ? ipos + (this.view.state.doc.nodeAt(ipos) ?? it.node).nodeSize : this.view.state.doc.content.size;
     const tr = this.view.state.tr;
     for (const n of slideClipboard) { tr.insert(at, n); at += n.nodeSize; }
     this.step();
@@ -397,7 +385,7 @@ export class SlideRail {
     const it = this.items[index];
     if (!it) return;
     this.step();
-    this.view.dispatch(L.setAttrs(this.view.state.tr, it.pos, { transition: t || null }));
+    this.view.dispatch(L.setAttrs(this.view.state.tr, livePos(it.wrap, it.pos), { transition: t || null }));
   }
 
   private menu(index: number): MenuItem[] {
@@ -409,12 +397,13 @@ export class SlideRail {
       { sep: true },
       { label: 'Cut', shortcut: `${MOD}+X`, icon: 'cut', disabled: n <= 1, action: () => this.copy(index, true) },
       { label: 'Copy', shortcut: `${MOD}+C`, icon: 'copy', action: () => this.copy(index, false) },
-      { label: 'Paste after this slide', shortcut: `${MOD}+V`, icon: 'paste', disabled: !slideClipboard.length, action: () => this.paste(index) },
+      { label: 'Paste after this slide', shortcut: `${MOD}+V`, icon: 'paste', disabled: !getSlideClipboard().length, action: () => this.paste(index) },
       { sep: true },
       { label: 'Move up', shortcut: `${MOD}+↑`, disabled: index <= 0, action: () => this.move(index, index - 1) },
       { label: 'Move down', shortcut: `${MOD}+↓`, disabled: index >= n - 1, action: () => this.move(index, index + 2) },
       { label: 'Transition', sub: ['', ...PAGE_TRANSITIONS].map(t => ({ label: t || 'None', checked: (node?.attrs.transition ?? '') === t, action: () => this.setTransition(index, t) })) },
       { sep: true },
+      { label: 'Slide sorter', action: () => this.openSorter() },
       { label: 'Present from this slide', shortcut: 'Shift+F5', action: () => { this.goTo(index); startPresentation(this.view, { fromCurrent: true }); } },
     ];
   }
@@ -423,42 +412,10 @@ export class SlideRail {
 
   private toggleLayouts(anchor: HTMLElement): void {
     if (this.popup) { this.closeLayouts(); return; }
-    const pop = div('ol-rail-pop');
-    pop.dataset.railLayoutPicker = '';
-    const heading = div('ol-rail-pop-title');
-    heading.textContent = 'New slide';
-    pop.append(heading);
-    const grid = div('ol-rail-pop-grid');
-    for (const l of SLIDE_LAYOUTS) {
-      const b = button('ol-rail-layout', '', l.label);
-      b.dataset.layout = l.id;
-      b.innerHTML = layoutIcon(l.id);
-      const cap = document.createElement('span');
-      cap.textContent = l.label;
-      b.append(cap);
-      b.addEventListener('click', () => { this.closeLayouts(); this.newSlide(l.id, true); });
-      grid.append(b);
-    }
-    pop.append(grid);
-    this.el.append(pop);
-    const r = anchor.getBoundingClientRect(), base = this.el.getBoundingClientRect();
-    pop.style.bottom = `${base.bottom - r.top + 6}px`;
-    this.popup = pop;
-    const away = (e: Event) => { if (!pop.contains(e.target as Node) && e.target !== anchor) this.closeLayouts(); };
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); this.closeLayouts(); this.list.focus(); } };
-    document.addEventListener('pointerdown', away, true);
-    document.addEventListener('keydown', esc, true);
-    (pop as HTMLElement & { _off?: () => void })._off = () => { document.removeEventListener('pointerdown', away, true); document.removeEventListener('keydown', esc, true); };
-    (grid.querySelector('button[data-layout="content"]') as HTMLElement | null)?.focus();
+    this.popup = layoutPicker(this.el, anchor, l => this.newSlide(l, true), () => { this.popup = null; });
   }
 
-  private closeLayouts(): void {
-    const p = this.popup as (HTMLElement & { _off?: () => void }) | null;
-    if (!p) return;
-    p._off?.();
-    p.remove();
-    this.popup = null;
-  }
+  private closeLayouts(): void { this.popup?.(); }
 
   /* ---------------------------------------------------------------- pointer and keys */
 
@@ -562,21 +519,4 @@ export class SlideRail {
     else done = false;
     if (done) { e.preventDefault(); e.stopPropagation(); }
   };
-}
-
-/** a layout's sketch for the picker: title bars, text lines, columns */
-function layoutIcon(id: SlideLayout): string {
-  const bar = (x: number, y: number, w: number, h = 3) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1" class="t"/>`;
-  const lines = (x: number, y: number, w: number, k: number) => Array.from({ length: k }, (_, i) => `<rect x="${x}" y="${y + i * 4}" width="${i === k - 1 ? w * 0.6 : w}" height="1.6" rx="0.8" class="l"/>`).join('');
-  const body: Record<SlideLayout, string> = {
-    title: bar(12, 13, 40, 5) + lines(18, 22, 28, 1),
-    content: bar(6, 5, 34) + lines(6, 13, 52, 4),
-    section: bar(6, 17, 36, 5) + `<rect x="6" y="24.5" width="10" height="1" class="t"/>` + lines(6, 28, 26, 1),
-    two: bar(6, 5, 34) + lines(6, 13, 24, 4) + lines(34, 13, 24, 4),
-    comparison: bar(6, 5, 34) + bar(6, 12, 16, 2) + bar(34, 12, 16, 2) + lines(6, 17, 24, 3) + lines(34, 17, 24, 3),
-    titleonly: bar(6, 5, 34),
-    statement: bar(10, 14, 44, 4) + bar(18, 20, 28, 4),
-    blank: '',
-  };
-  return `<svg viewBox="0 0 64 36" aria-hidden="true"><rect x="0.5" y="0.5" width="63" height="35" rx="2" class="p"/>${body[id]}</svg>`;
 }

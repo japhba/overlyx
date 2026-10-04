@@ -11,7 +11,9 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { lyxToPm, headerValue, mergeLyx, type LyxDocument, type PMJSON } from '@overlyx/core';
 import { documentModel, sameModel, modelDocument, type DocumentModel, type SyncTag } from '../shared/documentModel.ts';
-import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, sameDocumentText, type TexContext } from './texdoc.ts';
+import os from 'node:os';
+import { parseDocumentText, writeDocumentText, includeResolver, cachedParseFile, sameDocumentText, markdownAsTex, type TexContext } from './texdoc.ts';
+import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { primePreserveCache, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { buildMeta } from './meta.ts';
 import { findMaster } from './project.ts';
@@ -300,8 +302,20 @@ export class DocSession {
     });
   }
 
-  /** For a build: the master's file (a child builds through its master), and that file's header. */
-  buildTarget(): { absPath: string; header: LyxDocument['header'] | null } {
+  /**
+   * For a build: the master's file (a child builds through its master), and that file's header. A
+   * markdown document is built from its LaTeX, written to a scratch directory (`texInputs`: where
+   * its images are found) and set with LuaLaTeX.
+   */
+  buildTarget(): { absPath: string; header: LyxDocument['header'] | null; texInputs?: string } {
+    if (isMarkdownPath(this.relPath)) {
+      const dir = path.join(os.tmpdir(), 'overlyx-markdown', crypto.createHash('sha1').update(this.ctx.root + '/' + this.relPath).digest('hex').slice(0, 12));
+      fs.mkdirSync(dir, { recursive: true });
+      const absPath = path.join(dir, path.basename(this.relPath).replace(/\.[^.]+$/, '') + '.tex');
+      fs.writeFileSync(absPath, markdownAsTex(this.toLyxDocument(), this.ctx, this.relPath));
+      const lines = [...this.header().lines.filter(l => !l.startsWith('\\default_output_format ')), '\\default_output_format pdf5'];
+      return { absPath, header: { lines }, texInputs: path.dirname(path.join(this.ctx.root, this.relPath)) };
+    }
     const masterRel = this.isChild ? findMaster(this.ctx.root, this.relPath) : null;
     if (masterRel) {
       let header: LyxDocument['header'] | null = null;

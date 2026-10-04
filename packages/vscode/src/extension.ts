@@ -71,7 +71,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     const target = session.buildTarget();
     const latexmk = vscode.workspace.getConfiguration('overlyx').get<string>('latexmk') || 'latexmk';
     build.requestBuild({
-      docId: session.docId, absPath: target.absPath, header: target.header, latexmk,
+      docId: session.docId, absPath: target.absPath, header: target.header, latexmk, texInputs: target.texInputs,
       prepare: async () => {
         // the .tex file on disk is what latexmk compiles: write the editor's state first
         await session.save(e.resync);

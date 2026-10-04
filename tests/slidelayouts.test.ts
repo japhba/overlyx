@@ -13,8 +13,9 @@ import { schema, layoutTemplate, lyxToPmNode, pmToLyxBody } from '@overlyx/core'
 import { parseTex, writeTex } from '../packages/core/src/tex/index.ts';
 import { deckStyle, insertSlide, layoutObjects, promptMarks, SLIDE_LAYOUTS, boxIsEmpty } from '../packages/client/src/editor/layout/slidelayouts.ts';
 import { pages } from '../packages/client/src/editor/layout/commands.ts';
+import { LYX_LAYOUTS } from './lyxlib';
 
-const opts = { layoutDir: path.resolve('lyx/lib/layouts'), localDirs: [] };
+const opts = { layoutDir: LYX_LAYOUTS, localDirs: [] };
 const PAGE = { w: 160, h: 90 };
 
 function load(tex: string) {

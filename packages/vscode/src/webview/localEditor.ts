@@ -7,6 +7,7 @@ import { Awareness } from 'y-protocols/awareness';
 import { ySyncPlugin, yCursorPlugin, yUndoPlugin, ySyncPluginKey, yUndoPluginKey, defaultDeleteFilter, undo, redo, initProseMirrorDoc, prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
 import { schema, projectOfDoc, docDirOf } from '@overlyx/core';
 import { assemblePlugins, editorViewProps, editorAttributes, dispatchTransactionProp, installEditorDom } from '@client/editor/assembly';
+import { isMarkdownDoc } from '@client/editor/markdown';
 import { inkPlugin } from '@client/editor/plugins/ink';
 import { getPrefs, subscribePrefs } from '@client/prefs';
 import { editorSessions } from './editorSession';
@@ -87,6 +88,7 @@ export function createLocalEditor(opts: LocalEditorOptions): LocalEditorHandle {
     keymap({ 'Mod-z': undo, 'Mod-y': redo, 'Mod-Z': redo, 'Shift-Mod-z': redo }),
   ];
   const plugins = assemblePlugins({
+    markdown: isMarkdownDoc(opts.docId),
     sync, marginMode: opts.marginMode ?? false,
     ink: opts.child ? null : inkPlugin(awareness), getView: () => viewRef,
     onUpdate: (view, info) => {

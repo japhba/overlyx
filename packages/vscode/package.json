@@ -1,7 +1,7 @@
 {
   "name": "overlyx-vscode",
   "displayName": "OverLyX",
-  "description": "LyX-style WYSIWYG editing for LaTeX .tex files — the OverLyX editor inside VS Code: rendered text and formulas, LyX keybindings, change tracking, comments, outline, PDF preview with SyncTeX. File browsing, git and agents stay VS Code's.",
+  "description": "LyX-style WYSIWYG editing for LaTeX .tex files (and markdown) — the OverLyX editor inside VS Code: rendered text and formulas, LyX keybindings, change tracking, comments, outline, PDF preview with SyncTeX. File browsing, git and agents stay VS Code's.",
   "version": "0.2.11",
   "publisher": "overlyx",
   "private": true,
@@ -26,6 +26,12 @@
         "selector": [
           {
             "filenamePattern": "*.tex"
+          },
+          {
+            "filenamePattern": "*.md"
+          },
+          {
+            "filenamePattern": "*.markdown"
           }
         ],
         "priority": "option"
@@ -112,7 +118,7 @@
       "editor/title": [
         {
           "command": "overlyx.openInOverlyx",
-          "when": "resourceExtname == .tex && activeCustomEditorId != overlyx.texEditor",
+          "when": "resourceExtname =~ /^\\.(tex|md|markdown)$/ && activeCustomEditorId != overlyx.texEditor",
           "group": "navigation"
         },
         {

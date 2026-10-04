@@ -14,6 +14,11 @@
    shapes, cropped images and raw TikZ placed anywhere on fixed-size pages, Keynote-style with
    Inkscape's pen and node tools; the file is a plain beamer `.tex` (animations are overlays) and
    presents full screen.
+6. **Markdown** — `.md` files open in the same editor, restricted to what markdown can hold, with
+   markdown's typing (`**bold**`, `> `, "```" …); comments and tracked changes are HTML in the file,
+   unchanged blocks are saved byte for byte.
+7. **Google Docs sync** — link a document to a Google Doc: edits made there come back as tracked
+   changes, comments and replies go both ways.
 
 ## Try it
 

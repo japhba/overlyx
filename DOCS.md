@@ -450,6 +450,32 @@ blend.
     pages, remembered per browser (`ol.notes`); a page without notes then offers *Click to add speaker
     notes* (`PageView`), so showing them adds nothing to the file. In notes, keys type (the canvas's
     tool letters and object keys stay out of them).
+    **One slide at a time** (PowerPoint's Normal view; `controller.ts syncShownPage`): in a deck the
+    canvas shows only the page that holds the selection — the other pages are `display: none`
+    (`.ol-single`, `.ol-shown`) but keep their DOM, which the thumbnails copy and where formulas are
+    still drawn in idle time. So everything that moves the selection turns the slide: the rail, the
+    sorter, the outline, Find. PageDown / PageUp (not while text is being edited), the arrows and
+    Home / End with nothing selected, and the wheel beyond the slide's top or bottom edge (once per
+    flick: 60 px of scrolling, then 450 ms of rest) turn it too. The slide is fitted to the window with
+    its notes under it, centred, and nothing scrolls at the fit; the fit uses the scroller's offset
+    size, so the scroll bars a zoom brings do not change it. Zoomed, its margins stay what they were at
+    the fit, on both sides (`--ol-single-top` / `--ol-single-bottom`), so a pinch keeps the point under
+    the pointer anywhere on the slide. Hidden pages are not measured against the PDF; a page is measured
+    when it is shown. Objects can no longer be dragged onto another page of a deck — cut and paste them.
+    Rail and sorter address pages by their node views' live positions (`livePos`): their own remembered
+    positions are as old as their last refresh, a quarter second after an edit.
+    **Slide sorter** (`editor/layout/sorter.ts`, PowerPoint's View ▸ Slide Sorter; the grid button in
+    the rail's header or its folded strip, or the rail's menu): every slide as a card over the canvas
+    and the rail, with its number, name (or first words), transition, animation clicks and whether it
+    has notes. Click selects, Shift+click a range, Ctrl/⌘+click toggles; dragging moves the selection
+    (`movePagesTo`, only the moved pages are taken out and put back); Delete, Ctrl+D (copies after the
+    last selected), Ctrl+C / X / V (the rail's slide clipboard), Ctrl+Z / Y, arrows and Shift+arrows by
+    the grid's columns, Ctrl+A, F5 / Shift+F5; the right-click menu sets a transition for the whole
+    selection. Enter or a double click opens the slide in the canvas (the double click's target is the grid, which
+    captured the pointer — the card is looked up under it), Esc or *Done* returns to the focused one
+    (the canvas behind follows the focus all along). The slider sizes the cards
+    (`ol.sorter`); only their scale changes. Rail and sorter share `slidekit.ts` (thumbnails, the
+    mutation filter, the layout picker, the clipboard, `undoStep`).
     **New slide layouts** (`editor/layout/slidelayouts.ts`): Title slide, Title and content, Section
     header, Two content, Comparison, Title only, Big statement, Blank — in the deck's own style, read off
     its pages since a beamer file has no masters (`deckStyle`: the title box most content pages share,
@@ -1146,10 +1172,8 @@ packages/vscode   the same editor inside VS Code (a custom editor for .tex files
   name; the declaration is never duplicated), and the layout list in meta all honour them.
   Declarations typed into the body are moved to the user preamble on the next save. The math
   parser knows `\operatorname{…}` and `\operatorname*{…}` (symbols.json; the generator keeps
-  shipped entries on regen). Markdown files (`.md`) open in a WYSIWYG editor
-  (`app/MarkdownEditor.tsx`, prosemirror-markdown): `## ` resizes into a live heading as you
-  type, bold/lists/quotes/links likewise; Source switches to the plain text editor; files stay
-  ordinary markdown on disk.
+  shipped entries on regen). Markdown files (`.md`) are documents
+  too — see *Markdown documents* below.
 
 **One editor, two shells.** The web client (`app/App.tsx`) and the VS Code webview
 (`packages/vscode/src/webview/EditorShell.tsx`) do not each assemble an editor: the plugins in their
@@ -1371,6 +1395,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/selection-inserts.spec.ts   # comments / floats / captions keep the selection, pasted blocks, Enter in a caption, Insert ▸ Graphics on a layout page, live authors, TeX pane after settings, tracked tables, formula notice, tablet reflow
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/slidesorter.spec.ts   # the slide sorter: selection, dragging several, duplicate / delete / undo, keys, transitions, size, the saved order
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sliderail.spec.ts   # the slide rail: thumbnails, new slides in the deck's style, drag to reorder, its menu, undo, the saved file
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layout.spec.ts   # layout documents: new deck, text box + formula, move / resize / undo, toolbar, presentation steps, zoom, text overlays, a linear beamer deck presented; the font size box
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
@@ -1395,6 +1420,8 @@ OVERLYX_E2E_AI_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test
 # the Agent panel (e2e/agent.spec.ts): start the server with OVERLYX_CODEX_BIN=scripts/codex-stub.mjs
 # (a stand-in for `codex app-server`: sign-in, streamed replies, one approval round-trip), then
 OVERLYX_E2E_AGENT_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/agent.spec.ts
+# the Google Docs sync: a server started with OVERLYX_E2E_GOOGLE_STUB=1 (simulated Google APIs, gdocs/fake.ts)
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/gdocs.spec.ts e2e/markdown.spec.ts
 # agents connected over MCP (e2e/mcp-presence.spec.ts): get_presence on a selection made in the browser, the
 # agent's caret / highlight, a panel message through wait_for_instructions and back, a pushed Claude Code session;
 # MCP is not proxied by vite, so name the server
@@ -1597,6 +1624,96 @@ How it works, in order of what happens when you open a document:
 * Every document's Yjs history carries an *epoch*; a browser tab whose editor belongs to an older
   epoch (server restarted with a changed file) reloads instead of merging stale content. Cross-tab
   BroadcastChannel syncing of y-websocket is disabled for the same reason.
+
+## Markdown documents
+
+A `.md` (`.markdown`) file opens in the same editor as a `.tex` document — collaborative, with
+comments, change tracking, versions, the outline, agents and a PDF — restricted to what markdown
+can hold (`core/src/md/`, `client/src/editor/markdown.ts`):
+
+* **The model.** `md/parse.ts` (markdown-it: CommonMark, GFM tables / strikethrough / autolinks,
+  plus `$…$` / `$$…$$` math and `[^label]` footnotes) maps markdown onto the LyX model: `#`…`#####`
+  are Section…Subparagraph (unnumbered: `\secnumdepth -1`), lists Itemize / Enumerate with depth
+  (an item's further paragraphs one level deeper), `>` Quote, fenced code a listings inset (its
+  language in `lstparams`), formulas Formula insets, tables a tabular (booktabs rules), images a
+  Graphics inset (alt text as `special alt={…}`, a linked badge's link as a `link` parameter),
+  footnotes Foot insets (with their label). Inline HTML for underline, `<sub>` / `<sup>`, `<br>`
+  is understood; any other HTML is kept verbatim in a raw (ERT) inset. YAML front matter is kept
+  verbatim (the document's preamble lines).
+* **Comments and changes in the file.** A comment thread is an HTML comment right after the
+  commented text, invisible in every markdown viewer:
+  `text<!-- @comment⏎    Jan Bauer (2026-10-04 12:00):⏎    the comment⏎    -->` (lines indented by
+  four spaces so they can never start a markdown block; in a heading or table cell it is one line,
+  `\n` between its lines). A plain `<!-- … -->` is a note. Tracked changes are
+  `<ins author="Jan Bauer" datetime="2026-10-04T12:00:00Z">…</ins>` / `<del …>` (GitHub shows them
+  underlined / struck out); a document's authors are rebuilt from them.
+* **Writing** (`md/write.ts`). Edited blocks are written canonically (`*em*`, `**bold**`, `-`
+  bullets, fenced code, padded tables; text escaped so it reads back as text; emphasis the
+  delimiter rules cannot express — `a**"b"**c` — as `<strong>`); `writeMarkdownPreserving` keeps
+  every unchanged block's bytes (its `*` bullets, setext headings, wrapping, reference links)
+  and the space between blocks, so a save changes the edited blocks only and writing a file that
+  was just parsed gives it back exactly (verified on 400 real READMEs). LaTeX-only constructs that
+  reach a markdown document degrade with warnings (a citation to `\[@key]`, small caps to plain).
+* **The editor** offers markdown's toolbar (bold, italic, strikethrough, code, H1–H3, quote, code
+  block, rule) and menus, and markdown's typing: `**bold**`, `*em*` / `_em_`, `` `code` ``,
+  `~~strike~~` format as you type; `> ` starts a quote (Enter on an empty quote line ends it),
+  "```lang" + Enter a code block, `---` + Enter a rule, `$$` + Enter a display formula, `- [ ]` a
+  task with a box to tick; markdown pasted as text arrives as structure. Layouts and font
+  attributes markdown lacks (pasted from LaTeX, a LaTeX shortcut) become the nearest markdown
+  (Chapter → `#`, Description → bullets) or go; labels, citations and margin notes say they are
+  not available. The source pane is labelled *Markdown*.
+* **PDF**: the model is written as LaTeX (`markdownForLatex`: images on the web become links, raw
+  HTML is left out, code languages listings does not know are dropped) and built with LuaLaTeX.
+* **VS Code**: the extension opens `.md` with *Open With… ▸ OverLyX Editor* (VS Code's own
+  markdown editor stays the default), with the same parser and writer.
+
+## Google Docs sync
+
+*File ▸ Google Docs (sync, comments)…* links a document — markdown or `.tex` — to a Google Doc
+and keeps the two in step both ways (`server/src/gdocs/`): you write in OverLyX, collaborators
+read, comment and edit in Google Docs.
+
+* **Connecting.** Each account connects its Google Drive once (OAuth, scope `drive.file`: OverLyX
+  only ever sees the Google Docs it created). The sign-in's OAuth client and redirect address
+  (`/api/auth/google/callback`) are reused — `auth.ts` hands a Drive connection's callback to
+  `gdocs/google.ts`; the refresh token is stored encrypted (AES-GCM, key derived from the server
+  secret) in `google_drive`. **Setup:** in the Google Cloud project of `GOOGLE_CLIENT_ID`, enable the
+  *Google Docs API* and the *Google Drive API* (APIs & Services ▸ Library); `drive.file` is a
+  non-sensitive scope, so no app verification is needed. Without the APIs enabled the dialog says so.
+* **The model** (`gdocs/model.ts`). A document projects to blocks Google Docs can hold: headings
+  (the document's top heading level is Heading 1), paragraphs, bulleted / numbered lists with
+  nesting, quotes (indented), code blocks (monospace lines on a grey ground), tables, text with
+  bold / italic / underline / strikethrough / monospace / links / super- and subscript, real
+  footnotes. What Docs cannot hold is text that reads back: `$…$` formulas (`$$…$$` centred),
+  `[@key]` citations, `[ref: label]`, `[image: file]`. Tracked changes are shown as accepted (the
+  API cannot write suggestions); notes are left out; comment threads become Google comments.
+* **Writing** (`gdocs/edits.ts`): the Google Doc is diffed against the blocks and edited in place
+  with `documents.batchUpdate`, back to front — a changed paragraph word by word (narrowed to the
+  characters that changed), formatting as style updates, new and removed blocks as insertions and
+  deletions — so comments anchored in Google Docs keep their text. It goes in rounds that re-read
+  the document: a new table is inserted empty and filled in the next round, a new footnote likewise,
+  lists get their bullets last (createParagraphBullets reads nesting levels from leading tabs).
+  Paragraphs with suggestions pending in Google Docs are not touched. A seeded fuzz test
+  (tests/gdocs.test.ts) checks that random edits always converge.
+* **Reading back** (`gdocs/sync.ts`). Each sync compares the Google Doc with the blocks it held after
+  the previous sync; what changed there is mapped onto the document as it was then and applied
+  through the agents' edit path (`docedit.ts` applyTrackedSource): tracked insertions / deletions
+  by “Name (Google Docs)” (Drive's last modifier), merged with edits made here meanwhile. Accepting
+  them changes nothing in Google Docs; rejecting them takes the Google Doc back.
+* **Comments** both ways: a Google comment becomes a thread right after the text it quotes, its
+  replies messages; a thread written here becomes a Google comment (anchored to the text before it
+  with the Docs API's `insertComment` where the project has it — it is in preview — else a Drive
+  comment quoting that text, which Docs lists unanchored), its messages replies; resolving and
+  reopening go both ways. `gdocs_links.comments` maps threads to comments, so nothing is sent twice.
+* **When**: every minute (`startAutoSync`) a linked document is synced if it was saved since its
+  last sync or Drive reports a new version of the Google Doc; *Sync now* in the dialog any time;
+  *Sync automatically* off leaves it to the button. The sync uses the Drive of whoever linked the
+  document. Unlinking keeps the Google Doc; a link whose document is gone is dropped.
+* **Tests**: `tests/gdocs.test.ts` runs against `gdocs/fake.ts`, a simulation of the Docs / Drive
+  APIs (indices, paragraph joins, bullets from tabs, tables, footnotes, anchored comments).
+  `e2e/gdocs.spec.ts` needs a server started with `OVERLYX_E2E_GOOGLE_STUB=1`: the simulation
+  instead of Google, a Drive connection without the consent screen, and `/api/gdocs/e2e/*` for the
+  test to play the collaborator.
 
 ## The .tex format
 

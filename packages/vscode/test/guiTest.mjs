@@ -72,13 +72,14 @@ fs.copyFileSync(path.join(pkg, 'test/fixtures/graphics.pdf'), path.join(fixtureR
 fs.writeFileSync(path.join(ws, 'main.tex'), MAIN);
 fs.writeFileSync(path.join(ws, 'chapter.tex'), '\\section{Details}\n\nChild paragraph with $a+b$.\n');
 fs.writeFileSync(path.join(ws, 'macros.tex'), String.raw`\newcommand{\bx}{\boldsymbol{x}}`);
+fs.writeFileSync(path.join(ws, 'notes.md'), '# Notes heading\n\nA *markdown* paragraph.\n\n* a star bullet\n');
 
 /* ---------------------------------------------------------------- VS Code launch */
 const udd = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-gui-udd-'));
 const extDir = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-gui-ext-'));
 fs.mkdirSync(path.join(udd, 'User'), { recursive: true });
 fs.writeFileSync(path.join(udd, 'User/settings.json'), JSON.stringify({
-  'workbench.editorAssociations': { '*.tex': 'overlyx.texEditor' },
+  'workbench.editorAssociations': { '*.tex': 'overlyx.texEditor', '*.md': 'overlyx.texEditor' },
   'security.workspace.trust.enabled': false,
   'update.mode': 'none',
   'telemetry.telemetryLevel': 'off',
@@ -357,6 +358,33 @@ try {
   if (/Ove[A-Z]/.test(finalTex)) fail('stray palette keystrokes leaked into the document');
   const pdfText = await pdfFrame.evaluate(() => document.body.innerText);
   if (pdfText.indexOf('✗') >= 0) fail('PDF panel reports build errors');
+
+  /* ---- 7. a markdown file in the same editor: typed markdown is saved as markdown ---- */
+  await page.keyboard.press('Control+p');
+  await page.waitForSelector('.quick-input-widget input', { timeout: 15000 });
+  await page.keyboard.type('notes.md');
+  await sleep(600);
+  await page.keyboard.press('Enter');
+  const mdFrame = await until(async () => {
+    for (const f of page.frames()) { try { if (await f.$('.lyx-editor .lyx-layout-section') && (await f.evaluate(() => document.body.innerText)).includes('Notes heading')) return f; } catch { /* gone */ } }
+    return null;
+  }, 60000, 'the markdown file in the OverLyX editor');
+  await sleep(1500);   // the editor settles (meta, fonts) before the click
+  // (the column is narrow here — the PDF panel is open beside it — so the paragraph wraps: click its last line)
+  const mdPar = mdFrame.locator('.lyx-par', { hasText: 'paragraph.' }).first();
+  const box = await mdPar.boundingBox();
+  await mdPar.click({ position: { x: Math.max(4, (box?.width ?? 20) - 3), y: Math.max(4, (box?.height ?? 16) - 6) } });
+  await sleep(300);
+  await page.keyboard.press('End');
+  await sleep(200);
+  await page.keyboard.type(' Now **bold** too.');
+  await until(() => mdFrame.evaluate(() => !!document.querySelector('.lyx-series-bold')), 10000, 'the **bold** markup made bold while typing');
+  await page.keyboard.press('Control+s');
+  await until(() => fs.readFileSync(path.join(ws, 'notes.md'), 'utf8').includes('Now **bold** too.'), 20000, 'the typed markdown in notes.md');
+  const md = fs.readFileSync(path.join(ws, 'notes.md'), 'utf8');
+  if (!md.startsWith('# Notes heading\n\nA *markdown* paragraph. Now **bold** too.\n\n* a star bullet')) fail('notes.md was rewritten beyond the edit: ' + JSON.stringify(md));
+  log('markdown file edited in the OverLyX editor and saved as markdown');
+  await shot('06-markdown');
 
   log('ALL GUI CHECKS PASSED');
   await browser.close().catch(() => {});

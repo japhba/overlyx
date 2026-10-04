@@ -27,6 +27,7 @@ import { openLinkBoxFor, LINK_KEY } from '../editor/links';
 import { layoutToolbar } from './layouttoolbar';
 import { FontSizeBox } from './fontsize';
 import { isLayoutDoc } from '../editor/layout/commands';
+import { isMarkdownDoc, insertCodeBlock, insertRule } from '../editor/markdown';
 
 export type ToolbarId = 'standard' | 'viewupdate' | 'extra' | 'vcs' | 'math' | 'mathpanels' | 'table' | 'review';
 export type ToolbarMode = 'on' | 'off' | 'auto';
@@ -479,5 +480,40 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
   const showLayout = !!view && isLayoutDoc(view.state.doc);
   const layoutRow = showLayout ? layoutToolbar(ctx) : [];
 
-  return { standard, viewUpdate, extra, math, mathPanels, table, review, layout: layoutRow, showLayout, showMath, showTable, showReview };
+  const bars = { standard, viewUpdate, extra, math, mathPanels, table, review, layout: layoutRow, showLayout, showMath, showTable, showReview };
+  return isMarkdownDoc(docId) || meta?.format === 'markdown' ? markdownToolbars(bars, ctx) : bars;
+}
+
+/** buttons of the LaTeX toolbars for what markdown has no syntax for: not shown in a markdown document */
+const NOT_MARKDOWN = new Set([
+  'noun', 'charstyles', 'italic', 'textcolor', 'fontsize', 'flex', 'l-labeling', 'l-description', 'float', 'tablefloat', 'label', 'ref', 'cite',
+  'index', 'nomencl', 'marginal', 'boxinset', 'macro', 'include', 'textstyle', 'paragraph', 'outputsync', 'r-output',
+  't-top', 't-bottom', 't-left', 't-right', 't-border', 't-inner', 't-all', 't-none', 't-formal', 't-ad', 't-vt', 't-vm', 't-vb', 't-width',
+  't-rotcell', 't-rottable', 't-mc', 't-mr', 't-settings',
+]);
+
+/**
+ * The toolbars of a markdown document (editor/markdown.ts): markdown's inline styles (emphasis, bold,
+ * strikethrough, code) and blocks (headings, lists, quote, code block, rule), nothing it cannot write.
+ */
+function markdownToolbars(bars: Toolbars, ctx: ToolbarContext): Toolbars {
+  const { view, layout, run } = ctx;
+  const has = (name: string, value: string) => cursorMarks(view).some(m => m.type.name === name && m.attrs.value === value);
+  const keep = (rows: ToolButton[][]) => rows.map(g => g.filter(b => !NOT_MARKDOWN.has(b.id))).filter(g => g.length);
+  const heading = (n: number, name: string): ToolButton => ({ id: 'md-h' + n, title: `Heading ${n} (${'#'.repeat(n)} + space)`, icon: 'h' + n, active: layout === name, action: () => run(C.setLayout(layout === name ? 'Standard' : name)) });
+  const inline: ToolButton[] = [
+    { id: 'bold', title: 'Bold (Ctrl+B · **text**)', icon: 'bold', action: () => run(C.fontCommands.bold), active: has('series', 'bold') },
+    { id: 'emph', title: 'Emphasis / italic (Ctrl+E · *text*)', icon: 'italic', action: () => run(C.fontCommands.emph), active: has('emph', 'on') || has('shape', 'italic') },
+    { id: 'strike', title: 'Strikethrough (Ctrl+Shift+O · ~~text~~)', icon: 'strike', action: () => run(C.fontCommands.strikeout), active: has('strikeout', 'on') },
+    { id: 'code', title: 'Code (`text`)', icon: 'code', action: () => run(C.fontCommands.typewriter), active: has('family', 'typewriter') },
+  ];
+  const blocks: ToolButton[] = [
+    heading(1, 'Section'), heading(2, 'Subsection'), heading(3, 'Subsubsection'),
+    { id: 'md-quote', title: 'Quote (> + space)', icon: 'quote', active: layout === 'Quote', action: () => run(C.setLayout(layout === 'Quote' ? 'Standard' : 'Quote')) },
+    { id: 'md-codeblock', title: 'Code block (``` + Enter)', icon: 'codeblock', action: () => run(insertCodeBlock) },
+    { id: 'md-rule', title: 'Horizontal rule (--- + Enter)', icon: 'hrule', action: () => run(insertRule) },
+  ];
+  const standard = keep(bars.standard).map(g => (g.some(b => b.id === 'emph') ? inline : g));
+  const extra = keep(bars.extra).map(g => (g.some(b => b.id === 'l-standard') ? [...g.filter(b => b.id !== 'l-section'), ...blocks] : g));
+  return { ...bars, standard, extra, viewUpdate: keep(bars.viewUpdate), table: keep(bars.table), review: keep(bars.review) };
 }

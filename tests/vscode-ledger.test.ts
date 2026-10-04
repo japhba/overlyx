@@ -10,8 +10,9 @@ import path from 'node:path';
 import { lyxToPm } from '@overlyx/core';
 import { parseTex } from '../packages/core/src/tex/index.ts';
 import { SyncLedger, mergeModels, documentModel, sameModel } from '../packages/vscode/src/shared/documentModel.ts';
+import { LYX_LAYOUTS } from './lyxlib';
 
-const model = (text: string) => { const r = parseTex(text + '\n', { layoutDir: path.resolve('lyx/lib/layouts'), localDirs: [] }); return documentModel(lyxToPm(r.doc), r.doc.header.lines); };
+const model = (text: string) => { const r = parseTex(text + '\n', { layoutDir: LYX_LAYOUTS, localDirs: [] }); return documentModel(lyxToPm(r.doc), r.doc.header.lines); };
 
 describe('SyncLedger', () => {
   const D0 = model('Alpha beta gamma.'), D1 = model('Alpha gamma.'), D2 = model('Alpha.');

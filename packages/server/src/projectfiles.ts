@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { hasSettingsLine, isProjectKey } from '@overlyx/core';
+import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { config } from './config.ts';
 
 /** `doc`: a .tex document (has \\begin{document}, is \\input by one, or was written by OverLyX — a fragment with its settings line); `tex`: other LaTeX sources (preamble, macros, .sty); `dir`: a directory (so empty folders show in the explorer) */
@@ -20,6 +21,8 @@ export function fileKind(name: string): ProjectFile['kind'] {
   if (ext === '.tex' || ext === '.sty' || ext === '.cls') return 'tex';
   if (ext === '.pdf') return 'pdf';
   if (ext === '.board') return 'board';
+  // markdown files open in the document editor
+  if (isMarkdownPath(name)) return 'doc';
   if (IMAGE_EXT.has(ext)) return 'image';
   return 'other';
 }

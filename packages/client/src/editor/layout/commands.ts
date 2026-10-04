@@ -89,6 +89,45 @@ export function movePageTo(state: EditorState, pagePos: number, gap: number): Tr
   return tr;
 }
 
+/** Delete these pages; null when that would leave none (a document keeps one page at least). */
+export function deletePages(state: EditorState, positions: number[]): Transaction | null {
+  const list = pages(state.doc);
+  const gone = list.filter(p => positions.includes(p.pos));
+  if (!gone.length || gone.length >= list.length) return null;
+  const tr = state.tr;
+  for (const p of [...gone].reverse()) tr.delete(p.pos, p.pos + p.node.nodeSize);
+  return tr;
+}
+
+/**
+ * Move these pages, keeping their order, into the gap before page `gap` (0 … the number of pages; the
+ * slide sorter's drag). `first`: the index of the first moved page afterwards. Null: nothing moves.
+ */
+export function movePagesTo(state: EditorState, positions: number[], gap: number): { tr: Transaction; first: number } | null {
+  const list = pages(state.doc);
+  const moving = list.filter(p => positions.includes(p.pos));
+  if (!moving.length) return null;
+  const rest = list.filter(p => !positions.includes(p.pos));
+  const first = list.slice(0, Math.max(0, gap)).filter(p => !positions.includes(p.pos)).length;
+  const order = [...rest.slice(0, first), ...moving, ...rest.slice(first)];
+  if (order.every((p, i) => p === list[i])) return null;
+  // only the moved pages are taken out and put back (their neighbours keep their identity for collaborators)
+  const end = list[list.length - 1].pos + list[list.length - 1].node.nodeSize;
+  const tr = state.tr;
+  for (const p of [...moving].reverse()) tr.delete(p.pos, p.pos + p.node.nodeSize);
+  tr.insert(tr.mapping.map(first < rest.length ? rest[first].pos : end), Fragment.from(moving.map(p => p.node)));
+  return { tr, first };
+}
+
+/** Insert these pages after the page at `afterPos` (null: at the end); `first` is the index of the first. */
+export function insertPagesAfter(state: EditorState, afterPos: number | null, nodes: PMNode[]): { tr: Transaction; first: number } {
+  const list = pages(state.doc);
+  const i = afterPos === null ? list.length - 1 : list.findIndex(p => p.pos === afterPos);
+  const after = list[i] ?? list[list.length - 1];
+  const at = after ? after.pos + after.node.nodeSize : state.doc.content.size;
+  return { tr: state.tr.insert(at, Fragment.from(nodes)), first: i + 1 };
+}
+
 /* ------------------------------------------------------------------ objects */
 
 export function defaultParagraph(): PMNode {

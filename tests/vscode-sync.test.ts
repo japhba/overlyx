@@ -19,6 +19,7 @@ vi.mock('vscode', () => ({
   } },
 }));
 import { DocSession } from '../packages/vscode/src/host/session.ts';
+import { LYX_LAYOUTS } from './lyxlib';
 
 const initial = '\\section{Replica derivation}\n\nOld directions d and e.\n\nAn unchanged anchor.\n\nAnother unchanged anchor.\n\nLocal notes.\n';
 const revised = initial.replace('Replica derivation', 'MSRJD derivation').replace('Old directions d and e.', 'New normalized representation directions.');
@@ -30,7 +31,7 @@ const model = (text: string) => { const parsed = parseDocumentText(text, ctx, 'a
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'overlyx-sync-test-'));
-  ctx = { root, layoutDir: path.resolve('lyx/lib/layouts') };
+  ctx = { root, layoutDir: LYX_LAYOUTS };
   fs.writeFileSync(path.join(root, 'main.tex'), '\\documentclass{article}\n\\begin{document}\n\\input{appendix}\n\\end{document}\n');
   fs.writeFileSync(path.join(root, 'appendix.tex'), initial);
   doc = { text: initial, version: 1, isDirty: true, isClosed: false, uri: { fsPath: path.join(root, 'appendix.tex') }, getText() { return this.text; }, get lineCount() { return this.text.split('\n').length; } };

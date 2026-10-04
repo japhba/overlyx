@@ -14,7 +14,8 @@ import { manager, DocManager } from './docs.ts';
 import { projectDir, resolveProjectPath, findMaster, childDocuments } from './projects.ts';
 import { toPdf, cacheDir } from './graphics.ts';
 import { sandboxed, type SandboxSpec } from './sandbox.ts';
-import { readTextFile } from './texdoc.ts';
+import { readTextFile, markdownAsTex } from './texdoc.ts';
+import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { rewriteParentPaths } from './texpaths.ts';
 export { rewriteParentPaths };
 
@@ -276,6 +277,14 @@ export async function exportTex(docId: string): Promise<{ dir: string; main: str
   const docDir = path.dirname(doc.absPath);
   const warnings: string[] = [];
   linkDocumentAssets(docDir, dir);
+  if (isMarkdownPath(doc.relPath)) {
+    // a markdown document is built from its LaTeX: the editor's model written as a .tex file
+    const tex = markdownAsTex(doc.toLyxDocument(), doc.project, doc.relPath);
+    const main = path.join(dir, path.basename(doc.relPath).replace(/\.[^.]+$/, '') + '.tex');
+    const rewritten = await rewriteGraphics(tex, docDir, dir, warnings);
+    fs.writeFileSync(main, rewritten, 'utf8');
+    return { dir, main, warnings, tex: rewritten };
+  }
   const files = [doc.relPath, ...childDocuments(doc.project, doc.relPath)];
   const proj = projectDir(doc.project);
   let mainText = '', mainSource = '';
@@ -393,7 +402,8 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   // a TeX magic comment at the top of the file (`%!TEX TS-program = lualatex`, `% !TeX program =
   // xelatex` — what TeXShop, Overleaf and LaTeX Workshop read) names the engine the author builds with
   const magic = magicEngine(doc.fileText ?? await doc.textAsync());
-  const engineFlag = magic ?? (outFmt === 'pdf5' ? '-pdflua' : outFmt === 'pdf4' || nonTex ? '-pdfxe' : '-pdf');
+  // markdown is UTF-8 through and through (emoji, arrows, any script): LuaTeX takes it as it is
+  const engineFlag = isMarkdownPath(doc.relPath) ? '-pdflua' : magic ?? (outFmt === 'pdf5' ? '-pdflua' : outFmt === 'pdf4' || nonTex ? '-pdfxe' : '-pdf');
   // build products must be real files in the build directory, never links into the project
   for (const ext of ['.pdf', '.synctex.gz', '.aux', '.log', '.out', '.bbl', '.blg', '.toc', '.fls', '.fdb_latexmk']) {
     const f = path.join(exp.dir, base + ext);
