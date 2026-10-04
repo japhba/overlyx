@@ -1314,6 +1314,52 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/pdfview.spec.ts e
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/panes.spec.ts   # WYSIWYG · TeX · PDF panes, PDF age / auto-build / flicker-free rebuild, section folding, dash keys
 ```
 
+**Safari and Firefox.** Real users come with Safari (Mac, iPhone, iPad), Firefox and Edge besides
+Chrome, so the suite also runs in Playwright's WebKit (Safari's engine, as the "Desktop Safari" device)
+and Firefox; Chromium stays the default:
+
+```bash
+OVERLYX_E2E_BROWSERS=webkit OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/editing.spec.ts    # Safari's engine
+OVERLYX_E2E_BROWSERS=firefox OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/editing.spec.ts   # Firefox
+OVERLYX_E2E_BROWSERS=all …   # Chromium, Firefox and WebKit, a project each (a failure names its browser)
+```
+
+What differs, and how the specs deal with it:
+
+- **The Mod key.** Playwright's WebKit and Firefox on Linux report `navigator.platform` as
+  "Linux x86_64" whatever the device's user agent says (Desktop Safari's is a Mac's), so the app takes
+  Control as its Mod key in all three browsers here and a spec's `Control+…` means the same in each.
+  (On a Mac host every browser reports "MacIntel": the app's Mod key is then ⌘, and such presses would
+  have to become `ControlOrMeta+…`.)
+- **The clipboard.** `grantClipboard(context)` (e2e/helpers.ts) grants what each engine knows — both
+  permissions in Chromium, clipboard-read in WebKit (it writes without one), none in Firefox (granting
+  an unknown permission throws); `readClipboard(page)` reads the text — WebKit refuses
+  `navigator.clipboard.readText()` without a gesture (Safari shows a Paste button), so there it is
+  pasted into a scratch page of the same context. Playwright's WebKit keeps only text/plain on its
+  pasteboard (a copy's HTML, which carries table cells and insets, is gone at the paste), runs no copy
+  for Ctrl+C on a selection outside editable text, and its `clipboard.read()` (the menus' Paste) waits
+  for Safari's Paste button: clipboard.spec accepts typographic quotes there, agent.spec fires the copy
+  event itself, tablerows.spec skips its HTML pastes.
+- **Touch.** `newTouchContext(browser, …)` makes a tablet: under `hasTouch` WebKit and Firefox leave
+  `navigator.maxTouchPoints` at 0 (a real iPad says 5), which the app's tablet test needs.
+- **PDF fixtures.** `page.pdf()` exists only in Chromium: darkpdf.spec prints its figure there whatever
+  the browser under test.
+- **Computed styles** read differently: WebKit leaves out the quotes around a font family that needs
+  none (`CMU Serif, serif`), so fonts.spec compares families without quotes.
+- **Pointer positions** are whole pixels in WebKit and Firefox, fractions in Chromium: sizes drawn
+  with the mouse come out a hair different (layout.spec allows 69.98 mm for 70).
+- **Settling.** A click Playwright lands on a formula not yet hovered reaches the formula's field
+  directly in Chromium but its row in WebKit, which focuses the field a frame later: specs that type
+  right after such a click wait for `nextFrames(page)`.
+- **Offline.** Playwright's WebKit fails every navigation while its network is emulated offline
+  ("WebKit encountered an internal error") before the service worker is asked, and it keeps opening
+  WebSockets (the editor's reconnects sync the "offline" edits at once): offline.spec reloads offline
+  only in Chromium and Firefox and skips its long offline sessions in WebKit
+  (scratch/browsers/swoffline.mts, wsoffline.mts).
+- **Memory.** A WebKit page holding the dev build and a long paper takes ~0.8 GB, three times
+  Chromium's: collab.spec's six users need more than 3 GB, so run it with `OVERLYX_E2E_COLLAB_USERS=3` in WebKit
+  on a small machine, and give a Playwright run in WebKit 2.3 GB (specs with a second user open several pages).
+
 ## Offline mode
 
 How it works, in order of what happens when you open a document:
@@ -1371,6 +1417,21 @@ How it works, in order of what happens when you open a document:
 
 ## Compatibility notes
 
+* **Browsers**: Chrome and Edge, Safari (Mac, iPhone, iPad) and Firefox; the e2e suite runs in all
+  three engines (*Tests*). What Safari and Firefox needed:
+  - pdf.js's *legacy* build (`app/PdfViewer.tsx`, the VS Code PDF panel too): the default build needs
+    `Map.getOrInsertComputed`, `Math.sumPrecise` and the `Iterator` global (Safari 26.2, Firefox 144,
+    Chrome 147) — before Safari 18.4 the app did not even start, later it showed no PDF. In Safari's
+    engine pdf.js also decodes images without an OffscreenCanvas (it drew one image in another's place).
+  - Safari has no `requestIdleCallback`: formulas rendered "in idle time" use a timer whose deadline
+    runs out (a constant one rendered a long paper's formulas in one task and froze the page).
+  - an Overleaf zip chosen before signing in is parked in IndexedDB as bytes — Safari stores no Blob
+    there in a private window; files dropped into the file tree fall back to the dropped `File` where
+    WebKit's directory entry cannot be read.
+  - child documents open on the browser's own `dblclick` (WebKit sent it elsewhere when the link was
+    redrawn between the clicks, and missed ProseMirror's 500 ms window on a busy page); a drag's
+    autoscroll runs per time, not per frame (120 Hz screens scrolled twice as fast); the hidden input of
+    a formula has 16px text (an iPhone zooms into smaller focused text).
 * Byte-exact round trips are guaranteed for LyX ≥ 2.4 files; older files are re-wrapped exactly
   like LyX does on save.
 * The document header (class, preamble, options) is edited through *Document ▸ Settings*; raw
@@ -1405,7 +1466,9 @@ How it works, in order of what happens when you open a document:
 * Large documents: the editor opens the local copy and starts syncing while the document's
   metadata loads; formulas near the top are rendered synchronously (a ~40 ms budget), the rest
   show their source and are rendered in idle time or when scrolled near, and become editable
-  fields when they scroll into view or are hovered/entered. Macro tables are shared and cached
+  fields when they scroll into view or are hovered/entered. (Safari has no `requestIdleCallback`:
+  a timer with an 8 ms deadline stands in — `idleCallback` in nodeviews/math.ts; its deadline
+  once never ran out, and Safari rendered every formula of a long paper in one frozen task.) Macro tables are shared and cached
   per document, so a 300-formula paper paints in well under a second.
 * Every document's Yjs history carries an *epoch*; a browser tab whose editor belongs to an older
   epoch (server restarted with a changed file) reloads instead of merging stale content. Cross-tab
