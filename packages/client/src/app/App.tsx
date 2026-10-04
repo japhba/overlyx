@@ -32,7 +32,7 @@ import { setDocumentFonts } from '../fonts/editorfont';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
 import { Versions } from './Versions';
-import { AgentPanel } from './AgentPanel';
+import { AgentPanel, askAgentAbout } from './AgentPanel';
 import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
 import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX } from './Ruler';
 import { StatusBar, type Status } from './StatusBar';
@@ -126,7 +126,7 @@ async function clearLocalData(): Promise<void> {
 type RightTab = 'comments' | 'versions' | 'agent';
 const RIGHT_TABS = ['comments', 'versions', 'agent'] as const;
 const RIGHT_TAB_LABELS: Record<RightTab, string> = { comments: 'Comments', versions: 'Versions', agent: 'Agent' };
-const RIGHT_TAB_TITLES: Record<RightTab, string> = { comments: 'Comment threads: open ones and the resolved archive', versions: 'Versions of this document', agent: 'The coding agent (OpenAI Codex) working in this project' };
+const RIGHT_TAB_TITLES: Record<RightTab, string> = { comments: 'Comment threads: open ones and the resolved archive', versions: 'Versions of this document', agent: 'Agents: the coding agent (OpenAI Codex) working in this project, and your agents connected from elsewhere (Claude Code, Codex …)' };
 const PDF_TITLE = 'The PDF beside the text (Ctrl+R builds it)';
 /** below this width one pane at a time (the pane switch works like tabs) */
 const NARROW_PANES = '(max-width: 760px)';
@@ -299,7 +299,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   });
   // sidebars: the documents panel (left: project, its file tree with the documents' outlines) and the right
   // panels; shown / hidden state is kept per browser (a hidden sidebar leaves a rail to bring it back)
-  const [showFiles, setShowFiles] = useState(() => stored('ol.files') !== '0');
+  // (a phone-width screen starts with the documents panel folded into its rail: the panel took 270 of an
+  // iPhone's 393 pixels and left the text a column one letter wide)
+  const [showFiles, setShowFiles] = useState(() => { const v = stored('ol.files'); return v !== null ? v !== '0' : !(typeof matchMedia === 'function' && matchMedia(NARROW_PANES).matches); });
   const [rightTab, setRightTab] = useState<RightTab | null>(() => { const v = stored('ol.right'); return v !== null && (RIGHT_TABS as readonly string[]).includes(v) ? v as RightTab : null; });
   // the LaTeX source is a panel below the writing area with its own switch
   useEffect(() => { try { localStorage.setItem('ol.files', showFiles ? '1' : '0'); localStorage.setItem('ol.right', rightTab ?? ''); } catch { /* ignore */ } }, [showFiles, rightTab]);
@@ -412,7 +414,26 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   useEffect(() => subscribePrefs(setPrefsState), []);
   /** The Agent panel appears once AI assistance is activated in the settings (any AI toggle, or the ✦ button). */
   const aiActivated = prefs.aiButton || prefs.aiRewrite || prefs.aiCompleteText || prefs.aiCompleteMath;
-  useEffect(() => { if (!aiActivated && rightTab === 'agent') setRightTab(null); }, [aiActivated, rightTab]);
+  /** the account has agents connected from elsewhere over MCP (Claude Code, Codex …): the Agent panel talks to them too */
+  const [hasExternalAgents, setHasExternalAgents] = useState(false);
+  useEffect(() => {
+    if (user?.guest) return;
+    let last = 0;
+    // again when the page comes back to the front (an agent was just started in a terminal)
+    const check = () => { if (Date.now() - last < 5000 || document.hidden) return; last = Date.now(); api.externalAgents().then(r => setHasExternalAgents(r.agents.length > 0)).catch(() => { /* none */ }); };
+    check();
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => { window.removeEventListener('focus', check); document.removeEventListener('visibilitychange', check); };
+  }, [user?.id]);
+  const agentTab = aiActivated || hasExternalAgents;
+  useEffect(() => { if (!agentTab && rightTab === 'agent') setRightTab(null); }, [agentTab, rightTab]);
+  // "Ask agent about this" in the editor's right-click menu: the selection pinned for the Agent panel's next message
+  useEffect(() => {
+    if (!agentTab) return;
+    editorContext.askAgent = () => { setRightTab('agent'); askAgentAbout(); };
+    return () => { editorContext.askAgent = undefined; };
+  }, [agentTab]);
   const [ai, setAi] = useState<AiStatus | null>(null);
   // completions in flight (a small indicator in the status bar; several may overlap briefly)
   const [aiBusy, setAiBusy] = useState(0);
@@ -1491,7 +1512,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         </div>
         {isLyxDoc && !rightTab && (
           <div class="rail right">
-            {RIGHT_TABS.filter(t => t !== 'agent' || aiActivated).map(t => <button key={t} data-rail={t} title={RIGHT_TAB_TITLES[t]} onClick={() => { setRightTab(t); if (t === 'versions') setSelVersion(v => v + 1); }}>{RIGHT_TAB_LABELS[t]}</button>)}
+            {RIGHT_TABS.filter(t => t !== 'agent' || agentTab).map(t => <button key={t} data-rail={t} title={RIGHT_TAB_TITLES[t]} onClick={() => { setRightTab(t); if (t === 'versions') setSelVersion(v => v + 1); }}>{RIGHT_TAB_LABELS[t]}</button>)}
             <button data-rail="pdf" class={panes.shown.pdf ? 'active' : ''} title={PDF_TITLE} onClick={() => flipPane('pdf')}>PDF</button>
             <button data-rail="source" class={panes.shown.tex ? 'active' : ''} title={SOURCE_TITLE} onClick={toggleRawSplit}>Source</button>
           </div>
@@ -1502,14 +1523,14 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
             <div class="panel-tabs">
               <button class={rightTab === 'comments' ? 'active' : ''} data-tab="comments" onClick={() => setRightTab('comments')} title={RIGHT_TAB_TITLES.comments}>Comments</button>
               <button class={rightTab === 'versions' ? 'active' : ''} data-tab="versions" onClick={() => { setRightTab('versions'); setSelVersion(v => v + 1); }} title={RIGHT_TAB_TITLES.versions}>Versions</button>
-              {aiActivated && <button class={rightTab === 'agent' ? 'active' : ''} data-tab="agent" onClick={() => setRightTab('agent')} title={RIGHT_TAB_TITLES.agent}>Agent</button>}
+              {agentTab && <button class={rightTab === 'agent' ? 'active' : ''} data-tab="agent" onClick={() => setRightTab('agent')} title={RIGHT_TAB_TITLES.agent}>Agent</button>}
               <button class={'toggle' + (panes.shown.pdf ? ' on' : '')} data-tab="pdf" onClick={() => flipPane('pdf')} title={PDF_TITLE}>PDF</button>
               <button class={'toggle' + (panes.shown.tex ? ' on' : '')} data-tab="source" onClick={toggleRawSplit} title={SOURCE_TITLE}>Source</button>
               <button class="hide" title="Hide the sidebar" onClick={() => setRightTab(null)}>»</button>
             </div>
             {rightTab === 'comments' && <div class="panel-body"><Comments views={[masterView, ...[...childRefs.current.values()].map(h => h.view)].filter((v): v is EditorView => !!v)} tick={docTick} /></div>}
             {rightTab === 'versions' && <div class="panel-body"><Versions docId={docId} refreshKey={selVersion} /></div>}
-            {rightTab === 'agent' && <AgentPanel project={projectOfDoc(docId)} notify={notify} />}
+            {rightTab === 'agent' && <AgentPanel project={projectOfDoc(docId)} notify={notify} codex={aiActivated} />}
           </div>
         )}
       </div>

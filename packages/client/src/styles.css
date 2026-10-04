@@ -586,7 +586,7 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
    p{…} columns at their width (the <colgroup>, core schema.ts) — not the column-filling fixed layout
    of prosemirror-tables' stylesheet */
 .lyx-tabular { display: inline-block; vertical-align: middle; margin: 4px 0; max-width: none; width: max-content; text-indent: 0; }
-.ProseMirror .lyx-tabular table, .ol-present-stage .lyx-tabular table { border-collapse: collapse; table-layout: auto; width: auto; }
+.ProseMirror .lyx-tabular table, .ol-present-stage .lyx-tabular table, .ol-rail-holder .lyx-tabular table { border-collapse: collapse; table-layout: auto; width: auto; }
 /* a table alone on its line (editor/plugins/widetables.ts): centred on the text column; one wider than
    the column is moved left by --ol-spill so that it overflows both margins by the same amount */
 .lyx-par.ol-solo-table { text-align: center; text-indent: 0; }
@@ -640,7 +640,8 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .lm-sel { position: absolute; background: rgba(90, 140, 220, 0.28); }
 .lm-corner { position: absolute; box-sizing: border-box; width: 4px; height: 4px; }
 .lm-macro-name { position: absolute; font: 8px/10px system-ui, sans-serif; color: var(--math-arg); background: var(--math-arg-bg); padding: 0 2px; border-radius: 2px; white-space: nowrap; }
-.lm-input { position: absolute; width: 1px; height: 1px; opacity: 0; left: 0; top: 0; padding: 0; border: 0; margin: 0; resize: none; overflow: hidden; pointer-events: none; }
+/* (16px: Safari on an iPhone zooms the page into a focused text field whose letters are smaller — on every tap into a formula) */
+.lm-input { position: absolute; width: 1px; height: 1px; opacity: 0; left: 0; top: 0; padding: 0; border: 0; margin: 0; resize: none; overflow: hidden; pointer-events: none; font-size: 16px; }
 /* an empty cell: a blank of a letter's size in MathJax's layout (core EMPTY_CELL), outlined */
 .lm-empty { box-shadow: inset 0 0 0 1px var(--muted2); border-radius: 1px; }
 /* the boxes of empty cells only while the formula is being edited (its field has the focus; formulas
@@ -744,7 +745,7 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .statusbar .zoom { display: inline-flex; flex-shrink: 0; align-items: center; gap: 1px; margin-left: 4px; }
 .statusbar .zoom-btn { border: 1px solid transparent; background: none; color: var(--ui-fg); width: 18px; height: 18px; line-height: 1; border-radius: 3px; font-size: 13px; padding: 0; cursor: pointer; }
 .statusbar .zoom-btn:hover { background: var(--ui-hover); border-color: var(--ui-border); }
-.statusbar .zoom-select { height: 18px; font-size: 11px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); color: var(--ui-fg); }
+.statusbar .zoom-select { height: 18px; font-size: 11px; padding-block: 0; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); color: var(--ui-fg); }   /* (no vertical padding: Safari's own cut the 18 px box's text off at the bottom) */
 .statusbar .save-state.saved { color: var(--ok); }
 /* the PDF's age in the status bar (app/StatusBar.tsx PdfStatusChip) */
 .statusbar .pdf-status { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; font: inherit; color: var(--ui-muted); background: none; border: 1px solid transparent; border-radius: 3px; padding: 0 6px; line-height: 18px; cursor: pointer; white-space: nowrap; }
@@ -1236,6 +1237,7 @@ button.tb-cw:hover:not(:disabled) { background: var(--row-hover); border-color: 
 .menubar .users .avatar { padding: 0; cursor: pointer; font-family: inherit; transition: transform 0.1s; position: relative; }
 .menubar .users .avatar:hover { transform: scale(1.15); z-index: 1; box-shadow: 0 0 0 1.5px var(--muted2); }
 .menubar .users .avatar.self { cursor: default; }
+.menubar .users .avatar.agent { border-radius: 6px; }   /* an agent connected over MCP: a rounded square, not a circle */
 .menubar .users .avatar:not(.has-cursor) { opacity: 0.6; }
 .ProseMirror-yjs-cursor.flash > div { animation: ol-cursor-flash 0.4s ease-in-out 4; }
 @keyframes ol-cursor-flash { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }
@@ -1254,9 +1256,36 @@ button.tb-cw:hover:not(:disabled) { background: var(--row-hover); border-color: 
 .home-card .blurb { color: var(--fg2); font-size: 13px; line-height: 1.45; max-width: 720px; }
 .home-card .docs a { display: block; font-size: 12.5px; color: var(--link); text-decoration: none; padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .home-card .docs a:hover { text-decoration: underline; }
-.home-card .actions { margin-top: auto; display: flex; gap: 6px; padding-top: 6px; }
-.btn.small { font-size: 11.5px; padding: 3px 9px; }
+.home-card .actions { margin-top: auto; display: flex; flex-wrap: wrap; gap: 6px; padding-top: 6px; }
+.home-card .actions .danger { margin-left: auto; }   /* set apart at the right, also when a narrow card wraps it */
+a.btn { display: inline-block; color: var(--ui-fg); text-decoration: none; line-height: normal; }
+.btn.primary, a.btn.primary { color: #fff; }
 .btn.danger { color: var(--err); }
+/* the switch between the list and the grid: one icon showing the view it leads to */
+.home .home-view-switch { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--ui-muted); }
+.home .home-view-switch:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.home .home-view-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.home .home-view-switch svg { fill: currentColor; }
+/* rows: one bordered list, a project per line — name and facts left, documents below them, actions right */
+.home .cards.rows { display: flex; flex-direction: column; gap: 0; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
+.home-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title actions" "meta actions" "docs actions"; column-gap: 16px; row-gap: 2px; align-items: center;
+  min-height: 0; padding: 10px 14px; border: none; border-radius: 0; box-shadow: none; background: none; border-top: 1px solid var(--ui-border2); }
+.home-row:first-child { border-top: none; }
+.home-row:hover { background: var(--surface2); }
+.home-row .title { grid-area: title; min-width: 0; }
+.home-row .title .name { color: var(--ui-fg); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-row .title .name:hover { color: var(--accent); text-decoration: underline; }
+.home-row .meta { grid-area: meta; }
+.home-row .docs { grid-area: docs; display: flex; gap: 2px 14px; min-width: 0; overflow: hidden; white-space: nowrap; mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
+.home-row .docs a { display: inline; flex: none; overflow: visible; }
+.home-row .actions { grid-area: actions; margin: 0; padding: 0; flex-wrap: nowrap; justify-content: flex-end; }
+@media (max-width: 720px) {
+  .home { padding: 0 16px 32px; margin-top: 18px; }
+  .home .home-actions { flex-wrap: wrap; }
+  .home-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "title" "meta" "docs" "actions"; }
+  .home-row .actions { justify-content: flex-start; flex-wrap: wrap; padding-top: 6px; }
+}
+.btn.small { font-size: 11.5px; padding: 3px 9px; }
 .badge { font-size: 9.5px; padding: 0 5px; border-radius: 8px; background: var(--chip-bg); color: var(--accent); font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; line-height: 15px; }
 .badge.view { background: var(--ui-bg2); color: var(--ui-muted); }
 .tree-row .badge { margin-left: 2px; }
@@ -1572,6 +1601,30 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .agent-threads .row .meta { color: var(--ui-muted); font-size: 11.5px; margin-top: 2px; }
 .agent-threads .new { align-self: stretch; }
 .agent-readonly { border-top: 1px solid var(--ui-border); padding: 6px 8px; color: var(--ui-muted); font-size: 12px; }
+/* the Agent panel's tabs: the embedded agent and the agents connected from elsewhere (ExternalAgents.tsx) */
+.agent-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.agent-wrap > .agent-panel { flex: 1; min-height: 0; height: auto; }
+.agent-switch { display: flex; gap: 4px; padding: 5px 6px; border-bottom: 1px solid var(--ui-border); overflow-x: auto; flex: none; }
+.agent-switch button { font: inherit; font-size: 12px; background: none; color: var(--ui-muted); border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.agent-switch button:hover { background: var(--ui-hover); }
+.agent-switch button.active { color: var(--ui-fg); border-color: var(--ui-border); background: var(--ui-bg2); }
+.ext-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ui-muted); flex: none; display: inline-block; box-sizing: border-box; }
+.ext-dot.offline { background: transparent; border: 1.5px solid var(--ui-muted); }
+.ext-dot.listening, .ext-dot.working { animation: ext-pulse 2s ease-in-out infinite; }
+@keyframes ext-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .ext-dot.listening, .ext-dot.working { animation: none; } }
+.ext-head .who { color: var(--ui-fg); }
+.ext-user .ext-context { color: var(--ui-muted); font-size: 11.5px; margin-top: 3px; white-space: normal; }
+.ext-user .ext-state { color: var(--ui-muted); font-size: 11px; margin-top: 2px; white-space: normal; }
+.ext-user .ext-state a { color: var(--accent); }
+.ext-reply.progress { color: var(--ui-muted); font-size: 12.5px; }
+.ext-hint { border: 1px dashed var(--ui-border); border-radius: 8px; padding: 8px 10px; color: var(--ui-muted); font-size: 12.5px; line-height: 1.5; }
+.ext-hint p { margin: 0 0 6px; }
+.ext-hint p:last-child { margin-bottom: 0; }
+.ext-hint code { font-family: ui-monospace, monospace; font-size: 11.5px; background: var(--ui-bg2); border-radius: 4px; padding: 0 3px; }
+.ext-hint .ext-cmd { display: inline-block; margin: 3px 0; user-select: all; overflow-wrap: anywhere; }
+.ext-none { margin: 12px; }
+.ext-pin { font-size: 12px; color: var(--ui-muted); display: flex; align-items: center; gap: 6px; }
 
 /* Agent panel v2: selectors, math, diff summaries, approval feedback */
 .agent-compose .agent-select { font: inherit; font-size: 12px; max-width: 110px; background: var(--page-bg); color: inherit; border: 1px solid var(--ui-border); border-radius: 5px; padding: 2px 3px; }
@@ -1829,13 +1882,16 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .ol-page .lm-field, .ol-page .lyx-math-static { padding: 0; border: 0; }
 .ol-page .lm-field:hover { outline: 1px solid rgba(26,115,232,0.3); }
 .ol-page .lm-field.focused { outline: 1px solid var(--accent); }
-.ol-page .lm-field:not(.focused) .lm-empty mjx-mspace, .ol-present-stage .lm-empty mjx-mspace { width: 0 !important; }
+.ol-page .lm-field:not(.focused) .lm-empty mjx-mspace, .ol-present-stage .lm-empty mjx-mspace, .ol-rail-holder .lm-empty mjx-mspace { width: 0 !important; }
 .ol-page .lm-field.display, .ol-page .lyx-math-static.display { font-size: 1em; }
 /* formulas at the text's nominal size, in the math font's own scale (not the editor's x-height match) */
-.lyx-editor.ol-layout .ol-page mjx-container[jax="CHTML"], .ol-present-stage .ol-page mjx-container[jax="CHTML"] { font-size: calc(var(--ol-math-rel, 1) * 1em); }
+.lyx-editor.ol-layout .ol-page mjx-container[jax="CHTML"], .ol-present-stage .ol-page mjx-container[jax="CHTML"], .ol-rail-holder .ol-page mjx-container[jax="CHTML"] { font-size: calc(var(--ol-math-rel, 1) * 1em); }
 .ol-page-label { position: absolute; right: calc(100% + 10px); top: 0; font: 12px/1.3 var(--ui-font); color: var(--ui-muted); white-space: nowrap; user-select: none; max-width: 30px; overflow: hidden; text-overflow: ellipsis; }
 .ol-obj { position: absolute; box-sizing: border-box; transform-origin: 50% 50%; }
 .ol-box-frame { position: absolute; box-sizing: border-box; pointer-events: none; }
+/* "Click to add title" in an empty named box of a new slide (nodeviews.ts BoxView): laid out like its text, the editor's only */
+.ol-box-prompt { position: absolute; inset: 0; display: flex; flex-direction: column; box-sizing: border-box; opacity: 0.42; white-space: nowrap; overflow: hidden; pointer-events: none; }
+.ol-box-prompt[hidden], .ol-box.ol-edited .ol-box-prompt { display: none; }   /* (the caret in it: the prompt makes way, as in PowerPoint) */
 .ol-box-content { position: relative; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; outline: none; line-height: var(--ol-lh); }
 .ol-box-content > .lyx-par, .ol-box-content .lyx-par { margin: 0; padding: 0; text-indent: 0; }
 /* TeX's lines (a text box is a minipage), so that the text stands where the PDF has it:
@@ -1899,6 +1955,13 @@ mjx-mtable:has(.lyx-size-tiny, .lyx-size-scriptsize, .lyx-size-footnotesize, .ly
   background: var(--surface); color: var(--editor-fg); border: 1px solid var(--ui-border); border-radius: 6px; font: 13px/1.4 var(--ui-font);
 }
 .ol-layout.ol-show-notes .ol-page-wrap { margin-bottom: 110px; }
+/* a page without notes, while they are shown: an invitation in their place (nodeviews.ts PageView) */
+.ol-notes-add { display: none; }
+.ol-layout.ol-show-notes .ol-page-wrap:not(.ol-has-notes) > .ol-notes-add {
+  display: block; position: absolute; left: 0; right: 0; top: calc(100% + 8px); padding: 10px 12px; box-sizing: border-box;
+  border: 1px dashed var(--ui-border); border-radius: 6px; color: var(--ui-muted); font: 13px/1.4 var(--ui-font); cursor: text; user-select: none;
+}
+.ol-layout.ol-show-notes .ol-page-wrap:not(.ol-has-notes) > .ol-notes-add:hover { border-color: var(--active-border); color: var(--ui-fg); background: var(--surface); }
 .ol-layout .ol-notes::before { content: 'Speaker notes'; display: block; font-size: 11px; color: var(--ui-muted); margin-bottom: 2px; }
 /* the pointer: an arrow on the canvas and over objects (the page is not text to click into); the
    text cursor over the text box being edited or a selected one (a click puts the caret there) */
@@ -2095,3 +2158,53 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 
 /* the raw LaTeX object's editor (editor/layout/rawedit.ts) */
 .ol-rawedit-code { width: min(70vw, 760px); min-height: 40vh; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: var(--surface); color: var(--ui-fg); resize: vertical; }
+
+/* ------------------------------------------------------------ the slide rail of decks (editor/layout/rail.ts)
+   PowerPoint's thumbnail pane, lying over the scroller's left edge inside the editor column; the canvas makes room */
+.lyx-editor.ol-layout.ol-has-rail { padding-left: var(--ol-rail-w, 0px); box-sizing: border-box; }
+.ol-slide-rail { position: absolute; z-index: 6; width: 196px; display: flex; flex-direction: column; box-sizing: border-box; background: var(--surface2); border-right: 1px solid var(--ui-border); font: 12px/1.3 var(--ui-font); color: var(--ui-fg); user-select: none; -webkit-user-select: none; }
+.ol-slide-rail.collapsed { width: 26px; }
+.ol-slide-rail.collapsed > :not(.ol-rail-show), .ol-slide-rail:not(.collapsed) > .ol-rail-show { display: none; }
+.ol-rail-show { flex: 1; writing-mode: vertical-rl; border: none; background: none; color: var(--ui-muted); padding: 12px 0; font: inherit; cursor: pointer; }
+.ol-rail-show:hover { color: var(--ui-fg); background: var(--ui-hover); }
+.ol-rail-head { display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 12px; border-bottom: 1px solid var(--ui-border2); }
+.ol-rail-title { font-weight: 600; }
+.ol-rail-count { margin-left: auto; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.ol-rail-hide { width: 22px; height: 22px; padding: 0; border: none; border-radius: 4px; background: none; color: var(--ui-muted); }
+.ol-rail-notes { height: 20px; padding: 0 6px; border: 1px solid var(--ui-border); border-radius: 10px; background: none; color: var(--ui-muted); font: 11px var(--ui-font); }
+.ol-rail-notes:hover { color: var(--ui-fg); border-color: var(--active-border); }
+.ol-rail-notes.active { background: var(--active-bg); border-color: var(--active-border); color: var(--ui-fg); }
+.ol-rail-hide:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.ol-rail-list { position: relative; flex: 1; min-height: 0; overflow: hidden auto; padding: 8px 0 12px; outline: none; scrollbar-width: thin; }
+.ol-rail-item { position: relative; display: flex; align-items: flex-start; gap: 6px; padding: 5px 8px 5px 4px; cursor: pointer; }
+.ol-rail-num { flex: none; width: 20px; padding-top: 1px; text-align: right; font-size: 11px; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.ol-rail-item.has-transition .ol-rail-num::after { content: '\2726'; display: block; margin-top: 2px; font-size: 9px; color: var(--muted2); }
+.ol-rail-thumb { flex: none; width: 138px; border-radius: 3px; overflow: hidden; background: #fff; box-shadow: 0 0 0 1px var(--ui-border); transition: box-shadow 0.1s; }
+.ol-rail-item:hover .ol-rail-thumb { box-shadow: 0 0 0 1px var(--active-border); }
+.ol-rail-item.current .ol-rail-thumb { box-shadow: 0 0 0 2px var(--accent); }
+.ol-rail-list:focus-visible .ol-rail-item.current .ol-rail-thumb { box-shadow: 0 0 0 2px var(--accent), 0 0 0 5px var(--accent-border); }
+.ol-rail-item.current .ol-rail-num { color: var(--accent); font-weight: 600; }
+.ol-rail-item.dragging { opacity: 0.35; }
+.ol-slide-rail.dragging .ol-rail-item { cursor: grabbing; }
+.ol-rail-clip { position: relative; overflow: hidden; }
+.ol-rail-holder { position: absolute; left: 0; top: 0; width: calc(var(--ol-mm) * var(--ol-page-w)); font-size: 14px; line-height: 1.2; color: #000; transform-origin: 0 0; pointer-events: none; }
+.ol-rail-holder .ol-rail-page { margin: 0; box-shadow: none; }
+.ol-rail-more { position: absolute; top: 9px; right: 13px; width: 20px; height: 18px; padding: 0; border: 1px solid var(--ui-border); border-radius: 4px; background: var(--surface); color: var(--ui-fg); font-size: 12px; line-height: 1; opacity: 0; transition: opacity 0.1s; }
+.ol-rail-item:hover .ol-rail-more { opacity: 0.9; }
+.ol-rail-more:hover { opacity: 1; background: var(--ui-hover); }
+@media (hover: none) { .ol-rail-item.current .ol-rail-more { opacity: 0.9; } }
+.ol-rail-drop { position: absolute; z-index: 1; left: 28px; right: 10px; height: 3px; border-radius: 2px; background: var(--accent); display: none; pointer-events: none; }
+.ol-rail-foot { display: flex; gap: 1px; padding: 8px; border-top: 1px solid var(--ui-border2); }
+.ol-rail-new, .ol-rail-layouts { border: 1px solid var(--ui-border); background: var(--surface); color: var(--ui-fg); font: inherit; padding: 5px 8px; }
+.ol-rail-new { flex: 1; border-radius: 5px 0 0 5px; font-weight: 600; }
+.ol-rail-layouts { width: 28px; padding: 5px 0; border-radius: 0 5px 5px 0; border-left: none; }
+.ol-rail-new:hover, .ol-rail-layouts:hover { background: var(--row-hover); border-color: var(--accent-border); }
+.ol-rail-pop { position: absolute; z-index: 30; left: 8px; width: 292px; box-sizing: border-box; padding: 10px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2); }
+.ol-rail-pop-title { font-weight: 600; margin: 0 0 8px 2px; }
+.ol-rail-pop-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.ol-rail-layout { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 6px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--ui-fg); font: 11.5px/1.2 var(--ui-font); text-align: center; }
+.ol-rail-layout:hover, .ol-rail-layout:focus-visible { background: var(--row-hover); border-color: var(--accent-border); outline: none; }
+.ol-rail-layout svg { display: block; width: 100%; height: auto; }
+.ol-rail-layout svg .p { fill: #fff; stroke: var(--ui-border); }
+.ol-rail-layout svg .t { fill: var(--accent); }
+.ol-rail-layout svg .l { fill: var(--muted2); }

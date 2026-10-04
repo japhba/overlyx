@@ -137,10 +137,19 @@ export class CommandView implements NodeView {
     citationViews.add(this);
     this.dom.addEventListener('dblclick', (ev) => {
       ev.preventDefault();
-      // child documents open in a tab on double-click (editor.ts handleDoubleClickOn), not a dialog
-      if (this.node.attrs.cmd === 'include') return;
+      // a child document opens on double-click, not a dialog — on the browser's own dblclick, which counts
+      // clicks by the system's timing: ProseMirror's handleDoubleClickOn needs both presses handled within
+      // 500 ms, and a busy page (WebKit on a long paper: ~1 s after the first press) never got there
+      if (this.node.attrs.cmd === 'include') { const id = this.includeTarget(); if (id) editorContext.openInTab?.(id); return; }
       editorContext.openInsetDialog?.(this.view, this.getPos());
     });
+  }
+
+  /** the child document an include inset names (`<project>/<path>`), as its link's href */
+  private includeTarget(): string | null {
+    const project = viewProject(this.view) || editorContext.project;
+    const fn = unquote(params(this.node).get('filename'));
+    return project && fn ? project + '/' + resolveDocPath(fn, viewDocDir(this.view)) : null;
   }
 
   private render() {
@@ -212,10 +221,10 @@ export class CommandView implements NodeView {
         text = cmd;
         this.dom.classList.add('lyx-button');
     }
-    if (cmd === 'include' && (viewProject(this.view) || editorContext.project)) {
-      const fn = unquote(p.get('filename'));
+    const child = cmd === 'include' ? this.includeTarget() : null;
+    if (child) {
       const a = document.createElement('a');
-      a.href = '#/' + (viewProject(this.view) || editorContext.project) + '/' + resolveDocPath(fn, viewDocDir(this.view));
+      a.href = '#/' + child;
       a.textContent = text;
       a.className = 'lyx-include-link';
       a.addEventListener('click', (ev) => { if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) ev.preventDefault(); });
@@ -226,8 +235,12 @@ export class CommandView implements NodeView {
   }
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
+    // the same inset (ProseMirror also asks when only the decorations around it changed): its DOM stays —
+    // drawn anew between the two clicks of a double-click, a child document's link was another element
+    // under the second press, and Safari sent the dblclick to the paragraph instead
+    const same = node.sameMarkup(this.node);
     this.node = node;
-    this.render();
+    if (!same) this.render();
     return true;
   }
   /** redraw a citation from the current metadata (the bibliography may know its keys now) */

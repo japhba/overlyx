@@ -42,7 +42,7 @@ test('a pasted screenshot is uploaded into figures/ and inserted as a graphics i
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const dt = new DataTransfer();
     dt.items.add(new File([bytes], 'image.png', { type: 'image/png' }));   // the name browsers give clipboard images
-    document.querySelector('.lyx-editor')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    document.querySelector('.lyx-editor')!.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }), 'clipboardData', { value: dt }));
   }, PNG_B64);
   await expect(page.locator('.lyx-editor .lyx-graphics img')).toHaveCount(1, { timeout: 10000 });
   expect(figs().filter(f => /^pasted-\d{8}-\d{6}\.png$/.test(f))).toHaveLength(1);
@@ -60,7 +60,7 @@ test('pasted SVG markup becomes an .svg file in figures/ and a graphics inset', 
   await page.evaluate(() => {
     const dt = new DataTransfer();
     dt.setData('text/plain', '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle cx="10" cy="10" r="9" fill="tomato"/></svg>');
-    document.querySelector('.lyx-editor')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    document.querySelector('.lyx-editor')!.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }), 'clipboardData', { value: dt }));
   });
   await expect(page.locator('.lyx-editor .lyx-graphics')).toHaveCount(before + 1, { timeout: 10000 });
   const svg = figs().find(f => f.endsWith('.svg'));

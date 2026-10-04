@@ -8,7 +8,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { login, openDoc, texDoc, collectErrors, PROJECTS_DIR } from './helpers';
+import { login, openDoc, texDoc, collectErrors, PROJECTS_DIR, newTouchContext } from './helpers';
 
 const PROJECT = 'admin/e2e-ink';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -218,6 +218,11 @@ test('the lasso closes itself and selects what it touches; pen and highlighter k
   await expect(page.locator('[data-tb="i-c-1"]')).toHaveClass(/active/);
   // clean up the strokes for the tests that follow on this document (the page scrolled on reload: re-measure)
   await page.click('[data-tb="i-lasso"]');
+  await expect(page.locator('.lyx-editor .lyx-sketch')).toHaveCount(1);   // the strokes are back from the server
+  // …once it has settled: the restored cursor is scrolled to again a moment after the reload (editor.ts restoreCursor),
+  // which came after the measuring in Firefox
+  const scrollTop = () => page.evaluate(() => document.querySelector('.editor-scroll')!.scrollTop);
+  await expect.poll(async () => { const a = await scrollTop(); await page.waitForTimeout(500); return a === await scrollTop(); }, { timeout: 10000 }).toBe(true);
   const box2 = (await page.locator('.lyx-editor .lyx-par').first().boundingBox())!;
   const tx = box2.x + box2.width + 40, ty = box2.y + 12;
   await page.mouse.move(tx - 30, ty - 40);
@@ -358,7 +363,7 @@ test('with the canvas focused (caret deactivated), a pasted image lands in the m
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const dt = new DataTransfer();
     dt.items.add(new File([bytes], 'shot.png', { type: 'image/png' }));
-    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    document.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }), 'clipboardData', { value: dt }));
   });
 
   // the image becomes a margin object: an anchor appears, it is selected, no graphics inset is inserted
@@ -377,7 +382,7 @@ test('with the canvas focused (caret deactivated), a pasted image lands in the m
 });
 
 test('the drawing toolbar activates itself on tablet clients', async ({ browser }) => {
-  const ctx = await browser.newContext({ viewport: { width: 1180, height: 820 }, hasTouch: true, isMobile: true });
+  const ctx = await newTouchContext(browser, { viewport: { width: 1180, height: 820 }, isMobile: true });
   const page = await ctx.newPage();
   try {
     await login(page);

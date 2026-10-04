@@ -1,0 +1,260 @@
+// @vitest-environment happy-dom
+/**
+ * Things that worked in Chromium only — findings of the e2e suite run in WebKit (Safari's engine) and
+ * Firefox, and of probes of what a Safari / iPad user does (scratch/browsers/). One block per fix.
+ */
+import { describe, it, expect, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { schema } from '../packages/core/src/schema.ts';
+import { editorContext } from '../packages/client/src/editor/context.ts';
+import { CommandView } from '../packages/client/src/editor/nodeviews/leaf.ts';
+import { keepScrollOnFocus, caretOutOfWidget } from '../packages/client/src/editor/assembly.ts';
+import { isTabletClient } from '../packages/client/src/editor/plugins/ink.ts';
+import { pasteEventWith } from '../packages/client/src/editor/clipmenu.ts';
+import { EditorState, Plugin, TextSelection } from 'prosemirror-state';
+import { EditorView, Decoration, DecorationSet } from 'prosemirror-view';
+import { idleCallback } from '../packages/client/src/editor/nodeviews/math.ts';
+import { stashPendingImport, takePendingImport, pendingImportFlag } from '../packages/client/src/app/pendingImport.ts';
+
+afterEach(() => { editorContext.openInTab = undefined; editorContext.openInsetDialog = undefined; });
+
+/**
+ * The PDF viewer loads pdf.js's legacy build: the default one needs Map.getOrInsertComputed,
+ * Math.sumPrecise and the Iterator global (Safari 26.2, Firefox 144, Chrome 147) and stopped the whole
+ * app from starting in older Safari (`Iterator` is evaluated when pdf.js is imported).
+ */
+describe('pdf.js', () => {
+  it('the web client and the VS Code PDF panel load the legacy build (and its worker), never the default one', () => {
+    for (const f of ['packages/client/src/app/PdfViewer.tsx', 'packages/vscode/src/webview/pdfMain.tsx']) {
+      const src = readFileSync(f, 'utf8');
+      const imports = [...src.matchAll(/from '(pdfjs-dist[^']*)'|'(pdfjs-dist\/[^']*worker[^']*)'/g)].map(m => m[1] ?? m[2]);
+      expect(imports.length, f).toBeGreaterThan(0);
+      for (const i of imports) expect(i, f).toMatch(/^pdfjs-dist\/legacy\/build\//);
+    }
+  });
+});
+
+/**
+ * A child document opens on the browser's own double-click: ProseMirror's handleDoubleClickOn counts the
+ * clicks itself (500 ms apart at most), which a busy WebKit page missed, and WebKit sent the dblclick to
+ * the paragraph when the link was drawn anew between the two clicks.
+ */
+describe('a child document (\\input / \\include inset)', () => {
+  const include = (filename: string) => schema.nodes.command.create({ cmd: 'include', params: JSON.stringify(['LatexCommand input', `filename "${filename}"`, '']) });
+  const viewIn = (project: string, docDir: string) => { const dom = document.createElement('div'); dom.dataset.project = project; dom.dataset.docDir = docDir; return { dom } as never; };
+
+  it('opens on the dblclick event itself, relative to the document\'s folder; no inset dialog', () => {
+    const opened: string[] = [];
+    let dialogs = 0;
+    editorContext.openInTab = (id: string) => { opened.push(id); };
+    editorContext.openInsetDialog = () => { dialogs++; };
+    const v = new CommandView(include('../shared/macros.tex'), viewIn('jan/paper', 'chapters'), () => 0);
+    expect(v.dom.querySelector('a.lyx-include-link')?.getAttribute('href')).toBe('#/jan/paper/shared/macros.tex');
+    const ev = new MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 });
+    v.dom.querySelector('a')!.dispatchEvent(ev);
+    expect(opened).toEqual(['jan/paper/shared/macros.tex']);
+    expect(dialogs).toBe(0);
+    expect(ev.defaultPrevented).toBe(true);
+    v.destroy?.();
+  });
+
+  it('keeps its link element when ProseMirror updates it unchanged (the second click of a double-click hits the same element)', () => {
+    const v = new CommandView(include('a.tex'), viewIn('jan/paper', ''), () => 0);
+    const link = v.dom.querySelector('a');
+    expect(v.update(include('a.tex'))).toBe(true);
+    expect(v.dom.querySelector('a')).toBe(link);
+    expect(v.update(include('b.tex'))).toBe(true);   // another file: drawn anew
+    expect(v.dom.querySelector('a')?.getAttribute('href')).toBe('#/jan/paper/b.tex');
+    v.destroy?.();
+  });
+
+  it('other command insets still open their dialog on a double-click', () => {
+    let dialogs = 0;
+    editorContext.openInTab = () => { throw new Error('not a child document'); };
+    editorContext.openInsetDialog = () => { dialogs++; };
+    const label = schema.nodes.command.create({ cmd: 'label', params: JSON.stringify(['LatexCommand label', 'name "sec:intro"', '']) });
+    const v = new CommandView(label, viewIn('jan/paper', ''), () => 0);
+    v.dom.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 }));
+    expect(dialogs).toBe(1);
+    v.destroy?.();
+  });
+});
+
+/**
+ * Without requestIdleCallback (Safari) the idle-time rendering of formulas gets a deadline that runs
+ * out: a constant one rendered every formula of a long paper in one task and froze the page.
+ */
+describe('idle time without requestIdleCallback (Safari)', () => {
+  it('the deadline runs out: an idle task that renders while timeRemaining() lasts stops after ~8 ms', async () => {
+    const spent = await new Promise<{ first: number; steps: number; ms: number }>(res => idleCallback(d => {
+      const t0 = performance.now(), first = d.timeRemaining();
+      let steps = 0;
+      while (d.timeRemaining() > 0 && steps < 1e7) { steps++; for (let i = 0; i < 1000; i++) Math.sqrt(i); }
+      res({ first, steps, ms: performance.now() - t0 });
+    }, {}));
+    expect(spent.first).toBeGreaterThan(0);
+    expect(spent.first).toBeLessThanOrEqual(8);
+    expect(spent.steps).toBeLessThan(1e7);   // it ended because the time was up
+    expect(spent.ms).toBeLessThan(50);
+  });
+  it('requestIdleCallback is used where the browser has it', () => {
+    const calls: unknown[] = [];
+    idleCallback(() => {}, { requestIdleCallback: (cb: unknown, o: unknown) => { calls.push(o); } });
+    expect(calls).toEqual([{ timeout: 500 }]);
+  });
+});
+
+/**
+ * An Overleaf zip chosen before the sign-in is parked in IndexedDB as bytes: Safari cannot store a Blob
+ * there in a private window, and the import was lost.
+ *
+ * An IndexedDB with one object store per database, values kept by structured clone — and, as Safari's in a
+ * private window, refusing a value that holds a Blob ("Error preparing Blob/File data to be stored in object store").
+ */
+function privateSafariIndexedDB() {
+  const dbs = new Map<string, Map<string, Map<IDBValidKey, unknown>>>();
+  const hasBlob = (v: unknown): boolean => v instanceof Blob || (Array.isArray(v) ? v.some(hasBlob) : !!v && typeof v === 'object' && !(v instanceof ArrayBuffer) && Object.values(v).some(hasBlob));
+  const later = (f: () => void) => setTimeout(f, 0);
+  return {
+    open(name: string) {
+      const req: any = {};
+      later(() => {
+        const fresh = !dbs.has(name);
+        const stores = dbs.get(name) ?? new Map<string, Map<IDBValidKey, unknown>>();
+        dbs.set(name, stores);
+        const db: any = {
+          objectStoreNames: { contains: (n: string) => stores.has(n) },
+          createObjectStore: (n: string) => { stores.set(n, new Map()); },
+          close() {},
+          transaction(store: string) {
+            const t: any = {};
+            const data = stores.get(store)!;
+            const op = (f: () => unknown) => { const r: any = {}; later(() => { try { r.result = f(); r.onsuccess?.(); later(() => t.oncomplete?.()); } catch (e) { r.error = e; t.error = e; r.onerror?.(); later(() => t.onerror?.()); } }); return r; };
+            t.objectStore = () => ({
+              put: (v: unknown, k: IDBValidKey) => op(() => { if (hasBlob(v)) throw new DOMException('Error preparing Blob/File data to be stored in object store', 'UnknownError'); data.set(k, structuredClone(v)); return k; }),
+              get: (k: IDBValidKey) => op(() => structuredClone(data.get(k))),
+              delete: (k: IDBValidKey) => op(() => { data.delete(k); }),
+            });
+            return t;
+          },
+        };
+        req.result = db;
+        if (fresh) req.onupgradeneeded?.();
+        req.onsuccess?.();
+      });
+      return req;
+    },
+  };
+}
+
+describe('an Overleaf import chosen before the sign-in', () => {
+  it('survives the sign-in where IndexedDB takes no Blobs (Safari, private window): the zips come back as Files', async () => {
+    const saved = (globalThis as any).indexedDB;
+    (globalThis as any).indexedDB = privateSafariIndexedDB();
+    try {
+      const zip = new File([new Uint8Array([80, 75, 3, 4, 1, 2, 3])], 'thesis.zip', { type: 'application/zip', lastModified: 1700000000000 });
+      await stashPendingImport({ links: '', token: '', zips: [zip] });
+      expect(pendingImportFlag()).toBe(true);
+      const back = await takePendingImport();
+      expect(back?.zips.map(f => [f.name, f.type, f.size, f instanceof File])).toEqual([['thesis.zip', 'application/zip', 7, true]]);
+      expect([...new Uint8Array(await back!.zips[0].arrayBuffer())]).toEqual([80, 75, 3, 4, 1, 2, 3]);
+      expect(pendingImportFlag()).toBe(false);
+      expect(await takePendingImport()).toBeNull();   // taken: nothing waits any more
+    } finally { (globalThis as any).indexedDB = saved; }
+  });
+});
+
+/**
+ * The editor getting the focus back keeps the page where it is: WebKit reveals the editor's previous
+ * DOM selection on focus whatever preventScroll says (a click on a child document's link took the
+ * focus, ProseMirror took it back, and Safari scrolled to where the caret had been).
+ */
+describe('focusing the editor', () => {
+  it('leaves the scroll positions of its scrolling ancestors as they were', () => {
+    const scroller = document.createElement('div');
+    const place = document.createElement('div');
+    scroller.appendChild(place); document.body.appendChild(scroller);
+    const view = new EditorView(place, { state: EditorState.create({ schema }) });
+    keepScrollOnFocus(view);
+    scroller.scrollTop = 591;
+    // what WebKit does on focus: the old caret, far down the page, is revealed
+    const focusDom = view.dom.focus.bind(view.dom);
+    view.dom.focus = (o?: FocusOptions) => { focusDom(o); scroller.scrollTop = 1847; };
+    view.focus();
+    expect(scroller.scrollTop).toBe(591);
+    view.destroy(); scroller.remove();
+  });
+});
+
+/**
+ * The menus' Paste hands the editor a paste event with the clipboard's data: Firefox's ClipboardEvent
+ * constructor leaves clipboardData empty, and LaTeX text pasted from the menu went in unparsed.
+ */
+describe('a paste event made by the menus', () => {
+  it('carries its data also where the constructor drops it (Firefox)', () => {
+    const Native = globalThis.ClipboardEvent;
+    class FirefoxLike extends Event { clipboardData = new DataTransfer(); constructor(type: string) { super(type); } }
+    (globalThis as any).ClipboardEvent = FirefoxLike;
+    try {
+      const data = new DataTransfer();
+      data.setData('text/plain', '\\section{Pasted}');
+      expect(pasteEventWith(data).clipboardData?.getData('text/plain')).toBe('\\section{Pasted}');
+    } finally { (globalThis as any).ClipboardEvent = Native; }
+  });
+});
+
+/**
+ * Firefox's Home put the caret inside an uneditable widget at the start of a heading (its fold
+ * toggle), where ProseMirror ignores it: Shift+End then selected nothing and Delete joined the
+ * heading with the next paragraph. The caret is put beside the widget, in the text.
+ */
+describe('a caret inside a widget at the start of a line', () => {
+  const setup = () => {
+    const doc = schema.nodes.doc.create(null, [schema.nodes.paragraph.create(null, schema.text('Intro')), schema.nodes.paragraph.create(null, schema.text('Conclusion'))]);
+    const toggle = Decoration.widget(9, () => { const el = document.createElement('span'); el.className = 'toggle'; el.contentEditable = 'false'; el.innerHTML = '<svg></svg>'; return el; }, { side: -1, ignoreSelection: true });
+    const place = document.createElement('div'); document.body.appendChild(place);
+    const view = new EditorView(place, { state: EditorState.create({ doc, plugins: [new Plugin({ props: { decorations: s => DecorationSet.create(s.doc, [toggle]) } })] }) });
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 19)));   // at the end of "Conclusion"
+    const widget = view.dom.querySelector('.toggle')!;
+    return { view, widget, done: () => { view.destroy(); place.remove(); } };
+  };
+  it('Home that landed in the widget: the caret goes to the start of the text', () => {
+    const { view, widget, done } = setup();
+    getSelection()!.collapse(widget, 0);
+    caretOutOfWidget(view, false);
+    expect([view.state.selection.from, view.state.selection.to]).toEqual([9, 9]);
+    done();
+  });
+  it('with Shift held the selection keeps its anchor', () => {
+    const { view, widget, done } = setup();
+    getSelection()!.collapse(widget, 0);
+    caretOutOfWidget(view, true);
+    expect([view.state.selection.anchor, view.state.selection.head]).toEqual([19, 9]);
+    done();
+  });
+  it('a caret in the text is left alone', () => {
+    const { view, done } = setup();
+    const at = view.domAtPos(12);   // inside "Conclusion"
+    getSelection()!.collapse(at.node, at.offset);
+    caretOutOfWidget(view, false);
+    expect(view.state.selection.from).toBe(19);
+    done();
+  });
+});
+
+/** A phone is no tablet: its page has no margins to draw in, and the drawing toolbar took its width. */
+describe('the drawing toolbar on touch devices', () => {
+  const device = (width: number, height: number, touch: number) => {
+    const mm = globalThis.matchMedia, mtp = Object.getOwnPropertyDescriptor(Navigator.prototype, 'maxTouchPoints');
+    (globalThis as any).matchMedia = (q: string) => ({ matches: q.includes('coarse') ? touch > 0 : /max-width: (\d+)px/.test(q) && width <= Number(/max-width: (\d+)px/.exec(q)![1]) || /max-height: (\d+)px/.test(q) && height <= Number(/max-height: (\d+)px/.exec(q)![1]) });
+    Object.defineProperty(Navigator.prototype, 'maxTouchPoints', { get: () => touch, configurable: true });
+    try { return isTabletClient(); } finally { (globalThis as any).matchMedia = mm; if (mtp) Object.defineProperty(Navigator.prototype, 'maxTouchPoints', mtp); }
+  };
+  it('switches itself on for a tablet, not for a phone in either orientation, not for a mouse', () => {
+    expect(device(834, 1194, 5)).toBe(true);    // iPad portrait
+    expect(device(1194, 834, 5)).toBe(true);    // iPad landscape
+    expect(device(393, 852, 5)).toBe(false);    // iPhone portrait
+    expect(device(852, 393, 5)).toBe(false);    // iPhone landscape
+    expect(device(1400, 900, 0)).toBe(false);   // a desktop
+  });
+});

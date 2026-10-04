@@ -11,30 +11,22 @@
  * follows the stream while you are at the bottom. Threads belong to the project: every editor
  * sees them, the one who started a thread drives it. A turn that changed files ends with a
  * checkpoint card (the server's agentwork.ts): what it changed, whether the PDF still builds,
- * and Undo — the turn's changes taken back exactly, edits made since kept.
+ * and Undo — the turn's changes taken back exactly, edits made since kept. Agents connected from
+ * elsewhere over MCP (Claude Code, Codex on the user's machine …) get tabs of their own at the top
+ * (ExternalAgents.tsx): the owner writes to them here and reads their replies.
  */
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import type { ComponentChildren } from 'preact';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel, type LitHit, type AgentCheckpoint } from '../api';
 import { editorContext } from '../editor/context';
-import { renderStaticHtml } from '../editor/lyxmath/field';
-import { useMathRendererVersion } from '../editor/lyxmath/usemath';
-import { latexSelectionText } from './richcopy';
 import { bibRefs, type BibRef } from './bibrefs';
-import { parseBlocks, type MdBlock } from './mdblocks';
+import { RichText, transcriptCopy } from './agentText';
 import { uiConfirm } from './Dialogs';
+import { useExternalAgents, ExternalAgentView, AgentChip, NoExternalAgents, ago } from './ExternalAgents';
 
 interface Approval { requestId: string; method: string; params: any }
 
 const errText = (e: unknown) => (e as Error)?.message ?? String(e);
 
-/** Copying from the transcript: rendered formulas leave as their LaTeX source (see richcopy.ts). */
-const transcriptCopy = (e: ClipboardEvent) => {
-  const t = latexSelectionText(document.getSelection());
-  if (t === null || !e.clipboardData) return;
-  e.preventDefault();
-  e.clipboardData.setData('text/plain', t);
-};
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const store = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
 
@@ -68,77 +60,6 @@ const CONTEXT_RE = /\[context\][\s\S]*?\[\/context\]\s*/g;
 const LEGACY_CONTEXT_RE = /\[context\] The user is editing [^\n]*? in OverLyX\.(?:\nTheir current selection in that document:\n```latex\n[\s\S]*?\n?```)?\s*/g;
 const userText = (it: AgentItem): string =>
   (it.content ?? []).map(c => c.text ?? '').join('\n').replace(CONTEXT_RE, '').replace(LEGACY_CONTEXT_RE, '').trim();
-
-/* ------------------------------------------------------------------ LaTeX + markdown-lite rendering */
-
-function MathBit({ latex, display }: { latex: string; display: boolean }) {
-  // drawn again with another math font, or once the font data it waited for has arrived
-  const version = useMathRendererVersion();
-  const [retried, setRetried] = useState(0);
-  const html = useMemo(() => {
-    try { return renderStaticHtml(latex, display, (editorContext.meta?.macros ?? {}) as never, undefined, () => setRetried(n => n + 1)); } catch { return null; }
-  }, [latex, display, version, retried]);
-  const attrs = { 'data-latex': latex, 'data-display': display ? '1' : undefined };
-  if (!html) return <span class="agent-math" {...attrs}>{display ? `\\[${latex}\\]` : `$${latex}$`}</span>;
-  return <span class={'agent-math' + (display ? ' display' : '')} {...attrs} dangerouslySetInnerHTML={{ __html: html }} />;
-}
-
-function inlineBits(text: string): ComponentChildren[] {
-  const out: ComponentChildren[] = [];
-  const re = /\$([^$\n]+?)\$|\\\((.+?)\\\)|`([^`\n]+)`|\*\*([^*\n]+?)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
-  let last = 0, k = 0;
-  for (let m = re.exec(text); m; m = re.exec(text)) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    if (m[1] !== undefined || m[2] !== undefined) out.push(<MathBit key={k++} latex={m[1] ?? m[2]} display={false} />);
-    else if (m[3] !== undefined) out.push(<code key={k++}>{m[3]}</code>);
-    else if (m[4] !== undefined) out.push(<b key={k++}>{m[4]}</b>);
-    else out.push(<a key={k++} href={m[6]} target="_blank" rel="noreferrer">{m[5]}</a>);
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return out;
-}
-
-/** Running text: $$…$$/\[…\] display math (also a stray fence), $…$/\(…\) inline math, `code`, **bold**, [links](https://…). */
-function FlowText({ text }: { text: string }) {
-  const parts: ComponentChildren[] = [];
-  const re = /```[\w-]*\n?([\s\S]*?)```|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g;
-  let last = 0, k = 0;
-  for (let m = re.exec(text); m; m = re.exec(text)) {
-    if (m.index > last) parts.push(...inlineBits(text.slice(last, m.index)));
-    if (m[1] !== undefined) parts.push(<pre key={'c' + k++} class="agent-code">{m[1].replace(/\n$/, '')}</pre>);
-    else parts.push(<div key={'m' + k++} class="agent-math-block"><MathBit latex={(m[2] ?? m[3]).trim()} display /></div>);
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) parts.push(...inlineBits(text.slice(last)));
-  return <>{parts}</>;
-}
-
-/** Assistant text: block structure (fenced code, tables, quotes, headings, rules — app/mdblocks.ts) over FlowText. */
-function RichText({ text }: { text: string }) {
-  return <>{parseBlocks(text).map((b, i) => <Block key={i} b={b} />)}</>;
-}
-
-function Block({ b }: { b: MdBlock }) {
-  switch (b.kind) {
-    case 'text': return <FlowText text={b.text} />;
-    case 'code': return <pre class="agent-code" data-lang={b.lang || undefined}>{b.code}</pre>;
-    case 'heading': return <div class={`agent-h agent-h${b.level}`}>{inlineBits(b.text)}</div>;
-    case 'rule': return <hr class="agent-hr" />;
-    case 'quote': return <blockquote class="agent-quote">{b.blocks.map((x, i) => <Block key={i} b={x} />)}</blockquote>;
-    case 'table': {
-      const style = (i: number) => (b.align[i] ? { textAlign: b.align[i]! } : undefined);
-      return (
-        <div class="agent-table-wrap">
-          <table class="agent-table">
-            <thead><tr>{b.head.map((c, i) => <th key={i} style={style(i)}>{inlineBits(c)}</th>)}</tr></thead>
-            <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, i) => <td key={i} style={style(i)}>{inlineBits(c)}</td>)}</tr>)}</tbody>
-          </table>
-        </div>
-      );
-    }
-  }
-}
 
 /* ------------------------------------------------------------------ diffs */
 
@@ -378,7 +299,7 @@ function ApprovalCard({ a, onDecide }: { a: Approval; onDecide: (d: string, feed
   );
 }
 
-export function AgentPanel({ project, notify }: { project: string; notify: (msg: string, kind?: 'info' | 'error') => void }) {
+function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; notify: (msg: string, kind?: 'info' | 'error') => void; pinned: AgentTurnContext | null; onUnpin: () => void }) {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [login, setLogin] = useState<AgentLogin | null>(null);
   const [threads, setThreads] = useState<AgentThreadInfo[]>([]);
@@ -399,6 +320,8 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
   const [tracked, setTracked] = useState(stored('ol.agent.tracked') !== '0');
   const selRef = useRef(sel); selRef.current = sel;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (pinned) inputRef.current?.focus(); }, [pinned]);
   const stick = useRef(true);   // follow the stream while the user is at the bottom
 
   const refreshStatus = () => api.agentStatus().then(setStatus).catch(e => { setStatus({ enabled: false, authenticated: false }); notify(errText(e), 'error'); });
@@ -574,11 +497,13 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
     if (busyTurn && busyTurn !== 'pending' && selRef.current) {
       if (fixed === undefined) setText('');
       setItems(list => [...list, localItem]);
-      void api.agentSteer(project, selRef.current, busyTurn, t, localItem.id, selectionContext()).catch(e => notify(errText(e), 'error'));
+      void api.agentSteer(project, selRef.current, busyTurn, t, localItem.id, pinned ?? selectionContext()).catch(e => notify(errText(e), 'error'));
+      onUnpin();
       return;
     }
     if (busyTurn) return;
-    const context = selectionContext();
+    const context = pinned ?? selectionContext();
+    onUnpin();
     if (fixed === undefined) setText('');
     void (async () => {
       try {
@@ -659,7 +584,9 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
       )}
       {(!sel || mine) && (
         <div class="agent-compose">
+          {pinned && <div class="ext-pin" data-ext-pin>About the passage you pinned <button class="mini" title="Do not send it" onClick={onUnpin}>×</button></div>}
           <textarea
+            ref={inputRef}
             value={text}
             placeholder={busyTurn && busyTurn !== 'pending' ? 'Steer the running turn… (Enter to send)' : sel ? 'Reply… (Enter to send)' : 'Ask the agent… (Enter to send)'}
             onInput={e => setText((e.target as HTMLTextAreaElement).value)}
@@ -689,6 +616,62 @@ export function AgentPanel({ project, notify }: { project: string; notify: (msg:
         </div>
       )}
       {sel && !mine && <div class="agent-readonly">Started by {threads.find(t => t.id === sel)?.user.name ?? 'another editor'} — you can read it, not drive it.</div>}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ the panel: the embedded agent and the agents from elsewhere */
+
+/** a passage pinned with "Ask agent about this" before the panel was showing (taken by the panel when it mounts) */
+let pendingPin: AgentTurnContext | null = null;
+const PIN_EVENT = 'ol:ask-agent';
+
+/**
+ * "Ask agent about this" (the editor's right-click menu; App.tsx sets editorContext.askAgent): the
+ * current selection is pinned as the context of the next message to whichever agent the panel
+ * shows, and its composer takes the keyboard.
+ */
+export function askAgentAbout(): void {
+  pendingPin = selectionContext() ?? null;
+  window.dispatchEvent(new CustomEvent(PIN_EVENT));
+}
+
+/**
+ * The Agent panel: the embedded agent (Codex on the server — when AI assistance is on, `codex`) and
+ * the account's agents connected from elsewhere (ExternalAgents.tsx), one at a time, chosen in a
+ * row of tabs at the top (kept per browser).
+ */
+export function AgentPanel({ project, notify, codex }: { project: string; notify: (msg: string, kind?: 'info' | 'error') => void; codex: boolean }) {
+  const ext = useExternalAgents();
+  const [which, setWhich] = useState<string>(() => stored('ol.agent.which') ?? '');
+  const [pinned, setPinned] = useState<AgentTurnContext | null>(null);
+  const [focusKey, setFocusKey] = useState(0);
+  useEffect(() => {
+    const take = () => { if (pendingPin) { setPinned(pendingPin); pendingPin = null; } setFocusKey(k => k + 1); };
+    if (pendingPin) take();
+    window.addEventListener(PIN_EVENT, take);
+    return () => window.removeEventListener(PIN_EVENT, take);
+  }, []);
+  const choose = (w: string) => { setWhich(w); store('ol.agent.which', w); };
+  const current = which.startsWith('ext:') ? ext.agents.find(a => `ext:${a.id}` === which) ?? null : null;
+  // nothing chosen (or the choice is gone): the embedded agent, else the agent from elsewhere seen last
+  const shown = current ? which : codex ? 'codex' : ext.agents[0] ? `ext:${ext.agents[0].id}` : '';
+  const agent = shown.startsWith('ext:') ? ext.agents.find(a => `ext:${a.id}` === shown) ?? null : null;
+  return (
+    <div class="agent-wrap">
+      {ext.agents.length > 0 && (
+        <div class="agent-switch" role="tablist">
+          {codex && <button role="tab" class={shown === 'codex' ? 'active' : ''} data-agent-tab="codex" title="OpenAI Codex, running on this server with your ChatGPT account" onClick={() => choose('codex')}>Codex (built in)</button>}
+          {ext.agents.map(a => (
+            <button key={a.id} role="tab" class={shown === `ext:${a.id}` ? 'active' : ''} data-agent-tab={`ext:${a.id}`} title={`${a.label} — ${a.status === 'offline' ? 'last seen ' + ago(a.lastSeen) : a.status}`} onClick={() => choose(`ext:${a.id}`)}>
+              <AgentChip a={a} />
+            </button>
+          ))}
+        </div>
+      )}
+      {shown === 'codex' ? <CodexPanel project={project} notify={notify} pinned={pinned} onUnpin={() => setPinned(null)} />
+        : agent ? <ExternalAgentView agent={agent} notify={notify} onMessage={ext.onMessage} resync={ext.resync} pinned={pinned} onUnpin={() => setPinned(null)} contextOf={selectionContext} focusKey={focusKey} />
+        : <div class="agent-panel"><NoExternalAgents /></div>}
     </div>
   );
 }

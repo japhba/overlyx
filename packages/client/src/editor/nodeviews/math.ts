@@ -44,12 +44,20 @@ function canRenderNow(): boolean {
   lastBudgetCheck = now;
   return now - batchStart < 40;
 }
-const idle: (cb: (d: { timeRemaining(): number }) => void) => void =
-  typeof (window as any).requestIdleCallback === 'function' ? (cb) => (window as any).requestIdleCallback(cb, { timeout: 500 }) : (cb) => setTimeout(() => cb({ timeRemaining: () => 8 }), 16);
+/**
+ * requestIdleCallback — or, where there is none (Safari), a timer whose deadline really runs out: the
+ * pump renders formulas while `timeRemaining()` lasts, and a constant 8 ms had it render every queued
+ * formula of a long paper in one go, which froze Safari for seconds after the paper opened (no
+ * typing, no clicks, no timers; ~30 s for recurrent_feature in Playwright's WebKit).
+ */
+export function idleCallback(cb: (d: { timeRemaining(): number }) => void, w: { requestIdleCallback?: unknown } = window as never): void {
+  if (typeof w.requestIdleCallback === 'function') { (w.requestIdleCallback as (cb: unknown, o: unknown) => void)(cb, { timeout: 500 }); return; }
+  setTimeout(() => { const end = performance.now() + 8; cb({ timeRemaining: () => Math.max(0, end - performance.now()) }); }, 16);
+}
 function schedulePump(): void {
   if (staticPumpScheduled || !staticQueue.size) return;
   staticPumpScheduled = true;
-  idle(pumpStatic);
+  idleCallback(pumpStatic);
 }
 function pumpStatic(deadline: { timeRemaining(): number }): void {
   staticPumpScheduled = false;

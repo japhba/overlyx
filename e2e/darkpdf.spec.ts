@@ -3,7 +3,7 @@
  * the paper in the editor's page colour, colours keeping their hue — while a photograph keeps its
  * colours; the ◐ switch in the PDF toolbar (only in the dark theme) goes back to the PDF's own colours.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, chromium, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { login, collectErrors, PROJECTS_DIR, texDoc, pickTheme } from './helpers';
 
@@ -30,8 +30,10 @@ test.beforeAll(async ({ browser }) => {
   await p.close();
   writeFileSync(`${DIR}/photo.jpg`, Buffer.from(photo.split(',')[1], 'base64'));
   writeFileSync(`${DIR}/plot.png`, Buffer.from(plot.split(',')[1], 'base64'));
-  // a PDF figure (as \includegraphics of a matplotlib PDF): a flat, light heat map beside a grainy photograph, on white
-  const fig = await browser.newPage();
+  // a PDF figure (as \includegraphics of a matplotlib PDF): a flat, light heat map beside a grainy photograph, on white;
+  // printed by Chromium whatever the browser under test (page.pdf exists only there)
+  const printer = browser.browserType().name() === 'chromium' ? browser : await chromium.launch();
+  const fig = await printer.newPage();
   const [heat, grain] = await fig.evaluate(() => {
     const h = document.createElement('canvas'); h.width = 64; h.height = 64;
     const a = h.getContext('2d')!;
@@ -47,6 +49,7 @@ test.beforeAll(async ({ browser }) => {
   await fig.setContent(`<body style="margin:0;background:#fff"><div style="display:flex;gap:90px;padding:70px 90px"><img src="${heat}" style="width:140px;height:140px;image-rendering:pixelated"><img src="${grain}" style="width:140px;height:140px"></div><div style="margin:0 90px;border-top:2px solid #000"></div></body>`);
   writeFileSync(`${DIR}/fig.pdf`, await fig.pdf({ width: '600px', height: '300px', printBackground: true }));
   await fig.close();
+  if (printer !== browser) await printer.close();
   writeFileSync(`${DIR}/figure.tex`, texDoc('\\begin{figure}[h]\\centering\\includegraphics[width=0.9\\linewidth]{fig.pdf}\\caption{A PDF figure.}\\end{figure}', '\\usepackage{graphicx}'));
   writeFileSync(`${DIR}/main.tex`, texDoc([
     'Dark pages: \\textcolor{red}{red text} and black text.',
@@ -74,6 +77,9 @@ const photoSpot = (page: Page) => page.evaluate(() => {
   return [sx / n / c.width, sy / n / c.height];
 });
 const near = (a: number[], b: number[], tol: number) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
+/** the editor's dark page colour (#121216), give or take the rounding of the canvas filter (Firefox's comes out 2 levels lighter) */
+const PAGE = [18, 18, 22];
+const isPage = (rgb: number[]) => near(rgb, PAGE, 3);
 
 test('dark pages: the paper in the page colour, colours keep their hue, the photograph its colours; ◐ switches back', async ({ page }) => {
   const errors = collectErrors(page);
@@ -96,13 +102,13 @@ test('dark pages: the paper in the page colour, colours keep their hue, the phot
   await pickTheme(page, 'Dark');
   await expect(page.locator('.pdf-viewer')).toHaveClass(/dark-pages/);
   await expect(page.locator('[data-pdf-dark]')).toHaveAttribute('aria-pressed', 'true');
-  await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([18, 18, 22]);
+  await expect.poll(async () => isPage(await pixel(page, 0.03, 0.03)), { timeout: 10000 }).toBe(true);
   expect(near(await pixel(page, spot[0], spot[1]), photoLight, 6)).toBe(true);
 
   // the sepia tone: the ink follows the editor's text colour — the paper stays the page colour
   await page.evaluate(() => { document.documentElement.dataset.tone = 'sepia'; });
   await page.waitForTimeout(600);
-  expect(await pixel(page, 0.03, 0.03)).toEqual([18, 18, 22]);
+  expect(isPage(await pixel(page, 0.03, 0.03))).toBe(true);
 
   // ◐: the PDF's own colours again, kept as a preference
   await page.evaluate(() => { document.documentElement.dataset.tone = 'white'; });
@@ -111,7 +117,7 @@ test('dark pages: the paper in the page colour, colours keep their hue, the phot
   await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([255, 255, 255]);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ol.prefs') || '{}').darkPdf)).toBe(false);
   await page.locator('[data-pdf-dark]').click();
-  await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([18, 18, 22]);
+  await expect.poll(async () => isPage(await pixel(page, 0.03, 0.03)), { timeout: 10000 }).toBe(true);
   await pickTheme(page, 'Light');
   expect(errors.filter(e => !/favicon|ResizeObserver|willReadFrequently/.test(e))).toEqual([]);
 });
@@ -152,7 +158,7 @@ test('a PDF figure is judged as a whole: its heat map turns dark with it, the ph
 
   await pickTheme(page, 'Dark');
   await expect(page.locator('.pdf-viewer')).toHaveClass(/dark-pages/);
-  await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([18, 18, 22]);
+  await expect.poll(async () => isPage(await pixel(page, 0.03, 0.03)), { timeout: 10000 }).toBe(true);
   // the heat map is dark with the figure; the photograph in the same figure is as it was
   expect(await area(spots.heat[0], spots.heat[1])).toBeLessThan(110);
   expect(near(await pixel(page, spots.grain[0], spots.grain[1]), grainLight, 8)).toBe(true);

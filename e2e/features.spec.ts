@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
-import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf, fillDialog, acceptDialog } from './helpers';
+import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf, nextFrames, fillDialog, acceptDialog } from './helpers';
 
 /** Each test works on its own copy of a document inside a scratch project. */
 const PROJECT = 'admin/e2e-scratch';
@@ -20,6 +20,7 @@ const fileText = (id: string) => readFileSync(PROJECTS_DIR + '/' + id, 'utf8');
 async function firstStandard(page: Page) {
   const p = page.locator('.lyx-editor > .lyx-par.lyx-layout-standard').first();
   await p.click({ position: { x: 4, y: 10 } });
+  await nextFrames(page);
   await page.keyboard.press('Home');
   return p;
 }
@@ -104,6 +105,7 @@ test('the cursor comes back to where it was when the document is reopened', asyn
   // go somewhere further down and leave a mark
   const p = page.locator('.lyx-editor > .lyx-par.lyx-layout-standard').nth(3);
   await p.click({ position: { x: 4, y: 10 } });
+  await nextFrames(page);
   await page.keyboard.press('End');
   await page.keyboard.type(' CURSORMARK');
   const pos = await head();

@@ -218,12 +218,14 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   const uploadDropped = async (dt: DataTransfer, dir: string) => {
     if (!project) return;
     const prefix = dir ? dir + '/' : '';
-    // webkitGetAsEntry (all browsers) also walks dropped directories; plain files are the fallback
-    const entries = Array.from(dt.items ?? []).map(i => (i as any).webkitGetAsEntry?.()).filter(Boolean);
+    // webkitGetAsEntry (all browsers) also walks dropped directories; plain files are the fallback — also
+    // for a file whose entry cannot be read: WebKit hands out an entry for a file that is not on disk (one
+    // made in a page) whose file() fails with NotFoundError, and nothing was uploaded
+    const dropped = Array.from(dt.items ?? []).filter(i => i.kind === 'file').map(i => ({ entry: (i as any).webkitGetAsEntry?.(), file: i.getAsFile() }));
     const files: { rel: string; file: File }[] = [];
     const emptyDirs: string[] = [];
-    const walk = (entry: any, at: string): Promise<void> => new Promise(resolve => {
-      if (entry.isFile) entry.file((f: File) => { files.push({ rel: at + entry.name, file: f }); resolve(); }, () => resolve());
+    const walk = (entry: any, at: string, fallback: File | null = null): Promise<void> => new Promise(resolve => {
+      if (entry.isFile) entry.file((f: File) => { files.push({ rel: at + entry.name, file: f }); resolve(); }, () => { if (fallback) files.push({ rel: at + fallback.name, file: fallback }); resolve(); });
       else if (entry.isDirectory) {
         const sub = at + entry.name + '/';
         const reader = entry.createReader();
@@ -238,7 +240,13 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
         read();
       } else resolve();
     });
-    if (entries.length) await Promise.all(entries.map(en => walk(en, prefix)));
+    if (dropped.length) {
+      await Promise.all(dropped.map(d => {
+        if (d.entry) return walk(d.entry, prefix, d.file);
+        if (d.file) files.push({ rel: prefix + d.file.name, file: d.file });
+        return undefined;
+      }));
+    }
     else for (const f of Array.from(dt.files ?? [])) files.push({ rel: prefix + f.name, file: f });
     if (!files.length && !emptyDirs.length) return;
     const clashes = files.filter(x => project.files.some(f => f.path === x.rel));

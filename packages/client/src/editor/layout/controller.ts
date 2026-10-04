@@ -37,6 +37,8 @@ import * as L from './commands';
 import type { PageView } from './nodeviews';
 import { startPresentation } from './present';
 import { openRawEditor } from './rawedit';
+import { SlideRail } from './rail';
+import { promptMarks, boxIsEmpty, BOX_PROMPTS } from './slidelayouts';
 import { editorContext } from '../context';
 
 export type Tool = 'select' | 'text' | 'shape' | 'line' | 'arrow' | 'pen' | 'pencil' | 'nodes' | 'crop';
@@ -125,6 +127,27 @@ export function deselectAll(tr: Transaction, pagePos?: number | null): Transacti
   return tr;
 }
 
+/** Are the speaker notes shown under the pages (remembered per browser)? */
+export function notesShown(): boolean {
+  try { return localStorage.getItem('ol.notes') === '1'; } catch { return false; }
+}
+
+/** Show or hide the speaker notes under the pages, and remember it. */
+export function showNotes(view: EditorView, on: boolean): void {
+  view.dom.classList.toggle('ol-show-notes', on);
+  try { localStorage.setItem('ol.notes', on ? '1' : '0'); } catch { /* not remembered */ }
+  view.dispatch(view.state.tr);   // the toolbars show the new state
+}
+
+/** Did pages come, go or change places (not just change inside)? */
+function pageOrderChanged(a: PMNode, b: PMNode): boolean {
+  const pa = L.pages(a).map(p => p.node), pb = L.pages(b).map(p => p.node);
+  if (pa.length !== pb.length) return true;
+  const inB = new Set(pb), inA = new Set(pa);
+  const sa = pa.filter(n => inB.has(n)), sb = pb.filter(n => inA.has(n));
+  return sa.some((n, i) => n !== sb[i]);
+}
+
 /** Inkscape's Ctrl (and Keynote's Shift): lock the axis, keep the proportions, 15° steps */
 const constrained = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): boolean => e.shiftKey || e.ctrlKey || e.metaKey;
 /** (x, y) turned about (ax, ay) to the nearest 15° direction, at the same distance */
@@ -192,9 +215,18 @@ export function layoutPlugin(): Plugin<LayoutPluginState> {
     view: (view) => { controller = new LayoutController(view); return controller; },
     // a text selection never spans two text boxes: its head is kept in the anchor's box
     appendTransaction: (trs, _old, state) => {
-      if (!trs.some(t => t.selectionSet) || !L.isLayoutDoc(state.doc)) return null;
+      if (!L.isLayoutDoc(state.doc)) return null;
       const s = state.selection;
-      if (!(s instanceof TextSelection) || s.empty) return null;
+      // the caret in an empty named box (a new slide's "Click to add title"): what is typed gets the deck's
+      // title formatting — set again after any change of the document too (the box growing to its text), which drops stored marks
+      if (s instanceof TextSelection && s.empty && !state.storedMarks && trs.some(t => t.selectionSet || t.docChanged)) {
+        const eb = L.editedBox(state);
+        if (eb && eb.node.attrs.name && BOX_PROMPTS[eb.node.attrs.name] && boxIsEmpty(eb.node)) {
+          const marks = promptMarks(state.doc, eb.node, controller?.page ?? { w: 160, h: 90 });
+          return marks ? state.tr.setStoredMarks(marks) : null;
+        }
+      }
+      if (!trs.some(t => t.selectionSet) || !(s instanceof TextSelection) || s.empty) return null;
       const boxOf = (p: number) => { const $p = state.doc.resolve(p); for (let d = $p.depth; d > 0; d--) if ($p.node(d).type.name === 'ol_box' || $p.node(d).type.name === 'ol_notes') return $p.before(d); return -1; };
       const a = boxOf(s.anchor), h = boxOf(s.head);
       if (a === h || a < 0) return null;
@@ -305,6 +337,8 @@ class LayoutController {
   private nodeSel: { seg: number; pt: number } | null = null;
   private lastLocalBox: number | null = null;
   private growQueued = false;
+  /** the thumbnails of a deck (rail.ts) */
+  private rail: SlideRail | null = null;
 
   constructor(private view: EditorView) {
     controllers.set(view, this);
@@ -331,14 +365,39 @@ class LayoutController {
       const eb = L.editedBox(view.state);
       if (eb && eb.node.attrs.grow) this.lastLocalBox = eb.pos;
       this.queueGrow();
+      // a page added, removed or moved: the pages after it have other numbers
+      if (pageOrderChanged(prev.doc, view.state.doc)) for (const pv of this.pageViews()) pv.render();
     }
+    this.syncRail(!!prev && prev.doc !== view.state.doc);
     this.renderOverlays();
+  }
+
+  /** a deck — slides, or several pages — has the slide rail beside the canvas */
+  private syncRail(docChanged: boolean): void {
+    const deck = !!this.scroller && (L.pages(this.view.state.doc).length > 1 || (this.beamer && this.page.w <= 300 && this.page.h <= 200));
+    if (deck && !this.rail) {
+      this.rail = new SlideRail(this.view, this.scroller!, {
+        page: () => this.page,
+        basePt: () => this.basePt,
+        currentPage: () => this.currentPage()?.pos ?? null,
+        park: pos => this.view.dispatch(deselectAll(this.view.state.tr, pos)),
+        refit: () => this.fit(),
+        notes: on => { if (on !== undefined) showNotes(this.view, on); return this.view.dom.classList.contains('ol-show-notes'); },
+      });
+      this.fit();
+    } else if (!deck && this.rail) {
+      this.rail.destroy();
+      this.rail = null;
+      this.fit();
+    } else this.rail?.update(docChanged);
   }
 
   destroy(): void { this.detach(); this.metaUnobserve?.(); this.metaUnobserve = null; this.colorStyle?.remove(); this.gesture?.cancel(); if (this.checkRetry) clearTimeout(this.checkRetry); }
   private colorStyle: HTMLStyleElement | null = null;
 
   private attach(): void {
+    // the speaker notes under the pages, as the reader last had them (the Layout toolbar's and the slide rail's toggle)
+    this.view.dom.classList.toggle('ol-show-notes', notesShown());
     const scroller = (this.view.dom.closest('.editor-scroll') ?? this.view.dom.parentElement) as HTMLElement | null;
     this.scroller = scroller;
     if (scroller && typeof ResizeObserver !== 'undefined') {
@@ -359,6 +418,7 @@ class LayoutController {
   }
 
   private detach(): void {
+    this.rail?.destroy(); this.rail = null;
     this.resize?.disconnect(); this.resize = null;
     if (this.scroller) {
       this.scroller.removeEventListener('wheel', this.onWheel);
@@ -597,8 +657,8 @@ class LayoutController {
     const s = this.view.dom.style;
     s.setProperty('--ol-basept', String(this.basePt));
     // text in the document's own colours (\definecolor{jblue}…): \textcolor{jblue} draws in it, in the
-    // editor and in the presentation's copies of the pages
-    const rules = Object.entries(colors).map(([name, rgb]) => `.lyx-editor .lyx-color-${CSS.escape(name)},.ol-present-stage .lyx-color-${CSS.escape(name)}{color:${rgbToHex(rgb)}}`).join('\n');
+    // editor and in the copies of the pages (the presentation, the slide rail's thumbnails)
+    const rules = Object.entries(colors).map(([name, rgb]) => { const c = `.lyx-color-${CSS.escape(name)}`; return `.lyx-editor ${c},.ol-present-stage ${c},.ol-rail-holder ${c}{color:${rgbToHex(rgb)}}`; }).join('\n');
     if (rules || this.colorStyle) {
       if (!this.colorStyle) { this.colorStyle = document.createElement('style'); this.colorStyle.dataset.olColors = ''; document.head.append(this.colorStyle); }
       this.colorStyle.textContent = rules;
@@ -667,7 +727,7 @@ class LayoutController {
   /** the page's scale: the zoom at which the whole page fits the window, times the canvas zoom */
   private fit(): void {
     const sc = this.scroller ?? (this.view.dom.closest('.editor-scroll') ?? this.view.dom.parentElement) as HTMLElement | null;
-    const width = Math.max(200, (sc?.clientWidth ?? 1000) - 72);
+    const width = Math.max(200, (sc?.clientWidth ?? 1000) - 72 - (this.rail?.width() ?? 0));
     const height = Math.max(150, (sc?.clientHeight ?? 800) - 70);
     const pxPerMm = Math.min(width / this.page.w, height / this.page.h);
     this.fitPagePt = Math.min(pxPerMm / 2.845276, 4);
@@ -862,7 +922,7 @@ class LayoutController {
   pointerDown(ev: PointerEvent): boolean {
     if (!this.active || ev.button !== 0 || !this.view.editable) return false;
     const target = ev.target as HTMLElement;
-    if (target.closest('.ol-overlay') || target.closest('.ol-page-label')) return false;   // handles have their own listeners
+    if (target.closest('.ol-overlay, .ol-page-label, .ol-notes-add')) return false;   // handles have their own listeners
     const ctx = this.pageCtxFromEl(target);
     const st = layoutKey.getState(this.view.state)!;
     if (!ctx) {
@@ -1878,6 +1938,9 @@ class LayoutController {
       startPresentation(view, { fromCurrent: ev.key !== 'F5' || ev.shiftKey });
       return true;
     }
+    // typing in a page's speaker notes is typing: no tool letters, no object keys
+    const $h = view.state.selection.$head;
+    for (let d = $h.depth; d > 0; d--) if ($h.node(d).type.name === 'ol_notes') return false;
     // the pen: Enter finishes, Esc finishes (or drops a single node)
     if (st.tool === 'pen' && this.pen) {
       if (ev.key === 'Enter') { this.finishPen(false); return true; }

@@ -432,6 +432,34 @@ blend.
     default, like Keynote; *justified* writes `align=justify`), base font size and line spacing;
     X / Y / W / H / angle fields in millimetres. Pages: new, duplicate, delete, move, background,
     transition, name, speaker notes under the pages. The documents panel lists the pages.
+  * **Slide rail** (`editor/layout/rail.ts`, PowerPoint's thumbnail pane; created by the layout
+    controller for a deck — several pages, or one slide-sized beamer page — so both shells have it): a
+    live miniature of every page left of the canvas, numbered, the current one marked as the canvas
+    scrolls or an object is picked. A thumbnail is a copy of the page's own DOM drawn at 320 px and
+    scaled (as the presenter view draws pages), redrawn when that page's DOM changes (a mutation
+    observer; selection marks do not count); it is not inside `.lyx-editor`, so the page's objects
+    appear twice in the DOM — e2e specs scope their locators to `.lyx-editor`. The rail lies over the
+    scroller's left edge inside the editor column (`--ol-rail-w` makes room on the canvas, `fit()`
+    subtracts it); « folds it to a strip (remembered, `ol.slides`; folded by default on a phone). A
+    click goes to a page, a drag reorders (`movePageTo`), right-click or ⋯ has New slide ▸ layouts,
+    duplicate, delete, cut / copy / paste of whole slides, move, transition and *Present from this
+    slide*; with the rail focused ↑ ↓ Home End move, Enter adds a slide, Delete removes one,
+    Ctrl+D duplicates, Ctrl+↑ / ↓ reorder, Ctrl+Z undoes (each command is its own undo step:
+    `stopCapturing`), F5 presents, Esc returns to the canvas.
+    *Notes* in its header (and the Layout toolbar's notes button) shows the speaker notes under the
+    pages, remembered per browser (`ol.notes`); a page without notes then offers *Click to add speaker
+    notes* (`PageView`), so showing them adds nothing to the file. In notes, keys type (the canvas's
+    tool letters and object keys stay out of them).
+    **New slide layouts** (`editor/layout/slidelayouts.ts`): Title slide, Title and content, Section
+    header, Two content, Comparison, Title only, Big statement, Blank — in the deck's own style, read off
+    its pages since a beamer file has no masters (`deckStyle`: the title box most content pages share,
+    the largest box below it, the most common background, the objects repeated on at least 60 % of the
+    content pages — footer bars, logos — which come along; the Title slide is the first page with its
+    text taken out). New boxes are empty and named (`name=Title`, `Text`, `Subtitle`, …): the editor
+    shows *Click to add title* in them (`BoxView` prompt, gone while the caret is in the box, never in
+    the PDF, a thumbnail or the presentation), and text typed into an empty title starts with the
+    deck's title formatting (the layout plugin re-sets the stored marks, also after the box grows).
+    An empty page is written with `\olpage{}`, so it is read back as a page, not as a linear frame.
   * **Animations and presentation** (`editor/layout/present.ts`): an object's *step* is a beamer
     overlay specification (`2-`, `2-4`, `1,3-`): the PDF gets one page per step, as beamer does, and
     the badge on the canvas shows it; *Animation* picks the step ("appear next") and an entrance for
@@ -1005,6 +1033,15 @@ blend.
   `journalctl -u overlyx-codex-update`). A keeper started on an older codex (the version is
   stamped in `data/agent-home/<id>/codex-version`) is stopped once quiet for `OVERLYX_AGENT_IDLE_MS`
   even with the panel open, so the next request runs the new one.
+  **Agents from elsewhere** (`app/ExternalAgents.tsx`, see *MCP connector*): the account's agents
+  connected over MCP — Claude Code, Codex, ChatGPT — get tabs of their own at the top of the panel
+  (the Agent tab appears when AI assistance is on *or* the account has such agents): status
+  (listening / working / connected / offline, the project and document it last worked in, whether
+  messages reach it pushed), the conversation, a composer that sends the document and the
+  selection along (the same context as a Codex turn), "take back" for a message it has not picked
+  up, Forget. **Ask agent about this** in the editor's right-click menu (`editorContext.askAgent`,
+  set only by a shell with the panel) pins the selection as the context of the panel's next
+  message — to Codex or to an agent from elsewhere — and focuses the composer.
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or
   Preferences — the switches are menu items, so the command palette finds them): needs
   `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.1 Flash Lite rewrites,
@@ -1334,6 +1371,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/selection-inserts.spec.ts   # comments / floats / captions keep the selection, pasted blocks, Enter in a caption, Insert ▸ Graphics on a layout page, live authors, TeX pane after settings, tracked tables, formula notice, tablet reflow
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sliderail.spec.ts   # the slide rail: thumbnails, new slides in the deck's style, drag to reorder, its menu, undo, the saved file
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layout.spec.ts   # layout documents: new deck, text box + formula, move / resize / undo, toolbar, presentation steps, zoom, text overlays, a linear beamer deck presented; the font size box
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
 npx vitest run tests/docworker.test.ts   # the document workers write the bytes the main thread writes; saves in order; a dead worker loses nothing
@@ -1357,6 +1395,10 @@ OVERLYX_E2E_AI_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test
 # the Agent panel (e2e/agent.spec.ts): start the server with OVERLYX_CODEX_BIN=scripts/codex-stub.mjs
 # (a stand-in for `codex app-server`: sign-in, streamed replies, one approval round-trip), then
 OVERLYX_E2E_AGENT_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/agent.spec.ts
+# agents connected over MCP (e2e/mcp-presence.spec.ts): get_presence on a selection made in the browser, the
+# agent's caret / highlight, a panel message through wait_for_instructions and back, a pushed Claude Code session;
+# MCP is not proxied by vite, so name the server
+OVERLYX_E2E_SERVER=http://127.0.0.1:3001 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/mcp-presence.spec.ts
 # "a user writes a paper": real arXiv papers typed from blank documents through the editor UI —
 # paperwriting.spec.ts / paperwriting-more.spec.ts (first pages of Attention, a coding-theory paper, BERT) and
 # the whole GAN and Adam papers from abstract to bibliography with a latexmk build (~15 min each; needs pdftotext):
@@ -1378,6 +1420,58 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/textselect.spec.t
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/pdfview.spec.ts e2e/rawsplit.spec.ts   # pdf.js viewer, SyncTeX, PDF tabs; the [raw] split tab, scroll sync, live apply
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/panes.spec.ts   # WYSIWYG · TeX · PDF panes, PDF age / auto-build / flicker-free rebuild, section folding, dash keys
 ```
+
+**Safari and Firefox.** Real users come with Safari (Mac, iPhone, iPad), Firefox and Edge besides
+Chrome, so the suite also runs in Playwright's WebKit (Safari's engine, as the "Desktop Safari" device)
+and Firefox; Chromium stays the default:
+
+```bash
+OVERLYX_E2E_BROWSERS=webkit OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/editing.spec.ts    # Safari's engine
+OVERLYX_E2E_BROWSERS=firefox OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/editing.spec.ts   # Firefox
+OVERLYX_E2E_BROWSERS=all …   # Chromium, Firefox and WebKit, a project each (a failure names its browser)
+```
+
+What differs, and how the specs deal with it:
+
+- **The Mod key.** Playwright's WebKit and Firefox on Linux report `navigator.platform` as
+  "Linux x86_64" whatever the device's user agent says (Desktop Safari's is a Mac's), so the app takes
+  Control as its Mod key in all three browsers here and a spec's `Control+…` means the same in each.
+  (On a Mac host every browser reports "MacIntel": the app's Mod key is then ⌘, and such presses would
+  have to become `ControlOrMeta+…`.)
+- **The clipboard.** `grantClipboard(context)` (e2e/helpers.ts) grants what each engine knows — both
+  permissions in Chromium, clipboard-read in WebKit (it writes without one), none in Firefox (granting
+  an unknown permission throws); `readClipboard(page)` reads the text — WebKit refuses
+  `navigator.clipboard.readText()` without a gesture (Safari shows a Paste button), so there it is
+  pasted into a scratch page of the same context. Playwright's WebKit keeps only text/plain on its
+  pasteboard (a copy's HTML, which carries table cells and insets, is gone at the paste), runs no copy
+  for Ctrl+C on a selection outside editable text, and its `clipboard.read()` (the menus' Paste) waits
+  for Safari's Paste button: clipboard.spec accepts typographic quotes there, agent.spec fires the copy
+  event itself, tablerows.spec skips its HTML pastes.
+- **Touch.** `newTouchContext(browser, …)` makes a tablet: under `hasTouch` WebKit and Firefox leave
+  `navigator.maxTouchPoints` at 0 (a real iPad says 5), which the app's tablet test needs.
+- **PDF fixtures.** `page.pdf()` exists only in Chromium: darkpdf.spec prints its figure there whatever
+  the browser under test.
+- **Computed styles** read differently: WebKit leaves out the quotes around a font family that needs
+  none (`CMU Serif, serif`), so fonts.spec compares families without quotes.
+- **Pointer positions** are whole pixels in WebKit and Firefox, fractions in Chromium: sizes drawn
+  with the mouse come out a hair different (layout.spec allows 69.98 mm for 70).
+- **Synthetic events.** Firefox's ClipboardEvent constructor ignores `clipboardData`: specs that paste
+  by dispatching one set the property on the event; Chromium has no `insertFromComposition` input
+  type (misc.spec's Safari composition order runs in WebKit and Firefox only).
+- **Devices.** devices.spec opens the app as a phone and as a tablet; scratch/browsers/ipad.mts
+  (`landscape`, `portrait`, `phone`; `ENGINE=chromium`) taps through a document and takes screenshots.
+- **Settling.** A click Playwright lands on a formula not yet hovered reaches the formula's field
+  directly in Chromium but its row in WebKit, which focuses the field a frame later: specs that type
+  right after such a click wait for `nextFrames(page)`.
+- **Offline.** Playwright's WebKit fails every navigation while its network is emulated offline
+  ("WebKit encountered an internal error") before the service worker is asked, and it keeps opening
+  WebSockets (the editor's reconnects sync the "offline" edits at once): offline.spec reloads offline
+  only in Chromium and Firefox and skips its long offline sessions in WebKit
+  (scratch/browsers/swoffline.mts, wsoffline.mts).
+- **Memory.** A WebKit page holding the dev build and a long paper takes ~0.8 GB, three times
+  Chromium's: collab.spec's six users need more than 3 GB in WebKit and more than 2.5 GB in Firefox,
+  so run it with `OVERLYX_E2E_COLLAB_USERS=3` there on a small machine, and give a Playwright run in
+  WebKit 2.3 GB (specs with a second user open several pages).
 
 ## Offline mode
 
@@ -1436,6 +1530,32 @@ How it works, in order of what happens when you open a document:
 
 ## Compatibility notes
 
+* **Browsers**: Chrome and Edge, Safari (Mac, iPhone, iPad) and Firefox; the e2e suite runs in all
+  three engines (*Tests*). What Safari and Firefox needed:
+  - pdf.js's *legacy* build (`app/PdfViewer.tsx`, the VS Code PDF panel too): the default build needs
+    `Map.getOrInsertComputed`, `Math.sumPrecise` and the `Iterator` global (Safari 26.2, Firefox 144,
+    Chrome 147) — before Safari 18.4 the app did not even start, later it showed no PDF. In Safari's
+    engine pdf.js also decodes images without an OffscreenCanvas (it drew one image in another's place).
+  - Safari has no `requestIdleCallback`: formulas rendered "in idle time" use a timer whose deadline
+    runs out (a constant one rendered a long paper's formulas in one task and froze the page).
+  - an Overleaf zip chosen before signing in is parked in IndexedDB as bytes — Safari stores no Blob
+    there in a private window; files dropped into the file tree fall back to the dropped `File` where
+    WebKit's directory entry cannot be read.
+  - Firefox: after a caret key the caret is put beside an uneditable widget at a line's start
+    (`caretOutOfWidget`, assembly.ts) — Home on a heading left it in the fold toggle, where
+    ProseMirror ignores it, and Shift+End, Delete joined the heading with the next paragraph; the
+    menus' Paste sets clipboardData on the paste event itself (`pasteEventWith`, clipmenu.ts:
+    Firefox's ClipboardEvent constructor drops it, and LaTeX text went in unparsed).
+  - phones (Safari on an iPhone, Chrome on Android): the documents panel starts in its rail and the
+    drawing toolbar stays off (`isTabletClient` excludes screens narrow in either orientation) — the
+    panel and the toolbar left a 393 px iPhone a text column one letter wide.
+  - the editor taking the focus back keeps the page where it is (`keepScrollOnFocus`, assembly.ts):
+    WebKit reveals the editor's previous DOM selection on focus whatever `preventScroll` says, so a
+    click on a child document's link (which takes the focus) scrolled to the old caret.
+  - child documents open on the browser's own `dblclick` (ProseMirror's 500 ms double-click window
+    was missed on a busy WebKit page); a drag's autoscroll runs per time, not per frame (120 Hz
+    screens scrolled twice as fast); the hidden input of a formula has 16px text (an iPhone zooms
+    into smaller focused text); a whiteboard that connects before its first render says it is live.
 * Byte-exact round trips are guaranteed for LyX ≥ 2.4 files; older files are re-wrapped exactly
   like LyX does on save.
 * The document header (class, preamble, options) is edited through *Document ▸ Settings*; raw
@@ -1470,7 +1590,9 @@ How it works, in order of what happens when you open a document:
 * Large documents: the editor opens the local copy and starts syncing while the document's
   metadata loads; formulas near the top are rendered synchronously (a ~40 ms budget), the rest
   show their source and are rendered in idle time or when scrolled near, and become editable
-  fields when they scroll into view or are hovered/entered. Macro tables are shared and cached
+  fields when they scroll into view or are hovered/entered. (Safari has no `requestIdleCallback`:
+  a timer with an 8 ms deadline stands in — `idleCallback` in nodeviews/math.ts; its deadline
+  once never ran out, and Safari rendered every formula of a long paper in one frozen task.) Macro tables are shared and cached
   per document, so a 300-formula paper paints in well under a second.
 * Every document's Yjs history carries an *epoch*; a browser tab whose editor belongs to an older
   epoch (server restarted with a changed file) reloads instead of merging stale content. Cross-tab
@@ -1567,8 +1689,14 @@ Two ways to authenticate:
 A token or grant stands for the *account* behind it — in every project it gets that account's role
 (viewers read; edit access is needed for `propose_edit`, the comment tools and the write tools).
 `packages/server/src/mcp.ts` implements the connector on top of `@modelcontextprotocol/sdk`'s
-stateless Streamable HTTP transport (one request/response per JSON-RPC call, no session) and
-exposes these tools:
+Streamable HTTP transport — stateless (one request/response per JSON-RPC call, no session) for
+every client except those in `SESSION_CLIENTS` (`mcpAgents.ts`: Claude Code, clientInfo
+`claude-code`), which get a session at initialize (`Mcp-Session-Id`, a GET event stream for pushed
+messages, DELETE ends it). Sessions are rows in `mcp_sessions`: a request with a session id the
+process does not know (after a restart) brings its session back for the same token instead of a
+404 (Claude Code itself re-initializes when its event stream drops). A GET or DELETE without a
+session answers 405. `OVERLYX_MCP_LOG=1` logs one line per request (method, tool, session,
+clientInfo, User-Agent). It exposes these tools:
 
 * `list_documents`, `read_document(path)` — the project's `.tex` documents and one document's LaTeX
   source (`text`) plus its paragraphs (index, layout, depth, plain text) for the paragraph tools.
@@ -1628,7 +1756,9 @@ exposes these tools:
   `now_reads`, a build that breaks after a tracked edit or whose errors point at `\lyxadded` /
   `\lyxdeleted`, math / tables / preamble the tracked form mangles, or the user asking — and to
   build after every change and step back with `project_history` / `restore_project` rather than
-  leave a document not compiling. A failed `build_pdf` repeats the hint.
+  leave a document not compiling. A failed `build_pdf` repeats the hint. The Git dialog's section
+  also explains presence (get_presence, the agent as a collaborator) and writing to the agent from
+  the Agent panel, with Claude Code's channels flag.
 * `edit_file(path, old_text, new_text, replace_all?)` — a passage of a text file (refs.bib, macros,
   `.sty`) replaced directly, like `write_file`; documents are refused (use `edit_document`).
 * `project_history(limit?)`, `restore_project(commit)` — the way back for any agent: the project's
@@ -1646,6 +1776,73 @@ exposes these tools:
   by the token's account, `<username>/<name>`. An agent can populate it with `create_document`, `write_document` and
   `write_file`; local files, including binaries and an existing Git history, are imported with the
   CLI instead. This tool is intentionally absent from a fixed `/mcp/<owner>/<project>` connection.
+* **Where people are: `get_presence(project?, path?)`** (`agentPresence.ts presenceIn`,
+  `ycursor.ts describeCursor`). For each open document of the project (or one): the people in it —
+  one entry per browser tab or editor, the account taken from the WebSocket connection, not from
+  what the client claims — and the agents, each with `cursor` (`paragraph`: the index in
+  read_document's `paragraphs`; `offset` into that paragraph's text; `excerpt` with `‸` at the
+  cursor; `layout`) and `selection` (`from`/`to` places and the selected text verbatim — across
+  paragraphs joined by a blank line, long ones cut in the middle). `you: true` marks the token's own
+  account, `self` the asking agent, `moved_seconds_ago` when a cursor last changed. The awareness
+  `cursor` (two Yjs relative positions, y-prosemirror's) is resolved server-side: the paragraph is
+  serialized with marker characters at the cursor's places through the same conversion
+  read_document uses (editor nodes → document model → `itemText`), so formulas, footnotes and
+  special characters count exactly as read_document shows them; inside a table (whose cells
+  read_document's paragraph text leaves out) the excerpt includes the cells and `offset` is null.
+  Without a project (on `/mcp`): only where the user is, across their projects. Only documents the
+  token's account can view are listed. MCP_INSTRUCTIONS tell the agent that "this", "here", "the
+  selected paragraph" mean the user's own cursor / selection and to call get_presence first.
+* **People see the agent.** An agent connected from elsewhere (not the Agent panel's own) gets an
+  awareness client of its own in each document it reads or edits (`agentPresence.ts showAgent`): a
+  state `{ user: { name: "Claude Code (Jan)", color, agent: true }, cursor }` applied to the
+  document's Awareness and relayed by ws.ts like a browser's, so the web client and the VS Code
+  extension draw it with their collaborator rendering (presence avatars — agents as rounded
+  squares — and a named caret / selection). After an edit the caret covers the range it changed
+  (the CRDT events of its transaction, `ycursor.ts changedRange`); `highlight(path, quote |
+  paragraph_index, clear?)` points at a passage (`findPassage`: the paragraph's text with formulas
+  as their LaTeX, whitespace / quotes / case matched loosely, a long quote by its first and last
+  words). The state is renewed every 10 s while the agent works (the Awareness drops states after
+  30 s) and removed after 5 minutes without a tool call there (`AGENT_IDLE_MS`); browsers cannot
+  overwrite an agent's client id (`isAgentClient` in ws.ts's sanitizer).
+* **Messages from OverLyX** (`mcpAgents.ts`). An agent is one MCP client behind one credential —
+  (token, `clientInfo.name`) → a row in `mcp_agents`; two sessions of the same client with the same
+  token are one agent; a client connecting with a new token after the old one was rotated or
+  revoked takes the old row over (its conversation carries on), and agents whose credential is gone
+  are not listed. Its owner writes to it in the Agent panel (`POST /api/mcp-agents/:id/messages`,
+  stored in `mcp_agent_messages` with the editor context — document, selection as LaTeX marked in
+  an excerpt, read only from documents the sender can view). The agent gets it either way:
+  `wait_for_instructions(timeout_seconds?)` — a long poll (default 40 s, at most 50 s: Codex gives a
+  tool 60 s; progress notifications every 15 s when the client asked for them) that returns as soon
+  as a message arrives, works with any client — or pushed to a Claude Code session as
+  `notifications/claude/channel` (`{ content, meta: { message_id, from, document } }`, the server
+  declares `capabilities.experimental['claude/channel']` on session connections). Claude Code drops
+  channel events silently unless it was started with the flag, so a push counts as delivered only
+  after that session answered a pushed message (`mcp_sessions.channel_ok`); until then the message
+  also stays available to wait_for_instructions. `reply(text, message_id?, done?)` answers (default:
+  the last message it got; `done: false` for an interim update). A message handed out by a poll
+  that the agent then did nothing about (no other tool call since) is handed out again — that
+  answer was most likely lost on the way. MCP_INSTRUCTIONS describe the loop ("listen to OverLyX":
+  wait, act, reply, wait again) and the channel tag. **Security:** only the account the token
+  belongs to may send — never collaborators or link guests of a shared project (the panel's routes
+  check the owner, guests are refused, cross-site requests too); messages are tied to the token's
+  identity; at most 8000 characters per message (20000 per reply), 20 messages a minute per
+  account, 25 waiting per agent, 40 replies a minute per agent; view-only accounts' agents can
+  listen and reply but still not edit. The panel's live view is one SSE stream per account (`GET
+  /api/mcp-agents/events`: the agent list, every message added or changed).
+* **What to run.** The long poll needs nothing: tell the agent (Claude Code, Codex, …) "listen to
+  OverLyX". Pushed messages in Claude Code (its research-preview *channels*; Claude Code signed in
+  with a claude.ai account or a Console API key, not Bedrock / Vertex / Foundry): add the server as usual (`claude mcp add
+  --transport http overlyx <origin>/mcp --header "Authorization: Bearer …"`) and start the session
+  with `claude --dangerously-load-development-channels server:overlyx` (the name given in `claude
+  mcp add`; a custom channel is not on Anthropic's allowlist, so `--channels` alone does not
+  register it — the flag shows a confirmation dialog first). On claude.ai Team and Enterprise plans
+  an Owner must first enable channels (claude.ai ▸ Admin settings ▸ Claude Code ▸ Channels, or
+  `channelsEnabled: true` in managed settings); otherwise Claude Code connects, the tools work, and
+  a startup notice says channels are not enabled — the long poll still works. Claude Code with the
+  v2 MCP runtime probes `server/discover` (protocol revision 2026-07-28) first; this server answers
+  with the earlier handshake, which is what channels need. Checked with Claude Code 2.1.289 against
+  an isolated instance (4 Oct 2026): session, event stream, the long-poll loop end to end, and a push
+  sent; the injection itself was not seen because that account's Team org has channels off.
 
 ## Authentication and identity
 

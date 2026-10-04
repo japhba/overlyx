@@ -13,7 +13,7 @@ import { hexToTex, cssColor, OBJECT_EFFECTS, PAGE_TRANSITIONS, PAGE_PRESETS, SHA
 import { api } from '../api';
 import { ICONS, NAMED_COLORS, type ToolButton, type Palette } from './Toolbar';
 import type { ToolbarContext } from './toolbars';
-import { layoutKey, selectedObjects, setTool, layoutControllerOf, selectObjects, SHAPE_TOOLS, type Tool } from '../editor/layout/controller';
+import { layoutKey, selectedObjects, setTool, layoutControllerOf, selectObjects, showNotes, SHAPE_TOOLS, type Tool } from '../editor/layout/controller';
 import * as L from '../editor/layout/commands';
 import { docColors, boxOf, objectBounds } from '../editor/layout/geom';
 import { placeImage, placeImageFiles } from '../editor/layout/images';
@@ -347,16 +347,8 @@ export function layoutToolbar(ctx: ToolbarContext): ToolButton[][] {
       </div>
     ) } },
     { id: 'ol-size', icon: `${Math.round(pageSz.w)}×${Math.round(pageSz.h)}`, title: 'Page size of the document', palette: { title: 'Page size', render: close => <PageSizePanel ctx={ctx} close={close} /> } },
-    { id: 'ol-notes', icon: 'ol-notes', title: 'Speaker notes under the pages (beamer’s \\note)', active: view.dom.classList.contains('ol-show-notes'), action: () => run(v => {
-      const on = !v.dom.classList.contains('ol-show-notes');
-      v.dom.classList.toggle('ol-show-notes', on);
-      const cur = ctl?.currentPage();
-      if (on && cur) {
-        const n = v.state.doc.nodeAt(cur.pos)!;
-        if (n.lastChild?.type.name !== 'ol_notes') v.dispatch(v.state.tr.insert(cur.pos + n.nodeSize - 1, v.state.schema.nodes.ol_notes.create(null, L.defaultParagraph())));
-        else v.dispatch(v.state.tr);
-      } else v.dispatch(v.state.tr);
-    }) },
+    // (a page without notes offers "Click to add speaker notes" under it: nothing is added to the file by showing them)
+    { id: 'ol-notes', icon: 'ol-notes', title: 'Speaker notes under the pages (beamer’s \\note)', active: view.dom.classList.contains('ol-show-notes'), action: () => run(v => showNotes(v, !v.dom.classList.contains('ol-show-notes'))) },
     { id: 'ol-present', icon: 'ol-present', title: 'Present — full screen from this page (F5; Shift+F5 from the start)', action: () => run(v => startPresentation(v, { fromCurrent: true })) },
   ];
 

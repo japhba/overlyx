@@ -109,6 +109,27 @@ export interface AgentCheckpoint {
 export interface AgentEventMsg { kind: 'notification' | 'request' | 'status' | 'checkpoint'; method?: string; params?: any; requestId?: string; running?: boolean }
 export interface AgentTurnContext { docId?: string; content?: PMJSON[]; layout?: string; mathLatex?: string; openDocs?: string[] }
 export interface AgentModel { id: string; label: string; description: string; efforts: string[]; defaultEffort: string | null; isDefault: boolean }
+/** an agent connected over MCP from elsewhere (Claude Code, Codex, ChatGPT …; mcpAgents.ts on the server) */
+export interface ExternalAgent {
+  id: number; name: string; label: string; color: string;
+  client: { name: string; version: string | null }; token: string;
+  lastSeen: number; project: string | null; path: string | null; lastTool: string | null;
+  /** listening: waiting for a message; working: has messages it has not answered; online: seen in the last minutes */
+  status: 'listening' | 'working' | 'online' | 'offline';
+  /** pushed messages (Claude Code channels): 'confirmed' once its channel delivered, 'possible' while a session stream is open */
+  push: 'confirmed' | 'possible' | null;
+  queued: number;
+}
+/** one message between the owner and an external agent: role 'user' from OverLyX, 'agent' its reply */
+export interface ExternalAgentMessage {
+  id: number; role: 'user' | 'agent'; text: string;
+  /** user: queued → delivered → answered (or cancelled); agent: final | progress */
+  state: string; via: 'poll' | 'push' | null; replyTo: number | null;
+  createdAt: number; deliveredAt: number | null; pushedAt: number | null;
+  context: { docId: string; text: string } | null;
+}
+/** the external-agents event stream (SSE): the list changed, or a message was added / changed */
+export type ExternalAgentEvent = { kind: 'agents'; agents: ExternalAgent[] } | { kind: 'message'; agentId: number; message: ExternalAgentMessage };
 
 /**
  * Base URL for the API. Empty in the web app (same origin); the VS Code extension's webview sets
@@ -244,6 +265,12 @@ export const api = {
   agentSteer: (project: string, tid: string, turnId: string, text: string, clientMessageId?: string, context?: AgentTurnContext) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/steer`, { turnId, text, clientMessageId, context }),
   agentApprove: (project: string, tid: string, requestId: string, decision: string) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/approval`, { requestId, decision }),
   agentInterrupt: (project: string, tid: string, turnId: string) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/interrupt`, { turnId }),
+  /** agents connected over MCP from elsewhere, and the owner's messages to them */
+  externalAgents: () => req<{ agents: ExternalAgent[] }>('GET', '/api/mcp-agents'),
+  externalAgentMessages: (id: number) => req<{ agent: ExternalAgent; messages: ExternalAgentMessage[] }>('GET', `/api/mcp-agents/${id}/messages`),
+  externalAgentSend: (id: number, text: string, context?: AgentTurnContext) => req<{ message: ExternalAgentMessage }>('POST', `/api/mcp-agents/${id}/messages`, { text, context }),
+  externalAgentCancel: (id: number, mid: number) => req<{ message: ExternalAgentMessage }>('POST', `/api/mcp-agents/${id}/messages/${mid}/cancel`),
+  externalAgentForget: (id: number) => req<{ ok: boolean }>('DELETE', `/api/mcp-agents/${id}`),
   versions: (id: string) => req<{ versions: VersionInfo[] }>('GET', `/api/docs/${encId(id)}/versions`),
   /** `lyx`: explicit content (e.g. offline edits that could not be merged) instead of the current server state */
   createVersion: (id: string, name: string, lyx?: string) => req<{ id: number }>('POST', `/api/docs/${encId(id)}/versions`, lyx !== undefined ? { name, lyx } : { name }),

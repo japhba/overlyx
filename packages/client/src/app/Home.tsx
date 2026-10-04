@@ -1,7 +1,8 @@
 /**
- * Start screen (no document open): the user's projects as cards — their personal example project
- * first, then their own projects, then what others shared with them, each group most recent first
- * (app/recency.ts: last opened by you, or last changed).
+ * Start screen (no document open): the user's projects — their personal example project first (a
+ * welcome card), then their own projects, then what others shared with them, each group most recent
+ * first (app/recency.ts: last opened by you, or last changed). Projects are listed as rows; the icon
+ * at the right of the action bar switches to a grid of cards, remembered per browser (`ol.homeView`).
  */
 import { useEffect, useState } from 'preact/hooks';
 import { api, zipUrl, type AdminProjectInfo, type Project, type User } from '../api';
@@ -20,6 +21,16 @@ export function projectDocs(p: Project): string[] {
 /** a project's title, else its name without the owner (`jan/thesis` → `thesis`) */
 export const projectTitle = (p: Project) => p.title ?? projectShortName(p.name);
 
+type HomeView = 'rows' | 'grid';
+const VIEW_KEY = 'ol.homeView';
+function storedView(): HomeView {
+  try { return localStorage.getItem(VIEW_KEY) === 'grid' ? 'grid' : 'rows'; } catch { return 'rows'; }
+}
+/** the view the switch leads to: a 2×2 grid of squares, or three lines with bullets */
+const viewIcon = (to: HomeView) => to === 'grid'
+  ? <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1" /><rect x="9" y="1.5" width="5.5" height="5.5" rx="1" /><rect x="1.5" y="9" width="5.5" height="5.5" rx="1" /><rect x="9" y="9" width="5.5" height="5.5" rx="1" /></svg>
+  : <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="2.5" cy="3.5" r="1.3" /><circle cx="2.5" cy="8" r="1.3" /><circle cx="2.5" cy="12.5" r="1.3" /><rect x="5.5" y="2.6" width="9" height="1.8" rx="0.9" /><rect x="5.5" y="7.1" width="9" height="1.8" rx="0.9" /><rect x="5.5" y="11.6" width="9" height="1.8" rx="0.9" /></svg>;
+
 export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, onChanged, onBrowse, onSignIn, notify }: {
   user: User; refreshKey: number; onOpen: (id: string) => void; onStartTour: (id: string) => void; onShare: (project: string) => void; onGit: (project: string) => void; onChanged: () => void; onBrowse: () => void;
   /** guests cannot create projects; they are asked to sign in instead */
@@ -29,6 +40,12 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [adminList, setAdminList] = useState<AdminProjectInfo[] | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [view, setView] = useState<HomeView>(storedView);
+  const switchView = () => {
+    const next: HomeView = view === 'rows' ? 'grid' : 'rows';
+    setView(next);
+    try { localStorage.setItem(VIEW_KEY, next); } catch { /* the choice just is not remembered */ }
+  };
   // an import chosen on the landing page before the sign-in: runs now, and a lone project opens itself
   const [pending, setPending] = useState<ImportInitial | null>(null);
   useEffect(() => {
@@ -81,6 +98,23 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
     catch (e) { notify((e as Error).message, 'error'); }
   };
 
+  const metaText = (p: Project, docs: string[]) =>
+    `${p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · ${docs.length} document${docs.length === 1 ? '' : 's'}, ${p.files.length} file${p.files.length === 1 ? '' : 's'}${recencyLabel(p) ? ` · ${recencyLabel(p)}` : ''}`;
+  const badge = (p: Project) => p.via !== 'owner' && <span class={'badge' + (p.role === 'view' ? ' view' : '')}>{p.via === 'admin' ? 'admin' : p.role === 'view' ? 'can view' : 'can edit'}</span>;
+  const docLink = (p: Project, d: string) => <a key={d} href={'#/' + p.name + '/' + d} onClick={e => { e.preventDefault(); onOpen(p.name + '/' + d); }}>📄 {d}</a>;
+  const actions = (p: Project, docs: string[], isExample = false) => (
+    <div class="actions">
+      {docs[0] ? (isExample
+        ? <button class="btn primary small" data-start-tour onClick={() => onStartTour(p.name + '/' + docs[0])}>Start the tour</button>
+        : <button class="btn primary small" onClick={() => onOpen(p.name + '/' + docs[0])}>Open</button>)
+        : <button class="btn primary small" onClick={() => onOpen(p.name)} title="This project has no documents yet — open it to create the first one">Open</button>}
+      {p.role === 'owner' && p.via !== 'admin' && <button class="btn small" onClick={() => onShare(p.name)} data-share={p.name}>Share…</button>}
+      <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>
+      <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>
+      {p.role === 'owner' && <button class="btn small danger" title="Move this project to the trash" onClick={() => void remove(p)}>Delete</button>}
+    </div>
+  );
+
   const card = (p: Project) => {
     const docs = projectDocs(p);
     const isExample = p === example;
@@ -88,7 +122,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       <div class={'home-card' + (isExample ? ' example' : '')} key={p.name} data-project={p.name}>
         <div class="title">
           <span>{isExample ? '👋 ' : '📁 '}{projectTitle(p)}</span>
-          {p.via !== 'owner' && <span class={'badge' + (p.role === 'view' ? ' view' : '')}>{p.via === 'admin' ? 'admin' : p.role === 'view' ? 'can view' : 'can edit'}</span>}
+          {badge(p)}
         </div>
         {isExample && (
           <div class="blurb">
@@ -97,25 +131,37 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
             <b>Start the tour</b> opens it with an interactive walkthrough that asks you to try the essentials (every step can be skipped).
           </div>
         )}
-        {!isExample && <div class="meta">{p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · {docs.length} document{docs.length === 1 ? '' : 's'}, {p.files.length} file{p.files.length === 1 ? '' : 's'}{recencyLabel(p) ? ` · ${recencyLabel(p)}` : ''}</div>}
+        {!isExample && <div class="meta">{metaText(p, docs)}</div>}
         <div class="docs">
-          {docs.slice(0, isExample ? 1 : 6).map(d => <a key={d} href={'#/' + p.name + '/' + d} onClick={e => { e.preventDefault(); onOpen(p.name + '/' + d); }}>📄 {d}</a>)}
+          {docs.slice(0, isExample ? 1 : 6).map(d => docLink(p, d))}
           {!isExample && docs.length > 6 && <span class="meta">+{docs.length - 6} more in the documents panel</span>}
           {!docs.length && <span class="meta">No documents yet.</span>}
         </div>
-        <div class="actions">
-          {docs[0] ? (isExample
-            ? <button class="btn primary small" data-start-tour onClick={() => onStartTour(p.name + '/' + docs[0])}>Start the tour</button>
-            : <button class="btn primary small" onClick={() => onOpen(p.name + '/' + docs[0])}>Open</button>)
-            : <button class="btn primary small" onClick={() => onOpen(p.name)} title="This project has no documents yet — open it to create the first one">Open</button>}
-          {p.role === 'owner' && p.via !== 'admin' && <button class="btn small" onClick={() => onShare(p.name)} data-share={p.name}>Share…</button>}
-          <button class="btn small" onClick={() => onGit(p.name)} data-git={p.name} title="Clone, pull and push this project with git">Git…</button>
-          <a class="btn small" data-download-zip={p.name} href={zipUrl(p.name)} title="Download the whole project as a .zip">Download</a>
-          {p.role === 'owner' && <button class="btn small danger" title="Move this project to the trash" onClick={() => void remove(p)}>Delete</button>}
-        </div>
+        {actions(p, docs, isExample)}
       </div>
     );
   };
+
+  /** one line per project: name and facts on the left, its first documents on one line below (the count is in the facts), the actions on the right */
+  const row = (p: Project) => {
+    const docs = projectDocs(p);
+    const target = docs[0] ? p.name + '/' + docs[0] : p.name;
+    return (
+      <div class="home-card home-row" key={p.name} data-project={p.name}>
+        <div class="title">
+          <a class="name" href={'#/' + target} onClick={e => { e.preventDefault(); onOpen(target); }}>📁 {projectTitle(p)}</a>
+          {badge(p)}
+        </div>
+        <div class="meta">{metaText(p, docs)}</div>
+        <div class="docs">
+          {docs.slice(0, 8).map(d => docLink(p, d))}
+          {!docs.length && <span class="meta">No documents yet.</span>}
+        </div>
+        {actions(p, docs)}
+      </div>
+    );
+  };
+  const list = (ps: Project[]) => <div class={'cards ' + view} data-home-view={view}>{ps.map(view === 'rows' ? row : card)}</div>;
 
   return (
     <div class="home">
@@ -127,15 +173,19 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           : <button class="btn primary" onClick={() => void newProject()}>+ New project</button>}
         {!user.guest && <button class="btn" data-import-overleaf onClick={() => setImportOpen(true)} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
         <button class="btn" onClick={onBrowse}>Show the documents panel</button>
+        <button class="home-view-switch" data-home-view-switch={view === 'rows' ? 'grid' : 'rows'} onClick={switchView}
+          title={view === 'rows' ? 'Show projects as a grid of cards' : 'Show projects as a list'} aria-label={view === 'rows' ? 'Grid view' : 'List view'}>
+          {viewIcon(view === 'rows' ? 'grid' : 'rows')}
+        </button>
       </div>
       {importOpen && <OverleafImport existing={(projects ?? []).filter(p => splitProjectKey(p.name).owner === user.username).map(p => projectShortName(p.name))} onClose={() => { setImportOpen(false); setPending(null); }} onImported={() => { void load(); onChanged(); }} notify={notify}
         initial={pending ?? undefined} autostart={!!pending} onDone={names => void openImported(names)} />}
       {projects === null && <div class="meta">Loading your projects…</div>}
       {example && <div class="cards">{card(example)}</div>}
-      {mine.length > 0 && <><h3>Your projects</h3><div class="cards">{mine.map(card)}</div></>}
+      {mine.length > 0 && <><h3>Your projects</h3>{list(mine)}</>}
       {projects && !mine.length && !example && !user.guest && <div class="meta">You have no projects yet — create one, or ask a colleague to share theirs with you.</div>}
-      {shared.length > 0 && <><h3>Shared with you</h3><div class="cards">{shared.map(card)}</div></>}
-      {admin.length > 0 && <><h3>Opened as administrator</h3><div class="cards">{admin.map(card)}</div></>}
+      {shared.length > 0 && <><h3>Shared with you</h3>{list(shared)}</>}
+      {admin.length > 0 && <><h3>Opened as administrator</h3>{list(admin)}</>}
       {user.isAdmin && adminList && others.length > 0 && (
         <>
           <h3>Administration</h3>

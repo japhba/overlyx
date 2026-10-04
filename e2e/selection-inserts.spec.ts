@@ -108,7 +108,7 @@ test('HTML blocks pasted into a paragraph become paragraphs and list items, not 
     const dt = new DataTransfer();
     dt.setData('text/html', `<html xmlns:o="urn:schemas-microsoft-com:office:office"><body><!--StartFragment--><p class=MsoNormal><b>Results</b></p><p class=MsoNormal>We observed a <i>significant</i> increase.<o:p></o:p></p><ul><li class=MsoNormal>Session A: 3.2 Hz</li><li class=MsoNormal>Session B: 2.8 Hz</li></ul><table border=1><tr><td>Condition</td><td>Mean</td></tr><tr><td>Control</td><td>3.1</td></tr></table><!--EndFragment--></body></html>`);
     dt.setData('text/plain', 'Results\nWe observed a significant increase.\nSession A: 3.2 Hz\nSession B: 2.8 Hz');
-    document.querySelector('.lyx-editor')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    document.querySelector('.lyx-editor')!.dispatchEvent(Object.defineProperty(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }), 'clipboardData', { value: dt }));
   });
   await expect(page.locator('.lyx-editor .lyx-inset-note')).toHaveCount(0);
   await saved(page);

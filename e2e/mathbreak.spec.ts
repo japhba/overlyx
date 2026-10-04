@@ -6,7 +6,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { login, openDoc, collectErrors, texDoc, PROJECTS_DIR } from './helpers';
+import { login, openDoc, collectErrors, texDoc, PROJECTS_DIR, nextFrames } from './helpers';
 
 const PROJECT = 'admin/e2e-mathbreak';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -25,7 +25,9 @@ const layout = (page: Page) => page.evaluate(`(() => [...document.querySelectorA
   const lines = [...d.querySelectorAll('mjx-linebox')].map(l => { const rs = [...l.querySelectorAll(':scope > *')].map(k => k.getBoundingClientRect()).filter(r => r.width); return { left: Math.min(...rs.map(r => r.left)), right: Math.max(...rs.map(r => r.right)) }; });
   return { lines: lines.length, inside: lines.every(l => l.left >= col.left - 1 && l.right <= col.right + 1) };
 }))()`) as Promise<{ lines: number; inside: boolean }[]>;
-const caret = (page: Page) => page.evaluate(`(() => { const f = document.querySelector('.lyx-editor .lyx-math-display').pmViewDesc.spec.field; const c = document.querySelector('.lm-field.focused .lm-caret'); return { depth: f.cursor.depth, pos: f.cursor.pos, y: c ? c.getBoundingClientRect().top : null }; })()`) as Promise<{ depth: number; pos: number; y: number | null }>;
+// the caret is drawn on the next animation frame (lyxmath/field.ts scheduleLayout): read it after that
+const caret = async (page: Page) => { await nextFrames(page); return caretNow(page); };
+const caretNow = (page: Page) => page.evaluate(`(() => { const f = document.querySelector('.lyx-editor .lyx-math-display').pmViewDesc.spec.field; const c = document.querySelector('.lm-field.focused .lm-caret'); return { depth: f.cursor.depth, pos: f.cursor.pos, y: c ? c.getBoundingClientRect().top : null }; })()`) as Promise<{ depth: number; pos: number; y: number | null }>;
 
 test('a long display formula breaks into lines inside the column; clicks and ↑/↓ follow the lines', async ({ page }) => {
   const errors = collectErrors(page);
@@ -39,7 +41,11 @@ test('a long display formula breaks into lines inside the column; clicks and ↑
   expect(l[1].lines).toBeLessThanOrEqual(1);        // x+y=z fits on one line
   // a click on the second line puts the cursor there, at the top level of the formula
   const disp = page.locator('.lyx-editor .lyx-math-display').first();
-  const plus = (await disp.locator('mjx-linebox').nth(1).locator('mjx-mrow.lm-c0 > mjx-mo.lm-a').nth(1).boundingBox())!;
+  // (measured once the formula has settled: a re-render in between detaches the element — WebKit, slower, got null)
+  const plusAt = disp.locator('mjx-linebox').nth(1).locator('mjx-mrow.lm-c0 > mjx-mo.lm-a').nth(1);
+  const box: { at: { x: number; y: number; width: number; height: number } | null } = { at: null };
+  await expect.poll(async () => (box.at = await plusAt.boundingBox()) !== null, { timeout: 10000 }).toBe(true);
+  const plus = box.at!;
   await page.mouse.click(plus.x + 1, plus.y + plus.height / 2);
   const onSecond = await caret(page);
   expect(onSecond.depth).toBe(1);

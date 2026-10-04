@@ -7,7 +7,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { login, texDoc, collectErrors, PROJECTS_DIR } from './helpers';
+import { login, texDoc, collectErrors, PROJECTS_DIR, browserName } from './helpers';
 
 const PROJECT = 'admin/e2e-layout';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -165,7 +165,7 @@ test('a new slide deck from the File menu is a beamer file of layout pages', asy
   await page.locator('[data-layout-name]').fill('talk.tex');
   await page.locator('[data-create-layout]').click();
   await page.waitForSelector('.lyx-editor.ol-layout .ol-page', { timeout: 30000 });
-  await expect(page.locator('.ol-page')).toHaveCount(2);
+  await expect(page.locator('.lyx-editor .ol-page')).toHaveCount(2);
   await expect(page.locator('[data-toolbar="layout"]')).toBeVisible();
   const text = fileText('talk.tex');
   expect(text).toContain('\\documentclass[aspectratio=43]{beamer}');
@@ -178,7 +178,7 @@ test('draw a text box, type with a formula, move and resize a shape, undo', asyn
   const errors = collectErrors(page);
   await login(page);
   await openLayout(page, 'slides.tex');
-  const pg = (await page.locator('.ol-page').first().boundingBox())!;
+  const pg = (await page.locator('.lyx-editor .ol-page').first().boundingBox())!;
   const pxPerMm = pg.width / 160;
 
   // the text tool: drag a box, type into it
@@ -188,18 +188,20 @@ test('draw a text box, type with a formula, move and resize a shape, undo', asyn
   await page.mouse.move(pg.x + 140 * pxPerMm, pg.y + 60 * pxPerMm, { steps: 5 });
   await page.mouse.up();
   await page.keyboard.type('Hello $x^2$ layout');
-  await expect(page.locator('.ol-box').nth(1)).toContainText('Hello');
-  await expect(page.locator('.ol-box').nth(1).locator('.lyx-math-inline')).toHaveCount(1);
+  await expect(page.locator('.lyx-editor .ol-box').nth(1)).toContainText('Hello');
+  await expect(page.locator('.lyx-editor .ol-box').nth(1).locator('.lyx-math-inline')).toHaveCount(1);
   await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toContain('Hello $x^{2}$ layout');
-  expect(fileText('slides.tex')).toMatch(/\\begin\{olbox\}\{x=70mm,y=45mm,w=70mm,h=[\d.]+mm,grow\}\nHello \$x\^\{2\}\$ layout\n\\end\{olbox\}/);
+  // (70 mm give or take a pixel: pointer events carry whole pixels in WebKit and Firefox, fractions in Chromium)
+  const box = /\\begin\{olbox\}\{x=([\d.]+)mm,y=([\d.]+)mm,w=([\d.]+)mm,h=[\d.]+mm,grow\}\nHello \$x\^\{2\}\$ layout\n\\end\{olbox\}/.exec(fileText('slides.tex'));
+  expect(box?.slice(1).map(Number).every((v, i) => Math.abs(v - [70, 45, 70][i]) < 1.5 / pxPerMm)).toBe(true);
 
   // Esc leaves the text for the box, Esc again deselects; a click selects the blue shape
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
-  const blue = page.locator('.ol-shape').first();
+  const blue = page.locator('.lyx-editor .ol-shape').first();
   const b0 = (await blue.boundingBox())!;
   await page.mouse.click(b0.x + b0.width / 2, b0.y + b0.height / 2);
-  await expect(page.locator('.ol-selframe')).toHaveCount(1);
+  await expect(page.locator('.lyx-editor .ol-selframe')).toHaveCount(1);
   // drag it 10 mm right, 5 mm down (Alt: no snapping)
   await page.keyboard.down('Alt');
   await page.mouse.move(b0.x + b0.width / 2, b0.y + b0.height / 2);
@@ -207,22 +209,25 @@ test('draw a text box, type with a formula, move and resize a shape, undo', asyn
   await page.mouse.move(b0.x + b0.width / 2 + 10 * pxPerMm, b0.y + b0.height / 2 + 5 * pxPerMm, { steps: 8 });
   await page.mouse.up();
   await page.keyboard.up('Alt');
-  await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=30mm,y=25mm,w=30mm,h=20mm,[^}]*name=Blue\}/);
+  // the blue shape's x, y, w, h in mm, within a pixel of the intended values (pointer events carry whole
+  // pixels in WebKit and Firefox, fractions in Chromium)
+  const blueAt = (want: number[]) => { const m = /\\olshape\{x=([\d.]+)mm,y=([\d.]+)mm,w=([\d.]+)mm,h=([\d.]+)mm,[^}]*name=Blue\}/.exec(fileText('slides.tex')); return !!m && m.slice(1).every((v, i) => Math.abs(Number(v) - want[i]) < 1.5 / pxPerMm); };
+  await expect.poll(() => blueAt([30, 25, 30, 20]), { timeout: 15000 }).toBe(true);
   // the east handle: 10 mm wider
-  const h = (await page.locator('.ol-h-e').first().boundingBox())!;
+  const h = (await page.locator('.lyx-editor .ol-h-e').first().boundingBox())!;
   await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
   await page.keyboard.down('Alt'); await page.keyboard.up('Alt');
   await page.mouse.down();
   await page.mouse.move(h.x + h.width / 2 + 10 * pxPerMm, h.y + h.height / 2, { steps: 6 });
   await page.mouse.up();
-  await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=30mm,y=25mm,w=40mm,h=20mm,/);
+  await expect.poll(() => blueAt([30, 25, 40, 20]), { timeout: 15000 }).toBe(true);
   // arrow keys nudge by 1 mm
   await page.keyboard.press('ArrowLeft');
-  await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=29mm,y=25mm,w=40mm/);
+  await expect.poll(() => blueAt([29, 25, 40, 20]), { timeout: 15000 }).toBe(true);
   // undo twice: the width comes back
   await page.keyboard.press('Control+z');
   await page.keyboard.press('Control+z');
-  await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=30mm,y=25mm,w=30mm,h=20mm,/);
+  await expect.poll(() => blueAt([30, 25, 30, 20]), { timeout: 15000 }).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -230,7 +235,7 @@ test('toolbar: bring to front and fill colour; a rectangle drawn with the shape 
   const errors = collectErrors(page);
   await login(page);
   await openLayout(page, 'slides.tex');
-  const blue = page.locator('.ol-shape').first();
+  const blue = page.locator('.lyx-editor .ol-shape').first();
   const b = (await blue.boundingBox())!;
   await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
   await page.locator('[data-tb="ol-front"]').click();
@@ -242,7 +247,7 @@ test('toolbar: bring to front and fill colour; a rectangle drawn with the shape 
 
   await page.keyboard.press('Escape');
   await page.keyboard.press('r');
-  const pg = (await page.locator('.ol-page').first().boundingBox())!;
+  const pg = (await page.locator('.lyx-editor .ol-page').first().boundingBox())!;
   const pxPerMm = pg.width / 160;
   await page.mouse.move(pg.x + 100 * pxPerMm, pg.y + 65 * pxPerMm);
   await page.keyboard.down('Alt');
@@ -250,7 +255,15 @@ test('toolbar: bring to front and fill colour; a rectangle drawn with the shape 
   await page.mouse.move(pg.x + 120 * pxPerMm, pg.y + 80 * pxPerMm, { steps: 5 });
   await page.mouse.up();
   await page.keyboard.up('Alt');
-  await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=100mm,y=65mm,w=20mm,h=15mm,vb=0 0 20 15,fill=\[HTML\]DCE9F7,draw=\[HTML\]2F5597,line=0.8pt\}\{M 0 0 L 20 0 L 20 15 L 0 15 Z\}/);
+  // a rectangle of 20 × 15 mm at (100, 65) — within a pixel (pointer events carry whole pixels in WebKit and Firefox)
+  const drawn = () => {
+    const m = /\\olshape\{x=([\d.]+)mm,y=([\d.]+)mm,w=([\d.]+)mm,h=([\d.]+)mm,vb=0 0 ([\d.]+) ([\d.]+),fill=\[HTML\]DCE9F7,draw=\[HTML\]2F5597,line=0.8pt\}\{M 0 0 L ([\d.]+) 0 L ([\d.]+) ([\d.]+) L 0 ([\d.]+) Z\}/.exec(fileText('slides.tex'));
+    if (!m) return false;
+    const [x, y, w, h, vw, vh, p1, p2, p3, p4] = m.slice(1).map(Number);
+    const px = 1.5 / pxPerMm;
+    return Math.abs(x - 100) < px && Math.abs(y - 65) < px && Math.abs(w - 20) < 2 * px && Math.abs(h - 15) < 2 * px && vw === w && vh === h && p1 === w && p2 === w && p3 === h && p4 === h;
+  };
+  await expect.poll(drawn, { timeout: 15000 }).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -258,27 +271,27 @@ test('editing a box stays in the box: Ctrl+A and typing replace only its text; t
   const errors = collectErrors(page);
   await login(page);
   await openLayout(page, 'slides.tex');
-  const box = page.locator('.ol-box', { hasText: 'First words' });
+  const box = page.locator('.lyx-editor .ol-box', { hasText: 'First words' });
   const bb = (await box.boundingBox())!;
   await page.mouse.dblclick(bb.x + 10, bb.y + bb.height / 2);
   await page.keyboard.press('Control+a');
   await page.keyboard.type('Replaced');
   await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\n\\begin\{olbox\}\{x=70mm,y=20mm,w=60mm,h=10mm,font=14pt\}\nReplaced\n\\end\{olbox\}/);
   expect(fileText('slides.tex')).toContain('Second page');
-  await expect(page.locator('.ol-page')).toHaveCount(2);
+  await expect(page.locator('.lyx-editor .ol-page')).toHaveCount(2);
   // the arrows stop at the box's edge (the caret stays in it)
   await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowDown');
   await page.keyboard.type('!');
   await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toContain('\nReplaced!\n');
   await page.keyboard.press('Escape');
   // right-click on the red shape: its menu; Delete removes it
-  const red = page.locator('.ol-shape:has(path[fill="#ff0000"])');
+  const red = page.locator('.lyx-editor .ol-shape:has(path[fill="#ff0000"])');
   const rb = (await red.boundingBox())!;
   await page.mouse.click(rb.x + rb.width / 2, rb.y + rb.height / 2, { button: 'right' });
   await page.locator('.ctx-menu .ctx-label', { hasText: /^Delete$/ }).click();
   await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).not.toContain('name=Later');
   // on the empty page: a text box there
-  const pg = (await page.locator('.ol-page').first().boundingBox())!;
+  const pg = (await page.locator('.lyx-editor .ol-page').first().boundingBox())!;
   await page.mouse.click(pg.x + pg.width * 0.1, pg.y + pg.height * 0.85, { button: 'right' });
   await page.locator('.ctx-menu .ctx-label', { hasText: 'Text box here' }).click();
   await page.keyboard.type('Corner note');
@@ -294,7 +307,7 @@ test('a raw LaTeX object is typeset with the document\'s preamble and shown as i
   await expect(page.locator('.ol-rawedit-code')).toBeVisible();
   await page.locator('.ol-rawedit-code').fill('\\begin{tikzpicture}\\fill[jblue] (0,0) circle (5mm);\\end{tikzpicture}');
   await page.keyboard.press('Control+Enter');
-  await expect(page.locator('.ol-raw.ol-rendered')).toHaveCount(1, { timeout: 60000 });
+  await expect(page.locator('.lyx-editor .ol-raw.ol-rendered')).toHaveCount(1, { timeout: 60000 });
   await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/\\begin\{olraw\}\{[^}]*\}\n\\begin\{tikzpicture\}\\fill\[jblue\] \(0,0\) circle \(5mm\);\\end\{tikzpicture\}\n\\end\{olraw\}/);
   expect(errors).toEqual([]);
 });
@@ -303,30 +316,35 @@ test('the node editor moves a node with its handles; the crop tool crops from an
   const errors = collectErrors(page);
   await login(page);
   await openLayout(page, 'tools.tex');
-  const pg = (await page.locator('.ol-page').first().boundingBox())!;
+  const pg = (await page.locator('.lyx-editor .ol-page').first().boundingBox())!;
   const mm = pg.width / 160;
-  const circle = (await page.locator('.ol-shape').first().boundingBox())!;
+  const circle = (await page.locator('.lyx-editor .ol-shape').first().boundingBox())!;
   await page.mouse.dblclick(circle.x + circle.width / 2, circle.y + circle.height / 2);
-  await expect(page.locator('.ol-node')).toHaveCount(5);
-  await expect(page.locator('.ol-ctl')).toHaveCount(8);
+  await expect(page.locator('.lyx-editor .ol-node')).toHaveCount(5);
+  await expect(page.locator('.lyx-editor .ol-ctl')).toHaveCount(8);
   // the first node (the right-most point) 5 mm further right: the box grows by 5 mm
-  const node = (await page.locator('.ol-node').first().boundingBox())!;
+  const node = (await page.locator('.lyx-editor .ol-node').first().boundingBox())!;
   await page.mouse.move(node.x + node.width / 2, node.y + node.height / 2);
   await page.mouse.down();
   await page.mouse.move(node.x + node.width / 2 + 5 * mm, node.y + node.height / 2, { steps: 6 });
   await page.mouse.up();
-  await expect.poll(() => fileText('tools.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=20mm,y=20mm,w=35(\.\d+)?mm,h=30mm,vb=0 0 35(\.\d+)? 30,[^}]*name=Circle\}\{M 35(\.\d+)? 15 C 35/);
+  // (35 mm within a pixel: pointer events carry whole pixels in WebKit and Firefox)
+  await expect.poll(() => fileText('tools.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=20mm,y=20mm,w=(?:35(\.\d+)?|34\.9\d*)mm,h=30mm,vb=0 0 (?:35(\.\d+)?|34\.9\d*) 30,[^}]*name=Circle\}\{M (?:35(\.\d+)?|34\.9\d*) 15 C /);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   // crop: double-click the image, the west handle 10 mm to the right
-  const img = (await page.locator('.ol-image').first().boundingBox())!;
+  const img = (await page.locator('.lyx-editor .ol-image').first().boundingBox())!;
   await page.mouse.dblclick(img.x + img.width / 2, img.y + img.height / 2);
-  const w = (await page.locator('.ol-crop-h.ol-h-w').boundingBox())!;
+  const w = (await page.locator('.lyx-editor .ol-crop-h.ol-h-w').boundingBox())!;
   await page.mouse.move(w.x + w.width / 2, w.y + w.height / 2);
   await page.mouse.down();
   await page.mouse.move(w.x + w.width / 2 + 10 * mm, w.y + w.height / 2, { steps: 6 });
   await page.mouse.up();
-  await expect.poll(() => fileText('tools.tex'), { timeout: 15000 }).toMatch(/\\olimage\{x=90mm,y=20mm,w=30mm,h=30mm,crop=0\.25 0 0 0,name=Pic\}\{pic\.png\}/);
+  // x = 90 mm, w = 30 mm and a quarter of the 40 mm image cropped, each within a pixel
+  await expect.poll(() => {
+    const m = /\\olimage\{x=([\d.]+)mm,y=20mm,w=([\d.]+)mm,h=30mm,crop=([\d.]+) 0 0 0,name=Pic\}\{pic\.png\}/.exec(fileText('tools.tex'));
+    return !!m && Math.abs(Number(m[1]) - 90) < 1.5 / mm && Math.abs(Number(m[2]) - 30) < 1.5 / mm && Math.abs(Number(m[3]) - 0.25) < 1.5 / (40 * mm);
+  }, { timeout: 15000 }).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -334,7 +352,7 @@ test('presentation: F5, overlay steps, the next page, Esc', async ({ page }) => 
   const errors = collectErrors(page);
   await login(page);
   await openLayout(page, 'present.tex');
-  const pg = (await page.locator('.ol-page').first().boundingBox())!;
+  const pg = (await page.locator('.lyx-editor .ol-page').first().boundingBox())!;
   await page.mouse.click(pg.x + pg.width - 8, pg.y + pg.height - 8);   // empty page: focus, nothing selected
   await page.keyboard.press('F5');
   await expect(page.locator('.ol-present')).toBeVisible();
@@ -354,7 +372,7 @@ test('a layout document opens with its whole page in the window; a pinch (Ctrl +
   await login(page);
   await openLayout(page, 'zoom.tex');
   const scroller = (await page.locator('.editor-scroll').boundingBox())!;
-  const pg0 = (await page.locator('.ol-page').first().boundingBox())!;
+  const pg0 = (await page.locator('.lyx-editor .ol-page').first().boundingBox())!;
   // the whole page is visible (both sides) and the status bar says so
   expect(pg0.width).toBeLessThanOrEqual(scroller.width);
   expect(pg0.height).toBeLessThanOrEqual(scroller.height);
@@ -366,18 +384,20 @@ test('a layout document opens with its whole page in the window; a pinch (Ctrl +
   for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, -20); await page.waitForTimeout(30); }
   await page.keyboard.up('Control');
   await page.waitForTimeout(300);
-  const pg1 = (await page.locator('.ol-page').first().boundingBox())!;
+  const pg1 = (await page.locator('.lyx-editor .ol-page').first().boundingBox())!;
   expect(pg1.width).toBeGreaterThan(pg0.width * 1.5);
-  expect(Math.abs(pg1.x + pg1.width * 0.3 - px)).toBeLessThan(6);
-  expect(Math.abs(pg1.y + pg1.height * 0.4 - py)).toBeLessThan(6);
+  // (within 6 px — 8 where pointer events carry whole pixels, WebKit and Firefox: the half pixel is zoomed with the page)
+  const slack = browserName(page) === 'chromium' ? 6 : 8;
+  expect(Math.abs(pg1.x + pg1.width * 0.3 - px)).toBeLessThan(slack);
+  expect(Math.abs(pg1.y + pg1.height * 0.4 - py)).toBeLessThan(slack);
   await expect(page.locator('.zoom-select')).not.toHaveValue('fit');
   // Ctrl+Minus steps out, Fit goes back to the whole page
   await page.keyboard.press('Control+Minus');
   await page.waitForTimeout(200);
-  expect((await page.locator('.ol-page').first().boundingBox())!.width).toBeLessThan(pg1.width);
+  expect((await page.locator('.lyx-editor .ol-page').first().boundingBox())!.width).toBeLessThan(pg1.width);
   await page.selectOption('.zoom-select', 'fit');
   await page.waitForTimeout(200);
-  expect(Math.abs((await page.locator('.ol-page').first().boundingBox())!.width - pg0.width)).toBeLessThan(2);
+  expect(Math.abs((await page.locator('.lyx-editor .ol-page').first().boundingBox())!.width - pg0.width)).toBeLessThan(2);
   expect(errors).toEqual([]);
 });
 
@@ -385,7 +405,7 @@ test("presentation: beamer's overlays in a box's text (\\item<2->, \\only<3>)", 
   const errors = collectErrors(page);
   await login(page);
   await openLayout(page, 'overlays.tex');
-  const pg = (await page.locator('.ol-page').first().boundingBox())!;
+  const pg = (await page.locator('.lyx-editor .ol-page').first().boundingBox())!;
   await page.mouse.click(pg.x + pg.width - 8, pg.y + pg.height - 8);
   await page.keyboard.press('F5');
   await expect(page.locator('.ol-present')).toBeVisible();
@@ -489,7 +509,7 @@ test("text boxes set their lines as TeX does: the first line's letters at the to
   const errors = collectErrors(page);
   await login(page);
   await openLayout(page, 'texlines.tex');
-  await expect(page.locator('.ol-page .lyx-math-display.ol-disp-first.ol-disp-last mjx-container')).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('.lyx-editor .ol-page .lyx-math-display.ol-disp-first.ol-disp-last mjx-container')).toBeVisible({ timeout: 15000 });
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.querySelector('.lyx-editor')!).getPropertyValue('--ol-tex-lines').trim())).toBe('1');
   const m = await page.evaluate(() => {
     const boxes = [...document.querySelectorAll<HTMLElement>('.ol-page .ol-box')];
@@ -524,9 +544,9 @@ test('selecting like Inkscape: a click on nothing deselects, rubber bands from t
   const errors = collectErrors(page);
   await login(page);
   await openLayout(page, 'select.tex');
-  const pg = (await page.locator('.ol-page').first().boundingBox())!;
+  const pg = (await page.locator('.lyx-editor .ol-page').first().boundingBox())!;
   const at = (x: number, y: number): [number, number] => [pg.x + x / 160 * pg.width, pg.y + y / 90 * pg.height];
-  const frames = page.locator('.ol-selframe:not(.ol-thin):not(.ol-union)');
+  const frames = page.locator('.lyx-editor .ol-selframe:not(.ol-thin):not(.ol-union)');
   // the shapes by name — the first one: a copy left by Space comes later in the page
   const state = () => page.evaluate(() => {
     const v = (window as any).overlyx.activeView;
@@ -545,7 +565,7 @@ test('selecting like Inkscape: a click on nothing deselects, rubber bands from t
   // a click on an object selects it; the page does not move when the toolbar follows the selection
   await page.mouse.click(...at(40, 30));
   await expect(frames).toHaveCount(1);
-  expect(Math.abs((await page.locator('.ol-page').first().boundingBox())!.y - pg.y)).toBeLessThan(1);
+  expect(Math.abs((await page.locator('.lyx-editor .ol-page').first().boundingBox())!.y - pg.y)).toBeLessThan(1);
   // a click beside the page: nothing selected (and no caret dropped into a box); Delete then deletes nothing
   await page.mouse.click(pg.x - 20, pg.y + pg.height / 2);
   let s = await state();
@@ -559,7 +579,7 @@ test('selecting like Inkscape: a click on nothing deselects, rubber bands from t
   // editing the box: the text cursor over it; a click on an empty spot of the page leaves it
   await page.mouse.click(...at(30, 57));
   await page.mouse.click(...at(30, 57));
-  await expect(page.locator('.ol-editing')).toHaveCount(1);
+  await expect(page.locator('.lyx-editor .ol-editing')).toHaveCount(1);
   expect(await cursorAt(30, 57)).toBe('text');
   await page.mouse.click(...at(120, 75));
   expect(await state()).toMatchObject({ sel: 'GapCursor', editing: false, frames: 0 });
@@ -569,13 +589,13 @@ test('selecting like Inkscape: a click on nothing deselects, rubber bands from t
   await page.mouse.move(lx, ly); await page.mouse.down();
   for (let i = 1; i <= 8; i++) { const [tx, ty] = at(95, 45); await page.mouse.move(lx + (tx - lx) * i / 8, ly + (ty - ly) * i / 8); }
   await page.mouse.up();
-  await expect(page.locator('.ol-selframe.ol-union')).toHaveCount(1);
-  await expect(page.locator('.ol-selframe.ol-thin')).toHaveCount(2);
+  await expect(page.locator('.lyx-editor .ol-selframe.ol-union')).toHaveCount(1);
+  await expect(page.locator('.lyx-editor .ol-selframe.ol-thin')).toHaveCount(2);
   // Shift+click takes one out again
   await page.keyboard.down('Shift'); await page.mouse.click(...at(40, 30)); await page.keyboard.up('Shift');
   await expect(frames).toHaveCount(1);
   await page.mouse.click(pg.x - 20, pg.y + 20);
-  await expect(page.locator('.ol-selframe')).toHaveCount(0);
+  await expect(page.locator('.lyx-editor .ol-selframe')).toHaveCount(0);
   // with Shift a drag that starts on an object is a rubber band too
   const [bx, by] = at(22, 62), [ex, ey] = at(95, 15);
   await page.keyboard.down('Shift');
@@ -583,7 +603,7 @@ test('selecting like Inkscape: a click on nothing deselects, rubber bands from t
   for (let i = 1; i <= 8; i++) await page.mouse.move(bx + (ex - bx) * i / 8, by + (ey - by) * i / 8);
   await page.mouse.up();
   await page.keyboard.up('Shift');
-  await expect(page.locator('.ol-selframe.ol-thin')).toHaveCount(2);
+  await expect(page.locator('.lyx-editor .ol-selframe.ol-thin')).toHaveCount(2);
   s = await state();
   expect(s.shapes.A).toEqual({ x: 30, y: 20 });   // nothing moved
   await page.mouse.click(pg.x - 20, pg.y + 20);
@@ -626,20 +646,20 @@ test('after a build, a text box whose text runs out of it in the PDF is marked; 
   await login(page);
   await openLayout(page, 'check.tex');
   // an edit first: the file gets OverLyX's block (the layout macros) on its save
-  await page.locator('.ol-box', { hasText: 'A short line.' }).click();
-  await page.locator('.ol-box', { hasText: 'A short line.' }).click();
+  await page.locator('.lyx-editor .ol-box', { hasText: 'A short line.' }).click();
+  await page.locator('.lyx-editor .ol-box', { hasText: 'A short line.' }).click();
   await page.keyboard.press('End');
   await page.keyboard.type(' Yes.');
   await expect.poll(() => fileText('check.tex'), { timeout: 15000 }).toContain('A short line. Yes.');
   await page.locator('.tb-btn[title^="View PDF"]').click();
-  const badge = page.locator('.ol-check.ol-check-overflow');
+  const badge = page.locator('.lyx-editor .ol-check.ol-check-overflow');
   await expect(badge).toHaveCount(1, { timeout: 240000 });
   await expect(badge).toHaveAttribute('title', /taller than its box and runs out of it/);
-  await expect(page.locator('.ol-check')).toHaveCount(1);   // the short box fits and matches
+  await expect(page.locator('.lyx-editor .ol-check')).toHaveCount(1);   // the short box fits and matches
   const h0 = await page.evaluate(() => { let h = 0; (window as any).overlyx.activeView.state.doc.descendants((n: any) => { if (n.type.name === 'ol_box' && n.textContent.startsWith('This box')) h = n.attrs.h; return true; }); return h; });
   expect(h0).toBe(8);
   await badge.click();
-  await expect(page.locator('.ol-check')).toHaveCount(0);
+  await expect(page.locator('.lyx-editor .ol-check')).toHaveCount(0);
   const h1 = await page.evaluate(() => { let h = 0; (window as any).overlyx.activeView.state.doc.descendants((n: any) => { if (n.type.name === 'ol_box' && n.textContent.startsWith('This box')) h = n.attrs.h; return true; }); return h; });
   expect(h1).toBeGreaterThan(20);
   expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);

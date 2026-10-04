@@ -78,6 +78,9 @@ test('LyX math keys: inset markers, Backspace/Delete dissolve a cell, Space leav
   await wrap.hover();
   await expect(wrap.locator('.lm-field')).toHaveCount(1, { timeout: 5000 });
   await wrap.click();
+  // the pointer off the formula: the inset under it is marked too (LyX's hover frame), and which inset
+  // the middle of the formula is depends on the browser's glyph widths
+  await page.locator('.lyx-editor .lyx-par').first().hover({ position: { x: 2, y: 2 } });
   // cursor paths are [cell index, position] per level, like LyX's DocIterator
   const setPath = (path: number[][]) => page.evaluate((path) => {
     const f = (document.querySelector('.lyx-editor .lyx-math-inline') as any).pmViewDesc.spec.field;

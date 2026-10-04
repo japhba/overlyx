@@ -139,3 +139,25 @@ test('a pinch (Ctrl + wheel) zooms the viewer about the pointer; an A0 page stay
   await expect(page.locator('.pdf-tab .pdf-toolbar .small-btn[title="Fit the page width"]')).toHaveText('Fit width');
   expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
 });
+
+test('an older engine (Safari 17, Firefox 130, Chrome 121) starts the app and shows a PDF: pdf.js polyfills what it needs', async ({ page }) => {
+  // the APIs pdf.js's default build needs (Safari 26.2 / Firefox 144 / Chrome 147), taken away from a
+  // page of the signed-in context and from its pdf.js worker — without the global Iterator the app did
+  // not even start
+  const OLD = 'delete globalThis.Iterator; for (const M of [Map, WeakMap]) { delete M.prototype.getOrInsertComputed; delete M.prototype.getOrInsert; } delete Math.sumPrecise; delete Promise.try; delete Uint8Array.prototype.toBase64; delete Uint8Array.fromBase64;';
+  const old = await page.context().newPage();
+  await old.addInitScript(OLD + ' globalThis.__olderEngine = typeof Iterator === "undefined" && !Map.prototype.getOrInsertComputed && !Math.sumPrecise;');
+  await old.route(/pdf\.worker[^/]*\.m?js(\?.*)?$/, async route => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, body: OLD + '\n' + await res.text() });
+  });
+  const errors = collectErrors(old);
+  await old.request.get('/api/projects');
+  await old.goto('/#/' + ID);
+  await old.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+  expect(await old.evaluate(() => (globalThis as any).__olderEngine)).toBe(true);   // (pdf.js's polyfills have put them back since)
+  await old.locator('.tree-row.file', { hasText: 'poster.pdf' }).click();
+  await expect(old.locator('.pdf-tab .pdf-page-box canvas.ready').first()).toBeAttached({ timeout: 30000 });
+  expect(errors.filter(e => !/favicon|ResizeObserver|\[vite\] failed to connect/.test(e))).toEqual([]);   // (the dev server's own reload socket, once in Chromium)
+  await old.close();
+});

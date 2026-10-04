@@ -88,3 +88,34 @@ test('the example project\'s welcome text reads as one sentence ("...when you ar
   expect(text).toContain('when you are done. Start the tour');
   expect(text).not.toContain('done.Start the tour');
 });
+
+test('projects are listed as rows by default; the icon switches to a grid of cards (remembered), and no card\'s buttons spill into its neighbour', async ({ page }) => {
+  await login(page);
+  await page.evaluate(() => localStorage.removeItem('ol.homeView'));
+  await page.goto('/');
+  const list = page.locator('.home .cards[data-home-view]').first();
+  await expect(list).toHaveAttribute('data-home-view', 'rows', { timeout: 15000 });
+  await expect(page.locator('.home-row').first()).toBeVisible();
+  // the switch shows the view it leads to, and the choice survives a reload
+  const toggle = page.locator('[data-home-view-switch]');
+  await expect(toggle).toHaveAttribute('data-home-view-switch', 'grid');
+  await toggle.click();
+  await expect(list).toHaveAttribute('data-home-view', 'grid');
+  await page.reload();
+  await expect(page.locator('.home .cards[data-home-view]').first()).toHaveAttribute('data-home-view', 'grid', { timeout: 15000 });
+  // five action buttons used to overflow a 270 px card, Delete landing on the next card
+  for (const width of [1280, 900, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    // a phone shows the start page without the documents panel beside it
+    if (width < 500 && await page.locator('.docpanel button.hide').count()) await page.locator('.docpanel button.hide').click();
+    for (const view of ['grid', 'rows']) {
+      if (await page.locator('.home .cards[data-home-view]').first().getAttribute('data-home-view') !== view) await page.locator('[data-home-view-switch]').click();
+      const spill = await page.locator('.home-card').evaluateAll(cards => cards.filter(c => {
+        const box = c.getBoundingClientRect();
+        return [...c.querySelectorAll('.actions > *')].some(b => { const r = b.getBoundingClientRect(); return r.right > box.right + 1 || r.left < box.left - 1; });
+      }).map(c => (c as HTMLElement).dataset.project));
+      expect(spill, `${view} at ${width}px`).toEqual([]);
+    }
+  }
+  await page.evaluate(() => localStorage.removeItem('ol.homeView'));
+});

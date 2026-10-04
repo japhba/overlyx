@@ -7,7 +7,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
-import { login, openDoc, collectErrors, texDoc, PROJECTS_DIR } from './helpers';
+import { login, openDoc, collectErrors, texDoc, PROJECTS_DIR, grantClipboard, readClipboard, browserName } from './helpers';
 
 const PROJECT = 'admin/e2e-tablerows';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -43,7 +43,7 @@ test.beforeAll(() => {
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
 async function open(page: Page, file: string) {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await grantClipboard(page.context());
   await login(page);
   await openDoc(page, `${PROJECT}/${file}.tex`);
   await page.waitForSelector('.lyx-editor .lyx-tabular td');
@@ -71,15 +71,22 @@ async function clickCell(page: Page, text: string, button: 'left' | 'right' = 'l
     return s.empty && s.from >= start && s.from <= start + (el.textContent ?? '').length + 2;
   })).toBe(true);
 }
+/**
+ * Playwright's WebKit keeps only text/plain on its pasteboard (Safari keeps the HTML, which carries the
+ * cells), and its navigator.clipboard.read() — the menus' and the toolbar's Paste — needs the click on
+ * Safari's Paste button that a spec cannot give: the rows paste as text there.
+ */
+const NO_HTML_PASTE = "Playwright WebKit's pasteboard keeps no HTML, and clipboard.read() needs Safari's Paste button";
 const onDisk = (file: string, re: RegExp) => (readFileSync(`${DIR}/${file}.tex`, 'utf8').match(re) ?? []).length;
 const PASTED = ['a1|b1', 'a2|b2', 'a3|b3', 'a1|b1', 'a2|b2'];
 
 test('two whole rows copied with Ctrl+C paste over the cursor row and extend the table (Ctrl+V)', async ({ page }) => {
+  test.skip(browserName(page) === 'webkit', NO_HTML_PASTE);
   const errors = collectErrors(page);
   await open(page, 'keys');
   await dragCells(page, 'a1', 'b2');
   await page.keyboard.press('Control+c');
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('a1\n\nb1\n\na2\n\nb2');
+  expect(await readClipboard(page)).toBe('a1\n\nb1\n\na2\n\nb2');
   await clickCell(page, 'a4');
   await page.keyboard.press('Control+v');
   await expect.poll(() => rows(page)).toEqual(PASTED);
@@ -89,6 +96,7 @@ test('two whole rows copied with Ctrl+C paste over the cursor row and extend the
 });
 
 test('the right-click menu and the toolbar paste table rows cell by cell too', async ({ page }) => {
+  test.skip(browserName(page) === 'webkit', NO_HTML_PASTE);
   const errors = collectErrors(page);
   await open(page, 'menu');
   await dragCells(page, 'a1', 'b2');
@@ -107,6 +115,7 @@ test('the right-click menu and the toolbar paste table rows cell by cell too', a
 });
 
 test('cut empties the selected cells; the rows paste back elsewhere', async ({ page }) => {
+  test.skip(browserName(page) === 'webkit', NO_HTML_PASTE);
   const errors = collectErrors(page);
   await open(page, 'cut');
   await dragCells(page, 'a2', 'b3');
@@ -135,7 +144,7 @@ test('rows of an align formula copy and paste as rows (Ctrl+C / Ctrl+V and the t
   await page.mouse.move(two.x + two.width + 1, two.y + two.height / 2, { steps: 8 });
   await page.mouse.up();
   await page.keyboard.press('Control+c');
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('x&=1\\\\y&=2');
+  expect(await readClipboard(page)).toBe('x&=1\\\\y&=2');
   // after the 3: Enter opens an empty row below, ← goes to its first cell, the rows go in there
   const three = (await glyph('3').boundingBox())!;
   await page.mouse.click(three.x + three.width - 1, three.y + three.height / 2);
@@ -145,6 +154,7 @@ test('rows of an align formula copy and paste as rows (Ctrl+C / Ctrl+V and the t
   await page.keyboard.press('Escape');
   await expect.poll(latex).toBe('\\begin{align}\nx & =1\\\\\ny & =2\\\\\nz & =3\\\\\nx & =1\\\\\ny & =2\n\\end{align}');
   // the toolbar's paste inside the formula takes the same way
+  if (browserName(page) === 'webkit') { expect(errors).toEqual([]); return; }   // (NO_HTML_PASTE: no clipboard.read() there)
   await page.evaluate(() => navigator.clipboard.writeText('u&=4\\\\v&=5'));
   const lastTwo = (await page.locator(`.lyx-editor .lyx-math-display mjx-c.${charClass('2')}`).last().boundingBox())!;
   await page.mouse.move(lastTwo.x, lastTwo.y);

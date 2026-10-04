@@ -8,11 +8,13 @@
  */
 import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView, NodeView } from 'prosemirror-view';
+import { TextSelection } from 'prosemirror-state';
 import { graphicsUrl } from '../../api';
 import { resolveDocPath, viewDocDir, viewProject } from '../context';
 import { subscribeProjectEvents } from '../../projectevents';
 import { boxOf, placeElement, MM, PT, color, shapePathInBox, DASHES, ptToMm } from './geom';
 import { rawPreview } from './rawpreview';
+import { BOX_PROMPTS, boxIsEmpty } from './slidelayouts';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 
@@ -28,6 +30,8 @@ export class PageView implements NodeView {
   contentDOM: HTMLElement;
   overlay: HTMLElement;
   label: HTMLElement;
+  /** "Click to add speaker notes" under a page without notes, while the notes are shown */
+  notesAdd: HTMLElement;
 
   constructor(public node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('div');
@@ -40,23 +44,49 @@ export class PageView implements NodeView {
     this.overlay = document.createElement('div');
     this.overlay.className = 'ol-overlay';
     this.overlay.contentEditable = 'false';
-    this.dom.append(this.label, this.contentDOM, this.overlay);
+    this.notesAdd = document.createElement('div');
+    this.notesAdd.className = 'ol-notes-add';
+    this.notesAdd.contentEditable = 'false';
+    this.notesAdd.textContent = 'Click to add speaker notes';
+    this.notesAdd.addEventListener('mousedown', e => { e.preventDefault(); this.addNotes(); });
+    this.dom.append(this.label, this.contentDOM, this.overlay, this.notesAdd);
     (this.dom as HTMLElement & { olPage?: PageView }).olPage = this;
     this.render();
   }
 
   pos(): number | undefined { return this.getPos(); }
 
+  /** the page's speaker notes (beamer's \note), created empty if it has none; the caret into them */
+  private addNotes(): void {
+    const pos = this.getPos();
+    const page = pos === undefined ? null : this.view.state.doc.nodeAt(pos);
+    if (pos === undefined || !page) return;
+    const tr = this.view.state.tr;
+    let notes = page.lastChild?.type.name === 'ol_notes' ? pos + page.nodeSize - 1 - page.lastChild.nodeSize : -1;
+    if (notes < 0) {
+      notes = pos + page.nodeSize - 1;
+      tr.insert(notes, this.view.state.schema.nodes.ol_notes.create(null, this.view.state.schema.nodes.paragraph.create({ layout: 'Plain Layout', depth: 0 })));
+    }
+    tr.setSelection(TextSelection.near(tr.doc.resolve(notes + 2)));
+    this.view.dispatch(tr.scrollIntoView());
+    this.view.focus();
+  }
+
+  private shown = { fill: null as string | null, transition: null as string | null, label: '' };
+
   render(): void {
     const a = this.node.attrs;
-    this.contentDOM.style.background = color(a.fill) ?? '';
-    this.dom.dataset.transition = a.transition ?? '';
+    // written only when they change: the slide rail redraws a thumbnail on any change of its page's DOM
+    const fill = color(a.fill) ?? '';
+    if (fill !== this.shown.fill) { this.contentDOM.style.background = fill; this.shown.fill = fill; }
+    if ((a.transition ?? '') !== this.shown.transition) { this.dom.dataset.transition = a.transition ?? ''; this.shown.transition = a.transition ?? ''; }
+    this.dom.classList.toggle('ol-has-notes', this.node.lastChild?.type.name === 'ol_notes');
     const pos = this.getPos();
     let index = 0;
     if (pos !== undefined) this.view.state.doc.forEach((c, off) => { if (off < pos && c.type.name === 'ol_page') index++; });
     const name = a.name ? ` — ${a.name}` : '';
-    this.label.textContent = `${index + 1}${name}`;
-    this.label.title = `Page ${index + 1}${name}${a.transition ? ` · transition: ${a.transition}` : ''}`;
+    const label = `${index + 1}${name}`, title = `Page ${index + 1}${name}${a.transition ? ` · transition: ${a.transition}` : ''}`;
+    if (label + title !== this.shown.label) { this.label.textContent = label; this.label.title = title; this.shown.label = label + title; }
   }
 
   update(node: PMNode): boolean {
@@ -70,10 +100,10 @@ export class PageView implements NodeView {
     if (m.type === 'selection') return false;
     // the overlay and the label are ours; style changes of the sheet too
     const t = m.target as HTMLElement;
-    return this.overlay.contains(t) || this.label.contains(t) || (m.type === 'attributes' && t === this.contentDOM);
+    return this.overlay.contains(t) || this.label.contains(t) || this.notesAdd.contains(t) || (m.type === 'attributes' && (t === this.contentDOM || t === this.dom));
   }
 
-  stopEvent(e: Event): boolean { return this.overlay.contains(e.target as Node) || this.label.contains(e.target as Node); }
+  stopEvent(e: Event): boolean { return this.overlay.contains(e.target as Node) || this.label.contains(e.target as Node) || this.notesAdd.contains(e.target as Node); }
 }
 
 /* ------------------------------------------------------------------ text box */
@@ -82,6 +112,8 @@ export class BoxView implements NodeView {
   dom: HTMLElement;
   contentDOM: HTMLElement;
   frame: HTMLElement;
+  /** "Click to add title" in an empty named box (a new slide's, slidelayouts.ts): the editor's only */
+  private prompt: HTMLElement;
 
   constructor(public node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('div');
@@ -91,8 +123,22 @@ export class BoxView implements NodeView {
     this.frame.contentEditable = 'false';
     this.contentDOM = document.createElement('div');
     this.contentDOM.className = 'ol-box-content';
+    this.prompt = document.createElement('div');
+    this.prompt.className = 'ol-box-prompt';
+    this.frame.append(this.prompt);
     this.dom.append(this.frame, this.contentDOM);
     this.render();
+  }
+
+  private syncPrompt(): void {
+    const a = this.node.attrs;
+    const text = a.name && boxIsEmpty(this.node) ? BOX_PROMPTS[a.name] : undefined;
+    this.prompt.hidden = !text;
+    if (!text) return;
+    if (this.prompt.textContent !== text) this.prompt.textContent = text;
+    // laid out like the text would be: the box's margin, size, alignment and colour
+    const c = this.contentDOM.style, p = this.prompt.style;
+    p.padding = c.padding; p.fontSize = c.fontSize; p.color = c.color; p.textAlign = c.textAlign; p.justifyContent = c.justifyContent;
   }
 
   render(): void {
@@ -120,13 +166,14 @@ export class BoxView implements NodeView {
     this.dom.dataset.step = a.step ?? '';
     this.dom.classList.toggle('ol-grow', !!a.grow);
     this.dom.classList.toggle('ol-locked', !!a.lock);
+    this.syncPrompt();
   }
 
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     const attrsChanged = node.attrs !== this.node.attrs;
     this.node = node;
-    if (attrsChanged) this.render();
+    if (attrsChanged) this.render(); else this.syncPrompt();
     return true;
   }
 
