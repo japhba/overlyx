@@ -69,7 +69,7 @@ import { db, type UserRow } from './db.ts';
 import { showAgent, presenceIn, type AgentLook, type PresentPerson } from './agentPresence.ts';
 import { changedRange, findPassage, type Cursor } from './ycursor.ts';
 import {
-  agentFor, agentRow, agentLabel, agentColor, noteToolCall, wantsSession, recordSession, sessionRow, touchSession, dropSession,
+  agentFor, knownAgent, agentRow, agentLabel, agentColor, noteToolCall, wantsSession, recordSession, sessionRow, touchSession, dropSession,
   registerPusher, unregisterPusher, streamChanged, waitForInstructions, replyFromAgent, forAgent,
   type AgentRow, type ClientInfo, type TokenIdentity,
 } from './mcpAgents.ts';
@@ -866,6 +866,9 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
   return server;
 }
 
+/** OVERLYX_MCP_LOG=1: one log line per MCP request (method, session, client) — for finding out what a client does */
+const MCP_LOG = process.env.OVERLYX_MCP_LOG === '1';
+
 /** the largest JSON-RPC request accepted (a whole document in write_document) */
 const REQUEST_MAX = '2mb';
 
@@ -1050,6 +1053,10 @@ async function handle(req: Request, res: Response): Promise<void> {
   }
   // the Agent panel's own agent is not an agent "from elsewhere": no entry, no presence, no session
   const external = identity.name !== PANEL_AGENT;
+  if (MCP_LOG) {
+    const msgs = (Array.isArray(req.body) ? req.body : [req.body]).filter(Boolean) as { method?: string; params?: { name?: string; clientInfo?: unknown } }[];
+    console.log(`[mcp] ${req.method} ${req.originalUrl} token=${identity.kind}:${identity.id} session=${req.header('mcp-session-id') ?? '-'} ${msgs.map(m => m.method === 'tools/call' ? `tools/call:${m.params?.name}` : m.method === 'initialize' ? `initialize:${JSON.stringify(m.params?.clientInfo)}` : m.method ?? 'response').join(',')} ua=${req.header('user-agent') ?? '-'}`);
+  }
 
   const sid = req.header('mcp-session-id');
   if (sid) {
@@ -1077,8 +1084,10 @@ async function handle(req: Request, res: Response): Promise<void> {
   const init = initializeOf(req.body);
   if (init && external && wantsSession(init.client)) { await newSession(req, res, identity, user, init.client!, project); return; }
 
-  // stateless: a server and transport for this one request
-  const caller = callerFor(external ? agentFor(identity, init?.client ?? null, { stateless: !!init }) : null);
+  // stateless: a server and transport for this one request. A request that neither says who the client
+  // is nor calls a tool (Claude Code's server/discover probe, tools/list) creates no agent entry.
+  const callsTool = (Array.isArray(req.body) ? req.body : [req.body]).some(m => m && typeof m === 'object' && (m as { method?: unknown }).method === 'tools/call');
+  const caller = callerFor(!external ? null : init || callsTool ? agentFor(identity, init?.client ?? null, { stateless: !!init }) : knownAgent(identity));
   const server = buildMcpServer(user, identity.name, identity.userId, project, caller);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => { void transport.close(); void server.close(); });

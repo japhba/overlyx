@@ -828,6 +828,14 @@ describe('messages from OverLyX to an agent elsewhere', () => {
     ]);
   });
 
+  it("a probe that neither says who the client is nor calls a tool (Claude Code's server/discover) creates no agent", async () => {
+    const t = createMcpToken(owner.id, 'Prober').token;
+    await rpc(t, 'server/discover', {});
+    await rpc(t, 'tools/list');
+    const id = (db.prepare("SELECT id FROM mcp_tokens WHERE name = 'Prober'").get() as { id: number }).id;
+    expect(db.prepare("SELECT COUNT(*) AS n FROM mcp_agents WHERE token_kind = 'agent' AND token_id = ?").get(id)).toEqual({ n: 0 });
+  });
+
   it('times out empty, well within a client tool timeout', async () => {
     const t = createMcpToken(owner.id, 'Patient').token;
     await initialize(t, 'codex-mcp-client');
@@ -899,6 +907,20 @@ describe('messages from OverLyX to an agent elsewhere', () => {
       for (let i = 1; i < 20; i++) await sendInstruction(sessionUser(rita.id), ritaAgent, `msg ${i}`, undefined);
       await expect(sendInstruction(sessionUser(rita.id), ritaAgent, 'one too many', undefined)).rejects.toThrow(/too many/);
     } finally { srv2.close(); }
+  });
+
+  it('a rotated account token: the client connecting with the new one is the same agent, its conversation kept; no dead twin is listed', async () => {
+    const tina = createUser('tina', 'Tina', 'pw');
+    const t1 = createPersonalToken(tina.id, 'Account access token').token;
+    await initialize(t1, 'codex-mcp-client', allBase);
+    const before = agentIdOf(t1);
+    const m = await sendInstruction(sessionUser(tina.id), before, 'still there after the rotation?', undefined);
+    const t2 = createPersonalToken(tina.id, 'Account access token').token;   // rotates: t1 stops working
+    expect((await rpcAt(allBase, t1, 'tools/list')).status).toBe(401);
+    await initialize(t2, 'codex-mcp-client', allBase);
+    expect(agentIdOf(t2)).toBe(before);
+    expect(listAgents(tina.id).map(a => a.id)).toEqual([before]);
+    expect((await callToolAt(allBase, t2, 'wait_for_instructions', { timeout_seconds: 1 })).messages.map((x: any) => x.message_id)).toEqual([m.id]);
   });
 
   it('a view-only account\'s agent listens and replies, and still cannot edit', async () => {

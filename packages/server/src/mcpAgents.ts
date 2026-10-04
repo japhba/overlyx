@@ -95,16 +95,29 @@ export function agentFor(ident: TokenIdentity, client: ClientInfo | null, opts: 
   const now = Date.now();
   if (client) {
     const name = client.name.trim().slice(0, 80) || 'mcp-client';
+    // a new token for a client the account used before with a token that is gone (rotated, revoked):
+    // the same agent — its conversation carries over instead of a dead twin staying in the list
+    if (!db.prepare('SELECT 1 FROM mcp_agents WHERE token_kind = ? AND token_id = ? AND client_name = ?').get(ident.kind, ident.id, name)) {
+      const orphan = (db.prepare('SELECT * FROM mcp_agents WHERE user_id = ? AND client_name = ? ORDER BY last_seen_at DESC').all(ident.userId, name) as AgentRow[]).find(r => !tokenAlive(r));
+      if (orphan) db.prepare('UPDATE mcp_agents SET token_kind = ?, token_id = ? WHERE id = ?').run(ident.kind, ident.id, orphan.id);
+    }
     db.prepare(`INSERT INTO mcp_agents (user_id, token_kind, token_id, client_name, client_title, client_version, created_at, last_seen_at, stateless_at) VALUES (?,?,?,?,?,?,?,?,?)
       ON CONFLICT(token_kind, token_id, client_name) DO UPDATE SET client_title = excluded.client_title, client_version = excluded.client_version, last_seen_at = excluded.last_seen_at, stateless_at = COALESCE(excluded.stateless_at, stateless_at)`)
       .run(ident.userId, ident.kind, ident.id, name, client.title?.slice(0, 80) ?? null, client.version?.slice(0, 40) ?? null, now, now, opts.stateless ? now : null);
     scheduleAgentsEvent(ident.userId);
     return db.prepare('SELECT * FROM mcp_agents WHERE token_kind = ? AND token_id = ? AND client_name = ?').get(ident.kind, ident.id, name) as AgentRow;
   }
-  const known = db.prepare('SELECT * FROM mcp_agents WHERE token_kind = ? AND token_id = ? ORDER BY stateless_at IS NULL, stateless_at DESC, last_seen_at DESC LIMIT 1').get(ident.kind, ident.id) as AgentRow | undefined;
-  if (known) return known;
-  return agentFor(ident, { name: '', title: ident.name }, opts);
+  return knownAgent(ident) ?? agentFor(ident, { name: '', title: ident.name }, opts);
 }
+
+/** The token's agent that initialized statelessly last (any of its agents), without creating one. */
+export function knownAgent(ident: TokenIdentity): AgentRow | null {
+  return (db.prepare('SELECT * FROM mcp_agents WHERE token_kind = ? AND token_id = ? ORDER BY stateless_at IS NULL, stateless_at DESC, last_seen_at DESC LIMIT 1').get(ident.kind, ident.id) as AgentRow | undefined) ?? null;
+}
+
+/** The agent's credential still exists (a rotated or revoked one does not). */
+const tokenAlive = (row: Pick<AgentRow, 'token_kind' | 'token_id'>): boolean =>
+  !!db.prepare(`SELECT 1 FROM ${row.token_kind === 'personal' ? 'git_tokens' : 'mcp_tokens'} WHERE id = ?`).get(row.token_id);
 
 /** A tool call of the agent: when it was last seen, and where (the panel lists it). */
 export function noteToolCall(agentId: number, tool: string, project: string | null, path: string | null): void {
@@ -369,10 +382,10 @@ export function publicAgent(row: AgentRow): PublicAgent {
   };
 }
 
-/** The account's agents seen in the last 30 days, most recent first. */
+/** The account's agents seen in the last 30 days whose credential still works, most recent first. */
 export function listAgents(userId: number): PublicAgent[] {
-  const rows = db.prepare('SELECT * FROM mcp_agents WHERE user_id = ? AND last_seen_at > ? ORDER BY last_seen_at DESC LIMIT 20').all(userId, Date.now() - 30 * 86400_000) as AgentRow[];
-  return rows.map(publicAgent);
+  const rows = db.prepare('SELECT * FROM mcp_agents WHERE user_id = ? AND last_seen_at > ? ORDER BY last_seen_at DESC LIMIT 40').all(userId, Date.now() - 30 * 86400_000) as AgentRow[];
+  return rows.filter(tokenAlive).slice(0, 20).map(publicAgent);
 }
 
 /* ------------------------------------------------------------------ live updates for the panel */
@@ -428,9 +441,15 @@ export function mcpAgentRoutes(): express.Router {
     res.json({ agent: publicAgent(row), messages: rows.reverse().map(publicMessage) });
   });
 
+  // changes come from the owner's own page only, never from a cross-site form (a message makes an agent act on somebody's machine)
+  const sameSite = (req: Request, res: Response): boolean => {
+    if (originAllowed(req) && req.headers['sec-fetch-site'] !== 'cross-site') return true;
+    res.status(403).json({ error: 'forbidden' });
+    return false;
+  };
+
   r.post('/mcp-agents/:id/messages', (req, res) => { void (async () => {
-    // a message makes an agent act on somebody's machine: the owner's own page only, never a cross-site form
-    if (!originAllowed(req) || req.headers['sec-fetch-site'] === 'cross-site') { res.status(403).json({ error: 'forbidden' }); return; }
+    if (!sameSite(req, res)) return;
     const row = own(req, res);
     if (!row) return;
     try {
@@ -440,6 +459,7 @@ export function mcpAgentRoutes(): express.Router {
   })(); });
 
   r.post('/mcp-agents/:id/messages/:mid/cancel', (req, res) => {
+    if (!sameSite(req, res)) return;
     const row = own(req, res);
     if (!row) return;
     try { res.json({ message: publicMessage(cancelInstruction(req.user!, row.id, Number(req.params.mid))) }); } catch (e) { fail(res, e); }
@@ -447,11 +467,14 @@ export function mcpAgentRoutes(): express.Router {
 
   /** Forget an agent: its conversation goes; it comes back as a new entry when it connects again. */
   r.delete('/mcp-agents/:id', (req, res) => {
+    if (!sameSite(req, res)) return;
     const row = own(req, res);
     if (!row) return;
     db.prepare('DELETE FROM mcp_agent_messages WHERE agent_id = ?').run(row.id);
     db.prepare('DELETE FROM mcp_sessions WHERE agent_id = ?').run(row.id);
     db.prepare('DELETE FROM mcp_agents WHERE id = ?').run(row.id);
+    for (const p of [...pushers.values()]) if (p.agentId === row.id) pushers.delete(p.sessionId);
+    scheduleAgentsEvent(row.user_id);
     res.json({ ok: true });
   });
   return r;

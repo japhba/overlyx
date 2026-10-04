@@ -417,10 +417,12 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   useEffect(() => {
     if (user?.guest) return;
     let last = 0;
-    const check = () => { if (Date.now() - last < 30_000) return; last = Date.now(); api.externalAgents().then(r => setHasExternalAgents(r.agents.length > 0)).catch(() => { /* none */ }); };
+    // again when the page comes back to the front (an agent was just started in a terminal)
+    const check = () => { if (Date.now() - last < 5000 || document.hidden) return; last = Date.now(); api.externalAgents().then(r => setHasExternalAgents(r.agents.length > 0)).catch(() => { /* none */ }); };
     check();
     window.addEventListener('focus', check);
-    return () => window.removeEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => { window.removeEventListener('focus', check); document.removeEventListener('visibilitychange', check); };
   }, [user?.id]);
   const agentTab = aiActivated || hasExternalAgents;
   useEffect(() => { if (!agentTab && rightTab === 'agent') setRightTab(null); }, [agentTab, rightTab]);
