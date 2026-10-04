@@ -1245,7 +1245,9 @@ sub-directory per account, named by its username, and in it one directory per pr
 `packages/client/dist`), `OVERLYX_UNLOAD_MS` (how long an idle document stays loaded, default 6 h),
 `OVERLYX_MAX_BUILDS` (parallel PDF builds, default 2), `OVERLYX_BUILD_NICE` (niceness of latexmk,
 default 10), `OVERLYX_DOC_WORKERS` (worker threads for parsing and writing documents, default the
-cores less two, 1–4; `0`: on the main thread), `OVERLYX_SANDBOX` (`auto` — use bubblewrap when installed, the default; `bwrap` — required;
+cores less two, 1–4; `0`: on the main thread), `OVERLYX_MOVE_RECORD_DAYS` (how long a paragraph
+split or join is remembered, so that an editor coming back from offline after it still gets its edits
+placed, default 30; see *Offline mode*), `OVERLYX_SANDBOX` (`auto` — use bubblewrap when installed, the default; `bwrap` — required;
 `none`),
 `LYX_LAYOUT_DIR` (LyX `lib/layouts`), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` +
 `OVERLYX_PUBLIC_URL` to enable Google sign-in, `OVERLYX_OWNER_EMAIL` (the instance owner: made an
@@ -1534,13 +1536,60 @@ How it works, in order of what happens when you open a document:
    larger half (the first on a tie) with the split text run trimmed, never deleted, and copies the
    smaller one (y-prosemirror aligned the runs from the left and, with formulas in the paragraph,
    rewrote the first run and deleted the split one — what somebody offline had typed there was lost,
-   and two people typing at a paragraph's start and pressing Enter duplicated it). What others typed
-   meanwhile into the split run survives (inside the copied part it ends up at the split point). Two
-   limits remain: text typed meanwhile into the copied half *beyond a formula or inset* is lost, and
-   when two people split the same paragraph before syncing, a stretch both of them copied can appear
-   twice. External changes of
-   the file are applied on the server as a *diff* (`packages/server/src/ydiff.ts`), so paragraphs
-   they did not touch keep their identity and offline edits inside them survive.
+   and two people typing at a paragraph's start and pressing Enter duplicated it).
+
+   A copy is still a copy: whatever a co-author who had not seen the split yet typed, deleted,
+   formatted or changed in a formula of the copied half went to the deleted original. So copies are
+   recorded and the server moves such late edits after them (`core/src/moves.ts`,
+   `server/src/moves.ts`):
+   - **The editor records what it copied.** In the same Yjs transaction as a split, a join (Backspace
+     at a paragraph's start) or any edit that moves text between paragraphs, `recordCopies` (called
+     from typinganchor.ts) aligns the text before and after and writes the pairs *original unit →
+     copy* (characters, formulas, insets) into the shared map `moves`, keyed by the client and its
+     clock. A text run that loses or receives copied characters is re-created whole, so that no run
+     ever mixes moved and unmoved text; the deleted originals are listed to be kept.
+   - **The server keeps the originals and repairs late edits.** `MoveRepair` (one per open document,
+     `docs.ts`) sees every update a client sends (`ws.ts`) and every diff of the server's own: a
+     record is restated as the server's (`s…` keys; the client's key goes), and the originals it
+     names are excluded from Yjs' garbage collection (`protectMoves`, also in the document workers'
+     mirrors, whose state is what gets persisted). An insertion into a moved original — anchored, as
+     Yjs anchors everything, to the characters it was typed between — is moved beside the copies of
+     those characters, a deletion of moved characters deletes their copies, formatting and a formula's
+     new value go to the copy. The repair is an update of its own, made after the client's update has
+     been applied and broadcast, so every client gets the same result; it is idempotent (a reconnect
+     resending the same updates changes nothing) and costs nothing for updates that touch no moved
+     text (a lookup per new item). Two people splitting or joining the same paragraph before they
+     sync both copy some text: one copy wins (fixed rules: a copy that moved over one that stayed,
+     then the one in the smaller paragraph), the other is deleted, and what was typed into either
+     ends up once in the winner. A paragraph a late editor added among
+     moved ones is put back between the paragraphs it was typed between.
+   - **Reconnecting.** A client that comes back with edits the server has not seen gets the server's
+     sync step 2 only after its own step 2 has been applied and repaired (at most 3 s later), so it
+     never starts editing on the unrepaired state.
+   - Records older than `OVERLYX_MOVE_RECORD_DAYS` (default 30) are dropped when the document is
+     opened; their originals are collected the next time it is loaded. An editor that was offline
+     longer than that gets its late edits in the deleted original, as before.
+   - Not covered: undoing a split after a late edit was moved (the undo restores the original, the
+     moved edit stays in the copy); an editor of an older version, which records nothing (its splits
+     copy as before); and some interleavings of several splits and joins of the same paragraphs,
+     which can leave words in the wrong order or bring a deleted word back (in the randomized test
+     below no word is ever lost or doubled by splits; with joins, 2–7 of 100 long scripts lose one).
+   - Tests: `tests/split-repair.test.ts` (each case, both orders, both sides offline, a server restart
+     in between, the server's own diffs), `tests/split-fuzz.test.ts` (random scripts of typing,
+     deleting, Enter and Backspace on two or three editors going offline and online; every word typed
+     must be there once, in the order its author saw; `OVERLYX_FUZZ_SEEDS`, `OVERLYX_FUZZ_STEPS`,
+     `OVERLYX_FUZZ_JOINS=1`, `OVERLYX_FUZZ_STRICT=1` to fail the known limits too,
+     `OVERLYX_FUZZ_DEBUG=<seed>` to replay and shrink one),
+     `tests/yjs-net.ts` (the network they run on: real y-prosemirror editors and a server with
+     controlled deliveries), `tests/agent-edit-moves.test.ts` (Agent-panel and MCP edits through
+     docs.ts with an editor connected, which sends an agent's edit back — the deletions in it are the
+     edit's own moves, not late deletions) and `e2e/offline-splits.spec.ts` (both press Enter in one paragraph, one
+     of them offline, and type behind formulas in both halves).
+
+   External changes of the file are applied on the server as a *diff* (`packages/server/src/ydiff.ts`),
+   so paragraphs they did not touch keep their identity and offline edits inside them survive; a diff
+   that splits or joins paragraphs records its copies like an editor, and goes through the repair as
+   the server's own (what it saw counts as known: `applyMirrorUpdate`).
    A formula is one value, not text: when two people change the same formula from the same version,
    the one who loses keeps their version in a comment beside it (*"Concurrent formula edit by … —
    retained for review"*, `client/src/editor/mathconflict.ts`; each formula carries an edit clock,

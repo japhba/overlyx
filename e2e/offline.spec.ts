@@ -203,8 +203,9 @@ test('a minute offline beside another writer in the same paragraph and list: eve
       const token = `Z${tag}q${String(i).padStart(4, '0')}Z`;
       await p.keyboard.type(` ${token} `, { delay: 30 });
       typed.push(token);
-      // the online side splits the list item (one text run): what the offline side typed into it survives the split
-      // (not kept: text typed meanwhile beyond a formula in the copied half; two splits of one paragraph may copy a stretch twice — DOCS.md)
+      // the online side splits the list item: what the offline side typed into it meanwhile is moved after the
+      // copy (the server's repair of paragraph moves, DOCS.md "Back online"; formulas and both sides splitting:
+      // offline-splits.spec.ts)
       if (tag === 'zb' && inPar === 'previous decoder layer' && needle) await p.keyboard.press('Enter');
       await p.waitForTimeout(400 + Math.random() * 800);
     }

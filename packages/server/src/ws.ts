@@ -65,6 +65,8 @@ function closeConn(doc: OpenDoc, conn: WebSocket): void {
 }
 
 const docHandlers = new WeakSet<OpenDoc>();
+/** the state vector each connection reported in its last sync step 1 */
+const knows = new WeakMap<WebSocket, Map<number, number>>();
 
 function ensureDocHandlers(doc: OpenDoc): void {
   if (docHandlers.has(doc)) return;
@@ -170,23 +172,29 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
       const dec = decoding.createDecoder(message);
       const type = decoding.readVarUint(dec);
       switch (type) {
-        case MSG_SYNC:
-          if (doc.bigForSync && decoding.peekVarUint(dec) === syncProtocol.messageYjsSyncStep1) {
-            // what the client lacks of a big document (all of it, on its first visit) takes a while
-            // to encode: the document worker does it, the answer is sent when it is ready
-            decoding.readVarUint(dec);
-            void sendMissing(doc, conn, decoding.readVarUint8Array(dec));
-            break;
+        case MSG_SYNC: {
+          const kind = decoding.readVarUint(dec);
+          if (kind === syncProtocol.messageYjsSyncStep1) {
+            const sv = decoding.readVarUint8Array(dec);
+            // what the client has: its sync step 2 that follows carries every deletion it knows of, and
+            // those it learnt with a paragraph's move are not to be applied again (moves.ts)
+            let state: Map<number, number> | null = null;
+            try { state = Y.decodeStateVector(sv); knows.set(conn, state); } catch { knows.delete(conn); }
+            // a client coming back with edits the server has not seen gets its answer once its own sync
+            // step 2 (sent as soon as it has the server's step 1) is applied and repaired: it then goes
+            // from its offline state straight to the merged one, not through a state it should not edit in
+            if (!readOnly && state && [...state].some(([client, clock]) => clock > Y.getState(doc.ydoc.store, client))) {
+              deferStep1(doc, conn, sv);
+              break;
+            }
+            answerStep1(doc, conn, sv);
+          } else if (!readOnly && (kind === syncProtocol.messageYjsSyncStep2 || kind === syncProtocol.messageYjsUpdate)) {
+            // applied through the repair of paragraph moves (a viewer's are dropped: it only ever gets the document)
+            doc.moves.receive(decoding.readVarUint8Array(dec), conn, { step2: kind === syncProtocol.messageYjsSyncStep2, knows: knows.get(conn) ?? null });
+            if (kind === syncProtocol.messageYjsSyncStep2) releaseStep1(doc, conn);
           }
-          encoding.writeVarUint(enc, MSG_SYNC);
-          if (readOnly) {
-            // a viewer only ever gets the document: answer its state request, drop anything it sends
-            if (decoding.readVarUint(dec) === syncProtocol.messageYjsSyncStep1) syncProtocol.writeSyncStep2(enc, doc.ydoc, decoding.readVarUint8Array(dec));
-          } else {
-            syncProtocol.readSyncMessage(dec, enc, doc.ydoc, conn);
-          }
-          if (encoding.length(enc) > 1) send(doc, conn, encoding.toUint8Array(enc));
           break;
+        }
         case MSG_AWARENESS: {
           // another connection's client ids, and the agents' (agentPresence.ts), are not this client's to set
           const update = sanitizeAwarenessUpdate(decoding.readVarUint8Array(dec), id => isAgentClient(doc, id) || [...doc.conns].some(([c, ids]) => c !== conn && ids.has(id)));
@@ -245,6 +253,39 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
 }
 
 export { Y };
+
+/** sync step 1 requests held until the client's own step 2 has been applied */
+const heldStep1 = new WeakMap<WebSocket, { sv: Uint8Array; timer: NodeJS.Timeout }>();
+/** the longest a client's sync step 2 is waited for (an old or odd client may never send it) */
+const STEP1_HOLD_MS = 3000;
+
+function deferStep1(doc: OpenDoc, conn: WebSocket, sv: Uint8Array): void {
+  const prev = heldStep1.get(conn);
+  if (prev) clearTimeout(prev.timer);
+  heldStep1.set(conn, { sv, timer: setTimeout(() => releaseStep1(doc, conn), STEP1_HOLD_MS) });
+}
+
+function releaseStep1(doc: OpenDoc, conn: WebSocket): void {
+  const held = heldStep1.get(conn);
+  if (!held) return;
+  heldStep1.delete(conn);
+  clearTimeout(held.timer);
+  if (doc.conns.has(conn)) answerStep1(doc, conn, held.sv);
+}
+
+/** sync step 2: what the client with state vector `sv` lacks */
+function answerStep1(doc: OpenDoc, conn: WebSocket, sv: Uint8Array): void {
+  if (doc.bigForSync) {
+    // what the client lacks of a big document (all of it, on its first visit) takes a while
+    // to encode: the document worker does it, the answer is sent when it is ready
+    void sendMissing(doc, conn, sv);
+    return;
+  }
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, MSG_SYNC);
+  syncProtocol.writeSyncStep2(enc, doc.ydoc, sv);
+  send(doc, conn, encoding.toUint8Array(enc));
+}
 
 /** Sync step 2 for a client whose state vector is `sv`, encoded by the document worker. */
 async function sendMissing(doc: OpenDoc, conn: WebSocket, sv: Uint8Array): Promise<void> {

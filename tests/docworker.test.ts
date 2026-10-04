@@ -191,6 +191,26 @@ describe('the worker writes what the main thread writes', () => {
     expect(w2.toText()).toBe(m2.toText());
     expect(w2.toText()).toContain('Stored, changed on disk.');
   });
+
+  it('a paragraph split on disk while closed, then typed into by a client that had not seen it: the mirror gets the repair', async () => {
+    const [w] = await twins('splitdisk', docText('Alpha beta gamma delta epsilon. Zeta eta theta iota kappa lambda mu nu xi omicron.', 'Closing.'));
+    // a client with the document, offline from now on
+    const client = new Y.Doc();
+    Y.applyUpdate(client, Y.encodeStateAsUpdate(w.ydoc));
+    await w.persistStateAsync();
+    await manager.unload(w.id);
+    writeFileSync(w.absPath, docText('Alpha beta gamma delta epsilon.', 'Zeta eta theta iota kappa lambda mu nu xi omicron.', 'Closing.'));
+    // opened over the stored state: the worker's diff copies the second half (and records it), the
+    // main thread restates the record (an update of its own)
+    const w2 = await manager.open(w.id);
+    expect(w2.ydoc.getMap('moves').size).toBe(1);
+    const text = (client.getXmlFragment('prosemirror').get(0) as Y.XmlElement).toArray().find(x => x instanceof Y.XmlText) as Y.XmlText;
+    client.transact(() => text.insert(text.toString().indexOf('lambda'), 'LATE '), 'client');
+    w2.moves.receive(Y.encodeStateAsUpdate(client, Y.encodeStateVector(w2.ydoc)), {}, { step2: true, knows: Y.decodeStateVector(Y.encodeStateVector(client)) });
+    // the late word goes where it was typed, in the new paragraph; the worker writes what the document holds
+    expect(w2.toText()).toContain('\nZeta eta theta iota kappa LATE lambda mu nu xi omicron.\n');
+    expect(await w2.textAsync()).toBe(w2.toText());
+  });
 });
 
 describe('saves of one document', () => {

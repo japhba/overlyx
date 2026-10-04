@@ -30,6 +30,7 @@ import { Plugin, TextSelection } from 'prosemirror-state';
 import type { Node as PMNode, MarkType } from 'prosemirror-model';
 import * as Y from 'yjs';
 import { ySyncPluginKey, updateYFragment } from 'y-prosemirror';
+import { recordCopies, followMoves } from '../../../../core/src/moves';
 
 /** The parts of y-prosemirror's ProsemirrorBinding used here. */
 interface SyncBinding {
@@ -203,7 +204,7 @@ export function typingAnchorPlugin(): Plugin {
       let synced: PMNode | null = null;
       binding._prosemirrorChanged = (doc: PMNode) => {
         // one Yjs transaction with y-prosemirror's own origin (the undo manager tracks it as a local edit)
-        binding.type.doc!.transact(() => {
+        binding.type.doc!.transact(tr => {
           const sel = binding.prosemirrorView?.state.selection;
           if (doc !== synced) {
             try {
@@ -212,9 +213,12 @@ export function typingAnchorPlugin(): Plugin {
           }
           synced = doc;
           sync(doc);
+          // a split, a join or a run cut by an inline node copied text: recorded, for the server to place what others typed into the original
+          try { recordCopies(tr); } catch (e) { console.warn('[moves]', e); }
         }, ySyncPluginKey);
       };
-      return {};
+      // moved text keeps the cursor and the undo history on it when the move comes from elsewhere
+      return { destroy: followMoves(binding.type.doc!) };
     },
   });
 }
