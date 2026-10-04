@@ -347,7 +347,26 @@ export function describeChange(type: string | undefined, authorId: number, time:
  * opened this document (child link, file browser) landing in the new editor and opening a dialog
  * for whatever node now sits under the pointer.
  */
+/**
+ * view.focus() leaves every scroll position as it was (what ProseMirror asks for with preventScroll).
+ * WebKit (Safari) reveals the editor's previous DOM selection when the editor gets the focus back,
+ * preventScroll or not: a click on a child document's link, which takes the focus, scrolled the page
+ * to wherever the caret had been — the second click of the double-click then hit another paragraph.
+ */
+export function keepScrollOnFocus(view: EditorView): void {
+  const focus = view.focus.bind(view);
+  view.focus = () => {
+    const kept: [Element, number, number][] = [];
+    for (let el: Element | null = view.dom.parentElement; el; el = el.parentElement) kept.push([el, el.scrollTop, el.scrollLeft]);
+    const root = document.scrollingElement;
+    if (root && !kept.some(k => k[0] === root)) kept.push([root, root.scrollTop, root.scrollLeft]);
+    focus();
+    for (const [el, top, left] of kept) if (el.scrollTop !== top || el.scrollLeft !== left) { el.scrollTop = top; el.scrollLeft = left; }
+  };
+}
+
 export function installEditorDom(view: EditorView, docId: string): void {
+  keepScrollOnFocus(view);
   const createdAt = performance.now();
   view.dom.addEventListener('dblclick', (ev) => { if (performance.now() - createdAt < 600) { ev.stopPropagation(); ev.preventDefault(); } }, true);
   view.dom.dataset.docId = docId;

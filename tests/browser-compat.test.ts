@@ -8,6 +8,9 @@ import { readFileSync } from 'node:fs';
 import { schema } from '../packages/core/src/schema.ts';
 import { editorContext } from '../packages/client/src/editor/context.ts';
 import { CommandView } from '../packages/client/src/editor/nodeviews/leaf.ts';
+import { keepScrollOnFocus } from '../packages/client/src/editor/assembly.ts';
+import { EditorState } from 'prosemirror-state';
+import { EditorView } from 'prosemirror-view';
 import { idleCallback } from '../packages/client/src/editor/nodeviews/math.ts';
 import { stashPendingImport, takePendingImport, pendingImportFlag } from '../packages/client/src/app/pendingImport.ts';
 
@@ -156,5 +159,27 @@ describe('an Overleaf import chosen before the sign-in', () => {
       expect(pendingImportFlag()).toBe(false);
       expect(await takePendingImport()).toBeNull();   // taken: nothing waits any more
     } finally { (globalThis as any).indexedDB = saved; }
+  });
+});
+
+/**
+ * The editor getting the focus back keeps the page where it is: WebKit reveals the editor's previous
+ * DOM selection on focus whatever preventScroll says (a click on a child document's link took the
+ * focus, ProseMirror took it back, and Safari scrolled to where the caret had been).
+ */
+describe('focusing the editor', () => {
+  it('leaves the scroll positions of its scrolling ancestors as they were', () => {
+    const scroller = document.createElement('div');
+    const place = document.createElement('div');
+    scroller.appendChild(place); document.body.appendChild(scroller);
+    const view = new EditorView(place, { state: EditorState.create({ schema }) });
+    keepScrollOnFocus(view);
+    scroller.scrollTop = 591;
+    // what WebKit does on focus: the old caret, far down the page, is revealed
+    const focusDom = view.dom.focus.bind(view.dom);
+    view.dom.focus = (o?: FocusOptions) => { focusDom(o); scroller.scrollTop = 1847; };
+    view.focus();
+    expect(scroller.scrollTop).toBe(591);
+    view.destroy(); scroller.remove();
   });
 });
