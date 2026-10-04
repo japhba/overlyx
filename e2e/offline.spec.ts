@@ -303,6 +303,9 @@ test('the chosen math font is cached whole, so formulas keep their font offline'
     return n;
   });
   await expect.poll(cached, { timeout: 30000 }).toBe(expected);
+  // the font's files, as the worker lists them (read online: /sw.js itself is not in the worker's cache)
+  const fontFiles = await page.evaluate(async () => ((await (await fetch('/sw.js')).text()).match(/\/assets\/mathjax\/stix2\/[^"]+\.woff2/g) ?? []));
+  expect(fontFiles.length).toBeGreaterThan(0);
   // offline, a formula in a style no formula had used (bold italic, script) still gets its font
   await context.setOffline(true);
   const failed: string[] = [];
@@ -311,11 +314,7 @@ test('the chosen math font is cached whole, so formulas keep their font offline'
     await page.reload();
     await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
   }
-  const ok = await page.evaluate(async () => {
-    const files = ((await (await fetch('/sw.js')).text()).match(/\/assets\/mathjax\/stix2\/[^"]+\.woff2/g) ?? []);
-    const res = await Promise.all(files.map(f => fetch(f).then(r => r.ok, () => false)));
-    return res.every(Boolean) && files.length > 0;
-  });
+  const ok = await page.evaluate(async (files) => (await Promise.all(files.map(f => fetch(f).then(r => r.ok, () => false)))).every(Boolean), fontFiles);
   expect(ok).toBe(true);
   expect(await page.evaluate(() => document.documentElement.dataset.mathFont)).toBe('stix2');
   expect(failed).toEqual([]);
