@@ -1459,10 +1459,13 @@ How it works, in order of what happens when you open a document:
   - an Overleaf zip chosen before signing in is parked in IndexedDB as bytes — Safari stores no Blob
     there in a private window; files dropped into the file tree fall back to the dropped `File` where
     WebKit's directory entry cannot be read.
-  - child documents open on the browser's own `dblclick` (WebKit sent it elsewhere when the link was
-    redrawn between the clicks, and missed ProseMirror's 500 ms window on a busy page); a drag's
-    autoscroll runs per time, not per frame (120 Hz screens scrolled twice as fast); the hidden input of
-    a formula has 16px text (an iPhone zooms into smaller focused text).
+  - the editor taking the focus back keeps the page where it is (`keepScrollOnFocus`, assembly.ts):
+    WebKit reveals the editor's previous DOM selection on focus whatever `preventScroll` says, so a
+    click on a child document's link (which takes the focus) scrolled to the old caret.
+  - child documents open on the browser's own `dblclick` (ProseMirror's 500 ms double-click window
+    was missed on a busy WebKit page); a drag's autoscroll runs per time, not per frame (120 Hz
+    screens scrolled twice as fast); the hidden input of a formula has 16px text (an iPhone zooms
+    into smaller focused text); a whiteboard that connects before its first render says it is live.
 * Byte-exact round trips are guaranteed for LyX ≥ 2.4 files; older files are re-wrapped exactly
   like LyX does on save.
 * The document header (class, preamble, options) is edited through *Document ▸ Settings*; raw
