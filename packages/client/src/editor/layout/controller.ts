@@ -335,7 +335,7 @@ class LayoutController {
     this.renderOverlays();
   }
 
-  destroy(): void { this.detach(); this.metaUnobserve?.(); this.metaUnobserve = null; this.colorStyle?.remove(); this.gesture?.cancel(); }
+  destroy(): void { this.detach(); this.metaUnobserve?.(); this.metaUnobserve = null; this.colorStyle?.remove(); this.gesture?.cancel(); if (this.checkRetry) clearTimeout(this.checkRetry); }
   private colorStyle: HTMLStyleElement | null = null;
 
   private attach(): void {
@@ -380,11 +380,14 @@ class LayoutController {
   /** boxes that differ from the PDF — by node: a box edited or moved since is another node, its mark goes */
   private flags = new WeakMap<PMNode, CheckFlag>();
   private checkStamp = 0;
+  /** a measurement waiting for formulas that are not drawn yet (pages far from the viewport draw theirs in idle time) */
+  private checkRetry: ReturnType<typeof setTimeout> | null = null;
   /** TeX's spacing from the last build (and the base size it was measured at) */
   private texParams: { params: OlxParams; base: number } | null = null;
 
   setCheck(check: LayoutCheck): void {
     this.check = check;
+    if (this.checkRetry) { clearTimeout(this.checkRetry); this.checkRetry = null; }
     if (check.params) { this.texParams = { params: check.params, base: this.basePt }; this.applyTexParams(); }
     // measured once the new spacing is laid out (and the page font is in)
     const measure = () => requestAnimationFrame(() => requestAnimationFrame(() => this.measureCheck()));
@@ -404,10 +407,12 @@ class LayoutController {
   }
 
   /** compare every box unchanged since the build with what TeX made of it */
-  private measureCheck(): void {
+  private measureCheck(tries = 0): void {
     const c = this.check;
+    this.checkRetry = null;
     if (!c || this.view.isDestroyed || !this.active) return;
     this.flags = new WeakMap();
+    let undrawn = false;
     const byKey = new Map(c.boxes.map(b => [`${b.page}|${b.key}`, b]));
     const pxPerPt = this.fitPagePt * this.zoom;
     let page = -1;
@@ -428,6 +433,8 @@ class LayoutController {
         n.descendants(d => { if (d.isInline && !d.isText) atoms = true; if (d.type.name === 'math_display') display = true; return !atoms || !display; });
         if (!atoms && !n.textContent.trim()) return false;
         const content = (this.view.nodeDOM(offset + 1 + p) as HTMLElement | null)?.querySelector?.(':scope > .ol-box-content') as HTMLElement | null;
+        // a formula still waiting to be drawn has the height of its source text: measured once it is drawn
+        if (content?.querySelector('.lyx-math-static.pending')) { undrawn = true; return false; }
         const flag = content ? compareWithPdf(content, rec, pxPerPt, display) : null;
         if (flag) this.flags.set(n, flag);
         return false;
@@ -435,6 +442,13 @@ class LayoutController {
     });
     this.checkStamp++;
     this.renderOverlays(true);
+    // again once the formulas are drawn, and once the fonts they brought in have loaded (heights change)
+    if (tries >= 40) return;
+    if (undrawn) this.checkRetry = setTimeout(() => this.measureCheck(tries + 1), 500);
+    else if (typeof document !== 'undefined' && document.fonts?.status === 'loading') {
+      const stamp = this.checkStamp;
+      void document.fonts.ready.then(() => requestAnimationFrame(() => { if (stamp === this.checkStamp) this.measureCheck(tries + 1); }));
+    }
   }
 
   private checkBadge(node: PMNode, pos: number, f: CheckFlag): HTMLElement {
@@ -582,8 +596,9 @@ class LayoutController {
     docColors.map = colors;
     const s = this.view.dom.style;
     s.setProperty('--ol-basept', String(this.basePt));
-    // text in the document's own colours (\definecolor{jblue}…): \textcolor{jblue} draws in it
-    const rules = Object.entries(colors).map(([name, rgb]) => `.lyx-editor .lyx-color-${CSS.escape(name)}{color:${rgbToHex(rgb)}}`).join('\n');
+    // text in the document's own colours (\definecolor{jblue}…): \textcolor{jblue} draws in it, in the
+    // editor and in the presentation's copies of the pages
+    const rules = Object.entries(colors).map(([name, rgb]) => `.lyx-editor .lyx-color-${CSS.escape(name)},.ol-present-stage .lyx-color-${CSS.escape(name)}{color:${rgbToHex(rgb)}}`).join('\n');
     if (rules || this.colorStyle) {
       if (!this.colorStyle) { this.colorStyle = document.createElement('style'); this.colorStyle.dataset.olColors = ''; document.head.append(this.colorStyle); }
       this.colorStyle.textContent = rules;

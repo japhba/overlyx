@@ -492,7 +492,10 @@ blend.
     a **red !** where the text runs out of its box in the PDF by more than a quarter line (a click
     makes the box that tall), an **amber ≠** where it has another number of lines (or, with display
     formulas, another height) than here. Marks belong to the node: editing or moving a box drops its
-    mark until the next build. Empty boxes (background cards) are not compared. Macro files the preamble `\input`s
+    mark until the next build. Empty boxes (background cards) are not compared. A box whose formulas
+    are not drawn yet (pages far from the viewport draw theirs in idle time) is measured once they are,
+    and again once the fonts they brought in have loaded; such statically drawn formulas have the
+    editable ones' metrics on pages (no field padding, displays at the text size). Macro files the preamble `\input`s
     keep OverLyX's `%% @display` forms (`macrosFromLatex`). The example `poster_bernstein26` (a beamerposter of minipages and
     tcolorboxes) was rebuilt as native objects by `scratch/layoutmode/poster-gen.mts` and compiles to
     the same poster.
