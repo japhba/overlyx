@@ -59,6 +59,21 @@ const RAW_ENVS = new Set([
   'verbatim', 'verbatim*', 'lstlisting', 'minted', 'Verbatim', 'BVerbatim', 'LVerbatim', 'alltt', 'filecontents', 'filecontents*',
   'tikzpicture', 'tikzcd', 'pgfpicture', 'algorithmic', 'algorithmic*', 'lstlisting*', 'comment*', 'asy', 'luacode', 'luacode*', 'pycode', 'sagesilent',
 ]);
+/**
+ * A group that starts with a size declaration ({\small …}) is text in that size, not an argument of
+ * the unknown command or environment before it: what the writer writes after raw LaTeX.
+ */
+function sizeGroup(s: string, pos: number): boolean {
+  return /^\{\s*\\(tiny|scriptsize|footnotesize|small|normalsize|large|Large|LARGE|huge|Huge|fontsize)(?![A-Za-z])/.test(s.slice(pos, pos + 20));
+}
+
+/** commands whose first brace arguments are no text (sizes, colours, angles): kept raw with the command */
+const RAW_LEADING_ARGS: Record<string, number> = {
+  resizebox: 2, 'resizebox*': 2, scalebox: 1, rotatebox: 1, colorbox: 1, fcolorbox: 2, textcolor: 1, raisebox: 1,
+  adjustbox: 1, hyperlink: 1, hypertarget: 1,
+};
+/** raw environments whose content is LaTeX code (they may nest), not verbatim text */
+const CODE_ENVS = new Set(['tikzpicture', 'tikzcd', 'pgfpicture', 'algorithmic', 'algorithmic*']);
 const TABULAR_ENVS = new Set(['tabular', 'tabular*', 'tabularx', 'longtable', 'xltabular']);
 const ALIGN_ENVS: Record<string, string> = { center: 'center', flushleft: 'left', flushright: 'right', centering: 'center', raggedright: 'left', raggedleft: 'right' };
 /** commands whose arguments are LaTeX code, not text: taken verbatim into one ERT */
@@ -160,6 +175,13 @@ interface TextCtx {
   skipSpace: boolean;
   /** index in `pars` of the enclosing environment's first paragraph */
   envStart?: number;
+  /**
+   * Inside how many constructs kept as raw LaTeX around parsed content (an environment OverLyX does
+   * not know, an unknown command's argument): an alignment declared there stays raw LaTeX too — as
+   * a paragraph's alignment it would be written as \begin{center} … \end{center} around paragraphs
+   * the construct's \begin and \end are in, splitting it.
+   */
+  rawDepth: number;
 }
 
 interface Stop { close?: boolean; env?: string; item?: boolean; cell?: boolean }
@@ -168,7 +190,7 @@ type StopReason = 'eof' | 'close' | 'end' | 'item' | 'amp' | 'newrow';
 const cloneState = (st: State): State => ({ font: { ...st.font }, change: st.change ? { ...st.change } : undefined });
 
 function newCtx(base: string, owner: TextCtx['owner'] = 'inset'): TextCtx {
-  return { pars: [], layout: base, depth: 0, nestDepth: 0, envLayout: null, itemStyle: null, cur: null, align: null, noindent: false, appendix: false, owner, base, openBrackets: 0, skipSpace: false };
+  return { pars: [], layout: base, depth: 0, nestDepth: 0, envLayout: null, itemStyle: null, cur: null, align: null, noindent: false, appendix: false, owner, base, openBrackets: 0, skipSpace: false, rawDepth: 0 };
 }
 
 /** asctime(gmtime(t)) → unix seconds ("Tue Aug 26 14:03:00 2026"). */
@@ -202,7 +224,20 @@ const NOTE_HEADER = /^% @(note|comment|greyedout)(?:\s+(open|collapsed))?\s*$/;
 const NOTE_END = /^% @end\s*$/;
 
 /** the 1-based line of the scanner's position within its text (for messages) */
-function lineAt(s: Scanner): number { let n = 1; for (let i = 0; i < s.pos && i < s.s.length; i++) if (s.s.charCodeAt(i) === 10) n++; return n; }
+function lineAt(s: Scanner): number {
+  // (the newlines of a text are found once: counting from the start for every warning made a
+  // document with many unknown environments quadratic — 40% of parsing an 850 kB paper)
+  let nl = newlineCache.get(s);
+  if (!nl) {
+    nl = [];
+    for (let i = s.s.indexOf('\n'); i >= 0; i = s.s.indexOf('\n', i + 1)) nl.push(i);
+    newlineCache.set(s, nl);
+  }
+  let lo = 0, hi = nl.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (nl[m] < s.pos) lo = m + 1; else hi = m; }
+  return lo + 1;
+}
+const newlineCache = new WeakMap<Scanner, number[]>();
 
 /** `\\fontsize{25}{30}` → "25pt" (leading 1.2 × the size), "25pt/33.5pt" otherwise; null for sizes that are no plain lengths */
 function absoluteSize(size: string, skip: string): string | null {
@@ -736,7 +771,9 @@ class BodyParser {
 
     // paragraph layouts (commands); several styles may share a LaTeX name and differ in a parameter
     // (KOMA's \setkomavar{fromname}{...}): the one whose parameter follows wins
-    const styles = this.cmdStyles.get(name);
+    // — not inside a construct kept as raw LaTeX (rawDepth): a heading there would end the paragraph's
+    // environment while the raw \begin{proof} is still open in it; it stays raw LaTeX too
+    const styles = ctx.rawDepth ? undefined : this.cmdStyles.get(name);
     if (styles) {
       let style = styles.find(x => !x.latexParam);
       for (const cand of styles) {
@@ -875,6 +912,7 @@ class BodyParser {
     if (name === 'noindent') { if (ctx.cur && ctx.cur.items.length) this.pushERT(ctx, st, '\\noindent' + (t.spaceAfter ? ' ' : '')); else ctx.noindent = true; return null; }
     if (name === 'appendix') { this.endPar(ctx); this.startsHere(ctx); ctx.appendix = true; return null; }
     if (name === 'centering' || name === 'raggedright' || name === 'raggedleft') {
+      if (ctx.rawDepth) { this.pushERT(ctx, st, '\\' + name + (t.spaceAfter ? ' ' : '')); return null; }
       if (s.peekChar() === '{' && s.peekChar(1) === '}') s.pos += 2;
       const align = ALIGN_ENVS[name];
       if (ctx.float && !ctx.pars.length && !ctx.cur) { setParam(ctx.float.params, 'alignment', align); return null; }
@@ -972,7 +1010,8 @@ class BodyParser {
       if (url === null) { this.pushERT(ctx, st, '\\href'); return null; }
       let target = url.trim().replace(/\\%/g, '%').replace(/\\#/g, '#');
       const params = ['LatexCommand href'];
-      const nameText = text === null ? '' : text.trim();
+      // (trimmed, but a control space at its end — "…,}\ " in a bibliography — stays one)
+      const nameText = text === null ? '' : text.trim() + (/(^|[^\\])(\\\\)*\\$/.test(text.trim()) ? ' ' : '');
       if (nameText && nameText !== target) params.push('name ' + quote(nameText));
       let type = '';
       if (target.startsWith('mailto:')) { type = 'mailto:'; target = target.slice(7); }
@@ -1137,16 +1176,22 @@ class BodyParser {
     // verbatim arguments
     if (RAW_ARG_CMDS.has(name) || (name.endsWith('*') && RAW_ARG_CMDS.has(name.slice(0, -1)))) {
       let raw = '\\' + name + (s.readStar() ? '*' : '');
+      // \let\a\b, \newlength\foo, \setlength\parindent{0pt}: arguments that are bare commands —
+      // as many as the command has, never more (\setlength{\tabcolsep}{3pt} \resizebox{…}{…}{…}
+      // \end{table} once went into the ERT, the float's end with it)
+      const arity: Record<string, number> = { let: 2, newlength: 1, setlength: 2, addtolength: 2, setcounter: 2, addtocounter: 2, definecolor: 3, colorlet: 2, linespread: 1 };
+      let args = 0;
       for (;;) {
         const save = s.pos;
+        if (arity[name] !== undefined && args >= arity[name]) break;
         s.skipBlanks();
         const c = s.peekChar();
-        if (c === '{') { const e = groupEnd(s.s, s.pos); raw += s.s.slice(s.pos, e); s.pos = e; continue; }
+        if (c === '{' && !sizeGroup(s.s, s.pos)) { const e = groupEnd(s.s, s.pos); raw += s.s.slice(s.pos, e); s.pos = e; args++; continue; }
         if (c === '[') { const o = s.readOptional(); if (o === null) { s.pos = save; break; } raw += `[${o}]`; continue; }
         if (c === '=' && name === 'let') { raw += '='; s.pos++; continue; }
         if (c === '\\' && (name === 'let' || name === 'newlength' || name === 'setlength' || name === 'addtolength')) {
           const m = /^\\([A-Za-z@]+|.)/.exec(s.s.slice(s.pos));
-          if (m) { raw += m[0]; s.pos += m[0].length; continue; }
+          if (m) { raw += m[0]; s.pos += m[0].length; args++; continue; }
         }
         s.pos = save;
         break;
@@ -1176,18 +1221,37 @@ class BodyParser {
       if (opt !== null) { this.pushERT(ctx, st, `\\bibitem[${opt}]`); return null; }
     }
 
-    // unknown command: ERT, its brace arguments parsed as text between ERT braces
-    this.pushERT(ctx, st, '\\' + name + (s.readStar() ? '*' : ''));
+    // unknown command: ERT, its brace arguments parsed as text between ERT braces — except those
+    // of the box commands that are no text (a size, a colour, an angle: in the outer font they
+    // would be written {\footnotesize !} and no longer be one)
+    let head = '\\' + name + (s.readStar() ? '*' : '');
     let first = true;
+    for (let n = RAW_LEADING_ARGS[name] ?? 0; n > 0;) {
+      const save = s.pos;
+      s.skipBlanks();
+      const c = s.peekChar();
+      if (c === '[') { const o = s.readOptional(); if (o === null) { s.pos = save; break; } head += `[${o}]`; continue; }
+      if (c !== '{') { s.pos = save; break; }
+      const e = groupEnd(s.s, s.pos);
+      head += s.s.slice(s.pos, e);
+      s.pos = e;
+      n--;
+      first = false;
+    }
+    this.pushERT(ctx, st, head);
     for (;;) {
       const save = s.pos;
       s.skipBlanks();
       const c = s.peekChar();
       if (c === '[') { const o = s.readOptional(); if (o === null) { s.pos = save; break; } this.pushERT(ctx, st, `[${o}]`); first = false; continue; }
-      if (c === '{') {
+      if (c === '{' && !sizeGroup(s.s, s.pos)) {
         s.pos++;
         this.pushERT(ctx, st, '{');
+        const align = ctx.align;
+        ctx.rawDepth++;
         const r = this.parseText(s, ctx, cloneState(st), { ...stop, close: true, item: false });
+        ctx.rawDepth--;
+        ctx.align = align;
         this.pushERT(ctx, st, '}');
         first = false;
         if (r !== 'close' && r !== 'eof') return r;
@@ -1344,7 +1408,8 @@ class BodyParser {
     if (RAW_ENVS.has(env)) {
       const opt = env === 'lstlisting' || env === 'minted' || env === 'Verbatim' ? s.readOptional() : null;
       const lang = env === 'minted' ? s.readGroup() : null;
-      const inner = s.readUntilEnd(env);
+      // LaTeX code (not verbatim text) may hold the same environment: a tikzpicture in a node
+      const inner = s.readUntilEnd(env, CODE_ENVS.has(env));
       this.endPar(ctx);
       this.pushERT(ctx, st, `\\begin{${env}}` + (opt !== null ? `[${opt}]` : '') + (lang !== null ? `{${lang}}` : '') + inner + `\\end{${env}}`);
       this.endPar(ctx);
@@ -1355,7 +1420,7 @@ class BodyParser {
       const tab = parseTabular(s, env, (text) => this.parseInsetString(text, 'Plain Layout', 'cell'));
       if (tab) { this.pushInset(ctx, st, tab); return; }
       s.pos = start;
-      const inner = s.readUntilEnd(env);
+      const inner = s.readUntilEnd(env, true);   // (a tabular in a cell of a tabular)
       this.pushERT(ctx, st, `\\begin{${env}}${inner}\\end{${env}}`);
       return;
     }
@@ -1372,7 +1437,7 @@ class BodyParser {
       this.inTitleAlign = inAlign;
       return;
     }
-    if (align) {
+    if (align && !ctx.rawDepth) {
       this.endPar(ctx);
       this.startsHere(ctx);
       const saved = ctx.align;
@@ -1427,17 +1492,22 @@ class BodyParser {
       return;
     }
     // unknown environment: ERT around its content — and a note for the user (the source pane shows it)
-    this.warnings.push(`\\begin{${env}} on line ${this.lineBase + lineAt(s)} is not an environment OverLyX knows: kept as raw LaTeX`);
+    if (!align) this.warnings.push(`\\begin{${env}} on line ${this.lineBase + lineAt(s)} is not an environment OverLyX knows: kept as raw LaTeX`);
     let raw = `\\begin{${env}}`;
     for (;;) {
       const c = s.peekChar();
       if (c === '[') { const o = s.readOptional(); if (o === null) break; raw += `[${o}]`; continue; }
-      if (c === '{') { const e = groupEnd(s.s, s.pos); const g = s.s.slice(s.pos, e); if (g.length > 80 || g.includes('\n\n')) break; raw += g; s.pos = e; continue; }
+      if (c === '{' && !sizeGroup(s.s, s.pos)) { const e = groupEnd(s.s, s.pos); const g = s.s.slice(s.pos, e); if (g.length > 80 || g.includes('\n\n')) break; raw += g; s.pos = e; continue; }
       break;
     }
     this.pushERT(ctx, st, raw);
     this.envStack.push(env);
+    // what is declared inside ends with the environment (an alignment stays raw there: rawDepth)
+    const outerAlign = ctx.align;
+    ctx.rawDepth++;
     const r = this.parseText(s, ctx, cloneState(st), { env });
+    ctx.rawDepth--;
+    ctx.align = outerAlign;
     this.envStack.pop();
     if (r === 'end') this.pushERT(ctx, st, `\\end{${env}}`);
   }
@@ -1573,7 +1643,8 @@ class BodyParser {
     const beginPos = s.pos - `\\begin{${env}}`.length;
     this.endPar(ctx);
     const isItem = style.latexType === 'Item_Environment' || style.latexType === 'List_Environment' || style.latexType === 'Bib_Environment';
-    const saved = { layout: ctx.layout, depth: ctx.depth, nestDepth: ctx.nestDepth, envLayout: ctx.envLayout, itemStyle: ctx.itemStyle, envStart: ctx.envStart };
+    // (an alignment declared inside ends with the environment, as in TeX)
+    const saved = { layout: ctx.layout, depth: ctx.depth, nestDepth: ctx.nestDepth, envLayout: ctx.envLayout, itemStyle: ctx.itemStyle, envStart: ctx.envStart, align: ctx.align };
     // a nested environment needs a paragraph of the enclosing one to hang from
     this.hangFrom(ctx);
     const depth = ctx.nestDepth;

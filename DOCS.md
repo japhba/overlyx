@@ -146,8 +146,10 @@ blend.
   the settings line. A co-author's `git diff` after one typed word shows that paragraph, not a
   reformatted file. How: the parser records where every body paragraph came from
   (`ParseTexResult.sources`), the writer where it wrote each one (`spans`); paragraphs are matched
-  by the writer's text for them, and the base's glue is kept where the writer's glue is the same.
-  The result is always parsed again and must give the document being saved (or, where the writer
+  by the writer's text for them, and the base's glue is kept where the writer's glue is the same;
+  the base text a rewritten paragraph replaces must open and close the same environments and
+  groups as the writer's text in its place (else more is rewritten: a `\begin{center}` in one
+  paragraph and its `\end{center}` after the next go together). The result is always parsed again and must give the document being saved (or, where the writer
   itself does not reproduce a paragraph it wrote, what a full rewrite reads back as); otherwise
   more is rewritten, in the end the whole file — never worse than writing it all. Every save path
   goes through it: the server (`server/src/docwork.ts renderDoc`, so autosave, MCP edits, agent
@@ -1501,7 +1503,12 @@ invisible to LaTeX itself:
   their position, as in LyX; a macro's on-screen *display* form, LyX's second definition line, is
   the trailer `%% @display {…}` on the definition line), fonts, quotes, accents. What is not understood is kept verbatim as
   raw LaTeX (shown like LyX's ERT) with its arguments still editable as text; LyX-specific
-  spellings (`\SpecialChar`, protected spaces, …) are written as their LaTeX equivalents.
+  spellings (`\SpecialChar`, protected spaces, …) are written as their LaTeX equivalents. Inside
+  such raw LaTeX (an environment OverLyX does not know, like `titlepage`; an unknown command's
+  argument) an alignment declaration (`\centering`), an alignment environment and a heading stay
+  raw too, and what is declared inside ends with it; the writer keeps raw `\begin`/`\end` and
+  braces out of its font groups and puts one alignment environment around paragraphs that raw
+  LaTeX links, so it never splits an environment.
 
 `scripts/import-lyx.ts` converts a project's `.lyx` files (children as fragments, SVG/EPS
 graphics as PDF); the LyX settings become a real preamble, exactly as LyX's own export writes it.

@@ -181,13 +181,32 @@ export class Scanner {
   }
 
   /** Read raw text up to (not including) `\end{name}`; the `\end{name}` is consumed. */
-  readUntilEnd(name: string): string {
+  readUntilEnd(name: string, nested = false): string {
     const marker = `\\end{${name}}`;
-    const idx = this.s.indexOf(marker, this.pos);
+    const idx = nested ? this.nestedEnd(name) : this.s.indexOf(marker, this.pos);
     if (idx < 0) { const out = this.s.slice(this.pos); this.pos = this.s.length; return out; }
     const out = this.s.slice(this.pos, idx);
     this.pos = idx + marker.length;
     return out;
+  }
+
+  /**
+   * Where the \end{name} closing an environment whose \begin was just read is, counting the
+   * same environments nested in it (a tikzpicture in a node of a tikzpicture) and skipping
+   * comments; -1 when there is none.
+   */
+  private nestedEnd(name: string): number {
+    const s = this.s, open = `\\begin{${name}}`, close = `\\end{${name}}`;
+    let depth = 1;
+    for (let i = this.pos; i < s.length; i++) {
+      const c = s[i];
+      if (c === '%') { while (i < s.length && s[i] !== '\n') i++; continue; }
+      if (c !== '\\') continue;
+      if (s.startsWith(open, i)) { depth++; i += open.length - 1; continue; }
+      if (s.startsWith(close, i)) { if (--depth === 0) return i; i += close.length - 1; continue; }
+      i++;
+    }
+    return -1;
   }
 
   /** Read raw text up to (not including) `marker`; the marker is consumed. Returns null when not found. */
@@ -211,7 +230,7 @@ export class Scanner {
         if (c === '\\') { i += 2; continue; }
         if (c === '%' && grouped) { while (i < s.length && s[i] !== '\n') i++; continue; }
         if (c === '{' && grouped) depth++;
-        else if (c === '}' && grouped && depth > 0) depth--;
+        else if (c === '}' && grouped && depth-- === 0) break;   // the group around the $ ends first: not that way
         else if (c === '$' && depth === 0) { const out = s.slice(this.pos, i); this.pos = i + 1; return out; }
         if (c === '\n' && s[i + 1] === '\n') break;   // a paragraph break inside inline math: not math
         i++;

@@ -180,18 +180,24 @@ function preserve(doc: LyxDocument, full: WriteTexResult, o: PreserveOptions, ca
     // — and the base text a written stretch replaces must have balanced braces: a brace of a kept
     // stretch whose partner was replaced would stray (and a stray brace reads back as nothing, so
     // reading back cannot tell); the replaced stretch grows towards the partner
+    let drops = 0;
     for (let changed = true; changed;) {
       changed = false;
+      // the base itself does not nest around here (a file an older writer split): written whole,
+      // which mends it, rather than growing the written stretch paragraph by paragraph
+      if (drops > 100) return fullOut('base does not nest');
       for (let x = 0; x + 1 < kept.length && !changed; x++) {
         const j = kept[x], k = kept[x + 1];
         if (baseGlue(j, k)) continue;
         if (nEndOf(j) === undefined && j >= 0) { kept.splice(x, 1); changed = true; stats.notes?.push(`${j}: no end in the writer's text`); continue; }
         if (nStartOf(k) === undefined && k < n1) { kept.splice(x + 1, 1); changed = true; stats.notes?.push(`${k}: no start in the writer's text`); continue; }
-        const d = braceDepth(T, tEndOf(src(j))!, tStartOf(src(k))!);
-        if (d.delta === 0 && d.min >= 0) continue;
-        // unmatched closing braces: their partners are before (j's side); opening ones: after
-        const drop = d.min < 0 ? (j >= 0 ? x : k < n1 ? x + 1 : -1) : (k < n1 ? x + 1 : j >= 0 ? x : -1);
-        if (drop >= 0) { stats.notes?.push(`${kept[drop]}: braces`); kept.splice(drop, 1); changed = true; }
+        // the base text replaced must do to the environments and groups around it what the
+        // writer's text in its place does (an \end{itemize} for an \end{itemize}); else what it
+        // closes was opened before (j's side), what it opens closes after (k's side)
+        const t = structure(T, tEndOf(src(j))!, tStartOf(src(k))!), w = structure(full.text, nEndOf(j)!, nStartOf(k)!);
+        if (t.closes !== '?' && t.closes === w.closes && t.opens === w.opens) continue;
+        const drop = t.closes !== w.closes ? (j >= 0 ? x : k < n1 ? x + 1 : -1) : (k < n1 ? x + 1 : j >= 0 ? x : -1);
+        if (drop >= 0) { stats.notes?.push(`${kept[drop]}: braces / environments`); kept.splice(drop, 1); changed = true; drops++; }
       }
     }
 
@@ -508,26 +514,49 @@ export function merge3(t: string, b: string, n: string): string | null {
 }
 
 /**
- * Are the braces of `s` between `from` and `to` balanced (comments and \{ \} left out)? Only such
- * stretches of the base are put next to the writer's text: a stray brace reads back as nothing,
- * so reading back would not tell that it moved.
+ * Are the braces and environments of `s` between `from` and `to` balanced (comments and \{ \}
+ * left out)? Only such stretches of the base are put next to the writer's text: a stray brace or
+ * \end reads back as nothing (or as raw LaTeX), so reading back would not tell that it moved.
  */
 function balanced(s: string, from: number, to: number): boolean {
   const d = braceDepth(s, from, to);
   return d.delta === 0 && d.min >= 0;
 }
 
-/** The brace depth at the end of `s` between `from` and `to` and the lowest it gets, starting at 0. */
-function braceDepth(s: string, from: number, to: number): { delta: number; min: number } {
-  let depth = 0, min = 0;
+/**
+ * What `s` between `from` and `to` does to the environments and groups around it: what it closes
+ * that it did not open, and what it leaves open (braces, \begin{…}). The base's \begin{center} in
+ * one paragraph and its \end{center} after the next must be written or kept together.
+ */
+function structure(s: string, from: number, to: number): { closes: string; opens: string } {
+  const stack: string[] = [], closed: string[] = [];
   for (let i = from; i < to; i++) {
     const c = s[i];
-    if (c === '\\') { i++; continue; }
     if (c === '%') { while (i < to && s[i] !== '\n') i++; continue; }
-    if (c === '{') depth++;
-    else if (c === '}' && --depth < min) min = depth;
+    if (c === '\\') {
+      const m = s.startsWith('\\begin', i) || s.startsWith('\\end', i) ? /^\\(begin|end)\s*\{([^}]*)\}/.exec(s.slice(i, Math.min(to, i + 120))) : null;
+      if (!m) { i++; continue; }
+      if (m[1] === 'begin') stack.push(m[2]);
+      else if (stack[stack.length - 1] === m[2]) stack.pop();
+      else if (!stack.length) closed.push(m[2]);
+      else return { closes: '?', opens: '?' };   // crossed: never like anything the writer writes
+      i += m[0].length - 1;
+      continue;
+    }
+    if (c === '{') stack.push('{');
+    else if (c === '}') {
+      if (stack[stack.length - 1] === '{') stack.pop();
+      else if (!stack.length) closed.push('{');
+      else return { closes: '?', opens: '?' };
+    }
   }
-  return { delta: depth, min };
+  return { closes: closed.join(','), opens: stack.join(',') };
+}
+
+/** `structure` as depths: unbalanced when it closes or opens anything. */
+function braceDepth(s: string, from: number, to: number): { delta: number; min: number } {
+  const st = structure(s, from, to);
+  return { delta: st.opens ? st.opens.split(',').length : 0, min: st.closes ? -1 : 0 };
 }
 
 /** Where `s` has its newlines. */

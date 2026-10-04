@@ -269,6 +269,27 @@ describe('saving keeps the file as it is where nothing changed', () => {
   });
 });
 
+describe('the base text a written paragraph replaces', () => {
+  // big850 (the load test's paper): a chapter heading as two paragraphs in one center environment,
+  // the \begin{center} in the first one's text, the \end{center} after the second one
+  const CHAPTER = '\\documentclass{article}\n\\begin{document}\nBefore.\n\n\\begingroup\n\\begin{center}\n{\\large\\scshape Chapter V\\par}\\vspace{6pt}\n{\\LARGE The limiting law of local-time activity\\par}\n\\end{center}\n\\vspace{6pt}\n\nThe proof proceeds.\n\\endgroup\n\\end{document}\n';
+
+  it('takes its environments along: editing the first of two paragraphs in one \\begin{center} rewrites both, kept the rest', () => {
+    const r = save(CHAPTER, d => replaceText(d, 'Chapter V', 'Chapter Five'));
+    expect(r.stats.outcome).toBe('kept');
+    expect(r.stats.retries ?? 0).toBe(0);
+    expect(r.text.match(/\\begin\{center\}/g)?.length).toBe(r.text.match(/\\end\{center\}/g)?.length);
+    expect(r.text).toContain('Before.\n');
+    expect(r.text).toContain('The proof proceeds.');
+    readsBack(r.text, r.doc);
+  });
+
+  it('a list item and the \\end{itemize} after it are replaced by the writer\'s item and \\end{itemize}: the item before stays', () => {
+    const r = save(PAPER, d => replaceText(d, 'Second point.', 'Second point, revised.'));
+    expect(r.text).toContain('  \\item First point,\n  wrapped.');
+  });
+});
+
 describe('the result is verified', () => {
   it('a writer whose paragraph boundaries cannot be trusted falls back to rewriting more, never to a wrong file', () => {
     const p = parse(PAPER);

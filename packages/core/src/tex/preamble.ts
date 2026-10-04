@@ -59,22 +59,22 @@ export interface DocumentSplit {
 
 /** `s` with every comment replaced by blanks of the same length (positions are preserved). */
 export function maskComments(s: string): string {
-  let out = '';
-  let i = 0;
-  while (i < s.length) {
-    const c = s[i];
-    if (c === '\\') { out += s.slice(i, i + 2); i += 2; continue; }
-    if (c === '%') {
-      let j = i;
-      while (j < s.length && s[j] !== '\n') j++;
-      out += ' '.repeat(j - i);
-      i = j;
-      continue;
-    }
-    out += c;
-    i++;
+  // built from slices, not character by character (an 850 kB document is masked several times per parse)
+  const parts: string[] = [];
+  let from = 0;
+  for (let i = s.indexOf('%'); i >= 0; i = s.indexOf('%', i + 1)) {
+    let k = i, bs = 0;
+    while (k > 0 && s[k - 1] === '\\') { bs++; k--; }
+    if (bs % 2) continue;   // \%
+    let j = s.indexOf('\n', i);
+    if (j < 0) j = s.length;
+    parts.push(s.slice(from, i), ' '.repeat(j - i));
+    from = j;
+    i = j - 1;
   }
-  return out;
+  if (!parts.length) return s;
+  parts.push(s.slice(from));
+  return parts.join('');
 }
 
 /** Position of `re` in `s` outside comments, or -1. */
