@@ -4,8 +4,9 @@
  * real browser and an MCP client — the SDK, as Codex or Claude Code would connect with the account
  * token — reads it back with get_presence; the agent edits and points at a passage, and the browser
  * shows it as a collaborator; a message written in the Agent panel reaches the agent through
- * wait_for_instructions and its reply shows in the panel; a Claude Code session gets the message
- * pushed (channels); a collaborator can neither see nor reach the admin's agents.
+ * wait_for_instructions and its reply shows in the panel; "Ask agent about this" pins a passage for
+ * the next message; a Claude Code session gets the message pushed (channels); a collaborator can
+ * neither see nor reach the admin's agents.
  *
  * MCP is not proxied by the vite dev server: OVERLYX_E2E_SERVER names the server under test when
  * OVERLYX_E2E_BASE is vite (e.g. OVERLYX_E2E_SERVER=http://127.0.0.1:3001).
@@ -154,6 +155,28 @@ test('a message from the Agent panel reaches the agent with the selection; its r
   await expect(reply).toContainText('Fixed it: the typo is gone', { timeout: 10000 });
   await expect(reply.locator('.agent-math')).toHaveCount(1);
   await expect(bubble).toContainText('Answered');
+});
+
+test('"Ask agent about this" pins the selection for the next message, even after the selection moved on', async ({ page }) => {
+  await login(page);
+  await openDoc(page, DOC);
+  const { client } = await connect('codex-mcp-client');
+  await selectText(page, 'quick brown fox');
+  const box = await page.evaluate(() => { const r = window.getSelection()!.getRangeAt(0).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.mouse.click(box.x, box.y, { button: 'right' });
+  await page.locator('.ctx-menu .ctx-item', { hasText: 'Ask agent about this' }).click();
+  await expect(page.locator('.agent-wrap')).toBeVisible();
+  await page.locator('[data-agent-tab]', { hasText: 'Codex' }).first().click();
+  await expect(page.locator('[data-ext-pin]')).toContainText('the selected passage');
+  await selectText(page, 'sets the scene');   // the selection moves on; the pinned passage is what goes along
+  const waiting = call(client, 'wait_for_instructions', { timeout_seconds: 45 });
+  await page.locator('[data-ext-input]').fill('What is this about?');
+  await page.keyboard.press('Enter');
+  const got = await waiting;
+  expect(got.messages[0].text).toBe('What is this about?');
+  expect(got.messages[0].context).toContain('⟦SELECTION⟧quick brown fox⟦/SELECTION⟧');
+  await expect(page.locator('[data-ext-pin]')).toHaveCount(0);   // used up
+  await call(client, 'reply', { message_id: got.messages[0].message_id, text: 'A fox and a dog.' });
 });
 
 test('Claude Code gets the message pushed into its session (channels)', async ({ page }) => {
