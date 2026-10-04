@@ -1578,7 +1578,8 @@ How it works, in order of what happens when you open a document:
      in between, the server's own diffs), `tests/split-fuzz.test.ts` (random scripts of typing,
      deleting, Enter and Backspace on two or three editors going offline and online; every word typed
      must be there once, in the order its author saw; `OVERLYX_FUZZ_SEEDS`, `OVERLYX_FUZZ_STEPS`,
-     `OVERLYX_FUZZ_JOINS=1`, `OVERLYX_FUZZ_DEBUG=<seed>` to replay and shrink one),
+     `OVERLYX_FUZZ_JOINS=1`, `OVERLYX_FUZZ_STRICT=1` to fail the known limits too,
+     `OVERLYX_FUZZ_DEBUG=<seed>` to replay and shrink one),
      `tests/yjs-net.ts` (the network they run on: real y-prosemirror editors and a server with
      controlled deliveries) and `e2e/offline-splits.spec.ts` (both press Enter in one paragraph, one
      of them offline, and type behind formulas in both halves).
