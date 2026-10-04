@@ -27,8 +27,8 @@ export function UserAvatars({ users, onJump }: { users: PresenceUser[]; onJump?:
   return (
     <span class="users" title={users.map(u => u.name).join(', ')}>
       {users.map(u => (
-        <button key={u.clientId} type="button" class={'avatar' + (u.self ? ' self' : '') + (u.hasCursor ? ' has-cursor' : '')} style={{ background: u.color }}
-          title={u.self ? `${u.name} (you)` : u.hasCursor ? `${u.name} — click to jump to their cursor` : `${u.name} — no cursor in this document yet`}
+        <button key={u.clientId} type="button" class={'avatar' + (u.self ? ' self' : '') + (u.hasCursor ? ' has-cursor' : '') + (u.agent ? ' agent' : '')} style={{ background: u.color }}
+          title={u.self ? `${u.name} (you)` : `${u.name}${u.agent ? ' — an agent connected from elsewhere' : ''}${u.hasCursor ? ' — click to jump to ' + (u.agent ? 'its' : 'their') + ' cursor' : ' — no cursor in this document yet'}`}
           data-client={u.clientId} data-username={u.username ?? ''} data-initials={u.avatar ? undefined : initials(u.name).length} onMouseDown={e => e.preventDefault()} onClick={() => onJump?.(u)}><AvatarContent name={u.name} src={u.avatar} /></button>
       ))}
     </span>

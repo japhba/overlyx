@@ -2,7 +2,8 @@
  * Right-click menu of the text editor, laid out like Google Docs': context-sensitive entries for
  * cross-references, labels, citations, hyperlinks, child documents, graphics, insets and tracked
  * changes, then Cut / Copy / Paste / Paste without formatting / Delete, Comment and Insert link
- * (⌘K), the format options, Clear formatting, and OverLyX's insert / structure commands.
+ * (⌘K), Ask agent about this (where the shell has an Agent panel), the format options, Clear
+ * formatting, and OverLyX's insert / structure commands.
  */
 import type { EditorView } from 'prosemirror-view';
 import { NodeSelection, TextSelection, type Command } from 'prosemirror-state';
@@ -184,6 +185,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
     { label: 'Comment', icon: 'comment', shortcut: MOD + '+Alt+C', action: run(C.insertComment) },
     ...(onLink ? [] : [{ label: 'Insert link', icon: 'link', shortcut: LINK_KEY, action: () => openLinkBox(view) } as MenuItem]),
     ...(prefs.aiRewrite ? [{ label: hasSel ? 'Rewrite selection with AI…' : 'Write here with AI…', icon: 'ai', shortcut: REWRITE_KEY, action: () => openRewrite(view) } as MenuItem] : []),
+    ...(editorContext.askAgent ? [{ label: hasSel ? 'Ask agent about this…' : 'Ask agent…', icon: 'ai', action: () => editorContext.askAgent?.() } as MenuItem] : []),
     ...(hasSel && !formulaSelected ? [{ label: 'Turn into a formula', icon: 'formula', shortcut: MOD + '+M', action: () => C.insertMath(false)(view) } as MenuItem] : []),
     { sep: true },
   );

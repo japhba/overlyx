@@ -44,6 +44,8 @@ export interface EditorContext {
   mathField?: import('./lyxmath/field').LyxMathField | null;
   /** documents open in the workspace panel (the active one first) — sent to the agent as context */
   openDocs?: () => string[];
+  /** "Ask agent about this" (right-click menu): pin the selection for the Agent panel's next message — set by a shell that has the panel */
+  askAgent?: () => void;
 }
 
 export const editorContext: EditorContext = { user: null, meta: null, docId: null, project: null, docDir: '', trackChanges: false, combined: false };

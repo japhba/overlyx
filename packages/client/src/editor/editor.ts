@@ -70,7 +70,7 @@ function checkedAwareness(aw: Awareness): Awareness {
 }
 
 /** A user connected to the document (one entry per browser tab / awareness client). */
-export interface PresenceUser { name: string; color: string; username?: string; /** profile picture URL (Google sign-in), if any */ avatar?: string | null; clientId: number; /** has a known cursor position in this document */ hasCursor: boolean; self: boolean }
+export interface PresenceUser { name: string; color: string; username?: string; /** profile picture URL (Google sign-in), if any */ avatar?: string | null; clientId: number; /** has a known cursor position in this document */ hasCursor: boolean; self: boolean; /** an agent connected over MCP (the server's agentPresence.ts) */ agent?: boolean }
 
 /**
  * Where the user's edits are: `saved` = the .lyx file on the server contains everything, `saving` =
@@ -368,7 +368,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
   const status = { connected: false, synced: false, users: [] as PresenceUser[] };
   const pushStatus = () => {
     const users: PresenceUser[] = [];
-    checkedStates(provider.awareness).forEach((s, clientId) => { if (s.user) users.push({ name: s.user.name, color: s.user.color, username: s.user.username, avatar: s.user.avatar ?? null, clientId, hasCursor: !!s.cursor, self: clientId === ydoc.clientID }); });
+    checkedStates(provider.awareness).forEach((s, clientId) => { if (s.user) users.push({ name: s.user.name, color: s.user.color, username: s.user.username, avatar: s.user.avatar ?? null, clientId, hasCursor: !!s.cursor, self: clientId === ydoc.clientID, ...(s.user.agent === true ? { agent: true } : {}) }); });
     status.users = users;
     opts.onStatus?.({ ...status });
   };

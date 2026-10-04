@@ -151,6 +151,15 @@ claude mcp add --transport http overlyx ${location.origin}/mcp \\
 url = "${location.origin}/mcp"
 bearer_token_env_var = "OVERLYX_TOKEN"`}</pre>
           <div class="hint">With <code>OVERLYX_TOKEN</code> set to your account access token (below).</div>
+          <div class="hint" data-git-agents-live>
+            The agent <b>sees where you are</b>: your cursor and selection in an open document (its <code>get_presence</code>{' '}
+            tool), so "this paragraph" or "the selected equation" means yours. You see it too — as a collaborator with its
+            own cursor where it last edited or what it points at. And you can <b>write to it from OverLyX</b>: in the Agent
+            panel (right sidebar) pick it and send a message; ask it once, in its terminal, to <i>listen to OverLyX</i> and it
+            waits for your messages and answers there. Claude Code can get your messages pushed into its session instead —
+            start it with <code>claude --dangerously-load-development-channels server:overlyx</code>. Only you (the owner of
+            the token) can write to your agent, never the people you share a project with.
+          </div>
 
           <h4>Your account access token — Git, CLI and MCP</h4>
           <div class="hint">Your account has one manually-managed token, shared by every project and client. Use it as the password for Git or the OverLyX CLI, or as an MCP Bearer token. Rotating it replaces the old token everywhere.</div>
