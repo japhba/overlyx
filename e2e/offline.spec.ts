@@ -315,7 +315,11 @@ test('the chosen math font is cached whole, so formulas keep their font offline'
     await page.reload();
     await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
   }
-  const ok = await page.evaluate(async (files) => (await Promise.all(files.map(f => fetch(f).then(r => r.ok, () => false)))).every(Boolean), fontFiles);
+  // (Playwright's WebKit fails requests while emulated offline before the service worker is asked — there the
+  // cache itself is asked, as the worker would be)
+  const ok = browserName(page) === 'webkit'
+    ? await page.evaluate(async (files) => (await Promise.all(files.map(f => caches.match(f).then(r => !!r?.ok)))).every(Boolean), fontFiles)
+    : await page.evaluate(async (files) => (await Promise.all(files.map(f => fetch(f).then(r => r.ok, () => false)))).every(Boolean), fontFiles);
   expect(ok).toBe(true);
   expect(await page.evaluate(() => document.documentElement.dataset.mathFont)).toBe('stix2');
   expect(failed).toEqual([]);

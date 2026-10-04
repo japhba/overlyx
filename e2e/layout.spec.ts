@@ -328,7 +328,8 @@ test('the node editor moves a node with its handles; the crop tool crops from an
   await page.mouse.down();
   await page.mouse.move(node.x + node.width / 2 + 5 * mm, node.y + node.height / 2, { steps: 6 });
   await page.mouse.up();
-  await expect.poll(() => fileText('tools.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=20mm,y=20mm,w=35(\.\d+)?mm,h=30mm,vb=0 0 35(\.\d+)? 30,[^}]*name=Circle\}\{M 35(\.\d+)? 15 C 35/);
+  // (35 mm within a pixel: pointer events carry whole pixels in WebKit and Firefox)
+  await expect.poll(() => fileText('tools.tex'), { timeout: 15000 }).toMatch(/\\olshape\{x=20mm,y=20mm,w=(?:35(\.\d+)?|34\.9\d*)mm,h=30mm,vb=0 0 (?:35(\.\d+)?|34\.9\d*) 30,[^}]*name=Circle\}\{M (?:35(\.\d+)?|34\.9\d*) 15 C /);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   // crop: double-click the image, the west handle 10 mm to the right
@@ -339,7 +340,11 @@ test('the node editor moves a node with its handles; the crop tool crops from an
   await page.mouse.down();
   await page.mouse.move(w.x + w.width / 2 + 10 * mm, w.y + w.height / 2, { steps: 6 });
   await page.mouse.up();
-  await expect.poll(() => fileText('tools.tex'), { timeout: 15000 }).toMatch(/\\olimage\{x=90mm,y=20mm,w=30mm,h=30mm,crop=0\.25 0 0 0,name=Pic\}\{pic\.png\}/);
+  // x = 90 mm, w = 30 mm and a quarter of the 40 mm image cropped, each within a pixel
+  await expect.poll(() => {
+    const m = /\\olimage\{x=([\d.]+)mm,y=20mm,w=([\d.]+)mm,h=30mm,crop=([\d.]+) 0 0 0,name=Pic\}\{pic\.png\}/.exec(fileText('tools.tex'));
+    return !!m && Math.abs(Number(m[1]) - 90) < 1.5 / mm && Math.abs(Number(m[2]) - 30) < 1.5 / mm && Math.abs(Number(m[3]) - 0.25) < 1.5 / (40 * mm);
+  }, { timeout: 15000 }).toBe(true);
   expect(errors).toEqual([]);
 });
 
