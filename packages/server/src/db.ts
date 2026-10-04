@@ -264,3 +264,53 @@ CREATE TABLE IF NOT EXISTS oauth_grants (
 if (!(db.prepare("PRAGMA table_info(mcp_tokens)").all() as { name: string }[]).some(c => c.name === 'expires_at')) {
   db.exec('ALTER TABLE mcp_tokens ADD COLUMN expires_at INTEGER');
 }
+
+// Agents connected over MCP from elsewhere (mcpAgents.ts): one row per token and MCP client
+// ("Claude Code" with the account token, ChatGPT's OAuth grant, …) — what the Agent panel lists —
+// their sessions (clients that keep one, so a server restart does not end them), and the
+// conversation the account's owner has with each from inside OverLyX.
+db.exec(`
+CREATE TABLE IF NOT EXISTS mcp_agents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  token_kind TEXT NOT NULL,
+  token_id INTEGER NOT NULL,
+  client_name TEXT NOT NULL,
+  client_title TEXT,
+  client_version TEXT,
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL,
+  last_project TEXT,
+  last_path TEXT,
+  last_tool TEXT,
+  active_at INTEGER,
+  stateless_at INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS mcp_agents_client ON mcp_agents(token_kind, token_id, client_name);
+CREATE INDEX IF NOT EXISTS mcp_agents_user ON mcp_agents(user_id, last_seen_at);
+CREATE TABLE IF NOT EXISTS mcp_sessions (
+  id TEXT PRIMARY KEY,
+  agent_id INTEGER NOT NULL,
+  token_kind TEXT NOT NULL,
+  token_id INTEGER NOT NULL,
+  project TEXT,
+  channel_ok INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mcp_agent_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  text TEXT NOT NULL,
+  context TEXT,
+  reply_to INTEGER,
+  state TEXT NOT NULL,
+  via TEXT,
+  created_at INTEGER NOT NULL,
+  delivered_at INTEGER,
+  pushed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS mcp_agent_messages_agent ON mcp_agent_messages(agent_id, id);
+`);

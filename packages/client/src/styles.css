@@ -1233,6 +1233,7 @@ button.tb-cw:hover:not(:disabled) { background: var(--row-hover); border-color: 
 .menubar .users .avatar { padding: 0; cursor: pointer; font-family: inherit; transition: transform 0.1s; position: relative; }
 .menubar .users .avatar:hover { transform: scale(1.15); z-index: 1; box-shadow: 0 0 0 1.5px var(--muted2); }
 .menubar .users .avatar.self { cursor: default; }
+.menubar .users .avatar.agent { border-radius: 6px; }   /* an agent connected over MCP: a rounded square, not a circle */
 .menubar .users .avatar:not(.has-cursor) { opacity: 0.6; }
 .ProseMirror-yjs-cursor.flash > div { animation: ol-cursor-flash 0.4s ease-in-out 4; }
 @keyframes ol-cursor-flash { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }
@@ -1596,6 +1597,30 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .agent-threads .row .meta { color: var(--ui-muted); font-size: 11.5px; margin-top: 2px; }
 .agent-threads .new { align-self: stretch; }
 .agent-readonly { border-top: 1px solid var(--ui-border); padding: 6px 8px; color: var(--ui-muted); font-size: 12px; }
+/* the Agent panel's tabs: the embedded agent and the agents connected from elsewhere (ExternalAgents.tsx) */
+.agent-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.agent-wrap > .agent-panel { flex: 1; min-height: 0; height: auto; }
+.agent-switch { display: flex; gap: 4px; padding: 5px 6px; border-bottom: 1px solid var(--ui-border); overflow-x: auto; flex: none; }
+.agent-switch button { font: inherit; font-size: 12px; background: none; color: var(--ui-muted); border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.agent-switch button:hover { background: var(--ui-hover); }
+.agent-switch button.active { color: var(--ui-fg); border-color: var(--ui-border); background: var(--ui-bg2); }
+.ext-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ui-muted); flex: none; display: inline-block; box-sizing: border-box; }
+.ext-dot.offline { background: transparent; border: 1.5px solid var(--ui-muted); }
+.ext-dot.listening, .ext-dot.working { animation: ext-pulse 2s ease-in-out infinite; }
+@keyframes ext-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .ext-dot.listening, .ext-dot.working { animation: none; } }
+.ext-head .who { color: var(--ui-fg); }
+.ext-user .ext-context { color: var(--ui-muted); font-size: 11.5px; margin-top: 3px; white-space: normal; }
+.ext-user .ext-state { color: var(--ui-muted); font-size: 11px; margin-top: 2px; white-space: normal; }
+.ext-user .ext-state a { color: var(--accent); }
+.ext-reply.progress { color: var(--ui-muted); font-size: 12.5px; }
+.ext-hint { border: 1px dashed var(--ui-border); border-radius: 8px; padding: 8px 10px; color: var(--ui-muted); font-size: 12.5px; line-height: 1.5; }
+.ext-hint p { margin: 0 0 6px; }
+.ext-hint p:last-child { margin-bottom: 0; }
+.ext-hint code { font-family: ui-monospace, monospace; font-size: 11.5px; background: var(--ui-bg2); border-radius: 4px; padding: 0 3px; }
+.ext-hint .ext-cmd { display: inline-block; margin: 3px 0; user-select: all; overflow-wrap: anywhere; }
+.ext-none { margin: 12px; }
+.ext-pin { font-size: 12px; color: var(--ui-muted); display: flex; align-items: center; gap: 6px; }
 
 /* Agent panel v2: selectors, math, diff summaries, approval feedback */
 .agent-compose .agent-select { font: inherit; font-size: 12px; max-width: 110px; background: var(--page-bg); color: inherit; border: 1px solid var(--ui-border); border-radius: 5px; padding: 2px 3px; }

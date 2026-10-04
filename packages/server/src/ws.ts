@@ -16,6 +16,7 @@ import { canonicalDocId } from './namespaces.ts';
 import { splitDocId, sanitizeAwarenessState, MAX_AWARENESS_STATE_JSON } from '@overlyx/core';
 import { markDocOpened } from './userSettings.ts';
 import { config } from './config.ts';
+import { isAgentClient, trackMoves } from './agentPresence.ts';
 
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
@@ -68,6 +69,7 @@ const docHandlers = new WeakSet<OpenDoc>();
 function ensureDocHandlers(doc: OpenDoc): void {
   if (docHandlers.has(doc)) return;
   docHandlers.add(doc);
+  trackMoves(doc);   // when each client last moved (agentPresence.ts presenceIn)
   doc.ydoc.on('update', (update: Uint8Array, origin: unknown) => {
     // An agent (MCP) edit goes out twice: first tagged as MSG_AGENT_EDIT so new clients apply it
     // with an undo-tracked origin (Ctrl+Z reverts the agent like one's own typing), then as the
@@ -186,7 +188,8 @@ async function handleConnection(conn: WebSocket, docId: string, user: SessionUse
           if (encoding.length(enc) > 1) send(doc, conn, encoding.toUint8Array(enc));
           break;
         case MSG_AWARENESS: {
-          const update = sanitizeAwarenessUpdate(decoding.readVarUint8Array(dec), id => [...doc.conns].some(([c, ids]) => c !== conn && ids.has(id)));
+          // another connection's client ids, and the agents' (agentPresence.ts), are not this client's to set
+          const update = sanitizeAwarenessUpdate(decoding.readVarUint8Array(dec), id => isAgentClient(doc, id) || [...doc.conns].some(([c, ids]) => c !== conn && ids.has(id)));
           if (update) awarenessProtocol.applyAwarenessUpdate(doc.awareness, update, conn);
           break;
         }

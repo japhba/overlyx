@@ -1022,6 +1022,15 @@ blend.
   `journalctl -u overlyx-codex-update`). A keeper started on an older codex (the version is
   stamped in `data/agent-home/<id>/codex-version`) is stopped once quiet for `OVERLYX_AGENT_IDLE_MS`
   even with the panel open, so the next request runs the new one.
+  **Agents from elsewhere** (`app/ExternalAgents.tsx`, see *MCP connector*): the account's agents
+  connected over MCP — Claude Code, Codex, ChatGPT — get tabs of their own at the top of the panel
+  (the Agent tab appears when AI assistance is on *or* the account has such agents): status
+  (listening / working / connected / offline, the project and document it last worked in, whether
+  messages reach it pushed), the conversation, a composer that sends the document and the
+  selection along (the same context as a Codex turn), "take back" for a message it has not picked
+  up, Forget. **Ask agent about this** in the editor's right-click menu (`editorContext.askAgent`,
+  set only by a shell with the panel) pins the selection as the context of the panel's next
+  message — to Codex or to an agent from elsewhere — and focuses the composer.
 * **AI assistance** (`editor/ai/`, server `ai.ts`; off by default, Tools ▸ AI assistance or
   Preferences — the switches are menu items, so the command palette finds them): needs
   `OPENROUTER_API_KEY` on the server (the same key as "Escalate to AI"); Gemini 3.1 Flash Lite rewrites,
@@ -1375,6 +1384,10 @@ OVERLYX_E2E_AI_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test
 # the Agent panel (e2e/agent.spec.ts): start the server with OVERLYX_CODEX_BIN=scripts/codex-stub.mjs
 # (a stand-in for `codex app-server`: sign-in, streamed replies, one approval round-trip), then
 OVERLYX_E2E_AGENT_STUB=1 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/agent.spec.ts
+# agents connected over MCP (e2e/mcp-presence.spec.ts): get_presence on a selection made in the browser, the
+# agent's caret / highlight, a panel message through wait_for_instructions and back, a pushed Claude Code session;
+# MCP is not proxied by vite, so name the server
+OVERLYX_E2E_SERVER=http://127.0.0.1:3001 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/mcp-presence.spec.ts
 # "a user writes a paper": real arXiv papers typed from blank documents through the editor UI —
 # paperwriting.spec.ts / paperwriting-more.spec.ts (first pages of Attention, a coding-theory paper, BERT) and
 # the whole GAN and Adam papers from abstract to bibliography with a latexmk build (~15 min each; needs pdftotext):
@@ -1665,8 +1678,14 @@ Two ways to authenticate:
 A token or grant stands for the *account* behind it — in every project it gets that account's role
 (viewers read; edit access is needed for `propose_edit`, the comment tools and the write tools).
 `packages/server/src/mcp.ts` implements the connector on top of `@modelcontextprotocol/sdk`'s
-stateless Streamable HTTP transport (one request/response per JSON-RPC call, no session) and
-exposes these tools:
+Streamable HTTP transport — stateless (one request/response per JSON-RPC call, no session) for
+every client except those in `SESSION_CLIENTS` (`mcpAgents.ts`: Claude Code, clientInfo
+`claude-code`), which get a session at initialize (`Mcp-Session-Id`, a GET event stream for pushed
+messages, DELETE ends it). Sessions are rows in `mcp_sessions`: a request with a session id the
+process does not know (after a restart) brings its session back for the same token instead of a
+404 (Claude Code itself re-initializes when its event stream drops). A GET or DELETE without a
+session answers 405. `OVERLYX_MCP_LOG=1` logs one line per request (method, tool, session,
+clientInfo, User-Agent). It exposes these tools:
 
 * `list_documents`, `read_document(path)` — the project's `.tex` documents and one document's LaTeX
   source (`text`) plus its paragraphs (index, layout, depth, plain text) for the paragraph tools.
@@ -1726,7 +1745,9 @@ exposes these tools:
   `now_reads`, a build that breaks after a tracked edit or whose errors point at `\lyxadded` /
   `\lyxdeleted`, math / tables / preamble the tracked form mangles, or the user asking — and to
   build after every change and step back with `project_history` / `restore_project` rather than
-  leave a document not compiling. A failed `build_pdf` repeats the hint.
+  leave a document not compiling. A failed `build_pdf` repeats the hint. The Git dialog's section
+  also explains presence (get_presence, the agent as a collaborator) and writing to the agent from
+  the Agent panel, with Claude Code's channels flag.
 * `edit_file(path, old_text, new_text, replace_all?)` — a passage of a text file (refs.bib, macros,
   `.sty`) replaced directly, like `write_file`; documents are refused (use `edit_document`).
 * `project_history(limit?)`, `restore_project(commit)` — the way back for any agent: the project's
@@ -1744,6 +1765,73 @@ exposes these tools:
   by the token's account, `<username>/<name>`. An agent can populate it with `create_document`, `write_document` and
   `write_file`; local files, including binaries and an existing Git history, are imported with the
   CLI instead. This tool is intentionally absent from a fixed `/mcp/<owner>/<project>` connection.
+* **Where people are: `get_presence(project?, path?)`** (`agentPresence.ts presenceIn`,
+  `ycursor.ts describeCursor`). For each open document of the project (or one): the people in it —
+  one entry per browser tab or editor, the account taken from the WebSocket connection, not from
+  what the client claims — and the agents, each with `cursor` (`paragraph`: the index in
+  read_document's `paragraphs`; `offset` into that paragraph's text; `excerpt` with `‸` at the
+  cursor; `layout`) and `selection` (`from`/`to` places and the selected text verbatim — across
+  paragraphs joined by a blank line, long ones cut in the middle). `you: true` marks the token's own
+  account, `self` the asking agent, `moved_seconds_ago` when a cursor last changed. The awareness
+  `cursor` (two Yjs relative positions, y-prosemirror's) is resolved server-side: the paragraph is
+  serialized with marker characters at the cursor's places through the same conversion
+  read_document uses (editor nodes → document model → `itemText`), so formulas, footnotes and
+  special characters count exactly as read_document shows them; inside a table (whose cells
+  read_document's paragraph text leaves out) the excerpt includes the cells and `offset` is null.
+  Without a project (on `/mcp`): only where the user is, across their projects. Only documents the
+  token's account can view are listed. MCP_INSTRUCTIONS tell the agent that "this", "here", "the
+  selected paragraph" mean the user's own cursor / selection and to call get_presence first.
+* **People see the agent.** An agent connected from elsewhere (not the Agent panel's own) gets an
+  awareness client of its own in each document it reads or edits (`agentPresence.ts showAgent`): a
+  state `{ user: { name: "Claude Code (Jan)", color, agent: true }, cursor }` applied to the
+  document's Awareness and relayed by ws.ts like a browser's, so the web client and the VS Code
+  extension draw it with their collaborator rendering (presence avatars — agents as rounded
+  squares — and a named caret / selection). After an edit the caret covers the range it changed
+  (the CRDT events of its transaction, `ycursor.ts changedRange`); `highlight(path, quote |
+  paragraph_index, clear?)` points at a passage (`findPassage`: the paragraph's text with formulas
+  as their LaTeX, whitespace / quotes / case matched loosely, a long quote by its first and last
+  words). The state is renewed every 10 s while the agent works (the Awareness drops states after
+  30 s) and removed after 5 minutes without a tool call there (`AGENT_IDLE_MS`); browsers cannot
+  overwrite an agent's client id (`isAgentClient` in ws.ts's sanitizer).
+* **Messages from OverLyX** (`mcpAgents.ts`). An agent is one MCP client behind one credential —
+  (token, `clientInfo.name`) → a row in `mcp_agents`; two sessions of the same client with the same
+  token are one agent; a client connecting with a new token after the old one was rotated or
+  revoked takes the old row over (its conversation carries on), and agents whose credential is gone
+  are not listed. Its owner writes to it in the Agent panel (`POST /api/mcp-agents/:id/messages`,
+  stored in `mcp_agent_messages` with the editor context — document, selection as LaTeX marked in
+  an excerpt, read only from documents the sender can view). The agent gets it either way:
+  `wait_for_instructions(timeout_seconds?)` — a long poll (default 40 s, at most 50 s: Codex gives a
+  tool 60 s; progress notifications every 15 s when the client asked for them) that returns as soon
+  as a message arrives, works with any client — or pushed to a Claude Code session as
+  `notifications/claude/channel` (`{ content, meta: { message_id, from, document } }`, the server
+  declares `capabilities.experimental['claude/channel']` on session connections). Claude Code drops
+  channel events silently unless it was started with the flag, so a push counts as delivered only
+  after that session answered a pushed message (`mcp_sessions.channel_ok`); until then the message
+  also stays available to wait_for_instructions. `reply(text, message_id?, done?)` answers (default:
+  the last message it got; `done: false` for an interim update). A message handed out by a poll
+  that the agent then did nothing about (no other tool call since) is handed out again — that
+  answer was most likely lost on the way. MCP_INSTRUCTIONS describe the loop ("listen to OverLyX":
+  wait, act, reply, wait again) and the channel tag. **Security:** only the account the token
+  belongs to may send — never collaborators or link guests of a shared project (the panel's routes
+  check the owner, guests are refused, cross-site requests too); messages are tied to the token's
+  identity; at most 8000 characters per message (20000 per reply), 20 messages a minute per
+  account, 25 waiting per agent, 40 replies a minute per agent; view-only accounts' agents can
+  listen and reply but still not edit. The panel's live view is one SSE stream per account (`GET
+  /api/mcp-agents/events`: the agent list, every message added or changed).
+* **What to run.** The long poll needs nothing: tell the agent (Claude Code, Codex, …) "listen to
+  OverLyX". Pushed messages in Claude Code (its research-preview *channels*; Claude Code signed in
+  with a claude.ai account or a Console API key, not Bedrock / Vertex / Foundry): add the server as usual (`claude mcp add
+  --transport http overlyx <origin>/mcp --header "Authorization: Bearer …"`) and start the session
+  with `claude --dangerously-load-development-channels server:overlyx` (the name given in `claude
+  mcp add`; a custom channel is not on Anthropic's allowlist, so `--channels` alone does not
+  register it — the flag shows a confirmation dialog first). On claude.ai Team and Enterprise plans
+  an Owner must first enable channels (claude.ai ▸ Admin settings ▸ Claude Code ▸ Channels, or
+  `channelsEnabled: true` in managed settings); otherwise Claude Code connects, the tools work, and
+  a startup notice says channels are not enabled — the long poll still works. Claude Code with the
+  v2 MCP runtime probes `server/discover` (protocol revision 2026-07-28) first; this server answers
+  with the earlier handshake, which is what channels need. Checked with Claude Code 2.1.289 against
+  an isolated instance (4 Oct 2026): session, event stream, the long-poll loop end to end, and a push
+  sent; the injection itself was not seen because that account's Team org has channels off.
 
 ## Authentication and identity
 

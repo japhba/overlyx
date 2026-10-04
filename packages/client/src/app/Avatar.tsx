@@ -6,7 +6,8 @@
 import { useState } from 'preact/hooks';
 
 export function initials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
+  // "Claude Code (Jan)" — an agent named after its owner: the initials of the agent, not "C("
+  const words = name.replace(/\s*\([^)]*\)\s*$/, '').trim().split(/\s+/).filter(w => /\p{L}|\p{N}/u.test(w));
   if (!words.length) return '?';
   const first = words[0][0] ?? '';
   const last = words.length > 1 ? words[words.length - 1][0] ?? '' : '';

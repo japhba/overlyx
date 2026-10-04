@@ -10,6 +10,7 @@ import { setSecurityHeaders } from './security.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
 import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, allow as aiAllow, AiError } from './ai.ts';
 import { mcpRouter } from './mcp.ts';
+import { mcpAgentRoutes, pruneAgents } from './mcpAgents.ts';
 import { agentRoutes, disconnectAgents } from './agent.ts';
 import { oauthRoutes, wellKnownRoutes } from './mcpOauth.ts';
 import { listMcpTokens, deleteMcpToken } from './mcpTokens.ts';
@@ -119,7 +120,7 @@ api.use((req, _res, next) => {
  * Guests act only inside the projects their links opened: no projects, tokens, agents or
  * administration of their own (their role in a project is checked like everybody's, below).
  */
-const GUEST_DENIED = /^\/(git\/tokens|mcp-tokens|admin(\/|$)|users$|agent(\/|$)|import(\/|$)|projects\/[^/]+\/agent(\/|$))/;
+const GUEST_DENIED = /^\/(git\/tokens|mcp-tokens|mcp-agents(\/|$)|admin(\/|$)|users$|agent(\/|$)|import(\/|$)|projects\/[^/]+\/agent(\/|$))/;
 api.use((req, res, next) => {
   if (req.user!.guest && (GUEST_DENIED.test(req.path) || (req.method === 'POST' && req.path === '/projects'))) { res.status(403).json({ error: 'Sign in to do this' }); return; }
   next();
@@ -128,6 +129,8 @@ api.use(express.json({ limit: '5mb' }));
 api.use(feedbackRoutes());
 api.use(usageRoutes());
 api.use(agentRoutes());
+// agents connected over MCP from elsewhere: the account's list, and messages to them (mcpAgents.ts)
+api.use(mcpAgentRoutes());
 
 /* ----------------------------------------------------------------- access */
 
@@ -1354,6 +1357,7 @@ startPublishing();
 void ensureAllRepos().then(() => startMirrorSweeper());
 pruneAccessLog();
 pruneGuests();
+pruneAgents();
 
 const server = http.createServer(app);
 attachWebSocket(server);
