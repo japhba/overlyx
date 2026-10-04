@@ -36,7 +36,9 @@ const MULTIPAR_INSETS = new Set(['Note', 'Foot', 'Marginal', 'Float', 'Wrap', 'B
 export function isFontSwitchInset(ctx: ExportContext, inset: Inset): boolean {
   if (inset.type === 'Tabular') return false;
   if (inset.type !== 'Text') return false;
-  if (inset.name === 'ERT') return false;
+  // a declaration that holds for what follows is never in a font group (\setlength{\tabcolsep}{…}
+  // in one ends with it); raw LaTeX that opens or closes something: see paragraphLatex
+  if (inset.name === 'ERT') return DECLARATION.test(ertContent(inset));
   if (inset.name === 'Note') return inset.arg === 'Comment' || inset.arg === 'Greyedout';
   if (inset.name === 'Flex') {
     const il = findInsetLayout(ctx.dc, 'Flex:' + inset.arg);
@@ -44,6 +46,45 @@ export function isFontSwitchInset(ctx: ExportContext, inset: Inset): boolean {
   }
   if (inset.name === 'Branch') return branchSelected(ctx, inset);
   return MULTIPAR_INSETS.has(inset.name);
+}
+
+/** Raw LaTeX that is a declaration for what follows (lengths, counters, colours, definitions). */
+const DECLARATION = /^\s*\\(setlength|addtolength|setcounter|addtocounter|definecolor|colorlet|linespread)(?![A-Za-z])/;
+
+/** An ERT inset's LaTeX. */
+export function ertContent(inset: TextInset): string {
+  return inset.paragraphs.map(p => p.items.map(it => (it.kind === 'text' ? it.text : '')).join('')).join('\n');
+}
+
+/**
+ * Raw LaTeX's environments and groups: walking `tex` from the open ones in `stack` (\begin names,
+ * '{' for a brace), what is still open at the end — and whether it closed one it did not open.
+ */
+export function rawWalk(tex: string, stack: string[] = []): { open: string[]; closedOuter: boolean } {
+  const open = [...stack];
+  let closedOuter = false;
+  for (let i = 0; i < tex.length; i++) {
+    const c = tex[i];
+    if (c === '%') { while (i < tex.length && tex[i] !== '\n') i++; continue; }
+    if (c === '\\') {
+      const m = /^\\(begin|end)\s*\{([^}]*)\}/.exec(tex.slice(i, i + 120));
+      if (m) {
+        if (m[1] === 'begin') open.push(m[2]);
+        else if (open[open.length - 1] === m[2]) open.pop();
+        else closedOuter = true;
+        i += m[0].length - 1;
+      } else i++;
+      continue;
+    }
+    if (c === '{') open.push('{');
+    else if (c === '}') { if (open[open.length - 1] === '{') open.pop(); else closedOuter = true; }
+  }
+  return { open, closedOuter };
+}
+/** Does raw LaTeX open or close an environment or a group? */
+export function rawUnbalanced(inset: TextInset): boolean {
+  const w = rawWalk(ertContent(inset));
+  return w.open.length > 0 || w.closedOuter;
 }
 
 function branchSelected(ctx: ExportContext, inset: TextInset): boolean {
@@ -160,7 +201,7 @@ function latexFormula(ctx: ExportContext, os: TexStream, rp: RunParams, f: Formu
   // colours in the formula (the Text colour palette in a formula writes {\color{red} …}, a picked one [HTML]{…})
   for (const m of f.latex.matchAll(/\\(?:text)?color\s*(\[[^\]]*\])?\s*\{([^}]*)\}/g)) ctx.features.require(m[1] || EXTENDED_COLORS.has(m[2].trim()) ? 'xcolor' : 'color');
   if (f.inline) {
-    let latex = mathUnicode(ctx, normalizeMath(f.latex.replace(/\n/g, ' '), ctx.symbols, ctx.macroNames));
+    let latex = mathUnicode(ctx, normalizeMath(joinLines(f.latex), ctx.symbols, ctx.macroNames));
     if (rp.movingArg && ctx.macroNames.size) {
       // user macros are fragile: LyX protects them in moving arguments
       latex = latex.replace(/(\\protect)?\\([A-Za-z]+)/g, (m0, prot: string | undefined, name: string) => (!prot && ctx.macroNames.has(name) ? '\\protect' + m0 : m0));
@@ -177,6 +218,17 @@ function latexFormula(ctx: ExportContext, os: TexStream, rp: RunParams, f: Formu
   os.write(mathUnicode(ctx, normalizeMath(f.latex.replace(/\n$/, ''), ctx.symbols, ctx.macroNames)));
   os.write('\n');
   void pos;
+}
+
+/**
+ * An inline formula on one line — except where a line ends in a comment: joined, the comment would
+ * swallow the rest of the formula (a tikzpicture written in $…$ over several commented lines).
+ */
+function joinLines(latex: string): string {
+  const lines = latex.split('\n');
+  let out = lines[0];
+  for (let i = 1; i < lines.length; i++) out += (/(^|[^\\])(\\\\)*%/.test(lines[i - 1]) ? '\n' : ' ') + lines[i];
+  return out;
 }
 
 /** InsetMathMacroTemplate::write (LaTeX flavour). */

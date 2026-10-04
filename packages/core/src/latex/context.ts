@@ -78,6 +78,12 @@ export interface ExportContext {
    * by paragraph index — recorded by texOnePar while it writes into that very stream.
    */
   parSpans?: { stream: TexStream | null; spans: ({ start: number; end: number } | undefined)[] };
+  /**
+   * Paragraphs linked by raw LaTeX that opens in one and closes in a later one (an environment
+   * OverLyX does not know, an unknown command's argument): `lead` is the run's first paragraph. Their
+   * alignment is one environment around the run — per paragraph it would split the construct.
+   */
+  linked?: WeakMap<Paragraph, { lead: Paragraph; first: boolean; last: boolean }>;
   /** \maketitle bookkeeping (shared by the whole document) */
   needMaketitle: boolean;
   haveMaketitle: boolean;

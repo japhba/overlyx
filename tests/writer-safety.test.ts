@@ -1,7 +1,9 @@
 /**
  * The writer never produces LaTeX that cannot compile from a document the editor can make:
  * a caption of several paragraphs (Enter pressed in a caption) is one paragraph in \caption{…};
- * an aligned heading has its alignment around the command, not a \par inside its argument.
+ * an aligned heading has its alignment around the command, not a \par inside its argument; an
+ * environment kept as raw LaTeX (titlepage, …) is never split across alignment environments or
+ * font groups, and what is declared inside it ends with it.
  *   npx vitest run tests/writer-safety.test.ts
  */
 import { describe, it, expect } from 'vitest';
@@ -13,6 +15,25 @@ import { parseTex, writeTex } from '../packages/core/src/tex/index.ts';
 import { walkInsets, type TextInset } from '../packages/core/src/index.ts';
 
 const hasPdflatex = (() => { try { execFileSync('pdflatex', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
+/** Do the environments and braces of `text` nest (comments left out)? */
+function nests(text: string): boolean {
+  const stack: string[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '%') { while (i < text.length && text[i] !== '\n') i++; continue; }
+    if (c === '\\') {
+      const m = /^\\(begin|end)\{([^}]*)\}/.exec(text.slice(i, i + 100));
+      if (!m) { i++; continue; }
+      if (m[1] === 'begin') stack.push(m[2]); else if (stack.pop() !== m[2]) return false;
+      i += m[0].length - 1;
+      continue;
+    }
+    if (c === '{') stack.push('{');
+    else if (c === '}' && stack.pop() !== '{') return false;
+  }
+  return stack.length === 0;
+}
+
 function compile(text: string): void {
   if (!hasPdflatex) return;
   const dir = mkdtempSync(join(tmpdir(), 'overlyx-writer-safety-'));
@@ -67,6 +88,81 @@ describe('aligned headings', () => {
     const out = writeTex(parseTex(src).doc).text;
     expect(out).toContain('\n\\paragraph*{Acknowledgments.}');
     expect(out).not.toContain('{\\centering\\paragraph');
+    compile(out);
+  });
+});
+
+describe('environments kept as raw LaTeX', () => {
+  const TITLEPAGE = '\\documentclass{article}\n\\begin{document}\n\nBody first.\n\n\\begin{titlepage}\n    \\centering\n    {\\Large A title\\par}\n\n    Bit flip (gate $X$).\n\\end{titlepage}\n\nAfter the title page.\n\n\\end{document}\n';
+
+  it('a \\centering inside a titlepage stays inside it: no center environment splitting it, nothing after it centred', () => {
+    const doc = parseTex(TITLEPAGE).doc;
+    expect(doc.body.every(p => !p.params.align)).toBe(true);
+    const out = writeTex(doc).text;
+    expect(out).toContain('\\begin{titlepage}');
+    expect(out).toContain('\\centering');
+    expect(out).not.toContain('\\begin{center}');
+    expect(nests(out)).toBe(true);
+    expect(writeTex(parseTex(out).doc).text).toBe(out);
+    compile(out);
+  });
+
+  it('an outer alignment around a raw environment is one alignment environment around all of it', () => {
+    for (const src of [
+      '\\documentclass{article}\n\\begin{document}\n\\begin{center}\n\\begin{titlepage}\nA title\n\nBit flip.\n\\end{titlepage}\n\\end{center}\nAfter.\n\\end{document}\n',
+      '\\documentclass{article}\n\\begin{document}\n\\centering\nFirst.\n\n\\begin{titlepage}\nA title\n\nBit flip.\n\\end{titlepage}\n\nAfter.\n\\end{document}\n',
+    ]) {
+      const out = writeTex(parseTex(src).doc).text;
+      expect(nests(out)).toBe(true);
+      expect(writeTex(parseTex(out).doc).text).toBe(out);
+      compile(out);
+    }
+  });
+
+  it('a font size around a raw environment is not one group per paragraph across its \\begin and \\end', () => {
+    const src = '\\documentclass{article}\n\\begin{document}\nText.\n\n{\\small\\begin{quotation} We compare.\n\nThen more.\n\\end{quotation}}\n\nAfter.\n\\end{document}\n';
+    const out = writeTex(parseTex(src).doc).text;
+    expect(nests(out)).toBe(true);
+    compile(out);
+  });
+
+  it('a heading inside a raw environment stays raw: the theorem around it is not split', () => {
+    const src = '\\documentclass{article}\n\\usepackage{amsthm}\n\\newtheorem{lemma}{Lemma}\n\\newenvironment{myproof}{\\par Proof.}{\\par}\n\\begin{document}\n\\begin{lemma}\nTrue.\n\n\\begin{myproof}\nWe begin.\n\n\\paragraph{Proof of (a).}\nBy the bound.\n\\end{myproof}\n\\end{lemma}\nAfter.\n\\end{document}\n';
+    const out = writeTex(parseTex(src).doc).text;
+    expect(out.match(/\\begin\{lemma\}/g)).toHaveLength(1);
+    expect(nests(out)).toBe(true);
+    compile(out);
+  });
+
+  it('\\setlength{…}{…} does not take the commands after it (and a float\'s \\end) into its raw LaTeX', () => {
+    const src = '\\documentclass{article}\n\\usepackage{graphicx}\n\\begin{document}\nBefore.\n\n\\begin{table}[!ht]\n  \\caption{Models.}\n  \\centering\n  \\footnotesize\n  \\setlength{\\tabcolsep}{3.5pt}\n  \\resizebox{\\linewidth}{!}{%\n  \\begin{tabular}{ll}\n    a & b \\\\\n  \\end{tabular}}\n\\end{table}\n\nAfter the table.\n\\end{document}\n';
+    const doc = parseTex(src).doc;
+    expect(doc.body.map(p => p.items.some(it => it.kind === 'text' && it.text.includes('After the table')))).toEqual([false, false, true]);
+    const out = writeTex(doc).text;
+    expect(nests(out)).toBe(true);
+    compile(out);
+  });
+
+  it('a tikzpicture inside a tikzpicture is read to its own end', () => {
+    const src = '\\documentclass{article}\n\\usepackage{tikz}\n\\begin{document}\n\\begin{tikzpicture}\n\\node (A) {\\begin{tikzpicture}\\node {a};\\end{tikzpicture}};\n\\node[right of=A] {b};\n\\end{tikzpicture}\nAfter.\n\\end{document}\n';
+    const out = writeTex(parseTex(src).doc).text;
+    expect(nests(out)).toBe(true);
+    compile(out);
+  });
+
+  it('an inline formula over commented lines keeps their line ends (joined, the comment swallows the rest)', () => {
+    const src = '\\documentclass{article}\n\\usepackage{tikz}\n\\begin{document}\nThe state $\\begin{tikzpicture}[baseline]\n  \\node {a}; % a node\n  \\node {b};\n\\end{tikzpicture}$ here.\n\\end{document}\n';
+    const out = writeTex(parseTex(src).doc).text;
+    expect(out).toContain('% a node\n');
+    expect(nests(out)).toBe(true);
+    compile(out);
+  });
+
+  it('a control space at the end of an \\href text stays one ("…,}\\ }" in a bibliography)', () => {
+    const src = '\\documentclass{article}\n\\usepackage{hyperref}\n\\begin{document}\nSee \\href {https://example.org/x.pdf} {\\emph {A title},\\ }and more.\n\\end{document}\n';
+    const out = writeTex(parseTex(src).doc).text;
+    expect(out).not.toContain('\\}');
+    expect(nests(out)).toBe(true);
     compile(out);
   });
 });

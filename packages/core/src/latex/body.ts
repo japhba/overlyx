@@ -14,7 +14,7 @@ import {
   asctime, babelName, closeFont, effectiveFont, fontsEqualEff, latexChar, latexSpecialItem, openFont, polyglossiaName,
   type EffectiveFont,
 } from './text.ts';
-import { latexInset, isFontSwitchInset, type InsetPosition } from './insets.ts';
+import { latexInset, isFontSwitchInset, ertContent, rawWalk, rawUnbalanced, type InsetPosition } from './insets.ts';
 import { isLayoutPage, latexLayoutPage } from './layoutpage.ts';
 
 /** A text (list of paragraphs) being written, with its owning inset's layout. */
@@ -321,9 +321,35 @@ function texEnvironment(ctx: ExportContext, text: TextInfo, pit: number, os: Tex
 
 /* ------------------------------------------------------------- latexParagraphs */
 
+/**
+ * Runs of paragraphs linked by raw LaTeX that one of them opens and a later one closes (the ERT
+ * \begin{titlepage} in one, \end{titlepage} in another) → ctx.linked.
+ */
+function linkRuns(ctx: ExportContext, pars: Paragraph[]): void {
+  let open: string[] = [];
+  let run: Paragraph[] = [];
+  const close = () => {
+    if (run.length > 1) {
+      ctx.linked ??= new WeakMap();
+      run.forEach((p, k) => ctx.linked!.set(p, { lead: run[0], first: k === 0, last: k === run.length - 1 }));
+    }
+    run = [];
+  };
+  for (const p of pars) {
+    for (const it of p.items) {
+      if (it.kind !== 'inset' || it.inset.type !== 'Text' || it.inset.name !== 'ERT') continue;
+      open = rawWalk(ertContent(it.inset), open).open;
+    }
+    run.push(p);
+    if (!open.length) close();
+  }
+  close();
+}
+
 /** Write all paragraphs of a text (main text or inset). */
 export function latexParagraphs(ctx: ExportContext, text: TextInfo, os: TexStream, rp: RunParams): void {
   const pars = text.pars;
+  linkRuns(ctx, pars);
   const state = { prevLang: rp.outerLang };
   let pit = 0;
   while (pit < pars.length) {
@@ -734,6 +760,9 @@ function startParParams(ctx: ExportContext, os: TexStream, rp: RunParams, par: P
     const startsWithVSpace = first && first.kind === 'inset' && first.inset.type === 'Leaf' && first.inset.name === 'VSpace';
     if (!startsWithVSpace) { os.write('\\noindent'); os.termcmd(); }
   }
+  // paragraphs linked by raw LaTeX share one alignment environment, the first one's (ctx.linked)
+  const link = ctx.linked?.get(par);
+  if (link && !link.first) return;
   if (curAlign === style.align) return;
   if (curAlign !== 'left' && curAlign !== 'right' && curAlign !== 'center') return;
   if (rp.movingArg) os.write('\\protect');
@@ -743,6 +772,10 @@ function startParParams(ctx: ExportContext, os: TexStream, rp: RunParams, par: P
 function endParParams(ctx: ExportContext, os: TexStream, rp: RunParams, par: Paragraph, style: LayoutStyle, isLastPar: boolean): void {
   if (rp.forcePlain || !rp.customPars) return;
   if (ctx.texMode && isCommand(style) && !style.inTitle) return;
+  const link = ctx.linked?.get(par);
+  if (link && !link.last) return;
+  // (the lead is never the text's last paragraph: its environment form, not the declaration)
+  if (link) { par = link.lead; style = styleOf(ctx, par, rp); isLastPar = false; if (ctx.texMode && isCommand(style) && !style.inTitle) return; }
   const curAlign = parAlign(par, style);
   if (curAlign === style.align) return;
   if (curAlign !== 'left' && curAlign !== 'right' && curAlign !== 'center') return;
@@ -822,7 +855,10 @@ export function paragraphLatex(ctx: ExportContext, os: TexStream, rp: RunParams,
     if (u.kind === 'inset' && u.inset.type === 'Text' && u.inset.name === 'Argument') continue;
 
     const current = effectiveFont(u.font, base, parLang);
-    const fontSwitchInset = u.kind === 'inset' && isFontSwitchInset(ctx, u.inset);
+    // (raw LaTeX that opens or closes an environment or a group: outside font groups, which would
+    // not nest with it — {\small\begin{proof} … \textbf{x} … \end{proof}} split the group at the bold)
+    const fontSwitchInset = u.kind === 'inset' && (isFontSwitchInset(ctx, u.inset)
+      || (u.inset.type === 'Text' && u.inset.name === 'ERT' && rawUnbalanced(u.inset)));
 
     // close the running font if the font changes (or before a multi-par inset)
     if (openFontFlag && (!fontsEqualEff(current, running) || fontSwitchInset)) {
