@@ -9,7 +9,8 @@ import { parentPort } from 'node:worker_threads';
 import * as Y from 'yjs';
 import { prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
 import { itemText, lyxToPm, schema, type LyxDocument } from '@overlyx/core';
-import type { PreserveCache } from '@overlyx/core/tex/index.ts';
+import { checkTexHealth, type PreserveCache } from '@overlyx/core/tex/index.ts';
+import { documentMeta } from './docmeta.ts';
 import { applyLyxDocument } from './ydiff.ts';
 import { parseDocumentText, looksLikeDocument } from './texdoc.ts';
 import {
@@ -89,7 +90,11 @@ class Mirror implements DocState, EditableDoc {
   }
 }
 
-/** Run `f` on the mirror and return the CRDT update it made (null: none). */
+/**
+ * Run `f` on the mirror and return the CRDT update it made (null: none). When `f` fails after it
+ * changed the mirror, the mirror is dropped: the main thread never applies that change, so the
+ * next request rebuilds the mirror from the document as it is.
+ */
 function capture<T>(m: Mirror, f: () => T): { value: T; update: Uint8Array | null } {
   const updates: Uint8Array[] = [];
   const on = (u: Uint8Array) => { updates.push(u); };
@@ -97,6 +102,9 @@ function capture<T>(m: Mirror, f: () => T): { value: T; update: Uint8Array | nul
   try {
     const value = f();
     return { value, update: updates.length === 0 ? null : updates.length === 1 ? updates[0] : Y.mergeUpdates(updates) };
+  } catch (e) {
+    if (updates.length && mirrors.get(m.id) === m) { mirrors.delete(m.id); m.ydoc.destroy(); }
+    throw e;
   } finally { m.ydoc.off('update', on); }
 }
 
@@ -222,6 +230,12 @@ const ops: Record<string, (doc: DocInfo | null, a: Args) => unknown> = {
 
   /** another version of the document with the edits between two others carried over (docedit.ts foldEdits) */
   fold: (d, a) => foldEdits(mirrorOf(d).take(a), a.shadow, a.base, a.live),
+
+  /** what the editor needs to know about the document besides its content (docmeta.ts), and its structural health */
+  meta: (d, a) => {
+    const m = mirrorOf(d).take(a);
+    return { ...documentMeta(m, lookup), health: m.fileText === null ? [] : checkTexHealth(m.fileText, { isFragment: m.isChild }) };
+  },
 
   /** the warnings of parsing a source in the document's context */
   warnings: (d, a) => parseDocumentText(a.text, d!.project, d!.relPath).warnings,

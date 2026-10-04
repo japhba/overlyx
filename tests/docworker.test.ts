@@ -160,6 +160,15 @@ describe('the worker writes what the main thread writes', () => {
       .rejects.toThrow(/^old_text was not found in the document/);
   });
 
+  it('the editor\'s metadata (macros, labels, cited keys, layouts, health) is the same', async () => {
+    const text = readFileSync(join(TEMPLATES, 'welcome', 'welcome.tex'), 'utf8');
+    const [w, m] = await twins('meta', text, { 'refs.bib': readFileSync(join(TEMPLATES, 'welcome', 'refs.bib'), 'utf8') });
+    const strip = ({ timings: _t, ...rest }: Awaited<ReturnType<typeof w.metaAsync>>) => rest;
+    const mw = strip(await w.metaAsync()), mm = strip(await m.metaAsync());
+    expect(mw).toEqual(mm);
+    expect(mw.labels.length + mw.macroList.length + mw.citedKeys.length).toBeGreaterThan(0);
+  });
+
   it('loaded source, read_document\'s paragraphs and parse warnings are the same', async () => {
     const [w, m] = await twins('source', docText('A.', 'B.'));
     const src = docText('A, rewritten by hand.', 'B.', '\\unknownmacro{C}');

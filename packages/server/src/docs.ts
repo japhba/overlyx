@@ -24,6 +24,7 @@ import { applyLyxDocument } from './ydiff.ts';
 import { readTextFile, looksLikeDocument, parseDocumentText } from './texdoc.ts';
 import { sha1, metaOf, lyxDocumentOf, renderDoc, renderModel, parseFor, mergeFileText, loadOverStored, type DocState, type DocMeta, type Rendered, type SourceSpan } from './docwork.ts';
 import { DocWorkers, WorkerGone, MirrorLost, type SyncEntry } from './docpool.ts';
+import { documentMeta, type DocumentMeta } from './docmeta.ts';
 import { applyTrackedSource, applyPlainSource, restoreSource, foldEdits, replaceInSource, type EditableDoc, type TrackedResult } from './docedit.ts';
 
 export type { SourceSpan, DocMeta };
@@ -610,6 +611,12 @@ export class OpenDoc implements DocState, EditableDoc {
       return { text: this.toText(), paragraphs: lyx.body.map((p, i) => ({ index: i, layout: p.layout, depth: p.depth, text: p.items.map(itemText).join('') })) };
     }
     return await inWorker(this, 'read', { fileText: this.fileText, isChild: this.isChild }) as { text: string; paragraphs: { index: number; layout: string; depth: number; text: string }[] };
+  }
+
+  /** What the editor needs to know about the document besides its content (docmeta.ts), and its structural health. */
+  async metaAsync(): Promise<DocumentMeta & { health: HealthIssue[] }> {
+    if (!this.usesWorker) return { ...documentMeta(this, openDocs), health: this.health() };
+    return await inWorker(this, 'meta', { fileText: this.fileText, isChild: this.isChild }) as DocumentMeta & { health: HealthIssue[] };
   }
 
   /** a big document: what a connecting client lacks (all of it on a first visit) is encoded by the worker */
