@@ -37,7 +37,7 @@ import {
   setHeaderValue, diffText, commentHeader, formatTimestamp, parseHeader, parseThread, trackDiff, changeStats,
   splitDocId, type LyxDocument, type Item, type TextInset, type Paragraph,
 } from '@overlyx/core';
-import { applyTrackedSource, applyPlainSource, replaceInSource } from './docedit.ts';
+import { replaceInSource } from './docedit.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import nodePath from 'node:path';
 import { manager } from './docs.ts';
@@ -83,11 +83,8 @@ function listDocuments(project: string): { path: string; size: number }[] {
 }
 
 async function readDocument(project: string, path: string) {
-  const { doc, lyx } = await openLyx(project, path);
-  return {
-    text: doc.toText(),
-    paragraphs: lyx.body.map((p, i) => ({ index: i, layout: p.layout, depth: p.depth, text: p.items.map(itemText).join('') })),
-  };
+  const doc = await manager.open(`${project}/${path}`);
+  return doc.readAsync();   // { text, paragraphs: index, layout, depth, text }
 }
 
 const authorName = (agentName: string) => `${agentName} (MCP)`;
@@ -334,16 +331,16 @@ async function writeDocumentLocked(project: string, userId: number, agentName: s
     return { ok: true, created: true, warnings: r.warnings };
   }
   const doc = await manager.open(`${project}/${path}`);
-  const r = parseDocumentText(tex, doc.project, doc.relPath);
   if (!tracked) {
+    await doc.parseWarnings(tex);   // a source that does not parse fails here, before the commit
     await restorePoint(project, userId);
-    const st = applyPlainSource(doc, doc.toText(), tex);
+    const { result: st, warnings } = await doc.agentEdit('plain', null, { after: tex }, { warnings: true });
     touchProject(project, userId);
-    return { ok: true, created: false, tracked: false, changed: st.changed, warnings: r.warnings, note: 'Written directly (no tracked changes); the previous state is in the project history (project_history / restore_project).' };
+    return { ok: true, created: false, tracked: false, changed: st.changed, warnings, note: 'Written directly (no tracked changes); the previous state is in the project history (project_history / restore_project).' };
   }
-  const st = applyTrackedSource(doc, doc.toText(), tex, authorName(agentName));
+  const { result: st, warnings } = await doc.agentEdit('tracked', null, { after: tex }, { author: authorName(agentName), warnings: true });
   return {
-    ok: true, created: false, warnings: r.warnings, inserted_chars: st.inserted, deleted_chars: st.deleted,
+    ok: true, created: false, warnings, inserted_chars: st.inserted, deleted_chars: st.deleted,
     ...(st.direct.length ? { applied_directly: st.direct } : {}),
     note: st.changed ? 'Applied as tracked changes against the current document — only what differs is marked; a reviewer accepts or rejects them.' : 'The source parsed to the same document — nothing changed.',
   };
@@ -355,31 +352,24 @@ function editDocument(project: string, userId: number, agentName: string, path: 
 
 async function editDocumentLocked(project: string, userId: number, agentName: string, path: string, oldText: string, newText: string, all: boolean, tracked: boolean) {
   const doc = await manager.open(`${project}/${path}`);
+  const replace = { oldText, newText, all };
   if (!tracked) {
-    let before = doc.toText();
-    let after = replaceInSource(before, oldText, newText, all);   // a passage that does not match fails before the commit
-    let typed = false;
-    const onUpdate = () => { typed = true; };
-    doc.ydoc.on('update', onUpdate);
-    try { await restorePoint(project, userId); } finally { doc.ydoc.off('update', onUpdate); }
-    // whatever was typed into the document during the commit is what the edit applies to (an
-    // old_text somebody changed meanwhile no longer matches — said, not overwritten)
-    if (typed) { before = doc.toText(); after = replaceInSource(before, oldText, newText, all); }
-    const r = parseDocumentText(after, doc.project, doc.relPath);
-    const st = applyPlainSource(doc, before, after);   // three-way: an edit somebody made meanwhile elsewhere survives
+    replaceInSource(await doc.textAsync(), oldText, newText, all);   // a passage that does not match fails before the commit
+    await restorePoint(project, userId);
+    // the edit applies to the document as it is then: whatever was typed meanwhile (during the commit)
+    // is kept (an old_text somebody changed meanwhile no longer matches — said, not overwritten), and
+    // three-way: an edit somebody made meanwhile elsewhere survives
+    const { result: st, warnings } = await doc.agentEdit('plain', null, { replace }, { warnings: true });
     touchProject(project, userId);
     return {
-      ok: true, tracked: false, warnings: r.warnings,
+      ok: true, tracked: false, warnings,
       ...(st.changed ? {} : { note: 'The edit parsed to the same document — nothing changed (e.g. only whitespace differed).' }),
       now_reads: st.excerpt,
     };
   }
-  const before = doc.toText();
-  const after = replaceInSource(before, oldText, newText, all);
-  const r = parseDocumentText(after, doc.project, doc.relPath);
-  const st = applyTrackedSource(doc, before, after, authorName(agentName));
+  const { result: st, warnings } = await doc.agentEdit('tracked', null, { replace }, { author: authorName(agentName), warnings: true });
   return {
-    ok: true, inserted_chars: st.inserted, deleted_chars: st.deleted, warnings: r.warnings,
+    ok: true, inserted_chars: st.inserted, deleted_chars: st.deleted, warnings,
     // what changed decides, not the marks: a preamble edit or one's own pending insertion taken back needs none
     ...(!st.changed ? { note: 'The edit parsed to the same document — nothing changed (e.g. only whitespace differed).' }
       : st.inserted + st.deleted === 0 && !st.direct.length ? { note: 'Applied; nothing in it needed a tracked-change mark (e.g. it took back text of your own pending insertion).' } : {}),
@@ -481,7 +471,7 @@ async function fetchDoc(user: SessionUser, id: string) {
   let text: string;
   if (isDocumentFile(project, rel)) {
     const doc = await manager.open(id);
-    text = doc.toText();
+    text = await doc.textAsync();
   } else {
     const abs = resolveProjectPath(project, rel);
     if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) throw new Error(`not found: ${id}`);

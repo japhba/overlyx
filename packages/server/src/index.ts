@@ -17,10 +17,10 @@ import { cliDownloadRoutes } from './cliDownload.ts';
 import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocFolds, lastOpenedByProject } from './userSettings.ts';
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
-import { manager, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
-import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, fileKind, findMaster, isBackupFile, isDocumentFile } from './projects.ts';
+import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
+import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
 import { snippetSvg, snippetFile } from './snippets.ts';
-import { cachedParseFile, importLyxFile, parseDocumentText, parseFragmentText, newLayoutDocumentText } from './texdoc.ts';
+import { importLyxFile, parseFragmentText, newLayoutDocumentText } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
 import { extractZip, bundledZips, projectNameFromZip, writeZip } from './zip.ts';
 import { pdfLinkByToken, pdfLinksOf, createPdfLink, deletePdfLink, countHit, pdfForLink, pdfLinkFileName, linkableDocs } from './pdflinks.ts';
@@ -40,7 +40,7 @@ import { usageRoutes } from './usage.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, restoreProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
-import { texHeadings, collectMacros, toMathliveMacros, parseBibtex, getTextClass, getModules, getAuthors, headerValue, paramMap, unquote, walkInsets, walkParagraphs as walkParagraphsAll, plainText, lyxToPm, splitDocId, projectOfDoc, docPathOf, splitProjectKey } from '@overlyx/core';
+import { texHeadings, parseBibtex, lyxToPm, splitDocId, projectOfDoc, docPathOf, splitProjectKey } from '@overlyx/core';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -837,88 +837,13 @@ api.get('/docs/*/meta', async (req, res) => {
     const id = docId(req);
     const doc = await manager.open(id);
     lap('open');
-    const lyx = doc.toLyxDocument();
-    lap('toLyx');
+    // the document's part (its state, the project's files): in the document worker
+    const m = await doc.metaAsync();
+    lap('doc');
     const proj = projectDir(doc.project);
-    // child documents inherit macros, bibliography and labels from their master
-    const masterRel = findMaster(doc.project, doc.relPath);
-    lap('findMaster');
-    const masterId = masterRel ? `${doc.project}/${masterRel}` : null;
-    const readDoc = (rel: string) => {
-      const open = manager.docs.get(`${doc.project}/${rel}`);
-      if (open) return open.toLyxDocument();
-      return cachedParseFile(doc.project, rel).doc;
-    };
-    const rootRel = masterRel ?? doc.relPath;
-    const rootLyx = masterRel ? readDoc(masterRel) : lyx;
-    const docDir = path.dirname(path.join(proj, rootRel));
+    const docDir = path.dirname(path.join(proj, m.master ? m.master.slice(doc.project.length + 1) : doc.relPath));
     const safe = (fn: string) => { const abs = path.resolve(docDir, fn); return abs.startsWith(proj) ? abs : null; };
-    const texName = (fn: string) => (fn.endsWith('.tex') || fn.includes('.') ? fn : fn + '.tex');
-    const includeDoc = (fn: string) => { const abs = safe(texName(fn)); if (!abs || !abs.endsWith('.tex') || !fs.existsSync(abs)) return undefined; try { return readDoc(path.relative(proj, abs)); } catch { return undefined; } };
-    const macros = collectMacros(rootLyx, {
-      include: includeDoc,
-      readFile: (fn) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } },
-    });
-    if (masterRel) {
-      // the child's own macros come last (they override for the child's view)
-      macros.push(...collectMacros(lyx, { include: includeDoc, readFile: (fn) => { const abs = safe(fn); try { return abs ? fs.readFileSync(abs, 'utf8') : undefined; } catch { return undefined; } } }, { includePreamble: false }));
-    }
-    lap('macros');
-    // labels across the master tree (for the cross-reference dialog)
-    const labels: { name: string; context: string; file: string }[] = [];
-    const seenLabelFiles = new Set<string>();
-    const collectLabels = (d: typeof lyx, rel: string, depth: number) => {
-      if (depth > 4 || seenLabelFiles.has(rel)) return;
-      seenLabelFiles.add(rel);
-      const dir = path.dirname(path.join(proj, rel));
-      for (const par of walkParagraphsAll(d.body)) {
-        for (const it of par.items) {
-          if (it.kind !== 'inset') continue;
-          const ins = it.inset;
-          if (ins.type === 'Leaf' && ins.name === 'CommandInset' && ins.arg === 'label') {
-            labels.push({ name: unquote(paramMap(ins.params).get('name')), context: plainText([par]).slice(0, 80), file: rel });
-          } else if (ins.type === 'Formula' && !ins.inline) {
-            for (const m of ins.latex.matchAll(/\\label\{([^}]*)\}/g)) labels.push({ name: m[1], context: '(equation)', file: rel });
-          } else if (ins.type === 'Leaf' && ins.name === 'CommandInset' && ins.arg === 'include') {
-            const fn = texName(unquote(paramMap(ins.params).get('filename')));
-            if (fn.endsWith('.tex')) {
-              const abs = path.resolve(dir, fn);
-              if (abs.startsWith(proj) && fs.existsSync(abs)) { try { collectLabels(readDoc(path.relative(proj, abs)), path.relative(proj, abs), depth + 1); } catch { /* ignore */ } }
-            }
-          }
-        }
-      }
-    };
-    collectLabels(rootLyx, rootRel, 0);
-    lap('labels');
-    // bibliography files referenced by bibtex insets (in this doc and children), and the keys cited
-    const bibFiles = new Set<string>();
-    const citedKeys = new Set<string>();
-    const scanned = new Set<string>([rootRel, doc.relPath]);
-    const scan = (d: typeof lyx, depth: number) => {
-      if (depth > 4) return;
-      for (const { inset } of walkInsets(d.body)) {
-        if (inset.type !== 'Leaf' || inset.name !== 'CommandInset') continue;
-        const pm = paramMap(inset.params);
-        if (inset.arg === 'bibtex') {
-          for (const f of unquote(pm.get('bibfiles')).split(',')) if (f.trim()) bibFiles.add(f.trim());
-        } else if (inset.arg === 'citation') {
-          for (const k of unquote(pm.get('key')).split(',')) if (k.trim()) citedKeys.add(k.trim());
-        } else if (inset.arg === 'include') {
-          const fn = texName(unquote(pm.get('filename')));
-          const abs = safe(fn);
-          if (abs && fn.endsWith('.tex') && fs.existsSync(abs)) {
-            const rel = path.relative(proj, abs);
-            if (scanned.has(rel)) continue;     // child documents may include each other (appendix ↔ macros file)
-            scanned.add(rel);
-            try { scan(readDoc(rel), depth + 1); } catch { /* ignore */ }
-          }
-        }
-      }
-    };
-    scan(rootLyx, 0);
-    if (masterRel) scan(lyx, 0);
-    lap('bibscan');
+    const bibFiles = new Set(m.bibFiles), citedKeys = new Set(m.citedKeys);
     const bib: ReturnType<typeof parseBibtex> = [];
     for (const f of bibFiles) {
       const abs = safe(f.endsWith('.bib') ? f : f + '.bib');
@@ -931,46 +856,33 @@ api.get('/docs/*/meta', async (req, res) => {
       }
     }
     lap('bib');
-    let layouts: unknown = null;
-    let flexInsets: unknown = null;
-    try {
-      const mod = await import('@overlyx/core/latex/index.ts') as any;
-      const L = lyx.header.lines, ps = L.indexOf('\\begin_preamble'), pe = L.indexOf('\\end_preamble');
-      const userPre = ps >= 0 && pe > ps ? L.slice(ps + 1, pe).join('\n') : '';
-      const dc = mod.applyDocumentTheorems(mod.loadDocumentClass(getTextClass(lyx), getModules(lyx), config.layoutDir, [proj, docDir]), userPre, config.layoutDir, [proj, docDir]);
-      layouts = mod.describeLayouts(dc);
-      flexInsets = dc.insetLayouts ? mod.flexInsetNames(dc) : null;
-    } catch (e) {
-      layouts = null;
-    }
-    lap('layouts');
-    if (req.query.debug) console.log('meta', id, timings, 'total', Math.round(performance.now() - t0), 'ms');
+    if (req.query.debug) console.log('meta', id, { ...m.timings, ...timings }, 'total', Math.round(performance.now() - t0), 'ms');
     // de-duplicate bibliography entries by key; large bibliographies are searched through /bib instead of shipped whole
     const seenKeys = new Set<string>();
     const bibAll = bib.filter(e => (seenKeys.has(e.key) ? false : (seenKeys.add(e.key), true)));
     const bibUnique = bibAll.length > 400 ? bibAll.filter(e => citedKeys.has(e.key)) : bibAll;
     bibIndex.set(id, { files: [...bibFiles].map(f => safe(f.endsWith('.bib') ? f : f + '.bib')).filter((x): x is string => !!x), fallbackProject: bibFiles.size ? null : doc.project });
     res.json({
-      id, project: doc.project, path: doc.relPath, master: masterId,
+      id, project: doc.project, path: doc.relPath, master: m.master,
       role: req.role ?? 'edit',
-      labels,
-      textclass: getTextClass(lyx), modules: getModules(lyx),
+      labels: m.labels,
+      textclass: m.textclass, modules: m.modules,
       availableModules: describeModules(config.layoutDir, [proj, docDir]),
-      language: headerValue(lyx.header, 'language') ?? 'english',
-      useRefstyle: headerValue(lyx.header, 'use_refstyle') === '1',
-      citeEngine: headerValue(lyx.header, 'cite_engine') ?? 'basic',
-      citeEngineType: headerValue(lyx.header, 'cite_engine_type') ?? 'default',
-      trackingChanges: headerValue(lyx.header, 'tracking_changes') === 'true',
+      language: m.language,
+      useRefstyle: m.useRefstyle,
+      citeEngine: m.citeEngine,
+      citeEngineType: m.citeEngineType,
+      trackingChanges: m.trackingChanges,
       bibTotal: bibAll.length,
-      secnumdepth: Number(headerValue(lyx.header, 'secnumdepth') ?? 3),
-      tocdepth: Number(headerValue(lyx.header, 'tocdepth') ?? 3),
-      authors: getAuthors(lyx.header),
-      macros: toMathliveMacros(macros),
-      macroList: macros.map(m => ({ name: m.name, args: m.args, def: m.def, display: m.display, source: m.source })),
+      secnumdepth: m.secnumdepth,
+      tocdepth: m.tocdepth,
+      authors: m.authors,
+      macros: m.macros,
+      macroList: m.macroList,
       bib: bibUnique.slice(0, 30000).map(e => ({ key: e.key, author: e.authorShort, year: e.year, title: e.title })),
-      layouts, flexInsets,
+      layouts: m.layouts, flexInsets: m.flexInsets,
       files: listProjects().find(p => p.name === doc.project)?.files ?? [],
-      health: doc.health(),
+      health: m.health,
     });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
@@ -1004,7 +916,7 @@ api.post('/docs/*/ai-repair', async (req, res) => {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
     if (!config.openrouter.apiKey) { res.status(503).json({ error: 'AI repair is not configured on this server (OPENROUTER_API_KEY is unset).' }); return; }
     const doc = await manager.open(docId(req));
-    const original = doc.fileText ?? doc.toText();
+    const original = doc.fileText ?? await doc.textAsync();
     const issues = doc.health();
     const proposed = await requestAiRepair(original, issues);
     res.json({ original, proposed, issues });
@@ -1088,10 +1000,11 @@ api.get('/snippets/:key.svg', (req, res) => {
 api.get('/docs/*/tex', async (req, res) => {
   try {
     const doc = await manager.open(docId(req));
-    if (req.query.map === '1') { res.json(doc.toTextMap()); return; }
+    if (req.query.map === '1') { res.json(await doc.textMapAsync()); return; }
+    const text = await doc.textAsync();
     res.setHeader('Content-Type', 'application/x-tex; charset=utf-8');
     if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${path.basename(doc.relPath)}"`);
-    res.send(doc.toText());
+    res.send(text);
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
@@ -1116,10 +1029,9 @@ api.post('/docs/*/source', async (req, res) => {
     if (typeof text !== 'string') { res.status(400).json({ error: 'text missing' }); return; }
     if (text.length > 20_000_000) { res.status(413).json({ error: 'too large' }); return; }
     const doc = await manager.open(docId(req));
-    const r = parseDocumentText(text, doc.project, doc.relPath);
-    doc.loadFromLyx(r.doc, 'source');
+    const warnings = await doc.loadText(text, 'source');
     doc.scheduleSave();
-    res.json({ ok: true, warnings: r.warnings });
+    res.json({ ok: true, warnings });
   } catch (e) { res.status(400).json({ error: String(e) }); }
 });
 
@@ -1294,8 +1206,8 @@ api.get('/docs/*/build', (req, res) => {
 });
 
 /** A layout document's text boxes as TeX set them in the last build, for the editor's check against the PDF (export.ts layoutCheckOf). */
-api.get('/docs/*/layoutcheck', (req, res) => {
-  try { res.json(layoutCheckOf(docId(req))); } catch (e) { res.status(500).json({ error: String((e as Error).message ?? e) }); }
+api.get('/docs/*/layoutcheck', async (req, res) => {
+  try { res.json(await layoutCheckOf(docId(req))); } catch (e) { res.status(500).json({ error: String((e as Error).message ?? e) }); }
 });
 
 /* ------------------------------------------------------------------- users */
@@ -1447,7 +1359,8 @@ const server = http.createServer(app);
 attachWebSocket(server);
 
 server.listen(config.port, config.host, () => {
-  console.log(`OverLyX server listening on http://${config.host}:${config.port}  (projects: ${config.projectsDir}, data: ${config.dataDir})`);
+  console.log(`OverLyX server listening on http://${config.host}:${config.port}  (projects: ${config.projectsDir}, data: ${config.dataDir}, document workers: ${docWorkers.enabled ? docWorkers.size : 'none'})`);
+  docWorkers.warm();
 });
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {

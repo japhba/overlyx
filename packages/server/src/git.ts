@@ -388,7 +388,7 @@ export async function restoreProject(project: string, hash: string, by: number |
     return { restored: true, files };
   });
   // open documents: take the restored text over now rather than when the watcher gets to it
-  if (result.restored) for (const [id, doc] of manager.docs) if (id.startsWith(project + '/')) { try { doc.absorbExternalChange(); } catch (e) { console.error(`[git] ${id}: reload after restore failed:`, e); } }
+  if (result.restored) for (const [id, doc] of manager.docs) if (id.startsWith(project + '/')) { try { await doc.absorbExternalChangeAsync(); } catch (e) { console.error(`[git] ${id}: reload after restore failed:`, e); } }
   if (result.restored) console.log(`[git] "${project}" restored to ${hash.slice(0, 7)} (${result.files.length} files)`);
   return { ...result, head: readHead(projectDir(project)) };
 }
@@ -553,7 +553,7 @@ async function cliBuild(req: Request, res: Response): Promise<void> {
   try {
     await manager.open(id);   // validates the path
     // a push a moment ago: its files may not have reached the open documents yet (the watcher waits for writes to settle)
-    for (const [docId, doc] of manager.docs) if (docId.startsWith(t.project + '/')) { try { doc.absorbExternalChange(); } catch { /* the watcher retries */ } }
+    for (const [docId, doc] of manager.docs) if (docId.startsWith(t.project + '/')) { try { await doc.absorbExternalChangeAsync(); } catch { /* the watcher retries */ } }
   } catch (e) { res.status(404).json({ error: (e as Error).message }); return; }
   logAccess(t.project, user.id, 'build', t.path);
   const previous = (lastBuild(id)?.status as 'ok' | 'error' | undefined) ?? null;

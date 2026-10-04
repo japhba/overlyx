@@ -528,7 +528,7 @@ async function composeInput(text: string, ctx: TurnContext | undefined): Promise
     // selection may not appear verbatim in the file, e.g. a partial formula)
     try {
       const doc = await manager.open(ctx.docId);
-      const excerpt = documentContext(doc.toText(), sel, 5000);
+      const excerpt = documentContext(await doc.textAsync(), sel, 5000);
       if (excerpt.includes('⟦SELECTION⟧')) lines.push(`Where the selection sits in ${ctx.docId} (the ⟦SELECTION⟧…⟦/SELECTION⟧ markers are not part of the file):`, '```latex', excerpt, '```');
     } catch { /* best-effort */ }
   }

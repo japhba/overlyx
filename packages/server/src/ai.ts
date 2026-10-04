@@ -249,7 +249,7 @@ export async function rewrite(doc: OpenDoc, req: RewriteRequest, signal?: AbortS
   const instruction = req.instruction.trim();
   if (!instruction) throw new AiError('Say what to do with the passage.', 400);
   const model = pickModel(req.model, config.ai.model);
-  const docText = doc.toText();
+  const docText = await doc.textAsync();
   const macros = macroLines(doc);
   if (req.source) {
     // the source view: the selection is raw .tex text; the reply goes verbatim into the file
@@ -308,17 +308,17 @@ export interface CompleteResult { text: string; nodes: PMJSON[] }
 
 /** A cached document context per document: the LaTeX source, refreshed at most every few seconds (typing pauses come often). */
 const contextCache = new Map<string, { at: number; text: string; macros: string[] }>();
-function docContext(doc: OpenDoc): { text: string; macros: string[] } {
+async function docContext(doc: OpenDoc): Promise<{ text: string; macros: string[] }> {
   const hit = contextCache.get(doc.id);
   if (hit && Date.now() - hit.at < 15000) return hit;
-  const entry = { at: Date.now(), text: doc.toText(), macros: macroLines(doc) };
+  const entry = { at: Date.now(), text: await doc.textAsync(), macros: macroLines(doc) };
   if (contextCache.size > 100) contextCache.clear();
   contextCache.set(doc.id, entry);
   return entry;
 }
 
 export async function complete(doc: OpenDoc, req: CompleteRequest, signal?: AbortSignal): Promise<CompleteResult> {
-  const { text: docText, macros: allMacros } = docContext(doc);
+  const { text: docText, macros: allMacros } = await docContext(doc);
   // latency matters more than breadth here: a few thousand characters around the cursor, the
   // start of the preamble (class, title, the first macros) and the first macro definitions
   const before = req.before.slice(-2000), after = req.after.slice(0, 500);

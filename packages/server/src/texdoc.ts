@@ -10,7 +10,7 @@ import type { LyxDocument } from '@overlyx/core';
 import { layoutTemplate, setHeaderValue } from '@overlyx/core';
 import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 import { config } from './config.ts';
-import { projectDir, findMaster, resolveProjectPath } from './projects.ts';
+import { projectDir, findMaster, resolveProjectPath } from './projectfiles.ts';
 
 /** A file read relative to a document, refusing to leave the project. */
 export function readerFor(project: string, absDocPath: string): (name: string) => string | undefined {

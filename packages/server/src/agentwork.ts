@@ -31,7 +31,6 @@ import { config } from './config.ts';
 import { db } from './db.ts';
 import { manager, docFiles, readTextFile, type OpenDoc } from './docs.ts';
 import { projectDir, resolveProjectPath, isDocumentFile, findMaster } from './projects.ts';
-import { applyTrackedSource, applyPlainSource, foldEdits, restoreSource } from './docedit.ts';
 import { lastBuild, buildIncluding, buildErrors, requestBuild } from './export.ts';
 import { touchProject } from './git.ts';
 
@@ -106,9 +105,9 @@ const turnsDir = (tid: string) => path.join(root(), safeId(tid) + '.turns');
 const cpDir = (tid: string, n: number) => path.join(turnsDir(tid), String(n));
 
 /** The live source of a document: the open document's, else the file's. */
-function liveText(project: string, rel: string): string {
+async function liveText(project: string, rel: string): Promise<string> {
   const open = manager.docs.get(`${project}/${rel}`);
-  return open ? open.toText() : readTextFile(resolveProjectPath(project, rel));
+  return open ? await open.textAsync() : readTextFile(resolveProjectPath(project, rel));
 }
 
 /* ------------------------------------------------------------------ live → copy */
@@ -130,7 +129,7 @@ export function prepareWorkspace(tid: string, project: string, userId: number, t
       const ext = path.extname(f.name).toLowerCase() || f.name.toLowerCase();
       let text: string | null = null;
       if ((f.kind === 'doc' || TEXT_EXT.has(ext)) && f.size <= MAX_TEXT) {
-        try { text = f.kind === 'doc' ? liveText(project, f.path) : fs.readFileSync(live, 'utf8'); } catch { continue; }
+        try { text = f.kind === 'doc' ? await liveText(project, f.path) : fs.readFileSync(live, 'utf8'); } catch { continue; }
         if (text.includes('\0')) text = null;
       }
       fs.mkdirSync(path.dirname(dst), { recursive: true });
@@ -213,13 +212,13 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
           const doc = await manager.open(`${project}/${rel}`);
           if (manifest.tracked === false) {
             // Track changes off: the agent's change goes in as it is (the checkpoint can still take it back)
-            const r = applyPlainSource(doc, base, text);
+            const { result: r } = await doc.agentEdit('plain', base, { after: text });
             out.push({ path: rel, action: 'edited' });
-            if (r.after !== r.before) recordDoc(tid, manifest, doc, rel, r.before, r.after);
+            if (r.after !== r.before) await recordDoc(tid, manifest, doc, rel, r.before, r.after);
           } else {
-            const r = applyTrackedSource(doc, base, text, AGENT_AUTHOR);
+            const { result: r } = await doc.agentEdit('tracked', base, { after: text }, { author: AGENT_AUTHOR });
             out.push({ path: rel, action: 'tracked', inserted: r.inserted, deleted: r.deleted });
-            if (r.after !== r.before) recordDoc(tid, manifest, doc, rel, r.before, r.after);
+            if (r.after !== r.before) await recordDoc(tid, manifest, doc, rel, r.before, r.after);
           }
         } else {
           const live = resolveProjectPath(project, rel);
@@ -362,7 +361,7 @@ function buildState(docId: string): { status: 'ok' | 'error'; errors: string[] }
 }
 
 /** The agent changed document `rel`: the live source went from `before` to `after`. */
-function recordDoc(tid: string, manifest: Manifest, doc: OpenDoc, rel: string, before: string, after: string): void {
+async function recordDoc(tid: string, manifest: Manifest, doc: OpenDoc, rel: string, before: string, after: string): Promise<void> {
   const cp = currentCheckpoint(tid, manifest);
   const dir = cpDir(tid, cp.n), sh = path.join(dir, 'shadow', rel), af = path.join(dir, 'after', rel);
   if (!cp.files.some(f => f.path === rel)) {
@@ -375,7 +374,7 @@ function recordDoc(tid: string, manifest: Manifest, doc: OpenDoc, rel: string, b
   } else {
     // people edited the document between two of the agent's changes: carry that over
     const prevAfter = readUtf8(af), shadow = readUtf8(sh);
-    if (prevAfter !== null && shadow !== null && prevAfter !== before) writeAtomic(sh, foldEdits(doc, shadow, prevAfter, before).text);
+    if (prevAfter !== null && shadow !== null && prevAfter !== before) writeAtomic(sh, (await doc.foldEditsAsync(shadow, prevAfter, before)).text);
   }
   writeAtomic(af, after);
   cp.updatedAt = Date.now();
@@ -536,9 +535,9 @@ export function undoCheckpoint(tid: string, project: string, n: number, userId: 
           if (shadow === null || after === null) { kept.push({ path: f.path, why: 'its checkpoint is incomplete' }); continue; }
           let doc: OpenDoc;
           try { doc = await manager.open(`${project}/${f.path}`); } catch { kept.push({ path: f.path, why: 'the document is gone' }); continue; }
-          const now = doc.toText();
-          const { text: target, conflicts } = foldEdits(doc, shadow, after, now);
-          const text = target === now ? now : restoreSource(doc, target);
+          const now = await doc.textAsync();
+          const { text: target, conflicts } = await doc.foldEditsAsync(shadow, after, now);
+          const text = target === now ? now : (await doc.agentEdit('restore', now, { after: target })).result.text;
           if (conflicts) kept.push({ path: f.path, why: `${conflicts > 1 ? `${conflicts} paragraphs` : 'a paragraph'} edited since ${conflicts > 1 ? 'were' : 'was'} left as ${conflicts > 1 ? 'they are' : 'it is'}` });
           reverted.push(f.path);
           refresh(f.path, text);
