@@ -107,7 +107,8 @@ export function agentFor(ident: TokenIdentity, client: ClientInfo | null, opts: 
     scheduleAgentsEvent(ident.userId);
     return db.prepare('SELECT * FROM mcp_agents WHERE token_kind = ? AND token_id = ? AND client_name = ?').get(ident.kind, ident.id, name) as AgentRow;
   }
-  return knownAgent(ident) ?? agentFor(ident, { name: '', title: ident.name }, opts);
+  // a client that never said who it is: named after its credential (an old named agent token), or generically
+  return knownAgent(ident) ?? agentFor(ident, { name: '', title: ident.kind === 'personal' ? 'MCP client' : ident.name }, opts);
 }
 
 /** The token's agent that initialized statelessly last (any of its agents), without creating one. */
