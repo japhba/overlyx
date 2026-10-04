@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { schema } from '../packages/core/src/schema.ts';
 import { editorContext } from '../packages/client/src/editor/context.ts';
 import { CommandView } from '../packages/client/src/editor/nodeviews/leaf.ts';
+import { idleCallback } from '../packages/client/src/editor/nodeviews/math.ts';
 
 afterEach(() => { editorContext.openInTab = undefined; editorContext.openInsetDialog = undefined; });
 
@@ -70,5 +71,29 @@ describe('a child document (\\input / \\include inset)', () => {
     v.dom.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 }));
     expect(dialogs).toBe(1);
     v.destroy?.();
+  });
+});
+
+/**
+ * Without requestIdleCallback (Safari) the idle-time rendering of formulas gets a deadline that runs
+ * out: a constant one rendered every formula of a long paper in one task and froze the page.
+ */
+describe('idle time without requestIdleCallback (Safari)', () => {
+  it('the deadline runs out: an idle task that renders while timeRemaining() lasts stops after ~8 ms', async () => {
+    const spent = await new Promise<{ first: number; steps: number; ms: number }>(res => idleCallback(d => {
+      const t0 = performance.now(), first = d.timeRemaining();
+      let steps = 0;
+      while (d.timeRemaining() > 0 && steps < 1e7) { steps++; for (let i = 0; i < 1000; i++) Math.sqrt(i); }
+      res({ first, steps, ms: performance.now() - t0 });
+    }, {}));
+    expect(spent.first).toBeGreaterThan(0);
+    expect(spent.first).toBeLessThanOrEqual(8);
+    expect(spent.steps).toBeLessThan(1e7);   // it ended because the time was up
+    expect(spent.ms).toBeLessThan(50);
+  });
+  it('requestIdleCallback is used where the browser has it', () => {
+    const calls: unknown[] = [];
+    idleCallback(() => {}, { requestIdleCallback: (cb: unknown, o: unknown) => { calls.push(o); } });
+    expect(calls).toEqual([{ timeout: 500 }]);
   });
 });
