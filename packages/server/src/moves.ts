@@ -40,6 +40,7 @@ interface Incoming {
   /** the server's own diff (a file changed on disk, an agent's edit), made on a mirror of the document */
   server: boolean;
   ds?: Ranges;
+  had?: Map<number, number>;
 }
 
 /** one inline unit: a character of a text item, or the item of an inline node / text run */
@@ -130,11 +131,19 @@ export class MoveRepair {
     this.ydoc.transact(t2 => work.run(t2, keys, conflicts), MOVES_ORIGIN);
   }
 
-  /** the update deletes units that were copied */
+  /** the update deletes units that were copied, and its sender did not have the copy (as far as known) */
   private deletionHits(inc: Incoming): boolean {
     const ds = dsOf(inc);
+    const had = carried(inc);
     let hit = false;
-    ds.forEach((client, clock, len) => { if (!hit && this.index.overlapping(client, clock, len).some(([, , m]) => m.dst && m.side !== HANDLED)) hit = true; });
+    ds.forEach((client, clock, len) => {
+      if (hit) return;
+      for (const [k, n, m] of this.index.overlapping(client, clock, len)) {
+        if (!m.dst || m.side === HANDLED) continue;
+        for (let i = 0; i < n && !hit; i++) if (!this.index.copiesOf(client, k + i).some(c => (had.get(c.client) ?? 0) > c.clock)) hit = true;
+        if (hit) return;
+      }
+    });
     return hit;
   }
 
@@ -147,6 +156,20 @@ export class MoveRepair {
 function dsOf(inc: Incoming): Ranges {
   if (!inc.ds) { try { inc.ds = Ranges.of(Y.decodeUpdate(inc.update).ds); } catch { inc.ds = new Ranges(); } }
   return inc.ds;
+}
+
+/**
+ * What the sender had, at least: the structs its update carries (a client resends what it applied
+ * from elsewhere — the editor applies an agent's edit itself and y-websocket sends it back — and that
+ * update deletes the originals its copies replace) and the state vector of its sync step 1.
+ */
+function carried(inc: Incoming): Map<number, number> {
+  if (!inc.had) {
+    const had = new Map(inc.knows ?? []);
+    try { for (const [client, to] of Y.parseUpdateMeta(inc.update).to) if (to > (had.get(client) ?? 0)) had.set(client, to); } catch { /* not decodable: nothing more */ }
+    inc.had = had;
+  }
+  return inc.had;
 }
 
 /** the repair of one update */
@@ -1131,11 +1154,14 @@ class Work {
   private propagateDeletions(): void {
     const inc = this.inc;
     const ids: Y.ID[] = [];
+    const had = inc ? carried(inc) : null;
     if (inc) dsOf(inc).forEach((client, clock, len) => {
       for (const [k, n, m] of this.index.overlapping(client, clock, len)) {
         if (!m.dst || m.side === HANDLED || m.rec === this.rec) continue;
         for (let i = 0; i < n; i++) {
           if (this.adoptedSrc.has(client, k + i)) continue;
+          // the sender had the copy (its update carries it): the deletion is the move's own, sent again
+          if (this.knowsCopy(had!, client, k + i)) continue;
           // a sync step 2 carries every deletion the sender knows of: one that knew a copy of the unit
           // (the move's own, or its own copy when it moved the unit too) learnt of the deletion with it;
           // one that knew the move of the run around it got the unit only inside the deleted run
