@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { parseTex, writeTex, writeTexPreserving, type PreserveCache, type PreserveStats } from '../packages/core/src/tex/index.ts';
-import { canonical } from '../packages/core/src/tex/preserve.ts';
+import { canonical, texBalance } from '../packages/core/src/tex/preserve.ts';
 import { lyxToPm, pmToLyxBody, lyxAuthorId, addAuthor, type LyxDocument, type Paragraph } from '../packages/core/src/index.ts';
 
 /** An Overleaf-style paper: hard-wrapped paragraphs, comments, the user's own preamble and spellings. */
@@ -295,5 +295,23 @@ describe('the result is verified', () => {
     const text = writeTexPreserving(doc, { base: PAPER, parse: lying, write: d => writeTex(d), stats }).text;
     expect(stats.outcome).toBe('full');
     expect(text).toBe(full);
+  });
+});
+
+describe('a preserved save never balances environments differently from both the file and a full rewrite', () => {
+  it('texBalance counts environments and braces, not comments or escaped braces', () => {
+    expect(texBalance('\\begin{a}x\\end{a}{y}')).toBe(texBalance(''));
+    expect(texBalance('\\begin{center}\\par\\end{center}\\par\\end{center}')).not.toBe(texBalance(''));
+    expect(texBalance('% \\begin{x} {\n\\{ \\}')).toBe(texBalance(''));
+  });
+  it('falls back to the full rewrite instead of doubling a closing line (titlepage with \\centering)', () => {
+    const src = '\\documentclass{article}\n\\begin{document}\n\nBody first.\n\n\\begin{titlepage}\n    \\centering\n    {\\Large A title\\par}\n\n    Bit flip (gate $X$).\n\\end{titlepage}\n\n\\end{document}\n';
+    const opts = { layoutDir: '/root/lyx/lib/layouts', localDirs: ['/tmp'] };
+    const parse = (t: string) => parseTex(t, opts);
+    const write = (d: any) => writeTex(d, { ...opts, fragment: false, basename: 'main' });
+    const doc = parse(src).doc;
+    const W = write(doc).text;
+    const out = writeTexPreserving(doc, { base: W, parse, write }).text;
+    expect([texBalance(W), texBalance(src)]).toContain(texBalance(out));
   });
 });
