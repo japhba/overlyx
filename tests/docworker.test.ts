@@ -321,11 +321,35 @@ describe('a client connecting while its document opens', () => {
       await Promise.race([synced, sleep(10000).then(() => { throw new Error('no sync step 2'); })]);
       expect(JSON.stringify(client.getXmlFragment('prosemirror').toJSON())).toContain('Hello from the file.');
       ws.close();
+      // a big document: what the client lacks is encoded by the worker — the same update
+      const pars = Array.from({ length: 1200 }, (_, i) => `Paragraph ${i} of a long thesis, with $x_${i}$ and some words to make it longer than it is.`);
+      writeFileSync(path('wsopen', 'big.tex'), docText(...pars));
+      const big = await open('u/wsopen/big.tex');
+      expect(big.bigForSync).toBe(true);
+      const sv = Y.encodeStateVector(new Y.Doc());
+      const viaWorker = await big.missingFor(sv);
+      const other = new Y.Doc();
+      Y.applyUpdate(other, viaWorker);
+      expect(other.getXmlFragment('prosemirror').toJSON()).toBe(big.fragment.toJSON());
+      const client2 = new Y.Doc();
+      const ws2 = new WebSocket(`ws://127.0.0.1:${port}/ws?doc=${encodeURIComponent('u/wsopen/big.tex')}`, { headers: { cookie: `ol_session=${signSession(toSessionUser(user))}` } });
+      ws2.binaryType = 'arraybuffer';
+      const synced2 = new Promise<void>((resolve) => {
+        ws2.on('message', (data: ArrayBuffer) => {
+          const dec = decoding.createDecoder(new Uint8Array(data));
+          if (decoding.readVarUint(dec) !== 0) return;
+          if (syncProtocol.readSyncMessage(dec, encoding.createEncoder(), client2, 'server') === syncProtocol.messageYjsSyncStep2) resolve();
+        });
+      });
+      ws2.on('open', () => { const enc = encoding.createEncoder(); encoding.writeVarUint(enc, 0); syncProtocol.writeSyncStep1(enc, client2); ws2.send(encoding.toUint8Array(enc)); });
+      await Promise.race([synced2, sleep(20000).then(() => { throw new Error('no sync step 2 for the big document'); })]);
+      expect(client2.getXmlFragment('prosemirror').toJSON()).toBe(big.fragment.toJSON());
+      ws2.close();
     } finally {
       manager.open = open;
       server.close();
     }
-  });
+  }, 60000);
 });
 
 describe('the pool', () => {

@@ -139,6 +139,9 @@ const ops: Record<string, (doc: DocInfo | null, a: Args) => unknown> = {
   /** the CRDT state, for persisting it */
   state: (d) => Y.encodeStateAsUpdate(mirrorOf(d).ydoc),
 
+  /** what a client with state vector `sv` lacks (sync step 2) */
+  missing: (d, a) => Y.encodeStateAsUpdate(mirrorOf(d).ydoc, a.sv),
+
   /** a document opened on top of its stored history (`state`, which the main thread applied too) */
   open: (d, a) => {
     if (!d) throw new Error('no document');

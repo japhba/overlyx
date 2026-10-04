@@ -604,6 +604,15 @@ export class OpenDoc implements DocState, EditableDoc {
     return await inWorker(this, 'read', { fileText: this.fileText, isChild: this.isChild }) as { text: string; paragraphs: { index: number; layout: string; depth: number; text: string }[] };
   }
 
+  /** a big document: what a connecting client lacks (all of it on a first visit) is encoded by the worker */
+  get bigForSync(): boolean { return this.usesWorker && (this.fileText?.length ?? 0) > 100_000; }
+
+  /** What a client whose state vector is `sv` lacks, as an update (sync step 2), encoded by the document worker. */
+  async missingFor(sv: Uint8Array): Promise<Uint8Array> {
+    if (!this.usesWorker) return Y.encodeStateAsUpdate(this.ydoc, sv);
+    return await inWorker(this, 'missing', { sv }) as Uint8Array;
+  }
+
   /** The warnings of parsing a source in this document's context. */
   async parseWarnings(text: string): Promise<string[]> {
     if (!this.usesWorker) return parseDocumentText(text, this.project, this.relPath).warnings;
