@@ -107,3 +107,24 @@ test('a formula typed in italic text stays in the emphasis, and Ctrl+I switches 
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+test('the source pane numbers its lines, and the text, the colours and the caret stay aligned', async ({ browser }) => {
+  const { ctx, page, errors } = await open(browser);
+  await page.locator('.lyx-editor .lyx-par', { hasText: 'Last paragraph.' }).click();
+  await page.keyboard.press('Control+Alt+s');
+  await expect(page.locator('.source-pane')).toBeVisible();
+  await expect(page.locator('.source-pane pre.hl:not(.selhl) .l').first()).toBeAttached({ timeout: 15000 });
+  const m = await page.evaluate(() => {
+    const pre = document.querySelector('.source-pane pre.hl:not(.selhl)') as HTMLElement, ta = document.querySelector('.source-pane textarea.source') as HTMLTextAreaElement;
+    const lines = [...pre.querySelectorAll('.l')] as HTMLElement[];
+    const num = getComputedStyle(lines[0], '::before');
+    return { count: lines.length, taLines: ta.value.split('\n').length, content: num.content, numRight: lines[0].getBoundingClientRect().left + parseFloat(num.left) + parseFloat(num.width), textLeft: lines[0].getBoundingClientRect().left, prePad: getComputedStyle(pre).paddingLeft, taPad: getComputedStyle(ta).paddingLeft };
+  });
+  expect(m.count).toBe(m.taLines);
+  expect(m.content).toBe('counter(line)');
+  expect(m.taPad).toBe(m.prePad);
+  expect(parseFloat(m.prePad)).toBeGreaterThan(20);
+  expect(m.numRight).toBeLessThanOrEqual(m.textLeft);   // the numbers end before the text begins
+  expect(errors).toEqual([]);
+  await ctx.close();
+});

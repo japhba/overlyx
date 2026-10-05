@@ -171,6 +171,14 @@ try {
       await type(['ArrowRight']); await type(chars(' is')); await type(['Control+i']); await type(chars(' known.'));
       await sleep(2000); await record('italic done');
     }
+    if (name === 'source') {
+      // the source pane beside the document (its line numbers)
+      await type(['Control+Alt+s']); await sleep(2500);
+      const box = await frame.evaluate(() => { const r = document.querySelector('.source-pane')?.getBoundingClientRect(); return r ? { x: r.x, y: r.y, width: r.width, height: Math.min(r.height, 500) } : null; });
+      const fr = await frame.frameElement().then(e => e.boundingBox());
+      if (box && fr) await page.screenshot({ path: path.join(out, 'source-pane.png'), clip: { x: fr.x + box.x, y: fr.y + box.y, width: box.width, height: box.height } });
+      await record('source pane');
+    }
     if (name === 'cmd') {
       await type(chars(' With '));
       await type(['$']); await sleep(400);

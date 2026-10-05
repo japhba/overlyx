@@ -846,9 +846,13 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .source-pane .grip:hover { background: var(--accent); opacity: 0.5; }
 .source-pane .bar .close { margin-left: 4px; }
 .source-pane .code { position: relative; flex: 1; min-height: 0; overflow: hidden; }
-.source-pane .code pre.hl, .source-pane .code textarea.source { position: absolute; inset: 0; margin: 0; box-sizing: border-box; width: 100%; height: 100%; font-family: "DejaVu Sans Mono", Menlo, monospace; font-size: 11.5px; line-height: 15px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: break-word; tab-size: 4; overflow: auto; overflow-x: hidden; }
+.source-pane .code pre.hl, .source-pane .code textarea.source { position: absolute; inset: 0; margin: 0; box-sizing: border-box; width: 100%; height: 100%; font-family: "DejaVu Sans Mono", Menlo, monospace; font-size: 11.5px; line-height: 15px; padding: 6px 8px 6px calc(var(--gutter, 3ch) + 12px); white-space: pre-wrap; overflow-wrap: break-word; tab-size: 4; overflow: auto; overflow-x: hidden; }
 .source-pane .code pre.hl { pointer-events: none; overflow: hidden; color: var(--ui-fg); background: var(--page-bg); }
-.source-pane .code pre.hl code { font: inherit; }
+.source-pane .code pre.hl code { font: inherit; counter-reset: line; }
+/* line numbers in the left padding (as in the text-file editor), beside the first row of a wrapped line */
+.source-pane .code pre.hl .l { counter-increment: line; }
+.source-pane .code pre.hl:not(.selhl) .l::before { content: counter(line); position: absolute; left: calc(-1 * var(--gutter, 3ch) - 8px); width: var(--gutter, 3ch); text-align: right; color: var(--muted2); user-select: none; }
+.source-pane .code pre.hl .l.cur::before { color: var(--fg2); }
 /* one block per source line (texhighlight.ts highlightLines): soft-wrapped like the textarea; the current line is marked */
 pre.hl .l { position: relative; min-height: 1.45em; min-height: 1lh; }
 .source-pane .code pre.hl .l { min-height: 15px; }

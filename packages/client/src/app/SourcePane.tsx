@@ -588,7 +588,8 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
         {!dirty && applied === 'ok' && <span class="apply-state ok" data-apply-state="ok" title={applyNote}>applied ✓{applyNote ? ' · ' + applyNote : ''}</span>}
         {onClose && <button class="small-btn close" onClick={onClose} title="Hide the source pane (Ctrl+Alt+S)">✕</button>}
       </div>
-      <div class="code">
+      {/* line numbers sit in the left padding, as wide as the last line's number */}
+      <div class="code" style={`--gutter: ${String(lineHtml.length).length + 1}ch`}>
         <pre class="hl" ref={pre} aria-hidden="true"><code /></pre>
         {overlay && <pre class="hl selhl" ref={selPre} aria-hidden="true"><code>{text.slice(0, overlay.from)}<span class="selrange">{text.slice(overlay.from, overlay.to)}</span>{text.slice(overlay.to)}</code></pre>}
         {/* uncontrolled: the browser inserts what is typed and the DOM is the source of truth (a controlled value re-applied by a slow re-render can drop a fast keystroke); load() sets it */}
