@@ -9,7 +9,8 @@ import { describe, expect, it } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { Slice, Fragment, type Node as PMNode } from 'prosemirror-model';
 import { schema } from '@overlyx/core';
-import { foldPlugin, foldKey, foldHeadings, setSectionFolded, setLevelFolded, foldAllSections, unfoldAllSections, sectionFoldState, foldedCount } from '../packages/client/src/editor/plugins/fold';
+import { foldPlugin, foldKey, foldHeadings, foldListItems, setSectionFolded, setLevelFolded, foldAllSections, unfoldAllSections, sectionFoldState, foldedCount, setItemFolded, itemFoldState, foldAllItems, unfoldAllItems } from '../packages/client/src/editor/plugins/fold';
+import { EditorView } from 'prosemirror-view';
 
 const par = (layout: string, text: string) => schema.node('paragraph', { layout }, text ? [schema.text(text)] : []);
 /** Section A (with Subsection A1, A2), Section B, trailing text */
@@ -122,5 +123,74 @@ describe('section folding', () => {
     const s = EditorState.create({ doc: d, plugins: [foldPlugin()] });
     expect(run(s, setSectionFolded(0, true)).ok).toBe(false);
     expect(sectionFoldState(s, 1)).toEqual({ folded: false, foldable: false });
+  });
+});
+
+describe('list item folding', () => {
+  const item = (text: string, depth = 0, layout = 'Itemize') => schema.node('paragraph', { layout, depth }, [schema.text(text)]);
+  const nested = (text: string, depth: number) => schema.node('paragraph', { layout: 'Standard', depth }, [schema.text(text)]);
+  /** • one ( • one.a ( • one.a.i ) · a figure under one.a ) • two · after */
+  function listDoc(): PMNode {
+    return schema.node('doc', null, [
+      par('Section', 'S'),
+      item('one'), item('one.a', 1), item('one.a.i', 2), nested('figure of one.a', 2), item('one.b', 1),
+      item('two'),
+      par('Standard', 'after'),
+    ]);
+  }
+  const listState = () => EditorState.create({ doc: listDoc(), plugins: [foldPlugin()] });
+
+  it('finds the items with sub-items: the deeper paragraphs right after them, nested text and figures included', () => {
+    expect(foldListItems(listDoc()).map(h => [h.node.textContent, h.level, h.endIndex - h.index - 1])).toEqual([['one', 0, 4], ['one.a', 1, 2]]);
+  });
+
+  it('folding an item hides its sub-items only, changes nothing in the document, and leaves the sections alone', () => {
+    const s0 = listState();
+    const { ok, state: s1 } = run(s0, setItemFolded(posOf(s0.doc, 'one.a'), true));
+    expect(ok).toBe(true);
+    expect(s1.doc.eq(s0.doc)).toBe(true);
+    expect(hiddenTexts(s1)).toEqual(['one.a.i', 'figure of one.a']);
+    expect(itemFoldState(s1, posOf(s1.doc, 'one.a') + 1)).toEqual({ folded: true });
+    expect(foldedCount(s1)).toBe(0);   // no section folded
+    expect(run(s1, foldAllSections).state.doc.eq(s1.doc)).toBe(true);
+    // folding all sections keeps the item's fold; expanding them all does not expand it
+    const { state: s2 } = run(run(s1, foldAllSections).state, unfoldAllSections);
+    expect(hiddenTexts(s2)).toEqual(['one.a.i', 'figure of one.a']);
+    expect(run(s1, setItemFolded(posOf(s1.doc, 'two'), true)).ok).toBe(false);   // no sub-items
+  });
+
+  it('fold all list items folds outer and inner ones; expanding the outer one shows the inner one still folded', () => {
+    const { state: s1 } = run(listState(), foldAllItems);
+    expect(hiddenTexts(s1)).toEqual(['one.a', 'one.a.i', 'figure of one.a', 'one.b']);
+    const { state: s2 } = run(s1, setItemFolded(posOf(s1.doc, 'one'), false));
+    expect(hiddenTexts(s2)).toEqual(['one.a.i', 'figure of one.a']);
+    const { state: s3 } = run(s2, unfoldAllItems);
+    expect(hiddenTexts(s3)).toEqual([]);
+  });
+
+  it('a cursor put into folded sub-items unfolds them; an item that loses its sub-items is no longer folded', () => {
+    const { state: s1 } = run(listState(), setItemFolded(posOf(listDoc(), 'one.a'), true));
+    const s2 = s1.apply(s1.tr.setSelection(TextSelection.create(s1.doc, posOf(s1.doc, 'one.a.i') + 2)));
+    expect(hiddenTexts(s2)).toEqual([]);
+    // the sub-items deleted: the fold ends (a later item indented under one.a must not vanish)
+    const { state: s3 } = run(listState(), setItemFolded(posOf(listDoc(), 'one.a'), true));
+    const from = posOf(s3.doc, 'one.a.i'), to = posOf(s3.doc, 'one.b');
+    const s4 = s3.apply(s3.tr.delete(from, to));
+    expect(foldKey.getState(s4)!.folded).toEqual([]);
+  });
+
+  it('Enter at the end of a folded item starts the next item after its hidden sub-items', () => {
+    const { state: s1 } = run(listState(), setItemFolded(posOf(listDoc(), 'one.a'), true));
+    const end = posOf(s1.doc, 'one.a') + 1 + 'one.a'.length;
+    const s2 = s1.apply(s1.tr.setSelection(TextSelection.create(s1.doc, end)));
+    const view = new EditorView(document.createElement('div'), { state: s2 });
+    view.someProp('handleKeyDown', f => f(view, new KeyboardEvent('keydown', { key: 'Enter' })));
+    const texts: [string, number, string][] = [];
+    view.state.doc.forEach(c => texts.push([c.textContent, c.attrs.depth, c.attrs.layout]));
+    expect(texts.slice(2, 7)).toEqual([['one.a', 1, 'Itemize'], ['one.a.i', 2, 'Itemize'], ['figure of one.a', 2, 'Standard'], ['', 1, 'Itemize'], ['one.b', 1, 'Itemize']]);
+    expect(view.state.selection.$head.parent.textContent).toBe('');
+    expect(view.state.selection.$head.parent.attrs.depth).toBe(1);
+    expect(hiddenTexts(view.state)).toEqual(['one.a.i', 'figure of one.a']);   // still folded
+    view.destroy();
   });
 });

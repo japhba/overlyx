@@ -3,7 +3,7 @@ import type { MenuDef, MenuEntry } from './MenuBar';
 import type { ToolbarId, ToolbarMode } from './toolbars';
 import { editorContext } from '../editor/context';
 import * as C from '../editor/commands';
-import { foldAllSections, unfoldAllSections, toggleSectionAtCursor, toggleLevelAtCursor } from '../editor/plugins/fold';
+import { foldAllSections, unfoldAllSections, toggleSectionAtCursor, toggleLevelAtCursor, toggleItemAtCursor, foldAllItems, unfoldAllItems } from '../editor/plugins/fold';
 import { isPresenting, togglePresentation, PRESENTATION_KEY } from './presentation';
 
 export interface ViewMenuContext {
@@ -27,6 +27,10 @@ export function editorViewMenu({ hostItems, themeItems, hostToolbars, combined, 
       { label: 'Expand all at this level', action: () => run(toggleLevelAtCursor(false)) },
       { label: 'Fold all sections', action: () => run(foldAllSections) },
       { label: 'Expand all sections', action: () => run(unfoldAllSections) },
+      // list items with sub-items fold the same way (the arrow left of the bullet)
+      { label: 'Fold / expand this list item\'s sub-items', action: () => run(toggleItemAtCursor) },
+      { label: 'Fold all list items', action: () => run(foldAllItems) },
+      { label: 'Expand all list items', action: () => run(unfoldAllItems) },
       { sep: true },
       { label: 'Zoom in', shortcut: 'Ctrl++', action: () => editorContext.ui?.zoom(1) },
       { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => editorContext.ui?.zoom(-1) },

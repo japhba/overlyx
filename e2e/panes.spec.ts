@@ -1,8 +1,8 @@
 /**
  * The writing area's panes — WYSIWYG, TeX source and PDF side by side in any combination and order
  * (app/panes.ts, the PaneSwitch in the menu bar) —, the PDF pane's age and outdated state,
- * automatic builds, the rebuild that keeps the page and never blanks it (PdfViewer), section
- * folding (editor/plugins/fold.ts) and the dash keys.
+ * automatic builds, the rebuild that keeps the page and never blanks it (PdfViewer), section and
+ * list-item folding (editor/plugins/fold.ts) and the dash keys.
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
@@ -12,6 +12,7 @@ const PROJECT = 'admin/e2e-panes';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 const STAMP = Date.now().toString(36);
 const RECENT_OLDER = `admin/e2e-recent-older-${STAMP}`, RECENT_NEWER = `admin/e2e-recent-newer-${STAMP}`;
+const LISTS = texDoc(['Before the list.', '\\begin{itemize}', '\\item Alpha', '\\begin{itemize}', '\\item Alpha one', '\\begin{itemize}', '\\item Alpha one deep', '\\end{itemize}', '\\item Alpha two', '\\end{itemize}', '\\item Beta', '\\end{itemize}', '', 'After the list.'].join('\n'));
 const SHORT = texDoc('\\section{One}\n\nFirst section text.\n\n\\subsection{One a}\n\nSub text.\n\n\\section{Two}\n\nSecond section text with a findme word.\n\n\\section{Three}\n\nThird text.');
 
 test.beforeAll(() => {
@@ -24,6 +25,7 @@ test.beforeAll(() => {
   writeFileSync(`${DIR}/long.tex`, texDoc(paras.join('\n')));
   writeFileSync(`${DIR}/short.tex`, SHORT);
   writeFileSync(`${DIR}/dash.tex`, texDoc('Dashes here'));
+  writeFileSync(`${DIR}/lists.tex`, LISTS);
   // six sections with a subsection each, long enough to scroll: the folds per user, and nothing jumps
   const secs: string[] = [];
   for (let k = 1; k <= 6; k++) {
@@ -309,6 +311,59 @@ test('section folding: the arrow beside a heading and its right-click menu (this
   await expect(text('First section text.')).toBeVisible();
   await arrowMenu('Two', 'Expand all sections');
   await expect(text('Sub text.')).toBeVisible();
+  expect(noise(errors)).toEqual([]);
+});
+
+test('list items fold their sub-items: the arrow beside the bullet, remembered, Enter after a folded item, the right-click menu', async ({ page }) => {
+  const errors = collectErrors(page);
+  await prefs(page, { autoBuild: 'off' });
+  await login(page);
+  await page.request.put(`/api/docs/${PROJECT}/lists.tex/folds`, { data: { folds: [], at: Date.now() } });
+  await open(page, 'lists.tex');
+  const item = (t: string) => page.locator('.lyx-editor > .lyx-par', { hasText: new RegExp(`^${t}$`) });
+  // only items with sub-items have an arrow
+  await expect(page.locator('.lyx-editor .lyx-fold-toggle.item')).toHaveCount(2);
+  await expect(item('Beta').locator('.lyx-fold-toggle')).toHaveCount(0);
+  await item('Alpha').hover();
+  const toggle = item('Alpha').locator('.lyx-fold-toggle');
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+  await expect(item('Alpha one')).toBeHidden();
+  await expect(item('Alpha one deep')).toBeHidden();
+  await expect(item('Alpha two')).toBeHidden();
+  await expect(item('Beta')).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await page.waitForTimeout(2000);
+  expect(readFileSync(`${DIR}/lists.tex`, 'utf8')).toBe(LISTS);   // a way of looking at the document, not a change of it
+
+  // remembered
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+  await expect(item('Alpha two')).toBeHidden({ timeout: 10000 });
+  await expect(item('Alpha').locator('.lyx-fold-toggle.closed')).toBeVisible();
+
+  // Enter at the end of the folded item: the new item comes after its sub-items, which stay folded under it
+  await item('Alpha').click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Gamma');
+  await expect(item('Gamma')).toBeVisible();
+  await expect(item('Alpha two')).toBeHidden();
+  await expect.poll(() => readFileSync(`${DIR}/lists.tex`, 'utf8'), { timeout: 15000 }).toMatch(/\\item Alpha two\s*\\end\{itemize\}\s*\\item Gamma\s*\\item Beta/);
+
+  // the right-click menu of the text: List items ▸ Expand all list items
+  await item('Gamma').click({ button: 'right' });
+  await page.locator('.ctx-item', { hasText: 'List items' }).hover();
+  await page.locator('.ctx-item', { hasText: 'Expand all list items' }).click();
+  await expect(item('Alpha one deep')).toBeVisible();
+  // … and View ▸ Fold all list items folds the inner one too: expanding Alpha shows Alpha one folded
+  await page.locator('.menubar .menu button', { hasText: 'View' }).click();
+  await page.locator('.menu-item', { hasText: 'Fold all list items' }).click();
+  await expect(item('Alpha one')).toBeHidden();
+  await item('Alpha').hover();
+  await item('Alpha').locator('.lyx-fold-toggle').click();
+  await expect(item('Alpha one')).toBeVisible();
+  await expect(item('Alpha one deep')).toBeHidden();
   expect(noise(errors)).toEqual([]);
 });
 

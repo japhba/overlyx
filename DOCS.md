@@ -860,6 +860,18 @@ blend.
   focus back without scrolling to a cursor that is off screen. The folded headings are positions mapped through every transaction; a collaborator's
   change arrives from y-prosemirror as a whole-document replacement, so the heading is found again by
   node identity (unchanged paragraphs keep their node objects) or by layout and text.
+* **List items fold their sub-items** the same way (same plugin, Workflowy style): an item with
+  sub-items — the deeper paragraphs right after it (nested items, and text, formulas and figures
+  nested in the item) — gets an arrow just left of its bullet (left of the label box for numbers and
+  labels: they can be wide), on hover and always while folded; items without sub-items have none.
+  The arrow's right-click menu, the text's right-click menu (*List items*) and the View menu fold or
+  show this item's sub-items, or all list items (outer and inner: showing an outer item finds its
+  inner ones still folded); *Fold / Expand all sections* leave list items alone. **Enter at the end
+  of a folded item** starts the next item after its hidden sub-items (splitting the item would hand
+  them to the new, empty one; tracked like any paragraph break). An item whose sub-items are deleted
+  or outdented is no longer folded, so a later item indented under it never vanishes. Saved with the
+  section folds (layout + text, at most the 1000 characters the server keeps). Slide thumbnails
+  (`beamerslides.ts` `clean`) drop the fold classes: a slide shows all of its text.
 * **Dashes**: Alt+- types an em dash (—), Alt+Shift+- an en dash (–) — the characters themselves,
   written as `---` / `--` (on a Mac ⌥⇧- stays the system's em dash). The hyphenation point `\-`
   that Alt+- used to insert is in *Insert ▸ Special Character*.

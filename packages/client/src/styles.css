@@ -371,6 +371,11 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .lyx-fold-toggle:hover { background: var(--ui-hover); color: var(--ui-fg); }
 .lyx-par:hover > .lyx-fold-toggle.empty { opacity: 0.3; cursor: default; }
 .lyx-fold-toggle.empty:hover { background: none; }
+/* a list item with sub-items folds them: its arrow sits just left of the bullet / number (first line) */
+.lyx-fold-toggle.item { left: -21px; top: calc(0.725em - 10px); width: 20px; height: 20px; }
+.lyx-fold-toggle.item svg { width: 14px; height: 14px; }
+/* a bullet is narrow (right-aligned at 1.8em): the arrow right beside it; numbers and labels can be wide, theirs stays left of the label box */
+.lyx-layout-itemize > .lyx-fold-toggle.item { left: calc(1.2em - 20px); }
 @media (hover: none) { .lyx-fold-toggle { opacity: 0.45; } .lyx-fold-toggle.empty { opacity: 0; } }
 @media print { .lyx-fold-toggle { display: none; } }
 /* list items: the label (bullet / number) sits in a right-aligned box left of the text with a clear gap to it — LaTeX's

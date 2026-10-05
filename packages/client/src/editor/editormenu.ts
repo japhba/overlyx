@@ -22,7 +22,7 @@ import { getPrefs, setPref } from '../prefs';
 import { openRewrite, REWRITE_KEY } from './ai/rewrite';
 import { openLinkBox, openLink, hrefOf, unlinkText, LINK_KEY } from './links';
 import { addToDictionary, ignoreWord } from './spell/plugin';
-import { foldMenuItems, sectionFoldState, foldedCount } from './plugins/fold';
+import { foldMenuItems, sectionFoldState, foldedCount, itemFoldMenuItems, itemFoldState, foldedItemCount } from './plugins/fold';
 
 const REF_TYPES: [string, string][] = [
   ['ref', '<reference>'], ['eqref', '(<reference>)'], ['pageref', '<page>'], ['vref', '<reference> on page <page>'],
@@ -236,6 +236,7 @@ export function editorContextMenu(view: EditorView, ev: MouseEvent, spelling?: {
       { label: 'TeX code (ERT)', action: run(C.insertERT) },
     ] },
     ...sectionItems(view),
+    ...listFoldItems(view),
     ...(C.tableContext(view.state) ? tableItems(view, run) : []),
     { label: 'Track changes', icon: 'track', sub: [
       { label: 'Track changes', checked: editorContext.trackChanges, action: () => editorContext.ui?.toggleTrackChanges() },
@@ -272,6 +273,12 @@ function pushInsetItems(view: EditorView, node: PMNode, pos: number, items: Menu
     { label: 'Dissolve inset', icon: 'clearFormat', action: () => { C.dissolveInset(pos)(view.state, view.dispatch); view.focus(); } },
     { sep: true },
   );
+}
+
+/** List folding in the right-click menu (editor/plugins/fold.ts): this item's sub-items, all list items. */
+function listFoldItems(view: EditorView): MenuItem[] {
+  if (!itemFoldState(view.state) && !foldedItemCount(view.state)) return [];
+  return [{ label: 'List items', icon: 'layout', sub: itemFoldMenuItems(view, view.state.selection.head) }];
 }
 
 /** Section folding in the right-click menu (editor/plugins/fold.ts): this section, all of its level, all. */

@@ -13,7 +13,12 @@
  * when a document opens. A fold never moves what the reader looks at: the heading clicked (or the
  * block at the top of the view) stays where it is on screen (dispatchInPlace).
  *
- * The folded headings are kept as positions and mapped through every transaction. A
+ * List items fold the same way (Workflowy style): an item with sub-items — the deeper paragraphs
+ * right after it (nested items, and the text, formulas and figures nested in it) — gets an arrow
+ * left of its bullet that folds them away. Enter at the end of a folded item starts the next item
+ * after its hidden sub-items, not between them.
+ *
+ * The folded headings and items are kept as positions and mapped through every transaction. A
  * collaborator's change arrives from y-prosemirror as a replacement of the whole document, which
  * deletes every position; y-prosemirror keeps the node objects of unchanged paragraphs, so such a
  * heading is found again by identity, and a recreated one by its layout and text.
@@ -21,20 +26,27 @@
 import { Plugin, PluginKey, Selection, TextSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { sectionLevel } from '../layouts';
+import { schema } from '@overlyx/core';
+import { sectionLevel, isListLayout } from '../layouts';
 import { editorContext, viewDocId } from '../context';
 import { showContextMenu, type MenuItem } from '../contextmenu';
 import { api, API_BASE, type SavedFold } from '../../api';
 
-export interface FoldState { /** document positions of the folded headings, ascending */ folded: readonly number[]; decos: DecorationSet }
+export interface FoldState { /** document positions of the folded headings and list items, ascending */ folded: readonly number[]; decos: DecorationSet }
 export const foldKey = new PluginKey<FoldState>('lyx-fold');
 
 type FoldMeta = { fold: number[] } | { unfold: number[] } | { set: number[] };
 
-/** A top-level heading and the section it opens: the body is every child after it, up to `end` (exclusive). */
-export interface FoldHeading { pos: number; index: number; level: number; node: PMNode; /** doc position where the section ends */ end: number; endIndex: number }
+/**
+ * A top-level heading and the section it opens, or a list item and its sub-items (`kind: 'item'`,
+ * `level` = its depth): the body is every child after it, up to `end` (exclusive).
+ */
+export interface FoldHeading { pos: number; index: number; level: number; node: PMNode; /** doc position where the section ends */ end: number; endIndex: number; kind: 'section' | 'item' }
 
 const levelOf = (n: PMNode): number | null => (n.type.name === 'paragraph' ? sectionLevel(String(n.attrs.layout)) : null);
+const isItem = (n: PMNode): boolean => n.type.name === 'paragraph' && isListLayout(String(n.attrs.layout));
+/** a paragraph that can fold what follows it: a heading or a list item */
+const canFold = (n: PMNode): boolean => levelOf(n) !== null || isItem(n);
 const bodyStart = (h: FoldHeading) => h.pos + h.node.nodeSize;
 const hasBody = (h: FoldHeading) => h.endIndex > h.index + 1;
 
@@ -46,11 +58,31 @@ export function foldHeadings(doc: PMNode): FoldHeading[] {
     const level = levelOf(child);
     if (level === null) return;
     while (open.length && open[open.length - 1].level >= level) { const h = open.pop()!; h.end = offset; h.endIndex = index; }
-    const h: FoldHeading = { pos: offset, index, level, node: child, end: doc.content.size, endIndex: doc.childCount };
+    const h: FoldHeading = { pos: offset, index, level, node: child, end: doc.content.size, endIndex: doc.childCount, kind: 'section' };
     out.push(h);
     open.push(h);
   });
   return out;
+}
+
+/** The document's top-level list items that have sub-items: the deeper paragraphs right after them (a heading ends them). */
+export function foldListItems(doc: PMNode): FoldHeading[] {
+  const kids: { node: PMNode; off: number }[] = [];
+  doc.forEach((node, off) => kids.push({ node, off }));
+  const out: FoldHeading[] = [];
+  kids.forEach(({ node, off }, index) => {
+    if (!isItem(node)) return;
+    const depth = Number(node.attrs.depth) || 0;
+    let j = index + 1;
+    while (j < kids.length && kids[j].node.type.name === 'paragraph' && (Number(kids[j].node.attrs.depth) || 0) > depth && levelOf(kids[j].node) === null) j++;
+    if (j > index + 1) out.push({ pos: off, index, level: depth, node, end: j < kids.length ? kids[j].off : doc.content.size, endIndex: j, kind: 'item' });
+  });
+  return out;
+}
+
+/** Everything that folds: the headings (with or without a body) and the list items with sub-items, in document order. */
+export function foldUnits(doc: PMNode): FoldHeading[] {
+  return [...foldHeadings(doc), ...foldListItems(doc)].sort((a, b) => a.pos - b.pos);
 }
 
 /** The folded headings whose hidden body contains position `x` (outermost first). */
@@ -72,35 +104,38 @@ function hiddenRanges(heads: FoldHeading[], folded: ReadonlySet<number>): [numbe
 
 const CHEVRON = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4.5 6l3.5 4 3.5-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-function toggleWidget(closed: boolean, body: boolean, hidden: number) {
+function toggleWidget(kind: FoldHeading['kind'], closed: boolean, body: boolean, hidden: number) {
   return (view: EditorView, getPos: () => number | undefined): HTMLElement => {
     const el = document.createElement('span');
-    el.className = 'lyx-fold-toggle' + (closed ? ' closed' : '') + (body ? '' : ' empty');
+    el.className = 'lyx-fold-toggle' + (kind === 'item' ? ' item' : '') + (closed ? ' closed' : '') + (body ? '' : ' empty');
     el.contentEditable = 'false';
     el.setAttribute('role', 'button');
     el.setAttribute('aria-expanded', String(!closed));
     el.setAttribute('data-fold-toggle', '');
-    el.title = (closed ? `Expand this section (${hidden} hidden paragraph${hidden === 1 ? '' : 's'})` : body ? 'Fold this section' : 'Nothing to fold: the section is empty') + ' — right-click: fold or expand all of this level, or all';
+    const many = `${hidden} hidden paragraph${hidden === 1 ? '' : 's'}`;
+    el.title = kind === 'item'
+      ? (closed ? `Show the sub-items (${many})` : 'Fold the sub-items') + ' — right-click: fold or expand all list items'
+      : (closed ? `Expand this section (${many})` : body ? 'Fold this section' : 'Nothing to fold: the section is empty') + ' — right-click: fold or expand all of this level, or all';
     el.innerHTML = CHEVRON;
     el.addEventListener('mousedown', ev => {
       ev.preventDefault(); ev.stopPropagation();
       const p = getPos();
       if (p === undefined || ev.button !== 0) return;
-      setSectionFolded(p - 1, 'toggle')(view.state, view.dispatch, view);
+      (kind === 'item' ? setItemFolded : setSectionFolded)(p - 1, 'toggle')(view.state, view.dispatch, view);
     });
-    // right-click: this section, all of its level, all
+    // right-click: this section, all of its level, all (an item: this one, all list items)
     el.addEventListener('contextmenu', ev => {
       ev.preventDefault(); ev.stopPropagation();
       const p = getPos();
       if (p === undefined) return;
-      showContextMenu(ev.clientX, ev.clientY, foldMenuItems(view, p - 1));
+      showContextMenu(ev.clientX, ev.clientY, kind === 'item' ? itemFoldMenuItems(view, p - 1) : foldMenuItems(view, p - 1));
     });
     return el;
   };
 }
 
 function buildDecos(doc: PMNode, folded: readonly number[]): DecorationSet {
-  const heads = foldHeadings(doc);
+  const heads = foldUnits(doc);
   if (!heads.length) return DecorationSet.empty;
   const set = new Set(folded);
   const decos: Decoration[] = [];
@@ -108,8 +143,8 @@ function buildDecos(doc: PMNode, folded: readonly number[]): DecorationSet {
     const closed = set.has(h.pos);
     const body = hasBody(h);
     const hidden = closed ? h.endIndex - h.index - 1 : 0;
-    decos.push(Decoration.widget(h.pos + 1, toggleWidget(closed, body, hidden), {
-      side: -1, ignoreSelection: true, stopEvent: () => true, key: `fold:${closed ? 'c' : 'o'}:${body ? hidden || 'b' : 'e'}`,
+    decos.push(Decoration.widget(h.pos + 1, toggleWidget(h.kind, closed, body, hidden), {
+      side: -1, ignoreSelection: true, stopEvent: () => true, key: `fold:${h.kind}:${closed ? 'c' : 'o'}:${body ? hidden || 'b' : 'e'}`,
     }));
     if (closed) decos.push(Decoration.node(h.pos, bodyStart(h), { class: 'lyx-fold-closed' }));
   }
@@ -133,25 +168,27 @@ function remap(folded: readonly number[], tr: Transaction, oldDoc: PMNode, newDo
     let np: number | undefined;
     if (!r.deleted && newDoc.resolve(r.pos).depth === 0) {
       const n = newDoc.nodeAt(r.pos);
-      if (n && levelOf(n) !== null) np = r.pos;
+      if (n && canFold(n)) np = r.pos;
     }
     if (np === undefined && old) {
-      if (!byNode) { byNode = new Map(); newDoc.forEach((c, off) => { if (levelOf(c) !== null && !byNode!.has(c)) byNode!.set(c, off); }); }
+      if (!byNode) { byNode = new Map(); newDoc.forEach((c, off) => { if (canFold(c) && !byNode!.has(c)) byNode!.set(c, off); }); }
       np = byNode.get(old);
     }
-    if (np === undefined && old && levelOf(old) !== null) {
-      heads ??= foldHeadings(newDoc);
+    if (np === undefined && old && canFold(old)) {
+      heads ??= foldUnits(newDoc);
       const same = heads.filter(h => h.node.attrs.layout === old.attrs.layout && h.node.textContent === old.textContent);
       if (same.length) np = same.reduce((a, b) => (Math.abs(b.pos - r.pos) < Math.abs(a.pos - r.pos) ? b : a)).pos;
     }
     if (np !== undefined) out.add(np);
   }
+  // an item whose sub-items are gone has nothing left to fold (it must not swallow the next item indented under it)
+  if (out.size) { const units = new Set(foldUnits(newDoc).map(h => h.pos)); for (const p of out) if (!units.has(p)) out.delete(p); }
   return [...out].sort((a, b) => a - b);
 }
 
 /** A cursor or a selection inside folded-away text unfolds the sections that hide it; a selection from visible text into a fold (Select All) does not. */
 function reveal(folded: readonly number[], state: EditorState): readonly number[] {
-  const heads = foldHeadings(state.doc);
+  const heads = foldUnits(state.doc);
   const set = new Set(folded);
   const { head, anchor, empty } = state.selection;
   const hiding = hidingAt(heads, set, head);
@@ -171,7 +208,7 @@ export function foldPlugin(): Plugin<FoldState> {
         if (tr.docChanged && folded.length) folded = remap(folded, tr, oldState.doc, newState.doc);
         const meta = tr.getMeta(foldKey) as FoldMeta | undefined;
         if (meta) {
-          const heads = new Set(foldHeadings(newState.doc).map(h => h.pos));
+          const heads = new Set(foldUnits(newState.doc).map(h => h.pos));
           if ('set' in meta) folded = meta.set.filter(p => heads.has(p));
           else if ('fold' in meta) folded = [...new Set([...folded, ...meta.fold.filter(p => heads.has(p))])];
           else folded = folded.filter(p => !meta.unfold.includes(p));
@@ -188,6 +225,7 @@ export function foldPlugin(): Plugin<FoldState> {
       // ↑ / ↓ at the edge of a line beside a fold go to the next visible line (ProseMirror would
       // otherwise select a hidden formula or table there, and unfold the section)
       handleKeyDown(view, ev) {
+        if (ev.key === 'Enter' && !ev.shiftKey && !ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.isComposing) return enterAfterFoldedItem(view.state, view.dispatch);
         if ((ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') || ev.shiftKey || ev.altKey || ev.ctrlKey || ev.metaKey) return false;
         const st = foldKey.getState(view.state);
         if (!st?.folded.length) return false;
@@ -197,7 +235,7 @@ export function foldPlugin(): Plugin<FoldState> {
         if (!view.endOfTextblock(dir > 0 ? 'down' : 'up')) return false;
         const doc = view.state.doc;
         const index = sel.$head.index(0);
-        const heads = foldHeadings(doc);
+        const heads = foldUnits(doc);
         const ranges = hiddenRanges(heads, new Set(st.folded));
         const hiddenChild = (i: number) => { let off = 0; for (let k = 0; k < i; k++) off += doc.child(k).nodeSize; return ranges.some(([a, b]) => off >= a && off < b); };
         let i = index + dir;
@@ -234,7 +272,7 @@ export function foldPlugin(): Plugin<FoldState> {
       window.addEventListener('pagehide', onHide);
       /** saved folds applied to the document (a fold hiding the cursor stays open: it was put back there, or moved meanwhile) */
       const putBack = (v: EditorView, saved: SavedFold[]) => {
-        const heads = foldHeadings(v.state.doc);
+        const heads = foldUnits(v.state.doc);
         const want = matchSaved(heads, saved);
         const hiding = new Set(hidingAt(heads, new Set(want), v.state.selection.head).map(h => h.pos));
         const keep = want.filter(p => !hiding.has(p));
@@ -247,7 +285,7 @@ export function foldPlugin(): Plugin<FoldState> {
           const st = foldKey.getState(v.state);
           if (!st) return;
           if (!restored) {
-            if (v.state.doc === prev.doc || !foldHeadings(v.state.doc).length) return;
+            if (v.state.doc === prev.doc || !foldUnits(v.state.doc).length) return;
             restored = true;
             const docId = viewDocId(v);
             // after this update (the first content usually arrives inside y-prosemirror's own dispatch)
@@ -312,7 +350,7 @@ const spacers = new WeakMap<EditorView, number>();
  */
 function anchorElement(view: EditorView, after: EditorState, anchorPos: number | null, top: number, bottom: number): HTMLElement | null {
   const folded = new Set(foldKey.getState(after)?.folded ?? []);
-  const heads = foldHeadings(after.doc);
+  const heads = foldUnits(after.doc);
   const shownAs = (pos: number) => { const hid = hidingAt(heads, folded, pos + 1); return hid.length ? hid[0].pos : pos; };
   const dom = (pos: number) => { const d = view.nodeDOM(pos); return d instanceof HTMLElement ? d : null; };
   const inView = (el: HTMLElement | null) => { if (!el || !el.getClientRects().length) return false; const r = el.getBoundingClientRect(); return r.bottom > top + 1 && r.top < bottom; };
@@ -376,7 +414,7 @@ function send(tr: Transaction, dispatch: ((tr: Transaction) => void) | undefined
 function foldTransaction(state: EditorState, meta: FoldMeta): Transaction {
   const tr = state.tr.setMeta(foldKey, meta).setMeta('addToHistory', false);
   if ('unfold' in meta) return tr;
-  const heads = foldHeadings(state.doc);
+  const heads = foldUnits(state.doc);
   const cur = new Set(foldKey.getState(state)?.folded ?? []);
   const next = 'set' in meta ? new Set(meta.set) : new Set([...cur, ...meta.fold]);
   const hiding = hidingAt(heads, next, state.selection.head);
@@ -459,7 +497,7 @@ export function foldMenuItems(view: EditorView, pos: number): MenuItem[] {
   }
   items.push(
     { label: 'Fold all sections', disabled: !heads.some(x => hasBody(x) && !folded.has(x.pos)), action: run(setAllFolded(true, h?.pos ?? null)) },
-    { label: 'Expand all sections', disabled: !folded.size, action: run(setAllFolded(false, h?.pos ?? null)) },
+    { label: 'Expand all sections', disabled: !heads.some(x => folded.has(x.pos)), action: run(setAllFolded(false, h?.pos ?? null)) },
   );
   return items;
 }
@@ -470,10 +508,11 @@ export function foldMenuItems(view: EditorView, pos: number): MenuItem[] {
  */
 export function setAllFolded(fold: boolean, anchorPos: number | null = null): Command {
   return (state, dispatch, view) => {
-    const all = fold ? foldHeadings(state.doc).filter(hasBody).map(h => h.pos) : [];
+    const heads = foldHeadings(state.doc);
     const cur = foldKey.getState(state)?.folded ?? [];
-    if (fold ? !all.length || all.every(p => cur.includes(p)) : !cur.length) return false;
-    send(foldTransaction(state, { set: all }), dispatch, view, anchorPos);
+    const change = fold ? heads.filter(h => hasBody(h) && !cur.includes(h.pos)).map(h => h.pos) : cur.filter(p => heads.some(h => h.pos === p));
+    if (!change.length) return false;
+    send(foldTransaction(state, fold ? { fold: change } : { unfold: change }), dispatch, view, anchorPos);
     return true;
   };
 }
@@ -483,7 +522,111 @@ export const foldAllSections: Command = setAllFolded(true);
 export const unfoldAllSections: Command = setAllFolded(false);
 
 /** how many sections are folded (menus enable Expand all with it) */
-export const foldedCount = (state: EditorState): number => foldKey.getState(state)?.folded.length ?? 0;
+export const foldedCount = (state: EditorState): number => {
+  const folded = foldKey.getState(state)?.folded ?? [];
+  if (!folded.length) return 0;
+  const heads = new Set(foldHeadings(state.doc).map(h => h.pos));
+  return folded.filter(p => heads.has(p)).length;
+};
+
+/* ------------------------------------------------------------------ list items */
+
+/** the innermost list item with sub-items at `pos`: the item itself, or the one whose sub-items `pos` is in */
+function itemAt(doc: PMNode, pos: number): FoldHeading | null {
+  let best: FoldHeading | null = null;
+  for (const h of foldListItems(doc)) if (h.pos <= pos && pos < h.end) best = h;   // later items nest deeper
+  return best;
+}
+
+/** Fold / unfold / toggle the sub-items of the list item at `pos` (or of the item whose sub-items `pos` is in). */
+export function setItemFolded(pos: number, how: boolean | 'toggle'): Command {
+  return (state, dispatch, view) => {
+    const h = itemAt(state.doc, pos);
+    if (!h) return false;
+    const folded = foldKey.getState(state)?.folded.includes(h.pos) ?? false;
+    const fold = how === 'toggle' ? !folded : how;
+    if (fold === folded) return false;
+    send(foldTransaction(state, fold ? { fold: [h.pos] } : { unfold: [h.pos] }), dispatch, view, h.pos);
+    return true;
+  };
+}
+
+/** how many list items are folded (the right-click menu offers Expand all with it) */
+export const foldedItemCount = (state: EditorState): number => {
+  const folded = foldKey.getState(state)?.folded ?? [];
+  if (!folded.length) return 0;
+  const items = new Set(foldListItems(state.doc).map(h => h.pos));
+  return folded.filter(p => items.has(p)).length;
+};
+
+/** Fold / expand the sub-items of the list item the cursor is in. */
+export const toggleItemAtCursor: Command = (state, dispatch, view) => setItemFolded(state.selection.head, 'toggle')(state, dispatch, view);
+
+/** the list item at the cursor: folded or not (the right-click menu's label); null outside a list item with sub-items */
+export function itemFoldState(state: EditorState, pos = state.selection.head): { folded: boolean } | null {
+  const h = itemAt(state.doc, pos);
+  return h ? { folded: foldKey.getState(state)?.folded.includes(h.pos) ?? false } : null;
+}
+
+/** Fold the sub-items of every list item that has some (outer ones and inner ones: unfolding an item shows its sub-items folded), or expand them all. */
+export function setAllItemsFolded(fold: boolean, anchorPos: number | null = null): Command {
+  return (state, dispatch, view) => {
+    const items = foldListItems(state.doc);
+    const cur = foldKey.getState(state)?.folded ?? [];
+    const change = fold ? items.filter(h => !cur.includes(h.pos)).map(h => h.pos) : cur.filter(p => items.some(h => h.pos === p));
+    if (!change.length) return false;
+    send(foldTransaction(state, fold ? { fold: change } : { unfold: change }), dispatch, view, anchorPos);
+    return true;
+  };
+}
+/** View ▸ Fold all list items. */
+export const foldAllItems: Command = setAllItemsFolded(true);
+/** View ▸ Expand all list items. */
+export const unfoldAllItems: Command = setAllItemsFolded(false);
+
+/** The folding entries for the list item at / above `pos`: its sub-items, all list items — the arrow's right-click menu, the text's right-click menu. */
+export function itemFoldMenuItems(view: EditorView, pos: number): MenuItem[] {
+  const state = view.state;
+  const run = (cmd: Command) => () => { cmd(view.state, view.dispatch, view); view.focus(); };
+  const h = itemAt(state.doc, pos);
+  const folded = new Set(foldKey.getState(state)?.folded ?? []);
+  const items = foldListItems(state.doc);
+  const out: MenuItem[] = [];
+  if (h) {
+    const closed = folded.has(h.pos);
+    out.push({ label: closed ? 'Show the sub-items' : 'Fold the sub-items', action: run(setItemFolded(h.pos, !closed)) }, { sep: true });
+  }
+  out.push(
+    { label: 'Fold all list items', disabled: !items.some(x => !folded.has(x.pos)), action: run(setAllItemsFolded(true, h?.pos ?? null)) },
+    { label: 'Expand all list items', disabled: !items.some(x => folded.has(x.pos)), action: run(setAllItemsFolded(false, h?.pos ?? null)) },
+  );
+  return out;
+}
+
+/**
+ * Enter at the end of a folded list item: the new item comes after its hidden sub-items (they stay
+ * folded under it) — splitting the item would hand them to the new, empty one.
+ */
+function enterAfterFoldedItem(state: EditorState, dispatch?: (tr: Transaction) => void): boolean {
+  const { $head, empty } = state.selection;
+  if (!empty || $head.depth !== 1 || $head.parentOffset !== $head.parent.content.size) return false;
+  const pos = $head.before(1);
+  if (!(foldKey.getState(state)?.folded.includes(pos))) return false;
+  const h = foldListItems(state.doc).find(x => x.pos === pos);
+  if (!h) return false;
+  if (!dispatch) return true;
+  const attrs = { ...h.node.attrs, endChange: null, appendix: false };
+  const tr = state.tr.insert(h.end, schema.nodes.paragraph.create(attrs));
+  // a paragraph break while changes are tracked: the paragraph before the new one ends in an inserted break (commands.ts paragraphBreak)
+  if (editorContext.trackChanges && editorContext.changeAuthorId !== undefined) {
+    const $end = tr.doc.resolve(h.end);
+    const prev = $end.nodeBefore;
+    if (prev && prev.type.name === 'paragraph') tr.setNodeMarkup(h.end - prev.nodeSize, undefined, { ...prev.attrs, endChange: JSON.stringify({ type: 'inserted', author: editorContext.changeAuthorId, time: Math.floor(Date.now() / 1000) }) });
+  }
+  tr.setSelection(TextSelection.create(tr.doc, h.end + 1));
+  dispatch(tr.scrollIntoView());
+  return true;
+}
 
 /* ------------------------------------------------------------------ remembered per user and document */
 
@@ -523,15 +666,17 @@ function writeLocal(docId: string, rec: FoldRecord): void {
   } catch { /* storage unavailable */ }
 }
 
-/** The folded headings by layout, text and which of the equal headings (the n-th "Results") it is — positions do not survive a reload. */
+/** what identifies a folded heading or item: its text, at most the 1000 characters the server keeps */
+const savedText = (h: FoldHeading) => h.node.textContent.slice(0, 1000);
+/** The folded headings and list items by layout, text and which of the equal ones (the n-th "Results") it is — positions do not survive a reload. */
 function serializeFolds(doc: PMNode, folded: readonly number[]): SavedFold[] {
   const seen = new Map<string, number>();
   const out: SavedFold[] = [];
-  for (const h of foldHeadings(doc)) {
-    const k = h.node.attrs.layout + '\n' + h.node.textContent;
+  for (const h of foldUnits(doc)) {
+    const k = h.node.attrs.layout + '\n' + savedText(h);
     const n = seen.get(k) ?? 0;
     seen.set(k, n + 1);
-    if (folded.includes(h.pos)) out.push({ l: String(h.node.attrs.layout), t: h.node.textContent, n });
+    if (folded.includes(h.pos)) out.push({ l: String(h.node.attrs.layout), t: savedText(h), n });
   }
   return out;
 }
@@ -539,10 +684,10 @@ function matchSaved(heads: FoldHeading[], saved: SavedFold[]): number[] {
   const seen = new Map<string, number>();
   const out: number[] = [];
   for (const h of heads) {
-    const k = h.node.attrs.layout + '\n' + h.node.textContent;
+    const k = h.node.attrs.layout + '\n' + savedText(h);
     const n = seen.get(k) ?? 0;
     seen.set(k, n + 1);
-    if (hasBody(h) && saved.some(x => x.l === h.node.attrs.layout && x.t === h.node.textContent && x.n === n)) out.push(h.pos);
+    if (hasBody(h) && saved.some(x => x.l === h.node.attrs.layout && x.t === savedText(h) && x.n === n)) out.push(h.pos);
   }
   return out;
 }
