@@ -336,6 +336,18 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .lyx-par[data-depth="8"] { margin-left: 16em; }
 .lyx-par[data-depth="9"] { margin-left: 18em; }
 .lyx-par[data-depth="10"] { margin-left: 20em; }
+/* what is nested in a list item — a further paragraph, an image, a formula, a table (LaTeX: inside the \item;
+   markdown: indented under it) — starts where the item's text does: its level's 2em plus the label's 0.4em */
+.lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="1"] { margin-left: 2.4em; }
+.lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="2"] { margin-left: 4.4em; }
+.lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="3"] { margin-left: 6.4em; }
+.lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="4"] { margin-left: 8.4em; }
+.lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="5"] { margin-left: 10.4em; }
+.lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="6"] { margin-left: 12.4em; }
+.lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="7"] { margin-left: 14.4em; }
+.lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="8"] { margin-left: 16.4em; }
+.lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="9"] { margin-left: 18.4em; }
+.lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="10"] { margin-left: 20.4em; }
 /* \paragraph_spacing (LyX: single / onehalf / double / other) */
 .lyx-par[data-spacing="onehalf"] { line-height: 1.8; }
 .lyx-par[data-spacing="double"] { line-height: 2.4; }
@@ -584,6 +596,11 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .lyx-graphics { display: block; max-width: 100%; text-align: center; }
 .lyx-graphics img { display: block; max-width: 100%; height: auto; margin: 0 auto; background: #fff; }
 .lyx-graphics .graphics-caption { display: block; font-family: var(--ui-font); font-size: 0.8em; color: var(--ui-muted); border: 1px dashed var(--ui-border); padding: 8px; }
+.lyx-graphics .graphics-caption:empty { display: none; }
+/* an image in a list item or nested in one belongs to it: it starts at the item's text, as LaTeX and markdown
+   put it (centred, it would look like a figure of its own) — unless its paragraph is centred */
+.lyx-par:is(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling, [data-depth]:not([data-depth="0"])):not([data-align]) > .lyx-graphics { text-align: left; }
+.lyx-par:is(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling, [data-depth]:not([data-depth="0"])):not([data-align]) > .lyx-graphics img { margin: 0; }
 .lyx-graphics.ProseMirror-selectednode img { outline: 2px solid var(--accent); }
 
 /* tables */
@@ -1907,6 +1924,10 @@ mjx-mtable:has(.lyx-size-tiny, .lyx-size-scriptsize, .lyx-size-footnotesize, .ly
 .ol-page .lyx-layout-itemize[data-depth="1"], .ol-page .lyx-layout-enumerate[data-depth="1"] { margin-left: calc(var(--ol-pt) * var(--ol-leftmargin, 21.9)); }
 .ol-page .lyx-layout-itemize[data-depth="2"], .ol-page .lyx-layout-enumerate[data-depth="2"] { margin-left: calc(var(--ol-pt) * var(--ol-leftmargin, 21.9) * 2); }
 .ol-page .lyx-layout-itemize[data-depth="3"], .ol-page .lyx-layout-enumerate[data-depth="3"] { margin-left: calc(var(--ol-pt) * var(--ol-leftmargin, 21.9) * 3); }
+/* a paragraph nested in an item starts at the item's text (beamer: \leftmargini per level) */
+.ol-page .lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="1"] { margin-left: calc(var(--ol-pt) * var(--ol-leftmargin, 21.9)); }
+.ol-page .lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="2"] { margin-left: calc(var(--ol-pt) * var(--ol-leftmargin, 21.9) * 2); }
+.ol-page .lyx-par:not(.lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling)[data-depth="3"] { margin-left: calc(var(--ol-pt) * var(--ol-leftmargin, 21.9) * 3); }
 .ol-page .lyx-layout-itemize[data-depth="0"] + .lyx-layout-itemize[data-depth="0"], .ol-page .lyx-layout-enumerate[data-depth="0"] + .lyx-layout-enumerate[data-depth="0"] { margin-top: calc(var(--ol-pt) * var(--ol-itemsep, 3)); }
 .ol-page .lyx-layout-itemize[data-label]::before, .ol-page .lyx-layout-enumerate[data-label]::before { left: auto; right: calc(100% - var(--ol-pt) * (var(--ol-leftmargin, 21.9) - var(--ol-labelsep, 5.475))); width: auto; text-align: right; color: var(--ol-item-color, #3333b3); }
 .ol-page .lyx-layout-itemize[data-label]::before { content: var(--ol-bullet, '\25B6'); font-size: calc(1em * var(--ol-bullet-k, 0.5)); line-height: calc(var(--ol-lh) / var(--ol-bullet-k, 0.5)); }

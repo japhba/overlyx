@@ -638,10 +638,21 @@ blend.
   non-TeX fonts the sets step aside. `tests/fonts.test.ts`, `e2e/fonts.spec.ts`.
 * **Lists, Google-Docs style** (`editor/commands.ts leaveList`, `editor/plugins/mdrules.ts`): `- ` or `* ` at
   the start of a paragraph starts a bullet list, `1. ` a numbered one, `## ` a heading (Backspace right
-  after brings the marker back); Enter continues a list, Enter on an *empty* item ends it, and Backspace
-  at the start of an item takes the bullet away and keeps the text instead of joining the paragraphs — a
-  nested item moves out one level first. Tab / Shift+Tab nest and unnest (`listIndent`), Alt+Enter always
-  starts a plain paragraph.
+  after brings the marker back); Enter continues a list, Enter on an *empty* item ends it (a nested one
+  moves out one level first). **Backspace at the start of an item** takes the bullet away and keeps the
+  text where it was: it becomes a paragraph *of the item above* (LyX depth + 1 — LaTeX writes it inside
+  that `\item`, markdown indents it under it), as deep as LyX's nesting rule allows (`maxDepthAfter`:
+  the first item of a list has no item above — it leaves the list, or goes into its parent item); each
+  further Backspace moves it out one level, then it joins as usual. The item's own sub-items stay
+  where they are. Tab / Shift+Tab nest and unnest (`listIndent`) — Tab also on a paragraph right after
+  a list item, which puts it (or the image in it) into that item; Alt+Enter always starts a plain
+  paragraph. **What is nested in an item starts at the item's text**: non-list paragraphs at depth *n*
+  sit at 2*n* + 0.4em (the item's label box), on layout pages at `--ol-leftmargin` × *n* (beamer's
+  `\leftmargini`); an image in an item or nested in one is not centred like a figure of its own but
+  starts there too (as LaTeX and markdown renderers put it), unless its paragraph has an alignment.
+  Images, formulas, tables and code belong to the list level they are nested at (they fold with
+  their item); a float with a caption is a figure of its own and best kept outside the list (LaTeX
+  floats it away from the item anyway; markdown has none).
 * **Ruler**: a Google-Docs-style ruler above the page (*View ▸ Ruler*) with draggable margin
   handles sets the text width (also *View ▸ Text width*, `Ctrl+Alt+±`); double-click resets it.
 * **LyX math editor**: formulas are edited with our own port of LyX's mathed (`packages/core/src/math`:

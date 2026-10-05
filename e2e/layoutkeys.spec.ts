@@ -4,12 +4,15 @@
  *    a level the class lacks (Chapter in an article) leaves the paragraph alone;
  *  - `- ` at a paragraph start starts a bullet list, `1. ` a numbered one, `## ` a subsection;
  *    Backspace right after brings the marker back;
+ *  - Backspace at the start of an item keeps its text in the item above (nested, written inside
+ *    the \item), Tab puts a paragraph after a list back into it; what is nested in an item (an
+ *    image too) starts at the item's text;
  *  - a formula inserted (or pasted from LaTeX) while tracking changes is coloured like inserted
  *    text, and the .tex carries it inside \lyxadded. Needs the seeded admin.
  */
 import { test, expect } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { login, openDoc, texDoc, PROJECTS_DIR, grantClipboard } from './helpers';
+import { login, openDoc, texDoc, PROJECTS_DIR, grantClipboard, png } from './helpers';
 
 const PROJECT = 'admin/e2e-layoutkeys';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -22,6 +25,8 @@ test.beforeAll(() => {
   writeFileSync(`${DIR}/keys.tex`, texDoc('First paragraph.\n\nSecond paragraph.\n\nThird paragraph.'));
   writeFileSync(`${DIR}/md.tex`, texDoc('Intro paragraph.\n\n'));
   writeFileSync(`${DIR}/ct.tex`, texDoc('Tracked paragraph with words.'));
+  writeFileSync(`${DIR}/nest.tex`, texDoc(['\\begin{itemize}', '\\item first point', '\\item second point', '\\item with a figure', '', '\\includegraphics[width=2cm]{plot}', '\\end{itemize}', '', 'After the list.'].join('\n'), '\\usepackage{graphicx}'));
+  writeFileSync(`${DIR}/plot.png`, png(120, 80, (x, y) => (y === Math.round(60 - x / 3) ? [0, 0, 0] : [255, 255, 255])));
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
 
@@ -104,6 +109,35 @@ test('"- ", "1. " and "## " at a paragraph start become a bullet, a numbered ite
   await expect(pars).toHaveCount(8);   // the paragraph was not joined to the previous one
   await expect.poll(() => readFileSync(`${DIR}/md.tex`, 'utf8'), { timeout: 15000 }).toMatch(/\\begin\{itemize\}\n\\item first point\n\\item second point\n\\end\{itemize\}/);
   expect(readFileSync(`${DIR}/md.tex`, 'utf8')).toContain('\\subsection{Heading here}');
+});
+
+test('Backspace at the start of an item keeps its text in the item above, the next one takes it out of the list, Tab puts it back; an image in an item starts at its text', async ({ page }) => {
+  await login(page);
+  await openDoc(page, `${PROJECT}/nest.tex`);
+  await page.waitForTimeout(500);
+  const pars = page.locator('.lyx-editor > .lyx-par');
+  const par = (t: string) => pars.filter({ hasText: t }).first();
+  const textLeft = (t: string) => par(t).evaluate(e => e.getBoundingClientRect().left + parseFloat(getComputedStyle(e).paddingLeft));
+  await expect(pars).toHaveCount(5);
+  await par('second point').click();
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Backspace');
+  await expect(par('second point')).toHaveAttribute('data-layout', 'Standard');
+  await expect(par('second point')).toHaveAttribute('data-depth', '1');
+  await expect(pars).toHaveCount(5);   // not joined
+  expect(Math.abs(await textLeft('second point') - await textLeft('first point'))).toBeLessThan(1);   // the text stays where it was
+  await expect.poll(() => readFileSync(`${DIR}/nest.tex`, 'utf8'), { timeout: 15000 }).toMatch(/\\item first point\n\nsecond point\n\\item with a figure/);
+  await page.keyboard.press('Backspace');
+  await expect(par('second point')).toHaveAttribute('data-depth', '0');   // out of the list
+  expect(await textLeft('second point')).toBeLessThan(await textLeft('first point') - 10);
+  await page.keyboard.press('Tab');
+  await expect(par('second point')).toHaveAttribute('data-depth', '1');   // back into the item above
+  // the image nested in "with a figure": at the item's text, not centred
+  const img = page.locator('.lyx-editor > .lyx-par[data-depth="1"] .lyx-graphics img');
+  await expect.poll(() => img.evaluate(e => (e as HTMLImageElement).naturalWidth), { timeout: 15000 }).toBeGreaterThan(0);
+  const imgLeft = await img.evaluate(e => e.getBoundingClientRect().left);
+  expect(Math.abs(imgLeft - await textLeft('with a figure'))).toBeLessThan(1);
+  await expect(page.locator('.lyx-editor .graphics-caption:visible')).toHaveCount(0);   // no empty caption box under a loaded image
 });
 
 test('a formula inserted while tracking changes is coloured as an insertion and lands in \\lyxadded', async ({ page, context }) => {

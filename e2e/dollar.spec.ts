@@ -9,22 +9,11 @@
  */
 import { test, expect } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import zlib from 'node:zlib';
-import { login, openDoc, texDoc, PROJECTS_DIR, pickTheme } from './helpers';
+import { login, openDoc, texDoc, PROJECTS_DIR, pickTheme, png } from './helpers';
 
 const PROJECT = 'admin/e2e-dollar';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
 
-/** a small RGBA PNG painted by `px(x, y)` */
-function png(w: number, h: number, px: (x: number, y: number) => [number, number, number]): Buffer {
-  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
-  const crc = (b: Buffer) => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
-  const chunk = (type: string, data: Buffer) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]); };
-  const raw = Buffer.alloc((w * 3 + 1) * h);
-  for (let y = 0; y < h; y++) { raw[y * (w * 3 + 1)] = 0; for (let x = 0; x < w; x++) { const [r, g, b] = px(x, y); const i = y * (w * 3 + 1) + 1 + x * 3; raw[i] = r; raw[i + 1] = g; raw[i + 2] = b; } }
-  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
-}
 const lineArt = (shift = 0) => png(120, 80, (x, y) => (x === 10 + shift || y === 70 || y === Math.round(60 - x / 3) ? [0, 0, 0] : [255, 255, 255]));
 const photo = () => png(120, 80, (x, y) => [(x * 2) % 256, (y * 3) % 256, ((x + y) * 5) % 256]);
 

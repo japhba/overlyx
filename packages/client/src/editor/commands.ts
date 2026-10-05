@@ -107,6 +107,20 @@ export function setParagraphAttrs(attrs: Partial<Record<string, unknown>>): Comm
   };
 }
 
+/** LyX Paragraph::getMaxDepthAfter: how deep the paragraph after `prev` may nest — one step deeper under an environment (a list item), else as deep as `prev`. */
+function maxDepthAfter(prev: PMNode | null | undefined, prevDepth = (prev?.attrs.depth as number) || 0): number {
+  if (prev?.type.name !== 'paragraph') return 0;
+  return isEnvironmentLayout(prev.attrs.layout as string, editorContext.meta?.layouts) ? prevDepth + 1 : prevDepth;
+}
+
+/** the paragraph before the cursor's paragraph in the same container (the document, an inset, a cell), if any */
+function paragraphBefore(state: EditorState): PMNode | null {
+  const cur = currentParagraph(state);
+  if (!cur) return null;
+  const $p = state.doc.resolve(cur.pos);
+  return $p.index() > 0 ? $p.parent.child($p.index() - 1) : null;
+}
+
 /**
  * LyX Text::changeDepth: a paragraph may nest one step deeper only under its predecessor
  * (getMaxDepthAfter: prev.depth + 1 when prev's layout is an environment, else prev.depth);
@@ -121,17 +135,12 @@ export function changeDepth(delta: 1 | -1): Command {
     const tr = state.tr;
     let any = false;
     const newDepths = new Map<PMNode, number>();
-    const layouts = editorContext.meta?.layouts;
     state.doc.nodesBetween(from, to, (node, pos) => {
       if (node.type.name !== 'paragraph') return true;
       const $pos = state.doc.resolve(pos);
       if ($pos.depth !== level - 1) return true;
       const prev = $pos.index() > 0 ? $pos.parent.child($pos.index() - 1) : null;
-      let maxDepth = 0;
-      if (prev?.type.name === 'paragraph') {
-        const prevDepth = newDepths.get(prev) ?? ((prev.attrs.depth as number) || 0);
-        maxDepth = isEnvironmentLayout(prev.attrs.layout as string, layouts) ? prevDepth + 1 : prevDepth;
-      }
+      const maxDepth = prev ? maxDepthAfter(prev, newDepths.get(prev) ?? ((prev.attrs.depth as number) || 0)) : 0;
       const depth = (node.attrs.depth as number) || 0;
       let next = depth;
       if (delta > 0 && depth < maxDepth) next = depth + 1;
@@ -148,15 +157,18 @@ export function changeDepth(delta: 1 | -1): Command {
 
 /**
  * Tab / Shift+Tab as list indent (LyX site.bind: Tab falls through cell-forward to
- * depth-increment). Claimed only in list paragraphs and nested continuation paragraphs, so the
- * key keeps its browser meaning in ordinary text — but once claimed the key is consumed even if
- * no depth change is possible, so focus never tabs out of the editor mid-list.
+ * depth-increment). Claimed in list paragraphs, nested continuation paragraphs, and a paragraph
+ * that can nest under the list item above it (Tab puts a paragraph or an image after a list into
+ * that item), so the key keeps its browser meaning in ordinary text — but once claimed the key is
+ * consumed even if no depth change is possible, so focus never tabs out of the editor mid-list.
  */
 export function listIndent(delta: 1 | -1): Command {
   return (state, dispatch) => {
     const cur = currentParagraph(state);
     if (!cur) return false;
-    if (!isListLayout(cur.node.attrs.layout as string) && !((cur.node.attrs.depth as number) > 0)) return false;
+    const depth = (cur.node.attrs.depth as number) || 0;
+    const underItem = delta > 0 && maxDepthAfter(paragraphBefore(state)) > depth;
+    if (!isListLayout(cur.node.attrs.layout as string) && !(depth > 0) && !underItem) return false;
     changeDepth(delta)(state, dispatch);
     return true;
   };
@@ -246,13 +258,27 @@ const leaveList: Command = (state, dispatch) => {
   return true;
 };
 
-/** Backspace at the start of a list item takes the bullet away instead of joining the paragraphs (Google Docs); a nested paragraph moves out one level. */
+/**
+ * Backspace at the start of a list item takes the bullet away and keeps the text where it was
+ * (Google Docs): it becomes a paragraph of the item above — text, an image, a formula belonging to
+ * that item (LaTeX: a paragraph inside its \item; markdown: an indented block under it) — as deep as
+ * LyX lets it nest there (the first item of a list has no item above: out of the list, or into the
+ * parent item). The next Backspace moves such a nested paragraph out one level, and so on, instead
+ * of joining the paragraphs.
+ */
 export const listExitBackspace: Command = (state, dispatch, view) => {
   const { $from, empty } = state.selection;
   if (!empty || $from.parentOffset !== 0) return false;
   const par = $from.parent;
   if (par.type.name !== 'paragraph') return false;
-  if (!isListLayout(par.attrs.layout as string) && !(((par.attrs.depth as number) || 0) > 0)) return false;
+  const depth = (par.attrs.depth as number) || 0;
+  if (isListLayout(par.attrs.layout as string)) {
+    if (!dispatch) return true;
+    const nest = Math.min(depth + 1, maxDepthAfter(paragraphBefore(state)));
+    dispatch(state.tr.setNodeMarkup($from.before(), undefined, { ...par.attrs, layout: inInset(state) ? 'Plain Layout' : 'Standard', depth: nest }).scrollIntoView());
+    return true;
+  }
+  if (depth === 0) return false;
   return leaveList(state, dispatch, view);
 };
 
