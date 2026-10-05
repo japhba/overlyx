@@ -77,6 +77,84 @@ test('copying a paragraph and pasting it keeps citations, references, formulas a
   expect(errors).toEqual([]);
 });
 
+test('a section with a comment thread, a note box and a table keeps them whole through copy, cut and paste', async ({ page, context }) => {
+  await grantClipboard(context);
+  const errors = collectErrors(page);
+  const FILE = `${DIR}/notes.tex`;
+  writeFileSync(FILE, withPreambleOf(`${SRC}/main.tex`, `\\section{Alpha}
+
+Alpha first paragraph with a comment here.
+%% @comment
+%% Admin (2026-10-05 10:00):
+%%
+%% Comment on alpha.
+%% @end
+And more alpha text.
+
+Alpha second paragraph with a note box.
+%% @note
+%% A yellow note inside alpha.
+%% @end
+
+\\begin{tabular}{cc}
+a & b\\tabularnewline
+c & d\\tabularnewline
+\\end{tabular}
+
+\\section{Beta}
+
+Beta paragraph.
+`));
+  await login(page);
+  await page.evaluate(() => { localStorage.setItem('ol.tabs', '[]'); });
+  await page.goto(`/#/${PROJECT}/notes.tex`);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor > .lyx-par').length >= 5, null, { timeout: 60000 });
+  await page.waitForTimeout(1500);
+  // select from the start of the "Alpha" heading to the end of its last paragraph (the table's)
+  const selectAlpha = () => page.evaluate(() => {
+    const v = (window as any).overlyx.activeView;
+    let from = -1, to = -1, seen = false;
+    v.state.doc.forEach((n: any, off: number) => {
+      if (n.attrs.layout === 'Section') seen = n.textContent === 'Alpha' && from < 0;
+      if (seen && from < 0) from = off + 1;
+      if (seen) to = off + n.nodeSize - 1;
+    });
+    v.dispatch(v.state.tr.setSelection(v.state.selection.constructor.create(v.state.doc, from, to)));
+    v.focus();
+  });
+  const pasteAtEnd = async () => {
+    await page.evaluate(() => {
+      const v = (window as any).overlyx.activeView;
+      v.dispatch(v.state.tr.setSelection(v.state.selection.constructor.create(v.state.doc, v.state.doc.content.size - 1)));
+      v.focus();
+    });
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Control+v');
+  };
+  const file = () => readFileSync(FILE, 'utf8');
+  await selectAlpha();
+  await page.keyboard.press('Control+c');
+  await pasteAtEnd();
+  await expect.poll(() => count(file(), /\\section\{Alpha\}/g), { timeout: 15000 }).toBe(2);
+  // the copy: a heading, the thread with its header and text, the note's text, the table — inside their insets
+  await expect.poll(() => count(file(), /%% @comment\n%% Admin \(2026-10-05 10:00\):\n%%\n%% Comment on alpha\.\n%% @end/g)).toBe(2);
+  expect(count(file(), /%% @note\n%% A yellow note inside alpha\.\n%% @end/g)).toBe(2);
+  expect(count(file(), /\\begin\{tabular\}/g)).toBe(2);
+  expect(count(file(), /^Comment on alpha\.|^A yellow note inside alpha\./gm)).toBe(0);
+  await expect(page.locator('.lyx-editor .lyx-inset-note-comment')).toHaveCount(2);
+  await expect(page.locator('.lyx-editor .lyx-inset-note-note')).toHaveCount(2);
+  // cut the first Alpha and paste it at the end: moved, nothing lost
+  await selectAlpha();
+  await page.keyboard.press('Control+x');
+  await pasteAtEnd();
+  await expect.poll(() => file().indexOf('\\section{Beta}') < file().indexOf('\\section{Alpha}'), { timeout: 15000 }).toBe(true);
+  await expect.poll(() => count(file(), /%% @comment\n%% Admin \(2026-10-05 10:00\):\n%%\n%% Comment on alpha\.\n%% @end/g)).toBe(2);
+  expect(count(file(), /\\section\{Alpha\}/g)).toBe(2);
+  expect(count(file(), /%% @note\n%% A yellow note inside alpha\.\n%% @end/g)).toBe(2);
+  expect(count(file(), /\\begin\{tabular\}/g)).toBe(2);
+  expect(errors).toEqual([]);
+});
+
 test('foreign HTML pastes as document content (bold, italics, a heading)', async ({ page }) => {
   await login(page);
   await open(page);

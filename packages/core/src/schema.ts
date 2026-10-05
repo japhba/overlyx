@@ -94,6 +94,17 @@ export const INSET_NAMES_WITH_STATUS = new Set([
   'listings', 'script', 'Phantom', 'IPA', 'IPADeco', 'Preview',
 ]);
 
+/** A paragraph's attributes from its element (`<p>`, or `<div class="lyx-par">` from the clipboard). */
+function paragraphAttrs(dom: HTMLElement): Record<string, unknown> {
+  return {
+    layout: dom.getAttribute('data-layout') || 'Standard', depth: Number(dom.getAttribute('data-depth') || 0),
+    align: dom.getAttribute('data-align'), noindent: dom.getAttribute('data-noindent') === '1',
+    labelwidthstring: dom.getAttribute('data-labelwidthstring'), spacing: dom.getAttribute('data-spacing'), leftindent: dom.getAttribute('data-leftindent'),
+    appendix: dom.getAttribute('data-appendix') === '1',
+    endChange: (() => { try { const v = dom.getAttribute('data-end-change'); return v ? JSON.parse(v) : null; } catch { return null; } })(),
+  };
+}
+
 function insetDOM(node: { attrs: Record<string, any> }): DOMOutputSpec {
   const cls = `lyx-inset lyx-inset-${node.attrs.name.toLowerCase()}` +
     (node.attrs.arg ? ` lyx-inset-${node.attrs.name.toLowerCase()}-${String(node.attrs.arg).toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : '') +
@@ -158,13 +169,9 @@ const nodes: Record<string, NodeSpec> = {
       endChange: { default: null },
     },
     parseDOM: [
-      { tag: 'p', getAttrs: (dom: HTMLElement) => ({
-        layout: dom.getAttribute('data-layout') || 'Standard', depth: Number(dom.getAttribute('data-depth') || 0),
-        align: dom.getAttribute('data-align'), noindent: dom.getAttribute('data-noindent') === '1',
-        labelwidthstring: dom.getAttribute('data-labelwidthstring'), spacing: dom.getAttribute('data-spacing'), leftindent: dom.getAttribute('data-leftindent'),
-        appendix: dom.getAttribute('data-appendix') === '1',
-        endChange: (() => { try { const v = dom.getAttribute('data-end-change'); return v ? JSON.parse(v) : null; } catch { return null; } })(),
-      }) },
+      { tag: 'p', getAttrs: paragraphAttrs },
+      // a paragraph that holds a block (an inset's paragraphs, a table) is a div on the clipboard (client editor/cliphtml.ts)
+      { tag: 'div.lyx-par', getAttrs: paragraphAttrs },
       // foreign HTML (a web page, Google Docs, …): headings and list items become LyX layouts
       ...Object.entries(LAYOUT_OF_TAG).map(([tag, layout]) => ({ tag, getAttrs: () => ({ layout }) })),
       // list items: numbered in an <ol>; an item made of paragraphs (Google Docs: <li><p>…</p></li>) is its first paragraph

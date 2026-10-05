@@ -49,6 +49,7 @@ import { GraphicsView, CommandView, LeafView } from './nodeviews/leaf';
 import { editorContext, viewDocDir, viewProject } from './context';
 import { imageFiles, insertImageFiles, isSvgMarkup, looksLikeImageFileName, svgFile } from './imagepaste';
 import { sliceText } from './cliptext';
+import { clipboardSerializer } from './cliphtml';
 import { showContextMenu } from './contextmenu';
 import { editorContextMenu } from './editormenu';
 import { includeTarget } from './commands';
@@ -236,12 +237,14 @@ export function dispatchTransactionProp(getView: () => EditorView, viewOnly: () 
  * suggestions), paste (images, SVG markup, LaTeX parsed into structure, plain text as paragraphs)
  * and dropped image files.
  */
-export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeViews' | 'clipboardTextSerializer' | 'handleDoubleClickOn' | 'handleClickOn' | 'handleDOMEvents' | 'handlePaste' | 'handleDrop'> {
+export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeViews' | 'clipboardTextSerializer' | 'clipboardSerializer' | 'handleDoubleClickOn' | 'handleClickOn' | 'handleDOMEvents' | 'handlePaste' | 'handleDrop'> {
   const viewOnly = () => o.viewOnly?.() ?? false;
   return {
     nodeViews: editorNodeViews(),
     // text/plain for the clipboard: formulas as $…$, references as \ref{…}, … (see cliptext.ts)
     clipboardTextSerializer: sliceText,
+    // text/html: an inset's paragraphs (a comment, a note, a footnote, a table's cells) stay inside it (see cliphtml.ts)
+    clipboardSerializer: clipboardSerializer(),
     handleDoubleClickOn(view, _pos, node, nodePos) {
       // a child document: opened by its node view on the browser's dblclick (nodeviews/leaf.ts CommandView)
       if (node.type.name === 'command' && node.attrs.cmd === 'include') return true;
