@@ -473,6 +473,11 @@ export function resolveChange(range: ChangeRange, accept: boolean): Command {
   };
 }
 
+/** A change author's name from the document's author table ("author 3" when it has none). */
+export function changeAuthorName(id: number): string {
+  return editorContext.meta?.authors.find(a => a.id === id)?.name ?? `author ${id}`;
+}
+
 /* ------------------------------------------------ navigation (LyX change-next / change-previous) */
 
 /** All tracked change runs of the document in document order (adjacent same author/type merged). */
@@ -523,10 +528,17 @@ export function resolveSelectionChanges(accept: boolean): Command {
   return (state, dispatch) => {
     const { from, to, empty } = state.selection;
     const ranges = empty ? [changeAt(state, from)].filter((c): c is ChangeRange => !!c) : allChanges(state.doc).filter(c => c.from < to && c.to > from);
+    return resolveChanges(ranges, accept)(state, dispatch);
+  };
+}
+
+/** Accept or reject the given change runs (positions in the state's document). */
+export function resolveChanges(ranges: readonly ChangeRange[], accept: boolean): Command {
+  return (state, dispatch) => {
     if (!ranges.length) return false;
     if (!dispatch) return true;
     let tr = state.tr;
-    for (const r of ranges.sort((a, b) => b.from - a.from)) {
+    for (const r of [...ranges].sort((a, b) => b.from - a.from)) {
       const remove = accept ? r.type === 'deleted' : r.type === 'inserted';
       if (r.boundary) { resolveBoundary(tr, r, remove); continue; }
       if (remove) tr = tr.delete(r.from, r.to);
@@ -542,6 +554,25 @@ export function resolveSelectionChanges(accept: boolean): Command {
     dispatch(tr.setMeta('lyx-changes', true));
     return true;
   };
+}
+
+const changesOfDoc = new WeakMap<PMNode, ChangeRange[]>();
+
+/**
+ * The change run at `pos` (`boundary`: the paragraph break that ends there) together with the runs
+ * that touch it and have the same author: one suggestion to accept or reject as a whole — a
+ * replacement (the deletion and its insertion), a suggestion across paragraph breaks. Null when
+ * no change is there.
+ */
+export function changeGroupAt(doc: PMNode, pos: number, boundary = false): ChangeRange[] | null {
+  let all = changesOfDoc.get(doc);
+  if (!all) changesOfDoc.set(doc, all = allChanges(doc));
+  const i = all.findIndex(r => boundary ? r.boundary && r.from === pos : !r.boundary && r.from <= pos && pos < r.to);
+  if (i < 0) return null;
+  let a = i, b = i;
+  while (a > 0 && all[a - 1].to === all[a].from && all[a - 1].author === all[i].author) a--;
+  while (b + 1 < all.length && all[b + 1].from === all[b].to && all[b + 1].author === all[i].author) b++;
+  return all.slice(a, b + 1);
 }
 
 /* ------------------------------------------------ display filter (insertions / deletions) */

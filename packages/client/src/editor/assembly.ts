@@ -22,7 +22,8 @@ import { lyxKeymap, chordPlugin } from './keymap';
 import { numberingPlugin } from './plugins/numbering';
 import { foldPlugin } from './plugins/fold';
 import { marginPlugin } from './plugins/margin';
-import { changeTrackingPlugin, changesFilterPlugin } from './plugins/changes';
+import { changeTrackingPlugin, changesFilterPlugin, changeAuthorName } from './plugins/changes';
+import { changeActionsPlugin } from './plugins/changeactions';
 import { fontCarryPlugin } from './plugins/fontcarry';
 import { typingAnchorPlugin } from './plugins/typinganchor';
 import { insetCaretPlugin } from './plugins/insetcaret';
@@ -143,6 +144,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     ...(o.ink ? [o.ink] : []),
     changeTrackingPlugin(),
     changesFilterPlugin(),
+    changeActionsPlugin(),   // ✓ / ✗ with the author and date over the tracked change under the pointer or the caret
     findPlugin(),
     pasteTargetsPlugin(),
     linksPlugin(),   // the bubble under a hyperlink, the selection shown while the link box is open
@@ -366,7 +368,7 @@ export function editorViewProps(o: ViewPropsOptions): Pick<EditorProps, 'nodeVie
 
 /** "Inserted by Jane Doe on 3/2/2026, 10:12" for a tracked change. */
 export function describeChange(type: string | undefined, authorId: number, time: number): string {
-  const author = editorContext.meta?.authors.find(a => a.id === authorId)?.name ?? `author ${authorId}`;
+  const author = changeAuthorName(authorId);
   const when = time ? new Date(time * 1000).toLocaleString() : '';
   return `${type === 'deleted' ? 'Deleted' : 'Inserted'} by ${author}${when ? ' on ' + when : ''}`;
 }

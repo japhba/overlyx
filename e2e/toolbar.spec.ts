@@ -239,6 +239,65 @@ test('the mode switch at the top right: Editing · Suggesting · Viewing, and wh
   await ctx.close();
 });
 
+test('accept / reject in the text: a bar with the author and the date over a tracked change', async ({ page }) => {
+  const errors = collectErrors(page);
+  await open(page);
+  const sw = page.locator('.tb-toprow .edit-mode-btn');
+  const pick = async (mode: string) => { await sw.click(); await page.locator(`.edit-mode-menu [data-mode="${mode}"]`).click(); await expect(sw).toHaveAttribute('data-edit-mode', mode); };
+  // select `part` of the (unique) text `needle`
+  const select = (needle: string, part: string) => page.evaluate(([needle, part]) => {
+    const v = (window as any).overlyx.activeView;
+    let at = -1;
+    v.state.doc.descendants((n: any, pos: number) => { if (at < 0 && n.isText && n.text.includes(needle)) at = pos + n.text.indexOf(needle) + needle.indexOf(part); return at < 0; });
+    v.dispatch(v.state.tr.setSelection(v.state.selection.constructor.create(v.state.doc, at, at + part.length)));
+    v.focus();
+  }, [needle, part]);
+  const bar = page.locator('.change-actions');
+  await page.locator('.lyx-editor > .lyx-par').first().click();
+  if (await sw.getAttribute('data-edit-mode') !== 'editing') await pick('editing');
+
+  // suggest a replacement and a deletion; while typing, no bar comes up
+  await pick('suggesting');
+  await select('number 5 with', 'number');
+  await page.keyboard.type('count');
+  await expect.poll(() => /\\lyxdeleted\{[^}]*\}\{[^}]*\}\{number\}\\lyxadded\{[^}]*\}\{[^}]*\}\{count\}/.test(file())).toBe(true);
+  await expect(bar).toHaveCount(0);
+  await select('number 6 with some words', 'some ');
+  await page.keyboard.press('Backspace');
+  await expect.poll(() => /\\lyxdeleted\{[^}]*\}\{[^}]*\}\{some ?\}/.test(file())).toBe(true);
+  await pick('editing');
+
+  // the pointer on the deleted word: the bar over it names the author and the date
+  const gone = page.locator('.lyx-editor .lyx-change-deleted', { hasText: 'number' });
+  await gone.hover();
+  await expect(bar).toBeVisible();
+  await expect(bar.locator('.change-actions-author')).toHaveText('Admin');
+  await expect(bar.locator('.change-actions-date')).not.toBeEmpty();
+  const b = (await bar.boundingBox())!, g = (await gone.boundingBox())!;
+  expect(b.y + b.height).toBeLessThanOrEqual(g.y + 1);
+  expect(Math.abs(b.x - g.x)).toBeLessThan(40);
+  // ✓ shades what it settles: the deletion and its insertion, one replacement
+  await bar.locator('.change-action.accept').hover();
+  await expect(page.locator('.change-actions-shade')).not.toHaveCount(0);
+  await bar.locator('.change-action.accept').click();
+  await expect(bar).toHaveCount(0);
+  await expect(page.locator('.change-actions-shade')).toHaveCount(0);
+  await expect.poll(() => file().replace(/\n/g, ' ')).toContain('Filler paragraph count 5 with');
+  expect(file()).not.toMatch(/\{number\}|\{count\}/);
+
+  // the caret in a change brings the bar up as well, and it stays while the pointer goes elsewhere
+  await page.locator('.lyx-editor .lyx-change-deleted', { hasText: 'some' }).click();
+  await expect(bar).toBeVisible();
+  await page.mouse.move(5, 300);
+  await page.waitForTimeout(700);
+  await expect(bar).toBeVisible();
+  await bar.locator('.change-action.reject').click();
+  await expect.poll(() => file().replace(/\n/g, ' ')).toContain('Filler paragraph number 6 with some words');
+  expect(file()).not.toContain('\\lyxdeleted');
+  await expect(bar).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test('clicking a user avatar jumps to that user\'s cursor', async ({ browser }) => {
   const ctxA = await browser.newContext(); const pageA = await ctxA.newPage();
   const ctxB = await browser.newContext(); const pageB = await ctxB.newPage();

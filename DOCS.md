@@ -1679,6 +1679,13 @@ How it works, in order of what happens when you open a document:
   events) knows the key — no reload. A table inserted or deleted as a whole has its rules and cell
   boundaries in the author's colour, an outline and a tinted ground (a deleted one is crossed out), so it
   never reads as an accepted table.
+* **Accept / reject in the text** (`editor/plugins/changeactions.ts`, both shells): a small bar
+  with the author (a dot in their colour), the date, ✓ and ✗ appears over the change under the
+  pointer, or the change the caret was clicked or moved into (not while typing). One click settles the
+  change with the runs touching it by the same author (`changeGroupAt` in plugins/changes.ts), so a
+  replacement (deletion + insertion) or a suggestion across a paragraph break is one decision; hovering
+  ✓ / ✗ shades what it applies to. Not on read-only editors. The bar and the shading are drawn outside
+  the editor's DOM. `tests/changes-actions.test.ts`, `e2e/toolbar.spec.ts` "accept / reject in the text".
 * **Mode switch: Editing · Suggesting · Viewing** (`app/EditModeSwitch.tsx`, both shells — the web
   client at the right end of the first toolbar row, as in Google Docs; the VS Code webview in its
   top bar): Suggesting is change tracking — a setting of the document (`\tracking_changes`), so it

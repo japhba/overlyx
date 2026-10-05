@@ -31,6 +31,8 @@ export const MENU_ICONS = {
   cite: '<path d="M6.5 7.5h4v4c0 3-1.7 5-4 6M13.5 7.5h4v4c0 3-1.7 5-4 6"/>',
   image: '<rect x="3.5" y="5" width="17" height="14" rx="1.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17.5l5-4.5 3.5 3 3-2.5 4.5 4"/>',
   inset: '<rect x="3.5" y="6" width="17" height="12" rx="2"/><path d="M8 12h8"/>',
+  accept: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  reject: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.3M12 18.2v2.3M3.5 12h2.3M18.2 12h2.3M6 6l1.6 1.6M16.4 16.4 18 18M6 18l1.6-1.6M16.4 7.6 18 6"/>',
 } as const;
 
