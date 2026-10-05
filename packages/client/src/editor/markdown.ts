@@ -22,6 +22,7 @@ import { schema, paragraphsToPm, isMarkdownPath, MARKDOWN_LAYOUTS, markdownLayou
 import { inRawText } from './rawtext';
 import { editorContext } from './context';
 import { pasteBlocksIntoEmpty } from './plugins/paste';
+import { fontCommands } from './commands';
 
 /** Is this document (id or path) written as markdown? */
 export function isMarkdownDoc(docId: string | null | undefined): boolean {
@@ -268,6 +269,9 @@ export function markdownPlugins(): Plugin[] {
     }),
     keymap({
       Enter: enterMarkup,
+      // italic is markdown's emphasis (the toolbar's italic button too): Ctrl+I's italic shape became
+      // emphasis as it was typed, so it could switch italic on but never off again
+      'Mod-i': fontCommands.emph,
       'Alt-Mod-m': notInMarkdown('margin notes'),
       'Alt-Mod-l': notInMarkdown('labels'),
       'Shift-Mod-i': notInMarkdown('cross-references'),

@@ -129,6 +129,33 @@ describe('document model → markdown', () => {
     expect(JSON.stringify(parseMarkdown(md).doc.body)).toBe(JSON.stringify(doc.body));
   });
 
+  it('a formula, image, footnote, script, line break or comment inside emphasis stays inside it', () => {
+    // each used to end the emphasis: written back as `<em>the value </em>$x$<em> is</em>`
+    for (const md of ['*the value $x$ is* known.', 'Let *$x$* be given.', '**bold $x$ text** here', '*see ![i](a.png) here* x', '*a<sub>2</sub> b* c', '*a <kbd>K</kbd> b* x', '*a\\\nb* x', 'a *b <!-- note --> c* d', '*text[^1] more* x\n\n[^1]: The note.']) {
+      expect(roundTrip(md + '\n')).toBe(md + '\n');
+    }
+    const [p] = body('*the value $x$ is*\n');
+    expect(p.items.map(i => i.font)).toEqual([{ emph: 'on' }, { emph: 'on' }, { emph: 'on' }]);
+    // the script carries the emphasis around it; its text only what is set inside it
+    expect((insetOf(body('*a<sub>**2**</sub>*\n')[0]) as Extract<Inset, { type: 'Text' }>).paragraphs[0].items[0].font).toEqual({ series: 'bold' });
+  });
+
+  it('emphasis on the space after a word is written with delimiters, not HTML tags', () => {
+    // typed with Ctrl+I: the space after "value" is italic too; a space shows no emphasis
+    const doc = parseMarkdown('x\n').doc;
+    doc.body = [{ layout: 'Standard', depth: 0, params: {}, items: [
+      { kind: 'text', text: 'the value ', font: { emph: 'on' } },
+      { kind: 'inset', font: {}, inset: { type: 'Formula', inline: true, latex: '$x$' } },
+      { kind: 'text', text: ' and ', font: {} }, { kind: 'text', text: 'bold ', font: { series: 'bold' } }, { kind: 'text', text: 'end.', font: {} },
+    ] }];
+    expect(writeMarkdown(doc).text).toBe('*the value* $x$ and **bold** end.\n');
+    // …also at the end of the paragraph, while typing on in italic
+    doc.body[0].items = [{ kind: 'text', text: 'So ', font: {} }, { kind: 'text', text: 'typing on ', font: { emph: 'on' } }];
+    expect(writeMarkdown(doc).text).toBe('So *typing on*\n');
+    // a mark that continues stays open; the longer one is outermost
+    expect(roundTrip('_Note: this **does not** work._ And **_both_** here.\n')).toBe('*Note: this **does not** work.* And ***both*** here.\n');
+  });
+
   it('LaTeX-only constructs degrade to their closest markdown, with warnings', () => {
     const doc = parseMarkdown('x\n').doc;
     doc.body = [

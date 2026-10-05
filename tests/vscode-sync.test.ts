@@ -219,6 +219,33 @@ describe('VS Code host: its own write-and-reparse is not a change on disk', () =
     expect(fs.readdirSync(path.join(root, 'recovery')).length).toBeGreaterThan(0);   // the dropped edit is kept as a draft
   });
 
+  it('typing in a formula of a markdown document is not a change on disk: no snapshot, no draft, no <em>', async () => {
+    // a formula's editClock is not in the file: every update with a just-edited formula used to be
+    // "rebased" and the file's version sent back while the formula was being typed
+    const text = '# Notes\n\nSo *the value $x$ is* known.\n';
+    fs.writeFileSync(path.join(root, 'notes.md'), text);
+    doc.text = text;
+    doc.uri = { fsPath: path.join(root, 'notes.md') };
+    state.documents.set(doc.uri.fsPath, doc);
+    session = new DocSession(doc as never, ctx, 'paper', 'notes.md', path.join(root, 'recovery'));
+    session.parseCurrent();
+    const mdModel = (t: string) => { const parsed = parseDocumentText(t, ctx, 'notes.md'); return documentModel(lyxToPm(parsed.doc), parsed.doc.header.lines); };
+    const typed = (m: ReturnType<typeof model>, latex: string, clock: number) => {
+      const json = structuredClone(m.pmDoc) as any;
+      const math = json.content[1].content.find((n: any) => n.type === 'math_inline');
+      Object.assign(math.attrs, { latex, editClock: JSON.stringify({ 7: clock }) });
+      return { pmDoc: json, headerLines: m.headerLines };
+    };
+    const base = mdModel(text);
+    const first = typed(base, 'x+1', 1);
+    expect(await session.applyPmUpdate(first.pmDoc, first.headerLines, base, { epoch: 'e', seq: 1 })).toBe(false);
+    expect(doc.text).toBe('# Notes\n\nSo *the value $x+1$ is* known.\n');
+    const second = typed(base, 'x+12', 2);
+    expect(await session.applyPmUpdate(second.pmDoc, second.headerLines, documentModel(first.pmDoc, first.headerLines), { epoch: 'e', seq: 2 })).toBe(false);
+    expect(doc.text).toBe('# Notes\n\nSo *the value $x+12$ is* known.\n');
+    expect(fs.existsSync(path.join(root, 'recovery'))).toBe(false);
+  });
+
   it('a save of the document text itself (auto save) is not a change to push', async () => {
     const base = model(initial);
     const edited = edit(base, 'Local notes.', 'Local notes, edited.');

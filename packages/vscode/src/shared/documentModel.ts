@@ -3,8 +3,21 @@ import { lyxToPm, mergeLyx, pmToLyxBody, schema, type LyxDocument, type PMJSON }
 /** A snapshot is also the base against which the next editor change is interpreted. */
 export interface DocumentModel { pmDoc: PMJSON; headerLines: string[] }
 
+/**
+ * What the file can hold of an editor document. A formula's `editClock` (the web editor's count of
+ * edits to it, for telling concurrent formula edits apart) is not written: kept in the model, every
+ * update with a just-edited formula differed from the file's parse — the host took it for a merge
+ * and sent the file's version back, which, arriving while the formula was being typed, replaced it
+ * and reported a "concurrent formula edit".
+ */
 export function documentModel(pmDoc: unknown, headerLines: string[]): DocumentModel {
-  return { pmDoc: schema.nodeFromJSON(pmDoc).toJSON(), headerLines: [...headerLines] };
+  return { pmDoc: withoutEditClocks(schema.nodeFromJSON(pmDoc).toJSON()), headerLines: [...headerLines] };
+}
+
+function withoutEditClocks(node: PMJSON): PMJSON {
+  if (node.attrs && 'editClock' in node.attrs) { const { editClock: _clock, ...rest } = node.attrs; node.attrs = rest; }
+  node.content?.forEach(withoutEditClocks);
+  return node;
 }
 
 export function sameModel(a: DocumentModel, b: DocumentModel): boolean { return JSON.stringify(a) === JSON.stringify(b); }

@@ -83,3 +83,27 @@ test('a comment thread on a markdown document is an HTML comment in the file', a
   await expect.poll(() => readFileSync(FILE, 'utf8'), { timeout: 20000 }).toMatch(/\$x\^\{?2\}?\$\.<!-- @comment\n {4}Admin \(\d{4}-\d\d-\d\d \d\d:\d\d\):\n {4}Needs a citation\n {4}-->/);
   await ctx.close();
 });
+
+test('a formula typed in italic text stays in the emphasis, and Ctrl+I switches italic off again', async ({ browser }) => {
+  // the parser gave a formula inside `*…*` no font: the file came back as `<em>the value </em>$x$<em> is</em>`
+  const { ctx, page, errors } = await open(browser);
+  const ed = page.locator('.lyx-editor');
+  await ed.locator('.lyx-par', { hasText: 'Last paragraph.' }).click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('So ', { delay: 10 });
+  await page.keyboard.press('Control+i');
+  await page.keyboard.type('the value ', { delay: 10 });
+  await page.keyboard.type('$', { delay: 10 });
+  await expect(ed.locator('.lyx-math-inline').last()).toBeVisible();
+  await page.keyboard.type('x+1', { delay: 30 });
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.type(' is', { delay: 10 });
+  await page.keyboard.press('Control+i');
+  await page.keyboard.type(' known.', { delay: 10 });
+  await saved(page);
+  await expect.poll(() => readFileSync(FILE, 'utf8'), { timeout: 15000 }).toContain('So *the value $x+1$ is* known.');
+  expect(readFileSync(FILE, 'utf8')).not.toContain('<em>');
+  expect(errors).toEqual([]);
+  await ctx.close();
+});

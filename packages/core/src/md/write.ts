@@ -120,7 +120,7 @@ function htmlComment(kind: string, lines: string[], single: boolean): string {
 const iso = (t: number) => new Date(t * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 const attrQ = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
-type Seg = { md: string; marks: string[]; change?: Change; text?: string; code?: boolean };
+type Seg = { md: string; marks: string[]; change?: Change; text?: string; code?: boolean; note?: boolean };
 
 const MARK_ORDER = ['strong', 'em', 'strike', 'u'];
 
@@ -260,9 +260,28 @@ function inlineMd(items: Item[], w: W, o: InlineOpts): string {
 
 function sameInline(a: string, b: string): boolean {
   try {
-    const p = (s: string) => JSON.stringify(parseMarkdown(s).doc.body.map(x => normalize(x.items)));
+    const p = (s: string) => JSON.stringify(parseMarkdown(s).doc.body.map(x => trimEnds(normalize(x.items.flatMap(plainSpaces)))));
     return p(a) === p(b);
   } catch { return false; }
+}
+
+/**
+ * Emphasis and bold do not show on a space: `*the value* more` (the space moved out of the
+ * delimiters) reads back the way `<em>the value </em>more` does.
+ */
+function plainSpaces(it: Item): Item[] {
+  if (it.kind !== 'text' || (!it.font.emph && !it.font.series)) return [it];
+  const { emph: _e, series: _s, ...plain } = it.font;
+  return it.text.split(/(\s+)/).filter(Boolean).map(t => ({ ...it, text: t, font: /^\s+$/.test(t) ? plain : it.font }));
+}
+
+/** the space at the start and end of a paragraph is not written (`<em>typing </em>` at its end reads back as `*typing*` does) */
+function trimEnds(items: Item[]): Item[] {
+  const out = [...items];
+  const first = out[0], last = out[out.length - 1];
+  if (first?.kind === 'text') out[0] = { ...first, text: first.text.trimStart() };
+  if (last?.kind === 'text') out[out.length - 1] = { ...(out[out.length - 1] as typeof last), text: (out[out.length - 1] as typeof last).text.trimEnd() };
+  return out.filter(i => i.kind !== 'text' || i.text);
 }
 
 function segments(items: Item[], w: W, o: InlineOpts): Seg[] {
@@ -287,9 +306,15 @@ function segments(items: Item[], w: W, o: InlineOpts): Seg[] {
       // a line break that ends the paragraph: markdown drops a trailing backslash break, not a <br>
       const trailing = isBreak(it) && items.slice(i + 1).every(x => isBreak(x) || (x.kind === 'text' && !x.text.trim()));
       const md = trailing ? '<br>' : insetMd(it.inset, w, o, it.font);
-      segs.push({ md, marks: it.inset.type === 'Text' && it.inset.name === 'Note' ? [] : fontMarks(it.font), change: it.change });
+      segs.push({ md, marks: it.inset.type === 'Text' && it.inset.name === 'Note' ? [] : fontMarks(it.font), change: it.change, note: it.inset.type === 'Text' && it.inset.name === 'Note' });
     }
   }
+  // a comment inside emphasis does not end it: it takes the marks its neighbours share
+  segs.forEach((s, k) => {
+    if (!s.note) return;
+    const prev = segs.slice(0, k).reverse().find(x => !x.note), next = segs.slice(k + 1).find(x => !x.note);
+    s.marks = prev && next ? prev.marks.filter(m => next.marks.includes(m)) : [];
+  });
   return segs;
 }
 
@@ -320,17 +345,23 @@ function renderSegs(segs: Seg[], o: InlineOpts, html: boolean): string {
   };
   const closeTag = (k: string) => (k.startsWith('change:') ? (k.startsWith('change:inserted') ? '</ins>' : '</del>') : CLOSE[k][html ? 1 : 0]);
   const authorName = (id: number) => currentAuthors.get(id) ?? 'Unknown';
-  for (const s of segs) {
+  const wants = segs.map(want);
+  /** how many segments from `at` on carry `k` */
+  const runOf = (k: string, at: number) => { let n = 0; while (at + n < segs.length && wants[at + n].includes(k)) n++; return n; };
+  segs.forEach((s, at) => {
     if (s.change) changes.set(changeKey(s.change), s.change);
-    const target = want(s);
+    const target = wants[at];
+    // what is open and still wanted stays open (`*a **b** c*`, not `*a* ***b*** *c*`) …
     let common = 0;
-    while (common < stack.length && common < target.length && stack[common] === target[common]) common++;
+    while (common < stack.length && target.includes(stack[common])) common++;
     for (let i = stack.length - 1; i >= common; i--) toks.push({ t: 'close', k: stack[i], s: closeTag(stack[i]) });
     stack = stack.slice(0, common);
-    for (let i = common; i < target.length; i++) { toks.push({ t: 'open', k: target[i], s: openTag(target[i]) }); stack.push(target[i]); }
+    // … and of the marks opened here, the one that runs longest is outermost
+    const opening = target.filter(k => !stack.includes(k)).sort((a, b) => runOf(b, at) - runOf(a, at) || target.indexOf(a) - target.indexOf(b));
+    for (const k of opening) { toks.push({ t: 'open', k, s: openTag(k) }); stack.push(k); }
     if (s.text !== undefined) toks.push({ t: 'text', s: s.text, raw: false });
     else toks.push({ t: 'text', s: s.md, raw: true });
-  }
+  });
   for (let i = stack.length - 1; i >= 0; i--) toks.push({ t: 'close', k: stack[i], s: closeTag(stack[i]) });
   // whitespace moves out of delimiter runs (`** a**` is no emphasis)
   for (let i = 0; i < toks.length && !html; i++) {

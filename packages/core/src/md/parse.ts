@@ -264,7 +264,7 @@ const HEADING_OF_TAG: Record<string, string> = { h1: HEADING_LAYOUTS[0], h2: HEA
 
 interface Ctx { depth: number; quote: boolean; base: string }
 
-type Sub = { name: string; at: number };
+type Sub = { name: string; at: number; font: FontState };
 
 class Converter {
   pars: Paragraph[] = [];
@@ -436,6 +436,8 @@ class Converter {
       return f as FontState;
     };
     const add = (it: Item) => { if (change) it.change = { ...change }; items.push(it); };
+    // an inline object takes the font around it, as text does: `*the value $x$ is*` is one emphasis
+    const addInset = (inset: Inset) => add({ kind: 'inset', inset, font: cur() });
     const addText = (t: string) => { if (t) add({ kind: 'text', text: t, font: cur() }); };
     const open = (key: keyof FontState, value: string, tag: string) => { fontStack.push({ key, value, tag }); };
     const close = (tag: string) => {
@@ -445,7 +447,7 @@ class Converter {
       switch (t.type) {
         case 'text': case 'text_special': addText(t.content); break;
         case 'softbreak': addText(' '); break;
-        case 'hardbreak': add(newline()); break;
+        case 'hardbreak': addInset(newlineInset()); break;
         case 'em_open': open('emph', 'on', 'em'); break;
         case 'em_close': close('em'); break;
         case 'strong_open': open('series', 'bold', 'strong'); break;
@@ -453,12 +455,12 @@ class Converter {
         case 's_open': open('strikeout', 'on', 's'); break;
         case 's_close': close('s'); break;
         case 'code_inline': { const f: Record<string, string> = { ...cur(), family: 'typewriter' }; add({ kind: 'text', text: t.content, font: Object.fromEntries(FONT_KEYS.filter(k => f[k]).map(k => [k, f[k]])) as FontState }); break; }
-        case 'math_inline': add({ kind: 'inset', inset: formula(t.content, t.markup === '$$'), font: {} }); break;
+        case 'math_inline': addInset(formula(t.content, t.markup === '$$')); break;
         case 'footnote_ref': {
           const label = String(t.meta?.label ?? '');
           const content = this.env.footnotes?.get(label) ?? '';
           const paragraphs = this.footnoteDepth > 2 ? [{ layout: 'Plain Layout', depth: 0, params: {}, items: content ? [text(content)] : [] }] : parseBlocksInto(this.md, content, this.env, 'Plain Layout', this.footnoteDepth + 1, this);
-          add({ kind: 'inset', inset: { type: 'Text', name: 'Foot', arg: '', params: [`label ${q(label)}`], status: 'collapsed', paragraphs }, font: {} });
+          addInset({ type: 'Text', name: 'Foot', arg: '', params: [`label ${q(label)}`], status: 'collapsed', paragraphs });
           break;
         }
         case 'link_open':
@@ -491,7 +493,7 @@ class Converter {
           const params = [`\tfilename ${t.attrGet('src') ?? ''}`];
           const alt = (t.children ?? []).map(c => c.content).join('') || t.content;
           if (alt) params.push(`\tspecial alt={${alt.replace(/[{}]/g, '')}}`);
-          add({ kind: 'inset', inset: { type: 'Leaf', name: 'Graphics', arg: '', params }, font: {} });
+          addInset({ type: 'Leaf', name: 'Graphics', arg: '', params });
           break;
         }
         case 'html_inline': {
@@ -518,14 +520,16 @@ class Converter {
             if (closing) close('html:' + name); else open(FONT_TAGS[name][0], FONT_TAGS[name][1], 'html:' + name);
             break;
           }
-          if (name === 'br' && !closing) { add(newline()); break; }
-          if ((name === 'sub' || name === 'sup') && raw.toLowerCase() === `<${name}>`) { subs.push({ name, at: items.length }); break; }
+          if (name === 'br' && !closing) { addInset(newlineInset()); break; }
+          if ((name === 'sub' || name === 'sup') && raw.toLowerCase() === `<${name}>`) { subs.push({ name, at: items.length, font: cur() }); break; }
           if ((name === 'sub' || name === 'sup') && closing && subs[subs.length - 1]?.name === name) {
-            const inner = items.splice(subs.pop()!.at);
-            add({ kind: 'inset', inset: { type: 'Text', name: 'script', arg: name === 'sub' ? 'subscript' : 'superscript', params: [], status: 'open', paragraphs: [{ layout: 'Plain Layout', depth: 0, params: {}, items: normalize(inner) }] }, font: {} });
+            const sub = subs.pop()!;
+            // the script carries the font around it; its text only what was set inside it
+            const inner = items.splice(sub.at).map(i => ({ ...i, font: fontInside(i.font, sub.font) }));
+            add({ kind: 'inset', inset: { type: 'Text', name: 'script', arg: name === 'sub' ? 'subscript' : 'superscript', params: [], status: 'open', paragraphs: [{ layout: 'Plain Layout', depth: 0, params: {}, items: normalize(inner) }] }, font: sub.font });
             break;
           }
-          add({ kind: 'inset', inset: ert(raw), font: {} });
+          addInset(ert(raw));
           break;
         }
         default:
@@ -543,7 +547,8 @@ const FONT_TAGS: Record<string, [keyof FontState, string]> = {
 
 const q = (s: string) => '"' + s.replace(/"/g, '\\"') + '"';
 const text = (s: string): Item => ({ kind: 'text', text: s, font: {} });
-const newline = (): Item => ({ kind: 'inset', inset: { type: 'Leaf', name: 'Newline', arg: 'newline', params: [] }, font: {} });
+const newlineInset = (): Inset => ({ type: 'Leaf', name: 'Newline', arg: 'newline', params: [] });
+const newline = (): Item => ({ kind: 'inset', inset: newlineInset(), font: {} });
 
 function itemTextOf(it: Item): string {
   if (it.kind === 'text') return it.text;
@@ -574,6 +579,12 @@ export function normalize(items: Item[]): Item[] {
     out.push(it);
   }
   return out;
+}
+
+/** `font` without what it shares with the font around it (`outer`) */
+function fontInside(font: FontState, outer: FontState): FontState {
+  const f = font as Record<string, string | undefined>, o = outer as Record<string, string | undefined>;
+  return Object.fromEntries(Object.keys(f).filter(k => f[k] !== undefined && f[k] !== o[k]).map(k => [k, f[k]])) as FontState;
 }
 
 function sameFont(a: FontState, b: FontState): boolean {
