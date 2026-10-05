@@ -11,6 +11,7 @@ import { takePendingImport } from './pendingImport';
 import { sortByRecency, recencyLabel } from './recency';
 import { projectShortName, splitProjectKey, isProjectName } from '@overlyx/core';
 import { uiPrompt, uiConfirm } from './Dialogs';
+import { promptNewFile } from './newfile';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -87,7 +88,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
       validate: v => (v && !isProjectName(v) ? 'Only letters, digits, space, . _ - are allowed.' : null),
     });
     if (!name) return;
-    try { await api.createProject(name.trim()); await load(); onChanged(); notify(`Project "${name.trim()}" created — add a document with + Doc in the documents panel`); }
+    try { await api.createProject(name.trim()); await load(); onChanged(); notify(`Project "${name.trim()}" created — add a document with + File in the files panel`); }
     catch (e) { notify((e as Error).message, 'error'); }
   };
   const remove = async (p: Project) => {
@@ -134,7 +135,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         {!isExample && <div class="meta">{metaText(p, docs)}</div>}
         <div class="docs">
           {docs.slice(0, isExample ? 1 : 6).map(d => docLink(p, d))}
-          {!isExample && docs.length > 6 && <span class="meta">+{docs.length - 6} more in the documents panel</span>}
+          {!isExample && docs.length > 6 && <span class="meta">+{docs.length - 6} more in the files panel</span>}
           {!docs.length && <span class="meta">No documents yet.</span>}
         </div>
         {actions(p, docs, isExample)}
@@ -172,7 +173,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           ? <button class="btn primary" data-guest-signin onClick={onSignIn}>Sign in</button>
           : <button class="btn primary" onClick={() => void newProject()}>+ New project</button>}
         {!user.guest && <button class="btn" data-import-overleaf onClick={() => setImportOpen(true)} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
-        <button class="btn" onClick={onBrowse}>Show the documents panel</button>
+        <button class="btn" onClick={onBrowse}>Show the files panel</button>
         <button class="home-view-switch" data-home-view-switch={view === 'rows' ? 'grid' : 'rows'} onClick={switchView}
           title={view === 'rows' ? 'Show projects as a grid of cards' : 'Show projects as a list'} aria-label={view === 'rows' ? 'Grid view' : 'List view'}>
           {viewIcon(view === 'rows' ? 'grid' : 'rows')}
@@ -219,17 +220,15 @@ export function ProjectRootPanel({ project, notify, onCreated }: { project: stri
     return () => { alive = false; };
   }, [project]);
   const createFirstDoc = async () => {
-    const name = await uiPrompt('New Document', `First document of "${projectShortName(project)}":`, 'main.tex', { placeholder: 'main.tex' });
-    if (!name) return;
-    try { const r = await api.newDoc(project, name, { title: name.replace(/\.(tex|lyx)$/, '') }); onCreated(r.id); }
-    catch (e) { notify((e as Error).message, 'error'); }
+    const id = await promptNewFile(project, { where: projectShortName(project), initial: 'main.tex', title: 'New Document' }).catch(e => { notify((e as Error).message, 'error'); return null; });
+    if (id) onCreated(id);
   };
   if (info === undefined) return <div class="home"><div class="meta">Loading…</div></div>;
   if (info === null) return <div class="home"><h1>Not found</h1><div class="meta">This project does not exist, or you do not have access to it.</div></div>;
   return (
     <div class="home">
       <h1>📁 {projectTitle(info)}</h1>
-      <div class="sub">This project has no documents yet. Its files (if any) are in the documents panel on the left.</div>
+      <div class="sub">This project has no documents yet. Its files (if any) are in the files panel on the left.</div>
       <div class="home-actions">
         <button class="btn primary" onClick={() => void createFirstDoc()}>+ New document</button>
       </div>

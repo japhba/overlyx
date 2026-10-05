@@ -1,8 +1,10 @@
 /**
  * File browser: one project at a time (a switcher at the top lists everything the user can open —
- * own projects, shared ones, and for administrators all others). Documents and text files open in
- * tabs; images and PDFs open in a browser tab. LaTeX build products and LyX backups are hidden
- * unless "all files" is on. Under the documents panel a document row expands into its outline.
+ * own projects, shared ones, and for administrators all others). Every file is just a file: + File
+ * makes any of them, the name's ending deciding what it becomes (app/newfile.ts); documents, text
+ * files, PDFs and whiteboards open in place, images in a browser tab. LaTeX build products and LyX
+ * backups are hidden unless "all files" is on. Under the files panel a document row expands into its
+ * outline.
  */
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -11,21 +13,7 @@ import { subscribeProjectEvents } from '../projectevents';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
 import { projectOfDoc, splitDocId, projectShortName } from '@overlyx/core';
 import { uiPrompt, uiConfirm, uiAlert } from './Dialogs';
-
-/**
- * Prompts for a name, retrying with the server's own error shown (typically a name collision)
- * until the user picks a free one or cancels — a collision here never falls through to offering to
- * delete anything (persona-p7 F4: the quick-add buttons used to risk exactly that).
- */
-async function promptUntilCreated(title: string, message: string, initial: string, create: (name: string) => Promise<void>): Promise<void> {
-  let name = initial, error: string | undefined;
-  for (;;) {
-    const n = await uiPrompt(title, error ? `${message}\n\n${error} — try another name.` : message, name);
-    if (!n) return;
-    try { await create(n); return; }
-    catch (e) { name = n; error = (e as Error).message; }
-  }
-}
+import { promptNewFile } from './newfile';
 
 /**
  * Subscribe to the server's change stream for one project (SSE): `onChange` fires whenever files
@@ -164,33 +152,14 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     setCollapsed(c => ({ ...c, ...open }));
   };
 
-  const newDoc = async (dir = '') => {
+  /** a new file of any kind — a document, a whiteboard, a .bib … (app/newfile.ts: the name's ending decides); a taken name asks again, never replaces */
+  const newFile = async (dir = '') => {
     if (!project) return;
-    await promptUntilCreated('New Document', `New document file name (in ${projectLabel(project)}${dir ? '/' + dir : ''}):`, 'untitled.tex', async name => {
-      const r = await api.newDoc(project.name, (dir ? dir + '/' : '') + name, { title: name.replace(/\.(tex|lyx)$/, '') });
-      await load();
-      onOpen(r.id);
-    });
-  };
-  const newTextFile = async (dir = '') => {
-    if (!project) return;
-    await promptUntilCreated('New File', `New text file (in ${projectLabel(project)}${dir ? '/' + dir : ''}), e.g. macros.tex or refs.bib:`, 'notes.tex', async name => {
-      const rel = (dir ? dir + '/' : '') + name;
-      if (project.files.some(f => f.path === rel)) throw new Error('file exists');
-      await api.writeText(project.name, rel, '');
-      await load();
-      onOpen(project.name + '/' + rel);
-    });
-  };
-  const newBoard = async (dir = '') => {
-    if (!project) return;
-    await promptUntilCreated('New Whiteboard', `New whiteboard (in ${projectLabel(project)}${dir ? '/' + dir : ''}):`, 'whiteboard.board', async name0 => {
-      const name = name0.endsWith('.board') ? name0 : name0 + '.board';
-      const rel = (dir ? dir + '/' : '') + name;
-      await api.upload(project.name, rel, new Blob(['{"overlyx":"board","v":1,"objects":{\n}}\n'], { type: 'application/octet-stream' }), { overwrite: false });
-      await load();
-      onOpen(project.name + '/' + rel);
-    });
+    const id = await promptNewFile(project.name, { dir, where: projectLabel(project) + (dir ? '/' + dir : '') });
+    if (!id) return;
+    if (dir) reveal(dir + '/');
+    await load();
+    onOpen(id);
   };
   const upload = async (dir = '') => {
     if (!project) return;
@@ -321,8 +290,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     ] : []),
   ];
   const newItems = (dir = ''): MenuItem[] => canEdit ? [
-    { label: 'New Document…', action: () => void newDoc(dir) },
-    { label: 'New File…', action: () => void newTextFile(dir) },
+    { label: 'New File…', action: () => void newFile(dir) },
     { label: 'New Folder…', action: () => void newFolder(dir) },
     { label: 'Upload…', action: () => void upload(dir) },
   ] : [];
@@ -359,7 +327,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
             onDragOver={dragOver(node.path)} onDrop={drop(node.path)}>
             <span class="twisty">{isCollapsed ? '▸' : '▾'}</span><span class="fname">{node.name}</span>
             {canEdit && <span class="row-actions">
-              <button class="mini" title="New document here" onClick={e => { e.stopPropagation(); void newDoc(node.path); }}>+</button>
+              <button class="mini" title="New file here (a document, a whiteboard, a .bib …)" onClick={e => { e.stopPropagation(); void newFile(node.path); }}>+</button>
               <button class="mini" title="Upload files here" onClick={e => { e.stopPropagation(); void upload(node.path); }}>⇧</button>
             </span>}
           </div>
@@ -384,7 +352,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     const outlined = isDoc && !!outlines;
     const open = outlined && outlines!.open(id);
     const row = (
-      <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (!isDoc ? ' other' : '') + (outlined ? ' doc-name' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }}
+      <a key={key} class={'tree-row file' + (id === current ? ' current' : '') + (outlined ? ' doc-name' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }}
         href={href} target={inTab ? undefined : '_blank'} title={`${f.path} · ${(f.size / 1024).toFixed(0)} KB${isLyx ? ' · click to import as .tex' : inTab && isPdf ? ' · opens in the PDF viewer' : inTab && !isDoc ? ' · opens in the text editor' : ''}`}
         data-file={f.path}
         onDragOver={dragOver(f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '')}
@@ -426,9 +394,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
         {via === 'owner' ? 'Your project' : via === 'admin' ? `Owned by ${project.owner?.name ?? '—'}` : `Shared by ${project.owner?.name ?? '—'} · ${role === 'view' ? 'view only' : 'you can edit'}`} · {project.name}
       </div>}
       <div class="actions">
-        {canEdit && project && <button class="small-btn" onClick={() => void newDoc()} title="New LyX document in this project">+ Doc</button>}
-        {canEdit && project && <button class="small-btn" onClick={() => void newTextFile()} title="New text file (.tex, .bib, …) in this project">+ File</button>}
-        {canEdit && project && <button class="small-btn" onClick={() => void newBoard()} title="New whiteboard (freehand drawing, images, sticky notes — live-collaborative)">+ Board</button>}
+        {canEdit && project && <button class="small-btn" onClick={() => void newFile()} title="New file in this project — the ending decides what it is: .tex a LaTeX document, .md a Markdown document, .board a whiteboard, .bib, .sty … a text file">+ File</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void newFolder()} title="New folder in this project (also in the right-click menu of any folder)">+ Folder</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void upload()} title="Upload files (figures, .bib, .sty …) — or drag them from your computer onto the file list">⇧</button>}
         {role === 'owner' && via !== 'admin' && project && onShare && <button class="small-btn" data-share={project.name} onClick={() => onShare(project.name)} title="Share this project…">👥</button>}
@@ -436,7 +402,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
         <button class="small-btn" onClick={() => setShowAll(!showAll)} title="Show LaTeX build files (.aux, .log, .bbl …) and LyX backups (~, #, .emergency)">{showAll ? 'Fewer' : 'All files'}</button>
       </div>
       {project && tree.map(n => renderNode(n, 0))}
-      {project && !tree.length && <div class="empty">No files yet — add a document with + Doc, or upload files.</div>}
+      {project && !tree.length && <div class="empty">No files yet — make one with + File (main.tex is a document), or upload files.</div>}
       {!projects.length && <div class="empty">No projects yet.</div>}
     </div>
   );

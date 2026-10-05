@@ -131,7 +131,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
           ))}
         </select>
         {project && (project.via ?? 'owner') !== 'owner' && <span class={'badge' + (project.role === 'view' ? ' view' : '')} title={project.role === 'view' ? 'Shared with you for viewing' : 'Shared with you for editing'}>{project.via === 'admin' ? 'admin' : project.role === 'view' ? 'view' : 'edit'}</span>}
-        <button class="hide" title="Hide the documents panel (Ctrl+Alt+O)" onClick={onHide}>«</button>
+        <button class="hide" title="Hide the files panel (Ctrl+Alt+O)" onClick={onHide}>«</button>
       </div>
       <div class="panel-body">
         <FileBrowser current={current} project={selected} refreshKey={listKey} onOpen={id => onOpen(id)} onGit={onGit} outlines={{

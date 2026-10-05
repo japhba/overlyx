@@ -196,8 +196,8 @@ test('a board can be created from the file browser', async ({ page }) => {
   await login(page);
   await page.goto(`/#/${PROJECT}/main.tex`);
   await page.waitForSelector('.lyx-editor');
-  await page.click('.filetree .actions button:has-text("+ Board")');
-  await fillDialog(page, 'scratchpad');
+  await page.click('.filetree .actions button:has-text("+ File")');   // any file: the .board ending makes a whiteboard
+  await fillDialog(page, 'scratchpad.board');
   await page.waitForSelector('.board-tools', { timeout: 20000 });
   await expect(page).toHaveURL(new RegExp(`${PROJECT}/scratchpad\\.board`));
 });

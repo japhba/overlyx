@@ -859,7 +859,7 @@ export function ChildDocDialog({ meta, project, docDir, onInsert, onClose }: {
       ) : (
         <>
           <Row label="New file name"><input type="text" autofocus value={newName} onInput={e => setNewName(e.currentTarget.value)} onKeyDown={e => { if (e.key === 'Enter') void createNew(); }} /></Row>
-          <div class="sub">Created empty: a bare fragment with no preamble of its own, ready to be {kind === 'include' ? 'included' : 'input'} here. Open it from the documents panel to write its content.</div>
+          <div class="sub">Created empty: a bare fragment with no preamble of its own, ready to be {kind === 'include' ? 'included' : 'input'} here. Open it from the files panel to write its content.</div>
           {error && <div class="err" role="alert">{error}</div>}
         </>
       )}

@@ -4,8 +4,8 @@
  * Needs the seeded users admin and bob.
  */
 import { test, expect, type Browser, type BrowserContext } from '@playwright/test';
-import { mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
-import { apiLogin, adminCredentials, userCredentials, shareProject, BASE_URL, PROJECTS_DIR, grantClipboard, readClipboard, fillDialog, acceptDialog } from './helpers';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
+import { apiLogin, adminCredentials, userCredentials, shareProject, BASE_URL, PROJECTS_DIR, grantClipboard, readClipboard, fillDialog, acceptDialog, cancelDialog, dialogLocator } from './helpers';
 
 const PROJECT = 'admin/e2e-text';
 const DIR = `${PROJECTS_DIR}/${PROJECT}`;
@@ -304,6 +304,41 @@ test('the explorer context menu works like VS Code: new folder, duplicate, renam
   await admin.close();
 });
 
+test('+ File makes any kind of file — the ending decides: .tex and .md documents, a .bib in the text editor, a .board whiteboard; images are uploaded instead', async ({ browser }) => {
+  const admin = await asUser(browser);
+  const page = await admin.newPage();
+  await page.goto('/#/' + PROJECT + '/main.tex');
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  const tree = page.locator('.filetree');
+  await expect(tree.locator('.actions button', { hasText: /^\+ (Doc|Board)$/ })).toHaveCount(0);   // no separate document / whiteboard buttons
+  const make = async (name: string) => { await tree.locator('.actions button', { hasText: '+ File' }).click(); await fillDialog(page, name); };
+  await make('made/chapter.tex');
+  await expect(page).toHaveURL(/made\/chapter\.tex$/, { timeout: 10000 });
+  await page.waitForSelector('.lyx-editor .lyx-par', { timeout: 30000 });
+  expect(readFileSync(`${DIR}/made/chapter.tex`, 'utf8')).toContain('\\begin{document}');
+  await expect(tree.locator('[data-file="made/chapter.tex"] .twisty[role=button]')).toHaveCount(1);   // a document: it expands into its outline
+  await make('made/notes');   // no ending: a .tex document
+  await expect(page).toHaveURL(/made\/notes\.tex$/, { timeout: 10000 });
+  await make('made/todo.md');
+  await expect(page).toHaveURL(/made\/todo\.md$/, { timeout: 10000 });
+  expect(readFileSync(`${DIR}/made/todo.md`, 'utf8')).toBe('# todo\n\n');
+  await make('made/extra.bib');
+  await expect(page).toHaveURL(/text:.*made\/extra\.bib$/, { timeout: 10000 });
+  await expect(page.locator('.text-editor textarea')).toBeVisible();
+  expect(readFileSync(`${DIR}/made/extra.bib`, 'utf8')).toBe('');
+  await make('made/sketch.board');
+  await page.waitForSelector('.board-tools', { timeout: 20000 });
+  // an image cannot be made empty: the prompt says so and stays; a taken name is never replaced
+  await tree.locator('.actions button', { hasText: '+ File' }).click();
+  await fillDialog(page, 'made/pic.png');
+  await expect(dialogLocator(page)).toContainText('upload one instead');
+  await fillDialog(page, 'made/extra.bib');
+  await expect(dialogLocator(page)).toContainText('file exists');
+  await cancelDialog(page);
+  expect(existsSync(`${DIR}/made/pic.png`)).toBe(false);
+  rmSync(`${DIR}/made`, { recursive: true, force: true });
+});
+
 test('folders via the + Folder button, and files dragged in from the computer land in the project (a folder row is a drop target)', async ({ browser }) => {
   const admin = await asUser(browser);
   const page = await admin.newPage();
@@ -311,7 +346,7 @@ test('folders via the + Folder button, and files dragged in from the computer la
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   const tree = page.locator('.filetree');
   await expect(tree.locator('[data-file="macros.tex"]')).toHaveCount(1);
-  // the + Folder button next to + Doc / + File
+  // the + Folder button next to + File
   await tree.locator('button', { hasText: '+ Folder' }).click();
   await fillDialog(page, 'drafts');
   await expect(tree.locator('.tree-row.folder', { hasText: 'drafts' })).toHaveCount(1, { timeout: 10000 });

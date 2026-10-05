@@ -342,7 +342,8 @@ blend.
   the raw summary) and `GET /api/admin/usage` rank actions by how often they failed, were undone
   within 5 s or were repeated in bursts, list the unanswered shortcuts, the dismissed dialogs and the
   error templates.
-* **Documents panel, one project at a time** (`app/DocPanel.tsx`, Google-Docs style, left; `Ctrl+Alt+O`):
+* **Files panel, one project at a time** (`app/DocPanel.tsx`, Google-Docs style, left; `Ctrl+Alt+O`; it was
+  the "documents panel" — there is no separate list of documents, and no separate way to make one):
   the project switcher at the top lists your projects and the ones shared with you — choosing another
   one opens *its* main document (there is no tab bar across projects any more; the hash names the one
   file shown). Below it one tree of the project's files (`app/FileBrowser.tsx`, VS Code-like: folders
@@ -351,7 +352,7 @@ blend.
   tools), its row brought near the top of the panel — and any other with its ▸, showing the file's
   headings (`GET /api/docs/<id>/outline`, `core/tex/headings.ts`, no parse), where a heading opens that
   document at the heading (`#/<doc>?heading=<n>`). A click on a row opens the file in place (figures,
-  `.bib`, `.sty` … in the text editor or a browser tab); `+ Doc` / `+ File` / `+ Folder`, and what was
+  `.bib`, `.sty` … in the text editor or a browser tab); `+ File` / `+ Folder`, and what was
   just created, moved or uploaded is revealed; files — or whole folders — dragged in from the
   computer are uploaded to where they are dropped (the project, or the folder row under the pointer);
   LaTeX build products (`.aux`, `.log`, `.bbl`, …) and LyX
@@ -361,7 +362,17 @@ blend.
   `.txt`, `latexmkrc`, …): they open in a tab like documents, with line numbers, autosave 1.5 s
   after the last change (or `Ctrl+S`), and a conflict check — if the file changed on the server
   meanwhile (someone else, git) the save is refused and you choose between the server's
-  version and yours. Viewers get it read-only. `+ File` in the file browser creates one.
+  version and yours. Viewers get it read-only.
+* **One way to make a file** (`app/newfile.ts`): the panel's `+ File`, its right-click *New File…*
+  (and a folder row's `+`), *File ▸ New…* (`Ctrl+N`, also from a text file) and a new project's first
+  document all ask for a name, and **the ending decides** what it becomes: `.tex` — or no ending — a
+  LaTeX document from the template, `.md` a Markdown document, `.board` a whiteboard, anything else
+  (`.bib`, `.sty`, `.txt` …) an empty text file; images, PDFs and other binaries are refused with a
+  pointer to Upload. A taken name asks again with the server's error, never replaces (text files go
+  through `upload?overwrite=0`). Consequence: an empty raw `.tex` (a preamble) is no longer made
+  from the panel — name it `.sty`, or upload it; existing raw `.tex` files still open in the text
+  editor (what a `.tex` *is* stays decided by its content, `projects.ts classifyDocs`). Rows are no
+  longer greyed for non-documents; documents keep their outline twisty.
 * **Layout documents** (Pages' *page layout* next to its word processing; `editor/layout/`, core
   `layout/`): slides, posters and free-form pages — fixed-size pages whose objects sit anywhere:
   **text boxes** (ordinary OverLyX text: formulas, lists, colours, citations…), **vector shapes**
@@ -946,7 +957,7 @@ blend.
   (`localStorage.ol.inkPensMm`, an older px case migrates) and shared with the whiteboards. Clicking the
   margin canvas takes the caret out of the text, so `Ctrl+V` then puts an image into the margin
   instead of a LaTeX figure.
-* **Whiteboards** (`.board` files, *File ▸ New whiteboard…* or *+ Board*; `app/BoardEditor.tsx`,
+* **Whiteboards** (`.board` files, *File ▸ New whiteboard…* or *+ File* with a `.board` name; `app/BoardEditor.tsx`,
   server `BoardDoc` in `docs.ts`): a Miro-style infinite canvas with the same pens, lasso and laser,
   images (paste / drop / upload, move and resize) and sticky notes, live-collaborative through the
   same websocket layer; saved as one JSON object per line, so git diffs stay readable.

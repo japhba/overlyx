@@ -42,6 +42,7 @@ import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathF
 import { Tour, tourWanted, rememberTour, type TourEnd } from './Tour';
 import { FeedbackDialog } from './Feedback';
 import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog, ChildDocDialog, DialogHost, uiPrompt, uiConfirm, uiAlert } from './Dialogs';
+import { promptNewFile } from './newfile';
 import { SettingsPanel } from './Settings';
 import { createEditor, moveLocalCopies, type EditorHandle, type SaveState } from '../editor/editor';
 import { refreshMacros } from '../editor/macrodefs';
@@ -142,7 +143,7 @@ function useMedia(query: string): boolean {
   }, [query]);
   return on;
 }
-const LEFT_TITLE = 'Documents of the project and their outlines (Ctrl+Alt+O)';
+const LEFT_TITLE = 'The project\'s files; documents expand into their outlines (Ctrl+Alt+O)';
 const SOURCE_TITLE = 'LaTeX source beside the text (Ctrl+Alt+S)';
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 
@@ -847,18 +848,11 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       zoom: (d) => { if (!layoutZoomStep(d)) setZoom(z => (d === 0 ? 1 : Math.min(2.5, Math.max(0.5, +(z + d * 0.1).toFixed(2))))); },
       textWidth: stepTextWidth,
       openFile: () => setShowFiles(true),
+      // any kind of file: the name's ending decides (app/newfile.ts)
       newFile: () => {
         const p = textId ? projectOfDoc(textId) : null;
         if (!p) return;
-        void (async () => {
-          let name = 'untitled.tex', error: string | undefined;
-          for (;;) {
-            const n = await uiPrompt('New Document', error ? `New document name:\n\n${error} — try another name.` : 'New document name:', name);
-            if (!n) return;
-            try { const r = await api.newDoc(p, n, { title: n.replace(/\.(tex|lyx)$/, '') }); location.hash = '#/' + r.id; setRefreshKey(k => k + 1); return; }
-            catch (e) { name = n; error = (e as Error).message; }
-          }
-        })();
+        void promptNewFile(p).then(id => { if (id) { location.hash = '#/' + id; setRefreshKey(k => k + 1); } });
       },
     };
   });
@@ -1073,7 +1067,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   ] };
   const projectRootMenus: MenuDef[] = docId ? [
     { title: 'File', items: [
-      { label: 'New document…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
+      { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
       { label: 'Share project…', action: () => setShareFor(projectOfDoc(docId)) },
       { label: 'Git repository…', action: () => setGitFor(projectOfDoc(docId)) },
       { sep: true },
@@ -1082,7 +1076,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   ] : [];
   const textFileMenus: MenuDef[] = docId ? [
     { title: 'File', items: [
-      { label: 'Open… (documents panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
+      { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
+      { label: 'Open… (files panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
       ...(isPdfTab ? [] : [{ label: 'Saved automatically (Ctrl+S saves now)', disabled: true, action: () => {} }]),
       { sep: true },
       { label: 'Download', action: () => window.open(`/api/projects/${encodeURIComponent(projectOfDoc(textId!))}/file/${docPathOf(textId!).split('/').map(encodeURIComponent).join('/')}`) },
@@ -1150,7 +1145,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
           .catch(e => notify('Could not create the whiteboard: ' + (e as Error).message, 'error'));
         });
       } },
-      { label: 'Open… (documents panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
+      { label: 'Open… (files panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
       { label: save.state === 'offline' ? 'Offline — changes are saved on this device' : save.state === 'saving' ? 'Saving…' : 'All changes saved automatically', disabled: true, action: () => {} },
       { sep: true },
       { label: 'Export ▸', sub: [
@@ -1189,7 +1184,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     }),
     editingMenus.insert,
     { title: 'Navigate', items: [
-      { label: 'Outline pane (documents panel)', shortcut: 'Ctrl+Alt+O', action: () => setShowFiles(true) },
+      { label: 'Outline pane (files panel)', shortcut: 'Ctrl+Alt+O', action: () => setShowFiles(true) },
       { label: 'Go to label…', action: () => { void uiPrompt('Go to Label', 'Label:').then(n => { if (n) gotoLabel(n, view ?? undefined); }); } },
       { label: 'Sync to PDF (forward search)', shortcut: 'Ctrl+Alt+J', action: () => { void syncToPdf(); } },
       { sep: true },
@@ -1256,7 +1251,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     build: () => { void build(); }, updatePdf: () => { void build({ open: false }); }, syncToPdf: () => { void syncToPdf(); },
     slots: {
       leading: [
-        { id: 'new', title: 'New document (Ctrl+N)', icon: 'new', action: () => editorContext.ui?.newFile() },
+        { id: 'new', title: 'New file — a document, a whiteboard, a .bib … (Ctrl+N)', icon: 'new', action: () => editorContext.ui?.newFile() },
         { id: 'open', title: 'Open (Ctrl+O)', icon: 'open', action: () => setShowFiles(true) },
       ],
       navigation: [{ id: 'navback', title: 'Navigate back (Ctrl+Alt+←)', icon: 'navback', action: navBack }],
@@ -1499,7 +1494,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
               onOpen={(id, o) => openInTab(id, o)} onGit={p => setGitFor(p)} onHide={() => setShowFiles(false)} onProject={setCurProject} notify={notify} />
           </div>
         ) : (
-          <div class="rail left"><button data-rail="outline" title={LEFT_TITLE} onClick={() => setShowFiles(true)}>Documents</button></div>
+          <div class="rail left"><button data-rail="outline" title={LEFT_TITLE} onClick={() => setShowFiles(true)}>Files</button></div>
         )}
         {showFiles && <SidebarGrip side="left" />}
         <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')} ref={columnRef}>
