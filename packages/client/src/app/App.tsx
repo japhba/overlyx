@@ -30,6 +30,7 @@ import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
 import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, SidebarGrip, restoreSidebarWidths } from './shellutil';
 import { setDocumentFonts } from '../fonts/editorfont';
+import { setDocumentParagraphs } from '../editor/paragraphsep';
 import { Outline, buildOutline, type OutlineItem } from './Outline';
 import { Comments } from './Comments';
 import { Versions } from './Versions';
@@ -513,7 +514,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
 
   useEffect(() => applyEditorZoom(zoom), [zoom]);
   // Settings ▸ Editor ▸ Font ▸ "As in the document" follows the document's roman font
-  useEffect(() => { setDocumentFonts(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
+  useEffect(() => { setDocumentFonts(headerLines); setDocumentParagraphs(headerLines); setLayoutHeader(headerLines); }, [headerLines]);
   // Ctrl/Cmd +/- zoom the document text, never the browser chrome — wherever the focus is (formula
   // fields, panels). Ctrl+0 is a paragraph style now (Part, like LyX's Alt+P 0); reset via the status bar.
   useEffect(() => {

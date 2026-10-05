@@ -55,7 +55,8 @@ import nodePath from 'node:path';
 import { manager } from './docs.ts';
 import { listProjects, projectDir, resolveProjectPath, assertWritableRelPath, isDocumentFile, newDocumentText, newMarkdownText, findMaster } from './projects.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
-import { parseDocumentText, parseFragmentText } from './texdoc.ts';
+import { parseDocumentText, parseFragmentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
+import { userSettings } from './userSettings.ts';
 import { touchProject, repoInfo, restoreProject, commitProject } from './git.ts';
 import { buildIncluding, buildErrors, lastBuild, currentJob } from './export.ts';
 import { PANEL_AGENT, buildBeforeTurn, agentCheckpoint, undoCheckpoint, panelTracking } from './agentwork.ts';
@@ -407,7 +408,9 @@ function createDocument(project: string, userId: number, accountName: string, re
   const abs = resolveProjectPath(project, rel);
   if (fs.existsSync(abs)) throw new Error('file exists — write_document replaces an existing document');
   fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
-  fs.writeFileSync(abs, isMarkdownPath(rel) ? newMarkdownText(title) : newDocumentText({ title, author: accountName }), 'utf8');
+  let text = isMarkdownPath(rel) ? newMarkdownText(title) : newDocumentText({ title, author: accountName });
+  if (!isMarkdownPath(rel) && userSettings(userId).paragraphSkip) text = withDocumentSettings(text, project, rel, NO_INDENT_SETTINGS);
+  fs.writeFileSync(abs, text, 'utf8');
   touchProject(project, userId);
   return { ok: true, path: rel };
 }

@@ -114,9 +114,9 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
       if (u.id === user.id) setSettings(r.settings);
     } catch (e) { setErr((e as Error).message); }
   };
-  const toggleFineGrained = async (on: boolean) => {
+  const toggleAccountSetting = async (patch: { fineGrainedAccess?: boolean; paragraphSkip?: boolean }) => {
     setErr('');
-    try { setSettings((await api.setSettings({ fineGrainedAccess: on })).settings); }
+    try { setSettings((await api.setSettings(patch)).settings); }
     catch (e) { setErr((e as Error).message); }
   };
 
@@ -192,7 +192,11 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             <div data-setting="whoami">{user.name} ({user.username}){user.isAdmin ? ' — administrator' : ''}</div>
             <h3>Sign-ins</h3>
             <div class="sub">Signing in the OverLyX CLI on a computer (<code>overlyx auth login</code>) gives it — git, builds, the AI agents there — a credential of its own; so does connecting an OAuth client such as ChatGPT. It reaches all your projects, with your role in each, and is revoked in File ▸ Git repository.</div>
-            {!user.guest && <label class="pref"><input type="checkbox" data-setting="fine-grained" disabled={settings === null} checked={!!settings?.fineGrainedAccess} onChange={e => void toggleFineGrained((e.target as HTMLInputElement).checked)} /><span>Fine-grained access<span class="sub">When you authorize a new sign-in, choose which projects it reaches and whether it may only read (clone, pull, read and build — no push, edits or comments). Sign-ins made before keep their access; switching this off does not widen narrowed ones.</span></span></label>}
+            {!user.guest && <label class="pref"><input type="checkbox" data-setting="fine-grained" disabled={settings === null} checked={!!settings?.fineGrainedAccess} onChange={e => void toggleAccountSetting({ fineGrainedAccess: (e.target as HTMLInputElement).checked })} /><span>Fine-grained access<span class="sub">When you authorize a new sign-in, choose which projects it reaches and whether it may only read (clone, pull, read and build — no push, edits or comments). Sign-ins made before keep their access; switching this off does not widen narrowed ones.</span></span></label>}
+            {!user.guest && <>
+              <h3>New documents</h3>
+              <label class="pref"><input type="checkbox" data-setting="paragraph-skip" disabled={settings === null} checked={!!settings?.paragraphSkip} onChange={e => void toggleAccountSetting({ paragraphSkip: (e.target as HTMLInputElement).checked })} /><span>No paragraph indentation<span class="sub">Documents you create separate paragraphs by vertical space instead of indenting their first line, in the editor and in the PDF (Document ▸ Settings ▸ Paragraph separation, which each document can change). Documents that exist already keep their setting.</span></span></label>
+            </>}
             {err && !user.isAdmin && <div class="err">{err}</div>}
             <h3>Token re-copy</h3>
             <div class="sub">The account access token (File ▸ Git repository…) works with Git, the CLI and MCP. It is normally shown exactly once — only a hash is kept. With re-copy enabled, its plaintext remains on the server and the Git dialog offers Copy again later. This convenience stores a recoverable secret, so it is off by default; an administrator switches it per account.</div>

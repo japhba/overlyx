@@ -193,6 +193,18 @@ function isIncludedByAnyLyx(project: string, relPath: string): boolean {
   return walk(proj, 0);
 }
 
+/** Settings ▸ Account ▸ New documents without indentation (userSettings paragraphSkip): vertical space between paragraphs. */
+export const NO_INDENT_SETTINGS: Record<string, string> = { paragraph_separation: 'skip', defskip: 'medskip' };
+
+/** A document's text with some settings changed, written as a settings change in the editor writes it (the rest byte for byte). */
+export function withDocumentSettings(text: string, project: string, relPath: string, settings: Record<string, string>): string {
+  const doc = parseDocumentText(text, project, relPath).doc;
+  const before = [...doc.header.lines];
+  for (const [k, v] of Object.entries(settings)) setHeaderValue(doc.header, k, v);
+  doc.header.lines = markEditedSettings(before, doc.header.lines, Object.keys(settings));
+  return writeDocumentText(doc, project, relPath, false, undefined, { base: text }).text;
+}
+
 /**
  * A new layout document (slides, poster, page; core layout/templates.ts) written through the .tex
  * writer, so its managed block (the layout macros, the page size) is there before the first edit

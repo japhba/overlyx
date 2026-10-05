@@ -14,17 +14,22 @@
  * read only (tokenAuth.ts AccessScope). Off by default (a sign-in reaches all of the account's
  * projects); each user switches it in Settings ▸ Account. Switching it off again leaves the
  * credentials already narrowed as they are.
+ *
+ * `paragraphSkip`: documents this account creates (File ▸ New, + File, MCP create_document) separate
+ * paragraphs by vertical space instead of indenting their first lines — Document ▸ Settings ▸
+ * Paragraph separation, written into the new file (texdoc.ts NO_INDENT_SETTINGS). Off by default
+ * (LaTeX's indentation); each user switches it in Settings ▸ Account.
  */
 import { db } from './db.ts';
 import { config } from './config.ts';
 import { projectOfDoc } from '@overlyx/core';
 
-export interface UserSettings { allowRecopyTokens: boolean; fineGrainedAccess: boolean }
+export interface UserSettings { allowRecopyTokens: boolean; fineGrainedAccess: boolean; paragraphSkip: boolean }
 
 export function userSettings(userId: number): UserSettings {
   const row = db.prepare('SELECT email, settings FROM users WHERE id = ?').get(userId) as { email: string | null; settings: string | null } | undefined;
   const isOwner = !!(config.ownerEmail && row?.email && row.email.toLowerCase() === config.ownerEmail);
-  const defaults: UserSettings = { allowRecopyTokens: isOwner, fineGrainedAccess: false };
+  const defaults: UserSettings = { allowRecopyTokens: isOwner, fineGrainedAccess: false, paragraphSkip: false };
   if (!row?.settings) return defaults;
   try {
     const stored = JSON.parse(row.settings);
@@ -32,13 +37,14 @@ export function userSettings(userId: number): UserSettings {
   } catch { return defaults; }
 }
 
-/** Store an override for a user (allowRecopyTokens: an administrator's action; fineGrainedAccess: the user's own); only known keys are kept. */
+/** Store an override for a user (allowRecopyTokens: an administrator's action; fineGrainedAccess, paragraphSkip: the user's own); only known keys are kept. */
 export function setUserSettings(userId: number, patch: Partial<UserSettings>): UserSettings {
   const row = db.prepare('SELECT settings FROM users WHERE id = ?').get(userId) as { settings: string | null } | undefined;
   let stored: Record<string, unknown> = {};
   try { const v = row?.settings ? JSON.parse(row.settings) : {}; if (v && typeof v === 'object') stored = v; } catch { /* start over */ }
   if (typeof patch.allowRecopyTokens === 'boolean') stored.allowRecopyTokens = patch.allowRecopyTokens;
   if (typeof patch.fineGrainedAccess === 'boolean') stored.fineGrainedAccess = patch.fineGrainedAccess;
+  if (typeof patch.paragraphSkip === 'boolean') stored.paragraphSkip = patch.paragraphSkip;
   db.prepare('UPDATE users SET settings = ? WHERE id = ?').run(JSON.stringify(stored), userId);
   return userSettings(userId);
 }

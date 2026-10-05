@@ -77,7 +77,7 @@ export interface GitToken { id: number; name: string; created_at: number; last_u
 /** what a narrowed credential reaches: these projects (null = all) and/or only reading */
 export interface CredentialScope { projects: string[] | null; readonly: boolean }
 /** Per-account server-side settings (Settings ▸ Account; userSettings.ts on the server). */
-export interface UserSettings { allowRecopyTokens: boolean; fineGrainedAccess: boolean }
+export interface UserSettings { allowRecopyTokens: boolean; fineGrainedAccess: boolean; paragraphSkip: boolean }
 export interface AdminUser { id: number; username: string; name: string; color: string; isAdmin: number; email: string | null; allowRecopyTokens: boolean }
 /** the project's off-site mirror (a private repository in the instance's GitHub organisation) */
 export interface MirrorStatus { configured: boolean; org: string | null; repo: string | null; url: string | null; enabled: boolean; head: string | null; lastHead: string | null; lastPushAt: number | null; lastAttemptAt: number | null; lastError: string | null; behind: boolean; intervalMs: number }
@@ -225,7 +225,7 @@ export const api = {
   setFolds: (id: string, folds: SavedFold[], at: number) => req<{ folds: SavedFold[]; at: number }>('PUT', `/api/docs/${encId(id)}/folds`, { folds, at }),
   keys: () => req<{ keys: Record<string, string | null> }>('GET', '/api/keys'),
   setKeys: (keys: Record<string, string | null>) => req<{ keys: Record<string, string | null> }>('POST', '/api/keys', { keys }),
-  setSettings: (patch: { fineGrainedAccess: boolean }) => req<{ settings: UserSettings }>('POST', '/api/settings', patch),
+  setSettings: (patch: { fineGrainedAccess?: boolean; paragraphSkip?: boolean }) => req<{ settings: UserSettings }>('POST', '/api/settings', patch),
   adminUserSettings: (id: number, patch: Partial<UserSettings>) => req<{ settings: UserSettings }>('POST', `/api/admin/users/${id}/settings`, patch),
   mcpTokens: () => req<{ tokens: GitToken[] }>('GET', '/api/mcp-tokens'),
   deleteMcpToken: (id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/mcp-tokens/${id}`),

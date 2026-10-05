@@ -81,6 +81,8 @@ describe('one toolbar definition for both front ends', () => {
       expect(src, `${file} must zoom through applyEditorZoom (app/shellutil.tsx)`).toMatch(/applyEditorZoom\(zoom\)/);
       // Settings ▸ Editor ▸ Font ▸ "As in the document" needs the shown document's settings (fonts/editorfont.ts)
       expect(src, `${file} must report its document's fonts through setDocumentFonts`).toMatch(/setDocumentFonts\(headerLines\)/);
+      // Paragraph separation "Vertical space" draws paragraphs flush left with a gap (editor/paragraphsep.ts)
+      expect(src, `${file} must report its document's paragraph separation through setDocumentParagraphs`).toMatch(/setDocumentParagraphs\(headerLines\)/);
       expect(src, `${file} must not use CSS zoom`).not.toMatch(/style=\{\{\s*zoom|--editor-zoom/);
       // the theme switch (Default / Light / Dark and the dark text tone) is MenuBar's ThemeToggle in both shells
       expect(src, `${file} builds its own theme switch — use ThemeToggle from app/MenuBar.tsx`).not.toContain('class="theme-toggle"');

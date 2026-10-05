@@ -1686,6 +1686,12 @@ How it works, in order of what happens when you open a document:
   replacement (deletion + insertion) or a suggestion across a paragraph break is one decision; hovering
   ✓ / ✗ shades what it applies to. Not on read-only editors. The bar and the shading are drawn outside
   the editor's DOM. `tests/changes-actions.test.ts`, `e2e/toolbar.spec.ts` "accept / reject in the text".
+* **Paragraph separation** (Document ▸ Settings): "Vertical space" (`\paragraph_separation skip`) is drawn
+  as the PDF has it — paragraphs flush left, `\defskip` between them (`editor/paragraphsep.ts`, both
+  shells via `setDocumentParagraphs(headerLines)`; markdown documents are always this way). Settings ▸
+  Account ▸ New documents ▸ "No paragraph indentation" (`userSettings` `paragraphSkip`) writes it into
+  the documents the account creates (the new-document route and MCP `create_document`, through
+  `texdoc.ts` `withDocumentSettings`). `tests/paragraph-skip.test.ts`, `e2e/parskip.spec.ts`.
 * **Mode switch: Editing · Suggesting · Viewing** (`app/EditModeSwitch.tsx`, both shells — the web
   client at the right end of the first toolbar row, as in Google Docs; the VS Code webview in its
   top bar): Suggesting is change tracking — a setting of the document (`\tracking_changes`), so it

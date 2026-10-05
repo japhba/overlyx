@@ -357,7 +357,13 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 .lyx-par[data-align="left"] { text-align: left; }
 .lyx-par.lyx-layout-standard { text-indent: 1.4em; }
 .lyx-par.lyx-layout-standard[data-noindent="1"] { text-indent: 0; }
-.lyx-layout-standard + .lyx-layout-standard { }
+/* Paragraph separation "Vertical space" (editor/paragraphsep.ts): flush left, \defskip between paragraphs */
+html[data-par-sep] .lyx-editor > .lyx-par.lyx-layout-standard { text-indent: 0; }
+html[data-par-sep] .lyx-editor > .lyx-par + .lyx-par.lyx-layout-standard { margin-top: calc(var(--ol-pt) * 6); }
+html[data-par-sep="smallskip"] .lyx-editor > .lyx-par + .lyx-par.lyx-layout-standard { margin-top: calc(var(--ol-pt) * 3); }
+html[data-par-sep="bigskip"] .lyx-editor > .lyx-par + .lyx-par.lyx-layout-standard { margin-top: calc(var(--ol-pt) * 12); }
+html[data-par-sep="halfline"] .lyx-editor > .lyx-par + .lyx-par.lyx-layout-standard { margin-top: 0.5lh; }
+html[data-par-sep="fullline"] .lyx-editor > .lyx-par + .lyx-par.lyx-layout-standard { margin-top: 1lh; }
 .lyx-layout-title { font-size: 1.7em; text-align: center; font-weight: 700; margin: 0.4em 0; }
 .lyx-layout-author, .lyx-layout-affiliation, .lyx-layout-author-email, .lyx-layout-date { text-align: center; font-size: 1.05em; }
 .lyx-layout-abstract { font-size: 0.92em; margin: 0.6em 2.5em; }

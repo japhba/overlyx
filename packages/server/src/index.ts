@@ -23,7 +23,7 @@ import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners 
 import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { snippetSvg, snippetFile } from './snippets.ts';
-import { importLyxFile, parseFragmentText, newLayoutDocumentText } from './texdoc.ts';
+import { importLyxFile, parseFragmentText, newLayoutDocumentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
 import { toPdf } from './graphics.ts';
 import { extractZip, bundledZips, projectNameFromZip, writeZip } from './zip.ts';
 import { pdfLinkByToken, pdfLinksOf, createPdfLink, deletePdfLink, countHit, pdfForLink, pdfLinkFileName, linkableDocs } from './pdflinks.ts';
@@ -542,11 +542,18 @@ api.delete('/git/tokens/:id', (req, res) => {
 
 /** The signed-in account's server-side settings (userSettings.ts) — the Settings panel. */
 api.get('/settings', (req, res) => { res.json({ settings: userSettings(req.user!.id) }); });
-/** The settings a user switches for themselves (fineGrainedAccess); token re-copy stays an administrator's. */
+/** The settings a user switches for themselves (fineGrainedAccess, paragraphSkip); token re-copy stays an administrator's. */
 api.post('/settings', (req, res) => {
   if (req.user!.guest) { res.status(403).json({ error: 'sign in first' }); return; }
-  if (typeof req.body?.fineGrainedAccess !== 'boolean') { res.status(400).json({ error: 'fineGrainedAccess must be a boolean' }); return; }
-  res.json({ settings: setUserSettings(req.user!.id, { fineGrainedAccess: req.body.fineGrainedAccess }) });
+  const patch: { fineGrainedAccess?: boolean; paragraphSkip?: boolean } = {};
+  for (const key of ['fineGrainedAccess', 'paragraphSkip'] as const) {
+    const v = req.body?.[key];
+    if (v === undefined) continue;
+    if (typeof v !== 'boolean') { res.status(400).json({ error: `${key} must be a boolean` }); return; }
+    patch[key] = v;
+  }
+  if (!Object.keys(patch).length) { res.status(400).json({ error: 'nothing to change' }); return; }
+  res.json({ settings: setUserSettings(req.user!.id, patch) });
 });
 
 /** The account's custom keyboard shortcuts — keybindings.ts on the client syncs them across browsers. */
@@ -581,7 +588,11 @@ api.post('/projects/:project/new', needProject('edit'), (req, res) => {
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     const layout = typeof req.body?.layout === 'string' ? req.body.layout : null;
     if (markdown) fs.writeFileSync(abs, newMarkdownText(req.body?.title), 'utf8');
-    else fs.writeFileSync(abs, layout ? newLayoutDocumentText(req.params.project, rel, layout, { title: req.body?.title, author: req.user?.name }) : newDocumentText({ textclass: req.body?.textclass, title: req.body?.title, author: req.user?.name }), 'utf8');
+    else if (layout) fs.writeFileSync(abs, newLayoutDocumentText(req.params.project, rel, layout, { title: req.body?.title, author: req.user?.name }), 'utf8');
+    else {
+      const text = newDocumentText({ textclass: req.body?.textclass, title: req.body?.title, author: req.user?.name });
+      fs.writeFileSync(abs, userSettings(req.user!.id).paragraphSkip ? withDocumentSettings(text, req.params.project, rel, NO_INDENT_SETTINGS) : text, 'utf8');
+    }
     touchProject(req.params.project, req.user!.id);
     res.json({ id: `${req.params.project}/${rel}` });
   } catch (e) { res.status(400).json({ error: String(e) }); }
