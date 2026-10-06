@@ -1,6 +1,7 @@
 /**
- * Accept / reject in the text itself (Google Docs' suggestion card, made small): a bar with the
- * author, the date, ✓ and ✗ over the tracked change under the pointer — or the one the caret is in,
+ * Accept / reject in the text itself (Google Docs' suggestion card, made small): a bar with ✓ and ✗
+ * first (right above where the change starts, a short way to click), then the author and the date,
+ * over the tracked change under the pointer — or the one the caret is in,
  * once the caret got there by a click or a key (not while typing: every typed suggestion would
  * bring it up). One click settles the change and the runs touching it by the same author, so a
  * replacement (the deletion and its insertion) or a suggestion across paragraph breaks is one
@@ -200,7 +201,6 @@ class ChangeActions {
     const when = document.createElement('span');
     when.className = 'change-actions-date';
     info.append(dot, who, when);
-    bar.appendChild(info);
     for (const accept of [true, false]) {
       const b = document.createElement('button');
       b.type = 'button';
@@ -211,6 +211,7 @@ class ChangeActions {
       b.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); this.resolve(accept); });
       bar.appendChild(b);
     }
+    bar.appendChild(info);
     document.body.appendChild(bar);
     return bar;
   }

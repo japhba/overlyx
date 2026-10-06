@@ -443,9 +443,9 @@ html[data-par-sep="fullline"] .lyx-editor > .lyx-par + .lyx-par.lyx-layout-stand
 }
 .lyx-math-inline[data-changed="deleted"], .lyx-math-display[data-changed="deleted"], .lyx-macro[data-changed="deleted"] { text-decoration: none; }
 .lyx-change-hidden { display: none; }
-/* ✓ / ✗ with the author and date over a tracked change (editor/plugins/changeactions.ts) */
-.change-actions { position: fixed; z-index: 185; display: flex; align-items: center; gap: 1px; padding: 2px 2px 2px 8px; background: var(--surface); border: 1px solid var(--ui-border2); border-radius: 7px; box-shadow: 0 1px 4px rgba(60,64,67,0.25); font-family: var(--ui-font); font-size: 12px; line-height: 1; color: var(--ui-fg); white-space: nowrap; user-select: none; }
-.change-actions-info { display: inline-flex; align-items: center; gap: 5px; min-width: 0; margin-right: 4px; }
+/* ✓ / ✗, then the author and date, over a tracked change (editor/plugins/changeactions.ts) */
+.change-actions { position: fixed; z-index: 185; display: flex; align-items: center; gap: 1px; padding: 2px 8px 2px 2px; background: var(--surface); border: 1px solid var(--ui-border2); border-radius: 7px; box-shadow: 0 1px 4px rgba(60,64,67,0.25); font-family: var(--ui-font); font-size: 12px; line-height: 1; color: var(--ui-fg); white-space: nowrap; user-select: none; }
+.change-actions-info { display: inline-flex; align-items: center; gap: 5px; min-width: 0; margin-left: 5px; }
 .change-actions-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--change-color, var(--ok)); }
 .change-actions-dot[data-kind="deletion"] { background: var(--change-color, var(--err)); }
 .change-actions-author { font-weight: 600; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }

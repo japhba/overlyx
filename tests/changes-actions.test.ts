@@ -87,6 +87,8 @@ describe('the bar over a change', () => {
     expect(bar.querySelector('.change-actions-date')!.textContent).toBe(shortChangeDate(T));
     expect(bar.querySelector('.change-actions-info')!.getAttribute('title')).toMatch(/^Changed by Ada Lovelace on /);
     expect(bar.querySelector('.change-action.accept')!.getAttribute('title')).toBe('Accept this change');
+    // ✓ and ✗ come first, the author and the date after them
+    expect(Array.from(bar.children).map(c => c.className)).toEqual(['change-action accept', 'change-action reject', 'change-actions-info']);
     (bar.querySelector('.change-action.accept') as HTMLElement).click();
     expect(plain(view.state.doc)).toEqual(['Hello new! world']);
     expect(document.querySelector('.change-actions')).toBeNull();

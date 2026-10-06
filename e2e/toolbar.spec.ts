@@ -276,6 +276,10 @@ test('accept / reject in the text: a bar with the author and the date over a tra
   const b = (await bar.boundingBox())!, g = (await gone.boundingBox())!;
   expect(b.y + b.height).toBeLessThanOrEqual(g.y + 1);
   expect(Math.abs(b.x - g.x)).toBeLessThan(40);
+  // ✓ right above where the change starts, the author after ✗
+  const ok = (await bar.locator('.change-action.accept').boundingBox())!, who = (await bar.locator('.change-actions-author').boundingBox())!;
+  expect(Math.abs(ok.x - g.x)).toBeLessThan(12);
+  expect(who.x).toBeGreaterThan(ok.x + ok.width);
   // ✓ shades what it settles: the deletion and its insertion, one replacement
   await bar.locator('.change-action.accept').hover();
   await expect(page.locator('.change-actions-shade')).not.toHaveCount(0);
