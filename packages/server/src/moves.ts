@@ -24,7 +24,7 @@
 import * as Y from 'yjs';
 import {
   MOVES_MAP, MOVES_ORIGIN, KEPT, MOVED, HANDLED, PLACED, CONTAINERS, Ranges, EntryList, protectMoves, encodeRecord, decodeRecord,
-  typeOf, isContainer, isLive, containerOf, valueOf, childIndex, pairCopies, forEachStruct, idKey, insertSeparated,
+  typeOf, isContainer, isLive, containerOf, valueOf, childIndex, pairCopies, forEachStruct, idKey, insertSeparated, sawBefore,
   type MoveIndex, type MoveRecord,
 } from '@overlyx/core/moves.ts';
 
@@ -333,6 +333,13 @@ class Work {
     // (the update's records are restated in this repair's record)
     const own = this.own.has(rec) || rec === this.rec;
     if (own && this.isNew(by.id)) return true;
+    // made by the record's own author: no late edit, whether made after the record (its author knew it)
+    // or before (its author had it when it moved the text). Undoing a split puts the originals back
+    // (Yjs restores them as new items beside the deleted ones), and the opening quote of "…" typed
+    // into a run is the author's item next to copies its next keystroke records: taken for late
+    // edits, the restored text went after the copies the undo had just deleted, and the quote to the
+    // end of the paragraph
+    if (madeBy(rec, by.id.client)) return true;
     if (!this.madeHere) return false;
     // the server's own diff: it saw everything it was made on (a client's update can arrive meanwhile)
     const at = own ? null : this.doc.getMap<unknown>(MOVES_MAP)._map.get(rec.key);
@@ -349,7 +356,7 @@ class Work {
   private isSource(u: Unit, by: Y.Item): boolean {
     if (typeOf(u.item) instanceof Y.XmlText) { const last = this.edgeUnit(u.item, true); return !!last && this.isSource(last, by); }
     const m = u.item.deleted ? this.mapped(u.item.id.client, u.item.id.clock + u.off) : null;
-    return !!m && !this.known(m.rec, by);
+    return !!m && !this.known(m.rec, by) && !sawBefore(m.rec, by.id);
   }
   /** a copy (or a run of copies) the sender's own record made */
   private ownCopy(it: Y.Item): boolean {
@@ -363,7 +370,7 @@ class Work {
     let item = u.item, off = u.off;
     if (typeOf(item) instanceof Y.XmlText) { const first = this.edgeUnit(item, false); if (!first) return false; item = first.item; off = first.off; }
     const s = this.index.sourceOf(item.id.client, item.id.clock + off);
-    return !!s && s.side !== PLACED && !this.known(s.rec, by);
+    return !!s && s.side !== PLACED && !this.known(s.rec, by) && !sawBefore(s.rec, by.id);
   }
 
   /* ------------------------------------------------------------------------------ the repair */
@@ -377,12 +384,18 @@ class Work {
     const conflicted = new Ranges();
     for (const c of conflicts) conflicted.add(c.client, c.clock, c.len);
     // the editors' records: restated (their valid entries), so that the server's records are the only lasting ones
+    let sv: Map<number, number> | undefined, svKnown = true;
     for (const key of keys) {
       const r = decodeRecord(key, map.get(key));
       map.delete(key);
       this.index.records.delete(key);
       this.rec.adopt.push(key);
       if (!r) continue;
+      // what the editors had (one sender: the earliest of its records counts; a record without it: unknown)
+      if (!r.sv) svKnown = false;
+      else if (!sv) sv = new Map(r.sv);
+      else for (const [c, k] of sv) { const o = r.sv.get(c); if (o === undefined) sv.delete(c); else if (o < k) sv.set(c, o); }
+      this.rec.sv = svKnown ? sv : undefined;
       this.rec.size += r.size;
       for (const p of r.protect) if (Y.getState(this.store, p.client) > p.clock) { const it = Y.getItem(this.store, p); if (it instanceof Y.Item && it.deleted) this.protect(it.id); }
       const e = r.entries;
@@ -1377,6 +1390,13 @@ class Work {
 }
 
 /** the side and copy an editor's record gives a source unit */
+/** `client` made copies of the record (not ones the server placed): it wrote the record */
+function madeBy(r: MoveRecord, client: number): boolean {
+  const e = r.entries;
+  for (let i = 0; i < e.length; i += 6) if ((e[i + 3] === KEPT || e[i + 3] === MOVED) && e[i + 4] === client) return true;
+  return false;
+}
+
 function entryFor(r: MoveRecord, client: number, clock: number): [number, Y.ID | null] | null {
   const e = r.entries;
   for (let i = 0; i < e.length; i += 6) {

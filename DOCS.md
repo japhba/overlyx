@@ -1597,6 +1597,17 @@ How it works, in order of what happens when you open a document:
      then the one in the smaller paragraph), the other is deleted, and what was typed into either
      ends up once in the winner. A paragraph a late editor added among
      moved ones is put back between the paragraphs it was typed between.
+   - **Late means: by somebody who had not seen the move.** A record carries what its author had
+     (`sv`: the state vector over the clients of the touched paragraphs, appended to the encoding so
+     that older readers ignore it, and carried over when the server restates the record); an item its
+     author had is no late edit, and neither is any item of the author's own client (it either came
+     after the record or was there when the text moved). Without that the first unit after a split
+     point — whose Yjs origin is the moved unit before it, as in every paragraph loaded from the file —
+     was taken for a late insertion: Enter right after a formula or a quote pulled the rest of the
+     paragraph back up, the closing quote of "…" typed into a run moved the opening one to the end of
+     the paragraph, and undoing a split lost its first half. Editors follow only other clients' copies
+     (`followMoves`): following their own, restated by the server, Ctrl+Z after Enter restored the
+     originals as the very copies it was deleting.
    - **Reconnecting.** A client that comes back with edits the server has not seen gets the server's
      sync step 2 only after its own step 2 has been applied and repaired (at most 3 s later), so it
      never starts editing on the unrepaired state.
@@ -1607,7 +1618,8 @@ How it works, in order of what happens when you open a document:
      moved edit stays in the copy); an editor of an older version, which records nothing (its splits
      copy as before); and some interleavings of several splits and joins of the same paragraphs,
      which can leave words in the wrong order or bring a deleted word back (in the randomized test
-     below no word is ever lost or doubled by splits; with joins, 2–7 of 100 long scripts lose one).
+     below no word is ever lost or doubled by splits; with joins, none of the default 120 scripts lose
+     one since 6 Oct 2026 — 2–7 of 100 did before).
    - Tests: `tests/split-repair.test.ts` (each case, both orders, both sides offline, a server restart
      in between, the server's own diffs), `tests/split-fuzz.test.ts` (random scripts of typing,
      deleting, Enter and Backspace on two or three editors going offline and online; every word typed
@@ -1617,8 +1629,10 @@ How it works, in order of what happens when you open a document:
      `tests/yjs-net.ts` (the network they run on: real y-prosemirror editors and a server with
      controlled deliveries), `tests/agent-edit-moves.test.ts` (Agent-panel and MCP edits through
      docs.ts with an editor connected, which sends an agent's edit back — the deletions in it are the
-     edit's own moves, not late deletions) and `e2e/offline-splits.spec.ts` (both press Enter in one paragraph, one
-     of them offline, and type behind formulas in both halves).
+     edit's own moves, not late deletions), `tests/split-own-edits.test.ts` (one editor alone: Enter
+     beside formulas and quotes, smart quotes typed into a run, undo of splits and joins) and
+     `e2e/offline-splits.spec.ts` (both press Enter in one paragraph, one of them offline, and type
+     behind formulas in both halves).
 
    External changes of the file are applied on the server as a *diff* (`packages/server/src/ydiff.ts`),
    so paragraphs they did not touch keep their identity and offline edits inside them survive; a diff

@@ -41,14 +41,33 @@ function containerChain($p: ResolvedPos): number[] {
   return out;
 }
 
-/** the pointer's document position; coordinates are clamped into the visible part of the editor */
-function hitAt(view: EditorView, x: number, y: number): { pos: number; inside: number } | null {
-  const box = view.dom.getBoundingClientRect();
+/**
+ * The comment / note card a pointer target lies in, when notes are shown in the margin
+ * (plugins/margin.ts): the card sits beside the text column, outside the editor's box.
+ */
+function marginCard(target: EventTarget | null): HTMLElement | null {
+  return (target as Element | null)?.closest?.<HTMLElement>('.lyx-inset-note.in-margin > .inset-box') ?? null;
+}
+
+/**
+ * The pointer's document position; coordinates are clamped into the visible part of the editor —
+ * or of `within`, the margin card a gesture started in (clamped into the text column, a press on a
+ * card landed in the text beside it).
+ */
+function hitAt(view: EditorView, x: number, y: number, within?: HTMLElement | null): { pos: number; inside: number } | null {
+  const box = (within?.isConnected ? within : view.dom).getBoundingClientRect();
   const vis = visibleBox(view);
   x = Math.min(Math.max(x, Math.max(box.left, vis.left) + 1), Math.min(box.right, vis.right) - 1);
   y = Math.min(Math.max(y, Math.max(box.top, vis.top) + 1), Math.min(box.bottom, vis.bottom) - 1);
   const p = view.posAtCoords({ left: x, top: y });
   let inside = p ? p.inside : -1, pos: number | null = p ? p.pos : null;
+  if (within) {
+    // ProseMirror's probe checks the point against every block around the caret: a card hangs
+    // below the paragraph holding its comment, so a press on its lower lines came out after that
+    // paragraph. The browser's caret at the point, when it is in the card, is the answer.
+    const c = caretAt(x, y);
+    if (c && within.contains(c.node)) try { pos = view.posAtDOM(c.node, c.offset); } catch { /* not document content */ }
+  }
   if (pos === null || inside < 0) {
     // over a widget the caret probe can fail or land beside it: resolve the widget itself
     const el = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest(OWN_WIDGETS);
@@ -58,6 +77,19 @@ function hitAt(view: EditorView, x: number, y: number): { pos: number; inside: n
     }
   }
   return pos === null ? null : { pos, inside };
+}
+
+/** a DOM node (`Node` here is ProseMirror's) */
+type DOMNode = AbstractRange['startContainer'];
+
+/** the browser's caret position at a point */
+function caretAt(x: number, y: number): { node: DOMNode; offset: number } | null {
+  const doc = document as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: DOMNode; offset: number } | null };
+  try {
+    if (doc.caretPositionFromPoint) { const c = doc.caretPositionFromPoint(x, y); return c ? { node: c.offsetNode, offset: c.offset } : null; }
+    const r = doc.caretRangeFromPoint?.(x, y);
+    return r ? { node: r.startContainer, offset: r.startOffset } : null;
+  } catch { return null; }
 }
 
 /** the part of the editor that is on screen (its scroll container minus the toolbars docked over its bottom) */
@@ -107,8 +139,8 @@ function closestEdge(view: EditorView, r: Range, x: number, y: number): number {
  * anchor's text level (an inset off it taken whole at its closest edge), and the anchor's own
  * container taken whole when the pointer has left it.
  */
-export function dragSelection(view: EditorView, anchor: Range, x: number, y: number, opts: { bySide?: boolean } = {}): { anchor: number; head: number } | null {
-  const hit = hitAt(view, x, y);
+export function dragSelection(view: EditorView, anchor: Range, x: number, y: number, opts: { bySide?: boolean; within?: HTMLElement | null } = {}): { anchor: number; head: number } | null {
+  const hit = hitAt(view, x, y, opts.within);
   if (!hit) return null;
   const doc = view.state.doc;
   if (hit.pos > doc.content.size) return null;
@@ -196,12 +228,14 @@ type DragOpts = {
  */
 export function startDrag(view: EditorView, anchor: Range, ev: MouseEvent, opts: DragOpts = {}): void {
   const sc = scroller(view);
+  // a drag that starts in a margin card selects in that card
+  const within = marginCard(ev.target);
   let dragging = !opts.deferred;
   let last: { x: number; y: number } | null = null;
   let raf = 0;
   const unitRange = (pos: number): Range => opts.unit === 'word' ? wordRange(view.state.doc, pos) : opts.unit === 'paragraph' ? paragraphRange(view.state.doc, pos) : { from: pos, to: pos };
   const apply = (x: number, y: number) => {
-    const s = dragSelection(view, anchor, x, y);
+    const s = dragSelection(view, anchor, x, y, { within });
     if (!s) return;
     if (opts.unit && s.anchor === anchor.from) {
       // grow by whole words / paragraphs on the head side, keeping the anchor unit
@@ -264,7 +298,7 @@ export function startDrag(view: EditorView, anchor: Range, ev: MouseEvent, opts:
 export function dragFromAtom(view: EditorView, from: number, to: number, ev: MouseEvent, reenter?: (ev: MouseEvent) => boolean): void {
   view.focus();
   startDrag(view, { from, to }, ev, { reenter });
-  const s = dragSelection(view, { from, to }, ev.clientX, ev.clientY);
+  const s = dragSelection(view, { from, to }, ev.clientX, ev.clientY, { within: marginCard(ev.target) });
   if (s) setSel(view, s.anchor, s.head);
 }
 
@@ -272,7 +306,7 @@ export function dragFromAtom(view: EditorView, from: number, to: number, ev: Mou
 export function shiftClickAt(view: EditorView, x: number, y: number): boolean {
   view.focus();
   const a = view.state.selection.anchor;
-  const s = dragSelection(view, { from: a, to: a }, x, y, { bySide: true });
+  const s = dragSelection(view, { from: a, to: a }, x, y, { bySide: true, within: marginCard(document.elementFromPoint(x, y)) });
   if (s) setSel(view, s.anchor, s.head);
   return !!s;
 }
@@ -301,7 +335,7 @@ export function dragSelectPlugin(): Plugin {
           // the formula editor, inset labels / buttons, label chips, table cells (prosemirror-tables'
           // cell selection) and the tracked-change fold markers (changes.ts) handle their own mouse
           if (t.closest('.lm-field, .lm-input, .eq-labels, .eq-meta, .lyx-tabular, .inset-label, .inset-actions, .inset-anchor, .ol-change-fold')) return false;
-          const start = hitAt(view, ev.clientX, ev.clientY);
+          const start = hitAt(view, ev.clientX, ev.clientY, marginCard(t));
           if (!start) return false;
           // shift-click: extend the selection from its anchor — a formula / inset is taken whole
           if (ev.shiftKey) {

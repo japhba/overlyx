@@ -57,7 +57,17 @@ export interface MoveRecord {
   adopt: string[];
   /** flat: srcClient, srcClock, len, side, dstClient (−1: none), dstClock */
   entries: number[];
+  /**
+   * What its author had when it wrote the record (a state vector over the clients of the touched
+   * paragraphs; absent: unknown, as in the records of older editors). A unit next to a moved one that
+   * the author had was left there on purpose — the first unit after a split point, typically: it is
+   * no late edit. Appended after the entries, so older readers ignore it.
+   */
+  sv?: Map<number, number>;
 }
+
+/** `id` was there for the author of `r` when it wrote the record */
+export const sawBefore = (r: MoveRecord, id: Y.ID): boolean => !!r.sv && id.clock < (r.sv.get(id.client) ?? 0);
 
 const VERSION = 1;
 export const idKey = (id: { client: number; clock: number }) => `${id.client}:${id.clock}`;
@@ -89,6 +99,10 @@ export function encodeRecord(r: Omit<MoveRecord, 'key'>): Uint8Array {
     if (e[i + 4] < 0) encoding.writeVarUint(enc, 0);
     else { encoding.writeVarUint(enc, ci(e[i + 4]) + 1); encoding.writeVarUint(enc, e[i + 5]); }
   }
+  if (r.sv) {
+    encoding.writeVarUint(enc, r.sv.size);
+    for (const [client, clock] of r.sv) { encoding.writeVarUint(enc, client); encoding.writeVarUint(enc, clock); }
+  }
   return encoding.toUint8Array(enc);
 }
 
@@ -114,7 +128,12 @@ export function decodeRecord(key: string, bytes: unknown): MoveRecord | null {
       else entries.push(sc, sk, len, side, clients[d - 1], decoding.readVarUint(dec));
     }
     if (entries.some(v => v === undefined)) return null;
-    return { key, t, server, size, protect, adopt, entries };
+    let sv: Map<number, number> | undefined;
+    if (decoding.hasContent(dec)) {
+      sv = new Map();
+      for (let n = decoding.readVarUint(dec); n > 0; n--) { const client = decoding.readVarUint(dec); sv.set(client, decoding.readVarUint(dec)); }
+    }
+    return { key, t, server, size, protect, adopt, entries, ...(sv ? { sv } : {}) };
   } catch { return null; }
 }
 
@@ -653,10 +672,19 @@ export function recordCopies(tr: Y.Transaction, opts: { containers?: ReadonlySet
     if (t instanceof Y.XmlText) for (let it = t._start; it; it = it.right) if (it.content instanceof Y.ContentFormat && wasLive(it)) out.push(it.id.client, it.id.clock, it.length, HANDLED, -1, 0);
   }
   const uniq = new Map(protect.map(p => [idKey(p), p]));
+  // what this editor had of the clients whose units are in the touched paragraphs
+  const sv = new Map<number, number>();
+  const seen = (it: Y.Item) => { const c = it.id.client; if (!sv.has(c)) sv.set(c, before.get(c) ?? 0); };
+  for (const g of groups.values()) for (const cont of g) for (let ch = cont._start; ch; ch = ch.right) {
+    seen(ch);
+    const t = typeOf(ch);
+    if (t instanceof Y.XmlText) for (let it = t._start; it; it = it.right) seen(it);
+  }
+  for (const [c, k] of sv) if (!k) sv.delete(c);
   const rec: MoveRecord = {
     key: `c${doc.clientID}-${Y.getState(doc.store, doc.clientID)}`,
     t: Math.floor((opts.now ?? Date.now()) / 1000), server: false, size,
-    protect: [...uniq.values()], adopt: [], entries: out.entries,
+    protect: [...uniq.values()], adopt: [], entries: out.entries, sv,
   };
   doc.getMap(MOVES_MAP).set(rec.key, encodeRecord(rec));
   return rec;
@@ -678,7 +706,10 @@ export function followMoves(ydoc: Y.Doc): () => void {
       if (!r) continue;
       const e = r.entries;
       for (let i = 0; i < e.length; i += 6) {
-        if (e[i + 4] < 0) continue;
+        // (a copy this editor made itself — its own split, restated by the server — is in its own undo
+        // history: undoing the split must bring the originals back, not follow them to the copies it
+        // deletes; followed, Ctrl+Z after Enter emptied the paragraph)
+        if (e[i + 4] < 0 || e[i + 4] === ydoc.clientID) continue;
         const [sc, sk, len, , dc, dk] = e.slice(i, i + 6);
         if (Y.getState(ydoc.store, sc) <= sk || Y.getState(ydoc.store, dc) <= dk) continue;
         try {

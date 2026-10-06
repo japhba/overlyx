@@ -16,6 +16,11 @@ export class InsetView implements NodeView {
   label: HTMLElement;
   anchor: HTMLElement;
   actions: HTMLElement;
+  /** the classes render() sets; the others on `dom` belong to someone else (the margin layout's
+   * `in-margin`, decorations, the anchor's `highlight`) and must survive a re-render */
+  private own: string[] = [];
+  /** what the action buttons were built for: '' (no comment), 'open' or 'resolved' */
+  private controls = '';
 
   constructor(private node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('span');
@@ -72,7 +77,12 @@ export class InsetView implements NodeView {
     const a = this.node.attrs;
     const name = String(a.name), arg = String(a.arg ?? '');
     const status = a.status === 'collapsed' ? 'collapsed' : 'open';
-    this.dom.className = `lyx-inset lyx-inset-${name.toLowerCase()}${arg ? ' lyx-inset-' + name.toLowerCase() + '-' + arg.toLowerCase().replace(/[^a-z0-9]+/g, '-') : ''} ${status}`;
+    // (rewriting className dropped `in-margin` on every keystroke in a comment: the card fell back
+    // into the text until the next layout frame — the box flashed and the text under it jumped)
+    const own = ['lyx-inset', `lyx-inset-${name.toLowerCase()}`, ...(arg ? [`lyx-inset-${name.toLowerCase()}-${arg.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`] : []), status];
+    for (const c of this.own) if (!own.includes(c)) this.dom.classList.remove(c);
+    this.dom.classList.add(...own);
+    this.own = own;
     this.dom.dataset.name = name;
     this.dom.dataset.arg = arg;
     this.label.textContent = insetLabel(name, arg, JSON.parse(a.params || '[]'));
@@ -90,12 +100,16 @@ export class InsetView implements NodeView {
     if (name === 'Note' || name === 'Foot' || name === 'Marginal' || name === 'ERT' || name === 'Float' || name === 'Caption' || name === 'Box' || name === 'Branch' || name === 'Flex' || name === 'Argument' || name === 'listings' || name === 'Index' || name === 'Wrap') {
       this.label.title = `${insetLabel(name, arg)} — click to ${status === 'open' ? 'collapse' : 'open'}, double-click for settings`;
     }
-    // comment-thread controls
-    this.actions.replaceChildren();
-    if (this.isComment()) {
-      const first = this.node.firstChild?.textContent ?? '';
-      const h = parseHeader(first.trim());
-      this.dom.classList.toggle('resolved', !!h?.resolved);
+    // comment-thread controls (rebuilt only when they change: every keystroke in the thread re-renders)
+    const h = this.isComment() ? parseHeader((this.node.firstChild?.textContent ?? '').trim()) : null;
+    this.dom.classList.toggle('resolved', !!h?.resolved);
+    const controls = this.isComment() ? (h?.resolved ? 'resolved' : 'open') : '';
+    if (controls !== this.controls) {
+      this.controls = controls;
+      this.actions.replaceChildren();
+      this.anchor.title = '';
+    }
+    if (controls && !this.actions.firstChild) {
       // a resolved thread leaves the text: its marker stays (the Comments panel lists it and can reopen it)
       this.anchor.title = h?.resolved ? 'Resolved comment — click to put the cursor here; the Comments panel lists it and can reopen it' : '';
       const reply = document.createElement('button');

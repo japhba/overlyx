@@ -5,7 +5,8 @@
  *  - the ( )↑ / ( )↓ math toolbar buttons grow and shrink the delimiter pair around the cursor;
  *  - a graphics file rewritten on disk reloads in the editor (no page reload), and in the dark
  *    theme line art is shown light-on-dark while a photo-like picture is left alone;
- *  - a comment thread shows as a card with avatar, name and time. Needs the seeded admin.
+ *  - a comment thread shows as a card with avatar, name and time; in the margin a click into the card
+ *    edits it. Needs the seeded admin.
  */
 import { test, expect } from '@playwright/test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -153,4 +154,28 @@ test('a comment thread is a card: avatar, name and time per message, Reply / Res
   await expect(card.locator('.inset-action')).toHaveText(['Reply', 'Resolve']);
   // the header text itself is unchanged in the file
   expect(readFileSync(`${DIR}/thread.tex`, 'utf8')).toContain('%% Jan Bauer (2026-08-26 14:03):');
+});
+
+test('a card in the margin: a click into its text puts the caret there, typing stays in it, the card stays put', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('ol.margin', '1'));
+  await login(page);
+  await openDoc(page, `${PROJECT}/thread.tex`);
+  const card = page.locator('.lyx-editor .lyx-inset-note-comment').first();
+  await expect(card).toHaveClass(/in-margin/);
+  const box = card.locator(':scope > .inset-box');
+  const before = (await box.boundingBox())!;
+  // the last message: beside the text column (a press there landed in the text beside the card) and
+  // below the one-line paragraph holding the thread (the press came out after that paragraph)
+  const last = card.locator('.inset-content > .lyx-par').last();
+  await expect(last).toHaveText('Done.');
+  const b = (await last.boundingBox())!;
+  await page.mouse.click(b.x + b.width - 2, b.y + b.height / 2);
+  await page.keyboard.press('End');
+  // re-rendering the thread on a keystroke dropped `in-margin`: the card fell into the text for a frame
+  await card.evaluate(el => { (window as any).__dropped = 0; new MutationObserver(() => { if (!el.classList.contains('in-margin')) (window as any).__dropped++; }).observe(el, { attributes: true, attributeFilter: ['class'] }); });
+  await page.keyboard.type(' Thanks', { delay: 30 });
+  await expect(last).toHaveText('Done. Thanks');
+  expect(await page.evaluate(() => (window as any).__dropped)).toBe(0);
+  expect(Math.abs((await box.boundingBox())!.x - before.x)).toBeLessThan(2);
+  await expect.poll(() => readFileSync(`${DIR}/thread.tex`, 'utf8'), { timeout: 15000 }).toContain('%% Done. Thanks');
 });
