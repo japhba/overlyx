@@ -9,7 +9,7 @@ import * as vscode from 'vscode';
 import path from 'node:path';
 import {
   installLauncher, launcherCommand, detectAgents, registerClaude, unregisterClaude, claudeRegistered, allowClaudeTools,
-  registerCodex, unregisterCodex, codexRegistered, claudeSettingsFile, codexConfigFile, CLAUDE_ALLOW, type StdioCommand,
+  registerCodex, unregisterCodex, codexRegistered, instructCodex, claudeSettingsFile, codexConfigFile, codexInstructionsFile, CLAUDE_ALLOW, type StdioCommand,
 } from '../agents/register.ts';
 import { publishOpenDocuments } from '../agents/openDocuments.ts';
 
@@ -43,7 +43,7 @@ export function setupAgents(context: vscode.ExtensionContext, layoutDir: () => s
       } catch (e) { done.push(`not Claude Code: ${String((e as { stderr?: string }).stderr || (e as Error).message).trim()}`); }
     }
     if (agents.codex) {
-      try { registerCodex(cmd); done.push(`Codex (${codexConfigFile()})`); }
+      try { registerCodex(cmd); await context.globalState.update('agents.codexNote', true); done.push(`Codex (${codexConfigFile()}, and a note in ${codexInstructionsFile()})`); }
       catch (e) { done.push(`not Codex: ${(e as Error).message}`); }
     }
     return done;
@@ -90,6 +90,8 @@ export function setupAgents(context: vscode.ExtensionContext, layoutDir: () => s
     const cmd = command();
     if (claudeRegistered() && !claudeRegistered(cmd)) await registerClaude(cmd);
     if (codexRegistered() && !codexRegistered(cmd)) registerCodex(cmd);
+    // connected with a version before the AGENTS.md note: added once (taken out by the user later, it stays out)
+    if (codexRegistered() && !context.globalState.get('agents.codexNote')) { instructCodex(true); await context.globalState.update('agents.codexNote', true); }
   };
 
   // in the background: never in the way of opening the editor. Only for the installed extension —

@@ -10,12 +10,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { resolveLayoutDir } from '../host/lyxlib.ts';
-import { runTool, toolTarget, type ToolName } from './localEdit.ts';
+import { runTool, toolTarget, directoryUsesOverlyx, type ToolName } from './localEdit.ts';
 import { openDocuments } from './openDocuments.ts';
 
 export const LOCAL_SERVER_NAME = 'overlyx-local';
 
-export const LOCAL_INSTRUCTIONS = `OverLyX documents on this computer — .tex files with an OverLyX block in the preamble ("%% OverLyX ---") and their child documents, and any .tex or .md file open in the OverLyX editor in VS Code: edit them with these tools, not with your own file editing (apply_patch, edit/write tools, shell). Your edit then becomes TRACKED CHANGES — insertions and deletions attributed to you, which the user accepts or rejects in the editor (an editor that has the file open shows them at once, also with unsaved edits). Read the files with your own tools; paths are relative to your working directory. Every other file — a README, a plain LaTeX project without OverLyX — you edit as usual; the tools refuse those.
+export const LOCAL_INSTRUCTIONS = `OverLyX documents on this computer — the .tex and .md files of a project that uses OverLyX (some .tex file in it has an OverLyX block in the preamble, "%% OverLyX ---"; e.g. a clone of an OverLyX project), apart from its README / AGENTS-style notes, and any file open in the OverLyX editor in VS Code (no editor needs to be open): edit them with these tools, not with your own file editing (apply_patch, edit/write tools, shell). Your edit then becomes TRACKED CHANGES — insertions and deletions attributed to you, which the user accepts or rejects in the editor (an editor that has the file open shows them at once, also with unsaved edits). Read the files with your own tools; paths are relative to your working directory. Every other file — a README, a plain LaTeX project without OverLyX — you edit as usual; the tools refuse those.
 
 edit_document replaces a passage (old_text → new_text; any LaTeX), write_document writes a whole source or creates a document. Only what actually changes is marked — a word, a digit, a table cell. In the source, pending changes look like \\lyxadded{author}{date}{text} and \\lyxdeleted{author}{date}{text} (in markdown: <ins …>text</ins>, <del …>text</del>); old_text may leave that markup out, and whitespace differences are tolerated. Never write or edit that markup yourself, and leave other people's tracked changes alone. The preamble is never tracked (applied directly, and said so).
 
@@ -24,6 +24,15 @@ Tracked editing must never block you or leave a document broken. On ANY problem 
 Comments: add_comment starts a thread at a passage, reply_to_comment answers a thread (and resolve: true marks it done). In the source a thread is a block of "%% @comment" … "%% @end" lines (in markdown an HTML comment "<!-- @comment … -->") with "Author (date):" headers; change threads only through these tools.
 
 Other files (refs.bib, .sty, macros, figures, code) are not documents: edit them directly with your own tools. Leave the block between "%% OverLyX ---" and "%% end OverLyX ---" alone (regenerated on every save); put preamble additions above it. The tools may rewrite what you wrote into OverLyX's canonical form (spacing, line breaks) — read the file again before editing the same passage.`;
+
+/**
+ * Where the agent works, said up front: an agent that reads a document without OverLyX's block of
+ * its own (a rebuttal next to the paper) cannot tell the project uses OverLyX and edits it itself —
+ * seen with Claude Code. Codex shows its model no server instructions, so the tool descriptions say it too.
+ */
+const whereNote = (here: boolean) => here
+  ? 'This working directory is a project that uses OverLyX (some of its .tex files carry OverLyX\'s block): edit every one of its .tex and .md documents — also those without the block, but not README / AGENTS-style notes — with these tools.'
+  : 'This working directory is not a project that uses OverLyX: use these tools for files the user has open in the OverLyX editor, or documents in another directory that uses OverLyX (they refuse anything else), and edit everything else as usual.';
 
 /** Whose changes: the agent's own name, from the client's initialize. */
 export function authorFor(client: { name?: string; title?: string } | undefined): string {
@@ -51,7 +60,8 @@ async function handToEditor(endpoint: string, call: { tool: ToolName; args: Reco
 }
 
 export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsDir?: string }): McpServer {
-  const server = new McpServer({ name: LOCAL_SERVER_NAME, version: '1.0.0' }, { instructions: LOCAL_INSTRUCTIONS });
+  const here = directoryUsesOverlyx(opts.cwd);
+  const server = new McpServer({ name: LOCAL_SERVER_NAME, version: '1.0.0' }, { instructions: `${whereNote(here)}\n\n${LOCAL_INSTRUCTIONS}` });
   /**
    * A tool call: handed to the VS Code window that has the document open (the edit then applies to
    * its editor, unsaved typing included), else done on the file.
@@ -72,7 +82,7 @@ export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsD
   const trackedArg = z.boolean().optional().describe('true (default): tracked changes for the user to review. false: applied directly, without marks — the fallback whenever tracked editing runs into any problem (see the instructions)');
 
   server.registerTool('edit_document', {
-    description: "Edit an OverLyX document by replacing a passage of its source — use this instead of apply_patch, your own edit tools or the shell for .tex files with an OverLyX block (\"%% OverLyX ---\" in the preamble), their child documents, and files open in the OverLyX editor; other files you edit as usual (this tool refuses them). old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to you and diffed against the file, so only what actually changes is marked; the user reviews them in the OverLyX editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the file now reads, for follow-up edits; applied_directly lists what was applied without marks (the preamble is never tracked). With tracked: false the same edit is applied directly — use that as soon as a tracked edit fails, garbles the passage or breaks the build.",
+    description: (here ? 'This working directory is a project that uses OverLyX: use this for every edit of its .tex and .md documents (not README / AGENTS-style notes), also those without an OverLyX block of their own. ' : '') + "Edit an OverLyX document by replacing a passage of its source — use this instead of apply_patch, your own edit tools or the shell for the .tex / .md documents of a project that uses OverLyX (some .tex file in it has an OverLyX block, \"%% OverLyX ---\" in the preamble) and for files open in the OverLyX editor; other files you edit as usual (this tool refuses them). old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to you and diffed against the file, so only what actually changes is marked; the user reviews them in the OverLyX editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the file now reads, for follow-up edits; applied_directly lists what was applied without marks (the preamble is never tracked). With tracked: false the same edit is applied directly — use that as soon as a tracked edit fails, garbles the passage or breaks the build.",
     inputSchema: {
       path: pathArg,
       old_text: z.string().describe('The passage to replace, copied from the file'),

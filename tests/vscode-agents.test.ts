@@ -4,7 +4,7 @@
  * and the registration with Claude Code / Codex — against scratch directories and fake `claude` /
  * `codex` executables (the real ones and their configs are never touched).
  */
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,9 +14,11 @@ import { parseTex } from '../packages/core/src/tex/parse.ts';
 import { parseThread, type Paragraph } from '@overlyx/core';
 import { LYX_LAYOUTS } from './lyxlib.ts';
 
-const ROOT = path.join(process.env.OVERLYX_SCRATCH ?? os.tmpdir(), 'overlyx-vscode-agents-test');
+// per process: another run of the suite (a parallel session) must not wipe this one's projects
+const ROOT = path.join(process.env.OVERLYX_SCRATCH ?? os.tmpdir(), `overlyx-vscode-agents-test-${process.pid}`);
 fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(ROOT, { recursive: true });
+afterAll(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 // the agents' configs, for everything below: never the real ones
 process.env.CLAUDE_CONFIG_DIR = path.join(ROOT, 'claude-home');
 process.env.CODEX_HOME = path.join(ROOT, 'codex-home');
@@ -131,6 +133,20 @@ describe('local tools: document files edited as tracked changes', () => {
     await expect(writeDocument('plain/new.tex', { tex: PAPER }, lc(dir, 'Claude Code', closed))).resolves.toMatchObject({ created: true });
   });
 
+  it('in a project that uses OverLyX (a clone: some .tex has the block) every document counts, no editor needed — not its README', async () => {
+    const overlyx = PAPER.replace('\\begin{document}', '%% OverLyX ------------------------------------------------------------------\n%% overlyx-settings: {"textclass":"article"}\n%% end OverLyX --------------------------------------------------------------\n\\begin{document}');
+    const clone = project({ '.git/HEAD': 'ref: refs/heads/main\n', 'paper/main.tex': overlyx, 'rebuttal/rebuttal.tex': PAPER, 'notes.md': '# Notes\n\nThe quick brown fox.\n', 'README.md': '# Readme\n\nSome text.\n', 'AGENTS.md': 'Be brief.\n' });
+    const foreign = project({ '.git/HEAD': 'ref: refs/heads/main\n', 'paper.tex': PAPER, 'notes.md': '# Notes\n\nThe quick brown fox.\n' });
+    const closed = () => false;
+    await expect(editDocument('rebuttal/rebuttal.tex', { old_text: 'lazy', new_text: 'sleepy' }, lc(clone, 'Codex', closed))).resolves.toMatchObject({ ok: true });
+    expect(read(clone, 'rebuttal/rebuttal.tex')).toMatch(/\\lyxadded\{Codex\}\{[^}]+\}\{sleepy\}/);
+    await expect(editDocument('notes.md', { old_text: 'brown', new_text: 'red' }, lc(clone, 'Codex', closed))).resolves.toMatchObject({ ok: true });
+    expect(read(clone, 'notes.md')).toContain('<ins author="Codex"');
+    for (const f of ['README.md', 'AGENTS.md']) await expect(addComment(f, { text: 'x' }, lc(clone, 'Codex', closed))).rejects.toThrow(/not an OverLyX document/);
+    for (const f of ['paper.tex', 'notes.md']) await expect(editDocument(f, { old_text: 'quick', new_text: 'fast' }, lc(foreign, 'Codex', closed))).rejects.toThrow(/not an OverLyX document/);
+    expect(read(foreign, 'paper.tex')).toBe(PAPER);
+  });
+
   it('the windows\' lists of open documents: written per process, read while that process lives', () => {
     const agents = path.join(ROOT, 'agents-open');
     publishOpenDocuments(agents, ['/a/main.tex', '/b/notes.md'], 'http://127.0.0.1:1/t/x');
@@ -228,7 +244,10 @@ describe('local tools: the MCP server agents start (stdio)', () => {
     ]);
     expect(init.result.serverInfo.name).toBe('overlyx-local');
     expect(init.result.instructions).toMatch(/TRACKED CHANGES/);
+    // a plain directory (the file only counts because it is open in an editor): said up front
+    expect(init.result.instructions).toMatch(/^This working directory is not a project that uses OverLyX/);
     expect(list.result.tools.map((t: { name: string }) => t.name).sort()).toEqual(['add_comment', 'edit_document', 'reply_to_comment', 'write_document']);
+    if (edit.result.isError) throw new Error(edit.result.content[0].text);
     expect(JSON.parse(edit.result.content[0].text)).toMatchObject({ ok: true, inserted_chars: 3, deleted_chars: 5 });
     expect(read(dir, 'paper/main.tex')).toMatch(/\\lyxadded\{Codex\}\{[^}]+\}\{red\}/);
     expect(bad.result.isError).toBe(true);
@@ -263,6 +282,14 @@ describe('local tools: the MCP server agents start (stdio)', () => {
       expect(JSON.parse(direct.result.content[0].text)).toMatchObject({ ok: true, inserted_chars: 6 });
       expect(read(dir)).toMatch(/\\lyxadded\{Claude Code\}\{[^}]+\}\{sleepy\}/);
     } finally { bridge.close(); }
+  }, 60000);
+
+  it('in a project that uses OverLyX, the agent hears it at once — instructions and the edit tool\'s description', async () => {
+    const overlyx = PAPER.replace('\\begin{document}', '%% OverLyX ------------------------------------------------------------------\n%% overlyx-settings: {"textclass":"article"}\n%% end OverLyX --------------------------------------------------------------\n\\begin{document}');
+    const dir = project({ '.git/HEAD': 'ref: refs/heads/main\n', 'paper/main.tex': overlyx, 'rebuttal.tex': PAPER });
+    const [init, list] = await session(path.join(dir, 'paper'), 'claude-code', []);
+    expect(init.result.instructions).toMatch(/^This working directory is a project that uses OverLyX/);
+    expect(list.result.tools.find((t: { name: string }) => t.name === 'edit_document').description).toMatch(/^This working directory is a project that uses OverLyX: use this for every edit/);
   }, 60000);
 
   it('names the author after the agent', () => {
@@ -340,7 +367,21 @@ if (a[0] === 'mcp' && a[1] === 'remove') process.exit(1);
     expect(after.match(/\[mcp_servers\.overlyx-local\]/g)).toHaveLength(1);
     expect(after).toContain('command = "/opt/code/code"');
     expect(fs.readFileSync(file + '.bak', 'utf8')).toContain('model = "gpt-6"');
+    // the note in Codex's personal instructions (its model follows AGENTS.md before tool descriptions): added once, the rest kept
+    const notes = reg.codexInstructionsFile();
+    expect(fs.readFileSync(notes, 'utf8')).toMatch(/^<!-- OverLyX \(VS Code extension\): begin[^\n]*-->\n## OverLyX documents: edit them as tracked changes\n.*`overlyx-local` MCP server.*\n<!-- OverLyX: end -->\n$/s);
+    expect(reg.codexInstructed()).toBe(true);
+    reg.instructCodex(false);
+    fs.writeFileSync(notes, '# Mine\n\nAlways answer in English.\n');
+    expect(reg.instructCodex(true)).toBe(true);
+    expect(reg.instructCodex(true)).toBe(false);
+    expect(fs.readFileSync(notes, 'utf8')).toMatch(/^# Mine\n\nAlways answer in English\.\n\n<!-- OverLyX/);
     expect(reg.unregisterCodex()).toBe(true);
+    expect(fs.readFileSync(notes, 'utf8')).toBe('# Mine\n\nAlways answer in English.\n');
+    reg.instructCodex(true); reg.instructCodex(false);
+    expect(fs.readFileSync(notes, 'utf8')).toBe('# Mine\n\nAlways answer in English.\n');
+    fs.rmSync(notes); reg.instructCodex(true); reg.instructCodex(false);
+    expect(fs.existsSync(notes)).toBe(false);   // nothing of the user's: no file left behind
     expect(fs.readFileSync(file, 'utf8')).not.toContain('overlyx-local');
     expect(fs.readFileSync(file, 'utf8')).toContain('[mcp_servers.overlyx]');
     fs.writeFileSync(file, 'mcp_servers.overlyx-local.command = "x"\n');

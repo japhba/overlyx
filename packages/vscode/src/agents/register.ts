@@ -2,8 +2,8 @@
  * Registering the local tool server (agents/server.ts) with the agents on this computer: Claude
  * Code (`claude mcp add-json`, user scope, plus a permission rule so its tools run without a
  * prompt in every folder) and Codex (a [mcp_servers.overlyx-local] table in config.toml, its tools
- * approved). Codex shows the model only the tools' descriptions, not a server's instructions: they
- * say themselves which files they are for.
+ * approved, and a note in its personal AGENTS.md). Codex shows the model the tools' descriptions
+ * but not a server's instructions, and follows AGENTS.md before either.
  *
  * The agents run a launcher kept in the extension's global storage, which outlives extension
  * updates: it starts dist/agents.cjs of the version that registered it — or, once an update has
@@ -198,6 +198,7 @@ export function registerCodex(cmd: StdioCommand): void {
   try { text = fs.readFileSync(file, 'utf8'); } catch { /* a new config */ }
   // defined some other way (inline table, dotted keys): left to the user, not duplicated
   if (new RegExp(`^\\s*(mcp_servers\\.)?"?${SERVER_NAME}"?\\s*(=|\\.)`, 'm').test(text)) throw new Error(`${file} defines "${SERVER_NAME}" in another form — remove it there and connect again`);
+  instructCodex(true);
   if (text.includes(codexTable(cmd))) return;
   if (text && !fs.existsSync(file + '.bak')) fs.copyFileSync(file, file + '.bak');
   const rest = withoutCodexServer(text).replace(/\s*$/, '');
@@ -207,6 +208,48 @@ export function registerCodex(cmd: StdioCommand): void {
 
 export function unregisterCodex(): boolean {
   const file = codexConfigFile();
+  instructCodex(false);
   try { const t = fs.readFileSync(file, 'utf8'); const r = withoutCodexServer(t); if (r !== t) { fs.writeFileSync(file, r.replace(/\s*$/, '\n')); return true; } } catch { /* none */ }
   return false;
+}
+
+/*
+ * Codex's model follows AGENTS.md, not the tool descriptions: in a project that uses OverLyX it
+ * patched a document without OverLyX's block of its own (a rebuttal next to the paper) itself. So
+ * connecting also adds a marked block to Codex's personal instructions ($CODEX_HOME/AGENTS.md);
+ * disconnecting takes it out, and nothing else of the file is touched.
+ */
+export const codexInstructionsFile = () => path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'AGENTS.md');
+const NOTE_BEGIN = '<!-- OverLyX (VS Code extension): begin — "OverLyX: Disconnect AI Agents" removes this block -->';
+const NOTE_END = '<!-- OverLyX: end -->';
+const CODEX_NOTE = `${NOTE_BEGIN}
+## OverLyX documents: edit them as tracked changes
+In a project that uses OverLyX (some .tex file in it has a "%% OverLyX ---" block in its preamble — e.g. a clone of an OverLyX project), edit every .tex and .md document (not README / AGENTS-style notes) with the tools of the \`${SERVER_NAME}\` MCP server — \`edit_document\`, \`write_document\`, \`add_comment\`, \`reply_to_comment\` — not with apply_patch or the shell: your edits then become tracked changes the user reviews in OverLyX. The tools refuse other files; edit those as usual.
+${NOTE_END}
+`;
+
+const withoutNote = (text: string): string => {
+  const a = text.indexOf(NOTE_BEGIN), b = text.indexOf(NOTE_END);
+  if (a < 0 || b < a) return text;
+  const before = text.slice(0, a).replace(/\n+$/, ''), after = text.slice(b + NOTE_END.length).replace(/^\n+/, '');
+  if (!before) return after;
+  return after ? `${before}\n\n${after}` : `${before}\n`;
+};
+
+export function codexInstructed(): boolean {
+  try { return fs.readFileSync(codexInstructionsFile(), 'utf8').includes(CODEX_NOTE); } catch { return false; }
+}
+
+/** Add (or take out) the block; returns whether the file changed. A file left empty by taking it out is removed. */
+export function instructCodex(on: boolean): boolean {
+  const file = codexInstructionsFile();
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch { if (!on) return false; }
+  const rest = withoutNote(text);
+  const next = on ? (rest.trim() ? rest.replace(/\s*$/, '\n\n') : '') + CODEX_NOTE : rest;
+  if (next === text) return false;
+  if (!next.trim()) { fs.rmSync(file, { force: true }); return true; }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, next);
+  return true;
 }

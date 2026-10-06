@@ -81,15 +81,19 @@ which you accept or reject in the editor like a collaborator's. Agents can also 
 threads and answer yours (and resolve them). When the extension finds Claude Code or Codex on this
 computer it asks once whether to connect them; later, **OverLyX: Connect AI Agents** /
 **Disconnect AI Agents**. Agents started after that have the tools of the `overlyx-local` server
-(`edit_document`, `write_document`, `add_comment`, `reply_to_comment`) for OverLyX documents: `.tex`
-files OverLyX has written (its block in the preamble) and their child documents, and any file open in
-an OverLyX editor (markdown too). Other files — a README, a plain LaTeX project — they edit as usual;
-the tools refuse them, so no tracked-change markup ends up there.
+(`edit_document`, `write_document`, `add_comment`, `reply_to_comment`) for OverLyX documents: the
+`.tex` and `.md` files of a project that uses OverLyX — some `.tex` file in it has OverLyX's block in
+the preamble, as in a clone of an OverLyX project — apart from its README / AGENTS-style notes, and
+any file open in an OverLyX editor. No editor needs to be open, nor VS Code running. Other files — a
+README, a plain LaTeX project — they edit as usual; the tools refuse them, so no tracked-change markup
+ends up there. Connecting needs no document either: run the command from the palette.
 
 Connecting registers a local tool server: for Claude Code with `claude mcp add-json -s user`, plus
 `mcp__overlyx-local` in `permissions.allow` of its user settings so the tools run without a prompt in
 every folder; for Codex a `[mcp_servers.overlyx-local]` table in `~/.codex/config.toml` (backed up to
-`config.toml.bak` first) with `default_tools_approval_mode = "approve"`, Codex's counterpart. The command is VS Code's own runtime (`ELECTRON_RUN_AS_NODE=1`, no Node.js
+`config.toml.bak` first) with `default_tools_approval_mode = "approve"`, Codex's counterpart, and a
+marked note in `~/.codex/AGENTS.md` (Codex follows that file rather than the tools' descriptions);
+disconnecting removes both. The command is VS Code's own runtime (`ELECTRON_RUN_AS_NODE=1`, no Node.js
 needed) with a launcher in the extension's global storage that survives extension updates. Nothing
 leaves the computer and no OverLyX account is involved. When the document is open in a VS Code
 window, the edit goes through that editor — it applies to what you see, unsaved typing included, and

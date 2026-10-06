@@ -2020,10 +2020,21 @@ clientInfo, User-Agent). It exposes these tools:
   `codex exec` fails them). Codex (0.160) passes the model the tools' descriptions but not the
   server's `instructions`, so the descriptions say which files they are for and to prefer them over
   apply_patch — verified: without that it patched the file natively. The tools refuse files that are
-  not OverLyX documents (no settings line / OverLyX block, not a child of such a master, not open in
-  an OverLyX editor — each window lists its open files in `<global storage>/agents/open/<pid>.json`,
-  `agents/openDocuments.ts`; the launcher passes the directory as `OVERLYX_AGENTS_DIR`), so a README
-  or a plain LaTeX project never gets `<ins>` / `\lyxadded` markup. The command is `process.execPath` with `ELECTRON_RUN_AS_NODE=1` (a
+  not OverLyX documents (`localEdit.ts isOverlyxDocument`): a document counts when it is open in an
+  OverLyX editor (each window lists its open files in `<global storage>/agents/open/<pid>.json`,
+  `agents/openDocuments.ts`; the launcher passes the directory as `OVERLYX_AGENTS_DIR`), has the
+  settings line / OverLyX block or its master has, or belongs to a project that uses OverLyX — its
+  git repository (else its project directory) has, four levels deep, some `.tex` with the block —
+  except README / AGENTS / CLAUDE-style `.md` notes. So in a clone of an OverLyX project every
+  document works without an editor open (of the user's 81 documents 16 have no block of their own,
+  all in such projects), while a README or a plain LaTeX project never gets `<ins>` / `\lyxadded`.
+  An agent cannot tell a document without a block of its own belongs to such a project — Claude Code
+  read a plain rebuttal and patched it itself — so the server checks its working directory at start
+  (`directoryUsesOverlyx`) and says so first in its instructions and in edit_document's description.
+  Codex patched it anyway (its model searched for AGENTS.md first): connecting also writes a marked
+  block into `$CODEX_HOME/AGENTS.md` (`instructCodex`; disconnecting takes it out, a file left empty
+  is removed; connected before the note → added once, globalState `agents.codexNote`). Verified with a
+  project-level AGENTS.md carrying the same block. The command is `process.execPath` with `ELECTRON_RUN_AS_NODE=1` (a
   Snap's revision path via `current`; on macOS the app's `MacOS/Electron`) running a launcher in the
   global storage (`agents/overlyx-local.cjs` + `current.json`), which starts the registering version's
   `dist/agents.cjs` or, once an update removed it, the newest installed `overlyx.overlyx-vscode-*`.
