@@ -100,6 +100,12 @@ export function stripMathDelims(s: string): string {
   return close[m[1]] === m[3] ? m[2].trim() : t;
 }
 
+/** attributes that keep password managers off the hidden formula input */
+const NO_AUTOFILL: [string, string][] = [
+  ['data-1p-ignore', 'true'], ['data-lpignore', 'true'], ['data-bwignore', 'true'],
+  ['data-form-type', 'other'], ['data-protonpass-ignore', 'true'],
+];
+
 export function activeMathField(): LyxMathField | null { return active; }
 /** called whenever a math field gains or loses the focus (the toolbar switches to LyX's math toolbar) */
 export const mathFocusListeners = new Set<(field: LyxMathField | null) => void>();
@@ -176,6 +182,9 @@ export class LyxMathField {
     this.input.className = 'lm-input';
     this.input.setAttribute('aria-label', 'formula');
     this.input.autocomplete = 'off'; this.input.spellcheck = false; this.input.tabIndex = -1;
+    // password managers ignore autocomplete=off and open their fill menu on every click into a formula;
+    // each one's own opt-out (1Password, LastPass, Bitwarden, Dashlane, Proton Pass)
+    for (const [k, v] of NO_AUTOFILL) this.input.setAttribute(k, v);
     this.dom.append(this.content, this.overlay, this.input);
     this.wire();
     // another math font: drawn again
