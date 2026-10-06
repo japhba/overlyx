@@ -1,7 +1,8 @@
 /**
  * OverLyX's local tool server (MCP over stdio): Claude Code, Codex or any MCP client on this
- * computer edits the OverLyX documents in its working directory as tracked changes, and comments
- * on them, through the files themselves (localEdit.ts) — no account, no server, no sync. The
+ * computer edits LaTeX / markdown documents as tracked changes — when the user asks for that; it
+ * edits as usual otherwise — and comments on them, through the files themselves (localEdit.ts) or
+ * the VS Code window that has a document open — no account, no server, no sync. The
  * extension registers it with the agents (host/agents.ts); each agent session starts it:
  * dist/agents.cjs, by way of the stable launcher the extension keeps in its global storage.
  */
@@ -10,12 +11,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { resolveLayoutDir } from '../host/lyxlib.ts';
-import { runTool, toolTarget, directoryUsesOverlyx, type ToolName } from './localEdit.ts';
+import { runTool, toolTarget, type ToolName } from './localEdit.ts';
 import { openDocuments } from './openDocuments.ts';
 
 export const LOCAL_SERVER_NAME = 'overlyx-local';
 
-export const LOCAL_INSTRUCTIONS = `OverLyX documents on this computer — the .tex and .md files of a project that uses OverLyX (some .tex file in it has an OverLyX block in the preamble, "%% OverLyX ---"; e.g. a clone of an OverLyX project), apart from its README / AGENTS-style notes, and any file open in the OverLyX editor in VS Code (no editor needs to be open): edit them with these tools, not with your own file editing (apply_patch, edit/write tools, shell). Your edit then becomes TRACKED CHANGES — insertions and deletions attributed to you, which the user accepts or rejects in the editor (an editor that has the file open shows them at once, also with unsaved edits). Read the files with your own tools; paths are relative to your working directory. Every other file — a README, a plain LaTeX project without OverLyX — you edit as usual; the tools refuse those.
+export const LOCAL_INSTRUCTIONS = `Tracked changes in LaTeX (.tex) and markdown (.md) documents, for the OverLyX editor. Use these tools ONLY when the user asks for it — "with track changes", "as tracked changes", "as suggestions", "so I can review them", or for comments in the document. Otherwise edit files as you normally would, with your own tools; never on your own initiative. When asked, edit the documents with these tools, not with your own file editing (apply_patch, edit/write tools, shell): your edit then becomes TRACKED CHANGES — insertions and deletions attributed to you, which the user accepts or rejects in the OverLyX editor (an editor that has the file open shows them at once, also with unsaved edits; none needs to be open). Read the files with your own tools; paths are relative to your working directory. A document without OverLyX's block in its preamble gets one with the first tracked change (it defines the change marks for LaTeX).
 
 edit_document replaces a passage (old_text → new_text; any LaTeX), write_document writes a whole source or creates a document. Only what actually changes is marked — a word, a digit, a table cell. In the source, pending changes look like \\lyxadded{author}{date}{text} and \\lyxdeleted{author}{date}{text} (in markdown: <ins …>text</ins>, <del …>text</del>); old_text may leave that markup out, and whitespace differences are tolerated. Never write or edit that markup yourself, and leave other people's tracked changes alone. The preamble is never tracked (applied directly, and said so).
 
@@ -24,15 +25,6 @@ Tracked editing must never block you or leave a document broken. On ANY problem 
 Comments: add_comment starts a thread at a passage, reply_to_comment answers a thread (and resolve: true marks it done). In the source a thread is a block of "%% @comment" … "%% @end" lines (in markdown an HTML comment "<!-- @comment … -->") with "Author (date):" headers; change threads only through these tools.
 
 Other files (refs.bib, .sty, macros, figures, code) are not documents: edit them directly with your own tools. Leave the block between "%% OverLyX ---" and "%% end OverLyX ---" alone (regenerated on every save); put preamble additions above it. The tools may rewrite what you wrote into OverLyX's canonical form (spacing, line breaks) — read the file again before editing the same passage.`;
-
-/**
- * Where the agent works, said up front: an agent that reads a document without OverLyX's block of
- * its own (a rebuttal next to the paper) cannot tell the project uses OverLyX and edits it itself —
- * seen with Claude Code. Codex shows its model no server instructions, so the tool descriptions say it too.
- */
-const whereNote = (here: boolean) => here
-  ? 'This working directory is a project that uses OverLyX (some of its .tex files carry OverLyX\'s block): edit every one of its .tex and .md documents — also those without the block, but not README / AGENTS-style notes — with these tools.'
-  : 'This working directory is not a project that uses OverLyX: use these tools for files the user has open in the OverLyX editor, or documents in another directory that uses OverLyX (they refuse anything else), and edit everything else as usual.';
 
 /** Whose changes: the agent's own name, from the client's initialize. */
 export function authorFor(client: { name?: string; title?: string } | undefined): string {
@@ -60,8 +52,7 @@ async function handToEditor(endpoint: string, call: { tool: ToolName; args: Reco
 }
 
 export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsDir?: string }): McpServer {
-  const here = directoryUsesOverlyx(opts.cwd);
-  const server = new McpServer({ name: LOCAL_SERVER_NAME, version: '1.0.0' }, { instructions: `${whereNote(here)}\n\n${LOCAL_INSTRUCTIONS}` });
+  const server = new McpServer({ name: LOCAL_SERVER_NAME, version: '1.0.0' }, { instructions: LOCAL_INSTRUCTIONS });
   /**
    * A tool call: handed to the VS Code window that has the document open (the edit then applies to
    * its editor, unsaved typing included), else done on the file.
@@ -75,14 +66,14 @@ export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsD
         const answer = await handToEditor(endpoint, { tool, args, author, cwd: opts.cwd });
         if (answer) return answer.error !== undefined ? fail(new Error(answer.error)) : ok(answer.result);
       }
-      return ok(await runTool(tool, args, { cwd: opts.cwd, layoutDir: opts.layoutDir, author, isOpen: abs => open.has(abs) }));
+      return ok(await runTool(tool, args, { cwd: opts.cwd, layoutDir: opts.layoutDir, author }));
     } catch (e) { return fail(e); }
   };
   const pathArg = z.string().describe('The document file: relative to your working directory (e.g. "paper/main.tex"), or absolute');
   const trackedArg = z.boolean().optional().describe('true (default): tracked changes for the user to review. false: applied directly, without marks — the fallback whenever tracked editing runs into any problem (see the instructions)');
 
   server.registerTool('edit_document', {
-    description: (here ? 'This working directory is a project that uses OverLyX: use this for every edit of its .tex and .md documents (not README / AGENTS-style notes), also those without an OverLyX block of their own. ' : '') + "Edit an OverLyX document by replacing a passage of its source — use this instead of apply_patch, your own edit tools or the shell for the .tex / .md documents of a project that uses OverLyX (some .tex file in it has an OverLyX block, \"%% OverLyX ---\" in the preamble) and for files open in the OverLyX editor; other files you edit as usual (this tool refuses them). old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to you and diffed against the file, so only what actually changes is marked; the user reviews them in the OverLyX editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the file now reads, for follow-up edits; applied_directly lists what was applied without marks (the preamble is never tracked). With tracked: false the same edit is applied directly — use that as soon as a tracked edit fails, garbles the passage or breaks the build.",
+    description: "Edit a LaTeX (.tex) or markdown (.md) document as tracked changes for the OverLyX editor — only when the user asks for tracked changes / suggestions to review (otherwise edit as usual); then use this instead of apply_patch, your own edit tools or the shell. old_text must occur exactly once — include enough surrounding text to make it unique, or set replace_all. Any LaTeX is allowed in new_text (formulas, citations, environments, paragraph breaks). Applied as tracked changes attributed to you and diffed against the file, so only what actually changes is marked; the user reviews them in the OverLyX editor. Tracked-change markup (\\lyxadded / \\lyxdeleted) may be left out of old_text; whitespace differences are tolerated. Returns now_reads: the edited lines as the file now reads, for follow-up edits; applied_directly lists what was applied without marks (the preamble is never tracked). With tracked: false the same edit is applied directly — use that as soon as a tracked edit fails, garbles the passage or breaks the build.",
     inputSchema: {
       path: pathArg,
       old_text: z.string().describe('The passage to replace, copied from the file'),
@@ -93,12 +84,12 @@ export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsD
   }, call('edit_document'));
 
   server.registerTool('write_document', {
-    description: "Write an OverLyX document's whole source, or create the document when the file does not exist. On an existing document the new source is diffed against the file and applied as tracked changes (only what differs is marked) — or, with tracked: false, written directly. For a local change prefer edit_document.",
+    description: "Write a document's whole source as tracked changes (only when the user asks for tracked changes), or create the document when the file does not exist. On an existing document the new source is diffed against the file and applied as tracked changes (only what differs is marked) — or, with tracked: false, written directly. For a local change prefer edit_document.",
     inputSchema: { path: pathArg, tex: z.string().describe('The complete source'), tracked: trackedArg },
   }, call('write_document'));
 
   server.registerTool('add_comment', {
-    description: 'Start a comment thread in an OverLyX document, signed with your name — for a question or a suggestion the user should decide on rather than an edit. It sits right after the quoted passage (at), or at the end of the paragraph containing it; without at, at the end of the document.',
+    description: 'Start a comment thread in a LaTeX or markdown document for the OverLyX editor, signed with your name — when the user asks for comments, or for a question or suggestion they should decide on while you make tracked changes. It sits right after the quoted passage (at), or at the end of the paragraph containing it; without at, at the end of the document.',
     inputSchema: {
       path: pathArg,
       text: z.string().describe('The comment (plain text; new lines start new paragraphs)'),
@@ -107,7 +98,7 @@ export function buildLocalServer(opts: { cwd: string; layoutDir: string; agentsD
   }, call('add_comment'));
 
   server.registerTool('reply_to_comment', {
-    description: 'Answer a comment thread of an OverLyX document (e.g. one the user left for you), and/or mark it resolved once it is dealt with. The thread is found by a quote of its text.',
+    description: 'Answer a comment thread of a document (e.g. one the user left for you in OverLyX), and/or mark it resolved once it is dealt with. The thread is found by a quote of its text.',
     inputSchema: {
       path: pathArg,
       comment: z.string().describe('A passage of the thread (any of its messages), unique among the threads'),

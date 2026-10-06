@@ -62,8 +62,7 @@ export function setupAgents(context: vscode.ExtensionContext, layoutDir: () => s
     }
   };
 
-  // the files open in this window's OverLyX editors: documents for the tools even without OverLyX's marks (a .md
-  // file), and their edits come here (bridge.ts /api/agent/tool), to apply to the editor's text
+  // the files open in this window's OverLyX editors: agents' edits of them come here (bridge.ts /api/agent/tool), to apply to the editor's text
   let published = '';
   const publish = (files: string[]) => {
     const key = JSON.stringify(files);

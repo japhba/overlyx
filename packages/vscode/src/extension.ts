@@ -230,7 +230,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         if (!(TOOL_NAMES as readonly string[]).includes(call.tool)) return { error: `unknown tool ${call.tool}` };
         const target = toolTarget(call.args, call.cwd);
         const run = (store: TextStore) => runTool(call.tool as ToolName, call.args, {
-          cwd: call.cwd, layoutDir: layoutDir(), author: call.author, isOpen: () => true, store: abs => (abs === target ? store : undefined),
+          cwd: call.cwd, layoutDir: layoutDir(), author: call.author, store: abs => (abs === target ? store : undefined),
         });
         for (const e of registry.all()) {
           const job = e.agentEdit?.(target, run);

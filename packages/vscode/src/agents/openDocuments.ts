@@ -2,8 +2,7 @@
  * Which files are open in OverLyX editors right now, across VS Code windows: each extension host
  * writes its list to `<agents dir>/open/<pid>.json` (host/agents.ts), with the address of its local
  * bridge (host/bridge.ts, token included — the file is the user's alone); the local tool server
- * reads them (lists of windows that are gone are ignored). A file open in an editor is an OverLyX
- * document for the tools even without OverLyX's marks in it (a markdown file), and its edits go
+ * reads them (lists of windows that are gone are ignored). Edits of a file open in an editor go
  * through that window, so they apply to what the user sees, unsaved typing included.
  */
 import fs from 'node:fs';

@@ -75,18 +75,17 @@ requires **Developer: Reload Window** so VS Code loads the rebuilt extension.
 
 ### AI agents: their edits as tracked changes
 
-Claude Code, Codex or another agent working in your folders can edit OverLyX documents as
-**tracked changes**: insertions and deletions attributed to the agent ("Claude Code", "Codex"),
-which you accept or reject in the editor like a collaborator's. Agents can also start comment
-threads and answer yours (and resolve them). When the extension finds Claude Code or Codex on this
-computer it asks once whether to connect them; later, **OverLyX: Connect AI Agents** /
-**Disconnect AI Agents**. Agents started after that have the tools of the `overlyx-local` server
-(`edit_document`, `write_document`, `add_comment`, `reply_to_comment`) for OverLyX documents: the
-`.tex` and `.md` files of a project that uses OverLyX — some `.tex` file in it has OverLyX's block in
-the preamble, as in a clone of an OverLyX project — apart from its README / AGENTS-style notes, and
-any file open in an OverLyX editor. No editor needs to be open, nor VS Code running. Other files — a
-README, a plain LaTeX project — they edit as usual; the tools refuse them, so no tracked-change markup
-ends up there. Connecting needs no document either: run the command from the palette.
+Claude Code, Codex or another agent working in your folders can make its edits of LaTeX and
+markdown documents **tracked changes** when you ask for it — "…with track changes", "as suggestions":
+insertions and deletions attributed to the agent ("Claude Code", "Codex"), which you accept or reject
+in the editor like a collaborator's. Asked, agents also comment, and answer and resolve your comment
+threads. Without such a request they edit as they always do. When the extension finds Claude Code or
+Codex on this computer it asks once whether to connect them; later, **OverLyX: Connect AI Agents** /
+**Disconnect AI Agents** (from the palette, no document needed). Agents started after that have the
+tools of the `overlyx-local` server (`edit_document`, `write_document`, `add_comment`,
+`reply_to_comment`), for any `.tex` or `.md` file. No editor needs to be open, nor VS Code running; a
+document without OverLyX's block in its preamble gets it with the first tracked change (it defines
+the change marks for LaTeX).
 
 Connecting registers a local tool server: for Claude Code with `claude mcp add-json -s user`, plus
 `mcp__overlyx-local` in `permissions.allow` of its user settings so the tools run without a prompt in

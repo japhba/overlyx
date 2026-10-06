@@ -214,17 +214,16 @@ export function unregisterCodex(): boolean {
 }
 
 /*
- * Codex's model follows AGENTS.md, not the tool descriptions: in a project that uses OverLyX it
- * patched a document without OverLyX's block of its own (a rebuttal next to the paper) itself. So
- * connecting also adds a marked block to Codex's personal instructions ($CODEX_HOME/AGENTS.md);
- * disconnecting takes it out, and nothing else of the file is touched.
+ * Codex's model follows AGENTS.md, not the tool descriptions: asked for tracked changes, it patched
+ * the plain text itself. So connecting also adds a marked block to Codex's personal instructions
+ * ($CODEX_HOME/AGENTS.md); disconnecting takes it out, and nothing else of the file is touched.
  */
 export const codexInstructionsFile = () => path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'AGENTS.md');
 const NOTE_BEGIN = '<!-- OverLyX (VS Code extension): begin — "OverLyX: Disconnect AI Agents" removes this block -->';
 const NOTE_END = '<!-- OverLyX: end -->';
 const CODEX_NOTE = `${NOTE_BEGIN}
-## OverLyX documents: edit them as tracked changes
-In a project that uses OverLyX (some .tex file in it has a "%% OverLyX ---" block in its preamble — e.g. a clone of an OverLyX project), edit every .tex and .md document (not README / AGENTS-style notes) with the tools of the \`${SERVER_NAME}\` MCP server — \`edit_document\`, \`write_document\`, \`add_comment\`, \`reply_to_comment\` — not with apply_patch or the shell: your edits then become tracked changes the user reviews in OverLyX. The tools refuse other files; edit those as usual.
+## Tracked changes in LaTeX / markdown documents (OverLyX)
+Only when the user asks for tracked changes ("with track changes", "as suggestions", "so I can review them") or for comments in a .tex or .md document: make the edits with the tools of the \`${SERVER_NAME}\` MCP server — \`edit_document\`, \`write_document\`, \`add_comment\`, \`reply_to_comment\` — not with apply_patch, the shell or hand-written markup; the user then reviews them in OverLyX. Otherwise edit as usual.
 ${NOTE_END}
 `;
 

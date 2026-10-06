@@ -20,8 +20,7 @@ import { commentHeader, formatTimestamp, parseHeader, parseThread } from '@overl
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { primePreserveCache, type PreserveCache, type ParseTexResult } from '@overlyx/core/tex/index.ts';
 import { parseDocumentText, writeDocumentText, includeResolver, type TexContext } from '../host/texdoc.ts';
-import { projectDirFor, findMaster } from '../host/project.ts';
-import { hasSettingsLine, MANAGED_BEGIN } from '@overlyx/core/tex/preamble.ts';
+import { projectDirFor } from '../host/project.ts';
 
 export { EditError };
 
@@ -32,8 +31,6 @@ export interface LocalContext {
   layoutDir: string;
   /** whose changes these are: "Claude Code", "Codex", … */
   author: string;
-  /** whether a file is open in an OverLyX editor (openDocuments.ts) */
-  isOpen: (absolutePath: string) => boolean;
   /** where a document's text is read from and written to (default: the file) */
   store?: (absolutePath: string) => TextStore | undefined;
 }
@@ -57,77 +54,7 @@ function locate(file: string, lc: LocalContext, mustExist = true): DocFile {
   if (!abs.endsWith('.tex') && !isMarkdownPath(abs)) throw new EditError(`${file}: a .tex or .md document is expected — edit other files directly`);
   if (mustExist && !fs.existsSync(abs)) throw new EditError(`${file} does not exist (relative paths start at ${lc.cwd})`);
   const root = projectDirFor(abs);
-  const f = { abs, ctx: { root, layoutDir: lc.layoutDir }, relPath: path.relative(root, abs) };
-  if (fs.existsSync(abs) && !isOverlyxDocument(f, lc)) {
-    throw new EditError(`${file} is not an OverLyX document (not in a project that uses OverLyX — none of its .tex files has the "%% OverLyX" block —, and not open in the OverLyX editor): edit it directly with your own tools, as you would without OverLyX. If the user wants your edits in it as tracked changes, they open it in the OverLyX editor first.`);
-  }
-  return f;
-}
-
-/**
- * Tracked changes and comment threads only go where OverLyX is in use — never into a code
- * repository's README or somebody's plain LaTeX: a file open in an OverLyX editor, a .tex file
- * OverLyX has written (its block in the preamble) or a child of such a master, and any document
- * of a project that uses OverLyX (a clone of an OverLyX project: some .tex file in it has the
- * block) — so no editor needs to be open — except the repository's own notes (README, AGENTS, …).
- */
-function isOverlyxDocument(f: DocFile, lc: LocalContext): boolean {
-  if (lc.isOpen(f.abs)) return true;
-  if (f.abs.endsWith('.tex')) {
-    if (writtenByOverlyx(f.abs)) return true;
-    const master = findMaster(f.ctx.root, f.relPath);
-    if (master && writtenByOverlyx(path.join(f.ctx.root, master))) return true;
-  } else if (REPO_NOTES.test(path.basename(f.abs))) return false;
-  return projectUsesOverlyx(repositoryOf(f.abs) ?? f.ctx.root);
-}
-
-/** Markdown files that belong to the repository rather than being documents of it */
-const REPO_NOTES = /^(readme|agents|claude|gemini|changelog|changes|contributing|license|licence|code_of_conduct|security|todo)(\.[^.]+)?\.(md|markdown)$/i;
-
-const writtenByOverlyx = (abs: string): boolean => {
-  try {
-    const fd = fs.openSync(abs, 'r');
-    try { const buf = Buffer.alloc(65536); const t = buf.toString('utf8', 0, fs.readSync(fd, buf, 0, buf.length, 0)); return hasSettingsLine(t) || t.includes(MANAGED_BEGIN); }
-    finally { fs.closeSync(fd); }
-  } catch { return false; }
-};
-
-/** The git repository a file is in (its top directory), if any */
-function repositoryOf(abs: string): string | null {
-  for (let dir = path.dirname(abs), i = 0; i < 12; i++) {
-    if (fs.existsSync(path.join(dir, '.git'))) return dir;
-    const up = path.dirname(dir);
-    if (up === dir) break;
-    dir = up;
-  }
-  return null;
-}
-
-/** Whether a directory (the agent's working directory) belongs to a project that uses OverLyX: its git repository, else the directory itself. */
-export const directoryUsesOverlyx = (dir: string): boolean => projectUsesOverlyx(repositoryOf(path.join(dir, '_')) ?? dir);
-
-/** Whether some .tex file of a project (a few levels deep) was written by OverLyX; remembered per directory. */
-const usesOverlyx = new Map<string, boolean>();
-function projectUsesOverlyx(root: string): boolean {
-  const hit = usesOverlyx.get(root);
-  if (hit !== undefined) return hit;
-  let seen = 0;
-  const scan = (dir: string, depth: number): boolean => {
-    let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return false; }
-    for (const e of entries) {
-      if (++seen > 2000) return false;
-      if (e.isFile() && e.name.endsWith('.tex') && writtenByOverlyx(path.join(dir, e.name))) return true;
-    }
-    if (depth >= 4) return false;
-    for (const e of entries) {
-      if (e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules' && e.name !== '_build' && scan(path.join(dir, e.name), depth + 1)) return true;
-    }
-    return false;
-  };
-  const found = scan(root, 0);
-  usesOverlyx.set(root, found);
-  return found;
+  return { abs, ctx: { root, layoutDir: lc.layoutDir }, relPath: path.relative(root, abs) };
 }
 
 /** The file's text; a file that is not UTF-8 is refused (writing it back would change its other bytes). */
