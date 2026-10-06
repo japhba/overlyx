@@ -68,8 +68,10 @@ connector. Every agent session starts it anew, so it uses the login as it is the
 `overlyx auth login` counts at once), asks the server where and how to connect (`/cli/mcp.json`),
 and the tools are the server's — changes on the server reach the agents without registering again.
 An installed CLI also keeps itself up to date (`overlyx update`; the bridge checks once an hour, for
-the next session). The agent edits your projects on the server, with your role in each; started
-inside a git clone of an OverLyX project, it is told which project that is.
+the next session). The agent edits your projects on the server, with your role in each. Started
+inside a git clone of an OverLyX project, it is told which project that is — and to edit the files of
+the clone, as tracked changes through the VS Code extension's local tools (`overlyx-local`, see the
+extension's README) when it has them, and to push with git.
 
 So you can start `claude` in any directory and tell it to do something in OverLyX ("tighten the
 abstract of my thesis", "fix this paragraph": it sees your cursor and selection in the document you

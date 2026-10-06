@@ -5,6 +5,7 @@
 import * as vscode from 'vscode';
 import type { DocSession } from './session.ts';
 import type { OutlineEntry } from '../shared/protocol.ts';
+import type { TextStore } from '../agents/localEdit.ts';
 
 export interface OpenEditor {
   session: DocSession;
@@ -13,6 +14,12 @@ export interface OpenEditor {
   selectionPos: number;
   /** after a save VS Code refused (the file changed outside meanwhile): bring VS Code's copy of the file up to date (DocSession.save) */
   resync?: (target: DocSession) => Promise<boolean>;
+  /**
+   * A local agent's edit of one of this view's documents (`absPath`): `run` reads and writes the
+   * document's text through `store`, in turn with the webview's own updates; the result is shown
+   * and saved. Undefined when the view does not hold that document.
+   */
+  agentEdit?: <T>(absPath: string, run: (store: TextStore) => Promise<T>) => Promise<T> | undefined;
 }
 
 export class Registry {

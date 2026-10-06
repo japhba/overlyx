@@ -58,7 +58,8 @@ Drawing SVGs are updated alongside editor changes, including when the TeX anchor
 The Help menu searches commands and allows shortcut customization. In VS Code its default
 shortcut is **Ctrl+Alt+Shift+P**; **Ctrl+Shift+P** and **F1** retain VS Code's command palette.
 File operations, source control, history, outline and theme commands use VS Code. Online accounts,
-collaboration and server AI remain browser services; the extension uses local files and VS Code agents.
+collaboration and server AI remain browser services; the extension uses local files and VS Code agents
+(whose edits can arrive as tracked changes: see *AI agents* below).
 
 ### External changes and unsaved edits
 
@@ -71,6 +72,29 @@ file and the unsaved buffer changed. Overwrite saves the merged buffer visible i
 
 Reloading a webview requests fresh content from its TextDocument. Updating extension-host code
 requires **Developer: Reload Window** so VS Code loads the rebuilt extension.
+
+### AI agents: their edits as tracked changes
+
+Claude Code, Codex or another agent working in your folders can edit OverLyX documents as
+**tracked changes**: insertions and deletions attributed to the agent ("Claude Code", "Codex"),
+which you accept or reject in the editor like a collaborator's. Agents can also start comment
+threads and answer yours (and resolve them). When the extension finds Claude Code or Codex on this
+computer it asks once whether to connect them; later, **OverLyX: Connect AI Agents** /
+**Disconnect AI Agents**. Agents started after that have the tools of the `overlyx-local` server
+(`edit_document`, `write_document`, `add_comment`, `reply_to_comment`) for OverLyX documents: `.tex`
+files OverLyX has written (its block in the preamble) and their child documents, and any file open in
+an OverLyX editor (markdown too). Other files — a README, a plain LaTeX project — they edit as usual;
+the tools refuse them, so no tracked-change markup ends up there.
+
+Connecting registers a local tool server: for Claude Code with `claude mcp add-json -s user`, plus
+`mcp__overlyx-local` in `permissions.allow` of its user settings so the tools run without a prompt in
+every folder; for Codex a `[mcp_servers.overlyx-local]` table in `~/.codex/config.toml` (backed up to
+`config.toml.bak` first) with `default_tools_approval_mode = "approve"`, Codex's counterpart. The command is VS Code's own runtime (`ELECTRON_RUN_AS_NODE=1`, no Node.js
+needed) with a launcher in the extension's global storage that survives extension updates. Nothing
+leaves the computer and no OverLyX account is involved. When the document is open in a VS Code
+window, the edit goes through that editor — it applies to what you see, unsaved typing included, and
+the document is saved — otherwise the tools change the file, and an editor merges it like any change
+on disk (see above).
 
 ## Requirements
 

@@ -1964,8 +1964,9 @@ clientInfo, User-Agent). It exposes these tools:
   HTTP: session id, SSE answers, the GET event stream for Claude Code's session, DELETE at the end),
   so a changed connector, endpoint or token needs no re-registration; an installed CLI updates itself
   (checksummed, at most hourly from the bridge). Started in a git clone of an OverLyX project, the
-  bridge prepends to the initialize `instructions` which project the directory is (edit it with the
-  tools, the clone only changes with `git pull`). The OverLyX repository registers the bridge for
+  bridge prepends to the initialize `instructions` which project the directory is, and that its files
+  are edited here — through the VS Code extension's local tools (below) where the agent has them — and
+  pushed with git; the server tools are for the server's copy. The OverLyX repository registers the bridge for
   agents working in a clone of it: `.mcp.json` and `.codex/config.toml` run the checkout's own CLI
   (`packages/cli/bin/overlyx.js`). The Git dialog shows these steps, and the direct `claude mcp add
   --transport http …` / Codex `url` + `bearer_token_env_var` forms for use without the CLI. Claude Code asks before the
@@ -1974,6 +1975,46 @@ clientInfo, User-Agent). It exposes these tools:
   (`$CLAUDE_CONFIG_DIR` or `~/.claude/settings.json`, merged and written atomically; `--ask-each-time`
   skips it, `mcp uninstall` takes it out). Started anywhere, Claude Code then works on OverLyX without
   prompts.
+* **Local agents next to the VS Code extension** (`packages/vscode/src/agents/`): the extension
+  ships a second bundle, `dist/agents.cjs`, an MCP server over stdio (`overlyx-local`) with
+  `edit_document`, `write_document`, `add_comment` and `reply_to_comment` for the `.tex` / `.md`
+  documents in the agent's working directory (`localEdit.ts runTool`): the tracked diff is the
+  server's (`core/lyx/docedit.ts` — moved there from the server, which re-exports it —
+  `applyTrackedSource` / `applyPlainSource` / `replaceInSource`) on an `EditableDoc` over a
+  `TextStore`, written with the extension's preserving writer (`host/texdoc.ts`: unchanged paragraphs
+  keep their bytes), per document one edit at a time and redone when the text changed meanwhile. A
+  child document is parsed in its master's project directory (`projectDirFor`); non-UTF-8 files are
+  refused. The author is the MCP client (`claude-code` → "Claude Code", `codex…` → "Codex"). **Where
+  the edit applies:** when a VS Code window has the document open (its `open/<pid>.json` lists the
+  file and its bridge address), the tool server hands the call over (`POST <bridge>/api/agent/tool`,
+  token in the URL; the list is mode 0600); the extension runs `runTool` with the editor's text as the
+  store, in turn with the webview's updates (`OpenEditor.agentEdit`, editorProvider.ts: syncFromDisk,
+  compute on `document.getText()`, `DocSession.writeAgentText`, snapshot to the webview, save — so the
+  agent reads and builds the result from the file). Unsaved typing survives even in the paragraph the
+  agent changes; only keystrokes still in the webview's debounce can conflict. Otherwise (no window,
+  or it answers `gone` / cannot be reached) the tool server edits the file, and an editor opened later
+  — or one whose window missed the hand-over — merges it like any change on disk (`session.ts
+  readDisk`, paragraph-level: the file wins a paragraph both changed, the draft goes to `recovery`).
+  Verified with `packages/vscode/test/probeAgentEdit.mjs` (xvfb: typed text kept, the change bar names
+  the agent once the metadata reloads). No account, server or sync is involved. Registration (`agents/register.ts`, `host/agents.ts`): on
+  activation the installed extension (not a development host or the tests) offers once (Connect / Not now = a week / Never; globalState
+  `agents.connect`), and connected, re-registers only when VS Code's runtime moved; commands
+  `overlyx.connectAgents` / `overlyx.disconnectAgents`. Claude Code: `claude mcp add-json -s user
+  overlyx-local {type: stdio, command, args, env}` (current-ness read from `.claude.json`) and
+  `mcp__overlyx-local` in `permissions.allow`; Codex: a `[mcp_servers.overlyx-local]` table in
+  `config.toml` (`.bak` first) with `default_tools_approval_mode = "approve"` (else every call asks;
+  `codex exec` fails them). Codex (0.160) passes the model the tools' descriptions but not the
+  server's `instructions`, so the descriptions say which files they are for and to prefer them over
+  apply_patch — verified: without that it patched the file natively. The tools refuse files that are
+  not OverLyX documents (no settings line / OverLyX block, not a child of such a master, not open in
+  an OverLyX editor — each window lists its open files in `<global storage>/agents/open/<pid>.json`,
+  `agents/openDocuments.ts`; the launcher passes the directory as `OVERLYX_AGENTS_DIR`), so a README
+  or a plain LaTeX project never gets `<ins>` / `\lyxadded` markup. The command is `process.execPath` with `ELECTRON_RUN_AS_NODE=1` (a
+  Snap's revision path via `current`; on macOS the app's `MacOS/Electron`) running a launcher in the
+  global storage (`agents/overlyx-local.cjs` + `current.json`), which starts the registering version's
+  `dist/agents.cjs` or, once an update removed it, the newest installed `overlyx.overlyx-vscode-*`.
+  Tests: `tests/vscode-agents.test.ts` (scratch `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, fake `claude` /
+  `codex` on PATH; the stdio server through tsx).
 * **Signing the CLI in** (`server/src/cliLogin.ts`): `overlyx auth login` opens `/cli/login` with
   a PKCE challenge and the port of a listener on 127.0.0.1; the consent page rides the browser's
   OverLyX session; *Authorize* redirects to the listener with a one-time code (CSP `form-action`

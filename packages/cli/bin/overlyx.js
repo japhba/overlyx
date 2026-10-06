@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.6.2';
+const VERSION = '0.6.3';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -579,7 +579,8 @@ async function* sseMessages(res, onId) {
 
 /**
  * The OverLyX project the agent's directory is a clone of (its git remote is `<host>/git/<owner>/<name>.git`),
- * or null. The agent hears it at initialize: the documents are edited on the server, not in the clone.
+ * or null. The agent hears it at initialize: the documents are edited here, in the clone — as tracked
+ * changes through the VS Code extension's local tools ("overlyx-local") where it has them — and pushed with git.
  */
 async function cloneOf(host) {
   let remotes;
@@ -599,9 +600,9 @@ async function cloneOf(host) {
 
 function withCloneInstructions(msg, clone) {
   if (!msg || !msg.result) return msg;
-  const note = `This directory is a git clone of the OverLyX project "${clone.project}". Its documents live on the OverLyX server: `
-    + `read and edit them with these tools (project "${clone.project}") — they are live there for everybody — rather than the files in this clone, `
-    + `which only change with git pull (git remote "${clone.remote}"). Build with build_pdf.`;
+  const note = `This directory is a git clone of the OverLyX project "${clone.project}" (git remote "${clone.remote}"). Edit its documents here, in these files: `
+    + `with the tools of the "overlyx-local" server where you have them (edit_document, write_document, add_comment — your edits become tracked changes the user reviews in the OverLyX editor), otherwise directly. `
+    + `Commit and push with git when the user asks (pull first). The tools below (project "${clone.project}") work on the copy on the OverLyX server, which changes only with a push — use them only when the user asks about that copy.`;
   return { ...msg, result: { ...msg.result, instructions: msg.result.instructions ? `${note}\n\n${msg.result.instructions}` : note } };
 }
 

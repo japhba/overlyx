@@ -251,13 +251,13 @@ describe("overlyx mcp: local agents through the CLI's bridge", () => {
     expect(JSON.stringify(a[3].result)).toContain('ada/Imported paper');
   });
 
-  it('in a clone of an OverLyX project, the agent hears which project it is (edited on the server)', async () => {
+  it('in a clone of an OverLyX project, the agent hears which project it is (and to edit the files here)', async () => {
     const clone = join(ROOT, 'a-clone');
     mkdirSync(clone, { recursive: true });
     await execFileP('git', ['init', '-q', clone]);
     await execFileP('git', ['-C', clone, 'remote', 'add', 'overlyx', `${host.replace('://', '://ada@')}/git/ada/Imported%20paper.git`]);
     const a = await bridge([INIT], { cwd: clone });
-    expect(a[1].result.instructions).toMatch(/^This directory is a git clone of the OverLyX project "ada\/Imported paper"/);
+    expect(a[1].result.instructions).toMatch(/^This directory is a git clone of the OverLyX project "ada\/Imported paper" \(git remote "overlyx"\)\. Edit its documents here, in these files: with the tools of the "overlyx-local" server/);
     // elsewhere: the server's own instructions only
     const b = await bridge([INIT]);
     expect(b[1].result.instructions ?? '').not.toContain('git clone of the OverLyX project');

@@ -226,6 +226,18 @@ export class DocSession {
     return { pmDoc: r.pmDoc, headerLines: r.headerLines };
   }
 
+  /**
+   * A local agent's edit (host/agents.ts): the document's new text, computed from its current text.
+   * The caller pushes the snapshot to the webview (the change is ours, not an external one).
+   */
+  writeAgentText(text: string): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.disposed) throw new Error('The document has closed');
+      parseDocumentText(text, this.ctx, this.relPath);
+      await this.replaceText(text);
+    });
+  }
+
   /** Source view edits use the same TextDocument and parsing path as external edits. */
   applySource(text: string): Promise<ReturnType<DocSession['parseCurrent']>> {
     return this.enqueue(() => this.writeSource(text));

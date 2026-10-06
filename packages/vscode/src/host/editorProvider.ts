@@ -11,6 +11,7 @@ import { webviewHtml } from './webviewHtml.ts';
 import type { EditorToHost, HostToEditor } from '../shared/protocol.ts';
 import type { TexContext } from './texdoc.ts';
 import { projectDirFor } from './project.ts';
+import type { TextStore } from '../agents/localEdit.ts';
 
 export interface ProviderDeps {
   bridgeBase(): Promise<string>;
@@ -94,6 +95,24 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       return !target.document.isDirty;
     };
     entry.resync = resync;
+    entry.agentEdit = <T>(absPath: string, run: (store: TextStore) => Promise<T>): Promise<T> | undefined => {
+      const target = [session, ...related.values()].find(s => s.document.uri.fsPath === absPath);
+      if (!target) return undefined;
+      // in turn with the webview's updates: the edit applies to the text as the user has it, unsaved typing included
+      const job = this.applyChain.then(async () => {
+        if (await target.syncFromDisk()) pushSnapshot(target);
+        const before = target.document.getText();
+        const result = await run({ read: () => target.document.getText(), write: text => target.writeAgentText(text) });
+        if (target.document.getText() !== before) {
+          pushSnapshot(target);
+          // on disk at once: the agent reads, builds and edits on from the file
+          await target.save(resync);
+        }
+        return result;
+      });
+      this.applyChain = job.then(() => undefined, () => undefined);
+      return job;
+    };
     let updateErrorShown = 0;
     /** The webview's Ctrl+S: every document of the view, merged with what changed on disk; failures are shown, with a retry. */
     const save = () => {

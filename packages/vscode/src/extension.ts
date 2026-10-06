@@ -22,6 +22,8 @@ import { collectFiles, readTextFile } from './host/project.ts';
 import { cachedParseFile, parseFragmentText, masterHeaderFor, type TexContext } from './host/texdoc.ts';
 import { buildMeta, bibEntriesFor } from './host/meta.ts';
 import { OverlyxTelemetry } from './host/telemetry.ts';
+import { setupAgents } from './host/agents.ts';
+import { runTool, toolTarget, TOOL_NAMES, type ToolName, type TextStore } from './agents/localEdit.ts';
 import * as build from './host/build.ts';
 import type { HostToEditor } from './shared/protocol.ts';
 
@@ -224,6 +226,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
         const dev = path.join(context.extensionPath, '../../node_modules', pkg, 'index.' + ext);
         return fs.existsSync(dev) ? dev : null;
       },
+      agentTool: async (call) => {
+        if (!(TOOL_NAMES as readonly string[]).includes(call.tool)) return { error: `unknown tool ${call.tool}` };
+        const target = toolTarget(call.args, call.cwd);
+        const run = (store: TextStore) => runTool(call.tool as ToolName, call.args, {
+          cwd: call.cwd, layoutDir: layoutDir(), author: call.author, isOpen: () => true, store: abs => (abs === target ? store : undefined),
+        });
+        for (const e of registry.all()) {
+          const job = e.agentEdit?.(target, run);
+          if (!job) continue;
+          try { return { result: await job }; } catch (err) { return { error: (err as Error)?.message ?? String(err) }; }
+        }
+        return { gone: true };   // closed meanwhile: the tool server edits the file
+      },
     };
   }
 
@@ -327,6 +342,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('overlyx.defaultEditor')) void applyDefaultEditor(true).catch(defaultEditorFailed); }));
 
   updater.schedule();
+  // Claude Code / Codex on this computer: their edits of the documents as tracked changes (agents/server.ts)
+  setupAgents(context, layoutDir, (e, area) => telemetry.report(e, area), {
+    files: () => registry.all().flatMap(e => [e.session, ...registry.relatedSessions(e).values()].map(s => s.document.uri.fsPath)),
+    onDidChange: registry.onDidChange,
+    endpoint: () => bridge.base,
+  });
 
   return { registry, bridgeBase: () => bridge.base, checkForUpdates: (opts) => updater.check(opts ?? { interactive: true }) };
 }

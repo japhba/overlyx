@@ -38,6 +38,8 @@ export interface BridgeDelegate {
   cacheDir(): string;
   /** spell checker dictionaries (dictionary-en etc. from node_modules), or null */
   dictionary(lang: string, ext: 'aff' | 'dic'): string | null;
+  /** a local agent's tool call for a document open here, handed over by the tool server (agents/server.ts) */
+  agentTool(call: { tool: string; args: Record<string, unknown>; author: string; cwd: string }): Promise<{ result?: unknown; error?: string; gone?: boolean }>;
 }
 
 const JSON_LIMIT = 32 * 1024 * 1024;
@@ -104,6 +106,12 @@ export class Bridge {
     if (api === '/bib/sources') { send(res, 200, { enabled: false, sources: [] }); return; }
     if (api === '/client-error') { send(res, 200, { url: null }); return; }
     if (api === '/projects' && req.method === 'GET') { send(res, 200, { projects: d.projects() }); return; }
+    if (api === '/agent/tool' && req.method === 'POST') {
+      const b = await body(req);
+      if (typeof b?.tool !== 'string' || !b.args || typeof b.args !== 'object' || typeof b.cwd !== 'string') { send(res, 400, { error: 'tool, args and cwd required' }); return; }
+      send(res, 200, await d.agentTool({ tool: b.tool, args: b.args, author: String(b.author ?? 'AI agent'), cwd: b.cwd }));
+      return;
+    }
 
     /* ---- documents ---- */
     m = /^\/docs\/([^/]+)\/([a-z-]+)(?:\/([a-z-]+))?$/.exec(api);
