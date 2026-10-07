@@ -110,7 +110,8 @@ let nextId = 1;
 const waiting = new Map<number, (m: any) => void>();
 const notified: ((m: any) => void)[] = [];
 function boot(): void {
-  cx = spawn(BIN, ['app-server'], { env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: home, CODEX_HOME: home, LANG: 'C.UTF-8', TERM: 'dumb', OVERLYX_MCP_TOKEN: 'SECRET-TOKEN' }, stdio: ['pipe', 'pipe', 'pipe'] });
+  // its own process group: `codex` is a node wrapper around the native binary, and stop() takes both
+  cx = spawn(BIN, ['app-server'], { detached: true, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: home, CODEX_HOME: home, LANG: 'C.UTF-8', TERM: 'dumb', OVERLYX_MCP_TOKEN: 'SECRET-TOKEN' }, stdio: ['pipe', 'pipe', 'pipe'] });
   let buf = '';
   cx.stdout.on('data', d => {
     buf += d;
@@ -130,6 +131,14 @@ function boot(): void {
   cx.stderr.on('data', () => { /* codex logs */ });
 }
 const approvalsAsked: string[] = [];
+/** End codex — wrapper and native binary — and wait until it is gone (it writes into its home until then). */
+async function stop(): Promise<void> {
+  if (!cx || cx.exitCode !== null || cx.signalCode !== null) return;
+  const gone = new Promise(r => cx.once('exit', r));
+  try { process.kill(-cx.pid!, 'SIGKILL'); } catch { cx.kill('SIGKILL'); }
+  await Promise.race([gone, new Promise(r => setTimeout(r, 3000))]);
+  await new Promise(r => setTimeout(r, 200));
+}
 const request = (method: string, params: unknown): Promise<any> => new Promise((resolve, reject) => {
   const id = nextId++;
   const t = setTimeout(() => reject(new Error(`${method}: no answer`)), 60000);
@@ -180,8 +189,7 @@ try {
   check('LaTeX builds in the working copy', out[5] !== undefined && out[5].includes('PDFLATEX=0'), out[5]);
   check('the MCP server learns which thread calls', mcpThreads.length > 0 && mcpThreads.every(k => k === KEY), mcpThreads.join(','));
   // a resumed thread (after a codex restart — a deploy, an update) gets the same sandbox
-  cx.kill('SIGKILL');
-  await new Promise(r => setTimeout(r, 500));
+  await stop();
   await start();
   // the panel reads the transcript first (opening the thread) — that must not load it without its sandbox
   await request('thread/read', { threadId: tid, includeTurns: true });
@@ -196,7 +204,7 @@ try {
 } catch (e) {
   check('the check ran', false, (e as Error).message);
 } finally {
-  try { cx!.kill('SIGKILL'); } catch { /* gone */ }
+  await stop();
   srv.close();
   fs.rmSync(R, { recursive: true, force: true });
 }
