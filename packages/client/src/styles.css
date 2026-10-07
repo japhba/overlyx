@@ -682,7 +682,7 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .lm-corner { position: absolute; box-sizing: border-box; width: 4px; height: 4px; }
 .lm-macro-name { position: absolute; font: 8px/10px system-ui, sans-serif; color: var(--math-arg); background: var(--math-arg-bg); padding: 0 2px; border-radius: 2px; white-space: nowrap; }
 /* (16px: Safari on an iPhone zooms the page into a focused text field whose letters are smaller — on every tap into a formula) */
-.lm-input { position: absolute; width: 1px; height: 1px; opacity: 0; left: 0; top: 0; padding: 0; border: 0; margin: 0; resize: none; overflow: hidden; pointer-events: none; font-size: 16px; }
+.lm-input { position: absolute; width: 1px; height: 1px; opacity: 0; left: 0; top: 0; padding: 0; border: 0; margin: 0; overflow: hidden; white-space: pre; outline: none; pointer-events: none; font-size: 16px; -webkit-user-select: text; user-select: text; }
 /* an empty cell: a blank of a letter's size in MathJax's layout (core EMPTY_CELL), outlined */
 .lm-empty { box-shadow: inset 0 0 0 1px var(--muted2); border-radius: 1px; }
 /* the boxes of empty cells only while the formula is being edited (its field has the focus; formulas

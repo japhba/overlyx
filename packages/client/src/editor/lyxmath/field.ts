@@ -4,7 +4,7 @@
  * behaviour, undo.
  *
  * DOM: <span class="lm-field"><span class="lm-content">MathJax</span><span class="lm-overlay">caret,
- * selection, corner markers</span><textarea class="lm-input"></textarea></span>
+ * selection, corner markers</span><span class="lm-input" contenteditable></span></span>
  * Every cell of the model is wrapped in `\htmlClass{lm-c<id>}{…}` and every atom in
  * `\htmlClass{lm-a}{…}` by the renderer (core/math/mathjax.ts), each a box of MathJax's layout,
  * so the caret, the selection, the corner markers and the mouse work on LyX's coordinate model
@@ -100,12 +100,6 @@ export function stripMathDelims(s: string): string {
   return close[m[1]] === m[3] ? m[2].trim() : t;
 }
 
-/** attributes that keep password managers off the hidden formula input */
-const NO_AUTOFILL: [string, string][] = [
-  ['data-1p-ignore', 'true'], ['data-lpignore', 'true'], ['data-bwignore', 'true'],
-  ['data-form-type', 'other'], ['data-protonpass-ignore', 'true'],
-];
-
 export function activeMathField(): LyxMathField | null { return active; }
 /** called whenever a math field gains or loses the focus (the toolbar switches to LyX's math toolbar) */
 export const mathFocusListeners = new Set<(field: LyxMathField | null) => void>();
@@ -118,7 +112,7 @@ export class LyxMathField {
   dom: HTMLSpanElement;
   private content: HTMLSpanElement;
   private overlay: HTMLSpanElement;
-  private input: HTMLTextAreaElement;
+  private input: HTMLSpanElement;
   hull: Hull;
   cursor: MathCursor;
   macros: MacroTable;
@@ -178,13 +172,17 @@ export class LyxMathField {
     this.content.className = 'lm-content';
     this.overlay = document.createElement('span');
     this.overlay.className = 'lm-overlay';
-    this.input = document.createElement('textarea');
+    // the keyboard and IME go into a hidden contenteditable, not a <textarea>: Chrome takes every
+    // focused textarea for a form field (its password manager, with macOS Passwords, offered saved
+    // logins at each click into a formula; autocomplete=off does not stop it), as do 1Password,
+    // Bitwarden & co.; a contenteditable is left alone, like the text around the formula
+    this.input = document.createElement('span');
     this.input.className = 'lm-input';
+    this.input.contentEditable = 'true';
+    this.input.setAttribute('role', 'textbox');
     this.input.setAttribute('aria-label', 'formula');
-    this.input.autocomplete = 'off'; this.input.spellcheck = false; this.input.tabIndex = -1;
-    // password managers ignore autocomplete=off and open their fill menu on every click into a formula;
-    // each one's own opt-out (1Password, LastPass, Bitwarden, Dashlane, Proton Pass)
-    for (const [k, v] of NO_AUTOFILL) this.input.setAttribute(k, v);
+    this.input.setAttribute('autocorrect', 'off'); this.input.setAttribute('autocapitalize', 'off');
+    this.input.spellcheck = false; this.input.tabIndex = -1;
     this.dom.append(this.content, this.overlay, this.input);
     this.wire();
     // another math font: drawn again
@@ -244,10 +242,16 @@ export class LyxMathField {
     if (where === 'start') { this.cursor.slices = this.cursor.slices.slice(0, 1); this.cursor.idx = 0; this.cursor.pos = 0; }
     if (where === 'end') { this.cursor.slices = this.cursor.slices.slice(0, 1); this.cursor.idx = this.cursor.lastidx; this.cursor.pos = this.cursor.lastpos; }
     this.cursor.clearSelection();
-    this.input.focus({ preventScroll: true });
+    this.focusInput();
     this.scheduleLayout();
   }
   blur(): void { this.input.blur(); }
+  /** the document's caret goes along: typing reaches a contenteditable only through it */
+  private focusInput(): void {
+    this.input.focus({ preventScroll: true });
+    const sel = this.input.ownerDocument.getSelection();
+    if (sel && !this.input.contains(sel.anchorNode)) sel.collapse(this.input, 0);
+  }
 
   private held = false;
   /**
@@ -260,7 +264,7 @@ export class LyxMathField {
   endHold(refocus: boolean): void {
     if (!this.held) return;
     this.held = false;
-    if (refocus) { this.input.focus({ preventScroll: true }); this.scheduleLayout(); }
+    if (refocus) { this.focusInput(); this.scheduleLayout(); }
     else if (!this.focused) { this.overlay.replaceChildren(); this.opts.onBlur?.(); }
   }
   /** the colour the cursor is in (the Text colour button shows it), null for the default */
@@ -570,9 +574,12 @@ export class LyxMathField {
       notifyFocus();
     });
     input.addEventListener('keydown', ev => this.keydown(ev));
+    // the element only ever holds an open composition: no other edit of the browser's (insertParagraph,
+    // formatBold, historyUndo …) may touch it — the keys are the field's (keydown)
     input.addEventListener('beforeinput', ev => {
-      if (ev.inputType === 'insertText' || ev.inputType === 'insertCompositionText') { if (ev.inputType === 'insertText') { ev.preventDefault(); this.typed(ev.data ?? ''); } return; }
-      if (ev.inputType.startsWith('delete') || ev.inputType.startsWith('insert')) ev.preventDefault();
+      if (ev.inputType === 'insertCompositionText') return;
+      ev.preventDefault();
+      if (ev.inputType === 'insertText') this.typed(ev.data ?? '');
     });
     // Dead keys (^ ` ´ ~ on German/French/… layouts) arrive as a composition: the text is taken once,
     // at compositionend; `input` events fired while composing must be ignored (the flag is on the
@@ -588,7 +595,7 @@ export class LyxMathField {
       this.typed('^');
     });
     input.addEventListener('compositionend', ev => {
-      input.value = '';
+      input.textContent = '';
       const data = ev.data ?? '';
       if (this.deadHat) {
         this.deadHat = false;
@@ -600,7 +607,7 @@ export class LyxMathField {
     });
     // macOS Chrome fires the composition's final input event with isComposing already false
     // (inputType insertCompositionText) before compositionend — it must not be typed a second time.
-    input.addEventListener('input', ev => { const ie = ev as InputEvent; if (ie.isComposing || ie.inputType === 'insertCompositionText') return; if (input.value) { const v = input.value; input.value = ''; this.typed(v); } });
+    input.addEventListener('input', ev => { const ie = ev as InputEvent; if (ie.isComposing || ie.inputType === 'insertCompositionText') return; const v = input.textContent; if (v) { input.textContent = ''; this.typed(v); } });
     input.addEventListener('copy', ev => { ev.preventDefault(); ev.clipboardData?.setData('text/plain', this.cursor.selection ? this.cursor.grabSelection() : ''); });
     input.addEventListener('cut', ev => { ev.preventDefault(); if (!this.cursor.selection || this.readOnly) return; ev.clipboardData?.setData('text/plain', this.cursor.grabSelection()); this.snapshot('cut'); this.cursor.eraseSelection(); this.commit(); });
     input.addEventListener('paste', ev => { ev.preventDefault(); if (this.readOnly) return; const t = ev.clipboardData?.getData('text/plain') ?? ''; if (!t) return; this.snapshot('paste'); this.cursor.paste(stripMathDelims(t)); this.commit(); });
@@ -650,7 +657,7 @@ export class LyxMathField {
     }
     this.dragAnchor = c.anchor ? c.anchor.map(x => ({ ...x })) : c.clone();
     this.dragging = true;
-    this.input.focus({ preventScroll: true });
+    this.focusInput();
     this.moved(old);
   }
 
@@ -694,7 +701,7 @@ export class LyxMathField {
     this.cursor.slices = this.dragAnchor.map(x => ({ ...x }));
     this.cursor.anchor = this.dragAnchor.map(x => ({ ...x }));
     this.dragging = true;
-    this.input.focus({ preventScroll: true });
+    this.focusInput();
     this.motion(ev);
     this.scheduleLayout();
     return true;

@@ -82,10 +82,10 @@ test('a dead-key ^ (German/French layouts: a composition) makes exactly one supe
   // what Chrome sends for a dead ^ followed by a non-composable key: a composition of "^" that is
   // committed (input event while composing, then compositionend), then the next key as plain text
   await page.evaluate(() => {
-    const ta = document.activeElement as HTMLTextAreaElement;
+    const ta = document.activeElement as HTMLElement;
     if (!ta || !ta.classList.contains('lm-input')) throw new Error('math field not focused');
     ta.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
-    ta.value = '^';
+    ta.textContent = '^';
     ta.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: '^', isComposing: true, bubbles: true }));
     ta.dispatchEvent(new CompositionEvent('compositionend', { data: '^' }));
   });
@@ -100,10 +100,10 @@ test('a dead-key ^ (German/French layouts: a composition) makes exactly one supe
   await page.keyboard.press('Control+m');
   await page.keyboard.type('u');
   await page.evaluate(() => {
-    const ta = document.activeElement as HTMLTextAreaElement;
+    const ta = document.activeElement as HTMLElement;
     if (!ta || !ta.classList.contains('lm-input')) throw new Error('math field not focused');
     ta.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
-    ta.value = 'ê';
+    ta.textContent = 'ê';
     ta.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'ê', isComposing: true, bubbles: true }));
     ta.dispatchEvent(new CompositionEvent('compositionend', { data: 'ê' }));
   });
@@ -112,9 +112,9 @@ test('a dead-key ^ (German/French layouts: a composition) makes exactly one supe
   await page.evaluate(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })); });
   expect(await page.evaluate(() => document.activeElement!.classList.contains('lm-input'))).toBe(true);
   await page.evaluate(() => {
-    const ta = document.activeElement as HTMLTextAreaElement;
+    const ta = document.activeElement as HTMLElement;
     ta.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
-    ta.value = '^';
+    ta.textContent = '^';
     ta.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: '^', isComposing: true, bubbles: true }));
     ta.dispatchEvent(new CompositionEvent('compositionend', { data: '^' }));
   });
@@ -126,10 +126,10 @@ test('a dead-key ^ (German/French layouts: a composition) makes exactly one supe
   await page.keyboard.press('Control+m');
   await page.keyboard.type('m');
   await page.evaluate(() => {
-    const ta = document.activeElement as HTMLTextAreaElement;
+    const ta = document.activeElement as HTMLElement;
     if (!ta || !ta.classList.contains('lm-input')) throw new Error('math field not focused');
     ta.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
-    ta.value = 'â';
+    ta.textContent = 'â';
     ta.dispatchEvent(new InputEvent('input', { inputType: 'insertCompositionText', data: 'â', isComposing: false, bubbles: true }));
     ta.dispatchEvent(new CompositionEvent('compositionend', { data: 'â' }));
   });
@@ -149,17 +149,17 @@ test("Safari's composition order (dead key ´ then e): one é in the formula, th
   // WebKit commits a composition as deleteCompositionText, then a cancelable insertFromComposition,
   // then compositionend — and only after that the keydown of the committing key (keyCode 229, not composing)
   const prevented = await page.evaluate(() => {
-    const ta = document.activeElement as HTMLTextAreaElement;
+    const ta = document.activeElement as HTMLElement;
     if (!ta || !ta.classList.contains('lm-input')) throw new Error('math field not focused');
     const input = (type: string, data: string | null, composing: boolean) => ta.dispatchEvent(new InputEvent('input', { inputType: type, data, isComposing: composing, bubbles: true }));
     const before = (type: string, data: string | null, cancelable: boolean) => { const e = new InputEvent('beforeinput', { inputType: type, data, isComposing: true, bubbles: true, cancelable }); ta.dispatchEvent(e); return e.defaultPrevented; };
     ta.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
     ta.dispatchEvent(new CompositionEvent('compositionupdate', { data: '´' }));
-    before('insertCompositionText', '´', false); ta.value = '´'; input('insertCompositionText', '´', true);
+    before('insertCompositionText', '´', false); ta.textContent = '´'; input('insertCompositionText', '´', true);
     ta.dispatchEvent(new CompositionEvent('compositionupdate', { data: 'é' }));
-    before('insertCompositionText', 'é', false); ta.value = 'é'; input('insertCompositionText', 'é', true);
-    before('deleteCompositionText', null, false); ta.value = ''; input('deleteCompositionText', null, true);
-    const p = before('insertFromComposition', 'é', true); if (!p) { ta.value = 'é'; input('insertFromComposition', 'é', false); }
+    before('insertCompositionText', 'é', false); ta.textContent = 'é'; input('insertCompositionText', 'é', true);
+    before('deleteCompositionText', null, false); ta.textContent = ''; input('deleteCompositionText', null, true);
+    const p = before('insertFromComposition', 'é', true); if (!p) { ta.textContent = 'é'; input('insertFromComposition', 'é', false); }
     ta.dispatchEvent(new CompositionEvent('compositionend', { data: 'é' }));
     ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', keyCode: 229, isComposing: false, bubbles: true, cancelable: true }));
     return p;

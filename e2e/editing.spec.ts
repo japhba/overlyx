@@ -421,9 +421,8 @@ test('clicking into a formula does not move the page (the math toolbars appear a
   expect(await page.locator('.toolbar-math').count()).toBe(0);
   await f.click({ position: { x: 10, y: 6 } });
   await expect(page.locator('.toolbar-math')).toHaveCount(1);       // the auto math row is there now …
-  // the focused formula input keeps password managers away (they ignore autocomplete=off)
-  expect(await page.evaluate(() => ['data-1p-ignore', 'data-lpignore', 'data-bwignore', 'data-form-type', 'data-protonpass-ignore']
-    .map(a => document.activeElement?.matches('textarea.lm-input') && document.activeElement.getAttribute(a)))).toEqual(['true', 'true', 'true', 'other', 'true']);
+  // the formula takes the keyboard in a contenteditable, not a form field (Chrome's password manager offered logins there)
+  expect(await page.evaluate(() => { const a = document.activeElement as HTMLElement; return [a.tagName, a.className, a.isContentEditable]; })).toEqual(['SPAN', 'lm-input', true]);
   await page.waitForTimeout(300);
   expect(Math.abs((await top()) - before)).toBeLessThan(2);          // … and the formula did not move on screen
   await page.keyboard.press('Escape');
