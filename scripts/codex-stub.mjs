@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 // A stand-in for the `codex` CLI's app-server mode (agent.ts) for unit and e2e tests: speaks
 // just enough of the JSON-RPC/JSONL protocol — device-code login (completes by itself after a
-// moment), threads, turns that echo the input as streamed deltas, a file-change approval
-// round-trip for prompts containing "write hello", and a failed turn for "hit the usage limit". No network, state under $CODEX_HOME.
+// moment), threads, turns that echo the input as streamed deltas, a file written in the working
+// copy for "write hello", an approval request to write outside it for "write outside" (OverLyX
+// must decline it by itself), and a failed turn for "hit the usage limit". No network, state under
+// $CODEX_HOME. Each thread/start and thread/resume is logged to $CODEX_HOME/thread-params.jsonl
+// (what OverLyX asked for: cwd, approval policy, config overrides), and its answer reports the
+// approval policy and permission profile the way codex does (a file "ignore-sandbox" in
+// $CODEX_HOME makes it report settings that did not take).
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -25,6 +30,7 @@ const thread = (t) => ({ id: t.id, preview: '', ephemeral: false, status: { type
 function runTurn(id, p) {
   const t = threads.get(p.threadId);
   if (p.cwd) t.cwd = p.cwd;                    // like codex: the per-turn cwd override sticks
+  fs.appendFileSync(path.join(HOME, 'thread-params.jsonl'), JSON.stringify({ method: 'turn/start', threadId: t.id, cwd: p.cwd ?? null, approvalPolicy: p.approvalPolicy ?? null, sandboxPolicy: p.sandboxPolicy ?? null }) + '\n');
   const turnId = 'turn-' + ++nTurn;
   // several input items arrive when the server prepends editor context; the user's message is last
   const all = (p.input ?? []).map(i => i.text ?? '');
@@ -99,18 +105,35 @@ function runTurn(id, p) {
     return;
   }
   if (/write hello/i.test(text)) {
-    const itemId = 'item-' + ++nItem, reqId = ++nReq;
+    // a new file in the working copy: the sandbox lets it through without asking
+    const itemId = 'item-' + ++nItem;
     const change = { path: path.join(t.cwd, 'hello.txt'), kind: 'add', diff: '+hello from the stub agent\n' };
+    fs.writeFileSync(change.path, 'hello from the stub agent\n');
+    notify('item/started', { threadId: t.id, turnId, item: { type: 'fileChange', id: itemId, changes: [change], status: 'inProgress' }, startedAtMs: Date.now() });
+    notify('item/completed', { threadId: t.id, turnId, item: { type: 'fileChange', id: itemId, changes: [change], status: 'completed' }, completedAtMs: Date.now() });
+    setTimeout(finish, Number(process.env.STUB_DELAY ?? 150));
+    return;
+  }
+  if (/write outside/i.test(text)) {
+    // a write outside the working copy needs codex's approval: the answer decides
+    const itemId = 'item-' + ++nItem, reqId = ++nReq;
+    const change = { path: path.join(t.cwd, '..', 'outside.txt'), kind: 'add', diff: '+written outside the copy\n' };
     notify('item/started', { threadId: t.id, turnId, item: { type: 'fileChange', id: itemId, changes: [change], status: 'inProgress' }, startedAtMs: Date.now() });
     pendingApprovals.set(reqId, ({ decision }) => {
       const ok = decision === 'accept' || decision === 'acceptForSession';
-      if (ok) fs.writeFileSync(change.path, 'hello from the stub agent\n');
+      if (ok) fs.writeFileSync(change.path, 'written outside the copy\n');
       notify('item/completed', { threadId: t.id, turnId, item: { type: 'fileChange', id: itemId, changes: [change], status: ok ? 'completed' : 'declined' }, completedAtMs: Date.now() });
-      finish();
+      finish(`outside write ${ok ? 'accepted' : 'declined'}`);
     });
     out({ id: reqId, method: 'item/fileChange/requestApproval', params: { threadId: t.id, turnId, itemId, startedAtMs: Date.now(), reason: null, changes: [change] } });
   } else setTimeout(finish, Number(process.env.STUB_DELAY ?? 150));
 }
+
+/** What codex reports back about a loaded thread's sandbox; with a file "ignore-sandbox" in $CODEX_HOME: as if the settings had not taken. */
+const settings = (p) => fs.existsSync(path.join(HOME, 'ignore-sandbox'))
+  ? { approvalPolicy: 'on-request', activePermissionProfile: null }
+  : { approvalPolicy: p.approvalPolicy ?? 'on-request', activePermissionProfile: p.config?.default_permissions ? { id: p.config.default_permissions, extends: null } : null };
+const logParams = (method, threadId, p) => fs.appendFileSync(path.join(HOME, 'thread-params.jsonl'), JSON.stringify({ method, threadId, cwd: p.cwd ?? null, approvalPolicy: p.approvalPolicy ?? null, config: p.config ?? null }) + '\n');
 
 let buf = '';
 process.stdin.on('data', (d) => {
@@ -140,14 +163,17 @@ process.stdin.on('data', (d) => {
       case 'thread/start': {
         const t = { id: 'thread-' + ++nThread, cwd: p.cwd ?? HOME, turns: [] };
         threads.set(t.id, t);
-        result(id, { thread: thread(t), model: 'stub-model', modelProvider: 'openai', serviceTier: null, cwd: t.cwd });
+        logParams('thread/start', t.id, p);
+        result(id, { thread: thread(t), model: 'stub-model', modelProvider: 'openai', serviceTier: null, cwd: t.cwd, ...settings(p) });
         notify('thread/started', { thread: thread(t) });
         break;
       }
       case 'thread/resume': {
         const t = threads.get(p.threadId) ?? { id: p.threadId, cwd: p.cwd ?? HOME, turns: [] };
+        if (p.cwd) t.cwd = p.cwd;
         threads.set(t.id, t);
-        result(id, { thread: thread(t) });
+        logParams('thread/resume', t.id, p);
+        result(id, { thread: thread(t), cwd: t.cwd, ...settings(p) });
         break;
       }
       case 'thread/read': { const t = threads.get(p.threadId); t ? result(id, { thread: thread(t) }) : out({ id, error: { code: -32600, message: 'no such thread' } }); break; }

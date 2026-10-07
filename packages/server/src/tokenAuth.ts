@@ -19,7 +19,11 @@ export interface AccessTokenIdentity {
  * offered with Settings ▸ Account ▸ Fine-grained access): only these projects (null = all of the
  * account's, including new ones) and/or read only. Enforced by access.ts roleFor/accessibleProjects.
  */
-export interface AccessScope { projects: string[] | null; readonly: boolean }
+export interface AccessScope {
+  projects: string[] | null; readonly: boolean;
+  /** narrowed by the Agent panel's per-thread setting, not at a sign-in (refusals say where to change it) */
+  panel?: true;
+}
 
 /** The stored form (mcp_tokens.scope, JSON) → a scope; an unreadable one reaches nothing. */
 export function parseScope(json: string | null | undefined): AccessScope | null {

@@ -1,9 +1,11 @@
 /**
  * The embedded coding agent (packages/server/src/agent.ts) against the codex app-server stub
  * (scripts/codex-stub.mjs, OVERLYX_CODEX_BIN): device-code sign-in completing by itself, per-user
- * state, threads bound to a project, a turn streaming deltas over the SSE events route, the
- * file-change approval round-trip actually writing the file, and the access rules (project role
- * required; only the thread's creator drives it).
+ * state, threads bound to a project, a turn streaming deltas over the SSE events route, files
+ * written in the working copy reaching the project, requests to leave the sandbox declined by the
+ * server, each thread's sandbox and scope as codex is asked for them (the real codex keeps to
+ * them: tests/agent-sandbox.test.ts), and the access rules (project role required; only the
+ * thread's creator drives it).
  */
 import { describe, it, expect, afterAll } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -196,20 +198,22 @@ describe('threads and turns', () => {
     expect(bobs.body.mine).toBe(false);
   });
 
-  it('a file change asks for approval; accepting writes the file', async () => {
-    // the stub holds the turn until its file-change approval is answered
-    const untilRequest = collectEvents('owner', evs => evs.some(e => e.kind === 'request'), 6000);
-    await sleep(150);
-    const turn = post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'please write hello somewhere' });
-    const evs = await untilRequest;
-    const request = evs.find(e => e.kind === 'request');
-    expect(request?.method).toBe('item/fileChange/requestApproval');
-    const ok = await post(`/projects/owner%2Fp/agent/threads/${tid}/approval`, { requestId: request.requestId, decision: 'accept' });
-    expect(ok.status).toBe(200);
+  it('a file written in the working copy reaches the project without asking', async () => {
+    const turn = await post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'please write hello somewhere' });
+    expect(turn.status).toBe(200);
     const file = join(ROOT, 'projects', 'owner', 'p', 'hello.txt');
     for (let i = 0; i < 30 && !existsSync(file); i++) await sleep(100);
     expect(readFileSync(file, 'utf8')).toContain('hello from the stub agent');
-    expect((await turn).status).toBe(200);
+  });
+
+  it('a request to leave the sandbox is declined by the server and never shown', async () => {
+    const events = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
+    await sleep(150);
+    await post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'now write outside the copy' });
+    const evs = await events;
+    expect(evs.some(e => e.kind === 'request')).toBe(false);
+    expect(evs.filter(e => e.method === 'item/agentMessage/delta').map(e => e.params.delta).join('')).toContain('outside write declined');
+    expect((await get(`/projects/owner%2Fp/agent/threads/${tid}`)).body.approvals).toEqual([]);
   });
 
   it('an MCP elicitation becomes an approval card; accepting answers with an ElicitResult', async () => {
@@ -244,18 +248,136 @@ describe('threads and turns', () => {
   });
 });
 
+describe("each thread's sandbox and scope (agent.ts threadSandbox, panelThreadScope)", () => {
+  const home = join(ROOT, 'data', 'agent-home', String(owner.id));
+  const live = join(ROOT, 'projects', 'owner', 'p');
+  const logged = (method: string) => readFileSync(join(home, 'thread-params.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(l => l.method === method);
+  const turnText = async (path: string, body: object) => {
+    const events = collectEvents('owner', evs => evs.some(e => e.method === 'turn/completed'));
+    await sleep(150);
+    const r = await post(path, body);
+    const evs = await events;
+    const um = evs.find(e => e.method === 'item/completed' && e.params.item?.type === 'userMessage');
+    return { status: r.status, input: (um?.params.item.content ?? []).map((c: { text?: string }) => c.text ?? '').join('\n') };
+  };
+  let tid = '';
+
+  it('the managed config locks codex down by default: system files only, no walking up to a repository, no sub-agents', () => {
+    const cfg = readFileSync(join(home, 'config.toml'), 'utf8');
+    expect(cfg).toMatch(/^default_permissions = "overlyx"$/m);
+    expect(cfg).toMatch(/^project_root_markers = \[\]$/m);
+    expect(cfg).toContain('":minimal" = "read"');
+    expect(cfg).toContain('multi_agent = false');
+    expect(cfg).toContain('exclude = ["OVERLYX_MCP_TOKEN", "CODEX_HOME"]');
+    expect(cfg).not.toContain(ROOT);   // no project, no OverLyX data in the fallback
+  });
+
+  it('a new thread starts in its sandbox: no way out, only its own project, every directory untrusted', async () => {
+    mkdirSync(join(ROOT, 'projects', 'mallory', 'own'), { recursive: true });   // someone else's project on the server
+    const r = await post('/projects/owner%2Fp/agent/threads', { scope: 'project' });
+    expect(r.status).toBe(200);
+    expect(r.body.scope).toBe('project');
+    tid = r.body.id;
+    const start = logged('thread/start').pop();
+    expect(start.approvalPolicy).toBe('never');
+    expect(start.cwd).toBe(join(ROOT, 'data', 'agent-start'));
+    expect(start.config.default_permissions).toBe('overlyx');
+    const prof = start.config['permissions.overlyx'];
+    expect(prof.network).toEqual({ enabled: false });
+    expect(prof.filesystem[live]).toBe('read');
+    expect(prof.filesystem[':project_roots']).toEqual({ '.': 'write' });
+    // of the server's own directories, only the project, the start directory and the thread's scratch space
+    const row = db.prepare('SELECT scope, mcp_key FROM agent_threads WHERE thread_id = ?').get(tid) as { scope: string; mcp_key: string };
+    const scratch = join(ROOT, 'data', 'agent-scratch', row.mcp_key);
+    expect(Object.keys(prof.filesystem).filter(k => k.startsWith(ROOT)).sort()).toEqual([start.cwd, scratch, live].sort());
+    expect(prof.filesystem[scratch]).toBe('write');
+    expect(start.config['shell_environment_policy.set']).toEqual({ HOME: scratch, TMPDIR: scratch });
+    expect(Object.keys(start.config.projects)).toEqual(expect.arrayContaining([start.cwd, live, scratch]));
+    expect(Object.values(start.config.projects).every(v => (v as { trust_level: string }).trust_level === 'untrusted')).toBe(true);
+    expect(row.scope).toBe('project');
+    expect(start.config['mcp_servers.overlyx.http_headers']).toEqual({ 'X-OverLyX-Thread': row.mcp_key });
+  });
+
+  it('a turn runs in the working copy under the same sandbox; limited to its project, the agent is told so', async () => {
+    // the owner also has another project open: a thread limited to owner/p hears nothing of it
+    mkdirSync(join(ROOT, 'projects', 'owner', 'q'), { recursive: true });
+    registerProject('owner/q', owner.id);
+    const t = await turnText(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'what can you read?', scope: 'project', context: { docId: 'owner/p/paper.tex', openDocs: ['owner/p/paper.tex', 'owner/q/thesis.tex'] } });
+    expect(t.status).toBe(200);
+    expect(t.input).toContain('The user is editing owner/p/paper.tex');
+    expect(t.input).not.toContain('owner/q');
+    const elsewhere = await turnText(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'and this one?', context: { docId: 'owner/q/thesis.tex' } });
+    expect(elsewhere.input).not.toContain('owner/q');
+    const turn = logged('turn/start').pop();
+    expect(turn.cwd).toBe(join(ROOT, 'data', 'agent-work', tid, 'p'));
+    expect(turn.approvalPolicy).toBe('never');
+    expect(turn.sandboxPolicy).toBeNull();
+    expect(t.input).toContain('limited you to this project ("owner/p")');
+    expect((await get(`/projects/owner%2Fp/agent/threads/${tid}`)).body.scope).toBe('project');
+  });
+
+  it('the panel widens it again: at once for the MCP tools, and the agent hears of it with the next message', async () => {
+    const { panelThreadScope } = await import('../packages/server/src/agent.ts');
+    const key = (db.prepare('SELECT mcp_key FROM agent_threads WHERE thread_id = ?').get(tid) as { mcp_key: string }).mcp_key;
+    expect(panelThreadScope(owner.id, key)).toEqual({ projects: ['owner/p'], readonly: false, panel: true });
+    expect((await post(`/projects/owner%2Fp/agent/threads/${tid}/scope`, { scope: 'all' }, 'bob')).status).toBe(403);
+    const r = await post(`/projects/owner%2Fp/agent/threads/${tid}/scope`, { scope: 'all' });
+    expect(r.body).toEqual({ ok: true, scope: 'all' });
+    expect(panelThreadScope(owner.id, key)).toBeNull();
+    expect(panelThreadScope(editor.id, key)).toEqual({ projects: [], readonly: true, panel: true });   // not bob's thread
+    const t = await turnText(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'and now?', scope: 'all' });
+    expect(t.input).toContain('read all their projects again');
+    const t2 = await turnText(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'still?' });
+    expect(t2.input).not.toContain('[context] Note from the OverLyX editor');   // nothing new to tell
+  });
+
+  it('after a codex restart a thread is loaded with its sandbox again — an old thread too, read only', async () => {
+    shutdownAgents();
+    await sleep(400);
+    await turnText(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'after a restart' });
+    const resumed = logged('thread/resume').pop();
+    expect(resumed.threadId).toBe(tid);
+    expect(resumed.approvalPolicy).toBe('never');
+    expect(resumed.cwd).toBe(join(ROOT, 'data', 'agent-work', tid, 'p'));
+    expect(resumed.config.default_permissions).toBe('overlyx');
+    expect(Object.keys(resumed.config.projects)).toContain(resumed.cwd);
+    // a thread from before the working copies: its cwd is the live project, which stays read only
+    const { NATIVE_EDITS_SINCE } = await import('../packages/server/src/agent.ts');
+    db.prepare('INSERT INTO agent_threads (thread_id, project, user_id, title, created_at, updated_at) VALUES (?,?,?,?,?,?)').run('old-thread', 'owner/p', owner.id, 'old', NATIVE_EDITS_SINCE - 1000, NATIVE_EDITS_SINCE - 1000);
+    expect((await turnText('/projects/owner%2Fp/agent/threads/old-thread/turn', { text: 'hello old thread' })).status).toBe(200);
+    const old = logged('thread/resume').pop();
+    expect(old.threadId).toBe('old-thread');
+    expect(old.cwd).toBe(live);
+    expect(old.config['permissions.overlyx'].filesystem[':project_roots']).toEqual({ '.': 'read' });
+    const key = (db.prepare("SELECT mcp_key FROM agent_threads WHERE thread_id = 'old-thread'").get() as { mcp_key: string | null }).mcp_key;
+    expect(key).toBeTruthy();
+    expect(old.config['mcp_servers.overlyx.http_headers']).toEqual({ 'X-OverLyX-Thread': key });
+  });
+
+  it('a thread codex will not sandbox does not run', async () => {
+    writeFileSync(join(home, 'ignore-sandbox'), '');
+    try {
+      shutdownAgents();
+      await sleep(400);
+      const turn = await post(`/projects/owner%2Fp/agent/threads/${tid}/turn`, { text: 'unsandboxed?' });
+      expect(turn.status).toBe(500);
+      expect(turn.body.error).toContain('sandbox did not take effect');
+      const fresh = await post('/projects/owner%2Fp/agent/threads');
+      expect(fresh.status).toBe(500);
+    } finally { rmSync(join(home, 'ignore-sandbox'), { force: true }); }
+  });
+});
+
 describe('legacyThreadNote (threads from before the overlyx MCP tools)', () => {
-  it('old threads get the direct-markup fallback, new ones nothing', async () => {
+  it('old threads are told to suggest a new thread for edits (their files are read only), new ones nothing', async () => {
     const { legacyThreadNote, MCP_TOOLS_SINCE } = await import('../packages/server/src/agent.ts');
     expect(legacyThreadNote(Date.now())).toBeNull();
     expect(legacyThreadNote(MCP_TOOLS_SINCE)).toBeNull();
-    const note = legacyThreadNote(MCP_TOOLS_SINCE - 1000, new Date('2026-09-03T09:15:00'));
+    const note = legacyThreadNote(MCP_TOOLS_SINCE - 1000);
     expect(note).not.toBeNull();
     expect(note!.startsWith('[context]')).toBe(true);
     expect(note!.trimEnd().endsWith('[/context]')).toBe(true);   // the panel strips [context]…[/context] spans
-    expect(note).toContain('\\lyxadded{Agent panel (MCP)}{Thu Sep  3 09:15:00 2026}');
-    expect(note).toContain('\\lyxdeleted{Agent panel (MCP)}');
-    expect(note).toContain('%%');
+    expect(note).toContain('new thread');
   });
 });
 

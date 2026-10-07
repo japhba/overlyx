@@ -52,13 +52,14 @@ function parseBody(raw: string, contentType: string | null): any {
   }
   try { return JSON.parse(raw); } catch { return raw; }
 }
-async function rpcAt(endpoint: string, token: string | null, method: string, params?: unknown): Promise<any> {
+async function rpcAt(endpoint: string, token: string | null, method: string, params?: unknown, headers: Record<string, string> = {}): Promise<any> {
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers,
     },
     body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }),
   });
@@ -637,9 +638,14 @@ describe('build', () => {
     const other = await rpc(createMcpToken(owner.id, 'Build Bot').token, 'tools/list');
     expect(other.body.result.tools.map((x: any) => x.name)).not.toContain('undo_turn');
     const panel = createMcpToken(owner.id, 'Agent panel').token;
-    const listed = await rpc(panel, 'tools/list');
+    // the panel's agent calls from one of its threads (X-OverLyX-Thread; agent.ts panelThreadScope)
+    db.prepare('INSERT INTO agent_threads (thread_id, project, user_id, title, created_at, updated_at, scope, mcp_key) VALUES (?,?,?,?,?,?,?,?)').run('undo-thread', 'owner/p', owner.id, null, Date.now(), Date.now(), null, 'undo-key');
+    const thread = { 'X-OverLyX-Thread': 'undo-key' };
+    const listed = await rpcAt(base, panel, 'tools/list', undefined, thread);
     expect(listed.body.result.tools.map((x: any) => x.name)).toContain('undo_turn');
-    await expect(callTool(panel, 'undo_turn', {})).rejects.toThrow(/No Agent panel thread has changed this project/);
+    const undone = await rpcAt(base, panel, 'tools/call', { name: 'undo_turn', arguments: {} }, thread);
+    expect(undone.body.result.isError).toBe(true);
+    expect(undone.body.result.content[0].text).toMatch(/No Agent panel thread has changed this project/);
   });
 });
 
@@ -793,10 +799,80 @@ describe('agents shown to the people in a document', () => {
 
   it("the Agent panel's own agent is not shown as a visitor and has no inbox", async () => {
     const panel = createMcpToken(owner.id, 'Agent panel').token;
+    db.prepare('INSERT INTO agent_threads (thread_id, project, user_id, title, created_at, updated_at, scope, mcp_key) VALUES (?,?,?,?,?,?,?,?)').run('visitor-thread', 'owner/p', owner.id, null, Date.now(), Date.now(), null, 'visitor-key');
+    const call = async (name: string, args: unknown) => {
+      const { body } = await rpcAt(base, panel, 'tools/call', { name, arguments: args }, { 'X-OverLyX-Thread': 'visitor-key' });
+      if (body.result.isError) throw new Error(body.result.content[0].text);
+      return body.result.content[0].text;
+    };
     const d = await manager.open('owner/p/pres.tex');
-    await callTool(panel, 'read_document', { path: 'pres.tex' });
+    await call('read_document', { path: 'pres.tex' });
     expect(agentStates(d).some(a => /Agent panel/.test(a.state.user.name))).toBe(false);
-    await expect(callTool(panel, 'wait_for_instructions', { timeout_seconds: 1 })).rejects.toThrow(/agents connected from elsewhere/);
+    await expect(call('wait_for_instructions', { timeout_seconds: 1 })).rejects.toThrow(/agents connected from elsewhere/);
+  });
+});
+
+describe("what the Agent panel's agent reaches (its thread's scope: agent.ts panelThreadScope)", () => {
+  // the owner's second project, a project of someone else shared with them, one not shared at all
+  const bob = createUser('bobmcp', 'Bob', 'pw');
+  const admin = createUser('adminmcp', 'Admin', 'pw', { isAdmin: true });
+  for (const [key, ownerId] of [['owner/q', owner.id], ['bobmcp/shared', bob.id], ['bobmcp/private', bob.id]] as const) {
+    mkdirSync(join(ROOT, 'projects', ...key.split('/')), { recursive: true });
+    writeFileSync(join(ROOT, 'projects', ...key.split('/'), 'main.tex'), doc(`In ${key}.`));
+    registerProject(key, ownerId);
+  }
+  db.prepare('INSERT INTO project_members (project, user_id, role, via, created_at) VALUES (?,?,?,?,?)').run('bobmcp/shared', owner.id, 'view', 'member', Date.now());
+  const thread = (id: string, userId: number, project: string, scope: string | null) =>
+    db.prepare('INSERT INTO agent_threads (thread_id, project, user_id, title, created_at, updated_at, scope, mcp_key) VALUES (?,?,?,?,?,?,?,?)').run(id, project, userId, null, Date.now(), Date.now(), scope, `key-${id}`);
+  thread('t-all', owner.id, 'owner/p', null);
+  thread('t-one', owner.id, 'owner/p', 'project');
+  thread('t-bob', bob.id, 'bobmcp/private', null);
+  const panel = createMcpToken(owner.id, 'Agent panel').token;
+  const callAs = async (token: string, key: string | null, name: string, args: unknown) => {
+    const { status, body } = await rpcAt(allBase, token, 'tools/call', { name, arguments: args }, key ? { 'X-OverLyX-Thread': key } : {});
+    if (status !== 200) throw new Error(`HTTP ${status}: ${body}`);
+    const text = body.result.content[0].text;
+    if (body.result.isError) throw new Error(text);
+    try { return JSON.parse(text); } catch { return text; }
+  };
+  const names = (list: { project: string }[]) => list.map(p => p.project).sort();
+  // the owner's projects (earlier tests made more) and the one shared with them — never bob's private one
+  const accountWide = (list: string[]) => { expect(list).toEqual(expect.arrayContaining(['bobmcp/shared', 'owner/p', 'owner/q'])); expect(list).not.toContain('bobmcp/private'); };
+
+  it('all my projects (the default): the account\'s own and those shared with it — never anyone else\'s', async () => {
+    accountWide(names(await callAs(panel, 'key-t-all', 'list_projects', {})));
+    expect((await callAs(panel, 'key-t-all', 'read_document', { project: 'owner/q', path: 'main.tex' })).text).toContain('In owner/q.');
+    expect((await callAs(panel, 'key-t-all', 'read_document', { project: 'bobmcp/shared', path: 'main.tex' })).text).toContain('In bobmcp/shared.');
+    await expect(callAs(panel, 'key-t-all', 'read_document', { project: 'bobmcp/private', path: 'main.tex' })).rejects.toThrow(/no access/);
+  });
+
+  it('this project only: the thread\'s own project and nothing else, said so in the refusal', async () => {
+    expect(names(await callAs(panel, 'key-t-one', 'list_projects', {}))).toEqual(['owner/p']);
+    await expect(callAs(panel, 'key-t-one', 'read_document', { project: 'owner/q', path: 'main.tex' })).rejects.toThrow(/limited this Agent panel thread to its own project, owner\/p/);
+    await expect(callAs(panel, 'key-t-one', 'read_document', { project: 'bobmcp/shared', path: 'main.tex' })).rejects.toThrow(/limited/);
+    // the panel switches it back: effective with the next call
+    db.prepare("UPDATE agent_threads SET scope = NULL WHERE thread_id = 't-one'").run();
+    accountWide(names(await callAs(panel, 'key-t-one', 'list_projects', {})));
+    db.prepare("UPDATE agent_threads SET scope = 'project' WHERE thread_id = 't-one'").run();
+  });
+
+  it("no thread, or another account's thread: nothing", async () => {
+    expect(await callAs(panel, null, 'list_projects', {})).toEqual([]);
+    expect(await callAs(panel, 'key-t-bob', 'list_projects', {})).toEqual([]);
+    expect(await callAs(panel, 'no-such-key', 'list_projects', {})).toEqual([]);
+    await expect(callAs(panel, null, 'read_document', { project: 'owner/p', path: 'main.tex' })).rejects.toThrow(/no access/);
+  });
+
+  it("an administrator's temporary grant on someone else's project does not reach the panel's agent", async () => {
+    const { grantAdminAccess } = await import('../packages/server/src/access.ts');
+    const { toSessionUser } = await import('../packages/server/src/auth.ts');
+    grantAdminAccess(toSessionUser(db.prepare('SELECT * FROM users WHERE id = ?').get(admin.id) as never), 'bobmcp/private', 30);
+    thread('t-admin', admin.id, 'owner/p', null);
+    const adminPanel = createMcpToken(admin.id, 'Agent panel').token;
+    const other = createMcpToken(admin.id, 'agent').token;
+    expect(names(await callAs(other, null, 'list_projects', {}))).toContain('bobmcp/private');   // the admin's own connection
+    expect(names(await callAs(adminPanel, 'key-t-admin', 'list_projects', {}))).not.toContain('bobmcp/private');
+    await expect(callAs(adminPanel, 'key-t-admin', 'read_document', { project: 'bobmcp/private', path: 'main.tex' })).rejects.toThrow(/no access/);
   });
 });
 

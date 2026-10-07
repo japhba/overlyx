@@ -74,6 +74,9 @@ const safeId = (tid: string) => tid.replace(/[^A-Za-z0-9._-]/g, '_');
 const manifestPath = (tid: string) => path.join(root(), safeId(tid) + '.json');
 const baseDir = (tid: string) => path.join(root(), safeId(tid) + '.base');
 
+/** A thread's scratch HOME and TMPDIR (agent.ts threadSandbox), by its MCP key — codex names the thread only after it has started in its sandbox. */
+export const scratchDir = (key: string) => path.join(config.dataDir, 'agent-scratch', key.replace(/[^A-Za-z0-9_-]/g, '_'));
+
 /** The agent's working directory for a thread of `project`. */
 export function workspaceDir(tid: string, project: string): string {
   return path.join(root(), safeId(tid), path.basename(projectDir(project)));
@@ -266,7 +269,8 @@ export function pruneWorkspaces(days = 30): void {
     const tid = n.slice(0, -5);
     const m = readManifest(tid);
     if (m && m.usedAt > cutoff) continue;
-    for (const p of [path.join(root(), tid), baseDir(tid), turnsDir(tid), manifestPath(tid)]) fs.rmSync(p, { recursive: true, force: true });
+    const key = (db.prepare('SELECT mcp_key FROM agent_threads WHERE thread_id = ?').get(tid) as { mcp_key: string | null } | undefined)?.mcp_key;
+    for (const p of [path.join(root(), tid), baseDir(tid), turnsDir(tid), manifestPath(tid), ...(key ? [scratchDir(key)] : [])]) fs.rmSync(p, { recursive: true, force: true });
   }
 }
 

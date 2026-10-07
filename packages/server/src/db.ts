@@ -219,6 +219,11 @@ CREATE TABLE IF NOT EXISTS agent_threads (
 );
 CREATE INDEX IF NOT EXISTS agent_threads_project ON agent_threads(project, updated_at);
 `);
+// scope: which projects the thread's agent reaches through the overlyx MCP tools — 'project' (its
+// own) or NULL (every project its user can open; agent.ts panelThreadScope); mcp_key: the thread's
+// X-OverLyX-Thread header, which tells the MCP server whose thread a call comes from
+try { db.exec('ALTER TABLE agent_threads ADD COLUMN scope TEXT'); } catch { /* column exists */ }
+try { db.exec('ALTER TABLE agent_threads ADD COLUMN mcp_key TEXT'); } catch { /* column exists */ }
 
 // The starter projects each account got (access.ts ensureStarterProjects): one row per account and
 // template, kept when the project is deleted, so a starter is created exactly once.

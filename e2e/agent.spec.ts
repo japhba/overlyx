@@ -2,9 +2,9 @@
  * The Agent panel (app/AgentPanel.tsx + packages/server/src/agent.ts) against the codex
  * app-server stub: the server under test must run with OVERLYX_CODEX_BIN=scripts/codex-stub.mjs
  * and OVERLYX_E2E_AGENT_STUB=1 exported for this spec. Covers the device-code sign-in (the stub
- * completes it by itself), a streamed reply in a fresh thread, the file-change approval writing
- * into the project, a patch in the agent's working copy arriving as word-level tracked changes,
- * and the thread list.
+ * completes it by itself), a streamed reply in a fresh thread, a file the agent writes in its
+ * working copy reaching the project, a patch there arriving as word-level tracked changes, what the
+ * agent may read (all my projects / this project only), and the thread list.
  */
 import { test, expect } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -24,7 +24,7 @@ test.beforeAll(() => {
 });
 test.afterAll(() => { rmSync(join(PROJECTS_DIR, PROJECT), { recursive: true, force: true }); });
 
-test('sign in, ask, approve a file change, find the thread again', async ({ page, context }) => {
+test('sign in, ask, let it write, limit what it reads, find the thread again', async ({ page, context }) => {
   test.setTimeout(120000);
   await login(page);
   // the Agent panel is hidden until AI assistance is activated in the settings
@@ -87,10 +87,9 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await page.keyboard.press('Control+v');
   await expect(page.locator('.lyx-editor .lyx-math-inline')).toHaveCount(1, { timeout: 10000 });
 
-  // a file change asks for approval; allowing it writes into the project
+  // a file the agent writes in its working copy reaches the project without asking
   await page.locator('.agent-compose textarea').fill('write hello for me');
   await page.keyboard.press('Enter');
-  await page.locator('[data-agent="approval"] [data-approve="accept"]').click({ timeout: 15000 });
   const helloFile = join(PROJECTS_DIR, PROJECT, 'hello.txt');
   await expect.poll(() => existsSync(helloFile), { timeout: 10000 }).toBe(true);
   expect(readFileSync(helloFile, 'utf8')).toContain('hello from the stub agent');
@@ -159,15 +158,41 @@ test('sign in, ask, approve a file change, find the thread again', async ({ page
   await expect(tabled.locator('table.agent-table td').last()).toHaveCSS('text-align', 'right');
   await expect(tabled.locator('blockquote.agent-quote b')).toHaveText('note');
 
+  // a request to leave the sandbox never becomes a card: the server declines it by itself
+  await page.locator('.agent-compose textarea').fill('write outside the copy');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.agent-msg.assistant').last()).toContainText('outside write declined', { timeout: 15000 });
+  await expect(page.locator('[data-agent="approval"]')).toHaveCount(0);
+
   // a pending approval survives a reload: the thread read returns it and the card comes back
-  await page.locator('.agent-compose textarea').fill('write hello once more');
+  await page.locator('.agent-compose textarea').fill('use the mcp tool once more');
   await page.keyboard.press('Enter');
   await expect(page.locator('[data-agent="approval"]')).toBeVisible({ timeout: 15000 });
   await page.reload();
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   await expect(page.locator('[data-agent="approval"]')).toBeVisible({ timeout: 15000 });
   await page.locator('[data-agent="approval"] [data-approve="decline"]').click();
-  await expect(page.locator('.agent-msg.assistant').last()).toContainText('Stub reply', { timeout: 15000 });
+  await expect(page.locator('.agent-msg.assistant').last()).toContainText('elicitation decline', { timeout: 15000 });
+
+  // what the agent may read: all my projects by default; limited to this project, the thread keeps
+  // it (also after a reload) and the agent is told before the next message
+  const scopeSel = page.locator('select[data-agent-scope]');
+  await expect(scopeSel).toHaveValue('all');
+  const tid = await page.evaluate(() => localStorage.getItem('ol.agent.sel:admin/e2e-agent'));
+  const scopeSaved = page.waitForResponse(r => r.url().includes('/scope') && r.request().method() === 'POST');
+  await scopeSel.selectOption('project');
+  expect((await scopeSaved).status()).toBe(200);
+  const threadScope = async () => (await (await page.request.get(`/api/projects/${encodeURIComponent(PROJECT)}/agent/threads/${tid}`)).json()).scope;
+  expect(await threadScope()).toBe('project');
+  await page.reload();
+  await page.waitForSelector('.lyx-editor', { timeout: 30000 });
+  await expect(page.locator('select[data-agent-scope]')).toHaveValue('project', { timeout: 15000 });
+  await page.locator('.agent-compose textarea').fill('what can you read?');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.agent-msg.assistant').last()).toContainText('Stub reply to: what can you read?', { timeout: 15000 });
+  await expect(page.locator('.agent-msg.user').last()).not.toContainText('[context]');   // the scope note stays hidden
+  await page.locator('select[data-agent-scope]').selectOption('all');
+  await expect.poll(threadScope).toBe('all');
 
   // a turn that fails (here: the ChatGPT account's usage limit) says so in the transcript, also
   // after a reload; codex's retries before it ("Reconnecting... 1/5") neither end the turn nor pop up

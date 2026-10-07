@@ -107,8 +107,15 @@ function withinScope(user: SessionUser, project: string, role: Role): Role | nul
 export function scopeRefusal(user: SessionUser, project: string | null, need: 'view' | 'edit' | 'create'): string | null {
   const s = user.scope;
   if (!s) return null;
+  const outside = !!project && !!s.projects && !s.projects.some(p => p === project || canonicalProject(p) === project);
+  if (s.panel) {
+    // the Agent panel's agent, in a thread limited to its own project (agent.ts panelThreadScope)
+    const where = s.projects?.length ? `its own project, ${s.projects.join(', ')}` : 'no project';
+    if (need === 'create') return `this Agent panel thread is limited to ${where} — it cannot create projects`;
+    return outside ? `the user limited this Agent panel thread to ${where}; they can let it read all their projects in the Agent panel` : null;
+  }
   if (need === 'create') return 'this sign-in is limited' + (s.projects ? ` to ${s.projects.join(', ')}` : '') + (s.readonly ? ' (read only)' : '') + ' — creating projects needs a sign-in with access to all your projects';
-  if (project && s.projects && !s.projects.some(p => p === project || canonicalProject(p) === project)) return `this sign-in is limited to ${s.projects.join(', ') || 'no projects'} — sign in again (overlyx auth login) to reach "${project}"`;
+  if (outside) return `this sign-in is limited to ${s.projects!.join(', ') || 'no projects'} — sign in again (overlyx auth login) to reach "${project}"`;
   if (need === 'edit' && s.readonly) return `this sign-in is read only — sign in again without "Read only" to change "${project}"`;
   return null;
 }

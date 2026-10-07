@@ -100,6 +100,9 @@ export interface AgentItem {
   checkpoint?: AgentCheckpoint;
 }
 export interface AgentTurn { id: string; items: AgentItem[]; status: string; error?: { message?: string } | null }
+/** what the Agent panel's agent may read: every project of the user (and shared with them), or only the thread's own (agent.ts panelThreadScope) */
+export type AgentScope = 'all' | 'project';
+
 /** a build of a document an agent turn changed, compared with its build before the change (agentwork.ts) */
 export interface AgentBuildCheck { doc: string; status: 'building' | 'ok' | 'error'; before: 'ok' | 'error' | null; broke: boolean; errors: string[] }
 /** what one agent turn changed in the project, and whether it was taken back (agentwork.ts Checkpoint) */
@@ -265,11 +268,13 @@ export const api = {
   agentLoginCancel: (loginId: string) => req<{ ok: boolean }>('POST', '/api/agent/login/cancel', { loginId }),
   agentLogout: () => req<{ ok: boolean }>('POST', '/api/agent/logout'),
   agentThreads: (project: string) => req<{ threads: AgentThreadInfo[] }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads`),
-  agentStartThread: (project: string) => req<{ id: string; model: string | null }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads`),
-  agentThread: (project: string, tid: string) => req<{ thread: { id: string; turns: AgentTurn[] }; mine: boolean; approvals?: { requestId: string; method: string; params: unknown }[]; checkpoints?: AgentCheckpoint[] }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}`),
+  agentStartThread: (project: string, scope?: AgentScope) => req<{ id: string; model: string | null; scope: AgentScope }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads`, { scope }),
+  agentThread: (project: string, tid: string) => req<{ thread: { id: string; turns: AgentTurn[] }; mine: boolean; approvals?: { requestId: string; method: string; params: unknown }[]; checkpoints?: AgentCheckpoint[]; scope?: AgentScope }>('GET', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}`),
+  /** what the thread's agent may read through the MCP tools: all the user's projects, or only this one */
+  agentSetScope: (project: string, tid: string, scope: AgentScope) => req<{ ok: boolean; scope: AgentScope }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/scope`, { scope }),
   agentUndo: (project: string, tid: string, n: number) => req<{ ok: boolean; checkpoint: AgentCheckpoint; reverted: string[]; kept: { path: string; why: string }[] }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/checkpoints/${n}/undo`),
   agentModels: () => req<{ models: AgentModel[] }>('GET', '/api/agent/models'),
-  agentTurn: (project: string, tid: string, body: { text: string; context?: AgentTurnContext; model?: string; effort?: string; clientMessageId?: string; /** false: the turn's document edits go in without tracked-change marks */ tracked?: boolean }) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/turn`, body),
+  agentTurn: (project: string, tid: string, body: { text: string; context?: AgentTurnContext; model?: string; effort?: string; clientMessageId?: string; /** false: the turn's document edits go in without tracked-change marks */ tracked?: boolean; scope?: AgentScope }) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/turn`, body),
   agentSteer: (project: string, tid: string, turnId: string, text: string, clientMessageId?: string, context?: AgentTurnContext) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/steer`, { turnId, text, clientMessageId, context }),
   agentApprove: (project: string, tid: string, requestId: string, decision: string) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/approval`, { requestId, decision }),
   agentInterrupt: (project: string, tid: string, turnId: string) => req<{ ok: boolean }>('POST', `/api/projects/${encodeURIComponent(project)}/agent/threads/${encodeURIComponent(tid)}/interrupt`, { turnId }),

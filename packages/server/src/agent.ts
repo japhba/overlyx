@@ -10,9 +10,15 @@
  * the project's sharing: any editor of the project sees its threads and may read transcripts,
  * only the thread's creator drives it.
  *
+ * What the agent can read (threadSandbox): its commands see the thread's working copy and the
+ * system's files, nothing else on disk — no other project, of this user or anyone. The user's other
+ * projects are reachable only through the overlyx MCP tools, and only while the thread's scope
+ * (the panel's "Reads" choice: all my projects, the default, or this project only) allows it.
+ *
  * The client talks to routes under /api (agentRoutes): a per-project SSE stream forwards codex's
  * notifications (message/reasoning deltas, command output, diffs, turn lifecycle) and its
- * approval *requests* (command execution / file changes), which the client answers via POST.
+ * requests to the user (allowing an MCP tool call, a question), which the client answers via POST;
+ * requests to leave the sandbox are declined by the server (onServerRequest).
  *
  * The codex child is NOT our child: a detached keeper (scripts/agent-keeper.mjs) owns it and
  * bridges its stdio to a unix socket under the user's agent home. A server restart — a deploy —
@@ -21,6 +27,7 @@
  */
 import express, { type Request, type Response } from 'express';
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
@@ -35,8 +42,9 @@ import { createMcpToken } from './mcpTokens.ts';
 import { selectionToTex, documentContext } from './ai.ts';
 import {
   prepareWorkspace, syncWorkspace, pruneWorkspaces, finishTurn, checkBuilds, noteTurnId, listCheckpoints, onCheckpoint,
-  publicCheckpoint, undoCheckpoint, UndoError, setPanelTracking, panelTracking, workspaceTracking, type Checkpoint,
+  publicCheckpoint, undoCheckpoint, UndoError, setPanelTracking, panelTracking, workspaceTracking, scratchDir, type Checkpoint,
 } from './agentwork.ts';
+import type { AccessScope } from './tokenAuth.ts';
 import { projectOfDoc, type PMJSON } from '@overlyx/core';
 import type { SessionUser } from './auth.ts';
 
@@ -62,6 +70,7 @@ export const NATIVE_EDITS_SINCE = Date.parse('2026-09-27T09:48:00Z');
 export const isNativeThread = (createdAt: number): boolean => createdAt >= NATIVE_EDITS_SINCE;
 
 const NATIVE_INSTRUCTIONS = (project: string) => `You are embedded in OverLyX, a collaborative WYSIWYG LaTeX editor. The working directory is your private working copy of the user's LaTeX project "${project}", refreshed from the live project at the start of every turn. Edit files here directly with your usual tools (apply_patch; a script for mechanical changes). Every change you make to a .tex document is picked up right away and applied to the live document as tracked changes — marked word by word, a changed digit is one digit — which the user reviews and accepts or rejects in the editor; that is the whole point, so edit exactly what needs to change and leave the rest byte-for-byte alone. Changes to other files (.bib, a new figure or .tex file) are copied into the project; build output you produce here (latexmk's .aux/.log, the PDF next to a .tex) stays here.
+Your shell sees only this working copy, the system's files and a scratch HOME — no other project is on disk for you. The user's other projects are reachable through the overlyx MCP tools (list_projects, read_document, …) as long as the user lets you read them (the agent panel can limit you to this project); there is no way out of the sandbox, so don't ask for one.
 The copy does not change under you during a turn, but the live document does — the user edits between and during your turns and your edits are merged in — so read a file afresh at the start of each turn instead of relying on what it said earlier.
 Pending tracked changes appear in the source as \\lyxadded{author}{time}{text} and \\lyxdeleted{author}{time}{text}: text inside \\lyxdeleted is already deleted — don't restore it unless asked; edit around and inside these macros freely (you never need to write them yourself). Comment lines starting with %% are OverLyX bookkeeping (notes, settings) — leave them unless asked. Never run git: OverLyX versions every change.
 The "overlyx" MCP server (project "${project}") has the comment threads (list_comments / add_comment / resolve_comment), build_pdf, which compiles the live document (your edits are already in it), and undo_turn. Do NOT recompile after every edit: when a turn has changed a .tex document, OverLyX builds it after the turn and shows the user whether the PDF still compiles — compile yourself only when asked, or once at the end of a larger or riskier change (new packages, macros, environments, tables). If build_pdf says your changes broke the build (it compares with the build before your changes), fix the error, or take the turn's changes back with undo_turn when you cannot fix it quickly — never end a turn leaving a document that no longer compiles. undo_turn with turns_back 1, 2, … takes back an earlier turn's changes exactly (the user's edits since are kept) — use it when the user asks you to roll back.
@@ -69,8 +78,117 @@ You have internet access through the web_search tool — use it for literature, 
 By default the user is here to understand and explore their document and the literature around it — answering, explaining, finding and summarizing is the normal mode, and most turns should not touch any file. Editing happens every so often, only when the user explicitly asks for a change; when a request is ambiguous about whether to edit, explain first and offer the edit instead of making it.
 Each user message may be preceded by a [context]…[/context] item the editor adds (the user did not write it): the document being edited, the other open documents, and the current selection — quoted, and marked ⟦SELECTION⟧…⟦/SELECTION⟧ in a file excerpt. Use it to resolve "this", "here" or an unqualified request.`;
 
-/** The sandbox of a turn in a working copy: only the copy (and /tmp) is writable. */
-const workspaceSandbox = (dir: string) => ({ type: 'workspaceWrite', writableRoots: [dir], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false });
+/* ------------------------------------------------------------------ what a thread may read and write */
+
+/** codex's permission profile for the panel's threads (threadSandbox; the managed config.toml holds a locked-down default of the same name) */
+const PROFILE = 'overlyx';
+/** Read-only besides codex's `:minimal` (/usr, /bin, /lib*, /etc): the TeX distribution's generated
+ *  files and the font caches — what sandbox.ts binds for builds — so latexmk works in the copy. */
+const SANDBOX_READ = ['/var/lib/texmf', '/var/cache/fontconfig', '/var/lib/ghostscript', '/opt'];
+/** What `:minimal` shows of /etc that no command needs (commands run as root): password hashes,
+ *  host keys, private certificates, the host's service and network configuration. */
+const SANDBOX_DENY = [
+  '/etc/shadow', '/etc/shadow-', '/etc/gshadow', '/etc/gshadow-', '/etc/sudoers', '/etc/sudoers.d', '/etc/security',
+  '/etc/ssh', '/etc/ssl/private', '/etc/letsencrypt', '/etc/caddy', '/etc/credstore', '/etc/credstore.encrypted',
+  '/etc/cloud', '/etc/netplan', '/etc/NetworkManager', '/etc/wireguard', '/etc/systemd', '/etc/crypttab', '/etc/krb5.keytab', '/etc/hetzner-build',
+];
+const exists = (p: string) => { try { fs.lstatSync(p); return true; } catch { return false; } };
+
+/** The directory new threads start in: empty, and nothing the agent can write (their turns then move to the working copy). */
+const startDir = () => { const d = path.join(config.dataDir, 'agent-start'); fs.mkdirSync(d, { recursive: true }); return d; };
+
+/** The parts of the profile that hold for every thread — also the managed config's default, should a thread ever load without its own. */
+function baseFilesystem(): Record<string, unknown> {
+  const fsys: Record<string, unknown> = { ':minimal': 'read' };
+  for (const p of SANDBOX_READ) if (exists(p)) fsys[p] = 'read';
+  for (const p of SANDBOX_DENY) if (exists(p)) fsys[p] = 'deny';
+  return fsys;
+}
+
+export interface ThreadSandbox { cwd: string; approvalPolicy: 'never'; config: Record<string, unknown> }
+
+/**
+ * Where a thread runs and what it may touch, given to codex at thread/start and thread/resume
+ * (codex binds it to the loaded thread). Commands — and codex's own file tools, which go through
+ * the same sandbox (view_image, apply_patch) — see the system's files (baseFilesystem), the turn's
+ * working directory (`:project_roots`: the copy, writable; for threads from before the copies the
+ * live project directory, read only), the live project read only (the copy's binary files are
+ * symlinks into it; its .git hidden) and a scratch HOME/TMPDIR of the thread. Nothing else exists
+ * in there: not the other projects (theirs are reached through the MCP tools, as far as
+ * panelThreadScope allows), not OverLyX's data (the database, codex's sign-ins), no network.
+ *
+ * approvalPolicy 'never': codex offers no way out — an approved escalation would run the command
+ * unsandboxed, as root (onServerRequest declines any that comes anyway). Every directory is marked
+ * untrusted: codex trusts the directory a thread with a writable sandbox starts in, and a trusted
+ * directory's .codex/config.toml — a project file any editor can write — would be loaded, its MCP
+ * servers started unsandboxed. The header tells the MCP server which thread is calling.
+ */
+export function threadSandbox(t: { project: string; key: string; cwd: string; native: boolean }): ThreadSandbox {
+  const live = projectDir(t.project), home = scratchDir(t.key), start = startDir();
+  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(t.cwd, { recursive: true });
+  const fsys = baseFilesystem();
+  fsys[start] = 'read';
+  fsys[live] = 'read';
+  if (exists(path.join(live, '.git'))) fsys[path.join(live, '.git')] = 'deny';
+  fsys[home] = 'write';
+  fsys[':project_roots'] = { '.': t.native ? 'write' : 'read' };
+  const untrusted = Object.fromEntries([...new Set([t.cwd, start, live, home])].map(d => [d, { trust_level: 'untrusted' }]));
+  return {
+    cwd: t.cwd,
+    approvalPolicy: 'never',
+    config: {
+      default_permissions: PROFILE,
+      [`permissions.${PROFILE}`]: { filesystem: fsys, network: { enabled: false } },
+      projects: untrusted,
+      'shell_environment_policy.set': { HOME: home, TMPDIR: home },
+      'mcp_servers.overlyx.http_headers': { 'X-OverLyX-Thread': t.key },
+    },
+  };
+}
+
+/** codex answered thread/start or thread/resume: the thread must run under threadSandbox's settings, else it is not used at all. */
+function assertSandboxed(res: any, tid: string): void {
+  if (res?.approvalPolicy !== 'never' || res?.activePermissionProfile?.id !== PROFILE) {
+    throw new Error(`the agent's sandbox did not take effect for thread ${tid} (approval ${JSON.stringify(res?.approvalPolicy)}, profile ${JSON.stringify(res?.activePermissionProfile?.id ?? null)}) — not running it`);
+  }
+}
+
+/** A thread's MCP key (the X-OverLyX-Thread header); threads from before the keys get one now. */
+function threadKey(tid: string): string {
+  const row = db.prepare('SELECT mcp_key FROM agent_threads WHERE thread_id = ?').get(tid) as { mcp_key: string | null } | undefined;
+  if (row?.mcp_key) return row.mcp_key;
+  const key = crypto.randomBytes(18).toString('base64url');
+  db.prepare('UPDATE agent_threads SET mcp_key = ? WHERE thread_id = ?').run(key, tid);
+  return key;
+}
+
+/** The panel's "Reads" choice for a thread: 'project' (only its own project) or 'all' (every project its user can open — the default). */
+export type ThreadScope = 'all' | 'project';
+const scopeOf = (v: unknown): ThreadScope => (v === 'project' ? 'project' : 'all');
+
+/**
+ * What the Agent panel's agent reaches through the MCP tools in the thread behind `key` (its
+ * X-OverLyX-Thread header; mcp.ts): its own project only, or the user's projects (null: as the
+ * account — projects shared with them included). An unknown thread reaches nothing.
+ */
+export function panelThreadScope(userId: number, key: string | undefined): AccessScope | null {
+  const row = key ? db.prepare('SELECT project, scope FROM agent_threads WHERE mcp_key = ? AND user_id = ?').get(key, userId) as { project: string; scope: string | null } | undefined : undefined;
+  if (!row) return { projects: [], readonly: true, panel: true };
+  return scopeOf(row.scope) === 'project' ? { projects: [row.project], readonly: false, panel: true } : null;
+}
+
+/** The scope each thread's agent was last told about (scopeNote) — kept in memory, a restart just tells it again. */
+const scopeTold = new Map<string, ThreadScope>();
+
+/** A note in front of a turn's message when the thread is limited to its project, or no longer is. */
+function scopeNote(tid: string, project: string, scope: ThreadScope): string | null {
+  const told = scopeTold.get(tid);
+  scopeTold.set(tid, scope);
+  if (scope === 'project') return `[context] Note from the OverLyX editor (the user did not write this): the user limited you to this project ("${project}") in the agent panel — the overlyx MCP tools reach no other project now; don't try, and say so if a request needs another project. [/context]`;
+  if (told === 'project') return '[context] Note from the OverLyX editor (the user did not write this): the user let you read all their projects again — the overlyx MCP tools (list_projects) reach them. [/context]';
+  return null;
+}
 
 /**
  * A note in front of a turn's message when the panel's Track changes box is off (or back on after
@@ -85,17 +203,64 @@ function trackingNote(tracked: boolean, wasTracked: boolean | undefined): string
 /**
  * Threads started before the managed codex config gained the overlyx MCP server were created
  * without the document tools (codex binds a thread's tool set at thread/start; the config change
- * cannot reach an existing thread). Such threads get a per-turn fallback note: edit the .tex
- * directly and write the tracked-change markup by hand. Wrapped as [context]…[/context] so the
- * panel strips it from the echoed user message (AgentPanel CONTEXT_RE is global).
+ * cannot reach an existing thread). They used to fall back to editing the .tex directly with
+ * hand-written tracked-change markup; their files are read only now (threadSandbox), so the note
+ * says to start a new thread instead. Wrapped as [context]…[/context] so the panel strips it from
+ * the echoed user message (AgentPanel CONTEXT_RE is global).
  */
 export const MCP_TOOLS_SINCE = Date.parse('2026-09-01T22:02:00Z');
-export function legacyThreadNote(createdAt: number, now = new Date()): string | null {
+export function legacyThreadNote(createdAt: number): string | null {
   if (createdAt >= MCP_TOOLS_SINCE) return null;
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], mons = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const p = (n: number) => String(n).padStart(2, '0');
-  const asctime = `${days[now.getDay()]} ${mons[now.getMonth()]} ${String(now.getDate()).padStart(2, ' ')} ${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())} ${now.getFullYear()}`;
-  return `[context] Note from the OverLyX editor (the user did not write this): this conversation was started before the "overlyx" document tools existed, so those MCP tools may be missing here — a NEW thread would have them. If they are missing and the user asks for a document change, edit the .tex file directly instead (the write triggers an approval card — expected; re-read the file immediately before patching, it changes live, and patch whole lines) and mark the edit up as a tracked change yourself: wrap every insertion in \\lyxadded{Agent panel (MCP)}{${asctime}}{…} and keep every deletion inside \\lyxdeleted{Agent panel (MCP)}{${asctime}}{old text} instead of removing the text. Leave lines starting with %% untouched. [/context]`;
+  return '[context] Note from the OverLyX editor (the user did not write this): this conversation was started before the "overlyx" document tools existed, so those MCP tools may be missing here — a NEW thread would have them. If they are missing and the user asks for a document change, this conversation cannot make it (its files are read only): say so and suggest starting a new thread. [/context]';
+}
+
+/** codex's config.toml for every account's agent home — OverLyX owns it and rewrites it on every start (AgentHost.ensureHome). */
+export function managedCodexConfig(): string {
+  const base = Object.entries(baseFilesystem()).map(([k, v]) => `${JSON.stringify(k)} = ${JSON.stringify(v)}`).join('\n');
+  return `# OverLyX-managed codex configuration for this account
+
+# Every thread gets its own sandbox at thread/start and thread/resume (agent.ts threadSandbox): its
+# working copy and the system's files, nothing else. The profile below is the fallback — system
+# files only, no writes — should a thread ever load without it.
+default_permissions = "${PROFILE}"
+# A thread's directory is its project root: no walking up to a repository around the data
+# directory, whose .codex/config.toml and AGENTS.md are not the agent's business.
+project_root_markers = []
+
+[permissions.${PROFILE}.filesystem]
+${base}
+
+[permissions.${PROFILE}.network]
+enabled = false
+
+# Commands get neither the MCP credential nor the location of codex's home (its sign-in).
+[shell_environment_policy]
+exclude = ["OVERLYX_MCP_TOKEN", "CODEX_HOME"]
+
+[features]
+memories = true
+web_search_request = true
+# Sub-agents take image paths in their input and read those files outside the sandbox.
+multi_agent = false
+
+# The agent may search the web (codex's own web_search tool — it runs outside the filesystem
+# sandbox, so the read-only sandbox does not block it).
+[tools]
+web_search = true
+
+# OverLyX's own MCP connector: tracked-change document edits, comments, builds — the account's
+# projects on one connection (tools take a \`project\` argument), as far as the calling thread's
+# scope allows (each thread adds its X-OverLyX-Thread header). The bearer token arrives via the
+# environment at codex start.
+[mcp_servers.overlyx]
+url = "http://127.0.0.1:${config.port}/mcp"
+bearer_token_env_var = "OVERLYX_MCP_TOKEN"
+# The tools already apply document edits as tracked changes the user reviews in the editor, so
+# codex must not gate them behind its own approval prompt. That prompt arrives as an MCP
+# elicitation; the panel used to have no card for it and every write tool came back
+# "user rejected MCP tool call".
+default_tools_approval_mode = "approve"
+`;
 }
 
 /* ------------------------------------------------------------------ per-user codex host */
@@ -149,28 +314,7 @@ class AgentHost {
     fs.mkdirSync(h, { recursive: true });
     // OverLyX owns this file — rewritten on every start so the port and settings stay current
     const file = path.join(h, 'config.toml');
-    const text = `# OverLyX-managed codex configuration for this account
-[features]
-memories = true
-web_search_request = true
-
-# The agent may search the web (codex's own web_search tool — it runs outside the filesystem
-# sandbox, so the read-only sandbox does not block it).
-[tools]
-web_search = true
-
-# OverLyX's own MCP connector: tracked-change document edits, comments, builds — all of the
-# account's projects on one connection (tools take a \`project\` argument). The bearer token
-# arrives via the environment at codex start.
-[mcp_servers.overlyx]
-url = "http://127.0.0.1:${config.port}/mcp"
-bearer_token_env_var = "OVERLYX_MCP_TOKEN"
-# The tools already apply document edits as tracked changes the user reviews in the editor, so
-# codex must not gate them behind its own approval prompt. That prompt arrives as an MCP
-# elicitation; the panel used to have no card for it and every write tool came back
-# "user rejected MCP tool call".
-default_tools_approval_mode = "approve"
-`;
+    const text = managedCodexConfig();
     let old: string | null = null;
     try { old = fs.readFileSync(file, 'utf8'); } catch { /* fresh home */ }
     if (old === text) return false;
@@ -323,13 +467,22 @@ default_tools_approval_mode = "approve"
     }
   }
 
-  /** codex asks the client something (command / file-change approval): forward to the panel. */
+  /** codex asks the client something: an MCP tool call to allow or a question for the user — forward to the panel. */
   private onServerRequest(msg: JsonRpcMsg): void {
     const method = msg.method!;
-    // Forwarded to the panel as approval cards: codex's command / file-change approvals, and MCP
-    // elicitations — codex asks the user to allow an MCP tool call this way (the question in
-    // params.message, tool arguments under params._meta). Anything else is unsupported.
-    if (!/requestApproval|applyPatchApproval|execCommandApproval|requestUserInput|mcpServer\/elicitation/.test(method)) {
+    // A command, file-change or permission approval can only ask to leave the thread's sandbox
+    // (threadSandbox; approvalPolicy 'never' should mean none arrives): accepted, it would run as
+    // root outside the thread's scope. Declined here, never shown.
+    const refusal = sandboxRefusal(method);
+    if (refusal) {
+      console.warn(`[agent ${this.userId}] declined ${method} — the agent stays in its sandbox`);
+      this.send({ jsonrpc: '2.0', id: msg.id, result: refusal });
+      return;
+    }
+    // Forwarded to the panel as cards: MCP elicitations — codex asks the user to allow an MCP tool
+    // call this way (the question in params.message, tool arguments under params._meta) — and the
+    // agent's questions to the user. Anything else is unsupported.
+    if (!/requestUserInput|mcpServer\/elicitation/.test(method)) {
       this.send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: `${method} is not supported by this client` } });
       return;
     }
@@ -423,10 +576,13 @@ default_tools_approval_mode = "approve"
     for (const s of this.subscribers) if (!project || s.project === project) s.res.write(data);
   }
 
-  async ensureThreadLoaded(threadId: string): Promise<void> {
-    if (this.loaded.has(threadId)) return;
-    await this.request('thread/resume', { threadId });
-    this.loaded.add(threadId);
+  /** Load a thread into codex (after a codex restart) — under its sandbox, which codex binds at load; `cwd`: where its turns run. */
+  async ensureThreadLoaded(row: ThreadRow, cwd: string): Promise<void> {
+    if (this.loaded.has(row.thread_id)) return;
+    const box = threadSandbox({ project: row.project, key: threadKey(row.thread_id), cwd, native: isNativeThread(row.created_at) });
+    const res = await this.request('thread/resume', { threadId: row.thread_id, cwd: box.cwd, approvalPolicy: box.approvalPolicy, config: box.config });
+    assertSandboxed(res, row.thread_id);
+    this.loaded.add(row.thread_id);
   }
 
   markLoaded(threadId: string, project: string): void { this.loaded.add(threadId); this.threadProjects.set(threadId, project); }
@@ -479,6 +635,14 @@ export function installedCodexVersion(bin: string = config.agent.bin, pathEnv: s
     return null;
   }
   return null;
+}
+
+/** The answer that turns down an approval request of `method` — null for requests that are not about leaving the sandbox. */
+function sandboxRefusal(method: string): object | null {
+  if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') return { decision: 'decline' };
+  if (method === 'item/permissions/requestApproval') return { permissions: {}, scope: 'turn' };
+  if (method === 'applyPatchApproval' || method === 'execCommandApproval') return { decision: { denied: { rejection: 'The OverLyX agent cannot leave its sandbox.' } } };
+  return /requestApproval/.test(method) ? { decision: 'decline' } : null;
 }
 
 const KEEPER_SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../scripts/agent-keeper.mjs');
@@ -540,9 +704,14 @@ export async function editorContextLines(ctx: TurnContext | undefined, user: Ses
 }
 
 /** The input sent to the agent: a context item (editorContextLines; the client hides items
- *  starting with "[context]") followed by the user's message. */
-async function composeInput(text: string, ctx: TurnContext | undefined, user: SessionUser): Promise<{ type: 'text'; text: string; text_elements: never[] }[]> {
+ *  starting with "[context]") followed by the user's message. A thread limited to its project
+ *  hears nothing of documents elsewhere (open in other tabs, say). */
+async function composeInput(text: string, ctx: TurnContext | undefined, user: SessionUser, onlyProject?: string): Promise<{ type: 'text'; text: string; text_elements: never[] }[]> {
   const item = (t: string) => ({ type: 'text' as const, text: t, text_elements: [] as never[] });
+  if (ctx && onlyProject) {
+    const here = (d: unknown) => typeof d === 'string' && projectOfDoc(d) === onlyProject;
+    ctx = here(ctx.docId) ? { ...ctx, openDocs: (Array.isArray(ctx.openDocs) ? ctx.openDocs : []).filter(here) } : undefined;
+  }
   const lines = await editorContextLines(ctx, user);
   if (!lines.length) return [item(text)];
   lines[0] = '[context] ' + lines[0];
@@ -553,7 +722,7 @@ async function composeInput(text: string, ctx: TurnContext | undefined, user: Se
 
 /* ------------------------------------------------------------------ routes */
 
-interface ThreadRow { thread_id: string; project: string; user_id: number; title: string | null; created_at: number; updated_at: number }
+interface ThreadRow { thread_id: string; project: string; user_id: number; title: string | null; created_at: number; updated_at: number; scope: string | null; mcp_key: string | null }
 const threadRow = (tid: string) => db.prepare('SELECT * FROM agent_threads WHERE thread_id = ?').get(tid) as ThreadRow | undefined;
 
 export function agentRoutes(): express.Router {
@@ -633,23 +802,27 @@ export function agentRoutes(): express.Router {
   r.post('/projects/:project/agent/threads', (req, res) => { void (async () => {
     if (!needRole(req, res, 'edit')) return;
     const project = String(req.params.project);
+    const scope = scopeOf(req.body?.scope);
     try {
       const h = host(req.user!.id); await h.ensure();
+      // the thread starts in an empty directory under its sandbox (its first turn moves it into
+      // the working copy, which exists only once codex has named the thread)
+      const key = crypto.randomBytes(18).toString('base64url');
+      const box = threadSandbox({ project, key, cwd: startDir(), native: true });
       const out = await h.request('thread/start', {
-        cwd: projectDir(project),
-        approvalPolicy: 'on-request',
-        // reads are free (the project is the cwd); every write goes through the MCP tools as a
-        // tracked change — a direct filesystem write is a sandbox exception the user must grant
-        sandbox: 'read-only',
+        cwd: box.cwd,
+        approvalPolicy: box.approvalPolicy,
+        config: box.config,
         developerInstructions: NATIVE_INSTRUCTIONS(project),
         ...(config.agent.model ? { model: config.agent.model } : {}),
       });
       const tid = out.thread.id as string;
-      db.prepare('INSERT OR REPLACE INTO agent_threads (thread_id, project, user_id, title, created_at, updated_at) VALUES (?,?,?,?,?,?)')
-        .run(tid, project, req.user!.id, null, Date.now(), Date.now());
+      assertSandboxed(out, tid);
+      db.prepare('INSERT OR REPLACE INTO agent_threads (thread_id, project, user_id, title, created_at, updated_at, scope, mcp_key) VALUES (?,?,?,?,?,?,?,?)')
+        .run(tid, project, req.user!.id, null, Date.now(), Date.now(), scope === 'project' ? 'project' : null, key);
       h.markLoaded(tid, project);
       logAccess(project, req.user!.id, 'open', 'agent-thread');
-      res.json({ id: tid, model: out.model ?? null });
+      res.json({ id: tid, model: out.model ?? null, scope });
     } catch (e) { fail(res, e); }
   })(); });
 
@@ -662,7 +835,7 @@ export function agentRoutes(): express.Router {
       const out = await h.request('thread/read', { threadId: row.thread_id, includeTurns: true });
       const approvals = row.user_id === req.user!.id ? h.pendingApprovals(row.thread_id) : [];
       const checkpoints = isNativeThread(row.created_at) ? listCheckpoints(row.thread_id).map(publicCheckpoint) : [];
-      res.json({ thread: out.thread, mine: row.user_id === req.user!.id, user: row.user_id, approvals, checkpoints });
+      res.json({ thread: out.thread, mine: row.user_id === req.user!.id, user: row.user_id, approvals, checkpoints, scope: scopeOf(row.scope) });
     } catch (e) { fail(res, e); }
   })(); });
 
@@ -675,8 +848,19 @@ export function agentRoutes(): express.Router {
     if (!text) { res.status(400).json({ error: 'empty message' }); return; }
     try {
       const h = host(req.user!.id); await h.ensure();
-      await h.ensureThreadLoaded(row.thread_id);
-      const input = await composeInput(text, req.body?.context as TurnContext | undefined, req.user!);
+      // the panel's Reads choice, sent with every message: it holds for this turn on
+      const scope = req.body?.scope === undefined ? scopeOf(row.scope) : scopeOf(req.body.scope);
+      if (scope !== scopeOf(row.scope)) db.prepare('UPDATE agent_threads SET scope = ? WHERE thread_id = ?').run(scope === 'project' ? 'project' : null, row.thread_id);
+      // cwd: the thread's working copy, mirrored from the live project now (older threads: the
+      // project's directory itself — a thread started before the project moved follows it)
+      const native = isNativeThread(row.created_at);
+      // the panel's Track changes box: off, the turn's document edits go in without tracked-change marks
+      const tracked = req.body?.tracked !== false;
+      const wasTracked = native ? workspaceTracking(row.thread_id) : panelTracking(req.user!.id, row.project);
+      setPanelTracking(req.user!.id, row.project, tracked);
+      const cwd = native ? await prepareWorkspace(row.thread_id, row.project, req.user!.id, tracked) : projectDir(row.project);
+      await h.ensureThreadLoaded(row, cwd);
+      const input = await composeInput(text, req.body?.context as TurnContext | undefined, req.user!, scope === 'project' ? row.project : undefined);
       const legacy = legacyThreadNote(row.created_at);
       if (legacy) input.unshift({ type: 'text', text: legacy, text_elements: [] });
       if (!row.title) db.prepare('UPDATE agent_threads SET title = ? WHERE thread_id = ?').run(text.slice(0, 100), row.thread_id);
@@ -685,23 +869,27 @@ export function agentRoutes(): express.Router {
       const effort = typeof req.body?.effort === 'string' && req.body.effort ? String(req.body.effort).slice(0, 20) : undefined;
       // the panel's optimistic message id: codex echoes it on the userMessage item, so the client can dedupe
       const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
-      // cwd: the thread's working copy, mirrored from the live project now (older threads: the
-      // project's directory itself — a thread started before the project moved follows it)
-      const native = isNativeThread(row.created_at);
-      // the panel's Track changes box: off, the turn's document edits go in without tracked-change marks
-      const tracked = req.body?.tracked !== false;
-      const wasTracked = native ? workspaceTracking(row.thread_id) : panelTracking(req.user!.id, row.project);
-      setPanelTracking(req.user!.id, row.project, tracked);
-      const note = trackingNote(tracked, wasTracked);
-      if (note) input.unshift({ type: 'text', text: note, text_elements: [] });
-      const cwd = native ? await prepareWorkspace(row.thread_id, row.project, req.user!.id, tracked) : projectDir(row.project);
-      const turn = h.request('turn/start', { threadId: row.thread_id, input, cwd, ...(native ? { sandboxPolicy: workspaceSandbox(cwd) } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(cmid ? { clientUserMessageId: cmid } : {}) }, 0);
+      for (const note of [trackingNote(tracked, wasTracked), scopeNote(row.thread_id, row.project, scope)]) if (note) input.unshift({ type: 'text', text: note, text_elements: [] });
+      // the sandbox stays the one the thread was loaded with (threadSandbox): its working directory
+      // is the turn's cwd, and no turn may bring an approval policy that lets it out
+      const turn = h.request('turn/start', { threadId: row.thread_id, input, cwd, approvalPolicy: 'never', ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(cmid ? { clientUserMessageId: cmid } : {}) }, 0);
       turn.catch(e => console.error(`[agent ${req.user!.id}] turn failed:`, (e as Error).message));
       // the turn runs long; its progress arrives over the events stream — answer as soon as it is accepted
       const quick = await Promise.race([turn.then(t => t), new Promise(r2 => setTimeout(r2, 5000, null))]);
       res.json({ ok: true, turn: quick ? (quick as any).turn ?? null : null });
     } catch (e) { fail(res, e); }
   })(); });
+
+  /** The panel's Reads choice for a thread: 'project' (only its own project) or 'all' — effective with the agent's next MCP call. */
+  r.post('/projects/:project/agent/threads/:tid/scope', (req, res) => {
+    if (!needRole(req, res, 'edit')) return;
+    const row = threadRow(String(req.params.tid));
+    if (!row || row.project !== String(req.params.project)) { res.status(404).json({ error: 'no such thread in this project' }); return; }
+    if (row.user_id !== req.user!.id) { res.status(403).json({ error: "Only the thread's creator can change what its agent reads" }); return; }
+    const scope = scopeOf(req.body?.scope);
+    db.prepare('UPDATE agent_threads SET scope = ? WHERE thread_id = ?').run(scope === 'project' ? 'project' : null, row.thread_id);
+    res.json({ ok: true, scope });
+  });
 
   /** Take back what a turn changed (its checkpoint): the documents as before it, edits made since kept. */
   r.post('/projects/:project/agent/threads/:tid/checkpoints/:n/undo', (req, res) => { void (async () => {
@@ -740,7 +928,7 @@ export function agentRoutes(): express.Router {
     try {
       const h = host(row.user_id); await h.ensure();
       const cmid = typeof req.body?.clientMessageId === 'string' && req.body.clientMessageId ? String(req.body.clientMessageId).slice(0, 60) : undefined;
-      const input = await composeInput(text, req.body?.context as TurnContext | undefined, req.user!);
+      const input = await composeInput(text, req.body?.context as TurnContext | undefined, req.user!, scopeOf(row.scope) === 'project' ? row.project : undefined);
       const legacy = legacyThreadNote(row.created_at);
       if (legacy) input.unshift({ type: 'text', text: legacy, text_elements: [] });
       await h.request('turn/steer', { threadId: row.thread_id, expectedTurnId: String(req.body?.turnId ?? ''), input, ...(cmid ? { clientUserMessageId: cmid } : {}) });

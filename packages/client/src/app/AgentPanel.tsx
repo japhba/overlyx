@@ -16,7 +16,7 @@
  * (ExternalAgents.tsx): the owner writes to them here and reads their replies.
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel, type LitHit, type AgentCheckpoint } from '../api';
+import { api, type AgentStatus, type AgentLogin, type AgentThreadInfo, type AgentItem, type AgentChange, type AgentEventMsg, type AgentTurnContext, type AgentModel, type LitHit, type AgentCheckpoint, type AgentScope } from '../api';
 import { editorContext } from '../editor/context';
 import { bibRefs, type BibRef } from './bibrefs';
 import { RichText, transcriptCopy } from './agentText';
@@ -318,6 +318,9 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
   const [effort, setEffort] = useState(stored('ol.agent.effort') ?? '');
   /** the agent's document edits as tracked changes (the default) or straight into the text */
   const [tracked, setTracked] = useState(stored('ol.agent.tracked') !== '0');
+  /** what the agent may read: all the user's projects (the default) or only this one — a new
+   *  thread takes the last choice, an open thread shows (and changes) its own */
+  const [scope, setScope] = useState<AgentScope>(stored('ol.agent.scope') === 'project' ? 'project' : 'all');
   const selRef = useRef(sel); selRef.current = sel;
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -469,6 +472,7 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
     setItems([...list, ...done.filter(c => !placed.has('cp-' + c.n)).map(cpItem)]);
     setLiveCp(cps.find(c => !c.finished && !c.undone) ?? null);
     setMine(r.mine);
+    if (r.scope) setScope(r.scope);
     setApprovals((r.approvals ?? []).map(a => ({ requestId: a.requestId, method: a.method, params: a.params })));
     const last = r.thread.turns[r.thread.turns.length - 1] as { id?: string; status?: string } | undefined;
     setBusyTurn(last?.status === 'inProgress' ? last.id ?? null : null);
@@ -508,10 +512,10 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
     void (async () => {
       try {
         let tid = selRef.current;
-        if (!tid) { const r = await api.agentStartThread(project); tid = r.id; setSel(tid); setMine(true); setItems([]); store('ol.agent.sel:' + project, tid); void refreshThreads(); }
+        if (!tid) { const r = await api.agentStartThread(project, scope); tid = r.id; setSel(tid); setMine(true); setItems([]); store('ol.agent.sel:' + project, tid); void refreshThreads(); }
         setItems(list => [...list, localItem]);
         setBusyTurn('pending');
-        await api.agentTurn(project, tid, { text: t, context, clientMessageId: localItem.id, tracked, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
+        await api.agentTurn(project, tid, { text: t, context, clientMessageId: localItem.id, tracked, scope, ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
       } catch (e) { setBusyTurn(null); notify(errText(e), 'error'); }
     })();
   };
@@ -605,6 +609,21 @@ function CodexPanel({ project, notify, pinned, onUnpin }: { project: string; not
                 {efforts.map(ef => <option key={ef} value={ef}>{ef}</option>)}
               </select>
             )}
+            <label data-agent-scope-label title={scope === 'project'
+                ? 'The agent reads only this project: its overlyx tools refuse every other one, and its commands only ever see this project’s files'
+                : 'The agent may read all your projects, and those shared with you, through its overlyx tools (to look something up in another paper, say); its commands only ever see this project’s files. Projects you cannot open are never within its reach'}>
+              Reads
+              <select class="agent-select" data-agent-scope value={scope}
+                onChange={e => {
+                  const v = (e.target as HTMLSelectElement).value === 'project' ? 'project' : 'all';
+                  setScope(v); store('ol.agent.scope', v);
+                  // an open thread changes at once: the agent's next tool call already keeps to it
+                  if (sel && mine) void api.agentSetScope(project, sel, v).catch(err => notify(errText(err), 'error'));
+                }}>
+                <option value="all">All my projects</option>
+                <option value="project">This project only</option>
+              </select>
+            </label>
             <label data-agent-tracked title={tracked ? 'The agent’s edits to documents arrive as tracked changes you accept or reject — untick to let it edit the text directly (a turn can still be taken back)' : 'The agent edits the documents directly, without tracked changes (a turn can still be taken back) — tick to review its edits as tracked changes'}>
               <input type="checkbox" checked={tracked} onChange={e => { const v = (e.target as HTMLInputElement).checked; setTracked(v); store('ol.agent.tracked', v ? '1' : '0'); }} />
               Track changes

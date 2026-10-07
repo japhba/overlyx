@@ -1032,8 +1032,7 @@ blend.
   across that user's projects. Users sign in with their *own* ChatGPT account (device code). A
   thread works in its **private working copy** of the project (`agentwork.ts`,
   `data/agent-work/<thread>/<project>/`) and edits files the way coding agents do — `apply_patch`,
-  a script — in codex's workspace-write sandbox whose only writable root is the copy (binary files
-  are symlinked in read-only; the sandbox refuses writes through them). Every turn mirrors the
+  a script — in its own codex sandbox (below). Every turn mirrors the
   live project in first (documents as their live source, with the tracked-change markup); every
   applied patch, command and finished turn takes the agent's changes back: a document is diffed
   against what was mirrored and merged into the live document as the agent's tracked changes,
@@ -1065,11 +1064,35 @@ blend.
   panel's token has it), and `build_pdf` tells it whether its changes broke the build.
   OverLyX's own MCP connector (a managed `[mcp_servers.overlyx]` entry pointing at `/mcp` with an
   internal per-account token) remains for comments, `build_pdf` and `undo_turn`. Threads started before 27 Sep 2026
-  keep their original setup (project directory as cwd, read-only sandbox, every edit through the
-  MCP document tools — tracked word by word as well). A write outside the copy is a sandbox
-  exception the panel asks the user to grant. The developer instructions steer the agent to explore
+  keep their original setup (project directory as cwd, read only, every edit through the
+  MCP document tools — tracked word by word as well).
+  **What the agent can read** (`threadSandbox`, given to codex at `thread/start` and `thread/resume`
+  as a permission profile, `overlyx`): its commands — and codex's own file tools, which go through
+  the same sandbox — see the system's files (`:minimal` minus credentials and host configuration in
+  /etc, plus the TeX distribution's generated files, so latexmk works), the turn's working copy
+  (writable), the live project read only (the copy's binary files are symlinks into it; its `.git`
+  hidden) and a scratch HOME/TMPDIR of the thread (`data/agent-scratch/<key>/`). Nothing else exists
+  in there: no other project of this or any user, no OverLyX data (database, codex's sign-ins), no
+  network. There is no way out: `approvalPolicy: 'never'`, and the server declines any command,
+  file-change or permission approval that still arrives (it could only ask to run unsandboxed, as
+  root). Every directory is marked untrusted — codex trusts the directory a thread with a writable
+  sandbox starts in, and a trusted directory's `.codex/config.toml` (a project file any editor can
+  write) would start MCP servers unsandboxed; threads start in the empty `data/agent-start/` and
+  move to the copy with their first turn. The managed config holds a system-files-only fallback of
+  the profile, `project_root_markers = []` and no sub-agents (they read image paths outside the
+  sandbox); a thread codex will not sandbox is not run (`assertSandboxed`). The user's other
+  projects are reachable only through the MCP tools, as the thread's **scope** allows — the
+  composer's **Reads** choice, stored per thread (`agent_threads.scope`, route `…/threads/:tid/scope`,
+  also sent with each message): *All my projects* (default: what the account can open, projects
+  shared with it included — never an administrator's temporary grant) or *This project only*
+  (the tools refuse every other project, the editor context drops documents from elsewhere, and
+  the agent is told). Each thread's codex MCP connection carries an `X-OverLyX-Thread` header
+  (`agent_threads.mcp_key`); `mcp.ts` narrows the panel's credential by it (`panelThreadScope`) and
+  gives a call without a known thread nothing. `scripts/codex-sandbox-check.mts` runs the real
+  codex against a stand-in model and checks all of this (`tests/agent-sandbox.test.ts`, and every
+  codex update). The developer instructions steer the agent to explore
   and explain by default — document edits only on an explicit ask — and codex's web_search tool is
-  enabled (internet access; sandboxed shell commands still ask). They also tell it the documents
+  enabled (internet access; shell commands have none). They also tell it the documents
   are live-edited: read a file afresh each turn, never restore earlier content from memory. The panel streams
   message/reasoning deltas, tool calls (folded) and diffs over SSE. Every message carries editor
   context automatically: the open documents and the current selection — as LaTeX (the ⌘J
@@ -1089,7 +1112,8 @@ blend.
   `OVERLYX_AGENT_MODEL` overrides the model. The model picker lists what the installed codex
   offers, and new GPT models need a newer codex: `deploy/overlyx-codex-update.timer` runs
   `scripts/update-codex.sh` every night (newest `@openai/codex` from npm, checked by
-  `scripts/codex-smoke.mjs` — `initialize` + `model/list` — else the previous version goes back;
+  `scripts/codex-smoke.mjs` — `initialize` + `model/list` — and `scripts/codex-sandbox-check.mts`,
+  else the previous version goes back;
   `journalctl -u overlyx-codex-update`). A keeper started on an older codex (the version is
   stamped in `data/agent-home/<id>/codex-version`) is stopped once quiet for `OVERLYX_AGENT_IDLE_MS`
   even with the panel open, so the next request runs the new one.

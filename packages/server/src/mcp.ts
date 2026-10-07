@@ -60,6 +60,7 @@ import { userSettings } from './userSettings.ts';
 import { touchProject, repoInfo, restoreProject, commitProject } from './git.ts';
 import { buildIncluding, buildErrors, lastBuild, currentJob } from './export.ts';
 import { PANEL_AGENT, buildBeforeTurn, agentCheckpoint, undoCheckpoint, panelTracking } from './agentwork.ts';
+import { panelThreadScope } from './agent.ts';
 import { verifyMcpToken } from './mcpTokens.ts';
 import { wwwAuthenticate } from './mcpOauth.ts';
 import { config } from './config.ts';
@@ -1051,6 +1052,14 @@ async function handle(req: Request, res: Response): Promise<void> {
   const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(identity.userId) as UserRow | undefined;
   if (!userRow) { res.status(403).json({ error: 'the account behind this token no longer exists' }); return; }
   const user: SessionUser = { ...toSessionUser(userRow), ...(identity.scope ? { scope: identity.scope } : {}) };
+  if (identity.name === PANEL_AGENT) {
+    // the Agent panel's own agent: one credential per account, narrowed per thread — to the
+    // thread's project when the user chose so (agent.ts panelThreadScope) — and never through an
+    // administrator's temporary grant on someone else's project
+    const scope = panelThreadScope(identity.userId, req.header('x-overlyx-thread'));
+    user.isAdmin = false;
+    if (scope) user.scope = scope;
+  }
   if (project !== null) {
     const role = roleFor(user, project);
     if (!atLeast(role, 'view')) { res.status(403).json({ error: scopeRefusal(user, project, 'view') ?? `this token's account has no access to project "${project}"` }); return; }
