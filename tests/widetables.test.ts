@@ -37,7 +37,7 @@ describe('column widths', () => {
     const spec = schema.nodes.table.spec.toDOM!(t) as any[];
     const colgroup = spec[2][1] as any[];
     expect(colgroup[0]).toBe('colgroup');
-    expect(colgroup.slice(1).map(c => c[1]?.style ?? null)).toEqual([null, 'width: 3cm', 'width: calc(var(--ol-column, 720px) * 0.3)']);
+    expect(colgroup.slice(1).map(c => c[1]?.style ?? null)).toEqual([null, 'width: calc(var(--ol-mm, 1mm) * 30 + var(--ol-col-padding, 0px))', 'width: calc(var(--ol-column, 720px) * 0.3)']);
     const dom = DOMSerializer.fromSchema(schema).serializeNode(t) as HTMLElement;
     expect(dom.querySelector('table > colgroup + tbody')).not.toBeNull();
     // the cells are still the table's content, and read back without the colgroup
@@ -51,9 +51,9 @@ describe('X columns (variable width, tabularx)', () => {
 
   it('share the table width less the other columns (--ol-xrest), the text width when the table has none', () => {
     expect(styles(table([[['alignment', 'left']], X, X]))).toEqual([null, 'width: calc((var(--ol-column, 720px) - var(--ol-xrest, 0px)) / 2)', 'width: calc((var(--ol-column, 720px) - var(--ol-xrest, 0px)) / 2)']);
-    expect(styles(table([X, [['alignment', 'left'], ['width', '2cm']]], [['tabularwidth', '50col%']]))).toEqual(['width: calc((calc(var(--ol-column, 720px) * 0.5) - var(--ol-xrest, 0px)) / 1)', 'width: 2cm']);
+    expect(styles(table([X, [['alignment', 'left'], ['width', '2cm']]], [['tabularwidth', '50col%']]))).toEqual(['width: calc((calc(var(--ol-column, 720px) * 0.5) - var(--ol-xrest, 0px)) / 1)', 'width: calc(var(--ol-mm, 1mm) * 20 + var(--ol-col-padding, 0px))']);
     // a width or a LaTeX spec of its own wins over varwidth (Tabular::latex)
-    expect(styles(table([[...X, ['width', '3cm']], [...X, ['special', 'S']]]))).toEqual(['width: 3cm', null]);
+    expect(styles(table([[...X, ['width', '3cm']], [...X, ['special', 'S']]]))).toEqual(['width: calc(var(--ol-mm, 1mm) * 30 + var(--ol-col-padding, 0px))', null]);
     expect(xColumns(table([[['alignment', 'left']], X]))).toEqual([false, true]);
     expect(xColumns(table([[['alignment', 'left']], [...X, ['width', '3cm']]]))).toBeNull();
   });

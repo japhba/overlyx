@@ -76,12 +76,12 @@ fs.writeFileSync(path.join(ws, 'notes.md'), '# Notes heading\n\nA *markdown* par
 fs.writeFileSync(path.join(ws, 'source-slide.tex'), String.raw`\documentclass[aspectratio=169]{beamer}
 \begin{document}
 \begin{frame}[plain]
-\begin{olbox}{x=8mm,y=18mm,w=144mm,h=56mm,font=14pt}
+\begin{olbox}{x=8mm,y=18mm,w=144mm,h=56mm,font=6.5pt}
 \setlength{\tabcolsep}{0.6mm} \setlength{\jot}{0.6pt}
 \global\long\def\arraystretch{1.15}
 
 Printed text \setlength{\parskip}{0pt} survives.
-\begin{tabular}{ll}Weights&Kernels\end{tabular}
+\begin{tabular}{p{9mm}|p{25.3mm}|p{25.3mm}|p{25.3mm}|p{25.3mm}|p{25.3mm}}W&A&B&C&D&E\end{tabular}
 \end{olbox}
 \begin{olraw}{x=8mm,y=77mm,w=144mm,h=9mm}
 \unsupportedpreviewcommand
@@ -487,12 +487,14 @@ try {
       outside: !canvas.contains(button) && br.bottom < cr.top,
       rawCode: canvas.querySelectorAll('.ol-raw pre').length,
       tableSpacing: canvas.querySelector('.lyx-tabular').style.getPropertyValue('--ol-tabcolsep'),
+      tableFits: canvas.querySelector('.lyx-tabular').getBoundingClientRect().width <= canvas.querySelector('.ol-box-content').getBoundingClientRect().width,
     };
   });
   if (!sourceCheck.text.includes('Printed text') || !sourceCheck.text.includes('survives.')) fail('mixed source paragraph lost printed text');
   if (/setlength|arraystretch|unsupportedpreviewcommand|ERT/.test(sourceCheck.text)) fail('source fragments still print on the slide: ' + sourceCheck.text);
   if (!sourceCheck.hiddenSourceLines || !sourceCheck.hiddenMacros || !sourceCheck.outside || sourceCheck.rawCode) fail('layout source chrome is on paper: ' + JSON.stringify(sourceCheck));
   if (!sourceCheck.tableSpacing.includes('0.6')) fail('the hidden tabcolsep command did not set the table spacing');
+  if (!sourceCheck.tableFits) fail('fixed table column widths ignored the slide zoom and overflowed the text box');
   await sourceFrame.locator('.ol-page-source').click();
   const sourceDialog = sourceFrame.getByRole('dialog', { name: 'Slide LaTeX' });
   await sourceDialog.waitFor();

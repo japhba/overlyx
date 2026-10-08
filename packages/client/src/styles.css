@@ -636,6 +636,7 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 /* in a text box on a page, a table stands where TeX sets it: aligned like the box's text (no \centering
    around it), its columns \tabcolsep (6 pt) apart from their rules on either side */
 .ol-page .lyx-par.ol-solo-table { text-align: inherit; }
+.ol-page .lyx-tabular { --ol-col-padding: calc(2 * var(--ol-tabcolsep, calc(var(--ol-pt) * 6))); }
 .ol-page .lyx-cell { padding-left: var(--ol-tabcolsep, calc(var(--ol-pt) * 6)); padding-right: var(--ol-tabcolsep, calc(var(--ol-pt) * 6)); }
 .lyx-cell { padding: 2px 6px; border: 1px dotted var(--cell-grid, var(--ui-border2)); min-width: 2em; }
 /* the dotted grid — LyX's hint for cell boundaries without a line — only while the cursor is in the

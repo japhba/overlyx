@@ -10,6 +10,7 @@
  *    LyX value, so that anything LyX can express round-trips losslessly.
  */
 import { Schema, type NodeSpec, type MarkSpec, type DOMOutputSpec } from 'prosemirror-model';
+import { toMm } from './layout/model.ts';
 
 const jsonAttr = (def: unknown) => ({ default: JSON.stringify(def) });
 const attr = (d: HTMLElement, name: string, def: string) => d.getAttribute(name) ?? def;
@@ -55,7 +56,12 @@ export function columnWidthLength(input: string | undefined | null): string | nu
 
 const attrOf = (attrs: [string, string][], key: string) => attrs.find(([k]) => k === key)?.[1];
 /** a width LyX writes (it writes none for zero) as CSS */
-const widthOf = (attrs: [string, string][]) => { const v = attrOf(attrs, 'width'); return v && parseFloat(v) === 0 ? null : lyxLengthCss(v); };
+const widthOf = (attrs: [string, string][], column = false) => {
+  const v = attrOf(attrs, 'width');
+  if (v && parseFloat(v) === 0) return null;
+  const css = lyxLengthCss(v), mm = toMm(v);
+  return css && mm !== null ? `calc(var(--ol-mm, 1mm) * ${mm}${column ? ' + var(--ol-col-padding, 0px)' : ''})` : css;
+};
 /**
  * A variable-width column (LyX's `varwidth="true"`, an X column of tabularx): no fixed width and no
  * LaTeX spec of its own (either wins in Tabular::latex).
@@ -80,7 +86,7 @@ function colgroupDOM(columns: string, features: string): DOMOutputSpec {
   return ['colgroup', ...cols.map(c => {
     if (!Array.isArray(c)) return ['col'];
     if (isVarwidthColumn(c)) return ['col', { class: 'ol-xcol', style: xw }];
-    const w = widthOf(c);
+    const w = widthOf(c, true);
     return w ? ['col', { style: `width: ${w}` }] : ['col'];
   })] as unknown as DOMOutputSpec;
 }
@@ -288,7 +294,7 @@ const nodes: Record<string, NodeSpec> = {
       for (const k of ['topline', 'bottomline', 'leftline', 'rightline']) if (m.get(k) === 'true') cls.push(k);
       if (m.get('alignment')) cls.push('align-' + m.get('alignment'));
       // a \multicolumn{n}{p{…}}: the width of the spanning cell
-      const w = lyxLengthCss(m.get('width'));
+      const w = widthOf([...m], true);
       if (w) a.style = `width: ${w}`;
       a.class = cls.join(' ');
       a['data-attrs'] = node.attrs.attrs;
