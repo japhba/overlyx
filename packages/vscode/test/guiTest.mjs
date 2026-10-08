@@ -413,6 +413,15 @@ try {
   await until(() => deckFrame.evaluate(() => (document.querySelector('.lyx-editor')?.textContent || '').includes('Title of the talk')), 15000, 'the title slide');
   log('File ▸ New File… ▸ Slide Deck created slides.tex and opened it as slides');
   await shot('08-new-slide-deck');
+  // Ctrl+B in slides is the editor's bold, not VS Code's Toggle Side Bar (overlyx.layoutDocument)
+  const sideBar = page.locator('#workbench\\.parts\\.sidebar');
+  if (!await sideBar.isVisible()) fail('the side bar should be open before the Ctrl+B check');
+  await deckFrame.locator('.lyx-editor .ol-box').first().click();
+  await sleep(400);
+  await page.keyboard.press('Control+b');
+  await sleep(1000);
+  if (!await sideBar.isVisible()) fail('Ctrl+B in the slide deck toggled VS Code\'s side bar');
+  log('Ctrl+B in the slide deck left the side bar open');
 
   log('ALL GUI CHECKS PASSED');
   await browser.close().catch(() => {});

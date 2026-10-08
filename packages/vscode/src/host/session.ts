@@ -22,6 +22,8 @@ import { markEditedSettings } from '@overlyx/core/tex/preamble.ts';
 export class DocSession {
   private headerLines: string[] = [];
   isChild = false;
+  /** slides, a poster or a page (layout mode: pages of placed objects) — as of the last parse */
+  layout = false;
   /** the exact text we last wrote into the TextDocument (to tell our own echoes from external edits) */
   private lastWritten: string | null = null;
   /** the last webview update applied; every snapshot pushed to the webview names it (SyncLedger) */
@@ -60,6 +62,7 @@ export class DocSession {
     this.synced = this.document.getText();
     const r = parseDocumentText(this.synced, this.ctx, this.relPath);
     this.isChild = r.fragment;
+    this.layout = r.doc.body[0]?.layout === 'OLPage';
     this.headerLines = r.doc.header.lines;
     const pmDoc = lyxToPm(r.doc);
     this.remember(documentModel(pmDoc, this.headerLines), r.doc);
