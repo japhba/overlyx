@@ -125,10 +125,19 @@ export interface CommonProps {
   step: string | null;
   /** how the object enters in OverLyX's presentation mode: fade, fly-left, fly-right, fly-up, fly-down, zoom, wipe */
   effect: string | null;
-  /** its name in the layers list */
+  /** its name in the objects list */
   name: string | null;
   lock: boolean;
   opacity: number | null;
+  /** the object's identity on its page (what connectors attach to: `from=` / `to=` of a shape) */
+  id: string | null;
+  /**
+   * a placeholder: on a master page, a box that is not drawn on the slides but gives the position
+   * and style of the slides' boxes with the same `ph` (which follow it while they are unchanged)
+   */
+  ph: string | null;
+  /** not drawn (the objects list's eye) */
+  hidden: boolean;
   /** keys this version does not know, kept as written */
   extra: string;
 }
@@ -157,6 +166,16 @@ export interface ShapeProps extends Placement, CommonProps {
   arrows: string | null;
   /** the path's own coordinate box: "minx miny width height" (like SVG's viewBox) */
   vb: string;
+  /**
+   * a connector's ends: the `id` of the object each end is attached to, optionally with the side
+   * (`box1.e`: the middle of its right edge; without a side the end lies on the object's outline
+   * on the line between the centres). The editor redraws the path when the objects move; TeX
+   * draws the path as written.
+   */
+  from: string | null;
+  to: string | null;
+  /** how a connector runs: straight (the default) or elbow (horizontal and vertical segments) */
+  conn: 'straight' | 'elbow' | null;
 }
 
 export interface ImageProps extends Placement, CommonProps {
@@ -172,8 +191,10 @@ export interface RawProps extends Placement, CommonProps {
 export interface GroupProps extends CommonProps {}
 
 export interface PageProps {
-  /** background colour */
+  /** background colour (none: the master's) */
   fill: string | null;
+  /** the master page whose objects are drawn behind this page's (a master page's: the one it builds on) */
+  master: string | null;
   /** beamer slide transition: fade, dissolve, wipe, push, cover, … */
   transition: string | null;
   name: string | null;
@@ -200,13 +221,13 @@ function takeKeys(keys: KeyList, known: Set<string>): { get(k: string): string |
 }
 
 const PLACE_KEYS = ['x', 'y', 'w', 'h', 'rotate'];
-const COMMON_KEYS = ['step', 'effect', 'name', 'lock', 'opacity'];
+const COMMON_KEYS = ['step', 'effect', 'name', 'lock', 'opacity', 'id', 'ph', 'hide'];
 const BOX_KEYS = new Set([...PLACE_KEYS, ...COMMON_KEYS, 'fill', 'draw', 'line', 'radius', 'pad', 'valign', 'shape', 'font', 'leading', 'color', 'grow', 'align']);
-const SHAPE_KEYS = new Set([...PLACE_KEYS, ...COMMON_KEYS, 'fill', 'draw', 'line', 'dash', 'arrows', 'vb']);
+const SHAPE_KEYS = new Set([...PLACE_KEYS, ...COMMON_KEYS, 'fill', 'draw', 'line', 'dash', 'arrows', 'vb', 'from', 'to', 'conn']);
 const IMAGE_KEYS = new Set([...PLACE_KEYS, ...COMMON_KEYS, 'crop']);
 const RAW_KEYS = new Set([...PLACE_KEYS, ...COMMON_KEYS]);
 const GROUP_KEYS = new Set(COMMON_KEYS);
-const PAGE_KEYS = new Set(['fill', 'transition', 'name']);
+const PAGE_KEYS = new Set(['fill', 'transition', 'name', 'master']);
 
 function placement(k: ReturnType<typeof takeKeys>): Placement {
   return {
@@ -219,7 +240,8 @@ function placement(k: ReturnType<typeof takeKeys>): Placement {
 function common(k: ReturnType<typeof takeKeys>): CommonProps {
   return {
     step: k.get('step') || null, effect: k.get('effect') || null, name: k.get('name') ?? null,
-    lock: k.has('lock') && k.get('lock') !== 'false', opacity: num(k.get('opacity')), extra: k.extra,
+    lock: k.has('lock') && k.get('lock') !== 'false', opacity: num(k.get('opacity')),
+    id: k.get('id') || null, ph: k.get('ph') || null, hidden: k.has('hide') && k.get('hide') !== 'false', extra: k.extra,
   };
 }
 
@@ -244,6 +266,7 @@ export function parseShapeKeys(s: string): ShapeProps {
     ...placement(k), ...common(k),
     fill: k.get('fill') || null, stroke: k.get('draw') || null, lw: toPt(k.get('line') ?? null),
     dash: k.get('dash') || null, arrows: k.get('arrows') || null, vb: k.get('vb') || '0 0 1 1',
+    from: k.get('from') || null, to: k.get('to') || null, conn: k.get('conn') === 'elbow' ? 'elbow' : k.get('conn') === 'straight' ? 'straight' : null,
   };
 }
 
@@ -265,7 +288,7 @@ export function parseGroupKeys(s: string): GroupProps {
 
 export function parsePageKeys(s: string, frame = 'plain'): PageProps {
   const k = takeKeys(parseKeys(s), PAGE_KEYS);
-  return { fill: k.get('fill') || null, transition: k.get('transition') || null, name: k.get('name') ?? null, frame, extra: k.extra };
+  return { fill: k.get('fill') || null, master: k.get('master') || null, transition: k.get('transition') || null, name: k.get('name') ?? null, frame, extra: k.extra };
 }
 
 const mm = (n: number) => fmtNum(n) + 'mm';
@@ -282,7 +305,10 @@ function commonKeys(p: CommonProps, out: KeyList): string {
   if (p.step) out.push(['step', p.step]);
   if (p.effect) out.push(['effect', p.effect]);
   if (p.name) out.push(['name', p.name]);
+  if (p.id) out.push(['id', p.id]);
+  if (p.ph) out.push(['ph', p.ph]);
   if (p.lock) out.push(['lock', null]);
+  if (p.hidden) out.push(['hide', null]);
   const s = writeKeys(out);
   return p.extra ? (s ? s + ',' + p.extra : p.extra) : s;
 }
@@ -312,6 +338,9 @@ export function writeShapeKeys(p: ShapeProps): string {
   if (p.stroke && p.lw !== null) out.push(['line', pt(p.lw)]);
   if (p.dash) out.push(['dash', p.dash]);
   if (p.arrows) out.push(['arrows', p.arrows]);
+  if (p.from) out.push(['from', p.from]);
+  if (p.to) out.push(['to', p.to]);
+  if (p.conn) out.push(['conn', p.conn]);
   return commonKeys(p, out);
 }
 
@@ -331,6 +360,7 @@ export function writeGroupKeys(p: GroupProps): string {
 
 export function writePageKeys(p: PageProps): string {
   const out: KeyList = [];
+  if (p.master) out.push(['master', p.master]);
   if (p.fill) out.push(['fill', p.fill]);
   if (p.transition) out.push(['transition', p.transition]);
   if (p.name) out.push(['name', p.name]);

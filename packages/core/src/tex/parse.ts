@@ -1472,6 +1472,8 @@ class BodyParser {
     if (env === 'minipage') { this.handleMinipage(s, ctx, st, 'Frameless'); return; }
     // a page of a layout document: a frame that holds positioned objects (layout/model.ts)
     if (env === 'frame' && ctx.owner === 'main' && this.tryLayoutPage(s, ctx)) return;
+    // a master page of a layout document (\begin{olmaster}{name=…}): drawn behind the frames that name it
+    if (env === 'olmaster' && ctx.owner === 'main') { this.layoutMaster(s, ctx); return; }
     // beamer's column environment, \begin{column}[T]{0.5\textwidth} … \end{column}: LyX's Column
     // paragraph (\column{…}) with the content after it, as for the command form
     if (env === 'column' && ctx.envLayout?.startsWith('Columns') && this.dc.styles.has('Column')) { this.handleColumnEnv(s, ctx, st); return; }
@@ -1534,6 +1536,18 @@ class BodyParser {
     ctx.pars.push({ layout: PAGE_LAYOUT, depth: 0, params: {}, items });
     ctx.cur = null;
     return true;
+  }
+
+  /** `\begin{olmaster}{keys} … \end{olmaster}` (the environment's name has been read) → a paragraph of layout OLPage of role master. */
+  private layoutMaster(s: Scanner, ctx: TextCtx): void {
+    const keys = s.readGroup() ?? '';
+    const inner = s.readUntilEnd('olmaster');
+    const items = this.parseLayoutObjects(new Scanner(inner), null)
+      .filter(it => !(it.kind === 'inset' && 'name' in it.inset && (it.inset.name === PAGE_PROPS_INSET || it.inset.name === NOTES_INSET)));
+    items.unshift({ kind: 'inset', font: {}, inset: { type: 'Leaf', name: PAGE_PROPS_INSET, arg: '', params: ['keys ' + keys, 'role master'] } });
+    this.endPar(ctx);
+    ctx.pars.push({ layout: PAGE_LAYOUT, depth: 0, params: {}, items });
+    ctx.cur = null;
   }
 
   /** The objects of a page (or of a group, until `\end{olgroup}`). */

@@ -122,8 +122,12 @@ describe('starter templates', () => {
     const text = readFileSync(join(TPL, 'deck', 'deck.tex'), 'utf8');
     expect(text).toMatch(/^% .*\n\\documentclass\[aspectratio=169\]\{beamer\}/);
     const doc = parseTex(text).doc;
-    const pages = doc.body.filter(p => p.layout === 'OLPage');
+    // the slides, and two master pages (\begin{olmaster}: Content and Section) before them
+    const isMaster = (p: (typeof doc.body)[number]) => p.items.some(it => it.kind === 'inset' && it.inset.type === 'Leaf' && it.inset.name === 'OLPageProps' && it.inset.params.includes('role master'));
+    const pages = doc.body.filter(p => p.layout === 'OLPage' && !isMaster(p));
     expect(pages.length).toBe(15);
+    expect(doc.body.filter(isMaster).length).toBe(2);
+    expect((text.match(/\\olpage\{master=/g) ?? []).length).toBeGreaterThanOrEqual(10);
     expect(doc.body.every(p => p.layout === 'OLPage')).toBe(true);
     // every slide has speaker notes (the guided tour) and a name for the slide rail
     for (const [i, p] of pages.entries()) {
@@ -176,7 +180,9 @@ describe('starter templates', () => {
         expect(olx.params).toMatchObject({ above: 11, bshort: 6.5, itemsep: 3 });
         const tex = readFileSync(join(dir, file), 'utf8');
         const check = layoutCheck(readFileSync(olxFile, 'utf8'), tex, tex);
-        expect(check.boxes.length).toBe((tex.match(/\\begin\{olbox\}/g) ?? []).length);
+        // (a master's boxes are drawn on the slides that use it, without a record: they are no slide's own)
+        const own = tex.replace(/\\begin\{olmaster\}[\s\S]*?\\end\{olmaster\}/g, '');
+        expect(check.boxes.length).toBe((own.match(/\\begin\{olbox\}/g) ?? []).length);
         expect(check.boxes.every(b => b.fresh && b.natural >= 0 && b.inner > 0)).toBe(true);
         if (id === 'poster') expect(olx.boxes.length).toBe(check.boxes.length);
         // no text runs out of its box in the PDF (the editor's mark: a quarter of a line, at least 2 pt)

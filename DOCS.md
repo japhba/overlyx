@@ -286,7 +286,8 @@ blend.
   *Example: slide deck* (`example-deck`, a 16:9 canvas deck in Layout mode — a 15-slide talk on why
   the sky is blue in one palette and grid: title and section slides drawn from shapes, a formula
   built up step by step, a diagram, a pgfplots plot with callouts, a cropped picture, a table, a
-  timeline, transitions — whose speaker notes are a guided tour of how each slide was made),
+  timeline, transitions, two masters (content slides, section dividers) — whose speaker notes are a
+  guided tour of how each slide was made),
   *Example: poster* (`example-poster`, an A0 poster in Layout mode that explains how to edit one) and
   *Example: paper* (`example-paper`, an article with equations and cross-references, a theorem and
   proof, a figure, a table and natbib citations from `refs.bib`); the account's name is the author.
@@ -389,8 +390,11 @@ blend.
     `\begin{olbox}{x=20mm,y=30mm,w=100mm,h=40mm,fill=paleblue,radius=3mm,pad=4mm,font=25pt} … \end{olbox}`,
     `\olshape{x=…,vb=0 0 40 30,fill=red!20,draw=black,line=0.8pt,arrows=-Stealth}{M 0 0 L 40 0 …}`,
     `\olimage{x=…,crop=0.1 0 0 0.2}{figures/plot.pdf}`, `\begin{olgroup}{step=2-} … \end{olgroup}`,
-    `\begin{olraw}{x=…} …LaTeX… \end{olraw}`, `\olpage{fill=…,transition=fade}` and `\note{…}` (speaker
-    notes). Geometry is millimetres from the page's top left, `rotate` TikZ's (counter-clockwise,
+    `\begin{olraw}{x=…} …LaTeX… \end{olraw}`, `\olpage{fill=…,transition=fade,master=Content}` and
+    `\note{…}` (speaker notes); master pages are `\begin{olmaster}{name=Content,fill=…} … \end{olmaster}`
+    before the frames (see *Masters*). Every object may have `id=` (what connectors attach to), `ph=`
+    (a placeholder of its master), `hide` (not drawn: the objects list's eye) and a shape `from=` /
+    `to=` / `conn=elbow` (a connector). Geometry is millimetres from the page's top left, `rotate` TikZ's (counter-clockwise,
     about the centre); colours are xcolor's (`jblue!25`, the document's own `\definecolor`s,
     `[HTML]D62728` for a picked colour); keys a version does not know are kept. In the document model a
     page is a paragraph of layout `OLPage` holding object insets (as LyX keeps a box in a paragraph),
@@ -420,7 +424,8 @@ blend.
     (disabled position fields and box style when nothing applies), so the page never jumps under the
     pointer. A second click (or a double click, or typing) edits a text box, Esc returns
     to the box. Moves and resizes snap to the page's edges and centre and the other objects' edges and
-    centres, with guides; arrow keys nudge 1 mm (Shift 10, Alt 0.1). Objects dropped on another page
+    centres (and the master's objects, the document's guides while shown, the grid while snapping to
+    it), with guides; arrow keys nudge 1 mm (Shift 10, Alt 0.1). Objects dropped on another page
     move there. Live previews are transactions outside the undo history; the result is one undoable
     step (and collaborators see objects move live). Everything on a page is sized in CSS through
     `--ol-mm` / `--ol-pt` (never CSS zoom or transforms on the editor). A document opens with its whole
@@ -489,7 +494,8 @@ blend.
     mutation filter, the layout picker, the clipboard, `undoStep`).
     **New slide layouts** (`editor/layout/slidelayouts.ts`): Title slide, Title and content, Section
     header, Two content, Comparison, Title only, Big statement, Blank — in the deck's own style, read off
-    its pages since a beamer file has no masters (`deckStyle`: the title box most content pages share,
+    its pages (`deckStyle`; a deck with masters offers those first, these below them as *Layouts without
+    a master*: the title box most content pages share,
     the largest box below it, the most common background, the objects repeated on at least 60 % of the
     content pages — footer bars, logos — which come along; the Title slide is the first page with its
     text taken out). New boxes are empty and named (`name=Title`, `Text`, `Subtitle`, …): the editor
@@ -497,6 +503,58 @@ blend.
     the PDF, a thumbnail or the presentation), and text typed into an empty title starts with the
     deck's title formatting (the layout plugin re-sets the stored marks, also after the box grows).
     An empty page is written with `\olpage{}`, so it is read back as a page, not as a linear frame.
+  * **Masters** (`editor/layout/masters.ts`; PowerPoint's slide master and layouts, the way beamer
+    does its background templates — defined once, drawn on every frame that uses it): a master page is
+    a page of role `master`, written `\begin{olmaster}{name=Content,fill=paper,master=Base} … \end{olmaster}`
+    at the top of the body (the managed block's `olmaster` keeps its objects in a token list, under its
+    name; `\olpage{master=Content}` draws the chain behind the frame's own objects: the base's first, the
+    nearest background unless the frame has one, the placeholders not, no `.olx` records). A master's
+    **placeholders** are its text boxes with a `ph=` (`title`, `body`, …): the slides' boxes with the same
+    `ph` take their frame and style from it, and **follow** it when it changes in every attribute they
+    still share with the old placeholder (`followMasters`, an appendTransaction of the layout plugin —
+    not for collaborators' changes, undo or live previews; what was changed on a slide stays). Every
+    slide box is written with its own geometry, so the file needs no lookup. In the editor a master's
+    objects are a widget at the start of each page that uses one (`MasterLayers`: a copy of the master
+    page's DOM, refreshed on its mutations, no pointer target), so thumbnails, the sorter and the
+    presentation copy them along (`present.ts` skips them when it numbers the objects' steps).
+    **Masters** in the rail's header (and *Edit masters* in the Page palette) switch the canvas and the
+    rail to the master pages (`setMasterView`: `.ol-master-view`; slides are hidden then, masters
+    otherwise; `L.pages(doc, 'masters')`): new / duplicate / rename / delete masters, *Builds on* (a
+    base), *Use for every slide*. On a slide: *New slide* offers the masters (their thumbnails; a slide
+    gets the placeholders empty, the caret in the first), the menu's *Master ▸* applies one (named boxes
+    become its placeholders, missing ones are added, objects equal to the masters' are dropped:
+    `applyMaster`), *Reset slide to its master*, *Make a master of this slide* (`masterFromSlide`: named
+    boxes — else the largest type at the top and the largest box below — become placeholders, the rest
+    the master's objects), and an object's *Move to the master* (off every slide of it that has the same
+    object). The example deck's dividers and content slides use two masters.
+  * **Connectors** (`editor/layout/connectors.ts`): the line and arrow tools show an object's five
+    connection points (the sides' middles, the centre) under the pointer; a line started or ended on one
+    is attached (`from=o1.e` — a side; `to=o2` — the centre: the end lies on the outline, flattened from
+    the shape's own path or an ellipse, towards the other end). `conn=elbow` (Arrow tips palette) runs it
+    horizontally and vertically. `followConnectors` (appendTransaction, live previews included without
+    history) redraws a page's connectors when its objects change, lets go of an end whose object went,
+    and keeps ids unique; copies (duplicate, paste, the Space stamp, Copy to every page: `copyObjects`)
+    get new ids, and a connector copied with its objects is attached to the copies. A selected line shows
+    its two ends (filled: attached) to drag onto another point or off; a connector dragged or nudged
+    without its objects lets go of them. The file holds the path as drawn: TeX ignores the keys.
+  * **Objects list** (`editor/layout/objects.ts`, Inkscape's Objects dialog / PowerPoint's Selection
+    pane; the layers button on the Layout toolbar, remembered as `ol.objects`): the shown page's objects
+    top-most first, groups unfolded; a click selects (Shift / Ctrl adds), a double click renames
+    (`name=`), the eye hides (`hide`: not drawn in the editor, the thumbnails, the presentation or the
+    PDF), the lock locks, a drag reorders among neighbours; the master's objects are listed below,
+    greyed. It lies over the scroller's right edge (`--ol-objects-w`).
+  * **Guides, grid, rulers** (`editor/layout/guides.ts`): rulers along the canvas's top and left (mm of
+    the shown page; hidden in a pane narrower than 480 px) — drag a guide out of one, drag it to move,
+    back onto the ruler or off the page to remove, double-click to type its place. Guides and the grid's
+    spacing are the document's (`overlyx_guides` = `x20 y45.5`, `overlyx_grid` in the settings line, set
+    through `api.setHeader`); showing the grid / guides / rulers and snapping to the grid are each
+    reader's (`ol.canvas.*`; the *Grid and guides* palette).
+  * **SVG as shapes** (`editor/layout/svgimport.ts`): SVG pasted onto a page (markup or a file: Inkscape,
+    Illustrator, matplotlib, draw.io) becomes editable shapes and text boxes in a group — transforms
+    applied to the points, CSS (style attributes, `<style>` sheets) resolved, `use`, markers as arrow
+    tips, dashes, same-style small shapes merged (a scatter plot stays a few objects), at most 1500;
+    gradients, clipping, filters and embedded images are approximated or left out with a notice. An SVG
+    picture already on a page has *Convert to shapes* in its menu (drawn into its frame, in its place).
   * **Animations and presentation** (`editor/layout/present.ts`): an object's *step* is a beamer
     overlay specification (`2-`, `2-4`, `1,3-`): the PDF gets one page per step, as beamer does, and
     the badge on the canvas shows it; *Animation* picks the step ("appear next") and an entrance for
@@ -1457,6 +1515,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/selection-inserts.spec.ts   # comments / floats / captions keep the selection, pasted blocks, Enter in a caption, Insert ▸ Graphics on a layout page, live authors, TeX pane after settings, tracked tables, formula notice, tablet reflow
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/slidesorter.spec.ts   # the slide sorter: selection, dragging several, duplicate / delete / undo, keys, transitions, size, the saved order
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sliderail.spec.ts   # the slide rail: thumbnails, new slides in the deck's style, drag to reorder, its menu, undo, the saved file
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/masters.spec.ts e2e/drawing.spec.ts   # masters (view, placeholders following, a master of a slide); connectors, the objects list, guides / grid, SVG as shapes
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layout.spec.ts   # layout documents: new deck, text box + formula, move / resize / undo, toolbar, presentation steps, zoom, text overlays, a linear beamer deck presented; the font size box
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
 npx vitest run tests/docworker.test.ts   # the document workers write the bytes the main thread writes; saves in order; a dead worker loses nothing

@@ -23,6 +23,18 @@ function ownStyle(dom: HTMLElement, m: MutationRecord | { type: 'selection'; tar
   return m.type === 'attributes' && (m.target === dom || !(m.target as HTMLElement).closest?.('.ol-box-content'));
 }
 
+/**
+ * What every object's element says of it: hidden (the objects list's eye: not drawn), locked (not
+ * picked on the canvas, no move cursor), a placeholder (`data-ph`: a master's, left out where the
+ * master is drawn on its slides), its id (connectors).
+ */
+function markCommon(dom: HTMLElement, a: Record<string, any>): void {
+  dom.classList.toggle('ol-hidden-obj', !!a.hidden);
+  dom.classList.toggle('ol-locked', !!a.lock);
+  if (a.ph) dom.dataset.ph = a.ph; else delete dom.dataset.ph;
+  if (a.id) dom.dataset.olId = a.id; else delete dom.dataset.olId;
+}
+
 /* ------------------------------------------------------------------ page */
 
 export class PageView implements NodeView {
@@ -72,7 +84,7 @@ export class PageView implements NodeView {
     this.view.focus();
   }
 
-  private shown = { fill: null as string | null, transition: null as string | null, label: '' };
+  private shown = { fill: null as string | null, transition: null as string | null, label: '', role: '' };
 
   render(): void {
     const a = this.node.attrs;
@@ -81,11 +93,15 @@ export class PageView implements NodeView {
     if (fill !== this.shown.fill) { this.contentDOM.style.background = fill; this.shown.fill = fill; }
     if ((a.transition ?? '') !== this.shown.transition) { this.dom.dataset.transition = a.transition ?? ''; this.shown.transition = a.transition ?? ''; }
     this.dom.classList.toggle('ol-has-notes', this.node.lastChild?.type.name === 'ol_notes');
+    // a master page (masters.ts) is shown only in the master view, numbered among the masters
+    const master = a.role === 'master';
+    if ((a.role ?? 'page') !== this.shown.role) { this.dom.dataset.role = a.role ?? 'page'; this.shown.role = a.role ?? 'page'; }
     const pos = this.getPos();
     let index = 0;
-    if (pos !== undefined) this.view.state.doc.forEach((c, off) => { if (off < pos && c.type.name === 'ol_page') index++; });
+    if (pos !== undefined) this.view.state.doc.forEach((c, off) => { if (off < pos && c.type.name === 'ol_page' && (c.attrs.role === 'master') === master) index++; });
     const name = a.name ? ` — ${a.name}` : '';
-    const label = `${index + 1}${name}`, title = `Page ${index + 1}${name}${a.transition ? ` · transition: ${a.transition}` : ''}`;
+    const label = master ? `M${index + 1}` : `${index + 1}${name}`;
+    const title = master ? `Master ${index + 1}${name}${a.master ? ` · builds on ${a.master}` : ''}` : `Page ${index + 1}${name}${a.master ? ` · master: ${a.master}` : ''}${a.transition ? ` · transition: ${a.transition}` : ''}`;
     if (label + title !== this.shown.label) { this.label.textContent = label; this.label.title = title; this.shown.label = label + title; }
   }
 
@@ -132,7 +148,8 @@ export class BoxView implements NodeView {
 
   private syncPrompt(): void {
     const a = this.node.attrs;
-    const text = a.name && boxIsEmpty(this.node) ? BOX_PROMPTS[a.name] : undefined;
+    // a named box of a new slide, or a placeholder (masters.ts): what to click for
+    const text = boxIsEmpty(this.node) ? (a.name && BOX_PROMPTS[a.name]) || (a.ph ? 'Click to add text' : undefined) : undefined;
     this.prompt.hidden = !text;
     if (!text) return;
     if (this.prompt.textContent !== text) this.prompt.textContent = text;
@@ -165,7 +182,7 @@ export class BoxView implements NodeView {
     this.dom.style.opacity = a.opacity !== null && a.opacity !== undefined ? String(a.opacity) : '';
     this.dom.dataset.step = a.step ?? '';
     this.dom.classList.toggle('ol-grow', !!a.grow);
-    this.dom.classList.toggle('ol-locked', !!a.lock);
+    markCommon(this.dom, a);
     this.syncPrompt();
   }
 
@@ -234,6 +251,7 @@ export class ShapeView implements NodeView {
     this.dom.classList.toggle('ol-invisible', !fill && !stroke);
     this.dom.style.opacity = a.opacity !== null && a.opacity !== undefined ? String(a.opacity) : '';
     this.dom.dataset.step = a.step ?? '';
+    markCommon(this.dom, a);
   }
 
   /** TikZ arrow tips (->, <-, <->, -Stealth, -Latex, …) as SVG markers */
@@ -333,6 +351,7 @@ export class ImageView implements NodeView {
     }
     this.dom.style.opacity = a.opacity !== null && a.opacity !== undefined ? String(a.opacity) : '';
     this.dom.dataset.step = a.step ?? '';
+    markCommon(this.dom, a);
   }
 
   update(node: PMNode): boolean {
@@ -356,11 +375,13 @@ export class GroupView implements NodeView {
     this.dom.className = 'ol-group';
     this.contentDOM = this.dom;
     this.dom.dataset.step = node.attrs.step ?? '';
+    markCommon(this.dom, node.attrs);
   }
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
     this.dom.dataset.step = node.attrs.step ?? '';
+    markCommon(this.dom, node.attrs);
     return true;
   }
   ignoreMutation(m: MutationRecord | { type: 'selection'; target: Node }): boolean {
@@ -397,6 +418,7 @@ export class RawView implements NodeView {
     if (!placed) return;
     placeElement(this.dom, boxOf(this.node));
     this.dom.dataset.step = a.step ?? '';
+    markCommon(this.dom, a);
     const seq = ++this.seq;
     const b = boxOf(this.node);
     this.dom.classList.add('ol-pending');
@@ -413,7 +435,7 @@ export class RawView implements NodeView {
     const old = this.node.attrs;
     this.node = node;
     if (old.latex !== node.attrs.latex || old.w !== node.attrs.w || old.h !== node.attrs.h || old.placed !== node.attrs.placed) this.render();
-    else if (old !== node.attrs) { placeElement(this.dom, boxOf(node)); this.dom.dataset.step = node.attrs.step ?? ''; }
+    else if (old !== node.attrs) { placeElement(this.dom, boxOf(node)); this.dom.dataset.step = node.attrs.step ?? ''; markCommon(this.dom, node.attrs); }
     return true;
   }
 

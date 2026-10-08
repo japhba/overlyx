@@ -14,6 +14,9 @@ import { layoutKey, selectObjects, selectedObjects, setTool, layoutControllerOf 
 import { startPresentation } from './present';
 import { openRawEditor } from './rawedit';
 import { imageExt, uploadBaseName, uploadUnique } from '../imagepaste';
+import { moveToMaster } from './masters';
+import { imageToShapes } from './images';
+import { copyObjects } from './connectors';
 import { toDocRel, viewDocDir, viewProject, editorContext } from '../context';
 
 /** Another picture in the same frame (its position, size and rotation stay; the crop is reset). */
@@ -92,16 +95,22 @@ export function layoutContextMenu(view: EditorView, ev: MouseEvent): boolean {
       { label: 'Copy to every page', action: run(() => {
         // the same objects at the same place on all the other pages (a logo, a footer, a page frame)
         const tr = view.state.tr;
-        const here = L.pageAt(view.state.doc, positions[0])?.pos;
-        for (const p of [...L.pages(view.state.doc)].reverse()) {
+        const herePage = L.pageAt(view.state.doc, positions[0]);
+        const here = herePage?.pos;
+        // (the other slides — or, in the master view, the other masters)
+        for (const p of [...L.pages(view.state.doc, L.isMasterPage(herePage?.node) ? 'masters' : 'slides')].reverse()) {
           if (p.pos === here) continue;
           let at = p.pos + p.node.nodeSize - 1;
           if (p.node.lastChild?.type.name === 'ol_notes') at -= p.node.lastChild.nodeSize;
-          tr.insert(at, objs.map(o => o.node));
+          tr.insert(at, copyObjects(objs.map(o => o.node), p.node));
         }
         view.dispatch(selectObjects(tr, positions.map(q => tr.mapping.map(q, -1))));
       }) },
+      // a slide's object onto its master: drawn on every slide of that master (masters.ts)
+      ...(pageNodeOf(view, positions[0])?.attrs.master && !L.isMasterPage(pageNodeOf(view, positions[0])) ? [{ label: `Move to the master (${pageNodeOf(view, positions[0])!.attrs.master})`, action: run(() => { const tr = moveToMaster(view.state, positions); if (tr) view.dispatch(tr.setMeta(layoutKey, { sel: [] })); }) } as MenuItem] : []),
       ...(kind === 'ol_image' ? [{ label: 'Replace image…', icon: 'image', action: () => replaceImage(view, one!.pos) } as MenuItem] : []),
+      // an SVG picture as editable shapes (images.ts imageToShapes)
+      ...(kind === 'ol_image' && /\.svg$/i.test(String(one!.node.attrs.src ?? '')) ? [{ label: 'Convert to shapes', action: () => { void imageToShapes(view, one!.pos); } } as MenuItem] : []),
       { label: locked ? 'Unlock' : 'Lock in place', action: run(() => { const tr = view.state.tr; for (const p of positions) L.setAttrs(tr, p, { lock: !locked }); view.dispatch(selectObjects(tr, positions)); }) },
       { label: 'Animation', sub: stepItems },
     ];
@@ -135,4 +144,8 @@ export function layoutContextMenu(view: EditorView, ev: MouseEvent): boolean {
   ];
   showContextMenu(ev.clientX, ev.clientY, items);
   return true;
+}
+
+function pageNodeOf(view: EditorView, pos: number | undefined): import('prosemirror-model').Node | null {
+  return pos === undefined ? null : L.pageAt(view.state.doc, pos)?.node ?? null;
 }

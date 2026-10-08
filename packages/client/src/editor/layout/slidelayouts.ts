@@ -13,7 +13,7 @@
 import type { Mark, Node as PMNode } from 'prosemirror-model';
 import type { EditorState, Transaction } from 'prosemirror-state';
 import { schema } from '@overlyx/core';
-import { pages, defaultParagraph, makeShape, type Attrs } from './commands';
+import { pages, defaultParagraph, makeShape, pageFill, type Attrs } from './commands';
 
 export type SlideLayout = 'title' | 'content' | 'section' | 'two' | 'comparison' | 'titleonly' | 'statement' | 'blank';
 
@@ -128,7 +128,8 @@ export function deckStyle(doc: PMNode, page: { w: number; h: number }, basePt = 
 
   // the background and the repeated objects: on at least 60 % of the content pages (two at least)
   const enough = (n: number) => n >= 2 && n >= content.length * 0.6;
-  const fills = mode(content.map(p => ({ key: String(p.attrs.fill ?? ''), value: p.attrs.fill as string | null })));
+  // (a slide of a master shows the master's background)
+  const fills = mode(content.map(p => { const f = pageFill(doc, p); return { key: String(f ?? ''), value: f }; }));
   const fill = fills && enough(fills.count) ? fills.value : null;
   const seen = new Map<string, { node: PMNode; pages: number; order: number }>();
   content.forEach(p => {

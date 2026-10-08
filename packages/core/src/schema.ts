@@ -412,18 +412,25 @@ const nodes: Record<string, NodeSpec> = {
 
 /** attribute defaults of positioned objects (layout/model.ts; geometry in mm, rotation in degrees CCW) */
 const placeAttrs = { x: { default: 0 }, y: { default: 0 }, w: { default: 40 }, h: { default: 20 }, rot: { default: 0 } };
-const commonAttrs = { step: { default: null }, effect: { default: null }, name: { default: null }, lock: { default: false }, opacity: { default: null }, extra: { default: '' } };
+const commonAttrs = {
+  step: { default: null }, effect: { default: null }, name: { default: null }, lock: { default: false }, opacity: { default: null },
+  id: { default: null }, ph: { default: null }, hidden: { default: false }, extra: { default: '' },
+};
 /** An object's attributes travel through the clipboard as JSON (`data-ol`). */
 const olDOM = (tag: string, cls: string, hole: boolean) => (node: import('prosemirror-model').Node): DOMOutputSpec =>
   hole ? [tag, { class: cls, 'data-ol': JSON.stringify(node.attrs) }, 0] : [tag, { class: cls, 'data-ol': JSON.stringify(node.attrs) }];
 const olParse = (tag: string, cls: string) => [{ tag: `${tag}.${cls}`, getAttrs: (d: HTMLElement) => { try { const a = JSON.parse(d.getAttribute('data-ol') ?? '{}'); return typeof a === 'object' && a ? a : {}; } catch { return {}; } } }];
 
 export const LAYOUT_NODES: Record<string, NodeSpec> = {
-  /** a fixed-size page (a beamer frame): its objects in drawing order, then the speaker notes */
+  /**
+   * a fixed-size page (a beamer frame): its objects in drawing order, then the speaker notes. A page
+   * of role 'master' is no frame but a master page (\begin{olmaster}): pages that name it in `master`
+   * get its objects drawn behind theirs.
+   */
   ol_page: {
     content: 'ol_object* ol_notes?',
     isolating: true,
-    attrs: { fill: { default: null }, transition: { default: null }, name: { default: null }, frame: { default: 'plain' }, extra: { default: '' } },
+    attrs: { fill: { default: null }, master: { default: null }, role: { default: 'page' }, transition: { default: null }, name: { default: null }, frame: { default: 'plain' }, extra: { default: '' } },
     toDOM: olDOM('section', 'ol-page', true),
     parseDOM: olParse('section', 'ol-page'),
   },
@@ -441,7 +448,10 @@ export const LAYOUT_NODES: Record<string, NodeSpec> = {
   /** a vector shape: SVG path data (absolute M / L / C / Z) in its own box `vb`, stretched to w × h */
   ol_shape: {
     group: 'ol_object', atom: true, selectable: true,
-    attrs: { ...placeAttrs, ...commonAttrs, d: { default: '' }, vb: { default: '0 0 100 100' }, fill: { default: null }, stroke: { default: null }, lw: { default: null }, dash: { default: null }, arrows: { default: null } },
+    attrs: {
+      ...placeAttrs, ...commonAttrs, d: { default: '' }, vb: { default: '0 0 100 100' }, fill: { default: null }, stroke: { default: null }, lw: { default: null }, dash: { default: null }, arrows: { default: null },
+      from: { default: null }, to: { default: null }, conn: { default: null },
+    },
     toDOM: olDOM('div', 'ol-shape', false),
     parseDOM: olParse('div', 'ol-shape'),
   },

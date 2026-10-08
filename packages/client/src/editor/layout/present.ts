@@ -93,7 +93,8 @@ function layoutSlide(view: EditorView, node: PMNode, pos: number): Slide {
   let notes = '';
   node.forEach(c => { if (c.type.name === 'ol_notes') notes = c.textContent; });
   // the objects' steps and effects from the document (the copy's data attributes may lag)
-  const objs = [...el.querySelectorAll<HTMLElement>('.ol-obj, .ol-group')];
+  // (the master's objects drawn on the page, masters.ts, are not the page's own)
+  const objs = [...el.querySelectorAll<HTMLElement>('.ol-obj, .ol-group')].filter(e => !e.closest('.ol-master-layer'));
   let i = 0;
   const walk = (n: PMNode) => n.forEach(c => {
     if (c.type.name === 'ol_notes') return;

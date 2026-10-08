@@ -19,6 +19,7 @@ import { showContextMenu, closeContextMenu, type MenuItem } from '../contextmenu
 import { MOD } from '../clipmenu';
 import { startPresentation, stepCount } from './present';
 import { SLIDE_LAYOUTS, insertSlide, type SlideLayout } from './slidelayouts';
+import { masterPages, slideFromMaster, applyMaster, asKind } from './masters';
 import { div, button, drawPage, scaleThumb, layoutPicker, undoStep, getSlideClipboard, setSlideClipboard, pageOfMutation, livePos } from './slidekit';
 
 export interface SorterHost {
@@ -294,7 +295,7 @@ export class SlideSorter {
     const idx = this.indices();
     const after = idx.length ? this.posOf(idx[idx.length - 1]) : null;
     this.apply(() => {
-      const { tr, first } = L.insertPagesAfter(this.view.state, after, nodes);
+      const { tr, first } = L.insertPagesAfter(this.view.state, after, asKind(nodes, false, this.view.state.doc));
       undoStep(this.view);
       this.view.dispatch(tr);
       return { first, count: nodes.length };
@@ -308,12 +309,22 @@ export class SlideSorter {
     this.apply(() => { undoStep(this.view); this.view.dispatch(r.tr); return { first: r.first, count }; });
   }
 
-  newSlide(layout: SlideLayout): void {
+  newSlide(layout: SlideLayout | { master: string }): void {
     const idx = this.indices();
     const after = idx.length ? this.posOf(idx[idx.length - 1]) : null;
-    const { tr } = insertSlide(this.view.state, after, layout, this.host.page(), this.host.basePt());
+    const { tr } = (typeof layout === 'object' ? slideFromMaster(this.view.state, after, layout.master) : null)
+      ?? insertSlide(this.view.state, after, typeof layout === 'object' ? 'content' : layout, this.host.page(), this.host.basePt());
     const first = idx.length ? idx[idx.length - 1] + 1 : this.cards.length;
     this.apply(() => { undoStep(this.view); this.view.dispatch(tr); return { first, count: 1 }; });
+  }
+
+  /** the selected slides use master `name` (null: none) */
+  private setMaster(name: string | null): void {
+    const tr = this.view.state.tr;
+    for (const pos of this.positions()) applyMaster(tr, tr.mapping.map(pos), name);
+    undoStep(this.view);
+    this.view.dispatch(tr);
+    this.refresh();
   }
 
   private setTransition(t: string): void {
@@ -338,15 +349,20 @@ export class SlideSorter {
 
   private toggleLayouts(): void {
     if (this.picker) { this.picker(); return; }
-    this.picker = layoutPicker(this.el, this.add, l => this.newSlide(l), () => { this.picker = null; this.grid.focus({ preventScroll: true }); });
+    const masters = masterPages(this.view.state.doc).map(m => ({ name: m.node.attrs.name as string, wrap: this.view.nodeDOM(m.pos) as HTMLElement | null }));
+    this.picker = layoutPicker(this.el, this.add, l => this.newSlide(l), () => { this.picker = null; this.grid.focus({ preventScroll: true }); },
+      { view: this.view, page: this.host.page(), masters, pickMaster: m => this.newSlide({ master: m }) });
   }
 
   private menu(): MenuItem[] {
     const n = this.sel.size, total = this.cards.length, what = n > 1 ? `${n} slides` : 'slide';
     const ts = new Set(this.indices().map(i => (this.cards[i].node.attrs.transition as string | null) ?? ''));
+    const ms = new Set(this.indices().map(i => (this.cards[i].node.attrs.master as string | null) ?? null));
+    const masters = masterPages(this.view.state.doc).map(m => m.node.attrs.name as string);
     return [
       { label: 'Open in the canvas', shortcut: 'Enter', action: () => this.close(this.focusIndex()) },
-      { label: 'New slide', sub: SLIDE_LAYOUTS.map(l => ({ label: l.label, action: () => this.newSlide(l.id) })) },
+      { label: 'New slide', sub: [...masters.map(m => ({ label: m, action: () => this.newSlide({ master: m }) })), ...(masters.length ? [{ sep: true } as MenuItem] : []), ...SLIDE_LAYOUTS.map(l => ({ label: l.label, action: () => this.newSlide(l.id) }))] },
+      ...(masters.length ? [{ label: 'Master', sub: [null, ...masters].map(m => ({ label: m ?? 'None', checked: ms.size === 1 && ms.has(m), action: () => this.setMaster(m) })) } as MenuItem] : []),
       { label: `Duplicate ${what}`, shortcut: `${MOD}+D`, action: () => this.duplicate() },
       { label: `Delete ${what}`, shortcut: 'Del', icon: 'delete', disabled: n >= total, action: () => this.remove() },
       { sep: true },

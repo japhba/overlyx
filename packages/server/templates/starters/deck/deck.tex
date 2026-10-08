@@ -46,10 +46,12 @@
   line/.store in=\ol@line,radius/.store in=\ol@radius,pad/.store in=\ol@pad,valign/.store in=\ol@valign,shape/.store in=\ol@shape,
   font/.store in=\ol@font,leading/.store in=\ol@leading,opacity/.store in=\ol@opacity,step/.store in=\ol@step,align/.store in=\ol@align,
   vb/.store in=\ol@vb,crop/.store in=\ol@crop,dash/.store in=\ol@dash,arrows/.store in=\ol@arrows,
-  transition/.store in=\ol@trans,.unknown/.code={}}
+  transition/.store in=\ol@trans,name/.store in=\ol@name,master/.store in=\ol@master,ph/.store in=\ol@ph,hide/.code={\def\ol@hide{1}},
+  .unknown/.code={}}
 \def\ol@reset{\def\ol@x{0mm}\def\ol@y{0mm}\def\ol@w{10mm}\def\ol@h{10mm}\def\ol@rot{0}\def\ol@fill{}\def\ol@draw{}\def\ol@color{}%
   \def\ol@line{0.4pt}\def\ol@radius{0pt}\def\ol@pad{0pt}\def\ol@valign{t}\def\ol@shape{rect}\def\ol@font{}\def\ol@leading{1.2}%
-  \def\ol@opacity{1}\def\ol@step{}\def\ol@align{left}\def\ol@vb{0 0 1 1}\def\ol@crop{0 0 0 0}\def\ol@dash{}\def\ol@arrows{}\def\ol@trans{}}
+  \def\ol@opacity{1}\def\ol@step{}\def\ol@align{left}\def\ol@vb{0 0 1 1}\def\ol@crop{0 0 0 0}\def\ol@dash{}\def\ol@arrows{}\def\ol@trans{}%
+  \def\ol@name{}\def\ol@master{}\def\ol@ph{}\def\ol@hide{}}
 \def\ol@setcolor#1#2{\def#1{}\if\relax\detokenize{#2}\relax\else\ol@@setcolor#1#2\relax\fi}
 \def\ol@@setcolor#1#2#3\relax{\ifx[#2\ol@@@setcolor#1[#3\relax\else\def#1{#2#3}\fi}
 \def\ol@@@setcolor#1[#2]#3\relax{\definecolor{ol\expandafter\@gobble\string#1}{#2}{#3}\edef#1{ol\expandafter\@gobble\string#1}}
@@ -59,7 +61,11 @@
   \ifx\ol@dash\empty\else\tikzset{ol@frame/.append style/.expanded={\ol@dash}}\fi
   \ifx\ol@arrows\empty\else\tikzset{ol@frame/.append style/.expanded={\ol@arrows}}\fi}
 \def\ol@only#1{\only<#1>}
-\def\ol@place#1{\ifx\ol@step\empty#1\else\edef\ol@tmp{\noexpand\ol@only{\ol@step}}\ol@tmp{#1}\fi\ignorespaces}
+% an object is drawn unless it is hidden, or a placeholder of a master page (the slides have their own boxes there)
+\newif\ifol@inmaster\newif\ifol@show
+\def\ol@drawn{\ol@showtrue\ifx\ol@hide\empty\else\ol@showfalse\fi\ifol@inmaster\ifx\ol@ph\empty\else\ol@showfalse\fi\fi
+  \ifol@show\expandafter\@firstoftwo\else\expandafter\@secondoftwo\fi}
+\def\ol@place#1{\ol@drawn{\ifx\ol@step\empty#1\else\edef\ol@tmp{\noexpand\ol@only{\ol@step}}\ol@tmp{#1}\fi}{}\ignorespaces}
 \def\ol@at{\path ([xshift=\ol@x+\ol@w/2,yshift=-\ol@y-\ol@h/2]current page.north west) coordinate (ol@c);}
 \newsavebox\ol@box
 \def\ol@boxbegin{\pgfmathsetlengthmacro\ol@iw{\ol@w-2*(\ol@pad)}\pgfmathsetlengthmacro\ol@ih{\ol@h-2*(\ol@pad)}%
@@ -81,9 +87,9 @@
 \def\ol@tboxbegin{\pgfmathsetlengthmacro\ol@iw{\ol@w-2*(\ol@pad)}\pgfmathsetlengthmacro\ol@ih{\ol@h-2*(\ol@pad)}%
   \begin{lrbox}{\ol@box}\begin{minipage}[t]{\ol@iw}}
 \def\ol@tboxend{\xdef\ol@bs{\the\dimexpr\baselineskip\relax}\par\end{minipage}\end{lrbox}%
-  \immediate\write\ol@olx{olx box \ifcsname c@framenumber\endcsname\the\c@framenumber\else\the\c@page\fi\space
+  \ifol@inmaster\else\immediate\write\ol@olx{olx box \ifcsname c@framenumber\endcsname\the\c@framenumber\else\the\c@page\fi\space
   \ifcsname beamer@slideinframe\endcsname\the\beamer@slideinframe\else1\fi\space x=\ol@x\space y=\ol@y\space w=\ol@w\space h=\ol@h\space
-  natural=\the\dimexpr\ht\ol@box+\dp\ol@box\relax\space inner=\ol@ih\space baselineskip=\ol@bs}%
+  natural=\the\dimexpr\ht\ol@box+\dp\ol@box\relax\space inner=\ol@ih\space baselineskip=\ol@bs}\fi
   \sbox\ol@box{\begin{minipage}[c][\ol@ih][\ol@valign]{\ol@iw}\usebox\ol@box\end{minipage}}}
 \newenvironment{olbox}[1]{\ol@reset\pgfqkeys{/ol}{#1}\ol@tboxbegin
   \ifx\ol@font\empty\else\pgfmathsetlengthmacro\ol@lead{\ol@leading*(\ol@font)}\fontsize{\ol@font}{\ol@lead}\selectfont\fi
@@ -103,11 +109,31 @@
 \def\ol@imagedraw#1{\leavevmode\begin{tikzpicture}[remember picture,overlay]\ol@at
   \node[anchor=center,inner sep=0pt,outer sep=0pt,rotate=\ol@rot,opacity=\ol@opacity] at (ol@c)
   {\adjincludegraphics[trim={\ol@cl\width} {\ol@cb\height} {\ol@cr\width} {\ol@ct\height},clip,width=\ol@w,height=\ol@h]{#1}};\end{tikzpicture}}
-\newenvironment{olgroup}[1]{\ol@reset\pgfqkeys{/ol}{#1}\ifx\ol@step\empty\def\ol@grpend{}\else
-  \edef\ol@tmp{\noexpand\begin{onlyenv}<\ol@step>}\ol@tmp\def\ol@grpend{\end{onlyenv}}\fi\ignorespaces}{\ol@grpend\ignorespacesafterend}
-\newcommand\olpage[1]{\ol@reset\pgfqkeys{/ol}{#1}\ifx\ol@fill\empty\else\leavevmode\begin{tikzpicture}[remember picture,overlay]
-  \fill[\ol@fill] (current page.north west) rectangle (current page.south east);\end{tikzpicture}\fi
-  \ifx\ol@trans\empty\else\ifcsname trans\ol@trans\endcsname\csname trans\ol@trans\endcsname\fi\fi\ignorespaces}
+\newsavebox\ol@trash
+\newenvironment{olgroup}[1]{\ol@reset\pgfqkeys{/ol}{#1}\ol@drawn{\ifx\ol@step\empty\def\ol@grpend{}\else
+  \edef\ol@tmp{\noexpand\begin{onlyenv}<\ol@step>}\ol@tmp\def\ol@grpend{\end{onlyenv}}\fi}%
+  {\begin{lrbox}{\ol@trash}\def\ol@grpend{\end{lrbox}}}\ignorespaces}{\ol@grpend\ignorespacesafterend}
+% master pages: \begin{olmaster}{name=…,fill=…,master=…} keeps its objects (and keys) under its name;
+% \olpage{master=…} draws them behind the frame's own — the base master's first, the placeholders not
+\ExplSyntaxOn
+\cs_new_protected:Npn \ol@mstore #1#2 { \tl_gclear_new:c { g__ol_master_ #1 _tl } \tl_gset:cn { g__ol_master_ #1 _tl } {#2} }
+\cs_new:Npn \ol@muse #1 { \tl_if_exist:cT { g__ol_master_ #1 _tl } { \tl_use:c { g__ol_master_ #1 _tl } } }
+\ExplSyntaxOff
+\NewDocumentEnvironment{olmaster}{m +b}{\ol@reset\pgfqkeys{/ol}{#1}\ifx\ol@name\empty\else
+  \expandafter\gdef\csname ol@mk@\ol@name\endcsname{#1}\expandafter\ol@mstore\expandafter{\ol@name}{#2}\fi}{\ignorespacesafterend}
+\newcount\ol@depth
+\def\ol@applykeys#1{\pgfqkeys{/ol}{#1}}
+\def\ol@mkeys#1{\expandafter\let\expandafter\ol@mk\csname ol@mk@#1\endcsname\ol@reset\expandafter\ol@applykeys\expandafter{\ol@mk}}
+\def\ol@masterfill#1{\ifcsname ol@mk@#1\endcsname\ol@mkeys{#1}\ifx\ol@fill\empty\ifx\ol@master\empty\else\ifnum\ol@depth<8
+  \advance\ol@depth1 \edef\ol@tmp{\noexpand\ol@masterfill{\ol@master}}\ol@tmp\fi\fi\else\let\ol@pfill\ol@fill\fi\fi}
+\def\ol@drawmaster#1{\ifcsname ol@mk@#1\endcsname\begingroup\ol@mkeys{#1}\ifx\ol@master\empty\else\ifnum\ol@depth<8
+  \advance\ol@depth1 \edef\ol@tmp{\noexpand\ol@drawmaster{\ol@master}}\ol@tmp\fi\fi\ol@inmastertrue\ol@muse{#1}\endgroup\fi}
+\newcommand\olpage[1]{\ol@reset\pgfqkeys{/ol}{#1}\let\ol@pfill\ol@fill\let\ol@pmaster\ol@master\let\ol@ptrans\ol@trans\ol@depth=0
+  \ifx\ol@pfill\empty\ifx\ol@pmaster\empty\else\edef\ol@tmp{\noexpand\ol@masterfill{\ol@pmaster}}\ol@tmp\fi\fi
+  \ifx\ol@pfill\empty\else\leavevmode\begin{tikzpicture}[remember picture,overlay]
+  \fill[\ol@pfill] (current page.north west) rectangle (current page.south east);\end{tikzpicture}\fi
+  \ifx\ol@ptrans\empty\else\ifcsname trans\ol@ptrans\endcsname\csname trans\ol@ptrans\endcsname\fi\fi
+  \ifx\ol@pmaster\empty\else\ol@depth=0 \edef\ol@tmp{\noexpand\ol@drawmaster{\ol@pmaster}}\ol@tmp\fi\ignorespaces}
 \@ifundefined{only}{\def\only<#1>#2{#2}\newenvironment{onlyenv}{\ol@skipspec}{}\def\ol@skipspec<#1>{}}{}
 \@ifundefined{note}{\newcommand\note[2][]{}}{}
 % this default might be overridden by plain title style
@@ -122,6 +148,26 @@
 %% end OverLyX --------------------------------------------------------------
 
 \begin{document}
+\begin{olmaster}{fill=paper,name=Content}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=3mm,font=7pt,color=dusk,name=Kicker,ph=kicker}
+\end{olbox}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=8mm,font=20pt,leading=1.1,color=night,name=Title,ph=title}
+\end{olbox}
+\end{olmaster}
+
+\begin{olmaster}{fill=night,name=Section}
+\olshape{x=0mm,y=73.5mm,w=160mm,h=1mm,vb=0 0 160 1,fill=white!24!night,name=Horizon}{M 0 0.5 L 160 0.5 L 160 0.8 L 0 0.8 Z}
+\begin{olbox}{x=12mm,y=78mm,w=80mm,h=3mm,font=7pt,color=white!45!night,grow,name=Footer}
+Why the sky is blue
+\end{olbox}
+\begin{olbox}{x=12mm,y=15mm,w=70mm,h=27mm,font=76pt,leading=1,color=sky,name=Number,ph=number}
+\end{olbox}
+\begin{olbox}{x=12mm,y=46mm,w=90mm,h=11mm,font=28pt,leading=1.1,color=white,name=Section title,ph=title}
+\end{olbox}
+\begin{olbox}{x=12mm,y=59.5mm,w=100mm,h=5mm,font=11pt,leading=1.3,color=white!70!night,name=Section text,ph=text}
+\end{olbox}
+\end{olmaster}
+
 \begin{frame}[plain]
 \olpage{fill=night,name=Title}
 \olshape{x=92.72mm,y=14.72mm,w=58.56mm,h=58.56mm,vb=0 0 58.56 58.56,draw=sun,line=0.6pt,opacity=0.4,name=Sun ring}{M 58.56 29.28 C 58.56 45.45 45.45 58.56 29.28 58.56 C 13.11 58.56 0 45.45 0 29.28 C 0 13.11 13.11 0 29.28 0 C 45.45 0 58.56 13.11 58.56 29.28 Z}
@@ -201,35 +247,31 @@ Why clouds are white, why the sky is not violet, and who explained it all.
 \end{frame}
 
 \begin{frame}[plain]
-\olpage{fill=night,transition=fade,name=Section 01}
+\olpage{master=Section,transition=fade,name=Section 01}
 \olshape{x=117.02mm,y=15.02mm,w=21.96mm,h=21.96mm,vb=0 0 21.96 21.96,draw=sun,line=0.6pt,opacity=0.4,name=Sun ring}{M 21.96 10.98 C 21.96 17.04 17.04 21.96 10.98 21.96 C 4.92 21.96 0 17.04 0 10.98 C 0 4.92 4.92 0 10.98 0 C 17.04 0 21.96 4.92 21.96 10.98 Z}
 \olshape{x=119mm,y=17mm,w=18mm,h=18mm,vb=0 0 18 18,fill=sun,name=Sun}{M 18 9 C 18 13.97 13.97 18 9 18 C 4.03 18 0 13.97 0 9 C 0 4.03 4.03 0 9 0 C 13.97 0 18 4.03 18 9 Z}
 \olshape{x=109.9mm,y=13.9mm,w=2.2mm,h=2.2mm,vb=0 0 2.2 2.2,fill=sky,name=Scattered light}{M 2.2 1.1 C 2.2 1.71 1.71 2.2 1.1 2.2 C 0.49 2.2 0 1.71 0 1.1 C 0 0.49 0.49 0 1.1 0 C 1.71 0 2.2 0.49 2.2 1.1 Z}
 \olshape{x=115.8mm,y=8.3mm,w=1.4mm,h=1.4mm,vb=0 0 1.4 1.4,fill=sky,name=Scattered light}{M 1.4 0.7 C 1.4 1.09 1.09 1.4 0.7 1.4 C 0.31 1.4 0 1.09 0 0.7 C 0 0.31 0.31 0 0.7 0 C 1.09 0 1.4 0.31 1.4 0.7 Z}
 \olshape{x=106.4mm,y=22.4mm,w=1.2mm,h=1.2mm,vb=0 0 1.2 1.2,fill=sky,name=Scattered light}{M 1.2 0.6 C 1.2 0.93 0.93 1.2 0.6 1.2 C 0.27 1.2 0 0.93 0 0.6 C 0 0.27 0.27 0 0.6 0 C 0.93 0 1.2 0.27 1.2 0.6 Z}
 \olshape{x=142.7mm,y=38.2mm,w=1.6mm,h=1.6mm,vb=0 0 1.6 1.6,fill=sky,name=Scattered light}{M 1.6 0.8 C 1.6 1.24 1.24 1.6 0.8 1.6 C 0.36 1.6 0 1.24 0 0.8 C 0 0.36 0.36 0 0.8 0 C 1.24 0 1.6 0.36 1.6 0.8 Z}
-\olshape{x=0mm,y=73.5mm,w=160mm,h=1mm,vb=0 0 160 1,fill=white!24!night,name=Horizon}{M 0 0.5 L 160 0.5 L 160 0.8 L 0 0.8 Z}
-\begin{olbox}{x=12mm,y=78mm,w=80mm,h=2.8mm,font=7pt,color=white!45!night,grow,name=Footer}
-Why the sky is blue
-\end{olbox}
-\begin{olbox}{x=12mm,y=15mm,w=70mm,h=18.1mm,font=76pt,leading=1,color=sky,grow,name=Number}
+\begin{olbox}{x=12mm,y=15mm,w=70mm,h=18.1mm,font=76pt,leading=1,color=sky,grow,name=Number,ph=number}
 \textbf{01}
 \end{olbox}
-\begin{olbox}{x=12mm,y=46mm,w=90mm,h=9.4mm,font=28pt,leading=1.1,color=white,grow,name=Section title}
+\begin{olbox}{x=12mm,y=46mm,w=90mm,h=9.4mm,font=28pt,leading=1.1,color=white,grow,name=Section title,ph=title}
 \textbf{Light meets air}
 \end{olbox}
-\begin{olbox}{x=12mm,y=59.5mm,w=100mm,h=4mm,font=11pt,leading=1.3,color=white!70!night,grow,name=Section text}
+\begin{olbox}{x=12mm,y=59.5mm,w=100mm,h=4mm,font=11pt,leading=1.3,color=white!70!night,grow,name=Section text,ph=text}
 What we see, and what a sunbeam does on its way down
 \end{olbox}
-\note{A section divider is an ordinary slide with a background colour and a transition: the Page menu on the Layout toolbar sets both (this one fades in). New slide adds a slide with the layout you pick; drag the thumbnails in the rail to reorder slides, and duplicate or delete a slide from its thumbnail's menu. A duplicated slide is the quickest way to keep a deck consistent.}
+\note{The section dividers share a master, Section: its dark background, the horizon, the footer, and where the number, title and text go. Masters (above the slide rail) shows the masters: change one there and every slide that uses it follows --- the slides' own changes stay. New slide offers the masters (a slide of one gets its placeholders, empty); a slide's menu switches its master or makes a new master of it. This divider fades in: the Page menu on the Layout toolbar sets a slide's transition.}
 \end{frame}
 
 \begin{frame}[plain]
-\olpage{fill=paper,name=Noon and sunset}
-\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker}
+\olpage{master=Content,name=Noon and sunset}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker,ph=kicker}
 \textbf{01 · LIGHT MEETS AIR}
 \end{olbox}
-\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title,ph=title}
 \textbf{Look up at noon, then west at dusk}
 \end{olbox}
 \olimage{x=12mm,y=27mm,w=66mm,h=40mm,crop=0 0.06 0.5 0.0309,name=Noon}{figures/sky}
@@ -250,11 +292,11 @@ What we see, and what a sunbeam does on its way down
 \end{frame}
 
 \begin{frame}[plain]
-\olpage{fill=paper,name=Diagram}
-\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker}
+\olpage{master=Content,name=Diagram}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker,ph=kicker}
 \textbf{01 · LIGHT MEETS AIR}
 \end{olbox}
-\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.2mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.2mm,font=20pt,leading=1.1,color=night,grow,name=Title,ph=title}
 \textbf{One sunbeam, two fates}
 \end{olbox}
 \olshape{x=13mm,y=43mm,w=22mm,h=22mm,vb=0 0 22 22,draw=sun,line=0.6pt,opacity=0.6,name=Sun ring}{M 22 11 C 22 17.08 17.08 22 11 22 C 4.92 22 0 17.08 0 11 C 0 4.92 4.92 0 11 0 C 17.08 0 22 4.92 22 11 Z}
@@ -290,37 +332,33 @@ Your eyes catch it from every direction: the sky glows blue.
 
 At sunset the path is 40 times longer: orange and red remain.
 \end{olbox}
-\note{Diagrams are shapes and arrows: R draws a rectangle, E an ellipse, L a line and A an arrow; the arrows here are curves with a tip (Arrow tips on the Layout toolbar), and N edits a shape's nodes. The two branches appear one after the other: select objects and give them an animation step and an entrance effect under Animation (steps 2 and 3 here). In the PDF every step becomes a page of its own --- beamer overlays.}
+\note{Diagrams are shapes and arrows: R draws a rectangle, E an ellipse, L a line and A an arrow --- started or ended on one of the dots an object shows, a line stays attached to it when it moves (a connector). The arrows here are curves with a tip (Arrow tips on the Layout toolbar), and N edits a shape's nodes. A pasted SVG (Inkscape, a plot) becomes shapes like these. The two branches appear one after the other: select objects and give them an animation step and an entrance effect under Animation (steps 2 and 3 here). In the PDF every step becomes a page of its own --- beamer overlays.}
 \end{frame}
 
 \begin{frame}[plain]
-\olpage{fill=night,transition=fade,name=Section 02}
+\olpage{master=Section,transition=fade,name=Section 02}
 \olshape{x=114.58mm,y=30.58mm,w=26.84mm,h=26.84mm,vb=0 0 26.84 26.84,draw=sun,line=0.6pt,opacity=0.4,name=Sun ring}{M 26.84 13.42 C 26.84 20.83 20.83 26.84 13.42 26.84 C 6.01 26.84 0 20.83 0 13.42 C 0 6.01 6.01 0 13.42 0 C 20.83 0 26.84 6.01 26.84 13.42 Z}
 \olshape{x=117mm,y=33mm,w=22mm,h=22mm,vb=0 0 22 22,fill=sun!40!dusk,name=Sun}{M 22 11 C 22 17.08 17.08 22 11 22 C 4.92 22 0 17.08 0 11 C 0 4.92 4.92 0 11 0 C 17.08 0 22 4.92 22 11 Z}
 \olshape{x=116.5mm,y=48.06mm,w=23mm,h=1.2mm,vb=0 0 23 1.2,fill=night,name=Sun stripe 1}{M 0 0 L 23 0 L 23 1.2 L 0 1.2 Z}
 \olshape{x=116.5mm,y=51.23mm,w=23mm,h=2.57mm,vb=0 0 23 2.57,fill=night,name=Sun stripe 2}{M 0 0 L 23 0 L 23 2.57 L 0 2.57 Z}
-\olshape{x=0mm,y=73.5mm,w=160mm,h=1mm,vb=0 0 160 1,fill=white!24!night,name=Horizon}{M 0 0.5 L 160 0.5 L 160 0.8 L 0 0.8 Z}
-\begin{olbox}{x=12mm,y=78mm,w=80mm,h=2.8mm,font=7pt,color=white!45!night,grow,name=Footer}
-Why the sky is blue
-\end{olbox}
-\begin{olbox}{x=12mm,y=15mm,w=70mm,h=18.1mm,font=76pt,leading=1,color=sky,grow,name=Number}
+\begin{olbox}{x=12mm,y=15mm,w=70mm,h=18.1mm,font=76pt,leading=1,color=sky,grow,name=Number,ph=number}
 \textbf{02}
 \end{olbox}
-\begin{olbox}{x=12mm,y=46mm,w=90mm,h=8.8mm,font=28pt,leading=1.1,color=white,grow,name=Section title}
+\begin{olbox}{x=12mm,y=46mm,w=90mm,h=8.8mm,font=28pt,leading=1.1,color=white,grow,name=Section title,ph=title}
 \textbf{The $\boldsymbol{\lambda^{-4}}$ law}
 \end{olbox}
-\begin{olbox}{x=12mm,y=59.5mm,w=100mm,h=4mm,font=11pt,leading=1.3,color=white!70!night,grow,name=Section text}
+\begin{olbox}{x=12mm,y=59.5mm,w=100mm,h=4mm,font=11pt,leading=1.3,color=white!70!night,grow,name=Section text,ph=text}
 Why small molecules prefer short waves
 \end{olbox}
-\note{This divider fades in as well. The section numbers and the sun that sinks from divider to divider are ordinary objects: copy them from one slide to another with Ctrl+C and Ctrl+V, or duplicate a selected object with Ctrl+D.}
+\note{This divider fades in as well. The sun that sinks from divider to divider is the slide's own, drawn over the master's horizon: copy objects from one slide to another with Ctrl+C and Ctrl+V, or duplicate a selected object with Ctrl+D. The objects list (the layers button on the Layout toolbar) names everything on the slide, the master's objects too; its eye hides an object, its lock keeps it from being picked.}
 \end{frame}
 
 \begin{frame}[plain]
-\olpage{fill=paper,name=Formula}
-\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.8mm,font=7pt,color=dusk,grow,name=Kicker}
+\olpage{master=Content,name=Formula}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.8mm,font=7pt,color=dusk,grow,name=Kicker,ph=kicker}
 \textbf{02 · THE $\boldsymbol{\lambda^{-4}}$ LAW}
 \end{olbox}
-\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title,ph=title}
 \textbf{Where the fourth power comes from}
 \end{olbox}
 \olshape{x=14.35mm,y=36mm,w=1mm,h=7.5mm,vb=0 0 1 7.5,fill=rule,step=2-,effect=fade,name=Thread 1}{M 0.5 0 L 0.8 0 L 0.8 7.5 L 0.5 7.5 Z}
@@ -414,11 +452,11 @@ $700\,\mathrm{nm}$
 \end{frame}
 
 \begin{frame}[plain]
-\olpage{fill=paper,name=Plot}
-\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.8mm,font=7pt,color=dusk,grow,name=Kicker}
+\olpage{master=Content,name=Plot}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.8mm,font=7pt,color=dusk,grow,name=Kicker,ph=kicker}
 \textbf{02 · THE $\boldsymbol{\lambda^{-4}}$ LAW}
 \end{olbox}
-\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=5.4mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=5.4mm,font=20pt,leading=1.1,color=night,grow,name=Title,ph=title}
 \textbf{Blue scatters far more than red}
 \end{olbox}
 \olimage{x=12mm,y=26mm,w=100mm,h=54mm,name=Plot}{figures/scattering}
@@ -463,33 +501,29 @@ Computed from Rayleigh's law, not measured.
 \end{frame}
 
 \begin{frame}[plain]
-\olpage{fill=night,transition=fade,name=Section 03}
+\olpage{master=Section,transition=fade,name=Section 03}
 \olshape{x=113mm,y=59mm,w=30mm,h=15mm,vb=0 0 30 15,fill=dusk,name=Sun}{M 0 15 C 0 6.72 6.72 0 15 0 C 23.28 0 30 6.72 30 15 Z}
 \olshape{x=112.5mm,y=66.58mm,w=31mm,h=0.82mm,vb=0 0 31 0.82,fill=night,name=Sun stripe 1}{M 0 0 L 31 0 L 31 0.82 L 0 0.82 Z}
 \olshape{x=112.5mm,y=68.94mm,w=31mm,h=1.29mm,vb=0 0 31 1.29,fill=night,name=Sun stripe 2}{M 0 0 L 31 0 L 31 1.29 L 0 1.29 Z}
 \olshape{x=112.5mm,y=71.41mm,w=31mm,h=1.77mm,vb=0 0 31 1.77,fill=night,name=Sun stripe 3}{M 0 0 L 31 0 L 31 1.77 L 0 1.77 Z}
-\olshape{x=0mm,y=73.5mm,w=160mm,h=1mm,vb=0 0 160 1,fill=white!24!night,name=Horizon}{M 0 0.5 L 160 0.5 L 160 0.8 L 0 0.8 Z}
-\begin{olbox}{x=12mm,y=78mm,w=80mm,h=2.8mm,font=7pt,color=white!45!night,grow,name=Footer}
-Why the sky is blue
-\end{olbox}
-\begin{olbox}{x=12mm,y=15mm,w=70mm,h=18.1mm,font=76pt,leading=1,color=sky,grow,name=Number}
+\begin{olbox}{x=12mm,y=15mm,w=70mm,h=18.1mm,font=76pt,leading=1,color=sky,grow,name=Number,ph=number}
 \textbf{03}
 \end{olbox}
-\begin{olbox}{x=12mm,y=46mm,w=90mm,h=9.4mm,font=28pt,leading=1.1,color=white,grow,name=Section title}
+\begin{olbox}{x=12mm,y=46mm,w=90mm,h=9.4mm,font=28pt,leading=1.1,color=white,grow,name=Section title,ph=title}
 \textbf{Beyond blue}
 \end{olbox}
-\begin{olbox}{x=12mm,y=59.5mm,w=100mm,h=3.6mm,font=11pt,leading=1.3,color=white!70!night,grow,name=Section text}
+\begin{olbox}{x=12mm,y=59.5mm,w=100mm,h=3.6mm,font=11pt,leading=1.3,color=white!70!night,grow,name=Section text,ph=text}
 Clouds, violet, and who worked it all out
 \end{olbox}
 \note{Last section. Speaker notes like these belong to their slide: they show under the slides when they are switched on (Notes at the top of the slide rail, or the notes button on the Layout toolbar), in the presenter view (S while presenting), and in the file they are beamer's \texttt{\textbackslash note}.}
 \end{frame}
 
 \begin{frame}[plain]
-\olpage{fill=paper,name=Comparison}
-\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker}
+\olpage{master=Content,name=Comparison}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker,ph=kicker}
 \textbf{03 · BEYOND BLUE}
 \end{olbox}
-\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title,ph=title}
 \textbf{Why clouds are white}
 \end{olbox}
 \begin{olbox}{x=12mm,y=27mm,w=65mm,h=53mm,fill=sky!9!paper,radius=3mm,name=Card 1,lock}
@@ -555,11 +589,11 @@ white clouds, grey haze and fog
 \end{frame}
 
 \begin{frame}[plain]
-\olpage{fill=paper,name=Table}
-\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker}
+\olpage{master=Content,name=Table}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker,ph=kicker}
 \textbf{03 · BEYOND BLUE}
 \end{olbox}
-\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title,ph=title}
 \textbf{Why is the sky not violet?}
 \end{olbox}
 \begin{olbox}{x=12mm,y=29mm,w=78mm,h=35.3mm,font=12pt,color=ink,grow,name=Table}
@@ -604,11 +638,11 @@ The mix of violet, blue and green looks pale blue.
 \end{frame}
 
 \begin{frame}[plain]
-\olpage{fill=paper,transition=wipe,name=Timeline}
-\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker}
+\olpage{master=Content,transition=wipe,name=Timeline}
+\begin{olbox}{x=12mm,y=8mm,w=136mm,h=2.2mm,font=7pt,color=dusk,grow,name=Kicker,ph=kicker}
 \textbf{03 · BEYOND BLUE}
 \end{olbox}
-\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title}
+\begin{olbox}{x=12mm,y=12.5mm,w=136mm,h=6.9mm,font=20pt,leading=1.1,color=night,grow,name=Title,ph=title}
 \textbf{150 years of looking up}
 \end{olbox}
 \olshape{x=12mm,y=51.5mm,w=136mm,h=1mm,vb=0 0 136 1,draw=mist!50!paper,line=0.8pt,arrows=-Stealth,name=Time axis}{M 0 0.5 L 136 0.5}

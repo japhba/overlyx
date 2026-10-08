@@ -38,7 +38,13 @@ import type { PageView } from './nodeviews';
 import { startPresentation } from './present';
 import { openRawEditor } from './rawedit';
 import { SlideRail } from './rail';
+import { ObjectsPanel, objectsShown, rememberObjectsShown } from './objects';
+import { LayoutRulers, parseGuides, formatGuides, headerValue, defaultGrid, canvasPref, setCanvasPref, type Guide, type CanvasPref } from './guides';
+import { api } from '../../api';
+import { viewDocId } from '../context';
 import { promptMarks, boxIsEmpty, BOX_PROMPTS } from './slidelayouts';
+import { followMasters, masterWidgets, destroyMasterLayers, masterChain, placeholderMarks } from './masters';
+import { followConnectors, copyObjects, freshId, sitePoint, centre, outlinePoint, isConnector, pageSegs, shapeAttrsFor, parseEnd, endRef, connectorPath, SIDES, type Side } from './connectors';
 import { editorContext } from '../context';
 
 export type Tool = 'select' | 'text' | 'shape' | 'line' | 'arrow' | 'pen' | 'pencil' | 'nodes' | 'crop';
@@ -68,7 +74,8 @@ const displayMarks = (() => {
   return (d: PMNode): DecorationSet => {
     if (d === doc) return set;
     doc = d;
-    const decos: Decoration[] = [];
+    // the objects of the pages' masters (masters.ts), drawn behind each page's own
+    const decos: Decoration[] = L.isLayoutDoc(d) ? masterWidgets(d) : [];
     if (L.isLayoutDoc(d)) d.descendants((node, pos) => {
       if (!node.isTextblock) return node.type.name !== 'ol_notes';
       if (!node.childCount) return false;
@@ -107,7 +114,8 @@ export function selectedObjects(state: EditorState): { node: PMNode; pos: number
 /** Select objects (object mode: the ProseMirror selection is a node selection of the first). */
 export function selectObjects(tr: Transaction, positions: number[]): Transaction {
   const valid = positions.filter(p => isLayoutObject(tr.doc.nodeAt(p)));
-  tr.setMeta(layoutKey, { sel: valid, target: null } as Meta);
+  // (with what the transaction already says to the plugin: a drawing tool going back to Select)
+  tr.setMeta(layoutKey, { ...(tr.getMeta(layoutKey) as Meta | undefined), sel: valid, target: null } as Meta);
   if (valid.length) {
     try { tr.setSelection(NodeSelection.create(tr.doc, valid[0])); } catch { /* not selectable */ }
   }
@@ -141,7 +149,8 @@ export function showNotes(view: EditorView, on: boolean): void {
 
 /** Did pages come, go or change places (not just change inside)? */
 function pageOrderChanged(a: PMNode, b: PMNode): boolean {
-  const pa = L.pages(a).map(p => p.node), pb = L.pages(b).map(p => p.node);
+  const all = (d: PMNode) => [...L.pages(d), ...L.pages(d, 'masters')].map(p => p.node);
+  const pa = all(a), pb = all(b);
   if (pa.length !== pb.length) return true;
   const inB = new Set(pb), inA = new Set(pa);
   const sa = pa.filter(n => inB.has(n)), sb = pb.filter(n => inA.has(n));
@@ -165,6 +174,56 @@ export function refreshLayoutCheck(view: EditorView, fetch: () => Promise<Layout
   const c = controllers.get(view);
   if (!c || !L.isLayoutDoc(view.state.doc)) return;
   fetch().then(check => { if (!view.isDestroyed) c.setCheck(check); }, () => { /* no build yet */ });
+}
+
+/**
+ * The master view (PowerPoint's View ▸ Slide Master): the canvas, the slide rail and the page commands
+ * show the master pages instead of the slides; the caret is parked on the first (a new master is made
+ * when there is none). Off: back to the slide that was shown.
+ */
+export function setMasterView(view: EditorView, on: boolean): void {
+  const c = controllers.get(view);
+  if (!c || c.masterView === on) return;
+  c.masterView = on;
+  view.dom.classList.toggle('ol-master-view', on);
+  const list = L.pages(view.state.doc, on ? 'masters' : 'slides');
+  const back = on ? null : c.slideBeforeMasters;
+  if (on) c.slideBeforeMasters = L.pageAt(view.state.doc, view.state.selection.from)?.pos ?? null;
+  const target = back !== null && list.some(p => p.pos === back) ? back : list[0]?.pos;
+  if (target !== undefined) view.dispatch(deselectAll(view.state.tr, target));
+  else view.dispatch(view.state.tr);
+  view.focus();
+}
+export function isMasterView(view: EditorView): boolean { return !!controllers.get(view)?.masterView; }
+
+/** The canvas's guides and grid (guides.ts): the document's, and the reader's switches. */
+export function canvasGuides(view: EditorView): { guides: Guide[]; grid: number; prefs: Record<CanvasPref, boolean> } | null {
+  const c = controllers.get(view);
+  if (!c) return null;
+  return { guides: c.docGuides, grid: c.gridMm(), prefs: { grid: canvasPref('grid'), snapGrid: canvasPref('snapGrid'), guides: canvasPref('guides'), rulers: canvasPref('rulers') } };
+}
+/** A reader's switch of the canvas (show the grid, snap to it, show the guides, the rulers). */
+export function setCanvasSwitch(view: EditorView, k: CanvasPref, on: boolean): void {
+  setCanvasPref(k, on);
+  const c = controllers.get(view);
+  c?.syncRulers();
+  view.dispatch(view.state.tr);
+}
+/** The document's guides (all of them; written to its settings) or grid spacing (mm). */
+export function setCanvasGuides(view: EditorView, change: { guides?: Guide[]; grid?: number }): void {
+  const c = controllers.get(view);
+  if (change.guides) c?.saveGuides(change.guides);
+  if (change.grid !== undefined) c?.saveGrid(change.grid);
+}
+
+/** Show or hide the objects list beside the canvas (objects.ts; remembered per browser); its state without `on`. */
+export function toggleObjectsPanel(view: EditorView, on?: boolean): boolean {
+  const c = controllers.get(view);
+  const next = on ?? !objectsShown();
+  rememberObjectsShown(next);
+  c?.syncObjects();
+  view.dispatch(view.state.tr);   // the toolbars show the new state
+  return next;
 }
 
 export function setTool(view: EditorView, tool: Tool, shape?: string): void {
@@ -213,31 +272,20 @@ export function layoutPlugin(): Plugin<LayoutPluginState> {
       },
     },
     view: (view) => { controller = new LayoutController(view); return controller; },
-    // a text selection never spans two text boxes: its head is kept in the anchor's box
-    appendTransaction: (trs, _old, state) => {
+    // a text selection never spans two text boxes: its head is kept in the anchor's box; the slides'
+    // boxes follow the placeholders of their masters (masters.ts)
+    appendTransaction: (trs, old, state) => {
       if (!L.isLayoutDoc(state.doc)) return null;
-      const s = state.selection;
-      // the caret in an empty named box (a new slide's "Click to add title"): what is typed gets the deck's
-      // title formatting — set again after any change of the document too (the box growing to its text), which drops stored marks
-      if (s instanceof TextSelection && s.empty && !state.storedMarks && trs.some(t => t.selectionSet || t.docChanged)) {
-        const eb = L.editedBox(state);
-        if (eb && eb.node.attrs.name && BOX_PROMPTS[eb.node.attrs.name] && boxIsEmpty(eb.node)) {
-          const marks = promptMarks(state.doc, eb.node, controller?.page ?? { w: 160, h: 90 });
-          return marks ? state.tr.setStoredMarks(marks) : null;
-        }
-      }
-      if (!trs.some(t => t.selectionSet) || !(s instanceof TextSelection) || s.empty) return null;
-      const boxOf = (p: number) => { const $p = state.doc.resolve(p); for (let d = $p.depth; d > 0; d--) if ($p.node(d).type.name === 'ol_box' || $p.node(d).type.name === 'ol_notes') return $p.before(d); return -1; };
-      const a = boxOf(s.anchor), h = boxOf(s.head);
-      if (a === h || a < 0) return null;
-      const box = state.doc.nodeAt(a)!;
-      const head = s.head > s.anchor ? a + box.nodeSize - 1 : a + 1;
-      return state.tr.setSelection(TextSelection.between(state.doc.resolve(s.anchor), state.doc.resolve(head)));
+      const own = selectionFixes(trs, state);
+      // (connectors follow in the next round, once the placeholders have moved)
+      const changes = followMasters(trs, old, state) ?? followConnectors(trs, old, state);
+      return changes && own ? merged(state, changes, own) : own ?? changes;
     },
     props: {
       decorations: (state) => displayMarks(state.doc),
       handleDOMEvents: {
         pointerdown: (view, ev) => controller?.pointerDown(ev as PointerEvent) ?? false,
+        pointermove: (view, ev) => { controller?.hover(ev as PointerEvent); return false; },
         dblclick: (view, ev) => controller?.doubleClick(ev as MouseEvent) ?? false,
         copy: (view, ev) => controller?.clipboard(ev as ClipboardEvent, false) ?? false,
         cut: (view, ev) => controller?.clipboard(ev as ClipboardEvent, true) ?? false,
@@ -251,6 +299,38 @@ export function layoutPlugin(): Plugin<LayoutPluginState> {
       },
     },
   });
+
+  /** the document changes of `changes` (with its metas), then the selection / stored marks of `own` */
+  function merged(state: EditorState, changes: Transaction, own: Transaction): Transaction {
+    const tr = state.tr;
+    for (const step of changes.steps) tr.step(step);
+    for (const k of ['olMasterFollow', 'olConnectors', 'addToHistory']) if (changes.getMeta(k) !== undefined) tr.setMeta(k, changes.getMeta(k));
+    if (own.selectionSet) tr.setSelection(own.selection.map(tr.doc, tr.mapping));
+    if (own.storedMarksSet) tr.setStoredMarks(own.storedMarks);
+    return tr;
+  }
+
+  /** the caret's stored marks in an empty named box; a text selection kept inside one box */
+  function selectionFixes(trs: readonly Transaction[], state: EditorState): Transaction | null {
+    const s = state.selection;
+    // the caret in an empty named box (a new slide's "Click to add title"): what is typed gets the deck's
+    // title formatting — set again after any change of the document too (the box growing to its text), which drops stored marks
+    if (s instanceof TextSelection && s.empty && !state.storedMarks && trs.some(t => t.selectionSet || t.docChanged)) {
+      const eb = L.editedBox(state);
+      if (eb && (eb.node.attrs.ph || (eb.node.attrs.name && BOX_PROMPTS[eb.node.attrs.name])) && boxIsEmpty(eb.node)) {
+        // a placeholder's: its master's sample text's formatting, else the deck's titles'
+        const marks = placeholderMarks(state.doc, eb.pos) ?? (eb.node.attrs.name && BOX_PROMPTS[eb.node.attrs.name] ? promptMarks(state.doc, eb.node, controller?.page ?? { w: 160, h: 90 }) : null);
+        return marks ? state.tr.setStoredMarks(marks) : null;
+      }
+    }
+    if (!trs.some(t => t.selectionSet) || !(s instanceof TextSelection) || s.empty) return null;
+    const boxOf = (p: number) => { const $p = state.doc.resolve(p); for (let d = $p.depth; d > 0; d--) if ($p.node(d).type.name === 'ol_box' || $p.node(d).type.name === 'ol_notes') return $p.before(d); return -1; };
+    const a = boxOf(s.anchor), h = boxOf(s.head);
+    if (a === h || a < 0) return null;
+    const box = state.doc.nodeAt(a)!;
+    const head = s.head > s.anchor ? a + box.nodeSize - 1 : a + 1;
+    return state.tr.setSelection(TextSelection.between(state.doc.resolve(s.anchor), state.doc.resolve(head)));
+  }
 }
 
 /* ------------------------------------------------------------------ geometry of the view */
@@ -318,6 +398,12 @@ const nodeId = (n: PMNode) => { let v = nodeIds.get(n); if (v === undefined) { v
 
 class LayoutController {
   private active = false;
+  /** the master pages are shown and edited (setMasterView) */
+  masterView = false;
+  /** the slide shown when the master view opened: shown again when it closes */
+  slideBeforeMasters: number | null = null;
+  /** which pages the canvas, the rail and the page keys go through */
+  kind(): L.PageKind { return this.masterView ? 'masters' : 'slides'; }
   page = { w: 160, h: 90 };
   /** a beamer document (linear or layout): the presentation shows its frames */
   beamer = false;
@@ -335,10 +421,22 @@ class LayoutController {
   private pen: { page: number; nodes: { x: number; y: number; cin?: [number, number]; cout?: [number, number] }[]; hover?: [number, number] } | null = null;
   /** a node or handle being edited: index into the shape's segments */
   private nodeSel: { seg: number; pt: number } | null = null;
+  /** connection points shown (the line and arrow tools over an object, a connector's end dragged): objects and the point snapped to */
+  private connectHint: { page: number; targets: { pos: number; on: Side | 'c' | null }[] } | null = null;
   private lastLocalBox: number | null = null;
   private growQueued = false;
   /** the thumbnails of a deck (rail.ts) */
   private rail: SlideRail | null = null;
+  /** the objects list (objects.ts), when shown */
+  private objects: ObjectsPanel | null = null;
+  /** the document's guides and grid spacing (guides.ts; null: the default for the page) */
+  docGuides: Guide[] = [];
+  private gridSetting: number | null = null;
+  private rulers: LayoutRulers | null = null;
+  /** a guide being dragged: the guides as they would be, which one */
+  private guideDrag: { list: Guide[]; index: number } | null = null;
+  /** the grid's spacing, mm */
+  gridMm(): number { return this.gridSetting ?? defaultGrid(this.page); }
   /** a deck shows one slide at a time: the page wrapper of the one with the selection */
   private shownWrap: HTMLElement | null = null;
   /** the speaker notes were shown under the pages at the last update (one slide at a time: they take room) */
@@ -366,6 +464,7 @@ class LayoutController {
     if (!layout) return;
     const st = layoutKey.getState(view.state)!;
     view.dom.dataset.olTool = st.tool;
+    view.dom.classList.toggle('ol-master-view', this.masterView);
     if (prev && prev.doc !== view.state.doc) {
       // a local edit inside a growing text box: its height follows the text
       const eb = L.editedBox(view.state);
@@ -377,6 +476,10 @@ class LayoutController {
     this.syncRail();
     this.syncShownPage();
     this.rail?.update(!!prev && prev.doc !== view.state.doc);
+    if (!!this.objects !== objectsShown()) this.syncObjects();
+    this.objects?.update();
+    if (!this.rulers && canvasPref('rulers')) this.syncRulers();
+    else if (this.rulers && !canvasPref('rulers')) this.syncRulers();
     const notes = view.dom.classList.contains('ol-show-notes');
     if (notes !== this.notesWere) { this.notesWere = notes; if (this.rail) this.fit(); }
     this.renderOverlays();
@@ -392,7 +495,9 @@ class LayoutController {
     this.view.dom.classList.toggle('ol-single', single);
     let wrap: HTMLElement | null = null;
     if (single) {
-      const page = L.pageAt(this.view.state.doc, this.view.state.selection.from) ?? L.pages(this.view.state.doc)[0];
+      // (a page of the other kind — a master while the slides are shown — is not shown: the first of this kind then)
+      let page = L.pageAt(this.view.state.doc, this.view.state.selection.from);
+      if (!page || L.isMasterPage(page.node) !== this.masterView) page = L.pages(this.view.state.doc, this.kind())[0] ?? null;
       wrap = page ? this.view.nodeDOM(page.pos) as HTMLElement | null : null;
     }
     if (wrap === this.shownWrap) return;
@@ -423,7 +528,7 @@ class LayoutController {
 
   /** the slide `d` slides on from the shown one (the caret parked on it, nothing selected) */
   stepSlide(d: number, absolute = false): boolean {
-    const list = L.pages(this.view.state.doc);
+    const list = L.pages(this.view.state.doc, this.kind());
     const cur = list.findIndex(p => this.view.nodeDOM(p.pos) === this.shownWrap);
     const i = Math.max(0, Math.min(list.length - 1, absolute ? d : cur + d));
     if (i === cur || !list[i]) return false;
@@ -436,6 +541,8 @@ class LayoutController {
     const deck = !!this.scroller && (L.pages(this.view.state.doc).length > 1 || (this.beamer && this.page.w <= 300 && this.page.h <= 200));
     if (deck && !this.rail) {
       this.rail = new SlideRail(this.view, this.scroller!, {
+        kind: () => this.kind(),
+        setMasterView: on => setMasterView(this.view, on),
         page: () => this.page,
         basePt: () => this.basePt,
         currentPage: () => this.currentPage()?.pos ?? null,
@@ -451,6 +558,42 @@ class LayoutController {
     }
   }
 
+  /** the rulers shown or not, as the reader has them (not in a narrow pane: the page needs the room) */
+  syncRulers(): void {
+    const sc = this.scroller;
+    const want = this.active && !!sc && canvasPref('rulers') && sc.clientWidth >= 480 && sc.clientHeight >= 320;
+    if (want && !this.rulers) {
+      this.rulers = new LayoutRulers(this.scroller!, {
+        sheet: () => { const c = this.currentPage(); return c ? { rect: c.rect, w: this.page.w, h: this.page.h } : null; },
+        dragOut: (ev, axis) => this.startGuideDrag(ev, null, axis),
+      });
+      this.view.dom.classList.add('ol-has-rulers');
+      this.fit();
+    } else if (!want && this.rulers) {
+      this.rulers.destroy();
+      this.rulers = null;
+      this.view.dom.classList.remove('ol-has-rulers');
+      this.fit();
+    }
+  }
+
+  /** the objects list shown or not, as remembered */
+  syncObjects(): void {
+    const want = this.active && !!this.scroller && objectsShown();
+    if (want && !this.objects) {
+      this.objects = new ObjectsPanel(this.view, this.scroller!, {
+        currentPage: () => this.currentPage(),
+        refit: () => this.fit(),
+        close: () => toggleObjectsPanel(this.view, false),
+      });
+      this.fit();
+    } else if (!want && this.objects) {
+      this.objects.destroy();
+      this.objects = null;
+      this.fit();
+    }
+  }
+
   destroy(): void { this.detach(); this.metaUnobserve?.(); this.metaUnobserve = null; this.colorStyle?.remove(); this.gesture?.cancel(); if (this.checkRetry) clearTimeout(this.checkRetry); }
   private colorStyle: HTMLStyleElement | null = null;
 
@@ -460,7 +603,7 @@ class LayoutController {
     const scroller = (this.view.dom.closest('.editor-scroll') ?? this.view.dom.parentElement) as HTMLElement | null;
     this.scroller = scroller;
     if (scroller && typeof ResizeObserver !== 'undefined') {
-      this.resize = new ResizeObserver(() => this.fit());
+      this.resize = new ResizeObserver(() => { this.syncRulers(); this.fit(); });
       this.resize.observe(scroller);
     }
     // a document opens with its whole page in the window
@@ -478,6 +621,12 @@ class LayoutController {
 
   private detach(): void {
     this.rail?.destroy(); this.rail = null;
+    this.objects?.destroy(); this.objects = null;
+    this.rulers?.destroy(); this.rulers = null;
+    this.view.dom.classList.remove('ol-has-rulers');
+    destroyMasterLayers(this.view);
+    this.masterView = false;
+    this.view.dom.classList.remove('ol-master-view');
     this.shownWrap?.classList.remove('ol-shown'); this.shownWrap = null;
     this.view.dom.classList.remove('ol-single');
     this.view.dom.style.removeProperty('--ol-single-top');
@@ -540,7 +689,8 @@ class LayoutController {
     const pxPerPt = this.fitPagePt * this.zoom;
     let page = -1;
     this.view.state.doc.forEach((pageNode, offset) => {
-      if (pageNode.type.name !== 'ol_page') return;
+      // (the PDF's pages are the frames: master pages are none)
+      if (pageNode.type.name !== 'ol_page' || L.isMasterPage(pageNode)) return;
       page++;
       const seen = new Map<string, number>();
       // the boxes in the order the writer writes them (groups entered), numbered like core's olboxBlocks
@@ -735,6 +885,9 @@ class LayoutController {
     const preamble = a >= 0 && b > a ? lines.slice(a + 1, b).join('\n') : '';
     this.beamer = cls.startsWith('beamer');
     this.preamble = preamble;
+    this.docGuides = parseGuides(headerValue(lines, 'overlyx_guides'));
+    const grid = Number(headerValue(lines, 'overlyx_grid'));
+    this.gridSetting = grid > 0 ? grid : null;
     const colors = preambleColors(preamble);
     const changed = JSON.stringify(colors) !== JSON.stringify(docColors.map);
     docColors.map = colors;
@@ -813,10 +966,11 @@ class LayoutController {
     const sc = this.scroller ?? (this.view.dom.closest('.editor-scroll') ?? this.view.dom.parentElement) as HTMLElement | null;
     // one slide at a time nothing scrolls at the fit: the scroll bars a zoom brings must not change it (offset sizes)
     const single = !!this.shownWrap;
-    const width = Math.max(200, ((single ? sc?.offsetWidth : sc?.clientWidth) ?? 1000) - 72 - (this.rail?.width() ?? 0));
+    const ruler = this.rulers ? 18 : 0;
+    const width = Math.max(200, ((single ? sc?.offsetWidth : sc?.clientWidth) ?? 1000) - 72 - (this.rail?.width() ?? 0) - (this.objects?.width() ?? 0) - ruler);
     // one slide at a time with its notes under it: the notes have room in the window too
     const notes = this.rail && this.view.dom.classList.contains('ol-show-notes') ? 118 : 0;
-    const height = Math.max(150, ((single ? sc?.offsetHeight : sc?.clientHeight) ?? 800) - 70 - notes);
+    const height = Math.max(150, ((single ? sc?.offsetHeight : sc?.clientHeight) ?? 800) - 70 - notes - ruler);
     const pxPerMm = Math.min(width / this.page.w, height / this.page.h);
     this.fitPagePt = Math.min(pxPerMm / 2.845276, 4);
     this.view.dom.style.setProperty('--ol-fit-pt', `${(this.fitPagePt * this.zoom).toFixed(4)}px`);
@@ -909,6 +1063,7 @@ class LayoutController {
 
   private renderOverlays(force = false): void {
     if (!this.active) return;
+    this.rulers?.refresh();
     const state = this.view.state;
     const st = layoutKey.getState(state)!;
     const sel = selectedObjects(state);
@@ -928,11 +1083,25 @@ class LayoutController {
       const editedHere = edited && edited.pos > pagePos && edited.pos < end ? edited.pos : -1;
       const key = [nodeId(page), pagePos, mine.map(o => o.pos).join(','), editedHere, editedHere >= 0 ? nodeId(edited!.node) : 0, st.tool, st.target ?? '',
         this.nodeSel ? `${this.nodeSel.seg}:${this.nodeSel.pt}` : '', JSON.stringify(this.guides.filter(g => g.page === pagePos)),
-        this.marquee?.page === pagePos ? JSON.stringify(this.marquee) : '', this.pen?.page === pagePos ? JSON.stringify(this.pen.nodes) : '', this.page.w, this.page.h, this.checkStamp].join('|');
+        this.marquee?.page === pagePos ? JSON.stringify(this.marquee) : '', this.pen?.page === pagePos ? JSON.stringify(this.pen.nodes) : '', this.page.w, this.page.h, this.checkStamp,
+        this.connectHint?.page === pagePos ? JSON.stringify(this.connectHint.targets) : '',
+        canvasPref('guides') ? formatGuides(this.docGuides) : '', canvasPref('grid') ? this.gridMm() : '', this.guideDrag ? JSON.stringify(this.guideDrag) : ''].join('|');
       const pvk = pv as PageView & { olOverlayKey?: string };
       if (!force && pvk.olOverlayKey === key) continue;
       pvk.olOverlayKey = key;
       const out: HTMLElement[] = [];
+      // the grid (behind everything else of the overlay) and the document's guides
+      if (canvasPref('grid')) { const g = div('ol-grid'); g.style.setProperty('--ol-grid', String(this.gridMm())); out.push(g); }
+      if (canvasPref('guides') || this.guideDrag) {
+        const list = this.guideDrag ? this.guideDrag.list : this.docGuides;
+        list.forEach((g, i) => {
+          const el = div(`ol-guideline ol-guideline-${g.axis}` + (this.guideDrag?.index === i ? ' ol-guideline-drag' : ''), g.axis === 'x' ? { left: MM(g.at) } : { top: MM(g.at) });
+          el.title = `Guide at ${Math.round(g.at * 10) / 10} mm — drag to move, back onto the ruler or off the page to remove; double-click for a position`;
+          el.addEventListener('pointerdown', ev => this.startGuideDrag(ev, i, g.axis));
+          el.addEventListener('dblclick', ev => { ev.preventDefault(); ev.stopPropagation(); this.askGuide(i); });
+          out.push(el);
+        });
+      }
       // animation badges: the step an object appears on
       pageObjects(page, pagePos).forEach(o => {
         if (!o.node.attrs.step) return;
@@ -950,7 +1119,20 @@ class LayoutController {
         return false;
       });
       if (edited && edited.pos > pagePos && edited.pos < end) out.push(this.frameEl(boxOf(edited.node), 'ol-editing', true, edited.pos));
-      if (mine.length === 1) {
+      if (mine.length === 1 && lineEnds(o0(mine)) && st.tool === 'select') {
+        // a line or a connector: its two ends to drag (onto an object's connection point: attached)
+        const o = mine[0];
+        out.push(this.frameEl(boxOf(o.node), 'ol-selframe ol-thin', false, o.pos));
+        const ends = lineEnds(o.node)!;
+        (['from', 'to'] as const).forEach((which, i) => {
+          const [x, y] = ends[i];
+          const h = div('ol-endpt' + (o.node.attrs[which] ? ' ol-endpt-on' : ''), { left: MM(x), top: MM(y) });
+          h.dataset.end = which;
+          h.title = o.node.attrs[which] ? 'Attached — drag it off the object to let go' : 'Drag onto an object’s connection point to attach';
+          h.addEventListener('pointerdown', ev => this.startEndDrag(ev, o.pos, which));
+          out.push(h);
+        });
+      } else if (mine.length === 1) {
         const o = mine[0];
         if (o.node.type.name === 'ol_group') {
           const b = objectBounds(o.node);
@@ -981,6 +1163,16 @@ class LayoutController {
         out.push(div('ol-marquee', { left: MM(m.x), top: MM(m.y), width: MM(m.w), height: MM(m.h) }));
       }
       if (this.pen && this.pen.page === pagePos) out.push(this.penEl());
+      if (this.connectHint?.page === pagePos) {
+        for (const t of this.connectHint.targets) {
+          const n = state.doc.nodeAt(t.pos);
+          if (!n) continue;
+          for (const site of [...SIDES, 'c'] as (Side | 'c')[]) {
+            const [x, y] = site === 'c' ? centre(n) : sitePoint(n, site);
+            out.push(div('ol-site' + (t.on === site ? ' ol-site-on' : ''), { left: MM(x), top: MM(y) }));
+          }
+        }
+      }
       pv.overlay.replaceChildren(...out);
     }
   }
@@ -1248,20 +1440,32 @@ class LayoutController {
   }
 
   /** snapping candidates of a page: its edges and centre, the other objects' edges and centres */
-  private snapLines(ctx: PageCtx, exclude: Set<number>): { xs: number[]; ys: number[] } {
+  private snapLines(ctx: PageCtx, exclude: Set<number>): { xs: number[]; ys: number[]; grid: number | null } {
     const xs = [0, this.page.w / 2, this.page.w], ys = [0, this.page.h / 2, this.page.h];
-    for (const o of pageObjects(ctx.node, ctx.pos)) {
-      if (exclude.has(o.pos)) continue;
-      const b = objectBounds(o.node);
+    // the document's guides (while shown), the grid (while snapping to it)
+    if (canvasPref('guides')) for (const g of this.docGuides) (g.axis === 'x' ? xs : ys).push(g.at);
+    const grid = canvasPref('snapGrid') ? this.gridMm() : null;
+    const add = (n: PMNode) => {
+      const b = objectBounds(n);
       xs.push(b.x, b.x + b.w / 2, b.x + b.w);
       ys.push(b.y, b.y + b.h / 2, b.y + b.h);
-    }
-    return { xs, ys };
+    };
+    for (const o of pageObjects(ctx.node, ctx.pos)) if (!exclude.has(o.pos) && !o.node.attrs.hidden) add(o.node);
+    // the master's objects drawn on the page (and its placeholders' frames)
+    for (const m of masterChain(this.view.state.doc, ctx.node.attrs.master).chain) m.node.forEach(c => { if (c.type.name !== 'ol_notes' && !c.attrs.hidden) add(c); });
+    return { xs, ys, grid };
   }
 
-  private snap(values: number[], lines: number[], tol: number): { d: number; at?: number } {
+  /** the nearest snap of one of `values` to a line (or, with a grid, to its nearest line), within `tol` */
+  private snap(values: number[], lines: number[], tol: number, grid: number | null = null): { d: number; at?: number } {
     let best: { d: number; at?: number } = { d: 0 }, bestAbs = tol;
     for (const v of values) for (const l of lines) { const d = l - v; if (Math.abs(d) < bestAbs) { bestAbs = Math.abs(d); best = { d, at: l }; } }
+    // the grid holds everything: the nearest grid line of any of the values, unless a line above is nearer
+    if (grid) {
+      let g: { d: number; at: number } | null = null;
+      for (const v of values) { const l = Math.round(v / grid) * grid; if (!g || Math.abs(l - v) < Math.abs(g.d)) g = { d: l - v, at: l }; }
+      if (g && (best.at === undefined || Math.abs(g.d) < bestAbs)) best = g;
+    }
     return best;
   }
 
@@ -1277,15 +1481,20 @@ class LayoutController {
     const stamps: [number, number][] = [];
     const x0 = ev.clientX, y0 = ev.clientY;
     /** the objects moved by (dx, dy), the stamped copies at the end of the page (after every object, so no position moves) */
+    // connectors moved without the objects they are attached to let go of them (else they would be drawn back)
+    const loose = looseEnds(objs.map(o => o.node));
     const apply = (tr: Transaction, live: boolean) => {
-      for (const o of objs) L.translate(tr, o.pos, dx, dy);
+      for (const o of objs) { const l = loose(o.node); if (l) L.setAttrs(tr, o.pos, l); L.translate(tr, o.pos, dx, dy); }
       const made: number[] = [];
       for (const [sx, sy] of stamps) {
-        for (const o of objs) {
+        // (each stamp's copies have ids of their own, its connectors attached to them)
+        const copies = copyObjects(objs.map(o => o.node), tr.doc.nodeAt(ctx.pos));
+        for (const [i, o] of objs.entries()) {
           const page = tr.doc.nodeAt(ctx.pos)!;
           let at = ctx.pos + page.nodeSize - 1;
           if (page.lastChild?.type.name === 'ol_notes') at -= page.lastChild.nodeSize;
-          tr.insert(at, o.node);
+          tr.insert(at, copies[i]);
+          void o;
           L.translate(tr, at, sx, sy);
           made.push(at);
           if (live) this.liveInserted.push({ pos: at, size: tr.doc.nodeAt(at)!.nodeSize });
@@ -1306,8 +1515,8 @@ class LayoutController {
         this.guides = [];
         if (!e.altKey) {
           const tol = 6 * ctx.mmPerPx;
-          const sx = this.snap([bounds.x + dx, bounds.x + bounds.w / 2 + dx, bounds.x + bounds.w + dx], lines.xs, tol);
-          const sy = this.snap([bounds.y + dy, bounds.y + bounds.h / 2 + dy, bounds.y + bounds.h + dy], lines.ys, tol);
+          const sx = this.snap([bounds.x + dx, bounds.x + bounds.w / 2 + dx, bounds.x + bounds.w + dx], lines.xs, tol, lines.grid);
+          const sy = this.snap([bounds.y + dy, bounds.y + bounds.h / 2 + dy, bounds.y + bounds.h + dy], lines.ys, tol, lines.grid);
           if (!(lock && dx === 0)) { dx += sx.d; if (sx.at !== undefined) this.guides.push({ x: sx.at, page: ctx.pos }); }
           if (!(lock && dy === 0)) { dy += sy.d; if (sy.at !== undefined) this.guides.push({ y: sy.at, page: ctx.pos }); }
         }
@@ -1408,8 +1617,8 @@ class LayoutController {
         this.guides = [];
         if (!b0.rot && !e.altKey && !keep) {
           const tol = 6 * ctx.mmPerPx;
-          if (dxh) { const edge = dxh > 0 ? nb.x + nb.w : nb.x; const sn = this.snap([edge], lines.xs, tol); if (sn.at !== undefined) { if (dxh > 0) nb.w += sn.d; else { nb.x += sn.d; nb.w -= sn.d; } this.guides.push({ x: sn.at, page: ctx.pos }); } }
-          if (dyh) { const edge = dyh > 0 ? nb.y + nb.h : nb.y; const sn = this.snap([edge], lines.ys, tol); if (sn.at !== undefined) { if (dyh > 0) nb.h += sn.d; else { nb.y += sn.d; nb.h -= sn.d; } this.guides.push({ y: sn.at, page: ctx.pos }); } }
+          if (dxh) { const edge = dxh > 0 ? nb.x + nb.w : nb.x; const sn = this.snap([edge], lines.xs, tol, lines.grid); if (sn.at !== undefined) { if (dxh > 0) nb.w += sn.d; else { nb.x += sn.d; nb.w -= sn.d; } this.guides.push({ x: sn.at, page: ctx.pos }); } }
+          if (dyh) { const edge = dyh > 0 ? nb.y + nb.h : nb.y; const sn = this.snap([edge], lines.ys, tol, lines.grid); if (sn.at !== undefined) { if (dyh > 0) nb.h += sn.d; else { nb.y += sn.d; nb.h -= sn.d; } this.guides.push({ y: sn.at, page: ctx.pos }); } }
         }
         this.liveApply(tr => this.applyResize(tr, objs, single, b0, nb, dyh !== 0));
       },
@@ -1521,13 +1730,16 @@ class LayoutController {
     const tol = 6 * ctx.mmPerPx;
     const snapPt = (x: number, y: number, e: PointerEvent): [number, number] => {
       if (e.altKey) return [x, y];
-      const sx = this.snap([x], lines.xs, tol), sy = this.snap([y], lines.ys, tol);
+      const sx = this.snap([x], lines.xs, tol, lines.grid), sy = this.snap([y], lines.ys, tol, lines.grid);
       return [x + sx.d, y + sy.d];
     };
-    const [ax, ay] = snapPt(x0, y0, ev);
+    const isLine = tool === 'line' || tool === 'arrow';
+    // a line or an arrow started on an object's connection point is a connector (connectors.ts)
+    const startOn = isLine ? this.connectSite(ev, ctx, null).snap : null;
+    let endOn: ConnectSnap | null = null;
+    let [ax, ay] = startOn ? startOn.point : snapPt(x0, y0, ev);
     let cur: [number, number] = [ax, ay];
     let dragged = false;
-    const isLine = tool === 'line' || tool === 'arrow';
     const nodeFor = (x1: number, y1: number, e: PointerEvent | null): PMNode => {
       let bx = x1, by = y1;
       if (e && constrained(e)) {
@@ -1551,6 +1763,14 @@ class LayoutController {
       move: (e) => {
         const [x, y] = ctx.mm(e);
         cur = snapPt(x, y, e);
+        if (isLine) {
+          const c = this.connectSite(e, ctx, startOn?.pos ?? null);
+          endOn = c.snap;
+          if (endOn) cur = endOn.side || !startOn ? endOn.point : outlinePoint(endOn.node, startOn.point);
+          // a start on an object's middle: on its outline, towards the pointer
+          if (startOn && !startOn.side) [ax, ay] = outlinePoint(startOn.node, cur);
+          this.connectHint = { page: ctx.pos, targets: [...(startOn ? [{ pos: startOn.pos, on: startOn.side ?? 'c' as const }] : []), ...(c.hint !== null ? [{ pos: c.hint, on: endOn ? endOn.side ?? 'c' as const : null }] : [])] };
+        }
         if (!dragged && Math.hypot(cur[0] - ax, cur[1] - ay) < 1) return;
         dragged = true;
         this.liveApply(tr => {
@@ -1567,8 +1787,24 @@ class LayoutController {
         else if (isLine) node = nodeFor(ax + this.page.w * 0.15, ay, null);
         else { const sz = Math.min(this.page.w, this.page.h) * 0.2; node = L.makeShape(st.shape, { ...NEW_STYLE.shape, x: ax, y: ay, w: sz, h: sz }); }
         if (dragged && tool === 'text') node = node.type.create({ ...node.attrs, grow: true }, node.content);
+        this.connectHint = null;
         let created = -1;
         this.commit(tr => {
+          // a connector: its objects get ids (they have none yet), its ends name them
+          if (isLine && dragged && (startOn || endOn)) {
+            const page = tr.doc.nodeAt(ctx.pos)!;
+            const made = new Set<string>();
+            const idOf = (o: ConnectSnap) => {
+              const n = tr.doc.nodeAt(o.pos)!;
+              if (n.attrs.id) return n.attrs.id as string;
+              const id = freshId(page, made);
+              made.add(id);
+              L.setAttrs(tr, o.pos, { id });
+              return id;
+            };
+            const from = startOn ? endRef(idOf(startOn), startOn.side) : null, to = endOn ? endRef(idOf(endOn), endOn.side) : null;
+            node = node.type.create({ ...node.attrs, from, to });
+          }
           const at = endOfPage(tr);
           tr.insert(at, node);
           created = at;
@@ -1581,7 +1817,177 @@ class LayoutController {
         }
         this.view.focus();
       },
-      cancel: () => this.cancelLive(),
+      cancel: () => { this.connectHint = null; this.cancelLive(); },
+    });
+  }
+
+  /* ---------------------------------------------------------------- guides */
+
+  /**
+   * Drag a guide (`index`), or a new one out of a ruler (null): it follows the pointer (onto the grid
+   * when snapping to it); dropped back onto a ruler or off the page it goes.
+   */
+  private startGuideDrag(ev: PointerEvent, index: number | null, axis: 'x' | 'y'): void {
+    if (ev.button !== 0 || !this.view.editable) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const ctx = this.currentPage();
+    if (!ctx) return;
+    const list = this.docGuides.map(g => ({ ...g }));
+    const at = (e: { clientX: number; clientY: number }) => {
+      const [x, y] = ctx.mm(e);
+      const v = axis === 'x' ? x : y;
+      if (canvasPref('snapGrid')) { const g = this.gridMm(); return Math.round(v / g) * g; }
+      return Math.round(v * 10) / 10;
+    };
+    let i = index;
+    if (i === null) { list.push({ axis, at: at(ev) }); i = list.length - 1; }
+    const k = i;
+    this.guideDrag = { list, index: k };
+    this.renderOverlays();
+    this.runGesture(ev, {
+      move: (e) => { list[k] = { axis, at: at(e) }; this.renderOverlays(); },
+      up: (e) => {
+        this.guideDrag = null;
+        const v = at(e), size = axis === 'x' ? this.page.w : this.page.h;
+        // back onto a ruler, or off the page (5 mm beyond its edge): gone — a new one was never there
+        if (this.rulers?.over(e.clientX, e.clientY) || v < -5 || v > size + 5) {
+          if (index === null) { this.renderOverlays(); return; }
+          list.splice(k, 1);
+        } else list[k] = { axis, at: v };
+        this.saveGuides(list);
+      },
+      cancel: () => { this.guideDrag = null; this.renderOverlays(); },
+    });
+  }
+
+  /** a guide's position typed in (a double click on it); empty: removed */
+  private askGuide(i: number): void {
+    const g = this.docGuides[i];
+    if (!g) return;
+    const v = window.prompt(`Guide position, mm from the page’s ${g.axis === 'x' ? 'left' : 'top'} edge (empty: remove it)`, String(g.at));
+    if (v === null) return;
+    const list = this.docGuides.map(x => ({ ...x }));
+    if (!v.trim()) list.splice(i, 1);
+    else if (Number.isFinite(Number(v))) list[i] = { axis: g.axis, at: Number(v) };
+    else return;
+    this.saveGuides(list);
+  }
+
+  /** the guides into the document's settings (shown at once; collaborators see them when the server has them) */
+  saveGuides(list: Guide[]): void {
+    this.docGuides = list;
+    this.renderOverlays(true);
+    this.saveSetting('overlyx_guides', formatGuides(list));
+  }
+
+  saveGrid(mm: number): void {
+    if (!(mm > 0)) return;
+    this.gridSetting = mm;
+    this.renderOverlays(true);
+    this.saveSetting('overlyx_grid', String(Math.round(mm * 100) / 100));
+  }
+
+  private saveSetting(key: string, value: string): void {
+    const id = viewDocId(this.view);
+    if (!id) return;
+    api.setHeader(id, { set: { [key]: value } })
+      .then(r => { if (r?.headerLines) setLayoutHeader(r.headerLines); })
+      .catch(e => editorContext.notify?.(`Could not save the ${key === 'overlyx_grid' ? 'grid' : 'guides'}: ${String(e)}`, 'error'));
+  }
+
+  /* ---------------------------------------------------------------- connectors */
+
+  /**
+   * The object under the pointer that a connector's end could attach to (`hint`: its connection points
+   * are shown), and the point it snaps to when the pointer is near one (a side's middle, or the centre:
+   * the end then lies on the outline towards the other end). Connectors themselves take no ends.
+   */
+  private connectSite(ev: { clientX: number; clientY: number }, ctx: PageCtx, exclude: number | null): { hint: number | null; snap: ConnectSnap | null } {
+    const [mx, my] = ctx.mm(ev);
+    const tol = 10 * ctx.mmPerPx;
+    let hint: number | null = null;
+    for (const el of document.elementsFromPoint(ev.clientX, ev.clientY)) {
+      if (!ctx.pv.contentDOM.contains(el) || el.closest('.ol-master-layer')) continue;
+      const objEl = (el as HTMLElement).closest?.('.ol-obj') as HTMLElement | null;
+      if (!objEl) continue;
+      const own = this.objectOfDom(objEl);
+      if (!own || own.pos === exclude || isConnector(own.node)) continue;
+      hint = own.pos;
+      break;
+    }
+    // near a connection point of the object under the pointer, or of any object (a point just outside it)
+    const cands = hint !== null ? [hint] : [];
+    const page = this.view.state.doc.nodeAt(ctx.pos);
+    page?.forEach((c, off) => { const p = ctx.pos + 1 + off; if (c.type.name !== 'ol_notes' && p !== exclude && p !== hint && !isConnector(c)) cands.push(p); });
+    let best: ConnectSnap | null = null, bestD = tol;
+    for (const pos of cands) {
+      const n = this.view.state.doc.nodeAt(pos);
+      if (!n) continue;
+      for (const site of [...SIDES, null] as (Side | null)[]) {
+        const pt = site ? sitePoint(n, site) : centre(n);
+        const d = Math.hypot(pt[0] - mx, pt[1] - my);
+        if (d < bestD) { bestD = d; best = { pos, node: n, side: site, point: pt }; }
+      }
+    }
+    if (best && hint === null) hint = best.pos;
+    return { hint, snap: best };
+  }
+
+  /** the pointer over the canvas: with the line or arrow tool, the connection points of the object under it */
+  hover(ev: PointerEvent): void {
+    if (!this.active || this.gesture) return;
+    const st = layoutKey.getState(this.view.state)!;
+    const was = this.connectHint;
+    if (st.tool !== 'line' && st.tool !== 'arrow') { if (was) { this.connectHint = null; this.renderOverlays(); } return; }
+    const ctx = this.pageCtxFromEl(ev.target as Element);
+    const c = ctx ? this.connectSite(ev, ctx, null) : null;
+    const next = ctx && c && c.hint !== null ? { page: ctx.pos, targets: [{ pos: c.hint, on: c.snap && c.snap.pos === c.hint ? c.snap.side ?? 'c' as const : null }] } : null;
+    if (JSON.stringify(next) === JSON.stringify(was)) return;
+    this.connectHint = next;
+    this.renderOverlays();
+  }
+
+  /** drag one end of a line or connector: onto a connection point it attaches, elsewhere it lets go */
+  private startEndDrag(ev: PointerEvent, pos: number, which: 'from' | 'to'): void {
+    if (ev.button !== 0) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const ctx = this.pageCtxAt(pos);
+    const orig = this.view.state.doc.nodeAt(pos);
+    const ends = orig ? lineEnds(orig) : null;
+    if (!ctx || !orig || !ends) return;
+    const other = which === 'from' ? ends[1] : ends[0];
+    let snap: ConnectSnap | null = null;
+    let pt: [number, number] = which === 'from' ? ends[0] : ends[1];
+    const shapeFor = (p: [number, number]) => {
+      const a: [number, number] = which === 'from' ? p : other, b: [number, number] = which === 'from' ? other : p;
+      const segs: PathSeg[] = orig.attrs.conn === 'elbow' ? elbowSegs(a, b) : [{ c: 'M', p: a }, { c: 'L', p: b }];
+      return shapeAttrsFor(segs);
+    };
+    this.beginLive([pos]);
+    this.runGesture(ev, {
+      move: (e) => {
+        const c = this.connectSite(e, ctx, null);
+        snap = c.snap;
+        pt = snap ? (snap.side ? snap.point : outlinePoint(snap.node, other)) : ctx.mm(e);
+        this.connectHint = c.hint !== null ? { page: ctx.pos, targets: [{ pos: c.hint, on: snap && snap.pos === c.hint ? snap.side ?? 'c' : null }] } : null;
+        const p = pt;
+        // (the end let go while it is dragged: the connector is drawn to the pointer, not back to its object)
+        this.liveApply(tr => L.setAttrs(tr, pos, { ...shapeFor(p), [which]: null }));
+      },
+      up: () => {
+        this.connectHint = null;
+        const s = snap, p = pt;
+        this.commit(tr => {
+          let ref: string | null = null;
+          if (s) {
+            let id = tr.doc.nodeAt(s.pos)?.attrs.id as string | null;
+            if (!id) { id = freshId(tr.doc.nodeAt(ctx.pos)!); L.setAttrs(tr, s.pos, { id }); }
+            ref = endRef(id, s.side);
+          }
+          L.setAttrs(tr, pos, { ...shapeFor(p), [which]: ref });
+        }, () => [pos]);
+      },
+      cancel: () => { this.connectHint = null; this.cancelLive(); },
     });
   }
 
@@ -2087,7 +2493,7 @@ class LayoutController {
         if (k === 'ArrowDown' || k === 'ArrowRight') { this.stepSlide(1); return true; }
         if (k === 'ArrowUp' || k === 'ArrowLeft') { this.stepSlide(-1); return true; }
         if (k === 'Home') { this.stepSlide(0, true); return true; }
-        if (k === 'End') { this.stepSlide(L.pages(view.state.doc).length - 1, true); return true; }
+        if (k === 'End') { this.stepSlide(L.pages(view.state.doc, this.kind()).length - 1, true); return true; }
       }
       if (mod && ev.key.toLowerCase() === 'a' && !ev.shiftKey) {
         const ctx = this.currentPage();
@@ -2106,6 +2512,9 @@ class LayoutController {
       const step = ev.shiftKey ? 10 : ev.altKey ? 0.1 : 1;
       const dx = k === 'ArrowLeft' ? -step : k === 'ArrowRight' ? step : 0, dy = k === 'ArrowUp' ? -step : k === 'ArrowDown' ? step : 0;
       const tr = view.state.tr;
+      // (a connector nudged without its objects lets go of them, as when it is dragged)
+      const loose = looseEnds(sel.map(o => o.node));
+      for (const o of sel) { const l = loose(o.node); if (l) L.setAttrs(tr, o.pos, l); }
       for (const p of positions) L.translate(tr, p, dx, dy);
       view.dispatch(selectObjects(tr, positions));
       return true;
@@ -2208,7 +2617,7 @@ class LayoutController {
     const tr = this.view.state.tr;
     const made: number[] = [];
     let p = at;
-    for (const n of nodes) { tr.insert(p, n); if (shift) L.translate(tr, p, shift, shift); made.push(p); p += n.nodeSize; }
+    for (const n of copyObjects(nodes, page)) { tr.insert(p, n); if (shift) L.translate(tr, p, shift, shift); made.push(p); p += n.nodeSize; }
     this.view.dispatch(selectObjects(tr, made));
     return true;
   }
@@ -2303,6 +2712,42 @@ function compareWithPdf(content: HTMLElement, rec: LayoutCheckBox, pxPerPt: numb
   }
   if (differs) return { kind: 'lines', natural: rec.natural, text: `In the PDF this text is ${diffText}.` };
   return null;
+}
+
+/* ------------------------------------------------------------------ connectors */
+
+/** an end of a connector being made: the object, its side (null: its middle — the outline), the point */
+interface ConnectSnap { pos: number; node: PMNode; side: Side | null; point: [number, number] }
+
+const o0 = (list: { node: PMNode }[]) => list[0].node;
+
+/** For objects moved together: what a connector among them lets go of (the ends whose objects stay), null: nothing. */
+function looseEnds(moved: PMNode[]): (n: PMNode) => Record<string, null> | null {
+  const ids = new Set<string>();
+  const collect = (n: PMNode) => { if (n.attrs.id) ids.add(n.attrs.id); n.forEach(collect); };
+  moved.forEach(collect);
+  return (n: PMNode) => {
+    if (!isConnector(n)) return null;
+    const out: Record<string, null> = {};
+    for (const k of ['from', 'to'] as const) { const e = parseEnd(n.attrs[k]); if (e && !ids.has(e.id)) out[k] = null; }
+    return Object.keys(out).length ? out : null;
+  };
+}
+
+/** A line's two ends on the page — a connector's, or an open path of two points — else null. */
+function lineEnds(n: PMNode): [[number, number], [number, number]] | null {
+  if (n.type.name !== 'ol_shape') return null;
+  const segs = pageSegs(n);
+  const pts = segs.filter(s => s.c !== 'Z') as { p: number[] }[];
+  const closed = segs.some(s => s.c === 'Z');
+  if (closed || pts.length < 2 || (!isConnector(n) && (pts.length !== 2 || segs[1].c !== 'L'))) return null;
+  const a = pts[0].p, b = pts[pts.length - 1].p;
+  return [[a[0], a[1]], [b[b.length - 2], b[b.length - 1]]];
+}
+
+function elbowSegs(a: [number, number], b: [number, number]): PathSeg[] {
+  const mx = (a[0] + b[0]) / 2;
+  return [{ c: 'M', p: a }, { c: 'L', p: [mx, a[1]] }, { c: 'L', p: [mx, b[1]] }, { c: 'L', p: b }];
 }
 
 /* ------------------------------------------------------------------ small helpers */

@@ -92,19 +92,48 @@ export function scaleThumb(clip: HTMLElement, holder: HTMLElement | null, width:
   clip.style.height = `${width * page.h / page.w}px`;
 }
 
+/** the deck's masters offered by the New slide picker: a slide of one has its objects and empty placeholders */
+export interface PickerMasters {
+  view: EditorView;
+  page: { w: number; h: number };
+  masters: { name: string; wrap: HTMLElement | null }[];
+  pickMaster(name: string): void;
+}
+
 /**
  * The New slide layout picker under / above `anchor`, inside `host` (positioned); `pick` gets the chosen
- * layout. Returns the function that closes it (Esc and a click elsewhere close it too, then `closed`).
+ * layout — or, for a deck with masters, `masters.pickMaster` the chosen master (shown first, as
+ * thumbnails). Returns the function that closes it (Esc and a click elsewhere close it too, then `closed`).
  */
-export function layoutPicker(host: HTMLElement, anchor: HTMLElement, pick: (l: SlideLayout) => void, closed: () => void): () => void {
+export function layoutPicker(host: HTMLElement, anchor: HTMLElement, pick: (l: SlideLayout) => void, closed: () => void, masters?: PickerMasters): () => void {
   const pop = div('ol-rail-pop');
   pop.dataset.railLayoutPicker = '';
   const heading = div('ol-rail-pop-title');
   heading.textContent = 'New slide';
   pop.append(heading);
-  const grid = div('ol-rail-pop-grid');
   let off = () => {};
   const close = () => { off(); pop.remove(); closed(); };
+  if (masters?.masters.length) {
+    const mgrid = div('ol-rail-pop-grid ol-rail-pop-masters');
+    for (const m of masters.masters) {
+      const b = button('ol-rail-layout ol-rail-master', '', `A slide of the master “${m.name}”`);
+      b.dataset.master = m.name;
+      const clip = div('ol-rail-master-clip');
+      const holder = m.wrap ? drawPage(masters.view, m.wrap, masters.page) : null;
+      scaleThumb(clip, holder, 64, masters.page);
+      if (holder) clip.append(holder);
+      const cap = document.createElement('span');
+      cap.textContent = m.name;
+      b.append(clip, cap);
+      b.addEventListener('click', () => { close(); masters.pickMaster(m.name); });
+      mgrid.append(b);
+    }
+    pop.append(mgrid);
+    const h2 = div('ol-rail-pop-title ol-rail-pop-sub');
+    h2.textContent = 'Layouts without a master';
+    pop.append(h2);
+  }
+  const grid = div('ol-rail-pop-grid');
   for (const l of SLIDE_LAYOUTS) {
     const b = button('ol-rail-layout', '', l.label);
     b.dataset.layout = l.id;
@@ -127,7 +156,7 @@ export function layoutPicker(host: HTMLElement, anchor: HTMLElement, pick: (l: S
   document.addEventListener('pointerdown', away, true);
   document.addEventListener('keydown', esc, true);
   off = () => { document.removeEventListener('pointerdown', away, true); document.removeEventListener('keydown', esc, true); };
-  (grid.querySelector('button[data-layout="content"]') as HTMLElement | null)?.focus();
+  ((pop.querySelector('button[data-master]') ?? grid.querySelector('button[data-layout="content"]')) as HTMLElement | null)?.focus();
   return close;
 }
 

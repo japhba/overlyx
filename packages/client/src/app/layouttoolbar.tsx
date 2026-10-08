@@ -13,7 +13,9 @@ import { hexToTex, cssColor, OBJECT_EFFECTS, PAGE_TRANSITIONS, PAGE_PRESETS, SHA
 import { api } from '../api';
 import { ICONS, NAMED_COLORS, type ToolButton, type Palette } from './Toolbar';
 import type { ToolbarContext } from './toolbars';
-import { layoutKey, selectedObjects, setTool, layoutControllerOf, selectObjects, showNotes, SHAPE_TOOLS, type Tool } from '../editor/layout/controller';
+import { layoutKey, selectedObjects, setTool, layoutControllerOf, selectObjects, showNotes, setMasterView, isMasterView, toggleObjectsPanel, canvasGuides, setCanvasSwitch, setCanvasGuides, SHAPE_TOOLS, type Tool } from '../editor/layout/controller';
+import { objectsShown } from '../editor/layout/objects';
+import { masterPages, applyMaster, slideFromMaster, newMaster, renameMaster, deleteMaster, duplicateMaster, possibleBases, resolvedFill } from '../editor/layout/masters';
 import * as L from '../editor/layout/commands';
 import { docColors, boxOf, objectBounds } from '../editor/layout/geom';
 import { placeImage, placeImageFiles } from '../editor/layout/images';
@@ -50,6 +52,8 @@ Object.assign(ICONS, {
   'ol-anim': I('<circle cx="5" cy="8" r="2.5" stroke-dasharray="1.4 1.1"/><circle cx="11" cy="8" r="3" fill="currentColor" fill-opacity="0.3"/><path d="M7.8 8h1"/>'),
   'ol-page-add': I('<rect x="2.5" y="3.5" width="11" height="7" rx="0.5"/><path d="M8 11.5v3.5M6.2 13.2h3.6"/>'),
   'ol-page': I('<rect x="1.5" y="3.5" width="13" height="9" rx="0.8"/><path d="M4 6.5h5M4 9h3"/>'),
+  'ol-objects': I('<path d="M8 2 14 5 8 8 2 5z"/><path d="m2 8 6 3 6-3M2 11l6 3 6-3"/>'),
+  'ol-grid': I('<path d="M2 5.5h12M2 10.5h12M5.5 2v12M10.5 2v12"/>'),
   'ol-notes': I('<rect x="2.5" y="1.5" width="11" height="13" rx="1"/><path d="M5 5h6M5 8h6M5 11h4"/>'),
   'ol-present': '<svg viewBox="0 0 16 16"><path d="M4.5 2.5l9 5.5-9 5.5z" fill="currentColor"/></svg>',
   'ol-lock': I('<rect x="3.5" y="7" width="9" height="7" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>'),
@@ -199,6 +203,32 @@ function AnimationPanel({ view, objs, close }: { view: EditorView; objs: { node:
   );
 }
 
+/** The canvas's grid (shown, snapped to, its spacing — the document's), its guides (shown; added, all removed) and rulers. */
+function GridPanel({ view, close }: { view: EditorView; close: () => void }) {
+  const [state, setState] = useState(() => canvasGuides(view));
+  if (!state) return null;
+  const sw = (k: 'grid' | 'snapGrid' | 'guides' | 'rulers', label: string) => (
+    <label class="ol-check-row"><input type="checkbox" checked={state.prefs[k]} data-ol-pref={k} onChange={e => { setCanvasSwitch(view, k, (e.target as HTMLInputElement).checked); setState(canvasGuides(view)); }} /> {label}</label>
+  );
+  const page = layoutControllerOf(view)?.page ?? { w: 160, h: 90 };
+  const add = (axis: 'x' | 'y') => { setCanvasGuides(view, { guides: [...state.guides, { axis, at: Math.round((axis === 'x' ? page.w : page.h) / 2 * 10) / 10 }] }); if (!state.prefs.guides) setCanvasSwitch(view, 'guides', true); close(); };
+  return (
+    <div class="ol-panel">
+      {sw('grid', 'Show the grid')}
+      {sw('snapGrid', 'Snap to the grid')}
+      <label>Spacing <NumberInput value={state.grid} step={0.5} onCommit={v => { if (v > 0) { setCanvasGuides(view, { grid: v }); setState(canvasGuides(view)); } }} /> mm</label>
+      <div class="ol-hint">The grid’s spacing and the guides are the document’s (everyone editing it sees them); what is shown is yours.</div>
+      {sw('guides', `Show the guides (${state.guides.length})`)}
+      {sw('rulers', 'Rulers — drag a guide out of one')}
+      <div class="ol-seg ol-wrap">
+        <button type="button" class="small-btn" data-ol-guide-add="x" onClick={() => add('x')}>Vertical guide</button>
+        <button type="button" class="small-btn" onClick={() => add('y')}>Horizontal guide</button>
+        <button type="button" class="small-btn" disabled={!state.guides.length} onClick={() => { setCanvasGuides(view, { guides: [] }); close(); }}>Remove all guides</button>
+      </div>
+    </div>
+  );
+}
+
 /** Page size: the presets (slides, posters, pages) or a custom size, written as the document's paper size. */
 function PageSizePanel({ ctx, close }: { ctx: ToolbarContext; close: () => void }) {
   const ctl = ctx.view ? layoutControllerOf(ctx.view) : null;
@@ -312,7 +342,9 @@ export function layoutToolbar(ctx: ToolbarContext): ToolButton[][] {
     { id: 'ol-stroke', icon: 'ol-stroke', html: ICONS['ol-stroke'] + swatch(curStroke), title: `Outline: ${curStroke ?? 'none'}`, disabled: !strokable.length, palette: { title: 'Outline', render: close => <LayoutColorPalette current={curStroke} close={close} noneLabel="No outline" onPick={c => setStyle(strokable, { stroke: c })} /> } },
     { id: 'ol-width', icon: 'ol-width', title: `Line width: ${curLw} pt`, disabled: !strokable.length, palette: { title: 'Line width (pt)', list: true, cols: 1, items: [0.4, 0.6, 0.8, 1, 1.5, 2, 3, 4, 6, 8].map(w => ({ label: `${w} pt${w === 0.4 ? ' (TikZ’s default)' : ''}`, active: Math.abs(curLw - w) < 1e-3, action: () => setStyle(strokable, { lw: w, ...(strokable.some(o => !o.node.attrs.stroke) ? {} : {}) }) })) } },
     { id: 'ol-dash', icon: 'ol-dash', title: 'Dashes', disabled: !shapesOnly.length, palette: { title: 'Dash pattern', list: true, cols: 1, items: [['', 'Solid'], ['dashed', 'Dashed'], ['densely dashed', 'Densely dashed'], ['loosely dashed', 'Loosely dashed'], ['dotted', 'Dotted'], ['densely dotted', 'Densely dotted'], ['dashdotted', 'Dash-dotted']].map(([v, l]) => ({ label: l, active: (shapesOnly[0]?.node.attrs.dash ?? '') === v, action: () => setStyle(shapesOnly, { dash: v || null }) })) } },
-    { id: 'ol-tips', icon: 'ol-tips', title: 'Arrow tips', disabled: !shapesOnly.length, palette: { title: 'Arrow tips (TikZ)', list: true, cols: 1, items: [['', 'None'], ['-Stealth', 'End: Stealth'], ['Stealth-', 'Start: Stealth'], ['Stealth-Stealth', 'Both: Stealth'], ['-Latex', 'End: LaTeX'], ['->', 'End: open'], ['<->', 'Both: open']].map(([v, l]) => ({ label: l, active: (shapesOnly[0]?.node.attrs.arrows ?? '') === v, action: () => setStyle(shapesOnly, { arrows: v || null }) })) } },
+    { id: 'ol-tips', icon: 'ol-tips', title: 'Arrow tips', disabled: !shapesOnly.length, palette: { title: 'Arrow tips (TikZ)', list: true, cols: 1, items: [...[['', 'None'], ['-Stealth', 'End: Stealth'], ['Stealth-', 'Start: Stealth'], ['Stealth-Stealth', 'Both: Stealth'], ['-Latex', 'End: LaTeX'], ['->', 'End: open'], ['<->', 'Both: open']].map(([v, l]) => ({ label: l, active: (shapesOnly[0]?.node.attrs.arrows ?? '') === v, action: () => setStyle(shapesOnly, { arrows: v || null }) })),
+      // a connector (its ends attached to objects, connectors.ts): straight, or in horizontal and vertical runs
+      ...(shapesOnly.some(o => o.node.attrs.from || o.node.attrs.to) ? [['straight', 'Connector: straight'], ['elbow', 'Connector: elbow']].map(([v, l]) => ({ label: l, active: (shapesOnly[0]?.node.attrs.conn ?? 'straight') === v, action: () => setStyle(shapesOnly, { conn: v === 'straight' ? null : v }) })) : [])] } },
     // always there (disabled unless one text box is selected): the row keeps its width, so the page below never jumps when the selection changes
     { id: 'ol-boxstyle', icon: 'ol-boxstyle', title: 'Text box: margin, corners, alignment, font size', disabled: !(flat.length === 1 && flat[0].node.type.name === 'ol_box'), palette: { title: 'Text box', render: (close: () => void) => <BoxStylePanel view={view} pos={flat[0].pos} close={close} /> } } as ToolButton,
     { id: 'ol-opacity', icon: 'α', title: 'Opacity', disabled: !flat.length, palette: { title: 'Opacity', list: true, cols: 1, items: [1, 0.85, 0.7, 0.5, 0.3, 0.15].map(o => ({ label: `${Math.round(o * 100)} %`, active: Math.abs((flat[0]?.node.attrs.opacity ?? 1) - o) < 1e-3, action: () => setStyle(flat, { opacity: o === 1 ? null : o }) })) } },
@@ -325,31 +357,63 @@ export function layoutToolbar(ctx: ToolbarContext): ToolButton[][] {
 
   const page = ctl?.currentPage();
   const pageNode = page ? view.state.doc.nodeAt(page.pos) : null;
+  // the master view (masters.ts): the page commands are the masters'
+  const inMasters = isMasterView(view);
+  const masterNames = masterPages(view.state.doc).map(m => m.node.attrs.name as string);
+  const masterFill = pageNode?.attrs.master ? resolvedFill(view.state.doc, { attrs: { fill: null, master: pageNode.attrs.master } }) : null;
   const pages: ToolButton[] = [
-    { id: 'ol-page-add', icon: 'ol-page-add', title: 'New page after this one (a copy with Shift)', action: () => run(v => {
+    { id: 'ol-page-add', icon: 'ol-page-add', title: inMasters ? 'A new master page' : 'New page after this one (with the master of this one)', action: () => run(v => {
+      if (inMasters) { v.dispatch(newMaster(v.state, pageSz).tr); return; }
       const cur = ctl?.currentPage();
-      const at = cur ? cur.pos + v.state.doc.nodeAt(cur.pos)!.nodeSize : null;
+      const curNode = cur ? v.state.doc.nodeAt(cur.pos) : null;
+      const made = curNode?.attrs.master ? slideFromMaster(v.state, cur!.pos, curNode.attrs.master) : null;
+      if (made) { v.dispatch(made.tr); return; }
+      const at = cur ? cur.pos + curNode!.nodeSize : null;
       v.dispatch(L.insertPage(v.state, at));
     }) },
-    { id: 'ol-page', icon: 'ol-page', title: 'This page: duplicate, delete, move, background, transition, size', palette: { title: 'Page', render: close => (
+    { id: 'ol-page', icon: 'ol-page', title: inMasters ? 'This master: name, the master it builds on, background, duplicate, delete' : 'This page: master, duplicate, delete, move, background, transition, size', palette: { title: inMasters ? 'Master' : 'Page', render: close => (
       <div class="ol-panel">
-        <div class="ol-seg ol-wrap">
+        {inMasters ? <>
+          <label>Name <input class="ol-text-in" value={pageNode?.attrs.name ?? ''} onKeyDown={e => e.stopPropagation()} onChange={e => run(v => { const cur = ctl?.currentPage(); const name = (e.target as HTMLInputElement).value.trim(); if (!cur || !name) return; const tr = renameMaster(v.state, cur.pos, name); if (tr) v.dispatch(tr); })} /></label>
+          <div class="ol-colors-title">Builds on (its objects drawn first)</div>
+          <div class="ol-seg ol-wrap">{[null, ...possibleBases(view.state.doc, pageNode?.attrs.name ?? '')].map(b => <button key={b ?? ''} type="button" class={'small-btn' + ((pageNode?.attrs.master ?? null) === b ? ' active' : '')} onClick={() => { close(); run(v => { const cur = ctl?.currentPage(); if (cur) v.dispatch(L.setAttrs(v.state.tr, cur.pos, { master: b })); }); }}>{b ?? 'nothing'}</button>)}</div>
+          <div class="ol-seg ol-wrap">
+            <button type="button" class="small-btn" onClick={() => { close(); run(v => { const cur = ctl?.currentPage(); const r = cur ? duplicateMaster(v.state, cur.pos) : null; if (r) v.dispatch(r.tr); }); }}>Duplicate</button>
+            <button type="button" class="small-btn" onClick={() => { close(); run(v => { const cur = ctl?.currentPage(); const tr = cur ? deleteMaster(v.state, cur.pos) : null; if (tr) v.dispatch(tr); }); }}>Delete</button>
+            <button type="button" class="small-btn" data-ol-close-masters="" onClick={() => { close(); setMasterView(view, false); }}>Close masters</button>
+          </div>
+        </> : <>
+          <div class="ol-colors-title">Master (drawn behind this page; its placeholders place the title and text)</div>
+          <div class="ol-seg ol-wrap">{[null, ...masterNames].map(m => <button key={m ?? ''} type="button" data-ol-master={m ?? ''} class={'small-btn' + ((pageNode?.attrs.master ?? null) === m ? ' active' : '')} onClick={() => { close(); run(v => { const cur = ctl?.currentPage(); if (!cur) return; const tr = v.state.tr; applyMaster(tr, cur.pos, m); v.dispatch(tr); }); }}>{m ?? 'none'}</button>)}</div>
+          <div class="ol-seg ol-wrap">
+            {pageNode?.attrs.master ? <button type="button" class="small-btn" onClick={() => { close(); run(v => { const cur = ctl?.currentPage(); if (!cur) return; const tr = v.state.tr; applyMaster(tr, cur.pos, pageNode.attrs.master, true); v.dispatch(tr); }); }}>Reset to master</button> : null}
+            <button type="button" class="small-btn" data-ol-edit-masters="" onClick={() => { close(); setMasterView(view, true); }}>Edit masters</button>
+          </div>
+        </>}
+        {inMasters ? null : <div class="ol-seg ol-wrap">
           <button type="button" class="small-btn" onClick={() => { close(); run(v => { const cur = ctl?.currentPage(); if (!cur) return; const n = v.state.doc.nodeAt(cur.pos)!; v.dispatch(L.insertPage(v.state, cur.pos + n.nodeSize, n)); }); }}>Duplicate</button>
           <button type="button" class="small-btn" onClick={() => { close(); run(v => { const cur = ctl?.currentPage(); if (!cur) return; const tr = L.deletePage(v.state, cur.pos); if (tr) v.dispatch(tr); else ctx.notify('A document keeps at least one page', 'error'); }); }}>Delete</button>
           <button type="button" class="small-btn" onClick={() => { close(); run(v => { const cur = ctl?.currentPage(); if (!cur) return; const tr = L.movePage(v.state, cur.pos, -1); if (tr) v.dispatch(tr.scrollIntoView()); }); }}>Move up</button>
           <button type="button" class="small-btn" onClick={() => { close(); run(v => { const cur = ctl?.currentPage(); if (!cur) return; const tr = L.movePage(v.state, cur.pos, 1); if (tr) v.dispatch(tr.scrollIntoView()); }); }}>Move down</button>
-        </div>
+        </div>}
         <div class="ol-colors-title">Background</div>
-        <LayoutColorPalette current={pageNode?.attrs.fill ?? null} close={close} noneLabel="White" onPick={c => run(v => { const cur = ctl?.currentPage(); if (cur) v.dispatch(L.setAttrs(v.state.tr, cur.pos, { fill: c })); })} />
-        <div class="ol-colors-title">Transition to this page</div>
-        <div class="ol-seg ol-wrap">{['', ...PAGE_TRANSITIONS].map(tn => <button key={tn} type="button" class={'small-btn' + ((pageNode?.attrs.transition ?? '') === tn ? ' active' : '')} onClick={() => { close(); run(v => { const cur = ctl?.currentPage(); if (cur) v.dispatch(L.setAttrs(v.state.tr, cur.pos, { transition: tn || null })); }); }}>{tn || 'none'}</button>)}</div>
-        <label>Name <input class="ol-text-in" value={pageNode?.attrs.name ?? ''} onKeyDown={e => e.stopPropagation()} onChange={e => run(v => { const cur = ctl?.currentPage(); if (cur) v.dispatch(L.setAttrs(v.state.tr, cur.pos, { name: (e.target as HTMLInputElement).value.trim() || null })); })} /></label>
+        <LayoutColorPalette current={pageNode?.attrs.fill ?? null} close={close} noneLabel={masterFill ? 'The master’s' : 'White'} onPick={c => run(v => { const cur = ctl?.currentPage(); if (cur) v.dispatch(L.setAttrs(v.state.tr, cur.pos, { fill: c })); })} />
+        {inMasters ? null : <>
+          <div class="ol-colors-title">Transition to this page</div>
+          <div class="ol-seg ol-wrap">{['', ...PAGE_TRANSITIONS].map(tn => <button key={tn} type="button" class={'small-btn' + ((pageNode?.attrs.transition ?? '') === tn ? ' active' : '')} onClick={() => { close(); run(v => { const cur = ctl?.currentPage(); if (cur) v.dispatch(L.setAttrs(v.state.tr, cur.pos, { transition: tn || null })); }); }}>{tn || 'none'}</button>)}</div>
+          <label>Name <input class="ol-text-in" value={pageNode?.attrs.name ?? ''} onKeyDown={e => e.stopPropagation()} onChange={e => run(v => { const cur = ctl?.currentPage(); if (cur) v.dispatch(L.setAttrs(v.state.tr, cur.pos, { name: (e.target as HTMLInputElement).value.trim() || null })); })} /></label>
+        </>}
       </div>
     ) } },
     { id: 'ol-size', icon: `${Math.round(pageSz.w)}×${Math.round(pageSz.h)}`, title: 'Page size of the document', palette: { title: 'Page size', render: close => <PageSizePanel ctx={ctx} close={close} /> } },
     // (a page without notes offers "Click to add speaker notes" under it: nothing is added to the file by showing them)
     { id: 'ol-notes', icon: 'ol-notes', title: 'Speaker notes under the pages (beamer’s \\note)', active: view.dom.classList.contains('ol-show-notes'), action: () => run(v => showNotes(v, !v.dom.classList.contains('ol-show-notes'))) },
     { id: 'ol-present', icon: 'ol-present', title: 'Present — full screen from this page (F5; Shift+F5 from the start)', action: () => run(v => startPresentation(v, { fromCurrent: true })) },
+    // the grid, the guides and the rulers (guides.ts)
+    { id: 'ol-grid', icon: 'ol-grid', title: 'Grid and guides: show the grid, snap to it, its spacing; the guides and rulers', active: canvasGuides(view)?.prefs.grid || canvasGuides(view)?.prefs.snapGrid,
+      palette: { title: 'Grid and guides', render: close => <GridPanel view={view} close={close} /> } },
+    // the objects list beside the canvas: select, rename, hide, lock, reorder (objects.ts)
+    { id: 'ol-objects', icon: 'ol-objects', title: 'Objects: the list of this page’s objects — select, rename, hide, lock, reorder', active: objectsShown(), action: () => run(v => { toggleObjectsPanel(v); }) },
   ];
 
   // the fields are there with nothing selected too (empty, disabled): the row keeps its width

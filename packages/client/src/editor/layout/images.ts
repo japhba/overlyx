@@ -6,12 +6,14 @@
 import type { EditorView } from 'prosemirror-view';
 import { NodeSelection } from 'prosemirror-state';
 import { schema } from '@overlyx/core';
-import { graphicsUrl } from '../../api';
+import { graphicsUrl, fileUrl } from '../../api';
 import { editorContext, resolveDocPath, toDocRel, viewDocDir, viewProject } from '../context';
 import { imageExt, imageFiles, isSvgMarkup, svgFile, uploadBaseName, uploadUnique } from '../imagepaste';
 import { isLayoutDoc, insertObject, pageAt } from './commands';
 import { isLayoutObject } from './geom';
 import { layoutControllerOf, selectObjects } from './controller';
+import { svgToLayoutObjects } from './svgimport';
+import { copyObjects } from './connectors';
 
 /** The natural aspect ratio (height / width) of a project image, as the editor's image route renders it. */
 export function imageAspect(view: EditorView, docRel: string): Promise<number> {
@@ -79,9 +81,60 @@ export function layoutPaste(view: EditorView, event: ClipboardEvent): boolean {
   const images = imageFiles(event.clipboardData);
   const text = event.clipboardData?.getData('text/plain') ?? '';
   const inBox = !objectMode(view) && !!pageAt(view.state.doc, view.state.selection.from) && view.state.selection.$from.parent.type.name === 'paragraph';
+  // an SVG (Inkscape, Illustrator, a plot): editable shapes, not a picture
+  const svgs = images.filter(f => f.type === 'image/svg+xml' || /\.svg$/i.test(f.name));
+  if (svgs.length === 1 && images.length === 1 && !inBox) { void svgs[0].text().then(t => { if (!placeSvg(view, t)) void placeImageFiles(view, images); }); return true; }
   if (images.length && !inBox) { void placeImageFiles(view, images); return true; }
-  if (!inBox && text && isSvgMarkup(text)) { void placeImageFiles(view, [svgFile(text)]); return true; }
+  if (!inBox && text && isSvgMarkup(text)) { if (!placeSvg(view, text)) void placeImageFiles(view, [svgFile(text)]); return true; }
   return false;
+}
+
+/** SVG markup as shapes and text boxes on the current page (svgimport.ts); false when nothing in it can be drawn. */
+export function placeSvg(view: EditorView, svg: string, at?: [number, number]): boolean {
+  const ctl = layoutControllerOf(view);
+  const page = ctl?.currentPage();
+  if (!ctl || !page) return false;
+  const r = svgToLayoutObjects(svg, { page: ctl.page, at });
+  if (!r.nodes.length) return false;
+  // on top of the page's objects, before its notes
+  let end = page.pos + page.node.nodeSize - 1;
+  if (page.node.lastChild?.type.name === 'ol_notes') end -= page.node.lastChild.nodeSize;
+  const tr = view.state.tr;
+  const made: number[] = [];
+  for (const n of copyObjects(r.nodes, page.node)) { tr.insert(end, n); made.push(end); end += n.nodeSize; }
+  view.dispatch(selectObjects(tr, made));
+  if (r.warnings.length) editorContext.notify?.(`Pasted as shapes — ${r.warnings[0]}${r.warnings.length > 1 ? ` (and ${r.warnings.length - 1} more)` : ''}`, 'info');
+  return true;
+}
+
+/**
+ * An SVG picture on a page turned into shapes and text boxes where it is (PowerPoint's "Convert to
+ * Shape"): its file is read, drawn into the picture's frame, and takes its place in the drawing order.
+ */
+export async function imageToShapes(view: EditorView, pos: number): Promise<void> {
+  const img = view.state.doc.nodeAt(pos);
+  const project = viewProject(view);
+  const ctl = layoutControllerOf(view);
+  if (!img || img.type.name !== 'ol_image' || !project || !ctl) return;
+  const file = resolveDocPath(String(img.attrs.src ?? ''), viewDocDir(view));
+  let text = '';
+  try {
+    const res = await fetch(fileUrl(project, file), { credentials: 'include' });
+    if (!res.ok) throw new Error(`${res.status}`);
+    text = await res.text();
+  } catch (e) { editorContext.notify?.(`Could not read ${file}: ${(e as Error).message}`, 'error'); return; }
+  const r = svgToLayoutObjects(text, { page: ctl.page, into: { x: Number(img.attrs.x), y: Number(img.attrs.y), w: Number(img.attrs.w), h: Number(img.attrs.h) } });
+  if (!r.nodes.length) { editorContext.notify?.(`Nothing in ${file} can be drawn as shapes${r.warnings.length ? ` (${r.warnings[0]})` : ''}`, 'error'); return; }
+  // the picture may have moved meanwhile: found again by its node
+  let at = -1;
+  view.state.doc.descendants((n, p) => { if (n === img) at = p; return at < 0; });
+  if (at < 0) return;
+  const page = pageAt(view.state.doc, at);
+  const nodes = copyObjects(r.nodes, page?.node ?? null).map(n => (img.attrs.step || img.attrs.name ? n.type.create({ ...n.attrs, step: img.attrs.step, effect: img.attrs.effect, name: n.attrs.name ?? img.attrs.name }, n.content, n.marks) : n));
+  const tr = view.state.tr.replaceWith(at, at + img.nodeSize, nodes);
+  view.dispatch(selectObjects(tr, [at]));
+  const notes = [...(img.attrs.rot ? ['the picture’s rotation is not kept'] : []), ...(Number(img.attrs.cl) || Number(img.attrs.ct) || Number(img.attrs.cr) || Number(img.attrs.cb) ? ['its crop is not kept'] : []), ...r.warnings];
+  if (notes.length) editorContext.notify?.(`Converted to shapes — ${notes[0]}${notes.length > 1 ? ` (and ${notes.length - 1} more)` : ''}`, 'info');
 }
 
 /** Files dropped onto a page: images are placed where they were dropped. */

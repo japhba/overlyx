@@ -1,6 +1,8 @@
 /**
  * Writing layout pages (layout/model.ts): a paragraph of layout OLPage becomes a plain beamer frame
- * whose object insets are written with the macro package of layout/latex.ts, in drawing order.
+ * whose object insets are written with the macro package of layout/latex.ts, in drawing order. A
+ * master page (`role master`) becomes \begin{olmaster}{name=…} … \end{olmaster}: a definition, drawn
+ * behind every frame whose \olpage names it (beamer's background template, one per master).
  */
 import type { Item, Paragraph } from '../lyx/ast.ts';
 import { paramMap } from '../lyx/ast.ts';
@@ -26,9 +28,16 @@ export function latexLayoutPage(ctx: ExportContext, os: TexStream, rp: RunParams
   const props = par.items.find(it => it.kind === 'inset' && it.inset.type === 'Leaf' && it.inset.name === PAGE_PROPS_INSET);
   const pp = props && props.kind === 'inset' && props.inset.type === 'Leaf' ? props.inset.params : [];
   const frame = param(pp, 'frame') ?? 'plain';
-  os.breakln();
-  os.write(`\\begin{frame}${frame ? `[${frame}]` : ''}\n`);
   const keys = param(pp, 'keys') ?? '';
+  os.breakln();
+  if (param(pp, 'role') === 'master') {
+    os.write(`\\begin{olmaster}{${keys}}\n`);
+    for (const it of par.items) if (it !== props && !(it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === NOTES_INSET)) latexLayoutObject(ctx, os, rp, it);
+    os.breakln();
+    os.write('\\end{olmaster}');
+    return;
+  }
+  os.write(`\\begin{frame}${frame ? `[${frame}]` : ''}\n`);
   // an empty page says \olpage{} all the same: a frame without any object would be read back as a linear beamer frame
   if (keys.trim() || !par.items.some(it => it !== props)) os.write(`\\olpage{${keys}}\n`);
   for (const it of par.items) if (it !== props) latexLayoutObject(ctx, os, rp, it);

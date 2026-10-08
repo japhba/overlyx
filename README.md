@@ -12,8 +12,9 @@
    connection and merge when you're back.
 5. **Layout mode** — slides, posters and free-form pages: text boxes with formulas, vector
    shapes, cropped images and raw TikZ placed anywhere on fixed-size pages, Keynote-style with
-   Inkscape's pen and node tools; the file is a plain beamer `.tex` (animations are overlays) and
-   presents full screen.
+   Inkscape's pen and node tools, connectors, guides and an objects list; slide masters with
+   placeholders, and pasted SVG as editable shapes; the file is a plain beamer `.tex` (animations
+   are overlays, masters `\begin{olmaster}` definitions) and presents full screen.
 6. **Markdown** — `.md` files open in the same editor, restricted to what markdown can hold, with
    markdown's typing (`**bold**`, `> `, "```" …); comments and tracked changes are HTML in the file,
    unchanged blocks are saved byte for byte.

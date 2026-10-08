@@ -2037,6 +2037,27 @@ mjx-mtable:has(.lyx-size-tiny, .lyx-size-scriptsize, .lyx-size-footnotesize, .ly
 .ol-node { width: 9px; height: 9px; margin: -5px 0 0 -5px; background: #fff; border: 1.5px solid var(--ol-sel); pointer-events: auto; cursor: move; transform: rotate(45deg); }
 .ol-node.ol-node-first { background: #cfe0ff; }
 .ol-node.ol-node-sel { background: var(--ol-sel); }
+/* connectors (editor/layout/connectors.ts): the connection points of an object under the line / arrow tool
+   or a dragged end (filled: the one snapped to), and the two ends of a selected line (filled: attached) */
+.ol-site { width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #fff; border: 1.5px solid var(--ol-sel); box-sizing: border-box; z-index: 6; }
+.ol-site.ol-site-on { width: 12px; height: 12px; margin: -6px 0 0 -6px; background: var(--ol-sel); box-shadow: 0 0 0 3px rgba(26,115,232,0.25); }
+.ol-endpt { width: 11px; height: 11px; margin: -6px 0 0 -6px; border-radius: 50%; background: #fff; border: 2px solid var(--ol-sel); box-sizing: border-box; pointer-events: auto; cursor: move; z-index: 7; }
+.ol-endpt.ol-endpt-on { background: var(--ol-sel); }
+/* the grid and the guides of the canvas (editor/layout/guides.ts): the grid a mesh of --ol-grid mm, a guide a
+   thin line with a wider handle across the page and a little beyond */
+.ol-overlay > .ol-grid { left: 0; top: 0; width: 100%; height: 100%; z-index: 0; background-image: linear-gradient(to right, rgba(26,115,232,0.16) 1px, transparent 1px), linear-gradient(to bottom, rgba(26,115,232,0.16) 1px, transparent 1px); background-size: calc(var(--ol-mm) * var(--ol-grid, 5)) calc(var(--ol-mm) * var(--ol-grid, 5)); }
+.ol-overlay > .ol-guideline { pointer-events: auto; z-index: 1; }
+.ol-guideline-x { top: -14px; bottom: -14px; width: 7px; margin-left: -3px; cursor: ew-resize; background: linear-gradient(to right, transparent 3px, #0ea5c6 3px, #0ea5c6 4px, transparent 4px); }
+.ol-guideline-y { left: -14px; right: -14px; height: 7px; margin-top: -3px; cursor: ns-resize; background: linear-gradient(to bottom, transparent 3px, #0ea5c6 3px, #0ea5c6 4px, transparent 4px); }
+.ol-guideline-x:hover, .ol-guideline-x.ol-guideline-drag { background: linear-gradient(to right, transparent 3px, #e0249a 3px, #e0249a 4px, transparent 4px); }
+.ol-guideline-y:hover, .ol-guideline-y.ol-guideline-drag { background: linear-gradient(to bottom, transparent 3px, #e0249a 3px, #e0249a 4px, transparent 4px); }
+.ol-ruler { position: absolute; z-index: 5; display: block; --ruler-bg: var(--surface2); --ruler-fg: var(--ui-muted); --ruler-page: var(--surface); --ruler-edge: var(--ui-border); }
+.ol-ruler-top { cursor: s-resize; }
+.ol-ruler-left { cursor: e-resize; }
+.ol-ruler-corner { position: absolute; z-index: 5; box-sizing: border-box; background: var(--surface2); border-right: 1px solid var(--ui-border); border-bottom: 1px solid var(--ui-border); }
+/* the rulers lie over the scroller's edges: the canvas keeps clear of them */
+.lyx-editor.ol-layout.ol-has-rulers { padding-top: 18px; padding-left: calc(var(--ol-rail-w, 0px) + 18px); }
+.ol-panel .ol-check-row { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .ol-ctl { width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--ol-sel); pointer-events: auto; cursor: move; }
 .ol-ctlline { stroke: var(--ol-sel); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .ol-nodepath { fill: none; stroke: transparent; stroke-width: 8; vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: copy; }
@@ -2192,6 +2213,33 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 /* ------------------------------------------------------------ the slide rail of decks (editor/layout/rail.ts)
    PowerPoint's thumbnail pane, lying over the scroller's left edge inside the editor column; the canvas makes room */
 .lyx-editor.ol-layout.ol-has-rail { padding-left: var(--ol-rail-w, 0px); box-sizing: border-box; }
+/* the objects list (editor/layout/objects.ts): over the scroller's right edge, the canvas makes room */
+.lyx-editor.ol-layout.ol-has-objects { padding-right: var(--ol-objects-w, 0px); box-sizing: border-box; }
+.ol-objects { position: absolute; z-index: 6; width: 236px; display: flex; flex-direction: column; box-sizing: border-box; background: var(--surface2); border-left: 1px solid var(--ui-border); font: 12px/1.3 var(--ui-font); color: var(--ui-fg); user-select: none; -webkit-user-select: none; }
+.ol-objects-head { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--ui-border2); font-weight: 600; }
+.ol-objects-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ol-objects-close { width: 22px; height: 22px; padding: 0; border: none; border-radius: 4px; background: none; color: var(--ui-muted); font-size: 16px; line-height: 1; }
+.ol-objects-close:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.ol-objects-list { position: relative; flex: 1; overflow: auto; padding: 4px 0 8px; }
+.ol-objects-row { display: flex; align-items: center; gap: 4px; min-height: 24px; padding-right: 4px; cursor: default; }
+.ol-objects-row:hover { background: var(--row-hover); }
+.ol-objects-row.selected { background: var(--active-bg); box-shadow: inset 2px 0 0 var(--accent); }
+.ol-objects-row.is-hidden .ol-objects-name, .ol-objects-row.is-hidden .ol-objects-icon { opacity: 0.45; }
+.ol-objects-row.ol-objects-master { color: var(--ui-muted); padding-left: 20px; }
+.ol-objects-fold { flex: none; width: 12px; text-align: center; color: var(--ui-muted); cursor: pointer; font-size: 10px; }
+.ol-objects-icon { flex: none; display: inline-flex; color: var(--ui-muted); }
+.ol-objects-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; outline: none; }
+.ol-objects-name[contenteditable="true"] { background: var(--surface); box-shadow: 0 0 0 1px var(--accent); padding: 0 3px; text-overflow: clip; user-select: text; -webkit-user-select: text; cursor: text; }
+.ol-objects-badges { display: inline-flex; gap: 2px; }
+.ol-objects-badge { padding: 0 4px; border-radius: 6px; background: var(--ui-hover); color: var(--ui-muted); font-size: 10px; line-height: 15px; }
+.ol-objects-eye, .ol-objects-lock { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 20px; padding: 0; border: none; border-radius: 4px; background: none; color: var(--ui-muted); }
+.ol-objects-eye:hover, .ol-objects-lock:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.ol-objects-row:not(:hover):not(.is-hidden) .ol-objects-eye, .ol-objects-row:not(:hover):not(.is-locked) .ol-objects-lock { visibility: hidden; }
+.ol-objects-section { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding: 6px 6px 3px 10px; border-top: 1px solid var(--ui-border2); color: var(--ui-muted); font-size: 11px; }
+.ol-objects-edit { margin-left: auto; height: 18px; padding: 0 6px; border: 1px solid var(--ui-border); border-radius: 9px; background: none; color: var(--ui-muted); font: 11px var(--ui-font); }
+.ol-objects-edit:hover { color: var(--ui-fg); border-color: var(--active-border); }
+.ol-objects-empty { padding: 10px; color: var(--ui-muted); }
+.ol-objects-drop { position: absolute; left: 6px; right: 6px; height: 2px; background: var(--accent); display: none; pointer-events: none; }
 .ol-slide-rail { position: absolute; z-index: 6; width: 196px; display: flex; flex-direction: column; box-sizing: border-box; background: var(--surface2); border-right: 1px solid var(--ui-border); font: 12px/1.3 var(--ui-font); color: var(--ui-fg); user-select: none; -webkit-user-select: none; }
 .ol-slide-rail.collapsed { width: 26px; }
 .ol-slide-rail.collapsed > :not(.ol-rail-show):not(.ol-rail-mini), .ol-slide-rail:not(.collapsed) > .ol-rail-show, .ol-slide-rail:not(.collapsed) > .ol-rail-mini { display: none; }
@@ -2202,7 +2250,8 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .ol-rail-show:hover { color: var(--ui-fg); background: var(--ui-hover); }
 .ol-rail-head { display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 12px; border-bottom: 1px solid var(--ui-border2); }
 .ol-rail-title { font-weight: 600; }
-.ol-rail-count { margin-right: auto; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ol-rail-count { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ol-rail-head > button { flex: none; }
 .ol-rail-hide { width: 22px; height: 22px; padding: 0; border: none; border-radius: 4px; background: none; color: var(--ui-muted); }
 .ol-rail-notes { height: 20px; padding: 0 6px; border: 1px solid var(--ui-border); border-radius: 10px; background: none; color: var(--ui-muted); font: 11px var(--ui-font); }
 .ol-rail-notes:hover { color: var(--ui-fg); border-color: var(--active-border); }
@@ -2238,6 +2287,24 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .ol-rail-pop { position: absolute; z-index: 30; left: 8px; width: 292px; box-sizing: border-box; padding: 10px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2); }
 .ol-rail-pop-title { font-weight: 600; margin: 0 0 8px 2px; }
 .ol-rail-pop-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+/* master pages (editor/layout/masters.ts): shown only in the master view; on the pages that use one, a copy
+   of its objects lies under theirs (a widget, no target of the pointer) */
+.lyx-editor.ol-layout:not(.ol-master-view) > .ol-page-wrap[data-role="master"] { display: none; }
+.lyx-editor.ol-layout.ol-master-view > .ol-page-wrap:not([data-role="master"]) { display: none; }
+.ol-master-layer { position: absolute; inset: 0; pointer-events: none; }
+.ol-master-layer * { pointer-events: none !important; }
+.lyx-editor.ol-master-view .ol-page { outline: 2px dashed var(--accent-border); outline-offset: 4px; }
+.lyx-editor.ol-master-view .ol-page-label { color: var(--accent); font-weight: 600; }
+.lyx-editor.ol-master-view .ol-box[data-ph] > .ol-box-frame { outline: 1px dashed rgba(26,115,232,0.5); }
+/* a hidden object (the objects list's eye) is not drawn; its place stays (a box keeps its measured height) */
+.ol-hidden-obj { visibility: hidden; }
+.ol-rail-masters-btn { height: 20px; padding: 0 5px; border: 1px solid var(--ui-border); border-radius: 10px; background: none; color: var(--ui-muted); font: 11px var(--ui-font); white-space: nowrap; }
+.ol-rail-masters-btn:hover { color: var(--ui-fg); border-color: var(--active-border); }
+.ol-rail-masters-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ol-slide-rail.ol-rail-masters .ol-rail-thumb::after { content: attr(data-name); display: block; padding: 2px 4px; font: 11px/1.3 var(--ui-font); color: var(--ui-fg); background: var(--surface); border-top: 1px solid var(--ui-border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ol-rail-pop-sub { margin-top: 10px; font-weight: 500; color: var(--ui-muted); }
+.ol-rail-master-clip { position: relative; overflow: hidden; margin: 0 auto; border-radius: 2px; background: #fff; box-shadow: 0 0 0 1px var(--ui-border); }
+.ol-rail-master span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ol-rail-layout { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 6px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--ui-fg); font: 11.5px/1.2 var(--ui-font); text-align: center; }
 .ol-rail-layout:hover, .ol-rail-layout:focus-visible { background: var(--row-hover); border-color: var(--accent-border); outline: none; }
 .ol-rail-layout svg { display: block; width: 100%; height: auto; }

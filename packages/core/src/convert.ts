@@ -230,7 +230,11 @@ export function pageToPm(p: Paragraph): PMJSON {
   for (const it of p.items) {
     if (it.kind !== 'inset') continue;
     const ins = it.inset;
-    if (ins.type === 'Leaf' && ins.name === PAGE_PROPS_INSET) { attrs = { ...parsePageKeys(keysOf(ins.params), paramOf(ins.params, 'frame') ?? 'plain') }; continue; }
+    if (ins.type === 'Leaf' && ins.name === PAGE_PROPS_INSET) {
+      attrs = { ...parsePageKeys(keysOf(ins.params), paramOf(ins.params, 'frame') ?? 'plain') };
+      if (paramOf(ins.params, 'role') === 'master') attrs.role = 'master';
+      continue;
+    }
     if (ins.type === 'Text' && ins.name === NOTES_INSET) { notes = { type: 'ol_notes', content: paragraphsToPm(ins.paragraphs) }; continue; }
     const o = objectToPm(it);
     if (o) content.push(o);
@@ -268,7 +272,8 @@ const objItem = (inset: Inset): Item => ({ kind: 'inset', font: {}, inset });
 
 export function pmPageToLyx(page: PMJSON): Paragraph {
   const a = (page.attrs ?? {}) as PageProps;
-  const props: Inset = { type: 'Leaf', name: PAGE_PROPS_INSET, arg: '', params: ['keys ' + writePageKeys({ fill: a.fill ?? null, transition: a.transition ?? null, name: a.name ?? null, frame: a.frame ?? 'plain', extra: a.extra ?? '' }), `frame ${a.frame ?? 'plain'}`] };
+  const props: Inset = { type: 'Leaf', name: PAGE_PROPS_INSET, arg: '', params: ['keys ' + writePageKeys({ fill: a.fill ?? null, master: a.master ?? null, transition: a.transition ?? null, name: a.name ?? null, frame: a.frame ?? 'plain', extra: a.extra ?? '' }), `frame ${a.frame ?? 'plain'}`] };
+  if ((a as { role?: string }).role === 'master') props.params.push('role master');
   const items: Item[] = [objItem(props)];
   for (const c of page.content ?? []) {
     if (c.type === 'ol_notes') { items.push(objItem({ type: 'Text', name: NOTES_INSET, arg: '', params: [], paragraphs: pmBlocksToParagraphs(c.content ?? []) })); continue; }

@@ -32,6 +32,8 @@ export const SETTINGS_KEYS = [
   'paperorientation', 'paperwidth', 'paperheight', 'leftmargin', 'rightmargin', 'topmargin', 'bottommargin', 'headheight', 'headsep', 'footskip', 'columnsep', 'papersides', 'paperpagestyle', 'paragraph_indentation',
   'font_roman', 'font_sans', 'font_typewriter', 'font_math', 'font_default_family', 'font_sf_scale', 'font_tt_scale', 'font_sc', 'font_roman_osf', 'use_microtype',
   'pdf_title', 'pdf_author', 'pdf_subject', 'pdf_keywords', 'pdf_bookmarks', 'pdf_bookmarksnumbered', 'pdf_bookmarksopen', 'pdf_breaklinks', 'pdf_pdfborder', 'pdf_backref', 'pdf_pdfusetitle', 'pdf_quoted_options',
+  // layout documents: the guides (`x20 y45.5`, mm) and the grid's spacing (mm) of the editor's canvas
+  'overlyx_guides', 'overlyx_grid',
   'overlyx_managed_settings',
 ];
 

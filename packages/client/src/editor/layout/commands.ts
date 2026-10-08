@@ -7,6 +7,7 @@ import { Fragment, type Node as PMNode } from 'prosemirror-model';
 import { NodeSelection, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import { schema, SHAPE_PRESETS, pageSizeOf, normalizePath, pathBounds, pathToString, type PathSeg } from '@overlyx/core';
 import { boxOf, objectBounds, unionBounds, isLayoutObject, pageObjects, rotatePoint } from './geom';
+import { copyObjects } from './connectors';
 
 export type Attrs = Record<string, unknown>;
 
@@ -21,10 +22,33 @@ export function pageAt(doc: PMNode, pos: number): { node: PMNode; pos: number } 
   return found;
 }
 
-export function pages(doc: PMNode): { node: PMNode; pos: number }[] {
+/** A master page (\begin{olmaster}): no slide of its own, drawn behind the slides that name it (masters.ts). */
+export const isMasterPage = (n: PMNode | null | undefined): boolean => !!n && n.type.name === 'ol_page' && n.attrs.role === 'master';
+
+/** the slides (the deck's frames), or the master pages */
+export type PageKind = 'slides' | 'masters';
+const kindOf = (n: PMNode | null | undefined): PageKind => (isMasterPage(n) ? 'masters' : 'slides');
+
+/** The pages of the document: its slides (frames), or with 'masters' its master pages. */
+export function pages(doc: PMNode, kind: PageKind = 'slides'): { node: PMNode; pos: number }[] {
   const out: { node: PMNode; pos: number }[] = [];
-  doc.forEach((n, off) => { if (n.type.name === 'ol_page') out.push({ node: n, pos: off }); });
+  doc.forEach((n, off) => { if (n.type.name === 'ol_page' && isMasterPage(n) === (kind === 'masters')) out.push({ node: n, pos: off }); });
   return out;
+}
+
+/** The background a page shows: its own, else that of the nearest master in its chain that has one (masters.ts). */
+export function pageFill(doc: PMNode, page: { attrs: Attrs }): string | null {
+  if (page.attrs.fill) return page.attrs.fill as string;
+  const seen = new Set<string>();
+  let name = page.attrs.master as string | null;
+  while (name && !seen.has(name)) {
+    seen.add(name);
+    const m = pages(doc, 'masters').find(x => x.node.attrs.name === name);
+    if (!m) return null;
+    if (m.node.attrs.fill) return m.node.attrs.fill;
+    name = m.node.attrs.master;
+  }
+  return null;
 }
 
 /** The top-level object (a direct child of its page) containing `pos`. */
@@ -54,21 +78,23 @@ export function emptyPage(attrs: Attrs = {}): PMNode {
 }
 
 export function insertPage(state: EditorState, after: number | null, page: PMNode = emptyPage()): Transaction {
-  const list = pages(state.doc);
+  const list = pages(state.doc, kindOf(page));
   const at = after === null ? (list.length ? list[list.length - 1].pos + list[list.length - 1].node.nodeSize : state.doc.content.size) : after;
   return state.tr.insert(at, page).scrollIntoView();
 }
 
 export function deletePage(state: EditorState, pagePos: number): Transaction | null {
-  const list = pages(state.doc);
-  if (list.length <= 1) return null;
+  const kind = kindOf(state.doc.nodeAt(pagePos));
+  const list = pages(state.doc, kind);
+  // a document keeps one slide at least (it may have no master)
+  if (list.length <= 1 && kind === 'slides') return null;
   const p = list.find(x => x.pos === pagePos);
   if (!p) return null;
   return state.tr.delete(p.pos, p.pos + p.node.nodeSize);
 }
 
 export function movePage(state: EditorState, pagePos: number, dir: -1 | 1): Transaction | null {
-  const list = pages(state.doc);
+  const list = pages(state.doc, kindOf(state.doc.nodeAt(pagePos)));
   const i = list.findIndex(x => x.pos === pagePos);
   const j = i + dir;
   if (i < 0 || j < 0 || j >= list.length) return null;
@@ -79,7 +105,7 @@ export function movePage(state: EditorState, pagePos: number, dir: -1 | 1): Tran
 
 /** Move a page into the gap before page `gap` (0 … the number of pages; the slide rail's drag). */
 export function movePageTo(state: EditorState, pagePos: number, gap: number): Transaction | null {
-  const list = pages(state.doc);
+  const list = pages(state.doc, kindOf(state.doc.nodeAt(pagePos)));
   const i = list.findIndex(x => x.pos === pagePos);
   if (i < 0 || gap < 0 || gap > list.length || gap === i || gap === i + 1) return null;
   const p = list[i];
@@ -91,9 +117,10 @@ export function movePageTo(state: EditorState, pagePos: number, gap: number): Tr
 
 /** Delete these pages; null when that would leave none (a document keeps one page at least). */
 export function deletePages(state: EditorState, positions: number[]): Transaction | null {
-  const list = pages(state.doc);
+  const kind = kindOf(state.doc.nodeAt(positions[0] ?? -1));
+  const list = pages(state.doc, kind);
   const gone = list.filter(p => positions.includes(p.pos));
-  if (!gone.length || gone.length >= list.length) return null;
+  if (!gone.length || (gone.length >= list.length && kind === 'slides')) return null;
   const tr = state.tr;
   for (const p of [...gone].reverse()) tr.delete(p.pos, p.pos + p.node.nodeSize);
   return tr;
@@ -104,7 +131,7 @@ export function deletePages(state: EditorState, positions: number[]): Transactio
  * slide sorter's drag). `first`: the index of the first moved page afterwards. Null: nothing moves.
  */
 export function movePagesTo(state: EditorState, positions: number[], gap: number): { tr: Transaction; first: number } | null {
-  const list = pages(state.doc);
+  const list = pages(state.doc, kindOf(state.doc.nodeAt(positions[0] ?? -1)));
   const moving = list.filter(p => positions.includes(p.pos));
   if (!moving.length) return null;
   const rest = list.filter(p => !positions.includes(p.pos));
@@ -121,7 +148,7 @@ export function movePagesTo(state: EditorState, positions: number[], gap: number
 
 /** Insert these pages after the page at `afterPos` (null: at the end); `first` is the index of the first. */
 export function insertPagesAfter(state: EditorState, afterPos: number | null, nodes: PMNode[]): { tr: Transaction; first: number } {
-  const list = pages(state.doc);
+  const list = pages(state.doc, kindOf(nodes[0]));
   const i = afterPos === null ? list.length - 1 : list.findIndex(p => p.pos === afterPos);
   const after = list[i] ?? list[list.length - 1];
   const at = after ? after.pos + after.node.nodeSize : state.doc.content.size;
@@ -205,6 +232,12 @@ export function scaleInto(tr: Transaction, pos: number, from: { x: number; y: nu
 /** Delete objects (positions of top-level objects; deleted from the last so positions stay valid). */
 export function deleteObjects(state: EditorState, positions: number[]): Transaction {
   const tr = state.tr;
+  // (a group's last member — picked in the objects list — takes its group along: a group is never empty)
+  positions = [...new Set(positions.map(p => {
+    let $p = state.doc.resolve(p);
+    while ($p.depth > 1 && $p.parent.type.name === 'ol_group' && $p.parent.childCount === 1) $p = state.doc.resolve($p.before());
+    return $p.pos;
+  }))].filter((p, _i, all) => !all.some(q => q < p && p < q + (state.doc.nodeAt(q)?.nodeSize ?? 0)));
   for (const pos of [...positions].sort((a, b) => b - a)) {
     const n = tr.doc.nodeAt(pos);
     if (n) tr.delete(pos, pos + n.nodeSize);
@@ -216,8 +249,12 @@ export function deleteObjects(state: EditorState, positions: number[]): Transact
 export function duplicateObjects(state: EditorState, positions: number[], off = 4): { tr: Transaction; positions: number[] } {
   const tr = state.tr;
   const made: { pos: number; step: number }[] = [];
-  for (const pos of [...positions].sort((a, b) => a - b)) {
-    const n = state.doc.nodeAt(pos), page = pageAt(state.doc, pos);
+  const sorted = [...positions].sort((a, b) => a - b);
+  // the copies with ids of their own; connectors among them attached to the copies (connectors.ts)
+  const first = sorted.length ? pageAt(state.doc, sorted[0]) : null;
+  const copies = copyObjects(sorted.map(p => state.doc.nodeAt(p)).filter((n): n is PMNode => !!n), first?.node ?? null);
+  for (const [i, pos] of sorted.entries()) {
+    const n = copies[i], page = pageAt(state.doc, pos);
     if (!n || !page) continue;
     const pagePos = tr.mapping.map(page.pos);
     const pageNode = tr.doc.nodeAt(pagePos)!;

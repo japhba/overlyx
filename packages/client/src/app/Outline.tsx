@@ -27,6 +27,8 @@ export function buildOutline(doc: PMNode, includeFloats = true, secnumdepth = 3)
   doc.forEach((para, pos) => {
     // a layout document: its pages (named, or by the text of their biggest-font box)
     if (para.type.name === 'ol_page') {
+      // (a master page is no page of the document's: masters.ts)
+      if (para.attrs.role === 'master') return;
       page++;
       let best = '', bestSize = -1;
       para.descendants(n => {

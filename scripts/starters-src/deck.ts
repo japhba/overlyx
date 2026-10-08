@@ -84,6 +84,10 @@ const page = (props: Partial<PageProps>, objects: string[], notes: string) => {
   return `\\begin{frame}[plain]\n${keys ? `\\olpage{${keys}}\n` : ''}${objects.join('\n')}\n\\note{${notes.replace(/\s+/g, ' ').trim()}}\n\\end{frame}`;
 };
 
+/** a master page (\begin{olmaster}): drawn behind the slides that name it; its boxes with a `ph` are their placeholders */
+const masterPage = (props: Partial<PageProps>, objects: string[]) =>
+  `\\begin{olmaster}{${writePageKeys({ ...parsePageKeys(''), ...props })}}\n${objects.join('\n')}\n\\end{olmaster}`;
+
 /* -------------------------------------------------------------------- slides */
 
 const W = 160, M = 12, CW = W - 2 * M, HORIZON = 74;
@@ -98,20 +102,28 @@ export function deck(heights: Heights = new Map()): string {
   /** a text box; one that grows with its text gets the height TeX gave it (by slide and name) */
   const box = (p: Partial<BoxProps>, body: string) => {
     const h = p.grow && p.name ? heights.get(`${cur}/${p.name}`) ?? p.h ?? 8 : p.h ?? 8;
-    return `\\begin{olbox}{${writeBoxKeys({ ...parseBoxKeys(''), ...p, h })}}\n${body}\n\\end{olbox}`;
+    return `\\begin{olbox}{${writeBoxKeys({ ...parseBoxKeys(''), ...p, h })}}\n${body ? body + '\n' : ''}\\end{olbox}`;
   };
   const slides: string[] = [];
   const next = () => ++cur;
 
-  // the parts every light slide has: kicker and title
-  const header = (kicker: string, title: string) => [
-    box({ x: M, y: 8, w: CW, h: 3, font: 7, color: 'dusk', grow: true, name: 'Kicker' }, `\\textbf{${kicker}}`),
-    box({ x: M, y: 12.5, w: CW, h: 8, font: 20, leading: 1.1, color: 'night', grow: true, name: 'Title' }, `\\textbf{${title}}`),
-  ];
+  // the parts every light slide has: kicker and title — the placeholders of the master Content
+  const KICKER: Partial<BoxProps> = { x: M, y: 8, w: CW, h: 3, font: 7, color: 'dusk', grow: true, name: 'Kicker', ph: 'kicker' };
+  const TITLE: Partial<BoxProps> = { x: M, y: 12.5, w: CW, h: 8, font: 20, leading: 1.1, color: 'night', grow: true, name: 'Title', ph: 'title' };
+  const header = (kicker: string, title: string) => [box(KICKER, `\\textbf{${kicker}}`), box(TITLE, `\\textbf{${title}}`)];
   // the dark slides' ground: the horizon, and the talk's title under it
   const horizon = (footer = true) => [
     rect(0, HORIZON, W, 0.3, { fill: 'white!24!night', name: 'Horizon' }),
     ...(footer ? [box({ x: M, y: 78, w: 80, h: 3, font: 7, color: 'white!45!night', grow: true, name: 'Footer' }, 'Why the sky is blue')] : []),
+  ];
+  // the section dividers' number, title and text — the placeholders of the master Section
+  const NUMBER: Partial<BoxProps> = { x: M, y: 15, w: 70, h: 27, font: 76, leading: 1, color: 'sky', grow: true, name: 'Number', ph: 'number' };
+  const STITLE: Partial<BoxProps> = { x: M, y: 46, w: 90, h: 11, font: 28, leading: 1.1, color: 'white', grow: true, name: 'Section title', ph: 'title' };
+  const STEXT: Partial<BoxProps> = { x: M, y: 59.5, w: 100, h: 5, font: 11, leading: 1.3, color: 'white!70!night', grow: true, name: 'Section text', ph: 'text' };
+  // the masters: what the content slides and the section dividers have in common (drawn behind their own objects)
+  const masters = [
+    masterPage({ name: 'Content', fill: 'paper' }, [box({ ...KICKER, grow: false }, ''), box({ ...TITLE, grow: false }, '')]),
+    masterPage({ name: 'Section', fill: 'night' }, [...horizon(), box({ ...NUMBER, grow: false }, ''), box({ ...STITLE, grow: false }, ''), box({ ...STEXT, grow: false }, '')]),
   ];
   // the sun: a disc (or a half disc on the horizon), a faint ring, night-coloured stripes across its lower part
   const sun = (cx: number, cy: number, r: number, fill: string, o: { half?: boolean; ring?: boolean; stripes?: number } = {}) => {
@@ -182,26 +194,26 @@ export function deck(heights: Heights = new Map()): string {
     slide follows.`));
 
   // a section divider: the number, the title, a line; the sun lower in every section
-  const divider = (num: string, title: string, text: string, sunObjs: string[], notes: string) => page({ fill: 'night', transition: 'fade', name: `Section ${num}` }, [
+  const divider = (num: string, title: string, text: string, sunObjs: string[], notes: string) => page({ master: 'Section', transition: 'fade', name: `Section ${num}` }, [
     ...sunObjs,
-    ...horizon(),
-    box({ x: M, y: 15, w: 70, h: 27, font: 76, leading: 1, color: 'sky', grow: true, name: 'Number' }, `\\textbf{${num}}`),
-    box({ x: M, y: 46, w: 90, h: 11, font: 28, leading: 1.1, color: 'white', grow: true, name: 'Section title' }, `\\textbf{${title}}`),
-    box({ x: M, y: 59.5, w: 100, h: 5, font: 11, leading: 1.3, color: 'white!70!night', grow: true, name: 'Section text' }, text),
+    box(NUMBER, `\\textbf{${num}}`),
+    box(STITLE, `\\textbf{${title}}`),
+    box(STEXT, text),
   ], notes);
 
   /* 3 · section 1 */
   next();
   slides.push(divider('01', 'Light meets air', 'What we see, and what a sunbeam does on its way down', [...sun(128, 26, 9, 'sun', { ring: true }), ...[[111, 15, 1.1], [116.5, 9, 0.7], [107, 23, 0.6], [143.5, 39, 0.8]].map(([x, y, r]) => circle(x, y, r, { fill: 'sky', name: 'Scattered light' }))],
-    `A section divider is an ordinary slide with a background colour and a transition: the Page menu on the
-    Layout toolbar sets both (this one fades in). New slide adds a slide with the layout you pick; drag the
-    thumbnails in the rail to reorder slides, and duplicate or delete a slide from its thumbnail's menu. A
-    duplicated slide is the quickest way to keep a deck consistent.`));
+    `The section dividers share a master, Section: its dark background, the horizon, the footer, and where the
+    number, title and text go. Masters (above the slide rail) shows the masters: change one there and every slide
+    that uses it follows --- the slides' own changes stay. New slide offers the masters (a slide of one gets its
+    placeholders, empty); a slide's menu switches its master or makes a new master of it. This divider fades in:
+    the Page menu on the Layout toolbar sets a slide's transition.`));
 
   /* 4 · two cropped pictures */
   const crop: [number, number][] = [[0, 0.5], [0.5, 0]];
   next();
-  slides.push(page({ fill: 'paper', name: 'Noon and sunset' }, [
+  slides.push(page({ master: 'Content', name: 'Noon and sunset' }, [
     ...header('01 · LIGHT MEETS AIR', 'Look up at noon, then west at dusk'),
     ...crop.flatMap(([l, r], i) => {
       const x = M + 70 * i;
@@ -220,7 +232,7 @@ export function deck(heights: Heights = new Map()): string {
   /* 5 · diagram */
   const beam = [['sky', -1.2], ['leaf', 0], ['dusk', 1.2]] as const;
   next();
-  slides.push(page({ fill: 'paper', name: 'Diagram' }, [
+  slides.push(page({ master: 'Content', name: 'Diagram' }, [
     ...header('01 · LIGHT MEETS AIR', 'One sunbeam, two fates'),
     circle(24, 54, 11, { stroke: 'sun', lw: 0.6, opacity: 0.6, name: 'Sun ring' }),
     circle(24, 54, 8, { fill: 'sun', name: 'Sun' }),
@@ -236,17 +248,20 @@ export function deck(heights: Heights = new Map()): string {
     path({ stroke: 'dusk', lw: 1.2, arrows: '-Stealth', step: '3-', effect: 'wipe', name: 'Transmitted' }, 'M 90.5 60 C 94 60 95 67 98.5 67'),
     box({ x: 99.5, y: 58, w: 48.5, h: 18, fill: 'dusk!10!paper', radius: 2.5, pad: 3, font: 8.5, leading: 1.3, color: 'ink', grow: true, step: '3-', effect: 'fade', name: 'Red card' },
       '\\textcolor{dusk}{\\textbf{Red goes straight on}}\n\nAt sunset the path is 40 times longer: orange and red remain.'),
-  ], `Diagrams are shapes and arrows: R draws a rectangle, E an ellipse, L a line and A an arrow; the arrows here
-    are curves with a tip (Arrow tips on the Layout toolbar), and N edits a shape's nodes. The two branches
+  ], `Diagrams are shapes and arrows: R draws a rectangle, E an ellipse, L a line and A an arrow --- started or
+    ended on one of the dots an object shows, a line stays attached to it when it moves (a connector). The arrows
+    here are curves with a tip (Arrow tips on the Layout toolbar), and N edits a shape's nodes. A pasted SVG
+    (Inkscape, a plot) becomes shapes like these. The two branches
     appear one after the other: select objects and give them an animation step and an entrance effect under
     Animation (steps 2 and 3 here). In the PDF every step becomes a page of its own --- beamer overlays.`));
 
   /* 6 · section 2 */
   next();
   slides.push(divider('02', 'The $\\boldsymbol{\\lambda^{-4}}$ law', 'Why small molecules prefer short waves', sun(128, 44, 11, 'sun!40!dusk', { ring: true, stripes: 2 }),
-    `This divider fades in as well. The section numbers and the sun that sinks from divider to divider are
-    ordinary objects: copy them from one slide to another with Ctrl+C and Ctrl+V, or duplicate a selected object
-    with Ctrl+D.`));
+    `This divider fades in as well. The sun that sinks from divider to divider is the slide's own, drawn over
+    the master's horizon: copy objects from one slide to another with Ctrl+C and Ctrl+V, or duplicate a selected
+    object with Ctrl+D. The objects list (the layers button on the Layout toolbar) names everything on the slide,
+    the master's objects too; its eye hides an object, its lock keeps it from being picked.`));
 
   /* 7 · formula, step by step */
   const rows = [
@@ -256,7 +271,7 @@ export function deck(heights: Heights = new Map()): string {
     ['Blue against red', '$450\\,\\mathrm{nm}$ against $700\\,\\mathrm{nm}$', '\\frac{P_{\\text{blue}}}{P_{\\text{red}}}=\\left(\\frac{700}{450}\\right)^{4}\\approx5.9'],
   ];
   next();
-  slides.push(page({ fill: 'paper', name: 'Formula' }, [
+  slides.push(page({ master: 'Content', name: 'Formula' }, [
     ...header('02 · THE $\\boldsymbol{\\lambda^{-4}}$ LAW', 'Where the fourth power comes from'),
     // the thread between the numbers grows with the rows
     ...[1, 2, 3].map(k => rect(14.85, 36 + 13.5 * (k - 1), 0.3, 7.5, { fill: 'rule', step: `${k + 1}-`, effect: 'fade', name: `Thread ${k}` })),
@@ -300,7 +315,7 @@ export function deck(heights: Heights = new Map()): string {
   const dot = (nm: number, name: string) => circle(at(nm)[0], at(nm)[1], 1.1, { fill: 'night', stroke: 'paper', lw: 0.8, name });
   const [vx, vy] = at(400), [bx, by] = at(450), [rx, ry] = at(700);
   next();
-  slides.push(page({ fill: 'paper', name: 'Plot' }, [
+  slides.push(page({ master: 'Content', name: 'Plot' }, [
     ...header('02 · THE $\\boldsymbol{\\lambda^{-4}}$ LAW', 'Blue scatters far more than red'),
     image({ ...fig, name: 'Plot' }, 'figures/scattering'),
     path({ stroke: 'ink', lw: 0.5, name: 'Violet leader' }, `M ${vx + 0.9} ${vy - 0.9} L ${vx + 4} ${r2(vy - 7.2)} L ${vx + 6} ${r2(vy - 7.2)}`),
@@ -336,7 +351,7 @@ export function deck(heights: Heights = new Map()): string {
       rows: ['nearly the same for all colours', 'mostly forwards', 'white clouds, grey haze and fog'] },
   ];
   next();
-  slides.push(page({ fill: 'paper', name: 'Comparison' }, [
+  slides.push(page({ master: 'Content', name: 'Comparison' }, [
     ...header('03 · BEYOND BLUE', 'Why clouds are white'),
     ...sides.flatMap((s, i) => [
       box({ x: s.x, y: 27, w: 65, h: 53, fill: s.fill, radius: 3, lock: true, name: `Card ${i + 1}` }, ''),
@@ -366,7 +381,7 @@ export function deck(heights: Heights = new Map()): string {
     'The mix of violet, blue and green looks pale blue.',
   ];
   next();
-  slides.push(page({ fill: 'paper', name: 'Table' }, [
+  slides.push(page({ master: 'Content', name: 'Table' }, [
     ...header('03 · BEYOND BLUE', 'Why is the sky not violet?'),
     box({ x: M, y: 29, w: 78, h: 38, font: 12, color: 'ink', grow: true, name: 'Table' }, table),
     box({ x: M, y: 72, w: 78, h: 4, font: 7.5, leading: 1.3, color: 'mist', grow: true, name: 'Table note' }, 'Light scattered, relative to red: $(700\\,\\mathrm{nm}/\\lambda)^{4}$.'),
@@ -389,7 +404,7 @@ export function deck(heights: Heights = new Map()): string {
     ['1910', 'Albert Einstein\n\nlinks it to changes\n\nin the air\'s density'],
   ];
   next();
-  slides.push(page({ fill: 'paper', transition: 'wipe', name: 'Timeline' }, [
+  slides.push(page({ master: 'Content', transition: 'wipe', name: 'Timeline' }, [
     ...header('03 · BEYOND BLUE', '150 years of looking up'),
     path({ stroke: 'mist!50!paper', lw: 0.8, arrows: '-Stealth', name: 'Time axis' }, `M ${M} 52 L ${W - M} 52`),
     ...events.flatMap(([year, text], i) => {
@@ -432,5 +447,5 @@ export function deck(heights: Heights = new Map()): string {
     project and replace its content slide by slide. The file, deck.tex, is an ordinary beamer document: it
     compiles anywhere, and its history stays readable. Delete this project when you no longer need it.`));
 
-  return `${DECK_PREAMBLE}\\begin{document}\n${slides.join('\n\n')}\n\\end{document}\n`;
+  return `${DECK_PREAMBLE}\\begin{document}\n${[...masters, ...slides].join('\n\n')}\n\\end{document}\n`;
 }
