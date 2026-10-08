@@ -31,6 +31,11 @@ reproduced byte for byte until you change them.
   image and PDF extensions can be omitted in `\includegraphics` references.
 - **Remote workspaces** route image and PDF previews through VS Code's connection to the
   extension host. Install or update OverLyX in the remote window, then reload that window.
+- **New slide decks, posters and documents**: *OverLyX: New Slide Deck…*, *New Poster…* and
+  *New Document…* in the command palette, or *File ▸ New File…* ▸ *Slide Deck* / *Poster* /
+  *LaTeX or Markdown Document…*. Pick the size, then where to save; the file opens in the
+  OverLyX editor. Slides, posters and pages are beamer files of freely placed text boxes, shapes
+  and images — the same templates as the web app's *File ▸ New slides / poster / page…*.
 - **Structure view** (OverLyX icon in the activity bar): the live outline — sections, floats —
   click to jump.
 - **PDF panel** (Ctrl+R): builds with your local `latexmk` next to the file, shows the PDF with

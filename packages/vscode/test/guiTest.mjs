@@ -86,6 +86,8 @@ fs.writeFileSync(path.join(udd, 'User/settings.json'), JSON.stringify({
   'workbench.startupEditor': 'none',
   'window.restoreWindows': 'none',
   'workbench.colorTheme': 'Default Light Modern',
+  // the save dialog of New Slide Deck as VS Code's own quick input (a native one is out of Playwright's reach)
+  'files.simpleDialog.enable': true,
 }, null, 2));
 
 const exe = await downloadAndUnzipVSCode({ cachePath: path.join(pkg, '.vscode-test') });
@@ -385,6 +387,32 @@ try {
   if (!md.startsWith('# Notes heading\n\nA *markdown* paragraph. Now **bold** too.\n\n* a star bullet')) fail('notes.md was rewritten beyond the edit: ' + JSON.stringify(md));
   log('markdown file edited in the OverLyX editor and saved as markdown');
   await shot('06-markdown');
+
+  /* ---- 8. File ▸ New File… ▸ Slide Deck: a 16:9 deck saved beside the open file, opened as slides ---- */
+  await page.keyboard.press('Control+Shift+p');
+  await page.waitForSelector('.quick-input-widget input', { timeout: 15000 });
+  await page.keyboard.type('Create: New File');
+  await sleep(500);
+  await page.keyboard.press('Enter');
+  await until(() => page.locator('.quick-input-widget .monaco-list-row', { hasText: 'Slide Deck' }).count(), 15000, 'Slide Deck in File ▸ New File…');
+  await shot('07-new-file-entries');
+  await page.locator('.quick-input-widget .monaco-list-row', { hasText: 'Slide Deck' }).first().click();
+  await until(() => page.locator('.quick-input-widget .monaco-list-row', { hasText: 'Slides 16:9' }).count(), 15000, 'the aspect ratios');
+  await page.keyboard.press('Enter');
+  // the save dialog offers slides.tex in the folder of the active file
+  await until(() => page.locator('.quick-input-widget input').inputValue().then(v => v.endsWith('/submission/slides.tex')), 15000, 'slides.tex offered in the save dialog');
+  await page.keyboard.press('Enter');
+  const deck = path.join(ws, 'slides.tex');
+  await until(() => fs.existsSync(deck), 15000, 'slides.tex on disk');
+  const deckTex = fs.readFileSync(deck, 'utf8');
+  if (!deckTex.startsWith('\\documentclass[aspectratio=169]{beamer}') || !deckTex.includes('\\begin{olbox}') || !deckTex.includes('Title of the talk')) fail('the new deck is not a 16:9 layout document: ' + deckTex.slice(0, 300));
+  const deckFrame = await until(async () => {
+    for (const f of page.frames()) { try { if (await f.locator('.lyx-editor .ol-page').count() === 2) return f; } catch { /* gone */ } }
+    return null;
+  }, 60000, 'the new deck in the OverLyX editor (two slides)');
+  await until(() => deckFrame.evaluate(() => (document.querySelector('.lyx-editor')?.textContent || '').includes('Title of the talk')), 15000, 'the title slide');
+  log('File ▸ New File… ▸ Slide Deck created slides.tex and opened it as slides');
+  await shot('08-new-slide-deck');
 
   log('ALL GUI CHECKS PASSED');
   await browser.close().catch(() => {});

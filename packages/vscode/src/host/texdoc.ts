@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseTex, writeTex, writeTexPreserving, type ParseTexResult, type PreserveCache } from '@overlyx/core/tex/index.ts';
-import type { LyxDocument } from '@overlyx/core';
+import { layoutTemplate, setHeaderValue, markEditedSettings, type LyxDocument } from '@overlyx/core';
 import { parseMarkdown, writeMarkdown, writeMarkdownPreserving, isMarkdownPath, markdownForLatex, type MarkdownPreserveCache } from '@overlyx/core/md/index.ts';
 import { findMaster, readTextFile, resolveInside } from './project.ts';
 
@@ -126,4 +126,18 @@ export function includeResolver(ctx: TexContext, relPath: string): (filename: st
       return cachedParseFile(ctx, path.relative(ctx.root, abs)).doc;
     } catch { return undefined; }
   };
+}
+
+/**
+ * A new layout document (slides, poster, page; core layout/templates.ts) written through the .tex
+ * writer, so its managed block (the layout macros, the page size) is there before the first edit
+ * and the file compiles right away — what the server's newLayoutDocumentText writes.
+ */
+export function newLayoutDocumentText(ctx: TexContext, relPath: string, preset: string, opts: { title?: string; author?: string }): string {
+  const tpl = layoutTemplate(preset, opts);
+  const doc = parseDocumentText(tpl.text, ctx, relPath).doc;
+  const before = [...doc.header.lines];
+  for (const [k, v] of Object.entries(tpl.settings)) setHeaderValue(doc.header, k, v);
+  doc.header.lines = markEditedSettings(before, doc.header.lines, Object.keys(tpl.settings));
+  return writeDocumentText(doc, ctx, relPath, false).text;
 }

@@ -39,6 +39,27 @@
     ],
     "commands": [
       {
+        "command": "overlyx.newSlides",
+        "title": "New Slide Deck…",
+        "shortTitle": "Slide Deck",
+        "category": "OverLyX",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "overlyx.newPoster",
+        "title": "New Poster…",
+        "shortTitle": "Poster",
+        "category": "OverLyX",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "overlyx.newDocument",
+        "title": "New Document…",
+        "shortTitle": "LaTeX or Markdown Document…",
+        "category": "OverLyX",
+        "icon": "$(new-file)"
+      },
+      {
         "command": "overlyx.openInOverlyx",
         "title": "Open in OverLyX Editor",
         "category": "OverLyX",
@@ -107,6 +128,13 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "overlyx.structure",
+        "contents": "The outline of the document open in the OverLyX editor appears here.\n[New Slide Deck](command:overlyx.newSlides)\n[New Document…](command:overlyx.newDocument)",
+        "when": "!overlyx.active"
+      }
+    ],
     "views": {
       "overlyx": [
         {
@@ -125,6 +153,11 @@
       ]
     },
     "menus": {
+      "file/newFile": [
+        { "command": "overlyx.newSlides", "group": "file" },
+        { "command": "overlyx.newPoster", "group": "file" },
+        { "command": "overlyx.newDocument", "group": "file" }
+      ],
       "editor/title": [
         {
           "command": "overlyx.openInOverlyx",

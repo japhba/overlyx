@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { BENIGN_BROWSER_ERROR } from '@client/error-reporting';
 
 export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, page: 'editor' | 'pdf', globals: Record<string, unknown>): Promise<string> {
   const config = vscode.workspace.getConfiguration('overlyx');
@@ -46,10 +47,11 @@ export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.
     (live ? `<base href="${dev.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}/">\n` : '') +
     // boot instrumentation: grab the one-shot VS Code API here (globals.ts reuses it) and forward
     // uncaught webview errors to the extension host — a webview that fails to boot is silent otherwise
+    // (not ResizeObserver's scheduling notice, which is no error)
     `<script nonce="${nonce}">
       window.__OVERLYX_VSCAPI = acquireVsCodeApi();
       window.__OVERLYX_VSCODE__ = ${JSON.stringify({ ...globals, assetBase: base + '/' })};
-      window.addEventListener('error', e => { if (!e.message) return; try { window.__OVERLYX_VSCAPI.postMessage({ type: 'notify', kind: 'error', text: 'webview: ' + e.message + ' @ ' + (e.filename || '?') + ':' + (e.lineno || 0), stack: e.error && e.error.stack ? String(e.error.stack).slice(0, 4000) : '' }); } catch {} }, true);
+      window.addEventListener('error', e => { if (!e.message || ${BENIGN_BROWSER_ERROR}.test(e.message.trim())) return; try { window.__OVERLYX_VSCAPI.postMessage({ type: 'notify', kind: 'error', text: 'webview: ' + e.message + ' @ ' + (e.filename || '?') + ':' + (e.lineno || 0), stack: e.error && e.error.stack ? String(e.error.stack).slice(0, 4000) : '' }); } catch {} }, true);
       window.addEventListener('unhandledrejection', e => { try { const r = e.reason; window.__OVERLYX_VSCAPI.postMessage({ type: 'notify', kind: 'error', text: 'webview promise: ' + String(r && r.message ? r.message : r).slice(0, 300), stack: r && r.stack ? String(r.stack).slice(0, 4000) : '' }); } catch {} });
     </script>`;
   return html.replace('<head>', '<head>\n' + inject);

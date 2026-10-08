@@ -13,6 +13,7 @@ export * from './layout/model.ts';
 export * from './layout/colors.ts';
 export * from './layout/latex.ts';
 export * from './layout/templates.ts';
+export * from './newdoc.ts';
 export * from './layout/check.ts';
 export * from './macros.ts';
 export * from './bib.ts';

@@ -114,25 +114,5 @@ export function createProject(name: string): Project {
   return { name, path: dir, files: [] };
 }
 
-const TEMPLATE_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../templates');
-
-/** Escape text for use in a LaTeX argument (titles, names). */
-function texEscape(s: string): string {
-  return s.replace(/[\\{}$&#^_%~]/g, c => ({ '\\': '\\textbackslash{}', '^': '\\^{}', '~': '\\textasciitilde{}' } as Record<string, string>)[c] ?? '\\' + c);
-}
-
-/** A new markdown document: its title as the first heading, then an empty paragraph to type in. */
-export function newMarkdownText(title?: string): string {
-  const t = (title ?? '').replace(/\s+/g, ' ').trim();
-  return t ? `# ${t}\n\n` : '';
-}
-
-export function newDocumentText(opts: { textclass?: string; title?: string; author?: string } = {}): string {
-  let tpl = fs.readFileSync(path.join(TEMPLATE_DIR, 'article.tex'), 'utf8');
-  if (opts.textclass) tpl = tpl.replace(/^\\documentclass(\[[^\]]*\])?\{[^}]*\}/m, (m, o: string | undefined) => `\\documentclass${o ?? ''}{${opts.textclass}}`);
-  const body: string[] = [];
-  if (opts.title) body.push(`\\title{${texEscape(opts.title)}}`);
-  if (opts.author) body.push(`\\author{${texEscape(opts.author)}}`);
-  if (opts.title || opts.author) body.push('\\maketitle', '');
-  return tpl.replace('@@BODY@@', body.join('\n'));
-}
+/** New documents start from the templates both shells share (core newdoc.ts). */
+export { newMarkdownText, newDocumentText } from '@overlyx/core';

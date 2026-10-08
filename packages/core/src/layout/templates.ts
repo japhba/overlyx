@@ -72,6 +72,7 @@ export function layoutTemplate(presetId: string, opts: { title?: string; author?
   return { text, settings };
 }
 
-function texEscape(s: string): string {
+/** Escape text for use in a LaTeX argument (titles, names). */
+export function texEscape(s: string): string {
   return s.replace(/\\/g, '\\textbackslash{}').replace(/([#$%&_{}])/g, '\\$1').replace(/~/g, '\\textasciitilde{}').replace(/\^/g, '\\textasciicircum{}');
 }

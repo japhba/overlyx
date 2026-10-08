@@ -23,6 +23,7 @@ import { cachedParseFile, parseFragmentText, masterHeaderFor, type TexContext } 
 import { buildMeta, bibEntriesFor } from './host/meta.ts';
 import { OverlyxTelemetry } from './host/telemetry.ts';
 import { setupAgents } from './host/agents.ts';
+import { registerNewDocumentCommands } from './host/newDocument.ts';
 import { runTool, toolTarget, TOOL_NAMES, type ToolName, type TextStore } from './agents/localEdit.ts';
 import * as build from './host/build.ts';
 import type { HostToEditor } from './shared/protocol.ts';
@@ -315,6 +316,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       const e = registry.active;
       if (e) void e.panel.webview.postMessage({ type: 'goto', pos } satisfies HostToEditor);
     }),
+    ...registerNewDocumentCommands(layoutDir, (e, area) => telemetry.report(e, area)),
   );
 
   // `overlyx.defaultEditor`: .tex files open in the OverLyX editor unless the user picks another.
