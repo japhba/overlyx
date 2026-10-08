@@ -540,7 +540,7 @@ test("text boxes set their lines as TeX does: the first line's letters at the to
   expect(errors).toEqual([]);
 });
 
-test('selecting like Inkscape: a click on nothing deselects, rubber bands from the canvas and with Shift, Ctrl locks the axis, Space leaves a copy; an arrow pointer', async ({ page }) => {
+test('selecting like Inkscape: a click on nothing deselects, rubber bands from the canvas and with Shift, Ctrl locks the axis, Space leaves a copy; an arrow over the page, the move pointer over objects', async ({ page }) => {
   const errors = collectErrors(page);
   await login(page);
   await openLayout(page, 'select.tex');
@@ -557,10 +557,10 @@ test('selecting like Inkscape: a click on nothing deselects, rubber bands from t
   });
   const cursorAt = (x: number, y: number) => page.evaluate(([cx, cy]) => getComputedStyle(document.elementFromPoint(cx, cy)!).cursor, at(x, y));
 
-  // an arrow over the page and over objects — not the text cursor
+  // an arrow over the page, the four-way move arrows over objects (a drag moves them) — not the text cursor
   expect(await cursorAt(120, 75)).toBe('default');
-  expect(await cursorAt(40, 30)).toBe('default');
-  expect(await cursorAt(30, 57)).toBe('default');
+  expect(await cursorAt(40, 30)).toBe('move');
+  expect(await cursorAt(30, 57)).toBe('move');
 
   // a click on an object selects it; the page does not move when the toolbar follows the selection
   await page.mouse.click(...at(40, 30));

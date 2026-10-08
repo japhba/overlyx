@@ -91,7 +91,8 @@ fs.writeFileSync(path.join(udd, 'User/settings.json'), JSON.stringify({
 }, null, 2));
 
 const exe = await downloadAndUnzipVSCode({ cachePath: path.join(pkg, '.vscode-test') });
-const PORT = 9339;
+// another port when two runs share the machine (two checkouts, two sessions): they would drive each other's VS Code
+const PORT = Number(process.env.OVERLYX_GUI_PORT) || 9339;
 const child = spawn(exe, [
   '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-workspace-trust',
   '--disable-updates', '--disable-crash-reporter', '--skip-welcome', '--skip-release-notes',
@@ -387,6 +388,13 @@ try {
   if (!md.startsWith('# Notes heading\n\nA *markdown* paragraph. Now **bold** too.\n\n* a star bullet')) fail('notes.md was rewritten beyond the edit: ' + JSON.stringify(md));
   log('markdown file edited in the OverLyX editor and saved as markdown');
   await shot('06-markdown');
+  // Ctrl+B in a document is the editor's bold, not VS Code's Toggle Side Bar
+  const sideBar = page.locator('#workbench\\.parts\\.sidebar');
+  if (!await sideBar.isVisible()) fail('the side bar should be open before the Ctrl+B check');
+  await page.keyboard.press('Control+b');
+  await sleep(1000);
+  if (!await sideBar.isVisible()) fail('Ctrl+B in a document toggled VS Code\'s side bar');
+  log('Ctrl+B in a document left the side bar open');
 
   /* ---- 8. File ▸ New File… ▸ Slide Deck: a 16:9 deck saved beside the open file, opened as slides ---- */
   await page.keyboard.press('Control+Shift+p');
@@ -413,15 +421,33 @@ try {
   await until(() => deckFrame.evaluate(() => (document.querySelector('.lyx-editor')?.textContent || '').includes('Title of the talk')), 15000, 'the title slide');
   log('File ▸ New File… ▸ Slide Deck created slides.tex and opened it as slides');
   await shot('08-new-slide-deck');
-  // Ctrl+B in slides is the editor's bold, not VS Code's Toggle Side Bar (overlyx.layoutDocument)
-  const sideBar = page.locator('#workbench\\.parts\\.sidebar');
-  if (!await sideBar.isVisible()) fail('the side bar should be open before the Ctrl+B check');
+  // an object shows the four-way move cursor (a drag moves it)
+  // (the text of the unselected author box; in the narrow column its middle can lie outside the viewport, so no elementFromPoint)
+  const objCursor = await deckFrame.evaluate(() => { const b = document.querySelectorAll('.lyx-editor .ol-box')[1]; return getComputedStyle(b.querySelector('.lyx-par') || b).cursor; });
+  if (objCursor !== 'move') fail('a slide object shows the ' + objCursor + ' cursor, not move');
+  // Ctrl+B in slides is the editor's bold, not VS Code's Toggle Side Bar
+  if (!await sideBar.isVisible()) fail('the side bar should be open before the Ctrl+B check in the deck');
   await deckFrame.locator('.lyx-editor .ol-box').first().click();
   await sleep(400);
   await page.keyboard.press('Control+b');
   await sleep(1000);
   if (!await sideBar.isVisible()) fail('Ctrl+B in the slide deck toggled VS Code\'s side bar');
   log('Ctrl+B in the slide deck left the side bar open');
+  // Ctrl+M in a text box: the formula field, drawn on paper even in the dark theme; VS Code's Ctrl+M (Tab moves focus) stays off
+  const themeBefore = await deckFrame.evaluate(() => { const t = document.documentElement.dataset.theme; document.documentElement.dataset.theme = 'dark'; return t; });
+  await deckFrame.locator('.lyx-editor .ol-box').nth(1).dblclick();
+  await sleep(400);
+  await page.keyboard.press('End');
+  await page.keyboard.press('Control+m');
+  await until(() => deckFrame.evaluate(() => !!document.querySelector('.lyx-editor .ol-box .lm-field.focused')), 10000, 'the formula field in the text box');
+  const fieldBg = await deckFrame.evaluate(() => getComputedStyle(document.querySelector('.lyx-editor .ol-box .lm-field.focused')).backgroundColor);
+  const lum = (fieldBg.match(/\d+/g) || []).slice(0, 3).map(Number).reduce((a, b) => a + b, 0) / 3;
+  if (lum < 200) fail('the formula being edited on a slide is drawn dark: ' + fieldBg);
+  if (await page.locator('.statusbar-item', { hasText: 'Tab Moves Focus' }).count()) fail('Ctrl+M also switched VS Code to Tab Moves Focus');
+  await page.keyboard.type('a^2');
+  await page.keyboard.press('Escape');
+  await deckFrame.evaluate(t => { document.documentElement.dataset.theme = t; }, themeBefore);
+  log('Ctrl+M in a slide text box opened a light formula field; the move cursor shows over objects');
 
   log('ALL GUI CHECKS PASSED');
   await browser.close().catch(() => {});

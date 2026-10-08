@@ -1892,6 +1892,8 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
   font-family: var(--ol-page-font, "CMU Sans Serif", "CMU Serif", sans-serif); font-size: calc(var(--ol-pt) * var(--ol-basept, 11) * var(--ol-text-scale, 1));
   --ol-lh: calc(1.2 / var(--ol-text-scale, 1)); line-height: var(--ol-lh);
   --editor-fg: #000; --caret: #1a3d6d;
+  /* pages are paper in the dark theme too: formulas being edited keep the light theme's colours */
+  --math-cmd: #1f5fa0; --math-arg: #7a1f7a; --math-arg-bg: #f6e3f6; --math-focus-bg: #f6f9ff; --ghost-fg: #888;
 }
 /* named sizes on paper are the class's absolute sizes (the controller sets --ol-size-*); justified
    text is hyphenated, as TeX does */
@@ -1988,9 +1990,12 @@ mjx-mtable:has(.lyx-size-tiny, .lyx-size-scriptsize, .lyx-size-footnotesize, .ly
 }
 .ol-layout.ol-show-notes .ol-page-wrap:not(.ol-has-notes) > .ol-notes-add:hover { border-color: var(--active-border); color: var(--ui-fg); background: var(--surface); }
 .ol-layout .ol-notes::before { content: 'Speaker notes'; display: block; font-size: 11px; color: var(--ui-muted); margin-bottom: 2px; }
-/* the pointer: an arrow on the canvas and over objects (the page is not text to click into); the
+/* the pointer: an arrow on the canvas (the page is not text to click into), the four-way arrows over
+   objects (a drag moves them, as in PowerPoint), the arrow again over locked ones (they stay put); the
    text cursor over the text box being edited or a selected one (a click puts the caret there) */
-.lyx-editor.ol-layout, .ol-layout .ol-page, .ol-layout .ol-obj, .ol-layout .ol-obj * { cursor: default; }
+.lyx-editor.ol-layout, .ol-layout .ol-page { cursor: default; }
+.ol-layout .ol-obj, .ol-layout .ol-obj * { cursor: move; }
+.ol-layout .ol-obj.ol-locked, .ol-layout .ol-obj.ol-locked * { cursor: default; }
 .ol-layout .ol-box.ol-edited .ol-box-content, .ol-layout .ol-box.ol-edited .ol-box-content *,
 .ol-layout .ol-box.ol-sel .ol-box-content, .ol-layout .ol-box.ol-sel .ol-box-content * { cursor: text; }
 .ol-layout .ol-notes, .ol-layout .ol-notes * { cursor: text; }

@@ -267,11 +267,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
   const updater = new Updater(context);
   // the built-in Outline pane cannot show a webview editor's outline: surface the Structure view
   // in the Explorer whenever an OverLyX editor is open (the context key drives its "when")
-  // and `overlyx.layoutDocument` while the OverLyX editor in front shows slides, a poster or a page (⌘B below)
-  registry.onDidChange(() => {
-    void vscode.commands.executeCommand('setContext', 'overlyx.active', registry.all().length > 0);
-    void vscode.commands.executeCommand('setContext', 'overlyx.layoutDocument', registry.active?.session.layout ?? false);
-  });
+  registry.onDidChange(() => void vscode.commands.executeCommand('setContext', 'overlyx.active', registry.all().length > 0));
   void vscode.commands.executeCommand('setContext', 'overlyx.active', false);
 
   context.subscriptions.push(
@@ -287,9 +283,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
       const target = uri ?? vscode.window.activeTextEditor?.document.uri;
       if (target) void vscode.commands.executeCommand('vscode.openWith', target, 'overlyx.texEditor');
     }),
-    // ⌘K (link), ⌘J (rewrite with AI), ⌘\ (clear formatting), F5 (present slides) and, in slides, ⌘B (bold) belong to the
-    // editor in the webview, which handles them itself; bound here so that VS Code does not also start its ⌘K chord, toggle
-    // the panel or the side bar, or split
+    // ⌘K (link), ⌘J (rewrite with AI), ⌘\ (clear formatting), ⌘B (bold), ⌘M / ⌘⇧M (formula), F5 (present slides) belong
+    // to the editor in the webview, which handles them itself; bound here so that VS Code does not also start its ⌘K chord,
+    // toggle the panel or the side bar, split, switch Tab to moving the focus or open the Problems panel
     vscode.commands.registerCommand('overlyx.editorKey', () => undefined),
     vscode.commands.registerCommand('overlyx.openAsText', () => {
       const doc = registry.active?.session.document;
