@@ -32,7 +32,7 @@ export function livePos(wrap: HTMLElement | null, fallback: number): number {
 /** The page wrapper whose look a DOM change of the editor changes, if any (selection marks, overlays and labels do not count). */
 export function pageOfMutation(r: MutationRecord): HTMLElement | null {
   const t = (r.target.nodeType === 1 ? r.target : r.target.parentElement) as HTMLElement | null;
-  if (!t || t.closest('.ol-overlay, .ol-page-label, .ol-notes-add')) return null;
+  if (!t || t.closest('.ol-overlay, .ol-page-label, .ol-notes-add, .ol-page-source')) return null;
   if (r.type === 'attributes' && r.attributeName === 'class') {
     const before = new Set((r.oldValue ?? '').split(/\s+/).filter(Boolean)), after = new Set(t.classList);
     if (![...before, ...after].some(c => before.has(c) !== after.has(c) && !UI_CLASSES.has(c))) return null;

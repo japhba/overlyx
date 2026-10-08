@@ -2,7 +2,8 @@
  * Raw LaTeX objects of layout pages are shown as their compiled image: the server typesets the
  * snippet with the document's own preamble on a page of the object's size (POST
  * /api/docs/:id/snippet → an SVG, cached by content). Where no server can (offline, the VS Code
- * extension without a TeX installation) the object shows its source instead.
+ * extension without a TeX installation) the object stays blank. Its source is available outside
+ * the canvas in the page's LaTeX inspector and the object's double-click editor.
  */
 import type { EditorView } from 'prosemirror-view';
 import { API_BASE } from '../../api';

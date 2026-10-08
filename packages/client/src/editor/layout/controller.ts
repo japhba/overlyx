@@ -46,6 +46,7 @@ import { promptMarks, boxIsEmpty, BOX_PROMPTS } from './slidelayouts';
 import { followMasters, masterWidgets, destroyMasterLayers, masterChain, placeholderMarks } from './masters';
 import { followConnectors, copyObjects, freshId, sitePoint, centre, outlinePoint, isConnector, pageSegs, shapeAttrsFor, parseEnd, endRef, connectorPath, SIDES, type Side } from './connectors';
 import { editorContext } from '../context';
+import { sourceOnlyParagraph, layoutTableSpacing } from './source';
 
 export type Tool = 'select' | 'text' | 'shape' | 'line' | 'arrow' | 'pen' | 'pencil' | 'nodes' | 'crop';
 
@@ -77,8 +78,16 @@ const displayMarks = (() => {
     // the objects of the pages' masters (masters.ts), drawn behind each page's own
     const decos: Decoration[] = L.isLayoutDoc(d) ? masterWidgets(d) : [];
     if (L.isLayoutDoc(d)) d.descendants((node, pos) => {
+      if (node.type.name === 'ol_box') for (const table of layoutTableSpacing(node)) {
+        const at = pos + 1 + table.pos;
+        decos.push(Decoration.node(at, at + table.node.nodeSize, { style: `--ol-tabcolsep: calc(var(--ol-mm) * ${table.mm})` }));
+      }
       if (!node.isTextblock) return node.type.name !== 'ol_notes';
       if (!node.childCount) return false;
+      if (sourceOnlyParagraph(node)) {
+        decos.push(Decoration.node(pos, pos + node.nodeSize, { class: 'ol-source-only' }));
+        return false;
+      }
       const first = node.firstChild!.type.name === 'math_display', last = node.lastChild!.type.name === 'math_display';
       if (!first && !last) return false;
       decos.push(Decoration.node(pos, pos + node.nodeSize, { class: [first ? 'ol-par-disp-first' : '', last ? 'ol-par-disp-last' : ''].join(' ').trim() }));

@@ -15,6 +15,7 @@ import { subscribeProjectEvents } from '../../projectevents';
 import { boxOf, placeElement, MM, PT, color, shapePathInBox, DASHES, ptToMm } from './geom';
 import { rawPreview } from './rawpreview';
 import { BOX_PROMPTS, boxIsEmpty } from './slidelayouts';
+import { layoutSources, openLayoutSources } from './source';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 
@@ -44,6 +45,7 @@ export class PageView implements NodeView {
   label: HTMLElement;
   /** "Click to add speaker notes" under a page without notes, while the notes are shown */
   notesAdd: HTMLElement;
+  private sourceButton: HTMLButtonElement;
 
   constructor(public node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
     this.dom = document.createElement('div');
@@ -61,7 +63,13 @@ export class PageView implements NodeView {
     this.notesAdd.contentEditable = 'false';
     this.notesAdd.textContent = 'Click to add speaker notes';
     this.notesAdd.addEventListener('mousedown', e => { e.preventDefault(); this.addNotes(); });
-    this.dom.append(this.label, this.contentDOM, this.overlay, this.notesAdd);
+    this.sourceButton = document.createElement('button');
+    this.sourceButton.type = 'button';
+    this.sourceButton.className = 'ol-page-source';
+    this.sourceButton.contentEditable = 'false';
+    this.sourceButton.title = 'Inspect the LaTeX fragments and definitions outside the slide';
+    this.sourceButton.addEventListener('click', () => { const pos = this.getPos(); if (pos !== undefined) openLayoutSources(this.view, pos); });
+    this.dom.append(this.label, this.contentDOM, this.overlay, this.notesAdd, this.sourceButton);
     (this.dom as HTMLElement & { olPage?: PageView }).olPage = this;
     this.render();
   }
@@ -93,6 +101,10 @@ export class PageView implements NodeView {
     if (fill !== this.shown.fill) { this.contentDOM.style.background = fill; this.shown.fill = fill; }
     if ((a.transition ?? '') !== this.shown.transition) { this.dom.dataset.transition = a.transition ?? ''; this.shown.transition = a.transition ?? ''; }
     this.dom.classList.toggle('ol-has-notes', this.node.lastChild?.type.name === 'ol_notes');
+    const sources = layoutSources(this.node).length;
+    this.sourceButton.hidden = sources === 0;
+    const sourceLabel = `LaTeX (${sources})`;
+    if (this.sourceButton.textContent !== sourceLabel) this.sourceButton.textContent = sourceLabel;
     // a master page (masters.ts) is shown only in the master view, numbered among the masters
     const master = a.role === 'master';
     if ((a.role ?? 'page') !== this.shown.role) { this.dom.dataset.role = a.role ?? 'page'; this.shown.role = a.role ?? 'page'; }
@@ -116,10 +128,10 @@ export class PageView implements NodeView {
     if (m.type === 'selection') return false;
     // the overlay and the label are ours; style changes of the sheet too
     const t = m.target as HTMLElement;
-    return this.overlay.contains(t) || this.label.contains(t) || this.notesAdd.contains(t) || (m.type === 'attributes' && (t === this.contentDOM || t === this.dom));
+    return this.overlay.contains(t) || this.label.contains(t) || this.notesAdd.contains(t) || this.sourceButton.contains(t) || (m.type === 'attributes' && (t === this.contentDOM || t === this.dom));
   }
 
-  stopEvent(e: Event): boolean { return this.overlay.contains(e.target as Node) || this.label.contains(e.target as Node) || this.notesAdd.contains(e.target as Node); }
+  stopEvent(e: Event): boolean { return this.overlay.contains(e.target as Node) || this.label.contains(e.target as Node) || this.notesAdd.contains(e.target as Node) || this.sourceButton.contains(e.target as Node); }
 }
 
 /* ------------------------------------------------------------------ text box */
@@ -394,7 +406,6 @@ export class GroupView implements NodeView {
 export class RawView implements NodeView {
   dom: HTMLElement;
   private img: HTMLImageElement;
-  private code: HTMLElement;
   private seq = 0;
 
   constructor(public node: PMNode, private view: EditorView, private getPos: () => number | undefined) {
@@ -403,9 +414,7 @@ export class RawView implements NodeView {
     this.img = document.createElement('img');
     this.img.draggable = false;
     this.img.alt = '';
-    this.code = document.createElement('pre');
-    this.code.className = 'ol-raw-code';
-    this.dom.append(this.img, this.code);
+    this.dom.append(this.img);
     this.render();
   }
 
@@ -413,7 +422,6 @@ export class RawView implements NodeView {
     const a = this.node.attrs;
     const placed = a.placed !== false;
     this.dom.className = placed ? 'ol-obj ol-raw' : 'ol-raw-unplaced';
-    this.code.textContent = String(a.latex ?? '');
     this.dom.title = placed ? 'Raw LaTeX — double-click to edit' : 'LaTeX on this page that is no object:\n' + String(a.latex ?? '');
     if (!placed) return;
     placeElement(this.dom, boxOf(this.node));

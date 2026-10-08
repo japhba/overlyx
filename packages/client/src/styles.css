@@ -636,7 +636,7 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 /* in a text box on a page, a table stands where TeX sets it: aligned like the box's text (no \centering
    around it), its columns \tabcolsep (6 pt) apart from their rules on either side */
 .ol-page .lyx-par.ol-solo-table { text-align: inherit; }
-.ol-page .lyx-cell { padding-left: calc(var(--ol-pt) * 6); padding-right: calc(var(--ol-pt) * 6); }
+.ol-page .lyx-cell { padding-left: var(--ol-tabcolsep, calc(var(--ol-pt) * 6)); padding-right: var(--ol-tabcolsep, calc(var(--ol-pt) * 6)); }
 .lyx-cell { padding: 2px 6px; border: 1px dotted var(--cell-grid, var(--ui-border2)); min-width: 2em; }
 /* the dotted grid — LyX's hint for cell boundaries without a line — only while the cursor is in the
    table (editor/plugins/envfocus.ts marks it); the colour changes, never the layout */
@@ -1910,6 +1910,15 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 /* formulas at the text's nominal size, in the math font's own scale (not the editor's x-height match) */
 .lyx-editor.ol-layout .ol-page mjx-container[jax="CHTML"], .ol-present-stage .ol-page mjx-container[jax="CHTML"], .ol-rail-holder .ol-page mjx-container[jax="CHTML"] { font-size: calc(var(--ol-math-rel, 1) * 1em); }
 .ol-page-label { position: absolute; right: calc(100% + 10px); top: 0; font: 12px/1.3 var(--ui-font); color: var(--ui-muted); white-space: nowrap; user-select: none; max-width: 30px; overflow: hidden; text-overflow: ellipsis; }
+/* Nonprinting source and editor labels never take space on paper. The inspector is above it. */
+.ol-page .ol-box-content .lyx-inset-ert, .ol-page .ol-box-content .lyx-inset-note,
+.ol-page .ol-box-content .lyx-macro, .ol-page .ol-box-content .ol-source-only { display: none; }
+.ol-page .ol-box-content .inset-label, .ol-page .ol-box-content .inset-anchor, .ol-page .ol-box-content .inset-actions { display: none; }
+.ol-page .ol-box-content .inset-box { background: none; border: none; padding: 0; margin: 0; }
+.ol-page-source { position: absolute; right: 0; bottom: calc(100% + 5px); border: none; padding: 2px 5px; background: transparent; color: var(--ui-muted); font: 12px/1.3 var(--ui-font); cursor: pointer; }
+.ol-page-source:hover { background: var(--ui-hover); color: var(--ui-fg); }
+.ol-page-source[hidden] { display: none; }
+.ol-source-code { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font: 13px/1.45 ui-monospace, monospace; padding: 8px; background: var(--surface2); color: var(--ui-fg); }
 .ol-obj { position: absolute; box-sizing: border-box; transform-origin: 50% 50%; }
 .ol-box-frame { position: absolute; box-sizing: border-box; pointer-events: none; }
 /* "Click to add title" in an empty named box of a new slide (nodeviews.ts BoxView): laid out like its text, the editor's only */
@@ -1927,13 +1936,13 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
      \belowdisplayshortskip below); when it ends one, no line after it (ProseMirror's trailing break
      overlaps it), and at the end of the box no skip either; its line is a text line (a formula
      lower than the line does not push the lines apart). The classes come from the layout plugin. */
-.ol-page .ol-box-content > :first-child { margin-top: calc(-1em * var(--ol-tex-lines, 0) * (var(--ol-lh) / 2 + var(--ol-fhalf, 0) - var(--ol-asc, 0))); }
-.ol-page .ol-box-content > :last-child { margin-bottom: calc(-1em * var(--ol-tex-lines, 0) * (var(--ol-lh) / 2 - var(--ol-fhalf, 0))); }
-.ol-page .ol-box-content > .ol-par-disp-first:first-child { margin-top: calc(-1em * var(--ol-tex-lines, 0) * (var(--ol-lh) / 2 + var(--ol-fhalf, 0))); }
-.ol-page .ol-box-content > .ol-par-disp-last:last-child { margin-bottom: 0; }
+.ol-page .ol-box-content > :nth-child(1 of :not(.ol-source-only)) { margin-top: calc(-1em * var(--ol-tex-lines, 0) * (var(--ol-lh) / 2 + var(--ol-fhalf, 0) - var(--ol-asc, 0))); }
+.ol-page .ol-box-content > :nth-last-child(1 of :not(.ol-source-only)) { margin-bottom: calc(-1em * var(--ol-tex-lines, 0) * (var(--ol-lh) / 2 - var(--ol-fhalf, 0))); }
+.ol-page .ol-box-content > .ol-par-disp-first:nth-child(1 of :not(.ol-source-only)) { margin-top: calc(-1em * var(--ol-tex-lines, 0) * (var(--ol-lh) / 2 + var(--ol-fhalf, 0))); }
+.ol-page .ol-box-content > .ol-par-disp-last:nth-last-child(1 of :not(.ol-source-only)) { margin-bottom: 0; }
 .ol-page .lyx-math-display { --ol-after: calc(var(--ol-pt) * var(--ol-dskip, 11)); margin: calc(var(--ol-pt) * var(--ol-dskip, 11)) 0 var(--ol-after); }
 .ol-page .lyx-math-display.ol-disp-first { margin-top: 1lh; --ol-after: calc(var(--ol-pt) * var(--ol-dskip-short, 6.5)); }
-.ol-page .ol-box-content > .ol-par-disp-last:last-child > .lyx-math-display.ol-disp-last { --ol-after: 0px; }
+.ol-page .ol-box-content > .ol-par-disp-last:nth-last-child(1 of :not(.ol-source-only)) > .lyx-math-display.ol-disp-last { --ol-after: 0px; }
 /* ProseMirror's trailing break after a display that ends its paragraph: its empty line overlaps the
    formula (a presentation's copy has no such break) */
 .ol-page .lyx-math-display.ol-disp-last:has(~ .ProseMirror-trailingBreak) { margin-bottom: calc(var(--ol-after) - 1lh); }
@@ -1969,11 +1978,8 @@ mjx-mtable:has(.lyx-size-tiny, .lyx-size-scriptsize, .lyx-size-footnotesize, .ly
 .ol-raw { outline: 1px dashed rgba(120,120,120,0.45); overflow: hidden; }
 .ol-raw > img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: none; }
 .ol-raw.ol-rendered > img { display: block; }
-.ol-raw.ol-rendered > .ol-raw-code { display: none; }
 .ol-raw.ol-rendered { outline-color: transparent; }
 .ol-layout .ol-raw.ol-rendered:hover { outline-color: rgba(120,120,120,0.45); }
-.ol-raw-code { margin: 0; padding: 2px 4px; font: calc(var(--ol-pt) * 6) / 1.25 ui-monospace, monospace; color: #555; white-space: pre-wrap; overflow: hidden; height: 100%; box-sizing: border-box; background: rgba(245,245,245,0.8); }
-.ol-raw.ol-pending > .ol-raw-code { opacity: 0.6; }
 .ol-raw-unplaced { display: none; }
 .ol-group { display: contents; }
 .ol-notes { display: none; }
@@ -2204,7 +2210,7 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .ol-page .lyx-space { background: none; }
 /* in the slideshow the page is only what the PDF shows: no editing aids */
 .ol-present .ol-invisible > svg, .ol-present .ol-raw, .ol-present .ol-box.ol-empty-frame:hover { outline: none; }
-.ol-present .ol-raw-code, .ol-present .ol-hit { display: none; }
+.ol-present .ol-hit { display: none; }
 .ol-present .spell-error, .ol-present .ol-misspelled, .ol-present [class*="spell"] { text-decoration: none !important; background: none !important; }
 
 /* the raw LaTeX object's editor (editor/layout/rawedit.ts) */
