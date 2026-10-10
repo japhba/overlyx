@@ -9,13 +9,14 @@
  *    the TeX distribution's own config under /etc still is.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync, appendFileSync, mkdirSync, symlinkSync, lstatSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { assertWritableRelPath } from '../packages/server/src/projects.ts';
 import { gitEnv } from '../packages/server/src/git.ts';
 import { sandboxed } from '../packages/server/src/sandbox.ts';
+import { sweepBuildDir } from '../packages/server/src/export.ts';
 
 const haveBwrap = ['/usr/bin/bwrap', '/usr/local/bin/bwrap'].some(existsSync);
 const haveGit = spawnSync('git', ['--version']).status === 0;
@@ -83,6 +84,40 @@ describe.skipIf(!haveBwrap)('the build sandbox hides host secrets but keeps the 
       expect(r.stdout).not.toContain('LEAK');
     } finally {
       rmSync(rwDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('sweepBuildDir clears what a build left behind', () => {
+  it('removes symlinks out of the project, keeps links to project files and real files/dirs', () => {
+    const base = mkdtempSync(join(tmpdir(), 'ol-sweep-'));
+    try {
+      const project = join(base, 'project');
+      const build = join(base, 'build');
+      mkdirSync(join(project, 'figs'), { recursive: true });
+      mkdirSync(join(build, 'sub'), { recursive: true });
+      writeFileSync(join(project, 'figs', 'plot.png'), 'PNG');
+      const secret = join(base, 'secret');
+      writeFileSync(secret, 'TOP SECRET');
+
+      writeFileSync(join(build, 'main.pdf'), '%PDF');                 // a build product: kept
+      writeFileSync(join(build, 'sub', 'main.aux'), 'aux');          // in a sub-directory: kept
+      symlinkSync(join(project, 'figs', 'plot.png'), join(build, 'plot.png'));  // a link to a project file: kept
+      symlinkSync(secret, join(build, 'svg-inkscape-leak.pdf'));     // a link to a host file (the attack): removed
+      symlinkSync('/etc/shadow', join(build, 'shadow'));             // an absolute link out: removed
+      symlinkSync(secret, join(build, 'sub', 'nested-leak'));        // in a sub-directory: removed
+
+      sweepBuildDir(build, project);
+
+      expect(readFileSync(join(build, 'main.pdf'), 'utf8')).toBe('%PDF');
+      expect(readFileSync(join(build, 'sub', 'main.aux'), 'utf8')).toBe('aux');
+      expect(lstatSync(join(build, 'plot.png')).isSymbolicLink()).toBe(true);
+      expect(existsSync(join(build, 'svg-inkscape-leak.pdf'))).toBe(false);
+      expect(existsSync(join(build, 'shadow'))).toBe(false);
+      expect(existsSync(join(build, 'sub', 'nested-leak'))).toBe(false);
+      expect(readFileSync(secret, 'utf8')).toBe('TOP SECRET');       // never followed
+    } finally {
+      rmSync(base, { recursive: true, force: true });
     }
   });
 });

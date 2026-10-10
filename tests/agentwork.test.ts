@@ -4,7 +4,7 @@
  * live document, other files copied, build output left behind.
  */
 import { describe, it, expect, afterAll } from 'vitest';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -93,6 +93,42 @@ describe('agent working copy', () => {
     await prepareWorkspace(T, 'owner/cv', 1);   // no sync in between (a missed notification)
     expect((await manager.open('owner/cv/cv.tex')).toText()).toMatch(/\\lyxdeleted\{Agent panel \(MCP\)\}\{[^}]*\}\{Second\}\\lyxadded\{Agent panel \(MCP\)\}\{[^}]*\}\{The second\} paragraph stays, edited live\./);
   });
+  it('a symlink the agent plants in its copy cannot make the server write or read outside the project', async () => {
+    const dir = await prepareWorkspace(T, 'owner/cv', 1);
+    const secret = join(ROOT, 'host-secret');
+    writeFileSync(secret, 'TOP SECRET');
+
+    // 1. a text file replaced by a link to a host file: the sync must not read the secret into the project
+    rmSync(join(dir, 'refs.bib'));
+    symlinkSync(secret, join(dir, 'refs.bib'));
+    // 2. a new file created through a symlinked sub-directory pointing outside the copy
+    const outside = join(ROOT, 'outside');
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(dir, 'escape'));
+    writeFileSync(join(outside, 'evil.tex'), 'should stay outside');
+    // 3. a brand-new link to a host file, as if to overwrite it on write-back
+    symlinkSync('/etc/hostname', join(dir, 'hostname.tex'));
+
+    const r = await syncWorkspace(T, 'owner/cv', 1);
+    // the secret never reaches the project's refs.bib (the link is not read; its name maps to the live file)
+    expect(readFileSync(join(PROJ, 'refs.bib'), 'utf8')).not.toContain('TOP SECRET');
+    // nothing was created from the symlinked directory or the host link
+    expect(existsSync(join(PROJ, 'escape'))).toBe(false);
+    expect(existsSync(join(PROJ, 'evil.tex'))).toBe(false);
+    expect(readFileSync('/etc/hostname', 'utf8')).not.toContain('should');
+    expect(readFileSync(secret, 'utf8')).toBe('TOP SECRET');   // untouched
+    expect(r.some(f => /TOP SECRET/.test(JSON.stringify(f)))).toBe(false);
+
+    // and the next turn's mirror-in (prepareWorkspace) writes through no planted link either: replace
+    // the mirrored figs/ directory with a link out, then re-mirror — the link is removed, not written through
+    const dir2 = workspaceDir(T, 'owner/cv');
+    rmSync(join(dir2, 'figs'), { recursive: true, force: true });
+    symlinkSync(outside, join(dir2, 'figs'));
+    await prepareWorkspace(T, 'owner/cv', 1);
+    expect(lstatSync(join(dir2, 'figs')).isSymbolicLink()).toBe(false);   // a real directory again
+    expect(existsSync(join(outside, 'plot.png'))).toBe(false);            // nothing written into the link's target
+  });
+
   it("with the panel's Track changes box off, a turn's edits go in directly — and its checkpoint can take them back", async () => {
     const { workspaceTracking, listCheckpoints, undoCheckpoint, finishTurn } = await import('../packages/server/src/agentwork.ts');
     expect(workspaceTracking(T)).toBe(true);

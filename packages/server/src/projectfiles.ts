@@ -109,7 +109,27 @@ export function resolveProjectPath(project: string, rel: string): string {
   const root = path.join(config.projectsDir, project);
   const abs = path.resolve(root, rel);
   if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error('path escapes project');
+  if (!staysInside(root, abs)) throw new Error('path escapes project');
   return abs;
+}
+
+/**
+ * Whether what exists of `abs` really lies inside `root` once symlinks are resolved — a link in a
+ * project (nothing of OverLyX makes one; git checks them out as plain files) must not take a read or
+ * a write out of it. A dangling link on the way counts as outside: writing through it would create its target.
+ */
+export function staysInside(root: string, abs: string): boolean {
+  let realRoot: string;
+  try { realRoot = fs.realpathSync.native(root); } catch { return true; }   // a project being created
+  for (let p = abs; ; p = path.dirname(p)) {
+    let real: string | null = null;
+    try { real = fs.realpathSync.native(p); }
+    catch {
+      try { if (fs.lstatSync(p).isSymbolicLink()) return false; } catch { /* missing: look at its directory */ }
+    }
+    if (real !== null) return real === realRoot || real.startsWith(realRoot + path.sep);
+    if (p === root || p === path.dirname(p)) return true;
+  }
 }
 
 export function projectDir(project: string): string {

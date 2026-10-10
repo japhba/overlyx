@@ -10,10 +10,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from './config.ts';
 import { manager } from './docs.ts';
-import { buildDirPath } from './namespaces.ts';
 import { projectDir } from './projects.ts';
 import { cacheDir } from './graphics.ts';
 import { run, texInputs, linkDocumentAssets, magicEngine, rewriteParentPaths } from './export.ts';
+import { sandboxHome } from './sandbox.ts';
+import { isRegularFileAt, readFileAt } from './confined.ts';
 
 const SNIPPETS = path.join(config.dataDir, 'cache', 'snippets');
 const inflight = new Map<string, Promise<string>>();
@@ -48,8 +49,10 @@ export async function snippetSvg(docId: string, latex: string, wmm: number, hmm:
 
 async function compile(docId: string, docDir: string, project: string, src: string, key: string): Promise<string> {
   await acquire();
-  const dir = path.join(buildDirPath(docId), 'snippets', key);
+  // its own directory, not inside the document's build directory (a build of the document could change it meanwhile)
+  const dir = path.join(config.dataDir, 'cache', 'snippet-build', key);
   try {
+    fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(dir, { recursive: true });
     fs.mkdirSync(SNIPPETS, { recursive: true });
     linkDocumentAssets(docDir, dir);
@@ -57,14 +60,14 @@ async function compile(docId: string, docDir: string, project: string, src: stri
     const engine = magicEngine(src) ?? (/\\usepackage(\[[^\]]*\])?\{fontspec\}/.test(src) ? '-pdfxe' : '-pdf');
     const r = await run('latexmk', [engine, '-pvc-', '-interaction=nonstopmode', '-halt-on-error', 'snippet.tex'], {
       cwd: dir, env: texInputs(docDir, dir, projectDir(project)), timeoutMs: 60000, nice: true,
-      sandbox: { rw: [dir], ro: [projectDir(project), cacheDir] },
+      sandbox: { rw: [dir], ro: [projectDir(project), cacheDir], home: sandboxHome(project) },
     }).done;
-    const pdf = path.join(dir, 'snippet.pdf');
-    if (!fs.existsSync(pdf)) throw new Error('the snippet did not compile' + (r.out.match(/^!.*$/m)?.[0] ? ': ' + r.out.match(/^!.*$/m)![0] : ''));
-    const out = path.join(dir, 'snippet.svg');
-    const c = await run('pdftocairo', ['-svg', '-f', '1', '-l', '1', pdf, out], { cwd: dir, timeoutMs: 30000 }).done;
-    if (c.code !== 0 || !fs.existsSync(out)) throw new Error('could not convert the snippet');
-    fs.copyFileSync(out, path.join(SNIPPETS, key + '.svg'));
+    if (!isRegularFileAt(path.join(dir, 'snippet.pdf'))) throw new Error('the snippet did not compile' + (r.out.match(/^!.*$/m)?.[0] ? ': ' + r.out.match(/^!.*$/m)![0] : ''));
+    // the conversion runs in the sandbox too: the directory holds what the project's code left there
+    const c = await run('pdftocairo', ['-svg', '-f', '1', '-l', '1', 'snippet.pdf', 'snippet.svg'], { cwd: dir, timeoutMs: 30000, sandbox: { rw: [dir], home: false } }).done;
+    const svg = c.code === 0 ? readFileAt(path.join(dir, 'snippet.svg'), 32 * 1024 * 1024) : null;
+    if (!svg) throw new Error('could not convert the snippet');
+    fs.writeFileSync(path.join(SNIPPETS, key + '.svg'), svg);
     return key;
   } finally {
     release();

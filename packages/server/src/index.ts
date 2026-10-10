@@ -33,7 +33,8 @@ import { pdfLinkByToken, pdfLinksOf, createPdfLink, deletePdfLink, countHit, pdf
 import { publishAvailable, publishTargetsOf, setPublishTarget, deletePublishTarget, publishPdf, startPublishing } from './pdfpublish.ts';
 import { overleafProjectId, cloneOverleafProject } from './overleaf.ts';
 import { toPng, isDirectImage } from './graphics.ts';
-import { buildPdf, exportTex, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit, layoutCheckOf } from './export.ts';
+import { buildPdf, exportTex, texExportDir, lastBuild, requestBuild, currentJob, cancelBuild, publicJob, cleanupProjectData, synctexView, synctexEdit, layoutCheckOf } from './export.ts';
+import { sendFileAt, readFileAt, isRegularFileAt } from './confined.ts';
 import { db } from './db.ts';
 import { accessibleProjects, adoptProjects, roleFor, atLeast, isRole, registerProject, projectRow, shareInfo, addMember, setMemberRole, removeMember, memberRow, linkMemberIds, setLink, linkProject, acceptLink, newOwner, setOwner, trashProject, ensureWelcomeProject, ensureStarterProjects, type Role } from './access.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
@@ -1006,6 +1007,10 @@ api.post('/docs/*/ai-repair', async (req, res) => {
   try {
     if (!atLeast(req.role, 'edit')) { res.status(403).json({ error: 'view-only' }); return; }
     if (!config.openrouter.apiKey) { res.status(503).json({ error: 'AI repair is not configured on this server (OPENROUTER_API_KEY is unset).' }); return; }
+    const uid = req.user!.id, HOUR = 3600_000, DAY = 24 * HOUR;
+    if (!aiAllow(`repair:${uid}`, config.ai.repairsPerHour, HOUR) || !aiAllow(`repair-day:${uid}`, config.ai.repairsPerDay, DAY) || !aiAllow('repair-day', config.ai.repairsPerDayTotal, DAY)) {
+      res.status(429).json({ error: 'That is the limit of AI repairs for now — try again later, or fix the document by hand.' }); return;
+    }
     const doc = await manager.open(docId(req));
     const original = doc.fileText ?? await doc.textAsync();
     const issues = doc.health();
@@ -1228,7 +1233,7 @@ api.post('/docs/*/export', async (req, res) => {
     const format = String(req.body?.format ?? 'pdf');
     const engine = 'overlyx';
     if (format === 'tex') {
-      const r = await exportTex(id);
+      const r = await exportTex(id, { into: texExportDir(id) });
       res.json({ ok: true, tex: r.tex, warnings: r.warnings });
       return;
     }
@@ -1251,11 +1256,11 @@ api.post('/docs/*/export/cancel', (req, res) => {
 
 api.get('/docs/*/pdf', (req, res) => {
   const b = lastBuild(docId(req));
-  if (!b?.pdf_path || !fs.existsSync(b.pdf_path)) { res.status(404).json({ error: 'no pdf built yet' }); return; }
+  if (!b?.pdf_path || !isRegularFileAt(b.pdf_path)) { res.status(404).json({ error: 'no pdf built yet' }); return; }
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Cache-Control', 'no-store');
   if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${path.basename(b.pdf_path)}"`);
-  res.sendFile(b.pdf_path);
+  if (!sendFileAt(res, b.pdf_path)) { res.removeHeader('Content-Disposition'); res.status(404).json({ error: 'no pdf built yet' }); }
 });
 
 /** SyncTeX forward search: the PDF boxes of a line (1-based) of the .tex as built (`?line=`). */
@@ -1286,9 +1291,9 @@ api.get('/docs/*/build', (req, res) => {
   const id = docId(req);
   const b = lastBuild(id);
   const job = currentJob(id);
-  const tex = req.query.tex === '1' && b?.tex_path && fs.existsSync(b.tex_path) ? fs.readFileSync(b.tex_path, 'utf8') : undefined;
+  const tex = req.query.tex === '1' && b?.tex_path ? readFileAt(b.tex_path, 16 * 1024 * 1024)?.toString('utf8') : undefined;
   let pdfAt: number | null = null;
-  try { if (b?.pdf_path) pdfAt = Math.round(fs.statSync(b.pdf_path).mtimeMs); } catch { /* gone */ }
+  try { if (b?.pdf_path) { const st = fs.lstatSync(b.pdf_path); if (st.isFile()) pdfAt = Math.round(st.mtimeMs); } } catch { /* gone */ }
   res.json({
     build: b ? { ...b, pdf: pdfAt !== null ? `/api/docs/${encodeURIComponent(id)}/pdf?t=${b.updated_at}` : null, pdf_at: pdfAt, tex } : null,
     job: job ? publicJob(job) : null,
@@ -1410,7 +1415,7 @@ app.get(['/pdf/:token', '/pdf/:token/:name'], async (req, res) => {
     res.type('text').send(busy ? 'The PDF is being built — try again in a moment.' : 'The PDF could not be built. The owner can see the errors in the editor.');
     return;
   }
-  const st = fs.statSync(pdf.path);
+  const st = fs.lstatSync(pdf.path);
   const etag = `"${st.size.toString(16)}-${Math.floor(pdf.updatedAt).toString(16)}"`;
   res.setHeader('ETag', etag);
   res.setHeader('Last-Modified', new Date(pdf.updatedAt).toUTCString());
@@ -1419,8 +1424,8 @@ app.get(['/pdf/:token', '/pdf/:token/:name'], async (req, res) => {
   res.setHeader('Content-Disposition', `${req.query.download === '1' ? 'attachment' : 'inline'}; filename="${pdf.fileName}"`);
   if (pdf.building) res.setHeader('X-OverLyX-Rebuilding', '1');
   if (req.headers['if-none-match'] === etag) { res.status(304).end(); return; }
+  if (!sendFileAt(res, pdf.path)) { res.removeHeader('Content-Disposition'); res.status(503).type('text').send('The PDF is being built — try again in a moment.'); return; }
   countHit(link.token);
-  res.sendFile(pdf.path);
 });
 
 // which commit runs here — public, so a deploy (scripts/deploy.sh, scripts/autodeploy.sh) and a

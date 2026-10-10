@@ -415,10 +415,10 @@ function matchedRest(b: string, r: string): string | null {
 /* ------------------------------------------------------------------ rate limiting */
 
 const buckets = new Map<string, number[]>();
-/** true when `key` may make another request (`limit` per minute) */
-export function allow(key: string, limit: number): boolean {
+/** true when `key` may make another request (`limit` per minute, or per `windowMs`) */
+export function allow(key: string, limit: number, windowMs = 60000): boolean {
   const now = Date.now();
-  const arr = (buckets.get(key) ?? []).filter(t => now - t < 60000);
+  const arr = (buckets.get(key) ?? []).filter(t => now - t < windowMs);
   if (arr.length >= limit) { buckets.set(key, arr); return false; }
   arr.push(now);
   buckets.set(key, arr);

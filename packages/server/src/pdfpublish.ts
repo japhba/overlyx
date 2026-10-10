@@ -14,6 +14,7 @@ import { config } from './config.ts';
 import { db } from './db.ts';
 import { docPathOf } from '@overlyx/core';
 import { lastBuild, onBuildFinished } from './export.ts';
+import { readFileAt } from './confined.ts';
 
 export interface PublishRow { doc_id: string; repo: string; path: string; branch: string | null; created_by: number | null; created_at: number; last_pushed_at: number | null; last_sha: string | null; last_error: string | null; last_attempt_at: number | null }
 
@@ -82,9 +83,11 @@ export function publishPdf(docId: string, reason = 'built'): Promise<PublishRow 
     const fail = (msg: string) => { db.prepare('UPDATE pdf_publish SET last_error = ?, last_attempt_at = ? WHERE doc_id = ?').run(msg.slice(0, 500), Date.now(), docId); console.warn(`[publish] ${docId} → ${t.repo}:${t.path}: ${msg}`); return publishTargetFor(docId); };
     if (!publishAvailable()) return fail('GITHUB_PUBLISH_TOKEN is not configured on this server');
     const b = lastBuild(docId);
-    if (!b?.pdf_path || !fs.existsSync(b.pdf_path)) return fail('no PDF built yet');
+    if (!b?.pdf_path) return fail('no PDF built yet');
     let content: Buffer;
-    try { content = fs.readFileSync(b.pdf_path); } catch (e) { return fail(String(e)); }
+    const pdf = readFileAt(b.pdf_path);
+    if (!pdf) return fail('no PDF built yet');
+    content = pdf;
     const sha = blobSha(content);
     if (t.last_sha === sha) { db.prepare('UPDATE pdf_publish SET last_error = NULL, last_attempt_at = ? WHERE doc_id = ?').run(Date.now(), docId); return publishTargetFor(docId); }
     const file = `/repos/${t.repo}/contents/${t.path.split('/').map(encodeURIComponent).join('/')}`;

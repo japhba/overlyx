@@ -10,6 +10,7 @@
  * `OVERLYX_SANDBOX`: `auto` (default: bwrap when installed, else a warning at start-up and no
  * sandbox), `bwrap` (required: refuse to start without it), `none`.
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.ts';
@@ -22,6 +23,8 @@ export interface SandboxSpec {
   cwd: string;
   /** the tool's complete environment (nothing of the server's environment is passed on) */
   env?: Record<string, string>;
+  /** its HOME (writable): sandboxHome(project) for a project's builds; false: an empty one that is thrown away; default the shared one */
+  home?: string | false;
 }
 
 const BWRAP = ['/usr/bin/bwrap', '/usr/local/bin/bwrap', '/bin/bwrap'];
@@ -55,11 +58,36 @@ export function sandboxAvailable(): boolean {
   return available;
 }
 
-/** A persistent HOME for the tools (TeX / fontconfig / inkscape caches, LyX's user directory). */
-export function sandboxHome(): string {
-  const h = path.join(config.dataDir, 'sandbox-home');
-  fs.mkdirSync(h, { recursive: true });
+/**
+ * A persistent HOME for the tools (TeX / fontconfig / inkscape caches, LyX's user directory).
+ * With a project: that project's own — a build runs the project's code (latexmkrc), and whatever it
+ * leaves in its HOME (a ~/.latexmkrc, a TeX file under ~/texmf) is read by every later build that
+ * shares it, so builds of different projects never share one. A new one starts as a copy of the
+ * shared HOME (its LuaTeX font cache saves a slow first build); the shared one is written only by
+ * the image converters, never by a project's build.
+ */
+export function sandboxHome(project?: string): string {
+  const shared = path.join(config.dataDir, 'sandbox-home');
+  fs.mkdirSync(shared, { recursive: true });
+  if (!project) return shared;
+  const h = path.join(config.dataDir, 'sandbox-homes', crypto.createHash('sha1').update(project).digest('hex').slice(0, 16));
+  if (!fs.existsSync(h)) {
+    const tmp = `${h}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      fs.mkdirSync(path.dirname(h), { recursive: true });
+      fs.cpSync(shared, tmp, { recursive: true, verbatimSymlinks: true });
+      fs.renameSync(tmp, h);
+    } catch {
+      fs.rmSync(tmp, { recursive: true, force: true });
+      fs.mkdirSync(h, { recursive: true });   // another build made it meanwhile (or the copy failed: an empty HOME works too)
+    }
+  }
   return h;
+}
+
+/** Remove a project's HOME (the project is gone). */
+export function removeSandboxHome(project: string): void {
+  fs.rmSync(path.join(config.dataDir, 'sandbox-homes', crypto.createHash('sha1').update(project).digest('hex').slice(0, 16)), { recursive: true, force: true });
 }
 
 export interface SandboxedCommand { cmd: string; args: string[]; env: NodeJS.ProcessEnv }
@@ -70,11 +98,12 @@ export interface SandboxedCommand { cmd: string; args: string[]; env: NodeJS.Pro
  */
 export function sandboxed(cmd: string, args: string[], spec: SandboxSpec): SandboxedCommand {
   if (!sandboxAvailable()) return { cmd, args, env: { ...process.env, ...spec.env } };
-  const home = sandboxHome();
+  const home = spec.home === false ? '/tmp/home' : spec.home ?? sandboxHome();
   const b: string[] = [];
   for (const d of [...SYSTEM_RO, ...ETC_RO]) if (fs.existsSync(d)) b.push('--ro-bind', d, d);
   b.push('--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp');
-  b.push('--bind', home, home);
+  if (spec.home === false) b.push('--dir', home);
+  else { fs.mkdirSync(home, { recursive: true }); b.push('--bind', home, home); }
   for (const d of new Set(spec.ro ?? [])) if (fs.existsSync(d)) b.push('--ro-bind', d, d);
   for (const d of new Set(spec.rw)) { fs.mkdirSync(d, { recursive: true }); b.push('--bind', d, d); }
   // As root, a user namespace would hide the capabilities that read files owned by other users

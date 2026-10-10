@@ -33,6 +33,7 @@ import { manager, docFiles, readTextFile, type OpenDoc } from './docs.ts';
 import { projectDir, resolveProjectPath, isDocumentFile, findMaster } from './projects.ts';
 import { lastBuild, buildIncluding, buildErrors, requestBuild } from './export.ts';
 import { touchProject } from './git.ts';
+import { lstatIn, readFileIn, readTextIn, readlinkIn, writeFileIn, symlinkIn, removeIn } from './confined.ts';
 
 /** The name the panel's agent has on the MCP server (its token's name) … */
 export const PANEL_AGENT = 'Agent panel';
@@ -128,32 +129,28 @@ export function prepareWorkspace(tid: string, project: string, userId: number, t
     const manifest: Manifest = { project, files: {}, usedAt: Date.now(), ...(tracked ? {} : { tracked: false }) };
     for (const f of docFiles(project)) {
       if (f.kind === 'dir') continue;
-      const live = resolveProjectPath(project, f.path), dst = path.join(dir, f.path);
+      const live = resolveProjectPath(project, f.path);
       const ext = path.extname(f.name).toLowerCase() || f.name.toLowerCase();
       let text: string | null = null;
       if ((f.kind === 'doc' || TEXT_EXT.has(ext)) && f.size <= MAX_TEXT) {
         try { text = f.kind === 'doc' ? await liveText(project, f.path) : fs.readFileSync(live, 'utf8'); } catch { continue; }
         if (text.includes('\0')) text = null;
       }
-      fs.mkdirSync(path.dirname(dst), { recursive: true });
-      let st: fs.Stats | null = null;
-      try { st = fs.lstatSync(dst); } catch { /* new */ }
+      // the agent may have left anything in its copy — a link in place of a directory included: every
+      // operation on it goes through confined.ts, which never follows one (the server runs as root)
       if (text !== null) {
-        if (st?.isSymbolicLink() || st?.isDirectory()) fs.rmSync(dst, { recursive: true, force: true });
-        let cur: string | null = null;
-        try { cur = st?.isFile() ? fs.readFileSync(dst, 'utf8') : null; } catch { /* unreadable */ }
-        if (cur !== text) writeAtomic(dst, text);
+        if (readTextIn(dir, f.path) !== text) writeFileIn(dir, f.path, text);
         writeBase(tid, f.path, text);
         manifest.files[f.path] = 'copy';
       } else {
-        if (!(st?.isSymbolicLink() && fs.readlinkSync(dst) === live)) { if (st) fs.rmSync(dst, { recursive: true, force: true }); fs.symlinkSync(live, dst); }
+        if (readlinkIn(dir, f.path) !== live) symlinkIn(dir, f.path, live);
         manifest.files[f.path] = 'link';
       }
     }
     // what disappeared from the project (renamed, deleted) disappears from the copy too
     for (const rel of Object.keys(old?.files ?? {})) {
       if (manifest.files[rel]) continue;
-      fs.rmSync(path.join(dir, rel), { force: true });
+      removeIn(dir, rel);
       fs.rmSync(path.join(baseDir(tid), rel), { force: true });
     }
     // a new turn: its changes go into a new checkpoint (made when it first changes something)
@@ -184,6 +181,7 @@ function* walk(dir: string, rel = ''): Generator<string> {
     const r = rel ? path.join(rel, e.name) : e.name;
     if (e.isDirectory()) yield* walk(dir, r);
     else if (e.isFile()) yield r;               // symlinks are never followed: they point at the live project
+    // (the copy can change while it is walked: syncNow reads each file through confined.ts again)
   }
 }
 
@@ -191,7 +189,7 @@ function* walk(dir: string, rel = ''): Generator<string> {
 function isOutput(dir: string, rel: string): boolean {
   const ext = path.extname(rel).toLowerCase();
   if (AUX_EXT.has(ext) || /\.synctex(\.gz)?$|\.run\.xml$|\.fdb_latexmk$/.test(rel)) return true;
-  return ext === '.pdf' && fs.existsSync(path.join(dir, rel.slice(0, -4) + '.tex'));
+  return ext === '.pdf' && !!lstatIn(dir, rel.slice(0, -4) + '.tex')?.isFile();
 }
 
 async function syncNow(tid: string, project: string, userId: number): Promise<SyncedFile[]> {
@@ -201,14 +199,16 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
   const out: SyncedFile[] = [];
   let touched = false;
   for (const rel of walk(dir)) {
-    const abs = path.join(dir, rel);
     const kind = manifest.files[rel];
     const ext = path.extname(rel).toLowerCase() || path.basename(rel).toLowerCase();
     try {
-      const st = fs.statSync(abs);
+      const st = lstatIn(dir, rel);
+      if (!st?.isFile()) continue;   // gone meanwhile, or a link now
       if (kind === 'copy') {
         if (st.size > MAX_TEXT) continue;
-        const text = fs.readFileSync(abs, 'utf8');
+        const buf = readFileIn(dir, rel, MAX_TEXT);
+        if (buf === null) continue;
+        const text = buf.toString('utf8');
         const base = readBase(tid, rel);
         if (base === null || text === base) continue;
         if (isDocumentFile(project, rel)) {
@@ -238,7 +238,8 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
       if (isOutput(dir, rel) || st.size > MAX_NEW) continue;
       if (!TEXT_EXT.has(ext) && !FIGURE_EXT.has(ext)) continue;
       const live = resolveProjectPath(project, rel);
-      const data = fs.readFileSync(abs);
+      const data = readFileIn(dir, rel, MAX_NEW);
+      if (data === null) continue;
       const existed = fs.existsSync(live);
       if (existed && isDocumentFile(project, rel)) continue;   // never overwrite a live document untracked
       const prev = existed ? readIfFile(live) : null;
@@ -247,7 +248,7 @@ async function syncNow(tid: string, project: string, userId: number): Promise<Sy
       touched = true;
       recordFile(tid, manifest, rel, prev, data);
       if (TEXT_EXT.has(ext) && !data.includes(0)) { writeBase(tid, rel, data.toString('utf8')); manifest.files[rel] = 'copy'; }
-      else { fs.rmSync(abs); fs.symlinkSync(live, abs); manifest.files[rel] = 'link'; }
+      else { symlinkIn(dir, rel, live); manifest.files[rel] = 'link'; }
     } catch (e) {
       out.push({ path: rel, action: 'tracked', error: (e as Error).message });
     }
@@ -270,7 +271,9 @@ export function pruneWorkspaces(days = 30): void {
     const m = readManifest(tid);
     if (m && m.usedAt > cutoff) continue;
     const key = (db.prepare('SELECT mcp_key FROM agent_threads WHERE thread_id = ?').get(tid) as { mcp_key: string | null } | undefined)?.mcp_key;
-    for (const p of [path.join(root(), tid), baseDir(tid), turnsDir(tid), manifestPath(tid), ...(key ? [scratchDir(key)] : [])]) fs.rmSync(p, { recursive: true, force: true });
+    // the copy and the scratch HOME are the agent's: removed without following anything in them
+    for (const p of [path.join(root(), tid), ...(key ? [scratchDir(key)] : [])]) removeIn(path.dirname(p), path.basename(p));
+    for (const p of [baseDir(tid), turnsDir(tid), manifestPath(tid)]) fs.rmSync(p, { recursive: true, force: true });
   }
 }
 
@@ -527,8 +530,8 @@ export function undoCheckpoint(tid: string, project: string, n: number, userId: 
     const refresh = (rel: string, text: string | null) => {
       const kind = manifest?.files[rel];
       if (!manifest || !kind) return;
-      if (text === null) { fs.rmSync(path.join(copy, rel), { force: true }); fs.rmSync(path.join(baseDir(tid), rel), { force: true }); delete manifest.files[rel]; }
-      else if (kind === 'copy') { writeAtomic(path.join(copy, rel), text); writeBase(tid, rel, text); }
+      if (text === null) { removeIn(copy, rel); fs.rmSync(path.join(baseDir(tid), rel), { force: true }); delete manifest.files[rel]; }
+      else if (kind === 'copy') { writeFileIn(copy, rel, text); writeBase(tid, rel, text); }
     };
     for (const f of cp.files) {
       const shadowFile = path.join(dir, 'shadow', f.path), afterFile = path.join(dir, 'after', f.path);

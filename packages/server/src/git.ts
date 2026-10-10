@@ -33,6 +33,7 @@ import { createOwnedProject } from './projectCreate.ts';
 import { buildIncluding, buildErrors, errorLocations, lastBuild } from './export.ts';
 import { canonicalProject } from './namespaces.ts';
 import { verifyAccessToken } from './tokenAuth.ts';
+import { sendFileAt } from './confined.ts';
 
 const execFileP = promisify(execFile);
 
@@ -139,11 +140,13 @@ export function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
     // hold user-editable files, so a repo's own config must never make git run code as the server
     // user. hooksPath → nowhere disables every hook (pre-commit, post-receive, …); fsmonitor=false
     // stops core.fsmonitor from launching a program on status/add. safe.directory=* because the
-    // projects may be owned by another account (rsynced from a laptop).
-    GIT_CONFIG_COUNT: '3',
+    // projects may be owned by another account (rsynced from a laptop). symlinks=false: a link in a
+    // commit (pushed, cloned from Overleaf, restored from a version) is checked out as a plain file.
+    GIT_CONFIG_COUNT: '4',
     GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: '*',
     GIT_CONFIG_KEY_1: 'core.hooksPath', GIT_CONFIG_VALUE_1: '/dev/null',
     GIT_CONFIG_KEY_2: 'core.fsmonitor', GIT_CONFIG_VALUE_2: 'false',
+    GIT_CONFIG_KEY_3: 'core.symlinks', GIT_CONFIG_VALUE_3: 'false',
     ...extra,
   };
 }
@@ -580,8 +583,7 @@ async function cliPdf(req: Request, res: Response): Promise<void> {
   const t = cliTarget(req, res, user, 'view', true);
   if (!t) return;
   const b = lastBuild(`${t.project}/${t.path}`);
-  if (!b?.pdf_path || !fs.existsSync(b.pdf_path)) { res.status(404).json({ error: 'no PDF yet — run overlyx build first' }); return; }
-  res.type('application/pdf').sendFile(path.resolve(b.pdf_path));
+  if (!b?.pdf_path || !sendFileAt(res.type('application/pdf'), path.resolve(b.pdf_path))) { res.removeHeader('Content-Type'); res.status(404).json({ error: 'no PDF yet — run overlyx build first' }); return; }
 }
 
 async function cliRestore(req: Request, res: Response): Promise<void> {

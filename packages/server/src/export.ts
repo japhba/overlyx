@@ -13,7 +13,8 @@ import { buildDirPath } from './namespaces.ts';
 import { manager, DocManager } from './docs.ts';
 import { projectDir, resolveProjectPath, findMaster, childDocuments } from './projects.ts';
 import { toPdf, cacheDir } from './graphics.ts';
-import { sandboxed, type SandboxSpec } from './sandbox.ts';
+import { sandboxed, sandboxHome, removeSandboxHome, type SandboxSpec } from './sandbox.ts';
+import { lstatIn, listIn, readFileIn, readTextIn, writeFileIn, isRegularFileAt } from './confined.ts';
 import { readTextFile, markdownAsTex } from './texdoc.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { rewriteParentPaths } from './texpaths.ts';
@@ -156,14 +157,23 @@ async function runJob(job: BuildJob): Promise<void> {
 
 /** Forget the build products and versions of a project's documents (the project was deleted). */
 export function cleanupProjectData(project: string): void {
+  try { removeSandboxHome(project); } catch { /* ignore */ }
   const ids = new Set<string>();
   for (const t of ['builds', 'versions', 'pdf_links', 'pdf_publish', 'user_doc_state']) {
     for (const r of db.prepare(`SELECT DISTINCT doc_id FROM ${t} WHERE substr(doc_id, 1, ?) = ?`).all(project.length + 1, project + '/') as { doc_id: string }[]) ids.add(r.doc_id);
     db.prepare(`DELETE FROM ${t} WHERE substr(doc_id, 1, ?) = ?`).run(project.length + 1, project + '/');
   }
   for (const id of ids) {
-    try { fs.rmSync(buildDirPath(id), { recursive: true, force: true }); } catch { /* ignore */ }
+    for (const d of [buildDirPath(id), texExportDir(id)]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } }
   }
+}
+
+/**
+ * Where a LaTeX export that is not a build goes (Export ▸ LaTeX): not the build directory, which
+ * belongs to the sandbox while a build of the document runs.
+ */
+export function texExportDir(docId: string): string {
+  return buildDirPath(docId) + '.tex';
 }
 
 export function buildDir(docId: string): string {
@@ -270,12 +280,14 @@ export function freshManagedBlock(text: string, current: string): string {
 }
 
 /** Put the document and its children into the build dir (graphics converted) and return the main file. */
-export async function exportTex(docId: string): Promise<{ dir: string; main: string; warnings: string[]; tex: string }> {
+export async function exportTex(docId: string, opts: { into?: string } = {}): Promise<{ dir: string; main: string; warnings: string[]; tex: string }> {
   const doc = await manager.open(docId);
   await manager.saveProject(doc.project);   // the files on disk match what is being built
-  const dir = buildDir(docId);
+  const dir = opts.into ?? buildDir(docId);
+  fs.mkdirSync(dir, { recursive: true });
   const docDir = path.dirname(doc.absPath);
   const warnings: string[] = [];
+  sweepBuildDir(dir, projectDir(doc.project));
   linkDocumentAssets(docDir, dir);
   if (isMarkdownPath(doc.relPath)) {
     // a markdown document is built from its LaTeX: the editor's model written as a .tex file
@@ -352,11 +364,70 @@ export function linkDocumentAssets(docDir: string, buildDirPath: string): void {
     }
   };
   linkDir(docDir, buildDirPath, 0);
-  // the svg package writes its cache next to the document when compiling locally; share it
-  const cache = path.join(docDir, 'svg-inkscape');
-  if (!fs.existsSync(cache)) { try { fs.mkdirSync(cache); } catch { /* ignore */ } }
-  const cacheLink = path.join(buildDirPath, 'svg-inkscape');
-  try { if (!fs.existsSync(cacheLink)) fs.symlinkSync(cache, cacheLink); } catch { /* ignore */ }
+  // the svg package keeps its conversion cache (svg-inkscape/) next to the document when compiling
+  // locally: the build works on a copy of it in the build directory (the sandbox writes nowhere in
+  // the project), and what it adds goes back afterwards (svgCacheBack)
+  for (const name of svgCacheFiles(docDir)) {
+    const src = path.join(docDir, SVG_CACHE, name), st = fs.statSync(src);
+    const have = lstatIn(buildDirPath, path.join(SVG_CACHE, name));
+    if (have?.isFile() && have.size === st.size && have.mtimeMs === st.mtimeMs) continue;
+    try { writeFileIn(buildDirPath, path.join(SVG_CACHE, name), fs.readFileSync(src), { mtime: st.mtime }); } catch { /* the build converts it again */ }
+  }
+}
+
+const SVG_CACHE = 'svg-inkscape';
+const SVG_CACHE_MAX_FILE = 20 * 1024 * 1024, SVG_CACHE_MAX_FILES = 500;
+
+/** The regular files of a project directory's svg-inkscape/ (none when it is missing or not a real directory). */
+function svgCacheFiles(dir: string): string[] {
+  const d = path.join(dir, SVG_CACHE);
+  try { if (!fs.lstatSync(d).isDirectory()) return []; } catch { return []; }
+  return fs.readdirSync(d, { withFileTypes: true }).filter(e => e.isFile() && !e.name.startsWith('.')).map(e => e.name).slice(0, SVG_CACHE_MAX_FILES);
+}
+
+/** What the build added to its copy of the svg package's cache goes into the project's svg-inkscape/ (regular files only, never through a link). */
+function svgCacheBack(buildDirPath: string, docDir: string): void {
+  let n = 0;
+  for (const name of listIn(buildDirPath, SVG_CACHE)) {
+    if (name.startsWith('.') || name.endsWith('.overlyx-tmp') || ++n > SVG_CACHE_MAX_FILES) continue;
+    const st = lstatIn(buildDirPath, path.join(SVG_CACHE, name));
+    if (!st?.isFile() || st.size > SVG_CACHE_MAX_FILE) continue;
+    const dest = path.join(docDir, SVG_CACHE, name);
+    try { const cur = fs.lstatSync(dest); if (cur.isFile() && cur.size === st.size && cur.mtimeMs === st.mtimeMs) continue; } catch { /* new */ }
+    const data = readFileIn(buildDirPath, path.join(SVG_CACHE, name), SVG_CACHE_MAX_FILE);
+    if (!data) continue;
+    try { writeFileIn(docDir, path.join(SVG_CACHE, name), data, { mtime: st.mtime }); } catch (e) { console.warn(`[build] svg cache ${name}: ${(e as Error).message}`); }
+  }
+}
+
+/**
+ * Make a build directory hold only what the server puts there and LaTeX writes: real directories,
+ * regular files, and the links linkDocumentAssets makes (to files of the project). The build runs
+ * a project's own code (latexmkrc), which can leave anything in the directory — a link out of it,
+ * a FIFO; the server writes the next build's files there and reads its results from there.
+ * Runs before an export and after every build, when nothing of the sandbox is running any more
+ * (builds of one document never overlap; bwrap's PID namespace ends with the build).
+ */
+export function sweepBuildDir(dir: string, projectRoot: string): void {
+  const root = path.resolve(projectRoot) + path.sep;
+  const walk = (d: string, depth: number) => {
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { if (depth < 12) walk(p, depth + 1); else fs.rmSync(p, { recursive: true, force: true }); continue; }
+      if (e.isFile()) continue;
+      if (e.isSymbolicLink()) {
+        let target = '';
+        try { target = path.resolve(d, fs.readlinkSync(p)); } catch { /* gone */ }
+        let ok = false;
+        try { ok = target.startsWith(root) && fs.realpathSync(target).startsWith(fs.realpathSync(root)) && fs.statSync(target).isFile(); } catch { /* dangling */ }
+        if (ok) continue;
+      }
+      try { fs.rmSync(p, { force: true, recursive: true }); } catch { /* gone */ }
+    }
+  };
+  walk(dir, 0);
 }
 
 export function texInputs(docDir: string, buildDirPath: string, projDir?: string): NodeJS.ProcessEnv {
@@ -423,21 +494,23 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   args.push(engineFlag, '-pvc-', '-g', '-f', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
   const proc = run('latexmk', args, {
     cwd: exp.dir, env: texInputs(docDir, exp.dir, projectDir(project)), timeoutMs: 420000, nice: true,
-    // the build directory (and the svg package's cache next to the document) are the only writable places
-    sandbox: { rw: [exp.dir, path.join(docDir, 'svg-inkscape')], ro: [projectDir(project), cacheDir] },
+    // the build directory is the only writable place (the svg package's cache is a copy in it)
+    sandbox: { rw: [exp.dir], ro: [projectDir(project), cacheDir], home: sandboxHome(project) },
     onLine: (l) => { job.progress = l.slice(0, 200); },
   });
   job.cancel = () => { job.status = 'cancelled'; proc.kill(); };
   const r = await proc.done;
   job.cancel = undefined;
+  // nothing of the sandbox runs any more: whatever the project's code left behind goes
+  sweepBuildDir(exp.dir, projectDir(project));
+  svgCacheBack(exp.dir, docDir);
   if (isCancelled(job)) { const c: BuildResult = { ok: false, log: 'cancelled', warnings: [] }; record(requestedId, c); return c; }
   const pdf = path.join(exp.dir, base + '.pdf');
-  const logFile = path.join(exp.dir, base + '.log');
   let log = r.out;
   const warnings = [...exp.warnings];
   let realErrors = r.code !== 0;
-  if (fs.existsSync(logFile)) {
-    const full = fs.readFileSync(logFile, 'utf8');
+  const full = readTextIn(exp.dir, base + '.log', 64 * 1024 * 1024);
+  if (full !== null) {
     log = extractErrors(full) + '\n\n---- latexmk output ----\n' + r.out.slice(-20000);
     // errors raised inside the generated bibliography come from malformed .bib entries, not from the
     // document: the PDF is still produced, so report them as warnings (as LyX does)
@@ -446,9 +519,10 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
     realErrors = errs.length > bbl.length || (r.code !== 0 && errs.length === 0);
     if (bbl.length) warnings.push(...bbl.map(e => `bibliography: ${path.basename(e.file)}:${e.line}: ${e.message}`));
   }
-  const ok = !realErrors && fs.existsSync(pdf);
+  const havePdf = isRegularFileAt(pdf);
+  const ok = !realErrors && havePdf;
   if (masterRel) log = `(built master document ${masterRel})\n` + log;
-  const res: BuildResult = { ok, log, pdfPath: fs.existsSync(pdf) ? pdf : undefined, texPath: exp.main, warnings, tex: exp.tex };
+  const res: BuildResult = { ok, log, pdfPath: havePdf ? pdf : undefined, texPath: exp.main, warnings, tex: exp.tex };
   record(requestedId, res);
   if (docId !== requestedId) record(docId, res);
   notifyBuilt(requestedId, res);
@@ -539,15 +613,17 @@ export interface SyncBox { page: number; x: number; y: number; h: number; v: num
 /** The last build's PDF, .synctex.gz and .tex names — or null when there is nothing to synchronize with. */
 function synctexFiles(docId: string): { dir: string; pdf: string; tex: string } | null {
   const b = lastBuild(docId);
-  if (!b?.pdf_path || !fs.existsSync(b.pdf_path)) return null;
+  if (!b?.pdf_path || !isRegularFileAt(b.pdf_path)) return null;
   const dir = path.dirname(b.pdf_path), pdf = path.basename(b.pdf_path);
-  if (!fs.existsSync(path.join(dir, pdf.replace(/\.pdf$/, '.synctex.gz')))) return null;
+  if (!lstatIn(dir, pdf.replace(/\.pdf$/, '.synctex.gz'))?.isFile()) return null;
   return { dir, pdf, tex: pdf.replace(/\.pdf$/, '.tex') };
 }
 
+/** `synctex` in the sandbox, reading the build directory only: a build running meanwhile may have put anything there */
 function synctex(args: string[], cwd: string): Promise<string> {
+  const s = sandboxed('synctex', args, { rw: [], ro: [cwd], cwd, env: {}, home: false });
   return new Promise((resolve, reject) => {
-    execFile('synctex', args, { cwd, timeout: 8000, maxBuffer: 4 * 1024 * 1024 }, (err, out) => (err && !out ? reject(err) : resolve(String(out))));
+    execFile(s.cmd, s.args, { cwd, env: s.env, timeout: 8000, maxBuffer: 4 * 1024 * 1024 }, (err, out) => (err && !out ? reject(err) : resolve(String(out))));
   });
 }
 
@@ -589,7 +665,10 @@ export async function layoutCheckOf(docId: string): Promise<LayoutCheck> {
   if (!b?.tex_path) return { params: null, boxes: [] };
   const base = b.tex_path.replace(/\.tex$/, '');
   let olx: string, built: string;
-  try { olx = fs.readFileSync(base + '.olx', 'utf8'); built = fs.readFileSync(base + '.olsrc', 'utf8'); } catch { return { params: null, boxes: [] }; }
+  const dir = path.dirname(base), name = path.basename(base);
+  const o = readTextIn(dir, name + '.olx', 16 * 1024 * 1024), src = readTextIn(dir, name + '.olsrc', 16 * 1024 * 1024);
+  if (o === null || src === null) return { params: null, boxes: [] };
+  olx = o; built = src;
   const open = manager.docs.get(docId);
   let live: string;
   try { const { project, relPath } = DocManager.parseId(docId); live = open ? await open.textAsync() : readTextFile(resolveProjectPath(project, relPath)); } catch { return { params: null, boxes: [] }; }

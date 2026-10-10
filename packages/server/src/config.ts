@@ -130,6 +130,10 @@ export const config = {
     /** requests per user per minute: rewrites / completions */
     rewritesPerMinute: Number(process.env.OVERLYX_AI_REWRITES_PER_MIN ?? 30),
     completionsPerMinute: Number(process.env.OVERLYX_AI_COMPLETIONS_PER_MIN ?? 240),
+    /** "Escalate to AI" repairs send a whole document to the repair model (an expensive one): per user an hour and a day, and for everyone a day */
+    repairsPerHour: Number(process.env.OVERLYX_AI_REPAIRS_PER_HOUR ?? 5),
+    repairsPerDay: Number(process.env.OVERLYX_AI_REPAIRS_PER_DAY ?? 20),
+    repairsPerDayTotal: Number(process.env.OVERLYX_AI_REPAIRS_PER_DAY_TOTAL ?? 200),
   },
   sessionDays: 30,
 };

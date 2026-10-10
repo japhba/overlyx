@@ -24,6 +24,7 @@ import { db } from './db.ts';
 import { toSessionUser, type SessionUser } from './auth.ts';
 import { roleFor } from './access.ts';
 import { projectDir } from './projects.ts';
+import { staysInside } from './projectfiles.ts';
 import { manager, HtmlDoc } from './docs.ts';
 import { isHtmlPath, deliverableInfo } from '@overlyx/core/html/deliverable.ts';
 import { RUNTIME_MODES, runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, type RuntimeMode } from '@overlyx/core/html/serve.ts';
@@ -133,7 +134,7 @@ export async function resolveDeliverable(token: string, rawRest: string, query: 
   if (rel === null) return { status: 404 };
   const root = projectDir(grant.project);
   const abs = path.join(root, rel);
-  if (!abs.startsWith(root + path.sep)) return { status: 404 };
+  if (!abs.startsWith(root + path.sep) || !staysInside(root, abs)) return { status: 404 };
 
   if (isHtmlPath(rel)) {
     let html: string;
