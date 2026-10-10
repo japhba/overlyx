@@ -29,6 +29,7 @@ test.beforeAll(() => {
   writeFileSync(`${DIR}/figs/plot.png`, lineArt());
   writeFileSync(`${DIR}/figs/photo.png`, photo());
   writeFileSync(`${DIR}/figs.tex`, texDoc('A plot: \\includegraphics[width=4cm]{figs/plot.png}\n\nA picture: \\includegraphics[width=4cm]{figs/photo.png}'));
+  writeFileSync(`${DIR}/chip.tex`, texDoc('Some text %\n%% @comment\n%% Jan Bauer (2026-08-26 14:03):\n%%\n%% Please check this claim.\n%%\n%% Kirsten Fischer (2026-08-27 09:10):\n%%\n%% Done.\n%% @end\nwith a thread, and a second line long enough to wrap around in the text column of the page so that the paragraph has two lines.'));
   writeFileSync(`${DIR}/thread.tex`, texDoc('Some text %\n%% @comment\n%% Jan Bauer (2026-08-26 14:03):\n%%\n%% Please check this claim.\n%%\n%% Kirsten Fischer (2026-08-27 09:10):\n%%\n%% Done.\n%% @end\nwith a thread.'));
 });
 test.afterAll(() => { rmSync(DIR, { recursive: true, force: true }); });
@@ -154,6 +155,55 @@ test('a comment thread is a card: avatar, name and time per message, Reply / Res
   await expect(card.locator('.inset-action')).toHaveText(['Reply', 'Resolve']);
   // the header text itself is unchanged in the file
   expect(readFileSync(`${DIR}/thread.tex`, 'utf8')).toContain('%% Jan Bauer (2026-08-26 14:03):');
+});
+
+test('a thread in the text is a chip: its card opens over the text with the cursor in it, Ctrl+Enter leaves, empty messages go', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('ol.margin', '0'));
+  await login(page);
+  await openDoc(page, `${PROJECT}/chip.tex`);
+  const card = page.locator('.lyx-editor .lyx-inset-note-comment').first();
+  const chip = card.locator('> .inset-anchor');
+  // the chip: the number of messages; no card in the line
+  await expect(chip).toBeVisible();
+  await expect(chip).toHaveAttribute('data-count', '2');
+  await expect(card.locator('> .inset-box')).toBeHidden();
+  const par = page.locator('.lyx-editor > .lyx-par').filter({ has: page.locator('.lyx-inset-note-comment') }).first();
+  const h0 = (await par.boundingBox())!.height;
+  // a click on the chip opens the card — a popover over the text: the paragraph keeps its height
+  await chip.click();
+  await expect(card).toHaveClass(/cm-active/);
+  await expect(card.locator('> .inset-box')).toBeVisible();
+  expect(Math.abs((await par.boundingBox())!.height - h0)).toBeLessThan(2);
+  const cb = (await card.locator('> .inset-box').boundingBox())!, cc = (await chip.boundingBox())!;
+  expect(cb.y).toBeGreaterThan(cc.y + cc.height - 1);   // under the chip
+  expect(cb.width).toBeGreaterThan(300);
+  // Reply: a message of mine, typed into; Ctrl+Enter is done — back into the text, the card closes
+  await card.locator('.inset-action[data-act="reply"]').click();
+  await page.keyboard.type('Merged.');
+  await expect(card.locator('.comment-header')).toHaveCount(3);
+  await page.keyboard.press('Control+Enter');
+  await expect(card).not.toHaveClass(/cm-active/);
+  await expect(card.locator('> .inset-box')).toBeHidden();
+  await expect(chip).toHaveAttribute('data-count', '3');
+  // a reply started and left empty goes when the cursor leaves the thread
+  await chip.click();
+  await card.locator('.inset-action[data-act="reply"]').click();
+  await expect(card.locator('.comment-header')).toHaveCount(4);
+  await page.keyboard.press('Escape');
+  await expect(card.locator('.comment-header')).toHaveCount(3);
+  // so does a new comment nothing was written into
+  await page.keyboard.press('Control+Alt+c');
+  await expect(page.locator('.lyx-editor .lyx-inset-note-comment')).toHaveCount(2);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.lyx-editor .lyx-inset-note-comment')).toHaveCount(1);
+  // ✓ resolves: the card goes, a grey marker stays, the cursor is back in the text
+  await chip.click();
+  await card.locator('.inset-action[data-act="resolve"]').click();
+  await expect(card).toHaveClass(/resolved/);
+  await expect(card).not.toHaveClass(/cm-active/);
+  await expect(card.locator('> .inset-box')).toBeHidden();
+  await expect.poll(() => readFileSync(`${DIR}/chip.tex`, 'utf8'), { timeout: 15000 }).toMatch(/Jan Bauer \(2026-08-26 14:03\) (\[|\{\[\})resolved/);
+  expect(readFileSync(`${DIR}/chip.tex`, 'utf8')).toContain('%% Merged.');
 });
 
 test('a card in the margin: a click into its text puts the caret there, typing stays in it, the card stays put', async ({ page }) => {

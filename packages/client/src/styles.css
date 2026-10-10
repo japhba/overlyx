@@ -533,22 +533,8 @@ html[data-theme="dark"] .lyx-inset-note > .inset-box > .inset-label:hover { back
 .lyx-inset-note-note > .inset-box { background: var(--note-bg); border-color: var(--note-border); border-left-color: #c9a70b; }
 .lyx-inset-note-note > .inset-box > .inset-label { color: #8a6d00; }
 html[data-theme="dark"] .lyx-inset-note-note > .inset-box > .inset-label { color: #e3c65a; }
-.lyx-inset-note-comment > .inset-box { background: var(--comment-bg); border-color: var(--comment-border); border-left-color: #4c7bb8; }
-.lyx-inset-note-comment > .inset-box > .inset-label { color: #35659f; }
-html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-label { color: #8fb9ec; }
 .lyx-inset-note-greyedout > .inset-box { color: var(--greyed-fg); border-color: var(--ui-border); border-left-color: var(--muted2); }
 .lyx-inset-note-greyedout > .inset-box > .inset-label { color: var(--muted2); }
-/* a comment card: label and buttons on the first row, the thread below it */
-.lyx-inset-note-comment:not(.collapsed) > .inset-box { display: inline-flex; flex-wrap: wrap; align-items: center; min-width: 240px; padding: 4px 8px 6px 8px; vertical-align: middle; text-indent: 0; }
-.lyx-inset-note-comment:not(.collapsed) > .inset-box > .inset-label { order: 1; }
-.lyx-inset-note-comment:not(.collapsed) > .inset-box > .inset-actions { order: 2; margin-left: auto; margin-right: 0; }
-.lyx-inset-note-comment:not(.collapsed) > .inset-box > .inset-content { order: 3; flex: 1 0 100%; display: block; margin-top: 2px; }
-.lyx-inset-note-comment > .inset-box > .inset-content > .lyx-par { display: block; }
-.lyx-inset-note-comment > .inset-box > .inset-content > .lyx-par:not(.comment-header) { padding-left: 24px; margin-top: 1px; font-size: 12.5px; }
-.lyx-inset-note-comment > .inset-box > .inset-action { border: 0; background: transparent; color: #35659f; font-weight: 600; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 4px; }
-.lyx-inset-note-comment > .inset-box > .inset-actions > .inset-action { border: 0; background: transparent; color: #35659f; font-weight: 600; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 4px; }
-.lyx-inset-note-comment > .inset-box > .inset-actions > .inset-action:hover { background: rgba(76, 123, 184, 0.14); }
-html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > .inset-action { color: #8fb9ec; }
 .lyx-inset-ert > .inset-box { font-family: "DejaVu Sans Mono", Menlo, monospace; font-size: 0.85em; background: var(--code-bg); border-color: var(--ui-border); color: var(--fg2); }
 .lyx-inset-ert > .inset-box > .inset-label { background: #8c8c8c; }
 .lyx-inset-ert > .inset-box > .inset-content > .lyx-par { white-space: pre-wrap; }
@@ -587,11 +573,6 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .lyx-inset-script-superscript > .inset-box { vertical-align: super; font-size: 0.75em; }
 .lyx-inset-script-subscript > .inset-box { vertical-align: sub; font-size: 0.75em; }
 .lyx-inset.highlight > .inset-box { box-shadow: 0 0 0 3px var(--hl-bg2); }
-/* a resolved comment thread leaves the text: a small grey marker stays, the Comments panel lists it */
-.lyx-inset-note-comment.resolved > .inset-box { display: none; }
-.lyx-inset-note-comment.resolved > .inset-anchor { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 2px; vertical-align: middle; cursor: pointer; background: var(--muted2); opacity: 0.7; }
-.lyx-inset-note-comment.resolved.highlight > .inset-anchor { box-shadow: 0 0 0 3px var(--hl-bg2); }
-.margin-mode .lyx-inset-note-comment.resolved > .inset-anchor { background: var(--muted2); }
 /* the Comments panel */
 .comments-panel { font-size: 12.5px; }
 .comments-panel .section-title { font-family: var(--ui-font); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--ui-muted); padding: 8px 8px 4px; }
@@ -610,25 +591,22 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 /* comment threads: the header paragraph "Name (time):" shows as avatar · name · time (numbering.ts
    decorates it: the initials and a hue come as attributes, the parentheses and the colon are made
    invisible — the text itself is untouched, so the file stays as it is) */
-.comment-header { font-family: var(--ui-font); font-size: 11px; line-height: 18px; color: var(--ui-muted); margin-top: 6px; text-indent: 0; }
-.lyx-inset-note-comment > .inset-box > .inset-content > .comment-header:first-child { margin-top: 0; }
-.comment-header::before { content: attr(data-initials); display: inline-block; width: 18px; height: 18px; margin-right: 6px; border-radius: 50%; background: hsl(var(--who-hue, 210) 45% 50%); color: #fff; font-size: 8.5px; font-weight: 700; line-height: 18px; text-align: center; letter-spacing: 0; vertical-align: top; user-select: none; }
-.comment-who { font-weight: 600; color: var(--ui-fg); }
-.comment-when { color: var(--ui-muted); font-size: 10.5px; }
 .comment-hide { font-size: 0; }
+.comment-header { font-family: var(--ui-font); font-size: 12px; line-height: 20px; color: var(--ui-muted); margin-top: 10px; text-indent: 0; }
+.lyx-inset-note-comment > .inset-box > .inset-content > .comment-header:first-child { margin-top: 0; }
+.comment-header::before { content: attr(data-initials); display: inline-block; width: 20px; height: 20px; margin-right: 8px; border-radius: 50%; background: hsl(var(--who-hue, 210) 45% 50%); color: #fff; font-size: 9px; font-weight: 700; line-height: 20px; text-align: center; letter-spacing: 0; vertical-align: top; user-select: none; }
+.comment-who { font-weight: 600; color: var(--ui-fg); margin-right: 6px; }
+.comment-when { color: var(--ui-muted); font-size: 11px; }
 .comment-header.resolved::after { content: "Resolved"; margin-left: 6px; font-size: 9.5px; font-weight: 600; color: var(--ok); text-transform: uppercase; letter-spacing: 0.4px; }
 .comments-panel .who .avatar { display: inline-block; width: 18px; height: 18px; border-radius: 50%; background: hsl(var(--who-hue, 210) 45% 50%); color: #fff; font-size: 8.5px; font-weight: 700; line-height: 18px; text-align: center; letter-spacing: 0; align-self: center; }
 
 /* margin mode: a dot in the text (hovering the card enlarges it), the cards in the margin column */
 .margin-mode .lyx-inset-note > .inset-anchor { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 3px; vertical-align: middle; cursor: pointer; background: #c9a70b; transition: transform 0.15s; }
-.margin-mode .lyx-inset-note-comment > .inset-anchor { background: #4c7bb8; }
 .margin-mode .lyx-inset-note-greyedout > .inset-anchor { background: var(--muted2); }
 .margin-mode .lyx-inset-note.in-margin:hover > .inset-anchor { transform: scale(1.4); }
 .margin-mode .lyx-inset-note.in-margin { position: static; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box { position: absolute; display: block; z-index: 2; box-shadow: 0 1px 2px rgba(0,0,0,0.08), 0 4px 14px rgba(0,0,0,0.08); border-radius: 8px; padding: 8px 10px; font-size: var(--note-size, 0.9em); line-height: 1.4; transition: box-shadow 0.15s; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box:hover { box-shadow: 0 2px 4px rgba(0,0,0,0.1), 0 8px 24px rgba(0,0,0,0.14); z-index: 3; }
-.margin-mode .lyx-inset-note-comment.in-margin:not(.collapsed) > .inset-box { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; }   /* as wide as the notes pane allows (plugins/margin.ts) */
-.margin-mode .lyx-inset-note-comment.in-margin:not(.collapsed) > .inset-box > .inset-content { margin-top: 4px; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
 /* a folded note in the margin: its label and a one-line excerpt (click the label to unfold it); nested notes fold as inline */
 .margin-mode .lyx-inset-note.in-margin.collapsed > .inset-box > .inset-content { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: 1.4em; opacity: 0.6; }
@@ -637,6 +615,55 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .margin-mode .lyx-inset-note.in-margin:not(.collapsed) .lyx-inset-note > .inset-box { display: block; margin: 3px 0; }
 .margin-mode .lyx-inset-note.in-margin:not(.collapsed) .lyx-inset-note:not(.collapsed) > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin:not(.collapsed) .lyx-inset-note:not(.collapsed) > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box .lyx-inset-note > .inset-anchor { display: none; }
+
+/* ------------------------------------------------------------ comment threads (both interfaces)
+   In the text a thread is a chip: a small yellow speech bubble with the number of messages (the
+   inset's anchor). Its card — avatar · name · time per message, the ✓ to resolve in the corner, a
+   Reply field at the foot — opens while the cursor is in the thread (`cm-active`,
+   plugins/commentui.ts): as a popover under the chip in the text (placed by plugins/margin.ts, the
+   line does not move), or highlighted in the margin column. A click on the chip opens it; Escape or
+   Ctrl+Enter go back to the text. The yellow is LyX's / the wordmark's. */
+:root { --cm-accent: #efb21a; --cm-chip-bg: #f7d35c; --cm-chip-fg: #4a3800; --cm-card: var(--surface); --cm-line: var(--ui-border); }
+html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip-fg: #fff3c9; }
+.lyx-inset-note-comment > .inset-anchor { display: inline-flex; align-items: center; justify-content: center; min-width: 1.45em; height: 1.25em; padding: 0 0.3em; margin: 0 0.12em; box-sizing: border-box;
+  border-radius: 0.62em 0.62em 0.62em 0.12em; background: var(--cm-chip-bg); color: var(--cm-chip-fg); font: 700 0.6em/1 var(--ui-font); vertical-align: 0.42em; text-indent: 0; cursor: pointer; user-select: none;
+  transition: transform 0.12s, box-shadow 0.12s; }
+.lyx-inset-note-comment > .inset-anchor::before { content: attr(data-count); }
+.lyx-inset-note-comment > .inset-anchor:hover, .lyx-inset-note-comment.cm-active > .inset-anchor, .margin-mode .lyx-inset-note-comment.in-margin:hover > .inset-anchor { transform: scale(1.12); box-shadow: 0 0 0 2px color-mix(in srgb, var(--cm-accent) 45%, transparent); }
+.margin-mode .lyx-inset-note-comment > .inset-anchor { width: auto; height: 1.25em; border-radius: 0.62em 0.62em 0.62em 0.12em; background: var(--cm-chip-bg); }
+/* resolved: the card goes, a small grey dot stays (the Comments panel lists the thread) */
+.lyx-inset-note-comment.resolved > .inset-box { display: none !important; }
+.lyx-inset-note-comment.resolved > .inset-anchor, .margin-mode .lyx-inset-note-comment.resolved > .inset-anchor { display: inline-block; min-width: 0; width: 8px; height: 8px; padding: 0; margin: 0 2px; border-radius: 50%; background: var(--muted2); opacity: 0.7; vertical-align: middle; box-shadow: none; transform: none; }
+.lyx-inset-note-comment.resolved > .inset-anchor::before { content: none; }
+.lyx-inset-note-comment.resolved.highlight > .inset-anchor { box-shadow: 0 0 0 3px var(--hl-bg2); }
+/* the card */
+.lyx-inset-note-comment > .inset-box { position: relative; display: flex; flex-direction: column; box-sizing: border-box; min-width: 220px; padding: 10px 12px 10px 14px; text-indent: 0; white-space: normal;
+  font-family: var(--ui-font); font-size: 13px; line-height: 1.45; color: var(--ui-fg); background: var(--cm-card); border: 1px solid var(--cm-line); border-left: 3px solid var(--cm-accent); border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 6px 18px -8px rgba(0, 0, 0, 0.18); }
+.lyx-inset-note-comment > .inset-box > .inset-label { display: none; }
+.lyx-inset-note-comment > .inset-box > .inset-actions { display: contents; }
+.lyx-inset-note-comment > .inset-box > .inset-content { display: block; order: 1; padding-right: 26px; }
+.lyx-inset-note-comment > .inset-box > .inset-content > .lyx-par { display: block; }
+.lyx-inset-note-comment > .inset-box > .inset-content > .lyx-par:not(.comment-header) { padding-left: 28px; margin-top: 2px; font-size: 13px; }
+/* ✓ resolve: the corner */
+.lyx-inset-note-comment > .inset-box .inset-action[data-act="resolve"], .lyx-inset-note-comment > .inset-box .inset-action[data-act="reopen"] { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ui-muted); font-size: 0; cursor: pointer; }
+.lyx-inset-note-comment > .inset-box .inset-action[data-act="resolve"]::before, .lyx-inset-note-comment > .inset-box .inset-action[data-act="reopen"]::before { content: ""; display: block; width: 16px; height: 16px; margin: 5px; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M4.5 12.5l5 5 10-11'/></svg>") center / contain no-repeat;
+          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M4.5 12.5l5 5 10-11'/></svg>") center / contain no-repeat; }
+.lyx-inset-note-comment > .inset-box .inset-action[data-act="resolve"]:hover { background: color-mix(in srgb, var(--ok, #2e7d32) 14%, transparent); color: var(--ok, #2e7d32); }
+/* Reply: a field at the foot of the open card */
+.lyx-inset-note-comment > .inset-box .inset-action[data-act="reply"] { order: 2; display: none; width: 100%; margin-top: 10px; padding: 6px 12px; border: 1px solid var(--cm-line); border-radius: 16px; background: var(--page-bg); color: var(--ui-muted); font: inherit; font-size: 12.5px; line-height: 18px; text-align: left; cursor: text; }
+.lyx-inset-note-comment > .inset-box .inset-action[data-act="reply"]::after { content: "…"; }
+.lyx-inset-note-comment > .inset-box .inset-action[data-act="reply"]:hover { border-color: var(--cm-accent); color: var(--ui-fg); }
+.lyx-inset-note-comment.cm-active > .inset-box .inset-action[data-act="reply"] { display: block; }
+/* in the text: only the chip, the card opens as a popover while the cursor is in the thread */
+.editor-host:not(.margin-mode) .lyx-inset-note-comment:not(.cm-active) > .inset-box { display: none; }
+.editor-host:not(.margin-mode) .lyx-inset-note-comment.cm-active > .inset-box { position: absolute; z-index: 20; width: 340px; max-width: none; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08), 0 14px 36px -10px rgba(0, 0, 0, 0.3); }
+/* in the margin: every card shows, the open one stands out */
+.margin-mode .lyx-inset-note-comment.in-margin > .inset-box { display: flex; flex-direction: column; padding: 10px 12px 10px 14px; border-left-width: 3px; border-radius: 8px; font-size: var(--note-size, 0.9em); }
+.margin-mode .lyx-inset-note-comment.in-margin.cm-active > .inset-box { z-index: 4; border-color: color-mix(in srgb, var(--cm-accent) 60%, var(--cm-line)); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1), 0 12px 30px -10px rgba(0, 0, 0, 0.3); }
+/* nested in another inset (a footnote, a note card): the same chip */
+.lyx-inset-note-comment .lyx-inset-note-comment > .inset-anchor { font-size: 0.55em; }
 
 /* leaf insets */
 .lyx-button { display: inline-block; font-family: var(--ui-font); font-size: 0.78em; line-height: 1.3; padding: 0 5px; border: 1px solid var(--chip-border); border-radius: 3px; background: var(--chip-bg); color: var(--chip-fg); vertical-align: 0.1em; white-space: nowrap; cursor: default; }
@@ -1473,6 +1500,7 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 
 /* interactive tour (app/Tour.tsx): the overlay lets clicks through, only the card takes them */
 .tour-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 90; }
+.tour-card.interface-prompt { left: 50%; top: 50%; transform: translate(-50%, -55%); width: 420px; }
 .tour-spot { position: fixed; z-index: 45; pointer-events: none; border-radius: 5px; box-shadow: 0 0 0 9999px rgba(20,30,50,0.28), 0 0 0 2px var(--accent), 0 0 14px 2px rgba(59,110,165,0.6); transition: left 0.15s, top 0.15s, width 0.15s, height 0.15s; }
 .tour-card { position: fixed; z-index: 95; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--accent-border); border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); padding: 12px 14px; font-family: var(--ui-font); font-size: 13px; line-height: 1.45; color: var(--ui-fg); }
 .tour-card h3 { margin: 0; font-size: 14px; color: var(--accent); }

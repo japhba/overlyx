@@ -60,11 +60,12 @@ export function collectComments(view: EditorView): CommentInfo[] {
   return out;
 }
 
-/** put the cursor into the thread and show it (the card flashes) */
+/** put the cursor into the thread (its card opens) and show it (the card flashes) */
 export function gotoComment(view: EditorView, pos: number): void {
   const n = view.state.doc.nodeAt(pos);
   if (!n || !isCommentNode(n)) return;
-  view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos + 2))).scrollIntoView());
+  // the end of the thread's last message: its card opens (plugins/commentui.ts), ready to read on or reply
+  view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos + n.nodeSize - 2), -1)).scrollIntoView());
   view.focus();
   const dom = view.nodeDOM(pos) as HTMLElement | null;
   if (dom) {

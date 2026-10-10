@@ -3,6 +3,9 @@
  * notes & comments pane right of the text (the document pane's split, app/notespane.tsx) instead
  * of inline. The inset DOM stays where ProseMirror put it (so editing/collaboration keep working);
  * we only move it visually with absolute positioning and stack the cards so they do not overlap.
+ * Without the margin, a comment thread is a chip in the text and its card opens as a popover under
+ * the chip while the cursor is in it (`cm-active`, plugins/commentui.ts): placed here too, kept
+ * inside the text column.
  */
 import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
@@ -35,7 +38,9 @@ export function marginPlugin(initial = false): Plugin<boolean> {
         update: (v, prevState) => {
           const on = marginKey.getState(v.state) ?? false;
           root.classList.toggle('margin-mode', on);
-          if (on || marginKey.getState(prevState)) schedule(v);
+          // an open comment card follows its chip (and goes when the cursor leaves the thread)
+          const popover = !!v.dom.querySelector('.lyx-inset-note-comment.cm-active, .lyx-inset-note-comment.cm-placed');
+          if (on || marginKey.getState(prevState) || popover) schedule(v);
         },
         destroy: () => { observer?.disconnect(); cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); },
       };
@@ -60,7 +65,14 @@ export function layout(view: EditorView): void {
   // threads are not shown at all (the Comments panel keeps them)
   const top = cards.filter(c => !c.parentElement?.closest('.lyx-inset-note') && !c.classList.contains('resolved'));
   if (!on) {
-    for (const c of cards) { c.classList.remove('in-margin'); const b = c.querySelector<HTMLElement>(':scope > .inset-box'); if (b) { b.style.top = ''; b.style.left = ''; b.style.width = ''; } }
+    for (const c of cards) {
+      c.classList.remove('in-margin');
+      const b = c.querySelector<HTMLElement>(':scope > .inset-box');
+      if (!b) continue;
+      if (c.classList.contains('cm-active') && !c.classList.contains('resolved')) placePopover(view, c, b);
+      else if (c.classList.contains('cm-placed')) { c.classList.remove('cm-placed'); b.style.top = ''; b.style.left = ''; b.style.width = ''; }
+      else { b.style.top = ''; b.style.left = ''; b.style.width = ''; }
+    }
     return;
   }
   // the notes pane: the right part of the page, --notes-col wide (inside ink mode's gutter: the page is
@@ -98,6 +110,21 @@ export function layout(view: EditorView): void {
     nextTop = topV + box.getBoundingClientRect().height + 8;
   }
   for (const c of cards) if (!top.includes(c)) c.classList.remove('in-margin');
+}
+
+/** the open comment card without a margin: under its chip, as wide as fits (up to 360px), inside the text column */
+function placePopover(view: EditorView, card: HTMLElement, box: HTMLElement): void {
+  const chip = card.querySelector<HTMLElement>(':scope > .inset-anchor') ?? card;
+  const c = chip.getBoundingClientRect();
+  const col = view.dom.getBoundingClientRect();
+  const width = Math.max(220, Math.min(360, col.width));
+  card.classList.add('cm-placed');
+  box.style.width = width + 'px';
+  const op = (box.offsetParent as HTMLElement | null) ?? view.dom;
+  const opRect = op.getBoundingClientRect();
+  const left = Math.max(col.left, Math.min(c.left - 16, col.right - width));
+  box.style.left = `${left - opRect.left + op.scrollLeft}px`;
+  box.style.top = `${c.bottom + 6 - opRect.top + op.scrollTop}px`;
 }
 
 export function setMarginMode(view: EditorView, on: boolean): void {

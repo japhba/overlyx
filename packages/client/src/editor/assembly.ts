@@ -22,6 +22,7 @@ import { lyxKeymap, chordPlugin } from './keymap';
 import { numberingPlugin } from './plugins/numbering';
 import { foldPlugin } from './plugins/fold';
 import { marginPlugin } from './plugins/margin';
+import { commentUiPlugin } from './plugins/commentui';
 import { changeTrackingPlugin, changesFilterPlugin, changeAuthorName } from './plugins/changes';
 import { changeActionsPlugin } from './plugins/changeactions';
 import { fontCarryPlugin } from './plugins/fontcarry';
@@ -130,6 +131,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     chordPlugin(),
     layoutPlugin(),   // layout documents: object selection, handles, drawing tools (before the keymap and the mouse selection)
     foldPlugin(),   // section folding (before the keymap: ↑ / ↓ beside a fold skip the hidden text)
+    commentUiPlugin(),   // the thread under the cursor opens; Ctrl+Enter leaves it (before the keymap); empty messages go when it is left
     lyxKeymap(),
     fontCarryPlugin(),
     insetCaretPlugin(),

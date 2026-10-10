@@ -42,7 +42,7 @@ import { useNotesPane, NotesSash } from './notespane';
 import { StatusBar, SaveIndicator, ZoomControl, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget, cursorLine, docBlocks, blockPos } from './SourcePane';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
-import { Tour, tourWanted, rememberTour, type TourEnd } from './Tour';
+import { Tour, InterfacePrompt, tourWanted, rememberTour, type TourEnd } from './Tour';
 import { FeedbackDialog } from './Feedback';
 import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog, ChildDocDialog, DialogHost, uiPrompt, uiConfirm, uiAlert } from './Dialogs';
 import { promptNewFile } from './newfile';
@@ -412,6 +412,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   // guests came for somebody's document, not for a tour (it is offered once they have an account)
   // (and not over an import that is about to run — Home.tsx picks it up; the tour is offered on the next visit)
   const [tour, setTour] = useState<'intro' | 'steps' | null>(() => (!user.guest && tourWanted() && !pendingImportFlag() ? 'intro' : null));
+  // a new account arriving with an Overleaf import skips the welcome card for now, but still picks its interface
+  const [askInterface, setAskInterface] = useState(() => !user.guest && tourWanted() && pendingImportFlag());
   const [viewOnly, setViewOnly] = useState(false);
   // the mode switch's Viewing: this browser's editors read-only although the user may edit (per document)
   const [viewing, setViewing] = useState(false);
@@ -1598,6 +1600,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       {shareFor && <ShareDialog project={shareFor} user={user} onClose={() => setShareFor(null)} onChanged={() => setRefreshKey(k => k + 1)} />}
       {newLayoutFor && <NewLayoutDialog project={newLayoutFor} dir={textId ? docPathOf(textId).split('/').slice(0, -1).join('/') : ''} notify={notify} onClose={() => setNewLayoutFor(null)} onCreated={id => { location.hash = '#/' + id; setRefreshKey(k => k + 1); }} />}
       {gitFor && <GitDialog project={gitFor} user={user} onClose={() => setGitFor(null)} />}
+      {askInterface && !tour && <InterfacePrompt onDone={() => setAskInterface(false)} />}
       {tour && <Tour intro={tour === 'intro'} onEnd={endTour}
         ctx={{ docId, ready: isLyxDoc && status.synced && !!view, docTick, layout, inMath: !!mathField, saveState: save.state, rightTab, pdfBusy: pdf.busy, pdfBuiltAt: pdf.builtAt ?? 0, shareOpen: !!shareFor, gitOpen: !!gitFor, marginMode }}
         actions={{ openExample, showRight: () => { if (!rightTab) setRightTab('comments'); }, showPdf: () => showPane('pdf'), showFiles: () => setShowFiles(true) }} />}

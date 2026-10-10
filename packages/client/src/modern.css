@@ -1,13 +1,14 @@
 /* ============================================================ the Modern interface (app/uimode.ts)
    OverLyX's own quiet look over the same app, after Dieter Rams ("less, but better") and the
    Bauhaus: warm paper greys, graphite ink, hairline rules, a strict 4 / 8 px grid and modest radii;
-   one signal colour (Braun orange) for what is on or is the one thing to press — the primary
-   action, the current place — and the selection / focus in Bauhaus blue; red, yellow and blue as
-   small geometric marks only (a document is a square, slides a triangle, a drawing a circle, as in
-   LyX's own red-yellow-blue logo). Type: Jost (geometric, Futura's family) for names and titles,
-   Inter for everything one reads while working. Icons: Lucide's line set (modernicons.ts).
-   html[data-ui="modern"] redefines the tokens of styles.css and lays out the header (the document's
-   name over the menus), one toolbar strip (toolbars.tsx `modern`), contextual rows as floating
+   the wordmark's three colours with one job each: red for what is on or is the one thing to press
+   (the primary action, the current place), blue for the selection, focus and links, yellow for
+   comments (styles.css `--cm-*`); the same three in the small marks of what a file is. Type: Jost
+   (geometric, Futura's family) for names and titles, Inter for everything one reads while working.
+   Icons: Lucide's line set (modernicons.ts). html[data-ui="modern"] redefines the tokens of
+   styles.css and lays out the header (one row: the wordmark, the menu button — every menu in one
+   panel, MenuBar.tsx `menu-main` — and the document's name), one toolbar strip (toolbars.tsx
+   `modern`), contextual rows as floating
    bars, the page as a sheet on a warm canvas. Interface only: nothing here may hide a function the
    Classic interface has (what is not in the row is under ⋮ and in the menus). */
 
@@ -38,8 +39,8 @@ html[data-ui="modern"] {
   --m-press: #262521;        /* a toggle that is on: a pressed key */
   --m-on-press: #f6f5f1;
   /* the colours: one signal, the selection, the marks */
-  --m-signal: #dc4b1d;       /* Braun orange: on / the primary action / where you are */
-  --m-signal-hover: #c13f15;
+  --m-signal: #d6402b;       /* the wordmark's red (LyX's X): on / the primary action / where you are */
+  --m-signal-hover: #bb3220;
   --m-on-signal: #ffffff;
   --m-blue: #2152a3;         /* Bauhaus blue: selection, focus, links */
   --m-red: #d6402b;
@@ -93,8 +94,8 @@ html[data-ui="modern"][data-theme="dark"] {
   --m-hover: rgba(236, 235, 230, 0.07);
   --m-press: #ecebe6;
   --m-on-press: #1b1a18;
-  --m-signal: #f0612e;
-  --m-signal-hover: #ff7744;
+  --m-signal: #ec5a43;
+  --m-signal-hover: #ff7058;
   --m-on-signal: #1b1a18;
   --m-blue: #85a8ea;
   --m-red: #ec5a43;
@@ -123,17 +124,34 @@ html[data-ui="modern"] * { scrollbar-color: var(--m-line-strong) transparent; sc
 
 /* ------------------------------------------------------------ the wordmark: the Bauhaus one (styles.css `.ol-wordmark.bauhaus`) */
 
-/* ------------------------------------------------------------ the header: the name over the menus */
+/* ------------------------------------------------------------ the header: one row — the wordmark, the menu button, the name */
 html[data-ui="modern"] .menubar {
-  height: 52px; padding: 0 12px 0 10px; border-bottom: 0; background: var(--ui-bg); gap: 4px;
+  height: 52px; padding: 0 12px 0 8px; border-bottom: 0; background: var(--ui-bg); gap: 4px;
 }
 html[data-ui="modern"] .menubar:has(> .menubar-title) {
-  display: grid; height: 60px; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: 28px 24px;
-  grid-template-areas: "brand title primary actions" "brand menus primary actions"; column-gap: 8px; align-content: center;
+  display: grid; height: 52px; grid-template-columns: auto auto minmax(0, 1fr) auto auto; grid-template-rows: 1fr;
+  grid-template-areas: "brand menus title primary actions"; column-gap: 4px; align-items: center;
 }
-html[data-ui="modern"] .menubar .brand { grid-area: brand; align-self: center; margin-right: 8px; padding: 6px 8px; border-radius: var(--m-radius); font-size: 17px; }
+html[data-ui="modern"] .menubar .brand { grid-area: brand; align-self: center; margin-right: 2px; padding: 3px 6px; border-radius: var(--m-radius); font-size: 17px; line-height: 1; }
+/* the menu button (MenuBar.tsx `menu-main`): every menu in one panel — the names left, the items of
+   the one pointed at right */
+html[data-ui="modern"] .menubar .menu-main > button, html[data-ui="modern"] .menubar .menu-overflow > button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 32px; padding: 0; border-radius: var(--m-radius); color: var(--m-ink2); }
+html[data-ui="modern"] .menubar .menu-main > button svg, html[data-ui="modern"] .menubar .menu-overflow > button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+html[data-ui="modern"] .menubar .menu-main.open > button { background: var(--m-press); color: var(--m-on-press); }
+html[data-ui="modern"] .menu-main { position: relative; }
+html[data-ui="modern"] .menu-main-panel { position: absolute; top: calc(100% + 8px); left: 0; z-index: 60; display: flex; align-items: stretch; background: var(--m-paper); border: 1px solid var(--m-line); border-radius: var(--m-radius); box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.28); max-height: calc(100dvh - 72px); overflow: hidden; }
+html[data-ui="modern"] .mm-titles { display: flex; flex-direction: column; min-width: 150px; padding: 6px; border-right: 1px solid var(--m-line2); background: var(--m-ground); }
+html[data-ui="modern"] .mm-title { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 10px; border: 0; border-radius: 4px; background: none; color: var(--m-ink2); font: inherit; font-size: 13px; text-align: left; cursor: default; }
+html[data-ui="modern"] .mm-title:not(.mm-home)::after { content: "›"; color: var(--m-muted); }
+html[data-ui="modern"] .mm-title:hover { background: var(--m-hover); color: var(--m-ink); }
+html[data-ui="modern"] .mm-title.on { background: var(--m-press); color: var(--m-on-press); }
+html[data-ui="modern"] .mm-title.on::after { color: inherit; }
+html[data-ui="modern"] .mm-titles .menu-sep { margin: 4px 6px; }
+html[data-ui="modern"] .mm-items { min-width: 280px; overflow: auto; }
+html[data-ui="modern"] .mm-items > .menu-list { position: static; border: 0; box-shadow: none; border-radius: 0; max-height: none; background: none; }
+html[data-ui="modern"] .mm-items > .menu-list.help-menu { width: 480px; }
 html[data-ui="modern"] .menubar .brand:hover { background: var(--m-hover); }
-html[data-ui="modern"] .menubar-title { grid-area: title; display: flex; align-items: baseline; gap: 12px; min-width: 0; padding-left: 2px; }
+html[data-ui="modern"] .menubar-title { grid-area: title; display: flex; align-items: baseline; gap: 12px; min-width: 0; padding-left: 6px; }
 html[data-ui="modern"] .menubar-title .mt-name { font-family: var(--m-display); font-size: 18px; font-weight: 500; line-height: 26px; letter-spacing: 0.005em; color: var(--m-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; margin-left: -6px; border-radius: 4px; border: 1px solid transparent; }
 html[data-ui="modern"] .menubar-title .mt-name:hover { border-color: var(--m-line); }
 html[data-ui="modern"] .menubar-title .mt-project { font-size: 12px; color: var(--m-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -141,7 +159,7 @@ html[data-ui="modern"] .menubar-title .mt-project::before { content: ''; display
 html[data-ui="modern"] .menubar-title .save-state { font-size: 12px; color: var(--m-muted); white-space: nowrap; }
 html[data-ui="modern"] .menubar-title .save-state.saved { color: var(--m-muted); }
 html[data-ui="modern"] .menubar-title .save-state.offline { color: var(--warn-fg); background: var(--warn-bg); padding: 0 8px; border-radius: 4px; }
-html[data-ui="modern"] .menubar:has(> .menubar-title) .menubar-menus { grid-area: menus; display: flex; align-items: center; min-width: 0; margin-left: -8px; }
+html[data-ui="modern"] .menubar:has(> .menubar-title) .menubar-menus { grid-area: menus; display: flex; align-items: center; min-width: 0; }
 html[data-ui="modern"] .menubar-menus { display: flex; align-items: center; }
 html[data-ui="modern"] .menubar .menu > button { font: inherit; font-size: 13px; color: var(--m-ink2); padding: 2px 8px; border-radius: 4px; line-height: 20px; }
 html[data-ui="modern"] .menubar .menu > button:hover, html[data-ui="modern"] .menubar .menu.open > button { background: var(--m-hover); color: var(--m-ink); }
@@ -282,12 +300,12 @@ html[data-ui="modern"] .hglyph[data-kind="hello"]::before { width: 34px; height:
 /* ------------------------------------------------------------ the page: a sheet on a warm canvas */
 html[data-ui="modern"] .editor-scroll { background: var(--m-canvas); }
 html[data-ui="modern"] .editor-scroll:has(> .home) { background: var(--ui-bg); }
-html[data-ui="modern"] .editor-page:not(:has(.ol-layout)):not(:has(.notes-pane)) {
+html[data-ui="modern"] .editor-scroll:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) {
   width: auto; max-width: calc(var(--text-width, 720px) + 192px); margin: 8px auto 48px; min-height: calc(100% - 56px);
   padding: 64px 96px 120px; box-shadow: 0 0 0 1px var(--m-line2), 0 1px 3px rgba(28, 27, 25, 0.05); border-radius: 2px;
 }
-html[data-ui="modern"][data-theme="dark"] .editor-page:not(:has(.ol-layout)):not(:has(.notes-pane)) { box-shadow: 0 0 0 1px var(--m-line); }
-@media (max-width: 900px) { html[data-ui="modern"] .editor-page:not(:has(.ol-layout)):not(:has(.notes-pane)) { padding: 32px 24px 120px; margin: 0; max-width: none; box-shadow: none; } }
+html[data-ui="modern"][data-theme="dark"] .editor-scroll:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) { box-shadow: 0 0 0 1px var(--m-line); }
+@media (max-width: 900px) { html[data-ui="modern"] .editor-scroll:not(.margin-mode) > .editor-page:not(:has(.ol-layout)) { padding: 32px 24px 120px; margin: 0; max-width: none; box-shadow: none; } }
 html[data-ui="modern"] .ruler { background: var(--m-canvas); }
 
 /* ------------------------------------------------------------ the side rails: square keys */
@@ -423,7 +441,7 @@ html[data-ui="modern"] .rail button[data-rail="outline"] { --icon: url("data:ima
 
 /* ------------------------------------------------------------ a phone */
 @media (max-width: 600px) {
-  html[data-ui="modern"] .menubar:has(> .menubar-title) { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "brand title actions" "brand menus actions"; }
+  html[data-ui="modern"] .menubar:has(> .menubar-title) { grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "brand menus title actions"; }
   html[data-ui="modern"] .menubar:has(> .menubar-title) .menubar-primary { display: none; }
   html[data-ui="modern"] .menubar .share-btn { padding: 0 10px; margin: 0 4px; }
   html[data-ui="modern"] .tb-modern-row, html[data-ui="modern"] .dl-toolbar, html[data-ui="modern"] .toolbar-layout { margin: 0 6px 6px; }

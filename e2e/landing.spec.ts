@@ -4,7 +4,7 @@
 import { test, expect } from '@playwright/test';
 import { existsSync, rmSync } from 'node:fs';
 import JSZip from 'jszip';
-import { login, openDoc, adminCredentials, apiLogin, BASE_URL, PROJECTS_DIR, TOUR_SEEN_SCRIPT, acceptDialog, cancelDialog, dialogLocator } from './helpers';
+import { login, openDoc, adminCredentials, userCredentials, apiLogin, BASE_URL, PROJECTS_DIR, TOUR_SEEN_SCRIPT, acceptDialog, cancelDialog, dialogLocator } from './helpers';
 
 async function zipOf(files: Record<string, string | Buffer>): Promise<Buffer> {
   const z = new JSZip();
@@ -31,7 +31,7 @@ test.describe('landing page', () => {
     await expect(page.locator('.login form button.btn.primary')).toHaveText('Sign in');
   });
 
-  test('the Bauhaus wordmark: tilted L·Y·X in both interfaces, speed lines, the hover motion; the feature sheet', async ({ page, browser }) => {
+  test('the Bauhaus wordmark: tilted L·Y·X in both interfaces, speed lines, the hover motion; the short page; the Modern menu button', async ({ page, browser }) => {
     const tilt = (sel: string) => page.locator(sel).evaluate(e => getComputedStyle(e).transform);
     for (const ui of ['classic', 'modern']) {
       await page.addInitScript((u: string) => { try { localStorage.setItem('ol.ui', u); } catch { /* ignore */ } }, ui);
@@ -45,21 +45,33 @@ test.describe('landing page', () => {
       await wm.hover();
       await expect.poll(() => tilt('.login .ol-wordmark .over')).not.toBe('none');   // "Over" leans forward
     }
-    // the sheet: documents, slides & posters, drawing first (the hero links to them), then the rest
-    await expect(page.locator('.login .fgroup h3')).toHaveText(['Documents', 'Slides & posters', 'Drawing', 'Together', 'Files & tools', 'Wherever you write']);
-    await expect(page.locator('.login .kinds a')).toHaveCount(3);
-    await expect(page.locator('.login')).toContainText('Inkscape');
-    // inside the Modern interface the wordmark keeps its tilted letters and speed lines too
+    // what it is in one sentence and one equation; what it does in four lines
+    await expect(page.locator('.login .lede')).toHaveText('LaTeX documents, slides and posters, edited and rendered in the same place.');
+    await expect(page.locator('.login .formula')).toContainText('OverLyX=Overleaf+LyX');
+    await expect(page.locator('.login .formula')).toContainText('Complexity');
+    await expect(page.locator('.login .flist strong')).toHaveText(['WYSIWYG LaTeX', 'Slides and posters', 'Together', 'Your tools']);
+    await expect(page.locator('.login')).not.toContainText('web page');
+    // inside the Modern interface the wordmark keeps its tilted letters and speed lines too (bob: an
+    // account that never chose an interface, so the browser's choice holds)
     const ctx = await browser.newContext();
     await ctx.addInitScript(TOUR_SEEN_SCRIPT);
     await ctx.addInitScript(() => { try { localStorage.setItem('ol.ui', 'modern'); } catch { /* ignore */ } });
-    await apiLogin(ctx);
+    await apiLogin(ctx, userCredentials('bob'));
+    await ctx.request.get(BASE_URL + '/api/projects');   // (the starter projects exist once listed)
     const app = await ctx.newPage();
-    await app.goto('/#/admin/welcome/welcome.tex');
+    await app.goto('/#/bob/welcome/welcome.tex');
     const brand = app.locator('.menubar .brand .ol-wordmark').first();
     await expect(brand).toBeVisible({ timeout: 20000 });
     expect(await brand.locator('.l').evaluate(e => getComputedStyle(e).transform)).not.toBe('none');
     expect(await brand.locator('.speed').evaluate(e => getComputedStyle(e).display)).not.toBe('none');
+    // no row of menus: one menu button beside the name opens them all — names left, items right
+    await expect(app.locator('.menubar-menus > .menu:not(.menu-main) > button')).toHaveCount(0);
+    await app.locator('[data-main-menu]').click();
+    await expect(app.locator('.menu-main-panel .mm-title', { hasText: 'File' })).toBeVisible();
+    await app.locator('.menu-main-panel .mm-title', { hasText: 'Insert' }).hover();
+    await expect(app.locator('.menu-main-panel .mm-items .menu-item', { hasText: 'Comment thread' })).toBeVisible();
+    await app.keyboard.press('Escape');
+    await expect(app.locator('.menu-main-panel')).toHaveCount(0);
     await ctx.close();
   });
 
@@ -191,7 +203,7 @@ test.describe('landing page', () => {
     expect(await video().evaluate(v => (v as HTMLVideoElement).currentSrc)).toContain('wysiwyg-light');
     // a clip that ends halts for a beat, then the wheel rotates on and the ". o .." moves with it
     await video().evaluate(v => { const x = v as HTMLVideoElement; x.currentTime = x.duration - 0.1; });
-    await expect(active()).toHaveAttribute('data-demo', 'slides', { timeout: 15000 });
+    await expect(active()).toHaveAttribute('data-demo', 'tex', { timeout: 15000 });
     await expect(page.locator('.wheel .dots .dot.active')).toHaveAttribute('data-dot', '1');
     await expect.poll(() => video().evaluate(v => !(v as HTMLVideoElement).paused && (v as HTMLVideoElement).currentTime < 3), { timeout: 15000 }).toBe(true);
     // a dot jumps straight to its clip and plays it from the start

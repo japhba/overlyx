@@ -13,6 +13,7 @@ import { formatShortcut } from './shortcuts';
 import { recordUsage, menuKey } from '../usage';
 import { tookActionWithout } from '../shortcuttips';
 import { canonical, effectiveShortcut, getBindings, isCustom, keyFromEvent, setBinding, subscribeBindings } from './keybindings';
+import { useUiMode } from './uimode';
 
 /** the right-click menu of the switch: the text tone of the dark theme (app/theme.ts DARK_TONES) */
 export function darkToneMenuItems(): MenuItem[] {
@@ -140,7 +141,7 @@ function useBindings() {
   return getBindings();
 }
 
-function MenuList({ items, path, close, style, back }: { items: MenuEntry[]; path: string[]; close: () => void; style?: string; back?: () => void }) {
+function MenuList({ items, path, close, style, back, escapeCloses }: { items: MenuEntry[]; path: string[]; close: () => void; style?: string; back?: () => void; /** Escape closes the menu even with `back` (← still goes back): the Modern panel */ escapeCloses?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { ref.current?.querySelector<HTMLElement>(':scope > [role="menuitem"]:not([aria-disabled="true"])')?.focus(); }, []);
   const onKey = (e: KeyboardEvent) => {
@@ -152,7 +153,7 @@ function MenuList({ items, path, close, style, back }: { items: MenuEntry[]; pat
     else if (e.key === 'ArrowUp') next = entries[(at - 1 + entries.length) % entries.length];
     else if (e.key === 'Home') next = entries[0];
     else if (e.key === 'End') next = entries.at(-1);
-    else if (e.key === 'Escape' || (e.key === 'ArrowLeft' && back)) { e.preventDefault(); e.stopPropagation(); (back ?? close)(); return; }
+    else if (e.key === 'Escape' || (e.key === 'ArrowLeft' && back)) { e.preventDefault(); e.stopPropagation(); (e.key === 'Escape' && escapeCloses ? close : back ?? close)(); return; }
     else if (e.key === 'Tab') { close(); return; }
     else if (e.key.length === 1 && /[a-z0-9]/i.test(e.key)) next = [...entries.slice(at + 1), ...entries.slice(0, at + 1)].find(el => el.textContent?.trim().toLowerCase().startsWith(e.key.toLowerCase()));
     if (next) { e.preventDefault(); e.stopPropagation(); next.focus(); }
@@ -294,6 +295,9 @@ export function MenuBar({ menus, user, right, primary, title, onLogout, onSettin
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [compact, setCompact] = useState(() => window.innerWidth < 1100);
   const barRef = useRef<HTMLDivElement>(null);
+  // the Modern interface has no row of menus: one menu button beside the name opens them all
+  // (menu names on the left, the one pointed at on the right); narrow, it drills down as in Classic
+  const modern = useUiMode() === 'modern';
   const [recording, setRecording] = useState<string | null>(null);
   const bindings = useBindings();
   /** whatever had the keyboard before the palette took it (the editor, usually) gets it back */
@@ -368,17 +372,41 @@ export function MenuBar({ menus, user, right, primary, title, onLogout, onSettin
   };
   const menuContent = (i: number) => menus[i].search
     ? <SearchMenu key={menus[i].title} menu={menus[i]} paletteShortcut={paletteShortcut} entries={entries} close={close} recording={recording} setRecording={setRecording} />
-    : <MenuList key={menus[i].title} items={menus[i].items} path={[menus[i].title]} close={close} back={compact ? () => { setOpen(null); setOverflowOpen(true); } : undefined} />;
+    : <MenuList key={menus[i].title} items={menus[i].items} path={[menus[i].title]} close={close}
+      back={compact ? () => { setOpen(null); setOverflowOpen(true); } : modern ? () => barRef.current?.querySelector<HTMLElement>('.mm-title.on')?.focus() : undefined} escapeCloses={modern && !compact} />;
   const paletteKey = formatShortcut(effectiveShortcut(PALETTE_ID, paletteShortcut) ?? 'F1');
   return (
     <div class="menubar" ref={barRef}>
       {onHome && <a class="brand" href="#/" title="Start screen" onClick={e => { e.preventDefault(); onHome(); }}><Wordmark /></a>}
       {title && <div class="menubar-title">{title}</div>}
       <div class="menubar-menus">
-      {compact ? (
+      {modern && !compact ? (
+        <div class={'menu menu-main' + (open !== null ? ' open' : '')}>
+          <button type="button" class="menu-main-btn" aria-haspopup="menu" aria-expanded={open !== null} aria-label="Menu" title={`Menu — or search the menus (${paletteKey})`} data-main-menu
+            onMouseDown={e => { e.preventDefault(); if (open !== null) close(); else toggle(Math.max(0, menus.findIndex(m => !m.search))); }}
+            onKeyDown={e => { if (['ArrowDown', 'Enter', ' '].includes(e.key)) { e.preventDefault(); if (open === null) toggle(0); } }}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+          </button>
+          {open !== null && <div class="menu-main-panel" role="presentation">
+            <div class="mm-titles" role="menubar" aria-orientation="vertical">
+              {onHome && <><button type="button" class="mm-title mm-home" onMouseDown={e => { e.preventDefault(); close(); onHome(); }}>Start screen</button><div class="menu-sep" /></>}
+              {menus.map((m, i) => (
+                <button key={m.title} type="button" class={'mm-title' + (open === i ? ' on' : '')} aria-haspopup="menu" aria-expanded={open === i}
+                  onMouseEnter={() => setOpen(i)} onMouseDown={e => { e.preventDefault(); setOpen(i); }}
+                  onKeyDown={e => {
+                    const all = [...(e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('.mm-title:not(.mm-home)') ?? [])];
+                    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = (i + (e.key === 'ArrowDown' ? 1 : menus.length - 1)) % menus.length; setOpen(n); all[n]?.focus(); }
+                    else if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); (e.currentTarget.closest('.menu-main-panel')?.querySelector<HTMLElement>('.mm-items [role="menuitem"]:not([aria-disabled="true"]), .mm-items input'))?.focus(); }
+                  }}>{m.title}</button>
+              ))}
+            </div>
+            <div class="mm-items">{menuContent(open)}</div>
+          </div>}
+        </div>
+      ) : compact ? (
         <div class={'menu menu-overflow' + (overflowOpen || open !== null ? ' open' : '')}>
           <button type="button" aria-haspopup="menu" aria-expanded={overflowOpen || open !== null} onMouseDown={e => e.preventDefault()} onClick={toggleOverflow}
-            onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); if (!overflowOpen && open === null) toggleOverflow(); } }}>Menu <span aria-hidden="true">▾</span></button>
+            onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); if (!overflowOpen && open === null) toggleOverflow(); } }}>{modern ? <svg class="menu-main-icon" viewBox="0 0 24 24" aria-label="Menu"><path d="M4 7h16M4 12h16M4 17h16" /></svg> : <>Menu <span aria-hidden="true">▾</span></>}</button>
           {(overflowOpen || open !== null) && <div class="menu-overflow-panel">
             {open === null
               ? <MenuList items={[...(onHome ? [{ label: 'Start screen', action: onHome }, { sep: true }] : []), ...menus.map((m, i) => ({ label: m.title, action: () => toggle(i) }))]} path={['Menu']} close={close} />

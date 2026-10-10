@@ -189,16 +189,20 @@ export function UiChoice() {
       <rect y="83" width="160" height="7" fill="#e9e9e6" />
     </svg>
   );
-  // Modern: the name over the menus, one strip of keys, the page — LyX's three colours as marks
+  // Modern: one header row (the wordmark, the menu button, the name), one strip of keys, the page as a sheet
   const modern = (
     <svg viewBox="0 0 160 90" aria-hidden="true">
       <rect width="160" height="90" fill="#f1efea" />
-      <circle cx="9" cy="9" r="3.2" fill="#2152a3" /><rect x="14" y="5.8" width="6.4" height="6.4" fill="#d6402b" /><path d="M25.5 5.6 29 12.2H22z" fill="#efb21a" />
-      <rect x="36" y="4.5" width="34" height="4" rx="1" fill="#1c1b19" />{[36, 47, 58, 69, 80].map(x => <rect key={x} x={x} y="11.5" width="8" height="2.4" rx="1" fill="#84807a" />)}
-      <rect x="132" y="5" width="22" height="9" rx="2" fill="#dc4b1d" />
-      <rect x="6" y="19" width="148" height="9" rx="2.5" fill="#e6e3dd" />{Array.from({ length: 14 }, (_, i) => <rect key={i} x={11 + i * 10} y="21.8" width="4.5" height="3.4" rx="0.6" fill={i === 3 ? '#262521' : '#4a4741'} opacity={i === 3 ? 1 : 0.75} />)}
-      <rect x="0" y="32" width="160" height="58" fill="#e8e5df" />
-      <rect x="40" y="36" width="80" height="54" fill="#fff" stroke="#e3e0d9" stroke-width="0.6" />{[44, 52, 59, 66, 73, 80].map(y => <rect key={y} x="50" y={y} width={y === 44 ? 36 : 60} height={y === 44 ? 4 : 2.6} rx="0.8" fill={y === 44 ? '#1c1b19' : '#bdb8ae'} />)}
+      {[5.6, 8.2, 10.8].map((y, k) => <rect key={y} x={k === 1 ? 4 : 5.5} y={y} width={k === 1 ? 5 : 3.5} height="1.1" fill="#1c1b19" />)}
+      <rect x="11" y="5.4" width="9" height="5.6" rx="0.6" fill="#1c1b19" />
+      <rect x="20.8" y="5" width="2.2" height="6" fill="#2152a3" transform="rotate(-12 21.9 8)" /><rect x="23.6" y="6" width="2.2" height="6" fill="#efb21a" transform="rotate(7 24.7 9)" /><rect x="26.4" y="5" width="2.2" height="6" fill="#d6402b" transform="rotate(12 27.5 8)" />
+      {[6.2, 8.2, 10.2].map(y => <rect key={y} x="34" y={y} width="5" height="0.9" rx="0.4" fill="#4a4741" />)}
+      <rect x="43" y="6" width="30" height="4" rx="1" fill="#1c1b19" />
+      <rect x="132" y="4.5" width="22" height="7" rx="1.5" fill="#d6402b" />
+      <rect x="6" y="16" width="148" height="9" rx="2.5" fill="#e6e3dd" />{Array.from({ length: 14 }, (_, i) => <rect key={i} x={11 + i * 10} y="18.8" width="4.5" height="3.4" rx="0.6" fill={i === 3 ? '#262521' : '#4a4741'} opacity={i === 3 ? 1 : 0.75} />)}
+      <rect x="0" y="29" width="160" height="61" fill="#e8e5df" />
+      <rect x="40" y="33" width="80" height="57" fill="#fff" stroke="#e3e0d9" stroke-width="0.6" />{[41, 49, 56, 63, 70, 77].map(y => <rect key={y} x="50" y={y} width={y === 41 ? 36 : 60} height={y === 41 ? 4 : 2.6} rx="0.8" fill={y === 41 ? '#1c1b19' : '#bdb8ae'} />)}
+      <path d="M103 55.5h5.2a1 1 0 0 1 1 1v2.6a1 1 0 0 1-1 1h-4.4l-1.2 1.2z" fill="#f7d35c" />
     </svg>
   );
   return (
@@ -209,6 +213,25 @@ export function UiChoice() {
       <button type="button" role="radio" aria-checked={cur === 'modern'} class={cur === 'modern' ? 'on' : ''} data-ui-choice="modern" onClick={() => setUiMode('modern')}>
         {modern}<b class="uc-name">Modern</b><span>Calm and simple — one toolbar; the tools for a formula, a table or a picture appear when you need them.</span>
       </button>
+    </div>
+  );
+}
+
+/**
+ * The interface choice on its own: a new account that arrives through the Overleaf import goes
+ * straight to its imported document (no welcome card, no tour then) — it still chooses Classic or
+ * Modern first. The tour waits for a later visit.
+ */
+export function InterfacePrompt({ onDone }: { onDone: () => void }) {
+  return (
+    <div class="tour" data-tour-step="interface">
+      <div class="tour-backdrop" />
+      <div class="tour-card interface-prompt" role="dialog" aria-label="Choose the interface" onMouseDown={e => e.preventDefault()}>
+        <h3>Welcome to OverLyX 👋</h3>
+        <p>Choose how OverLyX looks — the same functions either way; switch any time in <i>View ▸ Interface</i> or <i>Settings</i>:</p>
+        <UiChoice />
+        <div class="tour-buttons"><button class="btn primary" data-interface-done onClick={onDone}>Continue</button></div>
+      </div>
     </div>
   );
 }

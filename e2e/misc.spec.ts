@@ -216,8 +216,11 @@ test('resolved comments leave the text and live in the Comments panel archive, f
   const rail = page.locator('.rail.right [data-rail="comments"]');
   if (await rail.count()) await rail.click(); else await page.locator('.panel-tabs [data-tab="comments"]').click();
   const cards = page.locator('.lyx-editor .lyx-inset-note-comment');
-  // the resolved thread shows no card in the text, only its marker
-  await expect(cards.nth(0).locator('> .inset-box')).toBeVisible();
+  // in the text an open thread is a chip with its message count (its card opens with the cursor in
+  // the thread); the resolved thread shows no card either, only its grey marker
+  await expect(cards.nth(0).locator('> .inset-anchor')).toBeVisible();
+  await expect(cards.nth(0).locator('> .inset-anchor')).toHaveAttribute('data-count', '1');
+  await expect(cards.nth(0).locator('> .inset-box')).toBeHidden();
   await expect(cards.nth(1)).toHaveClass(/resolved/);
   await expect(cards.nth(1).locator('> .inset-box')).toBeHidden();
   await expect(cards.nth(1).locator('> .inset-anchor')).toBeVisible();
@@ -234,12 +237,13 @@ test('resolved comments leave the text and live in the Comments panel archive, f
   await expect(cards.nth(0).locator('> .inset-box')).toBeHidden();
   // (the writer escapes the brackets LaTeX-style; the parser reads both forms)
   await expect.poll(() => readFileSync(`${DIR}/threads.tex`, 'utf8'), { timeout: 15000 }).toMatch(/Jan Bauer \(2026-08-26 14:03\) (\[|\{\[\})resolved(\]|\{\]\}):/);
-  // reopen the other one from the archive: its card is back, the panel jumps to it
+  // reopen the other one from the archive: its chip is back; its row in the panel opens its card
   await panel.locator('[data-comment="resolved"]', { hasText: 'Kirsten' }).locator('[data-action="reopen"]').click();
   await expect(panel.locator('[data-comment="open"]')).toHaveCount(1);
-  await expect(cards.nth(1).locator('> .inset-box')).toBeVisible();
+  await expect(cards.nth(1)).not.toHaveClass(/resolved/);
   await panel.locator('[data-comment="open"]').click();
   await expect(cards.nth(1)).toHaveClass(/highlight/);
+  await expect(cards.nth(1).locator('> .inset-box')).toBeVisible();
 });
 
 test('a window resize after leaving the document does not crash (margin plugin cleanup)', async ({ page }) => {

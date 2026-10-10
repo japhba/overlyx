@@ -14,8 +14,9 @@
  *   OVERLYX_E2E_BASE=http://localhost:5175 OVERLYX_PROJECTS_DIR=$S/projects \
  *     OVERLYX_E2E_CREDENTIALS=$S/data/credentials.txt npx playwright test -c scripts/recording
  *
- * The VS Code clip is recorded separately by record-vscode.mjs (xvfb). The slides and drawing clips
- * use the Modern interface and the starter talk / poster (packages/server/templates/starters/web);
+ * The VS Code clip is recorded separately by record-vscode.mjs (xvfb). Every clip shows the Modern
+ * interface (the landing page's look); the slides clip uses the starter talk / poster
+ * (packages/server/templates/starters/web) and edits a formula on each;
  * the slides need the deck runtime in the server's client dist (OVERLYX_CLIENT_DIST, built with
  * `OVERLYX_RUNTIME_OUT=$S/dist/_ol npx vite build -c runtime.vite.config.ts` in packages/client).
  * Record one clip with `-g "slides"`.
@@ -51,7 +52,7 @@ async function freshProject(ctx: BrowserContext, name: string, tex: string): Pro
 }
 
 /** A context whose video becomes the clip; logged in as the admin unless `user` says otherwise. */
-async function recordingContext(browser: Browser, theme: Theme, user?: string, ui: 'classic' | 'modern' = 'classic'): Promise<BrowserContext> {
+async function recordingContext(browser: Browser, theme: Theme, user?: string, ui: 'classic' | 'modern' = 'modern'): Promise<BrowserContext> {
   const ctx = await browser.newContext({
     viewport: SIZE,
     recordVideo: { dir: OUT, size: SIZE },
@@ -202,33 +203,60 @@ for (const theme of ['light', 'dark'] as const) {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(400);
     await snap(page, 'before-present');
-    // presenting: the first slide, the next one, the laser
+    // a formula on a slide: LyX's formula editor right in it (slide 3, chosen in the rail)
+    await page.frameLocator('.dl-railframe').locator('section.slide').nth(2).click();
+    await page.waitForTimeout(700);
+    // (a double-click at the formula's right edge puts the cursor at its end — End there would leave it, as in LyX)
+    const law = page.frameLocator('.dl-frame').locator('section.slide').nth(2).locator('mjx-container svg').first();
+    const lb = (await law.boundingBox())!;
+    const fx = { x: lb.x + lb.width - 3, y: lb.y + lb.height * 0.5 };
+    await glide(page, title, fx, 600);
+    await page.mouse.dblclick(fx.x, fx.y);
+    await expect(page.locator('[data-dl-mathedit] .lm-field')).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(400);
+    await page.keyboard.type(' \\propto \\omega^4', { delay: 90 });
+    await page.waitForTimeout(500);
+    await snap(page, 'formula');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+    // presenting from there, with the laser over the formula
     await page.locator('[data-dl-present]').click();
     const pres = page.frameLocator('.dl-presenting iframe');
     await expect(pres.locator('section.slide[data-ol-current]')).toHaveCount(1, { timeout: 15000 });
-    await page.waitForTimeout(1100);
-    await page.keyboard.press('ArrowRight');
-    await page.waitForTimeout(700);
-    await page.keyboard.press('ArrowRight');
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(900);
     await page.keyboard.press('l');
-    await page.mouse.move(330, 470);
-    await glide(page, { x: 330, y: 470 }, { x: 560, y: 520 }, 600);
-    await glide(page, { x: 560, y: 520 }, { x: 800, y: 470 }, 600);
+    await page.mouse.move(200, 470);
+    await glide(page, { x: 200, y: 470 }, { x: 420, y: 520 }, 600);
+    await glide(page, { x: 420, y: 520 }, { x: 600, y: 470 }, 500);
     await snap(page, 'laser');
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(500);
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(300);
     await page.keyboard.press('Escape');
     await expect(page.locator('.dl-presenting')).toHaveCount(0, { timeout: 10000 });
-    await page.waitForTimeout(500);
-    await snap(page, 'after-present');
-    // the poster beside it, the same canvas
+    await page.waitForTimeout(400);
+    // the poster beside it, the same canvas and the same formula editor
     const posterFile = page.locator('[data-file="poster/index.html"]');
     if (!(await posterFile.isVisible())) await page.locator('.tree-row.folder > .fname:text-is("poster")').click();
     await posterFile.click();
     await expect(page.frameLocator('.dl-frame').locator('h1', { hasText: 'Why the sky is blue' })).toBeVisible({ timeout: 30000 });
-    await finish(ctx, page, 'slides', theme, t0, opened, 2200);
+    await page.waitForTimeout(1200);
+    const pf = page.frameLocator('.dl-frame').locator('section.slide .card').nth(1).locator('mjx-container svg').first();
+    const pb = (await pf.boundingBox())!;
+    const px = { x: pb.x + pb.width - 3, y: pb.y + pb.height * 0.5 };
+    await glide(page, { x: 640, y: 400 }, px, 600);
+    await page.mouse.dblclick(px.x, px.y);
+    await expect(page.locator('[data-dl-mathedit] .lm-field')).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(300);
+    await page.keyboard.type(' \\propto \\omega^4', { delay: 90 });
+    await page.waitForTimeout(500);
+    await snap(page, 'poster-formula');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+    await page.keyboard.press('Escape');
+    await finish(ctx, page, 'slides', theme, t0, opened, 1800);
   });
 
   test(`drawing (${theme})`, async ({ browser }) => {

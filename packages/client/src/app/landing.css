@@ -1,8 +1,8 @@
 /*
  * Landing page (Login.tsx): one Bauhaus look for every visitor, whichever interface (Classic /
  * Modern) they use inside — warm paper, graphite ink, hairlines, square corners, Jost for titles and
- * Inter for reading, LyX's blue / yellow / red only as the marks of documents ■, slides ▲ and
- * drawing ●. Sections are numbered (a CSS counter) under a heavy rule.
+ * Inter for reading, the "OverLyX = …" line in Computer Modern; the wordmark's blue / yellow / red
+ * as thin rules only. Sections sit under a heavy rule.
  * Loaded through Login.tsx, which vite bundles BEFORE styles.css (main.tsx import order), so every
  * rule that overrides one from styles.css or modern.css must win on specificity, not on order —
  * hence the `div.login.lp` prefix.
@@ -28,35 +28,26 @@ html[data-theme="dark"] div.login.lp {
 div.login.lp :is(button, input, textarea) { font-family: inherit; }
 div.login.lp ::selection { background: color-mix(in srgb, var(--lp-blue) 24%, transparent); }
 div.login.lp :focus-visible { outline: 2px solid var(--lp-blue); outline-offset: 2px; }
-div.login.lp .landing { display: block; max-width: 1120px; margin: 0 auto; padding: 0 40px; counter-reset: sec; }
-
-/* ------------------------------------------------------------ the marks: ■ ▲ ● filled, □ △ ○ in outline */
-div.login.lp .mark { width: 0.75em; height: 0.75em; flex: none; overflow: visible; }
-div.login.lp .mark.square { fill: var(--lp-blue); }
-div.login.lp .mark.triangle { fill: var(--lp-yellow); }
-div.login.lp .mark.circle { fill: var(--lp-red); }
-div.login.lp .mark:is(.square-o, .triangle-o, .circle-o) { fill: none; stroke: var(--lp-ink); stroke-width: 1.5; }
+div.login.lp .landing { display: block; max-width: 1120px; margin: 0 auto; padding: 0 40px; }
 
 /* ------------------------------------------------------------ hero: the wordmark and what it is, the sign-in card */
-div.login.lp .hero { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 80px; align-items: center; min-height: 0; padding: 96px 0 64px; }
+div.login.lp .hero { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 64px; align-items: center; min-height: 0; padding: 72px 0 56px; }
 div.login.lp .hero-copy { display: block; }
-div.login.lp .hero-copy h1 { margin: 0 0 36px; font-size: 64px; line-height: 1; font-weight: inherit; }
-div.login.lp .lede { margin: 0 0 18px; max-width: 17em; text-wrap: balance; font-family: var(--lp-display); font-size: 36px; line-height: 1.14; font-weight: 500; letter-spacing: -0.012em; }
-div.login.lp .sub { margin: 0 0 32px; max-width: 33em; font-size: 16px; line-height: 1.6; color: var(--lp-ink2); }
-div.login.lp .kinds { display: flex; flex-wrap: wrap; gap: 8px 28px; }
-div.login.lp .kinds a { display: inline-flex; align-items: center; gap: 9px; padding: 4px 0; border-bottom: 1px solid transparent; color: var(--lp-ink); text-decoration: none; font-family: var(--lp-display); font-size: 16px; font-weight: 500; }
-div.login.lp .kinds a:hover { border-bottom-color: var(--lp-ink); }
-
-/* behind the card: a small composition of the three marks, as on a Bauhaus poster */
-div.login.lp .signin-col { position: relative; isolation: isolate; }
-div.login.lp .comp { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
-div.login.lp .comp i { position: absolute; display: block; }
-div.login.lp .comp .c { width: 120px; height: 120px; right: -48px; top: -44px; border-radius: 50%; background: var(--lp-red); }
-div.login.lp .comp .s { width: 84px; height: 84px; left: -36px; bottom: -32px; background: var(--lp-blue); }
-div.login.lp .comp .t { width: 74px; height: 64px; right: 40px; bottom: -38px; background: var(--lp-yellow); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+div.login.lp .hero-copy h1 { margin: 0 0 28px; font-size: 64px; line-height: 0.9; font-weight: inherit; }
+div.login.lp .lede { margin: 0 0 24px; max-width: 20em; text-wrap: balance; font-family: var(--lp-display); font-size: 34px; line-height: 1.16; font-weight: 500; letter-spacing: -0.012em; }
+/* OverLyX = Overleaf + LyX (+ …) − Complexity: an align* block in Computer Modern — the left side, "=",
+   then one term per line, the continuation lines starting under the first term */
+div.login.lp .formula { display: grid; grid-template-columns: auto auto minmax(0, 1fr); column-gap: 0.4em; row-gap: 0.15em; align-items: baseline; margin: 0; max-width: 36em; font-family: "CMU Serif", "Latin Modern Roman", "Computer Modern", Georgia, serif; font-size: 18.5px; line-height: 1.45; color: var(--lp-ink2); }
+div.login.lp .formula .lhs { grid-column: 1; color: var(--lp-ink); }
+div.login.lp .formula .rel { grid-column: 2; }
+div.login.lp .formula .row { grid-column: 3; }
+div.login.lp .formula .row { white-space: nowrap; }
+div.login.lp .formula i { font-style: normal; padding: 0 0.3em; }
+div.login.lp .formula i.lead { padding-left: 0; }
+div.login.lp .formula .inner { padding-left: 0.42em; }   /* a continued line inside the parenthesis starts under its first term */
 
 /* the sign-in card: paper on the ground, a heavy rule on top; the Google button is the one dark key */
-div.login.lp form.signin { width: 360px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; padding: 28px 28px 22px; background: var(--lp-paper); border: 1px solid var(--lp-line); border-top: 3px solid var(--lp-ink); border-radius: 0; box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03), 0 24px 48px -32px rgba(0, 0, 0, 0.25); }
+div.login.lp form.signin { width: 350px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; padding: 28px 28px 22px; background: var(--lp-paper); border: 1px solid var(--lp-line); border-top: 0; border-radius: 0; background-image: linear-gradient(90deg, var(--lp-blue) 0 33.3%, var(--lp-yellow) 33.3% 66.6%, var(--lp-red) 66.6%); background-size: 100% 4px; background-repeat: no-repeat; padding-top: 32px; box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03), 0 24px 48px -32px rgba(0, 0, 0, 0.25); }
 div.login.lp .signin h2 { margin: 0; font-family: var(--lp-display); font-size: 24px; font-weight: 500; letter-spacing: -0.01em; }
 div.login.lp .signin .signin-note { margin: -4px 0 8px; font-size: 13px; line-height: 1.5; color: var(--lp-muted); }
 div.login.lp .signin .signin-note.link-note { margin: 0 0 4px; padding: 8px 10px; color: var(--lp-ink); background: color-mix(in srgb, var(--lp-yellow) 16%, transparent); border: 0; border-left: 3px solid var(--lp-yellow); border-radius: 0; }
@@ -83,9 +74,8 @@ div.login.lp .password button.btn:disabled { opacity: 0.5; cursor: default; }
 div.login.lp .err { color: var(--lp-red); font-size: 12.5px; }
 
 /* ------------------------------------------------------------ numbered sections under a heavy rule */
-div.login.lp :is(.sec, .overleaf-start) { counter-increment: sec; margin: 80px 0 0; padding: 18px 0 0; border: 0; border-top: 2px solid var(--lp-ink); border-radius: 0; background: none; box-shadow: none; }
-div.login.lp :is(.sec > h2, .overleaf-start h2) { display: flex; align-items: baseline; margin: 0 0 36px; font-family: var(--lp-display); font-size: 30px; font-weight: 500; letter-spacing: -0.01em; text-align: left; }
-div.login.lp :is(.sec > h2, .overleaf-start h2)::before { content: counter(sec, decimal-leading-zero); flex: none; width: 64px; font-size: 15px; font-weight: 500; color: var(--lp-muted); letter-spacing: 0.04em; }
+div.login.lp :is(.sec, .overleaf-start) { margin: 80px 0 0; padding: 18px 0 0; border: 0; border-top: 2px solid var(--lp-ink); border-radius: 0; background: none; box-shadow: none; }
+div.login.lp :is(.sec > h2, .overleaf-start h2) { display: block; margin: 0 0 32px; font-family: var(--lp-display); font-size: 30px; font-weight: 500; letter-spacing: -0.01em; text-align: left; }
 
 /* the demo gallery wheel: one clip at a time, sliding, with the position bars underneath */
 div.login.lp .demos { display: block; }
@@ -96,7 +86,6 @@ div.login.lp .wheel .frame { position: relative; aspect-ratio: 16 / 10; border: 
 div.login.lp .wheel video { display: block; width: 100%; height: 100%; object-fit: contain; }
 div.login.lp .wheel figcaption { display: flex; flex-direction: column; gap: 10px; padding: 0 0 4px; text-align: left; }
 div.login.lp .wheel figcaption strong { font-family: var(--lp-display); font-size: 22px; font-weight: 500; line-height: 1.2; }
-div.login.lp .wheel figcaption strong .mark { display: block; width: 14px; height: 14px; margin-bottom: 14px; }
 div.login.lp .wheel figcaption span { font-size: 14.5px; line-height: 1.6; color: var(--lp-ink2); opacity: 1; }
 div.login.lp .wheel figcaption a { color: var(--lp-ink); text-decoration: underline; text-underline-offset: 2px; }
 div.login.lp .replay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border: 0; border-radius: 2px; background: rgba(28, 27, 25, 0.82); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: none; opacity: 0; transition: opacity 0.2s; }
@@ -108,13 +97,14 @@ div.login.lp .dots .dot { width: 28px; height: 3px; padding: 0; border: 0; borde
 div.login.lp .dots .dot:hover { background: var(--lp-muted); }
 div.login.lp .dots .dot.active { width: 48px; height: 3px; background: var(--lp-ink); }
 
-/* the feature sheet: three columns, a group per kind of work */
-div.login.lp .fgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 56px 48px; }
-div.login.lp .fgroup { scroll-margin-top: 24px; }
-div.login.lp .fgroup h3 { display: flex; align-items: center; gap: 11px; margin: 0 0 18px; padding-bottom: 12px; border-bottom: 1px solid var(--lp-line); font-family: var(--lp-display); font-size: 20px; font-weight: 500; }
-div.login.lp .fgroup dl { display: flex; flex-direction: column; gap: 14px; margin: 0; }
-div.login.lp .fgroup dt { font-size: 11.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--lp-ink); }
-div.login.lp .fgroup dd { margin: 3px 0 0; font-size: 14px; line-height: 1.55; color: var(--lp-ink2); }
+/* what it does: four lines, each under a thin bar in one of the wordmark's colours */
+div.login.lp .flist { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px; margin: 0; padding: 0; list-style: none; }
+div.login.lp .flist li { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; border-top: 3px solid var(--lp-ink); }
+div.login.lp .flist li:nth-child(1) { border-top-color: var(--lp-blue); }
+div.login.lp .flist li:nth-child(2) { border-top-color: var(--lp-yellow); }
+div.login.lp .flist li:nth-child(3) { border-top-color: var(--lp-red); }
+div.login.lp .flist strong { font-family: var(--lp-display); font-size: 19px; font-weight: 500; }
+div.login.lp .flist span { font-size: 14.5px; line-height: 1.55; color: var(--lp-ink2); }
 
 /* ------------------------------------------------------------ "Coming from Overleaf?" (OverleafStart.tsx) */
 div.login.lp .overleaf-start { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 0 56px; align-items: start; }
@@ -158,7 +148,7 @@ div.login.lp .links svg { width: 14px; height: 14px; }
   div.login.lp .signin-col { width: 100%; max-width: 440px; }
   div.login.lp form.signin { width: 100%; }
   div.login.lp .wheel .slide { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-  div.login.lp .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  div.login.lp .flist { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   div.login.lp .overleaf-start { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   div.login.lp .overleaf-start .pick { padding-top: 0; }
 }
@@ -170,12 +160,9 @@ div.login.lp .links svg { width: 14px; height: 14px; }
   div.login.lp .sub { font-size: 15px; }
   div.login.lp .signin-col { max-width: none; }
   div.login.lp form.signin { padding: 24px 20px 18px; }
-  div.login.lp .comp .c { width: 72px; height: 72px; right: -26px; top: -26px; }
-  div.login.lp .comp .s { width: 52px; height: 52px; left: -14px; bottom: -20px; }
-  div.login.lp .comp .t { width: 48px; height: 42px; right: 28px; bottom: -24px; }
   div.login.lp :is(.sec, .overleaf-start) { margin-top: 64px; }
   div.login.lp :is(.sec > h2, .overleaf-start h2) { font-size: 25px; margin-bottom: 26px; }
-  div.login.lp :is(.sec > h2, .overleaf-start h2)::before { width: 44px; }
-  div.login.lp .fgrid { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+    div.login.lp .flist { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  div.login.lp .formula { font-size: 16.5px; }
   div.login.lp .foot { margin-top: 72px; }
 }

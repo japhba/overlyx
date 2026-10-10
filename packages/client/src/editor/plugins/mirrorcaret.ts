@@ -24,7 +24,11 @@ export function mirrorCaretPlugin(): Plugin<MirrorState> {
         if (m !== undefined) return m;
         if (prev === null) return null;
         if (!tr.docChanged) return prev;
-        return { from: tr.mapping.map(prev.from, -1), to: tr.mapping.map(prev.to, 1), head: tr.mapping.map(prev.head) };
+        // an edit that swallows the range (the source pane's edit replaces what it changed, often a
+        // whole stretch of the document) leaves the caret, not a tint over everything it replaced
+        const f = tr.mapping.mapResult(prev.from, -1), t = tr.mapping.mapResult(prev.to, 1), head = tr.mapping.map(prev.head);
+        if (f.deleted || t.deleted) return { from: head, to: head, head };
+        return { from: f.pos, to: t.pos, head };
       },
     },
     props: {

@@ -53,10 +53,13 @@ export class InsetView implements NodeView {
       this.dom.classList.add('highlight');
       setTimeout(() => this.dom.classList.remove('highlight'), 1200);
       const pos = this.getPos();
-      if (pos !== undefined) {
-        this.view.dispatch(this.view.state.tr.setSelection(TextSelection.near(this.view.state.doc.resolve(pos + 2))));
-        this.view.focus();
-      }
+      if (pos === undefined) return;
+      // a comment's chip opens the thread at the end of its last message (ready to read on or add a
+      // line); other notes put the cursor at their start
+      const cur = this.view.state.doc.nodeAt(pos);
+      const at = this.isComment() && cur && !this.dom.classList.contains('resolved') ? pos + cur.nodeSize - 2 : pos + 2;
+      this.view.dispatch(this.view.state.tr.setSelection(TextSelection.near(this.view.state.doc.resolve(at), at === pos + 2 ? 1 : -1)));
+      this.view.focus();
     });
   }
 
@@ -103,20 +106,29 @@ export class InsetView implements NodeView {
     // comment-thread controls (rebuilt only when they change: every keystroke in the thread re-renders)
     const h = this.isComment() ? parseHeader((this.node.firstChild?.textContent ?? '').trim()) : null;
     this.dom.classList.toggle('resolved', !!h?.resolved);
+    if (this.isComment()) {
+      // the chip in the text: how many messages the thread has, and who started it
+      let n = 0;
+      this.node.forEach(p => { if (parseHeader(p.textContent.trim())) n++; });
+      this.anchor.dataset.count = String(Math.max(1, n));
+      if (!h?.resolved) this.anchor.title = `Comment${h?.author ? ' by ' + h.author : ''}${n > 1 ? ` · ${n - 1} repl${n === 2 ? 'y' : 'ies'}` : ''} — click to open`;
+    }
     const controls = this.isComment() ? (h?.resolved ? 'resolved' : 'open') : '';
     if (controls !== this.controls) {
       this.controls = controls;
       this.actions.replaceChildren();
-      this.anchor.title = '';
     }
     if (controls && !this.actions.firstChild) {
       // a resolved thread leaves the text: its marker stays (the Comments panel lists it and can reopen it)
-      this.anchor.title = h?.resolved ? 'Resolved comment — click to put the cursor here; the Comments panel lists it and can reopen it' : '';
+      if (h?.resolved) this.anchor.title = 'Resolved comment — click to put the cursor here; the Comments panel lists it and can reopen it';
+      // Reply: a field at the foot of the open card; Resolve: the ✓ in its corner (the words stay the buttons' text)
       const reply = document.createElement('button');
-      reply.type = 'button'; reply.className = 'inset-action'; reply.textContent = 'Reply'; reply.title = 'Reply to this comment';
+      reply.type = 'button'; reply.className = 'inset-action'; reply.dataset.act = 'reply'; reply.textContent = 'Reply'; reply.title = 'Reply to this comment';
       reply.addEventListener('mousedown', (ev) => { ev.preventDefault(); this.reply(); });
       const resolve = document.createElement('button');
-      resolve.type = 'button'; resolve.className = 'inset-action'; resolve.textContent = h?.resolved ? 'Reopen' : 'Resolve'; resolve.title = 'Mark this thread as resolved';
+      resolve.type = 'button'; resolve.className = 'inset-action'; resolve.dataset.act = h?.resolved ? 'reopen' : 'resolve'; resolve.textContent = h?.resolved ? 'Reopen' : 'Resolve';
+      resolve.title = h?.resolved ? 'Reopen this thread' : 'Resolve: the thread leaves the text (Ctrl+Z undoes it; the Comments panel can reopen it)';
+      resolve.setAttribute('aria-label', resolve.textContent);
       resolve.addEventListener('mousedown', (ev) => { ev.preventDefault(); this.toggleResolved(); });
       this.actions.append(reply, resolve);
     }
@@ -176,7 +188,16 @@ export class InsetView implements NodeView {
 
   toggleResolved() {
     const pos = this.getPos();
-    if (pos !== undefined) toggleCommentResolved(this.view, pos);
+    if (pos === undefined) return;
+    const resolving = !this.dom.classList.contains('resolved');
+    toggleCommentResolved(this.view, pos);
+    if (resolving) {
+      // the card goes away: the cursor waits right after the thread's marker, in the text
+      const cur = this.view.state.doc.nodeAt(pos);
+      if (cur) this.view.dispatch(this.view.state.tr.setSelection(TextSelection.near(this.view.state.doc.resolve(pos + cur.nodeSize))));
+      this.view.focus();
+      editorContext.notify?.('Comment resolved — Ctrl+Z undoes it; the Comments panel lists it and can reopen it');
+    }
   }
 
   update(node: PMNode): boolean {

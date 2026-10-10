@@ -1,8 +1,8 @@
 /**
  * Landing / sign-in page, one Bauhaus look whatever interface (Classic / Modern) the visitor chose:
- * the wordmark and a plain description beside the sign-in card, the demo clips, the feature sheet
- * (documents ■, slides and posters ▲, drawing ●, then working together, files and tools, where it
- * runs), the Overleaf import, a footer. Google sign-in is the way in; the username + password form
+ * the wordmark, one sentence and the "OverLyX = Overleaf + LyX …" line beside the sign-in card, the
+ * demo clips (recorded in the Modern interface), four lines of what it does, the Overleaf import, a
+ * footer. Google sign-in is the way in; the username + password form
  * exists for accounts an administrator created (seeded users, e2e) and stays folded away behind a
  * small link while Google is available.
  *
@@ -11,7 +11,7 @@
  * the visitor's theme. A clip plays once when scrolled into view and halts on its last frame with
  * a replay button.
  */
-import type { ComponentChildren, JSX } from 'preact';
+import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Wordmark } from './Logo';
 import { api, googleSignInUrl, type User } from '../api';
@@ -54,93 +54,27 @@ const VscodeIcon = () => (
   </svg>
 );
 
-interface Clip { name: string; title: string; note: string; mark?: Mark; extra?: ComponentChildren }
+interface Clip { name: string; title: string; note: string; extra?: ComponentChildren }
 const CLIPS: Clip[] = [
-  { name: 'wysiwyg', mark: 'square', title: 'Text and formulas, as they will print', note: 'Sections, prose and formulas render while you type them — no compile loop, no raw markup.' },
-  { name: 'slides', mark: 'triangle', title: 'Slides and posters on a canvas', note: 'Move, resize and retype anything on a slide, present it with a laser pointer, and lay out a poster the same way.' },
-  { name: 'drawing', mark: 'circle', title: 'Inkscape’s tools on the slide', note: 'Combine shapes, drag their nodes, draw Bézier curves or by hand. What you draw is plain SVG in the file.' },
-  { name: 'tex', mark: 'square-o', title: 'A real .tex file underneath', note: 'The document is plain LaTeX, kept byte for byte. Open the source beside the page and edit either side — they stay in sync.' },
-  { name: 'collab', mark: 'circle-o', title: 'Writing together', note: 'Live cursors and presence, comment threads in the margin, change tracking and sharing.' },
+  { name: 'wysiwyg', title: 'Text and formulas, as they will print', note: 'Formulas render while you type them, with LyX’s formula editor.' },
+  { name: 'tex', title: 'A real .tex file underneath', note: 'Plain LaTeX, kept byte for byte. Edit the page or the source; they stay in sync.' },
+  { name: 'slides', title: 'Slides and posters', note: 'Move and retype anything, edit formulas in place, present with a laser pointer.' },
+  { name: 'drawing', title: 'Inkscape’s tools on the slide', note: 'Combine shapes, drag their nodes, draw curves or by hand.' },
+  { name: 'collab', title: 'Writing together', note: 'Live cursors, comments in the margin, tracked changes.' },
   {
-    name: 'vscode', mark: 'triangle-o', title: 'The same editor in VS Code',
-    note: "Rendered .tex documents and a PDF preview with SyncTeX, while files, git and agents stay VS Code's. ",
+    name: 'vscode', title: 'The same editor in VS Code',
+    note: 'Rendered .tex and a PDF preview, next to your files and git. ',
     extra: <a href={VSCODE_URL} target="_blank" rel="noopener">Get the extension.</a>,
   },
 ];
 
-/** the three kinds of work as LyX's red-yellow-blue logo and the Modern interface mark them (a document a
- *  square, slides a triangle, a drawing a circle); the rest of the sheet in outline */
-type Mark = 'square' | 'triangle' | 'circle' | 'square-o' | 'triangle-o' | 'circle-o';
-interface FeatureGroup { mark: Mark; id: string; title: string; items: [string, string][] }
-const FEATURES: FeatureGroup[] = [
-  {
-    mark: 'square', id: 'documents', title: 'Documents',
-    items: [
-      ['WYSIWYG', 'Text and formulas render as you type, with LyX’s formula editor. No compile loop.'],
-      ['Plain .tex', 'Files are LaTeX, kept byte for byte. The source opens beside the page; both sides edit.'],
-      ['Structure', 'Sections, lists, tables, figures, citations and cross-references from menus and shortcuts.'],
-      ['PDF', 'A real LaTeX build next to the editor, with SyncTeX between page and PDF.'],
-      ['Markdown', '.md documents in the same editor, written back as you would write them.'],
-    ],
-  },
-  {
-    mark: 'triangle', id: 'slides', title: 'Slides & posters',
-    items: [
-      ['A canvas', 'Drag, resize, rotate and retype every object of a slide deck or a poster.'],
-      ['Decks', 'A slide rail, layouts and masters, guides that snap, connectors between shapes.'],
-      ['Formulas', 'The same formula editor on slides as in documents.'],
-      ['Presenting', 'In the browser, with a laser pointer and pinch zoom. Export as PDF or as a web page.'],
-      ['Beamer', 'Layout mode edits a beamer .tex deck page by page.'],
-    ],
-  },
-  {
-    mark: 'circle', id: 'drawing', title: 'Drawing',
-    items: [
-      ['Inkscape’s path tools', 'Edit nodes, draw with the Bézier pen, combine shapes by union, difference and intersection.'],
-      ['SVG', 'Paste or drop an SVG and keep editing it as shapes.'],
-      ['Pictures', 'Crop and move the picture inside the crop; remove the background.'],
-      ['Ink', 'Pen and highlighter in a document’s margins and on whiteboards, with pressure.'],
-      ['Touch', 'Draw with a stylus, pan and zoom with your fingers.'],
-    ],
-  },
-  {
-    mark: 'circle-o', id: 'together', title: 'Together',
-    items: [
-      ['Live', 'Several authors in one document, with cursors and presence.'],
-      ['Review', 'Comments in the margin, tracked changes; Editing, Suggesting and Viewing modes.'],
-      ['Sharing', 'Invite by name or share a link; guests can join without an account.'],
-      ['History', 'Versions to look back at and restore.'],
-      ['Offline', 'Keep writing without a connection; edits merge when you are back.'],
-    ],
-  },
-  {
-    mark: 'square-o', id: 'files', title: 'Files & tools',
-    items: [
-      ['Git', 'Every project is a git repository: clone, pull and push.'],
-      ['From Overleaf', 'Import a project zip or use Overleaf’s Git access.'],
-      ['Agents', 'Coding agents such as Claude Code and Codex edit through tracked changes you accept or reject.'],
-      ['Your setup', 'Your own preamble, classes and packages; nothing proprietary in the files.'],
-    ],
-  },
-  {
-    mark: 'triangle-o', id: 'anywhere', title: 'Wherever you write',
-    items: [
-      ['Browser', 'Nothing to install. Works on tablets, with pen and touch.'],
-      ['VS Code', 'An extension with the same editor for local .tex files.'],
-      ['Two interfaces', 'Classic, with LyX’s toolbars, or Modern. Light or dark.'],
-    ],
-  },
+/** what it does, in four lines (the bar over each takes one of the wordmark's colours) */
+const FEATURES: { title: string; text: string }[] = [
+  { title: 'WYSIWYG LaTeX', text: 'Text and formulas render as you type. The file stays plain .tex, so it compiles anywhere.' },
+  { title: 'Slides and posters', text: 'On a canvas, with the same formula editor and Inkscape’s drawing tools.' },
+  { title: 'Together', text: 'Write live with others, comment and suggest changes, keep going offline.' },
+  { title: 'Your tools', text: 'Git, your Overleaf projects and a VS Code extension. Your preamble and packages just work.' },
 ];
-
-const MARK_SHAPES: Record<Mark, JSX.Element> = {
-  square: <rect x="1" y="1" width="10" height="10" />,
-  triangle: <polygon points="6,0.6 11.6,11 0.4,11" />,
-  circle: <circle cx="6" cy="6" r="5.4" />,
-  'square-o': <rect x="1.8" y="1.8" width="8.4" height="8.4" />,
-  'triangle-o': <polygon points="6,1.9 10.5,10.2 1.5,10.2" />,
-  'circle-o': <circle cx="6" cy="6" r="4.6" />,
-};
-const MarkGlyph = ({ mark }: { mark: Mark }) => <svg class={'mark ' + mark} viewBox="0 0 12 12" aria-hidden="true">{MARK_SHAPES[mark]}</svg>;
 
 /**
  * The demo gallery wheel: one clip at a time, auto-rotating — the active clip plays once, halts
@@ -204,7 +138,7 @@ function DemoWheel() {
                   Replay
                 </button>
               </div>
-              <figcaption><strong>{c.mark && <MarkGlyph mark={c.mark} />}{c.title}</strong><span>{c.note}{c.extra}</span></figcaption>
+              <figcaption><strong>{c.title}</strong><span>{c.note}{c.extra}</span></figcaption>
             </figure>
           );
         })}
@@ -256,16 +190,17 @@ export function Login({ onLogin, google, note, onBack }: {
         <header class="hero">
           <div class="hero-copy">
             <h1><Wordmark bauhaus /></h1>
-            <p class="lede">LaTeX documents, slides and posters, edited the way they will look.</p>
-            <p class="sub">Overleaf + LyX: a WYSIWYG editor for LaTeX in the browser and in VS Code. The files stay plain LaTeX, so git, Overleaf and the rest of your tools keep working.</p>
-            <nav class="kinds" aria-label="What you can make">
-              {FEATURES.slice(0, 3).map(g => (
-                <a href={'#' + g.id} onClick={e => { e.preventDefault(); scrollTo('#' + g.id); }}><MarkGlyph mark={g.mark} />{g.title}</a>
-              ))}
-            </nav>
+            <p class="lede">LaTeX documents, slides and posters, edited and rendered in the same place.</p>
+            {/* an align* block: the three lines line up at "=" */}
+            <div class="formula" role="img" aria-label="OverLyX equals Overleaf plus LyX, plus Google Docs, Google Slides, Inkscape, VS Code and Markdown, minus complexity">
+              <span class="lhs">OverLyX</span><span class="rel">=</span>
+              <span class="row">Overleaf<i>+</i>LyX</span>
+              <span class="row cont">(<i class="lead">+</i>Google Docs<i>+</i>Google Slides</span>
+              <span class="row cont inner"><i class="lead">+</i>Inkscape<i>+</i>VS Code<i>+</i>Markdown)</span>
+              <span class="row cont"><i class="lead">−</i>Complexity</span>
+            </div>
           </div>
           <div class="signin-col">
-          <div class="comp" aria-hidden="true"><i class="c" /><i class="s" /><i class="t" /></div>
           <form class="signin" onSubmit={submit}>
             <h2>Get started</h2>
             {note ? <p class="signin-note link-note" data-login-note>{note}</p>
@@ -300,14 +235,9 @@ export function Login({ onLogin, google, note, onBack }: {
         </section>
         <section class="features sec" id="features" aria-label="What OverLyX does">
           <h2>What it does</h2>
-          <div class="fgrid">
-            {FEATURES.map(g => (
-              <article class="fgroup" id={g.id} data-mark={g.mark}>
-                <h3><MarkGlyph mark={g.mark} />{g.title}</h3>
-                <dl>{g.items.map(([k, v]) => <div><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
-              </article>
-            ))}
-          </div>
+          <ul class="flist">
+            {FEATURES.map(f => <li><strong>{f.title}</strong><span>{f.text}</span></li>)}
+          </ul>
         </section>
         <OverleafStart google={google} onSignIn={importAndSignIn} googleIcon={<GoogleG />} onChange={setPendingCount} />
         <footer class="foot">

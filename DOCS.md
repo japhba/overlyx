@@ -41,12 +41,19 @@ blend.
   paragraphs that actually changed. See *Offline mode* below.
 * **Notes and comments**: LyX-style notes (Note / Comment / Greyed out) and OverLyX comment
   threads (author, time, replies, resolve) are kept in the `.tex` file as `%%` comment blocks.
-  On screen a note is a yellow sticky, a greyed-out part a quiet grey box, and a comment thread a
-  card with an avatar, name and time per message (the header paragraph `Name (time):` stays as
-  text in the file — `numbering.ts` decorates it, `styles.css` draws it) and Reply / Resolve at
-  the top right. *View ▸ Notes & comments in the margin* moves them into a right-hand column
-  (Google-Docs style). A thread is a point in the text (`%% @comment` has no range): commenting on
-  selected text keeps the text and anchors the thread right after it (`editor/commands.ts insertComment`).
+  On screen a note is a yellow sticky and a greyed-out part a quiet grey box. A comment thread is a
+  **chip** in the text — a small yellow speech bubble with the number of messages — and its **card**
+  (avatar, name and time per message: the header paragraph `Name (time):` stays as text in the file,
+  `numbering.ts` decorates it, `styles.css` draws it; ✓ in the corner resolves, a *Reply…* field at
+  the foot) opens while the cursor is in the thread (`editor/plugins/commentui.ts` marks it
+  `cm-active`): as a popover under the chip, over the text (placed by `plugins/margin.ts`, the line
+  does not move), or highlighted in the margin column (*View ▸ Notes & comments in the margin*,
+  Google-Docs style). A click on the chip opens the thread at its last message; Escape or Ctrl+Enter
+  go back to the text; a message of one's own left empty (a reply just started, a new comment nothing
+  was written into) goes when the cursor leaves the thread. Resolving puts the cursor back after the
+  thread's marker (Ctrl+Z undoes it; the Comments panel can reopen it). A thread is a point in the text
+  (`%% @comment` has no range): commenting on selected text keeps the text and anchors the thread
+  right after it (`editor/commands.ts insertComment`).
 * **Figures keep up with their files**: the server watches the projects (chokidar) and tells the
   open editors over the project's event stream (`/api/projects/:p/events`, `{"kind":"graphics"}`)
   when a graphics file is rewritten — a plot script ran, an upload landed — and the image reloads
@@ -1003,17 +1010,22 @@ blend.
 * **Two interfaces: Classic and Modern** (`app/uimode.ts`, `modern.css`, `app/modernicons.ts`):
   Classic is LyX's (its toolbar rows, menus and status bar); **Modern** is OverLyX's own quiet look
   (Dieter Rams / Bauhaus): warm paper grey around the work, graphite ink, hairlines, a 4/8 px grid,
-  one signal colour (Braun orange) for what is on and the one thing to press, blue only for
-  selection and focus, the Bauhaus primaries as small marks for what a thing is (a document a red
-  square, slides a yellow triangle, a web page or whiteboard a blue circle); Jost for names and
-  titles, Inter for the rest (self-hosted, `src/fonts/ui/`), Lucide line icons (ISC); square keys
-  that look pressed when on, recessed fields. The document's name over the menus (`MenuBar`
-  `title`), one toolbar strip (toolbars.tsx `modern`: search the menus, undo / redo, paragraph
+  and the wordmark's three colours with one job each — red (LyX's X) for what is on and the one thing
+  to press (Share, Present, primary buttons, the current file), blue for selection, focus and links,
+  yellow for comments — the same three in the small marks of what a file is (a document a red square,
+  slides a yellow triangle, a whiteboard a blue circle); Jost for names and titles, Inter for the
+  rest (self-hosted, `src/fonts/ui/`), Lucide line icons (ISC); square keys that look pressed when on,
+  recessed fields. The header is one row: the wordmark (Bauhaus look, tilted letters), a **menu
+  button** in place of the row of menus (`MenuBar` `menu-main`: one panel, the menu names on the left,
+  the items of the one pointed at on the right; ↑↓ / → / ← / Esc; narrow windows drill down as in
+  Classic), then the document's name and project (`MenuBar` `title`); one toolbar strip (toolbars.tsx
+  `modern`: search the menus, undo / redo, paragraph
   style, font, size, B I U, colour, link, comment, picture, table, formulas, lists, indent, clear
   formatting, everything else of LyX's rows under ⋮), the contextual rows (formula, table, review,
   ink) as floating bars — interface only, every function the same. The
-  choice is offered in the welcome card of a new account (two sketches, `Tour.tsx UiChoice`), in
-  *View ▸ Interface* and *Settings ▸ Appearance*; kept in the account (`users.settings.interface`,
+  choice is offered in the welcome card of a new account (two sketches, `Tour.tsx UiChoice`) — and on
+  its own (`InterfacePrompt`) to a new account that arrives with an Overleaf import (it skips the
+  welcome card) — in *View ▸ Interface* and *Settings ▸ Appearance*; kept in the account (`users.settings.interface`,
   `POST /api/settings`) and in the browser (`ol.ui`, applied before the first paint). The Classic
   standard row's text menu follows Google Docs' order too: font (default / serif / sans serif /
   monospace — LyX's families — and *The document's fonts…*), size, bold, italic, underline, colour
@@ -1070,31 +1082,32 @@ blend.
   reads as it prints, the scaffolding appears where one works.
 * **Landing page / sign-in** (`app/Login.tsx` + `app/landing.css`): one Bauhaus look for every visitor,
   whichever interface (Classic / Modern) they use inside — warm paper, graphite ink, hairlines, square
-  corners, Jost and Inter, LyX's blue / yellow / red only as marks (a document ■, slides ▲, a drawing ●;
-  the rest of the sheet in outline □ △ ○). A hero: the Bauhaus wordmark, one sentence of what it is, a
-  short description, links to the three kinds of work; beside it the sign-in card with a small
-  composition of the three marks behind it — *Continue with Google* is the way in; the username +
-  password form (accounts created by an administrator, e2e) is folded away behind a small link while
-  Google sign-in is configured, and is the only form otherwise; *Get the VS Code extension* sits right
-  under the Google button with the same weight, linking to the newest GitHub release. The Google
-  buttons carry the location hash as `?next=`, so a deep link (`#/owner/project/doc.tex`, a share link)
-  is where the sign-in returns to; a share link that did not open, or a guest asked to sign in, shows a
-  note above the button (and *Continue as a guest for now* to go back). Then numbered sections under a
-  heavy rule (a CSS counter): *See it in action* — a demo gallery wheel with six clips
-  (`public/landing/*.{webm,mp4,jpg}`): real recordings of the editor (WYSIWYG math typing; a slide deck
-  edited, presented with the laser and a poster beside it; Inkscape's path tools — union, nodes, a
-  Bézier curve, a scribble; the raw .tex split; two authors live with a margin comment thread; the VS
-  Code extension), each in a light and a dark variant picked by the visitor's theme (the slides and
-  drawing clips show the Modern interface). One clip shows at a time: it plays once when the wheel is
-  scrolled into view, halts on its last frame for a beat, then the wheel slides to the next and wraps
-  around; bars under the wheel show the position and jump to a clip, and ↻ on the frame replays the
-  one showing. *What it does* — the feature sheet (`FEATURES`: documents, slides & posters, drawing,
-  together, files & tools, wherever you write; plain statements, no slogans). *Coming from Overleaf?*
-  (`OverleafStart.tsx`), and a footer with the GitHub links. Regenerate the recordings with
+  corners, Jost and Inter; the wordmark's blue / yellow / red only as thin rules (over the sign-in
+  card, over the four lines of what it does). A hero: the Bauhaus wordmark, one sentence ("LaTeX
+  documents, slides and posters, edited and rendered in the same place."), and the line
+  *OverLyX = Overleaf + LyX (+ Google Docs + Google Slides + Inkscape + VS Code + Markdown) − Complexity*
+  set as an `align*` block in Computer Modern (CMU Serif); beside it the sign-in card — *Continue with
+  Google* is the way in; the username + password form (accounts created by an administrator, e2e) is
+  folded away behind a small link while Google sign-in is configured, and is the only form otherwise;
+  *Get the VS Code extension* sits right under the Google button with the same weight, linking to the
+  newest GitHub release. The Google buttons carry the location hash as `?next=`, so a deep link
+  (`#/owner/project/doc.tex`, a share link) is where the sign-in returns to; a share link that did not
+  open, or a guest asked to sign in, shows a note above the button (and *Continue as a guest for now*
+  to go back). Then sections under a heavy rule: *See it in action* — a demo gallery wheel with six
+  clips (`public/landing/*.{webm,mp4,jpg}`), real recordings of the editor in the Modern interface
+  (WYSIWYG math typing; the raw .tex split; a slide deck edited — a formula in LyX's formula editor
+  included — presented with the laser, and a formula on the poster beside it; Inkscape's path tools on
+  a slide; two authors live with a margin comment thread; the VS Code extension, its webview in the
+  Classic look), each in a light and a dark variant picked by the visitor's theme. One clip shows at
+  a time: it plays once when the wheel is scrolled into view, halts on its last frame for a beat, then
+  the wheel slides to the next and wraps around; bars under the wheel show the position and jump to a
+  clip, and ↻ on the frame replays the one showing. *What it does* — four lines (`FEATURES`: WYSIWYG
+  LaTeX, slides and posters, together, your tools; plain statements, no slogans). *Coming from
+  Overleaf?* (`OverleafStart.tsx`), and a footer with the GitHub links. Regenerate the recordings with
   `scripts/recording/` (see the comments in `record-demos.spec.ts` — an isolated instance; `-g slides`
   records one clip, `RECORD_PROBE=<dir>` saves a screenshot per step — and `record-vscode.mjs` —
-  xvfb); `e2e/landing.spec.ts` covers autoplay, rotation, the dots, replay, the theme swap and the
-  wordmark.
+  xvfb); `e2e/landing.spec.ts` covers autoplay, rotation, the dots, replay, the theme swap, the
+  wordmark and the Modern menu button.
 * **The wordmark** (`app/Logo.tsx`, styles.css `.ol-wordmark`): motion lines, "Over", then LyX's tilted
   blue L / yellow Y / red X. Two looks of the same markup: the Classic interface's chrome italic, and the
   Bauhaus one (`bauhaus` — the landing page — and every wordmark in the Modern interface): flat ink
