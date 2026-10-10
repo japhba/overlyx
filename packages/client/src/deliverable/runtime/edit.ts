@@ -621,6 +621,8 @@ function cleanHtml(el: HTMLElement): string {
   // a trailing <br> a browser leaves in an emptied block
   let html = c.innerHTML.replace(/<br>(\s*)$/, '$1');
   if (/^\s*<br>\s*$/.test(html)) html = '';
+  // the no-break spaces contenteditable puts beside typed spaces (so they would not collapse) are spaces
+  html = html.replace(/&nbsp;(?= )|(?<= )&nbsp;/g, ' ').replace(/&nbsp;(?=<\/|$)/g, ' ');
   return html;
 }
 

@@ -136,6 +136,8 @@ export function slideBoxes(): SlideBox[] {
 /** the pages' size: the first slide's (CSS px), or the viewport's for a web page */
 export function pageSize(): { width: number; height: number } {
   const s = slides()[0];
+  // a slide sized by the window (100vw): no size of its own — the editor would widen its frame to it without end
+  if (s && Math.abs(s.offsetWidth - document.documentElement.clientWidth) <= 2) return { width: 1280, height: 720 };
   if (s) return { width: s.offsetWidth, height: s.offsetHeight };
   return { width: document.documentElement.clientWidth, height: document.documentElement.scrollHeight };
 }
