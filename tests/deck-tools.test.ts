@@ -99,6 +99,13 @@ describe('the reorder operation (Arrange ▸ order)', () => {
     expect(() => applyOp(T, { t: 'reorder', parent: [1, 0], order: [0, 0, 1] })).toThrow();
   });
 
+  it("an SVG's camel-case attribute is replaced, not written a second time (the parser keys locations in lower case)", () => {
+    const svg = '<body>\n<svg viewBox="0 0 10 10" preserveAspectRatio="none"><path d="M0 0"/></svg>\n</body>';
+    const out = applyOp(svg, { t: 'attr', path: [1, 0], name: 'viewBox', value: '-1 -1 12 12' });
+    expect(out).toBe('<body>\n<svg viewBox="-1 -1 12 12" preserveAspectRatio="none"><path d="M0 0"/></svg>\n</body>');
+    expect(applyOp(svg, { t: 'attr', path: [1, 0], name: 'preserveAspectRatio', value: null })).toBe('<body>\n<svg viewBox="0 0 10 10"><path d="M0 0"/></svg>\n</body>');
+  });
+
   it('is rebased like the other operations (by its parent)', () => {
     const newer = T.replace('<body>', '<body class="x">');
     expect(rebaseOp(T, newer, { t: 'reorder', parent: [1, 0], order: [2, 1, 0] })).toEqual({ t: 'reorder', parent: [1, 0], order: [2, 1, 0] });

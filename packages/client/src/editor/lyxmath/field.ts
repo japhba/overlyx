@@ -245,6 +245,16 @@ export class LyxMathField {
     this.focusInput();
     this.scheduleLayout();
   }
+  /** the cursor put where a point is (as a click there would), and the keyboard into the formula */
+  focusAt(clientX: number, clientY: number): void {
+    const old = this.cursor.clone();
+    const g = this.geometry();
+    const s = editXY(g, this.hull, clientX, clientY);
+    moveToClosestEdge(g, s, clientX);
+    this.cursor.slices = s; this.cursor.clearSelection(); this.cursor.resetAnchor(); this.cursor.xTarget = null;
+    this.focusInput();
+    this.moved(old);
+  }
   blur(): void { this.input.blur(); }
   /** the document's caret goes along: typing reaches a contenteditable only through it */
   private focusInput(): void {

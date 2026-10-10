@@ -434,7 +434,31 @@ blend.
     drawing in the page** (`sourceops.ts inlineSvgHtml`: scripts, handlers, foreign content, links
     out of the file and Inkscape's private markup removed, ids prefixed so drawings never share one,
     sized from its viewBox) whose shapes can be selected (Ctrl+click), moved (a `translate` in their
-    parent's coordinates) and painted; a huge one goes in as a picture. **Pictures**: double-click
+    parent's coordinates) and painted; a huge one goes in as a picture. **Inkscape's path tools**
+    (`runtime/pathedit.ts`, geometry in `runtime/pathops.ts`): double-click a path (or a drawing of
+    one shape; a polygon, rectangle or ellipse is made a path first) or press N — the **node editor**:
+    nodes (diamond = corner, square = smooth) and their handles dragged, a smooth node's handles kept on
+    a line, a rubber band or Shift selects several, double-click the outline adds a node there
+    (de Casteljau: the curve keeps its shape), double-click a node switches corner / smooth, Delete
+    removes, arrow keys nudge; its toolbar row adds / deletes nodes, makes them corner or smooth, the
+    segments between them straight or curved, breaks, joins, closes the path; Enter, Esc or a click
+    beside it ends it and fits the drawing's box (its viewBox) to the path again. *Path* (in the
+    selection's toolbar): **Union, Difference** (the bottom object minus the others), **Intersection,
+    Exclusion** (polygon-clipping on the outlines flattened to 0.1 px, Béziers fitted again —
+    Schneider's algorithm — straight edges and corners kept; boxes of HTML, rotated or not, count by
+    their outline; the result takes the bottom object's place and paint, inside the drawing when all
+    were parts of one), **Combine** (Ctrl+K) / **Break apart** (Ctrl+Shift+K), **Object to path**,
+    **Simplify** (Ctrl+L), **Reverse**. The **Bézier pen** (B, in *Lines*): a click is a corner, a
+    drag pulls a smooth node's handles, the first node again closes the path (filled), Enter or a
+    double-click ends an open one (a stroke), Backspace takes the last node back. **Formulas** are
+    edited with **LyX's formula editor** (`runtime/mathedit.ts` + `MathOverlay.tsx`): while a text
+    is retyped its `\(…\)`, `\[…\]` and `$$…$$` are typeset chips; a click on one, an arrow key into
+    it, a double-click on a formula object or Ctrl+M (Ctrl+Shift+M displayed, or ∑ while typing)
+    opens the document's `LyxMathField` exactly over it (its size at the zoom, its colour), with the
+    math row in the toolbar (fraction, scripts, roots, delimiters, matrices, the panels); the formula
+    goes back as you type and when left (arrows, Esc, a click elsewhere), keeping its source as
+    written unless it changed; the formula tool makes an empty one and opens it (left empty, it goes).
+    **Pictures**: double-click
     crops (PowerPoint's: the whole picture ghosted, drag it inside the fixed frame, its corners scale
     it, the black handles change the frame; written as `div.ol-crop` with the `img` inside —
     resizing the frame scales the picture with it), crop to an aspect or a circle at once, *Reset
@@ -458,8 +482,10 @@ blend.
     mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
     duplicate, move, delete), the **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own
     component: the tools always; then only what fits the selection — text, shape, line or picture
-    tools, Arrange and the rest — and with nothing selected the slide's background and the canvas;
-    one row that scrolls sideways when narrow, its palettes fixed to the window), speaker
+    tools, Arrange, Path and the rest — and with nothing selected the slide's background and the canvas;
+    when they do not fit beside the tools they float as a bar of their own over the canvas's top edge
+    (`dl-ctx-row` — the canvas never moves when something is selected), its palettes fixed to the
+    window), speaker
     notes (`<aside class="notes">` of the slide in view), the code (a textarea on the same `Y.Text`;
     *Edit code* jumps to an object's source), others' selections (awareness `htmlSel`), files of
     the page changed on disk (stylesheets and pictures fetched again, scripts reload; project
@@ -909,13 +935,17 @@ blend.
   entry): Enter and Alt+Enter do nothing there and the status bar says why — a paragraph break would
   end the LaTeX argument (`\caption{…}`) and break the build (`editor/commands.ts singleParagraphInset`).
 * **Two interfaces: Classic and Modern** (`app/uimode.ts`, `modern.css`, `app/modernicons.ts`):
-  Classic is LyX's (its toolbar rows, menus and status bar); **Modern** looks like Google Docs and
-  Slides — the document's name over the menus (`MenuBar` `title`), one rounded toolbar
-  (toolbars.tsx `modern`: search the menus, undo / redo, paragraph style, font, size, B I U, colour,
-  link, comment, picture, table, formulas, lists, indent, clear formatting, everything else of LyX's
-  rows under ⋮), the contextual rows (formula, table, review, ink) as floating bars, Material icons
-  (`@mdi/js`, Apache-2.0), the files panel like Drive's, the page as a sheet on a light canvas, round
-  icon buttons on the side rails, Material dialogs — interface only, every function the same. The
+  Classic is LyX's (its toolbar rows, menus and status bar); **Modern** is OverLyX's own quiet look
+  (Dieter Rams / Bauhaus): warm paper grey around the work, graphite ink, hairlines, a 4/8 px grid,
+  one signal colour (Braun orange) for what is on and the one thing to press, blue only for
+  selection and focus, the Bauhaus primaries as small marks for what a thing is (a document a red
+  square, slides a yellow triangle, a web page or whiteboard a blue circle); Jost for names and
+  titles, Inter for the rest (self-hosted, `src/fonts/ui/`), Lucide line icons (ISC); square keys
+  that look pressed when on, recessed fields. The document's name over the menus (`MenuBar`
+  `title`), one toolbar strip (toolbars.tsx `modern`: search the menus, undo / redo, paragraph
+  style, font, size, B I U, colour, link, comment, picture, table, formulas, lists, indent, clear
+  formatting, everything else of LyX's rows under ⋮), the contextual rows (formula, table, review,
+  ink) as floating bars — interface only, every function the same. The
   choice is offered in the welcome card of a new account (two sketches, `Tour.tsx UiChoice`), in
   *View ▸ Interface* and *Settings ▸ Appearance*; kept in the account (`users.settings.interface`,
   `POST /api/settings`) and in the browser (`ol.ui`, applied before the first paint). The Classic

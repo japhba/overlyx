@@ -1324,6 +1324,10 @@ class LayoutController {
     if (obj.node.type.name === 'ol_image') { this.view.dispatch(selectObjects(this.view.state.tr, [hit.pos]).setMeta(layoutKey, { sel: [hit.pos], tool: 'crop', target: obj.pos } as Meta)); return true; }
     if (obj.node.type.name === 'ol_raw') { editRawLatex(this.view, obj.pos); return true; }
     if (obj.node.type.name === 'ol_box') {
+      // a formula: LyX's cursor at the point, as a click into it in the text does
+      const math = target.closest('.lyx-math-inline, .lyx-math-display') as (HTMLElement & { pmViewDesc?: { spec?: { ensureField?(): { focusAt(x: number, y: number): void } } } }) | null;
+      const field = math?.pmViewDesc?.spec?.ensureField?.();
+      if (field) { field.focusAt(ev.clientX, ev.clientY); return true; }
       // the word under the pointer (ProseMirror's own double click did not see the press)
       const at = this.view.posAtCoords({ left: ev.clientX, top: ev.clientY });
       if (at && at.pos > obj.pos && at.pos < obj.pos + obj.node.nodeSize) {

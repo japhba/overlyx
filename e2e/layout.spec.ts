@@ -197,7 +197,16 @@ test('draw a text box, type with a formula, move and resize a shape, undo', asyn
   const box = /\\begin\{olbox\}\{x=([\d.]+)mm,y=([\d.]+)mm,w=([\d.]+)mm,h=[\d.]+mm,grow\}\nHello \$x\^\{2\}\$ layout\n\\end\{olbox\}/.exec(fileText('slides.tex'));
   expect(box?.slice(1).map(Number).every((v, i) => Math.abs(v - [70, 45, 70][i]) < 1.5 / pxPerMm)).toBe(true);
 
-  // Esc leaves the text for the box, Esc again deselects; a click selects the blue shape
+  // Esc leaves the text for the box, Esc again deselects; a double-click on the formula is in it at once (LyX's cursor)
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  const fm = (await page.locator('.lyx-editor .ol-box').nth(1).locator('.lyx-math-inline').boundingBox())!;
+  await page.mouse.dblclick(fm.x + 2, fm.y + fm.height * 0.6);
+  await expect(page.locator('.lyx-editor .ol-box .lm-field.focused')).toHaveCount(1);
+  await page.keyboard.type('y');
+  // (where in it depends on the point)
+  await expect.poll(() => fileText('slides.tex'), { timeout: 15000 }).toMatch(/Hello \$[^$]*y[^$]*\$ layout/);
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   const blue = page.locator('.lyx-editor .ol-shape').first();

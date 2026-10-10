@@ -1,7 +1,7 @@
 /**
- * The interface: Classic (LyX's toolbars, menus and status bar) or Modern (Google Docs / Slides-like:
- * a title with the menus under it, one rounded toolbar, tools that appear when what they work on is
- * selected, no status bar). Interface only — every function is the same in both. `data-ui` on <html>
+ * The interface: Classic (LyX's toolbars, menus and status bar) or Modern (OverLyX's own quiet look:
+ * a title with the menus under it, one toolbar strip, tools that appear when what they work on is
+ * selected). Interface only — every function is the same in both. `data-ui` on <html>
  * is all the stylesheet looks at (modern.css); toolbars.tsx builds the Modern row from the same
  * buttons. Kept in this browser (`ol.ui`, applied before the first paint — main.tsx imports this
  * module early) and in the account (users.settings.interface), so a new browser follows the choice;

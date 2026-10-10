@@ -75,7 +75,7 @@ export function penPathD(pts: [number, number][]): string {
  * Google Slides' shapes; other shapes are SVG polygons stretched to their box with an outline that
  * keeps its width; lines go from the drag's start to its end (`pts`), the pen's stroke through `pts`.
  */
-export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleHint = 1, pts?: [number, number][]): string {
+export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleHint = 1, pts?: [number, number][], path?: { d: string; closed: boolean }): string {
   const flow = kind === 'page';
   const minW = (tool === 'text' || tool === 'formula') ? 520 * scaleHint : 240 * scaleHint;
   const w = rect.w > 8 ? rect.w : minW;
@@ -85,7 +85,15 @@ export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleH
   const centred = 'display: flex; align-items: center; justify-content: center; text-align: center; color: #fff; ';
   switch (tool) {
     case 'text': return flow ? '<p>Text</p>' : `<p style="${pos(false)}margin: 0">Text</p>`;
-    case 'formula': return flow ? '<p>\\[ e^{i\\pi} + 1 = 0 \\]</p>' : `<div style="${pos(false)}">\\[ e^{i\\pi} + 1 = 0 \\]</div>`;
+    // empty: LyX's formula editor opens on it at once (left empty, the box goes again); a click
+    // centres it on the point, in a size for a slide
+    case 'formula': {
+      if (flow) return '<p>\\[ \\]</p>';
+      const fw = rect.w > 8 ? rect.w : 480 * scaleHint;
+      const x = rect.w > 8 ? rect.x : Math.max(0, Math.min(1280 * scaleHint - fw, rect.x - fw / 2));
+      const y = rect.h > 8 ? rect.y : Math.max(0, rect.y - 32 * scaleHint);
+      return `<div style="position: absolute; left: ${r(x)}px; top: ${r(y)}px; width: ${r(fw)}px; font-size: ${r(40 * scaleHint)}px; text-align: center">\\[ \\]</div>`;
+    }
     case 'rect': return `<div style="${pos(true)}${flowSize}${centred}background: ${SHAPE_FILL}; border-radius: 8px"></div>`;
     case 'roundrect': return `<div style="${pos(true)}${flowSize}${centred}background: ${SHAPE_FILL}; border-radius: 28px"></div>`;
     case 'ellipse': return `<div style="${pos(true)}${flowSize}${centred}background: #e8a33d; border-radius: 50%"></div>`;
@@ -98,6 +106,13 @@ export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleH
       const x0 = rect.x, y0 = rect.y, W = Math.max(1, r(rect.w)), H = Math.max(1, r(rect.h));
       const d = penPathD(pts.map(([x, y]) => [x - x0, y - y0]));
       return `<svg style="${flow ? '' : `position: absolute; left: ${r(x0)}px; top: ${r(y0)}px; `}width: ${W}px; height: ${H}px; overflow: visible" viewBox="0 0 ${W} ${H}"><path d="${d}" fill="none" stroke="#1d2433" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    }
+    case 'bezier': {
+      // the Bézier pen's path (in its box's px): an open one is a stroke, a closed one a filled shape
+      if (!path?.d) return '';
+      const W = Math.max(1, Math.ceil(rect.w)), H = Math.max(1, Math.ceil(rect.h));
+      const paint = path.closed ? `fill="${SHAPE_FILL}"` : 'fill="none" stroke="#1d2433" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"';
+      return `<svg style="${flow ? '' : `position: absolute; left: ${r(rect.x)}px; top: ${r(rect.y)}px; `}width: ${W}px; height: ${H}px; overflow: visible" viewBox="0 0 ${W} ${H}"><path d="${path.d.replace(/"/g, '')}" ${paint}/></svg>`;
     }
     case 'line': case 'arrow': {
       // from where the drag started to where it ended (a click: a horizontal one)

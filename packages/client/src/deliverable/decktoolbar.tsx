@@ -8,9 +8,9 @@
  * so it looks like the LyX rows in the Classic interface and like Google's in the Modern one.
  */
 import { useEffect, useState } from 'preact/hooks';
-import type { ToolButton } from '../app/Toolbar';
+import { mathPreview, type ToolButton, type Palette } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
-import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, CanvasView } from './protocol';
+import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, CanvasView, NodeCmd } from './protocol';
 import { ASPECTS } from './runtime/crop';
 import './deckicons';
 
@@ -51,6 +51,88 @@ export interface DeckCtx {
   slideBackground(c: string | null): void;
   canvas: { view: CanvasView; set(v: Partial<CanvasView>): void };
   newSlide(): void;
+  /** LyX's formula editor (MathOverlay): open on a formula of the text, a new formula at the caret, its commands, the math panels */
+  math: { editing: boolean; insert(display: boolean): void; exec(cmd: string, ...args: unknown[]): void; panels: { id: string; title: string; palette: Palette }[] };
+  /** the node editor (a path's points): on, its selected nodes, its commands */
+  nodes: { editing: boolean; selected: number; total: number; cmd(c: NodeCmd): void };
+}
+
+/** the node editor's row: Inkscape's node toolbar */
+function nodeGroups(c: DeckCtx): ToolButton[][] {
+  const n = c.nodes, none = n.selected === 0, x = n.cmd;
+  return [
+    [
+      { id: 'dk-node-add', title: 'Add a node between the selected ones (or double-click the outline)', icon: 'dk-node-add', disabled: none, action: () => x('insert') },
+      { id: 'dk-node-del', title: 'Delete the selected nodes (Delete)', icon: 'dk-node-del', disabled: none, action: () => x('delete') },
+    ],
+    [
+      { id: 'dk-node-corner', title: 'Corner: the handles move on their own (double-click a node to switch)', icon: 'dk-node-corner', disabled: none, action: () => x('corner') },
+      { id: 'dk-node-smooth', title: 'Smooth: the handles stay on one line', icon: 'dk-node-smooth', disabled: none, action: () => x('smooth') },
+      { id: 'dk-seg-line', title: 'Make the segments between the selected nodes straight', icon: 'dk-seg-line', disabled: n.selected < 2, action: () => x('straight') },
+      { id: 'dk-seg-curve', title: 'Make the segments between the selected nodes curves', icon: 'dk-seg-curve', disabled: n.selected < 2, action: () => x('curve') },
+    ],
+    [
+      { id: 'dk-node-break', title: 'Break the path at the selected nodes', icon: 'dk-node-break', disabled: none, action: () => x('break') },
+      { id: 'dk-node-join', title: 'Join two selected end nodes', icon: 'dk-node-join', disabled: n.selected !== 2, action: () => x('join') },
+      { id: 'dk-path-close', title: 'Close or open the path', icon: 'dk-path-close', action: () => x('close') },
+    ],
+    [
+      { id: 'dk-node-all', title: 'Select all nodes (Ctrl+A)', icon: `${n.selected}/${n.total}`, action: () => x('all') },
+      { id: 'dk-node-done', title: 'Done (Enter or Esc, or click beside the path)', icon: 'Done', active: true, action: () => x('done') },
+    ],
+  ];
+}
+
+/** Inkscape's Path menu for the selection */
+function pathItems(c: DeckCtx, sel: SelItem[]) {
+  const many = sel.length >= 2;
+  const items = [
+    ...(many ? [
+      { label: 'Union', html: ICON('dk-union'), title: 'One shape of all of them', action: () => c.arrange('union') },
+      { label: 'Difference', html: ICON('dk-difference'), title: 'The bottom shape minus the ones above it', action: () => c.arrange('difference') },
+      { label: 'Intersection', html: ICON('dk-intersection'), title: 'Only where they all overlap', action: () => c.arrange('intersection') },
+      { label: 'Exclusion', html: ICON('dk-exclusion'), title: 'Where an odd number of them overlap', action: () => c.arrange('exclusion') },
+      { label: 'Combine (Ctrl+K)', html: ICON('dk-combine'), title: 'One path made of their outlines', action: () => c.arrange('combine') },
+    ] : []),
+    { label: 'Break apart (Ctrl+Shift+K)', html: ICON('dk-breakapart'), title: 'A path of several pieces: one object per piece', action: () => c.arrange('break-apart') },
+    { label: 'Object to path', html: ICON('dk-topath'), title: 'A rectangle, an ellipse, a polygon… as a path whose points can be edited', action: () => c.arrange('to-path') },
+    { label: 'Edit points (N)', html: ICON('dk-nodes'), title: 'Drag the nodes and handles of the path (or double-click it)', action: () => c.arrange('edit-nodes') },
+    { label: 'Simplify (Ctrl+L)', html: ICON('dk-simplify'), title: 'Fewer nodes, smoother curves', action: () => c.arrange('simplify') },
+    { label: 'Reverse direction', html: ICON('dk-reverse'), title: 'The path runs the other way (arrowheads swap ends)', action: () => c.arrange('reverse') },
+  ];
+  return items;
+}
+
+const MATH_PANEL_FACE: Record<string, string> = {
+  latex_greek: '\\alpha', latex_brel: '\\leq', latex_bop: '\\otimes', latex_arrow: '\\rightarrow', latex_misc: '\\infty', latex_varsz: '\\sum',
+  latex_dots: '\\cdots', latex_deco: '\\hat{a}', functions: '\\sin', font: '\\mathbb{R}', latex_delim: '\\lfloor\\rfloor', latex_ams_rel: '\\leqslant',
+  latex_ams_nrel: '\\nleq', latex_ams_ops: '\\boxtimes', latex_ams_arrows: '\\rightrightarrows', latex_ams_misc: '\\square', 'frac-square': '\\frac{a}{b}', 'sqrt-square': '\\sqrt{x}', space: '\\square\\,\\square', style: '\\displaystyle',
+};
+
+/** the math row while a formula is open: LyX's math toolbar, the commonest first, then its panels */
+function mathGroups(c: DeckCtx): ToolButton[][] {
+  const x = c.math.exec;
+  const face = (tex: string) => mathPreview(tex) ?? undefined;
+  return [
+    [
+      { id: 'm-frac', title: 'Fraction (Alt+M F)', icon: 'mfrac', action: () => x('insert', '\\frac{#0}{}') },
+      { id: 'm-sup', title: 'Superscript (^)', icon: 'sup', action: () => x('moveToSuperscript') },
+      { id: 'm-sub', title: 'Subscript (_)', icon: 'sub', action: () => x('moveToSubscript') },
+      { id: 'm-sqrt', title: 'Square root (Alt+M S)', icon: 'msqrt', action: () => x('insert', '\\sqrt{#0}') },
+      { id: 'm-sum', title: 'Sum (Alt+M U)', icon: 'msum', action: () => x('insert', '\\sum') },
+      { id: 'm-int', title: 'Integral (Alt+M I)', icon: 'mint', action: () => x('insert', '\\int') },
+    ],
+    [
+      { id: 'm-paren', title: '( ) that grow with their content (Alt+M ()', icon: '( )', html: face('\\left(\\square\\right)'), action: () => x('delim', '(', ')') },
+      { id: 'm-bracket', title: '[ ] (Alt+M [)', icon: '[ ]', html: face('\\left[\\square\\right]'), action: () => x('delim', '[', ']') },
+      { id: 'm-brace', title: '{ } (Alt+M {)', icon: '{ }', html: face('\\left\\{\\square\\right\\}'), action: () => x('delim', '\\{', '\\}') },
+      { id: 'm-abs', title: '| | (Alt+M |)', icon: '| |', html: face('\\left|\\square\\right|'), action: () => x('delim', '|', '|') },
+      { id: 'm-matrix', title: 'Matrix (2 × 2)', icon: 'matrix', html: face('\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}'), action: () => x('insert', '\\begin{pmatrix}#0 & \\\\ & \\end{pmatrix}') },
+      { id: 'm-cases', title: 'Cases (Alt+M C)', icon: 'cases', html: face('\\cases'), action: () => x('insert', '\\cases') },
+      { id: 'm-text', title: 'Text in the formula (Ctrl+M)', icon: 'Tx', action: () => x('text') },
+    ],
+    c.math.panels.filter(p => MATH_PANEL_FACE[p.id]).map(p => ({ id: 'mp-' + p.id, title: p.title, icon: p.title, html: face(MATH_PANEL_FACE[p.id]), palette: p.palette })),
+  ];
 }
 
 /** fonts offered: the web fonts load from Google Fonts (a <link> is added to the page when one is first used) */
@@ -77,7 +159,7 @@ const SHAPES: { tool: Tool; label: string }[] = [
   { tool: 'rect', label: 'Rectangle' }, { tool: 'roundrect', label: 'Rounded rectangle' }, { tool: 'ellipse', label: 'Ellipse' },
   { tool: 'triangle', label: 'Triangle' }, { tool: 'diamond', label: 'Diamond' }, { tool: 'star', label: 'Star' }, { tool: 'hexagon', label: 'Hexagon' },
 ];
-const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line' }, { tool: 'arrow', label: 'Arrow' }, { tool: 'pen', label: 'Scribble (pen)' }];
+const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line' }, { tool: 'arrow', label: 'Arrow' }, { tool: 'pen', label: 'Scribble (pen)' }, { tool: 'bezier', label: 'Path: click for corners, drag for curves (B)' }];
 
 const firstFamily = (css: string) => css.split(',')[0].trim().replace(/^["']|["']$/g, '');
 
@@ -127,14 +209,17 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-text', title: 'Text box (T) — click or drag on the slide', icon: 'dk-text', action: () => c.setTool('text'), active: c.tool === 'text', disabled: ro },
       { id: 'dk-shapes', title: 'Shapes (R rectangle, O ellipse)', icon: shapeTool ? `dk-${shapeTool.tool}` : 'dk-shapes', active: !!shapeTool, disabled: ro,
         palette: { title: 'Shapes', cols: 4, items: SHAPES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
-      { id: 'dk-lines', title: 'Lines (L line, A arrow, P pen)', icon: lineTool ? `dk-${lineTool.tool}` : 'dk-line', active: !!lineTool, disabled: ro,
-        palette: { title: 'Lines', cols: 3, items: LINES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
+      { id: 'dk-lines', title: 'Lines (L line, A arrow, P pen, B Bézier path)', icon: lineTool ? `dk-${lineTool.tool}` : 'dk-line', active: !!lineTool, disabled: ro,
+        palette: { title: 'Lines', cols: 4, items: LINES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
       { id: 'dk-image', title: 'Picture… (or drop a picture or an SVG on the slide)', icon: 'dk-image', action: c.insertImage, disabled: ro },
-      { id: 'dk-formula', title: 'Formula (TeX)', icon: 'dk-formula', action: () => c.setTool('formula'), active: c.tool === 'formula', disabled: ro },
+      { id: 'dk-formula', title: c.editingText ? 'Formula here, in the text (Ctrl+M; Ctrl+Shift+M displayed)' : 'Formula — click or drag on the slide; while typing a text, Ctrl+M puts one in it', icon: 'dk-formula',
+        action: () => { if (c.editingText) c.math.insert(false); else c.setTool('formula'); }, active: c.tool === 'formula' || c.math.editing, disabled: ro },
     ],
   ];
 
   if (ro) return { tools, context: [] };
+  if (c.math.editing) return { tools, context: mathGroups(c) };
+  if (c.nodes.editing) return { tools, context: nodeGroups(c) };
   const context: ToolButton[][] = [];
   const textish = c.editingText || sel.some(s => s.canText || s.text);
   const shapes = sel.filter(s => s.kind === 'shape' || s.kind === 'svg' || s.kind === 'svgpart' || (s.kind === 'text' && s.style.fill));
@@ -265,6 +350,9 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           ...(sel.length > 1 ? [{ label: 'Group (Ctrl+G)', html: ICON('dk-group'), action: () => c.arrange('group') }] : []),
           ...(isGroup ? [{ label: 'Ungroup (Ctrl+Shift+G)', html: ICON('dk-group'), action: () => c.arrange('ungroup') }] : []),
         ] } },
+      ...(sel.some(s => s.kind === 'shape' || s.kind === 'svg' || s.kind === 'svgpart' || s.kind === 'line') ? [{
+        id: 'dk-path', title: 'Path: union, difference, intersection, combine, object to path, edit points…', icon: 'dk-path',
+        palette: { title: 'Path', list: true, cols: 1, items: pathItems(c, sel) } } as ToolButton] : []),
       { id: 'dk-opacity', title: 'Opacity', icon: 'dk-opacity',
         palette: { title: 'Opacity', render: () => <Slider label="Opacity" value={Math.round((st ? Number(st.opacity) : 1) * 100)} onSet={v => c.paint({ opacity: v / 100 })} /> } },
       { id: 'dk-shadow', title: 'Shadow', icon: 'dk-shadow', active: !!st?.shadow, action: () => c.paint({ shadow: !st?.shadow }) },

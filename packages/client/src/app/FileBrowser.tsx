@@ -365,7 +365,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
         {outlines && (outlined
           ? <span class="twisty" role="button" title={open ? 'Hide the outline' : 'Show the outline'} onClick={e => { e.preventDefault(); e.stopPropagation(); outlines.toggle(id); }}>{open ? '▾' : '▸'}</span>
           : <span class="twisty" />)}
-        <span class="ficon">{f.kind === 'html' && f.deliverable ? DELIVERABLE_ICON[f.deliverable] : ICON[f.kind] ?? '·'}</span><span class="fname">{node.name}</span>
+        <span class="ficon" data-kind={f.kind === 'html' && f.deliverable ? f.deliverable : f.kind}>{f.kind === 'html' && f.deliverable ? DELIVERABLE_ICON[f.deliverable] : ICON[f.kind] ?? '·'}</span><span class="fname">{node.name}</span>
         {isDoc && offlineDocs.has(id) && <span class="offline-mark" title="A copy of this document is stored in this browser: it can be opened and edited offline">⬇</span>}
       </a>
     );

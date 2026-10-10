@@ -3,7 +3,7 @@
  * contextual Math / Table / Review rows. Buttons are plain, toggles (`active`) or palettes
  * (a popup grid of symbols rendered by MathJax, LyX's "IconPalette" / "PopupMenu").
  */
-import { MODERN_ICONS } from './modernicons';
+import { MODERN_ICONS, iconSvg } from './modernicons';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { createInsetMath, nargs } from '@overlyx/core';
@@ -16,10 +16,10 @@ import { splitTitle, tookActionWithout } from '../shortcuttips';
 
 /** The face of a toolbar button: LyX's own icon file when there is one, else a formula preview, a hand-drawn SVG, or plain text. */
 function btnIcon(b: ToolButton) {
-  // the Modern interface (uimode.ts): Material icons where it has one for the button
+  // the Modern interface (uimode.ts): its line icons where it has one for the button
   if (document.documentElement.dataset.ui === 'modern' && !b.html) {
     const p = MODERN_ICONS[b.id] ?? MODERN_ICONS[b.icon];
-    if (p) return <svg class="tb-mdi" viewBox="0 0 24 24" aria-hidden="true"><path d={p} /></svg>;
+    if (p) return <span class="tb-mi" dangerouslySetInnerHTML={{ __html: iconSvg(p) }} />;
   }
   if (LYX_ICONS[b.icon]) return <img class="tb-img" src={LYX_ICONS[b.icon]} alt="" draggable={false} />;
   if (b.html) return <span dangerouslySetInnerHTML={{ __html: b.html }} />;

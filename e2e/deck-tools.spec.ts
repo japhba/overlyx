@@ -233,3 +233,110 @@ test('a finger moves a text box on a touch screen', async ({ browser }) => {
   expect(real(errors)).toEqual([]);
   await ctx.close();
 });
+
+const MATHDECK = DECK.replace('<section class="slide">\n  <h2', `<section class="slide">
+  <div id="f" style="position: absolute; left: 100px; top: 250px; width: 500px; font-size: 40px; text-align: center">\\[ x^{2} \\]</div>
+  <p id="t" style="position: absolute; left: 100px; top: 500px; width: 900px; margin: 0; font-size: 32px">Energy</p>
+  <h2`);
+
+test("formulas on a slide are edited with LyX's formula editor", async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await setup(page, MATHDECK);
+  await page.locator('[data-tb="dk-select"]').click();
+  // (the second slide)
+  await slides(page).nth(1).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+  // a double-click on a formula: LyX's math field over it, the math row in the toolbar
+  const f = await at(page, 338, 285, 1);
+  await page.mouse.dblclick(f.x, f.y);
+  await expect(page.locator('[data-dl-mathedit] .lm-field')).toBeVisible();
+  await expect(page.locator('[data-tb="m-frac"]')).toBeVisible();
+  // (where the cursor is depends on the point: at the end, End would leave the formula, as in LyX)
+  await page.keyboard.type('y');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-dl-mathedit]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/>\\\[ [^<]*y[^<]* \\\]<\/div>/);
+
+  // Ctrl+M while typing a text: an inline formula, the arrow keys out of it and back into it
+  const t = await at(page, 160, 520, 1);
+  await page.mouse.dblclick(t.x, t.y);
+  await page.keyboard.press('End');
+  await page.keyboard.type(' ');
+  await page.keyboard.press('Control+m');
+  await expect(page.locator('[data-dl-mathedit] .lm-field')).toBeVisible();
+  await page.keyboard.type('E=mc^2');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('[data-dl-mathedit]')).toHaveCount(0);
+  await page.keyboard.type(' holds');
+  await page.keyboard.press('Escape');
+  await expect.poll(fileText, { timeout: 15000 }).toContain('Energy \\(E=mc^{2}\\) holds</p>');
+
+  // the formula tool: a new formula, typed at once; left empty, it goes again
+  await page.locator('[data-tb="dk-formula"]').click();
+  const n = await at(page, 900, 300, 1);
+  await page.mouse.click(n.x, n.y);
+  await expect(page.locator('[data-dl-mathedit] .lm-field')).toBeVisible();
+  await page.keyboard.type('a^2');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await expect.poll(fileText, { timeout: 15000 }).toContain('\\[ a^{2} \\]');
+  const before = (fileText().match(/<div/g) ?? []).length;
+  await page.locator('[data-tb="dk-formula"]').click();
+  const e = await at(page, 900, 150, 1);
+  await page.mouse.click(e.x, e.y);
+  await expect(page.locator('[data-dl-mathedit] .lm-field')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect.poll(() => (fileText().match(/<div/g) ?? []).length, { timeout: 15000 }).toBe(before);
+  expect(fileText()).not.toContain('\\[ \\]');
+  expect(real(errors)).toEqual([]);
+});
+
+const PATHDECK = DECK.replace('<div id="b" style="position: absolute; left: 300px; top: 400px;', '<div id="b" style="position: absolute; left: 150px; top: 450px;');
+
+test('Inkscape: union, editing the points of a path, the Bézier pen', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await setup(page, PATHDECK);
+  await page.locator('[data-tb="dk-select"]').click();
+
+  // two overlapping squares: Path ▸ Union — one path where the bottom one was, in its colour
+  const a = await at(page, 120, 420), b = await at(page, 230, 530);
+  await page.mouse.click(a.x, a.y);
+  await page.keyboard.down('Shift');
+  await page.mouse.click(b.x, b.y);
+  await page.keyboard.up('Shift');
+  await page.locator('[data-tb="dk-path"]').click();
+  await page.locator('[data-palette="dk-path"] .tb-pal-item', { hasText: 'Union' }).click();
+  await expect.poll(fileText, { timeout: 15000 }).not.toContain('id="b"');
+  expect(fileText()).not.toContain('id="a"');
+  expect(fileText()).toMatch(/<svg style="position: absolute; left: 100px; top: 400px; width: 151px; height: 151px; overflow: visible" viewBox="0 0 151 151"><path d="M[^"]+Z" fill="rgb\(255, 0, 0\)" fill-rule="evenodd"\/><\/svg>/);
+  // its eight corners, straight edges
+  const d = /viewBox="0 0 151 151"><path d="([^"]+)"/.exec(fileText())![1];
+  expect(d).not.toContain('C');
+  for (const pt of ['0 0', '100 0', '100 50', '150 50', '150 150', '50 150', '50 100', '0 100']) expect(d).toMatch(new RegExp(`[ML]${pt}(?=[LZ])`));
+
+  // double-click: its nodes; the top left one dragged up and left, then Esc — the drawing's box follows
+  const u = await at(page, 130, 430);
+  await page.mouse.dblclick(u.x, u.y);
+  await expect(page.locator('[data-tb="dk-node-done"]')).toBeVisible();
+  const n0 = await at(page, 100, 400), n1 = await at(page, 60, 360);
+  await page.mouse.move(n0.x, n0.y); await page.mouse.down(); await page.mouse.move(n1.x, n1.y, { steps: 6 }); await page.mouse.up();
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/[ML]-40 -40[LZ]/);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-tb="dk-node-done"]')).toHaveCount(0);
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/left: 59\.5px; top: 359\.5px; width: 191px; height: 191px; overflow: visible" viewBox="-40\.5 -40\.5 191 191"/);
+
+  // the Bézier pen (B): two clicks and a drag, Enter — an open path with a curve in it
+  await page.locator('[data-tb="dk-lines"]').click();
+  await page.locator('[data-palette="dk-lines"] .tb-pal-item[title^="Path"]').click();
+  const p0 = await at(page, 600, 300), p1 = await at(page, 800, 200), p2 = await at(page, 900, 350);
+  await page.mouse.click(p0.x, p0.y);
+  await page.mouse.move(p1.x, p1.y); await page.mouse.down(); await page.mouse.move(p1.x + 60, p1.y, { steps: 5 }); await page.mouse.up();
+  await page.mouse.click(p2.x, p2.y);
+  await page.keyboard.press('Enter');
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/<path d="M0 [\d.]+C[^"]*" fill="none" stroke="#1d2433"/);
+  expect(real(errors)).toEqual([]);
+});

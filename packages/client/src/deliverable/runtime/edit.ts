@@ -25,6 +25,8 @@ import { MODE, post, state, srcOf, pathOf, liveAt, sourced, slides, slideOf, doc
 import { guard } from './reconcile';
 import { refreshView } from './view';
 import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, redrawCrop, type CropContext } from './crop';
+import { chipify, unchip, openChip, setChip, doneChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
+import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing } from './pathedit';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -70,6 +72,7 @@ export function startEditing(): void {
   </style><div class="layer"></div>`;
   layer = root.querySelector('.layer') as HTMLElement;
   document.documentElement.appendChild(host);
+  initPaths({ root, scale: () => scale });
   const css = document.createElement('style');
   css.setAttribute('data-ol-runtime', '');
   css.textContent = `[data-ol-editing] { outline: none !important; cursor: text !important; caret-color: auto; }
@@ -77,7 +80,8 @@ export function startEditing(): void {
     html.ol-edit [data-ol-editing], html.ol-edit [data-ol-editing] * { -webkit-user-select: text; user-select: text; }
     html.ol-tool-draw, html.ol-tool-draw * { cursor: crosshair !important; }
     html.ol-dragging, html.ol-dragging * { cursor: grabbing !important; user-select: none !important; }
-    html.ol-edit a { cursor: default; }`;
+    html.ol-edit a { cursor: default; }
+    ${CHIP_CSS}`;
   document.head.appendChild(css);
   document.documentElement.classList.add('ol-edit');
 
@@ -100,9 +104,9 @@ export function startEditing(): void {
   addEventListener('gesturestart', onGesture as EventListener, { capture: true, passive: false } as AddEventListenerOptions);
   addEventListener('gesturechange', onGesture as EventListener, { capture: true, passive: false } as AddEventListenerOptions);
   addEventListener('submit', e => e.preventDefault(), true);
-  addEventListener('scroll', () => { draw(); post({ ol: 'scroll', y: scrollY }); visibleSlide(); }, { passive: true });
-  addEventListener('resize', () => { draw(); sendLayout(); refreshView(); });
-  new ResizeObserver(() => { draw(); refreshView(); }).observe(document.documentElement);
+  addEventListener('scroll', () => { draw(); post({ ol: 'scroll', y: scrollY }); visibleSlide(); trackChip(); }, { passive: true });
+  addEventListener('resize', () => { draw(); sendLayout(); refreshView(); trackChip(); });
+  new ResizeObserver(() => { draw(); refreshView(); trackChip(); }).observe(document.documentElement);
 }
 
 /* ------------------------------------------------------------------ messages from the editor */
@@ -113,11 +117,13 @@ export function setScale(s: number, anchor?: { docY: number; screenY: number }):
   if (anchor) scrollTo({ top: Math.max(0, anchor.docY - anchor.screenY / scale) });
   draw();
   redrawCrop();
+  redrawNodes();
 }
 export function setTool(t: Tool): void {
   tool = t;
   document.documentElement.classList.toggle('ol-tool-draw', t !== 'select');
-  if (t !== 'select') { stopText(); if (isCropping()) endCrop(true); }
+  if (t !== 'bezier') penCancel();
+  if (t !== 'select') { stopText(); if (isCropping()) endCrop(true); endNodes(); }
 }
 
 /* ------------------------------------------------------------------ crop (runtime/crop.ts: modal while it lasts) */
@@ -164,16 +170,37 @@ export function afterSource(): void {
   if (editing && !editing.isConnected) { editing = null; post({ ol: 'editing', path: null }); }
   report();
   draw();
+  nodesAfterSource();
 }
 
-export function editTextAt(path: Path, selectAll = false): void {
+export function editTextAt(path: Path, selectAll = false, math = false): void {
   const el = liveAt(path);
   if (!el) return;
   selected = [el];
   report();
-  if (canType(el)) beginText(el as HTMLElement, null, selectAll);
+  if (canType(el)) beginText(el as HTMLElement, null, selectAll && !math, math);
   draw();
 }
+
+/* ------------------------------------------------------------------ formulas (runtime/mathedit.ts) */
+
+export function mathSet(id: number, tex: string): void { void setChip(id, tex).then(() => { if (editing) scheduleCommit(); }); }
+export function mathDone(id: number, tex: string, dir: 'forward' | 'backward' | null): void {
+  const el = editing;
+  void doneChip(id, tex, dir, el).then(kept => {
+    if (!el || editing !== el) return;
+    // the formula emptied and nothing else left in its box: the box goes too (as an empty formula in LyX)
+    if (!kept && !cleanHtml(el).replace(/<[^>]*>|&nbsp;|\s/g, '')) {
+      const path = pathOf(el);
+      stopText();
+      if (path) { selected = []; report(); commit([{ t: 'remove', paths: [path] }]); }
+      return;
+    }
+    scheduleCommit();
+    draw();
+  });
+}
+export function insertMath(display: boolean): void { if (editing) insertChip(editing, display); }
 
 /** a formatting command on the text being retyped (bold, foreColor, fontName …; fontSizePx: a span with that size) */
 export function exec(command: string, value?: string): void {
@@ -444,7 +471,7 @@ function lineEnds(line: SVGLineElement): [[number, number], [number, number]] | 
 
 export function draw(): void {
   if (!layer) return;
-  if (isCropping()) { layer.innerHTML = ''; return; }
+  if (isCropping() || isNodeEditing()) { layer.innerHTML = ''; return; }
   const h = 8 / scale;
   layer.style.setProperty('--h', `${h}px`);
   layer.style.setProperty('--s', String(1 / scale));
@@ -552,7 +579,8 @@ function swallow(e: MouseEvent): void {
 }
 
 function onHover(e: PointerEvent): void {
-  if (isCropping()) return;
+  if (isCropping() || isNodeEditing()) return;
+  if (isPenDrawing() && e.pointerType !== 'touch') { penMove(e); return; }
   if (e.pointerType === 'touch') { onTouchMove(e); return; }
   if (drag || editing) return;
   const t = e.target as Element;
@@ -598,7 +626,7 @@ function grab(e: PointerEvent): void {
 }
 
 function onPointerDown(e: PointerEvent): void {
-  if (isCropping()) return;
+  if (isCropping() || isNodeEditing()) return;
   if (e.pointerType === 'touch') {
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (touches.size >= 2) { e.preventDefault(); e.stopPropagation(); startPinch(); return; }
@@ -607,11 +635,16 @@ function onPointerDown(e: PointerEvent): void {
   const t = e.target as Element;
   if (t === host) return;   // a handle (in the shadow root) handles itself
   if (editing) {
+    const chipEl = t.closest?.('.ol-mathchip') as HTMLElement | null;
+    // a formula of the text: LyX's formula editor, the cursor where it was clicked
+    if (chipEl && editing.contains(chipEl)) { e.preventDefault(); e.stopPropagation(); openChip(chipEl, { x: e.clientX, y: e.clientY }); return; }
     if (editing.contains(t)) return;   // a click inside the text being retyped: the caret's
     stopText();
   }
   e.preventDefault();
   e.stopPropagation();
+  // the Bézier pen: a node per press (pathedit.ts)
+  if (tool === 'bezier') { penDown(e, el => slideOf(el)); addEventListener('pointerup', penUpOnce, true); return; }
   grab(e);
   const x = e.pageX, y = e.pageY;
   const base = { x0: x, y0: y, els: [], moved: false, pointerId: e.pointerId, pointerType: e.pointerType, last: { x: e.clientX, y: e.clientY } };
@@ -1201,10 +1234,13 @@ function guessType(name: string): string {
 
 /* ------------------------------------------------------------------ text */
 
+function penUpOnce(): void { removeEventListener('pointerup', penUpOnce, true); penUp(); }
+
 function onDblClick(e: MouseEvent): void {
-  if (isCropping()) return;
+  if (isCropping() || isNodeEditing()) return;
   e.preventDefault();
   e.stopPropagation();
+  if (tool === 'bezier') { penDouble(); return; }
   if (tool !== 'select') return;
   const t = e.target as Element;
   if (editing && editing.contains(t)) return;
@@ -1212,6 +1248,9 @@ function onDblClick(e: MouseEvent): void {
   // a picture: PowerPoint's crop (drag the picture inside its frame)
   const pic = cur && cur.contains(t) ? cur : objectFor(t, false);
   if (pic && cropTarget(pic) && !isLocked(pic)) { selected = [pic]; report(); if (startCrop(pic, cropCtx())) post({ ol: 'cropping', path: pathOf(pic) }); draw(); return; }
+  // a path (or a drawing that is one shape): Inkscape's node editor
+  const shape = cur ? nodesTargetOf(t, cur) : null;
+  if (shape && !isLocked(cur!)) { startNodesOrConvert(shape); return; }
   // the selected object retyped, or its text-bearing part under the pointer
   let target: Element | null = null;
   if (cur && cur.contains(t)) {
@@ -1231,20 +1270,39 @@ function onDblClick(e: MouseEvent): void {
   draw();
 }
 
-function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectAll = false): void {
+function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectAll = false, openMath = false): void {
   const src = srcOf.get(el);
   if (!src) return;
   stopText();
   editing = el;
   guard.editing = el;
-  // the text as written: TeX instead of typeset math
+  // the text as written, its formulas chips (typeset, edited with LyX's formula editor: mathedit.ts)
   el.innerHTML = src.innerHTML;
   el.classList.add('ol-notex');
+  const chipping = chipify(el);
   el.setAttribute('data-ol-editing', '');
   el.contentEditable = 'true';
-  editStartHtml = el.innerHTML;
+  editStartHtml = cleanHtml(el);
   try { document.execCommand('defaultParagraphSeparator', false, 'p'); document.execCommand('styleWithCSS', false, 'true'); } catch { /* old browsers */ }
   el.focus({ preventScroll: true });
+  if (chipping.chips.length) {
+    // the caret once the formulas have their size; a click on a formula (or a new formula object) opens it
+    placeCaret(el, null, selectAll);
+    void chipping.ready.then(() => {
+      if (editing !== el) return;
+      const hit = at ? chipping.chips.find(c => { const r = c.getBoundingClientRect(); return at.x >= r.left && at.x <= r.right && at.y >= r.top && at.y <= r.bottom; }) : undefined;
+      if (hit) openChip(hit, at);
+      else if (openMath) openChip(chipping.chips[0], null);
+      else placeCaret(el, at, selectAll);
+    });
+  } else placeCaret(el, at, selectAll);
+  el.addEventListener('input', scheduleCommit);
+  el.addEventListener('paste', pastePlain);
+  post({ ol: 'editing', path: pathOf(el) });
+  draw();
+}
+
+function placeCaret(el: HTMLElement, at: { x: number; y: number } | null, selectAll: boolean): void {
   const sel = getSelection();
   if (sel) {
     let range: Range | null = null;
@@ -1257,10 +1315,6 @@ function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectA
     sel.removeAllRanges();
     sel.addRange(range);
   }
-  el.addEventListener('input', scheduleCommit);
-  el.addEventListener('paste', pastePlain);
-  post({ ol: 'editing', path: pathOf(el) });
-  draw();
 }
 
 function pastePlain(e: ClipboardEvent): void {
@@ -1280,11 +1334,14 @@ function scheduleCommit(): void {
 function cleanHtml(el: HTMLElement): string {
   const c = el.cloneNode(true) as HTMLElement;
   for (const x of Array.from(c.querySelectorAll('[data-ol-runtime]'))) x.remove();
+  unchip(c);
   // a trailing <br> a browser leaves in an emptied block
   let html = c.innerHTML.replace(/<br>(\s*)$/, '$1');
   if (/^\s*<br>\s*$/.test(html)) html = '';
   // the no-break spaces contenteditable puts beside typed spaces (so they would not collapse) are spaces
   html = html.replace(/&nbsp;(?= )|(?<= )&nbsp;/g, ' ').replace(/&nbsp;(?=<\/|$)/g, ' ');
+  // and the ones beside a formula (typed next to its uneditable chip)
+  html = html.replace(/(?<=\\\)|\\\]|\$\$)&nbsp;|&nbsp;(?=\\\(|\\\[|\$\$)/g, ' ');
   return html;
 }
 
@@ -1306,6 +1363,7 @@ function commitText(): void {
 /** end retyping: what was typed sent, the element shown as the text has it (math typeset) */
 export function stopText(): void {
   if (!editing) return;
+  closeChip();
   commitText();
   const el = editing;
   editing = null;
@@ -1332,10 +1390,17 @@ export function isEditingText(): boolean { return !!editing; }
 /* ------------------------------------------------------------------ keys, clipboard, menu */
 
 function onKeyDown(e: KeyboardEvent): void {
-  if (isCropping()) return;
+  if (isCropping() || isNodeEditing()) return;
+  if (isPenDrawing() && penKey(e)) { e.preventDefault(); e.stopPropagation(); return; }
   const mod = e.ctrlKey || e.metaKey;
   if (editing) {
     if (e.key === 'Escape') { e.preventDefault(); stopText(); return; }
+    // LyX: Ctrl+M a formula (Ctrl+Shift+M displayed), an arrow key into a formula goes into it
+    if (mod && !e.altKey && e.key.toLowerCase() === 'm') { e.preventDefault(); e.stopPropagation(); insertChip(editing, e.shiftKey); return; }
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !mod && !e.shiftKey && !e.altKey) {
+      const c = chipBeside(e.key === 'ArrowLeft' ? 'before' : 'after');
+      if (c) { e.preventDefault(); openChip(c, null, e.key === 'ArrowLeft' ? 'end' : 'start'); return; }
+    }
     if (mod && /^[zy]$/i.test(e.key)) { e.preventDefault(); commitText(); fwd(e); return; }
     if (mod && /^[bi]$/i.test(e.key)) { e.preventDefault(); exec(e.key.toLowerCase() === 'b' ? 'bold' : 'italic'); return; }
     if (mod && e.key.toLowerCase() === 'u') { e.preventDefault(); exec('underline'); return; }

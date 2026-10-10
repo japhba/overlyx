@@ -11,7 +11,7 @@
  * selection, arrange), speaker notes, the code (a textarea on the same text), presenting (a third
  * frame, full screen), and the host's downloads.
  */
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { type User } from '../api';
 import { showContextMenu, closeContextMenu, type MenuItem } from '../editor/contextmenu';
@@ -24,6 +24,9 @@ import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
 import { deckToolbar, type DeckTextActions } from './decktoolbar';
 import { BgRemoveDialog } from './BgRemoveDialog';
+import { MathOverlay, type MathEditState } from './MathOverlay';
+import { activeMathField } from '../editor/lyxmath/field';
+import { useMathPanels } from '../app/toolbars';
 import { parseSource, opSplices, elementAt, elementChildren, attr } from '@overlyx/core/html/source.ts';
 
 const PAD = 48;
@@ -100,12 +103,20 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const [current, setCurrent] = useState(0);
   const [sel, setSel] = useState<SelItem[]>([]);
   const [editingText, setEditingText] = useState<Path | null>(null);
+  /** a formula of the text being retyped, open in LyX's formula editor (MathOverlay) */
+  const [mathEdit, setMathEdit] = useState<MathEditState | null>(null);
+  /** keys typed between placing a new formula and LyX's field opening on it (given to the field then) */
+  const typeAhead = useRef<string[] | null>(null);
+  const typeAheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** the node editor on a path (runtime/pathedit.ts): how many of its nodes are selected */
+  const [nodeEd, setNodeEd] = useState<{ selected: number; total: number } | null>(null);
+  const nodeEdRef = useRef(false); nodeEdRef.current = !!nodeEd;
   const [tool, setToolState] = useState<Tool>('select');
   const [codeOpen, setCodeOpen] = useState(false);
   const [presenting, setPresenting] = useState(false);
   const canvasReady = useRef(false);
   const railReady = useRef(false);
-  const pending = useRef<{ select?: Path[]; editText?: Path } | null>(null);
+  const pending = useRef<{ select?: Path[]; editText?: Path; math?: boolean } | null>(null);
 
   const frameW = kind === 'page' ? (device === 'mobile' ? 390 : 1280) : pageW + PAD * 2;
   const fit = Math.max(0.05, Math.min(kind === 'page' ? 1 : 2, (box.w - 24) / frameW));
@@ -236,12 +247,15 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             if (p) {
               pending.current = null;
               if (p.select) toCanvas({ ol: 'select', paths: p.select });
-              if (p.editText) toCanvas({ ol: 'editText', path: p.editText, selectAll: true });
+              if (p.editText) toCanvas({ ol: 'editText', path: p.editText, selectAll: true, math: p.math });
             }
           }
           break;
         case 'selection': if (fromCanvas) { setSel(m.items); host.setSelection(m.items.map(i => i.path)); } break;
-        case 'editing': if (fromCanvas) setEditingText(m.path); break;
+        case 'editing': if (fromCanvas) { setEditingText(m.path); if (!m.path) setMathEdit(null); } break;
+        case 'mathEdit': if (fromCanvas) setMathEdit({ id: m.id, tex: m.tex, display: m.display, rect: m.rect, fontPx: m.fontPx, color: m.color, at: m.at, where: m.where }); break;
+        case 'mathRect': if (fromCanvas) setMathEdit(st => st && st.id === m.id ? { ...st, rect: m.rect } : st); break;
+        case 'mathClose': if (fromCanvas) setMathEdit(null); break;
         case 'visible': if (fromCanvas && m.slide >= 0) { setCurrent(m.slide); toRail({ ol: 'current', slide: m.slide }); } break;
         case 'goto': setCurrent(m.slide); toCanvas({ ol: 'scrollTo', slide: m.slide, smooth: false }); toRail({ ol: 'current', slide: m.slide }); break;
         case 'ops': {
@@ -261,7 +275,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           }
           break;
         }
-        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts); break;
+        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined); break;
+        case 'nodeEditing': if (fromCanvas) { setNodeEd(m.path ? { selected: m.selected, total: m.total } : null); if (m.path && document.activeElement !== canvasFrame.current) canvasFrame.current?.focus(); } break;
         case 'key': onRuntimeKey(m); break;
         case 'contextmenu': {
           const f = (fromRail ? railFrame : canvasFrame).current;
@@ -306,7 +321,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const scaleRef = useRef(scale); scaleRef.current = scale;
   useEffect(() => { const anchor = anchorRef.current ?? undefined; anchorRef.current = null; toCanvas({ ol: 'scale', scale, anchor }); }, [scale]);
   useEffect(() => { toRail({ ol: 'scale', scale: railScale }); }, [railScale]);
-  useEffect(() => { toCanvas({ ol: 'tool', tool }); }, [tool]);
+  // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
+  useEffect(() => { toCanvas({ ol: 'tool', tool }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool]);
 
   const MAX_ZOOM = 8;
   const zoomRef = useRef(zoom); zoomRef.current = zoom;
@@ -358,7 +374,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   const setTool = (t: Tool) => { setToolState(t); };
 
-  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][]) => {
+  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean }) => {
     setToolState('select');
     if (readOnlyRef.current) return;
     if (versions.current.get(v) === undefined) return;
@@ -366,10 +382,15 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const k = kindRef.current;
     const place = insertPlace(cur, slide, after, k);
     if (!place) return;
-    const html = objectHtml(t, rect, k, pageW / 1280, pts);
+    const html = objectHtml(t, rect, k, pageW / 1280, pts, bez);
     if (!html) return;
     if (!applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) return;
-    pending.current = (t === 'text' || t === 'formula') ? { editText: place.path } : { select: [place.path] };
+    pending.current = t === 'formula' ? { editText: place.path, math: true } : t === 'text' ? { editText: place.path } : { select: [place.path] };
+    if (t === 'formula') {
+      typeAhead.current = [];
+      if (typeAheadTimer.current) clearTimeout(typeAheadTimer.current);
+      typeAheadTimer.current = setTimeout(() => { typeAhead.current = null; }, 3000);
+    }
   };
 
   const insertObject = (t: Tool) => {
@@ -714,12 +735,16 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   const onRuntimeKey = (m: Extract<FromRuntime, { ol: 'key' }>) => {
     const mod = m.ctrl || m.meta;
+    if (typeAhead.current && !mod && m.key.length === 1) { typeAhead.current.push(m.key); return; }
     const k = m.key.toLowerCase();
     if (mod && k === 'z') { if (m.shift) host.redo(); else host.undo(); return; }
     if (mod && k === 'y') { host.redo(); return; }
     if (mod && k === 's') { if (host.save) host.save(); else notify('Saved automatically.'); return; }
     if (m.key === 'F5' || (mod && m.key === 'Enter')) { startPresenting(); return; }
     if (mod && k === 'g') { arrangeSel(m.shift ? 'ungroup' : 'group'); return; }
+    // Inkscape's Path ▸ Combine / Break apart / Simplify
+    if (mod && k === 'k') { arrangeSel(m.shift ? 'break-apart' : 'combine'); return; }
+    if (mod && k === 'l' && !m.shift) { arrangeSel('simplify'); return; }
     if (mod && m.key === 'ArrowUp') { arrangeSel(m.shift ? 'front' : 'forward'); return; }
     if (mod && m.key === 'ArrowDown') { arrangeSel(m.shift ? 'back' : 'backward'); return; }
     if (mod && k === 'm' && kindRef.current === 'deck') { newSlide(currentRef.current); return; }
@@ -735,8 +760,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (mod && m.key === '-') { zoomStep(1 / 1.25); return; }
     if (m.key === 'Escape') { setToolState('select'); return; }
     if (!mod && !m.alt) {
-      const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', v: 'select' };
+      const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', b: 'bezier', v: 'select' };
       if (map[k]) { setToolState(map[k]); return; }
+      if (k === 'n' && selRef.current.length) { arrangeSel('edit-nodes'); return; }
     }
     host.key?.(m);
   };
@@ -747,18 +773,23 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       if ((e.target as HTMLElement)?.closest?.('textarea, input')) return;
       if ((e.target as HTMLElement)?.isContentEditable) return;
       const mod = e.ctrlKey || e.metaKey;
+      // a new formula is opening: what is typed goes into it
+      if (typeAhead.current && !mod && !e.altKey && e.key.length === 1 && !document.querySelector('[data-dl-mathedit]')) { e.preventDefault(); typeAhead.current.push(e.key); return; }
+      // the node editor's keys when the focus is not in the canvas
+      if (nodeEdRef.current && (e.key === 'Escape' || e.key === 'Enter' || e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); toCanvas({ ol: 'nodes', cmd: e.key === 'Delete' || e.key === 'Backspace' ? 'delete' : 'done' }); return; }
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) host.redo(); else host.undo(); }
       else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); host.redo(); }
       else if (e.key === 'F5') { e.preventDefault(); startPresenting(); }
       // the focus left the canvas (a toolbar button, a palette): its shortcuts still work on the selection
-      else if (mod && ['g', 'm', '0', '=', '+', '-', '\\'].includes(e.key.toLowerCase()) || (mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown'))) { e.preventDefault(); onRuntimeKey({ ol: 'key', key: e.key, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey }); }
+      else if (mod && (['g', 'm', '0', '=', '+', '-', '\\'].includes(e.key.toLowerCase()) || (['k', 'l'].includes(e.key.toLowerCase()) && selRef.current.length)) || (mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown'))) { e.preventDefault(); onRuntimeKey({ ol: 'key', key: e.key, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey }); }
       else if (mod && e.key.toLowerCase() === 'd' && selRef.current.length) { e.preventDefault(); duplicateSel(); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selRef.current.length) { e.preventDefault(); removeSel(); }
       else if (!mod && !e.altKey && e.key.length === 1 && !readOnlyRef.current) {
         // the tools' letters also before the canvas has the focus
-        const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', v: 'select' };
+        const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', b: 'bezier', v: 'select' };
         const t = map[e.key.toLowerCase()];
         if (t) { e.preventDefault(); setToolState(t); }
+        else if (e.key.toLowerCase() === 'n' && selRef.current.length) { e.preventDefault(); arrangeSel('edit-nodes'); }
       }
       else if (e.key === 'Escape') setToolState('select');
     };
@@ -843,14 +874,39 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const frameH = Math.max(100, box.h / scale);
   const left = leftFor(scale, panX);
   const title = path.split('/').slice(-2).join('/');
+  const mathExec = (cmd: string, ...args: unknown[]) => { const f = activeMathField(); if (f) { f.execute(cmd, ...args); f.focus(); } };
+  const mathPanels = useMathPanels(mathExec);
   const bars = deckToolbar({
     kind, tool, setTool, readOnly, sel, editingText: !!editingText,
+    math: { editing: !!mathEdit, insert: display => toCanvas({ ol: 'insertMath', display }), exec: mathExec, panels: mathPanels },
+    nodes: { editing: !!nodeEd, selected: nodeEd?.selected ?? 0, total: nodeEd?.total ?? 0, cmd: cmd => toCanvas({ ol: 'nodes', cmd }) },
     undo: () => host.undo(), redo: () => host.redo(),
     insertImage: () => fileInput.current?.click(),
     text: textActions, paint, arrange: arrangeSel, image: imageTools, remove: removeSel,
     slideBackground: c => { const sp = slidePaths(text.toString())[currentRef.current]; if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); },
     canvas: { view, set: setView },
     newSlide: () => newSlide(currentRef.current),
+  });
+
+  // the contextual tools on a row of their own when they do not fit beside the others (nothing hidden)
+  const barRef = useRef<HTMLDivElement>(null);
+  const [ctxRow, setCtxRow] = useState(false);
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const check = () => {
+      const ctx = bar.querySelector<HTMLElement>(':scope > .dl-ctx');
+      const need = (ctx?.firstElementChild as HTMLElement | null)?.scrollWidth ?? 0;
+      let others = 0;
+      for (const k of Array.from(bar.children) as HTMLElement[]) if (k !== ctx && k.offsetParent !== null) others += k.offsetWidth + 4;
+      const cs = getComputedStyle(bar);
+      const room = bar.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - others - 16;
+      setCtxRow(need > room);
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(bar);
+    return () => ro.disconnect();
   });
 
   // the slide in view: is enough of it on the screen? (zoomed into a corner, or scrolled away from it)
@@ -868,7 +924,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   return (
     <div class={'dl-editor' + (presenting ? ' presenting' : '')} data-kind={kind}>
-      <div class="dl-toolbar" role="toolbar">
+      <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar">
         <span class="dl-title" title={path}>{title}</span>
         <Toolbar id="deck-tools" groups={bars.tools} />
         <input ref={fileInput} type="file" accept="image/*,.svg" multiple hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void uploadImages(fs.map(f => ({ name: f.name, type: f.type, data: f })), null); }} />
@@ -932,6 +988,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         )}
       </div>
       {floatPop && <FloatPopover {...floatPop} onClose={() => setFloatPop(null)} />}
+      {mathEdit && !presenting && <MathOverlay st={mathEdit} frame={canvasFrame.current} scale={scale} typeAhead={typeAhead}
+        onSet={tex => toCanvas({ ol: 'mathSet', id: mathEdit.id, tex })}
+        onDone={(tex, dir) => { const id = mathEdit.id; setMathEdit(null); if (dir) canvasFrame.current?.focus(); toCanvas({ ol: 'mathDone', id, tex, dir }); }} />}
       {bgFor && <BgRemoveDialog src={bgFor.url} name={bgFor.name} onDone={b => { void saveNoBg(b); }} onClose={() => setBgFor(null)} />}
       {presenting && link && (
         <div class="dl-presenting" ref={presentBox}>

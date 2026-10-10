@@ -21,6 +21,13 @@ It contains, or is a derivative of, the following third-party material:
 - **Spell-checker dictionaries** (`dict/`): `dictionary-en`, `dictionary-en-gb` (BSD-style /
   SCOWL licenses), `dictionary-de` (igerman98, GPL-2.0 or GPL-3.0), `dictionary-fr` (MPL-2.0).
 - **IBM Plex** — SIL OFL 1.1.
+- **Inter** and **Jost** (the Modern interface's type) — SIL OFL 1.1. Latin subsets; copyright and
+  licence: `dist/webview/licenses/ui-fonts-OFL.txt`.
+- **Lucide** icons (https://lucide.dev, the Modern interface's toolbar icons) — ISC. Licence:
+  `dist/webview/licenses/lucide.txt`.
+- **polygon-clipping** (https://github.com/mfogel/polygon-clipping) — MIT, with **splaytree** (MIT)
+  and **robust-predicates** (Unlicense): the slide canvas's Path ▸ Union / Difference / Intersection /
+  Exclusion, in the deliverable runtime.
 - **Computer Modern Unicode / CMU Serif** (https://ctan.org/pkg/cm-unicode) — SIL OFL 1.1.
   Unmodified Roman, bold, italic and bold italic text fonts; copyright the original Metafont
   authors and Andrey V. Panov. Full license and copyright notices: `dist/webview/licenses/cm-unicode-OFL.txt`.

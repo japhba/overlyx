@@ -148,7 +148,8 @@ function startTagLoc(el: HElement): TagLocation {
 /** Set (or with null remove) an attribute in the element's start tag; null when nothing changes. */
 export function attrSplice(text: string, el: HElement, name: string, value: string | null): Splice | null {
   const st = startTagLoc(el);
-  const loc = st.attrs?.[name];
+  // (the parser keys attribute locations by the name as lower case: an SVG's viewBox is "viewbox" there)
+  const loc = st.attrs?.[name] ?? st.attrs?.[name.toLowerCase()];
   if (loc) {
     if (value === null) {
       // the attribute and the whitespace before it

@@ -178,7 +178,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
           </>}
           {section === 'appearance' && <>
             <h3>Interface</h3>
-            <div class="sub">Classic shows LyX’s toolbars and menus; Modern looks like Google Docs and Slides, with tools that appear when you need them. The same functions either way. Kept for your account.</div>
+            <div class="sub">Classic shows LyX’s toolbars and menus; Modern is calmer and simpler — one toolbar, tools that appear when you need them. The same functions either way. Kept for your account.</div>
             <UiChoice />
             <h3>Theme</h3>
             <div class="sub">Kept in this browser.</div>

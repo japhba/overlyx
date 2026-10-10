@@ -29,13 +29,15 @@ export function projectDocs(p: Project, deliverables = false): string[] {
   return [...docs, ...html.map(f => f.path)];
 }
 const DELIVERABLE_NAME = { deck: 'slides', poster: 'poster', page: 'web page' } as const;
+/** what a thing is, before its name: an emoji (the Modern interface draws a geometric mark for `kind` instead, modern.css) */
+const Glyph = ({ kind, emoji }: { kind: string; emoji: string }) => <span class="hglyph" data-kind={kind} aria-hidden="true">{emoji}</span>;
 /** how a document is listed: an HTML deliverable by its folder (an index.html) and what it is */
-function docLabel(p: Project, d: string): string {
-  if (!/\.html?$/i.test(d)) return `📄 ${d}`;
+function docLabel(p: Project, d: string) {
+  if (!/\.html?$/i.test(d)) return <><Glyph kind="doc" emoji="📄" /> {d}</>;
   const kind = p.files.find(f => f.path === d)?.deliverable;
   const name = /(^|\/)index\.html?$/i.test(d) && d.includes('/') ? d.slice(0, d.lastIndexOf('/')) : d;
   const what = kind && !name.toLowerCase().includes(DELIVERABLE_NAME[kind].split(' ')[0]) ? ` (${DELIVERABLE_NAME[kind]})` : '';
-  return `${kind === 'deck' ? '🎞' : kind === 'poster' ? '🪧' : '🌐'} ${name}${what}`;
+  return <><Glyph kind={kind ?? 'page'} emoji={kind === 'deck' ? '🎞' : kind === 'poster' ? '🪧' : '🌐'} /> {name}{what}</>;
 }
 /** a project's title, else its name without the owner (`jan/thesis` → `thesis`) */
 export const projectTitle = (p: Project) => p.title ?? projectShortName(p.name);
@@ -140,7 +142,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
     return (
       <div class={'home-card' + (isExample ? ' example' : '')} key={p.name} data-project={p.name}>
         <div class="title">
-          <span>{isExample ? '👋 ' : '📁 '}{projectTitle(p)}</span>
+          <span>{isExample ? <Glyph kind="hello" emoji="👋" /> : <Glyph kind="project" emoji="📁" />} {projectTitle(p)}</span>
           {badge(p)}
         </div>
         {isExample && (
@@ -168,7 +170,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
     return (
       <div class="home-card home-row" key={p.name} data-project={p.name}>
         <div class="title">
-          <a class="name" href={'#/' + target} onClick={e => { e.preventDefault(); onOpen(target); }}>📁 {projectTitle(p)}</a>
+          <a class="name" href={'#/' + target} onClick={e => { e.preventDefault(); onOpen(target); }}><Glyph kind="project" emoji="📁" /> {projectTitle(p)}</a>
           {badge(p)}
         </div>
         <div class="meta">{metaText(p, docs)}</div>
@@ -212,7 +214,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           <div class="git-tokens admin-projects" data-admin-projects>
             {others.map(p => (
               <div class="git-token" key={p.name} data-admin-project={p.name}>
-                <span class="name">📁 {p.title ?? p.name}</span>
+                <span class="name"><Glyph kind="project" emoji="📁" /> {p.title ?? p.name}</span>
                 <span class="meta">{p.owner ? `${p.owner.name} (${p.owner.username})` : 'no owner'}{p.kind === 'example' ? ' · example project' : ''}</span>
                 <button class="mini" onClick={() => void openAsAdmin(p)}>Open as administrator…</button>
               </div>
@@ -246,10 +248,10 @@ export function ProjectRootPanel({ project, notify, onCreated }: { project: stri
   const docs = projectDocs(info, true);
   return (
     <div class="home">
-      <h1>📁 {projectTitle(info)}</h1>
+      <h1><Glyph kind="project" emoji="📁" /> {projectTitle(info)}</h1>
       {docs.length ? <>
         <div class="sub">Open one of its documents — all its files are in the files panel on the left.</div>
-        <div class="docs project-docs">{docs.map(d => <a key={d} href={'#/' + project + '/' + d.split('/').map(encodeURIComponent).join('/')} onClick={e => { e.preventDefault(); onCreated(project + '/' + d); }}>📄 {d}</a>)}</div>
+        <div class="docs project-docs">{docs.map(d => <a key={d} href={'#/' + project + '/' + d.split('/').map(encodeURIComponent).join('/')} onClick={e => { e.preventDefault(); onCreated(project + '/' + d); }}><Glyph kind="doc" emoji="📄" /> {d}</a>)}</div>
       </> : <div class="sub">This project has no documents yet. Its files (if any) are in the files panel on the left.</div>}
       <div class="home-actions">
         <button class="btn primary" onClick={() => void createFirstDoc()}>+ New document</button>

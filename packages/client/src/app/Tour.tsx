@@ -177,6 +177,7 @@ export type TourEnd = 'finished' | 'left' | 'declined';
 /** the two interfaces as small sketches: Classic (LyX's rows of icons, status bar) and Modern (Google's rounded row, a sheet) */
 export function UiChoice() {
   const cur = useUiMode();
+  // LyX: rows of coloured icons, everything in view
   const classic = (
     <svg viewBox="0 0 160 90" aria-hidden="true">
       <rect width="160" height="90" fill="#f3f3f1" />
@@ -188,23 +189,25 @@ export function UiChoice() {
       <rect y="83" width="160" height="7" fill="#e9e9e6" />
     </svg>
   );
+  // Modern: the name over the menus, one strip of keys, the page — LyX's three colours as marks
   const modern = (
     <svg viewBox="0 0 160 90" aria-hidden="true">
-      <rect width="160" height="90" fill="#f9fbfd" />
-      <rect x="6" y="4" width="10" height="10" rx="3" fill="#4285f4" /><rect x="20" y="4" width="40" height="4" rx="2" fill="#444" />{[20, 32, 44, 56, 68].map(x => <rect key={x} x={x} y="11" width="9" height="3" rx="1.5" fill="#9aa0a6" />)}
-      <rect x="128" y="5" width="20" height="8" rx="4" fill="#c2e7ff" />
-      <rect x="6" y="18" width="148" height="9" rx="4.5" fill="#edf2fa" />{Array.from({ length: 13 }, (_, i) => <rect key={i} x={12 + i * 10} y="20.5" width="5" height="4" rx="1" fill="#5f6368" />)}
-      <rect x="36" y="32" width="88" height="56" fill="#fff" stroke="#e8eaed" />{[42, 50, 58, 66, 74].map(y => <rect key={y} x="46" y={y} width={y === 42 ? 40 : 68} height="3" rx="1" fill="#c4c7c5" />)}
-      <rect x="54" y="80" width="52" height="7" rx="3.5" fill="#fff" stroke="#dadce0" />
+      <rect width="160" height="90" fill="#f1efea" />
+      <circle cx="9" cy="9" r="3.2" fill="#2152a3" /><rect x="14" y="5.8" width="6.4" height="6.4" fill="#d6402b" /><path d="M25.5 5.6 29 12.2H22z" fill="#efb21a" />
+      <rect x="36" y="4.5" width="34" height="4" rx="1" fill="#1c1b19" />{[36, 47, 58, 69, 80].map(x => <rect key={x} x={x} y="11.5" width="8" height="2.4" rx="1" fill="#84807a" />)}
+      <rect x="132" y="5" width="22" height="9" rx="2" fill="#dc4b1d" />
+      <rect x="6" y="19" width="148" height="9" rx="2.5" fill="#e6e3dd" />{Array.from({ length: 14 }, (_, i) => <rect key={i} x={11 + i * 10} y="21.8" width="4.5" height="3.4" rx="0.6" fill={i === 3 ? '#262521' : '#4a4741'} opacity={i === 3 ? 1 : 0.75} />)}
+      <rect x="0" y="32" width="160" height="58" fill="#e8e5df" />
+      <rect x="40" y="36" width="80" height="54" fill="#fff" stroke="#e3e0d9" stroke-width="0.6" />{[44, 52, 59, 66, 73, 80].map(y => <rect key={y} x="50" y={y} width={y === 44 ? 36 : 60} height={y === 44 ? 4 : 2.6} rx="0.8" fill={y === 44 ? '#1c1b19' : '#bdb8ae'} />)}
     </svg>
   );
   return (
     <div class="ui-choice" role="radiogroup" aria-label="Interface">
       <button type="button" role="radio" aria-checked={cur === 'classic'} class={cur === 'classic' ? 'on' : ''} data-ui-choice="classic" onClick={() => setUiMode('classic')}>
-        {classic}<b>Classic</b><span>LyX’s toolbars and menus — everything in view, for LaTeX and LyX users.</span>
+        {classic}<b class="uc-name">Classic</b><span>LyX’s toolbars and menus — everything in view, for LaTeX and LyX users.</span>
       </button>
       <button type="button" role="radio" aria-checked={cur === 'modern'} class={cur === 'modern' ? 'on' : ''} data-ui-choice="modern" onClick={() => setUiMode('modern')}>
-        {modern}<b>Modern</b><span>Like Google Docs and Slides — a simple toolbar; tools appear when you need them.</span>
+        {modern}<b class="uc-name">Modern</b><span>Calm and simple — one toolbar; the tools for a formula, a table or a picture appear when you need them.</span>
       </button>
     </div>
   );

@@ -18,6 +18,8 @@ import { api, fileUrl, type User } from '../api';
 import { imageFiles, imageExt, uploadBaseName, uploadUnique, isSvgMarkup, svgFile } from '../editor/imagepaste';
 import { HIGHLIGHT_OPACITY, LASER_COLOR, LASER_FADE_MS, getInk, setInk, subscribeInk, inkColorName, formatMm, mmToPx, type InkPen } from '../editor/plugins/ink';
 import { InkColorPicker, InkWidthPicker, widthDotPx } from './InkPickers';
+import { useUiMode } from './uimode';
+import { MODERN_ICONS, iconSvg } from './modernicons';
 
 export interface BoardObj {
   t: 'stroke' | 'img' | 'note';
@@ -516,8 +518,11 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     />
   );
 
+  // the Modern interface draws its line icons where Classic shows the emoji
+  const modern = useUiMode() === 'modern';
+  const face = (id: string, emoji: string) => (modern && MODERN_ICONS[id] ? <span class="bd-ic" dangerouslySetInnerHTML={{ __html: iconSvg(MODERN_ICONS[id], 17) }} /> : emoji);
   const toolBtn = (t: Tool, label: string, title: string) => (
-    <button class={'small-btn' + (tool === t ? ' active' : '')} data-tool={t} title={title} onClick={() => setTool(t)}>{label}</button>
+    <button class={'small-btn' + (tool === t ? ' active' : '')} data-tool={t} title={title} onClick={() => setTool(t)}>{face('bd-' + t, label)}</button>
   );
   const drawingTool = tool === 'pen' || tool === 'highlighter';
   const penSet = pens[curPen];
@@ -601,8 +606,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         {!readOnly && toolBtn('eraser', '⌫', 'Eraser (removes strokes)')}
         {toolBtn('laser', '🔴', 'Laser pointer — a glowing trace that stays while you hold the pen down and fades when you lift it; not saved, seen live by everyone on the board')}
         {!readOnly && toolBtn('note', '🗒', 'Sticky note')}
-        {!readOnly && <button class="small-btn" title="Add images (or paste / drag them in)" onClick={pickImages}>🖼</button>}
-        <button class={'small-btn' + (fingerDraw ? ' active' : '')} data-finger-draw title={fingerDraw ? 'Drawing with a finger is on — a finger draws, two fingers pan and zoom (click to let a finger pan)' : 'Draw with a finger (otherwise only a pen or the mouse draws; a finger pans)'} onClick={() => setFingerDraw(!fingerDraw)}>☝</button>
+        {!readOnly && <button class="small-btn" title="Add images (or paste / drag them in)" onClick={pickImages}>{face('bd-image', '🖼')}</button>}
+        <button class={'small-btn' + (fingerDraw ? ' active' : '')} data-finger-draw title={fingerDraw ? 'Drawing with a finger is on — a finger draws, two fingers pan and zoom (click to let a finger pan)' : 'Draw with a finger (otherwise only a pen or the mouse draws; a finger pans)'} onClick={() => setFingerDraw(!fingerDraw)}>{face('bd-finger', '☝')}</button>
         {!readOnly && <span class="board-sep" />}
         {/* presets (shared with the margin ink): one click selects, a click on the selected one edits it */}
         {!readOnly && penSet.colors.map((c, i) => {
@@ -636,7 +641,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         <button class="small-btn" title="Zoom out" onClick={() => zoomAt(innerWidth / 2, innerHeight / 2, 1 / 1.25)}>−</button>
         <button class="small-btn" title="Reset zoom" onClick={() => setCam(c => ({ ...c, s: 1 }))}>{Math.round(cam.s * 100)}%</button>
         <button class="small-btn" title="Zoom in" onClick={() => zoomAt(innerWidth / 2, innerHeight / 2, 1.25)}>+</button>
-        <button class="small-btn" title="Zoom to fit everything" onClick={fit}>⤢</button>
+        <button class="small-btn" title="Zoom to fit everything" onClick={fit}>{face('bd-fit', '⤢')}</button>
         <span class={'board-conn ' + conn} title={conn === 'online' ? 'Connected — changes sync live and save automatically' : conn === 'offline' ? 'No connection — reconnecting' : 'Connecting…'}>
           {conn === 'online' ? (readOnly ? '👁 view only' : '✓ live') : conn === 'offline' ? 'offline' : '…'}
         </span>

@@ -13,6 +13,7 @@
 import type { ArrangeHow, Paint, HtmlOp, Path } from '../protocol';
 import { selection, setSelection, start, placeLive, styleOp, commit, isLocked, movable, angleOf, isSvgPart, cs, containerOf, union, report, draw, kindOf, slidePoint } from './edit';
 import { srcOf, pathOf, slideOf, docRect } from './env';
+import { pathCommand } from './pathedit';
 
 export function arrange(how: ArrangeHow): void {
   const sel = selection();
@@ -24,6 +25,7 @@ export function arrange(how: ArrangeHow): void {
     case 'distribute-h': case 'distribute-v': distribute(sel, how === 'distribute-h'); break;
     case 'rotate-cw': case 'rotate-ccw': case 'rotate-reset': rotateBy(sel, how); break;
     case 'flip-h': case 'flip-v': flip(sel, how === 'flip-h'); break;
+    case 'union': case 'difference': case 'intersection': case 'exclusion': case 'combine': case 'break-apart': case 'to-path': case 'reverse': case 'simplify': case 'edit-nodes': pathCommand(how); break;
     case 'group': group(sel); break;
     case 'ungroup': ungroup(sel); break;
     case 'lock': case 'unlock': {

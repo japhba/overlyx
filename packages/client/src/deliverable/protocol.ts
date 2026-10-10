@@ -13,7 +13,7 @@ import type { HtmlOp, Path } from '@overlyx/core/html/source.ts';
 export type { HtmlOp, Path };
 
 export type DeliverableKind = 'deck' | 'poster' | 'page';
-export type Tool = 'select' | 'text' | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'hexagon' | 'line' | 'arrow' | 'pen' | 'formula';
+export type Tool = 'select' | 'text' | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'hexagon' | 'line' | 'arrow' | 'pen' | 'bezier' | 'formula';
 
 /** what kind of object the toolbar is showing tools for */
 export type ObjKind = 'text' | 'shape' | 'line' | 'image' | 'svg' | 'svgpart' | 'group' | 'formula' | 'other';
@@ -24,7 +24,12 @@ export type ArrangeHow =
   | 'align-left' | 'align-center' | 'align-right' | 'align-top' | 'align-middle' | 'align-bottom'
   | 'center-h' | 'center-v' | 'distribute-h' | 'distribute-v'
   | 'rotate-cw' | 'rotate-ccw' | 'rotate-reset' | 'flip-h' | 'flip-v'
-  | 'group' | 'ungroup' | 'lock' | 'unlock';
+  | 'group' | 'ungroup' | 'lock' | 'unlock'
+  /** Inkscape's Path menu (runtime/pathedit.ts) */
+  | 'union' | 'difference' | 'intersection' | 'exclusion' | 'combine' | 'break-apart' | 'to-path' | 'reverse' | 'simplify' | 'edit-nodes';
+
+/** the node editor's commands (Inkscape's node toolbar) */
+export type NodeCmd = 'insert' | 'delete' | 'corner' | 'smooth' | 'straight' | 'curve' | 'break' | 'join' | 'close' | 'all' | 'done';
 
 /** the selection's fill and outline as the toolbar sets them (null removes; undefined leaves alone) */
 export interface Paint {
@@ -94,7 +99,8 @@ export interface SlideBox { index: number; path: Path; rect: Rect; title: string
 export type ToRuntime =
   | { ol: 'source'; version: number; html: string }
   | { ol: 'select'; paths: Path[] }
-  | { ol: 'editText'; path: Path; selectAll?: boolean }
+  /** `math`: its first formula opened in LyX's formula editor at once (a new formula object) */
+  | { ol: 'editText'; path: Path; selectAll?: boolean; math?: boolean }
   | { ol: 'scrollTo'; slide: number; smooth?: boolean }
   | { ol: 'scale'; scale: number; anchor?: { docY: number; screenY: number } }
   | { ol: 'tool'; tool: Tool }
@@ -116,7 +122,15 @@ export type ToRuntime =
   /** the toolbar's Done / Cancel of crop mode */
   | { ol: 'endCrop'; commit: boolean }
   /** presenting: back to the whole slide (Escape left full screen while it was zoomed) */
-  | { ol: 'unzoom' };
+  | { ol: 'unzoom' }
+  /** the formula open in LyX's formula editor changed (runtime/mathedit.ts: the chip follows) */
+  | { ol: 'mathSet'; id: number; tex: string }
+  /** LyX's formula editor left the formula (`dir`: by an arrow key / Escape, the caret goes that side; null: elsewhere) */
+  | { ol: 'mathDone'; id: number; tex: string; dir: 'forward' | 'backward' | null }
+  /** a new formula at the caret of the text being retyped (the toolbar's ∑ while typing) */
+  | { ol: 'insertMath'; display: boolean }
+  /** a command of the node editor (editing a path's points) */
+  | { ol: 'nodes'; cmd: NodeCmd };
 
 /** runtime → editor */
 export type FromRuntime =
@@ -125,7 +139,7 @@ export type FromRuntime =
   | { ol: 'selection'; version: number; items: SelItem[] }
   | { ol: 'ops'; version: number; ops: HtmlOp[]; select?: 'inserted' | 'keep' | Path[]; then?: 'editText' }
   /** a new object drawn: its box (slide px), and for lines / the pen the points (slide px, in drawing order) */
-  | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][] }
+  | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean }
   | { ol: 'editing'; path: Path | null }
   | { ol: 'key'; key: string; ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }
   /** `on`: what was right-clicked — an object (now selected), a slide's empty area, or the canvas around the pages */
@@ -145,6 +159,17 @@ export type FromRuntime =
   /** crop mode started (the picture's path) or ended (null) */
   | { ol: 'cropping'; path: Path | null }
   /** presenting: the slide is zoomed in (or not any more) */
-  | { ol: 'presentZoom'; zoomed: boolean };
+  | { ol: 'presentZoom'; zoomed: boolean }
+  /**
+   * a formula of the text being retyped to edit with LyX's formula editor (runtime/mathedit.ts):
+   * its box (frame client px), font size (CSS px of the page) and colour; `at`: the click into it
+   */
+  | { ol: 'mathEdit'; id: number; tex: string; display: boolean; rect: Rect; fontPx: number; color: string; at: { x: number; y: number } | null; where: 'start' | 'end' }
+  /** the formula being edited moved (scrolled, reflowed) */
+  | { ol: 'mathRect'; id: number; rect: Rect }
+  /** the retyping ended while a formula was open: the formula editor closes */
+  | { ol: 'mathClose' }
+  /** the node editor is on (the path edited, how many of its nodes are selected) or off (null) */
+  | { ol: 'nodeEditing'; path: Path | null; selected: number; total: number };
 
 export const isFromRuntime = (d: unknown): d is FromRuntime => !!d && typeof d === 'object' && typeof (d as { ol?: unknown }).ol === 'string';

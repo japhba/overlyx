@@ -1185,7 +1185,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       themeItems: [
       { label: 'Interface ▸', sub: [
         { label: 'Classic — LyX’s toolbars and menus', checked: ui === 'classic', action: () => setUiMode('classic') },
-        { label: 'Modern — like Google Docs, tools appear as needed', checked: ui === 'modern', action: () => setUiMode('modern') },
+        { label: 'Modern — one calm toolbar, tools appear as needed', checked: ui === 'modern', action: () => setUiMode('modern') },
       ] },
       { label: 'Theme ▸', sub: [
         { label: 'Default (follows the system)', checked: themePref === 'system', action: () => setThemePref('system') },
