@@ -17,6 +17,7 @@ import {
   SplinePointer, SquaresUnite, SquaresSubtract, SquaresIntersect, SquaresExclude, Combine, Split, VectorPolygon, VectorSquare,
   ArrowRightLeft, DiamondPlus, DiamondMinus, Diamond, CircleDot, Slash, Unlink, Link2, Pentagon, ChartSpline,
   LassoSelect, Pen, Eraser, Hand, Maximize2, Focus,
+  FileType, FileType2, PanelsTopLeft, Globe, Brush, BookMarked, FileImage, Folder, Asterisk,
 } from 'lucide';
 
 type IconNode = [string, Record<string, string | number | undefined>][];
@@ -43,7 +44,7 @@ export const MODERN_ICONS: Record<string, string> = {
   'l-standard': N(Pilcrow), 'l-itemize': N(List), 'l-enumerate': N(ListOrdered), 'l-labeling': N(ListChecks),
   'l-description': N(ListTree), 'l-section': N(Heading1), depthin: N(ListIndentIncrease), depthout: N(ListIndentDecrease),
   float: N(Frame), tablefloat: N(Sheet), label: N(Tag), ref: N(Bookmark), cite: N(Quote),
-  index: N(Hash), footnote: N(StickyNote), marginal: N(PanelRight), note: N(StickyNote), comment: N(MessageSquarePlus),
+  index: N(Hash), footnote: N(Asterisk), marginal: N(PanelRight), note: N(StickyNote), comment: N(MessageSquarePlus),
   boxinset: N(Square), href: N(Link), ert: N(CodeXml), macro: N(Variable), include: N(Files), nomencl: N(Book),
   textstyle: N(Baseline), paragraph: N(Pilcrow),
   // math
@@ -77,6 +78,13 @@ export const MODERN_ICONS: Record<string, string> = {
   // the side rails (modern.css draws them as masks from these)
   'rail-comments': N(MessageSquare), 'rail-versions': N(History), 'rail-agent': N(Sparkles), 'rail-pdf': N(FileText),
   'rail-source': N(CodeXml), 'rail-outline': N(ListTree),
+};
+
+/** what a file or a project is, in the file tree and on the start page (FileBrowser's .ficon, Home's .hglyph) */
+export const KIND_ICONS: Record<string, string> = {
+  doc: N(FileText), tex: N(FileText), lyx: N(FileText), md: N(FileType), deck: N(Presentation), poster: N(PanelsTopLeft),
+  page: N(Globe), html: N(Globe), board: N(Brush), bib: N(BookMarked), image: N(FileImage), pdf: N(FileType2), other: N(File),
+  project: N(Folder), hello: N(Folder),
 };
 
 /** an icon (an entry of MODERN_ICONS) as markup, for palette items and buttons drawn as HTML */

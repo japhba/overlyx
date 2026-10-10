@@ -5,13 +5,16 @@
  * at the right of the action bar switches to a grid of cards, remembered per browser (`ol.homeView`).
  */
 import { useEffect, useState } from 'preact/hooks';
-import { api, zipUrl, type AdminProjectInfo, type Project, type User } from '../api';
+import { api, zipUrl, type AdminProjectInfo, type Project, type ProjectPerson, type User } from '../api';
+import { AvatarContent, initials } from './Avatar';
 import { OverleafImport, type ImportInitial } from './OverleafImport';
 import { takePendingImport } from './pendingImport';
 import { sortByRecency, recencyLabel } from './recency';
 import { projectShortName, splitProjectKey, isProjectName } from '@overlyx/core';
 import { uiPrompt, uiConfirm } from './Dialogs';
 import { promptNewFile } from './newfile';
+import { useUiMode } from './uimode';
+import { KIND_ICONS, iconSvg } from './modernicons';
 
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
@@ -30,7 +33,13 @@ export function projectDocs(p: Project, deliverables = false): string[] {
 }
 const DELIVERABLE_NAME = { deck: 'slides', poster: 'poster', page: 'web page' } as const;
 /** what a thing is, before its name: an emoji (the Modern interface draws a geometric mark for `kind` instead, modern.css) */
-const Glyph = ({ kind, emoji }: { kind: string; emoji: string }) => <span class="hglyph" data-kind={kind} aria-hidden="true">{emoji}</span>;
+/** what a project or a document is: an emoji in Classic, a line icon in Modern (modernicons.ts KIND_ICONS) */
+function Glyph({ kind, emoji }: { kind: string; emoji: string }) {
+  const modern = useUiMode() === 'modern';
+  return modern
+    ? <span class="hglyph icon" data-kind={kind} aria-hidden="true" dangerouslySetInnerHTML={{ __html: iconSvg(KIND_ICONS[kind] ?? KIND_ICONS.other, 15) }} />
+    : <span class="hglyph" data-kind={kind} aria-hidden="true">{emoji}</span>;
+}
 /** how a document is listed: an HTML deliverable by its folder (an index.html) and what it is */
 function docLabel(p: Project, d: string) {
   if (!/\.html?$/i.test(d)) return <><Glyph kind="doc" emoji="📄" /> {d}</>;
@@ -121,6 +130,30 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
 
   const metaText = (p: Project, docs: string[]) =>
     `${p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · ${docs.length} document${docs.length === 1 ? '' : 's'}, ${p.files.length} file${p.files.length === 1 ? '' : 's'}${recencyLabel(p) ? ` · ${recencyLabel(p)}` : ''}`;
+  /** who joined the project (and who owns it, when it is someone else's): avatars, then the names */
+  const people = (p: Project) => {
+    type Face = Omit<ProjectPerson, 'role'> & { role: ProjectPerson['role'] | 'owner' };
+    const owner: Face[] = p.via !== 'owner' && p.owner ? [{ name: p.owner.name, username: p.owner.username, color: '', avatar: null, role: 'owner', via: 'owner', since: 0, guest: false }] : [];
+    const members = (p.members ?? []).filter(m => m.username !== user.username || p.via === 'owner');
+    if (!members.length && !p.invited) return null;
+    const when = (t: number) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: new Date(t).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+    const shown: Face[] = [...owner, ...members];
+    const names = members.map(m => (m.username === user.username ? 'you' : m.name.split(' ')[0]));
+    return (
+      <div class="people" data-people={p.name}>
+        <span class="people-faces">
+          {shown.slice(0, 6).map(m => (
+            <span key={m.username} class={'avatar' + (m.role === 'owner' ? ' owner' : '')} style={{ background: m.color || 'var(--muted2)' }} data-initials={m.avatar ? undefined : initials(m.name).length}
+              title={m.role === 'owner' ? `${m.name} (${m.username}) — owns this project` : `${m.name} (${m.username}) — ${m.role === 'edit' ? 'can edit' : 'can view'}, joined ${when(m.since)}${m.via === 'link' ? ' through the link' : ''}${m.guest ? ' as a guest' : ''}`}>
+              <AvatarContent name={m.name} src={m.avatar} />
+            </span>
+          ))}
+          {shown.length > 6 && <span class="avatar more">+{shown.length - 6}</span>}
+        </span>
+        <span class="people-names">{names.length ? `${names.length > 3 ? names.slice(0, 3).join(', ') + ` and ${names.length - 3} more` : names.join(', ').replace(/, ([^,]*)$/, ' and $1')} joined` : ''}{p.invited ? `${names.length ? ' · ' : ''}${p.invited} invited` : ''}</span>
+      </div>
+    );
+  };
   const badge = (p: Project) => p.via !== 'owner' && <span class={'badge' + (p.role === 'view' ? ' view' : '')}>{p.via === 'admin' ? 'admin' : p.role === 'view' ? 'can view' : 'can edit'}</span>;
   const docLink = (p: Project, d: string) => <a key={d} href={'#/' + p.name + '/' + d} onClick={e => { e.preventDefault(); onOpen(p.name + '/' + d); }}>{docLabel(p, d)}</a>;
   const actions = (p: Project, docs: string[], isExample = false) => (
@@ -153,6 +186,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           </div>
         )}
         {!isExample && <div class="meta">{metaText(p, docs)}</div>}
+        {people(p)}
         <div class="docs">
           {docs.slice(0, isExample ? 1 : 6).map(d => docLink(p, d))}
           {!isExample && docs.length > 6 && <span class="meta">+{docs.length - 6} more in the files panel</span>}
@@ -174,6 +208,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           {badge(p)}
         </div>
         <div class="meta">{metaText(p, docs)}</div>
+        {people(p)}
         <div class="docs">
           {docs.slice(0, 8).map(d => docLink(p, d))}
           {!docs.length && <span class="meta">No documents yet.</span>}

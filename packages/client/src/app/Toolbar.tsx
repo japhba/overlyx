@@ -4,6 +4,7 @@
  * (a popup grid of symbols rendered by MathJax, LyX's "IconPalette" / "PopupMenu").
  */
 import { MODERN_ICONS, iconSvg } from './modernicons';
+import { pinUnder } from './popup';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { createInsetMath, nargs } from '@overlyx/core';
@@ -70,6 +71,12 @@ export interface ToolbarProps {
   label?: string;
   /** before which group the paragraph layout select goes (0: first, LyX's place; the Modern row: after undo / redo) */
   layoutsAt?: number;
+  /**
+   * groups that fold into a "more" palette button when the row is too narrow (Google Docs' ⋮): `order`
+   * names each group by one of its buttons, the first folds first; `more` is the palette button that
+   * takes them. Groups not named never fold (a row that still does not fit scrolls sideways).
+   */
+  collapse?: { order: string[]; more: string };
 }
 
 export const ICONS: Record<string, string> = {
@@ -415,18 +422,10 @@ function PaletteButton({ b }: { b: ToolButton }) {
     document.addEventListener('mousedown', h); document.addEventListener('keydown', k);
     return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
   }, [open]);
-  // the popup fixed to the window under its button (so a toolbar that scrolls sideways or clips does not cut it off),
-  // kept inside the window, above the button when there is more room there (the contextual rows docked at the bottom)
+  // the popup fixed to the window under its button (popup.ts: a toolbar that scrolls sideways or clips does not cut it off)
   useLayoutEffect(() => {
     const el = popRef.current, btn = ref.current;
-    if (!open || !el || !btn) return;
-    const b = btn.getBoundingClientRect();
-    Object.assign(el.style, { position: 'fixed', left: `${b.left}px`, top: `${b.bottom + 2}px`, right: 'auto', bottom: 'auto', marginTop: '0', maxHeight: '' });
-    const r = el.getBoundingClientRect();
-    if (r.right > window.innerWidth - 8) el.style.left = `${Math.max(4, window.innerWidth - 8 - r.width)}px`;
-    const below = window.innerHeight - b.bottom - 8, above = b.top - 8;
-    if (r.height > below && above > below) { el.style.top = `${Math.max(4, b.top - 2 - Math.min(r.height, above))}px`; el.style.maxHeight = `${above}px`; }
-    else if (r.height > below) el.style.maxHeight = `${below}px`;
+    if (open && el && btn) pinUnder(el, btn);
   }, [open]);
   const p = b.palette!;
   const close = () => setOpen(false);
@@ -466,7 +465,36 @@ function PaletteButton({ b }: { b: ToolButton }) {
   );
 }
 
-export function Toolbar({ id, layouts, layout, onLayout, groups, label, layoutsAt = 0 }: ToolbarProps) {
+export function Toolbar({ id, layouts, layout, onLayout, groups: allGroups, label, layoutsAt = 0, collapse }: ToolbarProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  // how many of collapse.order are folded into the more button: start over whenever the room changes,
+  // then fold one group after the other until the row fits (layout effects: before the row is painted)
+  const [folded, setFolded] = useState(0);
+  const [room, setRoom] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!collapse || !el) return;
+    const ro = new ResizeObserver(() => setRoom(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [!!collapse]);
+  // (a reset must render before the next fold: setting 0 and then +1 in one go would land on the
+  // old count, which renders nothing, and the folding would stop with the row still too wide)
+  const resetting = useRef(false);
+  useLayoutEffect(() => { resetting.current = true; setFolded(0); }, [room, allGroups.length]);
+  useLayoutEffect(() => {
+    if (resetting.current) { if (folded !== 0) return; resetting.current = false; }
+    const el = ref.current;
+    if (collapse && el && el.scrollWidth > el.clientWidth + 1 && folded < collapse.order.length) setFolded(f => f + 1);
+  });
+  let groups = allGroups;
+  if (collapse && folded) {
+    const out = new Set(collapse.order.slice(0, folded).map(key => allGroups.findIndex(g => g.some(b => b.id === key))).filter(i => i >= 0));
+    const moved = allGroups.filter((_, i) => out.has(i)).flat().filter(b => b.action && !b.widget);
+    groups = allGroups.filter((_, i) => !out.has(i)).map(g => g.map(b => (b.id === collapse.more && b.palette ? {
+      ...b, palette: { ...b.palette, items: [...moved.map(m => ({ label: m.title.replace(/\s*\(.*\)\s*$/, ''), title: m.title, html: MODERN_ICONS[m.id] ? iconSvg(MODERN_ICONS[m.id]) : undefined, action: m.action!, active: m.active })), ...(b.palette.items ?? [])] },
+    } : b)));
+  }
   const names = layouts ? layouts.map(l => l.name) : [];
   if (layouts && layout && !names.includes(layout)) names.unshift(layout);
   const select = layouts && (
@@ -475,7 +503,7 @@ export function Toolbar({ id, layouts, layout, onLayout, groups, label, layoutsA
     </select>
   );
   return (
-    <div class={'toolbar toolbar-' + id} data-toolbar={id} onMouseDown={e => { const t = e.target as HTMLInputElement; if (t.tagName !== 'SELECT' && t.tagName !== 'INPUT') e.preventDefault(); }}>
+    <div ref={ref} class={'toolbar toolbar-' + id} data-toolbar={id} data-folded={collapse ? folded : undefined} onMouseDown={e => { const t = e.target as HTMLInputElement; if (t.tagName !== 'SELECT' && t.tagName !== 'INPUT') e.preventDefault(); }}>
       {label && <span class="tb-label">{label}</span>}
       {layoutsAt === 0 && select}
       {groups.map((g, gi) => (

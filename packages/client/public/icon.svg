@@ -1,33 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- OverLyX favicon: "O·LYX" — the O in the wordmark's blue/cyan/chrome/pink sweep, a centred dot,
-       then LYX the way lyx.org draws it (heavy tilted caps, blue L / yellow Y / red X). All geometry,
-       no fonts, so it renders identically everywhere. -->
-  <defs>
-    <linearGradient id="over" gradientUnits="userSpaceOnUse" x1="2" y1="15" x2="19" y2="49">
-      <stop offset="0" stop-color="#2f5fdb"/>
-      <stop offset="0.3" stop-color="#16b3e6"/>
-      <stop offset="0.5" stop-color="#b3bedc"/>
-      <stop offset="0.7" stop-color="#ff2ec4"/>
-      <stop offset="1" stop-color="#9b1fd6"/>
-    </linearGradient>
-    <linearGradient id="dot" gradientUnits="userSpaceOnUse" x1="20" y1="30" x2="24.5" y2="34.5">
-      <stop offset="0" stop-color="#ff2ec4"/>
-      <stop offset="1" stop-color="#9b1fd6"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="12" fill="#ffffff"/>
-  <!-- O: heavy italic -->
-  <path transform="translate(9.8,32) skewX(-10) translate(-9.8,-32)" fill="url(#over)" fill-rule="evenodd"
-        d="M9.8,17 A8.5,15 0 1,0 9.8,47 A8.5,15 0 1,0 9.8,17 Z M9.8,21.8 A3.4,10.2 0 1,1 9.8,42.2 A3.4,10.2 0 1,1 9.8,21.8 Z"/>
-  <!-- centred dot -->
-  <circle cx="22" cy="32" r="2.3" fill="url(#dot)"/>
-  <!-- L Y X with a soft drop shadow -->
-  <g fill="#000" opacity="0.2" transform="translate(0.9,0.9)">
-    <path transform="rotate(-11 30.5 31) translate(25.2,16)" d="M0,0 H7.2 V22.6 H10.5 V30 H0 Z"/>
-    <path transform="rotate(6 43 35.5) translate(35.5,20.5)" d="M0,0 H5 L10.4,17 H4.6 Z M10,0 H15 L10.4,17 H4.6 Z M4.6,15 H10.4 V30 H4.6 Z"/>
-    <path transform="rotate(10 53.8 31.5) translate(47.3,16.5)" d="M0,0 H5.6 L13 30 H7.4 Z M7.4,0 H13 L5.6,30 H0 Z"/>
+  <!-- OverLyX favicon: LYX circled by an O — the wordmark's tilted capitals (blue L, yellow Y, red X,
+       as lyx.org draws them) inside a graphite ring on a paper disc, so it reads on light and dark tab
+       bars alike. Strokes only, no fonts: it renders identically everywhere. -->
+  <circle cx="32" cy="32" r="28.5" fill="#fbfaf7"/>
+  <circle cx="32" cy="32" r="26.2" fill="none" stroke="#1c1b19" stroke-width="5"/>
+  <g fill="none" stroke-width="4.6" stroke-linecap="butt" stroke-linejoin="miter">
+    <path stroke="#2152a3" transform="rotate(-12 19.5 32)" d="M16.4 21.5 V41.2 H24.6"/>
+    <path stroke="#efb21a" transform="rotate(7 31.5 33) translate(0 1.4)" d="M26.6 21.5 L31.5 30.6 L36.4 21.5 M31.5 30.6 V42"/>
+    <path stroke="#d6402b" transform="rotate(12 43.4 32)" d="M38.6 21.5 L48.2 42 M48.2 21.5 L38.6 42"/>
   </g>
-  <path fill="#2f7fd6" transform="rotate(-11 30.5 31) translate(25.2,16)" d="M0,0 H7.2 V22.6 H10.5 V30 H0 Z"/>
-  <path fill="#f3b400" transform="rotate(6 43 35.5) translate(35.5,20.5)" d="M0,0 H5 L10.4,17 H4.6 Z M10,0 H15 L10.4,17 H4.6 Z M4.6,15 H10.4 V30 H4.6 Z"/>
-  <path fill="#e14b2c" transform="rotate(10 53.8 31.5) translate(47.3,16.5)" d="M0,0 H5.6 L13 30 H7.4 Z M7.4,0 H13 L5.6,30 H0 Z"/>
 </svg>

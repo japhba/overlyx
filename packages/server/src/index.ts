@@ -43,7 +43,7 @@ import { gdocsRoutes } from './gdocs/routes.ts';
 import { startAutoSync } from './gdocs/sync.ts';
 import { ownProjectKey } from './projectCreate.ts';
 import { sandboxAvailable } from './sandbox.ts';
-import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests } from './access.ts';
+import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests, projectPeople } from './access.ts';
 import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
 import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, feedbackEnabled, appVersion, appCommit } from './feedback.ts';
 import { usageRoutes } from './usage.ts';
@@ -195,7 +195,9 @@ api.get('/projects', (req, res) => {
   ensureStarterProjects(req.user!);
   // when this user last opened each project (the start screen sorts by recency)
   const opened = lastOpenedByProject(req.user!.id);
-  res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null })) });
+  const people = projectPeople();
+  res.json({ projects: accessibleProjects(req.user!).map(p => ({ name: p.name, title: p.title, kind: p.kind, role: p.role, via: p.via, owner: p.owner, files: p.files, lastOpened: opened.get(p.name) ?? null,
+    members: people.get(p.name)?.people ?? [], invited: people.get(p.name)?.invited ?? 0 })) });
   void ensureAllRepos();   // directories that appeared since (created by hand, the welcome and starter projects) get their repository
 });
 

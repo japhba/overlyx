@@ -517,7 +517,8 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
   // the Modern row: the common tools; the rest of LyX's rows (action buttons) under ⋮
   const btn = (groups: ToolButton[][], id: string) => groups.flat().find(b => b.id === id);
   const pick = (groups: ToolButton[][], ids: string[]) => ids.map(id => btn(groups, id)).filter((b): b is ToolButton => !!b);
-  const inModern = new Set(['undo', 'redo', 'spellcheck', 'fontfamily', 'fontsize', 'bold', 'italic', 'underline', 'textcolor', 'href', 'comment', 'graphics', 'table', 'math', 'dmath', 'l-itemize', 'l-enumerate', 'depthout', 'depthin']);
+  const inModern = new Set(['undo', 'redo', 'spellcheck', 'fontfamily', 'fontsize', 'bold', 'italic', 'underline', 'textcolor', 'href', 'comment', 'footnote',
+    'ref', 'cite', 'label', 'graphics', 'float', 'table', 'math', 'dmath', 'ert', 'l-itemize', 'l-enumerate', 'depthout', 'depthin']);
   const moreItems = [...standard, ...extra].flat().filter(b => !inModern.has(b.id) && b.action && !b.widget && !b.palette)
     .map(b => ({ label: b.title.replace(/\s*\(.*\)\s*$/, ''), title: b.title, html: MODERN_SVG(b.id) ?? undefined, action: b.action!, active: b.active }));
   const modern: ToolButton[][] = [
@@ -525,7 +526,10 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
     pick([...standard], ['undo', 'redo', 'spellcheck']),
     pick(standard, ['fontfamily', 'fontsize']),
     pick(standard, ['bold', 'italic', 'underline', 'textcolor']),
-    [...pick(extra, ['href', 'comment']), ...pick(standard, ['graphics', 'table', 'math', 'dmath'])],
+    pick(extra, ['href', 'comment']),
+    pick(extra, ['ref', 'cite']),   // LaTeX's own: cross-reference, citation
+    [...pick(standard, ['graphics']), ...pick(extra, ['float']), ...pick(standard, ['table', 'math', 'dmath'])],
+    pick(extra, ['footnote', 'label', 'ert']),
     [...pick(extra, ['l-itemize', 'l-enumerate', 'depthout', 'depthin']), { id: 'font-clear', title: 'Clear formatting (Ctrl+Space)', icon: 'Tx', action: () => run(C.fontDefault) }],
     [{ id: 'modern-more', title: 'More: everything of LyX’s toolbars', icon: '⋮', palette: { title: 'More tools', list: true, cols: 1, items: moreItems } }],
   ].filter(g => g.length);
@@ -533,6 +537,11 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
   const bars = { standard, viewUpdate, extra, math, mathPanels, table, review, layout: layoutRow, modern, showLayout, showMath, showTable, showReview };
   return isMarkdownDoc(docId) || meta?.format === 'markdown' ? markdownToolbars(bars, ctx) : bars;
 }
+
+/** the Modern row folds into its ⋮ when the window is narrow: lists / indent / clear first, then
+ *  footnote / label / TeX code, then link / comment, then cross-reference / citation (the formatting
+ *  and the inserts — picture, figure, table, formulas — stay) */
+export const MODERN_COLLAPSE = { order: ['l-itemize', 'footnote', 'href', 'ref'], more: 'modern-more' };
 
 /** buttons of the LaTeX toolbars for what markdown has no syntax for: not shown in a markdown document */
 const NOT_MARKDOWN = new Set([

@@ -126,6 +126,11 @@ describe('sharing with people', () => {
     expect(access.isInvited('dave@example.com')).toBe(true);
     expect(access.isInvited('eve@example.com')).toBe(false);
     expect(access.isInvited('owner@example.com')).toBe(true);
+    // the project list's people: Carol by name; Dave only counts as invited — and no address shows
+    const before = access.projectPeople().get('jan/legacy')!;
+    expect(before.people.map(p => [p.username, p.role])).toEqual([['carol', 'edit']]);
+    expect(before.invited).toBe(1);
+    expect(JSON.stringify(before)).not.toMatch(/@/);
     // Dave signs in with Google: the invitation becomes a membership of the new account
     const dave = toSessionUser(createUser('dave', 'Dave', null, { email: 'dave@example.com', googleSub: 'g-dave' }));
     expect(access.roleFor(dave, 'jan/legacy')).toBe('view');     // matched by e-mail already
@@ -133,6 +138,7 @@ describe('sharing with people', () => {
     const m = access.shareInfo('jan/legacy').members.find(m => m.user?.username === 'dave');
     expect(m?.role).toBe('view');
     expect(db.prepare('SELECT COUNT(*) AS n FROM project_members WHERE user_id IS NULL').get()).toEqual({ n: 0 });
+    expect(access.projectPeople().get('jan/legacy')).toMatchObject({ invited: 0, people: [{ username: 'carol' }, { username: 'dave', name: 'Dave', role: 'view', guest: false }] });
     expect(() => access.addMember('jan/legacy', 'bad@address', 'view', jan)).toThrow(/valid e-mail/);
   });
 });

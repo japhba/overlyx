@@ -28,7 +28,7 @@ import { setThemePref, useTheme } from './theme';
 import { useUiMode, setUiMode, adoptAccountUi } from './uimode';
 import { usePresentation } from './presentation';
 import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
-import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
+import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, MODERN_COLLAPSE, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
 import { debounce, hashAuthor, applyAuthorColors, bcp47, suggestLabel, LayoutPicker, documentStats, applyEditorZoom, SidebarGrip, restoreSidebarWidths } from './shellutil';
 import { setDocumentFonts } from '../fonts/editorfont';
 import { setDocumentParagraphs } from '../editor/paragraphsep';
@@ -1455,7 +1455,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       {/* the Modern interface: one rounded row (toolbars.tsx `modern`), the mode switch at its end, as in Google Docs */}
       {isLyxDoc && ui === 'modern' && (
         <div class="tb-modern-row">
-          <Toolbar id="modern" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} layoutsAt={2} groups={tb.modern} />
+          <Toolbar id="modern" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} layoutsAt={2} groups={tb.modern} collapse={MODERN_COLLAPSE} />
           <span class="tb-modern-end">
             <ZoomControl zoom={zoom} onZoom={setZoom} />
             <button type="button" class="tb-pdf-btn" title="Build and show the PDF (Ctrl+R)" onClick={() => { void build(); }}>PDF</button>

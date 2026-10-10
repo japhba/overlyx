@@ -72,7 +72,43 @@ test.describe('landing page', () => {
     await expect(app.locator('.menu-main-panel .mm-items .menu-item', { hasText: 'Comment thread' })).toBeVisible();
     await app.keyboard.press('Escape');
     await expect(app.locator('.menu-main-panel')).toHaveCount(0);
+    // the toolbar strip: cross-reference and citation are on it; what does not fit folds into ⋮
+    await app.setViewportSize({ width: 1280, height: 800 });
+    await expect(app.locator('.tb-modern-row [data-tb="ref"]')).toBeVisible();
+    await expect(app.locator('.tb-modern-row [data-tb="cite"]')).toBeVisible();
+    const strip = app.locator('.tb-modern-row > .toolbar');
+    await expect.poll(() => strip.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await app.locator('.tb-modern-row [data-tb="modern-more"]').click();
+    await expect(app.locator('[data-palette="modern-more"] .tb-pal-item', { hasText: 'Footnote' })).toBeVisible();
+    await app.keyboard.press('Escape');
+    // file icons are line icons in Modern, not shapes or emoji
+    await expect(app.locator('.filetree .ficon.icon svg').first()).toBeVisible();
     await ctx.close();
+  });
+
+  test('coming from LyX: a .bind file chosen before the sign-in becomes shortcuts once a document is open', async ({ page }) => {
+    await page.addInitScript(TOUR_SEEN_SCRIPT);
+    await page.goto('/');
+    await expect(page.locator('[data-from-lyx]')).toContainText('Coming from LyX?');
+    await page.locator('[data-from-lyx-file]').setInputFiles({ name: 'user.bind', mimeType: 'text/plain', buffer: Buffer.from('# mine\n\\bind "C-S-b" "font-bold"\n\\bind "M-p 2" "layout Section"\n') });
+    await expect(page.locator('[data-from-lyx-note]')).toContainText('user.bind: 2 key bindings');
+    const creds = userCredentials('bob');
+    await page.getByPlaceholder('Username').fill(creds.username);
+    await page.getByPlaceholder('Password').fill(creds.password);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.waitForSelector('.home', { timeout: 30000 });
+    await page.request.get(BASE_URL + '/api/projects');
+    await page.goto('/#/bob/welcome/welcome.tex');
+    // the menus are there: the file applies, and says what it left out
+    const dlg = dialogLocator(page);
+    await expect(dlg).toContainText('1 shortcut from user.bind now apply', { timeout: 30000 });
+    await expect(dlg).toContainText('M-p 2 → layout Section: a chord');
+    await acceptDialog(page);
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('ol.keys') ?? '{}')['Edit ▸ Text Style ▸ Bold'])).toBe('Ctrl+Shift+B');
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('ol.lyxbind'))).toBeNull();
+    // (bob's other tests expect LyX's default keys)
+    await page.request.post(BASE_URL + '/api/keys', { data: { keys: {} } });
+    await page.evaluate(() => localStorage.removeItem('ol.keys'));
   });
 
   test('with Google: one big Google button, the password form folded away behind a quiet link', async ({ page }) => {

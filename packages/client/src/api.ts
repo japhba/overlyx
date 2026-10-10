@@ -30,7 +30,12 @@ export interface Project {
   owner?: { id: number; name: string; username: string } | null;
   /** when this user last opened the project (server clock), null: never */
   lastOpened?: number | null;
+  /** who joined it besides the owner (server access.ts projectPeople): names and avatars, in the order they came */
+  members?: ProjectPerson[];
+  /** invitations to an address without an account yet */
+  invited?: number;
 }
+export interface ProjectPerson { name: string; username: string; color: string; avatar: string | null; role: 'view' | 'edit'; via: string; since: number; guest: boolean }
 export interface ShareMember { id: number; role: 'view' | 'edit'; via: string; email: string | null; user: { id: number; name: string; username: string; color: string; avatar: string | null } | null }
 /** a zip import: `projects` lists every project the archive produced (several for an Overleaf bundle of zips), `errors` the ones that failed */
 export interface ZipImportResult { ok: boolean; name: string; files: number; skipped: string[]; projects: { name: string; files: number; skipped: string[] }[]; errors: { name: string; error: string }[] }

@@ -8,12 +8,13 @@ import { AvatarContent, initials } from './Avatar';
 import { setThemePref, useTheme, DARK_TONES, type ThemePref } from './theme';
 import { getPrefs, setPref } from '../prefs';
 import { showContextMenu, type MenuItem } from '../editor/contextmenu';
-import { uiConfirm } from './Dialogs';
+import { uiConfirm, uiAlert } from './Dialogs';
 import { formatShortcut } from './shortcuts';
 import { recordUsage, menuKey } from '../usage';
 import { tookActionWithout } from '../shortcuttips';
 import { canonical, effectiveShortcut, getBindings, isCustom, keyFromEvent, setBinding, subscribeBindings } from './keybindings';
 import { useUiMode } from './uimode';
+import { planBind, pendingLyxBind, clearPendingLyxBind, LYXBIND_EVENT } from './lyxbind';
 
 /** the right-click menu of the switch: the text tone of the dark theme (app/theme.ts DARK_TONES) */
 export function darkToneMenuItems(): MenuItem[] {
@@ -318,6 +319,30 @@ export function MenuBar({ menus, user, right, primary, title, onLogout, onSettin
     }
     return { custom, shadowed };
   }, [entries, bindings]);
+  // a LyX .bind file chosen on the landing page or in Settings: applied once a document's commands are here
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  useEffect(() => {
+    const apply = () => {
+      const file = pendingLyxBind();
+      const all = entriesRef.current;
+      if (!file || !all.some(e => e.id === 'Edit ▸ Text Style ▸ Bold')) return;
+      clearPendingLyxBind();
+      const plan = planBind(file.text, all);
+      for (const b of plan.set) setBinding(b.id, b.key);
+      const other = plan.includes.filter(f => !/^(cua|menus|math)$/.test(f));
+      const lines = [
+        plan.set.length ? `${plan.set.length} shortcut${plan.set.length === 1 ? '' : 's'} from ${file.name} now apply (on top of LyX's default keys, which OverLyX uses anyway).` : `Nothing in ${file.name} differs from LyX's default keys, which OverLyX uses already.`,
+        ...(other.length ? [`It builds on LyX's ${other.join(', ')} keymap — choose that .bind file too to take its keys.`] : []),
+        ...(plan.skipped.length ? ['', `Left out (${plan.skipped.length}):`, ...plan.skipped.slice(0, 10).map(k => `• ${k.keys} → ${k.lfun}: ${k.why}`), ...(plan.skipped.length > 10 ? [`… and ${plan.skipped.length - 10} more`] : [])] : []),
+        '', 'Help ▸ the search lists every shortcut; ✎ changes one, ↺ puts its default back.',
+      ];
+      void uiAlert('LyX Key Bindings', lines.join('\n'));
+    };
+    apply();
+    window.addEventListener(LYXBIND_EVENT, apply);
+    return () => window.removeEventListener(LYXBIND_EVENT, apply);
+  }, [entries.length]);
   const live = useRef({ keyIndex, recording, open, searchIndex, overflowOpen });
   live.current = { keyIndex, recording, open, searchIndex, overflowOpen };
 

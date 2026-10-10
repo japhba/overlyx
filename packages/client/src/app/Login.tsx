@@ -17,6 +17,7 @@ import { Wordmark } from './Logo';
 import { api, googleSignInUrl, type User } from '../api';
 import { useTheme } from './theme';
 import { OverleafStart } from './OverleafStart';
+import { stashLyxBind, pendingLyxBind, bindCount } from './lyxbind';
 import './landing.css';
 
 export const GITHUB_URL = 'https://github.com/japhba/overlyx';
@@ -154,6 +155,23 @@ function DemoWheel() {
   );
 }
 
+/**
+ * Coming from LyX: OverLyX already uses LyX's keys; a user's own .bind file (bind/user.bind of their
+ * LyX user directory) is kept in the browser and applied after the sign-in (app/lyxbind.ts).
+ */
+function LyxStart() {
+  const [file, setFile] = useState<{ name: string; count: number } | null>(() => { const p = pendingLyxBind(); return p ? { name: p.name, count: bindCount(p.text) } : null; });
+  const pick = (f: File | undefined) => { if (f) void f.text().then(t => { stashLyxBind(f.name, t); setFile({ name: f.name, count: bindCount(t) }); }); };
+  return (
+    <div class="from-lyx" data-from-lyx>
+      <p><strong>Coming from LyX?</strong> OverLyX uses LyX’s keys already. Bring your own as well — choose your <code>bind/user.bind</code> (or any .bind file); it applies once you are signed in, on every browser.</p>
+      <button type="button" class="fl-pick" data-from-lyx-pick onClick={e => (e.currentTarget.nextElementSibling as HTMLInputElement | null)?.click()}>Choose a .bind file</button>
+      <input type="file" hidden accept=".bind,text/plain" data-from-lyx-file onChange={e => { pick((e.target as HTMLInputElement).files?.[0]); (e.target as HTMLInputElement).value = ''; }} />
+      {file && <span class="fl-note" data-from-lyx-note>{file.name}: {file.count} key binding{file.count === 1 ? '' : 's'} — applied after you sign in.</span>}
+    </div>
+  );
+}
+
 export function Login({ onLogin, google, note, onBack }: {
   onLogin: (u: User) => void; google: boolean;
   /** why the visitor is here (a share link that did not open, a guest keeping a project) */
@@ -240,6 +258,7 @@ export function Login({ onLogin, google, note, onBack }: {
           </ul>
         </section>
         <OverleafStart google={google} onSignIn={importAndSignIn} googleIcon={<GoogleG />} onChange={setPendingCount} />
+        <LyxStart />
         <footer class="foot">
           <span class="foot-name">OverLyX — open source, built on LyX and LaTeX.</span>
           <nav class="links" aria-label="About OverLyX">

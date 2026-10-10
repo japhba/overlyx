@@ -155,6 +155,31 @@ export function accessibleProjects(user: SessionUser, opts: { files?: boolean } 
   return out;
 }
 
+/** someone who joined a project, as the project list shows them: a name and an avatar — never an address */
+export interface ProjectPerson { name: string; username: string; color: string; avatar: string | null; role: string; via: string; since: number; guest: boolean }
+
+/**
+ * Who joined each project: members with an account (invited by name, by an address that has an
+ * account by now, or come in through the link), the strongest role of each, in the order they came;
+ * invitations to an address without an account yet only count. For the project list (all of a
+ * project's people see who else is in it, as in a document's presence bar).
+ */
+export function projectPeople(): Map<string, { people: ProjectPerson[]; invited: number }> {
+  const rows = db.prepare(`SELECT m.project, m.role, m.via, m.created_at, u.id AS uid, u.display_name, u.username, u.color, u.avatar_url, u.is_guest
+    FROM project_members m LEFT JOIN users u ON u.id = m.user_id OR (m.user_id IS NULL AND m.email IS NOT NULL AND u.email IS NOT NULL AND lower(u.email) = lower(m.email))
+    ORDER BY m.created_at`).all() as { project: string; role: string; via: string; created_at: number; uid: number | null; display_name: string | null; username: string | null; color: string | null; avatar_url: string | null; is_guest: number | null }[];
+  const out = new Map<string, { people: ProjectPerson[]; invited: number }>();
+  for (const r of rows) {
+    const e = out.get(r.project) ?? { people: [], invited: 0 };
+    out.set(r.project, e);
+    if (r.uid == null || !r.username) { e.invited++; continue; }
+    const had = e.people.find(x => x.username === r.username);
+    if (had) { if (r.role === 'edit') had.role = 'edit'; continue; }
+    e.people.push({ name: r.display_name ?? r.username, username: r.username, color: r.color ?? '#888', avatar: r.avatar_url ? `/api/users/${r.uid}/avatar` : null, role: r.role, via: r.via, since: r.created_at, guest: !!r.is_guest });
+  }
+  return out;
+}
+
 /* ---------------------------------------------------------- administrators */
 
 /** An administrator's grant on a project: owner rights for a while, always logged. */

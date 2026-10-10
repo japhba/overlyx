@@ -14,6 +14,8 @@ import { showContextMenu, type MenuItem } from '../editor/contextmenu';
 import { projectOfDoc, splitDocId, projectShortName } from '@overlyx/core';
 import { uiPrompt, uiConfirm, uiAlert } from './Dialogs';
 import { promptNewFile } from './newfile';
+import { useUiMode } from './uimode';
+import { KIND_ICONS, iconSvg } from './modernicons';
 
 /**
  * Subscribe to the server's change stream for one project (SSE): `onChange` fires whenever files
@@ -73,6 +75,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   outlines?: DocOutlines;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
+  const modern = useUiMode() === 'modern';
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('ol.tree') || '{}'); } catch { return {}; } });
   const [showAll, setShowAll] = useState(false);
   const [picked, setPicked] = useState<string | null>(() => localStorage.getItem('ol.project'));
@@ -346,6 +349,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     const isPdf = f.kind === 'pdf';
     const isBoard = f.kind === 'board';
     const isHtml = f.kind === 'html';
+    const kind = isHtml && f.deliverable ? f.deliverable : f.name.toLowerCase().endsWith('.md') ? 'md' : f.kind;
     const inTab = isDoc || isLyx || isPdf || isBoard || isHtml || isTextFile(f.name);
     const tabId = isDoc || isBoard || isHtml ? id : isPdf ? 'pdf:' + id : 'text:' + id;
     const href = isLyx ? '#' : inTab ? '#/' + tabId : fileUrl(project!.name, f.path);
@@ -367,7 +371,9 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
         {outlines && (outlined
           ? <span class="twisty" role="button" title={open ? 'Hide the outline' : 'Show the outline'} onClick={e => { e.preventDefault(); e.stopPropagation(); outlines.toggle(id); }}>{open ? '▾' : '▸'}</span>
           : <span class="twisty" />)}
-        <span class="ficon" data-kind={f.kind === 'html' && f.deliverable ? f.deliverable : f.kind}>{f.kind === 'html' && f.deliverable ? DELIVERABLE_ICON[f.deliverable] : ICON[f.kind] ?? '·'}</span><span class="fname">{node.name}</span>
+        {modern
+          ? <span class="ficon icon" data-kind={kind} dangerouslySetInnerHTML={{ __html: iconSvg(KIND_ICONS[kind] ?? KIND_ICONS.other, 15) }} />
+          : <span class="ficon" data-kind={kind}>{f.kind === 'html' && f.deliverable ? DELIVERABLE_ICON[f.deliverable] : ICON[f.kind] ?? '·'}</span>}<span class="fname">{node.name}</span>
         {isDoc && offlineDocs.has(id) && <span class="offline-mark" title="A copy of this document is stored in this browser: it can be opened and edited offline">⬇</span>}
       </a>
     );

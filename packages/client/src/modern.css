@@ -238,7 +238,12 @@ html[data-ui="modern"] .toolbar select { height: 28px; border: 1px solid var(--m
 html[data-ui="modern"] .toolbar select:hover { border-color: var(--m-line-strong); }
 html[data-ui="modern"] .toolbar input[type=text], html[data-ui="modern"] .toolbar input[type=number] { border: 1px solid var(--m-line); background: var(--m-field); border-radius: 5px; color: var(--m-ink); }
 html[data-ui="modern"] .tb-caret { font-size: 8px; opacity: 0.6; }
-html[data-ui="modern"] .tb-face { font-size: 13px; min-width: 76px; text-align: left; display: inline-block; color: var(--m-ink); }
+html[data-ui="modern"] .tb-face { font-size: 13px; min-width: 56px; max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; display: inline-block; color: var(--m-ink); }
+/* the strip's room is precious (what does not fit folds into ⋮, Toolbar.tsx `collapse`): narrower fields and separators */
+html[data-ui="modern"] .tb-modern-row .toolbar select { max-width: 102px; }
+html[data-ui="modern"] .tb-modern-row .toolbar .tb-sep { margin: 0 4px; }
+html[data-ui="modern"] .tb-modern-row .fs-box .tb-btn.fs-step { width: 22px; min-width: 22px; }
+html[data-ui="modern"] .tb-modern-row .fs-box .tb-btn.fs-drop { width: 16px; min-width: 16px; }
 html[data-ui="modern"] .tb-modern-row .zoom { display: inline-flex; align-items: center; gap: 0; }
 html[data-ui="modern"] .tb-modern-row .zoom-btn { border: 0; background: none; color: var(--m-ink2); width: 24px; height: 28px; border-radius: 4px; font-size: 15px; cursor: pointer; }
 html[data-ui="modern"] .tb-modern-row .zoom-btn:hover { background: var(--m-hover); }
@@ -254,12 +259,6 @@ html[data-ui="modern"] .toolbar-layout .tb-label { display: none; }
 html[data-ui="modern"] .bottom-toolbars { left: 50% !important; right: auto !important; transform: translateX(-50%); bottom: 32px; width: max-content; max-width: calc(100vw - 48px); box-shadow: none; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
 html[data-ui="modern"] .bottom-toolbars .toolbar { pointer-events: auto; border: 1px solid var(--m-line); border-radius: 10px; background: var(--m-paper); box-shadow: var(--m-shadow); padding: 4px 8px; max-width: calc(100vw - 48px); flex-wrap: wrap; justify-content: center; }
 html[data-ui="modern"] .bottom-toolbars .toolbar .tb-label, html[data-ui="modern"] .dl-ctx .toolbar .tb-label { display: inline-flex; align-items: center; gap: 7px; color: var(--m-ink2); font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; padding: 0 6px 0 4px; }
-/* each row's mark: the formula a circle, the table a square, the review a triangle */
-html[data-ui="modern"] .toolbar .tb-label::before { content: ''; width: 8px; height: 8px; flex: none; background: var(--m-ink2); }
-html[data-ui="modern"] .toolbar-math .tb-label::before { border-radius: 50%; background: var(--m-blue); }
-html[data-ui="modern"] .toolbar-mathpanels .tb-label::before { border-radius: 50%; background: none; box-shadow: inset 0 0 0 1.5px var(--m-blue); }
-html[data-ui="modern"] .toolbar-table .tb-label::before { background: var(--m-red); }
-html[data-ui="modern"] .toolbar-review .tb-label::before { width: 9px; background: var(--m-yellow); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 
 /* ------------------------------------------------------------ the files panel */
 html[data-ui="modern"] .sidebar { background: var(--ui-bg); border-right: 1px solid var(--m-line2); }
@@ -280,22 +279,10 @@ html[data-ui="modern"] .small-btn.primary { background: var(--m-signal); border-
 html[data-ui="modern"] .sidebar-grip:hover, html[data-ui="modern"] .sidebar-grip:active { background: var(--m-signal); opacity: 0.5; }
 html[data-ui="modern"] .badge { border-radius: 3px; background: var(--chip-bg); color: var(--m-ink2); font-weight: 600; letter-spacing: 0.03em; }
 
-/* the marks of what a file is (FileBrowser's .ficon, Home's .hglyph): square, triangle, circle */
-html[data-ui="modern"] :is(.ficon, .hglyph)[data-kind] { font-size: 0 !important; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex: none; vertical-align: -2px; }
-html[data-ui="modern"] :is(.ficon, .hglyph)[data-kind]::before { content: ''; display: block; width: 8px; height: 8px; background: var(--m-muted); }
-html[data-ui="modern"] :is(.ficon, .hglyph):is([data-kind="doc"], [data-kind="tex"], [data-kind="lyx"], [data-kind="md"])::before { background: var(--m-red); }
-html[data-ui="modern"] :is(.ficon, .hglyph):is([data-kind="deck"], [data-kind="poster"])::before { width: 10px; height: 9px; background: var(--m-yellow); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
-html[data-ui="modern"] :is(.ficon, .hglyph)[data-kind="poster"]::before { width: 11px; height: 10px; clip-path: none; background: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 11 10%27><path d=%27M5.5 1.2 10 9.2H1z%27 fill=%27none%27 stroke=%27%23efb21a%27 stroke-width=%271.6%27 stroke-linejoin=%27round%27/></svg>") center / contain no-repeat; }
-html[data-ui="modern"] :is(.ficon, .hglyph):is([data-kind="board"])::before { border-radius: 50%; background: var(--m-blue); }
-html[data-ui="modern"] :is(.ficon, .hglyph):is([data-kind="page"], [data-kind="html"])::before { border-radius: 50%; background: none; box-shadow: inset 0 0 0 1.5px var(--m-blue); }
-html[data-ui="modern"] :is(.ficon, .hglyph)[data-kind="bib"]::before { height: 9px; width: 8px; background: linear-gradient(var(--m-ink2) 0 1.5px, transparent 1.5px 3.75px, var(--m-ink2) 3.75px 5.25px, transparent 5.25px 7.5px, var(--m-ink2) 7.5px 9px); }
-html[data-ui="modern"] :is(.ficon, .hglyph)[data-kind="image"]::before { width: 10px; height: 8px; background: none; box-shadow: inset 0 0 0 1.5px var(--m-muted); }
-html[data-ui="modern"] :is(.ficon, .hglyph)[data-kind="pdf"]::before { width: 7px; height: 9px; background: none; box-shadow: inset 0 0 0 1.5px var(--m-ink2); }
-html[data-ui="modern"] :is(.ficon, .hglyph)[data-kind="other"]::before { width: 4px; height: 4px; border-radius: 50%; background: var(--m-line-strong); }
-html[data-ui="modern"] .hglyph[data-kind="project"]::before { width: 9px; height: 9px; background: var(--m-black); }
-/* the example project: the three marks */
-html[data-ui="modern"] .hglyph[data-kind="hello"] { width: 34px; }
-html[data-ui="modern"] .hglyph[data-kind="hello"]::before { width: 34px; height: 10px; background: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 34 10%27><circle cx=%275%27 cy=%275%27 r=%274.6%27 fill=%27%232f5fb3%27/><rect x=%2712.4%27 y=%27.4%27 width=%279.2%27 height=%279.2%27 fill=%27%23d6402b%27/><path d=%27M29 .2 33.8 9.8H24.2z%27 fill=%27%23efb21a%27/></svg>") center / contain no-repeat; }
+/* what a file or a project is (FileBrowser's .ficon, Home's .hglyph): Lucide line icons (modernicons.ts KIND_ICONS) */
+html[data-ui="modern"] :is(.ficon, .hglyph).icon { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: none; vertical-align: -3px; font-size: 0; color: var(--m-ink2); }
+html[data-ui="modern"] :is(.ficon, .hglyph).icon svg { width: 15px; height: 15px; }
+html[data-ui="modern"] .tree-row.current .ficon.icon { color: var(--m-ink); }
 
 /* ------------------------------------------------------------ the page: a sheet on a warm canvas */
 html[data-ui="modern"] .editor-scroll { background: var(--m-canvas); }

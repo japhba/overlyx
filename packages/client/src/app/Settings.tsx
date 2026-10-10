@@ -15,6 +15,8 @@ import type { ComponentChildren } from 'preact';
 import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser } from '../api';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { resetShortcutTips } from '../shortcuttips';
+import { stashLyxBind } from './lyxbind';
+import { resetAllBindings } from './keybindings';
 import { setThemePref, useTheme, type ThemePref } from './theme';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import { Dialog } from './Dialogs';
@@ -161,6 +163,12 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             <h3>Shortcuts</h3>
             {check('shortcutTips', 'Shortcut tips', 'An action that has a shortcut but is taken with the mouse — a toolbar button, a menu entry, the right-click menu — shows its shortcut from the third time on, five times; pressing the shortcut once ends its tips.')}
             <Row label=""><button type="button" data-reset-shortcut-tips disabled={!p.shortcutTips} onClick={() => resetShortcutTips()}>Show all tips again</button></Row>
+            <div class="sub">OverLyX uses LyX’s default keys (cua.bind, menus.bind, math.bind). Bring your own from LyX: choose its <code>bind/user.bind</code> (or another .bind file) — what it binds to a command OverLyX has becomes that command’s shortcut, on every browser you sign in with.</div>
+            <Row label="">
+              <button type="button" data-import-lyxbind onClick={e => (e.currentTarget.nextElementSibling as HTMLInputElement | null)?.click()}>Import LyX key bindings (.bind)…</button>
+              <input type="file" accept=".bind,text/plain" hidden data-import-lyxbind-file onChange={e => { const f = (e.target as HTMLInputElement).files?.[0]; (e.target as HTMLInputElement).value = ''; if (f) void f.text().then(t => stashLyxBind(f.name, t)); }} />
+              <button type="button" data-reset-shortcuts onClick={() => resetAllBindings()}>Back to LyX’s default keys</button>
+            </Row>
           </>}
           {section === 'ai' && <>
             <h3>AI assistance</h3>

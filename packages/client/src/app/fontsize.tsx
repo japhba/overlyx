@@ -4,10 +4,11 @@
  * offers the named sizes with their points at the document's base size. Works on text, table cells,
  * a formula (as a whole) and a selected text box (editor/fontsize.ts).
  */
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { EditorView } from 'prosemirror-view';
 import { applyFontSize, activeFormula, baseSize, currentSize, stepSize, sizeTable, NAMED_SIZES, NAMED_LABELS, LAYOUT_LADDER, withNodeMark, ptToSize } from '../editor/fontsize';
 import { isLayoutDoc } from '../editor/layout/commands';
+import { pinUnder } from './popup';
 
 const fmt = (n: number) => String(Math.round(n * 100) / 100);
 
@@ -17,6 +18,7 @@ export function FontSizeBox({ view }: { view: EditorView }) {
   const [focused, setFocused] = useState(false);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   /** the formula being edited when the field took the focus (the formula loses it to the field) */
   const formula = useRef<{ pos: number } | null>(null);
   useEffect(() => { if (!focused) setText(fmt(cur.pt)); }, [cur.pt, focused]);
@@ -26,6 +28,8 @@ export function FontSizeBox({ view }: { view: EditorView }) {
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
+  // the list fixed under the box: the Modern toolbar strip scrolls sideways and would clip it
+  useLayoutEffect(() => { if (open && popRef.current && ref.current) pinUnder(popRef.current, ref.current); }, [open]);
   const apply = (pt: number) => {
     if (!(pt > 0)) return;
     const f = formula.current;
@@ -61,7 +65,7 @@ export function FontSizeBox({ view }: { view: EditorView }) {
       <button type="button" class="tb-btn fs-drop" title="Font sizes" onClick={() => setOpen(o => !o)}>▾</button>
       <button type="button" class="tb-btn fs-step" title="Larger" onClick={() => apply(stepSize(view, cur.pt, 1))}>+</button>
       {open && (
-        <div class="tb-popup list fs-list" role="menu">
+        <div ref={popRef} class="tb-popup list fs-list" role="menu">
           {!layout && <div class="tb-popup-title">LaTeX sizes at {fmt(base)} pt</div>}
           {!layout && NAMED_SIZES.map((n, i) => (
             <button key={n} type="button" class={'tb-pal-item' + (Math.abs(table[i] - cur.pt) < 0.05 ? ' active' : '')} onMouseDown={e => e.preventDefault()} onClick={() => { setOpen(false); apply(table[i]); }}>
