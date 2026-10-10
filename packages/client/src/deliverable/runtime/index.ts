@@ -16,13 +16,14 @@
 import type { ToRuntime, Path } from '../protocol';
 import { MODE, post, state, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign } from './env';
 import { startMath, typesetPage } from './math';
+import { renderCites, refreshCites, addEntries, CITE_CSS } from './cite';
 import { applySource, whenTypeset } from './reconcile';
 import * as edit from './edit';
 import { arrange, paint } from './arrange';
 import { nodeCommand } from './pathedit';
 import { setView, refreshView, reportColors } from './view';
 import { startPresenting } from './present';
-import { report } from './report';
+import { report, rememberPage } from './report';
 
 function addStyle(css: string): HTMLStyleElement {
   const s = document.createElement('style');
@@ -203,6 +204,8 @@ function onMessage(e: MessageEvent): void {
     case 'mathDone': if (MODE === 'edit') edit.mathDone(m.id, m.tex, m.dir, m.putBack); break;
     case 'mathDisplay': if (MODE === 'edit') edit.mathDisplay(m.id); break;
     case 'typeKeys': if (MODE === 'edit') edit.typeKeys(m.keys); break;
+    case 'bib': addEntries(m.entries); break;
+    case 'insertRef': if (MODE === 'edit') edit.insertRef(m.src); break;
     case 'insertMath': if (MODE === 'edit') edit.insertMath(m.display); break;
     case 'nodes': if (MODE === 'edit') nodeCommand(m.cmd); break;
   }
@@ -258,8 +261,12 @@ function settle(): Promise<void> {
 function init(): void {
   state.kind = detectKind();
   addStyle(NOTES_CSS);
+  if (MODE === 'check') rememberPage();
   // the formulas hidden (never their TeX on screen) and MathJax fetched while the page's fonts load
   startMath();
+  // citations and lists of references (cite.ts)
+  addStyle(CITE_CSS);
+  if (document.body) { renderCites([document.body]); refreshCites(); }
   window.__ol = { report, version: () => state.version, slides: () => slideBoxes(), size: pageSize };
   if (MODE === 'present') startPresenting();
   if (MODE === 'edit') edit.startEditing();
@@ -267,7 +274,7 @@ function init(): void {
   if (MODE === 'edit' || MODE === 'thumb') {
     addEventListener('message', onMessage);
     const sz = pageSize();
-    post({ ol: 'ready', version: null, kind: state.kind, slides: slideBoxes(), width: sz.width, height: sz.height, docHeight: document.documentElement.scrollHeight });
+    post({ ol: 'ready', version: null, kind: state.kind, slides: slideBoxes(), width: sz.width, height: sz.height, docHeight: document.documentElement.scrollHeight, macros: window.__OL?.macros });
   }
   void settle().then(() => {
     slideBoxes();   // (numbers the slides for the renderer's screenshots)

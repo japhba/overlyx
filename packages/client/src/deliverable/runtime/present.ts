@@ -1,6 +1,7 @@
 /**
  * Presenting a deck: one slide at a time, scaled to fill the window, on black; →, Space, PageDown,
- * a click go on; ←, PageUp, Backspace go back; Home / End; a number and Enter jumps; Escape asks
+ * a click go on — through a slide's steps first (data-step, data-steps: beamer's overlays) —;
+ * ←, PageUp, Backspace go back (to the slide before as it ends); Home / End; a number and Enter jumps; Escape asks
  * the editor to end the presentation. The slide shown is in the URL's hash (#3), so a reload or a
  * shared link keeps it. A poster is shown whole, a web page as it is.
  *
@@ -9,8 +10,11 @@
  */
 import { slides, post } from './env';
 import { PresentKit, type ZoomView } from '../../app/presentkit';
+import { stepOf } from '@overlyx/core/html/refs.ts';
 
 let current = 0;
+/** the step of the slide shown (beamer's overlays: objects with data-step="n" appear at step n) */
+let step = 1;
 let typed = '';
 let kit: PresentKit | null = null;
 
@@ -25,7 +29,11 @@ export function startPresenting(): void {
     .slide[data-ol-current] { position: fixed !important; left: 50% !important; top: 50% !important; margin: 0 !important;
       transform: translate(var(--ol-ztx, 0px), var(--ol-zty, 0px)) scale(var(--ol-zs, 1)) scale(var(--ol-fit, 1)) translate(-50%, -50%) !important;
       transform-origin: 0 0 !important; box-shadow: none !important; }
-    html.ol-hide-cursor, html.ol-hide-cursor * { cursor: none !important; }`;
+    html.ol-hide-cursor, html.ol-hide-cursor * { cursor: none !important; }
+    [data-ol-later] { visibility: hidden !important; }
+    html.ol-steps-dim [data-ol-later] { visibility: visible !important; opacity: .18 !important; }`;
+  // <meta name="overlyx-steps" content="dim">: what comes later shows faintly (beamer's \setbeamercovered{transparent})
+  if (/^dim/i.test(document.querySelector('meta[name="overlyx-steps"]')?.getAttribute('content') ?? '')) document.documentElement.classList.add('ol-steps-dim');
   document.head.appendChild(css);
   kit = new PresentKit({
     root: document.documentElement,
@@ -37,8 +45,8 @@ export function startPresenting(): void {
       return { x: (innerWidth - w) / 2, y: (innerHeight - h) / 2, w, h };
     },
     apply: zoom,
-    next: () => go(current + 1),
-    prev: () => go(current - 1),
+    next: forward,
+    prev: back,
     exit: () => post({ ol: 'exit' }),
     position: () => { const n = slides().length; return n ? `${current + 1} / ${n}` : ''; },
     // (for the editor: leaving full screen — Escape in a real browser — first goes back to the whole slide)
@@ -48,7 +56,7 @@ export function startPresenting(): void {
   go(h ? Number(h[1]) - 1 : 0);
   addEventListener('resize', fit);
   addEventListener('keydown', onKey, true);
-  addEventListener('click', e => { if ((e.target as Element).closest('a, button, input, select, textarea, video, [onclick]')) return; go(current + 1); });
+  addEventListener('click', e => { if ((e.target as Element).closest('a, button, input, select, textarea, video, [onclick]')) return; forward(); });
   addEventListener('hashchange', () => { const m = /^#(\d+)$/.exec(location.hash); if (m) go(Number(m[1]) - 1); });
   let idle: ReturnType<typeof setTimeout>;
   addEventListener('mousemove', () => { document.documentElement.classList.remove('ol-hide-cursor'); clearTimeout(idle); idle = setTimeout(() => document.documentElement.classList.add('ol-hide-cursor'), 2500); });
@@ -68,10 +76,49 @@ function zoom(v: ZoomView): void {
   st.setProperty('--ol-zty', `${(v.s - 1) * innerHeight / 2 + v.y}px`);
 }
 
-export function go(i: number): void {
+/* ------------------------------------------------------------------ steps */
+
+/**
+ * The objects of a slide that appear later and their steps: `data-step="n"` on any element, and
+ * the items of a list with `data-steps` one after the other (beamer's `[<+->]`; its value is the
+ * step of the first item, 1 when empty) — an item's own data-step wins.
+ */
+function steps(slide: Element): [Element, number][] {
+  const out: [Element, number][] = [];
+  for (const el of Array.from(slide.querySelectorAll('[data-step]'))) { const n = stepOf(el.getAttribute('data-step')); if (n > 1) out.push([el, n]); }
+  for (const list of Array.from(slide.querySelectorAll(':is(ul, ol)[data-steps]'))) {
+    const first = stepOf(list.getAttribute('data-steps'));
+    const items = Array.from(list.children).filter(c => c.localName === 'li');
+    items.forEach((li, i) => { if (!li.hasAttribute('data-step') && first + i > 1) out.push([li, first + i]); });
+  }
+  return out;
+}
+const lastStep = (slide: Element | undefined) => (slide ? Math.max(1, ...steps(slide).map(([, n]) => n)) : 1);
+
+function showStep(): void {
+  const s = slides()[current];
+  if (!s) return;
+  for (const el of Array.from(s.querySelectorAll('[data-ol-later]'))) el.removeAttribute('data-ol-later');
+  for (const [el, n] of steps(s)) if (n > step) el.setAttribute('data-ol-later', '');
+}
+
+/** on: the next step of the slide, or the next slide */
+function forward(): void {
+  if (step < lastStep(slides()[current])) { step++; showStep(); return; }
+  go(current + 1);
+}
+/** back: the step before, or the slide before as it ends */
+function back(): void {
+  if (step > 1) { step--; showStep(); return; }
+  if (current > 0) go(current - 1, true);
+}
+
+export function go(i: number, atEnd = false): void {
   const ss = slides();
   if (!ss.length) return;
   current = Math.max(0, Math.min(ss.length - 1, i));
+  step = atEnd ? lastStep(ss[current]) : 1;
+  showStep();
   ss.forEach((s, k) => { if (k === current) s.setAttribute('data-ol-current', ''); else s.removeAttribute('data-ol-current'); });
   fit();
   kit?.slideChanged();
@@ -93,8 +140,8 @@ function onKey(e: KeyboardEvent): void {
   if (kit?.key(e, typed !== '')) { e.preventDefault(); e.stopPropagation(); return; }
   const k = e.key;
   let handled = true;
-  if (k === 'ArrowRight' || k === 'ArrowDown' || k === ' ' || k === 'PageDown' || k === 'n') go(current + 1);
-  else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp' || k === 'Backspace' || k === 'p') go(current - 1);
+  if (k === 'ArrowRight' || k === 'ArrowDown' || k === ' ' || k === 'PageDown' || k === 'n') forward();
+  else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp' || k === 'Backspace' || k === 'p') back();
   else if (k === 'Home') go(0);
   else if (k === 'End') go(slides().length - 1);
   else if (/^\d$/.test(k)) { typed += k; }

@@ -11,12 +11,17 @@
  * glyphs are <use>s of the page's global font cache.
  */
 import { BASE } from './env';
+import { hasCite } from '@overlyx/core/html/refs.ts';
+import { CITE_WAIT } from './cite';
 
 let loading: Promise<void> | null = null;
 let own = false;
 let pageDone: Promise<void> | null = null;
 
-const TEX = /\\\(|\\\[|\$\$/;
+/** TeX MathJax typesets: \( \), \[ \], $$ $$, environments (equation, align …), \ref and \eqref in the text */
+const TEX = /\\\(|\\\[|\$\$|\\begin\{[A-Za-z]+\*?\}|\\(?:eq)?ref\{/;
+/** formulas whose rendering depends on others: numbered, labelled, referring (never copied; numbered anew together) */
+const NUMBERING = /\\(?:label|ref|eqref|tag|nonumber|notag)\b|\\begin\{(?:equation|align|gather|multline|flalign|alignat|xalignat|eqnarray)\}/;
 const MATH_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$/g;
 const WAIT = 'data-ol-texwait';
 /** MathJax's skipHtmlTags */
@@ -81,7 +86,7 @@ function remember(): void {
   if (!items) return;
   for (const item of items as Iterable<{ math: string; display: boolean; typesetRoot: Element | null }>) {
     const root = item.typesetRoot;
-    if (!root || !root.isConnected || root.querySelector('mjx-merror, [data-mjx-error]')) continue;
+    if (!root || !root.isConnected || root.querySelector('mjx-merror, [data-mjx-error]') || NUMBERING.test(item.math)) continue;
     const key = keyOf(item.math, !!item.display);
     if (typeset0.has(key)) continue;
     if (typeset0.size >= 400) typeset0.delete(typeset0.keys().next().value!);
@@ -126,7 +131,7 @@ function waitCss(): void {
   s.setAttribute('data-ol-runtime', '');
   s.setAttribute('data-ol-texwait-css', '');
   // (invisible, not hidden: it keeps taking clicks — a double-click on a formula still being typeset retypes it)
-  s.textContent = `[${WAIT}] { opacity: 0 !important; }`;
+  s.textContent = `[${WAIT}], [${CITE_WAIT}] { opacity: 0 !important; }`;
   (document.head ?? document.documentElement).appendChild(s);
 }
 
@@ -138,8 +143,15 @@ let parsing: MutationObserver | null = null;
 if (document.readyState === 'loading') {
   waitCss();
   const look = (n: Node) => {
-    if (n.nodeType === Node.TEXT_NODE) { if (TEX.test(n.nodeValue ?? '') && processed(n)) n.parentElement?.setAttribute(WAIT, ''); }
-    else if (n.nodeType === Node.ELEMENT_NODE) hideRaw(texTexts(n as Element));
+    if (n.nodeType === Node.TEXT_NODE) {
+      if (TEX.test(n.nodeValue ?? '') && processed(n)) n.parentElement?.setAttribute(WAIT, '');
+      // (a citation is rendered once the page is parsed: cite.ts)
+      if (hasCite(n.nodeValue ?? '')) n.parentElement?.setAttribute(CITE_WAIT, '');
+    } else if (n.nodeType === Node.ELEMENT_NODE) {
+      hideRaw(texTexts(n as Element));
+      const w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT);
+      for (let t = w.nextNode(); t; t = w.nextNode()) if (hasCite(t.nodeValue ?? '')) t.parentElement?.setAttribute(CITE_WAIT, '');
+    }
   };
   parsing = new MutationObserver(recs => {
     for (const r of recs) {
@@ -164,7 +176,9 @@ function load(): Promise<void> {
   return new Promise<void>((resolve) => {
     window.MathJax = {
       loader: { load: [], paths: { mathjax: BASE + 'mathjax', fonts: BASE + 'mathjax/fonts' } },
-      tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]'], ['$$', '$$']], processEscapes: true },
+      // equations numbered as LaTeX's (equation, align …), \label / \ref / \eqref anywhere on the page;
+      // the macros of the .tex files the page links (server: core html/deckextras.ts)
+      tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]'], ['$$', '$$']], processEscapes: true, tags: 'ams', macros: window.__OL?.macros ?? {} },
       svg: { fontCache: 'global' },
       // no menu, no speech or braille (their worker would be fetched from the page's opaque origin), no enrichment
       options: {
@@ -195,7 +209,53 @@ async function run(els: Element[] | null): Promise<void> {
   try { if (mj?.typesetPromise) await mj.typesetPromise(els ?? undefined); } catch { /* a formula MathJax cannot parse shows as its error */ }
   remember();
   showRaw(els);
+  if (els) await renumber(); else numbering = numberedItems();
 }
+
+/* ------------------------------------------------------------------ equation numbers */
+
+type Item = { math: string; typesetRoot: Element | null; removeFromDocument(restore?: boolean): void };
+/** the formulas that number or refer, in the page's order */
+function numberedItems(): Item[] {
+  const items = window.MathJax?.startup?.document?.math as Iterable<Item> | undefined;
+  if (!items) return [];
+  const out = Array.from(items).filter(it => it.typesetRoot?.isConnected && NUMBERING.test(it.math));
+  return out.sort((a, b) => (a.typesetRoot!.compareDocumentPosition(b.typesetRoot!) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+}
+/** the formulas that numbered last time (the same ones, in the same order: nothing to do) */
+let numbering: Item[] = [];
+
+/**
+ * Equation numbers and references as LaTeX has them: MathJax counts as it typesets, so after a
+ * change (a numbered formula put in, taken out or changed, a label renamed) every formula that
+ * numbers or refers is typeset again, in the page's order, from the start of the count.
+ */
+async function renumber(): Promise<void> {
+  const mj = window.MathJax;
+  if (own || !mj?.typesetPromise || !mj.texReset) return;
+  const items = numberedItems();
+  // (a formula typeset again — a text retyped, a formula edited — is another item: its label is
+  // MathJax's twice until the count starts over)
+  if (items.length === numbering.length && items.every((it, i) => it === numbering[i])) return;
+  numbering = items;
+  const parents: Element[] = [];
+  for (const it of items) {
+    const p = it.typesetRoot!.parentElement;
+    it.removeFromDocument(true);
+    if (p && !parents.includes(p)) parents.push(p);
+  }
+  // (an element inside another is typeset with it)
+  const roots = parents.filter(p => !parents.some(q => q !== p && q.contains(p)));
+  try {
+    mj.typesetClear(roots);
+    mj.texReset();
+    await mj.typesetPromise(roots);
+  } catch { /* shown as their errors */ }
+  numbering = numberedItems();
+  numbered.forEach(cb => cb());
+}
+/** called after the numbers were made anew (the editor's selection frames follow) */
+export const numbered = new Set<() => void>();
 
 /** OverLyX's MathJax typesets the page (not the page's own math library, not "no math at all") */
 export function mathTypeset(): boolean { return !own && !!window.MathJax?.startup; }
@@ -220,4 +280,6 @@ export function untypeset(els: Element[]): void {
   const mj = window.MathJax;
   if (own || !mj?.typesetClear || !els.length) return;
   try { mj.typesetClear(els); } catch { /* ignore */ }
+  // a numbered formula gone: the later ones count again (once the change is in place)
+  if (els.some(e => NUMBERING.test(e.textContent ?? '') || e.querySelector('mjx-container'))) queueMicrotask(() => { void renumber(); });
 }

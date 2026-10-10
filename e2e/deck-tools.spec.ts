@@ -9,7 +9,7 @@
  */
 import { test, expect, type Page, type Frame } from '@playwright/test';
 import { readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
-import { login, collectErrors, BASE_URL, PROJECTS_DIR } from './helpers';
+import { login, collectErrors, fillDialog, BASE_URL, PROJECTS_DIR } from './helpers';
 
 const RUN = Date.now().toString(36);
 const NAME = `e2e-decktools-${RUN}`;
@@ -370,6 +370,99 @@ test("formulas on a slide are edited with LyX's formula editor", async ({ page }
   expect(fileText()).not.toContain('\\[ \\]');
   // and never a formula's TeX on the slide meanwhile
   expect(await rawTexSeen(page)).toEqual([]);
+  expect(real(errors)).toEqual([]);
+});
+
+const LATEXDECK = DECK.replace('<title>Tools</title>', '<title>Tools</title>\n<link rel="overlyx-macros" href="../macros.tex">').replace('<section class="slide">\n  <h2', `<section class="slide">
+  <div id="f" style="position: absolute; left: 100px; top: 250px; width: 500px; font-size: 40px; text-align: center">\\[ a+b \\]</div>
+  <p id="t" style="position: absolute; left: 100px; top: 500px; width: 900px; margin: 0; font-size: 32px">Known</p>
+  <p id="m" style="position: absolute; left: 700px; top: 250px; width: 400px; margin: 0; font-size: 32px">In \\(\\R^n\\)</p>
+  <ul id="l" style="position: absolute; left: 700px; top: 380px; width: 400px; margin: 0; font-size: 28px"><li>One</li><li>Two</li></ul>
+  <h2`);
+
+test("LaTeX on slides: a citation from the project's .bib, a numbered equation with a label and \\eqref, references, steps, macros", async ({ page }) => {
+  const errors = collectErrors(page);
+  mkdirSync(`${PROJECTS_DIR}/${PROJECT}`, { recursive: true });
+  writeFileSync(`${PROJECTS_DIR}/${PROJECT}/refs.bib`, '@book{knuth84, author = {Knuth, Donald E.}, title = {The TeXbook}, publisher = {Addison-Wesley}, year = 1984}\n');
+  writeFileSync(`${PROJECTS_DIR}/${PROJECT}/macros.tex`, '\\newcommand{\\R}{\\mathbb{R}}\n');
+  await login(page);
+  await setup(page, LATEXDECK);
+  await page.locator('[data-tb="dk-select"]').click();
+  await slides(page).nth(1).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+  const fr = editFrame(page);
+  // the macros of the linked .tex file: \R typesets (no error)
+  await expect.poll(() => fr.evaluate(`document.querySelectorAll('#m mjx-container').length`)).toBe(1);
+  expect(await fr.evaluate(`document.querySelectorAll('#m [data-mjx-error], #m mjx-merror').length`)).toBe(0);
+
+  // Cite while typing: the project's bibliography searched, the citation put in as \citep and shown as [1]
+  const t = await at(page, 160, 520, 1);
+  await page.mouse.dblclick(t.x, t.y);
+  await page.keyboard.press('End');
+  await page.keyboard.type(' ');
+  await page.locator('[data-tb="dk-cite"]').click();
+  await page.locator('.dialog input[placeholder^="author"]').fill('knuth');
+  await page.locator('.dialog .list div', { hasText: 'knuth84' }).click();
+  await page.locator('[data-cite-insert]').click();
+  await page.keyboard.press('Escape');
+  await expect.poll(fileText, { timeout: 15000 }).toContain('Known \\citep{knuth84}</p>');
+  await expect.poll(() => fr.evaluate(`document.querySelector('#t ol-cite')?.textContent`)).toBe('[1]');
+
+  // the formula numbered and labelled in its toolbar: an equation environment, (1) on the slide
+  const f = await at(page, 338, 285, 1);
+  await page.mouse.dblclick(f.x, f.y);
+  await expect(page.locator('[data-dl-mathedit]:not(.pending)')).toBeVisible();
+  await page.locator('[data-tb="m-label"]').click();
+  await fillDialog(page, 'eq:sum');
+  await expect.poll(() => fr.evaluate(`document.querySelector('#f')?.textContent ?? ''`)).not.toContain('\\label');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-dl-mathedit]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/\\begin\{equation\}\s*a\+b\s*\\label\{eq:sum\}\s*\\end\{equation\}/);
+
+  // Ref while typing: the page's labels; \eqref{eq:sum} shows (1)
+  await page.mouse.dblclick(t.x, t.y);
+  await page.keyboard.press('End');
+  await page.locator('[data-tb="dk-ref"]').click();
+  await page.locator('.dk-ref-item', { hasText: 'eq:sum' }).click();
+  await page.keyboard.press('Escape');
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/\\citep\{knuth84\}(?: |&nbsp;)*\\eqref\{eq:sum\}/);
+
+  // the References tool: the works cited, listed
+  await page.locator('[data-tb="dk-references"]').click();
+  const r = await at(page, 640, 120, 1);
+  await page.mouse.click(r.x, r.y);
+  await expect.poll(fileText, { timeout: 15000 }).toContain('class="ol-bibliography"');
+  await expect.poll(() => fr.evaluate(`document.querySelector('.ol-bibliography')?.textContent ?? ''`)).toContain('The TeXbook');
+
+  // steps: the list's items one by one, an object at step 2
+  const l = await at(page, 760, 400, 1);
+  await page.mouse.click(l.x, l.y);
+  await page.locator('[data-tb="dk-step"]').click();
+  await page.locator('.tb-pal-item', { hasText: 'List items one by one' }).click();
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/<ul id="l"[^>]* data-steps="1"/);
+  const m = await at(page, 720, 270, 1);
+  await page.mouse.click(m.x, m.y);
+  await page.locator('[data-tb="dk-step"]').click();
+  await page.locator('.tb-pal-item', { hasText: 'At step 2' }).click();
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/<p id="m"[^>]* data-step="2"/);
+
+  // presenting: the slide's steps (the list item by item, the paragraph at step 2) before the slides go on; back through them
+  const present = await page.context().newPage();
+  await present.setViewportSize({ width: 1280, height: 720 });
+  await present.goto(editFrame(page).url().replace(/ol=edit/, 'ol=present').replace(/#.*$/, '') + '#1');
+  const shown = () => present.evaluate(`['#l li:nth-child(1)', '#l li:nth-child(2)', '#m'].map(s => getComputedStyle(document.querySelector(s)).visibility === 'visible' ? 1 : 0).join('')`);
+  await expect.poll(() => present.evaluate('location.hash')).toBe('#1');
+  await present.keyboard.press('ArrowRight');
+  await expect.poll(() => present.evaluate('location.hash')).toBe('#2');
+  await expect.poll(shown).toBe('100');
+  await present.keyboard.press('ArrowRight');
+  await expect.poll(shown).toBe('111');
+  await present.keyboard.press('ArrowLeft');
+  await expect.poll(shown).toBe('100');
+  await present.keyboard.press('ArrowLeft');
+  await expect.poll(() => present.evaluate('location.hash')).toBe('#1');
+  await present.close();
   expect(real(errors)).toEqual([]);
 });
 

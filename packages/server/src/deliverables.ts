@@ -29,6 +29,9 @@ import { manager, HtmlDoc } from './docs.ts';
 import { isHtmlPath, deliverableInfo } from '@overlyx/core/html/deliverable.ts';
 import { RUNTIME_MODES, runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, type RuntimeMode } from '@overlyx/core/html/serve.ts';
 import { toPng, toSvg } from './graphics.ts';
+import { deckExtras, type DeckExtras } from '@overlyx/core/html/deckextras.ts';
+import { cachedBib } from './bibcache.ts';
+import { collect, isBackupFile } from './projectfiles.ts';
 
 const KEY = crypto.createHmac('sha256', JWT_SECRET || 'dev').update('overlyx deliverable token').digest();
 
@@ -115,6 +118,24 @@ export function mountDeliverables(app: Express): void {
   });
 }
 
+/**
+ * What the runtime needs with a page besides its files (core html/deckextras.ts): the entries of the
+ * keys it cites, from the project's .bib files, and the macros of the .tex files it links.
+ */
+export function extrasOf(project: string, rel: string, html: string): DeckExtras {
+  if (!/\\(?:cite|citep|citet|citealp|citealt|citeauthor|citeyear|nocite|parencite|textcite|autocite)\b|ol-bibliography|overlyx-macros/.test(html)) return {};
+  const root = projectDir(project);
+  const inside = (r: string) => { const abs = path.join(root, r); return abs.startsWith(root + path.sep) && staysInside(root, abs) ? abs : null; };
+  try {
+    return deckExtras(html, rel, {
+      read: r => { const abs = inside(r); if (!abs) return null; try { const st = fs.statSync(abs); return st.isFile() && st.size < 4e6 ? fs.readFileSync(abs, 'utf8') : null; } catch { return null; } },
+      bibFiles: () => collect(root, root, [], 0).filter(f => f.kind === 'bib' && !isBackupFile(f.name)).map(f => f.path),
+      bibEntries: r => { const abs = inside(r); return abs ? cachedBib(abs) : []; },
+      resolve: (from, href) => resolveInProject(path.posix.dirname(from) === '.' ? '' : path.posix.dirname(from), href),
+    });
+  } catch (e) { console.error('[deliverables] extras of', rel, e); return {}; }
+}
+
 /** what a request of a deliverable's folder gets: a file to send, or a body */
 export interface Served { status: number; type?: string; body?: string | Buffer; file?: string; headers?: Record<string, string> }
 
@@ -140,7 +161,7 @@ export async function resolveDeliverable(token: string, rawRest: string, query: 
     let html: string;
     try { html = await liveHtml(grant.project, rel); } catch { return { status: 404, type: 'text/plain', body: 'Not found.' }; }
     const mode = (RUNTIME_MODES as readonly string[]).includes(String(query.ol)) ? String(query.ol) as RuntimeMode : 'view';
-    return { status: 200, type: 'text/html; charset=utf-8', body: injectRuntime(html, runtimeTags(mode)), headers: { 'Cache-Control': 'no-store' } };
+    return { status: 200, type: 'text/html; charset=utf-8', body: injectRuntime(html, runtimeTags(mode, { ...extrasOf(grant.project, rel, html) })), headers: { 'Cache-Control': 'no-store' } };
   }
 
   let st: fs.Stats;
@@ -267,7 +288,8 @@ export async function deliverableZip(project: string, rel: string, clientDist: s
         const text = open instanceof HtmlDoc ? open.html.toString() : data.toString('utf8');
         const kind = deliverableInfo(text).kind;
         const up = '../'.repeat(r.split('/').length - 1);
-        const tags = `<script>window.__OL={mode:${JSON.stringify(kind === 'deck' ? 'present' : 'view')}}</script><script src="${up}_overlyx/runtime.js"></script>`;
+        const cfg = JSON.stringify({ mode: kind === 'deck' ? 'present' : 'view', ...extrasOf(project, projRel, text) }).replace(/</g, '\\u003c');
+        const tags = `<script>window.__OL=${cfg}</script><script src="${up}_overlyx/runtime.js"></script>`;
         data = Buffer.from(injectRuntime(await rewriteHtml(text, path.posix.dirname(r) === '.' ? '' : path.posix.dirname(r)), tags));
       } else if (/\.css$/i.test(e.name)) {
         data = Buffer.from(await rewriteCss(data.toString('utf8'), path.posix.dirname(r) === '.' ? '' : path.posix.dirname(r)));

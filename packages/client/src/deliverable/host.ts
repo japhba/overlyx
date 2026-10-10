@@ -50,4 +50,11 @@ export interface DeliverableHost {
   save?(): void;
   /** a key pressed on the canvas that the editor does not handle (VS Code: its own shortcuts) */
   key?(k: { key: string; ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }): void;
+  /** the page's document id on the server (the citation dialog searches and adds papers with it); absent: no citation dialog */
+  readonly docId?: string;
+  /** the project's bibliography (its .bib files): the entries of `keys` (with their fields), for citations typed or pasted */
+  bibliography?(keys: string[]): Promise<BibRecord[]>;
 }
+
+/** an entry of the project's bibliography as the server sends it */
+export interface BibRecord { key: string; type?: string; fields?: Record<string, string>; authorShort?: string; author?: string; year?: string; title?: string }

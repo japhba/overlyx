@@ -8,7 +8,7 @@
 import { slides, slideTitle, state, srcOf, isForeign } from './env';
 import { mathTypeset } from './math';
 
-export interface PageIssue { kind: 'overflow' | 'offpage' | 'overlap' | 'small-text' | 'contrast' | 'image' | 'math'; text: string; at?: { x: number; y: number; w: number; h: number } }
+export interface PageIssue { kind: 'overflow' | 'offpage' | 'overlap' | 'small-text' | 'contrast' | 'image' | 'math' | 'citation' | 'reference'; text: string; at?: { x: number; y: number; w: number; h: number } }
 export interface PageReport { index: number; title: string; issues: PageIssue[] }
 
 export const scriptErrors: string[] = [];
@@ -192,6 +192,20 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
     if (m.parentElement?.closest('[data-mjx-error], [data-mml-node="merror"]')) continue;
     issues.push({ kind: 'math', text: `a formula did not typeset: ${(m.getAttribute('data-mjx-error') ?? m.getAttribute('title') ?? m.textContent ?? '').slice(0, 120)}`, at: rel(m.getBoundingClientRect()) });
   }
+  // citations of keys no .bib file of the project has (shown as ?, as LaTeX does: cite.ts)
+  for (const c of Array.from(scope.querySelectorAll('ol-cite[data-ol-missing]'))) {
+    issues.push({ kind: 'citation', text: `${c.getAttribute('data-ol-cite')} cites ${c.getAttribute('data-ol-missing')}, which no .bib file of the project has — add the entry (or fix the key)`, at: rel(c.getBoundingClientRect()) });
+  }
+  // references to labels no equation has (MathJax shows ???)
+  {
+    // (the slide's text as written: its references are typeset away on the page)
+    const own = srcOf.get(scope)?.outerHTML ?? (scope === document.body ? raw.html : raw.slides.get(scope) ?? '');
+    const labels = new Set([...(state.html || raw.html).matchAll(/\\label\{([^}]+)\}/g)].map(m => m[1].trim()));
+    for (const m of own.matchAll(/\\(?:eq)?ref\{([^}]+)\}/g)) {
+      if (labels.has(m[1].trim())) continue;
+      issues.push({ kind: 'reference', text: `${m[0]} refers to no equation: no \\label{${m[1].trim()}} on the page` });
+    }
+  }
   // TeX left as it was written: MathJax found no formula there (unbalanced braces, a missing delimiter)
   if (mathTypeset()) {
     const tw = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
@@ -207,6 +221,13 @@ function checkScope(scope: Element, frame: DOMRect, kind: 'deck' | 'poster' | 'p
     }
   }
   return issues;
+}
+
+/** the page as served, before its TeX was typeset (references are checked against it where no source came: render_page) */
+const raw = { html: '', slides: new WeakMap<Element, string>() };
+export function rememberPage(): void {
+  raw.html = document.documentElement.outerHTML;
+  for (const s of slides()) raw.slides.set(s, s.outerHTML);
 }
 
 export function report(): { kind: 'deck' | 'poster' | 'page'; width: number; height: number; pages: PageReport[]; errors: string[] } {

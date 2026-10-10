@@ -298,6 +298,8 @@ export const api = {
   getVersion: (id: string, vid: number) => req<{ lyx: string; name: string; created_at: number; author: string }>('GET', `/api/docs/${encId(id)}/versions/${vid}`),
   restoreVersion: (id: string, vid: number) => req<{ ok: boolean }>('POST', `/api/docs/${encId(id)}/versions/${vid}/restore`),
   deleteVersion: (id: string, vid: number) => req<{ ok: boolean }>('DELETE', `/api/docs/${encId(id)}/versions/${vid}`),
+  /** the entries of `keys` in a document's bibliography (with their fields: decks render citations from them) */
+  bibKeys: (id: string, keys: string[]) => req<{ entries: (BibItem & { type?: string; fields?: Record<string, string>; authorShort?: string })[] }>('GET', `/api/docs/${encId(id)}/bib?keys=${encodeURIComponent(keys.join(','))}`),
   bibSearch: (id: string, q: string, limit = 100) => req<{ entries: BibItem[]; total: number; matches: number }>('GET', `/api/docs/${encId(id)}/bib?q=${encodeURIComponent(q)}&limit=${limit}`),
   /** LaTeX export (returns the source) or a PDF build request (a background job; poll `build`) */
   export: (id: string, format: 'pdf' | 'tex', opts: { auto?: boolean } = {}) => req<{ ok: boolean; log?: string; warnings?: string[]; pdf?: string | null; tex?: string; job?: BuildJob }>('POST', `/api/docs/${encId(id)}/export`, { format, ...(opts.auto ? { auto: true } : {}) }),

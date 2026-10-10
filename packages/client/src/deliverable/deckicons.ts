@@ -24,6 +24,9 @@ Object.assign(ICONS, {
   'dk-bezier': I('<path d="M2.5 13C4 6 10 10 13.5 3"/><path d="M2.5 13l3.2-5.6M13.5 3L9.8 8.8" stroke-width="0.9"/><rect x="1.3" y="11.8" width="2.4" height="2.4" fill="currentColor"/><rect x="12.3" y="1.8" width="2.4" height="2.4" fill="currentColor"/><circle cx="5.7" cy="7.4" r="1"/><circle cx="9.8" cy="8.8" r="1"/>'),
   'dk-nodes': I('<path d="M2.5 12.5C3 6 6 3 13 3.5"/><path d="M3.8 3.2L7 6" stroke-width="0.9"/><path d="M1.2 12.5l1.3-1.3 1.3 1.3-1.3 1.3z" fill="currentColor"/><path d="M11.7 3.5L13 2.2l1.3 1.3L13 4.8z" fill="currentColor"/><circle cx="3.8" cy="3.2" r="1"/><path d="M8 8l2.5 6 1-2.3 2.3-1z" fill="currentColor" stroke-width="0.6"/>'),
   'dk-path': I('<circle cx="6" cy="7" r="4"/><circle cx="10" cy="9" r="4"/>'),
+  // the works cited, listed; objects that appear one after the other (beamer's overlays)
+  'dk-references': I('<path d="M2.5 3.5h2.2M2.5 8h2.2M2.5 12.5h2.2"/><path d="M6.5 3.5h7M6.5 8h7M6.5 12.5h5"/>'),
+  'dk-step': I('<rect x="2" y="9" width="12" height="4.5" rx="0.8"/><rect x="3.5" y="5" width="9" height="3" rx="0.8" stroke-dasharray="1.6 1.2"/><rect x="5" y="2" width="6" height="2" rx="0.6" stroke-dasharray="1.2 1"/>'),
   'dk-union': F('<path d="M6 2.6a4.4 4.4 0 0 1 4.3 3.5A4.4 4.4 0 1 1 5.7 11.4 4.4 4.4 0 0 1 6 2.6z"/>'),
   'dk-difference': '<svg viewBox="0 0 16 16"><path d="M6 2.6a4.4 4.4 0 0 1 4.3 3.5 4.4 4.4 0 0 0-4.6 5.3A4.4 4.4 0 0 1 6 2.6z" fill="currentColor"/><circle cx="10" cy="10" r="4.4" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="1.6 1.2"/></svg>',
   'dk-intersection': '<svg viewBox="0 0 16 16"><circle cx="6" cy="7" r="4.4" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="1.6 1.2"/><circle cx="10" cy="10" r="4.4" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="1.6 1.2"/><path d="M10.3 6.1a4.4 4.4 0 0 1-4.6 5.3 4.4 4.4 0 0 1 4.6-5.3z" fill="currentColor"/></svg>',

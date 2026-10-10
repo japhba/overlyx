@@ -2571,6 +2571,10 @@ html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 .dl-mathedit.closing .lm-field { outline-color: transparent; }
 .dl-mathedit.closing .lm-overlay { display: none; }
 .dl-mathedit .lm-field { padding: 0; border: 0; border-radius: 2px; outline: 1.5px solid var(--accent); outline-offset: 3px; background: transparent; }
+/* the reference picker (deck toolbar's Ref while typing: the page's equation labels) */
+.dk-refs { display: flex; flex-direction: column; min-width: 180px; max-height: 50vh; overflow: auto; padding: 4px 0; }
+.dk-ref-item { text-align: left; border: 0; background: none; padding: 6px 12px; font: inherit; font-family: ui-monospace, "DejaVu Sans Mono", monospace; font-size: 12.5px; color: var(--ui-fg); cursor: pointer; border-radius: 4px; }
+.dk-ref-item:hover, .dk-ref-item:focus-visible { background: var(--hover-bg, rgba(0,0,0,.06)); outline: none; }
 .dl-mathedit .lm-field.focused { background: transparent; border: 0; }
 .dl-mathedit .lm-field.display { font-size: 1em; }
 .dl-mathedit .lm-field.empty { min-width: 1.4em; min-height: 1em; }

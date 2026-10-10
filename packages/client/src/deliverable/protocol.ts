@@ -9,11 +9,14 @@
  * (core html/source.ts HtmlOp, elements by path) — the editor rebases them onto the current text.
  */
 import type { HtmlOp, Path } from '@overlyx/core/html/source.ts';
+import type { CiteEntry } from '@overlyx/core/html/refs.ts';
+import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
 
 export type { HtmlOp, Path };
 
 export type DeliverableKind = 'deck' | 'poster' | 'page';
-export type Tool = 'select' | 'text' | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'hexagon' | 'line' | 'arrow' | 'pen' | 'bezier' | 'formula';
+/** `references`: a list of the works cited (an element of class ol-bibliography, runtime/cite.ts) */
+export type Tool = 'select' | 'text' | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'hexagon' | 'line' | 'arrow' | 'pen' | 'bezier' | 'formula' | 'references';
 
 /** what kind of object the toolbar is showing tools for */
 export type ObjKind = 'text' | 'shape' | 'line' | 'image' | 'svg' | 'svgpart' | 'group' | 'formula' | 'other';
@@ -101,6 +104,10 @@ export interface SelItem {
   canText: boolean;
   /** a picture's src as written (for Replace / Remove background) */
   src?: string;
+  /** the step it appears at when presenting (data-step; 1: with the slide) */
+  step: number;
+  /** the list it is or holds: its items appear one by one from step `steps` (data-steps), or all at once (null) */
+  list?: { path: Path; steps: number | null };
 }
 
 export interface SlideBox { index: number; path: Path; rect: Rect; title: string }
@@ -141,6 +148,10 @@ export type ToRuntime =
   | { ol: 'mathDisplay'; id: number }
   /** LyX's formula editor is drawn over the formula: the formula itself hidden meanwhile (the runtime answers with mathKeys) */
   | { ol: 'mathShown'; id: number }
+  /** bibliography entries of keys cited since the page was served (runtime/cite.ts) */
+  | { ol: 'bib'; entries: CiteEntry[] }
+  /** a citation or reference (`\cite{…}`, `\eqref{…}`) put at the caret of the text being retyped, as a chip */
+  | { ol: 'insertRef'; src: string }
   /** keys typed ahead that came after the formula was left by them (the closing `$` of `$x$ and`): the text's */
   | { ol: 'typeKeys'; keys: KeyPress[] }
   /** a new formula at the caret of the text being retyped (the toolbar's ∑ while typing) */
@@ -150,7 +161,8 @@ export type ToRuntime =
 
 /** runtime → editor */
 export type FromRuntime =
-  | { ol: 'ready'; version: number | null; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number }
+  /** `macros`: those of the .tex files the page links (for LyX's formula editor) */
+  | { ol: 'ready'; version: number | null; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number; macros?: Record<string, MathJaxMacro> }
   | { ol: 'layout'; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number }
   | { ol: 'selection'; version: number; items: SelItem[] }
   | { ol: 'ops'; version: number; ops: HtmlOp[]; select?: 'inserted' | 'keep' | Path[]; then?: 'editText' }

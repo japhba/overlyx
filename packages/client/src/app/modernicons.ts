@@ -5,7 +5,7 @@
  * keeps its own in both. Each entry is the inside of an <svg viewBox="0 0 24 24"> (iconSvg wraps it).
  */
 import {
-  Undo2, Redo2, SpellCheck, Scissors, Copy, ClipboardPaste, Search, ArrowLeft, Italic, Bold, Underline, Strikethrough, Quote,
+  LibraryBig, GalleryVerticalEnd, Undo2, Redo2, SpellCheck, Scissors, Copy, ClipboardPaste, Search, ArrowLeft, Italic, Bold, Underline, Strikethrough, Quote,
   Sigma, SquareFunction, Image, Table, Braces, PanelRight, SquareRadical, TableProperties, FilePenLine, FileText, RefreshCw,
   RefreshCcwDot, RemoveFormatting, EllipsisVertical, PenTool, ListTree, File, FolderOpen, Pilcrow, List, ListOrdered, ListChecks,
   ListIndentIncrease, ListIndentDecrease, Heading1, Frame, Tag, Bookmark, TextQuote, StickyNote, MessageSquarePlus, Square, Link,
@@ -63,6 +63,8 @@ export const MODERN_ICONS: Record<string, string> = {
   'dk-replace': N(Replace), 'dk-bg': N(PaintBucket), 'dk-canvas': N(Grid2x2), 'dk-undo': N(Undo2), 'dk-redo': N(Redo2),
   'dk-cropaspect': N(SquareDashed), 'dk-highlight': N(Highlighter), 'dk-fill': N(Droplet), 'dk-pen': N(PencilLine),
   'dk-duplicate': N(Copy), 'dk-present': N(Presentation), 'dk-code': N(FileCode),
+  // LaTeX on slides: the list of references, steps (beamer's overlays)
+  'dk-references': N(LibraryBig), 'dk-step': N(GalleryVerticalEnd),
   // paths: the Bézier pen, Path ▸ (booleans, combine, object to path, simplify, reverse), editing nodes
   'dk-bezier': N(PenTool), 'dk-path': N(SplinePointer), 'dk-union': N(SquaresUnite), 'dk-difference': N(SquaresSubtract),
   'dk-intersection': N(SquaresIntersect), 'dk-exclusion': N(SquaresExclude), 'dk-combine': N(Combine), 'dk-breakapart': N(Split),

@@ -24,9 +24,11 @@ import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress } f
 import { MODE, post, state, srcOf, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout } from './env';
 import { guard } from './reconcile';
 import { typeset } from './math';
+import { renderCites, refreshCites } from './cite';
+import { stepOf } from '@overlyx/core/html/refs.ts';
 import { refreshView } from './view';
 import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, redrawCrop, type CropContext } from './crop';
-import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
+import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, insertRefChip, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing } from './pathedit';
 
 const NS = 'http://www.w3.org/1999/xhtml';
@@ -68,6 +70,7 @@ export function startEditing(): void {
     .draw { position: absolute; border: 1.5px dashed #2f6fde; background: rgba(47,111,222,.08); pointer-events: none; }
     .drop { position: absolute; border: 3px dashed #2f6fde; background: rgba(47,111,222,.10); pointer-events: none; box-sizing: border-box; }
     .tag { position: absolute; transform: translateY(-100%); background: #2f6fde; color: #fff; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; font-size: calc(11px * var(--s)); }
+    .step { position: absolute; transform: translate(calc(-100% - 5px * var(--s)), 0); min-width: calc(16px * var(--s)); height: calc(16px * var(--s)); line-height: calc(16px * var(--s)); padding: 0 calc(3px * var(--s)); box-sizing: border-box; border-radius: calc(8px * var(--s)); background: #2f6fde; color: #fff; text-align: center; font: 600 calc(10px * var(--s)) system-ui, sans-serif; pointer-events: none; box-shadow: 0 0 0 calc(1.5px * var(--s)) #fff; }
     .peer-tag { position: absolute; transform: translateY(-100%); color: #fff; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; font-size: calc(11px * var(--s)); }
     svg.ink { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
   </style><div class="layer"></div>`;
@@ -210,6 +213,8 @@ export function mathDone(id: number, tex: string, dir: 'forward' | 'backward' | 
   });
 }
 export function insertMath(display: boolean): void { if (editing) insertChip(editing, display); }
+/** a citation or reference at the caret of the text being retyped (the toolbar's pickers) */
+export function insertRef(src: string): void { if (!editing) return; editing.focus({ preventScroll: true }); insertRefChip(editing, src); scheduleCommit(); }
 
 /** a formatting command on the text being retyped (bold, foreColor, fontName …; fontSizePx: a span with that size) */
 export function exec(command: string, value?: string): void {
@@ -258,6 +263,8 @@ export function isTextual(el: Element): boolean {
 
 /** text can be typed into it: a text box, or a shape with nothing but text in it (an empty one too) */
 export function canType(el: Element): boolean {
+  // (a list of references is made by the runtime from the citations: cite.ts)
+  if (el.classList.contains('ol-bibliography')) return false;
   if (isTextual(el)) return true;
   if (!(el instanceof HTMLElement) || REPLACED.has(el.localName) || el.classList.contains('slide') || el === document.body || el.classList.contains('ol-crop')) return false;
   const src = srcOf.get(el);
@@ -442,7 +449,16 @@ function item(el: Element): SelItem | null {
     slide: s ? slides().indexOf(s) : -1,
     kind, locked: isLocked(el), cropped: el.classList.contains('ol-crop'), canText: canType(el),
     src: kind === 'image' ? pictureSrc(el) : undefined,
+    step: stepOf(el.getAttribute('data-step')),
+    list: listOf(el),
   };
+}
+
+/** the list an object is, or the one list it holds (its items can appear one by one) */
+function listOf(el: Element): SelItem['list'] {
+  const l = el.localName === 'ul' || el.localName === 'ol' ? el : el.querySelectorAll(':scope > ul, :scope > ol').length === 1 ? el.querySelector(':scope > ul, :scope > ol') : null;
+  const p = l && pathOf(l);
+  return p ? { path: p, steps: l!.hasAttribute('data-steps') ? stepOf(l!.getAttribute('data-steps')) : null } : undefined;
 }
 
 export function report(): void {
@@ -492,6 +508,13 @@ export function draw(): void {
     if (!el) continue;
     const r = docRect(el);
     parts.push(`<div class="frame peer" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;border-color:${esc(p.color)};border-width:${bw}px"></div><div class="peer-tag" style="left:${r.x}px;top:${r.y}px;background:${esc(p.color)}">${esc(p.name)}</div>`);
+  }
+  // the steps objects appear at when presenting (beamer's overlays), as PowerPoint numbers its animations
+  if (!editing) for (const el of Array.from(document.querySelectorAll('[data-step], :is(ul, ol)[data-steps]'))) {
+    const n = el.hasAttribute('data-steps') ? `${stepOf(el.getAttribute('data-steps'))}…` : String(stepOf(el.getAttribute('data-step')));
+    if (n === '1' || !srcOf.has(el)) continue;
+    const r = docRect(el);
+    if (r.w || r.h) parts.push(`<div class="step" style="left:${r.x}px;top:${r.y}px">${n}</div>`);
   }
   for (const el of selected) {
     if (!el.isConnected) continue;
@@ -1392,6 +1415,8 @@ export function stopText(): void {
   const src = srcOf.get(el);
   if (src && el.isConnected) {
     el.innerHTML = src.innerHTML;
+    renderCites([el]);
+    refreshCites();
     void typeset([el]).then(draw);
   }
   post({ ol: 'editing', path: null });
@@ -1428,6 +1453,8 @@ function onKeyDown(e: KeyboardEvent): void {
       if (c) { e.preventDefault(); openChip(c, null, e.key === 'ArrowLeft' ? 'end' : 'start'); return; }
     }
     if (mod && /^[zy]$/i.test(e.key)) { e.preventDefault(); commitText(); fwd(e); return; }
+    // link, citation, cross-reference: the editor's dialogs (as in documents: Ctrl+K, Ctrl+Shift+C, Ctrl+Shift+I)
+    if (mod && ((!e.shiftKey && e.key.toLowerCase() === 'k') || (e.shiftKey && /^[ci]$/i.test(e.key)))) { e.preventDefault(); commitText(); fwd(e); return; }
     if (mod && /^[bi]$/i.test(e.key)) { e.preventDefault(); exec(e.key.toLowerCase() === 'b' ? 'bold' : 'italic'); return; }
     if (mod && e.key.toLowerCase() === 'u') { e.preventDefault(); exec('underline'); return; }
     if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); commitText(); fwd(e); return; }

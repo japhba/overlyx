@@ -531,6 +531,30 @@ blend.
     until MathJax has typeset them, MathJax is fetched while the page's fonts load, and a formula
     typeset before is put back as a copy of its rendering at once (MathJax's SVG is in ex of the
     surrounding font, so it fits anywhere) — after an edit, a retyped text shown again, a chip.
+    **LaTeX beyond formulas — beamer's feel, plain LaTeX in the HTML** (core `html/refs.ts`, the
+    server side `html/deckextras.ts`, runtime `cite.ts`): **citations** `\cite{key}` (natbib's
+    `\citep`, `\citet` …, notes, several keys) from the project's .bib files (all, or those of
+    `<link rel="overlyx-bibliography" href>`), shown `[1]` in citation order or author-year
+    (`<meta name="overlyx-citations" content="authoryear">`), an element of class
+    `ol-bibliography` (the *References* tool) listing the works cited; the servers (web
+    `deliverables.ts extrasOf`, VS Code `host/deliverables.ts`) give the runtime the cited entries
+    and the macros with the page (`window.__OL.bib/.macros/.citeStyle`), the editor sends entries
+    of keys cited later (`bib`, `/api/docs/<deck>/bib?keys=`); a key no .bib has shows `?`.
+    **Numbered equations and references** are MathJax's (`tags: 'ams'`, `\label`, `\eqref` /
+    `\ref` anywhere in the text): whenever a formula that numbers or refers is typeset again,
+    every such formula is typeset again in page order from a fresh count (`renumber`), so numbers
+    stay LaTeX's through edits; LyX's formula editor numbers a displayed formula (Alt+M N or the
+    math row's *(1)*) and labels it (*Label*), the text's *Cross-reference* picks a label.
+    **Macros** of `<link rel="overlyx-macros" href="../paper/macros.tex">` (and what it
+    `\input`s) in every formula, on the slide and in the formula editor. **Steps** (beamer's
+    overlays): `data-step="n"` on an object, `data-steps` on a list (items one by one) — the
+    contextual toolbar's *Appear*, numbered badges on the canvas; presenting goes through a slide's
+    steps first and back to the previous slide's last step (`<meta name="overlyx-steps"
+    content="dim">`: later objects faint). While a text is retyped, references and citations are
+    uneditable chips, environments editable formulas. The text row's insert group matches the
+    documents': link (Ctrl+K), cross-reference (Ctrl+Shift+I), citation (Ctrl+Shift+C, the
+    documents' dialog incl. finding papers online), inline / display formula. render_page reports
+    citations of unknown keys and references to missing labels.
     **Pictures**: double-click
     crops (PowerPoint's: the whole picture ghosted, drag it inside the fixed frame, its corners scale
     it, the black handles change the frame; written as `div.ol-crop` with the `img` inside —

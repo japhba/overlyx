@@ -18,6 +18,8 @@ import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, RUNTIME_MODES, type RuntimeMode } from '@overlyx/core/html/serve.ts';
 import { starterFor, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
+import { deckExtras, type DeckExtras } from '@overlyx/core/html/deckextras.ts';
+import { parseBibtex, type BibEntry } from '@overlyx/core/bib.ts';
 import { webviewHtml } from './webviewHtml.ts';
 import { toPng } from './graphics.ts';
 
@@ -101,7 +103,7 @@ export class DeliverableServer {
       const mode = (RUNTIME_MODES as readonly string[]).includes(url.searchParams.get('ol') ?? '') ? url.searchParams.get('ol') as RuntimeMode : 'view';
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store');
-      res.end(injectRuntime(html, runtimeTags(mode)));
+      res.end(injectRuntime(html, runtimeTags(mode, { ...extrasOf(root, rel, html) })));
       return;
     }
     let st: fs.Stats;
@@ -257,4 +259,49 @@ export async function newDeliverable(kind: DeliverableKind, startDir: string): P
 
 function freeFolder(dir: string, name: string): string {
   for (let i = 2, n = name; ; n = `${name}-${i++}`) if (!fs.existsSync(path.join(dir, n))) return n;
+}
+
+/* ------------------------------------------------------------------ citations and macros */
+
+const bibCache = new Map<string, { stamp: string; entries: BibEntry[] }>();
+
+/** The .bib files under `root` (project-relative), as the web app offers every .bib file of a project. */
+function bibFilesUnder(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string, depth: number) => {
+    if (depth > 6 || out.length > 200) return;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+      const a = path.join(dir, e.name);
+      if (e.isDirectory()) walk(a, depth + 1);
+      else if (/\.bib$/i.test(e.name)) out.push(path.relative(root, a).split(path.sep).join('/'));
+    }
+  };
+  walk(root, 0);
+  return out;
+}
+
+/** What the runtime needs with a page besides its files (core html/deckextras.ts): cited entries, linked macros. */
+function extrasOf(root: string, rel: string, html: string): DeckExtras {
+  if (!/\\(?:cite|citep|citet|citealp|citealt|citeauthor|citeyear|nocite|parencite|textcite|autocite)\b|ol-bibliography|overlyx-macros/.test(html)) return {};
+  const inside = (r: string) => { const abs = path.join(root, r); return abs.startsWith(root + path.sep) ? abs : null; };
+  try {
+    return deckExtras(html, rel, {
+      read: r => { const abs = inside(r); if (!abs) return null; try { const st = fs.statSync(abs); return st.isFile() && st.size < 4e6 ? fs.readFileSync(abs, 'utf8') : null; } catch { return null; } },
+      bibFiles: () => bibFilesUnder(root),
+      bibEntries: r => {
+        const abs = inside(r);
+        if (!abs) return [];
+        const st = fs.statSync(abs), stamp = `${st.mtimeMs}:${st.size}`;
+        const hit = bibCache.get(abs);
+        if (hit?.stamp === stamp) return hit.entries;
+        const entries = parseBibtex(fs.readFileSync(abs, 'utf8'));
+        bibCache.set(abs, { stamp, entries });
+        return entries;
+      },
+      resolve: (from, href) => resolveInProject(path.posix.dirname(from) === '.' ? '' : path.posix.dirname(from), href),
+    });
+  } catch { return {}; }
 }

@@ -233,8 +233,10 @@ export function RefDialog({ labels, useRefstyle, view, initial, onInsert, onClos
 }
 
 /* ----------------------------------------------------------------- cite */
-export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, onClose }: {
+export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, onClose, search }: {
   meta: DocMeta | null; docId?: string; project?: string; initial?: { keys: string[]; cmd: string; before: string; after: string };
+  /** the bibliography is only searched on the server, its size unknown (a slide deck: every .bib file of the project) */
+  search?: boolean;
   onInsert: (keys: string[], cmd: string, before: string, after: string, entries: BibItem[]) => void;
   /** a paper was added to the project's cited.bib (the caller updates the bibliography inset and its metadata) */
   onAdded?: (r: BibAddResult) => void; onClose: () => void;
@@ -247,7 +249,7 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
   const [added, setAdded] = useState<BibItem[]>([]);
   const local = useMemo(() => [...added, ...(meta?.bib ?? [])], [meta, added]);
   const total = (meta?.bibTotal ?? (meta?.bib ?? []).length) + added.length;
-  const remote = total > local.length;    // large bibliography: search on the server
+  const remote = !!search || total > local.length;    // large bibliography: search on the server
   const [hits, setHits] = useState<BibItem[]>([]);
   const [searching, setSearching] = useState(false);
   useEffect(() => {
@@ -323,12 +325,12 @@ export function CiteDialog({ meta, docId, project, initial, onInsert, onAdded, o
       </div>
       {tab === 'project' ? (
         <>
-          <Row label="Search"><input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} placeholder="author, year, title, key" /><span class="sub" style="color:#888;font-size:11px;white-space:nowrap">{searching ? 'searching…' : `${total} entries`}</span></Row>
+          <Row label="Search"><input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} placeholder="author, year, title, key" /><span class="sub" style="color:#888;font-size:11px;white-space:nowrap">{searching ? 'searching…' : search ? `${list.length} found` : `${total} entries`}</span></Row>
           <div class="list" style="max-height:320px">
             {keys.filter(k => !list.some(e => e.key === k)).map(k => <div key={'sel-' + k} class="sel" onClick={() => toggle(k)}><b>{known.get(k)?.author || k}</b> <span class="sub">[{k}] (selected)</span></div>)}
             {list.map(e => <div key={e.key} class={keys.includes(e.key) ? 'sel' : ''} onClick={() => toggle(e.key)}><b>{e.author || e.key}</b> {e.year} <span class="sub">— {e.title}</span> <span class="sub">[{e.key}]</span></div>)}
-            {!total && <div class="sub">No bibliography entries yet — find the paper online (tab above) or add a .bib file to the project.</div>}
-            {remote && !q && total > local.length && <div class="sub" style="padding:4px 6px;color:#888">Type to search all {total} entries; the cited ones are listed first.</div>}
+            {(search ? !searching && !list.length : !total) && <div class="sub">{search && q ? 'Nothing found in the project\u2019s .bib files' : 'No bibliography entries yet'} — find the paper online (tab above) or add a .bib file to the project.</div>}
+            {remote && !search && !q && total > local.length && <div class="sub" style="padding:4px 6px;color:#888">Type to search all {total} entries; the cited ones are listed first.</div>}
           </div>
         </>
       ) : (

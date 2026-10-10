@@ -24,7 +24,12 @@ import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
 import { deckToolbar, type DeckTextActions } from './decktoolbar';
 import { BgRemoveDialog } from './BgRemoveDialog';
-import { MathOverlay, type MathEditState } from './MathOverlay';
+import { MathOverlay, type MathEditState, type MathOps } from './MathOverlay';
+import { CiteDialog, uiPrompt } from '../app/Dialogs';
+import type { DocMeta } from '../api';
+import { citedKeys, citeEntry, type CiteEntry } from '@overlyx/core/html/refs.ts';
+import type { MathJaxMacro } from '@overlyx/core/html/deckextras.ts';
+import type { MacroTable } from '@overlyx/core';
 import { activeMathField } from '../editor/lyxmath/field';
 import { mathReady } from '../editor/lyxmath/mathjax';
 import { setLayoutMathFont } from '../fonts/editorfont';
@@ -105,6 +110,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const [current, setCurrent] = useState(0);
   const [sel, setSel] = useState<SelItem[]>([]);
   const [editingText, setEditingText] = useState<Path | null>(null);
+  const editingTextRef = useRef(false); editingTextRef.current = !!editingText;
   /** a formula of the text being retyped, open in LyX's formula editor (MathOverlay) */
   const [mathEdit, setMathEdit] = useState<MathEditState | null>(null);
   /** keys typed between placing a new formula and LyX's field opening on it (given to the field then) */
@@ -112,6 +118,15 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const typeAheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** where the keys typed in the canvas while a formula opened go (MathOverlay) */
   const mathKeysIn = useRef<((id: number, keys: KeyPress[]) => void) | null>(null);
+  /** the open formula's numbering and label (the math row's Number and Label) */
+  const mathOps = useRef<MathOps | null>(null);
+  /** the macros of the .tex files the page links (runtime's ready), for LyX's formula editor */
+  const [deckMacros, setDeckMacros] = useState<MacroTable>({});
+  /** the citation dialog (Cite while typing a text) */
+  const [citeOpen, setCiteOpen] = useState(false);
+  /** bibliography entries fetched for keys the page cites (sent to the frames) and the keys asked for */
+  const bibKnown = useRef(new Map<string, CiteEntry>());
+  const bibAsked = useRef(new Set<string>());
   /** the node editor on a path (runtime/pathedit.ts): how many of its nodes are selected */
   const [nodeEd, setNodeEd] = useState<{ selected: number; total: number } | null>(null);
   const nodeEdRef = useRef(false); nodeEdRef.current = !!nodeEd;
@@ -152,6 +167,29 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (/\\\(|\\\[|\$\$/.test(text.toString())) void mathReady();
     return () => setLayoutMathFont(null);
   }, [host]);
+
+  // citations typed or pasted since the frames were served: their entries fetched and sent (runtime/cite.ts)
+  useEffect(() => {
+    if (!host.bibliography) return;
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const sync = () => {
+      const keys = citedKeys(text.toString()).filter(k => !bibAsked.current.has(k));
+      if (!keys.length) return;
+      for (const k of keys) bibAsked.current.add(k);
+      host.bibliography!(keys).then(list => {
+        const entries = list.map(e => citeEntry(e));
+        for (const e of entries) bibKnown.current.set(e.key, e);
+        if (!entries.length) return;
+        toCanvas({ ol: 'bib', entries }); toRail({ ol: 'bib', entries }); toFrame(presentFrame.current, { ol: 'bib', entries });
+      }).catch(() => { for (const k of keys) bibAsked.current.delete(k); });
+    };
+    syncBibRef.current = sync;
+    const off = host.onChange(() => { if (t) clearTimeout(t); t = setTimeout(sync, 400); });
+    const offReady = host.onReady(sync);
+    if (host.ready()) sync();
+    return () => { off(); offReady(); if (t) clearTimeout(t); syncBibRef.current = null; };
+  }, [host]);
+  const syncBibRef = useRef<(() => void) | null>(null);
 
   /* ------------------------------------------------------------- versions to the frames */
 
@@ -243,8 +281,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             toCanvas({ ol: 'tool', tool });
             toCanvas({ ol: 'view', view: viewRef.current });
             if (host.ready()) toCanvas({ ol: 'source', version: version.current, html: versions.current.get(version.current) ?? text.toString() });
+            setDeckMacros(macroTableOf(m.macros ?? {}));
+            if (bibKnown.current.size) toCanvas({ ol: 'bib', entries: [...bibKnown.current.values()] });
           } else {
             railReady.current = true;
+            if (bibKnown.current.size) toRail({ ol: 'bib', entries: [...bibKnown.current.values()] });
             toRail({ ol: 'scale', scale: railScale });
             if (host.ready()) toRail({ ol: 'source', version: version.current, html: text.toString() });
             toRail({ ol: 'current', slide: currentRef.current });
@@ -756,6 +797,10 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (m.key === 'F5' || (mod && m.key === 'Enter')) { startPresenting(); return; }
     if (mod && k === 'g') { arrangeSel(m.shift ? 'ungroup' : 'group'); return; }
     // Inkscape's Path ▸ Combine / Break apart / Simplify
+    // in a text being retyped: what goes into it, as in documents (link, citation, cross-reference)
+    if (editingTextRef.current && mod && !m.shift && k === 'k') { insertLink(); return; }
+    if (editingTextRef.current && mod && m.shift && k === 'c') { if (host.docId) setCiteOpen(true); return; }
+    if (editingTextRef.current && mod && m.shift && k === 'i') { pickReference(); return; }
     if (mod && k === 'k') { arrangeSel(m.shift ? 'break-apart' : 'combine'); return; }
     if (mod && k === 'l' && !m.shift) { arrangeSel('simplify'); return; }
     if (mod && m.key === 'ArrowUp') { arrangeSel(m.shift ? 'front' : 'forward'); return; }
@@ -889,9 +934,44 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const title = path.split('/').slice(-2).join('/');
   const mathExec = (cmd: string, ...args: unknown[]) => { const f = activeMathField(); if (f) { f.execute(cmd, ...args); f.focus(); } };
   const mathPanels = useMathPanels(mathExec);
+  const labelFormula = () => {
+    const ops = mathOps.current;
+    if (!ops) return;
+    void uiPrompt('Label', 'The name \\eqref{…} refers to this equation by (it is numbered).', ops.labelNow() || 'eq:', { okLabel: 'Label' }).then(name => { if (name !== null) mathOps.current?.label(name); });
+  };
+  /** a reference to a labelled equation: the labels of the page, picked under the button */
+  const pickReference = () => {
+    const labels = [...new Set([...text.toString().matchAll(/\\label\{([^}]+)\}/g)].map(m => m[1].trim()))];
+    const b = document.querySelector('[data-tb="dk-ref"]')?.getBoundingClientRect();
+    if (!labels.length) { notify('No equation has a label yet: open a displayed formula and give it one (Label in its toolbar).', 'info'); return; }
+    pickAt(b ? b.left : 200, b ? b.bottom + 4 : 120, 'Reference to', close => (
+      <div class="dk-refs">
+        {labels.map(l => <button type="button" class="dk-ref-item" key={l} onClick={() => { close(); canvasFrame.current?.focus(); toCanvas({ ol: 'insertRef', src: `\\eqref{${l}}` }); }}>{l}</button>)}
+      </div>
+    ));
+  };
+  /** a link on the words selected in the text being retyped (the address itself when none are) */
+  const insertLink = () => {
+    void uiPrompt('Link', 'The address the words link to', 'https://', { okLabel: 'Link' }).then(url => {
+      if (!url || !url.trim() || url.trim() === 'https://') return;
+      canvasFrame.current?.focus();
+      toCanvas({ ol: 'exec', command: 'createLink', value: url.trim() });
+    });
+  };
+  const setStep = (n: number | null) => {
+    const ops: HtmlOp[] = sel.map(s => ({ t: 'attr', path: s.path, name: 'data-step', value: n && n > 1 ? String(n) : null }));
+    if (n === null) for (const s of sel) if (s.list?.steps) ops.push({ t: 'attr', path: s.list.path, name: 'data-steps', value: null });
+    applyOps(ops);
+  };
+  const setListSteps = (from: number | null) => {
+    const l = sel.length === 1 ? sel[0].list : undefined;
+    if (l) applyOps([{ t: 'attr', path: l.path, name: 'data-steps', value: from === null ? null : String(from) }]);
+  };
   const bars = deckToolbar({
     kind, tool, setTool, readOnly, sel, editingText: !!editingText,
-    math: { editing: !!mathEdit && !mathEdit.closing, insert: display => toCanvas({ ol: 'insertMath', display }), exec: mathExec, panels: mathPanels },
+    math: { editing: !!mathEdit && !mathEdit.closing, insert: display => toCanvas({ ol: 'insertMath', display }), exec: mathExec, panels: mathPanels,
+      display: !!mathEdit?.display, number: () => mathOps.current?.number(), label: labelFormula },
+    latex: { link: insertLink, cite: host.docId ? () => setCiteOpen(true) : undefined, reference: pickReference, step: setStep, listSteps: setListSteps },
     nodes: { editing: !!nodeEd, selected: nodeEd?.selected ?? 0, total: nodeEd?.total ?? 0, cmd: cmd => toCanvas({ ol: 'nodes', cmd }) },
     undo: () => host.undo(), redo: () => host.redo(),
     insertImage: () => fileInput.current?.click(),
@@ -1001,11 +1081,20 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         )}
       </div>
       {floatPop && <FloatPopover {...floatPop} onClose={() => setFloatPop(null)} />}
+      {citeOpen && host.docId && <CiteDialog meta={CITE_META} search docId={host.docId} project={host.docId.split('/').slice(0, 2).join('/')}
+        onInsert={(keys, cmd, before, after) => {
+          if (!keys.length) return;
+          const opt = before || after ? `[${before}][${after}]` : '';
+          canvasFrame.current?.focus();
+          toCanvas({ ol: 'insertRef', src: `\\${cmd}${opt}{${keys.join(',')}}` });
+        }}
+        onAdded={r => { bibAsked.current.delete(r.key); setTimeout(() => syncBibRef.current?.(), 500); }}
+        onClose={() => setCiteOpen(false)} />}
       {mathEdit && !presenting && <MathOverlay st={mathEdit} frame={canvasFrame.current} scale={scale} typeAhead={typeAhead}
         onSet={tex => toCanvas({ ol: 'mathSet', id: mathEdit.id, tex })}
         onShown={() => toCanvas({ ol: 'mathShown', id: mathEdit.id })}
         onDisplay={() => toCanvas({ ol: 'mathDisplay', id: mathEdit.id })}
-        onRest={keys => toCanvas({ ol: 'typeKeys', keys })} keysIn={mathKeysIn}
+        onRest={keys => toCanvas({ ol: 'typeKeys', keys })} keysIn={mathKeysIn} ops={mathOps} macros={deckMacros}
         onDone={(tex, dir, putBack) => {
           const id = mathEdit.id;
           // the field stays (still) until the formula is shown again under it (the runtime's mathClose)
@@ -1050,3 +1139,13 @@ function FloatPopover({ x, y, title, render, onClose }: { x: number; y: number; 
 }
 
 export default DeliverableEditor;
+
+/** the citation dialog's view of a deck: the project's bibliography searched on the server, natbib's commands */
+const CITE_META = { bib: [], citeEngine: 'natbib' } as unknown as DocMeta;
+
+/** the page's macros (MathJax's form) as LyX's formula editor takes them */
+function macroTableOf(m: Record<string, MathJaxMacro>): MacroTable {
+  const out: MacroTable = {};
+  for (const [name, v] of Object.entries(m)) out[name] = typeof v === 'string' ? { nargs: 0, def: v } : { nargs: v[1], def: v[0], ...(v.length > 2 ? { nopt: 1 } : {}) };
+  return out;
+}

@@ -8,6 +8,7 @@
  */
 import { state, srcOf, liveOf, link, isForeign, post } from './env';
 import { typeset, untypeset } from './math';
+import { renderCites, refreshCites } from './cite';
 
 /** the element being retyped (contenteditable): left alone until that ends */
 export const guard = { editing: null as Element | null };
@@ -61,6 +62,9 @@ export function applySource(html: string, version: number): boolean {
   state.src = next;
   const added: Element[] = [];
   reconcile(document.documentElement, prev.documentElement, next.documentElement, added);
+  // citations at once (their numbers may have changed anywhere), formulas typeset
+  renderCites(added);
+  refreshCites();
   typesetting = typeset(added.filter(a => a.isConnected));
   return true;
 }

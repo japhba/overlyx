@@ -13,9 +13,19 @@
 import type { MathBox, KeyPress } from '../protocol';
 import { post } from './env';
 import { typeset, untypeset } from './math';
+import { refreshCites } from './cite';
+import { citeRegExp, hasCite } from '@overlyx/core/html/refs.ts';
 
-const MATH_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$/g;
-const DELIMS: Record<string, [string, string]> = { '(': ['\\(', '\\)'], '[': ['\\[', '\\]'], '$$': ['$$', '$$'] };
+/**
+ * What a retyped text shows as chips: formulas (\( \), \[ \], $$ $$, environments — equation,
+ * align … — edited with LyX's formula editor) and, uneditable, references (\ref, \eqref: their
+ * numbers) and citations (\cite …: their labels, cite.ts).
+ */
+const CHIP_RE = new RegExp(String.raw`\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$|(\\begin\{([A-Za-z]+\*?)\}[\s\S]*?\\end\{\5\})|(\\(?:eq)?ref\{[^}]*\})|(` + citeRegExp().source + ')', 'g');
+const CHIPPED = /\\\(|\\\[|\$\$|\\begin\{[A-Za-z]+\*?\}|\\(?:eq)?ref\{/;
+/** `env`: the formula is an environment, written as it is */
+const DELIMS: Record<string, [string, string]> = { '(': ['\\(', '\\)'], '[': ['\\[', '\\]'], '$$': ['$$', '$$'], env: ['', ''] };
+const isEnv = (tex: string) => /^\\begin\{([A-Za-z]+\*?)\}[\s\S]*\\end\{\1\}$/.test(tex.trim());
 
 let seq = 0;
 /** the chip whose formula is open in the editor */
@@ -37,46 +47,81 @@ function chip(tex: string, delim: string, src: string | null): HTMLElement {
   return c;
 }
 
-/** the formulas of a text (its source markup, just put in) made chips at once, typeset when `ready` resolves */
+/** a reference or citation as an uneditable chip: MathJax numbers a reference, cite.ts labels a citation */
+function refChip(src: string): HTMLElement {
+  const c = document.createElement('span');
+  c.contentEditable = 'false';
+  c.dataset.olSrc = src;
+  if (hasCite(src)) { c.className = 'ol-refchip ol-citechip'; c.setAttribute('data-ol-cite', src); c.textContent = '…'; }
+  else { c.className = 'ol-refchip ol-tex'; c.textContent = src; }
+  return c;
+}
+
+/** the formulas, references and citations of a text (its source markup, just put in) made chips at once, typeset when `ready` resolves */
 export function chipify(el: HTMLElement): { chips: HTMLElement[]; ready: Promise<void> } {
   const chips: HTMLElement[] = [];
+  const refs: HTMLElement[] = [];
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
     acceptNode: n => (n.parentElement?.closest('script, style, code, pre, textarea') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
   });
   const texts: Text[] = [];
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) if (/\\\(|\\\[|\$\$/.test(n.nodeValue ?? '')) texts.push(n as Text);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if (CHIPPED.test(n.nodeValue ?? '') || hasCite(n.nodeValue ?? '')) texts.push(n as Text);
   for (const t of texts) {
     const s = t.nodeValue ?? '';
     const frag = document.createDocumentFragment();
     let last = 0, found = 0;
-    for (const m of s.matchAll(MATH_RE)) {
+    for (const m of s.matchAll(CHIP_RE)) {
       found++;
       if (m.index! > last) frag.append(s.slice(last, m.index));
-      const delim = m[1] !== undefined ? '(' : m[2] !== undefined ? '[' : '$$';
-      const c = chip((m[1] ?? m[2] ?? m[3]).trim(), delim, m[0]);
-      chips.push(c);
-      frag.append(c);
+      if (m[6] !== undefined || m[7] !== undefined) {
+        const r = refChip(m[0]);
+        refs.push(r);
+        frag.append(r);
+      } else {
+        const env = m[4] !== undefined;
+        const delim = m[1] !== undefined ? '(' : m[2] !== undefined ? '[' : env ? 'env' : '$$';
+        const c = chip(env ? m[4] : (m[1] ?? m[2] ?? m[3]).trim(), delim, m[0]);
+        chips.push(c);
+        frag.append(c);
+      }
       last = m.index! + m[0].length;
     }
     if (!found) continue;
     if (last < s.length) frag.append(s.slice(last));
     t.replaceWith(frag);
   }
-  return { chips, ready: chips.length ? typeset(chips) : Promise.resolve() };
+  if (refs.some(r => r.classList.contains('ol-citechip'))) refreshCites();
+  const tex = [...chips, ...refs.filter(r => !r.classList.contains('ol-citechip'))];
+  return { chips, ready: tex.length ? typeset(tex) : Promise.resolve() };
+}
+
+/** a reference or citation put at the caret of the text being retyped (the toolbar's pickers) */
+export function insertRefChip(editing: HTMLElement, src: string): void {
+  const c = refChip(src);
+  const sel = getSelection();
+  let r = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+  if (!r || !editing.contains(r.startContainer)) { r = document.createRange(); r.selectNodeContents(editing); r.collapse(false); }
+  r.deleteContents();
+  r.insertNode(c);
+  r.setStartAfter(c); r.collapse(true);
+  sel?.removeAllRanges(); sel?.addRange(r);
+  if (c.classList.contains('ol-citechip')) refreshCites(); else void typeset([c]);
 }
 
 /** a chip as text again: its source as written, or the formula as it is now */
 export function chipText(c: HTMLElement): string {
+  if (c.classList.contains('ol-refchip')) return c.dataset.olSrc ?? '';
   const tex = c.dataset.olTex ?? '';
   if (!tex.trim()) return '';
   if (c.dataset.olSrc !== undefined && c.dataset.olSrcTex === tex) return c.dataset.olSrc;
+  if (c.dataset.olDelim === 'env') return tex.trim();
   const [a, b] = DELIMS[c.dataset.olDelim ?? '('] ?? DELIMS['('];
   return c.dataset.olDelim === '(' ? `${a}${tex}${b}` : `${a} ${tex} ${b}`;
 }
 
 /** the chips of a copy of the text (cleanHtml) put back as text */
 export function unchip(root: HTMLElement): void {
-  for (const c of Array.from(root.querySelectorAll<HTMLElement>('.ol-mathchip'))) {
+  for (const c of Array.from(root.querySelectorAll<HTMLElement>('.ol-mathchip, .ol-refchip'))) {
     // the no-break space a browser types beside an uneditable element is a space
     const p = c.previousSibling, n = c.nextSibling;
     if (p?.nodeType === Node.TEXT_NODE && p.nodeValue?.endsWith('\u00a0')) p.nodeValue = p.nodeValue.slice(0, -1) + ' ';
@@ -95,7 +140,9 @@ function boxOf(c: HTMLElement): MathBox {
   const cont = c.querySelector<HTMLElement>('mjx-container');
   const svg = cont?.querySelector<SVGSVGElement>(':scope > svg') ?? null;
   const s = getComputedStyle(c);
-  const vb = svg?.viewBox?.baseVal;
+  // (a numbered equation's SVG is as wide as its line, its viewBox kept in data-mjx-viewBox)
+  const vbAttr = svg?.getAttribute('data-mjx-viewBox')?.split(/[\s,]+/).map(Number);
+  const vb = svg?.viewBox?.baseVal?.height ? svg.viewBox.baseVal : vbAttr && vbAttr.length === 4 ? { y: vbAttr[1], height: vbAttr[3] } : null;
   let r: DOMRect, em: number, baseline: number;
   if (svg && vb && vb.height && svg.getBoundingClientRect().height) {
     // (the viewBox is in thousandths of the math font's em, its y = 0 the baseline)
@@ -200,6 +247,8 @@ export async function setChip(id: number, tex: string): Promise<void> {
 async function render(c: HTMLElement, tex: string): Promise<void> {
   if (c.dataset.olTex === tex && c.querySelector('mjx-container')) return;
   c.dataset.olTex = tex;
+  // numbered in LyX's formula editor (Alt+M N, a label): an environment; numbering taken off: \[ \] again
+  if (c.dataset.olDelim !== '(') c.dataset.olDelim = isEnv(tex) ? 'env' : c.dataset.olDelim === 'env' ? '[' : c.dataset.olDelim;
   untypeset([c]);
   const [a, b] = DELIMS[c.dataset.olDelim ?? '('] ?? DELIMS['('];
   c.textContent = a + tex + b;
@@ -306,4 +355,6 @@ export function chipBeside(dir: 'before' | 'after'): HTMLElement | null {
 export const CHIP_CSS = `.ol-mathchip { cursor: pointer !important; border-radius: 3px; -webkit-user-select: all; user-select: all; }
   .ol-mathchip:hover { background: rgba(47,111,222,.10); }
   .ol-mathchip[data-ol-mathediting] { visibility: hidden; }
-  .ol-mathchip:empty::before { content: '\\2026'; opacity: .5; }`;
+  .ol-mathchip:empty::before { content: '\\2026'; opacity: .5; }
+  .ol-mathchip[data-ol-mathediting] g[data-labels] { visibility: visible; }
+  .ol-refchip { border-radius: 3px; -webkit-user-select: all; user-select: all; box-shadow: inset 0 -1px 0 rgba(47,111,222,.45); }`;

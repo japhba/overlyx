@@ -6,11 +6,13 @@
  * through the source element it was made from, never by its place in the live tree.
  */
 import type { FromRuntime, DeliverableKind, Path, SlideBox } from '../protocol';
+import type { DeckExtras } from '@overlyx/core/html/deckextras.ts';
 
 export type Mode = 'edit' | 'thumb' | 'present' | 'print' | 'check' | 'view';
 
 declare global {
-  interface Window { __OL?: { mode?: Mode }; __olReady?: boolean; __ol?: unknown; MathJax?: any }
+  /** `__OL`: what the page's server gives the runtime — its mode, and the cited entries, citation style and macros (core html/deckextras.ts) */
+  interface Window { __OL?: { mode?: Mode } & DeckExtras; __olReady?: boolean; __ol?: unknown; MathJax?: any }
 }
 
 export const MODE: Mode = (window.__OL?.mode ?? 'view') as Mode;
@@ -29,7 +31,7 @@ export function post(msg: FromRuntime): void {
 export function isForeign(el: Element): boolean {
   if (el.hasAttribute('data-ol-runtime')) return true;
   const t = el.localName;
-  return t === 'ol-overlay' || t === 'mjx-container' || (t === 'style' && /^MJX/.test(el.id)) || (t === 'svg' && el.id === 'MJX-SVG-global-cache');
+  return t === 'ol-overlay' || t === 'mjx-container' || t === 'ol-cite' || (t === 'style' && /^MJX/.test(el.id)) || (t === 'svg' && el.id === 'MJX-SVG-global-cache');
 }
 
 /* ------------------------------------------------------------------ the source and its pairing */

@@ -94,6 +94,13 @@ export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleH
       const y = rect.h > 8 ? rect.y : Math.max(0, rect.y - 32 * scaleHint);
       return `<div style="position: absolute; left: ${r(x)}px; top: ${r(y)}px; width: ${r(fw)}px; font-size: ${r(40 * scaleHint)}px; text-align: center">\\[ \\]</div>`;
     }
+    // the works cited, listed by the runtime (cite.ts) as LaTeX's \bibliography: here only its box
+    case 'references': {
+      if (flow) return '<div class="ol-bibliography"></div>';
+      const bw = rect.w > 8 ? rect.w : 900 * scaleHint;
+      const x = rect.w > 8 ? rect.x : Math.max(0, Math.min(1280 * scaleHint - bw, rect.x - bw / 2));
+      return `<div class="ol-bibliography" style="position: absolute; left: ${r(x)}px; top: ${r(rect.y)}px; width: ${r(bw)}px; font-size: ${r(22 * scaleHint)}px; line-height: 1.35"></div>`;
+    }
     case 'rect': return `<div style="${pos(true)}${flowSize}${centred}background: ${SHAPE_FILL}; border-radius: 8px"></div>`;
     case 'roundrect': return `<div style="${pos(true)}${flowSize}${centred}background: ${SHAPE_FILL}; border-radius: 28px"></div>`;
     case 'ellipse': return `<div style="${pos(true)}${flowSize}${centred}background: #e8a33d; border-radius: 50%"></div>`;

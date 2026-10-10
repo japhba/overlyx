@@ -51,8 +51,21 @@ export interface DeckCtx {
   slideBackground(c: string | null): void;
   canvas: { view: CanvasView; set(v: Partial<CanvasView>): void };
   newSlide(): void;
-  /** LyX's formula editor (MathOverlay): open on a formula of the text, a new formula at the caret, its commands, the math panels */
-  math: { editing: boolean; insert(display: boolean): void; exec(cmd: string, ...args: unknown[]): void; panels: { id: string; title: string; palette: Palette }[] };
+  /** LyX's formula editor (MathOverlay): open on a formula of the text, a new formula at the caret, its commands, the math panels; a displayed one numbered and labelled */
+  math: { editing: boolean; insert(display: boolean): void; exec(cmd: string, ...args: unknown[]): void; panels: { id: string; title: string; palette: Palette }[]; display: boolean; number(): void; label(): void };
+  /** LaTeX's citations, references and overlays on slides (core html/refs.ts) */
+  latex: {
+    /** a link on the selected words (or the address put in) */
+    link(): void;
+    /** the citation dialog (absent where the project's bibliography cannot be searched) */
+    cite?(): void;
+    /** a reference to a labelled equation (\eqref) */
+    reference(): void;
+    /** the selected objects appear at a step when presenting (null: with the slide) */
+    step(n: number | null): void;
+    /** the selected list's items appear one by one (from step `from`), or all at once (null) */
+    listSteps(from: number | null): void;
+  };
   /** the node editor (a path's points): on, its selected nodes, its commands */
   nodes: { editing: boolean; selected: number; total: number; cmd(c: NodeCmd): void };
 }
@@ -131,6 +144,10 @@ function mathGroups(c: DeckCtx): ToolButton[][] {
       { id: 'm-cases', title: 'Cases (Alt+M C)', icon: 'cases', html: face('\\cases'), action: () => x('insert', '\\cases') },
       { id: 'm-text', title: 'Text in the formula (Ctrl+M)', icon: 'Tx', action: () => x('text') },
     ],
+    ...(c.math.display ? [[
+      { id: 'm-number', title: 'Number the equation, or not (Alt+M N) — LaTeX\'s equation environment', icon: '(1)', action: c.math.number },
+      { id: 'm-label', title: 'Label… — the name \\eqref{…} refers to it by (numbers it)', icon: 'Label', action: c.math.label },
+    ] as ToolButton[]] : []),
     c.math.panels.filter(p => MATH_PANEL_FACE[p.id]).map(p => ({ id: 'mp-' + p.id, title: p.title, icon: p.title, html: face(MATH_PANEL_FACE[p.id]), palette: p.palette })),
   ];
 }
@@ -212,8 +229,9 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-lines', title: 'Lines (L line, A arrow, P pen, B Bézier path)', icon: lineTool ? `dk-${lineTool.tool}` : 'dk-line', active: !!lineTool, disabled: ro,
         palette: { title: 'Lines', cols: 4, items: LINES.map(s => ({ label: s.label, html: ICON(`dk-${s.tool}`), active: c.tool === s.tool, action: () => c.setTool(s.tool) })) } },
       { id: 'dk-image', title: 'Picture… (or drop a picture or an SVG on the slide)', icon: 'dk-image', action: c.insertImage, disabled: ro },
-      { id: 'dk-formula', title: c.editingText ? 'Formula here, in the text (Ctrl+M; Ctrl+Shift+M displayed)' : 'Formula — click or drag on the slide; while typing a text, Ctrl+M puts one in it', icon: 'dk-formula',
+      { id: 'dk-formula', title: c.editingText ? 'Formula here, in the text (Ctrl+M or $; Ctrl+Shift+M displayed)' : 'Formula — click or drag on the slide; while typing a text, Ctrl+M or $ puts one in it', icon: 'dk-formula',
         action: () => { if (c.editingText) c.math.insert(false); else c.setTool('formula'); }, active: c.tool === 'formula' || c.math.editing, disabled: ro },
+      { id: 'dk-references', title: 'References — the works cited (\\cite) listed, as LaTeX\'s bibliography: click or drag on the slide', icon: 'dk-references', action: () => c.setTool('references'), active: c.tool === 'references', disabled: ro },
     ],
   ];
 
@@ -247,6 +265,18 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       ...(c.editingText ? [{ id: 'dk-hl', title: 'Highlight colour (of the selected words)', icon: '', html: swatchIcon(ICONSVG.highlight, null),
         palette: { title: 'Highlight', render: (close: () => void) => <ColorGrid current={null} close={close} none="None" onPick={col => c.text.highlight(col)} /> } } as ToolButton] : []),
     ]);
+    // what goes into a text, as in documents (the same order, icons, names and keys as their row: toolbars.tsx)
+    if (c.editingText) context.push(
+      [{ id: 'dk-href', title: 'Link (Ctrl+K)', icon: 'href', action: c.latex.link }],
+      [
+        { id: 'dk-ref', title: 'Cross-reference (Ctrl+Shift+I) — \\eqref to a labelled equation', icon: 'ref', action: c.latex.reference },
+        ...(c.latex.cite ? [{ id: 'dk-cite', title: 'Citation (Ctrl+Shift+C) — \\cite, from the project\'s .bib files or found online', icon: 'cite', action: c.latex.cite } as ToolButton] : []),
+      ],
+      [
+        { id: 'dk-math', title: 'Inline formula (Ctrl+M)', icon: 'math', action: () => c.math.insert(false) },
+        { id: 'dk-dmath', title: 'Display formula (Ctrl+Shift+M)', icon: 'dmath', action: () => c.math.insert(true) },
+      ],
+    );
     const al = st?.textAlign ?? 'left';
     context.push([
       { id: 'dk-align', title: 'Alignment', icon: al === 'center' ? 'aligncenter' : al === 'right' || al === 'end' ? 'alignright' : 'alignleft',
@@ -356,6 +386,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-opacity', title: 'Opacity', icon: 'dk-opacity',
         palette: { title: 'Opacity', render: () => <Slider label="Opacity" value={Math.round((st ? Number(st.opacity) : 1) * 100)} onSet={v => c.paint({ opacity: v / 100 })} /> } },
       { id: 'dk-shadow', title: 'Shadow', icon: 'dk-shadow', active: !!st?.shadow, action: () => c.paint({ shadow: !st?.shadow }) },
+      stepButton(c, sel),
       { id: 'dk-lock', title: locked ? 'Unlock (it can be moved again)' : 'Lock (selected, not moved or resized)', icon: 'dk-lock', active: locked, action: () => c.arrange(locked ? 'unlock' : 'lock') },
       { id: 'dk-delete', title: 'Delete (Del)', icon: 'dk-delete', action: c.remove, disabled: locked },
     ]);
@@ -377,6 +408,19 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     ]);
   }
   return { tools, context };
+}
+
+/** when the selected objects appear while presenting: beamer's overlays (data-step, a list's data-steps) */
+function stepButton(c: DeckCtx, sel: SelItem[]): ToolButton {
+  const step = sel.length ? Math.max(...sel.map(s => s.step)) : 1;
+  const list = sel.length === 1 ? sel[0].list : undefined;
+  const items = [
+    { label: 'With the slide', active: step === 1 && !list?.steps, action: () => c.latex.step(null) },
+    ...[2, 3, 4, 5, 6].map(n => ({ label: `At step ${n} (after ${n - 1} ${n === 2 ? 'click' : 'clicks'})`, active: step === n, action: () => c.latex.step(n) })),
+    ...(list ? [{ label: list.steps ? 'List items all at once' : 'List items one by one', active: !!list.steps, action: () => c.latex.listSteps(list.steps ? null : step) }] : []),
+  ];
+  return { id: 'dk-step', title: 'Appear when presenting: with the slide, or at a later step (as beamer\'s \\pause / \\item<2->)', icon: step > 1 ? `▸${step}` : list?.steps ? '▸…' : 'dk-step', active: step > 1 || !!list?.steps,
+    palette: { title: 'Appear', list: true, cols: 1, items } };
 }
 
 function weightBtn(id: string, title: string, cur: number, set: (w: number) => void): ToolButton {

@@ -12,7 +12,33 @@
  */
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { LyxMathField, stripMathDelims } from '../editor/lyxmath/field';
+import { parseFormula, writeFormula, type MacroTable } from '@overlyx/core';
 import type { MathBox, KeyPress } from './protocol';
+
+/** LyX's Alt+M N on a displayed formula: numbered (an equation environment, as LaTeX's) or not; every row of a grid alike */
+export function toggleNumbering(f: LyxMathField, macros: MacroTable = {}): void {
+  const h = parseFormula(f.latex, macros);
+  if (h.type === 'simple') return;
+  const on = !h.numberedRows.every(n => n === true);
+  h.numberedRows = h.numberedRows.map(() => on);
+  f.setLatex(writeFormula(h));
+}
+
+/** a label on the row of a displayed formula the cursor is in (numbering it): what \ref / \eqref point to */
+export function labelFormula(f: LyxMathField, name: string, macros: MacroTable = {}): void {
+  const h = parseFormula(f.latex, macros);
+  if (h.type === 'simple') return;
+  const row = Math.min(f.topRow(), h.rows.length - 1);
+  h.labels[row] = name.trim() || undefined;
+  if (name.trim()) h.numberedRows[row] = true;
+  f.setLatex(writeFormula(h));
+}
+
+/** the label of the row the cursor is in */
+export function formulaLabel(f: LyxMathField, macros: MacroTable = {}): string {
+  const h = parseFormula(f.latex, macros);
+  return h.labels[Math.min(f.topRow(), h.labels.length - 1)] ?? '';
+}
 
 export interface MathEditState {
   id: number; tex: string; display: boolean; box: MathBox; color: string; at: { x: number; y: number } | null; where: 'start' | 'end';
@@ -28,8 +54,15 @@ const OURS = '.dl-mathedit, .toolbar, .tb-popup, .dl-ctx, .dl-floatpop, .ctx-men
 /** the field's own rendering is there (not its source while the math font's data is on its way) */
 const drawn = (f: LyxMathField) => !!f.dom.querySelector('.lm-content mjx-container') && !f.dom.querySelector('.lm-content .lm-pending');
 
-export function MathOverlay({ st, frame, scale, onSet, onDone, onShown, onDisplay, onRest, keysIn, typeAhead }: {
+/** what the toolbar does to the formula open (the math row's Number and Label) */
+export interface MathOps { number(): void; label(name: string): void; labelNow(): string; display: boolean }
+
+export function MathOverlay({ st, frame, scale, macros, onSet, onDone, onShown, onDisplay, onRest, keysIn, ops, typeAhead }: {
   st: MathEditState;
+  /** set here while the field is open */
+  ops?: { current: MathOps | null };
+  /** the macros of the .tex files the page links (core html/deckextras.ts) */
+  macros?: MacroTable;
   frame: HTMLIFrameElement | null;
   scale: number;
   onSet(tex: string): void;
@@ -78,12 +111,16 @@ export function MathOverlay({ st, frame, scale, onSet, onDone, onShown, onDispla
       cb.current.onDone(texNow(), dir, putBack);
     };
     field = new LyxMathField({
-      latex: st.display ? `\\[${st.tex}\\]` : `$${st.tex}$`,
+      // (a numbered formula is its environment, as written)
+      latex: /^\s*\\begin\{/.test(st.tex) ? st.tex : st.display ? `\\[${st.tex}\\]` : `$${st.tex}$`,
       display: st.display,
-      macros: {},
+      macros: macros ?? {},
       onChange: () => cb.current.onSet(texNow()),
       onMoveOut: (dir, o) => finish(dir === 'backward' || dir === 'upward' ? 'backward' : 'forward', o.putBack),
-      onCommand: k => { if (k === '$$' && !done) { done = true; toDisplay = true; cb.current.onDisplay(); } },
+      onCommand: k => {
+        if (k === '$$' && !done) { done = true; toDisplay = true; cb.current.onDisplay(); }
+        else if (k === 'n' && field && st.display) { toggleNumbering(field, macros); cb.current.onSet(texNow()); }
+      },
       // the focus went into the page (a click on the slide) or somewhere else that is not the toolbar
       onBlur: () => setTimeout(() => {
         const a = document.activeElement as HTMLElement | null;
@@ -135,6 +172,12 @@ export function MathOverlay({ st, frame, scale, onSet, onDone, onShown, onDispla
     };
     box.current.addEventListener('keydown', hold, true);
     keysIn.current = (id, keys) => { if (id === st.id) release(keys); };
+    if (ops) ops.current = {
+      display: st.display,
+      number: () => { if (done || !st.display) return; toggleNumbering(f, macros); cb.current.onSet(texNow()); f.focus(); },
+      label: name => { if (done || !st.display) return; labelFormula(f, name, macros); cb.current.onSet(texNow()); f.focus(); },
+      labelNow: () => formulaLabel(f, macros),
+    };
     // shown once drawn (the formula under it stays until then); kept on its baseline as it changes
     let ok = false;
     setShown(false);
@@ -166,6 +209,7 @@ export function MathOverlay({ st, frame, scale, onSet, onDone, onShown, onDispla
       el?.removeEventListener('keydown', hold, true);
       document.removeEventListener('pointerdown', onDown, true);
       if (keysIn.current) keysIn.current = null;
+      if (ops) ops.current = null;
       done = true; f.destroy(); f.dom.remove();
     };
   }, [st.id]);
