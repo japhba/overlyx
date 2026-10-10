@@ -144,7 +144,8 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     t = window.setTimeout(place, 50);
     return () => clearTimeout(t);
   }, [current, project?.name]);
-  const toggle = (key: string) => setCollapsed(c => ({ ...c, [key]: !c[key] }));
+  /** open / close a folder; one that was never toggled shows its default (`closedByDefault`) — flip that, not `undefined` */
+  const toggle = (key: string, closedByDefault: boolean) => setCollapsed(c => ({ ...c, [key]: !(c[key] ?? closedByDefault) }));
   /** open the folders above a path (VS Code reveals what was just created, moved or uploaded) */
   const reveal = (rel: string) => {
     if (!project) return;
@@ -322,10 +323,11 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
   const renderNode = (node: TreeNode, depth: number) => {
     const key = project!.name + ':' + node.path;
     if (!node.file) {
-      const isCollapsed = collapsed[key] ?? (depth > 0 || !!outlines);   // under the documents panel folders start closed: the open document stays near the top
+      const closedByDefault = depth > 0 || !!outlines;   // under the documents panel folders start closed: the open document stays near the top
+      const isCollapsed = collapsed[key] ?? closedByDefault;
       return (
         <div key={key}>
-          <div class={'tree-row folder' + (dropDir === node.path ? ' drop-target' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }} onClick={() => toggle(key)} onContextMenu={folderCtx(node.path)}
+          <div class={'tree-row folder' + (dropDir === node.path ? ' drop-target' : '')} style={{ paddingLeft: 6 + depth * 14 + 'px' }} onClick={() => toggle(key, closedByDefault)} onContextMenu={folderCtx(node.path)}
             onDragOver={dragOver(node.path)} onDrop={drop(node.path)}>
             <span class="twisty">{isCollapsed ? '▸' : '▾'}</span><span class="fname">{node.name}</span>
             {canEdit && <span class="row-actions">

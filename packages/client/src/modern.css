@@ -121,18 +121,7 @@ html[data-ui="modern"] ::selection { background: color-mix(in srgb, var(--m-blue
 html[data-ui="modern"] :focus-visible { outline-color: var(--m-blue); }
 html[data-ui="modern"] * { scrollbar-color: var(--m-line-strong) transparent; scrollbar-width: thin; }
 
-/* ------------------------------------------------------------ the wordmark: flat, upright, LyX's primaries */
-html[data-ui="modern"] .ol-wordmark .speed { display: none; }
-html[data-ui="modern"] .ol-wordmark .over { font-family: var(--m-display); font-weight: 500; font-style: normal; transform: none; letter-spacing: -0.01em; color: var(--m-ink); background: none; -webkit-text-fill-color: currentColor; filter: none; animation: none !important; padding-right: 0.02em; }
-html[data-ui="modern"] .ol-wordmark .lyx { font-family: var(--m-display); font-weight: 700; font-size: 1em; letter-spacing: 0; margin-left: 0.04em; }
-html[data-ui="modern"] .ol-wordmark .lyx span { text-shadow: none; transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1); }
-html[data-ui="modern"] .ol-wordmark .l { color: var(--m-blue); transform: none; }
-html[data-ui="modern"] .ol-wordmark .y { color: var(--m-yellow); transform: translateY(0.08em); margin: 0; }
-html[data-ui="modern"] .ol-wordmark .x { color: var(--m-red); transform: none; }
-html[data-ui="modern"] .ol-wordmark:hover .l { transform: rotate(-12deg); }
-html[data-ui="modern"] .ol-wordmark:hover .y { transform: rotate(7deg) translateY(0.12em); }
-html[data-ui="modern"] .ol-wordmark:hover .x { transform: rotate(12deg); }
-@media (prefers-reduced-motion: reduce) { html[data-ui="modern"] .ol-wordmark .lyx span { transition: none; } }
+/* ------------------------------------------------------------ the wordmark: the Bauhaus one (styles.css `.ol-wordmark.bauhaus`) */
 
 /* ------------------------------------------------------------ the header: the name over the menus */
 html[data-ui="modern"] .menubar {

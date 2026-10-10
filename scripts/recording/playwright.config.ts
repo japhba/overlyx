@@ -10,6 +10,6 @@ export default defineConfig({
   timeout: 600000,
   retries: 0,
   workers: 1,
-  use: { baseURL: process.env.OVERLYX_E2E_BASE ?? 'http://localhost:5175', headless: true },
+  use: { baseURL: process.env.OVERLYX_E2E_BASE ?? 'http://localhost:5175', headless: true, actionTimeout: 20000 },
   reporter: [['list']],
 });

@@ -31,6 +31,38 @@ test.describe('landing page', () => {
     await expect(page.locator('.login form button.btn.primary')).toHaveText('Sign in');
   });
 
+  test('the Bauhaus wordmark: tilted L·Y·X in both interfaces, speed lines, the hover motion; the feature sheet', async ({ page, browser }) => {
+    const tilt = (sel: string) => page.locator(sel).evaluate(e => getComputedStyle(e).transform);
+    for (const ui of ['classic', 'modern']) {
+      await page.addInitScript((u: string) => { try { localStorage.setItem('ol.ui', u); } catch { /* ignore */ } }, ui);
+      await page.goto('/');
+      const wm = page.locator('.login .ol-wordmark');
+      await expect(wm).toHaveClass(/bauhaus/);   // the landing page has one look, whatever the interface
+      expect(await tilt('.login .ol-wordmark .l')).not.toBe('none');
+      expect(await tilt('.login .ol-wordmark .x')).not.toBe('none');
+      await expect(page.locator('.login .ol-wordmark .speed i')).toHaveCount(3);
+      expect(await tilt('.login .ol-wordmark .over')).toBe('none');
+      await wm.hover();
+      await expect.poll(() => tilt('.login .ol-wordmark .over')).not.toBe('none');   // "Over" leans forward
+    }
+    // the sheet: documents, slides & posters, drawing first (the hero links to them), then the rest
+    await expect(page.locator('.login .fgroup h3')).toHaveText(['Documents', 'Slides & posters', 'Drawing', 'Together', 'Files & tools', 'Wherever you write']);
+    await expect(page.locator('.login .kinds a')).toHaveCount(3);
+    await expect(page.locator('.login')).toContainText('Inkscape');
+    // inside the Modern interface the wordmark keeps its tilted letters and speed lines too
+    const ctx = await browser.newContext();
+    await ctx.addInitScript(TOUR_SEEN_SCRIPT);
+    await ctx.addInitScript(() => { try { localStorage.setItem('ol.ui', 'modern'); } catch { /* ignore */ } });
+    await apiLogin(ctx);
+    const app = await ctx.newPage();
+    await app.goto('/#/admin/welcome/welcome.tex');
+    const brand = app.locator('.menubar .brand .ol-wordmark').first();
+    await expect(brand).toBeVisible({ timeout: 20000 });
+    expect(await brand.locator('.l').evaluate(e => getComputedStyle(e).transform)).not.toBe('none');
+    expect(await brand.locator('.speed').evaluate(e => getComputedStyle(e).display)).not.toBe('none');
+    await ctx.close();
+  });
+
   test('with Google: one big Google button, the password form folded away behind a quiet link', async ({ page }) => {
     await page.route('**/api/auth/me', route => route.fulfill({ json: { user: null, google: true, signup: 'open' } }));
     await page.goto('/');
@@ -148,8 +180,8 @@ test.describe('landing page', () => {
 
   test('demo wheel: auto-plays in view, rotates to the next clip, dots jump, replay restarts, dark variants', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('.wheel .slide video')).toHaveCount(4);
-    await expect(page.locator('.wheel .dots .dot')).toHaveCount(4);
+    await expect(page.locator('.wheel .slide video')).toHaveCount(6);
+    await expect(page.locator('.wheel .dots .dot')).toHaveCount(6);
     const active = () => page.locator('.wheel .slide.active');
     const video = () => active().locator('video');
     await page.locator('.wheel').scrollIntoViewIfNeeded();
@@ -159,13 +191,13 @@ test.describe('landing page', () => {
     expect(await video().evaluate(v => (v as HTMLVideoElement).currentSrc)).toContain('wysiwyg-light');
     // a clip that ends halts for a beat, then the wheel rotates on and the ". o .." moves with it
     await video().evaluate(v => { const x = v as HTMLVideoElement; x.currentTime = x.duration - 0.1; });
-    await expect(active()).toHaveAttribute('data-demo', 'tex', { timeout: 15000 });
+    await expect(active()).toHaveAttribute('data-demo', 'slides', { timeout: 15000 });
     await expect(page.locator('.wheel .dots .dot.active')).toHaveAttribute('data-dot', '1');
     await expect.poll(() => video().evaluate(v => !(v as HTMLVideoElement).paused && (v as HTMLVideoElement).currentTime < 3), { timeout: 15000 }).toBe(true);
     // a dot jumps straight to its clip and plays it from the start
-    await page.locator('.wheel .dots .dot[data-dot="3"]').click();
+    await page.locator('.wheel .dots .dot[data-dot="5"]').click();
     await expect(active()).toHaveAttribute('data-demo', 'vscode');
-    await expect(page.locator('.wheel .dots .dot.active')).toHaveAttribute('data-dot', '3');
+    await expect(page.locator('.wheel .dots .dot.active')).toHaveAttribute('data-dot', '5');
     await expect.poll(() => video().evaluate(v => !(v as HTMLVideoElement).paused && (v as HTMLVideoElement).currentTime < 3), { timeout: 15000 }).toBe(true);
     // ↻ restarts the clip that is showing
     await video().evaluate(v => { (v as HTMLVideoElement).currentTime = 5; });

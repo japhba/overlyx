@@ -1002,23 +1002,39 @@ blend.
   cells show only while the cursor is in that table / formula (`editor/plugins/envfocus.ts` marks the
   table with `ol-editing`; the static formula rendering hides its `lm-empty` outlines) — a document
   reads as it prints, the scaffolding appears where one works.
-* **Landing page / sign-in** (`app/Login.tsx` + `app/landing.css`): a hero (wordmark, tagline, pitch
-  list, GitHub links) with the sign-in card beside it — *Continue with Google* is the way in (repeated
-  at the bottom of the page); the username + password form (accounts created by an administrator,
-  e2e) is folded away behind a small link while Google sign-in is configured, and is the only form
-  otherwise; *Get the VS Code extension* sits right under the Google button with the same weight,
-  linking to the newest GitHub release. The Google buttons carry the location hash as `?next=`,
-  so a deep link (`#/owner/project/doc.tex`, a share link) is where the sign-in returns to; a share link
-  that did not open, or a guest asked to sign in, shows a note above the button (and *Continue as
-  a guest for now* to go back). Below the hero, a demo gallery wheel with four clips
-  (`public/landing/*.{webm,mp4,jpg}`): real recordings of the editor (WYSIWYG math typing, the raw
-  .tex split, two authors live with a margin comment thread, the VS Code extension), each in a light
-  and a dark variant picked by the visitor's theme. One clip shows at a time: it plays once when the
-  wheel is scrolled into view, halts on its last frame for a beat, then the wheel slides to the next
-  and wraps around; ". o .." dots under the wheel show the position and jump to a clip, and ↻ on the
-  frame replays the one showing. Regenerate the recordings with `scripts/recording/` (see the
-  comments in `record-demos.spec.ts` — an isolated instance — and `record-vscode.mjs` — xvfb);
-  `e2e/landing.spec.ts` covers autoplay, rotation, the dots, replay and the theme swap.
+* **Landing page / sign-in** (`app/Login.tsx` + `app/landing.css`): one Bauhaus look for every visitor,
+  whichever interface (Classic / Modern) they use inside — warm paper, graphite ink, hairlines, square
+  corners, Jost and Inter, LyX's blue / yellow / red only as marks (a document ■, slides ▲, a drawing ●;
+  the rest of the sheet in outline □ △ ○). A hero: the Bauhaus wordmark, one sentence of what it is, a
+  short description, links to the three kinds of work; beside it the sign-in card with a small
+  composition of the three marks behind it — *Continue with Google* is the way in; the username +
+  password form (accounts created by an administrator, e2e) is folded away behind a small link while
+  Google sign-in is configured, and is the only form otherwise; *Get the VS Code extension* sits right
+  under the Google button with the same weight, linking to the newest GitHub release. The Google
+  buttons carry the location hash as `?next=`, so a deep link (`#/owner/project/doc.tex`, a share link)
+  is where the sign-in returns to; a share link that did not open, or a guest asked to sign in, shows a
+  note above the button (and *Continue as a guest for now* to go back). Then numbered sections under a
+  heavy rule (a CSS counter): *See it in action* — a demo gallery wheel with six clips
+  (`public/landing/*.{webm,mp4,jpg}`): real recordings of the editor (WYSIWYG math typing; a slide deck
+  edited, presented with the laser and a poster beside it; Inkscape's path tools — union, nodes, a
+  Bézier curve, a scribble; the raw .tex split; two authors live with a margin comment thread; the VS
+  Code extension), each in a light and a dark variant picked by the visitor's theme (the slides and
+  drawing clips show the Modern interface). One clip shows at a time: it plays once when the wheel is
+  scrolled into view, halts on its last frame for a beat, then the wheel slides to the next and wraps
+  around; bars under the wheel show the position and jump to a clip, and ↻ on the frame replays the
+  one showing. *What it does* — the feature sheet (`FEATURES`: documents, slides & posters, drawing,
+  together, files & tools, wherever you write; plain statements, no slogans). *Coming from Overleaf?*
+  (`OverleafStart.tsx`), and a footer with the GitHub links. Regenerate the recordings with
+  `scripts/recording/` (see the comments in `record-demos.spec.ts` — an isolated instance; `-g slides`
+  records one clip, `RECORD_PROBE=<dir>` saves a screenshot per step — and `record-vscode.mjs` —
+  xvfb); `e2e/landing.spec.ts` covers autoplay, rotation, the dots, replay, the theme swap and the
+  wordmark.
+* **The wordmark** (`app/Logo.tsx`, styles.css `.ol-wordmark`): motion lines, "Over", then LyX's tilted
+  blue L / yellow Y / red X. Two looks of the same markup: the Classic interface's chrome italic, and the
+  Bauhaus one (`bauhaus` — the landing page — and every wordmark in the Modern interface): flat ink
+  lines, upright Jost "Over", the letters still tilted; on hover "Over" leans forward, the lines stretch
+  into fading tails and pulse and the letters tip a little further, on an overshooting ease (off with
+  reduced motion).
 * **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in its pane
   by our own viewer (fit-to-width / zoom, page navigation). **Pinch zoom**: a trackpad pinch
   (Ctrl + wheel in Chromium and Firefox, Safari's gesture events) or Ctrl/⌘ + wheel zooms about the

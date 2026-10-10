@@ -230,6 +230,37 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .ol-wordmark .l { color: #2f7fd6; transform: rotate(-12deg) translateY(-0.04em); }
 .ol-wordmark .y { color: #f3b400; transform: rotate(7deg) translateY(0.12em); margin: 0 -0.02em; }
 .ol-wordmark .x { color: #e14b2c; transform: rotate(12deg) translateY(-0.02em); }
+/* the Bauhaus wordmark (Logo.tsx `bauhaus`: the landing page; every wordmark in the Modern interface):
+   flat ink speed lines, an upright geometric "Over", LyX's tilted capitals in flat primaries. Hover
+   (or `.play`): "Over" leans forward, the lines stretch into fading tails and pulse, the letters tip
+   a little further, one after the other — all on an overshooting ease, settling back on leave */
+.ol-wordmark.bauhaus, html[data-ui="modern"] .ol-wordmark { --wm-ink: #1c1b19; --wm-blue: #2152a3; --wm-yellow: #efb21a; --wm-red: #d6402b; --wm-ease: cubic-bezier(0.34, 1.56, 0.64, 1); }
+html[data-theme="dark"] .ol-wordmark.bauhaus, html[data-ui="modern"][data-theme="dark"] .ol-wordmark { --wm-ink: #ecebe6; --wm-blue: #5b8cf0; --wm-yellow: #f4c03c; --wm-red: #ec5a43; }
+.ol-wordmark.bauhaus .speed, html[data-ui="modern"] .ol-wordmark .speed { display: inline-flex; gap: 0.12em; margin-right: 0.15em; transition: transform 0.35s var(--wm-ease); }
+.ol-wordmark.bauhaus .speed i, html[data-ui="modern"] .ol-wordmark .speed i { height: 0.07em; border-radius: 0; background: var(--wm-ink); opacity: 1; transition: width 0.35s var(--wm-ease); }
+.ol-wordmark.bauhaus .speed i:nth-child(1), html[data-ui="modern"] .ol-wordmark .speed i:nth-child(1) { width: 0.42em; }
+.ol-wordmark.bauhaus .speed i:nth-child(2), html[data-ui="modern"] .ol-wordmark .speed i:nth-child(2) { width: 0.7em; }
+.ol-wordmark.bauhaus .speed i:nth-child(3), html[data-ui="modern"] .ol-wordmark .speed i:nth-child(3) { width: 0.28em; }
+.ol-wordmark.bauhaus .over, html[data-ui="modern"] .ol-wordmark .over { font-family: "OL Jost", "Jost", Futura, "Century Gothic", system-ui, sans-serif; font-weight: 500; font-style: normal; letter-spacing: -0.01em; margin-right: 0; padding-right: 0.02em; color: var(--wm-ink); background: none; -webkit-text-fill-color: currentColor; filter: none; animation: none; transform: none; transform-origin: 50% 85%; transition: transform 0.35s var(--wm-ease); }
+.ol-wordmark.bauhaus .lyx, html[data-ui="modern"] .ol-wordmark .lyx { font-family: "OL Jost", "Jost", Futura, "Century Gothic", system-ui, sans-serif; font-weight: 700; font-size: 1em; letter-spacing: -0.02em; margin-left: 0.08em; transition: transform 0.35s var(--wm-ease); }
+.ol-wordmark.bauhaus .lyx span, html[data-ui="modern"] .ol-wordmark .lyx span { text-shadow: none; transition: transform 0.45s var(--wm-ease); }
+.ol-wordmark.bauhaus .l, html[data-ui="modern"] .ol-wordmark .l { color: var(--wm-blue); transform: rotate(-12deg) translateY(-0.04em); }
+.ol-wordmark.bauhaus .y, html[data-ui="modern"] .ol-wordmark .y { color: var(--wm-yellow); transform: rotate(7deg) translateY(0.12em); margin: 0 0.01em; }
+.ol-wordmark.bauhaus .x, html[data-ui="modern"] .ol-wordmark .x { color: var(--wm-red); transform: rotate(12deg) translateY(-0.02em); }
+.ol-wordmark.bauhaus:is(:hover, .play) .over, html[data-ui="modern"] .ol-wordmark:is(:hover, .play) .over { transform: skewX(-11deg) translateX(0.03em); animation: none; filter: none; }
+.ol-wordmark.bauhaus:is(:hover, .play) .lyx, html[data-ui="modern"] .ol-wordmark:is(:hover, .play) .lyx { transform: translateX(0.07em); }
+.ol-wordmark.bauhaus:is(:hover, .play) .speed, html[data-ui="modern"] .ol-wordmark:is(:hover, .play) .speed { transform: translateX(-0.08em); }
+.ol-wordmark.bauhaus:is(:hover, .play) .speed i, html[data-ui="modern"] .ol-wordmark:is(:hover, .play) .speed i { background: linear-gradient(90deg, transparent, var(--wm-ink) 70%); animation: wm-pulse 0.5s ease-in-out infinite alternate; }
+.ol-wordmark.bauhaus:is(:hover, .play) .speed i:nth-child(1), html[data-ui="modern"] .ol-wordmark:is(:hover, .play) .speed i:nth-child(1) { width: 0.85em; }
+.ol-wordmark.bauhaus:is(:hover, .play) .speed i:nth-child(2), html[data-ui="modern"] .ol-wordmark:is(:hover, .play) .speed i:nth-child(2) { width: 1.25em; animation-delay: 0.17s; }
+.ol-wordmark.bauhaus:is(:hover, .play) .speed i:nth-child(3), html[data-ui="modern"] .ol-wordmark:is(:hover, .play) .speed i:nth-child(3) { width: 0.6em; animation-delay: 0.34s; }
+.ol-wordmark.bauhaus:is(:hover, .play) .l, html[data-ui="modern"] .ol-wordmark:is(:hover, .play) .l { transform: rotate(-17deg) translateY(-0.08em); }
+.ol-wordmark.bauhaus:is(:hover, .play) .y, html[data-ui="modern"] .ol-wordmark:is(:hover, .play) .y { transform: rotate(13deg) translateY(0.14em); transition-delay: 0.04s; }
+.ol-wordmark.bauhaus:is(:hover, .play) .x, html[data-ui="modern"] .ol-wordmark:is(:hover, .play) .x { transform: rotate(19deg) translateY(-0.06em); transition-delay: 0.08s; }
+@keyframes wm-pulse { from { transform: scaleX(0.8); } to { transform: scaleX(1.12); } }
+@media (prefers-reduced-motion: reduce) {
+  .ol-wordmark.bauhaus *, html[data-ui="modern"] .ol-wordmark * { transition: none !important; animation: none !important; }
+}
 /* theme toggle in the menu bar (app/MenuBar.tsx) */
 .editor-topbar .topbar-right { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .menubar .theme-toggle, .editor-topbar .theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; margin-right: 10px; border: 0; border-radius: 4px; background: none; color: var(--ui-muted); padding: 0; }

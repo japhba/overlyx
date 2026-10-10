@@ -28,6 +28,8 @@ async function asUser(browser: Browser, username?: string): Promise<BrowserConte
 test.beforeAll(async ({ browser }) => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(`${DIR}/figures`, { recursive: true });
+  mkdirSync(`${DIR}/archive`, { recursive: true });
+  writeFileSync(`${DIR}/archive/old.txt`, 'kept for later\n');
   writeFileSync(`${DIR}/main.tex`, LYX);
   writeFileSync(`${DIR}/macros.tex`, MACROS);
   writeFileSync(`${DIR}/notes.md`, '# Project notes\n\nSome **bold** text here.\n');
@@ -51,6 +53,13 @@ test('the documents panel shows one project at a time (one tree: documents expan
   await expect(panel.locator('.doc-tab')).toHaveCount(2);                 // main.tex and notes.md are documents (they have outlines) …
   await expect(tree.locator('.tree-row.file')).toHaveCount(4);          // … and the tree lists every file: main.tex, macros.tex, notes.md, refs.bib
   await expect(tree.locator('.tree-row.folder', { hasText: 'figures' })).toHaveCount(1);   // empty folders show too
+  // a folder that starts closed opens on the first click and closes on the next (the first click used to do nothing)
+  const archive = tree.locator('.tree-row.folder', { hasText: 'archive' }).locator('.fname');
+  await expect(tree.locator('[data-file="archive/old.txt"]')).toHaveCount(0);
+  await archive.click();
+  await expect(tree.locator('[data-file="archive/old.txt"]')).toBeVisible();
+  await archive.click();
+  await expect(tree.locator('[data-file="archive/old.txt"]')).toHaveCount(0);
   await expect(tree.locator('[data-file="main.aux"]')).toHaveCount(0);
   await expect(tree.locator('[data-file="main.tex~"]')).toHaveCount(0);
   await expect(tree.locator('.project-info')).toContainText('Your project');
