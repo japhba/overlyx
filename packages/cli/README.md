@@ -53,6 +53,23 @@ overlyx build ada/paper/main.tex --pdf paper.pdf
 overlyx restore ada/paper 3f2a91c                # the whole project back to that commit (a new commit on top)
 ```
 
+## Keeping a clone in step
+
+```sh
+git clone https://overlyx.app/git/ada/paper.git && cd paper
+overlyx sync             # once: what you saved goes to the server, what changed there comes here
+overlyx sync --watch     # until Ctrl+C, within seconds either way
+```
+
+No pull, commit or push: file contents travel, and the project's history stays OverLyX's own (a
+commit a while after the last change, naming everybody who edited). Your branch follows those
+commits, and a commit you make here becomes one on the server, with your message. Where the same
+paragraph of a document changed here and on the server, the server's text stays and yours is a
+tracked change over it; other text merges by lines; what cannot merge (binary files, the same
+lines) keeps the server's version and yours as `name (conflict, <computer> <date>).ext` next to it.
+The OverLyX VS Code extension does the same by itself while a clone is open in VS Code (only one of
+the two runs on a clone at a time).
+
 ## Local AI agents (Claude Code, Codex, …)
 
 ```sh

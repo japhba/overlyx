@@ -6,7 +6,8 @@ import esbuild from 'esbuild';
 const watch = process.argv.includes('--watch');
 const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node20', sourcemap: true, logLevel: 'info' };
 const contexts = await Promise.all([
-  esbuild.context({ ...common, entryPoints: ['src/extension.ts'], outfile: 'dist/extension.cjs', external: ['vscode'] }),
+  // the sync engine is the CLI's (packages/cli/bin/overlyx.js): bundled as a library, its command line off
+  esbuild.context({ ...common, entryPoints: ['src/extension.ts'], outfile: 'dist/extension.cjs', external: ['vscode'], define: { 'process.env.OVERLYX_CLI_LIBRARY': '"1"' } }),
   esbuild.context({ ...common, entryPoints: ['src/agents/entry.ts'], outfile: 'dist/agents.cjs' }),
 ]);
 if (watch) await Promise.all(contexts.map(c => c.watch()));

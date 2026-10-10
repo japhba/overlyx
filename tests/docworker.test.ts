@@ -20,7 +20,7 @@ process.env.OVERLYX_DOC_WORKERS = '2';
 
 const { manager, docWorkers } = await import('../packages/server/src/docs.ts');
 const { DocWorkers } = await import('../packages/server/src/docpool.ts');
-const { applyTrackedSource, applyPlainSource } = await import('../packages/server/src/docedit.ts');
+const { applyTrackedSource, applyPlainSource, applySyncedSource } = await import('../packages/server/src/docedit.ts');
 
 type Doc = Awaited<ReturnType<typeof manager.open>>;
 const TEMPLATES = join(import.meta.dirname, '..', 'packages', 'server', 'templates');
@@ -159,6 +159,24 @@ describe('the worker writes what the main thread writes', () => {
     // a passage that is not there: the agent gets the message, not a worker's stack trace
     await expect(w.agentEdit('tracked', null, { replace: { oldText: 'No such passage', newText: 'x', all: false } }, { author: 'Bot (MCP)' }))
       .rejects.toThrow(/^old_text was not found in the document/);
+  });
+
+  it('a synced clone\'s file (overlyx sync) merges the same: a paragraph both changed keeps the live text, the clone\'s as a tracked change', async () => {
+    const base = docText('Kept paragraph.', 'Both change this one.', 'Only the clone changes this.');
+    const [w, m] = await twins('synced', base);
+    for (const d of [w, m]) type(d, 1, 'Live ');
+    const after = base.replace('Both change this one.', 'Both change this one, says the clone.').replace('Only the clone changes this.', 'The clone changed this.');
+    const { result: rw } = await w.agentEdit('sync', base, { after }, { author: 'Ada Lovelace' });
+    const rm = applySyncedSource(m, base, after, 'Ada Lovelace');
+    expect(rw.conflicts).toBe(1);
+    expect(rm.conflicts).toBe(1);
+    await m.saveToFile();
+    const fw = readFileSync(w.absPath, 'utf8');
+    expect(untimed(fw)).toBe(untimed(readFileSync(m.absPath, 'utf8')));
+    expect(fw).toContain('The clone changed this.');
+    expect(fw).toMatch(/\\lyxadded\{Ada Lovelace\}/);
+    expect(fw).toContain('Live');
+    expect(fw).not.toMatch(/\\lyx(added|deleted)\{[^}]*\}\{[^}]*\}\{(The clone|Kept)/);
   });
 
   it('the editor\'s metadata (macros, labels, cited keys, layouts, health) is the same', async () => {

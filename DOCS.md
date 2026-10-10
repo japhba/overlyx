@@ -266,6 +266,51 @@ blend.
   it lacked are removed, ignored build products stay), commits that on top — nothing is rewritten, so
   a restore is undone the same way — and open documents take the restored text over.
 
+  **Synced clones** (10 Oct 2026; CLI 0.7.0, `server/sync.ts`, the engine in `cli/bin/overlyx.js`
+  "sync"): a clone stays in step with the project both ways without anybody pulling, committing or
+  pushing. The VS Code extension does it by itself for every workspace folder whose git remote is a
+  project on overlyx.app (or on a server in `overlyx.sync.servers` or signed in with the CLI) while
+  the window is open (`host/sync.ts`: status bar item, *OverLyX: Sync Now / Pause / Resume / Show
+  Sync Log*, a one-time notice, `overlyx.sync.enabled` switches it off); in a terminal,
+  `overlyx sync [DIR]` syncs once and `overlyx sync --watch` until Ctrl+C. The extension bundles the
+  CLI file as a library (esbuild defines `process.env.OVERLYX_CLI_LIBRARY`, which keeps its command
+  line from running; `overlyx.d.ts` types the exports). **File contents travel, not commits**, so
+  the history keeps OverLyX's own schedule (`touchProject`: a commit `OVERLYX_GIT_COMMIT_MS` after
+  the last change, attributed to everybody who edited — in the browser or in a synced clone); the
+  clone's branch follows those commits (`git fetch` with `X-OverLyX-Sync: 1`, which the smart-HTTP
+  handler serves without its usual commit-before-fetch, then `reset --mixed`: files untouched, index
+  and branch on the server's commit), and a commit made in the clone becomes one on the server with
+  its message (`POST /git/api/sync/commit`, once every file is in step). Protocol, all under
+  `/git/api/sync/` with git's credentials and roles: `state` (open documents saved first, then every
+  file as `git ls-files --cached --others --exclude-per-directory=.gitignore` lists it — the
+  project's own .gitignore files on both sides, never a machine's global excludes — with its git
+  blob hash, the branch, its head, the caller's role and a change cursor), `wait` (long poll: answers
+  when the docs watcher sees any file of the project change, or a commit is made — `projectFileListeners`,
+  `commitListeners` — or after 25 s), `file` (bytes), `push` (each changed file with the hash and, for
+  text, the content of the version the clone last had from the server: the merge base) and
+  `commit`. The client keeps, in `.git/overlyx-sync/`, the agreed hash of every file (`state.json`)
+  and those versions of the text files (`objects/`; the first sync's bases are the server's last
+  commit, fetched then). A push is applied where the server still has the base (byte-exact; an
+  open document takes it in like an external save); otherwise merged — a document with
+  `applySyncedSource` (`core/lyx/docedit.ts`, kind `sync` of `OpenDoc.agentEdit`, in the document
+  worker too): paragraphs only one side changed are taken over, and where both changed the same
+  paragraph the live text stays and the clone's is laid over it as a tracked change by the account
+  (the document's tracking mode is not touched); other text by lines (`git merge-file`). What cannot
+  be merged (overlapping lines, binary files, a file both created) keeps the server's version, and the
+  clone keeps its own beside it as `name (conflict, <computer> <date>).ext`, which then syncs like
+  any new file; an edit beats a removal on the other side. Nothing local is overwritten unless it is
+  still the version both sides agreed on, a file with unsaved changes in a VS Code editor waits
+  until it is saved, viewers receive but never send, nothing is written through a symlinked
+  directory of the clone or outside it, files over 20 MB stay out, `core.autocrlf` clones compare
+  text with LF. One sync per clone (`.git/overlyx-sync/lock`, pid + time, refreshed every round):
+  VS Code and a terminal's `--watch` never race, and the MCP bridge tells agents in a synced clone
+  that saved files reach the server by themselves. Tests: `tests/sync.test.ts` (the CLI against the
+  real routes: both directions, open documents with unsaved edits, paragraph / line / binary
+  conflicts, removals, viewers, branch following and adopted commits, no commit per sync, links,
+  `--watch` and its lock — a second watcher naps instead of polling), `tests/docworker.test.ts` (the `sync`
+  merge in a worker), `e2e/sync.spec.ts` (a real clone and the browser editor), `packages/vscode/test/runSyncTest.mjs`
+  (the extension in a real VS Code; see "Tests").
+
   `repo push` initialises and commits an ordinary folder; an existing repository must be clean so
   no uncommitted work is silently omitted. The server creates an unborn repository for the first
   push, preserving the local history without an unrelated synthetic merge. Its Basic-authenticated
@@ -1765,6 +1810,12 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/gdocs.spec.ts e2e
 # agent's caret / highlight, a panel message through wait_for_instructions and back, a pushed Claude Code session;
 # MCP is not proxied by vite, so name the server
 OVERLYX_E2E_SERVER=http://127.0.0.1:3001 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/mcp-presence.spec.ts
+# synced clones: `overlyx sync --watch` on a real clone ↔ the open editor (both directions, the branch following a commit);
+# start that server with OVERLYX_GIT_COMMIT_MS=600000 so that the spec's "Commit now" is the newest commit
+OVERLYX_E2E_SERVER=http://127.0.0.1:3001 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sync.spec.ts
+# the VS Code extension's sync in a real VS Code (a clone of a project on that server as the workspace: server → clone,
+# a save → server, a dirty file waits and then merges, pause / resume); build the extension first
+(cd packages/vscode && OVERLYX_E2E_SERVER=http://127.0.0.1:3001 xvfb-run -a node test/runSyncTest.mjs)
 # "a user writes a paper": real arXiv papers typed from blank documents through the editor UI —
 # paperwriting.spec.ts / paperwriting-more.spec.ts (first pages of Attention, a coding-theory paper, BERT) and
 # the whole GAN and Adam papers from abstract to bibliography with a latexmk build (~15 min each; needs pdftotext):

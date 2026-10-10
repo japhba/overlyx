@@ -10,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
-const VERSION = '0.6.3';
+const VERSION = '0.7.0';
 const DEFAULT_HOST = 'https://overlyx.app';
 
 const HELP = `OverLyX CLI ${VERSION}
@@ -26,6 +26,7 @@ Usage:
   overlyx repo push [PATH] [--name NAME] [--remote NAME]
   overlyx build OWNER/PROJECT/FILE.tex [--pdf FILE] [--log] [--wait SECONDS]
   overlyx restore OWNER/PROJECT COMMIT
+  overlyx sync [DIR] [--watch]                          keep a clone in step with the server, both ways
   overlyx mcp install [--client claude,codex] [--yes]   let local AI agents use OverLyX (Claude Code: in every directory, no prompts)
   overlyx mcp status | uninstall
   overlyx mcp serve                                      (what the agents run: the MCP bridge)
@@ -37,6 +38,7 @@ Examples:
   overlyx repo push . --name my-paper
   overlyx build ada/my-paper/main.tex     # compile on the server: errors, exit code 1 if it fails
   overlyx restore ada/my-paper 3f2a91c    # the whole project as it was at that commit (a new commit)
+  overlyx sync --watch                    # in a clone: saved files reach the server, its changes come here
   overlyx mcp install                     # Claude Code / Codex get OverLyX's tools (your login, your projects)
 
 \`auth login\` signs in through the browser and gets a credential of its own (revocable in OverLyX under
@@ -53,7 +55,7 @@ function fail(message, code = 1) {
 function parse(argv) {
   const positional = [];
   const flags = {};
-  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser', 'no-git', 'ask-each-time']);
+  const booleans = new Set(['push', 'with-token', 'help', 'version', 'log', 'yes', 'web', 'no-browser', 'no-git', 'ask-each-time', 'watch']);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--') { positional.push(...argv.slice(i + 1)); break; }
@@ -291,9 +293,10 @@ function openBrowser(url) {
  * OverLyX — authorizes, and hands the one-time code back to the listener, or shows it to paste here
  * (a browser on another computer). The code and the verifier give this CLI a credential of its own.
  */
-async function browserLogin(host, flags) {
-  const manual = !!flags['no-browser'] || !hasLocalBrowser();
-  if (manual && !process.stdin.isTTY) fail('no browser on this computer and no terminal to paste a code into: run overlyx auth login in a terminal, or pass a token (--with-token)');
+async function browserLogin(host, flags, ui = null) {
+  // ui (the VS Code extension): open(url) instead of the system browser; manual: the page shows a code, askCode() asks for it
+  const manual = ui ? !!ui.manual : !!flags['no-browser'] || !hasLocalBrowser();
+  if (manual && !ui && !process.stdin.isTTY) fail('no browser on this computer and no terminal to paste a code into: run overlyx auth login in a terminal, or pass a token (--with-token)');
   const verifier = crypto.randomBytes(32).toString('base64url');
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   const state = crypto.randomBytes(16).toString('base64url');
@@ -312,10 +315,13 @@ async function browserLogin(host, flags) {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const port = server.address().port;
   // in a clone of one of the projects: the page suggests it, should the account narrow sign-ins (fine-grained access)
-  const clone = await cloneOf(host);
+  const clone = ui ? (ui.project ? { project: ui.project } : null) : await cloneOf(host);
   const url = `${host}/cli/login?` + new URLSearchParams({ port: String(port), state, challenge, client: os.hostname(), ...(manual ? { mode: 'manual' } : {}), ...(clone ? { project: clone.project } : {}) }).toString();
   let rl = null;
-  if (manual) {
+  if (ui) {
+    await ui.open(url);
+    if (manual) void ui.askCode().then(code => finish(code?.trim() || null), () => finish(null));
+  } else if (manual) {
     // a browser on another computer cannot come back here: its page shows the code to paste
     process.stderr.write(`Open this address in a browser where you are signed in to OverLyX, and authorize:\n  ${url}\n`);
     rl = readline.createInterface({ input: process.stdin, output: process.stderr });
@@ -592,7 +598,7 @@ async function cloneOf(host) {
       const u = new URL(url);
       u.username = ''; u.password = '';
       const m = /^\/git\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(u.pathname);
-      if (m && `${u.protocol}//${u.host}` === host.replace(/\/$/, '')) return { project: `${decodeURIComponent(m[1])}/${decodeURIComponent(m[2])}`, remote: line.split(/\s+/)[0] };
+      if (m && `${u.protocol}//${u.host}` === host.replace(/\/$/, '')) return { project: `${decodeURIComponent(m[1])}/${decodeURIComponent(m[2])}`, remote: line.split(/\s+/)[0], synced: await syncRunning('.') };
     } catch { /* an ssh or local remote */ }
   }
   return null;
@@ -602,7 +608,9 @@ function withCloneInstructions(msg, clone) {
   if (!msg || !msg.result) return msg;
   const note = `This directory is a git clone of the OverLyX project "${clone.project}" (git remote "${clone.remote}"). Edit its documents here, in these files: `
     + `with the tools of the "overlyx-local" server where you have them (edit_document, write_document, add_comment — your edits become tracked changes the user reviews in the OverLyX editor), otherwise directly. `
-    + `Commit and push with git when the user asks (pull first). The tools below (project "${clone.project}") work on the copy on the OverLyX server, which changes only with a push — use them only when the user asks about that copy.`;
+    + (clone.synced
+      ? `OverLyX keeps this clone in step with the server (sync running): files saved here reach the server within seconds and changes made there arrive here — no pull or push needed. The tools below (project "${clone.project}") work on the server's copy, which is the same content; prefer the local files.`
+      : `Commit and push with git when the user asks (pull first). The tools below (project "${clone.project}") work on the copy on the OverLyX server, which changes only with a push — use them only when the user asks about that copy.`);
   return { ...msg, result: { ...msg.result, instructions: msg.result.instructions ? `${note}\n\n${msg.result.instructions}` : note } };
 }
 
@@ -921,6 +929,620 @@ async function mcpCommand(action, flags) {
   fail(`unknown mcp command: ${action}`);
 }
 
+/* ------------------------------------------------------------ sync: a clone kept in step with the server */
+
+/*
+ * `overlyx sync [DIR] [--watch]`, and the VS Code extension (which bundles this file): a git clone of
+ * an OverLyX project stays in step with the server both ways — what is saved here reaches the
+ * project (and the people editing it in the browser) within seconds, and what they write arrives
+ * here. File contents travel, not commits (server: sync.ts), so the project's history keeps
+ * OverLyX's own schedule; the local branch follows the server's commits, and a commit made here
+ * becomes one on the server with its message.
+ *
+ * State, in the clone's git directory (overlyx-sync/): for every file, the hash of the version both
+ * sides last agreed on (the merge base of the next change), and those versions of the text files.
+ * A file changed here is sent with its base: applied when the server still has that version, else
+ * merged there (a document paragraph by paragraph, the clone's text as a tracked change where both
+ * changed the same one; other text by lines). What cannot be merged keeps the server's version, and
+ * this side's goes next to it as a conflict copy. Nothing is ever overwritten that changed here
+ * since it was last in step, and a file open with unsaved changes in an editor (`isBusy`) waits.
+ */
+
+const SYNC_FILE_MAX = 20 * 1024 * 1024;      // larger files stay out of the sync (both sides)
+const SYNC_TEXT_MAX = 4 * 1024 * 1024;       // text sent with its base for a merge
+const SYNC_BATCH = 12 * 1024 * 1024;         // content per push request
+
+export function blobHash(buf) {
+  return crypto.createHash('sha1').update(`blob ${buf.length}\0`).update(buf).digest('hex');
+}
+const isTextBuf = (b) => b.length <= SYNC_TEXT_MAX && !b.includes(0) && Buffer.from(b.toString('utf8'), 'utf8').equals(b);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+/** a project-relative path the sync may touch: no way out of the clone, never into .git, not our temp files */
+function syncablePath(rel) {
+  if (typeof rel !== 'string' || !rel || rel.includes('\0') || rel.includes('\\') || rel.startsWith('/') || /^[A-Za-z]:/.test(rel) || rel.endsWith('.overlyx-tmp')) return false;
+  return rel.split('/').every(p => p !== '' && p !== '.' && p !== '..' && p.toLowerCase() !== '.git' && p.toLowerCase() !== 'git~1');
+}
+
+async function gitOut(dir, args, opts = {}) {
+  return (await execFileP('git', ['-C', dir, ...args], { encoding: opts.encoding ?? 'utf8', maxBuffer: 256 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...opts.env }, timeout: opts.timeout ?? 120000 })).stdout;
+}
+
+/** An OverLyX remote URL → { host, project } (host may carry a path prefix in front of /git/). */
+export function parseSyncRemote(url) {
+  let u;
+  try { u = new URL(url); } catch { return null; }
+  if (!/^https?:$/.test(u.protocol)) return null;
+  const m = /^(.*?)\/git\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(u.pathname);
+  if (!m) return null;
+  return { host: `${u.protocol}//${u.host}${m[1]}`.replace(/\/$/, ''), project: `${decodeURIComponent(m[2])}/${decodeURIComponent(m[3])}` };
+}
+
+/** The OverLyX project the checkout at `dir` is a clone of (its remotes: origin first, then overlyx), or null. */
+export async function syncTarget(dir) {
+  let names;
+  try { names = (await gitOut(dir, ['remote'], { timeout: 10000 })).split('\n').filter(Boolean); } catch { return null; }
+  names.sort((a, b) => (a === 'origin' ? -2 : a === 'overlyx' ? -1 : 0) - (b === 'origin' ? -2 : b === 'overlyx' ? -1 : 0));
+  for (const remote of names) {
+    let url;
+    try { url = (await gitOut(dir, ['remote', 'get-url', remote], { timeout: 10000 })).trim(); } catch { continue; }
+    const t = parseSyncRemote(url);
+    if (t) return { ...t, remote, url };
+  }
+  return null;
+}
+
+/** The sign-in for `host`: the CLI's own (overlyx auth login), else what git's credential helpers have for it. */
+export async function syncCredentials(host, dir) {
+  if (process.env.OVERLYX_TOKEN && process.env.OVERLYX_USERNAME) return { username: process.env.OVERLYX_USERNAME, token: process.env.OVERLYX_TOKEN };
+  try {
+    const saved = readConfig().hosts[host];
+    if (saved?.username && saved?.token) return { username: saved.username, token: saved.token };
+  } catch { /* no CLI config */ }
+  const u = new URL(host);
+  try {
+    const out = await new Promise((resolve, reject) => {
+      const child = execFile('git', ['-C', dir, 'credential', 'fill'], { encoding: 'utf8', timeout: 15000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '' } }, (e, stdout) => e ? reject(e) : resolve(stdout));
+      child.stdin.end(`protocol=${u.protocol.slice(0, -1)}\nhost=${u.host}\n\n`);
+    });
+    const f = Object.fromEntries(out.split('\n').map(l => l.split(/=(.*)/s)).filter(p => p[0]).map(p => [p[0], p[1] ?? '']));
+    if (f.username && f.password) return { username: f.username, token: f.password };
+  } catch { /* no helper has it */ }
+  return null;
+}
+
+class SyncHttpError extends Error {
+  constructor(status, message) { super(message); this.status = status; }
+}
+
+/**
+ * The sync of one clone. `opts`: dir, host, project, remote, auth {username, token}, client (a name
+ * for this computer), isBusy(rel) → true while an editor holds unsaved changes of the file,
+ * onStatus(status), log(line).
+ */
+export class SyncEngine {
+  constructor(opts) {
+    this.o = opts;
+    this.dir = path.resolve(opts.dir);
+    this.hashes = new Map();       // rel → { size, mtime, ino, hash } of local files
+    this.failed = new Map();       // rel → retry-after time, for files the server refused
+    this.status = { state: 'idle', conflicts: [], waiting: [], notSent: [], lastSync: 0, message: '' };
+    this.running = null;
+    this.again = false;
+    this.stopped = false;
+    this.cursor = null;
+    this.role = null;
+  }
+
+  log(line) { this.o.log?.(line); }
+  setStatus(patch) { this.status = { ...this.status, ...patch }; this.o.onStatus?.(this.status); }
+
+  /* ---- the server */
+
+  async request(pathname, init = {}) {
+    const url = `${this.o.host}/git/api/sync/${pathname}`;
+    let res;
+    try {
+      res = await fetch(url, { ...init, headers: { Authorization: basic(this.o.auth.username, this.o.auth.token), ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers }, signal: init.signal ?? AbortSignal.timeout(init.timeout ?? 120000) });
+    } catch (e) { throw new SyncHttpError(0, `cannot reach ${this.o.host}: ${e.cause?.message ?? e.message}`); }
+    if (init.raw && res.ok) return res;
+    const text = await res.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+    if (!res.ok) throw new SyncHttpError(res.status, body?.error ?? (text.trim() || `${res.status} ${res.statusText}`));
+    return body;
+  }
+
+  q(extra = {}) { return new URLSearchParams({ project: this.o.project, ...extra }).toString(); }
+
+  async remoteState() { return this.request(`state?${this.q()}`); }
+
+  async download(rel, hash) {
+    const res = await this.request(`file?${this.q({ path: rel })}`, { raw: true });
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (blobHash(buf) !== hash) return null;   // changed again meanwhile: the next round
+    return buf;
+  }
+
+  /* ---- local state (in the git directory) */
+
+  async open() {
+    this.gitDir = (await gitOut(this.dir, ['rev-parse', '--absolute-git-dir'])).trim();
+    this.stateDir = path.join(this.gitDir, 'overlyx-sync');
+    fs.mkdirSync(path.join(this.stateDir, 'objects'), { recursive: true });
+    this.autocrlf = (await gitOut(this.dir, ['config', '--get', 'core.autocrlf']).catch(() => '')).trim();
+    try { this.state = JSON.parse(fs.readFileSync(path.join(this.stateDir, 'state.json'), 'utf8')); } catch { this.state = null; }
+    if (this.state && (this.state.project !== this.o.project || this.state.host !== this.o.host)) this.state = null;
+  }
+
+  saveState() {
+    const file = path.join(this.stateDir, 'state.json');
+    fs.writeFileSync(file + '.tmp', JSON.stringify(this.state));
+    fs.renameSync(file + '.tmp', file);
+  }
+
+  keepObject(hash, buf) {
+    if (!isTextBuf(buf)) return;
+    const f = path.join(this.stateDir, 'objects', hash);
+    if (!fs.existsSync(f)) { fs.writeFileSync(f + '.tmp', buf); fs.renameSync(f + '.tmp', f); }
+  }
+
+  async baseText(hash) {
+    try { return fs.readFileSync(path.join(this.stateDir, 'objects', hash), 'utf8'); } catch { /* not kept: git may have it */ }
+    try { return await gitOut(this.dir, ['cat-file', 'blob', hash]); } catch { return null; }
+  }
+
+  /** Drop kept versions no file refers to any more. */
+  collect() {
+    const keep = new Set(Object.values(this.state.files));
+    for (const n of fs.readdirSync(path.join(this.stateDir, 'objects'))) if (!keep.has(n)) fs.rmSync(path.join(this.stateDir, 'objects', n), { force: true });
+  }
+
+  /** One sync process per clone (the VS Code extension and a terminal's `overlyx sync --watch` would race). */
+  lock() {
+    const file = path.join(this.stateDir, 'lock');
+    const me = { pid: process.pid, at: Date.now(), by: this.o.client ?? '' };
+    try {
+      const other = JSON.parse(fs.readFileSync(file, 'utf8'));
+      let alive = other.pid !== process.pid && Date.now() - other.at < 120000;
+      if (alive) { try { process.kill(other.pid, 0); } catch (e) { alive = e.code === 'EPERM'; } }
+      if (alive) return other;
+    } catch { /* free */ }
+    fs.writeFileSync(file, JSON.stringify(me));
+    return null;
+  }
+
+  unlock() {
+    const file = path.join(this.stateDir ?? '', 'lock');
+    try { if (JSON.parse(fs.readFileSync(file, 'utf8')).pid === process.pid) fs.rmSync(file, { force: true }); } catch { /* not ours */ }
+  }
+
+  /* ---- local files */
+
+  /** The file's hash (CRLF counted as LF where git converts line endings), null when missing, undefined when not synced (a link, a directory, too large). */
+  localHash(rel) {
+    if (!syncablePath(rel) || this.belowLink(rel)) return undefined;
+    let st;
+    try { st = fs.lstatSync(path.join(this.dir, rel)); } catch { this.hashes.delete(rel); return null; }
+    if (!st.isFile() || st.size > SYNC_FILE_MAX) return undefined;
+    const c = this.hashes.get(rel);
+    if (c && c.size === st.size && c.mtime === st.mtimeMs && c.ino === st.ino) return c.hash;
+    const hash = blobHash(this.normalized(fs.readFileSync(path.join(this.dir, rel))));
+    this.hashes.set(rel, { size: st.size, mtime: st.mtimeMs, ino: st.ino, hash });
+    return hash;
+  }
+
+  /** a directory on the way to `rel` is a link (or not a directory): nothing is read or written through it */
+  belowLink(rel) {
+    const parts = rel.split('/');
+    let p = this.dir;
+    for (const part of parts.slice(0, -1)) {
+      p = path.join(p, part);
+      let st;
+      try { st = fs.lstatSync(p); } catch { return false; }   // missing: made as a real directory when written
+      if (!st.isDirectory()) return true;
+    }
+    return false;
+  }
+
+  normalized(buf) {
+    if ((this.autocrlf === 'true' || this.autocrlf === 'input') && buf.includes(13) && isTextBuf(buf)) return Buffer.from(buf.toString('utf8').replace(/\r\n/g, '\n'), 'utf8');
+    return buf;
+  }
+
+  readLocal(rel) { return this.normalized(fs.readFileSync(path.join(this.dir, rel))); }
+
+  /** Every local file the sync looks at: git's view (tracked + untracked, the project's .gitignore files) and the files of the last state. */
+  async localPaths() {
+    const out = await gitOut(this.dir, ['ls-files', '-z', '--cached', '--others', '--exclude-per-directory=.gitignore']);
+    const paths = new Set(out.split('\0').filter(syncablePath));
+    for (const rel of Object.keys(this.state.files)) paths.add(rel);
+    return paths;
+  }
+
+  /** Write `buf` as the file, unless it changed since it had hash `expect` (null: it did not exist). */
+  writeLocal(rel, buf, expect) {
+    const abs = path.join(this.dir, rel);
+    if (this.localHash(rel) !== expect) return false;
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    const tmp = `${abs}.overlyx-tmp`;
+    fs.writeFileSync(tmp, buf);
+    try { const mode = fs.statSync(abs).mode; fs.chmodSync(tmp, mode); } catch { /* new file */ }
+    if (this.localHash(rel) !== expect) { fs.rmSync(tmp, { force: true }); return false; }
+    fs.renameSync(tmp, abs);
+    this.hashes.delete(rel);
+    return true;
+  }
+
+  removeLocal(rel, expect) {
+    if (this.localHash(rel) !== expect) return false;
+    fs.rmSync(path.join(this.dir, rel), { force: true });
+    this.hashes.delete(rel);
+    return true;
+  }
+
+  /** `dir/name (conflict, <computer> <date>).ext` next to `rel`, holding this side's version. */
+  conflictCopy(rel, buf) {
+    const ext = path.extname(rel), stem = rel.slice(0, rel.length - ext.length);
+    const d = new Date(), pad = (n) => String(n).padStart(2, '0');
+    const when = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}.${pad(d.getMinutes())}`;
+    let name = `${stem} (conflict, ${this.o.client || os.hostname()} ${when})${ext}`;
+    for (let i = 2; fs.existsSync(path.join(this.dir, name)); i++) name = `${stem} (conflict ${i}, ${this.o.client || os.hostname()} ${when})${ext}`;
+    fs.writeFileSync(path.join(this.dir, name), buf);
+    return name;
+  }
+
+  /* ---- git: the branch follows the server */
+
+  async gitAuthEnv(extraHeaders) {
+    const env = {};
+    const headers = [`Authorization: ${basic(this.o.auth.username, this.o.auth.token)}`, ...extraHeaders];
+    const count = /^\d+$/.test(process.env.GIT_CONFIG_COUNT ?? '') ? Number(process.env.GIT_CONFIG_COUNT) : 0;
+    headers.forEach((h, i) => { env[`GIT_CONFIG_KEY_${count + i}`] = 'http.extraHeader'; env[`GIT_CONFIG_VALUE_${count + i}`] = h; });
+    env.GIT_CONFIG_COUNT = String(count + headers.length);
+    return env;
+  }
+
+  /** Fetch the server's branch without making the server commit (it has nothing new for a synced clone). */
+  async fetchBranch(branch) {
+    const env = await this.gitAuthEnv(['X-OverLyX-Sync: 1']);
+    await gitOut(this.dir, ['fetch', '-q', this.o.remote, `+refs/heads/${branch}:refs/remotes/${this.o.remote}/${branch}`], { env, timeout: 300000 });
+    return (await gitOut(this.dir, ['rev-parse', `refs/remotes/${this.o.remote}/${branch}`])).trim();
+  }
+
+  async localBranch() {
+    return (await gitOut(this.dir, ['symbolic-ref', '--short', '-q', 'HEAD']).catch(() => '')).trim() || null;
+  }
+
+  async busyGit() {
+    for (const f of ['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'BISECT_LOG']) if (fs.existsSync(path.join(this.gitDir, f))) return f;
+    return null;
+  }
+
+  /** The first sync of this clone: the merge base of every file is the server's last commit (fetched now), or what is checked out. */
+  async initialState(remote) {
+    let commit = null;
+    if (remote.head && remote.branch) { try { commit = await this.fetchBranch(remote.branch); } catch (e) { this.log(`fetch: ${e.message.trim()}`); } }
+    if (!commit) commit = (await gitOut(this.dir, ['rev-parse', '-q', '--verify', 'HEAD']).catch(() => '')).trim() || null;
+    const files = {};
+    if (commit) {
+      for (const line of (await gitOut(this.dir, ['ls-tree', '-r', '-z', commit])).split('\0')) {
+        const m = /^(\d+) blob ([0-9a-f]+)\t(.*)$/s.exec(line);
+        if (m && m[1] !== '120000' && m[1] !== '160000') files[m[3]] = m[2];
+      }
+    }
+    return { version: 1, host: this.o.host, project: this.o.project, files, head: null };
+  }
+
+  /** The local branch moves to the server's commits; commits made here are recorded there (their messages, on what both sides now hold). */
+  async followBranch(remote, inStep) {
+    if (!remote.head || !remote.branch) return;
+    const branch = await this.localBranch();
+    if (branch !== remote.branch) return;
+    const tracking = `refs/remotes/${this.o.remote}/${remote.branch}`;
+    const head = (await gitOut(this.dir, ['rev-parse', '-q', '--verify', 'HEAD']).catch(() => '')).trim();
+    let known = (await gitOut(this.dir, ['rev-parse', '-q', '--verify', tracking]).catch(() => '')).trim();
+    if (known !== remote.head) known = await this.fetchBranch(remote.branch);
+    if (!known || head === known) { this.state.head = known; return; }
+    const ancestor = async (a, b) => { try { await gitOut(this.dir, ['merge-base', '--is-ancestor', a, b]); return true; } catch { return false; } };
+    if (head && !(await ancestor(head, known))) {
+      // commits made here: their changes are on the server already (the files are in step), their messages become a commit there
+      if (!inStep || this.role === 'view') return;
+      const ownLog = (await gitOut(this.dir, ['log', '--reverse', '--format=%B%x00', head, '--not', known]).catch(() => '')).split('\0').map(s => s.trim()).filter(Boolean);
+      if (!ownLog.length) return;
+      const r = await this.request('commit', { method: 'POST', body: JSON.stringify({ project: this.o.project, message: ownLog.join('\n\n') }) });
+      known = await this.fetchBranch(remote.branch);
+      if (!r?.head || known !== r.head) return;
+      this.log(`commit recorded on ${this.o.host}: ${r.head.slice(0, 7)} ${ownLog[0].split('\n')[0]}`);
+    }
+    // the index follows the branch, the files stay as they are (they are in step already)
+    await gitOut(this.dir, ['reset', '-q', '--mixed', known]);
+    this.state.head = known;
+  }
+
+  /* ---- one round */
+
+  /** Sync once; resolves with what changed. Concurrent calls run one after the other. */
+  sync() {
+    if (this.running) { this.again = true; return this.running; }
+    this.running = (async () => {
+      let result;
+      try {
+        // again: a file changed while it was read, or sync() was called meanwhile — at most a few rounds in a row
+        let n = 0;
+        do { this.again = false; result = await this.round(); } while (this.again && !this.stopped && ++n < 4);
+      } finally { this.running = null; }
+      return result;
+    })();
+    return this.running;
+  }
+
+  async round() {
+    const changes = { sent: [], received: [], conflicts: [], waiting: [], notSent: [], errors: [] };
+    if (!this.gitDir) await this.open();
+    const holder = this.lock();
+    if (holder) { this.setStatus({ state: 'paused', message: `synced by another process (${holder.by || 'pid ' + holder.pid})` }); return changes; }
+    const busy = await this.busyGit();
+    if (busy) { this.setStatus({ state: 'paused', message: `git is in the middle of something (${busy}) — the sync waits` }); return changes; }
+    this.setStatus({ state: 'syncing', message: '' });
+    let remote = await this.remoteState();
+    this.role = remote.role ?? this.role;
+    const branch = await this.localBranch();
+    if (remote.branch && branch && branch !== remote.branch) { this.setStatus({ state: 'paused', message: `on branch ${branch} — the sync runs on ${remote.branch}` }); return changes; }
+    if (!this.state) { this.state = await this.initialState(remote); this.saveState(); }
+    const base = this.state.files;
+    const remoteHash = (r) => new Map(r.files.filter(f => syncablePath(f.path)).map(f => [f.path, f.hash]));
+    let theirs = remoteHash(remote);
+    const now = Date.now();
+
+    // 1. what changed here goes to the server
+    const send = [];
+    for (const rel of await this.localPaths()) {
+      const l = this.localHash(rel);
+      if (l === undefined) continue;
+      const b = base[rel] ?? null;
+      if (l === b) continue;
+      const r = theirs.get(rel) ?? null;
+      if (l === r) { base[rel] = l; if (l) this.keepObject(l, this.readLocal(rel)); continue; }   // the same change on both sides
+      if (l === null && b !== null && !theirs.has(rel)) { delete base[rel]; continue; }             // removed on both sides
+      if (this.role === 'view') { changes.notSent.push(rel); continue; }
+      if ((this.failed.get(rel) ?? 0) > now) continue;
+      send.push(rel);
+    }
+    if (send.length) {
+      await this.send(send, base, changes);
+      remote = await this.remoteState();
+      theirs = remoteHash(remote);
+    }
+
+    // 2. what changed on the server comes here
+    for (const rel of new Set([...theirs.keys(), ...Object.keys(base)])) {
+      const r = theirs.get(rel) ?? null, b = base[rel] ?? null;
+      if (r === b) continue;
+      const l = this.localHash(rel);
+      if (l === undefined) continue;
+      if (l === r) { base[rel] = r; if (r === null) delete base[rel]; else this.keepObject(r, this.readLocal(rel)); continue; }
+      if (l !== b) { if (this.role === 'view') changes.notSent.push(rel); continue; }   // changed here too: sent next round (merged there)
+      if (this.o.isBusy?.(rel)) { changes.waiting.push(rel); continue; }
+      if (r === null) {
+        if (this.removeLocal(rel, b)) { delete base[rel]; changes.received.push({ path: rel, deleted: true }); }
+        continue;
+      }
+      const buf = await this.download(rel, r);
+      if (!buf) { this.again = true; continue; }
+      if (this.writeLocal(rel, buf, b)) { base[rel] = r; this.keepObject(r, buf); changes.received.push({ path: rel }); }
+    }
+    this.cursor = remote.cursor;
+    this.saveState();
+    this.collect();
+
+    const inStep = !changes.waiting.length && !changes.notSent.length && !changes.errors.length && !this.again;
+    try { await this.followBranch(remote, inStep); this.saveState(); }
+    catch (e) { this.log(`branch: ${String(e.message ?? e).trim()}`); }
+    const conflicts = [...this.status.conflicts.filter(c => now - c.at < 24 * 3600_000), ...changes.conflicts.map(c => ({ ...c, at: now }))].slice(-20);
+    this.setStatus({ state: 'idle', lastSync: Date.now(), conflicts, waiting: changes.waiting, notSent: changes.notSent, message: changes.errors.length ? changes.errors.map(e => `${e.path}: ${e.error}`).join('; ') : '' });
+    return changes;
+  }
+
+  async send(rels, base, changes) {
+    const items = [];
+    for (const rel of rels) {
+      const b = base[rel] ?? null;
+      const l = this.localHash(rel);
+      if (l === null) { items.push({ rel, sent: null, file: { path: rel, base: b, deleted: true } }); continue; }
+      const buf = this.readLocal(rel);
+      if (blobHash(buf) !== l) { this.again = true; continue; }   // changing as we read: next round
+      const text = isTextBuf(buf);
+      const baseText = text && b ? await this.baseText(b) : null;
+      items.push({ rel, sent: { hash: l, buf }, file: { path: rel, base: b, ...(baseText !== null ? { baseText } : {}), ...(text ? { text: buf.toString('utf8') } : { data: buf.toString('base64') }) } });
+    }
+    // in batches of about SYNC_BATCH bytes
+    for (let i = 0; i < items.length;) {
+      const batch = [];
+      let size = 0;
+      while (i < items.length && (!batch.length || size + (items[i].sent?.buf.length ?? 0) * 2 < SYNC_BATCH)) { size += (items[i].sent?.buf.length ?? 0) * 2; batch.push(items[i++]); }
+      const res = await this.request('push', { method: 'POST', body: JSON.stringify({ project: this.o.project, client: this.o.client ?? '', files: batch.map(x => x.file) }), timeout: 300000 });
+      const byPath = new Map((res.results ?? []).map(r => [r.path, r]));
+      for (const it of batch) this.settle(it, byPath.get(it.rel), base, changes);
+    }
+  }
+
+  /** The server's answer for one file sent. */
+  settle({ rel, sent }, r, base, changes) {
+    if (!r || r.status === 'error') {
+      changes.errors.push({ path: rel, error: r?.error ?? 'no answer' });
+      this.failed.set(rel, Date.now() + 5 * 60_000);
+      return;
+    }
+    this.failed.delete(rel);
+    const content = typeof r.text === 'string' ? Buffer.from(r.text, 'utf8') : typeof r.data === 'string' ? Buffer.from(r.data, 'base64') : null;
+    const setBase = (hash, buf) => { if (hash === null) delete base[rel]; else { base[rel] = hash; if (buf) this.keepObject(hash, buf); } };
+    if (r.status !== 'conflict' || r.conflicts) changes.sent.push({ path: rel, deleted: !sent, status: r.status, conflicts: r.conflicts });
+    if (!content || r.hash === (sent?.hash ?? null)) { setBase(r.hash, sent?.buf ?? null); return; }
+    // the server's file differs from what was sent: merged with changes made there, or (a conflict) its own version kept
+    const kept = r.status === 'conflict' && !r.conflicts;
+    // a merge holds what was sent: that is the base of whatever comes next here (a kept conflict does not)
+    if (!kept && sent) setBase(sent.hash, sent.buf);
+    if (this.o.isBusy?.(rel)) { changes.waiting.push(rel); return; }   // the editor saves first; then it comes round again
+    if (this.localHash(rel) !== (sent?.hash ?? null)) { this.again = true; return; }   // changed again meanwhile: sent next round
+    if (kept && sent) changes.conflicts.push({ path: rel, copy: this.conflictCopy(rel, sent.buf), kind: 'copy' });
+    else if (kept) changes.conflicts.push({ path: rel, kind: 'restored' });
+    else if (r.conflicts) changes.conflicts.push({ path: rel, kind: 'tracked', count: r.conflicts });
+    if (this.writeLocal(rel, content, sent?.hash ?? null)) setBase(r.hash, content);
+    else this.again = true;
+  }
+
+  /* ---- watching */
+
+  /**
+   * Keep syncing until stop(): after local changes (poke(), or a file watcher when `watchFiles`), as
+   * soon as the server reports a change (long poll), and every minute regardless.
+   */
+  async watch({ watchFiles = true } = {}) {
+    this.stopped = false;
+    let backoff = 2000;
+    let timer = null, wake = null;
+    // paused (another process holds the clone, another branch, git busy): look again in a while, or when poked
+    const nap = (ms) => new Promise(resolve => { const t = setTimeout(resolve, ms); wake = () => { clearTimeout(t); resolve(); }; });
+    const kick = () => { clearTimeout(timer); timer = setTimeout(() => { wake?.(); void this.sync().catch(() => undefined); }, 800); };
+    this.poke = kick;
+    if (watchFiles) {
+      try {
+        this.watcher = fs.watch(this.dir, { recursive: true }, (_e, name) => {
+          const n = String(name ?? '');
+          if (n === '.git' || n.startsWith('.git' + path.sep) || n.startsWith('.git/') || n.endsWith('.overlyx-tmp')) return;
+          kick();
+        });
+      } catch (e) { this.log(`not watching the files (${e.message}); syncing every minute`); }
+    }
+    const tick = setInterval(kick, 60_000);
+    this.stopTimers = () => { clearInterval(tick); clearTimeout(timer); this.watcher?.close(); wake?.(); };
+    while (!this.stopped) {
+      try {
+        await this.sync();
+        if (this.status.state === 'paused') { await nap(30_000); continue; }
+        backoff = 2000;
+        // until the server reports a change (it holds the request ~25 s)
+        while (!this.stopped) {
+          this.abort = new AbortController();
+          const signal = AbortSignal.any ? AbortSignal.any([this.abort.signal, AbortSignal.timeout(90_000)]) : this.abort.signal;
+          const r = await this.request(`wait?${this.q({ cursor: this.cursor ?? '' })}`, { signal });
+          if (r?.cursor !== this.cursor) break;
+        }
+      } catch (e) {
+        if (this.stopped) break;
+        const status = e.status ?? 0;
+        if (status === 401 || status === 403 || status === 404) { this.setStatus({ state: status === 401 ? 'signin' : 'error', message: e.message }); await nap(60_000); continue; }
+        this.setStatus({ state: status === 0 ? 'offline' : 'error', message: e.message });
+        this.log(e.message);
+        await nap(backoff);
+        backoff = Math.min(backoff * 2, 60_000);
+      }
+    }
+  }
+
+  stop() {
+    this.stopped = true;
+    this.stopTimers?.();
+    this.wake?.();
+    this.abort?.abort();
+    this.unlock();
+  }
+}
+
+/** Whether a sync (VS Code, `overlyx sync --watch`) keeps the clone at `dir` in step right now. */
+async function syncRunning(dir) {
+  try {
+    const gitDir = (await gitOut(dir, ['rev-parse', '--absolute-git-dir'], { timeout: 5000 })).trim();
+    const lock = JSON.parse(fs.readFileSync(path.join(gitDir, 'overlyx-sync', 'lock'), 'utf8'));
+    if (Date.now() - lock.at > 120000) return false;
+    try { process.kill(lock.pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+  } catch { return false; }
+}
+
+/** The engine for the clone at `dir`, signed in — or why there is none. */
+export async function syncEngineFor(dir, opts = {}) {
+  const target = await syncTarget(dir);
+  if (!target) return { error: 'not a clone of an OverLyX project (no remote …/git/<owner>/<project>.git)' };
+  const auth = opts.auth ?? await syncCredentials(target.host, dir);
+  if (!auth) return { error: `not signed in to ${target.host}: run overlyx auth login${target.host === DEFAULT_HOST ? '' : ` --host ${target.host}`}`, target, signin: true };
+  return { engine: new SyncEngine({ dir, ...target, auth, client: opts.client ?? os.hostname(), ...opts }), target };
+}
+
+/**
+ * Sign in through the browser and keep the credential as `overlyx auth login` does (the VS Code
+ * extension's "Sign in" for its sync; git's credential helper is left as it is). `ui`: see browserLogin.
+ */
+export async function signInWithBrowser(host, ui) {
+  host = normalizeHost(host);
+  const { username, token } = await browserLogin(host, {}, ui);
+  const result = await api({ host, username, token }, '/git/api/user');
+  const config = readConfig();
+  config.hosts[host] = { username: result.user.username, token };
+  if (!config.defaultHost) config.defaultHost = host;
+  writeConfig(config);
+  return { username: result.user.username, token };
+}
+
+/** The servers this computer is signed in to with the CLI, and overlyx.app: a clone of a project on one of them is synced. */
+export function knownSyncHosts() {
+  const hosts = new Set([DEFAULT_HOST]);
+  try { for (const h of Object.keys(readConfig().hosts ?? {})) hosts.add(h); } catch { /* no CLI config */ }
+  return [...hosts];
+}
+
+/** What a round changed, one line per file (the CLI's output, the VS Code extension's log). */
+export function describeChanges(c) {
+  const lines = [];
+  for (const s of c.sent) lines.push(`↑ ${s.path}${s.deleted ? ' (removed)' : s.status === 'merged' ? ' (merged with changes on the server)' : s.status === 'conflict' ? ` (${s.conflicts} paragraph${s.conflicts > 1 ? 's' : ''} changed on both sides: yours are tracked changes there)` : ''}`);
+  for (const r of c.received) lines.push(`↓ ${r.path}${r.deleted ? ' (removed)' : ''}`);
+  for (const k of c.conflicts) {
+    if (k.kind === 'copy') lines.push(`! ${k.path}: changed on both sides — the server's version is here now, yours is "${k.copy}"`);
+    if (k.kind === 'restored') lines.push(`! ${k.path}: changed on the server, so it was not removed — it is back`);
+  }
+  for (const w of c.waiting) lines.push(`… ${w}: unsaved in an editor, waits`);
+  for (const n of new Set(c.notSent)) lines.push(`· ${n}: changed here, not sent (you can only view this project)`);
+  for (const e of c.errors) lines.push(`✗ ${e.path}: ${e.error}`);
+  return lines;
+}
+
+async function syncCommand(args, flags) {
+  const dir = path.resolve(args[0] ?? '.');
+  const creds = flags.token || flags.username ? credentials(flags, false) : null;
+  const { engine, error, target } = await syncEngineFor(dir, {
+    ...(creds?.token && creds?.username ? { auth: { username: creds.username, token: creds.token } } : {}),
+    log: (line) => process.stderr.write(`overlyx sync: ${line}\n`),
+  });
+  if (!engine) fail(error);
+  const stamp = () => new Date().toLocaleTimeString();
+  if (!flags.watch) {
+    const c = await engine.sync();
+    engine.unlock();
+    if (engine.status.state === 'paused') fail(engine.status.message);
+    const lines = describeChanges(c);
+    process.stdout.write(lines.length ? lines.join('\n') + '\n' : `In step with ${target.host} (${target.project})\n`);
+    if (c.errors.length) process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(`Keeping ${dir} in step with ${target.project} on ${target.host} — Ctrl+C stops\n`);
+  let last = '';
+  engine.o.onStatus = (s) => {
+    const line = s.state === 'idle' ? '' : `${s.state}${s.message ? ': ' + s.message : ''}`;
+    if (line && line !== last) process.stderr.write(`[${stamp()}] ${line}\n`);
+    last = line;
+  };
+  const round = engine.round.bind(engine);
+  engine.round = async () => {
+    const c = await round();
+    for (const l of describeChanges(c)) process.stdout.write(`[${stamp()}] ${l}\n`);
+    return c;
+  };
+  const stop = () => { engine.stop(); process.exit(0); };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  await engine.watch();
+}
+
 async function main() {
   const { positional, flags } = parse(process.argv.slice(2));
   if (flags.version || positional[0] === 'version') { process.stdout.write(VERSION + '\n'); return; }
@@ -930,12 +1552,16 @@ async function main() {
   else if (group === 'repo' || group === 'project') await repoCommand(action, args, flags);
   else if (group === 'build') await buildCommand(positional.slice(1), flags);
   else if (group === 'restore') await restoreCommand(positional.slice(1), flags);
+  else if (group === 'sync') await syncCommand(positional.slice(1), flags);
   else if (group === 'mcp') await mcpCommand(action, flags);
   else if (group === 'update') await updateCommand(flags);
   else fail(`unknown command: ${group}\n\n${HELP}`);
 }
 
-main().catch(error => {
-  process.stderr.write(`overlyx: ${error.message ?? error}\n`);
-  process.exitCode = error.exitCode ?? 1;
-});
+// the VS Code extension bundles this file for its sync (esbuild defines OVERLYX_CLI_LIBRARY): no command line there
+if (process.env.OVERLYX_CLI_LIBRARY !== '1') {
+  main().catch(error => {
+    process.stderr.write(`overlyx: ${error.message ?? error}\n`);
+    process.exitCode = error.exitCode ?? 1;
+  });
+}

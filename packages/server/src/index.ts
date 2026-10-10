@@ -49,6 +49,7 @@ import { usageRoutes } from './usage.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
 import { gitRouter, ensureAllRepos, ensureRepo, repoInfo, cloneUrl, commitProject, restoreProject, touchProject, createToken, listTokens, deleteToken, flushCommits } from './git.ts';
+import { syncRouter } from './sync.ts';
 import { texHeadings, parseBibtex, lyxToPm, splitDocId, projectOfDoc, docPathOf, splitProjectKey } from '@overlyx/core';
 
 const app = express();
@@ -68,6 +69,7 @@ app.use('/api', vscodeTelemetryRoutes());
 // a guest who signs in: their open editors hold the guest's identity — reconnect them as the account
 app.use('/api/auth', authRouter({ onGuestAdopted: (projects, guestId) => { for (const p of projects) manager.kick(p, [guestId], 'signed in'); } }));
 // git over HTTP (Basic auth, see git.ts) — before the API's cookie auth and JSON parsing
+app.use('/git/api/sync', syncRouter());   // before the repositories: /git/<owner>/<name>.git
 app.use('/git', gitRouter());
 app.use('/mcp', mcpRouter());
 // OAuth for the MCP connector (ChatGPT and other spec-compliant MCP clients; mcpOauth.ts)

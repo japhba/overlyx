@@ -104,6 +104,22 @@ window, the edit goes through that editor — it applies to what you see, unsave
 the document is saved — otherwise the tools change the file, and an editor merges it like any change
 on disk (see above).
 
+### Clones of OverLyX projects stay in step
+
+Open a git clone of a project on overlyx.app (`git clone https://overlyx.app/git/<owner>/<project>.git`)
+and the extension keeps it in step with the server while the window is open: files you save reach
+the project within seconds, what people write there arrives here, and your branch follows the
+server's commits — no pull, commit or push. The project's history gets no commit per sync (OverLyX
+commits on its own schedule; a commit you make here becomes one there, with your message). Where
+you and someone on the server changed the same paragraph of a document, their text stays and yours
+is a tracked change over it; other text merges by lines; what cannot merge keeps the server's
+version and yours next to it as a conflict copy. A file with unsaved changes waits until you save
+it. The status bar shows the state (click it to sync now, pause the folder, see the log or open the
+project in the browser); it signs in through the browser the first time, unless the OverLyX CLI or
+git already has a sign-in for the server. `overlyx.sync.enabled` switches it off,
+`overlyx.sync.servers` adds self-hosted servers. In a terminal, `overlyx sync --watch` (OverLyX CLI)
+does the same; the two never run on one clone at once.
+
 ## Requirements
 
 - A TeX distribution with `latexmk` (and `synctex`) on the PATH for PDF preview — the editor
@@ -115,6 +131,8 @@ on disk (see above).
 
 - `overlyx.layoutDir` — LyX layout files to use (default: the copy bundled with the extension).
 - `overlyx.latexmk` — the latexmk executable.
+- `overlyx.sync.enabled` — keep clones of OverLyX projects in step with the server (default on);
+  `overlyx.sync.servers` — further OverLyX servers besides overlyx.app.
 
 ## Where is the outline?
 

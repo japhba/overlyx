@@ -132,6 +132,11 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
             (<code>git config --global credential.helper store</code>, or the macOS keychain / Windows credential manager).
             {!canPush && <> You have <b>view</b> access to this project: you can clone and pull, but not push.</>}
           </div>
+          <div class="hint" data-git-sync>
+            <b>Keep the clone in step, without pulling or pushing:</b> open it in VS Code with the OverLyX extension (it syncs by
+            itself), or run <code>overlyx sync --watch</code> in it (OverLyX CLI). Saved files reach this project within seconds, changes
+            made here arrive there, and the history gets no extra commits (only OverLyX's usual ones).
+          </div>
           <div class="hint">Just want a backup, not a git clone? <a href={zipUrl(project)} data-download-zip={project}>Download the whole project as a .zip</a>.</div>
 
           <h4>Local agents — Claude Code, Codex, … on your computer</h4>

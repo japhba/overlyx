@@ -241,6 +241,9 @@ export async function ensureAllRepos(): Promise<void> {
 /* -------------------------------------------------------------------- commits */
 
 interface Pending { editors: Set<number>; timer: NodeJS.Timeout | null; since: number }
+
+/** called after OverLyX made a commit (sync.ts: the clones' branches follow) */
+export const commitListeners = new Set<(project: string) => void>();
 const pending = new Map<string, Pending>();
 
 function editorsOf(ids: Iterable<number>): { name: string; email: string; username: string }[] {
@@ -270,6 +273,7 @@ async function commitLocked(project: string, opts: { message?: string; editors?:
   await git(project, ['commit', '-q', '--no-verify', '-m', message, '--author', `${author.name} <${author.email}>`], {
     env: { GIT_COMMITTER_NAME: self.name, GIT_COMMITTER_EMAIL: self.email },
   });
+  for (const l of commitListeners) l(project);
   return true;
 }
 
@@ -495,7 +499,7 @@ export function gitRouter(): express.Router {
   return r;
 }
 
-function authenticateBasic(req: Request, res: Response): SessionUser | null {
+export function authenticateBasic(req: Request, res: Response): SessionUser | null {
   if (!config.git) { res.status(404).type('text').send('git access is disabled on this server\n'); return null; }
   const ip = req.ip ?? 'x';
   const f = failures.get(ip);
@@ -534,7 +538,7 @@ async function createCliProject(req: Request, res: Response): Promise<void> {
 }
 
 /** The project and document a CLI request names (`project` = `<owner>/<name>` or an alias, `path` project-relative), with the caller's role checked. */
-function cliTarget(req: Request, res: Response, user: SessionUser, need: 'view' | 'edit', withPath: boolean): { project: string; path: string } | null {
+export function cliTarget(req: Request, res: Response, user: SessionUser, need: 'view' | 'edit', withPath: boolean): { project: string; path: string } | null {
   const src = req.method === 'GET' ? req.query : req.body ?? {};
   let project: string;
   try { project = canonicalProject(String(src.project ?? '')); } catch { res.status(400).json({ error: 'bad project name' }); return null; }
@@ -696,8 +700,12 @@ async function handle(req: Request, res: Response): Promise<void> {
       await serve();
     });
   } else {
-    // a fetch only reads: commit pending changes first (locked), then serve outside the lock
-    try { await commitProject(project); } catch (e) { console.error('[git] commit before fetch failed:', e); }
+    // a fetch only reads: commit pending changes first (locked), then serve outside the lock — not
+    // for a synced clone following the branch (`overlyx sync`: it has the files already, and a commit
+    // per sync would flood the history; OverLyX commits on its own schedule)
+    if (req.get('x-overlyx-sync') !== '1') {
+      try { await commitProject(project); } catch (e) { console.error('[git] commit before fetch failed:', e); }
+    }
     await serve();
   }
 }

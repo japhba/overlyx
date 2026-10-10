@@ -27,7 +27,7 @@ import { readTextFile, looksLikeDocument, parseDocumentText } from './texdoc.ts'
 import { sha1, metaOf, lyxDocumentOf, renderDoc, renderModel, parseFor, mergeFileText, loadOverStored, type DocState, type DocMeta, type Rendered, type SourceSpan } from './docwork.ts';
 import { DocWorkers, WorkerGone, MirrorLost, type SyncEntry } from './docpool.ts';
 import { documentMeta, type DocumentMeta } from './docmeta.ts';
-import { applyTrackedSource, applyPlainSource, restoreSource, foldEdits, replaceInSource, type EditableDoc, type TrackedResult } from './docedit.ts';
+import { applyTrackedSource, applyPlainSource, applySyncedSource, restoreSource, foldEdits, replaceInSource, type EditableDoc, type TrackedResult } from './docedit.ts';
 import { MoveRepair } from './moves.ts';
 import { MOVES_ORIGIN } from '@overlyx/core/moves.ts';
 
@@ -608,7 +608,8 @@ export class OpenDoc implements DocState, EditableDoc {
       const b = before ?? this.toText();
       const after = 'after' in edit ? edit.after : replaceInSource(b, edit.replace.oldText, edit.replace.newText, edit.replace.all);
       const warnings = opts.warnings ? parseDocumentText(after, this.project, this.relPath).warnings : [];
-      const result = kind === 'tracked' ? applyTrackedSource(this, b, after, author) : kind === 'plain' ? applyPlainSource(this, b, after) : { text: restoreSource(this, after) };
+      const result = kind === 'tracked' ? applyTrackedSource(this, b, after, author) : kind === 'plain' ? applyPlainSource(this, b, after)
+        : kind === 'sync' ? applySyncedSource(this, b, after, author) : { text: restoreSource(this, after) };
       return { result: result as EditResults[K], warnings };
     }
     const r = await this.exclusive(async () => {
@@ -715,8 +716,8 @@ export class OpenDoc implements DocState, EditableDoc {
   }
 }
 
-type EditKind = 'tracked' | 'plain' | 'restore';
-interface EditResults { tracked: TrackedResult; plain: ReturnType<typeof applyPlainSource>; restore: { text: string } }
+type EditKind = 'tracked' | 'plain' | 'sync' | 'restore';
+interface EditResults { tracked: TrackedResult; plain: ReturnType<typeof applyPlainSource>; sync: ReturnType<typeof applySyncedSource>; restore: { text: string } }
 /** what an agent's edit makes of the source: the whole new text, or a passage replaced */
 export type AgentEditSource = { after: string } | { replace: { oldText: string; newText: string; all: boolean } };
 
@@ -939,6 +940,8 @@ export const fileWrittenListeners = new Set<(project: string, userIds: number[])
  * (SSE, `GET /api/projects/:project/events`) so they refresh themselves.
  */
 export const projectChangedListeners = new Set<(project: string) => void>();
+/** any file of a project was written, created or removed (undebounced; the dotted directories and _build are not watched) — sync.ts wakes the clones waiting for a change */
+export const projectFileListeners = new Set<(project: string) => void>();
 /** a graphics file of a project was written or created: (project, project-relative path, mtime) — the editors reload the image */
 export const graphicsChangedListeners = new Set<(project: string, file: string, version: number) => void>();
 // (and the web files of HTML deliverables: their editors reload a stylesheet, a script, data, a font)
@@ -1222,6 +1225,10 @@ export class DocManager {
     // structural changes only ('change' would fire on every document save while someone types)
     this.watcher.on('all', (event: string, file: string) => {
       if (event !== 'change') this.notifyProjectChanged(file);
+      if (projectFileListeners.size) {
+        const project = path.relative(config.projectsDir, file).split(path.sep).slice(0, 2).join('/');
+        if (isProjectKey(project)) for (const l of projectFileListeners) l(project);
+      }
       if ((event === 'change' || event === 'add') && GRAPHICS_FILE.test(file)) this.notifyGraphicsChanged(file);
     });
   }

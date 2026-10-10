@@ -16,7 +16,7 @@
 import { addAuthor, lyxAuthorId, setHeaderValue, getPreamble, type LyxDocument, type Paragraph, type Item } from './ast.ts';
 import { mergeLyx, mergeInPlace, type RegionMerge } from './merge.ts';
 import { trackDiff, changeStats } from './trackdiff.ts';
-import { writeParagraphs } from './writer.ts';
+import { writeParagraph, writeParagraphs } from './writer.ts';
 import { collectMacros } from '../macros.ts';
 
 /**
@@ -161,6 +161,51 @@ export function applyPlainSource(doc: EditableDoc, before: string, after: string
   doc.edited();
   const newText = doc.toText();
   return { changed: newText !== oldText, excerpt: excerptOfChange(oldText, newText), before: oldText, after: newText };
+}
+
+/**
+ * A local clone's saved file brought into the live document (the sync of `overlyx sync` / the VS
+ * Code extension): `before` is the version the clone last had from the server, `after` its version
+ * now. What only the clone changed is applied directly; where the clone and the live document both
+ * changed the same paragraph, the live text stays and the clone's text is laid over it as a tracked
+ * change by `author` — nothing is lost, and the people in the editor see the conflict and decide.
+ * The document's tracking mode is left as it is.
+ */
+export function applySyncedSource(doc: EditableDoc, before: string, after: string, author: string): { changed: boolean; conflicts: number; before: string; after: string } {
+  const base = doc.parse(before), theirs = doc.parse(after), ours = doc.toLyxDocument();
+  let conflicts = 0;
+  const same = (x: string[], y: string[]) => x.length === y.length && x.every((l, i) => l === y[i]);
+  // `clientWins`: a paragraph both sides changed takes the clone's version (else the live one)
+  const resolve = (clientWins: boolean, count: boolean): RegionMerge => (b, o, t) => {
+    const kb = b.map(p => writeParagraph(p)), ko = o.map(p => writeParagraph(p)), kt = t.map(p => writeParagraph(p));
+    if (same(ko, kb)) return t;                        // only the clone changed the region
+    if (same(kt, kb) || same(kt, ko)) return o;        // only the live document changed it, or both alike
+    if (b.length === o.length && b.length === t.length) {
+      return b.map((_, k) => {
+        if (kt[k] === kb[k] || kt[k] === ko[k]) return o[k];
+        if (ko[k] === kb[k]) return t[k];
+        if (count) conflicts++;
+        return clientWins ? t[k] : o[k];
+      });
+    }
+    if (count) conflicts++;
+    return clientWins ? t : o;
+  };
+  const merged = mergeLyx(base, ours, theirs, resolve(false, true));
+  let target = merged;
+  if (conflicts) {
+    const clientWins = mergeLyx(base, ours, theirs, resolve(true, false));
+    const authorId = lyxAuthorId(author, '');
+    addAuthor(clientWins.header, authorId, author, '');
+    clientWins.body = trackDiff(merged.body, clientWins.body, { author: authorId, time: Math.floor(Date.now() / 1000) });
+    target = clientWins;
+  }
+  retireMacros(doc, ours, target);
+  const oldText = doc.toText();
+  doc.loadFromLyx(target, 'mcp');
+  doc.edited();
+  const newText = doc.toText();
+  return { changed: newText !== oldText, conflicts, before: oldText, after: newText };
 }
 
 /* ------------------------------------------------------------------ taking an edit back */

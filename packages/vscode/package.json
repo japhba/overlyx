@@ -16,7 +16,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "workspaceContains:.git/HEAD"
+  ],
   "main": "./dist/extension.cjs",
   "contributes": {
     "customEditors": [
@@ -140,6 +142,31 @@
         "category": "OverLyX"
       },
       {
+        "command": "overlyx.syncNow",
+        "title": "Sync Now with the Server",
+        "category": "OverLyX"
+      },
+      {
+        "command": "overlyx.syncPause",
+        "title": "Pause Sync for This Folder",
+        "category": "OverLyX"
+      },
+      {
+        "command": "overlyx.syncResume",
+        "title": "Resume Sync for This Folder",
+        "category": "OverLyX"
+      },
+      {
+        "command": "overlyx.syncShowLog",
+        "title": "Show Sync Log",
+        "category": "OverLyX"
+      },
+      {
+        "command": "overlyx.syncMenu",
+        "title": "Sync…",
+        "category": "OverLyX"
+      },
+      {
         "command": "overlyx.editorKey",
         "title": "Editor key (handled by the OverLyX editor)",
         "category": "OverLyX"
@@ -220,7 +247,8 @@
         }
       ],
       "commandPalette": [
-        { "command": "overlyx.editorKey", "when": "false" }
+        { "command": "overlyx.editorKey", "when": "false" },
+        { "command": "overlyx.syncMenu", "when": "false" }
       ]
     },
     "keybindings": [
@@ -312,6 +340,20 @@
           "type": "string",
           "default": "",
           "description": "Override the release-check endpoint (testing / self-hosted mirrors). Leave empty."
+        },
+        "overlyx.sync.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Keep clones of OverLyX projects in step with the server while VS Code is open: files you save reach the project within seconds, changes made there arrive here, and the branch follows the server's commits — no pull, commit or push. Applies to workspace folders whose git remote is a project on overlyx.app (or on a server listed in `#overlyx.sync.servers#` or signed in with the OverLyX CLI). Pause a single folder from the status bar.",
+          "tags": [
+            "usesOnlineServices"
+          ]
+        },
+        "overlyx.sync.servers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Further OverLyX servers (e.g. `https://latex.example.org`) whose project clones are synced, besides overlyx.app and the servers the OverLyX CLI is signed in to."
         },
         "overlyx.errorReports": {
           "type": "boolean",

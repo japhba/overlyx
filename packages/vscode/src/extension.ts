@@ -23,6 +23,7 @@ import { cachedParseFile, parseFragmentText, masterHeaderFor, type TexContext } 
 import { buildMeta, bibEntriesFor } from './host/meta.ts';
 import { OverlyxTelemetry } from './host/telemetry.ts';
 import { setupAgents } from './host/agents.ts';
+import { setupSync } from './host/sync.ts';
 import { registerNewDocumentCommands } from './host/newDocument.ts';
 import { DeliverableServer, DeliverableEditorProvider } from './host/deliverables.ts';
 import { runTool, toolTarget, TOOL_NAMES, type ToolName, type TextStore } from './agents/localEdit.ts';
@@ -364,6 +365,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     onDidChange: registry.onDidChange,
     endpoint: () => bridge.base,
   });
+
+  // a clone of an OverLyX project in the workspace: kept in step with the server (host/sync.ts)
+  setupSync(context, (e, area) => telemetry.report(e, area));
 
   return { registry, bridgeBase: () => bridge.base, checkForUpdates: (opts) => updater.check(opts ?? { interactive: true }) };
 }

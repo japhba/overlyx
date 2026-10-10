@@ -18,7 +18,7 @@ import {
   lyxDocumentOf, renderDoc, renderModel, parseResultFor, mergeFileText, loadOverStored,
   type DocState, type Rendered,
 } from './docwork.ts';
-import { applyTrackedSource, applyPlainSource, restoreSource, foldEdits, replaceInSource, type EditableDoc } from './docedit.ts';
+import { applyTrackedSource, applyPlainSource, applySyncedSource, restoreSource, foldEdits, replaceInSource, type EditableDoc } from './docedit.ts';
 import type { DocInfo, SyncEntry, WorkerRequest, WorkerResponse } from './docpool.ts';
 import { protectMoves } from '@overlyx/core/moves.ts';
 
@@ -228,6 +228,7 @@ const ops: Record<string, (doc: DocInfo | null, a: Args) => unknown> = {
     const after: string = a.replace ? replaceInSource(before, a.replace.oldText, a.replace.newText, a.replace.all) : a.after;
     const { value, update } = capture(m, () => a.kind === 'tracked' ? applyTrackedSource(m, before, after, a.author)
       : a.kind === 'plain' ? applyPlainSource(m, before, after)
+      : a.kind === 'sync' ? applySyncedSource(m, before, after, a.author)
       : { text: restoreSource(m, after) });
     return { result: value, warnings: m.warnings.get(after) ?? [], update, saved: m.saved, retired: [...m.retiredMacros], isChild: m.isChild };
   },
