@@ -8,7 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { BENIGN_BROWSER_ERROR } from '@client/error-reporting';
 
-export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, page: 'editor' | 'pdf', globals: Record<string, unknown>): Promise<string> {
+export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, page: 'editor' | 'pdf' | 'deliverable', globals: Record<string, unknown>): Promise<string> {
   const config = vscode.workspace.getConfiguration('overlyx');
   const live = !!config.get<string>('developmentPath');
   const localDev = config.get<string>('developmentServer')!;
@@ -40,6 +40,8 @@ export async function webviewHtml(webview: vscode.Webview, extensionUri: vscode.
     `script-src 'nonce-${nonce}' ${webview.cspSource} ${dev}`,
     `connect-src http://127.0.0.1:* ${bridgeOrigin} ${webview.cspSource} ${dev} ${dev.replace(/^http/, 'ws')}`,
     "worker-src blob: data:",
+    // the deliverable editor's frames: the pages, sandboxed, from the extension's local server (host/deliverables.ts)
+    ...(globals.frameOrigin ? [`frame-src ${String(globals.frameOrigin)} http://127.0.0.1:*`] : []),
   ].join('; ');
   const inject = `<meta http-equiv="Content-Security-Policy" content="${csp}">\n` +
     // Vite injects CSS into <style> tags with root-relative font/image URLs. Their base must

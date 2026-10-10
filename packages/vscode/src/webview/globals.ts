@@ -1,6 +1,6 @@
 /** Runtime configuration injected by the extension host (webviewHtml.ts). */
 export interface VsCodeGlobals {
-  page: 'editor' | 'pdf';
+  page: 'editor' | 'pdf' | 'deliverable';
   docId: string;
   /** the local HTTP bridge: http://127.0.0.1:<port>/t/<token> */
   base: string;

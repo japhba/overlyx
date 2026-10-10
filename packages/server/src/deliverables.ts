@@ -26,6 +26,7 @@ import { roleFor } from './access.ts';
 import { projectDir } from './projects.ts';
 import { manager, HtmlDoc } from './docs.ts';
 import { isHtmlPath, deliverableInfo } from '@overlyx/core/html/deliverable.ts';
+import { RUNTIME_MODES, runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, type RuntimeMode } from '@overlyx/core/html/serve.ts';
 import { toPng, toSvg } from './graphics.ts';
 
 const KEY = crypto.createHmac('sha256', JWT_SECRET || 'dev').update('overlyx deliverable token').digest();
@@ -75,26 +76,7 @@ function userById(id: number): SessionUser | null {
   return user;
 }
 
-/** The modes of the runtime: the editor's frame, its slide rail, a presentation, a print (PDF), a check (render_page), a plain view. */
-export const RUNTIME_MODES = ['edit', 'thumb', 'present', 'print', 'check', 'view'] as const;
-export type RuntimeMode = typeof RUNTIME_MODES[number];
-
-/** the runtime's tags, first thing in <head> */
-export function runtimeTags(mode: RuntimeMode, extra: Record<string, unknown> = {}): string {
-  const cfg = JSON.stringify({ mode, ...extra }).replace(/</g, '\\u003c');
-  return `<meta name="referrer" content="no-referrer"><script data-ol-runtime>window.__OL=${cfg}</script><script data-ol-runtime src="/_ol/runtime.js"></script>`;
-}
-
-/** `html` with the runtime's tags at the top of its <head> (made when it has none) */
-export function injectRuntime(html: string, tags: string): string {
-  const head = /<head(\s[^>]*)?>/i.exec(html);
-  if (head) return html.slice(0, head.index + head[0].length) + tags + html.slice(head.index + head[0].length);
-  const htmlTag = /<html(\s[^>]*)?>/i.exec(html);
-  if (htmlTag) return html.slice(0, htmlTag.index + htmlTag[0].length) + `<head>${tags}</head>` + html.slice(htmlTag.index + htmlTag[0].length);
-  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
-  const at = doctype ? doctype[0].length : 0;
-  return html.slice(0, at) + `<head>${tags}</head>` + html.slice(at);
-}
+export { RUNTIME_MODES, runtimeTags, injectRuntime, resolveInProject, type RuntimeMode };
 
 /** The page's text as the editors have it (an open document's), else the file's. */
 export async function liveHtml(project: string, rel: string): Promise<string> {
@@ -104,24 +86,14 @@ export async function liveHtml(project: string, rel: string): Promise<string> {
   return fs.readFileSync(path.join(projectDir(project), rel), 'utf8');
 }
 
-const SANDBOX = 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads';
 
 function commonHeaders(res: Response): void {
-  res.setHeader('Content-Security-Policy', SANDBOX);
+  res.setHeader('Content-Security-Policy', SANDBOX_CSP);
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   // the page's own fetch() and fonts come from an opaque origin: cross-origin to us
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-}
-
-/** a project-relative path for `rest` (relative to the folder `dir`), or null when it leaves the project or reaches .git */
-export function resolveInProject(dir: string, rest: string): string | null {
-  if (rest.includes('\0')) return null;
-  const rel = path.posix.normalize(path.posix.join(dir || '.', rest));
-  if (rel.startsWith('../') || rel === '..' || path.posix.isAbsolute(rel)) return null;
-  if (rel.split('/').some(seg => seg === '.git' || seg.startsWith('.overlyx'))) return null;
-  return rel === '.' ? '' : rel;
 }
 
 export function mountDeliverables(app: Express): void {

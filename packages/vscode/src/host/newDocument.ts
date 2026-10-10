@@ -1,8 +1,9 @@
 /**
- * OverLyX: New Slide Deck… / New Poster… / New Document… (command palette, File ▸ New File…): a
- * slide deck, poster or page (layout documents, core layout/templates.ts), or a LaTeX or Markdown
- * document (core newdoc.ts) — the templates the web app's File ▸ New uses — saved where the user
- * picks and opened in the OverLyX editor.
+ * OverLyX: New Slide Deck… / New Poster… / New Web Page… (HTML deliverables: a folder with an
+ * index.html, host/deliverables.ts) and New Document… (command palette, File ▸ New File…): a LaTeX
+ * or Markdown document (core newdoc.ts) or a LaTeX layout document (slides, poster or page, core
+ * layout/templates.ts) — the templates the web app's File ▸ New uses — saved where the user picks
+ * and opened in the OverLyX editor.
  */
 import * as vscode from 'vscode';
 import fs from 'node:fs';
@@ -11,6 +12,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { PAGE_PRESETS, newDocumentText, newMarkdownText } from '@overlyx/core';
 import { newLayoutDocumentText } from './texdoc.ts';
+import { newDeliverable } from './deliverables.ts';
 
 type Kind = 'slides' | 'poster' | 'page' | 'latex' | 'markdown';
 
@@ -38,7 +40,7 @@ function choices(kinds: Kind[]): (Choice | vscode.QuickPickItem)[] {
 }
 
 const PICK: Record<'any' | 'slides' | 'poster', { title: string; placeholder: string; kinds: Kind[] }> = {
-  any: { title: 'New document', placeholder: 'What to create — slides, posters and pages are beamer files of freely placed text boxes, shapes and images', kinds: ['latex', 'markdown', 'slides', 'poster', 'page'] },
+  any: { title: 'New document', placeholder: 'What to create — LaTeX slides, posters and pages are beamer files of freely placed text boxes, shapes and images (New Slide Deck / Poster / Web Page make HTML ones)', kinds: ['latex', 'markdown', 'slides', 'poster', 'page'] },
   slides: { title: 'New slide deck', placeholder: 'Aspect ratio — a beamer file of slides with freely placed text boxes, shapes and images', kinds: ['slides'] },
   poster: { title: 'New poster', placeholder: 'Paper size — a beamer file of freely placed text boxes, shapes and images', kinds: ['poster'] },
 };
@@ -101,5 +103,10 @@ export function registerNewDocumentCommands(layoutDir: () => string, report: (er
     report(e, 'newDocument');
     void vscode.window.showErrorMessage('OverLyX: could not create the document: ' + ((e as Error)?.message ?? String(e)));
   }));
-  return [command('overlyx.newDocument', 'any'), command('overlyx.newSlides', 'slides'), command('overlyx.newPoster', 'poster')];
+  // slide decks, posters and web pages are HTML deliverables now (host/deliverables.ts); the LaTeX layout documents stay in New Document…
+  const html = (id: string, kind: 'deck' | 'poster' | 'page') => vscode.commands.registerCommand(id, () => newDeliverable(kind, startFolder()).catch(e => {
+    report(e, 'newDeliverable');
+    void vscode.window.showErrorMessage('OverLyX: could not create it: ' + ((e as Error)?.message ?? String(e)));
+  }));
+  return [command('overlyx.newDocument', 'any'), html('overlyx.newSlides', 'deck'), html('overlyx.newPoster', 'poster'), html('overlyx.newWebPage', 'page')];
 }

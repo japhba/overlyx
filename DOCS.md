@@ -427,6 +427,17 @@ blend.
     **website `.zip`** that works without OverLyX (the runtime and MathJax under `_overlyx/`, a deck
     opening presenting, files from elsewhere in the project copied into `_assets/`, PDF figures as
     SVG).
+  * **VS Code** (`packages/vscode/src/host/deliverables.ts`, webview `deliverableMain.tsx`): *Open
+    With… ▸ OverLyX Slides, Poster or Web Page* on an `.html` file (or the editor title's button);
+    *New Slide Deck… / New Poster… / New Web Page…* (File ▸ New File…) make a folder with an
+    `index.html` (the LaTeX layout documents are in *New Document…*). The same editor
+    (`DeliverableCanvas` on a host, `deliverable/host.ts`) keeps the text in the file's
+    TextDocument: changes go to the extension as splices of the version the webview knows (one at a
+    time), the document's changes come back whole; undo and ⌘S are VS Code's; presenting and
+    *Print or save as PDF* open the page in the browser. The pages are served by a server of the
+    extension's own — not the bridge, whose API edits documents — on 127.0.0.1 with a random token,
+    the same sandbox policy and runtime (`dist/ol/`, built by `scripts/build-runtime.mjs`); paths
+    resolve in the workspace folder.
   * **Agents** (MCP, `mcp.ts`): `create_deliverable` (folder, kind, title), the file tools on the
     page (`read_file` / `edit_file` / `write_file` reach an open page's live text and apply as one
     splice), `list_documents` lists pages with their kind, and **`render_page`** shows a page as

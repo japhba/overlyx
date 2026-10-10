@@ -412,17 +412,18 @@ try {
   if (!await sideBar.isVisible()) fail('Ctrl+B in a document toggled VS Code\'s side bar');
   log('Ctrl+B in a document left the side bar open');
 
-  /* ---- 8. File ▸ New File… ▸ Slide Deck: a 16:9 deck saved beside the open file, opened as slides ---- */
+  /* ---- 8. File ▸ New File… ▸ LaTeX or Markdown Document ▸ Slides 16:9: a beamer layout deck saved beside the open file, opened as slides ---- */
   await page.keyboard.press('Control+Shift+p');
   await page.waitForSelector('.quick-input-widget input', { timeout: 15000 });
   await page.keyboard.type('Create: New File');
   await sleep(500);
   await page.keyboard.press('Enter');
   await until(() => page.locator('.quick-input-widget .monaco-list-row', { hasText: 'Slide Deck' }).count(), 15000, 'Slide Deck in File ▸ New File…');
+  for (const entry of ['Poster', 'Web Page', 'LaTeX or Markdown Document']) if (!await page.locator('.quick-input-widget .monaco-list-row', { hasText: entry }).count()) fail(`${entry} missing from File ▸ New File…`);
   await shot('07-new-file-entries');
-  await page.locator('.quick-input-widget .monaco-list-row', { hasText: 'Slide Deck' }).first().click();
+  await page.locator('.quick-input-widget .monaco-list-row', { hasText: 'LaTeX or Markdown Document' }).first().click();
   await until(() => page.locator('.quick-input-widget .monaco-list-row', { hasText: 'Slides 16:9' }).count(), 15000, 'the aspect ratios');
-  await page.keyboard.press('Enter');
+  await page.locator('.quick-input-widget .monaco-list-row', { hasText: 'Slides 16:9' }).first().click();
   // the save dialog offers slides.tex in the folder of the active file
   await until(() => page.locator('.quick-input-widget input').inputValue().then(v => v.endsWith('/submission/slides.tex')), 15000, 'slides.tex offered in the save dialog');
   await page.keyboard.press('Enter');
@@ -435,7 +436,7 @@ try {
     return null;
   }, 60000, 'the new deck in the OverLyX editor (two slides)');
   await until(() => deckFrame.evaluate(() => (document.querySelector('.lyx-editor')?.textContent || '').includes('Title of the talk')), 15000, 'the title slide');
-  log('File ▸ New File… ▸ Slide Deck created slides.tex and opened it as slides');
+  log('File ▸ New File… ▸ LaTeX or Markdown Document ▸ Slides 16:9 created slides.tex and opened it as slides');
   await shot('08-new-slide-deck');
   // an object shows the four-way move cursor (a drag moves it)
   // (the text of the unselected author box; in the narrow column its middle can lie outside the viewport, so no elementFromPoint)
@@ -464,6 +465,48 @@ try {
   await page.keyboard.press('Escape');
   await deckFrame.evaluate(t => { document.documentElement.dataset.theme = t; }, themeBefore);
   log('Ctrl+M in a slide text box opened a light formula field; the move cursor shows over objects');
+
+  /* ---- 8b. File ▸ New File… ▸ Slide Deck: an HTML deck (talk/index.html) in the OverLyX slides editor; retyped on the canvas, saved ---- */
+  await page.keyboard.press('Control+Shift+p');
+  await page.waitForSelector('.quick-input-widget input', { timeout: 15000 });
+  await page.keyboard.type('Create: New File');
+  await sleep(500);
+  await page.keyboard.press('Enter');
+  await until(() => page.locator('.quick-input-widget .monaco-list-row', { hasText: 'Slide Deck' }).count(), 15000, 'Slide Deck in File ▸ New File…');
+  await page.locator('.quick-input-widget .monaco-list-row', { hasText: 'Slide Deck' }).first().click();
+  await until(() => page.locator('.quick-input-widget input').inputValue().then(v => /\/submission\/talk(-\d+)?$/.test(v)), 15000, 'a talk folder offered in the save dialog');
+  const talkDir = path.join(ws, path.basename(await page.locator('.quick-input-widget input').inputValue()));
+  await page.keyboard.press('Enter');
+  const talk = path.join(talkDir, 'index.html');
+  await until(() => fs.existsSync(talk), 15000, 'talk/index.html on disk');
+  if (!fs.readFileSync(talk, 'utf8').includes('<meta name="overlyx" content="deck">')) fail('the new deck is not an HTML deck');
+  // the page in its sandboxed frame inside the webview: two slides, the formula typeset
+  const pageFrame = await until(async () => {
+    for (const f of page.frames()) { try { if (f.url().includes('ol=edit') && await f.locator('section.slide').count() === 2) return f; } catch { /* gone */ } }
+    return null;
+  }, 60000, 'the HTML deck in the OverLyX slides editor (two slides)');
+  await until(() => pageFrame.locator('section.slide mjx-container').count(), 30000, 'the formula typeset by MathJax');
+  await shot('08b-html-deck');
+  // double-click the title, type at its end, save: the file has it
+  // (a real double-click at the title on screen: Playwright's own element clicks do not apply the canvas frame's
+  // scale inside VS Code's out-of-process webview frames — the box of the frame element does)
+  const frameBox = await (await pageFrame.frameElement()).boundingBox();
+  const at = await pageFrame.evaluate(() => { const r = document.querySelector('section.slide h1').getBoundingClientRect(); return { x: r.left + Math.min(40, r.width / 2), y: r.top + r.height / 2, w: innerWidth }; });
+  const sc = frameBox.width / at.w;
+  await page.mouse.dblclick(frameBox.x + at.x * sc, frameBox.y + at.y * sc);
+  await sleep(400);
+  const editingNow = await pageFrame.evaluate(() => ({ editing: !!document.querySelector('[data-ol-editing]'), active: document.activeElement?.tagName, focus: document.hasFocus() }));
+  log('after the double-click: ' + JSON.stringify(editingNow));
+  await shot('08c-html-retype');
+  if (!editingNow.editing) fail('a double-click on the title did not start retyping it');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' in VS Code');
+  await sleep(1200);
+  await page.keyboard.press('Escape');
+  await sleep(500);
+  await page.keyboard.press('Control+s');
+  await until(() => /Talk in VS Code<\/h1>/.test(fs.readFileSync(talk, 'utf8')), 15000, 'the retyped title saved into talk/index.html');
+  log('File ▸ New File… ▸ Slide Deck created talk/index.html, opened it on the canvas, retyped the title and saved it');
 
   /* ---- 9. Layout source fragments and failed raw previews stay outside the printed canvas ---- */
   await page.keyboard.press('Control+p');

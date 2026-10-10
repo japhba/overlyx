@@ -24,6 +24,7 @@ import { buildMeta, bibEntriesFor } from './host/meta.ts';
 import { OverlyxTelemetry } from './host/telemetry.ts';
 import { setupAgents } from './host/agents.ts';
 import { registerNewDocumentCommands } from './host/newDocument.ts';
+import { DeliverableServer, DeliverableEditorProvider } from './host/deliverables.ts';
 import { runTool, toolTarget, TOOL_NAMES, type ToolName, type TextStore } from './agents/localEdit.ts';
 import * as build from './host/build.ts';
 import type { HostToEditor } from './shared/protocol.ts';
@@ -263,6 +264,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     reportError: (error, area) => telemetry.report(error, area),
   });
 
+  const deliverableServer = new DeliverableServer(vscode.Uri.joinPath(context.extensionUri, 'dist/ol').fsPath, path.join(context.globalStorageUri.fsPath, 'cache'));
   const outlineTree = new OutlineTree(registry);
   const updater = new Updater(context);
   // the built-in Outline pane cannot show a webview editor's outline: surface the Structure view
@@ -279,6 +281,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Overly
     vscode.window.createTreeView('overlyx.structureExplorer', { treeDataProvider: outlineTree, showCollapseAll: true }),
     registerTexSymbols(),
     vscode.window.onDidChangeActiveColorTheme(t => pdfPanels.postTheme([vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighContrast].includes(t.kind))),
+    // HTML deliverables: slide decks, posters, web pages (host/deliverables.ts)
+    vscode.window.registerCustomEditorProvider('overlyx.htmlEditor', new DeliverableEditorProvider(context, deliverableServer, bridgeBase), {
+      webviewOptions: { retainContextWhenHidden: true },
+      supportsMultipleEditorsPerDocument: false,
+    }),
+    { dispose: () => deliverableServer.dispose() },
+    vscode.commands.registerCommand('overlyx.openDeliverable', (uri?: vscode.Uri) => {
+      const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+      const target = uri ?? (input instanceof vscode.TabInputText ? input.uri : undefined);
+      if (target) void vscode.commands.executeCommand('vscode.openWith', target, 'overlyx.htmlEditor');
+    }),
     vscode.commands.registerCommand('overlyx.openInOverlyx', (uri?: vscode.Uri) => {
       const target = uri ?? vscode.window.activeTextEditor?.document.uri;
       if (target) void vscode.commands.executeCommand('vscode.openWith', target, 'overlyx.texEditor');

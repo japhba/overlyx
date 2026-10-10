@@ -140,7 +140,7 @@ describe('the sandboxed folder', () => {
     expect(r.headers.get('content-security-policy')).not.toMatch(/allow-same-origin/);
     expect(r.headers.get('referrer-policy')).toBe('no-referrer');
     const html = await r.text();
-    expect(html).toMatch(/<head><meta name="referrer" content="no-referrer"><script data-ol-runtime>window.__OL=\{"mode":"edit"\}<\/script><script data-ol-runtime src="\/_ol\/runtime.js"><\/script>/);
+    expect(html).toMatch(/<head><meta name="referrer" content="no-referrer" data-ol-runtime><script data-ol-runtime>window.__OL=\{"mode":"edit"\}<\/script><script data-ol-runtime src="\/_ol\/runtime.js"><\/script>/);
     expect(html).toContain('Only One message per slide');   // the live text, not the file
     const css = await fetch(`${base}/ol-d/${t}/style.css`);
     expect(await css.text()).toBe('h1 { color: red }');

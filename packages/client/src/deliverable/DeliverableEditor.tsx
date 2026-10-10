@@ -1,60 +1,48 @@
 /**
  * The editor of HTML deliverables — slide decks, posters, web pages (core html/): the page itself,
  * rendered in a sandboxed frame by the runtime (runtime/), is the canvas; this component owns the
- * text. The text is a Y.Text synced like any document (server docs.ts HtmlDoc), so people, agents
- * (the MCP file tools) and the code view all edit the same characters live. What people do on the
- * canvas arrives as operations on the version the frame showed, is rebased onto the text as it is
- * now (sourceops.ts) and applied as splices — nothing else of the file changes.
+ * text, through its host (host.ts — in the web app a Y.Text synced like any document, server docs.ts
+ * HtmlDoc; in VS Code the file's TextDocument), so people, agents (the file tools) and the code view
+ * all edit the same characters live. What people do on the canvas arrives as operations on the
+ * version the frame showed, is rebased onto the text as it is now (sourceops.ts) and applied as
+ * splices — nothing else of the file changes.
  *
  * Around the canvas: the slide rail (a second frame, small), the toolbar (insert objects, format the
- * selection, arrange), speaker notes, the code (a textarea on the same Y.Text), presenting (a third
- * frame, full screen), and downloads (PDF, a self-contained .zip).
+ * selection, arrange), speaker notes, the code (a textarea on the same text), presenting (a third
+ * frame, full screen), and the host's downloads.
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import * as Y from 'yjs';
-import { WebsocketProvider } from 'y-websocket';
-import * as decoding from 'lib0/decoding';
-import { splitDocId } from '@overlyx/core';
-import { api, type User } from '../api';
+import { type User } from '../api';
 import { showContextMenu, closeContextMenu, type MenuItem } from '../editor/contextmenu';
+import type { DeliverableHost } from './host';
+import { webHost } from './webHost';
 import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect } from './protocol';
 import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange } from './sourceops';
 import { parseSource, opSplices, elementAt, elementChildren } from '@overlyx/core/html/source.ts';
-import { subscribeProjectEvents } from '../projectevents';
 
-const LOCAL = 'local';
 const PAD = 48;
 
 type Notify = (text: string, kind?: 'info' | 'error') => void;
 
 interface Link { base: string; entry: string; expires: number }
 
+/** The deliverable editor of the web app: its host keeps the text in a Y.Text synced with the server (webHost.ts). */
 export function DeliverableEditor({ id, user, notify }: { id: string; user: User; notify: Notify }) {
-  const { project, path } = splitDocId(id);
+  const host = useMemo(() => webHost(id, user), [id]);
+  useEffect(() => () => host.destroy(), [host]);
+  return <DeliverableCanvas key={id} host={host} notify={notify} />;
+}
+
+/** The editor around the page, wherever it runs (`host`: the web app's, the VS Code extension's). */
+export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; notify: Notify }) {
+  const path = host.path;
   const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
   const [, bump] = useState(0);
   const rerender = () => bump(t => t + 1);
+  const text = { toString: () => host.text() };
 
-  /* ------------------------------------------------------------- the text, synced */
-
-  const conn = useMemo(() => {
-    const ydoc = new Y.Doc();
-    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
-    const provider = new WebsocketProvider(wsUrl, '', ydoc, { params: { doc: id }, disableBc: true });
-    const handlers = (provider as unknown as { messageHandlers: ((enc: unknown, dec: decoding.Decoder) => void)[] }).messageHandlers;
-    handlers[2] = (_e, dec) => { decoding.readVarString(dec); };
-    handlers[3] = (_e, dec) => { decoding.readVarUint(dec); decoding.readVarUint8Array(dec); };
-    handlers[4] = () => {};
-    handlers[5] = (_e, dec) => { Y.applyUpdate(ydoc, decoding.readVarUint8Array(dec), 'agent'); };
-    provider.awareness.setLocalStateField('user', { name: user.name, color: user.color, username: user.username, avatar: user.avatar ?? null });
-    const text = ydoc.getText('html');
-    const undo = new Y.UndoManager(text, { trackedOrigins: new Set([LOCAL, 'agent']), captureTimeout: 600 });
-    return { ydoc, provider, text, undo };
-  }, [id]);
-  const { ydoc, provider, text, undo } = conn;
-
-  const [synced, setSynced] = useState(false);
+  const [synced, setSynced] = useState(host.ready());
   const [online, setOnline] = useState(true);
   const [readOnly, setReadOnly] = useState(false);
   const readOnlyRef = useRef(false); readOnlyRef.current = readOnly;
@@ -98,18 +86,18 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
   const toCanvas = (msg: ToRuntime) => toFrame(canvasFrame.current, msg);
   const toRail = (msg: ToRuntime) => toFrame(railFrame.current, msg);
 
-  /** the address of the folder for this account; renewed before it expires */
+  /** the address of the folder; renewed before it expires */
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
-    const get = () => api.deliverableLink(project, path).then(l => {
+    const get = () => host.link().then(l => {
       if (cancelled) return;
-      setLink(prev => prev ?? l);
-      timer = setTimeout(get, Math.max(60000, l.expires - Date.now() - 10 * 60000));
+      setLink(prev => prev ?? { expires: 0, ...l });
+      if (l.expires) timer = setTimeout(get, Math.max(60000, l.expires - Date.now() - 10 * 60000));
     }).catch(e => { if (!cancelled) notify('Could not open the page: ' + (e as Error).message, 'error'); });
     void get();
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [project, path]);
+  }, [host]);
 
   /* ------------------------------------------------------------- versions to the frames */
 
@@ -128,40 +116,25 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
   };
 
   useEffect(() => {
-    const onText = (_e: Y.YTextEvent, tr: Y.Transaction) => { sendSource(tr.origin === LOCAL); codeSync(tr.origin); rerender(); };
-    text.observe(onText);
-    const onStatus = ({ status }: { status: string }) => setOnline(status === 'connected');
-    const onSync = (s: boolean) => { if (s) { setSynced(true); sendSource(true); } };
-    provider.on('status', onStatus);
-    provider.on('sync', onSync);
-    if (provider.synced) onSync(true);
-    void api.readText(project, path).then(r => setReadOnly(r.role === 'view')).catch(() => {});
-    const onAwareness = () => sendPeers();
-    provider.awareness.on('change', onAwareness);
-    const onDisconnect = (e: { code?: number; reason?: string } | CloseEvent) => { if ((e as CloseEvent).code === 4001) notify('This page was removed or renamed on disk.', 'error'); };
-    provider.on('connection-close', onDisconnect as never);
-    return () => {
-      text.unobserve(onText);
-      provider.off('status', onStatus);
-      provider.off('sync', onSync);
-      provider.awareness.off('change', onAwareness);
-      provider.awareness.setLocalState(null);
-      provider.destroy();
-      ydoc.destroy();
-    };
-  }, [conn]);
+    const offs = [
+      host.onChange(origin => { sendSource(origin === 'canvas'); codeSync(origin); rerender(); }),
+      host.onStatus(() => setOnline(host.online())),
+      host.onReady(() => { setSynced(true); sendSource(true); }),
+      host.onPeers(peers => toCanvas({ ol: 'peers', peers })),
+      host.onAsset((p, v) => { toCanvas({ ol: 'asset', path: p, v }); toRail({ ol: 'asset', path: p, v }); }),
+    ];
+    if (host.ready()) { setSynced(true); sendSource(true); }
+    const ro = setInterval(() => { if (host.readOnly() !== readOnlyRef.current) setReadOnly(host.readOnly()); }, 1000);
+    setReadOnly(host.readOnly());
+    return () => { for (const off of offs) off(); clearInterval(ro); };
+  }, [host]);
 
   /* ------------------------------------------------------------- changes of the text */
 
-  /** splices into the Y.Text, as one undo step */
-  const applySplices = (splices: { from: number; to: number; insert: string }[], origin = LOCAL) => {
+  /** splices of the text, as one undo step */
+  const applySplices = (splices: { from: number; to: number; insert: string }[], origin: 'canvas' | 'code' = 'canvas') => {
     if (readOnlyRef.current || !splices.length) return;
-    ydoc.transact(() => {
-      for (const s of [...splices].sort((a, b) => b.from - a.from || b.to - a.to)) {
-        if (s.to > s.from) text.delete(s.from, s.to - s.from);
-        if (s.insert) text.insert(s.from, s.insert);
-      }
-    }, origin);
+    host.apply(splices, origin);
   };
 
   /** operations on the current text (from this side: the toolbar, the rail's menu) */
@@ -213,11 +186,11 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
             if (m.width) setPageW(m.width);
             toCanvas({ ol: 'scale', scale });
             toCanvas({ ol: 'tool', tool });
-            if (synced || provider.synced) toCanvas({ ol: 'source', version: version.current, html: versions.current.get(version.current) ?? text.toString() });
+            if (host.ready()) toCanvas({ ol: 'source', version: version.current, html: versions.current.get(version.current) ?? text.toString() });
           } else {
             railReady.current = true;
             toRail({ ol: 'scale', scale: railScale });
-            if (synced || provider.synced) toRail({ ol: 'source', version: version.current, html: text.toString() });
+            if (host.ready()) toRail({ ol: 'source', version: version.current, html: text.toString() });
             toRail({ ol: 'current', slide: currentRef.current });
           }
           break;
@@ -233,7 +206,7 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
             }
           }
           break;
-        case 'selection': if (fromCanvas) { setSel(m.items); sendAwareness(m.items.map(i => i.path)); } break;
+        case 'selection': if (fromCanvas) { setSel(m.items); host.setSelection(m.items.map(i => i.path)); } break;
         case 'editing': if (fromCanvas) setEditingText(m.path); break;
         case 'visible': if (fromCanvas && m.slide >= 0) { setCurrent(m.slide); toRail({ ol: 'current', slide: m.slide }); } break;
         case 'goto': setCurrent(m.slide); toCanvas({ ol: 'scrollTo', slide: m.slide, smooth: false }); toRail({ ol: 'current', slide: m.slide }); break;
@@ -275,14 +248,6 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
     return () => { removeEventListener('message', onMessage); removeEventListener('blur', onBlur); };
   });
 
-  /* ------------------------------------------------------------- files of the page changed on disk */
-
-  useEffect(() => subscribeProjectEvents(project, ev => {
-    if (ev.kind !== 'graphics') return;
-    toCanvas({ ol: 'asset', path: ev.path, v: ev.v });
-    toRail({ ol: 'asset', path: ev.path, v: ev.v });
-  }), [project]);
-
   /* ------------------------------------------------------------- sizes */
 
   useEffect(() => {
@@ -299,19 +264,6 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
   useEffect(() => { toCanvas({ ol: 'scale', scale }); }, [scale]);
   useEffect(() => { toRail({ ol: 'scale', scale: railScale }); }, [railScale]);
   useEffect(() => { toCanvas({ ol: 'tool', tool }); }, [tool]);
-
-  /* ------------------------------------------------------------- presence */
-
-  const sendAwareness = (paths: Path[]) => { try { provider.awareness.setLocalStateField('htmlSel', { paths, v: version.current }); } catch { /* closing */ } };
-  const sendPeers = () => {
-    const peers: { paths: Path[]; color: string; name: string }[] = [];
-    provider.awareness.getStates().forEach((st, client) => {
-      if (client === ydoc.clientID) return;
-      const s = st as { user?: { name?: string; color?: string }; htmlSel?: { paths?: Path[] } };
-      if (s.htmlSel?.paths?.length) peers.push({ paths: s.htmlSel.paths, color: s.user?.color ?? '#888', name: s.user?.name ?? '' });
-    });
-    toCanvas({ ol: 'peers', peers });
-  };
 
   /* ------------------------------------------------------------- tools and objects */
 
@@ -349,7 +301,7 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
       let name = `${base}.${ext}`, rel = '';
       for (let i = 1; i < 50; i++) {
         rel = (dir ? dir + '/' : '') + 'images/' + name;
-        try { await api.upload(project, rel, f.data instanceof Blob ? f.data : new Blob([f.data], { type: f.type }), { overwrite: false }); break; }
+        try { await host.upload(rel, f.data instanceof Blob ? f.data : new Blob([f.data], { type: f.type })); break; }
         catch { name = `${base}-${i}.${ext}`; rel = ''; }
       }
       if (!rel) continue;
@@ -486,15 +438,16 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
   const onRuntimeKey = (m: Extract<FromRuntime, { ol: 'key' }>) => {
     const mod = m.ctrl || m.meta;
     const k = m.key.toLowerCase();
-    if (mod && k === 'z') { if (m.shift) undo.redo(); else undo.undo(); return; }
-    if (mod && k === 'y') { undo.redo(); return; }
-    if (mod && k === 's') { notify('Saved automatically.'); return; }
+    if (mod && k === 'z') { if (m.shift) host.redo(); else host.undo(); return; }
+    if (mod && k === 'y') { host.redo(); return; }
+    if (mod && k === 's') { if (host.save) host.save(); else notify('Saved automatically.'); return; }
     if (m.key === 'F5' || (mod && m.key === 'Enter')) { startPresenting(); return; }
     if (m.key === 'Escape') { setToolState('select'); return; }
     if (!mod && !m.alt) {
       const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', v: 'select' };
-      if (map[k]) setToolState(map[k]);
+      if (map[k]) { setToolState(map[k]); return; }
     }
+    host.key?.(m);
   };
 
   useEffect(() => {
@@ -502,8 +455,8 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
       if (!canvasBox.current?.closest('.dl-editor')?.contains(document.activeElement) && document.activeElement !== document.body) return;
       if ((e.target as HTMLElement)?.closest?.('textarea, input')) return;
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) undo.redo(); else undo.undo(); }
-      else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); undo.redo(); }
+      if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) host.redo(); else host.undo(); }
+      else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); host.redo(); }
       else if (e.key === 'F5') { e.preventDefault(); startPresenting(); }
     };
     addEventListener('keydown', onKey);
@@ -514,6 +467,7 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
 
   const presentBox = useRef<HTMLDivElement>(null);
   const startPresenting = () => {
+    if (link && host.present?.(src('present') + `#${currentRef.current + 1}`)) return;
     setPresenting(true);
     setTimeout(() => {
       void presentBox.current?.requestFullscreen?.().catch(() => undefined);
@@ -557,15 +511,10 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
     while (p < max && old[p] === v[p]) p++;
     let s = 0;
     while (s < max - p && old[old.length - 1 - s] === v[v.length - 1 - s]) s++;
-    ydoc.transact(() => {
-      if (old.length - s > p) text.delete(p, old.length - s - p);
-      if (v.length - s > p) text.insert(p, v.slice(p, v.length - s));
-    }, 'code');
+    applySplices([{ from: p, to: old.length - s, insert: v.slice(p, v.length - s) }], 'code');
     sendSource();
   };
   useEffect(() => { if (codeOpen && codeRef.current) codeRef.current.value = text.toString(); }, [codeOpen]);
-  // the code view's own edits are undone with the rest
-  useEffect(() => { undo.addTrackedOrigin('code'); }, [undo]);
 
   /* ------------------------------------------------------------- notes */
 
@@ -627,12 +576,7 @@ export function DeliverableEditor({ id, user, notify }: { id: string; user: User
         {kind !== 'page' && <button class="dl-btn dl-present" title="Present (F5)" data-dl-present onClick={startPresenting}>▶ Present</button>}
         <button class="dl-btn" title="Download" data-dl-download onClick={e => {
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-          const q = `?path=${encodeURIComponent(path)}&download=1`;
-          showContextMenu(r.left, r.bottom + 4, [
-            { label: 'PDF', action: () => window.open(`/api/projects/${encodeURIComponent(project)}/deliverable-pdf${q}`, '_blank') },
-            { label: 'Web page (.zip, works offline)', action: () => window.open(`/api/projects/${encodeURIComponent(project)}/deliverable-zip${q}`, '_blank') },
-            { label: 'Open in a new tab', action: () => window.open(src(kind === 'deck' ? 'present' : 'view'), '_blank', 'noopener') },
-          ]);
+          showContextMenu(r.left, r.bottom + 4, host.downloads(m => src(m === 'view' && kind === 'deck' ? 'present' : m)));
         }}>⤓ Download</button>
         <span class={'dl-status' + (online ? '' : ' off')}>{!synced ? 'Loading…' : !online ? 'Offline' : readOnly ? 'View only' : ''}</span>
       </div>

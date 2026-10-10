@@ -251,7 +251,11 @@ function init(): void {
   }
   void settle().then(() => {
     slideBoxes();   // (numbers the slides for the renderer's screenshots)
-    if (MODE === 'print') printCss();
+    if (MODE === 'print') {
+      printCss();
+      // opened to be printed (the VS Code extension's "Print or save as PDF"): the browser's print dialog
+      if (location.hash === '#print') setTimeout(() => print(), 300);
+    }
     window.__olReady = true;
     if (MODE === 'edit' || MODE === 'thumb') { sendLayout(); if (MODE === 'edit') edit.visibleSlide(); }
   });

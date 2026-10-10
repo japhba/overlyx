@@ -35,6 +35,19 @@
           }
         ],
         "priority": "option"
+      },
+      {
+        "viewType": "overlyx.htmlEditor",
+        "displayName": "OverLyX Slides, Poster or Web Page",
+        "selector": [
+          {
+            "filenamePattern": "*.html"
+          },
+          {
+            "filenamePattern": "*.htm"
+          }
+        ],
+        "priority": "option"
       }
     ],
     "commands": [
@@ -51,6 +64,19 @@
         "shortTitle": "Poster",
         "category": "OverLyX",
         "icon": "$(layout)"
+      },
+      {
+        "command": "overlyx.newWebPage",
+        "title": "New Web Page…",
+        "shortTitle": "Web Page",
+        "category": "OverLyX",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "overlyx.openDeliverable",
+        "title": "Open in OverLyX (slides, poster or web page)",
+        "category": "OverLyX",
+        "icon": "$(preview)"
       },
       {
         "command": "overlyx.newDocument",
@@ -156,12 +182,18 @@
       "file/newFile": [
         { "command": "overlyx.newSlides", "group": "file" },
         { "command": "overlyx.newPoster", "group": "file" },
+        { "command": "overlyx.newWebPage", "group": "file" },
         { "command": "overlyx.newDocument", "group": "file" }
       ],
       "editor/title": [
         {
           "command": "overlyx.openInOverlyx",
           "when": "resourceExtname =~ /^\\.(tex|md|markdown)$/ && activeCustomEditorId != overlyx.texEditor",
+          "group": "navigation"
+        },
+        {
+          "command": "overlyx.openDeliverable",
+          "when": "resourceExtname =~ /^\\.html?$/ && activeCustomEditorId != overlyx.htmlEditor",
           "group": "navigation"
         },
         {
@@ -192,6 +224,28 @@
       ]
     },
     "keybindings": [
+      {
+        "command": "overlyx.editorKey",
+        "key": "f5",
+        "when": "activeCustomEditorId == overlyx.htmlEditor && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "overlyx.editorKey",
+        "key": "shift+f5",
+        "when": "activeCustomEditorId == overlyx.htmlEditor && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "overlyx.editorKey",
+        "key": "ctrl+b",
+        "mac": "cmd+b",
+        "when": "activeCustomEditorId == overlyx.htmlEditor && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "overlyx.editorKey",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
+        "when": "activeCustomEditorId == overlyx.htmlEditor && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
       {
         "command": "overlyx.buildPdf",
         "key": "ctrl+r",
@@ -277,7 +331,7 @@
     "test:live": "node --import tsx test/liveTest.mts",
     "package:live": "node scripts/package-live.mjs",
     "dev": "concurrently -n host,webview -c blue,green \"node esbuild.mjs --watch\" \"vite build --watch --config webview.vite.config.ts\"",
-    "build": "node esbuild.mjs && vite build --config webview.vite.config.ts && node scripts/copy-assets.mjs",
+    "build": "node esbuild.mjs && vite build --config webview.vite.config.ts && node scripts/copy-assets.mjs && node scripts/build-runtime.mjs",
     "build:host": "node esbuild.mjs",
     "build:webview": "vite build --config webview.vite.config.ts",
     "package": "vsce package --no-dependencies",

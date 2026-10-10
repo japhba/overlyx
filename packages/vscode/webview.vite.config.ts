@@ -37,6 +37,7 @@ export default defineConfig({
       input: {
         editor: path.resolve(__dirname, 'src/webview/editor.html'),
         pdf: path.resolve(__dirname, 'src/webview/pdf.html'),
+        deliverable: path.resolve(__dirname, 'src/webview/deliverable.html'),
       },
     },
   },
