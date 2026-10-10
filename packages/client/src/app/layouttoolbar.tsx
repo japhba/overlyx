@@ -419,7 +419,8 @@ export function layoutToolbar(ctx: ToolbarContext): ToolButton[][] {
   // the fields are there with nothing selected too (empty, disabled): the row keeps its width
   const geom: ToolButton[] = [{ id: 'ol-geom', icon: '', title: 'Position and size (mm)', widget: () => <GeomFields view={view} objs={objs} /> }];
   void hasAttr;
-  return [tools, arrange, style, anim, geom, pages];
+  // contextual, like Google Slides': what works on objects only while objects are selected (or a box is being typed in)
+  return targets.length ? [tools, arrange, style, anim, geom, pages] : [tools, pages];
 }
 
 /** A project path as the document references it (relative to the document's folder). */

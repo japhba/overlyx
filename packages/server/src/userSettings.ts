@@ -19,17 +19,21 @@
  * paragraphs by vertical space instead of indenting their first lines — Document ▸ Settings ▸
  * Paragraph separation, written into the new file (texdoc.ts NO_INDENT_SETTINGS). Off by default
  * (LaTeX's indentation); each user switches it in Settings ▸ Account.
+ *
+ * `interface`: how the web app looks for this account — 'classic' (LyX's toolbars) or 'modern' (a
+ * Google Docs-like interface whose tools appear as needed), chosen in the welcome card of a new
+ * account or in Settings ▸ Interface; null until chosen (the app shows Classic then).
  */
 import { db } from './db.ts';
 import { config } from './config.ts';
 import { projectOfDoc } from '@overlyx/core';
 
-export interface UserSettings { allowRecopyTokens: boolean; fineGrainedAccess: boolean; paragraphSkip: boolean }
+export interface UserSettings { allowRecopyTokens: boolean; fineGrainedAccess: boolean; paragraphSkip: boolean; interface: 'classic' | 'modern' | null }
 
 export function userSettings(userId: number): UserSettings {
   const row = db.prepare('SELECT email, settings FROM users WHERE id = ?').get(userId) as { email: string | null; settings: string | null } | undefined;
   const isOwner = !!(config.ownerEmail && row?.email && row.email.toLowerCase() === config.ownerEmail);
-  const defaults: UserSettings = { allowRecopyTokens: isOwner, fineGrainedAccess: false, paragraphSkip: false };
+  const defaults: UserSettings = { allowRecopyTokens: isOwner, fineGrainedAccess: false, paragraphSkip: false, interface: null };
   if (!row?.settings) return defaults;
   try {
     const stored = JSON.parse(row.settings);
@@ -45,6 +49,7 @@ export function setUserSettings(userId: number, patch: Partial<UserSettings>): U
   if (typeof patch.allowRecopyTokens === 'boolean') stored.allowRecopyTokens = patch.allowRecopyTokens;
   if (typeof patch.fineGrainedAccess === 'boolean') stored.fineGrainedAccess = patch.fineGrainedAccess;
   if (typeof patch.paragraphSkip === 'boolean') stored.paragraphSkip = patch.paragraphSkip;
+  if (patch.interface === 'classic' || patch.interface === 'modern') stored.interface = patch.interface;
   db.prepare('UPDATE users SET settings = ? WHERE id = ?').run(JSON.stringify(stored), userId);
   return userSettings(userId);
 }

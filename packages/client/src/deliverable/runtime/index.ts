@@ -18,6 +18,8 @@ import { MODE, post, state, detectKind, slideBoxes, pageSize, sendLayout, slides
 import { startMath } from './math';
 import { applySource } from './reconcile';
 import * as edit from './edit';
+import { arrange, paint } from './arrange';
+import { setView, refreshView, reportColors } from './view';
 import { startPresenting } from './present';
 import { report } from './report';
 
@@ -175,19 +177,26 @@ function onMessage(e: MessageEvent): void {
       state.kind = detectKind();
       if (MODE === 'edit') edit.afterSource();
       if (MODE === 'thumb') drawRail();
-      if (first) void settle().then(() => sendLayout());
-      else requestAnimationFrame(() => { sendLayout(); if (MODE === 'thumb') drawRail(); });
+      if (first) void settle().then(() => { sendLayout(); if (MODE === 'edit') { refreshView(); reportColors(); } });
+      else requestAnimationFrame(() => { sendLayout(); if (MODE === 'thumb') drawRail(); if (MODE === 'edit') { refreshView(); reportColors(); } });
       break;
     }
     case 'select': if (MODE === 'edit') edit.selectPaths(m.paths as Path[]); break;
     case 'editText': if (MODE === 'edit') edit.editTextAt(m.path, m.selectAll); break;
     case 'scrollTo': if (MODE === 'edit') edit.scrollToSlide(m.slide, m.smooth); else if (MODE === 'thumb') railShow(m.slide); break;
-    case 'scale': if (MODE === 'edit') edit.setScale(m.scale); else { railScale = m.scale; drawRail(); } break;
+    case 'scale': if (MODE === 'edit') edit.setScale(m.scale, m.anchor); else { railScale = m.scale; drawRail(); } break;
     case 'tool': if (MODE === 'edit') edit.setTool(m.tool); break;
     case 'exec': if (MODE === 'edit') edit.exec(m.command, m.value); break;
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); break;
     case 'current': if (MODE === 'thumb') railShow(m.slide); break;
     case 'asset': refreshAsset(m.path, m.v); break;
+    case 'arrange': if (MODE === 'edit') arrange(m.how); break;
+    case 'paint': if (MODE === 'edit') paint(m.paint); break;
+    case 'view': if (MODE === 'edit') setView(m.view); break;
+    case 'crop': if (MODE === 'edit') edit.cropAt(m.path, { aspect: m.aspect, shape: m.shape }); break;
+    case 'cropPreset': if (MODE === 'edit') edit.cropPreset(m.path, m); break;
+    case 'cropAspect': if (MODE === 'edit') edit.setCropAspect(m.aspect, m.shape); break;
+    case 'endCrop': if (MODE === 'edit') edit.endCrop(m.commit); break;
   }
 }
 
@@ -258,7 +267,7 @@ function init(): void {
       if (location.hash === '#print') setTimeout(() => print(), 300);
     }
     window.__olReady = true;
-    if (MODE === 'edit' || MODE === 'thumb') { sendLayout(); if (MODE === 'edit') edit.visibleSlide(); }
+    if (MODE === 'edit' || MODE === 'thumb') { sendLayout(); if (MODE === 'edit') { edit.visibleSlide(); refreshView(); reportColors(); } }
   });
   void isForeign;
 }

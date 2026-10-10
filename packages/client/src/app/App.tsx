@@ -25,6 +25,7 @@ import { GuestCallout } from './Guest';
 import { GitDialog } from './Git';
 import { MenuBar, openPalette, PALETTE_LABEL, PALETTE_DEFAULT, type MenuDef } from './MenuBar';
 import { setThemePref, useTheme } from './theme';
+import { useUiMode, setUiMode, adoptAccountUi } from './uimode';
 import { usePresentation } from './presentation';
 import { Toolbar, NAMED_COLORS, type ToolButton } from './Toolbar';
 import { buildToolbars, loadToolbarPrefs, mathExecutor, useMathPanels, toolbarClipboard, markValue, type ToolbarId, type ToolbarMode, type ToolbarPrefs } from './toolbars';
@@ -38,7 +39,7 @@ import { AgentPanel, askAgentAbout } from './AgentPanel';
 import { PdfPanel, stateFromBuild, jobActive, EMPTY_PDF, type PdfState } from './PdfPanel';
 import { Ruler, NOTE_SCALE_DEFAULT, NOTE_SCALE_MIN, NOTE_SCALE_MAX } from './Ruler';
 import { useNotesPane, NotesSash } from './notespane';
-import { StatusBar, type Status } from './StatusBar';
+import { StatusBar, SaveIndicator, ZoomControl, type Status } from './StatusBar';
 import { SourcePane, type SourceTarget, cursorLine, docBlocks, blockPos } from './SourcePane';
 import { activeMathField, mathFocusListeners, mathCursorListeners, type LyxMathField } from '../editor/lyxmath/field';
 import { Tour, tourWanted, rememberTour, type TourEnd } from './Tour';
@@ -419,6 +420,9 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const metaApplied = useRef(false);
   // LyX toolbars: standard / extra always (unless hidden), math / table / review on, off or automatic (LyX's "auto")
   const { pref: themePref } = useTheme();
+  const ui = useUiMode();
+  // the account's interface (chosen in another browser) once its settings arrive
+  useEffect(() => { if (!user.guest) api.settings().then(r => adoptAccountUi(r.settings.interface)).catch(() => undefined); }, [user.username]);
   usePresentation();   // View ▸ Presentation mode: Shift+F11 toggles, Esc leaves
   // per-browser preferences (spell checking, AI assistance) and whether the server can answer AI requests
   const [prefs, setPrefsState] = useState<Prefs>(getPrefs);
@@ -1179,6 +1183,10 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { sep: true },
       ],
       themeItems: [
+      { label: 'Interface ▸', sub: [
+        { label: 'Classic — LyX’s toolbars and menus', checked: ui === 'classic', action: () => setUiMode('classic') },
+        { label: 'Modern — like Google Docs, tools appear as needed', checked: ui === 'modern', action: () => setUiMode('modern') },
+      ] },
       { label: 'Theme ▸', sub: [
         { label: 'Default (follows the system)', checked: themePref === 'system', action: () => setThemePref('system') },
         { label: 'Light', checked: themePref === 'light', action: () => setThemePref('light') },
@@ -1369,7 +1377,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         return <CiteDialog meta={meta} docId={docId} project={viewOnly ? undefined : project} onClose={close} onAdded={onBibAdded} onInsert={(keys, cmd, b, a, entries) => { rememberBib(entries); run(C.insertCite(keys, cmd, b, a)); }} />;
       }
       case 'href': return <HrefDialog onClose={close} onInsert={(t, n) => run(C.insertHref(t, n))} />;
-      case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); })} />;
+      case 'settings': return <SettingsDialog docId={docId} meta={meta} headerLines={headerLines} tab={typeof dialog.arg === 'string' ? dialog.arg : undefined} onClose={close} onSaved={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; if (masterView) refreshMacros(masterView, m.macros); })} />;
       case 'macros': return <MacrosDialog meta={meta} onClose={close} />;
       case 'airepair': return docId ? <AiRepairDialog docId={docId} onClose={close} onApplied={() => api.meta(docId).then(m => { setMeta(m); editorContext.meta = m; })} /> : null;
       case 'stats': return view ? <StatsDialog view={view} onClose={close} /> : null;
@@ -1433,24 +1441,42 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? projectShortName(shareProject)}”: invite people or turn on a link` : undefined}
         onSignIn={user.guest ? signIn : undefined}
         primary={isLyxDoc && <PaneSwitch layout={panes} onChange={changePanes} narrow={narrowPanes} markdown={isMarkdownDoc(docId)} />}
-        right={docId && <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span>} />
+        right={docId && <span class="doc-title" title={docId}>{docLabel}{meta?.master && !combined && <> · child of <a href={'#/' + meta.master} onClick={e => { e.preventDefault(); openInTab(meta.master!); }}>{meta.master.split('/').pop()}</a></>}</span>}
+        title={docId && ui === 'modern' ? (
+          <>
+            <span class="mt-name" title={docId}>{docPathOf(docId.replace(/^(text|pdf):/, '')).split('/').pop()}</span>
+            <span class="mt-project">{curProject?.title ?? projectShortName(projectOfDoc(docId.replace(/^(text|pdf):/, '')))}</span>
+            {isLyxDoc && <SaveIndicator save={save} />}
+          </>
+        ) : undefined} />
       {user.guest && <GuestCallout user={user} project={curProject} google={google} onSignIn={signIn} />}
+      {/* the Modern interface: one rounded row (toolbars.tsx `modern`), the mode switch at its end, as in Google Docs */}
+      {isLyxDoc && ui === 'modern' && (
+        <div class="tb-modern-row">
+          <Toolbar id="modern" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} layoutsAt={2} groups={tb.modern} />
+          <span class="tb-modern-end">
+            <ZoomControl zoom={zoom} onZoom={setZoom} />
+            <button type="button" class="tb-pdf-btn" title="Build and show the PDF (Ctrl+R)" onClick={() => { void build(); }}>PDF</button>
+            {modeSwitch}
+          </span>
+        </div>
+      )}
       {/* the mode switch (Editing · Suggesting · Viewing) ends the first toolbar row, as in Google Docs */}
-      {isLyxDoc && (modeRow === 'standard' || modeRow === 'own') && (
+      {isLyxDoc && ui !== 'modern' && (modeRow === 'standard' || modeRow === 'own') && (
         <div class="tb-toprow">
           {modeRow === 'standard' && <Toolbar id="standard" layouts={layouts} layout={layout} onLayout={n => run(C.setLayout(n))} groups={tb.standard} />}
           {modeSwitch}
         </div>
       )}
       {/* LyX's default.ui puts View/Update and Extra on one row ("samerow") */}
-      {isLyxDoc && (tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
+      {isLyxDoc && ui !== 'modern' && (tbMode('viewupdate') !== 'off' || tbMode('extra') !== 'off') && (
         <div class="tb-samerow">
           {tbMode('viewupdate') !== 'off' && <Toolbar id="viewupdate" groups={tb.viewUpdate} />}
           {tbMode('extra') !== 'off' && <Toolbar id="extra" groups={tb.extra} />}
           {modeRow === 'samerow' && modeSwitch}
         </div>
       )}
-      {isLyxDoc && tbMode('vcs') === 'on' && <Toolbar id="vcs" label="Version Control" groups={vcsGroups} />}
+      {isLyxDoc && ui !== 'modern' && tbMode('vcs') === 'on' && <Toolbar id="vcs" label="Version Control" groups={vcsGroups} />}
       {isLyxDoc && tb.showLayout && <Toolbar id="layout" label="Layout" groups={tb.layout} />}
       {/* the contextual math / table / review rows are docked at the bottom (before the StatusBar below) */}
       {docId && meta && meta.health.length > 0 && (

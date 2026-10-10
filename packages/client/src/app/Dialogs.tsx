@@ -380,7 +380,7 @@ export function HrefDialog({ initial, onInsert, onClose }: { initial?: { target:
 
 /* ------------------------------------------------------------- settings */
 const CLASSES = ['article', 'report', 'book', 'scrartcl', 'scrreprt', 'scrbook', 'amsart', 'amsbook', 'revtex4-2', 'revtex4-1', 'IEEEtran', 'elsarticle', 'llncs', 'beamer', 'letter', 'memoir', 'extarticle', 'acmart'];
-export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose }: { docId: string; meta: DocMeta | null; headerLines: string[]; onSaved: () => void; onClose: () => void }) {
+export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose, tab: tab0 }: { docId: string; meta: DocMeta | null; headerLines: string[]; onSaved: () => void; onClose: () => void; tab?: string }) {
   const get = (k: string) => headerLines.find(l => l.startsWith('\\' + k + ' '))?.slice(k.length + 2) ?? '';
   const preStart = headerLines.indexOf('\\begin_preamble'), preEnd = headerLines.indexOf('\\end_preamble');
   // a single map of header values edited by the tabs; only keys that changed are written back
@@ -416,7 +416,7 @@ export function SettingsDialog({ docId, meta, headerLines, onSaved, onClose }: {
   const [raw, setRaw] = useState(false);
   const [rawText, setRawText] = useState(headerLines.join('\n'));
   type Tab = 'general' | 'page' | 'text' | 'numbering' | 'fonts' | 'branches' | 'pdf' | 'preamble' | 'raw';
-  const [tab, setTab] = useState<Tab>('general');
+  const [tab, setTab] = useState<Tab>(() => (['general', 'page', 'text', 'numbering', 'fonts', 'branches', 'pdf', 'preamble', 'raw'].includes(tab0 ?? '') ? tab0 as Tab : 'general'));
   const save = async () => {
     if (tab === 'raw' || raw) { await api.setHeader(docId, { headerLines: rawText.split('\n') }); onSaved(); onClose(); return; }
     const lines = [...headerLines];

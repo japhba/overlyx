@@ -284,7 +284,9 @@ export type HtmlOp =
   | { t: 'remove'; paths: Path[] }
   | { t: 'insert'; parent: Path; index: number; html: string }
   | { t: 'move'; path: Path; parent: Path; index: number }
-  | { t: 'duplicate'; paths: Path[] };
+  | { t: 'duplicate'; paths: Path[] }
+  /** the element children of `parent` in a new order (`order[k]`: the index of the child that comes k-th); the text between them stays put */
+  | { t: 'reorder'; parent: Path; order: number[] };
 
 /** apply non-overlapping splices (in `text`'s coordinates) */
 export function applySplices(text: string, splices: readonly Splice[]): string {
@@ -315,6 +317,15 @@ export function opSplices(src: SourceDoc, op: HtmlOp): Splice[] {
       return kept.map(e => removeSplice(text, e));
     }
     case 'insert': return [insertSplice(text, need(doc, op.parent, false), op.index, op.html)];
+    case 'reorder': {
+      const kids = elementChildren(need(doc, op.parent, false)).filter(k => k.sourceCodeLocation);
+      if (op.order.length !== kids.length || new Set(op.order).size !== kids.length || op.order.some(i => !(i >= 0 && i < kids.length))) throw new Error('the children changed');
+      if (op.order.every((i, k) => i === k)) return [];
+      const from = kids[0].sourceCodeLocation!.startOffset, to = kids[kids.length - 1].sourceCodeLocation!.endOffset;
+      const parts = kids.map(k => text.slice(k.sourceCodeLocation!.startOffset, k.sourceCodeLocation!.endOffset));
+      const gaps = kids.slice(1).map((k, i) => text.slice(kids[i].sourceCodeLocation!.endOffset, k.sourceCodeLocation!.startOffset));
+      return [{ from, to, insert: op.order.map((i, k) => (k ? gaps[k - 1] : '') + parts[i]).join('') }];
+    }
     case 'duplicate': {
       const els = op.paths.map(p => need(doc, p));
       return els.filter(e => !els.some(o => o !== e && contains(o, e))).map(e => duplicateSplice(text, e));
@@ -410,7 +421,7 @@ export function rebasePath(oldText: string, newText: string, path: Path): Path |
 export function opPaths(op: HtmlOp): Path[] {
   switch (op.t) {
     case 'remove': case 'duplicate': return op.paths;
-    case 'insert': return [op.parent];
+    case 'insert': case 'reorder': return [op.parent];
     case 'move': return [op.path, op.parent];
     default: return [op.path];
   }
@@ -422,7 +433,7 @@ export function rebaseOp(oldText: string, newText: string, op: HtmlOp): HtmlOp |
   const map = (p: Path) => rebasePath(oldText, newText, p);
   switch (op.t) {
     case 'remove': case 'duplicate': { const ps = op.paths.map(map); return ps.every(Boolean) ? { ...op, paths: ps as Path[] } : null; }
-    case 'insert': { const p = map(op.parent); return p ? { ...op, parent: p } : null; }
+    case 'insert': case 'reorder': { const p = map(op.parent); return p ? { ...op, parent: p } : null; }
     case 'move': { const a = map(op.path), b = map(op.parent); return a && b ? { ...op, path: a, parent: b } : null; }
     default: { const p = map(op.path); return p ? { ...op, path: p } : null; }
   }

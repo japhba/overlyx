@@ -546,15 +546,19 @@ api.delete('/git/tokens/:id', (req, res) => {
 
 /** The signed-in account's server-side settings (userSettings.ts) — the Settings panel. */
 api.get('/settings', (req, res) => { res.json({ settings: userSettings(req.user!.id) }); });
-/** The settings a user switches for themselves (fineGrainedAccess, paragraphSkip); token re-copy stays an administrator's. */
+/** The settings a user switches for themselves (fineGrainedAccess, paragraphSkip, interface); token re-copy stays an administrator's. */
 api.post('/settings', (req, res) => {
   if (req.user!.guest) { res.status(403).json({ error: 'sign in first' }); return; }
-  const patch: { fineGrainedAccess?: boolean; paragraphSkip?: boolean } = {};
+  const patch: { fineGrainedAccess?: boolean; paragraphSkip?: boolean; interface?: 'classic' | 'modern' } = {};
   for (const key of ['fineGrainedAccess', 'paragraphSkip'] as const) {
     const v = req.body?.[key];
     if (v === undefined) continue;
     if (typeof v !== 'boolean') { res.status(400).json({ error: `${key} must be a boolean` }); return; }
     patch[key] = v;
+  }
+  if (req.body?.interface !== undefined) {
+    if (req.body.interface !== 'classic' && req.body.interface !== 'modern') { res.status(400).json({ error: 'interface must be classic or modern' }); return; }
+    patch.interface = req.body.interface;
   }
   if (!Object.keys(patch).length) { res.status(400).json({ error: 'nothing to change' }); return; }
   res.json({ settings: setUserSettings(req.user!.id, patch) });

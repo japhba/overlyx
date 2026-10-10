@@ -46,7 +46,8 @@ describe('the editor changes the text', () => {
     const out = applyOp(DECK, { t: 'insert', parent: place.parent, index: place.index, html: objectHtml('rect', { x: 10, y: 20, w: 100, h: 50 }, 'deck') });
     const el = elementAt(parseSource(out).doc, place.path)!;
     expect(el.tagName).toBe('div');
-    expect(out).toMatch(/<div style="position: absolute; left: 10px; top: 20px; width: 100px; height: 50px; background: #2f6fde; border-radius: 8px"><\/div>\n  <aside class="notes">/);
+    // a shape centres the text typed into it (Google Slides')
+    expect(out).toMatch(/<div style="position: absolute; left: 10px; top: 20px; width: 100px; height: 50px; display: flex; align-items: center; justify-content: center; text-align: center; color: #fff; background: #2f6fde; border-radius: 8px"><\/div>\n  <aside class="notes">/);
     expect(objectHtml('text', { x: 5, y: 6, w: 0, h: 0 }, 'deck')).toBe('<p style="position: absolute; left: 5px; top: 6px; width: 520px; margin: 0">Text</p>');
     expect(objectHtml('text', { x: 5, y: 6, w: 0, h: 0 }, 'page')).toBe('<p>Text</p>');
   });

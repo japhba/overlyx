@@ -3,6 +3,7 @@
  * contextual Math / Table / Review rows. Buttons are plain, toggles (`active`) or palettes
  * (a popup grid of symbols rendered by MathJax, LyX's "IconPalette" / "PopupMenu").
  */
+import { MODERN_ICONS } from './modernicons';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { createInsetMath, nargs } from '@overlyx/core';
@@ -15,6 +16,11 @@ import { splitTitle, tookActionWithout } from '../shortcuttips';
 
 /** The face of a toolbar button: LyX's own icon file when there is one, else a formula preview, a hand-drawn SVG, or plain text. */
 function btnIcon(b: ToolButton) {
+  // the Modern interface (uimode.ts): Material icons where it has one for the button
+  if (document.documentElement.dataset.ui === 'modern' && !b.html) {
+    const p = MODERN_ICONS[b.id] ?? MODERN_ICONS[b.icon];
+    if (p) return <svg class="tb-mdi" viewBox="0 0 24 24" aria-hidden="true"><path d={p} /></svg>;
+  }
   if (LYX_ICONS[b.icon]) return <img class="tb-img" src={LYX_ICONS[b.icon]} alt="" draggable={false} />;
   if (b.html) return <span dangerouslySetInnerHTML={{ __html: b.html }} />;
   if (ICONS[b.icon]) return <span dangerouslySetInnerHTML={{ __html: ICONS[b.icon] }} />;
@@ -62,6 +68,8 @@ export interface ToolbarProps {
   onLayout?: (name: string) => void;
   /** LyX-style label of a contextual toolbar (shown at the left) */
   label?: string;
+  /** before which group the paragraph layout select goes (0: first, LyX's place; the Modern row: after undo / redo) */
+  layoutsAt?: number;
 }
 
 export const ICONS: Record<string, string> = {
@@ -407,15 +415,18 @@ function PaletteButton({ b }: { b: ToolButton }) {
     document.addEventListener('mousedown', h); document.addEventListener('keydown', k);
     return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
   }, [open]);
-  // keep the popup inside the window
+  // the popup fixed to the window under its button (so a toolbar that scrolls sideways or clips does not cut it off),
+  // kept inside the window, above the button when there is more room there (the contextual rows docked at the bottom)
   useLayoutEffect(() => {
-    const el = popRef.current;
-    if (!open || !el) return;
-    el.style.left = '0'; el.style.right = 'auto';
+    const el = popRef.current, btn = ref.current;
+    if (!open || !el || !btn) return;
+    const b = btn.getBoundingClientRect();
+    Object.assign(el.style, { position: 'fixed', left: `${b.left}px`, top: `${b.bottom + 2}px`, right: 'auto', bottom: 'auto', marginTop: '0', maxHeight: '' });
     const r = el.getBoundingClientRect();
-    if (r.right > window.innerWidth - 8) { el.style.left = 'auto'; el.style.right = '0'; }
-    const r2 = el.getBoundingClientRect();
-    if (r2.left < 4) { el.style.right = 'auto'; el.style.left = `${4 - (ref.current?.getBoundingClientRect().left ?? 0)}px`; }
+    if (r.right > window.innerWidth - 8) el.style.left = `${Math.max(4, window.innerWidth - 8 - r.width)}px`;
+    const below = window.innerHeight - b.bottom - 8, above = b.top - 8;
+    if (r.height > below && above > below) { el.style.top = `${Math.max(4, b.top - 2 - Math.min(r.height, above))}px`; el.style.maxHeight = `${above}px`; }
+    else if (r.height > below) el.style.maxHeight = `${below}px`;
   }, [open]);
   const p = b.palette!;
   const close = () => setOpen(false);
@@ -455,19 +466,21 @@ function PaletteButton({ b }: { b: ToolButton }) {
   );
 }
 
-export function Toolbar({ id, layouts, layout, onLayout, groups, label }: ToolbarProps) {
+export function Toolbar({ id, layouts, layout, onLayout, groups, label, layoutsAt = 0 }: ToolbarProps) {
   const names = layouts ? layouts.map(l => l.name) : [];
   if (layouts && layout && !names.includes(layout)) names.unshift(layout);
+  const select = layouts && (
+    <select value={layout} onChange={e => { const v = (e.target as HTMLSelectElement).value; recordUsage('toolbar', `layout ▸ ${v}`); onLayout?.(v); }} title="Paragraph layout (Alt+P …)">
+      {names.map(n => <option key={n} value={n}>{n}</option>)}
+    </select>
+  );
   return (
     <div class={'toolbar toolbar-' + id} data-toolbar={id} onMouseDown={e => { const t = e.target as HTMLInputElement; if (t.tagName !== 'SELECT' && t.tagName !== 'INPUT') e.preventDefault(); }}>
       {label && <span class="tb-label">{label}</span>}
-      {layouts && (
-        <select value={layout} onChange={e => { const v = (e.target as HTMLSelectElement).value; recordUsage('toolbar', `layout ▸ ${v}`); onLayout?.(v); }} title="Paragraph layout (Alt+P …)">
-          {names.map(n => <option key={n} value={n}>{n}</option>)}
-        </select>
-      )}
+      {layoutsAt === 0 && select}
       {groups.map((g, gi) => (
         <span key={gi} style="display:contents">
+          {gi > 0 && gi === layoutsAt && select && <><span class="tb-sep" />{select}</>}
           {(gi > 0 || layouts || label) && <span class="tb-sep" />}
           {g.map(b => b.widget ? <span key={b.id} class="tb-widget" data-tb={b.id} title={b.title}>{b.widget()}</span> : b.palette ? <PaletteButton key={b.id} b={b} /> : (
             <button key={b.id} type="button" class={'tb-btn' + (b.active ? ' active' : '') + (b.kind === 'math' ? ' math' : '')} title={b.title} disabled={b.disabled} data-tb={b.id} onClick={e => { recordUsage('toolbar', b.id); tipFor(b, e.currentTarget); b.action?.(); }}>{btnIcon(b)}</button>

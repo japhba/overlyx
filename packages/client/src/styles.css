@@ -1,5 +1,6 @@
 @import './fonts/computer-modern/fonts.css';
 @import './fonts/web/webfonts.css';
+@import './modern.css';
 
 /* ------------------------------------------------------------ theme tokens
    Light values first; the dark theme (html[data-theme="dark"], set by app/theme.ts from the View menu,
@@ -177,7 +178,10 @@ button { cursor: pointer; }
 /* ------------------------------------------------------------ layout */
 .app { display: flex; flex-direction: column; height: 100%; position: relative; }
 .menubar { display: flex; flex-shrink: 0; align-items: center; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); padding: 0 6px; height: 32px; user-select: none; }
-.menubar > .menu, .menubar .brand { flex-shrink: 0; }
+.menubar-menus > .menu, .menubar .brand { flex-shrink: 0; }
+/* the menus' wrapper and the title above them are the Modern interface's (modern.css); Classic lays the menus out in the bar as before */
+.menubar-menus { display: contents; }
+.menubar-title { display: none; }
 .menubar-primary { display: flex; flex: 1 0 auto; align-items: center; justify-content: center; padding: 0 12px; }
 .menubar-actions { display: flex; flex: 0 1 auto; align-items: center; min-width: 0; }
 .menubar-actions > :not(.doc-title):not(.users) { flex-shrink: 0; }
@@ -283,6 +287,7 @@ html[data-theme="dark"] .ol-wordmark { --ol-blue: #3d7bff; --ol-cyan: #4fe3ff; -
 .tb-btn:hover { background: var(--ui-hover); border-color: var(--ui-border); }
 .tb-btn.active { background: var(--active-bg); border-color: var(--active-border); }
 .tb-btn svg { width: 16px; height: 16px; fill: currentColor; }
+.tb-btn svg[fill="none"], .tb-pal-sym svg[fill="none"], .dk-ico svg[fill="none"] { fill: none; }
 .tb-btn .tb-img { width: 17px; height: 17px; display: block; }
 html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg); }   /* LyX's icons are drawn dark-on-transparent */
 .tb-btn.math { font-family: var(--editor-font); font-style: italic; }
@@ -2186,9 +2191,6 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .ol-present-end::after { content: 'End of the presentation — click or press a key to leave'; position: absolute; color: #aaa; font: 15px var(--ui-font); }
 .ol-present-counter { position: absolute; right: 14px; bottom: 10px; font: 12px var(--ui-font); color: rgba(255,255,255,0.55); opacity: 0; transition: opacity 0.3s; pointer-events: none; }
 .ol-present-moving .ol-present-counter { opacity: 1; }
-.ol-present-laser { position: fixed; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: radial-gradient(circle, #ff3b30 0 35%, rgba(255,59,48,0.45) 60%, transparent 72%); pointer-events: none; display: none; z-index: 2; }
-.ol-present-laser-on .ol-present-laser { display: block; }
-.ol-present-laser-on, .ol-present-laser-on.ol-present-moving { cursor: none; }
 @keyframes ol-fx-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes ol-fx-fly-left { from { translate: -120vw 0; } to { translate: 0 0; } }
 @keyframes ol-fx-fly-right { from { translate: 120vw 0; } to { translate: 0 0; } }
@@ -2449,4 +2451,61 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .ol-newkind .ol-newthumb { background: #eef3fd; border: 1px solid var(--accent-border); border-radius: 3px; }
 .ol-newkind small { color: var(--ui-muted); font-size: 11px; text-align: center; }
 html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
+/* the deck toolbar (deliverable/decktoolbar.tsx): the toolbars' own component in the deck's row — tools at the left,
+   what fits the selection in the middle (scrolls sideways when the window is narrow; its palettes are fixed to the window),
+   view and output at the right; one row always, so the canvas never jumps when the selection changes */
+.dl-toolbar { flex-wrap: nowrap; gap: 4px; }
+.dl-toolbar .toolbar { border: 0; padding: 0; background: none; flex-wrap: nowrap; flex: none; }
+.dl-ctx { flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; display: flex; align-items: center; }
+.dl-ctx::-webkit-scrollbar { display: none; }
+.dl-ctx .toolbar { width: max-content; }
+.dl-ctx .toolbar > span:first-child > .tb-sep:first-child { display: none; }
+.dl-ctx:not(:empty)::before { content: ''; flex: none; width: 1px; height: 20px; background: var(--ui-border); margin: 0 4px 0 0; }
+.dl-zoomgroup { display: inline-flex; align-items: center; flex: none; }
+.dl-toolbar > .dl-btn, .dl-toolbar > .dl-status { flex: none; }
+@media (max-width: 900px) { .dl-title { display: none; } }
+.toolbar-deck-tools .tb-popup.list .tb-popup-grid, .toolbar-deck-context .tb-popup.list .tb-popup-grid { grid-template-columns: minmax(190px, max-content); }
+.toolbar-deck-context .tb-popup.list .tb-pal-sym { min-width: 40px; }
+.dk-font-face { font-size: 12px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; min-width: 64px; text-align: left; }
+.dk-font-sample { font-size: 15px; }
+.dk-ico svg { width: 16px; height: 16px; vertical-align: middle; }
+.dk-size { display: inline-flex; align-items: center; border: 1px solid var(--ui-border); border-radius: 4px; height: 24px; background: var(--surface); }
+.dk-size .tb-btn { height: 22px; min-width: 20px; padding: 0 4px; border: 0; border-radius: 3px; }
+.dk-size input { width: 34px; height: 20px; border: 0; padding: 0; text-align: center; font: inherit; font-size: 12px; background: none; color: var(--ui-fg); outline: none; }
+.dk-size input:focus { box-shadow: inset 0 0 0 1.5px var(--accent); border-radius: 3px; }
+.dk-slider { display: flex; align-items: center; gap: 8px; padding: 6px 8px; min-width: 200px; font-size: 12px; color: var(--ui-muted); }
+.dk-slider input { flex: 1; }
+.dk-canvas-pal { display: flex; flex-direction: column; gap: 4px; padding: 2px 4px 4px; }
+.dk-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ui-fg); padding: 2px 2px; white-space: nowrap; }
+.dk-pal-title { font-size: 11px; color: var(--ui-muted); margin-top: 6px; }
+.dl-floatpop { position: fixed; z-index: 1000; margin: 0; }
+/* the colour grid (app/ColorGrid.tsx) — Google's palette */
+.cg { display: flex; flex-direction: column; gap: 3px; padding: 4px 6px 6px; }
+.cg-row { display: flex; gap: 3px; }
+.cg-row.gap { margin-bottom: 6px; }
+.cg-swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(0,0,0,.12); padding: 0; cursor: pointer; position: relative; flex: none; }
+.cg-swatch:hover { transform: scale(1.18); box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.cg-swatch.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--accent); }
+.cg-add { display: inline-flex; align-items: center; justify-content: center; background: var(--surface); color: var(--ui-muted); font-size: 14px; line-height: 1; overflow: hidden; }
+.cg-add input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; padding: 0; border: 0; }
+.cg-custom-title { font-size: 11px; color: var(--ui-muted); margin-top: 6px; }
+.cg-none { display: flex; align-items: center; gap: 8px; padding: 4px 6px; margin: 0 0 6px -2px; border: 0; background: none; color: var(--ui-fg); font: inherit; font-size: 12px; border-radius: 4px; cursor: pointer; text-align: left; }
+.cg-none:hover { background: var(--ui-hover); }
+.cg-none-swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--ui-border); background: linear-gradient(135deg, transparent 45%, #d33 45%, #d33 55%, transparent 55%), var(--surface); }
+/* "Back to slide": when the slide in view is mostly off the screen (zoomed into a corner, scrolled away) */
+.dl-refocus { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 4; border: 1px solid var(--ui-border); background: var(--surface); color: var(--ui-fg); border-radius: 18px; padding: 6px 14px; font: inherit; font-size: 13px; box-shadow: 0 2px 10px rgba(0,0,0,.18); cursor: pointer; opacity: 0.85; }
+.dl-refocus:hover { opacity: 1; }
+.dl-refocus.lost { background: var(--accent); color: #fff; border-color: transparent; opacity: 1; }
 html[data-theme="dark"] .ol-newkind .ol-newthumb { background: #26324a; }
+/* the Layout row is contextual (layouttoolbar.tsx): one line always — it scrolls sideways when the window is narrow
+   (its palettes are fixed to the window), so selecting an object never makes it wrap and shift the page */
+.toolbar-layout { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+/* the canvas around a layout document's pages (editor/layout/desk.ts) */
+.lyx-editor.ol-page-checker .ol-page { background: repeating-conic-gradient(#cfd3d9 0 25%, #f4f5f7 0 50%) 0 0 / 20px 20px; }
+.ol-refocus { position: fixed; z-index: 45; transform: translateX(-50%); display: none; border: 1px solid var(--ui-border); border-radius: 18px; padding: 7px 16px; background: var(--surface); color: var(--ui-fg); font: inherit; font-size: 13px; box-shadow: 0 2px 10px rgba(0,0,0,.18); cursor: pointer; opacity: 0.9; }
+.ol-refocus.lost { background: var(--accent); color: #fff; border-color: transparent; opacity: 1; }
+.ol-refocus.on { display: block; }
+html[data-presenting] .ol-refocus { display: none; }
+.home .project-docs { display: flex; flex-direction: column; gap: 4px; margin: 10px 0 14px; }
+.home .project-docs a { color: var(--link); text-decoration: none; font-size: 14px; }
+.home .project-docs a:hover { text-decoration: underline; }

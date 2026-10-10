@@ -243,10 +243,14 @@ export function ProjectRootPanel({ project, notify, onCreated }: { project: stri
   };
   if (info === undefined) return <div class="home"><div class="meta">Loading…</div></div>;
   if (info === null) return <div class="home"><h1>Not found</h1><div class="meta">This project does not exist, or you do not have access to it.</div></div>;
+  const docs = projectDocs(info, true);
   return (
     <div class="home">
       <h1>📁 {projectTitle(info)}</h1>
-      <div class="sub">This project has no documents yet. Its files (if any) are in the files panel on the left.</div>
+      {docs.length ? <>
+        <div class="sub">Open one of its documents — all its files are in the files panel on the left.</div>
+        <div class="docs project-docs">{docs.map(d => <a key={d} href={'#/' + project + '/' + d.split('/').map(encodeURIComponent).join('/')} onClick={e => { e.preventDefault(); onCreated(project + '/' + d); }}>📄 {d}</a>)}</div>
+      </> : <div class="sub">This project has no documents yet. Its files (if any) are in the files panel on the left.</div>}
       <div class="home-actions">
         <button class="btn primary" onClick={() => void createFirstDoc()}>+ New document</button>
       </div>

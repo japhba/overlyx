@@ -8,6 +8,9 @@
  * Keys: → ↓ Space Enter PageDown N (next step), ← ↑ Backspace PageUp P (back), Home / End,
  * a page number then Enter, B / . (black screen), W / , (white screen), L (laser pointer),
  * S (presenter view: notes, next page, timer — in a second window), Esc (end).
+ *
+ * The laser pointer, pinch to zoom and pan (+ / - / 0 too) and the control bar are app/presentkit.ts's:
+ * zoomed, a click does not go on and Escape first goes back to the whole page.
  */
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
@@ -17,6 +20,7 @@ import { layoutControllerOf } from './controller';
 import { TEX_LINE_VARS } from './geom';
 import { annotateOverlays, applyOverlays, OverlayCounter } from './overlays';
 import { beamerSlides, hasFrames, clean } from './beamerslides';
+import { PresentKit, type ZoomView } from '../../app/presentkit';
 
 /** the page's fonts (editor/layout/controller.ts readHeader): the presentation draws with the same */
 const PAGE_FONT_VARS = ['--ol-page-font', '--ol-text-scale', '--ol-math-rel', ...TEX_LINE_VARS];
@@ -118,8 +122,7 @@ class Presentation {
   private step = 1;
   private typed = '';
   private counter: HTMLElement;
-  private laser: HTMLElement;
-  private laserOn = false;
+  private kit: PresentKit;
   private presenter: Window | null = null;
   private startedAt = Date.now();
   private page: { w: number; h: number };
@@ -142,17 +145,26 @@ class Presentation {
     }
     this.counter = document.createElement('div');
     this.counter.className = 'ol-present-counter';
-    this.laser = document.createElement('div');
-    this.laser.className = 'ol-present-laser';
-    this.root.append(this.stage, this.counter, this.laser);
+    this.root.append(this.stage, this.counter);
     this.slides = slides;
     document.body.append(this.root);
+    this.kit = new PresentKit({
+      root: this.root,
+      base: () => ({ x: this.stage.offsetLeft, y: this.stage.offsetTop, w: this.stage.offsetWidth, h: this.stage.offsetHeight }),
+      apply: v => this.zoom(v),
+      next: () => this.next(),
+      prev: () => this.prev(),
+      exit: () => this.end(),
+      position: () => { const s = this.slides[this.index]; return s ? `${this.index + 1} / ${this.slides.length}` : ''; },
+    });
+    this.cleanup.push(() => this.kit.destroy());
     this.fit();
     this.index = start;
     this.show(start, 1, null);
     const onKey = (e: KeyboardEvent) => this.key(e);
     const onResize = () => this.fit();
-    const onFs = () => { if (!document.fullscreenElement) this.end(); };
+    // leaving full screen (Escape, in a real browser) ends it — zoomed, it first goes back to the whole page, windowed
+    const onFs = () => { if (!document.fullscreenElement) { if (this.kit.zoomed) this.kit.resetZoom(); else this.end(); } };
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('resize', onResize);
     document.addEventListener('fullscreenchange', onFs);
@@ -164,10 +176,19 @@ class Presentation {
       this.root.classList.add('ol-present-moving');
       clearTimeout((this.root as unknown as { _t?: number })._t);
       (this.root as unknown as { _t?: number })._t = window.setTimeout(() => this.root.classList.remove('ol-present-moving'), 1500);
-      if (this.laserOn) { this.laser.style.left = e.clientX + 'px'; this.laser.style.top = e.clientY + 'px'; }
+      void e;
     });
     this.root.requestFullscreen?.().catch(() => { /* a window-sized presentation still works */ });
     this.root.focus();
+  }
+
+  /** the zoom drawn on the stage, about its corner (screen point q → s·q + (x, y)) */
+  private zoom(v: ZoomView): void {
+    const st = this.stage.style;
+    if (v.s === 1 && !v.x && !v.y) { st.transform = ''; st.transformOrigin = ''; return; }
+    const L = this.stage.offsetLeft, T = this.stage.offsetTop;
+    st.transformOrigin = '0 0';
+    st.transform = `translate(${(v.s - 1) * L + v.x}px, ${(v.s - 1) * T + v.y}px) scale(${v.s})`;
   }
 
   private fit(): void {
@@ -207,6 +228,7 @@ class Presentation {
       this.transition(prev, slide, dir);
     } else this.apply(slide, step, true);
     this.counter.textContent = `${index + 1} / ${this.slides.length}${slide.steps > 1 ? ` · ${step}/${slide.steps}` : ''}`;
+    this.kit?.slideChanged();
     this.updatePresenter();
   }
 
@@ -247,6 +269,7 @@ class Presentation {
   private key(e: KeyboardEvent): void {
     const k = e.key;
     e.stopPropagation();
+    if (this.kit.key(e, this.typed !== '')) { e.preventDefault(); return; }
     if (k === 'Escape') { e.preventDefault(); this.end(); return; }
     if (/^\d$/.test(k)) { this.typed += k; e.preventDefault(); return; }
     if (k === 'Enter' && this.typed) { const n = Number(this.typed) - 1; this.typed = ''; if (n >= 0 && n < this.slides.length) this.show(n, 1, null); e.preventDefault(); return; }
@@ -259,7 +282,6 @@ class Presentation {
       case 'End': e.preventDefault(); this.show(this.slides.length - 1, this.slides[this.slides.length - 1].steps, null); return;
       case 'b': case 'B': case '.': e.preventDefault(); this.blank('black'); return;
       case 'w': case 'W': case ',': e.preventDefault(); this.blank('white'); return;
-      case 'l': case 'L': e.preventDefault(); this.laserOn = !this.laserOn; this.root.classList.toggle('ol-present-laser-on', this.laserOn); return;
       case 's': case 'S': e.preventDefault(); this.openPresenter(); return;
       default: e.preventDefault();
     }

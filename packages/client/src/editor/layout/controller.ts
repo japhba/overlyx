@@ -24,6 +24,7 @@
  * history; at the end the original state is restored and the result applied in one undoable step.
  * The page size, base font and colours come from the document header (the Y meta map).
  */
+import { attachDesk, type DeskHandle } from './desk';
 import { Plugin, PluginKey, NodeSelection, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { GapCursor } from 'prosemirror-gapcursor';
@@ -626,9 +627,13 @@ class LayoutController {
     }
     activeZoom.add(this);
     this.readHeader(true);
+    // the canvas around the pages: its colour / checkerboards, Back to the slide, files dropped beside the pages (desk.ts)
+    if (scroller) this.desk = attachDesk(this.view, scroller, { currentPage: () => this.currentPage()?.pos ?? null, fit: () => this.zoomStep(0), zoomed: () => this.zoom > 1.01 });
   }
+  private desk: DeskHandle | null = null;
 
   private detach(): void {
+    this.desk?.destroy(); this.desk = null;
     this.rail?.destroy(); this.rail = null;
     this.objects?.destroy(); this.objects = null;
     this.rulers?.destroy(); this.rulers = null;

@@ -9,6 +9,7 @@
  *                fine-grained access for new sign-ins (the user's own switch); token re-copy —
  *                administrators switch it per account right here.
  */
+import { UiChoice } from './Tour';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser } from '../api';
@@ -176,6 +177,9 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             <div class="sub">What is sent: your instruction or the text around the cursor together with the document’s LaTeX source (so the model knows the notation, macros, citation keys) goes to the model through the OverLyX server. Nothing is written to the document without your Tab or Accept. The switches are also in the Tools menu, so the command palette finds them.</div>
           </>}
           {section === 'appearance' && <>
+            <h3>Interface</h3>
+            <div class="sub">Classic shows LyX’s toolbars and menus; Modern looks like Google Docs and Slides, with tools that appear when you need them. The same functions either way. Kept for your account.</div>
+            <UiChoice />
             <h3>Theme</h3>
             <div class="sub">Kept in this browser.</div>
             {THEMES.map(([v, label, hint]) => (

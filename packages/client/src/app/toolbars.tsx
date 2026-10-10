@@ -14,7 +14,12 @@ import { undo, redo } from 'y-prosemirror';
 import { llanglePreamble, hasLlangleSnippet, definesLlangle, columnWidthLength } from '@overlyx/core';
 import { api, type DocMeta } from '../api';
 import { setPref, type Prefs } from '../prefs';
-import { ColorPalette, colorIcon, ColumnWidthPicker, DelimPalette, TableSizePicker, mathPanelPalettes, mathPreview, type ToolButton, type DelimChoice, type Palette } from './Toolbar';
+import { colorIcon, ColumnWidthPicker, DelimPalette, TableSizePicker, mathPanelPalettes, mathPreview, NAMED_COLORS, type ToolButton, type DelimChoice, type Palette } from './Toolbar';
+import { ColorGrid } from './ColorGrid';
+import { openPalette } from './MenuBar';
+import { MODERN_ICONS, mdiSvg } from './modernicons';
+
+const MODERN_SVG = (id: string): string | null => (MODERN_ICONS[id] ? mdiSvg(MODERN_ICONS[id]) : null);
 import { uiPrompt, uiConfirm } from './Dialogs';
 import { activeMathField, type LyxMathField } from '../editor/lyxmath/field';
 import { useMathRendererVersion } from '../editor/lyxmath/usemath';
@@ -110,6 +115,12 @@ export interface Toolbars {
   review: ToolButton[][];
   /** layout documents: tools, arrangement, styles, animation, pages (layouttoolbar.tsx) */
   layout: ToolButton[][];
+  /**
+   * The Modern interface's one row (uimode.ts): Google Docs' order — search the menus, undo, the text
+   * menu, insert, lists, and everything else of LyX's rows under ⋮ (and in the menus). The contextual
+   * rows (math, table, review) and the Layout row are the same in both interfaces.
+   */
+  modern: ToolButton[][];
   showLayout: boolean;
   /** the contextual toolbars' visibility: their mode, or (automatic) the cursor's context */
   showMath: boolean;
@@ -243,7 +254,7 @@ function TextColorPalette({ field, current, close, onText }: { field: LyxMathFie
     f.execute('color', c && c.startsWith('#') ? c.toUpperCase() : c);
     f.endHold(true);
   };
-  return <ColorPalette current={current} close={close} onPick={pick} />;
+  return <ColorGrid current={current} close={close} onPick={pick} none="Default colour" named={NAMED_COLORS} />;
 }
 
 /* ---------------------------------------------------------------- the toolbars */
@@ -267,6 +278,26 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
   const showReview = tbMode('review') === 'on' || (tbMode('review') === 'auto' && (tracking || (!!view && docHasChanges(view.state.doc))));
   const outputChanges = ctx.headerLines.some(l => l === '\\output_changes true');
 
+  // the text menu's buttons (the Classic standard row and the Modern row share them)
+  const family = markValue(view, 'family');
+  const FAMILY: Record<string, string> = { roman: 'Serif', sans: 'Sans serif', typewriter: 'Monospace' };
+  const face = (css: string) => `<span class="tb-face-sample" style="font-family:${css}">Aa</span>`;
+  const fontFamilyBtn: ToolButton = {
+    id: 'fontfamily', title: 'Font: serif, sans serif or monospace (the document’s fonts: Document ▸ Settings ▸ Fonts)', icon: '',
+    html: `<span class="tb-face">${family ? FAMILY[family] ?? family : 'Default'}</span>`,
+    palette: { title: 'Font', list: true, cols: 1, items: [
+      { label: 'Default — the paragraph’s font', html: face('inherit'), active: !family, action: () => run(C.setValueMark('family', null)) },
+      { label: 'Serif (Roman)', html: face('var(--editor-font), serif'), active: family === 'roman', action: () => run(C.setValueMark('family', 'roman')) },
+      { label: 'Sans serif', html: face('var(--sf-font, system-ui), sans-serif'), active: family === 'sans', action: () => run(C.setValueMark('family', 'sans')) },
+      { label: 'Monospace (Typewriter)', html: face('ui-monospace, monospace'), active: family === 'typewriter', action: () => run(C.setValueMark('family', 'typewriter')) },
+      ...(docId ? [{ label: 'The document’s fonts…', html: face('var(--editor-font), serif'), action: () => setDialog({ name: 'settings', arg: 'fonts' }) }] : []),
+    ] },
+  };
+  const boldBtn: ToolButton = { id: 'bold', title: 'Bold (Ctrl+B)', icon: 'bold', action: () => run(C.fontCommands.bold), active: markActive('series', 'bold') };
+  const underlineBtn: ToolButton = { id: 'underline', title: 'Underline (Ctrl+U)', icon: 'underline', action: () => run(C.fontCommands.underline), active: markActive('bar', 'under') };
+  const textColorBtn: ToolButton = { id: 'textcolor', title: textColor ? `Text colour: ${textColor}` : 'Text colour', icon: 'textcolor', html: colorIcon(textColor), active: !!textColor,
+    palette: { title: mathField ? 'Colour in the formula' : 'Text colour', render: close => <TextColorPalette field={mathField} current={textColor} close={close} onText={c => run(C.setValueMark('color', c))} /> } };
+
   const standard: ToolButton[][] = [
     ...(slots.leading?.length ? [slots.leading] : []),
     [
@@ -281,15 +312,18 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
       { id: 'find', title: 'Find & replace (Ctrl+F)', icon: 'find', action: () => ctx.openFind() },
       ...(slots.navigation ?? []),
     ],
+    // the text menu, in Google Docs' order: font, size, bold / italic / underline, colour — then LyX's own emphasis, noun, styles
     [
+      fontFamilyBtn,
+      // font size: text, table cells, a formula as a whole, a selected text box (editor/fontsize.ts)
+      ...(view ? [{ id: 'fontsize', title: 'Font size (points)', icon: '', widget: () => <FontSizeBox view={view} /> } as ToolButton] : []),
+      boldBtn,
+      { id: 'italic', title: 'Italic (Ctrl+I)', icon: 'italic', action: () => run(C.fontCommands.italic), active: markActive('shape', 'italic') },
+      underlineBtn,
+      textColorBtn,
       { id: 'emph', title: 'Emphasis (Ctrl+E)', icon: 'emph', action: () => run(C.fontCommands.emph), active: markActive('emph', 'on') },
       { id: 'noun', title: 'Noun / small caps (Ctrl+Shift+N)', icon: 'noun', action: () => run(C.fontCommands.noun), active: markActive('noun', 'on') },
       { id: 'charstyles', title: 'Custom text styles', icon: 'charstyles', palette: styles },
-      { id: 'italic', title: 'Italic (Ctrl+I)', icon: 'italic', action: () => run(C.fontCommands.italic), active: markActive('shape', 'italic') },
-      { id: 'textcolor', title: textColor ? `Text colour: ${textColor}` : 'Text colour', icon: 'textcolor', html: colorIcon(textColor), active: !!textColor,
-        palette: { title: mathField ? 'Colour in the formula' : 'Text colour', render: close => <TextColorPalette field={mathField} current={textColor} close={close} onText={c => run(C.setValueMark('color', c))} /> } },
-      // font size: text, table cells, a formula as a whole, a selected text box (editor/fontsize.ts)
-      ...(view ? [{ id: 'fontsize', title: 'Font size (points)', icon: '', widget: () => <FontSizeBox view={view} /> } as ToolButton] : []),
     ],
     [
       { id: 'math', title: 'Inline formula (Ctrl+M)', icon: 'math', action: () => runView(C.insertMath(false)) },
@@ -480,7 +514,23 @@ export function buildToolbars(ctx: ToolbarContext): Toolbars {
   const showLayout = !!view && isLayoutDoc(view.state.doc);
   const layoutRow = showLayout ? layoutToolbar(ctx) : [];
 
-  const bars = { standard, viewUpdate, extra, math, mathPanels, table, review, layout: layoutRow, showLayout, showMath, showTable, showReview };
+  // the Modern row: the common tools; the rest of LyX's rows (action buttons) under ⋮
+  const btn = (groups: ToolButton[][], id: string) => groups.flat().find(b => b.id === id);
+  const pick = (groups: ToolButton[][], ids: string[]) => ids.map(id => btn(groups, id)).filter((b): b is ToolButton => !!b);
+  const inModern = new Set(['undo', 'redo', 'spellcheck', 'fontfamily', 'fontsize', 'bold', 'italic', 'underline', 'textcolor', 'href', 'comment', 'graphics', 'table', 'math', 'dmath', 'l-itemize', 'l-enumerate', 'depthout', 'depthin']);
+  const moreItems = [...standard, ...extra].flat().filter(b => !inModern.has(b.id) && b.action && !b.widget && !b.palette)
+    .map(b => ({ label: b.title.replace(/\s*\(.*\)\s*$/, ''), title: b.title, html: MODERN_SVG(b.id) ?? undefined, action: b.action!, active: b.active }));
+  const modern: ToolButton[][] = [
+    [{ id: 'modern-search', title: 'Search the menus and commands (Ctrl+Shift+P)', icon: 'Search', action: openPalette }],
+    pick([...standard], ['undo', 'redo', 'spellcheck']),
+    pick(standard, ['fontfamily', 'fontsize']),
+    pick(standard, ['bold', 'italic', 'underline', 'textcolor']),
+    [...pick(extra, ['href', 'comment']), ...pick(standard, ['graphics', 'table', 'math', 'dmath'])],
+    [...pick(extra, ['l-itemize', 'l-enumerate', 'depthout', 'depthin']), { id: 'font-clear', title: 'Clear formatting (Ctrl+Space)', icon: 'Tx', action: () => run(C.fontDefault) }],
+    [{ id: 'modern-more', title: 'More: everything of LyX’s toolbars', icon: '⋮', palette: { title: 'More tools', list: true, cols: 1, items: moreItems } }],
+  ].filter(g => g.length);
+
+  const bars = { standard, viewUpdate, extra, math, mathPanels, table, review, layout: layoutRow, modern, showLayout, showMath, showTable, showReview };
   return isMarkdownDoc(docId) || meta?.format === 'markdown' ? markdownToolbars(bars, ctx) : bars;
 }
 
@@ -515,5 +565,6 @@ function markdownToolbars(bars: Toolbars, ctx: ToolbarContext): Toolbars {
   ];
   const standard = keep(bars.standard).map(g => (g.some(b => b.id === 'emph') ? inline : g));
   const extra = keep(bars.extra).map(g => (g.some(b => b.id === 'l-standard') ? [...g.filter(b => b.id !== 'l-section'), ...blocks] : g));
-  return { ...bars, standard, extra, viewUpdate: keep(bars.viewUpdate), table: keep(bars.table), review: keep(bars.review) };
+  const modern = keep(bars.modern).map(g => (g.some(b => b.id === 'bold') ? inline : g)).filter(g => !g.some(b => b.id === 'fontfamily'));
+  return { ...bars, standard, extra, modern, viewUpdate: keep(bars.viewUpdate), table: keep(bars.table), review: keep(bars.review) };
 }

@@ -1,0 +1,59 @@
+/**
+ * Icons of the deck toolbar (DeliverableEditor), registered in the toolbars' icon table — line
+ * drawings on a 16-unit grid in the style of the Layout toolbar's, so both canvases look alike.
+ */
+import { ICONS } from '../app/Toolbar';
+
+const I = (body: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round">${body}</svg>`;
+const F = (body: string) => `<svg viewBox="0 0 16 16" fill="currentColor" stroke="none">${body}</svg>`;
+
+Object.assign(ICONS, {
+  'dk-select': I('<path d="M4 2.5l8 6.2-3.6.5 2.1 4.1-1.5.8-2.1-4.2L4 12.5z" fill="currentColor" stroke-width="0.8"/>'),
+  'dk-text': I('<rect x="2" y="2.5" width="12" height="11" rx="1" stroke-dasharray="2 1.5"/><path d="M5 5.5h6M8 5.5v6"/>'),
+  'dk-shapes': I('<rect x="1.8" y="5.5" width="7" height="7" rx="0.5"/><circle cx="10.5" cy="6" r="3.8" fill="var(--surface, #fff)"/>'),
+  'dk-rect': I('<rect x="2" y="3.5" width="12" height="9" rx="0.8"/>'),
+  'dk-roundrect': I('<rect x="2" y="3.5" width="12" height="9" rx="3"/>'),
+  'dk-ellipse': I('<ellipse cx="8" cy="8" rx="6" ry="4.6"/>'),
+  'dk-triangle': I('<path d="M8 2.5l6 11H2z"/>'),
+  'dk-diamond': I('<path d="M8 1.8l6.2 6.2L8 14.2 1.8 8z"/>'),
+  'dk-star': I('<path d="M8 1.8l1.9 4 4.3.4-3.3 2.9 1 4.3L8 11.2l-3.9 2.2 1-4.3L1.8 6.2l4.3-.4z"/>'),
+  'dk-hexagon': I('<path d="M4.5 2.5h7L15 8l-3.5 5.5h-7L1 8z"/>'),
+  'dk-line': I('<path d="M2.5 13.5l11-11"/>'),
+  'dk-arrow': I('<path d="M2.5 13.5L13 3"/><path d="M8 3h5v5"/>'),
+  'dk-pen': I('<path d="M2 14c3-1 2-5 5-6s3 3 7-4"/>'),
+  'dk-image': I('<rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1"/><circle cx="5.5" cy="6.2" r="1.3"/><path d="M2.5 12l3.5-3.5 2.5 2.5 2-2 3.5 3.5"/>'),
+  'dk-formula': '<svg viewBox="0 0 16 16"><text x="3" y="12.5" font-size="12" font-family="serif" fill="currentColor">∑</text></svg>',
+  'dk-bold': '<svg viewBox="0 0 16 16"><text x="3.2" y="12.5" font-size="12" font-weight="700" font-family="system-ui, sans-serif" fill="currentColor">B</text></svg>',
+  'dk-italic': '<svg viewBox="0 0 16 16"><text x="5" y="12.5" font-size="12" font-style="italic" font-family="Georgia, serif" fill="currentColor">I</text></svg>',
+  'dk-underline': '<svg viewBox="0 0 16 16"><text x="3.6" y="11" font-size="11" font-family="system-ui, sans-serif" fill="currentColor">U</text><path d="M3.5 13.6h9" stroke="currentColor" stroke-width="1.2"/></svg>',
+  'dk-strike': '<svg viewBox="0 0 16 16"><text x="3.8" y="12" font-size="11" font-family="system-ui, sans-serif" fill="currentColor">S</text><path d="M2.5 8.2h11" stroke="currentColor" stroke-width="1.1"/></svg>',
+  'dk-highlight': I('<path d="M4 10l6-6 2.5 2.5-6 6H4z"/><path d="M2.5 14.5h11" stroke-width="2.6" opacity="0.5"/>'),
+  'dk-lines': I('<path d="M6 3.5h8M6 8h8M6 12.5h8"/><path d="M3 2.5v11M1.8 4l1.2-1.5L4.2 4M1.8 12l1.2 1.5L4.2 12"/>'),
+  'dk-bullets': I('<circle cx="3" cy="4" r="1" fill="currentColor"/><circle cx="3" cy="8" r="1" fill="currentColor"/><circle cx="3" cy="12" r="1" fill="currentColor"/><path d="M6 4h8M6 8h8M6 12h8"/>'),
+  'dk-numbers': '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25"><text x="0.8" y="6" font-size="5" fill="currentColor" stroke="none">1</text><text x="0.8" y="10.2" font-size="5" fill="currentColor" stroke="none">2</text><text x="0.8" y="14.4" font-size="5" fill="currentColor" stroke="none">3</text><path d="M6 4h8M6 8.2h8M6 12.4h8"/></svg>',
+  'dk-fill': I('<path d="M3 8l5-5 5 5-5 5z" fill="currentColor" fill-opacity="0.25"/><path d="M13 10.5c.8 1.2 1.2 2 1.2 2.5a1.2 1.2 0 0 1-2.4 0c0-.5.4-1.3 1.2-2.5z" fill="currentColor"/>'),
+  'dk-stroke': I('<path d="M11 2.5l2.5 2.5-7 7-3 .5.5-3z"/>'),
+  'dk-weight': I('<path d="M2 3.5h12" stroke-width="0.8"/><path d="M2 7.5h12" stroke-width="1.6"/><path d="M2 12h12" stroke-width="2.8"/>'),
+  'dk-dash': I('<path d="M2 5h3M7 5h3M12 5h2"/><path d="M2 11h1.5M5 11h1.5M8 11h1.5M11 11h1.5"/>'),
+  'dk-tips': I('<path d="M2 8h11"/><path d="M10 5l3.5 3-3.5 3" fill="currentColor"/>'),
+  'dk-radius': I('<path d="M2.5 13.5V8a5.5 5.5 0 0 1 5.5-5.5h5.5"/>'),
+  'dk-opacity': '<svg viewBox="0 0 16 16"><defs><pattern id="dkop" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="2" height="2" fill="currentColor" opacity=".55"/><rect x="2" y="2" width="2" height="2" fill="currentColor" opacity=".55"/></pattern></defs><rect x="2" y="2" width="12" height="12" rx="2" fill="url(#dkop)" stroke="currentColor" stroke-width="1.1"/></svg>',
+  'dk-shadow': I('<rect x="2" y="2" width="9" height="9" rx="1"/><path d="M13.5 5v8.5H5" stroke-width="2.2" opacity="0.45"/>'),
+  'dk-arrange': I('<rect x="2.5" y="2.5" width="7" height="7" stroke-dasharray="1.6 1.2"/><rect x="6.5" y="6.5" width="7" height="7" fill="currentColor"/>'),
+  'dk-align': I('<path d="M2 1.5v13"/><rect x="3.5" y="3" width="9" height="3.5"/><rect x="3.5" y="9.5" width="5.5" height="3.5"/>'),
+  'dk-rotate': I('<path d="M13 8a5 5 0 1 1-2-4"/><path d="M11.5 1.5v3h-3"/>'),
+  'dk-flip': I('<path d="M8 1.5v13" stroke-dasharray="1.5 1.3"/><path d="M6 4L2 12h4z"/><path d="M10 4l4 8h-4z" fill="currentColor"/>'),
+  'dk-group': I('<rect x="1.5" y="1.5" width="13" height="13" stroke-dasharray="1.6 1.2"/><rect x="3.5" y="3.5" width="5" height="5"/><circle cx="10.5" cy="10.5" r="2.5"/>'),
+  'dk-lock': I('<rect x="3.5" y="7" width="9" height="7" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>'),
+  'dk-crop': I('<path d="M4.5 1.5v10h10M1.5 4.5h10v10"/>'),
+  'dk-nobg': I('<rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1" stroke-dasharray="1.6 1.3"/><path d="M5 12c0-3 1.3-5 3-5s3 2 3 5" fill="currentColor" fill-opacity="0.3"/><circle cx="8" cy="5.4" r="1.6" fill="currentColor" fill-opacity="0.3"/>'),
+  'dk-replace': I('<rect x="1.8" y="2.8" width="8.5" height="7.5" rx="0.8"/><path d="M12 6.5v6.8H5.5"/><path d="M10.2 11.4l1.8 1.9 1.8-1.9" /><path d="M3 8.6l2.4-2.4 1.8 1.8 1.2-1.2 1.6 1.6"/>'),
+  'dk-delete': I('<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>'),
+  'dk-background': I('<rect x="1.5" y="3" width="13" height="10" rx="1"/><path d="M1.5 10.5l4-3.5 3 2.5 2-1.5 4 3" fill="currentColor" fill-opacity="0.25"/>'),
+  'dk-canvas': I('<rect x="1.5" y="1.5" width="13" height="13" rx="1" stroke-dasharray="1.6 1.2"/><rect x="4" y="5" width="8" height="6" rx="0.5" fill="currentColor" fill-opacity="0.25"/>'),
+  'dk-present': F('<path d="M4.5 2.5l9 5.5-9 5.5z"/>'),
+  'dk-code': I('<path d="M5.5 4L2 8l3.5 4M10.5 4L14 8l-3.5 4"/>'),
+  'dk-download': I('<path d="M8 2v8.5M4.5 7l3.5 3.5L11.5 7M2.5 13.5h11"/>'),
+  'dk-valign': I('<path d="M2 2.5h12M2 13.5h12"/><rect x="5" y="5.5" width="6" height="5" rx="0.6"/>'),
+  'dk-clear': '<svg viewBox="0 0 16 16"><text x="2.2" y="11.5" font-size="10.5" font-family="system-ui, sans-serif" fill="currentColor">T</text><path d="M9 9.5l5 5M14 9.5l-5 5" stroke="currentColor" stroke-width="1.2"/></svg>',
+});

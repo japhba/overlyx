@@ -411,15 +411,66 @@ blend.
     `<html>`) on the version it showed; the editor rebases them onto the current text
     (`sourceops.ts rebasedSplices`: through the region that changed meanwhile; an element deleted
     meanwhile refuses) and applies them as splices of the `Y.Text` — one undo step each (⌘Z).
+  * **The canvas's tools** (PowerPoint's and Inkscape's, `runtime/edit.ts`, `runtime/arrange.ts`,
+    `runtime/view.ts`, `runtime/crop.ts`): shapes (rectangle, rounded, ellipse — boxes that centre
+    text typed into them — and triangle, diamond, star, hexagon as SVG polygons stretched to their box
+    with a constant-width outline), lines and arrows from where the drag started to where it ended
+    (Shift: 45° steps), the pen (a smoothed `<path>`); the round handle above a selection rotates it
+    (CSS `rotate`, Shift: 15° steps, snaps to 0/90/180/270), resizing a rotated box works in its own
+    axes, a line's ends are dragged by themselves, Alt+drag moves a copy, Ctrl/⌘+click selects inside
+    a group or a drawing (double-click goes in a level), a click on one of several selected objects
+    selects it alone, a shape takes text (double-click or start typing). *Arrange* (the toolbar's,
+    the object menu's, the keys): order (front / forward / backward / back as one `reorder` op of the
+    parent's children — the text between them stays put), align (to the slide for one object, to the
+    selection for several), centre on the slide, distribute (equal gaps), rotate 90°, flip (CSS
+    `scale`, an SVG shape a transform), group (a positioned `div.ol-group` around them, their
+    left/top made relative to it) / ungroup, lock (`data-ol-locked`: selected, not moved). Paint:
+    fill, border colour / weight / dash, corner radius, opacity, shadow, arrow tips — CSS for a box,
+    attributes for the shapes of an SVG (`currentColor` lines through the drawing's `color`). Text:
+    font (web fonts linked from Google Fonts when first used), size, B I U S, colour, highlight,
+    alignment, vertical alignment in shapes, lists, line spacing — on the selected runs while typing
+    (`execCommand` with CSS spans, `fontSizePx`), on the whole box otherwise. **Files dropped** on the
+    canvas (or pasted): a picture is uploaded and centred on the drop point; an **SVG becomes a
+    drawing in the page** (`sourceops.ts inlineSvgHtml`: scripts, handlers, foreign content, links
+    out of the file and Inkscape's private markup removed, ids prefixed so drawings never share one,
+    sized from its viewBox) whose shapes can be selected (Ctrl+click), moved (a `translate` in their
+    parent's coordinates) and painted; a huge one goes in as a picture. **Pictures**: double-click
+    crops (PowerPoint's: the whole picture ghosted, drag it inside the fixed frame, its corners scale
+    it, the black handles change the frame; written as `div.ol-crop` with the `img` inside —
+    resizing the frame scales the picture with it), crop to an aspect or a circle at once, *Reset
+    crop*, **Remove background** (`bgremove.ts` + `BgRemoveDialog.tsx`, no ML: background colours
+    from the border, a smooth backdrop fitted to it, a flood fill from the edges with a tolerance,
+    keep / remove brushes, a soft decontaminated edge; in a worker; saved next to the original as
+    `<name>-nobg.png`, the original kept), *Replace picture*. **Touch and pen**: the canvas takes
+    every gesture (`touch-action: none`) — a finger on an object moves it, on nothing pans, held
+    still it draws a selection box, two fingers pinch-zoom and pan; the pointer is captured by the
+    element pressed (a drag leaving the frame keeps going; clicks still land on the object).
+  * **The canvas around the pages**: by default the editor paints its surroundings in the page's own
+    colour (the body's background, reported by the runtime), so frame and editor are one surface; a
+    right-click on the canvas (or *Canvas* when nothing is selected) sets another colour, a
+    transparency checkerboard for the canvas, or one under the slides (where a slide has no
+    background of its own) — a view setting of this browser per document (`ol.canvas:<path>`),
+    never written to the file. **Zoom**: Ctrl+wheel / a trackpad or two-finger pinch zooms about the
+    pointer (the frame's scroll keeps the point, the editor pans sideways when the zoomed frame is
+    wider than the canvas); *Fit slide* / *Back to slide N* appears when zoomed in or when the slide
+    in view is mostly off the screen (Ctrl+0).
   * **Around the canvas** (`DeliverableEditor.tsx`): the slide rail (a second frame in `thumb`
     mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
-    duplicate, move, delete), the toolbar (insert objects and pictures — uploaded into
-    `<folder>/images/` — font size, bold/italic, colours, alignment, front/back, delete), speaker
+    duplicate, move, delete), the **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own
+    component: the tools always; then only what fits the selection — text, shape, line or picture
+    tools, Arrange and the rest — and with nothing selected the slide's background and the canvas;
+    one row that scrolls sideways when narrow, its palettes fixed to the window), speaker
     notes (`<aside class="notes">` of the slide in view), the code (a textarea on the same `Y.Text`;
     *Edit code* jumps to an object's source), others' selections (awareness `htmlSel`), files of
     the page changed on disk (stylesheets and pictures fetched again, scripts reload; project
     events). **Present** (F5) shows a third frame full screen in `present` mode (arrows, Space,
-    click, Home/End, a number and Enter, Escape); *Download* gives the **PDF** (headless Chromium,
+    click, Home/End, a number and Enter, Escape) with the whiteboard's **trail laser pointer**
+    (`app/presentkit.ts`, shared with the Layout presenter: L or the control bar that appears at the
+    bottom left on a move; a short fading tail behind the pointer, a trail that stays while pressed
+    and fades on release, clicks do not advance while it is on) and **pinch to zoom / pan** (Ctrl+wheel,
+    Safari's gestures, two fingers; while zoomed a drag pans and a click does not advance; 0, a
+    double click or Escape goes back to the whole slide — Escape leaving full screen first only
+    zooms out); *Download* gives the **PDF** (headless Chromium,
     `print` mode: a deck one slide per page at its size, a poster one page, a web page on A4) and a
     **website `.zip`** that works without OverLyX (the runtime and MathJax under `_overlyx/`, a deck
     opening presenting, files from elsewhere in the project copied into `_assets/`, PDF figures as
@@ -457,7 +508,13 @@ blend.
   slides / poster / page…* (`app/NewLayoutDialog.tsx`) offers beamer's slide sizes (16:9, 16:10, 4:3),
   A0/A1 posters and A4 / Letter pages (`layout/templates.ts`); *Page size* on the Layout toolbar
   changes it later (the document's custom paper size). A document is a layout document when it has
-  pages; a project holds both kinds side by side.
+  pages; a project holds both kinds side by side. The **Layout row is contextual** (what works on
+  objects only while objects are selected; one line that scrolls sideways). **The canvas around the
+  pages** (`editor/layout/desk.ts`): the same colour as the pages by default; a right-click on it
+  changes the colour or makes it — or the pages without a fill of their own — a transparency
+  checkerboard (a view setting of this browser per document); *Back to the slide* appears when the
+  current page is mostly out of view; files dropped beside the pages go on the current page, and a
+  dropped SVG (on a page or beside it) becomes shapes, as when pasted.
   * **The file is a plain beamer `.tex`** (so it compiles anywhere, git diffs stay readable, the
     agent and MCP edit it like any document). A page is `\begin{frame}[plain] … \end{frame}`, its
     objects lines of a small macro package the managed block defines (`layout/latex.ts`: TikZ overlay
@@ -851,6 +908,20 @@ blend.
 * **A caption is one paragraph** (LyX: `MultiPar false`; also an optional argument and an index
   entry): Enter and Alt+Enter do nothing there and the status bar says why — a paragraph break would
   end the LaTeX argument (`\caption{…}`) and break the build (`editor/commands.ts singleParagraphInset`).
+* **Two interfaces: Classic and Modern** (`app/uimode.ts`, `modern.css`, `app/modernicons.ts`):
+  Classic is LyX's (its toolbar rows, menus and status bar); **Modern** looks like Google Docs and
+  Slides — the document's name over the menus (`MenuBar` `title`), one rounded toolbar
+  (toolbars.tsx `modern`: search the menus, undo / redo, paragraph style, font, size, B I U, colour,
+  link, comment, picture, table, formulas, lists, indent, clear formatting, everything else of LyX's
+  rows under ⋮), the contextual rows (formula, table, review, ink) as floating bars, Material icons
+  (`@mdi/js`, Apache-2.0), the files panel like Drive's, the page as a sheet on a light canvas, round
+  icon buttons on the side rails, Material dialogs — interface only, every function the same. The
+  choice is offered in the welcome card of a new account (two sketches, `Tour.tsx UiChoice`), in
+  *View ▸ Interface* and *Settings ▸ Appearance*; kept in the account (`users.settings.interface`,
+  `POST /api/settings`) and in the browser (`ol.ui`, applied before the first paint). The Classic
+  standard row's text menu follows Google Docs' order too: font (default / serif / sans serif /
+  monospace — LyX's families — and *The document's fonts…*), size, bold, italic, underline, colour
+  (Google's palette, LaTeX's named colours, custom ones remembered), then emphasis, noun and styles.
 * **LyX toolbars** (a port of `lib/ui/stdtoolbars.inc`): the *Standard* and *Extra* rows, and the
   contextual *Math*, *Math panels*, *Table* and *Review* rows that appear automatically when the cursor
   is in a formula / a table / a document with tracked changes (or always / never: *View ▸ Toolbars*,
@@ -1116,7 +1187,10 @@ blend.
 * **Whiteboards** (`.board` files, *File ▸ New whiteboard…* or *+ File* with a `.board` name; `app/BoardEditor.tsx`,
   server `BoardDoc` in `docs.ts`): a Miro-style infinite canvas with the same pens, lasso and laser,
   images (paste / drop / upload, move and resize) and sticky notes, live-collaborative through the
-  same websocket layer; saved as one JSON object per line, so git diffs stay readable.
+  same websocket layer; saved as one JSON object per line, so git diffs stay readable. GoodNotes'
+  *draw with a finger* (the ☝ button, `ol.fingerDraw`): off, a finger pans and only a pen or the mouse
+  draws; on by default on touch screens until the first pen stroke (then the pen draws and the
+  finger pans, as with an Apple Pencil), two fingers always pan and zoom.
 * **Comments panel** (right sidebar, *Comments* tab; `app/Comments.tsx`, `editor/commentops.ts`):
   every comment thread of the open editors — open ones first, then the *Resolved* archive, like
   Google Docs' comment history. A resolved thread leaves the text and the margin: only a small grey

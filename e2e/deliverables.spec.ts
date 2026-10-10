@@ -58,7 +58,7 @@ test('a deck from the New dialog: select, drag, retype, draw, delete and undo', 
   // select the title: the toolbar shows its size; drag it
   const h1 = slides(page).first().locator('h1');
   await h1.click();
-  await expect(page.locator('.dl-fs')).toHaveText('64px');
+  await expect(page.locator('[data-dk-size] input')).toHaveValue('64');
   const b = (await h1.boundingBox())!;
   const scale = b.width / 1040;
   await page.mouse.move(b.x + 40, b.y + b.height / 2);
@@ -79,7 +79,7 @@ test('a deck from the New dialog: select, drag, retype, draw, delete and undo', 
   await page.keyboard.press('Escape');
 
   // a text box drawn: click with the T tool on the first slide, type over its "Text"
-  await page.locator('[data-dl-tool="text"]').click();
+  await page.locator('[data-tb="dk-text"]').click();
   const s1 = (await slides(page).first().boundingBox())!;
   await page.mouse.click(s1.x + s1.width * 0.1, s1.y + s1.height * 0.8);
   await expect.poll(fileText, { timeout: 15000 }).toMatch(/<p style="position: absolute; left: \d+px; top: \d+px; width: 520px; margin: 0">Text<\/p>\n<\/section>/);
@@ -92,7 +92,8 @@ test('a deck from the New dialog: select, drag, retype, draw, delete and undo', 
   const shape = slides(page).nth(1).locator('div[style*="border-radius: 24px"]');
   await shape.scrollIntoViewIfNeeded();
   await shape.click();
-  await expect(page.locator('.dl-toolbar button[title="Delete"]')).toBeEnabled();
+  // the contextual toolbar: a selected object brings its tools (Delete among them)
+  await expect(page.locator('.dl-toolbar [data-tb="dk-delete"]')).toBeEnabled();
   await page.keyboard.press('Delete');
   await expect.poll(fileText, { timeout: 15000 }).not.toContain('border-radius: 24px');
   await page.keyboard.press('Control+z');

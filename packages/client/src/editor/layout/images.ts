@@ -149,6 +149,9 @@ export function layoutDrop(view: EditorView, event: DragEvent): boolean {
   if (!pv || pos === undefined || !ctl) { void placeImageFiles(view, images); return true; }
   const rect = pv.contentDOM.getBoundingClientRect();
   const at: [number, number] = [(event.clientX - rect.left) * ctl.page.w / rect.width, (event.clientY - rect.top) * ctl.page.h / rect.height];
+  // one SVG (Inkscape, a plot): editable shapes where it was dropped, as when it is pasted
+  const svgs = images.filter(f => f.type === 'image/svg+xml' || /\.svg$/i.test(f.name));
+  if (svgs.length === 1 && images.length === 1) { void svgs[0].text().then(t => { if (!placeSvg(view, t, at)) void placeImageFiles(view, images, pos, at); }); return true; }
   void placeImageFiles(view, images, pos, at);
   return true;
 }

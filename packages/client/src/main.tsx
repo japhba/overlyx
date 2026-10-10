@@ -1,4 +1,5 @@
 import './app/theme';   // sets data-theme on <html> before anything renders
+import './app/uimode';  // and data-ui (Classic / Modern)
 import { render } from 'preact';
 import { App } from './app/App';
 import { editorContext } from './editor/context';

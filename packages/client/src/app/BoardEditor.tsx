@@ -226,8 +226,19 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     return minX > maxX ? null : { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
   };
 
+  /**
+   * GoodNotes' "Draw with finger": off, a finger pans and only a pen (stylus) or the mouse draws. By default
+   * on for touch screens without a pen seen yet; the first pen stroke switches it off (the pen draws, the
+   * finger pans), unless chosen with the ☝ button (kept in this browser).
+   */
+  const fingerDrawRef = useRef<boolean>((() => { try { const v = localStorage.getItem('ol.fingerDraw'); if (v !== null) return v === '1'; } catch { /* private */ } return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches; })());
+  const [fingerDraw, setFingerDrawState] = useState(fingerDrawRef.current);
+  const setFingerDraw = (v: boolean, remember = true) => { fingerDrawRef.current = v; setFingerDrawState(v); if (remember) { try { localStorage.setItem('ol.fingerDraw', v ? '1' : '0'); } catch { /* private */ } } };
+
   const onPointerDown = (e: PointerEvent) => {
     const vp = vpRef.current!;
+    if (e.pointerType === 'pen' && fingerDrawRef.current) { let chosen = false; try { chosen = localStorage.getItem('ol.fingerDraw') !== null; } catch { /* private */ } if (!chosen) setFingerDraw(false, false); }
+    const finger = e.pointerType === 'touch' && fingerDrawRef.current;
     vp.focus({ preventScroll: true });
     pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
     if (pointers.current.size === 2) {   // pinch zoom takes over
@@ -243,12 +254,12 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     const objId = target.closest?.('[data-obj]')?.getAttribute('data-obj') ?? null;
     const corner = target.getAttribute?.('data-corner') ?? undefined;
     const t = toolRef.current;
-    const drawTool = (t === 'pen' || t === 'highlighter') && e.pointerType !== 'touch' && !readOnlyRef.current;
+    const drawTool = (t === 'pen' || t === 'highlighter') && (e.pointerType !== 'touch' || finger) && !readOnlyRef.current;
     const origsOf = (ids: ReadonlySet<string>) => { const m = new Map<string, BoardObj>(); for (const id of ids) { const o = objects.get(id); if (o) m.set(id, { ...o, pts: o.pts?.map(p => [...p] as [number, number, number]) }); } return m; };
     const onSelBox = !!target.closest?.('.board-selbox');
     vp.setPointerCapture(e.pointerId);
     setPick(null);
-    if (t === 'laser' && e.pointerType !== 'touch') {
+    if (t === 'laser' && (e.pointerType !== 'touch' || finger)) {
       // the laser pointer: a viewer may use it too — nothing is written
       laserRef.current = [[bx, by]];
       setLaserFade(null);
@@ -260,7 +271,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
     } else if (e.button === 1 || ((t === 'select' || t === 'lasso') && !objId && !corner && (t === 'select' || e.pointerType === 'touch'))) {
       if (selectedRef.current.size) setSelected(new Set());
       dragRef.current = { kind: 'pan', start: [e.clientX - camRef.current.tx, e.clientY - camRef.current.ty] };
-    } else if (e.pointerType === 'touch' && !objId && t !== 'select' && !corner) {
+    } else if (e.pointerType === 'touch' && !objId && t !== 'select' && !corner && !(finger && (t === 'pen' || t === 'highlighter' || t === 'eraser'))) {
       dragRef.current = { kind: 'pan', start: [e.clientX - camRef.current.tx, e.clientY - camRef.current.ty] };
     } else if (corner && selectedRef.current.size && !readOnlyRef.current) {
       const base = groupBBox(selectedRef.current);
@@ -591,6 +602,7 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
         {toolBtn('laser', '🔴', 'Laser pointer — a glowing trace that stays while you hold the pen down and fades when you lift it; not saved, seen live by everyone on the board')}
         {!readOnly && toolBtn('note', '🗒', 'Sticky note')}
         {!readOnly && <button class="small-btn" title="Add images (or paste / drag them in)" onClick={pickImages}>🖼</button>}
+        <button class={'small-btn' + (fingerDraw ? ' active' : '')} data-finger-draw title={fingerDraw ? 'Drawing with a finger is on — a finger draws, two fingers pan and zoom (click to let a finger pan)' : 'Draw with a finger (otherwise only a pen or the mouse draws; a finger pans)'} onClick={() => setFingerDraw(!fingerDraw)}>☝</button>
         {!readOnly && <span class="board-sep" />}
         {/* presets (shared with the margin ink): one click selects, a click on the selected one edits it */}
         {!readOnly && penSet.colors.map((c, i) => {

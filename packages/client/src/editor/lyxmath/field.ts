@@ -568,7 +568,11 @@ export class LyxMathField {
     const input = this.input;
     input.addEventListener('focus', () => { this.focused = true; active = this; this.dom.classList.add('focused'); this.opts.onFocus?.(); this.scheduleLayout(); notifyFocus(); });
     input.addEventListener('blur', () => {
-      this.focused = false; if (active === this) active = null; this.altM = false; this.deadHat = false; this.dom.classList.remove('focused'); this.cursor.macroModeClose(); this.overlay.replaceChildren(); if (this.clearGhost()) this.render();
+      this.focused = false; if (active === this) active = null; this.altM = false; this.deadHat = false; this.dom.classList.remove('focused');
+      // a command typed last (\gamma with nothing after it) becomes its symbol when the formula is left, not at the next keystroke
+      const closed = this.cursor.macroModeClose();
+      this.overlay.replaceChildren();
+      if (closed) this.commit(); else if (this.clearGhost()) this.render();
       // held by a popup (the link box): the cursor and selection stay, drawn as they are, until endHold
       if (this.held) this.scheduleLayout(); else this.opts.onBlur?.();
       notifyFocus();
@@ -770,7 +774,9 @@ export class LyxMathField {
     const handled = () => { ev.preventDefault(); ev.stopPropagation(); };
     const move = (f: () => boolean, dir: MoveOutDirection, dissolveEmpty = false) => {
       c.selHandle(ev.shiftKey);
-      if (!c.macroModeClose() && !f()) {
+      // LyX: an arrow while a command name is being typed (\alpha) only closes it — shown as its symbol at once
+      if (c.macroModeClose()) { this.commit(); handled(); return; }
+      if (!f()) {
         if (!ev.shiftKey) { const dissolve = dissolveEmpty && this.isEmpty(); this.commit(); this.opts.onMoveOut?.(dir, { dissolve }); }
         // LyX: selecting past the edge pops the cursor out — the selection continues in the
         // document with the formula taken whole (selBegin/selEnd normalize to the inset)

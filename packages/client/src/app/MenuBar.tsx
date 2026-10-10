@@ -274,8 +274,10 @@ function SearchMenu({ menu, entries, close, recording, setRecording, paletteShor
   );
 }
 
-export function MenuBar({ menus, user, right, primary, onLogout, onSettings, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle, onSignIn, showThemeToggle = true, paletteShortcut = PALETTE_DEFAULT, captureF1 = true }: {
+export function MenuBar({ menus, user, right, primary, title, onLogout, onSettings, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle, onSignIn, showThemeToggle = true, paletteShortcut = PALETTE_DEFAULT, captureF1 = true }: {
   menus: MenuDef[]; user?: User; right?: ComponentChildren; primary?: ComponentChildren; onLogout?: () => void; onSettings?: () => void; onHome?: () => void; showThemeToggle?: boolean; paletteShortcut?: string; captureF1?: boolean;
+  /** the document's name above the menus (the Modern interface's header, Google Docs' layout; Classic shows `right`) */
+  title?: ComponentChildren;
   /** reference entries (shortcuts without a menu item) for the palette */
   searchEntries?: SearchEntry[];
   /** who is in the document right now (Google-Docs style, top right; click one to jump to their cursor) */
@@ -371,6 +373,8 @@ export function MenuBar({ menus, user, right, primary, onLogout, onSettings, onH
   return (
     <div class="menubar" ref={barRef}>
       {onHome && <a class="brand" href="#/" title="Start screen" onClick={e => { e.preventDefault(); onHome(); }}><Wordmark /></a>}
+      {title && <div class="menubar-title">{title}</div>}
+      <div class="menubar-menus">
       {compact ? (
         <div class={'menu menu-overflow' + (overflowOpen || open !== null ? ' open' : '')}>
           <button type="button" aria-haspopup="menu" aria-expanded={overflowOpen || open !== null} onMouseDown={e => e.preventDefault()} onClick={toggleOverflow}
@@ -385,11 +389,12 @@ export function MenuBar({ menus, user, right, primary, onLogout, onSettings, onH
         <div key={m.title} class={'menu' + (open === i ? ' open' : '')} onMouseEnter={() => { if (open !== null && open !== i) toggle(i); }}>
           <button aria-haspopup="menu" aria-expanded={open === i} onKeyDown={e => {
             if (['ArrowDown', 'Enter', ' '].includes(e.key)) { e.preventDefault(); toggle(i); }
-            else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); const next = (i + (e.key === 'ArrowRight' ? 1 : menus.length - 1)) % menus.length; (e.currentTarget.closest('.menubar')?.querySelectorAll<HTMLElement>(':scope > .menu > button')[next])?.focus(); }
+            else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); const next = (i + (e.key === 'ArrowRight' ? 1 : menus.length - 1)) % menus.length; (e.currentTarget.closest('.menubar-menus')?.querySelectorAll<HTMLElement>(':scope > .menu > button')[next])?.focus(); }
           }} onMouseDown={e => { e.preventDefault(); toggle(i); }} title={m.search ? `Search menus and shortcuts (${paletteKey})` : undefined}>{m.title}</button>
           {open === i && menuContent(i)}
         </div>
       ))}
+      </div>
       <div class="menubar-primary">{primary}</div>
       <div class="menubar-actions">
       {right}

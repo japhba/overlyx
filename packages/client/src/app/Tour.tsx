@@ -8,6 +8,7 @@
  * The tour never blocks the interface: the dimmed overlay lets clicks through, only the card itself
  * takes them (without stealing the editor's focus), so the user works in the real editor.
  */
+import { useUiMode, setUiMode } from './uimode';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 
@@ -173,6 +174,42 @@ function findTarget(sels: string[] | undefined): HTMLElement | null {
 
 export type TourEnd = 'finished' | 'left' | 'declined';
 
+/** the two interfaces as small sketches: Classic (LyX's rows of icons, status bar) and Modern (Google's rounded row, a sheet) */
+export function UiChoice() {
+  const cur = useUiMode();
+  const classic = (
+    <svg viewBox="0 0 160 90" aria-hidden="true">
+      <rect width="160" height="90" fill="#f3f3f1" />
+      <rect y="0" width="160" height="9" fill="#e9e9e6" />{[6, 22, 38, 54].map(x => <rect key={x} x={x} y="3" width="11" height="3" rx="1" fill="#888" />)}
+      <rect y="10" width="160" height="9" fill="#f3f3f1" />{Array.from({ length: 22 }, (_, i) => <rect key={i} x={4 + i * 7} y="12" width="5" height="5" rx="1" fill={['#d9a33b', '#5b8dc9', '#7a9a52', '#b0b0b0'][i % 4]} />)}
+      <rect y="20" width="160" height="9" fill="#f3f3f1" />{Array.from({ length: 18 }, (_, i) => <rect key={i} x={4 + i * 8} y="22" width="5" height="5" rx="1" fill={['#5b8dc9', '#b0b0b0', '#c9645b'][i % 3]} />)}
+      <rect x="0" y="30" width="28" height="52" fill="#f8f8f6" /><rect x="132" y="30" width="28" height="52" fill="#fff" />
+      <rect x="30" y="30" width="100" height="52" fill="#fff" />{[36, 44, 52, 60, 68].map(y => <rect key={y} x="40" y={y} width={y === 36 ? 50 : 80} height="3" rx="1" fill="#bbb" />)}
+      <rect y="83" width="160" height="7" fill="#e9e9e6" />
+    </svg>
+  );
+  const modern = (
+    <svg viewBox="0 0 160 90" aria-hidden="true">
+      <rect width="160" height="90" fill="#f9fbfd" />
+      <rect x="6" y="4" width="10" height="10" rx="3" fill="#4285f4" /><rect x="20" y="4" width="40" height="4" rx="2" fill="#444" />{[20, 32, 44, 56, 68].map(x => <rect key={x} x={x} y="11" width="9" height="3" rx="1.5" fill="#9aa0a6" />)}
+      <rect x="128" y="5" width="20" height="8" rx="4" fill="#c2e7ff" />
+      <rect x="6" y="18" width="148" height="9" rx="4.5" fill="#edf2fa" />{Array.from({ length: 13 }, (_, i) => <rect key={i} x={12 + i * 10} y="20.5" width="5" height="4" rx="1" fill="#5f6368" />)}
+      <rect x="36" y="32" width="88" height="56" fill="#fff" stroke="#e8eaed" />{[42, 50, 58, 66, 74].map(y => <rect key={y} x="46" y={y} width={y === 42 ? 40 : 68} height="3" rx="1" fill="#c4c7c5" />)}
+      <rect x="54" y="80" width="52" height="7" rx="3.5" fill="#fff" stroke="#dadce0" />
+    </svg>
+  );
+  return (
+    <div class="ui-choice" role="radiogroup" aria-label="Interface">
+      <button type="button" role="radio" aria-checked={cur === 'classic'} class={cur === 'classic' ? 'on' : ''} data-ui-choice="classic" onClick={() => setUiMode('classic')}>
+        {classic}<b>Classic</b><span>LyX’s toolbars and menus — everything in view, for LaTeX and LyX users.</span>
+      </button>
+      <button type="button" role="radio" aria-checked={cur === 'modern'} class={cur === 'modern' ? 'on' : ''} data-ui-choice="modern" onClick={() => setUiMode('modern')}>
+        {modern}<b>Modern</b><span>Like Google Docs and Slides — a simple toolbar; tools appear when you need them.</span>
+      </button>
+    </div>
+  );
+}
+
 export function Tour({ ctx, actions, intro, onEnd }: { ctx: TourCtx; actions: TourActions; intro: boolean; onEnd: (how: TourEnd) => void }) {
   const [step, setStep] = useState(intro ? -1 : 0);
   const [base, setBase] = useState<Snap | null>(null);
@@ -234,7 +271,9 @@ export function Tour({ ctx, actions, intro, onEnd }: { ctx: TourCtx; actions: To
         {step < 0 ? (
           <>
             <h3>Welcome to OverLyX 👋</h3>
-            <p>A three-minute hands-on tour: it opens your example document and asks you to try the essentials — typing, layouts, a formula, a comment, a PDF build, versions and sharing.</p>
+            <p>First, choose how OverLyX looks — the same functions either way; switch any time in <i>View ▸ Interface</i> or <i>Settings</i>:</p>
+            <UiChoice />
+            <p>Then a three-minute hands-on tour: it opens your example document and asks you to try the essentials — typing, layouts, a formula, a comment, a PDF build, versions and sharing.</p>
             <p class="tour-muted">Every step can be skipped and you can leave at any time; restart it from <i>Help ▸ Take the tour</i>.</p>
             {noExample && <p class="tour-error">You have no document to practise on — create a project and a document first, or open one shared with you, then start the tour from the Help menu.</p>}
             <div class="tour-buttons">

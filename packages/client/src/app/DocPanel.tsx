@@ -53,6 +53,13 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
   // the project shown: the current file's, else the last picked one, else the first
   const currentProject = current ? projectOfDoc(current) || null : null;
   useEffect(() => { if (currentProject) setPicked(currentProject); }, [currentProject]);
+  // the open file's project is not in the list loaded before (created, or shared with us, since): load it again — once per project
+  const refetchedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentProject || !projects.length || projects.some(p => p.name === currentProject) || refetchedFor.current === currentProject) return;
+    refetchedFor.current = currentProject;
+    void load();
+  }, [currentProject, projects]);
   useEffect(() => { if (picked) try { localStorage.setItem('ol.project', picked); } catch { /* ignore */ } }, [picked]);
   const groups = useMemo(() => {
     const byTitle = (a: Project, b: Project) => Number((b.kind ?? '') === 'example') - Number((a.kind ?? '') === 'example') || projectLabel(a).localeCompare(projectLabel(b));

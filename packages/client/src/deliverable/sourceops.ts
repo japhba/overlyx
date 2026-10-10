@@ -45,26 +45,153 @@ export function applyTo(text: string, splices: Splice[]): string {
 
 const r = (n: number) => Math.round(n);
 
-/** the markup of an object drawn with a tool, at `rect` (slide px; a click without dragging gives it a default size) */
-export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleHint = 1): string {
+/** a star's points in a 100×100 box */
+const STAR = Array.from({ length: 10 }, (_, i) => {
+  const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? 19.5 : 48;
+  return `${Math.round((50 + rr * Math.cos(a)) * 10) / 10},${Math.round((52 + rr * Math.sin(a)) * 10) / 10}`;
+}).join(' ');
+const POLYGONS: Partial<Record<Tool, string>> = {
+  triangle: '50,2 98,98 2,98',
+  diamond: '50,2 98,50 50,98 2,50',
+  star: STAR,
+  hexagon: '25,3 75,3 98,50 75,97 25,97 2,50',
+};
+const SHAPE_FILL = '#2f6fde';
+
+/** a smooth path through hand-drawn points (quadratic curves through the midpoints) */
+export function penPathD(pts: [number, number][]): string {
+  const q = (n: number) => Math.round(n * 10) / 10;
+  if (!pts.length) return '';
+  let d = `M${q(pts[0][0])} ${q(pts[0][1])}`;
+  if (pts.length === 1) return d + `L${q(pts[0][0] + 0.1)} ${q(pts[0][1])}`;
+  for (let i = 1; i < pts.length - 1; i++) d += `Q${q(pts[i][0])} ${q(pts[i][1])} ${q((pts[i][0] + pts[i + 1][0]) / 2)} ${q((pts[i][1] + pts[i + 1][1]) / 2)}`;
+  const last = pts[pts.length - 1];
+  return d + `L${q(last[0])} ${q(last[1])}`;
+}
+
+/**
+ * The markup of an object drawn with a tool, at `rect` (slide px; a click without dragging gives it
+ * a default size). Boxes (rectangles, ellipses) are divs that centre text typed into them, like
+ * Google Slides' shapes; other shapes are SVG polygons stretched to their box with an outline that
+ * keeps its width; lines go from the drag's start to its end (`pts`), the pen's stroke through `pts`.
+ */
+export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleHint = 1, pts?: [number, number][]): string {
   const flow = kind === 'page';
   const minW = (tool === 'text' || tool === 'formula') ? 520 * scaleHint : 240 * scaleHint;
   const w = rect.w > 8 ? rect.w : minW;
   const h = rect.h > 8 ? rect.h : (tool === 'line' || tool === 'arrow' ? 0 : tool === 'text' || tool === 'formula' ? 0 : 160 * scaleHint);
   const pos = (withH: boolean) => flow ? '' : `position: absolute; left: ${r(rect.x)}px; top: ${r(rect.y)}px; width: ${r(w)}px${withH && h ? `; height: ${r(h)}px` : ''}; `;
+  const flowSize = flow ? `width: ${r(w)}px; height: ${r(h || 160)}px; ` : '';
+  const centred = 'display: flex; align-items: center; justify-content: center; text-align: center; color: #fff; ';
   switch (tool) {
     case 'text': return flow ? '<p>Text</p>' : `<p style="${pos(false)}margin: 0">Text</p>`;
     case 'formula': return flow ? '<p>\\[ e^{i\\pi} + 1 = 0 \\]</p>' : `<div style="${pos(false)}">\\[ e^{i\\pi} + 1 = 0 \\]</div>`;
-    case 'rect': return `<div style="${pos(true)}${flow ? `width: ${r(w)}px; height: ${r(h || 160)}px; ` : ''}background: #2f6fde; border-radius: 8px"></div>`;
-    case 'ellipse': return `<div style="${pos(true)}${flow ? `width: ${r(w)}px; height: ${r(h || 160)}px; ` : ''}background: #e8a33d; border-radius: 50%"></div>`;
+    case 'rect': return `<div style="${pos(true)}${flowSize}${centred}background: ${SHAPE_FILL}; border-radius: 8px"></div>`;
+    case 'roundrect': return `<div style="${pos(true)}${flowSize}${centred}background: ${SHAPE_FILL}; border-radius: 28px"></div>`;
+    case 'ellipse': return `<div style="${pos(true)}${flowSize}${centred}background: #e8a33d; border-radius: 50%"></div>`;
+    case 'triangle': case 'diamond': case 'star': case 'hexagon': {
+      const W = r(w), H = r(h || 160 * scaleHint);
+      return `<svg style="${flow ? '' : `position: absolute; left: ${r(rect.x)}px; top: ${r(rect.y)}px; `}width: ${W}px; height: ${H}px; overflow: visible" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="${POLYGONS[tool]}" fill="${SHAPE_FILL}" stroke="none" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
+    }
+    case 'pen': {
+      if (!pts || pts.length < 2) return '';
+      const x0 = rect.x, y0 = rect.y, W = Math.max(1, r(rect.w)), H = Math.max(1, r(rect.h));
+      const d = penPathD(pts.map(([x, y]) => [x - x0, y - y0]));
+      return `<svg style="${flow ? '' : `position: absolute; left: ${r(x0)}px; top: ${r(y0)}px; `}width: ${W}px; height: ${H}px; overflow: visible" viewBox="0 0 ${W} ${H}"><path d="${d}" fill="none" stroke="#1d2433" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    }
     case 'line': case 'arrow': {
-      // from where the drag started to where it ended: the box's corners (a click: a horizontal one)
-      const W = Math.max(1, r(w)), H = Math.max(1, r(rect.h > 8 ? rect.h : 0));
+      // from where the drag started to where it ended (a click: a horizontal one)
+      const [[ax, ay], [bx, by]] = pts && pts.length === 2 ? pts : [[rect.x, rect.y], [rect.x + w, rect.y]];
+      const x0 = Math.min(ax, bx), y0 = Math.min(ay, by);
+      const W = Math.max(1, r(Math.abs(bx - ax))), H = Math.max(1, r(Math.abs(by - ay)));
+      const q = (n: number) => Math.round(n * 10) / 10;
       const head = tool === 'arrow' ? `<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>` : '';
-      return `<svg style="${flow ? '' : `position: absolute; left: ${r(rect.x)}px; top: ${r(rect.y)}px; `}width: ${W}px; height: ${Math.max(H, 1)}px; overflow: visible; color: #1d2433" viewBox="0 0 ${W} ${Math.max(H, 1)}">${head}<line x1="0" y1="${H > 1 ? 0 : 0}" x2="${W}" y2="${H > 1 ? H : 0}" stroke="currentColor" stroke-width="4"${tool === 'arrow' ? ' marker-end="url(#ah)"' : ''}/></svg>`;
+      return `<svg style="${flow ? '' : `position: absolute; left: ${r(x0)}px; top: ${r(y0)}px; `}width: ${W}px; height: ${H}px; overflow: visible; color: #1d2433" viewBox="0 0 ${W} ${H}">${head}<line x1="${q(ax - x0)}" y1="${q(ay - y0)}" x2="${q(bx - x0)}" y2="${q(by - y0)}" stroke="currentColor" stroke-width="4"${tool === 'arrow' ? ' marker-end="url(#ah)"' : ''}/></svg>`;
     }
     default: return '';
   }
+}
+
+/* ------------------------------------------------------------------ SVG files as drawings */
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const XLINK_NS = 'http://www.w3.org/1999/xlink';
+const SAFE_DATA = /^data:image\/(png|jpe?g|gif|webp|avif);/i;
+
+/**
+ * An SVG file made a drawing on the page (inline, so its shapes can be selected, moved and painted
+ * one by one): scripts, event handlers, foreign content, links out of the file and editor-private
+ * markup (Inkscape's, Sodipodi's) removed; its ids prefixed so two drawings never share one; sized
+ * from its viewBox. Null when it is not an SVG, or too big to be worth inlining (then it goes in as
+ * a picture).
+ */
+export function inlineSvgHtml(svgText: string, at: { x: number; y: number; maxW: number } | null, prefix: string): string | null {
+  if (svgText.length > 400_000) return null;
+  let doc: Document;
+  try { doc = new DOMParser().parseFromString(svgText, 'image/svg+xml'); } catch { return null; }
+  const svg = doc.documentElement;
+  if (!svg || svg.localName !== 'svg' || svg.namespaceURI !== SVG_NS || doc.getElementsByTagName('parsererror').length) return null;
+  // what must not be in a page
+  for (const el of Array.from(svg.querySelectorAll('*'))) {
+    const ln = el.localName.toLowerCase();
+    if (el.namespaceURI !== SVG_NS || ['script', 'foreignobject', 'iframe', 'object', 'embed', 'metadata', 'title', 'desc'].includes(ln)) { el.remove(); continue; }
+    if ((ln === 'set' || ln === 'animate') && /^(xlink:)?href$|^on/i.test(el.getAttribute('attributeName') ?? '')) { el.remove(); continue; }
+  }
+  const idMap = new Map<string, string>();
+  for (const el of [svg, ...Array.from(svg.querySelectorAll('*'))]) {
+    for (const a of Array.from(el.attributes)) {
+      const n = a.name.toLowerCase();
+      const pre = a.prefix ?? (n.includes(':') ? n.split(':')[0] : null);
+      if (n.startsWith('on') || (pre && !['xlink', 'xml', 'xmlns'].includes(pre)) || n.startsWith('xmlns:') && !['xmlns:xlink'].includes(n)) { el.removeAttributeNode(a); continue; }
+      if (n === 'href' || n === 'xlink:href') {
+        const v = a.value.trim();
+        if (!(v.startsWith('#') || SAFE_DATA.test(v))) el.removeAttributeNode(a);
+        continue;
+      }
+      if (/url\(\s*['"]?\s*(?!#)/i.test(a.value) && n !== 'id') el.setAttribute(a.name, a.value.replace(/url\(\s*['"]?\s*(?!#)[^)]*\)/gi, 'none'));
+    }
+    const id = el.getAttribute('id');
+    if (id) { const nid = `${prefix}-${id}`; idMap.set(id, nid); el.setAttribute('id', nid); }
+  }
+  // references to the renamed ids
+  const swap = (v: string) => v.replace(/url\(\s*(['"]?)#([^)'"]+)\1\s*\)/g, (m, q, id) => (idMap.has(id) ? `url(#${idMap.get(id)})` : m));
+  for (const el of [svg, ...Array.from(svg.querySelectorAll('*'))]) {
+    for (const a of Array.from(el.attributes)) {
+      if ((a.name === 'href' || a.name === 'xlink:href') && a.value.startsWith('#')) { const id = a.value.slice(1); if (idMap.has(id)) el.setAttributeNS(a.namespaceURI, a.name, '#' + idMap.get(id)); }
+      else if (a.value.includes('url(')) el.setAttribute(a.name, swap(a.value));
+    }
+  }
+  for (const st of Array.from(svg.querySelectorAll('style'))) {
+    let css = (st.textContent ?? '').replace(/@import[^;]*;?/gi, '');
+    css = swap(css).replace(/#([A-Za-z_][\w-]*)/g, (m, id) => (idMap.has(id) ? '#' + idMap.get(id) : m));
+    st.textContent = css;
+  }
+  // its size: width / height, else the viewBox
+  const num = (v: string | null) => { const m = v ? /^\s*([\d.]+)\s*(px|pt|mm|cm|in)?\s*$/.exec(v) : null; if (!m) return NaN; const k = { pt: 4 / 3, mm: 96 / 25.4, cm: 96 / 2.54, in: 96 } as Record<string, number>; return Number(m[1]) * (m[2] ? k[m[2]] ?? 1 : 1); };
+  const vb = (svg.getAttribute('viewBox') ?? '').trim().split(/[\s,]+/).map(Number);
+  let w = num(svg.getAttribute('width')), h = num(svg.getAttribute('height'));
+  if (vb.length === 4 && vb.every(Number.isFinite)) {
+    if (!Number.isFinite(w) && !Number.isFinite(h)) { w = vb[2]; h = vb[3]; }
+    else if (!Number.isFinite(w)) w = h * vb[2] / vb[3];
+    else if (!Number.isFinite(h)) h = w * vb[3] / vb[2];
+  } else {
+    if (!Number.isFinite(w)) w = 300;
+    if (!Number.isFinite(h)) h = 150;
+    svg.setAttribute('viewBox', `0 0 ${Math.round(w * 100) / 100} ${Math.round(h * 100) / 100}`);
+  }
+  svg.removeAttribute('width');
+  svg.removeAttribute('height');
+  svg.removeAttribute('style');
+  svg.removeAttribute('class');
+  if (at) {
+    const k = w > at.maxW ? at.maxW / w : 1;
+    const W = Math.max(8, w * k), H = Math.max(8, h * k);
+    svg.setAttribute('style', `position: absolute; left: ${r(at.x - W / 2)}px; top: ${r(at.y - H / 2)}px; width: ${r(W)}px; height: ${r(H)}px; overflow: visible`);
+  } else svg.setAttribute('style', `width: ${r(Math.min(w, 960))}px; max-width: 100%; height: auto`);
+  let out = new XMLSerializer().serializeToString(svg);
+  // what the HTML parser does not need
+  out = out.replace(/\sxmlns(:\w+)?="[^"]*"/g, (m, p1) => (p1 === ':xlink' ? m : '')).replace(/<!--[\s\S]*?-->/g, '');
+  return out.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
 }
 
 export function imageHtml(src: string, rect: Rect | null, kind: DeliverableKind, natural?: { w: number; h: number }): string {

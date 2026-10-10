@@ -1,0 +1,212 @@
+/* ============================================================ the Modern interface (app/uimode.ts)
+   Google Docs / Slides' look over the same app: html[data-ui="modern"] redefines the tokens of
+   styles.css and lays out the header (the document's name over the menus), one rounded toolbar
+   (toolbars.tsx `modern`), contextual rows as floating bars, the files panel like Drive's, the page
+   as a sheet on a light canvas, the side rails as round icon buttons. Interface only: nothing here
+   may hide a function the Classic interface has (what is not in the row is under ⋮ and in the menus). */
+
+html[data-ui="modern"] {
+  --ui-font: "Google Sans Text", "Google Sans", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --ui-bg: #f9fbfd;
+  --ui-bg2: #f0f4f9;
+  --ui-border: #dadce0;
+  --ui-border2: #e8eaed;
+  --ui-fg: #1f1f1f;
+  --fg2: #444746;
+  --ui-muted: #5f6368;
+  --muted2: #80868b;
+  --accent: #0b57d0;
+  --accent-strong: #0842a0;
+  --accent-border: #a8c7fa;
+  --surface: #ffffff;
+  --surface2: #ffffff;
+  --ui-hover: rgba(68, 71, 70, 0.08);
+  --row-hover: #f1f3f4;
+  --row-sel: #d3e3fd;
+  --active-bg: #d3e3fd;
+  --active-border: transparent;
+  --m-pill: #edf2fa;
+  --m-pill-hover: rgba(68, 71, 70, 0.08);
+  --m-on-sel: #041e49;
+  --m-canvas: #f9fbfd;
+  --m-share: #c2e7ff;
+  --m-share-fg: #001d35;
+  --m-shadow: 0 1px 2px rgba(60, 64, 67, 0.3), 0 2px 6px 2px rgba(60, 64, 67, 0.15);
+}
+html[data-ui="modern"][data-theme="dark"] {
+  --ui-bg: #1b1c1d;
+  --ui-bg2: #232425;
+  --ui-border: #444746;
+  --ui-border2: #303134;
+  --ui-fg: #e3e3e3;
+  --fg2: #c4c7c5;
+  --ui-muted: #9aa0a6;
+  --muted2: #80868b;
+  --accent: #4f8ef7;
+  --accent-strong: #a8c7fa;
+  --surface: #1f1f1f;
+  --surface2: #1f1f1f;
+  --ui-hover: rgba(227, 227, 227, 0.08);
+  --row-hover: #2d2e30;
+  --row-sel: #004a77;
+  --active-bg: #004a77;
+  --m-pill: #282a2c;
+  --m-pill-hover: rgba(227, 227, 227, 0.08);
+  --m-on-sel: #c2e7ff;
+  --m-canvas: #131314;
+  --m-share: #004a77;
+  --m-share-fg: #c2e7ff;
+  --m-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 4px 8px 3px rgba(0, 0, 0, 0.3);
+}
+html[data-ui="modern"] body { background: var(--ui-bg); }
+
+/* ------------------------------------------------------------ the header: the name over the menus */
+html[data-ui="modern"] .menubar {
+  height: 56px; padding: 0 12px 0 8px; border-bottom: 0; background: var(--ui-bg); gap: 4px;
+}
+html[data-ui="modern"] .menubar:has(> .menubar-title) {
+  display: grid; height: 64px; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: 30px 26px;
+  grid-template-areas: "brand title primary actions" "brand menus primary actions"; column-gap: 6px; align-content: center;
+}
+html[data-ui="modern"] .menubar .brand { grid-area: brand; align-self: center; margin-right: 6px; padding: 6px 8px; border-radius: 50%; font-size: 15px; }
+html[data-ui="modern"] .menubar-title { grid-area: title; display: flex; align-items: center; gap: 12px; min-width: 0; padding-left: 2px; }
+html[data-ui="modern"] .menubar-title .mt-name { font-size: 18px; line-height: 24px; color: var(--ui-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; margin-left: -6px; border-radius: 4px; border: 1px solid transparent; }
+html[data-ui="modern"] .menubar-title .mt-name:hover { border-color: var(--ui-border); }
+html[data-ui="modern"] .menubar-title .mt-project { font-size: 12px; color: var(--ui-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html[data-ui="modern"] .menubar-title .save-state { font-size: 12px; color: var(--ui-muted); white-space: nowrap; }
+html[data-ui="modern"] .menubar-title .save-state.offline { color: var(--warn-fg); background: var(--warn-bg); padding: 0 8px; border-radius: 10px; }
+html[data-ui="modern"] .menubar:has(> .menubar-title) .menubar-menus { grid-area: menus; display: flex; align-items: center; min-width: 0; margin-left: -6px; }
+html[data-ui="modern"] .menubar-menus { display: flex; align-items: center; }
+html[data-ui="modern"] .menubar .menu > button { font-size: 14px; color: var(--ui-fg); padding: 2px 7px; border-radius: 4px; line-height: 20px; }
+html[data-ui="modern"] .menubar .menu > button:hover, html[data-ui="modern"] .menubar .menu.open > button { background: var(--ui-hover); }
+html[data-ui="modern"] .menubar-primary { grid-area: primary; }
+html[data-ui="modern"] .menubar-actions { grid-area: actions; }
+html[data-ui="modern"] .menubar .doc-title { display: none; }
+html[data-ui="modern"] .menubar .share-btn { height: 40px; border-radius: 20px; padding: 0 22px 0 16px; background: var(--m-share); color: var(--m-share-fg); font-size: 14px; font-weight: 500; gap: 8px; margin-right: 12px; }
+html[data-ui="modern"] .menubar .share-btn:hover { filter: none; box-shadow: var(--m-shadow); }
+html[data-ui="modern"] .menubar .share-btn svg { width: 16px; height: 16px; }
+html[data-ui="modern"] .menubar .user-menu .avatar-btn .avatar { width: 32px; height: 32px; line-height: 32px; font-size: 13px; }
+html[data-ui="modern"] .menubar .users .avatar { width: 30px; height: 30px; line-height: 26px; }
+html[data-ui="modern"] .menubar .theme-toggle { width: 36px; height: 36px; border-radius: 50%; margin-right: 4px; }
+html[data-ui="modern"] .menubar .gh-link { width: 36px; height: 36px; border-radius: 50%; justify-content: center; padding: 0; margin-right: 2px; }
+html[data-ui="modern"] .menubar .gh-link:hover { background: var(--ui-hover); }
+html[data-ui="modern"] .menu-list { border-radius: 8px; border: 0; box-shadow: var(--m-shadow); padding: 6px 0; }
+
+/* ------------------------------------------------------------ the toolbar: one rounded row */
+html[data-ui="modern"] .tb-modern-row { display: flex; align-items: center; gap: 6px; margin: 0 16px 8px; padding: 0 6px 0 6px; min-height: 40px; border-radius: 24px; background: var(--m-pill); flex-shrink: 0; }
+html[data-ui="modern"] .tb-modern-row > .toolbar { flex: 1 1 auto; min-width: 0; background: none; border: 0; padding: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 1px; }
+html[data-ui="modern"] .tb-modern-row > .toolbar::-webkit-scrollbar { display: none; }
+html[data-ui="modern"] .tb-modern-end { display: flex; align-items: center; gap: 6px; flex: none; }
+html[data-ui="modern"] .toolbar .tb-btn { height: 28px; min-width: 28px; padding: 0 4px; border: 0; border-radius: 4px; color: var(--fg2); }
+html[data-ui="modern"] .toolbar .tb-btn:hover { background: var(--m-pill-hover); border: 0; }
+html[data-ui="modern"] .toolbar .tb-btn.active { background: var(--row-sel); color: var(--m-on-sel); border: 0; }
+html[data-ui="modern"] .toolbar .tb-pal.open > .tb-btn { background: var(--m-pill-hover); border: 0; }
+html[data-ui="modern"] .toolbar .tb-sep { height: 20px; background: var(--ui-border); margin: 0 5px; }
+html[data-ui="modern"] .tb-mdi { width: 20px; height: 20px; fill: currentColor; display: block; }
+html[data-ui="modern"] .toolbar .tb-btn .tb-img { filter: grayscale(1) contrast(1.2); opacity: 0.8; }
+html[data-ui="modern"][data-theme="dark"] .toolbar .tb-btn .tb-img { filter: grayscale(1) invert(1) contrast(1.1); }
+html[data-ui="modern"] .toolbar select { height: 28px; border: 0; background: transparent; font: inherit; font-size: 14px; color: var(--ui-fg); border-radius: 4px; padding: 0 4px; max-width: 132px; cursor: pointer; }
+html[data-ui="modern"] .toolbar select:hover { background: var(--m-pill-hover); }
+html[data-ui="modern"] .tb-caret { font-size: 9px; opacity: 0.7; }
+html[data-ui="modern"] .tb-face { font-size: 14px; min-width: 76px; text-align: left; display: inline-block; color: var(--ui-fg); }
+html[data-ui="modern"] .tb-modern-row .zoom { display: inline-flex; align-items: center; gap: 1px; }
+html[data-ui="modern"] .tb-modern-row .zoom-btn { border: 0; background: none; color: var(--fg2); width: 24px; height: 28px; border-radius: 4px; font-size: 15px; cursor: pointer; }
+html[data-ui="modern"] .tb-modern-row .zoom-btn:hover { background: var(--m-pill-hover); }
+html[data-ui="modern"] .tb-modern-row .zoom-select { height: 28px; border: 0; background: transparent; color: var(--ui-fg); font: inherit; font-size: 14px; border-radius: 4px; cursor: pointer; }
+html[data-ui="modern"] .tb-pdf-btn { height: 28px; padding: 0 12px; border: 0; border-radius: 14px; background: transparent; color: var(--fg2); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+html[data-ui="modern"] .tb-pdf-btn:hover { background: var(--m-pill-hover); }
+html[data-ui="modern"] .tb-modern-row .edit-mode, html[data-ui="modern"] .tb-modern-row [data-edit-mode] { border-radius: 16px; }
+html[data-ui="modern"] .tb-popup { border-radius: 8px; border: 0; box-shadow: var(--m-shadow); padding: 6px; }
+html[data-ui="modern"] .tb-popup-title { font-size: 12px; padding: 4px 8px 6px; }
+html[data-ui="modern"] .tb-popup.list .tb-pal-item { height: 32px; border-radius: 4px; padding: 0 10px; border: 0; }
+html[data-ui="modern"] .tb-popup.list .tb-pal-label { font-size: 14px; color: var(--ui-fg); }
+html[data-ui="modern"] .tb-popup .tb-pal-item:hover { background: var(--row-hover); border: 0; }
+html[data-ui="modern"] .tb-popup-grid:has(.tb-pal-label) { grid-template-columns: minmax(220px, max-content) !important; }
+
+/* the Layout row of a beamer layout document: a second rounded row */
+html[data-ui="modern"] .toolbar-layout { margin: 0 16px 8px; border-radius: 24px; background: var(--m-pill); border: 0; padding: 4px 10px; }
+
+/* the contextual rows (formula, table, review, ink): floating bars at the bottom, shown while they apply */
+html[data-ui="modern"] .bottom-toolbars { left: 50% !important; right: auto !important; transform: translateX(-50%); bottom: 34px; width: max-content; max-width: calc(100vw - 48px); box-shadow: none; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+html[data-ui="modern"] .bottom-toolbars .toolbar { pointer-events: auto; border: 0; border-radius: 22px; background: var(--surface); box-shadow: var(--m-shadow); padding: 4px 12px; max-width: calc(100vw - 48px); flex-wrap: wrap; justify-content: center; }
+html[data-ui="modern"] .bottom-toolbars .toolbar .tb-label { color: var(--accent); font-weight: 500; }
+
+/* ------------------------------------------------------------ the files panel: like Drive's */
+html[data-ui="modern"] .sidebar { background: var(--ui-bg); border-right: 0; }
+html[data-ui="modern"] .sidebar.right { border-left: 0; background: var(--surface); border-radius: 16px 0 0 0; box-shadow: var(--m-shadow); }
+html[data-ui="modern"] .tree-row { min-height: 32px; font-size: 14px; border-radius: 0 16px 16px 0; margin-right: 10px; padding-left: 10px; }
+html[data-ui="modern"] .tree-row:hover { background: var(--ui-hover); }
+html[data-ui="modern"] .tree-row.current { background: var(--row-sel); color: var(--m-on-sel); font-weight: 500; }
+html[data-ui="modern"] .sidebar .small-btn, html[data-ui="modern"] .small-btn { border-radius: 14px; padding: 3px 10px; border-color: var(--ui-border); font-size: 12px; }
+html[data-ui="modern"] .small-btn:hover { background: var(--ui-hover); }
+html[data-ui="modern"] .sidebar-grip:hover, html[data-ui="modern"] .sidebar-grip:active { background: var(--accent); opacity: 0.25; }
+
+/* ------------------------------------------------------------ the page: a sheet on a light canvas */
+html[data-ui="modern"] .editor-scroll { background: var(--m-canvas); }
+html[data-ui="modern"] .editor-page:not(:has(.ol-layout)):not(:has(.notes-pane)) {
+  width: auto; max-width: calc(var(--text-width, 720px) + 192px); margin: 4px auto 48px; min-height: calc(100% - 52px);
+  padding: 64px 96px 120px; box-shadow: 0 1px 3px rgba(60, 64, 67, 0.15), 0 1px 1px rgba(60, 64, 67, 0.08); border-radius: 2px;
+}
+@media (max-width: 900px) { html[data-ui="modern"] .editor-page:not(:has(.ol-layout)):not(:has(.notes-pane)) { padding: 32px 24px 120px; margin: 0; max-width: none; box-shadow: none; } }
+
+/* ------------------------------------------------------------ the side rails: round icon buttons */
+html[data-ui="modern"] .rail { width: 52px; padding: 10px 0; gap: 6px; align-items: center; background: var(--ui-bg); border: 0; }
+html[data-ui="modern"] .rail button { writing-mode: horizontal-tb; transform: none !important; width: 40px; height: 40px; margin: 0; padding: 0; border-radius: 50%; font-size: 0; color: var(--fg2); display: flex; align-items: center; justify-content: center; }
+html[data-ui="modern"] .rail button::before { content: ''; width: 20px; height: 20px; background: currentColor; -webkit-mask: var(--icon) center / 20px no-repeat; mask: var(--icon) center / 20px no-repeat; }
+html[data-ui="modern"] .rail button:hover { background: var(--ui-hover); }
+html[data-ui="modern"] .rail button.active { background: var(--row-sel); color: var(--m-on-sel); }
+html[data-ui="modern"] .panel-tabs { background: transparent; border-bottom: 1px solid var(--ui-border2); padding: 6px 8px 0; gap: 4px; }
+html[data-ui="modern"] .panel-tabs button { border-radius: 16px 16px 0 0; font-size: 13px; color: var(--fg2); }
+html[data-ui="modern"] .panel-tabs button.active { background: transparent; color: var(--accent); border-bottom-color: var(--accent); border-bottom-width: 3px; }
+
+/* ------------------------------------------------------------ the status bar: quiet, no duplicates of the toolbar */
+html[data-ui="modern"] .statusbar { height: 26px; background: var(--ui-bg); border-top: 0; font-size: 12px; padding: 0 16px; }
+html[data-ui="modern"] .statusbar .zoom, html[data-ui="modern"] .statusbar .save-state { display: none; }
+
+/* ------------------------------------------------------------ dialogs, buttons, menus */
+html[data-ui="modern"] .dialog { border-radius: 28px; box-shadow: 0 4px 8px 3px rgba(60, 64, 67, 0.15), 0 1px 3px rgba(60, 64, 67, 0.3); overflow: hidden; }
+html[data-ui="modern"] .dialog h2 { background: transparent; border-bottom: 0; padding: 22px 24px 6px; font-size: 22px; font-weight: 400; border-radius: 0; }
+html[data-ui="modern"] .dialog .body { padding: 12px 24px 16px; }
+html[data-ui="modern"] .dialog .buttons { border-top: 0; padding: 8px 24px 20px; }
+html[data-ui="modern"] .btn { border-radius: 20px; padding: 8px 22px; font-weight: 500; font-size: 14px; border-color: var(--ui-border); }
+html[data-ui="modern"] .btn.primary { background: var(--accent); border-color: var(--accent); }
+html[data-ui="modern"] .btn:hover { filter: none; box-shadow: 0 1px 2px rgba(60, 64, 67, 0.3); }
+html[data-ui="modern"] .dialog input[type=text], html[data-ui="modern"] .dialog input[type=number], html[data-ui="modern"] .dialog select, html[data-ui="modern"] .dialog textarea { border-radius: 4px; padding: 7px 10px; }
+
+/* ------------------------------------------------------------ the start screen */
+html[data-ui="modern"] .home-card { border: 0; border-radius: 16px; box-shadow: none; background: var(--surface); }
+html[data-ui="modern"] .home-card.example { background: var(--m-pill); }
+html[data-ui="modern"] .home-row { border-radius: 12px; }
+html[data-ui="modern"] .home-row:hover { background: var(--ui-hover); }
+
+/* ------------------------------------------------------------ slides, posters, web pages (deliverable/DeliverableEditor.tsx) */
+html[data-ui="modern"] .dl-editor { background: var(--ui-bg); }
+html[data-ui="modern"] .dl-toolbar { margin: 0 16px 8px; padding: 0 8px; min-height: 40px; border: 0; border-radius: 24px; background: var(--m-pill); }
+html[data-ui="modern"] .dl-title { display: none; }
+html[data-ui="modern"] .dl-btn { border-radius: 4px; border: 0; height: 28px; }
+html[data-ui="modern"] .dl-btn:hover:not(:disabled) { background: var(--m-pill-hover); }
+html[data-ui="modern"] .dl-present { border-radius: 16px; padding: 0 14px; background: var(--m-share); color: var(--m-share-fg); font-weight: 500; }
+html[data-ui="modern"] .dl-present:hover:not(:disabled) { background: var(--m-share) !important; box-shadow: var(--m-shadow); }
+html[data-ui="modern"] .dl-rail { background: var(--ui-bg); border-right: 0; }
+html[data-ui="modern"] .dl-notes { border-top: 0; background: var(--ui-bg); }
+html[data-ui="modern"] .dl-notes textarea { background: var(--surface); border-radius: 8px; margin: 0 16px 8px; width: calc(100% - 32px); height: calc(100% - 8px); }
+html[data-ui="modern"] .dk-size { border-radius: 4px; border-color: var(--ui-border); background: transparent; }
+
+/* ------------------------------------------------------------ whiteboards (app/BoardEditor.tsx): GoodNotes' floating palette */
+html[data-ui="modern"] .board-tools { border-radius: 24px; border: 0; box-shadow: var(--m-shadow); background: var(--surface); padding: 6px 10px; }
+html[data-ui="modern"] .board-tools .small-btn { border: 0; border-radius: 16px; font-size: 13px; padding: 4px 10px; }
+
+/* ------------------------------------------------------------ the welcome card's interface choice (Tour.tsx) */
+.ui-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0 6px; }
+.ui-choice button { display: flex; flex-direction: column; gap: 6px; align-items: stretch; padding: 10px; border: 2px solid var(--ui-border); border-radius: 12px; background: var(--surface); color: var(--ui-fg); font: inherit; text-align: left; cursor: pointer; }
+.ui-choice button:hover { border-color: var(--accent-border); }
+.ui-choice button.on { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.ui-choice b { font-size: 14px; }
+.ui-choice span { font-size: 12px; color: var(--ui-muted); line-height: 1.35; }
+.ui-choice svg { width: 100%; height: auto; border-radius: 6px; background: var(--ui-bg2); }
+html[data-ui="modern"] .rail button[data-rail="comments"] { --icon: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27><path d=%27M12,23A1,1 0 0,1 11,22V19H7A2,2 0 0,1 5,17V7A2,2 0 0,1 7,5H21A2,2 0 0,1 23,7V17A2,2 0 0,1 21,19H16.9L13.2,22.71C13,22.89 12.76,23 12.5,23H12M13,17V20.08L16.08,17H21V7H7V17H13M3,15H1V3A2,2 0 0,1 3,1H19V3H3V15M9,9H19V11H9V9M9,13H17V15H9V13Z%27/></svg>"); }
+html[data-ui="modern"] .rail button[data-rail="versions"] { --icon: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27><path d=%27M13.5,8H12V13L16.28,15.54L17,14.33L13.5,12.25V8M13,3A9,9 0 0,0 4,12H1L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3%27/></svg>"); }
+html[data-ui="modern"] .rail button[data-rail="agent"] { --icon: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27><path d=%27M19,1L17.74,3.75L15,5L17.74,6.26L19,9L20.25,6.26L23,5L20.25,3.75M9,4L6.5,9.5L1,12L6.5,14.5L9,20L11.5,14.5L17,12L11.5,9.5M19,15L17.74,17.74L15,19L17.74,20.25L19,23L20.25,20.25L23,19L20.25,17.74%27/></svg>"); }
+html[data-ui="modern"] .rail button[data-rail="pdf"] { --icon: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27><path d=%27M19 3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3M9.5 11.5C9.5 12.3 8.8 13 8 13H7V15H5.5V9H8C8.8 9 9.5 9.7 9.5 10.5V11.5M14.5 13.5C14.5 14.3 13.8 15 13 15H10.5V9H13C13.8 9 14.5 9.7 14.5 10.5V13.5M18.5 10.5H17V11.5H18.5V13H17V15H15.5V9H18.5V10.5M12 10.5H13V13.5H12V10.5M7 10.5H8V11.5H7V10.5Z%27/></svg>"); }
+html[data-ui="modern"] .rail button[data-rail="source"] { --icon: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27><path d=%27M14.6,16.6L19.2,12L14.6,7.4L16,6L22,12L16,18L14.6,16.6M9.4,16.6L4.8,12L9.4,7.4L8,6L2,12L8,18L9.4,16.6Z%27/></svg>"); }
+html[data-ui="modern"] .rail button[data-rail="outline"] { --icon: url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27><path d=%27M20,18H4V8H20M20,6H12L10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6Z%27/></svg>"); }
