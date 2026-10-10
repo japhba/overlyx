@@ -65,4 +65,21 @@ exports.run = async function run() {
   await vscode.commands.executeCommand('overlyx.syncResume');
   await until(() => fs.existsSync(path.join(ws, 'paused.txt')), 20000, 'the file after resuming');
   log('pause / resume');
+
+  // 6. Clone Project from OverLyX…: the server, then the project, then the folder (the pickers answered here)
+  const server = process.env.OVERLYX_TEST_SERVER, project = process.env.OVERLYX_TEST_PROJECT, clones = process.env.OVERLYX_TEST_CLONES;
+  fs.mkdirSync(clones, { recursive: true });
+  const w = vscode.window;
+  const real = { showQuickPick: w.showQuickPick, showOpenDialog: w.showOpenDialog, showInformationMessage: w.showInformationMessage };
+  const picked = [];
+  try {
+    w.showQuickPick = async (items) => { const list = await items; const it = list.find(i => i.host === server) || list.find(i => i.label === project); picked.push(it && it.label); return it; };
+    w.showOpenDialog = async () => [vscode.Uri.file(clones)];
+    w.showInformationMessage = async () => undefined;   // "Open / Open in New Window / Add to Workspace": none
+    await Promise.race([vscode.commands.executeCommand('overlyx.cloneProject'), new Promise((_, rej) => setTimeout(() => rej(new Error('the clone command waited for input the test did not give')), 60000))]);
+  } finally { Object.assign(w, real); }
+  const cloned = path.join(clones, project.split('/').pop());
+  assert.ok(fs.existsSync(path.join(cloned, 'main.tex')), 'the project is cloned: ' + JSON.stringify(picked));
+  assert.ok(!fs.readFileSync(path.join(cloned, '.git', 'config'), 'utf8').includes('olx'), 'no credential in .git/config');
+  log('clone command:', picked.join(' → '));
 };

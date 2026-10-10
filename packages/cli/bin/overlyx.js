@@ -306,7 +306,9 @@ async function browserLogin(host, flags, ui = null) {
     const u = new URL(req.url, 'http://127.0.0.1');
     if (u.pathname === '/callback' && u.searchParams.get('state') === state && u.searchParams.get('code')) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      res.end('<!doctype html><meta charset="utf-8"><title>OverLyX CLI</title><body style="font:15px/1.5 system-ui;max-width:28em;margin:12vh auto;padding:0 1em"><h2>The OverLyX CLI is signed in</h2><p>You can close this tab and go back to the terminal.</p></body>');
+      res.end(ui?.app === 'vscode'
+        ? '<!doctype html><meta charset="utf-8"><title>OverLyX for VS Code</title><body style="font:15px/1.5 system-ui;max-width:28em;margin:12vh auto;padding:0 1em"><h2>OverLyX for VS Code is signed in</h2><p>You can close this tab and go back to VS Code.</p></body>'
+        : '<!doctype html><meta charset="utf-8"><title>OverLyX CLI</title><body style="font:15px/1.5 system-ui;max-width:28em;margin:12vh auto;padding:0 1em"><h2>The OverLyX CLI is signed in</h2><p>You can close this tab and go back to the terminal.</p></body>');
       finish(u.searchParams.get('code'));
       return;
     }
@@ -316,7 +318,7 @@ async function browserLogin(host, flags, ui = null) {
   const port = server.address().port;
   // in a clone of one of the projects: the page suggests it, should the account narrow sign-ins (fine-grained access)
   const clone = ui ? (ui.project ? { project: ui.project } : null) : await cloneOf(host);
-  const url = `${host}/cli/login?` + new URLSearchParams({ port: String(port), state, challenge, client: os.hostname(), ...(manual ? { mode: 'manual' } : {}), ...(clone ? { project: clone.project } : {}) }).toString();
+  const url = `${host}/cli/login?` + new URLSearchParams({ port: String(port), state, challenge, client: os.hostname(), ...(manual ? { mode: 'manual' } : {}), ...(clone ? { project: clone.project } : {}), ...(ui?.app ? { app: ui.app } : {}) }).toString();
   let rl = null;
   if (ui) {
     await ui.open(url);
@@ -1403,7 +1405,7 @@ export class SyncEngine {
     let backoff = 2000;
     let timer = null, wake = null;
     // paused (another process holds the clone, another branch, git busy): look again in a while, or when poked
-    const nap = (ms) => new Promise(resolve => { const t = setTimeout(resolve, ms); wake = () => { clearTimeout(t); resolve(); }; });
+    const nap = (ms) => new Promise(resolve => { if (this.stopped) { resolve(); return; } const t = setTimeout(resolve, ms); wake = () => { clearTimeout(t); resolve(); }; });
     const kick = () => { clearTimeout(timer); timer = setTimeout(() => { wake?.(); void this.sync().catch(() => undefined); }, 800); };
     this.poke = kick;
     if (watchFiles) {
@@ -1482,6 +1484,40 @@ export async function signInWithBrowser(host, ui) {
   if (!config.defaultHost) config.defaultHost = host;
   writeConfig(config);
   return { username: result.user.username, token };
+}
+
+/** The servers this computer is signed in to (the CLI's sign-ins, shared with the VS Code extension). */
+export function signedInHosts() {
+  return Object.entries(readConfig().hosts ?? {}).filter(([, v]) => v?.username && v?.token).map(([host, v]) => ({ host, username: v.username }));
+}
+
+/** Forget the sign-in for `host` (the CLI's and the VS Code extension's: they share it). Git's configuration is left alone. */
+export function signOutOf(host) {
+  const config = readConfig();
+  host = normalizeHost(host);
+  if (!config.hosts[host]) return false;
+  delete config.hosts[host];
+  if (config.defaultHost === host) config.defaultHost = Object.keys(config.hosts)[0] ?? null;
+  writeConfig(config);
+  return true;
+}
+
+/** The projects the sign-in reaches on `host`: { name, title, role }. */
+export async function remoteProjects(host, auth) {
+  return (await api({ host, ...auth }, '/git/api/projects')).projects;
+}
+
+/**
+ * `git clone` of the project into `parent`/`name` — the credential travels in an environment header,
+ * never in .git/config or on the command line; the remote URL names the account, as `repo create` does.
+ */
+export async function cloneProject(host, auth, project, parent, name) {
+  const url = new URL(gitUrl({ host }, project));
+  url.username = auth.username;
+  const dir = path.join(parent, name ?? project.split('/').pop());
+  if (fs.existsSync(dir)) fail(`${dir} exists already`);
+  await git(parent, ['clone', '-q', url.toString(), dir], auth);
+  return dir;
 }
 
 /** The servers this computer is signed in to with the CLI, and overlyx.app: a clone of a project on one of them is synced. */

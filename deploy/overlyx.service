@@ -21,7 +21,7 @@ Environment=OVERLYX_OWNER_EMAIL=japhba@gmail.com
 EnvironmentFile=-/root/lyx/overlyx/deploy/secrets.env
 # OVERLYX_SIGNUP=invited would restrict Google sign-in to invited e-mail addresses (default: open)
 # Every project is a git repository served at <public url>/git/<project>.git (needs git in PATH);
-# OVERLYX_GIT=off disables it, OVERLYX_GIT_COMMIT_MS the idle time before OverLyX commits (default 2 min)
+# OVERLYX_GIT=off disables it, OVERLYX_GIT_COMMIT_MS the idle time before OverLyX commits (default 5 min; at most 30 min apart while editing: OVERLYX_GIT_COMMIT_MAX_WAIT)
 # LaTeX builds and image conversions run in a bubblewrap sandbox (apt install bubblewrap);
 # OVERLYX_SANDBOX=bwrap refuses to start without it, =none disables it (not recommended)
 #Environment=OVERLYX_SANDBOX=bwrap

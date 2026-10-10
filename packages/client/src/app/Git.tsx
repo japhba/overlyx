@@ -133,8 +133,9 @@ export function GitDialog({ project, onClose }: { project: string; user: User; o
             {!canPush && <> You have <b>view</b> access to this project: you can clone and pull, but not push.</>}
           </div>
           <div class="hint" data-git-sync>
-            <b>Keep the clone in step, without pulling or pushing:</b> open it in VS Code with the OverLyX extension (it syncs by
-            itself), or run <code>overlyx sync --watch</code> in it (OverLyX CLI). Saved files reach this project within seconds, changes
+            <b>Keep the clone in step, without pulling or pushing:</b> in VS Code with the OverLyX extension, <i>OverLyX: Clone
+            Project from OverLyX…</i> signs in, clones and syncs by itself (so does any clone opened there); in a terminal, run{' '}
+            <code>overlyx sync --watch</code> in the clone (OverLyX CLI). Saved files reach this project within seconds, changes
             made here arrive there, and the history gets no extra commits (only OverLyX's usual ones).
           </div>
           <div class="hint">Just want a backup, not a git clone? <a href={zipUrl(project)} data-download-zip={project}>Download the whole project as a .zip</a>.</div>
@@ -246,7 +247,7 @@ bearer_token_env_var = "OVERLYX_TOKEN"`}</pre>
 
           <h4>History</h4>
           <div class="hint">
-            OverLyX commits what people edit here about half a minute after the last change, and always before a clone, pull or push, so the
+            OverLyX commits what people edit here five minutes after the last change (at most half an hour apart while editing goes on), and always before a clone, pull or push, so the
             repository is never behind the editor. A push into the project updates it at once — open documents merge the change like an
             external save. <i>Restore</i> puts the whole project back to an earlier commit, as a new commit on top.
           </div>

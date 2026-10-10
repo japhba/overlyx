@@ -4,8 +4,9 @@
  *  - the project directory *is* the working tree (`git init` in place, a `.gitignore` for build
  *    products and LyX backups, an initial commit) — desktop LyX, OverLyX and git all work on the
  *    same files;
- *  - OverLyX **commits its own writes** automatically: a couple of minutes after the last change
- *    (`OVERLYX_GIT_COMMIT_MS`), and always right before a clone / fetch / push is served, so the
+ *  - OverLyX **commits its own writes** automatically: five minutes after the last change, at most
+ *    half an hour apart while editing goes on (`OVERLYX_GIT_COMMIT_MS`, `…_MAX_WAIT`), and always
+ *    right before a clone / fetch / push is served (not a synced clone's fetch, sync.ts), so the
  *    remote is never behind what the editor shows. Commits are attributed to the people who edited;
  *  - the repository is served over **smart HTTP** at `/git/<owner>/<name>.git` by `git http-backend`
  *    (a remote from before namespaces, `/git/<name>.git`, keeps working: namespaces.ts aliases),

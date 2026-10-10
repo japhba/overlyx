@@ -2,7 +2,8 @@
  * The extension's sync (src/host/sync.ts) in a real VS Code against a running OverLyX server — an
  * isolated instance, never production: a project is created there, cloned into a scratch workspace,
  * and test/suite/sync.cjs checks inside the extension host that the clone is synced by itself, both
- * ways, and that a file with unsaved changes in an editor waits until it is saved (then merges).
+ * ways, that a file with unsaved changes in an editor waits until it is saved (then merges), and that
+ * *Clone Project from OverLyX…* clones (its pickers answered by the test).
  * The sign-in comes from a scratch CLI config (OVERLYX_CONFIG_DIR), which also makes the server known.
  *
  *   OVERLYX_E2E_SERVER=http://127.0.0.1:3003 OVERLYX_E2E_CREDENTIALS=$S/data/credentials.txt \
@@ -49,7 +50,7 @@ try {
     extensionTestsPath: path.join(pkg, 'test/suite/sync.cjs'),
     launchArgs: [ws, '--disable-workspace-trust', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-extensions'],
     cachePath: path.join(pkg, '.vscode-test'),
-    extensionTestsEnv: { OVERLYX_TEST_WS: ws, OVERLYX_TEST_SERVER_DIR: path.join(projectsDir, PROJECT), OVERLYX_CONFIG_DIR: config, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+    extensionTestsEnv: { OVERLYX_TEST_WS: ws, OVERLYX_TEST_SERVER_DIR: path.join(projectsDir, PROJECT), OVERLYX_TEST_SERVER: server, OVERLYX_TEST_PROJECT: PROJECT, OVERLYX_TEST_CLONES: path.join(root, 'clones'), OVERLYX_CONFIG_DIR: config, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
   });
   console.log('sync integration test PASSED');
 } catch (e) {

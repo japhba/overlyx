@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import os, { tmpdir } from 'node:os';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -395,6 +395,59 @@ describe('overlyx auth login through the browser', () => {
     expect(readFileSync(GITCONFIG, 'utf8')).not.toContain('auth git-credential');
     // … and a code works once
     expect((await fetch(`${host}/cli/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, verifier: 'x' }) })).status).toBe(400);
+  });
+
+  it('the VS Code extension signs in, lists and clones with the bundled engine — no CLI, no token pasted, git\'s config untouched', async () => {
+    const VSCONFIG = join(ROOT, 'config-vscode');
+    const before = readFileSync(GITCONFIG, 'utf8');
+    const saved = { lib: process.env.OVERLYX_CLI_LIBRARY, config: process.env.OVERLYX_CONFIG_DIR };
+    process.env.OVERLYX_CLI_LIBRARY = '1';   // as the extension's bundle has it: the command line does not run
+    const lib = await import('../packages/cli/bin/overlyx.js');
+    process.env.OVERLYX_CONFIG_DIR = VSCONFIG;
+    try {
+      let consentText = '', callbackText = '';
+      const auth = await lib.signInWithBrowser(host, {
+        app: 'vscode',
+        // the browser: signed in to OverLyX, it shows the consent page, the person authorizes, the redirect goes back to VS Code
+        open: async (url: string) => {
+          const q = Object.fromEntries(new URL(url).searchParams);
+          expect(q.app).toBe('vscode');
+          consentText = await (await fetch(url, { headers: { cookie: cookie() } })).text();
+          const approved = await fetch(`${host}/cli/login`, { method: 'POST', redirect: 'manual', headers: { cookie: cookie(), 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ...q, decision: 'approve' }).toString() });
+          callbackText = await (await fetch(approved.headers.get('location')!)).text();
+        },
+      });
+      expect(consentText).toContain('Sign in OverLyX for VS Code?');
+      expect(consentText).toContain('clicked <i>Sign in</i> in VS Code');
+      expect(callbackText).toContain('OverLyX for VS Code is signed in');
+      expect(auth.username).toBe('ada');
+      expect(listMcpTokens(user.id).map(t => t.name)).toContain(`OverLyX for VS Code on ${os.hostname()}`);
+      // kept where the CLI keeps its sign-ins (one per computer for both); git's configuration is not touched
+      expect(JSON.parse(readFileSync(join(VSCONFIG, 'hosts.json'), 'utf8')).hosts[host].token).toBe(auth.token);
+      expect(lib.signedInHosts()).toEqual([{ host, username: 'ada' }]);
+      expect(readFileSync(GITCONFIG, 'utf8')).toBe(before);
+      // Clone Project from OverLyX…: the account's projects, and a clone without the token anywhere in it
+      const projects = await lib.remoteProjects(host, auth);
+      expect(projects.map((p: { name: string }) => p.name)).toContain('ada/Imported paper');
+      mkdirSync(join(ROOT, 'vscode-clones'), { recursive: true });
+      const gitEnvBefore = { config: process.env.GIT_CONFIG_GLOBAL };
+      process.env.GIT_CONFIG_GLOBAL = GITCONFIG;   // the stale helper of before must not be what clones
+      let dir: string;
+      try { dir = await lib.cloneProject(host, auth, 'ada/Imported paper', join(ROOT, 'vscode-clones')); }
+      finally { if (gitEnvBefore.config === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = gitEnvBefore.config; }
+      expect(dir).toBe(join(ROOT, 'vscode-clones', 'Imported paper'));
+      expect(readFileSync(join(dir, 'main.tex'), 'utf8')).toContain('Hello from an existing folder.');
+      const gitconfig = readFileSync(join(dir, '.git', 'config'), 'utf8');
+      expect(gitconfig).toContain(`url = ${host.replace('://', '://ada@')}/git/ada/Imported%20paper.git`);
+      expect(gitconfig).not.toContain(auth.token);
+      expect((await lib.syncTarget(dir))?.project).toBe('ada/Imported paper');
+      // Sign Out…
+      expect(lib.signOutOf(host)).toBe(true);
+      expect(lib.signedInHosts()).toEqual([]);
+    } finally {
+      if (saved.lib === undefined) delete process.env.OVERLYX_CLI_LIBRARY; else process.env.OVERLYX_CLI_LIBRARY = saved.lib;
+      if (saved.config === undefined) delete process.env.OVERLYX_CONFIG_DIR; else process.env.OVERLYX_CONFIG_DIR = saved.config;
+    }
   });
 
   it('fine-grained access (Settings ▸ Account, off by default): a sign-in narrowed to one project, read only', async () => {

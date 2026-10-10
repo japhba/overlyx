@@ -69,6 +69,17 @@ describe('mirror', () => {
     expect(after.head).not.toBe(before.head);
   });
 
+  it('the sweeper pushes what is committed and makes no commit of its own; Push now commits pending edits first', async () => {
+    const count = async () => Number((await execFileP('git', ['-C', join(ROOT, 'projects', PROJECT), 'rev-list', '--count', 'HEAD'])).stdout.trim());
+    const before = await count();
+    writeFileSync(join(ROOT, 'projects', PROJECT, 'pending.tex'), 'not committed yet\n');
+    await mirror.pushProject(PROJECT);
+    expect(await count()).toBe(before);
+    const now = await mirror.pushProject(PROJECT, { force: true });
+    expect(await count()).toBe(before + 1);
+    expect(await bareHead()).toBe(now.head);
+  });
+
   it('a paused project is left alone until resumed', async () => {
     mirror.setMirrorEnabled(PROJECT, false);
     writeFileSync(join(ROOT, 'projects', PROJECT, 'notes.tex'), 'notes\n');

@@ -239,7 +239,8 @@ blend.
   `git clone https://<server>/git/<owner>/<project>.git` with your username and your **account access
   token** created in that dialog (or your OverLyX password; Google accounts have no password). The project directory
   is the working tree, so desktop LyX, OverLyX and git all work on the same files. OverLyX commits
-  what people edit in the browser by itself — a couple of minutes after the last change and always
+  what people edit in the browser by itself — five minutes after the last change (at most half an hour
+  apart while editing goes on) and always
   right before a clone, pull or push (attributed to the people who edited) — so the repository is
   never behind the editor; *Commit now* in the dialog commits at once with a message of your own. A
   `git push` goes straight into the project (the checked-out branch is updated in place; open
@@ -271,7 +272,15 @@ blend.
   pushing. The VS Code extension does it by itself for every workspace folder whose git remote is a
   project on overlyx.app (or on a server in `overlyx.sync.servers` or signed in with the CLI) while
   the window is open (`host/sync.ts`: status bar item, *OverLyX: Sync Now / Pause / Resume / Show
-  Sync Log*, a one-time notice, `overlyx.sync.enabled` switches it off); in a terminal,
+  Sync Log*, a one-time notice, `overlyx.sync.enabled` switches it off). The extension needs neither
+  the CLI nor a pasted token: *OverLyX: Sign In…* (offered by itself when a clone of a server without
+  a sign-in turns up, or when the credential stops working) runs the CLI's browser sign-in from the
+  bundle with `app=vscode` — the consent page and the credential say "OverLyX for VS Code on
+  <computer>" (`server/cliLogin.ts`) — and keeps it in the CLI's `hosts.json`, so both share one
+  sign-in per computer; git's configuration is not touched. *OverLyX: Clone Project from OverLyX…*
+  (also in the empty Explorer) lists the account's projects (`/git/api/projects`) and clones one
+  (`cloneProject`: the credential in an environment header, the remote URL naming the account), then
+  opens it; *Sign Out…* forgets the sign-in (for the CLI too). In a terminal,
   `overlyx sync [DIR]` syncs once and `overlyx sync --watch` until Ctrl+C. The extension bundles the
   CLI file as a library (esbuild defines `process.env.OVERLYX_CLI_LIBRARY`, which keeps its command
   line from running; `overlyx.d.ts` types the exports). **File contents travel, not commits**, so
@@ -1639,8 +1648,9 @@ without it the notification is only logged, since outbound port 25 is blocked on
 and `OVERLYX_MAIL_FROM` (optional From header override),
 `OVERLYX_SIGNUP` (`open` — anyone with a Google account may sign in, the default — or `invited`),
 `OVERLYX_GIT` (`off` to not expose projects as git repositories), `OVERLYX_GIT_COMMIT_MS` (idle time
-before OverLyX commits what changed, default 2 min) and `OVERLYX_GIT_COMMIT_MAX_WAIT` (longest time
-changes stay uncommitted while editing goes on, default 15 min), `GITHUB_REPO` / `GITHUB_TOKEN` /
+before OverLyX commits what changed, default 5 min) and `OVERLYX_GIT_COMMIT_MAX_WAIT` (longest time
+changes stay uncommitted while editing goes on, default 30 min; 10 Oct 2026, the user: one commit per
+stretch of editing — it was 30 s / 15 min, about a commit a minute while typing), `GITHUB_REPO` / `GITHUB_TOKEN` /
 `GITHUB_API_URL` (feedback and error reports as issues, see above), `OVERLYX_ERROR_REPORTS` (`off`
 disables the automatic ones), `OVERLYX_USAGE_STATS` (`off` refuses the anonymous usage statistics), `OVERLYX_LITERATURE` (`off` disables the literature search of the
 citation dialog) and `OVERLYX_CONTACT_EMAIL` (optional, for the OpenAlex / Crossref polite pools). Git itself runs with an empty
@@ -1723,8 +1733,10 @@ whether it is configured; the features stay off in every browser until a user sw
 repositories*, permissions *Contents* and *Administration: read & write*), every project's git
 repository is pushed to a private repository `<org>/<project>` of that organisation
 (`packages/server/src/mirror.ts`): the repository is created on the first push, a sweeper runs every
-`OVERLYX_MIRROR_INTERVAL_MS` (5 min) and pushes each project whose HEAD moved (pending edits are
-committed first — OverLyX commits about `OVERLYX_GIT_COMMIT_MS` = 30 s after the last change), the
+`OVERLYX_MIRROR_INTERVAL_MS` (5 min) and pushes each project whose HEAD moved — what is committed:
+the sweeper makes no commit of its own (it used to commit pending edits, which put a commit into the
+history every 5 minutes of editing), so the backup trails the editor by up to `OVERLYX_GIT_COMMIT_MS` /
+`…_MAX_WAIT` (5 / 30 min); *Push now* commits first —, the
 server is the only writer (`--force --all`, nothing ever merges), the token reaches git through a
 credential helper reading the environment (never `.git/config` or the command line), a deleted
 project's repository is archived. The Git dialog shows the state per project (last push, behind,

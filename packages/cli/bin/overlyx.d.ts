@@ -54,4 +54,8 @@ export function syncCredentials(host: string, dir: string): Promise<SyncAuth | n
 export function syncEngineFor(dir: string, opts?: Partial<SyncEngineOptions>): Promise<{ engine?: SyncEngine; target?: SyncTarget; error?: string; signin?: boolean }>;
 export function knownSyncHosts(): string[];
 export function describeChanges(c: SyncChanges): string[];
-export function signInWithBrowser(host: string, ui: { open(url: string): Promise<unknown>; manual?: boolean; askCode?(): Promise<string | null | undefined>; project?: string }): Promise<SyncAuth>;
+export function signInWithBrowser(host: string, ui: { open(url: string): Promise<unknown>; manual?: boolean; askCode?(): Promise<string | null | undefined>; project?: string; app?: "vscode" }): Promise<SyncAuth>;
+export function signedInHosts(): { host: string; username: string }[];
+export function signOutOf(host: string): boolean;
+export function remoteProjects(host: string, auth: SyncAuth): Promise<{ name: string; title: string | null; role: string }[]>;
+export function cloneProject(host: string, auth: SyncAuth, project: string, parent: string, name?: string): Promise<string>;

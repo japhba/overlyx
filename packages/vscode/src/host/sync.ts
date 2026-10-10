@@ -9,12 +9,19 @@
  * same in a terminal, and the two never run on one clone at once). Here it adds: files with unsaved
  * changes in an editor wait until they are saved, a status bar item, a log, conflict notices, and
  * the browser sign-in. `overlyx.sync.enabled` switches it off; "Pause" holds one folder.
+ *
+ * Signing in and cloning need no CLI and no token: *OverLyX: Sign In…* (also offered as soon as a
+ * clone of a server it has no sign-in for turns up) authorizes in the browser — the CLI's own PKCE
+ * flow, bundled, with `app=vscode` so the page says "OverLyX for VS Code" — and keeps the credential
+ * where the CLI keeps its sign-ins (~/.config/overlyx/hosts.json: one sign-in per computer for both);
+ * *Clone Project from OverLyX…* lists the account's projects and clones one (the credential in an
+ * environment header, never in .git/config); *Sign Out…* forgets the sign-in.
  */
 import * as vscode from 'vscode';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { syncEngineFor, syncTarget, knownSyncHosts, describeChanges, signInWithBrowser, type SyncEngine, type SyncStatus, type SyncTarget, type SyncChanges } from '../../../cli/bin/overlyx.js';
+import { syncEngineFor, syncTarget, syncCredentials, knownSyncHosts, describeChanges, signInWithBrowser, signedInHosts, signOutOf, remoteProjects, cloneProject, type SyncEngine, type SyncStatus, type SyncTarget, type SyncChanges, type SyncAuth } from '../../../cli/bin/overlyx.js';
 
 interface FolderSync {
   dir: string;
@@ -28,6 +35,8 @@ interface FolderSync {
   connecting: Promise<void> | null;
 }
 
+const DEFAULT_HOST = 'https://overlyx.app';
+const hostName = (h: string) => new URL(h).host;
 const PAUSED = (dir: string) => `overlyx.sync.paused:${dir}`;
 const ANNOUNCED = (dir: string) => `overlyx.sync.announced:${dir}`;
 const time = (t: number) => new Date(t).toLocaleTimeString();
@@ -72,6 +81,14 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
 
   /** "syncing" shows only when a round takes a moment (it runs after every save and every change on the server) */
   function onStatus(f: FolderSync, s: SyncStatus): void {
+    if (s.state === 'signin') {
+      // the credential stopped working (revoked, expired): sign in again
+      disconnect(f);
+      f.signin = true; f.problem = s.message;
+      render(f);
+      offerSignIn(f.target);
+      return;
+    }
     if (s.state === 'syncing') {
       if (!f.spin) f.spin = setTimeout(() => { f.spin = null; render(f); }, 600);
       return;
@@ -107,7 +124,7 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
       isBusy: busy(f.dir),
       log: line => log(f.dir, line),
     });
-    if (!r.engine) { f.problem = r.error ?? null; f.signin = !!r.signin; render(f); return; }
+    if (!r.engine) { f.problem = r.error ?? null; f.signin = !!r.signin; render(f); if (f.signin) offerSignIn(f.target); return; }
     f.problem = null; f.signin = false;
     const engine = r.engine;
     engine.o.onStatus = s => onStatus(f, s);
@@ -164,20 +181,100 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     syncs.delete(dir);
   }
 
-  async function signIn(f: FolderSync): Promise<void> {
+  /** Sign in to `host` through the browser; then every folder waiting for it syncs. Null when it did not work out. */
+  async function signInTo(host: string, project?: string): Promise<SyncAuth | null> {
     try {
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Signing in to ${new URL(f.target.host).host} — authorize in the browser`, cancellable: false }, () => signInWithBrowser(f.target.host, {
-        project: f.target.project,
+      const auth = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Signing in to ${hostName(host)} — authorize OverLyX for VS Code in the browser`, cancellable: false }, () => signInWithBrowser(host, {
+        app: 'vscode',
+        project,
         // a remote window (SSH, a container): the browser is on another computer, so the page shows a code to paste
         manual: !!vscode.env.remoteName,
         open: url => Promise.resolve(vscode.env.openExternal(vscode.Uri.parse(url))),
         askCode: () => Promise.resolve(vscode.window.showInputBox({ prompt: 'Paste the code the OverLyX page shows', ignoreFocusOut: true })),
       }));
-      f.signin = false;
-      await connect(f);
+      void vscode.window.showInformationMessage(`OverLyX: signed in to ${hostName(host)} as ${auth.username}.`);
+      for (const f of syncs.values()) if (f.target.host === host && f.signin) { f.signin = false; f.problem = null; void connect(f); }
+      rescan();
+      return auth;
     } catch (e) {
-      void vscode.window.showErrorMessage(`OverLyX: signing in failed — ${(e as Error).message}`);
+      void vscode.window.showErrorMessage(`OverLyX: signing in to ${hostName(host)} failed — ${(e as Error).message}`);
+      return null;
     }
+  }
+  const signIn = (f: FolderSync) => signInTo(f.target.host, f.target.project);
+
+  /** once per server and window: a clone turned up that the sync cannot reach without a sign-in */
+  const offered = new Set<string>();
+  function offerSignIn(t: SyncTarget): void {
+    if (offered.has(t.host)) return;
+    offered.add(t.host);
+    void vscode.window.showWarningMessage(`OverLyX: sign in to ${hostName(t.host)} to keep this folder in step with ${t.project} — no pull or push needed after that.`, 'Sign in').then(a => { if (a) void signInTo(t.host, t.project); });
+  }
+
+  /** the servers to offer: overlyx.app, the ones signed in to, the ones in the settings */
+  function servers(): string[] {
+    return [...new Set([DEFAULT_HOST, ...signedInHosts().map(h => h.host), ...(config().get<string[]>('sync.servers') ?? []).map(h => h.replace(/\/$/, ''))])];
+  }
+
+  async function chooseServer(title: string, always: boolean): Promise<string | undefined> {
+    const list = servers();
+    if (list.length === 1 && !always) return list[0];
+    const signed = new Map(signedInHosts().map(h => [h.host, h.username]));
+    const items = [
+      ...list.map(h => ({ label: hostName(h), description: signed.has(h) ? `signed in as ${signed.get(h)}` : '', host: h })),
+      { label: '$(add) Another OverLyX server…', description: '', host: '' },
+    ];
+    const pickd = await vscode.window.showQuickPick(items, { title });
+    if (!pickd) return undefined;
+    if (pickd.host) return pickd.host;
+    const typed = await vscode.window.showInputBox({ title, prompt: 'The address of the OverLyX server', placeHolder: 'https://latex.example.org', ignoreFocusOut: true, validateInput: v => /^https?:\/\/[^/\s]+/.test(v.trim()) ? null : 'an http(s) address' });
+    return typed?.trim().replace(/\/+$/, '') || undefined;
+  }
+
+  /** The sign-in for `host` (the CLI's, git's), or a new one through the browser. */
+  async function authFor(host: string): Promise<SyncAuth | null> {
+    return (await syncCredentials(host, os.homedir())) ?? await signInTo(host);
+  }
+
+  async function cloneCommand(): Promise<void> {
+    const host = await chooseServer('Clone a project from which OverLyX server?', false);
+    if (!host) return;
+    const auth = await authFor(host);
+    if (!auth) return;
+    let projects: Awaited<ReturnType<typeof remoteProjects>>;
+    try { projects = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'OverLyX: listing projects' }, () => remoteProjects(host, auth)); }
+    catch (e) { void vscode.window.showErrorMessage(`OverLyX: cannot list the projects on ${hostName(host)} — ${(e as Error).message}`); return; }
+    if (!projects.length) { void vscode.window.showInformationMessage(`OverLyX: ${auth.username} has no projects on ${hostName(host)} yet.`); return; }
+    const choice = await vscode.window.showQuickPick(projects.map(p => ({ label: p.name, description: p.title ?? '', detail: p.role === 'view' ? 'view only: changes arrive here, yours are not sent' : undefined, p })), { title: `Clone a project from ${hostName(host)}`, matchOnDescription: true, placeHolder: 'kept in step with the server while it is open in VS Code' });
+    if (!choice) return;
+    const last = context.globalState.get<string>('overlyx.clone.parent');
+    const parents = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: 'Clone here', title: `Folder to clone ${choice.p.name} into`, defaultUri: vscode.Uri.file(last && fs.existsSync(last) ? last : os.homedir()) });
+    if (!parents?.length) return;
+    const parent = parents[0].fsPath;
+    let dir: string;
+    try { dir = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Cloning ${choice.p.name}…` }, () => cloneProject(host, auth, choice.p.name, parent)); }
+    catch (e) { void vscode.window.showErrorMessage(`OverLyX: cloning ${choice.p.name} failed — ${(e as Error).message}`); return; }
+    await context.globalState.update('overlyx.clone.parent', parent);
+    const uri = vscode.Uri.file(dir);
+    const open = await vscode.window.showInformationMessage(`OverLyX: cloned ${choice.p.name} into ${dir}. While it is open in VS Code it stays in step with the server.`, 'Open', 'Open in New Window', 'Add to Workspace');
+    if (open === 'Open') await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: false });
+    else if (open === 'Open in New Window') await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: true });
+    else if (open === 'Add to Workspace') vscode.workspace.updateWorkspaceFolders(vscode.workspace.workspaceFolders?.length ?? 0, 0, { uri });
+  }
+
+  async function signOutCommand(): Promise<void> {
+    const hosts = signedInHosts();
+    if (!hosts.length) { void vscode.window.showInformationMessage('OverLyX: not signed in to any server.'); return; }
+    const choice = hosts.length === 1 ? { h: hosts[0] } : await vscode.window.showQuickPick(hosts.map(h => ({ label: hostName(h.host), description: h.username, h })), { title: 'Sign out of which OverLyX server?' });
+    if (!choice) return;
+    const ok = await vscode.window.showWarningMessage(`Sign out of ${hostName(choice.h.host)} (${choice.h.username})?`, { modal: true, detail: 'The OverLyX CLI on this computer shares this sign-in, so it is signed out too. Synced folders stop syncing until you sign in again. (The credential stays valid until you revoke it in OverLyX under File ▸ Git repository.)' }, 'Sign Out');
+    if (ok !== 'Sign Out') return;
+    signOutOf(choice.h.host);
+    for (const f of syncs.values()) if (f.target.host === choice.h.host) { disconnect(f); f.signin = true; f.problem = 'Signed out.'; render(f); }
+  }
+
+  function rescan(): void {
+    for (const folder of vscode.workspace.workspaceFolders ?? []) void addFolder(folder).catch(e => report(e, 'sync.folder'));
   }
 
   const pick = (dir?: string): FolderSync | undefined => {
@@ -201,6 +298,9 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     vscode.commands.registerCommand('overlyx.syncPause', (dir?: string) => { const f = pick(dir); return f ? setPaused(f, true) : none(); }),
     vscode.commands.registerCommand('overlyx.syncResume', (dir?: string) => { const f = pick(dir); return f ? setPaused(f, false) : none(); }),
     vscode.commands.registerCommand('overlyx.syncShowLog', () => out.show(true)),
+    vscode.commands.registerCommand('overlyx.cloneProject', () => cloneCommand()),
+    vscode.commands.registerCommand('overlyx.signIn', async () => { const host = await chooseServer('Sign in to which OverLyX server?', true); if (host) await signInTo(host); }),
+    vscode.commands.registerCommand('overlyx.signOut', () => signOutCommand()),
     vscode.commands.registerCommand('overlyx.syncMenu', async (dir?: string) => {
       const f = pick(dir);
       if (!f) return none();
@@ -232,8 +332,8 @@ export function setupSync(context: vscode.ExtensionContext, report: (e: unknown,
     vscode.workspace.onDidChangeConfiguration(e => {
       if (!e.affectsConfiguration('overlyx.sync')) return;
       for (const f of syncs.values()) { if (enabled()) void connect(f); else disconnect(f); }
-      for (const folder of vscode.workspace.workspaceFolders ?? []) void addFolder(folder).catch(err => report(err, 'sync.folder'));
+      rescan();
     }),
   );
-  for (const folder of vscode.workspace.workspaceFolders ?? []) void addFolder(folder).catch(e => report(e, 'sync.folder'));
+  rescan();
 }

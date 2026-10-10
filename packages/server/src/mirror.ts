@@ -5,8 +5,10 @@
  *    `<org>/<project>` of the organisation `GITHUB_MIRROR_ORG`; the repository is created through
  *    the GitHub API the first time (a fine-grained token with Contents + Administration: write);
  *  - a sweeper runs every `OVERLYX_MIRROR_INTERVAL_MS` (5 min): each project whose HEAD moved since
- *    the last push (pending edits are committed first) is pushed with `--force --all` — the server
- *    is the only writer, GitHub only receives, so nothing ever needs merging;
+ *    the last push is pushed with `--force --all` — the server is the only writer, GitHub only
+ *    receives, so nothing ever needs merging. The sweeper pushes what is committed (OverLyX's own
+ *    schedule, git.ts touchProject) and makes no commit of its own, which would put one into the
+ *    history every 5 minutes of editing; *Push now* in the Git dialog commits pending edits first;
  *  - the token never touches `.git/config` or the command line: it is handed to git through a
  *    credential helper reading it from the environment of that one git process;
  *  - a deleted project's repository is *archived* on GitHub, never deleted;
@@ -146,7 +148,9 @@ export async function pushProject(project: string, opts: { force?: boolean } = {
   if (!mirrorConfigured()) return statusOf(project);
   const row = ensureRow(project);
   if (!row.enabled && !opts.force) return statusOf(project);
-  await commitProject(project);                    // pending edits become a commit first
+  // Push now: pending edits become a commit first; the sweeper leaves that to the schedule (a new project gets its repository and first commit)
+  if (opts.force) await commitProject(project);
+  else await ensureRepo(project);
   const head = (await git(project, ['rev-parse', 'HEAD']).catch(() => '')).trim();
   if (!head) return statusOf(project);
   if (head === row.last_head && !row.last_error && !opts.force) return statusOf(project);

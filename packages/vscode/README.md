@@ -115,8 +115,11 @@ you and someone on the server changed the same paragraph of a document, their te
 is a tracked change over it; other text merges by lines; what cannot merge keeps the server's
 version and yours next to it as a conflict copy. A file with unsaved changes waits until you save
 it. The status bar shows the state (click it to sync now, pause the folder, see the log or open the
-project in the browser); it signs in through the browser the first time, unless the OverLyX CLI or
-git already has a sign-in for the server. `overlyx.sync.enabled` switches it off,
+project in the browser). No CLI and no token needed: **OverLyX: Clone Project from OverLyX…** (also
+in the empty Explorer) signs you in through the browser, lists your projects and clones one;
+**OverLyX: Sign In… / Sign Out…** manage the sign-in, which the OverLyX CLI on the same computer
+shares. A clone made some other way asks you to sign in once, unless the CLI or git already has a
+sign-in for the server. `overlyx.sync.enabled` switches it off,
 `overlyx.sync.servers` adds self-hosted servers. In a terminal, `overlyx sync --watch` (OverLyX CLI)
 does the same; the two never run on one clone at once.
 

@@ -162,6 +162,22 @@
         "category": "OverLyX"
       },
       {
+        "command": "overlyx.cloneProject",
+        "title": "Clone Project from OverLyX…",
+        "category": "OverLyX",
+        "icon": "$(repo-clone)"
+      },
+      {
+        "command": "overlyx.signIn",
+        "title": "Sign In to OverLyX…",
+        "category": "OverLyX"
+      },
+      {
+        "command": "overlyx.signOut",
+        "title": "Sign Out of OverLyX…",
+        "category": "OverLyX"
+      },
+      {
         "command": "overlyx.syncMenu",
         "title": "Sync…",
         "category": "OverLyX"
@@ -186,6 +202,11 @@
         "view": "overlyx.structure",
         "contents": "The outline of the document open in the OverLyX editor appears here.\n[New Slide Deck](command:overlyx.newSlides)\n[New Document…](command:overlyx.newDocument)",
         "when": "!overlyx.active"
+      },
+      {
+        "view": "explorer",
+        "contents": "Work on a project from OverLyX (overlyx.app): it stays in step with the server while it is open here.\n[Clone an OverLyX Project](command:overlyx.cloneProject)",
+        "when": "workspaceFolderCount == 0"
       }
     ],
     "views": {

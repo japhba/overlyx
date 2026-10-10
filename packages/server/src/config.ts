@@ -78,10 +78,10 @@ export const config = {
   autoVersionIntervalMs: Number(process.env.OVERLYX_AUTOVERSION_MS ?? 10 * 60 * 1000),
   /** every project is a git repository served at /git/<owner>/<name>.git (OVERLYX_GIT=off disables it) */
   git: process.env.OVERLYX_GIT !== 'off',
-  /** idle time after the last change before OverLyX commits it (ms) */
-  gitCommitMs: Number(process.env.OVERLYX_GIT_COMMIT_MS ?? 30 * 1000),
+  /** idle time after the last change before OverLyX commits it (ms): one commit per stretch of editing, not per pause */
+  gitCommitMs: Number(process.env.OVERLYX_GIT_COMMIT_MS ?? 5 * 60 * 1000),
   /** longest time changes may stay uncommitted while editing goes on (ms) */
-  gitCommitMaxWaitMs: Number(process.env.OVERLYX_GIT_COMMIT_MAX_WAIT ?? 15 * 60 * 1000),
+  gitCommitMaxWaitMs: Number(process.env.OVERLYX_GIT_COMMIT_MAX_WAIT ?? 30 * 60 * 1000),
   /** feedback + error reports become GitHub issues of this repository (feedback.ts); needs a token with Issues: write */
   github: {
     repo: (process.env.GITHUB_REPO ?? 'japhba/overlyx').trim(),
