@@ -2,12 +2,15 @@
  * Formulas in a text being retyped are edited with LyX's formula editor. While edit.ts retypes a
  * text, each \( \), \[ \] or $$ $$ of it is a "chip": the typeset formula, one character for the
  * text around it (contenteditable=false). A click on a chip, an arrow key into it or Ctrl+M (a new
- * one) opens LyX's math field over it in the editor (DeliverableEditor places a LyxMathField on the
- * chip's box; the chip, hidden meanwhile, keeps the room the formula takes), which sends the
- * formula back as it changes (`mathSet`) and when it is left (`mathDone`). Written back as text
+ * one) opens LyX's math field over it in the editor: DeliverableEditor lays a LyxMathField exactly
+ * over the chip — same font (MathJax's New Computer Modern), same size, same baseline, growing from
+ * the same side — and once it is drawn (`mathShown`) the chip is hidden, keeping the room the
+ * formula takes. The field sends the formula back as it changes (`mathSet`: the chip typeset
+ * again, so the text around it reflows) and when it is left (`mathDone`: the chip shown, then
+ * `mathClose` takes the field away — never a moment without the formula). Written back as text
  * the formula keeps the source it had, unless it was changed.
  */
-import type { Rect } from '../protocol';
+import type { MathBox, KeyPress } from '../protocol';
 import { post } from './env';
 import { typeset, untypeset } from './math';
 
@@ -17,6 +20,7 @@ const DELIMS: Record<string, [string, string]> = { '(': ['\\(', '\\)'], '[': ['\
 let seq = 0;
 /** the chip whose formula is open in the editor */
 let open: HTMLElement | null = null;
+let openedAt = 0;
 
 export const isChip = (n: Node | null | undefined): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('ol-mathchip');
 
@@ -83,20 +87,106 @@ export function unchip(root: HTMLElement): void {
 
 const chipById = (id: number): HTMLElement | null => document.querySelector<HTMLElement>(`.ol-mathchip[data-ol-chip="${id}"]`);
 
-function rectOf(c: HTMLElement): Rect {
-  // a displayed formula: the box of the formula itself (centred in the line), not of the whole line
-  const inner = c.querySelector('mjx-container > svg') ?? c.querySelector('mjx-container') ?? c;
-  const r = (inner.getBoundingClientRect().width ? inner : c).getBoundingClientRect();
-  return { x: r.left, y: r.top, w: r.width, h: r.height };
+/** MathJax's em per ex of the text (1 / its font's x-height), read off a formula it drew */
+let emPerEx = 1 / 0.442;
+
+/** where the chip's formula is drawn: its box, baseline, em and the side it grows from */
+function boxOf(c: HTMLElement): MathBox {
+  const cont = c.querySelector<HTMLElement>('mjx-container');
+  const svg = cont?.querySelector<SVGSVGElement>(':scope > svg') ?? null;
+  const s = getComputedStyle(c);
+  const vb = svg?.viewBox?.baseVal;
+  let r: DOMRect, em: number, baseline: number;
+  if (svg && vb && vb.height && svg.getBoundingClientRect().height) {
+    // (the viewBox is in thousandths of the math font's em, its y = 0 the baseline)
+    const r0 = svg.getBoundingClientRect();
+    em = r0.height * 1000 / vb.height;
+    baseline = r0.top - vb.y / vb.height * r0.height;
+    // an inline formula is in pieces where its line may break (MathJax's inline breaks): all of them on its first line
+    let x0 = r0.left, x1 = r0.right, y0 = r0.top, y1 = r0.bottom;
+    for (const p of Array.from(cont!.children)) {
+      const pr = p.getBoundingClientRect();
+      if (p === svg || !pr.width || pr.top >= r0.bottom || pr.bottom <= r0.top) continue;
+      x0 = Math.min(x0, pr.left); x1 = Math.max(x1, pr.right); y0 = Math.min(y0, pr.top); y1 = Math.max(y1, pr.bottom);
+    }
+    r = new DOMRect(x0, y0, x1 - x0, y1 - y0);
+    const ex = parseFloat(svg.getAttribute('height') ?? '');
+    if (ex > 0) emPerEx = ex * 1000 / vb.height;
+  } else {
+    // an empty formula: its baseline and the text's x-height from a mark beside it
+    r = c.getBoundingClientRect();
+    const m = document.createElement('span');
+    m.setAttribute('data-ol-runtime', '');
+    m.style.cssText = 'display:inline-block;width:0;height:1ex;vertical-align:baseline;padding:0;border:0;margin:0';
+    c.after(m);
+    const mr = m.getBoundingClientRect();
+    m.remove();
+    baseline = mr.bottom;
+    em = (mr.height || parseFloat(s.fontSize) * 0.45) * emPerEx;
+  }
+  // a displayed formula is centred in its line by MathJax; an inline one goes with its line
+  const ta = getComputedStyle(cont && c.dataset.olDelim !== '(' ? cont : c).textAlign;
+  const rtl = s.direction === 'rtl';
+  const align = /center/.test(ta) ? 'center' : ta === 'right' || (ta === 'end' && !rtl) || (ta === 'start' && rtl) ? 'right' : 'left';
+  return { rect: { x: r.left, y: r.top, w: r.width, h: r.height }, baseline, em, align };
 }
 
 /** the editor opens LyX's formula editor on the chip (`at`: a click there, frame client px) */
-export function openChip(c: HTMLElement, at: { x: number; y: number } | null, where: 'start' | 'end' = 'end'): void {
+export function openChip(c: HTMLElement, at: { x: number; y: number } | null, where: 'start' | 'end' = 'end', dollar?: '$' | '$$'): void {
   if (open && open !== c) closeChip();
   open = c;
-  c.setAttribute('data-ol-mathediting', '');
-  const s = getComputedStyle(c);
-  post({ ol: 'mathEdit', id: Number(c.dataset.olChip), tex: c.dataset.olTex ?? '', display: c.dataset.olDelim !== '(', rect: rectOf(c), fontPx: parseFloat(s.fontSize) || 16, color: s.color, at, where });
+  openedAt = performance.now();
+  held = [];
+  post({ ol: 'mathEdit', id: Number(c.dataset.olChip), tex: c.dataset.olTex ?? '', display: c.dataset.olDelim !== '(', box: boxOf(c), color: getComputedStyle(c).color, at, where, dollar });
+}
+
+export const keyPress = (e: KeyboardEvent): KeyPress => ({ key: e.key, shift: e.shiftKey || undefined, ctrl: e.ctrlKey || undefined, alt: e.altKey || undefined, meta: e.metaKey || undefined });
+export const isModifierKey = (e: KeyboardEvent) => e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta' || e.key === 'AltGraph' || e.key === 'CapsLock';
+
+/** keys typed while the chip was opening (LyX's formula editor had not the keyboard yet) */
+let held: KeyPress[] = [];
+export function holdKey(k: KeyPress): void { held.push(k); }
+
+/**
+ * Keys typed in the text while the formula is being left (the editor gave the keyboard back, its
+ * mathDone not here yet): typed once the caret is beside the formula again.
+ */
+let after: KeyPress[] = [];
+let afterTimer: ReturnType<typeof setTimeout> | null = null;
+export function holdAfter(k: KeyPress): void {
+  after.push(k);
+  if (!afterTimer) afterTimer = setTimeout(flushAfter, 600);
+}
+/** the keys typed ahead after a formula applied now (a click or a new retyping comes after them) */
+export function flushAfter(): void {
+  if (afterTimer) { clearTimeout(afterTimer); afterTimer = null; }
+  const keys = after;
+  after = [];
+  typeKeysHere(keys, chipHooks.stop);
+}
+/** edit.ts's end of retyping (an Escape typed ahead) */
+export const chipHooks = { stop: () => {} };
+
+/** keys typed ahead, applied to the text being retyped at its caret (what they would have done there) */
+export function typeKeysHere(keys: KeyPress[], stop?: () => void): void {
+  const sel = getSelection();
+  for (const k of keys) {
+    if (k.ctrl || k.meta) continue;
+    if (k.key.length === 1 && !k.alt) document.execCommand('insertText', false, k.key);
+    else if (k.key === 'Backspace') document.execCommand('delete');
+    else if (k.key === 'Delete') document.execCommand('forwardDelete');
+    else if (k.key === 'Enter') document.execCommand(k.shift ? 'insertLineBreak' : 'insertParagraph');
+    else if (k.key === 'ArrowLeft' || k.key === 'ArrowRight') sel?.modify(k.shift ? 'extend' : 'move', k.key === 'ArrowLeft' ? 'backward' : 'forward', 'character');
+    else if (k.key === 'Escape') { stop?.(); return; }
+  }
+}
+
+/** the editor drew its field over the chip: the chip hidden (it keeps its room), the keys typed meanwhile handed over */
+export function shownChip(id: number): void {
+  const c = chipById(id);
+  if (c && c === open) c.setAttribute('data-ol-mathediting', '');
+  post({ ol: 'mathKeys', id, keys: c && c === open ? held : [] });
+  held = [];
 }
 
 /** the formula open in the editor changed: the chip follows (hidden, it keeps the formula's room) */
@@ -104,7 +194,7 @@ export async function setChip(id: number, tex: string): Promise<void> {
   const c = chipById(id);
   if (!c) return;
   await render(c, tex);
-  if (open === c) post({ ol: 'mathRect', id, rect: rectOf(c) });
+  if (open === c) post({ ol: 'mathRect', id, box: boxOf(c) });
 }
 
 async function render(c: HTMLElement, tex: string): Promise<void> {
@@ -121,12 +211,14 @@ async function render(c: HTMLElement, tex: string): Promise<void> {
  * The formula editor left the formula: the chip shown again (gone when the formula was emptied),
  * the caret beside it on the side it was left by. Returns whether the chip is still there.
  */
-export async function doneChip(id: number, tex: string, dir: 'forward' | 'backward' | null, editing: HTMLElement | null): Promise<boolean> {
+export async function doneChip(id: number, tex: string, dir: 'forward' | 'backward' | null, editing: HTMLElement | null, putBack = ''): Promise<boolean> {
   const c = chipById(id);
   if (open === c) open = null;
-  if (!c) return false;
+  if (!c) { post({ ol: 'mathClose', id }); return false; }
   await render(c, tex);
   c.removeAttribute('data-ol-mathediting');
+  // the formula is there again: the editor's field can go
+  post({ ol: 'mathClose', id });
   const keep = !!tex.trim();
   if (!editing || !editing.contains(c)) { if (!keep) c.remove(); return keep; }
   editing.focus({ preventScroll: true });
@@ -135,10 +227,19 @@ export async function doneChip(id: number, tex: string, dir: 'forward' | 'backwa
     const r = document.createRange();
     if (keep && dir === 'forward') r.setStartAfter(c); else r.setStartBefore(c);
     r.collapse(true);
-    if (!keep) c.remove();
+    if (!keep && putBack) {
+      // Backspace in the empty formula `$` opened: the typed dollar back as text, the caret after it
+      const t = document.createTextNode(putBack);
+      // (the space typed before it was the end of the text then: a browser made it a no-break space)
+      const p = c.previousSibling;
+      if (p?.nodeType === Node.TEXT_NODE && p.nodeValue?.endsWith('\u00a0')) p.nodeValue = p.nodeValue.slice(0, -1) + ' ';
+      c.replaceWith(t);
+      r.setStart(t, putBack.length); r.collapse(true);
+    } else if (!keep) c.remove();
     sel?.removeAllRanges();
     sel?.addRange(r);
   }
+  flushAfter();
   return keep;
 }
 
@@ -151,14 +252,16 @@ export function closeChip(): void {
 }
 
 export function openChipEl(): HTMLElement | null { return open && open.isConnected ? open : null; }
+/** a formula opened that LyX's formula editor has not taken yet (keys typed meanwhile are the formula's) */
+export function chipOpening(): boolean { return !!open && open.isConnected && !open.hasAttribute('data-ol-mathediting') && performance.now() - openedAt < 1500; }
 
 /** where the open chip is now (the page scrolled, the text reflowed) */
 export function trackChip(): void {
-  if (open && open.isConnected) post({ ol: 'mathRect', id: Number(open.dataset.olChip), rect: rectOf(open) });
+  if (open && open.isConnected) post({ ol: 'mathRect', id: Number(open.dataset.olChip), box: boxOf(open) });
 }
 
-/** a new (empty) formula at the caret of the text being retyped, opened at once */
-export function insertChip(editing: HTMLElement, display: boolean): void {
+/** a new (empty) formula at the caret of the text being retyped, opened at once (`dollar`: by typing `$`) */
+export function insertChip(editing: HTMLElement, display: boolean, dollar?: '$' | '$$'): void {
   const c = chip('', display ? '[' : '(', null);
   const sel = getSelection();
   let r = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
@@ -167,7 +270,21 @@ export function insertChip(editing: HTMLElement, display: boolean): void {
   r.insertNode(c);
   r.setStartAfter(c); r.collapse(true);
   sel?.removeAllRanges(); sel?.addRange(r);
-  openChip(c, null, 'end');
+  openChip(c, null, 'end', dollar);
+}
+
+/** `$$` typed: the open (empty, inline) formula made a displayed one, opened again */
+export function displayChip(id: number): void {
+  const c = chipById(id);
+  if (!c || c !== open || c.dataset.olDelim !== '(') return;
+  const d = chip('', '[', null);
+  c.replaceWith(d);
+  open = null;
+  const r = document.createRange();
+  r.setStartAfter(d); r.collapse(true);
+  const sel = getSelection();
+  sel?.removeAllRanges(); sel?.addRange(r);
+  openChip(d, null, 'end', '$$');
 }
 
 /** the chip just before / after a collapsed caret (an arrow key goes into it) */

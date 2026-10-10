@@ -15,8 +15,8 @@
  */
 import type { ToRuntime, Path } from '../protocol';
 import { MODE, post, state, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign } from './env';
-import { startMath } from './math';
-import { applySource } from './reconcile';
+import { startMath, typesetPage } from './math';
+import { applySource, whenTypeset } from './reconcile';
 import * as edit from './edit';
 import { arrange, paint } from './arrange';
 import { nodeCommand } from './pathedit';
@@ -176,7 +176,7 @@ function onMessage(e: MessageEvent): void {
       if (!ok) return;
       // (the kind as the text has it now: the page first served may have been another version)
       state.kind = detectKind();
-      if (MODE === 'edit') edit.afterSource();
+      if (MODE === 'edit') { edit.afterSource(); void whenTypeset().then(() => edit.draw()); }
       if (MODE === 'thumb') drawRail();
       if (first) void settle().then(() => { sendLayout(); if (MODE === 'edit') { refreshView(); reportColors(); } });
       else requestAnimationFrame(() => { sendLayout(); if (MODE === 'thumb') drawRail(); if (MODE === 'edit') { refreshView(); reportColors(); } });
@@ -198,8 +198,11 @@ function onMessage(e: MessageEvent): void {
     case 'cropPreset': if (MODE === 'edit') edit.cropPreset(m.path, m); break;
     case 'cropAspect': if (MODE === 'edit') edit.setCropAspect(m.aspect, m.shape); break;
     case 'endCrop': if (MODE === 'edit') edit.endCrop(m.commit); break;
+    case 'mathShown': if (MODE === 'edit') edit.mathShown(m.id); break;
     case 'mathSet': if (MODE === 'edit') edit.mathSet(m.id, m.tex); break;
-    case 'mathDone': if (MODE === 'edit') edit.mathDone(m.id, m.tex, m.dir); break;
+    case 'mathDone': if (MODE === 'edit') edit.mathDone(m.id, m.tex, m.dir, m.putBack); break;
+    case 'mathDisplay': if (MODE === 'edit') edit.mathDisplay(m.id); break;
+    case 'typeKeys': if (MODE === 'edit') edit.typeKeys(m.keys); break;
     case 'insertMath': if (MODE === 'edit') edit.insertMath(m.display); break;
     case 'nodes': if (MODE === 'edit') nodeCommand(m.cmd); break;
   }
@@ -242,7 +245,7 @@ function settle(): Promise<void> {
   if (!settled) {
     settled = (async () => {
       try { await Promise.race([document.fonts?.ready, new Promise(r => setTimeout(r, 8000))]); } catch { /* ignore */ }
-      await startMath();
+      await typesetPage();
       await waitImages();
       // the page's own scripts (a chart drawn after load) get a moment
       await new Promise(r => setTimeout(r, MODE === 'check' || MODE === 'print' ? 400 : 50));
@@ -255,6 +258,8 @@ function settle(): Promise<void> {
 function init(): void {
   state.kind = detectKind();
   addStyle(NOTES_CSS);
+  // the formulas hidden (never their TeX on screen) and MathJax fetched while the page's fonts load
+  startMath();
   window.__ol = { report, version: () => state.version, slides: () => slideBoxes(), size: pageSize };
   if (MODE === 'present') startPresenting();
   if (MODE === 'edit') edit.startEditing();

@@ -56,7 +56,9 @@ export function setDocumentFonts(headerLines: string[]): void {
 /**
  * A layout document's pages are paper: their formulas are drawn in the font its PDF has — a
  * sans-serif page (beamer's default math, notomath, sfmath) in Fira Math — whatever math font the
- * editor uses for linear documents (editor/layout/controller.ts; null gives the choice back).
+ * editor uses for linear documents (editor/layout/controller.ts; null gives the choice back). An
+ * HTML deck, poster or page likewise: its formulas are MathJax's New Computer Modern, and LyX's
+ * formula editor over one of them must be too (deliverable/DeliverableEditor.tsx).
  */
 export function setLayoutMathFont(id: string | null): void {
   if (id === layoutMath) return;

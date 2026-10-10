@@ -218,6 +218,10 @@ export class LyxMathField {
     this.render();
   }
   hasFocus(): boolean { return this.focused; }
+  /** text as if typed at the cursor (keys typed before the field had the keyboard) */
+  typeText(text: string): void { this.typed(text); }
+  /** a key as if pressed in the field (an arrow, Backspace, Escape … typed before the field had the keyboard) */
+  pressKey(init: KeyboardEventInit): void { this.keydown(new KeyboardEvent('keydown', { ...init, cancelable: true })); }
   /** the room a display formula has before it breaks into lines (em of its font); drawn again when it changed */
   setWidth(width: number | undefined): void { if (width === this.width) return; this.width = width; this.render(); }
   /** the row of the top-level cell the cursor is in (0 for inline / single-row formulas) */

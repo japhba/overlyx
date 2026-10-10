@@ -14,8 +14,11 @@ import { login, collectErrors, BASE_URL, PROJECTS_DIR } from './helpers';
 const RUN = Date.now().toString(36);
 const NAME = `e2e-decktools-${RUN}`;
 const PROJECT = `admin/${NAME}`;
-const DIR = `${PROJECTS_DIR}/${PROJECT}/talk`;
-const FILE = `${DIR}/index.html`;
+// each test its own deck (a folder of its own): the same file written again for the next test could
+// still be open on the server with the last test's text, and the next test would see that
+let deckNo = 0;
+let FOLDER = 'talk';
+let FILE = `${PROJECTS_DIR}/${PROJECT}/${FOLDER}/index.html`;
 const fileText = () => readFileSync(FILE, 'utf8');
 
 const DECK = `<!doctype html>
@@ -59,9 +62,11 @@ const editFrame = (page: Page): Frame => page.frames().find(f => /[?&]ol=edit/.t
 const real = (errors: string[]) => errors.filter(e => !/localStorage/.test(e));
 
 async function setup(page: Page, deck = DECK): Promise<void> {
-  mkdirSync(DIR, { recursive: true });
+  FOLDER = `talk${++deckNo}`;
+  FILE = `${PROJECTS_DIR}/${PROJECT}/${FOLDER}/index.html`;
+  mkdirSync(`${PROJECTS_DIR}/${PROJECT}/${FOLDER}`, { recursive: true });
   writeFileSync(FILE, deck);
-  await page.goto(`/#/${PROJECT}/talk/index.html`);
+  await page.goto(`/#/${PROJECT}/${FOLDER}/index.html`);
   await slides(page).first().waitFor({ timeout: 30000 });
   await page.waitForTimeout(900);
 }
@@ -239,6 +244,47 @@ const MATHDECK = DECK.replace('<section class="slide">\n  <h2', `<section class=
   <p id="t" style="position: absolute; left: 100px; top: 500px; width: 900px; margin: 0; font-size: 32px">Energy</p>
   <h2`);
 
+/** every frame from now on: the TeX of a formula visible on the slide (it never should be: hidden until typeset) */
+async function watchRawTex(page: Page): Promise<void> {
+  await editFrame(page).evaluate(`(() => {
+    window.__rawTex = [];
+    const tick = () => {
+      const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        const el = n.parentElement;
+        if (!/\\\\\\(|\\\\\\[|\\$\\$/.test(n.nodeValue || '') || !el || el.closest('script, style, aside') || el.closest('[contenteditable=true]:not(.ol-mathchip)')) continue;
+        const s = getComputedStyle(el);
+        if (s.visibility !== 'hidden' && s.display !== 'none' && !el.closest('[data-ol-texwait]') && el.getBoundingClientRect().width) window.__rawTex.push(n.nodeValue.trim().slice(0, 40));
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  })()`);
+}
+const rawTexSeen = (page: Page) => editFrame(page).evaluate('window.__rawTex') as Promise<string[]>;
+
+/** LyX's formula editor lies exactly over the slide's formula: the same size, on its baseline (frame px) */
+async function expectOverFormula(page: Page): Promise<void> {
+  await expect(page.locator('[data-dl-mathedit]:not(.pending) .lm-content mjx-container')).toBeVisible();
+  const fr = editFrame(page);
+  const chip = JSON.parse(await fr.evaluate(`(() => {
+    const c = document.querySelector('.ol-mathchip[data-ol-mathediting]');
+    const svgs = Array.from(c.querySelectorAll('mjx-container > svg')), rs = svgs.map(s => s.getBoundingClientRect());
+    const vb = svgs[0].viewBox.baseVal;
+    return JSON.stringify({ left: Math.min(...rs.map(r => r.left)), right: Math.max(...rs.map(r => r.right)), base: rs[0].top - vb.y / vb.height * rs[0].height, w: innerWidth });
+  })()`) as string) as { left: number; right: number; base: number; w: number };
+  const fb = (await page.locator('.dl-frame').boundingBox())!;
+  const k = fb.width / chip.w;
+  const ov = await page.evaluate(() => {
+    const o = document.querySelector('[data-dl-mathedit]')!;
+    const m = o.querySelector('.lm-content mjx-container')!.getBoundingClientRect(), b = o.querySelector('.dl-mathedit-base')!.getBoundingClientRect();
+    return { left: m.left, right: m.right, base: b.top };
+  });
+  expect(Math.abs((ov.left - fb.x) / k - chip.left)).toBeLessThan(2.5);
+  expect(Math.abs((ov.right - fb.x) / k - chip.right)).toBeLessThan(2.5);
+  expect(Math.abs((ov.base - fb.y) / k - chip.base)).toBeLessThan(1);
+}
+
 test("formulas on a slide are edited with LyX's formula editor", async ({ page }) => {
   const errors = collectErrors(page);
   await login(page);
@@ -247,10 +293,13 @@ test("formulas on a slide are edited with LyX's formula editor", async ({ page }
   // (the second slide)
   await slides(page).nth(1).scrollIntoViewIfNeeded();
   await page.waitForTimeout(400);
-  // a double-click on a formula: LyX's math field over it, the math row in the toolbar
+  await watchRawTex(page);
+  // a double-click on a formula: LyX's math field over it — the same font, size and baseline as the
+  // slide's (WYSIWYG: nothing moves or changes size), the math row in the toolbar
   const f = await at(page, 338, 285, 1);
   await page.mouse.dblclick(f.x, f.y);
   await expect(page.locator('[data-dl-mathedit] .lm-field')).toBeVisible();
+  await expectOverFormula(page);
   await expect(page.locator('[data-tb="m-frac"]')).toBeVisible();
   // (where the cursor is depends on the point: at the end, End would leave the formula, as in LyX)
   await page.keyboard.type('y');
@@ -274,6 +323,34 @@ test("formulas on a slide are edited with LyX's formula editor", async ({ page }
   await page.keyboard.press('Escape');
   await expect.poll(fileText, { timeout: 15000 }).toContain('Energy \\(E=mc^{2}\\) holds</p>');
 
+  // $ typed opens a formula, as in documents (typed fast: the keys before the field has the keyboard
+  // are the formula's), the closing $ leaves it; an inline formula's editor lies over it too
+  await page.mouse.dblclick(t.x, t.y);
+  await page.keyboard.press('End');
+  await page.keyboard.type(' $x^2$ ok');
+  await page.keyboard.press('Escape');
+  await expect.poll(fileText, { timeout: 15000 }).toContain('holds \\(x^{2}\\) ok</p>');
+  const xf = await at(page, 160, 520, 1);
+  await page.mouse.dblclick(xf.x + 20, xf.y);
+  await page.keyboard.press('End');
+  await page.keyboard.press('Control+ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('[data-dl-mathedit] .lm-field')).toBeVisible();
+  await expectOverFormula(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  // Backspace in the empty formula $ opened gives the dollar back
+  await page.mouse.dblclick(t.x, t.y);
+  await page.keyboard.press('End');
+  await page.keyboard.type(' $');
+  await expect(page.locator('[data-dl-mathedit]:not(.pending)')).toBeVisible();
+  await page.keyboard.press('Backspace');
+  await expect(page.locator('[data-dl-mathedit]')).toHaveCount(0);
+  await page.keyboard.type('5');
+  await page.keyboard.press('Escape');
+  await expect.poll(fileText, { timeout: 15000 }).toContain('ok $5</p>');
+
   // the formula tool: a new formula, typed at once; left empty, it goes again
   await page.locator('[data-tb="dk-formula"]').click();
   const n = await at(page, 900, 300, 1);
@@ -291,6 +368,8 @@ test("formulas on a slide are edited with LyX's formula editor", async ({ page }
   await page.keyboard.press('Escape');
   await expect.poll(() => (fileText().match(/<div/g) ?? []).length, { timeout: 15000 }).toBe(before);
   expect(fileText()).not.toContain('\\[ \\]');
+  // and never a formula's TeX on the slide meanwhile
+  expect(await rawTexSeen(page)).toEqual([]);
   expect(real(errors)).toEqual([]);
 });
 

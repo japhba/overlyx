@@ -55,6 +55,16 @@ export interface CanvasView {
 
 export interface Rect { x: number; y: number; w: number; h: number }
 
+/**
+ * Where a formula is on the slide, for LyX's formula editor to lie exactly over it (frame client
+ * px): its box, its baseline, the size of its font's em as MathJax drew it (scaled to the text's
+ * x-height), and the side it grows from as it changes (a centred line grows both ways).
+ */
+/** a key typed (the formula editor's type-ahead: keys typed while a formula opened or was left) */
+export interface KeyPress { key: string; shift?: boolean; ctrl?: boolean; alt?: boolean; meta?: boolean }
+
+export interface MathBox { rect: Rect; baseline: number; em: number; align: 'left' | 'center' | 'right' }
+
 /** what the toolbar shows of the selection */
 export interface SelStyle {
   fontSize: string; fontFamily: string; fontWeight: string; fontStyle: string; textDecoration: string;
@@ -125,8 +135,14 @@ export type ToRuntime =
   | { ol: 'unzoom' }
   /** the formula open in LyX's formula editor changed (runtime/mathedit.ts: the chip follows) */
   | { ol: 'mathSet'; id: number; tex: string }
-  /** LyX's formula editor left the formula (`dir`: by an arrow key / Escape, the caret goes that side; null: elsewhere) */
-  | { ol: 'mathDone'; id: number; tex: string; dir: 'forward' | 'backward' | null }
+  /** LyX's formula editor left the formula (`dir`: by an arrow key / Escape, the caret goes that side; null: elsewhere; `putBack`: Backspace in the empty formula `$` opened gives the typed dollar back as text) */
+  | { ol: 'mathDone'; id: number; tex: string; dir: 'forward' | 'backward' | null; putBack?: string }
+  /** `$$` typed: the empty inline formula `$` opened becomes a displayed one (as in documents) */
+  | { ol: 'mathDisplay'; id: number }
+  /** LyX's formula editor is drawn over the formula: the formula itself hidden meanwhile (the runtime answers with mathKeys) */
+  | { ol: 'mathShown'; id: number }
+  /** keys typed ahead that came after the formula was left by them (the closing `$` of `$x$ and`): the text's */
+  | { ol: 'typeKeys'; keys: KeyPress[] }
   /** a new formula at the caret of the text being retyped (the toolbar's ∑ while typing) */
   | { ol: 'insertMath'; display: boolean }
   /** a command of the node editor (editing a path's points) */
@@ -162,13 +178,16 @@ export type FromRuntime =
   | { ol: 'presentZoom'; zoomed: boolean }
   /**
    * a formula of the text being retyped to edit with LyX's formula editor (runtime/mathedit.ts):
-   * its box (frame client px), font size (CSS px of the page) and colour; `at`: the click into it
+   * where it is and how big its letters are, its colour; `at`: the click into it; `dollar`: opened
+   * by typing `$` (or `$$`) in the text (LyxMathField.dollar)
    */
-  | { ol: 'mathEdit'; id: number; tex: string; display: boolean; rect: Rect; fontPx: number; color: string; at: { x: number; y: number } | null; where: 'start' | 'end' }
-  /** the formula being edited moved (scrolled, reflowed) */
-  | { ol: 'mathRect'; id: number; rect: Rect }
-  /** the retyping ended while a formula was open: the formula editor closes */
-  | { ol: 'mathClose' }
+  | { ol: 'mathEdit'; id: number; tex: string; display: boolean; box: MathBox; color: string; at: { x: number; y: number } | null; where: 'start' | 'end'; dollar?: '$' | '$$' }
+  /** the keys typed in the text after the formula was opened there, before LyX's formula editor had the keyboard: the formula's, before any typed since */
+  | { ol: 'mathKeys'; id: number; keys: KeyPress[] }
+  /** the formula being edited moved (scrolled, reflowed, typeset again as it changed) */
+  | { ol: 'mathRect'; id: number; box: MathBox }
+  /** the formula editor closes: the formula is shown again (`id`, after mathDone), or the retyping ended while one was open */
+  | { ol: 'mathClose'; id?: number }
   /** the node editor is on (the path edited, how many of its nodes are selected) or off (null) */
   | { ol: 'nodeEditing'; path: Path | null; selected: number; total: number };
 

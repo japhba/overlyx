@@ -19,13 +19,15 @@ import { Toolbar } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
 import type { DeliverableHost } from './host';
 import { webHost } from './webHost';
-import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView } from './protocol';
+import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress } from './protocol';
 import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
 import { deckToolbar, type DeckTextActions } from './decktoolbar';
 import { BgRemoveDialog } from './BgRemoveDialog';
 import { MathOverlay, type MathEditState } from './MathOverlay';
 import { activeMathField } from '../editor/lyxmath/field';
+import { mathReady } from '../editor/lyxmath/mathjax';
+import { setLayoutMathFont } from '../fonts/editorfont';
 import { useMathPanels } from '../app/toolbars';
 import { parseSource, opSplices, elementAt, elementChildren, attr } from '@overlyx/core/html/source.ts';
 
@@ -108,6 +110,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /** keys typed between placing a new formula and LyX's field opening on it (given to the field then) */
   const typeAhead = useRef<string[] | null>(null);
   const typeAheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** where the keys typed in the canvas while a formula opened go (MathOverlay) */
+  const mathKeysIn = useRef<((id: number, keys: KeyPress[]) => void) | null>(null);
   /** the node editor on a path (runtime/pathedit.ts): how many of its nodes are selected */
   const [nodeEd, setNodeEd] = useState<{ selected: number; total: number } | null>(null);
   const nodeEdRef = useRef(false); nodeEdRef.current = !!nodeEd;
@@ -139,6 +143,14 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     }).catch(e => { if (!cancelled) notify('Could not open the page: ' + (e as Error).message, 'error'); });
     void get();
     return () => { cancelled = true; clearTimeout(timer); };
+  }, [host]);
+
+  // LyX's formula editor draws in the slides' math font (the runtime's MathJax: New Computer
+  // Modern, whatever font the editor uses for documents), its data fetched before a formula opens
+  useEffect(() => {
+    setLayoutMathFont('newcm');
+    if (/\\\(|\\\[|\$\$/.test(text.toString())) void mathReady();
+    return () => setLayoutMathFont(null);
   }, [host]);
 
   /* ------------------------------------------------------------- versions to the frames */
@@ -253,9 +265,10 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           break;
         case 'selection': if (fromCanvas) { setSel(m.items); host.setSelection(m.items.map(i => i.path)); } break;
         case 'editing': if (fromCanvas) { setEditingText(m.path); if (!m.path) setMathEdit(null); } break;
-        case 'mathEdit': if (fromCanvas) setMathEdit({ id: m.id, tex: m.tex, display: m.display, rect: m.rect, fontPx: m.fontPx, color: m.color, at: m.at, where: m.where }); break;
-        case 'mathRect': if (fromCanvas) setMathEdit(st => st && st.id === m.id ? { ...st, rect: m.rect } : st); break;
-        case 'mathClose': if (fromCanvas) setMathEdit(null); break;
+        case 'mathEdit': if (fromCanvas) setMathEdit({ id: m.id, tex: m.tex, display: m.display, box: m.box, color: m.color, at: m.at, where: m.where, dollar: m.dollar }); break;
+        case 'mathKeys': if (fromCanvas) mathKeysIn.current?.(m.id, m.keys); break;
+        case 'mathRect': if (fromCanvas) setMathEdit(st => st && st.id === m.id ? { ...st, box: m.box } : st); break;
+        case 'mathClose': if (fromCanvas) setMathEdit(st => m.id === undefined || st?.id === m.id ? null : st); break;
         case 'visible': if (fromCanvas && m.slide >= 0) { setCurrent(m.slide); toRail({ ol: 'current', slide: m.slide }); } break;
         case 'goto': setCurrent(m.slide); toCanvas({ ol: 'scrollTo', slide: m.slide, smooth: false }); toRail({ ol: 'current', slide: m.slide }); break;
         case 'ops': {
@@ -878,7 +891,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const mathPanels = useMathPanels(mathExec);
   const bars = deckToolbar({
     kind, tool, setTool, readOnly, sel, editingText: !!editingText,
-    math: { editing: !!mathEdit, insert: display => toCanvas({ ol: 'insertMath', display }), exec: mathExec, panels: mathPanels },
+    math: { editing: !!mathEdit && !mathEdit.closing, insert: display => toCanvas({ ol: 'insertMath', display }), exec: mathExec, panels: mathPanels },
     nodes: { editing: !!nodeEd, selected: nodeEd?.selected ?? 0, total: nodeEd?.total ?? 0, cmd: cmd => toCanvas({ ol: 'nodes', cmd }) },
     undo: () => host.undo(), redo: () => host.redo(),
     insertImage: () => fileInput.current?.click(),
@@ -990,7 +1003,17 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       {floatPop && <FloatPopover {...floatPop} onClose={() => setFloatPop(null)} />}
       {mathEdit && !presenting && <MathOverlay st={mathEdit} frame={canvasFrame.current} scale={scale} typeAhead={typeAhead}
         onSet={tex => toCanvas({ ol: 'mathSet', id: mathEdit.id, tex })}
-        onDone={(tex, dir) => { const id = mathEdit.id; setMathEdit(null); if (dir) canvasFrame.current?.focus(); toCanvas({ ol: 'mathDone', id, tex, dir }); }} />}
+        onShown={() => toCanvas({ ol: 'mathShown', id: mathEdit.id })}
+        onDisplay={() => toCanvas({ ol: 'mathDisplay', id: mathEdit.id })}
+        onRest={keys => toCanvas({ ol: 'typeKeys', keys })} keysIn={mathKeysIn}
+        onDone={(tex, dir, putBack) => {
+          const id = mathEdit.id;
+          // the field stays (still) until the formula is shown again under it (the runtime's mathClose)
+          setMathEdit(st => st && st.id === id ? { ...st, closing: true } : st);
+          setTimeout(() => setMathEdit(st => st && st.id === id && st.closing ? null : st), 800);
+          if (dir) canvasFrame.current?.focus();
+          toCanvas({ ol: 'mathDone', id, tex, dir, putBack });
+        }} />}
       {bgFor && <BgRemoveDialog src={bgFor.url} name={bgFor.name} onDone={b => { void saveNoBg(b); }} onClose={() => setBgFor(null)} />}
       {presenting && link && (
         <div class="dl-presenting" ref={presentBox}>

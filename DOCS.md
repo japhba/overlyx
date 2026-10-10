@@ -453,11 +453,23 @@ blend.
     double-click ends an open one (a stroke), Backspace takes the last node back. **Formulas** are
     edited with **LyX's formula editor** (`runtime/mathedit.ts` + `MathOverlay.tsx`): while a text
     is retyped its `\(…\)`, `\[…\]` and `$$…$$` are typeset chips; a click on one, an arrow key into
-    it, a double-click on a formula object or Ctrl+M (Ctrl+Shift+M displayed, or ∑ while typing)
-    opens the document's `LyxMathField` exactly over it (its size at the zoom, its colour), with the
-    math row in the toolbar (fraction, scripts, roots, delimiters, matrices, the panels); the formula
-    goes back as you type and when left (arrows, Esc, a click elsewhere), keeping its source as
-    written unless it changed; the formula tool makes an empty one and opens it (left empty, it goes).
+    it, a double-click on a formula object, Ctrl+M (Ctrl+Shift+M displayed, or ∑ while typing) or
+    `$` typed (as in documents: `$$` displayed, the closing `$` leaves it, Backspace in the empty one
+    gives the dollar back) opens the document's `LyxMathField` exactly over it — WYSIWYG, nothing
+    changes when it opens or closes: the slides' math font (New Computer Modern, `setLayoutMathFont`
+    while the deck editor is open, its data fetched up front), MathJax's em as drawn (the SVG's
+    viewBox: scaled to the text's x-height), on the formula's baseline, growing from its line's side
+    (a centred formula both ways; `MathBox`), shown only once drawn (`mathShown` hides the chip) and
+    kept, still, until the chip is back (`mathClose`); keys typed before the field has the keyboard
+    are held on both sides and replayed in order (`mathKeys`, `typeKeys`). The math row is in the
+    toolbar (fraction, scripts, roots, delimiters, matrices, the panels); the formula goes back as
+    you type and when left (arrows, Esc, a click elsewhere), keeping its source as written unless it
+    changed (merely opening one no longer rewrites it); the formula tool makes an empty one and opens
+    it (left empty, it goes). A formula's TeX is never on screen (`runtime/math.ts`): elements with
+    TeX are invisible (`data-ol-texwait`, opacity — still clickable) from the moment they are parsed
+    until MathJax has typeset them, MathJax is fetched while the page's fonts load, and a formula
+    typeset before is put back as a copy of its rendering at once (MathJax's SVG is in ex of the
+    surrounding font, so it fits anywhere) — after an edit, a retyped text shown again, a chip.
     **Pictures**: double-click
     crops (PowerPoint's: the whole picture ghosted, drag it inside the fixed frame, its corners scale
     it, the black handles change the frame; written as `div.ol-crop` with the `img` inside —

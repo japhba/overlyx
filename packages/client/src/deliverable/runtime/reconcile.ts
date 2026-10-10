@@ -61,9 +61,13 @@ export function applySource(html: string, version: number): boolean {
   state.src = next;
   const added: Element[] = [];
   reconcile(document.documentElement, prev.documentElement, next.documentElement, added);
-  void typeset(added.filter(a => a.isConnected));
+  typesetting = typeset(added.filter(a => a.isConnected));
   return true;
 }
+
+let typesetting: Promise<void> = Promise.resolve();
+/** settles when the formulas of the last version are typeset (formulas typeset before are at once) */
+export function whenTypeset(): Promise<void> { return typesetting; }
 
 /** the element's own text (its text nodes), the part a recursion into its children would not see */
 function ownText(el: Element): string {

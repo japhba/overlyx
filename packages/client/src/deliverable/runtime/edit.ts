@@ -20,12 +20,13 @@
  * and pan (the editor scales the frame); a pen works like the mouse. The pointer is captured, so a
  * drag that leaves the frame keeps going.
  */
-import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind } from '../protocol';
+import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress } from '../protocol';
 import { MODE, post, state, srcOf, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout } from './env';
 import { guard } from './reconcile';
+import { typeset } from './math';
 import { refreshView } from './view';
 import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, redrawCrop, type CropContext } from './crop';
-import { chipify, unchip, openChip, setChip, doneChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
+import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing } from './pathedit';
 
 const NS = 'http://www.w3.org/1999/xhtml';
@@ -184,10 +185,18 @@ export function editTextAt(path: Path, selectAll = false, math = false): void {
 
 /* ------------------------------------------------------------------ formulas (runtime/mathedit.ts) */
 
+export function mathShown(id: number): void { shownChip(id); }
 export function mathSet(id: number, tex: string): void { void setChip(id, tex).then(() => { if (editing) scheduleCommit(); }); }
-export function mathDone(id: number, tex: string, dir: 'forward' | 'backward' | null): void {
+export function mathDisplay(id: number): void { displayChip(id); }
+/** the formula left last: text typed after it waits for the caret to be beside it */
+let leaving: Promise<unknown> = Promise.resolve();
+chipHooks.stop = () => stopText();
+export function typeKeys(keys: KeyPress[]): void {
+  void leaving.then(() => { if (editing && keys.length) { editing.focus({ preventScroll: true }); typeKeysHere(keys, stopText); } });
+}
+export function mathDone(id: number, tex: string, dir: 'forward' | 'backward' | null, putBack?: string): void {
   const el = editing;
-  void doneChip(id, tex, dir, el).then(kept => {
+  leaving = doneChip(id, tex, dir, el, putBack).then(kept => {
     if (!el || editing !== el) return;
     // the formula emptied and nothing else left in its box: the box goes too (as an empty formula in LyX)
     if (!kept && !cleanHtml(el).replace(/<[^>]*>|&nbsp;|\s/g, '')) {
@@ -627,6 +636,8 @@ function grab(e: PointerEvent): void {
 
 function onPointerDown(e: PointerEvent): void {
   if (isCropping() || isNodeEditing()) return;
+  // keys typed after leaving a formula, before this press: theirs first
+  flushAfter();
   if (e.pointerType === 'touch') {
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (touches.size >= 2) { e.preventDefault(); e.stopPropagation(); startPinch(); return; }
@@ -1273,6 +1284,7 @@ function onDblClick(e: MouseEvent): void {
 function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectAll = false, openMath = false): void {
   const src = srcOf.get(el);
   if (!src) return;
+  flushAfter();
   stopText();
   editing = el;
   guard.editing = el;
@@ -1334,6 +1346,7 @@ function scheduleCommit(): void {
 function cleanHtml(el: HTMLElement): string {
   const c = el.cloneNode(true) as HTMLElement;
   for (const x of Array.from(c.querySelectorAll('[data-ol-runtime]'))) x.remove();
+  for (const x of Array.from(c.querySelectorAll('[data-ol-texwait]'))) x.removeAttribute('data-ol-texwait');
   unchip(c);
   // a trailing <br> a browser leaves in an emptied block
   let html = c.innerHTML.replace(/<br>(\s*)$/, '$1');
@@ -1379,13 +1392,20 @@ export function stopText(): void {
   const src = srcOf.get(el);
   if (src && el.isConnected) {
     el.innerHTML = src.innerHTML;
-    void import('./math').then(m => m.typeset([el]));
+    void typeset([el]).then(draw);
   }
   post({ ol: 'editing', path: null });
   draw();
 }
 
 export function isEditingText(): boolean { return !!editing; }
+
+/** the caret is in code (a $ there is a dollar) */
+function inCode(): boolean {
+  const n = getSelection()?.anchorNode;
+  const el = n ? (n.nodeType === Node.ELEMENT_NODE ? n as Element : n.parentElement) : null;
+  return !!el?.closest('code, pre, kbd, samp');
+}
 
 /* ------------------------------------------------------------------ keys, clipboard, menu */
 
@@ -1394,9 +1414,15 @@ function onKeyDown(e: KeyboardEvent): void {
   if (isPenDrawing() && penKey(e)) { e.preventDefault(); e.stopPropagation(); return; }
   const mod = e.ctrlKey || e.metaKey;
   if (editing) {
+    // a formula was just opened here and LyX's formula editor has not the keyboard yet: the keys are the formula's
+    if (chipOpening() && !isModifierKey(e)) { e.preventDefault(); holdKey(keyPress(e)); return; }
+    // the formula editor gave the keyboard back (it left the formula): typed once the caret is beside the formula
+    if (openChipEl() && !isModifierKey(e)) { e.preventDefault(); holdAfter(keyPress(e)); return; }
     if (e.key === 'Escape') { e.preventDefault(); stopText(); return; }
     // LyX: Ctrl+M a formula (Ctrl+Shift+M displayed), an arrow key into a formula goes into it
     if (mod && !e.altKey && e.key.toLowerCase() === 'm') { e.preventDefault(); e.stopPropagation(); insertChip(editing, e.shiftKey); return; }
+    // $ typed opens a formula, as in documents ($$ a displayed one, Backspace gives the $ back)
+    if (e.key === '$' && !mod && !e.altKey && !inCode()) { e.preventDefault(); insertChip(editing, false, '$'); return; }
     if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !mod && !e.shiftKey && !e.altKey) {
       const c = chipBeside(e.key === 'ArrowLeft' ? 'before' : 'after');
       if (c) { e.preventDefault(); openChip(c, null, e.key === 'ArrowLeft' ? 'end' : 'start'); return; }

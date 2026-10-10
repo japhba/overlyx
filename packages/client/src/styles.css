@@ -2534,8 +2534,14 @@ html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 .dl-refocus { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 4; border: 1px solid var(--ui-border); background: var(--surface); color: var(--ui-fg); border-radius: 18px; padding: 6px 14px; font: inherit; font-size: 13px; box-shadow: 0 2px 10px rgba(0,0,0,.18); cursor: pointer; opacity: 0.85; }
 .dl-refocus:hover { opacity: 1; }
 .dl-refocus.lost { background: var(--accent); color: #fff; border-color: transparent; opacity: 1; }
-/* LyX's formula editor over a formula of a slide (MathOverlay): in the formula's place, size and colour */
-.dl-mathedit { position: fixed; z-index: 30; line-height: normal; --caret: currentColor; display: flex; align-items: center; pointer-events: auto; }
+/* LyX's formula editor over a slide's formula (deliverable/MathOverlay.tsx): on its baseline (the
+   zero-size mark sits on the line's baseline), invisible until drawn, still while the formula comes back */
+.dl-mathedit { position: fixed; z-index: 30; line-height: normal; --caret: currentColor; display: block; white-space: nowrap; pointer-events: auto; }
+.dl-mathedit-base { display: inline-block; width: 0; height: 0; vertical-align: baseline; }
+.dl-mathedit.pending { opacity: 0; }
+.dl-mathedit.closing { pointer-events: none; }
+.dl-mathedit.closing .lm-field { outline-color: transparent; }
+.dl-mathedit.closing .lm-overlay { display: none; }
 .dl-mathedit .lm-field { padding: 0; border: 0; border-radius: 2px; outline: 1.5px solid var(--accent); outline-offset: 3px; background: transparent; }
 .dl-mathedit .lm-field.focused { background: transparent; border: 0; }
 .dl-mathedit .lm-field.display { font-size: 1em; }
