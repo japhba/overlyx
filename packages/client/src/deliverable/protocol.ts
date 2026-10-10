@@ -61,7 +61,7 @@ export type ToRuntime =
 /** runtime → editor */
 export type FromRuntime =
   | { ol: 'ready'; version: number | null; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number }
-  | { ol: 'layout'; slides: SlideBox[]; width: number; height: number; docHeight: number }
+  | { ol: 'layout'; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number }
   | { ol: 'selection'; version: number; items: SelItem[] }
   | { ol: 'ops'; version: number; ops: HtmlOp[]; select?: 'inserted' | 'keep'; then?: 'editText' }
   | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null }

@@ -10,7 +10,11 @@ import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { config } from './config.ts';
 
 /** `doc`: a .tex document (has \\begin{document}, is \\input by one, or was written by OverLyX — a fragment with its settings line); `tex`: other LaTeX sources (preamble, macros, .sty); `dir`: a directory (so empty folders show in the explorer) */
-export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other' }
+export interface ProjectFile {
+  path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other';
+  /** an HTML file: the kind of deliverable it is (its `<meta name="overlyx">`; none: a plain web page) */
+  deliverable?: 'deck' | 'poster' | 'page';
+}
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf', '.eps', '.ps', '.tif', '.tiff', '.webp', '.bmp']);
 
@@ -57,6 +61,27 @@ export function texInfo(abs: string, st: fs.Stats): { hasDocument: boolean; auth
   return info;
 }
 
+/** What an HTML file is (its meta tag, read from its head), cached by mtime + size. */
+const htmlKindCache = new Map<string, { key: string; kind: ProjectFile['deliverable'] }>();
+export function htmlKind(abs: string, st: fs.Stats): ProjectFile['deliverable'] {
+  const key = `${st.mtimeMs}:${st.size}`;
+  const hit = htmlKindCache.get(abs);
+  if (hit && hit.key === key) return hit.kind;
+  let kind: ProjectFile['deliverable'];
+  try {
+    const fd = fs.openSync(abs, 'r');
+    const buf = Buffer.alloc(Math.min(st.size, 16384));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    const m = /<meta\b[^>]*\bname\s*=\s*["']?overlyx["']?[^>]*>/i.exec(buf.toString('utf8'));
+    const c = m && /\bcontent\s*=\s*["']?\s*([a-z]+)/i.exec(m[0])?.[1]?.toLowerCase();
+    kind = c === 'deck' || c === 'slides' ? 'deck' : c === 'poster' ? 'poster' : c === 'page' || c === 'webpage' ? 'page' : undefined;
+  } catch { kind = undefined; }
+  if (htmlKindCache.size > 2000) htmlKindCache.clear();
+  htmlKindCache.set(abs, { key, kind });
+  return kind;
+}
+
 export function collect(root: string, dir: string, out: ProjectFile[], depth: number): ProjectFile[] {
   if (depth > 6) return out;
   let entries: fs.Dirent[];
@@ -70,7 +95,10 @@ export function collect(root: string, dir: string, out: ProjectFile[], depth: nu
       continue;
     }
     const st = fs.statSync(full);
-    out.push({ path: path.relative(root, full), name: e.name, size: st.size, mtime: st.mtimeMs, kind: fileKind(e.name) });
+    const kind = fileKind(e.name);
+    const f: ProjectFile = { path: path.relative(root, full), name: e.name, size: st.size, mtime: st.mtimeMs, kind };
+    if (kind === 'html') { const d = htmlKind(full, st); if (d) f.deliverable = d; }
+    out.push(f);
   }
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }

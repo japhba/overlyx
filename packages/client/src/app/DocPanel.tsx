@@ -92,7 +92,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
     const p = projects.find(x => x.name === name);
     if (!p) return;
     setPicked(name);
-    const d = projectDocs(p)[0];
+    const d = projectDocs(p, true)[0];
     if (d) onOpen(`${name}/${d}`);
     else onOpen(name);   // no documents yet: open the project itself (App.tsx's ProjectRootPanel offers to create one)
   };

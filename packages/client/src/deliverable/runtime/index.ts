@@ -171,9 +171,10 @@ function onMessage(e: MessageEvent): void {
       const first = state.src === null;
       const ok = applySource(m.html, m.version);
       if (!ok) return;
+      // (the kind as the text has it now: the page first served may have been another version)
+      state.kind = detectKind();
       if (MODE === 'edit') edit.afterSource();
       if (MODE === 'thumb') drawRail();
-      state.kind = detectKind();
       if (first) void settle().then(() => sendLayout());
       else requestAnimationFrame(() => { sendLayout(); if (MODE === 'thumb') drawRail(); });
       break;

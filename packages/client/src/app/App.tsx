@@ -1194,7 +1194,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
       { sep: true },
       { label: 'Back', shortcut: NAV_BACK_KEY, disabled: !navHistory.canBack(), action: navBack },
       { label: 'Forward', shortcut: NAV_FORWARD_KEY, disabled: !navHistory.canForward(), action: navForward },
-      { label: 'Next document of the project', action: () => { const d = curProject ? projectDocs(curProject).map(x => `${curProject.name}/${x}`) : []; const i = d.indexOf(docId); const n = d[(i + 1) % d.length]; if (n && n !== docId) openInTab(n); } },
+      { label: 'Next document of the project', action: () => { const d = curProject ? projectDocs(curProject, true).map(x => `${curProject.name}/${x}`) : []; const i = d.indexOf(docId); const n = d[(i + 1) % d.length]; if (n && n !== docId) openInTab(n); } },
       { label: 'Beginning of document', shortcut: 'Ctrl+Home', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)).scrollIntoView()); view.focus(); } } },
       { label: 'End of document', shortcut: 'Ctrl+End', action: () => { if (view) { view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView()); view.focus(); } } },
       // the document's sections (LyX's Navigate menu lists them too): a click jumps, the palette finds them

@@ -144,5 +144,5 @@ export function pageSize(): { width: number; height: number } {
 
 export function sendLayout(): void {
   const sz = pageSize();
-  post({ ol: 'layout', slides: slideBoxes(), width: sz.width, height: sz.height, docHeight: document.documentElement.scrollHeight });
+  post({ ol: 'layout', kind: state.kind, slides: slideBoxes(), width: sz.width, height: sz.height, docHeight: document.documentElement.scrollHeight });
 }

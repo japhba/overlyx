@@ -16,8 +16,26 @@ import { promptNewFile } from './newfile';
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
 const mainFirst = (a: string, b: string) => Number(!/(^|\/)main\.tex$/.test(a)) - Number(!/(^|\/)main\.tex$/.test(b)) || a.split('/').length - b.split('/').length || a.localeCompare(b);
 
-export function projectDocs(p: Project): string[] {
-  return p.files.filter(f => f.kind === 'doc' && !isBackup(f.name)).map(f => f.path).sort(mainFirst);
+/**
+ * A project's documents, its main one first: the LaTeX and Markdown documents, and with
+ * `deliverables` also its slide decks, posters and web pages (HTML files, decks first, after the documents).
+ */
+export function projectDocs(p: Project, deliverables = false): string[] {
+  const docs = p.files.filter(f => f.kind === 'doc' && !isBackup(f.name)).map(f => f.path).sort(mainFirst);
+  if (!deliverables) return docs;
+  const order = { deck: 0, poster: 1, page: 2 } as const;
+  const html = p.files.filter(f => f.kind === 'html' && !isBackup(f.name))
+    .sort((a, b) => (order[a.deliverable ?? 'page'] - order[b.deliverable ?? 'page']) || mainFirst(a.path, b.path));
+  return [...docs, ...html.map(f => f.path)];
+}
+const DELIVERABLE_NAME = { deck: 'slides', poster: 'poster', page: 'web page' } as const;
+/** how a document is listed: an HTML deliverable by its folder (an index.html) and what it is */
+function docLabel(p: Project, d: string): string {
+  if (!/\.html?$/i.test(d)) return `📄 ${d}`;
+  const kind = p.files.find(f => f.path === d)?.deliverable;
+  const name = /(^|\/)index\.html?$/i.test(d) && d.includes('/') ? d.slice(0, d.lastIndexOf('/')) : d;
+  const what = kind && !name.toLowerCase().includes(DELIVERABLE_NAME[kind].split(' ')[0]) ? ` (${DELIVERABLE_NAME[kind]})` : '';
+  return `${kind === 'deck' ? '🎞' : kind === 'poster' ? '🪧' : '🌐'} ${name}${what}`;
 }
 /** a project's title, else its name without the owner (`jan/thesis` → `thesis`) */
 export const projectTitle = (p: Project) => p.title ?? projectShortName(p.name);
@@ -58,7 +76,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
     try {
       const r = await api.projects();
       const p = r.projects.find(x => x.name === names[0]);
-      const doc = p && projectDocs(p)[0];
+      const doc = p && projectDocs(p, true)[0];
       if (doc) { setImportOpen(false); setPending(null); onOpen(p.name + '/' + doc); }
     } catch { /* the start page shows the project */ }
   };
@@ -102,7 +120,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const metaText = (p: Project, docs: string[]) =>
     `${p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · ${docs.length} document${docs.length === 1 ? '' : 's'}, ${p.files.length} file${p.files.length === 1 ? '' : 's'}${recencyLabel(p) ? ` · ${recencyLabel(p)}` : ''}`;
   const badge = (p: Project) => p.via !== 'owner' && <span class={'badge' + (p.role === 'view' ? ' view' : '')}>{p.via === 'admin' ? 'admin' : p.role === 'view' ? 'can view' : 'can edit'}</span>;
-  const docLink = (p: Project, d: string) => <a key={d} href={'#/' + p.name + '/' + d} onClick={e => { e.preventDefault(); onOpen(p.name + '/' + d); }}>📄 {d}</a>;
+  const docLink = (p: Project, d: string) => <a key={d} href={'#/' + p.name + '/' + d} onClick={e => { e.preventDefault(); onOpen(p.name + '/' + d); }}>{docLabel(p, d)}</a>;
   const actions = (p: Project, docs: string[], isExample = false) => (
     <div class="actions">
       {docs[0] ? (isExample
@@ -117,7 +135,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   );
 
   const card = (p: Project) => {
-    const docs = projectDocs(p);
+    const docs = projectDocs(p, true);
     const isExample = p === example;
     return (
       <div class={'home-card' + (isExample ? ' example' : '')} key={p.name} data-project={p.name}>
@@ -145,7 +163,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
 
   /** one line per project: name and facts on the left, its first documents on one line below (the count is in the facts), the actions on the right */
   const row = (p: Project) => {
-    const docs = projectDocs(p);
+    const docs = projectDocs(p, true);
     const target = docs[0] ? p.name + '/' + docs[0] : p.name;
     return (
       <div class="home-card home-row" key={p.name} data-project={p.name}>

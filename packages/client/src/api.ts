@@ -11,7 +11,11 @@ export function googleSignInUrl(next: string = location.hash): string {
   return '/api/auth/google' + (next.startsWith('#/') && next.length > 2 ? '?next=' + encodeURIComponent(next) : '');
 }
 /** `doc`: a .tex document (opens in the editor); `tex`: other LaTeX sources (text editor); `lyx`: importable */
-export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other' }
+export interface ProjectFile {
+  path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other';
+  /** an HTML file: the kind of deliverable it is (none: a plain web page) */
+  deliverable?: 'deck' | 'poster' | 'page';
+}
 export type Role = 'owner' | 'edit' | 'view';
 export interface Project {
   /** the project's key, `<owner>/<name>` (core projectKey.ts): documents are `<key>/<path>`, the URL `#/<key>/<path>` */

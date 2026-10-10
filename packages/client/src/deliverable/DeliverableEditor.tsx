@@ -196,6 +196,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           break;
         case 'layout':
           if (fromCanvas) {
+            setKind(m.kind);
             setSlides(m.slides);
             if (m.width) setPageW(m.width);
             const p = pending.current;

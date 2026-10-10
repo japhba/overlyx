@@ -53,7 +53,9 @@ function buildTree(files: ProjectFile[]): TreeNode[] {
   return root.children;
 }
 
-const ICON: Record<string, string> = { doc: '📄', lyx: '📥', bib: '📚', image: '🖼', tex: '𝓣', pdf: '📕', board: '🖍', html: '🎞', other: '·' };
+const ICON: Record<string, string> = { doc: '📄', lyx: '📥', bib: '📚', image: '🖼', tex: '𝓣', pdf: '📕', board: '🖍', html: '🌐', other: '·' };
+/** an HTML deliverable: slides, a poster, a web page */
+const DELIVERABLE_ICON = { deck: '🎞', poster: '🪧', page: '🌐' } as const;
 /** the explorer's cut/copy clipboard (paths within one project; survives re-renders) */
 let fileClip: { project: string; path: string; cut: boolean } | null = null;
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
@@ -363,7 +365,7 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
         {outlines && (outlined
           ? <span class="twisty" role="button" title={open ? 'Hide the outline' : 'Show the outline'} onClick={e => { e.preventDefault(); e.stopPropagation(); outlines.toggle(id); }}>{open ? '▾' : '▸'}</span>
           : <span class="twisty" />)}
-        <span class="ficon">{ICON[f.kind] ?? '·'}</span><span class="fname">{node.name}</span>
+        <span class="ficon">{f.kind === 'html' && f.deliverable ? DELIVERABLE_ICON[f.deliverable] : ICON[f.kind] ?? '·'}</span><span class="fname">{node.name}</span>
         {isDoc && offlineDocs.has(id) && <span class="offline-mark" title="A copy of this document is stored in this browser: it can be opened and edited offline">⬇</span>}
       </a>
     );
