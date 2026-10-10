@@ -1,8 +1,8 @@
 /**
- * "Annotations in the margin" mode: Note / Comment / Greyed-out insets are positioned in a
- * column to the right of the text (Google-Docs style) instead of inline. The inset DOM stays
- * where ProseMirror put it (so editing/collaboration keep working); we only move it visually
- * with absolute positioning and stack the cards so they do not overlap.
+ * "Annotations in the margin" mode: Note / Comment / Greyed-out insets are positioned in the
+ * notes & comments pane right of the text (the document pane's split, app/notespane.tsx) instead
+ * of inline. The inset DOM stays where ProseMirror put it (so editing/collaboration keep working);
+ * we only move it visually with absolute positioning and stack the cards so they do not overlap.
  */
 import { Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
@@ -27,6 +27,7 @@ export function marginPlugin(initial = false): Plugin<boolean> {
       root.classList.toggle('margin-mode', marginKey.getState(view.state) ?? false);
       observer = new ResizeObserver(() => schedule(view));
       observer.observe(view.dom);
+      observer.observe(root);   // the split moved: the text column may keep its width, the cards move anyway
       const onResize = () => schedule(view);
       window.addEventListener('resize', onResize);
       schedule(view);
@@ -42,6 +43,9 @@ export function marginPlugin(initial = false): Plugin<boolean> {
   });
 }
 
+/** cards keep 16px from the pane's edges and grow with it up to 560px */
+const PANE_PAD = 16, CARD_MAX = 560;
+
 export function isMarginNote(el: Element): boolean {
   return el.classList.contains('lyx-inset-note');
 }
@@ -56,20 +60,25 @@ export function layout(view: EditorView): void {
   // threads are not shown at all (the Comments panel keeps them)
   const top = cards.filter(c => !c.parentElement?.closest('.lyx-inset-note') && !c.classList.contains('resolved'));
   if (!on) {
-    ((root.closest('.editor-scroll') as HTMLElement | null) ?? root).style.removeProperty('--margin-col');
     for (const c of cards) { c.classList.remove('in-margin'); const b = c.querySelector<HTMLElement>(':scope > .inset-box'); if (b) { b.style.top = ''; b.style.left = ''; b.style.width = ''; } }
     return;
   }
-  // the note column is 320px wide (a `--note-width` on the page overrides that), less on a narrow
-  // page (the text column keeps at least ~360px)
-  const pageWidth = root.getBoundingClientRect().width;
-  const wanted = parseFloat(getComputedStyle(root).getPropertyValue('--note-width')) || 320;
-  const cardWidth = Math.max(160, Math.min(wanted, Math.round(pageWidth * 0.45)));
-  const col = `${cardWidth + 52}px`;
-  // on the scroll container, so the ruler above the page sees it too
-  const holder = (root.closest('.editor-scroll') as HTMLElement | null) ?? root;
-  if (holder.style.getPropertyValue('--margin-col') !== col) holder.style.setProperty('--margin-col', col);
-  const columnLeft = view.dom.getBoundingClientRect().right + 28; // just right of the text column
+  // the notes pane: the right part of the page, --notes-col wide (inside ink mode's gutter: the page is
+  // wider than the scroll pane by one on each side); without one (a layout page, a host that does not
+  // split) the cards go just right of the text column
+  const page = root.closest('.editor-page') as HTMLElement | null;
+  const scroll = root.closest('.editor-scroll') as HTMLElement | null;
+  const paneWidth = page ? parseFloat(getComputedStyle(page).getPropertyValue('--notes-col')) : NaN;
+  let columnLeft: number, cardWidth: number;
+  if (page && paneWidth > 0 && !view.dom.classList.contains('ol-layout')) {
+    const gutter = scroll ? Math.max(0, (page.offsetWidth - scroll.clientWidth) / 2) : 0;
+    const paneRight = page.getBoundingClientRect().right - gutter;
+    columnLeft = paneRight - paneWidth + PANE_PAD;
+    cardWidth = Math.max(120, Math.min(CARD_MAX, paneWidth - 2 * PANE_PAD));
+  } else {
+    columnLeft = view.dom.getBoundingClientRect().right + 28;
+    cardWidth = 320;
+  }
   // cards in folded-away sections (plugins/fold.ts) have no box: they must not push the others down
   const items = top.filter(c => c.getClientRects().length > 0).map(c => {
     const anchor = c.querySelector<HTMLElement>(':scope > .inset-anchor') ?? c;

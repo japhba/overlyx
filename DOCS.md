@@ -788,6 +788,8 @@ blend.
   floats it away from the item anyway; markdown has none).
 * **Ruler**: a Google-Docs-style ruler above the page (*View ▸ Ruler*) with draggable margin
   handles sets the text width (also *View ▸ Text width*, `Ctrl+Alt+±`); double-click resets it.
+  In margin mode it shows the split as well: the text column centred in the text part, and over
+  the notes pane its sash and the notes' text size.
 * **LyX math editor**: formulas are edited with our own port of LyX's mathed (`packages/core/src/math`:
   the LyX cell/inset model, a port of `MathParser.cpp` and of LyX 2.5's writer so that edited formulas
   are written exactly as LyX writes them, and a port of `Cursor.cpp`/`InsetMathNest` for the cursor)
@@ -1075,14 +1077,24 @@ blend.
   its previous / next sibling, never leaving its parent; promote / demote change the level of its
   heading and of every sub-heading in it by one step of the class's ladder (an article has no
   Chapter, so Section promotes to Part).
-* **Notes & comments in the margin** (*View* menu / toolbar): the note cards sit in a column right
-  of the text, Google-Docs style, stacked without overlap and anchored by small coloured squares
-  in the text (`editor/plugins/margin.ts`); a folded note is a card with its label and a one-line
-  excerpt, its label unfolds it (and the cards below move down); the − / + buttons on the ruler over the note column make the text
-  of notes and comments smaller / larger (`localStorage.ol.noteScale`, 60–130 % of the document
-  text, 90 % by default, double-click the label to reset — inline notes follow the same setting); the
-  column narrows on a small window and the text keeps at least 360px. Notes and comments are set
-  in the interface's sans-serif.
+* **Notes & comments in the margin** (*View* menu / toolbar): the document pane splits like VS
+  Code's side-by-side editor groups (`app/notespane.tsx`): the text on the left, a tinted notes &
+  comments pane on the right, and between them a sash that looks like the WYSIWYG / TeX / PDF pane
+  dividers. It runs from the ruler down the page. Drag it (on the page or on the ruler) to move the
+  split; the arrow keys step it when it has the focus, and a double-click resets it. The notes pane
+  is a share of the document pane (`localStorage.ol.notesShare`, 15–60 %, 30 % by default), so it
+  grows and shrinks with the window, the file tree and the PDF pane. It is never narrower than
+  200px, and the text part keeps 360px. Each shell sets the pane's width as `--notes-col` on
+  `.editor-scroll`; the page's padding and tint, the ruler and the cards all read it. The text column
+  keeps its own width (ruler handles, *View ▸ Text width*) and is centred in the text part, so the
+  page margin and the split are separate settings. The cards fill the pane (up to 560px), stacked
+  without overlap and anchored by small coloured dots in the text (`editor/plugins/margin.ts`). A
+  folded note is a card with its label and a one-line excerpt; its label unfolds it (and the cards
+  below move down). The − / + buttons on the ruler over the notes pane make the text of notes and
+  comments smaller / larger (`localStorage.ol.noteScale`, 60–130 % of the document text, 90 % by
+  default; double-click the label to reset; inline notes follow the same setting). Layout pages
+  (slides, posters) have no notes pane: there the cards sit just right of the page. Notes and
+  comments are set in the interface's sans-serif.
 * **Margin ink** (the pen button in the toolbar; `editor/plugins/ink.ts`, `core/ink.ts`): Goodnotes-style
   drawing in the space left and right of the text — the page grows wide gutters to pan into and snaps
   back to centre; on tablets the pen comes out by itself (`localStorage.ol.ink` overrides). Strokes

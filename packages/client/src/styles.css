@@ -318,8 +318,22 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
 /* the text column is centred; its width is a View setting (--text-width, "Text width" menu) */
 .lyx-editor { max-width: var(--text-width, 720px); margin: 0 auto; }
 /* with annotations in the margin, keep room for a 320px card column right of the text and centre both */
-/* margin mode: the note column (--margin-col, set by plugins/margin.ts from the page width) sits right of the text; the text keeps at least 360px */
-.margin-mode .lyx-editor { max-width: max(360px, min(var(--text-width, 720px), calc(100% - var(--margin-col, 372px)))); margin-left: max(0px, calc((100% - max(360px, min(var(--text-width, 720px), 100% - var(--margin-col, 372px))) - var(--margin-col, 372px)) / 2)); }
+/* margin mode (app/notespane.tsx) splits the document pane like VS Code's editor groups: the text part
+   (the column centred in it at its own width) | a sash | the notes & comments pane, --notes-col wide
+   (its share of the pane, set on .editor-scroll), tinted, where plugins/margin.ts stacks the cards.
+   --notes-inset: ink mode's gutters (the page is wider than the pane; the split stays in view) */
+.editor-scroll.margin-mode { --notes-inset: 0px; --notes-bg: color-mix(in srgb, var(--page-bg) 96%, var(--ui-fg)); }
+.editor-scroll.margin-mode.ink-pan { --notes-inset: var(--ink-gutter, 85vw); }
+.margin-mode > .editor-page {
+  padding-left: calc(48px + var(--notes-inset)); padding-right: calc(48px + var(--notes-inset) + var(--notes-col, 340px));
+  background: linear-gradient(to left, var(--page-bg) var(--notes-inset), var(--notes-bg) var(--notes-inset), var(--notes-bg) calc(var(--notes-inset) + var(--notes-col, 340px)), var(--page-bg) calc(var(--notes-inset) + var(--notes-col, 340px)));
+}
+/* the sash: the same divider as between the WYSIWYG / TeX / PDF panes (.pane-grip), full height, on the ruler too */
+.notes-sash { position: absolute; top: 0; bottom: 0; right: calc(var(--notes-inset, 0px) + var(--notes-col, 340px) - 4px); width: 7px; z-index: 4; cursor: col-resize; touch-action: none; outline: none; }
+.notes-sash::before { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--ui-border); }
+.notes-sash:hover::before, .notes-sash:focus-visible::before, html.notes-resizing .notes-sash::before { left: 2px; width: 3px; background: var(--accent); opacity: 0.6; }
+/* a layout page (slides, posters) has no notes pane */
+.margin-mode > .editor-page:has(> .editor-host > .ol-layout) > .notes-sash { display: none; }
 /* MathLive shades the inset that contains the caret; the LyX corner markers replace that */
 .lyx-editor { outline: none; font-family: var(--editor-font); font-size: calc(15.5px * var(--editor-zoom)); line-height: 1.45; color: var(--editor-fg); min-height: 300px; }
 .lyx-editor:focus-visible { outline: none; }
@@ -575,9 +589,9 @@ html[data-theme="dark"] .lyx-inset-note-comment > .inset-box > .inset-actions > 
 .margin-mode .lyx-inset-note-greyedout > .inset-anchor { background: var(--muted2); }
 .margin-mode .lyx-inset-note.in-margin:hover > .inset-anchor { transform: scale(1.4); }
 .margin-mode .lyx-inset-note.in-margin { position: static; }
-.margin-mode .lyx-inset-note.in-margin > .inset-box { position: absolute; width: 320px; max-width: calc(var(--margin-col, 372px) - 52px); display: block; z-index: 2; box-shadow: 0 1px 2px rgba(0,0,0,0.08), 0 4px 14px rgba(0,0,0,0.08); border-radius: 8px; padding: 8px 10px; font-size: var(--note-size, 0.9em); line-height: 1.4; transition: box-shadow 0.15s; }
+.margin-mode .lyx-inset-note.in-margin > .inset-box { position: absolute; display: block; z-index: 2; box-shadow: 0 1px 2px rgba(0,0,0,0.08), 0 4px 14px rgba(0,0,0,0.08); border-radius: 8px; padding: 8px 10px; font-size: var(--note-size, 0.9em); line-height: 1.4; transition: box-shadow 0.15s; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box:hover { box-shadow: 0 2px 4px rgba(0,0,0,0.1), 0 8px 24px rgba(0,0,0,0.14); z-index: 3; }
-.margin-mode .lyx-inset-note-comment.in-margin:not(.collapsed) > .inset-box { display: flex; flex-wrap: wrap; align-items: center; }
+.margin-mode .lyx-inset-note-comment.in-margin:not(.collapsed) > .inset-box { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; }   /* as wide as the notes pane allows (plugins/margin.ts) */
 .margin-mode .lyx-inset-note-comment.in-margin:not(.collapsed) > .inset-box > .inset-content { margin-top: 4px; }
 .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content, .margin-mode .lyx-inset-note.in-margin > .inset-box > .inset-content > .lyx-par:first-child { display: block; }
 /* a folded note in the margin: its label and a one-line excerpt (click the label to unfold it); nested notes fold as inline */
@@ -929,15 +943,18 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .ruler { position: sticky; top: 0; z-index: 6; height: 24px; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); user-select: none; font-family: var(--ui-font); }
 .ruler-inner { position: relative; margin: 0 48px; height: 100%; }
 .ruler-band { position: relative; height: 100%; max-width: var(--text-width, 720px); margin: 0 auto; background: var(--page-bg); border-left: 1px solid var(--ui-border); border-right: 1px solid var(--ui-border); box-sizing: border-box; }
-.margin-mode .ruler-band { max-width: max(360px, min(var(--text-width, 720px), calc(100% - var(--margin-col, 372px)))); margin-left: max(0px, calc((100% - max(360px, min(var(--text-width, 720px), 100% - var(--margin-col, 372px))) - var(--margin-col, 372px)) / 2)); }
+/* margin mode: the band centred in the text part, then the notes pane with its sash (the page's split, app/notespane.tsx) */
+.margin-mode > .ruler > .ruler-inner { margin-left: calc(48px + var(--notes-inset)); margin-right: calc(48px + var(--notes-inset) + var(--notes-col, 340px)); }
+.ruler-notes-pane { position: absolute; top: 0; bottom: 0; right: var(--notes-inset, 0px); width: var(--notes-col, 340px); background: var(--notes-bg); }
+.ruler-notes-pane > .notes-sash { left: -3px; right: auto; }
 .ruler .tick { position: absolute; bottom: 0; width: 1px; height: 5px; background: var(--muted2); }
 .ruler .tick.major { height: 9px; background: var(--ui-muted); }
 .ruler .tick-label { position: absolute; bottom: 9px; left: 2px; font-size: 9px; color: var(--ui-muted); line-height: 1; }
 .ruler .handle { position: absolute; top: 3px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid var(--accent); cursor: ew-resize; z-index: 2; }
 .ruler .handle.left { left: -7px; }
 .ruler .handle.right { right: -7px; }
-/* margin mode: the note width buttons sit over the note column */
-.ruler .ruler-notes { position: absolute; left: 100%; top: 3px; margin-left: 28px; display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--ui-muted); white-space: nowrap; }
+/* margin mode: the text size of notes and comments, over the notes pane */
+.ruler .ruler-notes { position: absolute; left: 16px; top: 3px; display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--ui-muted); white-space: nowrap; }
 .ruler .ruler-notes button { font: inherit; font-size: 11px; line-height: 1; width: 16px; height: 16px; padding: 0; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--page-bg); color: var(--fg2); cursor: pointer; }
 .ruler .ruler-notes button:hover:not(:disabled) { background: var(--row-hover); color: var(--ui-fg); }
 .ruler .ruler-notes button:disabled { opacity: 0.35; cursor: default; }
@@ -952,6 +969,9 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .editor-scroll.ink-pan { overflow-x: auto; scroll-snap-type: x proximity; }
 .editor-scroll.ink-pan > .editor-page, .editor-scroll.ink-pan > .ruler { width: calc(100% + 2 * var(--ink-gutter, 85vw)); }
 .editor-scroll.ink-pan .editor-host > .lyx-editor { scroll-snap-align: center; }
+/* margin mode: snap the whole split into view (the text part starts 48px into it), not the text column alone */
+.editor-scroll.ink-pan.margin-mode .editor-host > .lyx-editor { scroll-snap-align: none; }
+.editor-scroll.ink-pan.margin-mode .editor-host { scroll-snap-align: start; scroll-margin-left: 48px; }
 /* the gutters make the page wider than the pane: the column still fits the pane itself (its width less
    the page's 48px paddings — the page and the ruler are 100% + 2 gutters wide), so a narrow pane (the PDF
    beside the text on a tablet) reflows the text instead of cutting it off on both sides */

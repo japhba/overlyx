@@ -407,6 +407,60 @@ test("margin mode keeps the notes' fold state, unfolds on the label, and the rul
   await expect(page.locator('.editor-scroll.margin-mode')).toHaveCount(0);
 });
 
+test('margin mode splits the pane like editor groups: the sash on the page and the ruler moves the split, keys step it, a double-click resets it', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.evaluate(() => localStorage.removeItem('ol.notesShare'));
+  await openPaper(page);
+  if (!(await page.locator('.editor-scroll.margin-mode').count())) await page.locator('[data-tb="margin"]').click();
+  await expect.poll(() => page.locator('.lyx-inset-note.in-margin').count()).toBeGreaterThan(0);
+  const geo = () => page.evaluate(() => {
+    const r = (s: string) => document.querySelector(s)!.getBoundingClientRect();
+    const scroll = document.querySelector<HTMLElement>('.editor-scroll')!;
+    const cards = Array.from(document.querySelectorAll('.lyx-inset-note.in-margin > .inset-box')).map(e => e.getBoundingClientRect()).filter(b => b.width > 0);
+    return {
+      col: parseFloat(scroll.style.getPropertyValue('--notes-col')), pane: scroll.clientWidth,
+      page: r('.notes-sash[data-sash="page"]').left, ruler: r('.notes-sash[data-sash="ruler"]').left,
+      pageRight: r('.editor-page').right, text: [r('.lyx-editor').left, r('.lyx-editor').right], band: [r('.ruler-band').left, r('.ruler-band').right],
+      cardsLeft: Math.min(...cards.map(b => b.left)), cardsRight: Math.max(...cards.map(b => b.right)), cardWidth: cards[0]?.width ?? 0,
+    };
+  });
+  const g0 = await geo();
+  expect(g0.col / g0.pane).toBeCloseTo(0.3, 1);                       // the default share
+  expect(Math.abs(g0.page - g0.ruler)).toBeLessThanOrEqual(1);         // one line from the ruler down the page
+  expect(Math.abs(g0.text[0] - g0.band[0]) + Math.abs(g0.text[1] - g0.band[1])).toBeLessThanOrEqual(2);   // the ruler's band is the text column
+  expect(g0.text[1]).toBeLessThan(g0.page);                            // the text left of the sash, the cards right of it, inside the page
+  expect(g0.cardsLeft).toBeGreaterThan(g0.page);
+  expect(g0.cardsRight).toBeLessThanOrEqual(g0.pageRight);
+  // drag the page's sash 100px to the left: the notes pane grows by that, the cards with it, the share is kept
+  const sash = page.locator('.notes-sash[data-sash="page"]');
+  const sb = (await sash.boundingBox())!;
+  await page.mouse.move(sb.x + sb.width / 2, 450);
+  await page.mouse.down();
+  await page.mouse.move(sb.x + sb.width / 2 - 50, 450, { steps: 3 });
+  await page.mouse.move(sb.x + sb.width / 2 - 100, 450, { steps: 3 });
+  await expect(page.locator('html.notes-resizing')).toHaveCount(1);
+  await page.mouse.up();
+  await expect(page.locator('html.notes-resizing')).toHaveCount(0);
+  await expect.poll(async () => (await geo()).col).toBeCloseTo(g0.col + 100, -1);
+  const g1 = await geo();
+  expect(g1.cardWidth).toBeGreaterThan(g0.cardWidth + 90);
+  expect(g1.cardsLeft).toBeGreaterThan(g1.page);
+  expect(Math.abs(g1.page - g1.ruler)).toBeLessThanOrEqual(1);
+  expect(Number(await page.evaluate(() => localStorage.getItem('ol.notesShare')))).toBeCloseTo(g1.col / g1.pane, 2);
+  // the ruler's sash takes the arrow keys: → makes the notes pane narrower
+  await page.locator('.notes-sash[data-sash="ruler"]').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await geo()).col).toBeLessThan(g1.col - 10);
+  // a double-click resets the split
+  await sash.dblclick();
+  await expect.poll(async () => (await geo()).col).toBe(g0.col);
+  // margin mode off: no split
+  await page.locator('[data-tb="margin"]').click();
+  await expect(page.locator('.editor-scroll.margin-mode')).toHaveCount(0);
+  await expect(page.locator('.notes-sash')).toHaveCount(0);
+  expect(await page.locator('.editor-scroll').evaluate(el => (el as HTMLElement).style.getPropertyValue('--notes-col'))).toBe('');
+});
+
 test('clicking into a formula does not move the page (the math toolbars appear above it)', async ({ page }) => {
   await openPaper(page);
   const f = page.locator('.lyx-math-display').nth(3);
