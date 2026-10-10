@@ -17,6 +17,7 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { isProjectKey, splitDocId, itemText, type LyxDocument } from '@overlyx/core';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
+import { isHtmlPath } from '@overlyx/core/html/deliverable.ts';
 import { checkTexHealth, repairTex, type HealthIssue, type PreserveCache } from '@overlyx/core/tex/index.ts';
 import { db } from './db.ts';
 import { config } from './config.ts';
@@ -814,6 +815,99 @@ export class BoardDoc extends OpenDoc {
   }
 }
 
+/**
+ * An HTML deliverable's page (a deck, poster or web page — core html/): the same Yjs sync, presence
+ * and persistence as a .tex document, but the state is the file's text itself, a Y.Text('html'),
+ * written to disk as it is. People edit it on the canvas and in the code, agents through the file
+ * tools — every change lands here as a splice of the text, so whatever an agent wrote stays byte
+ * for byte. A change on disk is taken over where it does not touch unsaved edits (three-way, by
+ * the changed region); when it does, the disk wins and the state before is kept as a version.
+ */
+export class HtmlDoc extends OpenDoc {
+  constructor(id: string, project: string, relPath: string, absPath: string) {
+    super(id, project, relPath, absPath);
+    this.isChild = true;   // saveToFile's looksLikeDocument check: any text
+  }
+
+  get html(): Y.Text { return this.ydoc.getText('html'); }
+
+  override get usesWorker(): boolean { return false; }
+
+  override health(): HealthIssue[] { return []; }
+
+  protected override render(): Rendered {
+    return { text: this.html.toString(), files: {}, spans: [] };
+  }
+
+  /** The text into the CRDT as one splice (the changed region), so edits elsewhere and cursors survive. */
+  loadFromText(text: string, origin: string): void {
+    const cur = this.html.toString();
+    if (cur !== text) {
+      const r = changedRegion(cur, text);
+      this.ydoc.transact(() => {
+        if (r.removed) this.html.delete(r.from, r.removed);
+        if (r.insert) this.html.insert(r.from, r.insert);
+      }, origin);
+    }
+    if (origin === 'file-load') this.markSaved();
+  }
+
+  /** An agent's (or another server-side) change of the whole text: applied, then saved. */
+  replaceText(text: string, origin = 'mcp'): void {
+    this.loadFromText(text, origin);
+    this.edited();
+  }
+
+  override absorbExternalChange(text?: string): boolean {
+    if (text === undefined) {
+      try { text = readTextFile(this.absPath); } catch { return false; }
+    }
+    const hash = sha1(text);
+    if (hash === this.fileHash || hash === knownHashes.get(this.absPath)) return false;
+    const base = this.fileText ?? '';
+    const ours = this.html.toString();
+    this.fileHash = hash;
+    this.fileText = text;
+    knownHashes.set(this.absPath, hash);
+    if (ours === base) this.loadFromText(text, 'file-load');
+    else {
+      // unsaved edits here: the disk's change goes in where it is, unless it touches them
+      const d = changedRegion(base, text);
+      const from = mapThrough(base, ours, d.from), to = mapThrough(base, ours, d.from + d.removed);
+      if (from !== null && to !== null && to >= from) {
+        this.ydoc.transact(() => {
+          if (to > from) this.html.delete(from, to - from);
+          if (d.insert) this.html.insert(from, d.insert);
+        }, 'file-load');
+        this.dirty = true;
+      } else {
+        this.snapshot('before a change on disk', ours);
+        this.loadFromText(text, 'file-load');
+      }
+    }
+    this.persistState();
+    return true;
+  }
+}
+
+/** the one region where two texts differ: [from, from + removed) of `a` became `insert` */
+function changedRegion(a: string, b: string): { from: number; removed: number; insert: string } {
+  let p = 0;
+  const max = Math.min(a.length, b.length);
+  while (p < max && a.charCodeAt(p) === b.charCodeAt(p)) p++;
+  let s = 0;
+  while (s < max - p && a.charCodeAt(a.length - 1 - s) === b.charCodeAt(b.length - 1 - s)) s++;
+  return { from: p, removed: a.length - s - p, insert: b.slice(p, b.length - s) };
+}
+
+/** a position of `a` in `b`, when it is outside the region where they differ */
+function mapThrough(a: string, b: string, offset: number): number | null {
+  const r = changedRegion(a, b);
+  if (offset <= r.from) return offset;
+  if (offset >= r.from + r.removed) return offset + r.insert.length - r.removed;
+  return null;
+}
+
 /** hashes of file contents we last wrote / read, to distinguish our own writes from external ones */
 const knownHashes = new Map<string, string>();
 
@@ -847,7 +941,8 @@ export const fileWrittenListeners = new Set<(project: string, userIds: number[])
 export const projectChangedListeners = new Set<(project: string) => void>();
 /** a graphics file of a project was written or created: (project, project-relative path, mtime) — the editors reload the image */
 export const graphicsChangedListeners = new Set<(project: string, file: string, version: number) => void>();
-const GRAPHICS_FILE = /\.(png|jpe?g|gif|webp|svgz?|pdf|eps|ps|tiff?|bmp)$/i;
+// (and the web files of HTML deliverables: their editors reload a stylesheet, a script, data, a font)
+const GRAPHICS_FILE = /\.(png|jpe?g|gif|webp|avif|svgz?|pdf|eps|ps|tiff?|bmp|css|m?js|json|csv|tsv|woff2?|ttf|otf|mp4|webm)$/i;
 
 type DbState = { state: Buffer; file_hash: string; epoch: string | null };
 
@@ -888,10 +983,11 @@ export class DocManager {
 
   private async openCold(id: string): Promise<OpenDoc> {
     const { project, relPath } = DocManager.parseId(id);
-    if (!relPath.endsWith('.tex') && !relPath.endsWith('.board') && !isMarkdownPath(relPath)) throw new Error('not a .tex or markdown document');
+    if (!relPath.endsWith('.tex') && !relPath.endsWith('.board') && !isMarkdownPath(relPath) && !isHtmlPath(relPath)) throw new Error('not a .tex or markdown document');
     const absPath = resolveProjectPath(project, relPath);
     if (!fs.existsSync(absPath)) throw new Error('file not found: ' + id);
     if (relPath.endsWith('.board')) return this.openBoardCold(id, project, relPath, absPath);
+    if (isHtmlPath(relPath)) return this.openHtmlCold(id, project, relPath, absPath);
     const doc = new OpenDoc(id, project, relPath, absPath);
     const text = readTextFile(absPath);
     if (text.includes('\0')) throw new Error('not a text document: ' + id);
@@ -967,6 +1063,40 @@ export class DocManager {
     fresh.persistState();
     this.register(fresh);
     return fresh;
+  }
+
+  private openHtmlCold(id: string, project: string, relPath: string, absPath: string): HtmlDoc {
+    const text = readTextFile(absPath);
+    if (text.includes('\0')) throw new Error('not a text document: ' + id);
+    const hash = sha1(text);
+    const doc = new HtmlDoc(id, project, relPath, absPath);
+    doc.fileHash = hash;
+    doc.fileText = text;
+    knownHashes.set(absPath, hash);
+    const row = db.prepare('SELECT state, file_hash, epoch FROM ydocs WHERE id = ?').get(id) as DbState | undefined;
+    if (row) {
+      try {
+        Y.applyUpdate(doc.ydoc, new Uint8Array(row.state), 'db');
+        if (row.epoch) doc.epoch = row.epoch;
+      } catch { doc.ydoc.destroy(); return this.openHtmlFresh(id, project, relPath, absPath, text, hash); }
+    }
+    // the stored history with the file on top (a change made while it was closed is one splice)
+    doc.loadFromText(text, 'file-load');
+    doc.lastSavedAt = fs.statSync(absPath).mtimeMs;
+    if (!row || row.file_hash !== hash) doc.persistState();
+    this.register(doc);
+    return doc;
+  }
+
+  private openHtmlFresh(id: string, project: string, relPath: string, absPath: string, text: string, hash: string): HtmlDoc {
+    const doc = new HtmlDoc(id, project, relPath, absPath);
+    doc.fileHash = hash;
+    doc.fileText = text;
+    doc.loadFromText(text, 'file-load');
+    doc.lastSavedAt = fs.statSync(absPath).mtimeMs;
+    doc.persistState();
+    this.register(doc);
+    return doc;
   }
 
   private async openFresh(doc: OpenDoc, text: string): Promise<OpenDoc> {
@@ -1118,7 +1248,7 @@ export class DocManager {
   }
 
   private async onExternalChange(file: string): Promise<void> {
-    if (!file.endsWith('.tex') && !file.endsWith('.board') && !isMarkdownPath(file)) return;
+    if (!file.endsWith('.tex') && !file.endsWith('.board') && !isMarkdownPath(file) && !isHtmlPath(file)) return;
     const doc = [...this.docs.values()].find(d => d.absPath === file);
     if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] fs change ${file} open=${!!doc} hash=${doc?.fileHash.slice(0, 8)} known=${knownHashes.get(file)?.slice(0, 8)}`);
     if (!doc) return;
@@ -1136,7 +1266,7 @@ export class DocManager {
    * the clients are told (close code 4001); the next save would otherwise silently re-create it.
    */
   private async onExternalRemove(file: string): Promise<void> {
-    if (!file.endsWith('.tex') && !file.endsWith('.board') && !isMarkdownPath(file)) return;
+    if (!file.endsWith('.tex') && !file.endsWith('.board') && !isMarkdownPath(file) && !isHtmlPath(file)) return;
     const doc = [...this.docs.values()].find(d => d.absPath === file);
     if (process.env.OVERLYX_DEBUG_WATCH) console.log(`[docs] fs change ${file} open=${!!doc} hash=${doc?.fileHash.slice(0, 8)} known=${knownHashes.get(file)?.slice(0, 8)}`);
     if (!doc) return;
@@ -1181,6 +1311,7 @@ export class DocManager {
     const doc = await this.open(id);
     await this.createVersion(id, 'before restore of "' + v.name + '"', author, 'auto');
     if (doc instanceof BoardDoc) doc.loadFromJson(v.lyx, 'restore');
+    else if (doc instanceof HtmlDoc) doc.loadFromText(v.lyx, 'restore');
     else if (isLyxText(v.lyx)) doc.loadFromLyx(await parseVersionText(doc, v.lyx), 'restore');
     else await doc.loadText(v.lyx, 'restore', true);
     doc.scheduleSave();

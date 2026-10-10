@@ -26,45 +26,56 @@ const { walkInsets } = await import('../packages/core/src/index.ts');
 
 const TPL = join(import.meta.dirname, '../packages/server/templates/starters');
 const HAVE_LATEXMK = spawnSync('which', ['latexmk']).status === 0;
+/** the LaTeX starters (deck and poster are no longer given to new accounts, since the HTML deliverables, but their templates stay) */
 const FILES: Record<string, string> = { slides: 'slides.tex', deck: 'deck.tex', poster: 'poster.tex', paper: 'paper.tex' };
+const GIVEN: Record<string, string> = { slides: 'slides.tex', paper: 'paper.tex' };
 const personalise = (text: string, name: string) => text.replace(/@@NAME@@/g, name);
 
 describe('starter projects', () => {
   const ada = toSessionUser(createUser('ada', 'Ada Lovelace', 'pw'));
 
-  it('every account gets the decks, the poster and the paper once, besides the welcome project', () => {
+  it('every account gets the beamer deck, the HTML slides / poster / page and the paper once, besides the welcome project', () => {
     expect(access.ensureWelcomeProject(ada)).toBe('ada/welcome');
-    expect(access.ensureStarterProjects(ada)).toEqual(['ada/example-slides', 'ada/example-deck', 'ada/example-poster', 'ada/example-paper']);
+    expect(access.ensureStarterProjects(ada)).toEqual(['ada/example-slides', 'ada/example-web', 'ada/example-paper']);
     expect(access.ensureStarterProjects(ada)).toEqual([]);
     const mine = access.accessibleProjects(ada);
     expect(mine.map(p => [p.name, p.kind, p.title, p.role])).toEqual(expect.arrayContaining([
       ['ada/welcome', 'example', 'Welcome to OverLyX', 'owner'],
       ['ada/example-slides', 'project', 'Example: beamer slides', 'owner'],
-      ['ada/example-deck', 'project', 'Example: slide deck', 'owner'],
-      ['ada/example-poster', 'project', 'Example: poster', 'owner'],
+      ['ada/example-web', 'project', 'Example: slides, poster and web page', 'owner'],
       ['ada/example-paper', 'project', 'Example: paper', 'owner'],
     ]));
     // the welcome project stays the one example the client looks for
     expect(mine.filter(p => p.kind === 'example').map(p => p.name)).toEqual(['ada/welcome']);
-    for (const [id, file] of Object.entries(FILES)) {
+    for (const [id, file] of Object.entries(GIVEN)) {
       const dir = join(ROOT, 'projects', 'ada', `example-${id}`);
       const text = readFileSync(join(dir, file), 'utf8');
       expect(text).not.toContain('@@NAME@@');
       expect(text).toContain('Ada Lovelace');
       expect(existsSync(join(dir, 'figures'))).toBe(true);
     }
+    // the HTML deliverables, the name escaped for HTML
+    for (const [folder, kind] of [['talk', 'deck'], ['poster', 'poster'], ['site', 'page']]) {
+      const html = readFileSync(join(ROOT, 'projects', 'ada', 'example-web', folder, 'index.html'), 'utf8');
+      expect(html).toContain(`<meta name="overlyx" content="${kind}">`);
+      expect(html).toContain('Ada Lovelace');
+      expect(html).not.toContain('@@');
+    }
     expect(readdirSync(join(ROOT, 'projects', 'ada', 'example-paper')).sort()).toEqual(['figures', 'paper.tex', 'refs.bib']);
   });
 
   it('a deleted starter is not created again; a name in use gets another key', () => {
-    access.trashProject('ada/example-poster');
+    access.trashProject('ada/example-web');
     expect(access.ensureStarterProjects(ada)).toEqual([]);
-    expect(existsSync(join(ROOT, 'projects', 'ada', 'example-poster'))).toBe(false);
+    expect(existsSync(join(ROOT, 'projects', 'ada', 'example-web'))).toBe(false);
     // an account that already has a project called example-slides
     const bob = toSessionUser(createUser('bob', 'Bob Builder', 'pw'));
     mkdirSync(join(ROOT, 'projects', 'bob', 'example-slides'), { recursive: true });
     writeFileSync(join(ROOT, 'projects', 'bob', 'example-slides', 'mine.tex'), '\\documentclass{article}\n\\begin{document}\nMine.\n\\end{document}\n');
-    expect(access.ensureStarterProjects(bob)).toEqual(['bob/example-slides-2', 'bob/example-deck', 'bob/example-poster', 'bob/example-paper']);
+    const bobs = toSessionUser(createUser('bob2', 'Bob <&> Builder', 'pw'));
+    expect(access.ensureStarterProjects(bob)).toEqual(['bob/example-slides-2', 'bob/example-web', 'bob/example-paper']);
+    access.ensureStarterProjects(bobs);
+    expect(readFileSync(join(ROOT, 'projects', 'bob2', 'example-web', 'talk', 'index.html'), 'utf8')).toContain('Bob &lt;&amp;&gt; Builder');
     expect(readFileSync(join(ROOT, 'projects', 'bob', 'example-slides', 'mine.tex'), 'utf8')).toContain('Mine.');
   });
 
@@ -73,7 +84,7 @@ describe('starter projects', () => {
   });
 
   it('opening and saving a starter changes nothing (the server\'s own parse → write)', () => {
-    for (const [id, file] of Object.entries(FILES)) {
+    for (const [id, file] of Object.entries(GIVEN)) {
       const project = `ada/example-${id}`;
       if (!existsSync(join(ROOT, 'projects', project))) continue;   // the deleted poster
       const text = readFileSync(join(ROOT, 'projects', project, file), 'utf8');

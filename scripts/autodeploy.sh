@@ -95,7 +95,7 @@ log "checks passed — deploying ${target:0:10}"
 status "$target" pending "checks passed — deploying"
 git -C "$PROD" merge --ff-only --quiet "$target"
 if [ "$lockfile_changed" = 1 ]; then (cd "$PROD" && npm ci --no-audit --no-fund); fi
-(cd "$PROD/packages/client" && npx vite build --outDir dist.new > "$STATE/$target-build.log" 2>&1 && rm -rf dist && mv dist.new dist) \
+(cd "$PROD/packages/client" && npx vite build --outDir dist.new > "$STATE/$target-build.log" 2>&1 && OVERLYX_RUNTIME_OUT=dist.new/_ol npx vite build -c runtime.vite.config.ts >> "$STATE/$target-build.log" 2>&1 && rm -rf dist && mv dist.new dist) \
   || { tail -20 "$STATE/$target-build.log"; status "$target" failure "client build failed"; touch "$STATE/failed-$target"; exit 1; }
 rm -f "$STATE/$target-build.log"
 systemctl restart "$UNIT"

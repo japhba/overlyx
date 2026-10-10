@@ -70,6 +70,27 @@ async function convert(src: string, out: string, width: number): Promise<void> {
   }
 }
 
+/** The first page of a PDF as SVG (vector, for HTML deliverables), cached. */
+export async function toSvg(absFile: string): Promise<string> {
+  const st = fs.statSync(absFile);
+  const key = crypto.createHash('sha1').update(`svg|${absFile}|${st.mtimeMs}|${st.size}`).digest('hex');
+  const out = path.join(cacheDir, key + '.svg');
+  if (fs.existsSync(out)) return out;
+  const running = inflight.get(key);
+  if (running) return running;
+  const p = (async () => {
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const tmp = out + '.tmp.svg';
+    try {
+      await tool('pdftocairo', ['-svg', '-f', '1', '-l', '1', absFile, tmp], absFile, tmp, 60000);
+      fs.renameSync(tmp, out);
+      return out;
+    } finally { try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* ignore */ } }
+  })().finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
 /** Convert an image to PDF for LaTeX (svg/eps/...). */
 export async function toPdf(src: string, dest: string): Promise<void> {
   const ext = path.extname(src).toLowerCase();

@@ -374,7 +374,74 @@ blend.
   from the panel — name it `.sty`, or upload it; existing raw `.tex` files still open in the text
   editor (what a `.tex` *is* stays decided by its content, `projects.ts classifyDocs`). Rows are no
   longer greyed for non-documents; documents keep their outline twisty.
-* **Layout documents** (Pages' *page layout* next to its word processing; `editor/layout/`, core
+* **HTML deliverables: slide decks, posters, web pages** (`packages/client/src/deliverable/`, core
+  `html/`, server `deliverables.ts`, `render.ts`). *File ▸ New slides / poster / page…*
+  (`app/NewLayoutDialog.tsx`) makes a folder with an `index.html` — a deck, an A0 poster or a web
+  page from core's starting points (`html/deliverable.ts`). The page is whatever its authors write —
+  any HTML, CSS, JavaScript, SVG — and agents are meant to design it freely; OverLyX relies on three
+  conventions only: `<meta name="overlyx" content="deck|poster|page">`, pages as elements of class
+  `slide` of one fixed size, TeX math between `\( \)` / `\[ \]` / `$$ $$` (typeset by MathJax 4,
+  SVG output). `DELIVERABLE_GUIDE` tells agents this, plus how to keep objects editable (direct
+  children of the slide, positioned absolutely).
+  * **The text is the document.** An `.html` file opens in the deliverable editor; on the server it
+    is a `HtmlDoc` (docs.ts) — the file's text as a `Y.Text('html')` through the same WebSocket,
+    persistence and versions as every document, written to disk as it is; a change on disk is one
+    splice (three-way by the changed region; when it touches unsaved edits the disk wins and the
+    state before is kept as a version). Nothing ever normalises the file: every edit is a splice.
+  * **The canvas is the page itself**, rendered in a sandboxed frame. The server serves a project's
+    files under `/ol-d/<token>/<path>` — the token a signed capability (project, account, expiry;
+    the account's access is checked on every request), the response `Content-Security-Policy:
+    sandbox allow-scripts …` (an opaque origin: no cookies, no storage of the app, no same-origin
+    requests), `Referrer-Policy: no-referrer`; the frames are sandboxed too. Relative paths resolve
+    inside the project (`../figures/plot.pdf` reaches the paper's figures; a PDF or EPS asked for as
+    an image is converted to SVG / PNG). An HTML file is served as the editors have it (the open
+    document's text) with the runtime injected first in `<head>` (`deliverable/runtime/`, built by
+    `runtime.vite.config.ts` into `dist/_ol/runtime.js` with MathJax in `dist/_ol/mathjax/`; the
+    deploy scripts build it after the app).
+  * **The runtime** (modes `?ol=edit|thumb|present|print|check|view`) pairs the live page with the
+    source it was rendered from (`srcOf` / `liveOf`) and takes each new version of the text in
+    place (`reconcile.ts`): an unchanged element keeps its live state (typeset math, what the page's
+    scripts drew), one whose attributes changed keeps its children, one whose own text changed is
+    made anew and typeset; a changed `<script>` reloads the page. In the editor's frame it is the
+    canvas (`edit.ts`): a click selects an object (on a slide a child of the slide, a group's
+    inside by double-click or Alt; on a web page the innermost block), dragging moves positioned
+    elements (a static one on a slide becomes `position: relative`) with snapping to the slide and
+    the other objects, handles resize, a double click retypes text in place (contenteditable, its
+    TeX shown as written), arrows nudge, Delete, ⌘D, copy/cut/paste of objects, the drawing tools
+    (text, rectangle, ellipse, arrow, formula). Positions are written in the units the element
+    had. Everything it does reaches the editor as operations (core `html/source.ts` `HtmlOp`:
+    style / attr / inner / outer / remove / insert / move / duplicate, elements by their path from
+    `<html>`) on the version it showed; the editor rebases them onto the current text
+    (`sourceops.ts rebasedSplices`: through the region that changed meanwhile; an element deleted
+    meanwhile refuses) and applies them as splices of the `Y.Text` — one undo step each (⌘Z).
+  * **Around the canvas** (`DeliverableEditor.tsx`): the slide rail (a second frame in `thumb`
+    mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
+    duplicate, move, delete), the toolbar (insert objects and pictures — uploaded into
+    `<folder>/images/` — font size, bold/italic, colours, alignment, front/back, delete), speaker
+    notes (`<aside class="notes">` of the slide in view), the code (a textarea on the same `Y.Text`;
+    *Edit code* jumps to an object's source), others' selections (awareness `htmlSel`), files of
+    the page changed on disk (stylesheets and pictures fetched again, scripts reload; project
+    events). **Present** (F5) shows a third frame full screen in `present` mode (arrows, Space,
+    click, Home/End, a number and Enter, Escape); *Download* gives the **PDF** (headless Chromium,
+    `print` mode: a deck one slide per page at its size, a poster one page, a web page on A4) and a
+    **website `.zip`** that works without OverLyX (the runtime and MathJax under `_overlyx/`, a deck
+    opening presenting, files from elsewhere in the project copied into `_assets/`, PDF figures as
+    SVG).
+  * **Agents** (MCP, `mcp.ts`): `create_deliverable` (folder, kind, title), the file tools on the
+    page (`read_file` / `edit_file` / `write_file` reach an open page's live text and apply as one
+    splice), `list_documents` lists pages with their kind, and **`render_page`** shows a page as
+    images plus a report of what is wrong on every page (`runtime/report.ts`): text needing more
+    room than its box (measured by letting the box take its natural size), text running off the
+    slide, text of two objects on top of each other, a picture covering text, text too small for
+    the kind (deck ~2.2 % of the slide height, poster ~0.55 %), low contrast, pictures that did not
+    load, formulas that did not typeset (MathJax errors and TeX left as written), the page's script
+    errors. The renderer (`render.ts`) is one headless Chromium (playwright-core) in the bubblewrap
+    sandbox with **no network namespace**: every request of the page comes back to the server over
+    the DevTools pipe and is answered like the editor's frame (`resolveDeliverable`) or, for a short
+    list of public font / script CDNs, fetched by the server — nothing else is reachable. At most two
+    pages at once; the browser closes when idle.
+* **Layout documents** (LaTeX; since the HTML deliverables above, behind *A LaTeX (beamer) layout
+  document instead…* in the New dialog; `editor/layout/`, core
   `layout/`): slides, posters and free-form pages — fixed-size pages whose objects sit anywhere:
   **text boxes** (ordinary OverLyX text: formulas, lists, colours, citations…), **vector shapes**
   (SVG path data: rectangles, ellipses, stars, arrows, lines, Bézier curves), **images** (cropped),
@@ -1516,6 +1583,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/selection-inserts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/slidesorter.spec.ts   # the slide sorter: selection, dragging several, duplicate / delete / undo, keys, transitions, size, the saved order
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sliderail.spec.ts   # the slide rail: thumbnails, new slides in the deck's style, drag to reorder, its menu, undo, the saved file
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/masters.spec.ts e2e/drawing.spec.ts   # masters (view, placeholders following, a master of a slide); connectors, the objects list, guides / grid, SVG as shapes
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/deliverables.spec.ts   # HTML deliverables: a deck from the New dialog, select / drag / retype / draw / delete / undo on the canvas, rail, notes, code view, a change on disk shown live, presenting, PDF + website zip (the server needs the runtime built into its client dist: OVERLYX_RUNTIME_OUT=$S/dist/_ol npx vite build -c runtime.vite.config.ts in packages/client)
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layout.spec.ts   # layout documents: new deck, text box + formula, move / resize / undo, toolbar, presentation steps, zoom, text overlays, a linear beamer deck presented; the font size box
 npx vitest run tests/parity.test.ts   # the web client and the VS Code extension share one editor assembly and one toolbar definition
 npx vitest run tests/docworker.test.ts   # the document workers write the bytes the main thread writes; saves in order; a dead worker loses nothing

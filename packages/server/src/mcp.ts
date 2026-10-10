@@ -52,7 +52,10 @@ import {
 import { replaceInSource } from './docedit.ts';
 import { canonicalProject, canonicalDocId } from './namespaces.ts';
 import nodePath from 'node:path';
-import { manager } from './docs.ts';
+import { manager, HtmlDoc } from './docs.ts';
+import { isHtmlPath, deliverableInfo, starterFor, DELIVERABLE_GUIDE, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
+import { createDeliverable } from './deliverables.ts';
+import { renderPages, type DeliverableReport } from './render.ts';
 import { listProjects, projectDir, resolveProjectPath, assertWritableRelPath, isDocumentFile, newDocumentText, newMarkdownText, findMaster } from './projects.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { parseDocumentText, parseFragmentText, withDocumentSettings, NO_INDENT_SETTINGS } from './texdoc.ts';
@@ -88,6 +91,24 @@ function okStruct(value: Record<string, unknown>) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }], structuredContent: value };
 }
 
+/** render_page's report as text: the size, then every page's problems */
+function reportText(r: DeliverableReport, shown: number[]): string {
+  const lines: string[] = [];
+  const n = r.pages.length;
+  lines.push(r.kind === 'page' ? `Web page, ${r.width} px wide, ${r.height} px tall.` : `${r.kind === 'deck' ? `Deck of ${n} slide${n === 1 ? '' : 's'}` : 'Poster'}, ${r.width}×${r.height} px.`);
+  const clean: number[] = [];
+  for (const pg of r.pages) {
+    if (!pg.issues.length) { clean.push(pg.index); continue; }
+    lines.push(`${r.kind === 'deck' ? `Slide ${pg.index}${pg.title ? ` "${pg.title}"` : ''}` : r.kind === 'poster' ? 'The poster' : 'The page'}: ${pg.issues.length} problem${pg.issues.length === 1 ? '' : 's'}`);
+    for (const i of pg.issues) lines.push(`  - ${i.kind}: ${i.text}${i.at ? ` (at x=${i.at.x} y=${i.at.y}, ${i.at.w}×${i.at.h})` : ''}`);
+  }
+  if (clean.length && clean.length < n) lines.push(`No problems found on slide${clean.length === 1 ? '' : 's'} ${clean.join(', ')}.`);
+  else if (clean.length === n) lines.push('No problems found.');
+  if (r.errors.length) lines.push('Script errors on the page:', ...r.errors.map(e => `  - ${e}`));
+  if (r.kind === 'deck' && shown.length < n) lines.push(`Images below: slide${shown.length === 1 ? '' : 's'} ${shown.join(', ')} (pass pages to see others).`);
+  return lines.join('\n');
+}
+
 async function openLyx(project: string, path: string): Promise<{ doc: Awaited<ReturnType<typeof manager.open>>; lyx: LyxDocument }> {
   const doc = await manager.open(`${project}/${path}`);
   return { doc, lyx: doc.toLyxDocument() };
@@ -99,9 +120,23 @@ function commitEdit(doc: Awaited<ReturnType<typeof manager.open>>, lyx: LyxDocum
   void doc.saveToFile();
 }
 
-function listDocuments(project: string): { path: string; size: number }[] {
+function listDocuments(project: string): { path: string; size: number; kind?: string }[] {
   const p = listProjects().find(x => x.name === project);
-  return (p?.files ?? []).filter(f => f.kind === 'doc').map(f => ({ path: f.path, size: f.size }));
+  const docs: { path: string; size: number; kind?: string }[] = (p?.files ?? []).filter(f => f.kind === 'doc').map(f => ({ path: f.path, size: f.size }));
+  // HTML deliverables (decks, posters, web pages): edited with the file tools, looked at with render_page
+  for (const f of p?.files ?? []) {
+    if (f.kind !== 'html') continue;
+    let kind = 'page';
+    try { kind = deliverableInfo(liveText(project, f.path) ?? fs.readFileSync(resolveProjectPath(project, f.path), 'utf8')).kind; } catch { /* unreadable */ }
+    docs.push({ path: f.path, size: f.size, kind: `html ${kind} — read_file / edit_file, render_page` });
+  }
+  return docs;
+}
+
+/** an HTML deliverable's text as its open editors have it (null: not open) */
+function liveText(project: string, rel: string): string | null {
+  const d = manager.docs.get(`${project}/${rel}`);
+  return d instanceof HtmlDoc ? d.html.toString() : null;
 }
 
 async function readDocument(project: string, path: string) {
@@ -424,6 +459,9 @@ function assertTextFilePath(project: string, rel: string): string {
 
 function readFile(project: string, rel: string) {
   const abs = assertTextFilePath(project, rel);
+  // an HTML deliverable open in an editor: its live text (what people see, unsaved changes included)
+  const live = isHtmlPath(rel) ? liveText(project, rel) : null;
+  if (live !== null) return { text: live, size: Buffer.byteLength(live) };
   if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) throw new Error(`not found: ${rel}`);
   if (fs.statSync(abs).size > FILE_MAX) throw new Error('file too large (4 MB)');
   const buf = fs.readFileSync(abs);
@@ -434,6 +472,13 @@ function readFile(project: string, rel: string) {
 function writeFile(project: string, userId: number, rel: string, text: string) {
   const abs = assertTextFilePath(project, rel);
   if (Buffer.byteLength(text) > FILE_MAX) throw new Error('file too large (4 MB)');
+  // an HTML deliverable open in an editor: into its live text (the people there see it at once; saved from there)
+  const open = isHtmlPath(rel) ? manager.docs.get(`${project}/${rel}`) : undefined;
+  if (open instanceof HtmlDoc) {
+    open.replaceText(text, 'mcp');
+    touchProject(project, userId);
+    return { ok: true, size: Buffer.byteLength(text) };
+  }
   fs.mkdirSync(nodePath.dirname(abs), { recursive: true });
   const tmp = abs + '.overlyx-tmp';
   fs.writeFileSync(tmp, text, 'utf8');
@@ -519,6 +564,8 @@ Workflow: list_projects → list_documents / list_files → read_document (a doc
 Editing documents: edit_document (replace a passage) and write_document (a whole source) apply your change as TRACKED CHANGES by default, so the user can review them. Tracked editing must never block you or leave a document broken. On ANY problem with it, switch to direct editing at once by passing tracked: false to edit_document / write_document — the same edit, applied without tracked-change marks. Problems that call for the fallback include: an edit that fails to apply or does not match (do not retry a failing tracked edit more than once); tracked-change markup (\\lyxadded / \\lyxdeleted) making the passage hard to address; a result (now_reads) that looks garbled, duplicated or incomplete; a build that fails after your tracked edit, or whose errors point at tracked-change markup; math, tables, environments or preamble changes the tracked form mangles; the user asking for direct edits. When a tracked edit of yours broke something, take it back (project_history + restore_project, or edit_document with tracked: false restoring the old text) and redo it with tracked: false. Keep other people's tracked changes intact.
 
 Other text files (refs.bib, macros, .sty) are always edited directly: edit_file (replace a passage) or write_file.
+
+Slides, posters and web pages are HTML deliverables, not LaTeX: a folder with an index.html you design freely (create_deliverable starts one; read_file / edit_file / write_file edit it, live in people's editors; render_page shows you a page as an image with a list of problems). Its <meta name="overlyx" content="deck|poster|page"> says which kind it is. Read the deliverable guide in create_deliverable's or render_page's description before working on one.
 
 After every change run build_pdf and never leave a document that does not compile: fix the error, or step back. project_history lists the project's commits (OverLyX commits every edit shortly after it happens, and right before each of your direct edits); restore_project puts the whole project back to one of them as a new commit, so nothing is lost.
 
@@ -614,7 +661,7 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     description: 'Read a document: its full LaTeX source (`text` — what edit_document edits), and its paragraphs (index, layout, depth, plain text) for the paragraph tools and add_comment.',
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg, path: z.string().describe('Project-relative path, e.g. "main.tex"') },
-  }, async ({ project: p, path }) => { try { const project = need(p, 'view'); const r = await readDocument(project, path); await present(project, path); return ok(r); } catch (e) { return fail(e); } });
+  }, async ({ project: p, path }) => { try { const project = need(p, 'view'); if (isHtmlPath(path)) return ok(readFile(project, path)); const r = await readDocument(project, path); await present(project, path); return ok(r); } catch (e) { return fail(e); } });
 
   register('propose_edit', {
     description: 'Replace the text of one plain-text paragraph. Always applied as a tracked change (insertions/deletions attributed to this agent) — never a silent overwrite. Only works on paragraphs with no formulas/insets and uniform formatting; read_document first to get paragraph indices and check the content is plain.',
@@ -673,6 +720,50 @@ function buildMcpServer(user: SessionUser, agentName: string, userId: number, fi
     annotations: { readOnlyHint: true },
     inputSchema: { ...projArg, path: z.string() },
   }, async ({ project: p, path }) => { try { return ok(buildStatus(need(p, 'view'), path)); } catch (e) { return fail(e); } });
+
+  register('create_deliverable', {
+    description: 'Start a slide deck, a poster or a web page: a new folder with an index.html (a plain, conventional starting point — restyle or rewrite it completely). Then edit it with read_file / edit_file / write_file and look at it with render_page.\n\n' + DELIVERABLE_GUIDE,
+    inputSchema: {
+      ...projArg,
+      folder: z.string().describe('The new folder, project-relative, e.g. "talk" or "posters/neurips"'),
+      kind: z.enum(DELIVERABLE_KINDS as [DeliverableKind, ...DeliverableKind[]]).describe('deck (slides), poster, or page (a web page)'),
+      title: z.string().optional(),
+    },
+  }, async ({ project: p, folder, kind, title }) => {
+    try {
+      const project = need(p, 'edit');
+      const dir = String(folder).replace(/^\/+|\/+$/g, '');
+      if (dir) assertWritableRelPath(dir + '/index.html');
+      const rel = createDeliverable(project, dir, starterFor(kind, title ?? ''));
+      touchProject(project, userId);
+      return ok({ path: rel, kind, next: 'read_file it, rewrite it to the design you want with write_file / edit_file, then render_page to look at it.' });
+    } catch (e) { return fail(e); }
+  });
+
+  register('render_page', {
+    description: 'Look at an HTML deliverable (a deck, poster or web page): pages rendered as images by a real browser, as people see them and as the PDF prints, plus a report of problems on every page — text overflowing its box, text running off the slide, text of two objects overlapping, a picture covering text, text too small to read at the deliverable\'s size, low contrast, pictures that did not load, formulas that did not typeset, script errors. Use it after every substantial change and fix what it finds. For a deck pass the slides to see (0-based); the report always covers all of them.\n\n' + DELIVERABLE_GUIDE,
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      ...projArg,
+      path: z.string().describe('The deliverable\'s HTML file, e.g. "talk/index.html"'),
+      pages: z.array(z.number().int().nonnegative()).max(12).optional().describe('Slides to show as images, 0-based (default: the first). A web page or poster is one page.'),
+      width: z.number().int().min(320).max(2400).optional().describe('A web page\'s viewport width in CSS px (default 1280; 390 for a phone)'),
+    },
+  }, async ({ project: p, path, pages, width }) => {
+    try {
+      const project = need(p, 'view');
+      if (!isHtmlPath(path)) throw new Error('render_page shows HTML deliverables (an .html file); build_pdf builds LaTeX documents.');
+      if (!fs.existsSync(resolveProjectPath(project, path))) throw new Error(`No file ${path}.`);
+      const r = await renderPages(project, path, userId, { pages, width });
+      await present(project, path);
+      const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [{ type: 'text', text: reportText(r.report, r.images.map(i => i.index)) }];
+      for (const img of r.images) {
+        content.push({ type: 'text', text: r.report.kind === 'page' ? 'The page:' : `Slide ${img.index}${img.report?.title ? ` — ${img.report.title}` : ''}:` });
+        content.push({ type: 'image', data: img.png.toString('base64'), mimeType: 'image/png' });
+      }
+      return { content };
+    } catch (e) { return fail(e); }
+  });
 
   register('list_files', {
     description: 'All files of the project (kind: doc/tex/bib/image/pdf/…) — documents open with read_document, other text files with read_file.',

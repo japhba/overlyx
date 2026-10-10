@@ -137,8 +137,8 @@ describe('tools/list', () => {
     const { status, body } = await rpc(t.token, 'tools/list');
     expect(status).toBe(200);
     const names = body.result.tools.map((x: any) => x.name).sort();
-    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_document', 'delete_paragraph', 'edit_document', 'edit_file', 'fetch', 'get_presence', 'highlight', 'insert_paragraphs', 'list_comments',
-      'list_documents', 'list_files', 'list_projects', 'project_history', 'propose_edit', 'read_document', 'read_file', 'replace_paragraph', 'reply', 'resolve_comment', 'restore_project', 'search',
+    expect(names).toEqual(['add_comment', 'build_pdf', 'build_status', 'create_deliverable', 'create_document', 'delete_paragraph', 'edit_document', 'edit_file', 'fetch', 'get_presence', 'highlight', 'insert_paragraphs', 'list_comments',
+      'list_documents', 'list_files', 'list_projects', 'project_history', 'propose_edit', 'read_document', 'read_file', 'render_page', 'replace_paragraph', 'reply', 'resolve_comment', 'restore_project', 'search',
       'wait_for_instructions', 'write_document', 'write_file']);
   });
 

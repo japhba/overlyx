@@ -161,6 +161,8 @@ test('a new slide deck from the File menu is a beamer file of layout pages', asy
   await page.waitForSelector('.lyx-editor .lyx-par');
   await page.locator('.menubar').getByText('File', { exact: true }).click();
   await page.getByText('New slides / poster / page…').click();
+  // (HTML deliverables first; the LaTeX layout documents behind a link)
+  await page.locator('[data-latex-layout]').click();
   await page.locator('[data-preset="slides43"]').click();
   await page.locator('[data-layout-name]').fill('talk.tex');
   await page.locator('[data-create-layout]').click();

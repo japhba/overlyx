@@ -106,6 +106,9 @@ export default defineConfig({
     proxy: {
       '/api': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
       '/pdf': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
+      // HTML deliverables: their sandboxed pages and the runtime (packages/server/src/deliverables.ts)
+      '/ol-d': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
+      '/_ol': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
       '/ws': { target: `ws://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`, ws: true },
     },
   },

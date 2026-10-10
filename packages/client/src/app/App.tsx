@@ -63,6 +63,7 @@ import * as C from '../editor/commands';
 import { setMarginMode } from '../editor/plugins/margin';
 import { setInk, subscribeInk, isTabletClient } from '../editor/plugins/ink';
 import { BoardEditor } from './BoardEditor';
+import { DeliverableEditor } from '../deliverable/DeliverableEditor';
 import { NewLayoutDialog } from './NewLayoutDialog';
 import { setLayoutHeader, layoutZoomStep, refreshLayoutCheck } from '../editor/layout/controller';
 import { acceptAllChanges, rejectAllChanges, changeAt, hasChanges, changesFilterKey } from '../editor/plugins/changes';
@@ -277,6 +278,8 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const textId = docId ? docId.replace(/^(text|pdf):/, '') : null;
   const isLyxDoc = !!docId && !isTextTab && !isPdfTab && (docId.endsWith('.tex') || isMarkdownDoc(docId));
   const isBoardTab = !!docId && !isTextTab && !isPdfTab && docId.endsWith('.board');
+  // an HTML deliverable (a deck, a poster, a web page): the deliverable editor (deliverable/)
+  const isHtmlTab = !!docId && !isTextTab && !isPdfTab && /\.html?$/i.test(docId);
   // a bare project link (`#/owner/project`, no file): a brand-new project has nowhere else to send
   // you yet. Shown as a small landing in the editor area (its file tree is already the left sidebar)
   // instead of falling through to the plain-text editor, which would 404 trying to load it as a file.
@@ -1501,7 +1504,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         <div class={'editor-column panes' + (isLyxDoc && shownPanes.length > 1 ? ' split' : '')} ref={columnRef}>
         <div class={'editor-scroll' + (marginMode ? ' margin-mode' : '') + (inkMode && isLyxDoc ? ' ink-pan' : '')} ref={scrollRef} data-pane="doc" style={isLyxDoc ? paneStyle('doc') : undefined} onClick={e => { if (e.target === e.currentTarget && view) view.focus(); }}>
           {(isLyxDoc || isTextTab) && showRuler && <Ruler width={textWidth} onChange={setTextWidth} marginMode={isLyxDoc && marginMode} noteScale={noteScale} onNoteScale={setNoteScale} />}
-          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
+          {docId ? (isPdfTab ? <div class="pdf-tab"><PdfViewer key={docId} url={fileUrl(projectOfDoc(textId!), docPathOf(textId!))} toolbar={<a class="small-btn" href={fileUrl(projectOfDoc(textId!), docPathOf(textId!)) + '?download=1'}>Download</a>} /></div> : isBoardTab ? <BoardEditor key={docId} id={docId} user={user} notify={notify} /> : isHtmlTab ? <DeliverableEditor key={docId} id={docId} user={user} notify={notify} /> : isProjectRoot ? <ProjectRootPanel key={docId} project={docId} notify={notify} onCreated={id => { openInTab(id); setRefreshKey(k => k + 1); }} /> : !isLyxDoc ? <TextEditor key={docId} id={textId!} notify={notify} /> :
             <div class="editor-page">
               <div class="editor-host" ref={containerRef} />
               {combined && childIds.map(id => (

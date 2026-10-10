@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="overlyx" content="poster">
+<title>Why the sky is blue — poster</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: #14213d; --muted: #5c677d; --sky: #3a86ff; --wash: #eef4ff; }
+  body { margin: 0; background: #dfe3ea; font-family: Inter, system-ui, sans-serif; color: var(--ink); }
+  /* A0 portrait */
+  .slide { width: 841mm; height: 1189mm; position: relative; overflow: hidden; background: #fff; margin: 0 auto; }
+  .band { background: linear-gradient(160deg, #0b1d4a 0%, #1d3f8f 55%, #3a86ff 100%); color: #fff; }
+  h1 { font-size: 120pt; font-weight: 800; line-height: 1.02; margin: 0; letter-spacing: -0.02em; }
+  h2 { font-size: 52pt; font-weight: 800; margin: 0 0 10mm; color: var(--sky); }
+  p, li { font-size: 30pt; line-height: 1.4; margin: 0 0 8mm; }
+  ul { margin: 0; padding-left: 1.1em; }
+  .card { background: var(--wash); border-radius: 12mm; padding: 14mm; box-sizing: border-box; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<section class="slide">
+  <div class="band" style="position: absolute; left: 0; top: 0; width: 841mm; height: 230mm"></div>
+  <h1 style="position: absolute; left: 50mm; top: 55mm; width: 741mm; color: #fff">Why the sky is blue</h1>
+  <p style="position: absolute; left: 50mm; top: 150mm; width: 741mm; color: #c9d8ff; font-size: 40pt">@@NAME@@ · Department of Atmospheric Optics · an OverLyX example poster</p>
+
+  <div class="card" style="position: absolute; left: 50mm; top: 270mm; width: 360mm">
+    <h2>Question</h2>
+    <p>Sunlight contains every colour. Why does the daytime sky look blue, and the sunset red?</p>
+  </div>
+  <div class="card" style="position: absolute; left: 431mm; top: 270mm; width: 360mm">
+    <h2>Answer in one line</h2>
+    <p>Air molecules scatter light with an intensity that grows steeply as the wavelength shrinks:</p>
+    <div style="font-size: 54pt; text-align: center">\[ I \propto \lambda^{-4} \]</div>
+  </div>
+
+  <div style="position: absolute; left: 50mm; top: 560mm; width: 741mm">
+    <h2>Scattered intensity across the spectrum</h2>
+  </div>
+  <svg style="position: absolute; left: 50mm; top: 600mm; width: 741mm; height: 330mm" viewBox="0 0 470 210" preserveAspectRatio="none">
+    <defs><linearGradient id="specp" x1="0" x2="1"><stop offset="0" stop-color="#7b2ff7"/><stop offset=".2" stop-color="#3a86ff"/><stop offset=".4" stop-color="#2ec4b6"/><stop offset=".6" stop-color="#ffe066"/><stop offset=".8" stop-color="#ff9f1c"/><stop offset="1" stop-color="#e63946"/></linearGradient></defs>
+    <rect x="20" y="200" width="430" height="8" fill="url(#specp)"/>
+    <polyline fill="none" stroke="#14213d" stroke-width="2.5" points="20.0,10.0 32.6,30.7 45.3,49.0 57.9,65.0 70.6,79.3 83.2,91.9 95.9,103.2 108.5,113.2 121.2,122.2 133.8,130.3 146.5,137.5 159.1,144.0 171.8,149.9 184.4,155.3 197.1,160.1 209.7,164.5 222.4,168.5 235.0,172.1 247.6,175.5 260.3,178.5 272.9,181.3 285.6,183.9 298.2,186.2 310.9,188.4 323.5,190.4 336.2,192.2 348.8,193.9 361.5,195.5 374.1,196.9 386.8,198.3"/>
+  </svg>
+  <p class="muted" style="position: absolute; left: 50mm; top: 940mm; width: 741mm">From violet (380 nm, left) to red (700 nm, right): blue light is scattered about six times as strongly as red, \((700/450)^4 \approx 5.9\).</p>
+
+  <div class="card" style="position: absolute; left: 50mm; top: 1010mm; width: 741mm">
+    <h2>Why sunsets are red</h2>
+    <ul>
+      <li>Near the horizon, sunlight crosses up to 40 times more air</li>
+      <li>Most of the blue is scattered out of the beam on the way</li>
+    </ul>
+  </div>
+</section>
+
+</body>
+</html>

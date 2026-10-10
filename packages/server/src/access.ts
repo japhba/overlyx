@@ -486,13 +486,15 @@ const STARTER_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname)
 /** The starters every account gets besides the welcome project (templates/starters/<id>, scripts/gen-starters.ts). */
 export const STARTERS: { id: string; title: string }[] = [
   { id: 'slides', title: 'Example: beamer slides' },
-  { id: 'deck', title: 'Example: slide deck' },
-  { id: 'poster', title: 'Example: poster' },
+  // slides, a poster and a project page as HTML deliverables (talk/, poster/, site/)
+  { id: 'web', title: 'Example: slides, poster and web page' },
   { id: 'paper', title: 'Example: paper' },
 ];
+/** starters no longer given to new accounts (the LaTeX layout deck and poster, before the HTML deliverables); accounts that have them keep them */
+export const RETIRED_STARTERS = ['deck', 'poster'];
 
 /**
- * A beamer deck, a canvas slide deck, a poster and a paper to start from, each an ordinary project of
+ * A beamer deck, HTML slides / poster / web page and a paper to start from, each an ordinary project of
  * the account (`<user>/example-slides`, …) with the account's name as author. Each is created once per
  * account — new accounts on their first visit, older ones on their next — and never again once deleted
  * (`starter_projects` keeps a row per account and template). Guests get none.
@@ -523,16 +525,20 @@ export function ensureStarterProjects(user: SessionUser): string[] {
 }
 
 function templateVars(user: SessionUser): Record<string, string> {
-  return { NAME: lyxSafe(user.name), FIRSTNAME: lyxSafe(user.name).split(/\s+/)[0], USERNAME: user.username, LLANGLE: LLANGLE_PREAMBLE.trimEnd() };
+  return { NAME: lyxSafe(user.name), FIRSTNAME: lyxSafe(user.name).split(/\s+/)[0], USERNAME: user.username, LLANGLE: LLANGLE_PREAMBLE.trimEnd(), HTMLNAME: htmlSafe(user.name), HTMLFIRSTNAME: htmlSafe(user.name.split(/\s+/)[0] ?? '') };
 }
+
+const htmlSafe = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 function copyTemplate(from: string, to: string, vars: Record<string, string>): void {
   for (const e of fs.readdirSync(from, { withFileTypes: true })) {
     const src = path.join(from, e.name), dst = path.join(to, e.name);
     if (e.isDirectory()) { fs.mkdirSync(dst, { recursive: true }); copyTemplate(src, dst, vars); continue; }
-    if (/\.(lyx|bib|tex)$/.test(e.name)) {
-      // placeholders: @@NAME@@ in .tex files ("%%" starts a comment there), %%NAME%% elsewhere
-      const text = fs.readFileSync(src, 'utf8').replace(/(?:%%|@@)([A-Z]+)(?:%%|@@)/g, (m, k: string) => vars[k] ?? m);
+    if (/\.(lyx|bib|tex|html)$/.test(e.name)) {
+      // placeholders: @@NAME@@ in .tex and .html files ("%%" starts a comment in .tex), %%NAME%% elsewhere
+      // (in HTML the name as written, escaped for HTML — not for LaTeX)
+      const v = e.name.endsWith('.html') ? { ...vars, NAME: vars.HTMLNAME ?? '', FIRSTNAME: vars.HTMLFIRSTNAME ?? '' } : vars;
+      const text = fs.readFileSync(src, 'utf8').replace(/(?:%%|@@)([A-Z]+)(?:%%|@@)/g, (m, k: string) => v[k] ?? m);
       fs.writeFileSync(dst, text, 'utf8');
     } else {
       fs.copyFileSync(src, dst);

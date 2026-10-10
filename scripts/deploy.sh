@@ -63,7 +63,7 @@ if [ ! -d "$PROD/node_modules" ] || { git -C "$PROD" rev-parse -q --verify ORIG_
 fi
 
 step "production: build the client"
-(cd "$PROD/packages/client" && npx vite build --outDir dist.new && rm -rf dist && mv dist.new dist)
+(cd "$PROD/packages/client" && npx vite build --outDir dist.new && OVERLYX_RUNTIME_OUT=dist.new/_ol npx vite build -c runtime.vite.config.ts && rm -rf dist && mv dist.new dist)
 
 step "production: restart $UNIT"
 systemctl restart "$UNIT"

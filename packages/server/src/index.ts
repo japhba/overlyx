@@ -20,6 +20,9 @@ import { userSettings, setUserSettings, userKeys, setUserKeys, docFolds, setDocF
 import { authMiddleware, authRouter, requireAuth, createUser, createGuest, generatePassword, setSessionCookie, toSessionUser } from './auth.ts';
 import { attachWebSocket, originAllowed } from './ws.ts';
 import { manager, docWorkers, projectChangedListeners, graphicsChangedListeners } from './docs.ts';
+import { mountDeliverables, deliverableToken, splitEntry, createDeliverable, deliverableZip } from './deliverables.ts';
+import { deliverablePdf } from './render.ts';
+import { starterFor, isHtmlPath, DELIVERABLE_KINDS, type DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 import { listProjects, resolveProjectPath, assertWritableRelPath, projectDir, createProject, newDocumentText, newMarkdownText, fileKind, isBackupFile, isDocumentFile } from './projects.ts';
 import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { snippetSvg, snippetFile } from './snippets.ts';
@@ -596,6 +599,61 @@ api.post('/projects/:project/new', needProject('edit'), (req, res) => {
     touchProject(req.params.project, req.user!.id);
     res.json({ id: `${req.params.project}/${rel}` });
   } catch (e) { res.status(400).json({ error: String(e) }); }
+});
+
+/* ------------------------------------------------------------------ HTML deliverables (deliverables.ts) */
+
+/** A new deck / poster / web page: the folder `dir` with an index.html to start from. */
+api.post('/projects/:project/deliverables', needProject('edit'), (req, res) => {
+  try {
+    const kind = String(req.body?.kind ?? 'deck') as DeliverableKind;
+    if (!DELIVERABLE_KINDS.includes(kind)) { res.status(400).json({ error: 'kind: deck, poster or page' }); return; }
+    const dir = String(req.body?.dir ?? '').replace(/^\/+|\/+$/g, '');
+    if (dir) assertWritableRelPath(dir + '/index.html');
+    const rel = createDeliverable(req.params.project, dir, starterFor(kind, String(req.body?.title ?? '')));
+    touchProject(req.params.project, req.user!.id);
+    res.json({ id: `${req.params.project}/${rel}`, path: rel });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+});
+
+/** The sandboxed address of a deliverable's folder for this account (the editor's frames, a presentation). */
+api.get('/projects/:project/deliverable-link', needProject('view'), (req, res) => {
+  const rel = String(req.query.path ?? '');
+  if (!isHtmlPath(rel)) { res.status(400).json({ error: 'not an HTML file' }); return; }
+  // the whole project under the token, the page at its own path: `../figures/plot.pdf` resolves
+  // to the project's figures (a token per folder would be climbed out of by the URL itself)
+  const token = deliverableToken(req.params.project, '', req.user!.id);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ base: `/ol-d/${token}/`, entry: rel, expires: Date.now() + 12 * 3600 * 1000 - 60000 });
+});
+
+/** The deliverable as a PDF (rendered by headless Chromium, render.ts). */
+api.get('/projects/:project/deliverable-pdf', needProject('view'), async (req, res) => {
+  const rel = String(req.query.path ?? '');
+  if (!isHtmlPath(rel) || !fs.existsSync(resolveProjectPath(req.params.project, rel))) { res.status(404).json({ error: 'not found' }); return; }
+  try {
+    const pdf = await deliverablePdf(req.params.project, rel, req.user!.id);
+    const name = (splitEntry(rel).dir.split('/').pop() || splitProjectKey(req.params.project).name).replace(/[^A-Za-z0-9._ -]+/g, '-') || 'deliverable';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `${req.query.download === '1' ? 'attachment' : 'inline'}; filename="${name}.pdf"`);
+    res.end(pdf);
+  } catch (e) { console.error('[deliverables] pdf', e); res.status(500).json({ error: (e as Error).message }); }
+});
+
+/**
+ * The deliverable's folder as a .zip that works on its own: its files, its page(s) with the OverLyX
+ * runtime (presenting, math) included under _overlyx/ — open index.html in any browser, or host it
+ * (deliverables.ts deliverableZip).
+ */
+api.get('/projects/:project/deliverable-zip', needProject('view'), async (req, res) => {
+  const rel = String(req.query.path ?? '');
+  if (!isHtmlPath(rel)) { res.status(400).json({ error: 'not an HTML file' }); return; }
+  try {
+    const { name, entries } = await deliverableZip(req.params.project, rel, config.clientDist);
+    res.setHeader('Content-Disposition', `attachment; filename="${(name || splitProjectKey(req.params.project).name).replace(/[^A-Za-z0-9._ -]+/g, '-') || 'deliverable'}.zip"`);
+    res.setHeader('Content-Type', 'application/zip');
+    res.end(writeZip(entries));
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
 });
 
 /** Upload a file (raw body) into a project, e.g. figures/plot.png */
@@ -1371,6 +1429,9 @@ app.get('/api/version', (_req, res) => { res.setHeader('Cache-Control', 'no-stor
 app.use('/api', api);
 
 /* ------------------------------------------------------------------ static */
+
+// HTML deliverables' sandboxed pages (/ol-d/<token>/…) and the runtime's CORS (/_ol/…): before the app's catch-all
+mountDeliverables(app);
 
 if (fs.existsSync(config.clientDist)) {
   app.use(express.static(config.clientDist, { index: false, maxAge: '1h' }));

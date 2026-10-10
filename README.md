@@ -10,11 +10,13 @@
    change tracking, comment threads and sharing; every project is a git repository.
 4. **Offline support** — documents are mirrored in the browser, edits keep going without a
    connection and merge when you're back.
-5. **Layout mode** — slides, posters and free-form pages: text boxes with formulas, vector
-   shapes, cropped images and raw TikZ placed anywhere on fixed-size pages, Keynote-style with
-   Inkscape's pen and node tools, connectors, guides and an objects list; slide masters with
-   placeholders, and pasted SVG as editable shapes; the file is a plain beamer `.tex` (animations
-   are overlays, masters `\begin{olmaster}` definitions) and presents full screen.
+5. **Slides, posters and web pages** — a folder with an `index.html` that you and your agents design
+   any way you like (HTML, CSS, JavaScript, SVG; TeX math typeset by MathJax), edited live on a
+   canvas — select, drag, resize, retype, draw — or in its code, presented full screen and
+   downloaded as PDF or as a self-contained website. Agents get `render_page`: the page as a real
+   browser shows it, plus a list of what is wrong (overflowing or overlapping text, text off the
+   slide or too small, low contrast). The LaTeX **layout mode** (a plain beamer `.tex` of placed
+   text boxes, shapes, images and TikZ, with masters and connectors) remains for those who need it.
 6. **Markdown** — `.md` files open in the same editor, restricted to what markdown can hold, with
    markdown's typing (`**bold**`, `> `, "```" …); comments and tracked changes are HTML in the file,
    unchanged blocks are saved byte for byte.

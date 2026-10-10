@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="overlyx" content="page">
+<title>Why the sky is blue — project page</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: #14213d; --muted: #5c677d; --sky: #3a86ff; --wash: #eef4ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; color: var(--ink); line-height: 1.65; }
+  header { padding: 110px 24px 80px; text-align: center; color: #fff; background: linear-gradient(160deg, #0b1d4a 0%, #1d3f8f 55%, #3a86ff 100%); }
+  header h1 { font-size: clamp(38px, 7vw, 68px); line-height: 1.05; margin: 0 0 18px; letter-spacing: -0.02em; }
+  header p { margin: 0; color: #c9d8ff; font-size: 19px; }
+  .links { margin-top: 28px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .links a { color: #fff; text-decoration: none; border: 1px solid rgba(255,255,255,.5); border-radius: 999px; padding: 8px 18px; font-weight: 500; }
+  main { max-width: 760px; margin: 0 auto; padding: 56px 24px 96px; font-size: 19px; }
+  h2 { font-size: 28px; margin: 48px 0 12px; }
+  .figure { background: var(--wash); border-radius: 16px; padding: 24px; margin: 28px 0; }
+  .figure p { color: var(--muted); font-size: 16px; margin: 12px 0 0; }
+  pre { background: #f4f6fa; border-radius: 10px; padding: 16px; overflow-x: auto; font-size: 14px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Why the sky is blue</h1>
+  <p>@@NAME@@ · an OverLyX example project page</p>
+  <div class="links"><a href="#abstract">Abstract</a><a href="#result">Result</a><a href="#cite">Cite</a></div>
+</header>
+<main>
+  <h2 id="abstract">Abstract</h2>
+  <p>Sunlight is scattered by the molecules of the air with an intensity proportional to \(\lambda^{-4}\). Short wavelengths are therefore scattered far more than long ones, which colours the daytime sky blue and the sunset red.</p>
+  <h2 id="result">Result</h2>
+  <div class="figure">
+    \[ \frac{I_{450\,\mathrm{nm}}}{I_{700\,\mathrm{nm}}} = \left(\frac{700}{450}\right)^{4} \approx 5.9 \]
+    <p>Blue light is scattered about six times as strongly as red.</p>
+  </div>
+  <h2 id="cite">Cite</h2>
+<pre>@misc{sky,
+  title  = {Why the sky is blue},
+  author = {@@NAME@@},
+  note   = {OverLyX example}
+}</pre>
+</main>
+</body>
+</html>

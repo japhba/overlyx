@@ -53,7 +53,7 @@ function buildTree(files: ProjectFile[]): TreeNode[] {
   return root.children;
 }
 
-const ICON: Record<string, string> = { doc: '📄', lyx: '📥', bib: '📚', image: '🖼', tex: '𝓣', pdf: '📕', board: '🖍', other: '·' };
+const ICON: Record<string, string> = { doc: '📄', lyx: '📥', bib: '📚', image: '🖼', tex: '𝓣', pdf: '📕', board: '🖍', html: '🎞', other: '·' };
 /** the explorer's cut/copy clipboard (paths within one project; survives re-renders) */
 let fileClip: { project: string; path: string; cut: boolean } | null = null;
 const isBackup = (name: string) => name.endsWith('~') || name.startsWith('#') || name.endsWith('.emergency');
@@ -341,8 +341,9 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
     const isLyx = f.kind === 'lyx';
     const isPdf = f.kind === 'pdf';
     const isBoard = f.kind === 'board';
-    const inTab = isDoc || isLyx || isPdf || isBoard || isTextFile(f.name);
-    const tabId = isDoc || isBoard ? id : isPdf ? 'pdf:' + id : 'text:' + id;
+    const isHtml = f.kind === 'html';
+    const inTab = isDoc || isLyx || isPdf || isBoard || isHtml || isTextFile(f.name);
+    const tabId = isDoc || isBoard || isHtml ? id : isPdf ? 'pdf:' + id : 'text:' + id;
     const href = isLyx ? '#' : inTab ? '#/' + tabId : fileUrl(project!.name, f.path);
     const importLyx = async () => {
       if (!(await uiConfirm('Import LyX File', `Import ${f.name} into a .tex document (${f.name.replace(/\.lyx$/, '.tex')})? The .lyx file is kept; child documents it includes are imported too.`, { okLabel: 'Import' }))) return;

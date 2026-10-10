@@ -10,7 +10,7 @@ import { isMarkdownPath } from '@overlyx/core/md/index.ts';
 import { config } from './config.ts';
 
 /** `doc`: a .tex document (has \\begin{document}, is \\input by one, or was written by OverLyX — a fragment with its settings line); `tex`: other LaTeX sources (preamble, macros, .sty); `dir`: a directory (so empty folders show in the explorer) */
-export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'dir' | 'other' }
+export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other' }
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf', '.eps', '.ps', '.tif', '.tiff', '.webp', '.bmp']);
 
@@ -21,6 +21,8 @@ export function fileKind(name: string): ProjectFile['kind'] {
   if (ext === '.tex' || ext === '.sty' || ext === '.cls') return 'tex';
   if (ext === '.pdf') return 'pdf';
   if (ext === '.board') return 'board';
+  // an HTML deliverable (a deck, a poster, a web page: deliverables.ts) opens in the deliverable editor
+  if (ext === '.html' || ext === '.htm') return 'html';
   // markdown files open in the document editor
   if (isMarkdownPath(name)) return 'doc';
   if (IMAGE_EXT.has(ext)) return 'image';

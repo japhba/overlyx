@@ -11,7 +11,7 @@ export function googleSignInUrl(next: string = location.hash): string {
   return '/api/auth/google' + (next.startsWith('#/') && next.length > 2 ? '?next=' + encodeURIComponent(next) : '');
 }
 /** `doc`: a .tex document (opens in the editor); `tex`: other LaTeX sources (text editor); `lyx`: importable */
-export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'dir' | 'other' }
+export interface ProjectFile { path: string; name: string; size: number; mtime: number; kind: 'doc' | 'lyx' | 'bib' | 'image' | 'tex' | 'pdf' | 'board' | 'html' | 'dir' | 'other' }
 export type Role = 'owner' | 'edit' | 'view';
 export interface Project {
   /** the project's key, `<owner>/<name>` (core projectKey.ts): documents are `<key>/<path>`, the URL `#/<key>/<path>` */
@@ -234,6 +234,10 @@ export const api = {
   deleteMcpToken: (id: number) => req<{ tokens: GitToken[] }>('DELETE', `/api/mcp-tokens/${id}`),
   newDoc: (project: string, path: string, opts: { title?: string; textclass?: string; /** a layout document from this page preset (core PAGE_PRESETS) */ layout?: string } = {}) => req<{ id: string }>('POST', `/api/projects/${encodeURIComponent(project)}/new`, { path, ...opts }),
   /** plain text files (.tex, .bib, …) for the built-in text editor; `mtime` guards against overwriting someone else's save */
+  /** a new HTML deliverable (deck / poster / web page): the folder `dir` with its index.html */
+  newDeliverable: (project: string, dir: string, kind: 'deck' | 'poster' | 'page', title?: string) => req<{ id: string; path: string }>('POST', `/api/projects/${encodeURIComponent(project)}/deliverables`, { dir, kind, title }),
+  /** the sandboxed address of a deliverable's folder (server deliverables.ts) */
+  deliverableLink: (project: string, path: string) => req<{ base: string; entry: string; expires: number }>('GET', `/api/projects/${encodeURIComponent(project)}/deliverable-link?path=${encodeURIComponent(path)}`),
   readText: (project: string, path: string) => req<{ text: string; mtime: number; size: number; role: Role }>('GET', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`),
   writeText: (project: string, path: string, text: string, mtime?: number) => req<{ ok: boolean; mtime: number; size: number }>('PUT', `/api/projects/${encodeURIComponent(project)}/text/${path.split('/').map(encodeURIComponent).join('/')}`, mtime !== undefined ? { text, mtime } : { text }),
   upload: (project: string, path: string, file: Blob, opts?: { overwrite?: boolean }) => req<{ ok: boolean; path: string }>('POST', `/api/projects/${encodeURIComponent(project)}/upload?path=${encodeURIComponent(path)}${opts?.overwrite === false ? '&overwrite=0' : ''}`, undefined, file),
