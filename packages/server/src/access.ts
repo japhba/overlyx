@@ -490,8 +490,7 @@ export const STARTERS: { id: string; title: string }[] = [
   { id: 'web', title: 'Example: slides, poster and web page' },
   { id: 'paper', title: 'Example: paper' },
 ];
-/** starters no longer given to new accounts (the LaTeX layout deck and poster, before the HTML deliverables); accounts that have them keep them */
-export const RETIRED_STARTERS = ['deck', 'poster'];
+
 
 /**
  * A beamer deck, HTML slides / poster / web page and a paper to start from, each an ordinary project of

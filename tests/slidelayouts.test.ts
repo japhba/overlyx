@@ -91,8 +91,8 @@ describe('the deck\'s style', () => {
     expect(deckStyle(tr.doc, PAGE).title.marks.length).toBe(1);
   });
 
-  it('the example deck (a dark cover, slides each with a body of its own): the cover\'s background, a body below the title', () => {
-    const ex = load(readFileSync(path.resolve('packages/server/templates/starters/deck/deck.tex'), 'utf8')).state;
+  it('a rich deck (a dark cover, slides each with a body of its own — the former Layout-mode example): the cover\'s background, a body below the title', () => {
+    const ex = load(readFileSync(path.resolve('tests/fixtures/layout-deck.tex'), 'utf8')).state;
     const ds = deckStyle(ex.doc, PAGE, 11);
     expect(ds.title.attrs).toMatchObject({ x: 12, y: 12.5, w: 136, color: 'night' });
     expect(Math.round(Number(ds.title.attrs.font))).toBe(20);

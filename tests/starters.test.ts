@@ -1,8 +1,8 @@
 /**
- * The starter projects every account gets besides the welcome project (a beamer deck, a Layout-mode
- * slide deck, a Layout-mode poster and a paper: packages/server/templates/starters,
- * scripts/gen-starters.ts): created once per account, in OverLyX's canonical form (opening and saving
- * them changes nothing), and compiling.
+ * The starter projects every account gets besides the welcome project (a beamer deck, an HTML talk /
+ * poster / project page and a paper: packages/server/templates/starters, scripts/gen-starters.ts):
+ * created once per account, the LaTeX ones in OverLyX's canonical form (opening and saving them
+ * changes nothing) and compiling.
  *   npx vitest run tests/starters.test.ts
  */
 import { describe, it, expect } from 'vitest';
@@ -10,7 +10,6 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statS
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { parseOlx, layoutCheck } from '../packages/core/src/layout/check.ts';
 
 const ROOT = join(process.env.OVERLYX_SCRATCH ?? tmpdir(), 'overlyx-starters-test');
 rmSync(ROOT, { recursive: true, force: true });
@@ -26,9 +25,8 @@ const { walkInsets } = await import('../packages/core/src/index.ts');
 
 const TPL = join(import.meta.dirname, '../packages/server/templates/starters');
 const HAVE_LATEXMK = spawnSync('which', ['latexmk']).status === 0;
-/** the LaTeX starters (deck and poster are no longer given to new accounts, since the HTML deliverables, but their templates stay) */
-const FILES: Record<string, string> = { slides: 'slides.tex', deck: 'deck.tex', poster: 'poster.tex', paper: 'paper.tex' };
-const GIVEN: Record<string, string> = { slides: 'slides.tex', paper: 'paper.tex' };
+/** the LaTeX starters */
+const FILES: Record<string, string> = { slides: 'slides.tex', paper: 'paper.tex' };
 const personalise = (text: string, name: string) => text.replace(/@@NAME@@/g, name);
 
 describe('starter projects', () => {
@@ -47,7 +45,7 @@ describe('starter projects', () => {
     ]));
     // the welcome project stays the one example the client looks for
     expect(mine.filter(p => p.kind === 'example').map(p => p.name)).toEqual(['ada/welcome']);
-    for (const [id, file] of Object.entries(GIVEN)) {
+    for (const [id, file] of Object.entries(FILES)) {
       const dir = join(ROOT, 'projects', 'ada', `example-${id}`);
       const text = readFileSync(join(dir, file), 'utf8');
       expect(text).not.toContain('@@NAME@@');
@@ -84,9 +82,9 @@ describe('starter projects', () => {
   });
 
   it('opening and saving a starter changes nothing (the server\'s own parse → write)', () => {
-    for (const [id, file] of Object.entries(GIVEN)) {
+    for (const [id, file] of Object.entries(FILES)) {
       const project = `ada/example-${id}`;
-      if (!existsSync(join(ROOT, 'projects', project))) continue;   // the deleted poster
+      if (!existsSync(join(ROOT, 'projects', project))) continue;   // a deleted one
       const text = readFileSync(join(ROOT, 'projects', project, file), 'utf8');
       const r = parseDocumentText(text, project, file);
       expect(r.warnings, id).toEqual([]);
@@ -129,47 +127,6 @@ describe('starter templates', () => {
     for (const s of ['[<+->]', '\\item<2->', '\\pause', '\\includegraphics', '\\begin{tabular}']) expect(text).toContain(s);
   });
 
-  it('the slide deck is Layout-mode 16:9 pages with notes, steps, transitions, a cropped picture, a plot and a table', () => {
-    const text = readFileSync(join(TPL, 'deck', 'deck.tex'), 'utf8');
-    expect(text).toMatch(/^% .*\n\\documentclass\[aspectratio=169\]\{beamer\}/);
-    const doc = parseTex(text).doc;
-    // the slides, and two master pages (\begin{olmaster}: Content and Section) before them
-    const isMaster = (p: (typeof doc.body)[number]) => p.items.some(it => it.kind === 'inset' && it.inset.type === 'Leaf' && it.inset.name === 'OLPageProps' && it.inset.params.includes('role master'));
-    const pages = doc.body.filter(p => p.layout === 'OLPage' && !isMaster(p));
-    expect(pages.length).toBe(15);
-    expect(doc.body.filter(isMaster).length).toBe(2);
-    expect((text.match(/\\olpage\{master=/g) ?? []).length).toBeGreaterThanOrEqual(10);
-    expect(doc.body.every(p => p.layout === 'OLPage')).toBe(true);
-    // every slide has speaker notes (the guided tour) and a name for the slide rail
-    for (const [i, p] of pages.entries()) {
-      const notes = p.items.find(it => it.kind === 'inset' && it.inset.type === 'Text' && it.inset.name === 'OLNotes');
-      expect(notes, `slide ${i + 1}`).toBeTruthy();
-      const props = p.items.find(it => it.kind === 'inset' && it.inset.type === 'Leaf' && it.inset.name === 'OLPageProps');
-      expect(props && props.kind === 'inset' && props.inset.type === 'Leaf' && props.inset.params.some(l => /name=/.test(l)), `slide ${i + 1}`).toBe(true);
-    }
-    expect((text.match(/\\note\{/g) ?? []).length).toBe(15);
-    // animation steps with entrance effects, transitions, a cropped picture, the plot, a table
-    expect((text.match(/step=\d-/g) ?? []).length).toBeGreaterThan(10);
-    for (const fx of ['fade', 'wipe', 'zoom', 'fly-up']) expect(text).toContain(`effect=${fx}`);
-    expect((text.match(/\\olpage\{[^}]*transition=/g) ?? []).length).toBeGreaterThanOrEqual(4);
-    expect(text).toMatch(/\\olimage\{[^}]*crop=[^}]*\}\{figures\/sky\}/);
-    expect(text).toContain('{figures/scattering}');
-    expect(text).toContain('\\begin{tabular}');
-    expect(text).toContain('\\definecolor{sky}');
-    expect(readdirSync(join(TPL, 'deck', 'figures')).sort()).toEqual(['scattering.pdf', 'sky.pdf']);
-  });
-
-  it('the poster is one Layout-mode A0 page', () => {
-    const text = readFileSync(join(TPL, 'poster', 'poster.tex'), 'utf8');
-    expect(text).toContain('"papersize":"custom","paperwidth":"841mm","paperheight":"1189mm"');
-    expect((text.match(/\\begin\{frame\}\[plain\]/g) ?? []).length).toBe(1);
-    expect((text.match(/\\begin\{olbox\}/g) ?? []).length).toBeGreaterThan(30);
-    expect(text).toContain('\\olimage{');
-    expect(text).toContain('\\begin{olraw}');
-    const doc = parseTex(text).doc;
-    expect(doc.body.filter(p => p.layout === 'OLPage').length).toBe(1);
-  });
-
   for (const [id, file] of Object.entries(FILES)) {
     it.skipIf(!HAVE_LATEXMK)(`${id} compiles`, () => {
       const dir = join(ROOT, 'build', id);
@@ -184,22 +141,6 @@ describe('starter templates', () => {
       expect(existsSync(join(dir, file.replace('.tex', '.pdf')))).toBe(true);
       expect(log).not.toMatch(/Citation .* undefined/);
       expect(log).not.toMatch(/Reference .* undefined/);
-      // a layout document: TeX wrote the check of its text boxes — the class's spacing and one record per box
-      if (id === 'poster' || id === 'deck') {
-        const olxFile = join(dir, file.replace('.tex', '.olx'));
-        const olx = parseOlx(readFileSync(olxFile, 'utf8'));
-        expect(olx.params).toMatchObject({ above: 11, bshort: 6.5, itemsep: 3 });
-        const tex = readFileSync(join(dir, file), 'utf8');
-        const check = layoutCheck(readFileSync(olxFile, 'utf8'), tex, tex);
-        // (a master's boxes are drawn on the slides that use it, without a record: they are no slide's own)
-        const own = tex.replace(/\\begin\{olmaster\}[\s\S]*?\\end\{olmaster\}/g, '');
-        expect(check.boxes.length).toBe((own.match(/\\begin\{olbox\}/g) ?? []).length);
-        expect(check.boxes.every(b => b.fresh && b.natural >= 0 && b.inner > 0)).toBe(true);
-        if (id === 'poster') expect(olx.boxes.length).toBe(check.boxes.length);
-        // no text runs out of its box in the PDF (the editor's mark: a quarter of a line, at least 2 pt)
-        const over = check.boxes.filter(b => b.natural - b.inner > Math.max(2, b.baselineskip / 4));
-        expect(over.map(b => `slide ${b.page + 1}: ${b.key}`)).toEqual([]);
-      }
     }, 300000);
   }
 });

@@ -73,7 +73,8 @@ describe('the worker writes what the main thread writes', () => {
   const fixtures: [string, string][] = [
     ['welcome', join(TEMPLATES, 'welcome', 'welcome.tex')],
     ['paper', join(TEMPLATES, 'starters', 'paper', 'paper.tex')],
-    ['poster', join(TEMPLATES, 'starters', 'poster', 'poster.tex')],
+    // a Layout-mode A0 poster (the former example)
+    ['poster', join(import.meta.dirname, 'fixtures', 'layout-poster.tex')],
     ['slides', join(TEMPLATES, 'starters', 'slides', 'slides.tex')],
   ];
   for (const [name, file] of fixtures) {
