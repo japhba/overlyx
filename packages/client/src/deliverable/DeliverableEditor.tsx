@@ -798,7 +798,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     color: c => { if (editingText) exec('foreColor', c ?? 'inherit'); else styleSel({ color: c }); },
     highlight: c => exec('hiliteColor', c ?? 'transparent'),
     align: a => { if (editingText) exec(a === 'left' ? 'justifyLeft' : a === 'center' ? 'justifyCenter' : a === 'right' ? 'justifyRight' : 'justifyFull'); else styleSel({ 'text-align': a }); },
-    valign: v => styleSel({ display: 'flex', 'align-items': v }),
+    valign: v => toCanvas({ ol: 'valign', v }),
     list: kind => {
       const cmd = kind === 'ul' ? 'insertUnorderedList' : 'insertOrderedList';
       if (editingText) { exec(cmd); return; }

@@ -19,7 +19,7 @@ import { startMath, typesetPage } from './math';
 import { renderCites, refreshCites, addEntries, CITE_CSS } from './cite';
 import { applySource, whenTypeset } from './reconcile';
 import * as edit from './edit';
-import { arrange, paint } from './arrange';
+import { arrange, paint, valign } from './arrange';
 import { nodeCommand } from './pathedit';
 import { stepCommand } from './animate';
 import { setView, refreshView, reportColors } from './view';
@@ -205,6 +205,7 @@ function onMessage(e: MessageEvent): void {
     case 'asset': refreshAsset(m.path, m.v); break;
     case 'arrange': if (MODE === 'edit') arrange(m.how); break;
     case 'paint': if (MODE === 'edit') paint(m.paint); break;
+    case 'valign': if (MODE === 'edit') valign(m.v); break;
     case 'view': if (MODE === 'edit') setView(m.view); break;
     case 'crop': if (MODE === 'edit') edit.cropAt(m.path, { aspect: m.aspect, shape: m.shape }); break;
     case 'cropPreset': if (MODE === 'edit') edit.cropPreset(m.path, m); break;

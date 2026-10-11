@@ -27,6 +27,7 @@ const DECK = `<!doctype html>
 <section class="slide">
   <p id="t" style="position: absolute; left: 100px; top: 100px; width: 600px; margin: 0; font-size: 30px">Classical<br>Quantum<br>Wave</p>
   <ul id="l" style="position: absolute; left: 100px; top: 440px; width: 500px; margin: 0; font-size: 30px"><li>One</li><li>Two</li><li>Three</li></ul>
+  <div id="v" style="position: absolute; left: 760px; top: 80px; width: 420px; height: 240px; background: #dde6f3; font-size: 30px">Banner title<br>Some <b>authors</b> here</div>
 </section>
 </body></html>
 `;
@@ -100,6 +101,14 @@ test('slides: a bulleted paragraph box, Tab in a list, letters typed at the canv
   await page.locator('[data-anim-add="appear"]').click();
   await page.waitForTimeout(800);
   expect(fileText()).not.toMatch(/<ul id="l"[^>]*\sdata-step="/);
+
+  // a banner (a shape with text) aligned to its middle: its two lines stay two lines, the bold word in its line
+  await page.mouse.click(...await at(page, 1100, 300));
+  await page.locator('[data-tb="dk-align"]').click();
+  await page.locator('[data-palette="dk-align"] .tb-pal-item', { hasText: 'Middle' }).click();
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/<div id="v" style="[^"]*display: flex; flex-direction: column; justify-content: center[^"]*"><span class="ol-va">Banner title<br>Some <b>authors<\/b> here<\/span><\/div>/);
+  const lines = await slide(page).locator('#v .ol-va').evaluate(e => { const r = document.createRange(); r.selectNodeContents(e); return new Set([...r.getClientRects()].map(x => Math.round(x.top))).size; });
+  expect(lines).toBe(2);
   expect(real(errors)).toEqual([]);
 });
 

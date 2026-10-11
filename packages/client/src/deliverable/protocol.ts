@@ -167,6 +167,8 @@ export type ToRuntime =
   | { ol: 'asset'; path: string; v: number }
   | { ol: 'arrange'; how: ArrangeHow }
   | { ol: 'paint'; paint: Paint }
+  /** the selected text boxes aligned to their top, middle or bottom (runtime arrange.ts valign) */
+  | { ol: 'valign'; v: 'flex-start' | 'center' | 'flex-end' }
   | { ol: 'view'; view: CanvasView }
   /** crop mode for a picture (optionally with an aspect / a round frame at once) — runtime/crop.ts */
   | { ol: 'crop'; path: Path; aspect?: number | null; shape?: 'rect' | 'circle' }

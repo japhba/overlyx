@@ -11,7 +11,7 @@
  * px); ungroup puts them back on its parent. Lock: PowerPoint's — selectable, not moved or resized.
  */
 import type { ArrangeHow, Paint, HtmlOp, Path } from '../protocol';
-import { selection, setSelection, start, placeLive, styleOp, commit, isLocked, movable, angleOf, isSvgPart, cs, containerOf, union, report, draw, kindOf, slidePoint } from './edit';
+import { selection, setSelection, start, placeLive, styleOp, commit, isLocked, movable, angleOf, isSvgPart, cs, containerOf, union, report, draw, kindOf, slidePoint, stopText } from './edit';
 import { srcOf, pathOf, slideOf, docRect } from './env';
 import { pathCommand } from './pathedit';
 
@@ -262,6 +262,29 @@ function shapesOf(el: Element): Element[] {
 }
 
 const dashArray = (dash: Paint['dash'], w: number) => dash === 'dashed' ? `${r2(w * 3)} ${r2(w * 2)}` : dash === 'dotted' ? `${r2(Math.max(0.1, w * 0.01))} ${r2(w * 2)}` : null;
+
+const BLOCKS = /^(p|div|ul|ol|li|h[1-6]|table|figure|blockquote|pre|section|header|footer)$/;
+
+/**
+ * A text box aligned to its top, middle or bottom: a flex column, its text in one block first. A
+ * flex container lays out each run of text and each inline element as an item of its own — the
+ * lines of "Title<br>Authors" ran into one, bold words stood apart, and the text slid out of the box
+ * (usability wave, 11 Oct 2026). Blocks inside (paragraphs, a list) stack as they are.
+ */
+export function valign(v: 'flex-start' | 'center' | 'flex-end'): void {
+  stopText();
+  const ops: HtmlOp[] = [];
+  for (const el of selection().filter(e => !isLocked(e))) {
+    const path = pathOf(el), src = srcOf.get(el);
+    if (!path || !src) continue;
+    const kids = Array.from(src.childNodes).filter(n => !(n.nodeType === Node.TEXT_NODE && !n.textContent?.trim()) && n.nodeType !== Node.COMMENT_NODE);
+    const wrapped = kids.length === 1 && (kids[0] as Element).classList?.contains('ol-va');
+    const inline = kids.length > 0 && kids.every(n => n.nodeType === Node.TEXT_NODE || !BLOCKS.test((n as Element).localName));
+    if (inline && !wrapped) ops.push({ t: 'inner', path, html: `<span class="ol-va">${src.innerHTML.trim()}</span>` });
+    ops.push({ t: 'style', path, set: { display: 'flex', 'flex-direction': 'column', 'justify-content': v, 'align-items': null } });
+  }
+  if (ops.length) commit(ops, { select: 'keep' });
+}
 
 export function paint(p: Paint): void {
   const sel = selection().filter(el => !isLocked(el));
