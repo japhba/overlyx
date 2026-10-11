@@ -50,6 +50,13 @@ test('an account hands a project over and deletes itself', async ({ page, browse
   await expect(page.locator('.share-row[data-member="bob"]')).toBeVisible({ timeout: 15000 });
   await page.locator('.share-row[data-member="bob"] select[data-member-role]').selectOption('owner');
   await expect(dialogLocator(page)).toContainText('Make Bob');
+  // Escape answers the confirmation on top, not the Share dialog under it (and the two dialogs do
+  // not fight over the focus — that overflowed the stack)
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.dialog')).toHaveCount(1);
+  await expect(page.locator('.share-row[data-member="bob"] select[data-member-role]')).toHaveValue('edit');
+  await page.locator('.share-row[data-member="bob"] select[data-member-role]').selectOption('owner');
+  await expect(dialogLocator(page)).toContainText('Make Bob');
   await dialogLocator(page).locator('button.primary', { hasText: 'Make owner' }).click();
   await expect(page.locator('.share-row')).toHaveCount(0, { timeout: 15000 });
 

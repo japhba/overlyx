@@ -29,7 +29,12 @@ export function Dialog({ title, onClose, children, buttons, wide }: { title: str
     const box = boxRef.current!;
     const controls = () => [...box.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]')].filter(el => !el.closest('[hidden]') && el.getClientRects().length > 0);
     const focusFirst = () => (box.querySelector<HTMLElement>('[autofocus]') ?? controls()[0] ?? box).focus();
+    // only the frontmost dialog takes keys and keeps the focus: a confirmation opened over this one
+    // (uiConfirm over the Share dialog) gets Escape and the focus — two traps pulling the focus back
+    // and forth overflowed the stack, and Escape closed the dialog underneath
+    const frontmost = () => [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].at(-1) === box;
     const k = (e: KeyboardEvent) => {
+      if (!frontmost()) return;
       if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); closeRef.current(); }
       else if (e.key === 'Tab') {
         const list = controls(), first = list[0], last = list.at(-1);
@@ -42,7 +47,7 @@ export function Dialog({ title, onClose, children, buttons, wide }: { title: str
     // from (Insert ▸ Table runs its command and focuses the editor, then closes): pulling it back here
     // made the editor regain focus through a plain .focus() at close, and the browser put the caret at
     // the start of the document instead of in the new table
-    const contain = (e: FocusEvent) => { const t = e.target as Node; if (!box.contains(t) && !(previous && previous.contains(t))) focusFirst(); };
+    const contain = (e: FocusEvent) => { const t = e.target as Node; if (frontmost() && !box.contains(t) && !(previous && previous.contains(t))) focusFirst(); };
     document.addEventListener('keydown', k, true);
     document.addEventListener('focusin', contain);
     focusFirst();
