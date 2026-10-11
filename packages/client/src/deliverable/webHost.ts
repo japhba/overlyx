@@ -11,7 +11,8 @@ import { splitDocId } from '@overlyx/core';
 import { api, type User } from '../api';
 import { subscribeProjectEvents } from '../projectevents';
 import type { DeliverableHost, ChangeOrigin, Peer, Splice } from './host';
-import type { Path } from './protocol';
+import type { Path, TextCaret } from './protocol';
+import { safeColor } from './runtime/carets';
 
 export function webHost(id: string, user: User): DeliverableHost & { destroy(): void } {
   const { project, path } = splitDocId(id);
@@ -29,12 +30,22 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
   let readOnly = false;
   void api.readText(project, path).then(r => { readOnly = r.role === 'view'; }).catch(() => {});
 
+  // (another person's awareness is checked: it goes into the page's frame)
+  const isPath = (p: unknown): p is Path => Array.isArray(p) && p.length < 64 && p.every(i => Number.isInteger(i) && i >= 0);
+  const caretOf = (c: unknown): TextCaret | null => {
+    const x = c as TextCaret | null;
+    return x && isPath(x.path) && Number.isInteger(x.anchor) && Number.isInteger(x.head) && x.anchor >= 0 && x.head >= 0 ? { path: x.path, anchor: x.anchor, head: x.head } : null;
+  };
   const peersOf = (): Peer[] => {
     const peers: Peer[] = [];
     provider.awareness.getStates().forEach((st, client) => {
       if (client === ydoc.clientID) return;
-      const s = st as { user?: { name?: string; color?: string }; htmlSel?: { paths?: Path[] } };
-      if (s.htmlSel?.paths?.length) peers.push({ paths: s.htmlSel.paths, color: s.user?.color ?? '#888', name: s.user?.name ?? '' });
+      const s = st as { user?: { name?: string; color?: string; username?: string }; htmlSel?: { paths?: unknown[] }; htmlCaret?: unknown; htmlSlide?: unknown };
+      const paths = Array.isArray(s.htmlSel?.paths) ? s.htmlSel!.paths!.filter(isPath).slice(0, 200) : [];
+      const caret = caretOf(s.htmlCaret);
+      const slide = Number.isInteger(s.htmlSlide) && (s.htmlSlide as number) >= 0 ? s.htmlSlide as number : undefined;
+      if (!paths.length && !caret && slide === undefined) return;
+      peers.push({ paths, caret, slide, color: safeColor(s.user?.color), name: String(s.user?.name || s.user?.username || '').slice(0, 60) });
     });
     return peers;
   };
@@ -74,6 +85,8 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
     upload: async (rel, data) => { await api.upload(project, rel, data, { overwrite: false }); },
     onAsset: cb => subscribeProjectEvents(project, ev => { if (ev.kind === 'graphics') cb(ev.path, ev.v); }),
     setSelection(paths) { try { provider.awareness.setLocalStateField('htmlSel', { paths }); } catch { /* closing */ } },
+    setCaret(caret) { try { provider.awareness.setLocalStateField('htmlCaret', caret); } catch { /* closing */ } },
+    setSlide(slide) { try { if (provider.awareness.getLocalState()?.htmlSlide !== slide) provider.awareness.setLocalStateField('htmlSlide', slide); } catch { /* closing */ } },
     onPeers(cb) {
       const f = () => cb(peersOf());
       provider.awareness.on('change', f);

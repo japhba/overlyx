@@ -157,6 +157,16 @@ export type StepCmd =
   /** a list's items one by one, or all at once */
   | { how: 'list'; path: Path; on: boolean };
 
+/**
+ * A caret in a text being retyped: the text box (its path) and places in its text — a character, a
+ * formula, a citation, a line break, the start of a paragraph or list item each one place (runtime
+ * carets.ts). `head` is where the caret is, `anchor` where the selected words start.
+ */
+export interface TextCaret { path: Path; anchor: number; head: number }
+
+/** another person on the page: what they selected, the text they retype, the slide they look at */
+export interface PeerInfo { paths: Path[]; color: string; name: string; caret?: TextCaret | null; slide?: number }
+
 /** editor → runtime */
 export type ToRuntime =
   | { ol: 'source'; version: number; html: string }
@@ -170,7 +180,7 @@ export type ToRuntime =
   | { ol: 'tool'; tool: Tool; ink?: InkStyle }
   | { ol: 'exec'; command: string; value?: string }
   | { ol: 'go'; slide: number }
-  | { ol: 'peers'; peers: { paths: Path[]; color: string; name: string }[] }
+  | { ol: 'peers'; peers: PeerInfo[] }
   | { ol: 'current'; slide: number }
   /** a file of the project changed on disk (project-relative): stylesheets and pictures are fetched again, scripts and data reload the page */
   | { ol: 'asset'; path: string; v: number }
@@ -230,6 +240,8 @@ export type FromRuntime =
   /** a new object drawn: its box (slide px), and for lines / the pen the points (slide px, in drawing order) */
   | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean }
   | { ol: 'editing'; path: Path | null }
+  /** where the caret is in the text being retyped (null: none), for the others */
+  | { ol: 'caret'; caret: TextCaret | null }
   | { ol: 'key'; key: string; ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }
   /** `on`: what was right-clicked — an object (now selected), a slide's empty area, or the canvas around the pages */
   | { ol: 'contextmenu'; x: number; y: number; slide?: number; on?: 'object' | 'slide' | 'canvas' }

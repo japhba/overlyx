@@ -728,7 +728,13 @@ blend.
     (`dl-ctx-row` — the canvas never moves when something is selected), its palettes fixed to the
     window), speaker
     notes (`<aside class="notes">` of the slide in view), the code (a textarea on the same `Y.Text`;
-    *Edit code* jumps to an object's source), others' selections (awareness `htmlSel`), files of
+    *Edit code* jumps to an object's source), others' selections (awareness `htmlSel`; a dashed frame
+    and their name), their carets in a text they retype (`htmlCaret`: the box's path and places in its
+    text — a formula, citation or line break one place, a paragraph / list item one where it starts —
+    so a chip where it is retyped and MathJax's output elsewhere count alike, runtime `carets.ts`; a
+    bar in their colour with their name, the words they selected; sent with the text's commit, not
+    before it) and who is on which slide (`htmlSlide`, dots with initials on the rail;
+    `e2e/deck-carets.spec.ts`), files of
     the page changed on disk (stylesheets and pictures fetched again, scripts reload; project
     events). **Present** (F5) shows a third frame full screen in `present` mode (arrows, Space,
     click, Home/End, a number and Enter, Escape) with the whiteboard's **trail laser pointer**
