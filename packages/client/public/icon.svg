@@ -1,20 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- OverLyX favicon: LYX over an upright O — the wordmark's tilted blue L, yellow Y, red X in their
-       own proportions, the L and the X spilling over the ring's sides, in front of it (a gap in the
-       disc's colour where they cross). All on a paper disc (dark disc, light ring in the dark scheme),
-       so the ring never melts into a tab bar. Strokes only, no fonts: it renders identically everywhere. -->
+  <!-- OverLyX favicon: the wordmark's own L, Y and X (Jost Bold outlines, tilted as in the wordmark) over
+       an upright O; the X's upper arm passes behind the ring. Tuned by hand in the project favicon
+       (icon/index.html, slide 2), drawn here with the dark scheme's colours as well. -->
   <style>
     .disc { fill: #fbfaf7 } .halo { stroke: #fbfaf7 } .ring { stroke: #1c1b19 }
-    .l { stroke: #2152a3 } .y { stroke: #e9a90f } .x { stroke: #d6402b }
+    .l { fill: #2152a3 } .y { fill: #efb21a } .x { fill: #d6402b }
     @media (prefers-color-scheme: dark) {
       .disc { fill: #2a2825 } .halo { stroke: #2a2825 } .ring { stroke: #f4f1ea }
-      .l { stroke: #7fa8f4 } .y { stroke: #f6c43c } .x { stroke: #f2654c }
+      .l { fill: #7fa8f4 } .y { fill: #f6c43c } .x { fill: #f2654c }
     }
   </style>
-  <circle class="disc" cx="32" cy="32" r="31.5"/>
-  <g fill="none" stroke-linecap="butt" stroke-linejoin="miter">
-    <circle class="ring" cx="32" cy="32" r="19" stroke-width="3.8"/>
-    <path class="halo" transform="rotate(0 0 0)" d="M4.36 19.97 L9.48 44.05 L19.50 41.92" stroke-width="9.35"/><path class="halo" transform="rotate(0 0 0)" d="M27.05 18.24 L31.74 30.27 L39.21 19.73 M31.74 30.27 L30.00 44.42" stroke-width="9.35"/><path class="halo" transform="rotate(0 0 0)" d="M48.61 17.91 L55.02 45.47 M60.35 20.41 L43.28 42.98" stroke-width="9.35"/><path class="l" transform="rotate(0 0 0)" d="M4.36 19.97 L9.48 44.05 L19.50 41.92" stroke-width="5.75"/><path class="y" transform="rotate(0 0 0)" d="M27.05 18.24 L31.74 30.27 L39.21 19.73 M31.74 30.27 L30.00 44.42" stroke-width="5.75"/><path class="x" transform="rotate(0 0 0)" d="M48.61 17.91 L55.02 45.47 M60.35 20.41 L43.28 42.98" stroke-width="5.75"/>
-    
-  </g>
-</svg>
+    <circle class="disc" cx="32" cy="32" r="31.5"/>
+    <circle class="ring" cx="32" cy="32" r="21.0" fill="none" stroke-width="4.2"/>
+    <g>
+      <path id="glyph-L" class="l" transform="translate(14.352 30.857) rotate(-12) scale(0.02857) translate(-298.84 350)" d="M73.7860107421875 -700.0V0.0H523.8888549804688V-145.24688720703125H242.67486572265625V-700.0Z"/>
+      <path id="glyph-Y" class="y" transform="translate(30.040 35.429) rotate(7) scale(0.02857) translate(-329.90 350)" d="M466.59259033203125 -700.0 329.7119140625 -436.8970947265625 193.2098388671875 -700.0H-1.2139892578125L244.2139892578125 -283.600830078125V0.0H416.2098388671875V-285.22222900390625L661.0164184570312 -700.0Z"/>
+      <path id="glyph-X" class="x" transform="translate(48.978 31.429) rotate(12) scale(0.02857) translate(-342.75 350)" d="M457.96295166015625 -700.0 346.24688720703125 -496.9259033203125 237.53082275390625 -700.0H28.7860107421875L244.2139892578125 -358.92181396484375L3.7860107421875 0.0H212.53082275390625L344.62548828125 -232.72430419921875L472.96295166015625 0.0H681.707763671875L447.27978515625 -358.92181396484375L666.707763671875 -700.0Z"/>
+    </g>
+    <!-- the X's upper arm behind the ring: the ring again over it, inside this wedge, with a gap in the disc's colour -->
+    <clipPath id="x-behind"><path d="M32 32 L60.54 19.89 L61.12 21.37 L61.63 22.88 L62.06 24.42 L62.41 25.98 L62.68 27.55 L62.87 29.14 L62.97 30.73 L63.00 32.32 Z"/></clipPath>
+    <g clip-path="url(#x-behind)" fill="none">
+      <circle class="halo" cx="32" cy="32" r="21.0" stroke-width="7.4"/>
+      <circle class="ring" cx="32" cy="32" r="21.0" stroke-width="4.2"/>
+    </g>
+  </svg>

@@ -11,8 +11,8 @@ const ARRIVE_HOLD_MS = 450;
  * the Classic interface's chrome italic with a soft shadow, and the Bauhaus one (`bauhaus`, and
  * everywhere in the Modern interface) — no motion lines, upright geometric "Over", the letters still
  * tilted; on hover "Over" leans forward and the letters tip further. Plain markup
- * + CSS so it scales with the surrounding font size; the favicon (public/icon.svg) is LYX over
- * an upright O. `play` runs the hover animation without a pointer. `arrive`: the page's
+ * + CSS so it scales with the surrounding font size; the favicon (public/icon.svg) is the
+ * wordmark's LYX over an upright O. `play` runs the hover animation without a pointer. `arrive`: the page's
  * first wordmark (the landing page's, or the menu bar's when one is signed in already) starts in the
  * hover pose and relaxes back — the hover's leave, once per page load.
  */
