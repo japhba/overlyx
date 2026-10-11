@@ -202,3 +202,21 @@ describe('Enter in the middle of a paragraph while somebody else edits it (throu
     c1.view.state.doc.forEach(p => expect(p.attrs.layout).toBe('Itemize'));
   });
 });
+
+describe('two people typing live at the start of one paragraph', () => {
+  it('a cursor at the start of the paragraph stays there: neither word is split', () => {
+    const state = baseState({ type: 'doc', content: [par(text('Existing text.'))] });
+    const a = client(state, 1), b = client(state, 2);
+    // live: every change reaches the other side at once
+    a.ydoc.on('update', (u: Uint8Array, origin: unknown) => { if (origin !== 'net') Y.applyUpdate(b.ydoc, u, 'net'); });
+    b.ydoc.on('update', (u: Uint8Array, origin: unknown) => { if (origin !== 'net') Y.applyUpdate(a.ydoc, u, 'net'); });
+    // both cursors at the start of the paragraph
+    for (const c of [a, b]) c.view.dispatch(c.view.state.tr.setSelection(TextSelection.create(c.view.state.doc, 1)));
+    for (const ch of 'SAMEA1 ') a.view.dispatch(a.view.state.tr.insertText(ch));
+    for (const ch of 'SAMEB1 ') b.view.dispatch(b.view.state.tr.insertText(ch));
+    for (const ch of 'SAMEA2 ') a.view.dispatch(a.view.state.tr.insertText(ch));
+    const t = a.view.state.doc.textContent;
+    expect(b.view.state.doc.textContent).toBe(t);
+    expect(t).toBe('SAMEB1 SAMEA1 SAMEA2 Existing text.');
+  });
+});

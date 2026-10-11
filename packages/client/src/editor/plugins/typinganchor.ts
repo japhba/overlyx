@@ -203,20 +203,26 @@ function splitPoint(node: PMNode, pos: number): { index: number; offset: number 
  * co-authoring a heading). Here the cursor is anchored to the character on its *left* instead — the
  * one its owner just typed —, as Google Docs keeps it: before a change from elsewhere that character
  * is remembered (a Yjs relative position), after it the cursor goes back right behind it, if it is
- * still there and still that character. Selections, the start of a paragraph and anything else keep
- * y-prosemirror's placement.
+ * still there and still that character. At the start of a paragraph the cursor stays at the start.
+ * Selections and anything else keep y-prosemirror's placement.
  */
 type PMView = { state: import('prosemirror-state').EditorState; dispatch(tr: import('prosemirror-state').Transaction): void };
 function caretStaysWithItsText(b: SyncBinding): () => void {
   const binding = b as unknown as Omit<SyncBinding, 'prosemirrorView'> & { prosemirrorView?: PMView | null };
   const ydoc = binding.type.doc!;
   let anchor: { rel: Y.RelativePosition; ch: string } | null = null;
+  // the cursor at the start of its paragraph: what is there (or the paragraph's end, when it is empty)
+  let atStart: Y.RelativePosition | null = null;
   const before = (tr: Y.Transaction) => {
-    anchor = null;
+    anchor = null; atStart = null;
     if (tr.local) return;
     const st = binding.prosemirrorView?.state;
     const sel = st?.selection;
-    if (!st || !(sel instanceof TextSelection) || !sel.empty || sel.$head.parentOffset === 0) return;
+    if (!st || !(sel instanceof TextSelection) || !sel.empty) return;
+    if (sel.$head.parentOffset === 0) {
+      try { atStart = absolutePositionToRelativePosition(sel.head, binding.type, binding.mapping as never); } catch { atStart = null; }
+      return;
+    }
     const prev = sel.$head.nodeBefore;
     if (!prev?.isText) return;
     try {
@@ -225,10 +231,26 @@ function caretStaysWithItsText(b: SyncBinding): () => void {
     } catch { anchor = null; }
   };
   const after = (tr: Y.Transaction) => {
-    const a = anchor;
-    anchor = null;
+    const a = anchor, start = atStart;
+    anchor = null; atStart = null;
     const view = binding.prosemirrorView;
-    if (!a || tr.local || !view) return;
+    if (tr.local || !view) return;
+    // somebody typed at the start of the paragraph the cursor stands at the start of: the cursor
+    // stays at the start, before their text — y-prosemirror put it in front of the old first
+    // character, after the first letters that had arrived, and the rest of their word then landed on
+    // the other side of it ("S" + my words + "AMEA1", live co-editing test)
+    if (start) {
+      const st = view.state, sel = st.selection;
+      if (!(sel instanceof TextSelection) || !sel.empty) return;
+      let at: number | null = null;
+      try { at = relativePositionToAbsolutePosition(ydoc, binding.type, start, binding.mapping as never); } catch { at = null; }
+      if (at === null || at !== sel.head) return;
+      const $at = sel.$head;
+      if (!$at.parent.isTextblock || $at.parentOffset === 0) return;
+      view.dispatch(st.tr.setSelection(TextSelection.create(st.doc, $at.start())).setMeta('addToHistory', false));
+      return;
+    }
+    if (!a) return;
     const st = view.state, sel = st.selection;
     if (!(sel instanceof TextSelection) || !sel.empty) return;
     let at: number | null = null;
