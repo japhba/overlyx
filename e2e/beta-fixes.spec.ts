@@ -163,3 +163,25 @@ test('Edit ▸ Math: toggle inline/display acts on the formula being edited, not
   expect(readFileSync(file, 'utf8')).toMatch(/\\begin\{equation\}[\s\S]*\\label\{eq:mono\}[\s\S]*\\end\{equation\}/);
   expect(errors).toEqual([]);
 });
+
+test('End at the end of an exponent leaves the exponent, not the formula', async ({ page }) => {
+  const errors = collectErrors(page);
+  writeFileSync(`${DIR}/endkey.tex`, texDoc('Energy:\n\n\\[\nE=m\n\\]\nafter.'));
+  await login(page);
+  await page.request.get('/api/projects');
+  await page.goto(`/#/${PROJECT}/endkey.tex`);
+  await page.waitForSelector('.lyx-editor .lyx-math-display', { timeout: 30000 });
+  const f = page.locator('.lyx-editor .lyx-math-display').first();
+  await f.hover(); await f.click();
+  await expect(page.locator('.lm-field.focused')).toHaveCount(1);
+  await page.keyboard.press('End');
+  await page.keyboard.type('c^2');
+  await page.keyboard.press('End');        // out of the exponent, still in the formula
+  await page.keyboard.type('+1');
+  await expect(page.locator('.lm-field.focused')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+s');
+  await expect.poll(() => readFileSync(`${DIR}/endkey.tex`, 'utf8'), { timeout: 15000 }).toMatch(/E=mc\^\{2\}\+1/);
+  expect(readFileSync(`${DIR}/endkey.tex`, 'utf8')).toContain('after.');
+  expect(errors).toEqual([]);
+});

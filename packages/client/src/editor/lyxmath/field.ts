@@ -828,8 +828,11 @@ export class LyxMathField {
         c.xTarget = x;
         return;
       }
-      case 'Home': move(() => c.lineBegin(), 'backward'); return;
-      case 'End': move(() => c.lineEnd(), 'forward'); return;
+      // LyX (InsetMathNest LFUN_LINE_END → FINISHED_FORWARD): at the end of a script or a fraction's part
+      // End leaves that one, not the whole formula — it took the formula's next keys ("+1" after
+      // mc^2) into the paragraph below
+      case 'Home': move(() => c.lineBegin() || c.popBackward(), 'backward'); return;
+      case 'End': move(() => c.lineEnd() || c.popForward(), 'forward'); return;
       case 'Tab': {
         handled();
         if (this.ghost && !c.inMacroMode() && !this.readOnly) {
