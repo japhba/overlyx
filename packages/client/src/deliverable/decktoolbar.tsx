@@ -421,8 +421,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     section(c.kind === 'poster' ? 'Poster' : 'Slide');
     const v = c.canvas.view;
     context.push([
-      { id: 'dk-bg', title: 'Slide background colour', icon: 'dk-background',
-        palette: { title: 'Slide background', render: close => <ColorGrid current={null} close={close} none="As the design has it" onPick={col => c.slideBackground(col)} /> } },
+      { id: 'dk-bg', title: c.kind === 'poster' ? 'Poster background colour' : 'Slide background colour', icon: 'dk-background',
+        palette: { title: c.kind === 'poster' ? 'Poster background' : 'Slide background', render: close => <ColorGrid current={null} close={close} none="As the design has it" onPick={col => c.slideBackground(col)} /> } },
       { id: 'dk-canvas', title: 'Canvas: its colour, transparency checkerboards (also: right-click the canvas)', icon: 'dk-canvas',
         palette: { title: 'Canvas', render: close => (
           <div class="dk-canvas-pal">
@@ -432,8 +432,8 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
             <ColorGrid current={v.desk} close={close} none="Same as the page" onPick={col => c.canvas.set({ desk: col, deskChecker: false })} />
           </div>
         ) } },
-      { id: 'dk-newslide', title: 'New slide (Ctrl+M)', icon: '+ Slide', action: c.newSlide },
-      ...(c.kind === 'deck' ? [animateButton(c)] : []),
+      // (a poster is one page: a "slide" added to it was invisible — no rail — and a blank page of the PDF)
+      ...(c.kind === 'deck' ? [{ id: 'dk-newslide', title: 'New slide (Ctrl+M)', icon: '+ Slide', action: c.newSlide }, animateButton(c)] : []),
     ]);
   }
   let out = sections.filter(x => x.groups.length);
