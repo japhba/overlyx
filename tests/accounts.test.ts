@@ -18,7 +18,7 @@ process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 process.env.OVERLYX_OWNER_EMAIL = 'owner@example.com';
 process.env.OVERLYX_MIRROR_URL = `file://${join(ROOT, 'mirrors')}/{repo}.git`;
 process.env.OVERLYX_OPERATOR = 'Ada Operator';
-process.env.OVERLYX_CONTACT_EMAIL = 'privacy@example.org';
+process.env.OVERLYX_PRIVACY_CONTACT = 'privacy@example.org';
 
 const access = await import('../packages/server/src/access.ts');
 const accounts = await import('../packages/server/src/accounts.ts');

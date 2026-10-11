@@ -398,7 +398,8 @@ blend.
 * **Privacy notice and account deletion** (`packages/server/src/privacy.ts`, `accounts.ts`): `GET /privacy`
   is a public page (start-page footer, *Help ▸ Privacy notice*, Settings ▸ Privacy) describing what is
   kept, the services involved and retention — keep it in step with the code it names in its header.
-  The operator shown there comes from `OVERLYX_OPERATOR` and `OVERLYX_CONTACT_EMAIL`. *Settings ▸
+  The operator shown there comes from `OVERLYX_OPERATOR` and `OVERLYX_PRIVACY_CONTACT` (falling back to
+  `OVERLYX_CONTACT_EMAIL`); overlyx.app sets them in `/etc/systemd/system/overlyx.service.d/operator.conf`. *Settings ▸
   Account ▸ Delete account* (`GET /api/account/deletion` preview, `POST /api/account/delete` with the
   user name as confirmation) erases the owned projects (directories, rows, build output, trash copies,
   GitHub mirrors), memberships, sign-ins, the agent home and threads, the Drive connection, reports

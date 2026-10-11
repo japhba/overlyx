@@ -9,7 +9,9 @@
  * (third parties), scripts/backup.sh (backups).
  *
  * Who runs the instance comes from the environment: OVERLYX_OPERATOR (a name) and
- * OVERLYX_CONTACT_EMAIL (also the contact address of the literature services' polite pools).
+ * OVERLYX_PRIVACY_CONTACT (an e-mail address; else OVERLYX_CONTACT_EMAIL, the contact address of the
+ * literature services' polite pools). On overlyx.app both are set in a systemd drop-in
+ * (/etc/systemd/system/overlyx.service.d/operator.conf).
  */
 import type { Request, Response } from 'express';
 import { config } from './config.ts';
@@ -22,7 +24,9 @@ const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
 
 export function privacyHtml(): string {
   const operator = (process.env.OVERLYX_OPERATOR ?? '').trim();
-  const contact = config.contactEmail;
+  // the notice's own contact (OVERLYX_PRIVACY_CONTACT) — not sent with the literature searches as
+  // OVERLYX_CONTACT_EMAIL is (the OpenAlex / Crossref polite pools); that one is the fallback
+  const contact = (process.env.OVERLYX_PRIVACY_CONTACT ?? '').trim() || config.contactEmail;
   const site = config.publicUrl ? new URL(config.publicUrl).host : 'this OverLyX instance';
   // what this server offers: the notice describes it, not a different setup
   const google = !!config.google.clientId;
