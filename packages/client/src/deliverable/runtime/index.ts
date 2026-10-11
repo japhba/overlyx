@@ -30,6 +30,7 @@ import { setView, refreshView, reportColors } from './view';
 import { startPresenting } from './present';
 import { report, rememberPage } from './report';
 import { ensureSolo } from './solo';
+import { setDarkSlides, darkSlidesChanged } from './darkpages';
 import { installReviewCss, setReview, railReview } from './review';
 
 function addStyle(css: string): HTMLStyleElement {
@@ -208,26 +209,7 @@ function railShow(i: number): void {
   if (r.y < scrollY || r.y + r.h > scrollY + innerHeight) scrollTo({ top: Math.max(0, r.y - 20 / railScale) });
 }
 
-/* ------------------------------------------------------------------ slides light on dark */
-
-let invertCss: HTMLStyleElement | null = null;
-/**
- * The slides shown light on dark while they are edited (the editor's dark theme, app/darkslides.ts):
- * each slide inverted with a 180° hue rotation — colours keep their hue — and pictures, videos and
- * backgrounds with a picture inverted back to their own colours. Only the slides: the runtime's
- * frames and handles and the canvas around them stay as they are.
- */
-function invertSlides(on: boolean): void {
-  if (on && !invertCss) {
-    invertCss = document.createElement('style');
-    invertCss.setAttribute('data-ol-runtime', '');
-    const f = 'invert(1) hue-rotate(180deg)';
-    invertCss.textContent = `html.ol-invert .slide { filter: ${f}; }
-      html.ol-invert .slide :is(img, video, canvas, iframe, object, embed, image, [style*="background-image"], [style*="url("]) { filter: ${f}; }`;
-    document.head.appendChild(invertCss);
-  }
-  document.documentElement.classList.toggle('ol-invert', on);
-}
+/* ------------------------------------------------------------------ slides light on dark (darkpages.ts) */
 
 let railDeskCss: HTMLStyleElement | null = null;
 /** the rail's background between the thumbnails: the dark theme's canvas, or the page's own (null) */
@@ -251,6 +233,7 @@ function onMessage(e: MessageEvent): void {
       state.kind = detectKind();
       if (MODE === 'edit') { ensureSolo(); edit.afterSource(); void whenTypeset().then(() => edit.draw()); }
       if (MODE === 'thumb') drawRail();
+      darkSlidesChanged();
       if (first) void settle().then(() => { sendLayout(); if (MODE === 'edit') { refreshView(); reportColors(); } });
       else requestAnimationFrame(() => { sendLayout(); if (MODE === 'thumb') drawRail(); if (MODE === 'edit') { refreshView(); reportColors(); } });
       break;
@@ -263,7 +246,7 @@ function onMessage(e: MessageEvent): void {
     case 'tool': if (MODE === 'edit') edit.setTool(m.tool, m.ink); break;
     case 'exec': if (MODE === 'edit') edit.exec(m.command, m.value); break;
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); else if (MODE === 'thumb') { railPeers = m.peers; drawRail(); } break;
-    case 'dark': if (MODE === 'edit' || MODE === 'thumb') { invertSlides(m.invert); if (MODE === 'thumb') railDesk(m.desk); } break;
+    case 'dark': if (MODE === 'edit' || MODE === 'thumb') { setDarkSlides(m.invert, !!m.figures); if (MODE === 'thumb') railDesk(m.desk); } break;
     case 'current': if (MODE === 'thumb') railShow(m.slide); break;
     case 'asset': refreshAsset(m.path, m.v); break;
     case 'arrange': if (MODE === 'edit') arrange(m.how); break;

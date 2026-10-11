@@ -7,6 +7,19 @@
    the toggle in the menu bar or the system preference) only redefines tokens. Keep literal colours
    out of the rules below: everything that is not a LyX text colour or a user colour goes through a token. */
 :root {
+  --editor-font: "CMU Serif", serif;
+  /* San Francisco where the system has it (fonts/catalog.ts, the sans-serif face): Apple's system-font
+     keywords (Safari and Firefox, Chrome on macOS), then a copy installed by name; empty-handed
+     elsewhere, so the face's web font follows. On phones, SF Compact — Apple's cut for small displays —
+     comes first where it is installed (see the media query below). */
+  --sf-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "SF Pro Display";
+  --ui-font: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --editor-zoom: 1;
+}
+:root,
+/* smart invert off (app/darkpages.ts): in the dark theme a document's page is white paper, the light
+   theme's colours on it and everything in it (layout documents' pages are paper anyway) */
+html[data-theme="dark"]:not([data-dark-pages]) .editor-page:not(:has(.ol-layout)) {
   color-scheme: light;
   --vspace-color: #9a6a35;   /* LyX's "added space markers" brown */
   --ui-bg: #f3f3f1;
@@ -50,13 +63,6 @@
   --chip-border: #8ea2bd;
   --purple-bg: #f6f0fb;
   --purple-border: #b39ddb;
-  --editor-font: "CMU Serif", serif;
-  /* San Francisco where the system has it (fonts/catalog.ts, the sans-serif face): Apple's system-font
-     keywords (Safari and Firefox, Chrome on macOS), then a copy installed by name; empty-handed
-     elsewhere, so the face's web font follows. On phones, SF Compact — Apple's cut for small displays —
-     comes first where it is installed (see the media query below). */
-  --sf-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "SF Pro Display";
-  --ui-font: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --note-bg: #fff8c4;
   --note-border: #d9c76a;
   --comment-bg: #e4f0ff;
@@ -75,7 +81,6 @@
   --hl-d0: #b8860b; --hl-d1: #9932cc; --hl-d2: #1a7fd4;
   --example-bg: linear-gradient(135deg, #eef4fb, #fff);
   --backdrop: rgba(0,0,0,0.25);
-  --editor-zoom: 1;
 }
 /* phones (a touch screen, narrow in either orientation): SF Compact first */
 @media (pointer: coarse) and (max-width: 700px), (pointer: coarse) and (max-height: 500px) {
@@ -161,10 +166,10 @@ html[data-presenting] .app::after { content: 'Presentation — Esc leaves'; posi
 /* things that were fine as literals in light mode but need a darker twin */
 html[data-theme="dark"] .ProseMirror-yjs-selection { background: rgba(122,167,234,0.25); }
 html[data-theme="dark"] .lm-sel { background: rgba(122,167,234,0.35); }
-html[data-theme="dark"] .lyx-color-black { color: var(--editor-fg); }        /* "black" text = the default text colour */
-html[data-theme="dark"] .lyx-color-blue { color: #7f9fff; } html[data-theme="dark"] .lyx-color-red { color: #ff6b6b; } html[data-theme="dark"] .lyx-color-purple { color: #d07fd0; } html[data-theme="dark"] .lyx-color-brown { color: #d9a066; } html[data-theme="dark"] .lyx-color-darkgray { color: #bbb; }
-/* smart invert (figureinvert.ts): white → the page's dark grey, black strokes → light; hue-rotate keeps coloured lines roughly their colour */
-html[data-theme="dark"] .lyx-graphics.smart-invert img { filter: invert(0.93) hue-rotate(180deg); }
+html[data-theme="dark"][data-dark-pages] .lyx-color-black { color: var(--editor-fg); }        /* "black" text = the default text colour */
+html[data-theme="dark"][data-dark-pages] .lyx-color-blue { color: #7f9fff; } html[data-theme="dark"][data-dark-pages] .lyx-color-red { color: #ff6b6b; } html[data-theme="dark"][data-dark-pages] .lyx-color-purple { color: #d07fd0; } html[data-theme="dark"][data-dark-pages] .lyx-color-brown { color: #d9a066; } html[data-theme="dark"][data-dark-pages] .lyx-color-darkgray { color: #bbb; }
+/* smart invert (figureinvert.ts, app/darkpages.ts — pages and figures): white → the page's dark grey, black strokes → light; hue-rotate keeps coloured lines roughly their colour */
+html[data-theme="dark"][data-dark-pages][data-invert-figures] .lyx-graphics.smart-invert img { filter: invert(0.93) hue-rotate(180deg); }
 html[data-theme="dark"] .menu-list, html[data-theme="dark"] .ctx-menu, html[data-theme="dark"] .tb-popup, html[data-theme="dark"] .dialog, html[data-theme="dark"] .tour-card { box-shadow: 0 6px 24px rgba(0,0,0,0.6); }
 html[data-theme="dark"] .pdf-panel iframe { background: #2a2a30; }
 
@@ -376,6 +381,7 @@ html[data-theme="dark"] .tb-btn .tb-img { filter: invert(0.85) hue-rotate(180deg
    --notes-inset: ink mode's gutters (the page is wider than the pane; the split stays in view) */
 .editor-scroll.margin-mode { --notes-inset: 0px; --notes-bg: color-mix(in srgb, var(--page-bg) 96%, var(--ui-fg)); }
 .editor-scroll.margin-mode.ink-pan { --notes-inset: var(--ink-gutter, 85vw); }
+html[data-theme="dark"]:not([data-dark-pages]) .editor-scroll.margin-mode > .editor-page:not(:has(.ol-layout)) { --notes-bg: color-mix(in srgb, var(--page-bg) 96%, var(--ui-fg)); }   /* white paper (app/darkpages.ts) */
 .margin-mode > .editor-page {
   padding-left: calc(48px + var(--notes-inset)); padding-right: calc(48px + var(--notes-inset) + var(--notes-col, 340px));
   background: linear-gradient(to left, var(--page-bg) var(--notes-inset), var(--notes-bg) var(--notes-inset), var(--notes-bg) calc(var(--notes-inset) + var(--notes-col, 340px)), var(--page-bg) calc(var(--notes-inset) + var(--notes-col, 340px)));
@@ -557,10 +563,10 @@ html.lyx-list-dragging, html.lyx-list-dragging * { cursor: grabbing !important; 
 .lyx-inset-note > .inset-box { font-family: var(--ui-font); font-size: var(--note-size, 0.9em); line-height: 1.4; border-radius: 6px; border-left-width: 3px; padding: 2px 8px 2px 6px; text-indent: 0; }
 .lyx-inset-note > .inset-box > .inset-label { background: transparent; color: var(--ui-muted); font-size: 9.5px; line-height: 16px; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 4px; margin-right: 4px; margin-left: -2px; border-radius: 4px; vertical-align: 0.1em; }
 .lyx-inset-note > .inset-box > .inset-label:hover { background: rgba(0, 0, 0, 0.07); }
-html[data-theme="dark"] .lyx-inset-note > .inset-box > .inset-label:hover { background: rgba(255, 255, 255, 0.1); }
+html[data-theme="dark"][data-dark-pages] .lyx-inset-note > .inset-box > .inset-label:hover { background: rgba(255, 255, 255, 0.1); }
 .lyx-inset-note-note > .inset-box { background: var(--note-bg); border-color: var(--note-border); border-left-color: #c9a70b; }
 .lyx-inset-note-note > .inset-box > .inset-label { color: #8a6d00; }
-html[data-theme="dark"] .lyx-inset-note-note > .inset-box > .inset-label { color: #e3c65a; }
+html[data-theme="dark"][data-dark-pages] .lyx-inset-note-note > .inset-box > .inset-label { color: #e3c65a; }
 .lyx-inset-note-greyedout > .inset-box { color: var(--greyed-fg); border-color: var(--ui-border); border-left-color: var(--muted2); }
 .lyx-inset-note-greyedout > .inset-box > .inset-label { color: var(--muted2); }
 .lyx-inset-ert > .inset-box { font-family: "DejaVu Sans Mono", Menlo, monospace; font-size: 0.85em; background: var(--code-bg); border-color: var(--ui-border); color: var(--fg2); }
@@ -651,7 +657,7 @@ html[data-theme="dark"] .lyx-inset-note-note > .inset-box > .inset-label { color
    plugins/commentui.ts): as a popover under the chip in the text (placed by plugins/margin.ts, the
    line does not move), or highlighted in the margin column. A click on the chip opens it; Escape or
    Ctrl+Enter go back to the text. The yellow is LyX's / the wordmark's. */
-:root { --cm-accent: #efb21a; --cm-chip-bg: #f7d35c; --cm-chip-fg: #4a3800; --cm-card: var(--surface); --cm-line: var(--ui-border); }
+:root, html[data-theme="dark"]:not([data-dark-pages]) .editor-page:not(:has(.ol-layout)) { --cm-accent: #efb21a; --cm-chip-bg: #f7d35c; --cm-chip-fg: #4a3800; --cm-card: var(--surface); --cm-line: var(--ui-border); }
 html[data-theme="dark"] { --cm-accent: #f4c03c; --cm-chip-bg: #8a6b12; --cm-chip-fg: #fff3c9; }
 .lyx-inset-note-comment > .inset-anchor { display: inline-flex; align-items: center; justify-content: center; min-width: 1.45em; height: 1.25em; padding: 0 0.3em; margin: 0 0.12em; box-sizing: border-box;
   border-radius: 0.62em 0.62em 0.62em 0.12em; background: var(--cm-chip-bg); color: var(--cm-chip-fg); font: 700 0.6em/1 var(--ui-font); vertical-align: 0.42em; text-indent: 0; cursor: pointer; user-select: none;
@@ -1621,6 +1627,9 @@ textarea::selection, .dialog pre::selection, .dialog input::selection { backgrou
 .dialog .pref { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
 .dialog .pref input { margin-top: 2px; }
 .dialog .pref .sub, .dialog .body > .sub { display: block; color: var(--ui-muted); font-size: 11px; line-height: 1.4; }
+.dialog .pref.disabled { opacity: 0.55; cursor: default; }
+.dialog .pref.inline { display: inline-flex; align-items: center; margin-right: 14px; }
+.dialog .pref.inline input { margin-top: 0; }
 .dialog h3 { margin: 6px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ui-muted); }
 .statusbar .ai-busy { color: var(--accent); animation: ai-pulse 1s ease-in-out infinite; }
 @keyframes ai-pulse { 50% { opacity: 0.35; } }
@@ -2061,11 +2070,14 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
   /* pages are paper in the dark theme too: formulas being edited keep the light theme's colours */
   --math-cmd: #1f5fa0; --math-arg: #7a1f7a; --math-arg-bg: #f6e3f6; --math-focus-bg: #f6f9ff; --ghost-fg: #888;
 }
-/* slides light on dark (the dark theme with prefs.invertSlides, app/darkslides.ts): the pages and their
-   thumbnails inverted with a 180° hue rotation (colours keep their hue), pictures inverted back to their
-   own colours — never when presenting */
-html[data-theme="dark"][data-invert-slides] .ol-page:not(.ol-present-stage *) { filter: invert(1) hue-rotate(180deg); }
-html[data-theme="dark"][data-invert-slides] .ol-page:not(.ol-present-stage *) :is(.ol-image img, video) { filter: invert(1) hue-rotate(180deg); }
+/* slides light on dark (smart invert: the dark theme with prefs.darkPages, app/darkpages.ts): the pages and
+   their thumbnails inverted with a 180° hue rotation (colours keep their hue), pictures inverted back to
+   their own colours — except, with prefs.invertFigures, line art (a plot or diagram on a white ground,
+   `ol-lineart` from the image's pixels, layout/nodeviews.ts), which goes light on dark with the page —
+   never when presenting */
+html[data-theme="dark"][data-dark-pages] .ol-page:not(.ol-present-stage *) { filter: invert(1) hue-rotate(180deg); }
+html[data-theme="dark"][data-dark-pages] .ol-page:not(.ol-present-stage *) :is(.ol-image img, video) { filter: invert(1) hue-rotate(180deg); }
+html[data-theme="dark"][data-dark-pages][data-invert-figures] .ol-page:not(.ol-present-stage *) .ol-image.ol-lineart img { filter: none; }
 /* named sizes on paper are the class's absolute sizes (the controller sets --ol-size-*); justified
    text is hyphenated, as TeX does */
 .ol-page .lyx-size-tiny { font-size: calc(var(--ol-pt) * var(--ol-size-tiny) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-scriptsize { font-size: calc(var(--ol-pt) * var(--ol-size-scriptsize) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-footnotesize { font-size: calc(var(--ol-pt) * var(--ol-size-footnotesize) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-small { font-size: calc(var(--ol-pt) * var(--ol-size-small) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-normal { font-size: calc(var(--ol-pt) * var(--ol-size-normal) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-large { font-size: calc(var(--ol-pt) * var(--ol-size-large) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-larger { font-size: calc(var(--ol-pt) * var(--ol-size-larger) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-largest { font-size: calc(var(--ol-pt) * var(--ol-size-largest) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-huge { font-size: calc(var(--ol-pt) * var(--ol-size-huge) * var(--ol-text-scale, 1)); } .ol-page .lyx-size-giant { font-size: calc(var(--ol-pt) * var(--ol-size-giant) * var(--ol-text-scale, 1)); }
@@ -2291,9 +2303,9 @@ html[data-theme="dark"] { --canvas-bg: #121215; }
 .lyx-par[data-layout$="Frame"][data-depth="0"]:has(> .lyx-inset-argument[data-arg="4"]) { margin-top: 1.4em; padding-top: 0.5em; border-top: 1px solid var(--ui-border); }
 .lyx-inset-argument[data-owner$="Frame"][data-arg="4"] > .inset-box { border-color: transparent; background: none; }
 .lyx-inset-argument[data-owner$="Frame"][data-arg="4"] > .inset-box > .inset-content { font-size: 1.3em; color: #3333b3; }
-html[data-theme="dark"] .lyx-inset-argument[data-owner$="Frame"][data-arg="4"] > .inset-box > .inset-content { color: #9d9dff; }
+html[data-theme="dark"][data-dark-pages] .lyx-inset-argument[data-owner$="Frame"][data-arg="4"] > .inset-box > .inset-content { color: #9d9dff; }
 .lyx-par[data-layout="FrameTitle"] { font-size: 1.3em; color: #3333b3; }
-html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
+html[data-theme="dark"][data-dark-pages] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .lyx-inset-argument[data-arg="item:2"] > .inset-box, .lyx-inset-argument[data-owner^="inset:"][data-arg="1"] > .inset-box { font-size: 0.8em; vertical-align: 0.1em; }
 
 /* a linear beamer deck presented (beamerslides.ts): the default theme's look */

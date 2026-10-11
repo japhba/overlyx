@@ -44,7 +44,7 @@ media?.addEventListener('change', () => { if (pref === 'system') apply(); });
 apply();
 
 /**
- * The dark theme's text tone (prefs.darkTone, chosen by right-clicking the sun/moon switch): white, or —
+ * The dark theme's text tone (prefs.darkTone, chosen in the sun/moon switch's menu): white, or —
  * like Apple Books' sepia and grey reading themes — a warmer or softer tone for everything that is
  * white on the near-black page (text, formulas, the caret). `data-tone` on <html>; styles.css redefines
  * --editor-fg and --caret for it, so nothing but those tokens knows about it. Both shells import this
@@ -56,10 +56,18 @@ function applyTone(p: Prefs): void { document.documentElement.dataset.tone = p.d
 subscribePrefs(applyTone);
 applyTone(getPrefs());
 
-/** slides inverted in the dark theme (prefs.invertSlides, app/darkslides.ts): `data-invert-slides` on <html>, for the layout pages' rules in styles.css */
-function applyInvertSlides(p: Prefs): void { document.documentElement.toggleAttribute('data-invert-slides', !!p.invertSlides); }
-subscribePrefs(applyInvertSlides);
-applyInvertSlides(getPrefs());
+/**
+ * Smart invert (prefs.darkPages, prefs.invertFigures — app/darkpages.ts): `data-dark-pages` and
+ * `data-invert-figures` on <html>, which styles.css combines with `data-theme` — the editor's page
+ * dark or white paper, figures and layout pages inverted or not
+ */
+function applyDarkPages(p: Prefs): void {
+  const el = document.documentElement;
+  el.toggleAttribute('data-dark-pages', !!p.darkPages);
+  el.toggleAttribute('data-invert-figures', !!p.invertFigures);
+}
+subscribePrefs(applyDarkPages);
+applyDarkPages(getPrefs());
 
 /** Preact hook: re-renders when the preference or the system theme changes. */
 export function useTheme(): { pref: ThemePref; theme: Theme } {

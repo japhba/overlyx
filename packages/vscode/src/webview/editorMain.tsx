@@ -9,6 +9,7 @@ import { LYX_ICONS } from '@client/app/lyxicons';
 import { editorContext } from '@client/editor/context';
 import { isBenignBrowserError } from '@client/error-reporting';
 import { EditorShell } from './EditorShell';
+import { relayAppearance } from './appearance';
 import type { HostToEditor } from '../shared/protocol';
 import '@client/styles.css';
 import 'prosemirror-view/style/prosemirror.css';
@@ -17,6 +18,12 @@ import 'prosemirror-tables/style/tables.css';
 
 useHostTheme();
 applyTheme(G.dark);
+// the theme switch's choices made in another OverLyX webview (host/appearance.ts) — before the shell
+// mounts too (the host sends them before `init`): the shell reads ol.theme when it starts
+relayAppearance(t => {
+  try { if (t === 'system') localStorage.removeItem('ol.theme'); else localStorage.setItem('ol.theme', t); } catch { /* ignore */ }
+  window.dispatchEvent(new CustomEvent('ol:theme', { detail: t }));
+});
 // toolbar icons are absolute paths (/lyxicons/x.svg) in the web app: point them at our assets
 for (const k of Object.keys(LYX_ICONS)) if (LYX_ICONS[k].startsWith('/')) LYX_ICONS[k] = G.assetBase + LYX_ICONS[k].slice(1);
 

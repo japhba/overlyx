@@ -60,7 +60,8 @@ blend.
   in place (the URL carries the file's mtime). In the dark theme figures get an iOS-style *smart
   invert*: a plot or diagram (dark strokes on a light or transparent ground, judged from a small
   canvas copy of the pixels, `figureinvert.ts`) is shown light-on-dark with a CSS filter, a
-  photograph keeps its colours; *Settings ▸ Editor ▸ Figures* switches it off.
+  photograph keeps its colours; *Figures too* in the theme switch's menu (`prefs.invertFigures`)
+  switches it off — see *Smart invert* below.
 * **+ New** (start page, `NewProjectDialog` in `app/Home.tsx`): a *Document*, *Slides*, a *Poster* or
   an *Empty project*, each made in a project of its own named like it (`main.tex` from the template;
   slides / poster as an HTML deliverable in `slides/` or `poster/`) and opened right away. It replaced
@@ -1160,10 +1161,13 @@ blend.
   `app/MenuBar.tsx ThemeToggle` / `themeMenuItems`): *Default (follows the system)* — in VS Code,
   where the switch sits in the editor's top bar next to WYSIWYG / TeX / Split, *Default (follows
   VS Code)* —, *Light* or *Dark* (remembered in this browser / webview as `ol.theme`; Default
-  removes it), as do *View ▸ Theme* and *Settings ▸ Appearance* in the web client. Below them the
+  removes it), as do *View ▸ Theme* and *Settings ▸ Appearance* in the web client. Below them
+  *Smart invert in the dark theme* — *Pages* and *Figures too* (see **Smart invert** below) — then the
   text tone of the dark theme — white, or a sepia / grey tone like Apple Books' reading themes, for
   everything white on the page (text, formulas, caret; `prefs.darkTone` → `data-tone` on html,
-  tokens in styles.css). e2e tests switch with `pickTheme()` (e2e/helpers.ts). Text and formulas are white on a near-black page; everything in
+  tokens in styles.css) — and *Appearance settings…*. The same choices: *View ▸ Dark theme ▸*
+  (`darkThemeMenuEntries`, both shells, so the palette finds "smart invert") and *Settings ▸
+  Appearance ▸ Dark theme* (the editor section in VS Code, which has no Appearance). e2e tests switch with `pickTheme()` (e2e/helpers.ts). Text and formulas are white on a near-black page; everything in
   `packages/client/src/styles.css` goes through the theme tokens at the top of the file (light values
   on `:root`, dark ones on `html[data-theme="dark"]`, set by `app/theme.ts`).
 * **Fonts, for the editor and for the PDF separately** (like LyX's screen fonts and document fonts;
@@ -1473,20 +1477,39 @@ blend.
   dense black marks on white, a spike raster — as line art however dark it is. The colours are baked into the canvas when a
   page is drawn (an SVG filter through the canvas's `filter`, pixel by pixel where a browser lacks it —
   Safari); a CSS filter on the canvases cost a re-filter on every frame and halved the frame rate
-  while scrolling. The ◐ button in the PDF toolbar (dark theme only) and *Settings ▸ Editor ▸ PDF*
-  switch it (pref `darkPdf`); the VS Code PDF panel follows VS Code's dark themes the same way.
-  `e2e/darkpdf.spec.ts` reads the canvas pixels back.
-* **Slides in the dark theme** (`app/darkslides.ts`): the canvas around a deck's slide (inside the
-  frame and around it, and the rail's background) and around a layout document's pages is dark grey
-  (`DARK_DESK`) unless a canvas colour was chosen for the document (*Canvas colour ▸ Automatic*).
-  *Invert slides in the dark theme* (pref `invertSlides`, **off** by default — designed slides change
-  colour; `darkPdf` stays on by default) shows the slides light on dark like the PDF's pages: a CSS
-  `invert(1) hue-rotate(180deg)` on each slide (deck runtime, `{ol:'dark'}` to the canvas and rail
-  frames only, never the presentation frame) or layout page (`data-invert-slides` on <html>, set by
-  theme.ts; `.ol-present-stage` excluded), pictures and videos filtered once more back to their own
-  colours, the formula field over a slide's formula (MathOverlay) inverted with it. Switched by the
-  ◐ button beside the deck's zoom, the canvas's right-click menu and *Settings ▸ Slides and
-  posters*. `e2e/deck-dark.spec.ts`, `tests/darkslides.test.ts`.
+  while scrolling. The ◐ button in the PDF toolbar (dark theme only) switches smart invert
+  (below) — for every page, not the PDF alone; the VS Code PDF panel follows VS Code's dark themes the
+  same way. `e2e/darkpdf.spec.ts` reads the canvas pixels back.
+* **Smart invert** (`app/darkpages.ts`, pref `darkPages`, on by default; the theme switch's menu):
+  in the dark theme the content of *every* page is shown light on dark, colours keeping their hue —
+  one switch, so documents, PDFs and slides always agree. Documents (.tex, .md): the theme's tokens
+  make the page dark; off, `.editor-page` gets the light theme's colour tokens (styles.css and
+  modern.css list it beside `:root` / `html[data-ui="modern"]`; the font and zoom tokens live in
+  blocks of their own so the page keeps them) — white paper inside the dark interface, like Word's
+  page colour switch; the few literal dark-theme colours inside the page (LyX text colours, note
+  labels, frame titles, authors' change colours in shellutil.tsx) apply only with
+  `html[data-dark-pages]`. PDFs: the dark pages above. HTML slides and posters: the deck runtime
+  (`deliverable/runtime/darkpages.ts`, `{ol:'dark', invert, figures}` to the canvas and rail frames,
+  never the presentation) inverts each slide with `invert(1) hue-rotate(180deg)` and videos,
+  canvases, frames, background pictures and SVG images back; a web page (no slides) is inverted at
+  its root, its background with it, the runtime's overlay inverted back, and gets no dark desk (that
+  was its own background: black words on dark grey). Layout documents' pages and their thumbnails:
+  styles.css, `.ol-present-stage` excluded. The canvas around slides and layout pages is dark grey
+  (`DARK_DESK`) in the dark theme unless a canvas colour was chosen (*Canvas colour ▸ Automatic*).
+  **Figures too** (`invertFigures`): every `<img>` is judged by its pixels with the editor's
+  classifier (`editor/figureinvert.ts`) — line art goes light on dark with its page, a photograph
+  keeps its colours: editor figures (`smart-invert`), PDF graphics (pdfdark.ts), slide pictures
+  (`data-ol-lineart`, a runtime attribute never written to the text; the opaque-origin frame loads
+  the picture once more with CORS to read it), layout images (`ol-lineart`, layout/nodeviews.ts);
+  off, every picture keeps its colours. theme.ts mirrors both prefs on <html> (`data-dark-pages`,
+  `data-invert-figures`); `darkPdf` / `invertSlides` from before are carried over once (a PDF set to
+  its own colours keeps every page in its own colours). Switched by the theme switch's menu, *View ▸
+  Dark theme*, *Settings ▸ Appearance*, the ◐ in the PDF toolbar and beside a deck's zoom, and the
+  canvas's right-click menu. VS Code: each webview keeps its own storage, so the theme and these
+  choices go through the host (`host/appearance.ts`, global state) to the other editors, PDF panels
+  and slide editors (`webview/appearance.ts`); a PDF panel or slide editor follows the editor's
+  Light / Dark too. `tests/darkpages.test.ts`, `e2e/smartinvert.spec.ts`, `e2e/deck-dark.spec.ts`,
+  `e2e/darkpdf.spec.ts`, the GUI test's step 6b.
 * **Panes: WYSIWYG · TeX · PDF** (web client, `app/panes.ts`, `app/PaneSwitch.tsx`): the writing
   area shows the rendered document, its LaTeX source and the PDF side by side — any one, two or all
   three, in any order (Overleaf's split view with a third pane). The switch in the middle of the menu
@@ -2195,6 +2218,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/listdrag.spec.ts e2e/deck-lists.spec.ts   # list items dragged into another order (documents, markdown, a finger; slides — needs the runtime built into the dist), Alt+↑
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/smartinvert.spec.ts e2e/deck-dark.spec.ts e2e/darkpdf.spec.ts e2e/darktone.spec.ts e2e/theme.spec.ts   # the theme switch's menu, smart invert of documents (white paper when off), PDFs, slides, layout pages, web pages, figures (needs the runtime built into the dist)
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/selection-inserts.spec.ts   # comments / floats / captions keep the selection, pasted blocks, Enter in a caption, Insert ▸ Graphics on a layout page, live authors, TeX pane after settings, tracked tables, formula notice, tablet reflow
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/deck-weave.spec.ts   # a crossing woven from the right-click menu (the ring over the bar there only) and undone
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/deck-clipboard.spec.ts   # copy / cut / paste on the deck canvas: a drawing's parts to another slide (into its drawing or a drawing of their own), beside the original, words (needs the runtime built into the dist)

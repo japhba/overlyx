@@ -4,6 +4,7 @@
  * WYSIWYG view and in-editor undo).
  */
 import * as vscode from 'vscode';
+import { watchAppearance, sendAppearance, changeAppearance } from './appearance.ts';
 import path from 'node:path';
 import { DocSession } from './session.ts';
 import { Registry, type OpenEditor } from './registry.ts';
@@ -161,6 +162,9 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           }
           break;
         }
+        case 'appearance':
+          changeAppearance(panel.webview, msg.appearance);
+          break;
         case 'loadRelated':
           this.applyChain = this.applyChain.then(async () => {
             const { abs, rel } = relatedPath(msg.id);
@@ -181,6 +185,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
           });
           break;
         case 'ready': {
+          sendAppearance(panel.webview);   // before init: the shell starts with the theme switch's choices
           this.applyChain = this.applyChain.then(async () => {
             await session.syncFromDisk();
             const r = session.parseCurrent();
@@ -272,7 +277,7 @@ export class OverlyxEditorProvider implements vscode.CustomTextEditorProvider {
       if (panel.active) { this.registry.setActive(entry); refreshDocuments(); }
     }));
     subs.push(vscode.window.onDidChangeWindowState(state => { if (state.focused && panel.visible) refreshDocuments(); }));
-    subs.push(vscode.window.onDidChangeActiveColorTheme(() => post({ type: 'theme', dark: isDark() })));
+    subs.push(vscode.window.onDidChangeActiveColorTheme(() => post({ type: 'theme', dark: isDark() })), watchAppearance(panel.webview));
 
     panel.onDidDispose(() => {
       for (const timer of relatedTimers.values()) clearTimeout(timer);

@@ -368,6 +368,22 @@ try {
   await sleep(1000);
   await shot('05-pdf');
 
+  /* ---- 6b. the theme switch's choices reach the PDF panel (host/appearance.ts): the theme, smart invert ---- */
+  const pdfTheme = () => pdfFrame.evaluate(() => document.documentElement.dataset.theme);
+  await pickTheme('Dark');
+  await until(() => pdfTheme().then(t => t === 'dark'), 10000, 'the PDF panel to follow the editor\'s Dark');
+  const pdfDark = () => pdfFrame.evaluate(() => document.querySelector('[data-pdf-dark]')?.getAttribute('aria-pressed') ?? null);
+  await until(() => pdfDark().then(v => v === 'true'), 10000, 'dark PDF pages');
+  await editorFrame.locator('.editor-topbar [data-theme-toggle]').click();
+  await editorFrame.locator('.ctx-menu[data-theme-menu] .ctx-item', { hasText: 'Pages — documents, PDFs, slides' }).click();
+  await until(() => pdfDark().then(v => v === 'false'), 10000, 'smart invert switched off in the editor to reach the PDF panel');
+  await until(() => editorFrame.evaluate(() => getComputedStyle(document.querySelector('.editor-page')).backgroundColor === 'rgb(255, 255, 255)'), 5000, 'the document as white paper');
+  await pdfFrame.locator('[data-pdf-dark]').click();
+  await until(() => editorFrame.evaluate(() => document.documentElement.hasAttribute('data-dark-pages')), 10000, 'the PDF panel\'s ◐ to reach the editor');
+  await pickTheme('Default');
+  await until(() => pdfTheme().then(t => t === vscodeTheme), 10000, "the PDF panel back on VS Code's theme");
+  log('theme switch in the editor: Dark and smart invert reach the PDF panel, its ◐ reaches the editor');
+
   const finalTex = fs.readFileSync(path.join(ws, 'main.tex'), 'utf8');
   for (const figure of ['../figures/parent.png', '../../figures/grandparent.png', '../figures/parent-pdf']) {
     if (!finalTex.includes('{' + figure + '}')) fail('relative figure path changed on save: ' + figure);

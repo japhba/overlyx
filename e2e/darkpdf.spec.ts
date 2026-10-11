@@ -1,7 +1,8 @@
 /**
  * Dark PDF pages (app/pdfdark.ts): in the dark theme the PDF pane shows the pages light on dark —
  * the paper in the editor's page colour, colours keeping their hue — while a photograph keeps its
- * colours; the ◐ switch in the PDF toolbar (only in the dark theme) goes back to the PDF's own colours.
+ * colours; the ◐ switch in the PDF toolbar (only in the dark theme) goes back to the PDF's own colours —
+ * smart invert is one switch (app/darkpages.ts): the document's page turns white paper with it.
  */
 import { test, expect, chromium, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -83,7 +84,7 @@ const isPage = (rgb: number[]) => near(rgb, PAGE, 3);
 
 test('dark pages: the paper in the page colour, colours keep their hue, the photograph its colours; ◐ switches back', async ({ page }) => {
   const errors = collectErrors(page);
-  await page.addInitScript(() => { try { const p = JSON.parse(localStorage.getItem('ol.prefs') || '{}'); p.autoBuild = 'off'; delete p.darkPdf; localStorage.setItem('ol.prefs', JSON.stringify(p)); localStorage.setItem('ol.theme', 'light'); } catch { /* ignore */ } });
+  await page.addInitScript(() => { try { const p = JSON.parse(localStorage.getItem('ol.prefs') || '{}'); p.autoBuild = 'off'; delete p.darkPages; localStorage.setItem('ol.prefs', JSON.stringify(p)); localStorage.setItem('ol.theme', 'light'); } catch { /* ignore */ } });
   await login(page);
   await page.goto(`/#/${PROJECT}/main.tex`);
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
@@ -115,15 +116,22 @@ test('dark pages: the paper in the page colour, colours keep their hue, the phot
   await page.locator('[data-pdf-dark]').click();
   await expect(page.locator('[data-pdf-dark]')).toHaveAttribute('aria-pressed', 'false');
   await expect.poll(() => pixel(page, 0.03, 0.03), { timeout: 10000 }).toEqual([255, 255, 255]);
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ol.prefs') || '{}').darkPdf)).toBe(false);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ol.prefs') || '{}').darkPages)).toBe(false);
+  // one switch for every page: the document is white paper in the dark interface too, the theme switch's menu says so
+  const docPage = () => page.locator('.editor-page').first().evaluate(e => [getComputedStyle(e).backgroundColor, getComputedStyle(e.querySelector('.lyx-editor')!).color]);
+  await expect.poll(docPage).toEqual(['rgb(255, 255, 255)', 'rgb(17, 17, 17)']);
+  await page.locator('[data-theme-toggle]').first().click();
+  await expect(page.locator('.ctx-menu[data-theme-menu] .ctx-item', { hasText: 'Pages — documents, PDFs, slides' })).not.toHaveClass(/checked/);
+  await page.keyboard.press('Escape');
   await page.locator('[data-pdf-dark]').click();
   await expect.poll(async () => isPage(await pixel(page, 0.03, 0.03)), { timeout: 10000 }).toBe(true);
+  await expect.poll(docPage).toEqual(['rgb(18, 18, 22)', 'rgb(255, 255, 255)']);
   await pickTheme(page, 'Light');
   expect(errors.filter(e => !/favicon|ResizeObserver|willReadFrequently/.test(e))).toEqual([]);
 });
 
 test('a PDF figure is judged as a whole: its heat map turns dark with it, the photograph in it keeps its colours', async ({ page }) => {
-  await page.addInitScript(() => { try { const p = JSON.parse(localStorage.getItem('ol.prefs') || '{}'); p.autoBuild = 'off'; delete p.darkPdf; localStorage.setItem('ol.prefs', JSON.stringify(p)); localStorage.setItem('ol.theme', 'light'); } catch { /* ignore */ } });
+  await page.addInitScript(() => { try { const p = JSON.parse(localStorage.getItem('ol.prefs') || '{}'); p.autoBuild = 'off'; delete p.darkPages; localStorage.setItem('ol.prefs', JSON.stringify(p)); localStorage.setItem('ol.theme', 'light'); } catch { /* ignore */ } });
   await login(page);
   await page.goto(`/#/${PROJECT}/figure.tex`);
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par, .lyx-editor .lyx-inset').length > 0, null, { timeout: 30000 });

@@ -563,8 +563,8 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
           {ZOOMS.map(z => <option key={z} value={String(z)}>{Math.round(z * 100)}%</option>)}
         </select>
         <button class="small-btn" title="Zoom in" onClick={() => step(1)}>+</button>
-        {themeDark && <button class={'small-btn pdf-dark-toggle' + (dark ? ' active' : '')} data-pdf-dark aria-pressed={dark} onClick={() => setPref('darkPdf', !dark)}
-          title={dark ? 'Dark pages: the PDF light on dark, photographs in their colours — click for the PDF’s own colours' : 'The PDF’s own colours — click for dark pages'}>◐</button>}
+        {themeDark && <button class={'small-btn pdf-dark-toggle' + (dark ? ' active' : '')} data-pdf-dark aria-pressed={dark} onClick={() => setPref('darkPages', !dark)}
+          title={dark ? 'Smart invert: the pages light on dark, photographs in their colours — documents, PDFs and slides alike. Click for their own colours' : 'The pages’ own colours — click to smart-invert them (documents, PDFs and slides alike)'}>◐</button>}
         {toolbar && <span class="pdf-sep" />}
         {toolbar}
         {hint && <span class="pdf-hint">{hint}</span>}

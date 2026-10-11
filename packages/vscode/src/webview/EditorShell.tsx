@@ -10,6 +10,7 @@ import { usePresentation } from '@client/app/presentation';
 import { referenceTransaction } from '@client/editor/references';
 import { inkToolbar } from '@client/app/inkToolbar';
 import { StatsDialog } from '@client/app/StatsDialog';
+import { shareTheme } from './appearance';
 import { SettingsPanel } from '@client/app/Settings';
 import { HelpDialog, HELP_ROWS, DialogHost, uiPrompt } from '@client/app/Dialogs';
 import { Ruler, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, NOTE_SCALE_DEFAULT } from '@client/app/Ruler';
@@ -95,7 +96,14 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
   const pickTheme = (next: 'system' | 'light' | 'dark') => {
     setThemePref(next);
     try { if (next === 'system') localStorage.removeItem('ol.theme'); else localStorage.setItem('ol.theme', next); } catch { /* ignore */ }
+    shareTheme(next);   // the PDF panels and slide editors follow (host/appearance.ts)
   };
+  // …and another editor's switch (editorMain.tsx relays it)
+  useEffect(() => {
+    const on = (e: Event) => setThemePref((e as CustomEvent<'system' | 'light' | 'dark'>).detail);
+    window.addEventListener('ol:theme', on);
+    return () => window.removeEventListener('ol:theme', on);
+  }, []);
   const [textWidth, setTextWidth] = useState(Number(stored('ol.textWidth') ?? DEFAULT_WIDTH));
   const [noteScale, setNoteScale] = useState(Number(stored('ol.noteScale') ?? NOTE_SCALE_DEFAULT));
   const [showRuler, setShowRuler] = useState(stored('ol.ruler') !== '0');
@@ -703,7 +711,7 @@ export function EditorShell({ init }: { init: Extract<HostToEditor, { type: 'ini
       <MenuBar menus={menus} showThemeToggle={false} paletteShortcut="Ctrl+Alt+Shift+P" captureF1={false} searchEntries={helpSearchEntries} />
       <div class="editor-topbar"><strong title={docId}>{docId.split('/').pop()}</strong>
         <span class="topbar-right">
-          <ThemeToggle pref={themePref} dark={shownDark} onPick={pickTheme} host="VS Code" />
+          <ThemeToggle pref={themePref} dark={shownDark} onPick={pickTheme} host="VS Code" onSettings={() => setDialog({ name: 'preferences' })} />
           <EditModeSwitch mode={editModeOf(tracking, viewing)} canEdit view={view} views={allViews}
             onMode={m => applyEditMode(m, { tracking, toggleTracking: () => { void toggleTracking(); }, setViewing })} />
           <ViewModeSwitch mode={viewMode} onChange={setViewMode} />

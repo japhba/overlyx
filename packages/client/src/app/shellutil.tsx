@@ -48,7 +48,8 @@ export function applyAuthorColors(authors: { id: number; name: string }[]): void
     const light = isAgent(a.name) ? '#757575' : palette[i % palette.length];
     const dk = isAgent(a.name) ? '#9e9e9e' : dark[i % dark.length];
     return `.lyx-change[data-author="${a.id}"], .lyx-inset[data-author="${a.id}"] { --change-color: ${light}; }\n`
-      + `html[data-theme="dark"] .lyx-change[data-author="${a.id}"], html[data-theme="dark"] .lyx-inset[data-author="${a.id}"] { --change-color: ${dk}; }`;
+      // (lifted only on a dark page: with smart invert off the page is white paper, app/darkpages.ts)
+      + `html[data-theme="dark"][data-dark-pages] .lyx-change[data-author="${a.id}"], html[data-theme="dark"][data-dark-pages] .lyx-inset[data-author="${a.id}"] { --change-color: ${dk}; }`;
   }).join('\n');
 }
 

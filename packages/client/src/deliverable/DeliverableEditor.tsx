@@ -47,8 +47,7 @@ import { slideElements } from '@overlyx/core/html/deliverable.ts';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
 import { EditModeSwitch, type EditMode } from '../app/EditModeSwitch';
-import { useDarkSlides, DARK_DESK } from '../app/darkslides';
-import { setPref } from '../prefs';
+import { useDarkPagesState, toggleDarkPages, invertedColor, DARK_DESK } from '../app/darkpages';
 
 const PAD = 48;
 /** the slide rail's width: by default, and as far as its edge can be dragged */
@@ -176,10 +175,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const [scrollY, setScrollY] = useState(0);
   const scrollRef = useRef(0);
   const [view, setViewState] = useState<CanvasView>(() => loadView(host.path));
-  // the dark theme: a dark grey canvas unless one was chosen; the slides light on dark if asked for (app/darkslides.ts)
-  const darkS = useDarkSlides();
+  // the dark theme: a dark grey canvas unless one was chosen; the slides light on dark with smart invert (app/darkpages.ts)
+  const darkS = useDarkPagesState();
   const darkRef = useRef(darkS); darkRef.current = darkS;
-  const shownView = (v: CanvasView): CanvasView => (darkRef.current.dark && v.desk === null && !v.deskChecker ? { ...v, desk: DARK_DESK } : v);
+  // (a web page has no canvas around it: the desk would be its own background — black words on dark grey; smart invert darkens it instead)
+  const shownView = (v: CanvasView): CanvasView => (darkRef.current.dark && kindRef.current !== 'page' && v.desk === null && !v.deskChecker ? { ...v, desk: DARK_DESK } : v);
   const [colors, setColors] = useState<{ desk: string; page: string } | null>(null);
   const [floatPop, setFloatPop] = useState<{ x: number; y: number; title: string; render: (close: () => void) => ComponentChildren } | null>(null);
   const [cropping, setCropping] = useState<Path | null>(null);
@@ -486,13 +486,14 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           if (fromCanvas) {
             canvasReady.current = true;
             setKind(m.kind);
+            kindRef.current = m.kind;
             if (m.width) setPageW(m.width);
             if (m.height) setPageH(m.height);
             setSolo(m.solo ?? null);
             toCanvas({ ol: 'scale', scale });
             toCanvas({ ol: 'tool', tool, ink: deckInkStyle(inkRef.current, pageWRef.current) });
             toCanvas({ ol: 'view', view: shownView(viewRef.current) });
-            toCanvas({ ol: 'dark', invert: darkRef.current.invert, desk: null });
+            toCanvas({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: null });
             toCanvas(reviewMsgRef.current());
             if (objOpenRef.current) toCanvas({ ol: 'objects', on: true });
             if (host.ready()) toCanvas({ ol: 'source', version: version.current, html: versions.current.get(version.current) ?? text.toString() });
@@ -505,7 +506,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             toRail({ ol: 'scale', scale: railScale });
             if (host.ready()) toRail({ ol: 'source', version: version.current, html: text.toString() });
             toRail({ ol: 'current', slide: currentRef.current });
-            toRail({ ol: 'dark', invert: darkRef.current.invert, desk: darkRef.current.dark ? DARK_DESK : null });
+            toRail({ ol: 'dark', invert: darkRef.current.invert, figures: darkRef.current.figures, desk: darkRef.current.dark ? DARK_DESK : null });
             if (peersRef.current.length) toRail({ ol: 'peers', peers: peersRef.current });
           }
           break;
@@ -920,12 +921,13 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     saveView(host.path, v);
     toCanvas({ ol: 'view', view: shownView(v) });
   };
-  const deskCss = view.deskChecker ? CHECKER : (shownView(view).desk ?? colors?.desk ?? undefined);
+  // (beside a web page, its own colour — as it is shown: inverted with it)
+  const deskCss = view.deskChecker ? CHECKER : (shownView(view).desk ?? (colors?.desk && darkS.invert && kind === 'page' ? invertedColor(colors.desk) : colors?.desk) ?? undefined);
   useEffect(() => {
     toCanvas({ ol: 'view', view: shownView(viewRef.current) });
-    toCanvas({ ol: 'dark', invert: darkS.invert, desk: null });
-    toRail({ ol: 'dark', invert: darkS.invert, desk: darkS.dark ? DARK_DESK : null });
-  }, [darkS.dark, darkS.invert]);
+    toCanvas({ ol: 'dark', invert: darkS.invert, figures: darkS.figures, desk: null });
+    toRail({ ol: 'dark', invert: darkS.invert, figures: darkS.figures, desk: darkS.dark ? DARK_DESK : null });
+  }, [darkS.dark, darkS.invert, darkS.figures, kind]);
 
   /* ------------------------------------------------------------- tools and objects */
 
@@ -1257,7 +1259,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       ] },
       { label: 'Checkerboard canvas', checked: v.deskChecker, action: () => setView({ deskChecker: !v.deskChecker }) },
       { label: 'Checkerboard under the slides (shows transparency)', checked: v.pageChecker, action: () => setView({ pageChecker: !v.pageChecker }) },
-      ...(darkRef.current.dark ? [{ label: 'Invert slides in the dark theme', checked: darkRef.current.invert, action: () => setPref('invertSlides', !darkRef.current.invert) }] : []),
+      ...(darkRef.current.dark ? [{ label: 'Smart invert pages (dark theme)', checked: darkRef.current.invert, action: toggleDarkPages }] : []),
       { sep: true },
       { label: zoomRef.current > 1.01 ? 'Fit the slide' : 'Back to the slide', action: fitSlide },
     ];
@@ -1712,8 +1714,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           <button class="dl-btn dl-zoom" title="Fit (Ctrl+0)" onClick={fitSlide}>{Math.round(scale * 100)}%</button>
           <button class="dl-btn" title="Zoom in (Ctrl+=)" onClick={() => zoomStep(1.25)}>+</button>
         </span>
-        {darkS.dark && <button class={'dl-btn dl-invert' + (darkS.invert ? ' on' : '')} data-dl-invert aria-pressed={darkS.invert} onClick={() => setPref('invertSlides', !darkS.invert)}
-          title={darkS.invert ? 'Slides light on dark (pictures in their colours) — click for their own colours' : 'The slides’ own colours — click to show them light on dark'}>◐</button>}
+        {darkS.dark && <button class={'dl-btn dl-invert' + (darkS.invert ? ' on' : '')} data-dl-invert aria-pressed={darkS.invert} onClick={toggleDarkPages}
+          title={darkS.invert ? 'Smart invert: the slides light on dark, photographs in their colours — documents, PDFs and slides alike. Click for their own colours' : 'The slides’ own colours — click to smart-invert the pages (documents, PDFs and slides alike)'}>◐</button>}
         <button class={'dl-btn dl-objects-btn' + (objOpen ? ' on' : '')} data-tb="dk-objects" onClick={() => toggleObjects()}
           title="Objects: what is on the slide as a tree — open groups and drawings, select a letter of a logo, rename, lock, restack (Inkscape's Objects, PowerPoint's Selection Pane)"
           dangerouslySetInnerHTML={{ __html: ICONS['dk-objects'] ?? '' }} />

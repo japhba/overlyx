@@ -3,7 +3,7 @@
  * client's PdfPanel — build/cancel/status through the local bridge, inverse search through the
  * extension host).
  */
-import { G, vscode, applyTheme } from './globals';
+import { G, vscode } from './globals';
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';   // the same build as PdfViewer (one GlobalWorkerOptions)
@@ -12,9 +12,14 @@ import { PdfViewer, type PdfTarget } from '@client/app/PdfViewer';
 import { stateFromBuild, jobActive, type PdfState } from '@client/app/PdfPanel';
 import { pdfStatus, useTicker } from '@client/app/pdfstatus';
 import type { HostToPdf } from '../shared/protocol';
+import { useHostTheme } from '@client/app/theme';
+import { relayAppearance, setHostDark } from './appearance';
 import '@client/styles.css';
 
-applyTheme(G.dark);
+// the theme switch's choices from the editors (smart invert, the text tone, the theme — host/appearance.ts)
+useHostTheme();
+relayAppearance();
+setHostDark(G.dark);
 
 // The webview page cannot start a cross-origin worker from the asset host: load the pdf.js
 // worker's code and hand pdf.js a same-origin blob URL instead.
@@ -64,7 +69,7 @@ function PdfApp() {
     const onMsg = (ev: MessageEvent<HostToPdf>) => {
       const m = ev.data;
       if (m?.type === 'syncTarget') setTarget(m.target);
-      else if (m?.type === 'theme') applyTheme(m.dark);
+      else if (m?.type === 'theme') setHostDark(m.dark);
     };
     window.addEventListener('message', onMsg);
     return () => { window.removeEventListener('message', onMsg); if (timer.current) clearTimeout(timer.current); };

@@ -12,9 +12,9 @@
  * The colours are baked into the page's canvas when it is drawn (PdfViewer renders off-screen and
  * copies): through the SVG filter below with the canvas's own `filter` where the browser has it,
  * pixel by pixel otherwise (Safari). A CSS filter on the canvases would cost nothing to switch but
- * is applied again on every frame — it halved the frame rate while scrolling. Pref `darkPdf` (the ◐
- * button in the PDF toolbar, shown in the dark theme). The web client and the VS Code PDF panel
- * share this through PdfViewer.
+ * is applied again on every frame — it halved the frame rate while scrolling. Pref `darkPages`, smart
+ * invert for every kind of page (app/darkpages.ts: the theme switch's menu, the ◐ button in the PDF
+ * toolbar, shown in the dark theme). The web client and the VS Code PDF panel share this through PdfViewer.
  */
 import { useEffect, useState } from 'preact/hooks';
 import { classifyPixels } from '../editor/figureinvert';
@@ -46,7 +46,7 @@ export function toneMap(bg: RGB, fg: RGB): { slope: number; intercept: number }[
 }
 
 /** SVG's feColorMatrix type="hueRotate" values="180" (in sRGB): every row sums to 1, so greys stay grey */
-const HUE180 = [-0.574, 1.43, 0.144, 0.426, 0.43, 0.144, 0.426, 1.43, -0.856];
+export const HUE180 = [-0.574, 1.43, 0.144, 0.426, 0.43, 0.144, 0.426, 1.43, -0.856];
 
 /** The dark map applied to RGBA pixels in place — what the SVG filter does, for a canvas without `filter`. */
 export function darkenPixels(data: Uint8ClampedArray | number[], { bg, fg }: DarkColours): void {
@@ -119,7 +119,7 @@ export function useDarkPages(): { colours: DarkColours | null; themeDark: boolea
   const read = () => {
     const p = getPrefs();
     const themeDark = isDarkTheme();
-    return { themeDark, colours: themeDark && p.darkPdf !== false ? themeColours() : null, invertFigures: p.invertFigures };
+    return { themeDark, colours: themeDark && p.darkPages !== false ? themeColours() : null, invertFigures: p.invertFigures };
   };
   const [state, setState] = useState(read);
   useEffect(() => {

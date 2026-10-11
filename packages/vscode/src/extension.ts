@@ -28,12 +28,14 @@ import { registerNewDocumentCommands } from './host/newDocument.ts';
 import { DeliverableServer, DeliverableEditorProvider } from './host/deliverables.ts';
 import { runTool, toolTarget, TOOL_NAMES, type ToolName, type TextStore } from './agents/localEdit.ts';
 import * as build from './host/build.ts';
+import { initAppearance } from './host/appearance.ts';
 import type { HostToEditor } from './shared/protocol.ts';
 
 /** What activate() returns — consumed by the integration test (test/suite/index.cjs). */
 export interface OverlyxTestApi { registry: Registry; bridgeBase(): string; checkForUpdates(opts?: { interactive: boolean; apiOverride?: string; dryRun?: boolean }): Promise<CheckResult> }
 
 export async function activate(context: vscode.ExtensionContext): Promise<OverlyxTestApi> {
+  initAppearance(context);
   const telemetry = new OverlyxTelemetry(context);
   context.subscriptions.push(telemetry);
   const registry = new Registry();

@@ -9,6 +9,15 @@ import type { DocumentModel, SyncTag } from './documentModel';
 /** ProseMirror JSON document (nodes of the editor schema). */
 export type PmDoc = { type: string; [k: string]: unknown };
 
+/** the theme switch's theme: VS Code's (Default), Light or Dark */
+export type ThemeChoice = 'system' | 'light' | 'dark';
+/**
+ * The theme switch's choices, shared by the webviews through the host (host/appearance.ts): the
+ * theme, smart invert of the pages and their figures, the dark theme's text tone (client prefs.ts).
+ * A message carries what changed.
+ */
+export interface Appearance { theme?: ThemeChoice; darkPages?: boolean; invertFigures?: boolean; darkTone?: 'white' | 'sepia' | 'gray' }
+
 export interface OutlineEntry { pos: number; level: number; text: string; layout: string; num?: string }
 
 /** host → editor webview */
@@ -33,7 +42,8 @@ export type HostToEditor =
   | { type: 'inverseSync'; line: number }
   /** a PDF build of this document finished (a layout document fetches the check of its text boxes) */
   | { type: 'built' }
-  | { type: 'theme'; dark: boolean };
+  | { type: 'theme'; dark: boolean }
+  | { type: 'appearance'; appearance: Appearance };
 
 /** editor webview → host */
 export type EditorToHost =
@@ -55,17 +65,20 @@ export type EditorToHost =
   /** open another document of the project (child document, label in another file) */
   | { type: 'openDoc'; id: string; goto?: string; heading?: number; beside?: boolean }
   /** SyncTeX forward search result: show this box in the PDF panel */
-  | { type: 'syncTarget'; target: { page: number; x: number; y: number; w?: number; h?: number; seq: number } };
+  | { type: 'syncTarget'; target: { page: number; x: number; y: number; w?: number; h?: number; seq: number } }
+  | { type: 'appearance'; appearance: Appearance };
 
 /** host → PDF webview */
 export type HostToPdf =
   | { type: 'init'; docId: string; base: string; dark: boolean }
   | { type: 'syncTarget'; target: { page: number; x: number; y: number; w?: number; h?: number; seq: number } }
-  | { type: 'theme'; dark: boolean };
+  | { type: 'theme'; dark: boolean }
+  | { type: 'appearance'; appearance: Appearance };
 
 /** PDF webview → host */
 export type PdfToHost =
   | { type: 'ready' }
   /** double-click in the PDF: inverse search at this point (PDF points from the page's top-left) */
   | { type: 'inverse'; page: number; x: number; y: number }
-  | { type: 'notify'; text: string; kind?: 'info' | 'error'; stack?: string };
+  | { type: 'notify'; text: string; kind?: 'info' | 'error'; stack?: string }
+  | { type: 'appearance'; appearance: Appearance };

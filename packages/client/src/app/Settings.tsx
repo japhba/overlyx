@@ -20,7 +20,7 @@ import { stashLyxBind, ctrlINow, ctrlIPlan, CTRLI_COMMANDS, type CtrlI } from '.
 import { resetAllBindings, getBindings, setBinding, subscribeBindings } from './keybindings';
 import { useUiMode } from './uimode';
 import { formatShortcut } from './shortcuts';
-import { setThemePref, useTheme, type ThemePref } from './theme';
+import { setThemePref, useTheme, DARK_TONES, type ThemePref } from './theme';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
 import { Dialog, uiAlert } from './Dialogs';
 import { AUTO_BUILD_CHOICES, AUTO_BUILD_DELAYS } from './pdfstatus';
@@ -115,9 +115,19 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
 
-  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'aiInk' | 'usageStats' | 'shortcutTips' | 'darkPdf' | 'invertSlides', label: string, hint: string) => (
-    <label class="pref"><input type="checkbox" data-pref={key} checked={p[key]} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
+  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'aiInk' | 'usageStats' | 'shortcutTips' | 'darkPages', label: string, hint: string, disabled = false) => (
+    <label class={'pref' + (disabled ? ' disabled' : '')}><input type="checkbox" data-pref={key} checked={p[key]} disabled={disabled} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
   );
+  // smart invert and the text tone (app/darkpages.ts): Appearance, or the editor's section where a shell has no Appearance (VS Code)
+  const darkTheme = <div data-settings-dark>
+    <h3>Dark theme</h3>
+    {check('darkPages', 'Smart invert pages', 'The content of every page is shown light on dark — documents, PDFs, slides and posters, layout pages — in the page colour and text tone of the dark theme; colours keep their hue. Off: every page keeps its own colours, white paper inside the dark interface. Presenting shows slides as designed. The theme switch’s menu, the ◐ in the PDF toolbar and beside a deck’s zoom switch it too.')}
+    {check('invertFigures', 'Smart invert figures too', 'Plots and diagrams on a white or transparent base turn light on dark with the page; photographs keep their colours (each picture is judged by its pixels). Off: every picture keeps its colours.', !p.darkPages)}
+    <Row label="Text">{DARK_TONES.map(t => (
+      <label class="pref inline" key={t.id}><input type="radio" name="ol-dark-tone" data-pref-tone={t.id} checked={p.darkTone === t.id} onChange={() => setPref('darkTone', t.id)} /><span>{t.label}</span></label>
+    ))}</Row>
+    <div class="sub">The text and formulas of the dark theme in white, or in a warmer or softer tone like Apple Books’ sepia and grey reading themes — PDFs take it too.</div>
+  </div>;
   const toggleRecopy = async (u: AdminUser) => {
     setErr('');
     try {
@@ -173,11 +183,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             <Row label="Start after the save"><select data-pref="autoBuildDelay" value={String(p.autoBuildDelay)} disabled={p.autoBuild === 'off'} onChange={e => setPref('autoBuildDelay', Number((e.target as HTMLSelectElement).value))}>
               {AUTO_BUILD_DELAYS.map(d => <option key={d} value={String(d)}>{d === 0 ? 'right away' : `${d} s`}</option>)}
             </select></Row>
-            {check('darkPdf', 'Dark PDF pages in the dark theme', 'The PDF is shown light on dark, in the editor’s page colour and text tone; colours keep their hue and photographs their colours (with “Invert figures” off, every picture does). The ◐ button in the PDF toolbar switches it too.')}
-            <h3>Figures</h3>
-            {check('invertFigures', 'Invert figures in the dark theme', 'Plots and diagrams use a white base, including transparent images, and turn light-on-dark in the dark theme. Photographs keep their colours. Figures reload when their file changes on disk.')}
-            <h3>Slides and posters</h3>
-            {check('invertSlides', 'Invert slides in the dark theme', 'Slides and posters are shown light on dark while you edit them — on the canvas, in the slide list and on layout pages — like the PDF’s dark pages: colours keep their hue, pictures and videos keep their colours. Presenting shows them as designed. Off by default, since designed slides change colour; the ◐ button beside a deck’s zoom and the canvas’s right-click menu switch it too. Without it the canvas around the slides is dark grey in the dark theme.')}
+            {!sections.includes('appearance') && darkTheme}
             <h3>Shortcuts</h3>
             {check('shortcutTips', 'Shortcut tips', 'An action that has a shortcut but is taken with the mouse — a toolbar button, a menu entry, the right-click menu — shows its shortcut from the third time on, five times; pressing the shortcut once ends its tips.')}
             <Row label=""><button type="button" data-reset-shortcut-tips disabled={!p.shortcutTips} onClick={() => resetShortcutTips()}>Show all tips again</button></Row>
@@ -221,6 +227,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             {THEMES.map(([v, label, hint]) => (
               <label class="pref" key={v}><input type="radio" name="ol-theme" data-theme-pref={v} checked={themeChoice === v} onChange={() => setThemePref(v)} /><span>{label}{hint && <span class="sub">{hint}</span>}</span></label>
             ))}
+            {darkTheme}
           </>}
           {section === 'privacy' && <>
             <h3>Usage statistics</h3>

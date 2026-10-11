@@ -5,7 +5,8 @@
  * knows; the TextDocument's changes (its own and anybody's) come back as the whole text. Undo is
  * VS Code's (the document's), presenting and printing happen in the browser.
  */
-import { G, vscode, applyTheme } from './globals';   // must come first: sets OVERLYX_API_BASE
+import { G, vscode } from './globals';   // must come first: sets OVERLYX_API_BASE
+import { relayAppearance, setHostDark } from './appearance';
 import { render } from 'preact';
 import { useHostTheme } from '@client/app/theme';
 import { DeliverableCanvas } from '@client/deliverable/DeliverableEditor';
@@ -14,7 +15,10 @@ import type { HostToDeliverable } from '../host/deliverables';
 import '@client/styles.css';
 
 useHostTheme();
-applyTheme(G.dark);
+// the theme switch's choices from the editors (smart invert, the text tone, the theme — host/appearance.ts)
+relayAppearance();
+setHostDark(G.dark);
+addEventListener('message', (ev: MessageEvent<HostToDeliverable>) => { if (ev.data?.type === 'theme') setHostDark(ev.data.dark); });
 
 type Listener<T> = (v: T) => void;
 
@@ -113,7 +117,7 @@ const onInit = (ev: MessageEvent<HostToDeliverable>) => {
   const m = ev.data;
   if (m?.type !== 'dlInit') return;
   removeEventListener('message', onInit);
-  applyTheme(m.dark);
+  setHostDark(m.dark);
   render(<DeliverableCanvas host={vscodeHost(m)} notify={notify} />, document.getElementById('app')!);
 };
 addEventListener('message', onInit);

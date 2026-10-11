@@ -23,6 +23,13 @@
 
 /* ------------------------------------------------------------ tokens */
 html[data-ui="modern"] {
+  --m-radius: 6px;
+  --m-display: "OL Jost", "Jost", Futura, "Century Gothic", "OL Inter", system-ui, sans-serif;
+  --ui-font: "OL Inter", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+/* the colours; a document's page in the dark theme with smart invert off is white paper (styles.css, app/darkpages.ts) */
+html[data-ui="modern"],
+html[data-ui="modern"][data-theme="dark"]:not([data-dark-pages]) .editor-page:not(:has(.ol-layout)) {
   /* the material */
   --m-ink: #1c1b19;          /* graphite */
   --m-ink2: #4a4741;
@@ -47,11 +54,8 @@ html[data-ui="modern"] {
   --m-yellow: #efb21a;
   --m-black: #1c1b19;
   --m-shadow: 0 1px 2px rgba(28, 27, 25, 0.06), 0 8px 24px rgba(28, 27, 25, 0.12);
-  --m-radius: 6px;
-  --m-display: "OL Jost", "Jost", Futura, "Century Gothic", "OL Inter", system-ui, sans-serif;
 
   /* styles.css's tokens in this material */
-  --ui-font: "OL Inter", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --ui-bg: var(--m-ground);
   --ui-bg2: #e9e6e0;
   --ui-border: var(--m-line);

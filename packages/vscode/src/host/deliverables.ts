@@ -11,6 +11,8 @@
  * with the OverLyX runtime (dist/ol/runtime.js and its MathJax) put first into its <head>.
  */
 import * as vscode from 'vscode';
+import { watchAppearance, sendAppearance, changeAppearance } from './appearance.ts';
+import type { Appearance } from '../shared/protocol.ts';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -134,14 +136,18 @@ export type DeliverableToHost =
   | { type: 'dlUpload'; id: number; rel: string; data: string }
   | { type: 'dlOpenExternal'; url: string }
   | { type: 'dlSave' }
-  | { type: 'notify'; kind?: 'info' | 'error'; text: string };
+  | { type: 'notify'; kind?: 'info' | 'error'; text: string }
+  | { type: 'appearance'; appearance: Appearance };
 
 export type HostToDeliverable =
   /** `author`: git's user.name, the name comments and suggestions are made under */
   | { type: 'dlInit'; text: string; version: number; base: string; entry: string; readOnly: boolean; dark: boolean; author?: string }
   | { type: 'dlText'; text: string; version: number }
   | { type: 'dlAsset'; path: string; v: number }
-  | { type: 'dlUploaded'; id: number; error?: string };
+  | { type: 'dlUploaded'; id: number; error?: string }
+  /** VS Code's theme changed */
+  | { type: 'theme'; dark: boolean }
+  | { type: 'appearance'; appearance: Appearance };
 
 const isDark = () => [vscode.ColorThemeKind.Dark, vscode.ColorThemeKind.HighContrast].includes(vscode.window.activeColorTheme.kind);
 
@@ -181,11 +187,16 @@ export class DeliverableEditorProvider implements vscode.CustomTextEditorProvide
       post({ type: 'dlAsset', path: rel, v: Date.now() });
     };
     subs.push(watcher, watcher.onDidChange(asset), watcher.onDidCreate(asset));
+    subs.push(vscode.window.onDidChangeActiveColorTheme(() => post({ type: 'theme', dark: isDark() })), watchAppearance(panel.webview));
 
     subs.push(panel.webview.onDidReceiveMessage((msg: DeliverableToHost) => {
       switch (msg.type) {
         case 'ready':
           post({ type: 'dlInit', text: document.getText(), version: document.version, base, entry, readOnly: false, dark: isDark(), author: gitUserName(path.dirname(document.uri.fsPath)) });
+          sendAppearance(panel.webview);
+          break;
+        case 'appearance':
+          changeAppearance(panel.webview, msg.appearance);
           break;
         case 'dlApply':
           chain = chain.then(async () => {

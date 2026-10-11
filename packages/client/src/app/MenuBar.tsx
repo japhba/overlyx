@@ -17,24 +17,52 @@ import { canonical, effectiveShortcut, getBindings, isCustom, keyFromEvent, setB
 import { useUiMode } from './uimode';
 import { planBind, pendingLyxBind, clearPendingLyxBind, LYXBIND_EVENT, ctrlIPlan, ctrlINow } from './lyxbind';
 
-/** the right-click menu of the switch: the text tone of the dark theme (app/theme.ts DARK_TONES) */
+/** the text tone of the dark theme (app/theme.ts DARK_TONES) */
 export function darkToneMenuItems(): MenuItem[] {
   const current = getPrefs().darkTone;
   return [{ label: 'Text in the dark theme', info: true }, ...DARK_TONES.map(t => ({ label: t.label, checked: current === t.id, action: () => setPref('darkTone', t.id) }))];
 }
 
 /**
- * The theme switch's menu: Default (the system's theme — VS Code's in the extension), Light or
- * Dark, then the text tone of the dark theme.
+ * Smart invert (app/darkpages.ts): the pages — documents, PDFs, slides, posters, layout pages, one
+ * switch for all — and with them their figures (line art; photographs keep their colours)
  */
-export function themeMenuItems(pref: ThemePref, pick: (p: ThemePref) => void, host = 'the system'): MenuItem[] {
+export function smartInvertMenuItems(): MenuItem[] {
+  const p = getPrefs();
+  return [
+    { label: 'Smart invert in the dark theme', info: true },
+    { label: 'Pages — documents, PDFs, slides', checked: p.darkPages, action: () => setPref('darkPages', !p.darkPages) },
+    { label: 'Figures too — photos keep their colours', checked: p.invertFigures, disabled: !p.darkPages, action: () => setPref('invertFigures', !p.invertFigures) },
+  ];
+}
+
+/** the same choices for a menu bar's View menu (editorViewMenu.ts): one submenu, labels that stand alone in the command palette */
+export function darkThemeMenuEntries(): MenuEntry[] {
+  const p = getPrefs();
+  return [{ label: 'Dark theme ▸', sub: [
+    { label: 'Smart invert pages (documents, PDFs, slides)', checked: p.darkPages, action: () => setPref('darkPages', !p.darkPages) },
+    { label: 'Smart invert figures too (photos keep their colours)', checked: p.invertFigures, disabled: !p.darkPages, action: () => setPref('invertFigures', !p.invertFigures) },
+    { sep: true },
+    ...DARK_TONES.map(t => ({ label: `${t.label} text`, checked: p.darkTone === t.id, action: () => setPref('darkTone', t.id) })),
+  ] }];
+}
+
+/**
+ * The theme switch's menu: Default (the system's theme — VS Code's in the extension), Light or
+ * Dark; smart invert of the pages and their figures in the dark theme; the dark theme's text tone;
+ * the Appearance settings where the shell has them.
+ */
+export function themeMenuItems(pref: ThemePref, pick: (p: ThemePref) => void, host = 'the system', onSettings?: () => void): MenuItem[] {
   return [
     { label: 'Theme', info: true },
     { label: `Default (follows ${host})`, checked: pref === 'system', action: () => pick('system') },
     { label: 'Light', checked: pref === 'light', action: () => pick('light') },
     { label: 'Dark', checked: pref === 'dark', action: () => pick('dark') },
     { sep: true },
+    ...smartInvertMenuItems(),
+    { sep: true },
     ...darkToneMenuItems(),
+    ...(onSettings ? [{ sep: true }, { label: 'Appearance settings…', action: onSettings }] : []),
   ];
 }
 
@@ -50,20 +78,20 @@ const THEME_ICONS: Record<ThemePref, string> = {
  * opens themeMenuItems. Without props it uses the browser's preference (theme.ts, the web
  * client); the VS Code shell passes its own preference, what it shows and `host` = "VS Code".
  */
-export function ThemeToggle({ pref: givenPref, dark: shownDark, onPick, host = 'the system' }: { pref?: ThemePref; dark?: boolean; onPick?: (p: ThemePref) => void; host?: string } = {}) {
+export function ThemeToggle({ pref: givenPref, dark: shownDark, onPick, host = 'the system', onSettings }: { pref?: ThemePref; dark?: boolean; onPick?: (p: ThemePref) => void; host?: string; onSettings?: () => void } = {}) {
   const { theme, pref: ownPref } = useTheme();
   const pref = givenPref ?? ownPref;
   const dark = shownDark ?? theme === 'dark';
   // a click while the menu is open closes it (the menu's own mousedown handler) and must not reopen it
   const wasOpen = useRef(false);
   const menu = (x: number, y: number) => {
-    showContextMenu(x, y, themeMenuItems(pref, onPick ?? setThemePref, host));
+    showContextMenu(x, y, themeMenuItems(pref, onPick ?? setThemePref, host, onSettings));
     document.querySelector('.ctx-menu')?.setAttribute('data-theme-menu', '');
   };
   const shown = pref === 'system' ? `default (${dark ? 'dark' : 'light'}, as ${host})` : dark ? 'dark' : 'light';
   return (
     <button type="button" class="theme-toggle" data-theme-toggle data-current={dark ? 'dark' : 'light'} data-pref={pref} aria-haspopup="menu"
-      title={`Theme: ${shown} — choose default, light or dark, and the text tone of the dark theme`}
+      title={`Theme: ${shown} — default, light or dark; smart invert of pages and figures and the text tone in the dark theme`}
       onPointerDown={() => { wasOpen.current = !!document.querySelector('.ctx-menu[data-theme-menu]'); }}
       onClick={e => {
         if (wasOpen.current) { wasOpen.current = false; return; }
@@ -289,8 +317,10 @@ function SearchMenu({ menu, entries, close, recording, setRecording, paletteShor
   );
 }
 
-export function MenuBar({ menus, user, right, primary, title, onLogout, onSettings, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle, onSignIn, showThemeToggle = true, paletteShortcut = PALETTE_DEFAULT, captureF1 = true }: {
+export function MenuBar({ menus, user, right, primary, title, onLogout, onSettings, onAppearance, onHome, searchEntries: extra = [], users, onJumpToUser, onShare, shareTitle, onSignIn, showThemeToggle = true, paletteShortcut = PALETTE_DEFAULT, captureF1 = true }: {
   menus: MenuDef[]; user?: User; right?: ComponentChildren; primary?: ComponentChildren; onLogout?: () => void; onSettings?: () => void; onHome?: () => void; showThemeToggle?: boolean; paletteShortcut?: string; captureF1?: boolean;
+  /** the theme switch's "Appearance settings…" */
+  onAppearance?: () => void;
   /** the document's name above the menus (the Modern interface's header, Google Docs' layout; Classic shows `right`) */
   title?: ComponentChildren;
   /** reference entries (shortcuts without a menu item) for the palette */
@@ -484,7 +514,7 @@ export function MenuBar({ menus, user, right, primary, title, onLogout, onSettin
       <a class="gh-link" href="https://github.com/japhba/overlyx" target="_blank" rel="noopener" title="OverLyX on GitHub — source code, issues, releases (GPL-3.0)">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
       </a>
-      {showThemeToggle && <ThemeToggle />}
+      {showThemeToggle && <ThemeToggle onSettings={onAppearance} />}
       {user && <div class={'menu user-menu' + (userOpen ? ' open' : '')}>
         <button type="button" class="avatar-btn" data-user-menu title={`${user.name} (${user.username})`} onMouseDown={e => { e.preventDefault(); if (open !== null) setOpen(null); setUserOpen(o => !o); }}>
           <span class="avatar" style={{ background: user.color, color: inkOn(user.color) }} data-initials={user.avatar ? undefined : initials(user.name).length}><AvatarContent name={user.name} src={user.avatar} /></span>

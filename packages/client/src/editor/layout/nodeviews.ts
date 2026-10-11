@@ -16,6 +16,7 @@ import { boxOf, placeElement, MM, PT, color, shapePathInBox, DASHES, ptToMm } fr
 import { rawPreview } from './rawpreview';
 import { BOX_PROMPTS, boxIsEmpty } from './slidelayouts';
 import { layoutSources, openLayoutSources } from './source';
+import { classifyImage } from '../figureinvert';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 
@@ -331,8 +332,10 @@ export class ImageView implements NodeView {
     this.img = document.createElement('img');
     this.img.draggable = false;
     this.img.alt = '';
+    this.img.crossOrigin = 'anonymous';   // its pixels are read (classifyImage), from the VS Code bridge too — as the editor's figures (nodeviews/leaf.ts)
     this.img.addEventListener('error', () => this.dom.classList.add('ol-missing'));
-    this.img.addEventListener('load', () => this.dom.classList.remove('ol-missing'));
+    // smart invert (app/darkpages.ts): a plot or diagram on a white ground goes light on dark with the page, a photograph keeps its colours (styles.css)
+    this.img.addEventListener('load', () => { this.dom.classList.remove('ol-missing'); this.dom.classList.toggle('ol-lineart', classifyImage(this.img) === 'lineart'); });
     this.dom.append(this.img);
     this.render();
     const project = viewProject(view);

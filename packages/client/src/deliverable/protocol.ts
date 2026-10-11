@@ -205,11 +205,13 @@ export type ToRuntime =
   | { ol: 'go'; slide: number }
   | { ol: 'peers'; peers: PeerInfo[] }
   /**
-   * The editor's dark theme (app/darkslides.ts): `invert` — the slides shown light on dark
-   * (prefs.invertSlides; the canvas and the rail, never presenting); `desk` — the rail's background
-   * (the canvas's comes with the view), null for the page's own
+   * The editor's dark theme (app/darkpages.ts): `invert` — the slides shown light on dark (smart
+   * invert, prefs.darkPages; the canvas and the rail, never presenting); `figures` — line-art pictures
+   * inverted with them, photographs back in their colours (prefs.invertFigures; without it every
+   * picture keeps its colours); `desk` — the rail's background (the canvas's comes with the view),
+   * null for the page's own
    */
-  | { ol: 'dark'; invert: boolean; desk: string | null }
+  | { ol: 'dark'; invert: boolean; figures?: boolean; desk: string | null }
   | { ol: 'current'; slide: number }
   /** a file of the project changed on disk (project-relative): stylesheets and pictures are fetched again, scripts and data reload the page */
   | { ol: 'asset'; path: string; v: number }

@@ -23,12 +23,14 @@ export interface Prefs {
   aiCompleteMath: boolean;
   /** pause before a completion is requested (ms) */
   aiCompleteDelay: number;
-  /** Smart inversion adapts plots on a white base to the dark theme; photographs keep their colours. */
+  /**
+   * Smart invert, the dark theme's pages (app/darkpages.ts): the content of every page — documents,
+   * PDFs, slides, posters, layout pages — shown light on dark, colours keeping their hue; off, every
+   * page keeps its own colours (white paper in the dark interface). The theme switch's menu.
+   */
+  darkPages: boolean;
+  /** with darkPages, figures too: plots and diagrams on a white base turn light on dark with the page, photographs keep their colours (editor/figureinvert.ts) */
   invertFigures: boolean;
-  /** in the dark theme, PDF pages are shown light on dark with their photographs in colour (app/pdfdark.ts) */
-  darkPdf: boolean;
-  /** in the dark theme, slides and posters are shown light on dark too (app/darkslides.ts); off by default — designed slides change colour */
-  invertSlides: boolean;
   /** OpenRouter model ids for ⌘J (rewrite) and for autocomplete ('' = the server's default) */
   aiModel: string;
   aiCompletionModel: string;
@@ -64,7 +66,7 @@ export interface Prefs {
   autoCorrectChosen?: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, darkPdf: true, invertSlides: false, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true, mathKeyboard: 'auto', aiInk: false };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, darkPages: true, invertFigures: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true, mathKeyboard: 'auto', aiInk: false };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';
@@ -77,6 +79,13 @@ function load(): Prefs {
     // and scientific words as they were typed (normalised → normalized, invariance → invariable). A
     // stored `true` from the old default is dropped once; switching it on now marks the choice.
     if (v && typeof v === 'object' && !v.autoCorrectChosen) delete v.autoCorrect;
+    // 11 Oct 2026: one smart-invert switch for every page — the PDF's dark pages (`darkPdf`, on by
+    // default) and the slides' (`invertSlides`, off by default) became `darkPages`; a PDF switched
+    // to its own colours keeps the pages in their own colours everywhere
+    if (v && typeof v === 'object' && ('darkPdf' in v || 'invertSlides' in v)) {
+      if (!('darkPages' in v)) v.darkPages = v.darkPdf !== false;
+      delete v.darkPdf; delete v.invertSlides;
+    }
     return v && typeof v === 'object' ? { ...DEFAULT_PREFS, ...v } : { ...DEFAULT_PREFS };
   } catch { return { ...DEFAULT_PREFS }; }
 }

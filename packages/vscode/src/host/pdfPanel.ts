@@ -3,6 +3,7 @@
  * with build status, log and SyncTeX. One panel per document, revived on demand.
  */
 import * as vscode from 'vscode';
+import { watchAppearance, sendAppearance, changeAppearance } from './appearance.ts';
 import { webviewHtml } from './webviewHtml.ts';
 import type { HostToPdf, PdfToHost } from '../shared/protocol.ts';
 
@@ -34,8 +35,11 @@ export class PdfPanels {
       this.reportError(e, 'pdf.bridge');
       void vscode.window.showErrorMessage('OverLyX: could not connect to the PDF preview server: ' + String(e));
     });
+    const watching = watchAppearance(panel.webview);
     panel.webview.onDidReceiveMessage((msg: PdfToHost) => {
-      if (msg.type === 'inverse') this.onInverse(docId, msg.page, msg.x, msg.y);
+      if (msg.type === 'ready') sendAppearance(openedPanel.webview);
+      else if (msg.type === 'appearance') changeAppearance(openedPanel.webview, msg.appearance);
+      else if (msg.type === 'inverse') this.onInverse(docId, msg.page, msg.x, msg.y);
       else if (msg.type === 'notify') {
         if (msg.kind === 'error') {
           const error = new Error(msg.text);
@@ -45,7 +49,7 @@ export class PdfPanels {
         void (msg.kind === 'error' ? vscode.window.showErrorMessage(msg.text) : vscode.window.showInformationMessage(msg.text));
       }
     });
-    panel.onDidDispose(() => { if (this.panels.get(docId) === panel) this.panels.delete(docId); });
+    panel.onDidDispose(() => { watching.dispose(); if (this.panels.get(docId) === panel) this.panels.delete(docId); });
     return panel;
   }
 

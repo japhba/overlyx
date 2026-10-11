@@ -14,7 +14,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { LyxMathField, stripMathDelims } from '../editor/lyxmath/field';
 import { parseFormula, writeFormula, type MacroTable } from '@overlyx/core';
 import type { MathBox, KeyPress } from './protocol';
-import { INVERT_FILTER } from '../app/darkslides';
+import { INVERT_FILTER } from '../app/darkpages';
 
 /** LyX's Alt+M N on a displayed formula: numbered (an equation environment, as LaTeX's) or not; every row of a grid alike */
 export function toggleNumbering(f: LyxMathField, macros: MacroTable = {}): void {
@@ -60,7 +60,7 @@ export interface MathOps { number(): void; label(name: string): void; labelNow()
 
 export function MathOverlay({ st, frame, scale, macros, onSet, onDone, onShown, onDisplay, onRest, keysIn, ops, typeAhead, invert }: {
   st: MathEditState;
-  /** the slides are shown light on dark (app/darkslides.ts): the field over a formula is too */
+  /** the slides are shown light on dark (app/darkpages.ts): the field over a formula is too */
   invert?: boolean;
   /** set here while the field is open */
   ops?: { current: MathOps | null };

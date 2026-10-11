@@ -1362,7 +1362,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     // dialogs that do not need an editor (start screen, text files)
     if (dialog.name === 'feedback') return <FeedbackDialog docId={docId} onClose={() => { setDialog(null); view?.focus(); }} />;
     if (dialog.name === 'help') return <HelpDialog onClose={() => { setDialog(null); view?.focus(); }} />;
-    if (dialog.name === 'preferences') return <SettingsPanel ai={ai} user={user!} initial={dialog.arg as 'ai' | undefined} onClose={() => { setDialog(null); view?.focus(); }} />;
+    if (dialog.name === 'preferences') return <SettingsPanel ai={ai} user={user!} initial={dialog.arg as 'ai' | 'appearance' | undefined} onClose={() => { setDialog(null); view?.focus(); }} />;
     if (!view || !docId) return null;
     const close = () => { setDialog(null); view.focus(); };
     const project = projectOfDoc(viewDocId(view)) || projectOfDoc(docId);
@@ -1486,7 +1486,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
 
   return (
     <div class="app">
-      <MenuBar menus={menus} user={user} onLogout={onLogout} onSettings={() => setDialog({ name: 'preferences' })} onHome={() => { location.hash = '#/'; }} searchEntries={helpSearchEntries}
+      <MenuBar menus={menus} user={user} onLogout={onLogout} onSettings={() => setDialog({ name: 'preferences' })} onAppearance={() => setDialog({ name: 'preferences', arg: 'appearance' })} onHome={() => { location.hash = '#/'; }} searchEntries={helpSearchEntries}
         users={isLyxDoc ? status.users : undefined} onJumpToUser={jumpToUser}
         onShare={shareProject ? () => setShareFor(shareProject) : null} shareTitle={shareProject ? `Share “${curProject?.title ?? projectShortName(shareProject)}”: invite people or turn on a link` : undefined}
         onSignIn={user.guest ? signIn : undefined}

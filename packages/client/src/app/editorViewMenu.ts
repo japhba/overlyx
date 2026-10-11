@@ -1,5 +1,5 @@
 import type { Command } from 'prosemirror-state';
-import type { MenuDef, MenuEntry } from './MenuBar';
+import { darkThemeMenuEntries, type MenuDef, type MenuEntry } from './MenuBar';
 import type { ToolbarId, ToolbarMode } from './toolbars';
 import { editorContext } from '../editor/context';
 import * as C from '../editor/commands';
@@ -42,6 +42,8 @@ export function editorViewMenu({ hostItems, themeItems, hostToolbars, combined, 
       // the document alone: menu bar, toolbars, status bar, rulers and panels hidden; Esc leaves (app/presentation.ts)
       { label: 'Presentation mode', shortcut: PRESENTATION_KEY, checked: isPresenting(), action: togglePresentation },
       ...themeItems,
+      // smart invert of the pages and figures, the text tone (app/darkpages.ts; also the theme switch's menu)
+      ...darkThemeMenuEntries(),
       { label: 'Toolbars ▸', sub: [
         // the LyX toolbar set (stdtoolbars.inc); the contextual ones are docked at the bottom of the window
         { label: 'Standard', checked: tbMode('standard') !== 'off', action: () => setToolbar('standard', tbMode('standard') === 'off' ? 'on' : 'off') },
