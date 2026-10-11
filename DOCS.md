@@ -622,9 +622,9 @@ blend.
     past the edge (scrolled or dragged: about 80 px shown) it pops and the slide comes loose (the
     user, 11 Oct: "i can never get it to actually leave the focussed view — it should need just a
     little force, and some intuitive visual indication"). Loose, it moves one to one wherever it is
-    scrolled (a fifth of it stays on the canvas), stays where it is let go, an outline marks its
-    place (`.dl-dock`, solid once within `snapDistance`) and let go near that it snaps back in; the
-    "⤢ Centre slide" button, Ctrl+0 and another slide bring it back too. Only a scroll begun at the
+    scrolled (a fifth of it stays on the canvas), stays where it is let go, and let go within
+    `snapDistance` of its place it snaps back in; the "⤢ Centre slide" button, Ctrl+0 and another
+    slide bring it back too (no outline of its place: the user asked for just the button). Only a scroll begun at the
     edge sets it free (momentum carried over the edge while zoomed in just bounces, as with Safari's
     swipe between pages); a finger always can. A scroll resumed while the slide springs back catches
     it; wheel deltas are not scaled by the frame's zoom (a finger's moves are). Web

@@ -2535,7 +2535,7 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 /* one slide on the canvas: placed by a transform from its corner (deliverable/viewport.ts) */
 .dl-frame.solo { top: 0; left: 0; will-change: transform; }
 /* the slide pulled past an edge: a ring in the gap behind it fills as far as the pull has come (--k) and pops as
-   the slide comes loose; loose, an outline marks its place — solid once it is near enough to snap back in */
+   the slide comes loose (deliverable/viewport.ts) */
 .dl-pull { position: absolute; left: -16px; top: -16px; width: 32px; height: 32px; z-index: 3; pointer-events: none; opacity: 0; --k: 0; }
 .dl-pull svg { display: block; width: 100%; height: 100%; overflow: visible; transform: scale(calc(0.7 + 0.3 * var(--k))); }
 .dl-pull-disc { fill: var(--surface); stroke: var(--ui-border); stroke-width: 1; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.2)); }
@@ -2548,9 +2548,6 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 @keyframes dl-pull-pop { 0% { transform: scale(1); opacity: 1; } 35% { transform: scale(1.3); opacity: 1; } 100% { transform: scale(1.8); opacity: 0; } }
 @keyframes dl-pull-fade { from { opacity: 1; } to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .dl-pull.pop svg { animation-name: dl-pull-fade; } }
-.dl-dock { position: absolute; left: 0; top: 0; box-sizing: border-box; border: 1.5px dashed color-mix(in srgb, var(--ui-fg) 38%, transparent); border-radius: 3px; pointer-events: none; opacity: 0; transition: opacity 0.2s, border-color 0.15s, background-color 0.15s; }
-.dl-dock[data-on="1"] { opacity: 1; }
-.dl-dock[data-near="1"] { border-style: solid; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 /* the contextual tools in sections named as the selection's label on the canvas */
 .dl-ctx-secs { display: flex; align-items: center; width: max-content; }
 .dl-ctx-secs > .toolbar + .toolbar { margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--ui-border); }

@@ -240,31 +240,31 @@ test('one slide per canvas: the rail and Page Down move between them, a scroll s
   expect(Math.abs((s1.x + s1.width / 2) - (c.x + c.width / 2))).toBeLessThan(3);
   // a short scroll pulls the slide, and it springs back into the middle
   const rest = await transform();
-  const dock = page.locator('[data-dl-dock]'), refocus = page.locator('[data-dl-refocus]');
+  const refocus = page.locator('[data-dl-refocus]');
   await page.mouse.move(s1.x + s1.width / 2, s1.y + s1.height / 2);
   for (let i = 0; i < 3; i++) await page.mouse.wheel(0, 30);
   expect(await transform()).not.toBe(rest);
   await expect.poll(transform, { timeout: 3000 }).toBe(rest);
   await expect(refocus).toHaveCount(0);
-  // a little further: it comes loose and stays where it is let go, its place outlined
+  // a little further: it comes loose and stays where it is let go
   for (let i = 0; i < 8; i++) await page.mouse.wheel(0, 30);
   await expect(refocus).toHaveText(/Centre slide/);
-  await expect(dock).toHaveAttribute('data-on', '1');
   await page.waitForTimeout(900);
   const loose = await transform();
   expect(loose).not.toBe(rest);
   await page.waitForTimeout(300);
   expect(await transform()).toBe(loose);
-  // scrolled back near its place: the outline says so, and let go it snaps back in
+  // scrolled back near its place: let go, it snaps back in
   const off = async () => {
     const [a, b] = [rest, await transform()].map(t => /translate\(([-\d.]+)px, ([-\d.]+)px/.exec(t)!.slice(1).map(Number));
     return { x: b[0] - a[0], y: b[1] - a[1] };
   };
-  for (let i = 0; i < 40 && await dock.getAttribute('data-near') !== '1'; i++) {
+  for (let i = 0; i < 40; i++) {
     const o = await off();
+    if (Math.hypot(o.x, o.y) < 20) break;
     await page.mouse.wheel(Math.round(o.x * 0.15), Math.round(o.y * 0.15) || Math.sign(o.y));
   }
-  await expect(dock).toHaveAttribute('data-near', '1');
+  expect(await transform()).not.toBe(rest);
   await expect.poll(transform, { timeout: 3000 }).toBe(rest);
   await expect(refocus).toHaveCount(0);
   // loose again: Centre slide brings it back

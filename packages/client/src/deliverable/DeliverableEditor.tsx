@@ -580,12 +580,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const soloRef = useRef(soloOn); soloRef.current = soloOn;
   const viewInput = useRef<{ box: { w: number; h: number }; rect: Rect; scale: number; margin: number } | null>(null);
   viewInput.current = soloOn ? { box, rect: solo!.rect, scale, margin } : null;
-  /** the ring behind a slide pulled past an edge and the outline of its place once it came loose (drawn by the view) */
+  /** the ring behind a slide pulled past an edge (drawn by the view); pulled loose, Centre slide shows */
   const pullRing = useRef<HTMLDivElement>(null);
-  const dockMark = useRef<HTMLDivElement>(null);
   const [slideFree, setSlideFree] = useState(false);
   const slideView = useMemo(() => new SlideView(() => canvasFrame.current, () => viewInput.current,
-    { pull: () => pullRing.current, dock: () => dockMark.current, onFree: setSlideFree }), []);
+    { pull: () => pullRing.current, onFree: setSlideFree }), []);
   useEffect(() => () => slideView.destroy(), [slideView]);
   useLayoutEffect(() => { if (soloOn) slideView.render(); });
   // another slide: in the middle again (the zoom stays, as in PowerPoint)
@@ -1421,7 +1420,6 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             }}
             onDragOver={e => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
             onDrop={e => { if (!e.dataTransfer?.files.length) return; e.preventDefault(); const fs = Array.from(e.dataTransfer.files); void placeFiles(fs.map(f => ({ name: f.name, type: f.type, data: f })), null, null); }}>
-            {soloOn && <div ref={dockMark} class="dl-dock" data-dl-dock aria-hidden="true" />}
             {link && synced && <iframe ref={canvasFrame} class={'dl-frame' + (soloOn ? ' solo' : '')} title="Page" sandbox="allow-scripts allow-modals allow-popups allow-forms" src={src('edit')}
               style={soloOn ? { width: `${frameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
             {soloOn && (
@@ -1435,7 +1433,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             )}
             {(lost || zoomed || (soloOn && slideFree)) && kind !== 'page' && (
               <button type="button" class={'dl-refocus' + (lost ? ' lost' : '')} data-dl-refocus onClick={fitSlide}
-                title={zoomed ? 'Show the whole slide again (Ctrl+0)' : 'Back into the middle (Ctrl+0) — or move the slide onto its outline and let go'}>
+                title={zoomed ? 'Show the whole slide again (Ctrl+0)' : 'Back into the middle (Ctrl+0)'}>
                 {lost ? `⤢ Back to slide ${current + 1}` : zoomed ? '⤢ Fit slide' : '⤢ Centre slide'}
               </button>
             )}

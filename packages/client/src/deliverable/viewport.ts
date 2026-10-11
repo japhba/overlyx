@@ -6,8 +6,8 @@
  * views do (pull to refresh). While pulled past an edge the slide stretches a little towards the pull
  * and a ring fills in the gap behind it: pulled `BREAK` px past the edge the ring pops and the slide
  * comes loose. Free, it goes wherever it is scrolled or dragged (some of it always on the canvas) and
- * stays where it is let go; an outline marks its place, and let go near that it snaps back into it
- * (as do Fit, the "Centre slide" button and another slide). Only a scroll begun at the edge sets the
+ * stays where it is let go; let go near its place it snaps back into it (as do Fit, the "Centre
+ * slide" button and another slide). Only a scroll begun at the edge sets the
  * slide free — one that reached the edge on its way (momentum) just bounces, as with Safari's swipe
  * between pages; a finger always can.
  *
@@ -83,15 +83,8 @@ export interface ViewInput {
 export interface ViewMarks {
   /** the ring in the gap behind a slide pulled past an edge (`--k` its fill, 0–1); it pops (class `pop`) as the slide comes loose */
   pull?: () => HTMLElement | null;
-  /** the outline of the slide's place while it is free (`data-on`; `data-near`: let go now, it snaps back in) */
-  dock?: () => HTMLElement | null;
   /** the slide came loose (true) or is back in its place (false) */
   onFree?: (free: boolean) => void;
-}
-
-/** (an attribute set only when it changes: every frame sets them) */
-function setData(el: HTMLElement, key: string, value: string): void {
-  if (el.dataset[key] !== value) el.dataset[key] = value;
 }
 
 /**
@@ -168,7 +161,7 @@ export class SlideView {
     return p ? { x: p.tx + fx * p.s, y: p.ty + fy * p.s } : null;
   }
 
-  /** the transform for the offsets shown (with the stretch of a pull past an edge), and the ring and the outline */
+  /** the transform for the offsets shown (with the stretch of a pull past an edge), and the ring */
   render(): void {
     const el = this.frame(), v = this.input();
     if (!el || !v) return;
@@ -193,47 +186,35 @@ export class SlideView {
       ty = ay + (ty - ay) * ky;
     }
     el.style.transform = `translate(${tx}px, ${ty}px) scale(${p.s * kx}, ${p.s * ky})`;
-    this.drawMarks(v);
+    this.drawRing(v);
   }
 
-  /** the ring behind a slide pulled past an edge, filled as far as the pull has come; the outline of a free slide's place */
-  private drawMarks(v: ViewInput): void {
-    const ring = this.marks.pull?.(), dock = this.marks.dock?.();
-    if (!ring && !dock) return;
+  /** the ring behind a slide pulled past an edge, filled as far as the pull has come */
+  private drawRing(v: ViewInput): void {
+    const ring = this.marks.pull?.();
+    if (!ring || performance.now() < this.popping) return;
+    if (ring.classList.contains('pop')) ring.classList.remove('pop');
     const home = this.ranges(v);
     const w = v.rect.w * v.scale, h = v.rect.h * v.scale;
     const left = (v.box.w - w) / 2 + this.shown.x, top = (v.box.h - h) / 2 + this.shown.y;
-    if (ring && performance.now() >= this.popping) {
-      if (ring.classList.contains('pop')) ring.classList.remove('pop');
-      // the pull the shown place stands for (springing back too), past the range
-      const ux = unband(this.shown.x, home.x, v.box.w) - clampTo(this.shown.x, home.x);
-      const uy = unband(this.shown.y, home.y, v.box.h) - clampTo(this.shown.y, home.y);
-      const k = this.ringOn && !this.free ? Math.min(1, Math.hypot(ux, uy) / BREAK) : 0;
-      const opacity = Math.max(0, Math.min(1, (k - 0.08) / 0.25));
-      ring.style.opacity = opacity.toFixed(3);
-      if (opacity > 0) {
-        // in the gap the pull opens behind the slide, at most 40 px from its edge
-        let x: number, y: number;
-        if (Math.abs(ux) >= Math.abs(uy)) {
-          x = ux > 0 ? left - Math.min(40, left / 2) : left + w + Math.min(40, (v.box.w - left - w) / 2);
-          y = top + h / 2;
-        } else {
-          x = left + w / 2;
-          y = uy > 0 ? top - Math.min(40, top / 2) : top + h + Math.min(40, (v.box.h - top - h) / 2);
-        }
-        ring.style.transform = `translate(${clampTo(x, [22, v.box.w - 22])}px, ${clampTo(y, [22, v.box.h - 22])}px)`;
-        ring.style.setProperty('--k', k.toFixed(3));
+    // the pull the shown place stands for (springing back too), past the range
+    const ux = unband(this.shown.x, home.x, v.box.w) - clampTo(this.shown.x, home.x);
+    const uy = unband(this.shown.y, home.y, v.box.h) - clampTo(this.shown.y, home.y);
+    const k = this.ringOn && !this.free ? Math.min(1, Math.hypot(ux, uy) / BREAK) : 0;
+    const opacity = Math.max(0, Math.min(1, (k - 0.08) / 0.25));
+    ring.style.opacity = opacity.toFixed(3);
+    if (opacity > 0) {
+      // in the gap the pull opens behind the slide, at most 40 px from its edge
+      let x: number, y: number;
+      if (Math.abs(ux) >= Math.abs(uy)) {
+        x = ux > 0 ? left - Math.min(40, left / 2) : left + w + Math.min(40, (v.box.w - left - w) / 2);
+        y = top + h / 2;
+      } else {
+        x = left + w / 2;
+        y = uy > 0 ? top - Math.min(40, top / 2) : top + h + Math.min(40, (v.box.h - top - h) / 2);
       }
-    }
-    if (dock) {
-      setData(dock, 'on', this.free ? '1' : '');
-      if (!this.free) { setData(dock, 'near', ''); return; }
-      // the nearest place the slide would take back in it (the middle, or zoomed in, where it pans to)
-      const hx = clampTo(this.shown.x, home.x), hy = clampTo(this.shown.y, home.y);
-      dock.style.transform = `translate(${(v.box.w - w) / 2 + hx}px, ${(v.box.h - h) / 2 + hy}px)`;
-      dock.style.width = `${w}px`;
-      dock.style.height = `${h}px`;
-      setData(dock, 'near', pastRanges(this.shown, home) <= snapDistance(v.box) ? '1' : '');
+      ring.style.transform = `translate(${clampTo(x, [22, v.box.w - 22])}px, ${clampTo(y, [22, v.box.h - 22])}px)`;
+      ring.style.setProperty('--k', k.toFixed(3));
     }
   }
 
