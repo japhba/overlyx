@@ -24,6 +24,8 @@ export function privacyHtml(): string {
   const operator = (process.env.OVERLYX_OPERATOR ?? '').trim();
   const contact = config.contactEmail;
   const site = config.publicUrl ? new URL(config.publicUrl).host : 'this OverLyX instance';
+  // what this server offers: the notice describes it, not a different setup
+  const google = !!config.google.clientId;
   const who = operator ? esc(operator) : `the person who runs ${esc(site)}`;
   const reach = contact
     ? `by e-mail to <a href="mailto:${esc(contact)}">${esc(contact)}</a>, or with <b>Help ▸ Report a problem</b> in the app`
@@ -53,7 +55,9 @@ td,th{text-align:left;vertical-align:top;padding:.35rem .5rem;border-bottom:1px 
 
 <h2>What we keep about you</h2>
 <h3>Your account</h3>
-<p>When you sign in with Google we receive and keep your name, e-mail address, profile picture and Google account id. We derive a user name from your e-mail address and give you a colour (both show next to your edits). We also keep your settings and keyboard shortcuts.</p>
+${google
+    ? '<p>When you sign in with Google we receive and keep your name, e-mail address, profile picture and Google account id. We derive a user name from your e-mail address and give you a colour (both show next to your edits). We also keep your settings and keyboard shortcuts.</p>'
+    : '<p>Your account was set up by the operator: we keep your name, user name, e-mail address if one was given, a scrambled form of your password (never the password itself) and a colour that shows next to your edits. We also keep your settings and keyboard shortcuts.</p>'}
 <p>If you open a share link without signing in, you get a temporary guest account with a random name (“Anonymous Otter”). It is deleted about a month later, or its access moves to your account when you sign in.</p>
 <h3>Your projects</h3>
 <p>Everything you put into a project stays on the server: files, uploaded images, the PDFs we build, comments, tracked changes and earlier versions. Every project has a version history (a git repository). OverLyX commits your changes to it after a few minutes of editing, with your name and e-mail address as the author.</p>
@@ -69,7 +73,7 @@ td,th{text-align:left;vertical-align:top;padding:.35rem .5rem;border-bottom:1px 
 <h3>Server logs</h3>
 <p>The server's logs record events such as “user X opened project Y” or “a build failed”, together with user names and project or file names. For requests that fail, they also record the IP address and browser. The logs help us keep the service running and secure. They are deleted automatically, oldest first, once they reach a fixed size — currently after a few months.</p>
 <h3>In your browser</h3>
-<p>We set one sign-in cookie (<code>ol_session</code>, valid for 30 days). We also set short-lived cookies while you sign in with Google or connect Google Drive, which last 10 minutes. There are no advertising or tracking cookies.</p>
+<p>We set one sign-in cookie (<code>ol_session</code>, valid for 30 days)${google ? ', and short-lived ones (10 minutes) while you sign in with Google or connect Google Drive' : ''}. There are no advertising or tracking cookies.</p>
 <p>The app keeps your preferences in your browser. It also keeps copies of the documents you opened there, so it can work offline and reconnect without losing edits. <b>Sign out</b> removes those copies.</p>
 
 <h2>Who else sees your data</h2>
@@ -82,7 +86,7 @@ td,th{text-align:left;vertical-align:top;padding:.35rem .5rem;border-bottom:1px 
 <table>
 <tr><th>Service</th><th>What it gets</th><th>When</th></tr>
 <tr><td>Hetzner (Germany)</td><td>Hosts the server, so it stores everything above</td><td>Always</td></tr>
-<tr><td>Google</td><td>Signs you in. With Google Docs sync, the linked document's text and comments go to that Google Doc</td><td>When you sign in; Docs sync only if you connect Google Drive and link a document</td></tr>
+${google ? `<tr><td>Google</td><td>Signs you in. With Google Docs sync, the linked document's text and comments go to that Google Doc</td><td>When you sign in; Docs sync only if you connect Google Drive and link a document</td></tr>` : ''}
 <tr><td>GitHub (USA)</td><td>A backup copy of every project's version history, in private repositories that only the operator can access, updated every few minutes</td><td>Always. A project's owner can pause it in the project's <b>Git</b> dialog</td></tr>
 <tr><td>OpenRouter (USA), and the AI company whose model is used (Google by default; also Anthropic, OpenAI and others you can choose)</td><td>The text around your cursor or your selection, your instruction, and your document's LaTeX source as context. “Escalate to AI” for a document that will not build sends the whole <code>.tex</code> file. No account details</td><td>Only when you use an AI feature. All AI features are off until you switch them on in Settings</td></tr>
 <tr><td>OpenAI, through your own ChatGPT account</td><td>What the Agent panel's agent reads and writes in the project you give it. Its sign-in and conversations are stored on our server in your account's folder</td><td>Only if you use the Agent panel and sign in to ChatGPT there</td></tr>

@@ -1688,6 +1688,12 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .settings-nav button:hover { background: var(--row-hover); }
 .settings-nav button.active { background: var(--row-sel); font-weight: 600; }
 .settings-content { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 460px; }
+/* a phone: the sections become a row of tabs above the content, which takes the dialog's width (it was cut off at the right) */
+@media (max-width: 640px) {
+  .settings-dialog { flex-direction: column; gap: 10px; }
+  .settings-nav { flex-direction: row; flex-wrap: wrap; width: auto; border-right: 0; border-bottom: 1px solid var(--ui-border); padding: 0 0 8px; }
+  .settings-content { min-width: 0; }
+}
 .settings-content h3 { margin: 4px 0 0; }
 .lyx-editor.font-sample { flex: none; min-height: 0; max-width: none; margin: 0; padding: 8px 12px; font-size: 14.5px; line-height: 1.4; background: var(--page-bg); border: 1px solid var(--ui-border); border-radius: 4px; }
 .lyx-editor.font-sample p { margin: 0 0 2px; text-align: justify; hyphens: auto; }

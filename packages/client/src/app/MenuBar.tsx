@@ -187,7 +187,15 @@ function SubMenuItem({ entry, path, close }: { entry: MenuEntry; path: string[];
     const anchor = ref.current;
     if (!anchor) return;
     const r = anchor.getBoundingClientRect();
-    setPosition({ left: r.right + 240 > window.innerWidth - 8 ? Math.max(8, r.left - 240) : r.right, top: Math.max(8, Math.min(r.top, window.innerHeight - Math.min((entry.sub!.length + 1) * 24, window.innerHeight * .8))) });
+    const h = Math.min((entry.sub!.length + 1) * 24, window.innerHeight * .8);
+    // no room beside the item (a phone): below it — or above —, never over it: the submenu opened under
+    // the finger and the tap's click landed on its first entry (Text Style ▸ applied Italic)
+    if (r.right + 240 > window.innerWidth - 8 && r.left - 240 < 8) {
+      const below = r.bottom + h <= window.innerHeight - 8;
+      setPosition({ left: Math.max(8, Math.min(r.left + 16, window.innerWidth - 248)), top: below ? r.bottom : Math.max(8, r.top - h) });
+      return;
+    }
+    setPosition({ left: r.right + 240 > window.innerWidth - 8 ? Math.max(8, r.left - 240) : r.right, top: Math.max(8, Math.min(r.top, window.innerHeight - h)) });
   };
   return <div ref={ref} role="menuitem" tabIndex={-1} aria-haspopup="menu" aria-expanded={!!position} class="menu-item menu-sub" onMouseEnter={open} onMouseLeave={() => setPosition(null)} onClick={e => { if ((e.target as HTMLElement).closest('[role="menuitem"]') !== ref.current) return; e.stopPropagation(); open(); }} onKeyDown={e => {
     if (e.target !== ref.current) return;
