@@ -58,6 +58,12 @@ test.afterAll(() => rmSync(`${PROJECTS_DIR}/${PROJECT}`, { recursive: true, forc
 
 const frameLoc = (page: Page) => page.frameLocator('.dl-frame');
 const slides = (page: Page) => frameLoc(page).locator('section.slide');
+/** the canvas shows one slide at a time: slide `n` by its thumbnail in the rail, as a person would */
+async function gotoSlide(page: Page, n: number): Promise<void> {
+  await page.frameLocator('.dl-railframe').locator('section.slide').nth(n).click();
+  await expect(slides(page).nth(n)).toBeVisible();
+  await page.waitForTimeout(300);
+}
 const editFrame = (page: Page): Frame => page.frames().find(f => /[?&]ol=edit/.test(f.url()))!;
 const real = (errors: string[]) => errors.filter(e => !/localStorage/.test(e));
 
@@ -219,6 +225,50 @@ test('the canvas: a checkerboard from its menu, Back to the slide when zoomed in
   expect(real(errors)).toEqual([]);
 });
 
+test('one slide per canvas: the rail and Page Down move between them, a scroll springs back, the rail widens, the selection is named', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await setup(page);
+  const shownSlides = () => editFrame(page).evaluate(() => Array.from(document.querySelectorAll('section.slide')).map(s => ((s as HTMLElement).offsetHeight > 0 ? 1 : 0)).join(''));
+  const transform = () => page.locator('.dl-frame').evaluate(e => (e as HTMLElement).style.transform);
+  // only the first slide is on the canvas, the whole of it, in the middle
+  await expect.poll(shownSlides).toBe('10');
+  const c = (await page.locator('.dl-canvas').boundingBox())!;
+  const s1 = (await slides(page).first().boundingBox())!;
+  expect(s1.y).toBeGreaterThanOrEqual(c.y);
+  expect(s1.y + s1.height).toBeLessThanOrEqual(c.y + c.height);
+  expect(Math.abs((s1.x + s1.width / 2) - (c.x + c.width / 2))).toBeLessThan(3);
+  // a scroll pulls the slide, and it springs back into the middle
+  const rest = await transform();
+  await page.mouse.move(s1.x + s1.width / 2, s1.y + s1.height / 2);
+  for (let i = 0; i < 6; i++) await page.mouse.wheel(0, 60);
+  expect(await transform()).not.toBe(rest);
+  await expect.poll(transform, { timeout: 3000 }).toBe(rest);
+  await expect.poll(shownSlides).toBe('10');
+  // the four-way arrows over an object; selected, it is named at its corner and in the toolbar
+  const a = await at(page, 150, 450);
+  await page.mouse.move(a.x, a.y);
+  await expect.poll(() => editFrame(page).evaluate(() => document.documentElement.classList.contains('ol-over-obj'))).toBe(true);
+  await page.mouse.click(a.x, a.y);
+  await expect(page.locator('.dl-ctx .tb-label').first()).toHaveText(/shape/i);
+  // Page Down: the next slide; the rail: back to the first
+  await page.keyboard.press('PageDown');
+  await expect.poll(shownSlides).toBe('01');
+  await gotoSlide(page, 0);
+  await expect.poll(shownSlides).toBe('10');
+  // the rail's right edge dragged: wider thumbnails, kept for the next visit
+  const g = (await page.locator('[data-dl-railgrip]').boundingBox())!;
+  await page.mouse.move(g.x + 3, g.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(g.x + 103, g.y + 200, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => page.locator('.dl-rail').evaluate(e => (e as HTMLElement).getBoundingClientRect().width)).toBeGreaterThan(260);
+  expect(await page.evaluate(() => localStorage.getItem('ol.deckRail'))).toMatch(/^2\d\d$/);
+  await page.locator('[data-dl-railgrip]').dblclick();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('ol.deckRail'))).toBeNull();
+  expect(real(errors)).toEqual([]);
+});
+
 test('a finger moves a text box on a touch screen', async ({ browser }) => {
   const ctx = await browser.newContext({ baseURL: BASE_URL, hasTouch: true, viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
@@ -291,7 +341,7 @@ test("formulas on a slide are edited with LyX's formula editor", async ({ page }
   await setup(page, MATHDECK);
   await page.locator('[data-tb="dk-select"]').click();
   // (the second slide)
-  await slides(page).nth(1).scrollIntoViewIfNeeded();
+  await gotoSlide(page, 1);
   await page.waitForTimeout(400);
   await watchRawTex(page);
   // a double-click on a formula: LyX's math field over it — the same font, size and baseline as the
@@ -388,7 +438,7 @@ test("LaTeX on slides: a citation from the project's .bib, a numbered equation w
   await login(page);
   await setup(page, LATEXDECK);
   await page.locator('[data-tb="dk-select"]').click();
-  await slides(page).nth(1).scrollIntoViewIfNeeded();
+  await gotoSlide(page, 1);
   await page.waitForTimeout(400);
   const fr = editFrame(page);
   // the macros of the linked .tex file: \R typesets (no error)
@@ -500,6 +550,14 @@ test('Inkscape: union, editing the points of a path, the Bézier pen', async ({ 
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-tb="dk-node-done"]')).toHaveCount(0);
   await expect.poll(fileText, { timeout: 15000 }).toMatch(/left: 59\.5px; top: 359\.5px; width: 191px; height: 191px; overflow: visible" viewBox="-40\.5 -40\.5 191 191"/);
+
+  // a right-click on the drawing: named "SVG" (at its corner, in the toolbar), its menu edits its points
+  await page.mouse.click(u.x, u.y, { button: 'right' });
+  await expect(page.locator('.dl-ctx .tb-label').first()).toHaveText(/svg/i);
+  await page.locator('.ctx-menu .ctx-item', { hasText: 'Edit points' }).click();
+  await expect(page.locator('[data-tb="dk-node-done"]')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-tb="dk-node-done"]')).toHaveCount(0);
 
   // the Bézier pen (B): two clicks and a drag, Enter — an open path with a curve in it
   await page.locator('[data-tb="dk-lines"]').click();

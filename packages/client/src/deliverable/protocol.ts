@@ -112,6 +112,12 @@ export interface SelItem {
 
 export interface SlideBox { index: number; path: Path; rect: Rect; title: string }
 
+/**
+ * A deck or poster on the canvas shows one slide at a time (runtime edit.ts): the slide shown, where it
+ * is in the frame's document (CSS px) and the frame's height that holds it with room around it.
+ */
+export interface Solo { slide: number; rect: Rect; height: number }
+
 /** editor → runtime */
 export type ToRuntime =
   | { ol: 'source'; version: number; html: string }
@@ -162,8 +168,8 @@ export type ToRuntime =
 /** runtime → editor */
 export type FromRuntime =
   /** `macros`: those of the .tex files the page links (for LyX's formula editor) */
-  | { ol: 'ready'; version: number | null; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number; macros?: Record<string, MathJaxMacro> }
-  | { ol: 'layout'; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number }
+  | { ol: 'ready'; version: number | null; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number; macros?: Record<string, MathJaxMacro>; solo?: Solo }
+  | { ol: 'layout'; kind: DeliverableKind; slides: SlideBox[]; width: number; height: number; docHeight: number; solo?: Solo }
   | { ol: 'selection'; version: number; items: SelItem[] }
   | { ol: 'ops'; version: number; ops: HtmlOp[]; select?: 'inserted' | 'keep' | Path[]; then?: 'editText' }
   /** a new object drawn: its box (slide px), and for lines / the pen the points (slide px, in drawing order) */
@@ -180,8 +186,10 @@ export type FromRuntime =
   | { ol: 'scroll'; y: number }
   /** a pinch or Ctrl+wheel in the frame: zoom by `factor` about a point (frame client px; its document y) */
   | { ol: 'zoom'; factor: number; clientX: number; clientY: number; pageY: number }
-  /** sideways panning asked for in the frame (frame px; the editor pans what overflows its canvas) */
-  | { ol: 'pan'; dx: number }
+  /** panning asked for in the frame (frame px; the editor pans what overflows its canvas): a wheel or trackpad scroll, a finger */
+  | { ol: 'pan'; dx: number; dy?: number; finger?: boolean }
+  /** the finger that panned was lifted (the editor lets the canvas spring back) */
+  | { ol: 'panEnd' }
   /** the page's own colours: what is around its slides (the body's background) and the slides' usual one */
   | { ol: 'colors'; desk: string; page: string }
   /** crop mode started (the picture's path) or ended (null) */

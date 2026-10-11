@@ -14,7 +14,7 @@
  * turns true once fonts, math and pictures have settled (the renderer waits for it).
  */
 import type { ToRuntime, Path } from '../protocol';
-import { MODE, post, state, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign } from './env';
+import { MODE, post, state, detectKind, slideBoxes, pageSize, sendLayout, slides, srcOf, pathOf, docRect, isForeign, layoutHooks } from './env';
 import { startMath, typesetPage } from './math';
 import { renderCites, refreshCites, addEntries, CITE_CSS } from './cite';
 import { applySource, whenTypeset } from './reconcile';
@@ -24,6 +24,7 @@ import { nodeCommand } from './pathedit';
 import { setView, refreshView, reportColors } from './view';
 import { startPresenting } from './present';
 import { report, rememberPage } from './report';
+import { ensureSolo } from './solo';
 
 function addStyle(css: string): HTMLStyleElement {
   const s = document.createElement('style');
@@ -177,7 +178,7 @@ function onMessage(e: MessageEvent): void {
       if (!ok) return;
       // (the kind as the text has it now: the page first served may have been another version)
       state.kind = detectKind();
-      if (MODE === 'edit') { edit.afterSource(); void whenTypeset().then(() => edit.draw()); }
+      if (MODE === 'edit') { ensureSolo(); edit.afterSource(); void whenTypeset().then(() => edit.draw()); }
       if (MODE === 'thumb') drawRail();
       if (first) void settle().then(() => { sendLayout(); if (MODE === 'edit') { refreshView(); reportColors(); } });
       else requestAnimationFrame(() => { sendLayout(); if (MODE === 'thumb') drawRail(); if (MODE === 'edit') { refreshView(); reportColors(); } });
@@ -269,12 +270,12 @@ function init(): void {
   if (document.body) { renderCites([document.body]); refreshCites(); }
   window.__ol = { report, version: () => state.version, slides: () => slideBoxes(), size: pageSize };
   if (MODE === 'present') startPresenting();
-  if (MODE === 'edit') edit.startEditing();
+  if (MODE === 'edit') { edit.startEditing(); ensureSolo(); }
   if (MODE === 'thumb') startThumb();
   if (MODE === 'edit' || MODE === 'thumb') {
     addEventListener('message', onMessage);
     const sz = pageSize();
-    post({ ol: 'ready', version: null, kind: state.kind, slides: slideBoxes(), width: sz.width, height: sz.height, docHeight: document.documentElement.scrollHeight, macros: window.__OL?.macros });
+    post({ ol: 'ready', version: null, kind: state.kind, slides: slideBoxes(), width: sz.width, height: sz.height, docHeight: document.documentElement.scrollHeight, macros: window.__OL?.macros, solo: layoutHooks.solo?.() });
   }
   void settle().then(() => {
     slideBoxes();   // (numbers the slides for the renderer's screenshots)

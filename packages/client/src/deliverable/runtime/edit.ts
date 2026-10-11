@@ -29,7 +29,8 @@ import { stepOf } from '@overlyx/core/html/refs.ts';
 import { refreshView } from './view';
 import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, redrawCrop, type CropContext } from './crop';
 import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, insertRefChip, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
-import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing } from './pathedit';
+import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
+import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -42,10 +43,18 @@ let peers: { paths: Path[]; color: string; name: string }[] = [];
 let editing: HTMLElement | null = null;
 let editTimer: ReturnType<typeof setTimeout> | null = null;
 let editStartHtml = '';
+/** the cursor while dragging (the move arrows, a handle's resize arrows, rotation) */
+let dragCss: HTMLStyleElement | null = null;
 
 const TEXT_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'span', 'b', 'strong', 'i', 'em', 'u', 's', 'sub', 'sup', 'small', 'mark', 'a', 'br', 'ul', 'ol', 'li', 'blockquote', 'code', 'q', 'cite', 'abbr', 'time', 'label', 'font', 'section', 'article', 'header', 'footer', 'figcaption', 'dt', 'dd', 'dl', 'td', 'th', 'caption', 'big', 'del', 'ins', 'kbd', 'var', 'samp', 'strike']);
 const REPLACED = new Set(['img', 'svg', 'video', 'canvas', 'iframe', 'object', 'embed', 'picture', 'audio']);
 const SVG_SHAPES = new Set(['rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'path', 'text', 'tspan', 'g', 'use', 'image']);
+/**
+ * The four-way arrows over an object a drag moves, and while it moves — drawn, not the system's `move`
+ * cursor, which some browsers (Safari, Chrome on macOS) show as a hand or not at all.
+ */
+const MOVE_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='M12 1.5l3.6 4h-2.4v5.3h5.3V8.4l4 3.6-4 3.6v-2.4h-5.3v5.3h2.4l-3.6 4-3.6-4h2.4v-5.3H5.5v2.4L1.5 12l4-3.6v2.4h5.3V5.5H8.4z' fill='black' stroke='white' stroke-width='1.2' stroke-linejoin='round'/></svg>`;
+export const MOVE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(MOVE_SVG).replace(/'/g, '%27')}") 12 12, move`;
 const ROT_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M18 7a8 8 0 1 0 2 6' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M18 7a8 8 0 1 0 2 6' fill='none' stroke='black' stroke-width='1.6'/%3E%3Cpath d='M14 3l5 4-6 2z' fill='black' stroke='white' stroke-width='.8'/%3E%3C/svg%3E") 12 12, grab`;
 
 export function startEditing(): void {
@@ -63,13 +72,15 @@ export function startEditing(): void {
     .hover { position: absolute; outline: 1px solid rgba(47,111,222,.55); pointer-events: none; transform-origin: 50% 50%; }
     .handle { position: absolute; width: var(--h); height: var(--h); margin: calc(var(--h) / -2) 0 0 calc(var(--h) / -2); background: #fff; border: 1.5px solid #2f6fde; box-sizing: border-box; border-radius: 2px; pointer-events: auto; touch-action: none; }
     .handle.rot { border-radius: 50%; background: #2f6fde; border-color: #fff; cursor: ${ROT_CURSOR}; }
-    .handle.end { border-radius: 50%; width: calc(var(--h) * 1.25); height: calc(var(--h) * 1.25); margin: calc(var(--h) * -0.625) 0 0 calc(var(--h) * -0.625); cursor: move; }
+    .handle.end { border-radius: 50%; width: calc(var(--h) * 1.25); height: calc(var(--h) * 1.25); margin: calc(var(--h) * -0.625) 0 0 calc(var(--h) * -0.625); cursor: ${MOVE_CURSOR}; }
     .stem { position: absolute; background: #2f6fde; pointer-events: none; transform-origin: 50% 100%; }
     .lock { position: absolute; transform: translate(-100%, -100%); font-size: calc(12px * var(--s)); line-height: 1; pointer-events: none; }
     .guide { position: absolute; background: #e8467c; pointer-events: none; }
     .draw { position: absolute; border: 1.5px dashed #2f6fde; background: rgba(47,111,222,.08); pointer-events: none; }
     .drop { position: absolute; border: 3px dashed #2f6fde; background: rgba(47,111,222,.10); pointer-events: none; box-sizing: border-box; }
-    .tag { position: absolute; transform: translateY(-100%); background: #2f6fde; color: #fff; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; font-size: calc(11px * var(--s)); }
+    .tag { position: absolute; transform: translateY(calc(-100% - 3px * var(--s))); background: #2f6fde; color: #fff; padding: calc(1px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 600 calc(10.5px * var(--s)) / 1.35 system-ui, -apple-system, sans-serif; letter-spacing: .02em; }
+    .tag.editing { background: #e8a33d; }
+    .tag.locked { background: #8a93a6; }
     .step { position: absolute; transform: translate(calc(-100% - 5px * var(--s)), 0); min-width: calc(16px * var(--s)); height: calc(16px * var(--s)); line-height: calc(16px * var(--s)); padding: 0 calc(3px * var(--s)); box-sizing: border-box; border-radius: calc(8px * var(--s)); background: #2f6fde; color: #fff; text-align: center; font: 600 calc(10px * var(--s)) system-ui, sans-serif; pointer-events: none; box-shadow: 0 0 0 calc(1.5px * var(--s)) #fff; }
     .peer-tag { position: absolute; transform: translateY(-100%); color: #fff; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; font-size: calc(11px * var(--s)); }
     svg.ink { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
@@ -83,10 +94,14 @@ export function startEditing(): void {
     html.ol-edit, html.ol-edit body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
     html.ol-edit [data-ol-editing], html.ol-edit [data-ol-editing] * { -webkit-user-select: text; user-select: text; }
     html.ol-tool-draw, html.ol-tool-draw * { cursor: crosshair !important; }
-    html.ol-dragging, html.ol-dragging * { cursor: grabbing !important; user-select: none !important; }
+    html.ol-dragging, html.ol-dragging * { user-select: none !important; }
+    html.ol-over-obj, html.ol-over-obj * { cursor: ${MOVE_CURSOR} !important; }
     html.ol-edit a { cursor: default; }
     ${CHIP_CSS}`;
   document.head.appendChild(css);
+  dragCss = document.createElement('style');
+  dragCss.setAttribute('data-ol-runtime', '');
+  document.head.appendChild(dragCss);
   document.documentElement.classList.add('ol-edit');
 
   addEventListener('pointerdown', onPointerDown, true);
@@ -108,7 +123,11 @@ export function startEditing(): void {
   addEventListener('gesturestart', onGesture as EventListener, { capture: true, passive: false } as AddEventListenerOptions);
   addEventListener('gesturechange', onGesture as EventListener, { capture: true, passive: false } as AddEventListenerOptions);
   addEventListener('submit', e => e.preventDefault(), true);
-  addEventListener('scroll', () => { draw(); post({ ol: 'scroll', y: scrollY }); visibleSlide(); trackChip(); }, { passive: true });
+  addEventListener('scroll', () => {
+    // one slide on the canvas: the editor pans the frame, the page never scrolls (a focus could scroll it)
+    if (isSolo() && (scrollX || scrollY)) { scrollTo(0, 0); return; }
+    draw(); post({ ol: 'scroll', y: scrollY }); visibleSlide(); trackChip();
+  }, { passive: true });
   addEventListener('resize', () => { draw(); sendLayout(); refreshView(); trackChip(); });
   new ResizeObserver(() => { draw(); refreshView(); trackChip(); }).observe(document.documentElement);
 }
@@ -118,7 +137,7 @@ export function startEditing(): void {
 export function setScale(s: number, anchor?: { docY: number; screenY: number }): void {
   scale = s > 0 ? s : 1;
   // zoomed about a point: that point of the page stays where it is on the screen
-  if (anchor) scrollTo({ top: Math.max(0, anchor.docY - anchor.screenY / scale) });
+  if (anchor && !isSolo()) scrollTo({ top: Math.max(0, anchor.docY - anchor.screenY / scale) });
   draw();
   redrawCrop();
   redrawNodes();
@@ -160,8 +179,15 @@ export function setPeers(p: typeof peers): void { peers = p; draw(); }
 
 export function selectPaths(paths: Path[]): void {
   selected = paths.map(liveAt).filter((e): e is Element => !!e);
+  if (revealSlideOf(selected[0] ?? null)) afterReveal();
   report();
   draw();
+}
+
+/** another slide is shown now: what belonged to the one before goes, the editor learns the new layout */
+function afterReveal(): void {
+  hoverEl = null;
+  requestAnimationFrame(() => { sendLayout(); draw(); });
 }
 
 /** the selection, for the arrangement commands (arrange.ts) */
@@ -180,6 +206,7 @@ export function afterSource(): void {
 export function editTextAt(path: Path, selectAll = false, math = false): void {
   const el = liveAt(path);
   if (!el) return;
+  if (revealSlideOf(el)) afterReveal();
   selected = [el];
   report();
   if (canType(el)) beginText(el as HTMLElement, null, selectAll && !math, math);
@@ -482,6 +509,31 @@ const handleAt = (b: Box, fx: number, fy: number): [number, number] => {
   return [b.cx + x, b.cy + y];
 };
 
+/** the four corners of a (rotated) box */
+const cornersOf = (b: Box): [number, number][] => [handleAt(b, 0, 0), handleAt(b, 1, 0), handleAt(b, 0, 1), handleAt(b, 1, 1)];
+
+const SVG_PART_NAMES: Record<string, string> = { path: 'path', rect: 'rectangle', circle: 'circle', ellipse: 'ellipse', line: 'line', polyline: 'polyline', polygon: 'polygon', text: 'text', tspan: 'text', g: 'group', use: 'symbol', image: 'picture' };
+const KIND_NAMES: Record<ObjKind, [string, string]> = {
+  text: ['Text', 'texts'], shape: ['Shape', 'shapes'], line: ['Line', 'lines'], image: ['Picture', 'pictures'], svg: ['SVG', 'SVGs'],
+  svgpart: ['SVG part', 'SVG parts'], group: ['Group', 'groups'], formula: ['Formula', 'formulas'], other: ['Object', 'objects'],
+};
+const OTHER_NAMES: Record<string, string> = { video: 'Video', audio: 'Audio', canvas: 'Canvas', iframe: 'Embedded page', object: 'Embedded object', embed: 'Embedded object', table: 'Table' };
+
+/** what is selected, in a word or two: "SVG", "SVG ▸ path", "Picture", "3 shapes", "2 objects" (the toolbar's sections are named the same) */
+export function selectionLabel(els: Element[]): string {
+  if (!els.length) return '';
+  const kinds = els.map(kindOf);
+  if (els.length > 1) {
+    const k = kinds[0];
+    return kinds.every(x => x === k) ? `${els.length} ${KIND_NAMES[k][1]}` : `${els.length} objects`;
+  }
+  const el = els[0], k = kinds[0];
+  if (k === 'svgpart') return `SVG ▸ ${SVG_PART_NAMES[el.localName] ?? el.localName}`;
+  if (k === 'line' && el.localName === 'svg' && !lineOf(el)) return 'Drawing';
+  if (k === 'other') return OTHER_NAMES[el.localName] ?? 'Object';
+  return KIND_NAMES[k][0];
+}
+
 const RESIZE_CURSORS = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'];
 const HANDLE_ANGLE: Record<string, number> = { e: 0, se: 45, s: 90, sw: 135, w: 180, nw: 225, n: 270, ne: 315 };
 const cursorFor = (h: string, a: number) => RESIZE_CURSORS[(((Math.round((HANDLE_ANGLE[h] + a) / 45) % 4) + 4) % 4)];
@@ -496,6 +548,9 @@ function lineEnds(line: SVGLineElement): [[number, number], [number, number]] | 
 
 export function draw(): void {
   if (!layer) return;
+  // the four-way arrows over an object a drag would move (not over the text being retyped)
+  const over = !!hoverEl && hoverEl.isConnected && !editing && !drag && tool === 'select' && movable(hoverEl) && !isLocked(hoverEl) && !isCropping() && !isNodeEditing();
+  document.documentElement.classList.toggle('ol-over-obj', over);
   if (isCropping() || isNodeEditing()) { layer.innerHTML = ''; return; }
   const h = 8 / scale;
   layer.style.setProperty('--h', `${h}px`);
@@ -522,6 +577,14 @@ export function draw(): void {
     const locked = isLocked(el);
     parts.push(frameAt(`frame${el === editing ? ' editing' : ''}${locked ? ' locked' : ''}`, b, `border-width:${bw}px`));
     if (locked) { const [x, y] = handleAt(b, 1, 0); parts.push(`<div class="lock" style="left:${x}px;top:${y}px">🔒</div>`); }
+  }
+  // what is selected, in a word, at its top left corner (the toolbar's section is named the same)
+  const live = selected.filter(e => e.isConnected);
+  if (live.length && !(drag?.moved && drag.kind !== 'marquee')) {
+    let x = Infinity, y = Infinity;
+    for (const el of live) { const c = cornersOf(boxOf(el)); for (const [cx, cy] of c) { x = Math.min(x, cx); y = Math.min(y, cy); } }
+    const cls = live.some(e => e === editing) ? ' editing' : live.every(isLocked) ? ' locked' : '';
+    parts.push(`<div class="tag${cls}" data-ol-kind style="left:${x}px;top:${y}px">${esc(selectionLabel(live))}</div>`);
   }
   if (selected.length === 1 && !editing && selected[0].isConnected && !isLocked(selected[0]) && !drag?.moved) {
     const el = selected[0];
@@ -772,6 +835,7 @@ function release(): void {
   removeEventListener('pointerup', onDragEnd, true);
   removeEventListener('pointercancel', onDragEnd, true);
   document.documentElement.classList.remove('ol-dragging');
+  if (dragCss) dragCss.textContent = '';
 }
 
 const SNAP = 6;
@@ -809,12 +873,19 @@ function onDragMove(e: PointerEvent): void {
   if (!drag.moved) {
     drag.moved = true;
     if (drag.hold) clearTimeout(drag.hold);
-    if (drag.kind !== 'pan') document.documentElement.classList.add('ol-dragging');
+    if (drag.kind !== 'pan') {
+      document.documentElement.classList.add('ol-dragging');
+      // the cursor of what is dragged stays on wherever the pointer goes (Safari keeps the cursor it had at the press)
+      const b = drag.kind === 'resize' && drag.els[0] ? boxOf(drag.els[0].el) : null;
+      const cur = drag.kind === 'move' || drag.kind === 'end' ? MOVE_CURSOR : drag.kind === 'rotate' ? ROT_CURSOR : b && drag.handle ? cursorFor(drag.handle, b.a) : drag.kind === 'draw' || drag.kind === 'pen' ? 'crosshair' : '';
+      if (dragCss && cur) dragCss.textContent = `html.ol-dragging, html.ol-dragging * { cursor: ${cur} !important; }`;
+    }
   }
   if (drag.kind === 'pan') {
     const last = drag.last ?? { x: e.clientX, y: e.clientY };
-    scrollBy(0, last.y - e.clientY);
-    if (last.x !== e.clientX) post({ ol: 'pan', dx: e.clientX - last.x });
+    if (isSolo()) post({ ol: 'pan', dx: e.clientX - last.x, dy: e.clientY - last.y, finger: true });
+    else scrollBy(0, last.y - e.clientY);
+    if (!isSolo() && last.x !== e.clientX) post({ ol: 'pan', dx: e.clientX - last.x });
     drag.last = { x: e.clientX, y: e.clientY };
     return;
   }
@@ -949,6 +1020,7 @@ function onDragEnd(e: PointerEvent): void {
   if (!d) return;
   if (d.hold) clearTimeout(d.hold);
   if (d.kind === 'pan') {
+    if (d.moved && isSolo()) post({ ol: 'panEnd' });
     // a tap on nothing: the selection goes
     if (!d.moved && !e.shiftKey) { selected = []; report(); }
     draw();
@@ -1102,6 +1174,14 @@ function onWheel(e: WheelEvent): void {
     e.preventDefault();
     const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
     post({ ol: 'zoom', factor: Math.exp(-e.deltaY * k * 0.01), clientX: e.clientX, clientY: e.clientY, pageY: e.pageY });
+    return;
+  }
+  // one slide on the canvas: a scroll pans it (the editor lets it spring back to the middle)
+  if (isSolo()) {
+    e.preventDefault();
+    const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+    const sx = e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX, sy = e.shiftKey && !e.deltaX ? 0 : e.deltaY;
+    post({ ol: 'pan', dx: -sx * k, dy: -sy * k });
     return;
   }
   const dx = e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX;
@@ -1510,6 +1590,8 @@ function onKeyDown(e: KeyboardEvent): void {
     beginText(selected[0] as HTMLElement, null, true);
     return;
   }
+  // one slide on the canvas: Page Down / Up go to the next / previous one (the editor's)
+  if ((e.key === 'PageDown' || e.key === 'PageUp') && isSolo()) { e.preventDefault(); fwd(e); return; }
   if (e.key.length === 1 || e.key === 'F2') fwd(e);
 }
 
@@ -1584,6 +1666,8 @@ function onContextMenu(e: MouseEvent): void {
   if (editing) return;
   const el = objectFor(e.target as Element, e.ctrlKey || e.metaKey);
   if (el && !selected.includes(el)) { selected = [el]; report(); draw(); }
+  // the shape of a drawing under the pointer: the menu's "Edit points" edits that one
+  setMenuShape(el && e.target instanceof SVGElement && el.contains(e.target) ? e.target : null);
   const on = el ? 'object' : slideOf(e.target as Element) ? 'slide' : 'canvas';
   const s = slideOf(e.target as Element);
   post({ ol: 'contextmenu', x: e.clientX, y: e.clientY, on, slide: s ? slides().indexOf(s) : undefined });
@@ -1593,6 +1677,7 @@ function onContextMenu(e: MouseEvent): void {
 
 let lastVisible = -1;
 export function visibleSlideEl(): HTMLElement | null {
+  if (isSolo()) return slides()[soloIndex()] ?? null;
   const ss = slides();
   const mid = scrollY + innerHeight / 2;
   let best: HTMLElement | null = null, bd = Infinity;
@@ -1600,12 +1685,28 @@ export function visibleSlideEl(): HTMLElement | null {
   return best;
 }
 export function visibleSlide(): void {
+  if (isSolo()) { const k = soloIndex(); if (k !== lastVisible) { lastVisible = k; post({ ol: 'visible', slide: k }); } return; }
   const s = visibleSlideEl();
   const i = s ? slides().indexOf(s) : -1;
   if (i !== lastVisible) { lastVisible = i; post({ ol: 'visible', slide: i }); }
 }
 
 export function scrollToSlide(i: number, smooth = false): void {
+  if (isSolo()) {
+    if (!showSlide(i)) return;
+    lastVisible = soloIndex();
+    // what was going on on the slide before ends there
+    stopText();
+    if (isCropping()) endCrop(true);
+    endNodes();
+    hoverEl = null;
+    const s = slides()[soloIndex()];
+    const kept = selected.filter(el => s && s.contains(el));
+    if (kept.length !== selected.length) { selected = kept; report(); }
+    draw();
+    sendLayout();
+    return;
+  }
   const s = slides()[i];
   if (!s) return;
   const r = docRect(s);

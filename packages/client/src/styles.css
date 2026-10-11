@@ -2501,10 +2501,20 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .dl-rail { width: 170px; flex: none; position: relative; overflow: hidden; border-right: 1px solid var(--ui-border); background: var(--ui-bg); display: flex; flex-direction: column; }
 .dl-railframe { position: absolute; left: 8px; top: 0; border: 0; transform-origin: 0 0; background: transparent; }
 .dl-rail-actions { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px; display: flex; justify-content: center; background: linear-gradient(transparent, var(--ui-bg) 40%); }
+/* the rail's right edge: dragged sideways, the slides get wider or narrower */
+.dl-rail-grip { position: absolute; top: 0; right: 0; bottom: 0; width: 7px; z-index: 3; cursor: col-resize; touch-action: none; }
+.dl-rail-grip::after { content: ''; position: absolute; top: 0; bottom: 0; right: 0; width: 2px; background: transparent; transition: background .12s; }
+.dl-rail-grip:hover::after, .dl-rail-grip.on::after { background: var(--accent); }
 .dl-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .dl-canvas { flex: 1; position: relative; overflow: hidden; background: #d9dbe0; }
 .dl-frame { position: absolute; top: 0; border: 0; transform-origin: 0 0; background: #fff; }
 .dl-editor[data-kind="deck"] .dl-frame, .dl-editor[data-kind="poster"] .dl-frame { background: transparent; }
+/* one slide on the canvas: placed by a transform from its corner (deliverable/viewport.ts) */
+.dl-frame.solo { top: 0; left: 0; will-change: transform; }
+/* the contextual tools in sections named as the selection's label on the canvas */
+.dl-ctx-secs { display: flex; align-items: center; width: max-content; }
+.dl-ctx-secs > .toolbar + .toolbar { margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--ui-border); }
+.dl-ctx-secs .tb-label { white-space: nowrap; }
 .dl-notes { flex: none; height: 74px; border-top: 1px solid var(--ui-border); background: var(--surface); }
 .dl-notes textarea { width: 100%; height: 100%; box-sizing: border-box; border: 0; resize: none; padding: 8px 12px; font: 13px/1.4 var(--ui-font); background: transparent; color: var(--ui-fg); outline: none; }
 .dl-code { width: min(46%, 640px); flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--ui-border); background: var(--surface); }

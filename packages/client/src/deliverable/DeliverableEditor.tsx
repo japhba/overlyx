@@ -19,7 +19,8 @@ import { Toolbar } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
 import type { DeliverableHost } from './host';
 import { webHost } from './webHost';
-import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress } from './protocol';
+import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo } from './protocol';
+import { SlideView } from './viewport';
 import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
 import { deckToolbar, type DeckTextActions } from './decktoolbar';
@@ -37,6 +38,11 @@ import { useMathPanels } from '../app/toolbars';
 import { parseSource, opSplices, elementAt, elementChildren, attr } from '@overlyx/core/html/source.ts';
 
 const PAD = 48;
+/** the slide rail's width: by default, and as far as its edge can be dragged */
+const RAIL_W = 170, RAIL_MIN = 110, RAIL_MAX = 480;
+function loadRailW(): number {
+  try { const v = Number(localStorage.getItem('ol.deckRail')); return v >= RAIL_MIN && v <= RAIL_MAX ? v : RAIL_W; } catch { return RAIL_W; }
+}
 const CHECKER = 'repeating-conic-gradient(#e3e5e8 0 25%, #ffffff 0 50%) 0 0 / 16px 16px';
 const NO_VIEW: CanvasView = { desk: null, deskChecker: false, pageChecker: false };
 
@@ -46,6 +52,13 @@ function loadView(path: string): CanvasView {
 }
 function saveView(path: string, v: CanvasView): void {
   try { if (v.desk === null && !v.deskChecker && !v.pageChecker) localStorage.removeItem('ol.canvas:' + path); else localStorage.setItem('ol.canvas:' + path, JSON.stringify(v)); } catch { /* private window */ }
+}
+
+/** the same slide shown in the same place (a layout that changes nothing does not render the editor) */
+function sameSolo(a: Solo | null, b: Solo | null): boolean {
+  if (!a || !b) return a === b;
+  const r = a.rect, q = b.rect;
+  return a.slide === b.slide && Math.abs(a.height - b.height) < 2 && Math.abs(r.x - q.x) < 1 && Math.abs(r.y - q.y) < 1 && Math.abs(r.w - q.w) < 1 && Math.abs(r.h - q.h) < 1;
 }
 
 /** the natural size of a picture file (null when the browser cannot decode it) */
@@ -91,7 +104,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const presentFrame = useRef<HTMLIFrameElement>(null);
   const [kind, setKind] = useState<DeliverableKind>('deck');
   const [slides, setSlides] = useState<SlideBox[]>([]);
+  /** a deck's or poster's one slide on the canvas (runtime solo.ts): the frame is sized to it and panned here (viewport.ts) */
+  const [solo, setSolo] = useState<Solo | null>(null);
   const [pageW, setPageW] = useState(1280);
+  const [pageH, setPageH] = useState(0);
+  const [railW, setRailW] = useState(loadRailW);
   const [box, setBox] = useState({ w: 800, h: 600 });
   const [railH, setRailH] = useState(600);
   const [zoom, setZoom] = useState(1);
@@ -138,10 +155,16 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const pending = useRef<{ select?: Path[]; editText?: Path; math?: boolean } | null>(null);
 
   const frameW = kind === 'page' ? (device === 'mobile' ? 390 : 1280) : pageW + PAD * 2;
-  const fit = Math.max(0.05, Math.min(kind === 'page' ? 1 : 2, (box.w - 24) / frameW));
+  const soloOn = !!solo && kind !== 'page' && solo.rect.w > 0 && solo.rect.h > 0;
+  /** room kept around the slide on the canvas (screen px) */
+  const margin = box.w < 600 ? 12 : 32;
+  // one slide: the whole of it fits (both ways); a web page: its width
+  const fit = soloOn
+    ? Math.max(0.05, Math.min(2, (box.w - 2 * margin) / solo!.rect.w, (box.h - 2 * margin) / solo!.rect.h))
+    : Math.max(0.05, Math.min(kind === 'page' ? 1 : 2, (box.w - 24) / frameW));
   const scale = fit * zoom;
   const showRail = kind === 'deck';
-  const railScale = Math.max(0.05, 150 / frameW);
+  const railScale = Math.max(0.05, (railW - 20) / frameW);
 
   const toFrame = (f: HTMLIFrameElement | null, msg: ToRuntime) => { try { f?.contentWindow?.postMessage(msg, '*'); } catch { /* gone */ } };
   const toCanvas = (msg: ToRuntime) => toFrame(canvasFrame.current, msg);
@@ -256,6 +279,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const selRef = useRef(sel); selRef.current = sel;
   const kindRef = useRef(kind); kindRef.current = kind;
   const currentRef = useRef(current); currentRef.current = current;
+  const slidesRef = useRef(slides); slidesRef.current = slides;
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -277,6 +301,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             canvasReady.current = true;
             setKind(m.kind);
             if (m.width) setPageW(m.width);
+            if (m.height) setPageH(m.height);
+            setSolo(m.solo ?? null);
             toCanvas({ ol: 'scale', scale });
             toCanvas({ ol: 'tool', tool });
             toCanvas({ ol: 'view', view: viewRef.current });
@@ -296,6 +322,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             setKind(m.kind);
             setSlides(m.slides);
             if (m.width) setPageW(m.width);
+            if (m.height) setPageH(m.height);
+            setSolo(prev => sameSolo(prev, m.solo ?? null) ? prev : m.solo ?? null);
             const p = pending.current;
             if (p) {
               pending.current = null;
@@ -345,8 +373,19 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           break;
         }
         case 'pasteFiles': void placeFiles(m.files, m.slide, m.at); break;
-        case 'zoom': if (fromCanvas) zoomAbout(m.factor, m.clientX, m.clientY, m.pageY); break;
-        case 'pan': if (fromCanvas) setPanX(p => p + m.dx * scaleRef.current); break;
+        case 'zoom':
+          if (!fromCanvas) break;
+          if (soloRef.current) { const q = slideView.toCanvas(m.clientX, m.clientY); if (q) zoomSolo(m.factor, q.x, q.y); }
+          else zoomAbout(m.factor, m.clientX, m.clientY, m.pageY);
+          break;
+        case 'pan':
+          if (!fromCanvas) break;
+          if (soloRef.current) {
+            const s = scaleRef.current;
+            if (m.finger) slideView.panBy(m.dx * s, (m.dy ?? 0) * s); else slideView.scroll(m.dx * s, (m.dy ?? 0) * s);
+          } else setPanX(p => p + m.dx * scaleRef.current);
+          break;
+        case 'panEnd': if (fromCanvas) slideView.release(); break;
         case 'colors': if (fromCanvas) setColors({ desk: m.desk, page: m.page }); break;
         case 'cropping': if (fromCanvas) setCropping(m.path); break;
         case 'scroll': if (fromCanvas) { scrollRef.current = m.y; setScrollY(m.y); } break;
@@ -374,6 +413,16 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   }, [canvasBox.current, railBox.current]);
   const scaleRef = useRef(scale); scaleRef.current = scale;
   useEffect(() => { const anchor = anchorRef.current ?? undefined; anchorRef.current = null; toCanvas({ ol: 'scale', scale, anchor }); }, [scale]);
+  // one slide on the canvas: the frame's place (viewport.ts), set outside renders
+  const soloRef = useRef(soloOn); soloRef.current = soloOn;
+  const viewInput = useRef<{ box: { w: number; h: number }; rect: Rect; scale: number; margin: number } | null>(null);
+  viewInput.current = soloOn ? { box, rect: solo!.rect, scale, margin } : null;
+  const slideView = useMemo(() => new SlideView(() => canvasFrame.current, () => viewInput.current), []);
+  useEffect(() => () => slideView.destroy(), [slideView]);
+  useLayoutEffect(() => { if (soloOn) slideView.render(); });
+  // another slide: in the middle again (the zoom stays, as in PowerPoint)
+  useLayoutEffect(() => { if (soloOn) slideView.recentre(false); }, [solo?.slide, soloOn]);
+  useLayoutEffect(() => { if (soloOn) slideView.refit(); }, [box.w, box.h, solo?.rect.w, solo?.rect.h]);
   useEffect(() => { toRail({ ol: 'scale', scale: railScale }); }, [railScale]);
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
   useEffect(() => { toCanvas({ ol: 'tool', tool }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool]);
@@ -401,7 +450,16 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     anchorRef.current = { docY: pageY, screenY: clientY * s0 };
     setZoom(z1);
   };
+  /** one slide on the canvas: zoom by `factor` about a canvas point (no smaller than half the fit) */
+  const zoomSolo = (factor: number, px: number, py: number) => {
+    const z0 = zoomRef.current, f = fitRef.current;
+    const z1 = Math.max(0.5, Math.min(MAX_ZOOM / f, z0 * factor));
+    if (Math.abs(z1 - z0) < 1e-4) return;
+    slideView.zoomed(f * z0, f * z1, px, py);
+    setZoom(z1);
+  };
   const zoomStep = (factor: number) => {
+    if (soloRef.current) { const b = boxRef.current; zoomSolo(factor, b.w / 2, b.h / 2); return; }
     const sc = scaleRef.current, b = boxRef.current;
     const left = leftFor(sc, panRef.current);
     const cx = (b.w / 2 - left) / sc, cy = b.h / 2 / sc;
@@ -410,7 +468,31 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const fitSlide = () => {
     setZoom(1);
     setPanX(0);
+    if (soloRef.current) { slideView.recentre(true); return; }
     setTimeout(() => toCanvas({ ol: 'scrollTo', slide: currentRef.current, smooth: true }), 30);
+  };
+
+  /* ------------------------------------------------------------- the rail's width (its right edge dragged) */
+
+  const setRail = (w: number) => {
+    const v = Math.round(Math.max(RAIL_MIN, Math.min(RAIL_MAX, w)));
+    setRailW(v);
+    try { if (v === RAIL_W) localStorage.removeItem('ol.deckRail'); else localStorage.setItem('ol.deckRail', String(v)); } catch { /* private window */ }
+  };
+  const onRailGrip = (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const g = e.currentTarget as HTMLElement;
+    try { g.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
+    const x0 = e.clientX, w0 = railW;
+    g.classList.add('on');
+    const move = (ev: PointerEvent) => setRailW(Math.round(Math.max(RAIL_MIN, Math.min(RAIL_MAX, w0 + ev.clientX - x0))));
+    const up = (ev: PointerEvent) => {
+      g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); g.removeEventListener('pointercancel', up);
+      g.classList.remove('on');
+      setRail(w0 + ev.clientX - x0);
+    };
+    g.addEventListener('pointermove', move); g.addEventListener('pointerup', up); g.addEventListener('pointercancel', up);
   };
 
   /* ------------------------------------------------------------- the canvas around the pages */
@@ -484,7 +566,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       const cur = text.toString();
       const place = insertPlace(cur, slidePath, selRef.current[0]?.path ?? null, k);
       if (!place) continue;
-      const w = pageW, h = slides[0]?.rect.h ?? pageW * 9 / 16;
+      const w = pageW, h = pageH || pageW * 9 / 16;
       const cx = (at?.x ?? w / 2) + n * 24, cy = (at?.y ?? h / 2) + n * 24;
       let html: string | null = null;
       if (/svg/i.test(f.type) || /\.svg$/i.test(f.name)) {
@@ -693,6 +775,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const one = sel.length === 1 ? sel[0] : null;
     const items: MenuItem[] = [
       ...(one && one.canText ? [{ label: 'Edit text', shortcut: 'Enter', action: () => toCanvas({ ol: 'editText', path: one.path }) }] : []),
+      // a drawing: its points, Inkscape's node editor (the shape right-clicked, when the drawing has several)
+      ...(one && (one.kind === 'svg' || one.kind === 'svgpart' || one.kind === 'line') && !one.locked ? [{ label: 'Edit points', shortcut: 'N', action: () => arrangeSel('edit-nodes') }] : []),
       ...(one && one.kind === 'image' ? [
         { label: 'Crop', action: imageTools.crop },
         { label: 'Remove background', action: imageTools.removeBackground },
@@ -758,6 +842,12 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const next = after + 1;
     setTimeout(() => { setCurrent(next); toCanvas({ ol: 'scrollTo', slide: next }); toRail({ ol: 'current', slide: next }); }, 150);
   };
+  const gotoSlide = (i: number) => {
+    const n = slidesRef.current.length;
+    if (!n) return;
+    const k = Math.max(0, Math.min(n - 1, i));
+    setCurrent(k); toCanvas({ ol: 'scrollTo', slide: k }); toRail({ ol: 'current', slide: k });
+  };
   const duplicateSlide = (i: number) => { const p = slidePaths(text.toString())[i]; if (p) applyOps([{ t: 'duplicate', paths: [p] }]); };
   const deleteSlide = (i: number) => { const ps = slidePaths(text.toString()); if (ps.length > 1 && ps[i]) applyOps([{ t: 'remove', paths: [ps[i]] }]); };
   const moveSlide = (i: number, d: -1 | 1) => {
@@ -817,6 +907,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (mod && (m.key === '=' || m.key === '+')) { zoomStep(1.25); return; }
     if (mod && m.key === '-') { zoomStep(1 / 1.25); return; }
     if (m.key === 'Escape') { setToolState('select'); return; }
+    // the slide before / after (the canvas shows one; the rail moves between them)
+    if (!mod && !m.alt && (m.key === 'PageDown' || m.key === 'PageUp') && kindRef.current === 'deck') { gotoSlide(currentRef.current + (m.key === 'PageDown' ? 1 : -1)); return; }
     if (!mod && !m.alt) {
       const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', b: 'bezier', v: 'select' };
       if (map[k]) { setToolState(map[k]); return; }
@@ -840,6 +932,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       else if (e.key === 'F5') { e.preventDefault(); startPresenting(); }
       // the focus left the canvas (a toolbar button, a palette): its shortcuts still work on the selection
       else if (mod && (['g', 'm', '0', '=', '+', '-', '\\'].includes(e.key.toLowerCase()) || (['k', 'l'].includes(e.key.toLowerCase()) && selRef.current.length)) || (mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown'))) { e.preventDefault(); onRuntimeKey({ ol: 'key', key: e.key, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey }); }
+      else if (!mod && !e.altKey && (e.key === 'PageDown' || e.key === 'PageUp') && kindRef.current === 'deck' && soloRef.current) { e.preventDefault(); gotoSlide(currentRef.current + (e.key === 'PageDown' ? 1 : -1)); }
       else if (mod && e.key.toLowerCase() === 'd' && selRef.current.length) { e.preventDefault(); duplicateSel(); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selRef.current.length) { e.preventDefault(); removeSel(); }
       else if (!mod && !e.altKey && e.key.length === 1 && !readOnlyRef.current) {
@@ -1005,7 +1098,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   // the slide in view: is enough of it on the screen? (zoomed into a corner, or scrolled away from it)
   const curBox = slides[current]?.rect;
   let lost = false;
-  if (curBox && kind !== 'page' && box.w > 0) {
+  if (curBox && kind !== 'page' && !soloOn && box.w > 0) {
     const vx0 = -left / scale, vx1 = (box.w - left) / scale, vy0 = scrollY, vy1 = scrollY + box.h / scale;
     const ix = Math.max(0, Math.min(vx1, curBox.x + curBox.w) - Math.max(vx0, curBox.x));
     const iy = Math.max(0, Math.min(vy1, curBox.y + curBox.h) - Math.max(vy0, curBox.y));
@@ -1013,7 +1106,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const fills = (ix * iy) / Math.max(1, (vx1 - vx0) * (vy1 - vy0));
     lost = seen < 0.35 && fills < 0.6;
   }
-  const zoomed = zoom > 1.01;
+  const zoomed = soloOn ? Math.abs(zoom - 1) > 0.01 : zoom > 1.01;
 
   return (
     <div class={'dl-editor' + (presenting ? ' presenting' : '')} data-kind={kind}>
@@ -1022,7 +1115,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         <Toolbar id="deck-tools" groups={bars.tools} />
         <input ref={fileInput} type="file" accept="image/*,.svg" multiple hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void uploadImages(fs.map(f => ({ name: f.name, type: f.type, data: f })), null); }} />
         <input ref={replaceInput} type="file" accept="image/*,.svg" hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void replacePicture(fs); }} />
-        <div class="dl-ctx">{bars.context.length > 0 && <Toolbar id="deck-context" groups={bars.context} />}</div>
+        <div class="dl-ctx">{bars.sections.length > 0 && (
+          <div class="dl-ctx-secs">{bars.sections.map((sec, i) => <Toolbar key={`${i}:${sec.label}`} id="deck-context" label={sec.label} groups={sec.groups} />)}</div>
+        )}</div>
         {kind === 'page' && <>
           <button class={'dl-btn' + (device === 'desktop' ? ' on' : '')} title="Desktop width" onClick={() => setDevice('desktop')}>🖥</button>
           <button class={'dl-btn' + (device === 'mobile' ? ' on' : '')} title="Phone width" onClick={() => setDevice('mobile')}>📱</button>
@@ -1042,9 +1137,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       </div>
       <div class="dl-body">
         {showRail && (
-          <div class="dl-rail" ref={railBox}>
+          <div class="dl-rail" ref={railBox} style={{ width: `${railW}px` }}>
             {link && synced && <iframe ref={railFrame} class="dl-railframe" title="Slides" sandbox="allow-scripts" src={src('thumb')}
               style={{ width: `${frameW}px`, height: `${railH / railScale}px`, transform: `scale(${railScale})` }} />}
+            <div class="dl-rail-grip" role="separator" aria-orientation="vertical" aria-label="Slide rail width" title="Drag to make the slides wider or narrower (double-click: back to the usual width)"
+              data-dl-railgrip onPointerDown={onRailGrip} onDblClick={() => setRail(RAIL_W)} />
             <div class="dl-rail-actions">
               <button class="dl-btn" title="New slide after this one (Ctrl+M)" data-dl-newslide disabled={readOnly} onClick={() => newSlide(current)}>+ Slide</button>
             </div>
@@ -1053,11 +1150,24 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         <div class="dl-main">
           <div class="dl-canvas" ref={canvasBox} style={deskCss ? { background: deskCss } : undefined} data-desk={view.deskChecker ? 'checker' : view.desk ? 'custom' : 'page'}
             onContextMenu={e => { if (e.target === e.currentTarget) { e.preventDefault(); canvasMenu(e.clientX, e.clientY); } }}
-            onWheel={e => { if (e.target !== e.currentTarget) return; if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoomStep(Math.exp(-e.deltaY * 0.01)); } else if (e.deltaX || e.shiftKey) setPanX(p => p - (e.deltaX || e.deltaY)); }}
+            onWheel={e => {
+              if (e.target !== e.currentTarget) return;
+              const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+              if (soloOn) {
+                // beside the slide: as on it — a pinch zooms about the pointer, a scroll pulls the slide (it springs back)
+                e.preventDefault();
+                const r = e.currentTarget.getBoundingClientRect();
+                if (e.ctrlKey || e.metaKey) zoomSolo(Math.exp(-e.deltaY * k * 0.01), e.clientX - r.left, e.clientY - r.top);
+                else if (e.shiftKey && !e.deltaX) slideView.scroll(-e.deltaY * k, 0);
+                else slideView.scroll(-e.deltaX * k, -e.deltaY * k);
+                return;
+              }
+              if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoomStep(Math.exp(-e.deltaY * 0.01)); } else if (e.deltaX || e.shiftKey) setPanX(p => p - (e.deltaX || e.deltaY));
+            }}
             onDragOver={e => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
             onDrop={e => { if (!e.dataTransfer?.files.length) return; e.preventDefault(); const fs = Array.from(e.dataTransfer.files); void placeFiles(fs.map(f => ({ name: f.name, type: f.type, data: f })), null, null); }}>
-            {link && synced && <iframe ref={canvasFrame} class="dl-frame" title="Page" sandbox="allow-scripts allow-modals allow-popups allow-forms" src={src('edit')}
-              style={{ width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
+            {link && synced && <iframe ref={canvasFrame} class={'dl-frame' + (soloOn ? ' solo' : '')} title="Page" sandbox="allow-scripts allow-modals allow-popups allow-forms" src={src('edit')}
+              style={soloOn ? { width: `${frameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
             {(lost || zoomed) && kind !== 'page' && (
               <button type="button" class={'dl-refocus' + (lost ? ' lost' : '')} data-dl-refocus onClick={fitSlide} title="Show the whole slide again (Ctrl+0)">
                 {lost ? `⤢ Back to slide ${current + 1}` : '⤢ Fit slide'}

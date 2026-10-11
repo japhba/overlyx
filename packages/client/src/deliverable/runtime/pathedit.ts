@@ -134,6 +134,15 @@ const docOrder = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Nod
 
 /* ------------------------------------------------------------------ the Path menu */
 
+/** the shape of a drawing that was right-clicked (its menu's "Edit points" edits that one, not the whole drawing) */
+let menuShape: Element | null = null;
+export function setMenuShape(el: Element | null): void { menuShape = el && SHAPE_TAGS.has(el.localName) && srcOf.has(el) ? el : null; }
+function takeMenuShape(sel: Element): Element | null {
+  const m = menuShape;
+  menuShape = null;
+  return m && m.isConnected && (m === sel || sel.contains(m)) ? m : null;
+}
+
 export function pathCommand(how: string): void {
   const sel = selection().filter(e => !isLocked(e)).sort(docOrder);
   if (!sel.length) return;
@@ -143,7 +152,7 @@ export function pathCommand(how: string): void {
     case 'break-apart': return breakApart(sel);
     case 'to-path': return toPath(sel);
     case 'reverse': case 'simplify': return rewrite(sel, how);
-    case 'edit-nodes': return editNodesOf(sel[0]);
+    case 'edit-nodes': { const shape = takeMenuShape(sel[0]); return editNodesOf(shape ?? sel[0]); }
   }
 }
 

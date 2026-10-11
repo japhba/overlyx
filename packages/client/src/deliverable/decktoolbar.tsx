@@ -209,7 +209,17 @@ function Slider({ value, onSet, label }: { value: number; onSet: (v: number) => 
 
 const swatchIcon = (glyph: string, color: string | null) => `<svg viewBox="0 0 16 16">${glyph}<rect x="2" y="12.6" width="12" height="2.6" rx="0.5" fill="${color ?? 'none'}" stroke="${color ? 'none' : 'currentColor'}" stroke-width="0.7"/></svg>`;
 
-export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolButton[][] } {
+/** a named run of the contextual tools: what they act on, named as the selection's label on the canvas (runtime edit.ts selectionLabel) */
+export interface ToolSection { label: string; groups: ToolButton[][] }
+
+/** what the fill / border tools act on, in a word */
+function paintLabel(items: SelItem[]): string {
+  const ks = new Set(items.map(s => s.kind));
+  if (ks.size === 1) return ks.has('svg') ? 'SVG' : ks.has('svgpart') ? 'SVG part' : 'Shape';
+  return 'Fill & border';
+}
+
+export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolButton[][]; sections: ToolSection[] } {
   const ro = c.readOnly;
   const sel = c.sel;
   const one = sel.length === 1 ? sel[0] : null;
@@ -235,16 +245,20 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     ],
   ];
 
-  if (ro) return { tools, context: [] };
-  if (c.math.editing) return { tools, context: mathGroups(c) };
-  if (c.nodes.editing) return { tools, context: nodeGroups(c) };
-  const context: ToolButton[][] = [];
+  if (ro) return { tools, context: [], sections: [] };
+  if (c.math.editing) { const g = mathGroups(c); return { tools, context: g, sections: [{ label: 'Formula', groups: g }] }; }
+  if (c.nodes.editing) { const g = nodeGroups(c); return { tools, context: g, sections: [{ label: 'Points', groups: g }] }; }
+  const sections: ToolSection[] = [];
+  let context: ToolButton[][] = [];
+  /** the groups pushed from here on belong to a section named `label` */
+  const section = (label: string) => { context = []; sections.push({ label, groups: context }); };
   const textish = c.editingText || sel.some(s => s.canText || s.text);
   const shapes = sel.filter(s => s.kind === 'shape' || s.kind === 'svg' || s.kind === 'svgpart' || (s.kind === 'text' && s.style.fill));
   const lines = sel.filter(s => s.kind === 'line');
   const images = sel.filter(s => s.kind === 'image');
 
   if (textish) {
+    section(!c.editingText && one?.kind === 'formula' ? 'Formula' : 'Text');
     const st = one?.style;
     const px = st ? Math.round(parseFloat(st.fontSize) || 0) : 0;
     const fam = st ? firstFamily(st.fontFamily) : '';
@@ -304,6 +318,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
 
   const paintOf = (items: SelItem[]) => items[0]?.style;
   if (shapes.length) {
+    section(paintLabel(shapes));
     const st = paintOf(shapes)!;
     const boxShape = shapes.some(s => s.kind === 'shape');
     context.push([
@@ -318,6 +333,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     ]);
   }
   if (lines.length) {
+    section(lines.length > 1 ? 'Lines' : 'Line');
     const st = paintOf(lines)!;
     context.push([
       { id: 'dk-linecolor', title: 'Line colour', icon: '', html: swatchIcon(ICONSVG.stroke, st.stroke),
@@ -336,6 +352,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   if (images.length === 1 || c.image.cropping) {
     const im = images[0];
     const shapes = ASPECTS.map(a => ({ label: a.label, html: a.shape === 'circle' ? ICON('dk-ellipse') : ICON('dk-crop'), action: () => c.image.shape(a.ratio, a.shape ?? 'rect') }));
+    section(c.image.cropping ? 'Crop' : 'Picture');
     context.push(c.image.cropping ? [
       { id: 'dk-cropdone', title: 'Keep the crop (Enter)', icon: 'Done', action: () => c.image.done(true), active: true },
       { id: 'dk-cropcancel', title: 'Leave the picture as it was (Esc)', icon: 'Cancel', action: () => c.image.done(false) },
@@ -350,6 +367,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   }
 
   if (sel.length) {
+    section('Arrange');
     const st = one?.style;
     const locked = sel.every(s => s.locked);
     const isGroup = sel.some(s => s.kind === 'group');
@@ -391,6 +409,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-delete', title: 'Delete (Del)', icon: 'dk-delete', action: c.remove, disabled: locked },
     ]);
   } else if (c.kind !== 'page') {
+    section(c.kind === 'poster' ? 'Poster' : 'Slide');
     const v = c.canvas.view;
     context.push([
       { id: 'dk-bg', title: 'Slide background colour', icon: 'dk-background',
@@ -407,7 +426,13 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-newslide', title: 'New slide (Ctrl+M)', icon: '+ Slide', action: c.newSlide },
     ]);
   }
-  return { tools, context };
+  let out = sections.filter(x => x.groups.length);
+  // a shape or drawing selected (not being typed into): its own tools first, then those of its text — as its label says
+  if (!c.editingText && shapes.length && sel.every(x => x.kind !== 'text' && x.kind !== 'formula')) {
+    const own = out.find(x => x.label === paintLabel(shapes));
+    if (own) out = [own, ...out.filter(x => x !== own)];
+  }
+  return { tools, context: out.flatMap(x => x.groups), sections: out };
 }
 
 /** when the selected objects appear while presenting: beamer's overlays (data-step, a list's data-steps) */

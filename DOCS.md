@@ -578,6 +578,28 @@ blend.
     pointer (the frame's scroll keeps the point, the editor pans sideways when the zoomed frame is
     wider than the canvas); *Fit slide* / *Back to slide N* appears when zoomed in or when the slide
     in view is mostly off the screen (Ctrl+0).
+  * **One slide per canvas** (11 Oct 2026, the user: "each slide in a deck its own canvas, no
+    scrolling through slides apart from the slide side menu"): in a deck or poster the canvas frame
+    shows only the current slide (`runtime/solo.ts`: `html.ol-solo`, the other slides `display:
+    none`, the page laid out simply around it as for printing, 48 px of room for handles), fitted
+    into the canvas both ways and centred; the rail, Page Down / Page Up and selecting an object of
+    another slide (undo, the code view) change it, the zoom stays. The editor sizes the frame to the
+    slide and moves it by a transform set outside renders (`deliverable/viewport.ts` `SlideView`):
+    zoomed in it pans as far as the slide's edges and a margin; a scroll, a finger or a pinch past
+    that — or while the whole slide fits — pulls it against Apple's rubber-band resistance, the
+    slide stretching a little towards the pull, and on letting go it springs back into the middle
+    (the user: "snap into centered position in an apple pull to refresh gooey like fashion"; a
+    scroll lets go after 140 ms without wheel events; reduced motion: no spring, no stretch). Web
+    pages keep the scrolling frame. The rail's right edge (`.dl-rail-grip`) drags it wider or
+    narrower (110–480 px, `ol.deckRail`, double-click resets). A selection is named at its top
+    left corner in the canvas (`selectionLabel`: Text, Shape, Line, Picture, SVG, "SVG ▸ path",
+    Group, Formula, "3 shapes") and the contextual toolbar's sections carry the same names (the
+    selection's own first: a shape's Shape tools before its Text ones; Arrange; Slide; Points while
+    editing nodes; Formula; Crop). Objects a drag would move show four-way arrows drawn as an SVG
+    cursor (the system `move` cursor shows as a hand or not at all in Safari and Chrome on macOS),
+    kept for the whole drag — resize and rotate drags keep their handle's cursor. Right-click on a
+    drawing: *Edit points* opens the node editor on the shape under the pointer (a rectangle,
+    ellipse or line becomes a path first).
   * **Around the canvas** (`DeliverableEditor.tsx`): the slide rail (a second frame in `thumb`
     mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
     duplicate, move, delete), the **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own

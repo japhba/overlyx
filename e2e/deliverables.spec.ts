@@ -21,6 +21,12 @@ test.afterAll(() => rmSync(`${PROJECTS_DIR}/${PROJECT}`, { recursive: true, forc
 
 const frame = (page: Page) => page.frameLocator('.dl-frame');
 const slides = (page: Page) => frame(page).locator('section.slide');
+/** the canvas shows one slide at a time: slide `n` by its thumbnail in the rail, as a person would */
+async function gotoSlide(page: Page, n: number): Promise<void> {
+  await page.frameLocator('.dl-railframe').locator('section.slide').nth(n).click();
+  await expect(slides(page).nth(n)).toBeVisible();
+  await page.waitForTimeout(300);
+}
 
 async function open(page: Page): Promise<void> {
   await page.goto(`/#/${PROJECT}/talk/index.html`);
@@ -90,7 +96,7 @@ test('a deck from the New dialog: select, drag, retype, draw, delete and undo', 
 
   // the decorative shape on slide 2: selected, deleted, the deletion undone
   const shape = slides(page).nth(1).locator('div[style*="border-radius: 24px"]');
-  await shape.scrollIntoViewIfNeeded();
+  await gotoSlide(page, 1);
   await shape.click();
   // the contextual toolbar: a selected object brings its tools (Delete among them)
   await expect(page.locator('.dl-toolbar [data-tb="dk-delete"]')).toBeEnabled();

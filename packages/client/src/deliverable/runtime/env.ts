@@ -5,7 +5,7 @@
  * change elements, the runtime adds its overlay — so an element of the page is found in the text
  * through the source element it was made from, never by its place in the live tree.
  */
-import type { FromRuntime, DeliverableKind, Path, SlideBox } from '../protocol';
+import type { FromRuntime, DeliverableKind, Path, SlideBox, Solo } from '../protocol';
 import type { DeckExtras } from '@overlyx/core/html/deckextras.ts';
 
 export type Mode = 'edit' | 'thumb' | 'present' | 'print' | 'check' | 'view';
@@ -144,7 +144,10 @@ export function pageSize(): { width: number; height: number } {
   return { width: document.documentElement.clientWidth, height: document.documentElement.scrollHeight };
 }
 
+/** what the layout reports besides (solo.ts: the one slide the canvas shows) */
+export const layoutHooks: { solo?: () => Solo | undefined } = {};
+
 export function sendLayout(): void {
   const sz = pageSize();
-  post({ ol: 'layout', kind: state.kind, slides: slideBoxes(), width: sz.width, height: sz.height, docHeight: document.documentElement.scrollHeight });
+  post({ ol: 'layout', kind: state.kind, slides: slideBoxes(), width: sz.width, height: sz.height, docHeight: document.documentElement.scrollHeight, solo: layoutHooks.solo?.() });
 }
