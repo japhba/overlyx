@@ -21,6 +21,7 @@ import { startMath, typesetPage } from './math';
 import { renderCites, refreshCites, addEntries, CITE_CSS } from './cite';
 import { applySource, whenTypeset } from './reconcile';
 import * as edit from './edit';
+import { weave } from './weave';
 import { arrange, paint, valign, restack } from './arrange';
 import { wantObjects } from './objects';
 import { nodeCommand } from './pathedit';
@@ -291,6 +292,7 @@ function onMessage(e: MessageEvent): void {
     case 'review': if (MODE === 'edit') { setReview(m.view); edit.report(); edit.draw(); } break;
     case 'newComment': if (MODE === 'edit') edit.newComment(); break;
     case 'paste': if (MODE === 'edit') edit.pasteHere(m); break;
+    case 'weave': if (MODE === 'edit') weave(); break;
   }
 }
 

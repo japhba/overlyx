@@ -247,6 +247,8 @@ export type ToRuntime =
   | { ol: 'review'; view: ReviewView }
   /** Ctrl+Alt+M or the Comment button: what a new comment is on (the runtime answers with `comment`) */
   | { ol: 'newComment' }
+  /** the right-click menu's weave chosen: the crossing right-clicked woven (or its weave undone) — runtime/weave.ts */
+  | { ol: 'weave' }
   /** Ctrl+V with the keyboard in the editor: what the clipboard holds, pasted on the canvas (runtime/clip.ts) */
   | { ol: 'paste'; html: string; plain: string; files: { name: string; type: string; data: ArrayBuffer }[] };
 
@@ -269,8 +271,8 @@ export type FromRuntime =
   /** where the caret is in the text being retyped (null: none), for the others */
   | { ol: 'caret'; caret: TextCaret | null }
   | { ol: 'key'; key: string; ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }
-  /** `on`: what was right-clicked — an object (now selected), a slide's empty area, or the canvas around the pages */
-  | { ol: 'contextmenu'; x: number; y: number; slide?: number; on?: 'object' | 'slide' | 'canvas' }
+  /** `on`: what was right-clicked — an object (now selected), a slide's empty area, or the canvas around the pages; `weave`: two shapes cross there (runtime/weave.ts) */
+  | { ol: 'contextmenu'; x: number; y: number; slide?: number; on?: 'object' | 'slide' | 'canvas'; weave?: { label: string; undo: boolean } }
   | { ol: 'visible'; slide: number }
   | { ol: 'goto'; slide: number }
   | { ol: 'exit' }

@@ -584,7 +584,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           if (fromRail) slideMenu(x, y, m.slide ?? currentRef.current);
           else if (m.on === 'canvas') canvasMenu(x, y);
           else if (m.on === 'slide' && !selRef.current.length) emptySlideMenu(x, y, m.slide ?? currentRef.current);
-          else objectMenu(x, y);
+          // (after the selection the right-click made has come in: the menu is that object's)
+          else setMenuAt({ x, y, weave: m.weave });
           break;
         }
         case 'pasteFiles': void placeFiles(m.files, m.slide, m.at); break;
@@ -1153,11 +1154,17 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     sel.every(s => s.locked) ? { label: 'Unlock', action: () => arrangeSel('unlock') } : { label: 'Lock', action: () => arrangeSel('lock') },
   ];
 
-  const objectMenu = (x: number, y: number) => {
+  // an object right-clicked: its menu once the selection it made is in (the canvas sends both at once)
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number; weave?: { label: string; undo: boolean } } | null>(null);
+  useEffect(() => { if (menuAt) { setMenuAt(null); objectMenu(menuAt.x, menuAt.y, menuAt.weave); } }, [menuAt]);
+
+  const objectMenu = (x: number, y: number, weave?: { label: string; undo: boolean }) => {
     if (!sel.length) { emptySlideMenu(x, y, currentRef.current); return; }
     const one = sel.length === 1 ? sel[0] : null;
     const items: MenuItem[] = [
       ...(one && one.canText ? [{ label: 'Edit text', shortcut: 'Enter', action: () => toCanvas({ ol: 'editText', path: one.path }) }] : []),
+      // two shapes cross where it was right-clicked: the lower one over the upper one there, as if woven (runtime/weave.ts)
+      ...(weave ? [{ label: weave.label, disabled: readOnlyRef.current, action: () => toCanvas({ ol: 'weave' }) }] : []),
       // a drawing: its points, Inkscape's node editor (the shape right-clicked, when the drawing has several)
       ...(one && (one.kind === 'svg' || one.kind === 'svgpart' || one.kind === 'line') && !one.locked ? [{ label: 'Edit points', shortcut: 'N', action: () => arrangeSel('edit-nodes') }] : []),
       ...(one && one.kind === 'image' ? [

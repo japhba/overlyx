@@ -43,6 +43,7 @@ import { postObjects } from './objects';
 import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trackInput, commentTarget, setLiveAt, styleAuthors, REVIEW_OVERLAY_CSS } from './review';
 import { initListDrag, hoverList, notePointer, listParts, bindListGrips, listDragging, stepItem, LIST_DRAG_CSS } from './listdrag';
 import { clipOf, postClip, paste } from './clip';
+import { weaveMenu } from './weave';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -2413,7 +2414,9 @@ function onContextMenu(e: MouseEvent): void {
   setMenuShape(el && e.target instanceof SVGElement && el.contains(e.target) ? e.target : null);
   const on = el ? 'object' : slideOf(e.target as Element) ? 'slide' : 'canvas';
   const s = slideOf(e.target as Element);
-  post({ ol: 'contextmenu', x: e.clientX, y: e.clientY, on, slide: s ? slides().indexOf(s) : undefined });
+  // two shapes crossing under the pointer: the lower one can be woven over the upper one there (weave.ts)
+  const woven = el ? weaveMenu(e.clientX, e.clientY, e.target as Element) : null;
+  post({ ol: 'contextmenu', x: e.clientX, y: e.clientY, on, slide: s ? slides().indexOf(s) : undefined, ...(woven ? { weave: woven } : {}) });
 }
 
 /* ------------------------------------------------------------------ the slide in view */
