@@ -22,7 +22,7 @@
  */
 import type { Path, SelItem, SelStyle, Tool, Rect, HtmlOp, ObjKind, KeyPress } from '../protocol';
 import { MODE, post, state, srcOf, pathOf, liveAt, sourced, slides, slideOf, docRect, isForeign, sendLayout } from './env';
-import { guard } from './reconcile';
+import { guard, linkTree } from './reconcile';
 import { typeset } from './math';
 import { renderCites, refreshCites } from './cite';
 import { stepOf } from '@overlyx/core/html/refs.ts';
@@ -32,6 +32,7 @@ import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, red
 import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, insertRefChip, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
+import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trackInput, commentTarget, setLiveAt, styleAuthors, REVIEW_OVERLAY_CSS } from './review';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -83,12 +84,14 @@ export function startEditing(): void {
     .tag.editing { background: #e8a33d; }
     .tag.locked { background: #8a93a6; }
     ${STEPS_CSS}
+    ${REVIEW_OVERLAY_CSS}
     .peer-tag { position: absolute; transform: translateY(-100%); color: #fff; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; font-size: calc(11px * var(--s)); }
     svg.ink { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
   </style><div class="layer"></div>`;
   layer = root.querySelector('.layer') as HTMLElement;
   document.documentElement.appendChild(host);
   initPaths({ root, scale: () => scale });
+  setLiveAt(liveAt);
   const css = document.createElement('style');
   css.setAttribute('data-ol-runtime', '');
   css.textContent = `[data-ol-editing] { outline: none !important; cursor: text !important; caret-color: auto; }
@@ -207,6 +210,7 @@ export function afterSource(): void {
   selected = selected.map(e => (e.isConnected ? e : null)).filter((e): e is Element => !!e && !!pathOf(e));
   if (editing && !editing.isConnected) { editing = null; post({ ol: 'editing', path: null }); }
   stepsChanged();
+  styleAuthors();
   report();
   draw();
   nodesAfterSource();
@@ -520,6 +524,8 @@ function listOf(el: Element): SelItem['list'] {
 
 export function report(): void {
   if (state.version === null) return;
+  // the original of a changed object, faintly where it was (review.ts)
+  showGhost(selected.length === 1 && !editing ? selected[0] : null);
   post({ ol: 'selection', version: state.version, items: selected.map(item).filter((x): x is SelItem => !!x) });
   // (the Animation pane follows the selection's slide)
   postSequence();
@@ -596,6 +602,9 @@ export function draw(): void {
     const r = docRect(el);
     parts.push(`<div class="frame peer" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;border-color:${esc(p.color)};border-width:${bw}px"></div><div class="peer-tag" style="left:${r.x}px;top:${r.y}px;background:${esc(p.color)}">${esc(p.name)}</div>`);
   }
+  // suggestions and comment pins (review.ts): on the slide shown, on a web page all
+  const rv = reviewOverlay(isSolo() ? slides()[soloIndex()] ?? null : null, boxOf, selected);
+  parts.push(rv.under);
   // the steps objects appear and disappear at when presenting (beamer's overlays), as PowerPoint numbers its animations (animate.ts)
   if (!editing) parts.push(badges());
   for (const el of selected) {
@@ -645,8 +654,11 @@ export function draw(): void {
     const d = drag.kind === 'pen' ? smoothPath(drag.pts) : `M${drag.pts[0][0]} ${drag.pts[0][1]}L${drag.pts[drag.pts.length - 1][0]} ${drag.pts[drag.pts.length - 1][1]}`;
     parts.push(`<svg class="ink" width="1" height="1"><path d="${d}" fill="none" stroke="#2f6fde" stroke-width="${3 / scale}" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
   }
+  // the comment pins over everything (they are pressed)
+  parts.push(rv.pins);
   layer.innerHTML = parts.join('');
   for (const hd of Array.from(layer.querySelectorAll('.handle'))) hd.addEventListener('pointerdown', e => onHandleDown(e as PointerEvent, (hd as HTMLElement).dataset.h!), true);
+  bindPins(layer, el => { if (editing) stopText(); selected = [el]; report(); draw(); });
 }
 
 /** rotated by its round handle: a box on a slide, a picture, a drawing (not the flow of a web page) */
@@ -707,7 +719,7 @@ function onHover(e: PointerEvent): void {
   if (drag || editing) return;
   const t = e.target as Element;
   const el = (tool === 'select' || isOrdering()) && t && !isForeign(t) ? objectFor(t, e.ctrlKey || e.metaKey) : null;
-  if (el !== hoverEl) { hoverEl = el; draw(); }
+  if (el !== hoverEl) { hoverEl = el; setReviewHover(el); draw(); }
 }
 
 interface DragEl {
@@ -1425,6 +1437,8 @@ function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectA
   guard.editing = el;
   // the text as written, its formulas chips (typeset, edited with LyX's formula editor: mathedit.ts)
   el.innerHTML = src.innerHTML;
+  // (suggested deletions keep the caret out: what is typed never goes into them)
+  lockDeletions(el);
   el.classList.add('ol-notex');
   const chipping = chipify(el);
   el.setAttribute('data-ol-editing', '');
@@ -1444,7 +1458,9 @@ function beginText(el: HTMLElement, at: { x: number; y: number } | null, selectA
     });
   } else placeCaret(el, at, selectAll);
   el.addEventListener('input', scheduleCommit);
+  el.addEventListener('beforeinput', onBeforeInput);
   el.addEventListener('paste', pastePlain);
+  showGhost(null);
   post({ ol: 'editing', path: pathOf(el) });
   draw();
 }
@@ -1472,6 +1488,11 @@ function pastePlain(e: ClipboardEvent): void {
   document.execCommand('insertText', false, text);
 }
 
+/** while suggesting: deletions struck through and typing underlined as it happens (review.ts) */
+function onBeforeInput(e: Event): void {
+  if (editing && trackInput(e as InputEvent, editing)) scheduleCommit();
+}
+
 function scheduleCommit(): void {
   if (editTimer) clearTimeout(editTimer);
   editTimer = setTimeout(commitText, 350);
@@ -1482,6 +1503,8 @@ function cleanHtml(el: HTMLElement): string {
   const c = el.cloneNode(true) as HTMLElement;
   for (const x of Array.from(c.querySelectorAll('[data-ol-runtime]'))) x.remove();
   for (const x of Array.from(c.querySelectorAll('[data-ol-texwait]'))) x.removeAttribute('data-ol-texwait');
+  // (the suggested deletions locked while retyping)
+  for (const x of Array.from(c.querySelectorAll('[contenteditable]'))) x.removeAttribute('contenteditable');
   unchip(c);
   // a trailing <br> a browser leaves in an emptied block
   let html = c.innerHTML.replace(/<br>(\s*)$/, '$1');
@@ -1525,6 +1548,7 @@ export function stopText(): void {
   editing = null;
   guard.editing = null;
   el.removeEventListener('input', scheduleCommit);
+  el.removeEventListener('beforeinput', onBeforeInput);
   el.removeEventListener('paste', pastePlain);
   el.removeAttribute('contenteditable');
   el.removeAttribute('data-ol-editing');
@@ -1535,6 +1559,8 @@ export function stopText(): void {
   const src = srcOf.get(el);
   if (src && el.isConnected) {
     el.innerHTML = src.innerHTML;
+    // (its elements paired with the source's: else the next version would add them again beside these)
+    linkTree(el, src);
     renderCites([el]);
     refreshCites();
     void typeset([el]).then(draw);
@@ -1544,6 +1570,11 @@ export function stopText(): void {
 }
 
 export function isEditingText(): boolean { return !!editing; }
+
+/** what a new comment is on, to the editor (the text being retyped and its selected words, the selection, the slide) */
+export function newComment(): void {
+  commentTarget(editing, selection(), visibleSlideEl());
+}
 
 /** the caret is in code (a $ there is a dollar) */
 function inCode(): boolean {
@@ -1574,6 +1605,8 @@ function onKeyDown(e: KeyboardEvent): void {
       typeKeysHere([keyPress(e)], stopText);
       return;
     }
+    // a comment on the text (the words selected), as in documents (Ctrl+Alt+M)
+    if (mod && e.altKey && e.code === 'KeyM') { e.preventDefault(); e.stopPropagation(); newComment(); return; }
     // LyX: Ctrl+M a formula (Ctrl+Shift+M displayed), an arrow key into a formula goes into it
     if (mod && !e.altKey && e.key.toLowerCase() === 'm') { e.preventDefault(); e.stopPropagation(); insertChip(editing, e.shiftKey); return; }
     // $ typed opens a formula, as in documents ($$ a displayed one, Backspace gives the $ back)
@@ -1640,6 +1673,7 @@ function onKeyDown(e: KeyboardEvent): void {
     selectAllOnSlide();
     return;
   }
+  if (mod && e.altKey && e.code === 'KeyM') { e.preventDefault(); newComment(); return; }
   if (mod || e.key === 'F5' || e.key === 'Delete') { if (!['c', 'x', 'v'].includes(e.key.toLowerCase())) { e.preventDefault(); fwd(e); } return; }
   // a letter on a selected text object (or shape) starts retyping it
   if (e.key.length === 1 && !e.altKey && selected.length === 1 && canType(selected[0]) && !isLocked(selected[0])) {

@@ -2643,6 +2643,49 @@ html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 .dl-anim-btn:hover:not(:disabled), .dl-anim-label:hover { background: var(--hover-bg, rgba(0,0,0,.06)); color: var(--ui-fg); }
 .dl-anim-btn:disabled { opacity: .3; cursor: default; }
 .dl-anim-clear { margin: 6px 10px 10px; }
+
+/* the Review pane: comments and suggestions of a deck, poster or web page (ReviewPane.tsx) */
+.dl-rv { width: 288px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--ui-border); background: var(--surface); font-size: 12.5px; color: var(--ui-fg); min-height: 0; }
+.dl-rv-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--ui-border); flex-wrap: wrap; }
+.dl-rv-scope { display: inline-flex; }
+.dl-rv-scope .dl-btn { border-radius: 0; }
+.dl-rv-scope .dl-btn:first-child { border-radius: 4px 0 0 4px; }
+.dl-rv-scope .dl-btn:last-child { border-radius: 0 4px 4px 0; margin-left: -1px; }
+.dl-rv-resolved { margin-left: auto; align-items: center; }
+.dl-rv-all { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--ui-border); color: var(--ui-muted); }
+.dl-rv-all span { flex: 1; min-width: 0; }
+.dl-rv-list { flex: 1; overflow: auto; padding: 6px 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.dl-rv-list kbd { font: 11px ui-monospace, monospace; padding: 0 3px; border: 1px solid var(--ui-border); border-radius: 3px; }
+.dl-rv-slidehead { padding: 6px 2px 0; font-weight: 600; font-size: 11.5px; color: var(--ui-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-rv-card { border: 1px solid var(--ui-border); border-radius: 8px; padding: 7px 9px; background: var(--surface); cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
+.dl-rv-card:hover { border-color: color-mix(in srgb, var(--ui-border) 50%, var(--ui-fg)); }
+.dl-rv-card.change { border-left: 3px solid var(--who, #2f6fde); }
+.dl-rv-card.thread { border-left: 3px solid #f6b400; }
+.dl-rv-card.focus { box-shadow: 0 0 0 2px #2f6fde55; border-color: #2f6fde; }
+.dl-rv-card.done { opacity: .65; }
+.dl-rv-card.draft { cursor: default; border-color: #2f6fde; }
+.dl-rv-who { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dl-rv-who b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-rv-avatar { flex: none; }
+.dl-rv-time { color: var(--ui-muted); font-size: 11px; white-space: nowrap; }
+.dl-rv-tools { margin-left: auto; display: flex; gap: 2px; }
+.dl-rv-icon { width: 22px; height: 22px; border: 0; border-radius: 4px; background: none; color: var(--ui-muted); cursor: pointer; padding: 0; font: inherit; }
+.dl-rv-icon:hover { background: var(--hover-bg, rgba(0,0,0,.06)); color: var(--ui-fg); }
+.dl-rv-what { color: var(--ui-muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-rv-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; }
+.dl-rv-quote { border-left: 3px solid #f6b400; padding: 1px 6px; color: var(--ui-muted); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-rv-reply { border-top: 1px solid var(--ui-border); padding-top: 5px; margin-top: 3px; display: flex; flex-direction: column; gap: 2px; }
+.dl-rv-actions { display: flex; gap: 6px; margin-top: 3px; }
+.dl-rv-actions .dl-btn { flex: 1; }
+.dl-rv-accept:hover { color: #1a7f37; }
+.dl-rv-reject:hover { color: #c4312a; }
+.dl-rv-answer { display: flex; gap: 6px; align-items: flex-end; margin-top: 3px; }
+.dl-rv-card textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; color: inherit; background: var(--ui-bg, transparent); border: 1px solid var(--ui-border); border-radius: 5px; padding: 4px 6px; min-height: 28px; }
+.dl-rv-answer textarea { flex: 1; }
+.dl-review-btn { position: relative; display: inline-flex; align-items: center; gap: 3px; }
+.dl-rv-icon-svg { width: 15px; height: 15px; display: block; }
+.dl-rv-count { min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: #f6b400; color: #3a2a00; font-size: 10px; font-weight: 700; line-height: 15px; text-align: center; }
+.dl-toolbar .edit-mode { flex: none; }
 .dl-mathedit .lm-field.focused { background: transparent; border: 0; }
 .dl-mathedit .lm-field.display { font-size: 1em; }
 .dl-mathedit .lm-field.empty { min-width: 1.4em; min-height: 1em; }

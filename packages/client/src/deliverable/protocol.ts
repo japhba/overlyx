@@ -108,7 +108,21 @@ export interface SelItem {
   list?: { path: Path; steps: number | null };
 }
 
-export interface SlideBox { index: number; path: Path; rect: Rect; title: string }
+/** `deleted`: deleted as a suggestion (shown faded until accepted; not presented) */
+export interface SlideBox { index: number; path: Path; rect: Rect; title: string; deleted?: boolean }
+
+/** how the canvas shows the review (runtime/review.ts) */
+export interface ReviewView {
+  /** suggested additions / deletions shown (the mode switch's Show changes) */
+  ins: boolean;
+  del: boolean;
+  /** Suggesting is on: retyped words are marked as they are typed */
+  suggesting: boolean;
+  /** this person's name, for the marks typed here */
+  me: string;
+  /** the comment thread looked at: its object (pin highlighted), the words it is on (highlighted) */
+  focus: { path: Path; quote?: string } | null;
+}
 
 /**
  * A deck or poster on the canvas shows one slide at a time (runtime edit.ts): the slide shown, where it
@@ -185,7 +199,11 @@ export type ToRuntime =
   /** a command of the Animation pane */
   | { ol: 'steps'; cmd: StepCmd }
   /** Ctrl+A with the keyboard in the editor (not in the canvas): every object of the slide shown */
-  | { ol: 'selectAll' };
+  | { ol: 'selectAll' }
+  /** how the review is shown, Suggesting on or off */
+  | { ol: 'review'; view: ReviewView }
+  /** Ctrl+Alt+M or the Comment button: what a new comment is on (the runtime answers with `comment`) */
+  | { ol: 'newComment' };
 
 /** runtime → editor */
 export type FromRuntime =
@@ -233,6 +251,8 @@ export type FromRuntime =
   /** the node editor is on (the path edited, how many of its nodes are selected) or off (null) */
   | { ol: 'nodeEditing'; path: Path | null; selected: number; total: number }
   /** the Animation pane's rows: the sequence of the slide worked on (-1: none), its number of steps, click-in-order mode */
-  | { ol: 'sequence'; slide: number; rows: StepRow[]; steps: number; ordering: StepKind | null };
+  | { ol: 'sequence'; slide: number; rows: StepRow[]; steps: number; ordering: StepKind | null }
+  /** a comment pin pressed (`open`: show its threads), or what a new comment is on (the object or slide, the words selected in the text being retyped) */
+  | { ol: 'comment'; path: Path | null; quote?: string; slide: number; open: boolean };
 
 export const isFromRuntime = (d: unknown): d is FromRuntime => !!d && typeof d === 'object' && typeof (d as { ol?: unknown }).ol === 'string';

@@ -27,6 +27,7 @@ import { projectDir } from './projects.ts';
 import { staysInside } from './projectfiles.ts';
 import { manager, HtmlDoc } from './docs.ts';
 import { isHtmlPath, deliverableInfo } from '@overlyx/core/html/deliverable.ts';
+import { publishedText } from '@overlyx/core/html/review.ts';
 import { RUNTIME_MODES, runtimeTags, injectRuntime, resolveInProject, SANDBOX_CSP, type RuntimeMode } from '@overlyx/core/html/serve.ts';
 import { toPng, toSvg } from './graphics.ts';
 import { deckExtras, type DeckExtras } from '@overlyx/core/html/deckextras.ts';
@@ -289,7 +290,8 @@ export async function deliverableZip(project: string, rel: string, clientDist: s
       if (isHtmlPath(e.name)) {
         const projRel = (dir ? dir + '/' : '') + r;
         const open = manager.docs.get(`${project}/${projRel}`);
-        const text = open instanceof HtmlDoc ? open.html.toString() : data.toString('utf8');
+        // as published: the suggestions accepted, the comments left out (core html/review.ts)
+        const text = publishedText(open instanceof HtmlDoc ? open.html.toString() : data.toString('utf8'));
         const kind = deliverableInfo(text).kind;
         const up = '../'.repeat(r.split('/').length - 1);
         const cfg = JSON.stringify({ mode: kind === 'deck' ? 'present' : 'view', ...extrasOf(project, projRel, text) }).replace(/</g, '\\u003c');

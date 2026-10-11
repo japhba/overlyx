@@ -60,6 +60,7 @@ function vscodeHost(init: Extract<HostToDeliverable, { type: 'dlInit' }>): Deliv
   });
   return {
     path: init.entry,
+    author: () => init.author || 'You',
     text: () => text,
     apply(splices: Splice[], origin) {
       if (!splices.length) return;

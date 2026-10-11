@@ -67,6 +67,20 @@ describe('deliverable zips', () => {
     for (const rel of ['../talk2/index.html', '../../bob/talk2/index.html', 'a/../../talk2/index.html', '/etc/index.html'])
       await expect(deliverableZip('bob/talk', rel, join(ROOT, 'dist')), rel).rejects.toThrow(/bad folder/);
   });
+  it('are the page as published: suggestions accepted, comments left out (core html/review.ts)', async () => {
+    mkdirSync(join(ROOT, 'projects', 'bob', 'rv'), { recursive: true });
+    mkdirSync(join(ROOT, 'dist', '_ol', 'mathjax'), { recursive: true });
+    writeFileSync(join(ROOT, 'dist', '_ol', 'runtime.js'), '');
+    writeFileSync(join(ROOT, 'projects', 'bob', 'rv', 'index.html'), `<!doctype html><html><head><meta name="overlyx" content="deck"><title>t</title></head><body>
+<section class="slide" data-ol-comments='[{"id":"c1","by":"Kim","at":"2026-10-11 10:00","text":"internal remark"}]'>
+  <p>The <del data-ol-by="Kim|2026-10-11 10:00">old</del><ins data-ol-by="Kim|2026-10-11 10:00">new</ins> words</p>
+  <img src="x.png" data-ol-del="Kim|2026-10-11 10:00">
+</section></body></html>`);
+    const { entries } = await deliverableZip('bob/rv', 'index.html', join(ROOT, 'dist'));
+    const html = entries.find(e => e.name === 'index.html')!.data.toString('utf8');
+    expect(html).toContain('<p>The new words</p>');
+    expect(html).not.toMatch(/data-ol-|internal remark|x\.png/);
+  });
 });
 
 describe('sandboxed tools', () => {

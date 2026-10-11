@@ -37,6 +37,11 @@ import { mathReady } from '../editor/lyxmath/mathjax';
 import { setLayoutMathFont } from '../fonts/editorfont';
 import { useMathPanels } from '../app/toolbars';
 import { parseSource, opSplices, elementAt, elementChildren, attr } from '@overlyx/core/html/source.ts';
+import { reviewOps, resolveOps, resolveAll, reviewOf, isSuggesting, suggestingOp, stampOf, threadsOp, parseThreads, newThreadId, describe as describeObject, COMMENTS, type ReviewChange, type ReviewThread, type Thread } from '@overlyx/core/html/review.ts';
+import { slideElements } from '@overlyx/core/html/deliverable.ts';
+import { formatTimestamp } from '@overlyx/core';
+import { ReviewPane, type CommentDraft } from './ReviewPane';
+import { EditModeSwitch, type EditMode } from '../app/EditModeSwitch';
 
 const PAD = 48;
 /** the slide rail's width: by default, and as far as its edge can be dragged */
@@ -69,6 +74,17 @@ async function naturalSize(data: Blob): Promise<{ w: number; h: number } | null>
 
 type Notify = (text: string, kind?: 'info' | 'error') => void;
 
+const samePath = (a: Path | null | undefined, b: Path | null | undefined) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
+/** `inner` is `outer` or inside it */
+const within = (outer: Path, inner: Path) => outer.length <= inner.length && outer.every((x, i) => x === inner[i]);
+
+function loadFlag(key: string, dflt: boolean): boolean {
+  try { const v = localStorage.getItem(key); return v === null ? dflt : v === '1'; } catch { return dflt; }
+}
+function saveFlag(key: string, on: boolean): void {
+  try { localStorage.setItem(key, on ? '1' : '0'); } catch { /* private window */ }
+}
+
 interface Link { base: string; entry: string; expires: number }
 
 /** The deliverable editor of the web app: its host keeps the text in a Y.Text synced with the server (webHost.ts). */
@@ -89,7 +105,29 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const [synced, setSynced] = useState(host.ready());
   const [online, setOnline] = useState(true);
   const [readOnly, setReadOnly] = useState(false);
-  const readOnlyRef = useRef(false); readOnlyRef.current = readOnly;
+  /** the mode switch's Viewing: this editor only reads (the page may still be editable) */
+  const [viewing, setViewing] = useState(false);
+  /** nothing is changed from here: shared for viewing, or Viewing chosen */
+  const locked = readOnly || viewing;
+  const readOnlyRef = useRef(false); readOnlyRef.current = locked;
+  const hostReadOnly = useRef(false); hostReadOnly.current = readOnly;
+
+  /* ------------------------------------------------------------- review: comments and suggestions (core html/review.ts) */
+
+  /** who comments and suggests here */
+  const me = host.author?.() || 'You';
+  const textNow = host.text();
+  /** Suggesting: a setting of the page (its <meta>), for everyone editing it, as in documents */
+  const suggesting = isSuggesting(textNow);
+  const review = useMemo(() => reviewOf(textNow), [textNow]);
+  const [showIns, setShowIns] = useState(() => loadFlag('ol.deckShowIns', true));
+  const [showDel, setShowDel] = useState(() => loadFlag('ol.deckShowDel', true));
+  const [reviewOpen, setReviewOpenState] = useState(() => loadFlag('ol.reviewPane', false));
+  const setReviewOpen = (on: boolean) => { setReviewOpenState(on); saveFlag('ol.reviewPane', on); };
+  /** the thread looked at (its pin highlighted, its words too) */
+  const [focus, setFocus] = useState<{ path: Path; id: string; quote?: string } | null>(null);
+  /** a new comment being written */
+  const [draft, setDraft] = useState<CommentDraft | null>(null);
 
   /** every version of the text sent to the frames, kept a little while for rebasing their operations */
   const versions = useRef(new Map<number, string>());
@@ -253,7 +291,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       host.onAsset((p, v) => { toCanvas({ ol: 'asset', path: p, v }); toRail({ ol: 'asset', path: p, v }); }),
     ];
     if (host.ready()) { setSynced(true); sendSource(true); }
-    const ro = setInterval(() => { if (host.readOnly() !== readOnlyRef.current) setReadOnly(host.readOnly()); }, 1000);
+    const ro = setInterval(() => { if (host.readOnly() !== hostReadOnly.current) setReadOnly(host.readOnly()); }, 1000);
     setReadOnly(host.readOnly());
     return () => { for (const off of offs) off(); clearInterval(ro); };
   }, [host]);
@@ -266,12 +304,18 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     host.apply(splices, origin);
   };
 
-  /** operations on the current text (from this side: the toolbar, the rail's menu) */
-  const applyOps = (ops: HtmlOp[]): boolean => {
+  /** who and when, while suggesting (null: edits are direct) */
+  const suggestStamp = () => (isSuggesting(text.toString()) ? stampOf(me) : null);
+
+  /**
+   * operations on the current text (from this side: the toolbar, the rail's menu) — while suggesting
+   * made suggestions (core reviewOps); `raw`: as they are (comments, accepting / rejecting, notes)
+   */
+  const applyOps = (ops: HtmlOp[], raw = false): boolean => {
     const cur = text.toString();
     const src = parseSource(cur);
     try {
-      const sp = ops.flatMap(op => opSplices(src, op));
+      const sp = (raw ? ops : reviewOps(src, ops, suggestStamp())).flatMap(op => opSplices(src, op));
       applySplices(sp);
       return true;
     } catch (e) { notify(String((e as Error).message ?? e), 'error'); return false; }
@@ -282,11 +326,96 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const base = versions.current.get(v);
     const cur = text.toString();
     if (base === undefined) { notify('The page changed meanwhile — try again.', 'error'); return false; }
-    const sp = rebasedSplices(base, cur, ops);
+    let reviewed: HtmlOp[];
+    try { reviewed = reviewOps(parseSource(base), ops, suggestStamp()); } catch { reviewed = ops; }
+    const sp = rebasedSplices(base, cur, reviewed);
     if (!sp) { notify('Somebody changed that object meanwhile — try again.', 'error'); sendSource(true); return false; }
     applySplices(sp);
     return true;
   };
+
+  /* ------------------------------------------------------------- review: comments and suggestions */
+
+  /** the whole text replaced by `next`, as the one stretch that changed (one undo step) */
+  const replaceText = (next: string): boolean => {
+    const old = text.toString();
+    if (old === next) return false;
+    let p = 0;
+    const max = Math.min(old.length, next.length);
+    while (p < max && old[p] === next[p]) p++;
+    let s = 0;
+    while (s < max - p && old[old.length - 1 - s] === next[next.length - 1 - s]) s++;
+    applySplices([{ from: p, to: old.length - s, insert: next.slice(p, next.length - s) }]);
+    return true;
+  };
+  /** a person's suggestions on an object accepted or rejected */
+  const resolveChange = (c: ReviewChange, accept: boolean) => {
+    if (readOnlyRef.current) return;
+    applyOps(resolveOps(text.toString(), c.path, accept, { by: c.by }), true);
+  };
+  const resolveEverything = (accept: boolean) => {
+    if (readOnlyRef.current) return;
+    const n = reviewOf(text.toString()).changes.length;
+    if (replaceText(resolveAll(text.toString(), accept))) notify(`${accept ? 'Accepted' : 'Rejected'} ${n} suggestion${n === 1 ? '' : 's'} — Ctrl+Z undoes it.`);
+  };
+  /** the mode switch: Viewing is this editor's; Editing / Suggesting the page's setting */
+  const setMode = (m: EditMode) => {
+    setViewing(m === 'viewing');
+    if (m === 'viewing' || hostReadOnly.current) return;
+    const op = suggestingOp(text.toString(), m === 'suggesting');
+    if (op) applyOps([op], true);
+  };
+  const setChanges = (ins: boolean, del: boolean) => { setShowIns(ins); setShowDel(del); saveFlag('ol.deckShowIns', ins); saveFlag('ol.deckShowDel', del); };
+
+  /** the comment threads on an element, changed (written as they are, also while suggesting) */
+  const editThreads = (path: Path, f: (ts: Thread[]) => Thread[]) => {
+    if (readOnlyRef.current) return;
+    const el = elementAt(parseSource(text.toString()).doc, path);
+    if (!el) { notify('That object is no longer there.', 'error'); return; }
+    applyOps([threadsOp(path, f(parseThreads(attr(el, COMMENTS))))], true);
+  };
+  /** a new comment on what the canvas said it is on (the selection, the text retyped and its words, the slide; the page) */
+  const startDraft = (path: Path | null, slide: number, quote?: string) => {
+    if (readOnlyRef.current) { notify(hostReadOnly.current ? 'You can only view this page.' : 'Switch from Viewing to Editing or Suggesting to comment.', 'error'); return; }
+    const { doc } = parseSource(text.toString());
+    let p = path ?? (slide >= 0 ? slidesRef.current[slide]?.path ?? null : null);
+    if (!p) { const root = elementAt(doc, []); const b = root ? elementChildren(root).findIndex(k => k.tagName === 'body') : -1; p = b >= 0 ? [b] : null; }
+    const el = p ? elementAt(doc, p) : null;
+    if (!p || !el) return;
+    setReviewOpen(true);
+    setFocus(null);
+    setDraft({ path: p, slide, quote, what: el.tagName === 'body' ? 'the page' : describeObject(el, slideElements(doc)) });
+  };
+  const submitDraft = (v: string) => {
+    const d = draft;
+    if (!d?.path) return;
+    const th: Thread = { id: newThreadId(), by: me, at: formatTimestamp(), text: v, ...(d.quote ? { quote: d.quote } : {}) };
+    editThreads(d.path, ts => [...ts, th]);
+    setDraft(null);
+    setFocus({ path: d.path, id: th.id, quote: d.quote });
+  };
+  const replyTo = (t: ReviewThread, v: string) =>
+    editThreads(t.path, ts => ts.map(x => (x.id === t.thread.id ? { ...x, re: [...(x.re ?? []), { by: me, at: formatTimestamp(), text: v }] } : x)));
+  const resolveThread = (t: ReviewThread, done: boolean) =>
+    editThreads(t.path, ts => ts.map(x => { if (x.id !== t.thread.id) return x; const { done: _was, ...rest } = x; void _was; return done ? { ...rest, done: true } : rest; }));
+  const removeThread = (t: ReviewThread) => {
+    editThreads(t.path, ts => ts.filter(x => x.id !== t.thread.id));
+    if (focus?.id === t.thread.id) setFocus(null);
+  };
+  /** a card of the Review pane clicked: its slide shown, its object selected, its thread looked at */
+  const showOnCanvas = (path: Path, slide: number, threadId?: string) => {
+    const other = slide >= 0 && slide !== currentRef.current;
+    if (other) gotoSlide(slide);
+    if (!slidesRef.current.some(s => samePath(s.path, path))) setTimeout(() => toCanvas({ ol: 'select', paths: [path] }), other ? 80 : 0);
+    if (threadId) { const t = review.threads.find(x => x.thread.id === threadId && samePath(x.path, path)); setFocus({ path, id: threadId, quote: t?.thread.quote }); }
+    else setFocus(null);
+  };
+  const reviewMsg = (): ToRuntime => ({ ol: 'review', view: {
+    ins: showIns, del: showDel, suggesting: suggesting && !locked, me,
+    focus: focus ? { path: focus.path, quote: focus.quote } : draft?.path ? { path: draft.path, quote: draft.quote } : null,
+  } });
+  const reviewMsgRef = useRef(reviewMsg); reviewMsgRef.current = reviewMsg;
+  useEffect(() => { toCanvas(reviewMsg()); }, [showIns, showDel, suggesting, locked, me, JSON.stringify(focus), JSON.stringify(draft?.path ?? null), draft?.quote]);
 
   /* ------------------------------------------------------------- the runtime's messages */
 
@@ -306,7 +435,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       if (fromPresent) {
         if (m.ol === 'presentZoom') presentZoomed.current = m.zoomed;
         if (m.ol === 'exit') stopPresenting();
-        if (m.ol === 'visible') setCurrent(m.slide);
+        if (m.ol === 'visible') setCurrent(canvasIndexOf(m.slide));
         return;
       }
       switch (m.ol) {
@@ -320,6 +449,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             toCanvas({ ol: 'scale', scale });
             toCanvas({ ol: 'tool', tool });
             toCanvas({ ol: 'view', view: viewRef.current });
+            toCanvas(reviewMsgRef.current());
             if (host.ready()) toCanvas({ ol: 'source', version: version.current, html: versions.current.get(version.current) ?? text.toString() });
             setDeckMacros(macroTableOf(m.macros ?? {}));
             if (bibKnown.current.size) toCanvas({ ol: 'bib', entries: [...bibKnown.current.values()] });
@@ -380,6 +510,16 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         }
         case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined); break;
         case 'sequence': if (fromCanvas) setSeq({ slide: m.slide, rows: m.rows, steps: m.steps, ordering: m.ordering }); break;
+        case 'comment': {
+          if (!fromCanvas) break;
+          if (!m.open) { startDraft(m.path, m.slide, m.quote); break; }
+          // a pin: its threads in the pane
+          const ts = review.threads.filter(t => samePath(t.path, m.path) && !t.thread.done);
+          setReviewOpen(true);
+          setDraft(null);
+          if (ts[0]) setFocus({ path: ts[0].path, id: ts[0].thread.id, quote: ts[0].thread.quote });
+          break;
+        }
         case 'nodeEditing': if (fromCanvas) { setNodeEd(m.path ? { selected: m.selected, total: m.total } : null); if (m.path && document.activeElement !== canvasFrame.current) canvasFrame.current?.focus(); } break;
         case 'key': onRuntimeKey(m); break;
         case 'contextmenu': {
@@ -618,6 +758,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   /* ------------------------------------------------------------- the selection's formatting */
 
+  /** the suggestion on the one object selected (or on what it is in) */
+  const selChange = sel.length === 1 ? review.changes.find(c => samePath(c.path, sel[0].path)) ?? review.changes.find(c => within(c.path, sel[0].path)) ?? null : null;
+
   const styleSel = (set: Record<string, string | null>) => {
     if (!sel.length) return;
     applyOps(sel.map(s => ({ t: 'style', path: s.path, set })));
@@ -810,6 +953,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         { label: 'Replace picture…', action: imageTools.replace },
       ] : []),
       { label: 'Edit code', action: () => showCode() },
+      { label: 'Comment', shortcut: 'Ctrl+Alt+M', disabled: readOnlyRef.current, action: () => toCanvas({ ol: 'newComment' }) },
+      ...(selChange && !readOnlyRef.current ? [
+        { label: `Accept suggestion (${selChange.by})`, action: () => resolveChange(selChange, true) },
+        { label: 'Reject suggestion', action: () => resolveChange(selChange, false) },
+      ] : []),
       { sep: true },
       { label: 'Duplicate', shortcut: 'Ctrl+D', action: duplicateSel },
       { label: 'Delete', shortcut: 'Del', disabled: sel.every(s => s.locked), action: removeSel },
@@ -845,6 +993,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     showContextMenu(x, y, [
       { label: 'Text box', action: () => insertObject('text') },
       { label: 'Picture…', action: () => fileInput.current?.click() },
+      { label: kind === 'page' ? 'Comment on the page' : 'Comment on the slide', disabled: readOnlyRef.current, action: () => startDraft(sp ?? null, i) },
       ...(kind !== 'page' ? [
         { sep: true },
         { label: 'Slide background colour…', disabled: !sp || readOnlyRef.current, action: () => pickAt(x, y, 'Slide background', close => <ColorGrid current={null} close={close} none="As the design has it" onPick={c => { if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); }} />) },
@@ -898,6 +1047,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       { label: 'Move down', disabled: i >= n - 1, action: () => moveSlide(i, 1) },
       { sep: true },
       { label: 'Edit code', action: () => { const p = slidePaths(text.toString())[i]; if (p) showCode(p); } },
+      { label: 'Comment on the slide', disabled: readOnlyRef.current, action: () => startDraft(slidePaths(text.toString())[i] ?? null, i) },
       { label: 'Delete slide', disabled: n <= 1, action: () => deleteSlide(i) },
     ]);
   };
@@ -963,7 +1113,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       }
       // the node editor's keys when the focus is not in the canvas
       if (nodeEdRef.current && (e.key === 'Escape' || e.key === 'Enter' || e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); toCanvas({ ol: 'nodes', cmd: e.key === 'Delete' || e.key === 'Backspace' ? 'delete' : 'done' }); return; }
-      if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) host.redo(); else host.undo(); }
+      // a comment on the selection (or the slide), as in documents
+      if (mod && e.altKey && e.code === 'KeyM') { e.preventDefault(); toCanvas({ ol: 'newComment' }); }
+      else if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) host.redo(); else host.undo(); }
       else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); host.redo(); }
       else if (e.key === 'F5') { e.preventDefault(); startPresenting(!e.shiftKey); }
       // the focus left the canvas (a toolbar button, a palette): its shortcuts still work on the selection
@@ -1001,6 +1153,15 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   /* ------------------------------------------------------------- presenting */
 
+  // slides deleted as suggestions are not presented: the presentation numbers the others
+  const presentIndexOf = (i: number) => slidesRef.current.slice(0, i).filter(s => !s.deleted).length;
+  const canvasIndexOf = (k: number) => {
+    let n = -1;
+    const ss = slidesRef.current;
+    for (let i = 0; i < ss.length; i++) if (!ss[i].deleted && ++n === k) return i;
+    return k;
+  };
+
   const presentBox = useRef<HTMLDivElement>(null);
   /** the presented slide is zoomed in: Escape (which leaves full screen first) only zooms out */
   const presentZoomed = useRef(false);
@@ -1008,7 +1169,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const presentFrom = useRef(0);
   const startPresenting = (fromStart = false) => {
     presentZoomed.current = false;
-    presentFrom.current = fromStart ? 0 : currentRef.current;
+    presentFrom.current = fromStart ? 0 : presentIndexOf(currentRef.current);
     if (link && host.present?.(src('present') + `#${presentFrom.current + 1}`)) return;
     setPresenting(true);
     setTimeout(() => {
@@ -1073,7 +1234,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const saveNotes = (v: string, path = curSlidePath) => {
     if (!path || readOnlyRef.current) return;
     const op = notesOp(text.toString(), path, v);
-    if (op) applyOps([op]);
+    // (speaker notes are the presenter's: never a suggestion)
+    if (op) applyOps([op], true);
   };
   // another slide: what was typed goes to the slide it was typed for
   useEffect(() => {
@@ -1119,7 +1281,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (!open && seq.ordering) toCanvas({ ol: 'steps', cmd: { how: 'order', kind: null } });
   };
   const bars = deckToolbar({
-    kind, tool, setTool, readOnly, sel, editingText: !!editingText,
+    kind, tool, setTool, readOnly: locked, sel, editingText: !!editingText,
     math: { editing: !!mathEdit && !mathEdit.closing, insert: display => toCanvas({ ol: 'insertMath', display }), exec: mathExec, panels: mathPanels,
       display: !!mathEdit?.display, number: () => mathOps.current?.number(), label: labelFormula },
     latex: { link: insertLink, cite: host.docId ? () => setCiteOpen(true) : undefined, reference: pickReference },
@@ -1131,7 +1293,12 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     slideBackground: c => { const sp = slidePaths(text.toString())[currentRef.current]; if (sp) applyOps([{ t: 'style', path: sp, set: { background: c } }]); },
     canvas: { view, set: setView },
     newSlide: () => newSlide(currentRef.current),
+    review: {
+      comment: () => toCanvas({ ol: 'newComment' }),
+      suggestion: selChange ? { by: selChange.by, summary: selChange.summary, accept: () => resolveChange(selChange, true), reject: () => resolveChange(selChange, false) } : null,
+    },
   });
+  const openComments = review.threads.filter(t => !t.thread.done).length;
 
   // the contextual tools on a row of their own when they do not fit beside the others (nothing hidden)
   const barRef = useRef<HTMLDivElement>(null);
@@ -1187,6 +1354,13 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           <button class="dl-btn" title="Zoom in (Ctrl+=)" onClick={() => zoomStep(1.25)}>+</button>
         </span>
         <button class={'dl-btn' + (codeOpen ? ' on' : '')} title="The page's code" data-dl-code onClick={() => setCodeOpen(o => !o)}>&lt;/&gt;</button>
+        <button class={'dl-btn dl-review-btn' + (reviewOpen ? ' on' : '')} data-dl-review-toggle onClick={() => { setReviewOpen(!reviewOpen); if (reviewOpen) { setDraft(null); setFocus(null); } }}
+          title={`Comments and suggestions${openComments || review.changes.length ? ` — ${openComments} open comment${openComments === 1 ? '' : 's'}, ${review.changes.length} suggestion${review.changes.length === 1 ? '' : 's'}` : ''}`}>
+          <svg class="dl-rv-icon-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5h12v8.5H6.5L2 14z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
+          {openComments + review.changes.length > 0 && <span class="dl-rv-count" data-dl-review-count>{openComments + review.changes.length}</span>}
+        </button>
+        <EditModeSwitch mode={viewing ? 'viewing' : suggesting ? 'suggesting' : 'editing'} canEdit={!readOnly} view={null} views={() => []} onMode={setMode}
+          changes={{ ins: showIns, del: showDel, set: setChanges }} shortcuts={false} />
         {kind !== 'page' && <button class="dl-btn dl-present" title="Present from this slide (Shift+F5) — F5 from the first" data-dl-present onClick={() => startPresenting(false)}>▶ Present</button>}
         <button class="dl-btn" title="Download" data-dl-download onClick={e => {
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -1202,7 +1376,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             <div class="dl-rail-grip" role="separator" aria-orientation="vertical" aria-label="Slide rail width" title="Drag to make the slides wider or narrower (double-click: back to the usual width)"
               data-dl-railgrip onPointerDown={onRailGrip} onDblClick={() => setRail(RAIL_W)} />
             <div class="dl-rail-actions">
-              <button class="dl-btn" title="New slide after this one (Ctrl+M)" data-dl-newslide disabled={readOnly} onClick={() => newSlide(current)}>+ Slide</button>
+              <button class="dl-btn" title="New slide after this one (Ctrl+M)" data-dl-newslide disabled={locked} onClick={() => newSlide(current)}>+ Slide</button>
             </div>
           </div>
         )}
@@ -1235,20 +1409,28 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           </div>
           {kind === 'deck' && (
             <div class="dl-notes">
-              <textarea placeholder="Speaker notes" value={notesDraft && curSlidePath && notesDraft.path.join() === curSlidePath.join() ? notesDraft.text : notes} disabled={readOnly || !curSlidePath} data-dl-notes
+              <textarea placeholder="Speaker notes" value={notesDraft && curSlidePath && notesDraft.path.join() === curSlidePath.join() ? notesDraft.text : notes} disabled={locked || !curSlidePath} data-dl-notes
                 onInput={e => setNotesDraft((e.target as HTMLTextAreaElement).value)}
                 onBlur={e => { const d = draftRef.current; saveNotes((e.target as HTMLTextAreaElement).value, d?.path ?? curSlidePath); setNotesDraftState(null); }} />
             </div>
           )}
         </div>
         {animOpen && kind === 'deck' && (
-          <AnimationPane seq={seq} sel={sel} readOnly={readOnly} close={() => toggleAnim(false)}
+          <AnimationPane seq={seq} sel={sel} readOnly={locked} close={() => toggleAnim(false)}
             send={cmd => toCanvas({ ol: 'steps', cmd })} select={p => toCanvas({ ol: 'select', paths: [p] })} />
+        )}
+        {reviewOpen && (
+          <ReviewPane review={review} slideTitles={slides.map(s => s.title)} current={current} kind={kind} me={me} canEdit={!locked}
+            focus={focus} draft={draft} submitDraft={submitDraft} cancelDraft={() => setDraft(null)} select={showOnCanvas}
+            reply={replyTo} resolve={resolveThread} remove={removeThread}
+            accept={c => resolveChange(c, true)} reject={c => resolveChange(c, false)}
+            acceptAll={() => resolveEverything(true)} rejectAll={() => resolveEverything(false)}
+            close={() => { setReviewOpen(false); setDraft(null); setFocus(null); }} />
         )}
         {codeOpen && (
           <div class="dl-code">
             <div class="dl-code-head"><span>{path.split('/').pop()}</span><button class="dl-btn" onClick={() => setCodeOpen(false)} title="Close">×</button></div>
-            <textarea ref={codeRef} spellcheck={false} readOnly={readOnly} onInput={onCodeInput} data-dl-codearea
+            <textarea ref={codeRef} spellcheck={false} readOnly={locked} onInput={onCodeInput} data-dl-codearea
               onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '  '); } }} />
           </div>
         )}

@@ -42,6 +42,7 @@ export function webHost(id: string, user: User): DeliverableHost & { destroy(): 
   return {
     path,
     docId: id,
+    author: () => user.name || user.username,
     bibliography: async keys => (keys.length ? (await api.bibKeys(id, keys)).entries : []),
     text: () => text.toString(),
     apply(splices: Splice[], origin) {

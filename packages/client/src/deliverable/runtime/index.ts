@@ -26,6 +26,7 @@ import { setView, refreshView, reportColors } from './view';
 import { startPresenting } from './present';
 import { report, rememberPage } from './report';
 import { ensureSolo } from './solo';
+import { installReviewCss, setReview, railReview } from './review';
 
 function addStyle(css: string): HTMLStyleElement {
   const s = document.createElement('style');
@@ -65,6 +66,9 @@ function startThumb(): void {
     .n { position: absolute; font: 600 calc(12px / var(--s)) system-ui, sans-serif; color: #fff; background: rgba(40,44,52,.82); padding: calc(1px / var(--s)) calc(6px / var(--s)); border-radius: calc(4px / var(--s)); transform: translate(calc(4px / var(--s)), calc(4px / var(--s))); }
     .cur { position: absolute; box-sizing: border-box; border: calc(3px / var(--s)) solid #2f6fde; border-radius: calc(3px / var(--s)); }
     .drop { position: absolute; height: calc(3px / var(--s)); background: #2f6fde; }
+    .c { position: absolute; transform: translate(calc(-100% - 4px / var(--s)), calc(4px / var(--s))); display: flex; align-items: center; gap: calc(2px / var(--s)); font: 700 calc(11px / var(--s)) system-ui, sans-serif; color: #3a2a00; background: #f6b400; padding: calc(1px / var(--s)) calc(5px / var(--s)); border-radius: calc(8px / var(--s)) calc(8px / var(--s)) calc(8px / var(--s)) calc(2px / var(--s)); }
+    .chg { position: absolute; width: calc(4px / var(--s)); transform: translateX(calc(-7px / var(--s))); border-radius: calc(2px / var(--s)); }
+    .del { position: absolute; transform: translate(-50%, -50%); font: 700 calc(12px / var(--s)) system-ui, sans-serif; color: #fff; background: #d2453c; padding: calc(2px / var(--s)) calc(8px / var(--s)); border-radius: calc(4px / var(--s)); }
   </style><div class="l"></div>`;
   railLayer = root.querySelector('.l') as HTMLElement;
   document.documentElement.appendChild(host);
@@ -146,6 +150,11 @@ function drawRail(): void {
   ss.forEach((s, i) => {
     const r = docRect(s);
     parts.push(`<div class="n" style="left:${r.x}px;top:${r.y}px">${i + 1}</div>`);
+    // the slide's open comments and suggestions (review.ts)
+    const rv = railReview(s);
+    if (rv.changed) parts.push(`<div class="chg" style="left:${r.x}px;top:${r.y}px;height:${r.h}px;background:${rv.changed}" title="Suggested changes"></div>`);
+    if (rv.deleted) parts.push(`<div class="del" style="left:${r.x + r.w / 2}px;top:${r.y + r.h / 2}px">Deleted</div>`);
+    if (rv.comments) parts.push(`<div class="c" style="left:${r.x + r.w}px;top:${r.y}px">💬 ${rv.comments}</div>`);
     if (i === railCurrent) parts.push(`<div class="cur" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px"></div>`);
   });
   if (railDrag && railDrag.to !== null) {
@@ -212,6 +221,8 @@ function onMessage(e: MessageEvent): void {
     case 'nodes': if (MODE === 'edit') nodeCommand(m.cmd); break;
     case 'steps': if (MODE === 'edit') stepCommand(m.cmd); break;
     case 'selectAll': if (MODE === 'edit') edit.selectAllOnSlide(); break;
+    case 'review': if (MODE === 'edit') { setReview(m.view); edit.report(); edit.draw(); } break;
+    case 'newComment': if (MODE === 'edit') edit.newComment(); break;
   }
 }
 
@@ -265,6 +276,8 @@ function settle(): Promise<void> {
 function init(): void {
   state.kind = detectKind();
   addStyle(NOTES_CSS);
+  // suggestions shown while editing, accepted everywhere else (review.ts)
+  installReviewCss();
   if (MODE === 'check') rememberPage();
   // the formulas hidden (never their TeX on screen) and MathJax fetched while the page's fonts load
   startMath();

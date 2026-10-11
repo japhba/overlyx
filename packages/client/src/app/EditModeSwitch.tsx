@@ -44,7 +44,7 @@ const ICONS: Record<EditMode, string> = {
 };
 const Icon = ({ mode }: { mode: EditMode }) => <span class="edit-mode-icon" dangerouslySetInnerHTML={{ __html: ICONS[mode] }} />;
 
-export function EditModeSwitch({ mode, canEdit, view, views, onMode }: {
+export function EditModeSwitch({ mode, canEdit, view, views, onMode, changes, shortcuts = true }: {
   mode: EditMode;
   /** false with view access only: Viewing is all there is */
   canEdit: boolean;
@@ -53,6 +53,10 @@ export function EditModeSwitch({ mode, canEdit, view, views, onMode }: {
   /** … and every editor it applies to (the master and the combined view's children) */
   views: () => EditorView[];
   onMode(mode: EditMode): void;
+  /** the change filter where there is no ProseMirror editor (slides: the deck editor's own) */
+  changes?: { ins: boolean; del: boolean; set(ins: boolean, del: boolean): void };
+  /** the documents' shortcut named in the titles (not on slides, where Ctrl+Shift+E centres) */
+  shortcuts?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -68,7 +72,7 @@ export function EditModeSwitch({ mode, canEdit, view, views, onMode }: {
   const shown = mode === 'viewing' || !canEdit ? 'viewing' : mode;
   const current = MODES.find(m => m.mode === shown)!;
   const filter = view ? changesFilterKey.getState(view.state) : null;
-  const ins = filter?.showInsertions ?? true, del = filter?.showDeletions ?? true;
+  const ins = changes?.ins ?? filter?.showInsertions ?? true, del = changes?.del ?? filter?.showDeletions ?? true;
   const pickMode = (m: EditMode) => {
     setOpen(false);
     recordUsage('toolbar', `mode ▸ ${m}`);
@@ -78,6 +82,7 @@ export function EditModeSwitch({ mode, canEdit, view, views, onMode }: {
   const pickView = (c: typeof CHANGE_VIEWS[number]) => {
     setOpen(false);
     recordUsage('toolbar', `changes ▸ ${c.id}`);
+    if (changes) { changes.set(c.ins, c.del); return; }
     for (const v of views()) {
       const f = changesFilterKey.getState(v.state);
       if (f?.showInsertions !== c.ins || f?.showDeletions !== c.del) setChangesFilter(v, { showInsertions: c.ins, showDeletions: c.del });
@@ -96,7 +101,7 @@ export function EditModeSwitch({ mode, canEdit, view, views, onMode }: {
         <div class="edit-mode-menu" role="menu">
           {MODES.map(m => (
             <button type="button" key={m.mode} role="menuitemradio" aria-checked={shown === m.mode} data-mode={m.mode}
-              disabled={!canEdit && m.mode !== 'viewing'} title={!canEdit && m.mode !== 'viewing' ? 'The project was shared with you for viewing' : m.title} onClick={() => pickMode(m.mode)}>
+              disabled={!canEdit && m.mode !== 'viewing'} title={!canEdit && m.mode !== 'viewing' ? 'The project was shared with you for viewing' : shortcuts ? m.title : m.title.replace(/ \(Ctrl\+Shift\+E\)/, '')} onClick={() => pickMode(m.mode)}>
               <Icon mode={m.mode} />
               <span class="edit-mode-text"><b>{m.label}</b><small>{m.hint}</small></span>
               <span class="edit-mode-check">{shown === m.mode ? '✓' : ''}</span>

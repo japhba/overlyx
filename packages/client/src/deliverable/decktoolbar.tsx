@@ -66,6 +66,8 @@ export interface DeckCtx {
   animate: { open: boolean; toggle(): void };
   /** the node editor (a path's points): on, its selected nodes, its commands */
   nodes: { editing: boolean; selected: number; total: number; cmd(c: NodeCmd): void };
+  /** comments and suggestions (ReviewPane): a new comment, the selected object's suggestion to accept or reject */
+  review?: { comment(): void; suggestion: { by: string; summary: string; accept(): void; reject(): void } | null };
 }
 
 /** the node editor's row: Inkscape's node toolbar */
@@ -241,6 +243,9 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
         action: () => { if (c.editingText) c.math.insert(false); else c.setTool('formula'); }, active: c.tool === 'formula' || c.math.editing, disabled: ro },
       { id: 'dk-references', title: 'References — the works cited (\\cite) listed, as LaTeX\'s bibliography: click or drag on the slide', icon: 'dk-references', action: () => c.setTool('references'), active: c.tool === 'references', disabled: ro },
     ],
+    ...(c.review ? [[
+      { id: 'dk-comment', title: 'Comment (Ctrl+Alt+M) — on what is selected, on the words selected while typing, or on the slide', icon: 'dk-comment', action: c.review.comment, disabled: ro },
+    ]] : []),
   ];
 
   if (ro) return { tools, context: [], sections: [] };
@@ -248,6 +253,12 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   if (c.nodes.editing) { const g = nodeGroups(c); return { tools, context: g, sections: [{ label: 'Points', groups: g }] }; }
   const sections: ToolSection[] = [];
   let context: ToolButton[][] = [];
+  // the selected object's suggestion: accepted or rejected here, before its own tools
+  const sug = c.review?.suggestion;
+  if (sug) sections.push({ label: `Suggestion · ${sug.by}`, groups: [[
+    { id: 'dk-accept', title: `Accept: ${sug.summary}`, icon: 'dk-accept', action: sug.accept },
+    { id: 'dk-reject', title: `Reject: back to how it was (${sug.summary})`, icon: 'dk-reject', action: sug.reject },
+  ]] });
   /** the groups pushed from here on belong to a section named `label` */
   const section = (label: string) => { context = []; sections.push({ label, groups: context }); };
   const textish = c.editingText || sel.some(s => s.canText || s.text);
@@ -431,6 +442,9 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     const own = out.find(x => x.label === paintLabel(shapes));
     if (own) out = [own, ...out.filter(x => x !== own)];
   }
+  // (a suggestion on it before anything)
+  const sugSec = out.find(x => x.groups[0]?.[0]?.id === 'dk-accept');
+  if (sugSec && out[0] !== sugSec) out = [sugSec, ...out.filter(x => x !== sugSec)];
   return { tools, context: out.flatMap(x => x.groups), sections: out };
 }
 

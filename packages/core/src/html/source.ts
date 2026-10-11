@@ -145,8 +145,8 @@ function startTagLoc(el: HElement): TagLocation {
   return { ...st, attrs: st.attrs ?? (el.sourceCodeLocation as TagLocation).attrs };
 }
 
-/** Set (or with null remove) an attribute in the element's start tag; null when nothing changes. */
-export function attrSplice(text: string, el: HElement, name: string, value: string | null): Splice | null {
+/** Set (or with null remove) an attribute in the element's start tag; null when nothing changes. A new attribute is quoted with `quote` (an existing one keeps its quotes). */
+export function attrSplice(text: string, el: HElement, name: string, value: string | null, quote: '"' | "'" = '"'): Splice | null {
   const st = startTagLoc(el);
   // (the parser keys attribute locations by the name as lower case: an SVG's viewBox is "viewbox" there)
   const loc = st.attrs?.[name] ?? st.attrs?.[name.toLowerCase()];
@@ -169,7 +169,7 @@ export function attrSplice(text: string, el: HElement, name: string, value: stri
   let at = st.endOffset - 1;
   if (text[at - 1] === '/') at--;
   while (at > st.startOffset && /\s/.test(text[at - 1])) at--;
-  return { from: at, to: at, insert: ` ${name}="${escapeAttr(value, '"')}"` };
+  return { from: at, to: at, insert: ` ${name}=${quote}${escapeAttr(value, quote)}${quote}` };
 }
 
 export function styleSplice(text: string, el: HElement, set: Record<string, string | null>): Splice | null {
@@ -279,15 +279,17 @@ export function duplicateSplice(text: string, el: HElement): Splice {
 export type Path = number[];
 export type HtmlOp =
   | { t: 'style'; path: Path; set: Record<string, string | null> }
-  | { t: 'attr'; path: Path; name: string; value: string | null }
+  /** (`q`: the quotes of a new attribute — single ones for a JSON value) */
+  | { t: 'attr'; path: Path; name: string; value: string | null; q?: "'" }
   | { t: 'inner'; path: Path; html: string }
   | { t: 'outer'; path: Path; html: string }
   | { t: 'remove'; paths: Path[] }
   | { t: 'insert'; parent: Path; index: number; html: string }
-  | { t: 'move'; path: Path; parent: Path; index: number }
+  /** (`html`: what goes there instead of the element's own source — it moved and changed at once) */
+  | { t: 'move'; path: Path; parent: Path; index: number; html?: string }
   | { t: 'duplicate'; paths: Path[] }
   /** the element children of `parent` in a new order (`order[k]`: the index of the child that comes k-th); the text between them stays put */
-  | { t: 'reorder'; parent: Path; order: number[] };
+  | { t: 'reorder'; parent: Path; order: number[]; parts?: Record<number, string> };
 
 /** apply non-overlapping splices (in `text`'s coordinates) */
 export function applySplices(text: string, splices: readonly Splice[]): string {
@@ -308,7 +310,7 @@ export function opSplices(src: SourceDoc, op: HtmlOp): Splice[] {
   const { text, doc } = src;
   switch (op.t) {
     case 'style': { const s = styleSplice(text, need(doc, op.path), op.set); return s ? [s] : []; }
-    case 'attr': { const s = attrSplice(text, need(doc, op.path), op.name, op.value); return s ? [s] : []; }
+    case 'attr': { const s = attrSplice(text, need(doc, op.path), op.name, op.value, op.q); return s ? [s] : []; }
     case 'inner': return [innerSplice(need(doc, op.path), op.html)];
     case 'outer': { const r = outerRange(need(doc, op.path)); return [{ ...r, insert: op.html }]; }
     case 'remove': {
@@ -321,9 +323,10 @@ export function opSplices(src: SourceDoc, op: HtmlOp): Splice[] {
     case 'reorder': {
       const kids = elementChildren(need(doc, op.parent, false)).filter(k => k.sourceCodeLocation);
       if (op.order.length !== kids.length || new Set(op.order).size !== kids.length || op.order.some(i => !(i >= 0 && i < kids.length))) throw new Error('the children changed');
-      if (op.order.every((i, k) => i === k)) return [];
+      if (op.order.every((i, k) => i === k) && !op.parts) return [];
       const from = kids[0].sourceCodeLocation!.startOffset, to = kids[kids.length - 1].sourceCodeLocation!.endOffset;
-      const parts = kids.map(k => text.slice(k.sourceCodeLocation!.startOffset, k.sourceCodeLocation!.endOffset));
+      // (`parts`: children that changed as well — their new source)
+      const parts = kids.map((k, i) => op.parts?.[i] ?? text.slice(k.sourceCodeLocation!.startOffset, k.sourceCodeLocation!.endOffset));
       const gaps = kids.slice(1).map((k, i) => text.slice(kids[i].sourceCodeLocation!.endOffset, k.sourceCodeLocation!.startOffset));
       return [{ from, to, insert: op.order.map((i, k) => (k ? gaps[k - 1] : '') + parts[i]).join('') }];
     }
@@ -336,12 +339,12 @@ export function opSplices(src: SourceDoc, op: HtmlOp): Splice[] {
       const parent = need(doc, op.parent, false);
       if (el === parent || contains(el, parent)) throw new Error('cannot move an element into itself');
       const { from, to } = outerRange(el);
-      const html = text.slice(from, to);
+      const html = op.html ?? text.slice(from, to);
       // the index counts the siblings without the element itself
       const siblings = elementChildren(parent).filter(k => k !== el && k.sourceCodeLocation);
       const before = siblings[op.index];
-      if (before === nextElementSibling(el) && parent === el.parentNode) return [];
-      if (!before && parent === el.parentNode && siblings[siblings.length - 1] === previousElementSibling(el) && !nextElementSibling(el)) return [];
+      const stays = (before === nextElementSibling(el) && parent === el.parentNode) || (!before && parent === el.parentNode && siblings[siblings.length - 1] === previousElementSibling(el) && !nextElementSibling(el));
+      if (stays) return op.html === undefined ? [] : [{ from, to, insert: op.html }];
       const rm = removeSplice(text, el);
       // inserted where it would go if it were not there
       const ins = before ? insertBeforeSplice(text, before, html) : appendSplice(text, parent, siblings, html);

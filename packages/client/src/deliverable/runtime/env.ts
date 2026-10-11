@@ -90,10 +90,12 @@ export function sourced(el: Element | null): Element | null {
 
 export function slides(): HTMLElement[] {
   const out: HTMLElement[] = [];
+  // a slide deleted as a suggestion: shown (faded) while editing, not presented or printed
+  const shownDeleted = MODE === 'edit' || MODE === 'thumb';
   const visit = (n: Element) => {
     for (const c of Array.from(n.children)) {
       if (isForeign(c)) continue;
-      if (c.classList.contains('slide')) { out.push(c as HTMLElement); continue; }
+      if (c.classList.contains('slide')) { if (shownDeleted || !c.hasAttribute('data-ol-del')) out.push(c as HTMLElement); continue; }
       if (c.localName !== 'script' && c.localName !== 'style' && c.localName !== 'template') visit(c);
     }
   };
@@ -131,7 +133,7 @@ export function slideBoxes(): SlideBox[] {
   return slides().map((s, i) => {
     s.setAttribute('data-ol-slide-index', String(i));
     const src = srcOf.get(s);
-    return { index: i, path: src ? srcPath(src) : [], rect: docRect(s), title: slideTitle(s) };
+    return { index: i, path: src ? srcPath(src) : [], rect: docRect(s), title: slideTitle(s), ...(s.hasAttribute('data-ol-del') ? { deleted: true } : {}) };
   });
 }
 

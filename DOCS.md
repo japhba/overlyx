@@ -613,6 +613,38 @@ blend.
     kept for the whole drag — resize and rotate drags keep their handle's cursor. Right-click on a
     drawing: *Edit points* opens the node editor on the shape under the pointer (a rectangle,
     ellipse or line becomes a path first).
+  * **Comments and suggestions** (11 Oct 2026, the user: "build track changes and comments for
+    layout mode"): kept in the page's own text, as LyX keeps them in a document (`core
+    html/review.ts`; agents are told in `DELIVERABLE_GUIDE`). A comment thread is JSON in
+    `data-ol-comments='[…]'` on an object or slide (`by`, `at`, `text`, `re` replies, `done`, `quote`:
+    the words selected while typing); Ctrl+Alt+M, the 💬 tool, *Comment* in the object / slide / rail
+    menus start one; pins on the canvas open it (`runtime/review.ts`), the words it quotes are
+    highlighted (CSS Custom Highlight API). **Suggesting** is the mode switch's (`EditModeSwitch`
+    with the deck's own Show-changes filter), a setting of the page like `\tracking_changes`
+    (`<meta name="overlyx-suggesting" content="on">`); while it is on the canvas's operations are
+    rewritten before they become splices (`reviewOps`): an addition gets `data-ol-ins="Name|time"`, a
+    deletion `data-ol-del` (the object stays, faded and hatched), a change `data-ol-chg` +
+    `data-ol-was` (the old attribute values; `@outer` the whole element for crops / path edits /
+    ungrouping, `@i` the old place for reordering and slide moves), retyped text `<ins
+    data-ol-by>` / `<del data-ol-by>` from a word diff of the old marked text and the new one
+    (`trackInner`: formulas and commands atomic, list items / paragraphs added or deleted marked as
+    elements, earlier authors kept, deleting someone's suggested words drops them, old deletions
+    re-anchored). While retyping, deletions are struck through at once and typing is underlined
+    (`trackInput` on `beforeinput`; only presentation — the commit's diff is the truth), deletions
+    are `contenteditable=false`. The head, speaker notes and what is itself a suggested addition
+    change directly; copies (duplicate, paste) carry no comments or marks in any mode, and a
+    replaced element keeps them. The **Review pane** (`ReviewPane.tsx`, this slide / all) lists
+    threads and suggestions (one card per object and person, summarised: "Moved · Resized",
+    "Typed … · Deleted …") with Accept / Reject, Accept all / Reject all (`resolveOps` /
+    `resolveAll` rewrite the marked source; one undo step); the contextual toolbar's *Suggestion ·
+    Name* section accepts or rejects the selected object's. A selected changed object shows its
+    original faintly where it was (a ghost clone, `data-ol-runtime`). Outside the editor
+    (presenting, the PDF, `render_page`, *Open in a new tab*) the page shows with the suggestions
+    accepted and deleted slides are not presented; the rail marks changed slides, deleted ones and
+    open comments; the web-page zip is `publishedText` (accepted, no comments). Viewing makes this
+    editor read-only. The runtime syncs these `data-ol-` attributes like any source attribute
+    (reconcile.ts `SOURCE_OL`); `stopText` re-pairs a retyped element's children (`linkTree`) —
+    without it a later attribute change duplicated a text's inline elements.
   * **Around the canvas** (`DeliverableEditor.tsx`): the slide rail (a second frame in `thumb`
     mode: click, drag to reorder, its menu — new slide in the design of the current one, blank,
     duplicate, move, delete), the **contextual toolbar** (`decktoolbar.tsx`, the toolbars' own

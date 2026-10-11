@@ -50,6 +50,8 @@ export interface DeliverableHost {
   save?(): void;
   /** a key pressed on the canvas that the editor does not handle (VS Code: its own shortcuts) */
   key?(k: { key: string; ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }): void;
+  /** the name comments and suggestions are made under (the account's; VS Code: git's user.name) */
+  author?(): string;
   /** the page's document id on the server (the citation dialog searches and adds papers with it); absent: no citation dialog */
   readonly docId?: string;
   /** the project's bibliography (its .bib files): the entries of `keys` (with their fields), for citations typed or pasted */

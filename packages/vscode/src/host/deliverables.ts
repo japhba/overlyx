@@ -22,6 +22,7 @@ import { deckExtras, type DeckExtras } from '@overlyx/core/html/deckextras.ts';
 import { parseBibtex, type BibEntry } from '@overlyx/core/bib.ts';
 import { webviewHtml } from './webviewHtml.ts';
 import { toPng } from './graphics.ts';
+import { gitUserName } from './newDocument.ts';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -136,7 +137,8 @@ export type DeliverableToHost =
   | { type: 'notify'; kind?: 'info' | 'error'; text: string };
 
 export type HostToDeliverable =
-  | { type: 'dlInit'; text: string; version: number; base: string; entry: string; readOnly: boolean; dark: boolean }
+  /** `author`: git's user.name, the name comments and suggestions are made under */
+  | { type: 'dlInit'; text: string; version: number; base: string; entry: string; readOnly: boolean; dark: boolean; author?: string }
   | { type: 'dlText'; text: string; version: number }
   | { type: 'dlAsset'; path: string; v: number }
   | { type: 'dlUploaded'; id: number; error?: string };
@@ -183,7 +185,7 @@ export class DeliverableEditorProvider implements vscode.CustomTextEditorProvide
     subs.push(panel.webview.onDidReceiveMessage((msg: DeliverableToHost) => {
       switch (msg.type) {
         case 'ready':
-          post({ type: 'dlInit', text: document.getText(), version: document.version, base, entry, readOnly: false, dark: isDark() });
+          post({ type: 'dlInit', text: document.getText(), version: document.version, base, entry, readOnly: false, dark: isDark(), author: gitUserName(path.dirname(document.uri.fsPath)) });
           break;
         case 'dlApply':
           chain = chain.then(async () => {

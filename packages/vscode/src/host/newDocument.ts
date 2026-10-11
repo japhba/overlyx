@@ -59,7 +59,7 @@ function freeName(dir: string, name: string): string {
 }
 
 /** git's user.name — the author on a new title page, as the web app puts the account's name there */
-function gitUserName(cwd: string): string | undefined {
+export function gitUserName(cwd: string): string | undefined {
   try { return execFileSync('git', ['config', 'user.name'], { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || undefined; } catch { return undefined; }
 }
 

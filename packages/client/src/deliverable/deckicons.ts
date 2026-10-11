@@ -26,6 +26,10 @@ Object.assign(ICONS, {
   'dk-path': I('<circle cx="6" cy="7" r="4"/><circle cx="10" cy="9" r="4"/>'),
   // the works cited, listed; objects that appear one after the other (beamer's overlays)
   'dk-references': I('<path d="M2.5 3.5h2.2M2.5 8h2.2M2.5 12.5h2.2"/><path d="M6.5 3.5h7M6.5 8h7M6.5 12.5h5"/>'),
+  // comments and suggestions
+  'dk-comment': I('<path d="M2 2.5h12v8.5H6.5L2 14z"/><path d="M8 4.6v4.2M5.9 6.7h4.2"/>'),
+  'dk-accept': I('<path d="M3 8.5l3.2 3.2L13 4.8" stroke-width="1.6"/>'),
+  'dk-reject': I('<path d="M4 4l8 8M12 4l-8 8" stroke-width="1.6"/>'),
   'dk-step': I('<rect x="2" y="9" width="12" height="4.5" rx="0.8"/><rect x="3.5" y="5" width="9" height="3" rx="0.8" stroke-dasharray="1.6 1.2"/><rect x="5" y="2" width="6" height="2" rx="0.6" stroke-dasharray="1.2 1"/>'),
   'dk-union': F('<path d="M6 2.6a4.4 4.4 0 0 1 4.3 3.5A4.4 4.4 0 1 1 5.7 11.4 4.4 4.4 0 0 1 6 2.6z"/>'),
   'dk-difference': '<svg viewBox="0 0 16 16"><path d="M6 2.6a4.4 4.4 0 0 1 4.3 3.5 4.4 4.4 0 0 0-4.6 5.3A4.4 4.4 0 0 1 6 2.6z" fill="currentColor"/><circle cx="10" cy="10" r="4.4" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="1.6 1.2"/></svg>',

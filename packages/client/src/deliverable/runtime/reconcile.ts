@@ -92,6 +92,13 @@ function relink(live: Element, s0: Element, s1: Element): void {
   if (!liveOf.get(s1)) link(live, s1);
 }
 
+/** a live element filled from its source (innerHTML) paired with it again, all the way down (its children are new nodes) */
+export function linkTree(live: Element, src: Element): void {
+  const a = [src, ...Array.from(src.querySelectorAll('*'))];
+  const b = [live, ...Array.from(live.querySelectorAll('*'))];
+  for (let i = 0; i < a.length && i < b.length; i++) if (a[i].localName === b[i].localName) link(b[i], a[i]);
+}
+
 function fresh(s1: Element): Element {
   const el = document.importNode(s1, true);
   const a = [s1, ...Array.from(s1.querySelectorAll('*'))];
@@ -100,10 +107,14 @@ function fresh(s1: Element): Element {
   return el;
 }
 
+/** data-ol- attributes of the source (the review's): kept in step like any other, unlike the runtime's own data-ol- ones */
+const SOURCE_OL = new Set(['data-ol-comments', 'data-ol-ins', 'data-ol-del', 'data-ol-chg', 'data-ol-was']);
+const synced = (name: string) => !name.startsWith('data-ol-') || SOURCE_OL.has(name);
+
 function syncAttributes(live: Element, s0: Element, s1: Element): void {
   // only what the source changed: attributes the page's scripts set stay
-  for (const a of Array.from(s0.attributes)) if (!s1.hasAttribute(a.name) && !a.name.startsWith('data-ol-')) live.removeAttribute(a.name);
-  for (const a of Array.from(s1.attributes)) if (s0.getAttribute(a.name) !== a.value && !a.name.startsWith('data-ol-')) {
+  for (const a of Array.from(s0.attributes)) if (!s1.hasAttribute(a.name) && synced(a.name)) live.removeAttribute(a.name);
+  for (const a of Array.from(s1.attributes)) if (s0.getAttribute(a.name) !== a.value && synced(a.name)) {
     try { live.setAttribute(a.name, a.value); } catch { /* an attribute name the DOM refuses */ }
   }
 }
