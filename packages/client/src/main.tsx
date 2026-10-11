@@ -23,7 +23,7 @@ initUsage();   // anonymous usage statistics (usage.ts): the session, screen cha
   const report = (msg: string, stack?: string) => {
     // Browsers deliver this ResizeObserver scheduling notice as a global ErrorEvent even though
     // no application exception occurred. It is safe to leave in the console, but not to alarm
-    // the user or create an automatic GitHub issue for it.
+    // the user or record an automatic error report for it.
     if (isBenignBrowserError(msg)) return;
     const now = Date.now();
     if (msg === last && now - lastAt < 5000) return;
@@ -31,8 +31,8 @@ initUsage();   // anonymous usage statistics (usage.ts): the session, screen cha
     editorContext.notify?.('Something went wrong: ' + msg.slice(0, 200) + ' (details in the browser console)', 'error');
     editorContext.lastError = msg + (stack ? '\n' + stack : '');
     recordUsage('error', noticeTemplate(msg));
-    // ...and reach the developers: an issue per distinct message (deduplicated on the server; no
-    // document content, see server/src/feedback.ts). At most a few per page load.
+    // ...and reach the developers: one report per distinct message, kept on the server (deduplicated
+    // there; no document content, see server/src/feedback.ts). At most a few per page load.
     if (sent.size < 5 && !sent.has(msg) && !/Failed to fetch|NetworkError|Load failed/.test(msg)) {
       sent.add(msg);
       api.clientError({ message: msg, stack: stack?.slice(0, 4000) ?? null }).catch(() => {});

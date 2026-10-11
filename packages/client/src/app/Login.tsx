@@ -248,6 +248,7 @@ export function Login({ onLogin, google, note, onBack }: {
               GitHub
             </a>
             <a href={GITHUB_URL + '/issues/new'} target="_blank" rel="noopener">Report an issue</a>
+            <a href="/privacy" data-privacy-link>Privacy</a>
           </nav>
         </footer>
       </div>

@@ -168,8 +168,9 @@ When VS Code telemetry is enabled, OverLyX sends errors from the extension host 
 to `https://overlyx.app/api/vscode-telemetry`. Reports contain the sanitized error and stack trace,
 the OverLyX and VS Code versions, operating-system/CPU family, and whether the extension host is
 local or remote. They never contain document content, filenames, workspace paths, account details,
-email addresses, or stable machine/session identifiers. Distinct errors are deduplicated in the
-project's issue tracker. Set `overlyx.errorReports` to false, or turn off VS Code telemetry globally,
+email addresses, or stable machine/session identifiers. Distinct errors are deduplicated and kept
+on the OverLyX server for the maintainers (never published; deleted 90 days after they last occurred,
+see https://overlyx.app/privacy). Set `overlyx.errorReports` to false, or turn off VS Code telemetry globally,
 to disable sending. The exact event schema is in `telemetry.json`; local details remain available in
 the **OverLyX** output channel.
 

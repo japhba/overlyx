@@ -23,7 +23,8 @@ test.describe('landing page', () => {
     await expect(page.locator('.login')).not.toContainText('without the compiling');
     await expect(page.locator('.login .links a', { hasText: 'GitHub' })).toHaveAttribute('href', 'https://github.com/japhba/overlyx');
     await expect(page.locator('.login .links a', { hasText: 'Report an issue' })).toHaveAttribute('href', /github\.com\/japhba\/overlyx\/issues\/new/);
-    await expect(page.locator('.login .links a')).toHaveCount(2);
+    await expect(page.locator('.login .links a', { hasText: 'Privacy' })).toHaveAttribute('href', '/privacy');
+    await expect(page.locator('.login .links a')).toHaveCount(3);
     // no Google configured here: the username form is shown directly, as the primary action
     await expect(page.locator('[data-google-login]')).toHaveCount(0);
     await expect(page.locator('[data-password-login]')).toHaveCount(0);

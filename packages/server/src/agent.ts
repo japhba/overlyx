@@ -660,6 +660,12 @@ export function disconnectAgents(): void { for (const h of hosts.values()) h.dis
 
 /** Stop every keeper and codex child (tests, explicit teardown). */
 export function shutdownAgents(): void { for (const h of hosts.values()) h.stop(); }
+/** The user deleted their account: their codex stops, and its home (ChatGPT sign-in, transcripts) goes. */
+export function forgetAgentUser(userId: number): void {
+  hosts.get(userId)?.stop();
+  hosts.delete(userId);
+  fs.rmSync(agentHomeDir(userId), { recursive: true, force: true });
+}
 
 export function agentAvailable(): boolean { return config.agent.enabled; }
 

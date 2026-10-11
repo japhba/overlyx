@@ -178,14 +178,18 @@ export const knownProjects = new Set<string>();
 
 export interface LitHit { id: string; title: string; authors: string[]; year: number | null; venue: string; type: string; doi: string | null; arxiv: string | null; url: string | null; citations: number | null; sources: string[]; dblp?: string }
 export interface BibAddResult { key: string; file: string; existed: boolean; bibtex: string; entry: BibItem }
-export interface FeedbackInfo { enabled: boolean; repo: string; newIssueUrl: string; version: string; errorReports: boolean }
+export interface FeedbackInfo { version: string; errorReports: boolean }
+/** what deleting the account erases (server accounts.ts deletionPreview) */
+export interface DeletionPreview { owned: { project: string; title: string | null; people: number }[]; memberOf: number; refused: string | null }
 export const api = {
   literatureSearch: (q: string) => req<{ hits: LitHit[]; sources: string[]; warnings: string[] }>('GET', `/api/bib/search?q=${encodeURIComponent(q)}`),
   literatureSources: () => req<{ enabled: boolean; sources: string[] }>('GET', '/api/bib/sources'),
   bibAdd: (project: string, data: { hit?: LitHit; bibtex?: string }) => req<BibAddResult>('POST', `/api/projects/${encodeURIComponent(project)}/bib/add`, data),
   feedbackInfo: () => req<FeedbackInfo>('GET', '/api/feedback/info'),
-  feedback: (data: { kind: 'bug' | 'idea' | 'question'; title: string; body: string; doc?: string | null; error?: string | null }) => req<{ number: number; url: string }>('POST', '/api/feedback', data),
-  clientError: (data: { message: string; stack?: string | null }) => req<{ url: string | null }>('POST', '/api/client-error', data),
+  feedback: (data: { kind: 'bug' | 'idea' | 'question'; title: string; body: string; doc?: string | null; error?: string | null }) => req<{ id: number }>('POST', '/api/feedback', data),
+  clientError: (data: { message: string; stack?: string | null }) => req<{ id: number | null }>('POST', '/api/client-error', data),
+  accountDeletion: () => req<DeletionPreview>('GET', '/api/account/deletion'),
+  deleteAccount: (confirm: string) => req<{ ok: boolean; projects: string[] }>('POST', '/api/account/delete', { confirm }),
   me: () => req<{ user: User | null; google: boolean; signup?: 'open' | 'invited' }>('GET', '/api/auth/me'),
   login: (username: string, password: string) => req<{ user: User }>('POST', '/api/auth/login', { username, password }),
   logout: () => req<{ ok: boolean }>('POST', '/api/auth/logout'),

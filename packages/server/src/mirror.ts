@@ -11,7 +11,9 @@
  *    history every 5 minutes of editing; *Push now* in the Git dialog commits pending edits first;
  *  - the token never touches `.git/config` or the command line: it is handed to git through a
  *    credential helper reading it from the environment of that one git process;
- *  - a deleted project's repository is *archived* on GitHub, never deleted;
+ *  - a deleted project's repository is *archived* on GitHub; it is deleted with the project's trash
+ *    copy 30 days later (deleteArchivedMirror from access.ts pruneTrash), or at once when its
+ *    owner deletes their account (deleteMirror);
  *  - `OVERLYX_MIRROR_URL=file:///…/{repo}.git` replaces GitHub by bare repositories on disk (tests).
  *
  * Status per project is kept in the `mirrors` table and shown in the Git dialog.
@@ -125,7 +127,7 @@ async function ensureRemoteRepo(repo: string, project: string): Promise<void> {
   known.add(repo);
 }
 
-/** Archive the mirror of a deleted project (best effort; nothing is ever deleted on GitHub). */
+/** Archive the mirror of a deleted project (best effort): restorable while the project is in the trash. */
 export async function archiveMirror(project: string): Promise<void> {
   const row = mirrorRow(project);
   db.prepare('DELETE FROM mirrors WHERE project = ?').run(project);
@@ -136,6 +138,46 @@ export async function archiveMirror(project: string): Promise<void> {
     if (r.status === 200) console.log(`[mirror] archived ${config.mirror.org}/${row.repo}`);
     else if (r.status !== 404) console.error(`[mirror] cannot archive ${row.repo}: ${r.status} ${r.json?.message ?? ''}`);
   } catch (e) { console.error(`[mirror] cannot archive ${row.repo}:`, e); }
+}
+
+/** Remove a mirror repository for good (best effort; a failure is logged for the operator to finish by hand). */
+async function deleteRepo(repo: string): Promise<boolean> {
+  known.delete(repo);
+  if (config.mirror.urlTemplate) {
+    const u = remoteUrl(repo);
+    if (u.startsWith('file://')) fs.rmSync(new URL(u).pathname, { recursive: true, force: true });
+    return true;
+  }
+  if (!mirrorConfigured()) return true;
+  try {
+    const r = await gh('DELETE', `/repos/${config.mirror.org}/${repo}`);
+    if (r.status === 204 || r.status === 404) { if (r.status === 204) console.log(`[mirror] deleted ${config.mirror.org}/${repo}`); return true; }
+    console.error(`[mirror] cannot delete ${config.mirror.org}/${repo} (${r.status} ${r.json?.message ?? ''}) — delete it by hand`);
+  } catch (e) { console.error(`[mirror] cannot delete ${config.mirror.org}/${repo} — delete it by hand:`, e); }
+  return false;
+}
+
+/** The project's owner deleted their account: its mirror goes now, archived or not. */
+export async function deleteMirror(project: string): Promise<void> {
+  const row = mirrorRow(project);
+  db.prepare('DELETE FROM mirrors WHERE project = ?').run(project);
+  await deleteRepo(row?.repo ?? repoNameFor(project));
+}
+
+/**
+ * The trash copy of a deleted project expired: its archived mirror goes too — unless the mirror is
+ * live again (a project of the same name was created since and reopened it).
+ */
+export async function deleteArchivedMirror(project: string): Promise<void> {
+  if (mirrorRow(project)) return;   // a live project of that name
+  const repo = repoNameFor(project);
+  if (!config.mirror.urlTemplate && mirrorConfigured()) {
+    try {
+      const r = await gh('GET', `/repos/${config.mirror.org}/${repo}`);
+      if (r.status !== 200 || !r.json?.archived) return;
+    } catch { return; }
+  }
+  await deleteRepo(repo);
 }
 
 /* -------------------------------------------------------------------- push */

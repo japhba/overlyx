@@ -1,36 +1,36 @@
 /**
- * Help ▸ Report a problem (app/Feedback.tsx). The test server has no GitHub token, so the dialog
- * falls back to opening GitHub's pre-filled "new issue" form in a new tab and says so.
+ * Help ▸ Report a problem (app/Feedback.tsx): the report is kept on the server (feedback.ts) — the
+ * dialog says it is not published, sends nothing to GitHub and confirms with the report's number.
  */
 import { test, expect } from '@playwright/test';
 import { login, collectErrors } from './helpers';
 
-test('the feedback dialog sends a report; without a GitHub token it opens the pre-filled issue form', async ({ page }) => {
+test('the feedback dialog keeps a report on the server and says it is not published', async ({ page }) => {
   const errors = collectErrors(page);
-  // the popup must keep the URL the app asked for (github.com would redirect an anonymous visitor to its login page)
-  await page.context().route('https://github.com/**', r => r.fulfill({ status: 200, contentType: 'text/html', body: '<title>stub</title>' }));
+  const github: string[] = [];
+  page.on('request', r => { if (/github\.com/.test(r.url())) github.push(r.url()); });
+  page.on('popup', p => github.push('popup ' + p.url()));
   await login(page);
   await page.waitForSelector('.home', { timeout: 20000 });
   await page.locator('.menubar .menu button', { hasText: 'Help' }).click();
   await page.locator('.menu-item', { hasText: 'Report a problem' }).click();
   const dialog = page.locator('.dialog');
-  await expect(dialog).toContainText('public');
+  await expect(dialog).toContainText('not published');
   await expect(dialog).toContainText('never the content of your documents');
+  await expect(dialog.locator('a[href="/privacy"]')).toBeVisible();
   // nothing written → refused in the dialog
   await page.locator('[data-feedback-send]').click();
   await expect(dialog).toContainText('Please write something first.');
   await page.locator('[data-feedback-kind]').selectOption('idea');
   await page.locator('[data-feedback-title]').fill('Dark mode');
   await page.locator('[data-feedback-body]').fill('It is late and the page is very white.');
-  const [popup] = await Promise.all([page.waitForEvent('popup'), page.locator('[data-feedback-send]').click()]);
-  expect(popup.url()).toContain('github.com/');
-  expect(popup.url()).toContain('/issues/new?title=Dark+mode&body=');
-  const body = new URL(popup.url()).searchParams.get('body') ?? '';
-  expect(body).toContain('It is late and the page is very white.');
-  expect(body).toContain('**Idea** reported by Admin (`admin`)');
-  await popup.close();
-  await expect(page.locator('[data-feedback-done]')).toContainText('not connected to GitHub');
+  const [res] = await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/feedback')), page.locator('[data-feedback-send]').click()]);
+  expect(res.status()).toBe(200);
+  const { id } = await res.json();
+  await expect(page.locator('[data-feedback-done]')).toContainText(`#${id}`);
+  await expect(page.locator('[data-feedback-done]')).toContainText('reached the people who run OverLyX');
   await page.keyboard.press('Escape');
   await expect(page.locator('.dialog')).toHaveCount(0);
-  expect(errors.filter(e => !/favicon|net::|github|status of 503/.test(e))).toEqual([]);   // 503 = the expected "no token" answer
+  expect(github).toEqual([]);
+  expect(errors.filter(e => !/favicon|net::/.test(e))).toEqual([]);
 });

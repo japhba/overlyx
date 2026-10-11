@@ -1,44 +1,47 @@
 /**
- * Feedback and error reports go straight to GitHub issues of the project's repository
- * (`GITHUB_REPO`, default japhba/overlyx) using `GITHUB_TOKEN` — a fine-grained token with
- * "Issues: read and write" on that repository is enough. Without a token the client is handed the
- * URL of a pre-filled "new issue" form instead.
+ * Feedback and error reports stay on this server (the `reports` table) — nothing goes to a public
+ * issue tracker. A person's report is also mailed to the instance owner (mailer.ts notifyOwner) so
+ * somebody reads it; `npx tsx scripts/reports.ts` lists them.
  *
- *   POST /api/feedback       a person's report (bug / idea / question) → one issue, label `feedback`
- *   POST /api/client-error   an error that escaped in the browser → issue per distinct message
- *                            (label `client-error`); repeats become a comment, at most one per
- *                            10 minutes per message, so a broken deploy cannot flood the tracker.
+ *   POST /api/feedback       a person's report (bug / idea / question) → one row, kind `feedback`
+ *   POST /api/client-error   an error that escaped in the browser → one row per distinct message
+ *                            (kind `client-error`); repeats only count up and refresh `last_at`
  *   POST /api/vscode-telemetry  a sanitized extension error, accepted without a web-app session
  *                            (the extension obeys VS Code's telemetry setting; this route is
  *                            separately rate-limited and accepts only a fixed diagnostic schema)
  *   server errors            reportServerError() from the process-level handlers, same dedupe
- *                            (label `server-error`)
+ *                            (kind `server-error`)
  *
- * What leaves the server: web-app reports carry the reporter's display name and user name, the app
- * version, browser, message / stack trace, and — only when the person ticked it — the document
- * name. VS Code reports carry a telemetry-sanitized exception and coarse runtime versions/platform.
- * Never document content. The repository may be public: the clients document the destination.
+ * What is kept: the reporter's account id (the name is looked up when the reports are read), the app
+ * version, browser, message / stack trace, and — only when the person ticked it — the document name.
+ * Never document content. VS Code reports carry a telemetry-sanitized exception and coarse runtime
+ * versions/platform, no account. Error rows are forgotten 90 days after they were last seen
+ * (pruneReports); a person's reports go with their account (forgetUserReports). The privacy notice
+ * (privacy.ts) says the same — keep the two in step.
  */
 import express from 'express';
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import { db } from './db.ts';
 import { config, REPO_ROOT } from './config.ts';
+import { notifyOwner } from './mailer.ts';
 
-db.exec(`CREATE TABLE IF NOT EXISTS error_reports (
-  hash TEXT PRIMARY KEY,
-  issue INTEGER NOT NULL,
-  issue_url TEXT NOT NULL,
+// error_reports held the GitHub issue of each distinct error, from when reports were issues
+db.exec(`DROP TABLE IF EXISTS error_reports;
+CREATE TABLE IF NOT EXISTS reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  hash TEXT UNIQUE,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  user_id INTEGER,
+  version TEXT NOT NULL,
+  user_agent TEXT,
   count INTEGER NOT NULL DEFAULT 1,
-  first_at INTEGER NOT NULL,
-  last_at INTEGER NOT NULL,
-  last_comment_at INTEGER NOT NULL
-)`);
-
-export const github = config.github;
-export const feedbackEnabled = (): boolean => !!(github.token && github.repo);
-export const newIssueUrl = (title = '', body = ''): string =>
-  `https://github.com/${github.repo}/issues/new?${new URLSearchParams({ title, body }).toString()}`;
+  created_at INTEGER NOT NULL,
+  last_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reports_last ON reports(kind, last_at);`);
 
 /** short git commit of the running code (read once, asynchronously) */
 export let appVersion = 'unknown';
@@ -47,40 +50,7 @@ export let appCommit = 'unknown';
 execFile('git', ['rev-parse', '--short', 'HEAD'], { cwd: REPO_ROOT, timeout: 5000 }, (err, out) => { if (!err && out.trim()) appVersion = out.trim(); });
 execFile('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, timeout: 5000 }, (err, out) => { if (!err && out.trim()) appCommit = out.trim(); });
 
-async function gh(method: string, path: string, body?: unknown): Promise<any> {
-  const res = await fetch(`${github.api}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${github.token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json',
-      'user-agent': 'overlyx-feedback', 'x-github-api-version': '2022-11-28',
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(15000),
-  });
-  const data: any = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`GitHub ${method} ${path}: ${res.status} ${data?.message ?? ''}`.trim());
-  return data;
-}
-
-const LABELS: Record<string, { color: string; description: string }> = {
-  feedback: { color: '0e8a16', description: 'Sent from the app (Help ▸ Report a problem)' },
-  'client-error': { color: 'd73a4a', description: 'Uncaught error in the browser, reported automatically' },
-  'server-error': { color: 'b60205', description: 'Uncaught error on the server, reported automatically' },
-  'vscode-error': { color: 'b60205', description: 'Sanitized error from the OverLyX VS Code extension' },
-};
-let labelsReady: Promise<void> | null = null;
-/** create the labels we use (once per process; a label that exists answers 422, which is fine) */
-function ensureLabels(): Promise<void> {
-  if (!labelsReady) labelsReady = (async () => {
-    for (const [name, l] of Object.entries(LABELS)) {
-      try { await gh('POST', `/repos/${github.repo}/labels`, { name, ...l }); }
-      catch (e) { if (!/422/.test(String(e))) console.warn('[feedback]', (e as Error).message); }
-    }
-  })();
-  return labelsReady;
-}
-
-export interface Reporter { name: string; username: string }
+export interface Reporter { id: number; name: string; username: string; email?: string | null }
 export interface FeedbackInput {
   kind: 'bug' | 'idea' | 'question';
   title: string;
@@ -94,24 +64,30 @@ export interface FeedbackInput {
 
 const clean = (s: unknown, max: number) => String(s ?? '').replace(/\r/g, '').trim().slice(0, max);
 const stamp = () => new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+const KIND: Record<string, string> = { bug: 'Bug', idea: 'Idea', question: 'Question' };
 
-export function formatFeedback(f: FeedbackInput, who: Reporter): { title: string; body: string } {
-  const KIND: Record<string, string> = { bug: 'Bug', idea: 'Idea', question: 'Question' };
+/** The stored title and body of a person's report (who sent it is the row's user_id, not text). */
+export function formatFeedback(f: FeedbackInput): { title: string; body: string } {
   const head = [
-    `**${KIND[f.kind] ?? 'Feedback'}** reported by ${clean(who.name, 80)} (\`${clean(who.username, 40)}\`) · OverLyX \`${appVersion}\` · ${stamp()}`,
-    f.doc ? `**Document:** \`${clean(f.doc, 200)}\`` : '',
-    f.userAgent ? `**Browser:** ${clean(f.userAgent, 300)}` : '',
+    `${KIND[f.kind] ?? 'Feedback'} · OverLyX ${appVersion} · ${stamp()}`,
+    f.doc ? `Document: ${clean(f.doc, 200)}` : '',
   ].filter(Boolean).join('\n');
-  const tail = f.error ? `\n\n---\n**Last error shown in the app:**\n\`\`\`\n${clean(f.error, 2000)}\n\`\`\`` : '';
-  return { title: clean(f.title, 200) || `${KIND[f.kind] ?? 'Feedback'} from ${clean(who.name, 80)}`, body: `${head}\n\n---\n\n${clean(f.body, 20000)}${tail}` };
+  const tail = f.error ? `\n\n--- Last error shown in the app:\n${clean(f.error, 2000)}` : '';
+  return { title: clean(f.title, 200) || `${KIND[f.kind] ?? 'Feedback'} (no title)`, body: `${head}\n\n${clean(f.body, 20000)}${tail}` };
 }
 
-/** Create one issue for a person's report. */
-export async function submitFeedback(f: FeedbackInput, who: Reporter): Promise<{ number: number; url: string }> {
-  await ensureLabels();
-  const { title, body } = formatFeedback(f, who);
-  const issue = await gh('POST', `/repos/${github.repo}/issues`, { title, body, labels: ['feedback'] });
-  return { number: issue.number, url: issue.html_url };
+const insertReport = db.prepare(`INSERT INTO reports (kind, hash, title, body, user_id, version, user_agent, count, created_at, last_at)
+  VALUES (@kind, @hash, @title, @body, @user_id, @version, @user_agent, 1, @now, @now)`);
+
+/** Keep one person's report and mail it to the owner. Returns the report's number. */
+export function submitFeedback(f: FeedbackInput, who: Reporter): { id: number } {
+  const { title, body } = formatFeedback(f);
+  const id = Number(insertReport.run({ kind: 'feedback', hash: null, title, body, user_id: who.id, version: appVersion, user_agent: f.userAgent ? clean(f.userAgent, 300) : null, now: Date.now() }).lastInsertRowid);
+  console.log(`[feedback] report #${id} (${f.kind}) from ${who.username}`);
+  void notifyOwner(`OverLyX ${KIND[f.kind]?.toLowerCase() ?? 'feedback'} #${id}: ${title}`,
+    `${who.name} (${who.username}${who.email ? ', ' + who.email : ''}) wrote:\n\n${body}\n\n` +
+    (f.userAgent ? `Browser: ${clean(f.userAgent, 300)}\n` : '') + `\nAll reports: npx tsx scripts/reports.ts\n`);
+  return { id };
 }
 
 /** messages differing only in numbers / hex ids / quoted names count as the same error */
@@ -120,12 +96,8 @@ export function errorHash(kind: string, message: string): string {
   return crypto.createHash('sha256').update(kind + '\n' + norm).digest('hex').slice(0, 16);
 }
 
-const COMMENT_EVERY_MS = 10 * 60 * 1000;
-const errRow = db.prepare('SELECT * FROM error_reports WHERE hash = ?');
-const errInsert = db.prepare('INSERT INTO error_reports (hash, issue, issue_url, count, first_at, last_at, last_comment_at) VALUES (?, ?, ?, 1, ?, ?, ?)');
-const errBump = db.prepare('UPDATE error_reports SET count = count + 1, last_at = ? WHERE hash = ?');
-const errCommented = db.prepare('UPDATE error_reports SET last_comment_at = ? WHERE hash = ?');
-interface ErrRow { hash: string; issue: number; issue_url: string; count: number; first_at: number; last_at: number; last_comment_at: number }
+const errRow = db.prepare('SELECT id FROM reports WHERE hash = ?');
+const errBump = db.prepare('UPDATE reports SET count = count + 1, last_at = ? WHERE id = ?');
 
 export interface ErrorInput {
   kind: 'client-error' | 'server-error' | 'vscode-error';
@@ -138,50 +110,43 @@ export interface ErrorInput {
 }
 
 /**
- * An error report: a new issue for a message never seen, otherwise a count bump and — not more
- * often than every 10 minutes — a comment on the existing issue. Returns the issue URL (null when
- * reporting is off).
+ * An error report: a new row for a message never seen, otherwise a count bump. A new distinct
+ * error is mailed to the owner (at most 10 such mails a day). Returns the report's number (null
+ * when reporting is off).
  */
-export async function reportError(e: ErrorInput): Promise<string | null> {
-  if (!feedbackEnabled() || !config.errorReports) return null;
+export function reportError(e: ErrorInput): number | null {
+  if (!config.errorReports) return null;
   const message = clean(e.message, 1000);
   if (!message) return null;
   const hash = errorHash(e.kind, message);
   const now = Date.now();
-  const details = [
-    `OverLyX \`${appVersion}\` · ${stamp()}${e.who ? ` · ${clean(e.who.name, 80)} (\`${clean(e.who.username, 40)}\`)` : ''}`,
-    e.userAgent ? `${e.kind === 'vscode-error' ? 'Client' : 'Browser'}: ${clean(e.userAgent, 300)}` : '',
+  const row = errRow.get(hash) as { id: number } | undefined;
+  if (row) { errBump.run(now, row.id); return row.id; }
+  const body = [
     ...Object.entries(e.details ?? {}).map(([key, value]) => `${clean(key, 40)}: ${clean(value, 300)}`),
-    '```', message, e.stack ? clean(e.stack, 4000) : '', '```',
+    message, e.stack ? clean(e.stack, 4000) : '',
   ].filter(Boolean).join('\n');
-  const row = errRow.get(hash) as ErrRow | undefined;
-  if (row) {
-    errBump.run(now, hash);
-    if (now - row.last_comment_at >= COMMENT_EVERY_MS) {
-      errCommented.run(now, hash);
-      try { await gh('POST', `/repos/${github.repo}/issues/${row.issue}/comments`, { body: `Seen again (${row.count + 1}× so far)\n\n${details}` }); }
-      catch (err) { console.warn('[feedback] comment failed:', (err as Error).message); }
-    }
-    return row.issue_url;
-  }
-  // first occurrence: claim the hash before the request so that a burst creates one issue only
-  errInsert.run(hash, 0, '', now, now, now);
-  try {
-    await ensureLabels();
-    const issue = await gh('POST', `/repos/${github.repo}/issues`, { title: `[${e.kind}] ${message.split('\n')[0].slice(0, 120)}`, body: details, labels: [e.kind] });
-    db.prepare('UPDATE error_reports SET issue = ?, issue_url = ? WHERE hash = ?').run(issue.number, issue.html_url, hash);
-    return issue.html_url;
-  } catch (err) {
-    db.prepare('DELETE FROM error_reports WHERE hash = ?').run(hash);
-    console.warn('[feedback] issue creation failed:', (err as Error).message);
-    return null;
-  }
+  const title = `[${e.kind}] ${message.split('\n')[0].slice(0, 120)}`;
+  const id = Number(insertReport.run({ kind: e.kind, hash, title, body, user_id: e.who?.id ?? null, version: appVersion, user_agent: e.userAgent ? clean(e.userAgent, 300) : null, now }).lastInsertRowid);
+  if (allow('error-mail', 10, 24 * 60 * 60 * 1000)) void notifyOwner(`OverLyX ${e.kind} #${id}: ${message.split('\n')[0].slice(0, 100)}`, `${body}\n\nOverLyX ${appVersion} · ${stamp()}\nAll reports: npx tsx scripts/reports.ts\n`);
+  return id;
 }
 
 /** Server-side errors from the process-level handlers (never throws). */
 export function reportServerError(err: unknown): void {
   const e = err instanceof Error ? err : new Error(String(err));
-  reportError({ kind: 'server-error', message: e.message, stack: e.stack }).catch(() => {});
+  try { reportError({ kind: 'server-error', message: e.message, stack: e.stack }); } catch { /* the database may be what failed */ }
+}
+
+/** Error reports not seen for `days` are forgotten (startup housekeeping); people's own reports stay until their account goes. */
+export function pruneReports(days = 90): number {
+  return db.prepare("DELETE FROM reports WHERE kind != 'feedback' AND last_at < ?").run(Date.now() - days * 24 * 60 * 60 * 1000).changes;
+}
+
+/** An account is deleted: its reports go, its link to error reports is cut. */
+export function forgetUserReports(userId: number): void {
+  db.prepare("DELETE FROM reports WHERE kind = 'feedback' AND user_id = ?").run(userId);
+  db.prepare('UPDATE reports SET user_id = NULL WHERE user_id = ?').run(userId);
 }
 
 /** simple per-key rate limit (sliding hour) */
@@ -198,9 +163,9 @@ export function allow(key: string, max: number, windowMs = 60 * 60 * 1000): bool
 export function feedbackRoutes(): express.Router {
   const r = express.Router();
   r.get('/feedback/info', (_req, res) => {
-    res.json({ enabled: feedbackEnabled(), repo: github.repo, newIssueUrl: newIssueUrl(), version: appVersion, errorReports: feedbackEnabled() && config.errorReports });
+    res.json({ version: appVersion, errorReports: config.errorReports });
   });
-  r.post('/feedback', async (req, res) => {
+  r.post('/feedback', (req, res) => {
     const u = req.user!;
     const b = req.body ?? {};
     const f: FeedbackInput = {
@@ -208,19 +173,16 @@ export function feedbackRoutes(): express.Router {
       doc: b.doc ? clean(b.doc, 200) : null, error: b.error ? clean(b.error, 2000) : null, userAgent: req.get('user-agent') ?? '',
     };
     if (!f.title && !f.body) { res.status(400).json({ error: 'Please write something.' }); return; }
-    const who = { name: u.name, username: u.username };
-    if (!feedbackEnabled()) { const { title, body } = formatFeedback(f, who); res.status(503).json({ error: 'Feedback is not connected to GitHub on this server.', fallback: newIssueUrl(title, body) }); return; }
     if (!allow(`feedback:${u.id}`, 10)) { res.status(429).json({ error: 'That is a lot of feedback for one hour — thank you! Please try again later.' }); return; }
-    try { res.json(await submitFeedback(f, who)); }
-    catch (e) { const { title, body } = formatFeedback(f, who); res.status(502).json({ error: (e as Error).message, fallback: newIssueUrl(title, body) }); }
+    res.json(submitFeedback(f, { id: u.id, name: u.name, username: u.username, email: u.email }));
   });
-  r.post('/client-error', async (req, res) => {
+  r.post('/client-error', (req, res) => {
     const u = req.user!;
     const b = req.body ?? {};
-    if (!feedbackEnabled() || !config.errorReports) { res.status(204).end(); return; }
+    if (!config.errorReports) { res.status(204).end(); return; }
     if (!allow('client-error', 60) || !allow(`client-error:${u.id}`, 20)) { res.status(429).json({ error: 'rate limited' }); return; }
-    const url = await reportError({ kind: 'client-error', message: clean(b.message, 1000), stack: b.stack ? clean(b.stack, 4000) : null, userAgent: req.get('user-agent') ?? '', who: { name: u.name, username: u.username } });
-    res.json({ url });
+    const id = reportError({ kind: 'client-error', message: clean(b.message, 1000), stack: b.stack ? clean(b.stack, 4000) : null, userAgent: req.get('user-agent') ?? '', who: { id: u.id, name: u.name, username: u.username } });
+    res.json({ id });
   });
   return r;
 }
@@ -243,8 +205,8 @@ const VSCODE_FIELDS: Record<string, string> = {
  */
 export function vscodeTelemetryRoutes(): express.Router {
   const r = express.Router();
-  r.post('/vscode-telemetry', express.json({ limit: '64kb', type: 'application/json' }), async (req, res) => {
-    if (!feedbackEnabled() || !config.errorReports) { res.status(204).end(); return; }
+  r.post('/vscode-telemetry', express.json({ limit: '64kb', type: 'application/json' }), (req, res) => {
+    if (!config.errorReports) { res.status(204).end(); return; }
     const b = req.body ?? {};
     if (b.schema !== 1 || (b.event !== 'error' && b.event !== 'unhandled-error')) {
       res.status(400).json({ error: 'unsupported diagnostic schema' }); return;
@@ -261,11 +223,11 @@ export function vscodeTelemetryRoutes(): express.Router {
         details[label] = clean(b[field], 300);
       }
     }
-    const url = await reportError({
+    const id = reportError({
       kind: 'vscode-error', message, stack: typeof b.stack === 'string' ? clean(b.stack, 4000) : null,
       userAgent: req.get('user-agent') ?? '', details,
     });
-    res.json({ url });
+    res.json({ id });
   });
   return r;
 }

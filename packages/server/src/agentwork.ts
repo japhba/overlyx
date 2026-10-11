@@ -270,11 +270,16 @@ export function pruneWorkspaces(days = 30): void {
     const tid = n.slice(0, -5);
     const m = readManifest(tid);
     if (m && m.usedAt > cutoff) continue;
-    const key = (db.prepare('SELECT mcp_key FROM agent_threads WHERE thread_id = ?').get(tid) as { mcp_key: string | null } | undefined)?.mcp_key;
-    // the copy and the scratch HOME are the agent's: removed without following anything in them
-    for (const p of [path.join(root(), tid), ...(key ? [scratchDir(key)] : [])]) removeIn(path.dirname(p), path.basename(p));
-    for (const p of [baseDir(tid), turnsDir(tid), manifestPath(tid)]) fs.rmSync(p, { recursive: true, force: true });
+    removeWorkspace(tid);
   }
+}
+
+/** A thread's working copy, scratch HOME, base and checkpoints go (pruning; its user deleted their account). */
+export function removeWorkspace(tid: string): void {
+  const key = (db.prepare('SELECT mcp_key FROM agent_threads WHERE thread_id = ?').get(tid) as { mcp_key: string | null } | undefined)?.mcp_key;
+  // the copy and the scratch HOME are the agent's: removed without following anything in them
+  for (const p of [path.join(root(), safeId(tid)), ...(key ? [scratchDir(key)] : [])]) removeIn(path.dirname(p), path.basename(p));
+  for (const p of [baseDir(tid), turnsDir(tid), manifestPath(tid)]) fs.rmSync(p, { recursive: true, force: true });
 }
 
 /* ------------------------------------------------------------------ checkpoints */

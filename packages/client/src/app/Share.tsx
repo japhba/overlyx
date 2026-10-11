@@ -9,7 +9,7 @@ import { inkOn } from './contrast';
 import { AvatarContent, initials } from './Avatar';
 import { api, pdfLinkUrl, type ActivityEntry, type PdfLinkInfo, type PdfLinksInfo, type PdfPublishInfo, type ShareInfo, type User } from '../api';
 import { ago } from './Git';
-import { Dialog } from './Dialogs';
+import { Dialog, uiConfirm } from './Dialogs';
 import { projectShortName } from '@overlyx/core';
 
 export function shareUrl(token: string): string { return `${location.origin}/#/share/${token}`; }
@@ -63,6 +63,15 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
     setBusy(true); setErr('');
     try { const r = await fn(); setInfo(r.share); onChanged?.(); return true; }
     catch (e) { setErr((e as Error).message); return false; }
+    finally { setBusy(false); }
+  };
+  // hand the project over (before leaving OverLyX, or to the person who carries it on): it moves to
+  // their account; the server keeps us on it as an editor
+  const makeOwner = async (to: { name: string; username: string }) => {
+    if (!await uiConfirm(`Make ${to.name} the owner?`, `“${info?.title ?? projectShortName(project)}” moves to ${to.name}’s account. You stay on it as an editor, but only ${to.name} can share it, change who may edit it, or delete it.`, { okLabel: 'Make owner' })) return;
+    setBusy(true); setErr('');
+    try { await api.setOwner(project, to.username); onChanged?.(); onClose(); }
+    catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
   };
   const add = async () => { if (!who.trim() || busy) return; if (await update(() => api.addMember(project, who.trim(), role))) setWho(''); };
@@ -125,8 +134,13 @@ export function ShareDialog({ project, user, onClose, onChanged }: { project: st
                   {m.user ? m.user.name : m.email}
                   <small>{m.user ? m.user.username : 'invited, not signed in yet'}{m.via === 'link' ? ' · via link' : ''}</small>
                 </span>
-                <select value={m.role} disabled={busy} onChange={e => void update(() => api.setMemberRole(project, m.id, (e.target as HTMLSelectElement).value as 'view' | 'edit'))}>
+                <select value={m.role} disabled={busy} data-member-role onChange={e => {
+                  const el = e.target as HTMLSelectElement;
+                  if (el.value === 'owner') { el.value = m.role; if (m.user) void makeOwner(m.user); return; }
+                  void update(() => api.setMemberRole(project, m.id, el.value as 'view' | 'edit'));
+                }}>
                   <option value="edit">Editor</option><option value="view">Viewer</option>
+                  {m.user && info.owner?.id === user.id && <option value="owner">Make owner…</option>}
                 </select>
                 <button class="mini" title="Remove access" disabled={busy} onClick={() => void update(() => api.removeMember(project, m.id))}>✕</button>
               </div>

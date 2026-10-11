@@ -379,21 +379,33 @@ blend.
   interface or takes the focus away from the editor, can be left at any time, and is restarted with
   *Help ▸ Take the tour* or *Start the tour* on the start screen. Specs suppress it (`login()` in
   `e2e/helpers.ts` marks it as seen); `e2e/tour.spec.ts` walks through it.
-* **Feedback straight to GitHub** (`packages/server/src/feedback.ts`, `app/Feedback.tsx`): *Help ▸
-  Report a problem / send feedback…* (available on the start screen too) creates an issue in the
-  project's repository (`GITHUB_REPO`, default `japhba/overlyx`) through the GitHub API with
-  `GITHUB_TOKEN` — a fine-grained token with *Issues: read and write* on that repository. The dialog
-  says what is sent (name and user name, app version, browser; the document name and the last error
-  message only when ticked; never document content) and that the tracker is public; 10 reports per
+* **Feedback and error reports stay on the server** (`packages/server/src/feedback.ts`, `app/Feedback.tsx`;
+  until 11 Oct 2026 they were GitHub issues of the public repository — the user: store them locally):
+  *Help ▸ Report a problem / send feedback…* (available on the start screen too) stores a row in the
+  `reports` table with the account id, app version and browser (the document name and the last error
+  message only when ticked; never document content), mails the owner (`notifyOwner`, needs
+  `OVERLYX_SMTP_URL`, otherwise only logged) and says the report is not published; 10 reports per
   person and hour. Uncaught browser errors (`main.tsx`) and server errors (`unhandledRejection`) are
-  reported automatically as one issue per distinct message (numbers / ids normalised), repeats become
-  a count and at most one comment per 10 minutes. The no-account VS Code extension uses its own
-  narrow, IP-rate-limited `/api/vscode-telemetry` receiver for errors when both VS Code telemetry and
+  recorded automatically as one row per distinct message (numbers / ids normalised; repeats count up),
+  the first occurrence mailed (≤10 a day). The no-account VS Code extension uses its own narrow,
+  IP-rate-limited `/api/vscode-telemetry` receiver for errors when both VS Code telemetry and
   `overlyx.errorReports` are enabled. VS Code sanitizes the exception first; only extension/VS Code
   versions, OS/CPU family and local/remote host kind accompany it — never document text, filenames,
   paths, account details, email or stable IDs (`packages/vscode/telemetry.json` declares the schema).
-  `OVERLYX_ERROR_REPORTS=off` keeps only the manual dialog. Without a token the dialog opens GitHub's
-  pre-filled *new issue* form in a new tab instead.
+  `OVERLYX_ERROR_REPORTS=off` keeps only the manual dialog. Error rows go 90 days after they were last
+  seen (`pruneReports`), people's reports with their account. Read them with
+  `npx tsx scripts/reports.ts [--kind feedback] [--days N] [--full] [--id N]` (read-only).
+* **Privacy notice and account deletion** (`packages/server/src/privacy.ts`, `accounts.ts`): `GET /privacy`
+  is a public page (start-page footer, *Help ▸ Privacy notice*, Settings ▸ Privacy) describing what is
+  kept, the services involved and retention — keep it in step with the code it names in its header.
+  The operator shown there comes from `OVERLYX_OPERATOR` and `OVERLYX_CONTACT_EMAIL`. *Settings ▸
+  Account ▸ Delete account* (`GET /api/account/deletion` preview, `POST /api/account/delete` with the
+  user name as confirmation) erases the owned projects (directories, rows, build output, trash copies,
+  GitHub mirrors), memberships, sign-ins, the agent home and threads, the Drive connection, reports
+  and the account row; the instance owner's account (`OVERLYX_OWNER_EMAIL`) is refused. The Share
+  dialog's *Make owner…* hands a project over first (the previous owner stays an editor). Deleted
+  projects and files leave `<data>/trash` after 30 days (`pruneTrash`, startup + daily), their
+  archived mirrors with them.
 * **Anonymous usage statistics** (`packages/client/src/usage.ts`, `packages/server/src/usage.ts`,
   `usageReport.ts`): the web app records the *kind* of every deliberate action — a menu entry
   ("Edit ▸ Text Style ▸ Bold"), toolbar button, shortcut or Alt+P chord, and whether its command did
@@ -1822,9 +1834,9 @@ and `OVERLYX_MAIL_FROM` (optional From header override),
 `OVERLYX_GIT` (`off` to not expose projects as git repositories), `OVERLYX_GIT_COMMIT_MS` (idle time
 before OverLyX commits what changed, default 5 min) and `OVERLYX_GIT_COMMIT_MAX_WAIT` (longest time
 changes stay uncommitted while editing goes on, default 30 min; 10 Oct 2026, the user: one commit per
-stretch of editing — it was 30 s / 15 min, about a commit a minute while typing), `GITHUB_REPO` / `GITHUB_TOKEN` /
-`GITHUB_API_URL` (feedback and error reports as issues, see above), `OVERLYX_ERROR_REPORTS` (`off`
-disables the automatic ones), `OVERLYX_USAGE_STATS` (`off` refuses the anonymous usage statistics), `OVERLYX_LITERATURE` (`off` disables the literature search of the
+stretch of editing — it was 30 s / 15 min, about a commit a minute while typing), `OVERLYX_ERROR_REPORTS` (`off`
+disables the automatic error reports, kept on the server — see above), `OVERLYX_OPERATOR` (who runs the
+instance, named in the privacy notice), `OVERLYX_USAGE_STATS` (`off` refuses the anonymous usage statistics), `OVERLYX_LITERATURE` (`off` disables the literature search of the
 citation dialog) and `OVERLYX_CONTACT_EMAIL` (optional, for the OpenAlex / Crossref polite pools). Git itself runs with an empty
 environment (`HOME=<data dir>/git-home`, `safe.directory=*` because projects may belong to another
 account) — the server's own git configuration never applies.
@@ -1885,19 +1897,17 @@ on an uncaught exception it saves the open documents and exits so that systemd r
 
 ## Secrets
 
-Everything secret (the Google OAuth client secret, the GitHub tokens for feedback issues and for
+Everything secret (the Google OAuth client secret, the GitHub token for
 the off-site mirror) stays out of the repository —
 which is public — in `deploy/secrets.env` (git-ignored, mode 600), read by the systemd unit through
 `EnvironmentFile=`; `deploy/secrets.env.example` lists the variables. The file exists on the server
 and in the nightly backup, nowhere else — deliberately no secret store: both values can be re-created
 in minutes (the OAuth client in the Google Cloud console under *APIs & Services ▸ Credentials*, a
-fine-grained personal access token with *Issues: read & write* on the repository in GitHub's
-*Developer settings*), and a second machine gets the file by `scp`. Without it the app runs with
-password login only and the feedback dialog falls back to GitHub's issue form. The per-instance JWT
+fine-grained personal access token in GitHub's *Developer settings*), and a second machine gets the
+file by `scp`. Without it the app runs with password login only. The per-instance JWT
 secret (`<data dir>/secret.key`) is generated on first start and is part of every backup too.
 
-Do not put a broad-scope token (your `gh` login) in there: the server runs user-supplied LaTeX, and a
-token with *Issues* on one repository is all the feedback channel needs. `GITHUB_PUBLISH_TOKEN`
+Do not put a broad-scope token (your `gh` login) in there: the server runs user-supplied LaTeX. `GITHUB_PUBLISH_TOKEN`
 (optional) lets administrators publish built PDFs into repositories (Share dialog ▸ *Public PDF
 link* ▸ *commit the PDF to a GitHub repository*): a fine-grained token with *Contents: read & write*
 on exactly the repositories that receive PDFs, nothing else.

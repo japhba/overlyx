@@ -12,7 +12,8 @@
 import { UiChoice } from './Tour';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser } from '../api';
+import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser, type DeletionPreview } from '../api';
+import { clearLocalData } from './localData';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { resetShortcutTips } from '../shortcuttips';
 import { stashLyxBind, ctrlINow, ctrlIPlan, CTRLI_COMMANDS, type CtrlI } from './lyxbind';
@@ -21,7 +22,7 @@ import { useUiMode } from './uimode';
 import { formatShortcut } from './shortcuts';
 import { setThemePref, useTheme, type ThemePref } from './theme';
 import { REWRITE_KEY } from '../editor/ai/rewrite';
-import { Dialog } from './Dialogs';
+import { Dialog, uiAlert } from './Dialogs';
 import { AUTO_BUILD_CHOICES, AUTO_BUILD_DELAYS } from './pdfstatus';
 import { EDITOR_FACES, MATH_FONTS, FOLLOW_DOCUMENT, MATCH_TEXT, editorFace, mathFont } from '../fonts/catalog';
 import { resolvedFace, resolvedMath } from '../fonts/editorfont';
@@ -215,6 +216,10 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             <h3>Usage statistics</h3>
             {check('usageStats', 'Send anonymous usage statistics', 'Which menu entries, buttons, shortcuts and dialogs are used, and which of them do nothing, are undone right away or end in an error message — so that confusing parts of the editor can be found and fixed.')}
             <div class="sub" data-setting="usage-what">What is sent: the kind of action (for example “Edit ▸ Text Style ▸ Bold”, “toolbar m-frac”, “Ctrl+Shift+K unbound”, “Citation dialog dismissed”), where it happened (text, formula, table, dialog), the template of an error message with its data removed, the kind of screen, and a random id for this page load. Never your name or account, document or project names, text, formulas or file names — quoted strings, file names and numbers are removed before anything leaves the browser, and again on the server. The browser’s Global Privacy Control signal switches it off as well. Kept in this browser.</div>
+            <h3>Problem reports</h3>
+            <div class="sub">What you send with Help ▸ Report a problem, and errors the app runs into, stay on this server — read by its operator, never published. Never the content of your documents.</div>
+            <h3>Privacy notice</h3>
+            <div class="sub">What OverLyX keeps about you, who else sees it, how long it stays and how to delete it: <a href="/privacy" target="_blank" rel="noopener" data-privacy-link>the privacy notice</a>.</div>
           </>}
           {section === 'account' && <>
             <h3>Signed in</h3>
@@ -243,9 +248,65 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
                 {users === null && <div class="sub">Loading…</div>}
               </div>
             </>}
+            {!user.guest && <DeleteAccount user={user} />}
           </>}
         </div>
       </div>
     </Dialog>
   );
+}
+
+/**
+ * Settings ▸ Account ▸ Delete account: what goes (the projects owned, shared ones marked — they can be
+ * handed over in their Share dialog first), confirmed by typing the user name; then this browser
+ * forgets the account as at sign-out and the start page appears (server accounts.ts).
+ */
+function DeleteAccount({ user }: { user: User }) {
+  const [open, setOpen] = useState(false);
+  const [preview, setPreview] = useState<DeletionPreview | null>(null);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { if (open && !preview) api.accountDeletion().then(setPreview).catch(e => setErr((e as Error).message)); }, [open]);
+  const confirmed = typed.trim().toLowerCase() === user.username.toLowerCase();
+  const remove = async () => {
+    if (!confirmed || busy) return;
+    setBusy(true); setErr('');
+    try {
+      await api.deleteAccount(typed.trim());
+      await clearLocalData();
+      try { localStorage.removeItem('ol.user'); localStorage.removeItem('ol.spell.words'); } catch { /* ignore */ }
+      await uiAlert('Account deleted', 'Your account and your projects have been deleted. The nightly backups forget them within 14 days.');
+      location.replace('/');
+    } catch (e) { setErr((e as Error).message); setBusy(false); }
+  };
+  const shared = preview?.owned.filter(p => p.people > 0) ?? [];
+  return <>
+    <h3>Delete account</h3>
+    {!open && <div class="sub">Deletes your account, the projects you own and everything OverLyX keeps about you (<a href="/privacy#delete" target="_blank" rel="noopener">what exactly</a>). <button class="btn small danger" data-delete-account onClick={() => setOpen(true)}>Delete account…</button></div>}
+    {open && <div class="delete-account" data-delete-panel>
+      {!preview && !err && <div class="sub">Checking what would be deleted…</div>}
+      {preview?.refused && <div class="err">{preview.refused}</div>}
+      {preview && !preview.refused && <>
+        <p>This deletes your account <b>{user.username}</b> right away. It cannot be undone.</p>
+        {preview.owned.length
+          ? <p>{preview.owned.length === 1 ? 'The project you own is' : `The ${preview.owned.length} projects you own are`} deleted with it, with their history:</p>
+          : <p>You own no projects.</p>}
+        {preview.owned.length > 0 && <ul class="delete-projects" data-delete-projects>
+          {preview.owned.map(p => <li key={p.project}>{p.title || p.project.split('/').pop()}{p.people > 0 && <b class="warn"> — shared with {p.people} {p.people === 1 ? 'person' : 'people'}, who lose it too</b>}</li>)}
+        </ul>}
+        {shared.length > 0 && <p class="sub">To keep a shared project going, open its Share dialog and choose <b>Make owner…</b> next to a collaborator first.</p>}
+        {preview.memberOf > 0 && <p class="sub">You leave {preview.memberOf} project{preview.memberOf === 1 ? '' : 's'} of other people; what you wrote there stays.</p>}
+        <p class="sub">Download what you want to keep first (Download on the start page).</p>
+        <label class="row">Type your user name <code>{user.username}</code> to confirm:
+          <input type="text" value={typed} autoComplete="off" spellcheck={false} data-delete-confirm onInput={e => setTyped((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') void remove(); }} />
+        </label>
+        <div class="row">
+          <button class="btn danger" disabled={!confirmed || busy} data-delete-go onClick={() => void remove()}>{busy ? 'Deleting…' : 'Delete my account'}</button>
+          <button class="btn" disabled={busy} onClick={() => { setOpen(false); setTyped(''); setErr(''); }}>Cancel</button>
+        </div>
+      </>}
+      {err && <div class="err">{err}</div>}
+    </div>}
+  </>;
 }

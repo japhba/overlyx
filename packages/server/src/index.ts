@@ -45,7 +45,9 @@ import { ownProjectKey } from './projectCreate.ts';
 import { sandboxAvailable } from './sandbox.ts';
 import { grantAdminAccess, projectsForAdmin, activityOf, logAccess, pruneAccessLog, pruneGuests, projectPeople } from './access.ts';
 import { statusOf as mirrorStatus, pushProject as mirrorPush, setMirrorEnabled, archiveMirror, startMirrorSweeper } from './mirror.ts';
-import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, feedbackEnabled, appVersion, appCommit } from './feedback.ts';
+import { feedbackRoutes, vscodeTelemetryRoutes, reportServerError, pruneReports, appVersion, appCommit } from './feedback.ts';
+import { deletionPreview, deleteAccount, pruneTrash } from './accounts.ts';
+import { privacyPage } from './privacy.ts';
 import { usageRoutes } from './usage.ts';
 import { searchLiterature, bibtexFor, addToCitedBib, sourcesAvailable, type Hit } from './bibsearch.ts';
 import { fetchPdfForEntry } from './pdffetch.ts';
@@ -547,6 +549,26 @@ api.post('/git/tokens', (req, res) => {
 api.delete('/git/tokens/:id', (req, res) => {
   deleteToken(req.user!.id, Number(req.params.id));
   res.json({ tokens: listTokens(req.user!.id, userSettings(req.user!.id).allowRecopyTokens) });
+});
+
+/* ----------------------------------------------------------------- account */
+
+/** What deleting the account would erase (Settings ▸ Account ▸ Delete account). */
+api.get('/account/deletion', (req, res) => { res.json(deletionPreview(req.user!)); });
+/** Delete the signed-in account ({ confirm: <user name> }): its projects, sign-ins and data go at once (accounts.ts). */
+api.post('/account/delete', async (req, res) => {
+  const u = req.user!;
+  if (String(req.body?.confirm ?? '').trim().toLowerCase() !== u.username.toLowerCase()) { res.status(400).json({ error: 'Type your user name to confirm.' }); return; }
+  const refused = deletionPreview(u).refused;
+  if (refused) { res.status(403).json({ error: refused }); return; }
+  try {
+    const projects = await deleteAccount(u, manager);
+    res.clearCookie('ol_session', { path: '/' });
+    res.json({ ok: true, projects });
+  } catch (e) {
+    console.error('[account] deletion failed:', e);
+    res.status(500).json({ error: 'The account could not be deleted completely: ' + (e as Error).message });
+  }
 });
 
 /** The signed-in account's server-side settings (userSettings.ts) — the Settings panel. */
@@ -1420,6 +1442,9 @@ app.use('/api', api);
 // HTML deliverables' sandboxed pages (/ol-d/<token>/…) and the runtime's CORS (/_ol/…): before the app's catch-all
 mountDeliverables(app);
 
+/** The privacy notice (privacy.ts): public, readable without signing in. */
+app.get('/privacy', privacyPage);
+
 if (fs.existsSync(config.clientDist)) {
   app.use(express.static(config.clientDist, { index: false, maxAge: '1h' }));
   app.get(/^(?!\/api\/|\/ws).*/, (_req, res) => res.sendFile(path.join(config.clientDist, 'index.html')));
@@ -1436,6 +1461,11 @@ void ensureAllRepos().then(() => startMirrorSweeper());
 pruneAccessLog();
 pruneGuests();
 pruneAgents();
+pruneReports();
+// deleted projects and files leave the trash after 30 days (the server rarely runs that long, but may)
+const pruneTrashNow = () => { pruneTrash().catch(e => console.error('[trash] pruning failed:', e)); };
+pruneTrashNow();
+setInterval(pruneTrashNow, 24 * 60 * 60 * 1000).unref();
 
 const server = http.createServer(app);
 attachWebSocket(server);

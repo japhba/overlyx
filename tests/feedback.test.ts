@@ -1,10 +1,10 @@
 /**
- * Feedback → GitHub issues (packages/server/src/feedback.ts) against a stub of the GitHub API:
- * a report becomes one issue with the reporter and version; an error becomes one issue per
- * distinct message with repeats as comments (rate limited); the routes enforce auth and limits;
- * without a token the client gets a pre-filled issue URL instead.
+ * Feedback and error reports stay on the server (packages/server/src/feedback.ts): a report is one
+ * row with the reporter's account and the version, mailed to the owner; an error is one row per
+ * distinct message whose repeats count up; the routes enforce auth and limits; nothing is sent to
+ * GitHub; error rows expire, a deleted account's reports go.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -17,67 +17,68 @@ mkdirSync(join(ROOT, 'data'), { recursive: true });
 mkdirSync(join(ROOT, 'projects'), { recursive: true });
 process.env.OVERLYX_DATA_DIR = join(ROOT, 'data');
 process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
-
-// --- a GitHub API stub: records issues and comments, checks the token
-const issues: any[] = [], comments: any[] = [], labels: string[] = [];
-const stub = express();
-stub.use(express.json());
-stub.use((req, res, next) => { if (req.headers.authorization !== 'Bearer test-token') { res.status(401).json({ message: 'Bad credentials' }); return; } next(); });
-stub.post('/repos/:o/:r/labels', (req, res) => { if (labels.includes(req.body.name)) { res.status(422).json({ message: 'Validation Failed' }); return; } labels.push(req.body.name); res.status(201).json(req.body); });
-stub.post('/repos/:o/:r/issues', (req, res) => { const n = issues.length + 1; issues.push({ number: n, ...req.body }); res.status(201).json({ number: n, html_url: `https://github.com/${req.params.o}/${req.params.r}/issues/${n}` }); });
-stub.post('/repos/:o/:r/issues/:n/comments', (req, res) => { comments.push({ issue: Number(req.params.n), ...req.body }); res.status(201).json({ id: comments.length }); });
-const stubServer = http.createServer(stub);
-await new Promise<void>(r => stubServer.listen(0, '127.0.0.1', r));
-const port = (stubServer.address() as { port: number }).port;
-process.env.GITHUB_API_URL = `http://127.0.0.1:${port}`;
-process.env.GITHUB_TOKEN = 'test-token';
-process.env.GITHUB_REPO = 'acme/overlyx';
+process.env.OVERLYX_SMTP_URL = 'json';
+process.env.OVERLYX_OWNER_EMAIL = 'owner@example.com';
+// a GitHub token from an older configuration must not lead anywhere
+process.env.GITHUB_TOKEN = 'must-not-be-used';
+process.env.GITHUB_API_URL = 'http://127.0.0.1:9';
 
 const fb = await import('../packages/server/src/feedback.ts');
+const { db } = await import('../packages/server/src/db.ts');
+const { sentMails } = await import('../packages/server/src/mailer.ts');
 const { createUser, toSessionUser, authMiddleware } = await import('../packages/server/src/auth.ts');
 
-afterAll(() => { stubServer.close(); rmSync(ROOT, { recursive: true, force: true }); });
+const realFetch = globalThis.fetch;
+const outbound: string[] = [];
+globalThis.fetch = ((url: any, init?: any) => { const u = String(url); if (!u.startsWith('http://127.0.0.1:') || u.startsWith('http://127.0.0.1:9/')) outbound.push(u); return realFetch(url, init); }) as typeof fetch;
+afterAll(() => { globalThis.fetch = realFetch; rmSync(ROOT, { recursive: true, force: true }); });
 
-describe('feedback → GitHub issues', () => {
-  it('a report becomes one issue with the reporter, the version and the opt-in details', async () => {
-    const r = await fb.submitFeedback({ kind: 'bug', title: 'Formula vanished', body: 'I typed `\\alpha` and it disappeared.', doc: 'paper/main.lyx', error: 'TypeError: x is undefined', userAgent: 'TestBrowser/1' }, { name: 'Ada Lovelace', username: 'ada' });
-    expect(r).toEqual({ number: 1, url: 'https://github.com/acme/overlyx/issues/1' });
-    const i = issues[0];
-    expect(i.title).toBe('Formula vanished');
-    expect(i.labels).toEqual(['feedback']);
-    expect(i.body).toContain('**Bug** reported by Ada Lovelace (`ada`)');
-    expect(i.body).toContain('**Document:** `paper/main.lyx`');
-    expect(i.body).toContain('**Browser:** TestBrowser/1');
-    expect(i.body).toContain('I typed `\\alpha` and it disappeared.');
-    expect(i.body).toContain('TypeError: x is undefined');
-    expect(labels).toEqual(['feedback', 'client-error', 'server-error', 'vscode-error']);
+const row = (id: number) => db.prepare('SELECT * FROM reports WHERE id = ?').get(id) as any;
+const ada = toSessionUser(createUser('ada', 'Ada Lovelace', null, { email: 'ada@example.com' }));
+
+describe('feedback and error reports, kept on the server', () => {
+  it('a report is one row with the account, the version and the opt-in details, mailed to the owner', async () => {
+    const r = fb.submitFeedback({ kind: 'bug', title: 'Formula vanished', body: 'I typed `\\alpha` and it disappeared.', doc: 'paper/main.lyx', error: 'TypeError: x is undefined', userAgent: 'TestBrowser/1' }, { id: ada.id, name: 'Ada Lovelace', username: 'ada', email: 'ada@example.com' });
+    const x = row(r.id);
+    expect(x.kind).toBe('feedback');
+    expect(x.title).toBe('Formula vanished');
+    expect(x.user_id).toBe(ada.id);
+    expect(x.user_agent).toBe('TestBrowser/1');
+    expect(x.body).toContain('Bug · OverLyX');
+    expect(x.body).toContain('Document: paper/main.lyx');
+    expect(x.body).toContain('I typed `\\alpha` and it disappeared.');
+    expect(x.body).toContain('TypeError: x is undefined');
+    expect(x.body).not.toContain('Ada');   // who sent it is the row's account, not text
+    await new Promise(r => setTimeout(r, 20));
+    const mail = sentMails.find(m => m.subject.includes(`#${r.id}`))!;
+    expect(mail.to).toBe('owner@example.com');
+    expect(mail.subject).toContain('Formula vanished');
+    expect(mail.text).toContain('Ada Lovelace (ada, ada@example.com) wrote:');
   });
 
-  it('leaves the document name out unless it was given', async () => {
-    await fb.submitFeedback({ kind: 'idea', title: '', body: 'Dark mode please', doc: null }, { name: 'Bob', username: 'bob' });
-    const i = issues[1];
-    expect(i.title).toBe('Idea from Bob');
-    expect(i.body).not.toContain('Document:');
-    expect(i.body).not.toContain('Last error');
+  it('leaves the document name and the error out unless they were given', () => {
+    const r = fb.submitFeedback({ kind: 'idea', title: '', body: 'Dark mode please', doc: null }, { id: ada.id, name: 'Ada', username: 'ada' });
+    const x = row(r.id);
+    expect(x.title).toBe('Idea (no title)');
+    expect(x.body).not.toContain('Document:');
+    expect(x.body).not.toContain('Last error');
   });
 
-  it('an error is one issue per distinct message; repeats bump the count and comment at most every 10 minutes', async () => {
-    const before = issues.length;
-    const u1 = await fb.reportError({ kind: 'client-error', message: 'Cannot read properties of undefined (reading "pos") at line 42', stack: 'at foo (app.js:42)', userAgent: 'UA', who: { name: 'Ada', username: 'ada' } });
-    expect(u1).toMatch(/issues\/\d+$/);
-    expect(issues.length).toBe(before + 1);
-    expect(issues[before].title).toBe('[client-error] Cannot read properties of undefined (reading "pos") at line 42');
-    expect(issues[before].labels).toEqual(['client-error']);
-    // same error, different numbers → same issue, no immediate comment
-    const u2 = await fb.reportError({ kind: 'client-error', message: 'Cannot read properties of undefined (reading "pos") at line 57' });
-    expect(u2).toBe(u1);
-    expect(issues.length).toBe(before + 1);
-    expect(comments.length).toBe(0);
-    // a different message → a new issue; a server error with the same text → its own issue (kind is part of the key)
-    await fb.reportError({ kind: 'client-error', message: 'Something else entirely' });
-    await fb.reportError({ kind: 'server-error', message: 'Something else entirely' });
-    expect(issues.length).toBe(before + 3);
-    expect(issues[before + 2].labels).toEqual(['server-error']);
+  it('an error is one row per distinct message; repeats count up', () => {
+    const before = (db.prepare('SELECT COUNT(*) AS n FROM reports').get() as { n: number }).n;
+    const a = fb.reportError({ kind: 'client-error', message: 'Cannot read properties of undefined (reading "pos") at line 42', stack: 'at foo (app.js:42)', userAgent: 'UA', who: { id: ada.id, name: 'Ada', username: 'ada' } })!;
+    expect(row(a).title).toBe('[client-error] Cannot read properties of undefined (reading "pos") at line 42');
+    expect(row(a).user_id).toBe(ada.id);
+    expect(row(a).body).toContain('at foo (app.js:42)');
+    // same error, different numbers → same row, counted
+    expect(fb.reportError({ kind: 'client-error', message: 'Cannot read properties of undefined (reading "pos") at line 57' })).toBe(a);
+    expect(row(a).count).toBe(2);
+    // a different message → a new row; a server error with the same text → its own row (kind is part of the key)
+    const b = fb.reportError({ kind: 'client-error', message: 'Something else entirely' })!;
+    const c = fb.reportError({ kind: 'server-error', message: 'Something else entirely' })!;
+    expect(new Set([a, b, c]).size).toBe(3);
+    expect(row(c).kind).toBe('server-error');
+    expect((db.prepare('SELECT COUNT(*) AS n FROM reports').get() as { n: number }).n).toBe(before + 3);
   });
 
   it('errorHash ignores numbers, hex ids and quoted names', () => {
@@ -85,7 +86,7 @@ describe('feedback → GitHub issues', () => {
     expect(fb.errorHash('client-error', 'a')).not.toBe(fb.errorHash('server-error', 'a'));
   });
 
-  it('the routes need a session, rate-limit a person, and report the issue URL', async () => {
+  it('the routes need a session, rate-limit a person, and answer with the report number', async () => {
     const user = createUser('carol', 'Carol', 'pw-not-needed-here');
     const app = express();
     app.use(authMiddleware);
@@ -98,24 +99,22 @@ describe('feedback → GitHub issues', () => {
     const base = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
     try {
       const info = await (await fetch(`${base}/feedback/info`)).json();
-      expect(info.enabled).toBe(true);
-      expect(info.repo).toBe('acme/overlyx');
-      expect(info.newIssueUrl).toContain('https://github.com/acme/overlyx/issues/new');
+      expect(info).toEqual({ version: expect.any(String), errorReports: true });
       const empty = await fetch(`${base}/feedback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
       expect(empty.status).toBe(400);
-      const before = issues.length;
       for (let i = 0; i < 10; i++) {
         const r = await fetch(`${base}/feedback`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'UA/2' }, body: JSON.stringify({ kind: 'question', title: `Q${i}`, body: 'why?' }) });
         expect(r.status).toBe(200);
-        expect((await r.json()).url).toMatch(/issues\/\d+$/);
+        const { id } = await r.json();
+        expect(row(id).user_id).toBe(user.id);
+        expect(row(id).user_agent).toBe('UA/2');
       }
-      expect(issues.length).toBe(before + 10);
-      expect(issues[before].body).toContain('(`carol`)');
-      expect(issues[before].body).toContain('UA/2');
       const tooMany = await fetch(`${base}/feedback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'question', title: 'Q11', body: 'why?' }) });
       expect(tooMany.status).toBe(429);
       const ce = await fetch(`${base}/client-error`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: 'boom in the browser', stack: 'at x' }) });
-      expect((await ce.json()).url).toMatch(/issues\/\d+$/);
+      const { id } = await ce.json();
+      expect(row(id).kind).toBe('client-error');
+      expect(row(id).user_id).toBe(user.id);
     } finally { srv.close(); }
   });
 
@@ -126,7 +125,6 @@ describe('feedback → GitHub issues', () => {
     await new Promise<void>(r => srv.listen(0, '127.0.0.1', r));
     const base = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
     try {
-      const before = issues.length;
       const r = await fetch(`${base}/vscode-telemetry`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'user-agent': 'overlyx-vscode/0.2.9' },
@@ -134,17 +132,17 @@ describe('feedback → GitHub issues', () => {
           schema: 1, event: 'error', area: 'editor.open', errorName: 'TypeError',
           message: 'Cannot read properties of undefined', stack: 'at open (extension.cjs:42:1)',
           extensionVersion: '0.2.9', vscodeVersion: '1.136.1', platform: 'linux', arch: 'x64',
-          remote: 'remote', uiKind: 'desktop', ignored: 'must not reach the issue',
+          remote: 'remote', uiKind: 'desktop', ignored: 'must not reach the report',
         }),
       });
       expect(r.status).toBe(200);
-      expect((await r.json()).url).toMatch(/issues\/\d+$/);
-      expect(issues.length).toBe(before + 1);
-      expect(issues[before].labels).toEqual(['vscode-error']);
-      expect(issues[before].body).toContain('Area: editor.open');
-      expect(issues[before].body).toContain('Extension: 0.2.9');
-      expect(issues[before].body).toContain('Extension host: remote');
-      expect(issues[before].body).not.toContain('must not reach');
+      const x = row((await r.json()).id);
+      expect(x.kind).toBe('vscode-error');
+      expect(x.user_id).toBeNull();
+      expect(x.body).toContain('Area: editor.open');
+      expect(x.body).toContain('Extension: 0.2.9');
+      expect(x.body).toContain('Extension host: remote');
+      expect(x.body).not.toContain('must not reach');
 
       const bad = await fetch(`${base}/vscode-telemetry`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 99, message: 'nope' }),
@@ -153,28 +151,22 @@ describe('feedback → GitHub issues', () => {
     } finally { srv.close(); }
   });
 
-  it('without a token the client is handed a pre-filled new-issue URL', async () => {
-    const token = fb.github.token;
-    fb.github.token = '';
-    try {
-      expect(fb.feedbackEnabled()).toBe(false);
-      const app = express();
-      app.use((req, _res, next) => { req.user = { id: 1, username: 'x', name: 'X', color: '#000', isAdmin: false } as any; next(); });
-      app.use(express.json());
-      app.use(fb.feedbackRoutes());
-      const srv = http.createServer(app);
-      await new Promise<void>(r => srv.listen(0, '127.0.0.1', r));
-      const base = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
-      try {
-        const r = await fetch(`${base}/feedback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'bug', title: 'T', body: 'B' }) });
-        expect(r.status).toBe(503);
-        const j = await r.json();
-        expect(j.fallback).toContain('https://github.com/acme/overlyx/issues/new?title=T&body=');
-        expect(new URL(j.fallback).searchParams.get('body')).toContain('**Bug** reported by X (`x`)');
-        const ce = await fetch(`${base}/client-error`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: 'ignored' }) });
-        expect(ce.status).toBe(204);
-        expect(await fb.reportError({ kind: 'server-error', message: 'ignored too' })).toBeNull();
-      } finally { srv.close(); }
-    } finally { fb.github.token = token; }
+  it('error rows expire after 90 days unseen; a deleted account keeps no reports', () => {
+    const old = fb.reportError({ kind: 'server-error', message: 'an old one' })!;
+    db.prepare('UPDATE reports SET last_at = ? WHERE id = ?').run(Date.now() - 91 * 24 * 60 * 60 * 1000, old);
+    const mine = fb.submitFeedback({ kind: 'bug', title: 'mine', body: 'x' }, { id: ada.id, name: 'Ada', username: 'ada' }).id;
+    db.prepare('UPDATE reports SET last_at = ? WHERE id = ?').run(Date.now() - 400 * 24 * 60 * 60 * 1000, mine);
+    expect(fb.pruneReports()).toBe(1);
+    expect(row(old)).toBeUndefined();
+    expect(row(mine)).toBeDefined();   // what a person wrote stays until their account goes
+    const err = fb.reportError({ kind: 'client-error', message: 'ada hit this', who: { id: ada.id, name: 'Ada', username: 'ada' } })!;
+    fb.forgetUserReports(ada.id);
+    expect(row(mine)).toBeUndefined();
+    expect(row(err).user_id).toBeNull();
+    expect((db.prepare('SELECT COUNT(*) AS n FROM reports WHERE user_id = ?').get(ada.id) as { n: number }).n).toBe(0);
+  });
+
+  it('never talks to GitHub', () => {
+    expect(outbound).toEqual([]);
   });
 });

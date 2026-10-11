@@ -248,11 +248,11 @@ describe('example project and deletion', () => {
     expect(access.roleFor(bob, 'jan/paper')).toBeNull();
   });
 
-  it('transfers ownership: the project moves into the new owner\'s namespace, the old keys lead there', () => {
+  it('transfers ownership: the project moves into the new owner\'s namespace, the old keys lead there, the old owner edits', () => {
     const to = access.setOwner('jan/legacy', access.newOwner('bob'));
     expect(to).toBe('bob/legacy');
     expect(access.roleFor(bob, 'bob/legacy')).toBe('owner');
-    expect(access.roleFor(jan, 'bob/legacy')).toBeNull();
+    expect(access.roleFor(jan, 'bob/legacy')).toBe('edit');
     expect(access.projectRow('jan/legacy')).toBeUndefined();
     expect(existsSync(join(ROOT, 'projects', 'bob', 'legacy'))).toBe(true);
     expect(existsSync(join(ROOT, 'projects', 'jan', 'legacy'))).toBe(false);

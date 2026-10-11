@@ -374,11 +374,17 @@ export function newOwner(username: string): { id: number; username: string } {
 
 /**
  * Hand a project to another account: it moves into the new owner's namespace (the old key stays an
- * alias). Nothing of the project may be open (DocManager.closeProject). Returns the new key.
+ * alias); the previous owner stays on it as an editor (as in Google Docs). Nothing of the project
+ * may be open (DocManager.closeProject). Returns the new key.
  */
 export function setOwner(project: string, owner: { id: number; username: string }): string {
+  const prev = projectRow(project)?.owner_id ?? null;
   db.prepare('UPDATE projects SET owner_id = ? WHERE name = ?').run(owner.id, project);
   db.prepare('DELETE FROM project_members WHERE project = ? AND user_id = ?').run(project, owner.id);
+  if (prev != null && prev !== owner.id && db.prepare('SELECT 1 FROM users WHERE id = ? AND is_guest = 0').get(prev)) {
+    db.prepare(`INSERT INTO project_members (project, user_id, email, role, via, added_by, created_at) VALUES (?, ?, NULL, 'edit', 'user', ?, ?)
+                ON CONFLICT(project, user_id) WHERE user_id IS NOT NULL DO UPDATE SET role = 'edit'`).run(project, prev, owner.id, Date.now());
+  }
   const { owner: ns, name } = splitProjectKey(project);
   if (ns === owner.username) return project;
   const to = freeKey(owner.username, name);

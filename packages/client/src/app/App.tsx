@@ -47,6 +47,7 @@ import { FeedbackDialog } from './Feedback';
 import { Dialog, GraphicsDialog, TableDialog, LabelDialog, RefDialog, CiteDialog, HrefDialog, SettingsDialog, InsetDialog, HelpDialog, TexDialog, MacrosDialog, ParagraphDialog, TableSettingsDialog, DelimiterDialog, MatrixDialog, commandParams, HELP_ROWS, AiRepairDialog, ChildDocDialog, DialogHost, uiPrompt, uiConfirm, uiAlert } from './Dialogs';
 import { promptNewFile } from './newfile';
 import { SettingsPanel } from './Settings';
+import { clearLocalData } from './localData';
 import { createEditor, moveLocalCopies, type EditorHandle, type SaveState } from '../editor/editor';
 import { refreshMacros } from '../editor/macrodefs';
 import { describeChange } from '../editor/assembly';
@@ -118,15 +119,6 @@ export function App() {
   if (!user) return <Login google={google} onLogin={setUser} note={linkNote} />;
   if (user.guest && wantLogin) return <Login google={google} onLogin={u => { setUser(u); setWantLogin(false); }} onBack={() => setWantLogin(false)} note="Sign in to keep the shared project in your account." />;
   return <Workspace user={user} google={google} onSignIn={() => setWantLogin(true)} onLogout={() => api.logout().then(clearLocalData).then(() => { try { localStorage.removeItem('ol.user'); } catch { /* ignore */ } setUser(null); })} />;
-}
-
-/** Forget everything cached in this browser (API responses cached by the service worker, local document copies). */
-async function clearLocalData(): Promise<void> {
-  try { if ('caches' in window) for (const k of await caches.keys()) if (k.startsWith('overlyx-api')) await caches.delete(k); } catch { /* ignore */ }
-  try {
-    const dbs = await (indexedDB as any).databases?.() as { name?: string }[] | undefined;
-    for (const d of dbs ?? []) if (d.name?.startsWith('overlyx:')) indexedDB.deleteDatabase(d.name);
-  } catch { /* ignore */ }
 }
 
 type RightTab = 'comments' | 'versions' | 'agent';
@@ -1113,6 +1105,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     { label: 'Keyboard shortcuts', action: () => setDialog({ name: 'help' }) },
     { sep: true },
     { label: 'Report a problem / send feedback…', action: () => setDialog({ name: 'feedback' }) },
+    { label: 'Privacy notice', action: () => void window.open('/privacy', '_blank', 'noopener') },
     { label: 'OverLyX for VS Code (.vsix download)', action: () => { const a = document.createElement('a'); a.href = '/api/vscode-extension'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); notify('Downloading the extension — install it in VS Code with “Extensions: Install from VSIX…”'); } },
     { label: 'About OverLyX', action: () => void uiAlert('About OverLyX', 'OverLyX — a LyX-like collaborative WYSIWYG editor for LaTeX documents.\nDocuments are ordinary .tex files (change tracking and comments live in the file as macros and comment blocks); formulas are edited with a port of LyX\'s math editor; collaboration via Yjs CRDTs.') },
   ] };

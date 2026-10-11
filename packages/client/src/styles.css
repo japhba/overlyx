@@ -1701,6 +1701,12 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .lyx-editor.font-sample .sample-display { margin: 6px 0 8px; text-align: center; overflow-x: auto; overflow-y: hidden; }
 .settings-users { border: 1px solid var(--ui-border); border-radius: 4px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
 .settings-users label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.delete-account { border: 1px solid var(--err); border-radius: 4px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.delete-account p { margin: 0; }
+.delete-account .delete-projects { margin: 0; padding-left: 20px; max-height: 160px; overflow: auto; }
+.delete-account .warn { color: var(--err); font-weight: 500; }
+.delete-account .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.delete-account input[type=text] { flex: 1; min-width: 140px; }
 
 /* ------------------------------------------------------------------ Agent panel (AgentPanel.tsx) */
 .agent-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; font-size: 13px; }

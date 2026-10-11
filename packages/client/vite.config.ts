@@ -106,6 +106,8 @@ export default defineConfig({
     proxy: {
       '/api': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
       '/pdf': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
+      // the privacy notice is a page of the server's (packages/server/src/privacy.ts)
+      '/privacy': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
       // HTML deliverables: their sandboxed pages and the runtime (packages/server/src/deliverables.ts)
       '/ol-d': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
       '/_ol': `http://localhost:${process.env.OVERLYX_API_PORT ?? 3000}`,
