@@ -124,8 +124,10 @@ describe('the worker writes what the main thread writes', () => {
     const [w, m] = await twins('merge', docText('one', 'two', 'three', 'four'));
     for (const d of [w, m]) type(d, 3, 'typed here ');
     for (const d of [w, m]) writeFileSync(d.absPath, docText('one from git', 'two', 'three', 'four'));
-    expect(await w.absorbExternalChangeAsync()).toBe(true);
+    // the main-thread one first, before anything awaits: the project watcher takes an external change
+    // ~0.4 s after the write settles, and under load awaiting the worker first left it time to do m's
     expect(m.absorbExternalChange()).toBe(true);
+    expect(await w.absorbExternalChangeAsync()).toBe(true);
     expect(w.toText()).toBe(m.toText());
     expect(w.toText()).toContain('one from git');
     expect(w.toText()).toContain('typed here four');
