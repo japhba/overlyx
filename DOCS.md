@@ -543,21 +543,39 @@ blend.
     margin-ink presets — a click on the picked colour / width changes it, `ol.deckInk`; the pen stays in
     hand stroke after stroke until Esc. A stroke is GoodNotes' (`runtime/freehand.ts` `inkRuns`): a
     centripetal Catmull-Rom curve through every point the pen reported (however few: loops stay
-    loops), resampled every ⅔ px and Gaussian-smoothed (~1 screen px; 2.5 px when the points all came
-    in whole px, as older Safari sends them), its width from the Pencil's pressure through
-    `pressureWidth` (usual writing ≈ the nominal width, light a third, hard 1½×), the pressure smoothed
-    too (raw, it beaded); a mouse's, a finger's and the highlighter's even. It is drawn by the
+    loops), resampled every ⅔ px and smoothed only where needed — 3 px when the points all came in
+    whole px (older Safari), and the stroke stabilization — by Tukey's twicing (2·G − G∘G: a plain
+    Gaussian pulled small loops in by σ²/2r, the ink "contracted"); its width from the Pencil's
+    pressure through `pressureWidth(p, sensitivity)` (usual writing ≈ the nominal width whatever the
+    sensitivity), the pressure smoothed too (raw, it beaded); a mouse's, a finger's and the
+    highlighter's even. The pen's settings are GoodNotes' (the pen button clicked again:
+    `PenSettings.tsx`, `deckink.ts` `nib`, protocol `Nib`, defaults 0 / 25 % / 0 / 0): fountain or
+    **ball pen** (even and round whatever the rest), **tip sharpness** (start, and the end once
+    lifted, tapered to a point over 1–6 widths), **pressure sensitivity**, **tip flatness** (a flat nib
+    at 30°: width by the stroke's direction, down-strokes full, up-strokes hairlines), **stroke
+    stabilization** (up to 6 screen px of smoothing) — with a preview drawn by `inkRuns`, plus
+    *Scribble to erase* and, once a Pencil has drawn here, *Fingers draw too*. It is drawn by the
     browser's stroker as runs of one width (steps of 2½ %, round caps and joins, each starting where
     the last ended), one `<path>` per width (`inkPaths`) — perfect-freehand's filled outline (before)
     straightened each stroke's first px, made its outline of chords as long as the pen is wide and
     blobbed small loops. Safari's coalesced events on the iPad repeat the last move's points (A B A
-    C D C: the line doubled back): `freshPoint` takes only newer ones; the browser's predicted point is
-    drawn ahead of the pen, not kept. Drawn in the slide itself while the pen moves (an
+    C D C: the line doubled back): `freshPoint` takes only newer ones. (Not the browser's predicted
+    point: drawn ahead of the pen, the line drew back when it lifted.) Drawn in the slide itself while the pen moves (an
     `svg.ol-ink[data-ol-runtime]`, one rAF) exactly as it is then written (`<svg class="ol-ink"><g
     fill="none" stroke=… stroke-linecap="round" stroke-linejoin="round"><path fill="none"
     stroke-width=… d=…/>…`, the highlighter translucent with `mix-blend-mode: multiply`; strokes drawn
     before as one filled outline still work — Paint `ink` recolours either), and shown until the
-    page has it (`inkArrived`), so nothing flickers or changes on release. Once a Pencil has drawn, fingers (and the palm) move the slide instead of drawing. Selected,
+    page has it (`inkArrived`), so nothing flickers or changes on release. Once a Pencil has drawn
+    (the runtime says `pencil`; kept as `ol.deckInk` `pencil`), fingers move the slide instead of
+    drawing. Palm rejection (runtime `isPalm` / `penLands`): touches that come down while the pen is
+    on the screen or within 0.4 s after it lifts, or as broad as a palm, are the palm's and count
+    for nothing till they lift; those already down when the pen lands are taken for the palm then
+    and what they began is undone (a pinch put back, a pull let go, three fingers no undo); a third
+    touch well after two others is the hand too. The editor hears `penDown` and does the same for
+    the hand resting on the grey canvas beside the slide (which moves the slide only after 10 px).
+    **Scribble to erase** (`isScribble`: five legs or more, back and forth along one axis, several
+    times as long as its box is across; `scribbledOut`: the strokes under it, if it went over any —
+    a scribble over nothing stays as written). Selected,
     a stroke's toolbar is its ink colour (kind `ink`). The eraser hides the strokes — Draw's, and open
     unfilled paths — it passes over and removes them in one change on release); handles as in Inkscape: a click selects with the
     resize box, a click on the selected object again turns its handles into rotation arrows off the
@@ -709,8 +727,15 @@ blend.
     scrolling through slides apart from the slide side menu"): in a deck or poster the canvas frame
     shows only the current slide (`runtime/solo.ts`: `html.ol-solo`, the other slides `display:
     none`, the page laid out simply around it as for printing, 48 px of room for handles), fitted
-    into the canvas both ways and centred; the rail, Page Down / Page Up and selecting an object of
-    another slide (undo, the code view) change it, the zoom stays. The editor sizes the frame to the
+    into the canvas both ways, edge to edge (no room round it: the pan margin, 32 px, comes in only as
+    the slide grows past the canvas — `panRange`), and centred; the rail, Page Down / Page Up, a
+    **swipe sideways** and selecting an object of another slide (undo, the code view) change it, the
+    zoom stays. The swipe (`SlideView.steer`, Safari's swipe between pages): a scroll or a finger whose
+    way is clearly sideways, the slide in its place and across the canvas or at that side's edge when
+    the swipe began, shows the pull on the rubber band and turns the page after 90 px of scroll (once
+    a swipe, momentum and all) or, a finger, a sixth of the canvas or a flick; the next slide comes
+    in from that side (`enter`). Sideways it never comes loose; up and down, and zoomed in mid-slide,
+    it pans and pulls loose as ever. The editor sizes the frame to the
     slide and moves it by a transform set outside renders (`deliverable/viewport.ts` `SlideView`; a zoom
     too while it goes on — `zoomTo`, `placeAt` hold a `live` scale the editor's `zoom` takes over ~120 ms
     after the last wheel step or when the fingers lift, so a pinch renders no Preact; `will-change` only

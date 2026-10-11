@@ -6,11 +6,21 @@
  * objectHtml), shown in points like the other line weights (units.ts). Kept in this browser (`ol.deckInk`).
  */
 import { INK_PALETTES, HIGHLIGHT_OPACITY } from '../editor/plugins/ink';
-import type { InkStyle } from './protocol';
+import type { InkStyle, Nib } from './protocol';
 
 export type DeckPen = 'pen' | 'highlighter';
 export interface DeckPenSet { color: string; width: number; colors: string[]; widths: number[] }
-export interface DeckInk { pen: DeckPen; pens: Record<DeckPen, DeckPenSet> }
+export interface DeckInk {
+  pen: DeckPen;
+  pens: Record<DeckPen, DeckPenSet>;
+  /** the pen's settings (GoodNotes'): ball or fountain, tip, pressure, stabilization */
+  nib: Nib;
+  /** a Pencil has drawn in this browser: fingers move the slide (unless `fingersDraw`) */
+  pencil: boolean;
+  fingersDraw: boolean;
+  /** scribbling over strokes erases them */
+  scribble: boolean;
+}
 
 /** the width presets (px of a 1280 px slide: 1½, 3, 6 pt; the highlighter's 10½, 18, 30 pt) and what the width picker offers */
 export const DECK_INK_WIDTHS: Record<DeckPen, number[]> = { pen: [2, 4, 8], highlighter: [14, 24, 40] };
@@ -18,9 +28,27 @@ export const DECK_INK_WIDTH_CHOICES: Record<DeckPen, number[]> = { pen: [1, 2, 3
 
 const KEY = 'ol.deckInk';
 
+/** the pen as it comes: a fountain pen with round ends, a little pressure, a round tip, no smoothing */
+export const DEFAULT_NIB: Nib = { ball: false, sharpness: 0, sensitivity: 0.25, flatness: 0, stabilization: 0 };
+const NIB_LEVELS = ['sharpness', 'sensitivity', 'flatness', 'stabilization'] as const;
+const isLevel = (v: unknown): v is number => typeof v === 'number' && v >= 0 && v <= 1;
+
+/** a pen's settings with `p` taken over (each level kept between 0 and 1) */
+function nibWith(n: Nib, p: Partial<Nib> | undefined): Nib {
+  const out = { ...n };
+  if (!p) return out;
+  if (typeof p.ball === 'boolean') out.ball = p.ball;
+  for (const k of NIB_LEVELS) if (isLevel(p[k])) out[k] = Math.round(p[k]! * 100) / 100;
+  return out;
+}
+
 export function defaultDeckInk(): DeckInk {
   return {
     pen: 'pen',
+    nib: { ...DEFAULT_NIB },
+    pencil: false,
+    fingersDraw: false,
+    scribble: true,
     pens: {
       pen: { color: INK_PALETTES.pen[0][0], width: DECK_INK_WIDTHS.pen[1], colors: INK_PALETTES.pen.map(c => c[0]), widths: [...DECK_INK_WIDTHS.pen] },
       highlighter: { color: INK_PALETTES.highlighter[0][0], width: DECK_INK_WIDTHS.highlighter[1], colors: INK_PALETTES.highlighter.map(c => c[0]), widths: [...DECK_INK_WIDTHS.highlighter] },
@@ -38,6 +66,8 @@ export function loadDeckInk(): DeckInk {
     const s = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Partial<DeckInk> | null;
     if (!s || typeof s !== 'object') return ink;
     if (s.pen === 'pen' || s.pen === 'highlighter') ink.pen = s.pen;
+    if (s.nib && typeof s.nib === 'object') ink.nib = nibWith(ink.nib, s.nib);
+    for (const k of ['pencil', 'fingersDraw', 'scribble'] as const) if (typeof s[k] === 'boolean') ink[k] = s[k]!;
     for (const p of ['pen', 'highlighter'] as DeckPen[]) {
       const v = s.pens?.[p];
       if (!v) continue;
@@ -62,6 +92,11 @@ export interface DeckInkPatch {
   slotColor?: { idx: number; color: string };
   /** a width preset of the pen in hand replaced (and picked) */
   slotWidth?: { idx: number; width: number };
+  /** the pen's settings changed */
+  nib?: Partial<Nib>;
+  pencil?: boolean;
+  fingersDraw?: boolean;
+  scribble?: boolean;
 }
 
 /** the presets after a change (a new object: the old one is left as it was) */
@@ -78,13 +113,19 @@ export function patchDeckInk(ink: DeckInk, p: DeckInkPatch): DeckInk {
     cur.widths[p.slotWidth.idx] = p.slotWidth.width;
     cur.width = p.slotWidth.width;
   }
-  return { pen, pens: { ...ink.pens, [pen]: cur } };
+  const flag = (k: 'pencil' | 'fingersDraw' | 'scribble') => (typeof p[k] === 'boolean' ? p[k]! : ink[k]);
+  return { pen, pens: { ...ink.pens, [pen]: cur }, nib: nibWith(ink.nib, p.nib), pencil: flag('pencil'), fingersDraw: flag('fingersDraw'), scribble: flag('scribble') };
 }
 
 /** the ink of the next stroke: the pen in hand, its width for a page `pageW` px wide (a poster's strokes as thick, seen whole, as a slide's) */
 export function deckInkStyle(ink: DeckInk, pageW = 1280): InkStyle {
   const p = ink.pens[ink.pen];
-  return { color: p.color, width: Math.round(p.width * Math.max(0.25, pageW / 1280) * 10) / 10, opacity: ink.pen === 'highlighter' ? HIGHLIGHT_OPACITY : 1 };
+  const hl = ink.pen === 'highlighter';
+  const fingers = ink.fingersDraw ? 'draw' as const : ink.pencil ? 'pan' as const : undefined;
+  return {
+    color: p.color, width: Math.round(p.width * Math.max(0.25, pageW / 1280) * 10) / 10, opacity: hl ? HIGHLIGHT_OPACITY : 1,
+    ...(hl ? {} : { nib: { ...ink.nib } }), ...(fingers ? { fingers } : {}), scribble: ink.scribble,
+  };
 }
 
 /** the size of a width preset's dot in the toolbar (screen px) */

@@ -23,7 +23,22 @@ export type DeliverableKind = 'deck' | 'poster' | 'page';
 export type Tool = 'select' | 'text' | 'rect' | 'roundrect' | 'ellipse' | 'triangle' | 'diamond' | 'star' | 'hexagon' | 'line' | 'arrow' | 'pen' | 'eraser' | 'bezier' | 'formula' | 'references';
 
 /** the ink a stroke is drawn in (Draw): colour, width in slide px, opacity (the highlighter's < 1, laid over what is under it as a highlighter is) */
-export interface InkStyle { color: string; width: number; opacity: number }
+/**
+ * Draw's pen, GoodNotes' settings (0..1 each): a ball pen (an even, round line) or a fountain pen with
+ * its tip sharpness (round or pointed ends), pressure sensitivity and tip flatness (a flat nib: down-
+ * strokes full, up-strokes hairlines); the stroke stabilization (smoothing) of either. runtime/freehand.ts.
+ */
+export interface Nib { ball: boolean; sharpness: number; sensitivity: number; flatness: number; stabilization: number }
+
+export interface InkStyle {
+  color: string; width: number; opacity: number;
+  /** the pen's (not the highlighter's) */
+  nib?: Nib;
+  /** fingers move the slide and only the pen draws ('pan': a Pencil has drawn in this browser), or draw too; unsaid: once a Pencil has drawn here */
+  fingers?: 'pan' | 'draw';
+  /** scribbling over strokes erases them (GoodNotes) */
+  scribble?: boolean;
+}
 
 /** what kind of object the toolbar is showing tools for */
 export type ObjKind = 'text' | 'shape' | 'line' | 'image' | 'svg' | 'svgpart' | 'group' | 'formula' | 'ink' | 'other';
@@ -264,6 +279,10 @@ export type FromRuntime =
   /** a new object drawn: its box (slide px), and for lines / the pen the points (slide px, in drawing order) */
   | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean; runs?: InkRunD[] }
   | { ol: 'editing'; path: Path | null }
+  /** a Pencil drew (the first time on this page): fingers move the slide in this browser from now on */
+  | { ol: 'pencil' }
+  /** the Pencil is on the screen, or has lifted: the hand resting beside the slide moves nothing meanwhile */
+  | { ol: 'penDown'; down: boolean }
   /** words pasted on the canvas: a new text box with them (`after`: the object selected on that slide) */
   | { ol: 'pasteText'; version: number; slide: Path | null; after: Path | null; text: string }
   /** what Ctrl+C copies of the selection now (null: nothing), for the editor to answer a copy at once (runtime/clip.ts) */

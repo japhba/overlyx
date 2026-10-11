@@ -248,11 +248,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   const frameW = kind === 'page' ? (device === 'mobile' ? 390 : 1280) : pageW + PAD * 2;
   const soloOn = !!solo && kind !== 'page' && solo.rect.w > 0 && solo.rect.h > 0;
-  /** room kept around the slide on the canvas (screen px) */
+  /** room past the slide's edges a slide zoomed in pans to (screen px) */
   const margin = box.w < 600 ? 12 : 32;
-  // one slide: the whole of it fits (both ways); a web page: its width
+  // one slide: the whole of it fits (both ways), edge to edge with the canvas; a web page: its width
   const fit = soloOn
-    ? Math.max(0.05, Math.min(2, (box.w - 2 * margin) / solo!.rect.w, (box.h - 2 * margin) / solo!.rect.h))
+    ? Math.max(0.05, Math.min(2, box.w / solo!.rect.w, box.h / solo!.rect.h))
     : Math.max(0.05, Math.min(kind === 'page' ? 1 : 2, (box.w - 24) / frameW));
   const scale = fit * zoom;
   const showRail = kind === 'deck';
@@ -603,6 +603,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           } else setPanX(p => p + m.dx * (m.screen ? screenK.current : scaleRef.current));
           break;
         case 'pinch': if (fromCanvas) onPinch(m); break;
+        case 'pencil': if (fromCanvas && !inkRef.current.pencil) setInk({ pencil: true }); break;
+        case 'penDown': if (fromCanvas) penOnCanvas(m.down); break;
         case 'history': if (fromCanvas) historyGesture(m.redo); break;
         case 'panEnd': if (fromCanvas) slideView.release(); break;
         case 'colors': if (fromCanvas) setColors({ desk: m.desk, page: m.page }); break;
@@ -639,9 +641,21 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /** the ring behind a slide pulled past an edge (drawn by the view); pulled loose, Centre slide shows */
   const pullRing = useRef<HTMLDivElement>(null);
   const [slideFree, setSlideFree] = useState(false);
-  const slideView = useMemo(() => new SlideView(() => canvasFrame.current, () => viewInput.current,
+  /** a swipe turned the page: the next slide comes in from that side */
+  const pageDir = useRef<0 | 1 | -1>(0);
+  const gotoSlideRef = useRef<(i: number) => void>(() => {});
+  const slideView = useMemo(() => new SlideView(() => canvasFrame.current, () => viewInput.current, {
     // (a pinch's scale reaches the page as it goes: the handles keep their size on the screen)
-    { pull: () => pullRing.current, onFree: setSlideFree, onLive: s => toCanvas({ ol: 'scale', scale: s }) }), []);
+    pull: () => pullRing.current, onFree: setSlideFree, onLive: s => toCanvas({ ol: 'scale', scale: s }),
+    // a swipe sideways: the next slide, or the one before (viewport.ts steer)
+    pages: () => kindRef.current === 'deck' && slidesRef.current.length > 1,
+    onPage: dir => {
+      const k = currentRef.current + dir;
+      if (k < 0 || k >= slidesRef.current.length) return;
+      pageDir.current = dir;
+      gotoSlideRef.current(k);
+    },
+  }), []);
   useEffect(() => () => slideView.destroy(), [slideView]);
   // Safari's pinches beside the slide (a Mac's trackpad; the iPad's fingers, which canvasTouch takes): the slide's zoom, never the page's
   useEffect(() => {
@@ -662,12 +676,17 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   }, [canvasBox.current]);
   useLayoutEffect(() => { if (soloOn) slideView.render(); });
   // another slide: in the middle again (the zoom stays, as in PowerPoint)
-  useLayoutEffect(() => { if (soloOn) slideView.recentre(false); }, [solo?.slide, soloOn]);
+  useLayoutEffect(() => {
+    if (!soloOn) return;
+    const d = pageDir.current;
+    pageDir.current = 0;
+    if (d) slideView.enter(d); else slideView.recentre(false);
+  }, [solo?.slide, soloOn]);
   useLayoutEffect(() => { if (soloOn) slideView.refit(); }, [box.w, box.h, solo?.rect.w, solo?.rect.h]);
   useEffect(() => { toRail({ ol: 'scale', scale: railScale }); }, [railScale]);
   // (the Bézier pen takes Enter / Esc / Backspace: the keyboard goes to the canvas)
   const inkStyle = deckInkStyle(ink, pageW);
-  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, inkStyle.color, inkStyle.width, inkStyle.opacity]);
+  useEffect(() => { toCanvas({ ol: 'tool', tool, ink: inkStyle }); if (tool === 'bezier') canvasFrame.current?.focus(); }, [tool, inkStyle.color, inkStyle.width, inkStyle.opacity, JSON.stringify(inkStyle.nib ?? null), inkStyle.fingers, inkStyle.scribble]);
   // the rail folded away: its frame goes, and says it is ready again when it comes back
   useEffect(() => { if (!railOpen) railReady.current = false; }, [railOpen]);
 
@@ -763,10 +782,20 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
    * and pinch, three undo or redo. Not the browser's: the iPad's Safari zoomed the whole page.
    */
   const canvasFingers = useRef(new Map<number, { x: number; y: number }>());
-  const canvasGesture = useRef<{ kind: 'pan' | 'pinch' | 'tri' | 'done'; x: number; y: number; x0: number; y0: number; t0: number } | null>(null);
+  const canvasGesture = useRef<{ kind: 'pan' | 'pinch' | 'tri' | 'done'; x: number; y: number; x0: number; y0: number; t0: number; moving?: boolean } | null>(null);
   const fingerMid = () => {
     const ps = [...canvasFingers.current.values()];
     return { x: ps.reduce((a, p) => a + p.x, 0) / ps.length, y: ps.reduce((a, p) => a + p.y, 0) / ps.length };
+  };
+  /** the Pencil on the slide (runtime): the hand resting beside it is the palm — what it began here is undone, and it moves nothing till the pen has lifted */
+  const penState = useRef({ down: false, off: -1e9 });
+  const penOnCanvas = (down: boolean) => {
+    penState.current = { down, off: down ? penState.current.off : performance.now() };
+    const g = canvasGesture.current;
+    if (!down || !g) return;
+    if (g.kind === 'pan') slideView.release();
+    else if (g.kind === 'pinch') pinchEnd(true);
+    g.kind = 'done';
   };
   const canvasTouch = (e: PointerEvent) => {
     if (e.pointerType !== 'touch' || !soloRef.current) return;
@@ -776,6 +805,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (e.type === 'pointerdown') {
       if (e.target !== e.currentTarget && !fingers.size) return;
       e.preventDefault();
+      if (penState.current.down || performance.now() - penState.current.off < 400) return;
       fingers.set(e.pointerId, at);
       const g = canvasGesture.current, m = fingerMid();
       if (fingers.size === 1) canvasGesture.current = { kind: 'pan', x: at.x, y: at.y, x0: at.x, y0: at.y, t0: performance.now() };
@@ -793,14 +823,19 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const g = canvasGesture.current;
     if (e.type === 'pointermove') {
       fingers.set(e.pointerId, at);
-      if (g?.kind === 'pan') { slideView.panBy(at.x - g.x, at.y - g.y); g.x = at.x; g.y = at.y; }
+      if (g?.kind === 'pan') {
+        // (a hand coming to rest beside the slide shifts a little: it moves nothing till it has gone 10 px)
+        if (!g.moving && Math.hypot(at.x - g.x0, at.y - g.y0) < 10) return;
+        if (!g.moving) { g.moving = true; g.x = at.x; g.y = at.y; return; }
+        slideView.panBy(at.x - g.x, at.y - g.y); g.x = at.x; g.y = at.y;
+      }
       else if (g?.kind === 'pinch') pinchMove([...fingers.values()]);
       else if (g?.kind === 'tri' && fingers.size >= 3) { const m = fingerMid(); g.x = m.x; g.y = m.y; }
       return;
     }
     // up or cancelled: the gesture ends with the first finger to lift (the others do nothing till they lift too)
     fingers.delete(e.pointerId);
-    if (g?.kind === 'pan') slideView.release();
+    if (g?.kind === 'pan') { if (g.moving) slideView.release(); }
     else if (g?.kind === 'pinch') pinchEnd(false);
     if (g && g.kind !== 'tri') g.kind = 'done';
     if (fingers.size) return;
@@ -1245,6 +1280,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const k = Math.max(0, Math.min(n - 1, i));
     setCurrent(k); toCanvas({ ol: 'scrollTo', slide: k }); toRail({ ol: 'current', slide: k });
   };
+  gotoSlideRef.current = gotoSlide;
   const duplicateSlide = (i: number) => { const p = slidePaths(text.toString())[i]; if (p) applyOps([{ t: 'duplicate', paths: [p] }]); };
   const deleteSlide = (i: number) => { const ps = slidePaths(text.toString()); if (ps.length > 1 && ps[i]) applyOps([{ t: 'remove', paths: [ps[i]] }]); };
   const moveSlide = (i: number, d: -1 | 1) => {

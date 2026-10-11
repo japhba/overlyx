@@ -485,7 +485,61 @@ test('Draw: strokes one after the other in the pen\'s colour, the highlighter, t
   expect(real(errors)).toEqual([]);
 });
 
-test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do not zoom, fingers beside the slide move it too, three fingers undo, a Pencil draws and fingers then move the slide', async ({ browser }) => {
+test("Draw: the pen's settings (GoodNotes'), a ball pen kept for the next visit; a scribble over strokes erases them, over nothing it stays", async ({ page, context }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await setup(page);
+  const strokes = () => (fileText().match(/<svg class="ol-ink"/g) ?? []).length;
+  const cdp = await context.newCDPSession(page);
+  const pen = (type: string, x: number, y: number, force: number) => cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, force, pointerType: 'pen' });
+  const mouseLine = async (pts: [number, number][]) => {
+    const ps = await Promise.all(pts.map(([x, y]) => at(page, x, y)));
+    await page.mouse.move(ps[0].x, ps[0].y); await page.mouse.down();
+    for (const p of ps.slice(1)) await page.mouse.move(p.x, p.y, { steps: 6 });
+    await page.mouse.up();
+  };
+  await page.locator('[data-tb="dk-draw"]').click();
+  // the pen clicked again: its settings — a fountain pen, round tip, a quarter of the pressure, as drawn
+  await page.locator('[data-tb="dk-ink-pen"]').click();
+  const ps = page.locator('[data-pen-settings]');
+  await expect(ps).toBeVisible();
+  await expect(ps.locator('[data-pen-kind="fountain"]')).toHaveAttribute('aria-checked', 'true');
+  for (const [k, v] of [['sharpness', '0%'], ['sensitivity', '25%'], ['flatness', '0%'], ['stabilization', '0%']]) await expect(ps.locator(`[data-pen-level="${k}"] .pen-set-val`)).toHaveText(v);
+  await expect(ps.locator('[data-pen-scribble]')).toBeChecked();
+  // a ball pen: no pressure, tip or flatness to set, stabilization still
+  await ps.locator('[data-pen-kind="ball"]').click();
+  await expect(ps.locator('[data-pen-level="sensitivity"]')).toHaveCount(0);
+  await expect(ps.locator('[data-pen-level="stabilization"]')).toHaveCount(1);
+  await expect(page.locator('[data-tb="dk-ink-pen"]')).toHaveAttribute('title', /^Ball pen/);
+  await page.locator('.dl-zoom').click();
+  await expect(ps).toHaveCount(0);
+  // drawn with the Pencil, pressed lightly then hard: one even line
+  const p0 = await at(page, 300, 260);
+  await pen('mousePressed', p0.x, p0.y, 0.1);
+  for (let i = 1; i <= 20; i++) await pen('mouseMoved', p0.x + i * 10, p0.y + Math.sin(i / 3) * 8, 0.1 + 0.8 * i / 20);
+  await pen('mouseReleased', p0.x + 200, p0.y, 0.9);
+  await expect.poll(strokes, { timeout: 15000 }).toBe(1);
+  expect((fileText().match(/<svg class="ol-ink"[\s\S]*?<\/svg>/)![0].match(/<path /g) ?? []).length).toBe(1);
+  // kept in this browser
+  await page.reload();
+  await slides(page).first().waitFor({ timeout: 30000 });
+  await page.locator('[data-tb="dk-draw"]').click();
+  await expect(page.locator('[data-tb="dk-ink-pen"]')).toHaveAttribute('title', /^Ball pen/);
+  // a line, then a scribble across it: both go (one undo brings the line back)
+  await mouseLine([[300, 640], [700, 640]]);
+  await expect.poll(strokes, { timeout: 15000 }).toBe(2);
+  const scribble = (y0: number, y1: number) => Array.from({ length: 13 }, (_, i) => [380 + i * 12, i % 2 ? y0 : y1] as [number, number]);
+  await mouseLine(scribble(610, 670));
+  await expect.poll(strokes, { timeout: 15000 }).toBe(1);
+  await page.keyboard.press('Control+z');
+  await expect.poll(strokes, { timeout: 15000 }).toBe(2);
+  // a scribble over nothing: kept as drawn
+  await mouseLine(scribble(530, 590));
+  await expect.poll(strokes, { timeout: 15000 }).toBe(3);
+  expect(real(errors)).toEqual([]);
+});
+
+test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do not zoom, fingers beside the slide move it too, three fingers undo, a Pencil draws and fingers then move the slide, the resting hand does nothing, a swipe turns the page', async ({ browser }) => {
   const ctx = await browser.newContext({ baseURL: BASE_URL, hasTouch: true, viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
   const errors = collectErrors(page);
@@ -592,7 +646,7 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
   await expect(page.locator('[data-dl-hud]')).toHaveText(/Undo/);
   await expect.poll(fileText, { timeout: 15000 }).toContain('id="a"');
 
-  // a Pencil draws, with its pressure; a finger then moves the slide instead of drawing (the palm too)
+  // a Pencil draws, with its pressure; a finger then moves the slide instead of drawing
   await page.locator('[data-tb="dk-draw"]').click();
   const strokes = () => (fileText().match(/<svg class="ol-ink"/g) ?? []).length;
   const p0 = await at(page, 200, 620);
@@ -604,12 +658,47 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
   const t0 = (await view()).box;
   const f0 = await at(page, 700, 600);
   await touches('touchStart', [f0]);
-  for (let i = 1; i <= 8; i++) { await touches('touchMove', [{ x: f0.x - i * 10, y: f0.y }]); await page.waitForTimeout(16); }
+  for (let i = 1; i <= 8; i++) { await touches('touchMove', [{ x: f0.x, y: f0.y - i * 10 }]); await page.waitForTimeout(16); }
   // (the slide follows the finger; let go, it springs back into place)
-  expect(t0.x - (await view()).box.x).toBeGreaterThan(20);
+  expect(t0.y - (await view()).box.y).toBeGreaterThan(20);
   await touches('touchEnd', []);
   await page.waitForTimeout(600);
   expect(strokes()).toBe(1);
+
+  // the hand resting on the screen as the Pencil writes (two touches): no pinch, no zoom, the stroke drawn whole
+  const s0 = (await view()).s;
+  const p1 = await at(page, 200, 300);
+  await pen('mousePressed', p1.x, p1.y, 0.3);
+  for (let i = 1; i <= 8; i++) await pen('mouseMoved', p1.x + i * 12, p1.y, 0.4);
+  await touches('touchStart', [{ x: p1.x + 150, y: p1.y + 120 }, { x: p1.x + 210, y: p1.y + 140 }]);
+  for (let i = 9; i <= 16; i++) { await pen('mouseMoved', p1.x + i * 12, p1.y, 0.4); await touches('touchMove', [{ x: p1.x + 150 + i * 3, y: p1.y + 120 }, { x: p1.x + 210 - i * 4, y: p1.y + 140 }]); }
+  await pen('mouseReleased', p1.x + 192, p1.y, 0.1);
+  await touches('touchEnd', []);
+  await expect.poll(strokes, { timeout: 15000 }).toBe(2);
+  expect(Math.abs((await view()).s - s0)).toBeLessThan(1e-3);
+  await page.waitForTimeout(600);
+  // the palm landing first (three touches), then the Pencil: the stroke, and no undo
+  const p2 = await at(page, 200, 360);
+  await touches('touchStart', [{ x: p2.x + 150, y: p2.y + 100 }, { x: p2.x + 190, y: p2.y + 110 }, { x: p2.x + 230, y: p2.y + 130 }]);
+  await page.waitForTimeout(60);
+  await pen('mousePressed', p2.x, p2.y, 0.3);
+  for (let i = 1; i <= 12; i++) await pen('mouseMoved', p2.x + i * 12, p2.y, 0.4);
+  await pen('mouseReleased', p2.x + 144, p2.y, 0.1);
+  await page.waitForTimeout(50);
+  await touches('touchEnd', []);
+  await expect.poll(strokes, { timeout: 15000 }).toBe(3);
+  await page.waitForTimeout(800);
+  expect(strokes()).toBe(3);
+  await expect(page.locator('[data-dl-hud]')).toHaveCount(0);
+
+  // a finger swiped sideways: the next slide
+  const shown = () => editFrame(page).evaluate(() => Array.from(document.querySelectorAll('section.slide')).map(s => ((s as HTMLElement).offsetHeight > 0 ? 1 : 0)).join(''));
+  expect(await shown()).toBe('10');
+  const f1 = await at(page, 900, 300);
+  await touches('touchStart', [f1]);
+  for (let i = 1; i <= 6; i++) await touches('touchMove', [{ x: f1.x - i * 25, y: f1.y + i }]);
+  await touches('touchEnd', []);
+  await expect.poll(shown).toBe('01');
   expect(real(errors)).toEqual([]);
   await ctx.close();
 });
@@ -620,7 +709,9 @@ test('the canvas: a checkerboard from its menu, Back to the slide when zoomed in
   await setup(page);
   // the canvas around the frame takes the page's own colour
   await expect.poll(() => page.locator('.dl-canvas').evaluate(e => getComputedStyle(e).backgroundColor)).toBe('rgb(223, 227, 234)');
-  // right-click between the slides: the canvas menu
+  // right-click beside the slide (zoomed out a little: fitted, it fills the canvas): the canvas menu
+  await page.locator('.dl-zoomgroup button[title^="Zoom out"]').click();
+  await page.waitForTimeout(400);
   const s1 = (await slides(page).first().boundingBox())!;
   await page.mouse.click(s1.x + s1.width / 2, s1.y + s1.height + 8, { button: 'right' });
   await page.locator('.ctx-menu').getByText('Checkerboard canvas').click();
@@ -633,19 +724,20 @@ test('the canvas: a checkerboard from its menu, Back to the slide when zoomed in
   expect(real(errors)).toEqual([]);
 });
 
-test('one slide per canvas: the rail and Page Down move between them, a scroll springs back or pulled further sets the slide loose, the rail widens, the selection is named', async ({ page }) => {
+test('one slide per canvas: fitted edge to edge; the rail, Page Down and a swipe sideways move between them, a scroll springs back or pulled further sets the slide loose, the rail widens, the selection is named', async ({ page }) => {
   const errors = collectErrors(page);
   await login(page);
   await setup(page);
   const shownSlides = () => editFrame(page).evaluate(() => Array.from(document.querySelectorAll('section.slide')).map(s => ((s as HTMLElement).offsetHeight > 0 ? 1 : 0)).join(''));
   const transform = () => page.locator('.dl-frame').evaluate(e => (e as HTMLElement).style.transform);
-  // only the first slide is on the canvas, the whole of it, in the middle
+  // only the first slide is on the canvas, the whole of it, in the middle — edge to edge with the canvas, no room around it
   await expect.poll(shownSlides).toBe('10');
   const c = (await page.locator('.dl-canvas').boundingBox())!;
   const s1 = (await slides(page).first().boundingBox())!;
-  expect(s1.y).toBeGreaterThanOrEqual(c.y);
-  expect(s1.y + s1.height).toBeLessThanOrEqual(c.y + c.height);
+  expect(s1.y).toBeGreaterThanOrEqual(c.y - 0.5);
+  expect(s1.y + s1.height).toBeLessThanOrEqual(c.y + c.height + 0.5);
   expect(Math.abs((s1.x + s1.width / 2) - (c.x + c.width / 2))).toBeLessThan(3);
+  expect(Math.min(Math.abs(s1.x - c.x), Math.abs(s1.y - c.y))).toBeLessThan(1.5);
   // a short scroll pulls the slide, and it springs back into the middle
   const rest = await transform();
   const refocus = page.locator('[data-dl-refocus]');
@@ -706,6 +798,14 @@ test('one slide per canvas: the rail and Page Down move between them, a scroll s
   await expect.poll(shownSlides).toBe('01');
   await gotoSlide(page, 0);
   await expect.poll(shownSlides).toBe('10');
+  // a swipe sideways (a trackpad's two fingers): the next slide, and back; up and down it pans as before
+  await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2);
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(40, 0);
+  await expect.poll(shownSlides).toBe('01');
+  await page.waitForTimeout(500);
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(-40, 0);
+  await expect.poll(shownSlides).toBe('10');
+  await page.waitForTimeout(500);
   // the rail's right edge dragged: wider thumbnails, kept for the next visit
   const g = (await page.locator('[data-dl-railgrip]').boundingBox())!;
   await page.mouse.move(g.x + 3, g.y + 200);

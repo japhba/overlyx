@@ -7,8 +7,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { objectHtml, inlineSvgHtml, penPathD } from '../packages/client/src/deliverable/sourceops.ts';
-import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, defaultDeckInk } from '../packages/client/src/deliverable/deckink.ts';
-import { inkRuns, runPathD, runsBox, inkPaths, freshPoint, pressureWidth, type FreePt, type InkRun } from '../packages/client/src/deliverable/runtime/freehand.ts';
+import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, defaultDeckInk, DEFAULT_NIB } from '../packages/client/src/deliverable/deckink.ts';
+import { inkRuns, runPathD, runsBox, inkPaths, freshPoint, pressureWidth, isScribble, type FreePt, type InkRun } from '../packages/client/src/deliverable/runtime/freehand.ts';
 import { applyOp, opSplices, parseSource, rebaseOp } from '../packages/core/src/html/source.ts';
 
 describe('objects drawn on a slide', () => {
@@ -84,18 +84,24 @@ describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
   it("the Pencil's pressure sets the width, smoothed (no beads); a mouse's and the highlighter's are even", () => {
     const line = (press: (i: number) => number): FreePt[] => Array.from({ length: 201 }, (_, i) => [i * 2, 50, press(i)]);
     const widths = (runs: InkRun[]) => runs.map(r => r.w);
-    const hard = inkRuns(line(() => 0.8), { width: 4, pressure: true }), light = inkRuns(line(() => 0.1), { width: 4, pressure: true });
+    const full = { sensitivity: 1 };
+    const hard = inkRuns(line(() => 0.8), { width: 4, pressure: true, nib: full }), light = inkRuns(line(() => 0.1), { width: 4, pressure: true, nib: full });
     expect(Math.max(...widths(hard))).toBeGreaterThan(Math.max(...widths(light)) * 1.6);
-    // the usual writing pressure (~0.25): about the width asked for
-    expect(Math.abs(pressureWidth(0.25) - 1)).toBeLessThan(0.05);
+    // the usual writing pressure (~0.25): the width asked for, whatever the sensitivity; at a quarter (the default) a little thinner or wider
+    for (const k of [0.25, 0.5, 1]) expect(pressureWidth(0.25, k)).toBeCloseTo(1, 6);
+    expect(pressureWidth(0, 0.25)).toBeCloseTo(0.79, 2);
+    expect(pressureWidth(1, 0.25)).toBeCloseTo(1.19, 2);
+    const soft = inkRuns(line(() => 0.8), { width: 4, pressure: true });
+    expect(Math.max(...widths(soft))).toBeLessThan(Math.max(...widths(hard)));
+    expect(Math.max(...widths(soft))).toBeGreaterThan(4.3);
     // a noisy hand: the pressure jumps between 0.2 and 0.3 from one point to the next; the width hardly moves
-    const noisy = inkRuns(line(i => (i % 2 ? 0.3 : 0.2)), { width: 4, pressure: true });
+    const noisy = inkRuns(line(i => (i % 2 ? 0.3 : 0.2)), { width: 4, pressure: true, nib: full });
     const mid = widths(noisy).slice(1, -1);
     expect(Math.max(...mid) - Math.min(...mid)).toBeLessThan(0.25);
     expect(noisy.length).toBeLessThan(6);
     // a pen's first event without pressure (0) takes the next one's: no blob, no hairline
-    const first = inkRuns([[0, 0, 0], ...line(() => 0.25).slice(1)], { width: 4, pressure: true });
-    expect(first[0].w).toBeCloseTo(4 * pressureWidth(0.25), 0);
+    const first = inkRuns([[0, 0, 0], ...line(() => 0.6).slice(1)], { width: 4, pressure: true, nib: full });
+    expect(first[0].w).toBeCloseTo(4 * pressureWidth(0.6), 0);
     for (const o of [{ width: 4 }, { width: 20, highlighter: true, pressure: true }]) {
       const runs = inkRuns(line(i => i / 200), o);
       expect(runs).toHaveLength(1);
@@ -108,9 +114,69 @@ describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
     expect(dot).toEqual([{ w: 6, pts: [[50, 50]] }]);
     expect(runPathD(dot[0])).toBe('M50 50L50.01 50');
     expect(runsBox(dot)).toEqual({ x: 47, y: 47, w: 6, h: 6 });
-    const runs = inkRuns(Array.from({ length: 101 }, (_, i) => [i * 3, 0, i / 100]), { width: 4, pressure: true });
+    const runs = inkRuns(Array.from({ length: 101 }, (_, i) => [i * 3, 0, i / 100]), { width: 4, pressure: true, nib: { sensitivity: 1 } });
     expect(runs.length).toBeGreaterThan(3);
     for (let i = 1; i < runs.length; i++) expect(runs[i].pts[0]).toEqual(runs[i - 1].pts[runs[i - 1].pts.length - 1]);
+  });
+
+  it("small loops keep their size (the ink contracted: a Gaussian pulls curves in), smoothed or not", () => {
+    const loop = (r: number, whole: boolean): FreePt[] => Array.from({ length: Math.ceil(4 * Math.PI * r / 1.6) }, (_, i) => {
+      const a = i * 1.6 / r; const x = 100 + r * Math.cos(a), y = 100 + r * Math.sin(a);
+      return [whole ? Math.round(x) : x, whole ? Math.round(y) : y, 0.25];
+    });
+    const radius = (runs: InkRun[]) => { const ps = all(runs).slice(10, -10); return ps.reduce((a, [x, y]) => a + Math.hypot(x - 100, y - 100), 0) / ps.length; };
+    expect(Math.abs(radius(inkRuns(loop(5, false), { width: 4, pressure: true, zoom: 0.6 })) - 5)).toBeLessThan(0.05);
+    expect(Math.abs(radius(inkRuns(loop(6, true), { width: 4, pressure: true, zoom: 0.6, coarse: true })) - 6)).toBeLessThan(0.1);
+    expect(Math.abs(radius(inkRuns(loop(6, false), { width: 4, pressure: true, zoom: 1, nib: { stabilization: 0.5 } })) - 6)).toBeLessThan(0.15);
+  });
+
+  it("the pen's settings: a ball pen even, the tip sharp or round, a flat nib's down-strokes full, stabilization smooths", () => {
+    const line = (n: number, f: (i: number) => [number, number], press: (i: number) => number = () => 0.25): FreePt[] => Array.from({ length: n + 1 }, (_, i) => [...f(i), press(i)] as FreePt);
+    const flat = line(150, i => [i * 2, 50], i => 0.05 + i / 150);
+    // a ball pen: one width, whatever the pressure and the rest
+    const ball = inkRuns(flat, { width: 4, pressure: true, nib: { ball: true, sensitivity: 1, sharpness: 1, flatness: 1 } });
+    expect(ball).toHaveLength(1);
+    expect(ball[0].w).toBe(4);
+    // no pressure sensitivity: even too
+    expect(inkRuns(flat, { width: 4, pressure: true, nib: { sensitivity: 0 } })).toHaveLength(1);
+    // a sharp tip: pointed at the start, and at the end once the pen has lifted (while drawing the end is the pen's)
+    const even = line(100, i => [i * 2, 50]);
+    const sharp = inkRuns(even, { width: 4, pressure: true, nib: { sensitivity: 0, sharpness: 1 }, final: true });
+    expect(sharp[0].w).toBeLessThan(1);
+    expect(sharp[sharp.length - 1].w).toBeLessThan(1);
+    expect(Math.max(...sharp.map(r => r.w))).toBe(4);
+    const live = inkRuns(even, { width: 4, pressure: true, nib: { sensitivity: 0, sharpness: 1 } });
+    expect(live[0].w).toBeLessThan(1);
+    expect(live[live.length - 1].w).toBe(4);
+    // a flat nib: a down-stroke wider than an up-stroke rising to the right (its edge's way: a hairline)
+    const down = inkRuns(line(60, i => [50, i * 2]), { width: 4, nib: { flatness: 1 } });
+    const up = inkRuns(line(60, i => [i * 2 * Math.cos(Math.PI / 6), 200 - i * 2 * Math.sin(Math.PI / 6)]), { width: 4, nib: { flatness: 1 } });
+    const mid = (runs: InkRun[]) => runs[Math.floor(runs.length / 2)].w;
+    expect(mid(down)).toBeGreaterThan(mid(up) * 4);
+    // stabilization: a shaky straight line comes out straight
+    let seed = 3; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+    const shaky = line(200, i => [i * 1.5, 50 + rnd() * 1.6]);
+    const dev = (runs: InkRun[]) => { const ys = all(runs).filter(([x]) => x > 30 && x < 270).map(([, y]) => Math.abs(y - 50)); return ys.reduce((a, b) => a + b, 0) / ys.length; };
+    const as = dev(inkRuns(shaky, { width: 4, zoom: 1 }));
+    const half = dev(inkRuns(shaky, { width: 4, zoom: 1, nib: { stabilization: 0.5 } })), full = dev(inkRuns(shaky, { width: 4, zoom: 1, nib: { stabilization: 1 } }));
+    expect(half).toBeLessThan(as * 0.7);
+    expect(full).toBeLessThan(half);
+    expect(full).toBeLessThan(as * 0.45);
+  });
+
+  it('tells a scribble (back and forth over one place) from writing', () => {
+    const pts = (f: (t: number) => [number, number], n = 400) => Array.from({ length: n + 1 }, (_, i) => f(i / n));
+    // a zig-zag across a word: six legs or more, along one axis
+    expect(isScribble(pts(t => [100 + 60 * Math.abs(((t * 7) % 2) - 1), 50 + t * 20]))).toBe(true);
+    // a tighter, slanted one
+    expect(isScribble(pts(t => { const a = 40 * Math.abs(((t * 9) % 2) - 1); return [a + t * 30, a * 0.6 + 100]; }))).toBe(true);
+    // writing: m m m (down-strokes retraced, arches over), loops (e e e), a straight line, a few zig-zags
+    // (an m's arches, six of them: from the baseline up, over and down, turning back up at each foot)
+    const m = pts(t => { const u = t * 6, k = Math.min(5, Math.floor(u)), a = Math.PI * (u - k); return [k * 24 + 12 - 12 * Math.cos(a), 40 - 40 * Math.sin(a)]; });
+    expect(isScribble(m)).toBe(false);
+    expect(isScribble(pts(t => [t * 120 + 10 * Math.cos(t * 30), 50 + 10 * Math.sin(t * 30)]))).toBe(false);
+    expect(isScribble(pts(t => [t * 200, 30]))).toBe(false);
+    expect(isScribble(pts(t => [60 * Math.abs(((t * 3) % 2) - 1), t * 20]))).toBe(false);
   });
 
   it("takes each of the pen's points once, in order: Safari's coalesced events repeat the last move's (A B A C D C)", () => {
@@ -161,9 +227,29 @@ describe("Draw's pens (deckink.ts)", () => {
 
   it("the stroke's ink: the highlighter translucent, widths scaled to the page (a poster's as thick, seen whole, as a slide's)", () => {
     const ink = defaultDeckInk();
-    expect(deckInkStyle(ink)).toEqual({ color: ink.pens.pen.color, width: 4, opacity: 1 });
+    expect(deckInkStyle(ink)).toEqual({ color: ink.pens.pen.color, width: 4, opacity: 1, nib: DEFAULT_NIB, scribble: true });
+    // a Pencil has drawn in this browser: fingers move the slide — unless they are to draw too
+    expect(deckInkStyle(patchDeckInk(ink, { pencil: true })).fingers).toBe('pan');
+    expect(deckInkStyle(patchDeckInk(ink, { pencil: true, fingersDraw: true })).fingers).toBe('draw');
     expect(deckInkStyle(ink, 2560).width).toBe(8);
     expect(deckInkStyle(patchDeckInk(ink, { pen: 'highlighter' })).opacity).toBeLessThan(1);
+    // the pen's settings go with the pen, not the highlighter
+    expect(deckInkStyle(patchDeckInk(ink, { pen: 'highlighter' })).nib).toBeUndefined();
+  });
+
+  it("the pen's settings (GoodNotes'): 0, 25 %, 0, 0 to start with; changed one at a time, each between 0 and 1", () => {
+    expect(defaultDeckInk().nib).toEqual({ ball: false, sharpness: 0, sensitivity: 0.25, flatness: 0, stabilization: 0 });
+    const a = patchDeckInk(defaultDeckInk(), { nib: { ball: true } });
+    expect(a.nib.ball).toBe(true);
+    const b = patchDeckInk(a, { nib: { sharpness: 0.5, flatness: 7, stabilization: -1 } });
+    expect(b.nib).toEqual({ ball: true, sharpness: 0.5, sensitivity: 0.25, flatness: 0, stabilization: 0 });
+    // (another change leaves them as they are)
+    expect(patchDeckInk(b, { color: '#123456' }).nib).toEqual(b.nib);
+    saveDeckInk(b);
+    expect(loadDeckInk().nib).toEqual(b.nib);
+    localStorage.setItem('ol.deckInk', JSON.stringify({ nib: { ball: 'yes', sharpness: 'x', sensitivity: 2 } }));
+    expect(loadDeckInk().nib).toEqual(DEFAULT_NIB);
+    localStorage.removeItem('ol.deckInk');
   });
 
   it("is kept in this browser; what is broken in storage is the default's", () => {

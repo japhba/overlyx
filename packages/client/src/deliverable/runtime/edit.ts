@@ -36,7 +36,7 @@ import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, red
 import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, insertRefChip, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
-import { inkRuns, inkPaths, runsBox, freshPoint, type FreePt, type InkRun } from './freehand';
+import { inkRuns, inkPaths, runsBox, freshPoint, isScribble, type FreePt, type InkRun } from './freehand';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from '../gestures';
 import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
 import { postObjects } from './objects';
@@ -1051,9 +1051,14 @@ function onPointerDown(e: PointerEvent): void {
   notePointer(e);
   // keys typed after leaving a formula, before this press: theirs first
   flushAfter();
-  if (e.pointerType === 'pen') penSeen = true;
+  if (e.pointerType === 'pen') penLands(e);
   if (e.pointerType === 'touch') {
-    touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.screenX, sy: e.screenY });
+    // the hand resting on the screen while the Pencil writes: not a finger (palm rejection)
+    if (isPalm(e)) { palms.add(e.pointerId); e.preventDefault(); e.stopPropagation(); return; }
+    const now = performance.now();
+    // three fingers come down together; one coming down well after two others is the hand
+    if (touches.size === 2 && !tri && fingersPan() && now - Math.min(...[...touches.values()].map(t => t.t0 ?? now)) > 250) { palms.add(e.pointerId); e.preventDefault(); e.stopPropagation(); return; }
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.screenX, sy: e.screenY, t0: now });
     if (touches.size >= 3 || tri) { e.preventDefault(); e.stopPropagation(); if (!tri) startTri(); return; }
     if (touches.size >= 2) { e.preventDefault(); e.stopPropagation(); startPinch(); return; }
   }
@@ -1077,8 +1082,8 @@ function onPointerDown(e: PointerEvent): void {
   grab(e);
   const x = e.pageX, y = e.pageY;
   const base = { x0: x, y0: y, els: [], moved: false, pointerId: e.pointerId, pointerType: e.pointerType, last: { x: e.clientX, y: e.clientY }, ls: { x: e.screenX, y: e.screenY } };
-  // drawing with a Pencil: fingers (and the palm resting on the screen) move the slide, they do not draw (GoodNotes)
-  if ((tool === 'pen' || tool === 'eraser') && e.pointerType === 'touch' && penSeen) {
+  // drawing with a Pencil: fingers move the slide, they do not draw (GoodNotes)
+  if ((tool === 'pen' || tool === 'eraser') && e.pointerType === 'touch' && fingersPan()) {
     drag = { ...base, kind: 'pan', slide: slideOf(t) };
     capture();
     return;
@@ -1594,7 +1599,7 @@ function lineOp(svg: HTMLElement): HtmlOp | null {
 
 /* ------------------------------------------------------------------ touch: panning and pinching */
 
-const touches = new Map<number, { x: number; y: number; sx: number; sy: number }>();
+const touches = new Map<number, { x: number; y: number; sx: number; sy: number; t0?: number }>();
 let pinch: { d: number; mx: number; my: number; smx: number; smy: number } | null = null;
 /** a web page's pinch: where it began, how far it has zoomed, pan or zoom (gestures.ts) */
 let pinch0: { d: number; smx: number; smy: number; f: number; lock: PinchLock } | null = null;
@@ -1614,6 +1619,7 @@ function dropDrag(): void {
   for (const x of drag.els) revertLive(x);
   if (drag.kind === 'erase') for (const el of drag.erased ?? []) (el as HTMLElement | SVGElement).style.visibility = '';
   if (drag.hold) clearTimeout(drag.hold);
+  if (drag.kind === 'pan' && drag.moved) post({ ol: 'panEnd' });
   release(); drag = null; drawBox = null; guides = []; draw();
 }
 
@@ -1630,7 +1636,7 @@ function startPinch(): void {
 
 function onTouchMove(e: PointerEvent): void {
   if (!touches.has(e.pointerId)) return;
-  touches.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.screenX, sy: e.screenY });
+  touches.set(e.pointerId, { ...touches.get(e.pointerId)!, x: e.clientX, y: e.clientY, sx: e.screenX, sy: e.screenY });
   if (tri) { moveTri(); return; }
   if (!pinch) return;
   if (isSolo()) { post({ ol: 'pinch', phase: 'move', pts: pinchPts() }); return; }
@@ -1646,7 +1652,9 @@ function onTouchMove(e: PointerEvent): void {
 }
 
 function onTouchUp(e: PointerEvent): void {
+  if (e.pointerType === 'pen' && e.pointerId === penOn) { penOn = null; penOffAt = performance.now(); post({ ol: 'penDown', down: false }); }
   if (e.pointerType !== 'touch') return;
+  palms.delete(e.pointerId);
   touches.delete(e.pointerId);
   if (tri) { if (!touches.size) endTri(); return; }
   if (touches.size < 2 && pinch) {
@@ -1689,13 +1697,44 @@ function endTri(): void {
 
 /** a Pencil drew here: fingers move the slide from now on, they do not draw */
 let penSeen = false;
+/** fingers move the slide, only the pen draws: as the editor says (a Pencil has drawn in this browser, `fingers` in the pen's settings), else once one has here */
+const fingersPan = () => inkStyle.fingers === 'pan' || (inkStyle.fingers !== 'draw' && penSeen);
+
+/**
+ * Palm rejection (GoodNotes'): the hand resting on the screen while the Pencil writes makes touches
+ * too — often two or three, which pinched (and dropped the stroke) or undid. A touch is the palm's
+ * when it comes down while the pen is on the screen or just after it lifts, or is as broad as a palm;
+ * those already down when the pen lands are taken for the palm then, and what they began is undone
+ * (a pinch put back, a pull let go). The palm's touches count for nothing until they lift.
+ */
+let penOn: number | null = null, penOffAt = -1e9;
+const palms = new Set<number>();
+const PALM_AFTER = 400;
+
+function isPalm(e: PointerEvent): boolean {
+  if (penOn !== null || performance.now() - penOffAt < PALM_AFTER) return true;
+  // (a contact as broad as a palm, where the browser says how broad: the iPad's)
+  return fingersPan() && Math.max(e.width || 0, e.height || 0) * scale > 46;
+}
+
+function penLands(e: PointerEvent): void {
+  if (!penSeen) { penSeen = true; post({ ol: 'pencil' }); }
+  penOn = e.pointerId;
+  post({ ol: 'penDown', down: true });
+  if (!touches.size) return;
+  for (const id of touches.keys()) palms.add(id);
+  touches.clear();
+  tri = null;
+  if (pinch) { if (isSolo()) post({ ol: 'pinch', phase: 'cancel', pts: [] }); pinch = null; pinch0 = null; }
+  if (drag && drag.pointerType === 'touch') dropDrag();
+}
 
 /**
  * The stroke being drawn: in the page itself, where it will stay and as it will look (freehand.ts) —
- * the pen's points (`t`: the time of the last), whether they all came in whole px, and where the
- * browser expects the pen next (shown, not kept).
+ * the pen's points (`t`: the time of the last) and whether they all came in whole px. (Not where the
+ * browser expects the pen next: drawn ahead of the pen, the line drew back when it lifted.)
  */
-let ink: { slide: HTMLElement | null; pts: FreePt[]; pressure: boolean; svg: SVGSVGElement; g: SVGGElement; frame: number; t: number; whole: boolean; ahead: FreePt[] } | null = null;
+let ink: { slide: HTMLElement | null; pts: FreePt[]; client: [number, number][]; pressure: boolean; svg: SVGSVGElement; g: SVGGElement; frame: number; t: number; whole: boolean } | null = null;
 /** strokes drawn and sent to the editor, shown until the page has them (`count`: that many strokes the slide will have then) */
 const sentInk: { svg: SVGSVGElement; slide: HTMLElement | null; count: number; timer: ReturnType<typeof setTimeout> }[] = [];
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1721,7 +1760,7 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   for (const [k, v] of Object.entries(inkPaint())) g.setAttribute(k, v);
   svg.append(g);
   (slide ?? document.body).append(svg);
-  ink = { slide, pts: [inkPoint(e, slide)], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), ahead: [] };
+  ink = { slide, pts: [inkPoint(e, slide)], client: [[e.clientX, e.clientY]], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e) };
   paintInk(true);
 }
 
@@ -1737,9 +1776,6 @@ function moveInk(e: PointerEvent): void {
   if (!ink) return;
   const evs = e.getCoalescedEvents?.() ?? [];
   for (const ev of evs.length ? evs : [e]) takeInk(ev);
-  // where the browser expects the pen next frame: drawn already, so the line keeps up with it (GoodNotes', PencilKit's predicted touches)
-  const next = (e.getPredictedEvents?.() ?? []).find(ev => ev.timeStamp > ink!.t);
-  ink.ahead = next ? [inkPoint(next, ink.slide)].filter(p => { const l = ink!.pts[ink!.pts.length - 1]; return Math.hypot(p[0] - l[0], p[1] - l[1]) < 40; }) : [];
   if (!ink.frame) ink.frame = requestAnimationFrame(() => { if (ink) { ink.frame = 0; paintInk(false); } });
 }
 
@@ -1751,13 +1787,13 @@ function takeInk(ev: PointerEvent): void {
   ink.t = ev.timeStamp;
   ink.whole &&= wholePx(ev);
   ink.pts.push(p);
+  ink.client.push([ev.clientX, ev.clientY]);
 }
 
 /** the stroke as runs of one width (freehand.ts), a path for each width as the page will have it (those that did not change left alone) */
 function paintInk(final: boolean): InkRun[] {
   if (!ink) return [];
-  const pts = final || !ink.ahead.length ? ink.pts : ink.pts.concat(ink.ahead);
-  const runs = inkRuns(pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, zoom: scale, coarse: ink.whole && ink.pts.length > 4 });
+  const runs = inkRuns(ink.pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, zoom: scale, coarse: ink.whole && ink.pts.length > 4, nib: inkStyle.nib, final });
   const paths = inkPaths(runs), kids = ink.g.children;
   paths.forEach((p, i) => {
     let el = kids[i];
@@ -1777,6 +1813,16 @@ function endInk(e: PointerEvent): void {
   // where it lifted, if not where it last was — with the pressure it had (a Pencil lifting reports none)
   const up = inkPoint(e, ink.slide), last = ink.pts[ink.pts.length - 1];
   if (e.timeStamp >= ink.t && Math.hypot(up[0] - last[0], up[1] - last[1]) > 0.5) ink.pts.push([up[0], up[1], last[2]]);
+  // a scribble over strokes erases them (GoodNotes): the scribble goes, and they do
+  const gone = inkStyle.scribble !== false && inkStyle.opacity >= 1 && isScribble(ink.pts.map(p => [p[0], p[1]]), scale) ? scribbledOut(ink.client) : [];
+  if (gone.length && state.version !== null) {
+    if (ink.frame) cancelAnimationFrame(ink.frame);
+    ink.svg.remove();
+    ink = null;
+    for (const el of gone) (el as HTMLElement | SVGElement).style.visibility = 'hidden';
+    commit([{ t: 'remove', paths: gone.map(pathOf).filter((p): p is Path => !!p) }]);
+    return;
+  }
   const runs = paintInk(true);
   const b = runsBox(runs);
   const { slide, svg } = ink;
@@ -1789,6 +1835,35 @@ function endInk(e: PointerEvent): void {
   const entry = { svg, slide, count: inkCount(slide) + waiting + 1, timer: setTimeout(() => { svg.remove(); const i = sentInk.indexOf(entry); if (i >= 0) sentInk.splice(i, 1); }, 4000) };
   sentInk.push(entry);
   post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, runs: inkPaths(runs, -x, -y) });
+}
+
+/**
+ * The strokes a scribble went over (Draw's, and open unfilled paths, as the eraser takes) — if it went
+ * over strokes at all (for a twentieth of its length: a zig-zag across one line crosses it at each
+ * leg); a scribble over nothing stays, as written.
+ */
+function scribbledOut(client: [number, number][]): Element[] {
+  const found: Element[] = [];
+  let samples = 0, hits = 0, carry = 0;
+  const step = 3 / scale;
+  const at = (x: number, y: number) => {
+    samples++;
+    let hit = false;
+    for (const h of document.elementsFromPoint(x, y)) {
+      if (!(h instanceof SVGGeometryElement) || h.localName === 'svg') continue;
+      const obj = objectFor(h, false);
+      if (!obj || isLocked(obj) || !isStrokeArt(obj)) continue;
+      hit = true;
+      if (!found.includes(obj)) found.push(obj);
+    }
+    if (hit) hits++;
+  };
+  at(client[0][0], client[0][1]);
+  for (let i = 1; i < client.length; i++) {
+    const [ax, ay] = client[i - 1], [bx, by] = client[i], l = Math.hypot(bx - ax, by - ay);
+    for (carry += l; carry >= step; carry -= step) { const f = 1 - (carry - step) / Math.max(l, 1e-6); at(ax + (bx - ax) * f, ay + (by - ay) * f); }
+  }
+  return hits >= Math.max(2, 0.05 * samples) ? found : [];
 }
 
 /** the stroke being drawn given up (a second finger, a cancelled pointer) */

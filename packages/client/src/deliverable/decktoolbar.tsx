@@ -14,6 +14,7 @@ import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, CanvasView, Nod
 import { ASPECTS } from './runtime/crop';
 import { fmtPt, ptToPx, pxToPt, sizePt, stepPt } from './units';
 import { InkColorPicker } from '../app/InkPickers';
+import { PenSettings } from './PenSettings';
 import { inkColorName } from '../editor/plugins/ink';
 import { DECK_INK_WIDTH_CHOICES, deckInkDot, type DeckInk, type DeckInkPatch } from './deckink';
 import './deckicons';
@@ -86,7 +87,11 @@ function drawGroups(c: DeckCtx): ToolButton[][] {
   const take = (p: DeckInkPatch) => { c.ink.set(p); if (erasing) c.setTool('pen'); };
   return [
     [
-      { id: 'dk-ink-pen', title: 'Pen (P) — with its own colour and width', icon: 'inkpen', active: !erasing && !hl, action: () => take({ pen: 'pen' }) },
+      { id: 'dk-ink-pen', title: `${ink.nib.ball ? 'Ball pen' : 'Fountain pen'} (P) — with its own colour and width; click it again for its settings: fountain or ball pen, tip, pressure, stabilization`,
+        icon: ink.nib.ball ? 'inkball' : 'inkpen', active: !erasing && !hl, action: () => take({ pen: 'pen' }),
+        paletteWhenActive: true,
+        palette: { title: 'Pen', render: () => <PenSettings nib={ink.nib} color={ink.pens.pen.color} width={ink.pens.pen.width} habits={{ scribble: ink.scribble, fingersDraw: ink.fingersDraw, pencil: ink.pencil }}
+          onChange={nib => take({ pen: 'pen', nib })} onHabits={h => c.ink.set(h)} /> } },
       { id: 'dk-ink-hl', title: 'Highlighter — with its own colour and width; what is under it shows through', icon: 'inkhl', active: !erasing && hl, action: () => take({ pen: 'highlighter' }) },
       { id: 'dk-ink-eraser', title: 'Eraser (E) — removes the strokes it passes over (drawn ones: shapes and text stay)', icon: 'inkeraser', active: erasing, action: () => c.setTool('eraser') },
     ],

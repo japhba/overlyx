@@ -5,7 +5,7 @@
  * free, and let go near its place it snaps back in.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { rubber, banded, unband, panRange, freeRange, spring, clampTo, SlideView, BREAK, snapDistance } from '../packages/client/src/deliverable/viewport.ts';
+import { rubber, banded, unband, panRange, freeRange, spring, clampTo, SlideView, BREAK, snapDistance, PAGE_SCROLL } from '../packages/client/src/deliverable/viewport.ts';
 import { pinchFactor, pinchLock, triGesture, PINCH_START, PAN_BREAK } from '../packages/client/src/deliverable/gestures.ts';
 
 describe('the slide canvas', () => {
@@ -25,6 +25,9 @@ describe('the slide canvas', () => {
   });
   it('has no range when the slide fits (it stays in the middle), else as much as overflows', () => {
     expect(panRange(700, 1000, 32)).toEqual([0, 0]);
+    // fitted edge to edge: no wobble; a little past the canvas, the margin comes in with it
+    expect(panRange(1000, 1000, 32)).toEqual([0, 0]);
+    expect(panRange(1010, 1000, 32)).toEqual([-10, 10]);
     expect(panRange(1200, 1000, 32)).toEqual([-132, 132]);
     expect(clampTo(500, panRange(1200, 1000, 32))).toBe(132);
   });
@@ -182,8 +185,9 @@ describe('zooming the slide (a pinch, a trackpad)', () => {
     const { v } = make();
     v.render();
     const before = v.toCanvas(700, 400)!;
-    v.zoomTo(0.9, before.x, before.y);
-    expect(v.scaleNow()).toBe(0.9);
+    // (past the canvas both ways: the slide pans as far as it must for the point to stay)
+    v.zoomTo(1.2, before.x, before.y);
+    expect(v.scaleNow()).toBe(1.2);
     const after = v.toCanvas(700, 400)!;
     expect(after.x).toBeCloseTo(before.x, 6);
     expect(after.y).toBeCloseTo(before.y, 6);
@@ -261,5 +265,89 @@ describe('fingers on the canvas (gestures.ts)', () => {
     expect(triGesture(90, -10, 400)).toBe('redo');
     expect(triGesture(4, 2, 900)).toBe(null);
     expect(triGesture(10, 120, 300)).toBe(null);
+  });
+});
+
+describe('a swipe sideways turns the page (Safari\'s swipe between pages)', () => {
+  const box = { w: 1000, h: 700 }, rect = { x: 48, y: 48, w: 1280, h: 720 };
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    vi.stubGlobal('requestAnimationFrame', (f: (t: number) => void) => setTimeout(() => f(performance.now()), 16));
+    vi.stubGlobal('cancelAnimationFrame', (h: ReturnType<typeof setTimeout>) => clearTimeout(h));
+  });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  const make = (scale = 0.7, pages = true) => {
+    const frame = { style: {} } as unknown as HTMLElement;
+    const turned: number[] = [], free: boolean[] = [];
+    const v = new SlideView(() => frame, () => ({ box, rect, scale, margin: 32 }), { pages: () => pages, onPage: d => turned.push(d), onFree: f => free.push(f) });
+    v.render();
+    const letGo = () => vi.advanceTimersByTime(200);
+    return { v, turned, free, letGo };
+  };
+
+  it('a scroll sideways: the next slide (swiped left) or the one before, once a swipe, however long its momentum', () => {
+    const { v, turned, letGo } = make();
+    for (let i = 0; i < 12; i++) v.scroll(-30, 2);
+    expect(turned).toEqual([1]);
+    letGo();
+    for (let i = 0; i < 4; i++) v.scroll(PAGE_SCROLL / 3, 0);
+    expect(turned).toEqual([1, -1]);
+    letGo();
+    // up and down: no page; nor a short sideways nudge
+    for (let i = 0; i < 6; i++) v.scroll(3, -40);
+    v.scroll(-20, 0);
+    letGo();
+    expect(turned).toEqual([1, -1]);
+  });
+
+  it('zoomed in, it pans first; only a swipe begun at that side\'s edge turns the page — and sideways it never comes loose', () => {
+    const { v, turned, free, letGo } = make(1.2);
+    for (let i = 0; i < 6; i++) v.scroll(-30, 0);
+    expect(turned).toEqual([]);
+    // panned to its right edge; a new swipe on: the next slide
+    for (let i = 0; i < 40; i++) v.scroll(-30, 0);
+    letGo();
+    expect(turned).toEqual([]);
+    for (let i = 0; i < 8; i++) v.scroll(-30, 0);
+    expect(turned).toEqual([1]);
+    for (let i = 0; i < 40; i++) v.scroll(-30, 0);
+    letGo();
+    expect(free).toEqual([]);
+  });
+
+  it('a finger: far enough or a flick turns the page, a short slow pull springs back; two fingers never page', () => {
+    const { v, turned } = make();
+    v.panBy(-20, 0); v.release();
+    expect(turned).toEqual([]);
+    v.panBy(-25, 0); v.panBy(-25, 0); v.release();   // a flick
+    expect(turned).toEqual([1]);
+    v.panBy(40, 0); vi.advanceTimersByTime(400); v.panBy(20, 0); v.release();   // slow and short
+    expect(turned).toEqual([1]);
+    v.panBy(100, 0); vi.advanceTimersByTime(400); v.panBy(80, 0); v.release();   // slow, a sixth of the canvas
+    expect(turned).toEqual([1, -1]);
+    v.panBy(-60, 0); v.placeAt(0.8, 640, 360, 500, 350); v.release();
+    expect(turned).toEqual([1, -1]);
+  });
+
+  it('a poster (one page), or a slide pulled loose: sideways it pulls as ever', () => {
+    const { v, turned, free, letGo } = make(0.7, false);
+    for (let i = 0; i < 20; i++) v.scroll(-30, 0);
+    letGo();
+    expect(turned).toEqual([]);
+    expect(free).toEqual([true]);
+    for (let i = 0; i < 20; i++) v.scroll(30, 0);
+    letGo();
+    expect(turned).toEqual([]);
+  });
+
+  it('the next slide comes in from the side it was swiped from', () => {
+    const { v } = make();
+    vi.stubGlobal('matchMedia', () => ({ matches: false }));
+    const x = () => v.place()!.tx - (box.w / 2 - (rect.x + rect.w / 2) * v.place()!.s);
+    v.enter(1);
+    expect(x()).toBeGreaterThan(100);
+    vi.advanceTimersByTime(1000);
+    expect(Math.abs(x())).toBeLessThan(1);
   });
 });

@@ -1099,6 +1099,22 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .ink-pick-range { display: block; width: 100%; margin: 4px 0; accent-color: var(--accent); }
 .ink-pick-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 5px; color: var(--ui-muted); }
 .ink-pick-hint { font-style: italic; }
+/* Draw's pen settings (deliverable/PenSettings.tsx): fountain or ball pen, GoodNotes' four levels */
+.pen-set { width: 216px; }
+.pen-set-kind { display: flex; gap: 2px; margin-bottom: 6px; padding: 2px; border: 1px solid var(--ui-border); border-radius: 6px; }
+.pen-set-k { flex: 1; padding: 3px 4px; border: 0; border-radius: 4px; background: none; color: var(--ui-fg); font: inherit; cursor: pointer; }
+.pen-set-k:hover { background: var(--ui-hover, rgba(127, 127, 127, 0.12)); }
+.pen-set-k.active { background: var(--accent); color: #fff; }
+.pen-set-row { display: block; margin-top: 6px; }
+.pen-set-name { display: flex; justify-content: space-between; }
+.pen-set-val { color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.pen-set-row .ink-pick-range { margin: 2px 0 0; }
+.pen-set-ends { display: flex; justify-content: space-between; color: var(--ui-muted); font-size: 10px; }
+.pen-set-note { margin-top: 6px; color: var(--ui-muted); }
+.pen-set-check { display: flex; align-items: center; gap: 6px; margin-top: 7px; cursor: pointer; }
+.pen-set-check input { margin: 0; accent-color: var(--accent); }
+.pen-set-reset { padding: 1px 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: none; color: var(--ui-fg); font: inherit; cursor: pointer; }
+.pen-set-reset:disabled { opacity: 0.45; cursor: default; }
 
 /* Whiteboard (.board documents, app/BoardEditor.tsx): an infinite pan/zoom canvas. */
 .board { position: relative; flex: 1; min-height: 0; height: 100%; overflow: hidden; outline: none; background: var(--page-bg);

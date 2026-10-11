@@ -21,16 +21,22 @@ export type FreePt = [number, number, number];
 /** a stretch of the stroke at one width: its points (slide px) */
 export interface InkRun { w: number; pts: [number, number][] }
 
+/** GoodNotes' pen settings (0..1 each; protocol.ts Nib): a ball pen's line is even and round, whatever the rest */
+export interface NibOpts { ball?: boolean; sharpness?: number; sensitivity?: number; flatness?: number; stabilization?: number }
+
 export interface FreeOpts {
   /** the nominal width (px) */
   width: number;
   highlighter?: boolean;
   /** the points carry a pen's pressure (else the width is even) */
   pressure?: boolean;
-  /** screen px per px of the slide: the smoothing is about a screen px (never under 0.6 px of the slide) */
+  /** screen px per px of the slide (the stabilization is in screen px) */
   zoom?: number;
-  /** the points came in whole px (older Safari): smoothed more, or their steps show */
+  /** the points came in whole px (older Safari): smoothed, or their steps show */
   coarse?: boolean;
+  nib?: NibOpts;
+  /** the pen has lifted: the end tapers too (a sharp tip's) */
+  final?: boolean;
 }
 
 /**
@@ -44,34 +50,110 @@ export function freshPoint(pts: FreePt[], lastT: number, t: number, p: FreePt): 
   return true;
 }
 
-/** the width at a pressure, as a part of the nominal one: a light touch a third, the Pencil's usual writing (~0.25) the nominal width, pressed hard half as wide again */
-export function pressureWidth(p: number): number {
-  const q = Math.max(0, Math.min(1, p));
-  return 0.35 + 1.15 * (1 - (1 - q) ** 3);
+/**
+ * Whether a stroke is a scribble (GoodNotes' scribble to erase): back and forth over one place — five
+ * legs or more, each turning back on the last (by more than 120°) and going back the way it came,
+ * along one axis (writing's turns go every which way, an m's arches all go on), and the whole several
+ * times as long as its box is across.
+ * `zoom`: screen px per px of the points. Whether it erases is the runtime's: only over strokes.
+ */
+export function isScribble(pts: [number, number][], zoom = 1): boolean {
+  if (pts.length < 8) return false;
+  const step = 2 / zoom, minLeg = 6 / zoom;
+  const legs: [number, number][] = [];
+  let [ax, ay] = pts[0], [px, py] = pts[0], dx = 0, dy = 0, total = 0;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of pts) {
+    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+    const sx = x - px, sy = y - py, l = Math.hypot(sx, sy);
+    if (l < step) continue;
+    total += l;
+    // (the way it has been going: the last few steps)
+    const dl = Math.hypot(dx, dy);
+    if (dl && (sx * dx + sy * dy) / (l * dl) < -0.5) { legs.push([px - ax, py - ay]); ax = px; ay = py; dx = 0; dy = 0; }
+    dx = dx * 0.5 + sx / l; dy = dy * 0.5 + sy / l;
+    px = x; py = y;
+  }
+  legs.push([px - ax, py - ay]);
+  const long = legs.filter(([a, b]) => Math.hypot(a, b) >= minLeg);
+  if (long.length < 5 || total < 2.5 * Math.hypot(x1 - x0, y1 - y0)) return false;
+  // back and forth: each leg goes back the way the last came (an m's arches all go on, one after the other)
+  let back = 0;
+  for (let i = 1; i < long.length; i++) if (long[i][0] * long[i - 1][0] + long[i][1] * long[i - 1][1] < 0) back++;
+  if (back < 0.7 * (long.length - 1)) return false;
+  // one axis: the legs' directions (either way along it) agree
+  let c = 0, sn = 0;
+  for (const [a, b] of long) { const t = 2 * Math.atan2(b, a); c += Math.cos(t); sn += Math.sin(t); }
+  return Math.hypot(c, sn) / long.length >= 0.6;
+}
+
+/**
+ * The width at a pressure, as a part of the nominal one, at a pressure sensitivity (0..1): the
+ * Pencil's usual writing (~0.25) the nominal width whatever the sensitivity; at full sensitivity a
+ * light touch two fifths of it and pressed hard twice it, at a quarter (the default) 0.79–1.19.
+ */
+export function pressureWidth(p: number, sensitivity = 1): number {
+  const r = (q: number) => 1 - (1 - Math.max(0, Math.min(1, q))) ** 3;
+  return Math.exp(sensitivity * (r(p) - r(0.25)) * 1.643);
+}
+
+/** the nib's edge (a flat tip): rising to the right at 30°, as a pen is held — up-strokes hairlines, down-strokes full (screen y runs down) */
+const NIB_ANGLE = -Math.PI / 6;
+
+/** a flat tip's width across a stroke going at angle `a`, its average over all directions 1 */
+function flatWidth(flatness: number): (a: number) => number {
+  const b = 1 - 0.85 * flatness;
+  const raw = (a: number) => Math.sqrt(Math.sin(a - NIB_ANGLE) ** 2 + b * b * Math.cos(a - NIB_ANGLE) ** 2);
+  let mean = 0;
+  for (let i = 0; i < 64; i++) mean += raw((i * Math.PI) / 64) / 64;
+  return a => raw(a) / mean;
 }
 
 /** the stroke through `pts`, as runs of one width each (one run: a dot, or an even line) */
 export function inkRuns(input: FreePt[], o: FreeOpts): InkRun[] {
   const w = Math.max(0.5, o.width);
-  const pts = clean(input, !!o.pressure && !o.highlighter);
+  const nib = o.nib ?? {};
+  const pen = !o.highlighter && !nib.ball;
+  const pts = clean(input, !!o.pressure && pen);
   if (!pts.length) return [];
-  const even = o.highlighter || !o.pressure;
-  const widthAt = (p: number) => even ? w : round2(w * pressureWidth(p));
-  if (pts.length === 1) return [{ w: widthAt(pts[0][2]), pts: [[pts[0][0], pts[0][1]]] }];
+  const sens = pen && o.pressure ? clamp01(nib.sensitivity ?? 0.25) : 0;
+  const sharp = pen ? clamp01(nib.sharpness ?? 0) : 0, flat = pen ? clamp01(nib.flatness ?? 0) : 0;
+  if (pts.length === 1) return [{ w: round2(w * (sens ? pressureWidth(pts[0][2], sens) : 1)), pts: [[pts[0][0], pts[0][1]]] }];
   // samples every h px along the curve through the points
   const h = Math.max(0.3, Math.min(1, w / 6));
   const s = resample(spline(pts, h), h);
-  const sigma = Math.max(o.coarse ? COARSE_SIGMA : 0.6, Math.min(2, 0.9 / (o.zoom ?? 1)));
-  const x = gauss(s.x, sigma / h), y = gauss(s.y, sigma / h), p = gauss(s.p, (2.5 * sigma) / h);
+  // smoothed only where asked (the stabilization, in screen px) or needed (whole px), without pulling curves in
+  const zoom = o.zoom && o.zoom > 0 ? o.zoom : 1;
+  const sq = o.coarse ? COARSE_SIGMA : 0, ss = (clamp01(nib.stabilization ?? 0) * STAB_PX) / zoom;
+  const sigma = Math.hypot(sq, ss);
+  const x = twice(s.x, sigma / h), y = twice(s.y, sigma / h);
+  const p = sens ? gauss(s.p, Math.max(2, 2.5 * sigma) / h, true) : s.p;
+  // the width along it: pressure, the flat tip's direction, the sharp tip's taper at the start (and the end, once lifted)
+  const n = x.length;
+  const across = flat ? flatWidth(flat) : null;
+  let dir: number[] | null = null;
+  if (across) {
+    const raw = x.map((_, i) => { const a = Math.max(0, i - 2), b = Math.min(n - 1, i + 2); return across(Math.atan2(y[b] - y[a], x[b] - x[a])); });
+    dir = gauss(raw, 2 / h, true);
+  }
+  const taper = sharp ? w * (1 + 5 * sharp) : 0, tip = 1 - 0.85 * sharp;
+  const ease = (d: number) => { const u = Math.min(1, d / taper); return tip + (1 - tip) * u * (2 - u); };
+  const widthAt = (i: number) => {
+    let f = sens ? pressureWidth(p[i], sens) : 1;
+    if (dir) f *= dir[i];
+    if (taper) { f *= ease(i * h); if (o.final) f *= ease((n - 1 - i) * h); }
+    return w * f;
+  };
   // runs: a new one where the width has moved a step on (each starts where the last ended)
   // (steps of 2½ %: a little over 0.05 px each side for the usual pen, not seen even zoomed in)
+  const even = !sens && !dir && !taper;
   const q = Math.max(0.03, w * 0.025);
   const runs: InkRun[] = [];
   let cur: InkRun | null = null;
-  for (let i = 0; i < x.length; i++) {
-    const wi = widthAt(p[i]);
+  for (let i = 0; i < n; i++) {
+    const wi = even ? w : widthAt(i);
     if (!cur || Math.abs(wi - cur.w) > q) {
-      const lw = even ? w : round2(Math.round(wi / q) * q);
+      const lw = even ? w : round2(Math.max(q, Math.round(wi / q) * q));
       cur = { w: lw, pts: cur ? [cur.pts[cur.pts.length - 1]] : [] };
       runs.push(cur);
     }
@@ -81,9 +163,12 @@ export function inkRuns(input: FreePt[], o: FreeOpts): InkRun[] {
   return runs.map(r => ({ w: r.w, pts: simplify(r.pts, tol) }));
 }
 
+const clamp01 = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
 const round2 = (n: number) => Math.round(n * 100) / 100;
 /** the smoothing (px) of whole-px points: their steps gone, the loops of handwriting kept */
-const COARSE_SIGMA = 2.5;
+const COARSE_SIGMA = 3;
+/** the smoothing (screen px) at full stroke stabilization: at half, a 6 px loop moves less than 0.1 px and a shaky hand's line is calm */
+const STAB_PX = 6;
 
 /** without repeats; a pen's unknown pressures (0) from the nearest known */
 function clean(input: FreePt[], pen: boolean): FreePt[] {
@@ -163,19 +248,35 @@ function resample(line: FreePt[], h: number): { x: number[]; y: number[]; p: num
   return { x, y, p };
 }
 
-/** a Gaussian (σ in samples) along the samples; towards either end over as many on each side as there are (the ends stay where the pen was) */
-function gauss(v: number[], sigma: number): number[] {
+/**
+ * A Gaussian (σ in samples) along the samples. Towards either end over as many on each side as
+ * there are, so the ends stay where the pen was — or, `oneSided` (the pressure), over what there is
+ * on either side, so the ends are smoothed too.
+ */
+function gauss(v: number[], sigma: number, oneSided = false): number[] {
   const n = v.length, K = Math.ceil(2.5 * sigma);
   if (sigma < 0.3 || n < 3) return v.slice();
   const wt = Array.from({ length: K + 1 }, (_, k) => Math.exp(-(k * k) / (2 * sigma * sigma)));
   const out = new Array<number>(n);
   for (let i = 0; i < n; i++) {
-    const k = Math.min(K, i, n - 1 - i);
+    const lo = oneSided ? Math.min(K, i) : Math.min(K, i, n - 1 - i), hi = oneSided ? Math.min(K, n - 1 - i) : lo;
     let s = wt[0] * v[i], ws = wt[0];
-    for (let j = 1; j <= k; j++) { s += wt[j] * (v[i - j] + v[i + j]); ws += 2 * wt[j]; }
+    for (let j = 1; j <= lo; j++) { s += wt[j] * v[i - j]; ws += wt[j]; }
+    for (let j = 1; j <= hi; j++) { s += wt[j] * v[i + j]; ws += wt[j]; }
     out[i] = s / ws;
   }
   return out;
+}
+
+/**
+ * Smoothed without shrinking (Tukey's twicing: 2·G(v) − G(G(v))): a Gaussian alone pulls every curve
+ * in towards its centre (by σ²/2r — the small loops of handwriting most), which showed as the ink
+ * contracting; this takes out the jitter as the Gaussian does but keeps curves where they were.
+ */
+function twice(v: number[], sigma: number): number[] {
+  if (sigma < 0.3) return v.slice();
+  const g = gauss(v, sigma), gg = gauss(g, sigma);
+  return g.map((a, i) => 2 * a - gg[i]);
 }
 
 /** Ramer–Douglas–Peucker: the points no further than `tol` from the line kept without them dropped (the ends kept) */
