@@ -76,7 +76,11 @@ export function ThemeToggle({ pref: givenPref, dark: shownDark, onPick, host = '
 }
 
 export interface MenuEntry {
-  label?: string; shortcut?: string; action?: () => void; checked?: boolean; disabled?: boolean; sep?: boolean; sub?: MenuEntry[];
+  label?: string;
+  /** what the entry is known by when its label differs (the Modern interface's plain names): custom
+   *  shortcuts, the usage statistics and the palette's ids keep the Classic label (see documentMenus `plain`) */
+  id?: string;
+  shortcut?: string; action?: () => void; checked?: boolean; disabled?: boolean; sep?: boolean; sub?: MenuEntry[];
   /** what the usage statistics record instead of the label — for entries whose label is document content (the Navigate menu's headings) */
   stat?: string;
 }
@@ -105,9 +109,9 @@ export function collectEntries(menus: MenuDef[]): SearchEntry[] {
   const walk = (items: MenuEntry[], path: string[]) => {
     for (const it of items) {
       if (it.sep || !it.label) continue;
-      if (it.sub) { walk(it.sub, [...path, cleanLabel(it.label)]); continue; }
+      if (it.sub) { walk(it.sub, [...path, cleanLabel(it.id ?? it.label)]); continue; }
       if (it.disabled || !it.action) continue;
-      out.push({ id: entryId(path, it.label), label: cleanLabel(it.label), path, shortcut: it.shortcut, checked: it.checked, action: it.action, stat: it.stat });
+      out.push({ id: entryId(path, it.id ?? it.label), label: cleanLabel(it.label), path, shortcut: it.shortcut, checked: it.checked, action: it.action, stat: it.stat });
     }
   };
   for (const m of menus) walk(m.items, [m.title]);
@@ -163,12 +167,12 @@ function MenuList({ items, path, close, style, back, escapeCloses }: { items: Me
     {items.map((it, i) => {
       if (it.sep) return <div key={i} class="menu-sep" role="separator" />;
       if (it.sub) return <SubMenuItem key={i} entry={it} path={path} close={close} />;
-      const sc = it.label ? effectiveShortcut(entryId(path, it.label), it.shortcut) : it.shortcut;
+      const sc = it.label ? effectiveShortcut(entryId(path, it.id ?? it.label), it.shortcut) : it.shortcut;
       // the shortcut tip goes where the entry was (the menu closes)
       const run = (row: EventTarget | null) => {
         if (it.disabled) return;
         const at = (row as Element | null)?.getBoundingClientRect();
-        close(); recordUsage('menu', menuKey(path, it.stat ?? it.label ?? '')); tookActionWithout(sc, it.stat ?? it.label ?? '', at); it.action?.();
+        close(); recordUsage('menu', menuKey(path, it.stat ?? it.id ?? it.label ?? '')); tookActionWithout(sc, it.label ?? '', at); it.action?.();
       };
       return <div key={i} role="menuitem" tabIndex={-1} aria-disabled={!!it.disabled} class={'menu-item' + (it.checked ? ' checked' : '') + (it.disabled ? ' disabled' : '')} onClick={e => run(e.currentTarget)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); run(e.currentTarget); } }}><span>{it.label}</span>{sc && <span class="shortcut">{formatShortcut(sc)}</span>}</div>;
     })}
@@ -188,7 +192,7 @@ function SubMenuItem({ entry, path, close }: { entry: MenuEntry; path: string[];
     if (e.target !== ref.current) return;
     if (['ArrowRight', 'Enter', ' '].includes(e.key)) { e.preventDefault(); e.stopPropagation(); open(); }
   }}><span>{cleanLabel(entry.label ?? '')}</span>
-    {position && <MenuList items={entry.sub!} path={[...path, cleanLabel(entry.label ?? '')]} close={close} back={() => { setPosition(null); ref.current?.focus(); }} style={`position:fixed;top:${position.top}px;left:${position.left}px`} />}
+    {position && <MenuList items={entry.sub!} path={[...path, cleanLabel(entry.id ?? entry.label ?? '')]} close={close} back={() => { setPosition(null); ref.current?.focus(); }} style={`position:fixed;top:${position.top}px;left:${position.left}px`} />}
   </div>;
 }
 
@@ -263,7 +267,7 @@ function SearchMenu({ menu, entries, close, recording, setRecording, paletteShor
       ) : (
         menu.items.map((it, i) => {
           if (it.sep) return <div key={i} class="menu-sep" />;
-          const sc = it.label ? effectiveShortcut(entryId([menu.title], it.label), it.shortcut) : it.shortcut;
+          const sc = it.label ? effectiveShortcut(entryId([menu.title], it.id ?? it.label), it.shortcut) : it.shortcut;
           return (
             <div key={i} class={'menu-item' + (it.checked ? ' checked' : '') + (it.disabled ? ' disabled' : '')} onClick={e => { if (!it.disabled) { const at = e.currentTarget.getBoundingClientRect(); close(); tookActionWithout(sc, it.label ?? '', at); it.action?.(); } }}>
               <span>{it.label}</span>{sc && <span class="shortcut">{formatShortcut(sc)}</span>}

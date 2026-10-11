@@ -83,16 +83,20 @@ test('the pane switch shows WYSIWYG, TeX and PDF in any combination and order; w
   expect(await shown(page)).toEqual(['pdf']);
   await expect(chip(page, 'pdf')).toHaveAttribute('aria-pressed', 'true');
 
-  // ▾: every arrangement as a picture
+  // ▾: the arrangements in words; Swap sides reverses them
   await page.locator('[data-pane-menu]').click();
-  await expect(page.locator('.pane-menu .pane-preset')).toHaveCount(15);
-  await page.locator('[data-preset="pdf-doc"]').click();
+  await expect(page.locator('.pane-menu .pane-preset')).toHaveCount(6);
+  await expect(page.locator('[data-preset="pdf"]')).toHaveAttribute('aria-checked', 'true');
+  await page.locator('[data-preset="doc-pdf"]', { hasText: 'Document and PDF' }).click();
+  expect(await shown(page)).toEqual(['doc', 'pdf']);
+  await page.locator('[data-pane-menu]').click();
+  await page.locator('[data-pane-swap]').click();
   expect(await shown(page)).toEqual(['pdf', 'doc']);
   await expect(page).toHaveURL(new RegExp(`#/${PROJECT}/long\\.tex$`));
   await expect(page.locator('.pane-menu')).toHaveCount(0);
 
   // dragging a chip moves its pane: PDF from the left to the right end
-  const from = (await chip(page, 'pdf').boundingBox())!, to = (await chip(page, 'tex').boundingBox())!;
+  const from = (await chip(page, 'pdf').boundingBox())!, to = (await page.locator('[data-pane-chip]').last().boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
   await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2, { steps: 3 });

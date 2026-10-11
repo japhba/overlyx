@@ -1,7 +1,7 @@
 /*
  * Landing page (Login.tsx): one Bauhaus look for every visitor, whichever interface (Classic /
  * Modern) they use inside — warm paper, graphite ink, hairlines, square corners, Jost for titles and
- * Inter for reading, the "OverLyX = …" line in Computer Modern; the wordmark's blue / yellow / red
+ * Inter for reading, the "OverLyX = …" line in Jost too (an equation in the page's own type); the wordmark's blue / yellow / red
  * as thin rules only. Sections sit under a heavy rule.
  * Loaded through Login.tsx, which vite bundles BEFORE styles.css (main.tsx import order), so every
  * rule that overrides one from styles.css or modern.css must win on specificity, not on order —
@@ -37,8 +37,9 @@ div.login.lp .hero-copy h1 { margin: 0 0 28px; font-size: 64px; line-height: 0.9
 div.login.lp .lede { margin: 0 0 24px; max-width: 20em; text-wrap: balance; font-family: var(--lp-display); font-size: 34px; line-height: 1.16; font-weight: 500; letter-spacing: -0.012em; }
 /* OverLyX = Overleaf + LyX (+ …) − Complexity: an align* block in Computer Modern — the left side, "=",
    then one term per line, the continuation lines starting under the first term */
-div.login.lp .formula { display: grid; grid-template-columns: auto auto minmax(0, 1fr); column-gap: 0.4em; row-gap: 0.15em; align-items: baseline; margin: 0; max-width: 36em; font-family: "CMU Serif", "Latin Modern Roman", "Computer Modern", Georgia, serif; font-size: 18.5px; line-height: 1.45; color: var(--lp-ink2); }
-div.login.lp .formula .lhs { grid-column: 1; color: var(--lp-ink); }
+div.login.lp .formula { display: grid; grid-template-columns: auto auto minmax(0, 1fr); column-gap: 0.4em; row-gap: 0.15em; align-items: baseline; margin: 0; max-width: 36em; font-family: var(--lp-display); font-size: 19px; font-weight: 400; letter-spacing: -0.005em; line-height: 1.5; color: var(--lp-ink2); }
+div.login.lp .formula .lhs { grid-column: 1; color: var(--lp-ink); font-weight: 500; }
+div.login.lp .formula .rel, div.login.lp .formula i { color: var(--lp-muted); font-weight: 300; }
 div.login.lp .formula .rel { grid-column: 2; }
 div.login.lp .formula .row { grid-column: 3; }
 div.login.lp .formula .row { white-space: nowrap; }

@@ -8,7 +8,7 @@
  * The tour never blocks the interface: the dimmed overlay lets clicks through, only the card itself
  * takes them (without stealing the editor's focus), so the user works in the real editor.
  */
-import { useUiMode, setUiMode } from './uimode';
+import { useUiMode, setUiMode, uiMode } from './uimode';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 
@@ -68,7 +68,7 @@ const kbd = (k: string) => <kbd>{k}</kbd>;
 
 export const TOUR_STEPS: Step[] = [
   {
-    id: 'type', title: 'A real LyX document',
+    id: 'type', title: 'A real LaTeX document',
     target: ['.lyx-editor'],
     ready: s => s.ready,
     body: (now) => now.ready ? <>
@@ -78,20 +78,20 @@ export const TOUR_STEPS: Step[] = [
     done: (now, base) => now.docTick > base.docTick,
   },
   {
-    id: 'layout', title: 'Paragraph layouts',
-    target: ['.toolbar-standard select'],
-    body: <>
-      <p>Headings, lists, theorems and the like are <i>layouts</i> of the document class, not formatting. The list here shows the layout of the paragraph under the cursor.</p>
-      <p><b>Press {kbd('Enter')} for a new paragraph and make it a <i>Section</i></b> — pick it from this list, press {kbd(MOD + '+2')}, or {kbd('Alt+P')} then {kbd('2')} (LyX's shortcut).</p>
+    id: 'layout', title: 'Paragraph styles',
+    target: ['.toolbar-standard [data-style-picker]', '[data-style-picker]'],
+    body: () => <>
+      <p>Headings, lists, theorems and the like are styles of the paragraph — LaTeX's sections and environments — not formatting. This box shows the style of the paragraph under the cursor; click it and type to search.</p>
+      <p><b>Press {kbd('Enter')} for a new paragraph and make it a <i>Section</i></b> — pick it from this box or press {kbd(MOD + '+2')}{uiMode() === 'classic' && <> (or {kbd('Alt+P')} then {kbd('2')}, LyX's shortcut)</>}.</p>
     </>,
     // a new heading (or list item, …) appeared, or the paragraph under the cursor got another layout
     done: (now, base) => now.styled > base.styled || (now.docTick > base.docTick && now.layout !== base.layout && now.layout !== 'Standard'),
   },
   {
-    id: 'math', title: 'Formulas, edited like in LyX',
+    id: 'math', title: 'Formulas, typeset as you type',
     target: ['[data-tb="math"]'],
-    body: <>
-      <p>Formulas are edited in place with LyX's keys: {kbd('^')} and {kbd('_')} for scripts, {kbd('\\')} starts a command ({kbd('Space')} or {kbd('Tab')} completes it), {kbd('Esc')} leaves the formula. The math toolbar appears while the cursor is in one.</p>
+    body: () => <>
+      <p>Type LaTeX inside a formula{uiMode() === 'classic' && <> (LyX's math keys work too)</>}: {kbd('^')} and {kbd('_')} for scripts, {kbd('\\')} starts a command ({kbd('Tab')} completes it), {kbd('Esc')} leaves the formula. The math toolbar appears while the cursor is in one.</p>
       <p><b>Press {kbd(MATH_KEY)} (or this button) and type</b> <code>\alpha^2 + \beta</code>.</p>
     </>,
     done: now => now.inMath,
@@ -109,7 +109,7 @@ export const TOUR_STEPS: Step[] = [
     id: 'comment', title: 'Comments and notes',
     target: ['[data-tb="comment"]'],
     body: <>
-      <p>Comment threads (author, time, replies, resolve) are stored as LyX <i>Comment</i> notes, so colleagues on desktop LyX see them too. <i>View ▸ Notes &amp; comments in the margin</i> moves them next to the text, Google-Docs style.</p>
+      <p>Comment threads (author, time, replies, resolve) are stored in the <code>.tex</code> file itself, so they travel with it. <i>View ▸ Notes &amp; comments in the margin</i> moves them next to the text, Google-Docs style.</p>
       <p><b>Select a word and press {kbd(COMMENT_KEY)}</b> (or this button) to start a thread, then type your remark.</p>
     </>,
     done: (now, base) => now.comments > base.comments,
@@ -119,7 +119,7 @@ export const TOUR_STEPS: Step[] = [
     target: ['[data-tb="pdf"]'],
     enter: a => a.showPdf(),
     body: <>
-      <p>PDF builds run in the background on the server (LaTeX export + <code>latexmk</code>) — keep editing while they run. The <i>PDF</i> pane beside the text shows the progress, the result, how old it is and the log; once it is open it rebuilds by itself a moment after you stop typing (the ▾ beside <i>View PDF</i> sets that). <i>WYSIWYG · TeX · PDF</i> at the top arranges the panes.</p>
+      <p>PDF builds run in the background on the server (<code>latexmk</code>) — keep editing while they run. The <i>PDF</i> pane beside the text shows the progress, the result, how old it is and the log; once it is open it rebuilds by itself a moment after you stop typing (the ▾ beside <i>View PDF</i> sets that). <i>WYSIWYG · TeX · PDF</i> at the top arranges the panes.</p>
       <p><b>Press {kbd(MOD + '+R')}</b> or this button to build the PDF.</p>
     </>,
     done: (now, base) => now.pdfBusy || now.pdfBuiltAt !== base.pdfBuiltAt,
@@ -145,16 +145,15 @@ export const TOUR_STEPS: Step[] = [
   },
   {
     id: 'git', title: 'Your files stay yours',
-    target: ['.docpanel [data-git]', '.filetree [data-git]'],
-    enter: a => a.showFiles(),
-    body: <>
-      <p>The project folder on the server is a git repository: ⎇ shows the clone URL and creates access tokens, so you can <code>git clone</code>, edit with desktop LyX or your favourite editor, and <code>push</code> — OverLyX commits what people edit here and merges what you push. Every document is also mirrored in this browser, so it opens instantly and works offline.</p>
+    target: ['.menubar [data-main-menu]', '.menubar .menu > button'],
+    body: () => <>
+      <p>The project folder on the server is a git repository: <i>File ▸ Git repository…</i> shows the clone URL and creates access tokens, so you can <code>git clone</code>, edit with your favourite editor{uiMode() === 'classic' && <> or desktop LyX</>}, and <code>push</code> — OverLyX commits what people edit here and merges what you push. Every document is also mirrored in this browser, so it opens instantly and works offline.</p>
     </>,
   },
   {
     id: 'end', title: 'That’s the tour',
-    body: <>
-      <p>The example document itself goes on with figures, tables, citations, cross-references and math macros — edit it freely, it is yours. <i>Help ▸ Keyboard shortcuts</i> lists LyX's bindings ({kbd('Alt+P')} … layouts, {kbd('Alt+M')} … math, {kbd(MOD + '+Shift+E')} change tracking, …).</p>
+    body: () => <>
+      <p>The example document itself goes on with figures, tables, citations, cross-references and math macros — edit it freely, it is yours. <i>Help ▸ Keyboard shortcuts</i> lists every shortcut{uiMode() === 'classic' ? <> — LyX's bindings ({kbd('Alt+P')} … paragraph layouts, {kbd('Alt+M')} … math, {kbd(MOD + '+Shift+E')} change tracking, …)</> : <> ({kbd(MOD + '+Shift+E')} change tracking, {kbd(MOD + '+F')} find, …)</>}.</p>
       <p>You can take this tour again any time from <i>Help ▸ Take the tour</i>.</p>
     </>,
   },
@@ -208,7 +207,7 @@ export function UiChoice() {
   return (
     <div class="ui-choice" role="radiogroup" aria-label="Interface">
       <button type="button" role="radio" aria-checked={cur === 'classic'} class={cur === 'classic' ? 'on' : ''} data-ui-choice="classic" onClick={() => setUiMode('classic')}>
-        {classic}<b class="uc-name">Classic</b><span>LyX’s toolbars and menus — everything in view, for LaTeX and LyX users.</span>
+        {classic}<b class="uc-name">Classic</b><span>LyX’s toolbars, menus, names and keys, everything in view — for people coming from desktop LyX.</span>
       </button>
       <button type="button" role="radio" aria-checked={cur === 'modern'} class={cur === 'modern' ? 'on' : ''} data-ui-choice="modern" onClick={() => setUiMode('modern')}>
         {modern}<b class="uc-name">Modern</b><span>Calm and simple — one toolbar; the tools for a formula, a table or a picture appear when you need them.</span>

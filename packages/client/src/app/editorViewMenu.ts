@@ -15,12 +15,15 @@ export interface ViewMenuContext {
 }
 
 export function editorViewMenu({ hostItems, themeItems, hostToolbars, combined, setCombined, marginMode, toggleMargin, run, showRuler, setShowRuler, tbMode, setToolbar, textWidth, setTextWidth, stepTextWidth }: ViewMenuContext): MenuDef {
+  // Modern: plain names, the Classic label stays the id (documentMenus `plain`)
+  const modern = typeof document !== 'undefined' && document.documentElement.dataset.ui === 'modern';
+  const plain = (classic: string, simple: string): { label: string; id?: string } => (modern ? { label: simple, id: classic } : { label: classic });
   return { title: 'View', items: [
       ...hostItems,
-      { label: 'Master + child documents in one view', checked: combined, action: () => setCombined(!combined) },
+      { ...plain('Master + child documents in one view', 'Included documents in one view'), checked: combined, action: () => setCombined(!combined) },
       { label: 'Notes & comments in the margin', checked: marginMode, action: toggleMargin },
-      { label: 'Open all insets', action: () => run(C.setAllInsets('open')) },
-      { label: 'Close all insets', action: () => run(C.setAllInsets('collapsed')) },
+      { ...plain('Open all insets', 'Open all footnotes, notes and boxes'), action: () => run(C.setAllInsets('open')) },
+      { ...plain('Close all insets', 'Close all footnotes, notes and boxes'), action: () => run(C.setAllInsets('collapsed')) },
       // Google-Docs-style section folding (editor/plugins/fold.ts): the arrow left of a heading does it for one
       { label: 'Fold / expand this section', action: () => run(toggleSectionAtCursor) },
       { label: 'Fold all at this level', action: () => run(toggleLevelAtCursor(true)) },

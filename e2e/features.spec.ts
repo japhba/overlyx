@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
-import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf, nextFrames, fillDialog, acceptDialog } from './helpers';
+import { login, openDoc, collectErrors, PROJECTS_DIR, FIXTURES_DIR, withPreambleOf, nextFrames, fillDialog, acceptDialog, stylePicker } from './helpers';
 
 /** Each test works on its own copy of a document inside a scratch project. */
 const PROJECT = 'admin/e2e-scratch';
@@ -141,9 +141,9 @@ test('LyX layouts via Alt+P chords, lists and depth', async ({ page }) => {
   await page.keyboard.press('Alt+p');
   await page.keyboard.press('2');                    // layout Section
   await expect(page.locator('.lyx-layout-section', { hasText: 'My new section' })).toHaveCount(1);
-  await expect(page.locator('.toolbar select')).toHaveValue('Section');
+  await expect(stylePicker(page)).toHaveAttribute('data-style-picker', 'Section');
   await page.keyboard.press('Enter');                // after a heading: Standard
-  await expect(page.locator('.toolbar select')).toHaveValue('Standard');
+  await expect(stylePicker(page)).toHaveAttribute('data-style-picker', 'Standard');
   await page.keyboard.type('first item');
   await page.keyboard.press('Alt+p'); await page.keyboard.press('i');   // Itemize
   await page.keyboard.press('Enter');

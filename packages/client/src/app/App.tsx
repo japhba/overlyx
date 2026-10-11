@@ -136,6 +136,8 @@ const RIGHT_TAB_TITLES: Record<RightTab, string> = { comments: 'Comment threads:
 const PDF_TITLE = 'The PDF beside the text (Ctrl+R builds it)';
 /** below this width one pane at a time (the pane switch works like tabs) */
 const NARROW_PANES = '(max-width: 760px)';
+/** the narrowest the document pane gets beside the PDF before the side panels fold away (px) */
+const READABLE_DOC = 600;
 function useMedia(query: string): boolean {
   const [on, setOn] = useState(() => typeof matchMedia === 'function' && matchMedia(query).matches);
   useEffect(() => {
@@ -938,6 +940,31 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     const t = setTimeout(() => { lastAutoFor.current = saved; void build({ open: false, auto: true }); }, Math.max(0, prefs.autoBuildDelay) * 1000);
     return () => clearTimeout(t);
   }, [docId, save.savedAt, pdf.known, pdf.busy, pdf.pdfAt, pdf.builtAt, pdf.ok, prefs.autoBuild, prefs.autoBuildDelay, pdfPaneVisible]);
+  // The PDF opened beside the document (Ctrl+R, the PDF button) must not squeeze the writing into a
+  // strip on a laptop: while the document pane is narrower than READABLE_DOC the side panels fold
+  // away, the right one first, and come back when the PDF is hidden again. Only right after the PDF
+  // appears — a panel opened again by hand afterwards stays open.
+  const pdfFold = useRef<{ prev: boolean; active: boolean; files: boolean; right: RightTab | null }>({ prev: false, active: false, files: false, right: null });
+  useLayoutEffect(() => {
+    const f = pdfFold.current;
+    const both = !!pdfPaneVisible && shownPanes.includes('doc');
+    if (both !== f.prev) {
+      f.prev = both; f.active = both;
+      if (!both) {
+        if (f.files) setShowFiles(true);
+        if (f.right) { const r = f.right; setRightTab(t => t ?? r); }
+        f.files = false; f.right = null;
+      }
+    }
+    if (f.files && showFiles) f.files = false;   // opened again by hand: the user's choice from now on
+    if (f.right && rightTab) f.right = null;
+    if (!f.active) return;
+    const w = document.querySelector<HTMLElement>('.editor-column.panes > [data-pane="doc"]')?.getBoundingClientRect().width;
+    if (w === undefined || w >= READABLE_DOC) { f.active = false; return; }
+    if (rightTab) { f.right = rightTab; setRightTab(null); }
+    else if (showFiles) { f.files = true; setShowFiles(false); }
+    else f.active = false;
+  });
   const cancelBuild = async () => {
     if (!docId) return;
     lastAutoFor.current = Math.max(lastAutoFor.current, save.savedAt);   // cancelled: no automatic build for this save either
@@ -1552,7 +1579,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         {showFiles ? (
           <div class="sidebar left">
             <DocPanel current={textId} currentDoc={isLyxDoc ? docId : null} refreshKey={refreshKey} outline={outline} activePos={activePos} view={masterView}
-              onOpen={(id, o) => openInTab(id, o)} onGit={p => setGitFor(p)} onHide={() => setShowFiles(false)} onProject={setCurProject} notify={notify} />
+              onOpen={(id, o) => openInTab(id, o)} onHide={() => setShowFiles(false)} onProject={setCurProject} notify={notify} />
           </div>
         ) : (
           <div class="rail left"><button data-rail="outline" title={LEFT_TITLE} onClick={() => setShowFiles(true)}>Files</button></div>

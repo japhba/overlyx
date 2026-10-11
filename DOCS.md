@@ -61,6 +61,11 @@ blend.
   invert*: a plot or diagram (dark strokes on a light or transparent ground, judged from a small
   canvas copy of the pixels, `figureinvert.ts`) is shown light-on-dark with a CSS filter, a
   photograph keeps its colours; *Settings ▸ Editor ▸ Figures* switches it off.
+* **+ New** (start page, `NewProjectDialog` in `app/Home.tsx`): a *Document*, *Slides*, a *Poster* or
+  an *Empty project*, each made in a project of its own named like it (`main.tex` from the template;
+  slides / poster as an HTML deliverable in `slides/` or `poster/`) and opened right away. It replaced
+  a "+ New project" prompt that left newcomers looking for where slides come from. A project without
+  documents (`ProjectRootPanel`) offers *+ New document*, *+ New slides* and *+ New poster*.
 * **The start page** lists the user's projects, then those shared with them, each most recent first:
   the later of when they last opened a document of it (`user_doc_state` *opened*, every open; the
   activity log for older history) and when a file of it last changed; the card says which
@@ -242,7 +247,7 @@ blend.
   the file is byte-identical; failures show in the dialog with *Push now* (`server/pdfpublish.ts`,
   table `pdf_publish`).
 * **Every project is a git repository** you can clone, pull and push from your own machine
-  (*File ▸ Git repository…*, the ⎇ button in the file browser, or *Git…* on a project card):
+  (*File ▸ Git repository…* or *Git…* on a project card):
   `git clone https://<server>/git/<owner>/<project>.git` with your username and your **account access
   token** created in that dialog (or your OverLyX password; Google accounts have no password). The project directory
   is the working tree, so desktop LyX, OverLyX and git all work on the same files. OverLyX commits
@@ -416,7 +421,9 @@ blend.
   document at the heading (`#/<doc>?heading=<n>`). A click on a row opens the file in place (figures,
   `.bib`, `.sty` … in the text editor or a browser tab); `+ File` / `+ Folder`, and what was
   just created, moved or uploaded is revealed; files — or whole folders — dragged in from the
-  computer are uploaded to where they are dropped (the project, or the folder row under the pointer);
+  computer are uploaded to where they are dropped (the project, or the folder row under the pointer;
+  the tree fills the whole panel, so a file dropped below the last row lands in the project instead
+  of vanishing);
   LaTeX build products (`.aux`, `.log`, `.bbl`, …) and LyX
   backups are hidden unless *All files* is on. The *Navigate* menu lists the sections as well
   (so the command palette finds them).
@@ -1062,6 +1069,17 @@ blend.
 * **A caption is one paragraph** (LyX: `MultiPar false`; also an optional argument and an index
   entry): Enter and Alt+Enter do nothing there and the status bar says why — a paragraph break would
   end the LaTeX argument (`\caption{…}`) and break the build (`editor/commands.ts singleParagraphInset`).
+* **LyX's concepts only in Classic.** OverLyX assumes people come from Overleaf or Google Docs, not
+  from LyX. The Modern interface names things plainly: paragraph styles (`app/stylenames.ts`:
+  *Normal text*, *Bullet list*, *Numbered list*, *Code*, *Section (unnumbered)* … — LyX's name stays
+  searchable in the style picker), menu entries (`plain(classic, simple)` in `documentMenus.ts` and
+  `editorViewMenu.ts`: *LaTeX code* for TeX code (ERT), *Note* for LyX note, *Include a document* for
+  Child document, *Open / close* for Open/close inset, *Nest deeper* for Increase depth …; the
+  Classic label stays the entry's `id`, so custom shortcuts, the statistics and Settings' Ctrl+I
+  choice keep working), and the toolbar's tooltips (`PLAIN_TITLES` in `toolbars.tsx`). LyX-only
+  devices (Branch, Menu separator) are not in Modern's menus. The welcome document, the tour and the
+  start page speak of LaTeX; the Classic choice in the welcome card is "for people coming from
+  desktop LyX", and Settings ▸ Shortcuts' *Coming from LyX* block is Classic-only.
 * **Two interfaces: Classic and Modern** (`app/uimode.ts`, `modern.css`, `app/modernicons.ts`):
   Classic is LyX's (its toolbar rows, menus and status bar); **Modern** is OverLyX's own quiet look
   (Dieter Rams / Bauhaus): warm paper grey around the work, graphite ink, hairlines, a 4/8 px grid,
@@ -1090,6 +1108,12 @@ blend.
   standard row's text menu follows Google Docs' order too: font (default / serif / sans serif /
   monospace — LyX's families — and *The document's fonts…*), size, bold, italic, underline, colour
   (Google's palette, LaTeX's named colours, custom ones remembered), then emphasis, noun and styles.
+* **The paragraph style picker** (`StylePicker` in `app/Toolbar.tsx`, both interfaces and VS Code):
+  the style at the cursor; a click opens the list with a search field (Google Docs' style menu,
+  headings previewed larger). It replaced a native `<select>`, whose type-ahead changed the paragraph
+  on the first letter typed and whose arrow keys applied every style stepped over — the rest of the
+  word then landed in the document. Now letters filter, the arrows move the highlight, Enter or a
+  click applies, Escape gives the keyboard back to where it was.
 * **LyX toolbars** (a port of `lib/ui/stdtoolbars.inc`): the *Standard* and *Extra* rows, and the
   contextual *Math*, *Math panels*, *Table* and *Review* rows that appear automatically when the cursor
   is in a formula / a table / a document with tracked changes (or always / never: *View ▸ Toolbars*,
@@ -1140,15 +1164,17 @@ blend.
   cells show only while the cursor is in that table / formula (`editor/plugins/envfocus.ts` marks the
   table with `ol-editing`; the static formula rendering hides its `lm-empty` outlines) — a document
   reads as it prints, the scaffolding appears where one works.
-* **Favicon** (`public/icon.svg`): LYX circled by an O — the wordmark's tilted blue L, yellow Y, red X
-  in a graphite ring on a paper disc (readable on light and dark tab bars).
+* **Favicon** (`public/icon.svg`): LYX doing acrobatics with an O — the yellow Y hangs from the ring by
+  both hands and swings, the red X cartwheels along its inside, the blue L leans back against it. The
+  ring is always the strongest contrast so it never melts into a tab bar: graphite on a paper disc with
+  a paper rim (light), light on a dark disc with a dark rim (`prefers-color-scheme: dark`).
 * **Landing page / sign-in** (`app/Login.tsx` + `app/landing.css`): one Bauhaus look for every visitor,
   whichever interface (Classic / Modern) they use inside — warm paper, graphite ink, hairlines, square
   corners, Jost and Inter; the wordmark's blue / yellow / red only as thin rules (over the sign-in
   card, over the four lines of what it does). A hero: the Bauhaus wordmark, one sentence ("LaTeX
   documents, slides and posters, edited and rendered in the same place."), and the line
   *OverLyX = Overleaf + LyX (+ Google Docs + Google Slides + Inkscape + VS Code + Markdown) − Complexity*
-  set as an `align*` block in Computer Modern (CMU Serif); beside it the sign-in card — *Continue with
+  set as an `align*` block in Jost, the page's title face (operators light and muted); beside it the sign-in card — *Continue with
   Google* is the way in; the username + password form (accounts created by an administrator, e2e) is
   folded away behind a small link while Google sign-in is configured, and is the only form otherwise;
   *Get the VS Code extension* sits right under the Google button with the same weight, linking to the
@@ -1219,8 +1245,13 @@ blend.
   area shows the rendered document, its LaTeX source and the PDF side by side — any one, two or all
   three, in any order (Overleaf's split view with a third pane). The switch in the middle of the menu
   bar has a chip per pane, standing in the panes' order: a click shows or hides one (the last one
-  stays), a double-click shows it alone, dragging a chip sideways moves its pane; ▾ draws all fifteen
-  arrangements as small pictures, plus *Mirror* and *Equal widths*. The dividers between panes are
+  stays), a double-click shows it alone, dragging a chip sideways moves its pane; ▾ lists the useful
+  arrangements in words (*Document only*, *Document and PDF*, … — `ARRANGEMENTS`; picking one keeps
+  the order of the panes already shown), plus *Swap sides* and *Equal widths* (it drew all fifteen
+  orders as little tiles, which newcomers could not read). When the PDF appears beside the document
+  and the document pane would get narrower than 600 px (`READABLE_DOC`, App.tsx), the side panels
+  fold away — the right one first — and come back when the PDF is hidden, unless one was opened again
+  by hand meanwhile (on a 1280 px laptop the writing had shrunk to ~340 px). The dividers between panes are
   dragged; order, visibility and widths are kept per browser (`ol.panes`). A pane's width is its
   weight as `flex-grow`, scaled over the panes on screen to add up to their number (`paneGrow`):
   flexbox shares out only part of the row when the factors add up to less than 1, which left a blank

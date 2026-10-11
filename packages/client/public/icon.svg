@@ -1,12 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- OverLyX favicon: LYX circled by an O — the wordmark's tilted capitals (blue L, yellow Y, red X,
-       as lyx.org draws them) inside a graphite ring on a paper disc, so it reads on light and dark tab
-       bars alike. Strokes only, no fonts: it renders identically everywhere. -->
-  <circle cx="32" cy="32" r="28.5" fill="#fbfaf7"/>
-  <circle cx="32" cy="32" r="26.2" fill="none" stroke="#1c1b19" stroke-width="5"/>
-  <g fill="none" stroke-width="4.6" stroke-linecap="butt" stroke-linejoin="miter">
-    <path stroke="#2152a3" transform="rotate(-12 19.5 32)" d="M16.4 21.5 V41.2 H24.6"/>
-    <path stroke="#efb21a" transform="rotate(7 31.5 33) translate(0 1.4)" d="M26.6 21.5 L31.5 30.6 L36.4 21.5 M31.5 30.6 V42"/>
-    <path stroke="#d6402b" transform="rotate(12 43.4 32)" d="M38.6 21.5 L48.2 42 M48.2 21.5 L38.6 42"/>
+  <!-- OverLyX favicon: LYX doing acrobatics with the O — the Y hangs from the ring by both hands and
+       swings, the X cartwheels along its inside, the L leans back against it (the wordmark's blue L,
+       yellow Y, red X). The ring is always the strongest contrast: graphite on a paper disc with a
+       paper rim outside it (light), or light on a dark disc with a dark rim (dark scheme), so it never
+       melts into a tab bar. Strokes only, no fonts: it renders identically everywhere. -->
+  <style>
+    .rim { fill: #fbfaf7 } .disc { fill: #fbfaf7 } .ring { stroke: #1c1b19 }
+    .l { stroke: #2152a3 } .y { stroke: #eaaa12 } .x { stroke: #d6402b } .swish { stroke: #1c1b19; opacity: .3 }
+    @media (prefers-color-scheme: dark) {
+      .rim { fill: #141312 } .disc { fill: #2b2926 } .ring { stroke: #f4f1ea }
+      .l { stroke: #7fa8f4 } .y { stroke: #f6c43c } .x { stroke: #f2654c } .swish { stroke: #f4f1ea; opacity: .4 }
+    }
+  </style>
+  <circle class="rim" cx="32" cy="32" r="31.5"/>
+  <circle class="disc" cx="32" cy="32" r="26"/>
+  <g fill="none" stroke-linecap="round">
+    <!-- the swing and the roll -->
+    <path class="swish" d="M14.6 23.4 A19 19 0 0 1 20.4 16.6" stroke-width="1.7"/>
+    <path class="swish" d="M52.4 26 A21 21 0 0 1 52.2 38.6" stroke-width="1.7"/>
+  </g>
+  <circle class="ring" cx="32" cy="32" r="26.6" fill="none" stroke-width="4.4"/>
+  <g fill="none" stroke-width="4.6" stroke-linejoin="miter">
+    <!-- L: leaning back, its heel braced against the ring -->
+    <path class="l" stroke-linecap="butt" transform="rotate(-15 17.8 46.6)" d="M17.8 28 V46.6 H26.4"/>
+    <!-- X: a cartwheel along the inside of the ring -->
+    <path class="x" stroke-linecap="butt" transform="rotate(16 43.6 38.6)" d="M38.8 28.6 L48.4 48.6 M48.4 28.6 L38.8 48.6"/>
+    <!-- Y: an aerialist hanging from the ring by both hands, swinging -->
+    <g transform="rotate(-16 32 32)"><path class="y" stroke-linecap="round" d="M26.4 6.4 L32 16.4 L37.6 6.4 M32 16.4 V27.4"/></g>
   </g>
 </svg>

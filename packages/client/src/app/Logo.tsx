@@ -4,8 +4,8 @@
  * the Classic interface's chrome italic with a soft shadow, and the Bauhaus one (`bauhaus`, and
  * everywhere in the Modern interface) — flat ink lines, upright geometric "Over", the letters still
  * tilted; on hover "Over" leans forward, the lines stretch and the letters tip further. Plain markup
- * + CSS so it scales with the surrounding font size; the favicon (public/icon.svg) is LYX circled by
- * an O. `play` runs the hover animation without a pointer.
+ * + CSS so it scales with the surrounding font size; the favicon (public/icon.svg) is LYX doing
+ * acrobatics with an O. `play` runs the hover animation without a pointer.
  */
 export function Wordmark({ play = false, bauhaus = false }: { play?: boolean; bauhaus?: boolean } = {}) {
   return (

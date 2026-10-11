@@ -182,9 +182,9 @@ html[data-ui="modern"] .view-mode-switch button { font-size: 12px; font-weight: 
 html[data-ui="modern"] .view-mode-switch button:hover { background: var(--m-hover); color: var(--m-ink); }
 html[data-ui="modern"] .view-mode-switch button.active { background: var(--m-paper); color: var(--m-ink); box-shadow: 0 0 0 1px var(--m-line), 0 1px 2px rgba(28, 27, 25, 0.08); }
 html[data-ui="modern"] .pane-menu-btn { height: 30px; border-radius: var(--m-radius); color: var(--m-muted); }
-html[data-ui="modern"] .pane-preset { border-radius: var(--m-radius); background: var(--m-field); }
-html[data-ui="modern"] .pane-preset:hover { border-color: var(--m-line-strong); }
-html[data-ui="modern"] .pane-preset.active { border-color: var(--m-signal); box-shadow: 0 0 0 1px var(--m-signal); }
+html[data-ui="modern"] .pane-preset { border-radius: var(--m-radius); }
+html[data-ui="modern"] .pane-preset:hover { background: var(--m-hover); }
+html[data-ui="modern"] .pane-preset.active { border-color: var(--m-signal); }
 
 /* Editing · Suggesting · Viewing */
 html[data-ui="modern"] .edit-mode-btn { height: 28px; border-radius: var(--m-radius); border-color: var(--m-line-strong); background: transparent; font-size: 12.5px; font-weight: 600; padding: 0 9px 0 10px; }
@@ -241,6 +241,14 @@ html[data-ui="modern"] .tb-caret { font-size: 8px; opacity: 0.6; }
 html[data-ui="modern"] .tb-face { font-size: 13px; min-width: 56px; max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; display: inline-block; color: var(--m-ink); }
 /* the strip's room is precious (what does not fit folds into ⋮, Toolbar.tsx `collapse`): narrower fields and separators */
 html[data-ui="modern"] .tb-modern-row .toolbar select { max-width: 102px; }
+html[data-ui="modern"] .tb-style-btn { height: 28px; border: 1px solid var(--m-line); background: var(--m-field); font-size: 13px; color: var(--m-ink); border-radius: 5px; max-width: 140px; }
+html[data-ui="modern"] .tb-style-btn:hover, html[data-ui="modern"] .tb-style.open .tb-style-btn { border-color: var(--m-line-strong); }
+html[data-ui="modern"] .tb-modern-row .tb-style-btn { min-width: 0; width: 112px; }
+html[data-ui="modern"] .tb-style-pop { border-radius: 8px; border-color: var(--m-line); }
+html[data-ui="modern"] .tb-style-search { height: 30px; border-color: var(--m-line); background: var(--m-field); border-radius: 5px; font-size: 13px; color: var(--m-ink); }
+html[data-ui="modern"] .tb-style-item { border-radius: 5px; color: var(--m-ink); }
+html[data-ui="modern"] .tb-style-item.hi { background: var(--m-hover); }
+html[data-ui="modern"] .tb-style-item.current { box-shadow: inset 2px 0 0 var(--m-signal); }
 html[data-ui="modern"] .tb-modern-row .toolbar .tb-sep { margin: 0 4px; }
 html[data-ui="modern"] .tb-modern-row .fs-box .tb-btn.fs-step { width: 22px; min-width: 22px; }
 html[data-ui="modern"] .tb-modern-row .fs-box .tb-btn.fs-drop { width: 16px; min-width: 16px; }

@@ -4,7 +4,7 @@
  * restartable from Help ▸ Take the tour and the start screen.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { login, collectErrors } from './helpers';
+import { login, collectErrors, pickStyle } from './helpers';
 
 const step = (page: Page, id: string) => page.locator(`.tour[data-tour-step="${id}"] .tour-card`);
 const done = (page: Page) => page.locator('.tour[data-tour-done="1"]');
@@ -34,7 +34,7 @@ test('offered on the first visit; each step notices what the user did; remembere
   await page.keyboard.press('Enter');
   await page.keyboard.type('A heading');
   await expect(done(page)).toHaveCount(0);
-  await page.locator('.toolbar-standard select').selectOption('Section');
+  await pickStyle(page, 'Section', '.toolbar-standard');
   await expect(done(page)).toHaveCount(1);
   await next(page).click();
 

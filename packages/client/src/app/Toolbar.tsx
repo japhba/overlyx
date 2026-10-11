@@ -7,6 +7,7 @@ import { MODERN_ICONS, iconSvg } from './modernicons';
 import { pinUnder } from './popup';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
+import { createPortal } from 'preact/compat';
 import { createInsetMath, nargs } from '@overlyx/core';
 import { renderMath, onMathRendererChange } from '../editor/lyxmath/mathjax';
 import type { LayoutInfo } from '../api';
@@ -14,6 +15,7 @@ import { MATH_PANELS, type PanelItem } from './mathpanels';
 import { LYX_ICONS } from './lyxicons';
 import { recordUsage } from '../usage';
 import { splitTitle, tookActionWithout } from '../shortcuttips';
+import { styleLabel, styleSearchText } from './stylenames';
 
 /** The face of a toolbar button: LyX's own icon file when there is one, else a formula preview, a hand-drawn SVG, or plain text. */
 function btnIcon(b: ToolButton) {
@@ -465,6 +467,99 @@ function PaletteButton({ b }: { b: ToolButton }) {
   );
 }
 
+/**
+ * The paragraph style control: the style at the cursor; a click opens the list with a search field
+ * (Google Docs' style menu). Unlike a native <select>, typing a letter or an arrow key never changes
+ * the paragraph — the arrows move the highlight, Enter or a click applies, Escape gives the keyboard
+ * back to where it was. Classic shows LyX's names, Modern plain ones (stylenames.ts).
+ */
+function StylePicker({ layouts, layout, onLayout }: { layouts: LayoutInfo[]; layout?: string; onLayout?: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [hi, setHi] = useState(0);
+  const ref = useRef<HTMLSpanElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const back = useRef<HTMLElement | null>(null);
+  const mode = document.documentElement.dataset.ui === 'modern' ? 'modern' : 'classic';
+  const all = layouts.map(l => l.name);
+  if (layout && !all.includes(layout)) all.unshift(layout);
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = words.length ? all.filter(n => { const t = styleSearchText(n, mode); return words.every(w => t.includes(w)); }) : all;
+  const info = (n: string) => layouts.find(l => l.name === n);
+  const close = (refocus: boolean) => {
+    setOpen(false);
+    if (refocus) back.current?.focus?.();
+  };
+  const pick = (n: string) => {
+    setOpen(false);
+    recordUsage('toolbar', `layout ▸ ${n}`);
+    onLayout?.(n);
+  };
+  const toggle = () => {
+    if (open) { close(true); return; }
+    back.current = document.activeElement as HTMLElement | null;
+    setQ('');
+    setHi(Math.max(0, all.indexOf(layout ?? '')));
+    setOpen(true);
+  };
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { const t = e.target as Node; if (!ref.current?.contains(t) && !popRef.current?.contains(t)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  useLayoutEffect(() => {
+    const el = popRef.current, btn = ref.current;
+    if (open && el && btn) { pinUnder(el, btn); el.querySelector<HTMLInputElement>('input')?.focus(); }
+  }, [open]);
+  // the highlighted row stays in view while the arrows move it
+  useLayoutEffect(() => { listRef.current?.querySelector<HTMLElement>('.hi')?.scrollIntoView?.({ block: 'nearest' }); }, [hi, open, q]);
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (shown.length) setHi(h => (Math.min(h, shown.length - 1) + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const n = shown[Math.min(hi, shown.length - 1)];
+      if (n) pick(n);
+    } else if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation();
+      close(true);
+    } else if (e.key === 'Tab') close(false);
+  };
+  const label = layout ? styleLabel(layout, mode) : '';
+  return (
+    <span ref={ref} class={'tb-style' + (open ? ' open' : '')}>
+      <button type="button" class="tb-style-btn" data-style-picker={layout ?? ''} title={`Paragraph style${mode === 'modern' ? '' : ' (layout)'}: ${label} — click to choose (Alt+P …)`} aria-haspopup="listbox" aria-expanded={open}
+        onMouseDown={e => e.preventDefault()} onClick={toggle}>
+        <span class="tb-style-name">{label}</span><span class="tb-caret">▾</span>
+      </button>
+      {/* in <body>: a toolbar's stacking context kept it under the tour's card that points at it */}
+      {open && createPortal(
+        <div ref={popRef} class="tb-popup tb-style-pop" data-style-list>
+          <input type="text" class="tb-style-search" value={q} placeholder="Search styles" spellcheck={false} aria-label="Search paragraph styles" data-style-search
+            onInput={e => { setQ((e.target as HTMLInputElement).value); setHi(0); }} onKeyDown={onKey} />
+          <div ref={listRef} class="tb-style-list" role="listbox">
+            {shown.map((n, i) => {
+              const l = info(n), lvl = l?.tocLevel;
+              const plain = styleLabel(n, mode);
+              return (
+                <button key={n} type="button" role="option" aria-selected={n === layout} data-style={n}
+                  class={'tb-style-item' + (n === layout ? ' current' : '') + (i === Math.min(hi, shown.length - 1) ? ' hi' : '')}
+                  style={lvl !== undefined && lvl >= -1 && lvl <= 3 ? { fontWeight: 600, fontSize: lvl <= 1 ? '1.2em' : lvl === 2 ? '1.1em' : '1.03em' } : undefined}
+                  onMouseDown={e => e.preventDefault()} onMouseMove={() => { if (hi !== i) setHi(i); }} onClick={() => pick(n)}>
+                  {plain}{plain !== n && words.length > 0 && <span class="tb-style-alt">{n}</span>}
+                </button>
+              );
+            })}
+            {!shown.length && <div class="tb-style-none">No style matches “{q}”</div>}
+          </div>
+        </div>, document.body)}
+    </span>
+  );
+}
+
 export function Toolbar({ id, layouts, layout, onLayout, groups: allGroups, label, layoutsAt = 0, collapse }: ToolbarProps) {
   const ref = useRef<HTMLDivElement>(null);
   // how many of collapse.order are folded into the more button: start over whenever the room changes,
@@ -495,13 +590,7 @@ export function Toolbar({ id, layouts, layout, onLayout, groups: allGroups, labe
       ...b, palette: { ...b.palette, items: [...moved.map(m => ({ label: m.title.replace(/\s*\(.*\)\s*$/, ''), title: m.title, html: MODERN_ICONS[m.id] ? iconSvg(MODERN_ICONS[m.id]) : undefined, action: m.action!, active: m.active })), ...(b.palette.items ?? [])] },
     } : b)));
   }
-  const names = layouts ? layouts.map(l => l.name) : [];
-  if (layouts && layout && !names.includes(layout)) names.unshift(layout);
-  const select = layouts && (
-    <select value={layout} onChange={e => { const v = (e.target as HTMLSelectElement).value; recordUsage('toolbar', `layout ▸ ${v}`); onLayout?.(v); }} title="Paragraph layout (Alt+P …)">
-      {names.map(n => <option key={n} value={n}>{n}</option>)}
-    </select>
-  );
+  const select = layouts && <StylePicker layouts={layouts} layout={layout} onLayout={onLayout} />;
   return (
     <div ref={ref} class={'toolbar toolbar-' + id} data-toolbar={id} data-folded={collapse ? folded : undefined} onMouseDown={e => { const t = e.target as HTMLInputElement; if (t.tagName !== 'SELECT' && t.tagName !== 'INPUT') e.preventDefault(); }}>
       {label && <span class="tb-label">{label}</span>}

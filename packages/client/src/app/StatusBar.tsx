@@ -2,6 +2,7 @@ import type { SaveState, PresenceUser } from '../editor/editor';
 import { AvatarContent, initials } from './Avatar';
 import { pdfStatus, useTicker, type PdfStatusInput } from './pdfstatus';
 import { useEffect, useState } from 'preact/hooks';
+import { styleLabel } from './stylenames';
 import { layoutZoom, layoutZoomStep, onLayoutZoom } from '../editor/layout/controller';
 
 export interface Status { connected: boolean; synced: boolean; users: PresenceUser[] }
@@ -111,7 +112,7 @@ export function StatusBar({ layout, status, chord, message, save, tracking, trac
     <div class="statusbar">
       <span><span class={'dot' + (status.connected ? ' on' : '')} />{status.connected ? (status.synced ? 'connected' : 'syncing…') : save.state === 'connecting' ? 'connecting…' : 'offline'}</span>
       {docLabel && <span class="doclabel" title="Document under the cursor">{docLabel}</span>}
-      <span title="Current paragraph layout">{layout}</span>
+      {document.documentElement.dataset.ui === 'modern' ? <span title="Paragraph style at the cursor">{styleLabel(layout, 'modern')}</span> : <span title="Current paragraph layout">{layout}</span>}
       {readOnly && <span class="readonly-badge" title="This project was shared with you for viewing: you can read and compile it, but not change it">👁 view only</span>}
       {aiBusy && <span class="ai-busy" title="Asking the model for a continuation…" data-ai-busy>✦ AI…</span>}
       {chord && <span class="chord">{chord} …</span>}

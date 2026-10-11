@@ -90,12 +90,26 @@ export function mirrorPanes(l: PaneLayout): PaneLayout {
 
 /** A preset: the panes shown, left to right. */
 export type Preset = PaneId[];
-/** Every arrangement: one pane (3), two (6 ordered pairs), three (6 orders) — the layout menu offers them all. */
-export const PRESETS: Preset[][] = [
-  [['doc'], ['tex'], ['pdf']],
-  [['doc', 'pdf'], ['tex', 'pdf'], ['doc', 'tex'], ['pdf', 'doc'], ['pdf', 'tex'], ['tex', 'doc']],
-  [['doc', 'tex', 'pdf'], ['tex', 'doc', 'pdf'], ['doc', 'pdf', 'tex'], ['pdf', 'doc', 'tex'], ['tex', 'pdf', 'doc'], ['pdf', 'tex', 'doc']],
+/** What the pane menu offers, in words: the arrangements people use (the order of the panes is the switch's business — drag a chip, or Swap sides). */
+export const ARRANGEMENTS: { panes: Preset; label: string }[] = [
+  { panes: ['doc'], label: 'Document only' },
+  { panes: ['doc', 'pdf'], label: 'Document and PDF' },
+  { panes: ['doc', 'tex'], label: 'Document and LaTeX source' },
+  { panes: ['tex', 'pdf'], label: 'LaTeX source and PDF' },
+  { panes: ['doc', 'tex', 'pdf'], label: 'All three' },
+  { panes: ['pdf'], label: 'PDF only' },
 ];
+/** an arrangement is on when exactly its panes are shown, in whatever order */
+export const arrangementMatches = (l: PaneLayout, panes: Preset): boolean => {
+  const vis = visiblePanes(l);
+  return vis.length === panes.length && panes.every(p => vis.includes(p));
+};
+/** show exactly these panes, in the order they already stand; the hidden ones go to the end (a pane shown later then joins at the side, not between them) */
+export function applyArrangement(l: PaneLayout, panes: Preset): PaneLayout {
+  if (arrangementMatches(l, panes)) return l;
+  const order = [...l.order.filter(p => panes.includes(p)), ...l.order.filter(p => !panes.includes(p))];
+  return { ...l, order, shown: { doc: panes.includes('doc'), tex: panes.includes('tex'), pdf: panes.includes('pdf') } };
+}
 export function applyPreset(l: PaneLayout, preset: Preset): PaneLayout {
   const order = [...preset, ...l.order.filter(p => !preset.includes(p))];
   return { ...l, order, shown: { doc: preset.includes('doc'), tex: preset.includes('tex'), pdf: preset.includes('pdf') } };

@@ -177,3 +177,12 @@ export function png(w: number, h: number, px: (x: number, y: number) => [number,
   const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
+
+/** The paragraph style picker of a toolbar (Toolbar.tsx StylePicker): pick `name` (the layout's LyX name) from its list. */
+export async function pickStyle(page: Page, name: string, toolbar = '.toolbar'): Promise<void> {
+  await page.locator(`${toolbar} [data-style-picker]`).first().click();
+  await page.locator(`[data-style-list] [data-style="${name}"]`).click();
+  await page.waitForTimeout(150);
+}
+/** the style picker's current paragraph style (the layout's LyX name) */
+export const stylePicker = (page: Page, toolbar = '.toolbar') => page.locator(`${toolbar} [data-style-picker]`).first();

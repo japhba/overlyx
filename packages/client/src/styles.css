@@ -323,6 +323,20 @@ html[data-theme="dark"] .ol-wordmark.bauhaus, html[data-ui="modern"][data-theme=
 
 .toolbar { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; background: var(--ui-bg); border-bottom: 1px solid var(--ui-border); padding: 3px 6px; user-select: none; }
 .toolbar select { height: 24px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); max-width: 200px; }
+/* the paragraph style picker (Toolbar.tsx StylePicker): looks like the select it replaced, opens a searchable list */
+.tb-style { position: relative; display: inline-flex; }
+.tb-style-btn { height: 24px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface); color: var(--fg); padding: 0 6px; min-width: 96px; max-width: 200px; font: inherit; font-size: 12px; cursor: pointer; }
+.tb-style-btn:hover, .tb-style.open .tb-style-btn { border-color: var(--accent); }
+.tb-style-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.tb-style-btn .tb-caret { font-size: 8px; opacity: 0.6; }
+.tb-popup.tb-style-pop { width: 240px; padding: 6px; display: flex; flex-direction: column; gap: 4px; overflow: hidden; z-index: 100; }   /* above the tour's card, which points at it */
+.tb-style-search { width: 100%; box-sizing: border-box; height: 26px; border: 1px solid var(--ui-border); border-radius: 3px; padding: 0 6px; background: var(--surface); color: var(--fg); font: inherit; font-size: 12px; }
+.tb-style-list { overflow-y: auto; max-height: min(52vh, 420px); display: flex; flex-direction: column; }
+.tb-style-item { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; text-align: left; border: 0; background: none; color: var(--fg); padding: 4px 8px; border-radius: 3px; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.tb-style-item.hi { background: var(--ui-hover); }
+.tb-style-item.current { box-shadow: inset 2px 0 0 var(--accent); }
+.tb-style-alt { font-size: 11px; font-weight: 400; color: var(--ui-muted); }
+.tb-style-none { padding: 6px 8px; font-size: 12px; color: var(--ui-muted); }
 .tb-btn { height: 24px; min-width: 26px; padding: 0 6px; border: 1px solid transparent; background: none; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; color: var(--fg2); }
 .tb-btn:hover { background: var(--ui-hover); border-color: var(--ui-border); }
 .tb-btn.active { background: var(--active-bg); border-color: var(--active-border); }
@@ -1149,6 +1163,9 @@ pre.hl .l.cur { background: color-mix(in srgb, var(--active-bg) 45%, transparent
 .tree-row { display: flex; align-items: center; gap: 5px; padding: 2px 6px; cursor: pointer; white-space: nowrap; color: inherit; text-decoration: none; font-size: 12.5px; line-height: 18px; }
 .tree-row:hover { background: var(--row-hover); }
 .filetree.dropping { outline: 2px dashed var(--accent); outline-offset: -2px; }
+/* the whole panel takes dropped files, not only the rows: a short list left most of it dead (files dropped below it vanished) */
+.panel-body:has(> .filetree) { display: flex; flex-direction: column; }
+.panel-body > .filetree { flex: 1 0 auto; }
 .tree-row.folder.drop-target { background: var(--row-sel); box-shadow: inset 0 0 0 1px var(--accent); }
 .tree-row.current { background: var(--row-sel); }
 .tree-row.project { font-weight: 700; }
@@ -1895,14 +1912,15 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .pane-menu-btn { height: 26px; min-width: 20px; padding: 0 4px; border: 1px solid transparent; border-radius: 5px; background: none; color: var(--ui-muted); cursor: pointer; font-size: 12px; }
 .pane-menu-btn:hover, .pane-menu-btn.open { background: var(--ui-hover); color: var(--ui-fg); }
 .pane-menu { position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 80; padding: 10px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2); display: flex; flex-direction: column; gap: 8px; width: max-content; max-width: calc(100vw - 24px); }
-.pane-presets { display: flex; gap: 6px; flex-wrap: wrap; }
-.pane-preset { display: flex; gap: 2px; padding: 3px; height: 34px; border: 1px solid var(--ui-border); border-radius: 5px; background: var(--surface2); cursor: pointer; }
-.pane-preset:hover { border-color: var(--accent); }
-.pane-preset.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.pane-preset .mini { display: flex; align-items: center; justify-content: center; width: 30px; border-radius: 2px; font-size: 9px; font-weight: 700; letter-spacing: 0.2px; color: var(--ui-fg); }
-.pane-preset .mini-doc { background: var(--page-bg); border: 1px solid var(--ui-border); font-family: var(--editor-font); font-size: 10px; }
-.pane-preset .mini-tex { background: var(--code-bg); border: 1px solid var(--ui-border); font-family: "DejaVu Sans Mono", Menlo, monospace; }
-.pane-preset .mini-pdf { background: var(--muted2); color: #fff; }
+.pane-menu-title { font-size: 11px; color: var(--ui-muted); padding: 0 4px; }
+.pane-preset { display: flex; align-items: center; gap: 10px; padding: 4px 8px 4px 4px; border: 1px solid transparent; border-radius: 5px; background: none; color: var(--ui-fg); cursor: pointer; text-align: left; font: inherit; font-size: 13px; }
+.pane-preset:hover { background: var(--ui-hover); }
+.pane-preset.active { border-color: var(--accent); }
+.pane-pic { display: flex; gap: 2px; width: 44px; height: 22px; padding: 2px; border: 1px solid var(--ui-border); border-radius: 3px; background: var(--surface2); box-sizing: border-box; }
+.pane-pic .mini { flex: 1; padding: 0; border-radius: 1px; }
+.pane-pic .mini-doc { background: var(--page-bg); border: 1px solid var(--ui-border); }
+.pane-pic .mini-tex { background: var(--code-bg); border: 1px solid var(--ui-border); }
+.pane-pic .mini-pdf { background: var(--muted2); border: 1px solid var(--muted2); }
 .pane-menu-actions { display: flex; gap: 6px; border-top: 1px solid var(--ui-border2); padding-top: 8px; }
 .pane-menu-actions button { font-size: 12px; padding: 3px 8px; border: 1px solid var(--ui-border); border-radius: 4px; background: var(--surface); color: var(--ui-fg); cursor: pointer; }
 .pane-menu-actions button:disabled { opacity: 0.5; cursor: default; }
@@ -2528,6 +2546,13 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 .ol-newkind.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-border); }
 .ol-newkind .ol-newthumb { background: #eef3fd; border: 1px solid var(--accent-border); border-radius: 3px; }
 .ol-newkind small { color: var(--ui-muted); font-size: 11px; text-align: center; }
+.ol-newkinds.four { grid-template-columns: repeat(4, 1fr); }
+.ol-newkind { min-height: 116px; justify-content: flex-end; }
+.ol-newkind .ol-newthumb.empty { width: 34px; height: 26px; background: none; border: 1.5px dashed var(--ui-border); }
+.dialog-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.dialog-hint { font-size: 12px; color: var(--ui-muted); margin: 6px 0; }
+.dialog-hint.error { color: var(--err); }
+@media (max-width: 560px) { .ol-newkinds.four { grid-template-columns: repeat(2, 1fr); } }
 html[data-theme="dark"] .dl-canvas { background: #2a2c31; }
 /* the deck toolbar (deliverable/decktoolbar.tsx): the toolbars' own component in the deck's row — tools at the left,
    what fits the selection in the middle (scrolls sideways when the window is narrow; its palettes are fixed to the window),

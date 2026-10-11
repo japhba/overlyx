@@ -4,7 +4,7 @@
  * (app/pdfstatus.ts).
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_LAYOUT, PRESETS, applyPreset, loadLayout, mirrorPanes, movePane, normalizeLayout, paneGrow, presetMatches, resizeBetween, saveLayout, setPaneShown, soloPane, togglePane, visiblePanes } from '../packages/client/src/app/panes';
+import { DEFAULT_LAYOUT, ARRANGEMENTS, applyArrangement, arrangementMatches, applyPreset, loadLayout, mirrorPanes, movePane, normalizeLayout, paneGrow, presetMatches, resizeBetween, saveLayout, setPaneShown, soloPane, togglePane, visiblePanes } from '../packages/client/src/app/panes';
 import { formatAge, pdfStatus } from '../packages/client/src/app/pdfstatus';
 
 beforeEach(() => localStorage.clear());
@@ -36,11 +36,14 @@ describe('pane layout', () => {
     expect(visiblePanes(m)).toEqual(['pdf', 'doc']);
     expect(m.shown.tex).toBe(false);
   });
-  it('offers every arrangement once: 3 single, 6 pairs, 6 orders of three', () => {
-    const all = PRESETS.flat().map(p => p.join('|'));
-    expect(PRESETS.map(g => g.length)).toEqual([3, 6, 6]);
-    expect(new Set(all).size).toBe(15);
-    for (const p of PRESETS.flat()) expect(presetMatches(applyPreset(DEFAULT_LAYOUT, p), p)).toBe(true);
+  it('the pane menu names its arrangements; picking one keeps the order of the panes already shown', () => {
+    expect(ARRANGEMENTS.map(a => a.label)).toContain('Document and PDF');
+    expect(new Set(ARRANGEMENTS.map(a => [...a.panes].sort().join('|'))).size).toBe(ARRANGEMENTS.length);
+    for (const a of ARRANGEMENTS) expect(arrangementMatches(applyArrangement(DEFAULT_LAYOUT, a.panes), a.panes)).toBe(true);
+    const swapped = applyPreset(DEFAULT_LAYOUT, ['pdf', 'doc']);
+    expect(arrangementMatches(swapped, ['doc', 'pdf'])).toBe(true);
+    expect(applyArrangement(swapped, ['doc', 'pdf'])).toBe(swapped);
+    expect(visiblePanes(applyArrangement(swapped, ['doc', 'tex', 'pdf']))).toEqual(['pdf', 'doc', 'tex']);
   });
   it('a dragged divider moves width between its two panes, never below the minimum', () => {
     const l = applyPreset(DEFAULT_LAYOUT, ['doc', 'pdf']);

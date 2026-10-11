@@ -12,7 +12,7 @@
 import { expect, type Page } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
-import { PROJECTS_DIR, fillDialog } from './helpers';
+import { PROJECTS_DIR, fillDialog, pickStyle } from './helpers';
 
 /** What "New document" (server projects.ts newDocumentText) writes for a titled, empty article. */
 export function blankArticle(title: string): string {
@@ -344,13 +344,18 @@ export async function setModules(page: Page, modules: string, expectLayout: stri
   await expect(page.locator('.dialog')).toContainText('Document Settings');
   await page.locator('.dialog input[placeholder^="e.g. theorems-ams"]').fill(modules);
   await page.locator('.dialog .btn.primary').click();
-  await expect(page.locator('select[title^="Paragraph layout"] option', { hasText: new RegExp(`^${expectLayout}$`) })).toHaveCount(1, { timeout: 10000 });
+  // the style picker lists the module's layouts
+  await expect.poll(async () => {
+    await page.locator('[data-style-picker]').first().click();
+    const n = await page.locator(`[data-style-list] [data-style="${expectLayout}"]`).count();
+    await page.keyboard.press('Escape');
+    return n;
+  }, { timeout: 10000 }).toBe(1);
 }
 
 /** Pick a paragraph layout from the toolbar's layout list (for the ones without an Alt+P key: Theorem, Proposition, Proof …). */
 export async function selectLayout(page: Page, name: string) {
-  await page.locator('select[title^="Paragraph layout"]').selectOption(name);
-  await page.waitForTimeout(150);
+  await pickStyle(page, name);
 }
 
 /** Insert ▸ Float ▸ Figure / Table / Algorithm at the cursor; the cursor ends up in the float's first paragraph. */

@@ -24,7 +24,6 @@ export interface DocPanelProps {
   activePos: number;
   view: EditorView | null;
   onOpen: (id: string, opts?: { heading?: number }) => void;
-  onGit?: (project: string) => void;
   onHide: () => void;
   /** the project the panel shows (for the Share button and the menus) */
   onProject?: (p: Project | null) => void;
@@ -33,7 +32,7 @@ export interface DocPanelProps {
 
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 
-export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, view, onOpen, onGit, onHide, onProject, notify }: DocPanelProps) {
+export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, view, onOpen, onHide, onProject, notify }: DocPanelProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [picked, setPicked] = useState<string | null>(() => stored('ol.project'));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -141,7 +140,7 @@ export function DocPanel({ current, currentDoc, refreshKey, outline, activePos, 
         <button class="hide" title="Hide the files panel (Ctrl+Alt+O)" onClick={onHide}>«</button>
       </div>
       <div class="panel-body">
-        <FileBrowser current={current} project={selected} refreshKey={listKey} onOpen={id => onOpen(id)} onGit={onGit} outlines={{
+        <FileBrowser current={current} project={selected} refreshKey={listKey} onOpen={id => onOpen(id)} outlines={{
           open: id => !!expanded[id],
           toggle,
           render: id => id === currentDoc ? <Outline view={view} items={outline} activePos={activePos} /> : staticOutline(id),

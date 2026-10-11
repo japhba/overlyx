@@ -1,12 +1,12 @@
 /**
  * The pane control in the menu bar (web client): WYSIWYG · TeX · PDF, left to right in the order
  * the panes stand. A click shows or hides a pane (the last one stays), a double-click shows it
- * alone, dragging a chip sideways moves its pane; ▾ opens every arrangement as a small picture,
- * and mirror / equal widths. On a phone-width screen one pane at a time: a click shows that one.
+ * alone, dragging a chip sideways moves its pane; ▾ lists the useful arrangements in words
+ * ("Document and PDF"), and swap sides / equal widths. On a phone-width screen one pane at a time: a click shows that one.
  * The layout logic is app/panes.ts.
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { PANE_LABELS, PANE_TITLES, PRESETS, applyPreset, mirrorPanes, movePane, presetMatches, resetWidths, soloPane, togglePane, visiblePanes, type PaneId, type PaneLayout, type Preset } from './panes';
+import { PANE_LABELS, PANE_TITLES, ARRANGEMENTS, applyArrangement, arrangementMatches, mirrorPanes, movePane, resetWidths, soloPane, togglePane, visiblePanes, type PaneId, type PaneLayout, type Preset } from './panes';
 
 const MINI: Record<PaneId, string> = { doc: 'Doc', tex: 'TeX', pdf: 'PDF' };
 
@@ -88,27 +88,24 @@ export function PaneSwitch({ layout, onChange, narrow = false, markdown = false 
       <button type="button" class={'pane-menu-btn' + (menu ? ' open' : '')} aria-haspopup="menu" aria-expanded={menu} title="Arrange the panes: every layout, mirror, equal widths" data-pane-menu onClick={() => setMenu(m => !m)}>▾</button>
       {menu && (
         <div class="pane-menu" role="menu">
-          {PRESETS.map((group, gi) => (
-            <div class="pane-presets" key={gi}>
-              {group.map(p => <PresetButton key={p.join('-')} preset={p} active={presetMatches(layout, p)} onPick={() => { onChange(applyPreset(layout, p)); setMenu(false); }} />)}
-            </div>
-          ))}
+          <div class="pane-menu-title">Show</div>
+          {ARRANGEMENTS.map(a => <PresetButton key={a.panes.join('-')} preset={a.panes} label={markdown ? a.label.replace('LaTeX', 'Markdown') : a.label} active={arrangementMatches(layout, a.panes)} onPick={() => { onChange(applyArrangement(layout, a.panes)); setMenu(false); }} />)}
           <div class="pane-menu-actions">
-            <button type="button" disabled={vis.length < 2} onClick={() => { onChange(mirrorPanes(layout)); setMenu(false); }} title="Reverse the order of the panes that are shown">⇄ Mirror</button>
-            <button type="button" onClick={() => { onChange(resetWidths(layout)); setMenu(false); }} title="Give the panes their default widths again">Equal widths</button>
+            <button type="button" disabled={vis.length < 2} data-pane-swap onClick={() => { onChange(mirrorPanes(layout)); setMenu(false); }} title="Reverse the order of the panes that are shown">⇄ Swap sides</button>
+            <button type="button" disabled={vis.length < 2} onClick={() => { onChange(resetWidths(layout)); setMenu(false); }} title="Give the panes their default widths again">Equal widths</button>
           </div>
-          <div class="pane-menu-hint">{hint}.</div>
+          <div class="pane-menu-hint">Or use the buttons: a click shows or hides a pane, a double-click shows only it, dragging one moves it.</div>
         </div>
       )}
     </div>
   );
 }
 
-function PresetButton({ preset, active, onPick }: { preset: Preset; active: boolean; onPick: () => void }) {
-  const label = preset.map(p => PANE_LABELS[p]).join(' | ');
+function PresetButton({ preset, label, active, onPick }: { preset: Preset; label: string; active: boolean; onPick: () => void }) {
   return (
-    <button type="button" role="menuitemradio" aria-checked={active} class={'pane-preset' + (active ? ' active' : '')} data-preset={preset.join('-')} title={label} aria-label={label} onClick={onPick}>
-      {preset.map(p => <span key={p} class={'mini mini-' + p}>{MINI[p]}</span>)}
+    <button type="button" role="menuitemradio" aria-checked={active} class={'pane-preset' + (active ? ' active' : '')} data-preset={preset.join('-')} onClick={onPick}>
+      <span class="pane-pic" aria-hidden="true">{preset.map(p => <span key={p} class={'mini mini-' + p} />)}</span>
+      <span class="pane-preset-label">{label}</span>
     </button>
   );
 }

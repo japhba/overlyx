@@ -5,6 +5,7 @@
  * paragraph layout picker, word counts. One copy for both shells (tests/parity.test.ts).
  */
 import { useState } from 'preact/hooks';
+import { styleLabel, styleSearchText } from './stylenames';
 import type { EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { currentParagraph } from '../editor/commands';
@@ -102,12 +103,13 @@ export function documentStats(view: EditorView): DocStats {
 /** The paragraph layout picker (Alt+P Space or the layout menu): type to filter, Enter takes the first match. */
 export function LayoutPicker({ layouts, onPick, onClose }: { layouts: { name: string; category?: string }[]; onPick: (n: string) => void; onClose: () => void }) {
   const [q, setQ] = useState('');
-  const list = layouts.filter(l => l.name.toLowerCase().includes(q.toLowerCase()));
+  const mode = document.documentElement.dataset.ui === 'modern' ? 'modern' : 'classic';
+  const list = layouts.filter(l => styleSearchText(l.name, mode).includes(q.toLowerCase()));
   return (
     <div class="dialog-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div class="dialog"><h2>Paragraph layout</h2><div class="body">
+      <div class="dialog"><h2>{mode === 'modern' ? 'Paragraph style' : 'Paragraph layout'}</h2><div class="body">
         <input type="text" autofocus value={q} onInput={e => setQ((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter' && list[0]) { onPick(list[0].name); onClose(); } if (e.key === 'Escape') onClose(); }} placeholder="type to filter…" />
-        <div class="list">{list.map(l => <div key={l.name} onClick={() => { onPick(l.name); onClose(); }}>{l.name} <span class="sub">{l.category}</span></div>)}</div>
+        <div class="list">{list.map(l => <div key={l.name} onClick={() => { onPick(l.name); onClose(); }}>{styleLabel(l.name, mode)} {mode !== 'modern' && <span class="sub">{l.category}</span>}</div>)}</div>
       </div></div>
     </div>
   );

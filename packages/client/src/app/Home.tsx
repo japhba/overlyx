@@ -11,7 +11,7 @@ import { OverleafImport, type ImportInitial } from './OverleafImport';
 import { takePendingImport } from './pendingImport';
 import { sortByRecency, recencyLabel } from './recency';
 import { projectShortName, splitProjectKey, isProjectName } from '@overlyx/core';
-import { uiPrompt, uiConfirm } from './Dialogs';
+import { uiConfirm, Dialog } from './Dialogs';
 import { promptNewFile } from './newfile';
 import { useUiMode } from './uimode';
 import { KIND_ICONS, iconSvg } from './modernicons';
@@ -111,15 +111,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const admin = projects?.filter(p => p.via === 'admin') ?? [];
   const firstName = user.guest ? 'guest' : user.name.split(/\s+/)[0];
 
-  const newProject = async () => {
-    const name = await uiPrompt('New Project', 'Name of the new project:', '', {
-      placeholder: 'letters, digits, space, . _ -',
-      validate: v => (v && !isProjectName(v) ? 'Only letters, digits, space, . _ - are allowed.' : null),
-    });
-    if (!name) return;
-    try { await api.createProject(name.trim()); await load(); onChanged(); notify(`Project "${name.trim()}" created — add a document with + File in the files panel`); }
-    catch (e) { notify((e as Error).message, 'error'); }
-  };
+  const [newOpen, setNewOpen] = useState(false);
   const remove = async (p: Project) => {
     const what = p.kind === 'example' ? 'your example project (it will not be re-created)' : `the project "${projectTitle(p)}" and its ${p.files.length} file(s)`;
     const ok = await uiConfirm('Delete Project', `Delete ${what}?\n\nThe folder is moved to the server's trash, not destroyed; ask an administrator to get it back.`, { danger: true, okLabel: 'Delete' });
@@ -180,8 +172,8 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         </div>
         {isExample && (
           <div class="blurb">
-            A short tour of OverLyX written for you, {firstName}: text and layouts, formulas and macros, a figure, a table, citations, notes and comments, sharing and compiling.
-            It is a normal LyX file in a project of your own — edit it, press <b>Ctrl+R</b> to see the PDF, share it with a colleague, or delete it when you are done.{' '}
+            A short tour of OverLyX written for you, {firstName}: text and headings, formulas and macros, a figure, a table, citations, notes and comments, sharing and compiling.
+            It is a plain LaTeX file in a project of your own — edit it, press <b>Ctrl+R</b> to see the PDF, share it with a colleague, or delete it when you are done.{' '}
             <b>Start the tour</b> opens it with an interactive walkthrough that asks you to try the essentials (every step can be skipped).
           </div>
         )}
@@ -222,11 +214,11 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   return (
     <div class="home">
       <h1>Welcome{projects ? `, ${firstName}` : ''}</h1>
-      <div class="sub">{user.guest ? 'You are here as a guest, through a link somebody shared. Sign in to keep those projects in an account of your own — and to create projects.' : 'OverLyX edits LyX documents in the browser, together with others. Projects are private until you share them.'}</div>
+      <div class="sub">{user.guest ? 'You are here as a guest, through a link somebody shared. Sign in to keep those projects in an account of your own — and to create projects.' : 'OverLyX edits LaTeX documents, slides and posters in the browser, together with others. Projects are private until you share them.'}</div>
       <div class="home-actions">
         {user.guest
           ? <button class="btn primary" data-guest-signin onClick={onSignIn}>Sign in</button>
-          : <button class="btn primary" onClick={() => void newProject()}>+ New project</button>}
+          : <button class="btn primary" data-new-project onClick={() => setNewOpen(true)} title="A new document, slide deck or poster — each in a project of its own">+ New</button>}
         {!user.guest && <button class="btn" data-import-overleaf onClick={() => setImportOpen(true)} title="Bring projects over from Overleaf — through its Git access, or from a downloaded zip">Import from Overleaf…</button>}
         <button class="btn" onClick={onBrowse}>Show the files panel</button>
         <button class="home-view-switch" data-home-view-switch={view === 'rows' ? 'grid' : 'rows'} onClick={switchView}
@@ -234,6 +226,8 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
           {viewIcon(view === 'rows' ? 'grid' : 'rows')}
         </button>
       </div>
+      {newOpen && <NewProjectDialog onClose={() => setNewOpen(false)} notify={notify}
+        onCreated={(id, name) => { setNewOpen(false); void load(); onChanged(); if (id) onOpen(id); else notify(`Project "${name}" created — add a document with + File in the files panel`); }} />}
       {importOpen && <OverleafImport existing={(projects ?? []).filter(p => splitProjectKey(p.name).owner === user.username).map(p => projectShortName(p.name))} onClose={() => { setImportOpen(false); setPending(null); }} onImported={() => { void load(); onChanged(); }} notify={notify}
         initial={pending ?? undefined} autostart={!!pending} onDone={names => void openImported(names)} />}
       {projects === null && <div class="meta">Loading your projects…</div>}
@@ -261,6 +255,64 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   );
 }
 
+type NewKind = 'doc' | 'deck' | 'poster' | 'empty';
+const NEW_KINDS: { id: NewKind; label: string; hint: string; w: number; h: number; name: string }[] = [
+  { id: 'doc', label: 'Document', hint: 'A paper, thesis or notes', w: 210, h: 297, name: 'Untitled document' },
+  { id: 'deck', label: 'Slides', hint: '16:9, presented full screen', w: 16, h: 9, name: 'Untitled slides' },
+  { id: 'poster', label: 'Poster', hint: 'A0 portrait', w: 841, h: 1189, name: 'Untitled poster' },
+  { id: 'empty', label: 'Empty project', hint: 'Add files later', w: 0, h: 0, name: '' },
+];
+
+/**
+ * The start page's + New: a document, slides or a poster, each in a project of its own (named like
+ * it), opened right away — or an empty project. Inside a project, + File and File ▸ New … add more.
+ */
+export function NewProjectDialog({ onClose, onCreated, notify }: { onClose: () => void; onCreated: (id: string | null, name: string) => void; notify: (text: string, kind?: 'info' | 'error') => void }) {
+  const [kind, setKind] = useState<NewKind>('doc');
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const k = NEW_KINDS.find(x => x.id === kind)!;
+  const typed = name.trim();
+  const invalid = typed && !isProjectName(typed) ? 'Only letters, digits, space, . _ - are allowed.' : null;
+  const create = async () => {
+    const n = typed || k.name;
+    if (!n || invalid) return;
+    setBusy(true);
+    try {
+      const { project } = await api.createProject(n);
+      const key = project.name;
+      const id = kind === 'doc' ? (await api.newDoc(key, 'main.tex', { title: n })).id
+        : kind === 'deck' ? (await api.newDeliverable(key, 'slides', 'deck', n)).id
+        : kind === 'poster' ? (await api.newDeliverable(key, 'poster', 'poster', n)).id
+        : null;
+      onCreated(id, n);
+    } catch (e) { setBusy(false); notify((e as Error).message, 'error'); }
+  };
+  return (
+    <Dialog title="New" onClose={onClose} buttons={
+      <button type="button" class="small-btn primary" disabled={busy || !!invalid || (kind === 'empty' && !typed)} onClick={() => void create()} data-new-create>Create</button>
+    }>
+      <div class="ol-newkinds four" role="radiogroup" aria-label="What to make">
+        {NEW_KINDS.map(x => {
+          const s = x.w ? 44 / Math.max(x.w, x.h) : 0;
+          return (
+            <button key={x.id} type="button" role="radio" aria-checked={x.id === kind} class={'ol-newkind' + (x.id === kind ? ' active' : '')} data-new-kind={x.id}
+              onClick={() => setKind(x.id)} onDblClick={() => { setKind(x.id); if (x.id !== 'empty') void create(); }}>
+              <span class={'ol-newthumb' + (x.w ? '' : ' empty')} style={x.w ? { width: `${x.w * s}px`, height: `${x.h * s}px` } : undefined} />
+              <span>{x.label}</span>
+              <small>{x.hint}</small>
+            </button>
+          );
+        })}
+      </div>
+      <label class="dialog-row">Name <input type="text" value={name} autofocus placeholder={k.name || 'Name of the project'} data-new-name
+        onInput={e => setName((e.target as HTMLInputElement).value)} onKeyDown={e => { if (e.key === 'Enter') void create(); }} /></label>
+      {invalid && <p class="dialog-hint error">{invalid}</p>}
+      <p class="dialog-hint">{kind === 'empty' ? 'A project holds documents, slides, figures and a bibliography together. Share it to work on it with others.' : `It gets a project of its own, “${typed || k.name}”, where figures and a bibliography can go too.`}</p>
+    </Dialog>
+  );
+}
+
 /**
  * A project with no document yet, opened directly (its bare `#/owner/project` link: a brand-new
  * project's dashboard tile, the project switcher, or a bookmark). The file tree is already the left
@@ -278,6 +330,10 @@ export function ProjectRootPanel({ project, notify, onCreated }: { project: stri
     const id = await promptNewFile(project, { where: projectShortName(project), initial: 'main.tex', title: 'New Document' }).catch(e => { notify((e as Error).message, 'error'); return null; });
     if (id) onCreated(id);
   };
+  const createDeliverable = async (kind: 'deck' | 'poster') => {
+    try { onCreated((await api.newDeliverable(project, kind === 'deck' ? 'slides' : 'poster', kind, projectShortName(project))).id); }
+    catch (e) { notify((e as Error).message, 'error'); }
+  };
   if (info === undefined) return <div class="home"><div class="meta">Loading…</div></div>;
   if (info === null) return <div class="home"><h1>Not found</h1><div class="meta">This project does not exist, or you do not have access to it.</div></div>;
   const docs = projectDocs(info, true);
@@ -290,6 +346,8 @@ export function ProjectRootPanel({ project, notify, onCreated }: { project: stri
       </> : <div class="sub">This project has no documents yet. Its files (if any) are in the files panel on the left.</div>}
       <div class="home-actions">
         <button class="btn primary" onClick={() => void createFirstDoc()}>+ New document</button>
+        <button class="btn" data-first-deliverable="deck" onClick={() => void createDeliverable('deck')}>+ New slides</button>
+        <button class="btn" data-first-deliverable="poster" onClick={() => void createDeliverable('poster')}>+ New poster</button>
       </div>
     </div>
   );

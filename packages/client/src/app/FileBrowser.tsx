@@ -67,8 +67,8 @@ export const projectLabel = (p: Project) => p.title ?? projectShortName(p.name);
 /** A document row's outline (the documents panel): whether it is expanded, the twisty, and what to show under the row. */
 export interface DocOutlines { open: (id: string) => boolean; toggle: (id: string) => void; render: (id: string) => ComponentChildren }
 
-export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, project: controlled, outlines }: {
-  current: string | null; onOpen: (id: string) => void; onShare?: (project: string) => void; onGit?: (project: string) => void; refreshKey: number;
+export function FileBrowser({ current, onOpen, onShare, refreshKey, project: controlled, outlines }: {
+  current: string | null; onOpen: (id: string) => void; onShare?: (project: string) => void; refreshKey: number;
   /** the project to show, chosen outside (the documents panel): no picker of its own */
   project?: string | null;
   /** documents expand into their outline in place */
@@ -409,7 +409,6 @@ export function FileBrowser({ current, onOpen, onShare, onGit, refreshKey, proje
         {canEdit && project && <button class="small-btn" onClick={() => void newFolder()} title="New folder in this project (also in the right-click menu of any folder)">+ Folder</button>}
         {canEdit && project && <button class="small-btn" onClick={() => void upload()} title="Upload files (figures, .bib, .sty …) — or drag them from your computer onto the file list">⇧</button>}
         {role === 'owner' && via !== 'admin' && project && onShare && <button class="small-btn" data-share={project.name} onClick={() => onShare(project.name)} title="Share this project…">👥</button>}
-        {project && onGit && <button class="small-btn" data-git={project.name} onClick={() => onGit(project.name)} title="Git repository: clone, pull and push this project from your computer…">⎇</button>}
         <button class="small-btn" onClick={() => setShowAll(!showAll)} title="Show LaTeX build files (.aux, .log, .bbl …) and LyX backups (~, #, .emergency)">{showAll ? 'Fewer' : 'All files'}</button>
       </div>
       {project && tree.map(n => renderNode(n, 0))}
