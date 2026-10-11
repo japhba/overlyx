@@ -1164,10 +1164,11 @@ blend.
   cells show only while the cursor is in that table / formula (`editor/plugins/envfocus.ts` marks the
   table with `ol-editing`; the static formula rendering hides its `lm-empty` outlines) — a document
   reads as it prints, the scaffolding appears where one works.
-* **Favicon** (`public/icon.svg`): LYX doing acrobatics with an O — the yellow Y hangs from the ring by
-  both hands and swings, the red X cartwheels along its inside, the blue L leans back against it. The
-  ring is always the strongest contrast so it never melts into a tab bar: graphite on a paper disc with
-  a paper rim (light), light on a dark disc with a dark rim (`prefers-color-scheme: dark`).
+* **Favicon** (`public/icon.svg`): LYX woven through a tilted O — the wordmark's blue L, yellow Y and
+  red X stand where they always did; the L and the Y pass in front of the ring's far side and behind
+  its near side, the X stays whole in front (a cut through its diagonals made it read as a Y). Every
+  crossing has a gap in the disc's colour. Everything sits on a disc — paper with a graphite ring, or
+  dark with a light ring (`prefers-color-scheme: dark`) — so the ring never melts into a tab bar.
 * **Landing page / sign-in** (`app/Login.tsx` + `app/landing.css`): one Bauhaus look for every visitor,
   whichever interface (Classic / Modern) they use inside — warm paper, graphite ink, hairlines, square
   corners, Jost and Inter; the wordmark's blue / yellow / red only as thin rules (over the sign-in
