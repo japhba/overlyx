@@ -76,7 +76,7 @@ test('the browser engine can be chosen instead (no OverLyX underlines, spellchec
 
 // runs last: it types typos into the shared fixture, which the counts above rely on
 test('autocorrect: a minor typo snaps into place after the word, Backspace puts it back', async ({ page }) => {
-  await page.addInitScript(() => { try { localStorage.setItem('ol.prefs', JSON.stringify({ spellcheck: true, spellEngine: 'overlyx', autoCorrect: true })); localStorage.removeItem('ol.spell.words'); } catch { /* ignore */ } });
+  await page.addInitScript(() => { try { localStorage.setItem('ol.prefs', JSON.stringify({ spellcheck: true, spellEngine: 'overlyx', autoCorrect: true, autoCorrectChosen: true })); localStorage.removeItem('ol.spell.words'); } catch { /* ignore */ } });
   await login(page);
   await page.goto('/#/' + DOC);
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 2, null, { timeout: 30000 });
