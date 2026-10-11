@@ -280,8 +280,14 @@ export function newSlideHtml(text: string, i: number, blank = false): string | n
   const open = t.slice(s.sourceCodeLocation.startTag.startOffset, s.sourceCodeLocation.startTag.endOffset);
   const close = `</${s.tagName}>`;
   if (blank) return `${open}\n</${s.tagName}>`;
-  // keep the headings (retitled) and the shapes; drop text boxes' text but the first heading's
+  // the slide's design, not its content: the first heading (retitled) and what recurs on another
+  // slide (a logo, a bar, a page number) — not this slide's own pictures, shapes and drawings
   const kids = elementChildren(s);
+  const elsewhere = new Set<string>();
+  for (const o of ss) {
+    if (o === s) continue;
+    for (const k of elementChildren(o)) if (k.sourceCodeLocation) { const r = outerRange(k); elsewhere.add(t.slice(r.from, r.to).trim()); }
+  }
   const parts: string[] = [];
   let titled = false;
   for (const k of kids) {
@@ -290,7 +296,9 @@ export function newSlideHtml(text: string, i: number, blank = false): string | n
     const { from, to } = outerRange(k);
     const src = t.slice(from, to);
     const textual = /^(h[1-6]|p|ul|ol|div|blockquote)$/.test(k.tagName) && /\S/.test(textOf(k));
-    if (!textual) { parts.push(src); continue; }
+    // (or marked as decoration by whoever designed the deck)
+    const decor = attr(k, 'aria-hidden') === 'true' || attr(k, 'data-ol-master') !== null || /(^|\s)(decor\w*|bg|background|accent|ornament|logo|footer|bar|band|stripe|rule)(\s|$)/i.test(attr(k, 'class') ?? '');
+    if (!textual) { if (elsewhere.has(src.trim()) || decor) parts.push(src); continue; }
     if (/^h[1-6]$/.test(k.tagName) && !titled) {
       titled = true;
       const st = k.sourceCodeLocation.startTag!;

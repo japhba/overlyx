@@ -52,13 +52,21 @@ describe('the editor changes the text', () => {
     expect(objectHtml('text', { x: 5, y: 6, w: 0, h: 0 }, 'page')).toBe('<p>Text</p>');
   });
 
-  it('a new slide keeps the design of the one it follows, without its text', () => {
+  it('a new slide keeps the design of the one it follows, without its text or its own pictures and shapes', () => {
     const html = newSlideHtml(DECK, 1)!;
     expect(html).toMatch(/^<section class="slide">/);
     expect(html).toContain('>Title</h2>');
     expect(html).not.toContain('One message per slide');
-    expect(html).toContain('border-radius: 24px');   // the shape stays
+    // that slide's own shape is content (usability test: "New slide" copied every picture and drawing)
+    expect(html).not.toContain('border-radius: 24px');
     expect(html).not.toContain('notes');
+    // what recurs on another slide (a logo) or is marked as decoration is the design: it stays
+    const logo = '<img class="corner" src="logo.png" style="position: absolute; right: 20px; top: 20px; width: 60px">';
+    const branded = DECK.replace(/<\/section>/g, `  ${logo}\n  <div class="accent" style="position: absolute; left: 0; top: 0; width: 8px; height: 720px; background: red"></div>\n</section>`);
+    const nb = newSlideHtml(branded, 1)!;
+    expect(nb).toContain(logo);
+    expect(nb).toContain('class="accent"');
+    expect(nb).not.toContain('border-radius: 24px');
     const ps = slidePaths(DECK);
     expect(ps).toEqual([[1, 0], [1, 1]]);
     const out = applyOp(DECK, { t: 'insert', parent: [1], index: 2, html });

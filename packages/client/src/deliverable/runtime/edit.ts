@@ -1461,14 +1461,22 @@ function cleanHtml(el: HTMLElement): string {
   return html;
 }
 
-function commitText(): void {
+/** elements whose content is text only (no paragraphs or lists inside: the parser would push them out of the box) */
+const PHRASING_BOXES = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+const BLOCK_INSIDE = /<(p|div|ul|ol|li|h[1-6]|blockquote|table|pre|section|figure)[\s>]/i;
+
+/** `final`: the retyping ends — a text box that got a list (or another block) inside becomes a div that can hold it */
+function commitText(final = false): void {
   if (editTimer) { clearTimeout(editTimer); editTimer = null; }
   if (!editing) return;
   const path = pathOf(editing);
   const html = cleanHtml(editing);
-  if (!path || html === editStartHtml) return;
+  const src = srcOf.get(editing);
+  const toDiv = final && !!src && PHRASING_BOXES.has(editing.localName) && BLOCK_INSIDE.test(html);
+  if (!path || (html === editStartHtml && !toDiv)) return;
   editStartHtml = html;
-  const ops: HtmlOp[] = [{ t: 'inner', path, html }];
+  const attrs = toDiv ? Array.from(src!.attributes).map(a => ` ${a.name}="${a.value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"`).join('') : '';
+  const ops: HtmlOp[] = [toDiv ? { t: 'outer', path, html: `<div${attrs}>${html}</div>` } : { t: 'inner', path, html }];
   // a box-wide change made while typing (the line spacing)
   const lh = editing.style.getPropertyValue('line-height');
   const srcLh = (srcOf.get(editing) as HTMLElement | undefined)?.style?.getPropertyValue('line-height') ?? '';
@@ -1480,7 +1488,7 @@ function commitText(): void {
 export function stopText(): void {
   if (!editing) return;
   closeChip();
-  commitText();
+  commitText(true);
   const el = editing;
   editing = null;
   guard.editing = null;
@@ -1538,6 +1546,13 @@ function onKeyDown(e: KeyboardEvent): void {
     if (mod && /^[bi]$/i.test(e.key)) { e.preventDefault(); exec(e.key.toLowerCase() === 'b' ? 'bold' : 'italic'); return; }
     if (mod && e.key.toLowerCase() === 'u') { e.preventDefault(); exec('underline'); return; }
     if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); commitText(); fwd(e); return; }
+    // Enter in a text box that is a paragraph or a heading: a line break — a paragraph inside it would be
+    // pushed out of the box by the parser (a stray box at the slide's corner after a reload)
+    if (e.key === 'Enter' && !mod && !e.altKey && PHRASING_BOXES.has(editing.localName) && !getSelection()?.anchorNode?.parentElement?.closest('li')) {
+      e.preventDefault();
+      document.execCommand('insertLineBreak');
+      return;
+    }
     return;
   }
   const tag = (e.target as Element | null)?.localName;

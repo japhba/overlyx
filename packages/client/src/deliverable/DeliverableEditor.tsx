@@ -1012,12 +1012,20 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   const curSlidePath = slides[current]?.path ?? null;
   const notes = curSlidePath && kind === 'deck' ? slideNotes(text.toString(), curSlidePath).text : '';
-  const [notesDraft, setNotesDraft] = useState<string | null>(null);
-  const saveNotes = (v: string) => {
-    if (!curSlidePath || readOnlyRef.current) return;
-    const op = notesOp(text.toString(), curSlidePath, v);
+  /** notes being typed, with the slide they are typed for (a click in the rail changes the slide without a blur) */
+  const [notesDraft, setNotesDraftState] = useState<{ path: Path; text: string } | null>(null);
+  const draftRef = useRef(notesDraft); draftRef.current = notesDraft;
+  const setNotesDraft = (v: string | null) => setNotesDraftState(v === null ? null : curSlidePath ? { path: curSlidePath, text: v } : null);
+  const saveNotes = (v: string, path = curSlidePath) => {
+    if (!path || readOnlyRef.current) return;
+    const op = notesOp(text.toString(), path, v);
     if (op) applyOps([op]);
   };
+  // another slide: what was typed goes to the slide it was typed for
+  useEffect(() => {
+    const d = draftRef.current;
+    if (d && (!curSlidePath || d.path.join() !== curSlidePath.join())) { saveNotes(d.text, d.path); setNotesDraftState(null); }
+  }, [curSlidePath?.join()]);
 
   /* ------------------------------------------------------------- render */
 
@@ -1176,9 +1184,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           </div>
           {kind === 'deck' && (
             <div class="dl-notes">
-              <textarea placeholder="Speaker notes" value={notesDraft ?? notes} disabled={readOnly || !curSlidePath} data-dl-notes
+              <textarea placeholder="Speaker notes" value={notesDraft && curSlidePath && notesDraft.path.join() === curSlidePath.join() ? notesDraft.text : notes} disabled={readOnly || !curSlidePath} data-dl-notes
                 onInput={e => setNotesDraft((e.target as HTMLTextAreaElement).value)}
-                onBlur={e => { saveNotes((e.target as HTMLTextAreaElement).value); setNotesDraft(null); }} />
+                onBlur={e => { const d = draftRef.current; saveNotes((e.target as HTMLTextAreaElement).value, d?.path ?? curSlidePath); setNotesDraftState(null); }} />
             </div>
           )}
         </div>

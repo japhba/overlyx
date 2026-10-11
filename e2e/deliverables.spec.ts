@@ -91,7 +91,10 @@ test('a deck from the New dialog: select, drag, retype, draw, delete and undo', 
   await expect.poll(fileText, { timeout: 15000 }).toMatch(/<p style="position: absolute; left: \d+px; top: \d+px; width: 520px; margin: 0">Text<\/p>\n<\/section>/);
   await page.waitForTimeout(600);
   await page.keyboard.type('A new box');
-  await expect.poll(fileText, { timeout: 15000 }).toContain('margin: 0">A new box</p>');
+  // Enter: a second line in the same box (a paragraph inside a <p> would be pushed out of it by the parser)
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('two lines');
+  await expect.poll(fileText, { timeout: 15000 }).toContain('margin: 0">A new box<br>two lines</p>');
   await page.keyboard.press('Escape');
 
   // the decorative shape on slide 2: selected, deleted, the deletion undone
@@ -126,6 +129,13 @@ test('slides from the rail, speaker notes, the code view, a change on disk shown
   await notes.fill('Mention the experiment.');
   await notes.blur();
   await expect.poll(fileText, { timeout: 15000 }).toContain('<aside class="notes">Mention the experiment.</aside>');
+  // notes typed and then another slide picked in the rail (no blur: the rail keeps the focus where it was) stay with their slide
+  await notes.click();
+  await notes.fill('Only for the third slide.');
+  await page.frameLocator('.dl-railframe').locator('section.slide').nth(1).click();
+  await expect(notes).not.toHaveValue('Only for the third slide.');
+  await expect.poll(fileText, { timeout: 15000 }).toContain('<aside class="notes">Only for the third slide.</aside>');
+  expect((fileText().match(/Only for the third slide\./g) ?? []).length).toBe(1);
 
   // the code view: an edit there shows on the canvas
   await page.locator('[data-dl-code]').click();
