@@ -115,7 +115,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
 
-  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'usageStats' | 'shortcutTips' | 'darkPdf', label: string, hint: string) => (
+  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'usageStats' | 'shortcutTips' | 'darkPdf' | 'invertSlides', label: string, hint: string) => (
     <label class="pref"><input type="checkbox" data-pref={key} checked={p[key]} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
   );
   const toggleRecopy = async (u: AdminUser) => {
@@ -169,6 +169,8 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             {check('darkPdf', 'Dark PDF pages in the dark theme', 'The PDF is shown light on dark, in the editor’s page colour and text tone; colours keep their hue and photographs their colours (with “Invert figures” off, every picture does). The ◐ button in the PDF toolbar switches it too.')}
             <h3>Figures</h3>
             {check('invertFigures', 'Invert figures in the dark theme', 'Plots and diagrams use a white base, including transparent images, and turn light-on-dark in the dark theme. Photographs keep their colours. Figures reload when their file changes on disk.')}
+            <h3>Slides and posters</h3>
+            {check('invertSlides', 'Invert slides in the dark theme', 'Slides and posters are shown light on dark while you edit them — on the canvas, in the slide list and on layout pages — like the PDF’s dark pages: colours keep their hue, pictures and videos keep their colours. Presenting shows them as designed. Off by default, since designed slides change colour; the ◐ button beside a deck’s zoom and the canvas’s right-click menu switch it too. Without it the canvas around the slides is dark grey in the dark theme.')}
             <h3>Shortcuts</h3>
             {check('shortcutTips', 'Shortcut tips', 'An action that has a shortcut but is taken with the mouse — a toolbar button, a menu entry, the right-click menu — shows its shortcut from the third time on, five times; pressing the shortcut once ends its tips.')}
             <Row label=""><button type="button" data-reset-shortcut-tips disabled={!p.shortcutTips} onClick={() => resetShortcutTips()}>Show all tips again</button></Row>

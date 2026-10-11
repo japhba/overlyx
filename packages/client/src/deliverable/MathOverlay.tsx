@@ -14,6 +14,7 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { LyxMathField, stripMathDelims } from '../editor/lyxmath/field';
 import { parseFormula, writeFormula, type MacroTable } from '@overlyx/core';
 import type { MathBox, KeyPress } from './protocol';
+import { INVERT_FILTER } from '../app/darkslides';
 
 /** LyX's Alt+M N on a displayed formula: numbered (an equation environment, as LaTeX's) or not; every row of a grid alike */
 export function toggleNumbering(f: LyxMathField, macros: MacroTable = {}): void {
@@ -57,8 +58,10 @@ const drawn = (f: LyxMathField) => !!f.dom.querySelector('.lm-content mjx-contai
 /** what the toolbar does to the formula open (the math row's Number and Label) */
 export interface MathOps { number(): void; label(name: string): void; labelNow(): string; display: boolean }
 
-export function MathOverlay({ st, frame, scale, macros, onSet, onDone, onShown, onDisplay, onRest, keysIn, ops, typeAhead }: {
+export function MathOverlay({ st, frame, scale, macros, onSet, onDone, onShown, onDisplay, onRest, keysIn, ops, typeAhead, invert }: {
   st: MathEditState;
+  /** the slides are shown light on dark (app/darkslides.ts): the field over a formula is too */
+  invert?: boolean;
   /** set here while the field is open */
   ops?: { current: MathOps | null };
   /** the macros of the .tex files the page links (core html/deckextras.ts) */
@@ -221,7 +224,7 @@ export function MathOverlay({ st, frame, scale, macros, onSet, onDone, onShown, 
   const x = fr.left + (b.align === 'left' ? b.rect.x : b.align === 'center' ? b.rect.x + b.rect.w / 2 : b.rect.x + b.rect.w) * scale;
   return (
     <div ref={box} class={'dl-mathedit' + (shown ? '' : ' pending') + (st.display ? ' display' : '') + (st.closing ? ' closing' : '')} data-dl-mathedit
-      style={{ left: `${x}px`, transform: b.align === 'left' ? undefined : `translateX(${b.align === 'center' ? -50 : -100}%)`, fontSize: `${b.em * scale}px`, color: st.color }}>
+      style={{ left: `${x}px`, transform: b.align === 'left' ? undefined : `translateX(${b.align === 'center' ? -50 : -100}%)`, fontSize: `${b.em * scale}px`, color: st.color, filter: invert ? INVERT_FILTER : undefined }}>
       <span ref={base} class="dl-mathedit-base" />
     </div>
   );

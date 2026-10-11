@@ -11,6 +11,8 @@ import type { EditorView } from 'prosemirror-view';
 import { showContextMenu, type MenuItem } from '../contextmenu';
 import { imageFiles } from '../imagepaste';
 import { placeImageFiles, placeSvg } from './images';
+import { darkSlides, onDarkSlides, DARK_DESK } from '../../app/darkslides';
+import { setPref } from '../../prefs';
 
 export interface DeskView { desk: string | null; deskChecker: boolean; pageChecker: boolean }
 const NONE: DeskView = { desk: null, deskChecker: false, pageChecker: false };
@@ -38,7 +40,8 @@ export function attachDesk(view: EditorView, scroller: HTMLElement, opts: { curr
   };
   const apply = () => {
     const el = page();
-    if (el) el.style.setProperty('--canvas-bg', v.deskChecker ? CHECKER : (v.desk ?? pageColor()));
+    // (the dark theme: a dark grey canvas, unless a colour was chosen — app/darkslides.ts)
+    if (el) el.style.setProperty('--canvas-bg', v.deskChecker ? CHECKER : (v.desk ?? (darkSlides().dark ? DARK_DESK : pageColor())));
     view.dom.classList.toggle('ol-page-checker', v.pageChecker);
     view.dom.classList.toggle('ol-desk-match', !v.desk && !v.deskChecker);
   };
@@ -46,7 +49,7 @@ export function attachDesk(view: EditorView, scroller: HTMLElement, opts: { curr
 
   const menuItems = (x: number, y: number): MenuItem[] => [
     { label: 'Canvas colour', sub: [
-      { label: 'Same as the page', checked: !v.desk && !v.deskChecker, action: () => set({ desk: null, deskChecker: false }) },
+      { label: darkSlides().dark ? 'Automatic (dark grey in the dark theme)' : 'Same as the page', checked: !v.desk && !v.deskChecker, action: () => set({ desk: null, deskChecker: false }) },
       { label: 'White', checked: v.desk === '#ffffff', action: () => set({ desk: '#ffffff', deskChecker: false }) },
       { label: 'Light grey', checked: v.desk === '#e7e8ea', action: () => set({ desk: '#e7e8ea', deskChecker: false }) },
       { label: 'Dark grey', checked: v.desk === '#3c4043', action: () => set({ desk: '#3c4043', deskChecker: false }) },
@@ -55,6 +58,7 @@ export function attachDesk(view: EditorView, scroller: HTMLElement, opts: { curr
     ] },
     { label: 'Checkerboard canvas', checked: v.deskChecker, action: () => set({ deskChecker: !v.deskChecker }) },
     { label: 'Checkerboard on pages without a fill (shows transparency)', checked: v.pageChecker, action: () => set({ pageChecker: !v.pageChecker }) },
+    ...(darkSlides().dark ? [{ label: 'Invert slides in the dark theme', checked: darkSlides().invert, action: () => setPref('invertSlides', !darkSlides().invert) }] : []),
     { sep: true },
     { label: 'Back to the slide', action: refocus },
   ];
@@ -124,6 +128,7 @@ export function attachDesk(view: EditorView, scroller: HTMLElement, opts: { curr
   window.addEventListener('resize', schedule);
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null;
   ro?.observe(view.dom);
+  const offDark = onDarkSlides(apply);
   apply();
   schedule();
   return {
@@ -135,6 +140,7 @@ export function attachDesk(view: EditorView, scroller: HTMLElement, opts: { curr
       scroller.removeEventListener('scroll', schedule);
       window.removeEventListener('resize', schedule);
       ro?.disconnect();
+      offDark();
       if (raf) cancelAnimationFrame(raf);
       btn.remove();
       page()?.style.removeProperty('--canvas-bg');

@@ -45,6 +45,8 @@ import { slideElements } from '@overlyx/core/html/deliverable.ts';
 import { formatTimestamp } from '@overlyx/core';
 import { ReviewPane, type CommentDraft } from './ReviewPane';
 import { EditModeSwitch, type EditMode } from '../app/EditModeSwitch';
+import { useDarkSlides, DARK_DESK } from '../app/darkslides';
+import { setPref } from '../prefs';
 
 const PAD = 48;
 /** the slide rail's width: by default, and as far as its edge can be dragged */
@@ -172,6 +174,10 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const [scrollY, setScrollY] = useState(0);
   const scrollRef = useRef(0);
   const [view, setViewState] = useState<CanvasView>(() => loadView(host.path));
+  // the dark theme: a dark grey canvas unless one was chosen; the slides light on dark if asked for (app/darkslides.ts)
+  const darkS = useDarkSlides();
+  const darkRef = useRef(darkS); darkRef.current = darkS;
+  const shownView = (v: CanvasView): CanvasView => (darkRef.current.dark && v.desk === null && !v.deskChecker ? { ...v, desk: DARK_DESK } : v);
   const [colors, setColors] = useState<{ desk: string; page: string } | null>(null);
   const [floatPop, setFloatPop] = useState<{ x: number; y: number; title: string; render: (close: () => void) => ComponentChildren } | null>(null);
   const [cropping, setCropping] = useState<Path | null>(null);
@@ -478,7 +484,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             setSolo(m.solo ?? null);
             toCanvas({ ol: 'scale', scale });
             toCanvas({ ol: 'tool', tool, ink: deckInkStyle(inkRef.current, pageWRef.current) });
-            toCanvas({ ol: 'view', view: viewRef.current });
+            toCanvas({ ol: 'view', view: shownView(viewRef.current) });
+            toCanvas({ ol: 'dark', invert: darkRef.current.invert, desk: null });
             toCanvas(reviewMsgRef.current());
             if (host.ready()) toCanvas({ ol: 'source', version: version.current, html: versions.current.get(version.current) ?? text.toString() });
             setDeckMacros(macroTableOf(m.macros ?? {}));
@@ -490,6 +497,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             toRail({ ol: 'scale', scale: railScale });
             if (host.ready()) toRail({ ol: 'source', version: version.current, html: text.toString() });
             toRail({ ol: 'current', slide: currentRef.current });
+            toRail({ ol: 'dark', invert: darkRef.current.invert, desk: darkRef.current.dark ? DARK_DESK : null });
             if (peersRef.current.length) toRail({ ol: 'peers', peers: peersRef.current });
           }
           break;
@@ -706,9 +714,14 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const v = { ...viewRef.current, ...patch };
     setViewState(v);
     saveView(host.path, v);
-    toCanvas({ ol: 'view', view: v });
+    toCanvas({ ol: 'view', view: shownView(v) });
   };
-  const deskCss = view.deskChecker ? CHECKER : (view.desk ?? colors?.desk ?? undefined);
+  const deskCss = view.deskChecker ? CHECKER : (shownView(view).desk ?? colors?.desk ?? undefined);
+  useEffect(() => {
+    toCanvas({ ol: 'view', view: shownView(viewRef.current) });
+    toCanvas({ ol: 'dark', invert: darkS.invert, desk: null });
+    toRail({ ol: 'dark', invert: darkS.invert, desk: darkS.dark ? DARK_DESK : null });
+  }, [darkS.dark, darkS.invert]);
 
   /* ------------------------------------------------------------- tools and objects */
 
@@ -1013,7 +1026,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     const v = viewRef.current;
     return [
       { label: 'Canvas colour', sub: [
-        { label: 'Same as the page', checked: v.desk === null && !v.deskChecker, action: () => setView({ desk: null, deskChecker: false }) },
+        { label: darkRef.current.dark ? 'Automatic (dark grey in the dark theme)' : 'Same as the page', checked: v.desk === null && !v.deskChecker, action: () => setView({ desk: null, deskChecker: false }) },
         ...(colors?.page ? [{ label: 'The slides’ colour', action: () => setView({ desk: colors.page, deskChecker: false }) }] : []),
         { label: 'White', checked: v.desk === '#ffffff', action: () => setView({ desk: '#ffffff', deskChecker: false }) },
         { label: 'Light grey', checked: v.desk === '#e8eaed', action: () => setView({ desk: '#e8eaed', deskChecker: false }) },
@@ -1023,6 +1036,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       ] },
       { label: 'Checkerboard canvas', checked: v.deskChecker, action: () => setView({ deskChecker: !v.deskChecker }) },
       { label: 'Checkerboard under the slides (shows transparency)', checked: v.pageChecker, action: () => setView({ pageChecker: !v.pageChecker }) },
+      ...(darkRef.current.dark ? [{ label: 'Invert slides in the dark theme', checked: darkRef.current.invert, action: () => setPref('invertSlides', !darkRef.current.invert) }] : []),
       { sep: true },
       { label: zoomRef.current > 1.01 ? 'Fit the slide' : 'Back to the slide', action: fitSlide },
     ];
@@ -1431,6 +1445,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           <button class="dl-btn dl-zoom" title="Fit (Ctrl+0)" onClick={fitSlide}>{Math.round(scale * 100)}%</button>
           <button class="dl-btn" title="Zoom in (Ctrl+=)" onClick={() => zoomStep(1.25)}>+</button>
         </span>
+        {darkS.dark && <button class={'dl-btn dl-invert' + (darkS.invert ? ' on' : '')} data-dl-invert aria-pressed={darkS.invert} onClick={() => setPref('invertSlides', !darkS.invert)}
+          title={darkS.invert ? 'Slides light on dark (pictures in their colours) — click for their own colours' : 'The slides’ own colours — click to show them light on dark'}>◐</button>}
         <button class={'dl-btn' + (codeOpen ? ' on' : '')} title="The page's code" data-dl-code onClick={() => setCodeOpen(o => !o)}>&lt;/&gt;</button>
         <button class={'dl-btn dl-review-btn' + (reviewOpen ? ' on' : '')} data-dl-review-toggle onClick={() => { setReviewOpen(!reviewOpen); if (reviewOpen) { setDraft(null); setFocus(null); } }}
           title={`Comments and suggestions${openComments || review.changes.length ? ` — ${openComments} open comment${openComments === 1 ? '' : 's'}, ${review.changes.length} suggestion${review.changes.length === 1 ? '' : 's'}` : ''}`}>
@@ -1549,7 +1565,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         }}
         onAdded={r => { bibAsked.current.delete(r.key); setTimeout(() => syncBibRef.current?.(), 500); }}
         onClose={() => setCiteOpen(false)} />}
-      {mathEdit && !presenting && <MathOverlay st={mathEdit} frame={canvasFrame.current} scale={scale} typeAhead={typeAhead}
+      {mathEdit && !presenting && <MathOverlay st={mathEdit} frame={canvasFrame.current} scale={scale} typeAhead={typeAhead} invert={darkS.invert}
         onSet={tex => toCanvas({ ol: 'mathSet', id: mathEdit.id, tex })}
         onShown={() => toCanvas({ ol: 'mathShown', id: mathEdit.id })}
         onDisplay={() => toCanvas({ ol: 'mathDisplay', id: mathEdit.id })}

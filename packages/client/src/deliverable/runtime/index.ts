@@ -206,6 +206,34 @@ function railShow(i: number): void {
   if (r.y < scrollY || r.y + r.h > scrollY + innerHeight) scrollTo({ top: Math.max(0, r.y - 20 / railScale) });
 }
 
+/* ------------------------------------------------------------------ slides light on dark */
+
+let invertCss: HTMLStyleElement | null = null;
+/**
+ * The slides shown light on dark while they are edited (the editor's dark theme, app/darkslides.ts):
+ * each slide inverted with a 180° hue rotation — colours keep their hue — and pictures, videos and
+ * backgrounds with a picture inverted back to their own colours. Only the slides: the runtime's
+ * frames and handles and the canvas around them stay as they are.
+ */
+function invertSlides(on: boolean): void {
+  if (on && !invertCss) {
+    invertCss = document.createElement('style');
+    invertCss.setAttribute('data-ol-runtime', '');
+    const f = 'invert(1) hue-rotate(180deg)';
+    invertCss.textContent = `html.ol-invert .slide { filter: ${f}; }
+      html.ol-invert .slide :is(img, video, canvas, iframe, object, embed, image, [style*="background-image"], [style*="url("]) { filter: ${f}; }`;
+    document.head.appendChild(invertCss);
+  }
+  document.documentElement.classList.toggle('ol-invert', on);
+}
+
+let railDeskCss: HTMLStyleElement | null = null;
+/** the rail's background between the thumbnails: the dark theme's canvas, or the page's own (null) */
+function railDesk(desk: string | null): void {
+  if (!railDeskCss) { railDeskCss = document.createElement('style'); railDeskCss.setAttribute('data-ol-runtime', ''); document.head.appendChild(railDeskCss); }
+  railDeskCss.textContent = desk && /^#[0-9a-f]{3,8}$/i.test(desk) ? `html, body { background: ${desk} !important; }` : '';
+}
+
 /* ------------------------------------------------------------------ messages */
 
 function onMessage(e: MessageEvent): void {
@@ -233,6 +261,7 @@ function onMessage(e: MessageEvent): void {
     case 'tool': if (MODE === 'edit') edit.setTool(m.tool, m.ink); break;
     case 'exec': if (MODE === 'edit') edit.exec(m.command, m.value); break;
     case 'peers': if (MODE === 'edit') edit.setPeers(m.peers); else if (MODE === 'thumb') { railPeers = m.peers; drawRail(); } break;
+    case 'dark': if (MODE === 'edit' || MODE === 'thumb') { invertSlides(m.invert); if (MODE === 'thumb') railDesk(m.desk); } break;
     case 'current': if (MODE === 'thumb') railShow(m.slide); break;
     case 'asset': refreshAsset(m.path, m.v); break;
     case 'arrange': if (MODE === 'edit') arrange(m.how); break;
