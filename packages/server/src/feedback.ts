@@ -140,7 +140,26 @@ export function reportServerError(err: unknown): void {
 
 /** Error reports not seen for `days` are forgotten (startup housekeeping); people's own reports stay until their account goes. */
 export function pruneReports(days = 90): number {
-  return db.prepare("DELETE FROM reports WHERE kind != 'feedback' AND last_at < ?").run(Date.now() - days * 24 * 60 * 60 * 1000).changes;
+  const day = 24 * 60 * 60 * 1000;
+  // mail to privacy@ / contact@ (inbox.ts) is kept a year — long enough to answer a request and keep its record
+  return db.prepare("DELETE FROM reports WHERE kind NOT IN ('feedback', 'mail') AND last_at < ?").run(Date.now() - days * day).changes
+    + db.prepare("DELETE FROM reports WHERE kind = 'mail' AND last_at < ?").run(Date.now() - 365 * day).changes;
+}
+
+/** Reports and mail for the administrators' list (newest first). */
+export function listReports(opts: { kind?: string; limit?: number } = {}): { id: number; kind: string; title: string; body: string; count: number; createdAt: number; lastAt: number; from: string | null }[] {
+  const rows = db.prepare(`SELECT r.*, u.username, u.display_name AS name FROM reports r LEFT JOIN users u ON u.id = r.user_id
+    ${opts.kind ? 'WHERE r.kind = @kind' : ''} ORDER BY r.last_at DESC LIMIT @limit`).all({ kind: opts.kind, limit: Math.min(500, opts.limit ?? 200) }) as any[];
+  return rows.map(r => ({ id: r.id, kind: r.kind, title: r.title, body: r.body, count: r.count, createdAt: r.created_at, lastAt: r.last_at, from: r.username ? `${r.name} (${r.username})` : null }));
+}
+export function deleteReport(id: number): boolean { return db.prepare('DELETE FROM reports WHERE id = ?').run(id).changes > 0; }
+
+/** A message received by mailin.ts: a report of kind `mail` (who wrote is in its text — no account). */
+export function storeMail(m: { from: string; fromName: string; to: string[]; subject: string; text: string; attachments: string[]; receivedAt: number }): number {
+  const head = [`From: ${m.fromName ? `${m.fromName} <${m.from}>` : m.from}`, `To: ${m.to.join(', ')}`, m.attachments.length ? `Attachments (not kept): ${m.attachments.join(', ')}` : ''].filter(Boolean).join('\n');
+  const id = Number(insertReport.run({ kind: 'mail', hash: null, title: clean(m.subject, 300) || '(no subject)', body: `${head}\n\n${clean(m.text, 20000)}`, user_id: null, version: appVersion, user_agent: null, now: m.receivedAt }).lastInsertRowid);
+  console.log(`[mail] message #${id} for ${m.to.join(', ')}`);
+  return id;
 }
 
 /** An account is deleted: its reports go, its link to error reports is cut. */

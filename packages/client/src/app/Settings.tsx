@@ -12,7 +12,7 @@
 import { UiChoice } from './Tour';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser, type DeletionPreview } from '../api';
+import { api, type AiStatus, type AiModelInfo, type User, type UserSettings, type AdminUser, type DeletionPreview, type AdminReport } from '../api';
 import { clearLocalData } from './localData';
 import { getPrefs, setPref, subscribePrefs, type Prefs } from '../prefs';
 import { resetShortcutTips } from '../shortcuttips';
@@ -248,6 +248,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
                 {users === null && <div class="sub">Loading…</div>}
               </div>
             </>}
+            {user.isAdmin && <AdminReports />}
             {!user.guest && <DeleteAccount user={user} />}
           </>}
         </div>
@@ -308,5 +309,44 @@ function DeleteAccount({ user }: { user: User }) {
       </>}
       {err && <div class="err">{err}</div>}
     </div>}
+  </>;
+}
+
+/**
+ * Administrators: what reached the people who run the instance — mail to privacy@ / contact@ (received
+ * on the server, never forwarded), problem reports from Help ▸ Report a problem, and errors the app
+ * ran into (server feedback.ts). Read here; a handled one can be deleted.
+ */
+const REPORT_KINDS: [string, string][] = [['mail', 'Mail'], ['feedback', 'Problem reports'], ['client-error', 'Errors (browser)'], ['server-error', 'Errors (server)'], ['vscode-error', 'Errors (VS Code)']];
+function AdminReports() {
+  const [kind, setKind] = useState('mail');
+  const [rows, setRows] = useState<AdminReport[] | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { setRows(null); api.adminReports(kind).then(r => setRows(r.reports)).catch(e => setErr((e as Error).message)); }, [kind]);
+  const remove = async (id: number) => {
+    try { await api.deleteAdminReport(id); setRows(list => (list ?? []).filter(r => r.id !== id)); } catch (e) { setErr((e as Error).message); }
+  };
+  const when = (t: number) => new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return <>
+    <h3>Messages and reports (administrator)</h3>
+    <div class="admin-reports" data-admin-reports>
+      <div class="ar-kinds">{REPORT_KINDS.map(([k, label]) => <button key={k} class={'btn small' + (k === kind ? ' active' : '')} onClick={() => setKind(k)} data-ar-kind={k}>{label}</button>)}</div>
+      {err && <div class="err">{err}</div>}
+      {rows === null && !err && <div class="sub">Loading…</div>}
+      {rows && !rows.length && <div class="sub">Nothing here.</div>}
+      {rows?.map(r => (
+        <div key={r.id} class={'ar-row' + (open === r.id ? ' open' : '')} data-ar-row={r.id}>
+          <button class="ar-head" onClick={() => setOpen(o => (o === r.id ? null : r.id))}>
+            <span class="ar-title">{r.title}</span>
+            <span class="sub">{r.from ? `${r.from} · ` : ''}{when(r.lastAt)}{r.count > 1 ? ` · ${r.count}×` : ''}</span>
+          </button>
+          {open === r.id && <>
+            <pre class="ar-body">{r.body}</pre>
+            <button class="btn small danger" onClick={() => void remove(r.id)}>Delete</button>
+          </>}
+        </div>
+      ))}
+    </div>
   </>;
 }

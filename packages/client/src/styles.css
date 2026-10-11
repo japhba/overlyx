@@ -1700,6 +1700,14 @@ html[data-presenting] .editor-column.panes > .editor-scroll { display: block !im
 .lyx-editor.font-sample .sample-display { margin: 6px 0 8px; text-align: center; overflow-x: auto; overflow-y: hidden; }
 .settings-users { border: 1px solid var(--ui-border); border-radius: 4px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
 .settings-users label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.admin-reports { display: flex; flex-direction: column; gap: 6px; }
+.admin-reports .ar-kinds { display: flex; flex-wrap: wrap; gap: 4px; }
+.admin-reports .ar-kinds .btn.active { font-weight: 600; border-color: var(--accent); }
+.admin-reports .ar-row { border: 1px solid var(--ui-border); border-radius: 4px; }
+.admin-reports .ar-head { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 6px 8px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.admin-reports .ar-title { font-weight: 600; overflow-wrap: anywhere; }
+.admin-reports .ar-body { margin: 0 8px 6px; padding: 6px 8px; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--ui-bg2); border-radius: 3px; }
+.admin-reports .ar-row .btn.danger { margin: 0 8px 8px; }
 .delete-account { border: 1px solid var(--err); border-radius: 4px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
 .delete-account p { margin: 0; }
 .delete-account .delete-projects { margin: 0; padding-left: 20px; max-height: 160px; overflow: auto; }

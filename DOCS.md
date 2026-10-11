@@ -395,6 +395,14 @@ blend.
   `OVERLYX_ERROR_REPORTS=off` keeps only the manual dialog. Error rows go 90 days after they were last
   seen (`pruneReports`), people's reports with their account. Read them with
   `npx tsx scripts/reports.ts [--kind feedback] [--days N] [--full] [--id N]` (read-only).
+* **Mail to privacy@ / contact@overlyx.app** (`packages/server/src/mailin.ts`, `inbox.ts`,
+  `deploy/overlyx-mailin.service`): a receive-only SMTP server, its own unprivileged systemd unit (port
+  25, DynamicUser, the production checkout read-only), accepts mail only for `MAILIN_RECIPIENTS` at
+  `MAILIN_DOMAIN`, keeps text + attachment names as JSON files in `/var/lib/overlyx-mailin`; it never
+  sends or forwards. The OverLyX server imports them every minute into `reports` (kind `mail`, kept a
+  year); administrators read them in Settings ▸ Account ▸ Messages and reports (`GET /api/admin/reports`).
+  Without an MX record senders deliver to the A record; restart `overlyx-mailin` after a deploy that
+  changes mailin.ts.
 * **Privacy notice and account deletion** (`packages/server/src/privacy.ts`, `accounts.ts`): `GET /privacy`
   is a public page (start-page footer, *Help ▸ Privacy notice*, Settings ▸ Privacy) describing what is
   kept, the services involved and retention — keep it in step with the code it names in its header.

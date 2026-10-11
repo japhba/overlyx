@@ -179,6 +179,8 @@ export const knownProjects = new Set<string>();
 export interface LitHit { id: string; title: string; authors: string[]; year: number | null; venue: string; type: string; doi: string | null; arxiv: string | null; url: string | null; citations: number | null; sources: string[]; dblp?: string }
 export interface BibAddResult { key: string; file: string; existed: boolean; bibtex: string; entry: BibItem }
 export interface FeedbackInfo { version: string; errorReports: boolean }
+/** a problem report, error record or mail for the administrators (server feedback.ts listReports) */
+export interface AdminReport { id: number; kind: string; title: string; body: string; count: number; createdAt: number; lastAt: number; from: string | null }
 /** what deleting the account erases (server accounts.ts deletionPreview) */
 export interface DeletionPreview { owned: { project: string; title: string | null; people: number }[]; memberOf: number; refused: string | null }
 export const api = {
@@ -189,6 +191,9 @@ export const api = {
   feedback: (data: { kind: 'bug' | 'idea' | 'question'; title: string; body: string; doc?: string | null; error?: string | null }) => req<{ id: number }>('POST', '/api/feedback', data),
   clientError: (data: { message: string; stack?: string | null }) => req<{ id: number | null }>('POST', '/api/client-error', data),
   accountDeletion: () => req<DeletionPreview>('GET', '/api/account/deletion'),
+  /** administrators: problem reports, error records, mail to privacy@ / contact@ (server feedback.ts) */
+  adminReports: (kind?: string) => req<{ reports: AdminReport[] }>('GET', `/api/admin/reports${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
+  deleteAdminReport: (id: number) => req<{ ok: boolean }>('DELETE', `/api/admin/reports/${id}`),
   deleteAccount: (confirm: string) => req<{ ok: boolean; projects: string[] }>('POST', '/api/account/delete', { confirm }),
   me: () => req<{ user: User | null; google: boolean; signup?: 'open' | 'invited' }>('GET', '/api/auth/me'),
   login: (username: string, password: string) => req<{ user: User }>('POST', '/api/auth/login', { username, password }),
