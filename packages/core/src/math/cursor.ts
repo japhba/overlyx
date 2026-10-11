@@ -67,6 +67,8 @@ export interface MathCursorHost {
   /** the formula should be "unlocked" from the macro table (name → nargs) */
 }
 
+/** environments `\begin{…}` typed as TeX makes a grid of */
+const TEX_GRID_ENVS = new Set(['matrix', 'pmatrix', 'bmatrix', 'Bmatrix', 'vmatrix', 'Vmatrix', 'smallmatrix', 'cases', 'aligned', 'gathered', 'split', 'array']);
 /** a relation or binary operator: a formula does not end there (a space typed after one is TeX's, not "leave") */
 const OPERATOR_CHARS = new Set(['=', '+', '-', '<', '>', ',', ':', ';', '(', '[', '|', '/', '*']);
 const OPERATOR_SYMS = new Set(['cdot', 'times', 'div', 'pm', 'mp', 'ast', 'star', 'circ', 'bullet', 'oplus', 'otimes', 'cup', 'cap', 'wedge', 'vee', 'setminus',
@@ -88,6 +90,8 @@ export class MathCursor {
    * (ignored), not LyX's "out of this box"
    */
   private braced = new WeakSet<Cell>();
+  /** grids made by typing `\begin{…}`: a space in their cells is TeX's too */
+  private texGrids = new WeakSet<Atom>();
   /** the next argument cell a typed `}` moved to: a `{` typed at its start just opens it */
   private expectBrace: Cell | null = null;
 
@@ -704,7 +708,8 @@ export class MathCursor {
       const starMacro = c === '*' && (SYMBOLS[name.slice(1) + '*'] || this.macros[name.slice(1) + '*']);
       if (/^[A-Za-z]$/.test(c) || starMacro) { p.n = name + c; return true; }
       if (name === '\\') {
-        if (c === '\\') { this.backspace(); this.niceInsertAtom(this.mode === 'text' ? { t: 'cmd', n: 'textbackslash' } : { t: 'sym', n: 'backslash' }); }
+        if (c === '\\' && this.mode === 'math' && this.texNewlineOK()) { this.backspace(); this.texNewline(); }
+        else if (c === '\\') { this.backspace(); this.niceInsertAtom(this.mode === 'text' ? { t: 'cmd', n: 'textbackslash' } : { t: 'sym', n: 'backslash' }); }
         else if (c === '^' && this.mode === 'math') { this.backspace(); this.niceInsertAtom({ t: 'sym', n: 'mathcircumflex' }); }
         else if (c === '{' || c === '%') {
           const sel = p.sel ?? '';
@@ -767,7 +772,7 @@ export class MathCursor {
       if (this.pos !== 0 && prev && prev.t === 'space' && prev.len === undefined) { prev.n = nextSpace(prev.n); return true; }
       // typed as TeX — inside braces the author typed (`\frac{a + b}{c}`), or after an operator a
       // formula cannot end with (`x = \sqrt{y}`): a TeX space, nothing to insert, no leaving
-      if (this.braced.has(this.cell)) return true;
+      if (this.braced.has(this.cell) || (this.depth >= 2 && this.texGrids.has(this.owner as Atom))) return true;
       if (prev && isOperatorAtom(prev) && (this.depth === 1 || (this.owner as Atom).t !== 'script')) return true;
       if (this.popForward()) return true;
       return this.pos !== this.lastpos;   // at the very end: leave the formula (caller handles false)
@@ -779,6 +784,12 @@ export class MathCursor {
     } else {
       if (c === '^') { this.niceInsertAtom({ t: 'cmd', n: 'textasciicircum' }); return true; }
       if (c === '~') { this.niceInsertAtom({ t: 'cmd', n: 'textasciitilde' }); return true; }
+    }
+    if (c === '}' && this.depth >= 2 && (this.owner as Atom).t === 'brace' && this.pos === this.lastpos) {
+      // the closing brace of a group typed as TeX (`\cmd{…}`): `\begin{pmatrix}` makes that grid, `\end{…}` leaves it, else out of the group
+      if (this.texEnvironment()) return true;
+      this.popForward();
+      return true;
     }
     if (c === '}' && !this.braced.has(this.cell) && this.depth >= 2 && (this.owner as Atom).t === 'script' && this.pos === this.lastpos) {
       // a script typed without braces holds one thing in TeX (`\varepsilon_0}`): the brace closes what encloses it
@@ -795,12 +806,71 @@ export class MathCursor {
       return true;
     }
     if (c === '{' && this.expectBrace === this.cell && this.pos === 0 && !this.cell.length) { this.expectBrace = null; this.braced.add(this.cell); return true; }
+    if (c === '&' && this.gridCellNext()) return true;
     if (c === '{' || c === '}' || c === '&' || c === '$' || c === '#' || c === '%' || c === '_') { this.niceInsertAtom(createInsetMath(c, this.macros)); return true; }
     this.insertChar(c);
     return true;
   }
 
   private popForwardIfIn(t: Atom['t']) { if (this.depth >= 2 && (this.owner as Atom).t === t) this.popForward(); }
+
+  /* ---- environments typed as TeX: \begin{pmatrix} a & b \\ c & d \end{pmatrix} */
+
+  /** in a grid (a matrix, cases, a multi-column hull): `&` goes to the next cell of the row, adding a column at its end */
+  private gridCellNext(): boolean {
+    const o = this.owner;
+    const g = gridOf(o);
+    if (!g || (isHull(o) && !COL_HULLS.has(o.type))) return false;
+    if (this.col + 1 < g.ncols) { this.idx++; this.pos = 0; return true; }
+    return this.gridAppendColumn();
+  }
+  /** `\\` typed as TeX: a new row after this one, the cursor in its first cell; a displayed equation becomes a gather (rows, no columns) */
+  private texNewline(): void {
+    const o = this.owner;
+    if (isHull(o) && o.type === 'equation') mutateHull(o, 'gather');
+    const g = gridOf(this.owner);
+    if (!g) return;
+    const r = this.row;
+    // what follows the cursor in its cell starts the new row
+    const tail = this.cell.splice(this.pos);
+    this.addRow(r);
+    this.idx = (r + 1) * g.ncols;
+    this.pos = 0;
+    this.cell.push(...tail);
+  }
+  /** `\\` typed makes a new row: in a grid or a display formula (not an inline one) */
+  private texNewlineOK(): boolean {
+    const o = this.owner;
+    if (isHull(o)) return o.type !== 'simple' && (ROW_HULLS.has(o.type) || o.type === 'equation');
+    return !!gridOf(o);
+  }
+  /** `}` closing `\begin{env}` (a grid of that environment, the cursor in its first cell) or `\end{…}` (out of the grid) */
+  private texEnvironment(): boolean {
+    const brace = this.owner as Atom & { t: 'brace'; body: Cell };
+    const name = brace.body.length && brace.body.every(a => a.t === 'char' && /[A-Za-z*]/.test(a.c)) ? brace.body.map(a => (a as { c: string }).c).join('') : '';
+    if (!name) return false;
+    const parent = this.slices[this.slices.length - 2];
+    const cell = atomCells(parent.owner)[parent.idx];
+    const before = cell[parent.pos - 1];
+    const cmd = before && before.t === 'cmd' ? before.n : '';
+    if (cmd !== 'begin' && cmd !== 'end') return false;
+    if (cmd === 'begin' && !TEX_GRID_ENVS.has(name)) return false;
+    // the `\begin` / `\end` and its brace go
+    this.slices.pop();
+    cell.splice(parent.pos - 1, 2);
+    this.top.pos = parent.pos - 1;
+    if (cmd === 'end') {
+      if (!isHull(this.owner) && gridOf(this.owner)) this.popForward();
+      return true;
+    }
+    const ncols = name === 'cases' || name === 'aligned' || name === 'alignedat' || name === 'split' ? 2 : 1;
+    const g: Atom = { t: 'grid', env: name.replace(/\*$/, ''), ncols, rows: [{ cells: Array.from({ length: ncols }, () => [] as Cell) }], ...(name === 'array' ? { halign: 'c' } : {}) } as Atom;
+    this.texGrids.add(g);
+    this.plainInsert(g);
+    this.top.pos--;
+    this.push(g, 0, 0);
+    return true;
+  }
 
   /** InsetMathNest::script: ^ and _ */
   script(up: boolean, saveSelection = ''): boolean {

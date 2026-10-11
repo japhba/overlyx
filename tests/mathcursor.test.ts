@@ -473,6 +473,14 @@ describe('typing TeX braces after a command', () => {
     expect(out(e)).toBe('$x^{2}+y$');
     expect(e.interpretChar(' ')).toBe(false); // … and at the end of the formula, the formula
   });
+  it('environments typed as TeX: \\begin{…} makes the grid, & and \\\\ move through it, \\end{…} leaves it', () => {
+    const t = (f: string, typed: string) => { const c = at(f); type(c, typed); return { out: out(c).replace(/\n/g, ''), depth: c.depth }; };
+    expect(t('$$', '\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}+x')).toEqual({ out: '$\\begin{pmatrix}a & b\\\\c & d\\end{pmatrix}+x$', depth: 1 });
+    expect(t('$$', 'f(x)=\\begin{cases}1 & x>0\\\\0 & \\text{else}\\end{cases}').out).toBe('$f(x)=\\begin{cases}1 & x>0\\\\0 & \\text{else}\\end{cases}$');
+    // a displayed equation with \\ becomes rows (gather), an unknown environment stays as typed
+    expect(t('\\[\\]', 'a=b\\\\c=d').out).toBe('\\begin{gather*}a=b\\\\c=d\\end{gather*}');
+    expect(t('$$', '\\begin{foo}x').out).toBe('$\\begin{foo}x$');
+  });
   it('braces elsewhere are still literal brace groups / \\{ \\}', () => {
     const c = at('$$');
     type(c, '\\alpha{');           // a command without arguments: a brace group follows it

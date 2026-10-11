@@ -84,7 +84,7 @@ const MARKER_COLOR = '#c000c0';   // LyX Color_mathframe
 
 /** LyX math.bind Alt+M bindings: key → LaTeX to insert (`#0` marks the cursor cell) */
 export const MATH_ALT_M: Record<string, string> = {
-  f: '\\frac{#0}{}', s: '\\sqrt{#0}', r: '\\sqrt[]{#0}', u: '\\sum', i: '\\int', l: '\\lim', c: '\\cases', o: '\\oint', p: '\\partial', b: '\\bar{#0}', h: '\\hat{#0}', v: '\\vec{#0}', w: '\\text{#0}', '~': '\\tilde{#0}', '^': '\\hat{#0}', '_': '\\underline{#0}', ',': '\\,', ':': '\\:', ';': '\\;', '!': '\\!',
+  f: '\\frac{#0}{}', s: '\\sqrt{#0}', r: '\\sqrt[]{#0}', u: '\\sum', i: '\\int', l: '\\lim', c: '\\begin{cases}#0 & \\\\ & \\end{cases}', o: '\\oint', p: '\\partial', b: '\\bar{#0}', h: '\\hat{#0}', v: '\\vec{#0}', w: '\\text{#0}', '~': '\\tilde{#0}', '^': '\\hat{#0}', '_': '\\underline{#0}', ',': '\\,', ':': '\\:', ';': '\\;', '!': '\\!',
   '(': '\\left(#0\\right)', '[': '\\left[#0\\right]', '{': '\\left\\{#0\\right\\}', '|': '\\left|#0\\right|', '<': '\\left\\langle #0\\right\\rangle',
 };
 

@@ -139,7 +139,7 @@ function mathGroups(c: DeckCtx): ToolButton[][] {
       { id: 'm-brace', title: '{ } (Alt+M {)', icon: '{ }', html: face('\\left\\{\\square\\right\\}'), action: () => x('delim', '\\{', '\\}') },
       { id: 'm-abs', title: '| | (Alt+M |)', icon: '| |', html: face('\\left|\\square\\right|'), action: () => x('delim', '|', '|') },
       { id: 'm-matrix', title: 'Matrix (2 × 2)', icon: 'matrix', html: face('\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}'), action: () => x('insert', '\\begin{pmatrix}#0 & \\\\ & \\end{pmatrix}') },
-      { id: 'm-cases', title: 'Cases (Alt+M C)', icon: 'cases', html: face('\\cases'), action: () => x('insert', '\\cases') },
+      { id: 'm-cases', title: 'Cases (Alt+M C)', icon: 'cases', html: face('\\begin{cases}a & \\\\ b & \\end{cases}'), action: () => x('insert', '\\begin{cases}#0 & \\\\ & \\end{cases}') },
       { id: 'm-text', title: 'Text in the formula (Ctrl+M)', icon: 'Tx', action: () => x('text') },
     ],
     ...(c.math.display ? [[
