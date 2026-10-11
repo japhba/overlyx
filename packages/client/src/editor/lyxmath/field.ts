@@ -134,6 +134,8 @@ export class LyxMathField {
    * typed marker back as text (the convention of the `- ` / `# ` triggers: Backspace undoes them).
    */
   dollar: '' | '$' | '$$' = '';
+  /** a backslash command or a brace was typed into this formula: it is being typed as TeX (Space at its top level does not leave it) */
+  private texTyped = false;
   private dragging = false;
   private deadHat = false;
   private lastLatex: string;
@@ -746,8 +748,10 @@ export class LyxMathField {
       const ok = this.cursor.interpretChar(ch);
       if (keep) this.ghost = g!.slice(1).replace(/^\s+/, '');
       // in a formula opened by typing `$` the closing `$` leaves it, as in LaTeX: Space at its top
-      // level is a TeX space (ignored), not LyX's "leave the inset" — `$r \ll d$` types as written
-      if (!ok && ch === ' ' && this.dollar) continue;
+      // level is a TeX space (ignored), not LyX's "leave the inset" — `$r \ll d$` types as written;
+      // so in one typed as TeX (`\omega_0 = \sqrt{k/m}` after Ctrl+M): → or Esc leave it
+      if (ch === '\\' || ch === '{' || ch === '}') this.texTyped = true;
+      if (!ok && ch === ' ' && (this.dollar || this.texTyped)) continue;
       if (!ok) { this.commit(); this.opts.onMoveOut?.('forward', { insertSpace: ch === ' ' }); return; }
     }
     this.commit(keep);

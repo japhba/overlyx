@@ -67,13 +67,27 @@ export interface MathCursorHost {
   /** the formula should be "unlocked" from the macro table (name → nargs) */
 }
 
+/** a relation or binary operator: a formula does not end there (a space typed after one is TeX's, not "leave") */
+const OPERATOR_CHARS = new Set(['=', '+', '-', '<', '>', ',', ':', ';', '(', '[', '|', '/', '*']);
+const OPERATOR_SYMS = new Set(['cdot', 'times', 'div', 'pm', 'mp', 'ast', 'star', 'circ', 'bullet', 'oplus', 'otimes', 'cup', 'cap', 'wedge', 'vee', 'setminus',
+  'leq', 'le', 'geq', 'ge', 'neq', 'ne', 'approx', 'sim', 'simeq', 'cong', 'equiv', 'propto', 'll', 'gg', 'subset', 'subseteq', 'supset', 'supseteq', 'in', 'notin', 'ni',
+  'to', 'rightarrow', 'leftarrow', 'Rightarrow', 'Leftarrow', 'leftrightarrow', 'Leftrightarrow', 'mapsto', 'implies', 'iff', 'coloneqq', 'perp', 'parallel', 'mid']);
+function isOperatorAtom(a: Atom): boolean {
+  if (a.t === 'char') return OPERATOR_CHARS.has(a.c);
+  return (a.t === 'sym' || a.t === 'cmd') && OPERATOR_SYMS.has(a.n);
+}
+
 export class MathCursor {
   slices: Slice[];
   anchor: Slice[] | null = null;
   private selecting = false;
   xTarget: number | null = null;
-  /** the argument cell a typed `{` opened (`\mathcal{` …): a `}` typed at its end closes it instead of inserting `\}` */
-  private typedBrace: Cell | null = null;
+  /**
+   * the cells a typed `{` opened — a command's argument (`\mathcal{`, `\frac{a}{`) or a script
+   * (`x^{`): a `}` typed at its end closes it instead of inserting `\}`, and a space inside is TeX's
+   * (ignored), not LyX's "out of this box"
+   */
+  private braced = new WeakSet<Cell>();
   /** the next argument cell a typed `}` moved to: a `{` typed at its start just opens it */
   private expectBrace: Cell | null = null;
 
@@ -724,7 +738,7 @@ export class MathCursor {
         if (atom && isActive(atom)) {
           this.posBackward(); this.push(atom); this.idxFirst();
           // `\mathcal{F}` typed as TeX: the brace opens the argument, it is not a brace group of its own
-          if (c === '{' && !this.cell.length) { this.typedBrace = this.cell; return true; }
+          if (c === '{' && !this.cell.length) { this.braced.add(this.cell); return true; }
           if (this.cell.length && !this.idxNext()) this.popForward();
         }
       }
@@ -751,6 +765,10 @@ export class MathCursor {
       }
       const prev = this.prevAtom();
       if (this.pos !== 0 && prev && prev.t === 'space' && prev.len === undefined) { prev.n = nextSpace(prev.n); return true; }
+      // typed as TeX — inside braces the author typed (`\frac{a + b}{c}`), or after an operator a
+      // formula cannot end with (`x = \sqrt{y}`): a TeX space, nothing to insert, no leaving
+      if (this.braced.has(this.cell)) return true;
+      if (prev && isOperatorAtom(prev) && (this.depth === 1 || (this.owner as Atom).t !== 'script')) return true;
       if (this.popForward()) return true;
       return this.pos !== this.lastpos;   // at the very end: leave the formula (caller handles false)
     }
@@ -762,13 +780,21 @@ export class MathCursor {
       if (c === '^') { this.niceInsertAtom({ t: 'cmd', n: 'textasciicircum' }); return true; }
       if (c === '~') { this.niceInsertAtom({ t: 'cmd', n: 'textasciitilde' }); return true; }
     }
-    if (c === '}' && this.typedBrace === this.cell && this.pos === this.lastpos) {
-      // the closing brace of an argument opened with `{`: on to the next argument (`\frac{a}{b}`) or out
-      this.typedBrace = null;
-      if (this.idxNext()) this.expectBrace = this.cell; else this.popForward();
+    if (c === '}' && !this.braced.has(this.cell) && this.depth >= 2 && (this.owner as Atom).t === 'script' && this.pos === this.lastpos) {
+      // a script typed without braces holds one thing in TeX (`\varepsilon_0}`): the brace closes what encloses it
+      const saved = this.clone();
+      while (this.depth >= 2 && !this.braced.has(this.cell) && (this.owner as Atom).t === 'script' && this.pos === this.lastpos) this.popForward();
+      if (!(this.braced.has(this.cell) && this.pos === this.lastpos)) this.setSlices(saved);
+    }
+    if (c === '}' && this.braced.has(this.cell) && this.pos === this.lastpos) {
+      // the closing brace of an argument or script opened with `{`: on to the next argument
+      // (`\frac{a}{b}`) or out — a script's (`x^{2}`) always out
+      this.braced.delete(this.cell);
+      if (this.depth >= 2 && (this.owner as Atom).t === 'script') this.popForward();
+      else if (this.idxNext()) this.expectBrace = this.cell; else this.popForward();
       return true;
     }
-    if (c === '{' && this.expectBrace === this.cell && this.pos === 0 && !this.cell.length) { this.expectBrace = null; this.typedBrace = this.cell; return true; }
+    if (c === '{' && this.expectBrace === this.cell && this.pos === 0 && !this.cell.length) { this.expectBrace = null; this.braced.add(this.cell); return true; }
     if (c === '{' || c === '}' || c === '&' || c === '$' || c === '#' || c === '%' || c === '_') { this.niceInsertAtom(createInsetMath(c, this.macros)); return true; }
     this.insertChar(c);
     return true;
@@ -803,6 +829,8 @@ export class MathCursor {
     }
     this.niceInsert(saveSelection, false);
     this.resetAnchor(); this.clearSelection();
+    // `x^{` typed as TeX: the brace opens the script, it is not a brace of its own
+    if (!this.cell.length) this.expectBrace = this.cell;
     return true;
   }
 

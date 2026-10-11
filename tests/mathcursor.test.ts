@@ -446,6 +446,33 @@ describe('typing TeX braces after a command', () => {
     type(c, 'x');
     expect(out(c)).toBe('$\\mathcal{F}+\\frac{a}{b}x$');
   });
+  it('`^{`, `_{` open the script and `}` closes it; an unbraced script ends at the outer `}`', () => {
+    const c = at('$$');
+    type(c, 'e^{i\\pi}+1=0');
+    expect(out(c)).toBe('$e^{i\\pi}+1=0$');
+    expect(c.depth).toBe(1);
+    const d = at('$$');
+    type(d, '\\sum_{n=1}^{\\infty}');
+    expect(out(d)).toBe('$\\sum^{\\infty}_{n=1}$');   // (the writer's order: the same TeX)
+    const e = at('$$');
+    type(e, '\\frac{\\rho}{\\varepsilon_0}+x');
+    expect(out(e)).toBe('$\\frac{\\rho}{\\varepsilon_{0}}+x$');
+  });
+  it('spaces typed as TeX: inside typed braces and after an operator they neither insert nor leave', () => {
+    const c = at('$$');
+    type(c, '\\frac{a + b}{c}');
+    expect(out(c)).toBe('$\\frac{a+b}{c}$');
+    const d = at('$$');
+    type(d, 'x = ');
+    expect(d.interpretChar(' ')).toBe(true);   // after `=`: still in the formula
+    type(d, '\\sqrt{k/m}');
+    expect(out(d)).toBe('$x=\\sqrt{k/m}$');
+    const e = at('$$');
+    type(e, 'x^2 ');                          // LyX: a space leaves the script …
+    type(e, '+y');
+    expect(out(e)).toBe('$x^{2}+y$');
+    expect(e.interpretChar(' ')).toBe(false); // … and at the end of the formula, the formula
+  });
   it('braces elsewhere are still literal brace groups / \\{ \\}', () => {
     const c = at('$$');
     type(c, '\\alpha{');           // a command without arguments: a brace group follows it
