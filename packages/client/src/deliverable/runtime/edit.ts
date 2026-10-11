@@ -212,6 +212,19 @@ export function afterSource(): void {
   nodesAfterSource();
 }
 
+/**
+ * The keys typed between drawing a text box and its retyping starting — the box has to go through
+ * the text and come back first —, typed into the frame or passed on by the editor (typeKeys): typed
+ * into the new box once it is retyped, in the order they came.
+ */
+let drawAhead: KeyPress[] | null = null;
+let drawAheadTimer: ReturnType<typeof setTimeout> | null = null;
+function expectNewText(): void {
+  drawAhead = [];
+  if (drawAheadTimer) clearTimeout(drawAheadTimer);
+  drawAheadTimer = setTimeout(() => { drawAhead = null; }, 4000);
+}
+
 export function editTextAt(path: Path, selectAll = false, math = false): void {
   const el = liveAt(path);
   if (!el) return;
@@ -219,6 +232,13 @@ export function editTextAt(path: Path, selectAll = false, math = false): void {
   selected = [el];
   report();
   if (canType(el)) beginText(el as HTMLElement, null, selectAll && !math, math);
+  // keys typed while the new box was on its way (runtime drawAhead)
+  if (drawAhead && editing === el) {
+    const keys = drawAhead;
+    drawAhead = null;
+    if (drawAheadTimer) { clearTimeout(drawAheadTimer); drawAheadTimer = null; }
+    if (keys.length) typeKeysHere(keys, stopText);
+  }
   draw();
 }
 
@@ -231,6 +251,8 @@ export function mathDisplay(id: number): void { displayChip(id); }
 let leaving: Promise<unknown> = Promise.resolve();
 chipHooks.stop = () => stopText();
 export function typeKeys(keys: KeyPress[]): void {
+  // a text box is on its way: the keys wait for it
+  if (drawAhead && !editing) { drawAhead.push(...keys); return; }
   void leaving.then(() => { if (editing && keys.length) { editing.focus({ preventScroll: true }); typeKeysHere(keys, stopText); } });
 }
 export function mathDone(id: number, tex: string, dir: 'forward' | 'backward' | null, putBack?: string): void {
@@ -1309,6 +1331,7 @@ function finishDraw(d: Drag, box: Rect | null, e: PointerEvent): void {
   }
   const slidePath = slide ? pathOf(slide) : null;
   const after = selected.length === 1 ? pathOf(selected[0]) : null;
+  if (tool === 'text') expectNewText();
   post({ ol: 'draw', version: state.version, tool, slide: slidePath, rect, after, pts });
 }
 
@@ -1533,6 +1556,7 @@ function inCode(): boolean {
 
 function onKeyDown(e: KeyboardEvent): void {
   if (isCropping() || isNodeEditing()) return;
+  if (drawAhead && !editing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Enter')) { e.preventDefault(); drawAhead.push(keyPress(e)); return; }
   if (isPenDrawing() && penKey(e)) { e.preventDefault(); e.stopPropagation(); return; }
   if (isOrdering() && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); stopOrdering(); return; }
   const mod = e.ctrlKey || e.metaKey;
@@ -1542,6 +1566,14 @@ function onKeyDown(e: KeyboardEvent): void {
     // the formula editor gave the keyboard back (it left the formula): typed once the caret is beside the formula
     if (openChipEl() && !isModifierKey(e)) { e.preventDefault(); holdAfter(keyPress(e)); return; }
     if (e.key === 'Escape') { e.preventDefault(); stopText(); return; }
+    // the frame has the keyboard but not the text being retyped (it was just made; a click left the focus
+    // on the page): the key is the text's, not lost on the page
+    if (!editing.contains(document.activeElement) && !mod && !e.altKey && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Enter')) {
+      e.preventDefault();
+      editing.focus({ preventScroll: true });
+      typeKeysHere([keyPress(e)], stopText);
+      return;
+    }
     // LyX: Ctrl+M a formula (Ctrl+Shift+M displayed), an arrow key into a formula goes into it
     if (mod && !e.altKey && e.key.toLowerCase() === 'm') { e.preventDefault(); e.stopPropagation(); insertChip(editing, e.shiftKey); return; }
     // $ typed opens a formula, as in documents ($$ a displayed one, Backspace gives the $ back)

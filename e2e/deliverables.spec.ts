@@ -88,8 +88,8 @@ test('a deck from the New dialog: select, drag, retype, draw, delete and undo', 
   await page.locator('[data-tb="dk-text"]').click();
   const s1 = (await slides(page).first().boundingBox())!;
   await page.mouse.click(s1.x + s1.width * 0.1, s1.y + s1.height * 0.8);
-  await expect.poll(fileText, { timeout: 15000 }).toMatch(/<p style="position: absolute; left: \d+px; top: \d+px; width: 520px; margin: 0">Text<\/p>\n<\/section>/);
-  await page.waitForTimeout(600);
+  // typed straight away, before the box is back from the text (usability test: the keys were lost or became tool shortcuts)
+  await page.waitForTimeout(150);
   await page.keyboard.type('A new box');
   // Enter: a second line in the same box (a paragraph inside a <p> would be pushed out of it by the parser)
   await page.keyboard.press('Enter');

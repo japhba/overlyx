@@ -133,6 +133,16 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const [mathEdit, setMathEdit] = useState<MathEditState | null>(null);
   /** keys typed between placing a new formula and LyX's field opening on it (given to the field then) */
   const typeAhead = useRef<string[] | null>(null);
+  /** a text box was just drawn and is not retyped yet: keys typed out here are passed to the frame, which types them into it (runtime drawAhead) */
+  const textAhead = useRef<boolean>(false);
+  const textAheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** a key for a text box being made: passed on (true), or not one of those keys */
+  const holdForText = (k: KeyPress): boolean => {
+    if (!textAhead.current || k.ctrl || k.meta || k.alt) return false;
+    if (k.key.length !== 1 && k.key !== 'Backspace' && k.key !== 'Enter') return false;
+    toCanvas({ ol: 'typeKeys', keys: [k] });
+    return true;
+  };
   const typeAheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** where the keys typed in the canvas while a formula opened go (MathOverlay) */
   const mathKeysIn = useRef<((id: number, keys: KeyPress[]) => void) | null>(null);
@@ -337,7 +347,14 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           }
           break;
         case 'selection': if (fromCanvas) { setSel(m.items); host.setSelection(m.items.map(i => i.path)); } break;
-        case 'editing': if (fromCanvas) { setEditingText(m.path); if (!m.path) setMathEdit(null); } break;
+        case 'editing':
+          if (!fromCanvas) break;
+          setEditingText(m.path);
+          editingTextRef.current = !!m.path;
+          if (!m.path) setMathEdit(null);
+          // the new text box is being retyped: what was typed meanwhile goes into it
+          if (m.path) textAhead.current = false;
+          break;
         case 'mathEdit': if (fromCanvas) setMathEdit({ id: m.id, tex: m.tex, display: m.display, box: m.box, color: m.color, at: m.at, where: m.where, dollar: m.dollar }); break;
         case 'mathKeys': if (fromCanvas) mathKeysIn.current?.(m.id, m.keys); break;
         case 'mathRect': if (fromCanvas) setMathEdit(st => st && st.id === m.id ? { ...st, box: m.box } : st); break;
@@ -527,6 +544,11 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (!html) return;
     if (!applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) return;
     pending.current = t === 'formula' ? { editText: place.path, math: true } : t === 'text' ? { editText: place.path } : { select: [place.path] };
+    if (t === 'text') {
+      textAhead.current = true;
+      if (textAheadTimer.current) clearTimeout(textAheadTimer.current);
+      textAheadTimer.current = setTimeout(() => { textAhead.current = false; }, 4000);
+    }
     if (t === 'formula') {
       typeAhead.current = [];
       if (typeAheadTimer.current) clearTimeout(typeAheadTimer.current);
@@ -885,6 +907,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const onRuntimeKey = (m: Extract<FromRuntime, { ol: 'key' }>) => {
     const mod = m.ctrl || m.meta;
     if (typeAhead.current && !mod && m.key.length === 1) { typeAhead.current.push(m.key); return; }
+    if (holdForText({ key: m.key, shift: m.shift, alt: m.alt, ctrl: m.ctrl, meta: m.meta })) return;
     const k = m.key.toLowerCase();
     if (mod && k === 'z') { if (m.shift) host.redo(); else host.undo(); return; }
     if (mod && k === 'y') { host.redo(); return; }
@@ -930,6 +953,14 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       const mod = e.ctrlKey || e.metaKey;
       // a new formula is opening: what is typed goes into it
       if (typeAhead.current && !mod && !e.altKey && e.key.length === 1 && !document.querySelector('[data-dl-mathedit]')) { e.preventDefault(); typeAhead.current.push(e.key); return; }
+      // a text box was just drawn: what is typed goes into it once it is ready
+      if (holdForText({ key: e.key, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, meta: e.metaKey })) { e.preventDefault(); return; }
+      // a text is being retyped but the keyboard is still out here (the canvas has not got it yet): the key is the text's
+      if (editingTextRef.current && !mod && !e.altKey && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Enter') && !document.querySelector('[data-dl-mathedit]')) {
+        e.preventDefault();
+        toCanvas({ ol: 'typeKeys', keys: [{ key: e.key, shift: e.shiftKey }] });
+        return;
+      }
       // the node editor's keys when the focus is not in the canvas
       if (nodeEdRef.current && (e.key === 'Escape' || e.key === 'Enter' || e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); toCanvas({ ol: 'nodes', cmd: e.key === 'Delete' || e.key === 'Backspace' ? 'delete' : 'done' }); return; }
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) host.redo(); else host.undo(); }
