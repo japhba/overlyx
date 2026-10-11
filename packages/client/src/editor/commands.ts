@@ -533,12 +533,26 @@ function enclosingFloat($pos: ResolvedPos): { node: PMNode; pos: number; depth: 
 const emptyCaption = () => schema.nodes.inset.create({ name: 'Caption', arg: 'Standard', params: '[]', status: null }, schema.nodes.paragraph.create({ layout: 'Plain Layout' }));
 
 /**
+ * The caret (or a text selection) in a table's cell: the state with the table selected instead — a
+ * caption or a float made there is the table's, not a caption or a float inside the cell (which wrote
+ * raw \caption into the table).
+ */
+function tableSelected(state: EditorState): EditorState | null {
+  if (state.selection instanceof NodeSelection) return null;
+  const $f = state.selection.$from;
+  for (let d = $f.depth; d > 0; d--) if ($f.node(d).type === schema.nodes.table) return state.apply(state.tr.setSelection(NodeSelection.create(state.doc, $f.before(d))));
+  return null;
+}
+
+/**
  * Insert ▸ Caption. Selected text becomes the caption (LyX moves it in). With an image or a table
  * selected the caption is for it: outside a float the object is put into a new figure / table float
  * with an empty caption; inside one, the caption gets a paragraph of its own beside the object's —
  * below a figure, above a table, as insertFloat lays them out. A caption never replaces what is selected.
  */
 export const insertCaption: Command = (state, dispatch, view) => {
+  const inTable = tableSelected(state);
+  if (inTable) return insertCaption(inTable, dispatch, view);
   const sel = state.selection;
   if (sel instanceof NodeSelection && sel.node.isInline && !sel.node.isText) {
     const float = enclosingFloat(sel.$from);
@@ -599,6 +613,8 @@ function commentAnchor(state: EditorState): number {
  */
 export function insertFloat(type: 'figure' | 'table' | 'algorithm' = 'figure'): Command {
   return (state, dispatch) => {
+    const inTable = type !== 'algorithm' ? tableSelected(state) : null;
+    if (inTable) return insertFloat(type)(inTable, dispatch);
     if (outsideLayoutText(state, dispatch)) return false;
     const taken = selectedParagraphs(state);
     // figures and tables are centered (the usual layout); an algorithm's steps are ordinary left-aligned paragraphs

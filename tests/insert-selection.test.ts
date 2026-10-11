@@ -111,6 +111,17 @@ describe('floats and captions wrap a selected image', () => {
     expect(shape(s.doc)).toBe('A [Float figure: diagram | [Caption Standard: ]] here.');
   });
 
+  it('Insert ▸ Caption or a table float with the caret in a table cell is for the table, not inside the cell', () => {
+    const table = () => schema.nodes.table.create(null, schema.nodes.table_row.create(null, [schema.nodes.table_cell.create(null, plain('cell'))]));
+    let s = stateOf(doc(par(table())));
+    const inCell = posOf(s.doc, 'paragraph', n => n.textContent === 'cell') + 3;
+    s = run(select(s, inCell, inCell), C.insertCaption);
+    expect(shape(s.doc)).toBe('[Float table: [Caption Standard: ] | <table>]');
+    let t = stateOf(doc(par(table())));
+    t = run(select(t, inCell, inCell), C.insertFloat('table'));
+    expect(shape(t.doc)).toBe('[Float table: [Caption Standard: ] | <table>]');
+  });
+
   it('Insert ▸ Caption with an image selected outside a float makes it a figure with a caption', () => {
     let s = stateOf(doc(par('Before ', image(), ' after')));
     s = selectNode(s, posOf(s.doc, 'graphics'));
