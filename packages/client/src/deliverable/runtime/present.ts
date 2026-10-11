@@ -23,11 +23,15 @@ export function startPresenting(): void {
   const css = document.createElement('style');
   css.setAttribute('data-ol-runtime', '');
   // the zoom (presentkit: screen point q → s·q + (x, y)) on top of the fit; with the origin at the
-  // slide's corner (left / top 50 %), so the fit alone is the old translate(-50%, -50%) scale(fit)
+  // slide's corner (left / top 50 %), so the fit alone is the old translate(-50%, -50%) scale(fit).
+  // Placed absolutely in the (unscrolled) window, not `fixed`: Safari may give a fixed element in a
+  // frame a layer of its own, rasterised before the scale — on an iPad the slide, scaled up to the
+  // screen, came out soft. (Its containers are not positioned meanwhile, so the window is its frame.)
   css.textContent = `html, body { overflow: hidden !important; background: #000 !important; }
     body { margin: 0 !important; }
+    :is(body, :has(.slide[data-ol-current])):not(html) { position: static !important; }
     .slide:not([data-ol-current]) { display: none !important; }
-    .slide[data-ol-current] { position: fixed !important; left: 50% !important; top: 50% !important; margin: 0 !important;
+    .slide[data-ol-current] { position: absolute !important; left: 50% !important; top: 50% !important; margin: 0 !important;
       transform: translate(var(--ol-ztx, 0px), var(--ol-zty, 0px)) scale(var(--ol-zs, 1)) scale(var(--ol-fit, 1)) translate(-50%, -50%) !important;
       transform-origin: 0 0 !important; box-shadow: none !important; }
     html.ol-hide-cursor, html.ol-hide-cursor * { cursor: none !important; }

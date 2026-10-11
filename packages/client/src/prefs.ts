@@ -53,11 +53,18 @@ export interface Prefs {
   editorMathFont: string;
   /** a tip with the shortcut after an action was taken with the mouse a few times (shortcuttips.ts) */
   shortcutTips: boolean;
+  /**
+   * OverLyX's math keyboard (editor/mathkbd) instead of the system keyboard while a formula has the
+   * cursor: on touch screens until a hardware keyboard is used ('auto'), always, or never
+   */
+  mathKeyboard: 'auto' | 'on' | 'off';
+  /** the math keyboard's pen: handwriting is read by an AI model (a picture of it goes through the server) */
+  aiInk: boolean;
   /** autoCorrect was set by the person (not the old default, see load) */
   autoCorrectChosen?: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, darkPdf: true, invertSlides: false, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, darkPdf: true, invertSlides: false, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true, mathKeyboard: 'auto', aiInk: false };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';

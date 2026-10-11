@@ -248,3 +248,33 @@ describe('rate limiter', () => {
     expect(ai.allow('other', 2)).toBe(true);
   });
 });
+
+describe('handwriting (the math keyboard\'s pen)', () => {
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  it('sends the picture and the formula around the cursor to the ink model; readings come back distinct, at most three', async () => {
+    nextReply = '{"latex": ["x^{2}", "$x^{2}$", "\\\\[x^2\\\\]", "x^{z}", "y"]}';
+    const r = await ai.recognizeInk({ image: PNG, before: 'a+', after: '=1' });
+    expect(r).toEqual(['x^{2}', 'x^2', 'x^{z}']);
+    expect(lastRequest.model).toBe('google/gemini-3.5-flash-lite');
+    expect(lastRequest.temperature).toBe(0);
+    const user = lastRequest.messages[1].content;
+    expect(user[0].text).toContain('a+⟦INK⟧=1');
+    expect(user[1]).toEqual({ type: 'image_url', image_url: { url: PNG } });
+    expect(lastRequest.messages[0].content).toBe(ai.INK_PROMPT);
+  });
+  it('a \\text part asks for plain text', async () => {
+    nextReply = '{"latex": ["for all"]}';
+    expect(await ai.recognizeInk({ image: PNG, text: true })).toEqual(['for all']);
+    expect(lastRequest.messages[1].content[0].text).toContain('\\text{');
+  });
+  it('only PNG data URLs, not too large', async () => {
+    await expect(ai.recognizeInk({ image: 'https://example.com/x.png' })).rejects.toMatchObject({ status: 400 });
+    await expect(ai.recognizeInk({ image: 'data:image/png;base64,' + 'A'.repeat(ai.INK_MAX_IMAGE) })).rejects.toMatchObject({ status: 413 });
+  });
+  it('bare LaTeX is one reading; nothing legible is none', () => {
+    expect(ai.parseInkReply('a+b')).toEqual(['a+b']);
+    expect(ai.parseInkReply('```json\n{"latex": ["\\\\frac{a}{b}"]}\n```')).toEqual(['\\frac{a}{b}']);
+    expect(ai.parseInkReply('{"latex": []}')).toEqual([]);
+    expect(ai.parseInkReply('')).toEqual([]);
+  });
+});

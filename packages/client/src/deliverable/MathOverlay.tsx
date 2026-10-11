@@ -10,7 +10,7 @@
  * (an arrow key or Escape out of it, a click elsewhere), and stays — still, without its frame —
  * until the formula is shown again under it (`closing`, the runtime's mathClose).
  */
-import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { LyxMathField, stripMathDelims } from '../editor/lyxmath/field';
 import { parseFormula, writeFormula, type MacroTable } from '@overlyx/core';
 import type { MathBox, KeyPress } from './protocol';
@@ -50,7 +50,7 @@ export interface MathEditState {
 }
 
 /** what is still part of editing the formula when it gets the pointer or the focus (the toolbars, their palettes) */
-const OURS = '.dl-mathedit, .toolbar, .tb-popup, .dl-ctx, .dl-floatpop, .ctx-menu, .dialog-backdrop';
+const OURS = '.dl-mathedit, .toolbar, .tb-popup, .dl-ctx, .dl-floatpop, .ctx-menu, .dialog-backdrop, .mk, .mk-pill';
 
 /** the field's own rendering is there (not its source while the math font's data is on its way) */
 const drawn = (f: LyxMathField) => !!f.dom.querySelector('.lm-content mjx-container') && !f.dom.querySelector('.lm-content .lm-pending');
@@ -219,6 +219,22 @@ export function MathOverlay({ st, frame, scale, macros, onSet, onDone, onShown, 
 
   // the formula moved or was typeset again, the canvas scrolled or zoomed: the field follows
   useLayoutEffect(place);
+  // the frame moves without a render of the editor (the slide view's transform: a pan, a pinch, the
+  // canvas fitted anew — above the math keyboard, editor/mathkbd): drawn again where it is now
+  const [, follow] = useState(0);
+  useEffect(() => {
+    if (!frame) return;
+    let last = '', raf = 0;
+    const tick = () => {
+      const r = frame.getBoundingClientRect();
+      const at = `${r.left.toFixed(1)},${r.top.toFixed(1)},${r.width.toFixed(1)}`;
+      if (last && at !== last) follow(n => n + 1);
+      last = at;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [frame, st.id]);
 
   if (!fr) return null;
   const x = fr.left + (b.align === 'left' ? b.rect.x : b.align === 'center' ? b.rect.x + b.rect.w / 2 : b.rect.x + b.rect.w) * scale;

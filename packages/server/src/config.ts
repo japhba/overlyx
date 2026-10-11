@@ -130,6 +130,9 @@ export const config = {
     /** requests per user per minute: rewrites / completions */
     rewritesPerMinute: Number(process.env.OVERLYX_AI_REWRITES_PER_MIN ?? 30),
     completionsPerMinute: Number(process.env.OVERLYX_AI_COMPLETIONS_PER_MIN ?? 240),
+    /** handwritten formulas (the math keyboard's pen, ai.ts recognizeInk): a vision model, and requests per user per minute */
+    inkModel: (process.env.OVERLYX_AI_INK_MODEL ?? 'google/gemini-3.5-flash-lite').trim(),
+    inkPerMinute: Number(process.env.OVERLYX_AI_INK_PER_MIN ?? 90),
     /** "Escalate to AI" repairs send a whole document to the repair model (an expensive one): per user an hour and a day, and for everyone a day */
     repairsPerHour: Number(process.env.OVERLYX_AI_REPAIRS_PER_HOUR ?? 5),
     repairsPerDay: Number(process.env.OVERLYX_AI_REPAIRS_PER_DAY ?? 20),

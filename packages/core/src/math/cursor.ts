@@ -74,6 +74,10 @@ const OPERATOR_CHARS = new Set(['=', '+', '-', '<', '>', ',', ':', ';', '(', '['
 const OPERATOR_SYMS = new Set(['cdot', 'times', 'div', 'pm', 'mp', 'ast', 'star', 'circ', 'bullet', 'oplus', 'otimes', 'cup', 'cap', 'wedge', 'vee', 'setminus',
   'leq', 'le', 'geq', 'ge', 'neq', 'ne', 'approx', 'sim', 'simeq', 'cong', 'equiv', 'propto', 'll', 'gg', 'subset', 'subseteq', 'supset', 'supseteq', 'in', 'notin', 'ni',
   'to', 'rightarrow', 'leftarrow', 'Rightarrow', 'Leftarrow', 'leftrightarrow', 'Leftrightarrow', 'mapsto', 'implies', 'iff', 'coloneqq', 'perp', 'parallel', 'mid']);
+/** big operators and function names: an operand (operandStart) does not reach back past them */
+const OPERAND_STOPS = new Set(['sum', 'prod', 'coprod', 'int', 'iint', 'iiint', 'oint', 'bigcup', 'bigcap', 'bigoplus', 'bigotimes', 'bigvee', 'bigwedge',
+  'lim', 'limsup', 'liminf', 'max', 'min', 'sup', 'inf', 'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh', 'coth',
+  'log', 'ln', 'lg', 'exp', 'det', 'dim', 'ker', 'arg', 'deg', 'gcd', 'hom', 'Pr', 'quad', 'qquad']);
 function isOperatorAtom(a: Atom): boolean {
   if (a.t === 'char') return OPERATOR_CHARS.has(a.c);
   return (a.t === 'sym' || a.t === 'cmd') && OPERATOR_SYMS.has(a.n);
@@ -526,6 +530,48 @@ export class MathCursor {
     if (cells.length) cells[a.t === 'macro' ? a.nopt : 0].push(...parseCell(safe, this.macros, this.mode === 'text' ? 'text' : 'math'));
     this.insertAtom(a);
     this.editInsertedInset();
+  }
+
+  /**
+   * Where the operand before the cursor begins (the math keyboard's fraction, as Desmos's: after
+   * `2x` or `(a+b)` the a/b key makes it the numerator): back to an operator, a space, a big
+   * operator or function name, or an opening bracket — a bracketed group `(…)` / `[…]` is taken
+   * whole, with what it is applied to (`f(x)`). The cursor's position when nothing precedes it.
+   */
+  operandStart(): number {
+    const cell = this.cell;
+    let i = this.pos;
+    while (i > 0) {
+      const a = cell[i - 1];
+      if (a.t === 'char' && (a.c === ')' || a.c === ']')) {
+        const open = a.c === ')' ? '(' : '[';
+        let depth = 0, j = i - 1;
+        for (; j >= 0; j--) {
+          const b = cell[j];
+          if (b.t !== 'char') continue;
+          if (b.c === a.c) depth++;
+          else if (b.c === open && --depth === 0) break;
+        }
+        if (j < 0) break;
+        i = j;
+        continue;
+      }
+      if (isOperatorAtom(a) || a.t === 'space' || a.t === 'kern' || (a.t === 'char' && /[\s{]/.test(a.c))) break;
+      if ((a.t === 'sym' || a.t === 'cmd') && OPERAND_STOPS.has(a.n)) break;
+      i--;
+    }
+    return i;
+  }
+  /** select the operand before the cursor (operandStart); false when there is none or a selection already */
+  selectOperand(): boolean {
+    if (this.selection) return false;
+    const start = this.operandStart(), end = this.pos;
+    if (start >= end) return false;
+    this.pos = start;
+    this.resetAnchor();
+    this.pos = end;
+    this.setSelection();
+    return this.selection;
   }
 
   /* ---- hyperlinks (\href{target}{…}, the link box of editor/links.ts) */

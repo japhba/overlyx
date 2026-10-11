@@ -115,7 +115,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
     if (section === 'account' && user.isAdmin && users === null) api.users().then(r => setUsers(r.users)).catch(e => setErr((e as Error).message));
   }, [section]);
 
-  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'usageStats' | 'shortcutTips' | 'darkPdf' | 'invertSlides', label: string, hint: string) => (
+  const check = (key: 'spellcheck' | 'autoCorrect' | 'invertFigures' | 'aiButton' | 'aiRewrite' | 'aiCompleteText' | 'aiCompleteMath' | 'aiInk' | 'usageStats' | 'shortcutTips' | 'darkPdf' | 'invertSlides', label: string, hint: string) => (
     <label class="pref"><input type="checkbox" data-pref={key} checked={p[key]} onChange={e => setPref(key, (e.target as HTMLInputElement).checked)} /><span>{label}<span class="sub">{hint}</span></span></label>
   );
   const toggleRecopy = async (u: AdminUser) => {
@@ -158,6 +158,13 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
               <option value="overlyx">OverLyX — instant, knows LaTeX (skips formulas, commands, code), suggestions in the menu; English, British, German, French</option>
               <option value="browser">Browser — the browser's own checker (checks slowly after a click; suggestions only via {/Mac/.test(navigator.platform) ? '⇧' : 'Shift+'}right-click)</option>
             </select></Row>
+            <h3>Formulas</h3>
+            <Row label="Math keyboard"><select data-pref="mathKeyboard" value={p.mathKeyboard} onChange={e => setPref('mathKeyboard', (e.target as HTMLSelectElement).value as Prefs['mathKeyboard'])}>
+              <option value="auto">On touch screens — until a hardware keyboard is used</option>
+              <option value="on">Always — whenever a formula has the cursor</option>
+              <option value="off">Never — the system keyboard</option>
+            </select></Row>
+            <div class="sub">A keyboard for formulas at the bottom of the screen, in place of the system keyboard: numbers and structures, functions, Greek, relations, letters — and ✎ Write, to write a formula by hand (Settings ▸ AI). Its ⌨ key hands over to the system keyboard.</div>
             <h3>PDF</h3>
             <div class="sub">Build the PDF by itself a moment after the document is saved (it is saved 1.5 s after you stop typing). Builds run in the background on the server.</div>
             {AUTO_BUILD_CHOICES.map(([v, label, hint]) => (
@@ -197,6 +204,7 @@ export function SettingsPanel({ ai, user, initial, onClose, sections = SECTIONS.
             {check('aiRewrite', `Rewrite with AI (${REWRITE_KEY})`, 'Select text or a formula, press the key and describe the change; the proposal is shown in place and applied only when you accept it.')}
             {check('aiCompleteText', 'Autocomplete text', 'After a pause while typing, a continuation appears in grey after the caret — formulas already rendered — while ✦ AI… shows in the status bar. Tab inserts it, anything else dismisses it. Works at the end of a word or paragraph, in ordinary text.')}
             {check('aiCompleteMath', 'Autocomplete formulas', 'The same inside formulas: a suggested continuation at the caret, Tab inserts it.')}
+            {check('aiInk', 'Read handwritten formulas', `The math keyboard’s ✎ Write: what you write with a pen or a finger is read as LaTeX — a picture of it and the formula around the cursor go to the model${ai?.inkModel ? ` (${ai.inkModel})` : ''}. Nothing is inserted until you tap a reading.`)}
             <Row label="Pause before suggesting"><input type="number" min={80} max={5000} step={20} value={p.aiCompleteDelay} onInput={e => setPref('aiCompleteDelay', Math.max(80, Number((e.target as HTMLInputElement).value) || 200))} style="max-width:90px" /> ms</Row>
             <h3>Models</h3>
             <div class="sub">Any OpenRouter model id works; the notes are from measurements on a real paper. The choice is kept in this browser.</div>

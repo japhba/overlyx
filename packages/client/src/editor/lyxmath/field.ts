@@ -20,6 +20,7 @@ import { graphicsUrl } from '../../api';
 import { editorContext, resolveDocPath } from '../context';
 import { getPrefs } from '../../prefs';
 import { renderMath, onMathRendererChange } from './mathjax';
+import { inputModeFor, mathKbdFocus, noteHardwareKey, setSystemKeyboard } from '../mathkbd/hook';
 
 export type MoveOutDirection = 'backward' | 'forward' | 'upward' | 'downward';
 
@@ -262,8 +263,23 @@ export class LyxMathField {
     this.moved(old);
   }
   blur(): void { this.input.blur(); }
+  /**
+   * The math keyboard's ⌨ key and back: the system keyboard (on) or none (the math keyboard) for this
+   * field — the input is focused again under the new inputmode, which is what makes iOS show or hide
+   * its keyboard; the owner does not hear of the blur in between.
+   */
+  useSystemKeyboard(on: boolean): void {
+    setSystemKeyboard(on);
+    this.hold();
+    this.input.blur();
+    this.focusInput();
+    this.endHold(false);
+  }
   /** the document's caret goes along: typing reaches a contenteditable only through it */
   private focusInput(): void {
+    // the math keyboard (editor/mathkbd) instead of the system's on touch screens: asked for before the focus
+    const mode = inputModeFor();
+    if (this.input.inputMode !== mode) this.input.inputMode = mode;
     this.input.focus({ preventScroll: true });
     const sel = this.input.ownerDocument.getSelection();
     if (sel && !this.input.contains(sel.anchorNode)) sel.collapse(this.input, 0);
@@ -339,6 +355,10 @@ export class LyxMathField {
         return true;
       }
       case 'text': return change('text', () => c.mathMode());
+      // the math keyboard's ⁿ√: a root with an index, the cursor in the index (the selection under the root)
+      case 'root': return change('root', () => { const sel = c.grabAndEraseSelection(); c.insertAtom({ t: 'sqrt', body: sel ? parseCell(sel, this.macros, c.mode) : [], index: [] }); c.editInsertedInset(); });
+      // the math keyboard's a/b: the operand before the cursor (2x, (a+b)) or the selection becomes the numerator
+      case 'smartFrac': return change('frac', () => { c.macroModeClose(); c.selectOperand(); c.niceInsertAtom(parseCell('\\frac{}{}', this.macros, c.mode)[0]); });
       // ⌘K (editor/links.ts): the selection becomes a link to args[0] (LaTeX), else a new link with the text args[1];
       // on a link: its target changes
       case 'link': {
@@ -582,7 +602,7 @@ export class LyxMathField {
   /* ------------------------------------------------------------ events */
   private wire(): void {
     const input = this.input;
-    input.addEventListener('focus', () => { this.focused = true; active = this; this.dom.classList.add('focused'); this.opts.onFocus?.(); this.scheduleLayout(); notifyFocus(); });
+    input.addEventListener('focus', () => { this.focused = true; active = this; this.dom.classList.add('focused'); this.opts.onFocus?.(); this.scheduleLayout(); notifyFocus(); mathKbdFocus(this); });
     input.addEventListener('blur', () => {
       this.focused = false; if (active === this) active = null; this.altM = false; this.deadHat = false; this.dom.classList.remove('focused');
       // a command typed last (\gamma with nothing after it) becomes its symbol when the formula is left, not at the next keystroke
@@ -592,8 +612,9 @@ export class LyxMathField {
       // held by a popup (the link box): the cursor and selection stay, drawn as they are, until endHold
       if (this.held) this.scheduleLayout(); else this.opts.onBlur?.();
       notifyFocus();
+      if (!this.held) mathKbdFocus(null);
     });
-    input.addEventListener('keydown', ev => this.keydown(ev));
+    input.addEventListener('keydown', ev => { if (this.input.inputMode === 'none') noteHardwareKey(ev); this.keydown(ev); });
     // the element only ever holds an open composition: no other edit of the browser's (insertParagraph,
     // formatBold, historyUndo …) may touch it — the keys are the field's (keydown)
     input.addEventListener('beforeinput', ev => {

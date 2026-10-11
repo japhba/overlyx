@@ -9,7 +9,7 @@ import { config } from './config.ts';
 import { cachedBib } from './bibcache.ts';
 import { setSecurityHeaders } from './security.ts';
 import { requestAiRepair, AiRepairError } from './airepair.ts';
-import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, allow as aiAllow, AiError } from './ai.ts';
+import { aiStatus, aiAvailable, rewrite as aiRewrite, complete as aiComplete, recognizeInk, allow as aiAllow, AiError } from './ai.ts';
 import { mcpRouter } from './mcp.ts';
 import { mcpAgentRoutes, pruneAgents } from './mcpAgents.ts';
 import { agentRoutes, disconnectAgents } from './agent.ts';
@@ -1041,6 +1041,22 @@ api.post('/docs/*/ai-repair/apply', async (req, res) => {
 
 /** Whether ⌘K rewriting / autocomplete can work on this server (a key is configured) and with which models. */
 api.get('/ai/status', (_req, res) => { res.json(aiStatus()); });
+
+/** The math keyboard's pen: handwriting (a PNG) read as LaTeX — up to three readings, most likely first. */
+api.post('/ai/ink', async (req, res) => {
+  try {
+    if (!aiAvailable()) { res.status(503).json({ error: 'Handwriting recognition is not configured on this server (OPENROUTER_API_KEY is unset).' }); return; }
+    if (!aiAllow(`ink:${req.user!.id}`, config.ai.inkPerMinute)) { res.status(429).json({ error: 'Too much handwriting at once — wait a moment.' }); return; }
+    const body = req.body ?? {};
+    const ac = new AbortController();
+    req.on('close', () => { if (!res.writableEnded) ac.abort(); });
+    const candidates = await recognizeInk({ image: String(body.image ?? ''), before: typeof body.before === 'string' ? body.before : undefined, after: typeof body.after === 'string' ? body.after : undefined, text: body.text === true, model: body.model }, ac.signal);
+    res.json({ candidates });
+  } catch (e) {
+    if (e instanceof AiError) { if (e.status !== 499) res.status(e.status).json({ error: e.message }); return; }
+    res.status(400).json({ error: (e as Error).message ?? String(e) });
+  }
+});
 
 /** ⌘K: rewrite the selected passage (or a formula) according to an instruction; the client previews the proposal. */
 api.post('/docs/*/ai/rewrite', async (req, res) => {

@@ -1,0 +1,117 @@
+/* The math keyboard (keyboard.ts) and its pen (inkpad.ts): docked at the bottom, above the page. */
+.mk {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 99;   /* under dialogs (100), menus and the link box; over the page and its grips */
+  display: flex; flex-direction: column;
+  padding: 0 max(6px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+  background: var(--ui-bg2); color: var(--ui-fg); border-top: 1px solid var(--ui-border);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, .10);
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none;
+  font: 15px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mk-gap: 6px; --mk-radius: 7px; --mk-ink: var(--editor-fg);
+}
+.mk[hidden], .mk-pill[hidden] { display: none !important; }
+.mk-grip { height: 14px; flex: none; cursor: ns-resize; display: grid; place-items: center; }
+.mk-grip::before { content: ''; width: 38px; height: 4px; border-radius: 2px; background: var(--ui-border); }
+.mk-head { flex: none; display: flex; align-items: center; gap: 8px; height: 38px; margin-bottom: var(--mk-gap); }
+.mk-tabs { flex: 1; min-width: 0; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.mk-tabs::-webkit-scrollbar { display: none; }
+.mk-tab, .mk-tool {
+  flex: none; height: 34px; min-width: 44px; padding: 0 12px; border: 0; border-radius: 17px;
+  background: transparent; color: var(--ui-muted); font: inherit; font-size: 15px; cursor: pointer;
+}
+.mk-tab.mk-on { background: var(--surface); color: var(--ui-fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .18); }
+.mk-tools { flex: none; display: flex; gap: 2px; }
+.mk-tool { padding: 0 8px; display: grid; place-items: center; }
+.mk-tool svg { width: 22px; height: 22px; }
+.mk-body { flex: 1; min-height: 0; display: flex; gap: calc(var(--mk-gap) * 1.6); }
+.mk-main { flex: 1; min-width: 0; display: flex; }
+.mk-page, .mk-side { display: flex; flex-direction: column; gap: var(--mk-gap); min-height: 0; }
+.mk-page { flex: 1; min-width: 0; }
+.mk-side { flex: none; width: clamp(96px, 17%, 168px); }
+.mk-row { flex: 1; min-height: 0; display: flex; gap: var(--mk-gap); }
+.mk-key {
+  flex: 1 1 0; min-width: 0; display: grid; place-items: center; overflow: hidden;
+  border-radius: var(--mk-radius); background: var(--surface); color: var(--ui-fg);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .28); cursor: pointer;
+  font-size: clamp(15px, 2.6vh, 23px); position: relative;
+}
+.mk-key.mk-op { background: color-mix(in srgb, var(--surface) 86%, var(--accent)); }
+.mk-key.mk-fn { background: color-mix(in srgb, var(--surface) 92%, var(--accent)); }
+.mk-key.mk-act { background: var(--ui-bg); color: var(--fg2); }
+.mk-key.mk-act.mk-on { background: var(--surface); color: var(--accent-strong); }
+.mk-key.mk-down, .mk-alt.mk-down { background: var(--active-bg); }
+/* a key with variants: a small mark in its corner (held, they show) */
+.mk-key.mk-has-alt::after { content: ''; position: absolute; right: 5px; top: 5px; width: 4px; height: 4px; border-radius: 50%; background: var(--muted2); opacity: .7; }
+.mk-l { white-space: nowrap; }
+.mk-m { font-size: 1.05em; line-height: 1; pointer-events: none; }
+.mk-m mjx-container { margin: 0 !important; }
+.mk-alts {
+  position: absolute; z-index: 1; display: flex; gap: 4px; padding: 5px;
+  background: var(--surface); border-radius: 12px; box-shadow: 0 6px 22px rgba(0, 0, 0, .28), 0 0 0 1px var(--ui-border2);
+}
+.mk-alt { min-width: 46px; height: 50px; padding: 0 8px; display: grid; place-items: center; border-radius: 8px; font-size: 22px; }
+
+/* the button the panel folds into */
+.mk-pill {
+  position: fixed; z-index: 99; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom));
+  height: 46px; padding: 0 14px; display: flex; align-items: center; gap: 6px; border-radius: 23px;
+  border: 1px solid var(--ui-border); background: var(--surface); color: var(--ui-fg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .18); font: 20px/1 system-ui, sans-serif; cursor: pointer; touch-action: none;
+}
+.mk-pill svg { width: 22px; height: 22px; }
+
+/* the page makes room for the panel; a deck's or poster's canvas ends at it (the slide is fitted above it) */
+html.mk-open .editor-scroll { padding-bottom: calc(var(--mk-h, 0px) + 24px); scroll-padding-bottom: calc(var(--mk-h, 0px) + 24px); }
+html.mk-open .editor-scroll:has(> .dl-editor) { padding-bottom: max(0px, calc(var(--mk-h, 0px) - 24px)); }
+
+/* ------------------------------------------------------------ the pen */
+.mk-pad { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--mk-gap); }
+.mk-pad-bar { flex: none; height: 46px; display: flex; align-items: center; gap: var(--mk-gap); }
+.mk-cands { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: var(--mk-gap); overflow-x: auto; scrollbar-width: none; }
+.mk-cands::-webkit-scrollbar { display: none; }
+.mk-cand {
+  flex: none; height: 42px; max-width: 70%; padding: 0 14px; display: grid; place-items: center; overflow: hidden;
+  border-radius: var(--mk-radius); border: 1px solid var(--ui-border); background: var(--surface); color: var(--editor-fg);
+  font-size: 19px; cursor: pointer;
+}
+.mk-cand.mk-best { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.mk-cand mjx-container { margin: 0 !important; }
+.mk-pad-status { color: var(--ui-muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 4px; }
+.mk-reading .mk-pad-status::before { content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 7px; border-radius: 50%; border: 2px solid var(--accent); border-right-color: transparent; vertical-align: -1px; animation: mk-spin .8s linear infinite; }
+@keyframes mk-spin { to { transform: rotate(360deg); } }
+.mk-pad-btn {
+  flex: none; width: 46px; height: 42px; border: 0; border-radius: var(--mk-radius);
+  background: var(--ui-bg); color: var(--fg2); font: 20px/1 system-ui, sans-serif; cursor: pointer; box-shadow: 0 1px 0 rgba(0, 0, 0, .2);
+}
+.mk-pad-btn:disabled { opacity: .4; cursor: default; }
+.mk-pad-btn.mk-pad-insert { width: 58px; background: var(--accent); color: #fff; }
+.mk-pad-btn.mk-pad-insert:disabled { background: var(--ui-bg); color: var(--fg2); }
+.mk-pad-surface {
+  flex: 1; min-height: 0; position: relative; border-radius: calc(var(--mk-radius) + 3px); overflow: hidden;
+  background: var(--page-bg); border: 1px solid var(--ui-border2);
+  /* a faint writing line */
+  background-image: linear-gradient(to bottom, transparent calc(64% - 1px), color-mix(in srgb, var(--ui-border) 70%, transparent) calc(64% - 1px), color-mix(in srgb, var(--ui-border) 70%, transparent) 64%, transparent 64%);
+}
+.mk-pad-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.mk-pad-consent {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  padding: 12px 24px; text-align: center; background: color-mix(in srgb, var(--page-bg) 92%, transparent); color: var(--fg2); font-size: 14px;
+}
+.mk-pad-consent[hidden] { display: none; }
+.mk-pad-consent p { max-width: 560px; margin: 0; line-height: 1.45; }
+.mk-pad-btn.mk-pad-on { width: auto; padding: 0 18px; background: var(--accent); color: #fff; font-size: 15px; }
+.mk-needs-consent .mk-pad-bar { opacity: .45; pointer-events: none; }
+
+/* phones: tighter */
+@media (max-width: 700px) {
+  .mk { --mk-gap: 5px; }
+  .mk-side { width: 26%; }
+  .mk-tab { padding: 0 9px; min-width: 38px; }
+  .mk-key { font-size: clamp(14px, 2.4vh, 19px); }
+}
+
+/* Modern (Rams / Bauhaus): flat keys, square corners */
+html[data-ui="modern"] .mk { --mk-radius: 3px; box-shadow: none; }
+html[data-ui="modern"] .mk-key, html[data-ui="modern"] .mk-pad-btn { box-shadow: none; border: 1px solid var(--ui-border2); }
+html[data-ui="modern"] .mk-tab { border-radius: 3px; }
+html[data-ui="modern"] .mk-tab.mk-on { box-shadow: inset 0 -2px 0 var(--accent); }

@@ -54,7 +54,9 @@ export interface HealthIssue { code: string; message: string; severity: 'warning
 /** ProseMirror JSON (nodes of the editor schema) as the server returns them for AI proposals */
 export interface PMJSON { type: string; attrs?: Record<string, any>; content?: PMJSON[]; marks?: { type: string; attrs?: Record<string, any> }[]; text?: string }
 export interface AiModelInfo { id: string; label: string; note: string; /** Artificial Analysis Intelligence Index */ aa?: number; /** measured rewrite (⌘J) response time */ speed: string }
-export interface AiStatus { available: boolean; model: string; completionModel: string; models: AiModelInfo[] }
+export interface AiStatus { available: boolean; model: string; completionModel: string; inkModel?: string; models: AiModelInfo[] }
+/** the math keyboard's pen: the handwriting as a PNG data URL, the formula around the cursor */
+export interface AiInkRequest { image: string; before?: string; after?: string; text?: boolean }
 export interface AiRewriteRequest { instruction: string; content: PMJSON[]; layout?: string; before?: string; after?: string; model?: string; math?: { latex: string; display: boolean; selection?: string }; source?: { text: string; before?: string; after?: string }; history?: { instruction: string; tex: string }[] }
 export interface AiRewriteResult { tex: string; nodes: PMJSON[]; original: string }
 export interface AiCompleteRequest { kind: 'text' | 'math'; before: string; after: string; formula?: string; paragraph?: string; model?: string }
@@ -284,6 +286,7 @@ export const api = {
   aiStatus: () => req<AiStatus>('GET', '/api/ai/status'),
   aiRewrite: (id: string, body: AiRewriteRequest, signal?: AbortSignal) => req<AiRewriteResult>('POST', `/api/docs/${encId(id)}/ai/rewrite`, body, undefined, signal),
   aiComplete: (id: string, body: AiCompleteRequest, signal?: AbortSignal) => req<AiCompleteResult>('POST', `/api/docs/${encId(id)}/ai/complete`, body, undefined, signal),
+  aiInk: (body: AiInkRequest, signal?: AbortSignal) => req<{ candidates: string[] }>('POST', '/api/ai/ink', body, undefined, signal),
   /** the embedded coding agent (Agent panel; agent.ts on the server) */
   agentStatus: () => req<AgentStatus>('GET', '/api/agent/status'),
   agentLogin: () => req<AgentLogin>('POST', '/api/agent/login'),

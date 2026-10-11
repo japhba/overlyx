@@ -42,8 +42,8 @@ export const MODELS: ModelInfo[] = [
   { id: 'openai/gpt-5.4-nano', label: 'GPT-5.4 nano', aa: 38, speed: '~1.5 s', note: 'OpenAI’s fast one' },
   { id: 'google/gemini-3.7-flash', label: 'Gemini 3.7 Flash', aa: 56, speed: '7–15 s', note: 'thinks hard — only for difficult rewrites' },
 ];
-export function aiStatus(): { available: boolean; model: string; completionModel: string; models: ModelInfo[] } {
-  return { available: aiAvailable(), model: config.ai.model, completionModel: config.ai.completionModel, models: MODELS };
+export function aiStatus(): { available: boolean; model: string; completionModel: string; inkModel: string; models: ModelInfo[] } {
+  return { available: aiAvailable(), model: config.ai.model, completionModel: config.ai.completionModel, inkModel: config.ai.inkModel, models: MODELS };
 }
 /** A model id chosen in the client, if it looks like an OpenRouter id; else the server's default. */
 export function pickModel(requested: unknown, fallback: string): string {
@@ -68,7 +68,9 @@ export function tuningFor(model: string): { reasoning?: { effort: 'minimal' | 'l
 
 /* ------------------------------------------------------------------ model access */
 
-export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string }
+/** a part of a message: text, or an image (a data: URL — the handwriting of the math keyboard's pen) */
+export type ChatPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string | ChatPart[] }
 export interface ChatOptions { model?: string; temperature?: number; maxTokens?: number; signal?: AbortSignal; title?: string }
 
 function messageText(content: unknown): string {
@@ -83,7 +85,9 @@ export async function chat(messages: ChatMessage[], opts: ChatOptions = {}): Pro
   const what = `${opts.title ?? 'OverLyX'} ${opts.model ?? config.ai.model}`;
   try {
     const text = await chatRaw(messages, opts);
-    console.log(`[ai] ${what}: ${Date.now() - t0} ms, ${messages.reduce((n, m) => n + m.content.length, 0)} chars in, ${text.length} out`);
+    const chars = messages.reduce((n, m) => n + (typeof m.content === 'string' ? m.content.length : m.content.reduce((k, p) => k + (p.type === 'text' ? p.text.length : 0), 0)), 0);
+    const images = messages.reduce((n, m) => n + (typeof m.content === 'string' ? 0 : m.content.filter(p => p.type === 'image_url').length), 0);
+    console.log(`[ai] ${what}: ${Date.now() - t0} ms, ${chars} chars${images ? ` + ${images} image${images > 1 ? 's' : ''}` : ''} in, ${text.length} out`);
     return text;
   } catch (e) {
     if (!(e instanceof AiError && e.status === 499)) console.warn(`[ai] ${what} failed after ${Date.now() - t0} ms: ${(e as Error).message}`);
@@ -410,6 +414,84 @@ function matchedRest(b: string, r: string): string | null {
     }
   }
   return null;
+}
+
+/* ------------------------------------------------------------------ handwriting */
+
+/**
+ * The math keyboard's pen (client editor/mathkbd/inkpad.ts): what is written on its pad, drawn as
+ * a PNG the way scripts/ink-bench.py draws Google's MathWriting inks (strokes scaled to a common
+ * letter height), goes to a vision model with the formula around the cursor; up to three readings
+ * come back, most likely first. The model is OVERLYX_AI_INK_MODEL (any OpenRouter vision model).
+ */
+export const INK_PROMPT = `You read handwritten mathematics. The image shows ink written with a pen or a finger on a tablet: one formula, or a piece of one that will be inserted at the cursor of a LaTeX formula editor.
+
+Transcribe exactly what is written into LaTeX math (no $ delimiters, no \\[ \\], no equation environments, no explanations):
+- Keep the writer's structure: fractions (\\frac), roots (\\sqrt, \\sqrt[n]), superscripts and subscripts (always braced: x^{2}, a_{ij}), integrals/sums with their limits, matrices (\\begin{pmatrix}…\\end{pmatrix} etc. matching the brackets drawn).
+- Use standard commands: Greek letters (\\alpha …), \\cdot for a raised dot, \\times for a cross, \\leq \\geq \\neq \\approx \\to \\in \\infty \\partial \\nabla, \\sin \\cos \\log \\ln \\lim \\exp when such a function name is written, \\mathbb{R} for blackboard letters, \\vec{x} \\hat{x} \\bar{x} \\dot{x} \\tilde{x} for accents.
+- Do not correct, complete or simplify the mathematics; an unbalanced bracket stays unbalanced. Do not add anything that is not written.
+- Ambiguous shapes: decide from the mathematical context (x vs \\times, 1 vs l vs |, 0 vs o vs O, z vs 2, s vs 5, u vs \\mu, v vs \\nu, t vs +, a dot vs \\cdot vs a decimal point). Prefer the reading a mathematician would most likely have meant.
+
+Reply with JSON only: {"latex": ["<most likely reading>", "<second reading>", "<third reading>"]} — up to three distinct readings, most likely first; give alternatives only where the handwriting is genuinely ambiguous (otherwise one entry).`;
+
+export interface InkRequest {
+  /** the ink drawn black on white: a data:image/png;base64 URL */
+  image: string;
+  /** the formula's LaTeX before and after the cursor (the cell it is in), for context */
+  before?: string;
+  after?: string;
+  /** the cursor is in a \text{} part of the formula */
+  text?: boolean;
+  model?: unknown;
+}
+
+/** at most this many characters of PNG data URL (about 1.5 MB of image) */
+export const INK_MAX_IMAGE = 2_000_000;
+
+/** The readings in a model's reply: JSON `{"latex": [...]}` (or bare LaTeX), delimiters stripped, distinct, at most three. */
+export function parseInkReply(reply: string): string[] {
+  const t = cleanReply(reply);
+  let list: unknown[] = [];
+  const m = /\{[\s\S]*\}/.exec(t);
+  if (m) {
+    try {
+      const j = JSON.parse(m[0]) as { latex?: unknown; candidates?: unknown };
+      const c = j.latex ?? j.candidates;
+      list = Array.isArray(c) ? c : typeof c === 'string' ? [c] : [];
+    } catch { /* not JSON: the reply itself */ }
+  }
+  if (!list.length && t && !t.startsWith('{')) list = [t];
+  const out: string[] = [];
+  for (const x of list) {
+    if (typeof x !== 'string') continue;
+    const s = x.trim()
+      .replace(/^\$\$?([\s\S]*?)\$\$?$/, '$1')
+      .replace(/^\\\[([\s\S]*)\\\]$/, '$1')
+      .replace(/^\\\(([\s\S]*)\\\)$/, '$1')
+      .replace(/^\\begin\{(equation|displaymath|math)\*?\}([\s\S]*)\\end\{\1\*?\}$/, '$2')
+      .trim();
+    if (!s || s.length > 600 || out.includes(s)) continue;
+    out.push(s);
+    if (out.length === 3) break;
+  }
+  return out;
+}
+
+/** Up to three LaTeX readings of the handwriting, most likely first (empty: nothing legible). */
+export async function recognizeInk(req: InkRequest, signal?: AbortSignal): Promise<string[]> {
+  const image = String(req.image ?? '');
+  if (!/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(image)) throw new AiError('The handwriting must be a PNG image.', 400);
+  if (image.length > INK_MAX_IMAGE) throw new AiError('The handwriting image is too large.', 413);
+  const before = String(req.before ?? '').slice(-400), after = String(req.after ?? '').slice(0, 200);
+  const where = before || after
+    ? `The formula around the cursor, ⟦INK⟧ marking where the handwriting goes: ${before}⟦INK⟧${after}`
+    : 'The cursor is in an empty formula.';
+  const mode = req.text ? ' The cursor is inside \\text{…}: transcribe what is written as plain text (no math commands).' : '';
+  const reply = await chat([
+    { role: 'system', content: INK_PROMPT },
+    { role: 'user', content: [{ type: 'text', text: where + mode }, { type: 'image_url', image_url: { url: image } }] },
+  ], { model: pickModel(req.model, config.ai.inkModel), temperature: 0, maxTokens: 400, signal, title: 'OverLyX ink' });
+  return parseInkReply(reply);
 }
 
 /* ------------------------------------------------------------------ rate limiting */
