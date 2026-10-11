@@ -1,10 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- OverLyX favicon: LYX woven through an upright O — the wordmark's tilted blue L, yellow Y, red X.
-       The L passes in front of the ring at the top, the y's tail (as in LyX's logo, it descends) in
-       front at the bottom; the X goes behind, in front, behind. A gap in the disc's colour marks
-       every crossing (the ring's pieces in front are clipped circles around their crossing). All on a
-       paper disc (dark disc, light ring in the dark scheme), so the ring never melts into a tab bar.
-       Strokes only, no fonts: it renders identically everywhere. -->
+  <!-- OverLyX favicon: LYX over an upright O — the wordmark's tilted blue L, yellow Y, red X in their
+       own proportions, the L and the X spilling over the ring's sides, in front of it (a gap in the
+       disc's colour where they cross). All on a paper disc (dark disc, light ring in the dark scheme),
+       so the ring never melts into a tab bar. Strokes only, no fonts: it renders identically everywhere. -->
   <style>
     .disc { fill: #fbfaf7 } .halo { stroke: #fbfaf7 } .ring { stroke: #1c1b19 }
     .l { stroke: #2152a3 } .y { stroke: #e9a90f } .x { stroke: #d6402b }
@@ -13,11 +11,10 @@
       .l { stroke: #7fa8f4 } .y { stroke: #f6c43c } .x { stroke: #f2654c }
     }
   </style>
-  <defs><clipPath id="k0"><circle cx="47.02" cy="46.09" r="6.5"/></clipPath><clipPath id="r0"><circle cx="47.02" cy="46.09" r="7.7"/></clipPath><clipPath id="k3"><circle cx="42.35" cy="14.19" r="6.5"/></clipPath><clipPath id="r3"><circle cx="42.35" cy="14.19" r="7.7"/></clipPath></defs>
   <circle class="disc" cx="32" cy="32" r="31.5"/>
   <g fill="none" stroke-linecap="butt" stroke-linejoin="miter">
-    <circle class="ring" cx="32" cy="32" r="20.6" stroke-width="4.2"/>
-    <path class="halo" transform="rotate(-10 19 31)" d="M15.2 12.4 V45.6 H25.6" stroke-width="8.6"/><path class="halo" transform="rotate(4 32 31)" d="M25.6 20.4 L32 33 L38.4 20.4 M32 33 V58.4" stroke-width="8.6"/><path class="halo" transform="rotate(10 44.4 31)" d="M38.8 12.8 L50 46.6 M50 14.4 L38.8 46.6" stroke-width="8.6"/><path class="l" transform="rotate(-10 19 31)" d="M15.2 12.4 V45.6 H25.6" stroke-width="4.8"/><path class="y" transform="rotate(4 32 31)" d="M25.6 20.4 L32 33 L38.4 20.4 M32 33 V58.4" stroke-width="4.8"/><path class="x" transform="rotate(10 44.4 31)" d="M38.8 12.8 L50 46.6 M50 14.4 L38.8 46.6" stroke-width="4.8"/>
-    <circle class="halo" cx="32" cy="32" r="20.6" stroke-width="8.0" clip-path="url(#k0)"/><circle class="ring" cx="32" cy="32" r="20.6" stroke-width="4.2" clip-path="url(#r0)"/><circle class="halo" cx="32" cy="32" r="20.6" stroke-width="8.0" clip-path="url(#k3)"/><circle class="ring" cx="32" cy="32" r="20.6" stroke-width="4.2" clip-path="url(#r3)"/>
+    <circle class="ring" cx="32" cy="32" r="19" stroke-width="3.8"/>
+    <path class="halo" transform="rotate(0 0 0)" d="M4.36 19.97 L9.48 44.05 L19.50 41.92" stroke-width="9.35"/><path class="halo" transform="rotate(0 0 0)" d="M27.05 18.24 L31.74 30.27 L39.21 19.73 M31.74 30.27 L30.00 44.42" stroke-width="9.35"/><path class="halo" transform="rotate(0 0 0)" d="M48.61 17.91 L55.02 45.47 M60.35 20.41 L43.28 42.98" stroke-width="9.35"/><path class="l" transform="rotate(0 0 0)" d="M4.36 19.97 L9.48 44.05 L19.50 41.92" stroke-width="5.75"/><path class="y" transform="rotate(0 0 0)" d="M27.05 18.24 L31.74 30.27 L39.21 19.73 M31.74 30.27 L30.00 44.42" stroke-width="5.75"/><path class="x" transform="rotate(0 0 0)" d="M48.61 17.91 L55.02 45.47 M60.35 20.41 L43.28 42.98" stroke-width="5.75"/>
+    
   </g>
 </svg>

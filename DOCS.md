@@ -1210,15 +1210,13 @@ blend.
   cells show only while the cursor is in that table / formula (`editor/plugins/envfocus.ts` marks the
   table with `ol-editing`; the static formula rendering hides its `lm-empty` outlines) — a document
   reads as it prints, the scaffolding appears where one works.
-* **Favicon** (`public/icon.svg`): LYX woven through an upright O — the wordmark's tilted blue L,
-  yellow Y and red X where they always stood. The L passes in front of the ring at the top, the y's
-  tail (it descends, as in LyX's logo) in front at the bottom, and the X goes behind, in front, behind.
-  Every crossing has a gap in the disc's colour; the ring's pieces in front are the ring clipped to a
-  small circle around the crossing, a little wider than their gap so no seam shows. The crossings were
-  chosen steep: where a stroke meets the ring at a shallow angle (an X diagonal against the ring's
-  side, a stretched letter) the gaps chopped the letters apart. Everything sits on a disc — paper with
-  a graphite ring, or dark with a light ring (`prefers-color-scheme: dark`) — so the ring never melts
-  into a tab bar.
+* **Favicon** (`public/icon.svg`): LYX over an upright O — the wordmark's tilted blue L, yellow Y and
+  red X in their own proportions, larger than the ring is wide: the L and the X spill over its sides,
+  in front of it (a gap in the disc's colour where they cross), the Y stands inside. Weaving them
+  through the ring was tried and dropped: an upright circle meets the X's diagonals and the L's stem
+  at shallow angles, so the ring in front cut the letters apart (and stretching them to cross steeply
+  distorted them). Everything sits on a disc — paper with a graphite ring, or dark with a light ring
+  (`prefers-color-scheme: dark`) — so the ring never melts into a tab bar.
 * **Landing page / sign-in** (`app/Login.tsx` + `app/landing.css`): one Bauhaus look for every visitor,
   whichever interface (Classic / Modern) they use inside — warm paper, graphite ink, hairlines, square
   corners, Jost and Inter; the wordmark's blue / yellow / red only as thin rules (over the sign-in
