@@ -1248,10 +1248,10 @@ blend.
   wordmark and the Modern menu button.
 * **The wordmark** (`app/Logo.tsx`, styles.css `.ol-wordmark`): motion lines, "Over", then LyX's tilted
   blue L / yellow Y / red X. Two looks of the same markup: the Classic interface's chrome italic, and the
-  Bauhaus one (`bauhaus` — the landing page — and every wordmark in the Modern interface): flat ink
-  lines, upright Jost "Over", the letters still tilted; on hover "Over" leans forward, the lines stretch
-  into fading tails and pulse and the letters tip a little further, on an overshooting ease (off with
-  reduced motion). On every page load the first wordmark (the landing page's, or the menu bar's when
+  Bauhaus one (`bauhaus` — the landing page — and every wordmark in the Modern interface): no speed
+  lines (they were dropped as too much), upright Jost "Over", the letters still tilted; on hover "Over"
+  leans forward and the letters tip a little further, on an overshooting ease (off with reduced
+  motion). On every page load the first wordmark (the landing page's, or the menu bar's when
   one is signed in already) arrives in that hover pose and relaxes back — the hover's leave
   (`Wordmark arrive`: held 450 ms from when its fonts are in and the page has painted, once per load).
 * **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in its pane

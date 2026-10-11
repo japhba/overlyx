@@ -32,7 +32,7 @@ test.describe('landing page', () => {
     await expect(page.locator('.login form button.btn.primary')).toHaveText('Sign in');
   });
 
-  test('the Bauhaus wordmark: tilted L·Y·X in both interfaces, speed lines, the hover motion; the short page; the Modern menu button', async ({ page, browser }) => {
+  test('the Bauhaus wordmark: tilted L·Y·X in both interfaces, no speed lines, the hover motion; the short page; the Modern menu button', async ({ page, browser }) => {
     const tilt = (sel: string) => page.locator(sel).evaluate(e => getComputedStyle(e).transform);
     for (const ui of ['classic', 'modern']) {
       await page.addInitScript((u: string) => { try { localStorage.setItem('ol.ui', u); } catch { /* ignore */ } }, ui);
@@ -41,7 +41,7 @@ test.describe('landing page', () => {
       await expect(wm).toHaveClass(/bauhaus/);   // the landing page has one look, whatever the interface
       expect(await tilt('.login .ol-wordmark .l')).not.toBe('none');
       expect(await tilt('.login .ol-wordmark .x')).not.toBe('none');
-      await expect(page.locator('.login .ol-wordmark .speed i')).toHaveCount(3);
+      expect(await page.locator('.login .ol-wordmark .speed').evaluate(e => getComputedStyle(e).display)).toBe('none');   // the forward lean is the motion
       // it arrives leaning forward (the hover pose) and relaxes upright: the hover's leave, on every page load
       await expect(wm).not.toHaveClass(/\bplay\b/, { timeout: 3000 });
       await expect.poll(() => tilt('.login .ol-wordmark .over')).toBe('none');
@@ -54,7 +54,7 @@ test.describe('landing page', () => {
     await expect(page.locator('.login .formula')).toContainText('Complexity');
     await expect(page.locator('.login .flist strong')).toHaveText(['WYSIWYG LaTeX', 'Slides and posters', 'Together', 'Your tools']);
     await expect(page.locator('.login')).not.toContainText('web page');
-    // inside the Modern interface the wordmark keeps its tilted letters and speed lines too (bob: an
+    // inside the Modern interface the wordmark keeps its tilted letters, without speed lines too (bob: an
     // account that never chose an interface, so the browser's choice holds)
     const ctx = await browser.newContext();
     await ctx.addInitScript(TOUR_SEEN_SCRIPT);
@@ -66,7 +66,7 @@ test.describe('landing page', () => {
     const brand = app.locator('.menubar .brand .ol-wordmark').first();
     await expect(brand).toBeVisible({ timeout: 20000 });
     expect(await brand.locator('.l').evaluate(e => getComputedStyle(e).transform)).not.toBe('none');
-    expect(await brand.locator('.speed').evaluate(e => getComputedStyle(e).display)).not.toBe('none');
+    expect(await brand.locator('.speed').evaluate(e => getComputedStyle(e).display)).toBe('none');
     // no row of menus: one menu button beside the name opens them all — names left, items right
     await expect(app.locator('.menubar-menus > .menu:not(.menu-main) > button')).toHaveCount(0);
     await app.locator('[data-main-menu]').click();
