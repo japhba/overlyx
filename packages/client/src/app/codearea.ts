@@ -229,6 +229,54 @@ const escapedAt = (v: string, i: number): boolean => { let n = 0; for (let k = i
  * Typing a closer that is already the next character steps over it.
  */
 export function typeChar(s: Snapshot, ch: string): Snapshot | null {
+  if (s.start === s.end && (ch === '}' || ch === '`')) {
+    // what typing the character gives by itself (null: the browser's plain insertion)
+    const r = typeCharPlain(s, ch) ?? { value: s.value.slice(0, s.start) + ch + s.value.slice(s.end), start: s.start + 1, end: s.start + 1 };
+    const fixed = ch === '}' ? stepOverEnd(r) : closeFence(r);
+    if (fixed) return fixed;
+  }
+  return typeCharPlain(s, ch);
+}
+
+/**
+ * `\end{env}` typed on its own line right above the `\end{env}` that Enter already added (enter):
+ * the typed line goes and the caret steps behind the existing one — typing the closer by habit
+ * duplicated it, and the duplicate closed an outer environment.
+ */
+function stepOverEnd(r: Snapshot): Snapshot | null {
+  const v = r.value, at = r.start;
+  const ls = lineStart(v, at), le = lineEnd(v, at);
+  const m = /^\s*\\end\{([^{}]+)\}$/.exec(v.slice(ls, at));
+  if (!m || !/^\s*$/.test(v.slice(at, le)) || le >= v.length) return null;
+  const next = v.slice(le + 1, lineEnd(v, le + 1));
+  const env = escapeRe(m[1]);
+  if (!new RegExp('^\\s*\\\\end\\{' + env + '\\}\\s*$').test(next)) return null;
+  const count = (re: string) => (v.match(new RegExp(re, 'g')) ?? []).length;
+  if (count('\\\\end\\{' + env + '\\}') <= count('\\\\begin\\{' + env + '\\}')) return null;
+  const pos = ls + next.length;
+  return { value: v.slice(0, ls) + v.slice(le + 1), start: pos, end: pos };
+}
+
+/**
+ * The closing ``` of a fenced code block typed on a line that Enter indented like the code: it
+ * moves to the opening fence's indentation — indented by four it is code, not a closing fence,
+ * and the block swallowed the rest of the document.
+ */
+function closeFence(r: Snapshot): Snapshot | null {
+  const v = r.value, at = r.start;
+  const ls = lineStart(v, at), le = lineEnd(v, at);
+  const m = /^([ \t]+)(`{3,})$/.exec(v.slice(ls, at));
+  if (!m || v.slice(at, le).trim()) return null;
+  // the fence lines above (at most three spaces in): an odd number leaves one open
+  const fences = v.slice(0, ls).split('\n').map(l => /^( {0,3})(`{3,}|~{3,})/.exec(l)).filter((f): f is RegExpExecArray => !!f);
+  if (fences.length % 2 === 0) return null;
+  const open = fences[fences.length - 1];
+  if (!open[2].startsWith('`') || m[2].length < open[2].length) return null;
+  const line = open[1] + m[2];
+  return { value: v.slice(0, ls) + line + v.slice(at), start: ls + line.length, end: ls + line.length };
+}
+
+function typeCharPlain(s: Snapshot, ch: string): Snapshot | null {
   const v = s.value;
   if (s.start !== s.end) {
     if (!(ch in PAIRS)) return null;
@@ -377,7 +425,7 @@ export function editingKey(e: { key: string; ctrlKey: boolean; metaKey: boolean;
   const s: Snapshot = { value: el.value, start: el.selectionStart, end: el.selectionEnd };
   const mod = mac ? e.metaKey : e.ctrlKey;
   const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
-  if (plain && e.key.length === 1) return e.shiftKey && !(e.key in PAIRS) && !CLOSERS.has(e.key) ? null : typeChar(s, e.key);
+  if (plain && e.key.length === 1) return e.shiftKey && !(e.key in PAIRS) && !CLOSERS.has(e.key) && e.key !== '`' ? null : typeChar(s, e.key);
   if (plain && e.key === 'Backspace') return backspace(s);
   if (plain && !e.shiftKey && e.key === 'Enter') return enter(s);
   if (plain && e.key === 'Tab') {

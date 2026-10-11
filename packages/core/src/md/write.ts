@@ -61,11 +61,15 @@ function escapeText(s: string, o: InlineOpts): string {
   return out;
 }
 
-/** the start of a line must not read as block syntax: `# `, `> `, `- `, `1. `, `===` … */
+/**
+ * The start of a line must not read as block syntax: `# `, `> `, `- `, `+ `, `1. `, `---`, `===`.
+ * Only what CommonMark would take as such is escaped — a marker needs the space after it, so
+ * `1.2`, `-5 °C` and `#hashtag` stay as typed.
+ */
 function escapeLineStart(s: string): string {
   s = s.replace(/^[ \t]+/, '');
-  if (/^(#|>|-|\+|=)/.test(s)) return '\\' + s;
-  const m = /^(\d{1,9})([.)])/.exec(s);
+  if (/^(#{1,6}(\s|$)|>|[-+](\s|$)|-+\s*$|=+\s*$)/.test(s)) return '\\' + s;
+  const m = /^(\d{1,9})([.)])(\s|$)/.exec(s);
   if (m) return m[1] + '\\' + s.slice(m[1].length);
   return s;
 }
@@ -394,7 +398,8 @@ function renderSegs(segs: Seg[], o: InlineOpts, html: boolean): string {
     if (tk.t !== 'text') { out += tk.s; lineStart = false; continue; }
     if (tk.raw) { out += tk.s; lineStart = tk.s.endsWith('\n'); continue; }
     let s = escapeText(tk.s, o);
-    if (lineStart) s = o.listItem && out === '' && /^\[[ xX]\] /.test(tk.s) ? tk.s.slice(0, 4) + escapeLineStart(escapeText(tk.s.slice(4), o)) : escapeLineStart(s);
+    // (a table cell holds no block syntax: `1.2` in a cell is a number)
+    if (lineStart && !o.inTable) s = o.listItem && out === '' && /^\[[ xX]\] /.test(tk.s) ? tk.s.slice(0, 4) + escapeLineStart(escapeText(tk.s.slice(4), o)) : escapeLineStart(s);
     out += s;
     if (s) lineStart = false;
   }

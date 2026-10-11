@@ -155,3 +155,37 @@ describe('editing conveniences', () => {
     expect(editingKey(ev('s', { ctrlKey: true }), el('a', 1), false)).toBeNull();
   });
 });
+
+describe('closers typed by habit', () => {
+  // type a string key by key through editingKey, as the textarea does (null = the browser inserts it)
+  const typeKeys = (s: { value: string; start: number; end: number }, keys: string) => {
+    for (const key of keys) {
+      const r = editingKey({ key, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false }, { value: s.value, selectionStart: s.start, selectionEnd: s.end }, false);
+      s = r ?? { value: s.value.slice(0, s.start) + key + s.value.slice(s.end), start: s.start + 1, end: s.start + 1 };
+    }
+    return s;
+  };
+  const press = (s: { value: string; start: number; end: number }, key: string) =>
+    editingKey({ key, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false }, { value: s.value, selectionStart: s.start, selectionEnd: s.end }, false)!;
+
+  it('\\end{env} typed above the one Enter added steps over it instead of duplicating it', () => {
+    let s = typeKeys(snap('\\begin{document}\n\\end{document}\n', 16), '\n\\begin{equation}');
+    s = press(s, 'Enter');                         // adds \end{equation} below the caret
+    expect(s.value).toBe('\\begin{document}\n\\begin{equation}\n  \n\\end{equation}\n\\end{document}\n');
+    s = typeKeys(s, 'E=mc^2');
+    s = press(s, 'Enter');
+    s = typeKeys(s, '\\end{equation}');
+    expect(s.value).toBe('\\begin{document}\n\\begin{equation}\n  E=mc^2\n\\end{equation}\n\\end{document}\n');
+    expect(s.value.slice(0, s.start).endsWith('\\end{equation}')).toBe(true);
+    // a closer that is really needed stays
+    const t = typeKeys(snap('\\begin{itemize}\n\\item a\n'), '\\end{itemize}');
+    expect(t.value).toBe('\\begin{itemize}\n\\item a\n\\end{itemize}');
+  });
+
+  it('the closing ``` of a code block typed on an indented line moves to the opening fence', () => {
+    const s = typeKeys(snap('```python\ndef f():\n    return 1\n    '), '```');
+    expect(s.value).toBe('```python\ndef f():\n    return 1\n```');
+    // without an open fence above, ``` stays where it was typed
+    expect(typeKeys(snap('text\n    '), '```').value).toBe('text\n    ```');
+  });
+});

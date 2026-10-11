@@ -113,10 +113,20 @@ describe('document model → markdown', () => {
 
   it('text that looks like markup is escaped', () => {
     const doc = parseMarkdown('x\n').doc;
-    const texts = ['# not a heading', '- not a list', '1. not a list', '*stars* and _under_ and `ticks`', 'a $5 price', '<div> and [link](x) and a\\b', '> no quote', '~~not struck~~'];
+    const texts = ['# not a heading', '- not a list', '1. not a list', '*stars* and _under_ and `ticks`', 'a $5 price', '<div> and [link](x) and a\\b', '> no quote', '~~not struck~~', '+ not a list', '2) not a list', '---', '==='];
     doc.body = texts.map(t => ({ layout: 'Standard', depth: 0, params: {}, items: [{ kind: 'text', text: t, font: {} }] }));
     const md = writeMarkdown(doc).text;
     expect(parseMarkdown(md).doc.body.map(p => p.items.map(i => (i.kind === 'text' ? i.text : '?')).join(''))).toEqual(texts);
+  });
+
+  it('text that only resembles markup stays as typed: numbers, signs and hashtags at a line start, anything in a table cell', () => {
+    // a list marker needs the space after it; `1.2` in a table cell was written as `1\.2`
+    for (const md of ['1.2 mg were added.', '-5 °C overnight.', '#hashtag first', '| A | 1.2 |\n| - | --- |\n| B | -0.4 |']) {
+      expect(roundTrip(md + '\n')).not.toMatch(/\\[.#-]/);
+    }
+    const table = roundTrip('| Sample | Conc. |\n|---|---|\n| A | 1.2 |\n| B | 2) x |\n');
+    expect(table).toContain('| 1.2 ');
+    expect(table).toContain('| 2) x ');
   });
 
   it('emphasis that the delimiter rules cannot express is written as HTML tags', () => {
