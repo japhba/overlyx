@@ -42,10 +42,12 @@ describe('autocorrectFix', () => {
   it('keeps the typed capitalisation', () => {
     expect(autocorrectFix('Teh', ['the'])).toBe('The');
   });
-  it('allows two edits only on long words', () => {
-    expect(autocorrectFix('recieved', ['received'])).toBe('received');
-    expect(autocorrectFix('exercize', ['exercise'])).toBe('exercise');   // long: distance 2 ok
-    expect(autocorrectFix('cat', ['cost'])).toBeNull();                  // short: distance 2 is a different word
+  it('one slip only: two edits are another word, also on long ones', () => {
+    expect(autocorrectFix('recieved', ['received'])).toBe('received');   // a swapped pair
+    expect(autocorrectFix('exercize', ['exercise'])).toBe('exercise');
+    expect(autocorrectFix('cat', ['cost'])).toBeNull();
+    // a term the dictionary lacks is no typo (usability wave, 11 Oct 2026: invariance → invariable)
+    expect(autocorrectFix('invariance', ['invariable', 'invariant'])).toBeNull();
   });
   it('never rewrites into something far away, split, or differently headed', () => {
     expect(autocorrectFix('graident', ['gradient'])).toBe('gradient');

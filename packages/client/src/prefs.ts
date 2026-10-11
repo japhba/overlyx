@@ -51,9 +51,11 @@ export interface Prefs {
   editorMathFont: string;
   /** a tip with the shortcut after an action was taken with the mouse a few times (shortcuttips.ts) */
   shortcutTips: boolean;
+  /** autoCorrect was set by the person (not the old default, see load) */
+  autoCorrectChosen?: boolean;
 }
 
-export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: true, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, darkPdf: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true };
+export const DEFAULT_PREFS: Prefs = { spellcheck: true, spellEngine: 'overlyx', autoCorrect: false, aiButton: false, aiRewrite: false, aiCompleteText: false, aiCompleteMath: false, aiCompleteDelay: 200, invertFigures: true, darkPdf: true, aiModel: '', aiCompletionModel: '', darkTone: 'white', usageStats: true, autoBuild: 'shown', autoBuildDelay: 1, editorFont: 'cm', editorMathFont: 'match', shortcutTips: true };
 /** delays that were the default in earlier builds: a stored one of these follows the current default */
 const OLD_DEFAULT_DELAYS = new Set([600, 450]);
 const STORAGE = 'ol.prefs';
@@ -62,6 +64,10 @@ function load(): Prefs {
   try {
     const v = JSON.parse(localStorage.getItem(STORAGE) ?? '{}');
     if (v && typeof v === 'object' && OLD_DEFAULT_DELAYS.has(v.aiCompleteDelay)) delete v.aiCompleteDelay;
+    // 11 Oct 2026: autocorrect became opt-in — against the US dictionary it "fixed" British spellings
+    // and scientific words as they were typed (normalised → normalized, invariance → invariable). A
+    // stored `true` from the old default is dropped once; switching it on now marks the choice.
+    if (v && typeof v === 'object' && !v.autoCorrectChosen) delete v.autoCorrect;
     return v && typeof v === 'object' ? { ...DEFAULT_PREFS, ...v } : { ...DEFAULT_PREFS };
   } catch { return { ...DEFAULT_PREFS }; }
 }
@@ -72,7 +78,7 @@ const listeners = new Set<(p: Prefs) => void>();
 export function getPrefs(): Prefs { return prefs; }
 export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]): void {
   if (prefs[key] === value) return;
-  prefs = { ...prefs, [key]: value };
+  prefs = { ...prefs, [key]: value, ...(key === 'autoCorrect' ? { autoCorrectChosen: true } : {}) };
   try { localStorage.setItem(STORAGE, JSON.stringify(prefs)); } catch { /* ignore */ }
   for (const l of listeners) { try { l(prefs); } catch { /* ignore */ } }
 }

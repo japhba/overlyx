@@ -2,8 +2,8 @@
  * Smartphone/Mac-style autocorrect (Tools \u25b8 Autocorrect typos): when a word is finished with a
  * space or punctuation, a minor typo is replaced by the dictionary's suggestion on the spot —
  * local and instant (the same Hunspell worker as the spell checker, no model call). "Minor"
- * means: the top suggestion is one edit away (two for long words, transpositions count as one),
- * keeps the first letter, and is a single word; acronyms, identifiers, code-like insets and
+ * means: the top suggestion is one edit away (a transposition counts as one),
+ * keeps the first letter, and is a single word; off unless switched on (prefs.ts); acronyms, identifiers, code-like insets and
  * verbatim layouts are never touched — and formulas live in the math field, which this plugin
  * never sees. The correction flashes briefly; Backspace right after it puts the typed word back
  * and stops that word from being corrected again this session (Ctrl+Z works too).
@@ -74,7 +74,9 @@ export function autocorrectFix(word: string, suggestions: string[]): string | nu
     if (!firstOk) continue;                      // otherwise the first letter must survive (the classic guard)
     if (/[\s-]/.test(s)) continue;              // no splitting into two words or hyphenating
     const dist = editDistance(w, c);
-    if (!(dist === 1 || (dist === 2 && w.length >= 6))) continue;
+    // one slip only (a swapped pair counts as one): two edits turned real words the dictionary
+    // lacks into others (invariance → invariable)
+    if (dist !== 1) continue;
     const score = (isSwap(w, c) ? 0 : 100) + dist * 10 + i;
     if (!best || score < best.score) best = { fix: matchCase(word, s), score };
   }
