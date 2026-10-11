@@ -48,8 +48,11 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   // responses needed to start offline (who am I, project list, metadata of the open document).
   const warm = () => {
     const urls = ['/api/auth/me', '/api/projects'];
-    const id = decodeURIComponent(location.hash.replace(/^#\/?/, '').split('?')[0]);
-    if (id) urls.push(`/api/docs/${encodeURIComponent(id)}/meta`);
+    // (the document's id without the hash's view prefix — raw:, text:, pdf: asked for a document that
+    // does not exist, a 403 in the console and nothing cached; a share link names no document)
+    let id = '';
+    try { id = decodeURIComponent(location.hash.replace(/^#\/?/, '').split('?')[0]).replace(/^(raw|text|pdf):/, ''); } catch { /* malformed */ }
+    if (id && !id.startsWith('share/') && id.includes('/')) urls.push(`/api/docs/${encodeURIComponent(id)}/meta`);
     for (const u of urls) fetch(u, { credentials: 'same-origin' }).catch(() => {});
   };
   // the math font in use is cached whole (sw.js 'math-font'), by the worker that controls the page — a new one after a deployment starts with an empty cache
