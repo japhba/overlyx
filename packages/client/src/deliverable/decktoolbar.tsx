@@ -219,6 +219,25 @@ function paintLabel(items: SelItem[]): string {
   return 'Fill & border';
 }
 
+/**
+ * The quick menu beside the selection (QuickBar.tsx): the operations used most, taken from the
+ * toolbar's own sections (so they act and look the same) — text: bold, italic, colour, size,
+ * alignment; shapes: fill and border; lines: colour, weight, arrowheads; pictures: crop and background;
+ * then arrange, `extra` (duplicate, comment) and delete. Empty while points, a formula or a crop are edited.
+ */
+const QUICK: string[][] = [['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-arrange']];
+export function quickGroups(sections: ToolSection[], extra: ToolButton[]): ToolButton[][] {
+  const all = new Map<string, ToolButton>();
+  for (const sec of sections) for (const g of sec.groups) for (const b of g) all.set(b.id, b);
+  if (all.has('dk-node-done') || all.has('dk-cropdone') || all.has('m-frac')) return [];
+  const groups = QUICK.map(ids => ids.map(id => all.get(id)).filter((b): b is ToolButton => !!b)).filter(g => g.length);
+  if (!groups.length) return [];
+  const del = all.get('dk-delete');
+  // its own ids (q-…): the toolbar's buttons stay one of a kind on the page
+  const own = (x: ToolButton): ToolButton => ({ ...x, id: 'q-' + x.id.replace(/^dk-/, '') });
+  return [...groups, [...extra, ...(del ? [del] : [])]].map(g => g.map(own));
+}
+
 export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolButton[][]; sections: ToolSection[] } {
   const ro = c.readOnly;
   const sel = c.sel;

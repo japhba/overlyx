@@ -99,7 +99,7 @@ async function dropFile(page: Page, name: string, type: string, base64: string, 
   }, { name, type, base64, fx, fy });
 }
 
-test('the contextual toolbar, fill, distribute, group, flip and the rotation handle', async ({ page }) => {
+test('the contextual toolbar, fill, distribute, group, flip and rotation (a second click: the arrows)', async ({ page }) => {
   const errors = collectErrors(page);
   await login(page);
   expect((await page.request.post(BASE_URL + '/api/projects', { data: { name: NAME } })).ok()).toBeTruthy();
@@ -113,7 +113,7 @@ test('the contextual toolbar, fill, distribute, group, flip and the rotation han
   const h1 = await at(page, 300, 130);
   await page.mouse.click(h1.x, h1.y);
   await expect(page.locator('[data-tb="dk-b"]')).toBeVisible();
-  await expect(page.locator('[data-dk-size] input')).toHaveValue('64');
+  await expect(page.locator('.dl-toolbar [data-dk-size] input')).toHaveValue('64');
   await expect(page.locator('[data-tb="dk-fill"]')).toHaveCount(0);
 
   // a shape: fill and border; a colour from the palette
@@ -149,15 +149,51 @@ test('the contextual toolbar, fill, distribute, group, flip and the rotation han
   await page.locator('[data-palette="dk-arrange"] .tb-pal-item', { hasText: 'Flip horizontally' }).click();
   await expect.poll(() => styleOf('a'), { timeout: 15000 }).toContain('scale: -1 1');
 
-  // rotated by the round handle above it: dragged level with the centre, to the right — a quarter turn
+  // rotated as in Inkscape: a click on the selected object again turns its handles into rotation arrows
+  // off the corners; the top right one (on the square's diagonal) dragged round to the bottom right — a quarter turn
   const c0 = await at(page, 150, 450);
-  const top = await at(page, 150, 400);
-  await page.mouse.move(top.x, top.y - 18);
+  await page.mouse.click(c0.x, c0.y);
+  await page.waitForTimeout(200);
+  const ne = await at(page, 200, 400);
+  await page.mouse.move(ne.x + 6.4, ne.y - 6.4);
   await page.mouse.down();
-  await page.mouse.move(c0.x + 60, c0.y - 40, { steps: 5 });
-  await page.mouse.move(c0.x + 120, c0.y, { steps: 5 });
+  await page.mouse.move(c0.x + 90, c0.y, { steps: 5 });
+  await page.mouse.move(c0.x + 60, c0.y + 60, { steps: 5 });
   await page.mouse.up();
   await expect.poll(() => styleOf('a'), { timeout: 15000 }).toContain('rotate: 90deg');
+  expect(real(errors)).toEqual([]);
+});
+
+test('the quick menu beside the selection: the toolbar\'s main buttons, out of the way while dragging, duplicate', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await page.request.post(BASE_URL + '/api/projects', { data: { name: NAME } });
+  await setup(page);
+  const quick = page.locator('[data-dl-quick]');
+  await expect(quick).toHaveCount(0);   // nothing selected
+  // a shape: fill and border among its buttons, beside it (above its top edge)
+  const c = await at(page, 150, 450);
+  await page.mouse.click(c.x, c.y);
+  await expect(quick).toBeVisible();
+  await expect(quick.locator('[data-tb="q-fill"]')).toHaveCount(1);
+  await expect(quick.locator('[data-tb="q-delete"]')).toHaveCount(1);
+  await expect(page.locator('[data-tb="dk-fill"]')).toHaveCount(1);   // the toolbar's own button stays one of a kind
+  const qb = (await quick.boundingBox())!, top = await at(page, 150, 400);
+  expect(qb.y + qb.height).toBeLessThanOrEqual(top.y);
+  // its fill acts as the toolbar's
+  await quick.locator('[data-tb="q-fill"]').click();
+  await page.locator('[data-palette="q-fill"] [data-color="#ffff00"]').click();
+  await expect.poll(() => styleOf('a'), { timeout: 15000 }).toContain('#ffff00');
+  // while the shape is dragged the menu steps aside, then follows it
+  await page.mouse.move(c.x, c.y);
+  await page.mouse.down();
+  await page.mouse.move(c.x + 40, c.y + 10, { steps: 6 });
+  await expect(quick).toHaveCount(0);
+  await page.mouse.up();
+  await expect(quick).toBeVisible();
+  // duplicate from the menu: a copy of the shape
+  await quick.locator('[data-tb="q-dup"]').click();
+  await expect.poll(() => (fileText().match(/background: #ffff00/g) ?? []).length, { timeout: 15000 }).toBe(2);
   expect(real(errors)).toEqual([]);
 });
 
@@ -535,6 +571,10 @@ test("LaTeX on slides: a citation from the project's .bib, a numbered equation w
   await page.locator('[data-anim-list]').click();
   await expect.poll(fileText, { timeout: 15000 }).toMatch(/<ul id="l"[^>]* data-steps="1"/);
   const m = await at(page, 720, 270, 1);
+  // (the quick menu above the list is where m is: a click on the slide's empty corner first)
+  const empty = await at(page, 1240, 700, 1);
+  await page.mouse.click(empty.x, empty.y);
+  await expect(page.locator('[data-dl-quick]')).toHaveCount(0);
   await page.mouse.click(m.x, m.y);
   await page.locator('[data-anim-add="appear"]').click();
   await expect.poll(fileText, { timeout: 15000 }).toMatch(/<p id="m"[^>]* data-step="3"/);

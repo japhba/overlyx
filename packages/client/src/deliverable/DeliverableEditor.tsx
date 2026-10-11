@@ -23,7 +23,8 @@ import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, Del
 import { SlideView } from './viewport';
 import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
-import { deckToolbar, type DeckTextActions } from './decktoolbar';
+import { deckToolbar, quickGroups, type DeckTextActions } from './decktoolbar';
+import { QuickBar } from './QuickBar';
 import { BgRemoveDialog } from './BgRemoveDialog';
 import { MathOverlay, type MathEditState, type MathOps } from './MathOverlay';
 import { AnimationPane, type Sequence } from './AnimationPane';
@@ -165,6 +166,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [current, setCurrent] = useState(0);
   const [sel, setSel] = useState<SelItem[]>([]);
+  /** something selected is being dragged on the canvas (the quick menu steps aside) */
+  const [dragging, setDragging] = useState(false);
   const [editingText, setEditingText] = useState<Path | null>(null);
   const editingTextRef = useRef(false); editingTextRef.current = !!editingText;
   /** a formula of the text being retyped, open in LyX's formula editor (MathOverlay) */
@@ -477,6 +480,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           }
           break;
         case 'selection': if (fromCanvas) { setSel(m.items); host.setSelection(m.items.map(i => i.path)); } break;
+        case 'dragging': if (fromCanvas) setDragging(m.on); break;
         case 'editing':
           if (!fromCanvas) break;
           setEditingText(m.path);
@@ -1321,6 +1325,16 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     },
   });
   const openComments = review.threads.filter(t => !t.thread.done).length;
+  // the quick menu beside the selection (QuickBar.tsx): the toolbar's most used buttons, duplicate, comment
+  const quick = !locked && !dragging && !presenting && tool === 'select' && sel.length && !nodeEd && !mathEdit && !cropping
+    ? quickGroups(bars.sections, [
+      { id: 'dk-dup', title: 'Duplicate (Ctrl+D)', icon: 'dk-duplicate', action: duplicateSel },
+      { id: 'dk-comment', title: 'Comment (Ctrl+Alt+M)', icon: 'dk-comment', action: () => toCanvas({ ol: 'newComment' }) },
+    ]) : [];
+  const quickRect = sel.length ? sel.map(s => s.rect).reduce((a, r) => {
+    const x = Math.min(a.x, r.x), y = Math.min(a.y, r.y);
+    return { x, y, w: Math.max(a.x + a.w, r.x + r.w) - x, h: Math.max(a.y + a.h, r.y + r.h) - y };
+  }) : null;
 
   // the contextual tools on a row of their own when they do not fit beside the others (nothing hidden)
   const barRef = useRef<HTMLDivElement>(null);
@@ -1358,6 +1372,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   return (
     <div class={'dl-editor' + (presenting ? ' presenting' : '')} data-kind={kind}>
+      {quick.length > 0 && quickRect && <QuickBar groups={quick} rect={quickRect} frame={() => canvasFrame.current} scrollY={() => (soloOn ? 0 : scrollRef.current)} />}
       <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar">
         <span class="dl-title" title={path}>{title}</span>
         <Toolbar id="deck-tools" groups={bars.tools} />

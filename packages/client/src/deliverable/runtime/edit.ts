@@ -10,8 +10,9 @@
  * with its TeX shown as written); Escape ends that, then goes a level up. Dragging moves what is
  * positioned (absolute, fixed, relative; on a slide also a static element, which becomes relative;
  * inside an SVG a shape gets a translate), Alt+drag moves a copy, handles resize (in the object's
- * own axes when it is rotated), the round handle above rotates (Shift: 15° steps), a line's ends are
- * dragged by themselves. Positions are written in the units the element had. Arrows nudge, Delete
+ * own axes when it is rotated); as in Inkscape a click on the selected object again turns its handles
+ * into rotation arrows at the corners (Shift: 15° steps) and the next click back, a double click edits
+ * its points (a shape) or its text; a line's ends are dragged by themselves. Positions are written in the units the element had. Arrows nudge, Delete
  * removes, ⌘D duplicates; ⌘Z, ⌘G and the rest go to the editor, which sends arrangement commands
  * back (arrange.ts).
  *
@@ -44,6 +45,8 @@ let tool: Tool = 'select';
 let selected: Element[] = [];
 let peers: { paths: Path[]; color: string; name: string }[] = [];
 let editing: HTMLElement | null = null;
+/** the selected object showing rotation arrows instead of resize handles (Inkscape: a click on the selected object switches them) */
+let rotating: Element | null = null;
 let editTimer: ReturnType<typeof setTimeout> | null = null;
 let editStartHtml = '';
 /** the cursor while dragging (the move arrows, a handle's resize arrows, rotation) */
@@ -74,9 +77,10 @@ export function startEditing(): void {
     .frame.locked { border-style: dotted; border-color: #8a93a6; }
     .hover { position: absolute; outline: 1px solid rgba(47,111,222,.55); pointer-events: none; transform-origin: 50% 50%; }
     .handle { position: absolute; width: var(--h); height: var(--h); margin: calc(var(--h) / -2) 0 0 calc(var(--h) / -2); background: #fff; border: 1.5px solid #2f6fde; box-sizing: border-box; border-radius: 2px; pointer-events: auto; touch-action: none; }
-    .handle.rot { border-radius: 50%; background: #2f6fde; border-color: #fff; cursor: ${ROT_CURSOR}; }
     .handle.end { border-radius: 50%; width: calc(var(--h) * 1.25); height: calc(var(--h) * 1.25); margin: calc(var(--h) * -0.625) 0 0 calc(var(--h) * -0.625); cursor: ${MOVE_CURSOR}; }
-    .stem { position: absolute; background: #2f6fde; pointer-events: none; transform-origin: 50% 100%; }
+    .handle.rot4 { width: calc(var(--h) * 2); height: calc(var(--h) * 2); margin: calc(var(--h) * -1) 0 0 calc(var(--h) * -1); border: 0; border-radius: 0; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 15A8.5 8.5 0 0 1 19.5 15M2 12.5l2.5 3 3-1.8M22 12.5l-2.5 3-3-1.8' stroke='white' stroke-width='5'/%3E%3Cpath d='M4.5 15A8.5 8.5 0 0 1 19.5 15M2 12.5l2.5 3 3-1.8M22 12.5l-2.5 3-3-1.8' stroke='%232f6fde' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat; cursor: ${ROT_CURSOR}; }
+    .rot-centre { position: absolute; width: calc(var(--h) * 1.4); height: calc(var(--h) * 1.4); margin: calc(var(--h) * -0.7) 0 0 calc(var(--h) * -0.7); pointer-events: none;
+      background: linear-gradient(#2f6fde, #2f6fde) center / 1.5px 100% no-repeat, linear-gradient(#2f6fde, #2f6fde) center / 100% 1.5px no-repeat; opacity: .8; }
     .lock { position: absolute; transform: translate(-100%, -100%); font-size: calc(12px * var(--s)); line-height: 1; pointer-events: none; }
     .guide { position: absolute; background: #e8467c; pointer-events: none; }
     .draw { position: absolute; border: 1.5px dashed #2f6fde; background: rgba(47,111,222,.08); pointer-events: none; }
@@ -623,6 +627,7 @@ export function draw(): void {
     const cls = live.some(e => e === editing) ? ' editing' : live.every(isLocked) ? ' locked' : '';
     parts.push(`<div class="tag${cls}" data-ol-kind style="left:${x}px;top:${y}px">${esc(selectionLabel(live))}</div>`);
   }
+  if (rotating && !(selected.length === 1 && selected[0] === rotating && !editing)) rotating = null;
   if (selected.length === 1 && !editing && selected[0].isConnected && !isLocked(selected[0]) && !drag?.moved) {
     const el = selected[0];
     const line = lineOf(el);
@@ -634,14 +639,16 @@ export function draw(): void {
       const fixed = fixedHeight(el);
       const hs: [string, number, number][] = [['nw', 0, 0], ['ne', 1, 0], ['sw', 0, 1], ['se', 1, 1], ['w', 0, 0.5], ['e', 1, 0.5]];
       if (fixed) hs.push(['n', 0.5, 0], ['s', 0.5, 1]);
-      if (!isSvgPart(el)) for (const [k, fx, fy] of hs) { const [x, y] = handleAt(b, fx, fy); parts.push(`<div class="handle" data-h="${k}" style="left:${x}px;top:${y}px;cursor:${cursorFor(k, b.a)};border-width:${bw}px"></div>`); }
-      if (rotatable(el)) {
-        const stem = 18 / scale;
-        const [tx, ty] = handleAt(b, 0.5, 0);
-        const [rx, ry] = rot(0, -stem, b.a);
-        parts.push(`<div class="stem" style="left:${tx - bw / 2}px;top:${ty - stem}px;width:${bw}px;height:${stem}px;transform:rotate(${b.a}deg)"></div>`);
-        parts.push(`<div class="handle rot" data-h="rot" style="left:${tx + rx}px;top:${ty + ry}px;border-width:${bw}px"></div>`);
-      }
+      if (rotating === el && rotatable(el)) {
+        // the second click: a rotation arrow off each corner (any of them turns it about its centre), the centre marked
+        const off = 9 / scale;
+        for (const [k, fx, fy, a] of [['nw', 0, 0, -45], ['ne', 1, 0, 45], ['se', 1, 1, 135], ['sw', 0, 1, -135]] as [string, number, number, number][]) {
+          const [x, y] = handleAt(b, fx, fy);
+          const [ox, oy] = rot((fx - 0.5) * 2 * off * Math.SQRT1_2, (fy - 0.5) * 2 * off * Math.SQRT1_2, b.a);
+          parts.push(`<div class="handle rot4" data-h="rot" data-corner="${k}" style="left:${x + ox}px;top:${y + oy}px;transform:rotate(${a + b.a}deg)"></div>`);
+        }
+        parts.push(`<div class="rot-centre" style="left:${b.cx}px;top:${b.cy}px"></div>`);
+      } else if (!isSvgPart(el)) for (const [k, fx, fy] of hs) { const [x, y] = handleAt(b, fx, fy); parts.push(`<div class="handle" data-h="${k}" style="left:${x}px;top:${y}px;cursor:${cursorFor(k, b.a)};border-width:${bw}px"></div>`); }
     }
   }
   for (const g of guides) {
@@ -739,6 +746,10 @@ interface Drag {
   copy?: boolean;
   /** the object pressed on (a click without a drag on one of several selected selects it alone) */
   clicked?: Element;
+  /** the press was on the object that was already the only one selected: a click switches its handles (Inkscape) */
+  again?: boolean;
+  /** the editor was told that something is being dragged (its quick menu steps aside) */
+  told?: boolean;
   pts?: [number, number][];
   /** the rotation drag's centre and starting angles */
   rot?: { cx: number; cy: number; a0: number; p0: number };
@@ -814,10 +825,11 @@ function onPointerDown(e: PointerEvent): void {
     report(); draw();
     return;
   }
+  const again = selected.length === 1 && selected[0] === el;
   if (!selected.includes(el)) { selected = [el]; report(); }
   draw();
   const els = selected.filter(s => movable(s) && !isLocked(s)).map(s => start(s as HTMLElement));
-  drag = { ...base, kind: 'move', els, copy: e.altKey, clicked: el };
+  drag = { ...base, kind: 'move', els, copy: e.altKey, clicked: el, again };
   capture();
 }
 
@@ -916,6 +928,7 @@ function onDragMove(e: PointerEvent): void {
   if (!drag.moved) {
     drag.moved = true;
     if (drag.hold) clearTimeout(drag.hold);
+    if (drag.kind === 'move' || drag.kind === 'resize' || drag.kind === 'rotate' || drag.kind === 'end') { drag.told = true; post({ ol: 'dragging', on: true }); }
     if (drag.kind !== 'pan') {
       document.documentElement.classList.add('ol-dragging');
       // the cursor of what is dragged stays on wherever the pointer goes (Safari keeps the cursor it had at the press)
@@ -1062,6 +1075,7 @@ function onDragEnd(e: PointerEvent): void {
   guides = [];
   if (!d) return;
   if (d.hold) clearTimeout(d.hold);
+  if (d.told) post({ ol: 'dragging', on: false });
   if (d.kind === 'pan') {
     if (d.moved && isSolo()) post({ ol: 'panEnd' });
     // a tap on nothing: the selection goes
@@ -1092,6 +1106,8 @@ function onDragEnd(e: PointerEvent): void {
   if (!d.moved) {
     // a click on one of several selected objects: that one alone (PowerPoint's); a drag would have moved them all
     if (d.kind === 'move' && d.clicked && selected.length > 1 && !e.shiftKey) { selected = [d.clicked]; report(); }
+    // a click on the object already selected: resize handles ⇄ rotation arrows (Inkscape)
+    else if (d.kind === 'move' && d.again && d.clicked && !e.shiftKey && rotatable(d.clicked) && !lineOf(d.clicked) && !isLocked(d.clicked)) rotating = rotating === d.clicked ? null : d.clicked;
     draw();
     return;
   }
@@ -1396,6 +1412,7 @@ function penUpOnce(): void { removeEventListener('pointerup', penUpOnce, true); 
 
 function onDblClick(e: MouseEvent): void {
   if (isCropping() || isNodeEditing()) return;
+  rotating = null;   // (its two clicks switched the handles twice: a double click means points or text)
   e.preventDefault();
   e.stopPropagation();
   if (isOrdering()) return;

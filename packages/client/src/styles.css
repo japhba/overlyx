@@ -2550,6 +2550,9 @@ html[data-theme="dark"] .lyx-par[data-layout="FrameTitle"] { color: #9d9dff; }
 @media (prefers-reduced-motion: reduce) { .dl-pull.pop svg { animation-name: dl-pull-fade; } }
 /* the contextual tools in sections named as the selection's label on the canvas */
 .dl-ctx-secs { display: flex; align-items: center; width: max-content; }
+/* the quick menu beside the selection on the canvas (deliverable/QuickBar.tsx) */
+.dl-quick { position: fixed; left: 0; top: 0; z-index: 70; display: flex; align-items: center; padding: 2px 4px; background: var(--surface); border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16); }
+.dl-quick .toolbar { background: none; border: 0; padding: 0; flex-wrap: nowrap; }
 .dl-ctx-secs > .toolbar + .toolbar { margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--ui-border); }
 .dl-ctx-secs .tb-label { white-space: nowrap; }
 .dl-notes { flex: none; height: 74px; border-top: 1px solid var(--ui-border); background: var(--surface); }

@@ -497,12 +497,24 @@ blend.
     `<html>`) on the version it showed; the editor rebases them onto the current text
     (`sourceops.ts rebasedSplices`: through the region that changed meanwhile; an element deleted
     meanwhile refuses) and applies them as splices of the `Y.Text` — one undo step each (⌘Z).
+  * **The quick menu** (`QuickBar.tsx`, `decktoolbar.tsx quickGroups`): a small bar right beside the
+    selection — above it, or below when there is no room — with the toolbar's most used buttons for
+    what is selected (text: bold, italic, colour, size, alignment; shapes: fill, border; lines: colour,
+    weight, arrowheads; pictures: crop, background), then arrange, duplicate, comment and delete. Its
+    buttons are the toolbar's own, under ids of their own (`q-…`, so the toolbar's stay one of a kind
+    on the page); it follows the selection through zoom and pan (the frame's box read every frame),
+    steps aside while something is dragged (the runtime's `dragging` message), and is not shown while
+    points, a formula or a crop are edited. It is positioned with left / top: a transformed parent
+    would carry the palettes' fixed popups away.
   * **The canvas's tools** (PowerPoint's and Inkscape's, `runtime/edit.ts`, `runtime/arrange.ts`,
     `runtime/view.ts`, `runtime/crop.ts`): shapes (rectangle, rounded, ellipse — boxes that centre
     text typed into them — and triangle, diamond, star, hexagon as SVG polygons stretched to their box
     with a constant-width outline), lines and arrows from where the drag started to where it ended
-    (Shift: 45° steps), the pen (a smoothed `<path>`); the round handle above a selection rotates it
-    (CSS `rotate`, Shift: 15° steps, snaps to 0/90/180/270), resizing a rotated box works in its own
+    (Shift: 45° steps), the pen (a smoothed `<path>`); handles as in Inkscape: a click selects with the
+    resize box, a click on the selected object again turns its handles into rotation arrows off the
+    four corners (the centre marked; any arrow turns it, CSS `rotate`, Shift: 15° steps, snaps to
+    0/90/180/270) and the next click back, a double click edits its points (a path) or its text — the
+    round handle on a stem above the box is gone; resizing a rotated box works in its own
     axes, a line's ends are dragged by themselves, Alt+drag moves a copy, Ctrl/⌘+click selects inside
     a group or a drawing (double-click goes in a level), a click on one of several selected objects
     selects it alone, a shape takes text (double-click or start typing). *Arrange* (the toolbar's,

@@ -376,6 +376,7 @@ html[data-ui="modern"] .home .project-docs a { color: var(--m-ink); display: inl
 /* ------------------------------------------------------------ slides, posters, web pages (deliverable/DeliverableEditor.tsx) */
 html[data-ui="modern"] .dl-editor { background: var(--ui-bg); }
 html[data-ui="modern"] .dl-toolbar { margin: 0 12px 8px; padding: 0 4px; min-height: 40px; border: 0; border-radius: 8px; background: var(--m-strip); gap: 2px; }
+html[data-ui="modern"] .dl-quick { border-color: var(--m-line); background: var(--m-field); border-radius: 10px; }
 /* the contextual tools on a second line of the strip when they do not fit beside the others */
 html[data-ui="modern"] .dl-toolbar.dl-ctx-row { padding-bottom: 4px; row-gap: 0; }
 html[data-ui="modern"] .dl-toolbar.dl-ctx-row > .dl-ctx { border-top: 1px solid var(--m-line); padding-top: 4px; margin: 0 4px; }

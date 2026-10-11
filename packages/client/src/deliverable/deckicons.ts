@@ -76,6 +76,7 @@ Object.assign(ICONS, {
   'dk-crop': I('<path d="M4.5 1.5v10h10M1.5 4.5h10v10"/>'),
   'dk-nobg': I('<rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1" stroke-dasharray="1.6 1.3"/><path d="M5 12c0-3 1.3-5 3-5s3 2 3 5" fill="currentColor" fill-opacity="0.3"/><circle cx="8" cy="5.4" r="1.6" fill="currentColor" fill-opacity="0.3"/>'),
   'dk-replace': I('<rect x="1.8" y="2.8" width="8.5" height="7.5" rx="0.8"/><path d="M12 6.5v6.8H5.5"/><path d="M10.2 11.4l1.8 1.9 1.8-1.9" /><path d="M3 8.6l2.4-2.4 1.8 1.8 1.2-1.2 1.6 1.6"/>'),
+  'dk-duplicate': I('<rect x="2.5" y="5.5" width="8" height="8" rx="1"/><path d="M5.5 5.5V3.5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/>'),
   'dk-delete': I('<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>'),
   'dk-background': I('<rect x="1.5" y="3" width="13" height="10" rx="1"/><path d="M1.5 10.5l4-3.5 3 2.5 2-1.5 4 3" fill="currentColor" fill-opacity="0.25"/>'),
   'dk-canvas': I('<rect x="1.5" y="1.5" width="13" height="13" rx="1" stroke-dasharray="1.6 1.2"/><rect x="4" y="5" width="8" height="6" rx="0.5" fill="currentColor" fill-opacity="0.25"/>'),

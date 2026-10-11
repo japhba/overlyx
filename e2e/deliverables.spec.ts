@@ -64,7 +64,7 @@ test('a deck from the New dialog: select, drag, retype, draw, delete and undo', 
   // select the title: the toolbar shows its size; drag it
   const h1 = slides(page).first().locator('h1');
   await h1.click();
-  await expect(page.locator('[data-dk-size] input')).toHaveValue('64');
+  await expect(page.locator('.dl-toolbar [data-dk-size] input')).toHaveValue('64');
   const b = (await h1.boundingBox())!;
   const scale = b.width / 1040;
   await page.mouse.move(b.x + 40, b.y + b.height / 2);
