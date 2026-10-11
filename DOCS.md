@@ -1211,13 +1211,13 @@ blend.
   cells show only while the cursor is in that table / formula (`editor/plugins/envfocus.ts` marks the
   table with `ol-editing`; the static formula rendering hides its `lm-empty` outlines) — a document
   reads as it prints, the scaffolding appears where one works.
-* **Favicon** (`public/icon.svg`): LYX over an upright O — the wordmark's tilted blue L, yellow Y and
-  red X in their own proportions, larger than the ring is wide: the L and the X spill over its sides,
-  in front of it (a gap in the disc's colour where they cross), the Y stands inside. Weaving them
-  through the ring was tried and dropped: an upright circle meets the X's diagonals and the L's stem
-  at shallow angles, so the ring in front cut the letters apart (and stretching them to cross steeply
-  distorted them). Everything sits on a disc — paper with a graphite ring, or dark with a light ring
-  (`prefers-color-scheme: dark`) — so the ring never melts into a tab bar.
+* **Favicon** (`public/icon.svg`): the wordmark's own L, Y and X — Jost Bold outlines, tilted as in
+  the wordmark — over an upright O; the X's upper arm passes behind the ring (the ring drawn again over
+  it inside a wedge, with a gap in the disc's colour). Everything sits on a disc — paper with a graphite
+  ring, or dark with a light ring (`prefers-color-scheme: dark`) — so the ring never melts into a tab
+  bar. The artwork lives in the user's project `jan/favicon` (`icon/index.html`, a deck of square
+  slides drawn at 10×, slide 2) for tweaking on the canvas; the icon is that slide's SVG with the dark
+  scheme's colours added (classes instead of fills).
 * **Landing page / sign-in** (`app/Login.tsx` + `app/landing.css`): one Bauhaus look for every visitor,
   whichever interface (Classic / Modern) they use inside — warm paper, graphite ink, hairlines, square
   corners, Jost and Inter; the wordmark's blue / yellow / red only as thin rules (over the sign-in
