@@ -41,8 +41,13 @@ export type ArrangeHow =
 /** the node editor's commands (Inkscape's node toolbar) */
 export type NodeCmd = 'insert' | 'delete' | 'corner' | 'smooth' | 'straight' | 'curve' | 'break' | 'join' | 'close' | 'all' | 'done';
 
+/** Draw's stroke, a run at one width (runtime/freehand.ts): its path data in the stroke's box */
+export interface InkRunD { w: number; d: string }
+
 /** the selection's fill and outline as the toolbar sets them (null removes; undefined leaves alone) */
 export interface Paint {
+  /** Draw's ink, whichever way the stroke is painted (a filled outline before, stroked runs now) */
+  ink?: string;
   fill?: string | null;
   stroke?: string | null;
   strokeWidth?: number | null;
@@ -253,7 +258,7 @@ export type FromRuntime =
   | { ol: 'dragging'; on: boolean }
   | { ol: 'ops'; version: number; ops: HtmlOp[]; select?: 'inserted' | 'keep' | Path[]; then?: 'editText' }
   /** a new object drawn: its box (slide px), and for lines / the pen the points (slide px, in drawing order) */
-  | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean }
+  | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean; runs?: InkRunD[] }
   | { ol: 'editing'; path: Path | null }
   /** where the caret is in the text being retyped (null: none), for the others */
   | { ol: 'caret'; caret: TextCaret | null }

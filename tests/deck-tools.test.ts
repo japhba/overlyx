@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { objectHtml, inlineSvgHtml, penPathD } from '../packages/client/src/deliverable/sourceops.ts';
 import { loadDeckInk, saveDeckInk, patchDeckInk, deckInkStyle, defaultDeckInk } from '../packages/client/src/deliverable/deckink.ts';
-import { freeOutline, outlinePathD, outlineBox, type FreePt } from '../packages/client/src/deliverable/runtime/freehand.ts';
+import { inkRuns, runPathD, runsBox, inkPaths, freshPoint, pressureWidth, type FreePt, type InkRun } from '../packages/client/src/deliverable/runtime/freehand.ts';
 import { applyOp, opSplices, parseSource, rebaseOp } from '../packages/core/src/html/source.ts';
 
 describe('objects drawn on a slide', () => {
@@ -52,59 +52,96 @@ describe('objects drawn on a slide', () => {
 });
 
 describe("Draw's strokes as GoodNotes draws them (runtime/freehand.ts)", () => {
-  /** half the stroke's width at x (the outline of a level stroke along y = 0, where its edges cross x) */
-  const half = (poly: number[][], x: number) => {
-    let h = 0;
-    for (let i = 0; i < poly.length; i++) {
-      const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % poly.length];
-      if ((ax - x) * (bx - x) > 0 || ax === bx) continue;
-      h = Math.max(h, Math.abs(ay + (by - ay) * (x - ax) / (bx - ax)));
-    }
-    return h;
-  };
-  const level = (n: number, press: (t: number) => number): FreePt[] => Array.from({ length: n + 1 }, (_, i) => [i * 4, 0, press(i / n)]);
+  const all = (runs: InkRun[]) => runs.flatMap(r => r.pts);
+  /** the points the drawn line passes: its points, and the middles of the straight bits between them */
+  const drawn = (runs: InkRun[]) => runs.flatMap(r => r.pts.flatMap((p, i) => i ? [[(p[0] + r.pts[i - 1][0]) / 2, (p[1] + r.pts[i - 1][1]) / 2], p] : [p]));
+  /** how far the stroke's points stray from a line through (x0, y0) at slope k */
+  const offLine = (runs: InkRun[], x0: number, y0: number, k: number) => Math.max(...all(runs).map(([x, y]) => Math.abs(y - y0 - k * (x - x0)) / Math.hypot(1, k)));
 
-  it("is a little thinner at the start and the end — short, blunt tapers, no needle; the Pencil's pressure makes it wider", () => {
-    for (const pressure of [true, false]) {
-      const poly = freeOutline(level(100, () => 0.5), { width: 6, pressure, last: true });
-      const mid = half(poly, 200);
-      expect(mid).toBeGreaterThan(2);
-      for (const x of [1, 399]) {
-        expect(half(poly, x)).toBeLessThan(mid * 0.6);
-        expect(half(poly, x)).toBeGreaterThan(mid * 0.25);
-      }
-      // (as wide as the rest a width and a half in)
-      expect(half(poly, 9)).toBeGreaterThan(mid * 0.85);
-      expect(half(poly, 391)).toBeGreaterThan(mid * 0.85);
-    }
-    const hard = freeOutline(level(100, () => 1), { width: 6, pressure: true, last: true });
-    const light = freeOutline(level(100, () => 0.15), { width: 6, pressure: true, last: true });
-    expect(half(hard, 200)).toBeGreaterThan(half(light, 200) * 1.6);
+  it('goes round where the pen went round, however few its points (no chords)', () => {
+    // twelve points on a circle (r = 20): a polygon's sides pass 0.68 px inside it
+    const pts: FreePt[] = Array.from({ length: 13 }, (_, i) => [100 + 20 * Math.cos(i * Math.PI / 6), 100 + 20 * Math.sin(i * Math.PI / 6), 0.5]);
+    const off = (runs: InkRun[]) => Math.max(...drawn(runs).map(([x, y]) => Math.abs(Math.hypot(x - 100, y - 100) - 20)));
+    expect(off([{ w: 4, pts: pts.map(([x, y]) => [x, y]) }])).toBeGreaterThan(0.6);
+    const runs = inkRuns(pts, { width: 4 });
+    expect(runs).toHaveLength(1);
+    expect(off(runs)).toBeLessThan(0.35);
+    // its first px too (perfect-freehand straightened them)
+    const start = drawn(runs).filter(([x, y]) => Math.hypot(x - 120, y - 100) < 5);
+    expect(start.length).toBeGreaterThan(2);
+    for (const [x, y] of start) expect(Math.abs(Math.hypot(x - 100, y - 100) - 20)).toBeLessThan(0.35);
   });
 
-  it("the highlighter is an even band; a tap is a dot", () => {
-    const poly = freeOutline(level(100, () => 0.5), { width: 20, highlighter: true, last: true });
-    expect(half(poly, 30)).toBeCloseTo(10, 0);
-    expect(half(poly, 200)).toBeCloseTo(10, 0);
-    const dot = outlineBox(freeOutline([[50, 50, 0.5]], { width: 6, pressure: true, last: true }));
-    expect(dot.w).toBeGreaterThan(3);
-    expect(dot.h).toBeGreaterThan(3);
+  it("whole-px points (an older Safari's) come out a straight line, not stairs", () => {
+    const pts: FreePt[] = Array.from({ length: 160 }, (_, i) => [Math.round(10 + i * 1.3), Math.round(20 + i * 1.3 * 0.3), 0.5]);
+    expect(offLine([{ w: 4, pts: pts.map(([x, y]) => [x, y]) }], 10, 20, 0.3)).toBeGreaterThan(0.45);
+    const runs = inkRuns(pts, { width: 4, coarse: true });
+    // (the ends stay where the pen was: measured between them)
+    const mid = all(runs).filter(([x]) => x > 40 && x < 200);
+    expect(offLine([{ w: 4, pts: mid }], 10, 20, 0.3)).toBeLessThan(0.2);
   });
 
-  it('is written as one closed path, moved into its own box', () => {
-    const poly = freeOutline(level(20, () => 0.5), { width: 4, last: true });
-    const b = outlineBox(poly);
-    const d = outlinePathD(poly, -b.x, -b.y);
-    expect(d).toMatch(/^M[\d.]+ [\d.]+Q/);
-    expect(d.endsWith('Z')).toBe(true);
-    expect(d).not.toMatch(/-\d/);   // (nothing left of or above its box)
-    const html = objectHtml('pen', { x: 10, y: 20, w: b.w, h: b.h }, 'deck', 1, undefined, { d, closed: true }, { color: '#d93025', width: 4, opacity: 1 });
-    expect(html).toMatch(/^<svg class="ol-ink" style="position: absolute; left: 10px; top: 20px; /);
-    expect(html).toContain(`<path d="${d}" fill="#d93025"/>`);
-    const hl = objectHtml('pen', { x: 0, y: 0, w: 9, h: 9 }, 'deck', 1, undefined, { d: 'M0 0L9 9Z" onload="x', closed: true }, { color: '#fbbc04', width: 24, opacity: 0.35 });
+  it("the Pencil's pressure sets the width, smoothed (no beads); a mouse's and the highlighter's are even", () => {
+    const line = (press: (i: number) => number): FreePt[] => Array.from({ length: 201 }, (_, i) => [i * 2, 50, press(i)]);
+    const widths = (runs: InkRun[]) => runs.map(r => r.w);
+    const hard = inkRuns(line(() => 0.8), { width: 4, pressure: true }), light = inkRuns(line(() => 0.1), { width: 4, pressure: true });
+    expect(Math.max(...widths(hard))).toBeGreaterThan(Math.max(...widths(light)) * 1.6);
+    // the usual writing pressure (~0.25): about the width asked for
+    expect(Math.abs(pressureWidth(0.25) - 1)).toBeLessThan(0.05);
+    // a noisy hand: the pressure jumps between 0.2 and 0.3 from one point to the next; the width hardly moves
+    const noisy = inkRuns(line(i => (i % 2 ? 0.3 : 0.2)), { width: 4, pressure: true });
+    const mid = widths(noisy).slice(1, -1);
+    expect(Math.max(...mid) - Math.min(...mid)).toBeLessThan(0.25);
+    expect(noisy.length).toBeLessThan(6);
+    // a pen's first event without pressure (0) takes the next one's: no blob, no hairline
+    const first = inkRuns([[0, 0, 0], ...line(() => 0.25).slice(1)], { width: 4, pressure: true });
+    expect(first[0].w).toBeCloseTo(4 * pressureWidth(0.25), 0);
+    for (const o of [{ width: 4 }, { width: 20, highlighter: true, pressure: true }]) {
+      const runs = inkRuns(line(i => i / 200), o);
+      expect(runs).toHaveLength(1);
+      expect(runs[0].w).toBe(o.width);
+    }
+  });
+
+  it('a tap is a dot; the runs meet end to end; the box takes in half the width', () => {
+    const dot = inkRuns([[50, 50, 0.5]], { width: 6 });
+    expect(dot).toEqual([{ w: 6, pts: [[50, 50]] }]);
+    expect(runPathD(dot[0])).toBe('M50 50L50.01 50');
+    expect(runsBox(dot)).toEqual({ x: 47, y: 47, w: 6, h: 6 });
+    const runs = inkRuns(Array.from({ length: 101 }, (_, i) => [i * 3, 0, i / 100]), { width: 4, pressure: true });
+    expect(runs.length).toBeGreaterThan(3);
+    for (let i = 1; i < runs.length; i++) expect(runs[i].pts[0]).toEqual(runs[i - 1].pts[runs[i - 1].pts.length - 1]);
+  });
+
+  it("takes each of the pen's points once, in order: Safari's coalesced events repeat the last move's (A B A C D C)", () => {
+    const pts: FreePt[] = [];
+    let t = -1;
+    const sent: [number, FreePt][] = [[1, [0, 0, 0.3]], [2, [1, 0, 0.3]], [1, [0, 0, 0.3]], [3, [2, 0, 0.3]], [4, [3, 0, 0.3]], [3, [2, 0, 0.3]], [5, [3, 0, 0.3]], [6, [4, 0, 0.3]]];
+    for (const [ts, p] of sent) if (freshPoint(pts, t, ts, p)) { pts.push(p); t = ts; }
+    expect(pts.map(p => p[0])).toEqual([0, 1, 2, 3, 4]);
+    // (the same time for all of a move's points, as some browsers give them: still taken)
+    const same: FreePt[] = [[0, 0, 0.3]];
+    expect(freshPoint(same, 7, 7, [1, 0, 0.3])).toBe(true);
+  });
+
+  it('is written as stroked runs in its own box, nothing else let through', () => {
+    const runs = inkRuns(Array.from({ length: 41 }, (_, i) => [10 + i * 2, 20 + Math.sin(i / 5) * 8, 0.2 + i / 80]), { width: 4, pressure: true });
+    const b = runsBox(runs), x = Math.floor(b.x), y = Math.floor(b.y);
+    const rd = runs.map(r => ({ w: r.w, d: runPathD(r, -x, -y) }));
+    // one path for each width, its runs in it one after the other
+    const grouped = inkPaths(runs, -x, -y);
+    expect(new Set(grouped.map(g => g.w)).size).toBe(grouped.length);
+    expect(grouped.reduce((n, g) => n + (g.d.match(/M/g) ?? []).length, 0)).toBe(runs.length);
+    for (const r of rd) expect(r.d).not.toMatch(/-\d/);   // (nothing left of or above its box)
+    const html = objectHtml('pen', { x, y, w: b.w, h: b.h }, 'deck', 1, undefined, { d: '', closed: false, runs: rd }, { color: '#d93025', width: 4, opacity: 1 });
+    expect(html).toMatch(new RegExp(`^<svg class="ol-ink" style="position: absolute; left: ${x}px; top: ${y}px; `));
+    expect(html).toContain('<g fill="none" stroke="#d93025" stroke-linecap="round" stroke-linejoin="round"><path fill="none" stroke-width="');
+    expect((html.match(/<path /g) ?? []).length).toBe(rd.length);
+    const hl = objectHtml('pen', { x: 0, y: 0, w: 9, h: 9 }, 'deck', 1, undefined, { d: '', closed: false, runs: [{ w: 24, d: 'M0 0L9 9" onload="x' }, { w: 1e9, d: 'M0 0L1 1' }] }, { color: '#fbbc04', width: 24, opacity: 0.35 });
     expect(hl).toContain('mix-blend-mode: multiply');
-    expect(hl).toContain('fill="#fbbc04" fill-opacity="0.35"');
+    expect(hl).toContain('stroke="#fbbc04" stroke-opacity="0.35"');
     expect(hl).not.toContain('onload');
+    expect(hl).not.toContain('1000000000');
   });
 });
 

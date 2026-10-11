@@ -427,10 +427,10 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   if (inks.length) {
     // Draw's strokes: their ink's colour (the outline is filled with it)
     section(inks.length > 1 ? 'Strokes' : 'Ink');
-    const st = inks[0].style;
+    const st = inks[0].style, ink = st.stroke ?? st.fill;
     context.push([
-      { id: 'dk-inkcolor', title: 'Ink colour', icon: '', html: swatchIcon(ICONSVG.stroke, st.fill),
-        palette: { title: 'Ink colour', render: close => <ColorGrid current={st.fill} close={close} onPick={col => { if (col) c.paint({ fill: col }); }} /> } },
+      { id: 'dk-inkcolor', title: 'Ink colour', icon: '', html: swatchIcon(ICONSVG.stroke, ink),
+        palette: { title: 'Ink colour', render: close => <ColorGrid current={ink} close={close} onPick={col => { if (col) c.paint({ ink: col }); }} /> } },
     ]);
   }
   if (images.length === 1 || c.image.cropping) {

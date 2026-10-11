@@ -532,14 +532,23 @@ blend.
     with a constant-width outline), lines and arrows from where the drag started to where it ended
     (Shift: 45° steps), **Draw** (P; `deckink.ts`: pen, highlighter and eraser E with the documents'
     margin-ink presets — a click on the picked colour / width changes it, `ol.deckInk`; the pen stays in
-    hand stroke after stroke until Esc. A stroke is GoodNotes' (`runtime/freehand.ts`, perfect-freehand):
-    an outline whose width follows the Pencil's pressure (else the speed), a little thinner at either
-    end over a width or two and blunt (tapers of 1½–2 widths down to a third — the long needle ends
-    were too much), a tap a dot, the highlighter an even band — drawn in the slide itself while the pen moves (an
-    `svg.ol-ink[data-ol-runtime]`, coalesced events, one rAF) exactly as it is then written
-    (`<svg class="ol-ink">` with one filled `<path>`, the highlighter translucent with `mix-blend-mode:
-    multiply`), and shown until the page has it (`inkArrived`), so nothing flickers or changes on
-    release. Once a Pencil has drawn, fingers (and the palm) move the slide instead of drawing. Selected,
+    hand stroke after stroke until Esc. A stroke is GoodNotes' (`runtime/freehand.ts` `inkRuns`): a
+    centripetal Catmull-Rom curve through every point the pen reported (however few: loops stay
+    loops), resampled every ⅔ px and Gaussian-smoothed (~1 screen px; 2.5 px when the points all came
+    in whole px, as older Safari sends them), its width from the Pencil's pressure through
+    `pressureWidth` (usual writing ≈ the nominal width, light a third, hard 1½×), the pressure smoothed
+    too (raw, it beaded); a mouse's, a finger's and the highlighter's even. It is drawn by the
+    browser's stroker as runs of one width (steps of 2½ %, round caps and joins, each starting where
+    the last ended), one `<path>` per width (`inkPaths`) — perfect-freehand's filled outline (before)
+    straightened each stroke's first px, made its outline of chords as long as the pen is wide and
+    blobbed small loops. Safari's coalesced events on the iPad repeat the last move's points (A B A
+    C D C: the line doubled back): `freshPoint` takes only newer ones; the browser's predicted point is
+    drawn ahead of the pen, not kept. Drawn in the slide itself while the pen moves (an
+    `svg.ol-ink[data-ol-runtime]`, one rAF) exactly as it is then written (`<svg class="ol-ink"><g
+    fill="none" stroke=… stroke-linecap="round" stroke-linejoin="round"><path fill="none"
+    stroke-width=… d=…/>…`, the highlighter translucent with `mix-blend-mode: multiply`; strokes drawn
+    before as one filled outline still work — Paint `ink` recolours either), and shown until the
+    page has it (`inkArrived`), so nothing flickers or changes on release. Once a Pencil has drawn, fingers (and the palm) move the slide instead of drawing. Selected,
     a stroke's toolbar is its ink colour (kind `ink`). The eraser hides the strokes — Draw's, and open
     unfilled paths — it passes over and removes them in one change on release); handles as in Inkscape: a click selects with the
     resize box, a click on the selected object again turns its handles into rotation arrows off the

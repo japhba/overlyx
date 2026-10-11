@@ -19,7 +19,7 @@ import { Toolbar, ICONS } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
 import type { DeliverableHost, Peer } from './host';
 import { webHost } from './webHost';
-import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode } from './protocol';
+import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode, InkRunD } from './protocol';
 import { SlideView } from './viewport';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from './gestures';
 import { isFromRuntime } from './protocol';
@@ -556,7 +556,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           }
           break;
         }
-        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined); break;
+        case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.runs ? { d: '', closed: false, runs: m.runs } : m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined); break;
         case 'sequence': if (fromCanvas) setSeq({ slide: m.slide, rows: m.rows, steps: m.steps, ordering: m.ordering }); break;
         case 'objects': if (fromCanvas) setObjects({ slide: m.slide, items: m.items }); break;
         case 'comment': {
@@ -870,7 +870,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
 
   const setTool = (t: Tool) => { setToolState(t); };
 
-  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean }) => {
+  const onDraw = (v: number, t: Tool, slide: Path | null, rect: Rect, after: Path | null, pts?: [number, number][], bez?: { d: string; closed: boolean; runs?: InkRunD[] }) => {
     // Draw: the pen stays in hand and the stroke is not selected — the next one follows (GoodNotes)
     const drawing = t === 'pen';
     if (!drawing) setToolState('select');

@@ -36,7 +36,7 @@ import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, red
 import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, insertRefChip, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
-import { freeOutline, outlinePathD, outlineBox, type FreePt } from './freehand';
+import { inkRuns, inkPaths, runsBox, freshPoint, type FreePt, type InkRun } from './freehand';
 import { pinchFactor, pinchLock, triGesture, type PinchLock } from '../gestures';
 import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
 import { postObjects } from './objects';
@@ -1686,8 +1686,12 @@ function endTri(): void {
 /** a Pencil drew here: fingers move the slide from now on, they do not draw */
 let penSeen = false;
 
-/** the stroke being drawn: in the page itself, where it will stay and as it will look (freehand.ts) */
-let ink: { slide: HTMLElement | null; pts: FreePt[]; pressure: boolean; svg: SVGSVGElement; path: SVGPathElement; frame: number } | null = null;
+/**
+ * The stroke being drawn: in the page itself, where it will stay and as it will look (freehand.ts) —
+ * the pen's points (`t`: the time of the last), whether they all came in whole px, and where the
+ * browser expects the pen next (shown, not kept).
+ */
+let ink: { slide: HTMLElement | null; pts: FreePt[]; pressure: boolean; svg: SVGSVGElement; g: SVGGElement; frame: number; t: number; whole: boolean; ahead: FreePt[] } | null = null;
 /** strokes drawn and sent to the editor, shown until the page has them (`count`: that many strokes the slide will have then) */
 const sentInk: { svg: SVGSVGElement; slide: HTMLElement | null; count: number; timer: ReturnType<typeof setTimeout> }[] = [];
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1695,8 +1699,11 @@ const inkCount = (slide: HTMLElement | null) => (slide ?? document.body).querySe
 
 function inkPoint(e: PointerEvent, slide: HTMLElement | null): FreePt {
   const [x, y] = slide ? slidePoint(slide, e.pageX, e.pageY) : [e.pageX, e.pageY];
-  return [x, y, e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.5];
+  // (a pen's 0: not known — its first and last events; freehand.ts takes the nearest known)
+  return [x, y, e.pointerType === 'pen' ? Math.max(0, e.pressure) : 0.5];
 }
+
+const wholePx = (e: PointerEvent) => Number.isInteger(e.clientX) && Number.isInteger(e.clientY);
 
 function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   dropInk();
@@ -1706,27 +1713,57 @@ function startInk(e: PointerEvent, slide: HTMLElement | null): void {
   svg.setAttribute('aria-hidden', 'true');
   const hl = inkStyle.opacity < 1;
   svg.setAttribute('style', `position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none${hl ? '; mix-blend-mode: multiply' : ''}`);
-  const path = document.createElementNS(SVG_NS, 'path') as SVGPathElement;
-  path.setAttribute('fill', inkStyle.color);
-  if (hl) path.setAttribute('fill-opacity', String(inkStyle.opacity));
-  svg.append(path);
+  const g = document.createElementNS(SVG_NS, 'g') as SVGGElement;
+  for (const [k, v] of Object.entries(inkPaint())) g.setAttribute(k, v);
+  svg.append(g);
   (slide ?? document.body).append(svg);
-  ink = { slide, pts: [inkPoint(e, slide)], pressure: e.pointerType === 'pen', svg, path, frame: 0 };
-  paintInk(false);
+  ink = { slide, pts: [inkPoint(e, slide)], pressure: e.pointerType === 'pen', svg, g, frame: 0, t: e.timeStamp, whole: wholePx(e), ahead: [] };
+  paintInk(true);
+}
+
+/** the paint of the stroke's runs, as the page will have it (sourceops.ts objectHtml) */
+function inkPaint(): Record<string, string> {
+  const a: Record<string, string> = { fill: 'none', stroke: inkStyle.color, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+  if (inkStyle.opacity < 1) a['stroke-opacity'] = String(Math.round(inkStyle.opacity * 100) / 100);
+  return a;
 }
 
 /** the pen moved: every point it passed (the coalesced events), drawn at the next frame */
 function moveInk(e: PointerEvent): void {
   if (!ink) return;
-  for (const ev of e.getCoalescedEvents?.() ?? [e]) ink.pts.push(inkPoint(ev, ink.slide));
+  const evs = e.getCoalescedEvents?.() ?? [];
+  for (const ev of evs.length ? evs : [e]) takeInk(ev);
+  // where the browser expects the pen next frame: drawn already, so the line keeps up with it (GoodNotes', PencilKit's predicted touches)
+  const next = (e.getPredictedEvents?.() ?? []).find(ev => ev.timeStamp > ink!.t);
+  ink.ahead = next ? [inkPoint(next, ink.slide)].filter(p => { const l = ink!.pts[ink!.pts.length - 1]; return Math.hypot(p[0] - l[0], p[1] - l[1]) < 40; }) : [];
   if (!ink.frame) ink.frame = requestAnimationFrame(() => { if (ink) { ink.frame = 0; paintInk(false); } });
 }
 
-function paintInk(last: boolean): number[][] {
+/** a point the pen passed — unless it gave it before (freehand.ts freshPoint: Safari's coalesced events) */
+function takeInk(ev: PointerEvent): void {
+  if (!ink) return;
+  const p = inkPoint(ev, ink.slide);
+  if (!freshPoint(ink.pts, ink.t, ev.timeStamp, p)) return;
+  ink.t = ev.timeStamp;
+  ink.whole &&= wholePx(ev);
+  ink.pts.push(p);
+}
+
+/** the stroke as runs of one width (freehand.ts), a path for each width as the page will have it (those that did not change left alone) */
+function paintInk(final: boolean): InkRun[] {
   if (!ink) return [];
-  const poly = freeOutline(ink.pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, last });
-  ink.path.setAttribute('d', outlinePathD(poly));
-  return poly;
+  const pts = final || !ink.ahead.length ? ink.pts : ink.pts.concat(ink.ahead);
+  const runs = inkRuns(pts, { width: inkStyle.width, highlighter: inkStyle.opacity < 1, pressure: ink.pressure, zoom: scale, coarse: ink.whole && ink.pts.length > 4 });
+  const paths = inkPaths(runs), kids = ink.g.children;
+  paths.forEach((p, i) => {
+    let el = kids[i];
+    if (!el) { el = document.createElementNS(SVG_NS, 'path'); ink!.g.append(el); }
+    const w = String(p.w);
+    if (el.getAttribute('d') !== p.d) el.setAttribute('d', p.d);
+    if (el.getAttribute('stroke-width') !== w) el.setAttribute('stroke-width', w);
+  });
+  while (kids.length > paths.length) kids[kids.length - 1].remove();
+  return runs;
 }
 
 /** the pen lifted: the stroke drawn to its end, sent; it stays shown until the page has it */
@@ -1735,19 +1772,19 @@ function endInk(e: PointerEvent): void {
   if (ink.frame) cancelAnimationFrame(ink.frame);
   // where it lifted, if not where it last was — with the pressure it had (a Pencil lifting reports none)
   const up = inkPoint(e, ink.slide), last = ink.pts[ink.pts.length - 1];
-  if (Math.hypot(up[0] - last[0], up[1] - last[1]) > 0.5) ink.pts.push([up[0], up[1], last[2]]);
-  const poly = paintInk(true);
-  const b = outlineBox(poly);
+  if (e.timeStamp >= ink.t && Math.hypot(up[0] - last[0], up[1] - last[1]) > 0.5) ink.pts.push([up[0], up[1], last[2]]);
+  const runs = paintInk(true);
+  const b = runsBox(runs);
   const { slide, svg } = ink;
   ink = null;
-  if (state.version === null || !poly.length || (!b.w && !b.h)) { svg.remove(); return; }
-  // whole px for its place, the outline moved into its own box
+  if (state.version === null || !runs.length) { svg.remove(); return; }
+  // whole px for its place, the runs moved into its own box
   const x = Math.floor(b.x), y = Math.floor(b.y);
-  const rect = { x, y, w: Math.ceil(b.x + b.w) - x, h: Math.ceil(b.y + b.h) - y };
+  const rect = { x, y, w: Math.max(1, Math.ceil(b.x + b.w) - x), h: Math.max(1, Math.ceil(b.y + b.h) - y) };
   const waiting = sentInk.filter(s => s.slide === slide).length;
   const entry = { svg, slide, count: inkCount(slide) + waiting + 1, timer: setTimeout(() => { svg.remove(); const i = sentInk.indexOf(entry); if (i >= 0) sentInk.splice(i, 1); }, 4000) };
   sentInk.push(entry);
-  post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, d: outlinePathD(poly, -x, -y), closed: true });
+  post({ ol: 'draw', version: state.version, tool: 'pen', slide: slide ? pathOf(slide) : null, rect, after: null, runs: inkPaths(runs, -x, -y) });
 }
 
 /** the stroke being drawn given up (a second finger, a cancelled pointer) */

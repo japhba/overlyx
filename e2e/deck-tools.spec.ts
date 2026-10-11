@@ -427,11 +427,11 @@ test('Draw: strokes one after the other in the pen\'s colour, the highlighter, t
   // Draw: its own row — pen, highlighter, eraser, the colours and widths
   await page.locator('[data-tb="dk-draw"]').click();
   await expect(page.locator('[data-tb="dk-ink-pen"]')).toBeVisible();
-  // the stroke is in the slide while it is drawn, in its ink (no preview of another colour), tapered
+  // the stroke is in the slide while it is drawn, in its ink (no preview of another colour), stroked with round ends
   const a0 = await at(page, 100, 600), a1 = await at(page, 400, 640);
   await page.mouse.move(a0.x, a0.y); await page.mouse.down(); await page.mouse.move(a1.x, a1.y, { steps: 12 });
   await page.waitForTimeout(100);
-  expect(await fr().evaluate(`(() => { const p = document.querySelector('section.slide svg.ol-ink[data-ol-runtime] path'); return p ? p.getAttribute('fill') + ' ' + (p.getAttribute('d') || '').length : null; })()`)).toMatch(/^#[0-9a-f]{6} \d{3,}/);
+  expect(await fr().evaluate(`(() => { const g = document.querySelector('section.slide svg.ol-ink[data-ol-runtime] g'); return g ? [g.getAttribute('stroke'), g.getAttribute('stroke-linecap'), Array.from(g.querySelectorAll('path')).map(p => p.getAttribute('d')).join('').length].join(' ') : null; })()`)).toMatch(/^#[0-9a-f]{6} round \d{2,}/);
   await page.mouse.up();
   await expect.poll(strokes, { timeout: 15000 }).toBe(1);
   // once the page has it, the stroke drawn is not shown twice
@@ -440,7 +440,7 @@ test('Draw: strokes one after the other in the pen\'s colour, the highlighter, t
   // the pen stays in hand (the stroke is not selected): the next one, red
   await page.locator('[data-tb="dk-ink-c2"]').click();
   await stroke(100, 680, 400, 690);
-  await expect.poll(fileText, { timeout: 15000 }).toContain('fill="#d93025"');
+  await expect.poll(fileText, { timeout: 15000 }).toContain('stroke="#d93025"');
   expect(strokes()).toBe(2);
   await expect(page.locator('[data-tb="dk-draw"]')).toHaveClass(/active/);
   // the highlighter over the title: translucent, multiplied over the text
@@ -460,6 +460,14 @@ test('Draw: strokes one after the other in the pen\'s colour, the highlighter, t
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-tb="dk-ink-pen"]')).toHaveCount(0);
   await expect(page.locator('[data-tb="dk-draw"]')).not.toHaveClass(/active/);
+  // a stroke selected: its ink colour changes (its runs' stroke, never a fill)
+  const s2 = await at(page, 250, 685);
+  await page.mouse.click(s2.x, s2.y);
+  await page.locator('[data-tb="dk-inkcolor"]').click();
+  await page.locator('[data-palette="dk-inkcolor"] [data-color="#ffff00"]').click();
+  await expect.poll(fileText, { timeout: 15000 }).toContain('stroke="#ffff00"');
+  expect(fileText()).not.toContain('fill="#ffff00"');
+  await page.keyboard.press('Escape');
 
   // the slide rail and the speaker notes fold away, stay so after a reload, and come back
   await page.locator('[data-dl-rail-hide]').click();

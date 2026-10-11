@@ -6,7 +6,7 @@
  */
 import { parseSource, opSplices, mapOffset, elementAt, elementChildren, outerRange, attr, hasClass, type HtmlOp, type Path, type Splice, type HElement } from '@overlyx/core/html/source.ts';
 import { slideElements } from '@overlyx/core/html/deliverable.ts';
-import type { Rect, Tool, DeliverableKind, InkStyle } from './protocol';
+import type { Rect, Tool, DeliverableKind, InkStyle, InkRunD } from './protocol';
 
 /**
  * Splices of `cur` that make the operations — made on `base` — or null when one of them touched
@@ -77,7 +77,7 @@ export function penPathD(pts: [number, number][]): string {
  * (`path`: runtime/freehand.ts, in its box's px) filled with its `ink` — the highlighter's translucent,
  * multiplied over what is under it so text stays dark (an older pen's stroke: a line through `pts`).
  */
-export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleHint = 1, pts?: [number, number][], path?: { d: string; closed: boolean }, ink?: InkStyle): string {
+export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleHint = 1, pts?: [number, number][], path?: { d: string; closed: boolean; runs?: InkRunD[] }, ink?: InkStyle): string {
   const flow = kind === 'page';
   const minW = (tool === 'text' || tool === 'formula') ? 520 * scaleHint : 240 * scaleHint;
   const w = rect.w > 8 ? rect.w : minW;
@@ -111,6 +111,14 @@ export function objectHtml(tool: Tool, rect: Rect, kind: DeliverableKind, scaleH
       return `<svg style="${flow ? '' : `position: absolute; left: ${r(rect.x)}px; top: ${r(rect.y)}px; `}width: ${W}px; height: ${H}px; overflow: visible" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="${POLYGONS[tool]}" fill="${SHAPE_FILL}" stroke="none" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
     }
     case 'pen': {
+      // Draw's stroke (runtime/freehand.ts): runs of the line at one width each, stroked with round caps and joins (no fill, each: a Fill for the selection leaves them be)
+      const runs = (path?.runs ?? []).filter(u => u.w > 0 && u.w <= 400 && typeof u.d === 'string').map(u => ({ w: Math.round(u.w * 100) / 100, d: u.d.replace(/[^ML0-9 .-]/g, '') })).filter(u => /^M/.test(u.d));
+      if (runs.length) {
+        const W = Math.max(1, Math.ceil(rect.w)), H = Math.max(1, Math.ceil(rect.h));
+        const color = ink && /^(#[0-9a-fA-F]{3,8}|[a-z]+|rgba?\([\d\s.,%]+\))$/.test(ink.color) ? ink.color : '#1d2433';
+        const hl = !!ink && ink.opacity < 1;
+        return `<svg class="ol-ink" style="${flow ? '' : `position: absolute; left: ${r(rect.x)}px; top: ${r(rect.y)}px; `}width: ${W}px; height: ${H}px; overflow: visible${hl ? '; mix-blend-mode: multiply' : ''}" viewBox="0 0 ${W} ${H}"><g fill="none" stroke="${color}"${hl ? ` stroke-opacity="${Math.round(ink!.opacity * 100) / 100}"` : ''} stroke-linecap="round" stroke-linejoin="round">${runs.map(u => `<path fill="none" stroke-width="${u.w}" d="${u.d}"/>`).join('')}</g></svg>`;
+      }
       if (path?.d) {
         const W = Math.max(1, Math.ceil(rect.w)), H = Math.max(1, Math.ceil(rect.h));
         const color = ink && /^(#[0-9a-fA-F]{3,8}|[a-z]+|rgba?\([\d\s.,%]+\))$/.test(ink.color) ? ink.color : '#1d2433';
