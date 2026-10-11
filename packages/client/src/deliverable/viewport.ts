@@ -87,6 +87,8 @@ export interface ViewMarks {
   pull?: () => HTMLElement | null;
   /** the slide came loose (true) or is back in its place (false) */
   onFree?: (free: boolean) => void;
+  /** a zoom going on shows the slide at this scale (once a frame at most), ahead of the editor's */
+  onLive?: (scale: number) => void;
 }
 
 /**
@@ -114,6 +116,9 @@ export class SlideView {
   private popping = 0;
   /** the scale shown while a zoom goes on (frame px → screen px), ahead of the editor's (`input().scale`) */
   private live: number | null = null;
+  /** the live scale last passed on (`onLive`; null: none since the editor's caught up), and the frame that passes on the next */
+  private told: number | null = null;
+  private liveFrame = 0;
   /** it moves (a scroll, a finger, a zoom, a spring): a layer of its own until it rests */
   private moving = false;
   private stillTimer: ReturnType<typeof setTimeout> | null = null;
@@ -209,6 +214,8 @@ export class SlideView {
     if (!el || !v) return;
     // the editor's scale caught up with the zoom shown
     if (this.live !== null && Math.abs(v.scale - this.live) < 1e-6 * Math.max(1, this.live)) this.live = null;
+    // (and once it caught up, the editor's again: a pinch back to where it began changes nothing in the editor)
+    if (this.live !== null ? this.live !== this.told : this.told !== null) this.tellLive();
     const r = this.active(v);
     const lag = this.lag();
     if (!this.anim) {
@@ -233,6 +240,20 @@ export class SlideView {
     if (!this.moving) { const d = (typeof devicePixelRatio === 'number' && devicePixelRatio) || 1; tx = Math.round(tx * d) / d; ty = Math.round(ty * d) / d; }
     el.style.transform = `translate(${tx}px, ${ty}px) scale(${p.s * kx}, ${p.s * ky})`;
     this.drawRing(v);
+  }
+
+  /**
+   * The scale a zoom shows, passed on as it goes (the page draws its handles and frames for it: at
+   * the editor's scale they grew with a pinch and shrank back once the fingers lifted). One a frame.
+   */
+  private tellLive(): void {
+    if (this.liveFrame || !this.marks.onLive) return;
+    this.liveFrame = requestAnimationFrame(() => {
+      this.liveFrame = 0;
+      const s = this.live ?? this.input()?.scale ?? null;
+      if (s !== null && s !== this.told) this.marks.onLive?.(s);
+      this.told = this.live === null ? null : s;
+    });
   }
 
   /** the ring behind a slide pulled past an edge, filled as far as the pull has come */
@@ -481,6 +502,7 @@ export class SlideView {
     this.stop();
     if (this.stillTimer) clearTimeout(this.stillTimer);
     if (this.popAnim) cancelAnimationFrame(this.popAnim);
+    if (this.liveFrame) cancelAnimationFrame(this.liveFrame);
     if (this.idle) clearTimeout(this.idle);
   }
 }

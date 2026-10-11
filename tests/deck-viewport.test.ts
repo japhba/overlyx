@@ -189,6 +189,33 @@ describe('zooming the slide (a pinch, a trackpad)', () => {
     expect(after.y).toBeCloseTo(before.y, 6);
   });
 
+  it('passes the scale a pinch shows on as it goes, once a frame: the page draws its handles for it', () => {
+    const told: number[] = [];
+    const frame = { style: {} as Record<string, string> };
+    let scale = 0.6;
+    const v = new SlideView(() => frame as unknown as HTMLElement, () => ({ box, rect, scale, margin: 32 }), { onLive: s => told.push(s) });
+    v.render();
+    v.placeAt(0.8, 400, 300, 300, 300);
+    v.placeAt(1.0, 400, 300, 300, 300);
+    expect(told).toEqual([]);
+    vi.advanceTimersByTime(20);
+    expect(told).toEqual([1.0]);
+    v.placeAt(1.2, 400, 300, 300, 300);
+    vi.advanceTimersByTime(20);
+    expect(told).toEqual([1.0, 1.2]);
+    // back to where it began: nothing changes in the editor, so the page hears its scale from here
+    v.placeAt(0.6, 400, 300, 300, 300);
+    vi.advanceTimersByTime(20);
+    expect(told).toEqual([1.0, 1.2, 0.6]);
+    // the editor catches up with a pinch: nothing more (it tells the page itself)
+    v.placeAt(0.9, 400, 300, 300, 300);
+    vi.advanceTimersByTime(20);
+    scale = 0.9;
+    v.render();
+    vi.advanceTimersByTime(20);
+    expect(told).toEqual([1.0, 1.2, 0.6, 0.9]);
+  });
+
   it('is a layer of its own only while it moves; at rest it is drawn again on whole device px (iPad blur)', () => {
     const { v, frame } = make();
     v.placeAt(1.234, 401.3, 299.7, 517.77, 333.33);

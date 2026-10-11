@@ -639,7 +639,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const pullRing = useRef<HTMLDivElement>(null);
   const [slideFree, setSlideFree] = useState(false);
   const slideView = useMemo(() => new SlideView(() => canvasFrame.current, () => viewInput.current,
-    { pull: () => pullRing.current, onFree: setSlideFree }), []);
+    // (a pinch's scale reaches the page as it goes: the handles keep their size on the screen)
+    { pull: () => pullRing.current, onFree: setSlideFree, onLive: s => toCanvas({ ol: 'scale', scale: s }) }), []);
   useEffect(() => () => slideView.destroy(), [slideView]);
   // Safari's pinches beside the slide (a Mac's trackpad; the iPad's fingers, which canvasTouch takes): the slide's zoom, never the page's
   useEffect(() => {

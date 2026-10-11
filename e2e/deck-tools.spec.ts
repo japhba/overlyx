@@ -504,6 +504,14 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
   // a pinch: the scale follows the fingers' distance (once they have clearly spread), step by step, never back; what is under their middle stays
   const v0 = await view();
   const under0 = { x: (c.x - v0.box.x) / v0.s, y: (c.y - v0.box.y) / v0.s };
+  // (the scales the page hears: it draws its handles for them)
+  const canvas = (await page.locator('.dl-frame').elementHandle())!;
+  const inFrame = (await canvas.contentFrame())!;
+  await inFrame.evaluate(() => {
+    const w = window as unknown as { olScales: number[] };
+    w.olScales = [];
+    addEventListener('message', e => { if (e.data?.ol === 'scale') w.olScales.push(e.data.scale); });
+  });
   await touches('touchStart', [{ x: c.x - 60, y: c.y }, { x: c.x + 60, y: c.y }]);
   const seen: number[] = [];
   for (let i = 1; i <= 12; i++) {
@@ -512,6 +520,11 @@ test('touch: a pinch zooms smoothly about the fingers, two fingers that pan do n
     await page.waitForTimeout(20);
     seen.push((await view()).s);
   }
+  // the fingers still down, the page knows the scale it is shown at: its handles keep their size on the screen (they grew with the pinch, then shrank)
+  await page.waitForTimeout(50);
+  const heard = await inFrame.evaluate(() => (window as unknown as { olScales: number[] }).olScales);
+  expect(heard.length).toBeGreaterThan(2);
+  expect(Math.abs(heard[heard.length - 1] / seen[seen.length - 1] - 1)).toBeLessThan(0.01);
   await touches('touchEnd', []);
   for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1] - 1e-6);
   // (×2.5 apart, less the first ~12 % they spread before it zoomed)
