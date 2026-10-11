@@ -2,8 +2,9 @@
  * Weaving on the deck canvas (deliverable/runtime/weave.ts): a bar crossing a ring twice — a
  * right-click on one crossing (on an object not selected yet: the object's menu, not the slide's)
  * offers the ring over the bar there; the ring then covers the bar at that crossing only, as a
- * clipped <use> of it right after the bar; a right-click there again undoes it.
- * Needs the seeded admin and the runtime built into the dist.
+ * clipped <use> of it right after the bar; a right-click there again undoes it. A click on the
+ * drawing's empty area (runtime/edit.ts blankOfDrawing) deselects; a click on or just beside a shape
+ * selects the drawing. Needs the seeded admin and the runtime built into the dist.
  */
 import { test, expect, type Page, type Frame } from '@playwright/test';
 import { readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -97,5 +98,38 @@ test('a crossing woven from the right-click menu: the ring over the bar there on
   await expect.poll(fileText, { timeout: 15000 }).not.toContain('data-ol-weave');
   await expect.poll(() => topAt(page, left.fx, left.fy)).toBe('rect#bar');
 
+  expect(errors.filter(e => !/localStorage/.test(e))).toEqual([]);
+});
+
+test('a drawing\'s empty area is nothing to a click: it deselects; a click on (or just beside) a shape selects the drawing', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await page.request.post(BASE_URL + '/api/projects', { data: { name: NAME } });
+  // (a deck of its own: the first test's may still be open on the server)
+  mkdirSync(`${PROJECTS_DIR}/${PROJECT}/knot2`, { recursive: true });
+  writeFileSync(`${PROJECTS_DIR}/${PROJECT}/knot2/index.html`, DECK);
+  await page.request.get('/api/projects');
+  await page.goto(`/#/${PROJECT}/knot2/index.html`);
+  await page.frameLocator('.dl-frame').locator('section.slide').first().waitFor({ timeout: 30000 });
+  await page.waitForTimeout(900);
+  const selectedNow = () => page.locator('.dl-toolbar [data-tb="dk-delete"]').count();
+
+  // the bar: the drawing selected
+  const bar = await at(page, 32, 32);
+  await page.mouse.click(bar.x, bar.y);
+  await expect.poll(selectedNow).toBe(1);
+  // the drawing's empty top (inside its box, nothing painted): deselected — the slide's tools instead
+  const blank = await at(page, 32, 4);
+  await page.mouse.click(blank.x, blank.y);
+  await expect.poll(selectedNow).toBe(0);
+  await expect(page.locator('.dl-toolbar [data-tb="dk-bg"]')).toBeVisible();
+  // just outside the ring's outline (0.3 units = 3 px of the slide): still the drawing
+  const near = await at(page, 32, 32 - 22.5 - 0.3);
+  await page.mouse.click(near.x, near.y);
+  await expect.poll(selectedNow).toBe(1);
+  // and the empty middle of the ring once more: nothing
+  const middle = await at(page, 32, 20);
+  await page.mouse.click(middle.x, middle.y);
+  await expect.poll(selectedNow).toBe(0);
   expect(errors.filter(e => !/localStorage/.test(e))).toEqual([]);
 });

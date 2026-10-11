@@ -1,26 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- OverLyX favicon: the wordmark's own L, Y and X (Jost Bold outlines, tilted as in the wordmark) over
-       an upright O; the X's upper arm passes behind the ring. Tuned by hand in the project favicon
-       (icon/index.html, slide 2), drawn here with the dark scheme's colours as well. -->
+  <!-- OverLyX favicon: the wordmark's own L, Y and X (Jost Bold outlines, tilted as in the wordmark)
+       through an upright O, woven: the L's stem over the ring and its foot under it, the X's upper arm
+       over and its lower leg under (each "under" a copy of the ring over the letter, clipped to that
+       crossing). Tuned by hand in the project favicon (icon/index.html, slide 2) and drawn here in its
+       units (the ring's centre at 28.1, 32.4), scaled into the disc; the dark scheme's colours as well.
+       PNGs for iOS / Android: scripts/gen-app-icons.py. -->
   <style>
-    .disc { fill: #fbfaf7 } .halo { stroke: #fbfaf7 } .ring { stroke: #1c1b19 }
+    .disc { fill: #fbfaf7 } .ring { stroke: #1c1b19 }
     .l { fill: #2152a3 } .y { fill: #efb21a } .x { fill: #d6402b }
     @media (prefers-color-scheme: dark) {
-      .disc { fill: #2a2825 } .halo { stroke: #2a2825 } .ring { stroke: #f4f1ea }
+      .disc { fill: #2a2825 } .ring { stroke: #f4f1ea }
       .l { fill: #7fa8f4 } .y { fill: #f6c43c } .x { fill: #f2654c }
     }
   </style>
-    <circle class="disc" cx="32" cy="32" r="31.5"/>
-    <circle class="ring" cx="32" cy="32" r="21.0" fill="none" stroke-width="4.2"/>
-    <g>
-      <path id="glyph-L" class="l" transform="translate(14.352 30.857) rotate(-12) scale(0.02857) translate(-298.84 350)" d="M73.7860107421875 -700.0V0.0H523.8888549804688V-145.24688720703125H242.67486572265625V-700.0Z"/>
-      <path id="glyph-Y" class="y" transform="translate(30.040 35.429) rotate(7) scale(0.02857) translate(-329.90 350)" d="M466.59259033203125 -700.0 329.7119140625 -436.8970947265625 193.2098388671875 -700.0H-1.2139892578125L244.2139892578125 -283.600830078125V0.0H416.2098388671875V-285.22222900390625L661.0164184570312 -700.0Z"/>
-      <path id="glyph-X" class="x" transform="translate(48.978 31.429) rotate(12) scale(0.02857) translate(-342.75 350)" d="M457.96295166015625 -700.0 346.24688720703125 -496.9259033203125 237.53082275390625 -700.0H28.7860107421875L244.2139892578125 -358.92181396484375L3.7860107421875 0.0H212.53082275390625L344.62548828125 -232.72430419921875L472.96295166015625 0.0H681.707763671875L447.27978515625 -358.92181396484375L666.707763671875 -700.0Z"/>
-    </g>
-    <!-- the X's upper arm behind the ring: the ring again over it, inside this wedge, with a gap in the disc's colour -->
-    <clipPath id="x-behind"><path d="M32 32 L60.54 19.89 L61.12 21.37 L61.63 22.88 L62.06 24.42 L62.41 25.98 L62.68 27.55 L62.87 29.14 L62.97 30.73 L63.00 32.32 Z"/></clipPath>
-    <g clip-path="url(#x-behind)" fill="none">
-      <circle class="halo" cx="32" cy="32" r="21.0" stroke-width="7.4"/>
-      <circle class="ring" cx="32" cy="32" r="21.0" stroke-width="4.2"/>
-    </g>
-  </svg>
+  <circle class="disc" cx="32" cy="32" r="31.5"/>
+  <g transform="translate(32 32) scale(0.94) translate(-28.1 -32.4)">
+    <circle id="ring" class="ring" cx="28.1" cy="32.4" r="24.7444" fill="none" stroke-width="4.7222"/>
+    <path class="l" transform="translate(15.936 30.735) rotate(-13.65) scale(0.043513) translate(-298.837 350)" d="M73.7860107421875 -700.0V0.0H523.8888549804688V-145.24688720703125H242.67486572265625V-700.0Z"/>
+    <g clip-path="url(#l-under)"><clipPath id="l-under"><circle cx="10.4289" cy="46.2756" r="2.2196"/></clipPath><use href="#ring"/></g>
+    <path class="x" transform="translate(42.465 31.058) rotate(10.42) scale(0.039215) translate(-342.747 350)" style="filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3))" d="M457.96295166015625 -700.0 346.24688720703125 -496.9259033203125 237.53082275390625 -700.0H28.7860107421875L244.2139892578125 -358.92181396484375L3.7860107421875 0.0H212.53082275390625L344.62548828125 -232.72430419921875L472.96295166015625 0.0H681.707763671875L447.27978515625 -358.92181396484375L666.707763671875 -700.0Z"/>
+    <g clip-path="url(#x-under)"><clipPath id="x-under"><circle cx="49.1067" cy="42.68" r="5.2627"/></clipPath><use href="#ring"/></g>
+    <path class="y" transform="translate(27.45 30.64) scale(0.04194) translate(-329.901 350)" d="M466.59259033203125 -700.0 329.7119140625 -436.8970947265625 193.2098388671875 -700.0H-1.2139892578125L244.2139892578125 -283.600830078125V0.0H416.2098388671875V-285.22222900390625L661.0164184570312 -700.0Z"/>
+  </g>
+</svg>

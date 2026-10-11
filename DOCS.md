@@ -495,7 +495,8 @@ blend.
     scripts drew), one whose attributes changed keeps its children, one whose own text changed is
     made anew and typeset; a changed `<script>` reloads the page. In the editor's frame it is the
     canvas (`edit.ts`): a click selects an object (on a slide a child of the slide, a group's
-    inside by double-click or Alt; on a web page the innermost block), dragging moves positioned
+    inside by double-click or Alt; on a web page the innermost block; a drawing's empty area —
+    nothing of it painted within a few px — is nothing: the click deselects), dragging moves positioned
     elements (a static one on a slide becomes `position: relative`) with snapping to the slide and
     the other objects, handles resize, a double click retypes text in place (contenteditable, its
     TeX shown as written), arrows nudge, Delete, ⌘D, copy/cut/paste of objects (`clip.ts`: the

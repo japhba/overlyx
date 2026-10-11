@@ -645,8 +645,26 @@ const rot = (x: number, y: number, deg: number): [number, number] => {
   return [x * c - y * s, x * s + y * c];
 };
 
-/** the object a pointer at `target` selects (see the header) */
-function objectFor(target: Element, deep: boolean): Element | null {
+/**
+ * A drawing's empty area — its <svg> box where none of its shapes is painted, nor a few px around
+ * (a thin line is still easy to take) — is nothing to a click: the selection goes, as beside the slide
+ * (Inkscape's). A drawing with a background or a border of its own is its box. `x`, `y`: client px.
+ */
+function blankOfDrawing(t: Element, x: number, y: number): boolean {
+  if (!(t instanceof SVGSVGElement) || !srcOf.has(t)) return false;
+  const c = cs(t);
+  if (c.backgroundColor !== 'rgba(0, 0, 0, 0)' || c.backgroundImage !== 'none' || parseFloat(c.borderTopWidth) > 0 || c.boxShadow !== 'none') return false;
+  const r = 5 / scale, q = r * Math.SQRT1_2;
+  for (const [dx, dy] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r], [q, q], [-q, q], [q, -q], [-q, -q]]) {
+    // (what is painted inside it comes before it)
+    for (const h of document.elementsFromPoint(x + dx, y + dy)) { if (h === t) break; if (t.contains(h)) return false; }
+  }
+  return true;
+}
+
+/** the object a pointer at `target` selects (see the header); `at`: where (client px) — a drawing's empty area is nothing there */
+function objectFor(target: Element, deep: boolean, at?: { x: number; y: number }): Element | null {
+  if (at && blankOfDrawing(target, at.x, at.y)) return null;
   const el = sourced(target);
   if (!el || el === document.body || el === document.documentElement || el.localName === 'head') return null;
   if (deep) return memberAt(el) ?? objectFor(target, false);
@@ -993,7 +1011,7 @@ function onHover(e: PointerEvent): void {
   if (e.pointerType === 'touch') { onTouchMove(e); return; }
   if (drag || editing) return;
   const t = e.target as Element;
-  const el = (tool === 'select' || isOrdering()) && t && !isForeign(t) ? objectFor(t, e.ctrlKey || e.metaKey) : null;
+  const el = (tool === 'select' || isOrdering()) && t && !isForeign(t) ? objectFor(t, e.ctrlKey || e.metaKey, { x: e.clientX, y: e.clientY }) : null;
   if (el !== hoverEl) { hoverEl = el; setReviewHover(el); draw(); }
 }
 
@@ -1107,7 +1125,7 @@ function onPointerDown(e: PointerEvent): void {
     capture();
     return;
   }
-  const el = objectFor(t, e.ctrlKey || e.metaKey);
+  const el = objectFor(t, e.ctrlKey || e.metaKey, { x: e.clientX, y: e.clientY });
   if (!el) {
     if (e.pointerType === 'touch') {
       // a finger on nothing pans; held still for a moment it draws a selection box instead
@@ -2490,7 +2508,7 @@ function onContextMenu(e: MouseEvent): void {
   e.preventDefault();
   e.stopPropagation();
   if (editing) return;
-  const el = objectFor(e.target as Element, e.ctrlKey || e.metaKey);
+  const el = objectFor(e.target as Element, e.ctrlKey || e.metaKey, { x: e.clientX, y: e.clientY });
   if (el && !selected.includes(el)) { selected = [el]; report(); draw(); }
   // the shape of a drawing under the pointer: the menu's "Edit points" edits that one
   setMenuShape(el && e.target instanceof SVGElement && el.contains(e.target) ? e.target : null);
