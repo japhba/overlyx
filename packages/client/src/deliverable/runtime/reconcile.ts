@@ -107,8 +107,12 @@ function fresh(s1: Element): Element {
   return el;
 }
 
-/** data-ol- attributes of the source (the review's): kept in step like any other, unlike the runtime's own data-ol- ones */
-const SOURCE_OL = new Set(['data-ol-comments', 'data-ol-ins', 'data-ol-del', 'data-ol-chg', 'data-ol-was']);
+/**
+ * data-ol- attributes of the source (the review's; a lock; an object's name from the Objects pane):
+ * kept in step like any other, unlike the runtime's own data-ol- ones — a lock written to the text
+ * did not hold on the canvas until the page was loaded again
+ */
+const SOURCE_OL = new Set(['data-ol-comments', 'data-ol-ins', 'data-ol-del', 'data-ol-chg', 'data-ol-was', 'data-ol-locked', 'data-ol-name']);
 const synced = (name: string) => !name.startsWith('data-ol-') || SOURCE_OL.has(name);
 
 function syncAttributes(live: Element, s0: Element, s1: Element): void {

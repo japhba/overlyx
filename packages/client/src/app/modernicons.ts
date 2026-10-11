@@ -17,7 +17,7 @@ import {
   SplinePointer, SquaresUnite, SquaresSubtract, SquaresIntersect, SquaresExclude, Combine, Split, VectorPolygon, VectorSquare,
   ArrowRightLeft, DiamondPlus, DiamondMinus, Diamond, CircleDot, Slash, Unlink, Link2, Pentagon, ChartSpline,
   LassoSelect, Pen, Eraser, Hand, Maximize2, Focus,
-  FileType, FileType2, PanelsTopLeft, Globe, Brush, BookMarked, FileImage, Folder, Asterisk,
+  FileType, FileType2, PanelsTopLeft, Globe, Brush, BookMarked, FileImage, Folder, Asterisk, Group, Ungroup, Layers2,
 } from 'lucide';
 
 type IconNode = [string, Record<string, string | number | undefined>][];
@@ -65,7 +65,7 @@ export const MODERN_ICONS: Record<string, string> = {
   'dk-cropaspect': N(SquareDashed), 'dk-highlight': N(Highlighter), 'dk-fill': N(Droplet), 'dk-pen': N(PencilLine), 'dk-draw': N(Pen), 'dk-ink-pen': N(Pen), 'dk-ink-hl': N(Highlighter), 'dk-ink-eraser': N(Eraser),
   'dk-duplicate': N(Copy), 'dk-present': N(Presentation), 'dk-code': N(FileCode),
   // LaTeX on slides: the list of references, steps (beamer's overlays)
-  'dk-references': N(LibraryBig), 'dk-step': N(GalleryVerticalEnd),
+  'dk-references': N(LibraryBig), 'dk-step': N(GalleryVerticalEnd), 'dk-group': N(Group), 'dk-ungroup': N(Ungroup), 'dk-objects': N(Layers2),
   // paths: the Bézier pen, Path ▸ (booleans, combine, object to path, simplify, reverse), editing nodes
   'dk-bezier': N(PenTool), 'dk-path': N(SplinePointer), 'dk-union': N(SquaresUnite), 'dk-difference': N(SquaresSubtract),
   'dk-intersection': N(SquaresIntersect), 'dk-exclusion': N(SquaresExclude), 'dk-combine': N(Combine), 'dk-breakapart': N(Split),

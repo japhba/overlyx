@@ -141,6 +141,9 @@ export interface Solo { slide: number; rect: Rect; height: number }
 export type StepKind = 'appear' | 'disappear';
 
 /** a row of the Animation pane: an object of the slide appears or disappears at a step (`up` / `down`: it can move that way) */
+/** a row of the Objects pane (runtime/objects.ts): an object of the slide, of a group or of a drawing; `kids`: the rows nested under it */
+export interface ObjNode { path: Path; depth: number; kind: ObjKind; word: string; label: string; named: boolean; locked: boolean; kids: number }
+
 export interface StepRow { path: Path; label: string; kind: StepKind; step: number; up: boolean; down: boolean; selected: boolean }
 
 /** the Animation pane's commands, carried out by the runtime on the slide worked on (runtime/animate.ts) */
@@ -227,6 +230,12 @@ export type ToRuntime =
   | { ol: 'steps'; cmd: StepCmd }
   /** Ctrl+A with the keyboard in the editor (not in the canvas): every object of the slide shown */
   | { ol: 'selectAll' }
+  /** the Objects pane opened or closed: its tree is sent (`objects`) while it is open */
+  | { ol: 'objects'; on: boolean }
+  /** the Objects pane's row under the pointer: that object outlined on the canvas */
+  | { ol: 'hover'; path: Path | null }
+  /** the Objects pane's drag: `path` in front of (or behind) its sibling `ref` */
+  | { ol: 'restack'; path: Path; ref: Path; front: boolean }
   /** Escape (a level up: out of a group) or an arrow (a nudge) with the keyboard in the editor */
   | { ol: 'canvasKey'; key: 'Escape' | 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'; shift: boolean }
   /** how the review is shown, Suggesting on or off */
@@ -294,6 +303,8 @@ export type FromRuntime =
   | { ol: 'nodeEditing'; path: Path | null; selected: number; total: number }
   /** the Animation pane's rows: the sequence of the slide worked on (-1: none), its number of steps, click-in-order mode */
   | { ol: 'sequence'; slide: number; rows: StepRow[]; steps: number; ordering: StepKind | null }
+  /** the Objects pane's tree of the slide worked on (while the pane is open) */
+  | { ol: 'objects'; slide: number; items: ObjNode[] }
   /** a comment pin pressed (`open`: show its threads), or what a new comment is on (the object or slide, the words selected in the text being retyped) */
   | { ol: 'comment'; path: Path | null; quote?: string; slide: number; open: boolean };
 

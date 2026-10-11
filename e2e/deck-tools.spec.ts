@@ -2,7 +2,8 @@
  * The deck canvas's tools (deliverable/decktoolbar.tsx, runtime/edit.ts, runtime/arrange.ts,
  * runtime/view.ts, runtime/crop.ts): the contextual toolbar (what shows depends on what is
  * selected), fill, distribute, group / ungroup (Ctrl+click moves an object inside a group, which fits
- * around it; a group resized as one; a drawing's parts into a <g>), sizes and line weights in points,
+ * around it; a group resized as one; a drawing's parts into a <g>, resized and turned with handles of
+ * their own), the Objects pane (select at any depth, rename, lock, restack), sizes and line weights in points,
  * flip, the rotation handle, new shapes and a line
  * drawn backwards, an SVG dropped in (inline, sanitised, its shapes editable), a crop preset, the
  * canvas's checkerboard from its right-click menu, "Back to the slide" when zoomed in, and moving a
@@ -292,6 +293,77 @@ test('groups: from the quick menu, Ctrl+click moves an object inside (the group 
   await expect.poll(fileText, { timeout: 15000 }).toMatch(/<g><rect id="r"[^<]*(<\/rect>)?<circle id="o"[^<]*(<\/circle>)?<\/g>/);
   await page.keyboard.press('Control+Shift+g');
   await expect.poll(fileText, { timeout: 15000 }).not.toContain('<g>');
+  expect(real(errors)).toEqual([]);
+});
+
+const LOGO_DECK = DECK.replace(/<section class="slide">[\s\S]*?<\/section>/, `<section class="slide">
+  <svg id="logo" style="position: absolute; left: 320px; top: 40px; width: 640px; height: 640px" viewBox="0 0 64 64">
+    <circle id="ring" cx="32" cy="32" r="21" fill="none" stroke="#1c1b19" stroke-width="5"/>
+    <path id="glyph-A" fill="#2152a3" transform="translate(16 32) rotate(-12) scale(0.03) translate(-250 -350)" d="M0 0H500V700H0Z"/>
+    <path id="glyph-B" fill="#efb21a" transform="translate(0 1) translate(32 32) scale(0.03) translate(-250 -350)" d="M0 0H500V700H0Z"/>
+    <g id="pair"><rect x="42" y="26" width="5" height="12" fill="#d6402b"/><rect x="49" y="26" width="5" height="12" fill="#d6402b"/></g>
+  </svg>
+</section>`);
+
+test('the parts of a drawing resized and turned with handles; the Objects pane selects, renames, locks and restacks them', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await page.request.post(BASE_URL + '/api/projects', { data: { name: NAME } });
+  await setup(page, LOGO_DECK);
+  const transformOf = (id: string) => new RegExp(`id="${id}"[^>]*transform="([^"]*)"`).exec(fileText())?.[1] ?? '';
+  /** a corner (fx, fy in 0…1) of a part's own box, on the page */
+  const corner = async (id: string, fx: number, fy: number) => {
+    const fb = (await page.locator('.dl-frame').boundingBox())!;
+    const p = await editFrame(page).evaluate(`(() => { const el = document.getElementById(${JSON.stringify(id)}); const b = el.getBBox(); const pt = new DOMPoint(b.x + b.width * ${fx}, b.y + b.height * ${fy}).matrixTransform(el.getScreenCTM()); return { x: pt.x, y: pt.y, w: innerWidth }; })()`) as { x: number; y: number; w: number };
+    return { x: fb.x + p.x * fb.width / p.w, y: fb.y + p.y * fb.width / p.w };
+  };
+  // the Objects pane: the drawing opened up, front first
+  await page.locator('[data-tb="dk-objects"]').click();
+  const rows = page.locator('[data-dl-objects] [data-obj-row]');
+  await expect(rows).toHaveText([/logo/, /pair/, /Rectangle/, /Rectangle/, /glyph-B/, /glyph-A/, /ring/]);
+  // a letter selected from it: resize handles on its turned box; the se one dragged out
+  await rows.filter({ hasText: 'glyph-A' }).click();
+  await expect(rows.filter({ hasText: 'glyph-A' })).toHaveClass(/sel/);
+  const se = await corner('glyph-A', 1, 1);
+  await page.mouse.move(se.x, se.y); await page.mouse.down();
+  await page.mouse.move(se.x + 20, se.y + 15, { steps: 4 }); await page.mouse.move(se.x + 40, se.y + 30, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(() => transformOf('glyph-A'), { timeout: 15000 }).not.toContain('scale(0.03)');
+  expect(transformOf('glyph-A')).toMatch(/^translate\([\d.]+ [\d.]+\) rotate\(-12\) scale\([\d.]+ [\d.]+\) translate\(-250 -350\)$/);
+  // a click on it again: rotation arrows; the ne one dragged round clockwise
+  const c = await corner('glyph-A', 0.5, 0.5);
+  await page.mouse.click(c.x, c.y);
+  await page.waitForTimeout(200);
+  const ne = await corner('glyph-A', 1, 0);
+  const l = Math.hypot(ne.x - c.x, ne.y - c.y), ax = ne.x + (ne.x - c.x) / l * 9, ay = ne.y + (ne.y - c.y) / l * 9;
+  await page.mouse.move(ax, ay); await page.mouse.down();
+  await page.mouse.move(ax + 30, ay + 40, { steps: 5 }); await page.mouse.move(ax + 40, ay + 90, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => transformOf('glyph-A'), { timeout: 15000 }).not.toContain('rotate(-12)');
+  expect(Number(/rotate\((-?[\d.]+)\)/.exec(transformOf('glyph-A'))![1])).toBeGreaterThan(0);
+  // another part moved: its chain of transforms tidied into one
+  await rows.filter({ hasText: 'glyph-B' }).click();
+  await page.keyboard.press('Shift+ArrowDown');
+  await expect.poll(() => transformOf('glyph-B'), { timeout: 15000 }).toBe('translate(32 34) scale(0.03) translate(-250 -350)');
+  // dragged onto glyph-B's upper half: glyph-A in front of it (after it in the drawing)
+  await rows.filter({ hasText: 'glyph-A' }).dragTo(rows.filter({ hasText: 'glyph-B' }), { targetPosition: { x: 30, y: 3 } });
+  await expect.poll(() => fileText().indexOf('id="glyph-A"') > fileText().indexOf('id="glyph-B"'), { timeout: 15000 }).toBe(true);
+  // renamed by a double click: in the file, the pane and the canvas's tag
+  await rows.filter({ hasText: 'ring' }).dblclick();
+  await page.locator('[data-obj-rename]').fill('The ring');
+  await page.keyboard.press('Enter');
+  await expect.poll(fileText, { timeout: 15000 }).toContain('data-ol-name="The ring"');
+  await expect(rows.filter({ hasText: 'The ring' })).toHaveCount(1);
+  // locked from the pane: it holds on the canvas at once (an arrow does not move it)
+  const pair = rows.filter({ hasText: 'pair' });
+  await pair.hover();
+  await pair.locator('[data-obj-lock]').click();
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/id="pair"[^>]*data-ol-locked/);
+  await pair.click();
+  const before = fileText();
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.waitForTimeout(1200);
+  expect(fileText()).toBe(before);
   expect(real(errors)).toEqual([]);
 });
 

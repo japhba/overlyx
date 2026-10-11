@@ -15,11 +15,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import type { ComponentChildren } from 'preact';
 import { type User } from '../api';
 import { showContextMenu, closeContextMenu, type MenuItem } from '../editor/contextmenu';
-import { Toolbar } from '../app/Toolbar';
+import { Toolbar, ICONS } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
 import type { DeliverableHost, Peer } from './host';
 import { webHost } from './webHost';
-import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo } from './protocol';
+import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, DeliverableKind, Rect, ArrangeHow, Paint, CanvasView, KeyPress, Solo, ObjNode } from './protocol';
 import { SlideView } from './viewport';
 import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
@@ -30,6 +30,7 @@ import { QuickBar } from './QuickBar';
 import { BgRemoveDialog } from './BgRemoveDialog';
 import { MathOverlay, type MathEditState, type MathOps } from './MathOverlay';
 import { AnimationPane, type Sequence } from './AnimationPane';
+import { ObjectsPane } from './ObjectsPane';
 import { CiteDialog, uiPrompt } from '../app/Dialogs';
 import type { DocMeta } from '../api';
 import { citedKeys, citeEntry, type CiteEntry } from '@overlyx/core/html/refs.ts';
@@ -234,6 +235,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   // the Animation pane (open or not: this browser's) and the sequence of the slide it shows (runtime/animate.ts)
   const [animOpen, setAnimOpen] = useState(() => { try { return localStorage.getItem('ol.animPane') === '1'; } catch { return false; } });
   const [seq, setSeq] = useState<Sequence>({ slide: -1, rows: [], steps: 1, ordering: null });
+  const [objOpen, setObjOpen] = useState(() => { try { return localStorage.getItem('ol.objPane') === '1'; } catch { return false; } });
+  const objOpenRef = useRef(objOpen); objOpenRef.current = objOpen;
+  const [objects, setObjects] = useState<{ slide: number; items: ObjNode[] }>({ slide: -1, items: [] });
   const [presenting, setPresenting] = useState(false);
   const canvasReady = useRef(false);
   const railReady = useRef(false);
@@ -487,6 +491,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             toCanvas({ ol: 'view', view: shownView(viewRef.current) });
             toCanvas({ ol: 'dark', invert: darkRef.current.invert, desk: null });
             toCanvas(reviewMsgRef.current());
+            if (objOpenRef.current) toCanvas({ ol: 'objects', on: true });
             if (host.ready()) toCanvas({ ol: 'source', version: version.current, html: versions.current.get(version.current) ?? text.toString() });
             setDeckMacros(macroTableOf(m.macros ?? {}));
             if (bibKnown.current.size) toCanvas({ ol: 'bib', entries: [...bibKnown.current.values()] });
@@ -552,6 +557,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         }
         case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined); break;
         case 'sequence': if (fromCanvas) setSeq({ slide: m.slide, rows: m.rows, steps: m.steps, ordering: m.ordering }); break;
+        case 'objects': if (fromCanvas) setObjects({ slide: m.slide, items: m.items }); break;
         case 'comment': {
           if (!fromCanvas) break;
           if (!m.open) { startDraft(m.path, m.slide, m.quote); break; }
@@ -1413,6 +1419,12 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       toCanvas({ ol: 'exec', command: 'createLink', value: url.trim() });
     });
   };
+  const toggleObjects = (open = !objOpen) => {
+    setObjOpen(open);
+    try { localStorage.setItem('ol.objPane', open ? '1' : '0'); } catch { /* private window */ }
+    toCanvas({ ol: 'objects', on: open });
+    if (!open) toCanvas({ ol: 'hover', path: null });
+  };
   const toggleAnim = (open = !animOpen) => {
     setAnimOpen(open);
     try { localStorage.setItem('ol.animPane', open ? '1' : '0'); } catch { /* private window */ }
@@ -1487,7 +1499,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   return (
     <div class={'dl-editor' + (presenting ? ' presenting' : '')} data-kind={kind}>
       {quick.length > 0 && quickRect && <QuickBar groups={quick} rect={quickRect} frame={() => canvasFrame.current} scrollY={() => (soloOn ? 0 : scrollRef.current)} />}
-      <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar">
+      {/* (the context tools, when they float below the bar, start right of the slide rail: its header stays clear) */}
+      <div ref={barRef} class={'dl-toolbar' + (ctxRow ? ' dl-ctx-row' : '')} role="toolbar" style={`--ctx-left: ${showRail ? (railShown ? railW : 28) + 8 : 8}px`}>
         <span class="dl-title" title={path}>{title}</span>
         <Toolbar id="deck-tools" groups={bars.tools} />
         <input ref={fileInput} type="file" accept="image/*,.svg" multiple hidden onChange={e => { const fs = Array.from((e.target as HTMLInputElement).files ?? []); (e.target as HTMLInputElement).value = ''; void uploadImages(fs.map(f => ({ name: f.name, type: f.type, data: f })), null); }} />
@@ -1506,6 +1519,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         </span>
         {darkS.dark && <button class={'dl-btn dl-invert' + (darkS.invert ? ' on' : '')} data-dl-invert aria-pressed={darkS.invert} onClick={() => setPref('invertSlides', !darkS.invert)}
           title={darkS.invert ? 'Slides light on dark (pictures in their colours) — click for their own colours' : 'The slides’ own colours — click to show them light on dark'}>◐</button>}
+        <button class={'dl-btn dl-objects-btn' + (objOpen ? ' on' : '')} data-tb="dk-objects" onClick={() => toggleObjects()}
+          title="Objects: what is on the slide as a tree — open groups and drawings, select a letter of a logo, rename, lock, restack (Inkscape's Objects, PowerPoint's Selection Pane)"
+          dangerouslySetInnerHTML={{ __html: ICONS['dk-objects'] ?? '' }} />
         <button class={'dl-btn' + (codeOpen ? ' on' : '')} title="The page's code" data-dl-code onClick={() => setCodeOpen(o => !o)}>&lt;/&gt;</button>
         <button class={'dl-btn dl-review-btn' + (reviewOpen ? ' on' : '')} data-dl-review-toggle onClick={() => { setReviewOpen(!reviewOpen); if (reviewOpen) { setDraft(null); setFocus(null); } }}
           title={`Comments and suggestions${openComments || review.changes.length ? ` — ${openComments} open comment${openComments === 1 ? '' : 's'}, ${review.changes.length} suggestion${review.changes.length === 1 ? '' : 's'}` : ''}`}>
@@ -1595,6 +1611,13 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             </button>
           ))}
         </div>
+        {objOpen && (
+          <ObjectsPane slide={objects.slide} items={objects.items} sel={sel} readOnly={locked} close={() => toggleObjects(false)}
+            select={paths => toCanvas({ ol: 'select', paths })} hover={p => toCanvas({ ol: 'hover', path: p })}
+            rename={(p, name) => applyOps([{ t: 'attr', path: p, name: 'data-ol-name', value: name }])}
+            lock={(p, on) => applyOps([{ t: 'attr', path: p, name: 'data-ol-locked', value: on ? '' : null }])}
+            restack={(p, ref, front) => toCanvas({ ol: 'restack', path: p, ref, front })} />
+        )}
         {animOpen && kind === 'deck' && (
           <AnimationPane seq={seq} sel={sel} readOnly={locked} close={() => toggleAnim(false)}
             send={cmd => toCanvas({ ol: 'steps', cmd })} select={p => toCanvas({ ol: 'select', paths: [p] })} />

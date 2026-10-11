@@ -73,6 +73,7 @@ Object.assign(ICONS, {
   'dk-align': I('<path d="M2 1.5v13"/><rect x="3.5" y="3" width="9" height="3.5"/><rect x="3.5" y="9.5" width="5.5" height="3.5"/>'),
   'dk-rotate': I('<path d="M13 8a5 5 0 1 1-2-4"/><path d="M11.5 1.5v3h-3"/>'),
   'dk-flip': I('<path d="M8 1.5v13" stroke-dasharray="1.5 1.3"/><path d="M6 4L2 12h4z"/><path d="M10 4l4 8h-4z" fill="currentColor"/>'),
+  'dk-objects': I('<rect x="1.8" y="2" width="4" height="3" rx="0.6"/><path d="M3.8 5v7.5h2.4M3.8 8.6h2.4"/><rect x="7.2" y="7.1" width="7" height="3" rx="0.6"/><rect x="7.2" y="11" width="7" height="3" rx="0.6"/><path d="M8 3.5h6.2"/>'),
   'dk-group': I('<rect x="1.5" y="1.5" width="13" height="13" stroke-dasharray="1.6 1.2"/><rect x="3.5" y="3.5" width="5" height="5"/><circle cx="10.5" cy="10.5" r="2.5"/>'),
   'dk-ungroup': I('<rect x="1.5" y="1.5" width="6.5" height="6.5" stroke-dasharray="1.4 1.1"/><rect x="3" y="3" width="3.5" height="3.5"/><rect x="8" y="8" width="6.5" height="6.5" stroke-dasharray="1.4 1.1"/><circle cx="11.25" cy="11.25" r="1.9"/>'),
   'dk-lock': I('<rect x="3.5" y="7" width="9" height="7" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>'),

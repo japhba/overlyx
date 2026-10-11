@@ -560,7 +560,22 @@ blend.
     flipped group); `commit` merges the style edits of one element (one commit's splices must not
     overlap). Resizing a group scales its objects' boxes (left / top / width, height where fixed; the
     text keeps its size, as in PowerPoint), in proportion at the corners. Parts of one drawing group
-    into a `<g>`; ungrouping a `<g>` hands its transform and paint to its parts. With the keyboard still
+    into a `<g>`; ungrouping a `<g>` hands its transform and paint to its parts. **Parts of a drawing**
+    (the letters of a logo, a ring: `edit.ts partBox`) have the same handles as any object — a resize
+    box turned with them, rotation arrows on a click again — worked through their own `transform`,
+    kept as one tidy chain `translate(p) rotate(a) scale(sx sy) translate(−c)` (c the centre of their
+    own box, `formText`; a move, a nudge and Arrange ▸ Rotate write it the same way, so a part's chain of
+    translates is tidied on its first move); their box includes half the stroke (Inkscape's visual
+    box); a skewed transform keeps the old move-only behaviour. **The Objects pane** (`ObjectsPane.tsx`,
+    `runtime/objects.ts`; the tree button beside the code and comments toggles, remembered as `ol.objPane`): Inkscape's Objects
+    dialog / PowerPoint's Selection Pane — the slide worked on as a tree, front first, each group and
+    drawing (and a drawing's `<g>`s) opened up (more than 12 inside: folded), rows named by
+    `data-ol-name`, a drawing's or part's id, or the text; a click selects at any depth (Shift/Ctrl:
+    one more), hovering outlines the object, a double click renames (`data-ol-name`, also shown in the
+    canvas's tag), the lock locks, a row dragged onto a sibling restacks it (`restack`: a `reorder`
+    op). The runtime sends the tree (`objects`) only while the pane is open, deduplicated, after every
+    selection, source and slide change. `reconcile.ts` now keeps `data-ol-locked` and `data-ol-name`
+    in step with the text (a lock did not hold on the canvas until a reload). With the keyboard still
     in the editor (a click on the canvas leaves it there), Escape and the arrows reach the canvas as
     `canvasKey`. **Units**: the interface shows physical units, never px (`deliverable/units.ts`; a
     CSS px is 1/96 in, so a 1280 × 720 slide is 13.33 × 7.5 in): font sizes in points (the size box,

@@ -12,9 +12,9 @@
  * and paint handed to its parts). Lock: PowerPoint's — selectable, not moved or resized.
  */
 import type { ArrangeHow, Paint, HtmlOp, Path } from '../protocol';
-import { selection, setSelection, start, placeLive, styleOp, commit, isLocked, movable, angleOf, isSvgPart, cs, containerOf, union, report, draw, kindOf, slidePoint, stopText, refitGroups, userScale, declaredPx } from './edit';
+import { selection, setSelection, start, placeLive, styleOp, commit, isLocked, movable, angleOf, isSvgPart, cs, containerOf, union, report, draw, kindOf, slidePoint, stopText, refitGroups, userScale, declaredPx, turnPartOp } from './edit';
 import { pxToPt } from '../units';
-import { srcOf, pathOf, slideOf, docRect } from './env';
+import { srcOf, pathOf, slideOf, docRect, liveAt } from './env';
 import { pathCommand } from './pathedit';
 
 export function arrange(how: ArrangeHow): void {
@@ -72,6 +72,22 @@ function order(sel: Element[], how: 'front' | 'back' | 'forward' | 'backward'): 
     for (const i of chosen) select.push([...ppath, next.indexOf(i)]);
   }
   commit(ops, { select });
+}
+
+/** the Objects pane's drag: `path` put in front of (`front`) or behind its sibling `ref`, still selected */
+export function restack(path: Path, ref: Path, front: boolean): void {
+  const el = liveAt(path), r = liveAt(ref);
+  const parent = el?.parentNode as Element | null;
+  if (!el || !r || el === r || r.parentNode !== parent || !parent || isLocked(el)) return;
+  const psrc = srcOf.get(parent), ppath = pathOf(parent), es = srcOf.get(el), rs = srcOf.get(r);
+  if (!psrc || !ppath || !es || !rs) return;
+  const kids = Array.from(psrc.children);
+  const from = kids.indexOf(es), to = kids.indexOf(rs);
+  if (from < 0 || to < 0) return;
+  const next = kids.map((_, i) => i).filter(i => i !== from);
+  next.splice(next.indexOf(to) + (front ? 1 : 0), 0, from);
+  if (next.every((v, k) => v === k)) return;
+  commit([{ t: 'reorder', parent: ppath, order: next }], { select: [[...ppath, next.indexOf(from)]] });
 }
 
 /* ------------------------------------------------------------------ position */
@@ -142,7 +158,9 @@ function rotateBy(sel: Element[], how: 'rotate-cw' | 'rotate-ccw' | 'rotate-rese
   const ops: HtmlOp[] = [];
   for (const el of sel) {
     const p = pathOf(el);
-    if (!p || isLocked(el) || isSvgPart(el)) continue;
+    if (!p || isLocked(el)) continue;
+    // a part of a drawing: through its transform, about its centre
+    if (isSvgPart(el)) { const op = turnPartOp(el, how === 'rotate-reset' ? 'reset' : how === 'rotate-cw' ? 90 : -90); if (op) ops.push(op); continue; }
     const a = how === 'rotate-reset' ? 0 : deg(angleOf(el) + (how === 'rotate-cw' ? 90 : -90));
     ops.push({ t: 'style', path: p, set: { rotate: a ? `${a}deg` : null } });
     // (live, for the group it is in to fit around it turned)

@@ -37,6 +37,7 @@ import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOr
 import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
 import { freeOutline, outlinePathD, outlineBox, type FreePt } from './freehand';
 import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
+import { postObjects } from './objects';
 import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trackInput, commentTarget, setLiveAt, styleAuthors, REVIEW_OVERLAY_CSS } from './review';
 import { initListDrag, hoverList, notePointer, listParts, bindListGrips, listDragging, stepItem, LIST_DRAG_CSS } from './listdrag';
 
@@ -543,12 +544,96 @@ function flipsOf(el: Element): { x: boolean; y: boolean } {
 /** an object's own box: its centre (document px), its size before rotation, its angle */
 export interface Box { cx: number; cy: number; w: number; h: number; a: number }
 export function boxOf(el: Element): Box {
+  if (isSvgPart(el)) { const p = partBox(el); if (p) return p.box; }
   const r = docRect(el);
   const a = el instanceof HTMLElement || el.localName === 'svg' ? angleOf(el) : 0;
   if (!a) return { cx: r.x + r.w / 2, cy: r.y + r.h / 2, w: r.w, h: r.h, a: 0 };
   const he = el as HTMLElement;
   const w = he.offsetWidth ?? el.clientWidth, h = he.offsetHeight ?? el.clientHeight;
   return { cx: r.x + r.w / 2, cy: r.y + r.h / 2, w: w || r.w, h: h || r.h, a };
+}
+
+/* ------------------------------------------------------------------ a part of a drawing: its own transform */
+
+/**
+ * A part's transform as translate(p) rotate(a) scale(sx sy) translate(−c), as Inkscape and the
+ * favicon's letters write it: c the centre of its own box (getBBox, before the transform), p where
+ * that centre lands in its parent's units, a in radians. A transform with a skew has none.
+ */
+export interface PartForm { p: [number, number]; a: number; sx: number; sy: number; c: [number, number] }
+
+/** a matrix as turn × scale (sy < 0: mirrored), or null when it skews */
+function turnScale(m: { a: number; b: number; c: number; d: number }): { a: number; sx: number; sy: number } | null {
+  const sx = Math.hypot(m.a, m.b);
+  if (!sx) return null;
+  const a = Math.atan2(m.b, m.a), sy = (m.a * m.d - m.b * m.c) / sx;
+  if (!sy || Math.hypot(m.c + Math.sin(a) * sy, m.d - Math.cos(a) * sy) > 1e-3 * Math.abs(sy)) return null;
+  return { a, sx, sy };
+}
+
+function partForm(el: SVGGraphicsElement): PartForm | null {
+  let bb: DOMRect;
+  try { bb = el.getBBox(); } catch { return null; }
+  const t = el.transform?.baseVal.consolidate();
+  const m = t ? t.matrix : new DOMMatrix();
+  const ts = turnScale(m);
+  if (!ts) return null;
+  const c: [number, number] = [bb.x + bb.width / 2, bb.y + bb.height / 2];
+  return { p: [m.a * c[0] + m.c * c[1] + m.e, m.b * c[0] + m.d * c[1] + m.f], c, ...ts };
+}
+
+/** the part's parent's units → document px */
+function parentToDoc(el: Element): DOMMatrix | null {
+  const m = (el.parentNode as SVGGraphicsElement | null)?.getScreenCTM?.();
+  return m ? new DOMMatrix().translate(scrollX, scrollY).multiply(DOMMatrix.fromMatrix(m)) : null;
+}
+
+/** a part of a drawing as a box of its own on the page (turned with it), and what makes it: null when it cannot be resized and turned so */
+export function partBox(el: Element): { box: Box; form: PartForm; P: DOMMatrix } | null {
+  if (!isSvgPart(el) || !SVG_SHAPES.has(el.localName) || el.localName === 'tspan') return null;
+  const form = partForm(el);
+  const P = form && parentToDoc(el);
+  if (!form || !P) return null;
+  const T = new DOMMatrix([Math.cos(form.a) * form.sx, Math.sin(form.a) * form.sx, -Math.sin(form.a) * form.sy, Math.cos(form.a) * form.sy, 0, 0]);
+  const L = turnScale(P.multiply(T));
+  if (!L) return null;
+  let bb: DOMRect;
+  try { bb = el.getBBox(); } catch { return null; }
+  // the box as it is seen: with half the outline outside the shape's geometry (Inkscape's visual box)
+  const c = cs(el), sw = el.localName !== 'g' && c.stroke && c.stroke !== 'none' ? parseFloat(c.strokeWidth) || 0 : 0;
+  const ctr = P.transformPoint(new DOMPoint(form.p[0], form.p[1]));
+  return { box: { cx: ctr.x, cy: ctr.y, w: L.sx * (bb.width + sw), h: Math.abs(L.sy) * (bb.height + sw), a: L.a * 180 / Math.PI }, form, P };
+}
+
+const fix = (n: number, k: number) => String(Math.round(n * 10 ** k) / 10 ** k || 0);
+const sig = (n: number) => String(Number(n.toPrecision(5)));
+
+/** a part's form as its transform attribute (null: none needed) */
+export function formText(f: PartForm): string | null {
+  const turned = Math.abs(f.a) >= 1e-5, scaled = Math.abs(f.sx - 1) >= 1e-6 || Math.abs(f.sy - 1) >= 1e-6;
+  if (!turned && !scaled) {
+    const tx = f.p[0] - f.c[0], ty = f.p[1] - f.c[1];
+    return Math.abs(tx) < 5e-4 && Math.abs(ty) < 5e-4 ? null : `translate(${fix(tx, 3)} ${fix(ty, 3)})`;
+  }
+  const out = [`translate(${fix(f.p[0], 3)} ${fix(f.p[1], 3)})`];
+  if (turned) out.push(`rotate(${fix(f.a * 180 / Math.PI, 2)})`);
+  if (scaled) out.push(Math.abs(f.sx - f.sy) < 1e-9 ? `scale(${sig(f.sx)})` : `scale(${sig(f.sx)} ${sig(f.sy)})`);
+  if (Math.abs(f.c[0]) >= 5e-4 || Math.abs(f.c[1]) >= 5e-4) out.push(`translate(${fix(-f.c[0], 3)} ${fix(-f.c[1], 3)})`);
+  return out.join(' ');
+}
+
+function setForm(el: Element, f: PartForm): void {
+  const t = formText(f);
+  if (t) el.setAttribute('transform', t); else el.removeAttribute('transform');
+}
+
+/** the edit turning a part of a drawing by `deg` (clockwise on the page) about its centre, or null */
+export function turnPartOp(el: Element, deg: number | 'reset'): HtmlOp | null {
+  const pb = partBox(el), path = pathOf(el);
+  if (!pb || !path) return null;
+  const flip = pb.P.a * pb.P.d - pb.P.b * pb.P.c < 0 ? -1 : 1;
+  const f = { ...pb.form, a: deg === 'reset' ? 0 : pb.form.a + flip * deg * Math.PI / 180 };
+  return { t: 'attr', path, name: 'transform', value: formText(f) };
 }
 
 const rot = (x: number, y: number, deg: number): [number, number] => {
@@ -673,7 +758,7 @@ function styleOf(el: Element): SelStyle {
     fontSize: c.fontSize, fontFamily: c.fontFamily, fontWeight: c.fontWeight, fontStyle: c.fontStyle, textDecoration: c.textDecorationLine,
     color: c.color, background: c.backgroundColor, textAlign: c.textAlign, borderRadius: c.borderTopLeftRadius, opacity: c.opacity,
     border: `${c.borderTopWidth} ${c.borderTopStyle} ${c.borderTopColor}`,
-    fill, stroke, strokeWidth, dash, rotate: angleOf(el), flipX: fl.x, flipY: fl.y,
+    fill, stroke, strokeWidth, dash, rotate: isSvgPart(el) ? Math.round((partBox(el)?.form.a ?? 0) * 1800 / Math.PI) / 10 : angleOf(el), flipX: fl.x, flipY: fl.y,
     shadow: c.boxShadow !== 'none' || (c.filter ?? '').includes('drop-shadow'), arrowStart, arrowEnd, lineHeight: c.lineHeight,
   };
 }
@@ -710,8 +795,9 @@ export function report(): void {
   // the original of a changed object, faintly where it was (review.ts)
   showGhost(selected.length === 1 && !editing ? selected[0] : null);
   post({ ol: 'selection', version: state.version, items: selected.map(item).filter((x): x is SelItem => !!x) });
-  // (the Animation pane follows the selection's slide)
+  // (the Animation pane and the Objects pane follow the selection's slide)
   postSequence();
+  postObjects();
 }
 
 /* ------------------------------------------------------------------ drawing */
@@ -749,10 +835,22 @@ export function selectionLabel(els: Element[]): string {
     return kinds.every(x => x === k) ? `${els.length} ${KIND_NAMES[k][1]}` : `${els.length} objects`;
   }
   const el = els[0], k = kinds[0];
-  if (k === 'svgpart') return `SVG ▸ ${SVG_PART_NAMES[el.localName] ?? el.localName}`;
+  // (named objects by their names: data-ol-name, or a drawing's part by its id)
+  const own = el.getAttribute('data-ol-name') ?? (k === 'svgpart' ? el.id : '');
+  if (k === 'svgpart') return `SVG ▸ ${own || (SVG_PART_NAMES[el.localName] ?? el.localName)}`;
   const name = k === 'line' && el.localName === 'svg' && !lineOf(el) ? 'Drawing' : k === 'other' ? OTHER_NAMES[el.localName] ?? 'Object' : KIND_NAMES[k][0];
+  const named = own ? `${name} · ${own}` : name;
   // an object of a group: where it is
-  return groupOf(el) ? `Group ▸ ${name}` : name;
+  return groupOf(el) ? `Group ▸ ${named}` : named;
+}
+
+/** a word for what an element is (the Objects pane's), "Path", "Group", "Text" */
+export function kindWord(el: Element): string {
+  const k = kindOf(el);
+  if (k === 'svgpart') { const n = SVG_PART_NAMES[el.localName] ?? el.localName; return n[0].toUpperCase() + n.slice(1); }
+  if (k === 'line' && el.localName === 'svg' && !lineOf(el)) return 'Drawing';
+  if (k === 'other') return OTHER_NAMES[el.localName] ?? 'Object';
+  return KIND_NAMES[k][0];
 }
 
 const RESIZE_CURSORS = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'];
@@ -825,7 +923,7 @@ export function draw(): void {
       ends.forEach(([x, y], i) => parts.push(`<div class="handle end" data-h="p${i}" style="left:${x}px;top:${y}px;border-width:${bw}px"></div>`));
     } else {
       const b = boxOf(el);
-      const fixed = fixedHeight(el);
+      const fixed = fixedHeight(el) || isSvgPart(el);
       const hs: [string, number, number][] = [['nw', 0, 0], ['ne', 1, 0], ['sw', 0, 1], ['se', 1, 1], ['w', 0, 0.5], ['e', 1, 0.5]];
       if (fixed) hs.push(['n', 0.5, 0], ['s', 0.5, 1]);
       if (rotating === el && rotatable(el)) {
@@ -837,7 +935,7 @@ export function draw(): void {
           parts.push(`<div class="handle rot4" data-h="rot" data-corner="${k}" style="left:${x + ox}px;top:${y + oy}px;transform:rotate(${a + b.a}deg)"></div>`);
         }
         parts.push(`<div class="rot-centre" style="left:${b.cx}px;top:${b.cy}px"></div>`);
-      } else if (!isSvgPart(el)) for (const [k, fx, fy] of hs) { const [x, y] = handleAt(b, fx, fy); parts.push(`<div class="handle" data-h="${k}" style="left:${x}px;top:${y}px;cursor:${cursorFor(k, b.a)};border-width:${bw}px"></div>`); }
+      } else if (!isSvgPart(el) || partBox(el)) for (const [k, fx, fy] of hs) { const [x, y] = handleAt(b, fx, fy); parts.push(`<div class="handle" data-h="${k}" style="left:${x}px;top:${y}px;cursor:${cursorFor(k, b.a)};border-width:${bw}px"></div>`); }
     }
   }
   for (const g of guides) {
@@ -864,7 +962,8 @@ export function draw(): void {
 
 /** rotated by its round handle: a box on a slide, a picture, a drawing (not the flow of a web page) */
 function rotatable(el: Element): boolean {
-  if (isSvgPart(el) || !movable(el)) return false;
+  if (isSvgPart(el)) return !!partBox(el);
+  if (!movable(el)) return false;
   return el instanceof HTMLElement || el.localName === 'svg';
 }
 
@@ -898,6 +997,8 @@ interface DragEl {
   inner?: { img: HTMLElement; l: number; t: number; w: number };
   /** a group's objects (those of the groups in it too), scaled with it when it is resized */
   members?: DragEl[];
+  /** a part of a drawing moved, resized and turned through its transform (partBox) */
+  part?: { box: Box; form: PartForm; P: DOMMatrix; Pinv: DOMMatrix; flip: number };
 }
 interface Drag {
   kind: 'move' | 'resize' | 'rotate' | 'end' | 'draw' | 'pen' | 'erase' | 'marquee' | 'pan';
@@ -1034,8 +1135,14 @@ export function start(el: HTMLElement): DragEl {
     el, r0, left0: Number.isFinite(left0) ? left0 : 0, top0: Number.isFinite(top0) ? top0 : 0,
     w0: angleOf(el) ? he.offsetWidth ?? r0.w : parseFloat(c.width) || r0.w, h0: angleOf(el) ? he.offsetHeight ?? r0.h : parseFloat(c.height) || r0.h,
     inline, transform0: isSvgPart(el) ? el.getAttribute('transform') : null, angle: angleOf(el),
-    inner: innerPicture(el),
+    inner: innerPicture(el), part: partDrag(el),
   };
+}
+
+function partDrag(el: Element): DragEl['part'] {
+  const pb = isSvgPart(el) ? partBox(el) : null;
+  if (!pb) return undefined;
+  return { ...pb, Pinv: pb.P.inverse(), flip: pb.P.a * pb.P.d - pb.P.b * pb.P.c < 0 ? -1 : 1 };
 }
 
 function innerPicture(el: Element): DragEl['inner'] {
@@ -1216,7 +1323,9 @@ function onDragMove(e: PointerEvent): void {
     if (e.shiftKey) a = Math.round(a / 15) * 15;
     else for (const k of [-180, -90, 0, 90, 180]) if (Math.abs(a - k) < 3) a = k;
     if (Math.abs(a) === 180) a = 180;
-    drag.els[0].el.style.setProperty('rotate', a ? `${Math.round(a * 10) / 10}deg` : '0deg');
+    const pd = drag.els[0].part;
+    if (pd) setForm(drag.els[0].el, { ...pd.form, a: pd.form.a + pd.flip * (a - r.a0) * Math.PI / 180 });
+    else drag.els[0].el.style.setProperty('rotate', a ? `${Math.round(a * 10) / 10}deg` : '0deg');
   } else if (drag.kind === 'end') {
     const line = lineOf(drag.els[0].el);
     if (line) {
@@ -1240,6 +1349,11 @@ export function union(rs: Rect[]): Rect {
 
 /** moved by (dx, dy) document px, live */
 export function placeLive(d: DragEl, dx: number, dy: number): void {
+  if (d.part) {
+    const m = d.part.Pinv, f = d.part.form;
+    setForm(d.el, { ...f, p: [f.p[0] + m.a * dx + m.c * dy, f.p[1] + m.b * dx + m.d * dy] });
+    return;
+  }
   if (isSvgPart(d.el)) {
     // in the coordinates of the shape's parent: a translate before what it had
     const parent = d.el.parentNode as SVGGraphicsElement;
@@ -1259,7 +1373,28 @@ export function placeLive(d: DragEl, dx: number, dy: number): void {
   st.setProperty('top', `${t0 + dy}px`);
 }
 
+/** a part of a drawing resized by a handle: scaled in its own axes, the opposite side where it was */
+function resizePart(d: DragEl, h: string, dx: number, dy: number, keepRatio: boolean): void {
+  const { box: b, form: f, Pinv } = d.part!;
+  guides = [];
+  const [ldx, ldy] = b.a ? rot(dx, dy, -b.a) : [dx, dy];
+  let w = b.w, hh = b.h;
+  if (h.includes('e')) w = b.w + ldx;
+  if (h.includes('w')) w = b.w - ldx;
+  if (h.includes('s')) hh = b.h + ldy;
+  if (h.includes('n')) hh = b.h - ldy;
+  if (keepRatio && h.length === 2 && b.w > 0 && b.h > 0) hh = w * (b.h / b.w);
+  const min = 2 / scale;
+  w = Math.max(min, w); hh = Math.max(min, hh);
+  const kx = b.w > 0 ? w / b.w : 1, ky = b.h > 0 ? hh / b.h : 1;
+  const sx = h.includes('e') ? 1 : h.includes('w') ? -1 : 0, sy = h.includes('s') ? 1 : h.includes('n') ? -1 : 0;
+  const [ox, oy] = rot(sx * (w - b.w) / 2, sy * (hh - b.h) / 2, b.a);
+  const c = Pinv.transformPoint(new DOMPoint(b.cx + ox, b.cy + oy));
+  setForm(d.el, { ...f, sx: f.sx * kx, sy: f.sy * ky, p: [c.x, c.y] });
+}
+
 function resizeLive(d: DragEl, h: string, dx: number, dy: number, keepRatio: boolean, noSnap: boolean): void {
+  if (d.part) { resizePart(d, h, dx, dy, keepRatio); return; }
   // a rotated box: the drag in its own axes; the opposite side stays where it is on the page
   const a = d.angle;
   const [ldx, ldy] = a ? rot(dx, dy, -a) : [dx, dy];
@@ -1361,6 +1496,12 @@ function onDragEnd(e: PointerEvent): void {
     if (d.kind === 'move' && d.clicked && selected.length > 1 && !e.shiftKey) { selected = [d.clicked]; report(); }
     // a click on the object already selected: resize handles ⇄ rotation arrows (Inkscape)
     else if (d.kind === 'move' && d.again && d.clicked && !e.shiftKey && rotatable(d.clicked) && !lineOf(d.clicked) && !isLocked(d.clicked)) rotating = rotating === d.clicked ? null : d.clicked;
+    draw();
+    return;
+  }
+  if (d.kind === 'rotate' && d.els[0]?.part) {
+    const op = styleOp(d.els[0]);
+    if (op) commit([op]);
     draw();
     return;
   }
@@ -2143,6 +2284,14 @@ function onKeyDown(e: KeyboardEvent): void {
   if (e.key.length === 1 || e.key === 'F2') fwd(e);
 }
 
+/** the Objects pane's row under the pointer: its object outlined as under the pointer */
+export function hoverPath(path: Path | null): void {
+  const el = path ? liveAt(path) : null;
+  if (el === hoverEl) return;
+  hoverEl = el;
+  draw();
+}
+
 /** Escape: a level up — from an object of a group (or a part of a drawing) to the group, else nothing selected */
 export function selectParent(): void {
   if (editing) return;
@@ -2254,10 +2403,10 @@ export function visibleSlideEl(): HTMLElement | null {
   return best;
 }
 export function visibleSlide(): void {
-  if (isSolo()) { const k = soloIndex(); if (k !== lastVisible) { lastVisible = k; post({ ol: 'visible', slide: k }); postSequence(); } return; }
+  if (isSolo()) { const k = soloIndex(); if (k !== lastVisible) { lastVisible = k; post({ ol: 'visible', slide: k }); postSequence(); postObjects(); } return; }
   const s = visibleSlideEl();
   const i = s ? slides().indexOf(s) : -1;
-  if (i !== lastVisible) { lastVisible = i; post({ ol: 'visible', slide: i }); postSequence(); }
+  if (i !== lastVisible) { lastVisible = i; post({ ol: 'visible', slide: i }); postSequence(); postObjects(); }
 }
 
 export function scrollToSlide(i: number, smooth = false): void {
@@ -2275,6 +2424,7 @@ export function scrollToSlide(i: number, smooth = false): void {
     draw();
     sendLayout();
     postSequence();
+    postObjects();
     return;
   }
   const s = slides()[i];
