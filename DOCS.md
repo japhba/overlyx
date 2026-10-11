@@ -508,7 +508,7 @@ blend.
   * **The quick menu** (`QuickBar.tsx`, `decktoolbar.tsx quickGroups`): a small bar right beside the
     selection — above it, or below when there is no room — with the toolbar's most used buttons for
     what is selected (text: bold, italic, colour, size, alignment; shapes: fill, border; lines: colour,
-    weight, arrowheads; pictures: crop, background), then arrange, duplicate, comment and delete. Its
+    weight, arrowheads; pictures: crop, background), then group / ungroup, arrange, duplicate, comment and delete. Its
     buttons are the toolbar's own, under ids of their own (`q-…`, so the toolbar's stay one of a kind
     on the page); it follows the selection through zoom and pan (the frame's box read every frame),
     steps aside while something is dragged (the runtime's `dragging` message), and is not shown while
@@ -523,9 +523,32 @@ blend.
     four corners (the centre marked; any arrow turns it, CSS `rotate`, Shift: 15° steps, snaps to
     0/90/180/270) and the next click back, a double click edits its points (a path) or its text — the
     round handle on a stem above the box is gone; resizing a rotated box works in its own
-    axes, a line's ends are dragged by themselves, Alt+drag moves a copy, Ctrl/⌘+click selects inside
-    a group or a drawing (double-click goes in a level), a click on one of several selected objects
-    selects it alone, a shape takes text (double-click or start typing). *Arrange* (the toolbar's,
+    axes, a line's ends are dragged by themselves, Alt+drag moves a copy, a click on one of several
+    selected objects selects it alone, a shape takes text (double-click or start typing).
+    **Groups** (`edit.ts isGroup`: a `div.ol-group`, or any box holding nothing but positioned objects
+    and no text of its own — kind `group`, never a text box): selected, moved and resized as one; the
+    toolbar and the quick menu have Group (two or more selected, Ctrl+G) and Ungroup (Ctrl+Shift+G)
+    buttons of their own. Ctrl/⌘+click (`memberAt`) selects the object of the innermost group under
+    the pointer *and the same press drags it* — better than Inkscape, where Ctrl+drag only constrains
+    the move — Ctrl+click on it again goes into its drawing; outside groups it picks a drawing's part.
+    A plain click then stays inside that group (its box drawn dashed, the tag says "Group ▸ Text"), a
+    double click on a member's text retypes it, Escape goes a level up. After an object of a group is
+    moved, nudged, resized, turned, aligned or deleted, `refitGroups` fits the group's box around its
+    objects again and shifts them inside it so nothing moves on the slide (skipped for a turned or
+    flipped group); `commit` merges the style edits of one element (one commit's splices must not
+    overlap). Resizing a group scales its objects' boxes (left / top / width, height where fixed; the
+    text keeps its size, as in PowerPoint), in proportion at the corners. Parts of one drawing group
+    into a `<g>`; ungrouping a `<g>` hands its transform and paint to its parts. With the keyboard still
+    in the editor (a click on the canvas leaves it there), Escape and the arrows reach the canvas as
+    `canvasKey`. **Units**: the interface shows physical units, never px (`deliverable/units.ts`; a
+    CSS px is 1/96 in, so a 1280 × 720 slide is 13.33 × 7.5 in): font sizes in points (the size box,
+    − / + and Ctrl+Shift+, / . step Word's ladder; written `font-size: 28pt`), line weights in points as
+    PowerPoint lists them (¼ … 12 pt; borders written in pt; an SVG shape's `stroke-width` converted to
+    its own units through its scale on the slide, `userScale`, unless `non-scaling-stroke`), corner
+    radii in points, the crop frame's size in mm (inches for en-US). Border widths are read from the
+    source (`declaredPx`): Chrome snaps computed ones to device pixels. Positions written by drags keep
+    the units the element had; agents' reports (`report.ts`) stay in CSS px, the units they write.
+    *Arrange* (the toolbar's,
     the object menu's, the keys): order (front / forward / backward / back as one `reorder` op of the
     parent's children — the text between them stays put), align (to the slide for one object, to the
     selection for several), centre on the slide, distribute (equal gaps), rotate 90°, flip (CSS
@@ -535,7 +558,7 @@ blend.
     attributes for the shapes of an SVG (`currentColor` lines through the drawing's `color`). Text:
     font (web fonts linked from Google Fonts when first used), size, B I U S, colour, highlight,
     alignment, vertical alignment in shapes, lists, line spacing — on the selected runs while typing
-    (`execCommand` with CSS spans, `fontSizePx`), on the whole box otherwise. **Files dropped** on the
+    (`execCommand` with CSS spans, `fontSize`), on the whole box otherwise. **Files dropped** on the
     canvas (or pasted): a picture is uploaded and centred on the drop point; an **SVG becomes a
     drawing in the page** (`sourceops.ts inlineSvgHtml`: scripts, handlers, foreign content, links
     out of the file and Inkscape's private markup removed, ids prefixed so drawings never share one,

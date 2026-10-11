@@ -204,6 +204,8 @@ export type ToRuntime =
   | { ol: 'steps'; cmd: StepCmd }
   /** Ctrl+A with the keyboard in the editor (not in the canvas): every object of the slide shown */
   | { ol: 'selectAll' }
+  /** Escape (a level up: out of a group) or an arrow (a nudge) with the keyboard in the editor */
+  | { ol: 'canvasKey'; key: 'Escape' | 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'; shift: boolean }
   /** how the review is shown, Suggesting on or off */
   | { ol: 'review'; view: ReviewView }
   /** Ctrl+Alt+M or the Comment button: what a new comment is on (the runtime answers with `comment`) */

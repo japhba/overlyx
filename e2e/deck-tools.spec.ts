@@ -1,7 +1,9 @@
 /**
  * The deck canvas's tools (deliverable/decktoolbar.tsx, runtime/edit.ts, runtime/arrange.ts,
  * runtime/view.ts, runtime/crop.ts): the contextual toolbar (what shows depends on what is
- * selected), fill, distribute, group / ungroup, flip, the rotation handle, new shapes and a line
+ * selected), fill, distribute, group / ungroup (Ctrl+click moves an object inside a group, which fits
+ * around it; a group resized as one; a drawing's parts into a <g>), sizes and line weights in points,
+ * flip, the rotation handle, new shapes and a line
  * drawn backwards, an SVG dropped in (inline, sanitised, its shapes editable), a crop preset, the
  * canvas's checkerboard from its right-click menu, "Back to the slide" when zoomed in, and moving a
  * text box with a finger on a touch screen (the ⌖ select tool). What lands in index.html each time.
@@ -113,7 +115,7 @@ test('the contextual toolbar, fill, distribute, group, flip and rotation (a seco
   const h1 = await at(page, 300, 130);
   await page.mouse.click(h1.x, h1.y);
   await expect(page.locator('[data-tb="dk-b"]')).toBeVisible();
-  await expect(page.locator('.dl-toolbar [data-dk-size] input')).toHaveValue('64');
+  await expect(page.locator('.dl-toolbar [data-dk-size] input')).toHaveValue('48');   // 64 px, in points
   await expect(page.locator('[data-tb="dk-fill"]')).toHaveCount(0);
 
   // a shape: fill and border; a colour from the palette
@@ -194,6 +196,101 @@ test('the quick menu beside the selection: the toolbar\'s main buttons, out of t
   // duplicate from the menu: a copy of the shape
   await quick.locator('[data-tb="q-dup"]').click();
   await expect.poll(() => (fileText().match(/background: #ffff00/g) ?? []).length, { timeout: 15000 }).toBe(2);
+  expect(real(errors)).toEqual([]);
+});
+
+const GROUP_DECK = DECK.replace(/<section class="slide">[\s\S]*?<\/section>/, `<section class="slide">
+  <div id="a" style="position: absolute; left: 100px; top: 100px; width: 100px; height: 100px; background: #ff0000"></div>
+  <div id="b" style="position: absolute; left: 300px; top: 100px; width: 100px; height: 100px; background: #00ff00"></div>
+  <p id="t" style="position: absolute; left: 100px; top: 400px; width: 600px; margin: 0; font-size: 32px">Text</p>
+  <svg id="s" style="position: absolute; left: 800px; top: 400px; width: 300px; height: 150px" viewBox="0 0 150 75"><rect id="r" x="0" y="0" width="60" height="60" fill="#112233" stroke="#000000" stroke-width="2"/><circle id="o" cx="110" cy="30" r="30" fill="#445566"/></svg>
+</section>`);
+
+const num = (style: string, prop: string) => Number(new RegExp(`(?:^|; )${prop}: (-?[\\d.]+)px`).exec(style)?.[1] ?? NaN);
+const groupStyle = () => /class="ol-group" style="([^"]*)"/.exec(fileText())?.[1] ?? '';
+
+test('groups: from the quick menu, Ctrl+click moves an object inside (the group fits around it), resized as one; a drawing\'s parts in a <g>; points', async ({ page }) => {
+  const errors = collectErrors(page);
+  await login(page);
+  await page.request.post(BASE_URL + '/api/projects', { data: { name: NAME } });
+  await setup(page, GROUP_DECK);
+  const quick = page.locator('[data-dl-quick]');
+  // two shapes: Group in the quick menu (and the toolbar)
+  const a = await at(page, 150, 150), b = await at(page, 350, 150);
+  await page.mouse.click(a.x, a.y);
+  await page.keyboard.down('Shift'); await page.mouse.click(b.x, b.y); await page.keyboard.up('Shift');
+  await expect(page.locator('.dl-toolbar [data-tb="dk-group"]')).toHaveCount(1);
+  await quick.locator('[data-tb="q-group"]').click();
+  await expect.poll(groupStyle, { timeout: 15000 }).toBe('position: absolute; left: 100px; top: 100px; width: 300px; height: 100px');
+  expect(styleOf('b')).toContain('left: 200px; top: 0px');
+  // the group selected, as one: Ungroup offered, no text tools
+  await expect(quick.locator('[data-tb="q-ungroup"]')).toHaveCount(1);
+  await expect(quick.locator('[data-tb="q-b"]')).toHaveCount(0);
+
+  // Ctrl+drag: the green square alone, inside the group (no snapping); the group grows to hold it
+  const b1 = await at(page, 350, 150), b2 = await at(page, 450, 200);
+  await page.keyboard.down('Control');
+  await page.mouse.move(b1.x, b1.y); await page.mouse.down();
+  await page.mouse.move((b1.x + b2.x) / 2, (b1.y + b2.y) / 2, { steps: 4 }); await page.mouse.move(b2.x, b2.y, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.up('Control');
+  await expect.poll(() => num(groupStyle(), 'width'), { timeout: 15000 }).toBeGreaterThan(395);
+  let g = groupStyle();
+  expect(Math.abs(num(g, 'width') - 400)).toBeLessThan(3);
+  expect(Math.abs(num(g, 'height') - 150)).toBeLessThan(3);
+  expect(num(g, 'left')).toBe(100);
+  expect(Math.abs(num(styleOf('b'), 'left') - 300)).toBeLessThan(3);
+  expect(styleOf('a')).toContain('left: 0px; top: 0px');
+  // a plain click on the other square: it alone (still inside the group)
+  await page.mouse.click(a.x, a.y);
+  await expect(quick.locator('[data-tb="q-ungroup"]')).toHaveCount(0);
+  // Escape: a level up, the group; the arrows move it (the keyboard is still in the editor)
+  await page.keyboard.press('Escape');
+  await expect(quick.locator('[data-tb="q-ungroup"]')).toHaveCount(1);
+  await page.keyboard.press('Shift+ArrowRight');
+  await expect.poll(() => num(groupStyle(), 'left'), { timeout: 15000 }).toBe(110);
+
+  // resized by a corner: its objects scale with it, in proportion
+  g = groupStyle();
+  const w0 = num(g, 'width'), h0 = num(g, 'height');
+  const se = await at(page, 110 + w0, 100 + h0), to = await at(page, 110 + w0 + 100, 100 + h0 + 20);
+  await page.mouse.move(se.x, se.y); await page.mouse.down();
+  await page.mouse.move((se.x + to.x) / 2, (se.y + to.y) / 2, { steps: 4 }); await page.mouse.move(to.x, to.y, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(() => num(groupStyle(), 'width'), { timeout: 15000 }).toBeGreaterThan(w0 + 90);
+  g = groupStyle();
+  const k = num(g, 'width') / w0;
+  expect(Math.abs(num(g, 'height') - h0 * k)).toBeLessThan(3);
+  expect(Math.abs(num(styleOf('b'), 'width') - 100 * k)).toBeLessThan(3);
+  expect(Math.abs(num(styleOf('b'), 'left') - 300 * k)).toBeLessThan(4);
+  // ungrouped: back on the slide where they are
+  await page.keyboard.press('Control+Shift+g');
+  await expect.poll(fileText, { timeout: 15000 }).not.toContain('ol-group');
+  expect(Math.abs(num(styleOf('b'), 'left') - (110 + 300 * k))).toBeLessThan(5);
+
+  // font sizes in points (32 px = 24 pt), written in points
+  const t = await at(page, 200, 420);
+  await page.mouse.click(t.x, t.y);
+  const size = page.locator('.dl-toolbar [data-dk-size] input');
+  await expect(size).toHaveValue('24');
+  await page.locator('.dl-toolbar [data-dk-size] button').last().click();
+  await expect.poll(() => styleOf('t'), { timeout: 15000 }).toContain('font-size: 28pt');
+  await expect(size).toHaveValue('28');
+
+  // a part of a drawing (Ctrl+click): its line weight in points of the slide — 2 units of a drawing shown twice its size: 3 pt
+  const r = await at(page, 860, 460);
+  await page.keyboard.down('Control'); await page.mouse.click(r.x, r.y); await page.keyboard.up('Control');
+  await page.locator('.dl-toolbar [data-tb="dk-weight"]').click();
+  await expect(page.locator('[data-palette="dk-weight"] .tb-pal-item.active')).toHaveText('3 pt');
+  await page.locator('[data-palette="dk-weight"] .tb-pal-item', { hasText: '1½ pt' }).click();
+  await expect.poll(fileText, { timeout: 15000 }).toContain('stroke-width="1"');
+  // two parts grouped: a <g> in the drawing; ungrouped again
+  const o = await at(page, 1020, 460);
+  await page.keyboard.down('Control'); await page.keyboard.down('Shift'); await page.mouse.click(o.x, o.y); await page.keyboard.up('Shift'); await page.keyboard.up('Control');
+  await page.keyboard.press('Control+g');
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/<g><rect id="r"[^<]*(<\/rect>)?<circle id="o"[^<]*(<\/circle>)?<\/g>/);
+  await page.keyboard.press('Control+Shift+g');
+  await expect.poll(fileText, { timeout: 15000 }).not.toContain('<g>');
   expect(real(errors)).toEqual([]);
 });
 

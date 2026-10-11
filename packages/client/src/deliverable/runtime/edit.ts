@@ -5,7 +5,8 @@
  * of the page's reach and out of its styles.
  *
  * A click selects an object: on a slide an element directly on it (a group's inside is reached by
- * double-clicking it, or with Ctrl / ⌘), on a web page the innermost block. A double click on text
+ * double-clicking it, or with Ctrl / ⌘ — that press drags the object within its group, which then
+ * fits around it again), on a web page the innermost block. A double click on text
  * — or on a shape: shapes take text like Google Slides' — retypes it in place (contenteditable,
  * with its TeX shown as written); Escape ends that, then goes a level up. Dragging moves what is
  * positioned (absolute, fixed, relative; on a slide also a static element, which becomes relative;
@@ -75,6 +76,7 @@ export function startEditing(): void {
     .frame.peer { border-style: dashed; }
     .frame.editing { border-color: #e8a33d; }
     .frame.locked { border-style: dotted; border-color: #8a93a6; }
+    .frame.ctx { border-style: dashed; border-color: rgba(47,111,222,.6); }
     .hover { position: absolute; outline: 1px solid rgba(47,111,222,.55); pointer-events: none; transform-origin: 50% 50%; }
     .handle { position: absolute; width: var(--h); height: var(--h); margin: calc(var(--h) / -2) 0 0 calc(var(--h) / -2); background: #fff; border: 1.5px solid #2f6fde; box-sizing: border-box; border-radius: 2px; pointer-events: auto; touch-action: none; }
     .handle.end { border-radius: 50%; width: calc(var(--h) * 1.25); height: calc(var(--h) * 1.25); margin: calc(var(--h) * -0.625) 0 0 calc(var(--h) * -0.625); cursor: ${MOVE_CURSOR}; }
@@ -283,11 +285,11 @@ export function insertMath(display: boolean): void { if (editing) insertChip(edi
 /** a citation or reference at the caret of the text being retyped (the toolbar's pickers) */
 export function insertRef(src: string): void { if (!editing) return; editing.focus({ preventScroll: true }); insertRefChip(editing, src); scheduleCommit(); }
 
-/** a formatting command on the text being retyped (bold, foreColor, fontName …; fontSizePx: a span with that size) */
+/** a formatting command on the text being retyped (bold, foreColor, fontName …; fontSize: a span with that size, a CSS length) */
 export function exec(command: string, value?: string): void {
   if (!editing) return;
   editing.focus();
-  if (command === 'fontSizePx' && value) styleRun('font-size', value);
+  if (command === 'fontSize' && value) styleRun('font-size', value);
   else if (command === 'lineHeight' && value) { editing.style.setProperty('line-height', value); scheduleCommit(); return; }
   else document.execCommand(command, false, value);
   scheduleCommit();
@@ -322,7 +324,7 @@ export function cs(el: Element): CSSStyleDeclaration { return getComputedStyle(e
 export function isTextual(el: Element): boolean {
   if (REPLACED.has(el.localName) || el.classList.contains('slide') || el === document.body) return false;
   const src = srcOf.get(el);
-  if (!src) return false;
+  if (!src || isGroup(el)) return false;
   if (!(src.textContent ?? '').trim()) return false;
   for (const d of Array.from(src.querySelectorAll('*'))) if (!TEXT_TAGS.has(d.localName)) return false;
   return TEXT_TAGS.has(src.localName);
@@ -337,6 +339,38 @@ export function canType(el: Element): boolean {
   const src = srcOf.get(el);
   if (!src || src.children.length || !TEXT_TAGS.has(src.localName)) return false;
   return !!slideOf(el) || el.offsetHeight > 0;
+}
+
+/**
+ * A group: what Group makes (`.ol-group`), or any box holding nothing but positioned objects — it is
+ * selected, moved and resized as one; Ctrl / ⌘ + click or a double click reaches its objects.
+ */
+export function isGroup(el: Element): boolean {
+  if (!(el instanceof HTMLElement) || REPLACED.has(el.localName) || el.classList.contains('slide') || el === document.body || el.classList.contains('ol-crop')) return false;
+  if (el.classList.contains('ol-group')) return true;
+  const src = srcOf.get(el);
+  if (!src || src.children.length < 2 || Array.from(src.childNodes).some(n => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim())) return false;
+  const kids = Array.from(el.children).filter(k => srcOf.has(k));
+  return kids.length > 1 && kids.every(k => { const p = cs(k).position; return p === 'absolute' || p === 'fixed'; });
+}
+
+/** a group's objects, positioned in it (those of the groups in it too, with `deep`) */
+export function membersOf(g: Element, deep = false): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  for (const k of Array.from(g.children)) {
+    if (!srcOf.has(k) || isForeign(k)) continue;
+    const p = cs(k).position;
+    if (p !== 'absolute' && p !== 'fixed') continue;
+    out.push(k as HTMLElement);
+    if (deep && isGroup(k)) out.push(...membersOf(k, true));
+  }
+  return out;
+}
+
+/** the group an object is in (null: it is on the slide itself) */
+export function groupOf(el: Element): HTMLElement | null {
+  const p = el.parentElement;
+  return p && isGroup(p) ? p : null;
 }
 
 /** an element inside an inline SVG (moved by a translate, painted by its attributes) */
@@ -379,6 +413,7 @@ export function kindOf(el: Element): ObjKind {
   if (isSvgPart(el)) return 'svgpart';
   if (el.localName === 'svg') return lineOf(el) || isStrokeArt(el) ? 'line' : 'svg';
   if (REPLACED.has(el.localName)) return 'other';
+  if (isGroup(el)) return 'group';
   const c = cs(el);
   const painted = c.backgroundColor !== 'rgba(0, 0, 0, 0)' || c.backgroundImage !== 'none' || (c.borderTopStyle !== 'none' && parseFloat(c.borderTopWidth) > 0);
   const src = srcOf.get(el);
@@ -426,7 +461,7 @@ const rot = (x: number, y: number, deg: number): [number, number] => {
 function objectFor(target: Element, deep: boolean): Element | null {
   const el = sourced(target);
   if (!el || el === document.body || el === document.documentElement || el.localName === 'head') return null;
-  if (deep) return el;
+  if (deep) return memberAt(el) ?? objectFor(target, false);
   // inside the selection's group: the child of that group
   const scope = selected.length === 1 ? selected[0].parentElement ?? (selected[0].parentNode as Element | null) : null;
   if (scope && scope.contains(el) && !scope.classList?.contains('slide') && scope !== document.body) {
@@ -445,6 +480,22 @@ function objectFor(target: Element, deep: boolean): Element | null {
     if (REPLACED.has(e.localName) || (d !== 'inline' && d !== 'contents')) return e;
   }
   return el;
+}
+
+/**
+ * Ctrl / ⌘ + click: the object of a group under the pointer — the innermost group's, so it is moved
+ * within its group straight away (Inkscape's Ctrl+click selects it, but a Ctrl+drag there only
+ * moves along an axis) — or, outside groups, the part of a drawing. Ctrl+click on that object again:
+ * the part of the drawing it is.
+ */
+function memberAt(el: Element): Element | null {
+  let part: Element | null = null;
+  for (let e: Element | null = el; e && e !== document.body && !e.classList?.contains('slide'); e = e.parentElement ?? (e.parentNode as Element | null)) {
+    if (!srcOf.has(e)) continue;
+    if (isSvgPart(e)) { part ??= e; continue; }
+    if (groupOf(e)) return part && selected.length === 1 && selected[0] === e ? part : e;
+  }
+  return part;
 }
 
 /* ------------------------------------------------------------------ the selection as the editor sees it */
@@ -469,6 +520,34 @@ const dashOf = (style: string, array: string): SelStyle['dash'] => {
   return 'solid';
 };
 
+/** CSS px of the slide per user unit of an SVG shape: its stroke widths are in user units, the toolbar's in points */
+export function userScale(el: Element): number {
+  // (the shapes the toolbar draws keep their outline's width however they are stretched: it is in CSS px)
+  if ((el.getAttribute('vector-effect') ?? cs(el).getPropertyValue('vector-effect')) === 'non-scaling-stroke') return 1;
+  const m = (el as SVGGraphicsElement).getScreenCTM?.();
+  if (!m) return 1;
+  const s = slideOf(el);
+  const k = s && s.offsetWidth ? s.getBoundingClientRect().width / s.offsetWidth : 1;
+  return Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) / k || 1;
+}
+
+const LENGTH_PX: Record<string, number> = { px: 1, pt: 4 / 3, pc: 16, mm: 96 / 25.4, cm: 96 / 2.54, in: 96 };
+
+/**
+ * A length the element's own style attribute gives (the first of `props` it has), in CSS px — read
+ * from the source because Chrome's computed border widths are snapped to device pixels (1 pt read
+ * back as ¾ pt).
+ */
+export function declaredPx(el: Element, props: string[]): number | null {
+  const style = srcOf.get(el)?.getAttribute('style') ?? '';
+  for (const p of props) {
+    const m = new RegExp(`(?:^|;)\\s*${p}\\s*:([^;]*)`, 'i').exec(style);
+    const len = m && /(-?[\d.]+)(px|pt|pc|mm|cm|in)\b/i.exec(m[1]);
+    if (len) return Number(len[1]) * LENGTH_PX[len[2].toLowerCase()];
+  }
+  return null;
+}
+
 function styleOf(el: Element): SelStyle {
   const c = cs(el);
   const fl = flipsOf(el);
@@ -480,13 +559,13 @@ function styleOf(el: Element): SelStyle {
     const tc = cs(t);
     fill = tc.fill && tc.fill !== 'none' ? tc.fill : null;
     stroke = tc.stroke && tc.stroke !== 'none' ? tc.stroke : null;
-    strokeWidth = stroke ? parseFloat(tc.strokeWidth) || 1 : 0;
+    strokeWidth = stroke ? (parseFloat(tc.strokeWidth) || 1) * userScale(t) : 0;
     dash = stroke ? dashOf('solid', tc.strokeDasharray) : 'none';
     arrowStart = !!t.getAttribute('marker-start');
     arrowEnd = !!t.getAttribute('marker-end');
   } else {
     fill = c.backgroundColor !== 'rgba(0, 0, 0, 0)' ? c.backgroundColor : null;
-    const bw = parseFloat(c.borderTopWidth) || 0;
+    const bw = parseFloat(c.borderTopWidth) > 0 ? declaredPx(el, ['border-top-width', 'border-width', 'border-top', 'border']) ?? parseFloat(c.borderTopWidth) : 0;
     stroke = c.borderTopStyle !== 'none' && bw > 0 ? c.borderTopColor : null;
     strokeWidth = stroke ? bw : 0;
     dash = stroke ? dashOf(c.borderTopStyle, '') : 'none';
@@ -572,9 +651,9 @@ export function selectionLabel(els: Element[]): string {
   }
   const el = els[0], k = kinds[0];
   if (k === 'svgpart') return `SVG ▸ ${SVG_PART_NAMES[el.localName] ?? el.localName}`;
-  if (k === 'line' && el.localName === 'svg' && !lineOf(el)) return 'Drawing';
-  if (k === 'other') return OTHER_NAMES[el.localName] ?? 'Object';
-  return KIND_NAMES[k][0];
+  const name = k === 'line' && el.localName === 'svg' && !lineOf(el) ? 'Drawing' : k === 'other' ? OTHER_NAMES[el.localName] ?? 'Object' : KIND_NAMES[k][0];
+  // an object of a group: where it is
+  return groupOf(el) ? `Group ▸ ${name}` : name;
 }
 
 const RESIZE_CURSORS = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'];
@@ -612,6 +691,9 @@ export function draw(): void {
   parts.push(rv.under);
   // the steps objects appear and disappear at when presenting (beamer's overlays), as PowerPoint numbers its animations (animate.ts)
   if (!editing) parts.push(badges());
+  // the objects of one group selected: the group's box, dashed (where a click on the others stays)
+  const ctx = selected.length && !editing ? groupOf(selected[0]) : null;
+  if (ctx && selected.every(el => groupOf(el) === ctx)) parts.push(frameAt('frame ctx', boxOf(ctx), `border-width:${bw}px`));
   for (const el of selected) {
     if (!el.isConnected) continue;
     const b = boxOf(el);
@@ -734,6 +816,8 @@ interface DragEl {
   el: HTMLElement; r0: Rect; left0: number; top0: number; w0: number; h0: number; inline: Map<string, string>; transform0: string | null; angle: number;
   /** a cropped picture's own picture (resized with its frame) */
   inner?: { img: HTMLElement; l: number; t: number; w: number };
+  /** a group's objects (those of the groups in it too), scaled with it when it is resized */
+  members?: DragEl[];
 }
 interface Drag {
   kind: 'move' | 'resize' | 'rotate' | 'end' | 'draw' | 'pen' | 'marquee' | 'pan';
@@ -858,6 +942,7 @@ function innerPicture(el: Element): DragEl['inner'] {
 
 /** a live change undone (a drag given up: a second finger came) */
 export function revertLive(d: DragEl): void {
+  for (const m of d.members ?? []) revertLive(m);
   if (isSvgPart(d.el)) { if (d.transform0 === null) d.el.removeAttribute('transform'); else d.el.setAttribute('transform', d.transform0); return; }
   for (const [p, v] of d.inline) { if (v) d.el.style.setProperty(p, v); else d.el.style.removeProperty(p); }
   if (!d.el.getAttribute('style')) d.el.removeAttribute('style');
@@ -875,8 +960,53 @@ function onHandleDown(e: PointerEvent, handle: string): void {
     drag = { ...base, kind: 'rotate', rot: { cx: b.cx, cy: b.cy, a0: b.a, p0: Math.atan2(e.pageY - b.cy, e.pageX - b.cx) * 180 / Math.PI } };
   } else if (handle === 'p0' || handle === 'p1') {
     drag = { ...base, kind: 'end' };
-  } else drag = { ...base, kind: 'resize' };
+  } else {
+    // a group: its objects grow and shrink with it (PowerPoint's)
+    if (isGroup(el)) base.els[0].members = membersOf(el, true).map(start);
+    drag = { ...base, kind: 'resize' };
+  }
   capture();
+}
+
+/**
+ * The groups the objects `els` are in, fitted to their objects again after these moved, changed
+ * size or are going (`gone`): the group's box around what is in it, its objects' positions in it
+ * shifted to match — nothing moves on the slide. As edits to commit after the objects' own (live
+ * too, so a group around the group fits next). A group turned or flipped keeps its box.
+ */
+export function refitGroups(els: Element[], gone: Set<Element> = new Set()): HtmlOp[] {
+  const ops: HtmlOp[] = [];
+  const todo = [...new Set(els.map(groupOf).filter((g): g is HTMLElement => !!g && !gone.has(g)))];
+  const done = new Set<Element>();
+  while (todo.length) {
+    const g = todo.shift()!;
+    if (done.has(g)) continue;
+    done.add(g);
+    const outer = groupOf(g);
+    if (outer && !gone.has(outer)) todo.push(outer);
+    const c = cs(g);
+    if (angleOf(g) || (c.scale && c.scale !== 'none') || c.transform !== 'none') continue;
+    const ms = membersOf(g).filter(m => !gone.has(m));
+    if (!ms.length || ms.length !== Array.from(g.children).filter(k => srcOf.has(k) && !gone.has(k) && !isForeign(k)).length) continue;
+    const rs = ms.map(m => { const r = docRect(m); const [x0, y0] = slidePoint(g, r.x, r.y), [x1, y1] = slidePoint(g, r.x + r.w, r.y + r.h); return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }; });
+    const u = union(rs);
+    if (Math.abs(u.x) < 0.5 && Math.abs(u.y) < 0.5 && Math.abs(u.w - g.offsetWidth) < 0.5 && Math.abs(u.h - g.offsetHeight) < 0.5) continue;
+    for (const m of ms) {
+      const d = start(m);
+      if (Math.abs(u.x) >= 0.5) m.style.setProperty('left', `${d.left0 - u.x}px`);
+      if (Math.abs(u.y) >= 0.5) m.style.setProperty('top', `${d.top0 - u.y}px`);
+      const op = styleOp(d);
+      if (op) ops.push(op);
+    }
+    const d = start(g);
+    g.style.setProperty('left', `${d.left0 + u.x}px`);
+    g.style.setProperty('top', `${d.top0 + u.y}px`);
+    g.style.setProperty('width', `${u.w}px`);
+    g.style.setProperty('height', `${u.h}px`);
+    const op = styleOp(d);
+    if (op) ops.push(op);
+  }
+  return ops;
 }
 
 function capture(): void {
@@ -974,7 +1104,7 @@ function onDragMove(e: PointerEvent): void {
     for (const d of drag.els) placeLive(d, ddx, ddy);
   } else if (drag.kind === 'resize') {
     const d = drag.els[0];
-    resizeLive(d, drag.handle!, dx, dy, e.shiftKey || d.el.localName === 'img' || d.el.classList.contains('ol-crop'), e.ctrlKey || e.metaKey);
+    resizeLive(d, drag.handle!, dx, dy, e.shiftKey || d.el.localName === 'img' || d.el.classList.contains('ol-crop') || !!d.members, e.ctrlKey || e.metaKey);
   } else if (drag.kind === 'rotate') {
     const r = drag.rot!;
     let a = r.a0 + Math.atan2(e.pageY - r.cy, e.pageX - r.cx) * 180 / Math.PI - r.p0;
@@ -1063,6 +1193,16 @@ function resizeLive(d: DragEl, h: string, dx: number, dy: number, keepRatio: boo
     d.inner.img.style.setProperty('top', `${d.inner.t * k}px`);
     d.inner.img.style.setProperty('width', `${d.inner.w * k}px`);
   }
+  if (d.members && d.w0 > 0 && d.h0 > 0) {
+    const kx = w / d.w0, ky = fixedHeight(d.el) || h === 'n' || h === 's' ? hh / d.h0 : 1;
+    for (const m of d.members) {
+      const ms = m.el.style;
+      ms.setProperty('left', `${m.left0 * kx}px`);
+      ms.setProperty('top', `${m.top0 * ky}px`);
+      ms.setProperty('width', `${m.w0 * kx}px`);
+      if (fixedHeight(m.el)) ms.setProperty('height', `${m.h0 * ky}px`);
+    }
+  }
   const pos = cs(d.el).position;
   if (pos !== 'static' && (h.includes('w') || h.includes('n') || a)) { st.setProperty('left', `${l}px`); st.setProperty('top', `${t}px`); }
 }
@@ -1116,13 +1256,13 @@ function onDragEnd(e: PointerEvent): void {
     const v = x.el.style.getPropertyValue('rotate');
     const a = parseFloat(v) || 0;
     const path = pathOf(x.el);
-    if (path) commit([{ t: 'style', path, set: { rotate: a ? `${Math.round(a * 10) / 10}deg` : null } }]);
+    if (path) commit([{ t: 'style', path, set: { rotate: a ? `${Math.round(a * 10) / 10}deg` : null } }, ...refitGroups([x.el])]);
     draw();
     return;
   }
   if (d.kind === 'end') {
     const op = lineOp(d.els[0].el);
-    if (op) commit([op]);
+    if (op) commit([op, ...refitGroups([d.els[0].el])]);
     draw();
     return;
   }
@@ -1136,8 +1276,10 @@ function onDragEnd(e: PointerEvent): void {
       const ist = x.inner.img.style;
       if (ip) ops.push({ t: 'style', path: ip, set: { left: `${Math.round(parseFloat(ist.left))}px`, top: `${Math.round(parseFloat(ist.top))}px`, width: `${Math.round(parseFloat(ist.width))}px` } });
     }
+    for (const m of x.members ?? []) { const op = styleOp(m); if (op) ops.push(op); }
   }
-  commit(ops);
+  // an object of a group moved or resized: the group fits around its objects again
+  commit([...ops, ...refitGroups(d.els.map(x => x.el))]);
   draw();
 }
 
@@ -1315,7 +1457,27 @@ export function styleOp(d: DragEl): HtmlOp | null {
 /** operations made here, to the editor (the page keeps what it shows until the text comes back) */
 export function commit(ops: HtmlOp[], extra: { select?: 'inserted' | 'keep' | Path[]; then?: 'editText' } = {}): void {
   if (!ops.length || state.version === null) return;
-  post({ ol: 'ops', version: state.version, ops, ...extra });
+  post({ ol: 'ops', version: state.version, ops: mergeStyles(ops), ...extra });
+}
+
+/**
+ * The style edits of one element made one, the later values winning: the editor applies all of a
+ * commit's edits to the same text at once, and two of one style attribute would overlap (an object
+ * of a group moved, then shifted as its group fits around it).
+ */
+function mergeStyles(ops: HtmlOp[]): HtmlOp[] {
+  const out: HtmlOp[] = [];
+  const at = new Map<string, Extract<HtmlOp, { t: 'style' }>>();
+  for (const op of ops) {
+    if (op.t !== 'style') { out.push(op); continue; }
+    const key = op.path.join('/');
+    const prev = at.get(key);
+    if (prev) { Object.assign(prev.set, op.set); continue; }
+    const own = { ...op, set: { ...op.set } };
+    at.set(key, own);
+    out.push(own);
+  }
+  return out;
 }
 
 /** what an element's left / top are measured from: its nearest positioned ancestor (a group, the slide) */
@@ -1666,9 +1828,7 @@ function onKeyDown(e: KeyboardEvent): void {
   if (e.key === 'Escape') {
     e.preventDefault();
     if (tool !== 'select') { fwd(e); return; }
-    const p = selected.length === 1 ? selected[0].parentElement ?? (selected[0].parentNode as Element | null) : null;
-    selected = p && srcOf.has(p) && !p.classList.contains('slide') && p !== document.body ? [p] : [];
-    report(); draw();
+    selectParent();
     return;
   }
   const free = selected.filter(s => !isLocked(s));
@@ -1676,21 +1836,17 @@ function onKeyDown(e: KeyboardEvent): void {
     e.preventDefault();
     const paths = free.map(pathOf).filter((p): p is Path => !!p);
     if (!paths.length) return;
+    // (the groups they were in fitted to what is left — before the removal, while the paths hold)
+    const refit = refitGroups(free, new Set(free));
     selected = selected.filter(isLocked);
     report();
-    commit([{ t: 'remove', paths }]);
+    commit([...refit, { t: 'remove', paths }]);
     return;
   }
   if (e.key === 'Enter' && selected.length === 1 && canType(selected[0])) { e.preventDefault(); beginText(selected[0] as HTMLElement, null, true); return; }
   if (e.key.startsWith('Arrow') && selected.length && !mod && !e.altKey) {
     e.preventDefault();
-    const step = (e.shiftKey ? 10 : 1);
-    const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
-    const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-    const els = free.filter(movable).map(s => start(s as HTMLElement));
-    for (const d of els) placeLive(d, dx, dy);
-    commit(els.map(styleOp).filter((x): x is HtmlOp => !!x));
-    draw();
+    nudge(e.key, e.shiftKey);
     return;
   }
   if (mod && e.key.toLowerCase() === 'd' && selected.length) {
@@ -1714,6 +1870,27 @@ function onKeyDown(e: KeyboardEvent): void {
   // one slide on the canvas: Page Down / Up go to the next / previous one (the editor's)
   if ((e.key === 'PageDown' || e.key === 'PageUp') && isSolo()) { e.preventDefault(); fwd(e); return; }
   if (e.key.length === 1 || e.key === 'F2') fwd(e);
+}
+
+/** Escape: a level up — from an object of a group (or a part of a drawing) to the group, else nothing selected */
+export function selectParent(): void {
+  if (editing) return;
+  const p = selected.length === 1 ? selected[0].parentElement ?? (selected[0].parentNode as Element | null) : null;
+  selected = p && srcOf.has(p) && !p.classList.contains('slide') && p !== document.body ? [p] : [];
+  report(); draw();
+}
+
+/** an arrow key: the selection moved by 1 px (Shift: 10) */
+export function nudge(key: string, shift: boolean): void {
+  if (editing) return;
+  const step = shift ? 10 : 1;
+  const dx = key === 'ArrowLeft' ? -step : key === 'ArrowRight' ? step : 0;
+  const dy = key === 'ArrowUp' ? -step : key === 'ArrowDown' ? step : 0;
+  const els = selected.filter(s => !isLocked(s) && movable(s)).map(s => start(s as HTMLElement));
+  if (!els.length) return;
+  for (const d of els) placeLive(d, dx, dy);
+  commit([...els.map(styleOp).filter((x): x is HtmlOp => !!x), ...refitGroups(els.map(d => d.el))]);
+  draw();
 }
 
 function fwd(e: KeyboardEvent): void {

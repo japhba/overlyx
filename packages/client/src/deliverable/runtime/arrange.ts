@@ -8,10 +8,12 @@
  * Order: front / back / one step, among the element's siblings. Align: to the slide for one object,
  * to the selection's bounds for several; distribute: equal gaps between the first and the last.
  * Group: a positioned box around the objects, their positions made relative to it (left / top in
- * px); ungroup puts them back on its parent. Lock: PowerPoint's — selectable, not moved or resized.
+ * px) — parts of one drawing go into a <g>; ungroup puts them back on its parent (a <g>'s transform
+ * and paint handed to its parts). Lock: PowerPoint's — selectable, not moved or resized.
  */
 import type { ArrangeHow, Paint, HtmlOp, Path } from '../protocol';
-import { selection, setSelection, start, placeLive, styleOp, commit, isLocked, movable, angleOf, isSvgPart, cs, containerOf, union, report, draw, kindOf, slidePoint, stopText } from './edit';
+import { selection, setSelection, start, placeLive, styleOp, commit, isLocked, movable, angleOf, isSvgPart, cs, containerOf, union, report, draw, kindOf, slidePoint, stopText, refitGroups, userScale, declaredPx } from './edit';
+import { pxToPt } from '../units';
 import { srcOf, pathOf, slideOf, docRect } from './env';
 import { pathCommand } from './pathedit';
 
@@ -84,7 +86,8 @@ function moveEach(moves: { el: Element; dx: number; dy: number }[]): void {
     const op = styleOp(d);
     if (op) ops.push(op);
   }
-  commit(ops, { select: 'keep' });
+  // (objects of a group aligned: the group fits around them again)
+  commit([...ops, ...refitGroups(moves.map(m => m.el))], { select: 'keep' });
   draw();
 }
 
@@ -142,8 +145,10 @@ function rotateBy(sel: Element[], how: 'rotate-cw' | 'rotate-ccw' | 'rotate-rese
     if (!p || isLocked(el) || isSvgPart(el)) continue;
     const a = how === 'rotate-reset' ? 0 : deg(angleOf(el) + (how === 'rotate-cw' ? 90 : -90));
     ops.push({ t: 'style', path: p, set: { rotate: a ? `${a}deg` : null } });
+    // (live, for the group it is in to fit around it turned)
+    (el as HTMLElement).style.setProperty('rotate', a ? `${a}deg` : '0deg');
   }
-  commit(ops, { select: 'keep' });
+  commit([...ops, ...refitGroups(sel)], { select: 'keep' });
 }
 
 function flip(sel: Element[], horizontal: boolean): void {
@@ -191,7 +196,33 @@ function withStyle(style: string, set: Record<string, string | null>): string {
 
 const px = (n: number) => `${Math.round(n)}px`;
 
+/** parts of one drawing (an SVG's shapes) put into a <g> where the first of them was */
+function groupParts(parts: Element[]): void {
+  const parent = parts[0].parentNode;
+  if (!parent || parts.some(el => el.parentNode !== parent)) return;
+  const kids = Array.from(srcOf.get(parent as Element)?.children ?? []);
+  const ordered = parts.map(el => ({ src: srcOf.get(el)!, path: pathOf(el) })).filter(x => x.src && x.path).sort((a, b) => kids.indexOf(a.src) - kids.indexOf(b.src));
+  if (ordered.length < 2) return;
+  const html = `<g>${ordered.map(x => x.src.outerHTML).join('')}</g>`;
+  commit([{ t: 'outer', path: ordered[0].path!, html }, { t: 'remove', paths: ordered.slice(1).map(x => x.path!) }], { select: [ordered[0].path!] });
+}
+
+/** a <g> of a drawing undone: its parts in its place, each with the group's transform and paint */
+function ungroupPart(src: Element): { html: string; n: number } {
+  const t = src.getAttribute('transform');
+  const paint = Array.from(src.attributes).filter(a => !['id', 'class', 'transform', 'style'].includes(a.name) && !a.name.startsWith('data-'));
+  const out = Array.from(src.children).map(k => {
+    const copy = k.cloneNode(true) as Element;
+    if (t) copy.setAttribute('transform', `${t} ${copy.getAttribute('transform') ?? ''}`.trim());
+    for (const a of paint) if (!copy.hasAttribute(a.name)) copy.setAttribute(a.name, a.value);
+    return copy.outerHTML;
+  });
+  return { html: out.join(''), n: out.length };
+}
+
 function group(sel: Element[]): void {
+  const parts = sel.filter(el => isSvgPart(el) && !isLocked(el));
+  if (parts.length >= 2 && parts.length === sel.length) { groupParts(parts); return; }
   const els = sel.filter(el => !isSvgPart(el) && !isLocked(el));
   if (els.length < 2) return;
   const parent = els[0].parentElement;
@@ -227,9 +258,17 @@ function ungroup(sel: Element[]): void {
   const ops: HtmlOp[] = [];
   const select: Path[] = [];
   let shift = 0;
-  const gs = sel.filter(el => kindOf(el) === 'group' && !isLocked(el)).map(el => ({ el, path: pathOf(el)!, src: srcOf.get(el)! })).filter(g => g.path && g.src)
+  const gs = sel.filter(el => (kindOf(el) === 'group' || (isSvgPart(el) && el.localName === 'g')) && !isLocked(el)).map(el => ({ el, path: pathOf(el)!, src: srcOf.get(el)! })).filter(g => g.path && g.src)
     .sort((a, b) => a.path[a.path.length - 1] - b.path[b.path.length - 1]);
   for (const g of gs) {
+    if (isSvgPart(g.el)) {
+      const { html, n } = ungroupPart(g.src);
+      ops.push({ t: 'outer', path: g.path, html });
+      const base = g.path[g.path.length - 1] + shift;
+      for (let i = 0; i < n; i++) select.push([...g.path.slice(0, -1), base + i]);
+      shift += n - 1;
+      continue;
+    }
     const c = cs(g.el);
     const gl = parseFloat(c.left) || 0, gt = parseFloat(c.top) || 0;
     const children = Array.from(g.src.children);
@@ -305,14 +344,15 @@ function boxPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[]): void {
   if (p.stroke !== undefined || p.strokeWidth !== undefined || p.dash !== undefined) {
     const hasBorder = c.borderTopStyle !== 'none' && parseFloat(c.borderTopWidth) > 0;
     const color = p.stroke !== undefined ? p.stroke : hasBorder ? c.borderTopColor : '#1d2433';
-    const width = p.strokeWidth !== undefined ? p.strokeWidth : hasBorder ? parseFloat(c.borderTopWidth) : 2;
+    const width = p.strokeWidth !== undefined ? p.strokeWidth : hasBorder ? declaredPx(el, ['border-top-width', 'border-width', 'border-top', 'border']) ?? parseFloat(c.borderTopWidth) : 2;
     const style = p.dash !== undefined ? (p.dash ?? 'solid') : hasBorder ? c.borderTopStyle : 'solid';
-    set.border = color === null || width === null || width === 0 ? null : `${r2(width)}px ${style} ${color}`;
+    // (in points, as the toolbar shows it)
+    set.border = color === null || width === null || width === 0 ? null : `${r2(pxToPt(width))}pt ${style} ${color}`;
     for (const k of ['border-width', 'border-style', 'border-color']) set[k] = null;
     // a box with a border keeps its size (the border drawn inside)
     if (set.border && c.boxSizing !== 'border-box') set['box-sizing'] = 'border-box';
   }
-  if (p.radius !== undefined) set['border-radius'] = p.radius === null ? null : `${r2(p.radius)}px`;
+  if (p.radius !== undefined) set['border-radius'] = p.radius === null ? null : p.radius >= 9999 ? '9999px' : `${r2(pxToPt(p.radius))}pt`;
   if (p.opacity !== undefined) set.opacity = p.opacity === null || p.opacity >= 1 ? null : String(r2(p.opacity));
   if (p.shadow !== undefined) set['box-shadow'] = p.shadow ? '0 6px 18px rgba(0, 0, 0, 0.22)' : null;
   if (Object.keys(set).length) ops.push({ t: 'style', path, set });
@@ -338,9 +378,11 @@ function svgPaint(el: Element, path: Path, p: Paint, ops: HtmlOp[]): void {
       if (usesCurrent && root && p.stroke !== null) { /* the drawing's colour, below */ }
       else attr('stroke', p.stroke ?? 'none');
     }
-    if (p.strokeWidth !== undefined) attr('stroke-width', p.strokeWidth === null ? null : String(r2(p.strokeWidth)));
+    // (widths come in CSS px of the slide: in the drawing's own units here)
+    const k = userScale(s);
+    if (p.strokeWidth !== undefined) attr('stroke-width', p.strokeWidth === null ? null : String(r2(p.strokeWidth / k)));
     if (p.dash !== undefined) {
-      const w = p.strokeWidth ?? (parseFloat(cs(s).strokeWidth) || 2);
+      const w = p.strokeWidth != null ? p.strokeWidth / k : (parseFloat(cs(s).strokeWidth) || 2);
       attr('stroke-dasharray', dashArray(p.dash, w));
       if (p.dash === 'dotted') attr('stroke-linecap', 'round');
     }

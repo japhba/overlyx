@@ -223,6 +223,7 @@ function onMessage(e: MessageEvent): void {
     case 'nodes': if (MODE === 'edit') nodeCommand(m.cmd); break;
     case 'steps': if (MODE === 'edit') stepCommand(m.cmd); break;
     case 'selectAll': if (MODE === 'edit') edit.selectAllOnSlide(); break;
+    case 'canvasKey': if (MODE === 'edit') { if (m.key === 'Escape') edit.selectParent(); else edit.nudge(m.key, m.shift); } break;
     case 'review': if (MODE === 'edit') { setReview(m.view); edit.report(); edit.draw(); } break;
     case 'newComment': if (MODE === 'edit') edit.newComment(); break;
   }

@@ -23,6 +23,7 @@ import type { FromRuntime, ToRuntime, SelItem, SlideBox, Tool, Path, HtmlOp, Del
 import { SlideView } from './viewport';
 import { isFromRuntime } from './protocol';
 import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slidePaths, slideNotes, notesOp, sourceRange, inlineSvgHtml } from './sourceops';
+import { sizePt, stepPt } from './units';
 import { deckToolbar, quickGroups, type DeckTextActions } from './decktoolbar';
 import { QuickBar } from './QuickBar';
 import { BgRemoveDialog } from './BgRemoveDialog';
@@ -774,13 +775,10 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (!sel.length) return;
     applyOps(sel.map(s => ({ t: 'style', path: s.path, set })));
   };
+  // (in points, as the size box shows them)
   const fontSize = (delta: number) => {
     if (!sel.length) return;
-    applyOps(sel.map(s => {
-      const px = parseFloat(s.style.fontSize) || 16;
-      const next = Math.max(6, Math.round(delta > 0 ? px * 1.15 + 0.5 : px / 1.15 - 0.5));
-      return { t: 'style', path: s.path, set: { 'font-size': `${next}px` } };
-    }));
+    applyOps(sel.map(s => ({ t: 'style', path: s.path, set: { 'font-size': `${stepPt(sizePt(parseFloat(s.style.fontSize) || 16), delta > 0 ? 1 : -1)}pt` } })));
   };
   const exec = (command: string, value?: string) => toCanvas({ ol: 'exec', command, value });
   /** a web font used for the first time: its stylesheet linked in the page's head */
@@ -799,7 +797,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   };
   const textActions: DeckTextActions = {
     family: (css, google) => { ensureFont(google); if (editingText) exec('fontName', css ?? 'inherit'); else styleSel({ 'font-family': css }); },
-    size: px => { if (editingText) exec('fontSizePx', `${px}px`); else styleSel({ 'font-size': `${px}px` }); },
+    size: pt => { if (editingText) exec('fontSize', `${pt}pt`); else styleSel({ 'font-size': `${pt}pt` }); },
     bold: () => { if (editingText) exec('bold'); else toggle('font-weight', '700', '400', s => Number(s.style.fontWeight) >= 600); },
     italic: () => { if (editingText) exec('italic'); else toggle('font-style', 'italic', 'normal', s => s.style.fontStyle === 'italic'); },
     underline: () => { if (editingText) exec('underline'); else toggle('text-decoration', 'underline', 'none', s => s.style.textDecoration.includes('underline')); },
@@ -945,7 +943,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       { label: 'Flip vertically', action: () => arrangeSel('flip-v') },
     ] },
     ...(sel.length > 1 ? [{ label: 'Group', shortcut: 'Ctrl+G', action: () => arrangeSel('group') }] : []),
-    ...(sel.some(s => s.kind === 'group') ? [{ label: 'Ungroup', shortcut: 'Ctrl+Shift+G', action: () => arrangeSel('ungroup') }] : []),
+    ...(sel.some(s => s.kind === 'group' || (s.kind === 'svgpart' && s.tag === 'g')) ? [{ label: 'Ungroup', shortcut: 'Ctrl+Shift+G', action: () => arrangeSel('ungroup') }] : []),
     sel.every(s => s.locked) ? { label: 'Unlock', action: () => arrangeSel('unlock') } : { label: 'Lock', action: () => arrangeSel('lock') },
   ];
 
@@ -1170,7 +1168,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         // the tools' letters also before the canvas has the focus
         if (letterKey(e.key)) e.preventDefault();
       }
-      else if (e.key === 'Escape') setToolState('select');
+      // Escape: the tool back to Select, then a level up (out of a group); arrows nudge — the canvas's keys
+      else if (e.key === 'Escape') { if (tool !== 'select') setToolState('select'); else if (selRef.current.length && !presenting) toCanvas({ ol: 'canvasKey', key: 'Escape', shift: false }); }
+      else if (!mod && !e.altKey && e.key.startsWith('Arrow') && selRef.current.length && !readOnlyRef.current && !presenting) { e.preventDefault(); toCanvas({ ol: 'canvasKey', key: e.key as 'ArrowLeft', shift: e.shiftKey }); }
     };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);

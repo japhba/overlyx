@@ -12,11 +12,13 @@ import { mathPreview, type ToolButton, type Palette } from '../app/Toolbar';
 import { ColorGrid } from '../app/ColorGrid';
 import type { SelItem, Tool, Paint, ArrangeHow, DeliverableKind, CanvasView, NodeCmd } from './protocol';
 import { ASPECTS } from './runtime/crop';
+import { fmtPt, ptToPx, pxToPt, sizePt, stepPt } from './units';
 import './deckicons';
 
 export interface DeckTextActions {
   family(css: string | null, google?: string): void;
-  size(px: number): void;
+  /** points (1 pt = 4/3 CSS px) */
+  size(pt: number): void;
   bold(): void; italic(): void; underline(): void; strike(): void;
   color(c: string | null): void;
   highlight(c: string | null): void;
@@ -180,17 +182,17 @@ const LINES: { tool: Tool; label: string }[] = [{ tool: 'line', label: 'Line' },
 
 const firstFamily = (css: string) => css.split(',')[0].trim().replace(/^["']|["']$/g, '');
 
-/** − [size] + : Google's font size box (px) */
-function SizeBox({ px, onSet }: { px: number; onSet: (px: number) => void }) {
-  const [text, setText] = useState(px ? String(px) : '');
-  useEffect(() => { setText(px ? String(px) : ''); }, [px]);
-  const commit = () => { const v = Math.round(Number(text)); if (v >= 4 && v <= 800 && v !== px) onSet(v); else setText(px ? String(px) : ''); };
-  const step = (d: number) => { const cur = px || 16; onSet(Math.max(4, d > 0 ? (cur < 12 ? cur + 1 : cur < 32 ? cur + 2 : Math.round(cur * 1.15)) : (cur <= 12 ? cur - 1 : cur <= 32 ? cur - 2 : Math.round(cur / 1.15)))); };
+/** − [size] + : Google's font size box, in points */
+function SizeBox({ pt, onSet }: { pt: number; onSet: (pt: number) => void }) {
+  const [text, setText] = useState(pt ? String(pt) : '');
+  useEffect(() => { setText(pt ? String(pt) : ''); }, [pt]);
+  const commit = () => { const v = Math.round(Number(text.replace(',', '.').replace(/\s*pt$/i, '')) * 2) / 2; if (v >= 3 && v <= 600 && v !== pt) onSet(v); else setText(pt ? String(pt) : ''); };
+  const step = (d: 1 | -1) => onSet(stepPt(pt || 12, d));
   return (
     <span class="dk-size" data-dk-size>
       <button type="button" class="tb-btn" title="Smaller (Ctrl+Shift+,)" onMouseDown={e => e.preventDefault()} onClick={() => step(-1)}>−</button>
-      <input value={text} inputMode="numeric" aria-label="Font size" onInput={e => setText((e.target as HTMLInputElement).value)}
-        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit(); (e.target as HTMLInputElement).blur(); } if (e.key === 'Escape') { setText(px ? String(px) : ''); (e.target as HTMLInputElement).blur(); } }}
+      <input value={text} inputMode="decimal" aria-label="Font size (pt)" onInput={e => setText((e.target as HTMLInputElement).value)}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit(); (e.target as HTMLInputElement).blur(); } if (e.key === 'Escape') { setText(pt ? String(pt) : ''); (e.target as HTMLInputElement).blur(); } }}
         onBlur={commit} />
       <button type="button" class="tb-btn" title="Larger (Ctrl+Shift+.)" onMouseDown={e => e.preventDefault()} onClick={() => step(1)}>+</button>
     </span>
@@ -223,9 +225,9 @@ function paintLabel(items: SelItem[]): string {
  * The quick menu beside the selection (QuickBar.tsx): the operations used most, taken from the
  * toolbar's own sections (so they act and look the same) — text: bold, italic, colour, size,
  * alignment; shapes: fill and border; lines: colour, weight, arrowheads; pictures: crop and background;
- * then arrange, `extra` (duplicate, comment) and delete. Empty while points, a formula or a crop are edited.
+ * then group / ungroup and arrange, `extra` (duplicate, comment) and delete. Empty while points, a formula or a crop are edited.
  */
-const QUICK: string[][] = [['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-arrange']];
+const QUICK: string[][] = [['dk-b', 'dk-i', 'dk-color', 'dk-size'], ['dk-align'], ['dk-fill', 'dk-stroke'], ['dk-linecolor', 'dk-lineweight', 'dk-tips'], ['dk-crop', 'dk-nobg'], ['dk-group', 'dk-ungroup', 'dk-arrange']];
 export function quickGroups(sections: ToolSection[], extra: ToolButton[]): ToolButton[][] {
   const all = new Map<string, ToolButton>();
   for (const sec of sections) for (const g of sec.groups) for (const b of g) all.set(b.id, b);
@@ -288,7 +290,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   if (textish) {
     section(!c.editingText && one?.kind === 'formula' ? 'Formula' : 'Text');
     const st = one?.style;
-    const px = st ? Math.round(parseFloat(st.fontSize) || 0) : 0;
+    const pt = st ? sizePt(parseFloat(st.fontSize) || 0) : 0;
     const fam = st ? firstFamily(st.fontFamily) : '';
     const bold = sel.length > 0 && sel.every(s => Number(s.style.fontWeight) >= 600);
     const italic = sel.length > 0 && sel.every(s => s.style.fontStyle === 'italic');
@@ -296,7 +298,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     context.push([
       { id: 'dk-font', title: 'Font', icon: '', html: `<span class="dk-font-face">${escHtml(fam || 'Font')}</span>`,
         palette: { title: 'Font', list: true, cols: 1, items: DECK_FONTS.map(f => ({ label: f.label, html: `<span class="dk-font-sample" style="font-family:${escAttr(f.css ?? 'inherit')}">Aa</span>`, active: !!f.css && firstFamily(f.css) === fam, action: () => c.text.family(f.css, f.google) })) } },
-      { id: 'dk-size', title: 'Font size (px)', icon: '', widget: () => <SizeBox px={px} onSet={c.text.size} /> },
+      { id: 'dk-size', title: 'Font size (pt)', icon: '', widget: () => <SizeBox pt={pt} onSet={c.text.size} /> },
     ]);
     context.push([
       { id: 'dk-b', title: 'Bold (Ctrl+B)', icon: 'dk-bold', action: c.text.bold, active: bold },
@@ -357,7 +359,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       weightBtn('dk-weight', 'Border weight', st.strokeWidth, w => c.paint(w === 0 ? { stroke: null } : { strokeWidth: w })),
       dashBtn('dk-dash', 'Border dash', st.dash, d => c.paint({ dash: d })),
       ...(boxShape ? [{ id: 'dk-radius', title: 'Corner radius', icon: 'dk-radius',
-        palette: { title: 'Corners', list: true, cols: 1, items: [0, 4, 8, 16, 28, 48].map(r => ({ label: r ? `${r} px` : 'Square', action: () => c.paint({ radius: r || null }) })).concat([{ label: 'Round (ellipse)', action: () => c.paint({ radius: 9999 }) }]) } } as ToolButton] : []),
+        palette: { title: 'Corners', list: true, cols: 1, items: [0, 3, 6, 12, 24, 36].map(r => ({ label: r ? `${r} pt` : 'Square', action: () => c.paint({ radius: r ? ptToPx(r) : null }) })).concat([{ label: 'Round (ellipse)', action: () => c.paint({ radius: 9999 }) }]) } } as ToolButton] : []),
     ]);
   }
   if (lines.length) {
@@ -398,8 +400,10 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
     section('Arrange');
     const st = one?.style;
     const locked = sel.every(s => s.locked);
-    const isGroup = sel.some(s => s.kind === 'group');
+    const isGroup = sel.some(s => s.kind === 'group' || (s.kind === 'svgpart' && s.tag === 'g'));
     context.push([
+      ...(sel.length > 1 ? [{ id: 'dk-group', title: 'Group (Ctrl+G) — moved and resized as one; Ctrl+click an object in it to move it alone', icon: 'dk-group', action: () => c.arrange('group') }] : []),
+      ...(isGroup ? [{ id: 'dk-ungroup', title: 'Ungroup (Ctrl+Shift+G)', icon: 'dk-ungroup', action: () => c.arrange('ungroup') }] : []),
       { id: 'dk-arrange', title: 'Arrange: order, align, rotate, group', icon: 'dk-arrange',
         palette: { title: 'Arrange', list: true, cols: 1, items: [
           { label: 'Bring to front (Ctrl+Shift+↑)', html: ICON('dk-arrange'), action: () => c.arrange('front') },
@@ -424,7 +428,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           { label: 'Flip horizontally', html: ICON('dk-flip'), action: () => c.arrange('flip-h') },
           { label: 'Flip vertically', html: ICON('dk-flip'), action: () => c.arrange('flip-v') },
           ...(sel.length > 1 ? [{ label: 'Group (Ctrl+G)', html: ICON('dk-group'), action: () => c.arrange('group') }] : []),
-          ...(isGroup ? [{ label: 'Ungroup (Ctrl+Shift+G)', html: ICON('dk-group'), action: () => c.arrange('ungroup') }] : []),
+          ...(isGroup ? [{ label: 'Ungroup (Ctrl+Shift+G)', html: ICON('dk-ungroup'), action: () => c.arrange('ungroup') }] : []),
         ] } },
       ...(sel.some(s => s.kind === 'shape' || s.kind === 'svg' || s.kind === 'svgpart' || s.kind === 'line') ? [{
         id: 'dk-path', title: 'Path: union, difference, intersection, combine, object to path, edit points…', icon: 'dk-path',
@@ -472,8 +476,18 @@ function animateButton(c: DeckCtx): ToolButton {
   return { id: 'dk-step', title: 'Animation: objects appear and disappear click by click when presenting, in the order you click them (beamer\'s \\pause, \\only<2->)', icon: 'dk-step', active: c.animate.open, action: c.animate.toggle };
 }
 
-function weightBtn(id: string, title: string, cur: number, set: (w: number) => void): ToolButton {
-  return { id, title, icon: 'dk-weight', palette: { title, list: true, cols: 1, items: [0, 1, 2, 3, 4, 6, 8, 12, 16].map(w => ({ label: w ? `${w} px` : 'None', html: w ? `<svg viewBox="0 0 40 16" width="40"><path d="M2 8h36" stroke="currentColor" stroke-width="${Math.min(w, 12)}"/></svg>` : undefined, active: Math.round(cur) === w, action: () => set(w) })) } };
+/** PowerPoint's line weights (pt), and two heavier */
+const WEIGHTS = [0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6, 9, 12];
+
+/** a line weight list, in points (`cur` and what `set` gets: CSS px of the slide) */
+function weightBtn(id: string, title: string, cur: number, set: (px: number) => void): ToolButton {
+  const now = pxToPt(cur);
+  return { id, title, icon: 'dk-weight', palette: { title, list: true, cols: 1, items: [0, ...WEIGHTS].map(w => ({
+    label: w ? `${fmtPt(w)} pt` : 'None',
+    html: w ? `<svg viewBox="0 0 40 16" width="40"><path d="M2 8h36" stroke="currentColor" stroke-width="${Math.min(ptToPx(w), 12)}"/></svg>` : undefined,
+    active: w ? Math.abs(now - w) < 0.07 : cur === 0,
+    action: () => set(ptToPx(w)),
+  })) } };
 }
 
 function dashBtn(id: string, title: string, cur: string, set: (d: 'solid' | 'dashed' | 'dotted') => void): ToolButton {

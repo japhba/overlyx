@@ -17,6 +17,7 @@
  * redrawn wholesale) and talks to edit.ts through a CropContext.
  */
 import type { HtmlOp, Path } from '../protocol';
+import { fmtSize } from '../units';
 
 export interface Box { x: number; y: number; w: number; h: number }
 export type FrameHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
@@ -563,7 +564,7 @@ function dragStart(e: PointerEvent, what: string): void {
     render();
     if (!tip) { tip = document.createElement('div'); tip.className = 'tip'; host.appendChild(tip); }
     const F = a.F;
-    tip.textContent = what.startsWith('pic:') ? `${Math.round(a.P.w / (a.t.img.naturalWidth || a.P.w) * 100)} %` : `${Math.round(F.w)} × ${Math.round(F.h)}`;
+    tip.textContent = what.startsWith('pic:') ? `${Math.round(a.P.w / (a.t.img.naturalWidth || a.P.w) * 100)} %` : fmtSize(F.w, F.h);
     tip.style.left = `${(F.x - a.F0.x + F.w / 2) * a.k}px`;
     tip.style.top = `${(F.y - a.F0.y) * a.k}px`;
   };
