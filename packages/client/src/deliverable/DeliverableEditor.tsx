@@ -889,7 +889,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     if (mod && k === 'z') { if (m.shift) host.redo(); else host.undo(); return; }
     if (mod && k === 'y') { host.redo(); return; }
     if (mod && k === 's') { if (host.save) host.save(); else notify('Saved automatically.'); return; }
-    if (m.key === 'F5' || (mod && m.key === 'Enter')) { startPresenting(); return; }
+    if (m.key === 'F5' || (mod && m.key === 'Enter')) { startPresenting(m.key === 'F5' && !m.shift); return; }
     if (mod && k === 'g') { arrangeSel(m.shift ? 'ungroup' : 'group'); return; }
     // Inkscape's Path ▸ Combine / Break apart / Simplify
     // in a text being retyped: what goes into it, as in documents (link, citation, cross-reference)
@@ -934,11 +934,13 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       if (nodeEdRef.current && (e.key === 'Escape' || e.key === 'Enter' || e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); toCanvas({ ol: 'nodes', cmd: e.key === 'Delete' || e.key === 'Backspace' ? 'delete' : 'done' }); return; }
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) host.redo(); else host.undo(); }
       else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); host.redo(); }
-      else if (e.key === 'F5') { e.preventDefault(); startPresenting(); }
+      else if (e.key === 'F5') { e.preventDefault(); startPresenting(!e.shiftKey); }
       // the focus left the canvas (a toolbar button, a palette): its shortcuts still work on the selection
       else if (mod && (['g', 'm', '0', '=', '+', '-', '\\'].includes(e.key.toLowerCase()) || (['k', 'l'].includes(e.key.toLowerCase()) && selRef.current.length)) || (mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown'))) { e.preventDefault(); onRuntimeKey({ ol: 'key', key: e.key, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey }); }
       else if (!mod && !e.altKey && (e.key === 'PageDown' || e.key === 'PageUp') && kindRef.current === 'deck' && soloRef.current) { e.preventDefault(); gotoSlide(currentRef.current + (e.key === 'PageDown' ? 1 : -1)); }
       else if (mod && e.key.toLowerCase() === 'd' && selRef.current.length) { e.preventDefault(); duplicateSel(); }
+      // the keyboard is in the editor, not the canvas (a click on the canvas leaves it here): Ctrl+A selects the slide's objects, not the page's text
+      else if (mod && !e.altKey && e.key.toLowerCase() === 'a' && kindRef.current !== 'page') { e.preventDefault(); toCanvas({ ol: 'selectAll' }); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selRef.current.length) { e.preventDefault(); removeSel(); }
       else if (!mod && !e.altKey && e.key.length === 1 && !readOnlyRef.current) {
         // the tools' letters also before the canvas has the focus
@@ -958,9 +960,12 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const presentBox = useRef<HTMLDivElement>(null);
   /** the presented slide is zoomed in: Escape (which leaves full screen first) only zooms out */
   const presentZoomed = useRef(false);
-  const startPresenting = () => {
+  /** the slide the presentation starts on: F5 the first (PowerPoint), Shift+F5 and the button the one shown */
+  const presentFrom = useRef(0);
+  const startPresenting = (fromStart = false) => {
     presentZoomed.current = false;
-    if (link && host.present?.(src('present') + `#${currentRef.current + 1}`)) return;
+    presentFrom.current = fromStart ? 0 : currentRef.current;
+    if (link && host.present?.(src('present') + `#${presentFrom.current + 1}`)) return;
     setPresenting(true);
     setTimeout(() => {
       void presentBox.current?.requestFullscreen?.().catch(() => undefined);
@@ -1138,7 +1143,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           <button class="dl-btn" title="Zoom in (Ctrl+=)" onClick={() => zoomStep(1.25)}>+</button>
         </span>
         <button class={'dl-btn' + (codeOpen ? ' on' : '')} title="The page's code" data-dl-code onClick={() => setCodeOpen(o => !o)}>&lt;/&gt;</button>
-        {kind !== 'page' && <button class="dl-btn dl-present" title="Present (F5)" data-dl-present onClick={startPresenting}>▶ Present</button>}
+        {kind !== 'page' && <button class="dl-btn dl-present" title="Present from this slide (Shift+F5) — F5 from the first" data-dl-present onClick={() => startPresenting(false)}>▶ Present</button>}
         <button class="dl-btn" title="Download" data-dl-download onClick={e => {
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
           showContextMenu(r.left, r.bottom + 4, host.downloads(m => src(m === 'view' && kind === 'deck' ? 'present' : m)));
@@ -1230,7 +1235,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       {bgFor && <BgRemoveDialog src={bgFor.url} name={bgFor.name} onDone={b => { void saveNoBg(b); }} onClose={() => setBgFor(null)} />}
       {presenting && link && (
         <div class="dl-presenting" ref={presentBox}>
-          <iframe ref={presentFrame} title="Presentation" sandbox="allow-scripts allow-popups" src={src('present') + `#${current + 1}`} />
+          <iframe ref={presentFrame} title="Presentation" sandbox="allow-scripts allow-popups" src={src('present') + `#${presentFrom.current + 1}`} />
         </div>
       )}
     </div>

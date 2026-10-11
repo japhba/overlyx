@@ -183,7 +183,9 @@ export type ToRuntime =
   /** a command of the node editor (editing a path's points) */
   | { ol: 'nodes'; cmd: NodeCmd }
   /** a command of the Animation pane */
-  | { ol: 'steps'; cmd: StepCmd };
+  | { ol: 'steps'; cmd: StepCmd }
+  /** Ctrl+A with the keyboard in the editor (not in the canvas): every object of the slide shown */
+  | { ol: 'selectAll' };
 
 /** runtime → editor */
 export type FromRuntime =

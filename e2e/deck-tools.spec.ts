@@ -251,6 +251,11 @@ test('one slide per canvas: the rail and Page Down move between them, a scroll s
   await expect.poll(() => editFrame(page).evaluate(() => document.documentElement.classList.contains('ol-over-obj'))).toBe(true);
   await page.mouse.click(a.x, a.y);
   await expect(page.locator('.dl-ctx .tb-label').first()).toHaveText(/shape/i);
+  // Ctrl+A with the keyboard in the editor (after a toolbar click): the slide's objects, not the page's text
+  await page.locator('[data-tb="dk-select"]').click();
+  await page.keyboard.press('Control+a');
+  await expect.poll(() => page.$$eval('.dl-ctx .tb-label', els => els.map(e => e.textContent ?? ''))).toEqual(expect.arrayContaining([expect.stringMatching(/shape/i), expect.stringMatching(/arrange/i)]));
+  expect(await page.evaluate(() => String(getSelection()))).toBe('');
   // Page Down: the next slide; the rail: back to the first
   await page.keyboard.press('PageDown');
   await expect.poll(shownSlides).toBe('01');

@@ -211,6 +211,7 @@ function onMessage(e: MessageEvent): void {
     case 'insertMath': if (MODE === 'edit') edit.insertMath(m.display); break;
     case 'nodes': if (MODE === 'edit') nodeCommand(m.cmd); break;
     case 'steps': if (MODE === 'edit') stepCommand(m.cmd); break;
+    case 'selectAll': if (MODE === 'edit') edit.selectAllOnSlide(); break;
   }
 }
 

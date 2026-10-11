@@ -191,6 +191,13 @@ function afterReveal(): void {
   requestAnimationFrame(() => { sendLayout(); draw(); });
 }
 
+/** Ctrl+A: every object of the slide (of the selection's slide, else the one shown) */
+export function selectAllOnSlide(): void {
+  if (editing || state.kind === 'page') return;
+  const s = selected[0]?.isConnected ? slideOf(selected[0]) : visibleSlideEl();
+  if (s) { selected = Array.from(s.children).filter(c => srcOf.has(c) && !isForeign(c) && !c.classList.contains('notes')); report(); draw(); }
+}
+
 /** the selection, for the arrangement commands (arrange.ts) */
 export function selection(): Element[] { return selected.filter(e => e.isConnected); }
 export function setSelection(els: Element[]): void { selected = els; report(); draw(); }
@@ -1598,8 +1605,7 @@ function onKeyDown(e: KeyboardEvent): void {
   }
   if (mod && e.key.toLowerCase() === 'a' && state.kind !== 'page') {
     e.preventDefault();
-    const s = selected[0] ? slideOf(selected[0]) : visibleSlideEl();
-    if (s) { selected = Array.from(s.children).filter(c => srcOf.has(c) && !isForeign(c) && !c.classList.contains('notes')); report(); draw(); }
+    selectAllOnSlide();
     return;
   }
   if (mod || e.key === 'F5' || e.key === 'Delete') { if (!['c', 'x', 'v'].includes(e.key.toLowerCase())) { e.preventDefault(); fwd(e); } return; }
