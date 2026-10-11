@@ -27,7 +27,6 @@ const TPL = join(import.meta.dirname, '../packages/server/templates/starters');
 const HAVE_LATEXMK = spawnSync('which', ['latexmk']).status === 0;
 /** the LaTeX starters */
 const FILES: Record<string, string> = { slides: 'slides.tex', paper: 'paper.tex' };
-const personalise = (text: string, name: string) => text.replace(/@@NAME@@/g, name);
 
 describe('starter projects', () => {
   const ada = toSessionUser(createUser('ada', 'Ada Lovelace', 'pw'));
@@ -48,15 +47,15 @@ describe('starter projects', () => {
     for (const [id, file] of Object.entries(FILES)) {
       const dir = join(ROOT, 'projects', 'ada', `example-${id}`);
       const text = readFileSync(join(dir, file), 'utf8');
-      expect(text).not.toContain('@@NAME@@');
-      expect(text).toContain('Ada Lovelace');
+      expect(text).not.toContain('@@');
+      expect(text).not.toContain('Lovelace');   // examples never carry the account's name (AGENTS.md)
       expect(existsSync(join(dir, 'figures'))).toBe(true);
     }
-    // the HTML deliverables, the name escaped for HTML
+    // the HTML deliverables
     for (const [folder, kind] of [['talk', 'deck'], ['poster', 'poster'], ['site', 'page']]) {
       const html = readFileSync(join(ROOT, 'projects', 'ada', 'example-web', folder, 'index.html'), 'utf8');
       expect(html).toContain(`<meta name="overlyx" content="${kind}">`);
-      expect(html).toContain('Ada Lovelace');
+      expect(html).not.toContain('Lovelace');
       expect(html).not.toContain('@@');
     }
     expect(readdirSync(join(ROOT, 'projects', 'ada', 'example-paper')).sort()).toEqual(['figures', 'paper.tex', 'refs.bib']);
@@ -70,10 +69,7 @@ describe('starter projects', () => {
     const bob = toSessionUser(createUser('bob', 'Bob Builder', 'pw'));
     mkdirSync(join(ROOT, 'projects', 'bob', 'example-slides'), { recursive: true });
     writeFileSync(join(ROOT, 'projects', 'bob', 'example-slides', 'mine.tex'), '\\documentclass{article}\n\\begin{document}\nMine.\n\\end{document}\n');
-    const bobs = toSessionUser(createUser('bob2', 'Bob <&> Builder', 'pw'));
     expect(access.ensureStarterProjects(bob)).toEqual(['bob/example-slides-2', 'bob/example-web', 'bob/example-paper']);
-    access.ensureStarterProjects(bobs);
-    expect(readFileSync(join(ROOT, 'projects', 'bob2', 'example-web', 'talk', 'index.html'), 'utf8')).toContain('Bob &lt;&amp;&gt; Builder');
     expect(readFileSync(join(ROOT, 'projects', 'bob', 'example-slides', 'mine.tex'), 'utf8')).toContain('Mine.');
   });
 
@@ -95,15 +91,13 @@ describe('starter projects', () => {
 
 describe('starter templates', () => {
   for (const [id, file] of Object.entries(FILES)) {
-    it(`${id}: canonical before and after personalising, figures small`, () => {
+    it(`${id}: canonical, figures small`, () => {
       const dir = join(TPL, id);
       const opts = { localDirs: [dir], readFile: (n: string) => { try { return readFileSync(join(dir, n), 'utf8'); } catch { return undefined; } } };
       const template = readFileSync(join(dir, file), 'utf8');
       const r = parseTex(template, opts);
       expect(r.warnings).toEqual([]);
       expect(writeTex(r.doc, opts).text).toBe(template);
-      const text = personalise(template, 'Augusta Ada King, Countess of Lovelace');
-      expect(writeTex(parseTex(text, opts).doc, opts).text).toBe(text);
       for (const f of readdirSync(join(dir, 'figures'))) expect(statSync(join(dir, 'figures', f)).size, f).toBeLessThan(100_000);
     });
   }
@@ -133,7 +127,6 @@ describe('starter templates', () => {
       rmSync(dir, { recursive: true, force: true });
       mkdirSync(dir, { recursive: true });
       cpSync(join(TPL, id), dir, { recursive: true });
-      writeFileSync(join(dir, file), personalise(readFileSync(join(TPL, id, file), 'utf8'), 'Test User'));
       spawnSync('latexmk', ['-pdf', '-bibtex', '-interaction=nonstopmode', '-f', file], { cwd: dir, timeout: 300000 });
       const log = existsSync(join(dir, file.replace('.tex', '.log'))) ? readFileSync(join(dir, file.replace('.tex', '.log')), 'latin1') : '';
       const errors = log.split('\n').filter(l => l.startsWith('! '));

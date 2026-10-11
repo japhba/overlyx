@@ -112,24 +112,27 @@ test('a project is private to its owner', async ({ browser }) => {
   await bob.close();
 });
 
-test('every account gets its own personalised example project', async ({ browser }) => {
+test('every account gets its own example project', async ({ browser }) => {
   const bob = await asUser(browser, 'bob');
   const ex = (await projectsOf(bob)).find(p => p.kind === 'example' && p.via === 'owner');
   expect(ex).toBeTruthy();
   expect([ex!.name, ex!.title, ex!.role, ex!.via]).toEqual(['bob/welcome', 'Welcome to OverLyX', 'owner', 'owner']);
   const text = readFileSync(`${PROJECTS_DIR}/bob/welcome/welcome.tex`, 'utf8');
-  expect(text).toMatch(/\\author\{Bob/);
+  expect(text).toContain('\\author{OverLyX}');   // not the account's name (AGENTS.md)
+  expect(text).not.toContain('Bob');
   expect(text).not.toContain('@@');
   // the start screen shows it first; it opens and renders (formulas incl. the double angle brackets)
   const page = await bob.newPage();
   await page.goto('/');
   await page.waitForSelector('.home', { timeout: 20000 });
-  await expect(page.locator('.home-card.example')).toContainText('Bob');
+  await expect(page.locator('.home-card.example')).toContainText('A short tour of OverLyX');
+  await expect(page.locator('.home-card.example')).not.toContainText('Bob');   // nor addressed by name
+  await expect(page.locator('.home h1')).toHaveText('Welcome');
   await page.locator('.home-card.example button', { hasText: 'Start the tour' }).click();
   await page.waitForSelector('.lyx-editor', { timeout: 30000 });
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 20, null, { timeout: 30000 });
   await expect(page.locator('.lyx-editor')).toContainText('Welcome to OverLyX');
-  await expect(page.locator('.lyx-editor')).toContainText('Bob');
+  await expect(page.locator('.lyx-editor')).not.toContainText('Bob');
   await page.waitForFunction(() => document.querySelectorAll('.lyx-editor mjx-container').length > 5, null, { timeout: 30000 });
   expect(await page.locator('.lyx-editor .lm-error:not(.lm-pending), .lm-undefined').count()).toBe(0);
   await expect(page.locator('.statusbar .readonly-badge')).toHaveCount(0);
@@ -265,6 +268,12 @@ test('anyone with the link: a visitor without an account comes in as a guest and
   await expect.poll(() => readFileSync(FILE, 'utf8'), { timeout: 15000 }).toContain('GUEST-TYPED');
   const share = await (await admin.request.get(`${BASE_URL}/api/projects/${PROJECT}/share`)).json();
   expect(share.members.find((m: { user: { username: string } | null }) => m.user?.username === me.username)).toMatchObject({ role: 'edit', via: 'link' });
+  // … but the owner's start screen leaves guests out of who joined
+  const home = await admin.newPage();
+  await home.goto('/');
+  await expect(home.locator(`.home [data-project="${PROJECT}"]`)).toBeVisible({ timeout: 20000 });
+  await expect(home.locator(`.home [data-project="${PROJECT}"]`)).not.toContainText('Anonymous');
+  await home.close();
   expect((await guest.request.post(BASE_URL + '/api/projects', { data: { name: 'guest-project' } })).status()).toBe(403);
   expect((await guest.request.get(BASE_URL + '/api/git/tokens')).status()).toBe(403);
   expect((await projectsOf(guest)).map(p => p.name)).toEqual([PROJECT]);     // no example project either

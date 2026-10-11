@@ -219,12 +219,12 @@ describe('link sharing', () => {
 });
 
 describe('example project and deletion', () => {
-  it('creates one personalised example project per account, once', () => {
+  it('creates one example project per account, once', () => {
     const name = access.ensureWelcomeProject(bob)!;
     expect(name).toBe('bob/welcome');
     const text = readFileSync(join(ROOT, 'projects', name, 'welcome.tex'), 'utf8');
-    expect(text).toContain('\\author{Bob Builder}');
-    expect(text).toContain('Bob.');
+    expect(text).toContain('\\author{OverLyX}');
+    expect(text).not.toContain('Bob');
     expect(text).not.toContain('@@');
     expect(text).toContain('% OverLyX: double angle brackets');
     expect(readdirSync(join(ROOT, 'projects', name)).sort()).toEqual(['figures', 'refs.bib', 'welcome.tex']);

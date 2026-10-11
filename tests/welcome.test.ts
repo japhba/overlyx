@@ -1,6 +1,6 @@
 /**
  * The personal example project ("Welcome to OverLyX", packages/server/templates/welcome): the
- * document must be canonical (writing what the parser reads reproduces it), personalise cleanly,
+ * document must be canonical (writing what the parser reads reproduces it), fill in cleanly,
  * and compile.
  *   npx vitest run tests/welcome.test.ts
  */
@@ -17,8 +17,8 @@ const SCRATCH = process.env.OVERLYX_SCRATCH ?? join(tmpdir(), 'overlyx-welcome-t
 const HAVE_LATEXMK = spawnSync('which', ['latexmk']).status === 0;
 
 /** the substitution done by ensureWelcomeProject (packages/server/src/access.ts) */
-function personalise(text: string, name: string): string {
-  const vars: Record<string, string> = { NAME: name, FIRSTNAME: name.split(/\s+/)[0], USERNAME: 'test', LLANGLE: LLANGLE_PREAMBLE.trimEnd() };
+function fillIn(text: string): string {
+  const vars: Record<string, string> = { LLANGLE: LLANGLE_PREAMBLE.trimEnd() };
   return text.replace(/(?:%%|@@)([A-Z]+)(?:%%|@@)/g, (m, k: string) => vars[k] ?? m);
 }
 
@@ -29,19 +29,18 @@ describe('welcome project template', () => {
     const r = parseTex(template);
     expect(r.warnings).toEqual([]);
     expect(writeTex(r.doc).text).toBe(template);
-    // personalised, the line breaks move (names are longer than the placeholders): stable after one save
-    const text = personalise(template, 'Ada Lovelace');
+    // filled in: stable after one save
+    const text = fillIn(template);
     const once = writeTex(parseTex(text).doc).text;
     expect(writeTex(parseTex(once).doc).text).toBe(once);
     expect(existsSync(join(TPL, 'refs.bib'))).toBe(true);
     expect(existsSync(join(TPL, 'figures', 'waves.pdf'))).toBe(true);
   });
 
-  it('personalises without leftovers and keeps its structure', () => {
-    const text = personalise(template, 'Ada Lovelace');
+  it('fills in without leftovers and keeps its structure', () => {
+    const text = fillIn(template);
     expect(text).not.toContain('@@');
-    expect(text).toContain('\\author{Ada Lovelace}');
-    expect(text).toContain('Ada.');            // first-name greeting in the abstract
+    expect(text).toContain('\\author{OverLyX}');   // not the reader's name, nor addressed by it (AGENTS.md)
     expect(text).toContain('% OverLyX: double angle brackets');
     const doc = parseTex(text).doc;
     expect(getTextClass(doc)).toBe('article');
@@ -58,7 +57,7 @@ describe('welcome project template', () => {
     const dir = join(SCRATCH, 'project');
     rmSync(SCRATCH, { recursive: true, force: true });
     mkdirSync(join(dir, 'figures'), { recursive: true });
-    writeFileSync(join(dir, 'welcome.tex'), personalise(template, 'Test User'));
+    writeFileSync(join(dir, 'welcome.tex'), fillIn(template));
     copyFileSync(join(TPL, 'refs.bib'), join(dir, 'refs.bib'));
     copyFileSync(join(TPL, 'figures', 'waves.pdf'), join(dir, 'figures', 'waves.pdf'));
     spawnSync('latexmk', ['-pdf', '-bibtex', '-interaction=nonstopmode', '-f', 'welcome.tex'], { cwd: dir, timeout: 240000 });

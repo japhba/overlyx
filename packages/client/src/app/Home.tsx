@@ -109,7 +109,6 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
   const mine = sortByRecency(projects?.filter(p => p.via === 'owner' && p !== example) ?? []);
   const shared = sortByRecency(projects?.filter(p => p.via === 'member' || p.via === 'link') ?? []);
   const admin = projects?.filter(p => p.via === 'admin') ?? [];
-  const firstName = user.guest ? 'guest' : user.name.split(/\s+/)[0];
 
   const [newOpen, setNewOpen] = useState(false);
   const remove = async (p: Project) => {
@@ -122,11 +121,11 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
 
   const metaText = (p: Project, docs: string[]) =>
     `${p.via === 'owner' ? 'Your project' : p.via === 'admin' ? (p.owner ? `Owned by ${p.owner.name} (${p.owner.username})` : 'No owner') : p.owner ? `Shared by ${p.owner.name}` : 'Shared with you'} · ${docs.length} document${docs.length === 1 ? '' : 's'}, ${p.files.length} file${p.files.length === 1 ? '' : 's'}${recencyLabel(p) ? ` · ${recencyLabel(p)}` : ''}`;
-  /** who joined the project (and who owns it, when it is someone else's): avatars, then the names */
+  /** who joined the project (and who owns it, when it is someone else's): avatars, then the names — guests ("Anonymous Otter") left out */
   const people = (p: Project) => {
     type Face = Omit<ProjectPerson, 'role'> & { role: ProjectPerson['role'] | 'owner' };
     const owner: Face[] = p.via !== 'owner' && p.owner ? [{ name: p.owner.name, username: p.owner.username, color: '', avatar: null, role: 'owner', via: 'owner', since: 0, guest: false }] : [];
-    const members = (p.members ?? []).filter(m => m.username !== user.username || p.via === 'owner');
+    const members = (p.members ?? []).filter(m => !m.guest && (m.username !== user.username || p.via === 'owner'));
     if (!members.length && !p.invited) return null;
     const when = (t: number) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: new Date(t).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
     const shown: Face[] = [...owner, ...members];
@@ -136,7 +135,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         <span class="people-faces">
           {shown.slice(0, 6).map(m => (
             <span key={m.username} class={'avatar' + (m.role === 'owner' ? ' owner' : '')} style={{ background: m.color || 'var(--muted2)' }} data-initials={m.avatar ? undefined : initials(m.name).length}
-              title={m.role === 'owner' ? `${m.name} (${m.username}) — owns this project` : `${m.name} (${m.username}) — ${m.role === 'edit' ? 'can edit' : 'can view'}, joined ${when(m.since)}${m.via === 'link' ? ' through the link' : ''}${m.guest ? ' as a guest' : ''}`}>
+              title={m.role === 'owner' ? `${m.name} (${m.username}) — owns this project` : `${m.name} (${m.username}) — ${m.role === 'edit' ? 'can edit' : 'can view'}, joined ${when(m.since)}${m.via === 'link' ? ' through the link' : ''}`}>
               <AvatarContent name={m.name} src={m.avatar} />
             </span>
           ))}
@@ -172,7 +171,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
         </div>
         {isExample && (
           <div class="blurb">
-            A short tour of OverLyX written for you, {firstName}: text and headings, formulas and macros, a figure, a table, citations, notes and comments, sharing and compiling.
+            A short tour of OverLyX: text and headings, formulas and macros, a figure, a table, citations, notes and comments, sharing and compiling.
             It is a plain LaTeX file in a project of your own — edit it, press <b>Ctrl+R</b> to see the PDF, share it with a colleague, or delete it when you are done.{' '}
             <b>Start the tour</b> opens it with an interactive walkthrough that asks you to try the essentials (every step can be skipped).
           </div>
@@ -213,7 +212,7 @@ export function Home({ user, refreshKey, onOpen, onStartTour, onShare, onGit, on
 
   return (
     <div class="home">
-      <h1>Welcome{projects ? `, ${firstName}` : ''}</h1>
+      <h1>Welcome</h1>
       <div class="sub">{user.guest ? 'You are here as a guest, through a link somebody shared. Sign in to keep those projects in an account of your own — and to create projects.' : 'OverLyX edits LaTeX documents, slides and posters in the browser, together with others. Projects are private until you share them.'}</div>
       <div class="home-actions">
         {user.guest

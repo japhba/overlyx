@@ -482,13 +482,9 @@ export function trashProject(project: string): string {
 export const WELCOME_TITLE = 'Welcome to OverLyX';
 const TEMPLATE_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../templates/welcome');
 
-/** Plain text for a LyX file body: no backslashes / control characters (they would be LyX syntax). */
-function lyxSafe(s: string): string { return s.replace(/[\\\x00-\x1f]/g, '').trim() || 'there'; }
-
 /**
- * Every account gets its own copy of the example project the first time it is asked for. The
- * document is personalised (the account's name is its author), so there is one per user; deleting
- * it is final (a tombstone row prevents re-creation). Guests get none: they are here for somebody
+ * Every account gets its own copy of the example project the first time it is asked for, one per
+ * user; deleting it is final (a tombstone row prevents re-creation). Guests get none: they are here for somebody
  * else's project, and their account is temporary.
  */
 export function ensureWelcomeProject(user: SessionUser): string | null {
@@ -499,7 +495,7 @@ export function ensureWelcomeProject(user: SessionUser): string | null {
   const name = freeKey(user.username, 'welcome');
   const dir = resolveProjectPath(name, '.');
   fs.mkdirSync(dir, { recursive: true });
-  copyTemplate(TEMPLATE_DIR, dir, templateVars(user));
+  copyTemplate(TEMPLATE_DIR, dir);
   registerProject(name, user.id, { title: WELCOME_TITLE, kind: 'example' });
   console.log(`[access] created example project "${name}" for ${user.username}`);
   return name;
@@ -519,7 +515,7 @@ export const STARTERS: { id: string; title: string }[] = [
 
 /**
  * A beamer deck, HTML slides / poster / web page and a paper to start from, each an ordinary project of
- * the account (`<user>/example-slides`, …) with the account's name as author. Each is created once per
+ * the account (`<user>/example-slides`, …). Each is created once per
  * account — new accounts on their first visit, older ones on their next — and never again once deleted
  * (`starter_projects` keeps a row per account and template). Guests get none.
  */
@@ -536,7 +532,7 @@ export function ensureStarterProjects(user: SessionUser): string[] {
     if (db.prepare('INSERT OR IGNORE INTO starter_projects (user_id, template, project, created_at) VALUES (?,?,?,?)').run(user.id, s.id, name, Date.now()).changes === 0) continue;
     try {
       fs.mkdirSync(resolveProjectPath(name, '.'), { recursive: true });
-      copyTemplate(src, resolveProjectPath(name, '.'), templateVars(user));
+      copyTemplate(src, resolveProjectPath(name, '.'));
       registerProject(name, user.id, { title: s.title, kind: 'project' });
       created.push(name);
     } catch (e) {
@@ -548,30 +544,22 @@ export function ensureStarterProjects(user: SessionUser): string[] {
   return created;
 }
 
-function templateVars(user: SessionUser): Record<string, string> {
-  return { NAME: lyxSafe(user.name), FIRSTNAME: lyxSafe(user.name).split(/\s+/)[0], USERNAME: user.username, LLANGLE: LLANGLE_PREAMBLE.trimEnd(), HTMLNAME: htmlSafe(user.name), HTMLFIRSTNAME: htmlSafe(user.name.split(/\s+/)[0] ?? '') };
-}
+/**
+ * The templates' placeholders: @@KEY@@ in .tex and .html files ("%%" starts a comment in .tex),
+ * %%KEY%% elsewhere. The examples carry no account's name: they neither name the reader as their
+ * author nor address them by it (AGENTS.md).
+ */
+const TEMPLATE_VARS: Record<string, string> = { LLANGLE: LLANGLE_PREAMBLE.trimEnd() };
 
-const htmlSafe = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-function copyTemplate(from: string, to: string, vars: Record<string, string>): void {
+function copyTemplate(from: string, to: string): void {
   for (const e of fs.readdirSync(from, { withFileTypes: true })) {
     const src = path.join(from, e.name), dst = path.join(to, e.name);
-    if (e.isDirectory()) { fs.mkdirSync(dst, { recursive: true }); copyTemplate(src, dst, vars); continue; }
+    if (e.isDirectory()) { fs.mkdirSync(dst, { recursive: true }); copyTemplate(src, dst); continue; }
     if (/\.(lyx|bib|tex|html)$/.test(e.name)) {
-      // placeholders: @@NAME@@ in .tex and .html files ("%%" starts a comment in .tex), %%NAME%% elsewhere
-      // (in HTML the name as written, escaped for HTML — not for LaTeX)
-      const v = e.name.endsWith('.html') ? { ...vars, NAME: vars.HTMLNAME ?? '', FIRSTNAME: vars.HTMLFIRSTNAME ?? '' } : vars;
-      const text = fs.readFileSync(src, 'utf8').replace(/(?:%%|@@)([A-Z]+)(?:%%|@@)/g, (m, k: string) => v[k] ?? m);
+      const text = fs.readFileSync(src, 'utf8').replace(/(?:%%|@@)([A-Z]+)(?:%%|@@)/g, (m, k: string) => TEMPLATE_VARS[k] ?? m);
       fs.writeFileSync(dst, text, 'utf8');
     } else {
       fs.copyFileSync(src, dst);
     }
   }
-}
-
-/** The personalised text of the example document (for tests and previews). */
-export function welcomeDocumentText(name: string): string {
-  const vars = { NAME: lyxSafe(name), FIRSTNAME: lyxSafe(name).split(/\s+/)[0], USERNAME: name, LLANGLE: LLANGLE_PREAMBLE.trimEnd() };
-  return fs.readFileSync(path.join(TEMPLATE_DIR, 'welcome.tex'), 'utf8').replace(/(?:%%|@@)([A-Z]+)(?:%%|@@)/g, (m, k: string) => (vars as Record<string, string>)[k] ?? m);
 }
