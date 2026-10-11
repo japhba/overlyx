@@ -131,10 +131,11 @@ describe('the file disappears', () => {
     edit(doc, docText('will be deleted', 'unsaved edit'));
     await sleep(300);           // let chokidar settle on the file
     unlinkSync(file('gone.tex'));
-    for (let i = 0; i < 60 && manager.docs.has('u/p/gone.tex'); i++) await sleep(100);
+    // (up to 12 s: on a loaded machine — full test runs side by side — the watcher's unlink came after 6)
+    for (let i = 0; i < 120 && manager.docs.has('u/p/gone.tex'); i++) await sleep(100);
     expect(manager.docs.has('u/p/gone.tex')).toBe(false);
     expect(existsSync(file('gone.tex'))).toBe(false);   // not re-created by a pending save
     const v = db.prepare("SELECT lyx FROM versions WHERE doc_id = ? AND name = 'file removed on disk'").get('u/p/gone.tex') as { lyx: string } | undefined;
     expect(v?.lyx).toContain('unsaved edit');
-  }, 15000);
+  }, 20000);
 });
