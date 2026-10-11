@@ -196,8 +196,5 @@ export function bibliographyOrder(keys: string[], numbers: Map<string, number>, 
 
 /* ------------------------------------------------------------------ steps */
 
-/** the step from which an object shows when presenting (data-step="3"; none: from the start) */
-export function stepOf(value: string | null | undefined): number {
-  const n = parseInt(value ?? '', 10);
-  return Number.isFinite(n) && n > 1 ? n : 1;
-}
+/** the step from which an object shows when presenting (html/steps.ts) */
+export { stepOf } from './steps.ts';

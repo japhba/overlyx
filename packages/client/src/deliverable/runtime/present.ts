@@ -1,6 +1,7 @@
 /**
  * Presenting a deck: one slide at a time, scaled to fill the window, on black; →, Space, PageDown,
- * a click go on — through a slide's steps first (data-step, data-steps: beamer's overlays) —;
+ * a click go on — through a slide's steps first (data-step, data-steps: beamer's overlays; objects
+ * appear and disappear) —;
  * ←, PageUp, Backspace go back (to the slide before as it ends); Home / End; a number and Enter jumps; Escape asks
  * the editor to end the presentation. The slide shown is in the URL's hash (#3), so a reload or a
  * shared link keeps it. A poster is shown whole, a web page as it is.
@@ -10,10 +11,10 @@
  */
 import { slides, post } from './env';
 import { PresentKit, type ZoomView } from '../../app/presentkit';
-import { stepOf } from '@overlyx/core/html/refs.ts';
+import { parseSteps, stepOf, stepVisible, lastStep as stepsOf, type Interval } from '@overlyx/core/html/steps.ts';
 
 let current = 0;
-/** the step of the slide shown (beamer's overlays: objects with data-step="n" appear at step n) */
+/** the step of the slide shown (beamer's overlays: objects with data-step show on the steps it names, core html/steps.ts) */
 let step = 1;
 let typed = '';
 let kit: PresentKit | null = null;
@@ -30,8 +31,8 @@ export function startPresenting(): void {
       transform: translate(var(--ol-ztx, 0px), var(--ol-zty, 0px)) scale(var(--ol-zs, 1)) scale(var(--ol-fit, 1)) translate(-50%, -50%) !important;
       transform-origin: 0 0 !important; box-shadow: none !important; }
     html.ol-hide-cursor, html.ol-hide-cursor * { cursor: none !important; }
-    [data-ol-later] { visibility: hidden !important; }
-    html.ol-steps-dim [data-ol-later] { visibility: visible !important; opacity: .18 !important; }`;
+    [data-ol-unshown] { visibility: hidden !important; }
+    html.ol-steps-dim [data-ol-unshown] { visibility: visible !important; opacity: .18 !important; }`;
   // <meta name="overlyx-steps" content="dim">: what comes later shows faintly (beamer's \setbeamercovered{transparent})
   if (/^dim/i.test(document.querySelector('meta[name="overlyx-steps"]')?.getAttribute('content') ?? '')) document.documentElement.classList.add('ol-steps-dim');
   document.head.appendChild(css);
@@ -79,27 +80,28 @@ function zoom(v: ZoomView): void {
 /* ------------------------------------------------------------------ steps */
 
 /**
- * The objects of a slide that appear later and their steps: `data-step="n"` on any element, and
+ * The objects of a slide that show on some steps only (any element, an SVG's paths too): those with
+ * `data-step` (a beamer overlay specification: "3" from step 3 on, "-3" until step 3, "2-4"…), and
  * the items of a list with `data-steps` one after the other (beamer's `[<+->]`; its value is the
  * step of the first item, 1 when empty) — an item's own data-step wins.
  */
-function steps(slide: Element): [Element, number][] {
-  const out: [Element, number][] = [];
-  for (const el of Array.from(slide.querySelectorAll('[data-step]'))) { const n = stepOf(el.getAttribute('data-step')); if (n > 1) out.push([el, n]); }
+function steps(slide: Element): [Element, Interval[]][] {
+  const out: [Element, Interval[]][] = [];
+  for (const el of Array.from(slide.querySelectorAll('[data-step]'))) out.push([el, parseSteps(el.getAttribute('data-step'))]);
   for (const list of Array.from(slide.querySelectorAll(':is(ul, ol)[data-steps]'))) {
     const first = stepOf(list.getAttribute('data-steps'));
     const items = Array.from(list.children).filter(c => c.localName === 'li');
-    items.forEach((li, i) => { if (!li.hasAttribute('data-step') && first + i > 1) out.push([li, first + i]); });
+    items.forEach((li, i) => { if (!li.hasAttribute('data-step') && first + i > 1) out.push([li, [[first + i, null]]]); });
   }
   return out;
 }
-const lastStep = (slide: Element | undefined) => (slide ? Math.max(1, ...steps(slide).map(([, n]) => n)) : 1);
+const lastStep = (slide: Element | undefined) => (slide ? stepsOf(steps(slide).map(([, iv]) => iv)) : 1);
 
 function showStep(): void {
   const s = slides()[current];
   if (!s) return;
-  for (const el of Array.from(s.querySelectorAll('[data-ol-later]'))) el.removeAttribute('data-ol-later');
-  for (const [el, n] of steps(s)) if (n > step) el.setAttribute('data-ol-later', '');
+  for (const el of Array.from(s.querySelectorAll('[data-ol-unshown]'))) el.removeAttribute('data-ol-unshown');
+  for (const [el, iv] of steps(s)) if (!stepVisible(iv, step)) el.setAttribute('data-ol-unshown', '');
 }
 
 /** on: the next step of the slide, or the next slide */

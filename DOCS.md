@@ -550,10 +550,16 @@ blend.
     math row's *(1)*) and labels it (*Label*), the text's *Cross-reference* picks a label.
     **Macros** of `<link rel="overlyx-macros" href="../paper/macros.tex">` (and what it
     `\input`s) in every formula, on the slide and in the formula editor. **Steps** (beamer's
-    overlays): `data-step="n"` on an object, `data-steps` on a list (items one by one) — the
-    contextual toolbar's *Appear*, numbered badges on the canvas; presenting goes through a slide's
-    steps first and back to the previous slide's last step (`<meta name="overlyx-steps"
-    content="dim">`: later objects faint). While a text is retyped, references and citations are
+    overlays, PowerPoint's animations; core `html/steps.ts`): `data-step` on any object, an SVG's
+    paths too, is a beamer overlay specification (a lone `3`: from step 3 on; `-3`: gone from step 4;
+    `2-4`), `data-steps` on a list (items one by one). The *Animation* pane (`AnimationPane.tsx`,
+    runtime `animate.ts`) edits the slide's sequence, not the strings: *Appear* / *Disappear* put the
+    selection on the next clicks in the order it was clicked (or all on one click), *Click objects
+    in order…* adds each object clicked (Shift: same click as the one before, Ctrl/⌘: a part of a
+    drawing), ↑ / ↓ move an event a notch (with the step beside, then past it), gaps close. Badges on
+    the canvas: blue the steps an object appears at, red those it disappears at. Presenting goes
+    through a slide's steps first and back to the previous slide's last step (`<meta
+    name="overlyx-steps" content="dim">`: hidden objects faint). While a text is retyped, references and citations are
     uneditable chips, environments editable formulas. The text row's insert group matches the
     documents': link (Ctrl+K), cross-reference (Ctrl+Shift+I), citation (Ctrl+Shift+C, the
     documents' dialog incl. finding papers online), inline / display formula. render_page reports

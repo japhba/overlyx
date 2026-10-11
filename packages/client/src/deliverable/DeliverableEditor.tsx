@@ -26,6 +26,7 @@ import { rebasedSplices, objectHtml, imageHtml, insertPlace, newSlideHtml, slide
 import { deckToolbar, type DeckTextActions } from './decktoolbar';
 import { BgRemoveDialog } from './BgRemoveDialog';
 import { MathOverlay, type MathEditState, type MathOps } from './MathOverlay';
+import { AnimationPane, type Sequence } from './AnimationPane';
 import { CiteDialog, uiPrompt } from '../app/Dialogs';
 import type { DocMeta } from '../api';
 import { citedKeys, citeEntry, type CiteEntry } from '@overlyx/core/html/refs.ts';
@@ -149,6 +150,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const nodeEdRef = useRef(false); nodeEdRef.current = !!nodeEd;
   const [tool, setToolState] = useState<Tool>('select');
   const [codeOpen, setCodeOpen] = useState(false);
+  // the Animation pane (open or not: this browser's) and the sequence of the slide it shows (runtime/animate.ts)
+  const [animOpen, setAnimOpen] = useState(() => { try { return localStorage.getItem('ol.animPane') === '1'; } catch { return false; } });
+  const [seq, setSeq] = useState<Sequence>({ slide: -1, rows: [], steps: 1, ordering: null });
   const [presenting, setPresenting] = useState(false);
   const canvasReady = useRef(false);
   const railReady = useRef(false);
@@ -358,6 +362,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           break;
         }
         case 'draw': onDraw(m.version, m.tool, m.slide, m.rect, m.after ?? null, m.pts, m.d !== undefined ? { d: m.d, closed: !!m.closed } : undefined); break;
+        case 'sequence': if (fromCanvas) setSeq({ slide: m.slide, rows: m.rows, steps: m.steps, ordering: m.ordering }); break;
         case 'nodeEditing': if (fromCanvas) { setNodeEd(m.path ? { selected: m.selected, total: m.total } : null); if (m.path && document.activeElement !== canvasFrame.current) canvasFrame.current?.focus(); } break;
         case 'key': onRuntimeKey(m); break;
         case 'contextmenu': {
@@ -1059,20 +1064,17 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       toCanvas({ ol: 'exec', command: 'createLink', value: url.trim() });
     });
   };
-  const setStep = (n: number | null) => {
-    const ops: HtmlOp[] = sel.map(s => ({ t: 'attr', path: s.path, name: 'data-step', value: n && n > 1 ? String(n) : null }));
-    if (n === null) for (const s of sel) if (s.list?.steps) ops.push({ t: 'attr', path: s.list.path, name: 'data-steps', value: null });
-    applyOps(ops);
-  };
-  const setListSteps = (from: number | null) => {
-    const l = sel.length === 1 ? sel[0].list : undefined;
-    if (l) applyOps([{ t: 'attr', path: l.path, name: 'data-steps', value: from === null ? null : String(from) }]);
+  const toggleAnim = (open = !animOpen) => {
+    setAnimOpen(open);
+    try { localStorage.setItem('ol.animPane', open ? '1' : '0'); } catch { /* private window */ }
+    if (!open && seq.ordering) toCanvas({ ol: 'steps', cmd: { how: 'order', kind: null } });
   };
   const bars = deckToolbar({
     kind, tool, setTool, readOnly, sel, editingText: !!editingText,
     math: { editing: !!mathEdit && !mathEdit.closing, insert: display => toCanvas({ ol: 'insertMath', display }), exec: mathExec, panels: mathPanels,
       display: !!mathEdit?.display, number: () => mathOps.current?.number(), label: labelFormula },
-    latex: { link: insertLink, cite: host.docId ? () => setCiteOpen(true) : undefined, reference: pickReference, step: setStep, listSteps: setListSteps },
+    latex: { link: insertLink, cite: host.docId ? () => setCiteOpen(true) : undefined, reference: pickReference },
+    animate: { open: animOpen && kind === 'deck', toggle: () => toggleAnim() },
     nodes: { editing: !!nodeEd, selected: nodeEd?.selected ?? 0, total: nodeEd?.total ?? 0, cmd: cmd => toCanvas({ ol: 'nodes', cmd }) },
     undo: () => host.undo(), redo: () => host.redo(),
     insertImage: () => fileInput.current?.click(),
@@ -1190,6 +1192,10 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             </div>
           )}
         </div>
+        {animOpen && kind === 'deck' && (
+          <AnimationPane seq={seq} sel={sel} readOnly={readOnly} close={() => toggleAnim(false)}
+            send={cmd => toCanvas({ ol: 'steps', cmd })} select={p => toCanvas({ ol: 'select', paths: [p] })} />
+        )}
         {codeOpen && (
           <div class="dl-code">
             <div class="dl-code-head"><span>{path.split('/').pop()}</span><button class="dl-btn" onClick={() => setCodeOpen(false)} title="Close">×</button></div>

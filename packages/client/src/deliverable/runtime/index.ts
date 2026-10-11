@@ -21,6 +21,7 @@ import { applySource, whenTypeset } from './reconcile';
 import * as edit from './edit';
 import { arrange, paint } from './arrange';
 import { nodeCommand } from './pathedit';
+import { stepCommand } from './animate';
 import { setView, refreshView, reportColors } from './view';
 import { startPresenting } from './present';
 import { report, rememberPage } from './report';
@@ -209,6 +210,7 @@ function onMessage(e: MessageEvent): void {
     case 'insertRef': if (MODE === 'edit') edit.insertRef(m.src); break;
     case 'insertMath': if (MODE === 'edit') edit.insertMath(m.display); break;
     case 'nodes': if (MODE === 'edit') nodeCommand(m.cmd); break;
+    case 'steps': if (MODE === 'edit') stepCommand(m.cmd); break;
   }
 }
 

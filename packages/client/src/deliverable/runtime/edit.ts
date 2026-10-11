@@ -27,6 +27,7 @@ import { typeset } from './math';
 import { renderCites, refreshCites } from './cite';
 import { stepOf } from '@overlyx/core/html/refs.ts';
 import { refreshView } from './view';
+import { badges, isOrdering, orderClick, stopOrdering, postSequence, stepsChanged, STEPS_CSS } from './animate';
 import { startCrop, isCropping, endCrop, cropNow, cropTarget, setCropAspect, redrawCrop, type CropContext } from './crop';
 import { chipify, unchip, openChip, openChipEl, chipOpening, holdKey, holdAfter, keyPress, isModifierKey, typeKeysHere, chipHooks, flushAfter, insertRefChip, shownChip, setChip, doneChip, displayChip, closeChip, trackChip, insertChip, chipBeside, CHIP_CSS } from './mathedit';
 import { initPaths, isNodeEditing, nodesAfterSource, nodesTargetOf, startNodesOrConvert, endNodes, redrawNodes, penDown, penMove, penUp, penKey, penDouble, penCancel, isPenDrawing, setMenuShape } from './pathedit';
@@ -81,7 +82,7 @@ export function startEditing(): void {
     .tag { position: absolute; transform: translateY(calc(-100% - 3px * var(--s))); background: #2f6fde; color: #fff; padding: calc(1px * var(--s)) calc(6px * var(--s)); border-radius: calc(3px * var(--s)); white-space: nowrap; pointer-events: none; font: 600 calc(10.5px * var(--s)) / 1.35 system-ui, -apple-system, sans-serif; letter-spacing: .02em; }
     .tag.editing { background: #e8a33d; }
     .tag.locked { background: #8a93a6; }
-    .step { position: absolute; transform: translate(calc(-100% - 5px * var(--s)), 0); min-width: calc(16px * var(--s)); height: calc(16px * var(--s)); line-height: calc(16px * var(--s)); padding: 0 calc(3px * var(--s)); box-sizing: border-box; border-radius: calc(8px * var(--s)); background: #2f6fde; color: #fff; text-align: center; font: 600 calc(10px * var(--s)) system-ui, sans-serif; pointer-events: none; box-shadow: 0 0 0 calc(1.5px * var(--s)) #fff; }
+    ${STEPS_CSS}
     .peer-tag { position: absolute; transform: translateY(-100%); color: #fff; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; font-size: calc(11px * var(--s)); }
     svg.ink { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
   </style><div class="layer"></div>`;
@@ -198,6 +199,7 @@ export function setSelection(els: Element[]): void { selected = els; report(); d
 export function afterSource(): void {
   selected = selected.map(e => (e.isConnected ? e : null)).filter((e): e is Element => !!e && !!pathOf(e));
   if (editing && !editing.isConnected) { editing = null; post({ ol: 'editing', path: null }); }
+  stepsChanged();
   report();
   draw();
   nodesAfterSource();
@@ -476,7 +478,6 @@ function item(el: Element): SelItem | null {
     slide: s ? slides().indexOf(s) : -1,
     kind, locked: isLocked(el), cropped: el.classList.contains('ol-crop'), canText: canType(el),
     src: kind === 'image' ? pictureSrc(el) : undefined,
-    step: stepOf(el.getAttribute('data-step')),
     list: listOf(el),
   };
 }
@@ -491,6 +492,8 @@ function listOf(el: Element): SelItem['list'] {
 export function report(): void {
   if (state.version === null) return;
   post({ ol: 'selection', version: state.version, items: selected.map(item).filter((x): x is SelItem => !!x) });
+  // (the Animation pane follows the selection's slide)
+  postSequence();
 }
 
 /* ------------------------------------------------------------------ drawing */
@@ -564,13 +567,8 @@ export function draw(): void {
     const r = docRect(el);
     parts.push(`<div class="frame peer" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;border-color:${esc(p.color)};border-width:${bw}px"></div><div class="peer-tag" style="left:${r.x}px;top:${r.y}px;background:${esc(p.color)}">${esc(p.name)}</div>`);
   }
-  // the steps objects appear at when presenting (beamer's overlays), as PowerPoint numbers its animations
-  if (!editing) for (const el of Array.from(document.querySelectorAll('[data-step], :is(ul, ol)[data-steps]'))) {
-    const n = el.hasAttribute('data-steps') ? `${stepOf(el.getAttribute('data-steps'))}…` : String(stepOf(el.getAttribute('data-step')));
-    if (n === '1' || !srcOf.has(el)) continue;
-    const r = docRect(el);
-    if (r.w || r.h) parts.push(`<div class="step" style="left:${r.x}px;top:${r.y}px">${n}</div>`);
-  }
+  // the steps objects appear and disappear at when presenting (beamer's overlays), as PowerPoint numbers its animations (animate.ts)
+  if (!editing) parts.push(badges());
   for (const el of selected) {
     if (!el.isConnected) continue;
     const b = boxOf(el);
@@ -679,7 +677,7 @@ function onHover(e: PointerEvent): void {
   if (e.pointerType === 'touch') { onTouchMove(e); return; }
   if (drag || editing) return;
   const t = e.target as Element;
-  const el = tool === 'select' && t && !isForeign(t) ? objectFor(t, e.ctrlKey || e.metaKey) : null;
+  const el = (tool === 'select' || isOrdering()) && t && !isForeign(t) ? objectFor(t, e.ctrlKey || e.metaKey) : null;
   if (el !== hoverEl) { hoverEl = el; draw(); }
 }
 
@@ -740,6 +738,9 @@ function onPointerDown(e: PointerEvent): void {
   }
   e.preventDefault();
   e.stopPropagation();
+  // the Animation pane's click-in-order mode: the object clicked comes on the next click (Shift: the
+  // same click as the one before; Ctrl / ⌘: the part of a drawing under the pointer) — animate.ts
+  if (isOrdering()) { const el = objectFor(t, e.ctrlKey || e.metaKey); if (el && slideOf(el)) orderClick(el, e.shiftKey); return; }
   // the Bézier pen: a node per press (pathedit.ts)
   if (tool === 'bezier') { penDown(e, el => slideOf(el)); addEventListener('pointerup', penUpOnce, true); return; }
   grab(e);
@@ -1354,6 +1355,7 @@ function onDblClick(e: MouseEvent): void {
   if (isCropping() || isNodeEditing()) return;
   e.preventDefault();
   e.stopPropagation();
+  if (isOrdering()) return;
   if (tool === 'bezier') { penDouble(); return; }
   if (tool !== 'select') return;
   const t = e.target as Element;
@@ -1525,6 +1527,7 @@ function inCode(): boolean {
 function onKeyDown(e: KeyboardEvent): void {
   if (isCropping() || isNodeEditing()) return;
   if (isPenDrawing() && penKey(e)) { e.preventDefault(); e.stopPropagation(); return; }
+  if (isOrdering() && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); stopOrdering(); return; }
   const mod = e.ctrlKey || e.metaKey;
   if (editing) {
     // a formula was just opened here and LyX's formula editor has not the keyboard yet: the keys are the formula's
@@ -1700,10 +1703,10 @@ export function visibleSlideEl(): HTMLElement | null {
   return best;
 }
 export function visibleSlide(): void {
-  if (isSolo()) { const k = soloIndex(); if (k !== lastVisible) { lastVisible = k; post({ ol: 'visible', slide: k }); } return; }
+  if (isSolo()) { const k = soloIndex(); if (k !== lastVisible) { lastVisible = k; post({ ol: 'visible', slide: k }); postSequence(); } return; }
   const s = visibleSlideEl();
   const i = s ? slides().indexOf(s) : -1;
-  if (i !== lastVisible) { lastVisible = i; post({ ol: 'visible', slide: i }); }
+  if (i !== lastVisible) { lastVisible = i; post({ ol: 'visible', slide: i }); postSequence(); }
 }
 
 export function scrollToSlide(i: number, smooth = false): void {
@@ -1720,6 +1723,7 @@ export function scrollToSlide(i: number, smooth = false): void {
     if (kept.length !== selected.length) { selected = kept; report(); }
     draw();
     sendLayout();
+    postSequence();
     return;
   }
   const s = slides()[i];

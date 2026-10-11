@@ -104,8 +104,6 @@ export interface SelItem {
   canText: boolean;
   /** a picture's src as written (for Replace / Remove background) */
   src?: string;
-  /** the step it appears at when presenting (data-step; 1: with the slide) */
-  step: number;
   /** the list it is or holds: its items appear one by one from step `steps` (data-steps), or all at once (null) */
   list?: { path: Path; steps: number | null };
 }
@@ -117,6 +115,26 @@ export interface SlideBox { index: number; path: Path; rect: Rect; title: string
  * is in the frame's document (CSS px) and the frame's height that holds it with room around it.
  */
 export interface Solo { slide: number; rect: Rect; height: number }
+
+/** what an object does at a step when presenting (core html/steps.ts) */
+export type StepKind = 'appear' | 'disappear';
+
+/** a row of the Animation pane: an object of the slide appears or disappears at a step (`up` / `down`: it can move that way) */
+export interface StepRow { path: Path; label: string; kind: StepKind; step: number; up: boolean; down: boolean; selected: boolean }
+
+/** the Animation pane's commands, carried out by the runtime on the slide worked on (runtime/animate.ts) */
+export type StepCmd =
+  /** the selection appears / disappears on the next clicks, one each in the order its objects were clicked (`together`: all on one) */
+  | { how: 'add'; kind: StepKind; together?: boolean }
+  /** click-in-order mode on (what the objects clicked do) or off */
+  | { how: 'order'; kind: StepKind | null }
+  /** an event a notch earlier or later */
+  | { how: 'move'; path: Path; step: number; dir: -1 | 1 }
+  | { how: 'remove'; path: Path; step: number }
+  /** the selection shown throughout */
+  | { how: 'clear' }
+  /** a list's items one by one, or all at once */
+  | { how: 'list'; path: Path; on: boolean };
 
 /** editor → runtime */
 export type ToRuntime =
@@ -163,7 +181,9 @@ export type ToRuntime =
   /** a new formula at the caret of the text being retyped (the toolbar's ∑ while typing) */
   | { ol: 'insertMath'; display: boolean }
   /** a command of the node editor (editing a path's points) */
-  | { ol: 'nodes'; cmd: NodeCmd };
+  | { ol: 'nodes'; cmd: NodeCmd }
+  /** a command of the Animation pane */
+  | { ol: 'steps'; cmd: StepCmd };
 
 /** runtime → editor */
 export type FromRuntime =
@@ -209,6 +229,8 @@ export type FromRuntime =
   /** the formula editor closes: the formula is shown again (`id`, after mathDone), or the retyping ended while one was open */
   | { ol: 'mathClose'; id?: number }
   /** the node editor is on (the path edited, how many of its nodes are selected) or off (null) */
-  | { ol: 'nodeEditing'; path: Path | null; selected: number; total: number };
+  | { ol: 'nodeEditing'; path: Path | null; selected: number; total: number }
+  /** the Animation pane's rows: the sequence of the slide worked on (-1: none), its number of steps, click-in-order mode */
+  | { ol: 'sequence'; slide: number; rows: StepRow[]; steps: number; ordering: StepKind | null };
 
 export const isFromRuntime = (d: unknown): d is FromRuntime => !!d && typeof d === 'object' && typeof (d as { ol?: unknown }).ol === 'string';

@@ -485,16 +485,18 @@ test("LaTeX on slides: a citation from the project's .bib, a numbered equation w
   await expect.poll(fileText, { timeout: 15000 }).toContain('class="ol-bibliography"');
   await expect.poll(() => fr.evaluate(`document.querySelector('.ol-bibliography')?.textContent ?? ''`)).toContain('The TeXbook');
 
-  // steps: the list's items one by one, an object at step 2
+  // steps (the Animation pane, e2e/deck-animate.spec.ts): the list's items one by one, an object
+  // appearing after them, then moved up to come with the second item
   const l = await at(page, 760, 400, 1);
   await page.mouse.click(l.x, l.y);
   await page.locator('[data-tb="dk-step"]').click();
-  await page.locator('.tb-pal-item', { hasText: 'List items one by one' }).click();
+  await page.locator('[data-anim-list]').click();
   await expect.poll(fileText, { timeout: 15000 }).toMatch(/<ul id="l"[^>]* data-steps="1"/);
   const m = await at(page, 720, 270, 1);
   await page.mouse.click(m.x, m.y);
-  await page.locator('[data-tb="dk-step"]').click();
-  await page.locator('.tb-pal-item', { hasText: 'At step 2' }).click();
+  await page.locator('[data-anim-add="appear"]').click();
+  await expect.poll(fileText, { timeout: 15000 }).toMatch(/<p id="m"[^>]* data-step="3"/);
+  await page.locator('[data-anim-row]', { hasText: 'In' }).locator('[data-anim-up]').click();
   await expect.poll(fileText, { timeout: 15000 }).toMatch(/<p id="m"[^>]* data-step="2"/);
 
   // presenting: the slide's steps (the list item by item, the paragraph at step 2) before the slides go on; back through them

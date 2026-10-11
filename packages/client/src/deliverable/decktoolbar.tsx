@@ -61,11 +61,9 @@ export interface DeckCtx {
     cite?(): void;
     /** a reference to a labelled equation (\eqref) */
     reference(): void;
-    /** the selected objects appear at a step when presenting (null: with the slide) */
-    step(n: number | null): void;
-    /** the selected list's items appear one by one (from step `from`), or all at once (null) */
-    listSteps(from: number | null): void;
   };
+  /** the Animation pane (what appears and disappears on each click when presenting): open, toggled */
+  animate: { open: boolean; toggle(): void };
   /** the node editor (a path's points): on, its selected nodes, its commands */
   nodes: { editing: boolean; selected: number; total: number; cmd(c: NodeCmd): void };
 }
@@ -404,7 +402,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
       { id: 'dk-opacity', title: 'Opacity', icon: 'dk-opacity',
         palette: { title: 'Opacity', render: () => <Slider label="Opacity" value={Math.round((st ? Number(st.opacity) : 1) * 100)} onSet={v => c.paint({ opacity: v / 100 })} /> } },
       { id: 'dk-shadow', title: 'Shadow', icon: 'dk-shadow', active: !!st?.shadow, action: () => c.paint({ shadow: !st?.shadow }) },
-      stepButton(c, sel),
+      ...(c.kind === 'deck' ? [animateButton(c)] : []),
       { id: 'dk-lock', title: locked ? 'Unlock (it can be moved again)' : 'Lock (selected, not moved or resized)', icon: 'dk-lock', active: locked, action: () => c.arrange(locked ? 'unlock' : 'lock') },
       { id: 'dk-delete', title: 'Delete (Del)', icon: 'dk-delete', action: c.remove, disabled: locked },
     ]);
@@ -424,6 +422,7 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
           </div>
         ) } },
       { id: 'dk-newslide', title: 'New slide (Ctrl+M)', icon: '+ Slide', action: c.newSlide },
+      ...(c.kind === 'deck' ? [animateButton(c)] : []),
     ]);
   }
   let out = sections.filter(x => x.groups.length);
@@ -435,17 +434,9 @@ export function deckToolbar(c: DeckCtx): { tools: ToolButton[][]; context: ToolB
   return { tools, context: out.flatMap(x => x.groups), sections: out };
 }
 
-/** when the selected objects appear while presenting: beamer's overlays (data-step, a list's data-steps) */
-function stepButton(c: DeckCtx, sel: SelItem[]): ToolButton {
-  const step = sel.length ? Math.max(...sel.map(s => s.step)) : 1;
-  const list = sel.length === 1 ? sel[0].list : undefined;
-  const items = [
-    { label: 'With the slide', active: step === 1 && !list?.steps, action: () => c.latex.step(null) },
-    ...[2, 3, 4, 5, 6].map(n => ({ label: `At step ${n} (after ${n - 1} ${n === 2 ? 'click' : 'clicks'})`, active: step === n, action: () => c.latex.step(n) })),
-    ...(list ? [{ label: list.steps ? 'List items all at once' : 'List items one by one', active: !!list.steps, action: () => c.latex.listSteps(list.steps ? null : step) }] : []),
-  ];
-  return { id: 'dk-step', title: 'Appear when presenting: with the slide, or at a later step (as beamer\'s \\pause / \\item<2->)', icon: step > 1 ? `▸${step}` : list?.steps ? '▸…' : 'dk-step', active: step > 1 || !!list?.steps,
-    palette: { title: 'Appear', list: true, cols: 1, items } };
+/** the Animation pane: what appears and disappears on each click when presenting (beamer's overlays, AnimationPane.tsx) */
+function animateButton(c: DeckCtx): ToolButton {
+  return { id: 'dk-step', title: 'Animation: objects appear and disappear click by click when presenting, in the order you click them (beamer\'s \\pause, \\only<2->)', icon: 'dk-step', active: c.animate.open, action: c.animate.toggle };
 }
 
 function weightBtn(id: string, title: string, cur: number, set: (w: number) => void): ToolButton {
