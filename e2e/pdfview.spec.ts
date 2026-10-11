@@ -3,7 +3,8 @@
  * pages; forward search (Ctrl+Alt+J) from a paragraph on the last page scrolls the viewer there
  * and flashes the box; a double-click on the first page's abstract puts the cursor into that
  * paragraph (inverse search); a PDF file of the project opens in a tab of its own with the viewer;
- * a pinch (Ctrl + wheel) zooms about the pointer, and a huge page (A0) stays sharp where it is in view.
+ * a pinch (Ctrl + wheel) zooms about the pointer, and a huge page (A0) stays sharp where it is in view;
+ * Fit content zooms past the margins, a level among the steps that a pinch stops at and holds.
  */
 import { test, expect } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
@@ -64,12 +65,12 @@ test('the built PDF is shown by the viewer; SyncTeX forward and inverse search',
   await page.locator('.lyx-editor .lyx-par', { hasText: 'the marmot sleeps' }).click();
   await page.keyboard.press('Control+Alt+j');
   await expect(page.locator('.pdf-flash')).toHaveCount(1, { timeout: 15000 });
-  expect(await page.locator('.pdf-flash').evaluate(e => e.parentElement?.getAttribute('data-page'))).toBe(String(pages));
+  expect(await page.locator('.pdf-flash').evaluate(e => e.closest('.pdf-page-box')?.getAttribute('data-page'))).toBe(String(pages));
   await expect(page.locator('.pdf-toolbar .pdf-page')).toHaveValue(String(pages));
   // the Sync button does the same
   await page.locator('.lyx-editor .lyx-par', { hasText: 'Paragraph number 3 of' }).click();
   await page.locator('[data-pdf-sync]').click();
-  await expect.poll(async () => page.locator('.pdf-flash').evaluate(e => e.parentElement?.getAttribute('data-page')).catch(() => null), { timeout: 15000 }).toBe('1');
+  await expect.poll(async () => page.locator('.pdf-flash').evaluate(e => e.closest('.pdf-page-box')?.getAttribute('data-page')).catch(() => null), { timeout: 15000 }).toBe('1');
 
   // inverse search: a double-click near the top of page 1 lands in the first paragraphs
   await page.locator('.pdf-toolbar .pdf-page').fill('1');
@@ -93,12 +94,91 @@ test('a PDF file of the project opens in a tab with the viewer', async ({ page }
   await expect(page.locator('.pdf-tab .pdf-toolbar a', { hasText: 'Download' })).toHaveAttribute('href', /paper\.pdf\?download=1$/);
   // zoom and page navigation
   await page.locator('.pdf-toolbar .small-btn[title="Zoom in"]').click();
-  await expect(page.locator('.pdf-toolbar .small-btn[title="Fit the page width"]')).not.toContainText('Fit width');
+  await expect(page.locator('.pdf-toolbar [data-pdf-zoom]')).not.toHaveValue('width');
   await page.locator('.pdf-toolbar .small-btn[title="Next page"]').click();
   await expect(page.locator('.pdf-toolbar .pdf-page')).toHaveValue('2');
   // back to the document tab: the editor is still there
   await page.locator('.docpanel .doc-tab[data-doc="two.tex"] .doc-name').click();
   await expect(page.locator('.lyx-editor .lyx-par').first()).toBeVisible({ timeout: 15000 });
+});
+
+test('Fit content zooms past the margins; a pinch snaps onto it and holds there, a mouse wheel steps to it, the next viewer starts there', async ({ page }) => {
+  test.skip(!existsSync(`${DIR}/paper.pdf`), 'no PDF fixture (example-gan/arxiv-1406.2661.pdf)');
+  const errors = collectErrors(page);
+  await page.setViewportSize({ width: 1000, height: 1100 });   // (a pane taller than wide, as beside a document)
+  await page.request.get('/api/projects');
+  await page.goto('/#/' + ID);
+  await page.waitForFunction(() => document.querySelectorAll('.lyx-editor .lyx-par').length > 0, null, { timeout: 30000 });
+  await page.locator('.tree-row.file', { hasText: 'paper.pdf' }).click();
+  const pick = page.locator('.pdf-tab [data-pdf-zoom]'), pagesEl = page.locator('.pdf-tab .pdf-pages');
+  const card = (n: number) => page.locator(`.pdf-tab .pdf-page-box[data-page="${n}"]`);
+  await expect(page.locator('.pdf-tab .pdf-page-box canvas.ready').first()).toBeAttached({ timeout: 30000 });
+  await expect(pick).toHaveValue('width');
+  const pane = await pagesEl.evaluate(e => ({ w: e.clientWidth, h: e.clientHeight }));
+  const fitWidth = (await card(2).boundingBox())!.width;
+
+  // the margins cropped away: what is printed on the pages as big as the pane takes it, all of it
+  await pick.selectOption('content');
+  await expect(pagesEl).toHaveAttribute('data-zoom', 'content');
+  const fill = async () => {
+    const out: number[] = [];
+    for (const n of [2, 3, 4]) { const b = (await card(n).boundingBox())!; out.push(Math.max(b.width / (pane.w - 16), b.height / (pane.h - 24))); }
+    return out;
+  };
+  await expect.poll(async () => Math.max(...await fill()), { timeout: 10000 }).toBeGreaterThan(0.97);
+  expect(Math.max(...await fill())).toBeLessThan(1.01);
+  const sheet = await card(2).locator('.pdf-sheet').evaluate(e => ({ left: parseFloat((e as HTMLElement).style.left), top: parseFloat((e as HTMLElement).style.top), w: (e as HTMLElement).offsetWidth }));
+  expect(sheet.left).toBeLessThan(-20);
+  expect(sheet.top).toBeLessThan(-20);
+  expect(sheet.w / fitWidth).toBeGreaterThan(1.15);   // zoomed in past Fit width
+  const contentW = (await card(2).boundingBox())!.width;
+
+  const view = (await pagesEl.boundingBox())!;
+  await page.mouse.move(view.x + view.width / 2, view.y + view.height / 2);
+  const pinch = async (dy: number, n: number) => {
+    await page.keyboard.down('Control');
+    for (let i = 0; i < n; i++) { await page.mouse.wheel(0, dy); await page.waitForTimeout(25); }
+    await page.keyboard.up('Control');
+  };
+  // a pinch a little past it: held there — the pages give a little, and spring back once let go
+  await pinch(-10, 3);
+  expect((await card(2).boundingBox())!.width).toBeGreaterThan(contentW * 1.02);
+  await expect(pick).toHaveValue('content');
+  await expect.poll(async () => Math.abs((await card(2).boundingBox())!.width - contentW), { timeout: 3000 }).toBeLessThan(1);
+  // pinched well past it: free, the whole pages again
+  await pinch(-10, 8);
+  await expect(pick).toHaveValue('custom');
+  await expect(pagesEl).not.toHaveAttribute('data-zoom', 'content');
+  expect(await card(2).locator('.pdf-sheet').evaluate(e => parseFloat((e as HTMLElement).style.left))).toBe(0);
+  // back towards it: caught, and said so for a moment
+  await page.waitForTimeout(400);
+  await pinch(10, 7);
+  await expect(pick).toHaveValue('content');
+  await expect(page.locator('.pdf-tab .pdf-zoom-hud')).toHaveText('Fit content');
+  await expect.poll(async () => Math.abs((await card(2).boundingBox())!.width - contentW), { timeout: 3000 }).toBeLessThan(1);
+
+  // a mouse wheel's notches (and − / +) step through the levels: Fit content is one of them
+  await pick.selectOption('width');
+  await expect(pagesEl).toHaveAttribute('data-zoom', 'width');
+  const seen: string[] = [];
+  for (let i = 0; i < 8 && !seen.includes('content'); i++) {
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -100);
+    await page.keyboard.up('Control');
+    await page.waitForTimeout(150);
+    seen.push(await pick.inputValue());
+  }
+  expect(seen).toContain('content');
+  expect(seen.length).toBeGreaterThan(1);   // (steps between Fit width and it)
+  await page.locator('.pdf-tab .pdf-toolbar .small-btn[title="Zoom in"]').click();
+  await expect(pick).not.toHaveValue('content');
+  await page.locator('.pdf-tab .pdf-toolbar .small-btn[title="Zoom out"]').click();
+  await expect(pick).toHaveValue('content');
+
+  // the next viewer starts at the fit chosen last
+  await page.reload();
+  await expect(page.locator('.pdf-tab .pdf-pages')).toHaveAttribute('data-zoom', 'content', { timeout: 30000 });
+  expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
 });
 
 test('a pinch (Ctrl + wheel) zooms the viewer about the pointer; an A0 page stays sharp where it is in view', async ({ page }) => {
@@ -114,11 +194,11 @@ test('a pinch (Ctrl + wheel) zooms the viewer about the pointer; an A0 page stay
   const x = b0.x + b0.width * 0.3, y = b0.y + 200;
   const fx = (x - b0.x) / b0.width, fy = (y - b0.y) / b0.height;
   await page.mouse.move(x, y);
-  // a trackpad pinch arrives as Ctrl + wheel: it zooms this viewer, not the whole page
+  // a trackpad pinch arrives as Ctrl + wheel (many small deltas): it zooms this viewer, not the whole page
   await page.keyboard.down('Control');
-  for (let i = 0; i < 9; i++) { await page.mouse.wheel(0, -100); await page.waitForTimeout(40); }
+  for (let i = 0; i < 24; i++) { await page.mouse.wheel(0, -10); await page.waitForTimeout(30); }
   await page.keyboard.up('Control');
-  await expect(page.locator('.pdf-tab .pdf-toolbar .small-btn[title="Fit the page width"]')).toHaveText(/^\d+%$/);
+  await expect(page.locator('.pdf-tab .pdf-toolbar [data-pdf-zoom]')).toHaveValue('custom');
   const b1 = (await pageBox.boundingBox())!;
   expect(b1.width / b0.width).toBeGreaterThan(6);
   // the spot that was under the pointer still is
@@ -135,8 +215,8 @@ test('a pinch (Ctrl + wheel) zooms the viewer about the pointer; an A0 page stay
   expect(detail!.y).toBeLessThanOrEqual(view.y + 1);
   expect(detail!.x + detail!.width).toBeGreaterThanOrEqual(view.x + view.width - 20);   // (less the scroll bar)
   // back to the whole width
-  await page.locator('.pdf-tab .pdf-toolbar .small-btn[title="Fit the page width"]').click();
-  await expect(page.locator('.pdf-tab .pdf-toolbar .small-btn[title="Fit the page width"]')).toHaveText('Fit width');
+  await page.locator('.pdf-tab .pdf-toolbar [data-pdf-zoom]').selectOption('width');
+  await expect(page.locator('.pdf-tab .pdf-pages')).toHaveAttribute('data-zoom', 'width');
   expect(errors.filter(e => !/favicon|ResizeObserver/.test(e))).toEqual([]);
 });
 

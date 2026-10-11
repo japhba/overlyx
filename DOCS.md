@@ -1421,10 +1421,23 @@ blend.
   one is signed in already) arrives in that hover pose and relaxes back — the hover's leave
   (`Wordmark arrive`: held 450 ms from when its fonts are in and the page has painted, once per load).
 * **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in its pane
-  by our own viewer (fit-to-width / zoom, page navigation). **Pinch zoom**: a trackpad pinch
-  (Ctrl + wheel in Chromium and Firefox, Safari's gesture events) or Ctrl/⌘ + wheel zooms about the
-  pointer, one step per frame; meanwhile the drawn pages stretch and are drawn anew once the pinch
-  settles (160 ms). A page whose canvas would exceed 2²⁵ pixels (an A0 poster zoomed in — browsers
+  by our own viewer (zoom, page navigation). **Zoom** (`app/pdfzoom.ts`): *Fit width*, *Fit content*
+  and the steps between them, one order for −, + and a mouse wheel's notches with Ctrl/⌘ (deltas of
+  lines or ≥ 50 px; no step within 5 % of a fit), and the zoom menu. **Fit content** zooms past the
+  margins: every page is cropped (`.pdf-page-box` showing part of its `.pdf-sheet`) to what is painted
+  on it — measured by drawing it 400 px tall in idle moments, the pages in reach first, the non-white
+  pixels' box plus 6 pt — and the pages are as big as the pane takes them, the typical page's content
+  (the median of the pages' fits) spanning the pane's width in a narrow pane, its height in a wide one;
+  wider content (a broad table) is shown smaller so all of it shows, less is not blown up; a page not
+  measured yet takes the typical crop, and measured pages keep the reader at the same point. The fit
+  chosen last is the next viewer's (`ol.pdfFit`). **Pinch zoom**: a trackpad pinch (Ctrl + wheel in
+  Chromium and Firefox with small deltas, Safari's gesture events) zooms about the pointer, one step
+  per frame, and stops at the fits (`Pinch`): within 7 % of one it snaps on (the name shows for a
+  moment, `.pdf-zoom-hud`), and it holds there until pinched ×1.2 past Fit width, ×1.45 past Fit
+  content — meanwhile the pages give a quarter of the pull and spring back when let go (220 ms after
+  the last wheel event, or `gestureend`); let go within 7 % of a fit it settles on it. The drawn pages
+  stretch meanwhile and are drawn anew once the pinch settles (160 ms) — a pinch let go where it began
+  draws nothing anew. A page whose canvas would exceed 2²⁵ pixels (an A0 poster zoomed in — browsers
   draw nothing on far bigger canvases) is drawn coarser, with a sharp detail canvas (`.pdf-detail`)
   over the part in view and half a window around it. A **rebuilt PDF replaces the old one
   without a flicker**: the new document loads while the old pages stay in view (one shared pdf.js

@@ -11,22 +11,25 @@
  * offset into it are kept, not the scroll fraction, so pages added above do not move the view).
  * `busy` draws a thin progress line along the top; `overlay` floats over the pages.
  *
- * Zoom: the toolbar's steps, or a pinch on a trackpad (Ctrl + wheel in Chromium and Firefox, the
- * gesture events in Safari) and Ctrl/⌘ + wheel about the pointer. While a pinch goes on the drawn
- * pages are stretched; they are drawn anew once it settles. A page whose canvas would exceed
+ * Zoom: Fit width, Fit content (past the margins: the pages cropped to what is painted on them, as big
+ * as the pane takes them — pdfzoom.ts) and the steps between, from the toolbar or a mouse wheel's
+ * notches with Ctrl/⌘; or a pinch on a trackpad (Ctrl + wheel in Chromium and Firefox, the gesture
+ * events in Safari), about the pointer, which stops at the fits and holds there. While a pinch goes on
+ * the drawn pages are stretched; they are drawn anew once it settles. A page whose canvas would exceed
  * MAX_CANVAS_PIXELS (an A0 poster zoomed in) is drawn coarser, with a sharp detail canvas over the
  * part of it in view.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 // pdf.js's legacy build: the default ("modern") one needs the newest engines — Map.getOrInsertComputed,
 // Math.sumPrecise, the Iterator global (Safari 26.2, Firefox 144, Chrome 147) — and without them the app
 // did not even start (Safari < 18.4: `Iterator` is evaluated on import) or rendered no page; the
 // legacy build carries polyfills for exactly these
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { formRects, paintDark, useDarkPages } from './pdfdark';
 import { setPref } from '../prefs';
+import { contentLayout, inkBox, stepZoom, zoomValue, Pinch, GAP, PAD, PT, WIDTH_SPARE, ZOOMS, type Box, type Fit, type Geo, type Levels, type Zoom } from './pdfzoom';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
 
@@ -52,43 +55,85 @@ export interface PdfTarget { page: number; x: number; y: number; w?: number; h?:
 
 interface PageInfo { width: number; height: number }
 
-/** a rectangle of a page box, in CSS pixels */
-interface BoxRect { x: number; y: number; w: number; h: number }
-/** what is drawn on a page's canvas: at which scale, the render under way, whether coarser than the scale (then with a detail canvas) */
-interface PageState { scale: number; task: RenderTask | null; coarse?: boolean; detail?: { scale: number; rect: BoxRect; task: RenderTask | null } }
+/** what is drawn on a page's canvas: at which scale, the render under way or `done`, whether coarser than the scale (then with a detail canvas over `rect`, CSS px of the page) */
+interface PageState { scale: number; task: RenderTask | null; done?: boolean; coarse?: boolean; detail?: { scale: number; rect: Box; task: RenderTask | null; done?: boolean } }
 
-const ZOOMS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
-/** the zoom range a pinch can reach */
-const MIN_ZOOM = 0.25, MAX_ZOOM = 8;
 /** the pixels of one page's canvas at most (as in pdf.js's own viewer; browsers refuse far bigger canvases and draw nothing) */
 const MAX_CANVAS_PIXELS = 2 ** 25;
 /** a pinch has settled — the pages are drawn at their new size — this long after its last step (ms) */
 const SETTLE_MS = 160;
-/** vertical gap below every page (px, styles.css .pdf-page-box margin) */
-const GAP = 12;
-/** padding above the first page (styles.css .pdf-pages) */
-const PAD = 12;
+/** a pinch by Ctrl + wheel has ended this long after its last event (ms) */
+const PINCH_END_MS = 220;
+/** a page is measured for Fit content drawn this big (px, its longer side) */
+const MEASURE_PX = 400;
+/** the fit chosen last, for the next viewer (this browser's) */
+const FIT_KEY = 'ol.pdfFit';
+
+/** what is painted on a page (pt from its top-left), from a small drawing of it; null when nothing is */
+async function measureContent(page: PDFPageProxy): Promise<Box | null> {
+  const v = page.getViewport({ scale: 1 });
+  const k = Math.min(1, MEASURE_PX / Math.max(v.width, v.height));
+  const viewport = page.getViewport({ scale: k });
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(viewport.width); c.height = Math.ceil(viewport.height);
+  await page.render({ canvas: c, viewport }).promise;
+  const ctx = c.getContext('2d');
+  const b = ctx && inkBox(ctx.getImageData(0, 0, c.width, c.height).data, c.width, c.height);
+  c.width = c.height = 0;
+  return b ? { x: b.x / k, y: b.y / k, w: b.w / k, h: b.h / k } : null;
+}
+
+const sameBox = (a: Box | null | undefined, b: Box | null): boolean =>
+  a === b || (!!a && !!b && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.w - b.w) < 0.5 && Math.abs(a.h - b.h) < 0.5);
+
+/** the place of every page: its top (px from the top of the scrolled pages) */
+const topsOf = (geo: Geo[]): number[] => {
+  const out: number[] = [];
+  let y = PAD;
+  for (const g of geo) { out.push(y); y += g.crop.h * g.scale + GAP; }
+  return out;
+};
 
 export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }: { url: string; target?: PdfTarget | null; onSync?: (page: number, x: number, y: number) => void; toolbar?: ComponentChildren; hint?: string; busy?: boolean; overlay?: ComponentChildren }) {
   const host = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState<PageInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
-  /** 'width' fits the page to the panel; a number is a zoom factor on 96 dpi */
-  const [zoom, setZoom] = useState<'width' | number>('width');
-  const [width, setWidth] = useState(0);
+  /** Fit width, Fit content (past the margins), or a factor on 96 dpi */
+  const [zoom, setZoom] = useState<Zoom>(() => { try { return localStorage.getItem(FIT_KEY) === 'content' ? 'content' : 'width'; } catch { return 'width'; } });
+  /** a fit's pages stretched a little: a pinch held at the fit pulls at it (pdfzoom.ts GIVE) */
+  const [stretch, setStretch] = useState(1);
+  /** the pane's inner size (px) */
+  const [pane, setPane] = useState({ width: 0, height: 0 });
+  const width = pane.width;
   const [current, setCurrent] = useState(1);
   const [flash, setFlash] = useState<{ page: number; x: number; y: number; w: number; h: number } | null>(null);
+  /** a pinch has just caught a fit: its name, for a moment */
+  const [caught, setCaught] = useState<Fit | null>(null);
+  const caughtTimer = useRef(0);
   const rendered = useRef(new Map<number, PageState>());
   const canvases = useRef(new Map<number, HTMLCanvasElement>());
   /** per page, the sharp canvas over the part in view when the page's own canvas is coarse */
   const details = useRef(new Map<number, HTMLCanvasElement>());
-  /** a pinch step waiting for the next frame: the zoom asked for and the pointer */
-  const pendingZoom = useRef<{ z: number; x: number; y: number } | null>(null);
-  /** the spot of a page (fractions of it) that stays under the pointer (x, y) while the new zoom lays out */
+  /** the document and colours the canvases are drawn for (a zoom keeps what is drawn till it is drawn anew) */
+  const drawnFor = useRef<{ doc: PDFDocumentProxy | null; dark: string }>({ doc: null, dark: '' });
+  /** what is painted on each page (pt), by page number: kept through a rebuild, till measured anew */
+  const boxes = useRef(new Map<number, Box | null>());
+  const [boxesVer, setBoxesVer] = useState(0);
+  /** the pages to measure, the one read first (set by the drawing of the pages in reach) */
+  const wantBoxes = useRef<(ns: number[]) => void>(() => {});
+  /** a zoom waiting for the next frame: what to show, and the point of the screen it is about */
+  const pendingZoom = useRef<{ zoom: Zoom; stretch: number; x: number; y: number } | null>(null);
+  /** the zoom shown (ahead of a render) */
+  const zoomNow = useRef<Zoom>(zoom);
+  /** the spot of a page (fractions of it) that stays under the point (x, y) while the new zoom lays out */
   const zoomAnchor = useRef<{ page: number; fx: number; fy: number; x: number; y: number } | null>(null);
   /** when the zoom last changed by a pinch (drawing waits until it settles) */
   const zoomedAt = useRef(0);
+  /** the pinch under way (Ctrl + wheel, Safari's gesture): its course through the levels, the pointer, the timer that ends it */
+  const gesture = useRef<{ pinch: Pinch; x: number; y: number; timer: number } | null>(null);
+  /** the frame of a spring back onto a fit */
+  const springRaf = useRef(0);
   /** dark pages (pdfdark.ts): baked into the canvases when they are drawn, so a change draws the pages again */
   const { colours, themeDark, invertFigures } = useDarkPages();
   const dark = !!colours;
@@ -98,23 +143,30 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
   /** the document shown and its loading task (destroyed when replaced, after the new one is up) */
   const shownTask = useRef<PDFDocumentLoadingTask | null>(null);
   const retired = useRef<PDFDocumentLoadingTask[]>([]);
-  /** where the reader was when a new document came in: page index and how far into it the viewport's top is */
-  const anchor = useRef<{ page: number; frac: number } | null>(null);
-  const layoutRef = useRef<{ pages: PageInfo[]; scaleFor: (p: PageInfo) => number }>({ pages: [], scaleFor: () => 1 });
+  /** where the reader was when the pages change size (a new document; Fit content's pages measured): page index and the point of it at the viewport's top (pt from its top) */
+  const anchor = useRef<{ page: number; y: number } | null>(null);
 
-  const scaleFor = (p: PageInfo) => (zoom === 'width' ? Math.max(0.2, (width - 28) / p.width) : zoom * (96 / 72));
-  layoutRef.current = { pages, scaleFor };
+  const widthScale = (p: PageInfo) => Math.max(0.2, (width - WIDTH_SPARE) / p.width);
+  // Fit content: the pages cropped to what is painted on them (pdfzoom.ts)
+  const content = useMemo(() => (pages.length && width ? contentLayout(pages, pages.map((_, i) => boxes.current.get(i + 1)), pane) : null), [pages, width, pane.height, boxesVer]);
+  const levels: Levels = pages.length && width ? { width: widthScale(pages[0]) / PT, content: (content?.scale ?? content?.geo[0]?.scale ?? 0) / PT || undefined } : {};
+  /** every page's scale (px per pt) and the part of it shown */
+  const geo = useMemo<Geo[]>(() => pages.map((p, i) => {
+    if (zoom === 'content' && content) return { scale: content.geo[i].scale * stretch, crop: content.geo[i].crop };
+    // (Fit content before the pane's size is known: as Fit width)
+    return { scale: typeof zoom === 'string' ? widthScale(p) * stretch : zoom * PT, crop: { x: 0, y: 0, w: p.width, h: p.height } };
+  }), [pages, zoom, stretch, content, width]);
+  const tops = useMemo(() => topsOf(geo), [geo]);
+  const layoutRef = useRef({ geo, tops, zoom, levels });
+  layoutRef.current = { geo, tops, zoom, levels };
 
-  /** the page at the viewport's top and the fraction of it above the top edge */
-  const readAnchor = (): { page: number; frac: number } | null => {
+  /** the page at the viewport's top and the point of it there (pt from the page's top) */
+  const readAnchor = (): { page: number; y: number } | null => {
     const el = host.current;
-    const { pages: ps, scaleFor: sf } = layoutRef.current;
-    if (!el || !ps.length) return null;
-    let y = PAD;
-    for (let i = 0; i < ps.length; i++) {
-      const h = ps[i].height * sf(ps[i]) + GAP;
-      if (y + h > el.scrollTop || i === ps.length - 1) return { page: i, frac: Math.max(0, Math.min(1, (el.scrollTop - y) / h)) };
-      y += h;
+    const { geo: g, tops: t } = layoutRef.current;
+    if (!el || !g.length) return null;
+    for (let i = 0; i < g.length; i++) {
+      if (t[i] + g[i].crop.h * g[i].scale + GAP > el.scrollTop || i === g.length - 1) return { page: i, y: g[i].crop.y + (el.scrollTop - t[i]) / g[i].scale };
     }
     return null;
   };
@@ -142,90 +194,197 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
     for (const s of rendered.current.values()) s.task?.cancel();
     for (const t of retired.current) void t.destroy();
     void shownTask.current?.destroy();
+    clearTimeout(caughtTimer.current);
+    cancelAnimationFrame(springRaf.current);
+    if (gesture.current) clearTimeout(gesture.current.timer);
   }, []);
 
-  // the panel's width (fit-to-width) and the visible page
+  // the pane's size (the fits) and the visible page
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    const measure = () => setPane(p => (p.width === el.clientWidth && p.height === el.clientHeight ? p : { width: el.clientWidth, height: el.clientHeight }));
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    setWidth(el.clientWidth);
+    measure();
     return () => ro.disconnect();
   }, []);
 
-  // a pinch on a trackpad, or Ctrl/⌘ + wheel: zoom about the pointer (one step per frame)
+  // what is painted on the pages (Fit content, and where it lies among the levels): measured small in
+  // idle moments, the page read first, then the others in reach
+  useEffect(() => {
+    if (!doc) return;
+    let disposed = false, busy = false, raf = 0;
+    let queue: number[] = [];
+    const fresh = new Set<number>();
+    const changed = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        // Fit content's pages change size: the reader stays at the same place
+        if (layoutRef.current.zoom === 'content' && !anchor.current) anchor.current = readAnchor();
+        setBoxesVer(v => v + 1);
+      });
+    };
+    const next = () => {
+      if (disposed || busy) return;
+      const n = queue.find(k => !fresh.has(k) && k <= doc.numPages);
+      if (n === undefined) return;
+      busy = true;
+      const run = async () => {
+        try {
+          const box = await measureContent(await doc.getPage(n));
+          if (!disposed && !sameBox(boxes.current.get(n), box)) { boxes.current.set(n, box); changed(); }
+        } catch { /* (a page that cannot be drawn keeps the typical crop) */ }
+        fresh.add(n);
+        busy = false;
+        next();
+      };
+      const w = window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
+      if (w.requestIdleCallback) w.requestIdleCallback(() => void run(), { timeout: 400 });
+      else setTimeout(() => void run(), 30);
+    };
+    wantBoxes.current = ns => { queue = ns; next(); };
+    return () => { disposed = true; cancelAnimationFrame(raf); wantBoxes.current = () => {}; };
+  }, [doc]);
+
+  /** shown next frame: a zoom (a fit's pages stretched by `stretch`) about the point (x, y) of the screen — the spot of the page under it stays there */
+  const request = (z: Zoom, stretch: number, x: number, y: number) => {
+    const first = !pendingZoom.current;
+    pendingZoom.current = { zoom: z, stretch, x, y };
+    if (first) requestAnimationFrame(applyZoom);
+  };
+  const applyZoom = () => {
+    const p = pendingZoom.current, el = host.current;
+    pendingZoom.current = null;
+    if (!p || !el) return;
+    // the page under the point (or the nearest) keeps the same spot under it
+    let best = Infinity;
+    for (const box of el.querySelectorAll<HTMLElement>('.pdf-page-box')) {
+      const r = box.getBoundingClientRect();
+      const d = p.y < r.top ? r.top - p.y : p.y > r.bottom ? p.y - r.bottom : 0;
+      if (d < best) {
+        best = d;
+        const sr = (box.firstElementChild as HTMLElement).getBoundingClientRect();
+        zoomAnchor.current = { page: Number(box.dataset.page), fx: (p.x - sr.left) / sr.width, fy: (p.y - sr.top) / sr.height, x: p.x, y: p.y };
+      }
+      if (d === 0) break;
+    }
+    zoomedAt.current = performance.now();
+    zoomNow.current = p.zoom;
+    setZoom(p.zoom);
+    setStretch(p.stretch);
+  };
+  /** the fit chosen last is the next viewer's */
+  const remember = (z: Zoom) => { if (typeof z === 'string') try { localStorage.setItem(FIT_KEY, z); } catch { /* storage unavailable */ } };
+  const middle = () => { const r = host.current?.getBoundingClientRect(); return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: 0, y: 0 }; };
+  const springStop = () => { cancelAnimationFrame(springRaf.current); springRaf.current = 0; };
+  /** a fit's pages spring back from `from` to their size */
+  const springTo = (z: Fit, from: number, x: number, y: number) => {
+    springStop();
+    const t0 = performance.now();
+    const frame = () => {
+      const t = Math.min(1, (performance.now() - t0) / 220), k = 1 - (1 - t) ** 3;
+      request(z, from + (1 - from) * k, x, y);
+      springRaf.current = t < 1 ? requestAnimationFrame(frame) : 0;
+    };
+    frame();
+  };
+  /** a step in or out (−, +, a mouse wheel's notch): the steps and the fits in one order; about a point of the screen (the pane's middle) */
+  const step = (dir: 1 | -1, x?: number, y?: number) => {
+    const l = layoutRef.current.levels;
+    if (!l.width) return;
+    springStop();
+    const m = middle();
+    const z = stepZoom(zoomValue(pendingZoom.current?.zoom ?? zoomNow.current, l), dir, l);
+    remember(z);
+    request(z, 1, x ?? m.x, y ?? m.y);
+  };
+  /** a zoom chosen from the menu */
+  const choose = (z: Zoom) => { springStop(); remember(z); const m = middle(); request(z, 1, m.x, m.y); };
+  const showCaught = (f: Fit) => {
+    setCaught(f);
+    clearTimeout(caughtTimer.current);
+    caughtTimer.current = window.setTimeout(() => setCaught(null), 900);
+  };
+  /** a pinch's step (log of the factor) about the pointer: on through the levels, stopping at the fits (pdfzoom.ts Pinch) */
+  const pinchBy = (d: number, x: number, y: number, timed: boolean) => {
+    springStop();
+    let g = gesture.current;
+    if (!g) g = gesture.current = { pinch: new Pinch(pendingZoom.current?.zoom ?? zoomNow.current, layoutRef.current.levels), x, y, timer: 0 };
+    g.x = x; g.y = y;
+    clearTimeout(g.timer);
+    if (timed) g.timer = window.setTimeout(endPinch, PINCH_END_MS);
+    const shown = g.pinch.by(d, layoutRef.current.levels);
+    if (shown.caught) showCaught(shown.caught);
+    request(shown.zoom, shown.stretch, x, y);
+  };
+  /** the pinch let go: held at a fit, or near one, it springs onto it */
+  const endPinch = () => {
+    const g = gesture.current;
+    gesture.current = null;
+    if (!g) return;
+    clearTimeout(g.timer);
+    const s = g.pinch.end(layoutRef.current.levels);
+    if (!s) return;
+    remember(s.zoom);
+    springTo(s.zoom, s.from, g.x, g.y);
+  };
+
+  // a pinch on a trackpad (Ctrl + wheel; Safari's gesture events), or a mouse wheel's notches with Ctrl/⌘
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    const shown = () => { const { pages: ps, scaleFor: sf } = layoutRef.current; return ps.length ? sf(ps[0]) / (96 / 72) : 1; };
-    const apply = () => {
-      const p = pendingZoom.current;
-      pendingZoom.current = null;
-      if (!p) return;
-      // the page under the pointer (or the nearest) keeps the same spot under it
-      let best = Infinity;
-      for (const box of el.querySelectorAll<HTMLElement>('.pdf-page-box')) {
-        const r = box.getBoundingClientRect();
-        const d = p.y < r.top ? r.top - p.y : p.y > r.bottom ? p.y - r.bottom : 0;
-        if (d < best) { best = d; zoomAnchor.current = { page: Number(box.dataset.page), fx: (p.x - r.left) / r.width, fy: (p.y - r.top) / r.height, x: p.x, y: p.y }; }
-        if (d === 0) break;
-      }
-      zoomedAt.current = performance.now();
-      setZoom(p.z);
-    };
-    const zoomAt = (z: number, x: number, y: number) => {
-      const first = !pendingZoom.current;
-      pendingZoom.current = { z: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z)), x, y };
-      if (first) requestAnimationFrame(apply);
-    };
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
       const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
-      // a trackpad sends many small deltas, a mouse wheel ±100 a notch (×1.28 then)
-      zoomAt((pendingZoom.current?.z ?? shown()) * Math.exp(-Math.max(-25, Math.min(25, dy)) * 0.01), e.clientX, e.clientY);
+      if (!dy) return;
+      // a mouse wheel's notch (lines, or a hundred px or so at once): a step, as the browser's own zoom
+      // takes; a trackpad sends many small deltas — a pinch, through the levels
+      if (e.deltaMode !== 0 || Math.abs(dy) >= 50) { if (!gesture.current) step(dy < 0 ? 1 : -1, e.clientX, e.clientY); return; }
+      pinchBy(-dy * 0.01, e.clientX, e.clientY, true);
     };
-    // Safari's trackpad pinch
-    let gestureBase = 1;
+    // Safari's trackpad pinch: its scale is from where the pinch began
+    let last = 1;
     const onGesture = (e: Event & { scale?: number; clientX?: number; clientY?: number }) => {
       e.preventDefault();
-      if (e.type === 'gesturestart') { gestureBase = shown(); return; }
+      if (e.type === 'gestureend') { endPinch(); return; }
+      if (e.type === 'gesturestart') { last = 1; return; }
+      const s = e.scale ?? 1;
+      if (!(s > 0)) return;
       const r = el.getBoundingClientRect();
-      zoomAt(gestureBase * (e.scale ?? 1), e.clientX ?? r.left + r.width / 2, e.clientY ?? r.top + r.height / 2);
+      pinchBy(Math.log(s / last), e.clientX ?? r.left + r.width / 2, e.clientY ?? r.top + r.height / 2, false);
+      last = s;
     };
     el.addEventListener('wheel', onWheel, { passive: false });
-    el.addEventListener('gesturestart', onGesture as EventListener, { passive: false });
-    el.addEventListener('gesturechange', onGesture as EventListener, { passive: false });
+    for (const t of ['gesturestart', 'gesturechange', 'gestureend']) el.addEventListener(t, onGesture as EventListener, { passive: false });
     return () => {
       el.removeEventListener('wheel', onWheel);
-      el.removeEventListener('gesturestart', onGesture as EventListener);
-      el.removeEventListener('gesturechange', onGesture as EventListener);
+      for (const t of ['gesturestart', 'gesturechange', 'gestureend']) el.removeEventListener(t, onGesture as EventListener);
     };
   }, []);
 
-  // a pinch step laid out: scroll so that the spot of the page is under the pointer again (before the paint)
+  // a zoom laid out: scroll so that the spot of the page is under the point again (before the paint)
   useLayoutEffect(() => {
     const el = host.current, a = zoomAnchor.current;
     zoomAnchor.current = null;
-    const box = a && el?.querySelector<HTMLElement>(`.pdf-page-box[data-page="${a.page}"]`);
-    if (!el || !a || !box) return;
-    const r = box.getBoundingClientRect();
+    const sheet = a && el?.querySelector<HTMLElement>(`.pdf-page-box[data-page="${a.page}"] > .pdf-sheet`);
+    if (!el || !a || !sheet) return;
+    const r = sheet.getBoundingClientRect();
     el.scrollLeft += r.left + a.fx * r.width - a.x;
     el.scrollTop += r.top + a.fy * r.height - a.y;
-  }, [zoom]);
+  }, [zoom, stretch]);
 
-  // a new document: back to the same page, the same distance into it (before the paint)
+  // a new document, Fit content's pages measured: back to the same page, the same point of it at the top (before the paint)
   useLayoutEffect(() => {
     const el = host.current, a = anchor.current;
-    if (!el || !a || !pages.length || !width) return;
+    if (!el || !a || !geo.length || !width) return;
     anchor.current = null;
-    const page = Math.min(a.page, pages.length - 1);
-    let y = PAD;
-    for (let i = 0; i < page; i++) y += pages[i].height * scaleFor(pages[i]) + GAP;
-    const top = Math.round(y + a.frac * (pages[page].height * scaleFor(pages[page]) + GAP));
+    const i = Math.min(a.page, geo.length - 1);
+    const top = Math.round(tops[i] + (a.y - geo[i].crop.y) * geo[i].scale);
     if (Math.abs(el.scrollTop - top) > 1) el.scrollTop = top;
-  }, [pages]);
+  }, [pages, boxesVer]);
 
   // render the pages that are (nearly) visible, at the current scale — off-screen, then copied in one step
   useEffect(() => {
@@ -233,20 +392,26 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
     if (!el || !doc || !pages.length || !width) return;
     // the documents this one replaced can go now (their renders were cancelled with the previous run)
     for (const t of retired.current.splice(0)) void t.destroy();
+    // another document, other colours: everything is drawn anew
+    if (drawnFor.current.doc !== doc || drawnFor.current.dark !== darkKey) {
+      for (const s of rendered.current.values()) { s.task?.cancel(); s.detail?.task?.cancel(); }
+      rendered.current.clear();
+      drawnFor.current = { doc, dark: darkKey };
+    }
     let disposed = false;
     const renderVisible = () => {
       if (disposed) return;
       const top = el.scrollTop - el.clientHeight, bottom = el.scrollTop + 2 * el.clientHeight;
-      let y = PAD, cur = 1, best = Infinity;
-      pages.forEach((p, i) => {
-        const scale = scaleFor(p);
-        const h = p.height * scale + GAP;
-        const mid = y + h / 2;
-        if (Math.abs(mid - (el.scrollTop + el.clientHeight / 3)) < best) { best = Math.abs(mid - (el.scrollTop + el.clientHeight / 3)); cur = i + 1; }
-        if (y + h >= top && y <= bottom) void renderPage(i + 1, scale);
-        y += h;
+      let cur = 1, best = Infinity;
+      const near: number[] = [];
+      geo.forEach((g, i) => {
+        const y = tops[i], h = g.crop.h * g.scale + GAP;
+        const d = Math.abs(y + h / 2 - (el.scrollTop + el.clientHeight / 3));
+        if (d < best) { best = d; cur = i + 1; }
+        if (y + h >= top && y <= bottom) { near.push(i + 1); void renderPage(i + 1, g.scale); }
       });
       setCurrent(cur);
+      wantBoxes.current(near.sort((a, b) => Math.abs(a - cur) - Math.abs(b - cur)));
     };
     /** the part of a coarse page in view (and half a window around it), drawn sharp on the page's detail canvas */
     const renderDetail = async (n: number, scale: number) => {
@@ -279,8 +444,9 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
         const figures = ops ? formRects(await ops, viewport.transform, off.width, off.height) : [];
         if (disposed || state.detail !== detail) return;
         detail.task = null;
+        detail.done = true;
         canvas.width = off.width; canvas.height = off.height;
-        // placed in fractions of the page box, so that a pinch stretches it with the page
+        // placed in fractions of the page, so that a pinch stretches it with the page
         const W = br.width, H = br.height;
         Object.assign(canvas.style, { left: `${rect.x / W * 100}%`, top: `${rect.y / H * 100}%`, width: `${rect.w / W * 100}%`, height: `${rect.h / H * 100}%` });
         const ctx = canvas.getContext('2d');
@@ -324,7 +490,8 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
         await task.promise;
         const figures = ops ? formRects(await ops, viewport.transform, off.width, off.height) : [];
         if (disposed || rendered.current.get(n)?.task !== task) return;
-        rendered.current.get(n)!.task = null;
+        claim.task = null;
+        claim.done = true;
         // resizing clears a canvas: size it and draw the finished page in the same task, so the old picture never blanks
         canvas.width = off.width; canvas.height = off.height;
         const ctx = canvas.getContext('2d');
@@ -350,41 +517,35 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
     el.addEventListener('scroll', schedule);
     return () => {
       disposed = true; el.removeEventListener('scroll', schedule); cancelAnimationFrame(raf); clearTimeout(timer);
-      for (const s of rendered.current.values()) { s.task?.cancel(); s.detail?.task?.cancel(); }
-      rendered.current.clear();
+      // drawings under way are given up (begun anew at the new size); what is drawn stays (a pinch let go where it began draws nothing)
+      for (const [n, s] of rendered.current) {
+        if (!s.done) { s.task?.cancel(); rendered.current.delete(n); }
+        else if (s.detail && !s.detail.done) { s.detail.task?.cancel(); s.detail = undefined; }
+      }
     };
-  }, [doc, pages, width, zoom, darkKey]);
+  }, [doc, geo, darkKey]);
 
   // forward search: scroll the target box into view and flash it
   useEffect(() => {
     const el = host.current;
     if (!el || !target || !pages.length || target.page < 1 || target.page > pages.length) return;
-    let y = PAD;
-    for (let i = 0; i < target.page - 1; i++) y += pages[i].height * scaleFor(pages[i]) + GAP;
-    const scale = scaleFor(pages[target.page - 1]);
-    const boxY = y + target.y * scale;
-    el.scrollTo({ top: Math.max(0, boxY - el.clientHeight / 3), behavior: 'smooth' });
+    const { geo: g, tops: t } = layoutRef.current;
+    const i = target.page - 1;
+    el.scrollTo({ top: Math.max(0, t[i] + (target.y - g[i].crop.y) * g[i].scale - el.clientHeight / 3), behavior: 'smooth' });
     setFlash({ page: target.page, x: target.x, y: target.y, w: target.w ?? 200, h: target.h ?? 12 });
-    const t = setTimeout(() => setFlash(null), 2500);
-    return () => clearTimeout(t);
-  }, [target?.seq, pages, width, zoom]);
+    const timer = setTimeout(() => setFlash(null), 2500);
+    return () => clearTimeout(timer);
+  }, [target?.seq, pages, width > 0]);
 
-  const zoomStep = (dir: 1 | -1) => {
-    setZoom(z => {
-      const cur = z === 'width' && pages.length ? scaleFor(pages[0]) / (96 / 72) : z === 'width' ? 1 : z;
-      const next = dir > 0 ? ZOOMS.find(v => v > cur + 0.01) ?? ZOOMS[ZOOMS.length - 1] : [...ZOOMS].reverse().find(v => v < cur - 0.01) ?? ZOOMS[0];
-      return next;
-    });
-  };
   const gotoPage = (n: number) => {
     const el = host.current;
     if (!el || !pages.length) return;
     n = Math.max(1, Math.min(pages.length, n));
-    let y = PAD;
-    for (let i = 0; i < n - 1; i++) y += pages[i].height * scaleFor(pages[i]) + GAP;
-    el.scrollTo({ top: y - PAD });
+    el.scrollTo({ top: tops[n - 1] - PAD });
   };
 
+  const shownZoom = zoomValue(zoom, levels);
+  const zoomPick = typeof zoom === 'string' ? zoom : ZOOMS.includes(zoom) ? String(zoom) : 'custom';
   return (
     <div class={'pdf-viewer' + (dark ? ' dark-pages' : '')}>
       <div class="pdf-toolbar">
@@ -393,9 +554,15 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
         <span class="pdf-count">/ {pages.length || '–'}</span>
         <button class="small-btn" title="Next page" onClick={() => gotoPage(current + 1)}>›</button>
         <span class="pdf-sep" />
-        <button class="small-btn" title="Zoom out" onClick={() => zoomStep(-1)}>−</button>
-        <button class={'small-btn' + (zoom === 'width' ? ' active' : '')} title="Fit the page width" onClick={() => setZoom('width')}>{zoom === 'width' ? 'Fit width' : `${Math.round(zoom * 100)}%`}</button>
-        <button class="small-btn" title="Zoom in" onClick={() => zoomStep(1)}>+</button>
+        <button class="small-btn" title="Zoom out" onClick={() => step(-1)}>−</button>
+        <select class="pdf-zoom" data-pdf-zoom value={zoomPick} onChange={e => { const v = (e.target as HTMLSelectElement).value; if (v !== 'custom') choose(v === 'width' || v === 'content' ? v : Number(v)); }}
+          title={`Zoom (${Math.round(shownZoom * 100)} %). Fit content zooms past the margins: what is printed on the pages, as big as the pane takes it. A pinch stops at Fit width and Fit content.`}>
+          <option value="width">Fit width</option>
+          <option value="content">Fit content</option>
+          {zoomPick === 'custom' && <option value="custom">{Math.round(shownZoom * 100)}%</option>}
+          {ZOOMS.map(z => <option key={z} value={String(z)}>{Math.round(z * 100)}%</option>)}
+        </select>
+        <button class="small-btn" title="Zoom in" onClick={() => step(1)}>+</button>
         {themeDark && <button class={'small-btn pdf-dark-toggle' + (dark ? ' active' : '')} data-pdf-dark aria-pressed={dark} onClick={() => setPref('darkPdf', !dark)}
           title={dark ? 'Dark pages: the PDF light on dark, photographs in their colours — click for the PDF’s own colours' : 'The PDF’s own colours — click for dark pages'}>◐</button>}
         {toolbar && <span class="pdf-sep" />}
@@ -405,17 +572,20 @@ export function PdfViewer({ url, target, onSync, toolbar, hint, busy, overlay }:
       <div class="pdf-stage">
         {busy && <div class="pdf-busy-line" aria-hidden="true" />}
         {overlay}
-        <div class="pdf-pages" ref={host}>
+        {caught && <div class="pdf-zoom-hud" aria-hidden="true">{caught === 'content' ? 'Fit content' : 'Fit width'}</div>}
+        <div class={'pdf-pages' + (typeof zoom === 'string' ? ' fitted' : '')} ref={host} data-zoom={typeof zoom === 'string' ? zoom : undefined}>
           {error && <div class="pdf-error">Could not open the PDF: {error}</div>}
           {pages.map((p, i) => {
-            const scale = scaleFor(p);
-            const n = i + 1;
+            const g = geo[i], s = g.scale, n = i + 1;
             return (
-              <div key={n} class="pdf-page-box" style={{ width: `${p.width * scale}px`, height: `${p.height * scale}px` }} data-page={n}
-                onDblClick={e => { if (!onSync) return; const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); onSync(n, (e.clientX - r.left) / scale, (e.clientY - r.top) / scale); }}>
-                <canvas ref={c => { if (c) canvases.current.set(n, c); else canvases.current.delete(n); }} />
-                <canvas class="pdf-detail" ref={c => { if (c) details.current.set(n, c); else details.current.delete(n); }} />
-                {flash && flash.page === n && <div class="pdf-flash" style={{ left: `${flash.x * scale - 4}px`, top: `${flash.y * scale - 3}px`, width: `${Math.max(24, flash.w * scale + 8)}px`, height: `${flash.h * scale + 6}px` }} />}
+              <div key={n} class="pdf-page-box" style={{ width: `${g.crop.w * s}px`, height: `${g.crop.h * s}px` }} data-page={n}
+                onDblClick={e => { if (!onSync) return; const r = ((e.currentTarget as HTMLElement).firstElementChild as HTMLElement).getBoundingClientRect(); onSync(n, (e.clientX - r.left) / s, (e.clientY - r.top) / s); }}>
+                {/* the whole page; the box shows the part of it in `crop` (Fit content: what is painted on it) */}
+                <div class="pdf-sheet" style={{ width: `${p.width * s}px`, height: `${p.height * s}px`, left: `${-g.crop.x * s}px`, top: `${-g.crop.y * s}px` }}>
+                  <canvas ref={c => { if (c) canvases.current.set(n, c); else canvases.current.delete(n); }} />
+                  <canvas class="pdf-detail" ref={c => { if (c) details.current.set(n, c); else details.current.delete(n); }} />
+                  {flash && flash.page === n && <div class="pdf-flash" style={{ left: `${flash.x * s - 4}px`, top: `${flash.y * s - 3}px`, width: `${Math.max(24, flash.w * s + 8)}px`, height: `${flash.h * s + 6}px` }} />}
+                </div>
               </div>
             );
           })}
