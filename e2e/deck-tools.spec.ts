@@ -256,6 +256,15 @@ test('one slide per canvas: the rail and Page Down move between them, a scroll s
   await page.keyboard.press('Control+a');
   await expect.poll(() => page.$$eval('.dl-ctx .tb-label', els => els.map(e => e.textContent ?? ''))).toEqual(expect.arrayContaining([expect.stringMatching(/shape/i), expect.stringMatching(/arrange/i)]));
   expect(await page.evaluate(() => String(getSelection()))).toBe('');
+  // the title selected and typed over with the keyboard in the editor: retyped, the letters are not the tools' (L drew a line)
+  await page.keyboard.press('Escape');
+  const h = await at(page, 150, 130);
+  await page.mouse.click(h.x, h.y);
+  await page.locator('[data-tb="dk-select"]').click();
+  await page.keyboard.type('Lola', { delay: 90 });   // (at a person's pace: at machine speed the first letter can overtake the next)
+  await page.keyboard.press('Escape');
+  await expect.poll(fileText, { timeout: 15000 }).toContain('>Lola</h1>');
+  expect(fileText()).not.toMatch(/<svg[^>]*><line/);
   // Page Down: the next slide; the rail: back to the first
   await page.keyboard.press('PageDown');
   await expect.poll(shownSlides).toBe('01');

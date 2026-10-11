@@ -974,6 +974,19 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       else if (mod && !e.altKey && e.key.toLowerCase() === 'a' && kindRef.current !== 'page') { e.preventDefault(); toCanvas({ ol: 'selectAll' }); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selRef.current.length) { e.preventDefault(); removeSel(); }
       else if (!mod && !e.altKey && e.key.length === 1 && !readOnlyRef.current) {
+        // a text box selected: typing retypes it (as in the canvas) — the letters are not the tools' then
+        // (a co-author typing over a selected title drew a line with L)
+        const one = selRef.current.length === 1 ? selRef.current[0] : null;
+        if (one && one.canText && !one.locked && e.key !== ' ') {
+          e.preventDefault();
+          toCanvas({ ol: 'editText', path: one.path, selectAll: true });
+          toCanvas({ ol: 'typeKeys', keys: [{ key: e.key, shift: e.shiftKey }] });
+          // the next keys follow it in order (not each one starting the retyping again) until the canvas says it is retyping
+          textAhead.current = true;
+          if (textAheadTimer.current) clearTimeout(textAheadTimer.current);
+          textAheadTimer.current = setTimeout(() => { textAhead.current = false; }, 2000);
+          return;
+        }
         // the tools' letters also before the canvas has the focus
         const map: Record<string, Tool> = { t: 'text', r: 'rect', o: 'ellipse', l: 'line', a: 'arrow', p: 'pen', b: 'bezier', v: 'select' };
         const t = map[e.key.toLowerCase()];
