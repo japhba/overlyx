@@ -25,6 +25,9 @@ initUsage();   // anonymous usage statistics (usage.ts): the session, screen cha
     // no application exception occurred. It is safe to leave in the console, but not to alarm
     // the user or record an automatic error report for it.
     if (isBenignBrowserError(msg)) return;
+    // a request the network (or leaving the page) cut off — every browser words it differently, Safari
+    // as "… due to access control checks": no application error, and offline the app goes on by itself
+    if (/Failed to fetch|NetworkError|Load failed|access control checks|network connection was lost/i.test(msg)) return;
     const now = Date.now();
     if (msg === last && now - lastAt < 5000) return;
     last = msg; lastAt = now;
@@ -33,7 +36,7 @@ initUsage();   // anonymous usage statistics (usage.ts): the session, screen cha
     recordUsage('error', noticeTemplate(msg));
     // ...and reach the developers: one report per distinct message, kept on the server (deduplicated
     // there; no document content, see server/src/feedback.ts). At most a few per page load.
-    if (sent.size < 5 && !sent.has(msg) && !/Failed to fetch|NetworkError|Load failed/.test(msg)) {
+    if (sent.size < 5 && !sent.has(msg)) {
       sent.add(msg);
       api.clientError({ message: msg, stack: stack?.slice(0, 4000) ?? null }).catch(() => {});
     }
