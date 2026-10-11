@@ -38,6 +38,7 @@ import { isSolo, showSlide, soloIndex, revealSlideOf } from './solo';
 import { freeOutline, outlinePathD, outlineBox, type FreePt } from './freehand';
 import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
 import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trackInput, commentTarget, setLiveAt, styleAuthors, REVIEW_OVERLAY_CSS } from './review';
+import { initListDrag, hoverList, notePointer, listParts, bindListGrips, listDragging, stepItem, LIST_DRAG_CSS } from './listdrag';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -98,6 +99,7 @@ export function startEditing(): void {
     .tag.locked { background: #8a93a6; }
     ${STEPS_CSS}
     ${REVIEW_OVERLAY_CSS}
+    ${LIST_DRAG_CSS}
     .peer-tag { position: absolute; transform: translateY(-100%); color: #fff; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap; pointer-events: none; font-size: calc(11px * var(--s)); }
     .psel { position: absolute; opacity: .28; pointer-events: none; }
     .pcaret { position: absolute; width: calc(2px * var(--s)); margin-left: calc(-1px * var(--s)); pointer-events: none; }
@@ -107,6 +109,18 @@ export function startEditing(): void {
   layer = root.querySelector('.layer') as HTMLElement;
   document.documentElement.appendChild(host);
   initPaths({ root, scale: () => scale });
+  // a list's items dragged into another order (listdrag.ts): the text being retyped, else the one box selected
+  initListDrag({
+    scale: () => scale,
+    box: () => {
+      const el = editing ?? (selected.length === 1 ? selected[0] : null);
+      return el instanceof HTMLElement && el.isConnected && !isLocked(el) && (el.localName === 'ul' || el.localName === 'ol' || !!el.querySelector('li')) ? el : null;
+    },
+    editing: () => editing,
+    draw,
+    edited: scheduleCommit,
+    commit: ops => commit(ops),
+  });
   setLiveAt(liveAt);
   const css = document.createElement('style');
   css.setAttribute('data-ol-runtime', '');
@@ -838,9 +852,12 @@ export function draw(): void {
     const d = `M${drag.pts[0][0]} ${drag.pts[0][1]}L${drag.pts[drag.pts.length - 1][0]} ${drag.pts[drag.pts.length - 1][1]}`;
     parts.push(`<svg class="ink" width="1" height="1"><path d="${d}" fill="none" stroke="#2f6fde" stroke-width="${3 / scale}" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
   }
+  // a list's grips (listdrag.ts) — not while the box itself is dragged
+  if (!drag || listDragging()) parts.push(listParts());
   // the comment pins over everything (they are pressed)
   parts.push(rv.pins);
   layer.innerHTML = parts.join('');
+  bindListGrips(layer);
   for (const hd of Array.from(layer.querySelectorAll('.handle'))) hd.addEventListener('pointerdown', e => onHandleDown(e as PointerEvent, (hd as HTMLElement).dataset.h!), true);
   bindPins(layer, el => { if (editing) stopText(); selected = [el]; report(); draw(); });
 }
@@ -865,7 +882,8 @@ function swallow(e: MouseEvent): void {
 }
 
 function onHover(e: PointerEvent): void {
-  if (isCropping() || isNodeEditing()) return;
+  if (isCropping() || isNodeEditing() || listDragging()) return;
+  if (hoverList(e, host)) draw();
   if (isPenDrawing() && e.pointerType !== 'touch') { penMove(e); return; }
   if (e.pointerType === 'touch') { onTouchMove(e); return; }
   if (drag || editing) return;
@@ -922,7 +940,8 @@ function grab(e: PointerEvent): void {
 }
 
 function onPointerDown(e: PointerEvent): void {
-  if (isCropping() || isNodeEditing()) return;
+  if (isCropping() || isNodeEditing() || listDragging()) return;
+  notePointer(e);
   // keys typed after leaving a formula, before this press: theirs first
   flushAfter();
   if (e.pointerType === 'pen') penSeen = true;
@@ -2031,6 +2050,8 @@ function onKeyDown(e: KeyboardEvent): void {
     // the formula editor gave the keyboard back (it left the formula): typed once the caret is beside the formula
     if (openChipEl() && !isModifierKey(e)) { e.preventDefault(); holdAfter(keyPress(e)); return; }
     if (e.key === 'Escape') { e.preventDefault(); stopText(); return; }
+    // Alt+↑ / Alt+↓: the list item the caret is in moves up / down (as in documents)
+    if (e.altKey && !mod && !e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && stepItem(e.key === 'ArrowUp' ? -1 : 1)) { e.preventDefault(); return; }
     // the frame has the keyboard but not the text being retyped (it was just made; a click left the focus
     // on the page): the key is the text's, not lost on the page
     if (!editing.contains(document.activeElement) && !mod && !e.altKey && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Enter')) {

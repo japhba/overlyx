@@ -514,6 +514,18 @@ blend.
     steps aside while something is dragged (the runtime's `dragging` message), and is not shown while
     points, a formula or a crop are edited. It is positioned with left / top: a transformed parent
     would carry the palettes' fixed popups away.
+  * **List items move by drag and drop** (`runtime/listdrag.ts`, as in documents): with a text box
+    selected or being retyped, a grip (in the overlay's shadow root) shows left of the bullet of the
+    item under the pointer — of every item for a finger or a pen. Dragged, a line shows where it lands:
+    before any item of any list of that box, or at a list's end; where two places meet (a nested list's
+    end, the outer list's next place) the pointer's x picks the innermost list it is right of. Not
+    retyping, the drop is one `move` op (the index counts the list's element children without the
+    item); an item dragged out of a nested list it was alone in sends `remove` (that list) + `insert`
+    (the item's source) in one commit — the splices do not overlap. Retyping, the item moves in place
+    (the caret kept) and is sent with the text; **Alt+↑ / Alt+↓** there move the caret's item. Esc
+    cancels. While suggesting it is recorded as the canvas's other operations are (core `review.ts`
+    `reviewOps`): a move within its list is a suggested change remembering the old place (`@i`), out of an
+    emptied nested list a suggested deletion + insertion, into another list a direct move.
   * **The canvas's tools** (PowerPoint's and Inkscape's, `runtime/edit.ts`, `runtime/arrange.ts`,
     `runtime/view.ts`, `runtime/crop.ts`): shapes (rectangle, rounded, ellipse — boxes that centre
     text typed into them — and triangle, diamond, star, hexagon as SVG polygons stretched to their box
@@ -1463,6 +1475,21 @@ blend.
   or outdented is no longer folded, so a later item indented under it never vanishes. Saved with the
   section folds (layout + text, at most the 1000 characters the server keeps). Slide thumbnails
   (`beamerslides.ts` `clean`) drop the fold classes: a slide shows all of its text.
+* **List items move by drag and drop**, with their sub-items (`plugins/listdrag.ts`, pure logic in
+  `editor/listmove.ts`; Notion / Google Docs / Workflowy): a ⠿ grip left of the bullet (left of the
+  fold arrow) shows while the pointer is over the item — and, after a finger or a pen put the caret
+  into an item, beside that item (no hover there). Dragging it shows a line where the item lands; how
+  far right of the press the pointer is sets the depth, within what the place allows (no deeper than
+  the paragraph before allows — LyX's getMaxDepthAfter —, no shallower than the paragraph after, which
+  would otherwise become the moved item's sub-item). The item stays in its container (document, inset,
+  cell, layout box); dropped among items of another list type it takes theirs (bullets ↔ numbers only;
+  never at its own place). Esc cancels, the view scrolls near its edges, a collaborator's change during
+  the drag finds the item again by node identity. One transaction: one undo step; with change tracking
+  on it is a tracked deletion + insertion (as LyX records a move); dropped at its own place with another
+  depth it is a depth change only (untracked, like Tab). A click on the grip (mouse) selects the item and
+  its sub-items. **Alt+↑ / Alt+↓** (LyX M-Up "outline-up; paragraph-move-up") move a list item with its
+  sub-items past its sibling (the first sub-item goes above its item, the last one below the next
+  paragraph — Workflowy), else the paragraph alone. Markdown lists too. Slides: see the deck canvas.
 * **Dashes**: Alt+- types an em dash (—), Alt+Shift+- an en dash (–) — the characters themselves,
   written as `---` / `--` (on a Mac ⌥⇧- stays the system's em dash). The hyphenation point `\-`
   that Alt+- used to insert is in *Insert ▸ Special Character*.
@@ -2075,6 +2102,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/smoke.spec.ts e2e
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sharing.spec.ts e2e/textfiles.spec.ts e2e/toolbar.spec.ts e2e/collab.spec.ts   # bob, carol, u1…u6
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/tour.spec.ts e2e/feedback.spec.ts e2e/misc.spec.ts e2e/clipboard.spec.ts e2e/tablerows.spec.ts e2e/cite.spec.ts
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.ts e2e/ink.spec.ts e2e/board.spec.ts   # Ctrl+digit headings, "- " lists, tracked formulas; margin ink + whiteboards
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/listdrag.spec.ts e2e/deck-lists.spec.ts   # list items dragged into another order (documents, markdown, a finger; slides — needs the runtime built into the dist), Alt+↑
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/selection-inserts.spec.ts   # comments / floats / captions keep the selection, pasted blocks, Enter in a caption, Insert ▸ Graphics on a layout page, live authors, TeX pane after settings, tracked tables, formula notice, tablet reflow
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/slidesorter.spec.ts   # the slide sorter: selection, dragging several, duplicate / delete / undo, keys, transitions, size, the saved order

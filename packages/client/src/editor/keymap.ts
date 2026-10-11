@@ -21,6 +21,7 @@ import { trackedDelete } from './plugins/changes';
 import { openRewrite, rewriteEnabled } from './ai/rewrite';
 import { openLinkBox } from './links';
 import { recordUsage } from '../usage';
+import { moveListItem } from './listmove';
 
 export interface UiActions {
   save(): void;
@@ -222,8 +223,9 @@ export function lyxKeymap(): Plugin {
     'Mod-/': insertSpecial('breakableslash'),
     'Alt-Shift-ArrowRight': changeDepth(1),
     'Alt-Shift-ArrowLeft': changeDepth(-1),
-    'Alt-ArrowUp': moveParagraph(-1),
-    'Alt-ArrowDown': moveParagraph(1),
+    // LyX M-Up "outline-up; paragraph-move-up": a list item moves with its sub-items (listmove.ts), else the paragraph
+    'Alt-ArrowUp': chainCommands(moveListItem(-1), moveParagraph(-1)),
+    'Alt-ArrowDown': chainCommands(moveListItem(1), moveParagraph(1)),
     // LyX site.bind Tab: completion-accept (the ghost suggestion, handled in ai/complete.ts);
     // cell-forward; depth-increment. Outside tables and lists the browser keeps the key.
     Tab: chainCommands(goToNextCell(1), listIndent(1)),

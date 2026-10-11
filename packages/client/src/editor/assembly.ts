@@ -22,6 +22,7 @@ import { unquote, paramMap, projectOfDoc, docDirOf } from '@overlyx/core';
 import { lyxKeymap, chordPlugin } from './keymap';
 import { numberingPlugin } from './plugins/numbering';
 import { foldPlugin } from './plugins/fold';
+import { listDragPlugin } from './plugins/listdrag';
 import { marginPlugin } from './plugins/margin';
 import { commentUiPlugin } from './plugins/commentui';
 import { changeTrackingPlugin, changesFilterPlugin, changeAuthorName } from './plugins/changes';
@@ -133,6 +134,7 @@ export function assemblePlugins(o: AssemblyOptions): Plugin[] {
     chordPlugin(),
     layoutPlugin(),   // layout documents: object selection, handles, drawing tools (before the keymap and the mouse selection)
     foldPlugin(),   // section folding (before the keymap: ↑ / ↓ beside a fold skip the hidden text)
+    listDragPlugin(),   // list items move by drag and drop, with their sub-items (the grip left of the bullet)
     commentUiPlugin(),   // the thread under the cursor opens; Ctrl+Enter leaves it (before the keymap); empty messages go when it is left
     lyxKeymap(),
     fontCarryPlugin(),

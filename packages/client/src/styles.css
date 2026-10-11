@@ -459,6 +459,18 @@ html[data-par-sep="fullline"] .lyx-editor > .lyx-par + .lyx-par.lyx-layout-stand
 .lyx-layout-itemize > .lyx-fold-toggle.item { left: calc(1.2em - 20px); }
 @media (hover: none) { .lyx-fold-toggle { opacity: 0.45; } .lyx-fold-toggle.empty { opacity: 0; } }
 @media print { .lyx-fold-toggle { display: none; } }
+/* list items move by drag and drop (plugins/listdrag.ts): the grip left of the bullet, the item where it was, the line where it
+   goes, the copy carried under the pointer — all outside the editor's DOM; under the dialogs and toolbar popups (z-index 100) */
+.lyx-list-grip { position: fixed; z-index: 80; width: 16px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--muted2); opacity: 0.8; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.lyx-list-grip:hover, .lyx-list-grip.dragging { background: var(--ui-hover); color: var(--ui-fg); opacity: 1; }
+.lyx-list-grip.dragging { cursor: grabbing; }
+@media (pointer: coarse) { .lyx-list-grip { width: 24px; height: 32px; } .lyx-list-grip svg { width: 12px; height: 19px; } }
+.lyx-list-src { position: fixed; z-index: 79; pointer-events: none; border-radius: 4px; background: color-mix(in srgb, var(--accent) 9%, transparent); outline: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
+.lyx-list-drop { position: fixed; z-index: 81; height: 2px; background: var(--accent); border-radius: 1px; pointer-events: none; }
+.lyx-list-drop::before { content: ''; position: absolute; left: -7px; top: -3px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--accent); background: var(--surface); box-sizing: border-box; }
+.lyx-list-ghost { position: fixed; z-index: 82; pointer-events: none; opacity: 0.9; background: var(--surface); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); padding: 2px 8px 2px 0; line-height: 1.45; overflow: hidden; max-height: 40vh; }
+html.lyx-list-dragging, html.lyx-list-dragging * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
+@media print { .lyx-list-grip, .lyx-list-drop, .lyx-list-src, .lyx-list-ghost { display: none; } }
 /* list items: the label (bullet / number) sits in a right-aligned box left of the text with a clear gap to it — LaTeX's
    \labelsep is 0.5em; the box ends 0.6em before the text starts */
 .lyx-layout-itemize, .lyx-layout-enumerate, .lyx-layout-description, .lyx-layout-labeling { padding-left: 2.4em; position: relative; }
