@@ -1039,6 +1039,8 @@ interface Drag {
   clicked?: Element;
   /** the press was on the object that was already the only one selected: a click switches its handles (Inkscape) */
   again?: boolean;
+  /** a finger's pan begun on an object not selected: a tap selects it */
+  tap?: Element;
   /** the editor was told that something is being dragged (its quick menu steps aside) */
   told?: boolean;
   pts?: [number, number][];
@@ -1143,6 +1145,20 @@ function onPointerDown(e: PointerEvent): void {
   if (e.shiftKey) {
     selected = selected.includes(el) ? selected.filter(s => s !== el) : [...selected, el];
     report(); draw();
+    return;
+  }
+  // a finger on an object that is not selected moves the slide — swiped sideways, to the next one — as
+  // in Keynote on an iPad (slides are mostly covered by their objects): a tap selects the object, and
+  // held still for a moment it is picked up and moves with the finger
+  if (e.pointerType === 'touch' && !selected.includes(el)) {
+    const d: Drag = { ...base, kind: 'pan', slide: slideOf(t), tap: el };
+    d.hold = setTimeout(() => {
+      if (drag !== d || d.moved) return;
+      selected = [el]; report(); draw();
+      drag = { ...base, kind: 'move', els: selected.filter(s => movable(s) && !isLocked(s)).map(s => start(s as HTMLElement)), clicked: el, again: false };
+    }, 450);
+    drag = d;
+    capture();
     return;
   }
   const again = selected.length === 1 && selected[0] === el;
@@ -1486,8 +1502,8 @@ function onDragEnd(e: PointerEvent): void {
   if (d.told) post({ ol: 'dragging', on: false });
   if (d.kind === 'pan') {
     if (d.moved && isSolo()) post({ ol: 'panEnd' });
-    // a tap on nothing: the selection goes
-    if (!d.moved && !e.shiftKey) { selected = []; report(); }
+    // a tap on nothing: the selection goes; on an object: that one is selected
+    if (!d.moved && !e.shiftKey && e.type !== 'pointercancel') { selected = d.tap ? [d.tap] : []; report(); }
     draw();
     return;
   }

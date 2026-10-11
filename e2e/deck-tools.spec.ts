@@ -7,7 +7,8 @@
  * flip, the rotation handle, new shapes and a line
  * drawn backwards, an SVG dropped in (inline, sanitised, its shapes editable), a crop preset, the
  * canvas's checkerboard from its right-click menu, "Back to the slide" when zoomed in, and moving a
- * text box with a finger on a touch screen (the ⌖ select tool), Draw (pen, highlighter, eraser), the
+ * text box with a finger on a touch screen (the ⌖ select tool; swiped over an object not selected,
+ * the slide turns), Draw (pen, highlighter, eraser), the
  * rail and the notes folded away. What lands in index.html each time.
  * Needs the seeded admin.
  */
@@ -848,6 +849,49 @@ test('a finger moves a text box on a touch screen', async ({ browser }) => {
   for (let i = 1; i <= 10; i++) { await touch('touchMove', p.x + (q.x - p.x) * i / 10, p.y + (q.y - p.y) * i / 10); await page.waitForTimeout(16); }
   await touch('touchEnd', q.x, q.y);
   await expect.poll(() => /<h1 style="([^"]*)"/.exec(fileText())?.[1] ?? '', { timeout: 15000 }).toMatch(/left: 2[12]\dpx; top: 1[78]\dpx/);
+  expect(real(errors)).toEqual([]);
+  await ctx.close();
+});
+
+test('a finger swiped over an object turns the page, as in Keynote on an iPad: a tap selects it, held still a moment it is picked up', async ({ browser }) => {
+  const ctx = await browser.newContext({ baseURL: BASE_URL, hasTouch: true, viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  const errors = collectErrors(page);
+  await login(page);
+  await setup(page);
+  const cdp = await ctx.newCDPSession(page);
+  const touch = async (type: string, x: number, y: number) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] });
+  const swipe = async (p: { x: number; y: number }, dx: number) => {
+    await touch('touchStart', p.x, p.y);
+    for (let i = 1; i <= 8; i++) { await touch('touchMove', p.x + dx * i / 8, p.y + i); await page.waitForTimeout(16); }
+    await touch('touchEnd', 0, 0);
+  };
+  const shown = () => editFrame(page).evaluate(() => Array.from(document.querySelectorAll('section.slide')).map(s => ((s as HTMLElement).offsetHeight > 0 ? 1 : 0)).join(''));
+  const h1 = () => /<h1 style="([^"]*)"/.exec(fileText())?.[1] ?? '';
+  const quick = page.locator('[data-dl-quick]');
+  const title = h1();
+  expect(await shown()).toBe('10');
+  // swiped left over the title, which is not selected: the next slide, the title where it was, nothing selected
+  await swipe(await at(page, 400, 135), -260);
+  await expect.poll(shown).toBe('01');
+  await expect(quick).toHaveCount(0);
+  // swiped right over the next slide's heading: back
+  await swipe(await at(page, 140, 100, 1), 260);
+  await expect.poll(shown).toBe('10');
+  await page.waitForTimeout(600);
+  expect(h1()).toBe(title);
+  // a tap on it selects it
+  const p = await at(page, 300, 135);
+  await touch('touchStart', p.x, p.y); await touch('touchEnd', p.x, p.y);
+  await expect(quick).toBeVisible();
+  // a square not selected, touched and held still a moment, then dragged: it moves, the slide stays
+  const a = await at(page, 150, 450), b = await at(page, 150 + 100, 450 + 50);
+  await touch('touchStart', a.x, a.y);
+  await page.waitForTimeout(600);
+  for (let i = 1; i <= 10; i++) { await touch('touchMove', a.x + (b.x - a.x) * i / 10, a.y + (b.y - a.y) * i / 10); await page.waitForTimeout(16); }
+  await touch('touchEnd', b.x, b.y);
+  await expect.poll(() => /id="a" style="([^"]*)"/.exec(fileText())?.[1] ?? '', { timeout: 15000 }).toMatch(/left: 19\d|left: 20\d/);
+  expect(await shown()).toBe('10');
   expect(real(errors)).toEqual([]);
   await ctx.close();
 });

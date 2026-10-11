@@ -716,8 +716,11 @@ blend.
     from the border, a smooth backdrop fitted to it, a flood fill from the edges with a tolerance,
     keep / remove brushes, a soft decontaminated edge; in a worker; saved next to the original as
     `<name>-nobg.png`, the original kept), *Replace picture*. **Touch and pen**: the canvas takes
-    every gesture (`touch-action: none`) — a finger on an object moves it, on nothing pans, held
-    still it draws a selection box, two fingers pinch-zoom and pan; the pointer is captured by the
+    every gesture (`touch-action: none`) — a finger on a selected object moves it; on an object not
+    selected it pans as on nothing (a swipe sideways turns the slide, as in Keynote on an iPad: slides
+    are mostly covered by their objects), a tap selects the object and held still a moment (450 ms)
+    it is picked up and moves; on nothing, held still it draws a selection box; two fingers
+    pinch-zoom and pan; the pointer is captured by the
     element pressed (a drag leaving the frame keeps going; clicks still land on the object).
   * **The canvas around the pages**: by default the editor paints its surroundings in the page's own
     colour (the body's background, reported by the runtime), so frame and editor are one surface; a
