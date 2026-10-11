@@ -617,7 +617,17 @@ blend.
     that — or while the whole slide fits — pulls it against Apple's rubber-band resistance, the
     slide stretching a little towards the pull, and on letting go it springs back into the middle
     (the user: "snap into centered position in an apple pull to refresh gooey like fashion"; a
-    scroll lets go after 140 ms without wheel events; reduced motion: no spring, no stretch). Web
+    scroll lets go after 140 ms without wheel events; reduced motion: no spring, no stretch). A ring
+    in the gap behind the slide (`.dl-pull`, `--k`) fills as the pull goes on; pulled `BREAK` (160) px
+    past the edge (scrolled or dragged: about 80 px shown) it pops and the slide comes loose (the
+    user, 11 Oct: "i can never get it to actually leave the focussed view — it should need just a
+    little force, and some intuitive visual indication"). Loose, it moves one to one wherever it is
+    scrolled (a fifth of it stays on the canvas), stays where it is let go, an outline marks its
+    place (`.dl-dock`, solid once within `snapDistance`) and let go near that it snaps back in; the
+    "⤢ Centre slide" button, Ctrl+0 and another slide bring it back too. Only a scroll begun at the
+    edge sets it free (momentum carried over the edge while zoomed in just bounces, as with Safari's
+    swipe between pages); a finger always can. A scroll resumed while the slide springs back catches
+    it; wheel deltas are not scaled by the frame's zoom (a finger's moves are). Web
     pages keep the scrolling frame. The rail's right edge (`.dl-rail-grip`) drags it wider or
     narrower (110–480 px, `ol.deckRail`, double-click resets). A selection is named at its top
     left corner in the canvas (`selectionLabel`: Text, Shape, Line, Picture, SVG, "SVG ▸ path",

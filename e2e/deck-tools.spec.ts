@@ -225,7 +225,7 @@ test('the canvas: a checkerboard from its menu, Back to the slide when zoomed in
   expect(real(errors)).toEqual([]);
 });
 
-test('one slide per canvas: the rail and Page Down move between them, a scroll springs back, the rail widens, the selection is named', async ({ page }) => {
+test('one slide per canvas: the rail and Page Down move between them, a scroll springs back or pulled further sets the slide loose, the rail widens, the selection is named', async ({ page }) => {
   const errors = collectErrors(page);
   await login(page);
   await setup(page);
@@ -238,12 +238,40 @@ test('one slide per canvas: the rail and Page Down move between them, a scroll s
   expect(s1.y).toBeGreaterThanOrEqual(c.y);
   expect(s1.y + s1.height).toBeLessThanOrEqual(c.y + c.height);
   expect(Math.abs((s1.x + s1.width / 2) - (c.x + c.width / 2))).toBeLessThan(3);
-  // a scroll pulls the slide, and it springs back into the middle
+  // a short scroll pulls the slide, and it springs back into the middle
   const rest = await transform();
+  const dock = page.locator('[data-dl-dock]'), refocus = page.locator('[data-dl-refocus]');
   await page.mouse.move(s1.x + s1.width / 2, s1.y + s1.height / 2);
-  for (let i = 0; i < 6; i++) await page.mouse.wheel(0, 60);
+  for (let i = 0; i < 3; i++) await page.mouse.wheel(0, 30);
   expect(await transform()).not.toBe(rest);
   await expect.poll(transform, { timeout: 3000 }).toBe(rest);
+  await expect(refocus).toHaveCount(0);
+  // a little further: it comes loose and stays where it is let go, its place outlined
+  for (let i = 0; i < 8; i++) await page.mouse.wheel(0, 30);
+  await expect(refocus).toHaveText(/Centre slide/);
+  await expect(dock).toHaveAttribute('data-on', '1');
+  await page.waitForTimeout(900);
+  const loose = await transform();
+  expect(loose).not.toBe(rest);
+  await page.waitForTimeout(300);
+  expect(await transform()).toBe(loose);
+  // scrolled back near its place: the outline says so, and let go it snaps back in
+  const off = async () => {
+    const [a, b] = [rest, await transform()].map(t => /translate\(([-\d.]+)px, ([-\d.]+)px/.exec(t)!.slice(1).map(Number));
+    return { x: b[0] - a[0], y: b[1] - a[1] };
+  };
+  for (let i = 0; i < 40 && await dock.getAttribute('data-near') !== '1'; i++) {
+    const o = await off();
+    await page.mouse.wheel(Math.round(o.x * 0.15), Math.round(o.y * 0.15) || Math.sign(o.y));
+  }
+  await expect(dock).toHaveAttribute('data-near', '1');
+  await expect.poll(transform, { timeout: 3000 }).toBe(rest);
+  await expect(refocus).toHaveCount(0);
+  // loose again: Centre slide brings it back
+  for (let i = 0; i < 8; i++) await page.mouse.wheel(0, -30);
+  await refocus.click();
+  await expect.poll(transform, { timeout: 3000 }).toBe(rest);
+  await expect(refocus).toHaveCount(0);
   await expect.poll(shownSlides).toBe('10');
   // the four-way arrows over an object; selected, it is named at its corner and in the toolbar
   const a = await at(page, 150, 450);

@@ -1,10 +1,11 @@
 /**
  * The one-slide canvas's place (packages/client/src/deliverable/viewport.ts): Apple's rubber band
  * past the pan range, its inverse (a pull caught mid-spring goes on from where it shows), the range
- * itself, and the spring that brings the slide back.
+ * itself, and the spring that brings the slide back; a pull far enough past an edge sets the slide
+ * free, and let go near its place it snaps back in.
  */
-import { describe, it, expect } from 'vitest';
-import { rubber, banded, unband, panRange, spring, clampTo } from '../packages/client/src/deliverable/viewport.ts';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { rubber, banded, unband, panRange, freeRange, spring, clampTo, SlideView, BREAK, snapDistance } from '../packages/client/src/deliverable/viewport.ts';
 
 describe('the slide canvas', () => {
   it('pulls past an edge against a growing resistance, never as far as the canvas', () => {
@@ -32,5 +33,106 @@ describe('the slide canvas', () => {
     expect(Math.min(...xs)).toBeLessThan(0);   // overshoots the middle a little
     expect(Math.min(...xs)).toBeGreaterThan(-15);
     expect(Math.abs(spring(100, 0.6))).toBeLessThan(2);
+  });
+});
+
+describe('a slide pulled loose', () => {
+  const box = { w: 1000, h: 700 }, rect = { x: 48, y: 48, w: 1280, h: 720 };
+  const FIT = 0.73;
+  // (reduced motion: no springs, the slide goes where it goes at once)
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    vi.stubGlobal('requestAnimationFrame', (f: (t: number) => void) => setTimeout(() => f(performance.now()), 16));
+    vi.stubGlobal('cancelAnimationFrame', (h: ReturnType<typeof setTimeout>) => clearTimeout(h));
+  });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  const make = (scale = FIT) => {
+    const frame = { style: {} } as unknown as HTMLElement;
+    const free: boolean[] = [];
+    const v = new SlideView(() => frame, () => ({ box, rect, scale, margin: 32 }), { onFree: f => free.push(f) });
+    /** where it shows, from the middle (screen px) */
+    const at = () => {
+      const p = v.place()!;
+      return { x: p.tx - (box.w / 2 - (rect.x + rect.w / 2) * p.s), y: p.ty - (box.h / 2 - (rect.y + rect.h / 2) * p.s) };
+    };
+    const letGo = () => vi.advanceTimersByTime(200);
+    return { v, free, at, letGo };
+  };
+
+  it('a short pull springs back; a little further, it comes loose and stays where it is let go', () => {
+    const { v, free, at, letGo } = make();
+    v.scroll(0, BREAK - 60);
+    expect(at().y).toBeGreaterThan(0);
+    letGo();
+    expect(at().y).toBeCloseTo(0, 6);
+    expect(v.isFree()).toBe(false);
+    v.scroll(0, BREAK - 60);
+    v.scroll(0, 80);
+    expect(v.isFree()).toBe(true);
+    expect(free).toEqual([true]);
+    const y = at().y;
+    expect(y).toBeGreaterThan(rubber(BREAK, box.h));   // (it caught up with some of the pull)
+    letGo();
+    expect(at().y).toBeCloseTo(y, 6);
+    // free, it follows a scroll one to one
+    v.scroll(-50, 30);
+    expect(at().x).toBeCloseTo(-50, 6);
+    expect(at().y).toBeCloseTo(y + 30, 6);
+  });
+
+  it('let go near its place it snaps back in; so does Fit, from anywhere', () => {
+    const { v, free, at, letGo } = make();
+    v.scroll(0, BREAK + 40);
+    letGo();
+    expect(v.isFree()).toBe(true);
+    v.scroll(0, -(at().y - snapDistance(box) + 10));
+    letGo();
+    expect(v.isFree()).toBe(false);
+    expect(at().y).toBeCloseTo(0, 6);
+    expect(free).toEqual([true, false]);
+    v.scroll(BREAK + 40, 0);
+    v.scroll(300, 0);
+    letGo();
+    expect(at().x).toBeGreaterThan(300);
+    v.recentre(false);
+    expect(at()).toEqual({ x: 0, y: 0 });
+    expect(free).toEqual([true, false, true, false]);
+  });
+
+  it('zoomed in, a scroll that reaches the edge on its way only bounces; one begun at the edge comes loose', () => {
+    const { v, at, letGo } = make(2);
+    const hi = panRange(rect.w * 2, box.w, 32)[1];
+    for (let i = 0; i < 4; i++) v.scroll(500, 0);
+    expect(v.isFree()).toBe(false);
+    letGo();
+    expect(at().x).toBeCloseTo(hi, 6);
+    v.scroll(100, 0);
+    v.scroll(100, 0);
+    expect(v.isFree()).toBe(true);
+  });
+
+  it('a finger comes loose by pulling, wherever the pull began, and catches up with the finger', () => {
+    const { v, at } = make(2);
+    const hi = panRange(rect.w * 2, box.w, 32)[1];
+    v.panBy(hi + BREAK - 1, 0);
+    expect(v.isFree()).toBe(false);
+    v.panBy(2, 0);
+    expect(v.isFree()).toBe(true);
+    expect(at().x).toBeCloseTo(hi + BREAK + 1, 6);
+  });
+
+  it('loose, some of it stays on the canvas', () => {
+    const w = rect.w * FIT;
+    const [lo, hi] = freeRange(w, box.w, 32);
+    expect(hi).toBe(-lo);
+    expect(box.w / 2 + hi - w / 2).toBeCloseTo(box.w - 0.2 * w, 6);   // a fifth of it still in
+    expect(freeRange(100, 1000, 32)[1]).toBe(1000 / 2 + 50 - 48);
+    const { v, at, letGo } = make();
+    v.scroll(BREAK + 10, 0);
+    v.scroll(5000, 0);
+    letGo();
+    expect(at().x).toBeCloseTo(hi, 6);
+    expect(v.isFree()).toBe(true);
   });
 });

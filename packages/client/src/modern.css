@@ -395,6 +395,13 @@ html[data-ui="modern"] .dl-notes textarea { background: var(--m-paper); border: 
 html[data-ui="modern"] .dk-size { border-radius: 5px; border-color: var(--m-line); background: var(--m-field); }
 html[data-ui="modern"] .dl-refocus { border-radius: var(--m-radius); border-color: var(--m-line); background: var(--m-paper); box-shadow: var(--m-shadow); font-size: 12.5px; }
 html[data-ui="modern"] .dl-refocus.lost { background: var(--m-press); color: var(--m-on-press); }
+html[data-ui="modern"] .dl-pull-disc { fill: var(--m-paper); stroke: var(--m-line); }
+html[data-ui="modern"] .dl-pull-arc { stroke: var(--m-signal); stroke-linecap: butt; }
+html[data-ui="modern"] .dl-pull-arrows { stroke: color-mix(in srgb, var(--m-ink) calc(var(--k) * 100%), var(--m-muted)); }
+html[data-ui="modern"] .dl-pull.pop .dl-pull-disc { fill: var(--m-signal); stroke: var(--m-signal); }
+html[data-ui="modern"] .dl-pull.pop .dl-pull-arrows { stroke: var(--m-on-signal); }
+html[data-ui="modern"] .dl-dock { border-color: color-mix(in srgb, var(--m-ink) 35%, transparent); border-radius: 0; }
+html[data-ui="modern"] .dl-dock[data-near="1"] { border-color: var(--m-signal); background: color-mix(in srgb, var(--m-signal) 8%, transparent); }
 
 /* the slide rail and objects of beamer layout documents */
 html[data-ui="modern"] .ol-refocus { border-radius: var(--m-radius); }

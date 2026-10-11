@@ -543,8 +543,9 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
         case 'pan':
           if (!fromCanvas) break;
           if (soloRef.current) {
+            // (a finger moves in the frame's px; a wheel's deltas are the device's, whatever the frame's scale)
             const s = scaleRef.current;
-            if (m.finger) slideView.panBy(m.dx * s, (m.dy ?? 0) * s); else slideView.scroll(m.dx * s, (m.dy ?? 0) * s);
+            if (m.finger) slideView.panBy(m.dx * s, (m.dy ?? 0) * s); else slideView.scroll(m.dx, m.dy ?? 0);
           } else setPanX(p => p + m.dx * scaleRef.current);
           break;
         case 'panEnd': if (fromCanvas) slideView.release(); break;
@@ -579,7 +580,12 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   const soloRef = useRef(soloOn); soloRef.current = soloOn;
   const viewInput = useRef<{ box: { w: number; h: number }; rect: Rect; scale: number; margin: number } | null>(null);
   viewInput.current = soloOn ? { box, rect: solo!.rect, scale, margin } : null;
-  const slideView = useMemo(() => new SlideView(() => canvasFrame.current, () => viewInput.current), []);
+  /** the ring behind a slide pulled past an edge and the outline of its place once it came loose (drawn by the view) */
+  const pullRing = useRef<HTMLDivElement>(null);
+  const dockMark = useRef<HTMLDivElement>(null);
+  const [slideFree, setSlideFree] = useState(false);
+  const slideView = useMemo(() => new SlideView(() => canvasFrame.current, () => viewInput.current,
+    { pull: () => pullRing.current, dock: () => dockMark.current, onFree: setSlideFree }), []);
   useEffect(() => () => slideView.destroy(), [slideView]);
   useLayoutEffect(() => { if (soloOn) slideView.render(); });
   // another slide: in the middle again (the zoom stays, as in PowerPoint)
@@ -1403,7 +1409,7 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
               if (e.target !== e.currentTarget) return;
               const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
               if (soloOn) {
-                // beside the slide: as on it — a pinch zooms about the pointer, a scroll pulls the slide (it springs back)
+                // beside the slide: as on it — a pinch zooms about the pointer, a scroll pulls the slide (it springs back, or pulled far enough, comes loose)
                 e.preventDefault();
                 const r = e.currentTarget.getBoundingClientRect();
                 if (e.ctrlKey || e.metaKey) zoomSolo(Math.exp(-e.deltaY * k * 0.01), e.clientX - r.left, e.clientY - r.top);
@@ -1415,11 +1421,22 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
             }}
             onDragOver={e => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
             onDrop={e => { if (!e.dataTransfer?.files.length) return; e.preventDefault(); const fs = Array.from(e.dataTransfer.files); void placeFiles(fs.map(f => ({ name: f.name, type: f.type, data: f })), null, null); }}>
+            {soloOn && <div ref={dockMark} class="dl-dock" data-dl-dock aria-hidden="true" />}
             {link && synced && <iframe ref={canvasFrame} class={'dl-frame' + (soloOn ? ' solo' : '')} title="Page" sandbox="allow-scripts allow-modals allow-popups allow-forms" src={src('edit')}
               style={soloOn ? { width: `${frameW}px`, height: `${solo!.height}px`, left: '0px' } : { width: `${frameW}px`, height: `${frameH}px`, transform: `scale(${scale})`, left: `${left}px` }} />}
-            {(lost || zoomed) && kind !== 'page' && (
-              <button type="button" class={'dl-refocus' + (lost ? ' lost' : '')} data-dl-refocus onClick={fitSlide} title="Show the whole slide again (Ctrl+0)">
-                {lost ? `⤢ Back to slide ${current + 1}` : '⤢ Fit slide'}
+            {soloOn && (
+              <div ref={pullRing} class="dl-pull" data-dl-pull aria-hidden="true">
+                <svg viewBox="0 0 32 32">
+                  <circle class="dl-pull-disc" cx="16" cy="16" r="15" />
+                  <circle class="dl-pull-arc" cx="16" cy="16" r="12.5" pathLength="1" transform="rotate(-90 16 16)" />
+                  <path class="dl-pull-arrows" d="M16 9v14M9 16h14M13.5 11.5 16 9l2.5 2.5M13.5 20.5 16 23l2.5-2.5M11.5 13.5 9 16l2.5 2.5M20.5 13.5 23 16l-2.5 2.5" />
+                </svg>
+              </div>
+            )}
+            {(lost || zoomed || (soloOn && slideFree)) && kind !== 'page' && (
+              <button type="button" class={'dl-refocus' + (lost ? ' lost' : '')} data-dl-refocus onClick={fitSlide}
+                title={zoomed ? 'Show the whole slide again (Ctrl+0)' : 'Back into the middle (Ctrl+0) — or move the slide onto its outline and let go'}>
+                {lost ? `⤢ Back to slide ${current + 1}` : zoomed ? '⤢ Fit slide' : '⤢ Centre slide'}
               </button>
             )}
           </div>
