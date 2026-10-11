@@ -1198,11 +1198,15 @@ blend.
   cells show only while the cursor is in that table / formula (`editor/plugins/envfocus.ts` marks the
   table with `ol-editing`; the static formula rendering hides its `lm-empty` outlines) — a document
   reads as it prints, the scaffolding appears where one works.
-* **Favicon** (`public/icon.svg`): LYX woven through a tilted O — the wordmark's blue L, yellow Y and
-  red X stand where they always did; the L and the Y pass in front of the ring's far side and behind
-  its near side, the X stays whole in front (a cut through its diagonals made it read as a Y). Every
-  crossing has a gap in the disc's colour. Everything sits on a disc — paper with a graphite ring, or
-  dark with a light ring (`prefers-color-scheme: dark`) — so the ring never melts into a tab bar.
+* **Favicon** (`public/icon.svg`): LYX woven through an upright O — the wordmark's tilted blue L,
+  yellow Y and red X where they always stood. The L passes in front of the ring at the top, the y's
+  tail (it descends, as in LyX's logo) in front at the bottom, and the X goes behind, in front, behind.
+  Every crossing has a gap in the disc's colour; the ring's pieces in front are the ring clipped to a
+  small circle around the crossing, a little wider than their gap so no seam shows. The crossings were
+  chosen steep: where a stroke meets the ring at a shallow angle (an X diagonal against the ring's
+  side, a stretched letter) the gaps chopped the letters apart. Everything sits on a disc — paper with
+  a graphite ring, or dark with a light ring (`prefers-color-scheme: dark`) — so the ring never melts
+  into a tab bar.
 * **Landing page / sign-in** (`app/Login.tsx` + `app/landing.css`): one Bauhaus look for every visitor,
   whichever interface (Classic / Modern) they use inside — warm paper, graphite ink, hairlines, square
   corners, Jost and Inter; the wordmark's blue / yellow / red only as thin rules (over the sign-in

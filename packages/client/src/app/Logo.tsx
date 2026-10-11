@@ -5,7 +5,7 @@
  * everywhere in the Modern interface) — flat ink lines, upright geometric "Over", the letters still
  * tilted; on hover "Over" leans forward, the lines stretch and the letters tip further. Plain markup
  * + CSS so it scales with the surrounding font size; the favicon (public/icon.svg) is LYX woven
- * through a tilted O. `play` runs the hover animation without a pointer.
+ * through an upright O. `play` runs the hover animation without a pointer.
  */
 export function Wordmark({ play = false, bauhaus = false }: { play?: boolean; bauhaus?: boolean } = {}) {
   return (
