@@ -4,7 +4,9 @@
  * pointer from L and from the control bar, its tail fading behind the moving dot, a pressed trace
  * that fades once lifted, a drag or a click with the laser on not going on; a pinch (Ctrl + wheel)
  * zooming the slide, a click then not going on, a drag panning, `0` and Escape going back to the
- * whole slide, a second Escape ending the presentation, the arrow keys going on (unzoomed).
+ * whole slide, a second Escape ending the presentation, the arrow keys going on (unzoomed); the
+ * bar out of sight until the mouse nears the bottom edge (a tap on a touch screen: the bar, not the
+ * next slide); the pen drawing on a slide, its drawing kept with that slide, E clearing it.
  * Needs the seeded admin.
  */
 import { test, expect, type Page, type FrameLocator, type Locator } from '@playwright/test';
@@ -64,8 +66,8 @@ async function laser(page: Page, scope: FrameLocator | Page, surface: Locator, p
   await page.mouse.click(cx, cy);
   await page.waitForTimeout(300);
   await expect(pos).toHaveText('1 / 2');
-  // the bar (shown by moving the mouse): its laser button switches it off and on
-  await page.mouse.move(cx, cy + 10);
+  // the bar (shown by moving the mouse near the bottom edge): its laser button switches it off and on
+  await page.mouse.move(cx, box.y + box.height - 40);
   const btn = ui.locator('button[data-k="laser"]');
   await expect(btn).toHaveAttribute('aria-pressed', 'true');
   await btn.click();
@@ -76,6 +78,46 @@ async function laser(page: Page, scope: FrameLocator | Page, surface: Locator, p
   await expect(pos).toHaveText('1 / 2');
   await page.keyboard.press('L');
   await expect(surface).not.toHaveClass(/olpk-laser-on/);
+}
+
+/** the pen from the bar (brought by the mouse near the bottom edge, not by pointing at the slide): a stroke, kept with its slide, E clears it, Escape puts the pen away */
+async function draw(page: Page, scope: FrameLocator | Page, surface: Locator, pos: Locator, box: { x: number; y: number; width: number; height: number }): Promise<void> {
+  const ui = scope.locator('ol-present-ui');
+  const bar = ui.locator('.bar');
+  const strokes = ui.locator('svg.laser g.strokes path');
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  await expect(pos).toHaveText('1 / 2');
+  await page.mouse.move(cx, cy);
+  await page.mouse.move(cx + 60, cy + 30, { steps: 5 });
+  await page.waitForTimeout(150);
+  await expect(bar).not.toHaveClass(/show/);
+  await page.mouse.move(cx, box.y + box.height - 40, { steps: 3 });
+  await expect(bar).toHaveClass(/show/);
+  await ui.locator('button[data-k="pen"]').click();
+  await expect(surface).toHaveClass(/olpk-drawing/);
+  await expect(ui.locator('.colors')).toBeVisible();
+  await page.mouse.move(cx - 120, cy - 60);
+  await page.mouse.down();
+  await page.mouse.move(cx + 120, cy + 40, { steps: 12 });
+  await page.mouse.up();
+  await expect(strokes).toHaveCount(1);
+  // the stroke sent the bar away; drawing did not go on
+  await expect(bar).not.toHaveClass(/show/);
+  await page.waitForTimeout(300);
+  await expect(pos).toHaveText('1 / 2');
+  // the drawing belongs to its slide
+  await page.keyboard.press('ArrowRight');
+  await expect(pos).toHaveText('2 / 2');
+  await expect(strokes).toHaveCount(0);
+  await page.keyboard.press('ArrowLeft');
+  await expect(pos).toHaveText('1 / 2');
+  await expect(strokes).toHaveCount(1);
+  await page.keyboard.press('e');
+  await expect(strokes).toHaveCount(0);
+  // Escape puts the pen away first (still presenting)
+  await page.keyboard.press('Escape');
+  await expect(surface).not.toHaveClass(/olpk-drawing/);
+  await expect(pos).toHaveText('1 / 2');
 }
 
 /** a pinch zooms; zoomed, a click does not go on, a drag pans; 0 and Escape go back; returns unzoomed */
@@ -140,6 +182,8 @@ test('an HTML deck: the laser and the zoom while presenting', async ({ page }) =
   await page.waitForTimeout(400);
   const box = (await page.locator('.dl-presenting iframe').boundingBox())!;
   await laser(page, pres, pres.locator('html'), pos, box);
+  await draw(page, pres, pres.locator('html'), pos, box);
+  await expect(page.locator('.dl-presenting')).toHaveCount(1);
   const slide = pres.locator('section.slide[data-ol-current]');
   // (headless Chromium hands synthetic wheel events over the slide's empty background in this sandboxed
   // frame to nobody — not even to a full-window overlay's listener; over its title they arrive)
@@ -167,10 +211,46 @@ test('a layout document: the laser and the zoom while presenting', async ({ page
   const pos = page.locator('.ol-present ol-present-ui .pos');
   const box = { x: 0, y: 0, ...page.viewportSize()! } as { x: number; y: number; width: number; height: number };
   await laser(page, page, page.locator('.ol-present'), pos, box);
+  await draw(page, page, page.locator('.ol-present'), pos, box);
+  await expect(page.locator('.ol-present')).toHaveCount(1);
   const stage = page.locator('.ol-present-stage');
   await zoom(page, page, stage, pos, { x: box.width * 0.4, y: box.height * 0.4 }, async () => /scale\((?!1\))/.test(await stage.evaluate(e => (e as HTMLElement).style.transform)));
   await expect(page.locator('.ol-present')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await expect(page.locator('.ol-present')).toHaveCount(0);
   expect(real(errors)).toEqual([]);
+});
+
+test.describe('on a touch screen', () => {
+  test.use({ hasTouch: true });
+  test('an HTML deck: a tap brings the bar and does not go on; another sends it away', async ({ page }) => {
+    const errors = collectErrors(page);
+    await login(page);
+    await page.goto(`/#/${PROJECT}/talk/index.html`);
+    await page.frameLocator('.dl-frame').locator('section.slide').first().waitFor({ timeout: 30000 });
+    await page.waitForTimeout(800);
+    await page.locator('[data-dl-present]').click();
+    const pres = page.frameLocator('.dl-presenting iframe');
+    const pos = pres.locator('ol-present-ui .pos');
+    const bar = pres.locator('ol-present-ui .bar');
+    await expect(pos).toHaveText('1 / 2', { timeout: 20000 });
+    await page.waitForTimeout(400);
+    const box = (await page.locator('.dl-presenting iframe').boundingBox())!;
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    await expect(bar).not.toHaveClass(/show/);
+    await page.touchscreen.tap(cx, cy);
+    await expect(bar).toHaveClass(/show/);
+    await page.waitForTimeout(400);
+    await expect(pos).toHaveText('1 / 2');
+    await page.touchscreen.tap(cx, cy);
+    await expect(bar).not.toHaveClass(/show/);
+    await page.waitForTimeout(400);
+    await expect(pos).toHaveText('1 / 2');
+    // the keys still go on
+    await page.keyboard.press('ArrowRight');
+    await expect(pos).toHaveText('2 / 2');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.dl-presenting')).toHaveCount(0, { timeout: 10000 });
+    expect(real(errors)).toEqual([]);
+  });
 });
