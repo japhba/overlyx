@@ -41,6 +41,10 @@ const execFileP = promisify(execFile);
 
 /** the largest file kept in sync (larger ones stay out of it, on both sides) */
 export const SYNC_FILE_MAX = 20 * 1024 * 1024;
+/** files in one push (the clients send at most SYNC_BATCH_FILES): each may need a merge, all under the project's lock */
+export const SYNC_PUSH_FILES = 1000;
+/** pushes of one user at the same time, and in ten minutes (a watching clone pushes every save) */
+const PUSHES_AT_ONCE = 2, PUSHES_PER_10MIN = 900;
 /** how long a `wait` is held open */
 const WAIT_MS = Number(process.env.OVERLYX_SYNC_WAIT_MS ?? 25_000);
 const MAX_WAITERS = 2000;
@@ -204,6 +208,7 @@ async function applyFile(project: string, user: SessionUser, f: PushedFile): Pro
   }
   // changed on both sides
   if (content === null || cur === null || f.base === null || typeof f.baseText !== 'string' || typeof f.text !== 'string' || !isText(cur)) return keepServer();
+  if (f.baseText.length > SYNC_FILE_MAX) return keepServer();
   if (isDocumentFile(project, rel) && !(open instanceof HtmlDoc)) {
     const doc = open ?? await manager.open(id);
     if (!(doc instanceof OpenDoc) || doc instanceof HtmlDoc) return keepServer();
@@ -291,11 +296,27 @@ export function syncRouter(): express.Router {
   // authenticated before the (large) body is read
   const authFirst = (req: Request, res: Response, next: () => void) => { const user = authenticateBasic(req, res); if (user) { res.locals.user = user; next(); } };
 
-  r.post('/push', authFirst, express.json({ limit: '64mb' }), async (req, res) => {
+  // one user's pushes: how many run now, and when the recent ones started
+  const pushing = new Map<number, number>();
+  const recent = new Map<number, number[]>();
+  const pushAllowed = (req: Request, res: Response, next: () => void) => {
+    const id = (res.locals.user as SessionUser).id;
+    const now = Date.now();
+    const times = (recent.get(id) ?? []).filter(x => now - x < 600000);
+    if ((pushing.get(id) ?? 0) >= PUSHES_AT_ONCE || times.length >= PUSHES_PER_10MIN) { res.status(429).set('Retry-After', '5').json({ error: 'too many pushes at once — try again in a moment' }); return; }
+    times.push(now);
+    recent.set(id, times);
+    pushing.set(id, (pushing.get(id) ?? 0) + 1);
+    res.on('close', () => { const n = (pushing.get(id) ?? 1) - 1; if (n > 0) pushing.set(id, n); else pushing.delete(id); });
+    next();
+  };
+
+  r.post('/push', authFirst, pushAllowed, express.json({ limit: '64mb' }), async (req, res) => {
     const t = target(req, res, 'edit');
     if (!t) return;
     const files = Array.isArray(req.body?.files) ? req.body.files as PushedFile[] : null;
     if (!files) { res.status(400).json({ error: 'files missing' }); return; }
+    if (files.length > SYNC_PUSH_FILES) { res.status(413).json({ error: `at most ${SYNC_PUSH_FILES} files per push` }); return; }
     try {
       await ensureRepo(t.project);
       const results = await exclusive(t.project, async () => {

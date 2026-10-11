@@ -155,13 +155,25 @@ describe('the sync of a document', async () => {
   const file = join(ROOT, 'projects', 'u', 'p', 'paper.md');
   const ID = 'u/p/paper.md';
   let fileId = '';
+  // the linker owns the project (a link whose linker may not edit the document any more stops syncing)
+  const { createUser } = await import('../packages/server/src/auth.ts');
+  const { registerProject } = await import('../packages/server/src/access.ts');
+  const owner = createUser('u', 'U', null);
+  registerProject('u/p', owner.id);
   beforeAll(async () => {
     writeFileSync(file, '# Paper\n\nThe first paragraph says something.\n\nThe second paragraph says more.\n\n- an item\n- another item\n');
-    const link = await sync.linkNewGoogleDoc(ID, 1, 'Paper');
+    const link = await sync.linkNewGoogleDoc(ID, owner.id, 'Paper');
     fileId = link.file_id;
   });
   const text = () => readFileSync(file, 'utf8');
   const docModel = async (): Promise<LyxDocument> => (await manager.open(ID)).toLyxDocument();
+
+  it('a collaborator who may not edit the document any more cannot keep it flowing to their Google Doc', async () => {
+    const stranger = createUser('w', 'W', null);
+    writeFileSync(join(ROOT, 'projects', 'u', 'p', 'private.md'), '# Private\n\nNot for W.\n');
+    await expect(sync.linkNewGoogleDoc('u/p/private.md', stranger.id, 'Private')).rejects.toThrow(/may not edit it any more/);
+    expect(sync.linkOf('u/p/private.md')).toBeNull();
+  });
 
   it('linking writes the document into a new Google Doc', async () => {
     expect(g.doc(fileId).text()).toBe('Paper\nThe first paragraph says something.\nThe second paragraph says more.\nan item\nanother item');

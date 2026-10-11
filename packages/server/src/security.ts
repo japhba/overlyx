@@ -5,6 +5,8 @@ export function setSecurityHeaders(res: Response, formRedirectUri?: string): voi
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  // the site is served over https only: browsers keep to it (ignored on plain-http responses, e.g. in development)
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000');
   // Only our own scripts run in the app; project files are user content and are served as
   // downloads (see /file/*), so a stray script in a project can never run as us.
   // Chromium checks form-action on the redirect after a form POST, too. The consent page

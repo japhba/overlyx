@@ -48,7 +48,8 @@ const resolveClient = (id: string): ClientRow | undefined =>
 const chatgptRedirect = (uri: string) => uri === 'https://chatgpt.com/connector_platform_oauth_redirect' || /^https:\/\/chatgpt\.com\/connector\/oauth\/[\w-]+$/.test(uri);
 const redirectAllowed = (c: ClientRow, uri: string) =>
   (JSON.parse(c.redirect_uris) as string[]).includes(uri) || (c.client_id.startsWith('https://chatgpt.com/') && chatgptRedirect(uri));
-const validRedirect = (uri: string) => { try { const u = new URL(uri); return u.protocol === 'https:' || u.hostname === 'localhost' || u.hostname === '127.0.0.1'; } catch { return false; } };
+// https anywhere, or plain http to this computer (a desktop client's callback) — no other scheme
+const validRedirect = (uri: string) => { try { const u = new URL(uri); return u.protocol === 'https:' || (u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '[::1]')); } catch { return false; } };
 
 /* ------------------------------------------------------------- discovery */
 

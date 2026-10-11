@@ -1725,7 +1725,22 @@ read-only, only the build directory (and the `svg-inkscape` cache next to the do
 the project directory is mounted read-only, there is no network, a private `/tmp` and `HOME`
 (`<data dir>/sandbox-home`, where TeX/fontconfig/inkscape caches and LyX's user directory persist),
 and an empty environment. Without bubblewrap the server starts with a warning and runs the tools
-unsandboxed (`packages/server/src/sandbox.ts`).
+unsandboxed (`packages/server/src/sandbox.ts`) — except as root, where builds are refused unless
+`OVERLYX_SANDBOX=none` says otherwise (they would run anyone's document code as root).
+Since the pre-beta audit (11 Oct 2026) every sandboxed tool also runs under `prlimit` (no file over
+1 GiB, no core dumps), a project's build and its formula snippets in a cgroup of their own
+(`systemd-run --scope`, 2.5 GB memory, 512 processes; `OVERLYX_BUILD_CGROUP=0` turns it off; used
+when the server runs as root under systemd), and a build that writes more than 3 GB into its
+directory is stopped. A build no longer sees the shared `<data dir>/cache` (it held every user's
+converted pictures and parsed bibliographies). The image converters (rsvg-convert, inkscape,
+pdftocairo, gs, ImageMagick) write into a fresh directory of their own with a throwaway `HOME`, the
+result moved into place afterwards, and ImageMagick's `/etc/ImageMagick-6` policy is bound in.
+URLs that come from users — a citation's PDF (`pdffetch.ts`), a deck's CDN files when agents render
+it (`render.ts`) — are fetched through `netguard.ts`: public hosts only, every redirect resolved and
+checked again (no server ports, local network or cloud metadata address). Imported zips never
+inflate past the sizes they declare; a synced clone's push takes at most 1000 files, two pushes per
+user at a time (`sync.ts`); Google Docs links stop syncing once their linker may no longer edit the
+document. Tests: `tests/security-limits.test.ts`, `tests/pdffetch.test.ts`.
 
 **Deploying.** Production runs from a separate clean checkout (`/root/lyx/overlyx-production`, the
 systemd unit's `WorkingDirectory`), and the VS Code extension is released by

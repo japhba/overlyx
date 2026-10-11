@@ -201,10 +201,14 @@ const ZIP_MAX = 200 * 1024 * 1024;
  * figures (which no browser shows in an <img>) converted to SVG / PNG.
  */
 export async function deliverableZip(project: string, rel: string, clientDist: string): Promise<{ name: string; entries: { name: string; data: Buffer }[] }> {
-  const { dir } = splitEntry(rel);
+  // the page's folder inside this project (`..` refused; a prefix test alone let `talk/../talk2` or a
+  // sibling project named like this one through), not through a symlinked directory
+  const clean = resolveInProject('', rel);
+  if (clean === null) throw new Error('bad folder');
+  const { dir } = splitEntry(clean);
   const root = projectDir(project);
   const folder = dir ? path.join(root, dir) : root;
-  if (!folder.startsWith(root)) throw new Error('bad folder');
+  if ((folder !== root && !folder.startsWith(root + path.sep)) || !staysInside(root, folder)) throw new Error('bad folder');
   const entries: { name: string; data: Buffer }[] = [];
   const assets = new Map<string, string>();   // project-relative source → zip path
   let total = 0;
@@ -223,7 +227,7 @@ export async function deliverableZip(project: string, rel: string, clientDist: s
     const projRel = resolveInProject(path.posix.join(dir, fromZipDir), decoded);
     if (projRel === null) return null;
     const abs = path.join(root, projRel);
-    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return null;
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile() || !staysInside(root, abs)) return null;
     const ext = path.extname(projRel).toLowerCase();
     const convert = asImage && (ext === '.pdf' || ext === '.eps' || ext === '.ps');
     const inside = dir ? projRel.startsWith(dir + '/') : true;

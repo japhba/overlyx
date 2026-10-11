@@ -13,10 +13,25 @@ import { sandboxed } from './sandbox.ts';
 const execFileRaw = promisify(execFile);
 export const cacheDir = path.join(config.dataDir, 'cache');
 
-/** Run a converter sandboxed: it may read the source's directory and write the output's directory only. */
-async function tool(cmd: string, args: string[], src: string, out: string, timeout: number): Promise<void> {
-  const s = sandboxed(cmd, args, { rw: [path.dirname(out)], ro: [path.dirname(src)], cwd: path.dirname(out), env: {} });
-  await execFileRaw(s.cmd, s.args, { timeout, env: s.env, maxBuffer: 4 * 1024 * 1024 });
+/**
+ * Run a converter sandboxed on a user's file: it reads the source's directory and writes only a fresh
+ * directory of its own, with a HOME that is thrown away — never the shared cache (every user's
+ * converted pictures) nor a HOME later builds use. `args(o)` is its command line writing to `o`; the
+ * files it made there (`o`, or `o` with an extension added: `made`) are moved to `out` afterwards.
+ */
+async function tool(cmd: string, args: (o: string) => string[], src: string, out: string, timeout: number, made: (o: string) => string = o => o): Promise<void> {
+  const work = fs.mkdtempSync(path.join(path.dirname(out), '.convert-'));
+  try {
+    const o = path.join(work, 'out' + path.extname(out));
+    const s = sandboxed(cmd, args(o), { rw: [work], ro: [path.dirname(src)], cwd: work, env: {}, home: false });
+    await execFileRaw(s.cmd, s.args, { timeout, env: s.env, maxBuffer: 4 * 1024 * 1024 });
+    const f = made(o);
+    const st = fs.lstatSync(f);
+    if (!st.isFile()) throw new Error(`${cmd} did not write its output`);
+    fs.renameSync(f, out);
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
 }
 const inflight = new Map<string, Promise<string>>();
 
@@ -39,35 +54,25 @@ export async function toPng(absFile: string, width = 1200): Promise<string> {
 
 async function convert(src: string, out: string, width: number): Promise<void> {
   const ext = path.extname(src).toLowerCase();
-  const tmp = out + '.tmp';
-  try {
-    if (ext === '.svg' || ext === '.svgz') {
-      try {
-        await tool('rsvg-convert', ['-w', String(width), '--keep-aspect-ratio', '-o', tmp + '.png', src], src, tmp, 60000);
-        fs.renameSync(tmp + '.png', out);
-        return;
-      } catch (e) {
-        await tool('inkscape', [src, '--export-type=png', '--export-width=' + width, '--export-filename=' + tmp + '.png'], src, tmp, 120000);
-        fs.renameSync(tmp + '.png', out);
-        return;
-      }
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  if (ext === '.svg' || ext === '.svgz') {
+    try {
+      await tool('rsvg-convert', o => ['-w', String(width), '--keep-aspect-ratio', '-o', o, src], src, out, 60000);
+    } catch {
+      await tool('inkscape', o => [src, '--export-type=png', '--export-width=' + width, '--export-filename=' + o], src, out, 120000);
     }
-    if (ext === '.pdf') {
-      // 150 dpi first page
-      await tool('pdftocairo', ['-png', '-transp', '-r', '150', '-f', '1', '-l', '1', '-singlefile', src, tmp], src, tmp, 60000);
-      fs.renameSync(tmp + '.png', out);
-      return;
-    }
-    if (ext === '.eps' || ext === '.ps') {
-      await tool('gs', ['-q', '-dSAFER', '-dBATCH', '-dNOPAUSE', '-dEPSCrop', '-r150', '-sDEVICE=png16m', '-sOutputFile=' + tmp + '.png', src], src, tmp, 60000);
-      fs.renameSync(tmp + '.png', out);
-      return;
-    }
-    await tool('convert', [src + '[0]', '-resize', `${width}x${width}>`, tmp + '.png'], src, tmp, 60000);
-    fs.renameSync(tmp + '.png', out);
-  } finally {
-    for (const f of [tmp, tmp + '.png']) { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch { /* ignore */ } }
+    return;
   }
+  if (ext === '.pdf') {
+    // 150 dpi first page (pdftocairo adds the .png to the name it is given)
+    await tool('pdftocairo', o => ['-png', '-transp', '-r', '150', '-f', '1', '-l', '1', '-singlefile', src, o.replace(/\.png$/, '')], src, out, 60000);
+    return;
+  }
+  if (ext === '.eps' || ext === '.ps') {
+    await tool('gs', o => ['-q', '-dSAFER', '-dBATCH', '-dNOPAUSE', '-dEPSCrop', '-r150', '-sDEVICE=png16m', '-sOutputFile=' + o, src], src, out, 60000);
+    return;
+  }
+  await tool('convert', o => [src + '[0]', '-resize', `${width}x${width}>`, o], src, out, 60000);
 }
 
 /** The first page of a PDF as SVG (vector, for HTML deliverables), cached. */
@@ -80,12 +85,8 @@ export async function toSvg(absFile: string): Promise<string> {
   if (running) return running;
   const p = (async () => {
     fs.mkdirSync(cacheDir, { recursive: true });
-    const tmp = out + '.tmp.svg';
-    try {
-      await tool('pdftocairo', ['-svg', '-f', '1', '-l', '1', absFile, tmp], absFile, tmp, 60000);
-      fs.renameSync(tmp, out);
-      return out;
-    } finally { try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* ignore */ } }
+    await tool('pdftocairo', o => ['-svg', '-f', '1', '-l', '1', absFile, o], absFile, out, 60000);
+    return out;
   })().finally(() => inflight.delete(key));
   inflight.set(key, p);
   return p;
@@ -96,12 +97,12 @@ export async function toPdf(src: string, dest: string): Promise<void> {
   const ext = path.extname(src).toLowerCase();
   if (ext === '.pdf') { fs.copyFileSync(src, dest); return; }
   if (ext === '.svg' || ext === '.svgz') {
-    try { await tool('rsvg-convert', ['-f', 'pdf', '-o', dest, src], src, dest, 120000); return; }
-    catch { await tool('inkscape', [src, '--export-type=pdf', '--export-filename=' + dest], src, dest, 180000); return; }
+    try { await tool('rsvg-convert', o => ['-f', 'pdf', '-o', o, src], src, dest, 120000); return; }
+    catch { await tool('inkscape', o => [src, '--export-type=pdf', '--export-filename=' + o], src, dest, 180000); return; }
   }
   if (ext === '.eps' || ext === '.ps') {
-    await tool('gs', ['-q', '-dSAFER', '-dBATCH', '-dNOPAUSE', '-dEPSCrop', '-sDEVICE=pdfwrite', '-sOutputFile=' + dest, src], src, dest, 120000);
+    await tool('gs', o => ['-q', '-dSAFER', '-dBATCH', '-dNOPAUSE', '-dEPSCrop', '-sDEVICE=pdfwrite', '-sOutputFile=' + o, src], src, dest, 120000);
     return;
   }
-  await tool('convert', [src, dest], src, dest, 120000);
+  await tool('convert', o => [src, o], src, dest, 120000);
 }

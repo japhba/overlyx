@@ -42,8 +42,16 @@ export function readZip(buf: Buffer): ZipEntry[] {
         const ln = buf.readUInt16LE(local + 26), lx = buf.readUInt16LE(local + 28);
         const start = local + 30 + ln + lx;
         const raw = buf.subarray(start, start + csize);
-        if (method === 0) return Buffer.from(raw);
-        if (method === 8) return zlib.inflateRawSync(raw);
+        // never more than the size the archive declares (the limits are checked on those): a zip bomb
+        // declaring a few bytes would otherwise inflate to gigabytes in memory
+        const corrupt = () => new Error(`corrupt zip file (${name} is not the size it declares)`);
+        if (method === 0) { if (raw.length !== usize) throw corrupt(); return Buffer.from(raw); }
+        if (method === 8) {
+          let out: Buffer;
+          try { out = zlib.inflateRawSync(raw, { maxOutputLength: Math.max(usize, 1) }); } catch { throw corrupt(); }
+          if (out.length !== usize) throw corrupt();
+          return out;
+        }
         throw new Error(`unsupported compression (method ${method}) for ${name}`);
       },
     });

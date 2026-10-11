@@ -1078,9 +1078,12 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     { label: 'OverLyX for VS Code (.vsix download)', action: () => { const a = document.createElement('a'); a.href = '/api/vscode-extension'; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); notify('Downloading the extension — install it in VS Code with “Extensions: Install from VSIX…”'); } },
     { label: 'About OverLyX', action: () => void uiAlert('About OverLyX', 'OverLyX — a LyX-like collaborative WYSIWYG editor for LaTeX documents.\nDocuments are ordinary .tex files (change tracking and comments live in the file as macros and comment blocks); formulas are edited with a port of LyX\'s math editor; collaboration via Yjs CRDTs.') },
   ] };
+  /** File ▸ New slides / poster / page…, wherever a project is open (a document, a text file, the project's page) */
+  const newSlidesItem = { label: 'New slides / poster / page…', action: () => { const p = docId ? projectOfDoc(textId ?? docId) : null; if (p) setNewLayoutFor(p); } };
   const projectRootMenus: MenuDef[] = docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
+      newSlidesItem,
       { label: 'Share project…', action: () => setShareFor(projectOfDoc(docId)) },
       { label: 'Git repository…', action: () => setGitFor(projectOfDoc(docId)) },
       { sep: true },
@@ -1090,6 +1093,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const textFileMenus: MenuDef[] = docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
+      newSlidesItem,
       { label: 'Open… (files panel)', shortcut: 'Ctrl+O', action: () => setShowFiles(true) },
       ...(isPdfTab ? [] : [{ label: 'Saved automatically (Ctrl+S saves now)', disabled: true, action: () => {} }]),
       { sep: true },
@@ -1145,7 +1149,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
   const menus: MenuDef[] = [...(isProjectRoot ? projectRootMenus : docId && !isLyxDoc ? textFileMenus : docId ? [
     { title: 'File', items: [
       { label: 'New…', shortcut: 'Ctrl+N', action: () => editorContext.ui?.newFile() },
-      { label: 'New slides / poster / page…', action: () => { const p = textId ? projectOfDoc(textId) : null; if (p) setNewLayoutFor(p); } },
+      newSlidesItem,
       { label: 'New whiteboard…', action: () => {
         const p = textId ? projectOfDoc(textId) : null;
         if (!p) return;

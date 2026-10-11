@@ -94,7 +94,9 @@ export class DeliverableServer {
     const rel = root ? resolveInProject('', rest) : null;
     if (!root || rel === null) { res.statusCode = 404; res.end(); return; }
     const abs = path.join(root, rel);
-    if (!abs.startsWith(root + path.sep)) { res.statusCode = 404; res.end(); return; }
+    // inside the root on disk too: a symlink in a project (a clone has real ones) must not hand the
+    // page's scripts a file elsewhere on this computer
+    if (!abs.startsWith(root + path.sep) || !realInside(root, abs)) { res.statusCode = 404; res.end(); return; }
     if (/\.html?$/i.test(abs)) {
       // as the editor has it (unsaved changes included)
       const open = vscode.workspace.textDocuments.find(d => !d.isClosed && d.uri.scheme === 'file' && d.uri.fsPath === abs);
@@ -284,9 +286,22 @@ function bibFilesUnder(root: string): string[] {
 }
 
 /** What the runtime needs with a page besides its files (core html/deckextras.ts): cited entries, linked macros. */
+/** Whether `abs` (inside `root` by name) is inside it on disk as well, symlinks resolved; a missing file is judged by its folder. */
+export function realInside(root: string, abs: string): boolean {
+  let realRoot: string;
+  try { realRoot = fs.realpathSync.native(root); } catch { return false; }
+  for (let p = abs; p.startsWith(root); p = path.dirname(p)) {
+    let real: string;
+    try { real = fs.realpathSync.native(p); }
+    catch { try { if (fs.lstatSync(p).isSymbolicLink()) return false; } catch { /* missing */ } if (p === root) return true; continue; }
+    return real === realRoot || real.startsWith(realRoot + path.sep);
+  }
+  return false;
+}
+
 function extrasOf(root: string, rel: string, html: string): DeckExtras {
   if (!/\\(?:cite|citep|citet|citealp|citealt|citeauthor|citeyear|nocite|parencite|textcite|autocite)\b|ol-bibliography|overlyx-macros/.test(html)) return {};
-  const inside = (r: string) => { const abs = path.join(root, r); return abs.startsWith(root + path.sep) ? abs : null; };
+  const inside = (r: string) => { const abs = path.join(root, r); return abs.startsWith(root + path.sep) && realInside(root, abs) ? abs : null; };
   try {
     return deckExtras(html, rel, {
       read: r => { const abs = inside(r); if (!abs) return null; try { const st = fs.statSync(abs); return st.isFile() && st.size < 4e6 ? fs.readFileSync(abs, 'utf8') : null; } catch { return null; } },
@@ -295,6 +310,7 @@ function extrasOf(root: string, rel: string, html: string): DeckExtras {
         const abs = inside(r);
         if (!abs) return [];
         const st = fs.statSync(abs), stamp = `${st.mtimeMs}:${st.size}`;
+        if (!st.isFile() || st.size > 16e6) return [];
         const hit = bibCache.get(abs);
         if (hit?.stamp === stamp) return hit.entries;
         const entries = parseBibtex(fs.readFileSync(abs, 'utf8'));

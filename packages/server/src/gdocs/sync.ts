@@ -24,6 +24,9 @@ import { manager, type OpenDoc } from '../docs.ts';
 import { project, readGoogle, strip, toParagraphs, blockKey, itemRuns, type GBlock, type Projection } from './model.ts';
 import { planRound } from './edits.ts';
 import { googleApi, GoogleAuthError, type GComment, type GoogleApi } from './google.ts';
+import { roleFor, atLeast } from '../access.ts';
+import { toSessionUser } from '../auth.ts';
+import type { UserRow } from '../db.ts';
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS gdocs_links (
@@ -92,9 +95,20 @@ export function syncDoc(docId: string): Promise<SyncReport> {
   return p;
 }
 
+/**
+ * Whether the person who linked the document may still edit it: a collaborator removed from the
+ * project (or made a viewer) must not keep its text flowing to and from their Google Doc.
+ */
+function linkerMayEdit(link: LinkRow): boolean {
+  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(link.user_id) as UserRow | undefined;
+  if (!row) return false;
+  return atLeast(roleFor(toSessionUser(row), splitDocId(link.doc_id).project), 'edit');
+}
+
 async function runSync(docId: string): Promise<SyncReport> {
   const link = linkOf(docId);
   if (!link) throw new Error('This document is not linked to a Google Doc');
+  if (!linkerMayEdit(link)) { unlink(docId); throw new Error('The person who linked this document to Google Docs may not edit it any more: the link is removed'); }
   const api = apiFor(link.user_id);
   const report: SyncReport = { pulled: 0, pushed: 0, rounds: 0, comments: { fromGoogle: 0, toGoogle: 0 }, warnings: [] };
   try {
@@ -471,6 +485,8 @@ async function tick(): Promise<void> {
     if (running.has(l.doc_id)) continue;
     // a document that is gone (deleted, its project removed) is not synced any more
     if (!documentExists(l.doc_id)) { unlink(l.doc_id); continue; }
+    // nor is one whose linker lost access to it
+    if (!linkerMayEdit(l)) { unlink(l.doc_id); console.log(`[gdocs] ${l.doc_id}: unlinked (its linker may not edit it any more)`); continue; }
     try {
       const open = manager.docs.get(l.doc_id) as OpenDoc | undefined;
       const changedHere = !!open && open.lastSavedAt > (l.last_sync ?? 0);

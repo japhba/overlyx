@@ -18,6 +18,7 @@ import { config } from './config.ts';
 import { sandboxAvailable } from './sandbox.ts';
 import { deliverableToken, resolveDeliverable, liveHtml, type RuntimeMode } from './deliverables.ts';
 import { deliverableInfo } from '@overlyx/core/html/deliverable.ts';
+import { guardedFetch } from './netguard.ts';
 
 const ORIGIN = 'http://overlyx.internal';
 /** public CDNs a deliverable may load fonts and libraries from */
@@ -99,7 +100,9 @@ async function answer(route: Route): Promise<void> {
   }
   if (u.protocol === 'https:' && CDN_HOSTS.has(u.hostname) && req.method() === 'GET') {
     try {
-      const res = await fetch(u, { signal: AbortSignal.timeout(15000), redirect: 'follow', headers: { 'User-Agent': req.headers()['user-agent'] ?? 'Mozilla/5.0' } });
+      // every hop (a redirect too) on an allowed CDN, over https, on a public address (netguard.ts)
+      const res = await guardedFetch(u, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': req.headers()['user-agent'] ?? 'Mozilla/5.0' } }, fetch,
+        { allow: h => h.protocol === 'https:' && CDN_HOSTS.has(h.hostname) });
       const buf = Buffer.from(await res.arrayBuffer());
       if (buf.length > CDN_MAX) { await route.abort(); return; }
       const headers: Record<string, string> = { 'Access-Control-Allow-Origin': '*' };

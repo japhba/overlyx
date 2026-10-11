@@ -10,6 +10,7 @@ import path from 'node:path';
 import { parseBibtex, cleanTex, type BibEntry } from '@overlyx/core';
 import { fetchImpl, type Hit } from './bibsearch.ts';
 import { assertWritableRelPath } from './projects.ts';
+import { guardedFetch } from './netguard.ts';
 
 const MAX_PDF_BYTES = 64 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT = 60000;
@@ -54,7 +55,8 @@ async function openAccessUrls(doi: string): Promise<string[]> {
 }
 
 async function downloadPdf(url: string): Promise<Buffer | null> {
-  const r = await fetchImpl(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT), redirect: 'follow' } as RequestInit);
+  // the URL is the entry's (anyone's BibTeX): public hosts only, every redirect checked (netguard.ts)
+  const r = await guardedFetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT) }, fetchImpl);
   if (!r.ok) return null;
   const len = Number(r.headers.get('content-length') ?? 0);
   if (len > MAX_PDF_BYTES) return null;

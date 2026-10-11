@@ -202,7 +202,18 @@ const OverlyxMethods = {
 }
 
 new DocumentMacroMap('overlyx-document-macros', {});
+/** MathML token elements a formula may make with \mmlToken */
+const MML_TOKENS = new Set(['mi', 'mn', 'mo', 'ms', 'mtext']);
 new CommandMap('overlyx-macros', {
+  // MathJax's \mmlToken{mi}[href=…,style=…]{x} sets any attribute: a formula of someone else's document
+  // could lay links or styled boxes over the editor — the token without its attributes
+  mmlToken(parser: TexParser, name: string) {
+    const kind = parser.GetArgument(name).trim();
+    parser.GetBrackets(name, '');
+    const text = parser.GetArgument(name);
+    if (!MML_TOKENS.has(kind)) throw new TexError('NotMathMLToken', '%1 is not a token element', kind);
+    parser.Push(parser.create('token', kind, {}, text) as MmlNode);
+  },
   htmlClass: OverlyxMethods.HtmlClass,
   includegraphics: OverlyxMethods.IncludeGraphics,
   raisebox: OverlyxMethods.Raisebox,

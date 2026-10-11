@@ -12,8 +12,11 @@ describe('sandbox', () => {
   it.skipIf(!haveBwrap)('wraps the command in bwrap with only the requested directories writable', () => {
     expect(sandboxAvailable()).toBe(true);
     const s = sandboxed('latexmk', ['-pdf', 'main.tex'], { rw: ['/tmp/ol-build'], ro: ['/usr'], cwd: '/tmp/ol-build', env: { TEXINPUTS: '/tmp/ol-build:' } });
-    expect(s.cmd).toBe('bwrap');
-    const a = s.args;
+    // bwrap, behind the limits every sandboxed tool gets (prlimit: no file past MAX_FILE_BYTES, no core dumps)
+    const full = [s.cmd, ...s.args];
+    expect(full).toContain('bwrap');
+    if (existsSync('/usr/bin/prlimit')) expect(full.slice(0, full.indexOf('bwrap')).some(x => x.startsWith('--fsize='))).toBe(true);
+    const a = full.slice(full.indexOf('bwrap') + 1);
     // the command comes last, after the separator
     expect(a.slice(-3)).toEqual(['--', 'latexmk', '-pdf', 'main.tex'].slice(-3));
     expect(a[a.indexOf('--') + 1]).toBe('latexmk');

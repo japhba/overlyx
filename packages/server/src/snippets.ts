@@ -11,8 +11,7 @@ import crypto from 'node:crypto';
 import { config } from './config.ts';
 import { manager } from './docs.ts';
 import { projectDir } from './projects.ts';
-import { cacheDir } from './graphics.ts';
-import { run, texInputs, linkDocumentAssets, magicEngine, rewriteParentPaths } from './export.ts';
+import { run, texInputs, linkDocumentAssets, magicEngine, rewriteParentPaths, BUILD_CGROUP } from './export.ts';
 import { sandboxHome } from './sandbox.ts';
 import { isRegularFileAt, readFileAt } from './confined.ts';
 
@@ -60,7 +59,7 @@ async function compile(docId: string, docDir: string, project: string, src: stri
     const engine = magicEngine(src) ?? (/\\usepackage(\[[^\]]*\])?\{fontspec\}/.test(src) ? '-pdfxe' : '-pdf');
     const r = await run('latexmk', [engine, '-pvc-', '-interaction=nonstopmode', '-halt-on-error', 'snippet.tex'], {
       cwd: dir, env: texInputs(docDir, dir, projectDir(project)), timeoutMs: 60000, nice: true,
-      sandbox: { rw: [dir], ro: [projectDir(project), cacheDir], home: sandboxHome(project) },
+      sandbox: { rw: [dir], ro: [projectDir(project)], home: sandboxHome(project), cgroup: BUILD_CGROUP },
     }).done;
     if (!isRegularFileAt(path.join(dir, 'snippet.pdf'))) throw new Error('the snippet did not compile' + (r.out.match(/^!.*$/m)?.[0] ? ': ' + r.out.match(/^!.*$/m)![0] : ''));
     // the conversion runs in the sandbox too: the directory holds what the project's code left there

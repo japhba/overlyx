@@ -2,15 +2,26 @@
  * One way to make a new file in a project, whatever it becomes — the files panel's + File and its
  * right-click New File…, File ▸ New…, a project's first document. There is no separate "document"
  * and "file": the name's ending decides. `.tex` (or no ending) is a LaTeX document from the
- * template, `.md` a Markdown document, `.board` a whiteboard, and `.bib`, `.sty`, `.txt` … an empty
- * text file. Images, PDFs and other binary files are uploaded instead.
+ * template, `.md` a Markdown document, `.board` a whiteboard, `.html` slides, a poster or a web page
+ * (an HTML deliverable from core's starting point, edited on the canvas — the name says which), and
+ * `.bib`, `.sty`, `.txt` … an empty text file. Images, PDFs and other binary files are uploaded instead.
  */
 import { api } from '../api';
 import { uiPrompt } from './Dialogs';
+import { starterFor } from '@overlyx/core/html/deliverable.ts';
+import type { DeliverableKind } from '@overlyx/core/html/deliverable.ts';
 
-export const NEW_FILE_HINT = 'The ending decides what it is: .tex a LaTeX document, .md a Markdown document, .board a whiteboard, .bib, .sty, .txt … a text file.';
+export const NEW_FILE_HINT = 'The ending decides what it is: .tex a LaTeX document, .md a Markdown document, .html slides (poster.html a poster, page.html or index.html a web page), .board a whiteboard, .bib, .sty, .txt … a text file.';
 
-export type NewFileKind = 'doc' | 'board' | 'text';
+export type NewFileKind = 'doc' | 'board' | 'deliverable' | 'text';
+
+/** which deliverable a new .html file is, by its name: a poster, a web page, else slides */
+export function deliverableKindForName(rel: string): DeliverableKind {
+  const base = (rel.split('/').pop() ?? rel).replace(/\.html?$/i, '');
+  if (/poster/i.test(base)) return 'poster';
+  if (/(^|[^a-z])(page|site|web|website|index|home)([^a-z]|$)/i.test(base)) return 'page';
+  return 'deck';
+}
 
 const BINARY_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'pdf', 'eps', 'ps', 'tif', 'tiff', 'webp', 'bmp', 'zip', 'gz', 'tgz', 'docx', 'pptx', 'xlsx', 'odt']);
 
@@ -21,6 +32,7 @@ export function newFileKind(rel: string): NewFileKind | null {
   const ext = extOf(rel);
   if (!ext || ext === 'tex' || ext === 'lyx' || ext === 'md' || ext === 'markdown') return 'doc';
   if (ext === 'board') return 'board';
+  if (ext === 'html' || ext === 'htm') return 'deliverable';
   if (BINARY_EXT.has(ext)) return null;
   return 'text';
 }
@@ -36,6 +48,13 @@ export async function createProjectFile(project: string, rel: string): Promise<s
   if (kind === 'doc') {
     const stem = (rel.split('/').pop() ?? rel).replace(/\.(tex|lyx|md|markdown)$/i, '');
     return (await api.newDoc(project, rel, { title: stem })).id;
+  }
+  if (kind === 'deliverable') {
+    // not an empty page (the canvas would have nothing to edit): the starting point of its kind
+    const stem = (rel.split('/').pop() ?? rel).replace(/\.html?$/i, '');
+    const title = stem.replace(/[-_]+/g, ' ').replace(/^\w/, c => c.toUpperCase());
+    const r = await api.upload(project, rel, new Blob([starterFor(deliverableKindForName(rel), title)], { type: 'text/html' }), { overwrite: false });
+    return project + '/' + r.path;
   }
   const empty = kind === 'board' ? '{"overlyx":"board","v":1,"objects":{\n}}\n' : '';
   const r = await api.upload(project, rel, new Blob([empty], { type: 'application/octet-stream' }), { overwrite: false });

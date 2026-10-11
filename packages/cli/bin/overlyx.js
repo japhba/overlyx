@@ -953,6 +953,7 @@ async function mcpCommand(action, flags) {
 const SYNC_FILE_MAX = 20 * 1024 * 1024;      // larger files stay out of the sync (both sides)
 const SYNC_TEXT_MAX = 4 * 1024 * 1024;       // text sent with its base for a merge
 const SYNC_BATCH = 12 * 1024 * 1024;         // content per push request
+const SYNC_BATCH_FILES = 200;                // files per push request (the server takes at most 1000)
 
 export function blobHash(buf) {
   return crypto.createHash('sha1').update(`blob ${buf.length}\0`).update(buf).digest('hex');
@@ -1362,7 +1363,7 @@ export class SyncEngine {
     for (let i = 0; i < items.length;) {
       const batch = [];
       let size = 0;
-      while (i < items.length && (!batch.length || size + (items[i].sent?.buf.length ?? 0) * 2 < SYNC_BATCH)) { size += (items[i].sent?.buf.length ?? 0) * 2; batch.push(items[i++]); }
+      while (i < items.length && batch.length < SYNC_BATCH_FILES && (!batch.length || size + (items[i].sent?.buf.length ?? 0) * 2 < SYNC_BATCH)) { size += (items[i].sent?.buf.length ?? 0) * 2; batch.push(items[i++]); }
       const res = await this.request('push', { method: 'POST', body: JSON.stringify({ project: this.o.project, client: this.o.client ?? '', files: batch.map(x => x.file) }), timeout: 300000 });
       const byPath = new Map((res.results ?? []).map(r => [r.path, r]));
       for (const it of batch) this.settle(it, byPath.get(it.rel), base, changes);

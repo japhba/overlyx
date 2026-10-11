@@ -12,6 +12,7 @@
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { config } from './config.ts';
 
@@ -25,7 +26,15 @@ export interface SandboxSpec {
   env?: Record<string, string>;
   /** its HOME (writable): sandboxHome(project) for a project's builds; false: an empty one that is thrown away; default the shared one */
   home?: string | false;
+  /**
+   * a cgroup of its own (a project's build, which runs the project's code): at most this much memory
+   * and this many processes, so one document cannot take the server's memory or process table
+   */
+  cgroup?: { memoryMB: number; tasks: number };
 }
+
+/** no file a sandboxed tool writes grows past this (a build filling the disk) */
+export const MAX_FILE_BYTES = 1024 * 1024 * 1024;
 
 const BWRAP = ['/usr/bin/bwrap', '/usr/local/bin/bwrap', '/bin/bwrap'];
 /** read-only system directories: binaries, libraries, the TeX distribution, fonts and their caches */
@@ -39,6 +48,8 @@ const SYSTEM_RO = ['/usr', '/lib', '/lib64', '/lib32', '/bin', '/sbin', '/opt', 
  */
 const ETC_RO = [
   '/etc/texmf', '/etc/fonts', '/etc/alternatives',
+  // ImageMagick's policy (its resource limits and the coders it refuses): without it, it runs with none
+  '/etc/ImageMagick-6', '/etc/ImageMagick-7',
   '/etc/ld.so.cache', '/etc/ld.so.conf', '/etc/ld.so.conf.d',
   '/etc/nsswitch.conf', '/etc/passwd', '/etc/group',
   '/etc/ssl', '/etc/ca-certificates.conf',
@@ -53,6 +64,8 @@ export function sandboxAvailable(): boolean {
     if (config.sandbox === 'none') { available = false; console.warn('[sandbox] OVERLYX_SANDBOX=none: LaTeX builds run unsandboxed'); }
     else if (found) { available = true; }
     else if (config.sandbox === 'bwrap') throw new Error('OVERLYX_SANDBOX=bwrap but bubblewrap is not installed (apt install bubblewrap)');
+    // as root, unsandboxed builds would run anyone's document code as root: refuse unless asked for explicitly
+    else if (process.getuid?.() === 0) throw new Error('bubblewrap (bwrap) is not installed: builds are refused, they would run as root unsandboxed. Install it (apt install bubblewrap), or set OVERLYX_SANDBOX=none to run them anyway.');
     else { available = false; console.warn('[sandbox] bubblewrap (bwrap) is not installed: LaTeX builds run UNSANDBOXED — anyone who may edit a project can run commands on this server. Install it: apt install bubblewrap'); }
   }
   return available;
@@ -92,6 +105,26 @@ export function removeSandboxHome(project: string): void {
 
 export interface SandboxedCommand { cmd: string; args: string[]; env: NodeJS.ProcessEnv }
 
+let prlimitBin: string | null | undefined;
+/** prlimit (util-linux), when there is one */
+function prlimit(): string | null {
+  if (prlimitBin === undefined) prlimitBin = ['/usr/bin/prlimit', '/bin/prlimit'].find(p => fs.existsSync(p)) ?? null;
+  return prlimitBin;
+}
+
+let scopes: boolean | null = null;
+/** Whether commands can get a cgroup of their own (root under systemd: `systemd-run --scope`), tried once. */
+function scopesAvailable(): boolean {
+  if (scopes === null) {
+    scopes = false;
+    if (process.getuid?.() === 0 && fs.existsSync('/run/systemd/system') && process.env.OVERLYX_BUILD_CGROUP !== '0') {
+      try { scopes = spawnSync('systemd-run', ['--scope', '--quiet', '--collect', '-p', 'TasksMax=8', 'true'], { timeout: 10000, stdio: 'ignore' }).status === 0; } catch { scopes = false; }
+      if (!scopes) console.warn('[sandbox] systemd-run --scope does not work here: builds share the server\'s memory and process limits');
+    }
+  }
+  return scopes;
+}
+
 /**
  * The command line that runs `cmd args` under the sandbox. Without a sandbox the command is
  * returned unchanged with `spec.env` merged into the server's environment.
@@ -114,5 +147,12 @@ export function sandboxed(cmd: string, args: string[], spec: SandboxSpec): Sandb
   b.push('--die-with-parent', '--new-session', '--chdir', spec.cwd);
   b.push('--clearenv', '--setenv', 'PATH', '/usr/local/bin:/usr/bin:/bin', '--setenv', 'LANG', 'C.UTF-8', '--setenv', 'HOME', home, '--setenv', 'TMPDIR', '/tmp');
   for (const [k, v] of Object.entries(spec.env ?? {})) b.push('--setenv', k, v);
-  return { cmd: 'bwrap', args: [...b, '--', cmd, ...args], env: { ...process.env } };
+  // limits that hold inside the sandbox too: no file over MAX_FILE_BYTES, no core dumps; a project's
+  // build in a cgroup of its own (systemd-run --scope runs the command itself: same process, same group)
+  const pre: string[] = [];
+  if (spec.cgroup && scopesAvailable()) pre.push('systemd-run', '--scope', '--quiet', '--collect', '-p', `MemoryMax=${spec.cgroup.memoryMB}M`, '-p', 'MemorySwapMax=0', '-p', `TasksMax=${spec.cgroup.tasks}`, '--');
+  const pl = prlimit();
+  if (pl) pre.push(pl, `--fsize=${MAX_FILE_BYTES}`, '--core=0', '--');
+  const all = [...pre, 'bwrap', ...b, '--', cmd, ...args];
+  return { cmd: all[0], args: all.slice(1), env: { ...process.env } };
 }

@@ -12,7 +12,7 @@ import { db } from './db.ts';
 import { buildDirPath } from './namespaces.ts';
 import { manager, DocManager } from './docs.ts';
 import { projectDir, resolveProjectPath, findMaster, childDocuments } from './projects.ts';
-import { toPdf, cacheDir } from './graphics.ts';
+import { toPdf } from './graphics.ts';
 import { sandboxed, sandboxHome, removeSandboxHome, type SandboxSpec } from './sandbox.ts';
 import { lstatIn, listIn, readFileIn, readTextIn, writeFileIn, isRegularFileAt } from './confined.ts';
 import { readTextFile, markdownAsTex } from './texdoc.ts';
@@ -180,6 +180,29 @@ export function buildDir(docId: string): string {
   const d = buildDirPath(docId);
   fs.mkdirSync(d, { recursive: true });
   return d;
+}
+
+/** a project's build: its own memory and process limits (sandbox.ts) */
+export const BUILD_CGROUP = { memoryMB: 2500, tasks: 512 };
+/** how much a build may write into its directory */
+const BUILD_DIR_MAX = 3 * 1024 * 1024 * 1024;
+
+/** the bytes of the files below `dir` (symlinks not followed), counting stops past `stop` */
+export function dirBytes(dir: string, stop = Infinity): number {
+  let total = 0, files = 0;
+  const walk = (d: string, depth: number) => {
+    if (depth > 12 || total > stop || files > 200000) return;
+    let es: fs.Dirent[];
+    try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of es) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p, depth + 1);
+      else if (e.isFile()) { files++; try { total += fs.lstatSync(p).size; } catch { /* gone */ } }
+      if (total > stop) return;
+    }
+  };
+  walk(dir, 0);
+  return total;
 }
 
 interface RunHandle { done: Promise<{ code: number; out: string }>; kill: () => void }
@@ -494,12 +517,18 @@ async function buildViaLatexmk(job: BuildJob): Promise<BuildResult> {
   args.push(engineFlag, '-pvc-', '-g', '-f', '-interaction=nonstopmode', '-file-line-error', '-synctex=1', base + '.tex');
   const proc = run('latexmk', args, {
     cwd: exp.dir, env: texInputs(docDir, exp.dir, projectDir(project)), timeoutMs: 420000, nice: true,
-    // the build directory is the only writable place (the svg package's cache is a copy in it)
-    sandbox: { rw: [exp.dir], ro: [projectDir(project), cacheDir], home: sandboxHome(project) },
+    // the build directory is the only writable place (the svg package's cache is a copy in it); the
+    // shared cache is not readable (it holds every user's converted pictures and parsed bibliographies)
+    sandbox: { rw: [exp.dir], ro: [projectDir(project)], home: sandboxHome(project), cgroup: BUILD_CGROUP },
     onLine: (l) => { job.progress = l.slice(0, 200); },
   });
   job.cancel = () => { job.status = 'cancelled'; proc.kill(); };
+  // a build that writes more than BUILD_DIR_MAX into its directory is stopped (one document filling the disk)
+  const watch = setInterval(() => {
+    if (dirBytes(exp.dir, BUILD_DIR_MAX) > BUILD_DIR_MAX) { clearInterval(watch); job.progress = 'stopped: the build wrote too much'; proc.kill(); }
+  }, 3000);
   const r = await proc.done;
+  clearInterval(watch);
   job.cancel = undefined;
   // nothing of the sandbox runs any more: whatever the project's code left behind goes
   sweepBuildDir(exp.dir, projectDir(project));

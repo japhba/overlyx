@@ -19,6 +19,9 @@ process.env.OVERLYX_PROJECTS_DIR = join(ROOT, 'projects');
 const bs = await import('../packages/server/src/bibsearch.ts');
 const pf = await import('../packages/server/src/pdffetch.ts');
 const { parseBibtex } = await import('../packages/core/src/bib.ts');
+const ng = await import('../packages/server/src/netguard.ts');
+// no DNS in tests: every example host is public, internal.example is on the local network
+ng.setResolver(async host => (host === 'internal.example' ? ['10.1.2.3'] : ['93.184.216.34']));
 
 const PDF = '%PDF-1.5\nfake pdf bytes\n%%EOF';
 const calls: string[] = [];
@@ -29,6 +32,8 @@ bs.setFetch((async (input: any) => {
     return new Response(JSON.stringify({ best_oa_location: { pdf_url: 'https://oa.example/paywalled.html' }, locations: [{ pdf_url: null }, { pdf_url: 'https://oa.example/lecun.pdf' }], open_access: { oa_url: 'https://oa.example/landing' } }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
   if (url === 'https://oa.example/lecun.pdf') return new Response(PDF, { status: 200, headers: { 'content-type': 'application/pdf' } });
+  if (url === 'https://redirect.example/paper.pdf') return new Response(null, { status: 302, headers: { location: 'http://127.0.0.1:8080/secret.pdf' } });
+  if (url.startsWith('http://127.0.0.1') || url.startsWith('http://internal.example') || url.startsWith('http://[::1]')) return new Response(PDF, { status: 200, headers: { 'content-type': 'application/pdf' } });
   if (url === 'https://oa.example/paywalled.html' || url === 'https://oa.example/landing') return new Response('<html>sign in</html>', { status: 200, headers: { 'content-type': 'text/html' } });
   if (url.startsWith('https://api.openalex.org/works/')) return new Response('not found', { status: 404 });
   return new Response('unknown ' + url, { status: 500 });
@@ -101,5 +106,22 @@ describe('fetching', () => {
     expect(r).toBeNull();
     expect(calls.length).toBe(before);
     expect(existsSync(join(PROJECT, 'pdf', 'knuth84_the_texbook.pdf'))).toBe(false);
+  });
+});
+
+describe('server-side request forgery', () => {
+  it('never fetches an entry\'s URL on the server itself or the local network, nor follows a redirect there', async () => {
+    const before = calls.length;
+    for (const [key, url] of [['a', 'http://127.0.0.1:8080/x.pdf'], ['b', 'http://internal.example/x.pdf'], ['c', 'http://[::1]/x.pdf'], ['d', 'https://redirect.example/paper.pdf']]) {
+      const r = await pf.fetchPdfForEntry(PROJECT, `@misc{${key}, title={Internal ${key}}, author={Mallory, M}, year={2024}, url={${url}}}`);
+      expect(r).toBeNull();
+    }
+    // only the public redirector was asked; the address it pointed at never was
+    expect(calls.slice(before)).toEqual(['https://redirect.example/paper.pdf']);
+  });
+
+  it('knows which addresses are private', () => {
+    for (const ip of ['127.0.0.1', '10.0.0.1', '172.16.5.4', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '::ffff:7f00:1']) expect(ng.isPrivateAddress(ip)).toBe(true);
+    for (const ip of ['93.184.216.34', '8.8.8.8', '2606:4700::1111']) expect(ng.isPrivateAddress(ip)).toBe(false);
   });
 });
