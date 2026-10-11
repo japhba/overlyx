@@ -42,6 +42,7 @@ import { offsetOf, caretBox, selectionBoxes, safeColor } from './carets';
 import { postObjects } from './objects';
 import { reviewOverlay, bindPins, setReviewHover, showGhost, lockDeletions, trackInput, commentTarget, setLiveAt, styleAuthors, REVIEW_OVERLAY_CSS } from './review';
 import { initListDrag, hoverList, notePointer, listParts, bindListGrips, listDragging, stepItem, LIST_DRAG_CSS } from './listdrag';
+import { clipOf, postClip, paste } from './clip';
 
 const NS = 'http://www.w3.org/1999/xhtml';
 let host: HTMLElement;
@@ -797,6 +798,8 @@ export function report(): void {
   // the original of a changed object, faintly where it was (review.ts)
   showGhost(selected.length === 1 && !editing ? selected[0] : null);
   post({ ol: 'selection', version: state.version, items: selected.map(item).filter((x): x is SelItem => !!x) });
+  // what Ctrl+C copies, ready for the editor (the keyboard is mostly there)
+  postClip(editing ? [] : selected);
   // (the Animation pane and the Objects pane follow the selection's slide)
   postSequence();
   postObjects();
@@ -2361,15 +2364,16 @@ function fwd(e: KeyboardEvent): void {
   post({ ol: 'key', key: e.key, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey });
 }
 
-const CLIP_MARK = '<!--overlyx-objects-->';
+/* the clipboard (clip.ts): with the keyboard in the frame — mostly it is in the editor, which does the same */
 
 function onCopy(e: ClipboardEvent): void {
   if (isCropping()) return;
   if (editing || !selected.length || !e.clipboardData) return;
+  const c = clipOf(selected);
+  if (!c) return;
   e.preventDefault();
-  const html = selected.map(s => srcOf.get(s)?.outerHTML ?? '').join('\n');
-  e.clipboardData.setData('text/html', CLIP_MARK + html);
-  e.clipboardData.setData('text/plain', html);
+  e.clipboardData.setData('text/html', c.html);
+  e.clipboardData.setData('text/plain', c.plain);
 }
 
 function onCut(e: ClipboardEvent): void {
@@ -2386,39 +2390,16 @@ function onPaste(e: ClipboardEvent): void {
   if (isCropping()) return;
   if (editing || !e.clipboardData) return;
   e.preventDefault();
-  const target = selected[0] ? slideOf(selected[0]) : visibleSlideEl();
-  const files = Array.from(e.clipboardData.files ?? []);
-  if (files.length) {
-    void Promise.all(files.map(async f => ({ name: f.name, type: f.type, data: await f.arrayBuffer() }))).then(fs2 => {
-      post({ ol: 'pasteFiles', files: fs2, slide: target ? pathOf(target) : null, at: null });
-    });
-    return;
-  }
-  const html = e.clipboardData.getData('text/html');
-  const parent = target ?? (selected[0]?.parentElement ?? document.body);
-  const parentPath = parent ? pathOf(parent) : null;
-  if (!parentPath) return;
-  if (html.includes(CLIP_MARK)) {
-    const body = html.slice(html.indexOf(CLIP_MARK) + CLIP_MARK.length).replace(/<!--EndFragment-->[\s\S]*$/, '');
-    const tmp = document.createElement('template');
-    tmp.innerHTML = body;
-    const items = Array.from(tmp.content.children).map(c => {
-      // pasted beside the original, not on it
-      const el = c as HTMLElement;
-      if (target) for (const p of ['left', 'top']) { const v = el.style.getPropertyValue(p); const m = /^(-?[\d.]+)px$/.exec(v); if (m) el.style.setProperty(p, `${Number(m[1]) + 24}px`); }
-      return el.outerHTML;
-    });
-    if (items.length) commit(items.map(h => ({ t: 'insert', parent: parentPath, index: 1e6, html: h })), { select: 'inserted' });
-    return;
-  }
-  // an SVG copied as text (from Inkscape, a code editor): a drawing
-  const plain = e.clipboardData.getData('text/plain').trim();
-  if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(plain)) {
-    post({ ol: 'pasteFiles', files: [{ name: 'pasted.svg', type: 'image/svg+xml', data: new TextEncoder().encode(plain).buffer as ArrayBuffer }], slide: target ? pathOf(target) : null, at: null });
-    return;
-  }
-  if (!plain) return;
-  post({ ol: 'draw', version: state.version!, tool: 'text', slide: target ? pathOf(target) : null, rect: { x: 80, y: 80, w: 600, h: 0 }, after: selected.length === 1 ? pathOf(selected[0]) : null });
+  const cd = e.clipboardData;
+  const files = Array.from(cd.files ?? []);
+  const html = cd.getData('text/html'), plain = cd.getData('text/plain');
+  void Promise.all(files.map(async f => ({ name: f.name, type: f.type, data: await f.arrayBuffer() }))).then(fs2 => pasteHere({ html, plain, files: fs2 }));
+}
+
+/** a paste (into the frame, or passed on by the editor) */
+export function pasteHere(d: Parameters<typeof paste>[0]): void {
+  if (isCropping() || editing) return;
+  paste(d);
 }
 
 function onContextMenu(e: MouseEvent): void {

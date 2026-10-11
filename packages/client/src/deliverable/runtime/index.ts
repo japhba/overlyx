@@ -290,6 +290,7 @@ function onMessage(e: MessageEvent): void {
     case 'canvasKey': if (MODE === 'edit') { if (m.key === 'Escape') edit.selectParent(); else edit.nudge(m.key, m.shift); } break;
     case 'review': if (MODE === 'edit') { setReview(m.view); edit.report(); edit.draw(); } break;
     case 'newComment': if (MODE === 'edit') edit.newComment(); break;
+    case 'paste': if (MODE === 'edit') edit.pasteHere(m); break;
   }
 }
 

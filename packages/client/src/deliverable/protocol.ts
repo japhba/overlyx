@@ -246,7 +246,9 @@ export type ToRuntime =
   /** how the review is shown, Suggesting on or off */
   | { ol: 'review'; view: ReviewView }
   /** Ctrl+Alt+M or the Comment button: what a new comment is on (the runtime answers with `comment`) */
-  | { ol: 'newComment' };
+  | { ol: 'newComment' }
+  /** Ctrl+V with the keyboard in the editor: what the clipboard holds, pasted on the canvas (runtime/clip.ts) */
+  | { ol: 'paste'; html: string; plain: string; files: { name: string; type: string; data: ArrayBuffer }[] };
 
 /** runtime → editor */
 export type FromRuntime =
@@ -260,6 +262,10 @@ export type FromRuntime =
   /** a new object drawn: its box (slide px), and for lines / the pen the points (slide px, in drawing order) */
   | { ol: 'draw'; version: number; tool: Tool; slide: Path | null; rect: Rect; after?: Path | null; pts?: [number, number][]; d?: string; closed?: boolean; runs?: InkRunD[] }
   | { ol: 'editing'; path: Path | null }
+  /** words pasted on the canvas: a new text box with them (`after`: the object selected on that slide) */
+  | { ol: 'pasteText'; version: number; slide: Path | null; after: Path | null; text: string }
+  /** what Ctrl+C copies of the selection now (null: nothing), for the editor to answer a copy at once (runtime/clip.ts) */
+  | { ol: 'clip'; html: string | null; plain: string | null }
   /** where the caret is in the text being retyped (null: none), for the others */
   | { ol: 'caret'; caret: TextCaret | null }
   | { ol: 'key'; key: string; ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }

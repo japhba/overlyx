@@ -200,6 +200,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
   /** a text box was just drawn and is not retyped yet: keys typed out here are passed to the frame, which types them into it (runtime drawAhead) */
   const textAhead = useRef<boolean>(false);
   const textAheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** what Ctrl+C copies of the canvas's selection (the canvas keeps it ready: a copy is answered at once) */
+  const clipRef = useRef<{ html: string; plain: string } | null>(null);
   /** a key for a text box being made: passed on (true), or not one of those keys */
   const holdForText = (k: KeyPress): boolean => {
     if (!textAhead.current || k.ctrl || k.meta || k.alt) return false;
@@ -524,6 +526,8 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
           break;
         case 'selection': if (fromCanvas) { setSel(m.items); host.setSelection(m.items.map(i => i.path)); } break;
         case 'caret': if (fromCanvas) host.setCaret?.(m.caret); break;
+        case 'clip': if (fromCanvas) clipRef.current = m.html ? { html: m.html, plain: m.plain ?? '' } : null; break;
+        case 'pasteText': if (fromCanvas) pasteText(m.version, m.slide, m.after, m.text); break;
         case 'dragging': if (fromCanvas) setDragging(m.on); break;
         case 'editing':
           if (!fromCanvas) break;
@@ -894,6 +898,17 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
       if (typeAheadTimer.current) clearTimeout(typeAheadTimer.current);
       typeAheadTimer.current = setTimeout(() => { typeAhead.current = null; }, 3000);
     }
+  };
+
+  /** words pasted on the canvas: a text box with them, selected */
+  const pasteText = (v: number, slide: Path | null, after: Path | null, words: string) => {
+    if (readOnlyRef.current || versions.current.get(v) === undefined) return;
+    const k = kindRef.current;
+    const place = insertPlace(text.toString(), slide, after, k);
+    if (!place) return;
+    const esc = words.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, '<br>');
+    const html = objectHtml('text', { x: 80, y: 80, w: 600, h: 0 }, k, pageW / 1280).replace(/>Text<\/p>$/, `>${esc}</p>`);
+    if (applyOps([{ t: 'insert', parent: place.parent, index: place.index, html }])) pending.current = { select: [place.path] };
   };
 
   const insertObject = (t: Tool) => {
@@ -1365,6 +1380,44 @@ export function DeliverableCanvas({ host, notify }: { host: DeliverableHost; not
     };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
+  });
+
+  // the clipboard: a click on the canvas leaves the keyboard here, so Ctrl+C / X / V come here, not to the
+  // canvas — the selection's copy is the one the canvas keeps ready, a paste is passed on (runtime/clip.ts)
+  useEffect(() => {
+    const ours = (e: ClipboardEvent) => {
+      if (presenting || !canvasBox.current?.getClientRects().length) return false;
+      if (!canvasBox.current.closest('.dl-editor')?.contains(document.activeElement) && document.activeElement !== document.body) return false;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.('textarea, input') || t?.isContentEditable || editingTextRef.current) return false;
+      // words selected out here (a dialog, the notes): theirs
+      const s = getSelection();
+      return !s || s.isCollapsed;
+    };
+    const onCopy = (e: ClipboardEvent) => {
+      const c = clipRef.current;
+      if (!ours(e) || !c || !selRef.current.length || !e.clipboardData) return;
+      e.preventDefault();
+      e.clipboardData.setData('text/html', c.html);
+      e.clipboardData.setData('text/plain', c.plain);
+    };
+    const onCut = (e: ClipboardEvent) => {
+      if (!ours(e) || !clipRef.current || !selRef.current.length || readOnlyRef.current) return;
+      onCopy(e);
+      removeSel();
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      if (!ours(e) || readOnlyRef.current || !e.clipboardData) return;
+      e.preventDefault();
+      const cd = e.clipboardData;
+      const html = cd.getData('text/html'), plain = cd.getData('text/plain');
+      void Promise.all(Array.from(cd.files ?? []).map(async f => ({ name: f.name, type: f.type, data: await f.arrayBuffer() })))
+        .then(files => toCanvas({ ol: 'paste', html, plain, files }));
+    };
+    addEventListener('copy', onCopy);
+    addEventListener('cut', onCut);
+    addEventListener('paste', onPaste);
+    return () => { removeEventListener('copy', onCopy); removeEventListener('cut', onCut); removeEventListener('paste', onPaste); };
   });
 
   /* ------------------------------------------------------------- presenting */

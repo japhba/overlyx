@@ -498,7 +498,13 @@ blend.
     inside by double-click or Alt; on a web page the innermost block), dragging moves positioned
     elements (a static one on a slide becomes `position: relative`) with snapping to the slide and
     the other objects, handles resize, a double click retypes text in place (contenteditable, its
-    TeX shown as written), arrows nudge, Delete, ⌘D, copy/cut/paste of objects, the drawing tools
+    TeX shown as written), arrows nudge, Delete, ⌘D, copy/cut/paste of objects (`clip.ts`: the
+    keyboard stays in the editor after a click on the canvas, so the editor answers ⌘C from a copy the
+    canvas keeps ready — `clip`, sent with every change of the selection — and passes ⌘V on as
+    `paste`; objects land on the slide in view where they were, beside them on their own slide, a step
+    further each time; the parts of a drawing go into the drawing selected there, in its units at the
+    same place on the slide, else as a drawing of their own fitted around them; ids taken in the page
+    get a `-2`; words become a text box), the drawing tools
     (text, rectangle, ellipse, arrow, formula). Positions are written in the units the element
     had. Everything it does reaches the editor as operations (core `html/source.ts` `HtmlOp`:
     style / attr / inner / outer / remove / insert / move / duplicate, elements by their path from
@@ -2137,6 +2143,7 @@ OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/layoutkeys.spec.t
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/listdrag.spec.ts e2e/deck-lists.spec.ts   # list items dragged into another order (documents, markdown, a finger; slides — needs the runtime built into the dist), Alt+↑
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/dollar.spec.ts   # $…$ / $$ typing, delimiter size buttons, figure reload + smart invert, comment cards
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/selection-inserts.spec.ts   # comments / floats / captions keep the selection, pasted blocks, Enter in a caption, Insert ▸ Graphics on a layout page, live authors, TeX pane after settings, tracked tables, formula notice, tablet reflow
+OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/deck-clipboard.spec.ts   # copy / cut / paste on the deck canvas: a drawing's parts to another slide (into its drawing or a drawing of their own), beside the original, words (needs the runtime built into the dist)
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/slidesorter.spec.ts   # the slide sorter: selection, dragging several, duplicate / delete / undo, keys, transitions, size, the saved order
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/sliderail.spec.ts   # the slide rail: thumbnails, new slides in the deck's style, drag to reorder, its menu, undo, the saved file
 OVERLYX_E2E_BASE=http://localhost:5174 npx playwright test e2e/masters.spec.ts e2e/drawing.spec.ts   # masters (view, placeholders following, a master of a slide); connectors, the objects list, guides / grid, SVG as shapes
