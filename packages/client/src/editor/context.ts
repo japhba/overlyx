@@ -17,6 +17,8 @@ export interface EditorContext {
   notify?: (msg: string, kind?: 'info' | 'error') => void;
   /** last uncaught error shown to the user (offered in the feedback dialog) */
   lastError?: string;
+  /** when this window last applied its LaTeX source pane (SourcePane apply): formulas the server rebuilds from it come back without their edit clock — ours, not a competing edit (mathconflict.ts) */
+  sourceAppliedAt?: number;
   /** author id used for change tracking */
   changeAuthorId?: number;
   trackChanges: boolean;

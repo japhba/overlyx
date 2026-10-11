@@ -33,6 +33,7 @@ import { highlightTexBlocks, highlightLineList } from './texhighlight';
 import { UndoStack, undoRedoKey, applyUndoRedo, applySnapshot, editingKey, matchBrackets, commentMask } from './codearea';
 import { findSourceLine, findSourceOffset, locateSourceLine, locateSourceCaret, type LocateBlock, type CursorContext } from './sourcelocate';
 import { spanIndexAt, spansFit, editRange, mapOffset, mapSpans, sourceOffsetInSpan, locateInSpan, lineOfOffset, offsetOfLine, type Span } from './sourcemap';
+import { editorContext } from '../editor/context';
 import { setMirrorCaret } from '../editor/plugins/mirrorcaret';
 import { openSourceRewrite } from '../editor/ai/rewrite';
 import { getPrefs } from '../prefs';
@@ -432,6 +433,7 @@ export function SourcePane({ target, tick, selTick, mathField, onNotify, onClose
     if (found.length && !force) { setApplied('held'); setApplyNote(found[0].note); setProblems(found); return false; }
     setApplied('applying'); setProblems([]);
     try {
+      editorContext.sourceAppliedAt = Date.now();
       const request = api.applySource(target.docId, current);
       inFlight.current = request;
       const r = await request;

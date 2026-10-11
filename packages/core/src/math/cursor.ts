@@ -1066,6 +1066,13 @@ export class MathCursor {
   }
   /** LFUN_NEWLINE_INSERT: split the current row at the cursor (hulls mutate simple/equation into align first) */
   newline() {
+    // in a script, fraction, root … of a row of a displayed formula: the row breaks after it — a \\
+    // typed inside left the script's braces around the next row (d\lambda_{i\\ &= …})
+    if (!isHull(this.owner) && !gridOf(this.owner)) {
+      let up = this.depth - 1;
+      while (up > 0 && !isHull(this.slices[up - 1].owner) && !gridOf(this.slices[up - 1].owner)) up--;
+      if (up > 0) while (this.depth > up) this.popForward();
+    }
     const o = this.owner;
     if (isHull(o) && (o.type === 'simple' || o.type === 'equation')) {
       const p = this.pos;

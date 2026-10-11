@@ -43,6 +43,9 @@ export class FormulaReview {
     if (!focused) this.base = incoming;
     const sync = ySyncPluginKey.getState(this.view.state);
     if (!sync?.isChangeOrigin || sync.isUndoRedoOperation || this.local === null || this.local === latex || this.retained.has(this.local)) return;
+    // our own source pane applied a moment ago: the server rebuilt the formula from the LaTeX, without
+    // a clock — the same person's edit, not a competing one (it left "Concurrent formula edit" comments)
+    if (!Object.keys(incoming).length && Date.now() - (editorContext.sourceAppliedAt ?? 0) < 15000) { this.local = null; return; }
     // A later author who started from our displayed version is making an ordinary
     // sequential edit. Only a version based on older content needs conflict preservation.
     if (Object.entries(this.localClock).every(([id, count]) => (incoming[id] ?? 0) >= count)) { this.local = null; return; }

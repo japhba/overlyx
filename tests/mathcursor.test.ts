@@ -181,6 +181,14 @@ describe('rows, numbering, labels, mutation', () => {
     type(c, 'c=d');                    // the cursor stays in the relation column, as in LyX
     expect(out(c)).toBe('\n\\begin{align*}\na & =b\\\\\n & c=d\n\\end{align*}\n');
   });
+  it('Enter inside a script breaks the row after the script, not inside its braces', () => {
+    // usability wave, 11 Oct 2026: d\\lambda_{i\\\\ &= …} — the row break and the next row went into the subscript
+    const c = at('\n\\begin{align}\na & =b\n\\end{align}\n');
+    type(c, 'x_i');
+    c.newline();
+    type(c, 'y');
+    expect(out(c)).toBe('\n\\begin{align}\na & =bx_{i}\\\\\n & y\n\\end{align}\n');
+  });
   it('number toggle, per-line numbering and labels', () => {
     const c = at('\n\\begin{align}\na & =b\\\\\nc & =d\n\\end{align}\n');
     c.numberLineToggle();                 // cursor is in the last row
