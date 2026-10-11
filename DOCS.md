@@ -1241,7 +1241,9 @@ blend.
   Bauhaus one (`bauhaus` — the landing page — and every wordmark in the Modern interface): flat ink
   lines, upright Jost "Over", the letters still tilted; on hover "Over" leans forward, the lines stretch
   into fading tails and pulse and the letters tip a little further, on an overshooting ease (off with
-  reduced motion).
+  reduced motion). On every page load the first wordmark (the landing page's, or the menu bar's when
+  one is signed in already) arrives in that hover pose and relaxes back — the hover's leave
+  (`Wordmark arrive`: held 450 ms from when its fonts are in and the page has painted, once per load).
 * **PDF viewer and SyncTeX** (`app/PdfViewer.tsx`, pdf.js): the built PDF is shown in its pane
   by our own viewer (fit-to-width / zoom, page navigation). **Pinch zoom**: a trackpad pinch
   (Ctrl + wheel in Chromium and Firefox, Safari's gesture events) or Ctrl/⌘ + wheel zooms about the

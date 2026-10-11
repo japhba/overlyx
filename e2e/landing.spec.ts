@@ -41,7 +41,9 @@ test.describe('landing page', () => {
       expect(await tilt('.login .ol-wordmark .l')).not.toBe('none');
       expect(await tilt('.login .ol-wordmark .x')).not.toBe('none');
       await expect(page.locator('.login .ol-wordmark .speed i')).toHaveCount(3);
-      expect(await tilt('.login .ol-wordmark .over')).toBe('none');
+      // it arrives leaning forward (the hover pose) and relaxes upright: the hover's leave, on every page load
+      await expect(wm).not.toHaveClass(/\bplay\b/, { timeout: 3000 });
+      await expect.poll(() => tilt('.login .ol-wordmark .over')).toBe('none');
       await wm.hover();
       await expect.poll(() => tilt('.login .ol-wordmark .over')).not.toBe('none');   // "Over" leans forward
     }

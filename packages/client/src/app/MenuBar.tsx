@@ -411,7 +411,7 @@ export function MenuBar({ menus, user, right, primary, title, onLogout, onSettin
   const paletteKey = formatShortcut(effectiveShortcut(PALETTE_ID, paletteShortcut) ?? 'F1');
   return (
     <div class="menubar" ref={barRef}>
-      {onHome && <a class="brand" href="#/" title="Start screen" onClick={e => { e.preventDefault(); onHome(); }}><Wordmark /></a>}
+      {onHome && <a class="brand" href="#/" title="Start screen" onClick={e => { e.preventDefault(); onHome(); }}><Wordmark arrive /></a>}
       {title && <div class="menubar-title">{title}</div>}
       <div class="menubar-menus">
       {modern && !compact ? (

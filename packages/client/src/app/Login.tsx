@@ -189,7 +189,7 @@ export function Login({ onLogin, google, note, onBack }: {
       <div class="landing">
         <header class="hero">
           <div class="hero-copy">
-            <h1><Wordmark bauhaus /></h1>
+            <h1><Wordmark bauhaus arrive /></h1>
             <p class="lede">LaTeX documents, slides and posters, edited and rendered in the same place.</p>
             {/* an align* block: the three lines line up at "=" */}
             <div class="formula" role="img" aria-label="OverLyX equals Overleaf plus LyX, plus Google Docs, Google Slides, Inkscape, VS Code and Markdown, minus complexity">
