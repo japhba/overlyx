@@ -31,9 +31,15 @@ describe('editorContext.meta', () => {
 
   it('a new author is named in change descriptions as soon as the metadata has them', () => {
     editorContext.meta = meta({ authors: [] });
-    expect(describeChange('deleted', -1812294520, 0)).toBe('Deleted by author -1812294520');
+    // not in the table yet: "a co-author", and the table is fetched again — once (not "author -1812294520")
+    let asked = 0;
+    editorContext.refreshAuthors = () => { asked++; };
+    expect(describeChange('deleted', -1812294520, 0)).toBe('Deleted by a co-author');
+    expect(describeChange('deleted', -1812294520, 0)).toBe('Deleted by a co-author');
+    expect(asked).toBe(1);
     editorContext.meta = meta({ authors: [{ id: -1812294520, name: 'Bob' }] });
     expect(describeChange('deleted', -1812294520, 0)).toBe('Deleted by Bob');
+    editorContext.refreshAuthors = undefined;
   });
 
   it('a citation drawn before its key was known shows author and year once the metadata is refreshed', () => {
