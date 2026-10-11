@@ -401,7 +401,18 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
     if (!el || !inkMode) return;
     el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
   }, [inkMode, docId]);
-  const [findOpen, setFindOpen] = useState(false);
+  const [findOpenState, setFindOpenState] = useState(false);
+  const findOpen = findOpenState;
+  // Ctrl+F (again): the find field gets the keyboard — `autofocus` does nothing for an input added later,
+  // so the typed search went into the document
+  const findInput = useRef<HTMLInputElement>(null);
+  const [findFocus, setFindFocus] = useState(0);
+  const setFindOpen = (v: boolean) => { setFindOpenState(v); if (v) setFindFocus(n => n + 1); };
+  useEffect(() => {
+    if (!findOpen) return;
+    const t = setTimeout(() => { findInput.current?.focus(); findInput.current?.select(); }, 0);
+    return () => clearTimeout(t);
+  }, [findOpen, findFocus]);
   // sharing: the project whose share dialog is open; view-only when the current project was shared for viewing
   const [shareFor, setShareFor] = useState<string | null>(null);
   // File ▸ New slides / poster / page…: the project a layout document is created in
@@ -1503,7 +1514,7 @@ function Workspace({ user, google, onSignIn, onLogout }: { user: User; google: b
         return (
         <div class="find-bar-wrap">
         <div class="find-bar">
-          <span>Find:</span><input autofocus value={findQ} onInput={e => { const v = (e.target as HTMLInputElement).value; setFindQ(v); requery({ query: v }); }} onKeyDown={e => { if (e.key === 'Enter' && view) findNext(view, e.shiftKey ? -1 : 1); if (e.key === 'Escape') { setFindOpen(false); if (view) { setQuery(view, { query: '' }); view.focus(); } } }} />
+          <span>Find:</span><input ref={findInput} value={findQ} onInput={e => { const v = (e.target as HTMLInputElement).value; setFindQ(v); requery({ query: v }); }} onKeyDown={e => { if (e.key === 'Enter' && view) findNext(view, e.shiftKey ? -1 : 1); if (e.key === 'Escape') { setFindOpen(false); if (view) { setQuery(view, { query: '' }); view.focus(); } } }} />
           <label title="Case sensitive"><input type="checkbox" checked={findCase} onChange={e => { const v = (e.target as HTMLInputElement).checked; setFindCase(v); requery({ caseSensitive: v }); }} /> Aa</label>
           <label title="Whole words only"><input type="checkbox" checked={findWord} onChange={e => { const v = (e.target as HTMLInputElement).checked; setFindWord(v); requery({ wholeWord: v }); }} /> Word</label>
           <button class="small-btn" onClick={() => view && findNext(view, 1)}>Next</button>
