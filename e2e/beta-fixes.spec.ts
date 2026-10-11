@@ -95,7 +95,7 @@ test('slides: a bulleted paragraph box, Tab in a list, letters typed at the canv
   await page.locator('[data-tb="dk-step"]').click();
   await expect(page.locator('[data-dl-anim]')).toBeVisible();
   await page.mouse.click(...await at(page, 200, 470));
-  await page.locator('[data-anim-list]').check();
+  await page.locator('[data-anim-list]').click();   // (controlled by the canvas's answer, not at once)
   await expect.poll(fileText, { timeout: 15000 }).toMatch(/<ul id="l"[^>]*data-steps="/);
   await page.locator('[data-anim-add="appear"]').click();
   await page.waitForTimeout(800);

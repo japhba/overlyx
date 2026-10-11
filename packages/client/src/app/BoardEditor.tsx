@@ -515,7 +515,8 @@ export function BoardEditor({ id, user, notify }: { id: string; user: User; noti
       // `autofocus` does nothing for an element added later — the keys went to the board, the note
       // stayed empty and the board, still "editing", ignored Ctrl+Z from then on
       defaultValue={o.text ?? ''}
-      ref={el => { if (el && !el.dataset.focused) { el.dataset.focused = '1'; el.focus({ preventScroll: true }); el.select(); } }}
+      // (after the click that made the note: its mousedown focuses the board, which would close the note again)
+      ref={el => { if (el && !el.dataset.focused) { el.dataset.focused = '1'; setTimeout(() => { if (el.isConnected) { el.focus({ preventScroll: true }); el.select(); } }, 0); } }}
       onBlur={e => { const v = (e.target as HTMLTextAreaElement).value; mutate(() => { const cur = objects.get(key); if (cur) objects.set(key, { ...cur, text: v }); }); setEditing(null); }}
       onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur(); }}
       onPointerDown={e => e.stopPropagation()}
